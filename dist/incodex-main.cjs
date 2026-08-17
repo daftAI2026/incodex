@@ -48,11 +48,59 @@ function copySettings() {
   return copied > 0;
 }
 
+const PID_NAME = ".incodex-pid";
+
+function assertSafeIncognitoHome() {
+  const home = path.resolve(INCOGNITO_HOME);
+  const real = path.resolve(DEFAULT_CODEX_HOME);
+  const root = path.resolve(USER_ROOT);
+  if (home === real) throw new Error("[incodex] refuse to burn real CODEX_HOME");
+  if (!home.startsWith(`${root}${path.sep}`)) {
+    throw new Error("[incodex] incognito home is outside ~/.incodex");
+  }
+  return home;
+}
+
 function burnIncognitoHome() {
-  if (!fs.existsSync(INCOGNITO_HOME)) return;
-  for (const name of fs.readdirSync(INCOGNITO_HOME)) {
-    if (KEEP_ON_BURN.has(name)) continue;
-    fs.rmSync(path.join(INCOGNITO_HOME, name), { recursive: true, force: true });
+  let home;
+  try {
+    home = assertSafeIncognitoHome();
+  } catch (error) {
+    logLaunch("burn-refused", { error: String(error) });
+    return;
+  }
+  if (!fs.existsSync(home)) return;
+  for (const name of fs.readdirSync(home)) {
+    if (KEEP_ON_BURN.has(name) || name === PID_NAME) continue;
+    fs.rmSync(path.join(home, name), { recursive: true, force: true });
+  }
+  logLaunch("burn");
+}
+
+function writePid() {
+  fs.mkdirSync(INCOGNITO_HOME, { recursive: true });
+  fs.writeFileSync(path.join(INCOGNITO_HOME, PID_NAME), String(process.pid));
+}
+
+function clearPid() {
+  try {
+    fs.rmSync(path.join(INCOGNITO_HOME, PID_NAME), { force: true });
+  } catch {
+    /* ignore */
+  }
+}
+
+function incognitoAlreadyRunning() {
+  const file = path.join(INCOGNITO_HOME, PID_NAME);
+  if (!fs.existsSync(file)) return false;
+  const pid = Number(fs.readFileSync(file, "utf8").trim());
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  if (pid === process.pid) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -68,6 +116,10 @@ function logLaunch(message, extra) {
 }
 
 function launchIncognito() {
+  if (incognitoAlreadyRunning()) {
+    logLaunch("already-running");
+    return { ok: true, reason: "already-running" };
+  }
   fs.mkdirSync(INCOGNITO_HOME, { recursive: true });
   fs.mkdirSync(INCOGNITO_CHROMIUM, { recursive: true });
   copySettings();
@@ -85,6 +137,7 @@ function launchIncognito() {
     },
   });
   child.unref();
+  return { ok: true };
 }
 
 function interceptOpenBeacon(session) {
@@ -95,6 +148,7 @@ function interceptOpenBeacon(session) {
     if (url.includes("/open")) launchIncognito();
     if (url.includes("/quit") && isIncognito()) {
       burnIncognitoHome();
+      clearPid();
       try {
         require("electron").app.quit();
       } catch {
@@ -152,12 +206,12 @@ function attachElectron() {
   const source = injectSource();
   electron.ipcMain.handle("incodex-open-incognito", async () => {
     if (isIncognito()) return { ok: false, reason: "already-incognito" };
-    launchIncognito();
-    return { ok: true };
+    return launchIncognito();
   });
   electron.ipcMain.handle("incodex-quit-incognito", async () => {
     if (!isIncognito()) return { ok: false, reason: "not-incognito" };
     burnIncognitoHome();
+    clearPid();
     electron.app.quit();
     return { ok: true };
   });
@@ -165,10 +219,26 @@ function attachElectron() {
     event.returnValue = isIncognito();
   });
 
-  electron.app.on("browser-window-created", (_event, win) => hookWindow(win, source));
-  electron.app.on("before-quit", () => {
-    if (isIncognito()) burnIncognitoHome();
+  electron.app.on("browser-window-created", (_event, win) => {
+    hookWindow(win, source);
+    if (!isIncognito()) return;
+    win.on("close", () => {
+      burnIncognitoHome();
+      clearPid();
+    });
   });
+  if (isIncognito()) {
+    writePid();
+    electron.app.on("window-all-closed", () => {
+      burnIncognitoHome();
+      clearPid();
+      electron.app.quit();
+    });
+    electron.app.on("before-quit", () => {
+      burnIncognitoHome();
+      clearPid();
+    });
+  }
 
   const ready = () => {
     hookPreload(electron.session.defaultSession);

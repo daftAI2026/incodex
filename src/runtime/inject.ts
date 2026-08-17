@@ -1,6 +1,7 @@
 const STYLE_ID = "incodex-privacy-style";
 const BTN_ATTR = "data-incodex-privacy-toggle";
 const TIP_ATTR = "data-incodex-tooltip";
+const LANDING_ATTR = "data-incodex-landing";
 const ROOT_ATTR = "data-incodex-privacy";
 const STORAGE_KEY = "incodex-privacy";
 const CLUSTER_ATTR = "data-incodex-header-cluster";
@@ -138,6 +139,29 @@ function ensureStyle(): void {
       box-sizing: border-box;
     }
     [${TIP_ATTR}][data-open="true"] { display: block; }
+    [${LANDING_ATTR}] {
+      pointer-events: none;
+      max-width: 28rem;
+      margin: 0 auto;
+      padding: 0.5rem 1rem 1.5rem;
+    }
+    [${LANDING_ATTR}] h2 {
+      margin: 0 0 0.5rem;
+      font-size: 1.25rem;
+      font-weight: 600;
+      line-height: 1.3;
+    }
+    [${LANDING_ATTR}] p,
+    [${LANDING_ATTR}] li {
+      margin: 0;
+      font-size: 0.875rem;
+      line-height: 1.55;
+    }
+    [${LANDING_ATTR}] ul {
+      margin: 0.75rem 0 0;
+      padding-left: 1.1rem;
+    }
+    [${LANDING_ATTR}] li + li { margin-top: 0.35rem; }
   `;
 }
 
@@ -237,6 +261,51 @@ function hideTooltip(): void {
   if (tip) tip.removeAttribute("data-open");
 }
 
+function hasConversationActivity(): boolean {
+  if (document.querySelector("[data-app-action-sidebar-thread-row]")) return true;
+  if (document.querySelector("[data-message-author-role], [data-turn-id]")) return true;
+  return false;
+}
+
+function findLandingHost(): HTMLElement | null {
+  const headings = [...document.querySelectorAll<HTMLElement>("h1, h2")];
+  const hero = headings.find((el) => /构建什么|What (will|should) you build|我们来构建/.test(el.textContent || ""));
+  if (hero?.parentElement) return hero.parentElement;
+  const composer = document.querySelector<HTMLElement>("textarea, [contenteditable='true']");
+  const column = composer?.closest<HTMLElement>("main, [class*='flex-1']");
+  return column ?? document.querySelector("main");
+}
+
+function landingEl(): HTMLElement {
+  let card = document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`);
+  if (card) return card;
+  card = document.createElement("aside");
+  card.setAttribute(LANDING_ATTR, "true");
+  card.className = "text-default";
+  card.innerHTML = `
+    <h2>这是一个干净窗口</h2>
+    <p class="text-codex-description">看不到平时的对话。关掉这个窗口后，这次聊过的内容会从临时目录清掉。原来的窗口还在。</p>
+    <ul class="text-codex-description">
+      <li>不会写入你平时的会话库</li>
+      <li>登录、语言和基础设置跟主窗口一样</li>
+      <li>再按 ⇧⌘N，或点「退出无痕」，即可离开</li>
+    </ul>
+  `;
+  return card;
+}
+
+function ensureLanding(): void {
+  const existing = document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`);
+  if (!isIncognitoWindow() || hasConversationActivity()) {
+    existing?.remove();
+    return;
+  }
+  const host = findLandingHost();
+  if (!host) return;
+  const card = landingEl();
+  if (card.parentElement !== host) host.insertBefore(card, host.firstElementChild);
+}
+
 function ensureButton(): void {
   const search = findSearchButton();
   if (!search) return;
@@ -273,6 +342,7 @@ function start(): void {
   ensureStyle();
   ensureButton();
   apply(isIncognitoWindow());
+  ensureLanding();
   window.addEventListener("keydown", onHotkey, true);
   let scheduled = false;
   const observer = new MutationObserver(() => {
@@ -281,6 +351,7 @@ function start(): void {
     requestAnimationFrame(() => {
       scheduled = false;
       ensureButton();
+      ensureLanding();
     });
   });
   observer.observe(document.documentElement, { childList: true, subtree: true });
