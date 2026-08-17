@@ -2,6 +2,7 @@ const STYLE_ID = "incodex-privacy-style";
 const BTN_ATTR = "data-incodex-privacy-toggle";
 const ROOT_ATTR = "data-incodex-privacy";
 const STORAGE_KEY = "incodex-privacy";
+const CLUSTER_ATTR = "data-incodex-header-cluster";
 
 const HIDE_SELECTORS = [
   "[data-app-action-sidebar-thread-row]",
@@ -12,6 +13,8 @@ const HIDE_SELECTORS = [
 ];
 
 const ICON_SVG = `{{HAT_GLASSES_SVG}}`;
+
+const SEARCH_LABELS = new Set(["Search", "搜索"]);
 
 function readEnabled(): boolean {
   try {
@@ -29,14 +32,17 @@ function writeEnabled(on: boolean): void {
   }
 }
 
+function labelFor(on: boolean): string {
+  return on ? "退出无痕" : "无痕";
+}
+
 function apply(on: boolean): void {
   document.documentElement.setAttribute(ROOT_ATTR, on ? "on" : "off");
   const btn = document.querySelector<HTMLElement>(`[${BTN_ATTR}]`);
-  if (btn) {
-    btn.setAttribute("aria-pressed", on ? "true" : "false");
-    btn.setAttribute("aria-label", on ? "Exit Incognito" : "Incognito");
-    btn.setAttribute("title", on ? "Exit Incognito" : "Incognito");
-  }
+  if (!btn) return;
+  btn.setAttribute("aria-pressed", on ? "true" : "false");
+  btn.setAttribute("aria-label", labelFor(on));
+  btn.setAttribute("title", labelFor(on));
 }
 
 function toggle(): void {
@@ -55,27 +61,32 @@ function ensureStyle(): void {
 }
 
 function findSearchButton(): HTMLElement | null {
-  const labeled = [
-    ...document.querySelectorAll<HTMLElement>('button[aria-label="Search"], button[aria-label="搜索"]'),
-  ];
-  if (labeled.length === 0) return null;
-  const inHeaderCluster = labeled.find((btn) =>
-    btn.closest(".ms-auto.flex.items-center, .flex.items-center.gap-1"),
+  const buttons = [...document.querySelectorAll<HTMLElement>("button")];
+  return (
+    buttons.find((btn) => SEARCH_LABELS.has((btn.getAttribute("aria-label") || "").trim())) ?? null
   );
-  return inHeaderCluster ?? labeled[0];
 }
 
-function isParkedInHeader(btn: HTMLElement, search: HTMLElement): boolean {
-  return btn.parentElement === search.parentElement && btn.nextElementSibling === search;
+function findHeaderCluster(search: HTMLElement): HTMLElement | null {
+  const cluster = search.closest<HTMLElement>(".ms-auto.flex.items-center");
+  return cluster;
 }
 
-function buildButton(template: HTMLElement | null): HTMLElement {
-  const btn = template ? (template.cloneNode(true) as HTMLElement) : document.createElement("button");
+function isParkedInCluster(btn: HTMLElement, cluster: HTMLElement, search: HTMLElement): boolean {
+  if (btn.parentElement !== cluster) return false;
+  if (search.closest(`[${BTN_ATTR}]`)) return false;
+  return !search.contains(btn) && !btn.contains(search);
+}
+
+function headerButtonClass(search: HTMLElement): string {
+  return search.className;
+}
+
+function buildButton(search: HTMLElement): HTMLElement {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = headerButtonClass(search);
   btn.setAttribute(BTN_ATTR, "true");
-  btn.setAttribute("type", "button");
-  btn.removeAttribute("disabled");
-  const svgHost = btn.querySelector("svg")?.parentElement ?? btn;
-  const oldSvg = btn.querySelector("svg");
   const wrap = document.createElement("span");
   wrap.innerHTML = ICON_SVG.trim();
   const svg = wrap.firstElementChild as SVGElement | null;
@@ -84,14 +95,13 @@ function buildButton(template: HTMLElement | null): HTMLElement {
     svg.setAttribute("aria-hidden", "true");
     svg.setAttribute("width", "16");
     svg.setAttribute("height", "16");
-    if (oldSvg) oldSvg.replaceWith(svg);
-    else svgHost.append(svg);
+    btn.append(svg);
   }
   btn.addEventListener(
     "click",
     (event) => {
       event.preventDefault();
-      event.stopPropagation();
+      event.stopImmediatePropagation();
       toggle();
     },
     true,
@@ -101,25 +111,17 @@ function buildButton(template: HTMLElement | null): HTMLElement {
 
 function ensureButton(): void {
   const search = findSearchButton();
-  if (!search?.parentElement) return;
+  if (!search) return;
+  const cluster = findHeaderCluster(search);
+  if (!cluster) return;
+  cluster.setAttribute(CLUSTER_ATTR, "true");
 
   let btn = document.querySelector<HTMLElement>(`[${BTN_ATTR}]`);
   if (!btn) btn = buildButton(search);
-  if (!isParkedInHeader(btn, search)) {
-    btn.style.removeProperty("position");
-    btn.style.removeProperty("top");
-    btn.style.removeProperty("left");
-    btn.style.removeProperty("z-index");
-    search.parentElement.insertBefore(btn, search);
+  if (!isParkedInCluster(btn, cluster, search)) {
+    cluster.insertBefore(btn, cluster.firstElementChild);
   }
   apply(readEnabled());
-}
-
-function onHotkey(event: KeyboardEvent): void {
-  if (!(event.metaKey || event.ctrlKey) || !event.shiftKey) return;
-  if (event.key !== "." && event.code !== "Period") return;
-  event.preventDefault();
-  toggle();
 }
 
 function start(): void {
@@ -128,11 +130,9 @@ function start(): void {
   ensureStyle();
   ensureButton();
   apply(readEnabled());
-  window.addEventListener("keydown", onHotkey, true);
   const observer = new MutationObserver(() => {
     ensureStyle();
     ensureButton();
-    apply(readEnabled());
   });
   observer.observe(document.documentElement, { childList: true, subtree: true });
 }
