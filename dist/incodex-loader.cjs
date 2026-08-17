@@ -13,7 +13,9 @@ function originalMain() {
 }
 
 function injectSource() {
-  const file = path.join(__dirname, INJECT_NAME);
+  const override = path.join(require("node:os").homedir(), ".incodex", INJECT_NAME);
+  const bundled = path.join(__dirname, INJECT_NAME);
+  const file = fs.existsSync(override) ? override : bundled;
   if (!fs.existsSync(file)) return "";
   return fs.readFileSync(file, "utf8");
 }

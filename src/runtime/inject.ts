@@ -6,17 +6,11 @@ const STORAGE_KEY = "incodex-privacy";
 const CLUSTER_ATTR = "data-incodex-header-cluster";
 const SHORTCUT_LABEL = "⇧⌘N";
 
+// Only sidebar conversation rows and project/folder rows.
+// Do not hide section headings, nav items, or the main-pane title.
 const HIDE_SELECTORS = [
   "[data-app-action-sidebar-thread-row]",
-  "[data-app-action-sidebar-thread-id]",
-  "[data-app-action-sidebar-thread-title]",
-  "[data-app-action-sidebar-thread-pinned]",
-  "[data-thread-title]",
   "[data-app-action-sidebar-project-row]",
-  "[data-app-action-sidebar-project-label]",
-  '[data-app-action-sidebar-section][data-app-action-sidebar-section-heading="Pinned"]',
-  '[data-app-action-sidebar-section][data-app-action-sidebar-section-heading="Projects"]',
-  '[data-app-action-sidebar-section][data-app-action-sidebar-section-heading="Recents"]',
 ];
 
 const ICON_SVG = `{{HAT_GLASSES_SVG}}`;
@@ -48,13 +42,15 @@ function apply(on: boolean): void {
   if (!btn) return;
   btn.setAttribute("aria-pressed", on ? "true" : "false");
   btn.setAttribute("aria-label", labelFor(on));
-  syncTooltip(btn);
+  const label = document.querySelector<HTMLElement>("[data-incodex-tooltip-label]");
+  if (label) label.textContent = labelFor(on);
 }
 
 function toggle(): void {
   const next = document.documentElement.getAttribute(ROOT_ATTR) !== "on";
   writeEnabled(next);
   apply(next);
+  hideTooltip();
 }
 
 function ensureStyle(): void {
@@ -62,7 +58,20 @@ function ensureStyle(): void {
   const style = document.createElement("style");
   style.id = STYLE_ID;
   const hide = HIDE_SELECTORS.map((sel) => `html[${ROOT_ATTR}="on"] ${sel}`).join(",\n");
-  style.textContent = `${hide} { display: none !important; }`;
+  style.textContent = `
+    ${hide} { display: none !important; }
+    [${TIP_ATTR}] {
+      position: fixed;
+      z-index: 50;
+      display: none;
+      width: max-content;
+      max-width: 240px;
+      pointer-events: none !important;
+      user-select: none;
+      box-sizing: border-box;
+    }
+    [${TIP_ATTR}][data-open="true"] { display: block; }
+  `;
   document.head.append(style);
 }
 
@@ -107,7 +116,6 @@ function buildButton(search: HTMLElement): HTMLElement {
     (event) => {
       event.preventDefault();
       event.stopImmediatePropagation();
-      hideTooltip();
       toggle();
     },
     true,
@@ -126,9 +134,7 @@ function tooltipEl(): HTMLElement {
   tip.setAttribute(TIP_ATTR, "true");
   tip.setAttribute("role", "tooltip");
   tip.className =
-    "z-50 w-fit select-none text-sm whitespace-normal break-words rounded-lg border border-default bg-surface-elevated-secondary text-default px-2 py-1.5 pointer-events-none";
-  tip.style.position = "fixed";
-  tip.hidden = true;
+    "z-50 w-fit select-none text-sm whitespace-normal break-words rounded-lg border border-default bg-surface-elevated-secondary text-default px-2 py-1.5";
   const text = document.createElement("div");
   text.className = "flex items-center gap-2";
   const label = document.createElement("div");
@@ -144,20 +150,17 @@ function tooltipEl(): HTMLElement {
   return tip;
 }
 
-function syncTooltip(btn: HTMLElement): void {
-  const tip = document.querySelector<HTMLElement>(`[${TIP_ATTR}]`);
-  const label = tip?.querySelector<HTMLElement>("[data-incodex-tooltip-label]");
-  if (label) label.textContent = labelFor(btn.getAttribute("aria-pressed") === "true");
-}
-
 function showTooltip(btn: HTMLElement): void {
   const tip = tooltipEl();
   const label = tip.querySelector<HTMLElement>("[data-incodex-tooltip-label]");
   if (label) label.textContent = labelFor(btn.getAttribute("aria-pressed") === "true");
-  tip.hidden = false;
+  tip.setAttribute("data-open", "true");
   const rect = btn.getBoundingClientRect();
   const tipRect = tip.getBoundingClientRect();
-  const left = Math.max(8, rect.left + rect.width / 2 - tipRect.width / 2);
+  const left = Math.min(
+    window.innerWidth - tipRect.width - 8,
+    Math.max(8, rect.left + rect.width / 2 - tipRect.width / 2),
+  );
   const top = Math.max(8, rect.top - tipRect.height - 8);
   tip.style.left = `${left}px`;
   tip.style.top = `${top}px`;
@@ -165,7 +168,7 @@ function showTooltip(btn: HTMLElement): void {
 
 function hideTooltip(): void {
   const tip = document.querySelector<HTMLElement>(`[${TIP_ATTR}]`);
-  if (tip) tip.hidden = true;
+  if (tip) tip.removeAttribute("data-open");
 }
 
 function ensureButton(): void {
@@ -198,9 +201,14 @@ function start(): void {
   ensureButton();
   apply(readEnabled());
   window.addEventListener("keydown", onHotkey, true);
+  let scheduled = false;
   const observer = new MutationObserver(() => {
-    ensureStyle();
-    ensureButton();
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(() => {
+      scheduled = false;
+      ensureButton();
+    });
   });
   observer.observe(document.documentElement, { childList: true, subtree: true });
 }
