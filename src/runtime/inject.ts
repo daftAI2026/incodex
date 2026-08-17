@@ -245,8 +245,24 @@ function hideTooltip(): void {
 const BANNER_DISMISS_KEY = "incodex-banner-dismissed";
 const BANNER_TITLE = "干净窗口";
 const BANNER_BODY = "登录和设置与主窗口相同，不会带入旧对话。关掉后，这次的聊天会从临时目录清掉。";
-const OFFICIAL_BANNER_MARKERS = ["启用快速模式", "Enable Fast mode", "立即启用", "Enable now"];
-const PRIMARY_CTA_LABELS = new Set(["立即启用", "Enable now", "Try now", "立即试用"]);
+const OFFICIAL_BANNER_MARKERS = [
+  "启用快速模式",
+  "Enable Fast mode",
+  "立即启用",
+  "Enable now",
+  "试试 ChatGPT 语音",
+  "使用额度已用完",
+  "Try ChatGPT voice",
+];
+const PRIMARY_CTA_LABELS = new Set([
+  "立即启用",
+  "Enable now",
+  "Try now",
+  "立即试用",
+  "开始语音",
+  "增加额度",
+]);
+const LEAKY_BANNER_MARKERS = ["启用快速模式", "Enable Fast mode", "上周在", "last week"];
 
 function bannerDismissed(): boolean {
   try {
@@ -269,6 +285,8 @@ function findOfficialBanner(): HTMLElement | null {
   return (
     [...document.querySelectorAll<HTMLElement>("aside")].find((el) => {
       if (el.hasAttribute(LANDING_ATTR)) return false;
+      const cls = el.className || "";
+      if (!cls.includes("rounded-2xl")) return false;
       const text = el.textContent || "";
       return OFFICIAL_BANNER_MARKERS.some((marker) => text.includes(marker));
     }) ?? null
@@ -310,7 +328,10 @@ function adoptOfficialBanner(src: HTMLElement): void {
     }
   }
   patchOfficialBanner(card);
-  src.setAttribute("data-incodex-hide-official", "");
+  const srcText = src.textContent || "";
+  if (LEAKY_BANNER_MARKERS.some((marker) => srcText.includes(marker))) {
+    src.setAttribute("data-incodex-hide-official", "");
+  }
 }
 
 function ensureLanding(): void {

@@ -122,6 +122,7 @@ function launchIncognito() {
   }
   fs.mkdirSync(INCOGNITO_HOME, { recursive: true });
   fs.mkdirSync(INCOGNITO_CHROMIUM, { recursive: true });
+  burnIncognitoHome();
   copySettings();
   const bin = process.execPath;
   const args = [`--user-data-dir=${INCOGNITO_CHROMIUM}`];
@@ -222,9 +223,10 @@ function attachElectron() {
   electron.app.on("browser-window-created", (_event, win) => {
     hookWindow(win, source);
     if (!isIncognito()) return;
-    win.on("close", () => {
+    win.on("closed", () => {
       burnIncognitoHome();
       clearPid();
+      electron.app.exit(0);
     });
   });
   if (isIncognito()) {
@@ -232,7 +234,7 @@ function attachElectron() {
     electron.app.on("window-all-closed", () => {
       burnIncognitoHome();
       clearPid();
-      electron.app.quit();
+      electron.app.exit(0);
     });
     electron.app.on("before-quit", () => {
       burnIncognitoHome();
