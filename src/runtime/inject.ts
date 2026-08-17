@@ -6,9 +6,13 @@ const STORAGE_KEY = "incodex-privacy";
 const CLUSTER_ATTR = "data-incodex-header-cluster";
 const SHORTCUT_LABEL = "⇧⌘N";
 
-// Hide chat history only. Project folders stay so a new thread can be started.
-const HIDE_SELECTORS = ["[data-app-action-sidebar-thread-row]"];
-const CHAT_SECTIONS = new Set(["Pinned", "Recents"]);
+// Private existing state: chat titles and folder names.
+// Product chrome stays: 新对话, 项目 heading, add-project.
+const HIDE_SELECTORS = [
+  "[data-app-action-sidebar-thread-row]",
+  "[data-app-action-sidebar-project-row]",
+];
+const HISTORY_SECTIONS = new Set(["Pinned", "Recents"]);
 const SHOW_MORE_LABELS = new Set(["Show more", "显示更多"]);
 
 const ICON_SVG = `{{HAT_GLASSES_SVG}}`;
@@ -49,13 +53,13 @@ function apply(on: boolean): void {
 function syncDerivedChrome(on: boolean): void {
   for (const section of document.querySelectorAll<HTMLElement>("[data-app-action-sidebar-section]")) {
     const heading = section.getAttribute("data-app-action-sidebar-section-heading") || "";
-    if (on && CHAT_SECTIONS.has(heading)) section.setAttribute("data-incodex-empty-section", "");
+    if (on && HISTORY_SECTIONS.has(heading)) section.setAttribute("data-incodex-empty-section", "");
     else section.removeAttribute("data-incodex-empty-section");
 
     for (const btn of section.querySelectorAll<HTMLElement>("button")) {
       const text = (btn.textContent || "").replace(/\s+/g, " ").trim();
       if (!SHOW_MORE_LABELS.has(text)) continue;
-      if (on && CHAT_SECTIONS.has(heading)) btn.setAttribute("data-incodex-show-more", "");
+      if (on) btn.setAttribute("data-incodex-show-more", "");
       else btn.removeAttribute("data-incodex-show-more");
     }
   }
@@ -79,6 +83,7 @@ function ensureStyle(): void {
   style.textContent = `
     ${hide} { display: none !important; }
     html[${ROOT_ATTR}="on"] [data-incodex-empty-section],
+    html[${ROOT_ATTR}="on"] [data-app-action-sidebar-project-show-all-toggle],
     html[${ROOT_ATTR}="on"] [data-incodex-show-more] {
       display: none !important;
     }
