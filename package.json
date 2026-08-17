@@ -1,0 +1,17 @@
+{
+  "name": "incodex",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Incognito toggle for the Codex desktop app",
+  "bin": {
+    "incodex": "./src/cli.ts"
+  },
+  "scripts": {
+    "incodex": "bun src/cli.ts",
+    "build:runtime": "bun src/build-runtime.ts"
+  },
+  "dependencies": {
+    "@electron/asar": "^3.4.1"
+  }
+}
