@@ -243,11 +243,10 @@ function hideTooltip(): void {
 }
 
 const BANNER_DISMISS_KEY = "incodex-banner-dismissed";
-const LEAKY_BANNER_TITLES = new Set([
-  "启用快速模式",
-  "Enable Fast mode",
-  "根据你上周",
-]);
+const BANNER_TITLE = "干净窗口";
+const BANNER_BODY = "登录和设置与主窗口相同，不会带入旧对话。关掉后，这次的聊天会从临时目录清掉。";
+const OFFICIAL_BANNER_MARKERS = ["启用快速模式", "Enable Fast mode", "立即启用", "Enable now"];
+const PRIMARY_CTA_LABELS = new Set(["立即启用", "Enable now", "Try now", "立即试用"]);
 
 function bannerDismissed(): boolean {
   try {
@@ -266,71 +265,52 @@ function dismissBanner(): void {
   document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`)?.remove();
 }
 
-function hideOfficialHomeBanners(): void {
-  for (const el of document.querySelectorAll<HTMLElement>("aside, [class*='rounded-2xl']")) {
-    const text = (el.textContent || "").replace(/\s+/g, " ");
-    if (![...LEAKY_BANNER_TITLES].some((title) => text.includes(title))) continue;
-    if (el.hasAttribute(LANDING_ATTR)) continue;
-    el.setAttribute("data-incodex-hide-official", "");
-  }
-}
-
-function findBannerHost(): HTMLElement | null {
-  const official = document.querySelector<HTMLElement>("[class*='home-composer-inline-inset']");
-  if (official) return official;
-  const hero = [...document.querySelectorAll<HTMLElement>("h1, h2")].find((el) =>
-    /构建什么|What (will|should) you build|我们来构建/.test(el.textContent || ""),
+function findOfficialBanner(): HTMLElement | null {
+  return (
+    [...document.querySelectorAll<HTMLElement>("aside")].find((el) => {
+      if (el.hasAttribute(LANDING_ATTR)) return false;
+      const text = el.textContent || "";
+      return OFFICIAL_BANNER_MARKERS.some((marker) => text.includes(marker));
+    }) ?? null
   );
-  const column =
-    hero?.closest<HTMLElement>("main") ??
-    document.querySelector<HTMLElement>("main") ??
-    document.querySelector<HTMLElement>("[class*='flex-1']");
-  if (!column) return null;
-  let host = column.querySelector<HTMLElement>("[data-incodex-banner-host]");
-  if (!host) {
-    host = document.createElement("div");
-    host.setAttribute("data-incodex-banner-host", "true");
-    host.className = "electron:mx-[var(--home-composer-inline-inset)]";
-    column.insertBefore(host, column.firstElementChild);
-  }
-  return host;
 }
 
-function bannerEl(): HTMLElement {
+function patchOfficialBanner(card: HTMLElement): void {
+  const title = card.querySelector<HTMLElement>(".text-base.font-medium, h3");
+  if (title) title.textContent = BANNER_TITLE;
+  const description = card.querySelector<HTMLElement>(
+    ".text-sm.leading-tight, .text-pretty.text-secondary",
+  );
+  if (description) description.textContent = BANNER_BODY;
+  for (const btn of card.querySelectorAll("button")) {
+    const label = (btn.textContent || "").replace(/\s+/g, " ").trim();
+    if (PRIMARY_CTA_LABELS.has(label)) btn.remove();
+  }
+}
+
+function adoptOfficialBanner(src: HTMLElement): void {
   let card = document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`);
-  if (card) return card;
-  card = document.createElement("aside");
-  card.setAttribute(LANDING_ATTR, "true");
-  card.setAttribute("role", "status");
-  card.className =
-    "relative isolate flex w-full overflow-hidden rounded-2xl border bg-surface py-2 ps-3 pe-2 text-sm shadow-xs lg:mx-auto electron:border-0 electron:ring-[0.5px] electron:ring-border-strong border-primary-outline text-default";
-  card.innerHTML = `
-    <div aria-hidden="true" class="absolute inset-0 -z-10 bg-primary-soft"></div>
-    <div class="flex min-w-0 w-full items-center gap-2 max-[400px]:items-start">
-      <div class="flex size-12 shrink-0 items-center justify-center self-center text-secondary">
-        ${ICON_SVG}
-      </div>
-      <div class="min-w-0 flex-1">
-        <div class="min-w-0 text-base font-medium text-default">干净窗口</div>
-        <div class="text-sm leading-tight text-pretty text-secondary">登录和设置与主窗口相同，不会带入旧对话。关掉后，这次的聊天会从临时目录清掉。</div>
-      </div>
-      <div class="flex items-center gap-2 self-center max-[400px]:w-full max-[400px]:justify-center max-[400px]:self-stretch">
-        <button type="button" data-incodex-banner-dismiss="true" aria-label="关闭说明" class="no-drag cursor-interaction items-center justify-center border whitespace-nowrap select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-ring flex rounded-lg border-transparent text-codex-description hover:text-default h-6 w-6 shrink-0">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="icon-xs" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-        </button>
-      </div>
-    </div>
-  `;
-  const icon = card.querySelector("svg");
-  icon?.setAttribute("class", "icon-sm text-chart-yellow");
-  icon?.setAttribute("width", "16");
-  icon?.setAttribute("height", "16");
-  card.querySelector("[data-incodex-banner-dismiss]")?.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    dismissBanner();
-  });
-  return card;
+  if (!card) {
+    card = src.cloneNode(true) as HTMLElement;
+    card.setAttribute(LANDING_ATTR, "true");
+    src.parentElement?.insertBefore(card, src);
+    for (const btn of card.querySelectorAll("button")) {
+      const aria = (btn.getAttribute("aria-label") || "").toLowerCase();
+      const isDismiss = /关闭|dismiss|close/.test(aria) || (btn.textContent || "").trim() === "";
+      if (!isDismiss) continue;
+      btn.addEventListener(
+        "click",
+        (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          dismissBanner();
+        },
+        true,
+      );
+    }
+  }
+  patchOfficialBanner(card);
+  src.setAttribute("data-incodex-hide-official", "");
 }
 
 function ensureLanding(): void {
@@ -338,15 +318,14 @@ function ensureLanding(): void {
     document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`)?.remove();
     return;
   }
-  hideOfficialHomeBanners();
+  const official = findOfficialBanner();
   if (bannerDismissed()) {
     document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`)?.remove();
+    official?.setAttribute("data-incodex-hide-official", "");
     return;
   }
-  const host = findBannerHost();
-  if (!host) return;
-  const card = bannerEl();
-  if (card.parentElement !== host) host.insertBefore(card, host.firstElementChild);
+  if (!official) return;
+  adoptOfficialBanner(official);
 }
 
 function ensureButton(): void {
