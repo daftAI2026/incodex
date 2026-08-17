@@ -13,7 +13,8 @@ const HIDE_SELECTORS = [
   "[data-app-action-sidebar-project-row]",
 ];
 const HISTORY_SECTIONS = new Set(["Pinned", "Recents"]);
-const SHOW_MORE_LABELS = new Set(["Show more", "显示更多"]);
+const SHOW_MORE_LABELS = new Set(["Show more", "显示更多", "展开显示", "Show all", "显示全部"]);
+const EMPTY_CHAT_LABELS = new Set(["No chats", "没有聊天"]);
 
 const ICON_SVG = `{{HAT_GLASSES_SVG}}`;
 const SEARCH_LABELS = new Set(["Search", "搜索"]);
@@ -62,6 +63,12 @@ function syncDerivedChrome(on: boolean): void {
       if (on) btn.setAttribute("data-incodex-show-more", "");
       else btn.removeAttribute("data-incodex-show-more");
     }
+    for (const el of section.querySelectorAll<HTMLElement>("span, div, p")) {
+      const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+      if (!EMPTY_CHAT_LABELS.has(text)) continue;
+      if (on) el.setAttribute("data-incodex-empty-chat", "");
+      else el.removeAttribute("data-incodex-empty-chat");
+    }
   }
 }
 
@@ -84,7 +91,8 @@ function ensureStyle(): void {
     ${hide} { display: none !important; }
     html[${ROOT_ATTR}="on"] [data-incodex-empty-section],
     html[${ROOT_ATTR}="on"] [data-app-action-sidebar-project-show-all-toggle],
-    html[${ROOT_ATTR}="on"] [data-incodex-show-more] {
+    html[${ROOT_ATTR}="on"] [data-incodex-show-more],
+    html[${ROOT_ATTR}="on"] [data-incodex-empty-chat] {
       display: none !important;
     }
     [${TIP_ATTR}] {
