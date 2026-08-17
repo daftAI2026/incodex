@@ -45,16 +45,19 @@ function labelFor(on: boolean): string {
 }
 
 function apply(on: boolean): void {
-  document.documentElement.setAttribute(ROOT_ATTR, on ? "on" : "off");
+  const incognito = isIncognitoWindow();
+  const hide = on && !incognito;
+  document.documentElement.setAttribute(ROOT_ATTR, hide ? "on" : "off");
+  document.documentElement.setAttribute("data-incodex-window", incognito ? "incognito" : "normal");
+  const pressed = incognito || on;
   const btn = document.querySelector<HTMLElement>(`[${BTN_ATTR}]`);
   if (btn) {
-    btn.setAttribute("aria-pressed", on ? "true" : "false");
-    btn.setAttribute("aria-label", labelFor(on));
+    btn.setAttribute("aria-pressed", pressed ? "true" : "false");
+    btn.setAttribute("aria-label", labelFor(pressed));
   }
   const label = document.querySelector<HTMLElement>("[data-incodex-tooltip-label]");
-  if (label) label.textContent = labelFor(on);
-  if (isIncognitoWindow()) return;
-  syncDerivedChrome(on);
+  if (label) label.textContent = labelFor(pressed);
+  syncDerivedChrome(hide);
 }
 
 function syncDerivedChrome(on: boolean): void {
