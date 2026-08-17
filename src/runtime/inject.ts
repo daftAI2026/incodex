@@ -142,29 +142,7 @@ function ensureStyle(): void {
       box-sizing: border-box;
     }
     [${TIP_ATTR}][data-open="true"] { display: block; }
-    [${LANDING_ATTR}] {
-      pointer-events: none;
-      max-width: 28rem;
-      margin: 0 auto;
-      padding: 0.5rem 1rem 1.5rem;
-    }
-    [${LANDING_ATTR}] h2 {
-      margin: 0 0 0.5rem;
-      font-size: 1.25rem;
-      font-weight: 600;
-      line-height: 1.3;
-    }
-    [${LANDING_ATTR}] p,
-    [${LANDING_ATTR}] li {
-      margin: 0;
-      font-size: 0.875rem;
-      line-height: 1.55;
-    }
-    [${LANDING_ATTR}] ul {
-      margin: 0.75rem 0 0;
-      padding-left: 1.1rem;
-    }
-    [${LANDING_ATTR}] li + li { margin-top: 0.35rem; }
+    [data-incodex-hide-official] { display: none !important; }
   `;
 }
 
@@ -264,48 +242,110 @@ function hideTooltip(): void {
   if (tip) tip.removeAttribute("data-open");
 }
 
-function hasConversationActivity(): boolean {
-  if (document.querySelector("[data-app-action-sidebar-thread-row]")) return true;
-  if (document.querySelector("[data-message-author-role], [data-turn-id]")) return true;
-  return false;
+const BANNER_DISMISS_KEY = "incodex-banner-dismissed";
+const LEAKY_BANNER_TITLES = new Set([
+  "启用快速模式",
+  "Enable Fast mode",
+  "根据你上周",
+]);
+
+function bannerDismissed(): boolean {
+  try {
+    return window.sessionStorage.getItem(BANNER_DISMISS_KEY) === "1";
+  } catch {
+    return false;
+  }
 }
 
-function findLandingHost(): HTMLElement | null {
-  const headings = [...document.querySelectorAll<HTMLElement>("h1, h2")];
-  const hero = headings.find((el) => /构建什么|What (will|should) you build|我们来构建/.test(el.textContent || ""));
-  if (hero?.parentElement) return hero.parentElement;
-  const composer = document.querySelector<HTMLElement>("textarea, [contenteditable='true']");
-  const column = composer?.closest<HTMLElement>("main, [class*='flex-1']");
-  return column ?? document.querySelector("main");
+function dismissBanner(): void {
+  try {
+    window.sessionStorage.setItem(BANNER_DISMISS_KEY, "1");
+  } catch {
+    /* ignore */
+  }
+  document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`)?.remove();
 }
 
-function landingEl(): HTMLElement {
+function hideOfficialHomeBanners(): void {
+  for (const el of document.querySelectorAll<HTMLElement>("aside, [class*='rounded-2xl']")) {
+    const text = (el.textContent || "").replace(/\s+/g, " ");
+    if (![...LEAKY_BANNER_TITLES].some((title) => text.includes(title))) continue;
+    if (el.hasAttribute(LANDING_ATTR)) continue;
+    el.setAttribute("data-incodex-hide-official", "");
+  }
+}
+
+function findBannerHost(): HTMLElement | null {
+  const official = document.querySelector<HTMLElement>("[class*='home-composer-inline-inset']");
+  if (official) return official;
+  const hero = [...document.querySelectorAll<HTMLElement>("h1, h2")].find((el) =>
+    /构建什么|What (will|should) you build|我们来构建/.test(el.textContent || ""),
+  );
+  const column =
+    hero?.closest<HTMLElement>("main") ??
+    document.querySelector<HTMLElement>("main") ??
+    document.querySelector<HTMLElement>("[class*='flex-1']");
+  if (!column) return null;
+  let host = column.querySelector<HTMLElement>("[data-incodex-banner-host]");
+  if (!host) {
+    host = document.createElement("div");
+    host.setAttribute("data-incodex-banner-host", "true");
+    host.className = "electron:mx-[var(--home-composer-inline-inset)]";
+    column.insertBefore(host, column.firstElementChild);
+  }
+  return host;
+}
+
+function bannerEl(): HTMLElement {
   let card = document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`);
   if (card) return card;
   card = document.createElement("aside");
   card.setAttribute(LANDING_ATTR, "true");
-  card.className = "text-default";
+  card.setAttribute("role", "status");
+  card.className =
+    "relative isolate flex w-full overflow-hidden rounded-2xl border bg-surface py-2 ps-3 pe-2 text-sm shadow-xs lg:mx-auto electron:border-0 electron:ring-[0.5px] electron:ring-border-strong border-primary-outline text-default";
   card.innerHTML = `
-    <h2>这是一个干净窗口</h2>
-    <p class="text-codex-description">看不到平时的对话。关掉这个窗口后，这次聊过的内容会从临时目录清掉。原来的窗口还在。</p>
-    <ul class="text-codex-description">
-      <li>不会写入你平时的会话库</li>
-      <li>登录、语言和基础设置跟主窗口一样</li>
-      <li>再按 ⇧⌘N，或点「退出无痕」，即可离开</li>
-    </ul>
+    <div aria-hidden="true" class="absolute inset-0 -z-10 bg-primary-soft"></div>
+    <div class="flex min-w-0 w-full items-center gap-2 max-[400px]:items-start">
+      <div class="flex size-12 shrink-0 items-center justify-center self-center text-secondary">
+        ${ICON_SVG}
+      </div>
+      <div class="min-w-0 flex-1">
+        <div class="min-w-0 text-base font-medium text-default">干净窗口</div>
+        <div class="text-sm leading-tight text-pretty text-secondary">登录和设置与主窗口相同，不会带入旧对话。关掉后，这次的聊天会从临时目录清掉。</div>
+      </div>
+      <div class="flex items-center gap-2 self-center max-[400px]:w-full max-[400px]:justify-center max-[400px]:self-stretch">
+        <button type="button" data-incodex-banner-dismiss="true" aria-label="关闭说明" class="no-drag cursor-interaction items-center justify-center border whitespace-nowrap select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-ring flex rounded-lg border-transparent text-codex-description hover:text-default h-6 w-6 shrink-0">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="icon-xs" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+    </div>
   `;
+  const icon = card.querySelector("svg");
+  icon?.setAttribute("class", "icon-sm text-chart-yellow");
+  icon?.setAttribute("width", "16");
+  icon?.setAttribute("height", "16");
+  card.querySelector("[data-incodex-banner-dismiss]")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dismissBanner();
+  });
   return card;
 }
 
 function ensureLanding(): void {
-  const existing = document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`);
-  if (!isIncognitoWindow() || hasConversationActivity()) {
-    existing?.remove();
+  if (!isIncognitoWindow()) {
+    document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`)?.remove();
     return;
   }
-  const host = findLandingHost();
+  hideOfficialHomeBanners();
+  if (bannerDismissed()) {
+    document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`)?.remove();
+    return;
+  }
+  const host = findBannerHost();
   if (!host) return;
-  const card = landingEl();
+  const card = bannerEl();
   if (card.parentElement !== host) host.insertBefore(card, host.firstElementChild);
 }
 
