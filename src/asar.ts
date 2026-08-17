@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LOADER_NAME, INJECT_NAME, MARKER_KEY } from "./paths";
+import { LOADER_NAME, INJECT_NAME, MAIN_NAME, PRELOAD_NAME, MARKER_KEY } from "./paths";
 
 type AsarApi = typeof asar & {
   getRawHeader: (p: string) => { header: unknown; headerString: string };
@@ -42,6 +42,8 @@ export async function patchAsar(options: {
   asarPath: string;
   loaderSource: string;
   injectSource: string;
+  mainSource: string;
+  preloadSource: string;
 }): Promise<{ hash: string; originalMain: string }> {
   const { main: originalMain, alreadyPatched } = readPackageMain(options.asarPath);
   if (!originalMain) throw new Error("package.json has no main");
@@ -64,6 +66,8 @@ export async function patchAsar(options: {
     writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
     writeFileSync(join(extractDir, LOADER_NAME), options.loaderSource);
     writeFileSync(join(extractDir, INJECT_NAME), options.injectSource);
+    writeFileSync(join(extractDir, MAIN_NAME), options.mainSource);
+    writeFileSync(join(extractDir, PRELOAD_NAME), options.preloadSource);
 
     await asar.createPackageWithOptions(extractDir, outAsar, {
       globOptions: { dot: true },
@@ -104,6 +108,8 @@ export async function restoreAsarMain(asarPath: string): Promise<void> {
     writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
     rmSync(join(extractDir, LOADER_NAME), { force: true });
     rmSync(join(extractDir, INJECT_NAME), { force: true });
+    rmSync(join(extractDir, MAIN_NAME), { force: true });
+    rmSync(join(extractDir, PRELOAD_NAME), { force: true });
     await asar.createPackageWithOptions(extractDir, outAsar, {
       globOptions: { dot: true },
       ...unpack,

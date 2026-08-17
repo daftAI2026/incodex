@@ -35,6 +35,10 @@ function writeEnabled(on: boolean): void {
   }
 }
 
+function isIncognitoWindow(): boolean {
+  return window.__incodexIncognito === true || window.incodex?.isIncognito?.() === true;
+}
+
 function labelFor(on: boolean): string {
   return on ? "退出无痕" : "无痕";
 }
@@ -48,6 +52,7 @@ function apply(on: boolean): void {
   }
   const label = document.querySelector<HTMLElement>("[data-incodex-tooltip-label]");
   if (label) label.textContent = labelFor(on);
+  if (isIncognitoWindow()) return;
   syncDerivedChrome(on);
 }
 
@@ -72,11 +77,38 @@ function syncDerivedChrome(on: boolean): void {
   }
 }
 
-function toggle(): void {
+function hideInPlace(): void {
   const next = document.documentElement.getAttribute(ROOT_ATTR) !== "on";
   writeEnabled(next);
   apply(next);
+}
+
+async function requestOpen(): Promise<boolean> {
+  try {
+    const result = await window.incodex?.openIncognito?.();
+    if (result?.ok) return true;
+  } catch {
+    /* use beacon */
+  }
+  try {
+    await fetch("https://incodex.invalid/open", { mode: "no-cors", cache: "no-store" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function activate(): Promise<void> {
   hideTooltip();
+  if (isIncognitoWindow()) {
+    try {
+      await window.incodex?.quitIncognito?.();
+    } catch {
+      window.close();
+    }
+    return;
+  }
+  await requestOpen();
 }
 
 function ensureStyle(): void {
@@ -100,7 +132,7 @@ function ensureStyle(): void {
       z-index: 50;
       display: none;
       width: max-content;
-      max-width: 240px;
+      max-width: min(20rem, calc(100vw - 16px));
       pointer-events: none !important;
       user-select: none;
       box-sizing: border-box;
@@ -150,7 +182,7 @@ function buildButton(search: HTMLElement): HTMLElement {
     (event) => {
       event.preventDefault();
       event.stopImmediatePropagation();
-      toggle();
+      void activate();
     },
     true,
   );
@@ -168,7 +200,7 @@ function tooltipEl(): HTMLElement {
   tip.setAttribute(TIP_ATTR, "true");
   tip.setAttribute("role", "tooltip");
   tip.className =
-    "z-50 w-fit select-none text-sm whitespace-normal break-words rounded-lg border border-default bg-surface-elevated-secondary text-default px-2 py-1.5";
+    "z-50 w-fit select-none text-sm whitespace-normal break-words rounded-lg border border-text bg-primary-solid text-primary-solid px-2 py-1.5";
   const text = document.createElement("div");
   text.className = "flex items-center gap-2";
   const label = document.createElement("div");
@@ -217,7 +249,7 @@ function ensureButton(): void {
   if (!isParkedInCluster(btn, cluster, search)) {
     cluster.insertBefore(btn, cluster.firstElementChild);
   }
-  apply(readEnabled());
+  apply(isIncognitoWindow() || readEnabled());
 }
 
 function onHotkey(event: KeyboardEvent): void {
@@ -225,15 +257,22 @@ function onHotkey(event: KeyboardEvent): void {
   if (event.code !== "KeyN" && event.key.toLowerCase() !== "n") return;
   event.preventDefault();
   event.stopImmediatePropagation();
-  toggle();
+  void activate();
 }
 
 function start(): void {
   if (window.__incodexStarted) return;
   window.__incodexStarted = true;
+  if (!isIncognitoWindow()) {
+    try {
+      window.localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
+  }
   ensureStyle();
   ensureButton();
-  apply(readEnabled());
+  apply(isIncognitoWindow());
   window.addEventListener("keydown", onHotkey, true);
   let scheduled = false;
   const observer = new MutationObserver(() => {
@@ -250,6 +289,12 @@ function start(): void {
 declare global {
   interface Window {
     __incodexStarted?: boolean;
+    __incodexIncognito?: boolean;
+    incodex?: {
+      isIncognito?: () => boolean;
+      openIncognito?: () => Promise<{ ok: boolean; reason?: string }>;
+      quitIncognito?: () => Promise<{ ok: boolean; reason?: string }>;
+    };
   }
 }
 

@@ -5,6 +5,10 @@ export const DEFAULT_APP = "/Applications/ChatGPT.app";
 export const USER_ROOT = join(homedir(), ".incodex");
 export const BACKUP_DIR = join(USER_ROOT, "backup");
 export const STATE_PATH = join(USER_ROOT, "install-state.json");
+export const INCOGNITO_HOME = join(USER_ROOT, "incognito-home");
+export const INCOGNITO_CHROMIUM = join(USER_ROOT, "incognito-chromium");
+export const MAIN_NAME = "incodex-main.cjs";
+export const PRELOAD_NAME = "incodex-preload.cjs";
 
 export const ASAR_REL = "Contents/Resources/app.asar";
 export const PLIST_REL = "Contents/Info.plist";

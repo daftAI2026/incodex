@@ -48,7 +48,11 @@ export function backupApp(appPath: string): void {
 function ensureRuntime(): void {
   const loaderPath = join(repoRoot, "dist/incodex-loader.cjs");
   const injectPath = join(repoRoot, "dist/incodex-inject.js");
-  if (existsSync(loaderPath) && existsSync(injectPath)) return;
+  const mainPath = join(repoRoot, "dist/incodex-main.cjs");
+  const preloadPath = join(repoRoot, "dist/incodex-preload.cjs");
+  if (existsSync(loaderPath) && existsSync(injectPath) && existsSync(mainPath) && existsSync(preloadPath)) {
+    return;
+  }
   const built = spawnSync("bun", ["src/build-runtime.ts"], {
     cwd: repoRoot,
     encoding: "utf8",
@@ -62,12 +66,16 @@ export async function install(appPath: string): Promise<void> {
   const asarPath = join(appPath, ASAR_REL);
   const loader = readFileSync(join(repoRoot, "dist/incodex-loader.cjs"), "utf8");
   const inject = readFileSync(join(repoRoot, "dist/incodex-inject.js"), "utf8");
+  const main = readFileSync(join(repoRoot, "dist/incodex-main.cjs"), "utf8");
+  const preload = readFileSync(join(repoRoot, "dist/incodex-preload.cjs"), "utf8");
   const before = headerHash(asarPath);
   backupApp(appPath);
   const patched = await patchAsar({
     asarPath,
     loaderSource: loader,
     injectSource: inject,
+    mainSource: main,
+    preloadSource: preload,
   });
   writeAsarIntegrity(appPath, patched.hash);
   signApp(appPath);
