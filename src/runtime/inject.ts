@@ -6,12 +6,14 @@ const STORAGE_KEY = "incodex-privacy";
 const CLUSTER_ATTR = "data-incodex-header-cluster";
 const SHORTCUT_LABEL = "⇧⌘N";
 
-// Only sidebar conversation rows and project/folder rows.
-// Do not hide section headings, nav items, or the main-pane title.
+// Rows Codex already gates on: pinned/recents threads, and project folders.
+// Headings stay until a section has no remaining rows, then we hide the section.
 const HIDE_SELECTORS = [
   "[data-app-action-sidebar-thread-row]",
   "[data-app-action-sidebar-project-row]",
 ];
+const EMPTY_SECTIONS = new Set(["Pinned", "Projects", "Recents"]);
+const SHOW_MORE_LABELS = new Set(["Show more", "显示更多"]);
 
 const ICON_SVG = `{{HAT_GLASSES_SVG}}`;
 const SEARCH_LABELS = new Set(["Search", "搜索"]);
@@ -39,11 +41,30 @@ function labelFor(on: boolean): string {
 function apply(on: boolean): void {
   document.documentElement.setAttribute(ROOT_ATTR, on ? "on" : "off");
   const btn = document.querySelector<HTMLElement>(`[${BTN_ATTR}]`);
-  if (!btn) return;
-  btn.setAttribute("aria-pressed", on ? "true" : "false");
-  btn.setAttribute("aria-label", labelFor(on));
+  if (btn) {
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+    btn.setAttribute("aria-label", labelFor(on));
+  }
   const label = document.querySelector<HTMLElement>("[data-incodex-tooltip-label]");
   if (label) label.textContent = labelFor(on);
+  syncDerivedChrome(on);
+}
+
+function syncDerivedChrome(on: boolean): void {
+  for (const section of document.querySelectorAll<HTMLElement>("[data-app-action-sidebar-section]")) {
+    const heading = section.getAttribute("data-app-action-sidebar-section-heading") || "";
+    if (!EMPTY_SECTIONS.has(heading)) {
+      section.removeAttribute("data-incodex-empty-section");
+      continue;
+    }
+    const empty = on || section.querySelector("[data-app-action-sidebar-thread-row], [data-app-action-sidebar-project-row]") == null;
+    if (empty) section.setAttribute("data-incodex-empty-section", "");
+    else section.removeAttribute("data-incodex-empty-section");
+  }
+  for (const btn of document.querySelectorAll<HTMLElement>("[data-app-action-sidebar-section] button")) {
+    const text = (btn.textContent || "").replace(/\s+/g, " ").trim();
+    if (SHOW_MORE_LABELS.has(text)) btn.setAttribute("data-incodex-show-more", "");
+  }
 }
 
 function toggle(): void {
@@ -54,12 +75,20 @@ function toggle(): void {
 }
 
 function ensureStyle(): void {
-  if (document.getElementById(STYLE_ID)) return;
-  const style = document.createElement("style");
-  style.id = STYLE_ID;
+  let style = document.getElementById(STYLE_ID) as HTMLStyleElement | null;
+  if (!style) {
+    style = document.createElement("style");
+    style.id = STYLE_ID;
+    document.head.append(style);
+  }
   const hide = HIDE_SELECTORS.map((sel) => `html[${ROOT_ATTR}="on"] ${sel}`).join(",\n");
   style.textContent = `
     ${hide} { display: none !important; }
+    html[${ROOT_ATTR}="on"] [data-incodex-empty-section],
+    html[${ROOT_ATTR}="on"] [data-app-action-sidebar-project-show-all-toggle],
+    html[${ROOT_ATTR}="on"] [data-incodex-show-more] {
+      display: none !important;
+    }
     [${TIP_ATTR}] {
       position: fixed;
       z-index: 50;
@@ -72,7 +101,6 @@ function ensureStyle(): void {
     }
     [${TIP_ATTR}][data-open="true"] { display: block; }
   `;
-  document.head.append(style);
 }
 
 function findSearchButton(): HTMLElement | null {
