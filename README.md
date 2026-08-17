@@ -16,5 +16,3 @@ bun src/cli.ts uninstall --live   # 从 ~/.incodex/backup 还原
 ```
 
 侧栏按钮图形是 [`assets/hat-glasses.svg`](assets/hat-glasses.svg)，按官方搜索按钮的 Lucide 规格绘制。这不是项目图标。
-
-方案见 [`Docs/privacy-mode-plan.md`](Docs/privacy-mode-plan.md)。

@@ -5,3 +5,4 @@
 node_modules/
 dist/_inject.src.ts
 .incodex-backup/
+Docs/
