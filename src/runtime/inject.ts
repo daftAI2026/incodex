@@ -55,15 +55,18 @@ function ensureStyle(): void {
 }
 
 function findSearchButton(): HTMLElement | null {
-  const labeled = document.querySelector<HTMLElement>(
-    'button[aria-label="Search"], button[aria-label="搜索"]',
+  const labeled = [
+    ...document.querySelectorAll<HTMLElement>('button[aria-label="Search"], button[aria-label="搜索"]'),
+  ];
+  if (labeled.length === 0) return null;
+  const inHeaderCluster = labeled.find((btn) =>
+    btn.closest(".ms-auto.flex.items-center, .flex.items-center.gap-1"),
   );
-  if (labeled) return labeled;
-  for (const btn of document.querySelectorAll<HTMLElement>("button")) {
-    const label = (btn.getAttribute("aria-label") || btn.textContent || "").trim();
-    if (label === "Search" || label === "搜索") return btn;
-  }
-  return null;
+  return inHeaderCluster ?? labeled[0];
+}
+
+function isParkedInHeader(btn: HTMLElement, search: HTMLElement): boolean {
+  return btn.parentElement === search.parentElement && btn.nextElementSibling === search;
 }
 
 function buildButton(template: HTMLElement | null): HTMLElement {
@@ -97,17 +100,17 @@ function buildButton(template: HTMLElement | null): HTMLElement {
 }
 
 function ensureButton(): void {
-  if (document.querySelector(`[${BTN_ATTR}]`)) return;
   const search = findSearchButton();
-  const btn = buildButton(search);
-  if (search?.parentElement) {
+  if (!search?.parentElement) return;
+
+  let btn = document.querySelector<HTMLElement>(`[${BTN_ATTR}]`);
+  if (!btn) btn = buildButton(search);
+  if (!isParkedInHeader(btn, search)) {
+    btn.style.removeProperty("position");
+    btn.style.removeProperty("top");
+    btn.style.removeProperty("left");
+    btn.style.removeProperty("z-index");
     search.parentElement.insertBefore(btn, search);
-  } else {
-    btn.style.position = "fixed";
-    btn.style.top = "12px";
-    btn.style.left = "12px";
-    btn.style.zIndex = "2147483647";
-    document.body?.append(btn);
   }
   apply(readEnabled());
 }
