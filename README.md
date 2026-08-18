@@ -1,17 +1,18 @@
 # Incodex
 
-给本机 [Codex](https://openai.com/codex/) 桌面端加一个侧栏按钮。点一下，再开一个干净窗口：登录和基础设置跟你平时一样，旧对话不会出现。
+给本机 [Codex](https://openai.com/codex/) 桌面端加一个侧栏按钮。点一下，再开一扇无痕窗口：登录和设置跟平时一样，不会带入之前的对话。关掉后，这次聊天不会留下记录。
 
-这是非官方工具。默认只补丁一份副本，不会改你正在用的 `/Applications/ChatGPT.app`。
+这是非官方工具。
 
 ## 它做什么
 
-- 装完重启 Codex，搜索按钮左边会出现帽子墨镜图标
-- 点按钮，或按 `⇧⌘N`（Windows / Linux 为 `Ctrl+Shift+N`），打开第二个窗口
-- 新窗口沿用你的登录、语言和 `config.toml` 里的基础设置
-- 新窗口看不到平时的对话列表；原来的窗口不受影响
-- 对话写在独立的 `CODEX_HOME` 里，不会改你平时的 `~/.codex` 会话库
-- 关掉这个窗口，或再点一次按钮，会清掉这份临时目录里的对话；登录和设置会留着，下次打开仍是空的
+- 装完重启 Codex，搜索左边会出现帽子墨镜按钮
+- 点按钮，或按 `⇧⌘N`（Windows / Linux 为 `Ctrl+Shift+N`），打开无痕窗口
+- 无痕窗口沿用你的登录、语言和 `config.toml` 里的基础设置
+- 看不到平时的对话列表；原来的窗口不受影响
+- 对话写在独立目录里，不会改你平时的 `~/.codex` 会话库
+- 关掉这扇窗，或再点一次按钮，会清掉这次的聊天；登录和设置会留着
+- 按钮和说明会跟主窗口语言走
 
 ## 要求
 
@@ -21,7 +22,7 @@
 
 ## 安装
 
-先只打副本，确认没问题再考虑改官方应用：
+先打一份副本试：
 
 ```bash
 git clone https://github.com/daftAI2026/incodex.git
@@ -30,15 +31,15 @@ bun install
 bun src/cli.ts install --clone
 ```
 
-然后打开 `~/.incodex/scratch/ChatGPT.app`。
+然后打开用户目录下的副本：`~/.incodex/scratch/ChatGPT.app`。
 
-确认无误后，再补丁正在用的官方应用：
+确认没问题后，再打进正在用的官方应用：
 
 ```bash
 bun src/cli.ts install --live
 ```
 
-`--live` 会先备份，再改 `/Applications/ChatGPT.app`。macOS 可能要求「App 管理」权限。卸掉：
+`--live` 会在用户目录里打好补丁，再整份替换 `/Applications/ChatGPT.app`。卸掉：
 
 ```bash
 bun src/cli.ts uninstall --live
@@ -52,9 +53,9 @@ bun src/cli.ts status
 
 ## 注意
 
-- 需要改 Codex 的应用包才能出现按钮，官方插件体系做不到这件事
-- 副本是临时签名，第一次开新窗口时，系统可能要你输入一次 Mac 登录密码（钥匙串）。这和 ChatGPT 账号密码不是一回事
-- Sparkle 升级官方应用后，补丁会被冲掉，需要再装一次
+- 官方插件加不了这个按钮，必须改应用包
+- 改包之后没法继续用一份有效的 OpenAI 签名。第一次开无痕窗，系统可能要你输入 **Mac 登录密码**（钥匙串里的 Codex Storage Key）。选 **始终允许**。这不是 ChatGPT 账号密码
+- 官方应用升级后，补丁会被冲掉，需要再跑一次 `install --live`
 - 目前只在 macOS 上试过
 
 ## 许可

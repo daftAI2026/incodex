@@ -1,14 +1,16 @@
-import { existsSync, cpSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, cpSync, readFileSync, mkdtempSync, rmSync, renameSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { headerHash, patchAsar, ensureDir } from "./asar";
+import { tmpdir } from "node:os";
+import { headerHash, patchAsar, ensureDir, readPackageMain } from "./asar";
 import { signApp, verifyApp } from "./codesign";
-import { writeAsarIntegrity } from "./integrity";
+import { writeAsarIntegrity, writeAsarIntegrityPlist } from "./integrity";
 import { ASAR_REL, BACKUP_DIR, DEFAULT_APP, PLIST_REL, USER_ROOT } from "./paths";
 import { saveState } from "./state";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+export const LIVE_PREV = join(USER_ROOT, "ChatGPT.app.pre-live");
 
 export type InstallOptions = {
   appPath: string;
@@ -22,37 +24,35 @@ export function resolveTarget(options: { clone?: boolean; live?: boolean; app?: 
   return DEFAULT_APP;
 }
 
+export function isOfficialApp(appPath: string): boolean {
+  return resolve(appPath) === resolve(DEFAULT_APP);
+}
+
 export function cloneOfficialApp(dest: string): void {
   if (!existsSync(DEFAULT_APP)) throw new Error(`Codex app not found: ${DEFAULT_APP}`);
-  if (existsSync(dest)) {
-    spawnSync("rm", ["-rf", dest], { stdio: "inherit" });
-  }
+  if (existsSync(dest)) spawnSync("rm", ["-rf", dest], { stdio: "inherit" });
   ensureDir(dirname(dest));
-  const cloned = spawnSync("cp", ["-cR", DEFAULT_APP, dest], { encoding: "utf8" });
-  if (cloned.status !== 0) {
-    const fallback = spawnSync("cp", ["-R", DEFAULT_APP, dest], { encoding: "utf8" });
-    if (fallback.status !== 0) {
-      throw new Error(fallback.stderr || "failed to copy ChatGPT.app");
-    }
-  }
+  const cloned = spawnSync("ditto", [DEFAULT_APP, dest], { encoding: "utf8" });
+  if (cloned.status !== 0) throw new Error(cloned.stderr || "failed to copy ChatGPT.app");
 }
 
 export function backupApp(appPath: string): void {
   ensureDir(BACKUP_DIR);
-  const asarPath = join(appPath, ASAR_REL);
-  const plistPath = join(appPath, PLIST_REL);
-  cpSync(asarPath, join(BACKUP_DIR, "app.asar"));
-  cpSync(plistPath, join(BACKUP_DIR, "Info.plist"));
+  cpSync(join(appPath, ASAR_REL), join(BACKUP_DIR, "app.asar"));
+  cpSync(join(appPath, PLIST_REL), join(BACKUP_DIR, "Info.plist"));
+}
+
+function backupOfficialIfNeeded(appPath: string): void {
+  const { alreadyPatched } = readPackageMain(join(appPath, ASAR_REL));
+  if (alreadyPatched) {
+    console.log("keeping existing official backup");
+    return;
+  }
+  console.log("backing up official asar and Info.plist to", BACKUP_DIR);
+  backupApp(appPath);
 }
 
 function ensureRuntime(): void {
-  const loaderPath = join(repoRoot, "dist/incodex-loader.cjs");
-  const injectPath = join(repoRoot, "dist/incodex-inject.js");
-  const mainPath = join(repoRoot, "dist/incodex-main.cjs");
-  const preloadPath = join(repoRoot, "dist/incodex-preload.cjs");
-  if (existsSync(loaderPath) && existsSync(injectPath) && existsSync(mainPath) && existsSync(preloadPath)) {
-    return;
-  }
   const built = spawnSync("bun", ["src/build-runtime.ts"], {
     cwd: repoRoot,
     encoding: "utf8",
@@ -61,32 +61,139 @@ function ensureRuntime(): void {
   if (built.status !== 0) throw new Error("failed to build runtime");
 }
 
-export async function install(appPath: string): Promise<void> {
-  ensureRuntime();
-  const asarPath = join(appPath, ASAR_REL);
-  const loader = readFileSync(join(repoRoot, "dist/incodex-loader.cjs"), "utf8");
-  const inject = readFileSync(join(repoRoot, "dist/incodex-inject.js"), "utf8");
-  const main = readFileSync(join(repoRoot, "dist/incodex-main.cjs"), "utf8");
-  const preload = readFileSync(join(repoRoot, "dist/incodex-preload.cjs"), "utf8");
-  const before = headerHash(asarPath);
-  backupApp(appPath);
+export function quitOfficialApp(): void {
+  const listed = spawnSync("ps", ["-ax", "-o", "pid=,command="], { encoding: "utf8" });
+  const needle = `${DEFAULT_APP}/Contents/MacOS/ChatGPT`;
+  const pids = (listed.stdout || "")
+    .split("\n")
+    .filter((line) => line.includes(needle))
+    .map((line) => Number(line.trim().split(/\s+/)[0]))
+    .filter((pid) => Number.isInteger(pid) && pid > 0);
+  if (pids.length === 0) return;
+  console.log("quitting official Codex", pids.join(" "));
+  for (const pid of pids) spawnSync("kill", [String(pid)]);
+  spawnSync("sleep", ["1"]);
+}
+
+function runtimeSources(): { loader: string; inject: string; main: string; preload: string } {
+  return {
+    loader: readFileSync(join(repoRoot, "dist/incodex-loader.cjs"), "utf8"),
+    inject: readFileSync(join(repoRoot, "dist/incodex-inject.js"), "utf8"),
+    main: readFileSync(join(repoRoot, "dist/incodex-main.cjs"), "utf8"),
+    preload: readFileSync(join(repoRoot, "dist/incodex-preload.cjs"), "utf8"),
+  };
+}
+
+async function patchAppBundle(
+  appPath: string,
+  resign: boolean,
+): Promise<{ originalMain: string; hash: string }> {
+  const src = runtimeSources();
   const patched = await patchAsar({
-    asarPath,
-    loaderSource: loader,
-    injectSource: inject,
-    mainSource: main,
-    preloadSource: preload,
+    asarPath: join(appPath, ASAR_REL),
+    loaderSource: src.loader,
+    injectSource: src.inject,
+    mainSource: src.main,
+    preloadSource: src.preload,
   });
   writeAsarIntegrity(appPath, patched.hash);
-  signApp(appPath);
-  if (!verifyApp(appPath)) {
-    console.warn("codesign --verify failed; the copy may still open after Gatekeeper bypass");
+  if (resign) signApp(appPath);
+  return patched;
+}
+
+function officialSourceApp(): string {
+  const prevAsar = join(LIVE_PREV, ASAR_REL);
+  if (existsSync(prevAsar) && !readPackageMain(prevAsar).alreadyPatched) return LIVE_PREV;
+  return DEFAULT_APP;
+}
+
+function swapOfficialWith(stagedApp: string, keepOfficialSource: boolean): void {
+  const outgoing = join(USER_ROOT, "ChatGPT.app.outgoing");
+  rmSync(outgoing, { recursive: true, force: true });
+  renameSync(DEFAULT_APP, outgoing);
+  try {
+    renameSync(stagedApp, DEFAULT_APP);
+  } catch (error) {
+    renameSync(outgoing, DEFAULT_APP);
+    throw error;
   }
+  if (keepOfficialSource) {
+    rmSync(outgoing, { recursive: true, force: true });
+    return;
+  }
+  rmSync(LIVE_PREV, { recursive: true, force: true });
+  renameSync(outgoing, LIVE_PREV);
+}
+
+async function installLive(): Promise<void> {
+  if (!existsSync(DEFAULT_APP)) throw new Error(`Codex app not found: ${DEFAULT_APP}`);
+  quitOfficialApp();
+  backupOfficialIfNeeded(DEFAULT_APP);
+  const sourceApp = officialSourceApp();
+  const keepOfficialSource = sourceApp === LIVE_PREV;
+  const before = headerHash(join(sourceApp, ASAR_REL));
+  const stagedApp = join(USER_ROOT, "ChatGPT.app.live");
+  rmSync(stagedApp, { recursive: true, force: true });
+  console.log("copying official OpenAI-signed app to a writable staging bundle");
+  const copied = spawnSync("ditto", [sourceApp, stagedApp], { encoding: "utf8" });
+  if (copied.status !== 0) throw new Error(copied.stderr || "failed to stage official app");
+  const patched = await patchAppBundle(stagedApp, true);
+  console.log("replacing /Applications/ChatGPT.app with the patched bundle");
+  swapOfficialWith(stagedApp, keepOfficialSource);
   saveState({
-    appPath,
+    appPath: DEFAULT_APP,
     originalMain: patched.originalMain,
     asarHashBefore: before,
     asarHashAfter: patched.hash,
     installedAt: new Date().toISOString(),
   });
+  console.log("official app patched. reopen /Applications/ChatGPT.app");
+  console.log("to restore official Codex: bun src/cli.ts uninstall --live");
+}
+
+export async function install(appPath: string): Promise<void> {
+  if (!existsSync(appPath)) throw new Error(`Codex app not found: ${appPath}`);
+  ensureRuntime();
+  if (isOfficialApp(appPath)) {
+    await installLive();
+    return;
+  }
+  const asarPath = join(appPath, ASAR_REL);
+  const src = runtimeSources();
+  const before = headerHash(asarPath);
+  backupApp(appPath);
+  const work = mkdtempSync(join(tmpdir(), "incodex-install-"));
+  try {
+    const stagedAsar = join(work, "app.asar");
+    const stagedPlist = join(work, "Info.plist");
+    cpSync(asarPath, stagedAsar);
+    cpSync(join(appPath, PLIST_REL), stagedPlist);
+    const unpackedSrc = `${asarPath}.unpacked`;
+    if (existsSync(unpackedSrc)) {
+      spawnSync("ditto", [unpackedSrc, `${stagedAsar}.unpacked`]);
+    }
+    const patched = await patchAsar({
+      asarPath: stagedAsar,
+      loaderSource: src.loader,
+      injectSource: src.inject,
+      mainSource: src.main,
+      preloadSource: src.preload,
+    });
+    writeAsarIntegrityPlist(stagedPlist, patched.hash);
+    cpSync(stagedAsar, asarPath);
+    cpSync(stagedPlist, join(appPath, PLIST_REL));
+    signApp(appPath);
+    if (!verifyApp(appPath)) {
+      console.warn("codesign --verify failed; the copy may still open after Gatekeeper bypass");
+    }
+    saveState({
+      appPath,
+      originalMain: patched.originalMain,
+      asarHashBefore: before,
+      asarHashAfter: patched.hash,
+      installedAt: new Date().toISOString(),
+    });
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
 }

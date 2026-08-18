@@ -29,6 +29,10 @@ export function readAsarIntegrity(appPath: string): string | null {
   return value || null;
 }
 
+export function writeAsarIntegrityPlist(plistPath: string, hash: string): void {
+  runPython([plistPath, "write", hash]);
+}
+
 export function writeAsarIntegrity(appPath: string, hash: string): void {
-  runPython([join(appPath, PLIST_REL), "write", hash]);
+  writeAsarIntegrityPlist(join(appPath, PLIST_REL), hash);
 }

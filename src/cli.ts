@@ -45,7 +45,11 @@ try {
     }
     console.log("installing into", appPath);
     await install(appPath);
-    console.log("done. restart that app copy to see the Incognito button.");
+    if (has("--live") && !arg("--app")) {
+      console.log("done. reopen /Applications/ChatGPT.app to use Incognito.");
+    } else {
+      console.log("done. restart that app copy to see the Incognito button.");
+    }
   } else if (command === "uninstall") {
     const target = arg("--app") ?? (has("--live") ? DEFAULT_APP : appPath);
     console.log("restoring", target);
