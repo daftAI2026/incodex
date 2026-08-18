@@ -41,9 +41,8 @@ function sessionFromEnv() {
 }
 
 function pickFile(name) {
-  const override = path.join(stateRoot(), name);
-  if (fs.existsSync(override)) return override;
-  return path.join(__dirname, name);
+  const { resolveRuntimeFile } = require("./incodex-runtime-load.cjs");
+  return resolveRuntimeFile(name, __dirname);
 }
 
 function injectSource() {

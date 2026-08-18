@@ -81,6 +81,7 @@ function runtimeSources(): {
   safeHome: string;
   ipcGuard: string;
   instance: string;
+  runtimeLoad: string;
 } {
   return {
     loader: readFileSync(join(repoRoot, "dist/incodex-loader.cjs"), "utf8"),
@@ -90,6 +91,7 @@ function runtimeSources(): {
     safeHome: readFileSync(join(repoRoot, "dist/incodex-safe-home.cjs"), "utf8"),
     ipcGuard: readFileSync(join(repoRoot, "dist/incodex-ipc-guard.cjs"), "utf8"),
     instance: readFileSync(join(repoRoot, "dist/incodex-instance.cjs"), "utf8"),
+    runtimeLoad: readFileSync(join(repoRoot, "dist/incodex-runtime-load.cjs"), "utf8"),
   };
 }
 
@@ -108,6 +110,7 @@ async function patchAppBundle(
     safeHomeSource: src.safeHome,
     ipcGuardSource: src.ipcGuard,
     instanceSource: src.instance,
+    runtimeLoadSource: src.runtimeLoad,
     installId,
   });
   writeAsarIntegrity(appPath, patched.hash);
