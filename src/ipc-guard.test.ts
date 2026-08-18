@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { actionResponse, authorizeSender, urlAllowed } from "./runtime/incodex-ipc-guard.cjs";
+import { actionResponse, authorizeSender, urlAllowed } from "./runtime/incodex-ipc-guard.cts";
 
 const allow = new Set([1]);
 

@@ -6,7 +6,7 @@ import { verifyApp } from "./codesign";
 import { loadCurrentInstallation, originalAppPath, targetId } from "./installation";
 import { readAsarIntegrity } from "./integrity";
 import { ASAR_REL, DEFAULT_APP, USER_ROOT } from "./paths";
-import { staleOwner, targetStateDir } from "./runtime/incodex-instance.cjs";
+import { staleOwner, targetStateDir } from "./runtime/incodex-instance.cts";
 import { listJournals, recoverAction, type Journal } from "./transaction";
 
 export type BackupReport = {

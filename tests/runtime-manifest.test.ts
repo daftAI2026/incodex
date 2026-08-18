@@ -15,4 +15,12 @@ describe("runtime manifest", () => {
     expect(manifest.files?.["incodex-main.cjs"]).toMatch(/^[0-9a-f]{64}$/);
     expect(manifest.files?.["incodex-preload.cjs"]).toMatch(/^[0-9a-f]{64}$/);
   });
+
+  test("compiled runtime CJS has no machine-specific paths and uses __dirname", () => {
+    const loader = readFileSync(join(import.meta.dir, "../dist/incodex-loader.cjs"), "utf8");
+    const main = readFileSync(join(import.meta.dir, "../dist/incodex-main.cjs"), "utf8");
+    expect(loader).toContain("__dirname");
+    expect(loader).not.toMatch(/\/Users\/|\/home\/[^.]|file:\/\/\//);
+    expect(main).not.toMatch(/\/Users\/|\/home\/[^.]|file:\/\/\//);
+  });
 });

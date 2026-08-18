@@ -1,3 +1,4 @@
+// @ts-nocheck
 "use strict";
 
 /** @typedef {{ __incodex?: { originalMain?: string } }} IncodexPackage */

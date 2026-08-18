@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { classifyWindow } from "./runtime/incodex-window-kind.cjs";
+import { classifyWindow } from "./runtime/incodex-window-kind.cts";
 
 describe("window classification", () => {
   test("overlay pet is auxiliary: always on top and not focusable", () => {

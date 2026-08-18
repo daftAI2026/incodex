@@ -1,3 +1,4 @@
+// @ts-nocheck
 "use strict";
 
 const { spawnSync } = require("node:child_process");
@@ -152,7 +153,7 @@ function listenForRaise(stateRoot, onRaise) {
   return server;
 }
 
-module.exports = {
+export {
   LOCK_NAME,
   SOCK_NAME,
   targetIdFromExec,

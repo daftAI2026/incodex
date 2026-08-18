@@ -12,7 +12,7 @@ import {
   rotateAndAppendLog,
   resolveSourceHome,
   sweepOrphanSessions,
-} from "./runtime/incodex-safe-home.cjs";
+} from "./runtime/incodex-safe-home.cts";
 
 function tempRoot(): string {
   return mkdtempSync(join(tmpdir(), "incodex-safe-"));

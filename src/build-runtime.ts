@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -47,17 +48,32 @@ try {
   /* ignore */
 }
 
+const emitted = spawnSync(join(root, "node_modules/typescript/bin/tsc"), ["-p", "tsconfig.runtime-emit.json"], {
+  cwd: root,
+  encoding: "utf8",
+  stdio: "inherit",
+});
+if (emitted.status !== 0) process.exit(emitted.status ?? 1);
+
+const emitDir = join(root, ".runtime-cjs");
 const copies: Array<[string, string]> = [
-  [join(root, "src/runtime/incodex-loader.cjs"), loaderOut],
-  [join(root, "src/runtime/incodex-main.cjs"), mainOut],
-  [join(root, "src/runtime/incodex-preload.cjs"), preloadOut],
-  [join(root, "src/runtime/incodex-safe-home.cjs"), safeHomeOut],
-  [join(root, "src/runtime/incodex-ipc-guard.cjs"), ipcGuardOut],
-  [join(root, "src/runtime/incodex-instance.cjs"), instanceOut],
-  [join(root, "src/runtime/incodex-runtime-load.cjs"), runtimeLoadOut],
-  [join(root, "src/runtime/incodex-window-kind.cjs"), windowKindOut],
+  [join(emitDir, "incodex-loader.cjs"), loaderOut],
+  [join(emitDir, "incodex-main.cjs"), mainOut],
+  [join(emitDir, "incodex-preload.cjs"), preloadOut],
+  [join(emitDir, "incodex-safe-home.cjs"), safeHomeOut],
+  [join(emitDir, "incodex-ipc-guard.cjs"), ipcGuardOut],
+  [join(emitDir, "incodex-instance.cjs"), instanceOut],
+  [join(emitDir, "incodex-runtime-load.cjs"), runtimeLoadOut],
+  [join(emitDir, "incodex-window-kind.cjs"), windowKindOut],
 ];
-for (const [from, to] of copies) writeFileSync(to, readFileSync(from));
+for (const [from, to] of copies) {
+  const text = readFileSync(from, "utf8").replace(
+    /require\("\.\/(incodex-[a-z-]+)\.cts"\)/g,
+    'require("./$1.cjs")',
+  );
+  writeFileSync(to, text);
+}
+assertPortableCjs(copies.map(([, to]) => to));
 
 const artifactPaths = [
   injectOut,
@@ -83,3 +99,13 @@ writeRuntimeManifest(outDir, {
 });
 
 for (const file of artifactPaths) console.log("wrote", file);
+
+function assertPortableCjs(files: string[]): void {
+  const banned = /\/Users\/|\/home\/|file:\/\/|C:\\\\Users\\/;
+  for (const file of files) {
+    const text = readFileSync(file, "utf8");
+    if (banned.test(text)) {
+      throw new Error(`${file} contains a machine-specific path; runtime CJS must use __dirname`);
+    }
+  }
+}

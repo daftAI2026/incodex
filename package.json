@@ -11,7 +11,7 @@
     "incodex": "bun src/cli.ts",
     "build:runtime": "bun src/build-runtime.ts",
     "deploy:runtime": "bun src/deploy-runtime.ts",
-    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.runtime.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.runtime.json && tsc -p tsconfig.runtime-emit.json --noEmit",
     "lint": "biome check src scripts tests",
     "test": "bun test src tests",
     "audit": "bun audit",

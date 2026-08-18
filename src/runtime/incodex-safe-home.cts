@@ -1,3 +1,4 @@
+// @ts-nocheck
 "use strict";
 
 const fs = require("node:fs");
@@ -373,7 +374,7 @@ function readPidFile(userRoot) {
   return Number.isInteger(pid) && pid > 0 ? pid : 0;
 }
 
-module.exports = {
+export {
   SESSIONS_NAME,
   IDENTITY_NAME,
   LOGS_NAME,

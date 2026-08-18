@@ -5,7 +5,7 @@ import {
   burnSessionHome,
   createSessionHome,
   sweepOrphanSessions,
-} from "./runtime/incodex-safe-home.cjs";
+} from "./runtime/incodex-safe-home.cts";
 
 export const EXIT_PATHS = [
   "close",
