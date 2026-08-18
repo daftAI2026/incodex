@@ -81,9 +81,10 @@ describe("privacy forensics", () => {
 
   test("absolute no-trace copy stays off until a real-device Electron scan exists", () => {
     expect(absolutePrivacyClaimAllowed()).toBe(false);
-    expect(translate("en", "body")).toContain("Temporary session data is cleaned up after a normal exit");
+    expect(translate("en", "body")).toContain("everyday chat list");
+    expect(translate("en", "body")).not.toContain("leave no record");
     expect(translate("en", "body")).not.toContain("leaves no record on this Mac");
-    expect(translate("zh-CN", "body")).toContain("正常退出后清理");
+    expect(translate("zh-CN", "body")).toContain("平时的列表");
     expect(translate("zh-CN", "body")).not.toContain("本机完全不留记录");
   });
 });
