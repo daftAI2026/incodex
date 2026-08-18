@@ -1,6 +1,7 @@
 "use strict";
 
 const { spawn } = require("node:child_process");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -8,8 +9,12 @@ const path = require("node:path");
 const safeHome = require("./incodex-safe-home.cjs");
 
 const USER_ROOT = path.join(os.homedir(), ".incodex");
-const INCOGNITO_CHROMIUM = path.join(USER_ROOT, "incognito-chromium");
 const DEFAULT_CODEX_HOME = path.join(os.homedir(), ".codex");
+const READY_TIMEOUT_MS = 15_000;
+
+function targetId() {
+  return crypto.createHash("sha256").update(process.execPath || "unknown").digest("hex").slice(0, 12);
+}
 
 function resolvedCodexHome() {
   const env = process.env.CODEX_HOME;
@@ -25,8 +30,9 @@ function isIncognito() {
 function sessionFromEnv() {
   const home = process.env.CODEX_HOME;
   const sessionId = process.env.INCODEX_SESSION_ID;
+  const root = process.env.INCODEX_SESSION_ROOT || (home ? safeHome.sessionRootFromHome(home) : "");
   if (!home || !sessionId) return null;
-  return { home, sessionId };
+  return { home, sessionId, root };
 }
 
 function pickFile(name) {
@@ -54,7 +60,7 @@ function readLocaleOverride() {
 
 function burnIncognitoHome() {
   const session = sessionFromEnv();
-  const home = session?.home || process.env.CODEX_HOME;
+  const home = session?.root || session?.home || process.env.CODEX_HOME;
   if (!home) return;
   try {
     safeHome.burnSessionHome(home, {
@@ -64,6 +70,16 @@ function burnIncognitoHome() {
     logLaunch("burn", { home });
   } catch (error) {
     logLaunch("burn-refused", { error: String(error), home });
+  }
+}
+
+function markSessionReady() {
+  const session = sessionFromEnv();
+  if (!session?.root) return;
+  try {
+    safeHome.writeReady(session.root);
+  } catch {
+    /* already written */
   }
 }
 
@@ -194,8 +210,8 @@ function raiseChildWhenReady(pid) {
 
 function logLaunch(message, extra) {
   try {
-    fs.appendFileSync(
-      path.join(USER_ROOT, "incognito.log"),
+    safeHome.rotateAndAppendLog(
+      USER_ROOT,
       `${new Date().toISOString()} ${message}${extra ? ` ${JSON.stringify(extra)}` : ""}\n`,
     );
   } catch {
@@ -281,24 +297,36 @@ function launchIncognito() {
     raiseExistingIncognito();
     return Promise.resolve({ ok: true, reason: "already-running" });
   }
+  const appTarget = targetId();
+  try {
+    safeHome.sweepOrphanSessions(USER_ROOT, { targetId: appTarget });
+  } catch (error) {
+    logLaunch("janitor-failed", { error: String(error) });
+  }
   let session;
   try {
-    session = safeHome.createSessionHome(USER_ROOT);
-    fs.mkdirSync(INCOGNITO_CHROMIUM, { recursive: true });
-    safeHome.copySettings(session.home, DEFAULT_CODEX_HOME);
+    session = safeHome.createSessionHome(USER_ROOT, { targetId: appTarget, pid: process.pid });
+    safeHome.copySettings(session.home, DEFAULT_CODEX_HOME, USER_ROOT);
   } catch (error) {
     logLaunch("prepare-failed", { error: String(error) });
     return Promise.resolve({ ok: false, reason: "prepare-failed" });
   }
   const bin = process.execPath;
-  if (!bin) return Promise.resolve({ ok: false, reason: "spawn-failed" });
-  const args = [`--user-data-dir=${INCOGNITO_CHROMIUM}`];
+  if (!bin) {
+    try {
+      safeHome.burnSessionHome(session.root, { userRoot: USER_ROOT, sessionId: session.sessionId });
+    } catch {
+      /* ignore */
+    }
+    return Promise.resolve({ ok: false, reason: "spawn-failed" });
+  }
+  const args = [`--user-data-dir=${session.chromium}`];
   const sourceBounds = captureSourceBounds();
   logLaunch("launch", {
     bin,
     home: session.home,
+    chromium: session.chromium,
     sessionId: session.sessionId,
-    userData: INCOGNITO_CHROMIUM,
     sourceBounds,
     tile: CHROME_WINDOW_TILE_PIXELS,
   });
@@ -319,32 +347,63 @@ function launchIncognito() {
           CODEX_HOME: session.home,
           INCODEX_INCOGNITO: "1",
           INCODEX_SESSION_ID: session.sessionId,
-          CODEX_ELECTRON_USER_DATA_PATH: INCOGNITO_CHROMIUM,
+          INCODEX_SESSION_ROOT: session.root,
+          CODEX_ELECTRON_USER_DATA_PATH: session.chromium,
           INCODEX_SOURCE_BOUNDS: sourceBounds,
         },
       });
     } catch (error) {
       logLaunch("spawn-threw", { error: String(error) });
+      try {
+        safeHome.burnSessionHome(session.root, { userRoot: USER_ROOT, sessionId: session.sessionId });
+      } catch {
+        /* ignore */
+      }
       done({ ok: false, reason: "spawn-failed" });
       return;
     }
     if (!child.pid) {
       logLaunch("spawn-no-pid");
+      try {
+        safeHome.burnSessionHome(session.root, { userRoot: USER_ROOT, sessionId: session.sessionId });
+      } catch {
+        /* ignore */
+      }
       done({ ok: false, reason: "spawn-failed" });
       return;
     }
-    child.once("error", (error) => {
+    child.on("error", (error) => {
       logLaunch("spawn-error", { error: String(error) });
       done({ ok: false, reason: "spawn-failed" });
     });
-    child.once("exit", (code) => {
-      if (settled) return;
-      logLaunch("exited-early", { code });
-      done({ ok: false, reason: "exited-early" });
+    child.on("exit", (code) => {
+      logLaunch("child-exit", { code, sessionId: session.sessionId });
+      try {
+        safeHome.burnSessionHome(session.root, { userRoot: USER_ROOT, sessionId: session.sessionId });
+      } catch (error) {
+        logLaunch("parent-burn-refused", { error: String(error) });
+      }
+      if (!settled) done({ ok: false, reason: "exited-early" });
     });
     raiseChildWhenReady(child.pid);
-    setTimeout(() => done({ ok: true }), 500);
-    child.unref();
+    const started = Date.now();
+    const timer = setInterval(() => {
+      if (settled) {
+        clearInterval(timer);
+        return;
+      }
+      if (safeHome.hasReady(session.root)) {
+        clearInterval(timer);
+        logLaunch("ready", { sessionId: session.sessionId, ms: Date.now() - started });
+        done({ ok: true });
+        return;
+      }
+      if (Date.now() - started > READY_TIMEOUT_MS) {
+        clearInterval(timer);
+        logLaunch("ready-timeout", { sessionId: session.sessionId });
+        done({ ok: false, reason: "ready-timeout" });
+      }
+    }, 50);
   });
 }
 
@@ -406,9 +465,14 @@ function attachElectron() {
     return;
   }
 
-  if (isIncognito()) {
+  if (!isIncognito()) {
+    try {
+      safeHome.sweepOrphanSessions(USER_ROOT, { targetId: targetId() });
+    } catch (error) {
+      logLaunch("janitor-failed", { error: String(error) });
+    }
+  } else {
     process.env.INCODEX_INCOGNITO = "1";
-    process.env.CODEX_ELECTRON_USER_DATA_PATH = INCOGNITO_CHROMIUM;
   }
 
   const source = injectSource();
@@ -445,7 +509,10 @@ function attachElectron() {
       applyChromeWindowTile(win);
       raiseOurWindows();
     };
-    win.once("ready-to-show", bringForward);
+    win.once("ready-to-show", () => {
+      markSessionReady();
+      bringForward();
+    });
     win.once("show", () => {
       bringForward();
       setTimeout(bringForward, 50);
