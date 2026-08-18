@@ -12,7 +12,8 @@ const ICON_SVG = `{{HAT_GLASSES_SVG}}`;
 const SEARCH_LABELS = new Set(["Search", "搜索"]);
 
 function isIncognitoWindow(): boolean {
-  return window.__incodexIncognito === true;
+  if (typeof window.__incodexIncognito === "boolean") return window.__incodexIncognito;
+  return false;
 }
 
 function currentLocale(): string {
@@ -437,6 +438,21 @@ function onHotkey(event: KeyboardEvent): void {
   void activate();
 }
 
+function uiReady(): boolean {
+  if (!document.querySelector(`[${BTN_ATTR}]`)) return false;
+  if (isIncognitoWindow() && !document.querySelector(`[${LANDING_ATTR}]`)) return false;
+  return true;
+}
+
+function observeRoot(): Element {
+  return (
+    document.querySelector(`[${CLUSTER_ATTR}]`) ||
+    document.querySelector("header") ||
+    document.querySelector("nav") ||
+    document.body
+  );
+}
+
 function start(): void {
   if (window.__incodexStarted) return;
   window.__incodexStarted = true;
@@ -445,6 +461,7 @@ function start(): void {
   apply();
   ensureLanding();
   window.addEventListener("keydown", onHotkey, true);
+  if (uiReady()) return;
   let scheduled = false;
   const observer = new MutationObserver(() => {
     if (scheduled) return;
@@ -453,9 +470,10 @@ function start(): void {
       scheduled = false;
       ensureButton();
       ensureLanding();
+      if (uiReady()) observer.disconnect();
     });
   });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  observer.observe(observeRoot(), { childList: true, subtree: true });
 }
 
 declare global {
