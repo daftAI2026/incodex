@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { fileSha256, inspectApp } from "./app-identity";
-import { headerHash, ensureDir, patchAsar } from "./asar";
+import { headerHash, ensureDir } from "./asar";
 import { assertLiveSupported, findSupportedBuild } from "./compatibility/supported-builds";
 import { signApp, verifyTarget, type SigningManifest } from "./codesign";
 import {
@@ -13,7 +13,7 @@ import {
   snapshotOriginalApp,
   writeInstallation,
 } from "./installation";
-import { writeAsarIntegrity } from "./integrity";
+import { loadRuntimeArtifacts, patchStagedBundle } from "./patcher";
 import {
   loadLiveInstallRecord,
   resolveOfficialOriginal,
@@ -75,50 +75,16 @@ export function quitOfficialApp(): void {
   spawnSync("sleep", ["1"]);
 }
 
-function runtimeSources(): {
-  loader: string;
-  inject: string;
-  main: string;
-  preload: string;
-  safeHome: string;
-  ipcGuard: string;
-  instance: string;
-  runtimeLoad: string;
-  windowKind: string;
-} {
-  return {
-    loader: readFileSync(join(repoRoot, "dist/incodex-loader.cjs"), "utf8"),
-    inject: readFileSync(join(repoRoot, "dist/incodex-inject.js"), "utf8"),
-    main: readFileSync(join(repoRoot, "dist/incodex-main.cjs"), "utf8"),
-    preload: readFileSync(join(repoRoot, "dist/incodex-preload.cjs"), "utf8"),
-    safeHome: readFileSync(join(repoRoot, "dist/incodex-safe-home.cjs"), "utf8"),
-    ipcGuard: readFileSync(join(repoRoot, "dist/incodex-ipc-guard.cjs"), "utf8"),
-    instance: readFileSync(join(repoRoot, "dist/incodex-instance.cjs"), "utf8"),
-    runtimeLoad: readFileSync(join(repoRoot, "dist/incodex-runtime-load.cjs"), "utf8"),
-    windowKind: readFileSync(join(repoRoot, "dist/incodex-window-kind.cjs"), "utf8"),
-  };
-}
-
 async function patchAppBundle(
   appPath: string,
   resign: boolean,
   installId: string,
 ): Promise<{ originalMain: string; hash: string; signing: SigningManifest | null }> {
-  const src = runtimeSources();
-  const patched = await patchAsar({
-    asarPath: join(appPath, ASAR_REL),
-    loaderSource: src.loader,
-    injectSource: src.inject,
-    mainSource: src.main,
-    preloadSource: src.preload,
-    safeHomeSource: src.safeHome,
-    ipcGuardSource: src.ipcGuard,
-    instanceSource: src.instance,
-    runtimeLoadSource: src.runtimeLoad,
-    windowKindSource: src.windowKind,
+  const patched = await patchStagedBundle({
+    stagedApp: appPath,
+    artifacts: loadRuntimeArtifacts(repoRoot),
     installId,
   });
-  writeAsarIntegrity(appPath, patched.hash);
   const signing = resign ? signApp(appPath) : null;
   return { ...patched, signing };
 }

@@ -31,5 +31,10 @@ describe("supported Codex builds", () => {
     expect(known?.adapterId).toBe("build-26.810.52044");
     expect(known?.expectedAsarFiles).toContain("package.json");
     expect(known?.selectors.length).toBeGreaterThan(0);
+    expect(known?.featureProbes).toEqual(["search-aria-label", "home-banners"]);
+    expect(known?.asarMain).toBeTruthy();
+    expect(known?.signingObservations).toContain("ad hoc");
+    expect(known?.testedMacOS.length).toBeGreaterThan(0);
+    expect(known?.architectures).toEqual(["arm64", "x86_64"]);
   });
 });

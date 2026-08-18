@@ -7,6 +7,7 @@ export type SupportedCodexBuild = {
   expectedAsarFiles: string[];
   adapterId: string;
   selectors: string[];
+  featureProbes: string[];
   signingObservations: string;
   testedMacOS: string[];
   experimental: boolean;
@@ -23,6 +24,7 @@ export const SUPPORTED_CODEX_BUILDS: readonly SupportedCodexBuild[] = [
     expectedAsarFiles: ["package.json", ".vite/build/early-bootstrap.js"],
     adapterId: "build-26.810.52044",
     selectors: [".ms-auto.flex.items-center", ".home-banners"],
+    featureProbes: ["search-aria-label", "home-banners"],
     signingObservations: "Official bundle is Developer ID signed; Incodex must ad hoc resign after asar rewrite.",
     testedMacOS: ["15"],
     experimental: true,
