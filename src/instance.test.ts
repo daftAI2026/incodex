@@ -6,6 +6,7 @@ import {
   ownerMatchesLive,
   readOwnerLock,
   staleOwner,
+  targetStateDir,
   writeOwnerLock,
 } from "./runtime/incodex-instance.cjs";
 
@@ -41,5 +42,23 @@ describe("instance owner", () => {
         nonce: "n",
       }),
     ).toThrow();
+  });
+});
+
+describe("target isolation", () => {
+  test("clone and live executables do not share lock, socket, or log directories", () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-lock-"));
+    const live = targetStateDir(root, "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT");
+    const clone = targetStateDir(root, "/Users/me/.incodex/scratch/ChatGPT.app/Contents/MacOS/ChatGPT");
+    expect(live).not.toBe(clone);
+    writeOwnerLock(live, {
+      pid: 11,
+      startedAt: "a",
+      execPath: "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+      sessionId: "live",
+      nonce: "n1",
+    });
+    expect(readOwnerLock(clone)).toBeNull();
+    expect(readOwnerLock(live)?.sessionId).toBe("live");
   });
 });
