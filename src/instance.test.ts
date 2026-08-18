@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   ownerMatchesLive,
   readOwnerLock,
+  singleFlight,
   staleOwner,
   targetStateDir,
   writeOwnerLock,
@@ -42,6 +43,38 @@ describe("instance owner", () => {
         nonce: "n",
       }),
     ).toThrow();
+  });
+});
+
+describe("concurrent launch", () => {
+  test("overlapping calls share one in-flight launch", async () => {
+    const holder: { current: Promise<number> | null } = { current: null };
+    let starts = 0;
+    const start = () => {
+      starts += 1;
+      return new Promise<number>((resolve) => setTimeout(() => resolve(starts), 20));
+    };
+    const [a, b, c] = await Promise.all([
+      singleFlight(holder, start),
+      singleFlight(holder, start),
+      singleFlight(holder, start),
+    ]);
+    expect(starts).toBe(1);
+    expect(a).toBe(1);
+    expect(b).toBe(1);
+    expect(c).toBe(1);
+  });
+
+  test("a later call after the first finishes may start again", async () => {
+    const holder: { current: Promise<number> | null } = { current: null };
+    let starts = 0;
+    const start = async () => {
+      starts += 1;
+      return starts;
+    };
+    await singleFlight(holder, start);
+    await singleFlight(holder, start);
+    expect(starts).toBe(2);
   });
 });
 

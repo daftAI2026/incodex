@@ -294,14 +294,10 @@ function applyChromeWindowTile(win) {
   }
 }
 
-let launchPromise = null;
+const launchHolder = { current: null };
 
 function launchIncognito() {
-  if (launchPromise) return launchPromise;
-  launchPromise = launchIncognitoOnce().finally(() => {
-    launchPromise = null;
-  });
-  return launchPromise;
+  return instance.singleFlight(launchHolder, launchIncognitoOnce);
 }
 
 async function launchIncognitoOnce() {
