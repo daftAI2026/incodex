@@ -13,11 +13,8 @@ function originalMain() {
 }
 
 function loadMain() {
-  const instance = require("./incodex-instance.cjs");
-  const userRoot = path.join(require("node:os").homedir(), ".incodex");
-  const override = path.join(instance.targetStateDir(userRoot, process.execPath), MAIN_NAME);
-  const bundled = path.join(__dirname, MAIN_NAME);
-  const file = fs.existsSync(override) ? override : bundled;
+  const { resolveRuntimeFile } = require("./incodex-runtime-load.cjs");
+  const file = resolveRuntimeFile(MAIN_NAME, __dirname);
   if (!fs.existsSync(file)) throw new Error("[incodex] missing incodex-main.cjs");
   require(file);
 }

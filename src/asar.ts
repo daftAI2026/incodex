@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LOADER_NAME, INJECT_NAME, MAIN_NAME, PRELOAD_NAME, SAFE_HOME_NAME, IPC_GUARD_NAME, INSTANCE_NAME, MARKER_KEY } from "./paths";
+import { LOADER_NAME, INJECT_NAME, MAIN_NAME, PRELOAD_NAME, SAFE_HOME_NAME, IPC_GUARD_NAME, INSTANCE_NAME, RUNTIME_LOAD_NAME, MARKER_KEY } from "./paths";
 
 type AsarApi = typeof asar & {
   getRawHeader: (p: string) => { header: unknown; headerString: string };
@@ -58,6 +58,7 @@ export async function patchAsar(options: {
   safeHomeSource: string;
   ipcGuardSource: string;
   instanceSource: string;
+  runtimeLoadSource: string;
   installId?: string;
 }): Promise<{ hash: string; originalMain: string }> {
   const { main: originalMain, alreadyPatched } = readPackageMain(options.asarPath);
@@ -89,6 +90,7 @@ export async function patchAsar(options: {
     writeFileSync(join(extractDir, SAFE_HOME_NAME), options.safeHomeSource);
     writeFileSync(join(extractDir, IPC_GUARD_NAME), options.ipcGuardSource);
     writeFileSync(join(extractDir, INSTANCE_NAME), options.instanceSource);
+    writeFileSync(join(extractDir, RUNTIME_LOAD_NAME), options.runtimeLoadSource);
 
     await asar.createPackageWithOptions(extractDir, outAsar, {
       globOptions: { dot: true },
@@ -134,6 +136,7 @@ export async function restoreAsarMain(asarPath: string): Promise<void> {
     rmSync(join(extractDir, SAFE_HOME_NAME), { force: true });
     rmSync(join(extractDir, IPC_GUARD_NAME), { force: true });
     rmSync(join(extractDir, INSTANCE_NAME), { force: true });
+    rmSync(join(extractDir, RUNTIME_LOAD_NAME), { force: true });
     await asar.createPackageWithOptions(extractDir, outAsar, {
       globOptions: { dot: true },
       ...unpack,

@@ -22,6 +22,7 @@ const preloadOut = join(outDir, "incodex-preload.cjs");
 const safeHomeOut = join(outDir, "incodex-safe-home.cjs");
 const ipcGuardOut = join(outDir, "incodex-ipc-guard.cjs");
 const instanceOut = join(outDir, "incodex-instance.cjs");
+const runtimeLoadOut = join(outDir, "incodex-runtime-load.cjs");
 
 const inject = Bun.spawnSync({
   cmd: ["bun", "build", injectTmp, "--outfile", injectOut, "--target", "browser", "--minify"],
@@ -37,17 +38,7 @@ writeFileSync(preloadOut, readFileSync(join(root, "src/runtime/incodex-preload.c
 writeFileSync(safeHomeOut, readFileSync(join(root, "src/runtime/incodex-safe-home.cjs")));
 writeFileSync(ipcGuardOut, readFileSync(join(root, "src/runtime/incodex-ipc-guard.cjs")));
 writeFileSync(instanceOut, readFileSync(join(root, "src/runtime/incodex-instance.cjs")));
-
-const hot = join(process.env.HOME ?? "", ".incodex");
-if (hot) {
-  mkdirSync(hot, { recursive: true });
-  writeFileSync(join(hot, "incodex-inject.js"), readFileSync(injectOut));
-  writeFileSync(join(hot, "incodex-main.cjs"), readFileSync(mainOut));
-  writeFileSync(join(hot, "incodex-preload.cjs"), readFileSync(preloadOut));
-  writeFileSync(join(hot, "incodex-safe-home.cjs"), readFileSync(safeHomeOut));
-  writeFileSync(join(hot, "incodex-ipc-guard.cjs"), readFileSync(ipcGuardOut));
-  writeFileSync(join(hot, "incodex-instance.cjs"), readFileSync(instanceOut));
-}
+writeFileSync(runtimeLoadOut, readFileSync(join(root, "src/runtime/incodex-runtime-load.cjs")));
 
 console.log("wrote", injectOut);
 console.log("wrote", loaderOut);
@@ -56,3 +47,4 @@ console.log("wrote", preloadOut);
 console.log("wrote", safeHomeOut);
 console.log("wrote", ipcGuardOut);
 console.log("wrote", instanceOut);
+console.log("wrote", runtimeLoadOut);
