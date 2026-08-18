@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,7 +12,7 @@ const injectSrc = readFileSync(join(root, "src/runtime/inject.ts"), "utf8").repl
   svg.replace(/`/g, "\\`").replace(/\$\{/g, "\\${"),
 );
 writeFileSync(join(outDir, "incognito-copy.ts"), readFileSync(join(root, "src/runtime/incognito-copy.ts")));
-const injectTmp = join(outDir, "_inject.src.ts");
+const injectTmp = join(root, "src/runtime/_inject.src.ts");
 writeFileSync(injectTmp, injectSrc);
 
 const injectOut = join(outDir, "incodex-inject.js");
@@ -31,7 +31,19 @@ const inject = Bun.spawnSync({
   stdout: "inherit",
   stderr: "inherit",
 });
-if (inject.exitCode !== 0) process.exit(inject.exitCode ?? 1);
+if (inject.exitCode !== 0) {
+  try {
+    unlinkSync(injectTmp);
+  } catch {
+    /* ignore */
+  }
+  process.exit(inject.exitCode ?? 1);
+}
+try {
+  unlinkSync(injectTmp);
+} catch {
+  /* ignore */
+}
 
 writeFileSync(loaderOut, readFileSync(join(root, "src/runtime/incodex-loader.cjs")));
 writeFileSync(mainOut, readFileSync(join(root, "src/runtime/incodex-main.cjs")));
