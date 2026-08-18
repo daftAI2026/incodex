@@ -182,6 +182,41 @@ export function publishExternalRuntime(options: {
   return current;
 }
 
+export type ExternalRuntimeReport = {
+  present: boolean;
+  ok: boolean;
+  version: string | null;
+  release: string | null;
+  error: string | null;
+};
+
+export function inspectExternalRuntime(userRoot: string): ExternalRuntimeReport {
+  const currentPath = join(runtimeRoot(userRoot), RUNTIME_CURRENT_NAME);
+  if (!existsSync(currentPath)) {
+    return { present: false, ok: false, version: null, release: null, error: "missing current.json" };
+  }
+  try {
+    const { current } = verifyExternalRuntime(userRoot);
+    return { present: true, ok: true, version: current.version, release: current.release, error: null };
+  } catch (error) {
+    return {
+      present: true,
+      ok: false,
+      version: null,
+      release: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+export function publishExternalRuntimeFromDist(userRoot: string, distDir: string, version: string): ExternalCurrent {
+  return publishExternalRuntime({
+    userRoot,
+    version,
+    files: loadDistRuntimeFiles(distDir),
+  });
+}
+
 export function loadDistRuntimeFiles(distDir: string): Record<string, string> {
   const files: Record<string, string> = {};
   for (const name of EXTERNAL_RUNTIME_FILES) {

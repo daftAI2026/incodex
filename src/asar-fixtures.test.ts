@@ -4,7 +4,7 @@ import { createPackageWithOptions, extractFile, listPackage, uncache } from "@el
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { collectUnpackOptions, headerHash, patchAsar, readPackageMain } from "./asar";
+import { asarHasOnlyLoader, collectUnpackOptions, headerHash, patchAsar, readPackageMain } from "./asar";
 import { LOADER_NAME, MARKER_KEY } from "./paths";
 
 const runtime = {
@@ -152,6 +152,7 @@ describe("ASAR fixtures", () => {
     expect(listed).toContain(`/${LOADER_NAME}`);
     expect(listed).not.toContain("/incodex-main.cjs");
     expect(listed).not.toContain("/incodex-inject.js");
+    expect(asarHasOnlyLoader(archive)).toBe(true);
   });
 
   test("a nonsense file offset is refused", () => {

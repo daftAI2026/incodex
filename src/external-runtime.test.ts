@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   EXTERNAL_RUNTIME_FILES,
+  inspectExternalRuntime,
   publishExternalRuntime,
   resolveExternalMain,
   verifyExternalRuntime,
@@ -63,6 +64,13 @@ describe("external runtime", () => {
     mkdirSync(dest, { recursive: true });
     writeFileSync(join(dest, "incodex-main.cjs"), "hot\n");
     expect(resolveExternalMain({ HOME: home, INCODEX_DEV_HOT: "1" }, exec)).toBe(join(dest, "incodex-main.cjs"));
+  });
+
+  test("inspect reports missing versus verified runtimes", () => {
+    const userRoot = mkdtempSync(join(tmpdir(), "incodex-rt-"));
+    expect(inspectExternalRuntime(userRoot)).toMatchObject({ present: false, ok: false });
+    publishExternalRuntime({ userRoot, version: "0.2.0", files: artifacts() });
+    expect(inspectExternalRuntime(userRoot)).toMatchObject({ present: true, ok: true, version: "0.2.0" });
   });
 
   test("replacing a version uses rename and leaves a valid current.json", () => {
