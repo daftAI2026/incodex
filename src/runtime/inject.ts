@@ -41,7 +41,7 @@ function isIncognitoWindow(): boolean {
 }
 
 function labelFor(on: boolean): string {
-  return on ? "退出无痕" : "无痕";
+  return on ? "退出无痕窗口" : "打开无痕窗口";
 }
 
 function apply(on: boolean): void {
@@ -142,7 +142,6 @@ function ensureStyle(): void {
       box-sizing: border-box;
     }
     [${TIP_ATTR}][data-open="true"] { display: block; }
-    [data-incodex-hide-official] { display: none !important; }
   `;
 }
 
@@ -243,26 +242,10 @@ function hideTooltip(): void {
 }
 
 const BANNER_DISMISS_KEY = "incodex-banner-dismissed";
-const BANNER_TITLE = "干净窗口";
+const BANNER_HOST_ATTR = "data-incodex-banner-host";
+const BANNER_TITLE = "无痕窗口";
 const BANNER_BODY = "登录和设置与主窗口相同，不会带入旧对话。关掉后，这次的聊天会从临时目录清掉。";
-const OFFICIAL_BANNER_MARKERS = [
-  "启用快速模式",
-  "Enable Fast mode",
-  "立即启用",
-  "Enable now",
-  "试试 ChatGPT 语音",
-  "使用额度已用完",
-  "Try ChatGPT voice",
-];
-const PRIMARY_CTA_LABELS = new Set([
-  "立即启用",
-  "Enable now",
-  "Try now",
-  "立即试用",
-  "开始语音",
-  "增加额度",
-]);
-const LEAKY_BANNER_MARKERS = ["启用快速模式", "Enable Fast mode", "上周在", "last week"];
+const CLOSE_SVG = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" class="icon-xs" aria-hidden="true"><path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
 
 function bannerDismissed(): boolean {
   try {
@@ -278,75 +261,126 @@ function dismissBanner(): void {
   } catch {
     /* ignore */
   }
+  document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`)?.closest(`[${BANNER_HOST_ATTR}]`)?.remove();
   document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`)?.remove();
 }
 
-function findOfficialBanner(): HTMLElement | null {
+function classNameOf(el: Element): string {
+  const value = el.getAttribute("class") || "";
+  return typeof value === "string" ? value : "";
+}
+
+function findOfficialBannerSlot(): HTMLElement | null {
   return (
-    [...document.querySelectorAll<HTMLElement>("aside")].find((el) => {
-      if (el.hasAttribute(LANDING_ATTR)) return false;
-      const cls = el.className || "";
-      if (!cls.includes("rounded-2xl")) return false;
-      const text = el.textContent || "";
-      return OFFICIAL_BANNER_MARKERS.some((marker) => text.includes(marker));
+    [...document.querySelectorAll<HTMLElement>("div")].find((el) => {
+      if (el.hasAttribute(BANNER_HOST_ATTR)) return false;
+      return classNameOf(el).split(/\s+/).includes("home-banners");
     }) ?? null
   );
 }
 
-function patchOfficialBanner(card: HTMLElement): void {
-  const title = card.querySelector<HTMLElement>(".text-base.font-medium, h3");
-  if (title) title.textContent = BANNER_TITLE;
-  const description = card.querySelector<HTMLElement>(
-    ".text-sm.leading-tight, .text-pretty.text-secondary",
-  );
-  if (description) description.textContent = BANNER_BODY;
-  for (const btn of card.querySelectorAll("button")) {
-    const label = (btn.textContent || "").replace(/\s+/g, " ").trim();
-    if (PRIMARY_CTA_LABELS.has(label)) btn.remove();
-  }
+function findLandingMount(): { parent: HTMLElement; before: Node | null } | null {
+  const slot = findOfficialBannerSlot();
+  if (slot) return { parent: slot, before: slot.firstChild };
+  return null;
 }
 
-function adoptOfficialBanner(src: HTMLElement): void {
-  let card = document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`);
-  if (!card) {
-    card = src.cloneNode(true) as HTMLElement;
-    card.setAttribute(LANDING_ATTR, "true");
-    src.parentElement?.insertBefore(card, src);
-    for (const btn of card.querySelectorAll("button")) {
-      const aria = (btn.getAttribute("aria-label") || "").toLowerCase();
-      const isDismiss = /关闭|dismiss|close/.test(aria) || (btn.textContent || "").trim() === "";
-      if (!isDismiss) continue;
-      btn.addEventListener(
-        "click",
-        (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          dismissBanner();
-        },
-        true,
-      );
-    }
+function buildLanding(): HTMLElement {
+  const host = document.createElement("div");
+  host.setAttribute(BANNER_HOST_ATTR, "true");
+  host.className = "home-banners flex w-full min-w-0 flex-col gap-2 pt-2";
+
+  const card = document.createElement("aside");
+  card.setAttribute(LANDING_ATTR, "true");
+  card.setAttribute("aria-live", "polite");
+  card.className =
+    "relative isolate flex w-full items-center gap-4 overflow-hidden rounded-2xl border border-primary-outline bg-surface py-2 ps-3 pe-2 text-sm text-default shadow-xs lg:mx-auto electron:border-0 electron:ring-[0.5px] electron:ring-border-strong";
+
+  const wash = document.createElement("div");
+  wash.setAttribute("aria-hidden", "true");
+  wash.className = "absolute inset-0 -z-10 bg-primary-soft";
+
+  const row = document.createElement("div");
+  row.className = "flex h-full w-full min-w-0 items-center gap-2";
+
+  const visual = document.createElement("div");
+  visual.className = "flex size-12 shrink-0 items-center justify-center self-center text-secondary";
+  visual.innerHTML = ICON_SVG.trim();
+  const svg = visual.querySelector("svg");
+  if (svg) {
+    svg.setAttribute("class", "icon-sm");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("width", "24");
+    svg.setAttribute("height", "24");
   }
-  patchOfficialBanner(card);
-  const srcText = src.textContent || "";
-  if (LEAKY_BANNER_MARKERS.some((marker) => srcText.includes(marker))) {
-    src.setAttribute("data-incodex-hide-official", "");
-  }
+
+  const copy = document.createElement("div");
+  copy.className = "min-w-0 flex-1";
+  const titleWrap = document.createElement("div");
+  titleWrap.className = "flex flex-wrap items-center gap-2";
+  const title = document.createElement("div");
+  title.className = "min-w-0 text-base font-medium text-default";
+  title.textContent = BANNER_TITLE;
+  titleWrap.append(title);
+  const body = document.createElement("div");
+  body.className = "text-sm leading-tight text-pretty text-secondary";
+  body.textContent = BANNER_BODY;
+  copy.append(titleWrap, body);
+
+  const actions = document.createElement("div");
+  actions.className =
+    "flex items-center gap-2 self-center max-[400px]:w-full max-[400px]:justify-center max-[400px]:self-stretch";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.setAttribute("aria-label", "关闭无痕窗口横幅");
+  close.className =
+    "flex size-8 shrink-0 items-center justify-center rounded-lg border-transparent text-codex-description hover:text-default";
+  close.innerHTML = CLOSE_SVG;
+  close.addEventListener(
+    "click",
+    (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      dismissBanner();
+    },
+    true,
+  );
+  actions.append(close);
+
+  row.append(visual, copy, actions);
+  card.append(wash, row);
+  host.append(card);
+  return host;
 }
 
 function ensureLanding(): void {
   if (!isIncognitoWindow()) {
+    document.querySelector<HTMLElement>(`[${BANNER_HOST_ATTR}]`)?.remove();
     document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`)?.remove();
     return;
   }
-  const official = findOfficialBanner();
   if (bannerDismissed()) {
+    document.querySelector<HTMLElement>(`[${BANNER_HOST_ATTR}]`)?.remove();
     document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`)?.remove();
-    official?.setAttribute("data-incodex-hide-official", "");
     return;
   }
-  if (!official) return;
-  adoptOfficialBanner(official);
+
+  const mount = findLandingMount();
+  if (!mount) return;
+
+  let host = document.querySelector<HTMLElement>(`[${BANNER_HOST_ATTR}]`);
+  if (!host) host = buildLanding();
+
+  const officialSlot = findOfficialBannerSlot();
+  if (officialSlot) {
+    host.className = "";
+    if (officialSlot.firstElementChild !== host) officialSlot.insertBefore(host, officialSlot.firstChild);
+    return;
+  }
+  if (mount.before === host) return;
+  if (host.parentElement === mount.parent && host.nextSibling === mount.before) return;
+  host.className = "home-banners flex w-full min-w-0 flex-col gap-2 pt-2";
+  mount.parent.insertBefore(host, mount.before);
 }
 
 function ensureButton(): void {

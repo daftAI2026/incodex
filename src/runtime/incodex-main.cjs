@@ -90,17 +90,112 @@ function clearPid() {
   }
 }
 
-function incognitoAlreadyRunning() {
+function readIncognitoPid() {
   const file = path.join(INCOGNITO_HOME, PID_NAME);
-  if (!fs.existsSync(file)) return false;
+  if (!fs.existsSync(file)) return 0;
   const pid = Number(fs.readFileSync(file, "utf8").trim());
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  if (pid === process.pid) return true;
+  if (!Number.isInteger(pid) || pid <= 0) return 0;
+  if (pid === process.pid) return pid;
   try {
     process.kill(pid, 0);
-    return true;
+    return pid;
   } catch {
-    return false;
+    return 0;
+  }
+}
+
+function incognitoAlreadyRunning() {
+  const pid = readIncognitoPid();
+  return pid > 0 && pid !== process.pid;
+}
+
+function raisePid(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  if (process.platform !== "darwin") return;
+  spawn(
+    "osascript",
+    [
+      "-e",
+      `tell application "System Events" to set frontmost of (first process whose unix id is ${pid}) to true`,
+    ],
+    { detached: true, stdio: "ignore" },
+  ).unref();
+}
+
+function isAuxiliaryWindow(win) {
+  if (!win || win.isDestroyed()) return true;
+  try {
+    if (typeof win.isAlwaysOnTop === "function" && win.isAlwaysOnTop()) return true;
+    if (typeof win.isFocusable === "function" && !win.isFocusable()) return true;
+    const bounds = win.getBounds();
+    if (bounds.width < 400 || bounds.height < 300) return true;
+  } catch {
+    return true;
+  }
+  return false;
+}
+
+function mainWindows(electron) {
+  return electron.BrowserWindow.getAllWindows().filter((win) => !isAuxiliaryWindow(win));
+}
+
+function hideAuxiliaryWindows(electron) {
+  for (const win of electron.BrowserWindow.getAllWindows()) {
+    if (!isAuxiliaryWindow(win)) continue;
+    try {
+      win.hide();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function raiseOurWindows() {
+  let electron;
+  try {
+    electron = require("electron");
+  } catch {
+    raisePid(process.pid);
+    return;
+  }
+  hideAuxiliaryWindows(electron);
+  try {
+    if (process.platform === "darwin") electron.app.focus({ steal: true });
+  } catch {
+    /* ignore */
+  }
+  for (const win of mainWindows(electron)) {
+    try {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+      if (typeof win.moveTop === "function") win.moveTop();
+    } catch {
+      /* ignore */
+    }
+  }
+  raisePid(process.pid);
+}
+
+function raiseExistingIncognito() {
+  const pid = readIncognitoPid();
+  if (!pid) return false;
+  try {
+    process.kill(pid, "SIGUSR1");
+  } catch {
+    /* process may not listen yet */
+  }
+  raisePid(pid);
+  setTimeout(() => raisePid(pid), 200);
+  setTimeout(() => raisePid(pid), 600);
+  logLaunch("raise-existing", { pid });
+  return true;
+}
+
+function raiseChildWhenReady(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  for (const delay of [150, 400, 800, 1400]) {
+    setTimeout(() => raisePid(pid), delay);
   }
 }
 
@@ -115,9 +210,82 @@ function logLaunch(message, extra) {
   }
 }
 
+// Chrome NewIncognitoWindow -> NewEmptyWindow -> OpenEmptyWindow -> WindowSizer.
+// Mac tile is kWindowTilePixels = 22 in window_sizer_mac.mm; Aura/Linux/Win is 10.
+const CHROME_WINDOW_TILE_PIXELS = process.platform === "darwin" ? 22 : 10;
+const CHROME_MIN_VISIBLE = 30;
+
+function captureSourceBounds() {
+  try {
+    const { BrowserWindow } = require("electron");
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    if (!win || win.isDestroyed()) return "";
+    const b = win.getBounds();
+    return `${b.x},${b.y},${b.width},${b.height}`;
+  } catch {
+    return "";
+  }
+}
+
+function readSourceBounds() {
+  const raw = process.env.INCODEX_SOURCE_BOUNDS;
+  if (!raw) return null;
+  const parts = raw.split(",").map(Number);
+  if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) return null;
+  return { x: parts[0], y: parts[1], width: parts[2], height: parts[3] };
+}
+
+function chromeTileBounds(source, screen) {
+  const bounds = {
+    x: source.x + CHROME_WINDOW_TILE_PIXELS,
+    y: source.y + CHROME_WINDOW_TILE_PIXELS,
+    width: source.width,
+    height: source.height,
+  };
+  const display = screen.getDisplayMatching(bounds);
+  const work = display.workArea;
+  bounds.height = Math.max(CHROME_MIN_VISIBLE, bounds.height);
+  bounds.width = Math.max(CHROME_MIN_VISIBLE, bounds.width);
+  if (bounds.y < work.y) bounds.y = work.y;
+  if (process.platform === "darwin") {
+    bounds.height = Math.min(work.height, bounds.height);
+    if (bounds.x < work.x || bounds.x + bounds.width > work.x + work.width) {
+      bounds.x = work.x;
+    }
+    if (bounds.y < work.y || bounds.y + bounds.height > work.y + work.height) {
+      bounds.y = work.y;
+    }
+  } else {
+    const minX = work.x + CHROME_MIN_VISIBLE - bounds.width;
+    const minY = work.y + CHROME_MIN_VISIBLE - bounds.height;
+    const maxX = work.x + work.width - CHROME_MIN_VISIBLE;
+    const maxY = work.y + work.height - CHROME_MIN_VISIBLE;
+    bounds.x = Math.min(Math.max(bounds.x, minX), maxX);
+    bounds.y = Math.min(Math.max(bounds.y, minY), maxY);
+  }
+  return bounds;
+}
+
+function applyChromeWindowTile(win) {
+  if (!win || win.isDestroyed()) return;
+  const source = readSourceBounds();
+  if (!source) return;
+  let screen;
+  try {
+    screen = require("electron").screen;
+  } catch {
+    return;
+  }
+  try {
+    win.setBounds(chromeTileBounds(source, screen));
+  } catch {
+    /* ignore */
+  }
+}
+
 function launchIncognito() {
   if (incognitoAlreadyRunning()) {
-    logLaunch("already-running");
+    raiseExistingIncognito();
     return { ok: true, reason: "already-running" };
   }
   fs.mkdirSync(INCOGNITO_HOME, { recursive: true });
@@ -126,7 +294,14 @@ function launchIncognito() {
   copySettings();
   const bin = process.execPath;
   const args = [`--user-data-dir=${INCOGNITO_CHROMIUM}`];
-  logLaunch("launch", { bin, home: INCOGNITO_HOME, userData: INCOGNITO_CHROMIUM });
+  const sourceBounds = captureSourceBounds();
+  logLaunch("launch", {
+    bin,
+    home: INCOGNITO_HOME,
+    userData: INCOGNITO_CHROMIUM,
+    sourceBounds,
+    tile: CHROME_WINDOW_TILE_PIXELS,
+  });
   const child = spawn(bin, args, {
     detached: true,
     stdio: "ignore",
@@ -135,8 +310,10 @@ function launchIncognito() {
       CODEX_HOME: INCOGNITO_HOME,
       INCODEX_INCOGNITO: "1",
       CODEX_ELECTRON_USER_DATA_PATH: INCOGNITO_CHROMIUM,
+      INCODEX_SOURCE_BOUNDS: sourceBounds,
     },
   });
+  raiseChildWhenReady(child.pid);
   child.unref();
   return { ok: true };
 }
@@ -178,7 +355,7 @@ function hookPreload(session) {
 }
 
 function hookWindow(win, source) {
-  if (!win?.webContents) return;
+  if (!win?.webContents || isAuxiliaryWindow(win)) return;
   hookPreload(win.webContents.session);
   const run = () => {
     if (!source || win.webContents.isDestroyed()) return;
@@ -221,9 +398,31 @@ function attachElectron() {
   });
 
   electron.app.on("browser-window-created", (_event, win) => {
+    if (isAuxiliaryWindow(win)) {
+      if (isIncognito()) {
+        try {
+          win.hide();
+        } catch {
+          /* ignore */
+        }
+      }
+      return;
+    }
     hookWindow(win, source);
     if (!isIncognito()) return;
+    applyChromeWindowTile(win);
+    const bringForward = () => {
+      applyChromeWindowTile(win);
+      raiseOurWindows();
+    };
+    win.once("ready-to-show", bringForward);
+    win.once("show", () => {
+      bringForward();
+      setTimeout(bringForward, 50);
+      setTimeout(bringForward, 300);
+    });
     win.on("closed", () => {
+      if (mainWindows(electron).some((open) => open !== win && !open.isDestroyed())) return;
       burnIncognitoHome();
       clearPid();
       electron.app.exit(0);
@@ -231,6 +430,7 @@ function attachElectron() {
   });
   if (isIncognito()) {
     writePid();
+    process.on("SIGUSR1", () => raiseOurWindows());
     electron.app.on("window-all-closed", () => {
       burnIncognitoHome();
       clearPid();
@@ -245,6 +445,7 @@ function attachElectron() {
   const ready = () => {
     hookPreload(electron.session.defaultSession);
     for (const win of electron.BrowserWindow.getAllWindows()) hookWindow(win, source);
+    if (isIncognito()) raiseOurWindows();
   };
   if (electron.app.isReady()) ready();
   else void electron.app.whenReady().then(ready);
