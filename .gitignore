@@ -7,10 +7,4 @@ node_modules/
 dist/_inject.src.ts
 dist/incognito-copy.ts
 .incodex-backup/
-# APFS is case-insensitive, so "Docs/" would also hide docs/.
-# Keep local review notes out of git; ship the Appshot write-up.
-docs/incodex 深度审查.md
-docs/incodex 深度审查-待办.md
-docs/lessons.md
-docs/incognito-window-plan.md
-docs/archive/
+docs
