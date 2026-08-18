@@ -98,19 +98,7 @@ export async function patchAsar(options: {
       globOptions: { dot: true },
       ...unpack,
     });
-
-    const staging = `${options.asarPath}.incodex-new`;
-    cpSync(outAsar, staging);
-    try {
-      renameSync(staging, options.asarPath);
-    } catch (error) {
-      try {
-        unlinkSync(staging);
-      } catch {
-        /* ignore */
-      }
-      throw error;
-    }
+    commitAsarAndUnpacked(outAsar, options.asarPath);
     return { hash: headerHash(options.asarPath), originalMain: keepMain };
   } finally {
     rmSync(work, { recursive: true, force: true });
@@ -144,25 +132,66 @@ export async function restoreAsarMain(asarPath: string): Promise<void> {
       globOptions: { dot: true },
       ...unpack,
     });
-    const staging = `${asarPath}.incodex-new`;
-    cpSync(outAsar, staging);
-    renameSync(staging, asarPath);
+    commitAsarAndUnpacked(outAsar, asarPath);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
 }
 
-function collectUnpackOptions(asarPath: string): { unpack?: string; unpackDir?: string } {
+export function escapeGlob(value: string): string {
+  return value.replace(/[\\*?[\]{}()!]/g, "\\$&");
+}
+
+export function exactUnpackPattern(rel: string): string {
+  return stripSlash(rel)
+    .split("/")
+    .map((part) => escapeGlob(part))
+    .join("/");
+}
+
+export function collectUnpackOptions(asarPath: string): { unpack?: string; unpackDir?: string } {
   const sibling = `${asarPath}.unpacked`;
   if (!existsSync(sibling)) return {};
   const raw = asarApi.getRawHeader(asarPath);
   const covers = unpackCovers((raw.header as { files?: Record<string, unknown> }) ?? {}, "");
-  const dirs = covers.filter((c) => c.type === "dir").map((c) => stripSlash(c.path));
-  const files = covers.filter((c) => c.type === "file").map((c) => `**/${stripSlash(c.path)}`);
+  const dirs = covers.filter((c) => c.type === "dir").map((c) => exactUnpackPattern(c.path));
+  // @electron/asar matches unpack globs against the absolute filename, so a
+  // relative-only pattern never hits. Prefix ** / after escaping so [ * ? ]
+  // stay literal and cannot swallow neighboring files.
+  const files = covers.filter((c) => c.type === "file").map((c) => `**/${exactUnpackPattern(c.path)}`);
   return {
     ...(files.length > 0 ? { unpack: brace(files) } : {}),
     ...(dirs.length > 0 ? { unpackDir: brace(dirs) } : {}),
   };
+}
+
+function commitAsarAndUnpacked(outAsar: string, destAsar: string): void {
+  const outUnpacked = `${outAsar}.unpacked`;
+  const destUnpacked = `${destAsar}.unpacked`;
+  const stagedAsar = `${destAsar}.incodex-new`;
+  const stagedUnpack = `${destUnpacked}.incodex-new`;
+  cpSync(outAsar, stagedAsar);
+  if (existsSync(outUnpacked)) {
+    rmSync(stagedUnpack, { recursive: true, force: true });
+    cpSync(outUnpacked, stagedUnpack, { recursive: true });
+  }
+  try {
+    renameSync(stagedAsar, destAsar);
+  } catch (error) {
+    try {
+      unlinkSync(stagedAsar);
+    } catch {
+      /* ignore */
+    }
+    rmSync(stagedUnpack, { recursive: true, force: true });
+    throw error;
+  }
+  if (existsSync(stagedUnpack)) {
+    rmSync(destUnpacked, { recursive: true, force: true });
+    renameSync(stagedUnpack, destUnpacked);
+    return;
+  }
+  if (existsSync(destUnpacked)) rmSync(destUnpacked, { recursive: true, force: true });
 }
 
 function unpackCovers(
