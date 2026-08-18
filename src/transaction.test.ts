@@ -42,6 +42,26 @@ describe("install journal", () => {
     expect(recoverAction(journal({ phase: "COMMITTED" }))).toBe("done");
   });
 
+  test("every unfinished phase has a recovery action", () => {
+    const base = {
+      schemaVersion: 1 as const,
+      installId: "x",
+      targetRealPath: "/tmp/app",
+      stagedApp: "/tmp/staged",
+      originalSnapshot: "/tmp/orig",
+      updatedAt: "now",
+    };
+    expect(recoverAction({ ...base, phase: "DISCOVERED" })).toBe("rollback");
+    expect(recoverAction({ ...base, phase: "BACKUP_COMMITTED" })).toBe("rollback");
+    expect(recoverAction({ ...base, phase: "STAGED" })).toBe("rollback");
+    expect(recoverAction({ ...base, phase: "PATCHED" })).toBe("rollback");
+    expect(recoverAction({ ...base, phase: "SIGNED" })).toBe("rollback");
+    expect(recoverAction({ ...base, phase: "VERIFIED" })).toBe("continue");
+    expect(recoverAction({ ...base, phase: "SWAPPED" })).toBe("continue");
+    expect(recoverAction({ ...base, phase: "TARGET_VERIFIED" })).toBe("continue");
+    expect(recoverAction({ ...base, phase: "COMMITTED" })).toBe("done");
+  });
+
   test("journal advances atomically and can be reloaded", () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-tx-"));
     const next = advanceJournal(journal(), "BACKUP_COMMITTED", root);

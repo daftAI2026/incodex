@@ -1,4 +1,4 @@
-import { createPackageWithOptions, extractAll, extractFile, getRawHeader } from "@electron/asar";
+import { createPackage, createPackageWithOptions, extractAll, extractFile, getRawHeader, uncache } from "@electron/asar";
 import { createHash } from "node:crypto";
 import {
   cpSync,
@@ -61,7 +61,8 @@ export async function patchAsar(options: {
 
   const work = mkdtempSync(join(tmpdir(), "incodex-asar-"));
   const extractDir = join(work, "src");
-  const outAsar = join(work, "app.asar");
+  const outAsar = join(work, "out", "app.asar");
+  ensureDir(join(work, "out"));
   const unpack = collectUnpackOptions(options.asarPath);
 
   try {
@@ -88,10 +89,7 @@ export async function patchAsar(options: {
     writeFileSync(join(extractDir, RUNTIME_LOAD_NAME), options.runtimeLoadSource);
     writeFileSync(join(extractDir, WINDOW_KIND_NAME), options.windowKindSource);
 
-    await createPackageWithOptions(extractDir, outAsar, {
-      globOptions: { dot: true },
-      ...unpack,
-    });
+    await writeAsar(extractDir, outAsar, unpack);
     commitAsarAndUnpacked(outAsar, options.asarPath);
     return { hash: headerHash(options.asarPath), originalMain: keepMain };
   } finally {
@@ -104,7 +102,8 @@ export async function restoreAsarMain(asarPath: string): Promise<void> {
   if (!alreadyPatched) return;
   const work = mkdtempSync(join(tmpdir(), "incodex-asar-"));
   const extractDir = join(work, "src");
-  const outAsar = join(work, "app.asar");
+  const outAsar = join(work, "out", "app.asar");
+  ensureDir(join(work, "out"));
   const unpack = collectUnpackOptions(asarPath);
   try {
     extractAll(asarPath, extractDir);
@@ -122,10 +121,7 @@ export async function restoreAsarMain(asarPath: string): Promise<void> {
     rmSync(join(extractDir, INSTANCE_NAME), { force: true });
     rmSync(join(extractDir, RUNTIME_LOAD_NAME), { force: true });
     rmSync(join(extractDir, WINDOW_KIND_NAME), { force: true });
-    await createPackageWithOptions(extractDir, outAsar, {
-      globOptions: { dot: true },
-      ...unpack,
-    });
+    await writeAsar(extractDir, outAsar, unpack);
     commitAsarAndUnpacked(outAsar, asarPath);
   } finally {
     rmSync(work, { recursive: true, force: true });
@@ -159,6 +155,17 @@ export function collectUnpackOptions(asarPath: string): { unpack?: string; unpac
   };
 }
 
+async function writeAsar(extractDir: string, outAsar: string, unpack: { unpack?: string; unpackDir?: string }): Promise<void> {
+  if (!unpack.unpack && !unpack.unpackDir) {
+    await createPackage(extractDir, outAsar);
+    return;
+  }
+  await createPackageWithOptions(extractDir, outAsar, {
+    globOptions: { dot: true },
+    ...unpack,
+  });
+}
+
 function commitAsarAndUnpacked(outAsar: string, destAsar: string): void {
   const outUnpacked = `${outAsar}.unpacked`;
   const destUnpacked = `${destAsar}.unpacked`;
@@ -183,9 +190,11 @@ function commitAsarAndUnpacked(outAsar: string, destAsar: string): void {
   if (existsSync(stagedUnpack)) {
     rmSync(destUnpacked, { recursive: true, force: true });
     renameSync(stagedUnpack, destUnpacked);
-    return;
+  } else if (existsSync(destUnpacked)) {
+    rmSync(destUnpacked, { recursive: true, force: true });
   }
-  if (existsSync(destUnpacked)) rmSync(destUnpacked, { recursive: true, force: true });
+  uncache(outAsar);
+  uncache(destAsar);
 }
 
 function unpackCovers(

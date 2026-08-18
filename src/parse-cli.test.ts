@@ -23,4 +23,22 @@ describe("parseCli", () => {
     expect(() => parseCli(["bun", "cli", "recover"])).toThrow(/transaction/);
     expect(parseCli(["bun", "cli", "recover", "--transaction", "abc"]).transaction).toBe("abc");
   });
+
+  test("install requires an explicit target", () => {
+    expect(() => parseCli(["bun", "cli", "install"])).toThrow(/requires --clone/);
+  });
+
+  test("accepts clone, custom app, json, and doctor", () => {
+    expect(parseCli(["bun", "cli", "install", "--clone"])).toMatchObject({ command: "install", clone: true });
+    expect(parseCli(["bun", "cli", "uninstall", "--app", "/tmp/ChatGPT.app"])).toMatchObject({
+      command: "uninstall",
+      app: "/tmp/ChatGPT.app",
+    });
+    expect(parseCli(["bun", "cli", "status", "--json"])).toMatchObject({ command: "status", json: true });
+    expect(parseCli(["bun", "cli", "doctor"])).toMatchObject({ command: "doctor" });
+  });
+
+  test("unknown commands are rejected", () => {
+    expect(() => parseCli(["bun", "cli", "wipe"])).toThrow(/unknown command/);
+  });
 });
