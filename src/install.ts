@@ -1,11 +1,10 @@
-import { existsSync, cpSync, readFileSync, mkdtempSync, rmSync, renameSync, symlinkSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, renameSync, symlinkSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { tmpdir } from "node:os";
 import { fileSha256, inspectApp } from "./app-identity";
-import { headerHash, patchAsar, ensureDir } from "./asar";
+import { headerHash, ensureDir } from "./asar";
 import { signApp, verifyApp } from "./codesign";
 import {
   manifestFromIdentity,
@@ -13,15 +12,16 @@ import {
   snapshotOriginalApp,
   writeInstallation,
 } from "./installation";
-import { writeAsarIntegrity, writeAsarIntegrityPlist } from "./integrity";
+import { writeAsarIntegrity } from "./integrity";
 import {
   loadLiveInstallRecord,
   resolveOfficialOriginal,
   saveLiveInstallRecord,
   selectOfficialInstallSource,
 } from "./live-source";
-import { ASAR_REL, DEFAULT_APP, LIVE_PREV, PLIST_REL, USER_ROOT } from "./paths";
+import { ASAR_REL, DEFAULT_APP, LIVE_PREV, USER_ROOT } from "./paths";
 import { saveState } from "./state";
+import { advanceJournal, writeJournal, type Journal } from "./transaction";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 export { LIVE_PREV };
@@ -112,6 +112,25 @@ async function patchAppBundle(
   return patched;
 }
 
+function requireVerified(appPath: string, label: string): void {
+  if (!verifyApp(appPath)) {
+    throw new Error(`${label}: codesign --verify failed; refusing to touch the real target`);
+  }
+}
+
+function swapBundle(stagedApp: string, targetApp: string): void {
+  const outgoing = `${targetApp}.incodex-outgoing`;
+  rmSync(outgoing, { recursive: true, force: true });
+  renameSync(targetApp, outgoing);
+  try {
+    renameSync(stagedApp, targetApp);
+  } catch (error) {
+    renameSync(outgoing, targetApp);
+    throw error;
+  }
+  rmSync(outgoing, { recursive: true, force: true });
+}
+
 function swapOfficialWith(stagedApp: string, originalDest: string | null): void {
   const outgoing = join(USER_ROOT, "ChatGPT.app.outgoing");
   rmSync(outgoing, { recursive: true, force: true });
@@ -159,25 +178,44 @@ async function installLive(): Promise<void> {
 
   const installId = randomUUID();
   const originalDest = originalAppPath(DEFAULT_APP, installId);
+  const stagedApp = join(USER_ROOT, "ChatGPT.app.live");
+  let journal: Journal = {
+    schemaVersion: 1,
+    installId,
+    targetRealPath: resolve(DEFAULT_APP),
+    stagedApp,
+    originalSnapshot: originalDest,
+    phase: "DISCOVERED",
+    updatedAt: new Date().toISOString(),
+  };
+  writeJournal(journal);
   if (decision.action === "use-backup") {
     console.log("install source: matching original backup");
     snapshotOriginalApp(sourceApp, originalDest);
   } else {
     console.log("install source: current official app");
   }
+  journal = advanceJournal(journal, "BACKUP_COMMITTED");
 
   const before = headerHash(join(sourceApp, ASAR_REL));
-  const stagedApp = join(USER_ROOT, "ChatGPT.app.live");
   rmSync(stagedApp, { recursive: true, force: true });
   console.log("copying official OpenAI-signed app to a writable staging bundle");
   const copied = spawnSync("ditto", [sourceApp, stagedApp], { encoding: "utf8" });
   if (copied.status !== 0) throw new Error(copied.stderr || "failed to stage official app");
+  journal = advanceJournal(journal, "STAGED");
   const patched = await patchAppBundle(stagedApp, true, installId);
+  journal = advanceJournal(journal, "PATCHED");
+  journal = advanceJournal(journal, "SIGNED");
+  requireVerified(stagedApp, "staged official app");
+  journal = advanceJournal(journal, "VERIFIED");
   const patchedAsar = join(stagedApp, ASAR_REL);
   const patchedAsarFileHash = fileSha256(patchedAsar);
   console.log("replacing /Applications/ChatGPT.app with the patched bundle");
   swapOfficialWith(stagedApp, decision.action === "use-current" ? originalDest : null);
+  journal = advanceJournal(journal, "SWAPPED");
   if (!existsSync(originalDest)) throw new Error("original snapshot missing after install");
+  requireVerified(DEFAULT_APP, "installed official app");
+  journal = advanceJournal(journal, "TARGET_VERIFIED");
   pointLivePrevAt(originalDest);
   const createdAt = new Date().toISOString();
   const manifest = manifestFromIdentity({
@@ -222,6 +260,7 @@ async function installLive(): Promise<void> {
     originalAsarFileHash: sourceIdentity.asarFileHash,
     originalPlistFileHash: sourceIdentity.plistFileHash,
   });
+  advanceJournal(journal, "COMMITTED");
   console.log("official app patched. reopen /Applications/ChatGPT.app");
   console.log("to restore official Codex: bun src/cli.ts uninstall --live");
 }
@@ -234,47 +273,42 @@ export async function install(appPath: string): Promise<void> {
     return;
   }
   const asarPath = join(appPath, ASAR_REL);
-  const src = runtimeSources();
   const before = headerHash(asarPath);
   const identity = inspectApp(appPath).identity;
   if (!identity) throw new Error(`could not read app identity: ${appPath}`);
   const installId = randomUUID();
   const originalDest = originalAppPath(appPath, installId);
-  snapshotOriginalApp(appPath, originalDest);
-  const work = mkdtempSync(join(tmpdir(), "incodex-install-"));
+  const stagedApp = join(USER_ROOT, "scratch", `ChatGPT.app.staged-${installId}`);
+  let journal: Journal = {
+    schemaVersion: 1,
+    installId,
+    targetRealPath: resolve(appPath),
+    stagedApp,
+    originalSnapshot: originalDest,
+    phase: "DISCOVERED",
+    updatedAt: new Date().toISOString(),
+  };
+  writeJournal(journal);
   let committed = false;
   try {
-    const stagedAsar = join(work, "app.asar");
-    const stagedPlist = join(work, "Info.plist");
-    cpSync(asarPath, stagedAsar);
-    cpSync(join(appPath, PLIST_REL), stagedPlist);
-    const unpackedSrc = `${asarPath}.unpacked`;
-    if (existsSync(unpackedSrc)) {
-      spawnSync("ditto", [unpackedSrc, `${stagedAsar}.unpacked`]);
-    }
-    const patched = await patchAsar({
-      asarPath: stagedAsar,
-      loaderSource: src.loader,
-      injectSource: src.inject,
-      mainSource: src.main,
-      preloadSource: src.preload,
-      safeHomeSource: src.safeHome,
-      ipcGuardSource: src.ipcGuard,
-      installId,
-    });
-    writeAsarIntegrityPlist(stagedPlist, patched.hash);
-    cpSync(stagedAsar, asarPath);
-    if (existsSync(`${stagedAsar}.unpacked`)) {
-      rmSync(unpackedSrc, { recursive: true, force: true });
-      spawnSync("ditto", [`${stagedAsar}.unpacked`, unpackedSrc]);
-    }
-    cpSync(stagedPlist, join(appPath, PLIST_REL));
-    signApp(appPath);
-    if (!verifyApp(appPath)) {
-      console.warn("codesign --verify failed; the copy may still open after Gatekeeper bypass");
-    }
+    snapshotOriginalApp(appPath, originalDest);
+    journal = advanceJournal(journal, "BACKUP_COMMITTED");
+    rmSync(stagedApp, { recursive: true, force: true });
+    const copied = spawnSync("ditto", [appPath, stagedApp], { encoding: "utf8" });
+    if (copied.status !== 0) throw new Error(copied.stderr || "failed to stage app bundle");
+    journal = advanceJournal(journal, "STAGED");
+    const patched = await patchAppBundle(stagedApp, false, installId);
+    journal = advanceJournal(journal, "PATCHED");
+    signApp(stagedApp);
+    journal = advanceJournal(journal, "SIGNED");
+    requireVerified(stagedApp, "staged app");
+    journal = advanceJournal(journal, "VERIFIED");
+    swapBundle(stagedApp, appPath);
+    journal = advanceJournal(journal, "SWAPPED");
+    requireVerified(appPath, "installed app");
+    journal = advanceJournal(journal, "TARGET_VERIFIED");
     const createdAt = new Date().toISOString();
-    const patchedAsarFileHash = fileSha256(asarPath);
+    const patchedAsarFileHash = fileSha256(join(appPath, ASAR_REL));
     writeInstallation({
       appPath,
       manifest: manifestFromIdentity({
@@ -295,7 +329,6 @@ export async function install(appPath: string): Promise<void> {
         patchedAsarFileHash,
       },
     });
-    committed = true;
     saveState({
       appPath,
       originalMain: patched.originalMain,
@@ -310,10 +343,13 @@ export async function install(appPath: string): Promise<void> {
       originalAsarFileHash: identity.asarFileHash,
       originalPlistFileHash: identity.plistFileHash,
     });
+    journal = advanceJournal(journal, "COMMITTED");
+    committed = true;
   } catch (error) {
-    if (!committed) rmSync(dirname(dirname(originalDest)), { recursive: true, force: true });
+    if (!committed) {
+      rmSync(stagedApp, { recursive: true, force: true });
+      rmSync(dirname(dirname(originalDest)), { recursive: true, force: true });
+    }
     throw error;
-  } finally {
-    rmSync(work, { recursive: true, force: true });
   }
 }
