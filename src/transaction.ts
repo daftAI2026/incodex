@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { ensureDir } from "./asar";
 import { USER_ROOT } from "./paths";
@@ -82,6 +82,18 @@ export function loadJournal(installId: string, root = USER_ROOT): Journal | null
   } catch {
     return null;
   }
+}
+
+export function listJournals(root = USER_ROOT): Journal[] {
+  const dir = join(root, "transactions");
+  if (!existsSync(dir)) return [];
+  const out: Journal[] = [];
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith(".json") || name.endsWith(".tmp")) continue;
+    const journal = loadJournal(name.replace(/\.json$/, ""), root);
+    if (journal) out.push(journal);
+  }
+  return out;
 }
 
 export function advanceJournal(journal: Journal, phase: Phase, root = USER_ROOT): Journal {

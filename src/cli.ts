@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 import { cloneOfficialApp, install, resolveTarget } from "./install";
 import { inspectApp } from "./app-identity";
-import { loadCurrentInstallation, targetId } from "./installation";
 import { parseCli } from "./parse-cli";
 import { DEFAULT_APP } from "./paths";
+import { diagnose, printDiagnosis } from "./doctor";
 import { printStatus } from "./status";
 import { loadJournal, recoverAction } from "./transaction";
 import { uninstall } from "./uninstall";
@@ -60,27 +60,14 @@ const appPath = resolveTarget({
     uninstall(target);
     console.log("done");
   } else if (parsed.command === "status") {
+    const target = parsed.app ?? DEFAULT_APP;
     if (parsed.json) {
-      const info = inspectApp(parsed.app ?? DEFAULT_APP);
-      const stored = loadCurrentInstallation(parsed.app ?? DEFAULT_APP);
-      console.log(JSON.stringify({ inspect: info, installation: stored?.manifest ?? null }, null, 2));
+      console.log(JSON.stringify(diagnose(target), null, 2));
     } else {
-      printStatus(parsed.app ?? DEFAULT_APP);
+      printStatus(target);
     }
   } else if (parsed.command === "doctor") {
-    const target = parsed.app ?? DEFAULT_APP;
-    const info = inspectApp(target);
-    const stored = loadCurrentInstallation(target);
-    console.log("target id:", targetId(target));
-    console.log("exists:", info.exists);
-    console.log("patched:", info.patched);
-    console.log("bundle:", info.listing?.bundleIdentifier ?? "unknown");
-    console.log("version:", info.listing?.appVersion ?? "unknown", info.listing?.appBuild ?? "");
-    console.log("arch:", info.listing?.architecture ?? "unknown");
-    console.log("asar file hash:", info.identity?.asarFileHash ?? "unknown");
-    console.log("codesign verify:", verifyApp(target));
-    console.log("stored install:", stored?.manifest.installId ?? "none");
-    console.log("stored original asar:", stored?.manifest.originalAsarFileHash ?? "none");
+    printDiagnosis(diagnose(parsed.app ?? DEFAULT_APP));
   } else if (parsed.command === "recover") {
     const journal = loadJournal(parsed.transaction!);
     if (!journal) throw new Error(`no journal for ${parsed.transaction}`);
