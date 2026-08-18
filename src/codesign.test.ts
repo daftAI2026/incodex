@@ -6,6 +6,7 @@ import {
   CODESIGN_VERIFY_ARGS,
   classifyUnretainable,
   compareSigning,
+  isSubsetOfHostEntitlements,
   normalizeEntitlementKeys,
   diagnoseSpctl,
   orderForInsideOut,
@@ -96,6 +97,17 @@ describe("adhoc entitlement policy", () => {
     );
     expect(after.reasons).toEqual([]);
     expect(normalizeEntitlementKeys(hostXml)).toContain("com.apple.security.cs.allow-jit");
+    const host = `<plist><dict>
+      <key>com.apple.developer.team-identifier</key><string>ABCD</string>
+      <key>com.apple.security.cs.allow-jit</key><true/>
+      <key>com.apple.security.network.client</key><true/>
+    </dict></plist>`;
+    const echoed = `<plist><dict>
+      <key>com.apple.security.cs.allow-jit</key><true/>
+      <key>com.apple.security.network.client</key><true/>
+    </dict></plist>`;
+    expect(isSubsetOfHostEntitlements(echoed, host)).toBe(true);
+    expect(isSubsetOfHostEntitlements(host, echoed)).toBe(false);
   });
 
   test("signing manifest records unretainable keys from the pre-resign dump", () => {

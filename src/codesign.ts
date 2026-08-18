@@ -139,13 +139,20 @@ export function normalizeEntitlementKeys(xml: string | null): string {
   return entitlementKeys(xml).slice().sort().join("\n");
 }
 
-/** codesign --display on nested dylibs often echoes the host app plist. Those are not the library's own entitlements. */
+/** codesign --display on nested dylibs/frameworks often echoes a subset of the host app plist. */
 export function ownEntitlementsXml(target: string, appPath: string, hostXml: string | null): string | null {
   const xml = dumpEntitlements(target);
   if (!xml) return null;
   if (target === appPath) return xml;
-  if (hostXml && normalizeEntitlementKeys(xml) === normalizeEntitlementKeys(hostXml)) return null;
+  if (hostXml && isSubsetOfHostEntitlements(xml, hostXml)) return null;
   return xml;
+}
+
+export function isSubsetOfHostEntitlements(xml: string | null, hostXml: string | null): boolean {
+  const nested = entitlementKeys(xml);
+  if (nested.length === 0) return true;
+  const host = new Set(entitlementKeys(hostXml));
+  return nested.every((key) => host.has(key));
 }
 
 export function inspectComponent(appPath: string, target: string, hostXml: string | null = null): SigningComponent {
@@ -197,7 +204,9 @@ export function compareSigning(
     }
     const entitlementKeysLost = original.entitlementsOwned
       ? entitlementKeys(original.entitlementsXml).filter(
-          (key) => !entitlementKeys(next.entitlementsXml).includes(key),
+          (key) =>
+            !entitlementKeys(next.entitlementsXml).includes(key) &&
+            !(ADHOC_UNRETAINABLE_KEYS as readonly string[]).includes(key),
         )
       : [];
     const requirementsChanged = normalizeReq(original.requirements) !== normalizeReq(next.requirements);
