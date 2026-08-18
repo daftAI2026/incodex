@@ -9,6 +9,7 @@ export const CODESIGN_VERIFY_ARGS = ["--verify", "--deep", "--strict", "--verbos
 const ADHOC_UNRETAINABLE_KEYS = [
   "com.apple.developer.team-identifier",
   "com.apple.application-identifier",
+  "com.apple.developer.aps-environment",
   "com.apple.security.application-groups",
   "keychain-access-groups",
 ] as const;
@@ -73,6 +74,9 @@ export function discoverNestedCode(appPath: string): string[] {
       appPath,
       "(",
       "-name",
+      "*.app",
+      "-o",
+      "-name",
       "*.framework",
       "-o",
       "-name",
@@ -93,13 +97,17 @@ export function discoverNestedCode(appPath: string): string[] {
   const found = (listed.stdout || "")
     .split("\n")
     .map((line) => line.trim())
-    .filter(Boolean);
-  const macos = spawnSync("find", [join(appPath, "Contents/MacOS"), "-type", "f"], { encoding: "utf8" });
-  const binaries = (macos.stdout || "")
+    .filter((item) => item && item !== appPath);
+  const binaries = spawnSync(
+    "find",
+    [appPath, "-type", "f", "(", "-perm", "+111", "-o", "-name", "*.dylib", ")"],
+    { encoding: "utf8" },
+  );
+  const files = (binaries.stdout || "")
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
-  return [...found, ...binaries];
+  return [...new Set([...found, ...files])];
 }
 
 export function displayField(target: string, flag: string): string {
@@ -135,17 +143,44 @@ export function classifyUnretainable(xml: string | null): string[] {
   );
 }
 
+const DISABLE_LIBRARY_VALIDATION = `  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+`;
+
+export function withDisableLibraryValidation(xml: string | null): string | null {
+  const base =
+    xml ??
+    `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+</dict></plist>`;
+  if (base.includes("com.apple.security.cs.disable-library-validation")) return base;
+  return base.replace("</dict>", `${DISABLE_LIBRARY_VALIDATION}</dict>`);
+}
+
+export function stripUnretainableEntitlements(xml: string | null): string | null {
+  if (!xml) return null;
+  let next = xml;
+  for (const key of ADHOC_UNRETAINABLE_KEYS) {
+    next = next.replace(
+      new RegExp(
+        `<key>${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}</key>\\s*(?:<true\\/>|<false\\/>|<string>[^<]*<\\/string>|<array>[\\s\\S]*?<\\/array>|<dict>[\\s\\S]*?<\\/dict>)`,
+        "g",
+      ),
+      "",
+    );
+  }
+  return next.includes("<key>") ? next : null;
+}
+
 export function normalizeEntitlementKeys(xml: string | null): string {
   return entitlementKeys(xml).slice().sort().join("\n");
 }
 
-/** codesign --display on nested dylibs/frameworks often echoes a subset of the host app plist. */
+/** Only the top-level app owns entitlements. Nested dumps usually echo the host plist. */
 export function ownEntitlementsXml(target: string, appPath: string, hostXml: string | null): string | null {
-  const xml = dumpEntitlements(target);
-  if (!xml) return null;
-  if (target === appPath) return xml;
-  if (hostXml && isSubsetOfHostEntitlements(xml, hostXml)) return null;
-  return xml;
+  if (target !== appPath) return null;
+  return dumpEntitlements(target) ?? hostXml;
 }
 
 export function isSubsetOfHostEntitlements(xml: string | null, hostXml: string | null): boolean {
@@ -236,9 +271,10 @@ export function compareSigning(
 export function signOne(target: string, entitlements: string | null, hardened: boolean): void {
   const args = ["--force", "--sign", "-"];
   if (hardened) args.push("--options", "runtime");
-  if (entitlements) {
+  const kept = stripUnretainableEntitlements(entitlements);
+  if (kept) {
     const entitlementsFile = join(mkdtempSync(join(tmpdir(), "incodex-ent-")), "entitlements.plist");
-    writeFileSync(entitlementsFile, entitlements);
+    writeFileSync(entitlementsFile, kept);
     args.push("--entitlements", entitlementsFile);
   }
   args.push(target);
@@ -249,29 +285,40 @@ export function signOne(target: string, entitlements: string | null, hardened: b
 }
 
 export function signApp(appPath: string): SigningManifest {
-  const before = inspectSigning(appPath);
-  const nested = discoverNestedCode(appPath);
-  const order = orderForInsideOut(nested, appPath);
-  for (const target of order) {
-    const original = before.find((item) => item.path === target);
-    signOne(
-      target,
-      original?.entitlementsOwned ? original.entitlementsXml : null,
-      original?.hardenedRuntime ?? hasHardenedRuntime(target),
-    );
+  const beforeXml = dumpEntitlements(appPath);
+  const signed = spawnSync("codesign", ["--force", "--deep", "--sign", "-", appPath], { encoding: "utf8" });
+  if (signed.status !== 0) {
+    throw new Error(signed.stderr || `codesign --deep failed: ${appPath}`);
   }
-  const after = inspectSigning(appPath);
   const verified = verifyApp(appPath);
   if (!verified) {
-    throw new Error("codesign --verify failed after inside-out resign");
+    throw new Error("codesign --verify failed after adhoc resign");
   }
-  return signingManifestFrom({
+  return {
+    schemaVersion: 1,
     appPath,
-    before,
-    after,
     verified,
     spctl: diagnoseSpctl(appPath),
-  });
+    components: [],
+    observations: [
+      {
+        path: appPath,
+        identifier: displayField(appPath, "--verbose").match(/Identifier=(\S+)/)?.[1] || "",
+        hardenedRuntime: hasHardenedRuntime(appPath),
+        entitlementsKept: false,
+        skippedEntitlements: "adhoc --deep resign; team-bound entitlements are not preserved",
+      },
+    ],
+    unretainableEntitlements: classifyUnretainable(beforeXml).length
+      ? [
+          {
+            relativePath: ".",
+            keys: classifyUnretainable(beforeXml),
+            reason: "adhoc identity cannot legally retain team-bound entitlements",
+          },
+        ]
+      : [],
+  };
 }
 
 export function signingManifestFrom(input: {

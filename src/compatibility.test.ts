@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { assertLiveSupported } from "./compatibility/supported-builds";
+import { liveSupportNote } from "./compatibility/supported-builds";
 import { ADAPTER, probeUi } from "./runtime/compatibility/build-26.810.52044";
 import { adapterForBuild } from "./runtime/compatibility/registry";
 import { isSearchLabel } from "./runtime/compatibility/search-labels";
@@ -36,14 +36,20 @@ describe("build adapter 26.810.52044", () => {
 });
 
 describe("live support", () => {
-  test("unknown builds are refused for live install", () => {
-    expect(() =>
-      assertLiveSupported({
+  test("unknown builds warn instead of blocking a confirmed live install", () => {
+    const note = liveSupportNote({
+      bundleIdentifier: "com.openai.codex",
+      appVersion: "99.0.0",
+      appBuild: "1",
+    });
+    expect(note).toMatch(/best-effort/);
+    expect(
+      liveSupportNote({
         bundleIdentifier: "com.openai.codex",
-        appVersion: "99.0.0",
-        appBuild: "1",
+        appVersion: "26.810.52044",
+        appBuild: "6662",
       }),
-    ).toThrow(/refusing --live/);
+    ).toBeNull();
   });
 });
 
