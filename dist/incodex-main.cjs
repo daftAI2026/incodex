@@ -403,11 +403,17 @@ async function launchIncognitoOnce() {
                     safeHome.burnSessionHome(session.root, expected);
                 }
                 catch (error) {
-                    if (attempt < 3) {
-                        setTimeout(() => tryBurn(attempt + 1), 150 * attempt);
+                    if (attempt < 5) {
+                        setTimeout(() => tryBurn(attempt + 1), 250 * attempt);
                         return;
                     }
                     logLaunch("parent-burn-refused", { error: String(error) });
+                    return;
+                }
+                // Thread-writer / plugin cache can recreate the folder after a
+                // successful rm. Keep sweeping for a short window.
+                if (attempt < 5 && fs.existsSync(session.root)) {
+                    setTimeout(() => tryBurn(attempt + 1), 400 * attempt);
                 }
             };
             tryBurn(1);
