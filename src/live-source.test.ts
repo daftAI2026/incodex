@@ -3,6 +3,7 @@ import type { AppIdentity, AppInspection } from "./app-identity";
 import {
   NOT_INCODEX_INSTALL,
   canRestoreOfficial,
+  liveRecordFromManifest,
   officialBackupMatchesInstall,
   parseLiveInstallRecord,
   selectOfficialInstallSource,
@@ -55,6 +56,29 @@ describe("parseLiveInstallRecord", () => {
   test("rejects a record that is only 'looks unpatched' without identity hashes", () => {
     expect(parseLiveInstallRecord({ schemaVersion: 1, installId: "x" })).toBeNull();
     expect(parseLiveInstallRecord(recordFor(originalA))).toEqual(recordFor(originalA));
+  });
+
+  test("installation manifests carry full file hashes, not only ASAR header hashes", () => {
+    const record = liveRecordFromManifest({
+      schemaVersion: 1,
+      installId,
+      targetRealPath: "/Applications/ChatGPT.app",
+      bundleIdentifier: originalA.bundleIdentifier,
+      appVersion: originalA.appVersion,
+      appBuild: originalA.appBuild,
+      architecture: originalA.architecture,
+      originalAsarHeaderHash: "header-only-is-not-enough",
+      originalAsarFileHash: originalA.asarFileHash,
+      originalPlistFileHash: originalA.plistFileHash,
+      patchedAsarHeaderHash: "header-patched",
+      patchedAsarFileHash: "file-patched",
+      originalMain: "index.js",
+      runtimeVersion: "0.1.0",
+      createdAt: "2026-08-18T00:00:00.000Z",
+      transactionState: "committed",
+    });
+    expect(record.original.asarFileHash).toBe("asar-a");
+    expect(record.original.asarFileHash).not.toBe("header-only-is-not-enough");
   });
 });
 

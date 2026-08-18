@@ -57,6 +57,7 @@ bun src/cli.ts status
 - 改包之后没法继续用一份有效的 OpenAI 签名。第一次开无痕窗，系统可能要你输入 **Mac 登录密码**（钥匙串里的 Codex Storage Key）。选 **始终允许**。这不是 ChatGPT 账号密码
 - 官方应用升级后，补丁会被冲掉，需要再跑一次 `install --live`。这次会给**当前这份官方应用**打补丁，不会把旧版本换回去，也不会删掉刚升上来的新版本
 - 如果官方已经升级成新版本，`uninstall --live` 不会用旧备份覆盖它，会提示当前应用已经不是 Incodex 安装态
+- 每次安装的原始包按应用路径隔离，写在 `~/.incodex/installations/` 里。副本、正式应用和自定义 `--app` 不会共用一份备份。卸载前会核对当前包的 install ID、build 和完整 ASAR hash，对不上就拒绝恢复
 - 目前只在 macOS 上试过
 
 ## 许可

@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { ensureDir } from "./asar";
 import {
   identitiesEqual,
@@ -6,7 +7,8 @@ import {
   type AppIdentity,
   type AppInspection,
 } from "./app-identity";
-import { LIVE_RECORD_PATH, USER_ROOT } from "./paths";
+import { loadCurrentInstallation, type InstallManifest } from "./installation";
+import { DEFAULT_APP, LIVE_PREV, LIVE_RECORD_PATH, USER_ROOT } from "./paths";
 
 export const NOT_INCODEX_INSTALL = "当前应用已经不是 Incodex 安装态";
 
@@ -26,12 +28,41 @@ export type SourceDecision =
 export type RestoreDecision = { ok: true } | { ok: false; reason: string };
 
 export function loadLiveInstallRecord(): LiveInstallRecord | null {
+  const stored = loadCurrentInstallation(DEFAULT_APP);
+  if (stored) return liveRecordFromManifest(stored.manifest);
   if (!existsSync(LIVE_RECORD_PATH)) return null;
   try {
     return parseLiveInstallRecord(JSON.parse(readFileSync(LIVE_RECORD_PATH, "utf8")));
   } catch {
     return null;
   }
+}
+
+export function liveRecordFromManifest(manifest: InstallManifest): LiveInstallRecord {
+  return {
+    schemaVersion: 1,
+    installId: manifest.installId,
+    targetRealPath: manifest.targetRealPath,
+    original: {
+      bundleIdentifier: manifest.bundleIdentifier,
+      appVersion: manifest.appVersion,
+      appBuild: manifest.appBuild,
+      architecture: manifest.architecture,
+      asarFileHash: manifest.originalAsarFileHash,
+      plistFileHash: manifest.originalPlistFileHash,
+    },
+    createdAt: manifest.createdAt,
+  };
+}
+
+export function resolveOfficialOriginal(): string | null {
+  const stored = loadCurrentInstallation(DEFAULT_APP);
+  if (stored) {
+    const original = join(stored.dir, "original", "ChatGPT.app");
+    if (existsSync(original)) return original;
+  }
+  if (existsSync(LIVE_PREV)) return LIVE_PREV;
+  return null;
 }
 
 export function parseLiveInstallRecord(raw: unknown): LiveInstallRecord | null {
