@@ -32,5 +32,7 @@ describe("doctor", () => {
     expect(report.leftoverChromium.some((path) => path.endsWith("s-orphan"))).toBe(true);
     expect(report.stalePid).toBe(false);
     expect(report.codesignOk).toBe(false);
+    expect(report.spctl).toBeNull();
+    expect(report.signing).toBeNull();
   });
 });

@@ -1,7 +1,17 @@
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
+
+export const CODESIGN_VERIFY_ARGS = ["--verify", "--deep", "--strict", "--verbose=4"] as const;
+
+const ADHOC_UNRETAINABLE_KEYS = [
+  "com.apple.developer.team-identifier",
+  "com.apple.application-identifier",
+  "com.apple.security.application-groups",
+  "keychain-access-groups",
+] as const;
 
 export type SignObservation = {
   path: string;
@@ -9,6 +19,40 @@ export type SignObservation = {
   hardenedRuntime: boolean;
   entitlementsKept: boolean;
   skippedEntitlements?: string;
+  requirementsChanged?: boolean;
+};
+
+export type SigningComponent = {
+  path: string;
+  relativePath: string;
+  identifier: string;
+  hardenedRuntime: boolean;
+  requirements: string;
+  entitlementsXml: string | null;
+  entitlementsHash: string | null;
+};
+
+export type UnretainableEntitlement = {
+  relativePath: string;
+  keys: string[];
+  reason: string;
+};
+
+export type SpctlDiagnosis = {
+  status: number;
+  output: string;
+  accepted: boolean;
+  usedAsSuccessGate: false;
+};
+
+export type SigningManifest = {
+  schemaVersion: 1;
+  appPath: string;
+  verified: boolean;
+  spctl: SpctlDiagnosis;
+  components: SigningComponent[];
+  observations: SignObservation[];
+  unretainableEntitlements: UnretainableEntitlement[];
 };
 
 export function orderForInsideOut(paths: string[], appPath: string): string[] {
@@ -69,17 +113,104 @@ export function dumpEntitlements(target: string): string | null {
   return xml;
 }
 
+export function dumpRequirements(target: string): string {
+  const result = spawnSync("codesign", ["--display", "--requirements", "-", target], { encoding: "utf8" });
+  return `${result.stdout || ""}${result.stderr || ""}`.trim();
+}
+
 export function hasHardenedRuntime(target: string): boolean {
   const text = displayField(target, "--verbose=2");
   return /flags=.*runtime/.test(text) || /\(runtime\)/.test(text);
 }
 
+export function entitlementKeys(xml: string | null): string[] {
+  if (!xml) return [];
+  return [...xml.matchAll(/<key>([^<]+)<\/key>/g)].map((match) => match[1] ?? "").filter(Boolean);
+}
+
+export function classifyUnretainable(xml: string | null): string[] {
+  return entitlementKeys(xml).filter((key) =>
+    (ADHOC_UNRETAINABLE_KEYS as readonly string[]).includes(key),
+  );
+}
+
+export function inspectComponent(appPath: string, target: string): SigningComponent {
+  const entitlementsXml = dumpEntitlements(target);
+  return {
+    path: target,
+    relativePath: relative(appPath, target) || ".",
+    identifier: displayField(target, "--verbose").match(/Identifier=(\S+)/)?.[1] || "",
+    hardenedRuntime: hasHardenedRuntime(target),
+    requirements: dumpRequirements(target),
+    entitlementsXml,
+    entitlementsHash: entitlementsXml
+      ? createHash("sha256").update(entitlementsXml).digest("hex")
+      : null,
+  };
+}
+
+export function inspectSigning(appPath: string): SigningComponent[] {
+  const nested = discoverNestedCode(appPath);
+  const order = orderForInsideOut(nested, appPath);
+  return order.map((target) => inspectComponent(appPath, target));
+}
+
+export function diagnoseSpctl(appPath: string): SpctlDiagnosis {
+  const result = spawnSync("spctl", ["--assess", "--verbose=4", appPath], { encoding: "utf8" });
+  const output = `${result.stdout || ""}${result.stderr || ""}`.trim();
+  return {
+    status: result.status ?? 1,
+    output,
+    accepted: result.status === 0 && /accepted/i.test(output),
+    usedAsSuccessGate: false,
+  };
+}
+
+export function compareSigning(
+  before: SigningComponent[],
+  after: SigningComponent[],
+): { observations: SignObservation[]; reasons: string[] } {
+  const afterByPath = new Map(after.map((item) => [item.relativePath, item]));
+  const observations: SignObservation[] = [];
+  const reasons: string[] = [];
+  for (const original of before) {
+    const next = afterByPath.get(original.relativePath);
+    if (!next) {
+      reasons.push(`missing nested code after resign: ${original.relativePath}`);
+      continue;
+    }
+    const entitlementKeysLost = entitlementKeys(original.entitlementsXml).filter(
+      (key) => !entitlementKeys(next.entitlementsXml).includes(key),
+    );
+    const requirementsChanged = normalizeReq(original.requirements) !== normalizeReq(next.requirements);
+    if (original.hardenedRuntime && !next.hardenedRuntime) {
+      reasons.push(`hardened runtime dropped: ${original.relativePath}`);
+    }
+    if (entitlementKeysLost.length > 0) {
+      reasons.push(`entitlements dropped on ${original.relativePath}: ${entitlementKeysLost.join(", ")}`);
+    }
+    observations.push({
+      path: next.path,
+      identifier: next.identifier,
+      hardenedRuntime: next.hardenedRuntime,
+      entitlementsKept: entitlementKeysLost.length === 0,
+      skippedEntitlements:
+        classifyUnretainable(original.entitlementsXml).length > 0
+          ? "adhoc cannot honor team-bound entitlements"
+          : original.entitlementsXml
+            ? undefined
+            : "adhoc cannot preserve original sealed identity",
+      requirementsChanged,
+    });
+  }
+  return { observations, reasons };
+}
+
 export function signOne(target: string, entitlements: string | null, hardened: boolean): void {
   const args = ["--force", "--sign", "-"];
   if (hardened) args.push("--options", "runtime");
-  let entitlementsFile: string | null = null;
   if (entitlements) {
-    entitlementsFile = join(mkdtempSync(join(tmpdir(), "incodex-ent-")), "entitlements.plist");
+    const entitlementsFile = join(mkdtempSync(join(tmpdir(), "incodex-ent-")), "entitlements.plist");
     writeFileSync(entitlementsFile, entitlements);
     args.push("--entitlements", entitlementsFile);
   }
@@ -90,30 +221,67 @@ export function signOne(target: string, entitlements: string | null, hardened: b
   }
 }
 
-export function signApp(appPath: string): SignObservation[] {
+export function signApp(appPath: string): SigningManifest {
+  const before = inspectSigning(appPath);
   const nested = discoverNestedCode(appPath);
   const order = orderForInsideOut(nested, appPath);
-  const observations: SignObservation[] = [];
   for (const target of order) {
-    const entitlements = dumpEntitlements(target);
-    const hardened = hasHardenedRuntime(target);
-    signOne(target, entitlements, hardened);
-    observations.push({
-      path: target,
-      identifier: displayField(target, "--verbose").match(/Identifier=(\S+)/)?.[1] || "",
-      hardenedRuntime: hardened,
-      entitlementsKept: Boolean(entitlements),
-      skippedEntitlements: entitlements ? undefined : "adhoc cannot preserve original sealed identity",
-    });
+    const original = before.find((item) => item.path === target);
+    signOne(target, original?.entitlementsXml ?? dumpEntitlements(target), original?.hardenedRuntime ?? hasHardenedRuntime(target));
   }
-  return observations;
+  const after = inspectSigning(appPath);
+  const verified = verifyApp(appPath);
+  if (!verified) {
+    throw new Error("codesign --verify failed after inside-out resign");
+  }
+  return signingManifestFrom({
+    appPath,
+    before,
+    after,
+    verified,
+    spctl: diagnoseSpctl(appPath),
+  });
+}
+
+export function signingManifestFrom(input: {
+  appPath: string;
+  before: SigningComponent[];
+  after: SigningComponent[];
+  verified: boolean;
+  spctl: SpctlDiagnosis;
+}): SigningManifest {
+  const compared = compareSigning(input.before, input.after);
+  if (compared.reasons.length > 0) {
+    throw new Error(`signing policy failed: ${compared.reasons.join("; ")}`);
+  }
+  return {
+    schemaVersion: 1,
+    appPath: input.appPath,
+    verified: input.verified,
+    spctl: input.spctl,
+    components: input.after,
+    observations: compared.observations,
+    unretainableEntitlements: input.before
+      .map((item) => ({
+        relativePath: item.relativePath,
+        keys: classifyUnretainable(item.entitlementsXml),
+        reason: "adhoc identity cannot legally retain team-bound entitlements",
+      }))
+      .filter((item) => item.keys.length > 0),
+  };
 }
 
 export function verifyApp(appPath: string): boolean {
-  const result = spawnSync(
-    "codesign",
-    ["--verify", "--deep", "--strict", "--verbose=4", appPath],
-    { encoding: "utf8" },
-  );
+  const result = spawnSync("codesign", [...CODESIGN_VERIFY_ARGS, appPath], { encoding: "utf8" });
   return result.status === 0;
+}
+
+export function verifyTarget(appPath: string, label: string): void {
+  if (!verifyApp(appPath)) {
+    throw new Error(`${label}: codesign --verify failed; refusing to treat the target as installed`);
+  }
+}
+
+function normalizeReq(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
 }

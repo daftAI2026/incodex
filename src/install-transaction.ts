@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import type { AppInspection } from "./app-identity";
 import { fileSha256, inspectApp } from "./app-identity";
 import { ensureDir, headerHash } from "./asar";
-import { signApp, verifyApp } from "./codesign";
+import { signApp, verifyApp, type SigningManifest } from "./codesign";
 import {
   manifestFromIdentity,
   originalAppPath,
@@ -40,7 +40,7 @@ export type CloneInstallDeps = {
   copyBundle: (src: string, dest: string) => void;
   snapshot: (src: string, dest: string) => void;
   patch: (stagedApp: string, installId: string) => Promise<{ originalMain: string; hash: string }>;
-  sign: (appPath: string) => void;
+  sign: (appPath: string) => SigningManifest | undefined;
   verify: (appPath: string) => boolean;
   targetRunning: (appPath: string) => boolean;
   swap: (stagedApp: string, targetApp: string, ops?: SwapOps) => void;
@@ -110,7 +110,7 @@ export function depsWithFault(base: CloneInstallDeps, fault: InstallFault): Clon
     },
     sign: (appPath) => {
       if (hit("SIGNED", "codesign", "permission-denied", "kill")) fail();
-      base.sign(appPath);
+      return base.sign(appPath);
     },
     verify: (appPath) => {
       verifyCount += 1;
@@ -191,7 +191,7 @@ export async function runCloneInstall(
     journal = advanceJournal(journal, "STAGED", root);
     const patched = await deps.patch(stagedApp, installId);
     journal = advanceJournal(journal, "PATCHED", root);
-    deps.sign(stagedApp);
+    const signing = deps.sign(stagedApp) ?? undefined;
     journal = advanceJournal(journal, "SIGNED", root);
     if (!deps.verify(stagedApp)) {
       throw new Error("staged app: codesign --verify failed; refusing to touch the real target");
@@ -228,6 +228,7 @@ export async function runCloneInstall(
         patchedAsarHeaderHash: patched.hash,
         patchedAsarFileHash,
       },
+      signing,
     });
     deps.writeState(
       {
