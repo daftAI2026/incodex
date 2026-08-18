@@ -14,6 +14,7 @@ export const MAIN_NAME = "incodex-main.cjs";
 export const PRELOAD_NAME = "incodex-preload.cjs";
 export const SAFE_HOME_NAME = "incodex-safe-home.cjs";
 export const IPC_GUARD_NAME = "incodex-ipc-guard.cjs";
+export const INSTANCE_NAME = "incodex-instance.cjs";
 
 export const ASAR_REL = "Contents/Resources/app.asar";
 export const PLIST_REL = "Contents/Info.plist";
