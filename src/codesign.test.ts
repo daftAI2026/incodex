@@ -14,7 +14,6 @@ import {
   stripUnretainableEntitlements,
   withDisableLibraryValidation,
   diagnoseSpctl,
-  dumpEntitlements,
   hostEntitlementsForAdhoc,
   orderForInsideOut,
   signApp,
