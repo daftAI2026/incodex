@@ -45,16 +45,13 @@ export function findSupportedBuild(input: {
   );
 }
 
-export function assertLiveSupported(input: {
+export function liveSupportNote(input: {
   bundleIdentifier?: string | null;
   appVersion?: string | null;
   appBuild?: string | null;
-}): SupportedCodexBuild {
-  const known = findSupportedBuild(input);
-  if (known) return known;
+}): string | null {
+  if (findSupportedBuild(input)) return null;
   const version = input.appVersion ?? "unknown";
   const build = input.appBuild ?? "unknown";
-  throw new Error(
-    `unknown Codex build ${version} (${build}); refusing --live. Use install --clone for experimental mode.`,
-  );
+  return `unknown Codex build ${version} (${build}); no frozen adapter. UI injection is best-effort after --confirm-live.`;
 }

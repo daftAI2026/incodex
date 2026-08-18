@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { fileSha256, inspectApp } from "./app-identity";
 import { headerHash, ensureDir } from "./asar";
-import { assertLiveSupported, findSupportedBuild } from "./compatibility/supported-builds";
+import { findSupportedBuild, liveSupportNote } from "./compatibility/supported-builds";
 import { signApp, verifyTarget, type SigningManifest } from "./codesign";
 import {
   manifestFromIdentity,
@@ -238,7 +238,8 @@ export async function install(appPath: string, options?: { root?: string }): Pro
   if (!existsSync(appPath)) throw new Error(`Codex app not found: ${appPath}`);
   const listing = inspectApp(appPath).listing;
   if (isOfficialApp(appPath)) {
-    assertLiveSupported(listing ?? {});
+    const note = liveSupportNote(listing ?? {});
+    if (note) console.warn(note);
     ensureRuntime();
     await installLive();
     return;
