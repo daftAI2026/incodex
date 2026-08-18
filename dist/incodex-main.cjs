@@ -397,12 +397,20 @@ async function launchIncognitoOnce() {
         });
         child.on("exit", (code) => {
             logLaunch("child-exit", { code, sessionId: session.sessionId });
-            try {
-                safeHome.burnSessionHome(session.root, { userRoot: USER_ROOT, sessionId: session.sessionId });
-            }
-            catch (error) {
-                logLaunch("parent-burn-refused", { error: String(error) });
-            }
+            const expected = { userRoot: USER_ROOT, sessionId: session.sessionId };
+            const tryBurn = (attempt) => {
+                try {
+                    safeHome.burnSessionHome(session.root, expected);
+                }
+                catch (error) {
+                    if (attempt < 3) {
+                        setTimeout(() => tryBurn(attempt + 1), 150 * attempt);
+                        return;
+                    }
+                    logLaunch("parent-burn-refused", { error: String(error) });
+                }
+            };
+            tryBurn(1);
             if (!settled)
                 done({ ok: false, reason: "exited-early" });
         });
