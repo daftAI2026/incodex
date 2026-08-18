@@ -73,12 +73,19 @@ export function quitOfficialApp(): void {
   spawnSync("sleep", ["1"]);
 }
 
-function runtimeSources(): { loader: string; inject: string; main: string; preload: string } {
+function runtimeSources(): {
+  loader: string;
+  inject: string;
+  main: string;
+  preload: string;
+  safeHome: string;
+} {
   return {
     loader: readFileSync(join(repoRoot, "dist/incodex-loader.cjs"), "utf8"),
     inject: readFileSync(join(repoRoot, "dist/incodex-inject.js"), "utf8"),
     main: readFileSync(join(repoRoot, "dist/incodex-main.cjs"), "utf8"),
     preload: readFileSync(join(repoRoot, "dist/incodex-preload.cjs"), "utf8"),
+    safeHome: readFileSync(join(repoRoot, "dist/incodex-safe-home.cjs"), "utf8"),
   };
 }
 
@@ -94,6 +101,7 @@ async function patchAppBundle(
     injectSource: src.inject,
     mainSource: src.main,
     preloadSource: src.preload,
+    safeHomeSource: src.safeHome,
     installId,
   });
   writeAsarIntegrity(appPath, patched.hash);
@@ -247,6 +255,7 @@ export async function install(appPath: string): Promise<void> {
       injectSource: src.inject,
       mainSource: src.main,
       preloadSource: src.preload,
+      safeHomeSource: src.safeHome,
       installId,
     });
     writeAsarIntegrityPlist(stagedPlist, patched.hash);
