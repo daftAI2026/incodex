@@ -1,4 +1,4 @@
-import asar from "@electron/asar";
+import { createPackageWithOptions, extractAll, extractFile, getRawHeader } from "@electron/asar";
 import { createHash } from "node:crypto";
 import {
   cpSync,
@@ -15,14 +15,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LOADER_NAME, INJECT_NAME, MAIN_NAME, PRELOAD_NAME, SAFE_HOME_NAME, IPC_GUARD_NAME, INSTANCE_NAME, RUNTIME_LOAD_NAME, WINDOW_KIND_NAME, MARKER_KEY } from "./paths";
 
-type AsarApi = typeof asar & {
-  getRawHeader: (p: string) => { header: unknown; headerString: string };
-};
-
-const asarApi = asar as AsarApi;
-
 export function headerHash(asarPath: string): string {
-  const raw = asarApi.getRawHeader(asarPath);
+  const raw = getRawHeader(asarPath);
   return createHash("sha256").update(raw.headerString).digest("hex");
 }
 
@@ -36,7 +30,7 @@ export function readPackageMain(asarPath: string): {
   alreadyPatched: boolean;
   installId: string | null;
 } {
-  const raw = JSON.parse(asar.extractFile(asarPath, "package.json").toString("utf8")) as {
+  const raw = JSON.parse(extractFile(asarPath, "package.json").toString("utf8")) as {
     main?: string;
     [MARKER_KEY]?: IncodexMarker;
   };
@@ -71,7 +65,7 @@ export async function patchAsar(options: {
   const unpack = collectUnpackOptions(options.asarPath);
 
   try {
-    asar.extractAll(options.asarPath, extractDir);
+    extractAll(options.asarPath, extractDir);
     const pkgPath = join(extractDir, "package.json");
     const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as Record<string, unknown> & {
       main?: string;
@@ -94,7 +88,7 @@ export async function patchAsar(options: {
     writeFileSync(join(extractDir, RUNTIME_LOAD_NAME), options.runtimeLoadSource);
     writeFileSync(join(extractDir, WINDOW_KIND_NAME), options.windowKindSource);
 
-    await asar.createPackageWithOptions(extractDir, outAsar, {
+    await createPackageWithOptions(extractDir, outAsar, {
       globOptions: { dot: true },
       ...unpack,
     });
@@ -113,7 +107,7 @@ export async function restoreAsarMain(asarPath: string): Promise<void> {
   const outAsar = join(work, "app.asar");
   const unpack = collectUnpackOptions(asarPath);
   try {
-    asar.extractAll(asarPath, extractDir);
+    extractAll(asarPath, extractDir);
     const pkgPath = join(extractDir, "package.json");
     const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as Record<string, unknown>;
     pkg.main = main;
@@ -128,7 +122,7 @@ export async function restoreAsarMain(asarPath: string): Promise<void> {
     rmSync(join(extractDir, INSTANCE_NAME), { force: true });
     rmSync(join(extractDir, RUNTIME_LOAD_NAME), { force: true });
     rmSync(join(extractDir, WINDOW_KIND_NAME), { force: true });
-    await asar.createPackageWithOptions(extractDir, outAsar, {
+    await createPackageWithOptions(extractDir, outAsar, {
       globOptions: { dot: true },
       ...unpack,
     });
@@ -152,7 +146,7 @@ export function exactUnpackPattern(rel: string): string {
 export function collectUnpackOptions(asarPath: string): { unpack?: string; unpackDir?: string } {
   const sibling = `${asarPath}.unpacked`;
   if (!existsSync(sibling)) return {};
-  const raw = asarApi.getRawHeader(asarPath);
+  const raw = getRawHeader(asarPath);
   const covers = unpackCovers((raw.header as { files?: Record<string, unknown> }) ?? {}, "");
   const dirs = covers.filter((c) => c.type === "dir").map((c) => exactUnpackPattern(c.path));
   // @electron/asar matches unpack globs against the absolute filename, so a

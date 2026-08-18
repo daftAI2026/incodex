@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import asar from "@electron/asar";
+import { createPackageWithOptions } from "@electron/asar";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,7 +28,7 @@ describe("unpack fixtures", () => {
     writeFileSync(join(src, "native", "foo[bar].node"), "special");
     writeFileSync(join(src, "native", "kept.js"), "packed");
     const archive = join(root, "app.asar");
-    await asar.createPackageWithOptions(src, archive, { unpack: "**/*.node" });
+    await createPackageWithOptions(src, archive, { unpack: "**/*.node" });
     expect(existsSync(`${archive}.unpacked`)).toBe(true);
 
     const options = collectUnpackOptions(archive);
