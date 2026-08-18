@@ -6,6 +6,7 @@ import {
   CODESIGN_VERIFY_ARGS,
   classifyUnretainable,
   compareSigning,
+  normalizeEntitlementKeys,
   diagnoseSpctl,
   orderForInsideOut,
   signApp,
@@ -59,6 +60,7 @@ describe("adhoc entitlement policy", () => {
         requirements: "designated => identifier com.incodex.mini",
         entitlementsXml: "<plist><dict><key>com.apple.security.cs.allow-jit</key><true/></dict></plist>",
         entitlementsHash: "a",
+        entitlementsOwned: true,
       },
     ];
     const afterOk: SigningComponent[] = [
@@ -71,9 +73,29 @@ describe("adhoc entitlement policy", () => {
     expect(ok.reasons).toEqual([]);
     expect(ok.observations[0]?.requirementsChanged).toBe(true);
 
-    const afterDropped = compareSigning(before, [{ ...before[0]!, hardenedRuntime: false, entitlementsXml: null, entitlementsHash: null }]);
+    const afterDropped = compareSigning(before, [{ ...before[0]!, hardenedRuntime: false, entitlementsXml: null, entitlementsHash: null, entitlementsOwned: false }]);
     expect(afterDropped.reasons.some((reason) => reason.includes("hardened runtime"))).toBe(true);
     expect(afterDropped.reasons.some((reason) => reason.includes("entitlements dropped"))).toBe(true);
+  });
+
+  test("does not treat host-app entitlements echoed onto a nested dylib as owned", () => {
+    const hostXml = "<plist><dict><key>com.apple.security.cs.allow-jit</key><true/></dict></plist>";
+    const dylib: SigningComponent = {
+      path: "/tmp/Mini.app/Contents/Frameworks/libfoo.dylib",
+      relativePath: "Contents/Frameworks/libfoo.dylib",
+      identifier: "libfoo",
+      hardenedRuntime: true,
+      requirements: "designated => identifier libfoo",
+      entitlementsXml: null,
+      entitlementsHash: null,
+      entitlementsOwned: false,
+    };
+    const after = compareSigning(
+      [dylib],
+      [{ ...dylib, entitlementsXml: null, requirements: "designated => cdhash H\"abc\"" }],
+    );
+    expect(after.reasons).toEqual([]);
+    expect(normalizeEntitlementKeys(hostXml)).toContain("com.apple.security.cs.allow-jit");
   });
 
   test("signing manifest records unretainable keys from the pre-resign dump", () => {
@@ -89,6 +111,7 @@ describe("adhoc entitlement policy", () => {
       requirements: "designated => identifier com.incodex.mini",
       entitlementsXml: xml,
       entitlementsHash: "a",
+      entitlementsOwned: true,
     };
     const manifest = signingManifestFrom({
       appPath: "/tmp/Mini.app",

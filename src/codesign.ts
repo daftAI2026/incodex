@@ -30,6 +30,7 @@ export type SigningComponent = {
   requirements: string;
   entitlementsXml: string | null;
   entitlementsHash: string | null;
+  entitlementsOwned: boolean;
 };
 
 export type UnretainableEntitlement = {
@@ -134,8 +135,21 @@ export function classifyUnretainable(xml: string | null): string[] {
   );
 }
 
-export function inspectComponent(appPath: string, target: string): SigningComponent {
-  const entitlementsXml = dumpEntitlements(target);
+export function normalizeEntitlementKeys(xml: string | null): string {
+  return entitlementKeys(xml).slice().sort().join("\n");
+}
+
+/** codesign --display on nested dylibs often echoes the host app plist. Those are not the library's own entitlements. */
+export function ownEntitlementsXml(target: string, appPath: string, hostXml: string | null): string | null {
+  const xml = dumpEntitlements(target);
+  if (!xml) return null;
+  if (target === appPath) return xml;
+  if (hostXml && normalizeEntitlementKeys(xml) === normalizeEntitlementKeys(hostXml)) return null;
+  return xml;
+}
+
+export function inspectComponent(appPath: string, target: string, hostXml: string | null = null): SigningComponent {
+  const entitlementsXml = ownEntitlementsXml(target, appPath, hostXml ?? dumpEntitlements(appPath));
   return {
     path: target,
     relativePath: relative(appPath, target) || ".",
@@ -146,13 +160,15 @@ export function inspectComponent(appPath: string, target: string): SigningCompon
     entitlementsHash: entitlementsXml
       ? createHash("sha256").update(entitlementsXml).digest("hex")
       : null,
+    entitlementsOwned: Boolean(entitlementsXml),
   };
 }
 
 export function inspectSigning(appPath: string): SigningComponent[] {
+  const hostXml = dumpEntitlements(appPath);
   const nested = discoverNestedCode(appPath);
   const order = orderForInsideOut(nested, appPath);
-  return order.map((target) => inspectComponent(appPath, target));
+  return order.map((target) => inspectComponent(appPath, target, hostXml));
 }
 
 export function diagnoseSpctl(appPath: string): SpctlDiagnosis {
@@ -179,9 +195,11 @@ export function compareSigning(
       reasons.push(`missing nested code after resign: ${original.relativePath}`);
       continue;
     }
-    const entitlementKeysLost = entitlementKeys(original.entitlementsXml).filter(
-      (key) => !entitlementKeys(next.entitlementsXml).includes(key),
-    );
+    const entitlementKeysLost = original.entitlementsOwned
+      ? entitlementKeys(original.entitlementsXml).filter(
+          (key) => !entitlementKeys(next.entitlementsXml).includes(key),
+        )
+      : [];
     const requirementsChanged = normalizeReq(original.requirements) !== normalizeReq(next.requirements);
     if (original.hardenedRuntime && !next.hardenedRuntime) {
       reasons.push(`hardened runtime dropped: ${original.relativePath}`);
@@ -227,7 +245,11 @@ export function signApp(appPath: string): SigningManifest {
   const order = orderForInsideOut(nested, appPath);
   for (const target of order) {
     const original = before.find((item) => item.path === target);
-    signOne(target, original?.entitlementsXml ?? dumpEntitlements(target), original?.hardenedRuntime ?? hasHardenedRuntime(target));
+    signOne(
+      target,
+      original?.entitlementsOwned ? original.entitlementsXml : null,
+      original?.hardenedRuntime ?? hasHardenedRuntime(target),
+    );
   }
   const after = inspectSigning(appPath);
   const verified = verifyApp(appPath);
