@@ -5,7 +5,7 @@ import { parseCli } from "./parse-cli";
 import { DEFAULT_APP } from "./paths";
 import { diagnose, printDiagnosis } from "./doctor";
 import { printStatus } from "./status";
-import { loadJournal, recoverAction } from "./transaction";
+import { recoverTransaction } from "./recover";
 import { uninstall } from "./uninstall";
 import { verifyApp } from "./codesign";
 
@@ -69,13 +69,14 @@ const appPath = resolveTarget({
   } else if (parsed.command === "doctor") {
     printDiagnosis(diagnose(parsed.app ?? DEFAULT_APP));
   } else if (parsed.command === "recover") {
-    const journal = loadJournal(parsed.transaction!);
-    if (!journal) throw new Error(`no journal for ${parsed.transaction}`);
-    console.log("phase:", journal.phase);
-    console.log("action:", recoverAction(journal));
-    console.log("target:", journal.targetRealPath);
-    console.log("staged:", journal.stagedApp);
-    console.log("original:", journal.originalSnapshot);
+    const result = recoverTransaction(parsed.transaction!);
+    console.log("phase:", result.journal.phase);
+    console.log("action:", result.action);
+    console.log("target:", result.journal.targetRealPath);
+    console.log("target present:", result.targetUntouched);
+    console.log("backup intact:", result.backupIntact);
+    console.log("staged removed:", result.stagedRemoved);
+    console.log("outgoing restored:", result.outgoingRestored);
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
