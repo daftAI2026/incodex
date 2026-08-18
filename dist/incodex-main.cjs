@@ -36,6 +36,17 @@ function injectSource() {
   return fs.readFileSync(file, "utf8");
 }
 
+function readLocaleOverride() {
+  const file = path.join(DEFAULT_CODEX_HOME, "config.toml");
+  if (!fs.existsSync(file)) return "";
+  try {
+    const match = fs.readFileSync(file, "utf8").match(/^\s*localeOverride\s*=\s*"([^"]+)"/m);
+    return match?.[1]?.trim() ?? "";
+  } catch {
+    return "";
+  }
+}
+
 function copySettings() {
   fs.mkdirSync(INCOGNITO_HOME, { recursive: true });
   let copied = 0;
@@ -359,7 +370,8 @@ function hookWindow(win, source) {
   hookPreload(win.webContents.session);
   const run = () => {
     if (!source || win.webContents.isDestroyed()) return;
-    const prefix = `window.__incodexIncognito=${isIncognito() ? "true" : "false"};`;
+    const locale = JSON.stringify(readLocaleOverride());
+    const prefix = `window.__incodexIncognito=${isIncognito() ? "true" : "false"};window.__incodexLocale=${locale};`;
     win.webContents.executeJavaScript(prefix + source, false).catch(() => {});
   };
   win.webContents.on("dom-ready", run);

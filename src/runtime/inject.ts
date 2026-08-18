@@ -40,8 +40,71 @@ function isIncognitoWindow(): boolean {
   return window.__incodexIncognito === true || window.incodex?.isIncognito?.() === true;
 }
 
+type CopyKey = "open" | "exit" | "title" | "body" | "dismiss";
+
+const COPY: Record<string, Record<CopyKey, string>> = {
+  "zh-CN": {
+    open: "打开无痕窗口",
+    exit: "退出无痕窗口",
+    title: "无痕窗口",
+    body: "账号和设置跟平时一样，不会带入之前的对话。关闭窗口后，这次聊天不会留下记录。",
+    dismiss: "关闭无痕窗口横幅",
+  },
+  "zh-TW": {
+    open: "開啟無痕視窗",
+    exit: "離開無痕視窗",
+    title: "無痕視窗",
+    body: "帳號和設定跟平時一樣，不會帶入之前的對話。關閉視窗後，這次聊天不會留下紀錄。",
+    dismiss: "關閉無痕視窗橫幅",
+  },
+  en: {
+    open: "Open incognito window",
+    exit: "Exit incognito window",
+    title: "Incognito window",
+    body: "Same account and settings as usual, without earlier chats. Close this window and this conversation won't leave a record.",
+    dismiss: "Dismiss incognito banner",
+  },
+  ja: {
+    open: "シークレットウィンドウを開く",
+    exit: "シークレットウィンドウを終了",
+    title: "シークレットウィンドウ",
+    body: "アカウントと設定は普段と同じで、以前の会話は引き継ぎません。このウィンドウを閉じると、今回のチャットは残りません。",
+    dismiss: "シークレットウィンドウのバナーを閉じる",
+  },
+  ko: {
+    open: "시크릿 창 열기",
+    exit: "시크릿 창 나가기",
+    title: "시크릿 창",
+    body: "계정과 설정은 평소와 같고, 이전 대화는 가져오지 않습니다. 창을 닫으면 이번 채팅은 남지 않습니다.",
+    dismiss: "시크릿 창 배너 닫기",
+  },
+};
+
+function resolveLocale(): string {
+  const raw = (
+    window.__incodexLocale ||
+    document.documentElement.lang ||
+    navigator.language ||
+    "en"
+  ).trim();
+  const lower = raw.toLowerCase().replaceAll("_", "-");
+  if (lower.startsWith("zh-tw") || lower.startsWith("zh-hk") || lower.startsWith("zh-hant")) return "zh-TW";
+  if (lower.startsWith("zh")) return "zh-CN";
+  if (lower.startsWith("ja")) return "ja";
+  if (lower.startsWith("ko")) return "ko";
+  if (COPY[raw]) return raw;
+  const base = raw.split("-")[0] ?? "en";
+  if (COPY[base]) return base;
+  return "en";
+}
+
+function t(key: CopyKey): string {
+  const locale = resolveLocale();
+  return COPY[locale]?.[key] ?? COPY.en[key];
+}
+
 function labelFor(on: boolean): string {
-  return on ? "退出无痕窗口" : "打开无痕窗口";
+  return on ? t("exit") : t("open");
 }
 
 function apply(on: boolean): void {
@@ -243,8 +306,8 @@ function hideTooltip(): void {
 
 const BANNER_DISMISS_KEY = "incodex-banner-dismissed";
 const BANNER_HOST_ATTR = "data-incodex-banner-host";
-const BANNER_TITLE = "无痕窗口";
-const BANNER_BODY = "账号和设置跟平时一样，不会带入之前的对话。关闭窗口后，这次聊天不会留下记录。";
+const BANNER_TITLE_ATTR = "data-incodex-banner-title";
+const BANNER_BODY_ATTR = "data-incodex-banner-body";
 const CLOSE_SVG = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" class="icon-xs" aria-hidden="true"><path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
 
 function bannerDismissed(): boolean {
@@ -320,11 +383,13 @@ function buildLanding(): HTMLElement {
   titleWrap.className = "flex flex-wrap items-center gap-2";
   const title = document.createElement("div");
   title.className = "min-w-0 text-base font-medium text-default";
-  title.textContent = BANNER_TITLE;
+  title.setAttribute(BANNER_TITLE_ATTR, "true");
+  title.textContent = t("title");
   titleWrap.append(title);
   const body = document.createElement("div");
   body.className = "text-sm leading-tight text-pretty text-secondary";
-  body.textContent = BANNER_BODY;
+  body.setAttribute(BANNER_BODY_ATTR, "true");
+  body.textContent = t("body");
   copy.append(titleWrap, body);
 
   const actions = document.createElement("div");
@@ -332,7 +397,7 @@ function buildLanding(): HTMLElement {
     "flex items-center gap-2 self-center max-[400px]:w-full max-[400px]:justify-center max-[400px]:self-stretch";
   const close = document.createElement("button");
   close.type = "button";
-  close.setAttribute("aria-label", "关闭无痕窗口横幅");
+  close.setAttribute("aria-label", t("dismiss"));
   close.className =
     "flex size-8 shrink-0 items-center justify-center rounded-lg border-transparent text-codex-description hover:text-default";
   close.innerHTML = CLOSE_SVG;
@@ -353,6 +418,15 @@ function buildLanding(): HTMLElement {
   return host;
 }
 
+function syncLandingCopy(host: HTMLElement): void {
+  const title = host.querySelector<HTMLElement>(`[${BANNER_TITLE_ATTR}]`);
+  const body = host.querySelector<HTMLElement>(`[${BANNER_BODY_ATTR}]`);
+  const close = host.querySelector<HTMLButtonElement>("button[aria-label]");
+  if (title) title.textContent = t("title");
+  if (body) body.textContent = t("body");
+  if (close) close.setAttribute("aria-label", t("dismiss"));
+}
+
 function ensureLanding(): void {
   if (!isIncognitoWindow()) {
     document.querySelector<HTMLElement>(`[${BANNER_HOST_ATTR}]`)?.remove();
@@ -370,6 +444,7 @@ function ensureLanding(): void {
 
   let host = document.querySelector<HTMLElement>(`[${BANNER_HOST_ATTR}]`);
   if (!host) host = buildLanding();
+  syncLandingCopy(host);
 
   const officialSlot = findOfficialBannerSlot();
   if (officialSlot) {
@@ -438,6 +513,7 @@ declare global {
   interface Window {
     __incodexStarted?: boolean;
     __incodexIncognito?: boolean;
+    __incodexLocale?: string;
     incodex?: {
       isIncognito?: () => boolean;
       openIncognito?: () => Promise<{ ok: boolean; reason?: string }>;
