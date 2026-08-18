@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { fileSha256, inspectApp } from "./app-identity";
 import { headerHash, ensureDir, patchAsar } from "./asar";
+import { assertLiveSupported, findSupportedBuild } from "./compatibility/supported-builds";
 import { signApp, verifyApp } from "./codesign";
 import {
   manifestFromIdentity,
@@ -284,11 +285,19 @@ async function installLive(): Promise<void> {
 
 export async function install(appPath: string): Promise<void> {
   if (!existsSync(appPath)) throw new Error(`Codex app not found: ${appPath}`);
-  ensureRuntime();
+  const listing = inspectApp(appPath).listing;
   if (isOfficialApp(appPath)) {
+    assertLiveSupported(listing ?? {});
+    ensureRuntime();
     await installLive();
     return;
   }
+  if (!findSupportedBuild(listing ?? {})) {
+    console.warn(
+      `unknown Codex build ${listing?.appVersion ?? "unknown"} (${listing?.appBuild ?? "unknown"}); clone is experimental`,
+    );
+  }
+  ensureRuntime();
   const asarPath = join(appPath, ASAR_REL);
   const before = headerHash(asarPath);
   const identity = inspectApp(appPath).identity;
