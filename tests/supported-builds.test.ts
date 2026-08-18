@@ -21,4 +21,15 @@ describe("supported Codex builds", () => {
       }),
     ).toBeUndefined();
   });
+
+  test("known builds carry the compatibility manifest fields", () => {
+    const known = findSupportedBuild({
+      bundleIdentifier: "com.openai.codex",
+      appVersion: "26.810.52044",
+      appBuild: "6662",
+    });
+    expect(known?.adapterId).toBe("build-26.810.52044");
+    expect(known?.expectedAsarFiles).toContain("package.json");
+    expect(known?.selectors.length).toBeGreaterThan(0);
+  });
 });
