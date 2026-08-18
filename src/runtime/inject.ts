@@ -1,3 +1,5 @@
+import { SELECTORS, STRIP_CLONE_ATTRS } from "./compatibility/default-adapter";
+import { isSearchLabel } from "./compatibility/search-labels";
 import { type CopyKey, translate, resolveLocale as matchLocale } from "./incognito-copy";
 
 const STYLE_ID = "incodex-privacy-style";
@@ -9,8 +11,6 @@ const CLUSTER_ATTR = "data-incodex-header-cluster";
 const SHORTCUT_LABEL = "⇧⌘N";
 
 const ICON_SVG = `{{HAT_GLASSES_SVG}}`;
-const SEARCH_LABELS = new Set(["Search", "搜索"]);
-
 function isIncognitoWindow(): boolean {
   if (typeof window.__incodexIncognito === "boolean") return window.__incodexIncognito;
   return false;
@@ -168,13 +168,13 @@ function showLaunchError(): void {
 function findSearchButton(): HTMLElement | null {
   return (
     [...document.querySelectorAll<HTMLElement>("button")].find((btn) =>
-      SEARCH_LABELS.has((btn.getAttribute("aria-label") || "").trim()),
+      isSearchLabel(btn.getAttribute("aria-label")),
     ) ?? null
   );
 }
 
 function findHeaderCluster(search: HTMLElement): HTMLElement | null {
-  return search.closest<HTMLElement>(".ms-auto.flex.items-center");
+  return search.closest<HTMLElement>(SELECTORS.headerCluster);
 }
 
 function isParkedInCluster(btn: HTMLElement, cluster: HTMLElement, search: HTMLElement): boolean {
@@ -183,10 +183,10 @@ function isParkedInCluster(btn: HTMLElement, cluster: HTMLElement, search: HTMLE
 
 function buildButton(search: HTMLElement): HTMLElement {
   const btn = search.cloneNode(false) as HTMLElement;
-  btn.removeAttribute("id");
-  btn.removeAttribute("aria-haspopup");
-  btn.removeAttribute("aria-expanded");
-  btn.removeAttribute("data-state");
+  for (const name of STRIP_CLONE_ATTRS) btn.removeAttribute(name);
+  for (const name of [...btn.attributes].map((attr) => attr.name)) {
+    if (name.startsWith("data-") && name !== BTN_ATTR) btn.removeAttribute(name);
+  }
   btn.setAttribute("type", "button");
   btn.setAttribute(BTN_ATTR, "true");
   btn.className = search.className;
