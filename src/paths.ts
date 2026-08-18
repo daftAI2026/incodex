@@ -7,6 +7,7 @@ export const BACKUP_DIR = join(USER_ROOT, "backup");
 export const STATE_PATH = join(USER_ROOT, "install-state.json");
 export const LIVE_PREV = join(USER_ROOT, "ChatGPT.app.pre-live");
 export const LIVE_RECORD_PATH = join(USER_ROOT, "live-install.json");
+export const INSTALLATIONS_DIR = join(USER_ROOT, "installations");
 export const INCOGNITO_HOME = join(USER_ROOT, "incognito-home");
 export const INCOGNITO_CHROMIUM = join(USER_ROOT, "incognito-chromium");
 export const MAIN_NAME = "incodex-main.cjs";

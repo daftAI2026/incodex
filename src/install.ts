@@ -1,19 +1,26 @@
-import { existsSync, cpSync, readFileSync, mkdtempSync, rmSync, renameSync } from "node:fs";
+import { existsSync, cpSync, readFileSync, mkdtempSync, rmSync, renameSync, symlinkSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { inspectApp } from "./app-identity";
-import { headerHash, patchAsar, ensureDir, readPackageMain } from "./asar";
+import { fileSha256, inspectApp } from "./app-identity";
+import { headerHash, patchAsar, ensureDir } from "./asar";
 import { signApp, verifyApp } from "./codesign";
+import {
+  manifestFromIdentity,
+  originalAppPath,
+  snapshotOriginalApp,
+  writeInstallation,
+} from "./installation";
 import { writeAsarIntegrity, writeAsarIntegrityPlist } from "./integrity";
 import {
   loadLiveInstallRecord,
+  resolveOfficialOriginal,
   saveLiveInstallRecord,
   selectOfficialInstallSource,
 } from "./live-source";
-import { ASAR_REL, BACKUP_DIR, DEFAULT_APP, LIVE_PREV, PLIST_REL, USER_ROOT } from "./paths";
+import { ASAR_REL, DEFAULT_APP, LIVE_PREV, PLIST_REL, USER_ROOT } from "./paths";
 import { saveState } from "./state";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -41,22 +48,6 @@ export function cloneOfficialApp(dest: string): void {
   ensureDir(dirname(dest));
   const cloned = spawnSync("ditto", [DEFAULT_APP, dest], { encoding: "utf8" });
   if (cloned.status !== 0) throw new Error(cloned.stderr || "failed to copy ChatGPT.app");
-}
-
-export function backupApp(appPath: string): void {
-  ensureDir(BACKUP_DIR);
-  cpSync(join(appPath, ASAR_REL), join(BACKUP_DIR, "app.asar"));
-  cpSync(join(appPath, PLIST_REL), join(BACKUP_DIR, "Info.plist"));
-}
-
-function backupOfficialIfNeeded(appPath: string): void {
-  const { alreadyPatched } = readPackageMain(join(appPath, ASAR_REL));
-  if (alreadyPatched) {
-    console.log("keeping existing official backup");
-    return;
-  }
-  console.log("backing up official asar and Info.plist to", BACKUP_DIR);
-  backupApp(appPath);
 }
 
 function ensureRuntime(): void {
@@ -110,7 +101,7 @@ async function patchAppBundle(
   return patched;
 }
 
-function swapOfficialWith(stagedApp: string, keepOfficialSource: boolean): void {
+function swapOfficialWith(stagedApp: string, originalDest: string | null): void {
   const outgoing = join(USER_ROOT, "ChatGPT.app.outgoing");
   rmSync(outgoing, { recursive: true, force: true });
   renameSync(DEFAULT_APP, outgoing);
@@ -120,45 +111,85 @@ function swapOfficialWith(stagedApp: string, keepOfficialSource: boolean): void 
     renameSync(outgoing, DEFAULT_APP);
     throw error;
   }
-  if (keepOfficialSource) {
+  if (!originalDest) {
     rmSync(outgoing, { recursive: true, force: true });
     return;
   }
+  ensureDir(dirname(originalDest));
+  if (existsSync(originalDest)) {
+    throw new Error(`refusing to overwrite original snapshot: ${originalDest}`);
+  }
+  renameSync(outgoing, originalDest);
+}
+
+function pointLivePrevAt(originalApp: string): void {
   rmSync(LIVE_PREV, { recursive: true, force: true });
-  renameSync(outgoing, LIVE_PREV);
+  symlinkSync(originalApp, LIVE_PREV);
+}
+
+function runtimeVersion(): string {
+  const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as { version?: string };
+  return pkg.version || "0.0.0";
 }
 
 async function installLive(): Promise<void> {
   if (!existsSync(DEFAULT_APP)) throw new Error(`Codex app not found: ${DEFAULT_APP}`);
   quitOfficialApp();
   const current = inspectApp(DEFAULT_APP);
-  const backup = existsSync(LIVE_PREV) ? inspectApp(LIVE_PREV) : null;
+  const previousOriginal = resolveOfficialOriginal();
+  const backup = previousOriginal ? inspectApp(previousOriginal) : null;
   const record = loadLiveInstallRecord();
   const decision = selectOfficialInstallSource({ current, backup, record });
   if (decision.action === "reject") throw new Error(decision.reason);
 
-  const sourceApp = decision.action === "use-backup" ? LIVE_PREV : DEFAULT_APP;
+  const sourceApp = decision.action === "use-backup" ? previousOriginal! : DEFAULT_APP;
   const sourceIdentity = decision.action === "use-backup" ? backup?.identity : current.identity;
   if (!sourceIdentity) throw new Error(`could not read official app identity: ${sourceApp}`);
 
-  backupOfficialIfNeeded(DEFAULT_APP);
-  const keepOfficialSource = decision.action === "use-backup";
+  const installId = randomUUID();
+  const originalDest = originalAppPath(DEFAULT_APP, installId);
+  if (decision.action === "use-backup") {
+    console.log("install source: matching original backup");
+    snapshotOriginalApp(sourceApp, originalDest);
+  } else {
+    console.log("install source: current official app");
+  }
+
   const before = headerHash(join(sourceApp, ASAR_REL));
   const stagedApp = join(USER_ROOT, "ChatGPT.app.live");
   rmSync(stagedApp, { recursive: true, force: true });
-  console.log(
-    decision.action === "use-backup"
-      ? "install source: matching original backup"
-      : "install source: current official app",
-  );
   console.log("copying official OpenAI-signed app to a writable staging bundle");
   const copied = spawnSync("ditto", [sourceApp, stagedApp], { encoding: "utf8" });
   if (copied.status !== 0) throw new Error(copied.stderr || "failed to stage official app");
-  const installId = randomUUID();
   const patched = await patchAppBundle(stagedApp, true, installId);
+  const patchedAsar = join(stagedApp, ASAR_REL);
+  const patchedAsarFileHash = fileSha256(patchedAsar);
   console.log("replacing /Applications/ChatGPT.app with the patched bundle");
-  swapOfficialWith(stagedApp, keepOfficialSource);
+  swapOfficialWith(stagedApp, decision.action === "use-current" ? originalDest : null);
+  if (!existsSync(originalDest)) throw new Error("original snapshot missing after install");
+  pointLivePrevAt(originalDest);
   const createdAt = new Date().toISOString();
+  const manifest = manifestFromIdentity({
+    installId,
+    targetRealPath: DEFAULT_APP,
+    original: sourceIdentity,
+    originalAsarHeaderHash: before,
+    patchedAsarHeaderHash: patched.hash,
+    patchedAsarFileHash,
+    originalMain: patched.originalMain,
+    runtimeVersion: runtimeVersion(),
+    createdAt,
+  });
+  writeInstallation({
+    appPath: DEFAULT_APP,
+    manifest,
+    runtime: {
+      installId,
+      originalMain: patched.originalMain,
+      patchedAsarHeaderHash: patched.hash,
+      patchedAsarFileHash,
+    },
+  });
   saveLiveInstallRecord({
     schemaVersion: 1,
     installId,
@@ -195,8 +226,12 @@ export async function install(appPath: string): Promise<void> {
   const src = runtimeSources();
   const before = headerHash(asarPath);
   const identity = inspectApp(appPath).identity;
-  backupApp(appPath);
+  if (!identity) throw new Error(`could not read app identity: ${appPath}`);
+  const installId = randomUUID();
+  const originalDest = originalAppPath(appPath, installId);
+  snapshotOriginalApp(appPath, originalDest);
   const work = mkdtempSync(join(tmpdir(), "incodex-install-"));
+  let committed = false;
   try {
     const stagedAsar = join(work, "app.asar");
     const stagedPlist = join(work, "Info.plist");
@@ -206,7 +241,6 @@ export async function install(appPath: string): Promise<void> {
     if (existsSync(unpackedSrc)) {
       spawnSync("ditto", [unpackedSrc, `${stagedAsar}.unpacked`]);
     }
-    const installId = randomUUID();
     const patched = await patchAsar({
       asarPath: stagedAsar,
       loaderSource: src.loader,
@@ -217,29 +251,55 @@ export async function install(appPath: string): Promise<void> {
     });
     writeAsarIntegrityPlist(stagedPlist, patched.hash);
     cpSync(stagedAsar, asarPath);
+    if (existsSync(`${stagedAsar}.unpacked`)) {
+      rmSync(unpackedSrc, { recursive: true, force: true });
+      spawnSync("ditto", [`${stagedAsar}.unpacked`, unpackedSrc]);
+    }
     cpSync(stagedPlist, join(appPath, PLIST_REL));
     signApp(appPath);
     if (!verifyApp(appPath)) {
       console.warn("codesign --verify failed; the copy may still open after Gatekeeper bypass");
     }
+    const createdAt = new Date().toISOString();
+    const patchedAsarFileHash = fileSha256(asarPath);
+    writeInstallation({
+      appPath,
+      manifest: manifestFromIdentity({
+        installId,
+        targetRealPath: appPath,
+        original: identity,
+        originalAsarHeaderHash: before,
+        patchedAsarHeaderHash: patched.hash,
+        patchedAsarFileHash,
+        originalMain: patched.originalMain,
+        runtimeVersion: runtimeVersion(),
+        createdAt,
+      }),
+      runtime: {
+        installId,
+        originalMain: patched.originalMain,
+        patchedAsarHeaderHash: patched.hash,
+        patchedAsarFileHash,
+      },
+    });
+    committed = true;
     saveState({
       appPath,
       originalMain: patched.originalMain,
       asarHashBefore: before,
       asarHashAfter: patched.hash,
-      installedAt: new Date().toISOString(),
+      installedAt: createdAt,
       installId,
-      ...(identity
-        ? {
-            bundleIdentifier: identity.bundleIdentifier,
-            appVersion: identity.appVersion,
-            appBuild: identity.appBuild,
-            architecture: identity.architecture,
-            originalAsarFileHash: identity.asarFileHash,
-            originalPlistFileHash: identity.plistFileHash,
-          }
-        : {}),
+      bundleIdentifier: identity.bundleIdentifier,
+      appVersion: identity.appVersion,
+      appBuild: identity.appBuild,
+      architecture: identity.architecture,
+      originalAsarFileHash: identity.asarFileHash,
+      originalPlistFileHash: identity.plistFileHash,
     });
+  } catch (error) {
+    if (!committed) rmSync(dirname(dirname(originalDest)), { recursive: true, force: true });
+    throw error;
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
