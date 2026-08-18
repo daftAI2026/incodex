@@ -28,7 +28,7 @@ const runtimeLoadOut = join(outDir, "incodex-runtime-load.cjs");
 const windowKindOut = join(outDir, "incodex-window-kind.cjs");
 
 const inject = Bun.spawnSync({
-  cmd: ["bun", "build", injectTmp, "--outfile", injectOut, "--target", "browser", "--minify"],
+  cmd: ["bun", "build", injectTmp, "--outfile", injectOut, "--target", "browser"],
   cwd: root,
   stdout: "inherit",
   stderr: "inherit",
