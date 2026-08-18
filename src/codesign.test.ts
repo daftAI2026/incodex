@@ -14,6 +14,8 @@ import {
   stripUnretainableEntitlements,
   withDisableLibraryValidation,
   diagnoseSpctl,
+  dumpEntitlements,
+  hostEntitlementsForAdhoc,
   orderForInsideOut,
   signApp,
   signOne,
@@ -58,6 +60,17 @@ describe("vendor helper preservation", () => {
     signOne(app, null, true);
     signApp(app);
     expect(readFileSync(join(cua, "KEEP"), "utf8")).toBe("vendor-original\n");
+  });
+
+  test("adhoc host entitlements keep camera and drop team identifiers", () => {
+    const xml = `<?xml version="1.0"?><plist><dict>
+      <key>com.apple.developer.team-identifier</key><string>ABCD</string>
+      <key>com.apple.security.device.camera</key><true/>
+    </dict></plist>`;
+    const keys = entitlementKeys(hostEntitlementsForAdhoc(xml));
+    expect(keys).toContain("com.apple.security.device.camera");
+    expect(keys).not.toContain("com.apple.developer.team-identifier");
+    expect(entitlementKeys(hostEntitlementsForAdhoc(null))).toContain("com.apple.security.device.camera");
   });
 });
 
