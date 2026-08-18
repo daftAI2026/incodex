@@ -4,39 +4,12 @@ const STYLE_ID = "incodex-privacy-style";
 const BTN_ATTR = "data-incodex-privacy-toggle";
 const TIP_ATTR = "data-incodex-tooltip";
 const LANDING_ATTR = "data-incodex-landing";
-const ROOT_ATTR = "data-incodex-privacy";
-const STORAGE_KEY = "incodex-privacy";
+const ERROR_ATTR = "data-incodex-launch-error";
 const CLUSTER_ATTR = "data-incodex-header-cluster";
 const SHORTCUT_LABEL = "⇧⌘N";
 
-// Private existing state: chat titles and folder names.
-// Product chrome stays: 新对话, 项目 heading, add-project.
-const HIDE_SELECTORS = [
-  "[data-app-action-sidebar-thread-row]",
-  "[data-app-action-sidebar-project-row]",
-];
-const HISTORY_SECTIONS = new Set(["Pinned", "Recents"]);
-const SHOW_MORE_LABELS = new Set(["Show more", "显示更多", "展开显示", "Show all", "显示全部"]);
-const EMPTY_CHAT_LABELS = new Set(["No chats", "没有聊天"]);
-
 const ICON_SVG = `{{HAT_GLASSES_SVG}}`;
 const SEARCH_LABELS = new Set(["Search", "搜索"]);
-
-function readEnabled(): boolean {
-  try {
-    return window.localStorage.getItem(STORAGE_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function writeEnabled(on: boolean): void {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, on ? "1" : "0");
-  } catch {
-    /* ignore */
-  }
-}
 
 function isIncognitoWindow(): boolean {
   return window.__incodexIncognito === true || window.incodex?.isIncognito?.() === true;
@@ -54,62 +27,32 @@ function labelFor(on: boolean): string {
   return on ? t("exit") : t("open");
 }
 
-function apply(on: boolean): void {
+function apply(): void {
   const incognito = isIncognitoWindow();
-  const hide = on && !incognito;
-  document.documentElement.setAttribute(ROOT_ATTR, hide ? "on" : "off");
   document.documentElement.setAttribute("data-incodex-window", incognito ? "incognito" : "normal");
-  const pressed = incognito || on;
   const btn = document.querySelector<HTMLElement>(`[${BTN_ATTR}]`);
   if (btn) {
-    btn.setAttribute("aria-pressed", pressed ? "true" : "false");
-    btn.setAttribute("aria-label", labelFor(pressed));
+    btn.setAttribute("aria-pressed", incognito ? "true" : "false");
+    btn.setAttribute("aria-label", labelFor(incognito));
   }
   const label = document.querySelector<HTMLElement>("[data-incodex-tooltip-label]");
-  if (label) label.textContent = labelFor(pressed);
-  syncDerivedChrome(hide);
+  if (label) label.textContent = labelFor(incognito);
 }
 
-function syncDerivedChrome(on: boolean): void {
-  for (const section of document.querySelectorAll<HTMLElement>("[data-app-action-sidebar-section]")) {
-    const heading = section.getAttribute("data-app-action-sidebar-section-heading") || "";
-    if (on && HISTORY_SECTIONS.has(heading)) section.setAttribute("data-incodex-empty-section", "");
-    else section.removeAttribute("data-incodex-empty-section");
-
-    for (const btn of section.querySelectorAll<HTMLElement>("button")) {
-      const text = (btn.textContent || "").replace(/\s+/g, " ").trim();
-      if (!SHOW_MORE_LABELS.has(text)) continue;
-      if (on) btn.setAttribute("data-incodex-show-more", "");
-      else btn.removeAttribute("data-incodex-show-more");
+async function requestOpen(): Promise<{ ok: boolean; reason?: string }> {
+  if (window.incodex?.openIncognito) {
+    try {
+      return (await window.incodex.openIncognito()) ?? { ok: false, reason: "unavailable" };
+    } catch {
+      return { ok: false, reason: "ipc-failed" };
     }
-    for (const el of section.querySelectorAll<HTMLElement>("span, div, p")) {
-      const text = (el.textContent || "").replace(/\s+/g, " ").trim();
-      if (!EMPTY_CHAT_LABELS.has(text)) continue;
-      if (on) el.setAttribute("data-incodex-empty-chat", "");
-      else el.removeAttribute("data-incodex-empty-chat");
-    }
-  }
-}
-
-function hideInPlace(): void {
-  const next = document.documentElement.getAttribute(ROOT_ATTR) !== "on";
-  writeEnabled(next);
-  apply(next);
-}
-
-async function requestOpen(): Promise<boolean> {
-  try {
-    const result = await window.incodex?.openIncognito?.();
-    if (result?.ok) return true;
-  } catch {
-    /* use beacon */
   }
   try {
     await fetch("https://incodex.invalid/open", { mode: "no-cors", cache: "no-store" });
-    return true;
   } catch {
-    return false;
+    /* beacon cannot confirm */
   }
+  return { ok: false, reason: "unavailable" };
 }
 
 async function activate(): Promise<void> {
@@ -122,7 +65,12 @@ async function activate(): Promise<void> {
     }
     return;
   }
-  await requestOpen();
+  const result = await requestOpen();
+  if (result.ok) {
+    hideLaunchError();
+    return;
+  }
+  showLaunchError();
 }
 
 function ensureStyle(): void {
@@ -132,15 +80,7 @@ function ensureStyle(): void {
     style.id = STYLE_ID;
     document.head.append(style);
   }
-  const hide = HIDE_SELECTORS.map((sel) => `html[${ROOT_ATTR}="on"] ${sel}`).join(",\n");
   style.textContent = `
-    ${hide} { display: none !important; }
-    html[${ROOT_ATTR}="on"] [data-incodex-empty-section],
-    html[${ROOT_ATTR}="on"] [data-app-action-sidebar-project-show-all-toggle],
-    html[${ROOT_ATTR}="on"] [data-incodex-show-more],
-    html[${ROOT_ATTR}="on"] [data-incodex-empty-chat] {
-      display: none !important;
-    }
     [${TIP_ATTR}] {
       position: fixed;
       z-index: 50;
@@ -152,7 +92,74 @@ function ensureStyle(): void {
       box-sizing: border-box;
     }
     [${TIP_ATTR}][data-open="true"] { display: block; }
+    [${ERROR_ATTR}] {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 60;
+      width: min(28rem, calc(100vw - 32px));
+    }
   `;
+}
+
+const WARNING_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" class="icon-xs" aria-hidden="true"><path d="M8 9.8a.767.767 0 1 1 0 1.533A.767.767 0 0 1 8 9.8Zm0-5.134c.368 0 .667.299.667.667V8a.667.667 0 0 1-1.334 0V5.333c0-.368.299-.667.667-.667Z"/><path fill-rule="evenodd" d="M8 1.333a6.667 6.667 0 1 1 0 13.334A6.667 6.667 0 0 1 8 1.333Zm0 1.334a5.333 5.333 0 1 0 0 10.666A5.333 5.333 0 0 0 8 2.667Z" clip-rule="evenodd"/></svg>`;
+
+function hideLaunchError(): void {
+  document.querySelector<HTMLElement>(`[${ERROR_ATTR}]`)?.remove();
+}
+
+function showLaunchError(): void {
+  hideLaunchError();
+  const card = document.createElement("div");
+  card.setAttribute(ERROR_ATTR, "true");
+  card.setAttribute("role", "alert");
+  card.className =
+    "alert-root inline-flex flex-col gap-2 rounded-xl px-2 py-2 text-base leading-[1.4] pointer-events-auto box-shadow-lg border border-warning-outline bg-warning-surface text-warning";
+
+  const row = document.createElement("div");
+  row.className = "flex min-w-0 items-start gap-1";
+
+  const iconWrap = document.createElement("div");
+  iconWrap.className = "flex size-6 shrink-0 grow-0 items-center justify-center self-start";
+  iconWrap.innerHTML = WARNING_ICON;
+
+  const mid = document.createElement("div");
+  mid.className = "flex min-w-0 flex-1 items-start gap-3";
+  const copy = document.createElement("div");
+  copy.className = "min-w-0 flex-1 justify-center gap-2 break-words";
+  const title = document.createElement("div");
+  title.className = "flex min-h-6 items-center text-start font-medium whitespace-pre-wrap";
+  title.textContent = t("errorTitle");
+  const body = document.createElement("div");
+  body.className = "text-start text-warning/80";
+  body.textContent = t("errorBody");
+  copy.append(title, body);
+
+  const actions = document.createElement("div");
+  actions.className = "flex shrink-0 items-center gap-2";
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.className =
+    "shrink-0 rounded-full bg-primary-solid px-3 py-1 text-sm font-medium text-primary-solid";
+  retry.textContent = t("errorRetry");
+  retry.addEventListener("click", () => {
+    hideLaunchError();
+    void activate();
+  });
+  actions.append(retry);
+  mid.append(copy, actions);
+
+  const close = document.createElement("button");
+  close.type = "button";
+  close.setAttribute("aria-label", t("errorClose"));
+  close.className =
+    "flex size-6 shrink-0 grow-0 cursor-interaction items-center justify-center self-start rounded-full hover:bg-background-primary-ghost-hover/5";
+  close.innerHTML = CLOSE_SVG;
+  close.addEventListener("click", () => hideLaunchError());
+
+  row.append(iconWrap, mid, close);
+  card.append(row);
+  document.body.append(card);
 }
 
 function findSearchButton(): HTMLElement | null {
@@ -417,7 +424,7 @@ function ensureButton(): void {
   if (!isParkedInCluster(btn, cluster, search)) {
     cluster.insertBefore(btn, cluster.firstElementChild);
   }
-  apply(isIncognitoWindow() || readEnabled());
+  apply();
 }
 
 function onHotkey(event: KeyboardEvent): void {
@@ -431,16 +438,9 @@ function onHotkey(event: KeyboardEvent): void {
 function start(): void {
   if (window.__incodexStarted) return;
   window.__incodexStarted = true;
-  if (!isIncognitoWindow()) {
-    try {
-      window.localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      /* ignore */
-    }
-  }
   ensureStyle();
   ensureButton();
-  apply(isIncognitoWindow());
+  apply();
   ensureLanding();
   window.addEventListener("keydown", onHotkey, true);
   let scheduled = false;

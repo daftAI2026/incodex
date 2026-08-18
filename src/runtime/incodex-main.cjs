@@ -297,13 +297,19 @@ function applyChromeWindowTile(win) {
 function launchIncognito() {
   if (incognitoAlreadyRunning()) {
     raiseExistingIncognito();
-    return { ok: true, reason: "already-running" };
+    return Promise.resolve({ ok: true, reason: "already-running" });
   }
-  fs.mkdirSync(INCOGNITO_HOME, { recursive: true });
-  fs.mkdirSync(INCOGNITO_CHROMIUM, { recursive: true });
-  burnIncognitoHome();
-  copySettings();
+  try {
+    fs.mkdirSync(INCOGNITO_HOME, { recursive: true });
+    fs.mkdirSync(INCOGNITO_CHROMIUM, { recursive: true });
+    burnIncognitoHome();
+    copySettings();
+  } catch (error) {
+    logLaunch("prepare-failed", { error: String(error) });
+    return Promise.resolve({ ok: false, reason: "prepare-failed" });
+  }
   const bin = process.execPath;
+  if (!bin) return Promise.resolve({ ok: false, reason: "spawn-failed" });
   const args = [`--user-data-dir=${INCOGNITO_CHROMIUM}`];
   const sourceBounds = captureSourceBounds();
   logLaunch("launch", {
@@ -313,20 +319,49 @@ function launchIncognito() {
     sourceBounds,
     tile: CHROME_WINDOW_TILE_PIXELS,
   });
-  const child = spawn(bin, args, {
-    detached: true,
-    stdio: "ignore",
-    env: {
-      ...process.env,
-      CODEX_HOME: INCOGNITO_HOME,
-      INCODEX_INCOGNITO: "1",
-      CODEX_ELECTRON_USER_DATA_PATH: INCOGNITO_CHROMIUM,
-      INCODEX_SOURCE_BOUNDS: sourceBounds,
-    },
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    let child;
+    try {
+      child = spawn(bin, args, {
+        detached: true,
+        stdio: "ignore",
+        env: {
+          ...process.env,
+          CODEX_HOME: INCOGNITO_HOME,
+          INCODEX_INCOGNITO: "1",
+          CODEX_ELECTRON_USER_DATA_PATH: INCOGNITO_CHROMIUM,
+          INCODEX_SOURCE_BOUNDS: sourceBounds,
+        },
+      });
+    } catch (error) {
+      logLaunch("spawn-threw", { error: String(error) });
+      done({ ok: false, reason: "spawn-failed" });
+      return;
+    }
+    if (!child.pid) {
+      logLaunch("spawn-no-pid");
+      done({ ok: false, reason: "spawn-failed" });
+      return;
+    }
+    child.once("error", (error) => {
+      logLaunch("spawn-error", { error: String(error) });
+      done({ ok: false, reason: "spawn-failed" });
+    });
+    child.once("exit", (code) => {
+      if (settled) return;
+      logLaunch("exited-early", { code });
+      done({ ok: false, reason: "exited-early" });
+    });
+    raiseChildWhenReady(child.pid);
+    setTimeout(() => done({ ok: true }), 500);
+    child.unref();
   });
-  raiseChildWhenReady(child.pid);
-  child.unref();
-  return { ok: true };
 }
 
 function interceptOpenBeacon(session) {
