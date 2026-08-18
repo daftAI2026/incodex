@@ -142,6 +142,25 @@ describe("symlink burn and copy", () => {
     ).toThrow(/session id/);
     expect(lstatSync(session.root).isDirectory()).toBe(true);
   });
+
+  test("burn still removes a leftover session after owner.json is already gone", () => {
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const session = createSessionHome(userRoot);
+    writeFileSync(join(session.chromium, "Cache"), "cookie");
+    rmSync(join(session.root, "owner.json"));
+    burnSessionHome(session.root, { userRoot, sessionId: session.sessionId, ino: session.ino, dev: session.dev });
+    expect(() => lstatSync(session.root)).toThrow();
+  });
+
+  test("burn without owner.json still refuses a folder whose name is not the session id", () => {
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const session = createSessionHome(userRoot);
+    rmSync(join(session.root, "owner.json"));
+    expect(() => burnSessionHome(session.root, { userRoot, sessionId: "s-other" })).toThrow(/missing session owner/);
+    expect(lstatSync(session.root).isDirectory()).toBe(true);
+  });
 });
 
 describe("session lifecycle", () => {

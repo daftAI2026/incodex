@@ -240,10 +240,15 @@ function tooltipEl(): HTMLElement {
   return tip;
 }
 
+// Official header tooltips use side=top, sideOffset=2. Pin our bottom edge
+// to that same gap so a taller label still lines up with Search / Info.
+const TOOLTIP_SIDE_OFFSET = 2;
+
 function showTooltip(btn: HTMLElement): void {
   const tip = tooltipEl();
   const label = tip.querySelector<HTMLElement>("[data-incodex-tooltip-label]");
   if (label) label.textContent = labelFor(btn.getAttribute("aria-pressed") === "true");
+  tip.style.visibility = "hidden";
   tip.setAttribute("data-open", "true");
   const rect = btn.getBoundingClientRect();
   const tipRect = tip.getBoundingClientRect();
@@ -251,14 +256,18 @@ function showTooltip(btn: HTMLElement): void {
     window.innerWidth - tipRect.width - 8,
     Math.max(8, rect.left + rect.width / 2 - tipRect.width / 2),
   );
-  const top = Math.max(8, rect.top - tipRect.height - 8);
   tip.style.left = `${left}px`;
-  tip.style.top = `${top}px`;
+  tip.style.top = "auto";
+  tip.style.bottom = `${Math.max(8, window.innerHeight - rect.top + TOOLTIP_SIDE_OFFSET)}px`;
+  tip.style.visibility = "";
 }
 
 function hideTooltip(): void {
   const tip = document.querySelector<HTMLElement>(`[${TIP_ATTR}]`);
-  if (tip) tip.removeAttribute("data-open");
+  if (!tip) return;
+  tip.removeAttribute("data-open");
+  tip.style.bottom = "";
+  tip.style.top = "";
 }
 
 const BANNER_DISMISS_KEY = "incodex-banner-dismissed";

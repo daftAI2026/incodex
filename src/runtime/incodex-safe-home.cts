@@ -157,6 +157,22 @@ function readOwner(home) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
+function assertBurnIdentity(home, expected) {
+  if (!expected.sessionId) return;
+  const file = path.join(home, OWNER_NAME);
+  const stats = assertNotSymlink(file, "owner manifest");
+  if (!stats) {
+    // Child burn already removed owner.json; Chromium may recreate a few
+    // files under the same path. The folder name is the session id.
+    if (path.basename(home) === expected.sessionId) return;
+    throw new Error(`[incodex] missing session owner: ${file}`);
+  }
+  const owner = JSON.parse(fs.readFileSync(file, "utf8"));
+  if (owner.sessionId !== expected.sessionId) {
+    throw new Error("[incodex] session id mismatch; refusing to burn");
+  }
+}
+
 function sessionRootFromHome(home) {
   const base = path.basename(home);
   if (base === "codex-home" || base === "chromium") return path.dirname(home);
@@ -179,12 +195,7 @@ function burnSessionHome(target, expected) {
   const realHome = realExisting(home);
   const sessions = realExisting(path.join(expected.userRoot, SESSIONS_NAME));
   assertInsideParent(realHome, sessions);
-  if (expected.sessionId) {
-    const owner = readOwner(home);
-    if (owner.sessionId !== expected.sessionId) {
-      throw new Error("[incodex] session id mismatch; refusing to burn");
-    }
-  }
+  assertBurnIdentity(home, expected);
   fs.rmSync(home, { recursive: true, force: false });
 }
 

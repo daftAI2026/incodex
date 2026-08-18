@@ -1101,23 +1101,29 @@ function tooltipEl() {
   document.body.append(tip);
   return tip;
 }
+var TOOLTIP_SIDE_OFFSET = 2;
 function showTooltip(btn) {
   const tip = tooltipEl();
   const label = tip.querySelector("[data-incodex-tooltip-label]");
   if (label)
     label.textContent = labelFor(btn.getAttribute("aria-pressed") === "true");
+  tip.style.visibility = "hidden";
   tip.setAttribute("data-open", "true");
   const rect = btn.getBoundingClientRect();
   const tipRect = tip.getBoundingClientRect();
   const left = Math.min(window.innerWidth - tipRect.width - 8, Math.max(8, rect.left + rect.width / 2 - tipRect.width / 2));
-  const top = Math.max(8, rect.top - tipRect.height - 8);
   tip.style.left = `${left}px`;
-  tip.style.top = `${top}px`;
+  tip.style.top = "auto";
+  tip.style.bottom = `${Math.max(8, window.innerHeight - rect.top + TOOLTIP_SIDE_OFFSET)}px`;
+  tip.style.visibility = "";
 }
 function hideTooltip() {
   const tip = document.querySelector(`[${TIP_ATTR}]`);
-  if (tip)
-    tip.removeAttribute("data-open");
+  if (!tip)
+    return;
+  tip.removeAttribute("data-open");
+  tip.style.bottom = "";
+  tip.style.top = "";
 }
 var BANNER_DISMISS_KEY = "incodex-banner-dismissed";
 var BANNER_HOST_ATTR = "data-incodex-banner-host";
