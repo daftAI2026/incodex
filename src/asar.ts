@@ -43,17 +43,20 @@ export function readPackageMain(asarPath: string): {
   };
 }
 
+const ASAR_RUNTIME_LEFTOVERS = [
+  INJECT_NAME,
+  MAIN_NAME,
+  PRELOAD_NAME,
+  SAFE_HOME_NAME,
+  IPC_GUARD_NAME,
+  INSTANCE_NAME,
+  RUNTIME_LOAD_NAME,
+  WINDOW_KIND_NAME,
+] as const;
+
 export async function patchAsar(options: {
   asarPath: string;
   loaderSource: string;
-  injectSource: string;
-  mainSource: string;
-  preloadSource: string;
-  safeHomeSource: string;
-  ipcGuardSource: string;
-  instanceSource: string;
-  runtimeLoadSource: string;
-  windowKindSource: string;
   installId?: string;
 }): Promise<{ hash: string; originalMain: string }> {
   const { main: originalMain, alreadyPatched } = readPackageMain(options.asarPath);
@@ -80,14 +83,9 @@ export async function patchAsar(options: {
     };
     writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
     writeFileSync(join(extractDir, LOADER_NAME), options.loaderSource);
-    writeFileSync(join(extractDir, INJECT_NAME), options.injectSource);
-    writeFileSync(join(extractDir, MAIN_NAME), options.mainSource);
-    writeFileSync(join(extractDir, PRELOAD_NAME), options.preloadSource);
-    writeFileSync(join(extractDir, SAFE_HOME_NAME), options.safeHomeSource);
-    writeFileSync(join(extractDir, IPC_GUARD_NAME), options.ipcGuardSource);
-    writeFileSync(join(extractDir, INSTANCE_NAME), options.instanceSource);
-    writeFileSync(join(extractDir, RUNTIME_LOAD_NAME), options.runtimeLoadSource);
-    writeFileSync(join(extractDir, WINDOW_KIND_NAME), options.windowKindSource);
+    for (const name of ASAR_RUNTIME_LEFTOVERS) {
+      rmSync(join(extractDir, name), { force: true });
+    }
 
     await writeAsar(extractDir, outAsar, unpack);
     commitAsarAndUnpacked(outAsar, options.asarPath);

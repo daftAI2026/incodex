@@ -21,6 +21,7 @@ import {
   selectOfficialInstallSource,
 } from "./live-source";
 import { runCloneInstall } from "./install-transaction";
+import { loadDistRuntimeFiles, publishExternalRuntime } from "./external-runtime";
 import { ASAR_REL, DEFAULT_APP, LIVE_PREV, USER_ROOT } from "./paths";
 import { saveState } from "./state";
 import { advanceJournal, writeJournal, type Journal } from "./transaction";
@@ -115,6 +116,15 @@ function swapOfficialWith(stagedApp: string, originalDest: string | null): void 
 function pointLivePrevAt(originalApp: string): void {
   rmSync(LIVE_PREV, { recursive: true, force: true });
   symlinkSync(originalApp, LIVE_PREV);
+}
+
+function publishBundledRuntime(userRoot: string): void {
+  const current = publishExternalRuntime({
+    userRoot,
+    version: runtimeVersion(),
+    files: loadDistRuntimeFiles(join(repoRoot, "dist")),
+  });
+  console.log(`external runtime ${current.version} -> ${current.release}`);
 }
 
 function runtimeVersion(): string {
@@ -241,6 +251,7 @@ export async function install(appPath: string, options?: { root?: string }): Pro
     const note = liveSupportNote(listing ?? {});
     if (note) console.warn(note);
     ensureRuntime();
+    publishBundledRuntime(options?.root ?? USER_ROOT);
     await installLive();
     return;
   }
@@ -250,6 +261,7 @@ export async function install(appPath: string, options?: { root?: string }): Pro
     );
   }
   ensureRuntime();
+  publishBundledRuntime(options?.root ?? USER_ROOT);
   await runCloneInstall(appPath, {
     root: options?.root,
     runtimeVersion: runtimeVersion(),

@@ -3,7 +3,7 @@
   "sourceCommit": "",
   "files": {
     "incodex-inject.js": "d5bb8e28f585b6d0623dbf8eca503cd98ab4df071e6d455d400a052d728c5844",
-    "incodex-loader.cjs": "7e442d28ac4260582f85a657f3a4f42b5c060b960ee6a4ea9637d048c01e83ac",
+    "incodex-loader.cjs": "6d037a91c1ec7a1fce9280fdfdba78716f99c6f9683226180f024f2f9f973c23",
     "incodex-main.cjs": "5ce04547eeb1766b2a2f2d4877fffbd4d4350879d91e37a446c8f9d8a71f9fbe",
     "incodex-preload.cjs": "d97ae1ae39028c90ff3687b375c8614fc1fe228b3a3d149ead1c5d95d1a6bc55",
     "incodex-safe-home.cjs": "e620409acd7e69403973d50c3f0dfb68f09881ba48c8f149d4ed53e759e73002",

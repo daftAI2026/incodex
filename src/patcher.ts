@@ -38,14 +38,6 @@ export async function patchStagedBundle(options: {
   const patched = await patchAsar({
     asarPath: join(options.stagedApp, ASAR_REL),
     loaderSource: options.artifacts.loader,
-    injectSource: options.artifacts.inject,
-    mainSource: options.artifacts.main,
-    preloadSource: options.artifacts.preload,
-    safeHomeSource: options.artifacts.safeHome,
-    ipcGuardSource: options.artifacts.ipcGuard,
-    instanceSource: options.artifacts.instance,
-    runtimeLoadSource: options.artifacts.runtimeLoad,
-    windowKindSource: options.artifacts.windowKind,
     installId: options.installId,
   });
   writeAsarIntegrity(options.stagedApp, patched.hash);
