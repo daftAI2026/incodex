@@ -11,12 +11,24 @@
     "incodex": "bun src/cli.ts",
     "build:runtime": "bun src/build-runtime.ts",
     "deploy:runtime": "bun src/deploy-runtime.ts",
-    "test": "bun test src"
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.runtime.json",
+    "lint": "biome check src scripts tests",
+    "test": "bun test src tests",
+    "audit": "bun audit",
+    "check:dist": "bun scripts/check-dist.ts",
+    "check": "bun run typecheck && bun run lint && bun test src tests && bun run check:dist"
   },
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=22.12.0",
+    "bun": "1.3.14"
   },
   "dependencies": {
     "@electron/asar": "4.2.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.2.4",
+    "@types/bun": "1.2.20",
+    "@types/node": "22.15.3",
+    "typescript": "5.9.2"
   }
 }

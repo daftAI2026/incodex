@@ -14,6 +14,7 @@ if (!isTopFrame()) {
   module.exports = {};
 } else {
   const api = {
+    /** @param {{ action: string, requestId?: string }} payload */
     requestIncognitoAction: (payload) => ipcRenderer.invoke("incodex-action", payload),
   };
   try {

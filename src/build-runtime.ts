@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeRuntimeManifest } from "./runtime-manifest";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = join(root, "dist");
@@ -45,21 +47,39 @@ try {
   /* ignore */
 }
 
-writeFileSync(loaderOut, readFileSync(join(root, "src/runtime/incodex-loader.cjs")));
-writeFileSync(mainOut, readFileSync(join(root, "src/runtime/incodex-main.cjs")));
-writeFileSync(preloadOut, readFileSync(join(root, "src/runtime/incodex-preload.cjs")));
-writeFileSync(safeHomeOut, readFileSync(join(root, "src/runtime/incodex-safe-home.cjs")));
-writeFileSync(ipcGuardOut, readFileSync(join(root, "src/runtime/incodex-ipc-guard.cjs")));
-writeFileSync(instanceOut, readFileSync(join(root, "src/runtime/incodex-instance.cjs")));
-writeFileSync(runtimeLoadOut, readFileSync(join(root, "src/runtime/incodex-runtime-load.cjs")));
-writeFileSync(windowKindOut, readFileSync(join(root, "src/runtime/incodex-window-kind.cjs")));
+const copies: Array<[string, string]> = [
+  [join(root, "src/runtime/incodex-loader.cjs"), loaderOut],
+  [join(root, "src/runtime/incodex-main.cjs"), mainOut],
+  [join(root, "src/runtime/incodex-preload.cjs"), preloadOut],
+  [join(root, "src/runtime/incodex-safe-home.cjs"), safeHomeOut],
+  [join(root, "src/runtime/incodex-ipc-guard.cjs"), ipcGuardOut],
+  [join(root, "src/runtime/incodex-instance.cjs"), instanceOut],
+  [join(root, "src/runtime/incodex-runtime-load.cjs"), runtimeLoadOut],
+  [join(root, "src/runtime/incodex-window-kind.cjs"), windowKindOut],
+];
+for (const [from, to] of copies) writeFileSync(to, readFileSync(from));
 
-console.log("wrote", injectOut);
-console.log("wrote", loaderOut);
-console.log("wrote", mainOut);
-console.log("wrote", preloadOut);
-console.log("wrote", safeHomeOut);
-console.log("wrote", ipcGuardOut);
-console.log("wrote", instanceOut);
-console.log("wrote", runtimeLoadOut);
-console.log("wrote", windowKindOut);
+const artifactPaths = [
+  injectOut,
+  loaderOut,
+  mainOut,
+  preloadOut,
+  safeHomeOut,
+  ipcGuardOut,
+  instanceOut,
+  runtimeLoadOut,
+  windowKindOut,
+];
+const files: Record<string, string> = {};
+for (const file of artifactPaths) {
+  files[file.slice(outDir.length + 1)] = createHash("sha256").update(readFileSync(file)).digest("hex");
+}
+writeRuntimeManifest(outDir, {
+  runtimeVersion: (
+    JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { version?: string }
+  ).version || "0.0.0",
+  sourceCommit: process.env.SOURCE_COMMIT || "",
+  files,
+});
+
+for (const file of artifactPaths) console.log("wrote", file);

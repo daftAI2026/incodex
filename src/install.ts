@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { fileSha256, inspectApp } from "./app-identity";
-import { headerHash, ensureDir } from "./asar";
+import { headerHash, ensureDir, patchAsar } from "./asar";
 import { signApp, verifyApp } from "./codesign";
 import {
   manifestFromIdentity,
@@ -167,6 +167,14 @@ function pointLivePrevAt(originalApp: string): void {
 }
 
 function runtimeVersion(): string {
+  try {
+    const manifest = JSON.parse(
+      readFileSync(join(repoRoot, "dist/runtime-manifest.json"), "utf8"),
+    ) as { runtimeVersion?: string };
+    if (manifest.runtimeVersion) return manifest.runtimeVersion;
+  } catch {
+    /* fall back to package.json */
+  }
   const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as { version?: string };
   return pkg.version || "0.0.0";
 }

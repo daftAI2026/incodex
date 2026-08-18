@@ -17,26 +17,28 @@
 ## 要求
 
 - macOS
-- [Bun](https://bun.sh)
+- [Bun](https://bun.sh) 1.3.14（见仓库根目录 `.bun-version`）
 - 已安装 Codex / ChatGPT 桌面端
 
 ## 安装
+
+当前还是开发中版本。请用 [Releases](https://github.com/daftAI2026/incodex/releases) 里带 checksum 的 tag；没有 tag 时再临时用一个明确的 commit，不要直接追着移动中的 `main` 打正式应用。
 
 先打一份副本试：
 
 ```bash
 git clone https://github.com/daftAI2026/incodex.git
 cd incodex
-bun install
+bun install --frozen-lockfile
 bun src/cli.ts install --clone
 ```
 
 然后打开用户目录下的副本：`~/.incodex/scratch/ChatGPT.app`。
 
-确认没问题后，再打进正在用的官方应用：
+确认没问题后，再打进正在用的官方应用。`--live` 仍是实验功能，必须先看完计划再确认：
 
 ```bash
-bun src/cli.ts install --live
+bun src/cli.ts install --live --confirm-live
 ```
 
 `--live` 会在用户目录里打好补丁，再整份替换 `/Applications/ChatGPT.app`。卸掉：
@@ -49,6 +51,7 @@ bun src/cli.ts uninstall --live
 
 ```bash
 bun src/cli.ts status
+bun src/cli.ts doctor
 ```
 
 ## 注意
@@ -62,4 +65,7 @@ bun src/cli.ts status
 
 ## 许可
 
-MIT
+MIT。完整文本见 [LICENSE](./LICENSE)。
+
+- 仓库里的 `assets/hat-glasses.svg` 和 `src/runtime/incognito-copy.ts` 翻译文案是 Incodex 原作，同样按 MIT 授权
+- Codex / ChatGPT 的名称、图标和官方应用本身属于 OpenAI，本仓库不授予那些材料的许可

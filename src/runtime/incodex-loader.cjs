@@ -1,11 +1,15 @@
 "use strict";
 
+/** @typedef {{ __incodex?: { originalMain?: string } }} IncodexPackage */
+
 const fs = require("node:fs");
 const path = require("node:path");
 
 const MAIN_NAME = "incodex-main.cjs";
 
+/** @returns {string} */
 function originalMain() {
+  /** @type {IncodexPackage} */
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8"));
   const rel = pkg.__incodex && pkg.__incodex.originalMain;
   if (!rel) throw new Error("[incodex] missing __incodex.originalMain");
