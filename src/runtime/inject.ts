@@ -244,7 +244,7 @@ function hideTooltip(): void {
 const BANNER_DISMISS_KEY = "incodex-banner-dismissed";
 const BANNER_HOST_ATTR = "data-incodex-banner-host";
 const BANNER_TITLE = "无痕窗口";
-const BANNER_BODY = "登录和设置与主窗口相同，不会带入旧对话。关掉后，这次的聊天会从临时目录清掉。";
+const BANNER_BODY = "账号和设置跟平时一样，不会带入之前的对话。关闭窗口后，这次聊天不会留下记录。";
 const CLOSE_SVG = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" class="icon-xs" aria-hidden="true"><path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
 
 function bannerDismissed(): boolean {
