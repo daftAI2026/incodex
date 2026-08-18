@@ -9,14 +9,6 @@ import { LOADER_NAME, MARKER_KEY } from "./paths";
 
 const runtime = {
   loaderSource: "/* loader */",
-  injectSource: "/* inject */",
-  mainSource: "/* main */",
-  preloadSource: "/* preload */",
-  safeHomeSource: "/* safe */",
-  ipcGuardSource: "/* ipc */",
-  instanceSource: "/* instance */",
-  runtimeLoadSource: "/* load */",
-  windowKindSource: "/* window */",
 };
 
 function fixture(): string {
@@ -92,6 +84,8 @@ describe("ASAR fixtures", () => {
     expect(listed).toContain("/index.js");
     expect(listed).toContain("/lib/util.js");
     expect(listed).toContain(`/${LOADER_NAME}`);
+    expect(listed).not.toContain("/incodex-main.cjs");
+    expect(listed).not.toContain("/incodex-inject.js");
     const pkg = JSON.parse(extractFile(archive, "package.json").toString("utf8")) as {
       main: string;
       [MARKER_KEY]?: { originalMain?: string; installId?: string };
@@ -144,6 +138,20 @@ describe("ASAR fixtures", () => {
     expect(extractFile(archive, LOADER_NAME).toString("utf8")).toBe("/* loader */");
     expect(extractFile(archive, "index.js").toString("utf8")).toBe("ok\n");
     expect(readPackageMain(archive).main).toBe("index.js");
+  });
+
+  test("a previous full runtime pack is stripped back to the loader", async () => {
+    const archive = await pack({
+      "package.json": `${JSON.stringify({ main: "index.js" })}\n`,
+      "index.js": "ok\n",
+      "incodex-main.cjs": "OLD MAIN\n",
+      "incodex-inject.js": "OLD INJECT\n",
+    });
+    await patchAsar({ asarPath: archive, installId: "strip", ...runtime });
+    const listed = listPackage(archive, { isPack: false });
+    expect(listed).toContain(`/${LOADER_NAME}`);
+    expect(listed).not.toContain("/incodex-main.cjs");
+    expect(listed).not.toContain("/incodex-inject.js");
   });
 
   test("a nonsense file offset is refused", () => {

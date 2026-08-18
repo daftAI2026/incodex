@@ -36,5 +36,8 @@ describe("architecture boundaries", () => {
     expect(patcher).not.toContain("USER_ROOT");
     expect(patcher).not.toContain(".incodex/targets");
     expect(src("src/install.ts")).toContain("patchStagedBundle");
+    expect(src("src/asar.ts")).toContain("ASAR_RUNTIME_LEFTOVERS");
+    expect(src("src/patcher.ts")).toContain("loaderSource: options.artifacts.loader");
+    expect(src("src/patcher.ts")).not.toContain("mainSource:");
   });
 });

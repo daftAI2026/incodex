@@ -39,14 +39,6 @@ describe("unpack fixtures", () => {
     await patchAsar({
       asarPath: archive,
       loaderSource: "/* loader */",
-      injectSource: "/* inject */",
-      mainSource: "/* main */",
-      preloadSource: "/* preload */",
-      safeHomeSource: "/* safe */",
-      ipcGuardSource: "/* ipc */",
-      instanceSource: "/* instance */",
-      runtimeLoadSource: "/* load */",
-      windowKindSource: "/* window */",
       installId: "test",
     });
     expect(existsSync(`${archive}.unpacked`)).toBe(true);

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { targetStateDir } from "./runtime/incodex-instance.cts";
@@ -32,5 +32,14 @@ describe("runtime load", () => {
         "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
       ),
     ).toBe(join(dest, "incodex-main.cjs"));
+  });
+
+  test("the asar loader fail-opens: it always requires originalMain after attach", () => {
+    const loader = readFileSync(join(import.meta.dir, "runtime/incodex-loader.cts"), "utf8");
+    expect(loader).toContain("try {\n  loadMain();\n} catch");
+    expect(loader).toContain("require(originalMain())");
+    expect(loader.indexOf("require(originalMain())")).toBeGreaterThan(loader.indexOf("loadMain()"));
+    expect(loader).not.toContain('require("./incodex-main.cjs")');
+    expect(loader).toContain("current.json");
   });
 });
