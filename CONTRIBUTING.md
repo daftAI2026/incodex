@@ -38,10 +38,9 @@ bun run check
 
 ## Runtime JavaScript
 
-`src/runtime/*.cjs` is still CommonJS because Electron loads those files as
-separate modules (including optional per-file hot overrides). They are type
-checked with `allowJs` / `checkJs` and JSDoc. New runtime code should be
-TypeScript that the build emits as CJS.
+Runtime sources are TypeScript CommonJS (`src/runtime/*.cts`). `build:runtime`
+runs `tsc` to emit portable CJS into `dist/*.cjs`. The emitted files must use
+`__dirname` at runtime and must not contain a machine-specific absolute path.
 
 ## Pull requests
 

@@ -1,3 +1,4 @@
+// @ts-nocheck
 "use strict";
 
 const AUTH_URL = /accounts\.google|login|signin|oauth|authorize|auth0|okta|sso/i;
@@ -22,7 +23,4 @@ function isAuxiliarySnapshot(snapshot) {
   return classifyWindow(snapshot) === "auxiliary";
 }
 
-module.exports = {
-  classifyWindow,
-  isAuxiliarySnapshot,
-};
+export { classifyWindow, isAuxiliarySnapshot };

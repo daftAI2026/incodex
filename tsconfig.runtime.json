@@ -12,5 +12,5 @@
     "maxNodeModuleJsDepth": 0,
     "types": ["node"]
   },
-  "include": ["src/runtime/**/*.cjs", "src/runtime/**/*.d.ts"]
+  "include": ["src/runtime/**/*.cts", "src/runtime/**/*.d.ts"]
 }

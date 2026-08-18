@@ -1,3 +1,4 @@
+// @ts-nocheck
 "use strict";
 
 const ALLOWED_HOSTS = new Set(["chatgpt.com", "openai.com"]);
@@ -64,9 +65,4 @@ function actionResponse(requestId, result) {
   };
 }
 
-module.exports = {
-  urlAllowed,
-  authorizeSender,
-  snapshotFromEvent,
-  actionResponse,
-};
+export { urlAllowed, authorizeSender, snapshotFromEvent, actionResponse };

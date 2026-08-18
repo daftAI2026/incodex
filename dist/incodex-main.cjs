@@ -1,575 +1,591 @@
+// @ts-nocheck
 "use strict";
-
+Object.defineProperty(exports, "__esModule", { value: true });
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-
 const safeHome = require("./incodex-safe-home.cjs");
 const ipcGuard = require("./incodex-ipc-guard.cjs");
 const instance = require("./incodex-instance.cjs");
 const windowKind = require("./incodex-window-kind.cjs");
-
 const USER_ROOT = path.join(os.homedir(), ".incodex");
 const DEFAULT_CODEX_HOME = path.join(os.homedir(), ".codex");
 const READY_TIMEOUT_MS = 15_000;
 let capturedSourceHome = null;
-
 function targetId() {
-  return instance.targetIdFromExec(process.execPath);
+    return instance.targetIdFromExec(process.execPath);
 }
-
 function stateRoot() {
-  return instance.targetStateDir(USER_ROOT, process.execPath);
+    return instance.targetStateDir(USER_ROOT, process.execPath);
 }
-
 function resolvedCodexHome() {
-  return safeHome.resolveSourceHome(process.env.CODEX_HOME, DEFAULT_CODEX_HOME);
+    return safeHome.resolveSourceHome(process.env.CODEX_HOME, DEFAULT_CODEX_HOME);
 }
-
 function sourceHome() {
-  if (capturedSourceHome) return capturedSourceHome;
-  if (process.env.INCODEX_SOURCE_HOME) {
-    return safeHome.resolveSourceHome(process.env.INCODEX_SOURCE_HOME, DEFAULT_CODEX_HOME);
-  }
-  return resolvedCodexHome();
+    if (capturedSourceHome)
+        return capturedSourceHome;
+    if (process.env.INCODEX_SOURCE_HOME) {
+        return safeHome.resolveSourceHome(process.env.INCODEX_SOURCE_HOME, DEFAULT_CODEX_HOME);
+    }
+    return resolvedCodexHome();
 }
-
 function captureSourceHome() {
-  if (isIncognito()) return;
-  capturedSourceHome = resolvedCodexHome();
+    if (isIncognito())
+        return;
+    capturedSourceHome = resolvedCodexHome();
 }
-
 function isIncognito() {
-  if (process.env.INCODEX_INCOGNITO === "1") return true;
-  return safeHome.isManagedSessionHome(resolvedCodexHome(), USER_ROOT);
+    if (process.env.INCODEX_INCOGNITO === "1")
+        return true;
+    return safeHome.isManagedSessionHome(resolvedCodexHome(), USER_ROOT);
 }
-
 function sessionFromEnv() {
-  const home = process.env.CODEX_HOME;
-  const sessionId = process.env.INCODEX_SESSION_ID;
-  const root = process.env.INCODEX_SESSION_ROOT || (home ? safeHome.sessionRootFromHome(home) : "");
-  if (!home || !sessionId) return null;
-  return { home, sessionId, root };
+    const home = process.env.CODEX_HOME;
+    const sessionId = process.env.INCODEX_SESSION_ID;
+    const root = process.env.INCODEX_SESSION_ROOT || (home ? safeHome.sessionRootFromHome(home) : "");
+    if (!home || !sessionId)
+        return null;
+    return { home, sessionId, root };
 }
-
 function pickFile(name) {
-  const { resolveRuntimeFile } = require("./incodex-runtime-load.cjs");
-  return resolveRuntimeFile(name, __dirname);
+    const { resolveRuntimeFile } = require("./incodex-runtime-load.cjs");
+    return resolveRuntimeFile(name, __dirname);
 }
-
 function injectSource() {
-  const file = pickFile("incodex-inject.js");
-  if (!fs.existsSync(file)) return "";
-  return fs.readFileSync(file, "utf8");
+    const file = pickFile("incodex-inject.js");
+    if (!fs.existsSync(file))
+        return "";
+    return fs.readFileSync(file, "utf8");
 }
-
 function readLocaleOverride() {
-  const file = path.join(sourceHome(), "config.toml");
-  if (!fs.existsSync(file)) return "";
-  try {
-    const match = fs.readFileSync(file, "utf8").match(/^\s*localeOverride\s*=\s*"([^"]+)"/m);
-    return match?.[1]?.trim() ?? "";
-  } catch {
-    return "";
-  }
+    const file = path.join(sourceHome(), "config.toml");
+    if (!fs.existsSync(file))
+        return "";
+    try {
+        const match = fs.readFileSync(file, "utf8").match(/^\s*localeOverride\s*=\s*"([^"]+)"/m);
+        return match?.[1]?.trim() ?? "";
+    }
+    catch {
+        return "";
+    }
 }
-
 function burnIncognitoHome() {
-  const session = sessionFromEnv();
-  const home = session?.root || session?.home || process.env.CODEX_HOME;
-  if (!home) return;
-  try {
-    safeHome.burnSessionHome(home, {
-      userRoot: USER_ROOT,
-      sessionId: session?.sessionId || process.env.INCODEX_SESSION_ID,
-    });
-    logLaunch("burn", { home });
-  } catch (error) {
-    logLaunch("burn-refused", { error: String(error), home });
-  }
+    const session = sessionFromEnv();
+    const home = session?.root || session?.home || process.env.CODEX_HOME;
+    if (!home)
+        return;
+    try {
+        safeHome.burnSessionHome(home, {
+            userRoot: USER_ROOT,
+            sessionId: session?.sessionId || process.env.INCODEX_SESSION_ID,
+        });
+        logLaunch("burn", { home });
+    }
+    catch (error) {
+        logLaunch("burn-refused", { error: String(error), home });
+    }
 }
-
 function markSessionReady() {
-  const session = sessionFromEnv();
-  if (!session?.root) return;
-  try {
-    safeHome.writeReady(session.root);
-  } catch {
-    /* already written */
-  }
+    const session = sessionFromEnv();
+    if (!session?.root)
+        return;
+    try {
+        safeHome.writeReady(session.root);
+    }
+    catch {
+        /* already written */
+    }
 }
-
 function writePid() {
-  try {
-    instance.writeOwnerLock(stateRoot(), instance.currentOwner(process.env.INCODEX_SESSION_ID, process.execPath));
-  } catch (error) {
-    if (instance.staleOwner(stateRoot())) {
-      instance.clearOwnerLock(stateRoot());
-      instance.writeOwnerLock(stateRoot(), instance.currentOwner(process.env.INCODEX_SESSION_ID, process.execPath));
-      return;
+    try {
+        instance.writeOwnerLock(stateRoot(), instance.currentOwner(process.env.INCODEX_SESSION_ID, process.execPath));
     }
-    logLaunch("lock-refused", { error: String(error) });
-  }
+    catch (error) {
+        if (instance.staleOwner(stateRoot())) {
+            instance.clearOwnerLock(stateRoot());
+            instance.writeOwnerLock(stateRoot(), instance.currentOwner(process.env.INCODEX_SESSION_ID, process.execPath));
+            return;
+        }
+        logLaunch("lock-refused", { error: String(error) });
+    }
 }
-
 function clearPid() {
-  instance.clearOwnerLock(stateRoot());
+    instance.clearOwnerLock(stateRoot());
 }
-
 async function incognitoAlreadyRunning() {
-  const connected = await instance.connectExisting(stateRoot());
-  if (connected) return true;
-  if (instance.staleOwner(stateRoot())) instance.clearOwnerLock(stateRoot());
-  return false;
-}
-
-function raisePid(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return;
-  if (process.platform !== "darwin") return;
-  spawn(
-    "osascript",
-    [
-      "-e",
-      `tell application "System Events" to set frontmost of (first process whose unix id is ${pid}) to true`,
-    ],
-    { detached: true, stdio: "ignore" },
-  ).unref();
-}
-
-function isAuxiliaryWindow(win) {
-  if (!win || win.isDestroyed()) return true;
-  try {
-    const bounds = typeof win.getBounds === "function" ? win.getBounds() : {};
-    const url = win.webContents && !win.webContents.isDestroyed() ? win.webContents.getURL() : "";
-    return windowKind.isAuxiliarySnapshot({
-      alwaysOnTop: typeof win.isAlwaysOnTop === "function" && win.isAlwaysOnTop(),
-      focusable: typeof win.isFocusable !== "function" || win.isFocusable(),
-      width: bounds.width,
-      height: bounds.height,
-      url,
-      hasParent: typeof win.getParentWindow === "function" && Boolean(win.getParentWindow()),
-    });
-  } catch {
+    const connected = await instance.connectExisting(stateRoot());
+    if (connected)
+        return true;
+    if (instance.staleOwner(stateRoot()))
+        instance.clearOwnerLock(stateRoot());
     return false;
-  }
 }
-
+function raisePid(pid) {
+    if (!Number.isInteger(pid) || pid <= 0)
+        return;
+    if (process.platform !== "darwin")
+        return;
+    spawn("osascript", [
+        "-e",
+        `tell application "System Events" to set frontmost of (first process whose unix id is ${pid}) to true`,
+    ], { detached: true, stdio: "ignore" }).unref();
+}
+function isAuxiliaryWindow(win) {
+    if (!win || win.isDestroyed())
+        return true;
+    try {
+        const bounds = typeof win.getBounds === "function" ? win.getBounds() : {};
+        const url = win.webContents && !win.webContents.isDestroyed() ? win.webContents.getURL() : "";
+        return windowKind.isAuxiliarySnapshot({
+            alwaysOnTop: typeof win.isAlwaysOnTop === "function" && win.isAlwaysOnTop(),
+            focusable: typeof win.isFocusable !== "function" || win.isFocusable(),
+            width: bounds.width,
+            height: bounds.height,
+            url,
+            hasParent: typeof win.getParentWindow === "function" && Boolean(win.getParentWindow()),
+        });
+    }
+    catch {
+        return false;
+    }
+}
 function mainWindows(electron) {
-  return electron.BrowserWindow.getAllWindows().filter((win) => !isAuxiliaryWindow(win));
+    return electron.BrowserWindow.getAllWindows().filter((win) => !isAuxiliaryWindow(win));
 }
-
 function hideAuxiliaryWindows(electron) {
-  for (const win of electron.BrowserWindow.getAllWindows()) {
-    if (!isAuxiliaryWindow(win)) continue;
-    try {
-      win.hide();
-    } catch {
-      /* ignore */
+    for (const win of electron.BrowserWindow.getAllWindows()) {
+        if (!isAuxiliaryWindow(win))
+            continue;
+        try {
+            win.hide();
+        }
+        catch {
+            /* ignore */
+        }
     }
-  }
 }
-
 function raiseOurWindows() {
-  let electron;
-  try {
-    electron = require("electron");
-  } catch {
-    raisePid(process.pid);
-    return;
-  }
-  hideAuxiliaryWindows(electron);
-  try {
-    if (process.platform === "darwin") electron.app.focus({ steal: true });
-  } catch {
-    /* ignore */
-  }
-  for (const win of mainWindows(electron)) {
+    let electron;
     try {
-      if (win.isMinimized()) win.restore();
-      win.show();
-      win.focus();
-      if (typeof win.moveTop === "function") win.moveTop();
-    } catch {
-      /* ignore */
+        electron = require("electron");
     }
-  }
-  raisePid(process.pid);
+    catch {
+        raisePid(process.pid);
+        return;
+    }
+    hideAuxiliaryWindows(electron);
+    try {
+        if (process.platform === "darwin")
+            electron.app.focus({ steal: true });
+    }
+    catch {
+        /* ignore */
+    }
+    for (const win of mainWindows(electron)) {
+        try {
+            if (win.isMinimized())
+                win.restore();
+            win.show();
+            win.focus();
+            if (typeof win.moveTop === "function")
+                win.moveTop();
+        }
+        catch {
+            /* ignore */
+        }
+    }
+    raisePid(process.pid);
 }
-
 async function raiseExistingIncognito() {
-  const ok = await instance.connectExisting(stateRoot());
-  logLaunch("raise-existing", { ok });
-  return ok;
+    const ok = await instance.connectExisting(stateRoot());
+    logLaunch("raise-existing", { ok });
+    return ok;
 }
-
 function raiseChildWhenReady(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return;
-  for (const delay of [150, 400, 800, 1400]) {
-    setTimeout(() => raisePid(pid), delay);
-  }
+    if (!Number.isInteger(pid) || pid <= 0)
+        return;
+    for (const delay of [150, 400, 800, 1400]) {
+        setTimeout(() => raisePid(pid), delay);
+    }
 }
-
 function logLaunch(message, extra) {
-  try {
-    safeHome.rotateAndAppendLog(
-      stateRoot(),
-      `${new Date().toISOString()} ${message}${extra ? ` ${JSON.stringify(extra)}` : ""}\n`,
-    );
-  } catch {
-    /* ignore */
-  }
+    try {
+        safeHome.rotateAndAppendLog(stateRoot(), `${new Date().toISOString()} ${message}${extra ? ` ${JSON.stringify(extra)}` : ""}\n`);
+    }
+    catch {
+        /* ignore */
+    }
 }
-
 // Chrome NewIncognitoWindow -> NewEmptyWindow -> OpenEmptyWindow -> WindowSizer.
 // Mac tile is kWindowTilePixels = 22 in window_sizer_mac.mm; Aura/Linux/Win is 10.
 const CHROME_WINDOW_TILE_PIXELS = process.platform === "darwin" ? 22 : 10;
 const CHROME_MIN_VISIBLE = 30;
-
 function captureSourceBounds() {
-  try {
-    const { BrowserWindow } = require("electron");
-    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
-    if (!win || win.isDestroyed()) return "";
-    const b = win.getBounds();
-    return `${b.x},${b.y},${b.width},${b.height}`;
-  } catch {
-    return "";
-  }
+    try {
+        const { BrowserWindow } = require("electron");
+        const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+        if (!win || win.isDestroyed())
+            return "";
+        const b = win.getBounds();
+        return `${b.x},${b.y},${b.width},${b.height}`;
+    }
+    catch {
+        return "";
+    }
 }
-
 function readSourceBounds() {
-  const raw = process.env.INCODEX_SOURCE_BOUNDS;
-  if (!raw) return null;
-  const parts = raw.split(",").map(Number);
-  if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) return null;
-  return { x: parts[0], y: parts[1], width: parts[2], height: parts[3] };
+    const raw = process.env.INCODEX_SOURCE_BOUNDS;
+    if (!raw)
+        return null;
+    const parts = raw.split(",").map(Number);
+    if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n)))
+        return null;
+    return { x: parts[0], y: parts[1], width: parts[2], height: parts[3] };
 }
-
 function chromeTileBounds(source, screen) {
-  const bounds = {
-    x: source.x + CHROME_WINDOW_TILE_PIXELS,
-    y: source.y + CHROME_WINDOW_TILE_PIXELS,
-    width: source.width,
-    height: source.height,
-  };
-  const display = screen.getDisplayMatching(bounds);
-  const work = display.workArea;
-  bounds.height = Math.max(CHROME_MIN_VISIBLE, bounds.height);
-  bounds.width = Math.max(CHROME_MIN_VISIBLE, bounds.width);
-  if (bounds.y < work.y) bounds.y = work.y;
-  if (process.platform === "darwin") {
-    bounds.height = Math.min(work.height, bounds.height);
-    if (bounds.x < work.x || bounds.x + bounds.width > work.x + work.width) {
-      bounds.x = work.x;
-    }
-    if (bounds.y < work.y || bounds.y + bounds.height > work.y + work.height) {
-      bounds.y = work.y;
-    }
-  } else {
-    const minX = work.x + CHROME_MIN_VISIBLE - bounds.width;
-    const minY = work.y + CHROME_MIN_VISIBLE - bounds.height;
-    const maxX = work.x + work.width - CHROME_MIN_VISIBLE;
-    const maxY = work.y + work.height - CHROME_MIN_VISIBLE;
-    bounds.x = Math.min(Math.max(bounds.x, minX), maxX);
-    bounds.y = Math.min(Math.max(bounds.y, minY), maxY);
-  }
-  return bounds;
-}
-
-function applyChromeWindowTile(win) {
-  if (!win || win.isDestroyed()) return;
-  const source = readSourceBounds();
-  if (!source) return;
-  let screen;
-  try {
-    screen = require("electron").screen;
-  } catch {
-    return;
-  }
-  try {
-    win.setBounds(chromeTileBounds(source, screen));
-  } catch {
-    /* ignore */
-  }
-}
-
-const launchHolder = { current: null };
-
-function launchIncognito() {
-  return instance.singleFlight(launchHolder, launchIncognitoOnce);
-}
-
-async function launchIncognitoOnce() {
-  if (await incognitoAlreadyRunning()) {
-    await raiseExistingIncognito();
-    return { ok: true, reason: "already-running" };
-  }
-  const appTarget = targetId();
-  try {
-    safeHome.sweepOrphanSessions(USER_ROOT, { targetId: appTarget });
-  } catch (error) {
-    logLaunch("janitor-failed", { error: String(error) });
-  }
-  let session;
-  try {
-    session = safeHome.createSessionHome(USER_ROOT, {
-      targetId: appTarget,
-      pid: process.pid,
-      sourceHome: sourceHome(),
-    });
-    safeHome.copySettings(session.home, sourceHome(), USER_ROOT);
-  } catch (error) {
-    logLaunch("prepare-failed", { error: String(error) });
-    return Promise.resolve({ ok: false, reason: "prepare-failed" });
-  }
-  const bin = process.execPath;
-  if (!bin) {
-    try {
-      safeHome.burnSessionHome(session.root, { userRoot: USER_ROOT, sessionId: session.sessionId });
-    } catch {
-      /* ignore */
-    }
-    return Promise.resolve({ ok: false, reason: "spawn-failed" });
-  }
-  const args = [`--user-data-dir=${session.chromium}`];
-  const sourceBounds = captureSourceBounds();
-  logLaunch("launch", {
-    bin,
-    home: session.home,
-    chromium: session.chromium,
-    sessionId: session.sessionId,
-    sourceBounds,
-    tile: CHROME_WINDOW_TILE_PIXELS,
-  });
-  return new Promise((resolve) => {
-    let settled = false;
-    const done = (result) => {
-      if (settled) return;
-      settled = true;
-      resolve(result);
+    const bounds = {
+        x: source.x + CHROME_WINDOW_TILE_PIXELS,
+        y: source.y + CHROME_WINDOW_TILE_PIXELS,
+        width: source.width,
+        height: source.height,
     };
-    let child;
-    try {
-      child = spawn(bin, args, {
-        detached: true,
-        stdio: "ignore",
-        env: {
-          ...process.env,
-          CODEX_HOME: session.home,
-          INCODEX_INCOGNITO: "1",
-          INCODEX_SESSION_ID: session.sessionId,
-          INCODEX_SESSION_ROOT: session.root,
-          CODEX_ELECTRON_USER_DATA_PATH: session.chromium,
-          INCODEX_SOURCE_BOUNDS: sourceBounds,
-          INCODEX_SOURCE_HOME: sourceHome(),
-        },
-      });
-    } catch (error) {
-      logLaunch("spawn-threw", { error: String(error) });
-      try {
-        safeHome.burnSessionHome(session.root, { userRoot: USER_ROOT, sessionId: session.sessionId });
-      } catch {
-        /* ignore */
-      }
-      done({ ok: false, reason: "spawn-failed" });
-      return;
-    }
-    if (!child.pid) {
-      logLaunch("spawn-no-pid");
-      try {
-        safeHome.burnSessionHome(session.root, { userRoot: USER_ROOT, sessionId: session.sessionId });
-      } catch {
-        /* ignore */
-      }
-      done({ ok: false, reason: "spawn-failed" });
-      return;
-    }
-    child.on("error", (error) => {
-      logLaunch("spawn-error", { error: String(error) });
-      done({ ok: false, reason: "spawn-failed" });
-    });
-    child.on("exit", (code) => {
-      logLaunch("child-exit", { code, sessionId: session.sessionId });
-      try {
-        safeHome.burnSessionHome(session.root, { userRoot: USER_ROOT, sessionId: session.sessionId });
-      } catch (error) {
-        logLaunch("parent-burn-refused", { error: String(error) });
-      }
-      if (!settled) done({ ok: false, reason: "exited-early" });
-    });
-    raiseChildWhenReady(child.pid);
-    const started = Date.now();
-    const timer = setInterval(() => {
-      if (settled) {
-        clearInterval(timer);
-        return;
-      }
-      if (safeHome.hasReady(session.root)) {
-        clearInterval(timer);
-        logLaunch("ready", { sessionId: session.sessionId, ms: Date.now() - started });
-        done({ ok: true });
-        return;
-      }
-      if (Date.now() - started > READY_TIMEOUT_MS) {
-        clearInterval(timer);
-        logLaunch("ready-timeout", { sessionId: session.sessionId });
-        done({ ok: false, reason: "ready-timeout" });
-      }
-    }, 50);
-  });
-}
-
-const allowedWindows = new Set();
-
-function rememberWindow(win) {
-  if (!win || typeof win.id !== "number") return;
-  allowedWindows.add(win.id);
-  win.once("closed", () => allowedWindows.delete(win.id));
-}
-
-function authorizeEvent(event) {
-  return ipcGuard.authorizeSender(ipcGuard.snapshotFromEvent(event), allowedWindows);
-}
-
-function hookPreload(session) {
-  if (!session || session.__incodexPreload) return;
-  session.__incodexPreload = true;
-  const preload = pickFile("incodex-preload.cjs");
-  if (!fs.existsSync(preload)) return;
-  try {
-    if (typeof session.registerPreloadScript === "function") {
-      session.registerPreloadScript({ filePath: preload, type: "frame" });
-    } else if (typeof session.setPreloads === "function") {
-      session.setPreloads([...(session.getPreloads?.() ?? []), preload]);
-    }
-  } catch (error) {
-    console.error("[incodex] preload failed", error);
-  }
-}
-
-function hookWindow(win, source) {
-  if (!win?.webContents || isAuxiliaryWindow(win)) return;
-  rememberWindow(win);
-  hookPreload(win.webContents.session);
-  const run = () => {
-    if (!source || win.webContents.isDestroyed()) return;
-    const locale = JSON.stringify(readLocaleOverride());
-    const prefix = `window.__incodexIncognito=${isIncognito() ? "true" : "false"};window.__incodexLocale=${locale};`;
-    win.webContents.executeJavaScript(prefix + source, false).catch(() => {});
-  };
-  win.webContents.on("dom-ready", run);
-  win.webContents.on("did-finish-load", run);
-  run();
-}
-
-function attachElectron() {
-  let electron;
-  try {
-    electron = require("electron");
-  } catch {
-    return;
-  }
-  captureSourceHome();
-
-  if (!isIncognito()) {
-    try {
-      safeHome.sweepOrphanSessions(USER_ROOT, { targetId: targetId() });
-    } catch (error) {
-      logLaunch("janitor-failed", { error: String(error) });
-    }
-  } else {
-    process.env.INCODEX_INCOGNITO = "1";
-  }
-
-  const source = injectSource();
-  electron.ipcMain.handle("incodex-action", async (event, payload) => {
-    const requestId = typeof payload?.requestId === "string" ? payload.requestId : "";
-    const gate = authorizeEvent(event);
-    if (!gate.ok) return ipcGuard.actionResponse(requestId, gate);
-    const action = payload?.action;
-    if (action === "open") {
-      if (isIncognito()) {
-        return ipcGuard.actionResponse(requestId, { ok: false, code: "ALREADY_INCOGNITO", reason: "already-incognito" });
-      }
-      const result = await launchIncognito();
-      return ipcGuard.actionResponse(requestId, {
-        ok: result.ok === true,
-        code: result.ok ? "OK" : String(result.reason || "FAILED").toUpperCase(),
-        reason: result.reason,
-      });
-    }
-    if (action === "quit") {
-      if (!isIncognito()) {
-        return ipcGuard.actionResponse(requestId, { ok: false, code: "NOT_INCOGNITO", reason: "not-incognito" });
-      }
-      burnIncognitoHome();
-      clearPid();
-      electron.app.quit();
-      return ipcGuard.actionResponse(requestId, { ok: true, code: "OK" });
-    }
-    return ipcGuard.actionResponse(requestId, { ok: false, code: "UNKNOWN_ACTION" });
-  });
-
-  electron.app.on("browser-window-created", (_event, win) => {
-    if (isAuxiliaryWindow(win)) {
-      if (isIncognito()) {
-        try {
-          win.hide();
-        } catch {
-          /* ignore */
+    const display = screen.getDisplayMatching(bounds);
+    const work = display.workArea;
+    bounds.height = Math.max(CHROME_MIN_VISIBLE, bounds.height);
+    bounds.width = Math.max(CHROME_MIN_VISIBLE, bounds.width);
+    if (bounds.y < work.y)
+        bounds.y = work.y;
+    if (process.platform === "darwin") {
+        bounds.height = Math.min(work.height, bounds.height);
+        if (bounds.x < work.x || bounds.x + bounds.width > work.x + work.width) {
+            bounds.x = work.x;
         }
-      }
-      return;
+        if (bounds.y < work.y || bounds.y + bounds.height > work.y + work.height) {
+            bounds.y = work.y;
+        }
     }
-    hookWindow(win, source);
-    if (!isIncognito()) return;
-    applyChromeWindowTile(win);
-    const bringForward = () => {
-      applyChromeWindowTile(win);
-      raiseOurWindows();
-    };
-    win.once("ready-to-show", () => {
-      markSessionReady();
-      bringForward();
-    });
-    win.once("show", () => {
-      bringForward();
-      setTimeout(bringForward, 50);
-      setTimeout(bringForward, 300);
-    });
-    win.on("closed", () => {
-      if (mainWindows(electron).some((open) => open !== win && !open.isDestroyed())) return;
-      burnIncognitoHome();
-      clearPid();
-      electron.app.exit(0);
-    });
-  });
-  if (isIncognito()) {
-    writePid();
-    instance.listenForRaise(stateRoot(), () => raiseOurWindows());
-    electron.app.on("window-all-closed", () => {
-      burnIncognitoHome();
-      clearPid();
-      electron.app.exit(0);
-    });
-    electron.app.on("before-quit", () => {
-      burnIncognitoHome();
-      clearPid();
-    });
-  }
-
-  const ready = () => {
-    hookPreload(electron.session.defaultSession);
-    for (const win of electron.BrowserWindow.getAllWindows()) hookWindow(win, source);
-    if (isIncognito()) raiseOurWindows();
-  };
-  if (electron.app.isReady()) ready();
-  else void electron.app.whenReady().then(ready);
+    else {
+        const minX = work.x + CHROME_MIN_VISIBLE - bounds.width;
+        const minY = work.y + CHROME_MIN_VISIBLE - bounds.height;
+        const maxX = work.x + work.width - CHROME_MIN_VISIBLE;
+        const maxY = work.y + work.height - CHROME_MIN_VISIBLE;
+        bounds.x = Math.min(Math.max(bounds.x, minX), maxX);
+        bounds.y = Math.min(Math.max(bounds.y, minY), maxY);
+    }
+    return bounds;
 }
-
+function applyChromeWindowTile(win) {
+    if (!win || win.isDestroyed())
+        return;
+    const source = readSourceBounds();
+    if (!source)
+        return;
+    let screen;
+    try {
+        screen = require("electron").screen;
+    }
+    catch {
+        return;
+    }
+    try {
+        win.setBounds(chromeTileBounds(source, screen));
+    }
+    catch {
+        /* ignore */
+    }
+}
+const launchHolder = { current: null };
+function launchIncognito() {
+    return instance.singleFlight(launchHolder, launchIncognitoOnce);
+}
+async function launchIncognitoOnce() {
+    if (await incognitoAlreadyRunning()) {
+        await raiseExistingIncognito();
+        return { ok: true, reason: "already-running" };
+    }
+    const appTarget = targetId();
+    try {
+        safeHome.sweepOrphanSessions(USER_ROOT, { targetId: appTarget });
+    }
+    catch (error) {
+        logLaunch("janitor-failed", { error: String(error) });
+    }
+    let session;
+    try {
+        session = safeHome.createSessionHome(USER_ROOT, {
+            targetId: appTarget,
+            pid: process.pid,
+            sourceHome: sourceHome(),
+        });
+        safeHome.copySettings(session.home, sourceHome(), USER_ROOT);
+    }
+    catch (error) {
+        logLaunch("prepare-failed", { error: String(error) });
+        return Promise.resolve({ ok: false, reason: "prepare-failed" });
+    }
+    const bin = process.execPath;
+    if (!bin) {
+        try {
+            safeHome.burnSessionHome(session.root, { userRoot: USER_ROOT, sessionId: session.sessionId });
+        }
+        catch {
+            /* ignore */
+        }
+        return Promise.resolve({ ok: false, reason: "spawn-failed" });
+    }
+    const args = [`--user-data-dir=${session.chromium}`];
+    const sourceBounds = captureSourceBounds();
+    logLaunch("launch", {
+        bin,
+        home: session.home,
+        chromium: session.chromium,
+        sessionId: session.sessionId,
+        sourceBounds,
+        tile: CHROME_WINDOW_TILE_PIXELS,
+    });
+    return new Promise((resolve) => {
+        let settled = false;
+        const done = (result) => {
+            if (settled)
+                return;
+            settled = true;
+            resolve(result);
+        };
+        let child;
+        try {
+            child = spawn(bin, args, {
+                detached: true,
+                stdio: "ignore",
+                env: {
+                    ...process.env,
+                    CODEX_HOME: session.home,
+                    INCODEX_INCOGNITO: "1",
+                    INCODEX_SESSION_ID: session.sessionId,
+                    INCODEX_SESSION_ROOT: session.root,
+                    CODEX_ELECTRON_USER_DATA_PATH: session.chromium,
+                    INCODEX_SOURCE_BOUNDS: sourceBounds,
+                    INCODEX_SOURCE_HOME: sourceHome(),
+                },
+            });
+        }
+        catch (error) {
+            logLaunch("spawn-threw", { error: String(error) });
+            try {
+                safeHome.burnSessionHome(session.root, { userRoot: USER_ROOT, sessionId: session.sessionId });
+            }
+            catch {
+                /* ignore */
+            }
+            done({ ok: false, reason: "spawn-failed" });
+            return;
+        }
+        if (!child.pid) {
+            logLaunch("spawn-no-pid");
+            try {
+                safeHome.burnSessionHome(session.root, { userRoot: USER_ROOT, sessionId: session.sessionId });
+            }
+            catch {
+                /* ignore */
+            }
+            done({ ok: false, reason: "spawn-failed" });
+            return;
+        }
+        child.on("error", (error) => {
+            logLaunch("spawn-error", { error: String(error) });
+            done({ ok: false, reason: "spawn-failed" });
+        });
+        child.on("exit", (code) => {
+            logLaunch("child-exit", { code, sessionId: session.sessionId });
+            try {
+                safeHome.burnSessionHome(session.root, { userRoot: USER_ROOT, sessionId: session.sessionId });
+            }
+            catch (error) {
+                logLaunch("parent-burn-refused", { error: String(error) });
+            }
+            if (!settled)
+                done({ ok: false, reason: "exited-early" });
+        });
+        raiseChildWhenReady(child.pid);
+        const started = Date.now();
+        const timer = setInterval(() => {
+            if (settled) {
+                clearInterval(timer);
+                return;
+            }
+            if (safeHome.hasReady(session.root)) {
+                clearInterval(timer);
+                logLaunch("ready", { sessionId: session.sessionId, ms: Date.now() - started });
+                done({ ok: true });
+                return;
+            }
+            if (Date.now() - started > READY_TIMEOUT_MS) {
+                clearInterval(timer);
+                logLaunch("ready-timeout", { sessionId: session.sessionId });
+                done({ ok: false, reason: "ready-timeout" });
+            }
+        }, 50);
+    });
+}
+const allowedWindows = new Set();
+function rememberWindow(win) {
+    if (!win || typeof win.id !== "number")
+        return;
+    allowedWindows.add(win.id);
+    win.once("closed", () => allowedWindows.delete(win.id));
+}
+function authorizeEvent(event) {
+    return ipcGuard.authorizeSender(ipcGuard.snapshotFromEvent(event), allowedWindows);
+}
+function hookPreload(session) {
+    if (!session || session.__incodexPreload)
+        return;
+    session.__incodexPreload = true;
+    const preload = pickFile("incodex-preload.cjs");
+    if (!fs.existsSync(preload))
+        return;
+    try {
+        if (typeof session.registerPreloadScript === "function") {
+            session.registerPreloadScript({ filePath: preload, type: "frame" });
+        }
+        else if (typeof session.setPreloads === "function") {
+            session.setPreloads([...(session.getPreloads?.() ?? []), preload]);
+        }
+    }
+    catch (error) {
+        console.error("[incodex] preload failed", error);
+    }
+}
+function hookWindow(win, source) {
+    if (!win?.webContents || isAuxiliaryWindow(win))
+        return;
+    rememberWindow(win);
+    hookPreload(win.webContents.session);
+    const run = () => {
+        if (!source || win.webContents.isDestroyed())
+            return;
+        const locale = JSON.stringify(readLocaleOverride());
+        const prefix = `window.__incodexIncognito=${isIncognito() ? "true" : "false"};window.__incodexLocale=${locale};`;
+        win.webContents.executeJavaScript(prefix + source, false).catch(() => { });
+    };
+    win.webContents.on("dom-ready", run);
+    win.webContents.on("did-finish-load", run);
+    run();
+}
+function attachElectron() {
+    let electron;
+    try {
+        electron = require("electron");
+    }
+    catch {
+        return;
+    }
+    captureSourceHome();
+    if (!isIncognito()) {
+        try {
+            safeHome.sweepOrphanSessions(USER_ROOT, { targetId: targetId() });
+        }
+        catch (error) {
+            logLaunch("janitor-failed", { error: String(error) });
+        }
+    }
+    else {
+        process.env.INCODEX_INCOGNITO = "1";
+    }
+    const source = injectSource();
+    electron.ipcMain.handle("incodex-action", async (event, payload) => {
+        const requestId = typeof payload?.requestId === "string" ? payload.requestId : "";
+        const gate = authorizeEvent(event);
+        if (!gate.ok)
+            return ipcGuard.actionResponse(requestId, gate);
+        const action = payload?.action;
+        if (action === "open") {
+            if (isIncognito()) {
+                return ipcGuard.actionResponse(requestId, { ok: false, code: "ALREADY_INCOGNITO", reason: "already-incognito" });
+            }
+            const result = await launchIncognito();
+            return ipcGuard.actionResponse(requestId, {
+                ok: result.ok === true,
+                code: result.ok ? "OK" : String(result.reason || "FAILED").toUpperCase(),
+                reason: result.reason,
+            });
+        }
+        if (action === "quit") {
+            if (!isIncognito()) {
+                return ipcGuard.actionResponse(requestId, { ok: false, code: "NOT_INCOGNITO", reason: "not-incognito" });
+            }
+            burnIncognitoHome();
+            clearPid();
+            electron.app.quit();
+            return ipcGuard.actionResponse(requestId, { ok: true, code: "OK" });
+        }
+        return ipcGuard.actionResponse(requestId, { ok: false, code: "UNKNOWN_ACTION" });
+    });
+    electron.app.on("browser-window-created", (_event, win) => {
+        if (isAuxiliaryWindow(win)) {
+            if (isIncognito()) {
+                try {
+                    win.hide();
+                }
+                catch {
+                    /* ignore */
+                }
+            }
+            return;
+        }
+        hookWindow(win, source);
+        if (!isIncognito())
+            return;
+        applyChromeWindowTile(win);
+        const bringForward = () => {
+            applyChromeWindowTile(win);
+            raiseOurWindows();
+        };
+        win.once("ready-to-show", () => {
+            markSessionReady();
+            bringForward();
+        });
+        win.once("show", () => {
+            bringForward();
+            setTimeout(bringForward, 50);
+            setTimeout(bringForward, 300);
+        });
+        win.on("closed", () => {
+            if (mainWindows(electron).some((open) => open !== win && !open.isDestroyed()))
+                return;
+            burnIncognitoHome();
+            clearPid();
+            electron.app.exit(0);
+        });
+    });
+    if (isIncognito()) {
+        writePid();
+        instance.listenForRaise(stateRoot(), () => raiseOurWindows());
+        electron.app.on("window-all-closed", () => {
+            burnIncognitoHome();
+            clearPid();
+            electron.app.exit(0);
+        });
+        electron.app.on("before-quit", () => {
+            burnIncognitoHome();
+            clearPid();
+        });
+    }
+    const ready = () => {
+        hookPreload(electron.session.defaultSession);
+        for (const win of electron.BrowserWindow.getAllWindows())
+            hookWindow(win, source);
+        if (isIncognito())
+            raiseOurWindows();
+    };
+    if (electron.app.isReady())
+        ready();
+    else
+        void electron.app.whenReady().then(ready);
+}
 try {
-  attachElectron();
-} catch (error) {
-  console.error("[incodex] main attach failed", error);
+    attachElectron();
+}
+catch (error) {
+    console.error("[incodex] main attach failed", error);
 }

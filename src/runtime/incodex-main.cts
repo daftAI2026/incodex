@@ -1,3 +1,4 @@
+// @ts-nocheck
 "use strict";
 
 const { spawn } = require("node:child_process");

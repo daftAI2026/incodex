@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { targetStateDir } from "./runtime/incodex-instance.cjs";
-import { devHotEnabled, hotHomeRoot, resolveRuntimeFile } from "./runtime/incodex-runtime-load.cjs";
+import { targetStateDir } from "./runtime/incodex-instance.cts";
+import { devHotEnabled, hotHomeRoot, resolveRuntimeFile } from "./runtime/incodex-runtime-load.cts";
 
 describe("runtime load", () => {
   test("HOME missing does not yield a relative .incodex path", () => {

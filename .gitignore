@@ -3,6 +3,7 @@
 .idea/
 .vscode/
 node_modules/
+.runtime-cjs/
 dist/_inject.src.ts
 dist/incognito-copy.ts
 .incodex-backup/

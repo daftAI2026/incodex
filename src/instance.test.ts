@@ -9,7 +9,7 @@ import {
   staleOwner,
   targetStateDir,
   writeOwnerLock,
-} from "./runtime/incodex-instance.cjs";
+} from "./runtime/incodex-instance.cts";
 
 describe("instance owner", () => {
   test("a reused PID with a different start time is not the same process", () => {

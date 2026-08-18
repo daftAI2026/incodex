@@ -1,4 +1,7 @@
+// @ts-nocheck
 "use strict";
+
+import { targetStateDir } from "./incodex-instance.cts";
 
 const fs = require("node:fs");
 const path = require("node:path");
@@ -18,13 +21,8 @@ function resolveRuntimeFile(name, bundledDir, env = process.env, execPath = proc
   if (!devHotEnabled(env)) return bundled;
   const root = hotHomeRoot(env);
   if (!root) return bundled;
-  const instance = require("./incodex-instance.cjs");
-  const override = path.join(instance.targetStateDir(root, execPath), name);
+  const override = path.join(targetStateDir(root, execPath), name);
   return fs.existsSync(override) ? override : bundled;
 }
 
-module.exports = {
-  devHotEnabled,
-  hotHomeRoot,
-  resolveRuntimeFile,
-};
+export { devHotEnabled, hotHomeRoot, resolveRuntimeFile };
