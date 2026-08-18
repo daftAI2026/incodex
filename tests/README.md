@@ -1,0 +1,13 @@
+# Tests
+
+Unit tests live next to the code they cover (`src/*.test.ts`). This directory
+holds cross-cutting fixtures and engineering checks.
+
+| path | purpose |
+| --- | --- |
+| `src/*.test.ts` | unit tests (CLI, backup identity, symlink, ASAR, IPC) |
+| `tests/supported-builds.test.ts` | compatibility manifest shape |
+| `tests/runtime-manifest.test.ts` | committed runtime metadata |
+
+ASAR fixture coverage is in `src/asar-unpack.test.ts` and `src/asar-upgrade.test.ts`.
+Install-fault and privacy-forensics cases still belong here once they exist.
