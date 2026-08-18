@@ -2,8 +2,8 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { inspectApp } from "./app-identity";
 import { headerHash, readPackageMain } from "./asar";
-import { verifyApp } from "./codesign";
-import { loadCurrentInstallation, originalAppPath, targetId } from "./installation";
+import { diagnoseSpctl, verifyApp, type SpctlDiagnosis } from "./codesign";
+import { loadCurrentInstallation, loadSigningManifest, originalAppPath, targetId } from "./installation";
 import { readAsarIntegrity } from "./integrity";
 import { ASAR_REL, DEFAULT_APP, USER_ROOT } from "./paths";
 import { staleOwner, targetStateDir } from "./runtime/incodex-instance.cts";
@@ -39,6 +39,14 @@ export type Diagnosis = {
   orphanSessions: string[];
   leftoverChromium: string[];
   interruptedTransactions: Array<{ installId: string; phase: Journal["phase"]; action: string }>;
+  signing: {
+    verified: boolean;
+    componentCount: number;
+    hardenedRuntimeOk: boolean;
+    unretainable: string[];
+    spctl: SpctlDiagnosis;
+  } | null;
+  spctl: SpctlDiagnosis | null;
 };
 
 export function diagnose(appPath = DEFAULT_APP, root = USER_ROOT): Diagnosis {
@@ -82,6 +90,8 @@ export function diagnose(appPath = DEFAULT_APP, root = USER_ROOT): Diagnosis {
   const orphanSessions = sessions.filter((session) => isOrphanSession(session));
   const execGuess = join(appPath, "Contents/MacOS/ChatGPT");
   const stateDir = targetStateDir(root, existsSync(execGuess) ? execGuess : appPath);
+  const storedSigning = stored ? loadSigningManifest(stored.dir) : null;
+  const spctl = info.exists ? diagnoseSpctl(appPath) : null;
 
   return {
     target: appPath,
@@ -103,6 +113,16 @@ export function diagnose(appPath = DEFAULT_APP, root = USER_ROOT): Diagnosis {
     stalePid: existsSync(join(stateDir, "incognito.lock")) ? staleOwner(stateDir) : false,
     orphanSessions,
     leftoverChromium,
+    signing: storedSigning
+      ? {
+          verified: storedSigning.verified,
+          componentCount: storedSigning.components.length,
+          hardenedRuntimeOk: storedSigning.observations.every((item) => item.hardenedRuntime),
+          unretainable: storedSigning.unretainableEntitlements.flatMap((item) => item.keys),
+          spctl: storedSigning.spctl,
+        }
+      : null,
+    spctl,
     interruptedTransactions: listJournals(root)
       .filter((journal) => recoverAction(journal) !== "done")
       .map((journal) => ({
@@ -128,6 +148,18 @@ export function printDiagnosis(report: Diagnosis): void {
   console.log("runtime version:", report.runtimeVersion ?? "unknown");
   console.log("original main:", report.originalMain || "unknown");
   console.log("codesign verify:", report.codesignOk);
+  if (report.signing) {
+    console.log("signing components:", report.signing.componentCount);
+    console.log("signing hardened runtime:", report.signing.hardenedRuntimeOk);
+    console.log(
+      "adhoc-unretainable entitlements:",
+      report.signing.unretainable.length ? report.signing.unretainable.join(", ") : "none",
+    );
+  }
+  if (report.spctl) {
+    console.log("spctl (diagnostic only):", report.spctl.accepted ? "accepted" : "not accepted");
+    console.log("spctl used as success gate:", report.spctl.usedAsSuccessGate);
+  }
   console.log("backup:", report.backup ? (report.backup.originalExists && report.backup.complete ? "ok" : "incomplete") : "none");
   if (report.backup) {
     console.log("backup belongs to target:", report.backup.belongsToTarget);

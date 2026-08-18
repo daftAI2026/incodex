@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import type { AppIdentity } from "./app-identity";
 import { ensureDir } from "./asar";
+import type { SigningManifest } from "./codesign";
 import { DEFAULT_APP, INSTALLATIONS_DIR, USER_ROOT } from "./paths";
 
 export type TransactionState = "committed";
@@ -163,6 +164,7 @@ export function writeInstallation(options: {
   appPath: string;
   manifest: InstallManifest;
   runtime: RuntimeManifest;
+  signing?: SigningManifest;
   root?: string;
 }): string {
   const root = options.root ?? USER_ROOT;
@@ -176,12 +178,29 @@ export function writeInstallation(options: {
   ensureDir(join(dir, "original"));
   ensureDir(join(dir, "patched"));
   writeFileSync(join(dir, "patched", "runtime-manifest.json"), `${JSON.stringify(options.runtime, null, 2)}\n`);
-  writeFileSync(join(dir, "manifest.json"), `${JSON.stringify(options.manifest, null, 2)}\n`);
+  if (options.signing) {
+    writeFileSync(
+      join(dir, "patched", "signing-manifest.json"),
+      `${JSON.stringify(options.signing, null, 2)}\n`,
+      { mode: 0o600 },
+    );
+  }
+  writeFileSync(join(dir, "manifest.json"), `${JSON.stringify(options.manifest, null, 2)}\n`, { mode: 0o600 });
   const pointer = join(targetStoreDir(options.appPath, root), "current.json");
   const staged = `${pointer}.tmp`;
   writeFileSync(staged, `${JSON.stringify({ installId: options.manifest.installId }, null, 2)}\n`);
   renameSync(staged, pointer);
   return dir;
+}
+
+export function loadSigningManifest(dir: string): SigningManifest | null {
+  try {
+    const raw = JSON.parse(readFileSync(join(dir, "patched", "signing-manifest.json"), "utf8")) as SigningManifest;
+    if (raw.schemaVersion !== 1 || !raw.spctl || raw.spctl.usedAsSuccessGate !== false) return null;
+    return raw;
+  } catch {
+    return null;
+  }
 }
 
 export function snapshotOriginalApp(sourceApp: string, destApp: string): void {

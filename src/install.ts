@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { fileSha256, inspectApp } from "./app-identity";
 import { headerHash, ensureDir, patchAsar } from "./asar";
 import { assertLiveSupported, findSupportedBuild } from "./compatibility/supported-builds";
-import { signApp, verifyApp } from "./codesign";
+import { signApp, verifyTarget, type SigningManifest } from "./codesign";
 import {
   manifestFromIdentity,
   originalAppPath,
@@ -103,7 +103,7 @@ async function patchAppBundle(
   appPath: string,
   resign: boolean,
   installId: string,
-): Promise<{ originalMain: string; hash: string }> {
+): Promise<{ originalMain: string; hash: string; signing: SigningManifest | null }> {
   const src = runtimeSources();
   const patched = await patchAsar({
     asarPath: join(appPath, ASAR_REL),
@@ -119,14 +119,8 @@ async function patchAppBundle(
     installId,
   });
   writeAsarIntegrity(appPath, patched.hash);
-  if (resign) signApp(appPath);
-  return patched;
-}
-
-function requireVerified(appPath: string, label: string): void {
-  if (!verifyApp(appPath)) {
-    throw new Error(`${label}: codesign --verify failed; refusing to touch the real target`);
-  }
+  const signing = resign ? signApp(appPath) : null;
+  return { ...patched, signing };
 }
 
 
@@ -214,7 +208,7 @@ async function installLive(): Promise<void> {
   const patched = await patchAppBundle(stagedApp, true, installId);
   journal = advanceJournal(journal, "PATCHED");
   journal = advanceJournal(journal, "SIGNED");
-  requireVerified(stagedApp, "staged official app");
+  verifyTarget(stagedApp, "staged official app");
   journal = advanceJournal(journal, "VERIFIED");
   const patchedAsar = join(stagedApp, ASAR_REL);
   const patchedAsarFileHash = fileSha256(patchedAsar);
@@ -222,7 +216,7 @@ async function installLive(): Promise<void> {
   swapOfficialWith(stagedApp, decision.action === "use-current" ? originalDest : null);
   journal = advanceJournal(journal, "SWAPPED");
   if (!existsSync(originalDest)) throw new Error("original snapshot missing after install");
-  requireVerified(DEFAULT_APP, "installed official app");
+  verifyTarget(DEFAULT_APP, "installed official app");
   journal = advanceJournal(journal, "TARGET_VERIFIED");
   pointLivePrevAt(originalDest);
   const createdAt = new Date().toISOString();
@@ -246,6 +240,7 @@ async function installLive(): Promise<void> {
       patchedAsarHeaderHash: patched.hash,
       patchedAsarFileHash,
     },
+    signing: patched.signing ?? undefined,
   });
   saveLiveInstallRecord({
     schemaVersion: 1,

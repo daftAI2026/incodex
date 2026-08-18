@@ -7,6 +7,7 @@ import {
   loadCurrentInstallation,
   parseInstallManifest,
   targetId,
+  loadSigningManifest,
   writeInstallation,
   type InstallManifest,
 } from "./installation";
@@ -156,6 +157,36 @@ describe("immutable per-target store", () => {
         runtime: runtime("first"),
       }),
     ).toThrow(/immutable/);
+  });
+
+  test("persists a signing manifest next to the runtime manifest", () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-inst-"));
+    const appPath = "/Applications/ChatGPT.app";
+    const dir = writeInstallation({
+      root,
+      appPath,
+      manifest: manifest({ installId: "signed-1" }),
+      runtime: runtime("signed-1"),
+      signing: {
+        schemaVersion: 1,
+        appPath,
+        verified: true,
+        spctl: { status: 3, output: "rejected", accepted: false, usedAsSuccessGate: false },
+        components: [],
+        observations: [],
+        unretainableEntitlements: [
+          {
+            relativePath: ".",
+            keys: ["com.apple.developer.team-identifier"],
+            reason: "adhoc identity cannot legally retain team-bound entitlements",
+          },
+        ],
+      },
+    });
+    const stored = loadSigningManifest(dir);
+    expect(stored?.verified).toBe(true);
+    expect(stored?.spctl.usedAsSuccessGate).toBe(false);
+    expect(stored?.unretainableEntitlements[0]?.keys).toContain("com.apple.developer.team-identifier");
   });
 });
 
