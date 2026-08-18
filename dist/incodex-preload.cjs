@@ -2,14 +2,23 @@
 
 const { contextBridge, ipcRenderer } = require("electron");
 
-const api = {
-  isIncognito: () => ipcRenderer.sendSync("incodex-is-incognito") === true,
-  openIncognito: () => ipcRenderer.invoke("incodex-open-incognito"),
-  quitIncognito: () => ipcRenderer.invoke("incodex-quit-incognito"),
-};
+function isTopFrame() {
+  try {
+    return window === window.top;
+  } catch {
+    return false;
+  }
+}
 
-try {
-  contextBridge.exposeInMainWorld("incodex", api);
-} catch {
-  globalThis.incodex = api;
+if (!isTopFrame()) {
+  module.exports = {};
+} else {
+  const api = {
+    requestIncognitoAction: (payload) => ipcRenderer.invoke("incodex-action", payload),
+  };
+  try {
+    contextBridge.exposeInMainWorld("incodex", api);
+  } catch {
+    globalThis.incodex = api;
+  }
 }
