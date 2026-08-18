@@ -13,7 +13,9 @@ function originalMain() {
 }
 
 function loadMain() {
-  const override = path.join(require("node:os").homedir(), ".incodex", MAIN_NAME);
+  const instance = require("./incodex-instance.cjs");
+  const userRoot = path.join(require("node:os").homedir(), ".incodex");
+  const override = path.join(instance.targetStateDir(userRoot, process.execPath), MAIN_NAME);
   const bundled = path.join(__dirname, MAIN_NAME);
   const file = fs.existsSync(override) ? override : bundled;
   if (!fs.existsSync(file)) throw new Error("[incodex] missing incodex-main.cjs");

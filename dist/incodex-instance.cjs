@@ -9,12 +9,20 @@ const crypto = require("node:crypto");
 const LOCK_NAME = "incognito.lock";
 const SOCK_NAME = "incognito.sock";
 
-function lockPath(userRoot) {
-  return path.join(userRoot, LOCK_NAME);
+function targetIdFromExec(execPath) {
+  return crypto.createHash("sha256").update(execPath || "unknown").digest("hex").slice(0, 12);
 }
 
-function sockPath(userRoot) {
-  return path.join(userRoot, SOCK_NAME);
+function targetStateDir(userRoot, execPath) {
+  return path.join(userRoot, "targets", targetIdFromExec(execPath));
+}
+
+function lockPath(stateRoot) {
+  return path.join(stateRoot, LOCK_NAME);
+}
+
+function sockPath(stateRoot) {
+  return path.join(stateRoot, SOCK_NAME);
 }
 
 function processIdentity(pid) {
@@ -36,8 +44,9 @@ function ownerMatchesLive(owner, live) {
   );
 }
 
-function writeOwnerLock(userRoot, owner) {
-  const file = lockPath(userRoot);
+function writeOwnerLock(stateRoot, owner) {
+  fs.mkdirSync(stateRoot, { recursive: true, mode: 0o700 });
+  const file = lockPath(stateRoot);
   const fd = fs.openSync(
     file,
     fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0),
@@ -50,8 +59,8 @@ function writeOwnerLock(userRoot, owner) {
   }
 }
 
-function readOwnerLock(userRoot) {
-  const file = lockPath(userRoot);
+function readOwnerLock(stateRoot) {
+  const file = lockPath(stateRoot);
   try {
     const stats = fs.lstatSync(file);
     if (stats.isSymbolicLink()) return null;
@@ -61,8 +70,8 @@ function readOwnerLock(userRoot) {
   }
 }
 
-function clearOwnerLock(userRoot) {
-  const file = lockPath(userRoot);
+function clearOwnerLock(stateRoot) {
+  const file = lockPath(stateRoot);
   try {
     const stats = fs.lstatSync(file);
     if (stats.isSymbolicLink()) return;
@@ -71,7 +80,7 @@ function clearOwnerLock(userRoot) {
     /* ignore */
   }
   try {
-    fs.rmSync(sockPath(userRoot));
+    fs.rmSync(sockPath(stateRoot));
   } catch {
     /* ignore */
   }
@@ -88,17 +97,17 @@ function currentOwner(sessionId, execPath) {
   };
 }
 
-function staleOwner(userRoot) {
-  const owner = readOwnerLock(userRoot);
+function staleOwner(stateRoot) {
+  const owner = readOwnerLock(stateRoot);
   if (!owner) return true;
   const live = processIdentity(owner.pid);
   if (!live) return true;
   return !ownerMatchesLive(owner, { ...live, execPath: owner.execPath });
 }
 
-function connectExisting(userRoot, timeoutMs = 400) {
+function connectExisting(stateRoot, timeoutMs = 400) {
   return new Promise((resolve) => {
-    const socket = net.connect(sockPath(userRoot));
+    const socket = net.connect(sockPath(stateRoot));
     let done = false;
     const finish = (ok) => {
       if (done) return;
@@ -116,25 +125,28 @@ function connectExisting(userRoot, timeoutMs = 400) {
   });
 }
 
-function listenForRaise(userRoot, onRaise) {
+function listenForRaise(stateRoot, onRaise) {
   try {
-    fs.rmSync(sockPath(userRoot));
+    fs.rmSync(sockPath(stateRoot));
   } catch {
     /* ignore */
   }
+  fs.mkdirSync(stateRoot, { recursive: true, mode: 0o700 });
   const server = net.createServer((socket) => {
     socket.on("data", (buf) => {
       if (String(buf).includes("raise")) onRaise();
       socket.end("ok\n");
     });
   });
-  server.listen(sockPath(userRoot));
+  server.listen(sockPath(stateRoot));
   return server;
 }
 
 module.exports = {
   LOCK_NAME,
   SOCK_NAME,
+  targetIdFromExec,
+  targetStateDir,
   processIdentity,
   ownerMatchesLive,
   writeOwnerLock,

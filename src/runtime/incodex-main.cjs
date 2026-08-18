@@ -1,7 +1,6 @@
 "use strict";
 
 const { spawn } = require("node:child_process");
-const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -15,7 +14,11 @@ const DEFAULT_CODEX_HOME = path.join(os.homedir(), ".codex");
 const READY_TIMEOUT_MS = 15_000;
 
 function targetId() {
-  return crypto.createHash("sha256").update(process.execPath || "unknown").digest("hex").slice(0, 12);
+  return instance.targetIdFromExec(process.execPath);
+}
+
+function stateRoot() {
+  return instance.targetStateDir(USER_ROOT, process.execPath);
 }
 
 function resolvedCodexHome() {
@@ -38,7 +41,7 @@ function sessionFromEnv() {
 }
 
 function pickFile(name) {
-  const override = path.join(USER_ROOT, name);
+  const override = path.join(stateRoot(), name);
   if (fs.existsSync(override)) return override;
   return path.join(__dirname, name);
 }
@@ -87,11 +90,11 @@ function markSessionReady() {
 
 function writePid() {
   try {
-    instance.writeOwnerLock(USER_ROOT, instance.currentOwner(process.env.INCODEX_SESSION_ID, process.execPath));
+    instance.writeOwnerLock(stateRoot(), instance.currentOwner(process.env.INCODEX_SESSION_ID, process.execPath));
   } catch (error) {
-    if (instance.staleOwner(USER_ROOT)) {
-      instance.clearOwnerLock(USER_ROOT);
-      instance.writeOwnerLock(USER_ROOT, instance.currentOwner(process.env.INCODEX_SESSION_ID, process.execPath));
+    if (instance.staleOwner(stateRoot())) {
+      instance.clearOwnerLock(stateRoot());
+      instance.writeOwnerLock(stateRoot(), instance.currentOwner(process.env.INCODEX_SESSION_ID, process.execPath));
       return;
     }
     logLaunch("lock-refused", { error: String(error) });
@@ -99,13 +102,13 @@ function writePid() {
 }
 
 function clearPid() {
-  instance.clearOwnerLock(USER_ROOT);
+  instance.clearOwnerLock(stateRoot());
 }
 
 async function incognitoAlreadyRunning() {
-  const connected = await instance.connectExisting(USER_ROOT);
+  const connected = await instance.connectExisting(stateRoot());
   if (connected) return true;
-  if (instance.staleOwner(USER_ROOT)) instance.clearOwnerLock(USER_ROOT);
+  if (instance.staleOwner(stateRoot())) instance.clearOwnerLock(stateRoot());
   return false;
 }
 
@@ -178,7 +181,7 @@ function raiseOurWindows() {
 }
 
 async function raiseExistingIncognito() {
-  const ok = await instance.connectExisting(USER_ROOT);
+  const ok = await instance.connectExisting(stateRoot());
   logLaunch("raise-existing", { ok });
   return ok;
 }
@@ -193,7 +196,7 @@ function raiseChildWhenReady(pid) {
 function logLaunch(message, extra) {
   try {
     safeHome.rotateAndAppendLog(
-      USER_ROOT,
+      stateRoot(),
       `${new Date().toISOString()} ${message}${extra ? ` ${JSON.stringify(extra)}` : ""}\n`,
     );
   } catch {
@@ -525,7 +528,7 @@ function attachElectron() {
   });
   if (isIncognito()) {
     writePid();
-    instance.listenForRaise(USER_ROOT, () => raiseOurWindows());
+    instance.listenForRaise(stateRoot(), () => raiseOurWindows());
     electron.app.on("window-all-closed", () => {
       burnIncognitoHome();
       clearPid();
