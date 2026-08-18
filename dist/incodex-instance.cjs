@@ -125,6 +125,16 @@ function connectExisting(stateRoot, timeoutMs = 400) {
   });
 }
 
+function singleFlight(holder, start) {
+  if (holder.current) return holder.current;
+  holder.current = Promise.resolve()
+    .then(start)
+    .finally(() => {
+      holder.current = null;
+    });
+  return holder.current;
+}
+
 function listenForRaise(stateRoot, onRaise) {
   try {
     fs.rmSync(sockPath(stateRoot));
@@ -156,4 +166,5 @@ module.exports = {
   staleOwner,
   connectExisting,
   listenForRaise,
+  singleFlight,
 };
