@@ -20,6 +20,7 @@ import {
   saveLiveInstallRecord,
   selectOfficialInstallSource,
 } from "./live-source";
+import { runCloneInstall } from "./install-transaction";
 import { ASAR_REL, DEFAULT_APP, LIVE_PREV, USER_ROOT } from "./paths";
 import { saveState } from "./state";
 import { advanceJournal, writeJournal, type Journal } from "./transaction";
@@ -128,18 +129,7 @@ function requireVerified(appPath: string, label: string): void {
   }
 }
 
-function swapBundle(stagedApp: string, targetApp: string): void {
-  const outgoing = `${targetApp}.incodex-outgoing`;
-  rmSync(outgoing, { recursive: true, force: true });
-  renameSync(targetApp, outgoing);
-  try {
-    renameSync(stagedApp, targetApp);
-  } catch (error) {
-    renameSync(outgoing, targetApp);
-    throw error;
-  }
-  rmSync(outgoing, { recursive: true, force: true });
-}
+
 
 function swapOfficialWith(stagedApp: string, originalDest: string | null): void {
   const outgoing = join(USER_ROOT, "ChatGPT.app.outgoing");
@@ -283,7 +273,7 @@ async function installLive(): Promise<void> {
   console.log("to restore official Codex: bun src/cli.ts uninstall --live");
 }
 
-export async function install(appPath: string): Promise<void> {
+export async function install(appPath: string, options?: { root?: string }): Promise<void> {
   if (!existsSync(appPath)) throw new Error(`Codex app not found: ${appPath}`);
   const listing = inspectApp(appPath).listing;
   if (isOfficialApp(appPath)) {
@@ -298,84 +288,9 @@ export async function install(appPath: string): Promise<void> {
     );
   }
   ensureRuntime();
-  const asarPath = join(appPath, ASAR_REL);
-  const before = headerHash(asarPath);
-  const identity = inspectApp(appPath).identity;
-  if (!identity) throw new Error(`could not read app identity: ${appPath}`);
-  const installId = randomUUID();
-  const originalDest = originalAppPath(appPath, installId);
-  const stagedApp = join(USER_ROOT, "scratch", `ChatGPT.app.staged-${installId}`);
-  let journal: Journal = {
-    schemaVersion: 1,
-    installId,
-    targetRealPath: resolve(appPath),
-    stagedApp,
-    originalSnapshot: originalDest,
-    phase: "DISCOVERED",
-    updatedAt: new Date().toISOString(),
-  };
-  writeJournal(journal);
-  let committed = false;
-  try {
-    snapshotOriginalApp(appPath, originalDest);
-    journal = advanceJournal(journal, "BACKUP_COMMITTED");
-    rmSync(stagedApp, { recursive: true, force: true });
-    const copied = spawnSync("ditto", [appPath, stagedApp], { encoding: "utf8" });
-    if (copied.status !== 0) throw new Error(copied.stderr || "failed to stage app bundle");
-    journal = advanceJournal(journal, "STAGED");
-    const patched = await patchAppBundle(stagedApp, false, installId);
-    journal = advanceJournal(journal, "PATCHED");
-    signApp(stagedApp);
-    journal = advanceJournal(journal, "SIGNED");
-    requireVerified(stagedApp, "staged app");
-    journal = advanceJournal(journal, "VERIFIED");
-    swapBundle(stagedApp, appPath);
-    journal = advanceJournal(journal, "SWAPPED");
-    requireVerified(appPath, "installed app");
-    journal = advanceJournal(journal, "TARGET_VERIFIED");
-    const createdAt = new Date().toISOString();
-    const patchedAsarFileHash = fileSha256(join(appPath, ASAR_REL));
-    writeInstallation({
-      appPath,
-      manifest: manifestFromIdentity({
-        installId,
-        targetRealPath: appPath,
-        original: identity,
-        originalAsarHeaderHash: before,
-        patchedAsarHeaderHash: patched.hash,
-        patchedAsarFileHash,
-        originalMain: patched.originalMain,
-        runtimeVersion: runtimeVersion(),
-        createdAt,
-      }),
-      runtime: {
-        installId,
-        originalMain: patched.originalMain,
-        patchedAsarHeaderHash: patched.hash,
-        patchedAsarFileHash,
-      },
-    });
-    saveState({
-      appPath,
-      originalMain: patched.originalMain,
-      asarHashBefore: before,
-      asarHashAfter: patched.hash,
-      installedAt: createdAt,
-      installId,
-      bundleIdentifier: identity.bundleIdentifier,
-      appVersion: identity.appVersion,
-      appBuild: identity.appBuild,
-      architecture: identity.architecture,
-      originalAsarFileHash: identity.asarFileHash,
-      originalPlistFileHash: identity.plistFileHash,
-    });
-    journal = advanceJournal(journal, "COMMITTED");
-    committed = true;
-  } catch (error) {
-    if (!committed) {
-      rmSync(stagedApp, { recursive: true, force: true });
-      rmSync(dirname(dirname(originalDest)), { recursive: true, force: true });
-    }
-    throw error;
-  }
+  await runCloneInstall(appPath, {
+    root: options?.root,
+    runtimeVersion: runtimeVersion(),
+    patch: (stagedApp, installId) => patchAppBundle(stagedApp, false, installId),
+  });
 }
