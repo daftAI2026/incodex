@@ -5,13 +5,11 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
+const safeHome = require("./incodex-safe-home.cjs");
+
 const USER_ROOT = path.join(os.homedir(), ".incodex");
-const INCOGNITO_HOME = path.join(USER_ROOT, "incognito-home");
 const INCOGNITO_CHROMIUM = path.join(USER_ROOT, "incognito-chromium");
 const DEFAULT_CODEX_HOME = path.join(os.homedir(), ".codex");
-const AUTH_NAME = "auth.json";
-const SETTINGS_FILES = [AUTH_NAME, "config.toml"];
-const KEEP_ON_BURN = new Set(SETTINGS_FILES);
 
 function resolvedCodexHome() {
   const env = process.env.CODEX_HOME;
@@ -21,7 +19,14 @@ function resolvedCodexHome() {
 
 function isIncognito() {
   if (process.env.INCODEX_INCOGNITO === "1") return true;
-  return path.resolve(resolvedCodexHome()) === path.resolve(INCOGNITO_HOME);
+  return safeHome.isManagedSessionHome(resolvedCodexHome(), USER_ROOT);
+}
+
+function sessionFromEnv() {
+  const home = process.env.CODEX_HOME;
+  const sessionId = process.env.INCODEX_SESSION_ID;
+  if (!home || !sessionId) return null;
+  return { home, sessionId };
 }
 
 function pickFile(name) {
@@ -47,65 +52,42 @@ function readLocaleOverride() {
   }
 }
 
-function copySettings() {
-  fs.mkdirSync(INCOGNITO_HOME, { recursive: true });
-  let copied = 0;
-  for (const name of SETTINGS_FILES) {
-    const src = path.join(DEFAULT_CODEX_HOME, name);
-    if (!fs.existsSync(src)) continue;
-    fs.copyFileSync(src, path.join(INCOGNITO_HOME, name));
-    copied += 1;
-  }
-  return copied > 0;
-}
-
-const PID_NAME = ".incodex-pid";
-
-function assertSafeIncognitoHome() {
-  const home = path.resolve(INCOGNITO_HOME);
-  const real = path.resolve(DEFAULT_CODEX_HOME);
-  const root = path.resolve(USER_ROOT);
-  if (home === real) throw new Error("[incodex] refuse to burn real CODEX_HOME");
-  if (!home.startsWith(`${root}${path.sep}`)) {
-    throw new Error("[incodex] incognito home is outside ~/.incodex");
-  }
-  return home;
-}
-
 function burnIncognitoHome() {
-  let home;
+  const session = sessionFromEnv();
+  const home = session?.home || process.env.CODEX_HOME;
+  if (!home) return;
   try {
-    home = assertSafeIncognitoHome();
+    safeHome.burnSessionHome(home, {
+      userRoot: USER_ROOT,
+      sessionId: session?.sessionId || process.env.INCODEX_SESSION_ID,
+    });
+    logLaunch("burn", { home });
   } catch (error) {
-    logLaunch("burn-refused", { error: String(error) });
-    return;
+    logLaunch("burn-refused", { error: String(error), home });
   }
-  if (!fs.existsSync(home)) return;
-  for (const name of fs.readdirSync(home)) {
-    if (KEEP_ON_BURN.has(name) || name === PID_NAME) continue;
-    fs.rmSync(path.join(home, name), { recursive: true, force: true });
-  }
-  logLaunch("burn");
 }
 
 function writePid() {
-  fs.mkdirSync(INCOGNITO_HOME, { recursive: true });
-  fs.writeFileSync(path.join(INCOGNITO_HOME, PID_NAME), String(process.pid));
+  safeHome.writePidFile(USER_ROOT, process.pid);
 }
 
 function clearPid() {
   try {
-    fs.rmSync(path.join(INCOGNITO_HOME, PID_NAME), { force: true });
-  } catch {
-    /* ignore */
+    safeHome.clearPidFile(USER_ROOT);
+  } catch (error) {
+    logLaunch("pid-clear-refused", { error: String(error) });
   }
 }
 
 function readIncognitoPid() {
-  const file = path.join(INCOGNITO_HOME, PID_NAME);
-  if (!fs.existsSync(file)) return 0;
-  const pid = Number(fs.readFileSync(file, "utf8").trim());
-  if (!Number.isInteger(pid) || pid <= 0) return 0;
+  let pid = 0;
+  try {
+    pid = safeHome.readPidFile(USER_ROOT);
+  } catch (error) {
+    logLaunch("pid-read-refused", { error: String(error) });
+    return 0;
+  }
+  if (!pid) return 0;
   if (pid === process.pid) return pid;
   try {
     process.kill(pid, 0);
@@ -299,11 +281,11 @@ function launchIncognito() {
     raiseExistingIncognito();
     return Promise.resolve({ ok: true, reason: "already-running" });
   }
+  let session;
   try {
-    fs.mkdirSync(INCOGNITO_HOME, { recursive: true });
+    session = safeHome.createSessionHome(USER_ROOT);
     fs.mkdirSync(INCOGNITO_CHROMIUM, { recursive: true });
-    burnIncognitoHome();
-    copySettings();
+    safeHome.copySettings(session.home, DEFAULT_CODEX_HOME);
   } catch (error) {
     logLaunch("prepare-failed", { error: String(error) });
     return Promise.resolve({ ok: false, reason: "prepare-failed" });
@@ -314,7 +296,8 @@ function launchIncognito() {
   const sourceBounds = captureSourceBounds();
   logLaunch("launch", {
     bin,
-    home: INCOGNITO_HOME,
+    home: session.home,
+    sessionId: session.sessionId,
     userData: INCOGNITO_CHROMIUM,
     sourceBounds,
     tile: CHROME_WINDOW_TILE_PIXELS,
@@ -333,8 +316,9 @@ function launchIncognito() {
         stdio: "ignore",
         env: {
           ...process.env,
-          CODEX_HOME: INCOGNITO_HOME,
+          CODEX_HOME: session.home,
           INCODEX_INCOGNITO: "1",
+          INCODEX_SESSION_ID: session.sessionId,
           CODEX_ELECTRON_USER_DATA_PATH: INCOGNITO_CHROMIUM,
           INCODEX_SOURCE_BOUNDS: sourceBounds,
         },
@@ -423,7 +407,6 @@ function attachElectron() {
   }
 
   if (isIncognito()) {
-    process.env.CODEX_HOME = INCOGNITO_HOME;
     process.env.INCODEX_INCOGNITO = "1";
     process.env.CODEX_ELECTRON_USER_DATA_PATH = INCOGNITO_CHROMIUM;
   }
