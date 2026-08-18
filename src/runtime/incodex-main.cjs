@@ -13,6 +13,7 @@ const windowKind = require("./incodex-window-kind.cjs");
 const USER_ROOT = path.join(os.homedir(), ".incodex");
 const DEFAULT_CODEX_HOME = path.join(os.homedir(), ".codex");
 const READY_TIMEOUT_MS = 15_000;
+let capturedSourceHome = null;
 
 function targetId() {
   return instance.targetIdFromExec(process.execPath);
@@ -23,9 +24,20 @@ function stateRoot() {
 }
 
 function resolvedCodexHome() {
-  const env = process.env.CODEX_HOME;
-  if (env && env.trim()) return path.resolve(env.trim());
-  return DEFAULT_CODEX_HOME;
+  return safeHome.resolveSourceHome(process.env.CODEX_HOME, DEFAULT_CODEX_HOME);
+}
+
+function sourceHome() {
+  if (capturedSourceHome) return capturedSourceHome;
+  if (process.env.INCODEX_SOURCE_HOME) {
+    return safeHome.resolveSourceHome(process.env.INCODEX_SOURCE_HOME, DEFAULT_CODEX_HOME);
+  }
+  return resolvedCodexHome();
+}
+
+function captureSourceHome() {
+  if (isIncognito()) return;
+  capturedSourceHome = resolvedCodexHome();
 }
 
 function isIncognito() {
@@ -53,7 +65,7 @@ function injectSource() {
 }
 
 function readLocaleOverride() {
-  const file = path.join(DEFAULT_CODEX_HOME, "config.toml");
+  const file = path.join(sourceHome(), "config.toml");
   if (!fs.existsSync(file)) return "";
   try {
     const match = fs.readFileSync(file, "utf8").match(/^\s*localeOverride\s*=\s*"([^"]+)"/m);
@@ -305,8 +317,12 @@ async function launchIncognitoOnce() {
   }
   let session;
   try {
-    session = safeHome.createSessionHome(USER_ROOT, { targetId: appTarget, pid: process.pid });
-    safeHome.copySettings(session.home, DEFAULT_CODEX_HOME, USER_ROOT);
+    session = safeHome.createSessionHome(USER_ROOT, {
+      targetId: appTarget,
+      pid: process.pid,
+      sourceHome: sourceHome(),
+    });
+    safeHome.copySettings(session.home, sourceHome(), USER_ROOT);
   } catch (error) {
     logLaunch("prepare-failed", { error: String(error) });
     return Promise.resolve({ ok: false, reason: "prepare-failed" });
@@ -350,6 +366,7 @@ async function launchIncognitoOnce() {
           INCODEX_SESSION_ROOT: session.root,
           CODEX_ELECTRON_USER_DATA_PATH: session.chromium,
           INCODEX_SOURCE_BOUNDS: sourceBounds,
+          INCODEX_SOURCE_HOME: sourceHome(),
         },
       });
     } catch (error) {
@@ -457,6 +474,7 @@ function attachElectron() {
   } catch {
     return;
   }
+  captureSourceHome();
 
   if (!isIncognito()) {
     try {

@@ -132,6 +132,7 @@ function createSessionHome(userRoot, options = {}) {
     sessionId,
     targetId: options.targetId || "",
     pid: options.pid || 0,
+    sourceHome: options.sourceHome || "",
     createdAt: new Date().toISOString(),
     ino: rootStat.ino,
     dev: rootStat.dev,
@@ -323,6 +324,11 @@ function rotateAndAppendLog(userRoot, line) {
   }
 }
 
+function resolveSourceHome(envHome, fallback) {
+  if (typeof envHome === "string" && envHome.trim()) return path.resolve(envHome.trim());
+  return fallback;
+}
+
 function isManagedSessionHome(home, userRoot) {
   if (!home) return false;
   const stats = lstatOrNull(home);
@@ -387,6 +393,7 @@ module.exports = {
   burnSessionHome,
   copySettings,
   syncIdentity,
+  resolveSourceHome,
   isManagedSessionHome,
   sweepOrphanSessions,
   writeReady,

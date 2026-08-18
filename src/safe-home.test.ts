@@ -10,6 +10,7 @@ import {
   FILE_MODE,
   LOG_LIMIT,
   rotateAndAppendLog,
+  resolveSourceHome,
   sweepOrphanSessions,
 } from "./runtime/incodex-safe-home.cjs";
 
@@ -193,5 +194,11 @@ describe("session lifecycle", () => {
     rotateAndAppendLog(userRoot, "new-line\n");
     expect(readFileSync(join(userRoot, "logs", "incognito.log"), "utf8")).toBe("new-line\n");
     expect(lstatSync(`${log}.1`).isFile()).toBe(true);
+  });
+
+  test("custom CODEX_HOME is resolved instead of the default ~/.codex", () => {
+    const custom = join(tempRoot(), "my-codex");
+    expect(resolveSourceHome(custom, "/Users/me/.codex")).toBe(custom);
+    expect(resolveSourceHome("  ", "/Users/me/.codex")).toBe("/Users/me/.codex");
   });
 });
