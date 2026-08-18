@@ -8,6 +8,7 @@ const path = require("node:path");
 
 const safeHome = require("./incodex-safe-home.cjs");
 const ipcGuard = require("./incodex-ipc-guard.cjs");
+const instance = require("./incodex-instance.cjs");
 
 const USER_ROOT = path.join(os.homedir(), ".incodex");
 const DEFAULT_CODEX_HOME = path.join(os.homedir(), ".codex");
@@ -85,38 +86,27 @@ function markSessionReady() {
 }
 
 function writePid() {
-  safeHome.writePidFile(USER_ROOT, process.pid);
+  try {
+    instance.writeOwnerLock(USER_ROOT, instance.currentOwner(process.env.INCODEX_SESSION_ID, process.execPath));
+  } catch (error) {
+    if (instance.staleOwner(USER_ROOT)) {
+      instance.clearOwnerLock(USER_ROOT);
+      instance.writeOwnerLock(USER_ROOT, instance.currentOwner(process.env.INCODEX_SESSION_ID, process.execPath));
+      return;
+    }
+    logLaunch("lock-refused", { error: String(error) });
+  }
 }
 
 function clearPid() {
-  try {
-    safeHome.clearPidFile(USER_ROOT);
-  } catch (error) {
-    logLaunch("pid-clear-refused", { error: String(error) });
-  }
+  instance.clearOwnerLock(USER_ROOT);
 }
 
-function readIncognitoPid() {
-  let pid = 0;
-  try {
-    pid = safeHome.readPidFile(USER_ROOT);
-  } catch (error) {
-    logLaunch("pid-read-refused", { error: String(error) });
-    return 0;
-  }
-  if (!pid) return 0;
-  if (pid === process.pid) return pid;
-  try {
-    process.kill(pid, 0);
-    return pid;
-  } catch {
-    return 0;
-  }
-}
-
-function incognitoAlreadyRunning() {
-  const pid = readIncognitoPid();
-  return pid > 0 && pid !== process.pid;
+async function incognitoAlreadyRunning() {
+  const connected = await instance.connectExisting(USER_ROOT);
+  if (connected) return true;
+  if (instance.staleOwner(USER_ROOT)) instance.clearOwnerLock(USER_ROOT);
+  return false;
 }
 
 function raisePid(pid) {
@@ -187,19 +177,10 @@ function raiseOurWindows() {
   raisePid(process.pid);
 }
 
-function raiseExistingIncognito() {
-  const pid = readIncognitoPid();
-  if (!pid) return false;
-  try {
-    process.kill(pid, "SIGUSR1");
-  } catch {
-    /* process may not listen yet */
-  }
-  raisePid(pid);
-  setTimeout(() => raisePid(pid), 200);
-  setTimeout(() => raisePid(pid), 600);
-  logLaunch("raise-existing", { pid });
-  return true;
+async function raiseExistingIncognito() {
+  const ok = await instance.connectExisting(USER_ROOT);
+  logLaunch("raise-existing", { ok });
+  return ok;
 }
 
 function raiseChildWhenReady(pid) {
@@ -293,10 +274,20 @@ function applyChromeWindowTile(win) {
   }
 }
 
+let launchPromise = null;
+
 function launchIncognito() {
-  if (incognitoAlreadyRunning()) {
-    raiseExistingIncognito();
-    return Promise.resolve({ ok: true, reason: "already-running" });
+  if (launchPromise) return launchPromise;
+  launchPromise = launchIncognitoOnce().finally(() => {
+    launchPromise = null;
+  });
+  return launchPromise;
+}
+
+async function launchIncognitoOnce() {
+  if (await incognitoAlreadyRunning()) {
+    await raiseExistingIncognito();
+    return { ok: true, reason: "already-running" };
   }
   const appTarget = targetId();
   try {
@@ -534,7 +525,7 @@ function attachElectron() {
   });
   if (isIncognito()) {
     writePid();
-    process.on("SIGUSR1", () => raiseOurWindows());
+    instance.listenForRaise(USER_ROOT, () => raiseOurWindows());
     electron.app.on("window-all-closed", () => {
       burnIncognitoHome();
       clearPid();
