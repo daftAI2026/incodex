@@ -1,3 +1,5 @@
+import { type CopyKey, translate, resolveLocale as matchLocale } from "./incognito-copy";
+
 const STYLE_ID = "incodex-privacy-style";
 const BTN_ATTR = "data-incodex-privacy-toggle";
 const TIP_ATTR = "data-incodex-tooltip";
@@ -40,67 +42,12 @@ function isIncognitoWindow(): boolean {
   return window.__incodexIncognito === true || window.incodex?.isIncognito?.() === true;
 }
 
-type CopyKey = "open" | "exit" | "title" | "body" | "dismiss";
-
-const COPY: Record<string, Record<CopyKey, string>> = {
-  "zh-CN": {
-    open: "打开无痕窗口",
-    exit: "退出无痕窗口",
-    title: "无痕窗口",
-    body: "账号和设置跟平时一样，不会带入之前的对话。关闭窗口后，这次聊天不会留下记录。",
-    dismiss: "关闭无痕窗口横幅",
-  },
-  "zh-TW": {
-    open: "開啟無痕視窗",
-    exit: "離開無痕視窗",
-    title: "無痕視窗",
-    body: "帳號和設定跟平時一樣，不會帶入之前的對話。關閉視窗後，這次聊天不會留下紀錄。",
-    dismiss: "關閉無痕視窗橫幅",
-  },
-  en: {
-    open: "Open incognito window",
-    exit: "Exit incognito window",
-    title: "Incognito window",
-    body: "Same account and settings as usual, without earlier chats. Close this window and this conversation won't leave a record.",
-    dismiss: "Dismiss incognito banner",
-  },
-  ja: {
-    open: "シークレットウィンドウを開く",
-    exit: "シークレットウィンドウを終了",
-    title: "シークレットウィンドウ",
-    body: "アカウントと設定は普段と同じで、以前の会話は引き継ぎません。このウィンドウを閉じると、今回のチャットは残りません。",
-    dismiss: "シークレットウィンドウのバナーを閉じる",
-  },
-  ko: {
-    open: "시크릿 창 열기",
-    exit: "시크릿 창 나가기",
-    title: "시크릿 창",
-    body: "계정과 설정은 평소와 같고, 이전 대화는 가져오지 않습니다. 창을 닫으면 이번 채팅은 남지 않습니다.",
-    dismiss: "시크릿 창 배너 닫기",
-  },
-};
-
-function resolveLocale(): string {
-  const raw = (
-    window.__incodexLocale ||
-    document.documentElement.lang ||
-    navigator.language ||
-    "en"
-  ).trim();
-  const lower = raw.toLowerCase().replaceAll("_", "-");
-  if (lower.startsWith("zh-tw") || lower.startsWith("zh-hk") || lower.startsWith("zh-hant")) return "zh-TW";
-  if (lower.startsWith("zh")) return "zh-CN";
-  if (lower.startsWith("ja")) return "ja";
-  if (lower.startsWith("ko")) return "ko";
-  if (COPY[raw]) return raw;
-  const base = raw.split("-")[0] ?? "en";
-  if (COPY[base]) return base;
-  return "en";
+function currentLocale(): string {
+  return matchLocale(window.__incodexLocale || document.documentElement.lang || navigator.language || "en");
 }
 
 function t(key: CopyKey): string {
-  const locale = resolveLocale();
-  return COPY[locale]?.[key] ?? COPY.en[key];
+  return translate(currentLocale(), key);
 }
 
 function labelFor(on: boolean): string {

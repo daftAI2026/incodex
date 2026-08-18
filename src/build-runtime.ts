@@ -11,6 +11,7 @@ const injectSrc = readFileSync(join(root, "src/runtime/inject.ts"), "utf8").repl
   "{{HAT_GLASSES_SVG}}",
   svg.replace(/`/g, "\\`").replace(/\$\{/g, "\\${"),
 );
+writeFileSync(join(outDir, "incognito-copy.ts"), readFileSync(join(root, "src/runtime/incognito-copy.ts")));
 const injectTmp = join(outDir, "_inject.src.ts");
 writeFileSync(injectTmp, injectSrc);
 

@@ -4,5 +4,6 @@
 .vscode/
 node_modules/
 dist/_inject.src.ts
+dist/incognito-copy.ts
 .incodex-backup/
 Docs/
