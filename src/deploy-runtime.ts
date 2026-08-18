@@ -19,6 +19,7 @@ const files = [
   "incodex-ipc-guard.cjs",
   "incodex-instance.cjs",
   "incodex-runtime-load.cjs",
+  "incodex-window-kind.cjs",
 ];
 
 const targetsDir = join(home, ".incodex", "targets");

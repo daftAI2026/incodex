@@ -8,6 +8,7 @@ const path = require("node:path");
 const safeHome = require("./incodex-safe-home.cjs");
 const ipcGuard = require("./incodex-ipc-guard.cjs");
 const instance = require("./incodex-instance.cjs");
+const windowKind = require("./incodex-window-kind.cjs");
 
 const USER_ROOT = path.join(os.homedir(), ".incodex");
 const DEFAULT_CODEX_HOME = path.join(os.homedir(), ".codex");
@@ -127,14 +128,19 @@ function raisePid(pid) {
 function isAuxiliaryWindow(win) {
   if (!win || win.isDestroyed()) return true;
   try {
-    if (typeof win.isAlwaysOnTop === "function" && win.isAlwaysOnTop()) return true;
-    if (typeof win.isFocusable === "function" && !win.isFocusable()) return true;
-    const bounds = win.getBounds();
-    if (bounds.width < 400 || bounds.height < 300) return true;
+    const bounds = typeof win.getBounds === "function" ? win.getBounds() : {};
+    const url = win.webContents && !win.webContents.isDestroyed() ? win.webContents.getURL() : "";
+    return windowKind.isAuxiliarySnapshot({
+      alwaysOnTop: typeof win.isAlwaysOnTop === "function" && win.isAlwaysOnTop(),
+      focusable: typeof win.isFocusable !== "function" || win.isFocusable(),
+      width: bounds.width,
+      height: bounds.height,
+      url,
+      hasParent: typeof win.getParentWindow === "function" && Boolean(win.getParentWindow()),
+    });
   } catch {
-    return true;
+    return false;
   }
-  return false;
 }
 
 function mainWindows(electron) {

@@ -23,6 +23,7 @@ const safeHomeOut = join(outDir, "incodex-safe-home.cjs");
 const ipcGuardOut = join(outDir, "incodex-ipc-guard.cjs");
 const instanceOut = join(outDir, "incodex-instance.cjs");
 const runtimeLoadOut = join(outDir, "incodex-runtime-load.cjs");
+const windowKindOut = join(outDir, "incodex-window-kind.cjs");
 
 const inject = Bun.spawnSync({
   cmd: ["bun", "build", injectTmp, "--outfile", injectOut, "--target", "browser", "--minify"],
@@ -39,6 +40,7 @@ writeFileSync(safeHomeOut, readFileSync(join(root, "src/runtime/incodex-safe-hom
 writeFileSync(ipcGuardOut, readFileSync(join(root, "src/runtime/incodex-ipc-guard.cjs")));
 writeFileSync(instanceOut, readFileSync(join(root, "src/runtime/incodex-instance.cjs")));
 writeFileSync(runtimeLoadOut, readFileSync(join(root, "src/runtime/incodex-runtime-load.cjs")));
+writeFileSync(windowKindOut, readFileSync(join(root, "src/runtime/incodex-window-kind.cjs")));
 
 console.log("wrote", injectOut);
 console.log("wrote", loaderOut);
@@ -48,3 +50,4 @@ console.log("wrote", safeHomeOut);
 console.log("wrote", ipcGuardOut);
 console.log("wrote", instanceOut);
 console.log("wrote", runtimeLoadOut);
+console.log("wrote", windowKindOut);

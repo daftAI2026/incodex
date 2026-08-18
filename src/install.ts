@@ -82,6 +82,7 @@ function runtimeSources(): {
   ipcGuard: string;
   instance: string;
   runtimeLoad: string;
+  windowKind: string;
 } {
   return {
     loader: readFileSync(join(repoRoot, "dist/incodex-loader.cjs"), "utf8"),
@@ -92,6 +93,7 @@ function runtimeSources(): {
     ipcGuard: readFileSync(join(repoRoot, "dist/incodex-ipc-guard.cjs"), "utf8"),
     instance: readFileSync(join(repoRoot, "dist/incodex-instance.cjs"), "utf8"),
     runtimeLoad: readFileSync(join(repoRoot, "dist/incodex-runtime-load.cjs"), "utf8"),
+    windowKind: readFileSync(join(repoRoot, "dist/incodex-window-kind.cjs"), "utf8"),
   };
 }
 
@@ -111,6 +113,7 @@ async function patchAppBundle(
     ipcGuardSource: src.ipcGuard,
     instanceSource: src.instance,
     runtimeLoadSource: src.runtimeLoad,
+    windowKindSource: src.windowKind,
     installId,
   });
   writeAsarIntegrity(appPath, patched.hash);
