@@ -34,6 +34,31 @@ describe("vendor helper preservation", () => {
     mkdirSync(join(outer, "Contents"), { recursive: true });
     expect(collectVendorHelperRoots(join(root, "ChatGPT.app"))).toEqual([outer]);
   });
+
+  test("signApp puts Computer Use back after --deep", () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-preserve-"));
+    const app = join(root, "Mini.app");
+    mkdirSync(join(app, "Contents/MacOS"), { recursive: true });
+    writeFileSync(
+      join(app, "Contents/Info.plist"),
+      `<?xml version="1.0"?><plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>com.incodex.mini</string>
+  <key>CFBundleExecutable</key><string>Mini</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+</dict></plist>
+`,
+    );
+    const main = join(app, "Contents/MacOS/Mini");
+    writeFileSync(main, "#!/bin/sh\necho mini\n");
+    chmodSync(main, 0o755);
+    const cua = join(app, "Contents/Resources/Codex Computer Use.app/Contents");
+    mkdirSync(cua, { recursive: true });
+    writeFileSync(join(cua, "KEEP"), "vendor-original\n");
+    signOne(main, null, true);
+    signOne(app, null, true);
+    signApp(app);
+    expect(readFileSync(join(cua, "KEEP"), "utf8")).toBe("vendor-original\n");
+  });
 });
 
 describe("inside-out signing order", () => {
