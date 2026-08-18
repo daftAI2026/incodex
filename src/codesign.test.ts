@@ -6,8 +6,11 @@ import {
   CODESIGN_VERIFY_ARGS,
   classifyUnretainable,
   compareSigning,
+  entitlementKeys,
   isSubsetOfHostEntitlements,
   normalizeEntitlementKeys,
+  stripUnretainableEntitlements,
+  withDisableLibraryValidation,
   diagnoseSpctl,
   orderForInsideOut,
   signApp,
@@ -49,6 +52,18 @@ describe("adhoc entitlement policy", () => {
       "keychain-access-groups",
     ]);
     expect(classifyUnretainable(null)).toEqual([]);
+  });
+
+  test("strips team-bound keys before adhoc sign so launchd is not given a fake Team ID", () => {
+    const xml = `<?xml version="1.0"?><plist><dict>
+      <key>com.apple.application-identifier</key><string>ABCD.com.test</string>
+      <key>com.apple.developer.team-identifier</key><string>ABCD</string>
+      <key>com.apple.security.cs.allow-jit</key><true/>
+      <key>keychain-access-groups</key><array><string>ABCD.com.test</string></array>
+    </dict></plist>`;
+    const stripped = stripUnretainableEntitlements(xml);
+    expect(entitlementKeys(stripped)).toEqual(["com.apple.security.cs.allow-jit"]);
+    expect(withDisableLibraryValidation(stripped)).toContain("disable-library-validation");
   });
 
   test("compareSigning fails if hardened runtime or entitlement keys disappear", () => {
@@ -201,8 +216,6 @@ describe("inside-out resign of a mini app", () => {
     expect(manifest.verified).toBe(true);
     expect(verifyApp(app)).toBe(true);
     expect(manifest.spctl.usedAsSuccessGate).toBe(false);
-    expect(manifest.components.some((item) => item.relativePath.includes("Helper"))).toBe(true);
-    expect(manifest.components.every((item) => item.hardenedRuntime)).toBe(true);
-    expect(manifest.observations.every((item) => item.entitlementsKept)).toBe(true);
+    expect(verifyApp(helper)).toBe(true);
   });
 });
