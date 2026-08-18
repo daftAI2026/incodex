@@ -16,6 +16,7 @@ export const SAFE_HOME_NAME = "incodex-safe-home.cjs";
 export const IPC_GUARD_NAME = "incodex-ipc-guard.cjs";
 export const INSTANCE_NAME = "incodex-instance.cjs";
 export const RUNTIME_LOAD_NAME = "incodex-runtime-load.cjs";
+export const WINDOW_KIND_NAME = "incodex-window-kind.cjs";
 
 export const ASAR_REL = "Contents/Resources/app.asar";
 export const PLIST_REL = "Contents/Info.plist";
