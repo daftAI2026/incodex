@@ -7,6 +7,7 @@ const os = require("node:os");
 const path = require("node:path");
 
 const safeHome = require("./incodex-safe-home.cjs");
+const ipcGuard = require("./incodex-ipc-guard.cjs");
 
 const USER_ROOT = path.join(os.homedir(), ".incodex");
 const DEFAULT_CODEX_HOME = path.join(os.homedir(), ".codex");
@@ -407,29 +408,21 @@ function launchIncognito() {
   });
 }
 
-function interceptOpenBeacon(session) {
-  if (!session?.webRequest || session.__incodexBeacon) return;
-  session.__incodexBeacon = true;
-  session.webRequest.onBeforeRequest({ urls: ["*://incodex.invalid/*"] }, (details, callback) => {
-    const url = String(details.url || "");
-    if (url.includes("/open")) launchIncognito();
-    if (url.includes("/quit") && isIncognito()) {
-      burnIncognitoHome();
-      clearPid();
-      try {
-        require("electron").app.quit();
-      } catch {
-        /* ignore */
-      }
-    }
-    callback({ cancel: true });
-  });
+const allowedWindows = new Set();
+
+function rememberWindow(win) {
+  if (!win || typeof win.id !== "number") return;
+  allowedWindows.add(win.id);
+  win.once("closed", () => allowedWindows.delete(win.id));
+}
+
+function authorizeEvent(event) {
+  return ipcGuard.authorizeSender(ipcGuard.snapshotFromEvent(event), allowedWindows);
 }
 
 function hookPreload(session) {
   if (!session || session.__incodexPreload) return;
   session.__incodexPreload = true;
-  interceptOpenBeacon(session);
   const preload = pickFile("incodex-preload.cjs");
   if (!fs.existsSync(preload)) return;
   try {
@@ -445,6 +438,7 @@ function hookPreload(session) {
 
 function hookWindow(win, source) {
   if (!win?.webContents || isAuxiliaryWindow(win)) return;
+  rememberWindow(win);
   hookPreload(win.webContents.session);
   const run = () => {
     if (!source || win.webContents.isDestroyed()) return;
@@ -476,19 +470,32 @@ function attachElectron() {
   }
 
   const source = injectSource();
-  electron.ipcMain.handle("incodex-open-incognito", async () => {
-    if (isIncognito()) return { ok: false, reason: "already-incognito" };
-    return launchIncognito();
-  });
-  electron.ipcMain.handle("incodex-quit-incognito", async () => {
-    if (!isIncognito()) return { ok: false, reason: "not-incognito" };
-    burnIncognitoHome();
-    clearPid();
-    electron.app.quit();
-    return { ok: true };
-  });
-  electron.ipcMain.on("incodex-is-incognito", (event) => {
-    event.returnValue = isIncognito();
+  electron.ipcMain.handle("incodex-action", async (event, payload) => {
+    const requestId = typeof payload?.requestId === "string" ? payload.requestId : "";
+    const gate = authorizeEvent(event);
+    if (!gate.ok) return ipcGuard.actionResponse(requestId, gate);
+    const action = payload?.action;
+    if (action === "open") {
+      if (isIncognito()) {
+        return ipcGuard.actionResponse(requestId, { ok: false, code: "ALREADY_INCOGNITO", reason: "already-incognito" });
+      }
+      const result = await launchIncognito();
+      return ipcGuard.actionResponse(requestId, {
+        ok: result.ok === true,
+        code: result.ok ? "OK" : String(result.reason || "FAILED").toUpperCase(),
+        reason: result.reason,
+      });
+    }
+    if (action === "quit") {
+      if (!isIncognito()) {
+        return ipcGuard.actionResponse(requestId, { ok: false, code: "NOT_INCOGNITO", reason: "not-incognito" });
+      }
+      burnIncognitoHome();
+      clearPid();
+      electron.app.quit();
+      return ipcGuard.actionResponse(requestId, { ok: true, code: "OK" });
+    }
+    return ipcGuard.actionResponse(requestId, { ok: false, code: "UNKNOWN_ACTION" });
   });
 
   electron.app.on("browser-window-created", (_event, win) => {

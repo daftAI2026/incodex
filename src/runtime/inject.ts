@@ -12,7 +12,7 @@ const ICON_SVG = `{{HAT_GLASSES_SVG}}`;
 const SEARCH_LABELS = new Set(["Search", "搜索"]);
 
 function isIncognitoWindow(): boolean {
-  return window.__incodexIncognito === true || window.incodex?.isIncognito?.() === true;
+  return window.__incodexIncognito === true;
 }
 
 function currentLocale(): string {
@@ -39,33 +39,35 @@ function apply(): void {
   if (label) label.textContent = labelFor(incognito);
 }
 
-async function requestOpen(): Promise<{ ok: boolean; reason?: string }> {
-  if (window.incodex?.openIncognito) {
-    try {
-      return (await window.incodex.openIncognito()) ?? { ok: false, reason: "unavailable" };
-    } catch {
-      return { ok: false, reason: "ipc-failed" };
-    }
+function newRequestId(): string {
+  return `incodex-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+async function requestAction(action: "open" | "quit"): Promise<{ ok: boolean; reason?: string; code?: string }> {
+  if (!window.incodex?.requestIncognitoAction) {
+    return { ok: false, reason: "unavailable", code: "UNAVAILABLE" };
   }
   try {
-    await fetch("https://incodex.invalid/open", { mode: "no-cors", cache: "no-store" });
+    return (
+      (await window.incodex.requestIncognitoAction({ action, requestId: newRequestId() })) ?? {
+        ok: false,
+        reason: "unavailable",
+        code: "UNAVAILABLE",
+      }
+    );
   } catch {
-    /* beacon cannot confirm */
+    return { ok: false, reason: "ipc-failed", code: "IPC_FAILED" };
   }
-  return { ok: false, reason: "unavailable" };
 }
 
 async function activate(): Promise<void> {
   hideTooltip();
   if (isIncognitoWindow()) {
-    try {
-      await window.incodex?.quitIncognito?.();
-    } catch {
-      window.close();
-    }
+    const result = await requestAction("quit");
+    if (!result.ok) window.close();
     return;
   }
-  const result = await requestOpen();
+  const result = await requestAction("open");
   if (result.ok) {
     hideLaunchError();
     return;
@@ -462,9 +464,10 @@ declare global {
     __incodexIncognito?: boolean;
     __incodexLocale?: string;
     incodex?: {
-      isIncognito?: () => boolean;
-      openIncognito?: () => Promise<{ ok: boolean; reason?: string }>;
-      quitIncognito?: () => Promise<{ ok: boolean; reason?: string }>;
+      requestIncognitoAction?: (payload: {
+        action: "open" | "quit";
+        requestId: string;
+      }) => Promise<{ ok: boolean; reason?: string; code?: string; requestId?: string }>;
     };
   }
 }
