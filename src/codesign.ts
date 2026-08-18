@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { basename, join, relative } from "node:path";
 
 export const CODESIGN_VERIFY_ARGS = ["--verify", "--deep", "--strict", "--verbose=4"] as const;
 
@@ -110,6 +110,30 @@ export function discoverNestedCode(appPath: string): string[] {
   return [...new Set([...found, ...files])];
 }
 
+const VENDOR_HELPER_NAMES = new Set([
+  "Codex Computer Use.app",
+  "Codex Computer Use Installer.app",
+  "SkyComputerUseClient.app",
+  "CUALockScreenGuardian.app",
+]);
+
+export function isVendorHelperPath(path: string): boolean {
+  return path.split("/").some((part) => VENDOR_HELPER_NAMES.has(part));
+}
+
+export function collectVendorHelperRoots(appPath: string): string[] {
+  const listed = spawnSync(
+    "find",
+    [appPath, "-name", "Codex Computer Use.app", "-o", "-name", "SkyComputerUseClient.app", "-o", "-name", "CUALockScreenGuardian.app"],
+    { encoding: "utf8" },
+  );
+  return (listed.stdout || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((item) => item && existsSync(item))
+    .filter((item, index, all) => !all.some((other, otherIndex) => otherIndex !== index && item.startsWith(`${other}/`)));
+}
+
 export function displayField(target: string, flag: string): string {
   const result = spawnSync("codesign", ["--display", flag, target], { encoding: "utf8" });
   return `${result.stdout || ""}${result.stderr || ""}`;
@@ -146,6 +170,29 @@ export function classifyUnretainable(xml: string | null): string[] {
 const DISABLE_LIBRARY_VALIDATION = `  <key>com.apple.security.cs.disable-library-validation</key>
   <true/>
 `;
+
+const ADHOC_HOST_FALLBACK = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>com.apple.security.automation.apple-events</key><true/>
+  <key>com.apple.security.cs.allow-jit</key><true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+  <key>com.apple.security.cs.disable-library-validation</key><true/>
+  <key>com.apple.security.device.audio-input</key><true/>
+  <key>com.apple.security.device.camera</key><true/>
+  <key>com.apple.security.files.user-selected.read-write</key><true/>
+  <key>com.apple.security.network.client</key><true/>
+  <key>com.apple.security.personal-information.calendars</key><true/>
+</dict></plist>
+`;
+
+export function hostEntitlementsForAdhoc(xml: string | null): string {
+  const stripped = stripUnretainableEntitlements(xml);
+  if (!stripped || !entitlementKeys(stripped).includes("com.apple.security.device.camera")) {
+    return ADHOC_HOST_FALLBACK;
+  }
+  return withDisableLibraryValidation(stripped) ?? ADHOC_HOST_FALLBACK;
+}
 
 export function withDisableLibraryValidation(xml: string | null): string | null {
   const base =
@@ -284,14 +331,22 @@ export function signOne(target: string, entitlements: string | null, hardened: b
   }
 }
 
-// OpenAI's Team ID cannot be kept after we rewrite the asar. Every nested
-// helper must share the same adhoc identity or launch aborts with
-// "different Team IDs". Apple prefers inside-out signing; we still record
-// unretainable entitlements and run --verify. The stamp itself is --deep so
-// Codex (Renderer/GPU/Service).app cannot be missed the way a hand-rolled
-// find() list missed them.
+// Only signing the outer .app leaves Codex Framework on OpenAI's Team ID;
+// the adhoc main then aborts on dlopen ("different Team IDs"). In-process
+// helpers must share one adhoc identity, so the tree is stamped with --deep.
+// Separate sidecar apps (Computer Use) are put back afterward. After --deep,
+// the outer app is signed once more without --deep so camera/JIT survive
+// without being copied onto every dylib.
 export function signApp(appPath: string): SigningManifest {
   const beforeXml = dumpEntitlements(appPath);
+  const preserve = collectVendorHelperRoots(appPath);
+  const stashRoot = preserve.length > 0 ? mkdtempSync(join(tmpdir(), "incodex-vendor-")) : null;
+  const stashed = preserve.map((src, index) => {
+    const dest = join(stashRoot!, String(index), basename(src));
+    const copied = spawnSync("ditto", [src, dest], { encoding: "utf8" });
+    if (copied.status !== 0) throw new Error(copied.stderr || `failed to stash ${src}`);
+    return { src, dest };
+  });
   const signed = spawnSync("codesign", ["--force", "--deep", "--sign", "-", appPath], { encoding: "utf8" });
   if (signed.status !== 0) {
     throw new Error(signed.stderr || `codesign --deep failed: ${appPath}`);
@@ -299,6 +354,16 @@ export function signApp(appPath: string): SigningManifest {
   const verified = verifyApp(appPath);
   if (!verified) {
     throw new Error("codesign --verify failed after adhoc resign");
+  }
+  for (const item of stashed) {
+    rmSync(item.src, { recursive: true, force: true });
+    const restored = spawnSync("ditto", [item.dest, item.src], { encoding: "utf8" });
+    if (restored.status !== 0) throw new Error(restored.stderr || `failed to restore ${item.src}`);
+  }
+  if (stashRoot) rmSync(stashRoot, { recursive: true, force: true });
+  signOne(appPath, hostEntitlementsForAdhoc(beforeXml), true);
+  if (!verifyApp(appPath)) {
+    throw new Error("codesign --verify failed after host entitlement resign");
   }
   return {
     schemaVersion: 1,
@@ -311,8 +376,8 @@ export function signApp(appPath: string): SigningManifest {
         path: appPath,
         identifier: displayField(appPath, "--verbose").match(/Identifier=(\S+)/)?.[1] || "",
         hardenedRuntime: hasHardenedRuntime(appPath),
-        entitlementsKept: false,
-        skippedEntitlements: "adhoc --deep resign; team-bound entitlements are not preserved",
+        entitlementsKept: true,
+        skippedEntitlements: "team-bound entitlements stripped; camera/JIT kept on the outer app only",
       },
     ],
     unretainableEntitlements: classifyUnretainable(beforeXml).length

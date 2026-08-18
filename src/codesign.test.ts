@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   CODESIGN_VERIFY_ARGS,
+  collectVendorHelperRoots,
   classifyUnretainable,
+  isVendorHelperPath,
   compareSigning,
   entitlementKeys,
   isSubsetOfHostEntitlements,
@@ -12,6 +14,7 @@ import {
   stripUnretainableEntitlements,
   withDisableLibraryValidation,
   diagnoseSpctl,
+  hostEntitlementsForAdhoc,
   orderForInsideOut,
   signApp,
   signOne,
@@ -19,6 +22,56 @@ import {
   verifyApp,
   type SigningComponent,
 } from "./codesign";
+
+describe("vendor helper preservation", () => {
+  test("Computer Use sidecar apps are treated as vendor helpers", () => {
+    expect(isVendorHelperPath("/tmp/App.app/Contents/Resources/cua_node/x/Codex Computer Use.app")).toBe(true);
+    expect(isVendorHelperPath("/tmp/App.app/Contents/Frameworks/Codex Framework.framework")).toBe(false);
+  });
+
+  test("collectVendorHelperRoots keeps the outer Computer Use app and not only inner copies", () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-vendor-"));
+    const outer = join(root, "ChatGPT.app/Contents/Resources/cua_node/Codex Computer Use.app");
+    mkdirSync(join(outer, "Contents"), { recursive: true });
+    expect(collectVendorHelperRoots(join(root, "ChatGPT.app"))).toEqual([outer]);
+  });
+
+  test("signApp puts Computer Use back after --deep", () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-preserve-"));
+    const app = join(root, "Mini.app");
+    mkdirSync(join(app, "Contents/MacOS"), { recursive: true });
+    writeFileSync(
+      join(app, "Contents/Info.plist"),
+      `<?xml version="1.0"?><plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>com.incodex.mini</string>
+  <key>CFBundleExecutable</key><string>Mini</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+</dict></plist>
+`,
+    );
+    const main = join(app, "Contents/MacOS/Mini");
+    writeFileSync(main, "#!/bin/sh\necho mini\n");
+    chmodSync(main, 0o755);
+    const cua = join(app, "Contents/Resources/Codex Computer Use.app/Contents");
+    mkdirSync(cua, { recursive: true });
+    writeFileSync(join(cua, "KEEP"), "vendor-original\n");
+    signOne(main, null, true);
+    signOne(app, null, true);
+    signApp(app);
+    expect(readFileSync(join(cua, "KEEP"), "utf8")).toBe("vendor-original\n");
+  });
+
+  test("adhoc host entitlements keep camera and drop team identifiers", () => {
+    const xml = `<?xml version="1.0"?><plist><dict>
+      <key>com.apple.developer.team-identifier</key><string>ABCD</string>
+      <key>com.apple.security.device.camera</key><true/>
+    </dict></plist>`;
+    const keys = entitlementKeys(hostEntitlementsForAdhoc(xml));
+    expect(keys).toContain("com.apple.security.device.camera");
+    expect(keys).not.toContain("com.apple.developer.team-identifier");
+    expect(entitlementKeys(hostEntitlementsForAdhoc(null))).toContain("com.apple.security.device.camera");
+  });
+});
 
 describe("inside-out signing order", () => {
   test("signs nested frameworks before the top-level app and never uses --deep for order", () => {

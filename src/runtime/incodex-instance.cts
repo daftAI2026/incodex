@@ -118,7 +118,11 @@ function connectExisting(stateRoot, timeoutMs = 400) {
     };
     socket.setTimeout(timeoutMs);
     socket.once("connect", () => {
-      socket.write("raise\n");
+      try {
+        socket.write("raise\n");
+      } catch {
+        /* ignore */
+      }
       finish(true);
     });
     socket.once("error", () => finish(false));
@@ -144,9 +148,16 @@ function listenForRaise(stateRoot, onRaise) {
   }
   fs.mkdirSync(stateRoot, { recursive: true, mode: 0o700 });
   const server = net.createServer((socket) => {
+    socket.on("error", () => {
+      /* client may already be gone; do not crash the main process */
+    });
     socket.on("data", (buf) => {
       if (String(buf).includes("raise")) onRaise();
-      socket.end("ok\n");
+      try {
+        if (!socket.destroyed) socket.end("ok\n");
+      } catch {
+        /* EPIPE: peer already closed */
+      }
     });
   });
   server.listen(sockPath(stateRoot));
