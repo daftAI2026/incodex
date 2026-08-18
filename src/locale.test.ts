@@ -12,8 +12,8 @@ describe("locale fallback", () => {
     expect(resolveLocale("zh")).toBe("zh-CN");
     expect(resolveLocale("zh-Hant")).toBe("zh-TW");
     expect(resolveLocale("zh-HK")).toBe("zh-HK");
-    expect(translate("zh-CN", "body")).toContain("~/.codex");
-    expect(translate("zh-TW", "body")).toContain("~/.codex");
+    expect(translate("zh-CN", "body")).toContain("平时的列表");
+    expect(translate("zh-TW", "body")).toContain("平時的列表");
   });
 
   test("language-only tags pick a regional default when needed", () => {

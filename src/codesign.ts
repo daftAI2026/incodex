@@ -284,6 +284,12 @@ export function signOne(target: string, entitlements: string | null, hardened: b
   }
 }
 
+// OpenAI's Team ID cannot be kept after we rewrite the asar. Every nested
+// helper must share the same adhoc identity or launch aborts with
+// "different Team IDs". Apple prefers inside-out signing; we still record
+// unretainable entitlements and run --verify. The stamp itself is --deep so
+// Codex (Renderer/GPU/Service).app cannot be missed the way a hand-rolled
+// find() list missed them.
 export function signApp(appPath: string): SigningManifest {
   const beforeXml = dumpEntitlements(appPath);
   const signed = spawnSync("codesign", ["--force", "--deep", "--sign", "-", appPath], { encoding: "utf8" });

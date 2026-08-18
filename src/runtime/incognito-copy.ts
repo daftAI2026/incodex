@@ -7,7 +7,7 @@ export const COPY: Record<string, CopyTable> = {
     open: "Open incognito window",
     exit: "Exit incognito window",
     title: "Incognito window",
-    body: "Same account and settings as usual, without earlier chats. Does not write to the everyday ~/.codex session store. Temporary session data is cleaned up after a normal exit.",
+    body: "Same account and settings as usual, without earlier chats. This conversation will not show up in your everyday chat list. Temporary data is removed after a normal exit.",
     dismiss: "Dismiss incognito banner",
     errorTitle: 'Couldn’t open the incognito window',
     errorBody: 'Try again. If it still fails, quit Codex and open it again.',
@@ -689,7 +689,7 @@ export const COPY: Record<string, CopyTable> = {
     open: "打开无痕窗口",
     exit: "退出无痕窗口",
     title: "无痕窗口",
-    body: "账号和设置跟平时一样，不会带入之前的对话。不会写入日常的 ~/.codex 会话库。临时会话数据会在正常退出后清理。",
+    body: "账号和设置跟平时一样，看不到以前的对话，这次的聊天也不会进平时的列表。正常关掉后，这次的临时数据会清掉。",
     dismiss: "关闭无痕窗口横幅",
     errorTitle: '无法打开无痕窗口',
     errorBody: '再试一次。如果还是不行，先退出 Codex 再打开。',
@@ -700,7 +700,7 @@ export const COPY: Record<string, CopyTable> = {
     open: "開啟無痕視窗",
     exit: "離開無痕視窗",
     title: "無痕視窗",
-    body: "帳戶和設定跟平時一樣，不會帶入之前的對話。不會寫入日常的 ~/.codex 會話庫。臨時會話資料會在正常退出後清理。",
+    body: "帳戶和設定跟平時一樣，看不到以前的對話，這次的聊天也不會進平時的列表。正常關掉後，這次的臨時資料會清掉。",
     dismiss: "關閉無痕視窗橫額",
     errorTitle: '無法開啟無痕視窗',
     errorBody: '再試一次。如果仍然不行，先退出 Codex 再開。',
@@ -711,7 +711,7 @@ export const COPY: Record<string, CopyTable> = {
     open: "開啟無痕視窗",
     exit: "離開無痕視窗",
     title: "無痕視窗",
-    body: "帳號和設定跟平時一樣，不會帶入之前的對話。不會寫入日常的 ~/.codex 會話庫。臨時會話資料會在正常退出後清理。",
+    body: "帳號和設定跟平時一樣，看不到以前的對話，這次的聊天也不會進平時的列表。正常關掉後，這次的臨時資料會清掉。",
     dismiss: "關閉無痕視窗橫幅",
     errorTitle: '無法開啟無痕視窗',
     errorBody: '再試一次。如果還是不行，先退出 Codex 再開啟。',
@@ -794,10 +794,10 @@ export function resolveLocale(raw: string): string {
 }
 
 const TIGHT_BODY: Record<string, string> = {
-  en: "Same account and settings as usual, without earlier chats. Does not write to the everyday ~/.codex session store. Temporary session data is cleaned up after a normal exit.",
-  "zh-CN": "账号和设置跟平时一样，不会带入之前的对话。不会写入日常的 ~/.codex 会话库。临时会话数据会在正常退出后清理。",
-  "zh-TW": "帳號和設定跟平時一樣，不會帶入之前的對話。不會寫入日常的 ~/.codex 會話庫。臨時會話資料會在正常退出後清理。",
-  "zh-HK": "帳戶和設定跟平時一樣，不會帶入之前的對話。不會寫入日常的 ~/.codex 會話庫。臨時會話資料會在正常退出後清理。",
+  en: "Same account and settings as usual, without earlier chats. This conversation will not show up in your everyday chat list. Temporary data is removed after a normal exit.",
+  "zh-CN": "账号和设置跟平时一样，看不到以前的对话，这次的聊天也不会进平时的列表。正常关掉后，这次的临时数据会清掉。",
+  "zh-TW": "帳號和設定跟平時一樣，看不到以前的對話，這次的聊天也不會進平時的列表。正常關掉後，這次的臨時資料會清掉。",
+  "zh-HK": "帳戶和設定跟平時一樣，看不到以前的對話，這次的聊天也不會進平時的列表。正常關掉後，這次的臨時資料會清掉。",
 };
 
 export function translate(locale: string, key: CopyKey): string {
