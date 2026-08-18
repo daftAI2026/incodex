@@ -3,6 +3,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  connectExisting,
+  listenForRaise,
   ownerMatchesLive,
   readOwnerLock,
   singleFlight,
@@ -43,6 +45,20 @@ describe("instance owner", () => {
         nonce: "n",
       }),
     ).toThrow();
+  });
+});
+
+describe("raise socket", () => {
+  test("a client that hangs up does not crash the listener", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-sock-"));
+    const server = listenForRaise(root, () => {});
+    await new Promise((resolve, reject) => {
+      server.once("listening", resolve);
+      server.once("error", reject);
+    });
+    const ok = await connectExisting(root, 500);
+    expect(ok).toBe(true);
+    server.close();
   });
 });
 

@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   CODESIGN_VERIFY_ARGS,
+  collectVendorHelperRoots,
   classifyUnretainable,
+  isVendorHelperPath,
   compareSigning,
   entitlementKeys,
   isSubsetOfHostEntitlements,
@@ -19,6 +21,20 @@ import {
   verifyApp,
   type SigningComponent,
 } from "./codesign";
+
+describe("vendor helper preservation", () => {
+  test("Computer Use sidecar apps are treated as vendor helpers", () => {
+    expect(isVendorHelperPath("/tmp/App.app/Contents/Resources/cua_node/x/Codex Computer Use.app")).toBe(true);
+    expect(isVendorHelperPath("/tmp/App.app/Contents/Frameworks/Codex Framework.framework")).toBe(false);
+  });
+
+  test("collectVendorHelperRoots keeps the outer Computer Use app and not only inner copies", () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-vendor-"));
+    const outer = join(root, "ChatGPT.app/Contents/Resources/cua_node/Codex Computer Use.app");
+    mkdirSync(join(outer, "Contents"), { recursive: true });
+    expect(collectVendorHelperRoots(join(root, "ChatGPT.app"))).toEqual([outer]);
+  });
+});
 
 describe("inside-out signing order", () => {
   test("signs nested frameworks before the top-level app and never uses --deep for order", () => {
