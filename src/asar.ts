@@ -26,15 +26,26 @@ export function headerHash(asarPath: string): string {
   return createHash("sha256").update(raw.headerString).digest("hex");
 }
 
-export function readPackageMain(asarPath: string): { main: string; alreadyPatched: boolean } {
+export type IncodexMarker = {
+  originalMain?: string;
+  installId?: string;
+};
+
+export function readPackageMain(asarPath: string): {
+  main: string;
+  alreadyPatched: boolean;
+  installId: string | null;
+} {
   const raw = JSON.parse(asar.extractFile(asarPath, "package.json").toString("utf8")) as {
     main?: string;
-    [MARKER_KEY]?: { originalMain?: string };
+    [MARKER_KEY]?: IncodexMarker;
   };
-  const original = raw[MARKER_KEY]?.originalMain;
+  const marker = raw[MARKER_KEY];
+  const original = marker?.originalMain;
   return {
     main: original ?? raw.main ?? "",
     alreadyPatched: Boolean(original),
+    installId: marker?.installId || null,
   };
 }
 
@@ -44,6 +55,7 @@ export async function patchAsar(options: {
   injectSource: string;
   mainSource: string;
   preloadSource: string;
+  installId?: string;
 }): Promise<{ hash: string; originalMain: string }> {
   const { main: originalMain, alreadyPatched } = readPackageMain(options.asarPath);
   if (!originalMain) throw new Error("package.json has no main");
@@ -58,11 +70,14 @@ export async function patchAsar(options: {
     const pkgPath = join(extractDir, "package.json");
     const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as Record<string, unknown> & {
       main?: string;
-      [MARKER_KEY]?: { originalMain?: string };
+      [MARKER_KEY]?: IncodexMarker;
     };
     const keepMain = alreadyPatched ? (pkg[MARKER_KEY]?.originalMain ?? originalMain) : originalMain;
     pkg.main = LOADER_NAME;
-    pkg[MARKER_KEY] = { originalMain: keepMain };
+    pkg[MARKER_KEY] = {
+      originalMain: keepMain,
+      ...(options.installId ? { installId: options.installId } : {}),
+    };
     writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
     writeFileSync(join(extractDir, LOADER_NAME), options.loaderSource);
     writeFileSync(join(extractDir, INJECT_NAME), options.injectSource);
