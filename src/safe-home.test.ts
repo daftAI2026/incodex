@@ -8,6 +8,9 @@ import {
   createSessionHome,
   exclusiveCopyFile,
   FILE_MODE,
+  LOG_LIMIT,
+  rotateAndAppendLog,
+  sweepOrphanSessions,
 } from "./runtime/incodex-safe-home.cjs";
 
 function tempRoot(): string {
@@ -53,7 +56,7 @@ describe("symlink burn and copy", () => {
     writeFileSync(outside, "secret");
     symlinkSync(outside, join(session.home, "auth.json"));
 
-    expect(() => copySettings(session.home, source)).toThrow(/symlink|overwrite/);
+    expect(() => copySettings(session.home, source, userRoot)).toThrow(/symlink|overwrite/);
     expect(readFileSync(outside, "utf8")).toBe("secret");
   });
 
@@ -76,11 +79,11 @@ describe("symlink burn and copy", () => {
     const victim = join(victimDir, "victim.txt");
     writeFileSync(victim, "keep-me");
 
-    rmSync(session.home, { recursive: true, force: true });
-    symlinkSync(victimDir, session.home);
+    rmSync(session.root, { recursive: true, force: true });
+    symlinkSync(victimDir, session.root);
 
     expect(() =>
-      burnSessionHome(session.home, {
+      burnSessionHome(session.root, {
         userRoot,
         sessionId: session.sessionId,
         ino: session.ino,
@@ -97,11 +100,14 @@ describe("symlink burn and copy", () => {
     const second = createSessionHome(userRoot);
     expect(first.home).not.toBe(second.home);
     expect(first.sessionId).not.toBe(second.sessionId);
-    expect(first.home.includes(`${join(userRoot, "sessions")}`)).toBe(true);
+    expect(first.root.includes(`${join(userRoot, "sessions")}`)).toBe(true);
+    expect(first.home.endsWith(`${join("codex-home")}`) || first.home.endsWith("/codex-home")).toBe(true);
+    expect(first.chromium.endsWith("/chromium")).toBe(true);
     expect(lstatSync(userRoot).mode & 0o777).toBe(0o700);
-    expect(lstatSync(first.home).mode & 0o777).toBe(0o700);
-    expect(lstatSync(join(first.home, "owner.json")).mode & 0o777).toBe(FILE_MODE);
-    expect(lstatSync(first.home).isSymbolicLink()).toBe(false);
+    expect(lstatSync(first.root).mode & 0o777).toBe(0o700);
+    expect(lstatSync(join(first.root, "owner.json")).mode & 0o777).toBe(FILE_MODE);
+    expect(lstatSync(join(first.root, "lock")).mode & 0o777).toBe(FILE_MODE);
+    expect(lstatSync(first.root).isSymbolicLink()).toBe(false);
   });
 
   test("copySettings writes private files and burn removes the whole session", () => {
@@ -111,16 +117,18 @@ describe("symlink burn and copy", () => {
     mkdirSync(source);
     writeFileSync(join(source, "auth.json"), '{"token":"x"}');
     const session = createSessionHome(userRoot);
-    expect(copySettings(session.home, source)).toBe(1);
+    expect(copySettings(session.home, source, userRoot)).toBe(1);
     expect(readFileSync(join(session.home, "auth.json"), "utf8")).toBe('{"token":"x"}');
     expect(lstatSync(join(session.home, "auth.json")).mode & 0o777).toBe(FILE_MODE);
-    burnSessionHome(session.home, {
+    writeFileSync(join(session.chromium, "Cache"), "cookie");
+    burnSessionHome(session.root, {
       userRoot,
       sessionId: session.sessionId,
       ino: session.ino,
       dev: session.dev,
     });
-    expect(() => lstatSync(session.home)).toThrow();
+    expect(() => lstatSync(session.root)).toThrow();
+    expect(() => lstatSync(session.chromium)).toThrow();
     expect(readFileSync(join(source, "auth.json"), "utf8")).toBe('{"token":"x"}');
   });
 
@@ -129,8 +137,61 @@ describe("symlink burn and copy", () => {
     const userRoot = join(root, ".incodex");
     const session = createSessionHome(userRoot);
     expect(() =>
-      burnSessionHome(session.home, { userRoot, sessionId: "other-session", ino: session.ino, dev: session.dev }),
+      burnSessionHome(session.root, { userRoot, sessionId: "other-session", ino: session.ino, dev: session.dev }),
     ).toThrow(/session id/);
-    expect(lstatSync(session.home).isDirectory()).toBe(true);
+    expect(lstatSync(session.root).isDirectory()).toBe(true);
+  });
+});
+
+describe("session lifecycle", () => {
+  test("drops stale identity auth when the source auth.json is gone", () => {
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const source = join(root, "codex");
+    mkdirSync(source);
+    writeFileSync(join(source, "auth.json"), '{"token":"old"}');
+    const first = createSessionHome(userRoot);
+    copySettings(first.home, source, userRoot);
+    expect(readFileSync(join(userRoot, "identity", "auth.json"), "utf8")).toBe('{"token":"old"}');
+    rmSync(join(source, "auth.json"));
+    const second = createSessionHome(userRoot);
+    expect(copySettings(second.home, source, userRoot)).toBe(0);
+    expect(() => lstatSync(join(userRoot, "identity", "auth.json"))).toThrow();
+    expect(() => lstatSync(join(second.home, "auth.json"))).toThrow();
+  });
+
+  test("janitor burns sessions whose owner pid is dead and leaves a live one", () => {
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const dead = createSessionHome(userRoot, { pid: 999999 });
+    writeFileSync(join(dead.chromium, "x"), "left");
+    const live = createSessionHome(userRoot, { pid: process.pid });
+    const swept = sweepOrphanSessions(userRoot, { keepSessionId: live.sessionId });
+    expect(swept).toBeGreaterThanOrEqual(1);
+    expect(() => lstatSync(dead.root)).toThrow();
+    expect(lstatSync(live.root).isDirectory()).toBe(true);
+  });
+
+  test("clone and live targets do not share a session or chromium directory", () => {
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const live = createSessionHome(userRoot, { targetId: "official-aaa" });
+    const clone = createSessionHome(userRoot, { targetId: "app-bbb" });
+    expect(live.root).not.toBe(clone.root);
+    expect(live.chromium).not.toBe(clone.chromium);
+    expect(live.root.includes("official-aaa")).toBe(true);
+    expect(clone.root.includes("app-bbb")).toBe(true);
+  });
+
+  test("incognito.log rotates instead of growing forever", () => {
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    mkdirSync(userRoot);
+    const log = join(userRoot, "logs", "incognito.log");
+    mkdirSync(join(userRoot, "logs"));
+    writeFileSync(log, "x".repeat(LOG_LIMIT));
+    rotateAndAppendLog(userRoot, "new-line\n");
+    expect(readFileSync(join(userRoot, "logs", "incognito.log"), "utf8")).toBe("new-line\n");
+    expect(lstatSync(`${log}.1`).isFile()).toBe(true);
   });
 });

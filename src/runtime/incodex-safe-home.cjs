@@ -4,11 +4,17 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const SESSIONS_NAME = "sessions";
+const IDENTITY_NAME = "identity";
+const LOGS_NAME = "logs";
 const OWNER_NAME = "owner.json";
+const LOCK_NAME = "lock";
+const READY_NAME = "ready";
 const PID_NAME = "incognito.pid";
 const SETTINGS_FILES = ["auth.json", "config.toml"];
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
+const LOG_LIMIT = 1024 * 1024;
+const LOG_KEEP = 3;
 
 const OPEN_EXCLUSIVE =
   fs.constants.O_WRONLY |
@@ -20,6 +26,12 @@ const OPEN_PRIVATE =
   fs.constants.O_WRONLY |
   fs.constants.O_CREAT |
   fs.constants.O_TRUNC |
+  (fs.constants.O_NOFOLLOW || 0);
+
+const OPEN_APPEND =
+  fs.constants.O_WRONLY |
+  fs.constants.O_CREAT |
+  fs.constants.O_APPEND |
   (fs.constants.O_NOFOLLOW || 0);
 
 function lstatOrNull(target) {
@@ -93,31 +105,46 @@ function exclusiveCopyFile(src, dest) {
   writePrivateFile(dest, data, { exclusive: true });
 }
 
-function createSessionHome(userRoot) {
-  const parent = path.dirname(userRoot);
-  ensurePrivateDir(userRoot, parent);
+function sessionsBase(userRoot, targetId) {
   const sessions = path.join(userRoot, SESSIONS_NAME);
   const sessionParent = ensurePrivateDir(sessions, userRoot);
-  const home = fs.mkdtempSync(path.join(sessions, "s-"));
-  fs.chmodSync(home, DIR_MODE);
-  const homeStat = assertNotSymlink(home, "session home");
-  if (!homeStat?.isDirectory()) throw new Error(`[incodex] session home is not a directory: ${home}`);
-  const realHome = realExisting(home);
-  assertInsideParent(realHome, sessionParent.real);
-  const sessionId = path.basename(home);
+  if (!targetId) return sessionParent;
+  return ensurePrivateDir(path.join(sessions, targetId), sessionParent.real);
+}
+
+function createSessionHome(userRoot, options = {}) {
+  const parent = path.dirname(userRoot);
+  ensurePrivateDir(userRoot, parent);
+  ensurePrivateDir(path.join(userRoot, IDENTITY_NAME), userRoot);
+  ensurePrivateDir(path.join(userRoot, LOGS_NAME), userRoot);
+  const sessionParent = sessionsBase(userRoot, options.targetId);
+  const root = fs.mkdtempSync(path.join(sessionParent.real, "s-"));
+  fs.chmodSync(root, DIR_MODE);
+  const rootStat = assertNotSymlink(root, "session root");
+  if (!rootStat?.isDirectory()) throw new Error(`[incodex] session root is not a directory: ${root}`);
+  const realRoot = realExisting(root);
+  assertInsideParent(realRoot, sessionParent.real);
+  const home = ensurePrivateDir(path.join(realRoot, "codex-home"), realRoot);
+  const chromium = ensurePrivateDir(path.join(realRoot, "chromium"), realRoot);
+  const sessionId = path.basename(realRoot);
+  writePrivateFile(path.join(realRoot, LOCK_NAME), `${options.pid || ""}\n`, { exclusive: true });
   const owner = {
     sessionId,
+    targetId: options.targetId || "",
+    pid: options.pid || 0,
     createdAt: new Date().toISOString(),
-    ino: homeStat.ino,
-    dev: homeStat.dev,
+    ino: rootStat.ino,
+    dev: rootStat.dev,
   };
-  writePrivateFile(path.join(home, OWNER_NAME), `${JSON.stringify(owner)}\n`, { exclusive: true });
+  writePrivateFile(path.join(realRoot, OWNER_NAME), `${JSON.stringify(owner)}\n`, { exclusive: true });
   return {
     sessionId,
-    home: realHome,
-    root: realExisting(userRoot),
-    ino: homeStat.ino,
-    dev: homeStat.dev,
+    root: realRoot,
+    home: home.real,
+    chromium: chromium.real,
+    identity: realExisting(path.join(userRoot, IDENTITY_NAME)),
+    ino: rootStat.ino,
+    dev: rootStat.dev,
   };
 }
 
@@ -128,8 +155,15 @@ function readOwner(home) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
-function burnSessionHome(home, expected) {
-  const stats = assertNotSymlink(home, "session home");
+function sessionRootFromHome(home) {
+  const base = path.basename(home);
+  if (base === "codex-home" || base === "chromium") return path.dirname(home);
+  return home;
+}
+
+function burnSessionHome(target, expected) {
+  const home = sessionRootFromHome(target);
+  const stats = assertNotSymlink(home, "session root");
   if (!stats) return;
   if (!stats.isDirectory()) {
     throw new Error(`[incodex] refuse to burn non-directory: ${home}`);
@@ -152,17 +186,141 @@ function burnSessionHome(home, expected) {
   fs.rmSync(home, { recursive: true, force: false });
 }
 
-function copySettings(home, sourceHome) {
-  const homeStat = assertNotSymlink(home, "session home");
-  if (!homeStat?.isDirectory()) throw new Error(`[incodex] session home missing: ${home}`);
-  let copied = 0;
+function removePrivateFile(dest) {
+  const stats = assertNotSymlink(dest, "file");
+  if (!stats) return;
+  fs.rmSync(dest);
+}
+
+function syncIdentity(userRoot, sourceHome) {
+  const identity = ensurePrivateDir(path.join(userRoot, IDENTITY_NAME), userRoot);
   for (const name of SETTINGS_FILES) {
     const src = path.join(sourceHome, name);
+    const dest = path.join(identity.real, name);
+    if (fs.existsSync(src)) {
+      writePrivateFile(dest, fs.readFileSync(src));
+    } else {
+      removePrivateFile(dest);
+    }
+  }
+  return identity.real;
+}
+
+function copySettings(home, sourceHome, userRoot) {
+  const homeStat = assertNotSymlink(home, "session home");
+  if (!homeStat?.isDirectory()) throw new Error(`[incodex] session home missing: ${home}`);
+  const identityDir = syncIdentity(userRoot, sourceHome);
+  let copied = 0;
+  for (const name of SETTINGS_FILES) {
+    const src = path.join(identityDir, name);
     if (!fs.existsSync(src)) continue;
     exclusiveCopyFile(src, path.join(home, name));
     copied += 1;
   }
   return copied;
+}
+
+function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function sweepOrphanSessions(userRoot, options = {}) {
+  const sessions = path.join(userRoot, SESSIONS_NAME);
+  if (!lstatOrNull(sessions)?.isDirectory() || lstatOrNull(sessions)?.isSymbolicLink()) return 0;
+  const roots = listSessionRoots(sessions, options.targetId);
+  let swept = 0;
+  for (const root of roots) {
+    if (options.keepSessionId && path.basename(root) === options.keepSessionId) continue;
+    try {
+      const owner = readOwner(root);
+      if (owner.pid && pidAlive(owner.pid)) continue;
+      burnSessionHome(root, { userRoot, sessionId: owner.sessionId });
+      swept += 1;
+    } catch {
+      try {
+        burnSessionHome(root, { userRoot });
+        swept += 1;
+      } catch {
+        /* leave it if we cannot prove it is safe */
+      }
+    }
+  }
+  for (const name of ["incognito-home", "incognito-chromium"]) {
+    const leftover = path.join(userRoot, name);
+    const stats = lstatOrNull(leftover);
+    if (!stats || stats.isSymbolicLink()) continue;
+    try {
+      fs.rmSync(leftover, { recursive: true, force: false });
+    } catch {
+      /* ignore */
+    }
+  }
+  return swept;
+}
+
+function listSessionRoots(sessions, targetId) {
+  const roots = [];
+  const start = targetId ? path.join(sessions, targetId) : sessions;
+  const startStat = lstatOrNull(start);
+  if (!startStat || startStat.isSymbolicLink() || !startStat.isDirectory()) return roots;
+  for (const name of fs.readdirSync(start)) {
+    const child = path.join(start, name);
+    const stats = lstatOrNull(child);
+    if (!stats || stats.isSymbolicLink() || !stats.isDirectory()) continue;
+    if (name.startsWith("s-")) roots.push(child);
+    else if (!targetId) {
+      for (const nested of fs.readdirSync(child)) {
+        const nest = path.join(child, nested);
+        const nestStat = lstatOrNull(nest);
+        if (nestStat && !nestStat.isSymbolicLink() && nestStat.isDirectory() && nested.startsWith("s-")) {
+          roots.push(nest);
+        }
+      }
+    }
+  }
+  return roots;
+}
+
+function writeReady(sessionRoot) {
+  writePrivateFile(path.join(sessionRoot, READY_NAME), `${Date.now()}\n`, { exclusive: true });
+}
+
+function hasReady(sessionRoot) {
+  const file = path.join(sessionRoot, READY_NAME);
+  const stats = lstatOrNull(file);
+  return Boolean(stats && !stats.isSymbolicLink());
+}
+
+function rotateAndAppendLog(userRoot, line) {
+  const logs = ensurePrivateDir(path.join(userRoot, LOGS_NAME), userRoot);
+  const file = path.join(logs.real, "incognito.log");
+  const stats = lstatOrNull(file);
+  if (stats?.isSymbolicLink()) throw new Error(`[incodex] refuse to write symlink log: ${file}`);
+  if (stats && stats.size >= LOG_LIMIT) {
+    for (let index = LOG_KEEP - 1; index >= 1; index -= 1) {
+      const from = `${file}.${index}`;
+      const to = `${file}.${index + 1}`;
+      if (lstatOrNull(from) && !lstatOrNull(from).isSymbolicLink()) {
+        fs.renameSync(from, to);
+      }
+    }
+    if (!stats.isSymbolicLink()) fs.renameSync(file, `${file}.1`);
+    const extra = `${file}.${LOG_KEEP}`;
+    if (lstatOrNull(extra) && !lstatOrNull(extra).isSymbolicLink()) fs.rmSync(extra);
+  }
+  const fd = fs.openSync(file, OPEN_APPEND, FILE_MODE);
+  try {
+    fs.writeSync(fd, line);
+    fs.fchmodSync(fd, FILE_MODE);
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 function isManagedSessionHome(home, userRoot) {
@@ -211,10 +369,15 @@ function readPidFile(userRoot) {
 
 module.exports = {
   SESSIONS_NAME,
+  IDENTITY_NAME,
+  LOGS_NAME,
   OWNER_NAME,
+  LOCK_NAME,
+  READY_NAME,
   SETTINGS_FILES,
   DIR_MODE,
   FILE_MODE,
+  LOG_LIMIT,
   assertNotSymlink,
   assertInsideParent,
   ensurePrivateDir,
@@ -223,8 +386,14 @@ module.exports = {
   createSessionHome,
   burnSessionHome,
   copySettings,
+  syncIdentity,
   isManagedSessionHome,
+  sweepOrphanSessions,
+  writeReady,
+  hasReady,
+  rotateAndAppendLog,
   writePidFile,
   clearPidFile,
   readPidFile,
+  sessionRootFromHome,
 };
