@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { cloneOfficialApp, install, resolveTarget } from "./install";
+import { cloneOfficialApp, install, installExternalRuntime, resolveTarget } from "./install";
 import { inspectApp } from "./app-identity";
 import { parseCli } from "./parse-cli";
 import { DEFAULT_APP } from "./paths";
@@ -24,6 +24,7 @@ Usage:
   bun src/cli.ts status [--json] [--app <path>]
   bun src/cli.ts doctor [--app <path>]
   bun src/cli.ts recover --transaction <id>
+  bun src/cli.ts runtime
 `);
   process.exit(0);
 }
@@ -68,6 +69,9 @@ const appPath = resolveTarget({
     }
   } else if (parsed.command === "doctor") {
     printDiagnosis(diagnose(parsed.app ?? DEFAULT_APP));
+  } else if (parsed.command === "runtime") {
+    installExternalRuntime();
+    console.log("done. Codex was not modified. reopen it to load the new runtime.");
   } else if (parsed.command === "recover") {
     const result = recoverTransaction(parsed.transaction!);
     console.log("phase:", result.journal.phase);

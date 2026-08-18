@@ -34,5 +34,8 @@ describe("doctor", () => {
     expect(report.codesignOk).toBe(false);
     expect(report.spctl).toBeNull();
     expect(report.signing).toBeNull();
+    expect(report.asarLoaderOnly).toBeNull();
+    expect(report.externalRuntime.ok).toBe(false);
+    expect(report.externalRuntime.present).toBe(false);
   });
 });

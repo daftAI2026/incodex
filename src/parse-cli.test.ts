@@ -41,4 +41,8 @@ describe("parseCli", () => {
   test("unknown commands are rejected", () => {
     expect(() => parseCli(["bun", "cli", "wipe"])).toThrow(/unknown command/);
   });
+
+  test("runtime updates external files without an install target", () => {
+    expect(parseCli(["bun", "cli", "runtime"])).toMatchObject({ command: "runtime", live: false, clone: false });
+  });
 });

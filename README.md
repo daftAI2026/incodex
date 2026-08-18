@@ -54,6 +54,14 @@ bun src/cli.ts status
 bun src/cli.ts doctor
 ```
 
+只更新 Incodex 自己的按钮 / 文案 / 清理逻辑，不必再改官方应用、也不必重签：
+
+```bash
+bun src/cli.ts runtime
+```
+
+这只写入 `~/.incodex/runtime/`。官方 Codex 升级冲掉补丁后，仍要再跑一次 `install --live --confirm-live`（只打**当前这份**官方包）。
+
 ## 注意
 
 - 官方插件加不了这个按钮，必须改应用包

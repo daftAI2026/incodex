@@ -1,8 +1,9 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { readPackageMain } from "./asar";
+import { asarHasOnlyLoader, readPackageMain } from "./asar";
+import { inspectExternalRuntime } from "./external-runtime";
 import { loadCurrentInstallation, targetId } from "./installation";
-import { ASAR_REL, DEFAULT_APP } from "./paths";
+import { ASAR_REL, DEFAULT_APP, USER_ROOT } from "./paths";
 import { loadState } from "./state";
 
 export function printStatus(appPath = DEFAULT_APP): void {
@@ -15,6 +16,12 @@ export function printStatus(appPath = DEFAULT_APP): void {
   }
   const pkg = readPackageMain(asarPath);
   console.log("patched:", pkg.alreadyPatched);
+  console.log("asar loader only:", asarHasOnlyLoader(asarPath));
+  const runtime = inspectExternalRuntime(USER_ROOT);
+  console.log(
+    "external runtime:",
+    runtime.ok ? `${runtime.version} ${runtime.release}` : runtime.present ? "invalid" : "missing",
+  );
   console.log("main:", pkg.main);
   if (pkg.installId) console.log("install id:", pkg.installId);
   console.log("target id:", targetId(appPath));

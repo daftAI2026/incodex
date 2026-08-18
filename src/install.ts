@@ -21,7 +21,7 @@ import {
   selectOfficialInstallSource,
 } from "./live-source";
 import { runCloneInstall } from "./install-transaction";
-import { loadDistRuntimeFiles, publishExternalRuntime } from "./external-runtime";
+import { publishExternalRuntimeFromDist } from "./external-runtime";
 import { ASAR_REL, DEFAULT_APP, LIVE_PREV, USER_ROOT } from "./paths";
 import { saveState } from "./state";
 import { advanceJournal, writeJournal, type Journal } from "./transaction";
@@ -119,12 +119,13 @@ function pointLivePrevAt(originalApp: string): void {
 }
 
 function publishBundledRuntime(userRoot: string): void {
-  const current = publishExternalRuntime({
-    userRoot,
-    version: runtimeVersion(),
-    files: loadDistRuntimeFiles(join(repoRoot, "dist")),
-  });
+  const current = publishExternalRuntimeFromDist(userRoot, join(repoRoot, "dist"), runtimeVersion());
   console.log(`external runtime ${current.version} -> ${current.release}`);
+}
+
+export function installExternalRuntime(userRoot = USER_ROOT): void {
+  ensureRuntime();
+  publishBundledRuntime(userRoot);
 }
 
 function runtimeVersion(): string {

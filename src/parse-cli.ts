@@ -1,4 +1,4 @@
-export type CliCommand = "help" | "install" | "uninstall" | "status" | "doctor" | "recover";
+export type CliCommand = "help" | "install" | "uninstall" | "status" | "doctor" | "recover" | "runtime";
 
 export type ParsedCli = {
   command: CliCommand;
@@ -48,7 +48,8 @@ function parseCommand(raw: string | undefined): CliCommand {
     command === "uninstall" ||
     command === "status" ||
     command === "doctor" ||
-    command === "recover"
+    command === "recover" ||
+    command === "runtime"
   ) {
     return command === "-h" || command === "--help" ? "help" : command;
   }

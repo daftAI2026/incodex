@@ -25,6 +25,20 @@ export type IncodexMarker = {
   installId?: string;
 };
 
+export function asarHasOnlyLoader(asarPath: string): boolean {
+  try {
+    extractFile(asarPath, LOADER_NAME);
+  } catch {
+    return false;
+  }
+  try {
+    extractFile(asarPath, MAIN_NAME);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 export function readPackageMain(asarPath: string): {
   main: string;
   alreadyPatched: boolean;

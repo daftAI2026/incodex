@@ -1,7 +1,8 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { inspectApp } from "./app-identity";
-import { headerHash, readPackageMain } from "./asar";
+import { asarHasOnlyLoader, headerHash, readPackageMain } from "./asar";
+import { inspectExternalRuntime, type ExternalRuntimeReport } from "./external-runtime";
 import { diagnoseSpctl, verifyApp, type SpctlDiagnosis } from "./codesign";
 import { loadCurrentInstallation, loadSigningManifest, originalAppPath, targetId } from "./installation";
 import { readAsarIntegrity } from "./integrity";
@@ -38,6 +39,8 @@ export type Diagnosis = {
   stalePid: boolean;
   orphanSessions: string[];
   leftoverChromium: string[];
+  asarLoaderOnly: boolean | null;
+  externalRuntime: ExternalRuntimeReport;
   interruptedTransactions: Array<{ installId: string; phase: Journal["phase"]; action: string }>;
   signing: {
     verified: boolean;
@@ -113,6 +116,8 @@ export function diagnose(appPath = DEFAULT_APP, root = USER_ROOT): Diagnosis {
     stalePid: existsSync(join(stateDir, "incognito.lock")) ? staleOwner(stateDir) : false,
     orphanSessions,
     leftoverChromium,
+    asarLoaderOnly: info.asarExists ? asarHasOnlyLoader(asarPath) : null,
+    externalRuntime: inspectExternalRuntime(root),
     signing: storedSigning
       ? {
           verified: storedSigning.verified,
@@ -147,6 +152,13 @@ export function printDiagnosis(report: Diagnosis): void {
   console.log("plist integrity hash:", report.plistIntegrityHash ?? "unknown");
   console.log("runtime version:", report.runtimeVersion ?? "unknown");
   console.log("original main:", report.originalMain || "unknown");
+  console.log("asar loader only:", report.asarLoaderOnly === null ? "unknown" : report.asarLoaderOnly);
+  if (report.externalRuntime.ok) {
+    console.log("external runtime:", report.externalRuntime.version, report.externalRuntime.release);
+  } else {
+    console.log("external runtime:", report.externalRuntime.present ? "invalid" : "missing");
+    if (report.externalRuntime.error) console.log("external runtime error:", report.externalRuntime.error);
+  }
   console.log("codesign verify:", report.codesignOk);
   if (report.signing) {
     console.log("signing components:", report.signing.componentCount);
