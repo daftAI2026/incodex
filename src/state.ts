@@ -8,6 +8,13 @@ export type InstallState = {
   asarHashBefore: string;
   asarHashAfter: string;
   installedAt: string;
+  installId?: string;
+  bundleIdentifier?: string;
+  appVersion?: string;
+  appBuild?: string;
+  architecture?: string;
+  originalAsarFileHash?: string;
+  originalPlistFileHash?: string;
 };
 
 export function loadState(): InstallState | null {
