@@ -9,6 +9,19 @@ function src(rel: string): string {
 }
 
 describe("architecture boundaries", () => {
+  test("native CLI experiment is documented so crate PRs do not target main", () => {
+    const agents = src("AGENTS.md");
+    const contributing = src("CONTRIBUTING.md");
+    expect(agents).toContain("exp/rust-cli");
+    expect(agents).toContain("tests/cli-golden.test.ts");
+    expect(agents).toContain("--base exp/rust-cli");
+    expect(agents).toContain("Do not send crate PRs at `main`");
+    expect(agents).toContain("Incognito-window hover");
+    expect(contributing).toContain("exp/rust-cli");
+    expect(contributing).toContain("base exp/rust-cli");
+    expect(contributing).toContain("Rust crate PRs use base `exp/rust-cli`");
+  });
+
   test("UI adapter has no file deletion, process control, or auth handling", () => {
     const inject = src("src/runtime/inject.ts");
     expect(inject).not.toMatch(/node:fs|node:child_process|auth\.json|rmSync|spawn\(/);
