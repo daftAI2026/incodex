@@ -13,7 +13,7 @@ Commands:
   status       Show whether Incodex is installed
   doctor       Diagnose the install
   runtime      Update Incodex without re-signing Codex
-  recover      Finish a failed install
+  recover      Roll back a failed install
   open         Open an incognito window without patching Codex
   update       Update this CLI
   self-uninstall  Remove this CLI (not Codex, unless --restore-app)
@@ -95,7 +95,7 @@ Examples:
       return `Usage:
   incodex recover --transaction <id>
 
-Finish or roll back an install that stopped halfway.
+Roll back an install that stopped halfway. Uncommitted work is never continued.
 
 Examples:
   incodex recover --transaction <id>
