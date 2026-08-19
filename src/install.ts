@@ -4,7 +4,6 @@ import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileSha256, inspectApp } from "./app-identity";
 import { asarHasOnlyLoader, headerHash, ensureDir } from "./asar";
-import { findSupportedBuild, liveSupportNote } from "./compatibility/supported-builds";
 import { signApp, verifyTarget, type SigningManifest } from "./codesign";
 import {
   loadCurrentInstallation,
@@ -29,12 +28,15 @@ import {
   resolvePackagedDistDir,
   runtimeMatchesPackaged,
 } from "./packaged-runtime";
+import { formatKv, formatOk } from "./cli-print";
+import { quitOfficialApp } from "./quit-official";
 import { notifyLaunchServices } from "./launch-services";
 import { ASAR_REL, DEFAULT_APP, LIVE_PREV, USER_ROOT } from "./paths";
 import { saveState } from "./state";
 import { advanceJournal, writeJournal, type Journal } from "./transaction";
 
 export { LIVE_PREV };
+export { listOfficialPids, quitOfficialApp } from "./quit-official";
 
 export function officialInstallAlreadyCurrent(input: {
   patched: boolean;
@@ -42,6 +44,16 @@ export function officialInstallAlreadyCurrent(input: {
   runtimeCurrent: boolean;
 }): boolean {
   return input.patched && input.loaderOnly && input.runtimeCurrent;
+}
+
+export function officialInstallWouldSkip(appPath: string, userRoot = USER_ROOT): boolean {
+  if (!isOfficialApp(appPath) || !existsSync(appPath)) return false;
+  const info = inspectApp(appPath);
+  return officialInstallAlreadyCurrent({
+    patched: info.patched,
+    loaderOnly: info.asarExists && asarHasOnlyLoader(join(appPath, ASAR_REL)),
+    runtimeCurrent: runtimeMatchesPackaged(userRoot),
+  });
 }
 
 export type InstallOptions = {
@@ -68,18 +80,9 @@ export function cloneOfficialApp(dest: string): void {
   if (cloned.status !== 0) throw new Error(cloned.stderr || "failed to copy ChatGPT.app");
 }
 
-export function quitOfficialApp(): void {
-  const listed = spawnSync("ps", ["-ax", "-o", "pid=,command="], { encoding: "utf8" });
-  const needle = `${DEFAULT_APP}/Contents/MacOS/ChatGPT`;
-  const pids = (listed.stdout || "")
-    .split("\n")
-    .filter((line) => line.includes(needle))
-    .map((line) => Number(line.trim().split(/\s+/)[0]))
-    .filter((pid) => Number.isInteger(pid) && pid > 0);
-  if (pids.length === 0) return;
-  console.log("quitting official Codex", pids.join(" "));
-  for (const pid of pids) spawnSync("kill", [String(pid)]);
-  spawnSync("sleep", ["1"]);
+export function openOfficialApp(): void {
+  const opened = spawnSync("open", [DEFAULT_APP], { encoding: "utf8" });
+  if (opened.status !== 0) throw new Error(opened.stderr || "failed to open ChatGPT.app");
 }
 
 async function patchAppBundle(
@@ -126,9 +129,7 @@ function pointLivePrevAt(originalApp: string): void {
 
 function publishBundledRuntime(userRoot: string) {
   const distDir = resolvePackagedDistDir();
-  const current = publishPackagedRuntime(userRoot, distDir);
-  console.log(`external runtime ${current.version} -> ${current.release}`);
-  return current;
+  return publishPackagedRuntime(userRoot, distDir);
 }
 
 export function installExternalRuntime(userRoot = USER_ROOT): CommandResult {
@@ -169,18 +170,18 @@ async function installLive(): Promise<{ installId: string; runtimeVersion: strin
   };
   writeJournal(journal);
   if (decision.action === "use-backup") {
-    console.log("install source: matching original backup");
+    console.log(formatKv("Source", "matching original backup"));
     snapshotOriginalApp(sourceApp, originalDest);
   } else {
-    console.log("install source: current official app");
+    console.log(formatKv("Source", "current official app"));
   }
   journal = advanceJournal(journal, "BACKUP_COMMITTED");
 
   const before = headerHash(join(sourceApp, ASAR_REL));
   rmSync(stagedApp, { recursive: true, force: true });
-  console.log("copying official OpenAI-signed app to a writable staging bundle");
   const copied = spawnSync("ditto", [sourceApp, stagedApp], { encoding: "utf8" });
   if (copied.status !== 0) throw new Error(copied.stderr || "failed to stage official app");
+  console.log(formatOk("Copied official app to staging"));
   journal = advanceJournal(journal, "STAGED");
   const patched = await patchAppBundle(stagedApp, true, installId);
   journal = advanceJournal(journal, "PATCHED");
@@ -189,8 +190,8 @@ async function installLive(): Promise<{ installId: string; runtimeVersion: strin
   journal = advanceJournal(journal, "VERIFIED");
   const patchedAsar = join(stagedApp, ASAR_REL);
   const patchedAsarFileHash = fileSha256(patchedAsar);
-  console.log("replacing /Applications/ChatGPT.app with the patched bundle");
   swapOfficialWith(stagedApp, decision.action === "use-current" ? originalDest : null);
+  console.log(formatOk("Replaced /Applications/ChatGPT.app"));
   journal = advanceJournal(journal, "SWAPPED");
   if (!existsSync(originalDest)) throw new Error("original snapshot missing after install");
   verifyTarget(DEFAULT_APP, "installed official app");
@@ -241,17 +242,14 @@ async function installLive(): Promise<{ installId: string; runtimeVersion: strin
     originalPlistFileHash: sourceIdentity.plistFileHash,
   });
   advanceJournal(journal, "COMMITTED");
-  console.log("official app patched. reopen /Applications/ChatGPT.app");
-  console.log("to restore official Codex: incodex uninstall");
+  console.log(formatOk("Official app patched"));
+  console.log(formatKv("Restore", "incodex uninstall"));
   return { installId, runtimeVersion: packagedRuntimeVersion(resolvePackagedDistDir()) };
 }
 
 export async function install(appPath: string, options?: { root?: string }): Promise<CommandResult> {
   if (!existsSync(appPath)) throw new Error(`Codex app not found: ${appPath}`);
-  const listing = inspectApp(appPath).listing;
   if (isOfficialApp(appPath)) {
-    const note = liveSupportNote(listing ?? {});
-    if (note) console.warn(note);
     const userRoot = options?.root ?? USER_ROOT;
     const info = inspectApp(appPath);
     const skip = officialInstallAlreadyCurrent({
@@ -262,7 +260,6 @@ export async function install(appPath: string, options?: { root?: string }): Pro
     const published = publishBundledRuntime(userRoot);
     if (skip) {
       const stored = loadCurrentInstallation(appPath, userRoot);
-      console.log("already current. Codex was not re-signed.");
       return {
         action: "install",
         skipped: true,
@@ -279,11 +276,6 @@ export async function install(appPath: string, options?: { root?: string }): Pro
       runtimeVersion: live.runtimeVersion,
       app: appPath,
     };
-  }
-  if (!findSupportedBuild(listing ?? {})) {
-    console.warn(
-      `unknown Codex build ${listing?.appVersion ?? "unknown"} (${listing?.appBuild ?? "unknown"}); clone is experimental`,
-    );
   }
   const published = publishBundledRuntime(options?.root ?? USER_ROOT);
   const cloned = await runCloneInstall(appPath, {

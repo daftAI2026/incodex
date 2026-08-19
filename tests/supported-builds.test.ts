@@ -1,40 +1,28 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
-import { findSupportedBuild, SUPPORTED_CODEX_BUILDS } from "../src/compatibility/supported-builds";
 
-describe("supported Codex builds", () => {
-  test("lists at least the observed official build", () => {
-    expect(SUPPORTED_CODEX_BUILDS.length).toBeGreaterThan(0);
-    const known = findSupportedBuild({
-      bundleIdentifier: "com.openai.codex",
-      appVersion: "26.810.52044",
-      appBuild: "6662",
-    });
-    expect(known?.asarMain).toBe(".vite/build/early-bootstrap.js");
+const root = join(import.meta.dir, "..");
+
+function src(rel: string): string {
+  return readFileSync(join(root, rel), "utf8");
+}
+
+describe("Codex builds are not an allowlist", () => {
+  test("there is no version+build table", () => {
+    expect(existsSync(join(root, "src/compatibility/supported-builds.ts"))).toBe(false);
   });
 
-  test("unknown builds are not listed", () => {
-    expect(
-      findSupportedBuild({
-        bundleIdentifier: "com.openai.codex",
-        appVersion: "0.0.0",
-        appBuild: "0",
-      }),
-    ).toBeUndefined();
+  test("install does not warn about an unknown Codex build number", () => {
+    expect(src("src/cli.ts")).not.toContain("unknown Codex build");
+    expect(src("src/cli.ts")).not.toContain("liveSupportNote");
+    expect(src("src/install.ts")).not.toContain("unknown Codex build");
+    expect(src("src/install.ts")).not.toContain("findSupportedBuild");
   });
 
-  test("known builds carry the compatibility manifest fields", () => {
-    const known = findSupportedBuild({
-      bundleIdentifier: "com.openai.codex",
-      appVersion: "26.810.52044",
-      appBuild: "6662",
-    });
-    expect(known?.adapterId).toBe("build-26.810.52044");
-    expect(known?.expectedAsarFiles).toContain("package.json");
-    expect(known?.selectors.length).toBeGreaterThan(0);
-    expect(known?.featureProbes).toEqual(["search-aria-label", "home-banners"]);
-    expect(known?.asarMain).toBeTruthy();
-    expect(known?.signingObservations).toContain("ad hoc");
-    expect(known?.testedMacOS.length).toBeGreaterThan(0);
-    expect(known?.architectures).toEqual(["arm64", "x86_64"]);
+  test("the default adapter is not named after one observed build", () => {
+    expect(src("src/runtime/compatibility/default-adapter.ts")).not.toMatch(/26\.810\.52044|6662/);
+    expect(src("src/runtime/compatibility/registry.ts")).not.toMatch(/26\.810\.52044|6662/);
+    expect(existsSync(join(root, "src/runtime/compatibility/build-26.810.52044.ts"))).toBe(false);
   });
 });

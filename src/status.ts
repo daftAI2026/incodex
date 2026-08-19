@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { asarHasOnlyLoader, readPackageMain } from "./asar";
-import { formatKv, formatOk, formatWarn } from "./cli-print";
+import { formatKv, formatOk, formatStep, formatWarn } from "./cli-print";
 import { inspectExternalRuntime } from "./external-runtime";
 import { loadCurrentInstallation, targetId } from "./installation";
 import { ASAR_REL, DEFAULT_APP, USER_ROOT } from "./paths";
@@ -38,6 +38,7 @@ export function formatStatus(view: StatusView): string {
 
 export function printStatus(appPath = DEFAULT_APP): void {
   const asarPath = join(appPath, ASAR_REL);
+  console.log(formatStep("Status"));
   if (!existsSync(appPath)) {
     console.log(formatWarn(`Codex app not found: ${appPath}`));
     console.log("");

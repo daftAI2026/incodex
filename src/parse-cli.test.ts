@@ -66,6 +66,16 @@ describe("parseCli", () => {
     expect(() => parseCli(["bun", "cli", "wipe"])).toThrow(/unknown command/);
   });
 
+  test("unknown flags are rejected instead of becoming a live install", () => {
+    expect(() => parseCli(["bun", "cli", "install", "--dry-run\uFF0C"])).toThrow(/unknown flag/);
+    expect(() => parseCli(["bun", "cli", "install", "--dry-run,"])).toThrow(/unknown flag/);
+    expect(() => parseCli(["bun", "cli", "install", "--please"])).toThrow(/unknown flag: --please/);
+  });
+
+  test("unexpected positional arguments are rejected", () => {
+    expect(() => parseCli(["bun", "cli", "install", "now"])).toThrow(/unexpected argument: now/);
+  });
+
   test("runtime updates external files without an install target", () => {
     expect(parseCli(["bun", "cli", "runtime"])).toMatchObject({ command: "runtime", live: false, clone: false });
   });

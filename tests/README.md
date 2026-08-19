@@ -6,7 +6,7 @@ holds cross-cutting fixtures and engineering checks.
 | path | purpose |
 | --- | --- |
 | `src/*.test.ts` | unit tests (CLI, backup identity, symlink, ASAR, IPC) |
-| `tests/supported-builds.test.ts` | compatibility manifest shape |
+| `tests/supported-builds.test.ts` | UI adapter is not pinned to one Codex build |
 | `tests/runtime-manifest.test.ts` | committed runtime metadata |
 
 ASAR fixture coverage is in `src/asar-unpack.test.ts` and `src/asar-upgrade.test.ts`.

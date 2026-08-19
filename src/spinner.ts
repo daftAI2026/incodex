@@ -1,4 +1,5 @@
-const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const FRAMES = ["|", "/", "-", "\\"];
+const PREFIX = "  ";
 
 export type Spinner = { stop: () => void };
 
@@ -19,11 +20,11 @@ export function startSpinner(message: string, options: SpinnerOptions = {}): Spi
 
   let frame = 0;
   const draw = () => {
-    write(`\r\u001b[2K${FRAMES[frame % FRAMES.length]} ${message}`);
+    write(`\r\u001b[2K${PREFIX}${FRAMES[frame % FRAMES.length]} ${message}`);
     frame += 1;
   };
   draw();
-  const timer = (options.setInterval ?? setInterval)(draw, options.intervalMs ?? 80);
+  const timer = (options.setInterval ?? setInterval)(draw, options.intervalMs ?? 50);
   return {
     stop() {
       (options.clearInterval ?? clearInterval)(timer);

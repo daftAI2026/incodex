@@ -1,7 +1,5 @@
 export type UiAdapter = {
   id: string;
-  appVersion: string;
-  appBuild: string;
   selectors: {
     headerCluster: string;
     homeBanners: string;
