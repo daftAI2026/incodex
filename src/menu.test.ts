@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { erasePaintedLines, handleMenuKey, HIDE_CURSOR, MENU_ITEMS, menuControlsLine, renderMenu, SHOW_CURSOR } from "./menu";
+import {
+  erasePaintedLines,
+  ERASE_DOWN,
+  handleMenuKey,
+  HIDE_CURSOR,
+  MENU_HOME,
+  MENU_ITEMS,
+  menuControlsLine,
+  renderMenu,
+  SHOW_CURSOR,
+} from "./menu";
 
 describe("menu", () => {
   test("covers install, uninstall, open, status, doctor, and quit", () => {
@@ -122,6 +132,11 @@ describe("handleMenuKey", () => {
     expect(SHOW_CURSOR).toBe("\u001b[?25h");
     expect(erasePaintedLines(12)).toBe("\u001b[12A\u001b[J");
     expect(erasePaintedLines(0)).toBe("");
+  });
+
+  test("a menu frame starts at the top of the screen and clears everything below", () => {
+    expect(MENU_HOME).toBe("\u001b[H");
+    expect(ERASE_DOWN).toBe("\u001b[J");
   });
 
   test("q and escape quit; U only runs update when a notice is showing", () => {

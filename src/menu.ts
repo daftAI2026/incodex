@@ -139,6 +139,8 @@ export function renderMenu(selected: number, options: RenderMenuOptions = {}): s
 
 export const HIDE_CURSOR = "\u001b[?25l";
 export const SHOW_CURSOR = "\u001b[?25h";
+export const MENU_HOME = "\u001b[H";
+export const ERASE_DOWN = "\u001b[J";
 
 export function erasePaintedLines(count: number): string {
   if (count <= 0) return "";
@@ -152,7 +154,6 @@ export function drainPendingInput(stdin: NodeJS.ReadStream = process.stdin): voi
 
 async function rawMenu(options: RenderMenuOptions): Promise<MenuChoice> {
   let selected = 0;
-  let painted = 0;
   const stdin = process.stdin;
   stdin.setRawMode(true);
   stdin.resume();
@@ -160,10 +161,8 @@ async function rawMenu(options: RenderMenuOptions): Promise<MenuChoice> {
   process.stdout.write(HIDE_CURSOR);
 
   const draw = () => {
-    if (painted > 0) process.stdout.write(`\u001b[${painted}A\u001b[J`);
     const text = renderMenu(selected, options);
-    process.stdout.write(`${text}\n`);
-    painted = text.split("\n").length;
+    process.stdout.write(`${MENU_HOME}${text}\n${ERASE_DOWN}`);
   };
 
   return new Promise((resolve, reject) => {
@@ -192,8 +191,7 @@ async function rawMenu(options: RenderMenuOptions): Promise<MenuChoice> {
       stdin.off("data", onData);
       drainPendingInput(stdin);
       if (stdin.isTTY) stdin.setRawMode(false);
-      if (painted > 0) process.stdout.write(erasePaintedLines(painted));
-      process.stdout.write(SHOW_CURSOR);
+      process.stdout.write(`${MENU_HOME}${ERASE_DOWN}${SHOW_CURSOR}`);
       stdin.pause();
     };
     try {
