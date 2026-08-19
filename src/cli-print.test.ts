@@ -1,0 +1,18 @@
+import { describe, expect, test } from "bun:test";
+import { formatKv, formatOk, formatSection, formatWarn } from "./cli-print";
+
+describe("cli print", () => {
+  test("kv lines align labels", () => {
+    const text = [formatKv("App", "/Applications/ChatGPT.app"), formatKv("Installed", "yes")].join("\n");
+    expect(text).toContain("App");
+    expect(text).toContain("/Applications/ChatGPT.app");
+    expect(text).toContain("Installed");
+    expect(text).not.toMatch(/^app:/m);
+  });
+
+  test("ok and warn marks are stable", () => {
+    expect(formatOk("Closed. Isolated session removed.")).toContain("Closed. Isolated session removed.");
+    expect(formatWarn("unknown Codex build")).toContain("unknown Codex build");
+    expect(formatSection("Signing")).toContain("Signing");
+  });
+});

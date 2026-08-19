@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { inspectApp } from "./app-identity";
+import { formatKv, formatSection, formatWarn } from "./cli-print";
 import { asarHasOnlyLoader, headerHash, readPackageMain } from "./asar";
 import { inspectExternalRuntime, type ExternalRuntimeReport } from "./external-runtime";
 import { diagnoseSpctl, verifyApp, type SpctlDiagnosis } from "./codesign";
@@ -139,52 +140,57 @@ export function diagnose(appPath = DEFAULT_APP, root = USER_ROOT): Diagnosis {
 }
 
 export function printDiagnosis(report: Diagnosis): void {
-  console.log("target:", report.target);
-  console.log("target id:", report.targetId);
-  console.log("exists:", report.exists);
-  console.log("patched:", report.patched);
-  console.log("bundle:", report.bundleId ?? "unknown");
-  console.log("version:", report.appVersion ?? "unknown", report.appBuild ?? "");
-  console.log("arch:", report.architecture ?? "unknown");
-  console.log("asar file hash:", report.asarFileHash ?? "unknown");
-  console.log("asar header hash:", report.asarHeaderHash ?? "unknown");
-  console.log("plist file hash:", report.plistFileHash ?? "unknown");
-  console.log("plist integrity hash:", report.plistIntegrityHash ?? "unknown");
-  console.log("runtime version:", report.runtimeVersion ?? "unknown");
-  console.log("original main:", report.originalMain || "unknown");
-  console.log("asar loader only:", report.asarLoaderOnly === null ? "unknown" : report.asarLoaderOnly);
-  if (report.externalRuntime.ok) {
-    console.log("external runtime:", report.externalRuntime.version, report.externalRuntime.release);
-  } else {
-    console.log("external runtime:", report.externalRuntime.present ? "invalid" : "missing");
-    if (report.externalRuntime.error) console.log("external runtime error:", report.externalRuntime.error);
-  }
-  console.log("codesign verify:", report.codesignOk);
+  const runtime = report.externalRuntime.ok
+    ? `${report.externalRuntime.version} ${report.externalRuntime.release}`
+    : report.externalRuntime.present
+      ? "invalid"
+      : "missing";
+  const backup = report.backup
+    ? report.backup.originalExists && report.backup.complete
+      ? "ok"
+      : "incomplete"
+    : "none";
+  console.log(formatSection("App"));
+  console.log(formatKv("Path", report.target));
+  console.log(formatKv("Exists", report.exists ? "yes" : "no"));
+  console.log(formatKv("Installed", report.patched ? "yes" : "no"));
+  console.log(formatKv("Bundle", report.bundleId ?? "unknown"));
+  console.log(formatKv("Version", `${report.appVersion ?? "unknown"} ${report.appBuild ?? ""}`.trim()));
+  console.log(formatKv("Arch", report.architecture ?? "unknown"));
+  console.log("");
+  console.log(formatSection("Runtime"));
+  console.log(formatKv("Version", report.runtimeVersion ?? "unknown"));
+  console.log(formatKv("External", runtime));
+  if (report.externalRuntime.error) console.log(formatWarn(report.externalRuntime.error));
+  console.log(formatKv("Loader", report.asarLoaderOnly === null ? "unknown" : report.asarLoaderOnly ? "asar only" : "mixed"));
+  console.log(formatKv("Main", report.originalMain || "unknown"));
+  console.log("");
+  console.log(formatSection("Signing"));
+  console.log(formatKv("Verify", report.codesignOk ? "ok" : "failed"));
   if (report.signing) {
-    console.log("signing components:", report.signing.componentCount);
-    console.log("signing hardened runtime:", report.signing.hardenedRuntimeOk);
-    console.log(
-      "adhoc-unretainable entitlements:",
-      report.signing.unretainable.length ? report.signing.unretainable.join(", ") : "none",
-    );
+    console.log(formatKv("Hardened", report.signing.hardenedRuntimeOk ? "yes" : "no"));
+    console.log(formatKv("Dropped", report.signing.unretainable.length ? report.signing.unretainable.join(", ") : "none"));
   }
   if (report.spctl) {
-    console.log("spctl (diagnostic only):", report.spctl.accepted ? "accepted" : "not accepted");
-    console.log("spctl used as success gate:", report.spctl.usedAsSuccessGate);
+    console.log(formatKv("Gatekeeper", report.spctl.accepted ? "accepted" : "not accepted (diagnostic)"));
   }
-  console.log("backup:", report.backup ? (report.backup.originalExists && report.backup.complete ? "ok" : "incomplete") : "none");
+  console.log("");
+  console.log(formatSection("Backup"));
+  console.log(formatKv("State", backup));
   if (report.backup) {
-    console.log("backup belongs to target:", report.backup.belongsToTarget);
-    console.log("backup original asar:", report.backup.originalAsarFileHash);
+    console.log(formatKv("Matches", report.backup.belongsToTarget ? "yes" : "no"));
   }
-  console.log("stale pid:", report.stalePid);
-  console.log("orphan sessions:", report.orphanSessions.length);
-  for (const session of report.orphanSessions) console.log("  orphan:", session);
-  console.log("chromium leftovers:", report.leftoverChromium.length);
-  for (const leftover of report.leftoverChromium) console.log("  chromium:", leftover);
-  console.log("interrupted transactions:", report.interruptedTransactions.length);
+  console.log("");
+  console.log(formatSection("Sessions"));
+  console.log(formatKv("Orphans", String(report.orphanSessions.length)));
+  console.log(formatKv("Chromium", String(report.leftoverChromium.length)));
+  console.log(formatKv("Stale pid", report.stalePid ? "yes" : "no"));
+  console.log(formatKv("Journals", String(report.interruptedTransactions.length)));
   for (const item of report.interruptedTransactions) {
-    console.log(`  ${item.installId} ${item.phase} -> ${item.action}`);
+    console.log(formatKv("Journal", `${item.installId}  ${item.phase} -> ${item.action}`));
+  }
+  if (report.interruptedTransactions.length) {
+    console.log(formatWarn("Old install journals are leftover. They do not mean the current app is broken."));
   }
 }
 

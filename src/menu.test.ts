@@ -41,6 +41,7 @@ describe("menu", () => {
     expect(text).toContain("5. Doctor");
     expect(text).toContain("6. Quit");
     expect(text).toContain("↑↓ | Enter | Q Quit | 1-6 Jump");
+    expect(handleMenuKey("5", 0)).toEqual({ action: "select", id: "doctor" });
   });
 
   test("selected row uses Mole's arrow", () => {

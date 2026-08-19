@@ -137,6 +137,19 @@ export function renderMenu(selected: number, options: RenderMenuOptions = {}): s
   return lines.join("\n");
 }
 
+function hideCursor(): void {
+  process.stdout.write("\u001b[?25l");
+}
+
+function showCursor(): void {
+  process.stdout.write("\u001b[?25h");
+}
+
+export function drainPendingInput(stdin: NodeJS.ReadStream = process.stdin): void {
+  stdin.resume();
+  while (stdin.readableLength > 0) stdin.read();
+}
+
 async function rawMenu(options: RenderMenuOptions): Promise<MenuChoice> {
   let selected = 0;
   let painted = 0;
@@ -144,6 +157,7 @@ async function rawMenu(options: RenderMenuOptions): Promise<MenuChoice> {
   stdin.setRawMode(true);
   stdin.resume();
   stdin.setEncoding("utf8");
+  hideCursor();
 
   const draw = () => {
     if (painted > 0) process.stdout.write(`\u001b[${painted}A\u001b[J`);
@@ -176,7 +190,9 @@ async function rawMenu(options: RenderMenuOptions): Promise<MenuChoice> {
     };
     const cleanup = () => {
       stdin.off("data", onData);
+      drainPendingInput(stdin);
       if (stdin.isTTY) stdin.setRawMode(false);
+      showCursor();
       stdin.pause();
     };
     try {

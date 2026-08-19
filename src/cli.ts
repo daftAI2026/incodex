@@ -10,6 +10,7 @@ import { diagnose, printDiagnosis } from "./doctor";
 import { commandHelp, rootHelp } from "./help";
 import { detectInstallChannel, prefixFromExecPath, selfUninstallPaths, updateAction } from "./cli-channel";
 import { formatCommandResult } from "./command-result";
+import { formatKv, formatOk, formatStep, formatWarn } from "./cli-print";
 import { cloneOfficialApp, install, installExternalRuntime, resolveTarget } from "./install";
 import { runMenu } from "./menu";
 import { fetchLatestReleaseTag, readUpdateMessageCache, refreshUpdateNotice, UPDATE_CACHE_PATH } from "./menu-update";
@@ -110,7 +111,7 @@ async function dispatch(parsed: ParsedCli): Promise<void> {
       return;
     }
     const result = installExternalRuntime();
-    console.log("done. Codex was not modified. reopen it to load the new runtime.");
+    console.log(formatOk("Runtime updated. Codex was not modified. Reopen it to load the new logic."));
     console.log(formatCommandResult(result));
     return;
   }
@@ -190,12 +191,10 @@ async function runOpen(parsed: ParsedCli): Promise<void> {
   const appPath = parsed.app ?? DEFAULT_APP;
   if (parsed.dryRun) {
     const described = describeIncognitoOpen({ appPath, userRoot: USER_ROOT });
-    console.log("planned open");
-    console.log("  app:", appPath);
-    console.log("  bin:", described.bin);
-    console.log("  args:", described.args.join(" "));
-    console.log("  Codex will not be patched");
-    console.log("no changes made.");
+    console.log(formatStep("Open incognito without patching Codex"));
+    console.log(formatKv("App", appPath));
+    console.log(formatKv("Binary", described.bin));
+    console.log(formatWarn("Dry run. No window opened."));
     return;
   }
   const plan = prepareIncognitoOpen({
@@ -203,11 +202,11 @@ async function runOpen(parsed: ParsedCli): Promise<void> {
     userRoot: USER_ROOT,
     sourceHome: defaultSourceHome(),
   });
-  console.log("opening incognito");
-  console.log("  bin:", plan.bin);
-  console.log("  home:", plan.home);
+  console.log(formatStep("Opening incognito window"));
+  console.log(formatKv("Binary", plan.bin));
+  console.log(formatKv("Home", plan.home));
   await waitAndBurn(plan, USER_ROOT);
-  console.log("closed. session removed.");
+  console.log(formatOk("Closed. Isolated session removed."));
 }
 
 async function runInstall(parsed: ParsedCli, appPath: string): Promise<void> {
@@ -224,42 +223,42 @@ async function runInstall(parsed: ParsedCli, appPath: string): Promise<void> {
     console.log("cloning official app to", appPath);
     cloneOfficialApp(appPath);
   }
-  console.log("installing into", appPath);
+  console.log(formatStep(`Installing into ${appPath}`));
   const result = await install(appPath);
   if (parsed.live && !parsed.app) {
-    console.log("done. reopen /Applications/ChatGPT.app to use Incognito.");
+    console.log(formatOk("Done. Reopen ChatGPT.app to use Incognito."));
   } else {
-    console.log("done. restart that app copy to see the Incognito button.");
+    console.log(formatOk("Done. Restart that app copy to see the Incognito button."));
   }
   console.log(formatCommandResult(result));
 }
 
 async function runUninstall(parsed: ParsedCli, appPath: string): Promise<void> {
   const target = parsed.app ?? appPath;
-  console.log("restore target:", target);
+  console.log(formatStep(`Restore ${target}`));
   if (parsed.dryRun) {
-    console.log("no changes made.");
+    console.log(formatWarn("Dry run. No files changed."));
     return;
   }
   await ensureConfirmed("uninstall", parsed);
-  console.log("restoring", target);
+  console.log(formatStep(`Restoring ${target}`));
   const result = uninstall(target);
-  console.log("done");
+  console.log(formatOk("Official app restored. If Dock still shows a folder, remove the icon and add ChatGPT.app again."));
   console.log(formatCommandResult(result));
 }
 
 function printInstallPlan(appPath: string, clone: boolean): void {
   const source = clone ? DEFAULT_APP : appPath;
   const info = inspectApp(source);
-  console.log(clone ? "planned clone install" : "planned install");
-  console.log("  app:", clone ? appPath : source);
-  if (clone) console.log("  source:", source);
-  console.log("  version:", info.listing?.appVersion ?? "unknown", info.listing?.appBuild ?? "");
-  console.log("  signed:", verifyApp(source));
+  console.log(formatStep(clone ? "Clone install" : "Install"));
+  console.log(formatKv("App", clone ? appPath : source));
+  if (clone) console.log(formatKv("Source", source));
+  console.log(formatKv("Version", `${info.listing?.appVersion ?? "unknown"} ${info.listing?.appBuild ?? ""}`.trim()));
+  console.log(formatKv("Signed", verifyApp(source) ? "yes" : "no"));
   if (!clone) {
-    console.log("  this replaces the app in place and resigns it ad hoc");
-    console.log("  official Appshot (smart snapshot) will stop working until uninstall");
-    console.log("  backup will be written under ~/.incodex/installations/");
+    console.log(formatWarn("Replaces the app in place and resigns it ad hoc."));
+    console.log(formatWarn("Official Appshot (smart snapshot) stops until uninstall."));
+    console.log(formatKv("Backup", "~/.incodex/installations/"));
   }
 }
 
