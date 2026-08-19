@@ -25,12 +25,14 @@ export function formatStatus(view: StatusView): string {
     formatKv("Exists", view.exists ? "yes" : "no"),
     formatKv("Installed", view.patched ? "yes" : "no"),
   ];
-  if (view.loaderOnly !== null) lines.push(formatKv("Loader", view.loaderOnly ? "asar loader only" : "mixed"));
+  if (view.patched && view.loaderOnly !== null) {
+    lines.push(formatKv("Loader", view.loaderOnly ? "asar loader only" : "mixed"));
+  }
   lines.push(formatKv("Runtime", view.runtime));
   if (view.appVersion) lines.push(formatKv("Version", view.appVersion));
-  if (view.installId) lines.push(formatKv("Install id", view.installId));
+  if (view.patched && view.installId) lines.push(formatKv("Install id", view.installId));
   lines.push(formatKv("Target", view.targetId));
-  if (view.main) lines.push(formatKv("Main", view.main));
+  if (view.patched && view.main) lines.push(formatKv("Main", view.main));
   return lines.join("\n");
 }
 
@@ -38,6 +40,7 @@ export function printStatus(appPath = DEFAULT_APP): void {
   const asarPath = join(appPath, ASAR_REL);
   if (!existsSync(appPath)) {
     console.log(formatWarn(`Codex app not found: ${appPath}`));
+    console.log("");
     return;
   }
   if (!existsSync(asarPath)) {
@@ -51,6 +54,7 @@ export function printStatus(appPath = DEFAULT_APP): void {
       targetId: targetId(appPath),
     }));
     console.log(formatWarn("asar missing"));
+    console.log("");
     return;
   }
   const pkg = readPackageMain(asarPath);
@@ -76,4 +80,5 @@ export function printStatus(appPath = DEFAULT_APP): void {
     }),
   );
   if (pkg.alreadyPatched) console.log(formatOk("Incodex is installed. Use doctor for hashes and signing."));
+  console.log("");
 }

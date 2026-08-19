@@ -1,7 +1,7 @@
 import { createInterface } from "node:readline/promises";
 import type { CliCommand } from "./parse-cli";
 
-export type MenuChoice = Exclude<CliCommand, "menu" | "help" | "version" | "runtime" | "recover"> | "quit";
+export type MenuChoice = Exclude<CliCommand, "menu" | "help" | "runtime" | "recover"> | "quit";
 
 export type MenuItem = {
   id: MenuChoice;
@@ -81,7 +81,7 @@ function alignWithWordmark(text: string, indent: number): string {
 export function menuControlsLine(updateAvailable: boolean): string {
   const parts = ["↑↓", "Enter"];
   if (updateAvailable) parts.push("U Update");
-  parts.push("Q Quit", `1-${MENU_ITEMS.length} Jump`);
+  parts.push("V Version", "Q Quit", `1-${MENU_ITEMS.length} Jump`);
   return parts.join(" | ");
 }
 
@@ -98,6 +98,7 @@ export function handleMenuKey(
     return { action: "move", selected: (selected + 1) % MENU_ITEMS.length };
   }
   if (key === "q" || key === "Q" || key === "\u001b") return { action: "select", id: "quit" };
+  if (key === "v" || key === "V") return { action: "select", id: "version" };
   if (key === "\r" || key === "\n") return { action: "select", id: MENU_ITEMS[selected]?.id ?? "quit" };
   if (key.length === 1 && key >= "1" && key <= "9") {
     const item = MENU_ITEMS[Number(key) - 1];
@@ -141,6 +142,7 @@ export const HIDE_CURSOR = "\u001b[?25l";
 export const SHOW_CURSOR = "\u001b[?25h";
 export const MENU_HOME = "\u001b[H";
 export const ERASE_DOWN = "\u001b[J";
+export const CLEAR_LINE = "\r\u001b[2K";
 
 export function erasePaintedLines(count: number): string {
   if (count <= 0) return "";
@@ -162,7 +164,11 @@ async function rawMenu(options: RenderMenuOptions): Promise<MenuChoice> {
 
   const draw = () => {
     const text = renderMenu(selected, options);
-    process.stdout.write(`${MENU_HOME}${text}\n${ERASE_DOWN}`);
+    const framed = text
+      .split("\n")
+      .map((line) => `${CLEAR_LINE}${line}`)
+      .join("\n");
+    process.stdout.write(`${MENU_HOME}${framed}\n${ERASE_DOWN}`);
   };
 
   return new Promise((resolve, reject) => {
@@ -211,6 +217,7 @@ async function numberedMenu(options: RenderMenuOptions): Promise<MenuChoice> {
     const answer = (await rl.question(`Choose [1-${MENU_ITEMS.length}]: `)).trim().toLowerCase();
     if (answer === "" || answer === "q") return "quit";
     if (answer === "u" && options.updateMessage) return "update";
+    if (answer === "v") return "version";
     const index = Number(answer) - 1;
     return MENU_ITEMS[index]?.id ?? "quit";
   } finally {

@@ -46,6 +46,11 @@ async function main(): Promise<void> {
     }
     const choice = await runMenu({ updateMessage: menuUpdateMessage() });
     if (choice === "quit") return;
+    if (choice === "version") {
+      console.log(cliVersion());
+      console.log("");
+      return;
+    }
     await dispatch({
       command: choice,
       help: false,
@@ -208,6 +213,7 @@ async function runOpen(parsed: ParsedCli): Promise<void> {
   console.log(formatKv("Home", plan.home));
   await withSpinner("Waiting for the window to close", () => waitAndBurn(plan, USER_ROOT));
   console.log(formatOk("Closed. Isolated session removed."));
+  console.log("");
 }
 
 async function runInstall(parsed: ParsedCli, appPath: string): Promise<void> {
@@ -232,6 +238,7 @@ async function runInstall(parsed: ParsedCli, appPath: string): Promise<void> {
     console.log(formatOk("Done. Restart that app copy to see the Incognito button."));
   }
   console.log(formatCommandResult(result));
+  console.log("");
 }
 
 async function runUninstall(parsed: ParsedCli, appPath: string): Promise<void> {
@@ -246,6 +253,7 @@ async function runUninstall(parsed: ParsedCli, appPath: string): Promise<void> {
   const result = await withSpinner("Restoring", async () => uninstall(target));
   console.log(formatOk("Official app restored. If Dock still shows a folder, remove the icon and add ChatGPT.app again."));
   console.log(formatCommandResult(result));
+  console.log("");
 }
 
 function printInstallPlan(appPath: string, clone: boolean): void {

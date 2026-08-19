@@ -22,4 +22,24 @@ describe("formatStatus", () => {
     expect(text).not.toContain("stored original asar file hash:");
     expect(text).not.toContain("asar file hash:");
   });
+
+  test("uninstalled status omits loader mix and leftover install id", () => {
+    const text = formatStatus({
+      appPath: "/Applications/ChatGPT.app",
+      exists: true,
+      patched: false,
+      loaderOnly: false,
+      runtime: "0.1.0 releases/0.1.0",
+      main: ".vite/build/early-bootstrap.js",
+      installId: "abc",
+      targetId: "official-404f3389062b",
+      appVersion: "26.814.41407 6720",
+    });
+    expect(text).toContain("Installed");
+    expect(text).toContain("no");
+    expect(text).not.toContain("Loader");
+    expect(text).not.toContain("Install id");
+    expect(text).not.toContain("mixed");
+  });
 });
+

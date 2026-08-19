@@ -192,6 +192,7 @@ export function printDiagnosis(report: Diagnosis): void {
   if (report.interruptedTransactions.length) {
     console.log(formatWarn("Old install journals are leftover. They do not mean the current app is broken."));
   }
+  console.log("");
 }
 
 function listSessionRoots(root: string, id: string): string[] {
