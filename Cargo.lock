@@ -59,6 +59,9 @@ dependencies = [
 [[package]]
 name = "incodex-asar"
 version = "0.2.0"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "incodex-cli"
