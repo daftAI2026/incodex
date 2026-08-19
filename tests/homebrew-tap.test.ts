@@ -99,7 +99,10 @@ describe("Homebrew tap bump", () => {
   });
 
   test("README documents the tap install", () => {
-    expect(readme).toContain("brew tap daftAI2026/tap");
-    expect(readme).toContain("brew install incodex");
+    expect(readme).toContain("brew install daftAI2026/tap/incodex");
+    expect(readme).not.toMatch(/brew tap daftAI2026\/tap\nbrew install incodex/);
+    expect(readme).toContain("github/stars/daftAI2026/incodex");
+    expect(readme).toContain("github/commit-activity/m/daftAI2026/incodex");
+    expect(readme).toContain("github/actions/workflow/status/daftAI2026/incodex/ci.yml");
   });
 });
