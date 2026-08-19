@@ -14,6 +14,8 @@ describe("release CLI artifacts", () => {
     expect(releaseYml).toMatch(/files:[\s\S]*incodex-darwin-arm64/);
     expect(releaseYml).toMatch(/files:[\s\S]*incodex-darwin-x64/);
     expect(releaseYml).toMatch(/files:[\s\S]*SHA256SUMS/);
+    expect(releaseYml).not.toContain("checksums.txt");
+    expect(releaseYml).not.toMatch(/files:[\s\S]*runtime-manifest\.json/);
   });
 
   test("creates the GitHub Release without auto-generated notes", () => {
