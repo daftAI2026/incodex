@@ -251,7 +251,7 @@ async function runUninstall(parsed: ParsedCli, appPath: string): Promise<void> {
   await ensureConfirmed("uninstall", parsed);
   console.log(formatStep(`Restoring ${target}`));
   const result = await withSpinner("Restoring", async () => uninstall(target));
-  console.log(formatOk("Official app restored. If Dock still shows a folder, remove the icon and add ChatGPT.app again."));
+  console.log(formatOk("Official app restored. Dock was refreshed."));
   console.log(formatCommandResult(result));
   console.log("");
 }

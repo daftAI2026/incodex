@@ -7,4 +7,5 @@ type SpawnFn = (command: string, args: string[], options: { stdio: "ignore" }) =
 
 export function notifyLaunchServices(appPath: string, spawn: SpawnFn = spawnSync): void {
   spawn(LSREGISTER, ["-f", appPath], { stdio: "ignore" });
+  spawn("/usr/bin/killall", ["Dock"], { stdio: "ignore" });
 }
