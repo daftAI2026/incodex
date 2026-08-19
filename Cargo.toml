@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/incodex-cli",
+    "crates/incodex-core",
+    "crates/incodex-transaction",
+    "crates/incodex-macos",
+    "crates/incodex-runtime-bundle",
+    "crates/incodex-asar",
+]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/daftAI2026/incodex"
