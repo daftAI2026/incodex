@@ -29,12 +29,14 @@ import {
   runtimeMatchesPackaged,
 } from "./packaged-runtime";
 import { formatKv, formatOk } from "./cli-print";
+import { quitOfficialApp } from "./quit-official";
 import { notifyLaunchServices } from "./launch-services";
 import { ASAR_REL, DEFAULT_APP, LIVE_PREV, USER_ROOT } from "./paths";
 import { saveState } from "./state";
 import { advanceJournal, writeJournal, type Journal } from "./transaction";
 
 export { LIVE_PREV };
+export { listOfficialPids, quitOfficialApp } from "./quit-official";
 
 export function officialInstallAlreadyCurrent(input: {
   patched: boolean;
@@ -42,6 +44,16 @@ export function officialInstallAlreadyCurrent(input: {
   runtimeCurrent: boolean;
 }): boolean {
   return input.patched && input.loaderOnly && input.runtimeCurrent;
+}
+
+export function officialInstallWouldSkip(appPath: string, userRoot = USER_ROOT): boolean {
+  if (!isOfficialApp(appPath) || !existsSync(appPath)) return false;
+  const info = inspectApp(appPath);
+  return officialInstallAlreadyCurrent({
+    patched: info.patched,
+    loaderOnly: info.asarExists && asarHasOnlyLoader(join(appPath, ASAR_REL)),
+    runtimeCurrent: runtimeMatchesPackaged(userRoot),
+  });
 }
 
 export type InstallOptions = {
@@ -68,28 +80,9 @@ export function cloneOfficialApp(dest: string): void {
   if (cloned.status !== 0) throw new Error(cloned.stderr || "failed to copy ChatGPT.app");
 }
 
-export function listOfficialPids(): number[] {
-  const listed = spawnSync("ps", ["-ax", "-o", "pid=,command="], { encoding: "utf8" });
-  const needle = `${DEFAULT_APP}/Contents/MacOS/ChatGPT`;
-  return (listed.stdout || "")
-    .split("\n")
-    .filter((line) => line.includes(needle))
-    .map((line) => Number(line.trim().split(/\s+/)[0]))
-    .filter((pid) => Number.isInteger(pid) && pid > 0);
-}
-
 export function openOfficialApp(): void {
   const opened = spawnSync("open", [DEFAULT_APP], { encoding: "utf8" });
   if (opened.status !== 0) throw new Error(opened.stderr || "failed to open ChatGPT.app");
-}
-
-export function quitOfficialApp(): void {
-  const pids = listOfficialPids();
-  if (pids.length === 0) return;
-  console.log(formatOk("Quit Codex"));
-  console.log(formatKv("Pids", pids.join(" ")));
-  for (const pid of pids) spawnSync("kill", [String(pid)]);
-  spawnSync("sleep", ["1"]);
 }
 
 async function patchAppBundle(
