@@ -15,6 +15,8 @@ Commands:
   runtime      Update Incodex without re-signing Codex
   recover      Finish a failed install
   open         Open an incognito window without patching Codex
+  update       Update this CLI
+  self-uninstall  Remove this CLI (not Codex, unless --restore-app)
 
 Run incodex <command> --help for details.
 inc is the same program as incodex.
@@ -108,6 +110,28 @@ release; after install, use the hat button or Shift+Command+N.
 Examples:
   incodex open
   incodex open --dry-run
+`;
+    case "update":
+      return `Usage:
+  incodex update [--dry-run]
+
+Update the CLI. Script installs re-run install.sh. Homebrew installs should
+use brew upgrade incodex. Source checkouts should git pull.
+
+Examples:
+  incodex update
+  incodex update --dry-run
+`;
+    case "self-uninstall":
+      return `Usage:
+  incodex self-uninstall [--restore-app] [--yes] [--dry-run]
+
+Remove the CLI from PATH. Does not restore Codex unless --restore-app.
+
+Examples:
+  incodex self-uninstall
+  incodex self-uninstall --restore-app --yes
+  incodex self-uninstall --dry-run
 `;
     default:
       return rootHelp();

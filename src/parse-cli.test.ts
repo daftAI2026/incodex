@@ -79,4 +79,15 @@ describe("parseCli", () => {
   test("open is a recognized command", () => {
     expect(parseCli(["bun", "cli", "open"]).command).toBe("open");
   });
+
+  test("update and self-uninstall are recognized", () => {
+    expect(parseCli(["bun", "cli", "update"])).toMatchObject({ command: "update", dryRun: false });
+    expect(parseCli(["bun", "cli", "self-uninstall"])).toMatchObject({
+      command: "self-uninstall",
+      restoreApp: false,
+    });
+    expect(parseCli(["bun", "cli", "self-uninstall", "--restore-app"]).restoreApp).toBe(true);
+    expect(parseCli(["bun", "cli", "update", "--dry-run"]).dryRun).toBe(true);
+  });
 });
+
