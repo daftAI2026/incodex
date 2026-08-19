@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { handleMenuKey, MENU_ITEMS, menuControlsLine, renderMenu } from "./menu";
+import { erasePaintedLines, handleMenuKey, HIDE_CURSOR, MENU_ITEMS, menuControlsLine, renderMenu, SHOW_CURSOR } from "./menu";
 
 describe("menu", () => {
   test("covers install, uninstall, open, status, doctor, and quit", () => {
@@ -115,6 +115,13 @@ describe("handleMenuKey", () => {
     expect(handleMenuKey("7", 0)).toEqual({ action: "ignore" });
     expect(handleMenuKey("\r", 2)).toEqual({ action: "select", id: "open" });
     expect(handleMenuKey("\n", 4)).toEqual({ action: "select", id: "doctor" });
+  });
+
+  test("leaving the menu erases it and restores the cursor", () => {
+    expect(HIDE_CURSOR).toBe("\u001b[?25l");
+    expect(SHOW_CURSOR).toBe("\u001b[?25h");
+    expect(erasePaintedLines(12)).toBe("\u001b[12A\u001b[J");
+    expect(erasePaintedLines(0)).toBe("");
   });
 
   test("q and escape quit; U only runs update when a notice is showing", () => {
