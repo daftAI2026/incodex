@@ -1,6 +1,5 @@
-<h4 align="right"><strong><a href="./README.md">English</a></strong> | 简体中文</h4>
-
 <div align="center">
+  <p><strong><a href="./README.md">English</a></strong> | 简体中文</p>
   <h1>Incodex</h1>
   <p><em>给本机 Codex 桌面端加一扇无痕窗口。</em></p>
 </div>
