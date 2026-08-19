@@ -53,5 +53,5 @@ export function liveSupportNote(input: {
   if (findSupportedBuild(input)) return null;
   const version = input.appVersion ?? "unknown";
   const build = input.appBuild ?? "unknown";
-  return `unknown Codex build ${version} (${build}); no frozen adapter. UI injection is best-effort after --confirm-live.`;
+  return `unknown Codex build ${version} (${build}); no frozen adapter. UI injection is best-effort.`;
 }

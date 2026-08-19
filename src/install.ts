@@ -242,7 +242,7 @@ async function installLive(): Promise<void> {
   });
   advanceJournal(journal, "COMMITTED");
   console.log("official app patched. reopen /Applications/ChatGPT.app");
-  console.log("to restore official Codex: bun src/cli.ts uninstall --live");
+  console.log("to restore official Codex: incodex uninstall");
 }
 
 export async function install(appPath: string, options?: { root?: string }): Promise<void> {
