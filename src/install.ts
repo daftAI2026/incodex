@@ -7,11 +7,13 @@ import { asarHasOnlyLoader, headerHash, ensureDir } from "./asar";
 import { findSupportedBuild, liveSupportNote } from "./compatibility/supported-builds";
 import { signApp, verifyTarget, type SigningManifest } from "./codesign";
 import {
+  loadCurrentInstallation,
   manifestFromIdentity,
   originalAppPath,
   snapshotOriginalApp,
   writeInstallation,
 } from "./installation";
+import type { CommandResult } from "./command-result";
 import { patchStagedBundle } from "./patcher";
 import {
   loadLiveInstallRecord,
@@ -121,17 +123,24 @@ function pointLivePrevAt(originalApp: string): void {
   symlinkSync(originalApp, LIVE_PREV);
 }
 
-function publishBundledRuntime(userRoot: string): void {
+function publishBundledRuntime(userRoot: string) {
   const distDir = resolvePackagedDistDir();
   const current = publishPackagedRuntime(userRoot, distDir);
   console.log(`external runtime ${current.version} -> ${current.release}`);
+  return current;
 }
 
-export function installExternalRuntime(userRoot = USER_ROOT): void {
-  publishBundledRuntime(userRoot);
+export function installExternalRuntime(userRoot = USER_ROOT): CommandResult {
+  const skipped = runtimeMatchesPackaged(userRoot);
+  const current = publishBundledRuntime(userRoot);
+  return {
+    action: "runtime",
+    skipped,
+    runtimeVersion: current.version,
+  };
 }
 
-async function installLive(): Promise<void> {
+async function installLive(): Promise<{ installId: string; runtimeVersion: string }> {
   if (!existsSync(DEFAULT_APP)) throw new Error(`Codex app not found: ${DEFAULT_APP}`);
   quitOfficialApp();
   const current = inspectApp(DEFAULT_APP);
@@ -233,9 +242,10 @@ async function installLive(): Promise<void> {
   advanceJournal(journal, "COMMITTED");
   console.log("official app patched. reopen /Applications/ChatGPT.app");
   console.log("to restore official Codex: incodex uninstall");
+  return { installId, runtimeVersion: packagedRuntimeVersion(resolvePackagedDistDir()) };
 }
 
-export async function install(appPath: string, options?: { root?: string }): Promise<void> {
+export async function install(appPath: string, options?: { root?: string }): Promise<CommandResult> {
   if (!existsSync(appPath)) throw new Error(`Codex app not found: ${appPath}`);
   const listing = inspectApp(appPath).listing;
   if (isOfficialApp(appPath)) {
@@ -248,23 +258,41 @@ export async function install(appPath: string, options?: { root?: string }): Pro
       loaderOnly: info.asarExists && asarHasOnlyLoader(join(appPath, ASAR_REL)),
       runtimeCurrent: runtimeMatchesPackaged(userRoot),
     });
-    publishBundledRuntime(userRoot);
+    const published = publishBundledRuntime(userRoot);
     if (skip) {
+      const stored = loadCurrentInstallation(appPath, userRoot);
       console.log("already current. Codex was not re-signed.");
-      return;
+      return {
+        action: "install",
+        skipped: true,
+        installId: stored?.manifest.installId,
+        runtimeVersion: published.version,
+        app: appPath,
+      };
     }
-    await installLive();
-    return;
+    const live = await installLive();
+    return {
+      action: "install",
+      installId: live.installId,
+      runtimeVersion: live.runtimeVersion,
+      app: appPath,
+    };
   }
   if (!findSupportedBuild(listing ?? {})) {
     console.warn(
       `unknown Codex build ${listing?.appVersion ?? "unknown"} (${listing?.appBuild ?? "unknown"}); clone is experimental`,
     );
   }
-  publishBundledRuntime(options?.root ?? USER_ROOT);
-  await runCloneInstall(appPath, {
+  const published = publishBundledRuntime(options?.root ?? USER_ROOT);
+  const cloned = await runCloneInstall(appPath, {
     root: options?.root,
     runtimeVersion: packagedRuntimeVersion(resolvePackagedDistDir()),
     patch: (stagedApp, installId) => patchAppBundle(stagedApp, false, installId),
   });
+  return {
+    action: "install",
+    installId: cloned.installId,
+    runtimeVersion: published.version,
+    app: appPath,
+  };
 }
