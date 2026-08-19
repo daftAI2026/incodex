@@ -5,3 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Typed install transaction for the Incodex native CLI"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
