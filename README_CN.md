@@ -257,7 +257,7 @@ Shell: /bin/zsh
 
 ## License
 
-MIT，完整文本见 [LICENSE](./LICENSE)。
+MIT，完整文本见 [LICENSE](./LICENSE)。第三方声明见 [NOTICE](./NOTICE)。
 
 - `src/runtime/incognito-copy.ts` 里的翻译文案是 Incodex 原作，同样按 MIT 授权
 - Codex / ChatGPT 的名称、图标和官方应用本身属于 OpenAI，本仓库不授予那些材料的许可
