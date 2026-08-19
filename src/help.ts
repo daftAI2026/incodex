@@ -104,8 +104,8 @@ Examples:
       return `Usage:
   incodex open [--dry-run] [--app <path>]
 
-Open an incognito window without patching Codex. Not implemented in this
-release; after install, use the hat button or Shift+Command+N.
+Open an incognito window without patching Codex. Uses an isolated CODEX_HOME
+and Chromium user-data-dir. Closing the window burns that session.
 
 Examples:
   incodex open
