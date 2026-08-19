@@ -259,5 +259,5 @@ Shell: /bin/zsh
 
 MIT. Full text in [LICENSE](./LICENSE).
 
-- `assets/hat-glasses.svg` is the Lucide `hat-glasses` icon (ISC). Translations in `src/runtime/incognito-copy.ts` are original Incodex work, also under MIT
+- Translations in `src/runtime/incognito-copy.ts` are original Incodex work, also under MIT
 - Codex / ChatGPT names, icons, and the official app belong to OpenAI. This repository does not license those materials
