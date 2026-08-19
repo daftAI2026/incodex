@@ -1,3 +1,4 @@
+pub mod cdp;
 pub mod diagnose;
 pub mod help;
 pub mod install;

@@ -4,13 +4,15 @@ This file is the shared source of truth for any AI agent working on this repo (C
 
 ## Project
 
-Incodex adds a Chrome-style incognito window to a locally installed OpenAI Codex desktop app (`ChatGPT.app`, `com.openai.codex`). It is an unofficial add-on. The installer patches the official bundle; the CLI can also launch an isolated window without patching.
+Incodex adds a Chrome-style incognito window to a locally installed OpenAI Codex desktop app (`ChatGPT.app`, `com.openai.codex`). It is an unofficial add-on. The installer patches the official bundle. `incodex open` is a second launch path: it does not patch or resign the official app, but that isolated window still gets the hat-glasses control and banner by injecting the same `inject.js` over a localhost debug port.
 
 Safety rules matter more than speed. Treat installer, signing, session cleanup, and IPC as the dangerous surface.
 
 ## Product Direction
 
-Users launch the official Codex icon as usual. After `incodex install`, a hat-glasses control sits left of Search. Click or `Shift+Command+N` opens a second isolated Codex window: same login, language, and base settings; no old chats; close burns that temp home. `incodex open` is the no-patch path.
+Users launch the official Codex icon as usual. After `incodex install`, a hat-glasses control sits left of Search. Click or `Shift+Command+N` opens a second isolated Codex window: same login, language, and base settings; no old chats; close burns that temp home.
+
+`incodex open` is the other launch path: spawn the official binary with an isolated home, do not copy/patch/resign the official app, then inject the **same** `inject.js` (hat-glasses + banner) through Chrome DevTools Protocol. CDP is not the Dock / `install` entry.
 
 ### What Incodex Should Do
 
@@ -29,7 +31,8 @@ Users launch the official Codex icon as usual. After `incodex install`, a hat-gl
 - Do not restore a valid OpenAI signature after asar changes. Appshot (智能快照) is a hard triangle; document it, do not fake Team ID `2DC432GLL2`.
 - Do not sign vendor CUA sidecars. Stash them, `--deep` the rest, restore, then outer `signOne`.
 - Do not default live-patch from `install.sh` / `bun link` / `incodex update`. Those only manage the CLI.
-- Do not add Overlay, CDP-as-launcher, an independent Session Agent, LaunchAgent auto-repair, runtime pubkeys, or Homebrew core. Own tap is `daftAI2026/homebrew-tap`; bump it from `release.yml`. Do not open a Homebrew/homebrew-core PR.
+- Do not add Overlay, an independent Session Agent, LaunchAgent auto-repair, runtime pubkeys, or Homebrew core. Own tap is `daftAI2026/homebrew-tap`; bump it from `release.yml`. Do not open a Homebrew/homebrew-core PR.
+- Do not use CDP as the everyday Dock / `install` launch path. `incodex open` may start the official binary with `--remote-debugging-port` on `127.0.0.1` and inject `dist/incodex-inject.js`. Do not clone the official app for `open`. Do not copy AGPL injector scripts.
 - Do not add `--yes` as a hidden alias that agents will hallucinate onto live patching beyond the documented flag. `--confirm-live` stays a hidden compat alias of `--yes`.
 - Do not write tests after the implementation to match it. Write a failing repro first.
 
@@ -82,7 +85,7 @@ Shipped releases are the TypeScript CLI on `main`. Native Rust CLI work lives on
 1. Golden CLI — already on `main` (#66). Align Rust to those tests. Do not rewrite the product language.
 2. Workspace + size probe: `crates/incodex-cli`, `incodex-core`, `incodex-transaction`, `incodex-macos`, `incodex-runtime-bundle`, `incodex-asar`. MIT. No AGPL asar crate. No TUI crate. `cargo test` on macOS. Measure uncompressed size and `--version` cold start.
 3. Read-only `status` / `doctor` aligned to golden.
-4. `open` (no asar, no resign). CleanupResult: only say removed when the directory is gone.
+4. `open` (no asar, no resign, no clone). CleanupResult: only say removed when the directory is gone. Product follow-up: CDP-inject the shared `inject.js` into that window (`docs/rust-cli/方案.md`, `open` CDP section).
 5. Transaction v2 in Rust only. Do not rebuild journal schema v2 / fsync in TypeScript.
 6. Native ASAR: own MIT crate; `@electron/asar` is a test oracle only.
 7. `install` / `uninstall` / `recover`. After this, Release can stop attaching Bun-compiled binaries.
@@ -121,7 +124,7 @@ Public docs use `incodex` / `inc`. Use `bun src/cli.ts` only inside this repo.
 - Pin GitHub Actions to a 40-character commit SHA with a version comment: `uses: owner/repo@<sha> # vX.Y.Z`. Do not leave floating `@v4` tags.
 - Official CLI packages are git tags `vX.Y.Z`. Follow `.claude/skills/release-flow/SKILL.md`, then `.claude/skills/release-notes/SKILL.md`. Do not `gh release create` and do not turn `generate_release_notes` back on.
 - Route session create/burn through `src/runtime/incodex-safe-home.cts`. Do not copy those functions into the CLI.
-- `incodex open` must not patch asar or resign. It spawns the official binary with `--user-data-dir`, `CODEX_HOME`, and `CODEX_ELECTRON_USER_DATA_PATH`.
+- `incodex open` must not patch asar, resign, or clone the official app. It spawns the official binary with `--user-data-dir`, `CODEX_HOME`, `CODEX_ELECTRON_USER_DATA_PATH`, and a localhost `--remote-debugging-port`, then injects the shared `inject.js`.
 - A second instance needs that Chromium user-data-dir pair. `CODEX_HOME` alone is swallowed by SingletonLock.
 
 ## Working Rules

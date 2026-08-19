@@ -10,6 +10,7 @@ use incodex_core::session::{
 };
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
 
+use crate::cdp::{allocate_debug_port, debug_launch_args, inject_shared_ui};
 use crate::parse::ParsedCli;
 
 #[derive(Debug, Clone)]
@@ -21,6 +22,7 @@ pub struct OpenPlan {
     pub chromium: PathBuf,
     pub session_id: String,
     pub session_root: PathBuf,
+    pub debug_port: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,8 +88,14 @@ pub fn prepare_incognito_open(
 }
 
 fn plan_from_session(bin: PathBuf, session: SessionHome, source_home: &Path) -> OpenPlan {
+    let debug_port = allocate_debug_port().unwrap_or(0);
+    let args = if debug_port == 0 {
+        vec![format!("--user-data-dir={}", session.chromium.display())]
+    } else {
+        debug_launch_args(&session.chromium.display().to_string(), debug_port)
+    };
     OpenPlan {
-        args: vec![format!("--user-data-dir={}", session.chromium.display())],
+        args,
         env: vec![
             ("CODEX_HOME".into(), session.home.display().to_string()),
             ("INCODEX_INCOGNITO".into(), "1".into()),
@@ -110,6 +118,7 @@ fn plan_from_session(bin: PathBuf, session: SessionHome, source_home: &Path) -> 
         session_id: session.session_id,
         session_root: session.root,
         bin,
+        debug_port,
     }
 }
 
@@ -154,13 +163,32 @@ fn spawn_plan(plan: &OpenPlan) -> Result<i32, String> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    match command.spawn() {
-        Ok(mut child) => child
-            .wait()
-            .map(|status| status.code().unwrap_or(1))
-            .map_err(|err| err.to_string()),
-        Err(err) => Err(err.to_string()),
+    let mut child = command.spawn().map_err(|err| err.to_string())?;
+    if plan.debug_port != 0 {
+        let port = plan.debug_port;
+        thread::spawn(move || {
+            for attempt in 1u8..=40 {
+                match inject_shared_ui(port) {
+                    Ok(()) => {
+                        if std::env::var_os("INCODEX_CDP_LOG").is_some() {
+                            eprintln!("cdp inject ok on attempt {attempt} port {port}");
+                        }
+                        return;
+                    }
+                    Err(err) => {
+                        if std::env::var_os("INCODEX_CDP_LOG").is_some() {
+                            eprintln!("cdp inject attempt {attempt}: {err}");
+                        }
+                    }
+                }
+                thread::sleep(Duration::from_millis(400));
+            }
+        });
     }
+    child
+        .wait()
+        .map(|status| status.code().unwrap_or(1))
+        .map_err(|err| err.to_string())
 }
 
 pub fn wait_and_burn_with<S, B>(

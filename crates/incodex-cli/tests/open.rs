@@ -79,7 +79,8 @@ Usage:
   incodex open [--dry-run] [--app <path>]
 
 Open an incognito window without patching Codex. Uses an isolated CODEX_HOME
-and Chromium user-data-dir. Closing the window burns that session.
+and Chromium user-data-dir. The hat-glasses control and banner still appear
+in that window. Closing the window burns that session.
 
 Examples:
   incodex open
@@ -155,6 +156,40 @@ fn open_waits_then_burns_and_does_not_patch_asar() {
         .filter(|path| path.contains("codex-home") || path.contains("/chromium"))
         .collect();
     assert!(leftover.is_empty(), "{leftover:?}");
+}
+
+#[test]
+fn open_spawns_official_binary_with_localhost_debug_port_and_does_not_patch() {
+    let home = isolated_home();
+    let app = fake_app(
+        &home,
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$HOME/open-argv.txt\"\nexit 0\n",
+    );
+    let source = home.join(".codex");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("auth.json"), "{}\n").unwrap();
+    let official = PathBuf::from("/Applications/ChatGPT.app/Contents/Resources/app.asar");
+    let official_before = official.exists().then(|| fs::read(&official).ok()).flatten();
+    let (status, stdout, stderr) = run(&["open", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
+    assert_eq!(stderr, "");
+    let argv = fs::read_to_string(home.join("open-argv.txt")).unwrap_or_default();
+    assert!(
+        argv.lines().any(|line| line.starts_with("--remote-debugging-port=")),
+        "missing debug port flag in {argv:?}"
+    );
+    assert!(
+        argv.lines().any(|line| line.starts_with("--remote-allow-origins=")),
+        "missing allow-origins flag in {argv:?}"
+    );
+    assert!(
+        argv.lines().any(|line| line.starts_with("--user-data-dir=")),
+        "missing user-data-dir in {argv:?}"
+    );
+    assert!(!app.join("Contents/Resources/app.asar").exists());
+    if let Some(before) = official_before {
+        assert_eq!(fs::read(&official).unwrap(), before);
+    }
 }
 
 #[test]
