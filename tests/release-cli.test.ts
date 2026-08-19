@@ -15,4 +15,10 @@ describe("release CLI artifacts", () => {
     expect(releaseYml).toMatch(/files:[\s\S]*incodex-darwin-x64/);
     expect(releaseYml).toMatch(/files:[\s\S]*SHA256SUMS/);
   });
+
+  test("creates the GitHub Release without auto-generated notes", () => {
+    expect(releaseYml).toContain("generate_release_notes: false");
+    expect(releaseYml).not.toContain("generate_release_notes: true");
+  });
 });
+
