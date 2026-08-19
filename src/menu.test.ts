@@ -64,7 +64,38 @@ describe("menu", () => {
     const text = renderMenu(0, { color: false });
     expect(text.includes("\x1b[")).toBe(false);
   });
+
+  test("repo URL and tagline left-align with the I of the wordmark", () => {
+    const text = renderMenu(0, { color: false });
+    const lines = text.split("\n");
+    const indent = lines[0]?.search(/\S/) ?? -1;
+    expect(indent).toBeGreaterThan(0);
+
+    const urlLine = lines.find((line) => line.includes("https://github.com/daftAI2026/incodex"));
+    const tagLine = lines.find((line) => line.includes("Incognito toggle for Codex desktop"));
+    expect(urlLine?.search(/\S/)).toBe(indent);
+    expect(tagLine?.search(/\S/)).toBe(indent);
+    expect(urlLine?.startsWith(" ".repeat(indent + 2))).toBe(false);
+  });
+
+  test("color mode uses Mole's green banner, blue URL, cyan selection, gray footer", () => {
+    const text = renderMenu(2, { color: true, updateMessage: "Update 0.2.0 available, run incodex update" });
+    const green = "\x1b[0;32m";
+    const blue = "\x1b[1;34m";
+    const cyan = "\x1b[0;36m";
+    const gray = "\x1b[0;38;5;244m";
+    const reset = "\x1b[0m";
+
+    expect(text).toContain(`${green}  _____   _   _    _____    ____    _____    ______  __   __${reset}`);
+    expect(text).toContain(`${blue}  https://github.com/daftAI2026/incodex${reset}`);
+    expect(text).toContain(`${green}  Incognito toggle for Codex desktop.${reset}`);
+    expect(text).toContain(`${green}  Update 0.2.0 available, run incodex update${reset}`);
+    expect(text).toContain(`${cyan}➤ 3. Open`);
+    expect(text).not.toContain(`${cyan}➤ 1. Install`);
+    expect(text).toContain(`${gray}↑↓ | Enter | U Update | Q Quit | 1-6 Jump${reset}`);
+  });
 });
+
 
 describe("handleMenuKey", () => {
   test("arrow keys and vim j/k move the selection", () => {
