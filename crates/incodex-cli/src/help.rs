@@ -117,7 +117,8 @@ Usage:
   incodex open [--dry-run] [--app <path>]
 
 Open an incognito window without patching Codex. Uses an isolated CODEX_HOME
-and Chromium user-data-dir. Closing the window burns that session.
+and Chromium user-data-dir. The hat-glasses control and banner still appear
+in that window. Closing the window burns that session.
 
 Examples:
   incodex open
