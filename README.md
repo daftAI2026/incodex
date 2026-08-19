@@ -257,7 +257,7 @@ Shell: /bin/zsh
 
 ## License
 
-MIT. Full text in [LICENSE](./LICENSE).
+MIT. Full text in [LICENSE](./LICENSE). Third-party notices in [NOTICE](./NOTICE).
 
-- `assets/hat-glasses.svg` and the translations in `src/runtime/incognito-copy.ts` are original Incodex work, also under MIT
+- Translations in `src/runtime/incognito-copy.ts` are original Incodex work, also under MIT
 - Codex / ChatGPT names, icons, and the official app belong to OpenAI. This repository does not license those materials
