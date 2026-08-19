@@ -1,7 +1,6 @@
-import { existsSync, readFileSync, rmSync, renameSync, symlinkSync } from "node:fs";
+import { existsSync, rmSync, renameSync, symlinkSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { fileSha256, inspectApp } from "./app-identity";
 import { headerHash, ensureDir } from "./asar";
@@ -13,7 +12,7 @@ import {
   snapshotOriginalApp,
   writeInstallation,
 } from "./installation";
-import { loadRuntimeArtifacts, patchStagedBundle } from "./patcher";
+import { patchStagedBundle } from "./patcher";
 import {
   loadLiveInstallRecord,
   resolveOfficialOriginal,
@@ -21,12 +20,16 @@ import {
   selectOfficialInstallSource,
 } from "./live-source";
 import { runCloneInstall } from "./install-transaction";
-import { publishExternalRuntimeFromDist } from "./external-runtime";
+import {
+  defaultPackagedDistDir,
+  loadPackagedArtifacts,
+  packagedRuntimeVersion,
+  publishPackagedRuntime,
+} from "./packaged-runtime";
 import { ASAR_REL, DEFAULT_APP, LIVE_PREV, USER_ROOT } from "./paths";
 import { saveState } from "./state";
 import { advanceJournal, writeJournal, type Journal } from "./transaction";
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 export { LIVE_PREV };
 
 export type InstallOptions = {
@@ -53,15 +56,6 @@ export function cloneOfficialApp(dest: string): void {
   if (cloned.status !== 0) throw new Error(cloned.stderr || "failed to copy ChatGPT.app");
 }
 
-function ensureRuntime(): void {
-  const built = spawnSync("bun", ["src/build-runtime.ts"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-    stdio: "inherit",
-  });
-  if (built.status !== 0) throw new Error("failed to build runtime");
-}
-
 export function quitOfficialApp(): void {
   const listed = spawnSync("ps", ["-ax", "-o", "pid=,command="], { encoding: "utf8" });
   const needle = `${DEFAULT_APP}/Contents/MacOS/ChatGPT`;
@@ -83,7 +77,7 @@ async function patchAppBundle(
 ): Promise<{ originalMain: string; hash: string; signing: SigningManifest | null }> {
   const patched = await patchStagedBundle({
     stagedApp: appPath,
-    artifacts: loadRuntimeArtifacts(repoRoot),
+    artifacts: loadPackagedArtifacts(defaultPackagedDistDir()),
     installId,
   });
   const signing = resign ? signApp(appPath) : null;
@@ -119,26 +113,13 @@ function pointLivePrevAt(originalApp: string): void {
 }
 
 function publishBundledRuntime(userRoot: string): void {
-  const current = publishExternalRuntimeFromDist(userRoot, join(repoRoot, "dist"), runtimeVersion());
+  const distDir = defaultPackagedDistDir();
+  const current = publishPackagedRuntime(userRoot, distDir);
   console.log(`external runtime ${current.version} -> ${current.release}`);
 }
 
 export function installExternalRuntime(userRoot = USER_ROOT): void {
-  ensureRuntime();
   publishBundledRuntime(userRoot);
-}
-
-function runtimeVersion(): string {
-  try {
-    const manifest = JSON.parse(
-      readFileSync(join(repoRoot, "dist/runtime-manifest.json"), "utf8"),
-    ) as { runtimeVersion?: string };
-    if (manifest.runtimeVersion) return manifest.runtimeVersion;
-  } catch {
-    /* fall back to package.json */
-  }
-  const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as { version?: string };
-  return pkg.version || "0.0.0";
 }
 
 async function installLive(): Promise<void> {
@@ -205,7 +186,7 @@ async function installLive(): Promise<void> {
     patchedAsarHeaderHash: patched.hash,
     patchedAsarFileHash,
     originalMain: patched.originalMain,
-    runtimeVersion: runtimeVersion(),
+    runtimeVersion: packagedRuntimeVersion(defaultPackagedDistDir()),
     createdAt,
   });
   writeInstallation({
@@ -251,7 +232,6 @@ export async function install(appPath: string, options?: { root?: string }): Pro
   if (isOfficialApp(appPath)) {
     const note = liveSupportNote(listing ?? {});
     if (note) console.warn(note);
-    ensureRuntime();
     publishBundledRuntime(options?.root ?? USER_ROOT);
     await installLive();
     return;
@@ -261,11 +241,10 @@ export async function install(appPath: string, options?: { root?: string }): Pro
       `unknown Codex build ${listing?.appVersion ?? "unknown"} (${listing?.appBuild ?? "unknown"}); clone is experimental`,
     );
   }
-  ensureRuntime();
   publishBundledRuntime(options?.root ?? USER_ROOT);
   await runCloneInstall(appPath, {
     root: options?.root,
-    runtimeVersion: runtimeVersion(),
+    runtimeVersion: packagedRuntimeVersion(defaultPackagedDistDir()),
     patch: (stagedApp, installId) => patchAppBundle(stagedApp, false, installId),
   });
 }
