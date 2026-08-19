@@ -92,8 +92,11 @@ version = "0.2.0"
 name = "incodex-transaction"
 version = "0.2.0"
 dependencies = [
+ "incodex-core",
+ "libc",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
