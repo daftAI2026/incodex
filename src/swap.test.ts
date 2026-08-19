@@ -98,7 +98,7 @@ describe("swap rollback", () => {
       phase: "VERIFIED",
       updatedAt: "now",
     };
-    const result = applyRecovery(journal);
+    const result = applyRecovery(journal, root);
     expect(result.outgoingRestored).toBe(true);
     expect(readFileSync(join(target, "marker"), "utf8")).toBe("original");
   });

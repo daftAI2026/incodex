@@ -35,12 +35,13 @@ describe("install journal", () => {
     expect(recoverAction(journal({ phase: "SIGNED" }))).toBe("rollback");
   });
 
-  test("verified staged work may continue; committed work is done", () => {
-    expect(recoverAction(journal({ phase: "VERIFIED" }))).toBe("continue");
+  test("anything not committed rolls back; committed and rolled back are done", () => {
+    expect(recoverAction(journal({ phase: "VERIFIED" }))).toBe("rollback");
     expect(recoverAction(journal({ phase: "TARGET_MOVED_OUT" }))).toBe("rollback");
-    expect(recoverAction(journal({ phase: "SWAPPED" }))).toBe("continue");
-    expect(recoverAction(journal({ phase: "TARGET_VERIFIED" }))).toBe("continue");
+    expect(recoverAction(journal({ phase: "SWAPPED" }))).toBe("rollback");
+    expect(recoverAction(journal({ phase: "TARGET_VERIFIED" }))).toBe("rollback");
     expect(recoverAction(journal({ phase: "COMMITTED" }))).toBe("done");
+    expect(recoverAction(journal({ phase: "ROLLED_BACK" }))).toBe("done");
   });
 
   test("every unfinished phase has a recovery action", () => {
@@ -57,11 +58,12 @@ describe("install journal", () => {
     expect(recoverAction({ ...base, phase: "STAGED" })).toBe("rollback");
     expect(recoverAction({ ...base, phase: "PATCHED" })).toBe("rollback");
     expect(recoverAction({ ...base, phase: "SIGNED" })).toBe("rollback");
-    expect(recoverAction({ ...base, phase: "VERIFIED" })).toBe("continue");
+    expect(recoverAction({ ...base, phase: "VERIFIED" })).toBe("rollback");
     expect(recoverAction({ ...base, phase: "TARGET_MOVED_OUT" })).toBe("rollback");
-    expect(recoverAction({ ...base, phase: "SWAPPED" })).toBe("continue");
-    expect(recoverAction({ ...base, phase: "TARGET_VERIFIED" })).toBe("continue");
+    expect(recoverAction({ ...base, phase: "SWAPPED" })).toBe("rollback");
+    expect(recoverAction({ ...base, phase: "TARGET_VERIFIED" })).toBe("rollback");
     expect(recoverAction({ ...base, phase: "COMMITTED" })).toBe("done");
+    expect(recoverAction({ ...base, phase: "ROLLED_BACK" })).toBe("done");
   });
 
   test("journal advances atomically and can be reloaded", () => {

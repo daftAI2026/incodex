@@ -14,6 +14,7 @@ export const PHASES = [
   "SWAPPED",
   "TARGET_VERIFIED",
   "COMMITTED",
+  "ROLLED_BACK",
 ] as const;
 
 export type Phase = (typeof PHASES)[number];
@@ -29,7 +30,7 @@ export type Journal = {
   updatedAt: string;
 };
 
-export type Recovery = "continue" | "rollback" | "refuse" | "done";
+export type Recovery = "rollback" | "refuse" | "done";
 
 export function journalPath(installId: string, root = USER_ROOT): string {
   return join(root, "transactions", `${installId}.json`);
@@ -52,22 +53,19 @@ export function parseJournal(raw: unknown): Journal | null {
 
 export function recoverAction(journal: Journal): Recovery {
   switch (journal.phase) {
+    case "COMMITTED":
+    case "ROLLED_BACK":
+      return "done";
     case "DISCOVERED":
     case "BACKUP_COMMITTED":
     case "STAGED":
     case "PATCHED":
     case "SIGNED":
-      return "rollback";
     case "VERIFIED":
-      return "continue";
     case "TARGET_MOVED_OUT":
-      return "rollback";
     case "SWAPPED":
-      return "continue";
     case "TARGET_VERIFIED":
-      return "continue";
-    case "COMMITTED":
-      return "done";
+      return "rollback";
     default:
       return "refuse";
   }

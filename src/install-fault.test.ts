@@ -23,7 +23,7 @@ type Case = {
   name: string;
   fault: InstallFault;
   expectBackup: "absent" | "intact";
-  expectAction: "rollback" | "continue" | "none";
+  expectAction: "rollback" | "none";
 };
 
 const cases: Case[] = [
@@ -46,14 +46,14 @@ const cases: Case[] = [
   { name: "kill at sign", fault: { phase: "SIGNED", kind: "kill" }, expectBackup: "intact", expectAction: "rollback" },
   { name: "verify at verified", fault: { phase: "VERIFIED", kind: "verify" }, expectBackup: "intact", expectAction: "rollback" },
   { name: "kill at verified", fault: { phase: "VERIFIED", kind: "kill" }, expectBackup: "intact", expectAction: "rollback" },
-  { name: "process still running", fault: { phase: "SWAPPED", kind: "process-running" }, expectBackup: "intact", expectAction: "continue" },
-  { name: "rename at swap", fault: { phase: "SWAPPED", kind: "rename" }, expectBackup: "intact", expectAction: "continue" },
-  { name: "kill at swap", fault: { phase: "SWAPPED", kind: "kill" }, expectBackup: "intact", expectAction: "continue" },
+  { name: "process still running", fault: { phase: "SWAPPED", kind: "process-running" }, expectBackup: "intact", expectAction: "rollback" },
+  { name: "rename at swap", fault: { phase: "SWAPPED", kind: "rename" }, expectBackup: "intact", expectAction: "rollback" },
+  { name: "kill at swap", fault: { phase: "SWAPPED", kind: "kill" }, expectBackup: "intact", expectAction: "rollback" },
   { name: "rollback rename", fault: { phase: "SWAPPED", kind: "rollback-rename" }, expectBackup: "intact", expectAction: "rollback" },
-  { name: "verify after swap", fault: { phase: "TARGET_VERIFIED", kind: "verify" }, expectBackup: "intact", expectAction: "continue" },
-  { name: "state write interrupt", fault: { phase: "COMMITTED", kind: "state-write" }, expectBackup: "intact", expectAction: "continue" },
-  { name: "disk full at commit", fault: { phase: "COMMITTED", kind: "disk-full" }, expectBackup: "intact", expectAction: "continue" },
-  { name: "kill at commit", fault: { phase: "COMMITTED", kind: "kill" }, expectBackup: "intact", expectAction: "continue" },
+  { name: "verify after swap", fault: { phase: "TARGET_VERIFIED", kind: "verify" }, expectBackup: "intact", expectAction: "rollback" },
+  { name: "state write interrupt", fault: { phase: "COMMITTED", kind: "state-write" }, expectBackup: "intact", expectAction: "rollback" },
+  { name: "disk full at commit", fault: { phase: "COMMITTED", kind: "disk-full" }, expectBackup: "intact", expectAction: "rollback" },
+  { name: "kill at commit", fault: { phase: "COMMITTED", kind: "kill" }, expectBackup: "intact", expectAction: "rollback" },
 ];
 
 describe("install transaction fault injection", () => {
@@ -81,14 +81,12 @@ describe("install transaction fault injection", () => {
       return;
     }
 
-    const recovered = applyRecovery(journal!);
+    const recovered = applyRecovery(journal!, world.root);
     expect(recovered.action).toBe(item.expectAction);
     expect(recovered.targetUntouched).toBe(true);
     expect(existsSync(join(world.app, MARKER))).toBe(true);
-    const swapped = item.fault.phase === "TARGET_VERIFIED" || item.fault.phase === "COMMITTED" || item.fault.phase === "STATE";
-    if (!swapped) {
-      expect(readFileSync(join(world.app, MARKER), "utf8").trim()).toBe("ORIGINAL");
-    }
+    expect(readFileSync(join(world.app, MARKER), "utf8").trim()).toBe("ORIGINAL");
+    expect(recovered.journal.phase).toBe("ROLLED_BACK");
     if (item.expectBackup === "intact") {
       expect(recovered.backupIntact).toBe(true);
       expect(readFileSync(join(journal!.originalSnapshot, MARKER), "utf8").trim()).toBe("ORIGINAL");
