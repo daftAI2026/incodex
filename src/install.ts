@@ -21,10 +21,10 @@ import {
 } from "./live-source";
 import { runCloneInstall } from "./install-transaction";
 import {
-  defaultPackagedDistDir,
   loadPackagedArtifacts,
   packagedRuntimeVersion,
   publishPackagedRuntime,
+  resolvePackagedDistDir,
 } from "./packaged-runtime";
 import { ASAR_REL, DEFAULT_APP, LIVE_PREV, USER_ROOT } from "./paths";
 import { saveState } from "./state";
@@ -77,7 +77,7 @@ async function patchAppBundle(
 ): Promise<{ originalMain: string; hash: string; signing: SigningManifest | null }> {
   const patched = await patchStagedBundle({
     stagedApp: appPath,
-    artifacts: loadPackagedArtifacts(defaultPackagedDistDir()),
+    artifacts: loadPackagedArtifacts(resolvePackagedDistDir()),
     installId,
   });
   const signing = resign ? signApp(appPath) : null;
@@ -113,7 +113,7 @@ function pointLivePrevAt(originalApp: string): void {
 }
 
 function publishBundledRuntime(userRoot: string): void {
-  const distDir = defaultPackagedDistDir();
+  const distDir = resolvePackagedDistDir();
   const current = publishPackagedRuntime(userRoot, distDir);
   console.log(`external runtime ${current.version} -> ${current.release}`);
 }
@@ -186,7 +186,7 @@ async function installLive(): Promise<void> {
     patchedAsarHeaderHash: patched.hash,
     patchedAsarFileHash,
     originalMain: patched.originalMain,
-    runtimeVersion: packagedRuntimeVersion(defaultPackagedDistDir()),
+    runtimeVersion: packagedRuntimeVersion(resolvePackagedDistDir()),
     createdAt,
   });
   writeInstallation({
@@ -244,7 +244,7 @@ export async function install(appPath: string, options?: { root?: string }): Pro
   publishBundledRuntime(options?.root ?? USER_ROOT);
   await runCloneInstall(appPath, {
     root: options?.root,
-    runtimeVersion: packagedRuntimeVersion(defaultPackagedDistDir()),
+    runtimeVersion: packagedRuntimeVersion(resolvePackagedDistDir()),
     patch: (stagedApp, installId) => patchAppBundle(stagedApp, false, installId),
   });
 }
