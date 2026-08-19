@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, unlinkSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EXTERNAL_RUNTIME_FILES, verifyExternalRuntime } from "./external-runtime";
@@ -66,6 +66,17 @@ describe("packaged runtime", () => {
     for (const name of EXTERNAL_RUNTIME_FILES) {
       expect(verified.current.files[name]).toMatch(/^[0-9a-f]{64}$/);
     }
+  });
+
+  test("second publish of the same files is a no-op", () => {
+    const dist = writeIsolatedDist("4.1.0");
+    const userRoot = mkdtempSync(join(tmpdir(), "incodex-home-"));
+    const first = publishPackagedRuntime(userRoot, dist);
+    const releaseDir = join(userRoot, "runtime", first.release);
+    const ino = lstatSync(releaseDir).ino;
+    const second = publishPackagedRuntime(userRoot, dist);
+    expect(second).toEqual(first);
+    expect(lstatSync(releaseDir).ino).toBe(ino);
   });
 
   test("missing dist file names the file and does not mention bun", () => {
