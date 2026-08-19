@@ -1,5 +1,10 @@
+<p align="center">
+  <img src="assets/hat-glasses.svg" alt="Incodex hat-glasses" width="96" />
+</p>
+
+<p align="left">English | <strong><a href="./README_CN.md">简体中文</a></strong></p>
+
 <div align="center">
-  <p>English | <strong><a href="./README_CN.md">简体中文</a></strong></p>
   <h1>Incodex</h1>
   <p><em>Incognito toggle for Codex desktop.</em></p>
 </div>
@@ -11,10 +16,6 @@
   <a href="https://github.com/daftAI2026/incodex/commits"><img src="https://img.shields.io/github/commit-activity/m/daftAI2026/incodex?style=flat-square" alt="Commits"></a>
   <a href="https://github.com/daftAI2026/incodex/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/daftAI2026/incodex/ci.yml?style=flat-square" alt="CI"></a>
   <a href="https://x.com/singkid9527"><img src="https://img.shields.io/badge/follow-singkid9527-red?style=flat-square&logo=X" alt="Follow"></a>
-</p>
-
-<p align="center">
-  <img src="assets/hat-glasses.svg" alt="Incodex hat-glasses" width="96" />
 </p>
 
 <p align="center">
