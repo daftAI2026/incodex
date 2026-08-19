@@ -40,4 +40,11 @@ describe("architecture boundaries", () => {
     expect(src("src/patcher.ts")).toContain("loaderSource: options.artifacts.loader");
     expect(src("src/patcher.ts")).not.toContain("mainSource:");
   });
+
+  test("installer does not rebuild runtime by spawning bun", () => {
+    const install = src("src/install.ts");
+    expect(install).not.toContain("src/build-runtime.ts");
+    expect(install).not.toMatch(/spawnSync\(\s*["']bun["']/);
+  });
 });
+
