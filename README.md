@@ -14,6 +14,10 @@
 </p>
 
 <p align="center">
+  <img src="assets/hat-glasses.svg" alt="Incodex hat-glasses" width="96" />
+</p>
+
+<p align="center">
   <img src="assets/sidebar.png" alt="Hat-glasses control left of Search in Codex" width="1000" />
 </p>
 

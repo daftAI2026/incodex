@@ -14,6 +14,10 @@
 </p>
 
 <p align="center">
+  <img src="assets/hat-glasses.svg" alt="Incodex 帽子墨镜" width="96" />
+</p>
+
+<p align="center">
   <img src="assets/sidebar.png" alt="Codex 搜索左边的帽子墨镜" width="1000" />
 </p>
 
