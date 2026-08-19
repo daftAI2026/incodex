@@ -1043,6 +1043,22 @@ function findSearchButton() {
 function isParkedLeftOfSearch(btn, search) {
   return btn.parentElement === search.parentElement && btn.nextElementSibling === search;
 }
+function buttonStillBesideSearch() {
+  const btn = document.querySelector(`[${BTN_ATTR}]`);
+  if (!btn?.isConnected)
+    return false;
+  const next = btn.nextElementSibling;
+  return Boolean(next && next.tagName === "BUTTON" && isSearchLabel(next.getAttribute("aria-label")));
+}
+function landingStillMounted() {
+  const landing = document.querySelector(`[${LANDING_ATTR}]`);
+  if (!isIncognitoWindow() || bannerDismissed())
+    return !landing;
+  return Boolean(landing);
+}
+function needsInject() {
+  return !buttonStillBesideSearch() || !landingStillMounted();
+}
 function buildButton(search) {
   const btn = search.cloneNode(false);
   for (const name of STRIP_CLONE_ATTRS)
@@ -1287,11 +1303,15 @@ function start() {
   window.addEventListener("keydown", onHotkey, true);
   let scheduled = false;
   const observer = new MutationObserver(() => {
+    if (!needsInject())
+      return;
     if (scheduled)
       return;
     scheduled = true;
     requestAnimationFrame(() => {
       scheduled = false;
+      if (!needsInject())
+        return;
       ensureButton();
       ensureLanding();
     });

@@ -176,6 +176,23 @@ function isParkedLeftOfSearch(btn: HTMLElement, search: HTMLElement): boolean {
   return btn.parentElement === search.parentElement && btn.nextElementSibling === search;
 }
 
+function buttonStillBesideSearch(): boolean {
+  const btn = document.querySelector<HTMLElement>(`[${BTN_ATTR}]`);
+  if (!btn?.isConnected) return false;
+  const next = btn.nextElementSibling;
+  return Boolean(next && next.tagName === "BUTTON" && isSearchLabel(next.getAttribute("aria-label")));
+}
+
+function landingStillMounted(): boolean {
+  const landing = document.querySelector(`[${LANDING_ATTR}]`);
+  if (!isIncognitoWindow() || bannerDismissed()) return !landing;
+  return Boolean(landing);
+}
+
+function needsInject(): boolean {
+  return !buttonStillBesideSearch() || !landingStillMounted();
+}
+
 function buildButton(search: HTMLElement): HTMLElement {
   const btn = search.cloneNode(false) as HTMLElement;
   for (const name of STRIP_CLONE_ATTRS) btn.removeAttribute(name);
@@ -449,10 +466,12 @@ function start(): void {
   window.addEventListener("keydown", onHotkey, true);
   let scheduled = false;
   const observer = new MutationObserver(() => {
+    if (!needsInject()) return;
     if (scheduled) return;
     scheduled = true;
     requestAnimationFrame(() => {
       scheduled = false;
+      if (!needsInject()) return;
       ensureButton();
       ensureLanding();
     });

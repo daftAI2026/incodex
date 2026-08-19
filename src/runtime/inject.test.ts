@@ -19,4 +19,9 @@ describe("hat-glasses stays after header remount", () => {
     expect(inject).toContain("document.documentElement");
     expect(inject).not.toContain("observer.observe(observeRoot()");
   });
+
+  test("skips ensureButton while the hat is still the previous sibling of Search", () => {
+    expect(inject).toContain("buttonStillBesideSearch");
+    expect(inject).toContain("if (!needsInject()) return");
+  });
 });
