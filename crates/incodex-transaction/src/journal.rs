@@ -169,7 +169,8 @@ pub fn reconstructed(root: &Path, journal: &JournalV2) -> Result<TxPaths, String
             }
         }
         if let Ok(real) = fs::canonicalize(&full) {
-            if !real.starts_with(&paths.dir) {
+            let dir_real = fs::canonicalize(&paths.dir).unwrap_or_else(|_| paths.dir.clone());
+            if !real.starts_with(&dir_real) {
                 return Err(format!("journal path escaped transaction dir: {rel}"));
             }
         }
