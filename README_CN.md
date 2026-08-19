@@ -14,10 +14,10 @@
 </p>
 
 <p align="center">
-  <img src="assets/hat-glasses.svg" alt="Incodex hat-glasses" width="96" />
+  <img src="assets/sidebar.png" alt="Codex 搜索左边的帽子墨镜" width="560" />
 </p>
 
-这是非官方工具。短命令是 `inc`，和 `incodex` 是同一个程序。macOS only.
+> 这是非官方工具。短命令是 `inc`，和 `incodex` 是同一个程序。
 
 ## Features
 

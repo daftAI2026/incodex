@@ -14,10 +14,10 @@
 </p>
 
 <p align="center">
-  <img src="assets/hat-glasses.svg" alt="Incodex hat-glasses" width="96" />
+  <img src="assets/sidebar.png" alt="Hat-glasses control left of Search in Codex" width="560" />
 </p>
 
-Unofficial. `inc` is the same program as `incodex`. macOS only.
+> Unofficial. `inc` is the same program as `incodex`.
 
 ## Features
 
