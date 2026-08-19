@@ -1,8 +1,8 @@
+<p align="left">English | <strong><a href="./README_CN.md">简体中文</a></strong></p>
+
 <p align="center">
   <img src="assets/hat-glasses.svg" alt="Incodex hat-glasses" width="96" />
 </p>
-
-<p align="left">English | <strong><a href="./README_CN.md">简体中文</a></strong></p>
 
 <div align="center">
   <h1>Incodex</h1>
