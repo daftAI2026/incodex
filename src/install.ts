@@ -4,7 +4,6 @@ import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileSha256, inspectApp } from "./app-identity";
 import { asarHasOnlyLoader, headerHash, ensureDir } from "./asar";
-import { findSupportedBuild } from "./compatibility/supported-builds";
 import { signApp, verifyTarget, type SigningManifest } from "./codesign";
 import {
   loadCurrentInstallation,
@@ -29,7 +28,7 @@ import {
   resolvePackagedDistDir,
   runtimeMatchesPackaged,
 } from "./packaged-runtime";
-import { formatKv, formatOk, formatWarn } from "./cli-print";
+import { formatKv, formatOk } from "./cli-print";
 import { notifyLaunchServices } from "./launch-services";
 import { ASAR_REL, DEFAULT_APP, LIVE_PREV, USER_ROOT } from "./paths";
 import { saveState } from "./state";
@@ -257,7 +256,6 @@ async function installLive(): Promise<{ installId: string; runtimeVersion: strin
 
 export async function install(appPath: string, options?: { root?: string }): Promise<CommandResult> {
   if (!existsSync(appPath)) throw new Error(`Codex app not found: ${appPath}`);
-  const listing = inspectApp(appPath).listing;
   if (isOfficialApp(appPath)) {
     const userRoot = options?.root ?? USER_ROOT;
     const info = inspectApp(appPath);
@@ -285,13 +283,6 @@ export async function install(appPath: string, options?: { root?: string }): Pro
       runtimeVersion: live.runtimeVersion,
       app: appPath,
     };
-  }
-  if (!findSupportedBuild(listing ?? {})) {
-    console.log(
-      formatWarn(
-        `unknown Codex build ${listing?.appVersion ?? "unknown"} (${listing?.appBuild ?? "unknown"}); clone is experimental`,
-      ),
-    );
   }
   const published = publishBundledRuntime(options?.root ?? USER_ROOT);
   const cloned = await runCloneInstall(appPath, {

@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { liveSupportNote } from "./compatibility/supported-builds";
-import { ADAPTER, probeUi } from "./runtime/compatibility/build-26.810.52044";
-import { adapterForBuild } from "./runtime/compatibility/registry";
+import { ADAPTER, probeUi } from "./runtime/compatibility/default-adapter";
+import { activeAdapter } from "./runtime/compatibility/registry";
 import { isSearchLabel } from "./runtime/compatibility/search-labels";
 
 describe("search labels", () => {
@@ -17,8 +16,11 @@ describe("search labels", () => {
   });
 });
 
-describe("build adapter 26.810.52044", () => {
-  test("has a feature probe and known selectors", () => {
+describe("default UI adapter", () => {
+  test("finds Search by label and parks against the header cluster", () => {
+    expect(ADAPTER.id).toBe("default");
+    expect(ADAPTER).not.toHaveProperty("appVersion");
+    expect(ADAPTER).not.toHaveProperty("appBuild");
     expect(ADAPTER.selectors.headerCluster).toContain("ms-auto");
     expect(ADAPTER.stripCloneAttrs).toContain("data-testid");
     const search = { getAttribute: (name: string) => (name === "aria-label" ? "搜尋" : null) };
@@ -29,27 +31,8 @@ describe("build adapter 26.810.52044", () => {
     expect(probeUi(root)).toEqual({ search: true, banners: true });
   });
 
-  test("is registered for the observed build and unknown builds have no adapter", () => {
-    expect(adapterForBuild("26.810.52044", "6662")?.id).toBe("build-26.810.52044");
-    expect(adapterForBuild("0.0.0", "0")).toBeUndefined();
-  });
-});
-
-describe("live support", () => {
-  test("unknown builds warn instead of blocking a confirmed live install", () => {
-    const note = liveSupportNote({
-      bundleIdentifier: "com.openai.codex",
-      appVersion: "99.0.0",
-      appBuild: "1",
-    });
-    expect(note).toMatch(/best-effort/);
-    expect(
-      liveSupportNote({
-        bundleIdentifier: "com.openai.codex",
-        appVersion: "26.810.52044",
-        appBuild: "6662",
-      }),
-    ).toBeNull();
+  test("is the adapter for every Codex build", () => {
+    expect(activeAdapter()).toBe(ADAPTER);
   });
 });
 

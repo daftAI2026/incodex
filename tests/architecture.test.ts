@@ -24,6 +24,7 @@ describe("architecture boundaries", () => {
       expect(file).not.toMatch(/from ["']\.\.\/asar["']|require\(["']\.\/asar["']\)/);
       expect(file).not.toContain("querySelector");
       expect(file).not.toContain("compatibility/build-");
+      expect(file).not.toContain("26.810.52044");
     }
   });
 

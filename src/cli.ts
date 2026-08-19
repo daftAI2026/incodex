@@ -2,7 +2,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, unlinkSync } from "node:fs";
 import { inspectApp } from "./app-identity";
-import { liveSupportNote } from "./compatibility/supported-builds";
 import { cliVersion } from "./cli-version";
 import { collectVersionFacts, formatVersionReport } from "./version-report";
 import { verifyApp } from "./codesign";
@@ -273,8 +272,6 @@ function printInstallPlan(appPath: string, clone: boolean): void {
     console.log(formatWarn("Official Appshot (smart snapshot) stops until uninstall."));
     console.log(formatKv("Backup", "~/.incodex/installations/"));
   }
-  const note = liveSupportNote(info.listing ?? {});
-  if (note) console.log(formatWarn(note));
 }
 
 function maybeRelaunchChatGPT(pidsBefore: number[]): void {
