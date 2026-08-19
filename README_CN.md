@@ -145,11 +145,19 @@ Incodex 会改本机已安装的 Electron 应用包。高风险操作默认要�
 ```bash
 $ incodex install
 
-➤ Installing into /Applications/ChatGPT.app
-✓ Done. Reopen ChatGPT.app to use Incognito.
-  install id: 0778f0fa-…
-  runtime version: 0.1.0
-  app: /Applications/ChatGPT.app
+➤ Install
+  App          /Applications/ChatGPT.app
+  Version      26.814.41957 6744
+  Signed       yes
+  ! Replaces the app in place and resigns it ad hoc.
+  ! Official Appshot (smart snapshot) stops until uninstall.
+  Backup       ~/.incodex/installations/
+  ✓ Official app patched
+  Install id   0778f0fa-…
+  Runtime      0.1.0
+  App          /Applications/ChatGPT.app
+➤ Relaunch
+  ✓ ChatGPT.app relaunched.
 ```
 
 装进去之后，搜索左边会出现帽子墨镜。点它或 `Shift+Command+N` 开无痕窗。
@@ -162,7 +170,7 @@ $ incodex open --dry-run
 ➤ Open incognito without patching Codex
   App          /Applications/ChatGPT.app
   Binary       /Applications/ChatGPT.app/Contents/MacOS/ChatGPT
-! Dry run. No window opened.
+  ! Dry run. No window opened.
 ```
 
 关窗后隔离会话会被清掉：
@@ -173,7 +181,7 @@ $ incodex open
 ➤ Opening incognito window
   Binary       /Applications/ChatGPT.app/Contents/MacOS/ChatGPT
   Home         ~/.incodex/sessions/…
-✓ Closed. Isolated session removed.
+  ✓ Closed. Isolated session removed.
 ```
 
 ### Status
@@ -181,6 +189,7 @@ $ incodex open
 ```bash
 $ incodex status
 
+➤ Status
   App          /Applications/ChatGPT.app
   Exists       yes
   Installed    yes
@@ -197,7 +206,7 @@ $ incodex status
 ```bash
 $ incodex doctor
 
-App
+➤ App
   Path         /Applications/ChatGPT.app
   Exists       yes
   Installed    yes
@@ -205,22 +214,22 @@ App
   Version      26.814.41407 6720
   Arch         arm64
 
-Runtime
+➤ Runtime
   Version      0.1.0
   External     0.1.0 releases/0.1.0
   Loader       asar only
   Main         .vite/build/early-bootstrap.js
 
-Signing
+➤ Signing
   Verify       ok
   Hardened     yes
   Gatekeeper   not accepted (diagnostic)
 
-Backup
+➤ Backup
   State        ok
   Matches      yes
 
-Sessions
+➤ Sessions
   Orphans      0
   Chromium     0
   Stale pid    no
