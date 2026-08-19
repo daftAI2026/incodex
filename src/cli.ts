@@ -12,6 +12,7 @@ import { detectInstallChannel, prefixFromExecPath, selfUninstallPaths, updateAct
 import { formatCommandResult } from "./command-result";
 import { cloneOfficialApp, install, installExternalRuntime, resolveTarget } from "./install";
 import { runMenu } from "./menu";
+import { fetchLatestReleaseTag, readUpdateMessageCache, refreshUpdateNotice, UPDATE_CACHE_PATH } from "./menu-update";
 import { defaultSourceHome, describeIncognitoOpen, prepareIncognitoOpen, waitAndBurn } from "./open-incognito";
 import { DEFAULT_APP, USER_ROOT } from "./paths";
 import { parseCli, type ParsedCli } from "./parse-cli";
@@ -41,7 +42,7 @@ async function main(): Promise<void> {
       console.log(rootHelp());
       return;
     }
-    const choice = await runMenu();
+    const choice = await runMenu({ updateMessage: menuUpdateMessage() });
     if (choice === "quit") return;
     await dispatch({
       command: choice,
@@ -56,6 +57,18 @@ async function main(): Promise<void> {
     return;
   }
   await dispatch(parsed);
+}
+
+function menuUpdateMessage(): string | undefined {
+  const argv1 = process.argv[1] ?? process.execPath;
+  const channel = detectInstallChannel({ execPath: process.execPath, argv1 });
+  void refreshUpdateNotice({
+    cachePath: UPDATE_CACHE_PATH,
+    current: cliVersion(),
+    channel,
+    fetchLatest: () => fetchLatestReleaseTag(),
+  }).catch(() => {});
+  return readUpdateMessageCache(UPDATE_CACHE_PATH, argv1) || undefined;
 }
 
 async function dispatch(parsed: ParsedCli): Promise<void> {
