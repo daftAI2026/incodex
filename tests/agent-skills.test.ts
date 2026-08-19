@@ -16,6 +16,16 @@ describe("agent skills", () => {
     expect(text).toContain("### 更新日志");
     expect(text).toContain("do not `gh release create`");
     expect(text).not.toContain("generate_release_notes: true");
+    expect(text).toContain("post-reactions.sh");
+  });
+
+  test("post-reactions.sh posts the six GitHub reactions on a lowercase v tag", () => {
+    const script = read(".claude/skills/release-notes/scripts/post-reactions.sh");
+    expect(script).toContain("daftAI2026/incodex");
+    expect(script).toContain("repos/${REPO}/releases");
+    expect(script).toContain("+1 laugh hooray heart rocket eyes");
+    expect(script).toContain('"$TAG" != v*');
+    expect(script).not.toContain('"$TAG" != V*');
   });
 
   test("release-flow publishes by pushing a lowercase v tag", () => {

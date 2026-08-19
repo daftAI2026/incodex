@@ -68,6 +68,14 @@ gh release edit v<version> --repo daftAI2026/incodex \
 
 Then `gh release view v<version> --web`.
 
+After the notes are on the Release, post the six reactions:
+
+```bash
+bash .claude/skills/release-notes/scripts/post-reactions.sh v<version>
+```
+
+Then re-read the release reactions and confirm all six landed (`+1`, `laugh`, `hooray`, `heart`, `rocket`, `eyes`). Do not run this before notes are published.
+
 ## When NOT to act
 
 - Mentions notes in passing: draft only, do not `gh release edit`.

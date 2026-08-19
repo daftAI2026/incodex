@@ -44,7 +44,7 @@ Must list both architecture binaries **and** `SHA256SUMS`. `install.sh` is fail-
 
 Script-install smoke after assets exist: install the previous binary (or first-time `install.sh`), run `incodex --version`, then `incodex update` if this is not 0.1.0.
 
-Then load `.claude/skills/release-notes/SKILL.md` and draft notes. Do not announce until notes are published.
+Then load `.claude/skills/release-notes/SKILL.md` and draft notes. After `gh release edit`, run `bash .claude/skills/release-notes/scripts/post-reactions.sh v<version>`. Do not announce until notes and reactions are published.
 
 ## Pitfalls
 
