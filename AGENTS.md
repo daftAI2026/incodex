@@ -52,8 +52,49 @@ If the answer is no or unclear, decline or narrow.
 - `src/runtime/*.cts` is Electron-side source. `bun run build:runtime` emits portable `dist/*.cjs` with `__dirname`, never a machine-absolute path.
 - `src/runtime/incodex-loader.cts` is the only file that belongs in official asar. Everything else loads from `~/.incodex/runtime/` after hash check and fail-opens to official main.
 - `install.sh` installs the CLI binary only. It must verify `SHA256SUMS` and must not run `incodex install`.
-- `docs/` is gitignored local research. Do not commit it.
+- `docs/` is gitignored local research. Do not commit it. The Native CLI experiment section below is the committed copy of that plan.
 - `.claude/skills/` is the agent skill tree. `.agents/skills/<name>` must stay a symlink to `../../.claude/skills/<name>`.
+
+## Native CLI experiment
+
+Shipped releases are the TypeScript CLI on `main`. Native Rust CLI work lives on `exp/rust-cli` until it is proven. Do not send crate PRs at `main`.
+
+### Branching
+
+1. `main` stays the product. Homebrew, `install.sh`, and `release.yml` still ship the Bun-compiled binary.
+2. `exp/rust-cli` is the integration branch. It started from `main` after the golden CLI contract (PR #66, `tests/cli-golden.test.ts`).
+3. Open crate PRs with `--base exp/rust-cli`. One step per PR. Merge that PR into `exp/rust-cli` when CI is green.
+4. When `main` moves (runtime, hover, golden tests), merge `main` into `exp/rust-cli`. Rebase topic branches onto `exp/rust-cli`, not onto `main`.
+5. Merge `exp/rust-cli` into `main` only after all of these hold:
+   - native `install` / `uninstall` / `recover` / `open` / `status` / `doctor` match `tests/cli-golden.test.ts`
+   - same-fixture comparison of plan output, asar, manifest, runtime hash, codesign, install / uninstall / recover
+   - uncompressed binary ≤ 10 MB (10–15 MB needs a written reason); record `--version` cold start against 50 ms
+6. Until that merge, do not point `install.sh`, the Homebrew tap, or `release.yml` at a Rust asset.
+
+### What stays on `main`
+
+- TypeScript CLI (`src/cli.ts`, `src/parse-cli.ts`, install / recover / open).
+- Electron Runtime (`src/runtime/*.cts` → `dist/*.cjs`). Bun still builds it; Rust will embed `dist/` later.
+- Incognito-window hover (hat-glasses → circle-x). That is Runtime, not a crate.
+
+### Steps on `exp/rust-cli` (one PR each)
+
+1. Golden CLI — already on `main` (#66). Align Rust to those tests. Do not rewrite the product language.
+2. Workspace + size probe: `crates/incodex-cli`, `incodex-core`, `incodex-transaction`, `incodex-macos`, `incodex-runtime-bundle`, `incodex-asar`. MIT. No AGPL asar crate. No TUI crate. `cargo test` on macOS. Measure uncompressed size and `--version` cold start.
+3. Read-only `status` / `doctor` aligned to golden.
+4. `open` (no asar, no resign). CleanupResult: only say removed when the directory is gone.
+5. Transaction v2 in Rust only. Do not rebuild journal schema v2 / fsync in TypeScript.
+6. Native ASAR: own MIT crate; `@electron/asar` is a test oracle only.
+7. `install` / `uninstall` / `recover`. After this, Release can stop attaching Bun-compiled binaries.
+8. Parallel comparison, then merge `exp/rust-cli` to `main`.
+
+### Commands on `exp/rust-cli`
+
+```bash
+cargo test --workspace --release
+```
+
+Do not add ratatui, cursive, crossterm, or an AGPL asar crate. Menu stays the existing numbered/arrow UI, implemented later without a TUI crate.
 
 ## Commands
 
@@ -65,6 +106,8 @@ bun run build:runtime
 bun src/cli.ts --help
 bun src/cli.ts install --dry-run
 INCODEX_DEV_HOT=1 bun run deploy:runtime
+# On exp/rust-cli only:
+cargo test --workspace --release
 ```
 
 Public docs use `incodex` / `inc`. Use `bun src/cli.ts` only inside this repo.
@@ -86,5 +129,5 @@ Public docs use `incodex` / `inc`. Use `bun src/cli.ts` only inside this repo.
 - Tests first. Add a failing test that states the bug or contract, then implement until it passes. Do not write tests to match already-written code.
 - If you touch `src/runtime` or `src/build-runtime.ts`, run `bun run build:runtime` and commit matching `dist/` files.
 - Keep Chinese and English user-facing copy in `incognito-copy.ts` together.
-- One review-sized change per PR. Open the PR and merge when CI is green unless the user says otherwise.
+- One review-sized change per PR. Open the PR and merge when CI is green unless the user says otherwise. Rust crate PRs target `exp/rust-cli` until that branch merges to `main`.
 - Do not add AI attribution trailers to commits.
