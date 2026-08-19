@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatKv, formatOk, formatSection, formatWarn } from "./cli-print";
+import { formatKv, formatOk, formatSection, formatStep, formatWarn } from "./cli-print";
 
 describe("cli print", () => {
   test("kv lines align labels", () => {
@@ -11,8 +11,16 @@ describe("cli print", () => {
   });
 
   test("ok and warn marks are stable", () => {
-    expect(formatOk("Closed. Isolated session removed.")).toContain("Closed. Isolated session removed.");
-    expect(formatWarn("unknown Codex build")).toContain("unknown Codex build");
-    expect(formatSection("Signing")).toContain("Signing");
+    expect(formatOk("Closed. Isolated session removed.", { color: false })).toContain("Closed. Isolated session removed.");
+    expect(formatWarn("unknown Codex build", { color: false })).toContain("unknown Codex build");
+    expect(formatSection("Signing", { color: false })).toBe("Signing");
+  });
+
+  test("tty color uses a purple section, green check, cyan step", () => {
+    expect(formatSection("Signing", { color: true })).toContain("\x1b[1;35m");
+    expect(formatOk("done", { color: true })).toContain("\x1b[0;32m");
+    expect(formatStep("Installing", { color: true })).toContain("\x1b[0;36m");
+    expect(formatWarn("careful", { color: true })).toContain("\x1b[0;33m");
   });
 });
+

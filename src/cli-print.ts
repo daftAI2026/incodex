@@ -1,21 +1,45 @@
 const LABEL_WIDTH = 12;
 
-export function formatKv(label: string, value: string): string {
-  return `  ${label.padEnd(LABEL_WIDTH)} ${value}`;
+const ANSI = {
+  green: "0;32",
+  yellow: "0;33",
+  cyan: "0;36",
+  purple: "1;35",
+  gray: "0;38;5;244",
+} as const;
+
+export type PrintOptions = { color?: boolean };
+
+function useColor(options?: PrintOptions): boolean {
+  return options?.color ?? Boolean(process.stdout.isTTY);
 }
 
-export function formatSection(title: string): string {
-  return title;
+function paint(enabled: boolean, code: string, text: string): string {
+  if (!enabled) return text;
+  return `\u001b[${code}m${text}\u001b[0m`;
 }
 
-export function formatOk(message: string): string {
-  return `✓ ${message}`;
+export function formatKv(label: string, value: string, options?: PrintOptions): string {
+  const color = useColor(options);
+  return `  ${paint(color, ANSI.gray, label.padEnd(LABEL_WIDTH))} ${value}`;
 }
 
-export function formatWarn(message: string): string {
-  return `! ${message}`;
+export function formatSection(title: string, options?: PrintOptions): string {
+  return paint(useColor(options), ANSI.purple, title);
 }
 
-export function formatStep(message: string): string {
-  return `➤ ${message}`;
+export function formatOk(message: string, options?: PrintOptions): string {
+  return `${paint(useColor(options), ANSI.green, "✓")} ${message}`;
+}
+
+export function formatWarn(message: string, options?: PrintOptions): string {
+  return `${paint(useColor(options), ANSI.yellow, "!")} ${message}`;
+}
+
+export function formatStep(message: string, options?: PrintOptions): string {
+  return `${paint(useColor(options), ANSI.cyan, "➤")} ${message}`;
+}
+
+export function formatHint(message: string, options?: PrintOptions): string {
+  return paint(useColor(options), ANSI.gray, message);
 }
