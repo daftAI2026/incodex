@@ -104,5 +104,18 @@ describe("Homebrew tap bump", () => {
     expect(readme).toContain("github/stars/daftAI2026/incodex");
     expect(readme).toContain("github/commit-activity/m/daftAI2026/incodex");
     expect(readme).toContain("github/actions/workflow/status/daftAI2026/incodex/ci.yml");
+    expect(readme).toContain("x.com/singkid9527");
+    expect(readme).not.toContain("badge/homebrew");
+    expect(readme).not.toContain("platform-macOS");
+  });
+
+  test("README is English and links a Chinese translation", () => {
+    const cn = readFileSync(join(root, "README_CN.md"), "utf8");
+    expect(readme).toContain("./README_CN.md");
+    expect(readme).toContain("简体中文");
+    expect(readme).toContain("Unofficial");
+    expect(cn).toContain("./README.md");
+    expect(cn).toContain("这是非官方工具");
+    expect(cn).toContain("brew install daftAI2026/tap/incodex");
   });
 });
