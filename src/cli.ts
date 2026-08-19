@@ -9,6 +9,7 @@ import { askToContinue } from "./confirm-prompt";
 import { diagnose, printDiagnosis } from "./doctor";
 import { commandHelp, rootHelp } from "./help";
 import { detectInstallChannel, prefixFromExecPath, selfUninstallPaths, updateAction } from "./cli-channel";
+import { formatCommandResult } from "./command-result";
 import { cloneOfficialApp, install, installExternalRuntime, resolveTarget } from "./install";
 import { runMenu } from "./menu";
 import { defaultSourceHome, describeIncognitoOpen, prepareIncognitoOpen, waitAndBurn } from "./open-incognito";
@@ -95,8 +96,9 @@ async function dispatch(parsed: ParsedCli): Promise<void> {
       console.log("would update ~/.incodex/runtime/ without modifying Codex");
       return;
     }
-    installExternalRuntime();
+    const result = installExternalRuntime();
     console.log("done. Codex was not modified. reopen it to load the new runtime.");
+    console.log(formatCommandResult(result));
     return;
   }
   if (parsed.command === "recover") {
@@ -210,12 +212,13 @@ async function runInstall(parsed: ParsedCli, appPath: string): Promise<void> {
     cloneOfficialApp(appPath);
   }
   console.log("installing into", appPath);
-  await install(appPath);
+  const result = await install(appPath);
   if (parsed.live && !parsed.app) {
     console.log("done. reopen /Applications/ChatGPT.app to use Incognito.");
   } else {
     console.log("done. restart that app copy to see the Incognito button.");
   }
+  console.log(formatCommandResult(result));
 }
 
 async function runUninstall(parsed: ParsedCli, appPath: string): Promise<void> {
@@ -227,8 +230,9 @@ async function runUninstall(parsed: ParsedCli, appPath: string): Promise<void> {
   }
   await ensureConfirmed("uninstall", parsed);
   console.log("restoring", target);
-  uninstall(target);
+  const result = uninstall(target);
   console.log("done");
+  console.log(formatCommandResult(result));
 }
 
 function printInstallPlan(appPath: string, clone: boolean): void {

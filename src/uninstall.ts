@@ -9,14 +9,22 @@ import {
   restoreOriginalApp,
 } from "./installation";
 import { canRestoreOfficial, loadLiveInstallRecord, resolveOfficialOriginal } from "./live-source";
+import type { CommandResult } from "./command-result";
 import { ASAR_REL, LIVE_PREV } from "./paths";
 
-export function uninstall(appPath: string): void {
+export function uninstall(appPath: string): CommandResult {
+  const stored = loadCurrentInstallation(appPath);
   if (isOfficialApp(appPath)) {
     uninstallOfficial(appPath);
-    return;
+  } else {
+    uninstallTarget(appPath);
   }
-  uninstallTarget(appPath);
+  return {
+    action: "uninstall",
+    installId: stored?.manifest.installId,
+    runtimeVersion: stored?.manifest.runtimeVersion,
+    app: appPath,
+  };
 }
 
 function uninstallOfficial(appPath: string): void {
