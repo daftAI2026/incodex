@@ -46,10 +46,6 @@ function isSearchLabel(label) {
 }
 
 // src/runtime/compatibility/default-adapter.ts
-var SELECTORS = {
-  headerCluster: ".ms-auto.flex.items-center",
-  homeBanners: ".home-banners"
-};
 var STRIP_CLONE_ATTRS = [
   "id",
   "name",
@@ -882,7 +878,6 @@ var BTN_ATTR = "data-incodex-privacy-toggle";
 var TIP_ATTR = "data-incodex-tooltip";
 var LANDING_ATTR = "data-incodex-landing";
 var ERROR_ATTR = "data-incodex-launch-error";
-var CLUSTER_ATTR = "data-incodex-header-cluster";
 var SHORTCUT_LABEL = "⇧⌘N";
 var ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
   <path d="M14 18a2 2 0 0 0-4 0"/>
@@ -1028,11 +1023,24 @@ function showLaunchError() {
 function findSearchButton() {
   return [...document.querySelectorAll("button")].find((btn) => isSearchLabel(btn.getAttribute("aria-label"))) ?? null;
 }
-function findHeaderCluster(search) {
-  return search.closest(SELECTORS.headerCluster);
+function isParkedLeftOfSearch(btn, search) {
+  return btn.parentElement === search.parentElement && btn.nextElementSibling === search;
 }
-function isParkedInCluster(btn, cluster, search) {
-  return btn.parentElement === cluster && !search.contains(btn) && !btn.contains(search);
+function buttonStillBesideSearch() {
+  const btn = document.querySelector(`[${BTN_ATTR}]`);
+  if (!btn?.isConnected)
+    return false;
+  const next = btn.nextElementSibling;
+  return Boolean(next && next.tagName === "BUTTON" && isSearchLabel(next.getAttribute("aria-label")));
+}
+function landingStillMounted() {
+  const landing = document.querySelector(`[${LANDING_ATTR}]`);
+  if (!isIncognitoWindow() || bannerDismissed())
+    return !landing;
+  return Boolean(landing);
+}
+function needsInject() {
+  return !buttonStillBesideSearch() || !landingStillMounted();
 }
 function buildButton(search) {
   const btn = search.cloneNode(false);
@@ -1248,17 +1256,13 @@ function ensureLanding() {
 }
 function ensureButton() {
   const search = findSearchButton();
-  if (!search)
+  if (!search?.parentElement)
     return;
-  const cluster = findHeaderCluster(search);
-  if (!cluster)
-    return;
-  cluster.setAttribute(CLUSTER_ATTR, "true");
   let btn = document.querySelector(`[${BTN_ATTR}]`);
   if (!btn)
     btn = buildButton(search);
-  if (!isParkedInCluster(btn, cluster, search)) {
-    cluster.insertBefore(btn, cluster.firstElementChild);
+  if (!isParkedLeftOfSearch(btn, search)) {
+    search.parentElement.insertBefore(btn, search);
   }
   apply();
 }
@@ -1271,16 +1275,6 @@ function onHotkey(event) {
   event.stopImmediatePropagation();
   activate();
 }
-function uiReady() {
-  if (!document.querySelector(`[${BTN_ATTR}]`))
-    return false;
-  if (isIncognitoWindow() && !document.querySelector(`[${LANDING_ATTR}]`))
-    return false;
-  return true;
-}
-function observeRoot() {
-  return document.querySelector(`[${CLUSTER_ATTR}]`) || document.querySelector("header") || document.querySelector("nav") || document.body;
-}
 function start() {
   if (window.__incodexStarted)
     return;
@@ -1290,22 +1284,22 @@ function start() {
   apply();
   ensureLanding();
   window.addEventListener("keydown", onHotkey, true);
-  if (uiReady())
-    return;
   let scheduled = false;
   const observer = new MutationObserver(() => {
+    if (!needsInject())
+      return;
     if (scheduled)
       return;
     scheduled = true;
     requestAnimationFrame(() => {
       scheduled = false;
+      if (!needsInject())
+        return;
       ensureButton();
       ensureLanding();
-      if (uiReady())
-        observer.disconnect();
     });
   });
-  observer.observe(observeRoot(), { childList: true, subtree: true });
+  observer.observe(document.documentElement, { childList: true, subtree: true });
 }
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", start, { once: true });
