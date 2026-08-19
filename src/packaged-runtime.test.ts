@@ -7,6 +7,7 @@ import {
   loadPackagedArtifacts,
   packagedRuntimeVersion,
   publishPackagedRuntime,
+  resolvePackagedDistDir,
 } from "./packaged-runtime";
 
 const ASAR_FILES = [
@@ -37,6 +38,11 @@ function writeIsolatedDist(version = "9.9.9"): string {
 }
 
 describe("packaged runtime", () => {
+  test("honors INCODEX_DIST instead of the repo dist folder", () => {
+    const dist = writeIsolatedDist("8.8.8");
+    expect(resolvePackagedDistDir({ INCODEX_DIST: dist })).toBe(dist);
+  });
+
   test("reads version from runtime-manifest.json without a package.json next to it", () => {
     const dist = writeIsolatedDist("3.2.1");
     expect(packagedRuntimeVersion(dist)).toBe("3.2.1");

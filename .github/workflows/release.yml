@@ -28,21 +28,31 @@ jobs:
           bun run typecheck
           bun run lint
           bun test src tests
+      - name: Compile CLI
+        run: |
+          mkdir -p release-cli
+          bun build src/cli.ts --compile --target=bun-darwin-arm64 --outfile release-cli/incodex-darwin-arm64
+          bun build src/cli.ts --compile --target=bun-darwin-x64 --outfile release-cli/incodex-darwin-x64
+          codesign --sign - --force release-cli/incodex-darwin-arm64
+          codesign --sign - --force release-cli/incodex-darwin-x64
       - name: Checksums
         run: |
           {
             echo "# Incodex ${GITHUB_REF_NAME}"
             echo "commit ${GITHUB_SHA}"
+            (cd release-cli && shasum -a 256 incodex-darwin-arm64 incodex-darwin-x64)
             find dist -type f | sort | while read -r file; do
               shasum -a 256 "$file"
             done
-            shasum -a 256 package.json bun.lock LICENSE
-          } > checksums.txt
-          cat checksums.txt
+          } | tee SHA256SUMS checksums.txt
+          cp SHA256SUMS release-cli/SHA256SUMS
       - name: Attest
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
+            release-cli/incodex-darwin-arm64
+            release-cli/incodex-darwin-x64
+            release-cli/SHA256SUMS
             checksums.txt
             dist/runtime-manifest.json
       - name: Publish GitHub Release
@@ -50,5 +60,8 @@ jobs:
         with:
           generate_release_notes: true
           files: |
+            release-cli/incodex-darwin-arm64
+            release-cli/incodex-darwin-x64
+            release-cli/SHA256SUMS
             checksums.txt
             dist/runtime-manifest.json

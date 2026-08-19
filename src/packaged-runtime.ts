@@ -1,8 +1,40 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { publishExternalRuntimeFromDist } from "./external-runtime";
+import { EXTERNAL_RUNTIME_FILES, publishExternalRuntime, publishExternalRuntimeFromDist } from "./external-runtime";
 import type { RuntimeArtifacts } from "./patcher";
+
+// bun `with { type: "file" }` is a path string; tsc types these files as modules.
+// @ts-expect-error
+import bundledLoader from "../dist/incodex-loader.cjs" with { type: "file" };
+// @ts-expect-error
+import bundledInject from "../dist/incodex-inject.js" with { type: "file" };
+// @ts-expect-error
+import bundledMain from "../dist/incodex-main.cjs" with { type: "file" };
+// @ts-expect-error
+import bundledPreload from "../dist/incodex-preload.cjs" with { type: "file" };
+// @ts-expect-error
+import bundledSafeHome from "../dist/incodex-safe-home.cjs" with { type: "file" };
+// @ts-expect-error
+import bundledIpcGuard from "../dist/incodex-ipc-guard.cjs" with { type: "file" };
+// @ts-expect-error
+import bundledInstance from "../dist/incodex-instance.cjs" with { type: "file" };
+// @ts-expect-error
+import bundledRuntimeLoad from "../dist/incodex-runtime-load.cjs" with { type: "file" };
+// @ts-expect-error
+import bundledWindowKind from "../dist/incodex-window-kind.cjs" with { type: "file" };
+import bundledManifest from "../dist/runtime-manifest.json";
+
+const BUNDLED_FILES: Record<string, string> = {
+  "incodex-loader.cjs": bundledLoader,
+  "incodex-inject.js": bundledInject,
+  "incodex-main.cjs": bundledMain,
+  "incodex-preload.cjs": bundledPreload,
+  "incodex-safe-home.cjs": bundledSafeHome,
+  "incodex-ipc-guard.cjs": bundledIpcGuard,
+  "incodex-instance.cjs": bundledInstance,
+  "incodex-runtime-load.cjs": bundledRuntimeLoad,
+  "incodex-window-kind.cjs": bundledWindowKind,
+};
 
 const ARTIFACT_FILES = {
   loader: "incodex-loader.cjs",
@@ -17,23 +49,36 @@ const ARTIFACT_FILES = {
 } as const;
 
 export function defaultPackagedDistDir(): string {
-  return join(dirname(fileURLToPath(import.meta.url)), "..", "dist");
+  return dirname(bundledLoader);
+}
+
+export function resolvePackagedDistDir(env: NodeJS.Dict<string> = process.env): string {
+  if (env.INCODEX_DIST) return env.INCODEX_DIST;
+  return defaultPackagedDistDir();
+}
+
+function usesBundledFiles(distDir: string, env: NodeJS.Dict<string> = process.env): boolean {
+  return !env.INCODEX_DIST && distDir === defaultPackagedDistDir();
+}
+
+function readDistFile(distDir: string, name: string, env: NodeJS.Dict<string> = process.env): string {
+  const path = usesBundledFiles(distDir, env) ? BUNDLED_FILES[name] : join(distDir, name);
+  if (!path || !existsSync(path)) throw new Error(`missing dist runtime file: ${name}`);
+  return readFileSync(path, "utf8");
 }
 
 export function packagedRuntimeVersion(distDir: string): string {
-  const path = join(distDir, "runtime-manifest.json");
-  if (!existsSync(path)) throw new Error("missing dist runtime file: runtime-manifest.json");
-  const raw = JSON.parse(readFileSync(path, "utf8")) as { runtimeVersion?: string };
+  if (usesBundledFiles(distDir)) {
+    if (typeof bundledManifest.runtimeVersion !== "string" || !bundledManifest.runtimeVersion) {
+      throw new Error("runtime-manifest.json missing runtimeVersion");
+    }
+    return bundledManifest.runtimeVersion;
+  }
+  const raw = JSON.parse(readDistFile(distDir, "runtime-manifest.json")) as { runtimeVersion?: string };
   if (typeof raw.runtimeVersion !== "string" || !raw.runtimeVersion) {
     throw new Error("runtime-manifest.json missing runtimeVersion");
   }
   return raw.runtimeVersion;
-}
-
-function readDistFile(distDir: string, name: string): string {
-  const path = join(distDir, name);
-  if (!existsSync(path)) throw new Error(`missing dist runtime file: ${name}`);
-  return readFileSync(path, "utf8");
 }
 
 export function loadPackagedArtifacts(distDir: string): RuntimeArtifacts {
@@ -51,5 +96,16 @@ export function loadPackagedArtifacts(distDir: string): RuntimeArtifacts {
 }
 
 export function publishPackagedRuntime(userRoot: string, distDir: string) {
+  if (usesBundledFiles(distDir)) {
+    const files: Record<string, string> = {};
+    for (const name of EXTERNAL_RUNTIME_FILES) {
+      files[name] = readDistFile(distDir, name);
+    }
+    return publishExternalRuntime({
+      userRoot,
+      version: packagedRuntimeVersion(distDir),
+      files,
+    });
+  }
   return publishExternalRuntimeFromDist(userRoot, distDir, packagedRuntimeVersion(distDir));
 }
