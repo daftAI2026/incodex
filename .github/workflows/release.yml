@@ -37,15 +37,8 @@ jobs:
           codesign --sign - --force release-cli/incodex-darwin-x64
       - name: Checksums
         run: |
-          {
-            echo "# Incodex ${GITHUB_REF_NAME}"
-            echo "commit ${GITHUB_SHA}"
-            (cd release-cli && shasum -a 256 incodex-darwin-arm64 incodex-darwin-x64)
-            find dist -type f | sort | while read -r file; do
-              shasum -a 256 "$file"
-            done
-          } | tee SHA256SUMS checksums.txt
-          cp SHA256SUMS release-cli/SHA256SUMS
+          (cd release-cli && shasum -a 256 incodex-darwin-arm64 incodex-darwin-x64 > SHA256SUMS)
+          cat release-cli/SHA256SUMS
       - name: Attest
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
@@ -53,8 +46,6 @@ jobs:
             release-cli/incodex-darwin-arm64
             release-cli/incodex-darwin-x64
             release-cli/SHA256SUMS
-            checksums.txt
-            dist/runtime-manifest.json
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
@@ -63,5 +54,3 @@ jobs:
             release-cli/incodex-darwin-arm64
             release-cli/incodex-darwin-x64
             release-cli/SHA256SUMS
-            checksums.txt
-            dist/runtime-manifest.json
