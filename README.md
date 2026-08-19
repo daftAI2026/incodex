@@ -24,7 +24,17 @@
 
 ## 安装
 
-当前还是开发中版本。请用 [Releases](https://github.com/daftAI2026/incodex/releases) 里带 checksum 的 tag；没有 tag 时再临时用一个明确的 commit，不要直接追着移动中的 `main` 打正式应用。
+当前还是开发中版本。请用 [Releases](https://github.com/daftAI2026/incodex/releases) 里带 checksum 的 tag。没有 tag 时，开发可以从源码 `bun link`。
+
+装命令到 PATH（不改 Codex）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/install.sh | bash
+```
+
+这会核 `SHA256SUMS`，把 `incodex` 和 `inc` 放到 `~/.local/bin`。没有可读的 checksum 会失败。
+
+开发从源码跑：
 
 ```bash
 git clone https://github.com/daftAI2026/incodex.git
