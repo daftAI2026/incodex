@@ -1,4 +1,4 @@
-<p align="left"><strong><a href="./README.md">English</a></strong> | 简体中文</p>
+<p align="right"><strong><a href="./README.md">English</a></strong> | 简体中文</p>
 
 <p align="center">
   <img src="assets/hat-glasses.svg" alt="Incodex 帽子墨镜" width="96" />
