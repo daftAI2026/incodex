@@ -1,6 +1,5 @@
-<h4 align="right">English | <strong><a href="./README_CN.md">简体中文</a></strong></h4>
-
 <div align="center">
+  <p>English | <strong><a href="./README_CN.md">简体中文</a></strong></p>
   <h1>Incodex</h1>
   <p><em>Incognito toggle for Codex desktop.</em></p>
 </div>
