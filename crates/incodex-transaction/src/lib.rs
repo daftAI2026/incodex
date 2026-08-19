@@ -1,7 +1,16 @@
+mod durable;
+mod engine;
+mod journal;
+mod lock;
+
 use std::fs;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+
+pub use engine::{recover, Engine, RecoverResult, TxError};
+pub use journal::{new_install_id, JournalV2};
+pub use lock::{acquire_target_lock, lock_path_for};
 
 pub const PHASES: &[&str] = &[
     "DISCOVERED",
@@ -96,9 +105,13 @@ pub fn parse_journal(raw: &serde_json::Value) -> Option<Journal> {
 }
 
 pub fn recover_action(journal: &Journal) -> Recovery {
-    match journal.phase.as_str() {
+    recover_action_phase(&journal.phase)
+}
+
+pub fn recover_action_phase(phase: &str) -> Recovery {
+    match phase {
         "COMMITTED" | "ROLLED_BACK" => Recovery::Done,
-        "DISCOVERED" | "BACKUP_COMMITTED" | "STAGED" | "PATCHED" | "SIGNED" | "VERIFIED"
+        "DISCOVERED" | "INTENT" | "BACKUP_COMMITTED" | "STAGED" | "PATCHED" | "SIGNED" | "VERIFIED"
         | "TARGET_MOVED_OUT" | "SWAPPED" | "TARGET_VERIFIED" => Recovery::Rollback,
         _ => Recovery::Refuse,
     }
@@ -127,6 +140,33 @@ pub fn list_journals(root: &Path) -> Vec<Journal> {
         let id = name.trim_end_matches(".json");
         if let Some(journal) = load_journal(id, root) {
             out.push(journal);
+        }
+    }
+    out
+}
+
+pub fn list_interrupted(root: &Path) -> Vec<(String, String, Recovery)> {
+    let mut out = Vec::new();
+    for journal in list_journals(root) {
+        let action = recover_action(&journal);
+        if action != Recovery::Done {
+            out.push((journal.install_id, journal.phase, action));
+        }
+    }
+    let dir = root.join("transactions");
+    let Ok(entries) = fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        if !entry.path().is_dir() {
+            continue;
+        }
+        let id = entry.file_name().to_string_lossy().into_owned();
+        if let Ok(journal) = journal::load_v2(root, &id) {
+            let action = recover_action_phase(&journal.phase);
+            if action != Recovery::Done {
+                out.push((journal.install_id, journal.phase, action));
+            }
         }
     }
     out

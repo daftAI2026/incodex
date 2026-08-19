@@ -4,7 +4,7 @@ use serde::Serialize;
 
 use incodex_core::paths::{user_root, ASAR_REL, RUNTIME_CURRENT_NAME, RUNTIME_DIR_NAME};
 use incodex_core::target_id;
-use incodex_transaction::{list_journals, recover_action, Recovery};
+use incodex_transaction::list_interrupted;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -85,16 +85,12 @@ pub fn diagnose_with_root(app_path: &Path, root: &Path) -> Diagnosis {
         external_runtime: inspect_external_runtime(root),
         signing: None,
         spctl: None,
-        interrupted_transactions: list_journals(root)
+        interrupted_transactions: list_interrupted(root)
             .into_iter()
-            .filter(|journal| recover_action(journal) != Recovery::Done)
-            .map(|journal| {
-                let action = recover_action(&journal).as_str().to_string();
-                InterruptedTransaction {
-                    install_id: journal.install_id,
-                    phase: journal.phase,
-                    action,
-                }
+            .map(|(install_id, phase, action)| InterruptedTransaction {
+                install_id,
+                phase,
+                action: action.as_str().to_string(),
             })
             .collect(),
     }

@@ -2,18 +2,22 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_incodex")
 }
 
+static HOME_SEQ: AtomicU64 = AtomicU64::new(0);
+
 fn isolated_home() -> PathBuf {
     let n = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("time")
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("incodex-open-{}-{n}", std::process::id()));
+    let seq = HOME_SEQ.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("incodex-open-{}-{n}-{seq}", std::process::id()));
     fs::create_dir_all(&dir).expect("home");
     dir
 }
