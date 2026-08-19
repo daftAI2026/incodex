@@ -8,7 +8,9 @@ export type CliCommand =
   | "doctor"
   | "recover"
   | "runtime"
-  | "open";
+  | "open"
+  | "update"
+  | "self-uninstall";
 
 export type ParsedCli = {
   command: CliCommand;
@@ -18,6 +20,7 @@ export type ParsedCli = {
   yes: boolean;
   dryRun: boolean;
   json: boolean;
+  restoreApp: boolean;
   app?: string;
   transaction?: string;
 };
@@ -33,6 +36,8 @@ const COMMANDS = new Set<CliCommand>([
   "recover",
   "runtime",
   "open",
+  "update",
+  "self-uninstall",
 ]);
 
 export function parseCli(argv: string[]): ParsedCli {
@@ -45,6 +50,7 @@ export function parseCli(argv: string[]): ParsedCli {
   const yes = flags.includes("--yes") || flags.includes("--confirm-live");
   const dryRun = flags.includes("--dry-run") || flags.includes("-n");
   const json = flags.includes("--json");
+  const restoreApp = flags.includes("--restore-app");
   const app = valueAfter(flags, "--app");
   const transaction = valueAfter(flags, "--transaction");
 
@@ -60,7 +66,7 @@ export function parseCli(argv: string[]): ParsedCli {
 
   const official = !clone && !app;
   const live = (command === "install" || command === "uninstall") && official;
-  return { command, help, clone, live, yes, dryRun, json, app, transaction };
+  return { command, help, clone, live, yes, dryRun, json, restoreApp, app, transaction };
 }
 
 function parseCommand(raw: string | undefined): CliCommand {

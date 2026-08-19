@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+import { spawnSync } from "node:child_process";
+import { existsSync, unlinkSync } from "node:fs";
 import { inspectApp } from "./app-identity";
 import { cliVersion } from "./cli-version";
 import { verifyApp } from "./codesign";
@@ -6,6 +8,7 @@ import { confirmDecision, isTty, requireYesMessage } from "./confirm";
 import { askToContinue } from "./confirm-prompt";
 import { diagnose, printDiagnosis } from "./doctor";
 import { commandHelp, rootHelp } from "./help";
+import { detectInstallChannel, prefixFromExecPath, selfUninstallPaths, updateAction } from "./cli-channel";
 import { cloneOfficialApp, install, installExternalRuntime, resolveTarget } from "./install";
 import { runMenu } from "./menu";
 import { DEFAULT_APP } from "./paths";
@@ -46,6 +49,7 @@ async function main(): Promise<void> {
       yes: false,
       dryRun: false,
       json: false,
+      restoreApp: false,
     });
     return;
   }
@@ -110,6 +114,61 @@ async function dispatch(parsed: ParsedCli): Promise<void> {
       "incodex open is not in this release.\n  After install, use the hat button or Shift+Command+N.",
     );
   }
+  if (parsed.command === "update") {
+    runUpdate(parsed);
+    return;
+  }
+  if (parsed.command === "self-uninstall") {
+    await runSelfUninstall(parsed);
+  }
+}
+
+function runUpdate(parsed: ParsedCli): void {
+  const channel = detectInstallChannel({ execPath: process.execPath, argv1: process.argv[1] ?? "" });
+  const action = updateAction(channel);
+  if (action.kind === "refuse") throw new Error(action.message);
+  const prefix = prefixFromExecPath(process.argv[1] ?? process.execPath);
+  console.log("update channel: script");
+  console.log("  prefix:", prefix);
+  if (parsed.dryRun) {
+    console.log("would re-run install.sh for this prefix");
+    console.log("no changes made.");
+    return;
+  }
+  const script = "curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/install.sh | bash";
+  const ran = spawnSync("bash", ["-lc", script], {
+    stdio: "inherit",
+    env: { ...process.env, INCODEX_PREFIX: prefix },
+  });
+  if (ran.status !== 0) throw new Error("update failed");
+}
+
+async function runSelfUninstall(parsed: ParsedCli): Promise<void> {
+  const argv1 = process.argv[1] ?? process.execPath;
+  const channel = detectInstallChannel({ execPath: process.execPath, argv1 });
+  if (channel === "homebrew") {
+    throw new Error("this copy was installed with Homebrew\n  brew uninstall incodex");
+  }
+  if (channel === "source") {
+    throw new Error("this copy is running from source\n  bun unlink");
+  }
+  const paths = selfUninstallPaths(argv1);
+  console.log("remove:");
+  for (const path of paths) console.log(" ", path);
+  if (parsed.restoreApp) console.log("also restore:", DEFAULT_APP);
+  if (parsed.dryRun) {
+    console.log("no changes made.");
+    return;
+  }
+  await ensureConfirmed("uninstall", parsed);
+  if (parsed.restoreApp) {
+    uninstall(DEFAULT_APP);
+    console.log("restored", DEFAULT_APP);
+  }
+  for (const path of paths) {
+    if (existsSync(path)) unlinkSync(path);
+  }
+  console.log("done");
 }
 
 async function runInstall(parsed: ParsedCli, appPath: string): Promise<void> {
