@@ -1,5 +1,6 @@
 pub mod diagnose;
 pub mod help;
+pub mod open;
 pub mod parse;
 pub mod version;
 
@@ -37,6 +38,7 @@ where
     }
 
     match parsed.command {
+        CliCommand::Open => crate::open::run_open(&parsed),
         CliCommand::Status | CliCommand::Doctor => {
             let target = parsed
                 .app
