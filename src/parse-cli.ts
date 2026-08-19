@@ -40,10 +40,26 @@ const COMMANDS = new Set<CliCommand>([
   "self-uninstall",
 ]);
 
+const SWITCH_FLAGS = new Set([
+  "--help",
+  "-h",
+  "--clone",
+  "--live",
+  "--yes",
+  "--confirm-live",
+  "--dry-run",
+  "-n",
+  "--json",
+  "--restore-app",
+]);
+
+const VALUE_FLAGS = new Set(["--app", "--transaction"]);
+
 export function parseCli(argv: string[]): ParsedCli {
   const raw = argv[2];
   const flags = argv.slice(3);
   const command = parseCommand(raw);
+  rejectUnknownArgs(flags);
   const help = command === "help" || flags.includes("--help") || flags.includes("-h");
   const clone = flags.includes("--clone");
   const liveFlag = flags.includes("--live");
@@ -67,6 +83,21 @@ export function parseCli(argv: string[]): ParsedCli {
   const official = !clone && !app;
   const live = (command === "install" || command === "uninstall") && official;
   return { command, help, clone, live, yes, dryRun, json, restoreApp, app, transaction };
+}
+
+function rejectUnknownArgs(flags: string[]): void {
+  for (let i = 0; i < flags.length; i += 1) {
+    const arg = flags[i]!;
+    if (VALUE_FLAGS.has(arg)) {
+      i += 1;
+      continue;
+    }
+    if (SWITCH_FLAGS.has(arg)) continue;
+    if (arg.startsWith("-")) {
+      throw new Error(`unknown flag: ${arg}\n  incodex --help`);
+    }
+    throw new Error(`unexpected argument: ${arg}\n  incodex --help`);
+  }
 }
 
 function parseCommand(raw: string | undefined): CliCommand {
