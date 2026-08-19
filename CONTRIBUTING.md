@@ -15,8 +15,11 @@ session cleanup, and IPC as the dangerous surface.
 git clone https://github.com/daftAI2026/incodex.git
 cd incodex
 bun install --frozen-lockfile
+bun link
 bun run check
 ```
+
+`bun link` puts `incodex` and `inc` on PATH. They run the same `src/cli.ts`.
 
 `check` runs typecheck, lint, unit tests, and a deterministic `dist` rebuild.
 
@@ -46,7 +49,7 @@ runs `tsc` to emit portable CJS into `dist/*.cjs`. The emitted files must use
 
 - One review-sized change per PR
 - Do not target `/Applications/ChatGPT.app` unless the change is specifically
-  about `--live`
+  about installing into the official app
 - Do not commit `node_modules`
 - If you touch `src/runtime` or `src/build-runtime.ts`, run `bun run build:runtime`
   and commit the matching `dist/` files
@@ -54,11 +57,15 @@ runs `tsc` to emit portable CJS into `dist/*.cjs`. The emitted files must use
 
 ## Destructive CLI
 
-`install`, `uninstall`, and `recover` require an explicit target:
+`incodex install` and `incodex uninstall` default to `/Applications/ChatGPT.app`.
+That is the product path. `--clone` patches a copy;
+`--app <path>` patches a specific bundle.
 
-```text
---clone | --live | --app <path>
-```
+On a terminal, official install/uninstall prints a plan and asks once.
+Without a terminal they require `--yes`. `--dry-run` and `--clone` do not ask.
 
-`--live` also requires `--confirm-live`. Do not reintroduce a default that
-points a destructive command at `/Applications/ChatGPT.app`.
+`--live` and `--confirm-live` still parse as hidden aliases (`--live` means the
+official app, `--confirm-live` means `--yes`). Do not document them as the
+user-facing command.
+
+Do not add a second installer that shells out to the old flag string.

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Private Security Report
+    url: https://github.com/daftAI2026/incodex/security/advisories/new
+    about: Report an exploitable bug privately. Do not open a public issue.

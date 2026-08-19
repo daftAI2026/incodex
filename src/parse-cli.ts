@@ -1,59 +1,74 @@
-export type CliCommand = "help" | "install" | "uninstall" | "status" | "doctor" | "recover" | "runtime";
+export type CliCommand =
+  | "menu"
+  | "help"
+  | "version"
+  | "install"
+  | "uninstall"
+  | "status"
+  | "doctor"
+  | "recover"
+  | "runtime"
+  | "open";
 
 export type ParsedCli = {
   command: CliCommand;
+  help: boolean;
   clone: boolean;
   live: boolean;
-  confirmLive: boolean;
+  yes: boolean;
+  dryRun: boolean;
   json: boolean;
   app?: string;
   transaction?: string;
 };
 
+const COMMANDS = new Set<CliCommand>([
+  "menu",
+  "help",
+  "version",
+  "install",
+  "uninstall",
+  "status",
+  "doctor",
+  "recover",
+  "runtime",
+  "open",
+]);
+
 export function parseCli(argv: string[]): ParsedCli {
-  const command = parseCommand(argv[2]);
+  const raw = argv[2];
   const flags = argv.slice(3);
+  const command = parseCommand(raw);
+  const help = command === "help" || flags.includes("--help") || flags.includes("-h");
   const clone = flags.includes("--clone");
-  const live = flags.includes("--live");
-  const confirmLive = flags.includes("--confirm-live");
+  const liveFlag = flags.includes("--live");
+  const yes = flags.includes("--yes") || flags.includes("--confirm-live");
+  const dryRun = flags.includes("--dry-run") || flags.includes("-n");
   const json = flags.includes("--json");
   const app = valueAfter(flags, "--app");
   const transaction = valueAfter(flags, "--transaction");
 
-  if (clone && live) {
+  if (clone && liveFlag) {
     throw new Error("--clone and --live cannot be used together");
   }
-  if (command === "uninstall" && !clone && !live && !app) {
-    throw new Error("uninstall requires an explicit --live, --clone, or --app <path>");
+  if (clone && app) {
+    throw new Error("--clone and --app cannot be used together");
   }
-  if (command === "install" && !clone && !live && !app) {
-    throw new Error("install requires --clone, --live, or --app <path>");
+  if (command === "recover" && !help && !transaction) {
+    throw new Error("recover requires --transaction <id>\n  incodex recover --transaction <id>");
   }
-  if (command === "install" && live && !confirmLive) {
-    throw new Error("install --live requires --confirm-live after you review the planned action");
-  }
-  if (command === "recover" && !transaction) {
-    throw new Error("recover requires --transaction <id>");
-  }
-  return { command, clone, live, confirmLive, json, app, transaction };
+
+  const official = !clone && !app;
+  const live = (command === "install" || command === "uninstall") && official;
+  return { command, help, clone, live, yes, dryRun, json, app, transaction };
 }
 
 function parseCommand(raw: string | undefined): CliCommand {
-  const command = raw ?? "help";
-  if (
-    command === "help" ||
-    command === "-h" ||
-    command === "--help" ||
-    command === "install" ||
-    command === "uninstall" ||
-    command === "status" ||
-    command === "doctor" ||
-    command === "recover" ||
-    command === "runtime"
-  ) {
-    return command === "-h" || command === "--help" ? "help" : command;
-  }
-  throw new Error(`unknown command: ${command}`);
+  if (raw === undefined || raw === "") return "menu";
+  if (raw === "-h" || raw === "--help" || raw === "help") return "help";
+  if (raw === "-V" || raw === "--version" || raw === "version") return "version";
+  if (COMMANDS.has(raw as CliCommand) && raw !== "menu") return raw as CliCommand;
+  throw new Error(`unknown command: ${raw}\n  incodex --help`);
 }
 
 function valueAfter(flags: string[], name: string): string | undefined {

@@ -4,6 +4,8 @@
 
 这是非官方工具。
 
+短命令是 `inc`，和 `incodex` 是同一个程序。
+
 ## 它做什么
 
 - 装完重启 Codex，搜索左边会出现帽子墨镜按钮
@@ -24,51 +26,66 @@
 
 当前还是开发中版本。请用 [Releases](https://github.com/daftAI2026/incodex/releases) 里带 checksum 的 tag；没有 tag 时再临时用一个明确的 commit，不要直接追着移动中的 `main` 打正式应用。
 
-先打一份副本试：
-
 ```bash
 git clone https://github.com/daftAI2026/incodex.git
 cd incodex
 bun install --frozen-lockfile
-bun src/cli.ts install --clone
+bun link
 ```
 
-然后打开用户目录下的副本：`~/.incodex/scratch/ChatGPT.app`。
+`bun link` 之后 PATH 上会有 `incodex` 和 `inc`。
 
-确认没问题后，再打进正在用的官方应用。`--live` 仍是实验功能，必须先看完计划再确认：
+终端里直接打 `inc` 会出菜单。打补丁进正在用的官方 Codex：
 
 ```bash
-bun src/cli.ts install --live --confirm-live
+incodex install
 ```
 
-`--live` 会在用户目录里打好补丁，再整份替换 `/Applications/ChatGPT.app`。卸掉：
+没有终端（脚本 / Agent）时要加 `--yes`。先看计划、不改包：
 
 ```bash
-bun src/cli.ts uninstall --live
+incodex install --dry-run
+incodex install --yes
+```
+
+开发可以先打一份副本：
+
+```bash
+incodex install --clone
+```
+
+然后打开 `~/.incodex/scratch/ChatGPT.app`。
+
+卸掉官方包上的补丁：
+
+```bash
+incodex uninstall
 ```
 
 查看状态：
 
 ```bash
-bun src/cli.ts status
-bun src/cli.ts doctor
+incodex status
+incodex doctor
 ```
 
 只更新 Incodex 自己的按钮 / 文案 / 清理逻辑，不必再改官方应用、也不必重签：
 
 ```bash
-bun src/cli.ts runtime
+incodex runtime
 ```
 
-这只写入 `~/.incodex/runtime/`。官方 Codex 升级冲掉补丁后，仍要再跑一次 `install --live --confirm-live`（只打**当前这份**官方包）。
+这只写入 `~/.incodex/runtime/`。官方 Codex 升级冲掉补丁后，仍要再跑一次 `incodex install`（只打**当前这份**官方包）。
+
+`bun install` / `bun link` 只把命令装到你的 PATH，不会改 `/Applications/ChatGPT.app`。改官方包的是随后那条 `incodex install`。
 
 ## 注意
 
 - 官方插件加不了这个按钮，必须改应用包
 - 改包之后没法继续用一份有效的 OpenAI 签名。第一次开无痕窗，系统可能要你输入 **Mac 登录密码**（钥匙串里的 Codex Storage Key）。选 **始终允许**。这不是 ChatGPT 账号密码
-- 因此官方 **智能快照**（拍照 / 截屏附件，英文 Appshot）会不可用，提示「无法附加智能快照」。这不是相机权限没开。Computer Use 一般还能用。`uninstall` 卸掉补丁、回到未改的官方应用后，快照会恢复
-- 官方应用升级后，补丁会被冲掉，需要再跑一次 `install --live`。这次会给**当前这份官方应用**打补丁，不会把旧版本换回去，也不会删掉刚升上来的新版本
-- 如果官方已经升级成新版本，`uninstall --live` 不会用旧备份覆盖它，会提示当前应用已经不是 Incodex 安装态
+- 因此官方 **智能快照**（拍照 / 截屏附件，英文 Appshot）会不可用，提示「无法附加智能快照」。这不是相机权限没开。Computer Use 一般还能用。`incodex uninstall` 卸掉补丁、回到未改的官方应用后，快照会恢复
+- 官方应用升级后，补丁会被冲掉，需要再跑一次 `incodex install`。这次会给**当前这份官方应用**打补丁，不会把旧版本换回去，也不会删掉刚升上来的新版本
+- 如果官方已经升级成新版本，`incodex uninstall` 不会用旧备份覆盖它，会提示当前应用已经不是 Incodex 安装态
 - 每次安装的原始包按应用路径隔离，写在 `~/.incodex/installations/` 里。副本、正式应用和自定义 `--app` 不会共用一份备份。卸载前会核对当前包的 install ID、build 和完整 ASAR hash，对不上就拒绝恢复
 - 目前只在 macOS 上试过
 

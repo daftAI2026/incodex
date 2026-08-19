@@ -5,7 +5,8 @@
   "license": "MIT",
   "description": "Incognito toggle for the Codex desktop app",
   "bin": {
-    "incodex": "./src/cli.ts"
+    "incodex": "./src/cli.ts",
+    "inc": "./src/cli.ts"
   },
   "scripts": {
     "incodex": "bun src/cli.ts",
