@@ -74,6 +74,7 @@ Public docs use `incodex` / `inc`. Use `bun src/cli.ts` only inside this repo.
 - Never write a second installer that shells out to `install --live --confirm-live`.
 - Only sign what must be signed. Leave official CUA sidecars official.
 - Do not enable required GitHub reviews. Do not force-push `main`.
+- Pin GitHub Actions to a 40-character commit SHA with a version comment, the same shape Mole uses: `uses: owner/repo@<sha> # vX.Y.Z`. Do not leave floating `@v4` tags.
 - Route session create/burn through `src/runtime/incodex-safe-home.cts`. Do not copy those functions into the CLI.
 - `incodex open` must not patch asar or resign. It spawns the official binary with `--user-data-dir`, `CODEX_HOME`, and `CODEX_ELECTRON_USER_DATA_PATH`.
 - A second instance needs that Chromium user-data-dir pair. `CODEX_HOME` alone is swallowed by SingletonLock.
