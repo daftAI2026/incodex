@@ -10,6 +10,10 @@ use serde::{Deserialize, Serialize};
 
 pub use engine::{recover, Engine, RecoverResult, TxError};
 pub use journal::{new_install_id, JournalV2};
+
+pub fn journal_v2(root: &Path, install_id: &str) -> Result<JournalV2, String> {
+    journal::load_v2(root, install_id)
+}
 pub use lock::{acquire_target_lock, lock_path_for};
 
 pub const PHASES: &[&str] = &[

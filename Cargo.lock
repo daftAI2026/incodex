@@ -71,6 +71,8 @@ version = "0.2.0"
 dependencies = [
  "incodex-asar",
  "incodex-core",
+ "incodex-macos",
+ "incodex-runtime-bundle",
  "incodex-transaction",
  "serde",
  "serde_json",
@@ -89,10 +91,17 @@ dependencies = [
 [[package]]
 name = "incodex-macos"
 version = "0.2.0"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "incodex-runtime-bundle"
 version = "0.2.0"
+dependencies = [
+ "serde_json",
+ "sha2",
+]
 
 [[package]]
 name = "incodex-transaction"
