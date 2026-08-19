@@ -6,8 +6,8 @@ describe("relaunchDecision", () => {
     expect(relaunchDecision({ before: [18665], after: [] })).toBe("open");
   });
 
-  test("asks when ChatGPT is still running after a skip", () => {
-    expect(relaunchDecision({ before: [18665], after: [18665] })).toBe("ask");
+  test("does not relaunch when install was already current", () => {
+    expect(relaunchDecision({ before: [52038], after: [52038], skipped: true })).toBe("none");
   });
 
   test("does nothing when ChatGPT was not running", () => {

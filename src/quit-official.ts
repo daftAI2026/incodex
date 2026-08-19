@@ -3,7 +3,6 @@ import { formatKv, formatOk } from "./cli-print";
 import { DEFAULT_APP } from "./paths";
 
 export const QUIT_PROMPT = "ChatGPT is running. Press Enter to quit it, ESC to abort: ";
-export const RELAUNCH_PROMPT = "Press Enter to relaunch ChatGPT, ESC to leave it running: ";
 export const STILL_RUNNING_MESSAGE = "ChatGPT is still running. Install aborted.";
 export const QUIT_APPLESCRIPT = 'tell application id "com.openai.codex" to quit';
 

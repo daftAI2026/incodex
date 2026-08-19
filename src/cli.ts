@@ -14,7 +14,7 @@ import { formatCommandResult } from "./command-result";
 import { formatKv, formatOk, formatStep, formatWarn } from "./cli-print";
 import { withSpinner } from "./spinner";
 import { cloneOfficialApp, install, installExternalRuntime, listOfficialPids, officialInstallWouldSkip, openOfficialApp, resolveTarget } from "./install";
-import { QUIT_PROMPT, RELAUNCH_PROMPT, quitOfficialApp } from "./quit-official";
+import { QUIT_PROMPT } from "./quit-official";
 import { relaunchDecision } from "./relaunch";
 import { runMenu } from "./menu";
 import { fetchLatestReleaseTag, readUpdateMessageCache, refreshUpdateNotice, UPDATE_CACHE_PATH } from "./menu-update";
@@ -228,20 +228,21 @@ async function runInstall(parsed: ParsedCli, appPath: string): Promise<void> {
     console.log(formatWarn("Dry run. No files changed."));
     return;
   }
-  await ensureConfirmed("install", parsed);
+  const skip = !parsed.clone && officialInstallWouldSkip(appPath);
+  if (!skip) await ensureConfirmed("install", parsed);
   if (parsed.clone && !parsed.app) {
     cloneOfficialApp(appPath);
     console.log(formatOk("Cloned official app"));
     console.log(formatKv("Target", appPath));
   }
   const pidsBefore = listOfficialPids();
-  if (parsed.live && !parsed.app && pidsBefore.length > 0 && !officialInstallWouldSkip(appPath)) {
+  if (!skip && parsed.live && !parsed.app && pidsBefore.length > 0) {
     await ensureQuitConfirmed(parsed);
   }
   const result = await install(appPath);
   console.log(formatCommandResult(result));
   if (parsed.live && !parsed.app) {
-    await maybeRelaunchChatGPT(pidsBefore, parsed.yes);
+    await maybeRelaunchChatGPT(pidsBefore, result.skipped === true);
   } else {
     console.log(formatOk("Restart that app copy to see the Incognito button."));
   }
@@ -271,13 +272,14 @@ function printInstallPlan(appPath: string, clone: boolean): void {
   if (clone) console.log(formatKv("Source", source));
   console.log(formatKv("Version", `${info.listing?.appVersion ?? "unknown"} ${info.listing?.appBuild ?? ""}`.trim()));
   console.log(formatKv("Signed", verifyApp(source) ? "yes" : "no"));
+  if (!clone && officialInstallWouldSkip(appPath)) return;
   if (!clone) {
     console.log(formatWarn("Replaces the app in place and resigns it ad hoc."));
     console.log(formatWarn("Official Appshot (smart snapshot) stops until uninstall."));
     console.log(formatKv("Backup", "~/.incodex/installations/"));
-  }
-  if (!clone && listOfficialPids().length > 0) {
-    console.log(formatWarn("ChatGPT is running."));
+    if (listOfficialPids().length > 0) {
+      console.log(formatWarn("ChatGPT is running. Install will quit it."));
+    }
   }
 }
 
@@ -296,27 +298,18 @@ async function ensureQuitConfirmed(parsed: ParsedCli): Promise<void> {
   if (!ok) throw new Error("aborted");
 }
 
-async function maybeRelaunchChatGPT(pidsBefore: number[], yes: boolean): Promise<void> {
-  const action = relaunchDecision({ before: pidsBefore, after: listOfficialPids() });
+async function maybeRelaunchChatGPT(pidsBefore: number[], skipped: boolean): Promise<void> {
+  const action = relaunchDecision({
+    before: pidsBefore,
+    after: listOfficialPids(),
+    skipped,
+  });
   if (action === "none") {
-    console.log(formatOk("Done. Open ChatGPT.app when you want Incognito."));
+    if (!skipped && pidsBefore.length === 0) {
+      console.log(formatOk("Done. Open ChatGPT.app when you want Incognito."));
+    }
     return;
   }
-  if (action === "ask") {
-    if (!isTty()) {
-      if (!yes) {
-        console.log(formatWarn("ChatGPT is still running. Relaunch it to load the new runtime."));
-        return;
-      }
-    } else {
-      const ok = await askToContinue(RELAUNCH_PROMPT);
-      if (!ok) {
-        console.log(formatWarn("Left ChatGPT running. Relaunch it to load the new runtime."));
-        return;
-      }
-    }
-  }
-  if (listOfficialPids().length > 0) quitOfficialApp();
   console.log(formatStep("Relaunch"));
   openOfficialApp();
   console.log(formatOk("ChatGPT.app relaunched."));
