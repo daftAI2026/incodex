@@ -18,7 +18,13 @@ import { QUIT_PROMPT } from "./quit-official";
 import { relaunchDecision } from "./relaunch";
 import { runMenu } from "./menu";
 import { fetchLatestReleaseTag, readUpdateMessageCache, refreshUpdateNotice, UPDATE_CACHE_PATH } from "./menu-update";
-import { defaultSourceHome, describeIncognitoOpen, prepareIncognitoOpen, waitAndBurn } from "./open-incognito";
+import {
+  defaultSourceHome,
+  describeIncognitoOpen,
+  formatSessionCleanup,
+  prepareIncognitoOpen,
+  waitAndBurn,
+} from "./open-incognito";
 import { DEFAULT_APP, USER_ROOT } from "./paths";
 import { parseCli, type ParsedCli } from "./parse-cli";
 import { recoverTransaction } from "./recover";
@@ -214,8 +220,9 @@ async function runOpen(parsed: ParsedCli): Promise<void> {
   console.log(formatStep("Opening incognito window"));
   console.log(formatKv("Binary", plan.bin));
   console.log(formatKv("Home", plan.home));
-  await withSpinner("Waiting for the window to close", () => waitAndBurn(plan, USER_ROOT));
-  console.log(formatOk("Closed. Isolated session removed."));
+  const result = await withSpinner("Waiting for the window to close", () => waitAndBurn(plan, USER_ROOT));
+  const closed = formatSessionCleanup(result.cleanup);
+  console.log(closed.ok ? formatOk(closed.message) : formatWarn(closed.message));
   console.log("");
 }
 

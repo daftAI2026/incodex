@@ -21,6 +21,15 @@ export type IncognitoOpenPlan = {
   sessionRoot: string;
 };
 
+export type CleanupResult =
+  | { removed: true; attempts: number }
+  | { removed: false; attempts: number; retainedPath: string; reason: string };
+
+export type WaitAndBurnResult = {
+  code: number;
+  cleanup: CleanupResult;
+};
+
 export function chatGptBinary(appPath: string): string {
   return join(appPath, "Contents/MacOS/ChatGPT");
 }
@@ -39,6 +48,8 @@ export function prepareIncognitoOpen(options: {
   userRoot: string;
   sourceHome: string;
   pid?: number;
+  copySettings?: typeof copySettings;
+  burnSessionHome?: typeof burnSessionHome;
 }): IncognitoOpenPlan {
   const bin = chatGptBinary(options.appPath);
   if (!existsSync(bin)) throw new Error(`Codex binary not found: ${bin}`);
@@ -53,7 +64,19 @@ export function prepareIncognitoOpen(options: {
     pid: options.pid ?? process.pid,
     sourceHome: options.sourceHome,
   });
-  copySettings(session.home, options.sourceHome, options.userRoot);
+  try {
+    (options.copySettings ?? copySettings)(session.home, options.sourceHome, options.userRoot);
+  } catch (error) {
+    try {
+      (options.burnSessionHome ?? burnSessionHome)(session.root, {
+        userRoot: options.userRoot,
+        sessionId: session.sessionId,
+      });
+    } catch {
+      /* still throw the copy failure */
+    }
+    throw error;
+  }
   return {
     bin,
     args: [`--user-data-dir=${session.chromium}`],
@@ -76,34 +99,65 @@ export function defaultSourceHome(env: NodeJS.Dict<string> = process.env): strin
   return env.CODEX_HOME || join(homedir(), ".codex");
 }
 
+export function formatSessionCleanup(cleanup: CleanupResult): { ok: boolean; message: string } {
+  if (cleanup.removed) {
+    return { ok: true, message: "Closed. Isolated session removed." };
+  }
+  return {
+    ok: false,
+    message: `Closed. Isolated session kept at ${cleanup.retainedPath} (${cleanup.reason})`,
+  };
+}
+
 export async function waitAndBurn(
   plan: IncognitoOpenPlan,
   userRoot: string,
   spawnImpl: typeof spawn = spawn,
-): Promise<number> {
+  options: {
+    retryDelayMs?: number;
+    burn?: typeof burnSessionHome;
+  } = {},
+): Promise<WaitAndBurnResult> {
   const child = spawnImpl(plan.bin, plan.args, {
     env: { ...process.env, ...plan.env },
     stdio: "ignore",
   });
-  const code: number = await new Promise((resolve, reject) => {
-    child.on("error", reject);
-    child.on("exit", (status) => resolve(status ?? 1));
-  });
-  await burnWithRetries(plan.sessionRoot, { userRoot, sessionId: plan.sessionId });
-  return code;
+  let code = 1;
+  try {
+    code = await new Promise((resolve, reject) => {
+      child.on("error", reject);
+      child.on("exit", (status) => resolve(status ?? 1));
+    });
+  } catch {
+    code = 1;
+  }
+  const cleanup = await burnWithRetries(plan.sessionRoot, { userRoot, sessionId: plan.sessionId }, options);
+  return { code, cleanup };
 }
 
 async function burnWithRetries(
   sessionRoot: string,
   expected: { userRoot: string; sessionId: string },
-): Promise<void> {
-  for (let attempt = 0; attempt < 5; attempt++) {
+  options: { retryDelayMs?: number; burn?: typeof burnSessionHome } = {},
+): Promise<CleanupResult> {
+  const delay = options.retryDelayMs ?? 250;
+  const burn = options.burn ?? burnSessionHome;
+  let reason = "session directory still present";
+  for (let attempt = 1; attempt <= 5; attempt++) {
     try {
-      burnSessionHome(sessionRoot, expected);
-    } catch {
-      if (attempt === 4) return;
+      burn(sessionRoot, expected);
+    } catch (error) {
+      reason = error instanceof Error ? error.message : String(error);
+      if (attempt === 5) {
+        return existsSync(sessionRoot)
+          ? { removed: false, attempts: attempt, retainedPath: sessionRoot, reason }
+          : { removed: true, attempts: attempt };
+      }
     }
-    if (!existsSync(sessionRoot)) return;
-    await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+    if (!existsSync(sessionRoot)) return { removed: true, attempts: attempt };
+    if (attempt < 5) await new Promise((resolve) => setTimeout(resolve, delay * attempt));
   }
+  return existsSync(sessionRoot)
+    ? { removed: false, attempts: 5, retainedPath: sessionRoot, reason }
+    : { removed: true, attempts: 5 };
 }
