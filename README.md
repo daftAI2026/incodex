@@ -45,8 +45,6 @@ brew install daftAI2026/tap/incodex
 curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/install.sh | bash
 ```
 
-核 `SHA256SUMS`，把命令放到 `~/.local/bin`。没有 checksum 会失败。需要 [Releases](https://github.com/daftAI2026/incodex/releases) 里已经有对应 tag。脚本装的更新用 `incodex update`。
-
 **从源码**
 
 ```bash
