@@ -11,6 +11,7 @@ import { commandHelp, rootHelp } from "./help";
 import { detectInstallChannel, prefixFromExecPath, selfUninstallPaths, updateAction } from "./cli-channel";
 import { formatCommandResult } from "./command-result";
 import { formatKv, formatOk, formatStep, formatWarn } from "./cli-print";
+import { withSpinner } from "./spinner";
 import { cloneOfficialApp, install, installExternalRuntime, resolveTarget } from "./install";
 import { runMenu } from "./menu";
 import { fetchLatestReleaseTag, readUpdateMessageCache, refreshUpdateNotice, UPDATE_CACHE_PATH } from "./menu-update";
@@ -205,7 +206,7 @@ async function runOpen(parsed: ParsedCli): Promise<void> {
   console.log(formatStep("Opening incognito window"));
   console.log(formatKv("Binary", plan.bin));
   console.log(formatKv("Home", plan.home));
-  await waitAndBurn(plan, USER_ROOT);
+  await withSpinner("Waiting for the window to close", () => waitAndBurn(plan, USER_ROOT));
   console.log(formatOk("Closed. Isolated session removed."));
 }
 
@@ -224,7 +225,7 @@ async function runInstall(parsed: ParsedCli, appPath: string): Promise<void> {
     cloneOfficialApp(appPath);
   }
   console.log(formatStep(`Installing into ${appPath}`));
-  const result = await install(appPath);
+  const result = await withSpinner("Installing", () => install(appPath));
   if (parsed.live && !parsed.app) {
     console.log(formatOk("Done. Reopen ChatGPT.app to use Incognito."));
   } else {
@@ -242,7 +243,7 @@ async function runUninstall(parsed: ParsedCli, appPath: string): Promise<void> {
   }
   await ensureConfirmed("uninstall", parsed);
   console.log(formatStep(`Restoring ${target}`));
-  const result = uninstall(target);
+  const result = await withSpinner("Restoring", async () => uninstall(target));
   console.log(formatOk("Official app restored. If Dock still shows a folder, remove the icon and add ChatGPT.app again."));
   console.log(formatCommandResult(result));
 }
