@@ -1,6 +1,7 @@
 pub mod canonical;
 pub mod paths;
 pub mod print;
+pub mod session;
 pub mod target;
 
 pub use canonical::{canonical_path, is_official_app};
