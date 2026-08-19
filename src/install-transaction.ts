@@ -15,7 +15,7 @@ import {
 } from "./installation";
 import { ASAR_REL, USER_ROOT } from "./paths";
 import { saveState } from "./state";
-import { swapBundle, type SwapOps } from "./swap";
+import { swapBundle, transactionOutgoing, type SwapOps, type SwapOptions } from "./swap";
 import { advanceJournal, writeJournal, type Journal, type Phase } from "./transaction";
 
 export type InstallFaultKind =
@@ -44,7 +44,7 @@ export type CloneInstallDeps = {
   sign: (appPath: string) => SigningManifest | undefined;
   verify: (appPath: string) => boolean;
   targetRunning: (appPath: string) => boolean;
-  swap: (stagedApp: string, targetApp: string, ops?: SwapOps) => void;
+  swap: (stagedApp: string, targetApp: string, ops?: SwapOps, options?: SwapOptions) => void;
   writeState: (state: Parameters<typeof saveState>[0], root: string) => void;
   writeInstall: typeof writeInstallation;
 };
@@ -123,21 +123,26 @@ export function depsWithFault(base: CloneInstallDeps, fault: InstallFault): Clon
       if (hit("SWAPPED", "process-running")) return true;
       return base.targetRunning(appPath);
     },
-    swap: (staged, target, ops) => {
+    swap: (staged, target, ops, options) => {
       if (hit("SWAPPED", "kill", "rename")) fail();
       if (hit("ROLLBACK", "rollback-rename") || hit("SWAPPED", "rollback-rename")) {
         let renames = 0;
-        base.swap(staged, target, {
-          rename: (from, to) => {
-            renames += 1;
-            if (renames >= 2) throw ioFault("rollback-rename");
-            renameSync(from, to);
+        base.swap(
+          staged,
+          target,
+          {
+            rename: (from, to) => {
+              renames += 1;
+              if (renames >= 2) throw ioFault("rollback-rename");
+              renameSync(from, to);
+            },
+            remove: (path) => rmSync(path, { recursive: true, force: true }),
           },
-          remove: (path) => rmSync(path, { recursive: true, force: true }),
-        });
+          options,
+        );
         return;
       }
-      base.swap(staged, target, ops);
+      base.swap(staged, target, ops, options);
     },
     writeState: (state, root) => {
       if (hit("COMMITTED", "state-write", "disk-full", "kill") || hit("STATE", "state-write", "disk-full", "kill")) {
@@ -174,12 +179,14 @@ export async function runCloneInstall(
   const installId = randomUUID();
   const originalDest = originalAppPath(appPath, installId, root);
   const stagedApp = join(root, "scratch", `ChatGPT.app.staged-${installId}`);
+  const outgoingApp = transactionOutgoing(root, installId);
   let journal: Journal = {
     schemaVersion: 1,
     installId,
     targetRealPath: canonicalPath(appPath),
     stagedApp,
     originalSnapshot: originalDest,
+    outgoingApp,
     phase: "DISCOVERED",
     updatedAt: new Date().toISOString(),
   };
@@ -201,7 +208,12 @@ export async function runCloneInstall(
     if (deps.targetRunning(appPath)) {
       throw new Error("target process is still running; refusing to swap");
     }
-    deps.swap(stagedApp, appPath);
+    deps.swap(stagedApp, appPath, undefined, {
+      outgoing: outgoingApp,
+      afterTargetMoved: () => {
+        journal = advanceJournal(journal, "TARGET_MOVED_OUT", root);
+      },
+    });
     journal = advanceJournal(journal, "SWAPPED", root);
     if (!deps.verify(appPath)) {
       throw new Error("installed app: codesign --verify failed; refusing to commit");
@@ -249,6 +261,7 @@ export async function runCloneInstall(
       root,
     );
     journal = advanceJournal(journal, "COMMITTED", root);
+    if (existsSync(outgoingApp)) rmSync(outgoingApp, { recursive: true, force: true });
     return { installId, journal };
   } catch (error) {
     if (existsSync(stagedApp) && journal.phase !== "SWAPPED" && journal.phase !== "TARGET_VERIFIED" && journal.phase !== "COMMITTED") {

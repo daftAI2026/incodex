@@ -37,6 +37,7 @@ describe("install journal", () => {
 
   test("verified staged work may continue; committed work is done", () => {
     expect(recoverAction(journal({ phase: "VERIFIED" }))).toBe("continue");
+    expect(recoverAction(journal({ phase: "TARGET_MOVED_OUT" }))).toBe("rollback");
     expect(recoverAction(journal({ phase: "SWAPPED" }))).toBe("continue");
     expect(recoverAction(journal({ phase: "TARGET_VERIFIED" }))).toBe("continue");
     expect(recoverAction(journal({ phase: "COMMITTED" }))).toBe("done");
@@ -57,6 +58,7 @@ describe("install journal", () => {
     expect(recoverAction({ ...base, phase: "PATCHED" })).toBe("rollback");
     expect(recoverAction({ ...base, phase: "SIGNED" })).toBe("rollback");
     expect(recoverAction({ ...base, phase: "VERIFIED" })).toBe("continue");
+    expect(recoverAction({ ...base, phase: "TARGET_MOVED_OUT" })).toBe("rollback");
     expect(recoverAction({ ...base, phase: "SWAPPED" })).toBe("continue");
     expect(recoverAction({ ...base, phase: "TARGET_VERIFIED" })).toBe("continue");
     expect(recoverAction({ ...base, phase: "COMMITTED" })).toBe("done");

@@ -1,7 +1,7 @@
 import { existsSync, rmSync } from "node:fs";
 import { withTargetLock } from "./mutation-lock";
 import { USER_ROOT } from "./paths";
-import { restoreOutgoingIfNeeded } from "./swap";
+import { outgoingPath, restoreOutgoingIfNeeded } from "./swap";
 import { loadJournal, recoverAction, type Journal, type Recovery } from "./transaction";
 
 export type RecoverResult = {
@@ -43,7 +43,10 @@ export function applyRecovery(journal: Journal): RecoverResult {
     throw new Error(`cannot recover transaction ${journal.installId} in phase ${journal.phase}`);
   }
 
-  const outgoingRestored = restoreOutgoingIfNeeded(journal.targetRealPath);
+  const outgoingRestored = restoreOutgoingIfNeeded(
+    journal.targetRealPath,
+    journal.outgoingApp ?? outgoingPath(journal.targetRealPath),
+  );
   let stagedRemoved = !existsSync(journal.stagedApp);
   if (action === "rollback" && existsSync(journal.stagedApp)) {
     rmSync(journal.stagedApp, { recursive: true, force: true });

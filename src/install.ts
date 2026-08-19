@@ -35,6 +35,7 @@ import { quitOfficialApp } from "./quit-official";
 import { notifyLaunchServices } from "./launch-services";
 import { ASAR_REL, DEFAULT_APP, LIVE_PREV, USER_ROOT } from "./paths";
 import { saveState } from "./state";
+import { defaultSwapOps, swapBundle, transactionOutgoing } from "./swap";
 import { advanceJournal, writeJournal, type Journal } from "./transaction";
 
 export { LIVE_PREV };
@@ -100,20 +101,7 @@ async function patchAppBundle(
 
 
 
-function swapOfficialWith(stagedApp: string, originalDest: string | null): void {
-  const outgoing = join(USER_ROOT, "ChatGPT.app.outgoing");
-  rmSync(outgoing, { recursive: true, force: true });
-  renameSync(DEFAULT_APP, outgoing);
-  try {
-    renameSync(stagedApp, DEFAULT_APP);
-  } catch (error) {
-    renameSync(outgoing, DEFAULT_APP);
-    throw error;
-  }
-  if (!originalDest) {
-    rmSync(outgoing, { recursive: true, force: true });
-    return;
-  }
+function archiveOutgoing(outgoing: string, originalDest: string): void {
   ensureDir(dirname(originalDest));
   if (existsSync(originalDest)) {
     throw new Error(`refusing to overwrite original snapshot: ${originalDest}`);
@@ -158,12 +146,14 @@ async function installLive(): Promise<{ installId: string; runtimeVersion: strin
   const installId = randomUUID();
   const originalDest = originalAppPath(DEFAULT_APP, installId);
   const stagedApp = join(USER_ROOT, "ChatGPT.app.live");
+  const outgoingApp = transactionOutgoing(USER_ROOT, installId);
   let journal: Journal = {
     schemaVersion: 1,
     installId,
     targetRealPath: canonicalize(DEFAULT_APP).realPath,
     stagedApp,
     originalSnapshot: originalDest,
+    outgoingApp,
     phase: "DISCOVERED",
     updatedAt: new Date().toISOString(),
   };
@@ -189,9 +179,17 @@ async function installLive(): Promise<{ installId: string; runtimeVersion: strin
   journal = advanceJournal(journal, "VERIFIED");
   const patchedAsar = join(stagedApp, ASAR_REL);
   const patchedAsarFileHash = fileSha256(patchedAsar);
-  swapOfficialWith(stagedApp, decision.action === "use-current" ? originalDest : null);
-  console.log(formatOk("Replaced /Applications/ChatGPT.app"));
+  swapBundle(stagedApp, DEFAULT_APP, defaultSwapOps, {
+    outgoing: outgoingApp,
+    afterTargetMoved: () => {
+      journal = advanceJournal(journal, "TARGET_MOVED_OUT");
+    },
+  });
   journal = advanceJournal(journal, "SWAPPED");
+  console.log(formatOk("Replaced /Applications/ChatGPT.app"));
+  if (decision.action === "use-current") {
+    archiveOutgoing(outgoingApp, originalDest);
+  }
   if (!existsSync(originalDest)) throw new Error("original snapshot missing after install");
   verifyTarget(DEFAULT_APP, "installed official app");
   journal = advanceJournal(journal, "TARGET_VERIFIED");
@@ -241,6 +239,7 @@ async function installLive(): Promise<{ installId: string; runtimeVersion: strin
     originalPlistFileHash: sourceIdentity.plistFileHash,
   });
   advanceJournal(journal, "COMMITTED");
+  if (existsSync(outgoingApp)) rmSync(outgoingApp, { recursive: true, force: true });
   console.log(formatOk("Official app patched"));
   console.log(formatKv("Restore", "incodex uninstall"));
   return { installId, runtimeVersion: packagedRuntimeVersion(resolvePackagedDistDir()) };

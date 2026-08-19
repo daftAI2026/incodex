@@ -10,6 +10,7 @@ export const PHASES = [
   "PATCHED",
   "SIGNED",
   "VERIFIED",
+  "TARGET_MOVED_OUT",
   "SWAPPED",
   "TARGET_VERIFIED",
   "COMMITTED",
@@ -23,6 +24,7 @@ export type Journal = {
   targetRealPath: string;
   stagedApp: string;
   originalSnapshot: string;
+  outgoingApp?: string;
   phase: Phase;
   updatedAt: string;
 };
@@ -41,6 +43,9 @@ export function parseJournal(raw: unknown): Journal | null {
   if (typeof value.targetRealPath !== "string" || !value.targetRealPath) return null;
   if (typeof value.stagedApp !== "string" || !value.stagedApp) return null;
   if (typeof value.originalSnapshot !== "string" || !value.originalSnapshot) return null;
+  if (value.outgoingApp !== undefined && (typeof value.outgoingApp !== "string" || !value.outgoingApp)) {
+    return null;
+  }
   if (!PHASES.includes(value.phase as Phase)) return null;
   return value as Journal;
 }
@@ -55,6 +60,8 @@ export function recoverAction(journal: Journal): Recovery {
       return "rollback";
     case "VERIFIED":
       return "continue";
+    case "TARGET_MOVED_OUT":
+      return "rollback";
     case "SWAPPED":
       return "continue";
     case "TARGET_VERIFIED":

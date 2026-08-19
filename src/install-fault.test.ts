@@ -49,7 +49,7 @@ const cases: Case[] = [
   { name: "process still running", fault: { phase: "SWAPPED", kind: "process-running" }, expectBackup: "intact", expectAction: "continue" },
   { name: "rename at swap", fault: { phase: "SWAPPED", kind: "rename" }, expectBackup: "intact", expectAction: "continue" },
   { name: "kill at swap", fault: { phase: "SWAPPED", kind: "kill" }, expectBackup: "intact", expectAction: "continue" },
-  { name: "rollback rename", fault: { phase: "SWAPPED", kind: "rollback-rename" }, expectBackup: "intact", expectAction: "continue" },
+  { name: "rollback rename", fault: { phase: "SWAPPED", kind: "rollback-rename" }, expectBackup: "intact", expectAction: "rollback" },
   { name: "verify after swap", fault: { phase: "TARGET_VERIFIED", kind: "verify" }, expectBackup: "intact", expectAction: "continue" },
   { name: "state write interrupt", fault: { phase: "COMMITTED", kind: "state-write" }, expectBackup: "intact", expectAction: "continue" },
   { name: "disk full at commit", fault: { phase: "COMMITTED", kind: "disk-full" }, expectBackup: "intact", expectAction: "continue" },
