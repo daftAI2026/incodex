@@ -1,5 +1,7 @@
+<p align="right">English | <strong><a href="./README_CN.md">简体中文</a></strong></p>
+
 <div align="center">
-  <p>English | <strong><a href="./README_CN.md">简体中文</a></strong></p>
+  <img src="assets/hat-glasses.svg" alt="Incodex hat-glasses" width="96" />
   <h1>Incodex</h1>
   <p><em>Incognito toggle for Codex desktop.</em></p>
 </div>
