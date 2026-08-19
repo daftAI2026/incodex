@@ -24,8 +24,11 @@ SOFTWARE.
 
 Third-party and asset notes
 
-- `assets/hat-glasses.svg` is original Incodex artwork and is licensed under
-  the same MIT License as the rest of this repository.
+- `assets/hat-glasses.svg` is the Lucide `hat-glasses` icon
+  (https://lucide.dev/icons/hat-glasses), ISC License,
+  Copyright (c) Lucide Icons and Contributors. The ISC notice requires that
+  copyright and permission text be included with copies; it does not require
+  a visible product credit.
 - User-facing translations in `src/runtime/incognito-copy.ts` are original
   Incodex work and are licensed under the same MIT License.
 - Codex, ChatGPT, and related names and application assets are trademarks or
