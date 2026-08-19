@@ -11,7 +11,8 @@ import { commandHelp, rootHelp } from "./help";
 import { detectInstallChannel, prefixFromExecPath, selfUninstallPaths, updateAction } from "./cli-channel";
 import { cloneOfficialApp, install, installExternalRuntime, resolveTarget } from "./install";
 import { runMenu } from "./menu";
-import { DEFAULT_APP } from "./paths";
+import { defaultSourceHome, describeIncognitoOpen, prepareIncognitoOpen, waitAndBurn } from "./open-incognito";
+import { DEFAULT_APP, USER_ROOT } from "./paths";
 import { parseCli, type ParsedCli } from "./parse-cli";
 import { recoverTransaction } from "./recover";
 import { printStatus } from "./status";
@@ -110,9 +111,8 @@ async function dispatch(parsed: ParsedCli): Promise<void> {
     return;
   }
   if (parsed.command === "open") {
-    throw new Error(
-      "incodex open is not in this release.\n  After install, use the hat button or Shift+Command+N.",
-    );
+    await runOpen(parsed);
+    return;
   }
   if (parsed.command === "update") {
     runUpdate(parsed);
@@ -169,6 +169,30 @@ async function runSelfUninstall(parsed: ParsedCli): Promise<void> {
     if (existsSync(path)) unlinkSync(path);
   }
   console.log("done");
+}
+
+async function runOpen(parsed: ParsedCli): Promise<void> {
+  const appPath = parsed.app ?? DEFAULT_APP;
+  if (parsed.dryRun) {
+    const described = describeIncognitoOpen({ appPath, userRoot: USER_ROOT });
+    console.log("planned open");
+    console.log("  app:", appPath);
+    console.log("  bin:", described.bin);
+    console.log("  args:", described.args.join(" "));
+    console.log("  Codex will not be patched");
+    console.log("no changes made.");
+    return;
+  }
+  const plan = prepareIncognitoOpen({
+    appPath,
+    userRoot: USER_ROOT,
+    sourceHome: defaultSourceHome(),
+  });
+  console.log("opening incognito");
+  console.log("  bin:", plan.bin);
+  console.log("  home:", plan.home);
+  await waitAndBurn(plan, USER_ROOT);
+  console.log("closed. session removed.");
 }
 
 async function runInstall(parsed: ParsedCli, appPath: string): Promise<void> {
