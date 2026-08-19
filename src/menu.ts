@@ -69,9 +69,13 @@ function ansi(enabled: boolean, code: string, text: string): string {
   return `\u001b[${code}m${text}\u001b[0m`;
 }
 
-function center(text: string, width: number): string {
-  if (text.length >= width) return text;
-  return `${" ".repeat(Math.floor((width - text.length) / 2))}${text}`;
+function leadingSpaces(text: string): number {
+  const index = text.search(/\S/);
+  return index < 0 ? 0 : index;
+}
+
+function alignWithWordmark(text: string, indent: number): string {
+  return `${" ".repeat(indent)}${text}`;
 }
 
 export function menuControlsLine(updateAvailable: boolean): string {
@@ -107,17 +111,17 @@ export function handleMenuKey(
 export function renderMenu(selected: number, options: RenderMenuOptions = {}): string {
   const color = options.color ?? Boolean(process.stdout.isTTY);
   const bannerLines = MENU_BANNER.split("\n");
-  const bannerWidth = bannerLines[0]?.length ?? 0;
+  const indent = leadingSpaces(bannerLines[0] ?? "");
   const titleWidth = Math.max(...MENU_ITEMS.map((item) => item.title.length));
   const updateAvailable = Boolean(options.updateMessage);
   const lines = [
     ...bannerLines.map((row) => ansi(color, ANSI.green, row)),
     "",
-    ansi(color, ANSI.blue, center(MENU_REPO_URL, bannerWidth)),
-    ansi(color, ANSI.green, center(MENU_TAGLINE, bannerWidth)),
+    ansi(color, ANSI.blue, alignWithWordmark(MENU_REPO_URL, indent)),
+    ansi(color, ANSI.green, alignWithWordmark(MENU_TAGLINE, indent)),
   ];
   if (options.updateMessage) {
-    lines.push("", ansi(color, ANSI.green, options.updateMessage));
+    lines.push("", ansi(color, ANSI.green, alignWithWordmark(options.updateMessage, indent)));
   }
   lines.push("");
   for (const [index, item] of MENU_ITEMS.entries()) {
