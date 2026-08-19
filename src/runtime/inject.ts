@@ -1,4 +1,4 @@
-import { SELECTORS, STRIP_CLONE_ATTRS } from "./compatibility/default-adapter";
+import { STRIP_CLONE_ATTRS } from "./compatibility/default-adapter";
 import { isSearchLabel } from "./compatibility/search-labels";
 import { type CopyKey, translate, resolveLocale as matchLocale } from "./incognito-copy";
 
@@ -7,7 +7,6 @@ const BTN_ATTR = "data-incodex-privacy-toggle";
 const TIP_ATTR = "data-incodex-tooltip";
 const LANDING_ATTR = "data-incodex-landing";
 const ERROR_ATTR = "data-incodex-launch-error";
-const CLUSTER_ATTR = "data-incodex-header-cluster";
 const SHORTCUT_LABEL = "⇧⌘N";
 
 const ICON_SVG = `{{HAT_GLASSES_SVG}}`;
@@ -173,12 +172,8 @@ function findSearchButton(): HTMLElement | null {
   );
 }
 
-function findHeaderCluster(search: HTMLElement): HTMLElement | null {
-  return search.closest<HTMLElement>(SELECTORS.headerCluster);
-}
-
-function isParkedInCluster(btn: HTMLElement, cluster: HTMLElement, search: HTMLElement): boolean {
-  return btn.parentElement === cluster && !search.contains(btn) && !btn.contains(search);
+function isParkedLeftOfSearch(btn: HTMLElement, search: HTMLElement): boolean {
+  return btn.parentElement === search.parentElement && btn.nextElementSibling === search;
 }
 
 function buildButton(search: HTMLElement): HTMLElement {
@@ -426,15 +421,12 @@ function ensureLanding(): void {
 
 function ensureButton(): void {
   const search = findSearchButton();
-  if (!search) return;
-  const cluster = findHeaderCluster(search);
-  if (!cluster) return;
-  cluster.setAttribute(CLUSTER_ATTR, "true");
+  if (!search?.parentElement) return;
 
   let btn = document.querySelector<HTMLElement>(`[${BTN_ATTR}]`);
   if (!btn) btn = buildButton(search);
-  if (!isParkedInCluster(btn, cluster, search)) {
-    cluster.insertBefore(btn, cluster.firstElementChild);
+  if (!isParkedLeftOfSearch(btn, search)) {
+    search.parentElement.insertBefore(btn, search);
   }
   apply();
 }
@@ -447,21 +439,6 @@ function onHotkey(event: KeyboardEvent): void {
   void activate();
 }
 
-function uiReady(): boolean {
-  if (!document.querySelector(`[${BTN_ATTR}]`)) return false;
-  if (isIncognitoWindow() && !document.querySelector(`[${LANDING_ATTR}]`)) return false;
-  return true;
-}
-
-function observeRoot(): Element {
-  return (
-    document.querySelector(`[${CLUSTER_ATTR}]`) ||
-    document.querySelector("header") ||
-    document.querySelector("nav") ||
-    document.body
-  );
-}
-
 function start(): void {
   if (window.__incodexStarted) return;
   window.__incodexStarted = true;
@@ -470,7 +447,6 @@ function start(): void {
   apply();
   ensureLanding();
   window.addEventListener("keydown", onHotkey, true);
-  if (uiReady()) return;
   let scheduled = false;
   const observer = new MutationObserver(() => {
     if (scheduled) return;
@@ -479,10 +455,9 @@ function start(): void {
       scheduled = false;
       ensureButton();
       ensureLanding();
-      if (uiReady()) observer.disconnect();
     });
   });
-  observer.observe(observeRoot(), { childList: true, subtree: true });
+  observer.observe(document.documentElement, { childList: true, subtree: true });
 }
 
 declare global {
