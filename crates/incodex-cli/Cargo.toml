@@ -1,0 +1,11 @@
+[package]
+name = "incodex-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Incodex native CLI"
+
+[[bin]]
+name = "incodex"
+path = "src/main.rs"

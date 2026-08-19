@@ -1,0 +1,7 @@
+[package]
+name = "incodex-macos"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "codesign, plist, Launch Services, and quit helpers"
