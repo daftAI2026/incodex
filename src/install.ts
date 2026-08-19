@@ -29,6 +29,7 @@ import {
   resolvePackagedDistDir,
   runtimeMatchesPackaged,
 } from "./packaged-runtime";
+import { notifyLaunchServices } from "./launch-services";
 import { ASAR_REL, DEFAULT_APP, LIVE_PREV, USER_ROOT } from "./paths";
 import { saveState } from "./state";
 import { advanceJournal, writeJournal, type Journal } from "./transaction";
@@ -271,6 +272,7 @@ export async function install(appPath: string, options?: { root?: string }): Pro
       };
     }
     const live = await installLive();
+    notifyLaunchServices(appPath);
     return {
       action: "install",
       installId: live.installId,
@@ -289,6 +291,7 @@ export async function install(appPath: string, options?: { root?: string }): Pro
     runtimeVersion: packagedRuntimeVersion(resolvePackagedDistDir()),
     patch: (stagedApp, installId) => patchAppBundle(stagedApp, false, installId),
   });
+  notifyLaunchServices(appPath);
   return {
     action: "install",
     installId: cloned.installId,

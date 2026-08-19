@@ -1,5 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { handleMenuKey, MENU_ITEMS, menuControlsLine, renderMenu } from "./menu";
+import {
+  erasePaintedLines,
+  CLEAR_LINE,
+  ERASE_DOWN,
+  handleMenuKey,
+  HIDE_CURSOR,
+  MENU_HOME,
+  MENU_ITEMS,
+  menuControlsLine,
+  renderMenu,
+  SHOW_CURSOR,
+} from "./menu";
 
 describe("menu", () => {
   test("covers install, uninstall, open, status, doctor, and quit", () => {
@@ -40,7 +51,8 @@ describe("menu", () => {
     expect(text).toContain("4. Status");
     expect(text).toContain("5. Doctor");
     expect(text).toContain("6. Quit");
-    expect(text).toContain("↑↓ | Enter | Q Quit | 1-6 Jump");
+    expect(text).toContain("↑↓ | Enter | V Version | Q Quit | 1-6 Jump");
+    expect(handleMenuKey("5", 0)).toEqual({ action: "select", id: "doctor" });
   });
 
   test("selected row uses Mole's arrow", () => {
@@ -55,9 +67,9 @@ describe("menu", () => {
       updateMessage: "Update 0.2.0 available, run incodex update",
     });
     expect(text).toContain("Update 0.2.0 available, run incodex update");
-    expect(text).toContain("↑↓ | Enter | U Update | Q Quit | 1-6 Jump");
-    expect(menuControlsLine(false)).toBe("↑↓ | Enter | Q Quit | 1-6 Jump");
-    expect(menuControlsLine(true)).toBe("↑↓ | Enter | U Update | Q Quit | 1-6 Jump");
+    expect(text).toContain("↑↓ | Enter | U Update | V Version | Q Quit | 1-6 Jump");
+    expect(menuControlsLine(false)).toBe("↑↓ | Enter | V Version | Q Quit | 1-6 Jump");
+    expect(menuControlsLine(true)).toBe("↑↓ | Enter | U Update | V Version | Q Quit | 1-6 Jump");
   });
 
   test("render without color has no ANSI escapes", () => {
@@ -92,7 +104,7 @@ describe("menu", () => {
     expect(text).toContain(`${green}  Update 0.2.0 available, run incodex update${reset}`);
     expect(text).toContain(`${cyan}➤ 3. Open`);
     expect(text).not.toContain(`${cyan}➤ 1. Install`);
-    expect(text).toContain(`${gray}↑↓ | Enter | U Update | Q Quit | 1-6 Jump${reset}`);
+    expect(text).toContain(`${gray}↑↓ | Enter | U Update | V Version | Q Quit | 1-6 Jump${reset}`);
   });
 });
 
@@ -116,11 +128,27 @@ describe("handleMenuKey", () => {
     expect(handleMenuKey("\n", 4)).toEqual({ action: "select", id: "doctor" });
   });
 
+  test("leaving the menu erases it and restores the cursor", () => {
+    expect(HIDE_CURSOR).toBe("\u001b[?25l");
+    expect(SHOW_CURSOR).toBe("\u001b[?25h");
+    expect(erasePaintedLines(12)).toBe("\u001b[12A\u001b[J");
+    expect(erasePaintedLines(0)).toBe("");
+  });
+
+  test("a menu frame starts at the top of the screen and clears everything below", () => {
+    expect(MENU_HOME).toBe("\u001b[H");
+    expect(ERASE_DOWN).toBe("\u001b[J");
+    expect(CLEAR_LINE).toBe("\r\u001b[2K");
+  });
+
   test("q and escape quit; U only runs update when a notice is showing", () => {
     expect(handleMenuKey("q", 0)).toEqual({ action: "select", id: "quit" });
     expect(handleMenuKey("Q", 0)).toEqual({ action: "select", id: "quit" });
     expect(handleMenuKey("\u001b", 0)).toEqual({ action: "select", id: "quit" });
     expect(handleMenuKey("u", 0)).toEqual({ action: "ignore" });
     expect(handleMenuKey("U", 0, { updateAvailable: true })).toEqual({ action: "select", id: "update" });
+    expect(handleMenuKey("v", 0)).toEqual({ action: "select", id: "version" });
+    expect(handleMenuKey("V", 0)).toEqual({ action: "select", id: "version" });
   });
 });
+

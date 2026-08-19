@@ -1,7 +1,7 @@
 import { createInterface } from "node:readline/promises";
 import type { CliCommand } from "./parse-cli";
 
-export type MenuChoice = Exclude<CliCommand, "menu" | "help" | "version" | "runtime" | "recover"> | "quit";
+export type MenuChoice = Exclude<CliCommand, "menu" | "help" | "runtime" | "recover"> | "quit";
 
 export type MenuItem = {
   id: MenuChoice;
@@ -81,7 +81,7 @@ function alignWithWordmark(text: string, indent: number): string {
 export function menuControlsLine(updateAvailable: boolean): string {
   const parts = ["↑↓", "Enter"];
   if (updateAvailable) parts.push("U Update");
-  parts.push("Q Quit", `1-${MENU_ITEMS.length} Jump`);
+  parts.push("V Version", "Q Quit", `1-${MENU_ITEMS.length} Jump`);
   return parts.join(" | ");
 }
 
@@ -98,6 +98,7 @@ export function handleMenuKey(
     return { action: "move", selected: (selected + 1) % MENU_ITEMS.length };
   }
   if (key === "q" || key === "Q" || key === "\u001b") return { action: "select", id: "quit" };
+  if (key === "v" || key === "V") return { action: "select", id: "version" };
   if (key === "\r" || key === "\n") return { action: "select", id: MENU_ITEMS[selected]?.id ?? "quit" };
   if (key.length === 1 && key >= "1" && key <= "9") {
     const item = MENU_ITEMS[Number(key) - 1];
@@ -137,19 +138,37 @@ export function renderMenu(selected: number, options: RenderMenuOptions = {}): s
   return lines.join("\n");
 }
 
+export const HIDE_CURSOR = "\u001b[?25l";
+export const SHOW_CURSOR = "\u001b[?25h";
+export const MENU_HOME = "\u001b[H";
+export const ERASE_DOWN = "\u001b[J";
+export const CLEAR_LINE = "\r\u001b[2K";
+
+export function erasePaintedLines(count: number): string {
+  if (count <= 0) return "";
+  return `\u001b[${count}A\u001b[J`;
+}
+
+export function drainPendingInput(stdin: NodeJS.ReadStream = process.stdin): void {
+  stdin.resume();
+  while (stdin.readableLength > 0) stdin.read();
+}
+
 async function rawMenu(options: RenderMenuOptions): Promise<MenuChoice> {
   let selected = 0;
-  let painted = 0;
   const stdin = process.stdin;
   stdin.setRawMode(true);
   stdin.resume();
   stdin.setEncoding("utf8");
+  process.stdout.write(HIDE_CURSOR);
 
   const draw = () => {
-    if (painted > 0) process.stdout.write(`\u001b[${painted}A\u001b[J`);
     const text = renderMenu(selected, options);
-    process.stdout.write(`${text}\n`);
-    painted = text.split("\n").length;
+    const framed = text
+      .split("\n")
+      .map((line) => `${CLEAR_LINE}${line}`)
+      .join("\n");
+    process.stdout.write(`${MENU_HOME}${framed}\n${ERASE_DOWN}`);
   };
 
   return new Promise((resolve, reject) => {
@@ -176,7 +195,9 @@ async function rawMenu(options: RenderMenuOptions): Promise<MenuChoice> {
     };
     const cleanup = () => {
       stdin.off("data", onData);
+      drainPendingInput(stdin);
       if (stdin.isTTY) stdin.setRawMode(false);
+      process.stdout.write(`${MENU_HOME}${ERASE_DOWN}${SHOW_CURSOR}`);
       stdin.pause();
     };
     try {
@@ -196,6 +217,7 @@ async function numberedMenu(options: RenderMenuOptions): Promise<MenuChoice> {
     const answer = (await rl.question(`Choose [1-${MENU_ITEMS.length}]: `)).trim().toLowerCase();
     if (answer === "" || answer === "q") return "quit";
     if (answer === "u" && options.updateMessage) return "update";
+    if (answer === "v") return "version";
     const index = Number(answer) - 1;
     return MENU_ITEMS[index]?.id ?? "quit";
   } finally {

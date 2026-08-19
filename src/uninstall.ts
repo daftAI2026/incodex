@@ -9,6 +9,7 @@ import {
   restoreOriginalApp,
 } from "./installation";
 import { canRestoreOfficial, loadLiveInstallRecord, resolveOfficialOriginal } from "./live-source";
+import { notifyLaunchServices } from "./launch-services";
 import type { CommandResult } from "./command-result";
 import { ASAR_REL, LIVE_PREV } from "./paths";
 
@@ -19,6 +20,7 @@ export function uninstall(appPath: string): CommandResult {
   } else {
     uninstallTarget(appPath);
   }
+  notifyLaunchServices(appPath);
   return {
     action: "uninstall",
     installId: stored?.manifest.installId,
