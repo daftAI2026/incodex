@@ -54,3 +54,63 @@ jobs:
             release-cli/incodex-darwin-arm64
             release-cli/incodex-darwin-x64
             release-cli/SHA256SUMS
+
+  update-formula:
+    runs-on: ubuntu-latest
+    needs: release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Extract version from tag
+        id: tag_version
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          VERSION=${TAG#v}
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Update Homebrew formula
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ steps.tag_version.outputs.tag }}
+          VERSION: ${{ steps.tag_version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${HOMEBREW_TAP_TOKEN:-}" ]]; then
+            echo "HOMEBREW_TAP_TOKEN is not set" >&2
+            exit 1
+          fi
+
+          SHA256SUMS=/tmp/incodex-SHA256SUMS
+          for _ in 1 2 3 4 5 6; do
+            if curl -fsSL -o "$SHA256SUMS" "https://github.com/daftAI2026/incodex/releases/download/${TAG}/SHA256SUMS"; then
+              break
+            fi
+            sleep 5
+          done
+          ARM_SHA=$(awk '$2 == "incodex-darwin-arm64" { print $1 }' "$SHA256SUMS")
+          X64_SHA=$(awk '$2 == "incodex-darwin-x64" { print $1 }' "$SHA256SUMS")
+          if [[ -z "$ARM_SHA" || -z "$X64_SHA" ]]; then
+            echo "Failed to resolve release checksums" >&2
+            cat "$SHA256SUMS" >&2 || true
+            exit 1
+          fi
+
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/daftAI2026/homebrew-tap.git" /tmp/homebrew-tap
+          ./scripts/update-homebrew-tap-formula.sh \
+            --formula /tmp/homebrew-tap/Formula/incodex.rb \
+            --tag "${TAG}" \
+            --arm-sha "${ARM_SHA}" \
+            --x64-sha "${X64_SHA}"
+
+          cd /tmp/homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet -- Formula/incodex.rb; then
+            echo "No Homebrew formula changes to push"
+            exit 0
+          fi
+
+          git add Formula/incodex.rb
+          git commit -m "incodex ${VERSION}" -m "Automated release via GitHub Actions"
+          git push origin HEAD:main

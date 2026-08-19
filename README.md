@@ -26,6 +26,15 @@
 
 ## Quick Start
 
+**用 Homebrew 装 CLI**（不改 Codex）
+
+```bash
+brew tap daftAI2026/tap
+brew install incodex
+```
+
+只把 `incodex` 和 `inc` 放到 PATH。改 Codex 仍然是随后那条 `incodex install`。更新用 `brew upgrade incodex`。
+
 **用脚本装 CLI**（不改 Codex）
 
 ```bash

@@ -29,7 +29,7 @@ Users launch the official Codex icon as usual. After `incodex install`, a hat-gl
 - Do not restore a valid OpenAI signature after asar changes. Appshot (智能快照) is a hard triangle; document it, do not fake Team ID `2DC432GLL2`.
 - Do not sign vendor CUA sidecars. Stash them, `--deep` the rest, restore, then outer `signOne`.
 - Do not default live-patch from `install.sh` / `bun link` / `incodex update`. Those only manage the CLI.
-- Do not add Overlay, CDP-as-launcher, an independent Session Agent, LaunchAgent auto-repair, runtime pubkeys, or Homebrew core. P4 (own tap) is parked.
+- Do not add Overlay, CDP-as-launcher, an independent Session Agent, LaunchAgent auto-repair, runtime pubkeys, or Homebrew core. Own tap is `daftAI2026/homebrew-tap`; bump it from `release.yml`. Do not open a Homebrew/homebrew-core PR.
 - Do not add `--yes` as a hidden alias that agents will hallucinate onto live patching beyond the documented flag. `--confirm-live` stays a hidden compat alias of `--yes`.
 - Do not write tests after the implementation to match it. Write a failing repro first.
 
