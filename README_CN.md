@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/sidebar.png" alt="Codex 搜索左边的帽子墨镜" width="560" />
+  <img src="assets/sidebar.png" alt="Codex 搜索左边的帽子墨镜" width="1000" />
 </p>
 
 > 这是非官方工具。短命令是 `inc`，和 `incodex` 是同一个程序。
