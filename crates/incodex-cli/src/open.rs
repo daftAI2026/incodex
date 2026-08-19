@@ -165,12 +165,25 @@ fn spawn_plan(plan: &OpenPlan) -> Result<i32, String> {
         .stderr(Stdio::null());
     let mut child = command.spawn().map_err(|err| err.to_string())?;
     if plan.debug_port != 0 {
-        match child.try_wait() {
-            Ok(None) => {
-                let _ = inject_shared_ui(plan.debug_port);
+        let port = plan.debug_port;
+        thread::spawn(move || {
+            for attempt in 1u8..=40 {
+                match inject_shared_ui(port) {
+                    Ok(()) => {
+                        if std::env::var_os("INCODEX_CDP_LOG").is_some() {
+                            eprintln!("cdp inject ok on attempt {attempt} port {port}");
+                        }
+                        return;
+                    }
+                    Err(err) => {
+                        if std::env::var_os("INCODEX_CDP_LOG").is_some() {
+                            eprintln!("cdp inject attempt {attempt}: {err}");
+                        }
+                    }
+                }
+                thread::sleep(Duration::from_millis(400));
             }
-            _ => {}
-        }
+        });
     }
     child
         .wait()

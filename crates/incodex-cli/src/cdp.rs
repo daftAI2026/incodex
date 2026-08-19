@@ -54,17 +54,17 @@ pub fn is_primary_codex_page(target: &CdpTarget) -> bool {
     if url.starts_with("chrome://") || url.starts_with("devtools://") {
         return false;
     }
-    if url.contains("quick-chat-prewarm") {
+    if url.contains("quick-chat-prewarm") || url.contains("avatar-overlay") {
         return false;
     }
-    url.starts_with("app://-/index.html") || url.starts_with("app://-/")
+    url == "app://-/index.html"
 }
 
 pub fn inject_shared_ui(debug_port: u16) -> Result<(), String> {
     let source = inject_source();
     let mut last = "cdp page not ready".to_string();
     let mut refused = 0u8;
-    for _ in 0..20 {
+    for _ in 0..8 {
         match try_inject(debug_port, &source) {
             Ok(()) => return Ok(()),
             Err(err) => {
@@ -131,6 +131,12 @@ fn send_cdp(
         if parsed.get("id").and_then(Value::as_u64) == Some(id) {
             if parsed.get("error").is_some() {
                 return Err(format!("cdp {method} failed: {text}"));
+            }
+            if parsed
+                .pointer("/result/exceptionDetails")
+                .is_some()
+            {
+                return Err(format!("cdp {method} exception: {text}"));
             }
             return Ok(());
         }
@@ -207,6 +213,11 @@ mod tests {
                 r#type: "page".into(),
                 url: "chrome://newtab".into(),
                 ws: "ws://127.0.0.1:1/devtools/page/a".into(),
+            },
+            CdpTarget {
+                r#type: "page".into(),
+                url: "app://-/index.html?initialRoute=%2Favatar-overlay".into(),
+                ws: "ws://127.0.0.1:1/devtools/page/d".into(),
             },
             CdpTarget {
                 r#type: "page".into(),
