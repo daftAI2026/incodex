@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/sidebar.png" alt="Hat-glasses control left of Search in Codex" width="560" />
+  <img src="assets/sidebar.png" alt="Hat-glasses control left of Search in Codex" width="1000" />
 </p>
 
 > Unofficial. `inc` is the same program as `incodex`.
