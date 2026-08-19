@@ -114,8 +114,13 @@ describe("Homebrew tap bump", () => {
     expect(readme).toContain("./README_CN.md");
     expect(readme).toContain("简体中文");
     expect(readme).toContain("Unofficial");
+    expect(readme).toContain("> Unofficial");
+    expect(readme).toContain("assets/sidebar.png");
+    expect(readme).not.toContain("macOS only");
     expect(cn).toContain("./README.md");
     expect(cn).toContain("这是非官方工具");
     expect(cn).toContain("brew install daftAI2026/tap/incodex");
+    expect(cn).toContain("assets/sidebar.png");
+    expect(cn).not.toContain("macOS only");
   });
 });
