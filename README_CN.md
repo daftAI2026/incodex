@@ -1,8 +1,8 @@
-<h4 align="right">English | <strong><a href="./README_CN.md">简体中文</a></strong></h4>
+<h4 align="right"><strong><a href="./README.md">English</a></strong> | 简体中文</h4>
 
 <div align="center">
   <h1>Incodex</h1>
-  <p><em>Incognito toggle for Codex desktop.</em></p>
+  <p><em>给本机 Codex 桌面端加一扇无痕窗口。</em></p>
 </div>
 
 <p align="center">
@@ -18,17 +18,17 @@
   <img src="assets/hat-glasses.svg" alt="Incodex hat-glasses" width="96" />
 </p>
 
-Unofficial. `inc` is the same program as `incodex`. macOS only.
+这是非官方工具。短命令是 `inc`，和 `incodex` 是同一个程序。macOS only.
 
 ## Features
 
-- **Incognito window**: Same login and settings as usual. No old chats, and this session does not join the everyday list
-- **Sidebar button**: After install, a hat-glasses control sits left of Search; `Shift+Command+N` also works
-- **Burns on close**: A normal close clears this temp session (including the isolated Chromium profile); login and settings stay
-- **Optional no-patch path**: `incodex open` launches an incognito window without touching the official signature
-- **Local CLI**: Terminal menu, Homebrew or script install, `status` / `doctor` / `runtime`. Not an official plugin
+- **无痕窗口**：登录和设置跟平时一样，看不到以前的对话，这次的聊天也不会进平时的列表
+- **侧栏按钮**：装进正在用的 Codex 后，搜索左边会出现帽子墨镜；`Shift+Command+N` 也能开
+- **关窗即焚**：正常关掉后清掉这次的临时会话（含独立 Chromium 档案）；登录和设置会留着
+- **可选不改包**：`incodex open` 直接开一扇无痕窗，不碰官方签名
+- **本机 CLI**：终端菜单、Homebrew / 脚本安装、`status` / `doctor` / `runtime`，不经过官方插件
 
-This is not a forensics claim that the machine keeps no traces.
+这还不是「本机完全不留记录」的取证结论。
 
 ## Quick Start
 
@@ -38,7 +38,7 @@ This is not a forensics claim that the machine keeps no traces.
 brew install daftAI2026/tap/incodex
 ```
 
-This only puts `incodex` and `inc` on PATH. Patching Codex is still `incodex install`. Update with `brew upgrade incodex`.
+只把 `incodex` 和 `inc` 放到 PATH。改 Codex 仍然是随后那条 `incodex install`。更新用 `brew upgrade incodex`。
 
 **Or via script**
 
@@ -46,7 +46,7 @@ This only puts `incodex` and `inc` on PATH. Patching Codex is still `incodex ins
 curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/install.sh | bash
 ```
 
-**From source**
+**从源码**
 
 ```bash
 git clone https://github.com/daftAI2026/incodex.git
@@ -55,28 +55,28 @@ bun install --frozen-lockfile
 bun link
 ```
 
-Needs [Bun](https://bun.sh) 1.3.14 (see `.bun-version`) and an installed Codex / ChatGPT desktop app.
+需要 [Bun](https://bun.sh) 1.3.14（见 `.bun-version`）和已安装的 Codex / ChatGPT 桌面端。
 
 **Run**
 
 ```bash
-inc                         # Interactive menu (terminal only)
+inc                         # 交互菜单（终端里）
 incodex --help
 incodex --version
 
-incodex install             # Patch the official Codex you are using
-incodex install --dry-run   # Print the plan
-incodex install --yes       # Required when stdin is not a terminal
-incodex install --clone     # Dev: patch a copy
+incodex install             # 打进正在用的官方 Codex
+incodex install --dry-run   # 只看计划
+incodex install --yes       # 没有终端时必须加
+incodex install --clone     # 开发：打到副本
 
-incodex uninstall           # Restore the official app
+incodex uninstall           # 还原官方包
 incodex status
 incodex doctor
-incodex runtime             # Update the button logic without re-signing Codex
-incodex open                # Incognito window, no patch
+incodex runtime             # 只更新按钮逻辑，不重签 Codex
+incodex open                # 不改官方包，直接开无痕窗
 incodex recover --transaction <id>
-incodex update              # Update this CLI (script installs)
-incodex self-uninstall      # Remove the CLI; add --restore-app to restore Codex
+incodex update              # 更新这个 CLI（脚本安装）
+incodex self-uninstall      # 卸掉 CLI；还原 Codex 要加 --restore-app
 ```
 
 **Preview safely**
@@ -91,32 +91,32 @@ incodex status --json
 incodex doctor --json
 ```
 
-`brew install`, `curl … | bash`, and `bun link` only put the command on PATH. The command that changes `/Applications/ChatGPT.app` is `incodex install`.
+`brew install`、`curl … | bash`、`bun link` 都只把命令装到 PATH。改 `/Applications/ChatGPT.app` 的是随后那条 `incodex install`。
 
 ## Security & Safety Design
 
-Incodex patches a locally installed Electron app. Destructive commands print a plan first: TTY asks once, non-TTY needs `--yes`, `--dry-run` only prints.
+Incodex 会改本机已安装的 Electron 应用包。高风险操作默认要看计划：TTY 问一次，非 TTY 要 `--yes`，`--dry-run` 只打印。
 
-- Official plugins cannot add this button. The app bundle has to change
-- After the patch, a valid OpenAI signature cannot be kept. The first incognito window may ask for your **Mac login password** (Codex Storage Key in Keychain). Choose **Always Allow**. That is not your ChatGPT password
-- Official **Appshot** (smart snapshot: photo / screenshot attachments) then stops working. This is not a missing camera permission. Computer Use usually still works. `incodex uninstall` restores Appshot
-- Report vulnerabilities via [SECURITY.md](SECURITY.md). Do not open a public issue
+- 官方插件加不了这个按钮，必须改应用包
+- 改包之后没法继续用一份有效的 OpenAI 签名。第一次开无痕窗，系统可能要你输入 **Mac 登录密码**（钥匙串里的 Codex Storage Key）。选 **始终允许**。这不是 ChatGPT 账号密码
+- 因此官方 **智能快照**（拍照 / 截屏附件，英文 Appshot）会不可用。这不是相机权限没开。Computer Use 一般还能用。`incodex uninstall` 后快照会恢复
+- 漏洞请走 [SECURITY.md](SECURITY.md)，不要开公开 issue
 
 ## Tips
 
-- An official upgrade wipes the patch. Run `incodex install` again on the **current** official package
-- If Codex has already been upgraded, `incodex uninstall` will not put an old backup back
-- Original-bundle backups are isolated per app path under `~/.incodex/installations/`
-- Homebrew: `brew upgrade incodex`. Script: `incodex update`. Source: `git pull`
-- The menu supports arrows, Vim `j/k`, digits that run immediately, `V` for version, `q` to quit
-- If a script install cannot find the command, add `~/.local/bin` to PATH
-- Button and copy follow the main window language
+- 官方升级会冲掉补丁。再跑一次 `incodex install`，打的是**当前这份**新官方包
+- 如果官方已经升成新版本，`incodex uninstall` 不会用旧备份盖回去
+- 原始包备份按应用路径隔离，在 `~/.incodex/installations/`
+- Homebrew 装的用 `brew upgrade incodex`；脚本装的用 `incodex update`；源码用 `git pull`
+- 菜单支持方向键、Vim `j/k`、数字立刻执行、`V` 看版本、`q` 退出
+- 脚本安装若找不到命令，把 `~/.local/bin` 加进 PATH
+- 按钮和说明跟主窗口语言走
 
 ## Features in Detail
 
 ### Interactive menu
 
-Run `inc` in a terminal:
+终端里直接跑 `inc`：
 
 ```
   _____   _   _    _____    ____    _____    ______  __   __
@@ -151,7 +151,7 @@ $ incodex install
   app: /Applications/ChatGPT.app
 ```
 
-After install, the hat-glasses control appears left of Search. Click it or press `Shift+Command+N` for an incognito window.
+装进去之后，搜索左边会出现帽子墨镜。点它或 `Shift+Command+N` 开无痕窗。
 
 ### Open without patching
 
@@ -164,7 +164,7 @@ $ incodex open --dry-run
 ! Dry run. No window opened.
 ```
 
-Closing the window burns the isolated session:
+关窗后隔离会话会被清掉：
 
 ```bash
 $ incodex open
@@ -226,7 +226,7 @@ Sessions
   Journals     0
 ```
 
-The Gatekeeper line is diagnostic, not an install failure. After the bundle changes, the official signature will not pass Gatekeeper.
+Gatekeeper 那一行是诊断，不是安装失败。改包之后官方签名本来就不会过 Gatekeeper。
 
 ### Version
 
@@ -243,11 +243,11 @@ Install: Homebrew
 Shell: /bin/zsh
 ```
 
-`Install` is Homebrew, Script, or Source. Homebrew installs should not run `incodex update`; use `brew upgrade incodex`.
+`Install` 会区分 Homebrew、脚本和源码。Homebrew 装的不要跑 `incodex update`，用 `brew upgrade incodex`。
 
 ## License
 
-MIT. Full text in [LICENSE](./LICENSE).
+MIT，完整文本见 [LICENSE](./LICENSE)。
 
-- `assets/hat-glasses.svg` and the translations in `src/runtime/incognito-copy.ts` are original Incodex work, also under MIT
-- Codex / ChatGPT names, icons, and the official app belong to OpenAI. This repository does not license those materials
+- 仓库里的 `assets/hat-glasses.svg` 和 `src/runtime/incognito-copy.ts` 翻译文案是 Incodex 原作，同样按 MIT 授权
+- Codex / ChatGPT 的名称、图标和官方应用本身属于 OpenAI，本仓库不授予那些材料的许可
