@@ -63,7 +63,7 @@ Shipped releases are the TypeScript CLI on `main`. Native Rust CLI work lives on
 
 1. `main` stays the product. Homebrew, `install.sh`, and `release.yml` still ship the Bun-compiled binary.
 2. `exp/rust-cli` is the integration branch. It started from `main` after the golden CLI contract (PR #66, `tests/cli-golden.test.ts`).
-3. Open crate PRs with `--base exp/rust-cli`. One step per PR. Merge that PR into `exp/rust-cli` when CI is green.
+3. Open crate PRs with `--base exp/rust-cli`. One step per PR. Merge that PR into `exp/rust-cli` when CI is green. Each crate PR starts with a failing `cargo test` repro commit, then the implementation commit that makes those tests pass. Do not land tests and code in the same first commit.
 4. When `main` moves (runtime, hover, golden tests), merge `main` into `exp/rust-cli`. Rebase topic branches onto `exp/rust-cli`, not onto `main`.
 5. Merge `exp/rust-cli` into `main` only after all of these hold:
    - native `install` / `uninstall` / `recover` / `open` / `status` / `doctor` match `tests/cli-golden.test.ts`

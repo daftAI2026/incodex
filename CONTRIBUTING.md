@@ -70,7 +70,8 @@ a TUI crate or an AGPL asar crate. Electron Runtime stays TypeScript. The
 incognito-window hover (hat → close icon) is Runtime work on `main`, not a crate.
 
 The step list is in `AGENTS.md` (Native CLI experiment). One step per PR into
-`exp/rust-cli`.
+`exp/rust-cli`. Each crate PR starts with a failing `cargo test` repro, then
+the implementation.
 
 ## Pull requests
 
