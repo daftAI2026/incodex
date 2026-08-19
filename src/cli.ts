@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, unlinkSync } from "node:fs";
 import { inspectApp } from "./app-identity";
 import { cliVersion } from "./cli-version";
+import { collectVersionFacts, formatVersionReport } from "./version-report";
 import { verifyApp } from "./codesign";
 import { confirmDecision, isTty, requireYesMessage } from "./confirm";
 import { askToContinue } from "./confirm-prompt";
@@ -32,7 +33,7 @@ try {
 async function main(): Promise<void> {
   const parsed = parseCli(process.argv);
   if (parsed.command === "version") {
-    console.log(cliVersion());
+    console.log(formatVersionReport(collectVersionFacts()));
     return;
   }
   if (parsed.command === "help" || parsed.help) {
@@ -47,8 +48,7 @@ async function main(): Promise<void> {
     const choice = await runMenu({ updateMessage: menuUpdateMessage() });
     if (choice === "quit") return;
     if (choice === "version") {
-      console.log(cliVersion());
-      console.log("");
+      console.log(formatVersionReport(collectVersionFacts()));
       return;
     }
     await dispatch({
