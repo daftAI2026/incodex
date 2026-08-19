@@ -2,7 +2,9 @@ import { existsSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { fileSha256, inspectApp } from "./app-identity";
 import { readPackageMain } from "./asar";
-import { isOfficialApp, quitOfficialApp } from "./install";
+import { canonicalize } from "./canonical-target";
+import { quitOfficialApp } from "./install";
+import { withTargetLock } from "./mutation-lock";
 import {
   canRestoreInstallation,
   loadCurrentInstallation,
@@ -11,22 +13,25 @@ import {
 import { canRestoreOfficial, loadLiveInstallRecord, resolveOfficialOriginal } from "./live-source";
 import { notifyLaunchServices } from "./launch-services";
 import type { CommandResult } from "./command-result";
-import { ASAR_REL, LIVE_PREV } from "./paths";
+import { ASAR_REL, LIVE_PREV, USER_ROOT } from "./paths";
 
-export function uninstall(appPath: string): CommandResult {
-  const stored = loadCurrentInstallation(appPath);
-  if (isOfficialApp(appPath)) {
-    uninstallOfficial(appPath);
-  } else {
-    uninstallTarget(appPath);
-  }
-  notifyLaunchServices(appPath);
-  return {
-    action: "uninstall",
-    installId: stored?.manifest.installId,
-    runtimeVersion: stored?.manifest.runtimeVersion,
-    app: appPath,
-  };
+export function uninstall(appPath: string, root = USER_ROOT): CommandResult {
+  const target = canonicalize(appPath);
+  return withTargetLock({ targetPath: target.realPath, root, command: "uninstall" }, () => {
+    const stored = loadCurrentInstallation(target.realPath, root);
+    if (target.isOfficial) {
+      uninstallOfficial(target.realPath);
+    } else {
+      uninstallTarget(target.realPath);
+    }
+    notifyLaunchServices(target.realPath);
+    return {
+      action: "uninstall",
+      installId: stored?.manifest.installId,
+      runtimeVersion: stored?.manifest.runtimeVersion,
+      app: target.realPath,
+    };
+  });
 }
 
 function uninstallOfficial(appPath: string): void {

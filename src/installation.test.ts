@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -46,6 +46,16 @@ describe("target identity", () => {
 
   test("the same real path always maps to the same target id", () => {
     expect(targetId("/Applications/ChatGPT.app")).toBe(targetId("/Applications/../Applications/ChatGPT.app"));
+  });
+
+  test("a parent symlink to a custom app shares that app's target id", () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-tid-"));
+    const realDir = join(root, "real");
+    const app = join(realDir, "ChatGPT.app");
+    mkdirSync(app, { recursive: true });
+    const alias = join(root, "alias");
+    symlinkSync(realDir, alias);
+    expect(targetId(join(alias, "ChatGPT.app"))).toBe(targetId(app));
   });
 });
 
