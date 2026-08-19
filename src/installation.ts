@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { canonicalPath, isOfficialApp } from "./canonical-target";
 import { spawnSync } from "node:child_process";
 import type { AppIdentity } from "./app-identity";
 import { ensureDir } from "./asar";
@@ -45,9 +46,13 @@ export type LoadedInstallation = {
 const HASH_LEN = 12;
 
 export function targetId(appPath: string): string {
-  const real = resolve(appPath);
+  if (isOfficialApp(appPath)) {
+    const digest = createHash("sha256").update(resolve(DEFAULT_APP)).digest("hex").slice(0, HASH_LEN);
+    return `official-${digest}`;
+  }
+  const real = canonicalPath(appPath);
   const digest = createHash("sha256").update(real).digest("hex").slice(0, HASH_LEN);
-  return real === resolve(DEFAULT_APP) ? `official-${digest}` : `app-${digest}`;
+  return `app-${digest}`;
 }
 
 export function targetStoreDir(appPath: string, root = USER_ROOT): string {
@@ -98,7 +103,7 @@ export function canRestoreInstallation(input: {
   currentOriginalMain: string;
   manifest: InstallManifest;
 }): RestoreCheck {
-  if (resolve(input.targetRealPath) !== resolve(input.manifest.targetRealPath)) {
+  if (canonicalPath(input.targetRealPath) !== canonicalPath(input.manifest.targetRealPath)) {
     return refuse(
       "backup does not belong to this target",
       "do not reuse another app's installation record; install this target again",
@@ -244,7 +249,7 @@ export function manifestFromIdentity(input: {
   return {
     schemaVersion: 1,
     installId: input.installId,
-    targetRealPath: resolve(input.targetRealPath),
+    targetRealPath: canonicalPath(input.targetRealPath),
     bundleIdentifier: input.original.bundleIdentifier,
     appVersion: input.original.appVersion,
     appBuild: input.original.appBuild,

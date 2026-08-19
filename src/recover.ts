@@ -1,4 +1,5 @@
 import { existsSync, rmSync } from "node:fs";
+import { withTargetLock } from "./mutation-lock";
 import { USER_ROOT } from "./paths";
 import { restoreOutgoingIfNeeded } from "./swap";
 import { loadJournal, recoverAction, type Journal, type Recovery } from "./transaction";
@@ -15,7 +16,14 @@ export type RecoverResult = {
 export function recoverTransaction(installId: string, root = USER_ROOT): RecoverResult {
   const journal = loadJournal(installId, root);
   if (!journal) throw new Error(`no journal for ${installId}`);
-  return applyRecovery(journal);
+  return withTargetLock(
+    { targetPath: journal.targetRealPath, root, command: "recover", installId },
+    () => {
+      const fresh = loadJournal(installId, root);
+      if (!fresh) throw new Error(`no journal for ${installId}`);
+      return applyRecovery(fresh);
+    },
+  );
 }
 
 export function applyRecovery(journal: Journal): RecoverResult {

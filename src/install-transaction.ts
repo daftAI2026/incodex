@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, renameSync, rmSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
+import { canonicalPath } from "./canonical-target";
 import { randomUUID } from "node:crypto";
 import type { AppInspection } from "./app-identity";
 import { fileSha256, inspectApp } from "./app-identity";
@@ -72,7 +73,7 @@ export function copyBundle(src: string, dest: string): void {
 
 export function appIsRunning(appPath: string): boolean {
   const listed = spawnSync("ps", ["-ax", "-o", "pid=,command="], { encoding: "utf8" });
-  const needle = `${resolve(appPath)}/Contents/MacOS/`;
+  const needle = `${canonicalPath(appPath)}/Contents/MacOS/`;
   return (listed.stdout || "").split("\n").some((line) => line.includes(needle));
 }
 
@@ -176,7 +177,7 @@ export async function runCloneInstall(
   let journal: Journal = {
     schemaVersion: 1,
     installId,
-    targetRealPath: resolve(appPath),
+    targetRealPath: canonicalPath(appPath),
     stagedApp,
     originalSnapshot: originalDest,
     phase: "DISCOVERED",

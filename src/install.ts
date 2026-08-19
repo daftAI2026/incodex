@@ -1,6 +1,8 @@
 import { existsSync, rmSync, renameSync, symlinkSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
+import { canonicalize, isOfficialApp } from "./canonical-target";
+import { withTargetLockAsync } from "./mutation-lock";
 import { spawnSync } from "node:child_process";
 import { fileSha256, inspectApp } from "./app-identity";
 import { asarHasOnlyLoader, headerHash, ensureDir } from "./asar";
@@ -36,6 +38,7 @@ import { saveState } from "./state";
 import { advanceJournal, writeJournal, type Journal } from "./transaction";
 
 export { LIVE_PREV };
+export { isOfficialApp } from "./canonical-target";
 export { listOfficialPids, quitOfficialApp } from "./quit-official";
 
 export function officialInstallAlreadyCurrent(input: {
@@ -66,10 +69,6 @@ export function resolveTarget(options: { clone?: boolean; live?: boolean; app?: 
   if (options.app) return options.app;
   if (options.clone) return join(USER_ROOT, "scratch", "ChatGPT.app");
   return DEFAULT_APP;
-}
-
-export function isOfficialApp(appPath: string): boolean {
-  return resolve(appPath) === resolve(DEFAULT_APP);
 }
 
 export function cloneOfficialApp(dest: string): void {
@@ -162,7 +161,7 @@ async function installLive(): Promise<{ installId: string; runtimeVersion: strin
   let journal: Journal = {
     schemaVersion: 1,
     installId,
-    targetRealPath: resolve(DEFAULT_APP),
+    targetRealPath: canonicalize(DEFAULT_APP).realPath,
     stagedApp,
     originalSnapshot: originalDest,
     phase: "DISCOVERED",
@@ -223,7 +222,7 @@ async function installLive(): Promise<{ installId: string; runtimeVersion: strin
   saveLiveInstallRecord({
     schemaVersion: 1,
     installId,
-    targetRealPath: resolve(DEFAULT_APP),
+    targetRealPath: canonicalize(DEFAULT_APP).realPath,
     original: sourceIdentity,
     createdAt,
   });
@@ -249,45 +248,48 @@ async function installLive(): Promise<{ installId: string; runtimeVersion: strin
 
 export async function install(appPath: string, options?: { root?: string }): Promise<CommandResult> {
   if (!existsSync(appPath)) throw new Error(`Codex app not found: ${appPath}`);
-  if (isOfficialApp(appPath)) {
-    const userRoot = options?.root ?? USER_ROOT;
-    const info = inspectApp(appPath);
-    const skip = officialInstallAlreadyCurrent({
-      patched: info.patched,
-      loaderOnly: info.asarExists && asarHasOnlyLoader(join(appPath, ASAR_REL)),
-      runtimeCurrent: runtimeMatchesPackaged(userRoot),
-    });
-    const published = publishBundledRuntime(userRoot);
-    if (skip) {
-      const stored = loadCurrentInstallation(appPath, userRoot);
+  const userRoot = options?.root ?? USER_ROOT;
+  const target = canonicalize(appPath);
+  return withTargetLockAsync({ targetPath: target.realPath, root: userRoot, command: "install" }, async () => {
+    if (target.isOfficial) {
+      const info = inspectApp(target.realPath);
+      const skip = officialInstallAlreadyCurrent({
+        patched: info.patched,
+        loaderOnly: info.asarExists && asarHasOnlyLoader(join(target.realPath, ASAR_REL)),
+        runtimeCurrent: runtimeMatchesPackaged(userRoot),
+      });
+      const published = publishBundledRuntime(userRoot);
+      if (skip) {
+        const stored = loadCurrentInstallation(target.realPath, userRoot);
+        return {
+          action: "install",
+          skipped: true,
+          installId: stored?.manifest.installId,
+          runtimeVersion: published.version,
+          app: target.realPath,
+        };
+      }
+      const live = await installLive();
+      notifyLaunchServices(target.realPath);
       return {
         action: "install",
-        skipped: true,
-        installId: stored?.manifest.installId,
-        runtimeVersion: published.version,
-        app: appPath,
+        installId: live.installId,
+        runtimeVersion: live.runtimeVersion,
+        app: target.realPath,
       };
     }
-    const live = await installLive();
-    notifyLaunchServices(appPath);
+    const published = publishBundledRuntime(userRoot);
+    const cloned = await runCloneInstall(target.realPath, {
+      root: userRoot,
+      runtimeVersion: packagedRuntimeVersion(resolvePackagedDistDir()),
+      patch: (stagedApp, installId) => patchAppBundle(stagedApp, false, installId),
+    });
+    notifyLaunchServices(target.realPath);
     return {
       action: "install",
-      installId: live.installId,
-      runtimeVersion: live.runtimeVersion,
-      app: appPath,
+      installId: cloned.installId,
+      runtimeVersion: published.version,
+      app: target.realPath,
     };
-  }
-  const published = publishBundledRuntime(options?.root ?? USER_ROOT);
-  const cloned = await runCloneInstall(appPath, {
-    root: options?.root,
-    runtimeVersion: packagedRuntimeVersion(resolvePackagedDistDir()),
-    patch: (stagedApp, installId) => patchAppBundle(stagedApp, false, installId),
   });
-  notifyLaunchServices(appPath);
-  return {
-    action: "install",
-    installId: cloned.installId,
-    runtimeVersion: published.version,
-    app: appPath,
-  };
 }
