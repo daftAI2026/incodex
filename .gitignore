@@ -9,3 +9,5 @@ dist/incognito-copy.ts
 .incodex-backup/
 docs
 release-cli/
+AGENTS.local.md
+CLAUDE.local.md
