@@ -46,5 +46,13 @@ describe("architecture boundaries", () => {
     expect(install).not.toContain("src/build-runtime.ts");
     expect(install).not.toMatch(/spawnSync\(\s*["']bun["']/);
   });
+
+  test("open path does not patch asar or resign", () => {
+    const open = src("src/open-incognito.ts");
+    expect(open).not.toContain('from "./asar"');
+    expect(open).not.toContain('from "./codesign"');
+    expect(open).not.toContain("signApp");
+    expect(open).not.toContain("patchAsar");
+  });
 });
 

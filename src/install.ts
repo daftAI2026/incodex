@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileSha256, inspectApp } from "./app-identity";
-import { headerHash, ensureDir } from "./asar";
+import { asarHasOnlyLoader, headerHash, ensureDir } from "./asar";
 import { findSupportedBuild, liveSupportNote } from "./compatibility/supported-builds";
 import { signApp, verifyTarget, type SigningManifest } from "./codesign";
 import {
@@ -25,12 +25,21 @@ import {
   packagedRuntimeVersion,
   publishPackagedRuntime,
   resolvePackagedDistDir,
+  runtimeMatchesPackaged,
 } from "./packaged-runtime";
 import { ASAR_REL, DEFAULT_APP, LIVE_PREV, USER_ROOT } from "./paths";
 import { saveState } from "./state";
 import { advanceJournal, writeJournal, type Journal } from "./transaction";
 
 export { LIVE_PREV };
+
+export function officialInstallAlreadyCurrent(input: {
+  patched: boolean;
+  loaderOnly: boolean;
+  runtimeCurrent: boolean;
+}): boolean {
+  return input.patched && input.loaderOnly && input.runtimeCurrent;
+}
 
 export type InstallOptions = {
   appPath: string;
@@ -232,7 +241,18 @@ export async function install(appPath: string, options?: { root?: string }): Pro
   if (isOfficialApp(appPath)) {
     const note = liveSupportNote(listing ?? {});
     if (note) console.warn(note);
-    publishBundledRuntime(options?.root ?? USER_ROOT);
+    const userRoot = options?.root ?? USER_ROOT;
+    const info = inspectApp(appPath);
+    const skip = officialInstallAlreadyCurrent({
+      patched: info.patched,
+      loaderOnly: info.asarExists && asarHasOnlyLoader(join(appPath, ASAR_REL)),
+      runtimeCurrent: runtimeMatchesPackaged(userRoot),
+    });
+    publishBundledRuntime(userRoot);
+    if (skip) {
+      console.log("already current. Codex was not re-signed.");
+      return;
+    }
     await installLive();
     return;
   }

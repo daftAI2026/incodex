@@ -1,6 +1,12 @@
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { EXTERNAL_RUNTIME_FILES, publishExternalRuntime, publishExternalRuntimeFromDist } from "./external-runtime";
+import {
+  EXTERNAL_RUNTIME_FILES,
+  publishExternalRuntime,
+  publishExternalRuntimeFromDist,
+  verifyExternalRuntime,
+} from "./external-runtime";
 import type { RuntimeArtifacts } from "./patcher";
 
 // bun `with { type: "file" }` is a path string; tsc types these files as modules.
@@ -95,7 +101,31 @@ export function loadPackagedArtifacts(distDir: string): RuntimeArtifacts {
   };
 }
 
+function distFileHash(distDir: string, name: string): string {
+  return createHash("sha256").update(readDistFile(distDir, name)).digest("hex");
+}
+
+export function runtimeMatchesPackaged(userRoot: string, distDir = resolvePackagedDistDir()): boolean {
+  try {
+    const existing = verifyExternalRuntime(userRoot);
+    if (existing.current.version !== packagedRuntimeVersion(distDir)) return false;
+    return EXTERNAL_RUNTIME_FILES.every((name) => existing.current.files[name] === distFileHash(distDir, name));
+  } catch {
+    return false;
+  }
+}
+
 export function publishPackagedRuntime(userRoot: string, distDir: string) {
+  const version = packagedRuntimeVersion(distDir);
+  try {
+    const existing = verifyExternalRuntime(userRoot);
+    if (existing.current.version === version) {
+      const same = EXTERNAL_RUNTIME_FILES.every((name) => existing.current.files[name] === distFileHash(distDir, name));
+      if (same) return existing.current;
+    }
+  } catch {
+    /* missing or invalid runtime; publish */
+  }
   if (usesBundledFiles(distDir)) {
     const files: Record<string, string> = {};
     for (const name of EXTERNAL_RUNTIME_FILES) {
@@ -103,9 +133,9 @@ export function publishPackagedRuntime(userRoot: string, distDir: string) {
     }
     return publishExternalRuntime({
       userRoot,
-      version: packagedRuntimeVersion(distDir),
+      version,
       files,
     });
   }
-  return publishExternalRuntimeFromDist(userRoot, distDir, packagedRuntimeVersion(distDir));
+  return publishExternalRuntimeFromDist(userRoot, distDir, version);
 }
