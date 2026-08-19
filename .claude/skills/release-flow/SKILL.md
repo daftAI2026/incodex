@@ -14,9 +14,9 @@ Tag-driven. `.github/workflows/release.yml` watches `'v*'` (lowercase). It compi
 | GitHub stable | two macOS binaries + `SHA256SUMS` | Push `vX.Y.Z` |
 | `install.sh` | downloads `releases/latest` | Same release |
 | Source | `git pull` + `bun link` | No tag |
-| Homebrew | not this flow | Parked |
+| Homebrew tap | `daftAI2026/homebrew-tap` formula urls/shas | Same release, `update-formula` job |
 
-Restate which channels this run will touch before acting. Do not invent a tap or npm publish.
+Restate which channels this run will touch before acting. Do not open a Homebrew/homebrew-core PR. Do not publish npm.
 
 ## Pre-flight
 
@@ -42,6 +42,8 @@ gh release view v<version> --json assets --jq '.assets[].name'
 
 Must list both architecture binaries **and** `SHA256SUMS`. `install.sh` is fail-closed on a missing or mismatched checksum; that is a release blocker, not cosmetic.
 
+The `update-formula` job clones `daftAI2026/homebrew-tap`, runs `scripts/update-homebrew-tap-formula.sh`, and commits `incodex <version>` / `Automated release via GitHub Actions`. It needs repository secret `HOMEBREW_TAP_TOKEN` (contents write on the tap). Missing checksums or a missing token fail the job; the GitHub Release itself already exists. Do not bump Homebrew/homebrew-core.
+
 Script-install smoke after assets exist: install the previous binary (or first-time `install.sh`), run `incodex --version`, then `incodex update` if this is not 0.1.0.
 
 Then load `.claude/skills/release-notes/SKILL.md` and draft notes. After `gh release edit`, run `bash .claude/skills/release-notes/scripts/post-reactions.sh v<version>`. Do not announce until notes and reactions are published.
@@ -51,4 +53,4 @@ Then load `.claude/skills/release-notes/SKILL.md` and draft notes. After `gh rel
 - **`gh release create` conflicts with the workflow.** Notes use `gh release edit`.
 - **Tag prefix is case-sensitive.** `v0.1.0` triggers the workflow. `V0.1.0` does not.
 - **Do not retag the same version.** If the build is bad: `gh release delete v<old> --cleanup-tag`, delete the local tag, bump `package.json`, commit, tag `v<new>`.
-- **Homebrew is out of scope.** Do not open a core or tap PR from this flow.
+- **Homebrew core is out of scope.** The tap bump is this flow. Do not open a Homebrew/homebrew-core PR.

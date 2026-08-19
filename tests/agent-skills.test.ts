@@ -34,6 +34,9 @@ describe("agent skills", () => {
     expect(text).toContain("SHA256SUMS");
     expect(text).toContain("incodex-darwin-arm64");
     expect(text).toContain("package.json");
+    expect(text).toContain("daftAI2026/homebrew-tap");
+    expect(text).toContain("HOMEBREW_TAP_TOKEN");
+    expect(text).toContain("Do not open a Homebrew/homebrew-core PR");
   });
 
   test("incodex CLI skill requires dry-run before destructive commands", () => {
