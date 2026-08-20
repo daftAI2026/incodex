@@ -45,4 +45,3 @@ fn pre_swap_recovery_cleans_a_leaf_symlink_without_touching_its_target() {
     assert_eq!(fs::read_to_string(victim.join("marker")).unwrap(), "do-not-delete");
     assert_eq!(journal_v2(&root, &id).unwrap().phase, "ROLLED_BACK");
 }
-
