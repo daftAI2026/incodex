@@ -88,6 +88,24 @@ fn committed_transaction_rejects_a_second_commit() {
 }
 
 #[test]
+fn commit_rejects_live_content_changed_after_swap() {
+    let root = scratch();
+    let target = app(&root, "ChatGPT.app", "original");
+    let candidate = app(&root, "candidate.app", "patched");
+    let mut tx = Engine::begin(&root, &target, "phase-guard-test").unwrap();
+    seal_backup(&root, &mut tx, &target);
+    tx.place_staging(&candidate).unwrap();
+    tx.swap().unwrap();
+    fs::write(target.join("marker"), "foreign").unwrap();
+
+    let result = tx.commit();
+
+    assert!(result.is_err(), "commit accepted a changed swapped live");
+    assert_eq!(tx.journal().phase, "SWAPPED");
+    assert_eq!(fs::read_to_string(target.join("marker")).unwrap(), "foreign");
+}
+
+#[test]
 fn rolled_back_transaction_rejects_a_second_rollback() {
     let root = scratch();
     let target = app(&root, "ChatGPT.app", "original");
