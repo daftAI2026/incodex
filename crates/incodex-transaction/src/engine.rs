@@ -146,6 +146,7 @@ impl Engine {
     where
         F: FnMut(&str),
     {
+        require_phase(&self.journal, "STAGED", "swap")?;
         recheck_target(&self.target)?;
         self.advance("TARGET_MOVED_OUT")?;
         checkpoint("TARGET_MOVED_OUT");
@@ -174,6 +175,7 @@ impl Engine {
     where
         F: FnMut(&str),
     {
+        require_phase(&self.journal, "SWAPPED", "commit")?;
         self.advance("COMMITTED")?;
         checkpoint("COMMITTED_BEFORE_CLEANUP");
         let cleanup_warning = cleanup_outgoing(&self.outgoing_app()).err();
@@ -181,8 +183,11 @@ impl Engine {
     }
 
     pub fn rollback(&mut self, _reason: &str) -> Result<(), String> {
-        if self.journal.phase == "COMMITTED" {
-            return Err("cannot rollback a committed transaction".into());
+        match self.journal.phase.as_str() {
+            "COMMITTED" => return Err("cannot rollback a committed transaction".into()),
+            "ROLLED_BACK" => return Err("transaction is already rolled back".into()),
+            phase if is_pre_swap_phase(phase) || is_post_swap_phase(phase) => {}
+            phase => return Err(format!("cannot rollback transaction in phase {phase}")),
         }
         if is_pre_swap_phase(&self.journal.phase) {
             cleanup_pre_swap(&self.root, &self.journal)?;
@@ -210,6 +215,17 @@ fn require_backup_snapshot(root: &Path, install_id: &str) -> Result<(), String> 
         )
     })?;
     Ok(())
+}
+
+fn require_phase(journal: &JournalV2, expected: &str, operation: &str) -> Result<(), String> {
+    if journal.phase == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "cannot {operation} transaction in phase {}; expected {expected}",
+            journal.phase
+        ))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -391,6 +407,10 @@ fn is_pre_swap_phase(phase: &str) -> bool {
         phase,
         "DISCOVERED" | "INTENT" | "BACKUP_COMMITTED" | "STAGED" | "PATCHED" | "SIGNED" | "VERIFIED"
     )
+}
+
+fn is_post_swap_phase(phase: &str) -> bool {
+    matches!(phase, "TARGET_MOVED_OUT" | "SWAPPED" | "TARGET_VERIFIED")
 }
 
 fn cleanup_outgoing(outgoing: &Path) -> Result<(), String> {
