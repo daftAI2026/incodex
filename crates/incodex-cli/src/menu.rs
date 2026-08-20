@@ -54,15 +54,18 @@ pub fn run_menu() -> Result<Option<CliCommand>, String> {
     let mut selected = 0_usize;
     crate::lifecycle::spawn_update_notice_refresh();
     let update_message = crate::lifecycle::read_update_notice();
+    let self_update_available = update_message
+        .as_deref()
+        .is_some_and(|message| message.ends_with("run incodex update"));
     let _cursor = CursorGuard;
     loop {
-        draw(selected, update_message.as_deref())?;
+        draw(selected, update_message.as_deref(), self_update_available)?;
         let key = crate::terminal::read_key()?;
         match key.as_slice() {
             [3] => return Err("interrupted".into()),
             [b'q'] | [b'Q'] | [0x1b] => return Ok(None),
             [b'v'] | [b'V'] => return Ok(Some(CliCommand::Version)),
-            [b'u'] | [b'U'] if update_message.is_some() => {
+            [b'u'] | [b'U'] if self_update_available => {
                 return Ok(Some(CliCommand::Update));
             }
             [b'\r'] | [b'\n'] => return Ok(ITEMS[selected].command),
@@ -83,7 +86,11 @@ pub fn run_menu() -> Result<Option<CliCommand>, String> {
     }
 }
 
-fn draw(selected: usize, update_message: Option<&str>) -> Result<(), String> {
+fn draw(
+    selected: usize,
+    update_message: Option<&str>,
+    self_update_available: bool,
+) -> Result<(), String> {
     let mut lines = vec![
         paint("0;32", BANNER),
         String::new(),
@@ -110,7 +117,7 @@ fn draw(selected: usize, update_message: Option<&str>) -> Result<(), String> {
         });
     }
     lines.push(String::new());
-    let controls = if update_message.is_some() {
+    let controls = if self_update_available {
         format!(
             "↑↓ | Enter | U Update | V Version | Q Quit | 1-{} Jump",
             ITEMS.len()
