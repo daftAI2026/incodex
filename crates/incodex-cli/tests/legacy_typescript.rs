@@ -119,9 +119,9 @@ impl LegacyTsV1Fixture {
                     "schemaVersion": 1,
                     "installId": INSTALL_ID,
                     "targetRealPath": target,
-                    "stagedApp": root_dir.join("scratch/ChatGPT.app.staged").display().to_string(),
+                    "stagedApp": root_dir.join(format!("scratch/ChatGPT.app.staged-{INSTALL_ID}")).display().to_string(),
                     "originalSnapshot": original_app,
-                    "outgoingApp": root_dir.join("transactions/outgoing/ChatGPT.app").display().to_string(),
+                    "outgoingApp": root_dir.join(format!("transactions/{INSTALL_ID}/outgoing/ChatGPT.app")).display().to_string(),
                     "phase": "COMMITTED",
                     "updatedAt": "2026-08-20T00:00:00.000Z"
                 })
@@ -137,9 +137,7 @@ impl LegacyTsV1Fixture {
     }
 
     fn target_store(&self) -> PathBuf {
-        self.root
-            .join("installations")
-            .join(target_id(&self.app))
+        self.root.join("installations").join(target_id(&self.app))
     }
 
     fn install_dir(&self) -> PathBuf {
@@ -238,22 +236,42 @@ fn legacy_typescript_fixture_reproduces_the_v1_disk_contract_without_running_ts_
 #[test]
 fn legacy_typescript_fixture_rejects_leaf_and_ancestor_symlinks() {
     assert_rejects_symlink(|fixture| replace_with_symlink(&fixture.target_store()));
-    assert_rejects_symlink(|fixture| {
-        replace_with_symlink(&fixture.root.join("installations"))
-    });
+    assert_rejects_symlink(|fixture| replace_with_symlink(&fixture.root.join("installations")));
     assert_rejects_symlink(|fixture| {
         replace_with_symlink(&fixture.target_store().join("current.json"))
     });
     assert_rejects_symlink(|fixture| {
-        replace_with_symlink(&fixture.install_dir().join("patched"))
+        replace_with_symlink(&fixture.install_dir().join("manifest.json"))
     });
+    assert_rejects_symlink(|fixture| replace_with_symlink(&fixture.install_dir().join("patched")));
     assert_rejects_symlink(|fixture| {
-        replace_with_symlink(&fixture.install_dir().join("original"))
+        replace_with_symlink(&fixture.install_dir().join("patched/runtime-manifest.json"))
     });
+    assert_rejects_symlink(|fixture| replace_with_symlink(&fixture.install_dir().join("original")));
     assert_rejects_symlink(|fixture| {
-        replace_with_symlink(&fixture.root.join("transactions"))
+        replace_with_symlink(&fixture.install_dir().join("original/ChatGPT.app"))
     });
+    assert_rejects_symlink(|fixture| replace_with_symlink(&fixture.root.join("transactions")));
     assert_rejects_symlink(|fixture| replace_with_symlink(&fixture.journal_path()));
+}
+
+#[test]
+fn legacy_typescript_fixture_rejects_symlinked_transaction_path_fields() {
+    assert_rejects_symlink(|fixture| {
+        let scratch = fixture.root.join("scratch");
+        let real = fixture.root.join("scratch.real");
+        fs::create_dir_all(&real).unwrap();
+        symlink(&real, &scratch).unwrap();
+    });
+    assert_rejects_symlink(|fixture| {
+        let outgoing = fixture
+            .root
+            .join(format!("transactions/{INSTALL_ID}/outgoing"));
+        let real = fixture.root.join("outgoing.real");
+        fs::create_dir_all(&real).unwrap();
+        fs::create_dir_all(outgoing.parent().unwrap()).unwrap();
+        symlink(&real, &outgoing).unwrap();
+    });
 }
 
 #[test]
@@ -261,7 +279,11 @@ fn legacy_typescript_fixture_rejects_a_dangling_target_store_symlink() {
     let fixture = LegacyTsV1Fixture::create();
     let target_store = fixture.target_store();
     fs::remove_dir_all(&target_store).unwrap();
-    symlink(target_store.with_file_name("missing-target-store"), target_store).unwrap();
+    symlink(
+        target_store.with_file_name("missing-target-store"),
+        target_store,
+    )
+    .unwrap();
 
     let error = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
         .expect_err("dangling target store must not look absent");
@@ -307,10 +329,9 @@ fn legacy_typescript_fixture_classifies_journal_phase_without_mixing_states() {
     ] {
         let fixture = LegacyTsV1Fixture::create();
         set_journal_phase(&fixture, phase);
-        let state =
-            incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
-                .expect("phase should be structurally readable")
-                .expect("fixture should be detected");
+        let state = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
+            .expect("phase should be structurally readable")
+            .expect("fixture should be detected");
         assert_eq!(state.kind, expected, "phase {phase} was misclassified");
     }
 }

@@ -5,11 +5,12 @@
 //! so a future migration can validate that state before touching the target.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::Deserialize;
 
 use incodex_core::{canonical_path, target_id};
+use incodex_transaction::validate_path_ancestors;
 
 pub const SCHEMA_VERSION: u32 = 1;
 
@@ -26,6 +27,13 @@ const PHASES: &[&str] = &[
     "COMMITTED",
     "ROLLED_BACK",
 ];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LegacyStateKind {
+    Committed,
+    Interrupted,
+    RolledBack,
+}
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -86,6 +94,7 @@ pub struct LegacyTsV1State {
     pub target_store: PathBuf,
     pub install_dir: PathBuf,
     pub original_app: PathBuf,
+    pub kind: LegacyStateKind,
     pub current: CurrentPointer,
     pub manifest: InstallManifest,
     pub runtime: RuntimeManifest,
@@ -101,29 +110,41 @@ pub fn load_legacy_ts_v1(root: &Path, target: &Path) -> Result<Option<LegacyTsV1
     let target_real_path = canonical_path(target);
     let target_id = target_id(target);
     let target_store = root.join("installations").join(&target_id);
-    if !target_store.exists() {
-        return Ok(None);
+    validate_storage_path(root, &target_store, "legacy installation target directory")?;
+    let target_store_metadata = match fs::symlink_metadata(&target_store) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "cannot inspect legacy installation target directory: {error}"
+            ))
+        }
+    };
+    if !target_store_metadata.file_type().is_dir() {
+        return Err(format!(
+            "legacy installation target directory is not a directory: {}",
+            target_store.display()
+        ));
     }
-    reject_symlink(&target_store, "legacy installation target directory")?;
-
     let current_path = target_store.join("current.json");
+    validate_storage_path(root, &current_path, "legacy current.json")?;
     let current: CurrentPointer = read_json(&current_path, "legacy current.json")?;
     validate_install_id(&current.install_id, "current installId")?;
 
     let install_dir = target_store.join(&current.install_id);
-    reject_symlink(&install_dir, "legacy installation directory")?;
-    let manifest: InstallManifest =
-        read_json(&install_dir.join("manifest.json"), "legacy manifest.json")?;
+    validate_storage_path(root, &install_dir, "legacy installation directory")?;
+    let manifest_path = install_dir.join("manifest.json");
+    validate_storage_path(root, &manifest_path, "legacy manifest.json")?;
+    let manifest: InstallManifest = read_json(&manifest_path, "legacy manifest.json")?;
     validate_manifest(&manifest, &current.install_id, &target_real_path)?;
 
-    let runtime: RuntimeManifest = read_json(
-        &install_dir.join("patched/runtime-manifest.json"),
-        "legacy runtime-manifest.json",
-    )?;
+    let runtime_path = install_dir.join("patched/runtime-manifest.json");
+    validate_storage_path(root, &runtime_path, "legacy runtime-manifest.json")?;
+    let runtime: RuntimeManifest = read_json(&runtime_path, "legacy runtime-manifest.json")?;
     validate_runtime(&runtime, &manifest)?;
 
     let original_app = install_dir.join("original/ChatGPT.app");
-    reject_symlink(&original_app, "legacy original backup")?;
+    validate_storage_path(root, &original_app, "legacy original backup")?;
     if !original_app.is_dir() {
         return Err(format!(
             "legacy original backup is missing: {}",
@@ -134,8 +155,10 @@ pub fn load_legacy_ts_v1(root: &Path, target: &Path) -> Result<Option<LegacyTsV1
     let journal_path = root
         .join("transactions")
         .join(format!("{}.json", current.install_id));
+    validate_storage_path(root, &journal_path, "legacy transaction journal")?;
     let journal: TransactionJournal = read_json(&journal_path, "legacy transaction journal")?;
-    validate_journal(
+    let kind = validate_journal(
+        root,
         &journal,
         &current.install_id,
         &target_real_path,
@@ -149,6 +172,7 @@ pub fn load_legacy_ts_v1(root: &Path, target: &Path) -> Result<Option<LegacyTsV1
         target_store,
         install_dir,
         original_app,
+        kind,
         current,
         manifest,
         runtime,
@@ -222,11 +246,12 @@ fn validate_runtime(runtime: &RuntimeManifest, manifest: &InstallManifest) -> Re
 }
 
 fn validate_journal(
+    root: &Path,
     journal: &TransactionJournal,
     expected_id: &str,
     target_real_path: &Path,
     original_app: &Path,
-) -> Result<(), String> {
+) -> Result<LegacyStateKind, String> {
     if journal.schema_version != SCHEMA_VERSION {
         return Err(format!(
             "unsupported legacy transaction schema: {}",
@@ -243,8 +268,20 @@ fn validate_journal(
     if journal.staged_app.is_empty() || journal.original_snapshot.is_empty() {
         return Err("legacy journal path is empty".into());
     }
+    validate_storage_path(root, Path::new(&journal.staged_app), "legacy stagedApp")?;
+    validate_storage_path(
+        root,
+        Path::new(&journal.original_snapshot),
+        "legacy originalSnapshot",
+    )?;
     if canonical_path(&journal.original_snapshot) != canonical_path(original_app) {
         return Err("legacy journal originalSnapshot does not match the backup".into());
+    }
+    if let Some(outgoing) = &journal.outgoing_app {
+        if outgoing.is_empty() {
+            return Err("legacy journal outgoingApp is empty".into());
+        }
+        validate_storage_path(root, Path::new(outgoing), "legacy outgoingApp")?;
     }
     if !PHASES.contains(&journal.phase.as_str()) {
         return Err(format!(
@@ -255,7 +292,11 @@ fn validate_journal(
     if journal.updated_at.is_empty() {
         return Err("legacy journal updatedAt is empty".into());
     }
-    Ok(())
+    Ok(match journal.phase.as_str() {
+        "COMMITTED" => LegacyStateKind::Committed,
+        "ROLLED_BACK" => LegacyStateKind::RolledBack,
+        _ => LegacyStateKind::Interrupted,
+    })
 }
 
 fn validate_install_id(value: &str, field: &str) -> Result<(), String> {
@@ -289,4 +330,29 @@ fn reject_symlink(path: &Path, label: &str) -> Result<(), String> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(format!("cannot inspect {label}: {error}")),
     }
+}
+
+fn validate_storage_path(root: &Path, path: &Path, label: &str) -> Result<(), String> {
+    reject_symlink(root, "legacy state root")?;
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| format!("{label} escaped the legacy state root: {}", path.display()))?;
+    if relative
+        .components()
+        .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err(format!(
+            "{label} is not a safe relative path under the legacy state root: {}",
+            path.display()
+        ));
+    }
+    let relative = relative.to_str().ok_or_else(|| {
+        format!(
+            "{label} is not valid UTF-8 under the legacy state root: {}",
+            path.display()
+        )
+    })?;
+    validate_path_ancestors(root, relative)
+        .map_err(|error| format!("{label} ancestor validation failed: {error}"))?;
+    reject_symlink(path, label)
 }
