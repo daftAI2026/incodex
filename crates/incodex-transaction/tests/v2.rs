@@ -297,6 +297,24 @@ fn backup_completion_is_durable_before_staging() {
 }
 
 #[test]
+fn committed_transaction_rejects_a_late_rollback() {
+    let root = scratch();
+    let target_app = app_bundle(&root, "ChatGPT.app", "original");
+    let staged = app_bundle(&root, "staged.app", "patched");
+    let mut tx = Engine::begin(&root, &target_app, "install").unwrap();
+    tx.place_staging(&staged).unwrap();
+    tx.swap().unwrap();
+    tx.commit().unwrap();
+
+    assert!(tx.rollback("late failure").is_err());
+    assert_eq!(
+        fs::read_to_string(target_app.join("marker")).unwrap(),
+        "patched"
+    );
+    assert_eq!(tx.journal().phase, "COMMITTED");
+}
+
+#[test]
 fn swap_writes_intent_before_moving_and_keeps_outgoing_until_commit() {
     let root = scratch();
     let target_app = app_bundle(&root, "ChatGPT.app", "original");
