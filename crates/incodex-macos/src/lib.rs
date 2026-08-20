@@ -312,6 +312,72 @@ pub fn quit_official_app() -> Result<(), String> {
     Ok(())
 }
 
+pub fn front_codex_window_bounds() -> Option<(i32, i32, i32, i32)> {
+    let script = r#"tell application "System Events" to tell first process whose bundle identifier is "com.openai.codex" to get {position, size} of front window"#;
+    let output = Command::new("osascript")
+        .args(["-e", script])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_window_bounds_output(&String::from_utf8_lossy(&output.stdout))
+}
+
+pub fn tile_process_front_window(
+    pid: u32,
+    source: (i32, i32, i32, i32),
+    offset: i32,
+) -> Result<(), String> {
+    let desired = (source.0 + offset, source.1 + offset, source.2, source.3);
+    set_process_front_window_bounds(pid, desired)?;
+    let actual = process_front_window_bounds(pid).ok_or("child window bounds unavailable")?;
+    if actual.2 != source.2 || actual.3 != source.3 {
+        set_process_front_window_bounds(pid, source)?;
+    }
+    Ok(())
+}
+
+fn process_front_window_bounds(pid: u32) -> Option<(i32, i32, i32, i32)> {
+    let script = format!(
+        "tell application \"System Events\" to tell first process whose unix id is {pid} to get {{position, size}} of front window"
+    );
+    let output = Command::new("osascript")
+        .args(["-e", &script])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_window_bounds_output(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn set_process_front_window_bounds(pid: u32, bounds: (i32, i32, i32, i32)) -> Result<(), String> {
+    let script = format!(
+        "tell application \"System Events\" to tell first process whose unix id is {pid} to tell front window to set {{position, size}} to {{{{{}, {}}}, {{{}, {}}}}}",
+        bounds.0, bounds.1, bounds.2, bounds.3
+    );
+    let output = Command::new("osascript")
+        .args(["-e", &script])
+        .output()
+        .map_err(|err| err.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    Ok(())
+}
+
+fn parse_window_bounds_output(raw: &str) -> Option<(i32, i32, i32, i32)> {
+    let values: Vec<i32> = raw
+        .trim()
+        .split(',')
+        .map(str::trim)
+        .map(str::parse)
+        .collect::<Result<_, _>>()
+        .ok()?;
+    (values.len() == 4).then(|| (values[0], values[1], values[2], values[3]))
+}
+
 pub fn notify_launch_services(app: &Path) -> Result<(), String> {
     let _ = Command::new("lsregister")
         .args(["-f", "-R", "-trusted"])
@@ -322,6 +388,17 @@ pub fn notify_launch_services(app: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn crate_compiles() {}
+
+    #[test]
+    fn parses_system_events_position_and_size() {
+        assert_eq!(
+            parse_window_bounds_output("0, 34, 1710, 1073\n"),
+            Some((0, 34, 1710, 1073))
+        );
+        assert_eq!(parse_window_bounds_output("missing"), None);
+    }
 }

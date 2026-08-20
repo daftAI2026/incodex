@@ -422,12 +422,15 @@ fn native_tty_menu_matches_the_typescript_menu_contract() {
 
 #[test]
 fn native_menu_shows_the_same_cached_update_notice_and_shortcut_as_typescript() {
-    let home = scratch("menu-update");
-    let cache = home.join(".incodex/cache/update_message");
-    fs::create_dir_all(cache.parent().unwrap()).unwrap();
-    fs::write(&cache, "Update 9.9.9 available, run incodex update\n").unwrap();
-    let ts = run_tty("bun", &["src/cli.ts"], &[], &home, "Quit", "q");
-    let rust = run_tty(rust_bin(), &[], &[], &home, "Quit", "q");
+    let ts_home = scratch("menu-update-ts");
+    let rust_home = scratch("menu-update-rust");
+    for home in [&ts_home, &rust_home] {
+        let cache = home.join(".incodex/cache/update_message");
+        fs::create_dir_all(cache.parent().unwrap()).unwrap();
+        fs::write(&cache, "Update 9.9.9 available, run incodex update\n").unwrap();
+    }
+    let ts = run_tty("bun", &["src/cli.ts"], &[], &ts_home, "Quit", "q");
+    let rust = run_tty(rust_bin(), &[], &[], &rust_home, "Quit", "q");
     let ts = visible(&ts.stdout);
     let rust = visible(&rust.stdout);
     for text in [
@@ -459,9 +462,9 @@ fn native_open_reproduces_the_typescript_wait_spinner_and_clears_its_line() {
         visible(&rust.stdout)
     );
     assert!(
-        ["|", "/", "-", "\\"]
-            .iter()
-            .any(|frame| rust.stdout.contains(&format!("  {frame} Waiting for the window to close"))),
+        ["|", "/", "-", "\\"].iter().any(|frame| rust
+            .stdout
+            .contains(&format!("  {frame} Waiting for the window to close"))),
         "missing spinner frames: {:?}",
         rust.stdout
     );

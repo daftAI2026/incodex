@@ -1,4 +1,5 @@
 use std::io::{self, Write};
+use std::path::PathBuf;
 
 use crate::parse::CliCommand;
 
@@ -52,14 +53,18 @@ const ITEMS: &[Item] = &[
 
 pub fn run_menu() -> Result<Option<CliCommand>, String> {
     let mut selected = 0_usize;
+    let update_message = read_update_message_cache();
     let _cursor = CursorGuard;
     loop {
-        draw(selected)?;
+        draw(selected, update_message.as_deref())?;
         let key = crate::terminal::read_key()?;
         match key.as_slice() {
             [3] => return Err("interrupted".into()),
             [b'q'] | [b'Q'] | [0x1b] => return Ok(None),
             [b'v'] | [b'V'] => return Ok(Some(CliCommand::Version)),
+            [b'u'] | [b'U'] if update_message.is_some() => {
+                return Ok(Some(CliCommand::Update));
+            }
             [b'\r'] | [b'\n'] => return Ok(ITEMS[selected].command),
             [b'k'] | [b'K'] | [0x1b, b'[', b'A'] => {
                 selected = (selected + ITEMS.len() - 1) % ITEMS.len();
@@ -78,14 +83,18 @@ pub fn run_menu() -> Result<Option<CliCommand>, String> {
     }
 }
 
-fn draw(selected: usize) -> Result<(), String> {
+fn draw(selected: usize, update_message: Option<&str>) -> Result<(), String> {
     let mut lines = vec![
         paint("0;32", BANNER),
         String::new(),
         paint("1;34", &format!("  {REPO_URL}")),
         paint("0;32", &format!("  {TAGLINE}")),
-        String::new(),
     ];
+    if let Some(message) = update_message {
+        lines.push(String::new());
+        lines.push(paint("0;32", &format!("  {message}")));
+    }
+    lines.push(String::new());
     let title_width = ITEMS.iter().map(|item| item.title.len()).max().unwrap_or(0);
     for (index, item) in ITEMS.iter().enumerate() {
         let body = format!(
@@ -101,12 +110,42 @@ fn draw(selected: usize) -> Result<(), String> {
         });
     }
     lines.push(String::new());
-    lines.push(paint(
-        "0;38;5;244",
-        &format!("↑↓ | Enter | V Version | Q Quit | 1-{} Jump", ITEMS.len()),
-    ));
+    let controls = if update_message.is_some() {
+        format!(
+            "↑↓ | Enter | U Update | V Version | Q Quit | 1-{} Jump",
+            ITEMS.len()
+        )
+    } else {
+        format!("↑↓ | Enter | V Version | Q Quit | 1-{} Jump", ITEMS.len())
+    };
+    lines.push(paint("0;38;5;244", &controls));
     print!("\u{1b}[?25l\u{1b}[H{}\n\u{1b}[J", lines.join("\n"));
     io::stdout().flush().map_err(|err| err.to_string())
+}
+
+fn read_update_message_cache() -> Option<String> {
+    let cache = incodex_core::paths::home_dir().join(".incodex/cache/update_message");
+    if !cache.exists() {
+        return None;
+    }
+    let binary = std::env::current_exe().unwrap_or_else(|_| PathBuf::new());
+    let stale = std::fs::metadata(&cache)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .zip(
+            std::fs::metadata(binary)
+                .and_then(|metadata| metadata.modified())
+                .ok(),
+        )
+        .is_some_and(|(cache_modified, binary_modified)| cache_modified < binary_modified);
+    if stale {
+        let _ = std::fs::write(cache, "");
+        return None;
+    }
+    std::fs::read_to_string(cache)
+        .ok()
+        .map(|message| message.trim().to_string())
+        .filter(|message| !message.is_empty())
 }
 
 fn paint(code: &str, text: &str) -> String {
