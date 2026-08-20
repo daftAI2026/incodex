@@ -1,7 +1,8 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{mpsc, Arc, Barrier};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use incodex_core::canonical::{inspect_target, recheck_target};
@@ -78,6 +79,45 @@ fn mutation_lock_is_exclusive_and_stolen_when_pid_is_dead() {
     .unwrap();
     let stolen = acquire_target_lock(&root, &app, "install", None).unwrap();
     drop(stolen);
+}
+
+#[test]
+fn concurrent_lock_creation_never_exposes_a_partial_record() {
+    let root = scratch();
+    let app = app_bundle(&root, "ChatGPT.app", "x");
+    let barrier = Arc::new(Barrier::new(20));
+    let release = Arc::new(AtomicBool::new(false));
+    let command = Arc::new("install-".repeat(500_000));
+    let (send, receive) = mpsc::channel();
+    let handles: Vec<_> = (0..20)
+        .map(|_| {
+            let root = root.clone();
+            let app = app.clone();
+            let barrier = Arc::clone(&barrier);
+            let release = Arc::clone(&release);
+            let command = Arc::clone(&command);
+            let send = send.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                let lock = acquire_target_lock(&root, &app, &command, None);
+                send.send(lock.is_ok()).unwrap();
+                if let Ok(lock) = lock {
+                    while !release.load(Ordering::Acquire) {
+                        std::thread::yield_now();
+                    }
+                    drop(lock);
+                }
+            })
+        })
+        .collect();
+    drop(send);
+
+    let winners = (0..20).filter(|_| receive.recv().unwrap()).count();
+    release.store(true, Ordering::Release);
+    for handle in handles {
+        handle.join().unwrap();
+    }
+    assert_eq!(winners, 1, "partial lock records allowed {winners} winners");
 }
 
 #[test]
