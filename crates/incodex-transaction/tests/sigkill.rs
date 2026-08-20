@@ -136,6 +136,49 @@ fn recover_sigkill_restarts_from_a_real_recovery_step() {
     assert_eq!(tree_digest(&original), original_digest);
 }
 
+#[test]
+fn pre_swap_recover_does_not_replace_live_with_partial_original() {
+    if run_recover_child_mode() {
+        return;
+    }
+
+    let root = scratch();
+    let app = make_app(&root, "ChatGPT.app", "ORIGINAL");
+    let original_digest = tree_digest(&app);
+    let id_file = root.join("install-id");
+
+    let status = spawn_pre_swap_child(&root, &app, &id_file);
+    assert_eq!(
+        status.signal(),
+        Some(libc::SIGKILL),
+        "install child was not SIGKILLed: {status:?}"
+    );
+
+    let install_id = fs::read_to_string(&id_file).expect("child must publish install id");
+    let install_id = install_id.trim();
+    assert_eq!(
+        journal_v2(&root, install_id)
+            .expect("interrupted install keeps its journal")
+            .phase,
+        "DISCOVERED"
+    );
+
+    let status = spawn_recover_child("recover", &root, install_id);
+    assert_eq!(status.code(), Some(0), "recover child failed: {status:?}");
+
+    assert_eq!(
+        tree_digest(&app),
+        original_digest,
+        "pre-swap recovery replaced a healthy target with a partial backup"
+    );
+    assert_eq!(
+        journal_v2(&root, install_id)
+            .expect("recovery keeps the journal readable")
+            .phase,
+        "ROLLED_BACK"
+    );
+}
+
 fn run_case(point: KillPoint) {
     let root = scratch();
     let app = make_app(&root, "ChatGPT.app", "ORIGINAL");
@@ -251,20 +294,53 @@ fn run_recover_child_mode() -> bool {
         return false;
     };
     let root = PathBuf::from(env::var(ROOT_ENV).expect("recover child root"));
-    let install_id = env::var(INSTALL_ID_ENV).expect("recover child install id");
     match mode.as_str() {
+        "discover-partial" => {
+            let app = PathBuf::from(env::var(APP_ENV).expect("partial install app"));
+            let tx = Engine::begin(&root, &app, "sigkill-test").expect("begin transaction");
+            let id = tx.install_id().to_string();
+            let id_file = PathBuf::from(env::var(ID_FILE_ENV).expect("partial install id file"));
+            fs::write(id_file, &id).expect("publish install id");
+            let partial = root
+                .join("transactions")
+                .join(&id)
+                .join("original/ChatGPT.app");
+            fs::create_dir_all(&partial).expect("create partial backup");
+            fs::write(partial.join("marker"), "PARTIAL\n").expect("write partial backup");
+            kill_self();
+        }
         "kill-after-restore" => {
+            let install_id = env::var(INSTALL_ID_ENV).expect("recover child install id");
             recover_with(&root, &install_id, |_| {
                 kill_self();
             })
             .expect("recover child");
         }
         "recover" => {
+            let install_id = env::var(INSTALL_ID_ENV).expect("recover child install id");
             recover(&root, &install_id).expect("recover child");
         }
         other => panic!("unknown recover child mode {other}"),
     }
     true
+}
+
+fn spawn_pre_swap_child(root: &Path, app: &Path, id_file: &Path) -> ExitStatus {
+    let exe = env::current_exe().expect("test executable");
+    Command::new(exe)
+        .args([
+            "--exact",
+            "pre_swap_recover_does_not_replace_live_with_partial_original",
+            "--nocapture",
+        ])
+        .env(RECOVER_CHILD_MODE, "discover-partial")
+        .env(ROOT_ENV, root)
+        .env(APP_ENV, app)
+        .env(ID_FILE_ENV, id_file)
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .status()
+        .expect("spawn partial install child")
 }
 
 fn mutate_child(root: &Path, app: &Path, candidate: &Path, point: KillPoint) {
