@@ -575,6 +575,11 @@ fn native_tty_failure_clears_progress_before_printing_the_error() {
         "error was printed before progress cleanup: {:?}",
         rust.stdout
     );
+    assert!(
+        visible(&rust.stdout).contains("  ✗ no installation record for this target"),
+        "error should follow the CLI body indentation and mark: {}",
+        visible(&rust.stdout)
+    );
 }
 
 #[test]
@@ -601,6 +606,46 @@ fn native_tty_runtime_animates_and_clears_its_line() {
         "runtime spinner must clear the current line: {:?}",
         rust.stdout
     );
+}
+
+#[test]
+fn native_tty_status_and_doctor_animate_without_changing_machine_output() {
+    for (command, stage, result) in [
+        ("status", "Inspecting installation status", "➤ Status"),
+        ("doctor", "Running diagnostics", "➤ App"),
+    ] {
+        let home = scratch(&format!("{command}-progress-tty"));
+        let app = marker_app(&home);
+        let rust = run_tty(
+            rust_bin(),
+            &[],
+            &[command, "--app", app.to_str().unwrap()],
+            &home,
+            result,
+            "",
+        );
+        assert_eq!(rust.status, 0, "{command}: {}", visible(&rust.stdout));
+        assert!(
+            ["|", "/", "-", "\\"]
+                .iter()
+                .any(|frame| rust.stdout.contains(&format!("  {frame} {stage}"))),
+            "{command} was silent: {:?}",
+            rust.stdout
+        );
+        assert!(
+            rust.stdout.contains("\r\u{1b}[2K"),
+            "{command} spinner did not clear: {:?}",
+            rust.stdout
+        );
+
+        let json = run_rust(&[command, "--json", "--app", app.to_str().unwrap()], &home);
+        assert_eq!(json.status, 0, "{json:?}");
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&json.stdout).is_ok(),
+            "{command} progress corrupted JSON: {json:?}"
+        );
+        assert!(!json.stdout.contains(stage), "{json:?}");
+    }
 }
 
 #[test]
