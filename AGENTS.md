@@ -89,7 +89,7 @@ Shipped releases are the TypeScript CLI on `main`. Native Rust CLI work lives on
 5. Transaction v2 in Rust only. Do not rebuild journal schema v2 / fsync in TypeScript.
 6. Native ASAR: own MIT crate; `@electron/asar` is a test oracle only.
 7. `install` / `uninstall` / `recover`. After this, Release can stop attaching Bun-compiled binaries.
-8. Parallel comparison, then merge `exp/rust-cli` to `main`.
+8. Parallel comparison, native numbered/arrow TTY menu, then merge `exp/rust-cli` to `main` after manual UI verification.
 
 ### Commands on `exp/rust-cli`
 
@@ -97,7 +97,7 @@ Shipped releases are the TypeScript CLI on `main`. Native Rust CLI work lives on
 cargo test --workspace --release
 ```
 
-Do not add ratatui, cursive, crossterm, or an AGPL asar crate. Menu stays the existing numbered/arrow UI, implemented later without a TUI crate.
+Do not add ratatui, cursive, crossterm, or an AGPL asar crate. The native menu is the existing numbered/arrow UI implemented directly with termios.
 
 ## Commands
 

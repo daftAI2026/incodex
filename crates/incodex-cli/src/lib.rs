@@ -1,14 +1,19 @@
 pub mod cdp;
+pub mod confirm;
 pub mod diagnose;
 pub mod help;
 pub mod install;
+pub mod lifecycle;
+pub mod menu;
 pub mod open;
 pub mod parse;
+pub mod spinner;
+pub mod terminal;
 pub mod version;
 
 use std::path::PathBuf;
 
-use diagnose::{diagnosis_json, diagnose, format_diagnosis, format_status};
+use diagnose::{diagnose, diagnosis_json, format_diagnosis, format_status};
 use help::{command_help, ROOT_HELP};
 use incodex_core::paths::DEFAULT_APP;
 use parse::{parse_cli, CliCommand};
@@ -20,7 +25,7 @@ where
     S: AsRef<str>,
 {
     let args: Vec<String> = args.into_iter().map(|s| s.as_ref().to_string()).collect();
-    let parsed = parse_cli(&args)?;
+    let mut parsed = parse_cli(&args)?;
     if parsed.command == CliCommand::Version {
         print!("{}", format_version_report(&collect_version_facts()));
         return Ok(());
@@ -35,12 +40,26 @@ where
         return Ok(());
     }
     if parsed.command == CliCommand::Menu {
-        println!("{ROOT_HELP}");
-        return Ok(());
+        if !terminal::is_tty() {
+            println!("{ROOT_HELP}");
+            return Ok(());
+        }
+        let Some(command) = menu::run_menu()? else {
+            return Ok(());
+        };
+        parsed.command = command;
+        parsed.live = matches!(command, CliCommand::Install | CliCommand::Uninstall);
+        if command == CliCommand::Version {
+            print!("{}", format_version_report(&collect_version_facts()));
+            return Ok(());
+        }
     }
 
     match parsed.command {
         CliCommand::Open => crate::open::run_open(&parsed),
+        CliCommand::Runtime => crate::lifecycle::run_runtime(&parsed),
+        CliCommand::Update => crate::lifecycle::run_update(&parsed),
+        CliCommand::SelfUninstall => crate::lifecycle::run_self_uninstall(&parsed),
         CliCommand::Install => crate::install::run_install(&parsed),
         CliCommand::Uninstall => crate::install::run_uninstall(&parsed),
         CliCommand::Recover => crate::install::run_recover(&parsed),

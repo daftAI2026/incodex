@@ -119,8 +119,10 @@ dependencies = [
  "incodex-macos",
  "incodex-runtime-bundle",
  "incodex-transaction",
+ "libc",
  "serde",
  "serde_json",
+ "sha2",
  "tungstenite",
 ]
 

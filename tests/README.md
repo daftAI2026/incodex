@@ -10,6 +10,7 @@ holds cross-cutting fixtures and engineering checks.
 | `tests/runtime-manifest.test.ts` | committed runtime metadata |
 | `tests/cli-golden.test.ts` | freeze CLI stdout/stderr/exit/JSON/TTY for the Rust port |
 | `tests/rust-workspace.test.ts` | MIT workspace, no TUI/AGPL crates, CI `cargo test` |
+| `crates/incodex-cli/tests/parity.rs` | same-fixture TypeScript/Rust plans, artifacts, manifests, signing, lifecycle, and native TTY behavior |
 
 ASAR fixture coverage is in `src/asar-unpack.test.ts` and `src/asar-upgrade.test.ts`.
 Install-fault and privacy-forensics cases still belong here once they exist.

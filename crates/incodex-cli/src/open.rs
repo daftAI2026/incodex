@@ -5,12 +5,15 @@ use std::time::Duration;
 
 use incodex_core::paths::{home_dir, user_root};
 use incodex_core::session::{
-    burn_session_home, copy_settings, create_session_home, sweep_orphan_sessions, target_id_from_exec,
-    BurnExpected, SessionHome,
+    burn_session_home, copy_settings, create_session_home, sweep_orphan_sessions,
+    target_id_from_exec, BurnExpected, SessionHome,
 };
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
 
-use crate::cdp::{allocate_debug_port, debug_launch_args, inject_shared_ui};
+use crate::cdp::{
+    allocate_debug_port, debug_launch_args, inject_shared_ui_with_options, InjectionOptions,
+    WindowBounds,
+};
 use crate::parse::ParsedCli;
 
 #[derive(Debug, Clone)]
@@ -23,11 +26,15 @@ pub struct OpenPlan {
     pub session_id: String,
     pub session_root: PathBuf,
     pub debug_port: u16,
+    pub locale: Option<String>,
+    pub source_bounds: Option<WindowBounds>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CleanupResult {
-    Removed { attempts: u8 },
+    Removed {
+        attempts: u8,
+    },
     Retained {
         attempts: u8,
         retained_path: PathBuf,
@@ -71,7 +78,12 @@ pub fn prepare_incognito_open(
     }
     let target_id = target_id_from_exec(&bin.to_string_lossy());
     let _ = sweep_orphan_sessions(user_root, Some(&target_id));
-    let session = create_session_home(user_root, Some(&target_id), pid, &source_home.to_string_lossy())?;
+    let session = create_session_home(
+        user_root,
+        Some(&target_id),
+        pid,
+        &source_home.to_string_lossy(),
+    )?;
     if let Err(error) = copy_settings(&session.home, source_home, user_root) {
         let _ = burn_session_home(
             &session.root,
@@ -119,7 +131,26 @@ fn plan_from_session(bin: PathBuf, session: SessionHome, source_home: &Path) -> 
         session_root: session.root,
         bin,
         debug_port,
+        locale: read_locale_override(source_home),
+        source_bounds: None,
     }
+}
+
+fn read_locale_override(source_home: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(source_home.join("config.toml")).ok()?;
+    content.lines().find_map(|line| {
+        let (name, value) = line.split_once('=')?;
+        if name.trim() != "localeOverride" {
+            return None;
+        }
+        value
+            .trim()
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    })
 }
 
 pub fn format_session_cleanup(cleanup: &CleanupResult) -> (bool, String) {
@@ -166,16 +197,41 @@ fn spawn_plan(plan: &OpenPlan) -> Result<i32, String> {
     let mut child = command.spawn().map_err(|err| err.to_string())?;
     if plan.debug_port != 0 {
         let port = plan.debug_port;
+        let child_pid = child.id();
+        let source_bounds = plan.source_bounds;
+        let options = InjectionOptions {
+            locale: plan.locale.clone(),
+        };
         thread::spawn(move || {
+            let mut bounds_ready = source_bounds.is_none();
+            let mut ui_ready = false;
+            let mut last_injection_error = None;
             for attempt in 1u8..=40 {
-                match inject_shared_ui(port) {
-                    Ok(()) => {
+                if !bounds_ready {
+                    if let Some(bounds) = source_bounds {
+                        bounds_ready = incodex_macos::tile_process_front_window(
+                            child_pid,
+                            (bounds.x, bounds.y, bounds.width, bounds.height),
+                            22,
+                        )
+                        .is_ok();
+                    }
+                }
+                match inject_shared_ui_with_options(port, &options) {
+                    Ok(()) if bounds_ready => {
                         if std::env::var_os("INCODEX_CDP_LOG").is_some() {
                             eprintln!("cdp inject ok on attempt {attempt} port {port}");
                         }
                         return;
                     }
+                    Ok(()) => {
+                        ui_ready = true;
+                        if std::env::var_os("INCODEX_CDP_LOG").is_some() {
+                            eprintln!("cdp inject ok; waiting for child window bounds");
+                        }
+                    }
                     Err(err) => {
+                        last_injection_error = Some(err.clone());
                         if std::env::var_os("INCODEX_CDP_LOG").is_some() {
                             eprintln!("cdp inject attempt {attempt}: {err}");
                         }
@@ -183,6 +239,20 @@ fn spawn_plan(plan: &OpenPlan) -> Result<i32, String> {
                 }
                 thread::sleep(Duration::from_millis(400));
             }
+            let detail = if !ui_ready {
+                format!(
+                    "UI injection failed: {}",
+                    last_injection_error
+                        .as_deref()
+                        .unwrap_or("unknown CDP error")
+                )
+            } else {
+                "the window could not inherit the main window bounds".to_string()
+            };
+            eprintln!(
+                "\r\u{1b}[2K{}",
+                format_warn(&format!("Window opened, but {detail}."), None)
+            );
         });
     }
     child
@@ -267,19 +337,42 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), String> {
         .unwrap_or_else(|| PathBuf::from(incodex_core::DEFAULT_APP));
     if parsed.dry_run {
         let (bin, _) = describe_incognito_open(&app_path);
-        println!("{}", format_step("Open incognito without patching Codex", None));
-        println!("{}", format_kv("App", &app_path.display().to_string(), None));
+        println!(
+            "{}",
+            format_step("Open incognito without patching Codex", None)
+        );
+        println!(
+            "{}",
+            format_kv("App", &app_path.display().to_string(), None)
+        );
         println!("{}", format_kv("Binary", &bin.display().to_string(), None));
         println!("{}", format_warn("Dry run. No window opened.", None));
         return Ok(());
     }
     let root = user_root();
     let source = default_source_home();
-    let plan = prepare_incognito_open(&app_path, &root, &source, std::process::id() as i32)?;
+    let mut plan = prepare_incognito_open(&app_path, &root, &source, std::process::id() as i32)?;
+    if app_path == Path::new(incodex_core::DEFAULT_APP) {
+        plan.source_bounds =
+            incodex_macos::front_codex_window_bounds().map(|(x, y, width, height)| WindowBounds {
+                x,
+                y,
+                width,
+                height,
+            });
+    }
     println!("{}", format_step("Opening incognito window", None));
-    println!("{}", format_kv("Binary", &plan.bin.display().to_string(), None));
-    println!("{}", format_kv("Home", &plan.home.display().to_string(), None));
+    println!(
+        "{}",
+        format_kv("Binary", &plan.bin.display().to_string(), None)
+    );
+    println!(
+        "{}",
+        format_kv("Home", &plan.home.display().to_string(), None)
+    );
+    let mut spinner = crate::spinner::Spinner::start("Waiting for the window to close");
     let (_code, cleanup) = wait_and_burn(&plan, &root, 250)?;
+    spinner.stop();
     let (ok, message) = format_session_cleanup(&cleanup);
     if ok {
         println!("{}", format_ok(&message, None));
@@ -347,14 +440,8 @@ mod tests {
         fs::create_dir_all(&source).unwrap();
         fs::write(source.join("auth.json"), "{}\n").unwrap();
         let plan = prepare_incognito_open(&app, &user, &source, 1).unwrap();
-        let (_code, cleanup) = wait_and_burn_with(
-            &plan,
-            &user,
-            0,
-            |_| Ok(0),
-            |_, _| Err("EPERM".into()),
-        )
-        .unwrap();
+        let (_code, cleanup) =
+            wait_and_burn_with(&plan, &user, 0, |_| Ok(0), |_, _| Err("EPERM".into())).unwrap();
         assert!(plan.session_root.exists());
         assert_eq!(
             cleanup,
@@ -390,4 +477,19 @@ mod tests {
         assert!(cleanup.removed());
     }
 
+    #[test]
+    fn locale_override_is_carried_into_the_cdp_injection_plan() {
+        let root = temp_root();
+        let app = fake_app(&root);
+        let user = root.join("home");
+        let source = root.join("codex");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(
+            source.join("config.toml"),
+            "model = \"test\"\nlocaleOverride = \"zh-CN\"\n",
+        )
+        .unwrap();
+        let plan = prepare_incognito_open(&app, &user, &source, 1).unwrap();
+        assert_eq!(plan.locale.as_deref(), Some("zh-CN"));
+    }
 }

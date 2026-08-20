@@ -73,6 +73,11 @@ The step list is in `AGENTS.md` (Native CLI experiment). One step per PR into
 `exp/rust-cli`. Each crate PR starts with a failing `cargo test` repro, then
 the implementation.
 
+Step 8 compares the TypeScript and Rust CLIs on the same fixture, including
+plans, ASAR and manifest semantics, Runtime hashes, signing, install,
+uninstall, and recover. Its native TTY menu must also be checked manually
+before the integration branch is merged.
+
 ## Pull requests
 
 - One review-sized change per PR

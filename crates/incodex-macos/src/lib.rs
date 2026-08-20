@@ -16,6 +16,7 @@ pub struct PlistInfo {
     pub bundle_identifier: String,
     pub app_version: String,
     pub app_build: String,
+    pub executable: String,
 }
 
 pub fn ditto(src: &Path, dest: &Path) -> Result<(), String> {
@@ -78,7 +79,79 @@ pub fn read_plist_info(app: &Path) -> Option<PlistInfo> {
         bundle_identifier: json_string(&raw, "CFBundleIdentifier"),
         app_version: json_string(&raw, "CFBundleShortVersionString"),
         app_build: json_string(&raw, "CFBundleVersion"),
+        executable: raw
+            .get("CFBundleExecutable")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("ChatGPT")
+            .to_string(),
     })
+}
+
+pub fn read_architecture(app: &Path, executable: &str) -> Option<String> {
+    let binary = app.join("Contents").join("MacOS").join(executable);
+    let output = Command::new("lipo")
+        .arg("-archs")
+        .arg(binary)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let mut architectures: Vec<_> = String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
+    architectures.sort();
+    let joined = architectures.join(" ");
+    (!joined.is_empty()).then_some(joined)
+}
+
+pub fn read_asar_integrity(app: &Path) -> Option<String> {
+    let plist = app.join("Contents").join("Info.plist");
+    let output = Command::new("plutil")
+        .args(["-convert", "json", "-o", "-", "--"])
+        .arg(plist)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let raw: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    raw.pointer("/ElectronAsarIntegrity/Resources~1app.asar/hash")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+pub fn diagnose_spctl(app: &Path) -> serde_json::Value {
+    let output = Command::new("spctl")
+        .args(["--assess", "--verbose=4", "--"])
+        .arg(app)
+        .output();
+    match output {
+        Ok(output) => {
+            let status = output.status.code().unwrap_or(1);
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            )
+            .trim()
+            .to_string();
+            serde_json::json!({
+                "status": status,
+                "output": text,
+                "accepted": output.status.success(),
+                "usedAsSuccessGate": false,
+            })
+        }
+        Err(error) => serde_json::json!({
+            "status": 1,
+            "output": error.to_string(),
+            "accepted": false,
+            "usedAsSuccessGate": false,
+        }),
+    }
 }
 
 fn json_string(raw: &serde_json::Value, key: &str) -> String {
@@ -119,6 +192,22 @@ pub fn verify_app(app: &Path) -> bool {
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)
+}
+
+pub fn has_hardened_runtime(app: &Path) -> bool {
+    let Ok(output) = Command::new("codesign")
+        .args(["--display", "--verbose=2", "--"])
+        .arg(app)
+        .output()
+    else {
+        return false;
+    };
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )
+    .contains("runtime")
 }
 
 pub fn collect_vendor_helper_roots(app: &Path) -> Vec<PathBuf> {
@@ -223,6 +312,72 @@ pub fn quit_official_app() -> Result<(), String> {
     Ok(())
 }
 
+pub fn front_codex_window_bounds() -> Option<(i32, i32, i32, i32)> {
+    let script = r#"tell application "System Events" to tell first process whose bundle identifier is "com.openai.codex" to get {position, size} of front window"#;
+    let output = Command::new("osascript")
+        .args(["-e", script])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_window_bounds_output(&String::from_utf8_lossy(&output.stdout))
+}
+
+pub fn tile_process_front_window(
+    pid: u32,
+    source: (i32, i32, i32, i32),
+    offset: i32,
+) -> Result<(), String> {
+    let desired = (source.0 + offset, source.1 + offset, source.2, source.3);
+    set_process_front_window_bounds(pid, desired)?;
+    let actual = process_front_window_bounds(pid).ok_or("child window bounds unavailable")?;
+    if actual.2 != source.2 || actual.3 != source.3 {
+        set_process_front_window_bounds(pid, source)?;
+    }
+    Ok(())
+}
+
+fn process_front_window_bounds(pid: u32) -> Option<(i32, i32, i32, i32)> {
+    let script = format!(
+        "tell application \"System Events\" to tell first process whose unix id is {pid} to get {{position, size}} of front window"
+    );
+    let output = Command::new("osascript")
+        .args(["-e", &script])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_window_bounds_output(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn set_process_front_window_bounds(pid: u32, bounds: (i32, i32, i32, i32)) -> Result<(), String> {
+    let script = format!(
+        "tell application \"System Events\" to tell first process whose unix id is {pid} to tell front window to set {{position, size}} to {{{{{}, {}}}, {{{}, {}}}}}",
+        bounds.0, bounds.1, bounds.2, bounds.3
+    );
+    let output = Command::new("osascript")
+        .args(["-e", &script])
+        .output()
+        .map_err(|err| err.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    Ok(())
+}
+
+fn parse_window_bounds_output(raw: &str) -> Option<(i32, i32, i32, i32)> {
+    let values: Vec<i32> = raw
+        .trim()
+        .split(',')
+        .map(str::trim)
+        .map(str::parse)
+        .collect::<Result<_, _>>()
+        .ok()?;
+    (values.len() == 4).then(|| (values[0], values[1], values[2], values[3]))
+}
+
 pub fn notify_launch_services(app: &Path) -> Result<(), String> {
     let _ = Command::new("lsregister")
         .args(["-f", "-R", "-trusted"])
@@ -233,6 +388,17 @@ pub fn notify_launch_services(app: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn crate_compiles() {}
+
+    #[test]
+    fn parses_system_events_position_and_size() {
+        assert_eq!(
+            parse_window_bounds_output("0, 34, 1710, 1073\n"),
+            Some((0, 34, 1710, 1073))
+        );
+        assert_eq!(parse_window_bounds_output("missing"), None);
+    }
 }
