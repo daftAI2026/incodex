@@ -164,7 +164,10 @@ pub fn validate_rel_paths(journal: &JournalV2) -> Result<(), String> {
 pub fn reconstructed(root: &Path, journal: &JournalV2) -> Result<TxPaths, String> {
     validate_rel_paths(journal)?;
     let paths = tx_paths(root, &journal.install_id);
+    reject_symlink(&root.join("transactions"), "transactions directory")?;
+    reject_symlink(&paths.dir, "transaction directory")?;
     for rel in [&journal.paths.staged, &journal.paths.outgoing, &journal.paths.original] {
+        validate_path_ancestors(&paths.dir, rel)?;
         let full = paths.dir.join(rel);
         if let Ok(meta) = fs::symlink_metadata(&full) {
             if meta.file_type().is_symlink() {
@@ -179,4 +182,31 @@ pub fn reconstructed(root: &Path, journal: &JournalV2) -> Result<TxPaths, String
         }
     }
     Ok(paths)
+}
+
+fn reject_symlink(path: &Path, label: &str) -> Result<(), String> {
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            Err(format!("{label} is a symlink: {}", path.display()))
+        }
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("cannot inspect {label}: {error}")),
+    }
+}
+
+fn validate_path_ancestors(base: &Path, rel: &str) -> Result<(), String> {
+    let mut current = base.to_path_buf();
+    for component in Path::new(rel).components() {
+        current.push(component.as_os_str());
+        match fs::symlink_metadata(&current) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(format!("journal path ancestor is a symlink: {rel}"));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+            Err(error) => return Err(format!("cannot inspect journal path: {error}")),
+        }
+    }
+    Ok(())
 }

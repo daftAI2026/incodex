@@ -308,9 +308,14 @@ fn uninstall_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
 }
 
 fn current_install_id(app: &Path, root: &Path, archive: &Archive) -> Option<String> {
-    if !archive.has_only_loader()
-        || archive.extract("incodex-loader.cjs").ok()? != loader_source().as_bytes()
-    {
+    if archive.extract("incodex-loader.cjs").ok()? != loader_source().as_bytes() {
+        return None;
+    }
+    installed_install_id(app, root, archive)
+}
+
+fn installed_install_id(app: &Path, root: &Path, archive: &Archive) -> Option<String> {
+    if !archive.has_only_loader() {
         return None;
     }
     let package = archive.read_package_main().ok()?;
@@ -341,6 +346,9 @@ fn find_committed(root: &Path, app: &Path) -> Result<incodex_transaction::Journa
     let real = inspect_target(app, None)
         .map(|t| t.real_path)
         .unwrap_or_else(|_| app.to_path_buf());
+    let live_install_id = Archive::open(&app.join(ASAR_REL))
+        .ok()
+        .and_then(|archive| installed_install_id(app, root, &archive));
     let dir = root.join("transactions");
     let entries = fs::read_dir(&dir).map_err(|_| {
         "no installation record for this target. refusing to use ~/.incodex/backup because it is not bound to this app"
@@ -359,6 +367,9 @@ fn find_committed(root: &Path, app: &Path) -> Result<incodex_transaction::Journa
             continue;
         }
         if Path::new(&journal.target.real_path) != real {
+            continue;
+        }
+        if live_install_id.as_deref() != Some(journal.install_id.as_str()) {
             continue;
         }
         if best
