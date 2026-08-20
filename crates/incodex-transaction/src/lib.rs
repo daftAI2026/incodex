@@ -2,6 +2,7 @@ mod durable;
 mod engine;
 mod journal;
 mod lock;
+mod proof;
 
 use std::fs;
 use std::path::Path;

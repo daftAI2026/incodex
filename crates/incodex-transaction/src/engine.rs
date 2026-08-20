@@ -1,10 +1,8 @@
 use std::fs;
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use incodex_core::canonical::{inspect_target, recheck_target, CanonicalTarget};
 use incodex_macos::ditto;
-use sha2::{Digest, Sha256};
 
 use crate::journal::{
     load_v2, reconstructed, tx_paths, validate_rel_paths, write_journal, JournalTarget, JournalV2,
@@ -12,6 +10,12 @@ use crate::journal::{
 };
 use crate::lock::{acquire_target_lock, TargetLock};
 use crate::new_install_id;
+use crate::proof::{
+    directory_identity, matches_recorded_restore, matches_recorded_restore_path,
+    optional_directory_identity, parse_identity, record_restore_intent, require_identity,
+    restore_source, tree_digest, validate_backup_digest, validate_pre_swap_live,
+    validate_staged_snapshot, validate_tree_digest,
+};
 use crate::Recovery;
 
 #[derive(Debug)]
@@ -42,7 +46,6 @@ pub struct CommitResult {
 
 pub struct Engine {
     root: PathBuf,
-    live_path: PathBuf,
     target: CanonicalTarget,
     journal: JournalV2,
     _lock: TargetLock,
@@ -53,6 +56,8 @@ impl Engine {
         let target = inspect_target(live_path, None)?;
         let install_id = new_install_id();
         let lock = acquire_target_lock(root, live_path, command, Some(&install_id))?;
+        recheck_target(&target)?;
+        let pre_swap_digest = tree_digest(&target.real_path)?;
         let journal = JournalV2 {
             schema_version: 2,
             install_id: install_id.clone(),
@@ -72,14 +77,18 @@ impl Engine {
             phase: "DISCOVERED".into(),
             sequence: 1,
             checksum: String::new(),
+            pre_swap_digest,
             backup_digest: String::new(),
             staged_device: String::new(),
             staged_inode: String::new(),
+            staged_digest: String::new(),
+            restored_device: String::new(),
+            restored_inode: String::new(),
+            restored_digest: String::new(),
         };
         write_journal(root, &journal)?;
         Ok(Self {
             root: root.to_path_buf(),
-            live_path: live_path.to_path_buf(),
             target,
             journal: load_v2(root, &install_id)?,
             _lock: lock,
@@ -110,6 +119,13 @@ impl Engine {
             ));
         }
         require_backup_snapshot(&self.root, self.install_id())?;
+        validate_backup_digest(
+            &tx_paths(&self.root, self.install_id()).original,
+            &self.journal,
+        )?;
+        validate_pre_swap_live(&self.target, &self.journal)?;
+        directory_identity(staged)
+            .map_err(|error| format!("cannot use staging source: {error}"))?;
         let dest = self.staging_app();
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent).map_err(|err| err.to_string())?;
@@ -119,8 +135,10 @@ impl Engine {
         }
         fs::rename(staged, &dest).or_else(|_| ditto(staged, &dest))?;
         let identity = directory_identity(&dest)?;
+        let digest = tree_digest(&dest)?;
         self.journal.staged_device = identity.device.to_string();
         self.journal.staged_inode = identity.inode.to_string();
+        self.journal.staged_digest = digest;
         self.advance("STAGED")
     }
 
@@ -133,7 +151,12 @@ impl Engine {
         }
         require_backup_snapshot(&self.root, self.install_id())?;
         let original = tx_paths(&self.root, self.install_id()).original;
-        self.journal.backup_digest = tree_digest(&original)?;
+        validate_pre_swap_live(&self.target, &self.journal)?;
+        let backup_digest = tree_digest(&original)?;
+        if backup_digest != self.journal.pre_swap_digest {
+            return Err("backup snapshot does not match the sealed pre-swap tree".into());
+        }
+        self.journal.backup_digest = backup_digest;
         self.advance("BACKUP_COMMITTED")
     }
 
@@ -147,17 +170,22 @@ impl Engine {
         F: FnMut(&str),
     {
         require_phase(&self.journal, "STAGED", "swap")?;
-        recheck_target(&self.target)?;
+        validate_pre_swap_live(&self.target, &self.journal)?;
+        validate_backup_digest(
+            &tx_paths(&self.root, self.install_id()).original,
+            &self.journal,
+        )?;
+        validate_staged_snapshot(&self.staging_app(), &self.journal)?;
         self.advance("TARGET_MOVED_OUT")?;
         checkpoint("TARGET_MOVED_OUT");
         let outgoing = self.outgoing_app();
         if let Some(parent) = outgoing.parent() {
             fs::create_dir_all(parent).map_err(|err| err.to_string())?;
         }
-        fs::rename(&self.live_path, &outgoing).map_err(|err| err.to_string())?;
+        fs::rename(&self.target.real_path, &outgoing).map_err(|err| err.to_string())?;
         checkpoint("LIVE_MOVED_OUT");
-        fs::rename(self.staging_app(), &self.live_path).map_err(|err| {
-            let _ = fs::rename(&outgoing, &self.live_path);
+        fs::rename(self.staging_app(), &self.target.real_path).map_err(|err| {
+            let _ = fs::rename(&outgoing, &self.target.real_path);
             err.to_string()
         })?;
         checkpoint("STAGING_MOVED_IN");
@@ -176,6 +204,8 @@ impl Engine {
         F: FnMut(&str),
     {
         require_phase(&self.journal, "SWAPPED", "commit")?;
+        let paths = reconstructed(&self.root, &self.journal)?;
+        validate_recovery_target(&self.journal, &paths, &self.target.real_path)?;
         self.advance("COMMITTED")?;
         checkpoint("COMMITTED_BEFORE_CLEANUP");
         let cleanup_warning = cleanup_outgoing(&self.outgoing_app()).err();
@@ -189,10 +219,12 @@ impl Engine {
             phase if is_pre_swap_phase(phase) || is_post_swap_phase(phase) => {}
             phase => return Err(format!("cannot rollback transaction in phase {phase}")),
         }
+        let paths = reconstructed(&self.root, &self.journal)?;
+        validate_recovery_target(&self.journal, &paths, &self.target.real_path)?;
         if is_pre_swap_phase(&self.journal.phase) {
             cleanup_pre_swap(&self.root, &self.journal)?;
         } else {
-            restore_live(&self.root, &self.live_path, &self.journal)?;
+            self.journal = restore_live(&self.root, &self.target.real_path, &self.journal)?;
         }
         self.advance("ROLLED_BACK")
     }
@@ -228,178 +260,12 @@ fn require_phase(journal: &JournalV2, expected: &str, operation: &str) -> Result
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct FsIdentity {
-    device: u64,
-    inode: u64,
-}
-
-fn directory_identity(path: &Path) -> Result<FsIdentity, String> {
-    let metadata = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
-    if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-        return Err(format!("path is not a real directory: {}", path.display()));
-    }
-    Ok(FsIdentity {
-        device: metadata.dev(),
-        inode: metadata.ino(),
-    })
-}
-
-fn tree_digest(root: &Path) -> Result<String, String> {
-    let mut entries = Vec::new();
-    collect_tree(root, root, &mut entries)?;
-    entries.sort_by(|left, right| left.0.cmp(&right.0));
-    let mut digest = Sha256::new();
-    for (relative, kind, data) in entries {
-        digest.update(relative.as_bytes());
-        digest.update([0]);
-        digest.update([kind]);
-        digest.update([0]);
-        digest.update(data);
-        digest.update([0]);
-    }
-    Ok(digest
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect())
-}
-
-fn collect_tree(
-    root: &Path,
-    current: &Path,
-    entries: &mut Vec<(String, u8, Vec<u8>)>,
-) -> Result<(), String> {
-    let mut children = fs::read_dir(current)
-        .map_err(|error| error.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())?;
-    children.sort_by_key(|entry| entry.file_name());
-    for entry in children {
-        let path = entry.path();
-        let relative = path
-            .strip_prefix(root)
-            .map_err(|error| error.to_string())?
-            .to_string_lossy()
-            .into_owned();
-        let file_type = entry.file_type().map_err(|error| error.to_string())?;
-        if file_type.is_symlink() {
-            let target = fs::read_link(&path).map_err(|error| error.to_string())?;
-            entries.push((
-                relative,
-                b'L',
-                target.to_string_lossy().as_bytes().to_vec(),
-            ));
-        } else if file_type.is_dir() {
-            entries.push((relative, b'D', Vec::new()));
-            collect_tree(root, &path, entries)?;
-        } else if file_type.is_file() {
-            entries.push((relative, b'F', fs::read(&path).map_err(|error| error.to_string())?));
-        } else {
-            return Err(format!("unsupported backup entry type: {}", path.display()));
-        }
-    }
-    Ok(())
-}
-
-fn validate_backup_digest(path: &Path, journal: &JournalV2) -> Result<(), String> {
-    if journal.backup_digest.is_empty() {
-        return Err("durable backup manifest is missing".into());
-    }
-    let actual = tree_digest(path)?;
-    if actual != journal.backup_digest {
-        return Err(format!(
-            "backup snapshot digest mismatch for {}",
-            path.display()
-        ));
-    }
-    Ok(())
-}
-
-fn restore_source(root: &Path, journal: &JournalV2) -> Result<PathBuf, String> {
-    let paths = tx_paths(root, &journal.install_id);
-    match fs::symlink_metadata(&paths.original) {
-        Ok(_) => {
-            directory_identity(&paths.original).map_err(|error| {
-                format!("invalid original restore source: {error}")
-            })?;
-            validate_backup_digest(&paths.original, journal)?;
-            return Ok(paths.original);
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(format!("cannot inspect original restore source: {error}")),
-    }
-    match fs::symlink_metadata(&paths.outgoing) {
-        Ok(_) => {
-            directory_identity(&paths.outgoing).map_err(|error| {
-                format!("invalid outgoing restore source: {error}")
-            })?;
-            validate_backup_digest(&paths.outgoing, journal)?;
-            Ok(paths.outgoing)
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            Err("no safe restore source exists".into())
-        }
-        Err(error) => Err(format!("cannot inspect outgoing restore source: {error}")),
-    }
-}
-
-fn parse_identity(device: &str, inode: &str, label: &str) -> Result<FsIdentity, String> {
-    if device.is_empty() || inode.is_empty() {
-        return Err(format!("{label} identity is missing from the journal"));
-    }
-    Ok(FsIdentity {
-        device: device
-            .parse()
-            .map_err(|_| format!("{label} device identity is invalid"))?,
-        inode: inode
-            .parse()
-            .map_err(|_| format!("{label} inode identity is invalid"))?,
-    })
-}
-
-fn optional_directory_identity(path: &Path, label: &str) -> Result<Option<FsIdentity>, String> {
-    match fs::symlink_metadata(path) {
-        Ok(_) => directory_identity(path)
-            .map(Some)
-            .map_err(|error| format!("{label} is not a real directory: {error}")),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(format!("cannot inspect {label}: {error}")),
-    }
-}
-
-fn require_identity(
-    actual: Option<FsIdentity>,
-    expected: FsIdentity,
-    label: &str,
-) -> Result<(), String> {
-    match actual {
-        Some(actual) if actual == expected => Ok(()),
-        Some(actual) => Err(format!(
-            "{label} identity changed from {}:{} to {}:{}",
-            expected.device, expected.inode, actual.device, actual.inode
-        )),
-        None => Err(format!("{label} is missing")),
-    }
-}
-
-fn matches_sealed_backup(live: &Path, journal: &JournalV2) -> Result<bool, String> {
-    if journal.backup_digest.is_empty() {
-        return Ok(false);
-    }
-    Ok(tree_digest(live)? == journal.backup_digest)
-}
-
 fn validate_recovery_target(
     journal: &JournalV2,
     paths: &crate::journal::TxPaths,
     live: &Path,
 ) -> Result<(), String> {
-    let original_target = parse_identity(
-        &journal.target.device,
-        &journal.target.inode,
-        "target",
-    )?;
+    let original_target = parse_identity(&journal.target.device, &journal.target.inode, "target")?;
     let parent = live
         .parent()
         .ok_or("target has no parent during recovery")?;
@@ -415,37 +281,87 @@ fn validate_recovery_target(
     )?;
 
     let live_identity = optional_directory_identity(live, "live target")?;
+    let staged_expected = if is_post_swap_phase(&journal.phase) {
+        Some(parse_identity(
+            &journal.staged_device,
+            &journal.staged_inode,
+            "staged target",
+        )?)
+    } else {
+        None
+    };
+    let staged_identity = if is_post_swap_phase(&journal.phase) {
+        optional_directory_identity(&paths.staged, "staged target")?
+    } else {
+        None
+    };
+    if let Some(identity) = staged_identity {
+        let expected =
+            staged_expected.ok_or("staged target identity is missing from the journal")?;
+        require_identity(Some(identity), expected, "staged target")?;
+        validate_tree_digest(&paths.staged, &journal.staged_digest, "staged target")?;
+    }
+
+    if matches!(journal.phase.as_str(), "BACKUP_COMMITTED" | "STAGED") {
+        validate_backup_digest(&paths.original, journal)?;
+    }
+
     match journal.phase.as_str() {
         phase if is_pre_swap_phase(phase) => {
-            require_identity(live_identity, original_target, "live target")
+            require_identity(live_identity, original_target, "live target")?;
+            validate_tree_digest(live, &journal.pre_swap_digest, "pre-swap live")
         }
         "TARGET_MOVED_OUT" => {
             let outgoing = optional_directory_identity(&paths.outgoing, "outgoing target")?;
             if let Some(identity) = outgoing.as_ref() {
                 require_identity(Some(*identity), original_target, "outgoing target")?;
+                validate_tree_digest(&paths.outgoing, &journal.backup_digest, "outgoing target")?;
             }
-            let staged = parse_identity(
-                &journal.staged_device,
-                &journal.staged_inode,
-                "staged target",
-            )?;
+            let staged =
+                staged_expected.ok_or("staged target identity is missing from the journal")?;
             match live_identity {
-                Some(identity) if identity == original_target || identity == staged => Ok(()),
-                Some(_) if matches_sealed_backup(live, journal)? => Ok(()),
-                None if outgoing.is_some() => Ok(()),
+                Some(identity) if identity == original_target => {
+                    validate_tree_digest(live, &journal.pre_swap_digest, "pre-swap live")
+                }
+                Some(identity) if identity == staged => {
+                    validate_tree_digest(live, &journal.staged_digest, "swapped live")?;
+                    if outgoing.is_none() {
+                        return Err("staged live has no outgoing original".into());
+                    }
+                    Ok(())
+                }
+                Some(_) if matches_recorded_restore(live, journal)? => Ok(()),
+                None if outgoing.is_some() && staged_identity.is_some() => Ok(()),
                 Some(_) => Err("live target is neither the original nor staged inode".into()),
                 None => Err("live target and outgoing target are both missing".into()),
             }
         }
         "SWAPPED" | "TARGET_VERIFIED" => {
-            let staged = parse_identity(
-                &journal.staged_device,
-                &journal.staged_inode,
-                "staged target",
-            )?;
-            if !matches!(live_identity, Some(identity) if identity == staged)
-                && !matches_sealed_backup(live, journal)?
+            let restore_root = paths
+                .dir
+                .parent()
+                .and_then(Path::parent)
+                .ok_or("transaction root is missing during recovery")?;
+            let _ = restore_source(restore_root, journal)?;
+            let staged =
+                staged_expected.ok_or("staged target identity is missing from the journal")?;
+            if matches!(live_identity, Some(identity) if identity == staged) {
+                validate_tree_digest(live, &journal.staged_digest, "swapped live")?;
+            } else if matches_recorded_restore(live, journal)? {
+                // +-----------------------------------------------------------+
+                // | restore rename 已完成；下一次 recover 只需重试垃圾清理。      |
+                // +-----------------------------------------------------------+
+            } else if live_identity.is_none()
+                && matches_recorded_restore_path(
+                    &paths.dir.join("restore/ChatGPT.app"),
+                    journal,
+                    "restore candidate",
+                )?
             {
+                // +-----------------------------------------------------------+
+                // | durable intent 已落盘但 rename 尚未完成，允许安全重试。       |
+                // +-----------------------------------------------------------+
+            } else {
                 return Err("swapped live target identity changed".into());
             }
             if let Some(identity) = optional_directory_identity(&paths.outgoing, "outgoing target")?
@@ -470,7 +386,7 @@ pub fn recover_with<F>(
 where
     F: FnOnce(&Path) -> bool,
 {
-    let journal = load_v2(root, install_id).map_err(|message| TxError::Refuse { message })?;
+    let mut journal = load_v2(root, install_id).map_err(|message| TxError::Refuse { message })?;
     validate_rel_paths(&journal).map_err(|message| TxError::Refuse { message })?;
     reconstructed(root, &journal).map_err(|message| TxError::Refuse { message })?;
     let live = PathBuf::from(&journal.target.real_path);
@@ -502,10 +418,15 @@ where
     }
     validate_recovery_target(&journal, &paths, &live)
         .map_err(|message| TxError::Refuse { message })?;
+    let already_restored = is_post_swap_phase(&journal.phase)
+        && matches_recorded_restore(&live, &journal)
+            .map_err(|message| TxError::Refuse { message })?;
     if is_pre_swap_phase(&journal.phase) {
         cleanup_pre_swap(root, &journal).map_err(TxError::Other)?;
+    } else if already_restored {
+        cleanup_restored(root, &journal).map_err(TxError::Other)?;
     } else {
-        restore_live(root, &live, &journal).map_err(TxError::Other)?;
+        journal = restore_live(root, &live, &journal).map_err(TxError::Other)?;
     }
     if !verify_restored(&live) {
         return Err(TxError::Other(
@@ -569,27 +490,40 @@ fn cleanup_pre_swap(root: &Path, journal: &JournalV2) -> Result<(), String> {
     Ok(())
 }
 
-fn restore_live(root: &Path, live: &Path, journal: &JournalV2) -> Result<(), String> {
+fn restore_live(root: &Path, live: &Path, journal: &JournalV2) -> Result<JournalV2, String> {
     let paths = tx_paths(root, &journal.install_id);
     let source = restore_source(root, journal)?;
-    if source == paths.original {
+    let candidate = if source == paths.original {
         // +---------------------------------------------------------------+
         // | 原始快照是卸载所需的耐久备份；先复制再替换，回滚绝不消费它。          |
         // +---------------------------------------------------------------+
         let restore = paths.dir.join("restore").join("ChatGPT.app");
         remove_path(&restore)?;
         ditto(&source, &restore)?;
-        replace_live(&restore, live, &paths.dir)?;
+        restore
     } else {
-        replace_live(&source, live, &paths.dir)?;
+        source
+    };
+    // +--------------------------------------------------------------------+
+    // | 先把待迁入目录的 inode/digest 写入 journal；rename 后 inode 不变。   |
+    // | 若进程死在两个动作之间，下一进程只重试可证明的 restore intent。    |
+    // +--------------------------------------------------------------------+
+    let journal = record_restore_intent(root, &candidate, journal)?;
+    replace_live(&candidate, live, &paths.dir)?;
+    cleanup_restored(root, &journal)?;
+    Ok(journal)
+}
+
+fn cleanup_restored(root: &Path, journal: &JournalV2) -> Result<(), String> {
+    let paths = tx_paths(root, &journal.install_id);
+    for path in [
+        paths.outgoing,
+        paths.staged,
+        paths.dir.join("restore"),
+        paths.dir.join("trash"),
+    ] {
+        remove_path(&path)?;
     }
-    if path_exists(&paths.outgoing)? {
-        // +---------------------------------------------------------------+
-        // | original 优先作为回滚源；outgoing 可能正处于被 commit 清理的半态。 |
-        // +---------------------------------------------------------------+
-        remove_path(&paths.outgoing)?;
-    }
-    remove_path(&paths.staged)?;
     Ok(())
 }
 
@@ -615,14 +549,6 @@ fn replace_live(source: &Path, live: &Path, transaction_dir: &Path) -> Result<()
     Ok(())
 }
 
-fn path_exists(path: &Path) -> Result<bool, String> {
-    match fs::symlink_metadata(path) {
-        Ok(_) => Ok(true),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error.to_string()),
-    }
-}
-
 fn remove_path(path: &Path) -> Result<(), String> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
@@ -634,6 +560,39 @@ fn remove_path(path: &Path) -> Result<(), String> {
     } else if metadata.file_type().is_dir() {
         fs::remove_dir_all(path).map_err(|err| err.to_string())
     } else {
-        Err(format!("cannot remove unsupported path type: {}", path.display()))
+        Err(format!(
+            "cannot remove unsupported path type: {}",
+            path.display()
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn tree_digest_streams_large_files_and_binds_permissions() {
+        let root = std::env::temp_dir().join(format!(
+            "incodex-tree-digest-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let large = root.join("large.bin");
+        fs::write(&large, vec![0x5a; 4 * 1024 * 1024]).unwrap();
+
+        let first = tree_digest(&root).unwrap();
+        fs::set_permissions(&large, fs::Permissions::from_mode(0o600)).unwrap();
+        let mode_changed = tree_digest(&root).unwrap();
+        assert_ne!(first, mode_changed);
+        fs::write(&large, vec![0xa5; 4 * 1024 * 1024]).unwrap();
+        assert_ne!(mode_changed, tree_digest(&root).unwrap());
+
+        fs::remove_dir_all(root).unwrap();
     }
 }

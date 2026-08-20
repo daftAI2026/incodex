@@ -41,11 +41,21 @@ pub struct JournalV2 {
     pub sequence: u64,
     pub checksum: String,
     #[serde(default)]
+    pub pre_swap_digest: String,
+    #[serde(default)]
     pub backup_digest: String,
     #[serde(default)]
     pub staged_device: String,
     #[serde(default)]
     pub staged_inode: String,
+    #[serde(default)]
+    pub staged_digest: String,
+    #[serde(default)]
+    pub restored_device: String,
+    #[serde(default)]
+    pub restored_inode: String,
+    #[serde(default)]
+    pub restored_digest: String,
 }
 
 #[derive(Debug, Clone)]
@@ -138,7 +148,10 @@ pub fn write_journal(root: &Path, journal: &JournalV2) -> Result<(), String> {
     }
     let path = tx_paths(root, &journal.install_id).journal;
     let sealed = seal(journal.clone());
-    let body = format!("{}\n", serde_json::to_string_pretty(&sealed).map_err(|err| err.to_string())?);
+    let body = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&sealed).map_err(|err| err.to_string())?
+    );
     write_atomic(&path, body.as_bytes())
 }
 
@@ -163,7 +176,17 @@ pub fn load_v2(root: &Path, install_id: &str) -> Result<JournalV2, String> {
 }
 
 pub fn validate_rel_paths(journal: &JournalV2) -> Result<(), String> {
-    for path in [&journal.paths.staged, &journal.paths.outgoing, &journal.paths.original] {
+    if journal.paths.staged != STAGED_REL
+        || journal.paths.outgoing != OUTGOING_REL
+        || journal.paths.original != ORIGINAL_REL
+    {
+        return Err("journal paths do not match the transaction layout".into());
+    }
+    for path in [
+        &journal.paths.staged,
+        &journal.paths.outgoing,
+        &journal.paths.original,
+    ] {
         if !is_safe_relative(path) {
             return Err(format!("journal path is not a relative child: {path}"));
         }
@@ -176,7 +199,11 @@ pub fn reconstructed(root: &Path, journal: &JournalV2) -> Result<TxPaths, String
     let paths = tx_paths(root, &journal.install_id);
     reject_symlink(&root.join("transactions"), "transactions directory")?;
     reject_symlink(&paths.dir, "transaction directory")?;
-    for rel in [&journal.paths.staged, &journal.paths.outgoing, &journal.paths.original] {
+    for rel in [
+        &journal.paths.staged,
+        &journal.paths.outgoing,
+        &journal.paths.original,
+    ] {
         validate_path_ancestors(&paths.dir, rel)?;
         let full = paths.dir.join(rel);
         if let Ok(meta) = fs::symlink_metadata(&full) {
@@ -249,9 +276,14 @@ mod tests {
             phase: "DISCOVERED".into(),
             sequence: 1,
             checksum: String::new(),
+            pre_swap_digest: String::new(),
             backup_digest: String::new(),
             staged_device: String::new(),
             staged_inode: String::new(),
+            staged_digest: String::new(),
+            restored_device: String::new(),
+            restored_inode: String::new(),
+            restored_digest: String::new(),
         }
     }
 
