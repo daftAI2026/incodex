@@ -233,6 +233,8 @@ case "$url" in
   https://raw.githubusercontent.com/daftAI2026/incodex/v9.9.9/install.sh)
     cat <<'INSTALLER'
 #!/bin/sh
+printf '%s\n' 'STABLE-INSTALLER-OUT'
+printf '%s\n' 'STABLE-INSTALLER-ERR' >&2
 sleep 0.2
 cat > "$INCODEX_PREFIX/bin/incodex.next" <<'CLI'
 #!/bin/sh
@@ -268,6 +270,8 @@ printf '%s' 'INCODEX_HTTP_STATUS:200'
         "update progress did not clear: {output:?}"
     );
     assert!(output.contains("Verified Incodex 9.9.9"), "{output:?}");
+    assert!(!output.contains("STABLE-INSTALLER-OUT"), "{output:?}");
+    assert!(!output.contains("STABLE-INSTALLER-ERR"), "{output:?}");
     assert_eq!(prefix.join("bin/incodex"), installed);
 }
 
@@ -287,11 +291,13 @@ case "$url" in
     printf '%s' '{"tag_name":"v9.9.9"}'
     ;;
   https://raw.githubusercontent.com/daftAI2026/incodex/v9.9.9/install.sh)
-    printf '%s\n' '#!/bin/sh' 'sleep 0.2' 'exit 1'
+    printf '%s\n' '#!/bin/sh' 'sleep 0.2' 'printf "%s\\n" "TAGGED-INSTALLER-ERROR" >&2' 'exit 1'
     ;;
   https://raw.githubusercontent.com/daftAI2026/incodex/main/install.sh)
     cat <<'INSTALLER'
 #!/bin/sh
+printf '%s\n' 'COMPAT-INSTALLER-OUT'
+printf '%s\n' 'COMPAT-INSTALLER-ERR' >&2
 sleep 0.2
 cat > "$INCODEX_PREFIX/bin/incodex.next" <<'CLI'
 #!/bin/sh
@@ -319,9 +325,14 @@ printf '%s' 'INCODEX_HTTP_STATUS:200'
         );
     }
     assert!(
-        output.contains("Stable installer did not complete"),
+        output.contains(
+            "Stable installer did not complete: update failed: installer exited with exit status: 1: TAGGED-INSTALLER-ERROR"
+        ),
         "{output:?}"
     );
+    assert_eq!(output.matches("TAGGED-INSTALLER-ERROR").count(), 1, "{output:?}");
+    assert!(!output.contains("COMPAT-INSTALLER-OUT"), "{output:?}");
+    assert!(!output.contains("COMPAT-INSTALLER-ERR"), "{output:?}");
     assert!(output.contains("Verified Incodex 9.9.9"), "{output:?}");
 }
 
