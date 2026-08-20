@@ -102,8 +102,17 @@ impl Engine {
     }
 
     pub fn swap(&mut self) -> Result<(), String> {
+        self.swap_with_checkpoint(|_| {})
+    }
+
+    #[doc(hidden)]
+    pub fn swap_with_checkpoint<F>(&mut self, mut checkpoint: F) -> Result<(), String>
+    where
+        F: FnMut(&str),
+    {
         recheck_target(&self.target)?;
         self.advance("TARGET_MOVED_OUT")?;
+        checkpoint("TARGET_MOVED_OUT");
         let outgoing = self.outgoing_app();
         if let Some(parent) = outgoing.parent() {
             fs::create_dir_all(parent).map_err(|err| err.to_string())?;
@@ -113,7 +122,9 @@ impl Engine {
             let _ = fs::rename(&outgoing, &self.live_path);
             err.to_string()
         })?;
-        self.advance("SWAPPED")
+        self.advance("SWAPPED")?;
+        checkpoint("SWAPPED");
+        Ok(())
     }
 
     pub fn commit(&mut self) -> Result<(), String> {
