@@ -177,7 +177,11 @@ impl Engine {
         if self.journal.phase == "COMMITTED" {
             return Err("cannot rollback a committed transaction".into());
         }
-        restore_live(&self.root, &self.live_path, &self.journal)?;
+        if is_pre_swap_phase(&self.journal.phase) {
+            cleanup_pre_swap(&self.root, &self.journal)?;
+        } else {
+            restore_live(&self.root, &self.live_path, &self.journal)?;
+        }
         self.advance("ROLLED_BACK")
     }
 
