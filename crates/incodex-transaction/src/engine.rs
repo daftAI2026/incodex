@@ -202,28 +202,44 @@ where
 
 fn restore_live(root: &Path, live: &Path, journal: &JournalV2) -> Result<(), String> {
     let paths = tx_paths(root, &journal.install_id);
-    let backup = if paths.outgoing.exists() {
-        Some(paths.outgoing.clone())
+    if paths.outgoing.exists() {
+        replace_live(&paths.outgoing, live, &paths.dir)?;
     } else if paths.original.exists() {
-        Some(paths.original.clone())
-    } else {
-        None
-    };
-    if let Some(backup) = backup {
-        if live.exists() {
-            let trash = paths.dir.join("trash").join("ChatGPT.app");
-            if let Some(parent) = trash.parent() {
-                fs::create_dir_all(parent).map_err(|err| err.to_string())?;
-            }
-            if trash.exists() {
-                fs::remove_dir_all(&trash).map_err(|err| err.to_string())?;
-            }
-            fs::rename(live, &trash).map_err(|err| err.to_string())?;
+        // +---------------------------------------------------------------+
+        // | 原始快照是卸载所需的耐久备份；先复制再替换，回滚绝不消费它。          |
+        // +---------------------------------------------------------------+
+        let restore = paths.dir.join("restore").join("ChatGPT.app");
+        if restore.exists() {
+            fs::remove_dir_all(&restore).map_err(|err| err.to_string())?;
         }
-        fs::rename(&backup, live).map_err(|err| err.to_string())?;
+        copy_dir(&paths.original, &restore)?;
+        replace_live(&restore, live, &paths.dir)?;
     }
     if paths.staged.exists() {
         fs::remove_dir_all(&paths.staged).map_err(|err| err.to_string())?;
+    }
+    Ok(())
+}
+
+fn replace_live(source: &Path, live: &Path, transaction_dir: &Path) -> Result<(), String> {
+    let trash = transaction_dir.join("trash").join("ChatGPT.app");
+    if let Some(parent) = trash.parent() {
+        fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+    }
+    if trash.exists() {
+        fs::remove_dir_all(&trash).map_err(|err| err.to_string())?;
+    }
+    let moved_live = if live.exists() {
+        fs::rename(live, &trash).map_err(|err| err.to_string())?;
+        true
+    } else {
+        false
+    };
+    if let Err(error) = fs::rename(source, live) {
+        if moved_live {
+            let _ = fs::rename(&trash, live);
+        }
+        return Err(error.to_string());
     }
     Ok(())
 }
