@@ -68,7 +68,7 @@ impl Spinner {
         let worker = thread::spawn(move || {
             let mut frame = 1_usize;
             while !worker_stopped.load(Ordering::Relaxed) {
-                thread::sleep(Duration::from_millis(50));
+                thread::park_timeout(Duration::from_millis(50));
                 if worker_stopped.load(Ordering::Relaxed) {
                     break;
                 }
@@ -86,6 +86,7 @@ impl Spinner {
     pub fn stop(&mut self) {
         self.stopped.store(true, Ordering::Relaxed);
         if let Some(worker) = self.worker.take() {
+            worker.thread().unpark();
             let _ = worker.join();
             eprint!("\r\u{1b}[2K");
             let _ = std::io::stderr().flush();
