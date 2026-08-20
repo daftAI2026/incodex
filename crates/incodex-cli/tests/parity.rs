@@ -486,6 +486,67 @@ fn native_open_animates_while_waiting_for_cdp_readiness_and_clears_its_line() {
 }
 
 #[test]
+fn native_tty_uninstall_animates_immediately_after_confirmation() {
+    let home = scratch("uninstall-progress-tty");
+    let app = patchable_app(&home);
+    let install = run_rust(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(install.status, 0, "{install:?}");
+
+    let rust = run_tty(
+        rust_bin(),
+        &[],
+        &["uninstall", "--app", app.to_str().unwrap()],
+        &home,
+        "Press Enter to confirm, ESC to cancel: ",
+        "\r",
+    );
+    assert_eq!(rust.status, 0, "{}", visible(&rust.stdout));
+    assert!(
+        ["|", "/", "-", "\\"].iter().any(|frame| rust
+            .stdout
+            .contains(&format!("  {frame} Restoring original app"))),
+        "confirmation was followed by a silent uninstall: {:?}",
+        rust.stdout
+    );
+    assert!(
+        rust.stdout.contains("\r\u{1b}[2K"),
+        "uninstall spinner must clear the current line: {:?}",
+        rust.stdout
+    );
+    assert!(
+        visible(&rust.stdout).contains("Official app restored. Dock was refreshed."),
+        "missing final uninstall result: {}",
+        visible(&rust.stdout)
+    );
+}
+
+#[test]
+fn native_non_tty_mutations_print_auditable_progress_stages() {
+    let home = scratch("mutation-progress-non-tty");
+    let app = patchable_app(&home);
+    let install = run_rust(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(install.status, 0, "{install:?}");
+    assert!(
+        install.stdout.contains("➤ Publishing Runtime")
+            && install.stdout.contains("➤ Backing up original app")
+            && install.stdout.contains("➤ Signing patched app"),
+        "install must expose durable stages without TTY controls: {install:?}"
+    );
+    assert!(!install.stdout.contains('\u{1b}'), "{install:?}");
+
+    let uninstall = run_rust(
+        &["uninstall", "--yes", "--app", app.to_str().unwrap()],
+        &home,
+    );
+    assert_eq!(uninstall.status, 0, "{uninstall:?}");
+    assert!(
+        uninstall.stdout.contains("➤ Restoring original app"),
+        "uninstall must expose its active stage: {uninstall:?}"
+    );
+    assert!(!uninstall.stdout.contains('\u{1b}'), "{uninstall:?}");
+}
+
+#[test]
 fn native_lifecycle_commands_match_the_typescript_source_checkout_contract() {
     let ts_home = scratch("lifecycle-ts");
     let rust_home = scratch("lifecycle-rust");
