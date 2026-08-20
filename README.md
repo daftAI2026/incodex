@@ -131,9 +131,9 @@ Run `inc` in a terminal:
   https://github.com/daftAI2026/incodex
   Incognito toggle for Codex desktop.
 
-➤ 1. Install     Patch the Codex app you are using
-  2. Uninstall   Restore the official Codex app
-  3. Open        Open an incognito window without patching
+➤ 1. Open        Open an incognito window without patching
+  2. Install     Patch the Codex app you are using
+  3. Uninstall   Restore the official Codex app
   4. Status      Show whether Incodex is installed
   5. Doctor      Diagnose the install and leftover sessions
   6. Quit        Exit this menu
