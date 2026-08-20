@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_asar::{pack_dir, Archive, LOADER_NAME, MARKER_KEY};
 use incodex_macos::ditto;
-use incodex_transaction::{acquire_target_lock, journal_v2, Engine};
+use incodex_transaction::{acquire_target_lock, Engine};
 use sha2::{Digest, Sha256};
 
 fn bin() -> &'static str {
