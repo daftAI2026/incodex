@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -88,7 +96,7 @@ catch (error) { process.stdout.write(String(error.message)); }`,
 
     expect(readOwnerLockState(root).kind).toBe("unverifiable");
     expect(() => acquireOwnerLease(root, currentOwner("contender", process.execPath))).toThrow(/unverifiable/);
-    expect(readOwnerLock(root)?.token).toBe(partial.token);
+    expect(readOwnerLockState(root).owner?.token).toBe(partial.token);
   });
 
   test("legacy owner records require startedAt and executable identity", () => {
@@ -390,6 +398,87 @@ describe("cross-process owner contention", () => {
 
     expect(winners).toHaveLength(1);
     expect(rejected).toHaveLength(19);
+    expect(winnerToken).toBeString();
+    expect(readOwnerLock(root)?.token).toBe(winnerToken);
+    expect(completed.every((result) => result.code === 0 || result.code === 2)).toBe(true);
+    expect(completed.every((result) => result.stderr === "")).toBe(true);
+  });
+
+  test("stale takeover claims have one OS winner and cannot delete its lease", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-os-stale-claim-"));
+    const barrier = join(root, "start");
+    const modulePath = join(import.meta.dir, "runtime/incodex-instance.cts");
+    const claimRoot = join(root, ".incognito.lock.takeover");
+    mkdirSync(claimRoot);
+    writeFileSync(
+      join(claimRoot, "owner"),
+      JSON.stringify({
+        pid: 999999,
+        startedAt: "never",
+        processStartIdentity: "never",
+        execIdentity: "/nope",
+        token: "stale-claim-token",
+      }),
+    );
+    writeFileSync(
+      join(root, LOCK_NAME),
+      JSON.stringify({
+        pid: 999999,
+        startedAt: "never",
+        execPath: "/nope",
+        sessionId: "stale",
+        token: "stale-token",
+      }),
+    );
+    const worker = String.raw`
+      const { existsSync } = require("node:fs");
+      const instance = require(process.env.INCODEX_TEST_MODULE);
+      const root = process.env.INCODEX_TEST_ROOT;
+      const barrier = process.env.INCODEX_TEST_BARRIER;
+      while (!existsSync(barrier)) {
+        const until = Date.now() + 5;
+        while (Date.now() < until) {}
+      }
+      const owner = instance.currentOwner("stale-claim-replacement", process.execPath);
+      try {
+        instance.acquireOwnerLease(root, owner);
+        process.stdout.write("WINNER " + owner.token + "\n");
+        setTimeout(() => process.exit(0), 1000);
+      } catch (error) {
+        process.stdout.write(String(error.code || "ERROR") + "\n");
+        process.exit(error.code === "OWNER_BUSY" || error.code === "OWNER_RACE" ? 2 : 3);
+      }
+    `;
+    const children = Array.from({ length: 8 }, () =>
+      spawn(process.execPath, ["-e", worker], {
+        env: {
+          ...process.env,
+          INCODEX_TEST_MODULE: modulePath,
+          INCODEX_TEST_ROOT: root,
+          INCODEX_TEST_BARRIER: barrier,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      }),
+    );
+    const results = children.map(
+      (child) =>
+        new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
+          let stdout = "";
+          let stderr = "";
+          child.stdout?.on("data", (chunk) => (stdout += String(chunk)));
+          child.stderr?.on("data", (chunk) => (stderr += String(chunk)));
+          child.once("close", (code) => resolve({ code, stdout, stderr }));
+          child.once("error", (error) => resolve({ code: 3, stdout, stderr: String(error) }));
+        }),
+    );
+    writeFileSync(barrier, "go\n");
+    const completed = await Promise.all(results);
+    const winners = completed.filter((result) => result.stdout.trim().startsWith("WINNER "));
+    const rejected = completed.filter((result) => ["OWNER_BUSY", "OWNER_RACE"].includes(result.stdout.trim()));
+    const winnerToken = winners[0]?.stdout.trim().slice("WINNER ".length);
+
+    expect(winners).toHaveLength(1);
+    expect(rejected).toHaveLength(7);
     expect(winnerToken).toBeString();
     expect(readOwnerLock(root)?.token).toBe(winnerToken);
     expect(completed.every((result) => result.code === 0 || result.code === 2)).toBe(true);
