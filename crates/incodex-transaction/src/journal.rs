@@ -308,14 +308,19 @@ pub fn reconstructed(root: &Path, journal: &JournalV2) -> Result<TxPaths, String
     let paths = tx_paths(root, &journal.install_id);
     reject_symlink(&root.join("transactions"), "transactions directory")?;
     reject_symlink(&paths.dir, "transaction directory")?;
-    for rel in [
-        &journal.paths.staged,
-        &journal.paths.outgoing,
-        &journal.paths.original,
+    for (rel, allow_leaf_symlink) in [
+        (journal.paths.staged.as_str(), true),
+        (journal.paths.outgoing.as_str(), true),
+        (journal.paths.original.as_str(), true),
+        ("restore/ChatGPT.app", false),
+        ("trash/ChatGPT.app", false),
     ] {
         validate_path_ancestors(&paths.dir, rel)?;
         let full = paths.dir.join(rel);
         if let Ok(meta) = fs::symlink_metadata(&full) {
+            if meta.file_type().is_symlink() && !allow_leaf_symlink {
+                return Err(format!("journal path is a symlink: {rel}"));
+            }
             if meta.file_type().is_symlink() {
                 // +-----------------------------------------------------------+
                 // | 叶子 symlink 只允许进入受控清理；恢复源会在 restore 前拒绝。 |
@@ -356,6 +361,9 @@ fn validate_path_ancestors(base: &Path, rel: &str) -> Result<(), String> {
         match fs::symlink_metadata(&current) {
             Ok(meta) if meta.file_type().is_symlink() => {
                 return Err(format!("journal path ancestor is a symlink: {rel}"));
+            }
+            Ok(meta) if !meta.file_type().is_dir() => {
+                return Err(format!("journal path ancestor is not a directory: {rel}"));
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
