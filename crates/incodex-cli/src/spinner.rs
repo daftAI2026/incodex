@@ -134,16 +134,18 @@ mod tests {
     use super::{Progress, Spinner};
 
     #[test]
-    fn rapid_stage_switches_do_not_wait_for_each_frame_interval() {
+    fn stopping_wakes_worker_before_long_frame_timeout() {
+        let mut spinner = Spinner::start_for_interval(
+            "Switching stage",
+            true,
+            Duration::from_secs(1),
+        );
+        std::thread::sleep(Duration::from_millis(50));
         let started = Instant::now();
-        for _ in 0..5 {
-            let mut spinner = Spinner::start_for("Switching stage", true);
-            std::thread::sleep(Duration::from_millis(5));
-            spinner.stop();
-        }
+        spinner.stop();
         assert!(
-            started.elapsed() < Duration::from_millis(150),
-            "stopping five stages took {:?}",
+            started.elapsed() < Duration::from_millis(500),
+            "stopping the worker took {:?}",
             started.elapsed()
         );
     }
