@@ -1,6 +1,7 @@
 import { STRIP_CLONE_ATTRS } from "./compatibility/default-adapter";
 import { isSearchLabel } from "./compatibility/search-labels";
 import { type CopyKey, translate, resolveLocale as matchLocale } from "./incognito-copy";
+import { iconFor, type IncognitoButtonIcon } from "./incognito-icon";
 
 const STYLE_ID = "incodex-privacy-style";
 const BTN_ATTR = "data-incodex-privacy-toggle";
@@ -10,6 +11,7 @@ const ERROR_ATTR = "data-incodex-launch-error";
 const SHORTCUT_LABEL = "⇧⌘N";
 
 const ICON_SVG = `{{HAT_GLASSES_SVG}}`;
+const EXIT_ICON_SVG = `{{CIRCLE_X_SVG}}`;
 function isIncognitoWindow(): boolean {
   if (typeof window.__incodexIncognito === "boolean") return window.__incodexIncognito;
   return false;
@@ -27,6 +29,39 @@ function labelFor(on: boolean): string {
   return on ? t("exit") : t("open");
 }
 
+function buttonIcon(btn: HTMLElement): IncognitoButtonIcon {
+  return iconFor({
+    incognito: isIncognitoWindow(),
+    hovered: btn.getAttribute("data-incodex-hovered") === "true",
+  });
+}
+
+function createButtonIcon(source: string, name: IncognitoButtonIcon, sample: SVGElement | null): SVGElement | null {
+  const wrap = document.createElement("span");
+  wrap.innerHTML = source.trim();
+  const svg = wrap.firstElementChild as SVGElement | null;
+  if (!svg) return null;
+  svg.setAttribute("data-incodex-icon", name);
+  svg.setAttribute("class", sample?.getAttribute("class") || "icon-xs");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("width", sample?.getAttribute("width") || "16");
+  svg.setAttribute("height", sample?.getAttribute("height") || "16");
+  return svg;
+}
+
+function setButtonIcon(btn: HTMLElement): void {
+  const name = buttonIcon(btn);
+  const current = btn.querySelector<SVGElement>("svg[data-incodex-icon]");
+  if (current?.getAttribute("data-incodex-icon") === name) return;
+  const source = name === "circle-x" ? EXIT_ICON_SVG : ICON_SVG;
+  const sample = current || btn.querySelector<SVGElement>("svg");
+  const next = createButtonIcon(source, name, sample);
+  if (!next) return;
+  if (current) current.replaceWith(next);
+  else if (sample) sample.replaceWith(next);
+  else btn.append(next);
+}
+
 function apply(): void {
   const incognito = isIncognitoWindow();
   document.documentElement.setAttribute("data-incodex-window", incognito ? "incognito" : "normal");
@@ -34,6 +69,7 @@ function apply(): void {
   if (btn) {
     btn.setAttribute("aria-pressed", incognito ? "true" : "false");
     btn.setAttribute("aria-label", labelFor(incognito));
+    setButtonIcon(btn);
   }
   const label = document.querySelector<HTMLElement>("[data-incodex-tooltip-label]");
   if (label) label.textContent = labelFor(incognito);
@@ -201,18 +237,10 @@ function buildButton(search: HTMLElement): HTMLElement {
   }
   btn.setAttribute("type", "button");
   btn.setAttribute(BTN_ATTR, "true");
+  btn.setAttribute("data-incodex-hovered", "false");
   btn.className = search.className;
-  const wrap = document.createElement("span");
-  wrap.innerHTML = ICON_SVG.trim();
-  const svg = wrap.firstElementChild as SVGElement | null;
-  if (svg) {
-    const sample = search.querySelector("svg");
-    svg.setAttribute("class", sample?.getAttribute("class") || "icon-xs");
-    svg.setAttribute("aria-hidden", "true");
-    svg.setAttribute("width", sample?.getAttribute("width") || "16");
-    svg.setAttribute("height", sample?.getAttribute("height") || "16");
-    btn.append(svg);
-  }
+  const svg = createButtonIcon(ICON_SVG, "hat-glasses", search.querySelector("svg"));
+  if (svg) btn.append(svg);
   btn.addEventListener(
     "click",
     (event) => {
@@ -222,8 +250,16 @@ function buildButton(search: HTMLElement): HTMLElement {
     },
     true,
   );
-  btn.addEventListener("pointerenter", () => showTooltip(btn));
-  btn.addEventListener("pointerleave", hideTooltip);
+  btn.addEventListener("pointerenter", () => {
+    btn.setAttribute("data-incodex-hovered", "true");
+    setButtonIcon(btn);
+    showTooltip(btn);
+  });
+  btn.addEventListener("pointerleave", () => {
+    btn.setAttribute("data-incodex-hovered", "false");
+    setButtonIcon(btn);
+    hideTooltip();
+  });
   btn.addEventListener("focus", () => showTooltip(btn));
   btn.addEventListener("blur", hideTooltip);
   return btn;
