@@ -85,7 +85,7 @@ describe("install.sh", () => {
     writePayload(
       fakeBin,
       "brew",
-      "#!/bin/sh\nif [ \"$1 $2\" = \"--prefix incodex\" ]; then printf '%s\\n' '/opt/homebrew/Cellar/incodex/0.3.1'; exit 0; fi\nexit 1\n",
+      "#!/bin/sh\nif [ \"$1 $2 $3\" = \"list --versions incodex\" ]; then printf '%s\\n' 'incodex 0.3.1'; exit 0; fi\nif [ \"$1 $2\" = \"--prefix incodex\" ]; then printf '%s\\n' '/opt/homebrew/Cellar/incodex/0.3.1'; exit 0; fi\nexit 1\n",
     );
     writePayload(fakeBin, "curl", `#!/bin/sh\n: > '${curlLog}'\nexit 88\n`);
 
@@ -104,6 +104,58 @@ describe("install.sh", () => {
     expect(ran.stderr).toContain("Homebrew-managed Incodex");
     expect(ran.stderr).toContain("brew upgrade incodex");
     expect(existsSync(curlLog)).toBe(false);
+  });
+
+  test("allows a script install when Homebrew knows the formula but has not installed it", () => {
+    const home = mkdtempSync(join(tmpdir(), "incodex-home-"));
+    const release = mkdtempSync(join(tmpdir(), "incodex-rel-"));
+    const prefix = mkdtempSync(join(tmpdir(), "incodex-pre-"));
+    const fakeBin = join(home, "fake-bin");
+    mkdirSync(fakeBin, { recursive: true });
+    const asset = "incodex-darwin-arm64";
+    writePayload(release, asset, "#!/bin/sh\necho fake-cli\n");
+    writeFileSync(join(release, "SHA256SUMS"), `${sha256(join(release, asset))}  ${asset}\n`);
+    writePayload(
+      fakeBin,
+      "brew",
+      "#!/bin/sh\nif [ \"$1 $2 $3\" = \"list --versions incodex\" ]; then exit 1; fi\nif [ \"$1 $2\" = \"--prefix incodex\" ]; then printf '%s\\n' '/opt/homebrew/opt/incodex'; exit 0; fi\nexit 1\n",
+    );
+    writePayload(
+      fakeBin,
+      "curl",
+      `#!/bin/sh
+dest=''
+url=''
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) shift; dest="$1" ;;
+    http*) url="$1" ;;
+  esac
+  shift
+done
+case "$url" in
+  */SHA256SUMS) cp "$FAKE_RELEASE/SHA256SUMS" "$dest" ;;
+  */incodex-darwin-arm64) cp "$FAKE_RELEASE/incodex-darwin-arm64" "$dest" ;;
+  *) exit 88 ;;
+esac
+`,
+    );
+
+    const ran = spawnSync("/bin/bash", [installSh], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: home,
+        PATH: `${fakeBin}:/usr/bin:/bin`,
+        FAKE_RELEASE: release,
+        INCODEX_PREFIX: prefix,
+        INCODEX_ARCH: "arm64",
+      },
+    });
+
+    expect(ran.status).toBe(0);
+    expect(ran.stderr).not.toContain("Homebrew-managed Incodex");
+    expect(existsSync(join(prefix, "bin/incodex"))).toBe(true);
   });
 
   test("installs incodex and inc from a verified local release dir", () => {
