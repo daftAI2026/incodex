@@ -3,12 +3,15 @@ use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_core::canonical_path;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::durable::ensure_private_dir;
+
+static LOCK_TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -94,21 +97,41 @@ pub fn acquire_target_lock(
                 .and_then(|body| serde_json::from_str::<LockRecord>(&body).ok())
                 .map(|holder| format!("{} pid {}", holder.command, holder.pid))
                 .unwrap_or_else(|| "another process".into());
-            Err(format!("another incodex command is modifying this app ({who})"))
+            Err(format!(
+                "another incodex command is modifying this app ({who})"
+            ))
         }
     }
 }
 
 fn write_exclusive(path: &Path, record: &LockRecord) -> Result<(), String> {
+    let body = format!(
+        "{}\n",
+        serde_json::to_string(record).map_err(|err| err.to_string())?
+    );
+    let parent = path.parent().ok_or("mutation lock has no parent")?;
+    let seq = LOCK_TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    let temporary = parent.join(format!(
+        ".lock-{}-{}-{seq}.tmp",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0)
+    ));
     let mut opts = OpenOptions::new();
     opts.write(true)
         .create_new(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW);
-    let mut file = opts.open(path).map_err(|err| err.to_string())?;
-    let body = format!("{}\n", serde_json::to_string(record).map_err(|err| err.to_string())?);
-    file.write_all(body.as_bytes()).map_err(|err| err.to_string())?;
-    Ok(())
+    let mut file = opts.open(&temporary).map_err(|err| err.to_string())?;
+    file.write_all(body.as_bytes())
+        .map_err(|err| err.to_string())?;
+    file.sync_data().map_err(|err| err.to_string())?;
+    drop(file);
+    let linked = fs::hard_link(&temporary, path).map_err(|err| err.to_string());
+    let _ = fs::remove_file(&temporary);
+    linked
 }
 
 fn steal_if_stale(path: &Path) -> bool {

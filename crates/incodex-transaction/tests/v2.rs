@@ -135,8 +135,16 @@ fn install_id_is_uuid_and_matches_directory_and_journal() {
         .join("journal.json")
         .exists());
     tx.place_staging(&staged).unwrap();
-    assert!(tx.staging_app().display().to_string().contains(tx.install_id()));
-    assert!(tx.outgoing_app().display().to_string().contains(tx.install_id()));
+    assert!(tx
+        .staging_app()
+        .display()
+        .to_string()
+        .contains(tx.install_id()));
+    assert!(tx
+        .outgoing_app()
+        .display()
+        .to_string()
+        .contains(tx.install_id()));
 }
 
 #[test]
@@ -147,7 +155,10 @@ fn swap_writes_intent_before_moving_and_keeps_outgoing_until_commit() {
     let mut tx = Engine::begin(&root, &target_app, "install").unwrap();
     tx.place_staging(&staged).unwrap();
     tx.swap().unwrap();
-    assert_eq!(fs::read_to_string(target_app.join("marker")).unwrap(), "patched");
+    assert_eq!(
+        fs::read_to_string(target_app.join("marker")).unwrap(),
+        "patched"
+    );
     assert!(tx.outgoing_app().exists());
     assert_eq!(
         fs::read_to_string(tx.outgoing_app().join("marker")).unwrap(),
@@ -169,7 +180,10 @@ fn verify_failure_restores_original_and_rolls_back() {
     tx.place_staging(&staged).unwrap();
     tx.swap().unwrap();
     tx.rollback("verify failed").unwrap();
-    assert_eq!(fs::read_to_string(target_app.join("marker")).unwrap(), "original");
+    assert_eq!(
+        fs::read_to_string(target_app.join("marker")).unwrap(),
+        "original"
+    );
     assert_eq!(tx.journal().phase, "ROLLED_BACK");
     let id = tx.install_id().to_string();
     drop(tx);
@@ -186,7 +200,10 @@ fn uncommitted_recover_rolls_back_and_is_idempotent() {
     drop(tx);
     let first = recover(&root, &id).unwrap();
     assert_eq!(first.action, Recovery::Rollback);
-    assert_eq!(fs::read_to_string(target_app.join("marker")).unwrap(), "original");
+    assert_eq!(
+        fs::read_to_string(target_app.join("marker")).unwrap(),
+        "original"
+    );
     let second = recover(&root, &id).unwrap();
     assert_eq!(second.action, Recovery::Done);
 }
@@ -223,7 +240,11 @@ fn tampered_journal_checksum_is_rejected() {
     let mut raw: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&journal_path).unwrap()).unwrap();
     raw["phase"] = serde_json::json!("COMMITTED");
-    fs::write(&journal_path, format!("{}\n", serde_json::to_string_pretty(&raw).unwrap())).unwrap();
+    fs::write(
+        &journal_path,
+        format!("{}\n", serde_json::to_string_pretty(&raw).unwrap()),
+    )
+    .unwrap();
 
     let error = incodex_transaction::journal_v2(&root, &id).unwrap_err();
     assert!(error.contains("checksum"), "{error}");
@@ -237,7 +258,9 @@ fn recover_refuses_while_the_target_lock_is_live() {
 
     let error = recover(&root, tx.install_id()).unwrap_err();
     assert!(
-        error.to_string().contains("another incodex command is modifying this app"),
+        error
+            .to_string()
+            .contains("another incodex command is modifying this app"),
         "{error}"
     );
     assert_eq!(tx.journal().phase, "DISCOVERED");
