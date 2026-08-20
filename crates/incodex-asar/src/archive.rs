@@ -19,6 +19,7 @@ const LEFTOVERS: &[&str] = &[
     "incodex-runtime-load.cjs",
     "incodex-window-kind.cjs",
 ];
+const ELECTRON_ASAR_BLOCK_SIZE: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct Archive {
@@ -298,21 +299,32 @@ fn copy_tree(
 fn insert_packed_file(files: &mut Map<String, Value>, blobs: &mut Vec<u8>, name: &str, data: Vec<u8>) {
     let offset = blobs.len() as u64;
     let size = data.len() as u64;
-    let hash = sha256_hex(&data);
+    let integrity = file_integrity(&data);
     blobs.extend_from_slice(&data);
     files.insert(
         name.to_string(),
         json!({
             "size": size,
             "offset": offset.to_string(),
-            "integrity": {
-                "algorithm": "SHA256",
-                "hash": hash,
-                "blockSize": 4_194_304,
-                "blocks": [hash]
-            }
+            "integrity": integrity
         }),
     );
+}
+
+fn file_integrity(data: &[u8]) -> Value {
+    let mut blocks = data
+        .chunks(ELECTRON_ASAR_BLOCK_SIZE)
+        .map(sha256_hex)
+        .collect::<Vec<_>>();
+    if blocks.is_empty() {
+        blocks.push(sha256_hex(data));
+    }
+    json!({
+        "algorithm": "SHA256",
+        "hash": sha256_hex(data),
+        "blockSize": ELECTRON_ASAR_BLOCK_SIZE,
+        "blocks": blocks,
+    })
 }
 
 fn write_archive(dest: &Path, files: &Map<String, Value>, blobs: &[u8]) -> Result<(), String> {
