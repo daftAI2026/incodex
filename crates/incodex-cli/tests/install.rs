@@ -6,6 +6,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_asar::{pack_dir, Archive, LOADER_NAME, MARKER_KEY};
+use incodex_transaction::acquire_target_lock;
 
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_incodex")
@@ -406,6 +407,94 @@ fn install_aborts_when_asar_integrity_cannot_be_written() {
         "{stderr}"
     );
     assert_eq!(fs::read(&asar).unwrap(), before);
+}
+
+#[test]
+fn install_does_not_skip_a_stale_loader_without_a_committed_transaction() {
+    let home = isolated_home();
+    let app = patchable_app(&home);
+    let fake = home.join("fake-loader-only");
+    fs::create_dir_all(&fake).unwrap();
+    fs::write(
+        fake.join("package.json"),
+        format!(
+            "{}\n",
+            serde_json::json!({
+                "main": LOADER_NAME,
+                (MARKER_KEY): {
+                    "originalMain": "index.js",
+                    "installId": "00000000-0000-4000-8000-000000000000"
+                }
+            })
+        ),
+    )
+    .unwrap();
+    fs::write(fake.join(LOADER_NAME), "stale loader\n").unwrap();
+    fs::write(fake.join("index.js"), "ok\n").unwrap();
+    pack_dir(&fake, &app.join("Contents/Resources/app.asar")).unwrap();
+
+    let (status, stdout, stderr) =
+        run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
+    assert!(!stdout.contains("Already current"), "{stdout}");
+    let archive = Archive::open(app.join("Contents/Resources/app.asar")).unwrap();
+    assert_ne!(archive.extract(LOADER_NAME).unwrap(), b"stale loader\n");
+}
+
+#[test]
+fn uninstall_refuses_while_another_command_holds_the_target_lock() {
+    let home = isolated_home();
+    let app = patchable_app(&home);
+    let (status, _, stderr) =
+        run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(status, 0, "{stderr}");
+    let asar = app.join("Contents/Resources/app.asar");
+    let patched = fs::read(&asar).unwrap();
+    let root = home.join(".incodex");
+    let _lock = acquire_target_lock(&root, &app, "test-holder", None).unwrap();
+
+    let (status, _stdout, stderr) = run(
+        &["uninstall", "--yes", "--app", app.to_str().unwrap()],
+        &home,
+    );
+    assert_eq!(status, 1, "{stderr}");
+    assert!(stderr.contains("another incodex command is modifying this app"), "{stderr}");
+    assert_eq!(fs::read(asar).unwrap(), patched);
+}
+
+#[test]
+fn post_swap_verification_failure_rolls_back_the_original_app() {
+    let home = isolated_home();
+    let app = patchable_app(&home);
+    let asar = app.join("Contents/Resources/app.asar");
+    let before = fs::read(&asar).unwrap();
+    let fake_bin = home.join("fake-bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    write_executable(
+        &fake_bin.join("codesign"),
+        &format!(
+            "#!/bin/sh\nlast=''\nfor arg in \"$@\"; do last=\"$arg\"; done\nif [ \"$1\" = \"--verify\" ] && [ \"$last\" = '{}' ]; then\n  printf '%s\\n' 'forced post-swap verification failure' >&2\n  exit 1\nfi\nexit 0\n",
+            app.display()
+        ),
+    );
+
+    let (status, _stdout, stderr) = run_with_path(
+        &["install", "--yes", "--app", app.to_str().unwrap()],
+        &home,
+        &path_with_fake_bin(&fake_bin),
+    );
+    assert_eq!(status, 1, "{stderr}");
+    assert!(stderr.contains("post-swap") || stderr.contains("verification"), "{stderr}");
+    assert_eq!(fs::read(&asar).unwrap(), before);
+    let journal_path = install_mutations(&home)
+        .into_iter()
+        .find(|path| path.ends_with("journal.json"))
+        .unwrap();
+    let journal: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(home.join(".incodex").join(journal_path)).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(journal["phase"], "ROLLED_BACK");
 }
 
 #[test]
