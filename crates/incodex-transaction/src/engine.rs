@@ -5,8 +5,8 @@ use incodex_core::canonical::{inspect_target, recheck_target, CanonicalTarget};
 use incodex_macos::ditto;
 
 use crate::journal::{
-    load_v2, reconstructed, tx_paths, validate_rel_paths, write_journal, JournalTarget, JournalV2,
-    RelPaths, ORIGINAL_REL, OUTGOING_REL, STAGED_REL,
+    load_v2, reconstructed, tx_paths, validate_recovery_proofs, validate_rel_paths, write_journal,
+    JournalTarget, JournalV2, RelPaths, ORIGINAL_REL, OUTGOING_REL, STAGED_REL,
 };
 use crate::lock::{acquire_target_lock, TargetLock};
 use crate::new_install_id;
@@ -265,6 +265,7 @@ fn validate_recovery_target(
     paths: &crate::journal::TxPaths,
     live: &Path,
 ) -> Result<(), String> {
+    validate_recovery_proofs(journal)?;
     let original_target = parse_identity(&journal.target.device, &journal.target.inode, "target")?;
     let parent = live
         .parent()

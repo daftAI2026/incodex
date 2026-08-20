@@ -133,8 +133,77 @@ pub fn checksum_of(journal: &JournalV2) -> String {
     let mut copy = journal.clone();
     copy.checksum.clear();
     let body = serde_json::to_vec(&copy).unwrap_or_default();
-    let digest = Sha256::digest(&body);
-    digest.iter().map(|b| format!("{b:02x}")).collect()
+    checksum_hex(&body)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LegacyJournalTarget<'a> {
+    requested_path: &'a str,
+    real_path: &'a str,
+    device: &'a str,
+    inode: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LegacyJournal<'a> {
+    schema_version: u32,
+    install_id: &'a str,
+    target: LegacyJournalTarget<'a>,
+    paths: &'a RelPaths,
+    phase: &'a str,
+    sequence: u64,
+    checksum: &'a str,
+}
+
+fn legacy_checksum_of(journal: &JournalV2) -> String {
+    let legacy = LegacyJournal {
+        schema_version: journal.schema_version,
+        install_id: &journal.install_id,
+        target: LegacyJournalTarget {
+            requested_path: &journal.target.requested_path,
+            real_path: &journal.target.real_path,
+            device: &journal.target.device,
+            inode: &journal.target.inode,
+        },
+        paths: &journal.paths,
+        phase: &journal.phase,
+        sequence: journal.sequence,
+        checksum: "",
+    };
+    let body = serde_json::to_vec(&legacy).unwrap_or_default();
+    checksum_hex(&body)
+}
+
+fn checksum_hex(body: &[u8]) -> String {
+    Sha256::digest(body)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn is_legacy_shape(raw: &serde_json::Value) -> bool {
+    let target_has_new_fields = raw
+        .get("target")
+        .and_then(serde_json::Value::as_object)
+        .map(|target| target.contains_key("parentDevice") || target.contains_key("parentInode"))
+        .unwrap_or(false);
+    let proof_fields = [
+        "preSwapDigest",
+        "backupDigest",
+        "stagedDevice",
+        "stagedInode",
+        "stagedDigest",
+        "restoredDevice",
+        "restoredInode",
+        "restoredDigest",
+    ];
+    !target_has_new_fields
+        && proof_fields.iter().all(|field| {
+            !raw.as_object()
+                .is_some_and(|object| object.contains_key(*field))
+        })
 }
 
 pub fn seal(mut journal: JournalV2) -> JournalV2 {
@@ -161,18 +230,58 @@ pub fn load_v2(root: &Path, install_id: &str) -> Result<JournalV2, String> {
     }
     let path = tx_paths(root, install_id).journal;
     let body = fs::read_to_string(&path).map_err(|err| err.to_string())?;
-    let journal: JournalV2 = serde_json::from_str(&body).map_err(|err| err.to_string())?;
+    let raw: serde_json::Value = serde_json::from_str(&body).map_err(|err| err.to_string())?;
+    let legacy = is_legacy_shape(&raw);
+    let journal: JournalV2 = serde_json::from_value(raw).map_err(|err| err.to_string())?;
     if journal.schema_version != 2 {
         return Err("unsupported journal schema".into());
     }
     if journal.install_id != install_id {
         return Err("journal install id does not match filename".into());
     }
-    if journal.checksum != checksum_of(&journal) {
+    let expected_checksum = if legacy {
+        legacy_checksum_of(&journal)
+    } else {
+        checksum_of(&journal)
+    };
+    if journal.checksum != expected_checksum {
         return Err("journal checksum mismatch".into());
     }
     validate_rel_paths(&journal)?;
     Ok(journal)
+}
+
+pub(crate) fn validate_recovery_proofs(journal: &JournalV2) -> Result<(), String> {
+    if matches!(journal.phase.as_str(), "COMMITTED" | "ROLLED_BACK") {
+        return Ok(());
+    }
+    if journal.target.parent_device.is_empty() || journal.target.parent_inode.is_empty() {
+        return Err("journal lacks recovery proof: target parent identity".into());
+    }
+    if journal.pre_swap_digest.is_empty() {
+        return Err("journal lacks recovery proof: pre-swap tree digest".into());
+    }
+    if !matches!(journal.phase.as_str(), "DISCOVERED" | "INTENT")
+        && journal.backup_digest.is_empty()
+    {
+        return Err("journal lacks recovery proof: backup tree digest".into());
+    }
+    if matches!(
+        journal.phase.as_str(),
+        "STAGED"
+            | "PATCHED"
+            | "SIGNED"
+            | "VERIFIED"
+            | "TARGET_MOVED_OUT"
+            | "SWAPPED"
+            | "TARGET_VERIFIED"
+    ) && (journal.staged_device.is_empty()
+        || journal.staged_inode.is_empty()
+        || journal.staged_digest.is_empty())
+    {
+        return Err("journal lacks recovery proof: staged tree identity and digest".into());
+    }
+    Ok(())
 }
 
 pub fn validate_rel_paths(journal: &JournalV2) -> Result<(), String> {
