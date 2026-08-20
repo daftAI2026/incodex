@@ -131,7 +131,9 @@ fn verify_failure_restores_original_and_rolls_back() {
     tx.rollback("verify failed").unwrap();
     assert_eq!(fs::read_to_string(target_app.join("marker")).unwrap(), "original");
     assert_eq!(tx.journal().phase, "ROLLED_BACK");
-    let again = recover(&root, tx.install_id()).unwrap();
+    let id = tx.install_id().to_string();
+    drop(tx);
+    let again = recover(&root, &id).unwrap();
     assert_eq!(again.action, Recovery::Done);
 }
 

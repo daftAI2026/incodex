@@ -142,6 +142,9 @@ pub fn recover(root: &Path, install_id: &str) -> Result<RecoverResult, TxError> 
     let journal = load_v2(root, install_id).map_err(|message| TxError::Refuse { message })?;
     validate_rel_paths(&journal).map_err(|message| TxError::Refuse { message })?;
     reconstructed(root, &journal).map_err(|message| TxError::Refuse { message })?;
+    let live = PathBuf::from(&journal.target.real_path);
+    let _lock = acquire_target_lock(root, &live, "recover", Some(install_id))
+        .map_err(|message| TxError::Refuse { message })?;
     let action = match journal.phase.as_str() {
         "COMMITTED" | "ROLLED_BACK" => Recovery::Done,
         "DISCOVERED" | "INTENT" | "BACKUP_COMMITTED" | "STAGED" | "TARGET_MOVED_OUT" | "SWAPPED"
@@ -156,7 +159,6 @@ pub fn recover(root: &Path, install_id: &str) -> Result<RecoverResult, TxError> 
     if action == Recovery::Done {
         return Ok(RecoverResult { action, journal });
     }
-    let live = PathBuf::from(&journal.target.real_path);
     restore_live(root, &live, &journal).map_err(TxError::Other)?;
     let mut next = journal.clone();
     next.phase = "ROLLED_BACK".into();

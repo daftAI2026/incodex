@@ -145,6 +145,9 @@ pub fn load_v2(root: &Path, install_id: &str) -> Result<JournalV2, String> {
     if journal.install_id != install_id {
         return Err("journal install id does not match filename".into());
     }
+    if journal.checksum != checksum_of(&journal) {
+        return Err("journal checksum mismatch".into());
+    }
     validate_rel_paths(&journal)?;
     Ok(journal)
 }
