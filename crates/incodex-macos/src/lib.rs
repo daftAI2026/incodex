@@ -456,4 +456,84 @@ mod tests {
 
         assert!(!hardened);
     }
+
+    #[test]
+    fn adhoc_outer_signature_uses_filtered_host_entitlements() {
+        let _path_lock = PATH_LOCK.lock().unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "incodex-host-entitlements-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let app = root.join("Mini.app");
+        std::fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
+        std::fs::write(app.join("Contents/Info.plist"), "fixture").unwrap();
+        let host = root.join("host-entitlements.plist");
+        std::fs::write(
+            &host,
+            r#"<?xml version="1.0"?><plist><dict>
+  <key>com.apple.developer.team-identifier</key><string>ABCD123456</string>
+  <key>com.apple.application-identifier</key><string>ABCD.com.incodex.mini</string>
+  <key>keychain-access-groups</key><array><string>ABCD.com.incodex.mini</string></array>
+  <key>com.apple.security.cs.allow-jit</key><true/>
+  <key>com.apple.security.device.camera</key><true/>
+</dict></plist>"#,
+        )
+        .unwrap();
+        let fake_codesign = root.join("codesign");
+        std::fs::write(
+            &fake_codesign,
+            r##"#!/bin/sh
+printf '%s\n' "$*" >> "$INCODEX_CODESIGN_LOG"
+if [ "$1" = "--display" ] && [ "$2" = "--entitlements" ]; then
+  cat "$INCODEX_CODESIGN_ENTITLEMENTS"
+  exit 0
+fi
+previous=""
+for arg in "$@"; do
+  if [ "$previous" = "--entitlements" ] && [ "$arg" != ":-" ]; then
+    cat "$arg" > "$INCODEX_CODESIGN_CAPTURE"
+  fi
+  previous="$arg"
+done
+exit 0
+"##,
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&fake_codesign).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&fake_codesign, permissions).unwrap();
+
+        let original_path = std::env::var_os("PATH");
+        let _path_guard = PathGuard(original_path.clone());
+        let mut path = OsString::from(root.as_os_str());
+        path.push(":");
+        if let Some(original_path) = original_path {
+            path.push(original_path);
+        }
+        let log = root.join("codesign.log");
+        let capture = root.join("captured-entitlements.plist");
+        std::env::set_var("PATH", path);
+        std::env::set_var("INCODEX_CODESIGN_ENTITLEMENTS", &host);
+        std::env::set_var("INCODEX_CODESIGN_CAPTURE", &capture);
+        std::env::set_var("INCODEX_CODESIGN_LOG", &log);
+
+        let result = sign_app(&app);
+        std::env::remove_var("INCODEX_CODESIGN_ENTITLEMENTS");
+        std::env::remove_var("INCODEX_CODESIGN_CAPTURE");
+        std::env::remove_var("INCODEX_CODESIGN_LOG");
+        assert!(result.is_ok(), "{result:?}");
+
+        let captured = std::fs::read_to_string(capture).unwrap();
+        assert!(captured.contains("com.apple.security.device.camera"));
+        assert!(captured.contains("com.apple.security.cs.allow-jit"));
+        assert!(captured.contains("com.apple.security.cs.disable-library-validation"));
+        assert!(!captured.contains("com.apple.developer.team-identifier"));
+        assert!(!captured.contains("com.apple.application-identifier"));
+        assert!(!captured.contains("keychain-access-groups"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

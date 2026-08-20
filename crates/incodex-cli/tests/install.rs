@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -33,6 +34,32 @@ fn run(args: &[&str], home: &Path) -> (i32, String, String) {
         String::from_utf8_lossy(&output.stdout).into_owned(),
         String::from_utf8_lossy(&output.stderr).into_owned(),
     )
+}
+
+fn run_with_path(args: &[&str], home: &Path, path: &Path) -> (i32, String, String) {
+    let output = Command::new(bin())
+        .args(args)
+        .env("HOME", home)
+        .env("PATH", path)
+        .env("TERM", "dumb")
+        .env("NO_COLOR", "1")
+        .env("SHELL", "/bin/zsh")
+        .output()
+        .expect("spawn incodex");
+    (
+        output.status.code().unwrap_or(1),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
+fn path_with_fake_bin(bin: &Path) -> PathBuf {
+    let mut path = OsString::from(bin.as_os_str());
+    path.push(":");
+    if let Some(existing) = std::env::var_os("PATH") {
+        path.push(existing);
+    }
+    PathBuf::from(path)
 }
 
 fn incodex_paths(home: &Path) -> Vec<String> {
@@ -294,6 +321,53 @@ fn install_yes_app_patches_asar_writes_runtime_and_commits() {
     if let Some(before) = official_before {
         assert_eq!(fs::read(&official).unwrap(), before);
     }
+}
+
+#[test]
+fn install_codesign_failure_aborts_custom_target_before_swap() {
+    let home = isolated_home();
+    let app = patchable_app(&home);
+    let asar = app.join("Contents/Resources/app.asar");
+    let before = fs::read(&asar).unwrap();
+    let cua = app
+        .join("Contents/Frameworks/CUALockScreenGuardian.app/Contents/MacOS/CUALockScreenGuardian");
+    let fake_bin = home.join("fake-bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    write_executable(
+        &fake_bin.join("codesign"),
+        "#!/bin/sh\nprintf '%s\\n' 'forced codesign failure' >&2\nexit 1\n",
+    );
+
+    let (status, _stdout, stderr) = run_with_path(
+        &["install", "--yes", "--app", app.to_str().unwrap()],
+        &home,
+        &path_with_fake_bin(&fake_bin),
+    );
+    assert_eq!(status, 1, "stderr={stderr}");
+    assert!(stderr.contains("forced codesign failure"), "{stderr}");
+    assert_eq!(fs::read(&asar).unwrap(), before);
+    assert!(cua.exists(), "vendor helper must be restored after sign failure");
+}
+
+#[test]
+fn install_aborts_when_asar_integrity_cannot_be_written() {
+    let home = isolated_home();
+    let app = patchable_app(&home);
+    let asar = app.join("Contents/Resources/app.asar");
+    let before = fs::read(&asar).unwrap();
+    let fake_bin = home.join("fake-bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    write_executable(&fake_bin.join("plutil"), "#!/bin/sh\nexit 1\n");
+    write_executable(&fake_bin.join("codesign"), "#!/bin/sh\nexit 0\n");
+
+    let (status, _stdout, stderr) = run_with_path(
+        &["install", "--yes", "--app", app.to_str().unwrap()],
+        &home,
+        &path_with_fake_bin(&fake_bin),
+    );
+    assert_eq!(status, 1, "stderr={stderr}");
+    assert!(stderr.contains("ElectronAsarIntegrity") || stderr.contains("plutil"), "{stderr}");
+    assert_eq!(fs::read(&asar).unwrap(), before);
 }
 
 #[test]
