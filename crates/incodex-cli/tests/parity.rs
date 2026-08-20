@@ -523,6 +523,61 @@ fn native_tty_uninstall_animates_immediately_after_confirmation() {
 }
 
 #[test]
+fn native_tty_install_animates_immediately_after_confirmation() {
+    let home = scratch("install-progress-tty");
+    let app = patchable_app(&home);
+    let rust = run_tty(
+        rust_bin(),
+        &[],
+        &["install", "--app", app.to_str().unwrap()],
+        &home,
+        "Press Enter to confirm, ESC to cancel: ",
+        "\r",
+    );
+    assert_eq!(rust.status, 0, "{}", visible(&rust.stdout));
+    assert!(
+        ["|", "/", "-", "\\"].iter().any(|frame| rust
+            .stdout
+            .contains(&format!("  {frame} Backing up original app"))),
+        "confirmation was followed by a silent install: {:?}",
+        rust.stdout
+    );
+    assert!(
+        rust.stdout.contains("\r\u{1b}[2K"),
+        "install spinner must clear the current line: {:?}",
+        rust.stdout
+    );
+}
+
+#[test]
+fn native_tty_failure_clears_progress_before_printing_the_error() {
+    let home = scratch("failed-progress-tty");
+    let app = patchable_app(&home);
+    let rust = run_tty(
+        rust_bin(),
+        &[],
+        &["uninstall", "--app", app.to_str().unwrap()],
+        &home,
+        "Press Enter to confirm, ESC to cancel: ",
+        "\r",
+    );
+    assert_eq!(rust.status, 1, "{}", visible(&rust.stdout));
+    let clear = rust
+        .stdout
+        .rfind("\r\u{1b}[2K")
+        .expect("failed progress must clear its current line");
+    let error = rust
+        .stdout
+        .rfind("no installation record for this target")
+        .expect("missing explicit uninstall error");
+    assert!(
+        clear < error,
+        "error was printed before progress cleanup: {:?}",
+        rust.stdout
+    );
+}
+
+#[test]
 fn native_tty_runtime_animates_and_clears_its_line() {
     let home = scratch("runtime-progress-tty");
     let rust = run_tty(
