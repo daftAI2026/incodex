@@ -297,6 +297,52 @@ fn backup_completion_is_durable_before_staging() {
 }
 
 #[test]
+fn backup_completion_requires_a_real_directory_snapshot() {
+    for kind in ["missing", "file", "symlink"] {
+        let root = scratch();
+        let target_app = app_bundle(&root, "ChatGPT.app", "live");
+        let mut tx = Engine::begin(&root, &target_app, "install").unwrap();
+        let original = root
+            .join("transactions")
+            .join(tx.install_id())
+            .join("original/ChatGPT.app");
+        match kind {
+            "missing" => {}
+            "file" => {
+                fs::create_dir_all(original.parent().unwrap()).unwrap();
+                fs::write(&original, b"partial").unwrap();
+            }
+            "symlink" => {
+                fs::create_dir_all(original.parent().unwrap()).unwrap();
+                symlink(&target_app, &original).unwrap();
+            }
+            _ => unreachable!(),
+        }
+
+        assert!(
+            tx.mark_backup_committed().is_err(),
+            "{kind} backup was accepted"
+        );
+        assert_eq!(tx.journal().phase, "DISCOVERED");
+    }
+}
+
+#[test]
+fn staging_requires_a_durable_backup_phase() {
+    let root = scratch();
+    let target_app = app_bundle(&root, "ChatGPT.app", "live");
+    let staged = app_bundle(&root, "staged.app", "staged");
+    let mut tx = Engine::begin(&root, &target_app, "install").unwrap();
+
+    let error = tx.place_staging(&staged).unwrap_err();
+
+    assert!(error.contains("BACKUP_COMMITTED"), "{error}");
+    assert_eq!(tx.journal().phase, "DISCOVERED");
+    assert!(staged.exists(), "the rejected source was consumed");
+    assert!(!tx.staging_app().exists());
+}
+
+#[test]
 fn committed_transaction_rejects_a_late_rollback() {
     let root = scratch();
     let target_app = app_bundle(&root, "ChatGPT.app", "original");
