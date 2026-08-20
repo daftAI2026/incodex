@@ -540,7 +540,7 @@ describe("cross-process owner contention", () => {
     acquireOwnerLease(root, replacement);
 
     expect(readOwnerLock(root)?.token).toBe(replacement.token);
-    expect(readdirSync(claimRoot)).not.toContain(".reclaim");
+    expect(!existsSync(claimRoot) || !readdirSync(claimRoot).includes(".reclaim")).toBe(true);
   });
 
   test("a stale claim cleaner cannot remove a replacement claim in its unlink window", async () => {
