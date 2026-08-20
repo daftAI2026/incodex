@@ -62,6 +62,30 @@ describe("install.sh", () => {
     expect(probe.stdout).toContain("fake-cli");
   });
 
+  test("recovers the default prefix passed by a legacy Bun standalone update", () => {
+    const release = mkdtempSync(join(tmpdir(), "incodex-rel-"));
+    const home = mkdtempSync(join(tmpdir(), "incodex-home-"));
+    writePayload(release, "incodex-darwin-arm64", "#!/bin/sh\necho fake-cli\n");
+    const sums = `${sha256(join(release, "incodex-darwin-arm64"))}  incodex-darwin-arm64\n`;
+    writeFileSync(join(release, "SHA256SUMS"), sums);
+
+    const ran = spawnSync("bash", [installSh], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: home,
+        INCODEX_DOWNLOAD_DIR: release,
+        INCODEX_PREFIX: "/$bunfs/root",
+        INCODEX_ARCH: "arm64",
+      },
+    });
+
+    expect(ran.status).toBe(0);
+    expect(existsSync(join(home, ".local", "bin", "incodex"))).toBe(true);
+    expect(existsSync(join(home, ".local", "bin", "inc"))).toBe(true);
+    expect(existsSync("/$bunfs/root/bin/incodex")).toBe(false);
+  });
+
   test("refuses to install when SHA256SUMS is missing", () => {
     const release = mkdtempSync(join(tmpdir(), "incodex-rel-"));
     const prefix = mkdtempSync(join(tmpdir(), "incodex-pre-"));
