@@ -382,6 +382,33 @@ fn rollback_before_swap_never_restores_a_partial_backup_over_live() {
 }
 
 #[test]
+fn durable_commit_does_not_report_cleanup_failure_as_uncommitted() {
+    let root = scratch();
+    let target_app = app_bundle(&root, "ChatGPT.app", "original");
+    let staged = app_bundle(&root, "staged.app", "patched");
+    let mut tx = Engine::begin(&root, &target_app, "install").unwrap();
+    seal_backup(&root, &mut tx, &target_app);
+    tx.place_staging(&staged).unwrap();
+    tx.swap().unwrap();
+    let outgoing = tx.outgoing_app();
+
+    let result = tx.commit_with_checkpoint(|phase| {
+        if phase == "COMMITTED_BEFORE_CLEANUP" {
+            fs::remove_dir_all(&outgoing).unwrap();
+            fs::write(&outgoing, b"leftover cleanup fixture").unwrap();
+        }
+    });
+
+    assert!(
+        result.is_ok(),
+        "durable COMMITTED must not be returned as an install failure: {result:?}"
+    );
+    assert_eq!(tx.journal().phase, "COMMITTED");
+    assert_eq!(fs::read_to_string(target_app.join("marker")).unwrap(), "patched");
+    assert!(outgoing.is_file(), "cleanup fixture was unexpectedly removed");
+}
+
+#[test]
 fn committed_transaction_rejects_a_late_rollback() {
     let root = scratch();
     let target_app = app_bundle(&root, "ChatGPT.app", "original");
