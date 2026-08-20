@@ -119,10 +119,12 @@ impl Engine {
             fs::create_dir_all(parent).map_err(|err| err.to_string())?;
         }
         fs::rename(&self.live_path, &outgoing).map_err(|err| err.to_string())?;
+        checkpoint("LIVE_MOVED_OUT");
         fs::rename(self.staging_app(), &self.live_path).map_err(|err| {
             let _ = fs::rename(&outgoing, &self.live_path);
             err.to_string()
         })?;
+        checkpoint("STAGING_MOVED_IN");
         self.advance("SWAPPED")?;
         checkpoint("SWAPPED");
         Ok(())
