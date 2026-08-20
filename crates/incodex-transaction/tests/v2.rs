@@ -170,6 +170,38 @@ fn durable_journal_is_0600_and_checksummed() {
 }
 
 #[test]
+fn tampered_journal_checksum_is_rejected() {
+    let root = scratch();
+    let target_app = app_bundle(&root, "ChatGPT.app", "x");
+    let tx = Engine::begin(&root, &target_app, "install").unwrap();
+    let id = tx.install_id().to_string();
+    let journal_path = root.join("transactions").join(&id).join("journal.json");
+    drop(tx);
+
+    let mut raw: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&journal_path).unwrap()).unwrap();
+    raw["phase"] = serde_json::json!("COMMITTED");
+    fs::write(&journal_path, format!("{}\n", serde_json::to_string_pretty(&raw).unwrap())).unwrap();
+
+    let error = incodex_transaction::journal_v2(&root, &id).unwrap_err();
+    assert!(error.contains("checksum"), "{error}");
+}
+
+#[test]
+fn recover_refuses_while_the_target_lock_is_live() {
+    let root = scratch();
+    let target_app = app_bundle(&root, "ChatGPT.app", "x");
+    let tx = Engine::begin(&root, &target_app, "install").unwrap();
+
+    let error = recover(&root, tx.install_id()).unwrap_err();
+    assert!(
+        error.to_string().contains("another incodex command is modifying this app"),
+        "{error}"
+    );
+    assert_eq!(tx.journal().phase, "DISCOVERED");
+}
+
+#[test]
 fn recover_refuses_traversal_absolute_and_symlink_paths_and_deletes_nothing() {
     let root = scratch();
     let victim = root.join("victim");
