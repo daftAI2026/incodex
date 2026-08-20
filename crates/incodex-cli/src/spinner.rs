@@ -65,6 +65,10 @@ impl Spinner {
     }
 
     fn start_for(message: &str, interactive: bool) -> Self {
+        Self::start_for_interval(message, interactive, Duration::from_millis(50))
+    }
+
+    fn start_for_interval(message: &str, interactive: bool, frame_interval: Duration) -> Self {
         let message = Arc::new(Mutex::new(message.to_string()));
         if !interactive {
             return Self {
@@ -81,7 +85,7 @@ impl Spinner {
         let worker = thread::spawn(move || {
             let mut frame = 1_usize;
             while !worker_stopped.load(Ordering::Relaxed) {
-                thread::park_timeout(Duration::from_millis(50));
+                thread::park_timeout(frame_interval);
                 if worker_stopped.load(Ordering::Relaxed) {
                     break;
                 }
@@ -135,11 +139,8 @@ mod tests {
 
     #[test]
     fn stopping_wakes_worker_before_long_frame_timeout() {
-        let mut spinner = Spinner::start_for_interval(
-            "Switching stage",
-            true,
-            Duration::from_secs(1),
-        );
+        let mut spinner =
+            Spinner::start_for_interval("Switching stage", true, Duration::from_secs(1));
         std::thread::sleep(Duration::from_millis(50));
         let started = Instant::now();
         spinner.stop();
