@@ -344,6 +344,120 @@ fn restore_source(root: &Path, journal: &JournalV2) -> Result<PathBuf, String> {
     }
 }
 
+fn parse_identity(device: &str, inode: &str, label: &str) -> Result<FsIdentity, String> {
+    if device.is_empty() || inode.is_empty() {
+        return Err(format!("{label} identity is missing from the journal"));
+    }
+    Ok(FsIdentity {
+        device: device
+            .parse()
+            .map_err(|_| format!("{label} device identity is invalid"))?,
+        inode: inode
+            .parse()
+            .map_err(|_| format!("{label} inode identity is invalid"))?,
+    })
+}
+
+fn optional_directory_identity(path: &Path, label: &str) -> Result<Option<FsIdentity>, String> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => directory_identity(path)
+            .map(Some)
+            .map_err(|error| format!("{label} is not a real directory: {error}")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("cannot inspect {label}: {error}")),
+    }
+}
+
+fn require_identity(
+    actual: Option<FsIdentity>,
+    expected: FsIdentity,
+    label: &str,
+) -> Result<(), String> {
+    match actual {
+        Some(actual) if actual == expected => Ok(()),
+        Some(actual) => Err(format!(
+            "{label} identity changed from {}:{} to {}:{}",
+            expected.device, expected.inode, actual.device, actual.inode
+        )),
+        None => Err(format!("{label} is missing")),
+    }
+}
+
+fn matches_sealed_backup(live: &Path, journal: &JournalV2) -> Result<bool, String> {
+    if journal.backup_digest.is_empty() {
+        return Ok(false);
+    }
+    Ok(tree_digest(live)? == journal.backup_digest)
+}
+
+fn validate_recovery_target(
+    journal: &JournalV2,
+    paths: &crate::journal::TxPaths,
+    live: &Path,
+) -> Result<(), String> {
+    let original_target = parse_identity(
+        &journal.target.device,
+        &journal.target.inode,
+        "target",
+    )?;
+    let parent = live
+        .parent()
+        .ok_or("target has no parent during recovery")?;
+    let expected_parent = parse_identity(
+        &journal.target.parent_device,
+        &journal.target.parent_inode,
+        "target parent",
+    )?;
+    require_identity(
+        optional_directory_identity(parent, "target parent")?,
+        expected_parent,
+        "target parent",
+    )?;
+
+    let live_identity = optional_directory_identity(live, "live target")?;
+    match journal.phase.as_str() {
+        phase if is_pre_swap_phase(phase) => {
+            require_identity(live_identity, original_target, "live target")
+        }
+        "TARGET_MOVED_OUT" => {
+            let outgoing = optional_directory_identity(&paths.outgoing, "outgoing target")?;
+            if let Some(identity) = outgoing.as_ref() {
+                require_identity(Some(*identity), original_target, "outgoing target")?;
+            }
+            let staged = parse_identity(
+                &journal.staged_device,
+                &journal.staged_inode,
+                "staged target",
+            )?;
+            match live_identity {
+                Some(identity) if identity == original_target || identity == staged => Ok(()),
+                Some(_) if matches_sealed_backup(live, journal)? => Ok(()),
+                None if outgoing.is_some() => Ok(()),
+                Some(_) => Err("live target is neither the original nor staged inode".into()),
+                None => Err("live target and outgoing target are both missing".into()),
+            }
+        }
+        "SWAPPED" | "TARGET_VERIFIED" => {
+            let staged = parse_identity(
+                &journal.staged_device,
+                &journal.staged_inode,
+                "staged target",
+            )?;
+            if !matches!(live_identity, Some(identity) if identity == staged)
+                && !matches_sealed_backup(live, journal)?
+            {
+                return Err("swapped live target identity changed".into());
+            }
+            if let Some(identity) = optional_directory_identity(&paths.outgoing, "outgoing target")?
+            {
+                require_identity(Some(identity), original_target, "outgoing target")?;
+            }
+            Ok(())
+        }
+        phase => Err(format!("cannot validate recovery target in phase {phase}")),
+    }
+}
+
 pub fn recover(root: &Path, install_id: &str) -> Result<RecoverResult, TxError> {
     recover_with(root, install_id, |_| true)
 }
@@ -362,6 +476,10 @@ where
     let live = PathBuf::from(&journal.target.real_path);
     let _lock = acquire_target_lock(root, &live, "recover", Some(install_id))
         .map_err(|message| TxError::Refuse { message })?;
+    // +---------------------------------------------------------------+
+    // | 路径检查必须在拿到 target lock 后再做一次，避免锁外检查的 TOCTOU。 |
+    // +---------------------------------------------------------------+
+    let paths = reconstructed(root, &journal).map_err(|message| TxError::Refuse { message })?;
     let action = match journal.phase.as_str() {
         "COMMITTED" | "ROLLED_BACK" => Recovery::Done,
         "DISCOVERED" | "INTENT" | "BACKUP_COMMITTED" | "STAGED" | "PATCHED" | "SIGNED"
@@ -382,6 +500,8 @@ where
         }
         return Ok(RecoverResult { action, journal });
     }
+    validate_recovery_target(&journal, &paths, &live)
+        .map_err(|message| TxError::Refuse { message })?;
     if is_pre_swap_phase(&journal.phase) {
         cleanup_pre_swap(root, &journal).map_err(TxError::Other)?;
     } else {
