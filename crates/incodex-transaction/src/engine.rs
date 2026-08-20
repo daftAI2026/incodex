@@ -185,7 +185,14 @@ where
     if action == Recovery::Done {
         return Ok(RecoverResult { action, journal });
     }
-    restore_live(root, &live, &journal).map_err(TxError::Other)?;
+    if matches!(
+        journal.phase.as_str(),
+        "DISCOVERED" | "BACKUP_COMMITTED" | "STAGED"
+    ) {
+        cleanup_pre_swap(root, &journal).map_err(TxError::Other)?;
+    } else {
+        restore_live(root, &live, &journal).map_err(TxError::Other)?;
+    }
     if !verify_restored(&live) {
         return Err(TxError::Other(
             "restored target failed codesign verification".into(),
@@ -199,6 +206,27 @@ where
         action: Recovery::Rollback,
         journal: load_v2(root, install_id).map_err(TxError::Other)?,
     })
+}
+
+fn cleanup_pre_swap(root: &Path, journal: &JournalV2) -> Result<(), String> {
+    let paths = tx_paths(root, &journal.install_id);
+    for path in [
+        paths.staged,
+        paths.outgoing,
+        paths.dir.join("restore"),
+        paths.dir.join("trash"),
+    ] {
+        if path.exists() {
+            fs::remove_dir_all(path).map_err(|err| err.to_string())?;
+        }
+    }
+    if journal.phase == "DISCOVERED" && paths.original.exists() {
+        // +---------------------------------------------------------------+
+        // | 备份尚未进入可用阶段；被中断的 ditto 产物只能当垃圾清掉，不能回写 live。 |
+        // +---------------------------------------------------------------+
+        fs::remove_dir_all(paths.original).map_err(|err| err.to_string())?;
+    }
+    Ok(())
 }
 
 fn restore_live(root: &Path, live: &Path, journal: &JournalV2) -> Result<(), String> {
