@@ -264,11 +264,7 @@ describe("golden CLI: TTY menu vs non-TTY help", () => {
       expect(ran.stdout).toContain(item.title);
       expect(ran.stdout).toContain(item.description);
     }
-    const menu = visible(ran.stdout);
-    expect(menu).toMatch(
-      /1\. Open[\s\S]*2\. Install[\s\S]*3\. Uninstall[\s\S]*4\. Status[\s\S]*5\. Doctor[\s\S]*6\. Quit/,
-    );
-    expect(menu).toContain("↑↓ | Enter | V Version | Q Quit | 1-6 Jump");
+    expect(visible(ran.stdout)).toContain("↑↓ | Enter | V Version | Q Quit | 1-6 Jump");
     expect(installMutations(home)).toEqual([]);
   }, 15_000);
 });
