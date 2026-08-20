@@ -252,6 +252,20 @@ describe("raise socket", () => {
     expect(readOwnerLock(root)?.token).toBe(replacement.token);
   });
 
+  test("a malformed owner is recoverable by the acquisition path", () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-malformed-owner-"));
+    writeFileSync(join(root, LOCK_NAME), "{\"pid\":");
+    const replacement = currentOwner("malformed-recovery", process.execPath);
+
+    expect(() => acquireOwnerLease(root, replacement)).not.toThrow();
+    expect(readOwnerLock(root)?.token).toBe(replacement.token);
+  });
+
+  test("main preflight delegates malformed owners to acquisition recovery", () => {
+    const mainSource = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
+    expect(mainSource).toContain('if (state.kind === "invalid") return false;');
+  });
+
   test("retrying a delayed socket does not create a second owner", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-delayed-socket-"));
     const owner = currentOwner("delayed", process.execPath);
