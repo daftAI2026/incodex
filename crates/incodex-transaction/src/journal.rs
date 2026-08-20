@@ -171,7 +171,10 @@ pub fn reconstructed(root: &Path, journal: &JournalV2) -> Result<TxPaths, String
         let full = paths.dir.join(rel);
         if let Ok(meta) = fs::symlink_metadata(&full) {
             if meta.file_type().is_symlink() {
-                return Err(format!("journal path is a symlink: {rel}"));
+                // +-----------------------------------------------------------+
+                // | 叶子 symlink 只允许进入受控清理；恢复源会在 restore 前拒绝。 |
+                // +-----------------------------------------------------------+
+                continue;
             }
         }
         if let Ok(real) = fs::canonicalize(&full) {
@@ -197,7 +200,12 @@ fn reject_symlink(path: &Path, label: &str) -> Result<(), String> {
 
 fn validate_path_ancestors(base: &Path, rel: &str) -> Result<(), String> {
     let mut current = base.to_path_buf();
-    for component in Path::new(rel).components() {
+    let components: Vec<_> = Path::new(rel).components().collect();
+    let component_count = components.len();
+    for (index, component) in components.into_iter().enumerate() {
+        if index + 1 == component_count {
+            break;
+        }
         current.push(component.as_os_str());
         match fs::symlink_metadata(&current) {
             Ok(meta) if meta.file_type().is_symlink() => {

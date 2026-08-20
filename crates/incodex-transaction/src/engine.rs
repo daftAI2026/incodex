@@ -272,10 +272,7 @@ fn is_pre_swap_phase(phase: &str) -> bool {
 }
 
 fn cleanup_outgoing(outgoing: &Path) -> Result<(), String> {
-    if outgoing.exists() {
-        fs::remove_dir_all(outgoing).map_err(|err| err.to_string())?;
-    }
-    Ok(())
+    remove_path(outgoing)
 }
 
 fn cleanup_committed(root: &Path, journal: &JournalV2) -> Result<(), String> {
@@ -286,9 +283,7 @@ fn cleanup_committed(root: &Path, journal: &JournalV2) -> Result<(), String> {
         paths.dir.join("restore"),
         paths.dir.join("trash"),
     ] {
-        if path.exists() {
-            fs::remove_dir_all(path).map_err(|err| err.to_string())?;
-        }
+        remove_path(&path)?;
     }
     Ok(())
 }
@@ -301,15 +296,13 @@ fn cleanup_pre_swap(root: &Path, journal: &JournalV2) -> Result<(), String> {
         paths.dir.join("restore"),
         paths.dir.join("trash"),
     ] {
-        if path.exists() {
-            fs::remove_dir_all(path).map_err(|err| err.to_string())?;
-        }
+        remove_path(&path)?;
     }
-    if matches!(journal.phase.as_str(), "DISCOVERED" | "INTENT") && paths.original.exists() {
+    if matches!(journal.phase.as_str(), "DISCOVERED" | "INTENT") {
         // +---------------------------------------------------------------+
         // | 备份尚未进入可用阶段；被中断的 ditto 产物只能当垃圾清掉，不能回写 live。 |
         // +---------------------------------------------------------------+
-        fs::remove_dir_all(paths.original).map_err(|err| err.to_string())?;
+        remove_path(&paths.original)?;
     }
     Ok(())
 }
@@ -329,15 +322,13 @@ fn restore_live(root: &Path, live: &Path, journal: &JournalV2) -> Result<(), Str
     } else if paths.outgoing.exists() {
         replace_live(&paths.outgoing, live, &paths.dir)?;
     }
-    if paths.outgoing.exists() {
+    if path_exists(&paths.outgoing)? {
         // +---------------------------------------------------------------+
         // | original 优先作为回滚源；outgoing 可能正处于被 commit 清理的半态。 |
         // +---------------------------------------------------------------+
-        fs::remove_dir_all(&paths.outgoing).map_err(|err| err.to_string())?;
+        remove_path(&paths.outgoing)?;
     }
-    if paths.staged.exists() {
-        fs::remove_dir_all(&paths.staged).map_err(|err| err.to_string())?;
-    }
+    remove_path(&paths.staged)?;
     Ok(())
 }
 
@@ -346,9 +337,7 @@ fn replace_live(source: &Path, live: &Path, transaction_dir: &Path) -> Result<()
     if let Some(parent) = trash.parent() {
         fs::create_dir_all(parent).map_err(|err| err.to_string())?;
     }
-    if trash.exists() {
-        fs::remove_dir_all(&trash).map_err(|err| err.to_string())?;
-    }
+    remove_path(&trash)?;
     let moved_live = if live.exists() {
         fs::rename(live, &trash).map_err(|err| err.to_string())?;
         true
@@ -361,8 +350,29 @@ fn replace_live(source: &Path, live: &Path, transaction_dir: &Path) -> Result<()
         }
         return Err(error.to_string());
     }
-    if trash.exists() {
-        fs::remove_dir_all(&trash).map_err(|err| err.to_string())?;
-    }
+    remove_path(&trash)?;
     Ok(())
+}
+
+fn path_exists(path: &Path) -> Result<bool, String> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn remove_path(path: &Path) -> Result<(), String> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.to_string()),
+    };
+    if metadata.file_type().is_symlink() || metadata.file_type().is_file() {
+        fs::remove_file(path).map_err(|err| err.to_string())
+    } else if metadata.file_type().is_dir() {
+        fs::remove_dir_all(path).map_err(|err| err.to_string())
+    } else {
+        Err(format!("cannot remove unsupported path type: {}", path.display()))
+    }
 }
