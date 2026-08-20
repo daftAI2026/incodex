@@ -6,7 +6,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_asar::{pack_dir, Archive, LOADER_NAME, MARKER_KEY};
-use incodex_transaction::acquire_target_lock;
+use incodex_transaction::{acquire_target_lock, Engine};
 
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_incodex")
@@ -500,6 +500,45 @@ fn post_swap_verification_failure_rolls_back_the_original_app() {
     )
     .unwrap();
     assert_eq!(journal["phase"], "ROLLED_BACK");
+}
+
+#[test]
+fn recover_does_not_finish_until_the_restored_app_verifies() {
+    let home = isolated_home();
+    let app = patchable_app(&home);
+    let root = home.join(".incodex");
+    let (status, _, stderr) =
+        run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(status, 0, "{stderr}");
+
+    let staged = home.join("broken-staged.app");
+    let copied = Command::new("ditto")
+        .args([&app, &staged])
+        .status()
+        .unwrap();
+    assert!(copied.success());
+    fs::write(staged.join("Contents/MacOS/ChatGPT"), "broken after signing\n").unwrap();
+    let mut tx = Engine::begin(&root, &app, "test-crash").unwrap();
+    tx.place_staging(&staged).unwrap();
+    tx.swap().unwrap();
+    let id = tx.install_id().to_string();
+    drop(tx);
+
+    let fake_bin = home.join("fake-bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    write_executable(&fake_bin.join("codesign"), "#!/bin/sh\nexit 1\n");
+    let (status, _stdout, stderr) = run_with_path(
+        &["recover", "--transaction", &id],
+        &home,
+        &path_with_fake_bin(&fake_bin),
+    );
+    assert_eq!(status, 1, "{stderr}");
+    assert!(stderr.contains("restored target failed codesign verification"), "{stderr}");
+    let journal: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(root.join("transactions").join(id).join("journal.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(journal["phase"], "SWAPPED");
 }
 
 #[test]
