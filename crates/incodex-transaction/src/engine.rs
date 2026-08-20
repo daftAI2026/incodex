@@ -19,6 +19,10 @@ use crate::proof::{
 };
 use crate::Recovery;
 
+#[cfg(test)]
+#[path = "engine_tests.rs"]
+mod engine_tests;
+
 #[derive(Debug)]
 pub enum TxError {
     Refuse { message: String },
