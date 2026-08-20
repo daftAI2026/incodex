@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { iconFor } from "./incognito-icon";
 
 const inject = readFileSync(join(import.meta.dir, "inject.ts"), "utf8");
 
@@ -23,5 +24,13 @@ describe("hat-glasses stays after header remount", () => {
   test("skips ensureButton while the hat is still the previous sibling of Search", () => {
     expect(inject).toContain("buttonStillBesideSearch");
     expect(inject).toContain("if (!needsInject()) return");
+  });
+});
+
+describe("incognito button exit affordance", () => {
+  test("shows circle-x only while an incognito button is hovered", () => {
+    expect(iconFor({ incognito: true, hovered: false })).toBe("hat-glasses");
+    expect(iconFor({ incognito: true, hovered: true })).toBe("circle-x");
+    expect(iconFor({ incognito: false, hovered: true })).toBe("hat-glasses");
   });
 });
