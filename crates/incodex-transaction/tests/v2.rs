@@ -404,7 +404,7 @@ fn rollback_before_swap_never_restores_a_partial_backup_over_live() {
 }
 
 #[test]
-fn durable_commit_does_not_report_cleanup_failure_as_uncommitted() {
+fn durable_commit_cleans_special_cleanup_leaves_after_commit() {
     let root = scratch();
     let target_app = app_bundle(&root, "ChatGPT.app", "original");
     let staged = app_bundle(&root, "staged.app", "patched");
@@ -433,16 +433,10 @@ fn durable_commit_does_not_report_cleanup_failure_as_uncommitted() {
         "durable COMMITTED must not be returned as an install failure: {result:?}"
     );
     let result = result.unwrap();
-    assert!(
-        result
-            .cleanup_warning
-            .as_deref()
-            .is_some_and(|warning| warning.contains("unsupported path type")),
-        "cleanup failure was not surfaced as a warning: {result:?}"
-    );
+    assert!(result.cleanup_warning.is_none(), "special leaf was not cleaned: {result:?}");
     assert_eq!(tx.journal().phase, "COMMITTED");
     assert_eq!(fs::read_to_string(target_app.join("marker")).unwrap(), "patched");
-    assert!(outgoing.exists(), "cleanup fixture was unexpectedly removed");
+    assert!(!outgoing.exists(), "special cleanup leaf survived");
 }
 
 #[test]
