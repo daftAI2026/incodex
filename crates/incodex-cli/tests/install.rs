@@ -445,8 +445,7 @@ fn install_does_not_skip_a_stale_loader_without_a_committed_transaction() {
 fn uninstall_refuses_while_another_command_holds_the_target_lock() {
     let home = isolated_home();
     let app = patchable_app(&home);
-    let (status, _, stderr) =
-        run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
+    let (status, _, stderr) = run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
     assert_eq!(status, 0, "{stderr}");
     let asar = app.join("Contents/Resources/app.asar");
     let patched = fs::read(&asar).unwrap();
@@ -458,7 +457,10 @@ fn uninstall_refuses_while_another_command_holds_the_target_lock() {
         &home,
     );
     assert_eq!(status, 1, "{stderr}");
-    assert!(stderr.contains("another incodex command is modifying this app"), "{stderr}");
+    assert!(
+        stderr.contains("another incodex command is modifying this app"),
+        "{stderr}"
+    );
     assert_eq!(fs::read(asar).unwrap(), patched);
 }
 
@@ -484,7 +486,10 @@ fn post_swap_verification_failure_rolls_back_the_original_app() {
         &path_with_fake_bin(&fake_bin),
     );
     assert_eq!(status, 1, "{stderr}");
-    assert!(stderr.contains("post-swap") || stderr.contains("verification"), "{stderr}");
+    assert!(
+        stderr.contains("post-swap") || stderr.contains("verification"),
+        "{stderr}"
+    );
     assert_eq!(fs::read(&asar).unwrap(), before);
     let journal_path = install_mutations(&home)
         .into_iter()

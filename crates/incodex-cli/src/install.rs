@@ -6,11 +6,11 @@ use incodex_core::canonical::{inspect_target, is_official_app};
 use incodex_core::paths::{user_root, ASAR_REL, DEFAULT_APP};
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
 use incodex_macos::{
-    ditto, notify_launch_services, quit_official_app, read_plist_info, restore_original, sign_app,
-    verify_app, write_asar_integrity,
+    ditto, notify_launch_services, quit_official_app, read_asar_integrity, read_plist_info,
+    restore_original, sign_app, verify_app, write_asar_integrity,
 };
 use incodex_runtime_bundle::{loader_source, publish, runtime_version};
-use incodex_transaction::{recover, Engine, Recovery, TxError};
+use incodex_transaction::{acquire_target_lock, journal_v2, recover, Engine, Recovery, TxError};
 
 use crate::parse::ParsedCli;
 
@@ -225,10 +225,10 @@ fn install_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
     let asar = app.join(ASAR_REL);
     if asar.exists() {
         if let Ok(archive) = Archive::open(&asar) {
-            if archive.has_only_loader() {
+            if let Some(install_id) = current_install_id(app, root, &archive) {
                 return Ok(CommandResult {
                     skipped: true,
-                    install_id: None,
+                    install_id: Some(install_id),
                     runtime_version: Some(published.version),
                     app: app.display().to_string(),
                 });
@@ -258,8 +258,21 @@ fn install_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
         }
     }
     tx.place_staging(&staged)?;
-    tx.swap()?;
-    tx.commit()?;
+    if let Err(error) = tx.swap() {
+        if matches!(tx.journal().phase.as_str(), "TARGET_MOVED_OUT" | "SWAPPED") {
+            let _ = tx.rollback(&error);
+        }
+        return Err(error);
+    }
+    if !verify_app(app) {
+        let error = "post-swap codesign verification failed".to_string();
+        tx.rollback(&error)?;
+        return Err(error);
+    }
+    if let Err(error) = tx.commit() {
+        tx.rollback(&error)?;
+        return Err(error);
+    }
     let _ = notify_launch_services(app);
     Ok(CommandResult {
         skipped: false,
@@ -276,6 +289,7 @@ fn uninstall_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
     if is_official_app(app, None) {
         let _ = quit_official_app();
     }
+    let _lock = acquire_target_lock(root, app, "uninstall", None)?;
     let journal = find_committed(root, app)?;
     let original = root
         .join("transactions")
@@ -289,6 +303,36 @@ fn uninstall_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
         runtime_version: Some(runtime_version()),
         app: app.display().to_string(),
     })
+}
+
+fn current_install_id(app: &Path, root: &Path, archive: &Archive) -> Option<String> {
+    if !archive.has_only_loader()
+        || archive.extract("incodex-loader.cjs").ok()? != loader_source().as_bytes()
+    {
+        return None;
+    }
+    let package = archive.read_package_main().ok()?;
+    if !package.already_patched {
+        return None;
+    }
+    let install_id = package.install_id?;
+    let journal = journal_v2(root, &install_id).ok()?;
+    if journal.phase != "COMMITTED" {
+        return None;
+    }
+    let target = fs::canonicalize(app).ok()?;
+    let journal_target = fs::canonicalize(&journal.target.real_path).ok()?;
+    if target != journal_target || !verify_app(app) {
+        return None;
+    }
+    let original = root
+        .join("transactions")
+        .join(&install_id)
+        .join(&journal.paths.original);
+    if !original.exists() || read_asar_integrity(app) != Some(archive.header_hash()) {
+        return None;
+    }
+    Some(install_id)
 }
 
 fn find_committed(root: &Path, app: &Path) -> Result<incodex_transaction::JournalV2, String> {
