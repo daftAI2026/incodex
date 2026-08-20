@@ -129,11 +129,17 @@ impl Engine {
     }
 
     pub fn commit(&mut self) -> Result<(), String> {
-        let outgoing = self.outgoing_app();
-        if outgoing.exists() {
-            fs::remove_dir_all(&outgoing).map_err(|err| err.to_string())?;
-        }
-        self.advance("COMMITTED")
+        self.commit_with_checkpoint(|_| {})
+    }
+
+    #[doc(hidden)]
+    pub fn commit_with_checkpoint<F>(&mut self, mut checkpoint: F) -> Result<(), String>
+    where
+        F: FnMut(&str),
+    {
+        self.advance("COMMITTED")?;
+        checkpoint("COMMITTED_BEFORE_CLEANUP");
+        cleanup_outgoing(&self.outgoing_app())
     }
 
     pub fn rollback(&mut self, _reason: &str) -> Result<(), String> {
@@ -183,6 +189,9 @@ where
         });
     }
     if action == Recovery::Done {
+        if journal.phase == "COMMITTED" {
+            cleanup_committed(root, &journal).map_err(TxError::Other)?;
+        }
         return Ok(RecoverResult { action, journal });
     }
     if matches!(
@@ -206,6 +215,28 @@ where
         action: Recovery::Rollback,
         journal: load_v2(root, install_id).map_err(TxError::Other)?,
     })
+}
+
+fn cleanup_outgoing(outgoing: &Path) -> Result<(), String> {
+    if outgoing.exists() {
+        fs::remove_dir_all(outgoing).map_err(|err| err.to_string())?;
+    }
+    Ok(())
+}
+
+fn cleanup_committed(root: &Path, journal: &JournalV2) -> Result<(), String> {
+    let paths = tx_paths(root, &journal.install_id);
+    cleanup_outgoing(&paths.outgoing)?;
+    for path in [
+        paths.staged,
+        paths.dir.join("restore"),
+        paths.dir.join("trash"),
+    ] {
+        if path.exists() {
+            fs::remove_dir_all(path).map_err(|err| err.to_string())?;
+        }
+    }
+    Ok(())
 }
 
 fn cleanup_pre_swap(root: &Path, journal: &JournalV2) -> Result<(), String> {

@@ -272,7 +272,9 @@ fn install_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
         return Err(error);
     }
     if let Err(error) = tx.commit() {
-        tx.rollback(&error)?;
+        if tx.journal().phase != "COMMITTED" {
+            tx.rollback(&error)?;
+        }
         return Err(error);
     }
     let _ = notify_launch_services(app);
