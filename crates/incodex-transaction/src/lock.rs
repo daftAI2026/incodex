@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 use crate::durable::ensure_private_dir;
 
 static LOCK_TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
+static LOCK_OWNER_SEQ: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,6 +22,8 @@ struct LockRecord {
     process_start: String,
     command: String,
     install_id: Option<String>,
+    #[serde(default)]
+    owner_token: Option<String>,
     requested_path: String,
     real_path: String,
     created_at: String,
@@ -29,6 +32,7 @@ struct LockRecord {
 pub struct TargetLock {
     path: PathBuf,
     pid: u32,
+    owner_token: String,
 }
 
 impl Drop for TargetLock {
@@ -39,12 +43,16 @@ impl Drop for TargetLock {
 
 impl TargetLock {
     fn release(&mut self) -> Result<(), String> {
-        if let Ok(body) = fs::read_to_string(&self.path) {
-            if let Ok(record) = serde_json::from_str::<LockRecord>(&body) {
-                if record.pid != self.pid {
-                    return Ok(());
-                }
-            }
+        let Ok(body) = fs::read_to_string(&self.path) else {
+            return Ok(());
+        };
+        let Ok(record) = serde_json::from_str::<LockRecord>(&body) else {
+            return Ok(());
+        };
+        if record.pid != self.pid
+            || record.owner_token.as_deref() != Some(self.owner_token.as_str())
+        {
+            return Ok(());
         }
         match fs::remove_file(&self.path) {
             Ok(()) => Ok(()),
@@ -69,12 +77,14 @@ pub fn acquire_target_lock(
     let real_path = canonical_path(target_path);
     let path = lock_path_for(root, target_path);
     ensure_private_dir(path.parent().unwrap())?;
+    let owner_token = new_owner_token();
     let record = LockRecord {
         schema_version: 1,
         pid: std::process::id(),
         process_start: process_start(std::process::id() as i32).unwrap_or_default(),
         command: command.to_string(),
         install_id: install_id.map(str::to_string),
+        owner_token: Some(owner_token.clone()),
         requested_path: target_path.display().to_string(),
         real_path: real_path.display().to_string(),
         created_at: unix_now(),
@@ -83,6 +93,7 @@ pub fn acquire_target_lock(
         Ok(()) => Ok(TargetLock {
             path,
             pid: std::process::id(),
+            owner_token: owner_token.clone(),
         }),
         Err(_) => {
             if steal_if_stale(&path) {
@@ -90,6 +101,7 @@ pub fn acquire_target_lock(
                 return Ok(TargetLock {
                     path,
                     pid: std::process::id(),
+                    owner_token,
                 });
             }
             let who = fs::read_to_string(&path)
@@ -102,6 +114,15 @@ pub fn acquire_target_lock(
             ))
         }
     }
+}
+
+fn new_owner_token() -> String {
+    let sequence = LOCK_OWNER_SEQ.fetch_add(1, Ordering::Relaxed);
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    format!("{}-{timestamp}-{sequence}", std::process::id())
 }
 
 fn write_exclusive(path: &Path, record: &LockRecord) -> Result<(), String> {
