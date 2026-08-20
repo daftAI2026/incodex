@@ -193,6 +193,7 @@ fn update_pins_the_installer_and_assets_to_the_resolved_release() {
     let download_base_log = home.join("download-base.log");
     let expected_version_log = home.join("expected-version.log");
     let download_dir_log = home.join("download-dir.log");
+    let arch_log = home.join("arch.log");
     fs::create_dir_all(&fake_bin).unwrap();
     let (prefix, installed) = installed_cli(&home);
     write_executable(
@@ -212,6 +213,7 @@ printf '%s\n' "$INCODEX_PREFIX" > "$PREFIX_LOG"
 printf '%s\n' "$INCODEX_DOWNLOAD_BASE" > "$DOWNLOAD_BASE_LOG"
 printf '%s\n' "$INCODEX_EXPECTED_VERSION" > "$EXPECTED_VERSION_LOG"
 printf '%s\n' "${INCODEX_DOWNLOAD_DIR-unset}" > "$DOWNLOAD_DIR_LOG"
+printf '%s\n' "${INCODEX_ARCH-unset}" > "$ARCH_LOG"
 cat > "$INCODEX_PREFIX/bin/incodex.next" <<'CLI'
 #!/bin/sh
 printf '%s\n' 'Incodex version 9.9.9'
@@ -237,9 +239,11 @@ esac
         .env("DOWNLOAD_BASE_LOG", &download_base_log)
         .env("EXPECTED_VERSION_LOG", &expected_version_log)
         .env("DOWNLOAD_DIR_LOG", &download_dir_log)
+        .env("ARCH_LOG", &arch_log)
         .env("INCODEX_PREFIX", home.join("attacker-prefix"))
         .env("INCODEX_DOWNLOAD_BASE", "https://attacker.invalid/release")
         .env("INCODEX_DOWNLOAD_DIR", home.join("attacker-release"))
+        .env("INCODEX_ARCH", "x86_64")
         .output()
         .unwrap();
 
@@ -266,6 +270,7 @@ esac
         fs::read_to_string(download_dir_log).unwrap().trim(),
         "unset"
     );
+    assert_eq!(fs::read_to_string(arch_log).unwrap().trim(), "unset");
     let urls = fs::read_to_string(curl_log).unwrap();
     assert!(urls.contains("raw.githubusercontent.com/daftAI2026/incodex/v9.9.9/install.sh"));
     assert!(!urls.contains("raw.githubusercontent.com/daftAI2026/incodex/main/install.sh"));
