@@ -179,6 +179,43 @@ fn pre_swap_recover_does_not_replace_live_with_partial_original() {
     );
 }
 
+#[test]
+fn recover_never_uses_a_partial_outgoing_as_the_rollback_source() {
+    if run_recover_child_mode() {
+        return;
+    }
+
+    let root = scratch();
+    let app = make_app(&root, "ChatGPT.app", "ORIGINAL");
+    let candidate = make_app(&root, "candidate.app", "PATCHED");
+    let original_digest = tree_digest(&app);
+    let id_file = root.join("install-id");
+
+    let status = spawn_partial_outgoing_child(&root, &app, &candidate, &id_file);
+    assert_eq!(
+        status.signal(),
+        Some(libc::SIGKILL),
+        "commit cleanup child was not SIGKILLed: {status:?}"
+    );
+
+    let install_id = fs::read_to_string(&id_file).expect("child must publish install id");
+    let install_id = install_id.trim();
+    assert_eq!(
+        journal_v2(&root, install_id)
+            .expect("interrupted transaction keeps its journal")
+            .phase,
+        "SWAPPED"
+    );
+
+    let status = spawn_recover_child("recover", &root, install_id);
+    assert_eq!(status.code(), Some(0), "recover child failed: {status:?}");
+    assert_eq!(
+        tree_digest(&app),
+        original_digest,
+        "recovery restored a partial outgoing bundle"
+    );
+}
+
 fn run_case(point: KillPoint) {
     let root = scratch();
     let app = make_app(&root, "ChatGPT.app", "ORIGINAL");
@@ -309,6 +346,23 @@ fn run_recover_child_mode() -> bool {
             fs::write(partial.join("marker"), "PARTIAL\n").expect("write partial backup");
             kill_self();
         }
+        "partial-outgoing" => {
+            let app = PathBuf::from(env::var(APP_ENV).expect("partial transaction app"));
+            let candidate =
+                PathBuf::from(env::var(CANDIDATE_ENV).expect("partial transaction candidate"));
+            let mut tx = Engine::begin(&root, &app, "sigkill-test").expect("begin transaction");
+            let id = tx.install_id().to_string();
+            let id_file =
+                PathBuf::from(env::var(ID_FILE_ENV).expect("partial transaction id file"));
+            fs::write(id_file, &id).expect("publish install id");
+            seed_original(&root, &app, &id);
+            tx.place_staging(&candidate).expect("stage candidate");
+            tx.swap().expect("swap candidate");
+            let outgoing = tx.outgoing_app();
+            fs::remove_file(outgoing.join("Contents/MacOS/ChatGPT"))
+                .expect("remove one outgoing file");
+            kill_self();
+        }
         "kill-after-restore" => {
             let install_id = env::var(INSTALL_ID_ENV).expect("recover child install id");
             recover_with(&root, &install_id, |_| {
@@ -341,6 +395,30 @@ fn spawn_pre_swap_child(root: &Path, app: &Path, id_file: &Path) -> ExitStatus {
         .stderr(Stdio::inherit())
         .status()
         .expect("spawn partial install child")
+}
+
+fn spawn_partial_outgoing_child(
+    root: &Path,
+    app: &Path,
+    candidate: &Path,
+    id_file: &Path,
+) -> ExitStatus {
+    let exe = env::current_exe().expect("test executable");
+    Command::new(exe)
+        .args([
+            "--exact",
+            "recover_never_uses_a_partial_outgoing_as_the_rollback_source",
+            "--nocapture",
+        ])
+        .env(RECOVER_CHILD_MODE, "partial-outgoing")
+        .env(ROOT_ENV, root)
+        .env(APP_ENV, app)
+        .env(CANDIDATE_ENV, candidate)
+        .env(ID_FILE_ENV, id_file)
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .status()
+        .expect("spawn partial transaction child")
 }
 
 fn mutate_child(root: &Path, app: &Path, candidate: &Path, point: KillPoint) {
