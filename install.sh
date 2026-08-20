@@ -76,8 +76,9 @@ fetch() {
   command -v curl >/dev/null 2>&1 || die "curl is required"
   local attempt=1
   local curl_exit=0
+  local http_status=""
   while true; do
-    if curl -fsSL --connect-timeout 10 --max-time 60 "${DOWNLOAD_BASE}/${src}" -o "${dest}"; then
+    if http_status="$(curl -fsSL --connect-timeout 10 --max-time 60 --write-out '%{http_code}' "${DOWNLOAD_BASE}/${src}" -o "${dest}")"; then
       return 0
     else
       curl_exit=$?
@@ -85,6 +86,12 @@ fetch() {
     rm -f "$dest"
     case "$curl_exit" in
       6 | 7 | 18 | 28 | 35 | 52 | 55 | 56) ;;
+      22)
+        case "$http_status" in
+          408 | 429 | 500 | 502 | 503 | 504) ;;
+          *) die "failed to download ${src} (HTTP ${http_status:-unknown})" ;;
+        esac
+        ;;
       *) die "failed to download ${src} (curl ${curl_exit})" ;;
     esac
     [[ "$attempt" -lt 3 ]] || die "failed to download ${src} after 3 attempts"

@@ -195,11 +195,21 @@ fn curl_download(url: &str, label: &str) -> Result<Vec<u8>, String> {
     let mut last_failure = None;
     for attempt in 1..=DOWNLOAD_ATTEMPTS {
         let downloaded = Command::new("curl")
-            .args(["-fsSL", "--connect-timeout", "10", "--max-time", "60", url])
+            .args([
+                "-fsSL",
+                "--connect-timeout",
+                "10",
+                "--max-time",
+                "60",
+                "--write-out",
+                "INCODEX_HTTP_STATUS:%{http_code}",
+                url,
+            ])
             .output()
             .map_err(|err| format!("update failed: could not start curl: {err}"))?;
+        let (body, http_status) = split_curl_body_and_status(downloaded.stdout);
         if downloaded.status.success() {
-            return Ok(downloaded.stdout);
+            return Ok(body);
         }
         let detail = String::from_utf8_lossy(&downloaded.stderr);
         let detail = detail.trim();
@@ -212,7 +222,9 @@ fn curl_download(url: &str, label: &str) -> Result<Vec<u8>, String> {
             format!("update failed: {detail}")
         });
         let code = downloaded.status.code();
-        if attempt == DOWNLOAD_ATTEMPTS || !code.is_some_and(transient_curl_exit) {
+        let transient = code.is_some_and(transient_curl_exit)
+            || (code == Some(22) && http_status.is_some_and(transient_http_status));
+        if attempt == DOWNLOAD_ATTEMPTS || !transient {
             break;
         }
         thread::sleep(RETRY_DELAY);
@@ -222,6 +234,29 @@ fn curl_download(url: &str, label: &str) -> Result<Vec<u8>, String> {
 
 fn transient_curl_exit(code: i32) -> bool {
     matches!(code, 6 | 7 | 18 | 28 | 35 | 52 | 55 | 56)
+}
+
+fn transient_http_status(status: u16) -> bool {
+    matches!(status, 408 | 429 | 500 | 502 | 503 | 504)
+}
+
+fn split_curl_body_and_status(mut output: Vec<u8>) -> (Vec<u8>, Option<u16>) {
+    let marker = b"INCODEX_HTTP_STATUS:";
+    let Some(separator) = output
+        .windows(marker.len())
+        .rposition(|window| window == marker)
+    else {
+        return (output, None);
+    };
+    let status = &output[separator + marker.len()..];
+    if status.len() != 3 || !status.iter().all(u8::is_ascii_digit) {
+        return (output, None);
+    }
+    let status = std::str::from_utf8(status)
+        .ok()
+        .and_then(|value| value.parse().ok());
+    output.truncate(separator);
+    (output, status)
 }
 
 fn latest_stable_release() -> Result<StableRelease, String> {
