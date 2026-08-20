@@ -17,9 +17,14 @@ describe("architecture boundaries", () => {
     expect(agents).toContain("--base exp/rust-cli");
     expect(agents).toContain("Do not send crate PRs at `main`");
     expect(agents).toContain("Incognito-window hover");
+    expect(agents).toContain("failing `cargo test` repro commit");
+    expect(agents).toContain("Do not use CDP as the everyday Dock / `install` launch path");
+    expect(agents).toContain("`incodex open` may start the official binary with `--remote-debugging-port`");
+    expect(agents).not.toContain("Do not add Overlay, CDP-as-launcher");
     expect(contributing).toContain("exp/rust-cli");
     expect(contributing).toContain("base exp/rust-cli");
     expect(contributing).toContain("Rust crate PRs use base `exp/rust-cli`");
+    expect(contributing).toContain("failing `cargo test` repro");
   });
 
   test("UI adapter has no file deletion, process control, or auth handling", () => {
