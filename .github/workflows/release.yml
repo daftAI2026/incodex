@@ -15,6 +15,10 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: stable
+          target: aarch64-apple-darwin,x86_64-apple-darwin
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
@@ -24,21 +28,59 @@ jobs:
         env:
           SOURCE_COMMIT: ${{ github.sha }}
         run: |
+          set -euo pipefail
           bun run build:runtime
+
+          TAG="${GITHUB_REF#refs/tags/}"
+          if ! [[ "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "release tag must be vX.Y.Z: $TAG" >&2
+            exit 1
+          fi
+          VERSION="${BASH_REMATCH[1]}"
+          PACKAGE_VERSION=$(bun -e 'process.stdout.write(require("./package.json").version)')
+          CARGO_VERSION=$(awk '
+            $0 == "[workspace.package]" { workspace = 1; next }
+            workspace && $1 == "version" { gsub(/"/, "", $3); print $3; exit }
+            workspace && /^\[/ { exit }
+          ' Cargo.toml)
+          RUNTIME_VERSION=$(bun -e 'process.stdout.write(require("./dist/runtime-manifest.json").runtimeVersion)')
+          [[ "$PACKAGE_VERSION" == "$VERSION" ]] || { echo "package.json version $PACKAGE_VERSION does not match $TAG" >&2; exit 1; }
+          [[ "$CARGO_VERSION" == "$VERSION" ]] || { echo "Cargo workspace version $CARGO_VERSION does not match $TAG" >&2; exit 1; }
+          [[ "$RUNTIME_VERSION" == "$VERSION" ]] || { echo "Runtime version $RUNTIME_VERSION does not match $TAG" >&2; exit 1; }
+
           bun run typecheck
           bun run lint
           bun test src tests
-      - name: Compile CLI
+          cargo test --locked --workspace --release
+      - name: Compile native CLI
         run: |
+          set -euo pipefail
+          cargo build --locked --release --target aarch64-apple-darwin --package incodex-cli --bin incodex
+          cargo build --locked --release --target x86_64-apple-darwin --package incodex-cli --bin incodex
+          rm -rf release-cli
           mkdir -p release-cli
-          bun build src/cli.ts --compile --target=bun-darwin-arm64 --outfile release-cli/incodex-darwin-arm64
-          bun build src/cli.ts --compile --target=bun-darwin-x64 --outfile release-cli/incodex-darwin-x64
+          install -m 755 target/aarch64-apple-darwin/release/incodex release-cli/incodex-darwin-arm64
+          install -m 755 target/x86_64-apple-darwin/release/incodex release-cli/incodex-darwin-x64
           codesign --sign - --force release-cli/incodex-darwin-arm64
           codesign --sign - --force release-cli/incodex-darwin-x64
+          file release-cli/incodex-darwin-arm64
+          file release-cli/incodex-darwin-x64
+          lipo -verify_arch arm64 release-cli/incodex-darwin-arm64
+          lipo -verify_arch x86_64 release-cli/incodex-darwin-x64
+          codesign --verify --strict release-cli/incodex-darwin-arm64
+          codesign --verify --strict release-cli/incodex-darwin-x64
       - name: Checksums
         run: |
+          set -euo pipefail
           (cd release-cli && shasum -a 256 incodex-darwin-arm64 incodex-darwin-x64 > SHA256SUMS)
           cat release-cli/SHA256SUMS
+          ACTUAL_ASSETS=$(find release-cli -type f -exec basename {} \; | LC_ALL=C sort)
+          EXPECTED_ASSETS=$(printf '%s\n' SHA256SUMS incodex-darwin-arm64 incodex-darwin-x64 | LC_ALL=C sort)
+          if [[ "$ACTUAL_ASSETS" != "$EXPECTED_ASSETS" ]]; then
+            echo "unexpected release asset set" >&2
+            printf 'expected:\n%s\nactual:\n%s\n' "$EXPECTED_ASSETS" "$ACTUAL_ASSETS" >&2
+            exit 1
+          fi
       - name: Attest
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:

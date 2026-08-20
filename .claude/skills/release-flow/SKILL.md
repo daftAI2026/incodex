@@ -5,13 +5,13 @@ description: Incodex CLI release runbook. Tag vX.Y.Z, wait for release.yml to at
 
 # Incodex CLI release flow
 
-Tag-driven. `.github/workflows/release.yml` watches `'v*'` (lowercase). It compiles `incodex-darwin-arm64` and `incodex-darwin-x64`, writes `SHA256SUMS`, attests, and creates a GitHub Release **without notes**.
+Tag-driven. `.github/workflows/release.yml` watches `'v*'` (lowercase). It cross-compiles the native Rust CLI as `incodex-darwin-arm64` and `incodex-darwin-x64`, writes `SHA256SUMS`, attests, and creates a GitHub Release **without notes**. Bun still builds the embedded Electron Runtime and runs the TypeScript reference tests; it does not produce a release CLI asset.
 
 ## Channels
 
 | Channel | What ships | Trigger |
 |---|---|---|
-| GitHub stable | two macOS binaries + `SHA256SUMS` | Push `vX.Y.Z` |
+| GitHub stable | two native Rust macOS binaries + `SHA256SUMS` | Push `vX.Y.Z` |
 | `install.sh` | downloads `releases/latest` | Same release |
 | Source | `git pull` + `bun link` | No tag |
 | Homebrew tap | `daftAI2026/homebrew-tap` formula urls/shas | Same release, `update-formula` job |
@@ -24,7 +24,8 @@ Restate which channels this run will touch before acting. Do not open a Homebrew
 2. `git status -s` is empty except intentionally staged release work.
 3. `git log origin/main..HEAD --oneline` is only what you intend to ship.
 4. `bun run check` exits 0.
-5. `release.yml` still has `generate_release_notes: false`.
+5. `cargo test --locked --workspace --release` exits 0.
+6. `release.yml` still has `generate_release_notes: false` and contains no Bun CLI compile step or legacy Bun asset.
 
 ## Tag and publish
 

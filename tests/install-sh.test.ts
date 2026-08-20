@@ -81,6 +81,27 @@ describe("install.sh", () => {
     expect(existsSync(join(prefix, "bin", "incodex"))).toBe(false);
   });
 
+  test("does not fall back to a legacy Bun asset when the stable Rust asset is missing", () => {
+    const release = mkdtempSync(join(tmpdir(), "incodex-rel-"));
+    const prefix = mkdtempSync(join(tmpdir(), "incodex-pre-"));
+    const legacy = "incodex-darwin-arm64-legacy-bun";
+    writePayload(release, legacy, "#!/bin/sh\necho legacy-bun\n");
+    writeFileSync(join(release, "SHA256SUMS"), `${sha256(join(release, legacy))}  ${legacy}\n`);
+
+    const ran = spawnSync("bash", [installSh], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        INCODEX_DOWNLOAD_DIR: release,
+        INCODEX_PREFIX: prefix,
+        INCODEX_ARCH: "arm64",
+      },
+    });
+    expect(ran.status).not.toBe(0);
+    expect(ran.stdout + ran.stderr).toContain("missing incodex-darwin-arm64");
+    expect(existsSync(join(prefix, "bin", "incodex"))).toBe(false);
+  });
+
   test("refuses to install when the checksum does not match", () => {
     const release = mkdtempSync(join(tmpdir(), "incodex-rel-"));
     const prefix = mkdtempSync(join(tmpdir(), "incodex-pre-"));

@@ -49,6 +49,9 @@ describe("Homebrew tap bump", () => {
     expect(out).toContain(`sha256 "${x64}"`);
     expect(out).toContain("v#{version}/incodex-darwin-arm64");
     expect(out).toContain("v#{version}/incodex-darwin-x64");
+    expect(out.match(/^\s*url /gm)?.length).toBe(2);
+    expect(out.match(/^\s*sha256 /gm)?.length).toBe(2);
+    expect(out).not.toMatch(/legacy|fallback|bun/i);
     expect(out).not.toContain('version "0.1.0"');
     expect(out).not.toContain("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     expect(out).not.toContain("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
@@ -106,7 +109,10 @@ describe("Homebrew tap bump", () => {
     expect(readme).toContain("github/actions/workflow/status/daftAI2026/incodex/ci.yml");
     expect(readme).toContain("x.com/singkid9527");
     expect(readme).not.toContain("badge/homebrew");
-    expect(readme).not.toContain("platform-macOS");
+    expect(readme).toContain("macOS on Apple Silicon (arm64) and Intel (x86_64)");
+    expect(readme).toContain("Windows and Linux are not supported");
+    expect(readme).toContain("cargo install --locked --path crates/incodex-cli");
+    expect(readme).not.toContain("bun link");
   });
 
   test("README is English and links a Chinese translation", () => {
@@ -121,6 +127,9 @@ describe("Homebrew tap bump", () => {
     expect(cn).toContain("这是非官方工具");
     expect(cn).toContain("brew install daftAI2026/tap/incodex");
     expect(cn).toContain("assets/sidebar.png");
-    expect(cn).not.toContain("macOS only");
+    expect(cn).toContain("Apple Silicon（arm64）和 Intel（x86_64）Mac");
+    expect(cn).toContain("不支持 Windows 或 Linux");
+    expect(cn).toContain("cargo install --locked --path crates/incodex-cli");
+    expect(cn).not.toContain("bun link");
   });
 });

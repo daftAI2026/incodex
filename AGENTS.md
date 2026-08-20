@@ -62,7 +62,7 @@ If the answer is no or unclear, decline or narrow.
 
 ## Native CLI integration
 
-Rust workspace now lives on `main`. The migration passed `tests/cli-golden.test.ts`, same-fixture TypeScript/Rust comparisons, the 10 MB size gate, the 50 ms product cold-start probe, and manual TTY/open verification. Stable release assets still come from the Bun-compiled TypeScript CLI until the compatibility cutover PR; source integration is not distribution cutover.
+Rust workspace now lives on `main`. The migration passed `tests/cli-golden.test.ts`, same-fixture TypeScript/Rust comparisons, the 10 MB size gate, the 50 ms product cold-start probe, and manual TTY/open verification. Existing published assets remain untouched. The next stable Release will publish the native Rust CLI. Bun remains responsible for building the embedded Electron Runtime and running the TypeScript reference suite, not for producing a new shipped CLI binary.
 
 ### Branching and TDD
 
@@ -80,10 +80,10 @@ Rust workspace now lives on `main`. The migration passed `tests/cli-golden.test.
 
 ### Release cutover
 
-1. The compatibility release will build Rust into the stable `incodex-darwin-arm64` / `incodex-darwin-x64` names.
-2. That release also keeps explicitly named legacy Bun assets for one version cycle. `install.sh` and the own Homebrew tap continue selecting only the stable names; do not add a Rust/Bun selector or fallback.
-3. A later release stops publishing new legacy assets. Never delete old release assets that remain useful for rollback.
-4. Until the compatibility cutover PR merges, `install.sh`, `daftAI2026/homebrew-tap`, and `release.yml` still distribute the Bun-compiled CLI. Do not open a Homebrew/homebrew-core PR.
+1. `release.yml` cross-compiles Rust into the stable `incodex-darwin-arm64` / `incodex-darwin-x64` names, then publishes only those binaries and `SHA256SUMS`.
+2. `install.sh` and the own Homebrew tap continue selecting only the stable names; do not add a Rust/Bun selector or fallback.
+3. New releases do not publish legacy Bun CLI assets. Never delete old Release assets that remain useful for rollback.
+4. Merging release-pipeline code is not permission to create a tag or GitHub Release. Obtain explicit repository-owner confirmation immediately before publishing. Do not open a Homebrew/homebrew-core PR.
 
 ### Rust commands
 

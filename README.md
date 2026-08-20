@@ -33,6 +33,8 @@ This is not a forensics claim that the machine keeps no traces.
 
 ## Quick Start
 
+**Supported platform:** macOS on Apple Silicon (arm64) and Intel (x86_64). Windows and Linux are not supported because Incodex integrates with the macOS Codex app bundle, code signing, Keychain, and Launch Services.
+
 **Install via Homebrew**
 
 ```bash
@@ -52,11 +54,10 @@ curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/install.sh 
 ```bash
 git clone https://github.com/daftAI2026/incodex.git
 cd incodex
-bun install --frozen-lockfile
-bun link
+cargo install --locked --path crates/incodex-cli
 ```
 
-Needs [Bun](https://bun.sh) 1.3.14 (see `.bun-version`) and an installed Codex / ChatGPT desktop app.
+Homebrew and script installs use prebuilt native Rust binaries and do not require Bun. A source install requires stable Rust and an installed Codex / ChatGPT desktop app. Contributors rebuilding the Electron Runtime also need [Bun](https://bun.sh) 1.3.14 (see `.bun-version`).
 
 **Run**
 
@@ -92,7 +93,7 @@ incodex status --json
 incodex doctor --json
 ```
 
-`brew install`, `curl … | bash`, and `bun link` only put the command on PATH. The command that changes `/Applications/ChatGPT.app` is `incodex install`.
+`brew install`, `curl … | bash`, and `cargo install` only put the command on PATH. The command that changes `/Applications/ChatGPT.app` is `incodex install`.
 
 ## Security & Safety Design
 
@@ -108,7 +109,7 @@ Incodex patches a locally installed Electron app. Destructive commands print a p
 - An official upgrade wipes the patch. Run `incodex install` again on the **current** official package
 - If Codex has already been upgraded, `incodex uninstall` will not put an old backup back
 - Original-bundle backups are isolated per app path under `~/.incodex/installations/`
-- Homebrew: `brew upgrade incodex`. Script: `incodex update`. Source: `git pull`
+- Homebrew: `brew upgrade incodex`. Script: `incodex update`. Source: `git pull && cargo install --locked --path crates/incodex-cli`
 - The menu supports arrows, Vim `j/k`, digits that run immediately, `V` for version, `q` to quit
 - If a script install cannot find the command, add `~/.local/bin` to PATH
 - Button and copy follow the main window language
