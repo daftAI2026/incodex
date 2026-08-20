@@ -58,7 +58,10 @@ pub struct Spinner {
 
 impl Spinner {
     pub fn start(message: &str) -> Self {
-        Self::start_for(message, std::io::stderr().is_terminal())
+        Self::start_for(
+            message,
+            crate::terminal::is_tty() && std::io::stderr().is_terminal(),
+        )
     }
 
     fn start_for(message: &str, interactive: bool) -> Self {

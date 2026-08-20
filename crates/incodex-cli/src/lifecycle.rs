@@ -130,14 +130,11 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
 
     progress.stage("Downloading stable installer");
     let tagged_installer = curl_download(&install_script_url, "stable installer")?;
-    progress.stop();
-    println!(
-        "{}",
-        format_step(&format!("Installing {}", latest.tag), None)
-    );
+    progress.stage(&format!("Installing {}", latest.tag));
     let first_attempt = run_installer(&tagged_installer, &prefix, &download_base, expected)
         .and_then(|_| verify_installed_version(&prefix, expected));
     if let Err(first_error) = first_attempt {
+        progress.stop();
         println!(
             "{}",
             format_warn(
@@ -147,11 +144,7 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
         );
         progress.stage("Downloading compatibility installer");
         let compatibility = curl_download(MAIN_INSTALLER_URL, "compatibility installer")?;
-        progress.stop();
-        println!(
-            "{}",
-            format_step(&format!("Repairing {}", latest.tag), None)
-        );
+        progress.stage(&format!("Repairing {}", latest.tag));
         run_installer(&compatibility, &prefix, &download_base, expected)?;
         verify_installed_version(&prefix, expected)?;
     }
