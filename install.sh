@@ -4,13 +4,43 @@ set -euo pipefail
 
 REPO="${INCODEX_REPO:-daftAI2026/incodex}"
 DOWNLOAD_BASE="${INCODEX_DOWNLOAD_BASE:-https://github.com/${REPO}/releases/latest/download}"
-PREFIX="${INCODEX_PREFIX:-${HOME}/.local}"
-BIN_DIR="${PREFIX}/bin"
 
 die() {
   echo "incodex installer: $*" >&2
   exit 1
 }
+
+legacy_bun_prefix() {
+  local pid="$PPID"
+  local depth=0
+  local executable=""
+  local bin_dir=""
+  while [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 1 && "$depth" -lt 5 ]]; do
+    executable="$(/bin/ps -ww -p "$pid" -o comm= 2>/dev/null | /usr/bin/sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    case "${executable##*/}" in
+      inc | incodex)
+        bin_dir="${executable%/*}"
+        if [[ "$executable" == /* && "${bin_dir##*/}" == "bin" && -x "$executable" ]]; then
+          bin_dir="$(cd -P "$bin_dir" 2>/dev/null && pwd)" || return 1
+          printf '%s\n' "${bin_dir%/bin}"
+          return 0
+        fi
+        ;;
+    esac
+    pid="$(/bin/ps -p "$pid" -o ppid= 2>/dev/null | /usr/bin/tr -d '[:space:]')"
+    depth=$((depth + 1))
+  done
+  return 1
+}
+
+PREFIX="${INCODEX_PREFIX:-${HOME}/.local}"
+case "$PREFIX" in
+  /\$bunfs | /\$bunfs/*)
+    PREFIX="$(legacy_bun_prefix)" ||
+      die "could not recover legacy Bun update prefix; rerun install.sh with INCODEX_PREFIX=/your/prefix"
+    ;;
+esac
+BIN_DIR="${PREFIX}/bin"
 
 arch_name() {
   local machine="${INCODEX_ARCH:-$(uname -m)}"

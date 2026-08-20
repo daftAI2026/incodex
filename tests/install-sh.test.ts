@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,6 +18,50 @@ function writePayload(dir: string, name: string, body: string): string {
   writeFileSync(path, body);
   chmodSync(path, 0o755);
   return path;
+}
+
+function writeLegacyBunLauncher(prefix: string): string {
+  const bin = join(prefix, "bin");
+  const source = join(prefix, "legacy-launcher.c");
+  const executable = join(bin, "incodex");
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(
+    source,
+    `#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+int main(int argc, char **argv) {
+  if (argc != 2) return 64;
+  pid_t child = fork();
+  if (child == 0) {
+    execl("/bin/bash", "bash", "-lc", "bash \\"$1\\"", "legacy", argv[1], (char *)0);
+    return 127;
+  }
+  if (child < 0) return 71;
+  int status = 0;
+  if (waitpid(child, &status, 0) < 0) return 71;
+  return WIFEXITED(status) ? WEXITSTATUS(status) : 128;
+}
+`,
+  );
+  const compiled = spawnSync("/usr/bin/cc", [source, "-o", executable], { encoding: "utf8" });
+  if (compiled.status !== 0) throw new Error(compiled.stderr || "legacy launcher compile failed");
+  return executable;
+}
+
+function runLegacyBunUpdate(release: string, prefix: string, home: string) {
+  const executable = writeLegacyBunLauncher(prefix);
+  return spawnSync(executable, [installSh], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      HOME: home,
+      INCODEX_DOWNLOAD_DIR: release,
+      INCODEX_PREFIX: "/$bunfs/root",
+      INCODEX_ARCH: "arm64",
+    },
+  });
 }
 
 describe("install.sh", () => {
@@ -60,6 +104,61 @@ describe("install.sh", () => {
     expect(existsSync(alias)).toBe(true);
     const probe = spawnSync(dest, [], { encoding: "utf8" });
     expect(probe.stdout).toContain("fake-cli");
+  });
+
+  test("recovers the default prefix passed by a legacy Bun standalone update", () => {
+    const release = mkdtempSync(join(tmpdir(), "incodex-rel-"));
+    const home = mkdtempSync(join(tmpdir(), "incodex-home-"));
+    const prefix = join(home, ".local");
+    writePayload(release, "incodex-darwin-arm64", "#!/bin/sh\necho fake-cli\n");
+    const sums = `${sha256(join(release, "incodex-darwin-arm64"))}  incodex-darwin-arm64\n`;
+    writeFileSync(join(release, "SHA256SUMS"), sums);
+
+    const ran = runLegacyBunUpdate(release, prefix, home);
+
+    expect(ran.status).toBe(0);
+    expect(existsSync(join(home, ".local", "bin", "incodex"))).toBe(true);
+    expect(existsSync(join(home, ".local", "bin", "inc"))).toBe(true);
+    expect(existsSync("/$bunfs/root/bin/incodex")).toBe(false);
+  });
+
+  test("recovers a custom prefix from the legacy Bun updater process", () => {
+    const release = mkdtempSync(join(tmpdir(), "incodex-rel-"));
+    const home = mkdtempSync(join(tmpdir(), "incodex-home-"));
+    const prefix = mkdtempSync(join(tmpdir(), "incodex-custom-"));
+    writePayload(release, "incodex-darwin-arm64", "#!/bin/sh\necho fake-cli\n");
+    const sums = `${sha256(join(release, "incodex-darwin-arm64"))}  incodex-darwin-arm64\n`;
+    writeFileSync(join(release, "SHA256SUMS"), sums);
+
+    const ran = runLegacyBunUpdate(release, prefix, home);
+
+    expect(ran.status).toBe(0);
+    expect(existsSync(join(prefix, "bin", "incodex"))).toBe(true);
+    expect(existsSync(join(prefix, "bin", "inc"))).toBe(true);
+    expect(existsSync(join(home, ".local", "bin", "incodex"))).toBe(false);
+  });
+
+  test("refuses an unverifiable legacy Bun prefix instead of silently relocating it", () => {
+    const release = mkdtempSync(join(tmpdir(), "incodex-rel-"));
+    const home = mkdtempSync(join(tmpdir(), "incodex-home-"));
+    writePayload(release, "incodex-darwin-arm64", "#!/bin/sh\necho fake-cli\n");
+    const sums = `${sha256(join(release, "incodex-darwin-arm64"))}  incodex-darwin-arm64\n`;
+    writeFileSync(join(release, "SHA256SUMS"), sums);
+
+    const ran = spawnSync("bash", [installSh], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: home,
+        INCODEX_DOWNLOAD_DIR: release,
+        INCODEX_PREFIX: "/$bunfs/root",
+        INCODEX_ARCH: "arm64",
+      },
+    });
+
+    expect(ran.status).not.toBe(0);
+    expect(ran.stderr).toContain("legacy Bun update prefix");
+    expect(existsSync(join(home, ".local", "bin", "incodex"))).toBe(false);
   });
 
   test("refuses to install when SHA256SUMS is missing", () => {
