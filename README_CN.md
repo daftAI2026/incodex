@@ -33,6 +33,8 @@
 
 ## Quick Start
 
+**支持平台：** Apple Silicon（arm64）和 Intel（x86_64）Mac。当前不支持 Windows 或 Linux，因为 Incodex 依赖 macOS 的 Codex 应用包、代码签名、钥匙串和 Launch Services。
+
 **Install via Homebrew**
 
 ```bash
@@ -52,11 +54,10 @@ curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/install.sh 
 ```bash
 git clone https://github.com/daftAI2026/incodex.git
 cd incodex
-bun install --frozen-lockfile
-bun link
+cargo install --locked --path crates/incodex-cli
 ```
 
-需要 [Bun](https://bun.sh) 1.3.14（见 `.bun-version`）和已安装的 Codex / ChatGPT 桌面端。
+Homebrew 和脚本安装直接使用预编译的原生 Rust 二进制，不需要 Bun。从源码安装需要稳定版 Rust 和已安装的 Codex / ChatGPT 桌面端；只有参与开发、重建 Electron Runtime 时才需要 [Bun](https://bun.sh) 1.3.14（见 `.bun-version`）。
 
 **Run**
 
@@ -92,7 +93,7 @@ incodex status --json
 incodex doctor --json
 ```
 
-`brew install`、`curl … | bash`、`bun link` 都只把命令装到 PATH。改 `/Applications/ChatGPT.app` 的是随后那条 `incodex install`。
+`brew install`、`curl … | bash`、`cargo install` 都只把命令装到 PATH。改 `/Applications/ChatGPT.app` 的是随后那条 `incodex install`。
 
 ## Security & Safety Design
 
@@ -108,7 +109,7 @@ Incodex 会改本机已安装的 Electron 应用包。高风险操作默认要�
 - 官方升级会冲掉补丁。再跑一次 `incodex install`，打的是**当前这份**新官方包
 - 如果官方已经升成新版本，`incodex uninstall` 不会用旧备份盖回去
 - 原始包备份按应用路径隔离，在 `~/.incodex/installations/`
-- Homebrew 装的用 `brew upgrade incodex`；脚本装的用 `incodex update`；源码用 `git pull`
+- Homebrew 装的用 `brew upgrade incodex`；脚本装的用 `incodex update`；源码用 `git pull && cargo install --locked --path crates/incodex-cli`
 - 菜单支持方向键、Vim `j/k`、数字立刻执行、`V` 看版本、`q` 退出
 - 脚本安装若找不到命令，把 `~/.local/bin` 加进 PATH
 - 按钮和说明跟主窗口语言走
