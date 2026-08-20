@@ -371,9 +371,9 @@ fn legacy_typescript_fixture_accepts_only_the_install_transaction_outgoing_layou
     set_journal_path(
         &fixture,
         "outgoingApp",
-        &fixture.root.join(
-            "transactions/22222222-2222-4222-8222-222222222222/outgoing/ChatGPT.app",
-        ),
+        &fixture
+            .root
+            .join("transactions/22222222-2222-4222-8222-222222222222/outgoing/ChatGPT.app"),
     );
     let error = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
         .expect_err("an outgoing path for another install must be rejected");

@@ -268,7 +268,9 @@ fn validate_journal(
     if journal.staged_app.is_empty() || journal.original_snapshot.is_empty() {
         return Err("legacy journal path is empty".into());
     }
-    validate_storage_path(root, Path::new(&journal.staged_app), "legacy stagedApp")?;
+    let staged_app = Path::new(&journal.staged_app);
+    validate_storage_path(root, staged_app, "legacy stagedApp")?;
+    validate_emitted_staged_path(root, staged_app, expected_id)?;
     validate_storage_path(
         root,
         Path::new(&journal.original_snapshot),
@@ -281,7 +283,9 @@ fn validate_journal(
         if outgoing.is_empty() {
             return Err("legacy journal outgoingApp is empty".into());
         }
-        validate_storage_path(root, Path::new(outgoing), "legacy outgoingApp")?;
+        let outgoing_path = Path::new(outgoing);
+        validate_storage_path(root, outgoing_path, "legacy outgoingApp")?;
+        validate_emitted_outgoing_path(root, outgoing_path, expected_id)?;
     }
     if !PHASES.contains(&journal.phase.as_str()) {
         return Err(format!(
@@ -297,6 +301,39 @@ fn validate_journal(
         "ROLLED_BACK" => LegacyStateKind::RolledBack,
         _ => LegacyStateKind::Interrupted,
     })
+}
+
+fn validate_emitted_staged_path(root: &Path, path: &Path, install_id: &str) -> Result<(), String> {
+    let live_path = root.join("ChatGPT.app.live");
+    let clone_path = root
+        .join("scratch")
+        .join(format!("ChatGPT.app.staged-{install_id}"));
+    if path == live_path || path == clone_path {
+        return Ok(());
+    }
+    Err(format!(
+        "legacy stagedApp is not an emitted TypeScript v1 staging path: {}",
+        path.display()
+    ))
+}
+
+fn validate_emitted_outgoing_path(
+    root: &Path,
+    path: &Path,
+    install_id: &str,
+) -> Result<(), String> {
+    let expected = root
+        .join("transactions")
+        .join(install_id)
+        .join("outgoing")
+        .join("ChatGPT.app");
+    if path == expected {
+        return Ok(());
+    }
+    Err(format!(
+        "legacy outgoingApp is not an emitted TypeScript v1 transaction path: {}",
+        path.display()
+    ))
 }
 
 fn validate_install_id(value: &str, field: &str) -> Result<(), String> {
