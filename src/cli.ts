@@ -1,5 +1,4 @@
 #!/usr/bin/env bun
-import { spawnSync } from "node:child_process";
 import { existsSync, unlinkSync } from "node:fs";
 import { inspectApp } from "./app-identity";
 import { cliVersion } from "./cli-version";
@@ -9,7 +8,7 @@ import { confirmDecision, isTty, requireYesMessage } from "./confirm";
 import { askToContinue } from "./confirm-prompt";
 import { diagnose, printDiagnosis } from "./doctor";
 import { commandHelp, rootHelp } from "./help";
-import { detectInstallChannel, prefixFromExecPath, selfUninstallPaths, updateAction } from "./cli-channel";
+import { detectInstallChannel, selfUninstallPaths, updateAction } from "./cli-channel";
 import { formatCommandResult } from "./command-result";
 import { formatKv, formatOk, formatStep, formatWarn } from "./cli-print";
 import { withSpinner } from "./spinner";
@@ -146,7 +145,7 @@ async function dispatch(parsed: ParsedCli): Promise<void> {
     return;
   }
   if (parsed.command === "update") {
-    runUpdate(parsed);
+    runUpdate();
     return;
   }
   if (parsed.command === "self-uninstall") {
@@ -154,24 +153,10 @@ async function dispatch(parsed: ParsedCli): Promise<void> {
   }
 }
 
-function runUpdate(parsed: ParsedCli): void {
+function runUpdate(): never {
   const channel = detectInstallChannel({ execPath: process.execPath, argv1: process.argv[1] ?? "" });
   const action = updateAction(channel);
-  if (action.kind === "refuse") throw new Error(action.message);
-  const prefix = prefixFromExecPath(process.argv[1] ?? process.execPath);
-  console.log("update channel: script");
-  console.log("  prefix:", prefix);
-  if (parsed.dryRun) {
-    console.log("would re-run install.sh for this prefix");
-    console.log("no changes made.");
-    return;
-  }
-  const script = "curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/install.sh | bash";
-  const ran = spawnSync("bash", ["-lc", script], {
-    stdio: "inherit",
-    env: { ...process.env, INCODEX_PREFIX: prefix },
-  });
-  if (ran.status !== 0) throw new Error("update failed");
+  throw new Error(action.message);
 }
 
 async function runSelfUninstall(parsed: ParsedCli): Promise<void> {

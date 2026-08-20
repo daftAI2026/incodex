@@ -48,7 +48,7 @@ runs `tsc` to emit portable CJS into `dist/*.cjs`. The emitted files must use
 
 ## Native CLI
 
-Rust CLI source is on `main`. The migration gates are complete, and the cutover pipeline means the next stable release will publish the native Rust CLI under the existing asset names; already-published assets remain untouched.
+Rust CLI source is on `main`. The migration gates are complete, and v0.3.1 published the native Rust CLI under the stable asset names. It is the only product CLI; the remaining TypeScript CLI code exists only for legacy fixtures and must not gain new behavior.
 
 ```bash
 git fetch origin
