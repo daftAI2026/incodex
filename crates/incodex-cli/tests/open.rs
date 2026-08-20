@@ -63,23 +63,23 @@ fn open_process(app: &Path, home: &Path) -> Child {
         .expect("spawn incodex open")
 }
 
-fn wait_for_file(path: &Path) {
+fn started_session(home: &Path, id: &str) -> PathBuf {
+    let marker = home.join(format!("started-{id}"));
     for _ in 0..1_000 {
-        if path.exists() {
-            return;
+        if let Ok(body) = fs::read_to_string(&marker) {
+            if let Some(root) = body
+                .lines()
+                .find_map(|line| line.strip_prefix("root=").map(PathBuf::from))
+            {
+                return root;
+            }
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    panic!("timed out waiting for {}", path.display());
-}
-
-fn started_session(home: &Path, id: &str) -> PathBuf {
-    let marker = home.join(format!("started-{id}"));
-    wait_for_file(&marker);
-    let body = fs::read_to_string(marker).expect("started marker");
-    body.lines()
-        .find_map(|line| line.strip_prefix("root=").map(PathBuf::from))
-        .expect("session root marker")
+    panic!(
+        "timed out waiting for complete session marker {}",
+        marker.display()
+    );
 }
 
 fn wait_for_exit(mut child: Child) -> Output {
