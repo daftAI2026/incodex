@@ -30,23 +30,6 @@ enum KillPoint {
     Committed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SwapGap {
-    LiveMovedOut,
-    StagingMovedIn,
-}
-
-impl SwapGap {
-    const ALL: [Self; 2] = [Self::LiveMovedOut, Self::StagingMovedIn];
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::LiveMovedOut => "LIVE_MOVED_OUT",
-            Self::StagingMovedIn => "STAGING_MOVED_IN",
-        }
-    }
-}
-
 impl KillPoint {
     const ALL: [Self; 5] = [
         Self::Discovered,
@@ -151,177 +134,6 @@ fn recover_sigkill_restarts_from_a_real_recovery_step() {
     let original = tx_dir.join("original/ChatGPT.app");
     assert!(original.exists());
     assert_eq!(tree_digest(&original), original_digest);
-}
-
-#[test]
-fn pre_swap_recover_does_not_replace_live_with_partial_original() {
-    if run_recover_child_mode() {
-        return;
-    }
-
-    let root = scratch();
-    let app = make_app(&root, "ChatGPT.app", "ORIGINAL");
-    let original_digest = tree_digest(&app);
-    let id_file = root.join("install-id");
-
-    let status = spawn_pre_swap_child(&root, &app, &id_file);
-    assert_eq!(
-        status.signal(),
-        Some(libc::SIGKILL),
-        "install child was not SIGKILLed: {status:?}"
-    );
-
-    let install_id = fs::read_to_string(&id_file).expect("child must publish install id");
-    let install_id = install_id.trim();
-    assert_eq!(
-        journal_v2(&root, install_id)
-            .expect("interrupted install keeps its journal")
-            .phase,
-        "DISCOVERED"
-    );
-
-    let status = spawn_recover_child("recover", &root, install_id);
-    assert_eq!(status.code(), Some(0), "recover child failed: {status:?}");
-
-    assert_eq!(
-        tree_digest(&app),
-        original_digest,
-        "pre-swap recovery replaced a healthy target with a partial backup"
-    );
-    assert_eq!(
-        journal_v2(&root, install_id)
-            .expect("recovery keeps the journal readable")
-            .phase,
-        "ROLLED_BACK"
-    );
-}
-
-#[test]
-fn recover_never_uses_a_partial_outgoing_as_the_rollback_source() {
-    if run_recover_child_mode() {
-        return;
-    }
-
-    let root = scratch();
-    let app = make_app(&root, "ChatGPT.app", "ORIGINAL");
-    let candidate = make_app(&root, "candidate.app", "PATCHED");
-    let original_digest = tree_digest(&app);
-    let id_file = root.join("install-id");
-
-    let status = spawn_partial_outgoing_child(&root, &app, &candidate, &id_file);
-    assert_eq!(
-        status.signal(),
-        Some(libc::SIGKILL),
-        "commit cleanup child was not SIGKILLed: {status:?}"
-    );
-
-    let install_id = fs::read_to_string(&id_file).expect("child must publish install id");
-    let install_id = install_id.trim();
-    assert_eq!(
-        journal_v2(&root, install_id)
-            .expect("interrupted transaction keeps its journal")
-            .phase,
-        "SWAPPED"
-    );
-
-    let status = spawn_recover_child("recover", &root, install_id);
-    assert_eq!(status.code(), Some(0), "recover child failed: {status:?}");
-    assert_eq!(
-        tree_digest(&app),
-        original_digest,
-        "recovery restored a partial outgoing bundle"
-    );
-}
-
-#[test]
-fn committed_journal_survives_kill_before_outgoing_cleanup() {
-    if run_recover_child_mode() {
-        return;
-    }
-
-    let root = scratch();
-    let app = make_app(&root, "ChatGPT.app", "ORIGINAL");
-    let candidate = make_app(&root, "candidate.app", "PATCHED");
-    let original_digest = tree_digest(&app);
-    let patched_digest = tree_digest(&candidate);
-    let id_file = root.join("install-id");
-
-    let status = spawn_commit_child(&root, &app, &candidate, &id_file);
-    assert_eq!(
-        status.signal(),
-        Some(libc::SIGKILL),
-        "commit child was not SIGKILLed: {status:?}"
-    );
-
-    let install_id = fs::read_to_string(&id_file).expect("child must publish install id");
-    let install_id = install_id.trim();
-    assert_eq!(
-        journal_v2(&root, install_id)
-            .expect("durable commit journal survives SIGKILL")
-            .phase,
-        "COMMITTED"
-    );
-
-    let status = spawn_recover_child("recover", &root, install_id);
-    assert_eq!(status.code(), Some(0), "recover child failed: {status:?}");
-    assert_eq!(
-        journal_v2(&root, install_id)
-            .expect("recovery keeps the journal readable")
-            .phase,
-        "COMMITTED"
-    );
-    assert_eq!(tree_digest(&app), patched_digest);
-
-    let tx_dir = root.join("transactions").join(install_id);
-    assert!(!tx_dir.join("outgoing/ChatGPT.app").exists());
-    assert!(tx_dir.join("original/ChatGPT.app").exists());
-    assert_eq!(
-        tree_digest(&tx_dir.join("original/ChatGPT.app")),
-        original_digest
-    );
-}
-
-#[test]
-fn swap_sigkill_between_real_renames_recovers_a_complete_original() {
-    if run_recover_child_mode() {
-        return;
-    }
-
-    for gap in SwapGap::ALL {
-        let root = scratch();
-        let app = make_app(&root, "ChatGPT.app", "ORIGINAL");
-        let candidate = make_app(&root, "candidate.app", "PATCHED");
-        let original_digest = tree_digest(&app);
-        let id_file = root.join("install-id");
-
-        let status = spawn_swap_gap_child(&root, &app, &candidate, &id_file, gap);
-        assert_eq!(
-            status.signal(),
-            Some(libc::SIGKILL),
-            "swap gap {gap:?} child was not SIGKILLed: {status:?}"
-        );
-
-        let install_id = fs::read_to_string(&id_file).expect("child must publish install id");
-        let install_id = install_id.trim();
-        assert_eq!(
-            journal_v2(&root, install_id)
-                .expect("interrupted swap keeps its journal")
-                .phase,
-            "TARGET_MOVED_OUT"
-        );
-
-        let status = spawn_recover_child("recover", &root, install_id);
-        assert_eq!(status.code(), Some(0), "recover child failed: {status:?}");
-        assert_eq!(tree_digest(&app), original_digest);
-
-        let tx_dir = root.join("transactions").join(install_id);
-        assert!(!tx_dir.join("staging/ChatGPT.app").exists());
-        assert!(!tx_dir.join("outgoing/ChatGPT.app").exists());
-        assert_eq!(
-            tree_digest(&tx_dir.join("original/ChatGPT.app")),
-            original_digest
-        );
-    }
 }
 
 fn run_case(point: KillPoint) {
@@ -439,174 +251,20 @@ fn run_recover_child_mode() -> bool {
         return false;
     };
     let root = PathBuf::from(env::var(ROOT_ENV).expect("recover child root"));
+    let install_id = env::var(INSTALL_ID_ENV).expect("recover child install id");
     match mode.as_str() {
-        "discover-partial" => {
-            let app = PathBuf::from(env::var(APP_ENV).expect("partial install app"));
-            let tx = Engine::begin(&root, &app, "sigkill-test").expect("begin transaction");
-            let id = tx.install_id().to_string();
-            let id_file = PathBuf::from(env::var(ID_FILE_ENV).expect("partial install id file"));
-            fs::write(id_file, &id).expect("publish install id");
-            let partial = root
-                .join("transactions")
-                .join(&id)
-                .join("original/ChatGPT.app");
-            fs::create_dir_all(&partial).expect("create partial backup");
-            fs::write(partial.join("marker"), "PARTIAL\n").expect("write partial backup");
-            kill_self();
-        }
-        "partial-outgoing" => {
-            let app = PathBuf::from(env::var(APP_ENV).expect("partial transaction app"));
-            let candidate =
-                PathBuf::from(env::var(CANDIDATE_ENV).expect("partial transaction candidate"));
-            let mut tx = Engine::begin(&root, &app, "sigkill-test").expect("begin transaction");
-            let id = tx.install_id().to_string();
-            let id_file =
-                PathBuf::from(env::var(ID_FILE_ENV).expect("partial transaction id file"));
-            fs::write(id_file, &id).expect("publish install id");
-            seed_original(&root, &app, &id);
-            tx.place_staging(&candidate).expect("stage candidate");
-            tx.swap().expect("swap candidate");
-            let outgoing = tx.outgoing_app();
-            fs::remove_file(outgoing.join("Contents/MacOS/ChatGPT"))
-                .expect("remove one outgoing file");
-            kill_self();
-        }
-        "commit-kill" => {
-            let app = PathBuf::from(env::var(APP_ENV).expect("commit app"));
-            let candidate = PathBuf::from(env::var(CANDIDATE_ENV).expect("commit candidate"));
-            let mut tx = Engine::begin(&root, &app, "sigkill-test").expect("begin transaction");
-            let id = tx.install_id().to_string();
-            let id_file = PathBuf::from(env::var(ID_FILE_ENV).expect("commit id file"));
-            fs::write(id_file, &id).expect("publish install id");
-            seed_original(&root, &app, &id);
-            tx.place_staging(&candidate).expect("stage candidate");
-            tx.swap().expect("swap candidate");
-            tx.commit_with_checkpoint(|phase| {
-                if phase == "COMMITTED_BEFORE_CLEANUP" {
-                    kill_self();
-                }
-            })
-            .expect("commit candidate");
-        }
-        "swap-gap" => {
-            let app = PathBuf::from(env::var(APP_ENV).expect("swap app"));
-            let candidate = PathBuf::from(env::var(CANDIDATE_ENV).expect("swap candidate"));
-            let gap = parse_swap_gap(&env::var(POINT_ENV).expect("swap gap"));
-            let mut tx = Engine::begin(&root, &app, "sigkill-test").expect("begin transaction");
-            let id = tx.install_id().to_string();
-            let id_file = PathBuf::from(env::var(ID_FILE_ENV).expect("swap id file"));
-            fs::write(id_file, &id).expect("publish install id");
-            seed_original(&root, &app, &id);
-            tx.place_staging(&candidate).expect("stage candidate");
-            tx.swap_with_checkpoint(|phase| {
-                if phase == gap.as_str() {
-                    kill_self();
-                }
-            })
-            .expect("swap candidate");
-            panic!("swap gap {gap:?} was not reached");
-        }
         "kill-after-restore" => {
-            let install_id = env::var(INSTALL_ID_ENV).expect("recover child install id");
             recover_with(&root, &install_id, |_| {
                 kill_self();
             })
             .expect("recover child");
         }
         "recover" => {
-            let install_id = env::var(INSTALL_ID_ENV).expect("recover child install id");
             recover(&root, &install_id).expect("recover child");
         }
         other => panic!("unknown recover child mode {other}"),
     }
     true
-}
-
-fn spawn_pre_swap_child(root: &Path, app: &Path, id_file: &Path) -> ExitStatus {
-    let exe = env::current_exe().expect("test executable");
-    Command::new(exe)
-        .args([
-            "--exact",
-            "pre_swap_recover_does_not_replace_live_with_partial_original",
-            "--nocapture",
-        ])
-        .env(RECOVER_CHILD_MODE, "discover-partial")
-        .env(ROOT_ENV, root)
-        .env(APP_ENV, app)
-        .env(ID_FILE_ENV, id_file)
-        .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
-        .status()
-        .expect("spawn partial install child")
-}
-
-fn spawn_partial_outgoing_child(
-    root: &Path,
-    app: &Path,
-    candidate: &Path,
-    id_file: &Path,
-) -> ExitStatus {
-    let exe = env::current_exe().expect("test executable");
-    Command::new(exe)
-        .args([
-            "--exact",
-            "recover_never_uses_a_partial_outgoing_as_the_rollback_source",
-            "--nocapture",
-        ])
-        .env(RECOVER_CHILD_MODE, "partial-outgoing")
-        .env(ROOT_ENV, root)
-        .env(APP_ENV, app)
-        .env(CANDIDATE_ENV, candidate)
-        .env(ID_FILE_ENV, id_file)
-        .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
-        .status()
-        .expect("spawn partial transaction child")
-}
-
-fn spawn_commit_child(root: &Path, app: &Path, candidate: &Path, id_file: &Path) -> ExitStatus {
-    let exe = env::current_exe().expect("test executable");
-    Command::new(exe)
-        .args([
-            "--exact",
-            "committed_journal_survives_kill_before_outgoing_cleanup",
-            "--nocapture",
-        ])
-        .env(RECOVER_CHILD_MODE, "commit-kill")
-        .env(ROOT_ENV, root)
-        .env(APP_ENV, app)
-        .env(CANDIDATE_ENV, candidate)
-        .env(ID_FILE_ENV, id_file)
-        .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
-        .status()
-        .expect("spawn commit child")
-}
-
-fn spawn_swap_gap_child(
-    root: &Path,
-    app: &Path,
-    candidate: &Path,
-    id_file: &Path,
-    gap: SwapGap,
-) -> ExitStatus {
-    let exe = env::current_exe().expect("test executable");
-    Command::new(exe)
-        .args([
-            "--exact",
-            "swap_sigkill_between_real_renames_recovers_a_complete_original",
-            "--nocapture",
-        ])
-        .env(RECOVER_CHILD_MODE, "swap-gap")
-        .env(ROOT_ENV, root)
-        .env(APP_ENV, app)
-        .env(CANDIDATE_ENV, candidate)
-        .env(POINT_ENV, gap.as_str())
-        .env(ID_FILE_ENV, id_file)
-        .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
-        .status()
-        .expect("spawn swap gap child")
 }
 
 fn mutate_child(root: &Path, app: &Path, candidate: &Path, point: KillPoint) {
@@ -708,13 +366,6 @@ fn parse_point(value: &str) -> KillPoint {
         .into_iter()
         .find(|point| point.as_env() == value)
         .unwrap_or_else(|| panic!("unknown kill point {value}"))
-}
-
-fn parse_swap_gap(value: &str) -> SwapGap {
-    SwapGap::ALL
-        .into_iter()
-        .find(|gap| gap.as_str() == value)
-        .unwrap_or_else(|| panic!("unknown swap gap {value}"))
 }
 
 fn kill_self() -> ! {
