@@ -1,14 +1,34 @@
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread;
+use std::time::Duration;
 
 use incodex_core::paths::{user_root, DEFAULT_APP};
-use incodex_core::{format_kv, format_ok, format_step};
+use incodex_core::{format_kv, format_ok, format_step, format_warn};
+use serde::Deserialize;
 
 use crate::parse::ParsedCli;
 
-const INSTALL_SCRIPT_URL: &str =
+const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/daftAI2026/incodex/releases/latest";
+const MAIN_INSTALLER_URL: &str =
     "https://raw.githubusercontent.com/daftAI2026/incodex/main/install.sh";
+const DOWNLOAD_ATTEMPTS: usize = 3;
+const RETRY_DELAY: Duration = Duration::from_millis(200);
+static UPDATE_NOTICE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug, Deserialize)]
+struct LatestRelease {
+    tag_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StableRelease {
+    tag: String,
+    version: [u64; 3],
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InstallChannel {
@@ -57,22 +77,97 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
         println!("no changes made.");
         return Ok(());
     }
-    let downloaded = Command::new("curl")
-        .args(["-fsSL", INSTALL_SCRIPT_URL])
-        .output()
-        .map_err(|err| format!("update failed: could not start curl: {err}"))?;
-    if !downloaded.status.success() {
-        let detail = String::from_utf8_lossy(&downloaded.stderr);
-        let detail = detail.trim();
-        return Err(if detail.is_empty() {
-            format!("update failed: curl exited with {}", downloaded.status)
-        } else {
-            format!("update failed: {detail}")
-        });
+
+    println!("{}", format_step("Checking for updates", None));
+    let latest = latest_stable_release()?;
+    let current = parse_stable_version(env!("CARGO_PKG_VERSION"))
+        .ok_or("update failed: current CLI version is not stable")?;
+    match latest.version.cmp(&current) {
+        std::cmp::Ordering::Less => {
+            println!(
+                "Current version {} is newer than latest release {}.",
+                env!("CARGO_PKG_VERSION"),
+                latest.tag
+            );
+            return Ok(());
+        }
+        std::cmp::Ordering::Equal => {
+            println!("Already on latest version, {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
+        std::cmp::Ordering::Greater => {}
     }
 
+    let update_target = prefix.join("bin/incodex");
+    let _lock =
+        incodex_transaction::acquire_target_lock(&user_root(), &update_target, "update", None)
+            .map_err(|err| {
+                if err.contains("another incodex command") {
+                    "update failed: another update is already running".to_string()
+                } else {
+                    format!("update failed: could not acquire update lock: {err}")
+                }
+            })?;
+    println!("updating {} -> {}", env!("CARGO_PKG_VERSION"), latest.tag);
+    let install_script_url = format!(
+        "https://raw.githubusercontent.com/daftAI2026/incodex/{}/install.sh",
+        latest.tag
+    );
+    let download_base = format!(
+        "https://github.com/daftAI2026/incodex/releases/download/{}",
+        latest.tag
+    );
+    let expected = latest.tag.trim_start_matches('v');
+
+    println!("{}", format_step("Downloading stable installer", None));
+    let tagged_installer = curl_download(&install_script_url, "stable installer")?;
+    println!(
+        "{}",
+        format_step(&format!("Installing {}", latest.tag), None)
+    );
+    let first_attempt = run_installer(&tagged_installer, &prefix, &download_base, expected)
+        .and_then(|_| verify_installed_version(&prefix, expected));
+    if let Err(first_error) = first_attempt {
+        println!(
+            "{}",
+            format_warn(
+                &format!("Stable installer did not complete: {first_error}"),
+                None,
+            )
+        );
+        println!(
+            "{}",
+            format_step("Downloading compatibility installer", None)
+        );
+        let compatibility = curl_download(MAIN_INSTALLER_URL, "compatibility installer")?;
+        println!(
+            "{}",
+            format_step(&format!("Repairing {}", latest.tag), None)
+        );
+        run_installer(&compatibility, &prefix, &download_base, expected)?;
+        verify_installed_version(&prefix, expected)?;
+    }
+
+    println!(
+        "{}",
+        format_ok(&format!("Verified Incodex {expected}"), None)
+    );
+    clear_update_notice();
+    Ok(())
+}
+
+fn run_installer(
+    installer: &[u8],
+    prefix: &Path,
+    download_base: &str,
+    expected_version: &str,
+) -> Result<(), String> {
     let mut bash = Command::new("bash")
+        .env_remove("INCODEX_ARCH")
+        .env_remove("INCODEX_DOWNLOAD_DIR")
         .env("INCODEX_PREFIX", &prefix)
+        .env("INCODEX_DOWNLOAD_BASE", download_base)
+        .env("INCODEX_EXPECTED_VERSION", expected_version)
         .stdin(Stdio::piped())
         .spawn()
         .map_err(|err| format!("update failed: could not start bash: {err}"))?;
@@ -82,7 +177,7 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
         .ok_or_else(|| "update failed: bash stdin unavailable".to_string())
         .and_then(|mut stdin| {
             stdin
-                .write_all(&downloaded.stdout)
+                .write_all(installer)
                 .map_err(|err| format!("update failed: could not send install script: {err}"))
         });
     if let Err(err) = write_result {
@@ -93,7 +188,278 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
     let status = bash
         .wait()
         .map_err(|err| format!("update failed: could not wait for bash: {err}"))?;
-    status.success().then_some(()).ok_or("update failed".into())
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| format!("update failed: installer exited with {status}"))
+}
+
+fn curl_download(url: &str, label: &str) -> Result<Vec<u8>, String> {
+    let mut last_failure = None;
+    for attempt in 1..=DOWNLOAD_ATTEMPTS {
+        let downloaded = Command::new("curl")
+            .args([
+                "-fsSL",
+                "--connect-timeout",
+                "10",
+                "--max-time",
+                "60",
+                "--write-out",
+                "INCODEX_HTTP_STATUS:%{http_code}",
+                url,
+            ])
+            .output()
+            .map_err(|err| format!("update failed: could not start curl: {err}"))?;
+        let (body, http_status) = split_curl_body_and_status(downloaded.stdout);
+        if downloaded.status.success() {
+            return Ok(body);
+        }
+        let detail = String::from_utf8_lossy(&downloaded.stderr);
+        let detail = detail.trim();
+        last_failure = Some(if detail.is_empty() {
+            format!(
+                "update failed: could not download {label}: curl exited with {}",
+                downloaded.status
+            )
+        } else {
+            format!("update failed: {detail}")
+        });
+        let code = downloaded.status.code();
+        let transient = code.is_some_and(transient_curl_exit)
+            || (code == Some(22) && http_status.is_some_and(transient_http_status));
+        if attempt == DOWNLOAD_ATTEMPTS || !transient {
+            break;
+        }
+        thread::sleep(RETRY_DELAY);
+    }
+    Err(last_failure.unwrap_or_else(|| format!("update failed: could not download {label}")))
+}
+
+fn transient_curl_exit(code: i32) -> bool {
+    matches!(code, 6 | 7 | 18 | 28 | 35 | 52 | 55 | 56)
+}
+
+fn transient_http_status(status: u16) -> bool {
+    matches!(status, 408 | 429 | 500 | 502 | 503 | 504)
+}
+
+fn split_curl_body_and_status(mut output: Vec<u8>) -> (Vec<u8>, Option<u16>) {
+    let marker = b"INCODEX_HTTP_STATUS:";
+    let Some(separator) = output
+        .windows(marker.len())
+        .rposition(|window| window == marker)
+    else {
+        return (output, None);
+    };
+    let status = &output[separator + marker.len()..];
+    if status.len() != 3 || !status.iter().all(u8::is_ascii_digit) {
+        return (output, None);
+    }
+    let status = std::str::from_utf8(status)
+        .ok()
+        .and_then(|value| value.parse().ok());
+    output.truncate(separator);
+    (output, status)
+}
+
+fn latest_stable_release() -> Result<StableRelease, String> {
+    let body = curl_download(LATEST_RELEASE_URL, "latest release metadata")?;
+    let release: LatestRelease = serde_json::from_slice(&body)
+        .map_err(|_| "update failed: invalid latest release metadata".to_string())?;
+    let raw = release.tag_name.strip_prefix('v').ok_or_else(|| {
+        format!(
+            "update failed: invalid latest release tag: {}",
+            release.tag_name
+        )
+    })?;
+    let version = parse_stable_version(raw).ok_or_else(|| {
+        format!(
+            "update failed: invalid latest release tag: {}",
+            release.tag_name
+        )
+    })?;
+    let canonical = format!("v{}.{}.{}", version[0], version[1], version[2]);
+    if release.tag_name != canonical {
+        return Err(format!(
+            "update failed: invalid latest release tag: {}",
+            release.tag_name
+        ));
+    }
+    Ok(StableRelease {
+        tag: release.tag_name,
+        version,
+    })
+}
+
+fn parse_stable_version(raw: &str) -> Option<[u64; 3]> {
+    let mut values = [0_u64; 3];
+    let mut parts = raw.split('.');
+    for value in &mut values {
+        let part = parts.next()?;
+        if part.is_empty()
+            || (part.len() > 1 && part.starts_with('0'))
+            || !part.bytes().all(|byte| byte.is_ascii_digit())
+        {
+            return None;
+        }
+        *value = part.parse().ok()?;
+    }
+    parts.next().is_none().then_some(values)
+}
+
+fn verify_installed_version(prefix: &Path, expected: &str) -> Result<(), String> {
+    let installed = prefix.join("bin/incodex");
+    let output = Command::new(&installed)
+        .arg("--version")
+        .output()
+        .map_err(|err| {
+            format!(
+                "update failed: could not run {}: {err}",
+                installed.display()
+            )
+        })?;
+    if !output.status.success() {
+        return Err(format!(
+            "update failed: installed CLI did not report {expected}"
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let reported = stdout.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("Incodex version ")
+            .and_then(|rest| rest.split_whitespace().next())
+    });
+    if reported != Some(expected) {
+        return Err(format!(
+            "update failed: installed CLI did not report {expected}"
+        ));
+    }
+    Ok(())
+}
+
+fn clear_update_notice() {
+    write_update_notice("");
+}
+
+pub(crate) fn read_update_notice() -> Option<String> {
+    let cache = user_root().join("cache/update_message");
+    let message = fs::read_to_string(&cache).ok()?;
+    let message = message.trim();
+    if valid_update_notice(message) {
+        return Some(message.to_string());
+    }
+    write_update_notice("");
+    None
+}
+
+fn valid_update_notice(message: &str) -> bool {
+    let Some(rest) = message.strip_prefix("Update ") else {
+        return false;
+    };
+    let Some((version_text, action)) = rest.split_once(" available, run ") else {
+        return false;
+    };
+    let Some(version) = parse_stable_version(version_text) else {
+        return false;
+    };
+    let Some(current) = parse_stable_version(env!("CARGO_PKG_VERSION")) else {
+        return false;
+    };
+    if version <= current {
+        return false;
+    }
+    let Ok(exe) = current_exe() else {
+        return false;
+    };
+    matches!(
+        (install_channel(&exe), action),
+        (InstallChannel::Script, "incodex update")
+            | (InstallChannel::Homebrew, "brew upgrade incodex")
+    )
+}
+
+pub(crate) fn spawn_update_notice_refresh() {
+    let Ok(exe) = current_exe() else {
+        return;
+    };
+    let channel = install_channel(&exe);
+    if channel == InstallChannel::Source {
+        return;
+    }
+    thread::spawn(move || {
+        let Ok(latest) = latest_stable_release() else {
+            return;
+        };
+        let Some(current) = parse_stable_version(env!("CARGO_PKG_VERSION")) else {
+            return;
+        };
+        let message = match channel {
+            InstallChannel::Script if latest.version > current => format!(
+                "Update {} available, run incodex update\n",
+                latest.tag.trim_start_matches('v')
+            ),
+            InstallChannel::Homebrew => homebrew_update_notice(current, latest.version),
+            _ => String::new(),
+        };
+        write_update_notice(&message);
+    });
+}
+
+fn homebrew_update_notice(current: [u64; 3], release: [u64; 3]) -> String {
+    let Some((version_text, formula)) = homebrew_stable_version() else {
+        return String::new();
+    };
+    if formula > current && formula <= release {
+        format!("Update {version_text} available, run brew upgrade incodex\n")
+    } else {
+        String::new()
+    }
+}
+
+fn homebrew_stable_version() -> Option<(String, [u64; 3])> {
+    let output = Command::new("brew")
+        .args(["info", "--json=v2", "incodex"])
+        .env("HOMEBREW_NO_AUTO_UPDATE", "1")
+        .env("HOMEBREW_NO_ENV_HINTS", "1")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let body: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    let text = body
+        .get("formulae")?
+        .as_array()?
+        .first()?
+        .get("versions")?
+        .get("stable")?
+        .as_str()?;
+    let version = parse_stable_version(text)?;
+    Some((text.to_string(), version))
+}
+
+fn write_update_notice(message: &str) {
+    let cache = user_root().join("cache/update_message");
+    let Some(parent) = cache.parent() else {
+        return;
+    };
+    if fs::create_dir_all(parent).is_err() {
+        return;
+    }
+    let sequence = UPDATE_NOTICE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let temporary = parent.join(format!(
+        ".update_message.{}.{sequence}.tmp",
+        std::process::id()
+    ));
+    let written = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .and_then(|mut file| file.write_all(message.as_bytes()));
+    if written.is_ok() {
+        let _ = fs::rename(&temporary, cache);
+    }
+    let _ = fs::remove_file(temporary);
 }
 
 pub fn run_self_uninstall(parsed: &ParsedCli) -> Result<(), String> {

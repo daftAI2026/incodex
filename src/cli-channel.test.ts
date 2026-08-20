@@ -46,9 +46,10 @@ describe("updateAction", () => {
     if (action.kind === "refuse") expect(action.message).toMatch(/git pull|bun link/);
   });
 
-  test("script re-runs the installer", () => {
+  test("legacy compiled TypeScript copy refuses instead of becoming a second updater", () => {
     const action = updateAction("script");
-    expect(action.kind).toBe("reinstall");
+    expect(action.kind).toBe("refuse");
+    if (action.kind === "refuse") expect(action.message).toContain("legacy TypeScript CLI updater has been retired");
   });
 });
 

@@ -18,7 +18,7 @@ describe("architecture boundaries", () => {
     const readme = src("README.md");
     const readmeCn = src("README_CN.md");
     expect(agents).toContain("Rust workspace now lives on `main`");
-    expect(agents).toContain("The next stable Release will publish the native Rust CLI");
+    expect(agents).toContain("The v0.3.1 compatibility release published the native Rust CLI");
     expect(agents).toContain("New releases do not publish legacy Bun CLI assets");
     expect(agents).toContain("Never delete old Release assets");
     expect(agents).toContain("New Rust CLI PRs target `main`");
@@ -34,7 +34,7 @@ describe("architecture boundaries", () => {
     expect(agents).toContain("`crates/incodex-core/src/session.rs`");
     expect(contributing).toContain("Rust CLI source is on `main`");
     expect(contributing).toContain("Rust CLI PRs use base `main`");
-    expect(contributing).toContain("the next stable release will publish the native Rust CLI");
+    expect(contributing).toContain("v0.3.1 published the native Rust CLI");
     expect(contributing).toContain("do not publish new legacy Bun CLI assets");
     expect(contributing).toContain("failing `cargo test` repro");
     expect(contributing).toContain("cargo run -p incodex-cli -- --help");
@@ -47,6 +47,16 @@ describe("architecture boundaries", () => {
       expect(readme).not.toContain("the hat-glasses control and banner still appear in that window");
       expect(readmeCn).not.toContain("这一扇里仍有帽子按钮和提示横幅");
     }
+  });
+
+  test("legacy TypeScript CLI cannot remain a second live updater", () => {
+    const agents = src("AGENTS.md");
+    const legacyCli = src("src/cli.ts");
+
+    expect(agents).toContain("The Rust CLI is the sole product CLI");
+    expect(agents).toContain("The legacy TypeScript CLI must not perform live self-updates");
+    expect(legacyCli).not.toContain("raw.githubusercontent.com/daftAI2026/incodex/main/install.sh");
+    expect(legacyCli).not.toMatch(/spawnSync\(\s*["']bash["']/);
   });
 
   test("UI adapter has no file deletion, process control, or auth handling", () => {

@@ -48,8 +48,8 @@ If the answer is no or unclear, decline or narrow.
 ## Repository Map
 
 - `AGENTS.md` is the contract. `CLAUDE.md` must stay a symlink to it.
-- `src/cli.ts` / `src/parse-cli.ts` are the TypeScript golden/reference CLI. Keep their public language aligned with the native implementation; do not put asar or codesign logic in either router.
-- `src/install.ts` / `src/uninstall.ts` / `src/recover.ts` are the TypeScript reference mutation paths while the compatibility window remains open.
+- `src/cli.ts` / `src/parse-cli.ts` are a frozen TypeScript reference used by legacy fixtures. They are not a second product CLI and must not perform live self-updates.
+- `src/install.ts` / `src/uninstall.ts` / `src/recover.ts` remain only to reproduce legacy states until the dedicated TypeScript CLI cleanup; they are not product paths.
 - `crates/incodex-cli` is the native CLI: `parse.rs` owns its command language, while `install.rs` and `open.rs` dispatch dangerous operations through the lower crates.
 - `crates/incodex-transaction` owns native mutation locks, durable journals, rollback, and recovery. `crates/incodex-asar` and `crates/incodex-macos` own ASAR and macOS signing/plist mechanics.
 - `crates/incodex-core/src/session.rs` owns native `open` session create/burn; it must stay behaviorally aligned with `src/runtime/incodex-safe-home.cts` without sharing language-specific code.
@@ -62,14 +62,14 @@ If the answer is no or unclear, decline or narrow.
 
 ## Native CLI integration
 
-Rust workspace now lives on `main`. The migration passed `tests/cli-golden.test.ts`, same-fixture TypeScript/Rust comparisons, the 10 MB size gate, the 50 ms product cold-start probe, and manual TTY/open verification. Existing published assets remain untouched. The next stable Release will publish the native Rust CLI. Bun remains responsible for building the embedded Electron Runtime and running the TypeScript reference suite, not for producing a new shipped CLI binary.
+Rust workspace now lives on `main`. The migration passed `tests/cli-golden.test.ts`, same-fixture TypeScript/Rust comparisons, the 10 MB size gate, the 50 ms product cold-start probe, and manual TTY/open verification. The v0.3.1 compatibility release published the native Rust CLI under the stable asset names. The Rust CLI is the sole product CLI. Bun remains responsible for building the embedded Electron Runtime and running legacy fixtures, not for producing a new shipped CLI binary.
 
 ### Branching and TDD
 
 1. New Rust CLI PRs target `main`. One review-sized change per PR.
 2. Each behavior change starts with a failing `cargo test` repro commit, followed by the implementation commit. Do not land tests and code in the same first commit.
-3. Keep the TypeScript CLI as the golden/reference implementation until the compatibility release has shipped and the legacy window closes. Do not rewrite product language independently in Rust.
-4. Rust `install` / `uninstall` / `recover` / `open` / `status` / `doctor` must remain aligned with `tests/cli-golden.test.ts` and the same-fixture parity suite.
+3. The legacy TypeScript CLI must not perform live self-updates. Keep it only where a legacy fixture still proves a migration or product-language contract; remove the remaining CLI surface in a dedicated cleanup PR rather than extending it.
+4. Rust `install` / `uninstall` / `recover` / `open` / `status` / `doctor` are the product paths. Preserve their proven safety contracts without creating new TypeScript parity work.
 
 ### Runtime boundary
 

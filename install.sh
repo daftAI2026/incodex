@@ -42,6 +42,20 @@ case "$PREFIX" in
 esac
 BIN_DIR="${PREFIX}/bin"
 
+refuse_managed_conflict() {
+  [[ -n "${INCODEX_DOWNLOAD_DIR:-}" ]] && return 0
+  command -v brew >/dev/null 2>&1 || return 0
+  local installed=""
+  installed="$(HOMEBREW_NO_AUTO_UPDATE=1 brew list --versions incodex 2>/dev/null)" || return 0
+  [[ -n "$installed" ]] || return 0
+  local brew_prefix=""
+  local location=""
+  if brew_prefix="$(HOMEBREW_NO_AUTO_UPDATE=1 brew --prefix incodex 2>/dev/null)" && [[ -n "$brew_prefix" ]]; then
+    location=" at ${brew_prefix}/bin/incodex"
+  fi
+  die "Homebrew-managed Incodex detected${location}. Run 'brew upgrade incodex', or 'brew uninstall incodex' before switching to the script installer"
+}
+
 arch_name() {
   local machine="${INCODEX_ARCH:-$(uname -m)}"
   case "$machine" in
@@ -60,7 +74,30 @@ fetch() {
     return
   fi
   command -v curl >/dev/null 2>&1 || die "curl is required"
-  curl -fsSL "${DOWNLOAD_BASE}/${src}" -o "${dest}" || die "failed to download ${src}"
+  local attempt=1
+  local curl_exit=0
+  local http_status=""
+  while true; do
+    if http_status="$(curl -fsSL --connect-timeout 10 --max-time 60 --write-out '%{http_code}' "${DOWNLOAD_BASE}/${src}" -o "${dest}")"; then
+      return 0
+    else
+      curl_exit=$?
+    fi
+    rm -f "$dest"
+    case "$curl_exit" in
+      6 | 7 | 18 | 28 | 35 | 52 | 55 | 56) ;;
+      22)
+        case "$http_status" in
+          408 | 429 | 500 | 502 | 503 | 504) ;;
+          *) die "failed to download ${src} (HTTP ${http_status:-unknown})" ;;
+        esac
+        ;;
+      *) die "failed to download ${src} (curl ${curl_exit})" ;;
+    esac
+    [[ "$attempt" -lt 3 ]] || die "failed to download ${src} after 3 attempts"
+    sleep 0.2
+    attempt=$((attempt + 1))
+  done
 }
 
 expected_sha() {
@@ -73,8 +110,15 @@ expected_sha() {
 }
 
 ASSET="$(arch_name)"
+refuse_managed_conflict
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/incodex-setup.XXXXXX")"
-cleanup() { rm -rf "$WORKDIR"; }
+STAGED_CLI=""
+STAGED_ALIAS_DIR=""
+cleanup() {
+  [[ -n "$STAGED_CLI" ]] && rm -f "$STAGED_CLI"
+  [[ -n "$STAGED_ALIAS_DIR" ]] && rm -rf "$STAGED_ALIAS_DIR"
+  rm -rf "$WORKDIR"
+}
 trap cleanup EXIT
 
 fetch SHA256SUMS "${WORKDIR}/SHA256SUMS"
@@ -88,9 +132,26 @@ ACTUAL="$(shasum -a 256 "${WORKDIR}/${ASSET}" | awk '{ print $1 }')"
 [[ "$EXPECT" == "$ACTUAL" ]] || die "checksum mismatch for ${ASSET}"
 
 mkdir -p "$BIN_DIR"
-cp "${WORKDIR}/${ASSET}" "${BIN_DIR}/incodex"
-chmod 755 "${BIN_DIR}/incodex"
-ln -sfn incodex "${BIN_DIR}/inc"
+[[ ! -d "${BIN_DIR}/incodex" ]] || die "${BIN_DIR}/incodex is a directory"
+[[ ! -d "${BIN_DIR}/inc" ]] || die "${BIN_DIR}/inc is a directory"
+STAGED_CLI="$(mktemp "${BIN_DIR}/.incodex.XXXXXX")"
+cp "${WORKDIR}/${ASSET}" "$STAGED_CLI"
+chmod 755 "$STAGED_CLI"
+
+PROBE_OUTPUT="$("$STAGED_CLI" --version 2>/dev/null)" || die "downloaded ${ASSET} is not runnable"
+if [[ -n "${INCODEX_EXPECTED_VERSION:-}" ]]; then
+  REPORTED_VERSION="$(printf '%s\n' "$PROBE_OUTPUT" | awk '$1 == "Incodex" && $2 == "version" { print $3; exit }')"
+  [[ "$REPORTED_VERSION" == "$INCODEX_EXPECTED_VERSION" ]] ||
+    die "downloaded ${ASSET} does not report expected version ${INCODEX_EXPECTED_VERSION}"
+fi
+
+mv -f "$STAGED_CLI" "${BIN_DIR}/incodex"
+STAGED_CLI=""
+STAGED_ALIAS_DIR="$(mktemp -d "${BIN_DIR}/.inc-alias.XXXXXX")"
+ln -s incodex "${STAGED_ALIAS_DIR}/inc"
+mv -f "${STAGED_ALIAS_DIR}/inc" "${BIN_DIR}/inc"
+rmdir "$STAGED_ALIAS_DIR"
+STAGED_ALIAS_DIR=""
 
 echo "installed ${BIN_DIR}/incodex"
 echo "alias     ${BIN_DIR}/inc"

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -76,6 +76,88 @@ describe("install.sh", () => {
     expect(text).toContain("SHA256SUMS");
   });
 
+  test("refuses to create a script install beside a Homebrew-managed Incodex", () => {
+    const home = mkdtempSync(join(tmpdir(), "incodex-home-"));
+    const prefix = mkdtempSync(join(tmpdir(), "incodex-pre-"));
+    const fakeBin = join(home, "fake-bin");
+    const curlLog = join(home, "curl-called");
+    mkdirSync(fakeBin, { recursive: true });
+    writePayload(
+      fakeBin,
+      "brew",
+      "#!/bin/sh\nif [ \"$1 $2 $3\" = \"list --versions incodex\" ]; then printf '%s\\n' 'incodex 0.3.1'; exit 0; fi\nif [ \"$1 $2\" = \"--prefix incodex\" ]; then printf '%s\\n' '/opt/homebrew/Cellar/incodex/0.3.1'; exit 0; fi\nexit 1\n",
+    );
+    writePayload(fakeBin, "curl", `#!/bin/sh\n: > '${curlLog}'\nexit 88\n`);
+
+    const ran = spawnSync("/bin/bash", [installSh], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: home,
+        PATH: `${fakeBin}:/usr/bin:/bin`,
+        INCODEX_PREFIX: prefix,
+        INCODEX_ARCH: "arm64",
+      },
+    });
+
+    expect(ran.status).not.toBe(0);
+    expect(ran.stderr).toContain("Homebrew-managed Incodex");
+    expect(ran.stderr).toContain("brew upgrade incodex");
+    expect(existsSync(curlLog)).toBe(false);
+  });
+
+  test("allows a script install when Homebrew knows the formula but has not installed it", () => {
+    const home = mkdtempSync(join(tmpdir(), "incodex-home-"));
+    const release = mkdtempSync(join(tmpdir(), "incodex-rel-"));
+    const prefix = mkdtempSync(join(tmpdir(), "incodex-pre-"));
+    const fakeBin = join(home, "fake-bin");
+    mkdirSync(fakeBin, { recursive: true });
+    const asset = "incodex-darwin-arm64";
+    writePayload(release, asset, "#!/bin/sh\necho fake-cli\n");
+    writeFileSync(join(release, "SHA256SUMS"), `${sha256(join(release, asset))}  ${asset}\n`);
+    writePayload(
+      fakeBin,
+      "brew",
+      "#!/bin/sh\nif [ \"$1 $2 $3\" = \"list --versions incodex\" ]; then exit 1; fi\nif [ \"$1 $2\" = \"--prefix incodex\" ]; then printf '%s\\n' '/opt/homebrew/opt/incodex'; exit 0; fi\nexit 1\n",
+    );
+    writePayload(
+      fakeBin,
+      "curl",
+      `#!/bin/sh
+dest=''
+url=''
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) shift; dest="$1" ;;
+    http*) url="$1" ;;
+  esac
+  shift
+done
+case "$url" in
+  */SHA256SUMS) cp "$FAKE_RELEASE/SHA256SUMS" "$dest" ;;
+  */incodex-darwin-arm64) cp "$FAKE_RELEASE/incodex-darwin-arm64" "$dest" ;;
+  *) exit 88 ;;
+esac
+`,
+    );
+
+    const ran = spawnSync("/bin/bash", [installSh], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: home,
+        PATH: `${fakeBin}:/usr/bin:/bin`,
+        FAKE_RELEASE: release,
+        INCODEX_PREFIX: prefix,
+        INCODEX_ARCH: "arm64",
+      },
+    });
+
+    expect(ran.status).toBe(0);
+    expect(ran.stderr).not.toContain("Homebrew-managed Incodex");
+    expect(existsSync(join(prefix, "bin/incodex"))).toBe(true);
+  });
+
   test("installs incodex and inc from a verified local release dir", () => {
     const release = mkdtempSync(join(tmpdir(), "incodex-rel-"));
     const prefix = mkdtempSync(join(tmpdir(), "incodex-pre-"));
@@ -104,6 +186,102 @@ describe("install.sh", () => {
     expect(existsSync(alias)).toBe(true);
     const probe = spawnSync(dest, [], { encoding: "utf8" });
     expect(probe.stdout).toContain("fake-cli");
+  });
+
+  test("retries transient checksum and CLI asset downloads", () => {
+    const release = mkdtempSync(join(tmpdir(), "incodex-rel-"));
+    const prefix = mkdtempSync(join(tmpdir(), "incodex-pre-"));
+    const home = mkdtempSync(join(tmpdir(), "incodex-home-"));
+    const fakeBin = join(home, "fake-bin");
+    const attemptsDir = join(home, "attempts");
+    mkdirSync(fakeBin, { recursive: true });
+    mkdirSync(attemptsDir, { recursive: true });
+    writePayload(
+      release,
+      "incodex-darwin-arm64",
+      "#!/bin/sh\nprintf '%s\\n' 'Incodex version 9.9.9'\n",
+    );
+    writeFileSync(
+      join(release, "SHA256SUMS"),
+      `${sha256(join(release, "incodex-darwin-arm64"))}  incodex-darwin-arm64\n`,
+    );
+    writePayload(fakeBin, "brew", "#!/bin/sh\nexit 1\n");
+    writePayload(
+      fakeBin,
+      "curl",
+      `#!/bin/sh
+url=""
+dest=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) dest="$2"; shift 2 ;;
+    http*) url="$1"; shift ;;
+    *) shift ;;
+  esac
+done
+name=$(basename "$url")
+counter='${attemptsDir}/'"$name"
+count=$(cat "$counter" 2>/dev/null || printf '0')
+count=$((count + 1))
+printf '%s\\n' "$count" > "$counter"
+if [ "$count" -lt 3 ]; then printf '503'; exit 22; fi
+cp '${release}/'"$name" "$dest"
+`,
+    );
+
+    const ran = spawnSync("/bin/bash", [installSh], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: home,
+        PATH: `${fakeBin}:/usr/bin:/bin`,
+        INCODEX_PREFIX: prefix,
+        INCODEX_ARCH: "arm64",
+        INCODEX_DOWNLOAD_BASE: "https://release.invalid/v9.9.9",
+        INCODEX_EXPECTED_VERSION: "9.9.9",
+      },
+    });
+
+    expect(ran.status).toBe(0);
+    expect(readFileSync(join(attemptsDir, "SHA256SUMS"), "utf8").trim()).toBe("3");
+    expect(readFileSync(join(attemptsDir, "incodex-darwin-arm64"), "utf8").trim()).toBe("3");
+    expect(existsSync(join(prefix, "bin", "incodex"))).toBe(true);
+  });
+
+  test("does not retry a permanent HTTP download failure", () => {
+    const prefix = mkdtempSync(join(tmpdir(), "incodex-pre-"));
+    const home = mkdtempSync(join(tmpdir(), "incodex-home-"));
+    const fakeBin = join(home, "fake-bin");
+    const attempts = join(home, "attempts");
+    mkdirSync(fakeBin, { recursive: true });
+    writePayload(fakeBin, "brew", "#!/bin/sh\nexit 1\n");
+    writePayload(
+      fakeBin,
+      "curl",
+      `#!/bin/sh
+count=$(cat '${attempts}' 2>/dev/null || printf '0')
+printf '%s\n' "$((count + 1))" > '${attempts}'
+printf '404'
+exit 22
+`,
+    );
+
+    const ran = spawnSync("/bin/bash", [installSh], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: home,
+        PATH: `${fakeBin}:/usr/bin:/bin`,
+        INCODEX_PREFIX: prefix,
+        INCODEX_ARCH: "arm64",
+        INCODEX_DOWNLOAD_BASE: "https://release.invalid/v9.9.9",
+        INCODEX_EXPECTED_VERSION: "9.9.9",
+      },
+    });
+
+    expect(ran.status).toBe(1);
+    expect(readFileSync(attempts, "utf8").trim()).toBe("1");
+    expect(existsSync(join(prefix, "bin", "incodex"))).toBe(false);
   });
 
   test("recovers the default prefix passed by a legacy Bun standalone update", () => {
@@ -218,5 +396,97 @@ describe("install.sh", () => {
     });
     expect(ran.status).not.toBe(0);
     expect(existsSync(join(prefix, "bin", "incodex"))).toBe(false);
+  });
+
+  test("keeps the existing CLI when the staged payload reports the wrong version", () => {
+    const release = mkdtempSync(join(tmpdir(), "incodex-rel-"));
+    const prefix = mkdtempSync(join(tmpdir(), "incodex-pre-"));
+    const bin = join(prefix, "bin");
+    mkdirSync(bin, { recursive: true });
+    writePayload(bin, "incodex", "#!/bin/sh\nprintf '%s\\n' 'Incodex version 0.2.0'\n");
+    symlinkSync("incodex", join(bin, "inc"));
+    writePayload(
+      release,
+      "incodex-darwin-arm64",
+      "#!/bin/sh\nprintf '%s\\n' 'Incodex version 8.8.8'\n",
+    );
+    writeFileSync(
+      join(release, "SHA256SUMS"),
+      `${sha256(join(release, "incodex-darwin-arm64"))}  incodex-darwin-arm64\n`,
+    );
+
+    const ran = spawnSync("bash", [installSh], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        INCODEX_DOWNLOAD_DIR: release,
+        INCODEX_PREFIX: prefix,
+        INCODEX_ARCH: "arm64",
+        INCODEX_EXPECTED_VERSION: "9.9.9",
+      },
+    });
+
+    expect(ran.status).not.toBe(0);
+    expect(ran.stderr).toContain("does not report expected version 9.9.9");
+    expect(readFileSync(join(bin, "incodex"), "utf8")).toContain("0.2.0");
+    expect(lstatSync(join(bin, "inc")).isSymbolicLink()).toBe(true);
+  });
+
+  test("atomically replaces an incodex symlink without modifying its target", () => {
+    const release = mkdtempSync(join(tmpdir(), "incodex-rel-"));
+    const prefix = mkdtempSync(join(tmpdir(), "incodex-pre-"));
+    const outside = mkdtempSync(join(tmpdir(), "incodex-outside-"));
+    const bin = join(prefix, "bin");
+    const victim = writePayload(outside, "victim", "#!/bin/sh\necho do-not-touch\n");
+    mkdirSync(bin, { recursive: true });
+    symlinkSync(victim, join(bin, "incodex"));
+    writePayload(
+      release,
+      "incodex-darwin-arm64",
+      "#!/bin/sh\nprintf '%s\\n' 'Incodex version 9.9.9'\n",
+    );
+    writeFileSync(
+      join(release, "SHA256SUMS"),
+      `${sha256(join(release, "incodex-darwin-arm64"))}  incodex-darwin-arm64\n`,
+    );
+
+    const ran = spawnSync("bash", [installSh], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        INCODEX_DOWNLOAD_DIR: release,
+        INCODEX_PREFIX: prefix,
+        INCODEX_ARCH: "arm64",
+        INCODEX_EXPECTED_VERSION: "9.9.9",
+      },
+    });
+
+    expect(ran.status).toBe(0);
+    expect(readFileSync(victim, "utf8")).toContain("do-not-touch");
+    expect(lstatSync(join(bin, "incodex")).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(bin, "incodex"), "utf8")).toContain("9.9.9");
+  });
+
+  test("checksum failure leaves an existing CLI untouched", () => {
+    const release = mkdtempSync(join(tmpdir(), "incodex-rel-"));
+    const prefix = mkdtempSync(join(tmpdir(), "incodex-pre-"));
+    const bin = join(prefix, "bin");
+    mkdirSync(bin, { recursive: true });
+    writePayload(bin, "incodex", "#!/bin/sh\necho old-cli\n");
+    writePayload(release, "incodex-darwin-arm64", "#!/bin/sh\necho new-cli\n");
+    writeFileSync(join(release, "SHA256SUMS"), `${"0".repeat(64)}  incodex-darwin-arm64\n`);
+
+    const ran = spawnSync("bash", [installSh], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        INCODEX_DOWNLOAD_DIR: release,
+        INCODEX_PREFIX: prefix,
+        INCODEX_ARCH: "arm64",
+      },
+    });
+
+    expect(ran.status).not.toBe(0);
+    expect(readFileSync(join(bin, "incodex"), "utf8")).toContain("old-cli");
   });
 });
