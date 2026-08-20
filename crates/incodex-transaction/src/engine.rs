@@ -231,9 +231,7 @@ fn cleanup_pre_swap(root: &Path, journal: &JournalV2) -> Result<(), String> {
 
 fn restore_live(root: &Path, live: &Path, journal: &JournalV2) -> Result<(), String> {
     let paths = tx_paths(root, &journal.install_id);
-    if paths.outgoing.exists() {
-        replace_live(&paths.outgoing, live, &paths.dir)?;
-    } else if paths.original.exists() {
+    if paths.original.exists() {
         // +---------------------------------------------------------------+
         // | 原始快照是卸载所需的耐久备份；先复制再替换，回滚绝不消费它。          |
         // +---------------------------------------------------------------+
@@ -243,6 +241,14 @@ fn restore_live(root: &Path, live: &Path, journal: &JournalV2) -> Result<(), Str
         }
         ditto(&paths.original, &restore)?;
         replace_live(&restore, live, &paths.dir)?;
+    } else if paths.outgoing.exists() {
+        replace_live(&paths.outgoing, live, &paths.dir)?;
+    }
+    if paths.outgoing.exists() {
+        // +---------------------------------------------------------------+
+        // | original 优先作为回滚源；outgoing 可能正处于被 commit 清理的半态。 |
+        // +---------------------------------------------------------------+
+        fs::remove_dir_all(&paths.outgoing).map_err(|err| err.to_string())?;
     }
     if paths.staged.exists() {
         fs::remove_dir_all(&paths.staged).map_err(|err| err.to_string())?;
