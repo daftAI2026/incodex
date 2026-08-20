@@ -2,6 +2,7 @@ use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use incodex_transaction::{journal_v2, recover_with, Engine};
 
@@ -9,7 +10,11 @@ static SEQ: AtomicU64 = AtomicU64::new(0);
 
 fn scratch() -> PathBuf {
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
-    let root = std::env::temp_dir().join(format!("incodex-restore-safety-{n}"));
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("incodex-restore-safety-{now}-{n}"));
     fs::create_dir_all(&root).unwrap();
     root
 }
@@ -72,7 +77,7 @@ fn recover_refuses_when_no_restore_source_exists() {
     );
     assert_eq!(
         fs::read_to_string(interrupted.target.join("marker")).unwrap(),
-        "patched"
+        "candidate"
     );
 }
 
@@ -101,7 +106,7 @@ fn recover_refuses_file_or_symlink_original_without_falling_back() {
         );
         assert_eq!(
             fs::read_to_string(interrupted.target.join("marker")).unwrap(),
-            "patched"
+            "candidate"
         );
     }
 }
@@ -122,7 +127,7 @@ fn recover_refuses_a_modified_sealed_original() {
     );
     assert_eq!(
         fs::read_to_string(interrupted.target.join("marker")).unwrap(),
-        "patched"
+        "candidate"
     );
 }
 
@@ -143,6 +148,6 @@ fn recover_refuses_a_partial_outgoing_when_original_is_missing() {
     );
     assert_eq!(
         fs::read_to_string(interrupted.target.join("marker")).unwrap(),
-        "patched"
+        "candidate"
     );
 }
