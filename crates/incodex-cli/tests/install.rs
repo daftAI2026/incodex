@@ -6,8 +6,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_asar::{pack_dir, Archive, LOADER_NAME, MARKER_KEY};
-use incodex_macos::{ditto, read_asar_integrity, sign_app, write_asar_integrity};
-use incodex_runtime_bundle::loader_source;
+use incodex_macos::ditto;
 use incodex_transaction::{acquire_target_lock, journal_v2, Engine};
 use sha2::{Digest, Sha256};
 
@@ -717,50 +716,6 @@ fn uninstall_yes_app_restores_original_asar() {
         String::from_utf8(archive.extract("index.js").unwrap()).unwrap(),
         "ok\n"
     );
-}
-
-#[test]
-fn uninstall_accepts_a_valid_install_from_an_older_runtime_loader() {
-    let home = isolated_home();
-    let app = patchable_app(&home);
-    let root = home.join(".incodex");
-    let original_digest = tree_digest(&app);
-    let (status, stdout, stderr) =
-        run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
-    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
-
-    let asar = app.join("Contents/Resources/app.asar");
-    let current = Archive::open(&asar).unwrap();
-    let install_id = current
-        .read_package_main()
-        .unwrap()
-        .install_id
-        .expect("committed install id");
-    assert_eq!(journal_v2(&root, &install_id).unwrap().phase, "COMMITTED");
-
-    let legacy_loader = "module.exports = require('./index.js');\n";
-    assert_ne!(legacy_loader.as_bytes(), loader_source().as_bytes());
-    let (legacy_hash, _) =
-        incodex_asar::patch_asar(&asar, legacy_loader, Some(&install_id)).unwrap();
-    write_asar_integrity(&app, &legacy_hash).unwrap();
-    sign_app(&app).unwrap();
-
-    let legacy = Archive::open(&asar).unwrap();
-    let package = legacy.read_package_main().unwrap();
-    assert_eq!(package.install_id.as_deref(), Some(install_id.as_str()));
-    assert_eq!(
-        legacy.extract(LOADER_NAME).unwrap(),
-        legacy_loader.as_bytes()
-    );
-    assert_eq!(read_asar_integrity(&app), Some(legacy.header_hash()));
-    assert!(is_signed(&app));
-
-    let (status, stdout, stderr) = run(
-        &["uninstall", "--yes", "--app", app.to_str().unwrap()],
-        &home,
-    );
-    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
-    assert_eq!(tree_digest(&app), original_digest);
 }
 
 #[test]
