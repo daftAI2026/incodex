@@ -1,6 +1,6 @@
 {
   "name": "incodex",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "license": "MIT",
   "description": "Incognito toggle for the Codex desktop app",
@@ -10,6 +10,7 @@
   },
   "scripts": {
     "incodex": "bun src/cli.ts",
+    "release:prepare": "bun scripts/prepare-release.ts",
     "build:runtime": "bun src/build-runtime.ts",
     "deploy:runtime": "bun src/deploy-runtime.ts",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.runtime.json && tsc -p tsconfig.runtime-emit.json --noEmit",
