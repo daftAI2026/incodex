@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   connectExisting,
+  clearOwnerLock,
   listenForRaise,
   ownerMatchesLive,
   readOwnerLock,
@@ -46,6 +47,28 @@ describe("instance owner", () => {
       }),
     ).toThrow();
   });
+
+  test("an old owner cannot clear a replacement lease", () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-lease-"));
+    const oldOwner = {
+      pid: 12,
+      startedAt: "Mon Aug 18 10:00:00 2026",
+      execPath: "/A/ChatGPT",
+      sessionId: "old",
+      token: "old-token",
+    };
+    const newOwner = {
+      pid: 13,
+      startedAt: "Mon Aug 18 10:01:00 2026",
+      execPath: "/A/ChatGPT",
+      sessionId: "new",
+      token: "new-token",
+    };
+    writeOwnerLock(root, newOwner);
+
+    expect(clearOwnerLock(root, oldOwner)).toBe(false);
+    expect(readOwnerLock(root)?.token).toBe(newOwner.token);
+  });
 });
 
 describe("raise socket", () => {
@@ -58,6 +81,32 @@ describe("raise socket", () => {
     });
     const ok = await connectExisting(root, 500);
     expect(ok).toBe(true);
+    server.close();
+  });
+
+  test("a raise request must carry the current owner token", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-sock-token-"));
+    const owner = {
+      pid: process.pid,
+      startedAt: "Mon Aug 18 10:00:00 2026",
+      execPath: process.execPath,
+      sessionId: "s",
+      token: "owner-token",
+    };
+    writeOwnerLock(root, owner);
+    let raised = false;
+    const server = listenForRaise(root, () => {
+      raised = true;
+    }, owner);
+    await new Promise((resolve, reject) => {
+      server.once("listening", resolve);
+      server.once("error", reject);
+    });
+
+    const ok = await connectExisting(root, 500, "wrong-token");
+
+    expect(ok).toBe(false);
+    expect(raised).toBe(false);
     server.close();
   });
 });
