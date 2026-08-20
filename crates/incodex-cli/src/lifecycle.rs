@@ -11,6 +11,7 @@ use incodex_core::{format_kv, format_ok, format_step, format_warn};
 use serde::Deserialize;
 
 use crate::parse::ParsedCli;
+use crate::spinner::Progress;
 
 const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/daftAI2026/incodex/releases/latest";
 const MAIN_INSTALLER_URL: &str =
@@ -42,7 +43,10 @@ pub fn run_runtime(parsed: &ParsedCli) -> Result<(), String> {
         println!("would update ~/.incodex/runtime/ without modifying Codex");
         return Ok(());
     }
+    let mut progress = Progress::new();
+    progress.stage("Publishing Runtime");
     let published = incodex_runtime_bundle::publish(&user_root())?;
+    progress.stop();
     println!("{}", format_step("Runtime", None));
     println!(
         "{}",
@@ -78,12 +82,14 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
         return Ok(());
     }
 
-    println!("{}", format_step("Checking for updates", None));
+    let mut progress = Progress::new();
+    progress.stage("Checking for updates");
     let latest = latest_stable_release()?;
     let current = parse_stable_version(env!("CARGO_PKG_VERSION"))
         .ok_or("update failed: current CLI version is not stable")?;
     match latest.version.cmp(&current) {
         std::cmp::Ordering::Less => {
+            progress.stop();
             println!(
                 "Current version {} is newer than latest release {}.",
                 env!("CARGO_PKG_VERSION"),
@@ -92,12 +98,14 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
             return Ok(());
         }
         std::cmp::Ordering::Equal => {
+            progress.stop();
             println!("Already on latest version, {}", env!("CARGO_PKG_VERSION"));
             return Ok(());
         }
         std::cmp::Ordering::Greater => {}
     }
 
+    progress.stage("Preparing update");
     let update_target = prefix.join("bin/incodex");
     let _lock =
         incodex_transaction::acquire_target_lock(&user_root(), &update_target, "update", None)
@@ -108,6 +116,7 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
                     format!("update failed: could not acquire update lock: {err}")
                 }
             })?;
+    progress.stop();
     println!("updating {} -> {}", env!("CARGO_PKG_VERSION"), latest.tag);
     let install_script_url = format!(
         "https://raw.githubusercontent.com/daftAI2026/incodex/{}/install.sh",
@@ -119,8 +128,9 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
     );
     let expected = latest.tag.trim_start_matches('v');
 
-    println!("{}", format_step("Downloading stable installer", None));
+    progress.stage("Downloading stable installer");
     let tagged_installer = curl_download(&install_script_url, "stable installer")?;
+    progress.stop();
     println!(
         "{}",
         format_step(&format!("Installing {}", latest.tag), None)
@@ -135,11 +145,9 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
                 None,
             )
         );
-        println!(
-            "{}",
-            format_step("Downloading compatibility installer", None)
-        );
+        progress.stage("Downloading compatibility installer");
         let compatibility = curl_download(MAIN_INSTALLER_URL, "compatibility installer")?;
+        progress.stop();
         println!(
             "{}",
             format_step(&format!("Repairing {}", latest.tag), None)
@@ -148,6 +156,7 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
         verify_installed_version(&prefix, expected)?;
     }
 
+    progress.stop();
     println!(
         "{}",
         format_ok(&format!("Verified Incodex {expected}"), None)
@@ -486,15 +495,19 @@ pub fn run_self_uninstall(parsed: &ParsedCli) -> Result<(), String> {
         return Ok(());
     }
     ensure_confirmed(parsed, "self-uninstall")?;
+    let mut progress = Progress::new();
     if parsed.restore_app {
-        crate::install::restore_default_for_self_uninstall()?;
+        crate::install::restore_default_for_self_uninstall(&mut progress)?;
+        progress.stop();
         println!("restored {DEFAULT_APP}");
     }
+    progress.stage("Removing Incodex CLI");
     for path in paths {
         if path.exists() {
             std::fs::remove_file(path).map_err(|err| err.to_string())?;
         }
     }
+    progress.stop();
     println!("done");
     Ok(())
 }

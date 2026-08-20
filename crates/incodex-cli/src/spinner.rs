@@ -8,6 +8,41 @@ use std::time::Duration;
 
 const FRAMES: &[char] = &['|', '/', '-', '\\'];
 
+pub struct Progress {
+    interactive: bool,
+    spinner: Option<Spinner>,
+}
+
+impl Progress {
+    pub fn new() -> Self {
+        Self {
+            interactive: crate::terminal::is_tty() && std::io::stderr().is_terminal(),
+            spinner: None,
+        }
+    }
+
+    pub fn stage(&mut self, message: &str) {
+        self.stop();
+        if self.interactive {
+            self.spinner = Some(Spinner::start(message));
+        } else {
+            println!("{}", incodex_core::format_step(message, None));
+        }
+    }
+
+    pub fn stop(&mut self) {
+        if let Some(mut spinner) = self.spinner.take() {
+            spinner.stop();
+        }
+    }
+}
+
+impl Drop for Progress {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
 pub struct Spinner {
     stopped: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
@@ -24,13 +59,18 @@ impl Spinner {
         let stopped = Arc::new(AtomicBool::new(false));
         let worker_stopped = Arc::clone(&stopped);
         let message = message.to_string();
+        eprint!("\r\u{1b}[2K  {} {message}", FRAMES[0]);
+        let _ = std::io::stderr().flush();
         let worker = thread::spawn(move || {
-            let mut frame = 0_usize;
+            let mut frame = 1_usize;
             while !worker_stopped.load(Ordering::Relaxed) {
+                thread::sleep(Duration::from_millis(50));
+                if worker_stopped.load(Ordering::Relaxed) {
+                    break;
+                }
                 eprint!("\r\u{1b}[2K  {} {message}", FRAMES[frame % FRAMES.len()]);
                 let _ = std::io::stderr().flush();
                 frame += 1;
-                thread::sleep(Duration::from_millis(50));
             }
         });
         Self {
