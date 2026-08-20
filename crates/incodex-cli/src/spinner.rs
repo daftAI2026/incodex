@@ -104,7 +104,7 @@ impl Drop for Spinner {
 mod tests {
     use std::time::{Duration, Instant};
 
-    use super::Spinner;
+    use super::{Progress, Spinner};
 
     #[test]
     fn rapid_stage_switches_do_not_wait_for_each_frame_interval() {
@@ -119,5 +119,34 @@ mod tests {
             "stopping five stages took {:?}",
             started.elapsed()
         );
+    }
+
+    #[test]
+    fn progress_stage_updates_reuse_the_running_worker() {
+        let mut progress = Progress::new_for(true);
+        progress.stage("First stage");
+        let worker = progress
+            .spinner
+            .as_ref()
+            .unwrap()
+            .worker
+            .as_ref()
+            .unwrap()
+            .thread()
+            .id();
+        progress.stage("Second stage");
+        assert_eq!(
+            progress
+                .spinner
+                .as_ref()
+                .unwrap()
+                .worker
+                .as_ref()
+                .unwrap()
+                .thread()
+                .id(),
+            worker
+        );
+        progress.stop();
     }
 }
