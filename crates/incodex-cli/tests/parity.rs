@@ -547,6 +547,20 @@ fn native_tty_install_animates_immediately_after_confirmation() {
         "install spinner must clear the current line: {:?}",
         rust.stdout
     );
+    assert!(
+        ["|", "/", "-", "\\"].iter().any(|frame| rust
+            .stdout
+            .contains(&format!("  {frame} Replacing application"))),
+        "install should expose a product phase instead of a transaction primitive: {:?}",
+        rust.stdout
+    );
+    for internal in ["Preparing installation transaction", "Swapping application"] {
+        assert!(
+            !rust.stdout.contains(internal),
+            "TTY leaked internal phase {internal:?}: {:?}",
+            rust.stdout
+        );
+    }
 }
 
 #[test]
@@ -744,7 +758,9 @@ fn native_non_tty_mutations_print_auditable_progress_stages() {
     assert!(
         install.stdout.contains("➤ Publishing Runtime")
             && install.stdout.contains("➤ Backing up original app")
-            && install.stdout.contains("➤ Signing patched app"),
+            && install.stdout.contains("➤ Patching and signing app")
+            && install.stdout.contains("➤ Replacing application")
+            && install.stdout.contains("➤ Verifying installation"),
         "install must expose durable stages without TTY controls: {install:?}"
     );
     assert!(!install.stdout.contains('\u{1b}'), "{install:?}");
