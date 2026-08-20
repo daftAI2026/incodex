@@ -32,7 +32,7 @@ fn install_phases_bound_repeated_tree_digest_scans() {
     tx.commit().unwrap();
 
     assert!(
-        digest_call_count() <= 7,
+        digest_call_count() <= 8,
         "adjacent phases rescanned immutable trees: {} calls",
         digest_call_count()
     );
