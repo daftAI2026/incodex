@@ -403,6 +403,14 @@ fn durable_commit_does_not_report_cleanup_failure_as_uncommitted() {
         result.is_ok(),
         "durable COMMITTED must not be returned as an install failure: {result:?}"
     );
+    let result = result.unwrap();
+    assert!(
+        result
+            .cleanup_warning
+            .as_deref()
+            .is_some_and(|warning| warning.contains("Not a directory")),
+        "cleanup failure was not surfaced as a warning: {result:?}"
+    );
     assert_eq!(tx.journal().phase, "COMMITTED");
     assert_eq!(fs::read_to_string(target_app.join("marker")).unwrap(), "patched");
     assert!(outgoing.is_file(), "cleanup fixture was unexpectedly removed");

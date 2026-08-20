@@ -132,6 +132,7 @@ struct CommandResult {
     install_id: Option<String>,
     runtime_version: Option<String>,
     app: String,
+    warning: Option<String>,
 }
 
 fn resolve_target(parsed: &ParsedCli, root: &Path) -> PathBuf {
@@ -233,6 +234,7 @@ fn install_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
                     install_id: Some(install_id),
                     runtime_version: Some(published.version),
                     app: app.display().to_string(),
+                    warning: None,
                 });
             }
         }
@@ -272,18 +274,27 @@ fn install_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
         tx.rollback(&error)?;
         return Err(error);
     }
-    if let Err(error) = tx.commit() {
-        if tx.journal().phase != "COMMITTED" {
-            tx.rollback(&error)?;
+    let commit = match tx.commit() {
+        Ok(result) => result,
+        Err(error) => {
+            if tx.journal().phase != "COMMITTED" {
+                tx.rollback(&error)?;
+            }
+            return Err(error);
         }
-        return Err(error);
-    }
+    };
+    let warning = commit.cleanup_warning.map(|error| {
+        format!(
+            "Install committed, but transaction cleanup failed: {error}. Run `incodex recover --transaction {install_id}` to retry cleanup."
+        )
+    });
     let _ = notify_launch_services(app);
     Ok(CommandResult {
         skipped: false,
         install_id: Some(install_id),
         runtime_version: Some(runtime_version()),
         app: app.display().to_string(),
+        warning,
     })
 }
 
@@ -307,6 +318,7 @@ fn uninstall_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
         install_id: Some(journal.install_id),
         runtime_version: Some(runtime_version()),
         app: app.display().to_string(),
+        warning: None,
     })
 }
 
@@ -398,6 +410,9 @@ fn print_command_result(result: &CommandResult) {
     }
     if let Some(id) = &result.install_id {
         println!("{}", format_kv("Install id", id, None));
+    }
+    if let Some(warning) = &result.warning {
+        println!("{}", format_warn(warning, None));
     }
     if let Some(version) = &result.runtime_version {
         println!("{}", format_kv("Runtime", version, None));

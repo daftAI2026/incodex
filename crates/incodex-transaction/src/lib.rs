@@ -8,7 +8,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-pub use engine::{recover, recover_with, Engine, RecoverResult, TxError};
+pub use engine::{recover, recover_with, CommitResult, Engine, RecoverResult, TxError};
 pub use journal::{new_install_id, JournalV2};
 
 pub fn journal_v2(root: &Path, install_id: &str) -> Result<JournalV2, String> {

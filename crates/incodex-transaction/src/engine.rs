@@ -33,6 +33,11 @@ pub struct RecoverResult {
     pub journal: JournalV2,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct CommitResult {
+    pub cleanup_warning: Option<String>,
+}
+
 pub struct Engine {
     root: PathBuf,
     live_path: PathBuf,
@@ -159,18 +164,19 @@ impl Engine {
         Ok(())
     }
 
-    pub fn commit(&mut self) -> Result<(), String> {
+    pub fn commit(&mut self) -> Result<CommitResult, String> {
         self.commit_with_checkpoint(|_| {})
     }
 
     #[doc(hidden)]
-    pub fn commit_with_checkpoint<F>(&mut self, mut checkpoint: F) -> Result<(), String>
+    pub fn commit_with_checkpoint<F>(&mut self, mut checkpoint: F) -> Result<CommitResult, String>
     where
         F: FnMut(&str),
     {
         self.advance("COMMITTED")?;
         checkpoint("COMMITTED_BEFORE_CLEANUP");
-        cleanup_outgoing(&self.outgoing_app())
+        let cleanup_warning = cleanup_outgoing(&self.outgoing_app()).err();
+        Ok(CommitResult { cleanup_warning })
     }
 
     pub fn rollback(&mut self, _reason: &str) -> Result<(), String> {
