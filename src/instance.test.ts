@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -497,6 +498,101 @@ describe("cross-process owner contention", () => {
     expect(readOwnerLock(root)?.token).toBe(winnerToken);
     expect(completed.every((result) => result.code === 0 || result.code === 2)).toBe(true);
     expect(completed.every((result) => result.stderr === "")).toBe(true);
+  });
+
+  test("a stale claim cleaner cannot remove a replacement claim in its unlink window", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-takeover-claim-window-"));
+    const claimRoot = join(root, ".incognito.lock.takeover");
+    const pauseFile = join(root, "claim-paused");
+    const releaseFile = join(root, "claim-release");
+    const modulePath = join(import.meta.dir, "runtime/incodex-instance.cts");
+    mkdirSync(claimRoot);
+    writeFileSync(
+      join(claimRoot, "owner"),
+      JSON.stringify({
+        pid: 999999,
+        startedAt: "never",
+        processStartIdentity: "never",
+        execIdentity: "/nope",
+        token: "stale-claim-token",
+      }),
+    );
+    writeFileSync(
+      join(root, LOCK_NAME),
+      JSON.stringify({
+        pid: 999999,
+        startedAt: "never",
+        execPath: "/nope",
+        sessionId: "stale",
+        token: "stale-token",
+      }),
+    );
+
+    const worker = String.raw`
+      const instance = require(process.env.INCODEX_TEST_MODULE);
+      const root = process.env.INCODEX_TEST_ROOT;
+      const owner = instance.currentOwner("claim-cleaner", process.execPath);
+      try {
+        instance.acquireOwnerLease(root, owner);
+        process.stdout.write("UNEXPECTED_WINNER\n");
+        process.exit(3);
+      } catch (error) {
+        process.stdout.write(String(error.code || "ERROR") + "\n");
+        process.exit(error.code === "OWNER_BUSY" || error.code === "OWNER_RACE" ? 0 : 2);
+      }
+    `;
+    const child = spawn(process.execPath, ["-e", worker], {
+      env: {
+        ...process.env,
+        INCODEX_TEST_MODULE: modulePath,
+        INCODEX_TEST_ROOT: root,
+        INCODEX_TEST_TAKEOVER_PAUSE_FILE: pauseFile,
+        INCODEX_TEST_TAKEOVER_RELEASE_FILE: releaseFile,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let closed = false;
+    child.stdout?.on("data", (chunk) => (stdout += String(chunk)));
+    child.stderr?.on("data", (chunk) => (stderr += String(chunk)));
+    const closePromise = new Promise<{ code: number | null }>((resolve) => {
+      child.once("close", (code) => {
+        closed = true;
+        resolve({ code });
+      });
+      child.once("error", () => {
+        closed = true;
+        resolve({ code: 2 });
+      });
+    });
+
+    try {
+      const deadline = Date.now() + 3000;
+      while (!existsSync(pauseFile) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(existsSync(pauseFile)).toBe(true);
+      if (!existsSync(pauseFile)) return;
+
+      const oldClaim = join(root, ".incognito.lock.takeover");
+      const quarantine = join(root, ".stale-claim-test");
+      renameSync(oldClaim, quarantine);
+      const replacement = currentOwner("claim-replacement", process.execPath);
+      mkdirSync(oldClaim);
+      writeFileSync(join(oldClaim, "owner"), JSON.stringify(replacement));
+      writeFileSync(releaseFile, "release\n");
+
+      const result = await closePromise;
+      expect(result.code).toBe(0);
+      expect(stdout.trim()).toBe("OWNER_BUSY");
+      expect(stderr).toBe("");
+      expect(readFileSync(join(oldClaim, "owner"), "utf8")).toContain(replacement.token);
+    } finally {
+      writeFileSync(releaseFile, "release\n");
+      if (!closed) child.kill();
+      await closePromise;
+    }
   });
 
   test("twenty OS processes recover one truncated lock without deleting the winner", async () => {
