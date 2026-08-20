@@ -1,5 +1,6 @@
 use std::fs;
 use std::os::unix::fs::symlink;
+use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -33,7 +34,7 @@ fn seed_backup(root: &Path, id: &str, source: &Path) {
 
 #[test]
 fn recover_committed_cleanup_converges_for_directory_file_and_symlink_leftovers() {
-    for kind in ["dir", "file", "symlink"] {
+    for kind in ["dir", "file", "symlink", "socket"] {
         let home = scratch();
         let root = home.join(".incodex");
         let target = app(&home, "ChatGPT.app", "patched");
@@ -59,8 +60,19 @@ fn recover_committed_cleanup_converges_for_directory_file_and_symlink_leftovers(
                 fs::write(&victim, b"must survive").unwrap();
                 symlink(&victim, &outgoing).unwrap();
             }
+            "socket" => {}
             _ => unreachable!(),
         }
+
+        let _socket = if kind == "socket" {
+            let socket_path =
+                std::env::temp_dir().join(format!("incodex-cleanup-socket-{}", std::process::id()));
+            let listener = UnixListener::bind(&socket_path).unwrap();
+            fs::rename(&socket_path, &outgoing).unwrap();
+            Some(listener)
+        } else {
+            None
+        };
 
         let output = Command::new(env!("CARGO_BIN_EXE_incodex"))
             .args(["recover", "--transaction", &id])
