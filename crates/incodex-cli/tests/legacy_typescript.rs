@@ -334,22 +334,30 @@ fn legacy_typescript_fixture_reproduces_the_v1_disk_contract_without_running_ts_
     let state = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
         .expect("legacy TS v1 fixture should be readable")
         .expect("fixture should be detected");
+    let manifest = state
+        .manifest
+        .as_ref()
+        .expect("committed state should include manifest metadata");
+    let original_app = state
+        .original_app
+        .as_ref()
+        .expect("committed state should include the original backup path");
 
     assert_eq!(state.install_id, INSTALL_ID);
-    assert_eq!(state.manifest.schema_version, 1);
-    assert_eq!(state.manifest.transaction_state, "committed");
+    assert_eq!(manifest.schema_version, 1);
+    assert_eq!(manifest.transaction_state, "committed");
     assert_eq!(
-        state.manifest.original_plist_file_hash,
+        manifest.original_plist_file_hash,
         sha256_hex(INFO_PLIST.as_bytes())
     );
     assert_eq!(state.journal.schema_version, 1);
     assert_eq!(state.journal.phase, "COMMITTED");
     assert_eq!(
         state.journal.original_snapshot,
-        state.original_app.display().to_string()
+        original_app.display().to_string()
     );
     assert_eq!(
-        fs::read(state.original_app.join("Contents/Resources/app.asar")).unwrap(),
+        fs::read(original_app.join("Contents/Resources/app.asar")).unwrap(),
         fixture.original
     );
     assert_eq!(
@@ -523,6 +531,22 @@ fn legacy_typescript_fixture_reads_real_writer_order_before_installation_metadat
             incodex_cli::legacy_typescript::LegacyStateKind::Interrupted,
             "phase {phase} was misclassified"
         );
+        assert!(
+            state.current.is_none(),
+            "phase {phase} borrowed stale current.json"
+        );
+        assert!(
+            state.manifest.is_none(),
+            "phase {phase} invented a manifest"
+        );
+        assert!(
+            state.runtime.is_none(),
+            "phase {phase} invented a runtime record"
+        );
+        assert!(
+            state.original_app.is_none(),
+            "phase {phase} invented a backup"
+        );
     }
 }
 
@@ -538,6 +562,36 @@ fn legacy_typescript_fixture_reads_a_real_rolled_back_journal_without_metadata()
         state.kind,
         incodex_cli::legacy_typescript::LegacyStateKind::RolledBack
     );
+    assert!(state.current.is_none());
+    assert!(state.manifest.is_none());
+    assert!(state.runtime.is_none());
+    assert!(state.original_app.is_none());
+}
+
+#[test]
+fn legacy_typescript_fixture_requires_metadata_for_a_committed_journal() {
+    let fixture = LegacyTsV1JournalFixture::create();
+    set_journal_phase_at(&fixture.journal_path, "COMMITTED");
+    let error = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
+        .expect_err("committed journal without post-metadata records must be rejected");
+    assert!(error.contains("metadata"), "{error}");
+}
+
+#[test]
+fn legacy_typescript_fixture_keeps_post_metadata_separate_from_commit_state() {
+    let fixture = LegacyTsV1Fixture::create();
+    set_journal_phase_at(&fixture.journal_path(), "TARGET_VERIFIED");
+    let state = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
+        .expect("post-metadata interrupted state should be structurally readable")
+        .expect("journal should be detected");
+    assert_eq!(
+        state.kind,
+        incodex_cli::legacy_typescript::LegacyStateKind::Interrupted
+    );
+    assert!(state.current.is_some());
+    assert!(state.manifest.is_some());
+    assert!(state.runtime.is_some());
+    assert!(state.original_app.is_some());
 }
 
 #[test]
@@ -560,6 +614,10 @@ fn legacy_typescript_fixture_prefers_a_new_orphan_journal_over_an_old_committed_
         state.kind,
         incodex_cli::legacy_typescript::LegacyStateKind::Interrupted
     );
+    assert!(state.current.is_none());
+    assert!(state.manifest.is_none());
+    assert!(state.runtime.is_none());
+    assert!(state.original_app.is_none());
 }
 
 #[test]

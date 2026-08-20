@@ -85,7 +85,10 @@ pub struct TransactionJournal {
     pub updated_at: String,
 }
 
-/// A validated snapshot of the files emitted by the retired TS CLI.
+/// A structurally consistent view of one retired TS v1 journal and its
+/// optional post-metadata records. This is not proof of the live target,
+/// backup contents, signature, hashes, or inode identity; migration must add
+/// those target-lock and backup-proof checks before acting on this record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LegacyTsV1State {
     pub target_id: String,
@@ -93,91 +96,269 @@ pub struct LegacyTsV1State {
     pub install_id: String,
     pub target_store: PathBuf,
     pub install_dir: PathBuf,
-    pub original_app: PathBuf,
+    pub original_app: Option<PathBuf>,
     pub kind: LegacyStateKind,
-    pub current: CurrentPointer,
-    pub manifest: InstallManifest,
-    pub runtime: RuntimeManifest,
+    pub current: Option<CurrentPointer>,
+    pub manifest: Option<InstallManifest>,
+    pub runtime: Option<RuntimeManifest>,
     pub journal: TransactionJournal,
+}
+
+#[derive(Debug, Clone)]
+struct LegacyJournalRecord {
+    journal: TransactionJournal,
+    kind: LegacyStateKind,
+}
+
+#[derive(Debug, Clone)]
+struct LegacyMetadata {
+    current: CurrentPointer,
+    manifest: InstallManifest,
+    runtime: RuntimeManifest,
+    original_app: PathBuf,
 }
 
 /// Read one target's legacy v1 state without invoking Bun or the old router.
 ///
-/// Ok(None) means the target has no v1 installation directory. An existing
-/// directory with malformed or contradictory records is an error, not a clean
-/// result: migration must never silently ignore a damaged legacy state.
+/// The flat transaction journals are enumerated before installation metadata.
+/// This is required because the retired writer creates its journal at
+/// `DISCOVERED`, before `current.json`, the manifest, the runtime manifest, or
+/// the original backup exists. Ok(None) means there is no target-matching
+/// journal and no legacy installation store. An existing or malformed record
+/// is an error, not a clean result: migration must never silently ignore a
+/// damaged legacy state.
 pub fn load_legacy_ts_v1(root: &Path, target: &Path) -> Result<Option<LegacyTsV1State>, String> {
     let target_real_path = canonical_path(target);
-    let target_id = target_id(target);
-    let target_store = root.join("installations").join(&target_id);
+    let target_key = target_id(target);
+    let target_store = root.join("installations").join(&target_key);
     validate_storage_path(root, &target_store, "legacy installation target directory")?;
-    let target_store_metadata = match fs::symlink_metadata(&target_store) {
+    let journals = enumerate_target_journals(root, &target_real_path, &target_key)?;
+    if journals.is_empty() {
+        if storage_path_exists(&target_store, "legacy installation target directory")? {
+            return Err(
+                "legacy installation records exist without a matching transaction journal".into(),
+            );
+        }
+        return Ok(None);
+    }
+
+    let selected = select_journal(root, &target_key, &journals)?;
+    let metadata = load_metadata(
+        root,
+        &target_key,
+        &target_real_path,
+        &selected.journal,
+        selected.kind == LegacyStateKind::Committed,
+    )?;
+    let install_dir = target_store.join(&selected.journal.install_id);
+
+    Ok(Some(LegacyTsV1State {
+        target_id: target_key,
+        target_real_path,
+        install_id: selected.journal.install_id.clone(),
+        target_store,
+        install_dir,
+        original_app: metadata.as_ref().map(|value| value.original_app.clone()),
+        kind: selected.kind,
+        current: metadata.as_ref().map(|value| value.current.clone()),
+        manifest: metadata.as_ref().map(|value| value.manifest.clone()),
+        runtime: metadata.as_ref().map(|value| value.runtime.clone()),
+        journal: selected.journal.clone(),
+    }))
+}
+
+fn enumerate_target_journals(
+    root: &Path,
+    target_real_path: &Path,
+    target_key: &str,
+) -> Result<Vec<LegacyJournalRecord>, String> {
+    let transactions = root.join("transactions");
+    validate_storage_path(root, &transactions, "legacy transactions directory")?;
+    let transactions_metadata = match fs::symlink_metadata(&transactions) {
         Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => {
             return Err(format!(
-                "cannot inspect legacy installation target directory: {error}"
+                "cannot inspect legacy transactions directory: {error}"
             ))
         }
     };
-    if !target_store_metadata.file_type().is_dir() {
+    if !transactions_metadata.file_type().is_dir() {
         return Err(format!(
-            "legacy installation target directory is not a directory: {}",
-            target_store.display()
+            "legacy transactions path is not a directory: {}",
+            transactions.display()
         ));
+    }
+
+    let mut records = Vec::new();
+    for entry in fs::read_dir(&transactions)
+        .map_err(|error| format!("cannot enumerate legacy transactions: {error}"))?
+    {
+        let entry =
+            entry.map_err(|error| format!("cannot read legacy transaction entry: {error}"))?;
+        let name = entry.file_name();
+        let name = name.to_str().ok_or_else(|| {
+            format!(
+                "legacy transaction filename is not valid UTF-8: {}",
+                entry.path().display()
+            )
+        })?;
+        if !name.ends_with(".json") || name.ends_with(".tmp") {
+            continue;
+        }
+        let path = entry.path();
+        validate_storage_path(root, &path, "legacy transaction journal")?;
+        let journal: TransactionJournal = read_json(&path, "legacy transaction journal")?;
+        if canonical_path(&journal.target_real_path) != target_real_path {
+            continue;
+        }
+        let filename_install_id = Path::new(name)
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| format!("legacy transaction filename is invalid: {name}"))?;
+        if filename_install_id != journal.install_id {
+            return Err(format!(
+                "legacy transaction filename does not match installId: {}",
+                path.display()
+            ));
+        }
+        let kind = validate_journal(root, &journal, target_key, target_real_path)?;
+        records.push(LegacyJournalRecord { journal, kind });
+    }
+    Ok(records)
+}
+
+fn select_journal<'a>(
+    root: &Path,
+    target_key: &str,
+    records: &'a [LegacyJournalRecord],
+) -> Result<&'a LegacyJournalRecord, String> {
+    if let Some(record) = newest_record(records, LegacyStateKind::Interrupted) {
+        return Ok(record);
+    }
+
+    if let Some(current_id) = read_current_install_id(root, target_key)? {
+        if let Some(record) = records.iter().find(|record| {
+            record.kind == LegacyStateKind::Committed && record.journal.install_id == current_id
+        }) {
+            return Ok(record);
+        }
+    }
+    if let Some(record) = newest_record(records, LegacyStateKind::Committed) {
+        return Ok(record);
+    }
+    newest_record(records, LegacyStateKind::RolledBack)
+        .ok_or_else(|| "legacy transaction journal set is empty".into())
+}
+
+fn newest_record(
+    records: &[LegacyJournalRecord],
+    kind: LegacyStateKind,
+) -> Option<&LegacyJournalRecord> {
+    records
+        .iter()
+        .filter(|record| record.kind == kind)
+        .max_by(|left, right| left.journal.updated_at.cmp(&right.journal.updated_at))
+}
+
+fn read_current_install_id(root: &Path, target_key: &str) -> Result<Option<String>, String> {
+    let target_store = root.join("installations").join(target_key);
+    validate_storage_path(root, &target_store, "legacy installation target directory")?;
+    if !storage_path_exists(&target_store, "legacy installation target directory")? {
+        return Ok(None);
     }
     let current_path = target_store.join("current.json");
     validate_storage_path(root, &current_path, "legacy current.json")?;
+    if !storage_path_exists(&current_path, "legacy current.json")? {
+        return Ok(None);
+    }
     let current: CurrentPointer = read_json(&current_path, "legacy current.json")?;
     validate_install_id(&current.install_id, "current installId")?;
+    Ok(Some(current.install_id))
+}
 
-    let install_dir = target_store.join(&current.install_id);
-    validate_storage_path(root, &install_dir, "legacy installation directory")?;
+fn load_metadata(
+    root: &Path,
+    target_key: &str,
+    target_real_path: &Path,
+    journal: &TransactionJournal,
+    required: bool,
+) -> Result<Option<LegacyMetadata>, String> {
+    let target_store = root.join("installations").join(target_key);
+    let install_dir = target_store.join(&journal.install_id);
+    let current_path = target_store.join("current.json");
     let manifest_path = install_dir.join("manifest.json");
-    validate_storage_path(root, &manifest_path, "legacy manifest.json")?;
-    let manifest: InstallManifest = read_json(&manifest_path, "legacy manifest.json")?;
-    validate_manifest(&manifest, &current.install_id, &target_real_path)?;
-
     let runtime_path = install_dir.join("patched/runtime-manifest.json");
-    validate_storage_path(root, &runtime_path, "legacy runtime-manifest.json")?;
-    let runtime: RuntimeManifest = read_json(&runtime_path, "legacy runtime-manifest.json")?;
-    validate_runtime(&runtime, &manifest)?;
-
     let original_app = install_dir.join("original/ChatGPT.app");
-    validate_storage_path(root, &original_app, "legacy original backup")?;
-    if !original_app.is_dir() {
-        return Err(format!(
-            "legacy original backup is missing: {}",
-            original_app.display()
-        ));
+    for (path, label) in [
+        (&target_store, "legacy installation target directory"),
+        (&install_dir, "legacy installation directory"),
+        (&current_path, "legacy current.json"),
+        (&manifest_path, "legacy manifest.json"),
+        (&runtime_path, "legacy runtime-manifest.json"),
+        (&original_app, "legacy original backup"),
+    ] {
+        validate_storage_path(root, path, label)?;
     }
 
-    let journal_path = root
-        .join("transactions")
-        .join(format!("{}.json", current.install_id));
-    validate_storage_path(root, &journal_path, "legacy transaction journal")?;
-    let journal: TransactionJournal = read_json(&journal_path, "legacy transaction journal")?;
-    let kind = validate_journal(
-        root,
-        &journal,
-        &current.install_id,
-        &target_real_path,
-        &original_app,
-    )?;
+    let paths = [
+        (&current_path, "legacy current.json"),
+        (&manifest_path, "legacy manifest.json"),
+        (&runtime_path, "legacy runtime-manifest.json"),
+        (&original_app, "legacy original backup"),
+    ];
+    let present = paths
+        .iter()
+        .map(|(path, label)| storage_path_exists(path, label))
+        .collect::<Result<Vec<_>, _>>()?;
+    if !present.iter().any(|value| *value) {
+        if required {
+            return Err("committed legacy journal has no installation metadata".into());
+        }
+        return Ok(None);
+    }
+    if !present.iter().all(|value| *value) {
+        if required {
+            return Err("committed legacy journal has incomplete installation metadata".into());
+        }
+        return Ok(None);
+    }
 
-    Ok(Some(LegacyTsV1State {
-        target_id,
-        target_real_path,
-        install_id: current.install_id.clone(),
-        target_store,
-        install_dir,
-        original_app,
-        kind,
+    let current: CurrentPointer = read_json(&current_path, "legacy current.json")?;
+    validate_install_id(&current.install_id, "current installId")?;
+    if current.install_id != journal.install_id {
+        if required {
+            return Err("legacy current installId does not match the selected journal".into());
+        }
+        return Ok(None);
+    }
+    let manifest: InstallManifest = read_json(&manifest_path, "legacy manifest.json")?;
+    validate_manifest(&manifest, &journal.install_id, target_real_path)?;
+    let runtime: RuntimeManifest = read_json(&runtime_path, "legacy runtime-manifest.json")?;
+    validate_runtime(&runtime, &manifest)?;
+    if !original_app.is_dir() {
+        if required {
+            return Err(format!(
+                "legacy original backup is missing: {}",
+                original_app.display()
+            ));
+        }
+        return Ok(None);
+    }
+    Ok(Some(LegacyMetadata {
         current,
         manifest,
         runtime,
-        journal,
+        original_app,
     }))
+}
+
+fn storage_path_exists(path: &Path, label: &str) -> Result<bool, String> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(format!("cannot inspect {label}: {error}")),
+    }
 }
 
 fn validate_manifest(
@@ -248,9 +429,8 @@ fn validate_runtime(runtime: &RuntimeManifest, manifest: &InstallManifest) -> Re
 fn validate_journal(
     root: &Path,
     journal: &TransactionJournal,
-    expected_id: &str,
+    target_key: &str,
     target_real_path: &Path,
-    original_app: &Path,
 ) -> Result<LegacyStateKind, String> {
     if journal.schema_version != SCHEMA_VERSION {
         return Err(format!(
@@ -259,9 +439,6 @@ fn validate_journal(
         ));
     }
     validate_install_id(&journal.install_id, "journal installId")?;
-    if journal.install_id != expected_id {
-        return Err("legacy journal installId does not match current.json".into());
-    }
     if canonical_path(&journal.target_real_path) != target_real_path {
         return Err("legacy journal targetRealPath does not match the target".into());
     }
@@ -270,14 +447,19 @@ fn validate_journal(
     }
     let staged_app = Path::new(&journal.staged_app);
     validate_storage_path(root, staged_app, "legacy stagedApp")?;
-    validate_emitted_staged_path(root, staged_app, expected_id)?;
+    validate_emitted_staged_path(root, staged_app, &journal.install_id)?;
     validate_storage_path(
         root,
         Path::new(&journal.original_snapshot),
         "legacy originalSnapshot",
     )?;
-    if canonical_path(&journal.original_snapshot) != canonical_path(original_app) {
-        return Err("legacy journal originalSnapshot does not match the backup".into());
+    let expected_original = root
+        .join("installations")
+        .join(target_key)
+        .join(&journal.install_id)
+        .join("original/ChatGPT.app");
+    if Path::new(&journal.original_snapshot) != expected_original {
+        return Err("legacy journal originalSnapshot is not the emitted backup path".into());
     }
     if let Some(outgoing) = &journal.outgoing_app {
         if outgoing.is_empty() {
@@ -285,7 +467,7 @@ fn validate_journal(
         }
         let outgoing_path = Path::new(outgoing);
         validate_storage_path(root, outgoing_path, "legacy outgoingApp")?;
-        validate_emitted_outgoing_path(root, outgoing_path, expected_id)?;
+        validate_emitted_outgoing_path(root, outgoing_path, &journal.install_id)?;
     }
     if !PHASES.contains(&journal.phase.as_str()) {
         return Err(format!(
