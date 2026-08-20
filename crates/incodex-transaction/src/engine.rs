@@ -188,8 +188,8 @@ where
         .map_err(|message| TxError::Refuse { message })?;
     let action = match journal.phase.as_str() {
         "COMMITTED" | "ROLLED_BACK" => Recovery::Done,
-        "DISCOVERED" | "INTENT" | "BACKUP_COMMITTED" | "STAGED" | "TARGET_MOVED_OUT"
-        | "SWAPPED" | "TARGET_VERIFIED" => Recovery::Rollback,
+        "DISCOVERED" | "INTENT" | "BACKUP_COMMITTED" | "STAGED" | "PATCHED" | "SIGNED"
+        | "VERIFIED" | "TARGET_MOVED_OUT" | "SWAPPED" | "TARGET_VERIFIED" => Recovery::Rollback,
         _ => Recovery::Refuse,
     };
     if action == Recovery::Refuse {
@@ -206,10 +206,7 @@ where
         }
         return Ok(RecoverResult { action, journal });
     }
-    if matches!(
-        journal.phase.as_str(),
-        "DISCOVERED" | "BACKUP_COMMITTED" | "STAGED"
-    ) {
+    if is_pre_swap_phase(&journal.phase) {
         cleanup_pre_swap(root, &journal).map_err(TxError::Other)?;
     } else {
         restore_live(root, &live, &journal).map_err(TxError::Other)?;
@@ -227,6 +224,13 @@ where
         action: Recovery::Rollback,
         journal: load_v2(root, install_id).map_err(TxError::Other)?,
     })
+}
+
+fn is_pre_swap_phase(phase: &str) -> bool {
+    matches!(
+        phase,
+        "DISCOVERED" | "INTENT" | "BACKUP_COMMITTED" | "STAGED" | "PATCHED" | "SIGNED" | "VERIFIED"
+    )
 }
 
 fn cleanup_outgoing(outgoing: &Path) -> Result<(), String> {
@@ -263,7 +267,7 @@ fn cleanup_pre_swap(root: &Path, journal: &JournalV2) -> Result<(), String> {
             fs::remove_dir_all(path).map_err(|err| err.to_string())?;
         }
     }
-    if journal.phase == "DISCOVERED" && paths.original.exists() {
+    if matches!(journal.phase.as_str(), "DISCOVERED" | "INTENT") && paths.original.exists() {
         // +---------------------------------------------------------------+
         // | 备份尚未进入可用阶段；被中断的 ditto 产物只能当垃圾清掉，不能回写 live。 |
         // +---------------------------------------------------------------+
