@@ -228,3 +228,44 @@ fn validate_path_ancestors(base: &Path, rel: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn journal_with_paths(paths: RelPaths) -> JournalV2 {
+        JournalV2 {
+            schema_version: 2,
+            install_id: "00000000-0000-4000-8000-000000000000".into(),
+            target: JournalTarget {
+                requested_path: "/Applications/ChatGPT.app".into(),
+                real_path: "/Applications/ChatGPT.app".into(),
+                device: "1".into(),
+                inode: "2".into(),
+                parent_device: "1".into(),
+                parent_inode: "3".into(),
+            },
+            paths,
+            phase: "DISCOVERED".into(),
+            sequence: 1,
+            checksum: String::new(),
+            backup_digest: String::new(),
+            staged_device: String::new(),
+            staged_inode: String::new(),
+        }
+    }
+
+    #[test]
+    fn relative_paths_are_frozen_to_the_transaction_layout() {
+        let journal = journal_with_paths(RelPaths {
+            staged: "staging/other.app".into(),
+            outgoing: OUTGOING_REL.into(),
+            original: ORIGINAL_REL.into(),
+        });
+
+        assert!(
+            validate_rel_paths(&journal).is_err(),
+            "a safe but non-canonical staged path was accepted"
+        );
+    }
+}
