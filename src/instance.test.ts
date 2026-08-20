@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +13,7 @@ import {
   listenForRaise,
   ownerMatchesLive,
   readOwnerLock,
+  readOwnerLockState,
   singleFlight,
   staleOwner,
   targetStateDir,
@@ -73,6 +74,49 @@ catch (error) { process.stdout.write(String(error.message)); }`,
         nonce: "n",
       }),
     ).toThrow();
+  });
+
+  test("a partial live owner is unverifiable and cannot be taken over", () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-partial-owner-"));
+    const partial = {
+      pid: process.pid,
+      execPath: process.execPath,
+      sessionId: "partial",
+      token: "partial-live-token",
+    };
+    writeOwnerLock(root, partial);
+
+    expect(readOwnerLockState(root).kind).toBe("unverifiable");
+    expect(() => acquireOwnerLease(root, currentOwner("contender", process.execPath))).toThrow(/unverifiable/);
+    expect(readOwnerLock(root)?.token).toBe(partial.token);
+  });
+
+  test("legacy owner records require startedAt and executable identity", () => {
+    const legacyRoot = mkdtempSync(join(tmpdir(), "incodex-legacy-owner-"));
+    writeOwnerLock(legacyRoot, {
+      pid: 999999,
+      startedAt: "never",
+      execPath: "/nope",
+      sessionId: "legacy",
+      token: "legacy-token",
+    });
+    expect(readOwnerLockState(legacyRoot).kind).toBe("valid");
+
+    const missingStartRoot = mkdtempSync(join(tmpdir(), "incodex-missing-start-"));
+    writeOwnerLock(missingStartRoot, {
+      pid: process.pid,
+      execPath: process.execPath,
+      sessionId: "missing-start",
+      token: "missing-start-token",
+    });
+    expect(readOwnerLockState(missingStartRoot).kind).toBe("unverifiable");
+
+    const missingExecRoot = mkdtempSync(join(tmpdir(), "incodex-missing-exec-"));
+    const live = currentOwner("missing-exec", process.execPath);
+    delete (live as Record<string, unknown>).execPath;
+    delete (live as Record<string, unknown>).execIdentity;
+    writeOwnerLock(missingExecRoot, live);
+    expect(readOwnerLockState(missingExecRoot).kind).toBe("unverifiable");
   });
 
   test("an old owner cannot clear a replacement lease", () => {
@@ -413,6 +457,86 @@ describe("cross-process owner contention", () => {
     expect(readOwnerLock(root)?.token).toBe(winnerToken);
     expect(completed.every((result) => result.code === 0 || result.code === 2)).toBe(true);
     expect(completed.every((result) => result.stderr === "")).toBe(true);
+  });
+
+  test("a replacement published during takeover unlink survives the old cleaner", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-takeover-window-"));
+    const pauseFile = join(root, "takeover-paused");
+    const releaseFile = join(root, "takeover-release");
+    const modulePath = join(import.meta.dir, "runtime/incodex-instance.cts");
+    writeFileSync(
+      join(root, LOCK_NAME),
+      JSON.stringify({
+        pid: 999999,
+        startedAt: "never",
+        execPath: "/nope",
+        sessionId: "stale",
+        token: "stale-token",
+      }),
+    );
+
+    const worker = String.raw`
+      const instance = require(process.env.INCODEX_TEST_MODULE);
+      const root = process.env.INCODEX_TEST_ROOT;
+      const owner = instance.currentOwner("old-cleaner", process.execPath);
+      try {
+        instance.acquireOwnerLease(root, owner);
+        process.stdout.write("UNEXPECTED_WINNER\n");
+        process.exit(3);
+      } catch (error) {
+        process.stdout.write(String(error.code || "ERROR") + "\n");
+        process.exit(error.code === "OWNER_BUSY" || error.code === "OWNER_RACE" ? 0 : 2);
+      }
+    `;
+    const child = spawn(process.execPath, ["-e", worker], {
+      env: {
+        ...process.env,
+        INCODEX_TEST_MODULE: modulePath,
+        INCODEX_TEST_ROOT: root,
+        INCODEX_TEST_TAKEOVER_PAUSE_FILE: pauseFile,
+        INCODEX_TEST_TAKEOVER_RELEASE_FILE: releaseFile,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let closed = false;
+    child.stdout?.on("data", (chunk) => (stdout += String(chunk)));
+    child.stderr?.on("data", (chunk) => (stderr += String(chunk)));
+    const closePromise = new Promise<{ code: number | null }>((resolve) => {
+      child.once("close", (code) => {
+        closed = true;
+        resolve({ code });
+      });
+      child.once("error", () => {
+        closed = true;
+        resolve({ code: 2 });
+      });
+    });
+
+    try {
+      const deadline = Date.now() + 3000;
+      while (!existsSync(pauseFile) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(existsSync(pauseFile)).toBe(true);
+      if (!existsSync(pauseFile)) return;
+
+      unlinkSync(join(root, LOCK_NAME));
+      const replacement = currentOwner("replacement", process.execPath);
+      writeOwnerLock(root, replacement);
+      writeFileSync(releaseFile, "release\n");
+
+      const result = await closePromise;
+      expect(result.code).toBe(0);
+      expect(stdout.trim()).toBe("OWNER_BUSY");
+      expect(stderr).toBe("");
+      expect(readOwnerLock(root)?.token).toBe(replacement.token);
+    } finally {
+      writeFileSync(releaseFile, "release\n");
+      if (!closed) child.kill();
+      await closePromise;
+    }
   });
 });
 
