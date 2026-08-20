@@ -49,6 +49,9 @@ describe("Homebrew tap bump", () => {
     expect(out).toContain(`sha256 "${x64}"`);
     expect(out).toContain("v#{version}/incodex-darwin-arm64");
     expect(out).toContain("v#{version}/incodex-darwin-x64");
+    expect(out.match(/^\s*url /gm)?.length).toBe(2);
+    expect(out.match(/^\s*sha256 /gm)?.length).toBe(2);
+    expect(out).not.toMatch(/legacy|fallback|bun/i);
     expect(out).not.toContain('version "0.1.0"');
     expect(out).not.toContain("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     expect(out).not.toContain("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");

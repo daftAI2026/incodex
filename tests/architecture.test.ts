@@ -18,8 +18,9 @@ describe("architecture boundaries", () => {
     const readme = src("README.md");
     const readmeCn = src("README_CN.md");
     expect(agents).toContain("Rust workspace now lives on `main`");
-    expect(agents).toContain("Stable release assets still come from the Bun-compiled TypeScript CLI");
-    expect(agents).toContain("legacy Bun assets for one version cycle");
+    expect(agents).toContain("The next stable Release will publish the native Rust CLI");
+    expect(agents).toContain("New releases do not publish legacy Bun CLI assets");
+    expect(agents).toContain("Never delete old Release assets");
     expect(agents).toContain("New Rust CLI PRs target `main`");
     expect(agents).toContain("tests/cli-golden.test.ts");
     expect(agents).toContain("Incognito-window hover");
@@ -33,7 +34,8 @@ describe("architecture boundaries", () => {
     expect(agents).toContain("`crates/incodex-core/src/session.rs`");
     expect(contributing).toContain("Rust CLI source is on `main`");
     expect(contributing).toContain("Rust CLI PRs use base `main`");
-    expect(contributing).toContain("stable release assets still use Bun");
+    expect(contributing).toContain("the next stable release will publish the native Rust CLI");
+    expect(contributing).toContain("do not publish new legacy Bun CLI assets");
     expect(contributing).toContain("failing `cargo test` repro");
     expect(contributing).toContain("cargo run -p incodex-cli -- --help");
     expect(safetyReviewer).toContain("crates/incodex-cli/src/install.rs");
