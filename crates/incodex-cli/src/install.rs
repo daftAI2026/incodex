@@ -7,12 +7,10 @@ use incodex_core::paths::{user_root, ASAR_REL, DEFAULT_APP};
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
 use incodex_macos::{
     ditto, notify_launch_services, quit_official_app, read_asar_integrity, read_plist_info,
-    restore_original, sign_app, verify_app, write_asar_integrity,
+    sign_app, verify_app, write_asar_integrity,
 };
 use incodex_runtime_bundle::{loader_source, publish, runtime_version};
-use incodex_transaction::{
-    acquire_target_lock, journal_v2, recover_with, Engine, Recovery, TxError,
-};
+use incodex_transaction::{journal_v2, recover_with, restore_committed, Engine, Recovery, TxError};
 
 use crate::parse::ParsedCli;
 
@@ -305,13 +303,8 @@ fn uninstall_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
     if is_official_app(app, None) {
         let _ = quit_official_app();
     }
-    let _lock = acquire_target_lock(root, app, "uninstall", None)?;
     let journal = find_committed(root, app)?;
-    let original = root
-        .join("transactions")
-        .join(&journal.install_id)
-        .join(&journal.paths.original);
-    restore_original(&original, app)?;
+    restore_committed(root, &journal.install_id, app)?;
     let _ = notify_launch_services(app);
     Ok(CommandResult {
         skipped: false,

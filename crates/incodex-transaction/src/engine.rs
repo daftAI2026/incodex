@@ -238,6 +238,32 @@ impl Engine {
     }
 }
 
+pub fn restore_committed(root: &Path, install_id: &str, live_path: &Path) -> Result<(), String> {
+    let initial = load_v2(root, install_id)?;
+    if initial.phase != "COMMITTED" {
+        return Err(format!(
+            "cannot restore an uncommitted transaction in phase {}",
+            initial.phase
+        ));
+    }
+    let lock_target = PathBuf::from(&initial.target.real_path);
+    let _lock = acquire_target_lock(root, &lock_target, "uninstall", Some(install_id))?;
+    let journal = load_v2(root, install_id)?;
+    if journal.phase != "COMMITTED" {
+        return Err(format!(
+            "transaction changed to phase {} before committed restore",
+            journal.phase
+        ));
+    }
+    let current = inspect_target(live_path, None)?;
+    if current.real_path != PathBuf::from(&journal.target.real_path) {
+        return Err("committed target real path changed before restore".into());
+    }
+    let paths = reconstructed(root, &journal)?;
+    validate_committed_restore_target(&journal, &paths, &current.real_path)?;
+    restore_live(root, &current.real_path, &journal).map(|_| ())
+}
+
 fn require_backup_snapshot(root: &Path, install_id: &str) -> Result<(), String> {
     let original = tx_paths(root, install_id).original;
     directory_identity(&original).map_err(|error| {
@@ -373,6 +399,35 @@ fn validate_recovery_target(
         }
         phase => Err(format!("cannot validate recovery target in phase {phase}")),
     }
+}
+
+fn validate_committed_restore_target(
+    journal: &JournalV2,
+    paths: &crate::journal::TxPaths,
+    live: &Path,
+) -> Result<(), String> {
+    validate_recovery_proofs(journal)?;
+    let current = inspect_target(live, None)?;
+    let expected_parent = parse_identity(
+        &journal.target.parent_device,
+        &journal.target.parent_inode,
+        "target parent",
+    )?;
+    if current.parent_device != expected_parent.device
+        || current.parent_inode != expected_parent.inode
+    {
+        return Err("committed target parent identity changed".into());
+    }
+    let expected_live = parse_identity(
+        &journal.staged_device,
+        &journal.staged_inode,
+        "committed live target",
+    )?;
+    let actual_live = directory_identity(live)?;
+    require_identity(Some(actual_live), expected_live, "committed live target")?;
+    validate_tree_digest(live, &journal.staged_digest, "committed live target")?;
+    validate_backup_digest(&paths.original, journal)
+        .map_err(|error| format!("invalid committed backup: {error}"))
 }
 
 pub fn recover(root: &Path, install_id: &str) -> Result<RecoverResult, TxError> {
