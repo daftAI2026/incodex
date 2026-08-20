@@ -1,5 +1,6 @@
 use std::env;
 use std::fs;
+use std::os::unix::fs::symlink;
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
@@ -133,6 +134,18 @@ fn run_case(point: KillPoint) {
         );
         assert_ne!(tree_digest(&app), patched_digest);
     }
+    let current_config = app.join("Contents/Resources/current-config.json");
+    assert!(
+        fs::symlink_metadata(&current_config)
+            .expect("restored config link")
+            .file_type()
+            .is_symlink(),
+        "{point:?}: recovery replaced an app-bundle symlink with a regular file"
+    );
+    assert_eq!(
+        fs::read_link(&current_config).expect("config link target"),
+        PathBuf::from("nested/config.json")
+    );
 
     let tx_dir = root.join("transactions").join(install_id);
     assert!(!tx_dir.join("staging/ChatGPT.app").exists());
@@ -290,6 +303,11 @@ fn make_app(root: &Path, name: &str, marker: &str) -> PathBuf {
         format!("{{\"marker\":\"{marker}\"}}\n"),
     )
     .expect("resource");
+    symlink(
+        "nested/config.json",
+        app.join("Contents/Resources/current-config.json"),
+    )
+    .expect("resource symlink");
     app
 }
 
@@ -307,7 +325,14 @@ fn copy_tree(from: &Path, to: &Path) {
         let entry = entry.expect("copy entry");
         let source = entry.path();
         let destination = to.join(entry.file_name());
-        if entry.file_type().expect("copy type").is_dir() {
+        let file_type = entry.file_type().expect("copy type");
+        if file_type.is_symlink() {
+            symlink(
+                fs::read_link(&source).expect("copy link target"),
+                &destination,
+            )
+            .expect("copy symlink");
+        } else if file_type.is_dir() {
             copy_tree(&source, &destination);
         } else {
             fs::copy(source, destination).expect("copy file");
@@ -337,7 +362,20 @@ fn collect_files(root: &Path, current: &Path, entries: &mut Vec<(String, Vec<u8>
     for entry in fs::read_dir(current).expect("digest directory") {
         let entry = entry.expect("digest entry");
         let path = entry.path();
-        if entry.file_type().expect("digest type").is_dir() {
+        let file_type = entry.file_type().expect("digest type");
+        if file_type.is_symlink() {
+            let relative = path
+                .strip_prefix(root)
+                .expect("digest relative link")
+                .to_string_lossy()
+                .into_owned();
+            let target = fs::read_link(&path)
+                .expect("digest link target")
+                .to_string_lossy()
+                .into_owned()
+                .into_bytes();
+            entries.push((relative, target));
+        } else if file_type.is_dir() {
             collect_files(root, &path, entries);
         } else {
             let relative = path
