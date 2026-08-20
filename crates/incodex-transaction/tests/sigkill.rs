@@ -7,7 +7,7 @@ use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use incodex_transaction::{journal_v2, recover, Engine, Recovery};
+use incodex_transaction::{journal_v2, recover, recover_with, Engine, Recovery};
 use sha2::{Digest, Sha256};
 
 const CHILD_MODE: &str = "INCODEX_TX_SIGKILL_CHILD";
@@ -17,6 +17,7 @@ const CANDIDATE_ENV: &str = "INCODEX_TX_SIGKILL_CANDIDATE";
 const POINT_ENV: &str = "INCODEX_TX_SIGKILL_POINT";
 const ID_FILE_ENV: &str = "INCODEX_TX_SIGKILL_ID_FILE";
 const INSTALL_ID_ENV: &str = "INCODEX_TX_SIGKILL_INSTALL_ID";
+const RECOVER_CHILD_MODE: &str = "INCODEX_TX_SIGKILL_RECOVER_CHILD";
 
 static SCRATCH_SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -70,6 +71,65 @@ fn sigkill_recovery_uses_real_transaction_checkpoints() {
     for point in KillPoint::ALL {
         run_case(point);
     }
+}
+
+#[test]
+fn recover_sigkill_restarts_from_a_real_recovery_step() {
+    if run_recover_child_mode() {
+        return;
+    }
+
+    let root = scratch();
+    let app = make_app(&root, "ChatGPT.app", "ORIGINAL");
+    let candidate = make_app(&root, "candidate.app", "PATCHED");
+    let original_digest = tree_digest(&app);
+    let id_file = root.join("install-id");
+
+    let status = spawn_child(
+        "mutate",
+        KillPoint::Swapped,
+        &root,
+        &app,
+        &candidate,
+        Some(&id_file),
+        None,
+    );
+    assert_eq!(
+        status.signal(),
+        Some(libc::SIGKILL),
+        "mutator was not SIGKILLed: {status:?}"
+    );
+
+    let install_id = fs::read_to_string(&id_file).expect("child must publish install id");
+    let install_id = install_id.trim();
+
+    let status = spawn_recover_child("kill-after-restore", &root, install_id);
+    assert_eq!(
+        status.signal(),
+        Some(libc::SIGKILL),
+        "recover child was not SIGKILLed: {status:?}"
+    );
+    assert_eq!(
+        journal_v2(&root, install_id)
+            .expect("journal survives a killed recover")
+            .phase,
+        "SWAPPED"
+    );
+
+    let status = spawn_recover_child("recover", &root, install_id);
+    assert_eq!(status.code(), Some(0), "second recover failed: {status:?}");
+
+    let recovered = journal_v2(&root, install_id).expect("recovery keeps the journal readable");
+    assert_eq!(recovered.phase, "ROLLED_BACK");
+    assert_eq!(tree_digest(&app), original_digest);
+
+    let tx_dir = root.join("transactions").join(install_id);
+    assert!(!tx_dir.join("staging/ChatGPT.app").exists());
+    assert!(!tx_dir.join("outgoing/ChatGPT.app").exists());
+    assert!(!tx_dir.join("trash/ChatGPT.app").exists());
+    let original = tx_dir.join("original/ChatGPT.app");
+    assert!(original.exists());
+    assert_eq!(tree_digest(&original), original_digest);
 }
 
 fn run_case(point: KillPoint) {
@@ -182,6 +242,27 @@ fn run_child_mode() -> bool {
     true
 }
 
+fn run_recover_child_mode() -> bool {
+    let Some(mode) = env::var(RECOVER_CHILD_MODE).ok() else {
+        return false;
+    };
+    let root = PathBuf::from(env::var(ROOT_ENV).expect("recover child root"));
+    let install_id = env::var(INSTALL_ID_ENV).expect("recover child install id");
+    match mode.as_str() {
+        "kill-after-restore" => {
+            recover_with(&root, &install_id, |_| {
+                kill_self();
+            })
+            .expect("recover child");
+        }
+        "recover" => {
+            recover(&root, &install_id).expect("recover child");
+        }
+        other => panic!("unknown recover child mode {other}"),
+    }
+    true
+}
+
 fn mutate_child(root: &Path, app: &Path, candidate: &Path, point: KillPoint) {
     let mut tx = Engine::begin(root, app, "sigkill-test").expect("begin transaction");
     let id = tx.install_id().to_string();
@@ -257,6 +338,19 @@ fn spawn_child(
         .stdout(Stdio::null())
         .stderr(Stdio::inherit());
     command.status().expect("spawn transaction child")
+}
+
+fn spawn_recover_child(mode: &str, root: &Path, install_id: &str) -> ExitStatus {
+    let exe = env::current_exe().expect("test executable");
+    Command::new(exe)
+        .args(["--exact", "recover_sigkill_restarts_from_a_real_recovery_step", "--nocapture"])
+        .env(RECOVER_CHILD_MODE, mode)
+        .env(ROOT_ENV, root)
+        .env(INSTALL_ID_ENV, install_id)
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .status()
+        .expect("spawn recover child")
 }
 
 fn parse_point(value: &str) -> KillPoint {
