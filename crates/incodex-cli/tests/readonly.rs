@@ -35,6 +35,65 @@ fn run(args: &[&str], home: &std::path::Path) -> (i32, String, String) {
     )
 }
 
+fn run_with_stdout_redirected(args: &[&str], home: &std::path::Path) -> (i32, String, String) {
+    let stdout_path = home.join("redirected.out");
+    let script = r#"
+import os, pty, select, sys, time
+program, home, stdout_path, *args = sys.argv[1:]
+env = os.environ.copy()
+env["HOME"] = home
+env["TERM"] = "xterm-256color"
+env["NO_COLOR"] = "1"
+pid, fd = pty.fork()
+if pid == 0:
+    output = os.open(stdout_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.dup2(output, 1)
+    os.close(output)
+    os.execvpe(program, [program, *args], env)
+buf = bytearray()
+deadline = time.time() + 5
+status = 1
+while time.time() < deadline:
+    ready, _, _ = select.select([fd], [], [], 0.1)
+    if ready:
+        try:
+            chunk = os.read(fd, 8192)
+        except OSError:
+            chunk = b""
+        if chunk:
+            buf.extend(chunk)
+    done, wait_status = os.waitpid(pid, os.WNOHANG)
+    if done == pid:
+        status = os.waitstatus_to_exitcode(wait_status)
+        break
+else:
+    os.kill(pid, 9)
+    os.waitpid(pid, 0)
+    status = 124
+sys.stdout.buffer.write(("STATUS %d\n" % status).encode())
+sys.stdout.buffer.write(bytes(buf))
+"#;
+    let output = Command::new("python3")
+        .arg("-c")
+        .arg(script)
+        .arg(bin())
+        .arg(home)
+        .arg(&stdout_path)
+        .args(args)
+        .output()
+        .expect("spawn redirected PTY harness");
+    let raw = String::from_utf8_lossy(&output.stdout).into_owned();
+    let (status, stderr) = raw.split_once('\n').unwrap_or((&raw, ""));
+    (
+        status
+            .strip_prefix("STATUS ")
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(1),
+        fs::read_to_string(stdout_path).unwrap_or_default(),
+        stderr.to_string(),
+    )
+}
+
 fn parse_json(stdout: &str) -> serde_json::Value {
     serde_json::from_str(stdout.trim_end()).expect("json")
 }
@@ -210,6 +269,23 @@ fn doctor_missing_app_prints_labeled_sections() {
             app = app.display()
         )
     );
+}
+
+#[test]
+fn status_and_doctor_do_not_animate_when_stdout_is_redirected() {
+    let home = isolated_home();
+    let app = home.join("Missing.app");
+    for command in ["status", "doctor"] {
+        let (status, stdout, stderr) =
+            run_with_stdout_redirected(&[command, "--app", app.to_str().unwrap()], &home);
+        assert_eq!(status, 0, "{command}: {stderr:?}");
+        assert!(stdout.contains(if command == "status" {
+            "➤ Status"
+        } else {
+            "➤ App"
+        }));
+        assert_eq!(stderr, "", "{command} leaked TTY progress: {stderr:?}");
+    }
 }
 
 #[test]

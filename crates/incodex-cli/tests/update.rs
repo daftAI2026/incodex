@@ -233,6 +233,7 @@ case "$url" in
   https://raw.githubusercontent.com/daftAI2026/incodex/v9.9.9/install.sh)
     cat <<'INSTALLER'
 #!/bin/sh
+sleep 0.2
 cat > "$INCODEX_PREFIX/bin/incodex.next" <<'CLI'
 #!/bin/sh
 printf '%s\n' 'Incodex version 9.9.9'
@@ -250,7 +251,11 @@ printf '%s' 'INCODEX_HTTP_STATUS:200'
     let path = format!("{}:/usr/bin:/bin", fake_bin.display());
     let (status, output) = run_tty(&installed, &home, &path);
     assert_eq!(status, 0, "{output:?}");
-    for stage in ["Checking for updates", "Downloading stable installer"] {
+    for stage in [
+        "Checking for updates",
+        "Downloading stable installer",
+        "Installing v9.9.9",
+    ] {
         assert!(
             ["|", "/", "-", "\\"]
                 .iter()
@@ -264,6 +269,60 @@ printf '%s' 'INCODEX_HTTP_STATUS:200'
     );
     assert!(output.contains("Verified Incodex 9.9.9"), "{output:?}");
     assert_eq!(prefix.join("bin/incodex"), installed);
+}
+
+#[test]
+fn update_keeps_animating_while_the_compatibility_installer_runs() {
+    let home = scratch("tty-compatibility-progress");
+    let fake_bin = home.join("fake-bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let (_, installed) = installed_cli(&home);
+    write_executable(
+        &fake_bin.join("curl"),
+        r#"#!/bin/sh
+url=""
+for arg in "$@"; do url="$arg"; done
+case "$url" in
+  https://api.github.com/repos/daftAI2026/incodex/releases/latest)
+    printf '%s' '{"tag_name":"v9.9.9"}'
+    ;;
+  https://raw.githubusercontent.com/daftAI2026/incodex/v9.9.9/install.sh)
+    printf '%s\n' '#!/bin/sh' 'sleep 0.2' 'exit 1'
+    ;;
+  https://raw.githubusercontent.com/daftAI2026/incodex/main/install.sh)
+    cat <<'INSTALLER'
+#!/bin/sh
+sleep 0.2
+cat > "$INCODEX_PREFIX/bin/incodex.next" <<'CLI'
+#!/bin/sh
+printf '%s\n' 'Incodex version 9.9.9'
+CLI
+chmod +x "$INCODEX_PREFIX/bin/incodex.next"
+mv "$INCODEX_PREFIX/bin/incodex.next" "$INCODEX_PREFIX/bin/incodex"
+INSTALLER
+    ;;
+  *) exit 88 ;;
+esac
+printf '%s' 'INCODEX_HTTP_STATUS:200'
+"#,
+    );
+
+    let path = format!("{}:/usr/bin:/bin", fake_bin.display());
+    let (status, output) = run_tty(&installed, &home, &path);
+    assert_eq!(status, 0, "{output:?}");
+    for stage in ["Installing v9.9.9", "Repairing v9.9.9"] {
+        assert!(
+            ["|", "/", "-", "\\"]
+                .iter()
+                .any(|frame| output.contains(&format!("  {frame} {stage}"))),
+            "update stage {stage:?} did not animate: {output:?}"
+        );
+    }
+    assert!(
+        output.contains("Stable installer did not complete"),
+        "{output:?}"
+    );
+    assert!(output.contains("Verified Incodex 9.9.9"), "{output:?}");
 }
 
 #[test]
