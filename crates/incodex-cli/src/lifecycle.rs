@@ -171,6 +171,8 @@ fn run_installer(
         .env("INCODEX_DOWNLOAD_BASE", download_base)
         .env("INCODEX_EXPECTED_VERSION", expected_version)
         .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|err| format!("update failed: could not start bash: {err}"))?;
     let write_result = bash
@@ -187,13 +189,31 @@ fn run_installer(
         let _ = bash.wait();
         return Err(err);
     }
-    let status = bash
-        .wait()
+    let output = bash
+        .wait_with_output()
         .map_err(|err| format!("update failed: could not wait for bash: {err}"))?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| format!("update failed: installer exited with {status}"))
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let detail = [stderr.as_ref(), stdout.as_ref()]
+        .into_iter()
+        .find_map(|text| {
+            let lines = text
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .collect::<Vec<_>>();
+            (!lines.is_empty()).then(|| lines.join(" | "))
+        });
+    Err(match detail {
+        Some(detail) => format!(
+            "update failed: installer exited with {}: {detail}",
+            output.status
+        ),
+        None => format!("update failed: installer exited with {}", output.status),
+    })
 }
 
 fn curl_download(url: &str, label: &str) -> Result<Vec<u8>, String> {

@@ -567,7 +567,7 @@ pub fn notify_launch_services(app: &Path) -> Result<(), String> {
     let _ = Command::new("lsregister")
         .args(["-f", "-R", "-trusted"])
         .arg(app)
-        .status();
+        .output();
     Ok(())
 }
 
