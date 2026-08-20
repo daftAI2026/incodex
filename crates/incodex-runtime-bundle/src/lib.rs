@@ -122,10 +122,47 @@ fn sha256_hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Barrier};
 
     #[test]
     fn loader_is_embedded() {
         assert!(loader_source().contains("incodex") || loader_source().len() > 10);
         assert!(!runtime_version().is_empty());
+    }
+
+    #[test]
+    fn concurrent_publishers_share_one_complete_runtime() {
+        let root = std::env::temp_dir().join(format!(
+            "incodex-runtime-concurrent-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let barrier = Arc::new(Barrier::new(20));
+        let handles: Vec<_> = (0..20)
+            .map(|_| {
+                let root = root.clone();
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    publish(&root)
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().unwrap().unwrap();
+        }
+        let current: serde_json::Value = serde_json::from_slice(
+            &fs::read(root.join("runtime/current.json")).unwrap(),
+        )
+        .unwrap();
+        let release = current["release"].as_str().unwrap();
+        for name in required_runtime_files() {
+            assert!(root.join("runtime").join(release).join(name).is_file(), "{name}");
+        }
+        fs::remove_dir_all(root).unwrap();
     }
 }
