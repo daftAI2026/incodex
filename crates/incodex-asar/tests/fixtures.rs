@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use incodex_asar::{
     pack_dir, pack_dir_unpacked, patch_asar, Archive, LOADER_NAME, MARKER_KEY,
 };
+use sha2::{Digest, Sha256};
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -35,6 +36,10 @@ fn pack(files: &[(&str, &str)]) -> PathBuf {
     let archive = root.join("app.asar");
     pack_dir(&src, &archive).unwrap();
     archive
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
 #[test]
@@ -262,6 +267,27 @@ fn multi_megabyte_blob_keeps_hash() {
     assert_eq!(
         String::from_utf8(after.extract("index.js").unwrap()).unwrap(),
         "ok\n"
+    );
+}
+
+#[test]
+fn packed_integrity_splits_files_into_electron_blocks() {
+    let big = "A".repeat(4 * 1024 * 1024 + 1);
+    let archive = pack(&[("package.json", "{}\n"), ("blob.bin", big.as_str())]);
+    let archive = Archive::open(&archive).unwrap();
+    let integrity = &archive.header["files"]["blob.bin"]["integrity"];
+    let first_block = vec![b'A'; 4 * 1024 * 1024];
+    let last_block = vec![b'A'];
+
+    assert_eq!(integrity["algorithm"], "SHA256");
+    assert_eq!(integrity["blockSize"], 4_194_304);
+    assert_eq!(integrity["hash"], sha256_hex(big.as_bytes()));
+    assert_eq!(
+        integrity["blocks"],
+        serde_json::json!([
+            sha256_hex(&first_block),
+            sha256_hex(&last_block),
+        ])
     );
 }
 
