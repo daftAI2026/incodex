@@ -3,6 +3,7 @@ use std::os::unix::fs::{symlink, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use incodex_asar::{pack_dir, Archive, LOADER_NAME};
 use incodex_macos::ditto;
@@ -10,8 +11,15 @@ use incodex_macos::ditto;
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
 fn home() -> PathBuf {
-    let id = SEQ.fetch_add(1, Ordering::Relaxed);
-    let root = std::env::temp_dir().join(format!("incodex-uninstall-safety-{id}"));
+    let sequence = SEQ.fetch_add(1, Ordering::Relaxed);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "incodex-uninstall-safety-{}-{now}-{sequence}",
+        std::process::id()
+    ));
     fs::create_dir_all(&root).unwrap();
     root
 }
