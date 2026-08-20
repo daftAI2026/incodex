@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{symlink, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -439,6 +439,79 @@ fn recover_refuses_traversal_absolute_and_symlink_paths_and_deletes_nothing() {
         }
         assert_eq!(fs::read_to_string(victim.join("keep")).unwrap(), "secret");
         assert!(victim.exists());
+    }
+}
+
+#[test]
+fn recover_refuses_ancestor_symlinks_even_when_leaf_is_missing_and_deletes_nothing() {
+    for ancestor in ["staging", "outgoing", "original"] {
+        let root = scratch();
+        let target_app = app_bundle(&root, "ChatGPT.app", "original");
+        let tx = Engine::begin(&root, &target_app, "install").unwrap();
+        let id = tx.install_id().to_string();
+        let tx_dir = root.join("transactions").join(&id);
+        drop(tx);
+
+        let victim = root.join(format!("victim-{ancestor}"));
+        fs::create_dir_all(&victim).unwrap();
+        fs::write(victim.join("keep"), "secret").unwrap();
+        symlink(&victim, tx_dir.join(ancestor)).unwrap();
+
+        let error = recover(&root, &id).unwrap_err();
+        assert!(
+            matches!(error, TxError::Refuse { .. }),
+            "ancestor symlink {ancestor} was not refused: {error:?}"
+        );
+        assert_eq!(fs::read_to_string(victim.join("keep")).unwrap(), "secret");
+        assert!(victim.exists());
+        assert!(
+            fs::symlink_metadata(tx_dir.join(ancestor))
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "recovery replaced the {ancestor} ancestor symlink"
+        );
+    }
+}
+
+#[test]
+fn recover_refuses_symlinked_transaction_storage_ancestors() {
+    for ancestor in ["transactions", "transaction"] {
+        let root = scratch();
+        let target_app = app_bundle(&root, "ChatGPT.app", "original");
+        let tx = Engine::begin(&root, &target_app, "install").unwrap();
+        let id = tx.install_id().to_string();
+        drop(tx);
+
+        let transactions = root.join("transactions");
+        let transaction = transactions.join(&id);
+        let (path, backing) = if ancestor == "transactions" {
+            (transactions.clone(), root.join("transactions.backing"))
+        } else {
+            (
+                transaction.clone(),
+                transactions.join(format!("{id}.backing")),
+            )
+        };
+        fs::rename(&path, &backing).unwrap();
+        symlink(&backing, &path).unwrap();
+
+        let error = recover(&root, &id).unwrap_err();
+        assert!(
+            matches!(error, TxError::Refuse { .. }),
+            "symlinked {ancestor} ancestor was not refused: {error:?}"
+        );
+        assert_eq!(
+            fs::read_to_string(target_app.join("marker")).unwrap(),
+            "original"
+        );
+        assert!(
+            fs::symlink_metadata(&path)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "recovery replaced the symlinked {ancestor} ancestor"
+        );
     }
 }
 

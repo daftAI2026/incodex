@@ -6,7 +6,10 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_asar::{pack_dir, Archive, LOADER_NAME, MARKER_KEY};
-use incodex_transaction::{acquire_target_lock, Engine};
+use incodex_macos::{ditto, read_asar_integrity, sign_app, write_asar_integrity};
+use incodex_runtime_bundle::loader_source;
+use incodex_transaction::{acquire_target_lock, journal_v2, Engine};
+use sha2::{Digest, Sha256};
 
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_incodex")
@@ -194,6 +197,51 @@ fn is_signed(path: &Path) -> bool {
         .status()
         .map(|status| status.success())
         .unwrap_or(false)
+}
+
+fn tree_digest(root: &Path) -> String {
+    let mut entries = Vec::new();
+    collect_tree_entries(root, root, &mut entries);
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut digest = Sha256::new();
+    for (relative, bytes) in entries {
+        digest.update(relative.as_bytes());
+        digest.update([0]);
+        digest.update(bytes);
+        digest.update([0]);
+    }
+    digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn collect_tree_entries(root: &Path, current: &Path, entries: &mut Vec<(String, Vec<u8>)>) {
+    for entry in fs::read_dir(current).unwrap() {
+        let entry = entry.unwrap();
+        let path = entry.path();
+        let file_type = entry.file_type().unwrap();
+        let relative = path
+            .strip_prefix(root)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        if file_type.is_symlink() {
+            entries.push((
+                relative,
+                fs::read_link(&path)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+                    .into_bytes(),
+            ));
+        } else if file_type.is_dir() {
+            collect_tree_entries(root, &path, entries);
+        } else {
+            entries.push((relative, fs::read(path).unwrap()));
+        }
+    }
 }
 
 #[test]
@@ -503,6 +551,96 @@ fn post_swap_verification_failure_rolls_back_the_original_app() {
 }
 
 #[test]
+fn interrupted_recover_refuses_uninstall_then_reinstall_round_trips_original() {
+    let home = isolated_home();
+    let app = patchable_app(&home);
+    let root = home.join(".incodex");
+    let original_digest = tree_digest(&app);
+
+    let (status, stdout, stderr) =
+        run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
+    let (status, stdout, stderr) = run(
+        &["uninstall", "--yes", "--app", app.to_str().unwrap()],
+        &home,
+    );
+    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
+    assert_eq!(tree_digest(&app), original_digest);
+
+    let staged_source = home.join("interrupted-staged.app");
+    ditto(&app, &staged_source).unwrap();
+    fs::write(
+        staged_source.join("interrupted-marker"),
+        "must not survive\n",
+    )
+    .unwrap();
+    let mut tx = Engine::begin(&root, &app, "test-interrupted-install").unwrap();
+    let id = tx.install_id().to_string();
+    let original = root
+        .join("transactions")
+        .join(&id)
+        .join("original/ChatGPT.app");
+    ditto(&app, &original).unwrap();
+    tx.place_staging(&staged_source).unwrap();
+    tx.swap().unwrap();
+    assert_eq!(tx.journal().phase, "SWAPPED");
+    assert_ne!(tree_digest(&app), original_digest);
+    assert!(tx.outgoing_app().exists());
+    drop(tx);
+
+    let fake_bin = home.join("fake-bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    write_executable(&fake_bin.join("codesign"), "#!/bin/sh\nexit 0\n");
+    let (status, stdout, stderr) = run_with_path(
+        &["recover", "--transaction", &id],
+        &home,
+        &path_with_fake_bin(&fake_bin),
+    );
+    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
+    assert!(stdout.contains("phase: ROLLED_BACK"), "{stdout}");
+    assert_eq!(tree_digest(&app), original_digest);
+    let tx_dir = root.join("transactions").join(&id);
+    let journal: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(tx_dir.join("journal.json")).unwrap()).unwrap();
+    assert_eq!(journal["phase"], "ROLLED_BACK");
+    assert!(tx_dir.join("original/ChatGPT.app").exists());
+    assert!(!tx_dir.join("staging/ChatGPT.app").exists());
+    assert!(!tx_dir.join("outgoing/ChatGPT.app").exists());
+
+    let (status, _stdout, stderr) = run(
+        &["uninstall", "--yes", "--app", app.to_str().unwrap()],
+        &home,
+    );
+    assert_eq!(
+        status, 1,
+        "uninstall must refuse without a committed install"
+    );
+    assert!(
+        stderr.contains("no installation record for this target"),
+        "{stderr}"
+    );
+    assert_eq!(tree_digest(&app), original_digest);
+
+    let (status, stdout, stderr) =
+        run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
+    assert_ne!(tree_digest(&app), original_digest);
+
+    let (status, stdout, stderr) = run(
+        &["uninstall", "--yes", "--app", app.to_str().unwrap()],
+        &home,
+    );
+    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
+    assert_eq!(tree_digest(&app), original_digest);
+
+    for entry in fs::read_dir(root.join("transactions")).unwrap().flatten() {
+        let tx_dir = entry.path();
+        assert!(!tx_dir.join("staging/ChatGPT.app").exists());
+        assert!(!tx_dir.join("outgoing/ChatGPT.app").exists());
+    }
+}
+
+#[test]
 fn recover_does_not_finish_until_the_restored_app_verifies() {
     let home = isolated_home();
     let app = patchable_app(&home);
@@ -572,6 +710,50 @@ fn uninstall_yes_app_restores_original_asar() {
         String::from_utf8(archive.extract("index.js").unwrap()).unwrap(),
         "ok\n"
     );
+}
+
+#[test]
+fn uninstall_accepts_a_valid_install_from_an_older_runtime_loader() {
+    let home = isolated_home();
+    let app = patchable_app(&home);
+    let root = home.join(".incodex");
+    let original_digest = tree_digest(&app);
+    let (status, stdout, stderr) =
+        run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
+
+    let asar = app.join("Contents/Resources/app.asar");
+    let current = Archive::open(&asar).unwrap();
+    let install_id = current
+        .read_package_main()
+        .unwrap()
+        .install_id
+        .expect("committed install id");
+    assert_eq!(journal_v2(&root, &install_id).unwrap().phase, "COMMITTED");
+
+    let legacy_loader = "module.exports = require('./index.js');\n";
+    assert_ne!(legacy_loader.as_bytes(), loader_source().as_bytes());
+    let (legacy_hash, _) =
+        incodex_asar::patch_asar(&asar, legacy_loader, Some(&install_id)).unwrap();
+    write_asar_integrity(&app, &legacy_hash).unwrap();
+    sign_app(&app).unwrap();
+
+    let legacy = Archive::open(&asar).unwrap();
+    let package = legacy.read_package_main().unwrap();
+    assert_eq!(package.install_id.as_deref(), Some(install_id.as_str()));
+    assert_eq!(
+        legacy.extract(LOADER_NAME).unwrap(),
+        legacy_loader.as_bytes()
+    );
+    assert_eq!(read_asar_integrity(&app), Some(legacy.header_hash()));
+    assert!(is_signed(&app));
+
+    let (status, stdout, stderr) = run(
+        &["uninstall", "--yes", "--app", app.to_str().unwrap()],
+        &home,
+    );
+    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
+    assert_eq!(tree_digest(&app), original_digest);
 }
 
 #[test]
