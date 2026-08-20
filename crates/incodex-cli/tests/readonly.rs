@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use sha2::{Digest, Sha256};
+
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_incodex")
 }
@@ -246,6 +248,46 @@ fn status_json_and_doctor_json_share_diagnosis_object() {
     assert_eq!(runtime["ok"], false);
     assert!(runtime["version"].is_null());
     assert_eq!(runtime["error"], "missing current.json");
+}
+
+#[test]
+fn doctor_rejects_runtime_manifest_missing_required_artifacts() {
+    let home = isolated_home();
+    let release = home.join(".incodex/runtime/releases/0.2.0");
+    fs::create_dir_all(&release).expect("runtime release");
+
+    let body = b"valid runtime artifact\n";
+    fs::write(release.join("incodex-main.cjs"), body).expect("runtime artifact");
+    let hash = Sha256::digest(body)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    fs::write(
+        home.join(".incodex/runtime/current.json"),
+        serde_json::json!({
+            "schemaVersion": 1,
+            "version": "0.2.0",
+            "release": "releases/0.2.0",
+            "files": { "incodex-main.cjs": hash },
+        })
+        .to_string(),
+    )
+    .expect("runtime manifest");
+
+    let app = home.join("Missing.app");
+    let (status, stdout, stderr) = run(
+        &["doctor", "--json", "--app", app.to_str().unwrap()],
+        &home,
+    );
+    assert_eq!(status, 0);
+    assert_eq!(stderr, "");
+    let runtime = &parse_json(&stdout)["externalRuntime"];
+    assert_eq!(runtime["present"], true);
+    assert_eq!(runtime["ok"], false);
+    assert!(runtime["error"]
+        .as_str()
+        .expect("runtime error")
+        .contains("incodex-preload.cjs"));
 }
 
 #[test]
