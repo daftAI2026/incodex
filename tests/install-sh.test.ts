@@ -136,6 +136,66 @@ describe("install.sh", () => {
     expect(probe.stdout).toContain("fake-cli");
   });
 
+  test("retries transient checksum and CLI asset downloads", () => {
+    const release = mkdtempSync(join(tmpdir(), "incodex-rel-"));
+    const prefix = mkdtempSync(join(tmpdir(), "incodex-pre-"));
+    const home = mkdtempSync(join(tmpdir(), "incodex-home-"));
+    const fakeBin = join(home, "fake-bin");
+    const attemptsDir = join(home, "attempts");
+    mkdirSync(fakeBin, { recursive: true });
+    mkdirSync(attemptsDir, { recursive: true });
+    writePayload(
+      release,
+      "incodex-darwin-arm64",
+      "#!/bin/sh\nprintf '%s\\n' 'Incodex version 9.9.9'\n",
+    );
+    writeFileSync(
+      join(release, "SHA256SUMS"),
+      `${sha256(join(release, "incodex-darwin-arm64"))}  incodex-darwin-arm64\n`,
+    );
+    writePayload(fakeBin, "brew", "#!/bin/sh\nexit 1\n");
+    writePayload(
+      fakeBin,
+      "curl",
+      `#!/bin/sh
+url=""
+dest=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) dest="$2"; shift 2 ;;
+    http*) url="$1"; shift ;;
+    *) shift ;;
+  esac
+done
+name=$(basename "$url")
+counter='${attemptsDir}/'"$name"
+count=$(cat "$counter" 2>/dev/null || printf '0')
+count=$((count + 1))
+printf '%s\\n' "$count" > "$counter"
+if [ "$count" -lt 3 ]; then exit 7; fi
+cp '${release}/'"$name" "$dest"
+`,
+    );
+
+    const ran = spawnSync("/bin/bash", [installSh], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: home,
+        PATH: `${fakeBin}:/usr/bin:/bin`,
+        INCODEX_PREFIX: prefix,
+        INCODEX_ARCH: "arm64",
+        INCODEX_DOWNLOAD_BASE: "https://release.invalid/v9.9.9",
+        INCODEX_EXPECTED_VERSION: "9.9.9",
+      },
+    });
+
+    expect(ran.status).toBe(0);
+    expect(readFileSync(join(attemptsDir, "SHA256SUMS"), "utf8").trim()).toBe("3");
+    expect(readFileSync(join(attemptsDir, "incodex-darwin-arm64"), "utf8").trim()).toBe("3");
+    expect(existsSync(join(prefix, "bin", "incodex"))).toBe(true);
+  });
+
   test("recovers the default prefix passed by a legacy Bun standalone update", () => {
     const release = mkdtempSync(join(tmpdir(), "incodex-rel-"));
     const home = mkdtempSync(join(tmpdir(), "incodex-home-"));
