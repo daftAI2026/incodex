@@ -581,6 +581,7 @@ fn interrupted_recover_refuses_uninstall_then_reinstall_round_trips_original() {
         .join(&id)
         .join("original/ChatGPT.app");
     ditto(&app, &original).unwrap();
+    tx.mark_backup_committed().unwrap();
     tx.place_staging(&staged_source).unwrap();
     tx.swap().unwrap();
     assert_eq!(tx.journal().phase, "SWAPPED");
@@ -660,6 +661,12 @@ fn recover_does_not_finish_until_the_restored_app_verifies() {
     )
     .unwrap();
     let mut tx = Engine::begin(&root, &app, "test-crash").unwrap();
+    let original = root
+        .join("transactions")
+        .join(tx.install_id())
+        .join("original/ChatGPT.app");
+    ditto(&app, &original).unwrap();
+    tx.mark_backup_committed().unwrap();
     tx.place_staging(&staged).unwrap();
     tx.swap().unwrap();
     let id = tx.install_id().to_string();

@@ -278,6 +278,8 @@ fn mutate_child(root: &Path, app: &Path, candidate: &Path, point: KillPoint) {
     }
 
     seed_original(root, app, &id);
+    tx.mark_backup_committed()
+        .expect("commit backup snapshot");
     let staged = candidate.to_path_buf();
     tx.place_staging(&staged).expect("stage candidate");
     if matches!(point, KillPoint::Staged) {

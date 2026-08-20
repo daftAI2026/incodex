@@ -33,6 +33,16 @@ fn app_bundle(root: &Path, name: &str, marker: &str) -> PathBuf {
     app
 }
 
+fn seal_backup(root: &Path, tx: &mut Engine, app: &Path) {
+    let original = root
+        .join("transactions")
+        .join(tx.install_id())
+        .join("original/ChatGPT.app");
+    fs::create_dir_all(&original).unwrap();
+    fs::copy(app.join("marker"), original.join("marker")).unwrap();
+    tx.mark_backup_committed().unwrap();
+}
+
 #[test]
 fn canonical_target_records_device_inode_and_symlink_alias_is_the_same_official() {
     let root = scratch();
@@ -267,6 +277,7 @@ fn install_id_is_uuid_and_matches_directory_and_journal() {
         .join(tx.install_id())
         .join("journal.json")
         .exists());
+    seal_backup(&root, &mut tx, &target_app);
     tx.place_staging(&staged).unwrap();
     assert!(tx
         .staging_app()
@@ -286,6 +297,12 @@ fn backup_completion_is_durable_before_staging() {
     let target_app = app_bundle(&root, "ChatGPT.app", "live");
     let mut tx = Engine::begin(&root, &target_app, "install").unwrap();
     assert_eq!(tx.journal().phase, "DISCOVERED");
+    let original = root
+        .join("transactions")
+        .join(tx.install_id())
+        .join("original/ChatGPT.app");
+    fs::create_dir_all(&original).unwrap();
+    fs::copy(target_app.join("marker"), original.join("marker")).unwrap();
     tx.mark_backup_committed().unwrap();
     assert_eq!(tx.journal().phase, "BACKUP_COMMITTED");
     assert_eq!(
@@ -348,6 +365,7 @@ fn committed_transaction_rejects_a_late_rollback() {
     let target_app = app_bundle(&root, "ChatGPT.app", "original");
     let staged = app_bundle(&root, "staged.app", "patched");
     let mut tx = Engine::begin(&root, &target_app, "install").unwrap();
+    seal_backup(&root, &mut tx, &target_app);
     tx.place_staging(&staged).unwrap();
     tx.swap().unwrap();
     tx.commit().unwrap();
@@ -366,6 +384,7 @@ fn swap_writes_intent_before_moving_and_keeps_outgoing_until_commit() {
     let target_app = app_bundle(&root, "ChatGPT.app", "original");
     let staged = app_bundle(&root, "staged.app", "patched");
     let mut tx = Engine::begin(&root, &target_app, "install").unwrap();
+    seal_backup(&root, &mut tx, &target_app);
     tx.place_staging(&staged).unwrap();
     tx.swap().unwrap();
     assert_eq!(
@@ -390,6 +409,7 @@ fn verify_failure_restores_original_and_rolls_back() {
     let target_app = app_bundle(&root, "ChatGPT.app", "original");
     let staged = app_bundle(&root, "staged.app", "patched");
     let mut tx = Engine::begin(&root, &target_app, "install").unwrap();
+    seal_backup(&root, &mut tx, &target_app);
     tx.place_staging(&staged).unwrap();
     tx.swap().unwrap();
     tx.rollback("verify failed").unwrap();

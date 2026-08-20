@@ -91,6 +91,12 @@ impl Engine {
     }
 
     pub fn place_staging(&mut self, staged: &Path) -> Result<(), String> {
+        if self.journal.phase != "BACKUP_COMMITTED" {
+            return Err(format!(
+                "cannot stage from phase {}; backup must be BACKUP_COMMITTED",
+                self.journal.phase
+            ));
+        }
         let dest = self.staging_app();
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent).map_err(|err| err.to_string())?;
@@ -107,6 +113,19 @@ impl Engine {
             return Err(format!(
                 "cannot commit backup from phase {}",
                 self.journal.phase
+            ));
+        }
+        let original = tx_paths(&self.root, self.install_id()).original;
+        let metadata = fs::symlink_metadata(&original).map_err(|error| {
+            format!(
+                "cannot commit backup: original snapshot {} is unavailable: {error}",
+                original.display()
+            )
+        })?;
+        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
+            return Err(format!(
+                "cannot commit backup: original snapshot {} must be a real directory",
+                original.display()
             ));
         }
         self.advance("BACKUP_COMMITTED")
