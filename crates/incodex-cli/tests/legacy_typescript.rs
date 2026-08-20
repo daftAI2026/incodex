@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -25,15 +25,20 @@ impl LegacyTsV1Fixture {
         fs::create_dir_all(asar.parent().unwrap()).unwrap();
         let source = root.join("asar-src");
         fs::create_dir_all(&source).unwrap();
-        fs::write(source.join("package.json"), r#"{"main":"index.js"}
-"#).unwrap();
+        fs::write(
+            source.join("package.json"),
+            r#"{"main":"index.js"}
+"#,
+        )
+        .unwrap();
         fs::write(source.join("index.js"), "legacy-original\n").unwrap();
         pack_dir(&source, &asar).unwrap();
         let original = fs::read(&asar).unwrap();
         let original_archive = Archive::open(&asar).unwrap();
         let original_header_hash = original_archive.header_hash();
         let original_file_hash = original_archive.file_hash();
-        let (patched_header_hash, _) = patch_asar(&asar, "legacy-loader\n", Some(INSTALL_ID)).unwrap();
+        let (patched_header_hash, _) =
+            patch_asar(&asar, "legacy-loader\n", Some(INSTALL_ID)).unwrap();
         let patched_file_hash = Archive::open(&asar).unwrap().file_hash();
 
         let root_dir = root.join(".incodex");
@@ -42,11 +47,7 @@ impl LegacyTsV1Fixture {
         let install_dir = target_store.join(INSTALL_ID);
         let original_app = install_dir.join("original/ChatGPT.app");
         fs::create_dir_all(original_app.join("Contents/Resources")).unwrap();
-        fs::write(
-            original_app.join("Contents/Resources/app.asar"),
-            &original,
-        )
-        .unwrap();
+        fs::write(original_app.join("Contents/Resources/app.asar"), &original).unwrap();
         fs::create_dir_all(install_dir.join("patched")).unwrap();
         fs::write(
             target_store.join("current.json"),
@@ -111,7 +112,11 @@ impl LegacyTsV1Fixture {
         )
         .unwrap();
 
-        Self { root: root_dir, app, original }
+        Self {
+            root: root_dir,
+            app,
+            original,
+        }
     }
 }
 
@@ -141,7 +146,10 @@ fn legacy_typescript_fixture_reproduces_the_v1_disk_contract_without_running_ts_
     assert_eq!(state.manifest.transaction_state, "committed");
     assert_eq!(state.journal.schema_version, 1);
     assert_eq!(state.journal.phase, "COMMITTED");
-    assert_eq!(state.journal.original_snapshot, state.original_app.display().to_string());
+    assert_eq!(
+        state.journal.original_snapshot,
+        state.original_app.display().to_string()
+    );
     assert_eq!(
         fs::read(state.original_app.join("Contents/Resources/app.asar")).unwrap(),
         fixture.original
@@ -168,7 +176,11 @@ fn legacy_typescript_fixture_rejects_a_manifest_target_mismatch() {
         .join("manifest.json");
     let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
     raw["targetRealPath"] = json!(fixture.root.join("Other.app"));
-    fs::write(&manifest, format!("{}\n", serde_json::to_string_pretty(&raw).unwrap())).unwrap();
+    fs::write(
+        &manifest,
+        format!("{}\n", serde_json::to_string_pretty(&raw).unwrap()),
+    )
+    .unwrap();
 
     let error = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
         .expect_err("mismatched target must not be accepted");
