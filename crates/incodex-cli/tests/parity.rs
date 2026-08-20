@@ -476,6 +476,21 @@ fn native_open_reproduces_the_typescript_wait_spinner_and_clears_its_line() {
 }
 
 #[test]
+fn native_lifecycle_commands_match_the_typescript_source_checkout_contract() {
+    let ts_home = scratch("lifecycle-ts");
+    let rust_home = scratch("lifecycle-rust");
+    for args in [
+        &["runtime", "--dry-run"][..],
+        &["update", "--dry-run"],
+        &["self-uninstall", "--dry-run"],
+    ] {
+        let ts = run_ts(args, &ts_home);
+        let rust = run_rust(args, &rust_home);
+        assert_eq!(rust, ts, "lifecycle parity failed for {args:?}");
+    }
+}
+
+#[test]
 fn native_tty_install_and_uninstall_ask_once_and_escape_aborts() {
     for command in ["install", "uninstall"] {
         let home = scratch(command);
