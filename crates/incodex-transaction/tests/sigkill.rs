@@ -30,6 +30,23 @@ enum KillPoint {
     Committed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SwapGap {
+    LiveMovedOut,
+    StagingMovedIn,
+}
+
+impl SwapGap {
+    const ALL: [Self; 2] = [Self::LiveMovedOut, Self::StagingMovedIn];
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::LiveMovedOut => "LIVE_MOVED_OUT",
+            Self::StagingMovedIn => "STAGING_MOVED_IN",
+        }
+    }
+}
+
 impl KillPoint {
     const ALL: [Self; 5] = [
         Self::Discovered,
@@ -264,6 +281,49 @@ fn committed_journal_survives_kill_before_outgoing_cleanup() {
     );
 }
 
+#[test]
+fn swap_sigkill_between_real_renames_recovers_a_complete_original() {
+    if run_recover_child_mode() {
+        return;
+    }
+
+    for gap in SwapGap::ALL {
+        let root = scratch();
+        let app = make_app(&root, "ChatGPT.app", "ORIGINAL");
+        let candidate = make_app(&root, "candidate.app", "PATCHED");
+        let original_digest = tree_digest(&app);
+        let id_file = root.join("install-id");
+
+        let status = spawn_swap_gap_child(&root, &app, &candidate, &id_file, gap);
+        assert_eq!(
+            status.signal(),
+            Some(libc::SIGKILL),
+            "swap gap {gap:?} child was not SIGKILLed: {status:?}"
+        );
+
+        let install_id = fs::read_to_string(&id_file).expect("child must publish install id");
+        let install_id = install_id.trim();
+        assert_eq!(
+            journal_v2(&root, install_id)
+                .expect("interrupted swap keeps its journal")
+                .phase,
+            "TARGET_MOVED_OUT"
+        );
+
+        let status = spawn_recover_child("recover", &root, install_id);
+        assert_eq!(status.code(), Some(0), "recover child failed: {status:?}");
+        assert_eq!(tree_digest(&app), original_digest);
+
+        let tx_dir = root.join("transactions").join(install_id);
+        assert!(!tx_dir.join("staging/ChatGPT.app").exists());
+        assert!(!tx_dir.join("outgoing/ChatGPT.app").exists());
+        assert_eq!(
+            tree_digest(&tx_dir.join("original/ChatGPT.app")),
+            original_digest
+        );
+    }
+}
+
 fn run_case(point: KillPoint) {
     let root = scratch();
     let app = make_app(&root, "ChatGPT.app", "ORIGINAL");
@@ -428,6 +488,24 @@ fn run_recover_child_mode() -> bool {
             })
             .expect("commit candidate");
         }
+        "swap-gap" => {
+            let app = PathBuf::from(env::var(APP_ENV).expect("swap app"));
+            let candidate = PathBuf::from(env::var(CANDIDATE_ENV).expect("swap candidate"));
+            let gap = parse_swap_gap(&env::var(POINT_ENV).expect("swap gap"));
+            let mut tx = Engine::begin(&root, &app, "sigkill-test").expect("begin transaction");
+            let id = tx.install_id().to_string();
+            let id_file = PathBuf::from(env::var(ID_FILE_ENV).expect("swap id file"));
+            fs::write(id_file, &id).expect("publish install id");
+            seed_original(&root, &app, &id);
+            tx.place_staging(&candidate).expect("stage candidate");
+            tx.swap_with_checkpoint(|phase| {
+                if phase == gap.as_str() {
+                    kill_self();
+                }
+            })
+            .expect("swap candidate");
+            panic!("swap gap {gap:?} was not reached");
+        }
         "kill-after-restore" => {
             let install_id = env::var(INSTALL_ID_ENV).expect("recover child install id");
             recover_with(&root, &install_id, |_| {
@@ -503,6 +581,32 @@ fn spawn_commit_child(root: &Path, app: &Path, candidate: &Path, id_file: &Path)
         .stderr(Stdio::inherit())
         .status()
         .expect("spawn commit child")
+}
+
+fn spawn_swap_gap_child(
+    root: &Path,
+    app: &Path,
+    candidate: &Path,
+    id_file: &Path,
+    gap: SwapGap,
+) -> ExitStatus {
+    let exe = env::current_exe().expect("test executable");
+    Command::new(exe)
+        .args([
+            "--exact",
+            "swap_sigkill_between_real_renames_recovers_a_complete_original",
+            "--nocapture",
+        ])
+        .env(RECOVER_CHILD_MODE, "swap-gap")
+        .env(ROOT_ENV, root)
+        .env(APP_ENV, app)
+        .env(CANDIDATE_ENV, candidate)
+        .env(POINT_ENV, gap.as_str())
+        .env(ID_FILE_ENV, id_file)
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .status()
+        .expect("spawn swap gap child")
 }
 
 fn mutate_child(root: &Path, app: &Path, candidate: &Path, point: KillPoint) {
@@ -604,6 +708,13 @@ fn parse_point(value: &str) -> KillPoint {
         .into_iter()
         .find(|point| point.as_env() == value)
         .unwrap_or_else(|| panic!("unknown kill point {value}"))
+}
+
+fn parse_swap_gap(value: &str) -> SwapGap {
+    SwapGap::ALL
+        .into_iter()
+        .find(|gap| gap.as_str() == value)
+        .unwrap_or_else(|| panic!("unknown swap gap {value}"))
 }
 
 fn kill_self() -> ! {
