@@ -360,6 +360,28 @@ fn staging_requires_a_durable_backup_phase() {
 }
 
 #[test]
+fn rollback_before_swap_never_restores_a_partial_backup_over_live() {
+    let root = scratch();
+    let target_app = app_bundle(&root, "ChatGPT.app", "healthy-live");
+    let mut tx = Engine::begin(&root, &target_app, "install").unwrap();
+    let partial = root
+        .join("transactions")
+        .join(tx.install_id())
+        .join("original/ChatGPT.app");
+    fs::create_dir_all(&partial).unwrap();
+    fs::write(partial.join("marker"), "partial-backup").unwrap();
+
+    tx.rollback("copy failed").unwrap();
+
+    assert_eq!(
+        fs::read_to_string(target_app.join("marker")).unwrap(),
+        "healthy-live"
+    );
+    assert!(!partial.exists(), "partial backup survived rollback");
+    assert_eq!(tx.journal().phase, "ROLLED_BACK");
+}
+
+#[test]
 fn committed_transaction_rejects_a_late_rollback() {
     let root = scratch();
     let target_app = app_bundle(&root, "ChatGPT.app", "original");
