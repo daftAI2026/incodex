@@ -433,6 +433,14 @@ mod tests {
     }
 
     #[test]
+    fn open_progress_distinguishes_launch_ready_and_waiting() {
+        let (opening, opened, waiting) = open_progress_copy();
+        assert_eq!(opening, "Opening incognito Codex window");
+        assert_eq!(opened, "Opened. Incognito Codex window is ready.");
+        assert_eq!(waiting, "Waiting for the window to close");
+    }
+
+    #[test]
     fn burn_failure_does_not_claim_removed() {
         let root = temp_root();
         let app = fake_app(&root);

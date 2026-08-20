@@ -430,4 +430,23 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn losing_the_primary_page_closes_the_whole_isolated_browser() {
+        let targets = vec![CdpTarget {
+            id: "overlay".into(),
+            r#type: "page".into(),
+            url: "app://-/index.html?initialRoute=%2Favatar-overlay".into(),
+            ws: "ws://127.0.0.1:43123/devtools/page/overlay".into(),
+        }];
+
+        assert_eq!(
+            lifecycle_action("main", &targets),
+            CdpLifecycleAction::CloseBrowser
+        );
+        assert_eq!(
+            browser_close_message(),
+            json!({ "id": 1, "method": "Browser.close", "params": {} })
+        );
+    }
 }
