@@ -360,6 +360,27 @@ fn staging_requires_a_durable_backup_phase() {
 }
 
 #[test]
+fn staging_rechecks_that_the_sealed_backup_still_exists() {
+    let root = scratch();
+    let target_app = app_bundle(&root, "ChatGPT.app", "live");
+    let staged = app_bundle(&root, "staged.app", "staged");
+    let mut tx = Engine::begin(&root, &target_app, "install").unwrap();
+    seal_backup(&root, &mut tx, &target_app);
+    let original = root
+        .join("transactions")
+        .join(tx.install_id())
+        .join("original/ChatGPT.app");
+    fs::remove_dir_all(&original).unwrap();
+
+    let error = tx.place_staging(&staged).unwrap_err();
+
+    assert!(error.contains("original snapshot"), "{error}");
+    assert_eq!(tx.journal().phase, "BACKUP_COMMITTED");
+    assert!(staged.exists(), "the rejected source was consumed");
+    assert!(!tx.staging_app().exists());
+}
+
+#[test]
 fn rollback_before_swap_never_restores_a_partial_backup_over_live() {
     let root = scratch();
     let target_app = app_bundle(&root, "ChatGPT.app", "healthy-live");
