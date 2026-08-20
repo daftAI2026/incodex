@@ -155,6 +155,9 @@ impl Engine {
     }
 
     pub fn rollback(&mut self, _reason: &str) -> Result<(), String> {
+        if self.journal.phase == "COMMITTED" {
+            return Err("cannot rollback a committed transaction".into());
+        }
         restore_live(&self.root, &self.live_path, &self.journal)?;
         self.advance("ROLLED_BACK")
     }
