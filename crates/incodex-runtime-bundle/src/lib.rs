@@ -21,6 +21,7 @@ const WINDOW_KIND: &str = include_str!("../../../dist/incodex-window-kind.cjs");
 const MANIFEST: &str = include_str!("../../../dist/runtime-manifest.json");
 
 const EXTERNAL_FILES: &[(&str, &str)] = &[
+    // Keep this list identical to RUNTIME_FILES in src/runtime/incodex-loader.cts.
     ("incodex-main.cjs", MAIN),
     ("incodex-preload.cjs", PRELOAD),
     ("incodex-inject.js", INJECT),
@@ -39,6 +40,11 @@ pub struct PublishedRuntime {
 
 pub fn loader_source() -> &'static str {
     LOADER
+}
+
+/// Return the fixed set of artifacts that the external loader requires.
+pub fn required_runtime_files() -> impl Iterator<Item = &'static str> {
+    EXTERNAL_FILES.iter().map(|(name, _)| *name)
 }
 
 pub fn runtime_version() -> String {

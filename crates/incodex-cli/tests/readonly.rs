@@ -275,19 +275,24 @@ fn doctor_rejects_runtime_manifest_missing_required_artifacts() {
     .expect("runtime manifest");
 
     let app = home.join("Missing.app");
-    let (status, stdout, stderr) = run(
-        &["doctor", "--json", "--app", app.to_str().unwrap()],
-        &home,
-    );
-    assert_eq!(status, 0);
-    assert_eq!(stderr, "");
-    let runtime = &parse_json(&stdout)["externalRuntime"];
-    assert_eq!(runtime["present"], true);
-    assert_eq!(runtime["ok"], false);
-    assert!(runtime["error"]
-        .as_str()
-        .expect("runtime error")
-        .contains("incodex-preload.cjs"));
+    for command in ["status", "doctor"] {
+        let (status, stdout, stderr) = run(
+            &[command, "--json", "--app", app.to_str().unwrap()],
+            &home,
+        );
+        assert_eq!(status, 0, "{command}");
+        assert_eq!(stderr, "", "{command}");
+        let runtime = &parse_json(&stdout)["externalRuntime"];
+        assert_eq!(runtime["present"], true, "{command}");
+        assert_eq!(runtime["ok"], false, "{command}");
+        assert!(
+            runtime["error"]
+                .as_str()
+                .expect("runtime error")
+                .contains("incodex-preload.cjs"),
+            "{command}"
+        );
+    }
 }
 
 #[test]
