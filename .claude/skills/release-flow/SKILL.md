@@ -13,10 +13,18 @@ Tag-driven. `.github/workflows/release.yml` watches `'v*'` (lowercase). It cross
 |---|---|---|
 | GitHub stable | two native Rust macOS binaries + `SHA256SUMS` | Push `vX.Y.Z` |
 | `install.sh` | downloads `releases/latest` | Same release |
-| Source | `git pull` + `bun link` | No tag |
+| Source | `git pull` + `cargo install --locked --path crates/incodex-cli` | No tag |
 | Homebrew tap | `daftAI2026/homebrew-tap` formula urls/shas | Same release, `update-formula` job |
 
 Restate which channels this run will touch before acting. Do not open a Homebrew/homebrew-core PR. Do not publish npm.
+
+## Prepare a version
+
+```bash
+bun run release:prepare -- <version>
+```
+
+This synchronizes `package.json`, the Cargo workspace and lockfile, the committed Runtime manifest, and both README output examples. Review and commit those changes before tagging. The command never commits, tags, or publishes.
 
 ## Pre-flight
 
