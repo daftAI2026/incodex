@@ -49,6 +49,16 @@ describe("architecture boundaries", () => {
     }
   });
 
+  test("legacy TypeScript CLI cannot remain a second live updater", () => {
+    const agents = src("AGENTS.md");
+    const legacyCli = src("src/cli.ts");
+
+    expect(agents).toContain("The Rust CLI is the sole product CLI");
+    expect(agents).toContain("The legacy TypeScript CLI must not perform live self-updates");
+    expect(legacyCli).not.toContain("raw.githubusercontent.com/daftAI2026/incodex/main/install.sh");
+    expect(legacyCli).not.toMatch(/spawnSync\(\s*["']bash["']/);
+  });
+
   test("UI adapter has no file deletion, process control, or auth handling", () => {
     const inject = src("src/runtime/inject.ts");
     expect(inject).not.toMatch(/node:fs|node:child_process|auth\.json|rmSync|spawn\(/);
