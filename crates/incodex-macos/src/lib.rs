@@ -567,7 +567,7 @@ pub fn notify_launch_services(app: &Path) -> Result<(), String> {
     let _ = Command::new("lsregister")
         .args(["-f", "-R", "-trusted"])
         .arg(app)
-        .status();
+        .output();
     Ok(())
 }
 
@@ -601,6 +601,52 @@ mod tests {
             Some((0, 34, 1710, 1073))
         );
         assert_eq!(parse_window_bounds_output("missing"), None);
+    }
+
+    #[test]
+    fn notify_launch_services_captures_tool_output() {
+        const CHILD: &str = "INCODEX_NOTIFY_LS_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            notify_launch_services(Path::new("/tmp/ChatGPT.app")).unwrap();
+            return;
+        }
+
+        let _path_lock = PATH_LOCK.lock().unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "incodex-lsregister-output-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let fake = root.join("lsregister");
+        std::fs::write(
+            &fake,
+            "#!/bin/sh\nprintf '%s\\n' LSREGISTER-OUT\nprintf '%s\\n' LSREGISTER-ERR >&2\n",
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&fake).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&fake, permissions).unwrap();
+
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::notify_launch_services_captures_tool_output",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .env("PATH", &root)
+            .output()
+            .unwrap();
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!stdout.contains("LSREGISTER-OUT"), "{stdout:?}");
+        assert!(!stderr.contains("LSREGISTER-ERR"), "{stderr:?}");
     }
 
     #[test]

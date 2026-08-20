@@ -16,6 +16,7 @@ use incodex_transaction::{
 };
 
 use crate::parse::ParsedCli;
+use crate::spinner::Progress;
 
 pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
     let root = user_root();
@@ -29,18 +30,23 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
         return Ok(());
     }
     ensure_confirmed(parsed, "install")?;
+    let mut progress = Progress::new();
     if parsed.clone && parsed.app.is_none() {
+        progress.stage("Cloning official app");
         if !Path::new(DEFAULT_APP).exists() {
             return Err(format!("Codex app not found: {DEFAULT_APP}"));
         }
         ditto(Path::new(DEFAULT_APP), &app)?;
+        progress.stop();
         println!("{}", format_ok("Cloned official app", None));
         println!("{}", format_kv("Target", &app.display().to_string(), None));
     }
     if parsed.live && parsed.app.is_none() {
+        progress.stage("Closing ChatGPT");
         let _ = quit_official_app();
     }
-    let result = install_app(&app, &root)?;
+    let result = install_app(&app, &root, &mut progress)?;
+    progress.stop();
     print_command_result(&result);
     if parsed.live && parsed.app.is_none() {
         println!(
@@ -67,7 +73,9 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
         return Ok(());
     }
     ensure_confirmed(parsed, "uninstall")?;
-    let result = uninstall_app(&app, &root)?;
+    let mut progress = Progress::new();
+    let result = uninstall_app(&app, &root, &mut progress)?;
+    progress.stop();
     println!(
         "{}",
         format_ok("Official app restored. Dock was refreshed.", None)
@@ -88,7 +96,10 @@ pub fn run_recover(parsed: &ParsedCli) -> Result<(), String> {
     if !v2.exists() && !v1.exists() {
         return Err(format!("no journal for {id}"));
     }
+    let mut progress = Progress::new();
+    progress.stage("Recovering transaction");
     let result = recover_with(&root, id, verify_app).map_err(map_tx)?;
+    progress.stop();
     println!("phase: {}", result.journal.phase);
     println!("action: {}", result.action.as_str());
     println!("target: {}", result.journal.target.real_path);
@@ -111,8 +122,8 @@ pub fn run_recover(parsed: &ParsedCli) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn restore_default_for_self_uninstall() -> Result<(), String> {
-    uninstall_app(Path::new(DEFAULT_APP), &user_root()).map(|_| ())
+pub(crate) fn restore_default_for_self_uninstall(progress: &mut Progress) -> Result<(), String> {
+    uninstall_app(Path::new(DEFAULT_APP), &user_root(), progress).map(|_| ())
 }
 
 fn map_tx(err: TxError) -> String {
@@ -221,10 +232,11 @@ fn ensure_confirmed(parsed: &ParsedCli, command: &str) -> Result<(), String> {
     ))
 }
 
-fn install_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
+fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<CommandResult, String> {
     if !app.exists() {
         return Err(format!("Codex app not found: {}", app.display()));
     }
+    progress.stage("Publishing Runtime");
     let published = publish(root)?;
     let asar = app.join(ASAR_REL);
     if asar.exists() {
@@ -247,11 +259,13 @@ fn install_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
         .join(&install_id)
         .join("original")
         .join("ChatGPT.app");
+    progress.stage("Backing up original app");
     ditto(app, &original)?;
     tx.mark_backup_committed()?;
     let staged = root
         .join("scratch")
         .join(format!("ChatGPT.app.staged-{install_id}"));
+    progress.stage("Patching and signing app");
     ditto(app, &staged)?;
     let (hash, _) = patch_asar(&staged.join(ASAR_REL), loader_source(), Some(&install_id))?;
     write_asar_integrity(&staged, &hash)?;
@@ -263,6 +277,7 @@ fn install_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
             return Err(err);
         }
     }
+    progress.stage("Replacing application");
     tx.place_staging(&staged)?;
     if let Err(error) = tx.swap() {
         if matches!(tx.journal().phase.as_str(), "TARGET_MOVED_OUT" | "SWAPPED") {
@@ -270,6 +285,7 @@ fn install_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
         }
         return Err(error);
     }
+    progress.stage("Verifying installation");
     if !verify_app(app) {
         let error = "post-swap codesign verification failed".to_string();
         tx.rollback(&error)?;
@@ -299,14 +315,21 @@ fn install_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
     })
 }
 
-fn uninstall_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
+fn uninstall_app(
+    app: &Path,
+    root: &Path,
+    progress: &mut Progress,
+) -> Result<CommandResult, String> {
     if !app.exists() {
         return Err(format!("Codex app not found: {}", app.display()));
     }
     if is_official_app(app, None) {
+        progress.stage("Closing ChatGPT");
         let _ = quit_official_app();
     }
+    progress.stage("Locating verified backup");
     let journal = find_committed(root, app)?;
+    progress.stage("Restoring original app");
     if journal.target.parent_device.is_empty() {
         let install_id = journal.install_id.clone();
         migrate_legacy_committed(root, &install_id, app, verify_app, |live| {
@@ -315,6 +338,7 @@ fn uninstall_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
     } else {
         restore_committed(root, &journal.install_id, app)?;
     }
+    progress.stage("Refreshing Dock registration");
     let _ = notify_launch_services(app);
     Ok(CommandResult {
         skipped: false,

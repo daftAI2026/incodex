@@ -69,12 +69,23 @@ where
                 .as_deref()
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from(DEFAULT_APP));
+            let mut spinner = (!parsed.json).then(|| {
+                crate::spinner::Spinner::start(if parsed.command == CliCommand::Status {
+                    "Inspecting installation status"
+                } else {
+                    "Running diagnostics"
+                })
+            });
+            let report = diagnose(&target);
+            if let Some(spinner) = &mut spinner {
+                spinner.stop();
+            }
             if parsed.json {
-                print!("{}", diagnosis_json(&diagnose(&target)));
+                print!("{}", diagnosis_json(&report));
             } else if parsed.command == CliCommand::Status {
-                println!("{}", format_status(&target));
+                println!("{}", format_status(&report));
             } else {
-                println!("{}", format_diagnosis(&diagnose(&target)));
+                println!("{}", format_diagnosis(&report));
             }
             Ok(())
         }

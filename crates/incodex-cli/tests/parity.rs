@@ -5,6 +5,8 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_asar::{pack_dir, Archive, LOADER_NAME, MARKER_KEY};
+use incodex_macos::ditto;
+use incodex_transaction::Engine;
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -154,6 +156,10 @@ fn visible(text: &str) -> String {
 
 fn count(text: &str, needle: &str) -> usize {
     text.match_indices(needle).count()
+}
+
+fn normalize_rust_error(text: &str) -> String {
+    text.strip_prefix("  ✗ ").unwrap_or(text).to_string()
 }
 
 fn assert_menu_order(text: &str, expected: &[&str]) {
@@ -516,6 +522,296 @@ fn native_open_animates_while_waiting_for_cdp_readiness_and_clears_its_line() {
 }
 
 #[test]
+fn native_tty_uninstall_animates_immediately_after_confirmation() {
+    let home = scratch("uninstall-progress-tty");
+    let app = patchable_app(&home);
+    let install = run_rust(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(install.status, 0, "{install:?}");
+
+    let rust = run_tty(
+        rust_bin(),
+        &[],
+        &["uninstall", "--app", app.to_str().unwrap()],
+        &home,
+        "Press Enter to confirm, ESC to cancel: ",
+        "\r",
+    );
+    assert_eq!(rust.status, 0, "{}", visible(&rust.stdout));
+    assert!(
+        ["|", "/", "-", "\\"].iter().any(|frame| rust
+            .stdout
+            .contains(&format!("  {frame} Restoring original app"))),
+        "confirmation was followed by a silent uninstall: {:?}",
+        rust.stdout
+    );
+    assert!(
+        rust.stdout.contains("\r\u{1b}[2K"),
+        "uninstall spinner must clear the current line: {:?}",
+        rust.stdout
+    );
+    assert!(
+        visible(&rust.stdout).contains("Official app restored. Dock was refreshed."),
+        "missing final uninstall result: {}",
+        visible(&rust.stdout)
+    );
+}
+
+#[test]
+fn native_tty_install_animates_immediately_after_confirmation() {
+    let home = scratch("install-progress-tty");
+    let app = patchable_app(&home);
+    let rust = run_tty(
+        rust_bin(),
+        &[],
+        &["install", "--app", app.to_str().unwrap()],
+        &home,
+        "Press Enter to confirm, ESC to cancel: ",
+        "\r",
+    );
+    assert_eq!(rust.status, 0, "{}", visible(&rust.stdout));
+    assert!(
+        ["|", "/", "-", "\\"].iter().any(|frame| rust
+            .stdout
+            .contains(&format!("  {frame} Backing up original app"))),
+        "confirmation was followed by a silent install: {:?}",
+        rust.stdout
+    );
+    assert!(
+        rust.stdout.contains("\r\u{1b}[2K"),
+        "install spinner must clear the current line: {:?}",
+        rust.stdout
+    );
+    assert!(
+        ["|", "/", "-", "\\"].iter().any(|frame| rust
+            .stdout
+            .contains(&format!("  {frame} Replacing application"))),
+        "install should expose a product phase instead of a transaction primitive: {:?}",
+        rust.stdout
+    );
+    for internal in ["Preparing installation transaction", "Swapping application"] {
+        assert!(
+            !rust.stdout.contains(internal),
+            "TTY leaked internal phase {internal:?}: {:?}",
+            rust.stdout
+        );
+    }
+}
+
+#[test]
+fn native_tty_failure_clears_progress_before_printing_the_error() {
+    let home = scratch("failed-progress-tty");
+    let app = patchable_app(&home);
+    let rust = run_tty(
+        rust_bin(),
+        &[],
+        &["uninstall", "--app", app.to_str().unwrap()],
+        &home,
+        "Press Enter to confirm, ESC to cancel: ",
+        "\r",
+    );
+    assert_eq!(rust.status, 1, "{}", visible(&rust.stdout));
+    let clear = rust
+        .stdout
+        .rfind("\r\u{1b}[2K")
+        .expect("failed progress must clear its current line");
+    let error = rust
+        .stdout
+        .rfind("no installation record for this target")
+        .expect("missing explicit uninstall error");
+    assert!(
+        clear < error,
+        "error was printed before progress cleanup: {:?}",
+        rust.stdout
+    );
+    assert!(
+        visible(&rust.stdout).contains("  ✗ no installation record for this target"),
+        "error should follow the CLI body indentation and mark: {}",
+        visible(&rust.stdout)
+    );
+}
+
+#[test]
+fn native_tty_runtime_animates_and_clears_its_line() {
+    let home = scratch("runtime-progress-tty");
+    let rust = run_tty(
+        rust_bin(),
+        &[],
+        &["runtime"],
+        &home,
+        "Runtime updated. Codex was not modified.",
+        "",
+    );
+    assert_eq!(rust.status, 0, "{}", visible(&rust.stdout));
+    assert!(
+        ["|", "/", "-", "\\"].iter().any(|frame| rust
+            .stdout
+            .contains(&format!("  {frame} Publishing Runtime"))),
+        "runtime publish was silent: {:?}",
+        rust.stdout
+    );
+    assert!(
+        rust.stdout.contains("\r\u{1b}[2K"),
+        "runtime spinner must clear the current line: {:?}",
+        rust.stdout
+    );
+}
+
+#[test]
+fn native_tty_status_and_doctor_animate_without_changing_machine_output() {
+    for (command, stage, result) in [
+        ("status", "Inspecting installation status", "➤ Status"),
+        ("doctor", "Running diagnostics", "➤ App"),
+    ] {
+        let home = scratch(&format!("{command}-progress-tty"));
+        let app = marker_app(&home);
+        let rust = run_tty(
+            rust_bin(),
+            &[],
+            &[command, "--app", app.to_str().unwrap()],
+            &home,
+            result,
+            "",
+        );
+        assert_eq!(rust.status, 0, "{command}: {}", visible(&rust.stdout));
+        assert!(
+            ["|", "/", "-", "\\"]
+                .iter()
+                .any(|frame| rust.stdout.contains(&format!("  {frame} {stage}"))),
+            "{command} was silent: {:?}",
+            rust.stdout
+        );
+        assert!(
+            rust.stdout.contains("\r\u{1b}[2K"),
+            "{command} spinner did not clear: {:?}",
+            rust.stdout
+        );
+
+        let json = run_rust(&[command, "--json", "--app", app.to_str().unwrap()], &home);
+        assert_eq!(json.status, 0, "{json:?}");
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&json.stdout).is_ok(),
+            "{command} progress corrupted JSON: {json:?}"
+        );
+        assert!(!json.stdout.contains(stage), "{json:?}");
+    }
+}
+
+#[test]
+fn native_tty_recover_animates_until_the_transaction_is_restored() {
+    let home = scratch("recover-progress-tty");
+    let app = patchable_app(&home);
+    assert!(
+        Command::new("codesign")
+            .args(["--force", "--deep", "--sign", "-", "--"])
+            .arg(&app)
+            .status()
+            .unwrap()
+            .success(),
+        "fixture must start with a verifiable signature"
+    );
+    let root = home.join(".incodex");
+    let mut transaction = Engine::begin(&root, &app, "install").unwrap();
+    let id = transaction.install_id().to_string();
+    let original = root
+        .join("transactions")
+        .join(&id)
+        .join("original/ChatGPT.app");
+    ditto(&app, &original).unwrap();
+    transaction.mark_backup_committed().unwrap();
+    let staged = root
+        .join("scratch")
+        .join(format!("ChatGPT.app.staged-{id}"));
+    ditto(&app, &staged).unwrap();
+    transaction.place_staging(&staged).unwrap();
+    transaction.swap().unwrap();
+    drop(transaction);
+
+    let rust = run_tty(
+        rust_bin(),
+        &[],
+        &["recover", "--transaction", &id],
+        &home,
+        "outgoing restored: true",
+        "",
+    );
+    assert_eq!(rust.status, 0, "{}", visible(&rust.stdout));
+    assert!(
+        ["|", "/", "-", "\\"].iter().any(|frame| rust
+            .stdout
+            .contains(&format!("  {frame} Recovering transaction"))),
+        "recover was silent: {:?}",
+        rust.stdout
+    );
+    assert!(
+        rust.stdout.contains("\r\u{1b}[2K"),
+        "recover spinner must clear the current line: {:?}",
+        rust.stdout
+    );
+}
+
+#[test]
+fn native_tty_self_uninstall_animates_while_removing_the_cli() {
+    let home = scratch("self-uninstall-progress-tty");
+    let bin = home.join("prefix/bin");
+    fs::create_dir_all(&bin).unwrap();
+    let installed = bin.join("incodex");
+    fs::copy(rust_bin(), &installed).unwrap();
+    fs::copy(rust_bin(), bin.join("inc")).unwrap();
+
+    let rust = run_tty(
+        installed.to_str().unwrap(),
+        &[],
+        &["self-uninstall"],
+        &home,
+        "Press Enter to confirm, ESC to cancel: ",
+        "\r",
+    );
+    assert_eq!(rust.status, 0, "{}", visible(&rust.stdout));
+    assert!(
+        ["|", "/", "-", "\\"].iter().any(|frame| rust
+            .stdout
+            .contains(&format!("  {frame} Removing Incodex CLI"))),
+        "self-uninstall was silent: {:?}",
+        rust.stdout
+    );
+    assert!(
+        rust.stdout.contains("\r\u{1b}[2K"),
+        "self-uninstall spinner must clear the current line: {:?}",
+        rust.stdout
+    );
+    assert!(!installed.exists());
+    assert!(!bin.join("inc").exists());
+}
+
+#[test]
+fn native_non_tty_mutations_print_auditable_progress_stages() {
+    let home = scratch("mutation-progress-non-tty");
+    let app = patchable_app(&home);
+    let install = run_rust(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(install.status, 0, "{install:?}");
+    assert!(
+        install.stdout.contains("➤ Publishing Runtime")
+            && install.stdout.contains("➤ Backing up original app")
+            && install.stdout.contains("➤ Patching and signing app")
+            && install.stdout.contains("➤ Replacing application")
+            && install.stdout.contains("➤ Verifying installation"),
+        "install must expose durable stages without TTY controls: {install:?}"
+    );
+    assert!(!install.stdout.contains('\u{1b}'), "{install:?}");
+
+    let uninstall = run_rust(
+        &["uninstall", "--yes", "--app", app.to_str().unwrap()],
+        &home,
+    );
+    assert_eq!(uninstall.status, 0, "{uninstall:?}");
+    assert!(
+        uninstall.stdout.contains("➤ Restoring original app"),
+        "uninstall must expose its active stage: {uninstall:?}"
+    );
+    assert!(!uninstall.stdout.contains('\u{1b}'), "{uninstall:?}");
+}
+
+#[test]
 fn native_lifecycle_commands_match_the_typescript_source_checkout_contract() {
     let ts_home = scratch("lifecycle-ts");
     let rust_home = scratch("lifecycle-rust");
@@ -526,7 +822,13 @@ fn native_lifecycle_commands_match_the_typescript_source_checkout_contract() {
     ] {
         let ts = run_ts(args, &ts_home);
         let rust = run_rust(args, &rust_home);
-        assert_eq!(rust, ts, "lifecycle parity failed for {args:?}");
+        assert_eq!(rust.status, ts.status, "status parity failed for {args:?}");
+        assert_eq!(rust.stdout, ts.stdout, "stdout parity failed for {args:?}");
+        assert_eq!(
+            normalize_rust_error(&rust.stderr),
+            ts.stderr,
+            "stderr parity failed for {args:?}"
+        );
     }
 }
 
@@ -605,7 +907,7 @@ fn plans_and_non_tty_refusals_match_on_the_same_fixture() {
             "stdout case={case:?}"
         );
         assert_eq!(
-            normalize_paths(&rust.stderr, &rs_home),
+            normalize_paths(&normalize_rust_error(&rust.stderr), &rs_home),
             normalize_paths(&ts.stderr, &ts_home),
             "stderr case={case:?}"
         );

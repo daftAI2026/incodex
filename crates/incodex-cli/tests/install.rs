@@ -305,7 +305,7 @@ fn non_tty_app_install_requires_yes_and_still_prints_the_plan() {
     assert_eq!(status, 1);
     assert_eq!(
         stderr,
-        "non-interactive install requires --yes\n  incodex install --yes\n"
+        "  ✗ non-interactive install requires --yes\n  incodex install --yes\n"
     );
     assert!(stdout.contains("➤ Install"));
     assert!(stdout.contains(&format!("  App          {}", app.display())));
@@ -333,7 +333,7 @@ fn recover_missing_transaction_matches_golden() {
     let (status, stdout, stderr) = run(&["recover", "--transaction", "does-not-exist"], &home);
     assert_eq!(status, 1);
     assert_eq!(stdout, "");
-    assert_eq!(stderr, "no journal for does-not-exist\n");
+    assert_eq!(stderr, "  ✗ no journal for does-not-exist\n");
 }
 
 #[test]

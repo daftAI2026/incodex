@@ -33,6 +33,68 @@ fn installed_cli(home: &std::path::Path) -> (PathBuf, PathBuf) {
     (prefix, installed)
 }
 
+fn run_tty(program: &std::path::Path, home: &std::path::Path, path: &str) -> (i32, String) {
+    let script = r#"
+import os, pty, select, sys, time
+program, home, path = sys.argv[1:]
+env = os.environ.copy()
+env["HOME"] = home
+env["PATH"] = path
+env["TERM"] = "xterm-256color"
+env["NO_COLOR"] = "1"
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe(program, [program, "update"], env)
+buf = bytearray()
+deadline = time.time() + 12
+while time.time() < deadline:
+    ready, _, _ = select.select([fd], [], [], 0.1)
+    if ready:
+        try:
+            chunk = os.read(fd, 8192)
+        except OSError:
+            _, status = os.waitpid(pid, 0)
+            code = os.waitstatus_to_exitcode(status)
+            sys.stdout.buffer.write(("STATUS %d\n" % code).encode())
+            sys.stdout.buffer.write(bytes(buf))
+            raise SystemExit(0)
+        if not chunk:
+            _, status = os.waitpid(pid, 0)
+            code = os.waitstatus_to_exitcode(status)
+            sys.stdout.buffer.write(("STATUS %d\n" % code).encode())
+            sys.stdout.buffer.write(bytes(buf))
+            raise SystemExit(0)
+        buf.extend(chunk)
+    done, status = os.waitpid(pid, os.WNOHANG)
+    if done == pid:
+        code = os.waitstatus_to_exitcode(status)
+        sys.stdout.buffer.write(("STATUS %d\n" % code).encode())
+        sys.stdout.buffer.write(bytes(buf))
+        raise SystemExit(0)
+os.kill(pid, 9)
+os.waitpid(pid, 0)
+sys.stdout.buffer.write(b"STATUS 124\n")
+sys.stdout.buffer.write(bytes(buf))
+"#;
+    let output = Command::new("python3")
+        .arg("-c")
+        .arg(script)
+        .arg(program)
+        .arg(home)
+        .arg(path)
+        .output()
+        .unwrap();
+    let raw = String::from_utf8_lossy(&output.stdout).into_owned();
+    let (status, output) = raw.split_once('\n').unwrap_or((&raw, ""));
+    (
+        status
+            .strip_prefix("STATUS ")
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(1),
+        output.to_string(),
+    )
+}
+
 fn open_menu_long_enough_for_background_refresh(
     home: &std::path::Path,
     installed: &std::path::Path,
@@ -151,6 +213,127 @@ fn update_does_not_retry_a_permanent_http_failure() {
     );
     assert!(String::from_utf8_lossy(&output.stderr).contains("update failed"));
     assert_eq!(fs::read_to_string(attempts).unwrap().trim(), "1");
+}
+
+#[test]
+fn update_animates_network_stages_and_clears_them_before_success() {
+    let home = scratch("tty-progress");
+    let fake_bin = home.join("fake-bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let (prefix, installed) = installed_cli(&home);
+    write_executable(
+        &fake_bin.join("curl"),
+        r#"#!/bin/sh
+url=""
+for arg in "$@"; do url="$arg"; done
+case "$url" in
+  https://api.github.com/repos/daftAI2026/incodex/releases/latest)
+    printf '%s' '{"tag_name":"v9.9.9"}'
+    ;;
+  https://raw.githubusercontent.com/daftAI2026/incodex/v9.9.9/install.sh)
+    cat <<'INSTALLER'
+#!/bin/sh
+printf '%s\n' 'STABLE-INSTALLER-OUT'
+printf '%s\n' 'STABLE-INSTALLER-ERR' >&2
+sleep 0.2
+cat > "$INCODEX_PREFIX/bin/incodex.next" <<'CLI'
+#!/bin/sh
+printf '%s\n' 'Incodex version 9.9.9'
+CLI
+chmod +x "$INCODEX_PREFIX/bin/incodex.next"
+mv "$INCODEX_PREFIX/bin/incodex.next" "$INCODEX_PREFIX/bin/incodex"
+INSTALLER
+    ;;
+  *) exit 88 ;;
+esac
+printf '%s' 'INCODEX_HTTP_STATUS:200'
+"#,
+    );
+
+    let path = format!("{}:/usr/bin:/bin", fake_bin.display());
+    let (status, output) = run_tty(&installed, &home, &path);
+    assert_eq!(status, 0, "{output:?}");
+    for stage in [
+        "Checking for updates",
+        "Downloading stable installer",
+        "Installing v9.9.9",
+    ] {
+        assert!(
+            ["|", "/", "-", "\\"]
+                .iter()
+                .any(|frame| output.contains(&format!("  {frame} {stage}"))),
+            "update stage {stage:?} did not animate: {output:?}"
+        );
+    }
+    assert!(
+        output.contains("\r\u{1b}[2K"),
+        "update progress did not clear: {output:?}"
+    );
+    assert!(output.contains("Verified Incodex 9.9.9"), "{output:?}");
+    assert!(!output.contains("STABLE-INSTALLER-OUT"), "{output:?}");
+    assert!(!output.contains("STABLE-INSTALLER-ERR"), "{output:?}");
+    assert_eq!(prefix.join("bin/incodex"), installed);
+}
+
+#[test]
+fn update_keeps_animating_while_the_compatibility_installer_runs() {
+    let home = scratch("tty-compatibility-progress");
+    let fake_bin = home.join("fake-bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let (_, installed) = installed_cli(&home);
+    write_executable(
+        &fake_bin.join("curl"),
+        r#"#!/bin/sh
+url=""
+for arg in "$@"; do url="$arg"; done
+case "$url" in
+  https://api.github.com/repos/daftAI2026/incodex/releases/latest)
+    printf '%s' '{"tag_name":"v9.9.9"}'
+    ;;
+  https://raw.githubusercontent.com/daftAI2026/incodex/v9.9.9/install.sh)
+    printf '%s\n' '#!/bin/sh' 'sleep 0.2' 'printf "%s\\n" "TAGGED-INSTALLER-ERROR" >&2' 'exit 1'
+    ;;
+  https://raw.githubusercontent.com/daftAI2026/incodex/main/install.sh)
+    cat <<'INSTALLER'
+#!/bin/sh
+printf '%s\n' 'COMPAT-INSTALLER-OUT'
+printf '%s\n' 'COMPAT-INSTALLER-ERR' >&2
+sleep 0.2
+cat > "$INCODEX_PREFIX/bin/incodex.next" <<'CLI'
+#!/bin/sh
+printf '%s\n' 'Incodex version 9.9.9'
+CLI
+chmod +x "$INCODEX_PREFIX/bin/incodex.next"
+mv "$INCODEX_PREFIX/bin/incodex.next" "$INCODEX_PREFIX/bin/incodex"
+INSTALLER
+    ;;
+  *) exit 88 ;;
+esac
+printf '%s' 'INCODEX_HTTP_STATUS:200'
+"#,
+    );
+
+    let path = format!("{}:/usr/bin:/bin", fake_bin.display());
+    let (status, output) = run_tty(&installed, &home, &path);
+    assert_eq!(status, 0, "{output:?}");
+    for stage in ["Installing v9.9.9", "Repairing v9.9.9"] {
+        assert!(
+            ["|", "/", "-", "\\"]
+                .iter()
+                .any(|frame| output.contains(&format!("  {frame} {stage}"))),
+            "update stage {stage:?} did not animate: {output:?}"
+        );
+    }
+    assert!(
+        output.contains(
+            "Stable installer did not complete: update failed: installer exited with exit status: 1: TAGGED-INSTALLER-ERROR"
+        ),
+        "{output:?}"
+    );
+    assert_eq!(output.matches("TAGGED-INSTALLER-ERROR").count(), 1, "{output:?}");
+    assert!(!output.contains("COMPAT-INSTALLER-OUT"), "{output:?}");
+    assert!(!output.contains("COMPAT-INSTALLER-ERR"), "{output:?}");
+    assert!(output.contains("Verified Incodex 9.9.9"), "{output:?}");
 }
 
 #[test]
@@ -640,7 +823,10 @@ fn native_menu_does_not_follow_an_invalid_update_notice_symlink() {
     open_menu_long_enough_for_background_refresh(&home, &installed, &path, "q");
 
     assert_eq!(fs::read_to_string(&victim).unwrap(), "do not truncate\n");
-    assert!(!fs::symlink_metadata(cache).unwrap().file_type().is_symlink());
+    assert!(!fs::symlink_metadata(cache)
+        .unwrap()
+        .file_type()
+        .is_symlink());
 }
 
 #[test]

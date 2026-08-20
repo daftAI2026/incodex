@@ -306,9 +306,10 @@ fn hash_file(path: &Path) -> Option<String> {
     )
 }
 
-pub fn format_status(app_path: &Path) -> String {
+pub fn format_status(report: &Diagnosis) -> String {
     let mut lines = vec![incodex_core::format_step("Status", None)];
-    if !app_path.exists() {
+    let app_path = Path::new(&report.target);
+    if !report.exists {
         lines.push(incodex_core::format_warn(
             &format!("Codex app not found: {}", app_path.display()),
             None,
@@ -316,7 +317,6 @@ pub fn format_status(app_path: &Path) -> String {
         lines.push(String::new());
         return lines.join("\n");
     }
-    let report = diagnose(app_path);
     lines.push(incodex_core::format_kv("App", &report.target, None));
     lines.push(incodex_core::format_kv(
         "Exists",
