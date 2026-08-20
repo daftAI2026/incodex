@@ -1,6 +1,6 @@
 use std::ffi::OsString;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{symlink, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -761,6 +761,67 @@ fn uninstall_accepts_a_valid_install_from_an_older_runtime_loader() {
     );
     assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
     assert_eq!(tree_digest(&app), original_digest);
+}
+
+#[test]
+fn uninstall_refuses_a_symlink_backup_and_a_foreign_live_target() {
+    let home = isolated_home();
+    let app = patchable_app(&home);
+    let (status, stdout, stderr) =
+        run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
+    let install_id = Archive::open(app.join("Contents/Resources/app.asar"))
+        .unwrap()
+        .read_package_main()
+        .unwrap()
+        .install_id
+        .unwrap();
+    let tx_dir = home.join(".incodex/transactions").join(&install_id);
+    let original = tx_dir.join("original/ChatGPT.app");
+    let victim = home.join("victim.app");
+    ditto(&app, &victim).unwrap();
+    fs::remove_dir_all(&original).unwrap();
+    symlink(&victim, &original).unwrap();
+    let patched_before = tree_digest(&app);
+
+    let (status, _stdout, stderr) = run(
+        &["uninstall", "--yes", "--app", app.to_str().unwrap()],
+        &home,
+    );
+    assert_eq!(status, 1, "uninstall accepted a symlink backup: {stderr}");
+    assert!(
+        stderr.contains("backup") || stderr.contains("source"),
+        "{stderr}"
+    );
+    assert_eq!(tree_digest(&app), patched_before);
+    assert!(victim.exists(), "symlink target was removed");
+
+    let home = isolated_home();
+    let app = patchable_app(&home);
+    let (status, stdout, stderr) =
+        run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
+    let foreign = home.join("foreign.app");
+    ditto(&app, &foreign).unwrap();
+    fs::remove_dir_all(&app).unwrap();
+    fs::rename(&foreign, &app).unwrap();
+
+    let (status, _stdout, stderr) = run(
+        &["uninstall", "--yes", "--app", app.to_str().unwrap()],
+        &home,
+    );
+    assert_eq!(
+        status, 1,
+        "uninstall overwrote a foreign live target: {stderr}"
+    );
+    assert!(
+        Archive::open(app.join("Contents/Resources/app.asar"))
+            .unwrap()
+            .read_package_main()
+            .unwrap()
+            .already_patched,
+        "foreign live target was restored"
+    );
 }
 
 #[test]
