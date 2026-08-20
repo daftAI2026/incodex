@@ -1,5 +1,4 @@
 use std::fs;
-use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 use incodex_asar::{patch_asar, Archive};
@@ -104,10 +103,7 @@ pub fn run_recover(parsed: &ParsedCli) -> Result<(), String> {
         .join(&result.journal.install_id)
         .join(&result.journal.paths.staged);
     println!("staged removed: {}", !staged.exists());
-    println!(
-        "outgoing restored: {}",
-        result.action == Recovery::Rollback
-    );
+    println!("outgoing restored: {}", result.action == Recovery::Rollback);
     let _ = result;
     Ok(())
 }
@@ -154,10 +150,17 @@ fn print_install_plan(app: &Path, clone: bool) -> Result<(), String> {
     );
     println!(
         "{}",
-        format_kv("App", &if clone { app } else { &source }.display().to_string(), None)
+        format_kv(
+            "App",
+            &if clone { app } else { &source }.display().to_string(),
+            None
+        )
     );
     if clone {
-        println!("{}", format_kv("Source", &source.display().to_string(), None));
+        println!(
+            "{}",
+            format_kv("Source", &source.display().to_string(), None)
+        );
     }
     let plist = read_plist_info(&source);
     let version = match &plist {
@@ -171,7 +174,11 @@ fn print_install_plan(app: &Path, clone: bool) -> Result<(), String> {
     println!("{}", format_kv("Version", &version, None));
     println!(
         "{}",
-        format_kv("Signed", if verify_app(&source) { "yes" } else { "no" }, None)
+        format_kv(
+            "Signed",
+            if verify_app(&source) { "yes" } else { "no" },
+            None
+        )
     );
     if !clone {
         println!(
@@ -180,12 +187,12 @@ fn print_install_plan(app: &Path, clone: bool) -> Result<(), String> {
         );
         println!(
             "{}",
-            format_warn("Official Appshot (smart snapshot) stops until uninstall.", None)
+            format_warn(
+                "Official Appshot (smart snapshot) stops until uninstall.",
+                None
+            )
         );
-        println!(
-            "{}",
-            format_kv("Backup", "~/.incodex/installations/", None)
-        );
+        println!("{}", format_kv("Backup", "~/.incodex/installations/", None));
     }
     Ok(())
 }
@@ -194,8 +201,12 @@ fn ensure_confirmed(parsed: &ParsedCli, command: &str) -> Result<(), String> {
     if parsed.clone || parsed.dry_run || parsed.yes {
         return Ok(());
     }
-    if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
-        return Err("aborted".into());
+    if crate::terminal::is_tty() {
+        return if crate::confirm::ask_to_continue()? {
+            Ok(())
+        } else {
+            Err("aborted".into())
+        };
     }
     Err(format!(
         "non-interactive {command} requires --yes\n  incodex {command} --yes"

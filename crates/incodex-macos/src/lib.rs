@@ -16,6 +16,7 @@ pub struct PlistInfo {
     pub bundle_identifier: String,
     pub app_version: String,
     pub app_build: String,
+    pub executable: String,
 }
 
 pub fn ditto(src: &Path, dest: &Path) -> Result<(), String> {
@@ -78,7 +79,79 @@ pub fn read_plist_info(app: &Path) -> Option<PlistInfo> {
         bundle_identifier: json_string(&raw, "CFBundleIdentifier"),
         app_version: json_string(&raw, "CFBundleShortVersionString"),
         app_build: json_string(&raw, "CFBundleVersion"),
+        executable: raw
+            .get("CFBundleExecutable")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("ChatGPT")
+            .to_string(),
     })
+}
+
+pub fn read_architecture(app: &Path, executable: &str) -> Option<String> {
+    let binary = app.join("Contents").join("MacOS").join(executable);
+    let output = Command::new("lipo")
+        .arg("-archs")
+        .arg(binary)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let mut architectures: Vec<_> = String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
+    architectures.sort();
+    let joined = architectures.join(" ");
+    (!joined.is_empty()).then_some(joined)
+}
+
+pub fn read_asar_integrity(app: &Path) -> Option<String> {
+    let plist = app.join("Contents").join("Info.plist");
+    let output = Command::new("plutil")
+        .args(["-convert", "json", "-o", "-", "--"])
+        .arg(plist)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let raw: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    raw.pointer("/ElectronAsarIntegrity/Resources~1app.asar/hash")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+pub fn diagnose_spctl(app: &Path) -> serde_json::Value {
+    let output = Command::new("spctl")
+        .args(["--assess", "--verbose=4", "--"])
+        .arg(app)
+        .output();
+    match output {
+        Ok(output) => {
+            let status = output.status.code().unwrap_or(1);
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            )
+            .trim()
+            .to_string();
+            serde_json::json!({
+                "status": status,
+                "output": text,
+                "accepted": output.status.success(),
+                "usedAsSuccessGate": false,
+            })
+        }
+        Err(error) => serde_json::json!({
+            "status": 1,
+            "output": error.to_string(),
+            "accepted": false,
+            "usedAsSuccessGate": false,
+        }),
+    }
 }
 
 fn json_string(raw: &serde_json::Value, key: &str) -> String {
@@ -119,6 +192,22 @@ pub fn verify_app(app: &Path) -> bool {
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)
+}
+
+pub fn has_hardened_runtime(app: &Path) -> bool {
+    let Ok(output) = Command::new("codesign")
+        .args(["--display", "--verbose=2", "--"])
+        .arg(app)
+        .output()
+    else {
+        return false;
+    };
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )
+    .contains("runtime")
 }
 
 pub fn collect_vendor_helper_roots(app: &Path) -> Vec<PathBuf> {
