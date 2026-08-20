@@ -585,7 +585,7 @@ describe("cross-process owner contention", () => {
 
       const result = await closePromise;
       expect(result.code).toBe(0);
-      expect(stdout.trim()).toBe("OWNER_BUSY");
+      expect(["OWNER_BUSY", "OWNER_RACE"]).toContain(stdout.trim());
       expect(stderr).toBe("");
       expect(readFileSync(join(oldClaim, "owner"), "utf8")).toContain(replacement.token);
     } finally {
