@@ -1,4 +1,5 @@
 use std::fs;
+use std::os::unix::fs::symlink;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -6,10 +7,20 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use incodex_asar::{pack_dir, patch_asar, Archive};
 use incodex_core::target_id;
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
 const INSTALL_ID: &str = "11111111-1111-4111-8111-111111111111";
+const INFO_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>com.example.incodex</string>
+  <key>CFBundleShortVersionString</key><string>1.0.0</string>
+  <key>CFBundleVersion</key><string>100</string>
+  <key>CFBundleExecutable</key><string>ChatGPT</string>
+</dict></plist>
+"#;
 
 struct LegacyTsV1Fixture {
     root: PathBuf,
@@ -23,6 +34,7 @@ impl LegacyTsV1Fixture {
         let app = root.join("ChatGPT.app");
         let asar = app.join("Contents/Resources/app.asar");
         fs::create_dir_all(asar.parent().unwrap()).unwrap();
+        fs::write(app.join("Contents/Info.plist"), INFO_PLIST).unwrap();
         let source = root.join("asar-src");
         fs::create_dir_all(&source).unwrap();
         fs::write(
@@ -47,6 +59,11 @@ impl LegacyTsV1Fixture {
         let install_dir = target_store.join(INSTALL_ID);
         let original_app = install_dir.join("original/ChatGPT.app");
         fs::create_dir_all(original_app.join("Contents/Resources")).unwrap();
+        fs::copy(
+            app.join("Contents/Info.plist"),
+            original_app.join("Contents/Info.plist"),
+        )
+        .unwrap();
         fs::write(original_app.join("Contents/Resources/app.asar"), &original).unwrap();
         fs::create_dir_all(install_dir.join("patched")).unwrap();
         fs::write(
@@ -68,7 +85,7 @@ impl LegacyTsV1Fixture {
                     "architecture": "arm64",
                     "originalAsarHeaderHash": original_header_hash,
                     "originalAsarFileHash": original_file_hash,
-                    "originalPlistFileHash": "plist-hash",
+                    "originalPlistFileHash": sha256_hex(INFO_PLIST.as_bytes()),
                     "patchedAsarHeaderHash": patched_header_hash,
                     "patchedAsarFileHash": patched_file_hash,
                     "originalMain": "index.js",
@@ -118,6 +135,55 @@ impl LegacyTsV1Fixture {
             original,
         }
     }
+
+    fn target_store(&self) -> PathBuf {
+        self.root
+            .join("installations")
+            .join(target_id(&self.app))
+    }
+
+    fn install_dir(&self) -> PathBuf {
+        self.target_store().join(INSTALL_ID)
+    }
+
+    fn journal_path(&self) -> PathBuf {
+        self.root
+            .join("transactions")
+            .join(format!("{INSTALL_ID}.json"))
+    }
+}
+
+fn sha256_hex(body: &[u8]) -> String {
+    Sha256::digest(body)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn replace_with_symlink(path: &std::path::Path) {
+    let name = path.file_name().unwrap().to_string_lossy();
+    let real = path.with_file_name(format!("{name}.real"));
+    fs::rename(path, &real).unwrap();
+    symlink(real, path).unwrap();
+}
+
+fn assert_rejects_symlink(mutator: impl FnOnce(&LegacyTsV1Fixture)) {
+    let fixture = LegacyTsV1Fixture::create();
+    mutator(&fixture);
+    let error = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
+        .expect_err("legacy state symlink must be rejected");
+    assert!(error.to_lowercase().contains("symlink"), "{error}");
+}
+
+fn set_journal_phase(fixture: &LegacyTsV1Fixture, phase: &str) {
+    let mut raw: serde_json::Value =
+        serde_json::from_slice(&fs::read(fixture.journal_path()).unwrap()).unwrap();
+    raw["phase"] = json!(phase);
+    fs::write(
+        fixture.journal_path(),
+        format!("{}\n", serde_json::to_string_pretty(&raw).unwrap()),
+    )
+    .unwrap();
 }
 
 fn temp_root() -> PathBuf {
@@ -144,6 +210,10 @@ fn legacy_typescript_fixture_reproduces_the_v1_disk_contract_without_running_ts_
     assert_eq!(state.install_id, INSTALL_ID);
     assert_eq!(state.manifest.schema_version, 1);
     assert_eq!(state.manifest.transaction_state, "committed");
+    assert_eq!(
+        state.manifest.original_plist_file_hash,
+        sha256_hex(INFO_PLIST.as_bytes())
+    );
     assert_eq!(state.journal.schema_version, 1);
     assert_eq!(state.journal.phase, "COMMITTED");
     assert_eq!(
@@ -163,6 +233,86 @@ fn legacy_typescript_fixture_reproduces_the_v1_disk_contract_without_running_ts_
             .as_deref(),
         Some(INSTALL_ID)
     );
+}
+
+#[test]
+fn legacy_typescript_fixture_rejects_leaf_and_ancestor_symlinks() {
+    assert_rejects_symlink(|fixture| replace_with_symlink(&fixture.target_store()));
+    assert_rejects_symlink(|fixture| {
+        replace_with_symlink(&fixture.root.join("installations"))
+    });
+    assert_rejects_symlink(|fixture| {
+        replace_with_symlink(&fixture.target_store().join("current.json"))
+    });
+    assert_rejects_symlink(|fixture| {
+        replace_with_symlink(&fixture.install_dir().join("patched"))
+    });
+    assert_rejects_symlink(|fixture| {
+        replace_with_symlink(&fixture.install_dir().join("original"))
+    });
+    assert_rejects_symlink(|fixture| {
+        replace_with_symlink(&fixture.root.join("transactions"))
+    });
+    assert_rejects_symlink(|fixture| replace_with_symlink(&fixture.journal_path()));
+}
+
+#[test]
+fn legacy_typescript_fixture_rejects_a_dangling_target_store_symlink() {
+    let fixture = LegacyTsV1Fixture::create();
+    let target_store = fixture.target_store();
+    fs::remove_dir_all(&target_store).unwrap();
+    symlink(target_store.with_file_name("missing-target-store"), target_store).unwrap();
+
+    let error = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
+        .expect_err("dangling target store must not look absent");
+    assert!(error.to_lowercase().contains("symlink"), "{error}");
+}
+
+#[test]
+fn legacy_typescript_fixture_rejects_an_empty_optional_outgoing_path() {
+    let fixture = LegacyTsV1Fixture::create();
+    let mut raw: serde_json::Value =
+        serde_json::from_slice(&fs::read(fixture.journal_path()).unwrap()).unwrap();
+    raw["outgoingApp"] = json!("");
+    fs::write(
+        fixture.journal_path(),
+        format!("{}\n", serde_json::to_string_pretty(&raw).unwrap()),
+    )
+    .unwrap();
+
+    let error = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
+        .expect_err("empty outgoingApp must be rejected");
+    assert!(error.contains("outgoingApp"), "{error}");
+}
+
+#[test]
+fn legacy_typescript_fixture_classifies_journal_phase_without_mixing_states() {
+    for (phase, expected) in [
+        (
+            "COMMITTED",
+            incodex_cli::legacy_typescript::LegacyStateKind::Committed,
+        ),
+        (
+            "TARGET_VERIFIED",
+            incodex_cli::legacy_typescript::LegacyStateKind::Interrupted,
+        ),
+        (
+            "PATCHED",
+            incodex_cli::legacy_typescript::LegacyStateKind::Interrupted,
+        ),
+        (
+            "ROLLED_BACK",
+            incodex_cli::legacy_typescript::LegacyStateKind::RolledBack,
+        ),
+    ] {
+        let fixture = LegacyTsV1Fixture::create();
+        set_journal_phase(&fixture, phase);
+        let state =
+            incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
+                .expect("phase should be structurally readable")
+                .expect("fixture should be detected");
+        assert_eq!(state.kind, expected, "phase {phase} was misclassified");
+    }
 }
 
 #[test]
