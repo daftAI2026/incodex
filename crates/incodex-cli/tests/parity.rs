@@ -5,6 +5,8 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_asar::{pack_dir, Archive, LOADER_NAME, MARKER_KEY};
+use incodex_macos::ditto;
+use incodex_transaction::Engine;
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -517,6 +519,85 @@ fn native_tty_uninstall_animates_immediately_after_confirmation() {
         visible(&rust.stdout).contains("Official app restored. Dock was refreshed."),
         "missing final uninstall result: {}",
         visible(&rust.stdout)
+    );
+}
+
+#[test]
+fn native_tty_runtime_animates_and_clears_its_line() {
+    let home = scratch("runtime-progress-tty");
+    let rust = run_tty(
+        rust_bin(),
+        &[],
+        &["runtime"],
+        &home,
+        "Runtime updated. Codex was not modified.",
+        "",
+    );
+    assert_eq!(rust.status, 0, "{}", visible(&rust.stdout));
+    assert!(
+        ["|", "/", "-", "\\"].iter().any(|frame| rust
+            .stdout
+            .contains(&format!("  {frame} Publishing Runtime"))),
+        "runtime publish was silent: {:?}",
+        rust.stdout
+    );
+    assert!(
+        rust.stdout.contains("\r\u{1b}[2K"),
+        "runtime spinner must clear the current line: {:?}",
+        rust.stdout
+    );
+}
+
+#[test]
+fn native_tty_recover_animates_until_the_transaction_is_restored() {
+    let home = scratch("recover-progress-tty");
+    let app = patchable_app(&home);
+    assert!(
+        Command::new("codesign")
+            .args(["--force", "--deep", "--sign", "-", "--"])
+            .arg(&app)
+            .status()
+            .unwrap()
+            .success(),
+        "fixture must start with a verifiable signature"
+    );
+    let root = home.join(".incodex");
+    let mut transaction = Engine::begin(&root, &app, "install").unwrap();
+    let id = transaction.install_id().to_string();
+    let original = root
+        .join("transactions")
+        .join(&id)
+        .join("original/ChatGPT.app");
+    ditto(&app, &original).unwrap();
+    transaction.mark_backup_committed().unwrap();
+    let staged = root
+        .join("scratch")
+        .join(format!("ChatGPT.app.staged-{id}"));
+    ditto(&app, &staged).unwrap();
+    transaction.place_staging(&staged).unwrap();
+    transaction.swap().unwrap();
+    drop(transaction);
+
+    let rust = run_tty(
+        rust_bin(),
+        &[],
+        &["recover", "--transaction", &id],
+        &home,
+        "outgoing restored: true",
+        "",
+    );
+    assert_eq!(rust.status, 0, "{}", visible(&rust.stdout));
+    assert!(
+        ["|", "/", "-", "\\"].iter().any(|frame| rust
+            .stdout
+            .contains(&format!("  {frame} Recovering transaction"))),
+        "recover was silent: {:?}",
+        rust.stdout
+    );
+    assert!(
+        rust.stdout.contains("\r\u{1b}[2K"),
+        "recover spinner must clear the current line: {:?}",
+        rust.stdout
     );
 }
 
