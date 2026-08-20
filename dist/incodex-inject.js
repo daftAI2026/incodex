@@ -872,6 +872,11 @@ function translate(locale, key) {
   return COPY[resolved]?.[key] ?? COPY.en[key];
 }
 
+// src/runtime/incognito-icon.ts
+function iconFor(input) {
+  return input.incognito && input.hovered ? "circle-x" : "hat-glasses";
+}
+
 // src/runtime/_inject.src.ts
 var STYLE_ID = "incodex-privacy-style";
 var BTN_ATTR = "data-incodex-privacy-toggle";
@@ -885,6 +890,11 @@ var ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" v
   <path d="M2 11h20"/>
   <circle cx="17" cy="18" r="3"/>
   <circle cx="7" cy="18" r="3"/>
+</svg>`;
+var EXIT_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <circle cx="12" cy="12" r="10"/>
+  <path d="m15 9-6 6"/>
+  <path d="m9 9 6 6"/>
 </svg>`;
 function isIncognitoWindow() {
   if (typeof window.__incodexIncognito === "boolean")
@@ -900,6 +910,46 @@ function t(key) {
 function labelFor(on) {
   return on ? t("exit") : t("open");
 }
+function buttonIcon(btn) {
+  return iconFor({
+    incognito: isIncognitoWindow(),
+    hovered: btn.getAttribute("data-incodex-hovered") === "true"
+  });
+}
+function createButtonIcon(source, name, sample) {
+  const wrap = document.createElement("span");
+  wrap.innerHTML = source.trim();
+  const svg = wrap.firstElementChild;
+  if (!svg)
+    return null;
+  svg.setAttribute("data-incodex-icon", name);
+  svg.setAttribute("class", sample?.getAttribute("class") || "icon-xs");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("width", sample?.getAttribute("width") || "16");
+  svg.setAttribute("height", sample?.getAttribute("height") || "16");
+  return svg;
+}
+function setButtonIcon(btn) {
+  const name = buttonIcon(btn);
+  const current = btn.querySelector("svg[data-incodex-icon]");
+  if (current?.getAttribute("data-incodex-icon") === name)
+    return;
+  const source = name === "circle-x" ? EXIT_ICON_SVG : ICON_SVG;
+  const sample = current || btn.querySelector("svg");
+  const next = createButtonIcon(source, name, sample);
+  if (!next)
+    return;
+  if (current)
+    current.replaceWith(next);
+  else if (sample)
+    sample.replaceWith(next);
+  else
+    btn.append(next);
+}
+function setButtonHover(btn, hovered) {
+  btn.setAttribute("data-incodex-hovered", hovered ? "true" : "false");
+  setButtonIcon(btn);
+}
 function apply() {
   const incognito = isIncognitoWindow();
   document.documentElement.setAttribute("data-incodex-window", incognito ? "incognito" : "normal");
@@ -907,6 +957,7 @@ function apply() {
   if (btn) {
     btn.setAttribute("aria-pressed", incognito ? "true" : "false");
     btn.setAttribute("aria-label", labelFor(incognito));
+    setButtonIcon(btn);
   }
   const label = document.querySelector("[data-incodex-tooltip-label]");
   if (label)
@@ -1052,25 +1103,24 @@ function buildButton(search) {
   }
   btn.setAttribute("type", "button");
   btn.setAttribute(BTN_ATTR, "true");
+  btn.setAttribute("data-incodex-hovered", "false");
   btn.className = search.className;
-  const wrap = document.createElement("span");
-  wrap.innerHTML = ICON_SVG.trim();
-  const svg = wrap.firstElementChild;
-  if (svg) {
-    const sample = search.querySelector("svg");
-    svg.setAttribute("class", sample?.getAttribute("class") || "icon-xs");
-    svg.setAttribute("aria-hidden", "true");
-    svg.setAttribute("width", sample?.getAttribute("width") || "16");
-    svg.setAttribute("height", sample?.getAttribute("height") || "16");
+  const svg = createButtonIcon(ICON_SVG, "hat-glasses", search.querySelector("svg"));
+  if (svg)
     btn.append(svg);
-  }
   btn.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopImmediatePropagation();
     activate();
   }, true);
-  btn.addEventListener("pointerenter", () => showTooltip(btn));
-  btn.addEventListener("pointerleave", hideTooltip);
+  btn.addEventListener("pointerenter", () => {
+    setButtonHover(btn, true);
+    showTooltip(btn);
+  });
+  btn.addEventListener("pointerleave", () => {
+    setButtonHover(btn, false);
+    hideTooltip();
+  });
   btn.addEventListener("focus", () => showTooltip(btn));
   btn.addEventListener("blur", hideTooltip);
   return btn;
