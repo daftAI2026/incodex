@@ -264,11 +264,15 @@ pub fn restore_committed(root: &Path, install_id: &str, live_path: &Path) -> Res
     restore_committed_locked(root, &journal, live_path)
 }
 
-pub fn migrate_legacy_committed(
+pub fn migrate_legacy_committed<F>(
     root: &Path,
     install_id: &str,
     live_path: &Path,
-) -> Result<(), String> {
+    verify_backup: F,
+) -> Result<(), String>
+where
+    F: FnOnce(&Path) -> bool,
+{
     let initial = load_v2(root, install_id)?;
     if !is_legacy_committed(&initial) {
         return Err("transaction is not a legacy COMMITTED journal".into());
@@ -286,6 +290,9 @@ pub fn migrate_legacy_committed(
     let paths = reconstructed(root, &journal)?;
     directory_identity(&paths.original)
         .map_err(|error| format!("invalid legacy backup: {error}"))?;
+    if !verify_backup(&paths.original) {
+        return Err("legacy backup failed codesign verification".into());
+    }
     let backup_digest = tree_digest(&paths.original)?;
     let staged_identity = directory_identity(&current.real_path)
         .map_err(|error| format!("invalid legacy live target: {error}"))?;

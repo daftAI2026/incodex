@@ -308,7 +308,7 @@ fn uninstall_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
     }
     let journal = find_committed(root, app)?;
     if journal.target.parent_device.is_empty() {
-        migrate_legacy_committed(root, &journal.install_id, app)?;
+        migrate_legacy_committed(root, &journal.install_id, app, verify_app)?;
     } else {
         restore_committed(root, &journal.install_id, app)?;
     }
