@@ -8,7 +8,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-pub use engine::{recover, Engine, RecoverResult, TxError};
+pub use engine::{recover, recover_with, Engine, RecoverResult, TxError};
 pub use journal::{new_install_id, JournalV2};
 
 pub fn journal_v2(root: &Path, install_id: &str) -> Result<JournalV2, String> {
@@ -115,8 +115,8 @@ pub fn recover_action(journal: &Journal) -> Recovery {
 pub fn recover_action_phase(phase: &str) -> Recovery {
     match phase {
         "COMMITTED" | "ROLLED_BACK" => Recovery::Done,
-        "DISCOVERED" | "INTENT" | "BACKUP_COMMITTED" | "STAGED" | "PATCHED" | "SIGNED" | "VERIFIED"
-        | "TARGET_MOVED_OUT" | "SWAPPED" | "TARGET_VERIFIED" => Recovery::Rollback,
+        "DISCOVERED" | "INTENT" | "BACKUP_COMMITTED" | "STAGED" | "PATCHED" | "SIGNED"
+        | "VERIFIED" | "TARGET_MOVED_OUT" | "SWAPPED" | "TARGET_VERIFIED" => Recovery::Rollback,
         _ => Recovery::Refuse,
     }
 }

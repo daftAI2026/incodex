@@ -10,7 +10,9 @@ use incodex_macos::{
     restore_original, sign_app, verify_app, write_asar_integrity,
 };
 use incodex_runtime_bundle::{loader_source, publish, runtime_version};
-use incodex_transaction::{acquire_target_lock, journal_v2, recover, Engine, Recovery, TxError};
+use incodex_transaction::{
+    acquire_target_lock, journal_v2, recover_with, Engine, Recovery, TxError,
+};
 
 use crate::parse::ParsedCli;
 
@@ -85,7 +87,7 @@ pub fn run_recover(parsed: &ParsedCli) -> Result<(), String> {
     if !v2.exists() && !v1.exists() {
         return Err(format!("no journal for {id}"));
     }
-    let result = recover(&root, id).map_err(map_tx)?;
+    let result = recover_with(&root, id, verify_app).map_err(map_tx)?;
     println!("phase: {}", result.journal.phase);
     println!("action: {}", result.action.as_str());
     println!("target: {}", result.journal.target.real_path);

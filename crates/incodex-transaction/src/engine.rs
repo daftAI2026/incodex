@@ -139,6 +139,17 @@ impl Engine {
 }
 
 pub fn recover(root: &Path, install_id: &str) -> Result<RecoverResult, TxError> {
+    recover_with(root, install_id, |_| true)
+}
+
+pub fn recover_with<F>(
+    root: &Path,
+    install_id: &str,
+    verify_restored: F,
+) -> Result<RecoverResult, TxError>
+where
+    F: FnOnce(&Path) -> bool,
+{
     let journal = load_v2(root, install_id).map_err(|message| TxError::Refuse { message })?;
     validate_rel_paths(&journal).map_err(|message| TxError::Refuse { message })?;
     reconstructed(root, &journal).map_err(|message| TxError::Refuse { message })?;
@@ -147,19 +158,27 @@ pub fn recover(root: &Path, install_id: &str) -> Result<RecoverResult, TxError> 
         .map_err(|message| TxError::Refuse { message })?;
     let action = match journal.phase.as_str() {
         "COMMITTED" | "ROLLED_BACK" => Recovery::Done,
-        "DISCOVERED" | "INTENT" | "BACKUP_COMMITTED" | "STAGED" | "TARGET_MOVED_OUT" | "SWAPPED"
-        | "TARGET_VERIFIED" => Recovery::Rollback,
+        "DISCOVERED" | "INTENT" | "BACKUP_COMMITTED" | "STAGED" | "TARGET_MOVED_OUT"
+        | "SWAPPED" | "TARGET_VERIFIED" => Recovery::Rollback,
         _ => Recovery::Refuse,
     };
     if action == Recovery::Refuse {
         return Err(TxError::Refuse {
-            message: format!("cannot recover transaction {install_id} in phase {}", journal.phase),
+            message: format!(
+                "cannot recover transaction {install_id} in phase {}",
+                journal.phase
+            ),
         });
     }
     if action == Recovery::Done {
         return Ok(RecoverResult { action, journal });
     }
     restore_live(root, &live, &journal).map_err(TxError::Other)?;
+    if !verify_restored(&live) {
+        return Err(TxError::Other(
+            "restored target failed codesign verification".into(),
+        ));
+    }
     let mut next = journal.clone();
     next.phase = "ROLLED_BACK".into();
     next.sequence += 1;

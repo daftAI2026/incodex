@@ -507,8 +507,7 @@ fn recover_does_not_finish_until_the_restored_app_verifies() {
     let home = isolated_home();
     let app = patchable_app(&home);
     let root = home.join(".incodex");
-    let (status, _, stderr) =
-        run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
+    let (status, _, stderr) = run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
     assert_eq!(status, 0, "{stderr}");
 
     let staged = home.join("broken-staged.app");
@@ -517,7 +516,11 @@ fn recover_does_not_finish_until_the_restored_app_verifies() {
         .status()
         .unwrap();
     assert!(copied.success());
-    fs::write(staged.join("Contents/MacOS/ChatGPT"), "broken after signing\n").unwrap();
+    fs::write(
+        staged.join("Contents/MacOS/ChatGPT"),
+        "broken after signing\n",
+    )
+    .unwrap();
     let mut tx = Engine::begin(&root, &app, "test-crash").unwrap();
     tx.place_staging(&staged).unwrap();
     tx.swap().unwrap();
@@ -533,7 +536,10 @@ fn recover_does_not_finish_until_the_restored_app_verifies() {
         &path_with_fake_bin(&fake_bin),
     );
     assert_eq!(status, 1, "{stderr}");
-    assert!(stderr.contains("restored target failed codesign verification"), "{stderr}");
+    assert!(
+        stderr.contains("restored target failed codesign verification"),
+        "{stderr}"
+    );
     let journal: serde_json::Value = serde_json::from_str(
         &fs::read_to_string(root.join("transactions").join(id).join("journal.json")).unwrap(),
     )
