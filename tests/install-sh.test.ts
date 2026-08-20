@@ -224,7 +224,7 @@ counter='${attemptsDir}/'"$name"
 count=$(cat "$counter" 2>/dev/null || printf '0')
 count=$((count + 1))
 printf '%s\\n' "$count" > "$counter"
-if [ "$count" -lt 3 ]; then exit 7; fi
+if [ "$count" -lt 3 ]; then printf '503'; exit 22; fi
 cp '${release}/'"$name" "$dest"
 `,
     );
@@ -246,6 +246,42 @@ cp '${release}/'"$name" "$dest"
     expect(readFileSync(join(attemptsDir, "SHA256SUMS"), "utf8").trim()).toBe("3");
     expect(readFileSync(join(attemptsDir, "incodex-darwin-arm64"), "utf8").trim()).toBe("3");
     expect(existsSync(join(prefix, "bin", "incodex"))).toBe(true);
+  });
+
+  test("does not retry a permanent HTTP download failure", () => {
+    const prefix = mkdtempSync(join(tmpdir(), "incodex-pre-"));
+    const home = mkdtempSync(join(tmpdir(), "incodex-home-"));
+    const fakeBin = join(home, "fake-bin");
+    const attempts = join(home, "attempts");
+    mkdirSync(fakeBin, { recursive: true });
+    writePayload(fakeBin, "brew", "#!/bin/sh\nexit 1\n");
+    writePayload(
+      fakeBin,
+      "curl",
+      `#!/bin/sh
+count=$(cat '${attempts}' 2>/dev/null || printf '0')
+printf '%s\n' "$((count + 1))" > '${attempts}'
+printf '404'
+exit 22
+`,
+    );
+
+    const ran = spawnSync("/bin/bash", [installSh], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: home,
+        PATH: `${fakeBin}:/usr/bin:/bin`,
+        INCODEX_PREFIX: prefix,
+        INCODEX_ARCH: "arm64",
+        INCODEX_DOWNLOAD_BASE: "https://release.invalid/v9.9.9",
+        INCODEX_EXPECTED_VERSION: "9.9.9",
+      },
+    });
+
+    expect(ran.status).toBe(1);
+    expect(readFileSync(attempts, "utf8").trim()).toBe("1");
+    expect(existsSync(join(prefix, "bin", "incodex"))).toBe(false);
   });
 
   test("recovers the default prefix passed by a legacy Bun standalone update", () => {

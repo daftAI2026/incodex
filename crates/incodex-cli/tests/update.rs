@@ -110,18 +110,19 @@ raise SystemExit(3)
 }
 
 #[test]
-fn update_fails_when_install_script_download_fails() {
+fn update_does_not_retry_a_permanent_http_failure() {
     let home = scratch("download-failure");
     let prefix = home.join("prefix");
     let bin = prefix.join("bin");
     let fake_bin = home.join("fake-bin");
+    let attempts = home.join("attempts");
     fs::create_dir_all(&bin).unwrap();
     fs::create_dir_all(&fake_bin).unwrap();
 
     let curl = fake_bin.join("curl");
     write_executable(
         &curl,
-        "#!/bin/sh\nprintf '%s\\n' 'simulated download failure' >&2\nexit 22\n",
+        "#!/bin/sh\ncount=$(cat \"$ATTEMPTS\" 2>/dev/null || printf '0')\nprintf '%s\\n' \"$((count + 1))\" > \"$ATTEMPTS\"\nprintf 'INCODEX_HTTP_STATUS:404'\nexit 22\n",
     );
 
     let bash_profile = home.join(".bash_profile");
@@ -137,6 +138,7 @@ fn update_fails_when_install_script_download_fails() {
         .arg("update")
         .env("HOME", &home)
         .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .env("ATTEMPTS", &attempts)
         .output()
         .unwrap();
 
@@ -148,6 +150,7 @@ fn update_fails_when_install_script_download_fails() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(String::from_utf8_lossy(&output.stderr).contains("update failed"));
+    assert_eq!(fs::read_to_string(attempts).unwrap().trim(), "1");
 }
 
 #[test]
@@ -286,14 +289,14 @@ case "$url" in
     count=$(cat "$ATTEMPTS" 2>/dev/null || printf '0')
     count=$((count + 1))
     printf '%s\n' "$count" > "$ATTEMPTS"
-    if [ "$count" -lt 3 ]; then exit 7; fi
+    if [ "$count" -lt 3 ]; then printf 'INCODEX_HTTP_STATUS:503'; exit 22; fi
     printf '%s\n' '{"tag_name":"v9.9.9"}'
     ;;
   https://raw.githubusercontent.com/daftAI2026/incodex/v9.9.9/install.sh)
     count=$(cat "$INSTALLER_ATTEMPTS" 2>/dev/null || printf '0')
     count=$((count + 1))
     printf '%s\n' "$count" > "$INSTALLER_ATTEMPTS"
-    if [ "$count" -lt 3 ]; then exit 7; fi
+    if [ "$count" -lt 3 ]; then printf 'INCODEX_HTTP_STATUS:503'; exit 22; fi
     cat <<'INSTALLER'
 #!/bin/sh
 cat > "$INCODEX_PREFIX/bin/incodex.next" <<'CLI'
