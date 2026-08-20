@@ -1,4 +1,8 @@
-use std::io::{self, IsTerminal, Read};
+use std::io::{self, IsTerminal};
+
+const ESC: u8 = 0x1b;
+const ESCAPE_BYTE_TIMEOUT_MS: i32 = 100;
+const MAX_ESCAPE_SEQUENCE_BYTES: usize = 32;
 
 pub fn is_tty() -> bool {
     io::stdin().is_terminal() && io::stdout().is_terminal()
@@ -27,27 +31,95 @@ pub fn read_key() -> Result<Vec<u8>, String> {
         original: &mut original,
     };
 
-    let mut first = [0_u8; 1];
-    io::stdin()
-        .read_exact(&mut first)
-        .map_err(|err| err.to_string())?;
-    let mut key = vec![first[0]];
-    if first[0] != 0x1b {
-        return Ok(key);
+    let first = read_byte(fd)?;
+    if first != ESC {
+        return Ok(vec![first]);
     }
+    read_escape_sequence(fd)
+}
 
-    let mut poll_fd = libc::pollfd {
-        fd,
-        events: libc::POLLIN,
-        revents: 0,
-    };
-    let ready = unsafe { libc::poll(&mut poll_fd, 1, 30) };
-    if ready > 0 && poll_fd.revents & libc::POLLIN != 0 {
-        let mut rest = [0_u8; 7];
-        let count = io::stdin().read(&mut rest).map_err(|err| err.to_string())?;
-        key.extend_from_slice(&rest[..count]);
+fn read_byte(fd: i32) -> Result<u8, String> {
+    let mut byte = [0_u8; 1];
+    loop {
+        let count = unsafe { libc::read(fd, byte.as_mut_ptr().cast(), 1) };
+        if count == 1 {
+            return Ok(byte[0]);
+        }
+        if count == 0 {
+            return Err(
+                io::Error::new(io::ErrorKind::UnexpectedEof, "terminal closed").to_string(),
+            );
+        }
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() == Some(libc::EINTR) {
+            continue;
+        }
+        return Err(error.to_string());
     }
-    Ok(key)
+}
+
+fn read_byte_with_timeout(fd: i32) -> Result<Option<u8>, String> {
+    loop {
+        let mut poll_fd = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let ready = unsafe { libc::poll(&mut poll_fd, 1, ESCAPE_BYTE_TIMEOUT_MS) };
+        if ready < 0 {
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::EINTR) {
+                continue;
+            }
+            return Err(error.to_string());
+        }
+        if ready == 0 {
+            return Ok(None);
+        }
+        if poll_fd.revents & (libc::POLLIN | libc::POLLHUP) != 0 {
+            return read_byte(fd).map(Some);
+        }
+    }
+}
+
+fn read_escape_sequence(fd: i32) -> Result<Vec<u8>, String> {
+    let Some(introducer) = read_byte_with_timeout(fd)? else {
+        return Ok(vec![ESC]);
+    };
+    match introducer {
+        b'[' => read_csi_sequence(fd),
+        b'O' => read_ss3_sequence(fd),
+        byte => Ok(vec![ESC, byte]),
+    }
+}
+
+fn read_ss3_sequence(fd: i32) -> Result<Vec<u8>, String> {
+    let Some(final_byte) = read_byte_with_timeout(fd)? else {
+        return Ok(vec![ESC, b'O']);
+    };
+    if matches!(final_byte, b'A' | b'B') {
+        return Ok(vec![ESC, b'[', final_byte]);
+    }
+    Ok(vec![ESC, b'O', final_byte])
+}
+
+fn read_csi_sequence(fd: i32) -> Result<Vec<u8>, String> {
+    let mut sequence = vec![ESC, b'['];
+    for _ in 0..MAX_ESCAPE_SEQUENCE_BYTES {
+        let Some(byte) = read_byte_with_timeout(fd)? else {
+            return Ok(sequence);
+        };
+        sequence.push(byte);
+        // CSI final bytes are 0x40..=0x7e. Parameters and intermediates are
+        // consumed one byte at a time, so a following key remains unread.
+        if (0x40..=0x7e).contains(&byte) {
+            if matches!(byte, b'A' | b'B') {
+                return Ok(vec![ESC, b'[', byte]);
+            }
+            return Ok(sequence);
+        }
+    }
+    Ok(sequence)
 }
 
 struct RestoreTerminal<'a> {
@@ -79,7 +151,11 @@ mod tests {
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
             );
-            assert!(pid >= 0, "forkpty failed: {}", std::io::Error::last_os_error());
+            assert!(
+                pid >= 0,
+                "forkpty failed: {}",
+                std::io::Error::last_os_error()
+            );
             if pid == 0 {
                 libc::close(report[0]);
                 let key = read_key().expect("child read_key");
