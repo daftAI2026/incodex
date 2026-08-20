@@ -17,6 +17,10 @@ pub struct JournalTarget {
     pub real_path: String,
     pub device: String,
     pub inode: String,
+    #[serde(default)]
+    pub parent_device: String,
+    #[serde(default)]
+    pub parent_inode: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -36,6 +40,12 @@ pub struct JournalV2 {
     pub phase: String,
     pub sequence: u64,
     pub checksum: String,
+    #[serde(default)]
+    pub backup_digest: String,
+    #[serde(default)]
+    pub staged_device: String,
+    #[serde(default)]
+    pub staged_inode: String,
 }
 
 #[derive(Debug, Clone)]

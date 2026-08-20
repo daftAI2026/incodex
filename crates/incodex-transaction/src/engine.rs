@@ -1,8 +1,10 @@
 use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use incodex_core::canonical::{inspect_target, recheck_target, CanonicalTarget};
 use incodex_macos::ditto;
+use sha2::{Digest, Sha256};
 
 use crate::journal::{
     load_v2, reconstructed, tx_paths, validate_rel_paths, write_journal, JournalTarget, JournalV2,
@@ -59,6 +61,8 @@ impl Engine {
                 real_path: target.real_path.display().to_string(),
                 device: target.target_device.to_string(),
                 inode: target.target_inode.to_string(),
+                parent_device: target.parent_device.to_string(),
+                parent_inode: target.parent_inode.to_string(),
             },
             paths: RelPaths {
                 staged: STAGED_REL.into(),
@@ -68,6 +72,9 @@ impl Engine {
             phase: "DISCOVERED".into(),
             sequence: 1,
             checksum: String::new(),
+            backup_digest: String::new(),
+            staged_device: String::new(),
+            staged_inode: String::new(),
         };
         write_journal(root, &journal)?;
         Ok(Self {
@@ -111,6 +118,9 @@ impl Engine {
             fs::remove_dir_all(&dest).map_err(|err| err.to_string())?;
         }
         fs::rename(staged, &dest).or_else(|_| ditto(staged, &dest))?;
+        let identity = directory_identity(&dest)?;
+        self.journal.staged_device = identity.device.to_string();
+        self.journal.staged_inode = identity.inode.to_string();
         self.advance("STAGED")
     }
 
@@ -122,6 +132,8 @@ impl Engine {
             ));
         }
         require_backup_snapshot(&self.root, self.install_id())?;
+        let original = tx_paths(&self.root, self.install_id()).original;
+        self.journal.backup_digest = tree_digest(&original)?;
         self.advance("BACKUP_COMMITTED")
     }
 
@@ -191,19 +203,129 @@ impl Engine {
 
 fn require_backup_snapshot(root: &Path, install_id: &str) -> Result<(), String> {
     let original = tx_paths(root, install_id).original;
-    let metadata = fs::symlink_metadata(&original).map_err(|error| {
+    directory_identity(&original).map_err(|error| {
         format!(
             "cannot use backup: original snapshot {} is unavailable: {error}",
             original.display()
         )
     })?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FsIdentity {
+    device: u64,
+    inode: u64,
+}
+
+fn directory_identity(path: &Path) -> Result<FsIdentity, String> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
     if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
+        return Err(format!("path is not a real directory: {}", path.display()));
+    }
+    Ok(FsIdentity {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+    })
+}
+
+fn tree_digest(root: &Path) -> Result<String, String> {
+    let mut entries = Vec::new();
+    collect_tree(root, root, &mut entries)?;
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut digest = Sha256::new();
+    for (relative, kind, data) in entries {
+        digest.update(relative.as_bytes());
+        digest.update([0]);
+        digest.update([kind]);
+        digest.update([0]);
+        digest.update(data);
+        digest.update([0]);
+    }
+    Ok(digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
+fn collect_tree(
+    root: &Path,
+    current: &Path,
+    entries: &mut Vec<(String, u8, Vec<u8>)>,
+) -> Result<(), String> {
+    let mut children = fs::read_dir(current)
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    children.sort_by_key(|entry| entry.file_name());
+    for entry in children {
+        let path = entry.path();
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|error| error.to_string())?
+            .to_string_lossy()
+            .into_owned();
+        let file_type = entry.file_type().map_err(|error| error.to_string())?;
+        if file_type.is_symlink() {
+            let target = fs::read_link(&path).map_err(|error| error.to_string())?;
+            entries.push((
+                relative,
+                b'L',
+                target.to_string_lossy().as_bytes().to_vec(),
+            ));
+        } else if file_type.is_dir() {
+            entries.push((relative, b'D', Vec::new()));
+            collect_tree(root, &path, entries)?;
+        } else if file_type.is_file() {
+            entries.push((relative, b'F', fs::read(&path).map_err(|error| error.to_string())?));
+        } else {
+            return Err(format!("unsupported backup entry type: {}", path.display()));
+        }
+    }
+    Ok(())
+}
+
+fn validate_backup_digest(path: &Path, journal: &JournalV2) -> Result<(), String> {
+    if journal.backup_digest.is_empty() {
+        return Err("durable backup manifest is missing".into());
+    }
+    let actual = tree_digest(path)?;
+    if actual != journal.backup_digest {
         return Err(format!(
-            "cannot use backup: original snapshot {} must be a real directory",
-            original.display()
+            "backup snapshot digest mismatch for {}",
+            path.display()
         ));
     }
     Ok(())
+}
+
+fn restore_source(root: &Path, journal: &JournalV2) -> Result<PathBuf, String> {
+    let paths = tx_paths(root, &journal.install_id);
+    match fs::symlink_metadata(&paths.original) {
+        Ok(_) => {
+            directory_identity(&paths.original).map_err(|error| {
+                format!("invalid original restore source: {error}")
+            })?;
+            validate_backup_digest(&paths.original, journal)?;
+            return Ok(paths.original);
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("cannot inspect original restore source: {error}")),
+    }
+    match fs::symlink_metadata(&paths.outgoing) {
+        Ok(_) => {
+            directory_identity(&paths.outgoing).map_err(|error| {
+                format!("invalid outgoing restore source: {error}")
+            })?;
+            validate_backup_digest(&paths.outgoing, journal)?;
+            Ok(paths.outgoing)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Err("no safe restore source exists".into())
+        }
+        Err(error) => Err(format!("cannot inspect outgoing restore source: {error}")),
+    }
 }
 
 pub fn recover(root: &Path, install_id: &str) -> Result<RecoverResult, TxError> {
@@ -309,18 +431,17 @@ fn cleanup_pre_swap(root: &Path, journal: &JournalV2) -> Result<(), String> {
 
 fn restore_live(root: &Path, live: &Path, journal: &JournalV2) -> Result<(), String> {
     let paths = tx_paths(root, &journal.install_id);
-    if paths.original.exists() {
+    let source = restore_source(root, journal)?;
+    if source == paths.original {
         // +---------------------------------------------------------------+
         // | 原始快照是卸载所需的耐久备份；先复制再替换，回滚绝不消费它。          |
         // +---------------------------------------------------------------+
         let restore = paths.dir.join("restore").join("ChatGPT.app");
-        if restore.exists() {
-            fs::remove_dir_all(&restore).map_err(|err| err.to_string())?;
-        }
-        ditto(&paths.original, &restore)?;
+        remove_path(&restore)?;
+        ditto(&source, &restore)?;
         replace_live(&restore, live, &paths.dir)?;
-    } else if paths.outgoing.exists() {
-        replace_live(&paths.outgoing, live, &paths.dir)?;
+    } else {
+        replace_live(&source, live, &paths.dir)?;
     }
     if path_exists(&paths.outgoing)? {
         // +---------------------------------------------------------------+
