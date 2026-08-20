@@ -8,7 +8,7 @@
     "incodex-preload.cjs": "d97ae1ae39028c90ff3687b375c8614fc1fe228b3a3d149ead1c5d95d1a6bc55",
     "incodex-safe-home.cjs": "e620409acd7e69403973d50c3f0dfb68f09881ba48c8f149d4ed53e759e73002",
     "incodex-ipc-guard.cjs": "1abbc914a8e2a627bb047cda385a216cbd17ef446d8a6dfe993b732fba380395",
-    "incodex-instance.cjs": "08a59be6f2c2ef4e30527c77be1e3206fb5dd5eb775f912a1bb6eaa3352d14ca",
+    "incodex-instance.cjs": "859ab6784b728ae58ac5c7b7dfb4910c265a9b6e3407ade7032f68a41f9d906d",
     "incodex-runtime-load.cjs": "153ea5d8d2eb68551936da7f997fa46f67882f35c62357391c30da6547251d84",
     "incodex-window-kind.cjs": "8d5f752ef6a34bd0927cd39010d68b3e7b7545a77f947683d4ce4a48b98ce648"
   }

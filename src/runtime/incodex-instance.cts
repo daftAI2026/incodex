@@ -80,28 +80,57 @@ function pidAlive(pid) {
   }
 }
 
-function writeOwnerLock(stateRoot, owner) {
-  fs.mkdirSync(stateRoot, { recursive: true, mode: 0o700 });
-  const file = lockPath(stateRoot);
-  const fd = fs.openSync(
-    file,
-    fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0),
-    0o600,
+function sleepForOwnerRecovery(ms) {
+  if (ms <= 0) return;
+  const waiter = new Int32Array(new SharedArrayBuffer(4));
+  Atomics.wait(waiter, 0, 0, ms);
+}
+
+function writeAtomicRecord(file, value) {
+  const temp = path.join(
+    path.dirname(file),
+    `.${path.basename(file)}.tmp.${process.pid}.${Date.now()}.${crypto.randomBytes(8).toString("hex")}`,
   );
+  let fd = null;
   try {
-    fs.writeSync(fd, `${JSON.stringify(owner)}\n`);
+    fd = fs.openSync(
+      temp,
+      fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0),
+      0o600,
+    );
+    const contents = Buffer.from(`${JSON.stringify(value)}\n`);
+    let offset = 0;
+    while (offset < contents.length) {
+      offset += fs.writeSync(fd, contents, offset, contents.length - offset, offset);
+    }
     try {
       fs.fsyncSync(fd);
     } catch {
-      /* Some test filesystems do not support fsync; the exclusive claim remains valid. */
+      /* Some test filesystems do not support fsync; the complete temp file remains private. */
     }
   } finally {
-    fs.closeSync(fd);
+    if (fd !== null) fs.closeSync(fd);
+  }
+  try {
+    // A hard-link publish makes the canonical path either absent or complete.
+    // A crash before this point leaves only an ignored temp file, never a
+    // truncated record that can poison the next launch.
+    fs.linkSync(temp, file);
+  } finally {
+    try {
+      fs.rmSync(temp, { force: true });
+    } catch {
+      /* The published hard link is still the authoritative record. */
+    }
   }
 }
 
-function readOwnerLockState(stateRoot) {
-  const file = lockPath(stateRoot);
+function writeOwnerLock(stateRoot, owner) {
+  fs.mkdirSync(stateRoot, { recursive: true, mode: 0o700 });
+  return writeAtomicRecord(lockPath(stateRoot), owner);
+}
+
+function readOwnerLockStateAt(file) {
   let stats;
   try {
     stats = fs.lstatSync(file);
@@ -121,6 +150,10 @@ function readOwnerLockState(stateRoot) {
   } catch (error) {
     return { kind: "invalid", owner: null, reason: String(error) };
   }
+}
+
+function readOwnerLockState(stateRoot) {
+  return readOwnerLockStateAt(lockPath(stateRoot));
 }
 
 function readOwnerLock(stateRoot) {
@@ -146,26 +179,68 @@ function removeSocket(stateRoot) {
   }
 }
 
+function ownerLockMetadata(file) {
+  try {
+    const stats = fs.lstatSync(file);
+    return { dev: stats.dev, ino: stats.ino, size: stats.size, mtimeMs: stats.mtimeMs };
+  } catch {
+    return null;
+  }
+}
+
+function sameOwnerLockMetadata(left, right) {
+  return Boolean(
+    left &&
+      right &&
+      left.dev === right.dev &&
+      left.ino === right.ino &&
+      left.size === right.size &&
+      left.mtimeMs === right.mtimeMs,
+  );
+}
+
 function clearOwnerLock(stateRoot, expectedOwner) {
   if (!expectedOwner || !ownerToken(expectedOwner)) return false;
-  const current = readOwnerLock(stateRoot);
-  if (!sameOwnerToken(current, expectedOwner)) return false;
+  const file = lockPath(stateRoot);
+  const current = readOwnerLockState(stateRoot);
+  const beforeMetadata = ownerLockMetadata(file);
+  if (current.kind !== "valid" || !sameOwnerToken(current.owner, expectedOwner) || !beforeMetadata) return false;
 
-  // Remove the socket while the matching lock still prevents a new owner from
-  // taking the path. Re-check the token before deleting the lock itself.
-  if (!removeSocket(stateRoot)) return false;
-  const stillCurrent = readOwnerLock(stateRoot);
-  if (!sameOwnerToken(stillCurrent, expectedOwner)) return false;
+  const candidate = path.join(
+    stateRoot,
+    `.${LOCK_NAME}.releasing.${process.pid}.${Date.now()}.${crypto.randomBytes(8).toString("hex")}`,
+  );
   try {
-    fs.rmSync(lockPath(stateRoot));
+    // Pin the inode before the second read. A replacement owner gets a new
+    // inode, so its canonical path is never eligible for this cleanup.
+    fs.linkSync(file, candidate);
+    const pinned = readOwnerLockStateAt(candidate);
+    const canonicalMetadata = ownerLockMetadata(file);
+    if (
+      pinned.kind !== "valid" ||
+      !sameOwnerToken(pinned.owner, expectedOwner) ||
+      !sameOwnerLockMetadata(beforeMetadata, canonicalMetadata)
+    ) {
+      return false;
+    }
+    fs.rmSync(file);
     return true;
   } catch (error) {
-    return Boolean(error && error.code === "ENOENT");
+    return false;
+  } finally {
+    try {
+      fs.rmSync(candidate, { force: true });
+    } catch {
+      /* The candidate is only a temporary inode pin. */
+    }
   }
 }
 
 function currentOwner(sessionId, execPath) {
   const live = processIdentity(process.pid);
+  if (!live?.processStartIdentity || !live?.execIdentity) {
+    throw new OwnerLeaseError("IDENTITY_UNAVAILABLE", "cannot acquire owner lease without process identity");
+  }
   const token = crypto.randomBytes(16).toString("hex");
   return {
     pid: process.pid,
@@ -206,47 +281,96 @@ function ownsOwnerLease(stateRoot, expectedOwner) {
   return sameOwnerToken(current, expectedOwner);
 }
 
+function quarantineInvalidOwnerLock(stateRoot) {
+  const file = lockPath(stateRoot);
+  const before = readOwnerLockState(stateRoot);
+  const beforeMetadata = ownerLockMetadata(file);
+  if (before.kind !== "invalid" || !beforeMetadata) return false;
+
+  // Give a legacy writer one recovery interval to finish its record. New
+  // writers never expose a partial canonical file because they publish via a
+  // hard link, but this grace protects an older process still holding its fd.
+  sleepForOwnerRecovery(OWNER_RETRY_DELAY_MS);
+  const settled = readOwnerLockState(stateRoot);
+  const settledMetadata = ownerLockMetadata(file);
+  if (settled.kind !== "invalid" || !sameOwnerLockMetadata(beforeMetadata, settledMetadata)) return false;
+
+  const quarantine = path.join(
+    stateRoot,
+    `.${LOCK_NAME}.invalid.${process.pid}.${Date.now()}.${crypto.randomBytes(8).toString("hex")}`,
+  );
+  let preserved = false;
+  try {
+    // Pin the malformed inode, then re-check the canonical pathname before
+    // removing it. A replacement inode is never touched by this recovery.
+    fs.linkSync(file, quarantine);
+    const pinned = readOwnerLockStateAt(quarantine);
+    const canonicalMetadata = ownerLockMetadata(file);
+    if (pinned.kind !== "invalid" || !sameOwnerLockMetadata(settledMetadata, canonicalMetadata)) return false;
+    try {
+      fs.rmSync(file);
+      preserved = true;
+      return true;
+    } catch (error) {
+      if (error && error.code === "ENOENT") {
+        preserved = true;
+        return true;
+      }
+      return false;
+    }
+  } catch (error) {
+    return false;
+  } finally {
+    if (!preserved) {
+      try {
+        fs.rmSync(quarantine, { force: true });
+      } catch {
+        /* Keep recovery best effort and never remove the canonical path here. */
+      }
+    }
+  }
+}
+
 function acquireOwnerLease(stateRoot, owner) {
   if (!owner || !ownerToken(owner)) {
     throw new OwnerLeaseError("OWNER_INVALID", "owner lease requires a token");
   }
-  try {
-    writeOwnerLock(stateRoot, owner);
-    const current = readOwnerLock(stateRoot);
-    if (!sameOwnerToken(current, owner)) {
-      throw new OwnerLeaseError("OWNER_VERIFY_FAILED", "owner lease verification failed", current);
+
+  let sawUnreadable = false;
+  for (let attempt = 0; attempt < OWNER_RETRY_COUNT; attempt += 1) {
+    try {
+      writeOwnerLock(stateRoot, owner);
+      const current = readOwnerLock(stateRoot);
+      if (!sameOwnerToken(current, owner)) {
+        throw new OwnerLeaseError("OWNER_VERIFY_FAILED", "owner lease verification failed", current);
+      }
+      return owner;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
     }
-    return owner;
-  } catch (error) {
-    if (error?.code !== "EEXIST") throw error;
+
+    const current = readOwnerLockState(stateRoot);
+    if (current.kind === "missing") continue;
+    if (current.kind === "invalid") {
+      sawUnreadable = true;
+      if (quarantineInvalidOwnerLock(stateRoot)) continue;
+      continue;
+    }
+
+    if (!staleOwnerRecord(current.owner)) {
+      throw new OwnerLeaseError("OWNER_BUSY", "another Incognito owner is active", current.owner);
+    }
+    if (!clearOwnerLock(stateRoot, current.owner)) continue;
   }
 
-  const current = readOwnerLockState(stateRoot);
-  if (current.kind === "missing") {
-    throw new OwnerLeaseError("OWNER_RACE", "owner lease disappeared during acquisition");
+  const finalState = readOwnerLockState(stateRoot);
+  if (finalState.kind === "valid" && !staleOwnerRecord(finalState.owner)) {
+    throw new OwnerLeaseError("OWNER_BUSY", "another Incognito owner won the lease race", finalState.owner);
   }
-  if (current.kind !== "valid") {
+  if (finalState.kind === "invalid" || sawUnreadable) {
     throw new OwnerLeaseError("OWNER_UNREADABLE", "owner lease is not readable");
   }
-  if (!staleOwnerRecord(current.owner)) {
-    throw new OwnerLeaseError("OWNER_BUSY", "another Incognito owner is active", current.owner);
-  }
-  if (!clearOwnerLock(stateRoot, current.owner)) {
-    throw new OwnerLeaseError("OWNER_RACE", "owner lease changed during stale-owner cleanup");
-  }
-  try {
-    writeOwnerLock(stateRoot, owner);
-    const verified = readOwnerLock(stateRoot);
-    if (!sameOwnerToken(verified, owner)) {
-      throw new OwnerLeaseError("OWNER_VERIFY_FAILED", "owner lease verification failed", verified);
-    }
-    return owner;
-  } catch (error) {
-    if (error?.code === "EEXIST") {
-      throw new OwnerLeaseError("OWNER_BUSY", "another Incognito owner won the lease race", readOwnerLock(stateRoot));
-    }
-    throw error;
-  }
+  throw new OwnerLeaseError("OWNER_RACE", "owner lease changed during acquisition");
 }
 
 function connectExisting(stateRoot, timeoutMs = 400, token = "") {
