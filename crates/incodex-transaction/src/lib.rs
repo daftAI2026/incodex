@@ -3,17 +3,18 @@ mod engine;
 mod journal;
 mod lock;
 mod proof;
+mod uninstall;
 
 use std::fs;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-pub use engine::{
-    migrate_legacy_committed, recover, recover_with, restore_committed, CommitResult, Engine,
-    RecoverResult, TxError,
-};
+pub use engine::{recover, recover_with, CommitResult, Engine, RecoverResult, TxError};
 pub use journal::{new_install_id, JournalV2};
+pub use uninstall::{
+    migrate_legacy_committed, restore_committed, restore_committed_with_checkpoint,
+};
 
 pub fn journal_v2(root: &Path, install_id: &str) -> Result<JournalV2, String> {
     journal::load_v2(root, install_id)
@@ -30,6 +31,7 @@ pub const PHASES: &[&str] = &[
     "TARGET_MOVED_OUT",
     "SWAPPED",
     "TARGET_VERIFIED",
+    "UNINSTALLING",
     "COMMITTED",
     "ROLLED_BACK",
 ];
@@ -120,7 +122,9 @@ pub fn recover_action_phase(phase: &str) -> Recovery {
     match phase {
         "COMMITTED" | "ROLLED_BACK" => Recovery::Done,
         "DISCOVERED" | "INTENT" | "BACKUP_COMMITTED" | "STAGED" | "PATCHED" | "SIGNED"
-        | "VERIFIED" | "TARGET_MOVED_OUT" | "SWAPPED" | "TARGET_VERIFIED" => Recovery::Rollback,
+        | "VERIFIED" | "TARGET_MOVED_OUT" | "SWAPPED" | "TARGET_VERIFIED" | "UNINSTALLING" => {
+            Recovery::Rollback
+        }
         _ => Recovery::Refuse,
     }
 }

@@ -275,6 +275,7 @@ pub(crate) fn validate_recovery_proofs(journal: &JournalV2) -> Result<(), String
             | "TARGET_MOVED_OUT"
             | "SWAPPED"
             | "TARGET_VERIFIED"
+            | "UNINSTALLING"
     ) && (journal.staged_device.is_empty()
         || journal.staged_inode.is_empty()
         || journal.staged_digest.is_empty())

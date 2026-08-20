@@ -1,10 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use incodex_core::canonical::{inspect_target, recheck_target, CanonicalTarget};
 use incodex_macos::ditto;
 
-use crate::durable::sync_dir;
 use crate::journal::{
     load_v2, reconstructed, tx_paths, validate_recovery_proofs, validate_rel_paths, write_journal,
     JournalTarget, JournalV2, RelPaths, ORIGINAL_REL, OUTGOING_REL, STAGED_REL,
@@ -13,11 +11,15 @@ use crate::lock::{acquire_target_lock, TargetLock};
 use crate::new_install_id;
 use crate::proof::{
     directory_identity, matches_recorded_restore, matches_recorded_restore_path,
-    optional_directory_identity, parse_identity, record_restore_intent, require_identity,
-    restore_source, tree_digest, validate_backup_digest, validate_pre_swap_identity,
-    validate_pre_swap_live, validate_staged_snapshot, validate_tree_digest,
+    optional_directory_identity, parse_identity, require_identity, tree_digest,
+    validate_backup_digest, validate_pre_swap_identity, validate_pre_swap_live,
+    validate_staged_snapshot, validate_tree_digest,
 };
+#[cfg(test)]
+use crate::uninstall::replace_live_with_checkpoint;
+use crate::uninstall::{cleanup_restored, remove_path, restore_live, sync_rename_parents};
 use crate::Recovery;
+use incodex_core::canonical::{inspect_target, recheck_target, CanonicalTarget};
 
 #[cfg(test)]
 #[path = "engine_tests.rs"]
@@ -244,113 +246,6 @@ impl Engine {
     }
 }
 
-pub fn restore_committed(root: &Path, install_id: &str, live_path: &Path) -> Result<(), String> {
-    let initial = load_v2(root, install_id)?;
-    if initial.phase != "COMMITTED" {
-        return Err(format!(
-            "cannot restore an uncommitted transaction in phase {}",
-            initial.phase
-        ));
-    }
-    let lock_target = PathBuf::from(&initial.target.real_path);
-    let _lock = acquire_target_lock(root, &lock_target, "uninstall", Some(install_id))?;
-    let journal = load_v2(root, install_id)?;
-    if journal.phase != "COMMITTED" {
-        return Err(format!(
-            "transaction changed to phase {} before committed restore",
-            journal.phase
-        ));
-    }
-    restore_committed_locked(root, &journal, live_path)
-}
-
-pub fn migrate_legacy_committed<F, G>(
-    root: &Path,
-    install_id: &str,
-    live_path: &Path,
-    verify_backup: F,
-    verify_live: G,
-) -> Result<(), String>
-where
-    F: FnOnce(&Path) -> bool,
-    G: FnOnce(&Path) -> bool,
-{
-    let initial = load_v2(root, install_id)?;
-    if !is_legacy_committed(&initial) {
-        return Err("transaction is not a legacy COMMITTED journal".into());
-    }
-    let lock_target = PathBuf::from(&initial.target.real_path);
-    let _lock = acquire_target_lock(root, &lock_target, "uninstall", Some(install_id))?;
-    let journal = load_v2(root, install_id)?;
-    if !is_legacy_committed(&journal) {
-        return Err("legacy transaction changed before migration".into());
-    }
-    let current = inspect_target(live_path, None)?;
-    if current.real_path != PathBuf::from(&journal.target.real_path) {
-        return Err("legacy committed target real path changed before migration".into());
-    }
-    let paths = reconstructed(root, &journal)?;
-    directory_identity(&paths.original)
-        .map_err(|error| format!("invalid legacy backup: {error}"))?;
-    if !verify_backup(&paths.original) {
-        return Err("legacy backup failed codesign verification".into());
-    }
-    if !verify_live(&current.real_path) {
-        return Err("legacy live target failed binding verification".into());
-    }
-    recheck_target(&current)?;
-    let backup_digest = tree_digest(&paths.original)?;
-    let staged_identity = directory_identity(&current.real_path)
-        .map_err(|error| format!("invalid legacy live target: {error}"))?;
-    let staged_digest = tree_digest(&current.real_path)?;
-    let mut migrated = journal.clone();
-    migrated.target.parent_device = current.parent_device.to_string();
-    migrated.target.parent_inode = current.parent_inode.to_string();
-    migrated.pre_swap_digest = backup_digest.clone();
-    migrated.backup_digest = backup_digest;
-    migrated.staged_device = staged_identity.device.to_string();
-    migrated.staged_inode = staged_identity.inode.to_string();
-    migrated.staged_digest = staged_digest;
-    migrated.sequence += 1;
-    write_journal(root, &migrated)?;
-    let migrated = load_v2(root, install_id)?;
-    restore_committed_locked(root, &migrated, live_path)
-}
-
-fn is_legacy_committed(journal: &JournalV2) -> bool {
-    journal.phase == "COMMITTED"
-        && journal.target.parent_device.is_empty()
-        && journal.target.parent_inode.is_empty()
-        && journal.pre_swap_digest.is_empty()
-        && journal.backup_digest.is_empty()
-        && journal.staged_device.is_empty()
-        && journal.staged_inode.is_empty()
-        && journal.staged_digest.is_empty()
-        && journal.restored_device.is_empty()
-        && journal.restored_inode.is_empty()
-        && journal.restored_digest.is_empty()
-}
-
-fn restore_committed_locked(
-    root: &Path,
-    journal: &JournalV2,
-    live_path: &Path,
-) -> Result<(), String> {
-    if journal.phase != "COMMITTED" {
-        return Err(format!(
-            "cannot restore an uncommitted transaction in phase {}",
-            journal.phase
-        ));
-    }
-    let current = inspect_target(live_path, None)?;
-    if current.real_path != PathBuf::from(&journal.target.real_path) {
-        return Err("committed target real path changed before restore".into());
-    }
-    reconstructed(root, &journal)?;
-    validate_committed_restore_target(&journal, &current.real_path)?;
-    restore_live(root, &current.real_path, &journal).map(|_| ())
-}
-
 fn require_backup_snapshot(root: &Path, install_id: &str) -> Result<(), String> {
     let original = tx_paths(root, install_id).original;
     directory_identity(&original).map_err(|error| {
@@ -450,7 +345,7 @@ fn validate_recovery_target(
                 None => Err("live target and outgoing target are both missing".into()),
             }
         }
-        "SWAPPED" | "TARGET_VERIFIED" => {
+        "SWAPPED" | "TARGET_VERIFIED" | "UNINSTALLING" => {
             let staged =
                 staged_expected.ok_or("staged target identity is missing from the journal")?;
             if matches!(live_identity, Some(identity) if identity == staged) {
@@ -482,30 +377,6 @@ fn validate_recovery_target(
     }
 }
 
-fn validate_committed_restore_target(journal: &JournalV2, live: &Path) -> Result<(), String> {
-    validate_recovery_proofs(journal)?;
-    let current = inspect_target(live, None)?;
-    let expected_parent = parse_identity(
-        &journal.target.parent_device,
-        &journal.target.parent_inode,
-        "target parent",
-    )?;
-    if current.parent_device != expected_parent.device
-        || current.parent_inode != expected_parent.inode
-    {
-        return Err("committed target parent identity changed".into());
-    }
-    let expected_live = parse_identity(
-        &journal.staged_device,
-        &journal.staged_inode,
-        "committed live target",
-    )?;
-    let actual_live = directory_identity(live)?;
-    require_identity(Some(actual_live), expected_live, "committed live target")?;
-    validate_tree_digest(live, &journal.staged_digest, "committed live target")?;
-    Ok(())
-}
-
 pub fn recover(root: &Path, install_id: &str) -> Result<RecoverResult, TxError> {
     recover_with(root, install_id, |_| true)
 }
@@ -531,7 +402,9 @@ where
     let action = match journal.phase.as_str() {
         "COMMITTED" | "ROLLED_BACK" => Recovery::Done,
         "DISCOVERED" | "INTENT" | "BACKUP_COMMITTED" | "STAGED" | "PATCHED" | "SIGNED"
-        | "VERIFIED" | "TARGET_MOVED_OUT" | "SWAPPED" | "TARGET_VERIFIED" => Recovery::Rollback,
+        | "VERIFIED" | "TARGET_MOVED_OUT" | "SWAPPED" | "TARGET_VERIFIED" | "UNINSTALLING" => {
+            Recovery::Rollback
+        }
         _ => Recovery::Refuse,
     };
     if action == Recovery::Refuse {
@@ -583,7 +456,10 @@ fn is_pre_swap_phase(phase: &str) -> bool {
 }
 
 fn is_post_swap_phase(phase: &str) -> bool {
-    matches!(phase, "TARGET_MOVED_OUT" | "SWAPPED" | "TARGET_VERIFIED")
+    matches!(
+        phase,
+        "TARGET_MOVED_OUT" | "SWAPPED" | "TARGET_VERIFIED" | "UNINSTALLING"
+    )
 }
 
 fn cleanup_outgoing(outgoing: &Path) -> Result<(), String> {
@@ -620,115 +496,6 @@ fn cleanup_pre_swap(root: &Path, journal: &JournalV2) -> Result<(), String> {
         remove_path(&paths.original)?;
     }
     Ok(())
-}
-
-fn restore_live(root: &Path, live: &Path, journal: &JournalV2) -> Result<JournalV2, String> {
-    let paths = tx_paths(root, &journal.install_id);
-    let source = restore_source(root, journal)?;
-    let candidate = if source == paths.original {
-        // +---------------------------------------------------------------+
-        // | 原始快照是卸载所需的耐久备份；先复制再替换，回滚绝不消费它。          |
-        // +---------------------------------------------------------------+
-        let restore = paths.dir.join("restore").join("ChatGPT.app");
-        remove_path(&restore)?;
-        ditto(&source, &restore)?;
-        restore
-    } else {
-        source
-    };
-    // +--------------------------------------------------------------------+
-    // | 先把待迁入目录的 inode/digest 写入 journal；rename 后 inode 不变。   |
-    // | 若进程死在两个动作之间，下一进程只重试可证明的 restore intent。    |
-    // +--------------------------------------------------------------------+
-    let journal = record_restore_intent(root, &candidate, journal)?;
-    replace_live(&candidate, live, &paths.dir)?;
-    cleanup_restored(root, &journal)?;
-    Ok(journal)
-}
-
-fn cleanup_restored(root: &Path, journal: &JournalV2) -> Result<(), String> {
-    let paths = tx_paths(root, &journal.install_id);
-    for path in [
-        paths.outgoing,
-        paths.staged,
-        paths.dir.join("restore"),
-        paths.dir.join("trash"),
-    ] {
-        remove_path(&path)?;
-    }
-    Ok(())
-}
-
-fn replace_live(source: &Path, live: &Path, transaction_dir: &Path) -> Result<(), String> {
-    replace_live_with_checkpoint(source, live, transaction_dir, |_| {})
-}
-
-fn replace_live_with_checkpoint<F>(
-    source: &Path,
-    live: &Path,
-    transaction_dir: &Path,
-    mut checkpoint: F,
-) -> Result<(), String>
-where
-    F: FnMut(&str),
-{
-    let trash = transaction_dir.join("trash").join("ChatGPT.app");
-    if let Some(parent) = trash.parent() {
-        fs::create_dir_all(parent).map_err(|err| err.to_string())?;
-    }
-    remove_path(&trash)?;
-    let moved_live = if live.exists() {
-        fs::rename(live, &trash).map_err(|err| err.to_string())?;
-        sync_rename_parents(live, &trash)?;
-        checkpoint("LIVE_MOVED_TO_TRASH_DURABLE");
-        true
-    } else {
-        false
-    };
-    if let Err(error) = fs::rename(source, live) {
-        if moved_live {
-            let _ = fs::rename(&trash, live);
-            let _ = sync_rename_parents(&trash, live);
-        }
-        return Err(error.to_string());
-    }
-    sync_rename_parents(source, live)?;
-    checkpoint("RESTORE_MOVED_TO_LIVE_DURABLE");
-    remove_path(&trash)?;
-    sync_parent(&trash)?;
-    Ok(())
-}
-
-fn sync_parent(path: &Path) -> Result<(), String> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| format!("path has no parent to sync: {}", path.display()))?;
-    sync_dir(parent)
-}
-
-fn sync_rename_parents(first: &Path, second: &Path) -> Result<(), String> {
-    sync_parent(first)?;
-    if first.parent() != second.parent() {
-        sync_parent(second)?;
-    }
-    Ok(())
-}
-
-fn remove_path(path: &Path) -> Result<(), String> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error.to_string()),
-    };
-    if metadata.file_type().is_dir() {
-        fs::remove_dir_all(path).map_err(|err| err.to_string())
-    } else {
-        // +--------------------------------------------------------------+
-        // | symlink_metadata 不跟随 leaf；目录递归，其余类型只 unlink。   |
-        // | 这样 socket/FIFO 等垃圾不会阻塞 committed/recovery 收敛。    |
-        // +--------------------------------------------------------------+
-        fs::remove_file(path).map_err(|err| err.to_string())
-    }
 }
 
 #[cfg(test)]
