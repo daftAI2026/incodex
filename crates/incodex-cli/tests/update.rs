@@ -173,6 +173,7 @@ fn update_pins_the_installer_and_assets_to_the_resolved_release() {
     let prefix_log = home.join("prefix.log");
     let download_base_log = home.join("download-base.log");
     let expected_version_log = home.join("expected-version.log");
+    let download_dir_log = home.join("download-dir.log");
     fs::create_dir_all(&fake_bin).unwrap();
     let (prefix, installed) = installed_cli(&home);
     write_executable(
@@ -191,6 +192,7 @@ case "$url" in
 printf '%s\n' "$INCODEX_PREFIX" > "$PREFIX_LOG"
 printf '%s\n' "$INCODEX_DOWNLOAD_BASE" > "$DOWNLOAD_BASE_LOG"
 printf '%s\n' "$INCODEX_EXPECTED_VERSION" > "$EXPECTED_VERSION_LOG"
+printf '%s\n' "${INCODEX_DOWNLOAD_DIR-unset}" > "$DOWNLOAD_DIR_LOG"
 cat > "$INCODEX_PREFIX/bin/incodex.next" <<'CLI'
 #!/bin/sh
 printf '%s\n' 'Incodex version 9.9.9'
@@ -215,8 +217,10 @@ esac
         .env("PREFIX_LOG", &prefix_log)
         .env("DOWNLOAD_BASE_LOG", &download_base_log)
         .env("EXPECTED_VERSION_LOG", &expected_version_log)
+        .env("DOWNLOAD_DIR_LOG", &download_dir_log)
         .env("INCODEX_PREFIX", home.join("attacker-prefix"))
         .env("INCODEX_DOWNLOAD_BASE", "https://attacker.invalid/release")
+        .env("INCODEX_DOWNLOAD_DIR", home.join("attacker-release"))
         .output()
         .unwrap();
 
@@ -233,6 +237,7 @@ esac
         "https://github.com/daftAI2026/incodex/releases/download/v9.9.9"
     );
     assert_eq!(fs::read_to_string(expected_version_log).unwrap().trim(), "9.9.9");
+    assert_eq!(fs::read_to_string(download_dir_log).unwrap().trim(), "unset");
     let urls = fs::read_to_string(curl_log).unwrap();
     assert!(urls.contains("raw.githubusercontent.com/daftAI2026/incodex/v9.9.9/install.sh"));
     assert!(!urls.contains("raw.githubusercontent.com/daftAI2026/incodex/main/install.sh"));
@@ -529,6 +534,36 @@ fn native_homebrew_menu_waits_for_the_formula_and_names_brew_upgrade() {
         fs::read_to_string(cache).unwrap().trim(),
         "Update 9.9.9 available, run brew upgrade incodex"
     );
+}
+
+#[test]
+fn native_homebrew_menu_rejects_a_current_script_update_notice() {
+    let home = scratch("menu-homebrew-stale-script-notice");
+    let fake_bin = home.join("fake-bin");
+    let cellar_bin = home.join(format!(
+        "Cellar/incodex/{}/bin",
+        env!("CARGO_PKG_VERSION")
+    ));
+    fs::create_dir_all(&fake_bin).unwrap();
+    fs::create_dir_all(&cellar_bin).unwrap();
+    let installed = cellar_bin.join("incodex");
+    fs::copy(env!("CARGO_BIN_EXE_incodex"), &installed).unwrap();
+    write_executable(&fake_bin.join("curl"), "#!/bin/sh\nexit 22\n");
+    let cache = home.join(".incodex/cache/update_message");
+    fs::create_dir_all(cache.parent().unwrap()).unwrap();
+    fs::write(
+        &cache,
+        format!(
+            "Update {} available, run incodex update\n",
+            env!("CARGO_PKG_VERSION")
+        ),
+    )
+    .unwrap();
+    let path = format!("{}:/usr/bin:/bin", fake_bin.display());
+
+    open_menu_long_enough_for_background_refresh(&home, &installed, &path);
+
+    assert_eq!(fs::read_to_string(cache).unwrap(), "");
 }
 
 #[test]

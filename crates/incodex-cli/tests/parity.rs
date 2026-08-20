@@ -429,8 +429,18 @@ fn native_menu_shows_the_same_cached_update_notice_and_shortcut_as_typescript() 
         fs::create_dir_all(cache.parent().unwrap()).unwrap();
         fs::write(&cache, "Update 9.9.9 available, run incodex update\n").unwrap();
     }
+    let rust_install = rust_home.join("prefix/bin/incodex");
+    fs::create_dir_all(rust_install.parent().unwrap()).unwrap();
+    fs::copy(rust_bin(), &rust_install).unwrap();
     let ts = run_tty("bun", &["src/cli.ts"], &[], &ts_home, "Quit", "q");
-    let rust = run_tty(rust_bin(), &[], &[], &rust_home, "Quit", "q");
+    let rust = run_tty(
+        rust_install.to_str().unwrap(),
+        &[],
+        &[],
+        &rust_home,
+        "Quit",
+        "q",
+    );
     let ts = visible(&ts.stdout);
     let rust = visible(&rust.stdout);
     for text in [
