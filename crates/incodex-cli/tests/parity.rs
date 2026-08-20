@@ -641,6 +641,8 @@ fn install_uninstall_artifacts_match_on_the_same_fixture() {
             "diagnosis field {field}\nTS={ts_diagnosis}\nRust={rs_diagnosis}"
         );
     }
+    let runtime_version = env!("CARGO_PKG_VERSION");
+    let runtime_release = format!("releases/{runtime_version}");
     for diagnosis in [&ts_diagnosis, &rs_diagnosis] {
         for field in [
             "asarFileHash",
@@ -653,8 +655,8 @@ fn install_uninstall_artifacts_match_on_the_same_fixture() {
         assert!(diagnosis["backup"].is_object(), "backup: {diagnosis}");
         assert_eq!(diagnosis["externalRuntime"]["present"], true);
         assert_eq!(diagnosis["externalRuntime"]["ok"], true);
-        assert_eq!(diagnosis["externalRuntime"]["version"], "0.2.0");
-        assert_eq!(diagnosis["externalRuntime"]["release"], "releases/0.2.0");
+        assert_eq!(diagnosis["externalRuntime"]["version"], runtime_version);
+        assert_eq!(diagnosis["externalRuntime"]["release"], runtime_release);
         assert!(diagnosis["signing"].is_object(), "signing: {diagnosis}");
         assert!(diagnosis["spctl"].is_object(), "spctl: {diagnosis}");
     }
