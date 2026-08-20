@@ -38,14 +38,14 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
         }
     }
     fs::rename(&tmp, path).map_err(|err| err.to_string())?;
-    fsync_dir(parent)?;
+    sync_dir(parent)?;
     let mut perms = fs::metadata(path).map_err(|err| err.to_string())?.permissions();
     perms.set_mode(FILE_MODE);
     fs::set_permissions(path, perms).map_err(|err| err.to_string())?;
     Ok(())
 }
 
-fn fsync_dir(dir: &Path) -> Result<(), String> {
+pub(crate) fn sync_dir(dir: &Path) -> Result<(), String> {
     let file = OpenOptions::new()
         .read(true)
         .open(dir)

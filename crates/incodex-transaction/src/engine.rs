@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use incodex_core::canonical::{inspect_target, recheck_target, CanonicalTarget};
 use incodex_macos::ditto;
 
+use crate::durable::sync_dir;
 use crate::journal::{
     load_v2, reconstructed, tx_paths, validate_recovery_proofs, validate_rel_paths, write_journal,
     JournalTarget, JournalV2, RelPaths, ORIGINAL_REL, OUTGOING_REL, STAGED_REL,
@@ -183,11 +184,15 @@ impl Engine {
             fs::create_dir_all(parent).map_err(|err| err.to_string())?;
         }
         fs::rename(&self.target.real_path, &outgoing).map_err(|err| err.to_string())?;
+        sync_rename_parents(&self.target.real_path, &outgoing)?;
+        checkpoint("LIVE_MOVED_OUT_DURABLE");
         checkpoint("LIVE_MOVED_OUT");
         fs::rename(self.staging_app(), &self.target.real_path).map_err(|err| {
             let _ = fs::rename(&outgoing, &self.target.real_path);
             err.to_string()
         })?;
+        sync_rename_parents(&self.staging_app(), &self.target.real_path)?;
+        checkpoint("STAGING_MOVED_IN_DURABLE");
         checkpoint("STAGING_MOVED_IN");
         self.advance("SWAPPED")?;
         checkpoint("SWAPPED");
@@ -584,6 +589,18 @@ fn cleanup_restored(root: &Path, journal: &JournalV2) -> Result<(), String> {
 }
 
 fn replace_live(source: &Path, live: &Path, transaction_dir: &Path) -> Result<(), String> {
+    replace_live_with_checkpoint(source, live, transaction_dir, |_| {})
+}
+
+fn replace_live_with_checkpoint<F>(
+    source: &Path,
+    live: &Path,
+    transaction_dir: &Path,
+    mut checkpoint: F,
+) -> Result<(), String>
+where
+    F: FnMut(&str),
+{
     let trash = transaction_dir.join("trash").join("ChatGPT.app");
     if let Some(parent) = trash.parent() {
         fs::create_dir_all(parent).map_err(|err| err.to_string())?;
@@ -591,6 +608,8 @@ fn replace_live(source: &Path, live: &Path, transaction_dir: &Path) -> Result<()
     remove_path(&trash)?;
     let moved_live = if live.exists() {
         fs::rename(live, &trash).map_err(|err| err.to_string())?;
+        sync_rename_parents(live, &trash)?;
+        checkpoint("LIVE_MOVED_TO_TRASH_DURABLE");
         true
     } else {
         false
@@ -598,10 +617,29 @@ fn replace_live(source: &Path, live: &Path, transaction_dir: &Path) -> Result<()
     if let Err(error) = fs::rename(source, live) {
         if moved_live {
             let _ = fs::rename(&trash, live);
+            let _ = sync_rename_parents(&trash, live);
         }
         return Err(error.to_string());
     }
+    sync_rename_parents(source, live)?;
+    checkpoint("RESTORE_MOVED_TO_LIVE_DURABLE");
     remove_path(&trash)?;
+    sync_parent(&trash)?;
+    Ok(())
+}
+
+fn sync_parent(path: &Path) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("path has no parent to sync: {}", path.display()))?;
+    sync_dir(parent)
+}
+
+fn sync_rename_parents(first: &Path, second: &Path) -> Result<(), String> {
+    sync_parent(first)?;
+    if first.parent() != second.parent() {
+        sync_parent(second)?;
+    }
     Ok(())
 }
 
