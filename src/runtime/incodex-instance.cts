@@ -12,6 +12,8 @@ const SOCK_NAME = "incognito.sock";
 const OWNER_RETRY_COUNT = 5;
 const OWNER_RETRY_DELAY_MS = 100;
 const TAKEOVER_CLAIM_NAME = ".incognito.lock.takeover";
+const TAKEOVER_CLAIM_OWNER_NAME = "owner";
+const TAKEOVER_CLAIM_RECLAIM_NAME = ".reclaim";
 
 function targetIdFromExec(execPath) {
   return crypto.createHash("sha256").update(execPath || "unknown").digest("hex").slice(0, 12);
@@ -53,16 +55,36 @@ function ownerToken(owner) {
   return "";
 }
 
+function hasOwnerProcessIdentity(owner) {
+  return Boolean(owner && (nonEmptyString(owner.processStartIdentity) || nonEmptyString(owner.startedAt)));
+}
+
+function hasOwnerExecutableIdentity(owner) {
+  return Boolean(owner && (nonEmptyString(owner.execIdentity) || nonEmptyString(owner.execPath)));
+}
+
+function nonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function hasReliableOwnerIdentity(owner) {
+  return hasOwnerProcessIdentity(owner) && hasOwnerExecutableIdentity(owner);
+}
+
+function executableIdentity(owner) {
+  if (nonEmptyString(owner?.execIdentity)) return owner.execIdentity;
+  if (nonEmptyString(owner?.comm)) return owner.comm;
+  return nonEmptyString(owner?.execPath) ? path.basename(owner.execPath) : "";
+}
+
 function ownerMatchesLive(owner, live) {
-  if (!owner || !live) return false;
+  if (!hasReliableOwnerIdentity(owner) || !hasReliableOwnerIdentity(live)) return false;
   const ownerStart = owner.processStartIdentity || owner.startedAt;
   const liveStart = live.processStartIdentity || live.startedAt;
   if (owner.pid !== live.pid || ownerStart !== liveStart) return false;
-  const ownerExec = owner.execIdentity || owner.comm;
-  const liveExec = live.execIdentity || live.comm;
-  if (ownerExec && liveExec) return ownerExec === liveExec;
-  if (owner.execPath && live.execPath) return owner.execPath === live.execPath;
-  return true;
+  const ownerExec = executableIdentity(owner);
+  const liveExec = executableIdentity(live);
+  return Boolean(ownerExec && liveExec && ownerExec === liveExec);
 }
 
 function sameOwnerToken(left, right) {
@@ -85,6 +107,22 @@ function sleepForOwnerRecovery(ms) {
   if (ms <= 0) return;
   const waiter = new Int32Array(new SharedArrayBuffer(4));
   Atomics.wait(waiter, 0, 0, ms);
+}
+
+function pauseBeforeTakeoverUnlink() {
+  const pauseFile = process.env.INCODEX_TEST_TAKEOVER_PAUSE_FILE;
+  const releaseFile = process.env.INCODEX_TEST_TAKEOVER_RELEASE_FILE;
+  if (!pauseFile || !releaseFile) return;
+  try {
+    fs.writeFileSync(pauseFile, `${process.pid}\n`, { flag: "wx", mode: 0o600 });
+  } catch {
+    return;
+  }
+  const deadline = Date.now() + 5000;
+  const waiter = new Int32Array(new SharedArrayBuffer(4));
+  while (!fs.existsSync(releaseFile) && Date.now() < deadline) {
+    Atomics.wait(waiter, 0, 0, 5);
+  }
 }
 
 function writeAtomicRecord(file, value) {
@@ -147,6 +185,9 @@ function readOwnerLockStateAt(file) {
     if (!owner || typeof owner !== "object" || !Number.isInteger(owner.pid) || !ownerToken(owner)) {
       return { kind: "invalid", owner: null, reason: "owner lock has no valid identity or token" };
     }
+    if (!hasReliableOwnerIdentity(owner)) {
+      return { kind: "unverifiable", owner, reason: "owner lock has no reliable process and executable identity" };
+    }
     return { kind: "valid", owner };
   } catch (error) {
     return { kind: "invalid", owner: null, reason: String(error) };
@@ -204,6 +245,48 @@ function takeoverClaimPath(stateRoot) {
   return path.join(stateRoot, TAKEOVER_CLAIM_NAME);
 }
 
+function takeoverClaimOwnerPath(stateRoot) {
+  return path.join(takeoverClaimPath(stateRoot), TAKEOVER_CLAIM_OWNER_NAME);
+}
+
+function takeoverClaimReclaimPath(stateRoot) {
+  return path.join(takeoverClaimPath(stateRoot), TAKEOVER_CLAIM_RECLAIM_NAME);
+}
+
+function readTakeoverClaimState(stateRoot) {
+  const file = takeoverClaimPath(stateRoot);
+  let stats;
+  try {
+    stats = fs.lstatSync(file);
+  } catch (error) {
+    if (error && error.code === "ENOENT") return { kind: "missing", owner: null };
+    return { kind: "invalid", owner: null, reason: String(error) };
+  }
+  if (stats.isDirectory()) {
+    const owner = readOwnerLockStateAt(takeoverClaimOwnerPath(stateRoot));
+    return owner.kind === "missing"
+      ? { kind: "invalid", owner: null, reason: "takeover claim has no owner record" }
+      : owner;
+  }
+  // A regular claim can only be left by an older runtime. It is read for a
+  // bounded migration window, but new claims are always published as dirs.
+  return readOwnerLockStateAt(file);
+}
+
+function takeoverClaimMetadata(stateRoot) {
+  const file = takeoverClaimPath(stateRoot);
+  try {
+    const stats = fs.lstatSync(file);
+    return { dev: stats.dev, ino: stats.ino };
+  } catch {
+    return null;
+  }
+}
+
+function sameTakeoverClaimMetadata(left, right) {
+  return Boolean(left && right && left.dev === right.dev && left.ino === right.ino);
+}
+
 function takeoverClaimOwner() {
   const live = processIdentity(process.pid);
   return {
@@ -216,23 +299,154 @@ function takeoverClaimOwner() {
 }
 
 function takeoverClaimIsStale(owner) {
-  if (!owner || !Number.isInteger(owner.pid) || owner.pid <= 0) return true;
-  if (!owner.processStartIdentity && !owner.startedAt) return !pidAlive(owner.pid);
+  if (!owner || !Number.isInteger(owner.pid) || owner.pid <= 0) return false;
+  if (!hasReliableOwnerIdentity(owner)) return false;
   const live = processIdentity(owner.pid);
   if (!live) return !pidAlive(owner.pid);
   return !ownerMatchesLive(owner, live);
 }
 
-function removeTakeoverClaimIfStale(stateRoot, expectedState) {
+function publishTakeoverClaim(stateRoot, owner) {
   const file = takeoverClaimPath(stateRoot);
-  const current = readOwnerLockStateAt(file);
-  if (current.kind !== expectedState.kind) return false;
-  if (current.kind === "valid" && !takeoverClaimIsStale(current.owner)) return false;
+  const temporary = path.join(
+    stateRoot,
+    `.${TAKEOVER_CLAIM_NAME}.tmp.${process.pid}.${Date.now()}.${crypto.randomBytes(8).toString("hex")}`,
+  );
+  fs.mkdirSync(temporary, { recursive: false, mode: 0o700 });
   try {
-    fs.rmSync(file);
+    writeAtomicRecord(path.join(temporary, TAKEOVER_CLAIM_OWNER_NAME), owner);
+    try {
+      // The destination is either absent or a non-empty claim directory. A
+      // directory rename therefore gives us an atomic no-replace publish.
+      fs.renameSync(temporary, file);
+      return owner;
+    } catch (error) {
+      if (["EEXIST", "ENOTEMPTY", "ENOTDIR"].includes(error?.code)) {
+        const conflict = new Error("takeover claim already exists");
+        conflict.code = "EEXIST";
+        throw conflict;
+      }
+      throw error;
+    }
+  } finally {
+    try {
+      fs.rmSync(temporary, { recursive: true, force: true });
+    } catch {
+      /* The temporary claim is private and best-effort after publication. */
+    }
+  }
+}
+
+function removeTakeoverReclaimMarkerIfOwned(stateRoot, expectedMetadata) {
+  const marker = path.join(takeoverClaimPath(stateRoot), TAKEOVER_CLAIM_RECLAIM_NAME);
+  const currentMetadata = ownerLockMetadata(marker);
+  if (!sameOwnerLockMetadata(expectedMetadata, currentMetadata)) return;
+  try {
+    fs.rmdirSync(marker);
+  } catch {
+    /* A non-empty or already moved marker belongs to another state. */
+  }
+}
+
+function removeLegacyTakeoverClaimIfStale(stateRoot, expectedState) {
+  const before = takeoverClaimMetadata(stateRoot);
+  if (!before) return false;
+  const current = readTakeoverClaimState(stateRoot);
+  if (current.kind !== expectedState.kind || (current.kind === "valid" && !takeoverClaimIsStale(current.owner))) return false;
+  pauseBeforeTakeoverUnlink();
+  const final = readTakeoverClaimState(stateRoot);
+  if (final.kind !== expectedState.kind || (final.kind === "valid" && !takeoverClaimIsStale(final.owner))) return false;
+  if (!sameTakeoverClaimMetadata(before, takeoverClaimMetadata(stateRoot))) return false;
+  try {
+    fs.rmSync(takeoverClaimPath(stateRoot));
     return true;
   } catch (error) {
     return Boolean(error && error.code === "ENOENT");
+  }
+}
+
+function removeTakeoverClaimIfStale(stateRoot, expectedState) {
+  const file = takeoverClaimPath(stateRoot);
+  const current = readTakeoverClaimState(stateRoot);
+  if (current.kind !== expectedState.kind) return false;
+  if (current.kind === "valid" && !takeoverClaimIsStale(current.owner)) return false;
+  if (!fs.existsSync(file)) return false;
+
+  let stats;
+  try {
+    stats = fs.lstatSync(file);
+  } catch {
+    return false;
+  }
+  if (!stats.isDirectory()) return removeLegacyTakeoverClaimIfStale(stateRoot, expectedState);
+
+  const beforeMetadata = takeoverClaimMetadata(stateRoot);
+  if (!beforeMetadata) return false;
+  let markerCreated = false;
+  let markerMetadata = null;
+  try {
+    fs.mkdirSync(takeoverClaimReclaimPath(stateRoot), { mode: 0o700 });
+    markerCreated = true;
+    markerMetadata = ownerLockMetadata(takeoverClaimReclaimPath(stateRoot));
+  } catch (error) {
+    // A fixed marker is the kernel's one-winner primitive for this claim
+    // generation. Never remove a marker owned by another reclaimer.
+    if (error?.code === "EEXIST" || error?.code === "ENOENT") return false;
+    return false;
+  }
+
+  try {
+    const claimed = readTakeoverClaimState(stateRoot);
+    const claimedMetadata = takeoverClaimMetadata(stateRoot);
+    if (
+      claimed.kind !== expectedState.kind ||
+      (claimed.kind === "valid" && !takeoverClaimIsStale(claimed.owner)) ||
+      !sameTakeoverClaimMetadata(beforeMetadata, claimedMetadata)
+    ) {
+      if (markerCreated && sameTakeoverClaimMetadata(beforeMetadata, claimedMetadata)) {
+        removeTakeoverReclaimMarkerIfOwned(stateRoot, markerMetadata);
+      }
+      return false;
+    }
+
+    pauseBeforeTakeoverUnlink();
+    const finalState = readTakeoverClaimState(stateRoot);
+    const finalMetadata = takeoverClaimMetadata(stateRoot);
+    if (
+      finalState.kind !== expectedState.kind ||
+      (finalState.kind === "valid" && !takeoverClaimIsStale(finalState.owner)) ||
+      !sameTakeoverClaimMetadata(beforeMetadata, finalMetadata)
+    ) {
+      return false;
+    }
+
+    const quarantine = path.join(
+      stateRoot,
+      `.${TAKEOVER_CLAIM_NAME}.stale.${process.pid}.${Date.now()}.${crypto.randomBytes(8).toString("hex")}`,
+    );
+    try {
+      // Only the process that created the fixed marker may move this
+      // non-empty directory. A new claim is published at a fresh inode.
+      fs.renameSync(file, quarantine);
+      fs.rmSync(quarantine, { recursive: true, force: true });
+      return true;
+    } catch {
+      try {
+        fs.rmSync(quarantine, { recursive: true, force: true });
+      } catch {
+        /* Never touch the canonical claim after a failed handoff. */
+      }
+      return false;
+    }
+  } finally {
+    // The marker moved with a successful quarantine. On a failed metadata
+    // check it is removed only while the original inode is still present.
+    if (markerCreated && fs.existsSync(file)) {
+      const currentMetadata = takeoverClaimMetadata(stateRoot);
+      if (sameTakeoverClaimMetadata(beforeMetadata, currentMetadata)) {
+        removeTakeoverReclaimMarkerIfOwned(stateRoot, markerMetadata);
+      }
+    }
   }
 }
 
@@ -241,23 +455,23 @@ function acquireTakeoverClaim(stateRoot) {
   for (let attempt = 0; attempt < OWNER_RETRY_COUNT; attempt += 1) {
     try {
       const owner = takeoverClaimOwner();
-      writeAtomicRecord(takeoverClaimPath(stateRoot), owner);
-      return owner;
+      if (!hasReliableOwnerIdentity(owner)) return null;
+      return publishTakeoverClaim(stateRoot, owner);
     } catch (error) {
       if (error?.code !== "EEXIST") throw error;
     }
 
-    const file = takeoverClaimPath(stateRoot);
-    const state = readOwnerLockStateAt(file);
+    const state = readTakeoverClaimState(stateRoot);
     if (state.kind === "missing") continue;
     if (state.kind === "valid" && !takeoverClaimIsStale(state.owner)) return null;
+    if (state.kind === "unverifiable") return null;
     if (state.kind === "invalid") {
-      const before = ownerLockMetadata(file);
+      const before = takeoverClaimMetadata(stateRoot);
       sleepForOwnerRecovery(OWNER_RETRY_DELAY_MS);
-      const settled = readOwnerLockStateAt(file);
-      const after = ownerLockMetadata(file);
+      const settled = readTakeoverClaimState(stateRoot);
+      const after = takeoverClaimMetadata(stateRoot);
       if (settled.kind === "valid" && !takeoverClaimIsStale(settled.owner)) return null;
-      if (settled.kind === "invalid" && sameOwnerLockMetadata(before, after)) {
+      if (settled.kind === "invalid" && sameTakeoverClaimMetadata(before, after)) {
         if (removeTakeoverClaimIfStale(stateRoot, settled)) continue;
       }
       continue;
@@ -269,13 +483,70 @@ function acquireTakeoverClaim(stateRoot) {
 
 function releaseTakeoverClaim(stateRoot, claim) {
   if (!claim || !ownerToken(claim)) return false;
-  const current = readOwnerLockStateAt(takeoverClaimPath(stateRoot));
+  const current = readTakeoverClaimState(stateRoot);
   if (current.kind !== "valid" || !sameOwnerToken(current.owner, claim)) return false;
+  const file = takeoverClaimPath(stateRoot);
+  let stats;
   try {
-    fs.rmSync(takeoverClaimPath(stateRoot));
-    return true;
+    stats = fs.lstatSync(file);
   } catch (error) {
     return Boolean(error && error.code === "ENOENT");
+  }
+  if (!stats.isDirectory()) {
+    try {
+      fs.rmSync(file);
+      return true;
+    } catch (error) {
+      return Boolean(error && error.code === "ENOENT");
+    }
+  }
+
+  const beforeMetadata = takeoverClaimMetadata(stateRoot);
+  let markerCreated = false;
+  let markerMetadata = null;
+  try {
+    fs.mkdirSync(takeoverClaimReclaimPath(stateRoot), { mode: 0o700 });
+    markerCreated = true;
+    markerMetadata = ownerLockMetadata(takeoverClaimReclaimPath(stateRoot));
+  } catch {
+    return false;
+  }
+  try {
+    const settled = readTakeoverClaimState(stateRoot);
+    const settledMetadata = takeoverClaimMetadata(stateRoot);
+    if (
+      settled.kind !== "valid" ||
+      !sameOwnerToken(settled.owner, claim) ||
+      !sameTakeoverClaimMetadata(beforeMetadata, settledMetadata)
+    ) {
+      if (markerCreated && sameTakeoverClaimMetadata(beforeMetadata, settledMetadata)) {
+        removeTakeoverReclaimMarkerIfOwned(stateRoot, markerMetadata);
+      }
+      return false;
+    }
+    const quarantine = path.join(
+      stateRoot,
+      `.${TAKEOVER_CLAIM_NAME}.released.${process.pid}.${Date.now()}.${crypto.randomBytes(8).toString("hex")}`,
+    );
+    try {
+      fs.renameSync(file, quarantine);
+      fs.rmSync(quarantine, { recursive: true, force: true });
+      return true;
+    } catch {
+      try {
+        fs.rmSync(quarantine, { recursive: true, force: true });
+      } catch {
+        /* A failed release leaves the canonical claim fail-closed. */
+      }
+      return false;
+    }
+  } finally {
+    if (markerCreated && fs.existsSync(file)) {
+      const currentMetadata = takeoverClaimMetadata(stateRoot);
+      if (sameTakeoverClaimMetadata(beforeMetadata, currentMetadata)) {
+        removeTakeoverReclaimMarkerIfOwned(stateRoot, markerMetadata);
+      }
+    }
   }
 }
 
@@ -318,6 +589,16 @@ function clearOwnerLock(stateRoot, expectedOwner) {
       ) {
         return false;
       }
+      pauseBeforeTakeoverUnlink();
+      const finalState = readOwnerLockState(stateRoot);
+      const finalMetadata = ownerLockMetadata(file);
+      if (
+        finalState.kind !== "valid" ||
+        !sameOwnerToken(finalState.owner, expectedOwner) ||
+        !sameOwnerLockMetadata(claimedMetadata, finalMetadata)
+      ) {
+        return false;
+      }
       fs.rmSync(file);
       return true;
     } catch {
@@ -354,6 +635,7 @@ function currentOwner(sessionId, execPath) {
 
 function staleOwnerRecord(owner) {
   if (!owner || !Number.isInteger(owner.pid) || owner.pid <= 0) return true;
+  if (!hasReliableOwnerIdentity(owner)) return false;
   const live = processIdentity(owner.pid);
   if (!live) return !pidAlive(owner.pid);
   return !ownerMatchesLive(owner, live);
@@ -361,7 +643,7 @@ function staleOwnerRecord(owner) {
 
 function staleOwner(stateRoot) {
   const state = readOwnerLockState(stateRoot);
-  if (state.kind !== "valid") return state.kind === "missing" || state.kind === "invalid";
+  if (state.kind !== "valid") return state.kind === "missing";
   return staleOwnerRecord(state.owner);
 }
 
@@ -409,6 +691,10 @@ function quarantineInvalidOwnerLock(stateRoot) {
     const pinned = readOwnerLockStateAt(quarantine);
     const canonicalMetadata = ownerLockMetadata(file);
     if (pinned.kind !== "invalid" || !sameOwnerLockMetadata(claimedMetadata, canonicalMetadata)) return false;
+    pauseBeforeTakeoverUnlink();
+    const finalState = readOwnerLockState(stateRoot);
+    const finalMetadata = ownerLockMetadata(file);
+    if (finalState.kind !== "invalid" || !sameOwnerLockMetadata(claimedMetadata, finalMetadata)) return false;
     try {
       fs.rmSync(file);
       preserved = true;
@@ -454,6 +740,13 @@ function acquireOwnerLease(stateRoot, owner) {
 
     const current = readOwnerLockState(stateRoot);
     if (current.kind === "missing") continue;
+    if (current.kind === "unverifiable") {
+      throw new OwnerLeaseError(
+        "OWNER_UNVERIFIABLE",
+        "owner lease is unverifiable; refusing takeover",
+        current.owner,
+      );
+    }
     if (current.kind === "invalid") {
       sawUnreadable = true;
       if (quarantineInvalidOwnerLock(stateRoot)) continue;
@@ -469,6 +762,13 @@ function acquireOwnerLease(stateRoot, owner) {
   const finalState = readOwnerLockState(stateRoot);
   if (finalState.kind === "valid" && !staleOwnerRecord(finalState.owner)) {
     throw new OwnerLeaseError("OWNER_BUSY", "another Incognito owner won the lease race", finalState.owner);
+  }
+  if (finalState.kind === "unverifiable") {
+    throw new OwnerLeaseError(
+      "OWNER_UNVERIFIABLE",
+      "owner lease is unverifiable; refusing takeover",
+      finalState.owner,
+    );
   }
   if (finalState.kind === "invalid" || sawUnreadable) {
     throw new OwnerLeaseError("OWNER_UNREADABLE", "owner lease is not readable");

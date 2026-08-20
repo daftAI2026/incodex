@@ -127,6 +127,10 @@ function clearPid(lease, server) {
 async function incognitoAlreadyRunning() {
   const state = instance.readOwnerLockState(stateRoot());
   if (state.kind === "missing") return false;
+  // Malformed records are recoverable by acquireOwnerLease, which quarantines
+  // the old inode before publishing a complete replacement. Do not turn a
+  // crash-truncated record into a permanent owner-unavailable preflight.
+  if (state.kind === "invalid") return false;
   if (state.kind !== "valid") throw new Error(`owner lease is ${state.kind}`);
   const owner = state.owner;
   const connected = await instance.connectExistingWithRetry(stateRoot(), instance.ownerToken(owner));
