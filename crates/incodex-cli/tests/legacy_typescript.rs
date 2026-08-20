@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
 const INSTALL_ID: &str = "11111111-1111-4111-8111-111111111111";
+const ORPHAN_INSTALL_ID: &str = "22222222-2222-4222-8222-222222222222";
 const INFO_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -26,6 +27,86 @@ struct LegacyTsV1Fixture {
     root: PathBuf,
     app: PathBuf,
     original: Vec<u8>,
+}
+
+struct LegacyTsV1JournalFixture {
+    root: PathBuf,
+    app: PathBuf,
+    journal_path: PathBuf,
+}
+
+impl LegacyTsV1JournalFixture {
+    fn create() -> Self {
+        let root = temp_root();
+        let app = root.join("ChatGPT.app");
+        fs::create_dir_all(&app).unwrap();
+        let state_root = root.join(".incodex");
+        let journal_path = write_flat_journal(
+            &state_root,
+            &app,
+            INSTALL_ID,
+            "DISCOVERED",
+            "2026-08-21T00:00:00.000Z",
+        );
+        Self {
+            root: state_root,
+            app,
+            journal_path,
+        }
+    }
+
+    fn advance_to(&self, phase: &str) {
+        let phases = [
+            "DISCOVERED",
+            "BACKUP_COMMITTED",
+            "STAGED",
+            "PATCHED",
+            "SIGNED",
+            "VERIFIED",
+            "TARGET_MOVED_OUT",
+            "SWAPPED",
+            "TARGET_VERIFIED",
+            "ROLLED_BACK",
+        ];
+        let target_index = phases
+            .iter()
+            .position(|candidate| *candidate == phase)
+            .unwrap();
+        for next in phases.iter().skip(1).take(target_index) {
+            if *next == "BACKUP_COMMITTED" {
+                fs::create_dir_all(
+                    self.root
+                        .join("installations")
+                        .join(target_id(&self.app))
+                        .join(INSTALL_ID)
+                        .join("original/ChatGPT.app"),
+                )
+                .unwrap();
+            }
+            if *next == "STAGED" {
+                fs::create_dir_all(
+                    self.root
+                        .join("scratch")
+                        .join(format!("ChatGPT.app.staged-{INSTALL_ID}")),
+                )
+                .unwrap();
+            }
+            if *next == "TARGET_MOVED_OUT" {
+                fs::create_dir_all(
+                    self.root
+                        .join(format!("transactions/{INSTALL_ID}/outgoing/ChatGPT.app")),
+                )
+                .unwrap();
+            }
+            set_journal_phase_at(&self.journal_path, next);
+        }
+        if phase == "DISCOVERED" {
+            return;
+        }
+        if phase == "ROLLED_BACK" {
+            set_journal_phase_at(&self.journal_path, phase);
+        }
+    }
 }
 
 impl LegacyTsV1Fixture {
@@ -173,12 +254,11 @@ fn assert_rejects_symlink(mutator: impl FnOnce(&LegacyTsV1Fixture)) {
     assert!(error.to_lowercase().contains("symlink"), "{error}");
 }
 
-fn set_journal_phase(fixture: &LegacyTsV1Fixture, phase: &str) {
-    let mut raw: serde_json::Value =
-        serde_json::from_slice(&fs::read(fixture.journal_path()).unwrap()).unwrap();
+fn set_journal_phase_at(path: &std::path::Path, phase: &str) {
+    let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
     raw["phase"] = json!(phase);
     fs::write(
-        fixture.journal_path(),
+        path,
         format!("{}\n", serde_json::to_string_pretty(&raw).unwrap()),
     )
     .unwrap();
@@ -193,6 +273,45 @@ fn set_journal_path(fixture: &LegacyTsV1Fixture, field: &str, path: &std::path::
         format!("{}\n", serde_json::to_string_pretty(&raw).unwrap()),
     )
     .unwrap();
+}
+
+fn write_flat_journal(
+    root: &std::path::Path,
+    app: &std::path::Path,
+    install_id: &str,
+    phase: &str,
+    updated_at: &str,
+) -> PathBuf {
+    let target = fs::canonicalize(app).unwrap();
+    let target_store = root.join("installations").join(target_id(app));
+    let original = target_store.join(install_id).join("original/ChatGPT.app");
+    let staged = root
+        .join("scratch")
+        .join(format!("ChatGPT.app.staged-{install_id}"));
+    let outgoing = root
+        .join("transactions")
+        .join(install_id)
+        .join("outgoing/ChatGPT.app");
+    let journal_path = root.join("transactions").join(format!("{install_id}.json"));
+    fs::create_dir_all(journal_path.parent().unwrap()).unwrap();
+    fs::write(
+        &journal_path,
+        format!(
+            "{}\n",
+            json!({
+                "schemaVersion": 1,
+                "installId": install_id,
+                "targetRealPath": target,
+                "stagedApp": staged,
+                "originalSnapshot": original,
+                "outgoingApp": outgoing,
+                "phase": phase,
+                "updatedAt": updated_at
+            })
+        ),
+    )
+    .unwrap();
+    journal_path
 }
 
 fn temp_root() -> PathBuf {
@@ -381,32 +500,66 @@ fn legacy_typescript_fixture_accepts_only_the_install_transaction_outgoing_layou
 }
 
 #[test]
-fn legacy_typescript_fixture_classifies_journal_phase_without_mixing_states() {
-    for (phase, expected) in [
-        (
-            "COMMITTED",
-            incodex_cli::legacy_typescript::LegacyStateKind::Committed,
-        ),
-        (
-            "TARGET_VERIFIED",
-            incodex_cli::legacy_typescript::LegacyStateKind::Interrupted,
-        ),
-        (
-            "PATCHED",
-            incodex_cli::legacy_typescript::LegacyStateKind::Interrupted,
-        ),
-        (
-            "ROLLED_BACK",
-            incodex_cli::legacy_typescript::LegacyStateKind::RolledBack,
-        ),
+fn legacy_typescript_fixture_reads_real_writer_order_before_installation_metadata() {
+    for phase in [
+        "DISCOVERED",
+        "BACKUP_COMMITTED",
+        "STAGED",
+        "PATCHED",
+        "SIGNED",
+        "VERIFIED",
+        "TARGET_MOVED_OUT",
+        "SWAPPED",
+        "TARGET_VERIFIED",
     ] {
-        let fixture = LegacyTsV1Fixture::create();
-        set_journal_phase(&fixture, phase);
+        let fixture = LegacyTsV1JournalFixture::create();
+        fixture.advance_to(phase);
         let state = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
-            .expect("phase should be structurally readable")
-            .expect("fixture should be detected");
-        assert_eq!(state.kind, expected, "phase {phase} was misclassified");
+            .expect("early writer state should be structurally readable")
+            .expect("journal must be detected before installation metadata exists");
+        assert_eq!(state.install_id, INSTALL_ID, "phase {phase} was lost");
+        assert_eq!(
+            state.kind,
+            incodex_cli::legacy_typescript::LegacyStateKind::Interrupted,
+            "phase {phase} was misclassified"
+        );
     }
+}
+
+#[test]
+fn legacy_typescript_fixture_reads_a_real_rolled_back_journal_without_metadata() {
+    let fixture = LegacyTsV1JournalFixture::create();
+    fixture.advance_to("ROLLED_BACK");
+    let state = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
+        .expect("rolled back writer state should be structurally readable")
+        .expect("rolled back journal must be detected");
+    assert_eq!(state.install_id, INSTALL_ID);
+    assert_eq!(
+        state.kind,
+        incodex_cli::legacy_typescript::LegacyStateKind::RolledBack
+    );
+}
+
+#[test]
+fn legacy_typescript_fixture_prefers_a_new_orphan_journal_over_an_old_committed_pointer() {
+    let fixture = LegacyTsV1Fixture::create();
+    let orphan = write_flat_journal(
+        &fixture.root,
+        &fixture.app,
+        ORPHAN_INSTALL_ID,
+        "DISCOVERED",
+        "2026-08-21T00:01:00.000Z",
+    );
+    set_journal_phase_at(&orphan, "SWAPPED");
+
+    let state = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
+        .expect("orphan journal should be structurally readable")
+        .expect("new orphan journal must not be hidden by current.json");
+    assert_eq!(state.install_id, ORPHAN_INSTALL_ID);
+    assert_eq!(
+        state.kind,
+        incodex_cli::legacy_typescript::LegacyStateKind::Interrupted
+    );
 }
 
 #[test]
