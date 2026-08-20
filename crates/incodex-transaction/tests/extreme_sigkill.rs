@@ -253,6 +253,9 @@ fn run_child_mode() -> bool {
             seed_original(&root, &app, &id);
             tx.place_staging(&candidate).expect("stage candidate");
             tx.swap().expect("swap candidate");
+            // +--------------------------------------------------------------------+
+            // | 这里只模拟真实 remove 完成后的边界；不冒充内核调用内部的不可观察中点。 |
+            // +--------------------------------------------------------------------+
             fs::remove_file(tx.outgoing_app().join("Contents/MacOS/ChatGPT"))
                 .expect("remove one outgoing file");
             kill_self();
@@ -267,8 +270,14 @@ fn run_child_mode() -> bool {
             seed_original(&root, &app, &id);
             tx.place_staging(&candidate).expect("stage candidate");
             tx.swap().expect("swap candidate");
+            let outgoing = tx.outgoing_app();
             tx.commit_with_checkpoint(|phase| {
                 if phase == "COMMITTED_BEFORE_CLEANUP" {
+                    // +-----------------------------------------------------------+
+                    // | durable COMMITTED 已落盘；partial outgoing 只能作为垃圾清理。 |
+                    // +-----------------------------------------------------------+
+                    fs::remove_file(outgoing.join("Contents/MacOS/ChatGPT"))
+                        .expect("remove one outgoing file");
                     kill_self();
                 }
             })
