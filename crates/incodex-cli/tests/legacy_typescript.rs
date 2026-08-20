@@ -184,6 +184,17 @@ fn set_journal_phase(fixture: &LegacyTsV1Fixture, phase: &str) {
     .unwrap();
 }
 
+fn set_journal_path(fixture: &LegacyTsV1Fixture, field: &str, path: &std::path::Path) {
+    let mut raw: serde_json::Value =
+        serde_json::from_slice(&fs::read(fixture.journal_path()).unwrap()).unwrap();
+    raw[field] = json!(path.display().to_string());
+    fs::write(
+        fixture.journal_path(),
+        format!("{}\n", serde_json::to_string_pretty(&raw).unwrap()),
+    )
+    .unwrap();
+}
+
 fn temp_root() -> PathBuf {
     let sequence = SEQ.fetch_add(1, Ordering::Relaxed);
     let now = SystemTime::now()
@@ -304,6 +315,68 @@ fn legacy_typescript_fixture_rejects_an_empty_optional_outgoing_path() {
 
     let error = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
         .expect_err("empty outgoingApp must be rejected");
+    assert!(error.contains("outgoingApp"), "{error}");
+}
+
+#[test]
+fn legacy_typescript_fixture_accepts_only_emitted_staging_layouts() {
+    let fixture = LegacyTsV1Fixture::create();
+    set_journal_path(
+        &fixture,
+        "stagedApp",
+        &fixture.root.join("ChatGPT.app.live"),
+    );
+    incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
+        .expect("official live staging layout should be structurally valid")
+        .expect("fixture should be detected");
+
+    let fixture = LegacyTsV1Fixture::create();
+    set_journal_path(&fixture, "stagedApp", &fixture.root);
+    let error = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
+        .expect_err("the state root itself is not a staging layout");
+    assert!(error.contains("stagedApp"), "{error}");
+
+    let fixture = LegacyTsV1Fixture::create();
+    set_journal_path(
+        &fixture,
+        "stagedApp",
+        &fixture.root.join("scratch/other-staged-app"),
+    );
+    let error = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
+        .expect_err("an unrelated staging path must be rejected");
+    assert!(error.contains("stagedApp"), "{error}");
+}
+
+#[test]
+fn legacy_typescript_fixture_accepts_only_the_install_transaction_outgoing_layout() {
+    let fixture = LegacyTsV1Fixture::create();
+    set_journal_path(&fixture, "outgoingApp", &fixture.root);
+    let error = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
+        .expect_err("the state root itself is not an outgoing app layout");
+    assert!(error.contains("outgoingApp"), "{error}");
+
+    let fixture = LegacyTsV1Fixture::create();
+    set_journal_path(
+        &fixture,
+        "outgoingApp",
+        &fixture
+            .root
+            .join(format!("transactions/{INSTALL_ID}/outgoing/Other.app")),
+    );
+    let error = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
+        .expect_err("an unrelated outgoing path must be rejected");
+    assert!(error.contains("outgoingApp"), "{error}");
+
+    let fixture = LegacyTsV1Fixture::create();
+    set_journal_path(
+        &fixture,
+        "outgoingApp",
+        &fixture.root.join(
+            "transactions/22222222-2222-4222-8222-222222222222/outgoing/ChatGPT.app",
+        ),
+    );
+    let error = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
+        .expect_err("an outgoing path for another install must be rejected");
     assert!(error.contains("outgoingApp"), "{error}");
 }
 
