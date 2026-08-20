@@ -38,10 +38,7 @@ fn update_fails_when_install_script_download_fails() {
     let bash_profile = home.join(".bash_profile");
     fs::write(
         &bash_profile,
-        format!(
-            "export PATH='{}:/usr/bin:/bin'\n",
-            fake_bin.display()
-        ),
+        format!("export PATH='{}:/usr/bin:/bin'\n", fake_bin.display()),
     )
     .unwrap();
 
