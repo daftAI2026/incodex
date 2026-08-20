@@ -50,7 +50,11 @@ pub struct Spinner {
 
 impl Spinner {
     pub fn start(message: &str) -> Self {
-        if !std::io::stderr().is_terminal() {
+        Self::start_for(message, std::io::stderr().is_terminal())
+    }
+
+    fn start_for(message: &str, interactive: bool) -> Self {
+        if !interactive {
             return Self {
                 stopped: Arc::new(AtomicBool::new(true)),
                 worker: None,
@@ -92,5 +96,27 @@ impl Spinner {
 impl Drop for Spinner {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::Spinner;
+
+    #[test]
+    fn rapid_stage_switches_do_not_wait_for_each_frame_interval() {
+        let started = Instant::now();
+        for _ in 0..5 {
+            let mut spinner = Spinner::start_for("Switching stage", true);
+            std::thread::sleep(Duration::from_millis(5));
+            spinner.stop();
+        }
+        assert!(
+            started.elapsed() < Duration::from_millis(150),
+            "stopping five stages took {:?}",
+            started.elapsed()
+        );
     }
 }
