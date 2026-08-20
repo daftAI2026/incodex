@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::{Duration, Instant};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
@@ -30,6 +31,53 @@ fn installed_cli(home: &std::path::Path) -> (PathBuf, PathBuf) {
     let installed = bin.join("incodex");
     fs::copy(env!("CARGO_BIN_EXE_incodex"), &installed).unwrap();
     (prefix, installed)
+}
+
+fn open_menu_long_enough_for_background_refresh(
+    home: &std::path::Path,
+    installed: &std::path::Path,
+    path: &str,
+) {
+    let script = r#"
+import os, pty, select, sys, time
+program, home, path = sys.argv[1:]
+env = os.environ.copy()
+env["HOME"] = home
+env["PATH"] = path
+env["TERM"] = "xterm-256color"
+env["NO_COLOR"] = "1"
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe(program, [program], env)
+deadline = time.time() + 5
+seen = False
+while time.time() < deadline:
+    ready, _, _ = select.select([fd], [], [], 0.1)
+    if ready:
+        try:
+            chunk = os.read(fd, 8192)
+        except OSError:
+            break
+        if b"6. Quit" in chunk:
+            seen = True
+            break
+if not seen:
+    os.kill(pid, 9)
+    os.waitpid(pid, 0)
+    raise SystemExit(2)
+time.sleep(0.7)
+os.write(fd, b"q")
+os.waitpid(pid, 0)
+"#;
+    let status = Command::new("python3")
+        .arg("-c")
+        .arg(script)
+        .arg(installed)
+        .arg(home)
+        .arg(path)
+        .status()
+        .unwrap();
+    assert!(status.success(), "PTY menu harness failed: {status}");
 }
 
 #[test]
@@ -111,6 +159,7 @@ fn update_pins_the_installer_and_assets_to_the_resolved_release() {
     let curl_log = home.join("curl.log");
     let prefix_log = home.join("prefix.log");
     let download_base_log = home.join("download-base.log");
+    let expected_version_log = home.join("expected-version.log");
     fs::create_dir_all(&fake_bin).unwrap();
     let (prefix, installed) = installed_cli(&home);
     write_executable(
@@ -128,6 +177,13 @@ case "$url" in
 #!/bin/sh
 printf '%s\n' "$INCODEX_PREFIX" > "$PREFIX_LOG"
 printf '%s\n' "$INCODEX_DOWNLOAD_BASE" > "$DOWNLOAD_BASE_LOG"
+printf '%s\n' "$INCODEX_EXPECTED_VERSION" > "$EXPECTED_VERSION_LOG"
+cat > "$INCODEX_PREFIX/bin/incodex.next" <<'CLI'
+#!/bin/sh
+printf '%s\n' 'Incodex version 9.9.9'
+CLI
+chmod 755 "$INCODEX_PREFIX/bin/incodex.next"
+mv -f "$INCODEX_PREFIX/bin/incodex.next" "$INCODEX_PREFIX/bin/incodex"
 INSTALLER
     ;;
   *)
@@ -145,6 +201,9 @@ esac
         .env("CURL_LOG", &curl_log)
         .env("PREFIX_LOG", &prefix_log)
         .env("DOWNLOAD_BASE_LOG", &download_base_log)
+        .env("EXPECTED_VERSION_LOG", &expected_version_log)
+        .env("INCODEX_PREFIX", home.join("attacker-prefix"))
+        .env("INCODEX_DOWNLOAD_BASE", "https://attacker.invalid/release")
         .output()
         .unwrap();
 
@@ -160,9 +219,275 @@ esac
         fs::read_to_string(download_base_log).unwrap().trim(),
         "https://github.com/daftAI2026/incodex/releases/download/v9.9.9"
     );
+    assert_eq!(fs::read_to_string(expected_version_log).unwrap().trim(), "9.9.9");
     let urls = fs::read_to_string(curl_log).unwrap();
     assert!(urls.contains("raw.githubusercontent.com/daftAI2026/incodex/v9.9.9/install.sh"));
     assert!(!urls.contains("raw.githubusercontent.com/daftAI2026/incodex/main/install.sh"));
+}
+
+#[test]
+fn update_retries_transient_release_lookup_and_announces_each_stage() {
+    let home = scratch("retry-progress");
+    let fake_bin = home.join("fake-bin");
+    let attempts = home.join("attempts");
+    let installer_attempts = home.join("installer-attempts");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let (_, installed) = installed_cli(&home);
+    write_executable(
+        &fake_bin.join("curl"),
+        r#"#!/bin/sh
+url=""
+for arg in "$@"; do url="$arg"; done
+case "$url" in
+  https://api.github.com/repos/daftAI2026/incodex/releases/latest)
+    count=$(cat "$ATTEMPTS" 2>/dev/null || printf '0')
+    count=$((count + 1))
+    printf '%s\n' "$count" > "$ATTEMPTS"
+    if [ "$count" -lt 3 ]; then exit 7; fi
+    printf '%s\n' '{"tag_name":"v9.9.9"}'
+    ;;
+  https://raw.githubusercontent.com/daftAI2026/incodex/v9.9.9/install.sh)
+    count=$(cat "$INSTALLER_ATTEMPTS" 2>/dev/null || printf '0')
+    count=$((count + 1))
+    printf '%s\n' "$count" > "$INSTALLER_ATTEMPTS"
+    if [ "$count" -lt 3 ]; then exit 7; fi
+    cat <<'INSTALLER'
+#!/bin/sh
+cat > "$INCODEX_PREFIX/bin/incodex.next" <<'CLI'
+#!/bin/sh
+printf '%s\n' 'Incodex version 9.9.9'
+CLI
+chmod 755 "$INCODEX_PREFIX/bin/incodex.next"
+mv -f "$INCODEX_PREFIX/bin/incodex.next" "$INCODEX_PREFIX/bin/incodex"
+INSTALLER
+    ;;
+  *) exit 88 ;;
+esac
+"#,
+    );
+
+    let output = Command::new(&installed)
+        .arg("update")
+        .env("HOME", &home)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .env("ATTEMPTS", &attempts)
+        .env("INSTALLER_ATTEMPTS", &installer_attempts)
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(fs::read_to_string(attempts).unwrap().trim(), "3");
+    assert_eq!(fs::read_to_string(installer_attempts).unwrap().trim(), "3");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for stage in [
+        "Checking for updates",
+        "Downloading stable installer",
+        "Installing v9.9.9",
+        "Verified Incodex 9.9.9",
+    ] {
+        assert!(stdout.contains(stage), "missing stage {stage:?}: {stdout}");
+    }
+}
+
+#[test]
+fn update_rejects_false_success_when_the_installed_binary_did_not_change() {
+    let home = scratch("false-success");
+    let fake_bin = home.join("fake-bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let (_, installed) = installed_cli(&home);
+    write_executable(
+        &fake_bin.join("curl"),
+        r#"#!/bin/sh
+url=""
+for arg in "$@"; do url="$arg"; done
+case "$url" in
+  https://api.github.com/repos/daftAI2026/incodex/releases/latest)
+    printf '%s\n' '{"tag_name":"v9.9.9"}' ;;
+  https://raw.githubusercontent.com/daftAI2026/incodex/v9.9.9/install.sh)
+    printf '%s\n' '#!/bin/sh' 'exit 0' ;;
+  https://raw.githubusercontent.com/daftAI2026/incodex/main/install.sh)
+    printf '%s\n' '#!/bin/sh' 'exit 0' ;;
+  *) exit 88 ;;
+esac
+"#,
+    );
+
+    let output = Command::new(&installed)
+        .arg("update")
+        .env("HOME", &home)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("installed CLI did not report 9.9.9"),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn update_uses_main_only_to_heal_a_failed_tagged_installer() {
+    let home = scratch("self-heal");
+    let fake_bin = home.join("fake-bin");
+    let curl_log = home.join("curl.log");
+    let download_base_log = home.join("download-base.log");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let (_, installed) = installed_cli(&home);
+    write_executable(
+        &fake_bin.join("curl"),
+        r#"#!/bin/sh
+printf '%s\n' "$*" >> "$CURL_LOG"
+url=""
+for arg in "$@"; do url="$arg"; done
+case "$url" in
+  https://api.github.com/repos/daftAI2026/incodex/releases/latest)
+    printf '%s\n' '{"tag_name":"v9.9.9"}' ;;
+  https://raw.githubusercontent.com/daftAI2026/incodex/v9.9.9/install.sh)
+    printf '%s\n' '#!/bin/sh' 'exit 42' ;;
+  https://raw.githubusercontent.com/daftAI2026/incodex/main/install.sh)
+    cat <<'INSTALLER'
+#!/bin/sh
+printf '%s\n' "$INCODEX_DOWNLOAD_BASE" > "$DOWNLOAD_BASE_LOG"
+cat > "$INCODEX_PREFIX/bin/incodex.next" <<'CLI'
+#!/bin/sh
+printf '%s\n' 'Incodex version 9.9.9'
+CLI
+chmod 755 "$INCODEX_PREFIX/bin/incodex.next"
+mv -f "$INCODEX_PREFIX/bin/incodex.next" "$INCODEX_PREFIX/bin/incodex"
+INSTALLER
+    ;;
+  *) exit 88 ;;
+esac
+"#,
+    );
+
+    let output = Command::new(&installed)
+        .arg("update")
+        .env("HOME", &home)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .env("CURL_LOG", &curl_log)
+        .env("DOWNLOAD_BASE_LOG", &download_base_log)
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let urls = fs::read_to_string(curl_log).unwrap();
+    let tag_pos = urls.find("/v9.9.9/install.sh").unwrap();
+    let heal_pos = urls.find("/main/install.sh").unwrap();
+    assert!(tag_pos < heal_pos, "main was not a fallback: {urls}");
+    assert_eq!(
+        fs::read_to_string(download_base_log).unwrap().trim(),
+        "https://github.com/daftAI2026/incodex/releases/download/v9.9.9"
+    );
+}
+
+#[test]
+fn overlapping_updates_are_refused_by_the_target_lock() {
+    let home = scratch("lock");
+    let fake_bin = home.join("fake-bin");
+    let installer_started = home.join("installer-started");
+    let installer_gate = home.join("installer-gate");
+    let installer_release = home.join("installer-release");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let (_, installed) = installed_cli(&home);
+    write_executable(
+        &fake_bin.join("curl"),
+        r#"#!/bin/sh
+url=""
+for arg in "$@"; do url="$arg"; done
+case "$url" in
+  https://api.github.com/repos/daftAI2026/incodex/releases/latest)
+    printf '%s\n' '{"tag_name":"v9.9.9"}' ;;
+  https://raw.githubusercontent.com/daftAI2026/incodex/v9.9.9/install.sh)
+    cat <<'INSTALLER'
+#!/bin/sh
+if mkdir "$INSTALLER_GATE" 2>/dev/null; then
+  : > "$INSTALLER_STARTED"
+  while [ ! -f "$INSTALLER_RELEASE" ]; do sleep 0.05; done
+  exit 1
+fi
+exit 0
+INSTALLER
+    ;;
+  https://raw.githubusercontent.com/daftAI2026/incodex/main/install.sh)
+    printf '%s\n' '#!/bin/sh' 'exit 1' ;;
+  *) exit 88 ;;
+esac
+"#,
+    );
+
+    let path = format!("{}:/usr/bin:/bin", fake_bin.display());
+    let mut first = Command::new(&installed)
+        .arg("update")
+        .env("HOME", &home)
+        .env("PATH", &path)
+        .env("INSTALLER_STARTED", &installer_started)
+        .env("INSTALLER_GATE", &installer_gate)
+        .env("INSTALLER_RELEASE", &installer_release)
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !installer_started.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(installer_started.exists(), "first updater never entered installer");
+
+    let started = Instant::now();
+    let second = Command::new(&installed)
+        .arg("update")
+        .env("HOME", &home)
+        .env("PATH", &path)
+        .env("INSTALLER_STARTED", &installer_started)
+        .env("INSTALLER_GATE", &installer_gate)
+        .env("INSTALLER_RELEASE", &installer_release)
+        .output()
+        .unwrap();
+    let elapsed = started.elapsed();
+    fs::write(&installer_release, "release\n").unwrap();
+    let _ = first.wait();
+
+    assert_eq!(second.status.code(), Some(1));
+    assert!(elapsed < Duration::from_secs(1), "second updater waited {elapsed:?}");
+    assert!(
+        String::from_utf8_lossy(&second.stderr).contains("another update is already running"),
+        "stderr={}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+}
+
+#[test]
+fn native_script_menu_refreshes_the_stable_update_notice_cache() {
+    let home = scratch("menu-refresh");
+    let fake_bin = home.join("fake-bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let (_, installed) = installed_cli(&home);
+    write_executable(
+        &fake_bin.join("curl"),
+        "#!/bin/sh\nprintf '%s\\n' '{\"tag_name\":\"v9.9.9\"}'\n",
+    );
+    let path = format!("{}:/usr/bin:/bin", fake_bin.display());
+
+    open_menu_long_enough_for_background_refresh(&home, &installed, &path);
+
+    let cache = home.join(".incodex/cache/update_message");
+    assert_eq!(
+        fs::read_to_string(cache).unwrap().trim(),
+        "Update 9.9.9 available, run incodex update"
+    );
 }
 
 #[test]
