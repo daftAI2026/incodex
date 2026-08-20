@@ -5,6 +5,9 @@ set -euo pipefail
 REPO="${INCODEX_REPO:-daftAI2026/incodex}"
 DOWNLOAD_BASE="${INCODEX_DOWNLOAD_BASE:-https://github.com/${REPO}/releases/latest/download}"
 PREFIX="${INCODEX_PREFIX:-${HOME}/.local}"
+case "$PREFIX" in
+  /\$bunfs | /\$bunfs/*) PREFIX="${HOME}/.local" ;;
+esac
 BIN_DIR="${PREFIX}/bin"
 
 die() {
