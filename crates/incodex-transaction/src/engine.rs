@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use incodex_macos::ditto;
 
+use crate::durable::sync_tree_and_ancestors;
 use crate::journal::{
     load_v2, reconstructed, tx_paths, validate_recovery_proofs, validate_rel_paths, write_journal,
     JournalTarget, JournalV2, RelPaths, ORIGINAL_REL, OUTGOING_REL, STAGED_REL,
@@ -159,6 +160,13 @@ impl Engine {
         if backup_digest != self.journal.pre_swap_digest {
             return Err("backup snapshot does not match the sealed pre-swap tree".into());
         }
+        let transaction_dir = original.parent().and_then(Path::parent).ok_or_else(|| {
+            format!(
+                "backup snapshot has no transaction root: {}",
+                original.display()
+            )
+        })?;
+        sync_tree_and_ancestors(&original, transaction_dir)?;
         self.journal.backup_digest = backup_digest;
         self.advance("BACKUP_COMMITTED")
     }
