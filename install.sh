@@ -45,10 +45,15 @@ BIN_DIR="${PREFIX}/bin"
 refuse_managed_conflict() {
   [[ -n "${INCODEX_DOWNLOAD_DIR:-}" ]] && return 0
   command -v brew >/dev/null 2>&1 || return 0
+  local installed=""
+  installed="$(HOMEBREW_NO_AUTO_UPDATE=1 brew list --versions incodex 2>/dev/null)" || return 0
+  [[ -n "$installed" ]] || return 0
   local brew_prefix=""
-  brew_prefix="$(HOMEBREW_NO_AUTO_UPDATE=1 brew --prefix incodex 2>/dev/null)" || return 0
-  [[ -n "$brew_prefix" ]] || return 0
-  die "Homebrew-managed Incodex detected at ${brew_prefix}/bin/incodex. Run 'brew upgrade incodex', or 'brew uninstall incodex' before switching to the script installer"
+  local location=""
+  if brew_prefix="$(HOMEBREW_NO_AUTO_UPDATE=1 brew --prefix incodex 2>/dev/null)" && [[ -n "$brew_prefix" ]]; then
+    location=" at ${brew_prefix}/bin/incodex"
+  fi
+  die "Homebrew-managed Incodex detected${location}. Run 'brew upgrade incodex', or 'brew uninstall incodex' before switching to the script installer"
 }
 
 arch_name() {
