@@ -260,6 +260,75 @@ pub fn restore_committed(root: &Path, install_id: &str, live_path: &Path) -> Res
             journal.phase
         ));
     }
+    restore_committed_locked(root, &journal, live_path)
+}
+
+pub fn migrate_legacy_committed(
+    root: &Path,
+    install_id: &str,
+    live_path: &Path,
+) -> Result<(), String> {
+    let initial = load_v2(root, install_id)?;
+    if !is_legacy_committed(&initial) {
+        return Err("transaction is not a legacy COMMITTED journal".into());
+    }
+    let lock_target = PathBuf::from(&initial.target.real_path);
+    let _lock = acquire_target_lock(root, &lock_target, "uninstall", Some(install_id))?;
+    let journal = load_v2(root, install_id)?;
+    if !is_legacy_committed(&journal) {
+        return Err("legacy transaction changed before migration".into());
+    }
+    let current = inspect_target(live_path, None)?;
+    if current.real_path != PathBuf::from(&journal.target.real_path) {
+        return Err("legacy committed target real path changed before migration".into());
+    }
+    let paths = reconstructed(root, &journal)?;
+    let backup_identity = directory_identity(&paths.original)
+        .map_err(|error| format!("invalid legacy backup: {error}"))?;
+    let backup_digest = tree_digest(&paths.original)?;
+    let staged_identity = directory_identity(&current.real_path)
+        .map_err(|error| format!("invalid legacy live target: {error}"))?;
+    let staged_digest = tree_digest(&current.real_path)?;
+    let mut migrated = journal.clone();
+    migrated.target.parent_device = current.parent_device.to_string();
+    migrated.target.parent_inode = current.parent_inode.to_string();
+    migrated.pre_swap_digest = backup_digest.clone();
+    migrated.backup_digest = backup_digest;
+    migrated.staged_device = staged_identity.device.to_string();
+    migrated.staged_inode = staged_identity.inode.to_string();
+    migrated.staged_digest = staged_digest;
+    migrated.sequence += 1;
+    write_journal(root, &migrated)?;
+    let migrated = load_v2(root, install_id)?;
+    let _ = backup_identity;
+    restore_committed_locked(root, &migrated, live_path)
+}
+
+fn is_legacy_committed(journal: &JournalV2) -> bool {
+    journal.phase == "COMMITTED"
+        && journal.target.parent_device.is_empty()
+        && journal.target.parent_inode.is_empty()
+        && journal.pre_swap_digest.is_empty()
+        && journal.backup_digest.is_empty()
+        && journal.staged_device.is_empty()
+        && journal.staged_inode.is_empty()
+        && journal.staged_digest.is_empty()
+        && journal.restored_device.is_empty()
+        && journal.restored_inode.is_empty()
+        && journal.restored_digest.is_empty()
+}
+
+fn restore_committed_locked(
+    root: &Path,
+    journal: &JournalV2,
+    live_path: &Path,
+) -> Result<(), String> {
+    if journal.phase != "COMMITTED" {
+        return Err(format!(
+            "cannot restore an uncommitted transaction in phase {}",
+            journal.phase
+        ));
+    }
     let current = inspect_target(live_path, None)?;
     if current.real_path != PathBuf::from(&journal.target.real_path) {
         return Err("committed target real path changed before restore".into());

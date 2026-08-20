@@ -10,7 +10,10 @@ use incodex_macos::{
     sign_app, verify_app, write_asar_integrity,
 };
 use incodex_runtime_bundle::{loader_source, publish, runtime_version};
-use incodex_transaction::{journal_v2, recover_with, restore_committed, Engine, Recovery, TxError};
+use incodex_transaction::{
+    journal_v2, migrate_legacy_committed, recover_with, restore_committed, Engine, Recovery,
+    TxError,
+};
 
 use crate::parse::ParsedCli;
 
@@ -304,7 +307,11 @@ fn uninstall_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
         let _ = quit_official_app();
     }
     let journal = find_committed(root, app)?;
-    restore_committed(root, &journal.install_id, app)?;
+    if journal.target.parent_device.is_empty() {
+        migrate_legacy_committed(root, &journal.install_id, app)?;
+    } else {
+        restore_committed(root, &journal.install_id, app)?;
+    }
     let _ = notify_launch_services(app);
     Ok(CommandResult {
         skipped: false,

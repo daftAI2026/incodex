@@ -10,7 +10,8 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 pub use engine::{
-    recover, recover_with, restore_committed, CommitResult, Engine, RecoverResult, TxError,
+    migrate_legacy_committed, recover, recover_with, restore_committed, CommitResult, Engine,
+    RecoverResult, TxError,
 };
 pub use journal::{new_install_id, JournalV2};
 
