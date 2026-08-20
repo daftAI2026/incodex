@@ -8,6 +8,7 @@ description = "Typed install transaction for the Incodex native CLI"
 
 [dependencies]
 incodex-core = { path = "../incodex-core" }
+incodex-macos = { path = "../incodex-macos" }
 libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true

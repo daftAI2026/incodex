@@ -157,6 +157,7 @@ name = "incodex-transaction"
 version = "0.2.0"
 dependencies = [
  "incodex-core",
+ "incodex-macos",
  "libc",
  "serde",
  "serde_json",

@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use incodex_core::canonical::{inspect_target, recheck_target, CanonicalTarget};
+use incodex_macos::ditto;
 
 use crate::journal::{
     load_v2, reconstructed, tx_paths, validate_rel_paths, write_journal, JournalTarget, JournalV2,
@@ -97,7 +98,7 @@ impl Engine {
         if dest.exists() {
             fs::remove_dir_all(&dest).map_err(|err| err.to_string())?;
         }
-        fs::rename(staged, &dest).or_else(|_| copy_dir(staged, &dest))?;
+        fs::rename(staged, &dest).or_else(|_| ditto(staged, &dest))?;
         self.advance("STAGED")
     }
 
@@ -212,7 +213,7 @@ fn restore_live(root: &Path, live: &Path, journal: &JournalV2) -> Result<(), Str
         if restore.exists() {
             fs::remove_dir_all(&restore).map_err(|err| err.to_string())?;
         }
-        copy_dir(&paths.original, &restore)?;
+        ditto(&paths.original, &restore)?;
         replace_live(&restore, live, &paths.dir)?;
     }
     if paths.staged.exists() {
@@ -240,20 +241,6 @@ fn replace_live(source: &Path, live: &Path, transaction_dir: &Path) -> Result<()
             let _ = fs::rename(&trash, live);
         }
         return Err(error.to_string());
-    }
-    Ok(())
-}
-
-fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {
-    fs::create_dir_all(to).map_err(|err| err.to_string())?;
-    for entry in fs::read_dir(from).map_err(|err| err.to_string())? {
-        let entry = entry.map_err(|err| err.to_string())?;
-        let dest = to.join(entry.file_name());
-        if entry.file_type().map_err(|err| err.to_string())?.is_dir() {
-            copy_dir(&entry.path(), &dest)?;
-        } else {
-            fs::copy(entry.path(), dest).map_err(|err| err.to_string())?;
-        }
     }
     Ok(())
 }
