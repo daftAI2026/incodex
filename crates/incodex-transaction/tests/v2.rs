@@ -281,6 +281,22 @@ fn install_id_is_uuid_and_matches_directory_and_journal() {
 }
 
 #[test]
+fn backup_completion_is_durable_before_staging() {
+    let root = scratch();
+    let target_app = app_bundle(&root, "ChatGPT.app", "live");
+    let mut tx = Engine::begin(&root, &target_app, "install").unwrap();
+    assert_eq!(tx.journal().phase, "DISCOVERED");
+    tx.mark_backup_committed().unwrap();
+    assert_eq!(tx.journal().phase, "BACKUP_COMMITTED");
+    assert_eq!(
+        incodex_transaction::journal_v2(&root, tx.install_id())
+            .unwrap()
+            .phase,
+        "BACKUP_COMMITTED"
+    );
+}
+
+#[test]
 fn swap_writes_intent_before_moving_and_keeps_outgoing_until_commit() {
     let root = scratch();
     let target_app = app_bundle(&root, "ChatGPT.app", "original");
