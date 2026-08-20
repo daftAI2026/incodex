@@ -214,7 +214,7 @@ describe("golden CLI: help and version", () => {
     }
   });
 
-  test("--version, -V, and version print the same report", () => {
+  test("--version, -V, and version print the same report shape", () => {
     const home = isolatedHome();
     const reports = [["--version"], ["-V"], ["version"]].map((args) => runCli(args, home));
     for (const ran of reports) {
@@ -233,8 +233,10 @@ describe("golden CLI: help and version", () => {
       expect(lines[9]).toBe("");
       expect(ran.stdout.endsWith("\n\n")).toBe(true);
     }
-    expect(reports[1]?.stdout).toBe(reports[0]?.stdout);
-    expect(reports[2]?.stdout).toBe(reports[0]?.stdout);
+    const stableReport = (stdout: string) =>
+      stdout.replace(/^Disk Free: .*$/m, "Disk Free: <live value>");
+    expect(stableReport(reports[1]?.stdout ?? "")).toBe(stableReport(reports[0]?.stdout ?? ""));
+    expect(stableReport(reports[2]?.stdout ?? "")).toBe(stableReport(reports[0]?.stdout ?? ""));
   });
 
   test("version wins over --help; --version is not a flag on other commands", () => {
