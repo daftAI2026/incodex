@@ -7,6 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use incodex_asar::{pack_dir, patch_asar, Archive, LOADER_NAME};
 use incodex_macos::{sign_app, write_asar_integrity};
+use incodex_transaction::journal_v2;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -164,6 +165,12 @@ fn uninstall_migrates_legacy_committed_journal_before_restore() {
     let restored = Archive::open(app.join("Contents/Resources/app.asar")).unwrap();
     assert_eq!(restored.read_package_main().unwrap().main, "index.js");
     assert!(restored.extract(LOADER_NAME).is_err());
+    assert_eq!(
+        journal_v2(&root.join(".incodex"), &install_id)
+            .unwrap()
+            .phase,
+        "ROLLED_BACK"
+    );
 }
 
 #[test]

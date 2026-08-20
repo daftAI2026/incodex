@@ -7,7 +7,9 @@ use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use incodex_transaction::{journal_v2, recover, recover_with, Engine, Recovery};
+use incodex_transaction::{
+    journal_v2, recover, recover_with, restore_committed_with_checkpoint, Engine, Recovery,
+};
 use sha2::{Digest, Sha256};
 
 const CHILD_MODE: &str = "INCODEX_TX_SIGKILL_CHILD";
@@ -18,6 +20,7 @@ const POINT_ENV: &str = "INCODEX_TX_SIGKILL_POINT";
 const ID_FILE_ENV: &str = "INCODEX_TX_SIGKILL_ID_FILE";
 const INSTALL_ID_ENV: &str = "INCODEX_TX_SIGKILL_INSTALL_ID";
 const RECOVER_CHILD_MODE: &str = "INCODEX_TX_SIGKILL_RECOVER_CHILD";
+const UNINSTALL_CHILD_MODE: &str = "INCODEX_TX_SIGKILL_UNINSTALL_CHILD";
 
 static SCRATCH_SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -134,6 +137,58 @@ fn recover_sigkill_restarts_from_a_real_recovery_step() {
     let original = tx_dir.join("original/ChatGPT.app");
     assert!(original.exists());
     assert_eq!(tree_digest(&original), original_digest);
+}
+
+#[test]
+fn uninstall_sigkill_after_live_moves_to_trash_recovers() {
+    if run_uninstall_child_mode() {
+        return;
+    }
+
+    let root = scratch();
+    let app = make_app(&root, "ChatGPT.app", "ORIGINAL");
+    let candidate = make_app(&root, "candidate.app", "PATCHED");
+    let original_digest = tree_digest(&app);
+    let id_file = root.join("install-id");
+    let status = spawn_uninstall_child(
+        "uninstall",
+        &root,
+        &app,
+        Some(&candidate),
+        Some(&id_file),
+        None,
+    );
+    assert_eq!(
+        status.signal(),
+        Some(libc::SIGKILL),
+        "uninstall child was not SIGKILLed: {status:?}"
+    );
+
+    let install_id = fs::read_to_string(&id_file).unwrap().trim().to_string();
+    assert_eq!(
+        journal_v2(&root, &install_id).unwrap().phase,
+        "UNINSTALLING"
+    );
+    assert!(!app.exists(), "live survived the intentional rename gap");
+
+    let status = spawn_uninstall_child("recover", &root, &app, None, None, Some(&install_id));
+    assert_eq!(status.code(), Some(0), "recover child failed: {status:?}");
+    assert_eq!(journal_v2(&root, &install_id).unwrap().phase, "ROLLED_BACK");
+    assert_eq!(tree_digest(&app), original_digest);
+
+    let tx_dir = root.join("transactions").join(&install_id);
+    for relative in [
+        "staging/ChatGPT.app",
+        "outgoing/ChatGPT.app",
+        "restore/ChatGPT.app",
+        "trash/ChatGPT.app",
+    ] {
+        assert!(!tx_dir.join(relative).exists(), "leftover: {relative}");
+    }
+    assert_eq!(
+        tree_digest(&tx_dir.join("original/ChatGPT.app")),
+        original_digest
+    );
 }
 
 fn run_case(point: KillPoint) {
@@ -267,6 +322,45 @@ fn run_recover_child_mode() -> bool {
     true
 }
 
+fn run_uninstall_child_mode() -> bool {
+    let Some(mode) = env::var(UNINSTALL_CHILD_MODE).ok() else {
+        return false;
+    };
+    let root = PathBuf::from(env::var(ROOT_ENV).expect("uninstall child root"));
+    let app = PathBuf::from(env::var(APP_ENV).expect("uninstall child app"));
+    match mode.as_str() {
+        "uninstall" => {
+            let candidate = PathBuf::from(env::var(CANDIDATE_ENV).expect("uninstall candidate"));
+            let mut tx = Engine::begin(&root, &app, "sigkill-uninstall-test")
+                .expect("begin uninstall transaction");
+            let id = tx.install_id().to_string();
+            fs::write(
+                PathBuf::from(env::var(ID_FILE_ENV).expect("uninstall id file")),
+                &id,
+            )
+            .expect("publish uninstall id");
+            seed_original(&root, &app, &id);
+            tx.mark_backup_committed().expect("commit backup snapshot");
+            tx.place_staging(&candidate).expect("stage candidate");
+            tx.swap().expect("swap candidate");
+            tx.commit().expect("commit candidate");
+            drop(tx);
+            restore_committed_with_checkpoint(&root, &id, &app, |phase| {
+                if phase == "LIVE_MOVED_TO_TRASH_DURABLE" {
+                    kill_self();
+                }
+            })
+            .expect("restore committed app");
+        }
+        "recover" => {
+            let id = env::var(INSTALL_ID_ENV).expect("recover uninstall id");
+            recover(&root, &id).expect("recover uninstall transaction");
+        }
+        other => panic!("unknown uninstall child mode {other}"),
+    }
+    true
+}
+
 fn mutate_child(root: &Path, app: &Path, candidate: &Path, point: KillPoint) {
     let mut tx = Engine::begin(root, app, "sigkill-test").expect("begin transaction");
     let id = tx.install_id().to_string();
@@ -278,8 +372,7 @@ fn mutate_child(root: &Path, app: &Path, candidate: &Path, point: KillPoint) {
     }
 
     seed_original(root, app, &id);
-    tx.mark_backup_committed()
-        .expect("commit backup snapshot");
+    tx.mark_backup_committed().expect("commit backup snapshot");
     let staged = candidate.to_path_buf();
     tx.place_staging(&staged).expect("stage candidate");
     if matches!(point, KillPoint::Staged) {
@@ -361,6 +454,33 @@ fn spawn_recover_child(mode: &str, root: &Path, install_id: &str) -> ExitStatus 
         .stderr(Stdio::inherit())
         .status()
         .expect("spawn recover child")
+}
+
+fn spawn_uninstall_child(
+    mode: &str,
+    root: &Path,
+    app: &Path,
+    candidate: Option<&Path>,
+    id_file: Option<&Path>,
+    install_id: Option<&str>,
+) -> ExitStatus {
+    let exe = env::current_exe().expect("uninstall child executable");
+    Command::new(exe)
+        .args([
+            "--exact",
+            "uninstall_sigkill_after_live_moves_to_trash_recovers",
+            "--nocapture",
+        ])
+        .env(UNINSTALL_CHILD_MODE, mode)
+        .env(ROOT_ENV, root)
+        .env(APP_ENV, app)
+        .env(CANDIDATE_ENV, candidate.unwrap_or(Path::new("")))
+        .env(ID_FILE_ENV, id_file.unwrap_or(Path::new("")))
+        .env(INSTALL_ID_ENV, install_id.unwrap_or(""))
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .status()
+        .expect("spawn uninstall child")
 }
 
 fn parse_point(value: &str) -> KillPoint {

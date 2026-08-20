@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_asar::{pack_dir, Archive, LOADER_NAME, MARKER_KEY};
 use incodex_macos::ditto;
-use incodex_transaction::{acquire_target_lock, Engine};
+use incodex_transaction::{acquire_target_lock, journal_v2, Engine};
 use sha2::{Digest, Sha256};
 
 fn bin() -> &'static str {
@@ -698,6 +698,12 @@ fn uninstall_yes_app_restores_original_asar() {
     let (status, stdout, stderr) =
         run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
     assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
+    let install_id = Archive::open(app.join("Contents/Resources/app.asar"))
+        .unwrap()
+        .read_package_main()
+        .unwrap()
+        .install_id
+        .unwrap();
 
     let (status, stdout, stderr) = run(
         &["uninstall", "--yes", "--app", app.to_str().unwrap()],
@@ -715,6 +721,12 @@ fn uninstall_yes_app_restores_original_asar() {
     assert_eq!(
         String::from_utf8(archive.extract("index.js").unwrap()).unwrap(),
         "ok\n"
+    );
+    assert_eq!(
+        journal_v2(&home.join(".incodex"), &install_id)
+            .unwrap()
+            .phase,
+        "ROLLED_BACK"
     );
 }
 
