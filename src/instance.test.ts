@@ -500,6 +500,49 @@ describe("cross-process owner contention", () => {
     expect(completed.every((result) => result.stderr === "")).toBe(true);
   });
 
+  test("a crashed reclaim marker is recoverable without poisoning takeover", () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-crashed-reclaim-"));
+    const claimRoot = join(root, ".incognito.lock.takeover");
+    const reclaimRoot = join(claimRoot, ".reclaim");
+    mkdirSync(reclaimRoot, { recursive: true });
+    writeFileSync(
+      join(claimRoot, "owner"),
+      JSON.stringify({
+        pid: 999999,
+        startedAt: "never",
+        processStartIdentity: "never",
+        execIdentity: "/nope",
+        token: "stale-claim-token",
+      }),
+    );
+    writeFileSync(
+      join(reclaimRoot, "owner"),
+      JSON.stringify({
+        pid: 999999,
+        startedAt: "never",
+        processStartIdentity: "never",
+        execIdentity: "/nope",
+        token: "crashed-reclaimer-token",
+      }),
+    );
+    writeFileSync(
+      join(root, LOCK_NAME),
+      JSON.stringify({
+        pid: 999999,
+        startedAt: "never",
+        execPath: "/nope",
+        sessionId: "stale",
+        token: "stale-token",
+      }),
+    );
+
+    const replacement = currentOwner("crashed-reclaim-replacement", process.execPath);
+    acquireOwnerLease(root, replacement);
+
+    expect(readOwnerLock(root)?.token).toBe(replacement.token);
+    expect(readdirSync(claimRoot)).not.toContain(".reclaim");
+  });
+
   test("a stale claim cleaner cannot remove a replacement claim in its unlink window", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-takeover-claim-window-"));
     const claimRoot = join(root, ".incognito.lock.takeover");
