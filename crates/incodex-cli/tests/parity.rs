@@ -162,6 +162,17 @@ fn normalize_rust_error(text: &str) -> String {
     text.strip_prefix("  ✗ ").unwrap_or(text).to_string()
 }
 
+fn assert_menu_order(text: &str, expected: &[&str]) {
+    let mut previous = 0;
+    for item in expected.iter().copied() {
+        let position = text
+            .find(item)
+            .unwrap_or_else(|| panic!("menu missing {item:?}: {text}"));
+        assert!(position >= previous, "menu item order changed: {text}");
+        previous = position;
+    }
+}
+
 fn marker_app(home: &Path) -> PathBuf {
     let app = home.join("Marker.app");
     fs::create_dir_all(&app).unwrap();
@@ -409,13 +420,32 @@ fn native_tty_menu_matches_the_typescript_menu_contract() {
     assert_eq!(rust.stderr, ts.stderr);
     let ts = visible(&ts.stdout);
     let rust = visible(&rust.stdout);
+    assert_menu_order(
+        &ts,
+        &[
+            "1. Install",
+            "2. Uninstall",
+            "3. Open",
+            "4. Status",
+            "5. Doctor",
+            "6. Quit",
+        ],
+    );
+    assert_menu_order(
+        &rust,
+        &[
+            "1. Open",
+            "2. Install",
+            "3. Uninstall",
+            "4. Status",
+            "5. Doctor",
+            "6. Quit",
+        ],
+    );
     for text in [
         "_____   _   _",
         "https://github.com/daftAI2026/incodex",
         "Incognito toggle for Codex desktop.",
-        "1. Install",
-        "2. Uninstall",
-        "3. Open",
         "4. Status",
         "5. Doctor",
         "6. Quit",
