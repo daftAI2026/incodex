@@ -245,6 +245,7 @@ fn install_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
         .join("original")
         .join("ChatGPT.app");
     ditto(app, &original)?;
+    tx.mark_backup_committed()?;
     let staged = root
         .join("scratch")
         .join(format!("ChatGPT.app.staged-{install_id}"));

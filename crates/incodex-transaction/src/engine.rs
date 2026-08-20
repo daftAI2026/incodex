@@ -102,6 +102,16 @@ impl Engine {
         self.advance("STAGED")
     }
 
+    pub fn mark_backup_committed(&mut self) -> Result<(), String> {
+        if self.journal.phase != "DISCOVERED" {
+            return Err(format!(
+                "cannot commit backup from phase {}",
+                self.journal.phase
+            ));
+        }
+        self.advance("BACKUP_COMMITTED")
+    }
+
     pub fn swap(&mut self) -> Result<(), String> {
         self.swap_with_checkpoint(|_| {})
     }
