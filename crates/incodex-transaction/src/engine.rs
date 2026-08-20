@@ -650,4 +650,40 @@ mod tests {
 
         fs::remove_dir_all(root).unwrap();
     }
+
+    #[test]
+    fn replace_live_checkpoints_after_durable_renames() {
+        let root = std::env::temp_dir().join(format!(
+            "incodex-replace-live-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let live = root.join("ChatGPT.app");
+        let source = root.join("restore/ChatGPT.app");
+        let transaction = root.join("transaction");
+        fs::create_dir_all(&live).unwrap();
+        fs::write(live.join("marker"), "patched").unwrap();
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("marker"), "original").unwrap();
+        fs::create_dir_all(&transaction).unwrap();
+
+        let mut checkpoints = Vec::new();
+        replace_live_with_checkpoint(&source, &live, &transaction, |phase| {
+            checkpoints.push(phase.to_string())
+        })
+        .unwrap();
+
+        assert_eq!(
+            checkpoints,
+            [
+                "LIVE_MOVED_TO_TRASH_DURABLE",
+                "RESTORE_MOVED_TO_LIVE_DURABLE"
+            ]
+        );
+        assert_eq!(fs::read_to_string(live.join("marker")).unwrap(), "original");
+        fs::remove_dir_all(root).unwrap();
+    }
 }
