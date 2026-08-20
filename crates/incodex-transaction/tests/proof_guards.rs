@@ -1,4 +1,5 @@
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -90,3 +91,24 @@ fn swap_rejects_staged_content_changed_after_place() {
     assert_eq!(fs::read_to_string(target.join("marker")).unwrap(), "live");
 }
 
+#[test]
+fn swap_rejects_staged_permissions_changed_after_place() {
+    let root = scratch();
+    let target = app(&root, "ChatGPT.app", "live");
+    let candidate = app(&root, "candidate.app", "patched");
+    let mut tx = Engine::begin(&root, &target, "proof-guard-test").unwrap();
+    copy_complete_snapshot(&root, &tx, &target);
+    tx.mark_backup_committed().unwrap();
+    tx.place_staging(&candidate).unwrap();
+    fs::set_permissions(
+        tx.staging_app().join("marker"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+
+    let result = tx.swap();
+
+    assert!(result.is_err(), "swap accepted a staging mode changed after place");
+    assert_eq!(tx.journal().phase, "STAGED");
+    assert_eq!(fs::read_to_string(target.join("marker")).unwrap(), "live");
+}
