@@ -102,6 +102,7 @@ impl Engine {
                 self.journal.phase
             ));
         }
+        require_backup_snapshot(&self.root, self.install_id())?;
         let dest = self.staging_app();
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent).map_err(|err| err.to_string())?;
@@ -120,19 +121,7 @@ impl Engine {
                 self.journal.phase
             ));
         }
-        let original = tx_paths(&self.root, self.install_id()).original;
-        let metadata = fs::symlink_metadata(&original).map_err(|error| {
-            format!(
-                "cannot commit backup: original snapshot {} is unavailable: {error}",
-                original.display()
-            )
-        })?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-            return Err(format!(
-                "cannot commit backup: original snapshot {} must be a real directory",
-                original.display()
-            ));
-        }
+        require_backup_snapshot(&self.root, self.install_id())?;
         self.advance("BACKUP_COMMITTED")
     }
 
@@ -198,6 +187,23 @@ impl Engine {
         self.journal = load_v2(&self.root, self.install_id())?;
         Ok(())
     }
+}
+
+fn require_backup_snapshot(root: &Path, install_id: &str) -> Result<(), String> {
+    let original = tx_paths(root, install_id).original;
+    let metadata = fs::symlink_metadata(&original).map_err(|error| {
+        format!(
+            "cannot use backup: original snapshot {} is unavailable: {error}",
+            original.display()
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
+        return Err(format!(
+            "cannot use backup: original snapshot {} must be a real directory",
+            original.display()
+        ));
+    }
+    Ok(())
 }
 
 pub fn recover(root: &Path, install_id: &str) -> Result<RecoverResult, TxError> {
