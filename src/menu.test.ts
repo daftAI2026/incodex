@@ -13,11 +13,11 @@ import {
 } from "./menu";
 
 describe("menu", () => {
-  test("covers install, uninstall, open, status, doctor, and quit", () => {
+  test("covers open, install, uninstall, status, doctor, and quit", () => {
     expect(MENU_ITEMS.map((item) => item.id)).toEqual([
+      "open",
       "install",
       "uninstall",
-      "open",
       "status",
       "doctor",
       "quit",
@@ -42,12 +42,12 @@ describe("menu", () => {
     expect(text).not.toMatch(/^incodex\n/);
     expect(text).toContain("https://github.com/daftAI2026/incodex");
     expect(text).toContain("Incognito toggle for Codex desktop");
-    expect(text).toContain("1. Install");
-    expect(text).toContain("Patch the Codex app you are using");
-    expect(text).toContain("2. Uninstall");
-    expect(text).toContain("Restore the official Codex app");
-    expect(text).toContain("3. Open");
+    expect(text).toContain("1. Open");
     expect(text).toContain("Open an incognito window without patching");
+    expect(text).toContain("2. Install");
+    expect(text).toContain("Patch the Codex app you are using");
+    expect(text).toContain("3. Uninstall");
+    expect(text).toContain("Restore the official Codex app");
     expect(text).toContain("4. Status");
     expect(text).toContain("5. Doctor");
     expect(text).toContain("6. Quit");
@@ -56,9 +56,9 @@ describe("menu", () => {
   });
 
   test("selected row uses Mole's arrow", () => {
-    const text = renderMenu(2, { color: false });
-    expect(text).toContain("➤ 3. Open");
-    expect(text).not.toContain("➤ 1. Install");
+    const text = renderMenu(0, { color: false });
+    expect(text).toContain("➤ 1. Open");
+    expect(text).not.toContain("➤ 2. Install");
   });
 
   test("optional update line appears and unlocks the U footer shortcut", () => {
@@ -91,7 +91,7 @@ describe("menu", () => {
   });
 
   test("color mode uses Mole's green banner, blue URL, cyan selection, gray footer", () => {
-    const text = renderMenu(2, { color: true, updateMessage: "Update 0.2.0 available, run incodex update" });
+    const text = renderMenu(0, { color: true, updateMessage: "Update 0.2.0 available, run incodex update" });
     const green = "\x1b[0;32m";
     const blue = "\x1b[1;34m";
     const cyan = "\x1b[0;36m";
@@ -102,8 +102,8 @@ describe("menu", () => {
     expect(text).toContain(`${blue}  https://github.com/daftAI2026/incodex${reset}`);
     expect(text).toContain(`${green}  Incognito toggle for Codex desktop.${reset}`);
     expect(text).toContain(`${green}  Update 0.2.0 available, run incodex update${reset}`);
-    expect(text).toContain(`${cyan}➤ 3. Open`);
-    expect(text).not.toContain(`${cyan}➤ 1. Install`);
+    expect(text).toContain(`${cyan}➤ 1. Open`);
+    expect(text).not.toContain(`${cyan}➤ 2. Install`);
     expect(text).toContain(`${gray}↑↓ | Enter | U Update | V Version | Q Quit | 1-6 Jump${reset}`);
   });
 });
@@ -120,11 +120,12 @@ describe("handleMenuKey", () => {
   });
 
   test("digits jump to that item and enter keeps the highlight", () => {
-    expect(handleMenuKey("1", 3)).toEqual({ action: "select", id: "install" });
-    expect(handleMenuKey("3", 0)).toEqual({ action: "select", id: "open" });
+    expect(handleMenuKey("1", 3)).toEqual({ action: "select", id: "open" });
+    expect(handleMenuKey("2", 0)).toEqual({ action: "select", id: "install" });
+    expect(handleMenuKey("3", 0)).toEqual({ action: "select", id: "uninstall" });
     expect(handleMenuKey("6", 0)).toEqual({ action: "select", id: "quit" });
     expect(handleMenuKey("7", 0)).toEqual({ action: "ignore" });
-    expect(handleMenuKey("\r", 2)).toEqual({ action: "select", id: "open" });
+    expect(handleMenuKey("\r", 0)).toEqual({ action: "select", id: "open" });
     expect(handleMenuKey("\n", 4)).toEqual({ action: "select", id: "doctor" });
   });
 
@@ -151,4 +152,3 @@ describe("handleMenuKey", () => {
     expect(handleMenuKey("V", 0)).toEqual({ action: "select", id: "version" });
   });
 });
-
