@@ -10,8 +10,10 @@ const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))
 
 describe("release CLI artifacts", () => {
   test("cross-compiles the native Rust CLI into the stable macOS asset names", () => {
-    expect(releaseYml).toContain("dtolnay/rust-toolchain@");
-    expect(releaseYml).toContain("targets: aarch64-apple-darwin,x86_64-apple-darwin");
+    expect(releaseYml).toContain(
+      "actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0",
+    );
+    expect(releaseYml).toContain("target: aarch64-apple-darwin,x86_64-apple-darwin");
     expect(releaseYml).toContain("cargo build --locked --release --target aarch64-apple-darwin");
     expect(releaseYml).toContain("cargo build --locked --release --target x86_64-apple-darwin");
     expect(releaseYml).toContain("target/aarch64-apple-darwin/release/incodex");
