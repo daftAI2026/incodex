@@ -48,7 +48,7 @@ runs `tsc` to emit portable CJS into `dist/*.cjs`. The emitted files must use
 
 ## Native CLI
 
-Rust CLI source is on `main`. The migration gates are complete, but stable release assets still use Bun until the compatibility cutover PR ships Rust under the existing asset names.
+Rust CLI source is on `main`. The migration gates are complete, and the cutover pipeline means the next stable release will publish the native Rust CLI under the existing asset names; already-published assets remain untouched.
 
 ```bash
 git fetch origin
@@ -68,7 +68,7 @@ cargo test --workspace --release
 
 Do not add a TUI crate or an AGPL ASAR crate. Electron Runtime stays TypeScript and Bun-built; Rust embeds committed `dist/`. Incognito hover remains shared Runtime behavior, not a separate Rust UI implementation.
 
-Release integration and release cutover are intentionally separate: the compatibility release moves the stable asset names to Rust while keeping explicitly named Bun legacy assets for one version cycle. `install.sh` and the own tap keep consuming only stable names.
+Release integration and release publication remain intentionally separate. The workflow cross-compiles Rust into the stable names; `install.sh` and the own tap consume only those names. New releases do not publish new legacy Bun CLI assets, while existing old Release assets remain untouched for rollback. Merging release code never authorizes creating a tag or Release.
 
 ## Pull requests
 
