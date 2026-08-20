@@ -19,6 +19,11 @@ struct Item {
 
 const ITEMS: &[Item] = &[
     Item {
+        command: Some(CliCommand::Open),
+        title: "Open",
+        description: "Open an incognito window without patching",
+    },
+    Item {
         command: Some(CliCommand::Install),
         title: "Install",
         description: "Patch the Codex app you are using",
@@ -27,11 +32,6 @@ const ITEMS: &[Item] = &[
         command: Some(CliCommand::Uninstall),
         title: "Uninstall",
         description: "Restore the official Codex app",
-    },
-    Item {
-        command: Some(CliCommand::Open),
-        title: "Open",
-        description: "Open an incognito window without patching",
     },
     Item {
         command: Some(CliCommand::Status),
