@@ -23,6 +23,20 @@ pub struct CdpTarget {
     pub ws: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WindowBounds {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+// Repro scaffold: the implementation commit must match Chromium's macOS
+// WindowSizer offset instead of returning the source window unchanged.
+pub fn chrome_tile_bounds(source: WindowBounds) -> WindowBounds {
+    source
+}
+
 pub fn allocate_debug_port() -> Result<u16, String> {
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|err| err.to_string())?;
     let port = listener.local_addr().map_err(|err| err.to_string())?.port();
@@ -40,6 +54,24 @@ pub fn debug_launch_args(user_data_dir: &str, debug_port: u16) -> Vec<String> {
 
 pub fn inject_source() -> String {
     format!("{INJECT_PREFIX}\n{INJECT_JS}")
+}
+
+// Repro scaffold: the implementation commit must carry the source locale
+// into the same injected script used by the installed Runtime.
+pub fn inject_source_for_locale(_locale: Option<&str>) -> String {
+    inject_source()
+}
+
+// Repro scaffold: injection is not successful until both product UI markers
+// exist in the main Codex document.
+pub fn ui_ready_expression() -> &'static str {
+    "false"
+}
+
+// Repro scaffold: never follow a CDP target to a non-loopback endpoint or a
+// port other than the one allocated for this child process.
+pub fn validate_cdp_websocket_url(_url: &str, _expected_port: u16) -> Result<(), String> {
+    Ok(())
 }
 
 pub fn pick_codex_page_target(targets: &[CdpTarget]) -> Option<&CdpTarget> {
@@ -205,6 +237,8 @@ fn http_get_json_host(host: &str, debug_port: u16, path: &str) -> Result<Value, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::Ipv4Addr;
+    use std::time::Instant;
 
     #[test]
     fn prefers_codex_app_page_and_skips_chrome_and_prewarm() {
@@ -234,5 +268,67 @@ mod tests {
         assert_eq!(picked.url, "app://-/index.html");
         assert!(inject_source().contains("__incodexIncognito=true"));
         assert!(inject_source().contains("data-incodex-privacy-toggle"));
+    }
+
+    #[test]
+    fn cdp_http_finishes_at_content_length_even_when_chromium_keeps_socket_open() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request);
+            let body = "[]";
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            thread::sleep(Duration::from_millis(2_500));
+        });
+
+        let started = Instant::now();
+        let value = http_get_json_host("127.0.0.1", port, "/json/list")
+            .expect("a complete Content-Length body must not wait for EOF");
+        assert_eq!(value, json!([]));
+        assert!(started.elapsed() < Duration::from_millis(500));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn cdp_websocket_is_confined_to_the_allocated_loopback_port() {
+        assert!(validate_cdp_websocket_url("ws://127.0.0.1:43123/devtools/page/a", 43123).is_ok());
+        assert!(validate_cdp_websocket_url("ws://[::1]:43123/devtools/page/a", 43123).is_ok());
+        assert!(validate_cdp_websocket_url("ws://127.0.0.1:43124/devtools/page/a", 43123).is_err());
+        assert!(validate_cdp_websocket_url("ws://example.com:43123/devtools/page/a", 43123).is_err());
+    }
+
+    #[test]
+    fn injected_ui_carries_locale_and_requires_button_and_banner_health() {
+        let source = inject_source_for_locale(Some("zh-CN"));
+        assert!(source.contains("window.__incodexIncognito=true"));
+        assert!(source.contains("window.__incodexLocale=\"zh-CN\""));
+        let health = ui_ready_expression();
+        assert!(health.contains("data-incodex-privacy-toggle"));
+        assert!(health.contains("data-incodex-banner-host"));
+    }
+
+    #[test]
+    fn open_window_uses_chromiums_macos_tile_offset_and_keeps_source_size() {
+        let source = WindowBounds {
+            x: 100,
+            y: 80,
+            width: 1280,
+            height: 800,
+        };
+        assert_eq!(
+            chrome_tile_bounds(source),
+            WindowBounds {
+                x: 122,
+                y: 102,
+                width: 1280,
+                height: 800,
+            }
+        );
     }
 }

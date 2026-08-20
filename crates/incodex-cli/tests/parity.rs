@@ -163,6 +163,19 @@ fn marker_app(home: &Path) -> PathBuf {
     app
 }
 
+fn sleeping_open_app(home: &Path) -> PathBuf {
+    let app = home.join("ChatGPT.app");
+    let macos = app.join("Contents/MacOS");
+    fs::create_dir_all(&macos).unwrap();
+    let executable = macos.join("ChatGPT");
+    fs::write(&executable, "#!/bin/sh\nsleep 0.8\n").unwrap();
+    let mut permissions = fs::metadata(&executable).unwrap().permissions();
+    use std::os::unix::fs::PermissionsExt;
+    permissions.set_mode(0o755);
+    fs::set_permissions(&executable, permissions).unwrap();
+    app
+}
+
 fn normalize_paths(text: &str, home: &Path) -> String {
     text.replace(&home.display().to_string(), "<HOME>")
         .lines()
@@ -405,6 +418,58 @@ fn native_tty_menu_matches_the_typescript_menu_contract() {
         assert!(ts.contains(text), "TS menu lost {text:?}: {ts}");
         assert!(rust.contains(text), "Rust menu missing {text:?}: {rust}");
     }
+}
+
+#[test]
+fn native_menu_shows_the_same_cached_update_notice_and_shortcut_as_typescript() {
+    let home = scratch("menu-update");
+    let cache = home.join(".incodex/cache/update_message");
+    fs::create_dir_all(cache.parent().unwrap()).unwrap();
+    fs::write(&cache, "Update 9.9.9 available, run incodex update\n").unwrap();
+    let ts = run_tty("bun", &["src/cli.ts"], &[], &home, "Quit", "q");
+    let rust = run_tty(rust_bin(), &[], &[], &home, "Quit", "q");
+    let ts = visible(&ts.stdout);
+    let rust = visible(&rust.stdout);
+    for text in [
+        "Update 9.9.9 available, run incodex update",
+        "↑↓ | Enter | U Update | V Version | Q Quit | 1-6 Jump",
+    ] {
+        assert!(ts.contains(text), "TS menu lost {text:?}: {ts}");
+        assert!(rust.contains(text), "Rust menu missing {text:?}: {rust}");
+    }
+}
+
+#[test]
+fn native_open_reproduces_the_typescript_wait_spinner_and_clears_its_line() {
+    let home = scratch("open-spinner");
+    let app = sleeping_open_app(&home);
+    let args = ["open", "--app", app.to_str().unwrap()];
+    let rust = run_tty(
+        rust_bin(),
+        &[],
+        &args,
+        &home,
+        "Closed. Isolated session removed.",
+        "",
+    );
+    assert_eq!(rust.status, 0, "{}", rust.stdout);
+    assert!(
+        rust.stdout.contains("Waiting for the window to close"),
+        "missing wait animation: {}",
+        visible(&rust.stdout)
+    );
+    assert!(
+        ["|", "/", "-", "\\"]
+            .iter()
+            .any(|frame| rust.stdout.contains(&format!("  {frame} Waiting for the window to close"))),
+        "missing spinner frames: {:?}",
+        rust.stdout
+    );
+    assert!(
+        rust.stdout.contains("\r\u{1b}[2K"),
+        "spinner must clear the current line: {:?}",
+        rust.stdout
+    );
 }
 
 #[test]
