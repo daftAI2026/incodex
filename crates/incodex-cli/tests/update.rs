@@ -621,6 +621,29 @@ fn native_homebrew_menu_rejects_a_current_script_update_notice() {
 }
 
 #[test]
+fn native_menu_does_not_follow_an_invalid_update_notice_symlink() {
+    let home = scratch("menu-notice-symlink");
+    let fake_bin = home.join("fake-bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let (_, installed) = installed_cli(&home);
+    write_executable(
+        &fake_bin.join("curl"),
+        "#!/bin/sh\nprintf '%s\\n' '{\"tag_name\":\"v9.9.9\"}'\n",
+    );
+    let cache = home.join(".incodex/cache/update_message");
+    fs::create_dir_all(cache.parent().unwrap()).unwrap();
+    let victim = home.join("unrelated-user-file");
+    fs::write(&victim, "do not truncate\n").unwrap();
+    std::os::unix::fs::symlink(&victim, &cache).unwrap();
+    let path = format!("{}:/usr/bin:/bin", fake_bin.display());
+
+    open_menu_long_enough_for_background_refresh(&home, &installed, &path, "q");
+
+    assert_eq!(fs::read_to_string(&victim).unwrap(), "do not truncate\n");
+    assert!(!fs::symlink_metadata(cache).unwrap().file_type().is_symlink());
+}
+
+#[test]
 fn update_rejects_a_non_release_tag_before_downloading_an_installer() {
     let home = scratch("invalid-tag");
     let fake_bin = home.join("fake-bin");
