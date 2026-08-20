@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use incodex_transaction::{journal_v2, new_install_id, recover, Recovery};
+use incodex_transaction::{
+    journal_v2, migrate_legacy_committed, new_install_id, recover, Recovery,
+};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -135,4 +137,39 @@ fn legacy_unfinished_journal_without_proofs_fails_closed_before_live_change() {
     assert!(error.to_string().contains("proof"), "{error}");
     assert_eq!(fs::read_to_string(app.join("marker")).unwrap(), "patched");
     assert!(original.exists(), "fail-closed recovery touched the backup");
+}
+
+#[test]
+fn legacy_migration_rechecks_live_binding_after_find_precheck() {
+    let root = scratch();
+    let app = app_bundle(&root, "old-install");
+    let id = new_install_id();
+    let original = root
+        .join("transactions")
+        .join(&id)
+        .join("original/ChatGPT.app");
+    fs::create_dir_all(&original).unwrap();
+    fs::write(original.join("marker"), "original").unwrap();
+    write_legacy(&root, &id, &app, "COMMITTED");
+
+    // 模拟 find_committed 已经通过，随后另一安装替换了同一路径的 live。
+    assert_eq!(fs::read_to_string(app.join("marker")).unwrap(), "old-install");
+    let replacement = app_bundle(&root, "new-install");
+    fs::remove_dir_all(&app).unwrap();
+    fs::rename(&replacement, &app).unwrap();
+
+    let error = migrate_legacy_committed(
+        &root,
+        &id,
+        &app,
+        |_| true,
+        |live: &Path| fs::read_to_string(live.join("marker")).unwrap() == "old-install",
+    )
+    .expect_err("legacy migration accepted a replacement live target");
+    assert!(error.contains("live"), "{error}");
+    assert_eq!(fs::read_to_string(app.join("marker")).unwrap(), "new-install");
+    assert_eq!(
+        fs::read_to_string(original.join("marker")).unwrap(),
+        "original"
+    );
 }
