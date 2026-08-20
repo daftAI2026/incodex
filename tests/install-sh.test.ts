@@ -76,6 +76,36 @@ describe("install.sh", () => {
     expect(text).toContain("SHA256SUMS");
   });
 
+  test("refuses to create a script install beside a Homebrew-managed Incodex", () => {
+    const home = mkdtempSync(join(tmpdir(), "incodex-home-"));
+    const prefix = mkdtempSync(join(tmpdir(), "incodex-pre-"));
+    const fakeBin = join(home, "fake-bin");
+    const curlLog = join(home, "curl-called");
+    mkdirSync(fakeBin, { recursive: true });
+    writePayload(
+      fakeBin,
+      "brew",
+      "#!/bin/sh\nif [ \"$1 $2\" = \"--prefix incodex\" ]; then printf '%s\\n' '/opt/homebrew/Cellar/incodex/0.3.1'; exit 0; fi\nexit 1\n",
+    );
+    writePayload(fakeBin, "curl", `#!/bin/sh\n: > '${curlLog}'\nexit 88\n`);
+
+    const ran = spawnSync("/bin/bash", [installSh], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: home,
+        PATH: `${fakeBin}:/usr/bin:/bin`,
+        INCODEX_PREFIX: prefix,
+        INCODEX_ARCH: "arm64",
+      },
+    });
+
+    expect(ran.status).not.toBe(0);
+    expect(ran.stderr).toContain("Homebrew-managed Incodex");
+    expect(ran.stderr).toContain("brew upgrade incodex");
+    expect(existsSync(curlLog)).toBe(false);
+  });
+
   test("installs incodex and inc from a verified local release dir", () => {
     const release = mkdtempSync(join(tmpdir(), "incodex-rel-"));
     const prefix = mkdtempSync(join(tmpdir(), "incodex-pre-"));

@@ -67,7 +67,20 @@ if not seen:
     raise SystemExit(2)
 time.sleep(0.7)
 os.write(fd, b"q")
+exit_deadline = time.time() + 3
+while time.time() < exit_deadline:
+    done, status = os.waitpid(pid, os.WNOHANG)
+    if done == pid:
+        raise SystemExit(os.waitstatus_to_exitcode(status))
+    ready, _, _ = select.select([fd], [], [], 0.05)
+    if ready:
+        try:
+            os.read(fd, 8192)
+        except OSError:
+            pass
+os.kill(pid, 9)
 os.waitpid(pid, 0)
+raise SystemExit(3)
 "#;
     let status = Command::new("python3")
         .arg("-c")
@@ -487,6 +500,34 @@ fn native_script_menu_refreshes_the_stable_update_notice_cache() {
     assert_eq!(
         fs::read_to_string(cache).unwrap().trim(),
         "Update 9.9.9 available, run incodex update"
+    );
+}
+
+#[test]
+fn native_homebrew_menu_waits_for_the_formula_and_names_brew_upgrade() {
+    let home = scratch("menu-homebrew-refresh");
+    let fake_bin = home.join("fake-bin");
+    let cellar_bin = home.join("Cellar/incodex/0.3.1/bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    fs::create_dir_all(&cellar_bin).unwrap();
+    let installed = cellar_bin.join("incodex");
+    fs::copy(env!("CARGO_BIN_EXE_incodex"), &installed).unwrap();
+    write_executable(
+        &fake_bin.join("curl"),
+        "#!/bin/sh\nprintf '%s\\n' '{\"tag_name\":\"v9.9.9\"}'\n",
+    );
+    write_executable(
+        &fake_bin.join("brew"),
+        "#!/bin/sh\nprintf '%s\\n' '{\"formulae\":[{\"versions\":{\"stable\":\"9.9.9\"},\"installed\":[{\"version\":\"0.3.1\"}]}]}'\n",
+    );
+    let path = format!("{}:/usr/bin:/bin", fake_bin.display());
+
+    open_menu_long_enough_for_background_refresh(&home, &installed, &path);
+
+    let cache = home.join(".incodex/cache/update_message");
+    assert_eq!(
+        fs::read_to_string(cache).unwrap().trim(),
+        "Update 9.9.9 available, run brew upgrade incodex"
     );
 }
 
