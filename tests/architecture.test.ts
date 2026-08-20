@@ -12,6 +12,11 @@ describe("architecture boundaries", () => {
   test("native CLI integration and release cutover boundary stay documented", () => {
     const agents = src("AGENTS.md");
     const contributing = src("CONTRIBUTING.md");
+    const safetyReviewer = src(".claude/agents/safety-reviewer.md");
+    const releaseFlow = src(".claude/skills/release-flow/SKILL.md");
+    const releaseWorkflow = src(".github/workflows/release.yml");
+    const readme = src("README.md");
+    const readmeCn = src("README_CN.md");
     expect(agents).toContain("Rust workspace now lives on `main`");
     expect(agents).toContain("Stable release assets still come from the Bun-compiled TypeScript CLI");
     expect(agents).toContain("legacy Bun assets for one version cycle");
@@ -23,10 +28,23 @@ describe("architecture boundaries", () => {
     expect(agents).toContain("`incodex open` may start the official binary with `--remote-debugging-port`");
     expect(agents).not.toContain("Do not add Overlay, CDP-as-launcher");
     expect(agents).not.toContain("--base exp/rust-cli");
+    expect(agents).not.toContain("exp/rust-cli");
+    expect(agents).toContain("`crates/incodex-cli` is the native CLI");
+    expect(agents).toContain("`crates/incodex-core/src/session.rs`");
     expect(contributing).toContain("Rust CLI source is on `main`");
     expect(contributing).toContain("Rust CLI PRs use base `main`");
     expect(contributing).toContain("stable release assets still use Bun");
     expect(contributing).toContain("failing `cargo test` repro");
+    expect(contributing).toContain("cargo run -p incodex-cli -- --help");
+    expect(safetyReviewer).toContain("crates/incodex-cli/src/install.rs");
+    expect(safetyReviewer).toContain("crates/incodex-transaction/**");
+    expect(releaseFlow).not.toContain("if this is not 0.1.0");
+    expect(readme).not.toContain("Runtime      0.1.0");
+    expect(readmeCn).not.toContain("Runtime      0.1.0");
+    if (releaseWorkflow.includes("bun build src/cli.ts --compile")) {
+      expect(readme).not.toContain("the hat-glasses control and banner still appear in that window");
+      expect(readmeCn).not.toContain("这一扇里仍有帽子按钮和提示横幅");
+    }
   });
 
   test("UI adapter has no file deletion, process control, or auth handling", () => {
@@ -76,4 +94,3 @@ describe("architecture boundaries", () => {
     expect(open).not.toContain("patchAsar");
   });
 });
-
