@@ -34,9 +34,9 @@ export const MENU_BANNER = [
 ].join("\n");
 
 export const MENU_ITEMS: MenuItem[] = [
-  { id: "open", title: "Open", description: "Open an incognito window without patching" },
   { id: "install", title: "Install", description: "Patch the Codex app you are using" },
   { id: "uninstall", title: "Uninstall", description: "Restore the official Codex app" },
+  { id: "open", title: "Open", description: "Open an incognito window without patching" },
   { id: "status", title: "Status", description: "Show whether Incodex is installed" },
   { id: "doctor", title: "Doctor", description: "Diagnose the install and leftover sessions" },
   { id: "quit", title: "Quit", description: "Exit this menu" },
