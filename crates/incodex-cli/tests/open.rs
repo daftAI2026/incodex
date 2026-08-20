@@ -1,7 +1,7 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -48,6 +48,49 @@ fn fake_app(root: &Path, script: &str) -> PathBuf {
     perms.set_mode(0o755);
     fs::set_permissions(&exe, perms).unwrap();
     app
+}
+
+fn open_process(app: &Path, home: &Path) -> Child {
+    Command::new(bin())
+        .args(["open", "--app", app.to_str().unwrap()])
+        .env("HOME", home)
+        .env("TERM", "dumb")
+        .env("NO_COLOR", "1")
+        .env("SHELL", "/bin/zsh")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn incodex open")
+}
+
+fn wait_for_file(path: &Path) {
+    for _ in 0..1_000 {
+        if path.exists() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("timed out waiting for {}", path.display());
+}
+
+fn started_session(home: &Path, id: &str) -> PathBuf {
+    let marker = home.join(format!("started-{id}"));
+    wait_for_file(&marker);
+    let body = fs::read_to_string(marker).expect("started marker");
+    body.lines()
+        .find_map(|line| line.strip_prefix("root=").map(PathBuf::from))
+        .expect("session root marker")
+}
+
+fn wait_for_exit(mut child: Child) -> Output {
+    for _ in 0..1_000 {
+        if child.try_wait().expect("poll open process").is_some() {
+            return child.wait_with_output().expect("collect open output");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    child.kill().expect("kill hung open process");
+    panic!("timed out waiting for open process");
 }
 
 fn incodex_paths(home: &Path) -> Vec<String> {
@@ -209,4 +252,95 @@ fn open_spawn_error_still_burns() {
         .filter(|path| path.contains("codex-home") || path.contains("/chromium"))
         .collect();
     assert!(leftover.is_empty(), "stdout={stdout} leftover={leftover:?}");
+}
+
+#[test]
+fn independent_open_processes_keep_sessions_isolated_and_report_each_session() {
+    let home = isolated_home();
+    let app = fake_app(
+        &home,
+        "#!/bin/sh\n\
+id=\"$INCODEX_SESSION_ID\"\n\
+printf '%s\\n' \"id=$id\" \"root=$INCODEX_SESSION_ROOT\" > \"$HOME/started-$id\"\n\
+while [ ! -e \"$HOME/release-$id\" ]; do sleep 0.01; done\n",
+    );
+    let source = home.join(".codex");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("auth.json"), "{}\n").unwrap();
+
+    let first = open_process(&app, &home);
+    let first_id = wait_for_started_id(&home, None);
+    let first_root = started_session(&home, &first_id);
+    let second = open_process(&app, &home);
+    let second_id = wait_for_started_id(&home, Some(&first_id));
+    let second_root = started_session(&home, &second_id);
+
+    assert_ne!(first_id, second_id);
+    assert_ne!(first_root, second_root);
+    assert!(first_root.is_dir());
+    assert!(second_root.is_dir());
+
+    fs::write(home.join(format!("release-{first_id}")), "").unwrap();
+    let first_output = wait_for_exit(first);
+    let first_removed_before_second = !first_root.exists();
+    let second_survived_first = second_root.is_dir();
+
+    fs::write(home.join(format!("release-{second_id}")), "").unwrap();
+    let second_output = wait_for_exit(second);
+    let second_removed_after_release = !second_root.exists();
+
+    assert!(first_removed_before_second, "first session was not burned");
+    assert!(second_survived_first, "first close burned the second session");
+    assert!(second_removed_after_release, "second session was not burned");
+    let first_stdout = String::from_utf8_lossy(&first_output.stdout);
+    let second_stdout = String::from_utf8_lossy(&second_output.stdout);
+    assert!(
+        first_stdout.contains(first_id.as_str()),
+        "first output must identify its session {first_id}: {first_stdout}"
+    );
+    assert!(
+        first_stdout
+            .lines()
+            .any(|line| line.contains("Session") && line.contains(first_id.as_str())),
+        "first output must label {first_id} as the session: {first_stdout}"
+    );
+    assert!(
+        !first_stdout.contains(second_id.as_str()),
+        "first output must not identify the second session {second_id}: {first_stdout}"
+    );
+    assert!(
+        second_stdout.contains(second_id.as_str()),
+        "second output must identify its session {second_id}: {second_stdout}"
+    );
+    assert!(
+        second_stdout
+            .lines()
+            .any(|line| line.contains("Session") && line.contains(second_id.as_str())),
+        "second output must label {second_id} as the session: {second_stdout}"
+    );
+    assert!(
+        !second_stdout.contains(first_id.as_str()),
+        "second output must not identify the first session {first_id}: {second_stdout}"
+    );
+}
+
+fn wait_for_started_id(home: &Path, exclude: Option<&str>) -> String {
+    for _ in 0..1_000 {
+        let mut ids = fs::read_dir(home)
+            .unwrap()
+            .flatten()
+            .filter_map(|entry| {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                name.strip_prefix("started-")
+                    .map(str::to_string)
+                    .filter(|id| exclude != Some(id.as_str()))
+            })
+            .collect::<Vec<_>>();
+        ids.sort();
+        if let Some(id) = ids.into_iter().next() {
+            return id;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("timed out waiting for an open session marker");
 }

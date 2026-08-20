@@ -370,6 +370,7 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), String> {
         "{}",
         format_kv("Home", &plan.home.display().to_string(), None)
     );
+    println!("{}", format_kv("Session", &plan.session_id, None));
     let mut spinner = crate::spinner::Spinner::start("Waiting for the window to close");
     let (_code, cleanup) = wait_and_burn(&plan, &root, 250)?;
     spinner.stop();
