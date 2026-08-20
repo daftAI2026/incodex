@@ -1,7 +1,8 @@
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -16,6 +17,7 @@ const MAIN_INSTALLER_URL: &str =
     "https://raw.githubusercontent.com/daftAI2026/incodex/main/install.sh";
 const DOWNLOAD_ATTEMPTS: usize = 3;
 const RETRY_DELAY: Duration = Duration::from_millis(200);
+static UPDATE_NOTICE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Deserialize)]
 struct LatestRelease {
@@ -336,7 +338,7 @@ fn verify_installed_version(prefix: &Path, expected: &str) -> Result<(), String>
 }
 
 fn clear_update_notice() {
-    let _ = fs::write(user_root().join("cache/update_message"), "");
+    write_update_notice("");
 }
 
 pub(crate) fn read_update_notice() -> Option<String> {
@@ -346,7 +348,7 @@ pub(crate) fn read_update_notice() -> Option<String> {
     if valid_update_notice(message) {
         return Some(message.to_string());
     }
-    let _ = fs::write(cache, "");
+    write_update_notice("");
     None
 }
 
@@ -444,10 +446,20 @@ fn write_update_notice(message: &str) {
     if fs::create_dir_all(parent).is_err() {
         return;
     }
-    let temporary = parent.join(format!(".update_message.{}.tmp", std::process::id()));
-    if fs::write(&temporary, message).is_ok() {
-        let _ = fs::rename(temporary, cache);
+    let sequence = UPDATE_NOTICE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let temporary = parent.join(format!(
+        ".update_message.{}.{sequence}.tmp",
+        std::process::id()
+    ));
+    let written = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .and_then(|mut file| file.write_all(message.as_bytes()));
+    if written.is_ok() {
+        let _ = fs::rename(&temporary, cache);
     }
+    let _ = fs::remove_file(temporary);
 }
 
 pub fn run_self_uninstall(parsed: &ParsedCli) -> Result<(), String> {
