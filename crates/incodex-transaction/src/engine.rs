@@ -264,14 +264,16 @@ pub fn restore_committed(root: &Path, install_id: &str, live_path: &Path) -> Res
     restore_committed_locked(root, &journal, live_path)
 }
 
-pub fn migrate_legacy_committed<F>(
+pub fn migrate_legacy_committed<F, G>(
     root: &Path,
     install_id: &str,
     live_path: &Path,
     verify_backup: F,
+    verify_live: G,
 ) -> Result<(), String>
 where
     F: FnOnce(&Path) -> bool,
+    G: FnOnce(&Path) -> bool,
 {
     let initial = load_v2(root, install_id)?;
     if !is_legacy_committed(&initial) {
@@ -293,6 +295,10 @@ where
     if !verify_backup(&paths.original) {
         return Err("legacy backup failed codesign verification".into());
     }
+    if !verify_live(&current.real_path) {
+        return Err("legacy live target failed binding verification".into());
+    }
+    recheck_target(&current)?;
     let backup_digest = tree_digest(&paths.original)?;
     let staged_identity = directory_identity(&current.real_path)
         .map_err(|error| format!("invalid legacy live target: {error}"))?;

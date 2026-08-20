@@ -150,11 +150,17 @@ fn legacy_migration_rechecks_live_binding_after_find_precheck() {
         .join("original/ChatGPT.app");
     fs::create_dir_all(&original).unwrap();
     fs::write(original.join("marker"), "original").unwrap();
-    write_legacy(&root, &id, &app, "COMMITTED");
+    let target_real = fs::canonicalize(&app).unwrap();
+    write_legacy(&root, &id, &target_real, "COMMITTED");
 
     // 模拟 find_committed 已经通过，随后另一安装替换了同一路径的 live。
-    assert_eq!(fs::read_to_string(app.join("marker")).unwrap(), "old-install");
-    let replacement = app_bundle(&root, "new-install");
+    assert_eq!(
+        fs::read_to_string(app.join("marker")).unwrap(),
+        "old-install"
+    );
+    let replacement = root.join("NewChatGPT.app");
+    fs::create_dir_all(&replacement).unwrap();
+    fs::write(replacement.join("marker"), "new-install").unwrap();
     fs::remove_dir_all(&app).unwrap();
     fs::rename(&replacement, &app).unwrap();
 
@@ -167,7 +173,10 @@ fn legacy_migration_rechecks_live_binding_after_find_precheck() {
     )
     .expect_err("legacy migration accepted a replacement live target");
     assert!(error.contains("live"), "{error}");
-    assert_eq!(fs::read_to_string(app.join("marker")).unwrap(), "new-install");
+    assert_eq!(
+        fs::read_to_string(app.join("marker")).unwrap(),
+        "new-install"
+    );
     assert_eq!(
         fs::read_to_string(original.join("marker")).unwrap(),
         "original"

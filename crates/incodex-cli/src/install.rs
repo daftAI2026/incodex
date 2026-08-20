@@ -308,7 +308,10 @@ fn uninstall_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
     }
     let journal = find_committed(root, app)?;
     if journal.target.parent_device.is_empty() {
-        migrate_legacy_committed(root, &journal.install_id, app, verify_app)?;
+        let install_id = journal.install_id.clone();
+        migrate_legacy_committed(root, &install_id, app, verify_app, |live| {
+            verified_live_install_id(root, live).as_deref() == Some(install_id.as_str())
+        })?;
     } else {
         restore_committed(root, &journal.install_id, app)?;
     }
@@ -357,13 +360,17 @@ fn installed_install_id(app: &Path, root: &Path, archive: &Archive) -> Option<St
     Some(install_id)
 }
 
+fn verified_live_install_id(root: &Path, app: &Path) -> Option<String> {
+    Archive::open(&app.join(ASAR_REL))
+        .ok()
+        .and_then(|archive| installed_install_id(app, root, &archive))
+}
+
 fn find_committed(root: &Path, app: &Path) -> Result<incodex_transaction::JournalV2, String> {
     let real = inspect_target(app, None)
         .map(|t| t.real_path)
         .unwrap_or_else(|_| app.to_path_buf());
-    let live_install_id = Archive::open(&app.join(ASAR_REL))
-        .ok()
-        .and_then(|archive| installed_install_id(app, root, &archive));
+    let live_install_id = verified_live_install_id(root, app);
     let dir = root.join("transactions");
     let entries = fs::read_dir(&dir).map_err(|_| {
         "no installation record for this target. refusing to use ~/.incodex/backup because it is not bound to this app"
