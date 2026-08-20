@@ -14,8 +14,8 @@ use crate::new_install_id;
 use crate::proof::{
     directory_identity, matches_recorded_restore, matches_recorded_restore_path,
     optional_directory_identity, parse_identity, record_restore_intent, require_identity,
-    restore_source, tree_digest, validate_backup_digest, validate_pre_swap_live,
-    validate_staged_snapshot, validate_tree_digest,
+    restore_source, tree_digest, validate_backup_digest, validate_pre_swap_identity,
+    validate_pre_swap_live, validate_staged_snapshot, validate_tree_digest,
 };
 use crate::Recovery;
 
@@ -124,11 +124,7 @@ impl Engine {
             ));
         }
         require_backup_snapshot(&self.root, self.install_id())?;
-        validate_backup_digest(
-            &tx_paths(&self.root, self.install_id()).original,
-            &self.journal,
-        )?;
-        validate_pre_swap_live(&self.target, &self.journal)?;
+        validate_pre_swap_identity(&self.target)?;
         directory_identity(staged)
             .map_err(|error| format!("cannot use staging source: {error}"))?;
         let dest = self.staging_app();
@@ -215,6 +211,7 @@ impl Engine {
         require_phase(&self.journal, "SWAPPED", "commit")?;
         let paths = reconstructed(&self.root, &self.journal)?;
         validate_recovery_target(&self.journal, &paths, &self.target.real_path)?;
+        validate_backup_digest(&paths.original, &self.journal)?;
         self.advance("COMMITTED")?;
         checkpoint("COMMITTED_BEFORE_CLEANUP");
         let cleanup_warning = cleanup_outgoing(&self.outgoing_app()).err();
@@ -287,7 +284,7 @@ pub fn migrate_legacy_committed(
         return Err("legacy committed target real path changed before migration".into());
     }
     let paths = reconstructed(root, &journal)?;
-    let backup_identity = directory_identity(&paths.original)
+    directory_identity(&paths.original)
         .map_err(|error| format!("invalid legacy backup: {error}"))?;
     let backup_digest = tree_digest(&paths.original)?;
     let staged_identity = directory_identity(&current.real_path)
@@ -304,7 +301,6 @@ pub fn migrate_legacy_committed(
     migrated.sequence += 1;
     write_journal(root, &migrated)?;
     let migrated = load_v2(root, install_id)?;
-    let _ = backup_identity;
     restore_committed_locked(root, &migrated, live_path)
 }
 
@@ -337,8 +333,8 @@ fn restore_committed_locked(
     if current.real_path != PathBuf::from(&journal.target.real_path) {
         return Err("committed target real path changed before restore".into());
     }
-    let paths = reconstructed(root, &journal)?;
-    validate_committed_restore_target(&journal, &paths, &current.real_path)?;
+    reconstructed(root, &journal)?;
+    validate_committed_restore_target(&journal, &current.real_path)?;
     restore_live(root, &current.real_path, &journal).map(|_| ())
 }
 
@@ -442,12 +438,6 @@ fn validate_recovery_target(
             }
         }
         "SWAPPED" | "TARGET_VERIFIED" => {
-            let restore_root = paths
-                .dir
-                .parent()
-                .and_then(Path::parent)
-                .ok_or("transaction root is missing during recovery")?;
-            let _ = restore_source(restore_root, journal)?;
             let staged =
                 staged_expected.ok_or("staged target identity is missing from the journal")?;
             if matches!(live_identity, Some(identity) if identity == staged) {
@@ -479,11 +469,7 @@ fn validate_recovery_target(
     }
 }
 
-fn validate_committed_restore_target(
-    journal: &JournalV2,
-    paths: &crate::journal::TxPaths,
-    live: &Path,
-) -> Result<(), String> {
+fn validate_committed_restore_target(journal: &JournalV2, live: &Path) -> Result<(), String> {
     validate_recovery_proofs(journal)?;
     let current = inspect_target(live, None)?;
     let expected_parent = parse_identity(
@@ -504,8 +490,7 @@ fn validate_committed_restore_target(
     let actual_live = directory_identity(live)?;
     require_identity(Some(actual_live), expected_live, "committed live target")?;
     validate_tree_digest(live, &journal.staged_digest, "committed live target")?;
-    validate_backup_digest(&paths.original, journal)
-        .map_err(|error| format!("invalid committed backup: {error}"))
+    Ok(())
 }
 
 pub fn recover(root: &Path, install_id: &str) -> Result<RecoverResult, TxError> {

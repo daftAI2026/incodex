@@ -4,10 +4,28 @@ use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+use std::cell::Cell;
+
 use incodex_core::canonical::{recheck_target, CanonicalTarget};
 use sha2::{Digest, Sha256};
 
 use crate::journal::{load_v2, tx_paths, write_journal, JournalV2};
+
+#[cfg(test)]
+thread_local! {
+    static TREE_DIGEST_CALLS: Cell<usize> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_digest_call_count() {
+    TREE_DIGEST_CALLS.with(|calls| calls.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn digest_call_count() -> usize {
+    TREE_DIGEST_CALLS.with(Cell::get)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct FsIdentity {
@@ -41,8 +59,12 @@ pub(crate) fn validate_pre_swap_live(
     target: &CanonicalTarget,
     journal: &JournalV2,
 ) -> Result<(), String> {
-    recheck_target(target)?;
+    validate_pre_swap_identity(target)?;
     validate_tree_digest(&target.real_path, &journal.pre_swap_digest, "pre-swap live")
+}
+
+pub(crate) fn validate_pre_swap_identity(target: &CanonicalTarget) -> Result<(), String> {
+    recheck_target(target)
 }
 
 pub(crate) fn validate_staged_snapshot(
@@ -75,6 +97,8 @@ struct TreeEntry {
 }
 
 pub(crate) fn tree_digest(root: &Path) -> Result<String, String> {
+    #[cfg(test)]
+    TREE_DIGEST_CALLS.with(|calls| calls.set(calls.get() + 1));
     let root_metadata = fs::symlink_metadata(root).map_err(|error| error.to_string())?;
     if root_metadata.file_type().is_symlink() || !root_metadata.file_type().is_dir() {
         return Err(format!(
