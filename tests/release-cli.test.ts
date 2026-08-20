@@ -33,8 +33,9 @@ describe("release CLI artifacts", () => {
     expect(releaseYml).toContain("rm -rf release-cli");
     expect(releaseYml).toContain("file release-cli/incodex-darwin-arm64");
     expect(releaseYml).toContain("file release-cli/incodex-darwin-x64");
-    expect(releaseYml).toContain("lipo -verify_arch arm64 release-cli/incodex-darwin-arm64");
-    expect(releaseYml).toContain("lipo -verify_arch x86_64 release-cli/incodex-darwin-x64");
+    expect(releaseYml).toContain("lipo release-cli/incodex-darwin-arm64 -verify_arch arm64");
+    expect(releaseYml).toContain("lipo release-cli/incodex-darwin-x64 -verify_arch x86_64");
+    expect(releaseYml).not.toContain("lipo -verify_arch");
     expect(releaseYml).toContain("codesign --verify --strict release-cli/incodex-darwin-arm64");
     expect(releaseYml).toContain("codesign --verify --strict release-cli/incodex-darwin-x64");
     expect(releaseYml).toContain("unexpected release asset set");

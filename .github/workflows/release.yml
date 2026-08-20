@@ -65,8 +65,8 @@ jobs:
           codesign --sign - --force release-cli/incodex-darwin-x64
           file release-cli/incodex-darwin-arm64
           file release-cli/incodex-darwin-x64
-          lipo -verify_arch arm64 release-cli/incodex-darwin-arm64
-          lipo -verify_arch x86_64 release-cli/incodex-darwin-x64
+          lipo release-cli/incodex-darwin-arm64 -verify_arch arm64
+          lipo release-cli/incodex-darwin-x64 -verify_arch x86_64
           codesign --verify --strict release-cli/incodex-darwin-arm64
           codesign --verify --strict release-cli/incodex-darwin-x64
       - name: Checksums
