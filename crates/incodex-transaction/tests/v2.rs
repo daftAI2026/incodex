@@ -1,5 +1,6 @@
 use std::fs;
 use std::io::Write;
+use std::os::unix::net::UnixListener;
 use std::os::unix::fs::{symlink, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -416,7 +417,14 @@ fn durable_commit_does_not_report_cleanup_failure_as_uncommitted() {
     let result = tx.commit_with_checkpoint(|phase| {
         if phase == "COMMITTED_BEFORE_CLEANUP" {
             fs::remove_dir_all(&outgoing).unwrap();
-            fs::write(&outgoing, b"leftover cleanup fixture").unwrap();
+            let socket = std::env::temp_dir().join(format!(
+                "incodex-cleanup-warning-{}",
+                std::process::id()
+            ));
+            let _ = fs::remove_file(&socket);
+            let listener = UnixListener::bind(&socket).unwrap();
+            fs::rename(&socket, &outgoing).unwrap();
+            std::mem::forget(listener);
         }
     });
 
@@ -429,12 +437,12 @@ fn durable_commit_does_not_report_cleanup_failure_as_uncommitted() {
         result
             .cleanup_warning
             .as_deref()
-            .is_some_and(|warning| warning.contains("Not a directory")),
+            .is_some_and(|warning| warning.contains("unsupported path type")),
         "cleanup failure was not surfaced as a warning: {result:?}"
     );
     assert_eq!(tx.journal().phase, "COMMITTED");
     assert_eq!(fs::read_to_string(target_app.join("marker")).unwrap(), "patched");
-    assert!(outgoing.is_file(), "cleanup fixture was unexpectedly removed");
+    assert!(outgoing.exists(), "cleanup fixture was unexpectedly removed");
 }
 
 #[test]
