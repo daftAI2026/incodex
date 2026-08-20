@@ -137,15 +137,30 @@ fn patchable_app(home: &Path) -> PathBuf {
         &contents.join("MacOS").join("ChatGPT"),
         "#!/bin/sh\nexit 0\n",
     );
+    let cua_app = contents.join("Frameworks/CUALockScreenGuardian.app");
+    fs::create_dir_all(cua_app.join("Contents")).unwrap();
+    fs::write(
+        cua_app.join("Contents/Info.plist"),
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>com.example.cua-guardian</string>
+  <key>CFBundleExecutable</key><string>CUALockScreenGuardian</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+</dict></plist>
+"#,
+    )
+    .unwrap();
     write_executable(
-        &contents
-            .join("Frameworks")
-            .join("CUALockScreenGuardian.app")
-            .join("Contents")
-            .join("MacOS")
-            .join("CUALockScreenGuardian"),
+        &cua_app.join("Contents/MacOS/CUALockScreenGuardian"),
         "#!/bin/sh\necho vendor-helper\nexit 0\n",
     );
+    let signed = Command::new("codesign")
+        .args(["--force", "--sign", "-", "--"])
+        .arg(&cua_app)
+        .status()
+        .expect("sign fixture vendor helper");
+    assert!(signed.success());
     let src = home.join("asar-src");
     fs::create_dir_all(&src).unwrap();
     fs::write(
@@ -194,7 +209,10 @@ fn install_dry_run_app_prints_plan_and_does_not_mutate() {
     assert!(stdout.contains(&format!("  App          {}", app.display())));
     assert!(stdout.contains("  ! Dry run. No files changed."));
     assert_eq!(install_mutations(&home), Vec::<String>::new());
-    assert_eq!(fs::read_to_string(app.join("marker")).unwrap(), "do-not-touch\n");
+    assert_eq!(
+        fs::read_to_string(app.join("marker")).unwrap(),
+        "do-not-touch\n"
+    );
 }
 
 #[test]
@@ -244,7 +262,10 @@ fn non_tty_app_install_requires_yes_and_still_prints_the_plan() {
     assert!(stdout.contains("➤ Install"));
     assert!(stdout.contains(&format!("  App          {}", app.display())));
     assert_eq!(install_mutations(&home), Vec::<String>::new());
-    assert_eq!(fs::read_to_string(app.join("marker")).unwrap(), "do-not-touch\n");
+    assert_eq!(
+        fs::read_to_string(app.join("marker")).unwrap(),
+        "do-not-touch\n"
+    );
 }
 
 #[test]
@@ -272,23 +293,26 @@ fn install_yes_app_patches_asar_writes_runtime_and_commits() {
     let home = isolated_home();
     let app = patchable_app(&home);
     let official = PathBuf::from("/Applications/ChatGPT.app/Contents/Resources/app.asar");
-    let official_before = official.exists().then(|| fs::read(&official).ok()).flatten();
-    let cua = app
-        .join("Contents/Frameworks/CUALockScreenGuardian.app/Contents/MacOS/CUALockScreenGuardian");
+    let official_before = official
+        .exists()
+        .then(|| fs::read(&official).ok())
+        .flatten();
+    let cua_app = app.join("Contents/Frameworks/CUALockScreenGuardian.app");
+    let cua = cua_app.join("Contents/MacOS/CUALockScreenGuardian");
     let cua_before = fs::read(&cua).unwrap();
-    assert!(!is_signed(&cua));
+    let cua_display_before = codesign_display(&cua_app);
+    assert!(is_signed(&cua_app));
 
-    let (status, stdout, stderr) = run(
-        &["install", "--yes", "--app", app.to_str().unwrap()],
-        &home,
-    );
+    let (status, stdout, stderr) =
+        run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
     assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
     assert_eq!(stderr, "");
     assert!(stdout.contains("➤ Install"));
 
     let asar = app.join("Contents/Resources/app.asar");
     let archive = Archive::open(&asar).unwrap();
-    let pkg: serde_json::Value = serde_json::from_slice(&archive.extract("package.json").unwrap()).unwrap();
+    let pkg: serde_json::Value =
+        serde_json::from_slice(&archive.extract("package.json").unwrap()).unwrap();
     assert_eq!(pkg["main"], LOADER_NAME);
     assert_eq!(pkg[MARKER_KEY]["originalMain"], "index.js");
     assert_eq!(
@@ -304,15 +328,23 @@ fn install_yes_app_patches_asar_writes_runtime_and_commits() {
         .filter(|path| path.ends_with("journal.json"))
         .collect();
     assert_eq!(journals.len(), 1);
-    let journal: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(home.join(".incodex").join(&journals[0])).unwrap())
-            .unwrap();
+    let journal: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(home.join(".incodex").join(&journals[0])).unwrap(),
+    )
+    .unwrap();
     assert_eq!(journal["phase"], "COMMITTED");
     assert_eq!(journal["schemaVersion"], 2);
 
     assert_eq!(fs::read(&cua).unwrap(), cua_before);
-    assert!(!is_signed(&cua), "vendor CUA sidecar must not be adhoc-signed");
-    let cua_display = codesign_display(&cua);
+    assert!(
+        is_signed(&cua_app),
+        "vendor CUA sidecar signature must survive"
+    );
+    let cua_display = codesign_display(&cua_app);
+    assert_eq!(
+        cua_display, cua_display_before,
+        "vendor CUA signature must be preserved"
+    );
     assert!(
         !cua_display.to_lowercase().contains("2dc432gll2"),
         "{cua_display}"
@@ -346,7 +378,10 @@ fn install_codesign_failure_aborts_custom_target_before_swap() {
     assert_eq!(status, 1, "stderr={stderr}");
     assert!(stderr.contains("forced codesign failure"), "{stderr}");
     assert_eq!(fs::read(&asar).unwrap(), before);
-    assert!(cua.exists(), "vendor helper must be restored after sign failure");
+    assert!(
+        cua.exists(),
+        "vendor helper must be restored after sign failure"
+    );
 }
 
 #[test]
@@ -366,7 +401,10 @@ fn install_aborts_when_asar_integrity_cannot_be_written() {
         &path_with_fake_bin(&fake_bin),
     );
     assert_eq!(status, 1, "stderr={stderr}");
-    assert!(stderr.contains("ElectronAsarIntegrity") || stderr.contains("plutil"), "{stderr}");
+    assert!(
+        stderr.contains("ElectronAsarIntegrity") || stderr.contains("plutil"),
+        "{stderr}"
+    );
     assert_eq!(fs::read(&asar).unwrap(), before);
 }
 
@@ -374,10 +412,8 @@ fn install_aborts_when_asar_integrity_cannot_be_written() {
 fn uninstall_yes_app_restores_original_asar() {
     let home = isolated_home();
     let app = patchable_app(&home);
-    let (status, stdout, stderr) = run(
-        &["install", "--yes", "--app", app.to_str().unwrap()],
-        &home,
-    );
+    let (status, stdout, stderr) =
+        run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
     assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
 
     let (status, stdout, stderr) = run(
@@ -389,7 +425,8 @@ fn uninstall_yes_app_restores_original_asar() {
     assert!(stdout.contains("➤ Uninstall"));
 
     let archive = Archive::open(app.join("Contents/Resources/app.asar")).unwrap();
-    let pkg: serde_json::Value = serde_json::from_slice(&archive.extract("package.json").unwrap()).unwrap();
+    let pkg: serde_json::Value =
+        serde_json::from_slice(&archive.extract("package.json").unwrap()).unwrap();
     assert_eq!(pkg["main"], "index.js");
     assert!(archive.extract(LOADER_NAME).is_err());
     assert_eq!(
@@ -402,18 +439,16 @@ fn uninstall_yes_app_restores_original_asar() {
 fn recover_committed_transaction_is_done() {
     let home = isolated_home();
     let app = patchable_app(&home);
-    let (status, _, stderr) = run(
-        &["install", "--yes", "--app", app.to_str().unwrap()],
-        &home,
-    );
+    let (status, _, stderr) = run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
     assert_eq!(status, 0, "{stderr}");
     let journal_path = install_mutations(&home)
         .into_iter()
         .find(|path| path.ends_with("journal.json"))
         .expect("journal");
-    let journal: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(home.join(".incodex").join(&journal_path)).unwrap())
-            .unwrap();
+    let journal: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(home.join(".incodex").join(&journal_path)).unwrap(),
+    )
+    .unwrap();
     let id = journal["installId"].as_str().expect("installId");
     let asar_before = fs::read(app.join("Contents/Resources/app.asar")).unwrap();
 

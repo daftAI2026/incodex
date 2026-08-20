@@ -171,18 +171,23 @@ pub fn write_asar_integrity(app: &Path, hash: &str) -> Result<(), String> {
         "Resources/app.asar": { "algorithm": "SHA256", "hash": hash }
     });
     let json = serde_json::to_string(&payload).map_err(|err| err.to_string())?;
+    let mut failures = Vec::new();
     for flag in ["-replace", "-insert"] {
-        let ok = Command::new("plutil")
+        let result = Command::new("plutil")
             .args([flag, "ElectronAsarIntegrity", "-json", &json])
             .arg(&plist)
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false);
-        if ok {
-            return Ok(());
+            .status();
+        match result {
+            Ok(status) if status.success() => return Ok(()),
+            Ok(status) => failures.push(format!("plutil {flag} exited with {status}")),
+            Err(err) => failures.push(format!("plutil {flag} failed: {err}")),
         }
     }
-    Ok(())
+    Err(format!(
+        "failed to update ElectronAsarIntegrity in {}: {}",
+        plist.display(),
+        failures.join("; ")
+    ))
 }
 
 pub fn verify_app(app: &Path) -> bool {
@@ -210,6 +215,157 @@ pub fn has_hardened_runtime(app: &Path) -> bool {
     text.lines()
         .filter_map(|line| line.split_once("flags=").map(|(_, flags)| flags))
         .any(|flags| flags.contains("runtime"))
+}
+
+const ADHOC_UNRETAINABLE_ENTITLEMENTS: &[&str] = &[
+    "com.apple.developer.team-identifier",
+    "com.apple.application-identifier",
+    "com.apple.developer.aps-environment",
+    "com.apple.security.application-groups",
+    "keychain-access-groups",
+];
+
+const ADHOC_HOST_FALLBACK: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>com.apple.security.automation.apple-events</key><true/>
+  <key>com.apple.security.cs.allow-jit</key><true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+  <key>com.apple.security.cs.disable-library-validation</key><true/>
+  <key>com.apple.security.device.audio-input</key><true/>
+  <key>com.apple.security.device.camera</key><true/>
+  <key>com.apple.security.files.user-selected.read-write</key><true/>
+  <key>com.apple.security.network.client</key><true/>
+  <key>com.apple.security.personal-information.calendars</key><true/>
+</dict></plist>
+"#;
+
+const DISABLE_LIBRARY_VALIDATION: &str =
+    "  <key>com.apple.security.cs.disable-library-validation</key><true/>\n";
+
+fn dump_entitlements(target: &Path) -> Option<String> {
+    let output = Command::new("codesign")
+        .args(["--display", "--entitlements", ":-", "--"])
+        .arg(target)
+        .output()
+        .ok()?;
+    let xml = String::from_utf8_lossy(&output.stdout).into_owned();
+    xml.contains("<plist").then_some(xml)
+}
+
+fn strip_unretainable_entitlements(xml: Option<&str>) -> Option<String> {
+    let mut next = xml?.to_string();
+    for key in ADHOC_UNRETAINABLE_ENTITLEMENTS {
+        let marker = format!("<key>{key}</key>");
+        while let Some(start) = next.find(&marker) {
+            let value_start = start + marker.len();
+            let value_start = value_start
+                + next[value_start..]
+                    .chars()
+                    .take_while(|ch| ch.is_whitespace())
+                    .map(char::len_utf8)
+                    .sum::<usize>();
+            let value_end = xml_value_end(&next, value_start)?;
+            next.replace_range(start..value_end, "");
+        }
+    }
+    next.contains("<key>").then_some(next)
+}
+
+fn xml_value_end(xml: &str, start: usize) -> Option<usize> {
+    let rest = xml.get(start..)?;
+    if rest.starts_with("<true/>") || rest.starts_with("<false/>") {
+        return Some(start + rest.find('>')? + 1);
+    }
+    let open_end = rest.find('>')?;
+    let open = &rest[1..open_end];
+    let name = open
+        .split_whitespace()
+        .next()?
+        .trim_end_matches('/')
+        .to_string();
+    let close = format!("</{name}>");
+    let close_start = rest[open_end + 1..].find(&close)? + open_end + 1;
+    Some(start + close_start + close.len())
+}
+
+fn with_disable_library_validation(xml: Option<&str>) -> Option<String> {
+    let base = xml.unwrap_or("<?xml version=\"1.0\"?><plist><dict></dict></plist>");
+    if base.contains("<key>com.apple.security.cs.disable-library-validation</key>") {
+        return Some(base.to_string());
+    }
+    base.contains("</dict>").then(|| {
+        base.replacen(
+            "</dict>",
+            &format!("{DISABLE_LIBRARY_VALIDATION}</dict>"),
+            1,
+        )
+    })
+}
+
+fn host_entitlements_for_adhoc(xml: Option<&str>) -> String {
+    let stripped = strip_unretainable_entitlements(xml);
+    if stripped
+        .as_deref()
+        .map(|value| !value.contains("<key>com.apple.security.device.camera</key>"))
+        .unwrap_or(true)
+    {
+        return ADHOC_HOST_FALLBACK.to_string();
+    }
+    with_disable_library_validation(stripped.as_deref())
+        .unwrap_or_else(|| ADHOC_HOST_FALLBACK.to_string())
+}
+
+fn temporary_entitlements_file(xml: &str) -> Result<(PathBuf, PathBuf), String> {
+    let root = std::env::temp_dir().join(format!(
+        "incodex-ent-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0)
+    ));
+    fs::create_dir_all(&root).map_err(|err| err.to_string())?;
+    let file = root.join("entitlements.plist");
+    if let Err(err) = fs::write(&file, xml) {
+        let _ = fs::remove_dir_all(&root);
+        return Err(err.to_string());
+    }
+    Ok((root, file))
+}
+
+fn sign_outer_with_entitlements(app: &Path, entitlements: &str) -> Result<(), String> {
+    let (root, file) = temporary_entitlements_file(entitlements)?;
+    let result = Command::new("codesign")
+        .args([
+            "--force",
+            "--sign",
+            "-",
+            "--options",
+            "runtime",
+            "--entitlements",
+        ])
+        .arg(&file)
+        .args(["--"])
+        .arg(app)
+        .output()
+        .map_err(|err| err.to_string())
+        .and_then(|output| {
+            if output.status.success() {
+                Ok(())
+            } else {
+                Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+            }
+        });
+    let cleanup = fs::remove_dir_all(root).map_err(|err| err.to_string());
+    match (result, cleanup) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(err), Ok(())) => Err(err),
+        (Ok(()), Err(err)) => Err(err),
+        (Err(sign), Err(cleanup)) => {
+            Err(format!("{sign}; failed to clean entitlements: {cleanup}"))
+        }
+    }
 }
 
 pub fn collect_vendor_helper_roots(app: &Path) -> Vec<PathBuf> {
@@ -247,6 +403,7 @@ fn walk_helpers(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 pub fn sign_app(app: &Path) -> Result<(), String> {
+    let before_xml = dump_entitlements(app);
     let preserve = collect_vendor_helper_roots(app);
     let stash_root = if preserve.is_empty() {
         None
@@ -278,28 +435,54 @@ pub fn sign_app(app: &Path) -> Result<(), String> {
         .args(["--force", "--deep", "--sign", "-", "--"])
         .arg(app)
         .output()
-        .map_err(|err| err.to_string())?;
-    if !deep.status.success() {
-        return Err(String::from_utf8_lossy(&deep.stderr).trim().to_string());
+        .map_err(|err| err.to_string())
+        .and_then(|output| {
+            if output.status.success() {
+                Ok(())
+            } else {
+                Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+            }
+        });
+    let restore = restore_stashed_helpers(&stashed, stash_root.as_deref());
+    if let Err(err) = restore {
+        return Err(match deep {
+            Ok(()) => err,
+            Err(deep_err) => format!("{deep_err}; {err}"),
+        });
     }
-    for (src, dest) in &stashed {
-        ditto(dest, src)?;
-    }
-    if let Some(root) = stash_root {
-        let _ = fs::remove_dir_all(root);
-    }
-    let outer = Command::new("codesign")
-        .args(["--force", "--sign", "-", "--options", "runtime", "--"])
-        .arg(app)
-        .output()
-        .map_err(|err| err.to_string())?;
-    if !outer.status.success() {
-        return Err(String::from_utf8_lossy(&outer.stderr).trim().to_string());
-    }
+    deep?;
+    sign_outer_with_entitlements(app, &host_entitlements_for_adhoc(before_xml.as_deref()))?;
     if !verify_app(app) {
         return Err("codesign --verify failed after adhoc resign".into());
     }
     Ok(())
+}
+
+fn restore_stashed_helpers(
+    stashed: &[(PathBuf, PathBuf)],
+    stash_root: Option<&Path>,
+) -> Result<(), String> {
+    let mut failures = Vec::new();
+    for (src, dest) in stashed {
+        if let Err(err) = ditto(dest, src) {
+            failures.push(format!("failed to restore {}: {err}", src.display()));
+        }
+    }
+    if failures.is_empty() {
+        if let Some(root) = stash_root {
+            if let Err(err) = fs::remove_dir_all(root) {
+                failures.push(format!(
+                    "failed to remove vendor stash {}: {err}",
+                    root.display()
+                ));
+            }
+        }
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("; "))
+    }
 }
 
 pub fn quit_official_app() -> Result<(), String> {

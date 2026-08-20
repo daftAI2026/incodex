@@ -248,13 +248,13 @@ fn install_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
         .join(format!("ChatGPT.app.staged-{install_id}"));
     ditto(app, &staged)?;
     let (hash, _) = patch_asar(&staged.join(ASAR_REL), loader_source(), Some(&install_id))?;
-    let _ = write_asar_integrity(&staged, &hash);
+    write_asar_integrity(&staged, &hash)?;
     if is_official_app(app, None) || verify_app(app) || app.join("Contents/MacOS").exists() {
         if let Err(err) = sign_app(&staged) {
             if is_official_app(app, None) {
                 tx.rollback(&err)?;
-                return Err(err);
             }
+            return Err(err);
         }
     }
     tx.place_staging(&staged)?;
