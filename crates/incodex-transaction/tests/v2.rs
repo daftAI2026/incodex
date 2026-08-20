@@ -1,9 +1,12 @@
 use std::fs;
+use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Barrier};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use incodex_core::canonical::{inspect_target, recheck_target};
 use incodex_transaction::{
@@ -82,6 +85,31 @@ fn mutation_lock_is_exclusive_and_stolen_when_pid_is_dead() {
 }
 
 #[test]
+fn stale_same_pid_lock_cannot_be_removed_by_previous_owner() {
+    let root = scratch();
+    let app = app_bundle(&root, "ChatGPT.app", "x");
+    let first = acquire_target_lock(&root, &app, "first", None).unwrap();
+    let lock_path = incodex_transaction::lock_path_for(&root, &app);
+    let mut record: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    record["processStart"] = serde_json::json!("not-the-current-process");
+    fs::write(
+        &lock_path,
+        format!("{}\n", serde_json::to_string(&record).unwrap()),
+    )
+    .unwrap();
+
+    let second = acquire_target_lock(&root, &app, "second", None).unwrap();
+    drop(first);
+    let third = acquire_target_lock(&root, &app, "third", None);
+    assert!(
+        third.is_err(),
+        "the previous owner removed a replacement lock from the same PID"
+    );
+    drop(second);
+}
+
+#[test]
 fn concurrent_lock_creation_never_exposes_a_partial_record() {
     let root = scratch();
     let app = app_bundle(&root, "ChatGPT.app", "x");
@@ -118,6 +146,111 @@ fn concurrent_lock_creation_never_exposes_a_partial_record() {
         handle.join().unwrap();
     }
     assert_eq!(winners, 1, "partial lock records allowed {winners} winners");
+}
+
+#[test]
+fn twenty_processes_contending_for_one_canonical_target_have_one_winner() {
+    if std::env::var_os("INCODEX_MUTATION_LOCK_WORKER").is_some() {
+        return;
+    }
+
+    const PROCESS_COUNT: usize = 20;
+    let root = scratch();
+    let app = app_bundle(&root, "ChatGPT.app", "x");
+    let coordination = root.join("coordination");
+    fs::create_dir_all(&coordination).unwrap();
+    let ready_dir = coordination.join("ready");
+    let result_dir = coordination.join("result");
+    fs::create_dir_all(&ready_dir).unwrap();
+    fs::create_dir_all(&result_dir).unwrap();
+    let start = coordination.join("start");
+    let release = coordination.join("release");
+    let executable = std::env::current_exe().unwrap();
+
+    let mut children = Vec::with_capacity(PROCESS_COUNT);
+    for id in 0..PROCESS_COUNT {
+        let child = Command::new(&executable)
+            .args(["--exact", "mutation_lock_process_worker", "--nocapture"])
+            .env("INCODEX_MUTATION_LOCK_WORKER", "1")
+            .env("INCODEX_MUTATION_LOCK_ID", id.to_string())
+            .env("INCODEX_MUTATION_LOCK_ROOT", &root)
+            .env("INCODEX_MUTATION_LOCK_TARGET", &app)
+            .env("INCODEX_MUTATION_LOCK_READY", &ready_dir)
+            .env("INCODEX_MUTATION_LOCK_RESULT", &result_dir)
+            .env("INCODEX_MUTATION_LOCK_START", &start)
+            .env("INCODEX_MUTATION_LOCK_RELEASE", &release)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        children.push(child);
+    }
+
+    wait_until("all lock workers ready", Duration::from_secs(10), || {
+        count_files(&ready_dir) == PROCESS_COUNT
+    });
+    fs::write(&start, b"go\n").unwrap();
+
+    wait_until("all lock workers reported", Duration::from_secs(10), || {
+        count_files(&result_dir) == PROCESS_COUNT
+    });
+    let winners = fs::read_dir(&result_dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter_map(|entry| fs::read_to_string(entry.path()).ok())
+        .filter(|result| result == "winner\n")
+        .count();
+    fs::write(&release, b"release\n").unwrap();
+    for child in &mut children {
+        let status = child.wait().unwrap();
+        assert!(status.success(), "lock worker exited with {status}");
+    }
+    assert_eq!(winners, 1, "twenty OS processes produced {winners} winners");
+}
+
+#[test]
+fn mutation_lock_process_worker() {
+    let Some(id) = std::env::var_os("INCODEX_MUTATION_LOCK_ID") else {
+        return;
+    };
+    let root = PathBuf::from(std::env::var_os("INCODEX_MUTATION_LOCK_ROOT").unwrap());
+    let target = PathBuf::from(std::env::var_os("INCODEX_MUTATION_LOCK_TARGET").unwrap());
+    let ready_dir = PathBuf::from(std::env::var_os("INCODEX_MUTATION_LOCK_READY").unwrap());
+    let result_dir = PathBuf::from(std::env::var_os("INCODEX_MUTATION_LOCK_RESULT").unwrap());
+    let start = PathBuf::from(std::env::var_os("INCODEX_MUTATION_LOCK_START").unwrap());
+    let release = PathBuf::from(std::env::var_os("INCODEX_MUTATION_LOCK_RELEASE").unwrap());
+
+    fs::write(ready_dir.join(&id), b"ready\n").unwrap();
+    wait_for_path(&start, Duration::from_secs(10));
+    let lock = acquire_target_lock(&root, &target, "process-stress", None);
+    let won = lock.is_ok();
+    let mut result = fs::File::create(result_dir.join(&id)).unwrap();
+    if won {
+        result.write_all(b"winner\n").unwrap();
+    } else {
+        result.write_all(b"loser\n").unwrap();
+    }
+    result.sync_data().unwrap();
+    if let Ok(lock) = lock {
+        wait_for_path(&release, Duration::from_secs(10));
+        drop(lock);
+    }
+}
+
+fn count_files(dir: &Path) -> usize {
+    fs::read_dir(dir).unwrap().filter_map(Result::ok).count()
+}
+
+fn wait_for_path(path: &Path, timeout: Duration) {
+    wait_until("coordination marker", timeout, || path.exists());
+}
+
+fn wait_until(label: &str, timeout: Duration, mut ready: impl FnMut() -> bool) {
+    let deadline = Instant::now() + timeout;
+    while !ready() {
+        assert!(Instant::now() < deadline, "timed out waiting for {label}");
+        thread::sleep(Duration::from_millis(5));
+    }
 }
 
 #[test]
