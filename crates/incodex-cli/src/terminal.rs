@@ -144,7 +144,9 @@ mod tests {
         unsafe {
             let mut master = -1;
             let mut report = [-1; 2];
+            let mut ready = [-1; 2];
             assert_eq!(libc::pipe(report.as_mut_ptr()), 0);
+            assert_eq!(libc::pipe(ready.as_mut_ptr()), 0);
             let pid = libc::forkpty(
                 &mut master,
                 std::ptr::null_mut(),
@@ -158,6 +160,25 @@ mod tests {
             );
             if pid == 0 {
                 libc::close(report[0]);
+                libc::close(ready[0]);
+                // 先把从端设为 raw，再通知父进程写入，避免 runner 调度让
+                // 输入在 read_key 设置 termios 之前进入规范模式。
+                let mut raw = std::mem::zeroed();
+                let raw_ready = libc::tcgetattr(libc::STDIN_FILENO, &mut raw) == 0;
+                if raw_ready {
+                    libc::cfmakeraw(&mut raw);
+                    raw.c_cc[libc::VMIN] = 1;
+                    raw.c_cc[libc::VTIME] = 0;
+                }
+                let raw_ready =
+                    raw_ready && libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &raw) == 0;
+                let signal = [u8::from(raw_ready)];
+                let _ = libc::write(ready[1], signal.as_ptr().cast(), 1);
+                libc::close(ready[1]);
+                if !raw_ready {
+                    libc::close(report[1]);
+                    libc::_exit(1);
+                }
                 let key = read_key().expect("child read_key");
                 let length = [u8::try_from(key.len()).expect("key length")];
                 let _ = libc::write(report[1], length.as_ptr().cast(), 1);
@@ -167,6 +188,11 @@ mod tests {
             }
 
             libc::close(report[1]);
+            libc::close(ready[1]);
+            let mut signal = [0_u8; 1];
+            assert_eq!(libc::read(ready[0], signal.as_mut_ptr().cast(), 1), 1);
+            assert_eq!(signal[0], 1, "child failed to enter raw mode");
+            libc::close(ready[0]);
             for (index, byte) in input.iter().enumerate() {
                 let written = libc::write(master, std::slice::from_ref(byte).as_ptr().cast(), 1);
                 assert_eq!(written, 1, "pty write failed");
