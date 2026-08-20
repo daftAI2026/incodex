@@ -84,3 +84,20 @@ fn recover_accepts_the_inode_change_caused_by_its_own_swap() {
     assert_eq!(fs::read_to_string(target.join("marker")).unwrap(), "original");
     assert_eq!(journal_v2(&root, &id).unwrap().phase, "ROLLED_BACK");
 }
+
+#[test]
+fn recover_refuses_a_foreign_live_with_the_same_backup_tree() {
+    let (root, target, id) = interrupted("SWAPPED");
+    let moved = root.join("later-live.app");
+    fs::rename(&target, &moved).unwrap();
+    app(&root, "ChatGPT.app", "original");
+
+    let result = recover_with(&root, &id, |_| true);
+
+    assert!(
+        result.is_err(),
+        "a same-content later replacement was treated as this transaction's restore"
+    );
+    assert_eq!(fs::read_to_string(target.join("marker")).unwrap(), "original");
+    assert_eq!(journal_v2(&root, &id).unwrap().phase, "SWAPPED");
+}
