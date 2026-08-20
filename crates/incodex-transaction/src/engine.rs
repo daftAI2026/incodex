@@ -242,5 +242,8 @@ fn replace_live(source: &Path, live: &Path, transaction_dir: &Path) -> Result<()
         }
         return Err(error.to_string());
     }
+    if trash.exists() {
+        fs::remove_dir_all(&trash).map_err(|err| err.to_string())?;
+    }
     Ok(())
 }

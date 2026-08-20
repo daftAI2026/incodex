@@ -103,6 +103,10 @@ fn recover_sigkill_restarts_from_a_real_recovery_step() {
     let install_id = fs::read_to_string(&id_file).expect("child must publish install id");
     let install_id = install_id.trim();
 
+    // +--------------------------------------------------------------------+
+    // | 这里只在真实恢复步骤完成后杀死进程；不伪造 copy/rename/remove 的内核中点。 |
+    // | 系统调用内部断电模型保留为后续待办。                                 |
+    // +--------------------------------------------------------------------+
     let status = spawn_recover_child("kill-after-restore", &root, install_id);
     assert_eq!(
         status.signal(),
@@ -343,7 +347,11 @@ fn spawn_child(
 fn spawn_recover_child(mode: &str, root: &Path, install_id: &str) -> ExitStatus {
     let exe = env::current_exe().expect("test executable");
     Command::new(exe)
-        .args(["--exact", "recover_sigkill_restarts_from_a_real_recovery_step", "--nocapture"])
+        .args([
+            "--exact",
+            "recover_sigkill_restarts_from_a_real_recovery_step",
+            "--nocapture",
+        ])
         .env(RECOVER_CHILD_MODE, mode)
         .env(ROOT_ENV, root)
         .env(INSTALL_ID_ENV, install_id)
