@@ -556,15 +556,14 @@ fn remove_path(path: &Path) -> Result<(), String> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(error.to_string()),
     };
-    if metadata.file_type().is_symlink() || metadata.file_type().is_file() {
-        fs::remove_file(path).map_err(|err| err.to_string())
-    } else if metadata.file_type().is_dir() {
+    if metadata.file_type().is_dir() {
         fs::remove_dir_all(path).map_err(|err| err.to_string())
     } else {
-        Err(format!(
-            "cannot remove unsupported path type: {}",
-            path.display()
-        ))
+        // +--------------------------------------------------------------+
+        // | symlink_metadata 不跟随 leaf；目录递归，其余类型只 unlink。   |
+        // | 这样 socket/FIFO 等垃圾不会阻塞 committed/recovery 收敛。    |
+        // +--------------------------------------------------------------+
+        fs::remove_file(path).map_err(|err| err.to_string())
     }
 }
 
