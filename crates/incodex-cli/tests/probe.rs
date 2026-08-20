@@ -6,7 +6,10 @@ fn bin() -> &'static str {
 }
 
 fn run(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(bin()).args(args).output().expect("spawn incodex");
+    let output = Command::new(bin())
+        .args(args)
+        .output()
+        .expect("spawn incodex");
     let status = output.status.code().unwrap_or(1);
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
@@ -39,9 +42,7 @@ fn version_prints_labeled_report() {
         assert!(lines[2].starts_with("Architecture: "));
         assert!(lines[3].starts_with("Kernel: "));
         assert!(
-            lines[4] == "SIP: Enabled"
-                || lines[4] == "SIP: Disabled"
-                || lines[4] == "SIP: Unknown"
+            lines[4] == "SIP: Enabled" || lines[4] == "SIP: Disabled" || lines[4] == "SIP: Unknown"
         );
         assert!(
             lines[5].starts_with("Disk Free: ")
@@ -68,6 +69,44 @@ fn uncompressed_release_binary_is_under_10mb() {
 }
 
 #[test]
+fn compressed_binary_and_runtime_resources_stay_inside_release_gates() {
+    let compressed = Command::new("gzip")
+        .args(["-c", bin()])
+        .output()
+        .expect("gzip native binary");
+    assert!(compressed.status.success());
+    assert!(
+        compressed.stdout.len() <= 5 * 1024 * 1024,
+        "compressed binary is {} bytes; limit is 5 MB",
+        compressed.stdout.len()
+    );
+
+    let dist = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../dist");
+    let names = [
+        "incodex-main.cjs",
+        "incodex-preload.cjs",
+        "incodex-inject.js",
+        "incodex-safe-home.cjs",
+        "incodex-ipc-guard.cjs",
+        "incodex-instance.cjs",
+        "incodex-window-kind.cjs",
+        "incodex-runtime-load.cjs",
+    ];
+    let runtime_size: u64 = names
+        .iter()
+        .map(|name| {
+            std::fs::metadata(dist.join(name))
+                .expect("runtime artifact")
+                .len()
+        })
+        .sum();
+    assert!(
+        runtime_size <= 250 * 1024,
+        "external runtime is {runtime_size} bytes; limit is 250 KB"
+    );
+}
+
+#[test]
 fn version_cold_start_is_recorded_against_50ms() {
     let _ = Command::new(bin()).arg("--version").status();
     let mut samples = Vec::new();
@@ -87,8 +126,8 @@ fn version_cold_start_is_recorded_against_50ms() {
         median, samples
     );
     assert!(
-        median.as_millis() <= 250,
-        "median {:?} is far above the 50ms target; samples {:?}",
+        median.as_millis() <= 50,
+        "median {:?} exceeds the 50ms target; samples {:?}",
         median,
         samples
     );
