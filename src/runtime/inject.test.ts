@@ -31,7 +31,7 @@ describe("hat-glasses stays after header remount", () => {
 
 describe("incognito button exit affordance", () => {
   test("keeps both Lucide icons on the same 1.5px stroke", () => {
-    const strokeWidth = (svg: string) => svg.match(/stroke-width="([^"]+)"/)?.[1];
+    const strokeWidth = (svg: string): string => svg.match(/stroke-width="([^"]+)"/)?.[1] ?? "";
     expect(strokeWidth(hatGlasses)).toBe("1.5");
     expect(strokeWidth(circleX)).toBe(strokeWidth(hatGlasses));
   });

@@ -62,6 +62,11 @@ function setButtonIcon(btn: HTMLElement): void {
   else btn.append(next);
 }
 
+function setButtonHover(btn: HTMLElement, hovered: boolean): void {
+  btn.setAttribute("data-incodex-hovered", hovered ? "true" : "false");
+  setButtonIcon(btn);
+}
+
 function apply(): void {
   const incognito = isIncognitoWindow();
   document.documentElement.setAttribute("data-incodex-window", incognito ? "incognito" : "normal");
@@ -251,13 +256,11 @@ function buildButton(search: HTMLElement): HTMLElement {
     true,
   );
   btn.addEventListener("pointerenter", () => {
-    btn.setAttribute("data-incodex-hovered", "true");
-    setButtonIcon(btn);
+    setButtonHover(btn, true);
     showTooltip(btn);
   });
   btn.addEventListener("pointerleave", () => {
-    btn.setAttribute("data-incodex-hovered", "false");
-    setButtonIcon(btn);
+    setButtonHover(btn, false);
     hideTooltip();
   });
   btn.addEventListener("focus", () => showTooltip(btn));
