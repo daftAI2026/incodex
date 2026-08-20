@@ -9,21 +9,23 @@ function src(rel: string): string {
 }
 
 describe("architecture boundaries", () => {
-  test("native CLI experiment is documented so crate PRs do not target main", () => {
+  test("native CLI integration and release cutover boundary stay documented", () => {
     const agents = src("AGENTS.md");
     const contributing = src("CONTRIBUTING.md");
-    expect(agents).toContain("exp/rust-cli");
+    expect(agents).toContain("Rust workspace now lives on `main`");
+    expect(agents).toContain("Stable release assets still come from the Bun-compiled TypeScript CLI");
+    expect(agents).toContain("legacy Bun assets for one version cycle");
+    expect(agents).toContain("New Rust CLI PRs target `main`");
     expect(agents).toContain("tests/cli-golden.test.ts");
-    expect(agents).toContain("--base exp/rust-cli");
-    expect(agents).toContain("Do not send crate PRs at `main`");
     expect(agents).toContain("Incognito-window hover");
     expect(agents).toContain("failing `cargo test` repro commit");
     expect(agents).toContain("Do not use CDP as the everyday Dock / `install` launch path");
     expect(agents).toContain("`incodex open` may start the official binary with `--remote-debugging-port`");
     expect(agents).not.toContain("Do not add Overlay, CDP-as-launcher");
-    expect(contributing).toContain("exp/rust-cli");
-    expect(contributing).toContain("base exp/rust-cli");
-    expect(contributing).toContain("Rust crate PRs use base `exp/rust-cli`");
+    expect(agents).not.toContain("--base exp/rust-cli");
+    expect(contributing).toContain("Rust CLI source is on `main`");
+    expect(contributing).toContain("Rust CLI PRs use base `main`");
+    expect(contributing).toContain("stable release assets still use Bun");
     expect(contributing).toContain("failing `cargo test` repro");
   });
 
