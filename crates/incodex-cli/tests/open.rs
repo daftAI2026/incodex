@@ -191,7 +191,8 @@ fn open_waits_then_burns_and_does_not_patch_asar() {
     let (status, stdout, stderr) = run(&["open", "--app", app.to_str().unwrap()], &home);
     assert_eq!(stderr, "", "{stdout}");
     assert_eq!(status, 0);
-    assert!(stdout.contains("➤ Opening incognito window"));
+    assert!(stdout.contains("➤ Opening incognito Codex window"));
+    assert!(!stdout.contains("Opened. Incognito Codex window is ready."));
     assert!(stdout.contains("Closed. Isolated session removed."));
     assert!(!asar.exists());
     let leftover: Vec<_> = incodex_paths(&home)

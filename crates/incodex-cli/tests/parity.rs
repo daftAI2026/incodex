@@ -443,7 +443,7 @@ fn native_menu_shows_the_same_cached_update_notice_and_shortcut_as_typescript() 
 }
 
 #[test]
-fn native_open_reproduces_the_typescript_wait_spinner_and_clears_its_line() {
+fn native_open_animates_while_waiting_for_cdp_readiness_and_clears_its_line() {
     let home = scratch("open-spinner");
     let app = sleeping_open_app(&home);
     let args = ["open", "--app", app.to_str().unwrap()];
@@ -457,14 +457,14 @@ fn native_open_reproduces_the_typescript_wait_spinner_and_clears_its_line() {
     );
     assert_eq!(rust.status, 0, "{}", rust.stdout);
     assert!(
-        rust.stdout.contains("Waiting for the window to close"),
-        "missing wait animation: {}",
+        rust.stdout.contains("Waiting for Codex UI to become ready"),
+        "missing opening readiness animation: {}",
         visible(&rust.stdout)
     );
     assert!(
         ["|", "/", "-", "\\"].iter().any(|frame| rust
             .stdout
-            .contains(&format!("  {frame} Waiting for the window to close"))),
+            .contains(&format!("  {frame} Waiting for Codex UI to become ready"))),
         "missing spinner frames: {:?}",
         rust.stdout
     );

@@ -48,6 +48,12 @@ pub struct InjectionOptions {
     pub locale: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CdpLifecycleAction {
+    Wait,
+    CloseBrowser,
+}
+
 pub fn allocate_debug_port() -> Result<u16, String> {
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|err| err.to_string())?;
     let port = listener.local_addr().map_err(|err| err.to_string())?.port();
@@ -121,19 +127,19 @@ pub fn is_primary_codex_page(target: &CdpTarget) -> bool {
 }
 
 pub fn inject_shared_ui(debug_port: u16) -> Result<(), String> {
-    inject_shared_ui_with_options(debug_port, &InjectionOptions::default())
+    inject_shared_ui_with_options(debug_port, &InjectionOptions::default()).map(|_| ())
 }
 
 pub fn inject_shared_ui_with_options(
     debug_port: u16,
     options: &InjectionOptions,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let source = inject_source_for_locale(options.locale.as_deref());
     let mut last = "cdp page not ready".to_string();
     let mut refused = 0u8;
     for _ in 0..8 {
         match try_inject(debug_port, &source) {
-            Ok(()) => return Ok(()),
+            Ok(target_id) => return Ok(target_id),
             Err(err) => {
                 let refused_now = err.contains("Connection refused")
                     || err.contains("Connection reset")
@@ -153,7 +159,7 @@ pub fn inject_shared_ui_with_options(
     Err(last)
 }
 
-fn try_inject(debug_port: u16, source: &str) -> Result<(), String> {
+fn try_inject(debug_port: u16, source: &str) -> Result<String, String> {
     let targets = list_targets(debug_port)?;
     let page = pick_codex_page_target(&targets).ok_or("no Codex page target")?;
     validate_cdp_websocket_url(&page.ws, debug_port)?;
@@ -184,8 +190,54 @@ fn try_inject(debug_port: u16, source: &str) -> Result<(), String> {
     {
         return Err("Incodex button and banner are not mounted yet".into());
     }
+    let target_id = page.id.clone();
     let _ = socket.close(None);
-    Ok(())
+    Ok(target_id)
+}
+
+pub fn start_lifecycle_monitor(debug_port: u16, primary_target_id: String) {
+    thread::spawn(move || monitor_primary_target(debug_port, &primary_target_id));
+}
+
+fn monitor_primary_target(debug_port: u16, primary_target_id: &str) {
+    loop {
+        thread::sleep(Duration::from_millis(200));
+        let Ok(targets) = list_targets(debug_port) else {
+            return;
+        };
+        match lifecycle_action(primary_target_id, &targets) {
+            CdpLifecycleAction::Wait => {}
+            CdpLifecycleAction::CloseBrowser => {
+                let _ = close_browser(debug_port);
+                return;
+            }
+        }
+    }
+}
+
+fn lifecycle_action(primary_target_id: &str, targets: &[CdpTarget]) -> CdpLifecycleAction {
+    if targets.iter().any(|target| target.id == primary_target_id) {
+        CdpLifecycleAction::Wait
+    } else {
+        CdpLifecycleAction::CloseBrowser
+    }
+}
+
+fn browser_close_message() -> Value {
+    json!({ "id": 1, "method": "Browser.close", "params": {} })
+}
+
+fn close_browser(debug_port: u16) -> Result<(), String> {
+    let version = http_get_json(debug_port, "/json/version")?;
+    let websocket = version
+        .get("webSocketDebuggerUrl")
+        .and_then(Value::as_str)
+        .ok_or("CDP browser target has no WebSocket URL")?;
+    validate_cdp_websocket_url(websocket, debug_port)?;
+    let (mut socket, _) = connect(websocket).map_err(|err| err.to_string())?;
+    socket
+        .send(Message::Text(browser_close_message().to_string()))
+        .map_err(|err| err.to_string())
 }
 
 fn send_cdp(

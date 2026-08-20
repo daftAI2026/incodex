@@ -1,5 +1,7 @@
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
@@ -11,8 +13,8 @@ use incodex_core::session::{
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
 
 use crate::cdp::{
-    allocate_debug_port, debug_launch_args, inject_shared_ui_with_options, InjectionOptions,
-    WindowBounds,
+    allocate_debug_port, debug_launch_args, inject_shared_ui_with_options, start_lifecycle_monitor,
+    InjectionOptions, WindowBounds,
 };
 use crate::parse::ParsedCli;
 
@@ -40,6 +42,11 @@ pub enum CleanupResult {
         retained_path: PathBuf,
         reason: String,
     },
+}
+
+enum InjectionStatus {
+    Ready,
+    Failed(String),
 }
 
 impl CleanupResult {
@@ -170,6 +177,14 @@ pub fn format_session_cleanup(cleanup: &CleanupResult) -> (bool, String) {
     }
 }
 
+fn open_progress_copy() -> (&'static str, &'static str, &'static str) {
+    (
+        "Opening incognito Codex window",
+        "Opened. Incognito Codex window is ready.",
+        "Waiting for the window to close",
+    )
+}
+
 pub fn wait_and_burn(
     plan: &OpenPlan,
     user_root: &Path,
@@ -195,6 +210,7 @@ fn spawn_plan(plan: &OpenPlan) -> Result<i32, String> {
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     let mut child = command.spawn().map_err(|err| err.to_string())?;
+    let (status_tx, status_rx) = mpsc::channel();
     if plan.debug_port != 0 {
         let port = plan.debug_port;
         let child_pid = child.id();
@@ -204,7 +220,7 @@ fn spawn_plan(plan: &OpenPlan) -> Result<i32, String> {
         };
         thread::spawn(move || {
             let mut bounds_ready = source_bounds.is_none();
-            let mut ui_ready = false;
+            let mut primary_target_id = None;
             let mut last_injection_error = None;
             for attempt in 1u8..=40 {
                 if !bounds_ready {
@@ -217,29 +233,32 @@ fn spawn_plan(plan: &OpenPlan) -> Result<i32, String> {
                         .is_ok();
                     }
                 }
-                match inject_shared_ui_with_options(port, &options) {
-                    Ok(()) if bounds_ready => {
-                        if std::env::var_os("INCODEX_CDP_LOG").is_some() {
-                            eprintln!("cdp inject ok on attempt {attempt} port {port}");
+                if primary_target_id.is_none() {
+                    match inject_shared_ui_with_options(port, &options) {
+                        Ok(target_id) => {
+                            primary_target_id = Some(target_id);
+                            if std::env::var_os("INCODEX_CDP_LOG").is_some() {
+                                eprintln!("cdp inject ok on attempt {attempt} port {port}");
+                            }
                         }
+                        Err(err) => {
+                            last_injection_error = Some(err.clone());
+                            if std::env::var_os("INCODEX_CDP_LOG").is_some() {
+                                eprintln!("cdp inject attempt {attempt}: {err}");
+                            }
+                        }
+                    }
+                }
+                if bounds_ready {
+                    if let Some(target_id) = primary_target_id.take() {
+                        start_lifecycle_monitor(port, target_id);
+                        let _ = status_tx.send(InjectionStatus::Ready);
                         return;
-                    }
-                    Ok(()) => {
-                        ui_ready = true;
-                        if std::env::var_os("INCODEX_CDP_LOG").is_some() {
-                            eprintln!("cdp inject ok; waiting for child window bounds");
-                        }
-                    }
-                    Err(err) => {
-                        last_injection_error = Some(err.clone());
-                        if std::env::var_os("INCODEX_CDP_LOG").is_some() {
-                            eprintln!("cdp inject attempt {attempt}: {err}");
-                        }
                     }
                 }
                 thread::sleep(Duration::from_millis(400));
             }
-            let detail = if !ui_ready {
+            let detail = if primary_target_id.is_none() {
                 format!(
                     "UI injection failed: {}",
                     last_injection_error
@@ -249,16 +268,47 @@ fn spawn_plan(plan: &OpenPlan) -> Result<i32, String> {
             } else {
                 "the window could not inherit the main window bounds".to_string()
             };
-            eprintln!(
-                "\r\u{1b}[2K{}",
-                format_warn(&format!("Window opened, but {detail}."), None)
-            );
+            let _ = status_tx.send(InjectionStatus::Failed(detail));
         });
+    } else {
+        let _ = status_tx.send(InjectionStatus::Failed(
+            "a localhost CDP port could not be allocated".into(),
+        ));
     }
-    child
-        .wait()
-        .map(|status| status.code().unwrap_or(1))
-        .map_err(|err| err.to_string())
+
+    let (_, opened, waiting) = open_progress_copy();
+    let mut spinner = crate::spinner::Spinner::start("Waiting for Codex UI to become ready");
+    let mut reported = false;
+    loop {
+        if !reported {
+            match status_rx.try_recv() {
+                Ok(InjectionStatus::Ready) => {
+                    spinner.stop();
+                    println!("{}", format_ok(opened, None));
+                    let _ = std::io::stdout().flush();
+                    spinner = crate::spinner::Spinner::start(waiting);
+                    reported = true;
+                }
+                Ok(InjectionStatus::Failed(detail)) => {
+                    spinner.stop();
+                    println!(
+                        "{}",
+                        format_warn(&format!("Window opened, but {detail}."), None)
+                    );
+                    let _ = std::io::stdout().flush();
+                    spinner = crate::spinner::Spinner::start(waiting);
+                    reported = true;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => reported = true,
+            }
+        }
+        if let Some(status) = child.try_wait().map_err(|err| err.to_string())? {
+            spinner.stop();
+            return Ok(status.code().unwrap_or(1));
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
 }
 
 pub fn wait_and_burn_with<S, B>(
@@ -361,7 +411,8 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), String> {
                 height,
             });
     }
-    println!("{}", format_step("Opening incognito window", None));
+    let (opening, _, _) = open_progress_copy();
+    println!("{}", format_step(opening, None));
     println!(
         "{}",
         format_kv("Binary", &plan.bin.display().to_string(), None)
@@ -371,9 +422,7 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), String> {
         format_kv("Home", &plan.home.display().to_string(), None)
     );
     println!("{}", format_kv("Session", &plan.session_id, None));
-    let mut spinner = crate::spinner::Spinner::start("Waiting for the window to close");
     let (_code, cleanup) = wait_and_burn(&plan, &root, 250)?;
-    spinner.stop();
     let (ok, message) = format_session_cleanup(&cleanup);
     if ok {
         println!("{}", format_ok(&message, None));
