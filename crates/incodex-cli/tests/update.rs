@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
-use std::time::{Duration, Instant};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -37,10 +37,11 @@ fn open_menu_long_enough_for_background_refresh(
     home: &std::path::Path,
     installed: &std::path::Path,
     path: &str,
+    keys: &str,
 ) {
     let script = r#"
 import os, pty, select, sys, time
-program, home, path = sys.argv[1:]
+program, home, path, keys = sys.argv[1:]
 env = os.environ.copy()
 env["HOME"] = home
 env["PATH"] = path
@@ -65,8 +66,22 @@ if not seen:
     os.kill(pid, 9)
     os.waitpid(pid, 0)
     raise SystemExit(2)
-time.sleep(0.7)
-os.write(fd, b"q")
+cache = os.path.join(home, ".incodex", "cache", "update_message")
+refresh_deadline = time.time() + 3
+while time.time() < refresh_deadline:
+    try:
+        if open(cache, "rb").read().strip():
+            break
+    except OSError:
+        pass
+    time.sleep(0.05)
+time.sleep(0.2)
+for key in keys.encode("ascii"):
+    try:
+        os.write(fd, bytes([key]))
+    except OSError:
+        break
+    time.sleep(0.2)
 exit_deadline = time.time() + 3
 while time.time() < exit_deadline:
     done, status = os.waitpid(pid, os.WNOHANG)
@@ -88,6 +103,7 @@ raise SystemExit(3)
         .arg(installed)
         .arg(home)
         .arg(path)
+        .arg(keys)
         .status()
         .unwrap();
     assert!(status.success(), "PTY menu harness failed: {status}");
@@ -231,13 +247,22 @@ esac
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(fs::read_to_string(prefix_log).unwrap().trim(), prefix.to_string_lossy());
+    assert_eq!(
+        fs::read_to_string(prefix_log).unwrap().trim(),
+        prefix.to_string_lossy()
+    );
     assert_eq!(
         fs::read_to_string(download_base_log).unwrap().trim(),
         "https://github.com/daftAI2026/incodex/releases/download/v9.9.9"
     );
-    assert_eq!(fs::read_to_string(expected_version_log).unwrap().trim(), "9.9.9");
-    assert_eq!(fs::read_to_string(download_dir_log).unwrap().trim(), "unset");
+    assert_eq!(
+        fs::read_to_string(expected_version_log).unwrap().trim(),
+        "9.9.9"
+    );
+    assert_eq!(
+        fs::read_to_string(download_dir_log).unwrap().trim(),
+        "unset"
+    );
     let urls = fs::read_to_string(curl_log).unwrap();
     assert!(urls.contains("raw.githubusercontent.com/daftAI2026/incodex/v9.9.9/install.sh"));
     assert!(!urls.contains("raw.githubusercontent.com/daftAI2026/incodex/main/install.sh"));
@@ -462,7 +487,10 @@ esac
     while !installer_started.exists() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
     }
-    assert!(installer_started.exists(), "first updater never entered installer");
+    assert!(
+        installer_started.exists(),
+        "first updater never entered installer"
+    );
 
     let started = Instant::now();
     let second = Command::new(&installed)
@@ -479,7 +507,10 @@ esac
     let _ = first.wait();
 
     assert_eq!(second.status.code(), Some(1));
-    assert!(elapsed < Duration::from_secs(1), "second updater waited {elapsed:?}");
+    assert!(
+        elapsed < Duration::from_secs(1),
+        "second updater waited {elapsed:?}"
+    );
     assert!(
         String::from_utf8_lossy(&second.stderr).contains("another update is already running"),
         "stderr={}",
@@ -499,7 +530,7 @@ fn native_script_menu_refreshes_the_stable_update_notice_cache() {
     );
     let path = format!("{}:/usr/bin:/bin", fake_bin.display());
 
-    open_menu_long_enough_for_background_refresh(&home, &installed, &path);
+    open_menu_long_enough_for_background_refresh(&home, &installed, &path, "q");
 
     let cache = home.join(".incodex/cache/update_message");
     assert_eq!(
@@ -527,7 +558,7 @@ fn native_homebrew_menu_waits_for_the_formula_and_names_brew_upgrade() {
     );
     let path = format!("{}:/usr/bin:/bin", fake_bin.display());
 
-    open_menu_long_enough_for_background_refresh(&home, &installed, &path);
+    open_menu_long_enough_for_background_refresh(&home, &installed, &path, "q");
 
     let cache = home.join(".incodex/cache/update_message");
     assert_eq!(
@@ -537,13 +568,28 @@ fn native_homebrew_menu_waits_for_the_formula_and_names_brew_upgrade() {
 }
 
 #[test]
+fn native_homebrew_menu_does_not_expose_the_self_update_shortcut() {
+    let home = scratch("menu-homebrew-no-self-update");
+    let fake_bin = home.join("fake-bin");
+    let cellar_bin = home.join(format!("Cellar/incodex/{}/bin", env!("CARGO_PKG_VERSION")));
+    fs::create_dir_all(&fake_bin).unwrap();
+    fs::create_dir_all(&cellar_bin).unwrap();
+    let installed = cellar_bin.join("incodex");
+    fs::copy(env!("CARGO_BIN_EXE_incodex"), &installed).unwrap();
+    write_executable(&fake_bin.join("curl"), "#!/bin/sh\nexit 22\n");
+    let cache = home.join(".incodex/cache/update_message");
+    fs::create_dir_all(cache.parent().unwrap()).unwrap();
+    fs::write(cache, "Update 9.9.9 available, run brew upgrade incodex\n").unwrap();
+    let path = format!("{}:/usr/bin:/bin", fake_bin.display());
+
+    open_menu_long_enough_for_background_refresh(&home, &installed, &path, "uq");
+}
+
+#[test]
 fn native_homebrew_menu_rejects_a_current_script_update_notice() {
     let home = scratch("menu-homebrew-stale-script-notice");
     let fake_bin = home.join("fake-bin");
-    let cellar_bin = home.join(format!(
-        "Cellar/incodex/{}/bin",
-        env!("CARGO_PKG_VERSION")
-    ));
+    let cellar_bin = home.join(format!("Cellar/incodex/{}/bin", env!("CARGO_PKG_VERSION")));
     fs::create_dir_all(&fake_bin).unwrap();
     fs::create_dir_all(&cellar_bin).unwrap();
     let installed = cellar_bin.join("incodex");
@@ -561,7 +607,7 @@ fn native_homebrew_menu_rejects_a_current_script_update_notice() {
     .unwrap();
     let path = format!("{}:/usr/bin:/bin", fake_bin.display());
 
-    open_menu_long_enough_for_background_refresh(&home, &installed, &path);
+    open_menu_long_enough_for_background_refresh(&home, &installed, &path, "q");
 
     assert_eq!(fs::read_to_string(cache).unwrap(), "");
 }
