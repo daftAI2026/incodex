@@ -3,6 +3,7 @@ pub mod confirm;
 pub mod diagnose;
 pub mod help;
 pub mod install;
+pub mod lifecycle;
 pub mod menu;
 pub mod open;
 pub mod parse;
@@ -56,6 +57,9 @@ where
 
     match parsed.command {
         CliCommand::Open => crate::open::run_open(&parsed),
+        CliCommand::Runtime => crate::lifecycle::run_runtime(&parsed),
+        CliCommand::Update => crate::lifecycle::run_update(&parsed),
+        CliCommand::SelfUninstall => crate::lifecycle::run_self_uninstall(&parsed),
         CliCommand::Install => crate::install::run_install(&parsed),
         CliCommand::Uninstall => crate::install::run_uninstall(&parsed),
         CliCommand::Recover => crate::install::run_recover(&parsed),

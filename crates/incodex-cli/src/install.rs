@@ -108,6 +108,10 @@ pub fn run_recover(parsed: &ParsedCli) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn restore_default_for_self_uninstall() -> Result<(), String> {
+    uninstall_app(Path::new(DEFAULT_APP), &user_root()).map(|_| ())
+}
+
 fn map_tx(err: TxError) -> String {
     match err {
         TxError::Refuse { message } | TxError::Other(message) => {
