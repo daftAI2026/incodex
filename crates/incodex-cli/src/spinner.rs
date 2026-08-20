@@ -1,7 +1,7 @@
 use std::io::{IsTerminal, Write};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, Mutex,
 };
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -15,16 +15,23 @@ pub struct Progress {
 
 impl Progress {
     pub fn new() -> Self {
+        Self::new_for(crate::terminal::is_tty() && std::io::stderr().is_terminal())
+    }
+
+    fn new_for(interactive: bool) -> Self {
         Self {
-            interactive: crate::terminal::is_tty() && std::io::stderr().is_terminal(),
+            interactive,
             spinner: None,
         }
     }
 
     pub fn stage(&mut self, message: &str) {
-        self.stop();
         if self.interactive {
-            self.spinner = Some(Spinner::start(message));
+            if let Some(spinner) = &mut self.spinner {
+                spinner.update_message(message);
+            } else {
+                self.spinner = Some(Spinner::start_for(message, true));
+            }
         } else {
             println!("{}", incodex_core::format_step(message, None));
         }
@@ -45,6 +52,7 @@ impl Drop for Progress {
 
 pub struct Spinner {
     stopped: Arc<AtomicBool>,
+    message: Arc<Mutex<String>>,
     worker: Option<JoinHandle<()>>,
 }
 
@@ -54,16 +62,18 @@ impl Spinner {
     }
 
     fn start_for(message: &str, interactive: bool) -> Self {
+        let message = Arc::new(Mutex::new(message.to_string()));
         if !interactive {
             return Self {
                 stopped: Arc::new(AtomicBool::new(true)),
+                message,
                 worker: None,
             };
         }
         let stopped = Arc::new(AtomicBool::new(false));
         let worker_stopped = Arc::clone(&stopped);
-        let message = message.to_string();
-        eprint!("\r\u{1b}[2K  {} {message}", FRAMES[0]);
+        let worker_message = Arc::clone(&message);
+        eprint!("\r\u{1b}[2K  {} {}", FRAMES[0], message.lock().unwrap());
         let _ = std::io::stderr().flush();
         let worker = thread::spawn(move || {
             let mut frame = 1_usize;
@@ -72,14 +82,28 @@ impl Spinner {
                 if worker_stopped.load(Ordering::Relaxed) {
                     break;
                 }
-                eprint!("\r\u{1b}[2K  {} {message}", FRAMES[frame % FRAMES.len()]);
+                eprint!(
+                    "\r\u{1b}[2K  {} {}",
+                    FRAMES[frame % FRAMES.len()],
+                    worker_message.lock().unwrap()
+                );
                 let _ = std::io::stderr().flush();
                 frame += 1;
             }
         });
         Self {
             stopped,
+            message,
             worker: Some(worker),
+        }
+    }
+
+    fn update_message(&mut self, message: &str) {
+        let mut current = self.message.lock().unwrap();
+        *current = message.to_string();
+        if self.worker.is_some() {
+            eprint!("\r\u{1b}[2K  {} {current}", FRAMES[0]);
+            let _ = std::io::stderr().flush();
         }
     }
 
