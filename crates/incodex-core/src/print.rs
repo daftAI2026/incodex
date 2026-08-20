@@ -31,6 +31,10 @@ pub fn format_warn(message: &str, color: Option<bool>) -> String {
     format!("  {} {message}", paint(use_color(color), "0;33", "!"))
 }
 
+pub fn format_error(message: &str, color: Option<bool>) -> String {
+    format!("  {} {message}", paint(use_color(color), "0;31", "✗"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -42,6 +46,10 @@ mod tests {
         assert_eq!(
             format_warn("Codex app not found: /tmp/x", Some(false)),
             "  ! Codex app not found: /tmp/x"
+        );
+        assert_eq!(
+            format_error("operation failed", Some(false)),
+            "  ✗ operation failed"
         );
     }
 }

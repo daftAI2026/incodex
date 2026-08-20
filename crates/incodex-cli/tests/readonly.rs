@@ -151,7 +151,7 @@ fn version_wins_over_help_and_help_rejects_version_flag() {
     let (status, stdout, stderr) = run(&["help", "--version"], &home);
     assert_eq!(status, 1);
     assert_eq!(stdout, "");
-    assert_eq!(stderr, "unknown flag: --version\n  incodex --help\n");
+    assert_eq!(stderr, "  ✗ unknown flag: --version\n  incodex --help\n");
 }
 
 #[test]
@@ -334,12 +334,12 @@ fn doctor_json_names_interrupted_journals() {
 fn unknown_flags_fail_closed() {
     let home = isolated_home();
     let cases: &[(&[&str], &str)] = &[
-        (&["wipe"], "unknown command: wipe\n  incodex --help\n"),
-        (&["status", "--please"], "unknown flag: --please\n  incodex --help\n"),
-        (&["status", "--app"], "--app requires a path, not another flag\n"),
+        (&["wipe"], "  ✗ unknown command: wipe\n  incodex --help\n"),
+        (&["status", "--please"], "  ✗ unknown flag: --please\n  incodex --help\n"),
+        (&["status", "--app"], "  ✗ --app requires a path, not another flag\n"),
         (
             &["recover"],
-            "recover requires --transaction <id>\n  incodex recover --transaction <id>\n",
+            "  ✗ recover requires --transaction <id>\n  incodex recover --transaction <id>\n",
         ),
     ];
     for (args, stderr) in cases {

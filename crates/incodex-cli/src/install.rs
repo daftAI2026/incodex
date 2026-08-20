@@ -238,7 +238,6 @@ fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<Comma
     }
     progress.stage("Publishing Runtime");
     let published = publish(root)?;
-    progress.stage("Inspecting current installation");
     let asar = app.join(ASAR_REL);
     if asar.exists() {
         if let Ok(archive) = Archive::open(&asar) {
@@ -253,7 +252,6 @@ fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<Comma
             }
         }
     }
-    progress.stage("Preparing installation transaction");
     let mut tx = Engine::begin(root, app, "install")?;
     let install_id = tx.install_id().to_string();
     let original = root
@@ -267,13 +265,11 @@ fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<Comma
     let staged = root
         .join("scratch")
         .join(format!("ChatGPT.app.staged-{install_id}"));
-    progress.stage("Preparing patched app");
+    progress.stage("Patching and signing app");
     ditto(app, &staged)?;
-    progress.stage("Patching application");
     let (hash, _) = patch_asar(&staged.join(ASAR_REL), loader_source(), Some(&install_id))?;
     write_asar_integrity(&staged, &hash)?;
     if is_official_app(app, None) || verify_app(app) || app.join("Contents/MacOS").exists() {
-        progress.stage("Signing patched app");
         if let Err(err) = sign_app(&staged) {
             if is_official_app(app, None) {
                 tx.rollback(&err)?;
@@ -281,22 +277,20 @@ fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<Comma
             return Err(err);
         }
     }
-    progress.stage("Staging patched app");
+    progress.stage("Replacing application");
     tx.place_staging(&staged)?;
-    progress.stage("Swapping application");
     if let Err(error) = tx.swap() {
         if matches!(tx.journal().phase.as_str(), "TARGET_MOVED_OUT" | "SWAPPED") {
             let _ = tx.rollback(&error);
         }
         return Err(error);
     }
-    progress.stage("Verifying installed app");
+    progress.stage("Verifying installation");
     if !verify_app(app) {
         let error = "post-swap codesign verification failed".to_string();
         tx.rollback(&error)?;
         return Err(error);
     }
-    progress.stage("Committing installation");
     let commit = match tx.commit() {
         Ok(result) => result,
         Err(error) => {
@@ -311,7 +305,6 @@ fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<Comma
             "Install committed, but transaction cleanup failed: {error}. Run `incodex recover --transaction {install_id}` to retry cleanup."
         )
     });
-    progress.stage("Refreshing Dock registration");
     let _ = notify_launch_services(app);
     Ok(CommandResult {
         skipped: false,

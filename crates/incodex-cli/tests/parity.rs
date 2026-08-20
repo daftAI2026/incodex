@@ -158,6 +158,10 @@ fn count(text: &str, needle: &str) -> usize {
     text.match_indices(needle).count()
 }
 
+fn normalize_rust_error(text: &str) -> String {
+    text.strip_prefix("  ✗ ").unwrap_or(text).to_string()
+}
+
 fn marker_app(home: &Path) -> PathBuf {
     let app = home.join("Marker.app");
     fs::create_dir_all(&app).unwrap();
@@ -788,7 +792,13 @@ fn native_lifecycle_commands_match_the_typescript_source_checkout_contract() {
     ] {
         let ts = run_ts(args, &ts_home);
         let rust = run_rust(args, &rust_home);
-        assert_eq!(rust, ts, "lifecycle parity failed for {args:?}");
+        assert_eq!(rust.status, ts.status, "status parity failed for {args:?}");
+        assert_eq!(rust.stdout, ts.stdout, "stdout parity failed for {args:?}");
+        assert_eq!(
+            normalize_rust_error(&rust.stderr),
+            ts.stderr,
+            "stderr parity failed for {args:?}"
+        );
     }
 }
 
@@ -867,7 +877,7 @@ fn plans_and_non_tty_refusals_match_on_the_same_fixture() {
             "stdout case={case:?}"
         );
         assert_eq!(
-            normalize_paths(&rust.stderr, &rs_home),
+            normalize_paths(&normalize_rust_error(&rust.stderr), &rs_home),
             normalize_paths(&ts.stderr, &ts_home),
             "stderr case={case:?}"
         );
