@@ -154,7 +154,7 @@ $ incodex install
   Backup       ~/.incodex/installations/
   ✓ Official app patched
   Install id   0778f0fa-…
-  Runtime      0.1.0
+  Runtime      0.2.0
   App          /Applications/ChatGPT.app
 ➤ Relaunch
   ✓ ChatGPT.app relaunched.
@@ -194,8 +194,8 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      0.1.0 releases/0.1.0
-  Version      26.814.41407 6720
+  Runtime      0.2.0 releases/0.2.0
+  Version      26.814.41957 6744
   Install id   0778f0fa-…
   Target       official-404f3389062b
   Main         .vite/build/early-bootstrap.js
@@ -211,12 +211,12 @@ $ incodex doctor
   Exists       yes
   Installed    yes
   Bundle       com.openai.codex
-  Version      26.814.41407 6720
+  Version      26.814.41957 6744
   Arch         arm64
 
 ➤ Runtime
-  Version      0.1.0
-  External     0.1.0 releases/0.1.0
+  Version      0.2.0
+  External     0.2.0 releases/0.2.0
   Loader       asar only
   Main         .vite/build/early-bootstrap.js
 
@@ -243,7 +243,7 @@ The Gatekeeper line is diagnostic, not an install failure. After the bundle chan
 ```bash
 $ incodex --version
 
-Incodex version 0.1.0
+Incodex version 0.2.0
 macOS: 26.6
 Architecture: arm64
 Kernel: 25.6.0

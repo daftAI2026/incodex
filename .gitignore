@@ -12,3 +12,4 @@ release-cli/
 AGENTS.local.md
 CLAUDE.local.md
 *.bun-build
+/target

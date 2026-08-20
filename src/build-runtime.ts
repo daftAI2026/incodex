@@ -9,10 +9,17 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = join(root, "dist");
 mkdirSync(outDir, { recursive: true });
 
-const svg = readFileSync(join(root, "assets/hat-glasses.svg"), "utf8").trim();
+const hatGlassesSvg = readFileSync(join(root, "assets/hat-glasses.svg"), "utf8").trim();
+const circleXSvg = readFileSync(join(root, "assets/circle-x.svg"), "utf8").trim();
+function embedSvg(svg: string): string {
+  return svg.replace(/`/g, "\\`").replace(/\$\{/g, "\\${");
+}
 const injectSrc = readFileSync(join(root, "src/runtime/inject.ts"), "utf8").replace(
   "{{HAT_GLASSES_SVG}}",
-  svg.replace(/`/g, "\\`").replace(/\$\{/g, "\\${"),
+  embedSvg(hatGlassesSvg),
+).replace(
+  "{{CIRCLE_X_SVG}}",
+  embedSvg(circleXSvg),
 );
 writeFileSync(join(outDir, "incognito-copy.ts"), readFileSync(join(root, "src/runtime/incognito-copy.ts")));
 const injectTmp = join(root, "src/runtime/_inject.src.ts");

@@ -4,13 +4,15 @@ This file is the shared source of truth for any AI agent working on this repo (C
 
 ## Project
 
-Incodex adds a Chrome-style incognito window to a locally installed OpenAI Codex desktop app (`ChatGPT.app`, `com.openai.codex`). It is an unofficial add-on. The installer patches the official bundle; the CLI can also launch an isolated window without patching.
+Incodex adds a Chrome-style incognito window to a locally installed OpenAI Codex desktop app (`ChatGPT.app`, `com.openai.codex`). It is an unofficial add-on. The installer patches the official bundle. `incodex open` is a second launch path: it does not patch or resign the official app, but that isolated window still gets the hat-glasses control and banner by injecting the same `inject.js` over a localhost debug port.
 
 Safety rules matter more than speed. Treat installer, signing, session cleanup, and IPC as the dangerous surface.
 
 ## Product Direction
 
-Users launch the official Codex icon as usual. After `incodex install`, a hat-glasses control sits left of Search. Click or `Shift+Command+N` opens a second isolated Codex window: same login, language, and base settings; no old chats; close burns that temp home. `incodex open` is the no-patch path.
+Users launch the official Codex icon as usual. After `incodex install`, a hat-glasses control sits left of Search. Click or `Shift+Command+N` opens a second isolated Codex window: same login, language, and base settings; no old chats; close burns that temp home.
+
+`incodex open` is the other launch path: spawn the official binary with an isolated home, do not copy/patch/resign the official app, then inject the **same** `inject.js` (hat-glasses + banner) through Chrome DevTools Protocol. CDP is not the Dock / `install` entry.
 
 ### What Incodex Should Do
 
@@ -29,7 +31,8 @@ Users launch the official Codex icon as usual. After `incodex install`, a hat-gl
 - Do not restore a valid OpenAI signature after asar changes. Appshot (智能快照) is a hard triangle; document it, do not fake Team ID `2DC432GLL2`.
 - Do not sign vendor CUA sidecars. Stash them, `--deep` the rest, restore, then outer `signOne`.
 - Do not default live-patch from `install.sh` / `bun link` / `incodex update`. Those only manage the CLI.
-- Do not add Overlay, CDP-as-launcher, an independent Session Agent, LaunchAgent auto-repair, runtime pubkeys, or Homebrew core. Own tap is `daftAI2026/homebrew-tap`; bump it from `release.yml`. Do not open a Homebrew/homebrew-core PR.
+- Do not add Overlay, an independent Session Agent, LaunchAgent auto-repair, runtime pubkeys, or Homebrew core. Own tap is `daftAI2026/homebrew-tap`; bump it from `release.yml`. Do not open a Homebrew/homebrew-core PR.
+- Do not use CDP as the everyday Dock / `install` launch path. `incodex open` may start the official binary with `--remote-debugging-port` on `127.0.0.1` and inject `dist/incodex-inject.js`. Do not clone the official app for `open`. Do not copy AGPL injector scripts.
 - Do not add `--yes` as a hidden alias that agents will hallucinate onto live patching beyond the documented flag. `--confirm-live` stays a hidden compat alias of `--yes`.
 - Do not write tests after the implementation to match it. Write a failing repro first.
 
@@ -45,56 +48,52 @@ If the answer is no or unclear, decline or narrow.
 ## Repository Map
 
 - `AGENTS.md` is the contract. `CLAUDE.md` must stay a symlink to it.
-- `src/cli.ts` is the router: parse, menu, confirm, dispatch. Do not put asar or codesign logic here.
-- `src/parse-cli.ts` is the only user-facing command language. One parser for `incodex`, `inc`, and `bun src/cli.ts`.
-- `src/install.ts` / `src/uninstall.ts` / `src/recover.ts` mutate the app bundle.
+- `src/cli.ts` / `src/parse-cli.ts` are the TypeScript golden/reference CLI. Keep their public language aligned with the native implementation; do not put asar or codesign logic in either router.
+- `src/install.ts` / `src/uninstall.ts` / `src/recover.ts` are the TypeScript reference mutation paths while the compatibility window remains open.
+- `crates/incodex-cli` is the native CLI: `parse.rs` owns its command language, while `install.rs` and `open.rs` dispatch dangerous operations through the lower crates.
+- `crates/incodex-transaction` owns native mutation locks, durable journals, rollback, and recovery. `crates/incodex-asar` and `crates/incodex-macos` own ASAR and macOS signing/plist mechanics.
+- `crates/incodex-core/src/session.rs` owns native `open` session create/burn; it must stay behaviorally aligned with `src/runtime/incodex-safe-home.cts` without sharing language-specific code.
 - `src/packaged-runtime.ts` reads committed `dist/` (or `INCODEX_DIST`). The installer must not `spawn bun src/build-runtime.ts`.
 - `src/runtime/*.cts` is Electron-side source. `bun run build:runtime` emits portable `dist/*.cjs` with `__dirname`, never a machine-absolute path.
 - `src/runtime/incodex-loader.cts` is the only file that belongs in official asar. Everything else loads from `~/.incodex/runtime/` after hash check and fail-opens to official main.
 - `install.sh` installs the CLI binary only. It must verify `SHA256SUMS` and must not run `incodex install`.
-- `docs/` is gitignored local research. Do not commit it. The Native CLI experiment section below is the committed copy of that plan.
+- `docs/` is gitignored local research. Do not commit it. The Native CLI integration section below is the committed release boundary.
 - `.claude/skills/` is the agent skill tree. `.agents/skills/<name>` must stay a symlink to `../../.claude/skills/<name>`.
 
-## Native CLI experiment
+## Native CLI integration
 
-Shipped releases are the TypeScript CLI on `main`. Native Rust CLI work lives on `exp/rust-cli` until it is proven. Do not send crate PRs at `main`.
+Rust workspace now lives on `main`. The migration passed `tests/cli-golden.test.ts`, same-fixture TypeScript/Rust comparisons, the 10 MB size gate, the 50 ms product cold-start probe, and manual TTY/open verification. Stable release assets still come from the Bun-compiled TypeScript CLI until the compatibility cutover PR; source integration is not distribution cutover.
 
-### Branching
+### Branching and TDD
 
-1. `main` stays the product. Homebrew, `install.sh`, and `release.yml` still ship the Bun-compiled binary.
-2. `exp/rust-cli` is the integration branch. It started from `main` after the golden CLI contract (PR #66, `tests/cli-golden.test.ts`).
-3. Open crate PRs with `--base exp/rust-cli`. One step per PR. Merge that PR into `exp/rust-cli` when CI is green.
-4. When `main` moves (runtime, hover, golden tests), merge `main` into `exp/rust-cli`. Rebase topic branches onto `exp/rust-cli`, not onto `main`.
-5. Merge `exp/rust-cli` into `main` only after all of these hold:
-   - native `install` / `uninstall` / `recover` / `open` / `status` / `doctor` match `tests/cli-golden.test.ts`
-   - same-fixture comparison of plan output, asar, manifest, runtime hash, codesign, install / uninstall / recover
-   - uncompressed binary ≤ 10 MB (10–15 MB needs a written reason); record `--version` cold start against 50 ms
-6. Until that merge, do not point `install.sh`, the Homebrew tap, or `release.yml` at a Rust asset.
+1. New Rust CLI PRs target `main`. One review-sized change per PR.
+2. Each behavior change starts with a failing `cargo test` repro commit, followed by the implementation commit. Do not land tests and code in the same first commit.
+3. Keep the TypeScript CLI as the golden/reference implementation until the compatibility release has shipped and the legacy window closes. Do not rewrite product language independently in Rust.
+4. Rust `install` / `uninstall` / `recover` / `open` / `status` / `doctor` must remain aligned with `tests/cli-golden.test.ts` and the same-fixture parity suite.
 
-### What stays on `main`
+### Runtime boundary
 
-- TypeScript CLI (`src/cli.ts`, `src/parse-cli.ts`, install / recover / open).
-- Electron Runtime (`src/runtime/*.cts` → `dist/*.cjs`). Bun still builds it; Rust will embed `dist/` later.
-- Incognito-window hover (hat-glasses → circle-x). That is Runtime, not a crate.
+- Electron Runtime stays TypeScript (`src/runtime/*.cts` → `dist/*.cjs`) and is still built by Bun; Rust embeds committed `dist/` artifacts.
+- Incognito-window hover (hat-glasses → circle-x) is Runtime, not Rust UI code.
+- `open` uses the official binary plus an isolated Chromium/CODEX_HOME pair and localhost CDP injection. It must not patch ASAR, clone, or re-sign the app.
+- Do not add ratatui, cursive, crossterm, or an AGPL ASAR crate. The native menu is the existing numbered/arrow UI implemented directly with termios.
 
-### Steps on `exp/rust-cli` (one PR each)
+### Release cutover
 
-1. Golden CLI — already on `main` (#66). Align Rust to those tests. Do not rewrite the product language.
-2. Workspace + size probe: `crates/incodex-cli`, `incodex-core`, `incodex-transaction`, `incodex-macos`, `incodex-runtime-bundle`, `incodex-asar`. MIT. No AGPL asar crate. No TUI crate. `cargo test` on macOS. Measure uncompressed size and `--version` cold start.
-3. Read-only `status` / `doctor` aligned to golden.
-4. `open` (no asar, no resign). CleanupResult: only say removed when the directory is gone.
-5. Transaction v2 in Rust only. Do not rebuild journal schema v2 / fsync in TypeScript.
-6. Native ASAR: own MIT crate; `@electron/asar` is a test oracle only.
-7. `install` / `uninstall` / `recover`. After this, Release can stop attaching Bun-compiled binaries.
-8. Parallel comparison, then merge `exp/rust-cli` to `main`.
+1. The compatibility release will build Rust into the stable `incodex-darwin-arm64` / `incodex-darwin-x64` names.
+2. That release also keeps explicitly named legacy Bun assets for one version cycle. `install.sh` and the own Homebrew tap continue selecting only the stable names; do not add a Rust/Bun selector or fallback.
+3. A later release stops publishing new legacy assets. Never delete old release assets that remain useful for rollback.
+4. Until the compatibility cutover PR merges, `install.sh`, `daftAI2026/homebrew-tap`, and `release.yml` still distribute the Bun-compiled CLI. Do not open a Homebrew/homebrew-core PR.
 
-### Commands on `exp/rust-cli`
+### Rust commands
 
 ```bash
+cargo run -p incodex-cli -- --help
+cargo run -p incodex-cli -- open --dry-run
 cargo test --workspace --release
 ```
 
-Do not add ratatui, cursive, crossterm, or an AGPL asar crate. Menu stays the existing numbered/arrow UI, implemented later without a TUI crate.
+Do not add ratatui, cursive, crossterm, or an AGPL asar crate. The native menu is the existing numbered/arrow UI implemented directly with termios.
 
 ## Commands
 
@@ -106,7 +105,6 @@ bun run build:runtime
 bun src/cli.ts --help
 bun src/cli.ts install --dry-run
 INCODEX_DEV_HOT=1 bun run deploy:runtime
-# On exp/rust-cli only:
 cargo test --workspace --release
 ```
 
@@ -120,8 +118,8 @@ Public docs use `incodex` / `inc`. Use `bun src/cli.ts` only inside this repo.
 - Do not enable required GitHub reviews. Do not force-push `main`.
 - Pin GitHub Actions to a 40-character commit SHA with a version comment: `uses: owner/repo@<sha> # vX.Y.Z`. Do not leave floating `@v4` tags.
 - Official CLI packages are git tags `vX.Y.Z`. Follow `.claude/skills/release-flow/SKILL.md`, then `.claude/skills/release-notes/SKILL.md`. Do not `gh release create` and do not turn `generate_release_notes` back on.
-- Route session create/burn through `src/runtime/incodex-safe-home.cts`. Do not copy those functions into the CLI.
-- `incodex open` must not patch asar or resign. It spawns the official binary with `--user-data-dir`, `CODEX_HOME`, and `CODEX_ELECTRON_USER_DATA_PATH`.
+- Route Electron Runtime session create/burn through `src/runtime/incodex-safe-home.cts` and native CLI session create/burn through `crates/incodex-core/src/session.rs`. Keep their safety contract aligned; do not fork a third implementation.
+- `incodex open` must not patch asar, resign, or clone the official app. It spawns the official binary with `--user-data-dir`, `CODEX_HOME`, `CODEX_ELECTRON_USER_DATA_PATH`, and a localhost `--remote-debugging-port`, then injects the shared `inject.js`.
 - A second instance needs that Chromium user-data-dir pair. `CODEX_HOME` alone is swallowed by SingletonLock.
 
 ## Working Rules
@@ -129,5 +127,5 @@ Public docs use `incodex` / `inc`. Use `bun src/cli.ts` only inside this repo.
 - Tests first. Add a failing test that states the bug or contract, then implement until it passes. Do not write tests to match already-written code.
 - If you touch `src/runtime` or `src/build-runtime.ts`, run `bun run build:runtime` and commit matching `dist/` files.
 - Keep Chinese and English user-facing copy in `incognito-copy.ts` together.
-- One review-sized change per PR. Open the PR and merge when CI is green unless the user says otherwise. Rust crate PRs target `exp/rust-cli` until that branch merges to `main`.
+- One review-sized change per PR. Open the PR and merge when CI is green unless the user says otherwise. Rust CLI PRs target `main`.
 - Do not add AI attribution trailers to commits.
