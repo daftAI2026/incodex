@@ -202,12 +202,14 @@ pub fn has_hardened_runtime(app: &Path) -> bool {
     else {
         return false;
     };
-    format!(
+    let text = format!(
         "{}{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
-    )
-    .contains("runtime")
+    );
+    text.lines()
+        .filter_map(|line| line.split_once("flags=").map(|(_, flags)| flags))
+        .any(|flags| flags.contains("runtime"))
 }
 
 pub fn collect_vendor_helper_roots(app: &Path) -> Vec<PathBuf> {
@@ -389,6 +391,22 @@ pub fn notify_launch_services(app: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::Mutex;
+
+    static PATH_LOCK: Mutex<()> = Mutex::new(());
+
+    struct PathGuard(Option<OsString>);
+
+    impl Drop for PathGuard {
+        fn drop(&mut self) {
+            match &self.0 {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+    }
 
     #[test]
     fn crate_compiles() {}
@@ -400,5 +418,42 @@ mod tests {
             Some((0, 34, 1710, 1073))
         );
         assert_eq!(parse_window_bounds_output("missing"), None);
+    }
+
+    #[test]
+    fn hardened_runtime_requires_runtime_in_codesign_flags() {
+        let _path_lock = PATH_LOCK.lock().unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "incodex-codesign-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let fake_codesign = root.join("codesign");
+        std::fs::write(
+            &fake_codesign,
+            "#!/bin/sh\nprintf '%s\\n' 'Executable=/tmp/runtime-target.app/Contents/MacOS/runtime-target' 'Identifier=com.example.runtime-target' 'flags=0x0(none)'\n",
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&fake_codesign).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&fake_codesign, permissions).unwrap();
+
+        let original_path = std::env::var_os("PATH");
+        let _path_guard = PathGuard(original_path.clone());
+        let mut path = OsString::from(root.as_os_str());
+        path.push(":");
+        if let Some(original_path) = original_path {
+            path.push(original_path);
+        }
+        std::env::set_var("PATH", path);
+
+        let hardened = has_hardened_runtime(Path::new("/tmp/runtime-target.app"));
+        std::fs::remove_dir_all(&root).unwrap();
+
+        assert!(!hardened);
     }
 }

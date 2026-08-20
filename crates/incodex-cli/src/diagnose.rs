@@ -210,6 +210,11 @@ fn verify_external_runtime(root: &Path, current_path: &Path) -> Result<(String, 
     if files.is_empty() {
         return Err("runtime files are empty".to_string());
     }
+    for name in incodex_runtime_bundle::required_runtime_files() {
+        if !files.contains_key(name) {
+            return Err(format!("runtime file is missing: {name}"));
+        }
+    }
     for (name, expected) in files {
         if !safe_relative(name) {
             return Err(format!("runtime file is not a safe relative path: {name}"));

@@ -1,10 +1,14 @@
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use incodex_core::paths::{user_root, DEFAULT_APP};
 use incodex_core::{format_kv, format_ok, format_step};
 
 use crate::parse::ParsedCli;
+
+const INSTALL_SCRIPT_URL: &str =
+    "https://raw.githubusercontent.com/daftAI2026/incodex/main/install.sh";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InstallChannel {
@@ -53,14 +57,42 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
         println!("no changes made.");
         return Ok(());
     }
-    let status = Command::new("bash")
-        .args([
-            "-lc",
-            "curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/install.sh | bash",
-        ])
+    let downloaded = Command::new("curl")
+        .args(["-fsSL", INSTALL_SCRIPT_URL])
+        .output()
+        .map_err(|err| format!("update failed: could not start curl: {err}"))?;
+    if !downloaded.status.success() {
+        let detail = String::from_utf8_lossy(&downloaded.stderr);
+        let detail = detail.trim();
+        return Err(if detail.is_empty() {
+            format!("update failed: curl exited with {}", downloaded.status)
+        } else {
+            format!("update failed: {detail}")
+        });
+    }
+
+    let mut bash = Command::new("bash")
         .env("INCODEX_PREFIX", &prefix)
-        .status()
-        .map_err(|err| err.to_string())?;
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("update failed: could not start bash: {err}"))?;
+    let write_result = bash
+        .stdin
+        .take()
+        .ok_or_else(|| "update failed: bash stdin unavailable".to_string())
+        .and_then(|mut stdin| {
+            stdin
+                .write_all(&downloaded.stdout)
+                .map_err(|err| format!("update failed: could not send install script: {err}"))
+        });
+    if let Err(err) = write_result {
+        let _ = bash.kill();
+        let _ = bash.wait();
+        return Err(err);
+    }
+    let status = bash
+        .wait()
+        .map_err(|err| format!("update failed: could not wait for bash: {err}"))?;
     status.success().then_some(()).ok_or("update failed".into())
 }
 
