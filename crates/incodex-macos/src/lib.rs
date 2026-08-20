@@ -202,12 +202,14 @@ pub fn has_hardened_runtime(app: &Path) -> bool {
     else {
         return false;
     };
-    format!(
+    let text = format!(
         "{}{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
-    )
-    .contains("runtime")
+    );
+    text.lines()
+        .filter_map(|line| line.split_once("flags=").map(|(_, flags)| flags))
+        .any(|flags| flags.contains("runtime"))
 }
 
 pub fn collect_vendor_helper_roots(app: &Path) -> Vec<PathBuf> {
