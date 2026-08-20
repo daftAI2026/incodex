@@ -7,11 +7,12 @@ use incodex_core::paths::{user_root, ASAR_REL, DEFAULT_APP};
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
 use incodex_macos::{
     ditto, notify_launch_services, quit_official_app, read_asar_integrity, read_plist_info,
-    restore_original, sign_app, verify_app, write_asar_integrity,
+    sign_app, verify_app, write_asar_integrity,
 };
 use incodex_runtime_bundle::{loader_source, publish, runtime_version};
 use incodex_transaction::{
-    acquire_target_lock, journal_v2, recover_with, Engine, Recovery, TxError,
+    journal_v2, migrate_legacy_committed, recover_with, restore_committed, Engine, Recovery,
+    TxError,
 };
 
 use crate::parse::ParsedCli;
@@ -132,6 +133,7 @@ struct CommandResult {
     install_id: Option<String>,
     runtime_version: Option<String>,
     app: String,
+    warning: Option<String>,
 }
 
 fn resolve_target(parsed: &ParsedCli, root: &Path) -> PathBuf {
@@ -233,6 +235,7 @@ fn install_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
                     install_id: Some(install_id),
                     runtime_version: Some(published.version),
                     app: app.display().to_string(),
+                    warning: None,
                 });
             }
         }
@@ -245,6 +248,7 @@ fn install_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
         .join("original")
         .join("ChatGPT.app");
     ditto(app, &original)?;
+    tx.mark_backup_committed()?;
     let staged = root
         .join("scratch")
         .join(format!("ChatGPT.app.staged-{install_id}"));
@@ -271,16 +275,27 @@ fn install_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
         tx.rollback(&error)?;
         return Err(error);
     }
-    if let Err(error) = tx.commit() {
-        tx.rollback(&error)?;
-        return Err(error);
-    }
+    let commit = match tx.commit() {
+        Ok(result) => result,
+        Err(error) => {
+            if tx.journal().phase != "COMMITTED" {
+                tx.rollback(&error)?;
+            }
+            return Err(error);
+        }
+    };
+    let warning = commit.cleanup_warning.map(|error| {
+        format!(
+            "Install committed, but transaction cleanup failed: {error}. Run `incodex recover --transaction {install_id}` to retry cleanup."
+        )
+    });
     let _ = notify_launch_services(app);
     Ok(CommandResult {
         skipped: false,
         install_id: Some(install_id),
         runtime_version: Some(runtime_version()),
         app: app.display().to_string(),
+        warning,
     })
 }
 
@@ -291,19 +306,22 @@ fn uninstall_app(app: &Path, root: &Path) -> Result<CommandResult, String> {
     if is_official_app(app, None) {
         let _ = quit_official_app();
     }
-    let _lock = acquire_target_lock(root, app, "uninstall", None)?;
     let journal = find_committed(root, app)?;
-    let original = root
-        .join("transactions")
-        .join(&journal.install_id)
-        .join(&journal.paths.original);
-    restore_original(&original, app)?;
+    if journal.target.parent_device.is_empty() {
+        let install_id = journal.install_id.clone();
+        migrate_legacy_committed(root, &install_id, app, verify_app, |live| {
+            verified_live_install_id(root, live).as_deref() == Some(install_id.as_str())
+        })?;
+    } else {
+        restore_committed(root, &journal.install_id, app)?;
+    }
     let _ = notify_launch_services(app);
     Ok(CommandResult {
         skipped: false,
         install_id: Some(journal.install_id),
         runtime_version: Some(runtime_version()),
         app: app.display().to_string(),
+        warning: None,
     })
 }
 
@@ -342,13 +360,17 @@ fn installed_install_id(app: &Path, root: &Path, archive: &Archive) -> Option<St
     Some(install_id)
 }
 
+fn verified_live_install_id(root: &Path, app: &Path) -> Option<String> {
+    Archive::open(&app.join(ASAR_REL))
+        .ok()
+        .and_then(|archive| installed_install_id(app, root, &archive))
+}
+
 fn find_committed(root: &Path, app: &Path) -> Result<incodex_transaction::JournalV2, String> {
     let real = inspect_target(app, None)
         .map(|t| t.real_path)
         .unwrap_or_else(|_| app.to_path_buf());
-    let live_install_id = Archive::open(&app.join(ASAR_REL))
-        .ok()
-        .and_then(|archive| installed_install_id(app, root, &archive));
+    let live_install_id = verified_live_install_id(root, app);
     let dir = root.join("transactions");
     let entries = fs::read_dir(&dir).map_err(|_| {
         "no installation record for this target. refusing to use ~/.incodex/backup because it is not bound to this app"
@@ -395,6 +417,9 @@ fn print_command_result(result: &CommandResult) {
     }
     if let Some(id) = &result.install_id {
         println!("{}", format_kv("Install id", id, None));
+    }
+    if let Some(warning) = &result.warning {
+        println!("{}", format_warn(warning, None));
     }
     if let Some(version) = &result.runtime_version {
         println!("{}", format_kv("Runtime", version, None));

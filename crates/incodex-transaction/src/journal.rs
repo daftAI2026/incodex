@@ -17,6 +17,10 @@ pub struct JournalTarget {
     pub real_path: String,
     pub device: String,
     pub inode: String,
+    #[serde(default)]
+    pub parent_device: String,
+    #[serde(default)]
+    pub parent_inode: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -36,6 +40,22 @@ pub struct JournalV2 {
     pub phase: String,
     pub sequence: u64,
     pub checksum: String,
+    #[serde(default)]
+    pub pre_swap_digest: String,
+    #[serde(default)]
+    pub backup_digest: String,
+    #[serde(default)]
+    pub staged_device: String,
+    #[serde(default)]
+    pub staged_inode: String,
+    #[serde(default)]
+    pub staged_digest: String,
+    #[serde(default)]
+    pub restored_device: String,
+    #[serde(default)]
+    pub restored_inode: String,
+    #[serde(default)]
+    pub restored_digest: String,
 }
 
 #[derive(Debug, Clone)]
@@ -113,8 +133,77 @@ pub fn checksum_of(journal: &JournalV2) -> String {
     let mut copy = journal.clone();
     copy.checksum.clear();
     let body = serde_json::to_vec(&copy).unwrap_or_default();
-    let digest = Sha256::digest(&body);
-    digest.iter().map(|b| format!("{b:02x}")).collect()
+    checksum_hex(&body)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LegacyJournalTarget<'a> {
+    requested_path: &'a str,
+    real_path: &'a str,
+    device: &'a str,
+    inode: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LegacyJournal<'a> {
+    schema_version: u32,
+    install_id: &'a str,
+    target: LegacyJournalTarget<'a>,
+    paths: &'a RelPaths,
+    phase: &'a str,
+    sequence: u64,
+    checksum: &'a str,
+}
+
+fn legacy_checksum_of(journal: &JournalV2) -> String {
+    let legacy = LegacyJournal {
+        schema_version: journal.schema_version,
+        install_id: &journal.install_id,
+        target: LegacyJournalTarget {
+            requested_path: &journal.target.requested_path,
+            real_path: &journal.target.real_path,
+            device: &journal.target.device,
+            inode: &journal.target.inode,
+        },
+        paths: &journal.paths,
+        phase: &journal.phase,
+        sequence: journal.sequence,
+        checksum: "",
+    };
+    let body = serde_json::to_vec(&legacy).unwrap_or_default();
+    checksum_hex(&body)
+}
+
+fn checksum_hex(body: &[u8]) -> String {
+    Sha256::digest(body)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn is_legacy_shape(raw: &serde_json::Value) -> bool {
+    let target_has_new_fields = raw
+        .get("target")
+        .and_then(serde_json::Value::as_object)
+        .map(|target| target.contains_key("parentDevice") || target.contains_key("parentInode"))
+        .unwrap_or(false);
+    let proof_fields = [
+        "preSwapDigest",
+        "backupDigest",
+        "stagedDevice",
+        "stagedInode",
+        "stagedDigest",
+        "restoredDevice",
+        "restoredInode",
+        "restoredDigest",
+    ];
+    !target_has_new_fields
+        && proof_fields.iter().all(|field| {
+            !raw.as_object()
+                .is_some_and(|object| object.contains_key(*field))
+        })
 }
 
 pub fn seal(mut journal: JournalV2) -> JournalV2 {
@@ -128,7 +217,10 @@ pub fn write_journal(root: &Path, journal: &JournalV2) -> Result<(), String> {
     }
     let path = tx_paths(root, &journal.install_id).journal;
     let sealed = seal(journal.clone());
-    let body = format!("{}\n", serde_json::to_string_pretty(&sealed).map_err(|err| err.to_string())?);
+    let body = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&sealed).map_err(|err| err.to_string())?
+    );
     write_atomic(&path, body.as_bytes())
 }
 
@@ -138,22 +230,73 @@ pub fn load_v2(root: &Path, install_id: &str) -> Result<JournalV2, String> {
     }
     let path = tx_paths(root, install_id).journal;
     let body = fs::read_to_string(&path).map_err(|err| err.to_string())?;
-    let journal: JournalV2 = serde_json::from_str(&body).map_err(|err| err.to_string())?;
+    let raw: serde_json::Value = serde_json::from_str(&body).map_err(|err| err.to_string())?;
+    let legacy = is_legacy_shape(&raw);
+    let journal: JournalV2 = serde_json::from_value(raw).map_err(|err| err.to_string())?;
     if journal.schema_version != 2 {
         return Err("unsupported journal schema".into());
     }
     if journal.install_id != install_id {
         return Err("journal install id does not match filename".into());
     }
-    if journal.checksum != checksum_of(&journal) {
+    let expected_checksum = if legacy {
+        legacy_checksum_of(&journal)
+    } else {
+        checksum_of(&journal)
+    };
+    if journal.checksum != expected_checksum {
         return Err("journal checksum mismatch".into());
     }
     validate_rel_paths(&journal)?;
     Ok(journal)
 }
 
+pub(crate) fn validate_recovery_proofs(journal: &JournalV2) -> Result<(), String> {
+    if matches!(journal.phase.as_str(), "COMMITTED" | "ROLLED_BACK") {
+        return Ok(());
+    }
+    if journal.target.parent_device.is_empty() || journal.target.parent_inode.is_empty() {
+        return Err("journal lacks recovery proof: target parent identity".into());
+    }
+    if journal.pre_swap_digest.is_empty() {
+        return Err("journal lacks recovery proof: pre-swap tree digest".into());
+    }
+    if !matches!(journal.phase.as_str(), "DISCOVERED" | "INTENT")
+        && journal.backup_digest.is_empty()
+    {
+        return Err("journal lacks recovery proof: backup tree digest".into());
+    }
+    if matches!(
+        journal.phase.as_str(),
+        "STAGED"
+            | "PATCHED"
+            | "SIGNED"
+            | "VERIFIED"
+            | "TARGET_MOVED_OUT"
+            | "SWAPPED"
+            | "TARGET_VERIFIED"
+            | "UNINSTALLING"
+    ) && (journal.staged_device.is_empty()
+        || journal.staged_inode.is_empty()
+        || journal.staged_digest.is_empty())
+    {
+        return Err("journal lacks recovery proof: staged tree identity and digest".into());
+    }
+    Ok(())
+}
+
 pub fn validate_rel_paths(journal: &JournalV2) -> Result<(), String> {
-    for path in [&journal.paths.staged, &journal.paths.outgoing, &journal.paths.original] {
+    if journal.paths.staged != STAGED_REL
+        || journal.paths.outgoing != OUTGOING_REL
+        || journal.paths.original != ORIGINAL_REL
+    {
+        return Err("journal paths do not match the transaction layout".into());
+    }
+    for path in [
+        &journal.paths.staged,
+        &journal.paths.outgoing,
+        &journal.paths.original,
+    ] {
         if !is_safe_relative(path) {
             return Err(format!("journal path is not a relative child: {path}"));
         }
@@ -166,12 +309,24 @@ pub fn reconstructed(root: &Path, journal: &JournalV2) -> Result<TxPaths, String
     let paths = tx_paths(root, &journal.install_id);
     reject_symlink(&root.join("transactions"), "transactions directory")?;
     reject_symlink(&paths.dir, "transaction directory")?;
-    for rel in [&journal.paths.staged, &journal.paths.outgoing, &journal.paths.original] {
+    for (rel, allow_leaf_symlink) in [
+        (journal.paths.staged.as_str(), true),
+        (journal.paths.outgoing.as_str(), true),
+        (journal.paths.original.as_str(), true),
+        ("restore/ChatGPT.app", false),
+        ("trash/ChatGPT.app", false),
+    ] {
         validate_path_ancestors(&paths.dir, rel)?;
         let full = paths.dir.join(rel);
         if let Ok(meta) = fs::symlink_metadata(&full) {
-            if meta.file_type().is_symlink() {
+            if meta.file_type().is_symlink() && !allow_leaf_symlink {
                 return Err(format!("journal path is a symlink: {rel}"));
+            }
+            if meta.file_type().is_symlink() {
+                // +-----------------------------------------------------------+
+                // | 叶子 symlink 只允许进入受控清理；恢复源会在 restore 前拒绝。 |
+                // +-----------------------------------------------------------+
+                continue;
             }
         }
         if let Ok(real) = fs::canonicalize(&full) {
@@ -197,11 +352,19 @@ fn reject_symlink(path: &Path, label: &str) -> Result<(), String> {
 
 fn validate_path_ancestors(base: &Path, rel: &str) -> Result<(), String> {
     let mut current = base.to_path_buf();
-    for component in Path::new(rel).components() {
+    let components: Vec<_> = Path::new(rel).components().collect();
+    let component_count = components.len();
+    for (index, component) in components.into_iter().enumerate() {
+        if index + 1 == component_count {
+            break;
+        }
         current.push(component.as_os_str());
         match fs::symlink_metadata(&current) {
             Ok(meta) if meta.file_type().is_symlink() => {
                 return Err(format!("journal path ancestor is a symlink: {rel}"));
+            }
+            Ok(meta) if !meta.file_type().is_dir() => {
+                return Err(format!("journal path ancestor is not a directory: {rel}"));
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
@@ -209,4 +372,50 @@ fn validate_path_ancestors(base: &Path, rel: &str) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn journal_with_paths(paths: RelPaths) -> JournalV2 {
+        JournalV2 {
+            schema_version: 2,
+            install_id: "00000000-0000-4000-8000-000000000000".into(),
+            target: JournalTarget {
+                requested_path: "/Applications/ChatGPT.app".into(),
+                real_path: "/Applications/ChatGPT.app".into(),
+                device: "1".into(),
+                inode: "2".into(),
+                parent_device: "1".into(),
+                parent_inode: "3".into(),
+            },
+            paths,
+            phase: "DISCOVERED".into(),
+            sequence: 1,
+            checksum: String::new(),
+            pre_swap_digest: String::new(),
+            backup_digest: String::new(),
+            staged_device: String::new(),
+            staged_inode: String::new(),
+            staged_digest: String::new(),
+            restored_device: String::new(),
+            restored_inode: String::new(),
+            restored_digest: String::new(),
+        }
+    }
+
+    #[test]
+    fn relative_paths_are_frozen_to_the_transaction_layout() {
+        let journal = journal_with_paths(RelPaths {
+            staged: "staging/other.app".into(),
+            outgoing: OUTGOING_REL.into(),
+            original: ORIGINAL_REL.into(),
+        });
+
+        assert!(
+            validate_rel_paths(&journal).is_err(),
+            "a safe but non-canonical staged path was accepted"
+        );
+    }
 }

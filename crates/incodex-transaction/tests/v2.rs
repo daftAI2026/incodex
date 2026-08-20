@@ -1,5 +1,6 @@
 use std::fs;
 use std::io::Write;
+use std::os::unix::net::UnixListener;
 use std::os::unix::fs::{symlink, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -31,6 +32,16 @@ fn app_bundle(root: &Path, name: &str, marker: &str) -> PathBuf {
     fs::create_dir_all(&app).unwrap();
     fs::write(app.join("marker"), marker).unwrap();
     app
+}
+
+fn seal_backup(root: &Path, tx: &mut Engine, app: &Path) {
+    let original = root
+        .join("transactions")
+        .join(tx.install_id())
+        .join("original/ChatGPT.app");
+    fs::create_dir_all(&original).unwrap();
+    fs::copy(app.join("marker"), original.join("marker")).unwrap();
+    tx.mark_backup_committed().unwrap();
 }
 
 #[test]
@@ -267,6 +278,7 @@ fn install_id_is_uuid_and_matches_directory_and_journal() {
         .join(tx.install_id())
         .join("journal.json")
         .exists());
+    seal_backup(&root, &mut tx, &target_app);
     tx.place_staging(&staged).unwrap();
     assert!(tx
         .staging_app()
@@ -281,11 +293,178 @@ fn install_id_is_uuid_and_matches_directory_and_journal() {
 }
 
 #[test]
+fn backup_completion_is_durable_before_staging() {
+    let root = scratch();
+    let target_app = app_bundle(&root, "ChatGPT.app", "live");
+    let mut tx = Engine::begin(&root, &target_app, "install").unwrap();
+    assert_eq!(tx.journal().phase, "DISCOVERED");
+    let original = root
+        .join("transactions")
+        .join(tx.install_id())
+        .join("original/ChatGPT.app");
+    fs::create_dir_all(&original).unwrap();
+    fs::copy(target_app.join("marker"), original.join("marker")).unwrap();
+    tx.mark_backup_committed().unwrap();
+    assert_eq!(tx.journal().phase, "BACKUP_COMMITTED");
+    assert_eq!(
+        incodex_transaction::journal_v2(&root, tx.install_id())
+            .unwrap()
+            .phase,
+        "BACKUP_COMMITTED"
+    );
+}
+
+#[test]
+fn backup_completion_requires_a_real_directory_snapshot() {
+    for kind in ["missing", "file", "symlink"] {
+        let root = scratch();
+        let target_app = app_bundle(&root, "ChatGPT.app", "live");
+        let mut tx = Engine::begin(&root, &target_app, "install").unwrap();
+        let original = root
+            .join("transactions")
+            .join(tx.install_id())
+            .join("original/ChatGPT.app");
+        match kind {
+            "missing" => {}
+            "file" => {
+                fs::create_dir_all(original.parent().unwrap()).unwrap();
+                fs::write(&original, b"partial").unwrap();
+            }
+            "symlink" => {
+                fs::create_dir_all(original.parent().unwrap()).unwrap();
+                symlink(&target_app, &original).unwrap();
+            }
+            _ => unreachable!(),
+        }
+
+        assert!(
+            tx.mark_backup_committed().is_err(),
+            "{kind} backup was accepted"
+        );
+        assert_eq!(tx.journal().phase, "DISCOVERED");
+    }
+}
+
+#[test]
+fn staging_requires_a_durable_backup_phase() {
+    let root = scratch();
+    let target_app = app_bundle(&root, "ChatGPT.app", "live");
+    let staged = app_bundle(&root, "staged.app", "staged");
+    let mut tx = Engine::begin(&root, &target_app, "install").unwrap();
+
+    let error = tx.place_staging(&staged).unwrap_err();
+
+    assert!(error.contains("BACKUP_COMMITTED"), "{error}");
+    assert_eq!(tx.journal().phase, "DISCOVERED");
+    assert!(staged.exists(), "the rejected source was consumed");
+    assert!(!tx.staging_app().exists());
+}
+
+#[test]
+fn staging_rechecks_that_the_sealed_backup_still_exists() {
+    let root = scratch();
+    let target_app = app_bundle(&root, "ChatGPT.app", "live");
+    let staged = app_bundle(&root, "staged.app", "staged");
+    let mut tx = Engine::begin(&root, &target_app, "install").unwrap();
+    seal_backup(&root, &mut tx, &target_app);
+    let original = root
+        .join("transactions")
+        .join(tx.install_id())
+        .join("original/ChatGPT.app");
+    fs::remove_dir_all(&original).unwrap();
+
+    let error = tx.place_staging(&staged).unwrap_err();
+
+    assert!(error.contains("original snapshot"), "{error}");
+    assert_eq!(tx.journal().phase, "BACKUP_COMMITTED");
+    assert!(staged.exists(), "the rejected source was consumed");
+    assert!(!tx.staging_app().exists());
+}
+
+#[test]
+fn rollback_before_swap_never_restores_a_partial_backup_over_live() {
+    let root = scratch();
+    let target_app = app_bundle(&root, "ChatGPT.app", "healthy-live");
+    let mut tx = Engine::begin(&root, &target_app, "install").unwrap();
+    let partial = root
+        .join("transactions")
+        .join(tx.install_id())
+        .join("original/ChatGPT.app");
+    fs::create_dir_all(&partial).unwrap();
+    fs::write(partial.join("marker"), "partial-backup").unwrap();
+
+    tx.rollback("copy failed").unwrap();
+
+    assert_eq!(
+        fs::read_to_string(target_app.join("marker")).unwrap(),
+        "healthy-live"
+    );
+    assert!(!partial.exists(), "partial backup survived rollback");
+    assert_eq!(tx.journal().phase, "ROLLED_BACK");
+}
+
+#[test]
+fn durable_commit_cleans_special_cleanup_leaves_after_commit() {
+    let root = scratch();
+    let target_app = app_bundle(&root, "ChatGPT.app", "original");
+    let staged = app_bundle(&root, "staged.app", "patched");
+    let mut tx = Engine::begin(&root, &target_app, "install").unwrap();
+    seal_backup(&root, &mut tx, &target_app);
+    tx.place_staging(&staged).unwrap();
+    tx.swap().unwrap();
+    let outgoing = tx.outgoing_app();
+
+    let result = tx.commit_with_checkpoint(|phase| {
+        if phase == "COMMITTED_BEFORE_CLEANUP" {
+            fs::remove_dir_all(&outgoing).unwrap();
+            let socket = std::env::temp_dir().join(format!(
+                "incodex-cleanup-warning-{}",
+                std::process::id()
+            ));
+            let _ = fs::remove_file(&socket);
+            let listener = UnixListener::bind(&socket).unwrap();
+            fs::rename(&socket, &outgoing).unwrap();
+            std::mem::forget(listener);
+        }
+    });
+
+    assert!(
+        result.is_ok(),
+        "durable COMMITTED must not be returned as an install failure: {result:?}"
+    );
+    let result = result.unwrap();
+    assert!(result.cleanup_warning.is_none(), "special leaf was not cleaned: {result:?}");
+    assert_eq!(tx.journal().phase, "COMMITTED");
+    assert_eq!(fs::read_to_string(target_app.join("marker")).unwrap(), "patched");
+    assert!(!outgoing.exists(), "special cleanup leaf survived");
+}
+
+#[test]
+fn committed_transaction_rejects_a_late_rollback() {
+    let root = scratch();
+    let target_app = app_bundle(&root, "ChatGPT.app", "original");
+    let staged = app_bundle(&root, "staged.app", "patched");
+    let mut tx = Engine::begin(&root, &target_app, "install").unwrap();
+    seal_backup(&root, &mut tx, &target_app);
+    tx.place_staging(&staged).unwrap();
+    tx.swap().unwrap();
+    tx.commit().unwrap();
+
+    assert!(tx.rollback("late failure").is_err());
+    assert_eq!(
+        fs::read_to_string(target_app.join("marker")).unwrap(),
+        "patched"
+    );
+    assert_eq!(tx.journal().phase, "COMMITTED");
+}
+
+#[test]
 fn swap_writes_intent_before_moving_and_keeps_outgoing_until_commit() {
     let root = scratch();
     let target_app = app_bundle(&root, "ChatGPT.app", "original");
     let staged = app_bundle(&root, "staged.app", "patched");
     let mut tx = Engine::begin(&root, &target_app, "install").unwrap();
+    seal_backup(&root, &mut tx, &target_app);
     tx.place_staging(&staged).unwrap();
     tx.swap().unwrap();
     assert_eq!(
@@ -310,6 +489,7 @@ fn verify_failure_restores_original_and_rolls_back() {
     let target_app = app_bundle(&root, "ChatGPT.app", "original");
     let staged = app_bundle(&root, "staged.app", "patched");
     let mut tx = Engine::begin(&root, &target_app, "install").unwrap();
+    seal_backup(&root, &mut tx, &target_app);
     tx.place_staging(&staged).unwrap();
     tx.swap().unwrap();
     tx.rollback("verify failed").unwrap();

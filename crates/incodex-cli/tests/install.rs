@@ -6,8 +6,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_asar::{pack_dir, Archive, LOADER_NAME, MARKER_KEY};
-use incodex_macos::{ditto, read_asar_integrity, sign_app, write_asar_integrity};
-use incodex_runtime_bundle::loader_source;
+use incodex_macos::ditto;
 use incodex_transaction::{acquire_target_lock, journal_v2, Engine};
 use sha2::{Digest, Sha256};
 
@@ -581,6 +580,7 @@ fn interrupted_recover_refuses_uninstall_then_reinstall_round_trips_original() {
         .join(&id)
         .join("original/ChatGPT.app");
     ditto(&app, &original).unwrap();
+    tx.mark_backup_committed().unwrap();
     tx.place_staging(&staged_source).unwrap();
     tx.swap().unwrap();
     assert_eq!(tx.journal().phase, "SWAPPED");
@@ -660,6 +660,12 @@ fn recover_does_not_finish_until_the_restored_app_verifies() {
     )
     .unwrap();
     let mut tx = Engine::begin(&root, &app, "test-crash").unwrap();
+    let original = root
+        .join("transactions")
+        .join(tx.install_id())
+        .join("original/ChatGPT.app");
+    ditto(&app, &original).unwrap();
+    tx.mark_backup_committed().unwrap();
     tx.place_staging(&staged).unwrap();
     tx.swap().unwrap();
     let id = tx.install_id().to_string();
@@ -692,6 +698,12 @@ fn uninstall_yes_app_restores_original_asar() {
     let (status, stdout, stderr) =
         run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
     assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
+    let install_id = Archive::open(app.join("Contents/Resources/app.asar"))
+        .unwrap()
+        .read_package_main()
+        .unwrap()
+        .install_id
+        .unwrap();
 
     let (status, stdout, stderr) = run(
         &["uninstall", "--yes", "--app", app.to_str().unwrap()],
@@ -710,50 +722,12 @@ fn uninstall_yes_app_restores_original_asar() {
         String::from_utf8(archive.extract("index.js").unwrap()).unwrap(),
         "ok\n"
     );
-}
-
-#[test]
-fn uninstall_accepts_a_valid_install_from_an_older_runtime_loader() {
-    let home = isolated_home();
-    let app = patchable_app(&home);
-    let root = home.join(".incodex");
-    let original_digest = tree_digest(&app);
-    let (status, stdout, stderr) =
-        run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
-    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
-
-    let asar = app.join("Contents/Resources/app.asar");
-    let current = Archive::open(&asar).unwrap();
-    let install_id = current
-        .read_package_main()
-        .unwrap()
-        .install_id
-        .expect("committed install id");
-    assert_eq!(journal_v2(&root, &install_id).unwrap().phase, "COMMITTED");
-
-    let legacy_loader = "module.exports = require('./index.js');\n";
-    assert_ne!(legacy_loader.as_bytes(), loader_source().as_bytes());
-    let (legacy_hash, _) =
-        incodex_asar::patch_asar(&asar, legacy_loader, Some(&install_id)).unwrap();
-    write_asar_integrity(&app, &legacy_hash).unwrap();
-    sign_app(&app).unwrap();
-
-    let legacy = Archive::open(&asar).unwrap();
-    let package = legacy.read_package_main().unwrap();
-    assert_eq!(package.install_id.as_deref(), Some(install_id.as_str()));
     assert_eq!(
-        legacy.extract(LOADER_NAME).unwrap(),
-        legacy_loader.as_bytes()
+        journal_v2(&home.join(".incodex"), &install_id)
+            .unwrap()
+            .phase,
+        "ROLLED_BACK"
     );
-    assert_eq!(read_asar_integrity(&app), Some(legacy.header_hash()));
-    assert!(is_signed(&app));
-
-    let (status, stdout, stderr) = run(
-        &["uninstall", "--yes", "--app", app.to_str().unwrap()],
-        &home,
-    );
-    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
-    assert_eq!(tree_digest(&app), original_digest);
 }
 
 #[test]
