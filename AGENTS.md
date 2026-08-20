@@ -48,9 +48,11 @@ If the answer is no or unclear, decline or narrow.
 ## Repository Map
 
 - `AGENTS.md` is the contract. `CLAUDE.md` must stay a symlink to it.
-- `src/cli.ts` is the router: parse, menu, confirm, dispatch. Do not put asar or codesign logic here.
-- `src/parse-cli.ts` is the only user-facing command language. One parser for `incodex`, `inc`, and `bun src/cli.ts`.
-- `src/install.ts` / `src/uninstall.ts` / `src/recover.ts` mutate the app bundle.
+- `src/cli.ts` / `src/parse-cli.ts` are the TypeScript golden/reference CLI. Keep their public language aligned with the native implementation; do not put asar or codesign logic in either router.
+- `src/install.ts` / `src/uninstall.ts` / `src/recover.ts` are the TypeScript reference mutation paths while the compatibility window remains open.
+- `crates/incodex-cli` is the native CLI: `parse.rs` owns its command language, while `install.rs` and `open.rs` dispatch dangerous operations through the lower crates.
+- `crates/incodex-transaction` owns native mutation locks, durable journals, rollback, and recovery. `crates/incodex-asar` and `crates/incodex-macos` own ASAR and macOS signing/plist mechanics.
+- `crates/incodex-core/src/session.rs` owns native `open` session create/burn; it must stay behaviorally aligned with `src/runtime/incodex-safe-home.cts` without sharing language-specific code.
 - `src/packaged-runtime.ts` reads committed `dist/` (or `INCODEX_DIST`). The installer must not `spawn bun src/build-runtime.ts`.
 - `src/runtime/*.cts` is Electron-side source. `bun run build:runtime` emits portable `dist/*.cjs` with `__dirname`, never a machine-absolute path.
 - `src/runtime/incodex-loader.cts` is the only file that belongs in official asar. Everything else loads from `~/.incodex/runtime/` after hash check and fail-opens to official main.
@@ -86,12 +88,8 @@ Rust workspace now lives on `main`. The migration passed `tests/cli-golden.test.
 ### Rust commands
 
 ```bash
-cargo test --workspace --release
-```
-
-## Commands on `exp/rust-cli`
-
-```bash
+cargo run -p incodex-cli -- --help
+cargo run -p incodex-cli -- open --dry-run
 cargo test --workspace --release
 ```
 
@@ -120,7 +118,7 @@ Public docs use `incodex` / `inc`. Use `bun src/cli.ts` only inside this repo.
 - Do not enable required GitHub reviews. Do not force-push `main`.
 - Pin GitHub Actions to a 40-character commit SHA with a version comment: `uses: owner/repo@<sha> # vX.Y.Z`. Do not leave floating `@v4` tags.
 - Official CLI packages are git tags `vX.Y.Z`. Follow `.claude/skills/release-flow/SKILL.md`, then `.claude/skills/release-notes/SKILL.md`. Do not `gh release create` and do not turn `generate_release_notes` back on.
-- Route session create/burn through `src/runtime/incodex-safe-home.cts`. Do not copy those functions into the CLI.
+- Route Electron Runtime session create/burn through `src/runtime/incodex-safe-home.cts` and native CLI session create/burn through `crates/incodex-core/src/session.rs`. Keep their safety contract aligned; do not fork a third implementation.
 - `incodex open` must not patch asar, resign, or clone the official app. It spawns the official binary with `--user-data-dir`, `CODEX_HOME`, `CODEX_ELECTRON_USER_DATA_PATH`, and a localhost `--remote-debugging-port`, then injects the shared `inject.js`.
 - A second instance needs that Chromium user-data-dir pair. `CODEX_HOME` alone is swallowed by SingletonLock.
 

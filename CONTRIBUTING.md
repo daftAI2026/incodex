@@ -20,7 +20,7 @@ bun link
 bun run check
 ```
 
-`bun link` puts `incodex` and `inc` on PATH. They run the same `src/cli.ts`.
+`bun link` puts the TypeScript golden/reference `incodex` and `inc` on PATH. It does not build the native binary.
 
 `check` runs typecheck, lint, unit tests, and a deterministic `dist` rebuild.
 
@@ -59,6 +59,12 @@ git checkout -b feat/your-change
 ```
 
 Each behavior change starts with a failing `cargo test` repro, followed by the implementation. Run `cargo test --workspace --release`; keep `tests/cli-golden.test.ts` and the same-fixture parity suite green.
+
+```bash
+cargo run -p incodex-cli -- --help
+cargo run -p incodex-cli -- status --json
+cargo test --workspace --release
+```
 
 Do not add a TUI crate or an AGPL ASAR crate. Electron Runtime stays TypeScript and Bun-built; Rust embeds committed `dist/`. Incognito hover remains shared Runtime behavior, not a separate Rust UI implementation.
 

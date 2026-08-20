@@ -50,7 +50,7 @@ Copy only `auth.json` and `config.toml` into the isolated home. Never delete or 
 
 ### 8. `open` mutates the app
 
-`incodex open` spawns the official binary with `--user-data-dir`, `CODEX_HOME`, and `CODEX_ELECTRON_USER_DATA_PATH`. No asar, no codesign.
+`incodex open` spawns the official binary with `--user-data-dir`, `CODEX_HOME`, `CODEX_ELECTRON_USER_DATA_PATH`, an exact loopback `--remote-debugging-port`, and matching `--remote-allow-origins`. It injects the shared `dist/incodex-inject.js` over CDP and verifies the button/banner. No asar, clone, or codesign.
 
 ### 9. Leftover session dirs
 

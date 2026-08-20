@@ -26,7 +26,7 @@
 - **无痕窗口**：登录和设置跟平时一样，看不到以前的对话，这次的聊天也不会进平时的列表
 - **侧栏按钮**：装进正在用的 Codex 后，搜索左边会出现帽子墨镜；`Shift+Command+N` 也能开
 - **关窗即焚**：正常关掉后清掉这次的临时会话（含独立 Chromium 档案）；登录和设置会留着
-- **可选不改包**：`incodex open` 直接开一扇无痕窗，不碰官方签名；这一扇里仍有帽子按钮和提示横幅
+- **可选不改包**：`incodex open` 直接开一扇无痕窗，不碰官方签名
 - **本机 CLI**：终端菜单、Homebrew / 脚本安装、`status` / `doctor` / `runtime`，不经过官方插件
 
 这还不是「本机完全不留记录」的取证结论。
@@ -154,7 +154,7 @@ $ incodex install
   Backup       ~/.incodex/installations/
   ✓ Official app patched
   Install id   0778f0fa-…
-  Runtime      0.1.0
+  Runtime      0.2.0
   App          /Applications/ChatGPT.app
 ➤ Relaunch
   ✓ ChatGPT.app relaunched.
@@ -194,8 +194,8 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      0.1.0 releases/0.1.0
-  Version      26.814.41407 6720
+  Runtime      0.2.0 releases/0.2.0
+  Version      26.814.41957 6744
   Install id   0778f0fa-…
   Target       official-404f3389062b
   Main         .vite/build/early-bootstrap.js
@@ -211,12 +211,12 @@ $ incodex doctor
   Exists       yes
   Installed    yes
   Bundle       com.openai.codex
-  Version      26.814.41407 6720
+  Version      26.814.41957 6744
   Arch         arm64
 
 ➤ Runtime
-  Version      0.1.0
-  External     0.1.0 releases/0.1.0
+  Version      0.2.0
+  External     0.2.0 releases/0.2.0
   Loader       asar only
   Main         .vite/build/early-bootstrap.js
 
@@ -243,7 +243,7 @@ Gatekeeper 那一行是诊断，不是安装失败。改包之后官方签名本
 ```bash
 $ incodex --version
 
-Incodex version 0.1.0
+Incodex version 0.2.0
 macOS: 26.6
 Architecture: arm64
 Kernel: 25.6.0
