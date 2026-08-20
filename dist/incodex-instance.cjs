@@ -30,6 +30,7 @@ const SOCK_NAME = "incognito.sock";
 exports.SOCK_NAME = SOCK_NAME;
 const OWNER_RETRY_COUNT = 5;
 const OWNER_RETRY_DELAY_MS = 100;
+const TAKEOVER_CLAIM_NAME = ".incognito.lock.takeover";
 function targetIdFromExec(execPath) {
     return crypto.createHash("sha256").update(execPath || "unknown").digest("hex").slice(0, 12);
 }
@@ -216,6 +217,94 @@ function sameOwnerLockMetadata(left, right) {
         left.size === right.size &&
         left.mtimeMs === right.mtimeMs);
 }
+function takeoverClaimPath(stateRoot) {
+    return path.join(stateRoot, TAKEOVER_CLAIM_NAME);
+}
+function takeoverClaimOwner() {
+    const live = processIdentity(process.pid);
+    return {
+        pid: process.pid,
+        startedAt: live?.startedAt || "",
+        processStartIdentity: live?.processStartIdentity || "",
+        execIdentity: live?.execIdentity || "",
+        token: crypto.randomBytes(16).toString("hex"),
+    };
+}
+function takeoverClaimIsStale(owner) {
+    if (!owner || !Number.isInteger(owner.pid) || owner.pid <= 0)
+        return true;
+    if (!owner.processStartIdentity && !owner.startedAt)
+        return !pidAlive(owner.pid);
+    const live = processIdentity(owner.pid);
+    if (!live)
+        return !pidAlive(owner.pid);
+    return !ownerMatchesLive(owner, live);
+}
+function removeTakeoverClaimIfStale(stateRoot, expectedState) {
+    const file = takeoverClaimPath(stateRoot);
+    const current = readOwnerLockStateAt(file);
+    if (current.kind !== expectedState.kind)
+        return false;
+    if (current.kind === "valid" && !takeoverClaimIsStale(current.owner))
+        return false;
+    try {
+        fs.rmSync(file);
+        return true;
+    }
+    catch (error) {
+        return Boolean(error && error.code === "ENOENT");
+    }
+}
+function acquireTakeoverClaim(stateRoot) {
+    fs.mkdirSync(stateRoot, { recursive: true, mode: 0o700 });
+    for (let attempt = 0; attempt < OWNER_RETRY_COUNT; attempt += 1) {
+        try {
+            const owner = takeoverClaimOwner();
+            writeAtomicRecord(takeoverClaimPath(stateRoot), owner);
+            return owner;
+        }
+        catch (error) {
+            if (error?.code !== "EEXIST")
+                throw error;
+        }
+        const file = takeoverClaimPath(stateRoot);
+        const state = readOwnerLockStateAt(file);
+        if (state.kind === "missing")
+            continue;
+        if (state.kind === "valid" && !takeoverClaimIsStale(state.owner))
+            return null;
+        if (state.kind === "invalid") {
+            const before = ownerLockMetadata(file);
+            sleepForOwnerRecovery(OWNER_RETRY_DELAY_MS);
+            const settled = readOwnerLockStateAt(file);
+            const after = ownerLockMetadata(file);
+            if (settled.kind === "valid" && !takeoverClaimIsStale(settled.owner))
+                return null;
+            if (settled.kind === "invalid" && sameOwnerLockMetadata(before, after)) {
+                if (removeTakeoverClaimIfStale(stateRoot, settled))
+                    continue;
+            }
+            continue;
+        }
+        if (removeTakeoverClaimIfStale(stateRoot, state))
+            continue;
+    }
+    return null;
+}
+function releaseTakeoverClaim(stateRoot, claim) {
+    if (!claim || !ownerToken(claim))
+        return false;
+    const current = readOwnerLockStateAt(takeoverClaimPath(stateRoot));
+    if (current.kind !== "valid" || !sameOwnerToken(current.owner, claim))
+        return false;
+    try {
+        fs.rmSync(takeoverClaimPath(stateRoot));
+        return true;
+    }
+    catch (error) {
+        return Boolean(error && error.code === "ENOENT");
+    }
+}
 function clearOwnerLock(stateRoot, expectedOwner) {
     if (!expectedOwner || !ownerToken(expectedOwner))
         return false;
@@ -224,31 +313,48 @@ function clearOwnerLock(stateRoot, expectedOwner) {
     const beforeMetadata = ownerLockMetadata(file);
     if (current.kind !== "valid" || !sameOwnerToken(current.owner, expectedOwner) || !beforeMetadata)
         return false;
-    const candidate = path.join(stateRoot, `.${LOCK_NAME}.releasing.${process.pid}.${Date.now()}.${crypto.randomBytes(8).toString("hex")}`);
+    const claim = acquireTakeoverClaim(stateRoot);
+    if (!claim)
+        return false;
     try {
-        // Pin the inode before the second read. A replacement owner gets a new
-        // inode, so its canonical path is never eligible for this cleanup.
-        fs.linkSync(file, candidate);
-        const pinned = readOwnerLockStateAt(candidate);
-        const canonicalMetadata = ownerLockMetadata(file);
-        if (pinned.kind !== "valid" ||
-            !sameOwnerToken(pinned.owner, expectedOwner) ||
-            !sameOwnerLockMetadata(beforeMetadata, canonicalMetadata)) {
+        // Re-read after winning the unique takeover claim. Any contender that
+        // replaced the old inode before the claim is never touched.
+        const claimed = readOwnerLockState(stateRoot);
+        const claimedMetadata = ownerLockMetadata(file);
+        if (claimed.kind !== "valid" ||
+            !sameOwnerToken(claimed.owner, expectedOwner) ||
+            !sameOwnerLockMetadata(beforeMetadata, claimedMetadata)) {
             return false;
         }
-        fs.rmSync(file);
-        return true;
-    }
-    catch (error) {
-        return false;
-    }
-    finally {
+        const candidate = path.join(stateRoot, `.${LOCK_NAME}.releasing.${process.pid}.${Date.now()}.${crypto.randomBytes(8).toString("hex")}`);
         try {
-            fs.rmSync(candidate, { force: true });
+            // Pin the inode before the final pathname check. The unique claim keeps
+            // another stale cleaner from unlinking a replacement in this interval.
+            fs.linkSync(file, candidate);
+            const pinned = readOwnerLockStateAt(candidate);
+            const canonicalMetadata = ownerLockMetadata(file);
+            if (pinned.kind !== "valid" ||
+                !sameOwnerToken(pinned.owner, expectedOwner) ||
+                !sameOwnerLockMetadata(claimedMetadata, canonicalMetadata)) {
+                return false;
+            }
+            fs.rmSync(file);
+            return true;
         }
         catch {
-            /* The candidate is only a temporary inode pin. */
+            return false;
         }
+        finally {
+            try {
+                fs.rmSync(candidate, { force: true });
+            }
+            catch {
+                /* The candidate is only a temporary inode pin. */
+            }
+        }
+    }
+    finally {
+        releaseTakeoverClaim(stateRoot, claim);
     }
 }
 function currentOwner(sessionId, execPath) {
@@ -303,21 +409,27 @@ function quarantineInvalidOwnerLock(stateRoot) {
         return false;
     // Give a legacy writer one recovery interval to finish its record. New
     // writers never expose a partial canonical file because they publish via a
-    // hard link, but this grace protects an older process still holding its fd.
     sleepForOwnerRecovery(OWNER_RETRY_DELAY_MS);
     const settled = readOwnerLockState(stateRoot);
     const settledMetadata = ownerLockMetadata(file);
     if (settled.kind !== "invalid" || !sameOwnerLockMetadata(beforeMetadata, settledMetadata))
         return false;
     const quarantine = path.join(stateRoot, `.${LOCK_NAME}.invalid.${process.pid}.${Date.now()}.${crypto.randomBytes(8).toString("hex")}`);
+    const claim = acquireTakeoverClaim(stateRoot);
+    if (!claim)
+        return false;
     let preserved = false;
     try {
+        const claimed = readOwnerLockState(stateRoot);
+        const claimedMetadata = ownerLockMetadata(file);
+        if (claimed.kind !== "invalid" || !sameOwnerLockMetadata(settledMetadata, claimedMetadata))
+            return false;
         // Pin the malformed inode, then re-check the canonical pathname before
         // removing it. A replacement inode is never touched by this recovery.
         fs.linkSync(file, quarantine);
         const pinned = readOwnerLockStateAt(quarantine);
         const canonicalMetadata = ownerLockMetadata(file);
-        if (pinned.kind !== "invalid" || !sameOwnerLockMetadata(settledMetadata, canonicalMetadata))
+        if (pinned.kind !== "invalid" || !sameOwnerLockMetadata(claimedMetadata, canonicalMetadata))
             return false;
         try {
             fs.rmSync(file);
@@ -344,6 +456,7 @@ function quarantineInvalidOwnerLock(stateRoot) {
                 /* Keep recovery best effort and never remove the canonical path here. */
             }
         }
+        releaseTakeoverClaim(stateRoot, claim);
     }
 }
 function acquireOwnerLease(stateRoot, owner) {
