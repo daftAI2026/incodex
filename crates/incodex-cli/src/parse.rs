@@ -60,6 +60,7 @@ pub struct ParsedCli {
     pub yes: bool,
     pub dry_run: bool,
     pub json: bool,
+    pub deep: bool,
     pub restore_app: bool,
     pub app: Option<String>,
     pub transaction: Option<String>,
@@ -75,6 +76,7 @@ const SWITCH_FLAGS: &[&str] = &[
     "--dry-run",
     "-n",
     "--json",
+    "--deep",
     "--restore-app",
 ];
 
@@ -85,12 +87,16 @@ pub fn parse_cli(args: &[String]) -> Result<ParsedCli, String> {
     let flags = if args.is_empty() { &[][..] } else { &args[1..] };
     let command = parse_command(raw)?;
     reject_unknown_args(flags)?;
-    let help = command == CliCommand::Help || flags.iter().any(|flag| flag == "--help" || flag == "-h");
+    let help =
+        command == CliCommand::Help || flags.iter().any(|flag| flag == "--help" || flag == "-h");
     let clone = flags.iter().any(|flag| flag == "--clone");
     let live_flag = flags.iter().any(|flag| flag == "--live");
-    let yes = flags.iter().any(|flag| flag == "--yes" || flag == "--confirm-live");
+    let yes = flags
+        .iter()
+        .any(|flag| flag == "--yes" || flag == "--confirm-live");
     let dry_run = flags.iter().any(|flag| flag == "--dry-run" || flag == "-n");
     let json = flags.iter().any(|flag| flag == "--json");
+    let deep = flags.iter().any(|flag| flag == "--deep");
     let restore_app = flags.iter().any(|flag| flag == "--restore-app");
     let app = value_after(flags, "--app")?;
     let transaction = value_after(flags, "--transaction")?;
@@ -101,8 +107,13 @@ pub fn parse_cli(args: &[String]) -> Result<ParsedCli, String> {
     if clone && app.is_some() {
         return Err("--clone and --app cannot be used together".to_string());
     }
+    if deep && command != CliCommand::Doctor {
+        return Err("--deep is only valid for doctor\n  incodex doctor --deep".to_string());
+    }
     if command == CliCommand::Recover && !help && transaction.is_none() {
-        return Err("recover requires --transaction <id>\n  incodex recover --transaction <id>".to_string());
+        return Err(
+            "recover requires --transaction <id>\n  incodex recover --transaction <id>".to_string(),
+        );
     }
 
     let official = !clone && app.is_none();
@@ -115,6 +126,7 @@ pub fn parse_cli(args: &[String]) -> Result<ParsedCli, String> {
         yes,
         dry_run,
         json,
+        deep,
         restore_app,
         app,
         transaction,

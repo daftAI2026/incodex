@@ -5,9 +5,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 mod signing;
+mod signing_outer;
 mod signing_policy;
 mod entitlements;
 pub use signing::*;
+pub use signing_outer::inspect_outer_signing;
 pub use signing_policy::validate_generic_nested_components;
 
 #[derive(Debug, Clone, Default)]

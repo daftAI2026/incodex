@@ -2,9 +2,9 @@ pub mod app_bundle;
 pub mod cdp;
 pub mod confirm;
 pub mod diagnose;
-pub(crate) mod diagnose_signing;
 pub(crate) mod diagnose_checks;
 pub(crate) mod diagnose_format;
+pub(crate) mod diagnose_signing;
 pub mod help;
 pub mod install;
 pub mod legacy_proof;
@@ -19,7 +19,7 @@ pub mod version;
 
 use std::path::PathBuf;
 
-use diagnose::diagnose;
+use diagnose::{diagnose_with_root_mode, DiagnosisMode};
 use diagnose_format::{diagnosis_json, format_diagnosis, format_status};
 use help::{command_help, ROOT_HELP};
 use incodex_core::paths::DEFAULT_APP;
@@ -139,7 +139,13 @@ where
                     "Running diagnostics"
                 })
             });
-            let report = diagnose(&target);
+            let mode = match parsed.command {
+                CliCommand::Status => DiagnosisMode::Status,
+                CliCommand::Doctor if parsed.deep => DiagnosisMode::DoctorDeep,
+                CliCommand::Doctor => DiagnosisMode::Doctor,
+                _ => unreachable!("diagnosis branch only handles status and doctor"),
+            };
+            let report = diagnose_with_root_mode(&target, &incodex_core::paths::user_root(), mode);
             if let Some(spinner) = &mut spinner {
                 spinner.stop();
             }

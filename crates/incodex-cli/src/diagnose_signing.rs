@@ -1,13 +1,118 @@
 use std::path::Path;
 
 use incodex_macos::{
-    has_hardened_runtime, plan_adhoc_entitlements, validate_generic_nested_components,
-    validate_generic_signing_inventory, validate_nested_components,
-    validate_official_signing_inventory, validate_signing_inventory, SignatureKind,
-    SignedComponent, SigningInventory, VENDOR_TEAM_IDENTIFIER,
+    has_hardened_runtime, inspect_outer_signing, plan_adhoc_entitlements,
+    validate_generic_nested_components, validate_generic_signing_inventory,
+    validate_nested_components, validate_official_signing_inventory, validate_signing_inventory,
+    SignatureKind, SignedComponent, SigningInventory, OFFICIAL_BUNDLE_IDENTIFIER,
+    VENDOR_TEAM_IDENTIFIER,
 };
 
 use crate::diagnose_checks::{CheckResult, DiagnosticFinding};
+
+pub(crate) fn not_requested_spctl() -> serde_json::Value {
+    serde_json::json!({
+        "status": "not-requested",
+        "output": serde_json::Value::Null,
+        "accepted": serde_json::Value::Null,
+        "usedAsSuccessGate": false,
+    })
+}
+
+pub(crate) fn not_requested_signing(outer: Option<&SignedComponent>) -> serde_json::Value {
+    let outer = outer.map(|component| {
+        serde_json::json!({
+            "path": component.path,
+            "identifier": component.identifier,
+            "teamIdentifier": component.team_identifier,
+            "kind": component.kind.as_str(),
+            "verified": component.verified,
+        })
+    });
+    serde_json::json!({
+        "status": "not-requested",
+        "verified": serde_json::Value::Null,
+        "componentCount": serde_json::Value::Null,
+        "components": serde_json::Value::Null,
+        "outer": outer,
+        "hardenedRuntimeOk": serde_json::Value::Null,
+        "unretainable": serde_json::Value::Null,
+        "spctl": not_requested_spctl(),
+    })
+}
+
+/// 默认 Doctor 只读取 outer identity，明确把 nested/entitlement 结论标成未请求。
+pub(crate) fn inspect_outer(
+    app_path: &Path,
+    patched: bool,
+    official_target: bool,
+) -> (Option<serde_json::Value>, bool, CheckResult) {
+    let outer = match inspect_outer_signing(app_path) {
+        Ok(outer) => outer,
+        Err(error) => {
+            return (
+                Some(serde_json::json!({
+                    "status": "unknown",
+                    "verified": false,
+                    "componentCount": serde_json::Value::Null,
+                    "components": serde_json::Value::Null,
+                    "outer": serde_json::Value::Null,
+                    "hardenedRuntimeOk": serde_json::Value::Null,
+                    "unretainable": serde_json::Value::Null,
+                    "error": error,
+                    "spctl": not_requested_spctl(),
+                })),
+                false,
+                CheckResult::unknown(
+                    "signing.inspect-failed",
+                    "outer signature identity could not be inspected",
+                ),
+            );
+        }
+    };
+    let accepted = accepts_outer_identity(&outer, patched, official_target);
+    let (code, message) = if accepted {
+        (
+            "signing.not-requested",
+            "nested signing, entitlements, and Gatekeeper were not inspected; use doctor --deep"
+                .to_string(),
+        )
+    } else {
+        (
+            "signing.outer-identity",
+            "outer signature identity evidence does not match this target".to_string(),
+        )
+    };
+    (
+        Some(not_requested_signing(Some(&outer))),
+        accepted,
+        CheckResult::unknown(code, message),
+    )
+}
+
+fn accepts_outer_identity(outer: &SignedComponent, patched: bool, official_target: bool) -> bool {
+    if !outer.verified {
+        return false;
+    }
+    if patched {
+        return outer.kind == SignatureKind::Adhoc;
+    }
+    if official_target {
+        return outer.kind == SignatureKind::Vendor
+            && outer.team_identifier.as_deref() == Some(VENDOR_TEAM_IDENTIFIER)
+            && outer.identifier.as_deref() == Some(OFFICIAL_BUNDLE_IDENTIFIER)
+            && !outer.authorities.is_empty();
+    }
+    match outer.kind {
+        SignatureKind::Adhoc => true,
+        SignatureKind::Vendor | SignatureKind::Other => {
+            outer.identifier.is_some()
+                && outer.team_identifier.is_some()
+                && !outer.authorities.is_empty()
+        }
+        SignatureKind::Unknown | SignatureKind::Unsigned => false,
+    }
+}
 
 pub(crate) fn validate_doctor_signing_inventory(
     inventory: &SigningInventory,
@@ -221,4 +326,3 @@ pub(crate) fn inspect_signing(
     });
     (Some(report), CheckResult::checked(findings))
 }
-
