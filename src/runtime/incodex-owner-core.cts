@@ -211,6 +211,10 @@ function readOwnerLock(stateRoot) {
   return state.kind === "valid" ? state.owner : null;
 }
 
+function isOwnerQuarantinePath(file) {
+  return typeof file === "string" && path.basename(file).startsWith(QUARANTINE_PREFIX);
+}
+
 function reclaimStaleActiveOwnerRecord(file, expectedOwner) {
   if (!staleOwnerRecord(expectedOwner)) return { removed: false };
   const quarantine = path.join(
@@ -247,7 +251,7 @@ function readOwnerRecords(stateRoot) {
   try {
     names = fs.readdirSync(stateRoot);
     for (const name of names) {
-      if (name.startsWith(QUARANTINE_PREFIX)) {
+      if (isOwnerQuarantinePath(name)) {
         const file = path.join(stateRoot, name);
         records.push({ path: file, state: readOwnerLockStateAt(file) });
         continue;
@@ -367,6 +371,7 @@ module.exports = {
   readOwnerLockState,
   readOwnerLock,
   readOwnerRecords,
+  isOwnerQuarantinePath,
   ownerLockMetadata,
   sameOwnerLockMetadata,
   currentOwner,

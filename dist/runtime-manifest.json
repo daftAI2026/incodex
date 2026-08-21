@@ -8,8 +8,8 @@
     "incodex-preload.cjs": "d97ae1ae39028c90ff3687b375c8614fc1fe228b3a3d149ead1c5d95d1a6bc55",
     "incodex-safe-home.cjs": "e620409acd7e69403973d50c3f0dfb68f09881ba48c8f149d4ed53e759e73002",
     "incodex-ipc-guard.cjs": "1abbc914a8e2a627bb047cda385a216cbd17ef446d8a6dfe993b732fba380395",
-    "incodex-owner-core.cjs": "f40cb08a10499b4e87b420da7e713ea2d6e0c1cfca5eee8862fe2e81f7b5d8f5",
-    "incodex-owner-recovery.cjs": "cc6c752a9da215aa06067f9ccd7ae6228bdb509d7dccfa8b05dcf797eca3f2c0",
+    "incodex-owner-core.cjs": "8fea7938d089c36991bea00de3f233b468cbd46388dd5e5f9a5a1f7a579bacf8",
+    "incodex-owner-recovery.cjs": "1273e8856cb47b597a1d7e96b24ac462df5ef22988072536c35691e1d4acaf67",
     "incodex-instance.cjs": "862df9b9dcb8fc8e55b5cf6097fd45b2e5150d1ab891c1c2223fca36c8da18d7",
     "incodex-runtime-load.cjs": "153ea5d8d2eb68551936da7f997fa46f67882f35c62357391c30da6547251d84",
     "incodex-window-kind.cjs": "8d5f752ef6a34bd0927cd39010d68b3e7b7545a77f947683d4ce4a48b98ce648"

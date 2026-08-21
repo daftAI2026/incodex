@@ -5,7 +5,7 @@ const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
 const core = require("./incodex-owner-core.cjs");
-const { LOCK_NAME, SOCK_NAME, ownerPortFromExec, ownerToken, writeOwnerLockExclusive, writeOwnerRecordExclusive, readOwnerLockState, readOwnerLock, readOwnerLockStateAt, readOwnerRecords, sameOwnerToken, staleOwnerRecord, OwnerLeaseError, lockPath, activeOwnerPath, } = core;
+const { LOCK_NAME, SOCK_NAME, ownerPortFromExec, ownerToken, writeOwnerLockExclusive, writeOwnerRecordExclusive, readOwnerLockState, readOwnerLock, readOwnerLockStateAt, readOwnerRecords, isOwnerQuarantinePath, sameOwnerToken, staleOwnerRecord, OwnerLeaseError, lockPath, activeOwnerPath, } = core;
 const activeLeases = new Map();
 const PROTOCOL_MAX_BYTES = 256;
 const PROTOCOL_IDLE_TIMEOUT_MS = 1_000;
@@ -206,7 +206,7 @@ async function acquireOwnerLease(stateRoot, owner) {
     if (!owner || !ownerToken(owner))
         throw new OwnerLeaseError("OWNER_INVALID", "owner lease requires a token");
     const records = readOwnerRecords(stateRoot);
-    if (records.some(({ state }) => state.kind === "unverifiable")) {
+    if (records.some(({ path: recordPath, state }) => isOwnerQuarantinePath(recordPath) || state.kind === "unverifiable")) {
         throw new OwnerLeaseError("OWNER_UNVERIFIABLE", "existing owner record cannot be verified; refusing publication");
     }
     if (hasForeignClaim(stateRoot)) {

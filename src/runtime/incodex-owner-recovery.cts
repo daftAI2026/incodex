@@ -17,6 +17,7 @@ const {
   readOwnerLock,
   readOwnerLockStateAt,
   readOwnerRecords,
+  isOwnerQuarantinePath,
   sameOwnerToken,
   staleOwnerRecord,
   OwnerLeaseError,
@@ -221,7 +222,7 @@ function probeOwnerPort(owner) {
 async function acquireOwnerLease(stateRoot, owner) {
   if (!owner || !ownerToken(owner)) throw new OwnerLeaseError("OWNER_INVALID", "owner lease requires a token");
   const records = readOwnerRecords(stateRoot);
-  if (records.some(({ state }) => state.kind === "unverifiable")) {
+  if (records.some(({ path: recordPath, state }) => isOwnerQuarantinePath(recordPath) || state.kind === "unverifiable")) {
     throw new OwnerLeaseError("OWNER_UNVERIFIABLE", "existing owner record cannot be verified; refusing publication");
   }
   if (hasForeignClaim(stateRoot)) {
