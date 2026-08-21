@@ -341,7 +341,11 @@ pub fn scan_owner_processes(root: &Path) -> ProcessScan {
     }
 }
 
-pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalScan {
+pub fn scan_journals(
+    root: &Path,
+    current_install_id: Option<&str>,
+    include_original_proof: bool,
+) -> JournalScan {
     let dir = root.join("transactions");
     if is_symlink(&dir) {
         return JournalScan {
@@ -465,7 +469,13 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                 Ok(journal) => {
                     let action = recover_action_phase(&journal.phase);
                     let (retained_original, original_valid, artifacts, recovery) =
-                        transaction_evidence(root, &journal.install_id, &journal.phase, action);
+                        transaction_evidence(
+                            root,
+                            &journal.install_id,
+                            &journal.phase,
+                            action,
+                            include_original_proof,
+                        );
                     let kind = if action != incodex_transaction::Recovery::Done {
                         interrupted.push((
                             journal.install_id.clone(),
@@ -668,6 +678,7 @@ fn transaction_evidence(
     install_id: &str,
     phase: &str,
     action: incodex_transaction::Recovery,
+    include_original_proof: bool,
 ) -> (Option<String>, Option<bool>, Vec<String>, Option<String>) {
     let transaction = root.join("transactions").join(install_id);
     let original = transaction.join("original/ChatGPT.app");
@@ -676,26 +687,42 @@ fn transaction_evidence(
         .filter(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
         .is_some();
     let retained_original = original_exists.then(|| original.display().to_string());
-    let original_valid = original_exists
-        .then(|| incodex_transaction::validate_backup_snapshot(root, install_id).is_ok());
-    let candidates = [
+    let original_valid = if include_original_proof {
+        original_exists
+            .then(|| incodex_transaction::validate_backup_snapshot(root, install_id).is_ok())
+    } else {
+        None
+    };
+    let internal_candidates = [
         transaction.join("staging/ChatGPT.app"),
         transaction.join("outgoing/ChatGPT.app"),
         transaction.join("restore/ChatGPT.app"),
         transaction.join("trash/ChatGPT.app"),
-        root.join("scratch")
-            .join(format!("ChatGPT.app.staged-{install_id}")),
     ];
-    let artifacts: Vec<String> = candidates
+    let external_scratch = root
+        .join("scratch")
+        .join(format!("ChatGPT.app.staged-{install_id}"));
+    let has_internal_artifacts = internal_candidates
+        .iter()
+        .any(|path| fs::symlink_metadata(path).is_ok());
+    let has_external_artifacts = fs::symlink_metadata(&external_scratch).is_ok();
+    let artifacts: Vec<String> = internal_candidates
         .into_iter()
+        .chain(std::iter::once(external_scratch))
         .filter(|path| fs::symlink_metadata(path).is_ok())
         .map(|path| path.display().to_string())
         .collect();
     let recovery = match action {
         incodex_transaction::Recovery::Rollback => Some("rollback".to_string()),
         incodex_transaction::Recovery::Refuse => Some("manual".to_string()),
-        incodex_transaction::Recovery::Done if !artifacts.is_empty() => {
+        incodex_transaction::Recovery::Done if phase == "COMMITTED" && has_external_artifacts => {
+            Some("manual".to_string())
+        }
+        incodex_transaction::Recovery::Done if phase == "COMMITTED" && has_internal_artifacts => {
             Some("cleanup".to_string())
+        }
+        incodex_transaction::Recovery::Done if phase == "ROLLED_BACK" && !artifacts.is_empty() => {
+            Some("manual".to_string())
         }
         incodex_transaction::Recovery::Done
             if phase == "ROLLED_BACK" && original_valid == Some(true) =>
