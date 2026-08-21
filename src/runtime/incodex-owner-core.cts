@@ -273,6 +273,13 @@ function readOwnerRecords(stateRoot) {
         });
         continue;
       }
+      if (state.kind === "valid" && quarantineAttempts >= MAX_SIDECAR_QUARANTINES) {
+        records.push({
+          path: file,
+          state: { kind: "unverifiable", owner: state.owner, reason: "stale-sidecar cleanup cap reached; manual resolution required" },
+        });
+        continue;
+      }
       if (state.kind === "valid" && quarantineAttempts < MAX_SIDECAR_QUARANTINES) {
         quarantineAttempts += 1;
         const result = reclaimStaleActiveOwnerRecord(file, state.owner);
