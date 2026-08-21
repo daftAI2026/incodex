@@ -5,8 +5,11 @@ const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
 const core = require("./incodex-owner-core.cjs");
-const { LOCK_NAME, SOCK_NAME, ownerPortFromExec, ownerToken, writeOwnerLock, readOwnerLockState, readOwnerLock, sameOwnerToken, OwnerLeaseError, lockPath, } = core;
+const { LOCK_NAME, SOCK_NAME, ownerPortFromExec, ownerToken, writeOwnerLock, readOwnerLockState, readOwnerLock, sameOwnerToken, staleOwnerRecord, OwnerLeaseError, lockPath, } = core;
 const activeLeases = new Map();
+const PROTOCOL_MAX_BYTES = 256;
+const PROTOCOL_IDLE_TIMEOUT_MS = 1_000;
+const MAX_LEASE_CONNECTIONS = 8;
 function claimPath(stateRoot) {
     return path.join(stateRoot, ".incognito.lock.takeover");
 }
@@ -31,8 +34,13 @@ function hasLegacySocket(stateRoot) {
 function protocolLine(socket, onLine) {
     let input = "";
     socket.setEncoding("utf8");
+    socket.setTimeout(PROTOCOL_IDLE_TIMEOUT_MS, () => socket.destroy());
     socket.on("data", (chunk) => {
         input += chunk;
+        if (Buffer.byteLength(input, "utf8") > PROTOCOL_MAX_BYTES) {
+            socket.destroy();
+            return;
+        }
         const newline = input.indexOf("\n");
         if (newline < 0)
             return;
@@ -47,10 +55,19 @@ function listenForLease(owner, server) {
 }
 function createLeaseServer(owner) {
     const lease = { owner, onRaise: null, server: net.createServer() };
+    let connections = 0;
     lease.server.on("connection", (socket) => {
+        if (connections >= MAX_LEASE_CONNECTIONS) {
+            socket.destroy();
+            return;
+        }
+        connections += 1;
+        socket.once("close", () => {
+            connections -= 1;
+        });
         protocolLine(socket, (line, connection) => {
             if (line === "probe") {
-                connection.end(`owner ${ownerToken(owner)}\n`);
+                connection.end("owner-ready\n");
                 return;
             }
             if (line === `raise ${ownerToken(owner)}`) {
@@ -67,6 +84,50 @@ function createLeaseServer(owner) {
         });
     });
     return lease;
+}
+async function validateDiagnosticBeforePublication(stateRoot, owner, beforeBind = false) {
+    const state = readOwnerLockState(stateRoot);
+    if (state.kind === "missing" || state.kind === "invalid")
+        return;
+    if (state.kind === "unverifiable") {
+        throw new OwnerLeaseError("OWNER_UNVERIFIABLE", "existing owner record cannot be verified; refusing publication", state.owner);
+    }
+    if (sameOwnerToken(state.owner, owner))
+        return;
+    if (!staleOwnerRecord(state.owner)) {
+        if (beforeBind) {
+            const probe = await probeOwnerPort(owner);
+            if (probe.kind === "owner")
+                return;
+            if (probe.kind === "foreign") {
+                throw new OwnerLeaseError("OWNER_FOREIGN_PORT", "target port is held by an unknown listener", state.owner);
+            }
+        }
+        throw new OwnerLeaseError("OWNER_LEGACY_OWNER", "live legacy owner record has no kernel handshake; refusing takeover", state.owner);
+    }
+}
+function removeOwnedDiagnosticRecord(stateRoot, expectedOwner) {
+    if (!sameOwnerToken(readOwnerLock(stateRoot), expectedOwner))
+        return false;
+    try {
+        fs.rmSync(lockPath(stateRoot), { force: true });
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+function closeLeaseServer(server) {
+    if (!server?.listening)
+        return Promise.resolve();
+    return new Promise((resolve) => {
+        try {
+            server.close(() => resolve());
+        }
+        catch {
+            resolve();
+        }
+    });
 }
 function bindOwnerPort(owner) {
     const port = ownerPortFromExec(owner.execPath);
@@ -108,7 +169,7 @@ function probeOwnerPort(owner) {
             response += String(chunk);
             if (response.includes("\n")) {
                 const line = response.trim();
-                if (/^owner [a-f0-9]+$/.test(line))
+                if (line === "owner-ready")
                     finish({ kind: "owner" });
                 else
                     finish({ kind: "foreign" });
@@ -127,6 +188,7 @@ async function acquireOwnerLease(stateRoot, owner) {
     if (hasLegacySocket(stateRoot)) {
         throw new OwnerLeaseError("OWNER_LEGACY_SOCKET", "legacy Unix owner socket is present; refusing a second runtime");
     }
+    await validateDiagnosticBeforePublication(stateRoot, owner, true);
     let lease;
     try {
         lease = await bindOwnerPort(owner);
@@ -142,12 +204,18 @@ async function acquireOwnerLease(stateRoot, owner) {
         throw new OwnerLeaseError("OWNER_PORT_UNAVAILABLE", "target port is occupied but does not answer the owner handshake");
     }
     try {
+        await validateDiagnosticBeforePublication(stateRoot, owner);
         writeOwnerLock(stateRoot, owner);
         return owner;
     }
     catch (error) {
         activeLeases.delete(ownerToken(owner));
-        lease.server.close();
+        try {
+            lease.server.close();
+        }
+        catch {
+            /* The listener is best effort after publication refusal. */
+        }
         throw error;
     }
 }
@@ -160,26 +228,26 @@ function setRaiseHandler(stateRoot, owner, onRaise) {
     return lease.server;
 }
 function clearOwnerLock(stateRoot, expectedOwner) {
-    const current = readOwnerLock(stateRoot);
-    if (!sameOwnerToken(current, expectedOwner))
-        return false;
     const token = ownerToken(expectedOwner);
     const lease = activeLeases.get(token);
     if (!lease)
+        return false;
+    if (!removeOwnedDiagnosticRecord(stateRoot, expectedOwner))
         return false;
     activeLeases.delete(token);
     try {
         lease.server.close();
     }
-    catch {
-        /* The kernel listener is already gone. */
-    }
-    try {
-        fs.rmSync(lockPath(stateRoot), { force: true });
-    }
-    catch {
-        /* The diagnostic record is non-authoritative. */
-    }
+    catch { /* The kernel listener is already gone. */ }
+    return true;
+}
+async function releaseOwnerLease(stateRoot, expectedOwner) {
+    const token = ownerToken(expectedOwner);
+    const lease = activeLeases.get(token);
+    if (!lease || !removeOwnedDiagnosticRecord(stateRoot, expectedOwner))
+        return false;
+    activeLeases.delete(token);
+    await closeLeaseServer(lease.server);
     return true;
 }
 function ownsActiveLease(owner) {
@@ -190,6 +258,7 @@ module.exports = {
     SOCK_NAME,
     acquireOwnerLease,
     clearOwnerLock,
+    releaseOwnerLease,
     setRaiseHandler,
     ownsActiveLease,
 };

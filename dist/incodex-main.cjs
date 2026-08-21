@@ -106,16 +106,19 @@ async function writePid() {
         return null;
     }
 }
-function clearPid(lease, server) {
+async function clearPid(lease, server) {
+    if (lease && instance.releaseOwnerLease) {
+        if (!(await instance.releaseOwnerLease(stateRoot(), lease))) {
+            logLaunch("lock-clear-refused", { sessionId: lease.sessionId });
+        }
+        return;
+    }
     try {
         if (server?.listening)
             server.close();
     }
     catch {
-        /* Server shutdown is best effort; the token check below remains mandatory. */
-    }
-    if (lease && !instance.clearOwnerLock(stateRoot(), lease)) {
-        logLaunch("lock-clear-refused", { sessionId: lease.sessionId });
+        /* Server shutdown is best effort when no managed lease remains. */
     }
 }
 async function incognitoAlreadyRunning() {
@@ -559,7 +562,7 @@ async function attachElectron() {
                 return ipcGuard.actionResponse(requestId, { ok: false, code: "NOT_INCOGNITO", reason: "not-incognito" });
             }
             burnIncognitoHome();
-            clearPid(ownerLease, raiseServer);
+            await clearPid(ownerLease, raiseServer);
             electron.app.quit();
             return ipcGuard.actionResponse(requestId, { ok: true, code: "OK" });
         }
@@ -598,7 +601,7 @@ async function attachElectron() {
             if (mainWindows(electron).some((open) => open !== win && !open.isDestroyed()))
                 return;
             burnIncognitoHome();
-            clearPid(ownerLease, raiseServer);
+            void clearPid(ownerLease, raiseServer);
             electron.app.exit(0);
         });
     });
@@ -617,7 +620,7 @@ async function attachElectron() {
             raiseServer = instance.listenForRaise(stateRoot(), () => raiseOurWindows(), ownerLease);
             raiseServer.once("error", (error) => {
                 logLaunch("raise-socket-failed", { error: String(error) });
-                clearPid(ownerLease, raiseServer);
+                void clearPid(ownerLease, raiseServer);
                 try {
                     electron.app.exit(1);
                 }
@@ -628,7 +631,7 @@ async function attachElectron() {
         }
         catch (error) {
             logLaunch("raise-socket-failed", { error: String(error) });
-            clearPid(ownerLease, raiseServer);
+            void clearPid(ownerLease, raiseServer);
             try {
                 electron.app.exit(1);
             }
@@ -639,12 +642,12 @@ async function attachElectron() {
         }
         electron.app.on("window-all-closed", () => {
             burnIncognitoHome();
-            clearPid(ownerLease, raiseServer);
+            void clearPid(ownerLease, raiseServer);
             electron.app.exit(0);
         });
         electron.app.on("before-quit", () => {
             burnIncognitoHome();
-            clearPid(ownerLease, raiseServer);
+            void clearPid(ownerLease, raiseServer);
         });
     }
     const ready = () => {

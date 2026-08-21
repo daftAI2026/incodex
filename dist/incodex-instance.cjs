@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.acquireOwnerLease = exports.ownsOwnerLease = exports.OwnerLeaseError = exports.staleOwner = exports.currentOwner = exports.clearOwnerLock = exports.readOwnerLock = exports.readOwnerLockState = exports.writeOwnerLock = exports.ownerMatchesLive = exports.ownerToken = exports.processIdentity = exports.ownerPortFromExec = exports.targetStateDir = exports.targetIdFromExec = exports.SOCK_NAME = exports.LOCK_NAME = void 0;
+exports.acquireOwnerLease = exports.ownsOwnerLease = exports.OwnerLeaseError = exports.staleOwner = exports.currentOwner = exports.releaseOwnerLease = exports.clearOwnerLock = exports.readOwnerLock = exports.readOwnerLockState = exports.writeOwnerLock = exports.ownerMatchesLive = exports.ownerToken = exports.processIdentity = exports.ownerPortFromExec = exports.targetStateDir = exports.targetIdFromExec = exports.SOCK_NAME = exports.LOCK_NAME = void 0;
 exports.sockPath = sockPath;
 exports.connectExisting = connectExisting;
 exports.connectExistingWithRetry = connectExistingWithRetry;
@@ -27,8 +27,9 @@ exports.currentOwner = currentOwner;
 exports.staleOwner = staleOwner;
 exports.OwnerLeaseError = OwnerLeaseError;
 exports.ownsOwnerLease = ownsOwnerLease;
-const { clearOwnerLock, acquireOwnerLease, setRaiseHandler } = recovery;
+const { clearOwnerLock, releaseOwnerLease, acquireOwnerLease, setRaiseHandler } = recovery;
 exports.clearOwnerLock = clearOwnerLock;
+exports.releaseOwnerLease = releaseOwnerLease;
 exports.acquireOwnerLease = acquireOwnerLease;
 const processIdentity = core.processIdentity;
 exports.processIdentity = processIdentity;
@@ -117,6 +118,7 @@ if (typeof module !== "undefined")
         readOwnerLockState,
         readOwnerLock,
         clearOwnerLock,
+        releaseOwnerLease,
         currentOwner,
         staleOwner,
         OwnerLeaseError,
