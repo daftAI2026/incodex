@@ -1,7 +1,8 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Duration;
 
@@ -17,6 +18,7 @@ use crate::cdp::{
     InjectionOptions, WindowBounds,
 };
 use crate::parse::ParsedCli;
+use crate::CliFailure;
 
 #[derive(Debug, Clone)]
 pub struct OpenPlan {
@@ -44,9 +46,108 @@ pub enum CleanupResult {
     },
 }
 
+/// `open` 生命周期向 shell 暴露的稳定退出码。
+///
+/// 0 表示 session 已删除；1 表示启动或子进程失败；2 表示 session
+/// 仍被保留；3 表示 UI/CDP 未通过验收。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
+pub enum OpenExitCode {
+    Success = 0,
+    ProcessFailure = 1,
+    CleanupRetained = 2,
+    UiInjectionFailure = 3,
+}
+
+impl OpenExitCode {
+    pub fn as_i32(self) -> i32 {
+        self as i32
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OpenProcessResult {
+    SpawnFailed { error: String },
+    Exited { code: i32, ui_ready: bool },
+}
+
+impl OpenProcessResult {
+    fn exit_code(&self, cleanup: &CleanupResult) -> OpenExitCode {
+        if !cleanup.removed() {
+            return OpenExitCode::CleanupRetained;
+        }
+        match self {
+            Self::SpawnFailed { .. } => OpenExitCode::ProcessFailure,
+            Self::Exited { code, .. } if *code != 0 => OpenExitCode::ProcessFailure,
+            Self::Exited {
+                code: 0,
+                ui_ready: false,
+            } => OpenExitCode::UiInjectionFailure,
+            Self::Exited {
+                code: 0,
+                ui_ready: true,
+            } => OpenExitCode::Success,
+            Self::Exited { .. } => OpenExitCode::ProcessFailure,
+        }
+    }
+
+    fn failure_message(&self, _cleanup: &CleanupResult, code: OpenExitCode) -> String {
+        match code {
+            // The retained-path warning was already printed on stdout. Do not
+            // duplicate it on stderr; the distinct process code carries the
+            // machine-readable failure class.
+            OpenExitCode::CleanupRetained => String::new(),
+            OpenExitCode::ProcessFailure => match self {
+                Self::SpawnFailed { error } => {
+                    format!("Unable to start the incognito window: {error}")
+                }
+                Self::Exited { code, .. } => {
+                    format!("Incognito Codex process exited with status {code}")
+                }
+            },
+            OpenExitCode::UiInjectionFailure => {
+                "Incognito Codex UI injection was not accepted".to_string()
+            }
+            OpenExitCode::Success => String::new(),
+        }
+    }
+}
+
 enum InjectionStatus {
     Ready,
     Failed(String),
+}
+
+#[derive(Clone, Default)]
+struct InjectionReadiness {
+    ready: Arc<AtomicBool>,
+}
+
+impl InjectionReadiness {
+    fn mark_ready(&self) {
+        self.ready.store(true, Ordering::Release);
+    }
+
+    fn observe(&self, status: &InjectionStatus) {
+        if matches!(status, InjectionStatus::Ready) {
+            self.mark_ready();
+        }
+    }
+
+    fn is_ready(&self) -> bool {
+        self.ready.load(Ordering::Acquire)
+    }
+}
+
+fn publish_injection_status(
+    status_tx: &mpsc::Sender<InjectionStatus>,
+    readiness: &InjectionReadiness,
+    status: InjectionStatus,
+) {
+    if matches!(status, InjectionStatus::Ready) {
+        readiness.mark_ready();
+    }
+    let _ = status_tx.send(status);
 }
 
 impl CleanupResult {
@@ -189,7 +290,7 @@ pub fn wait_and_burn(
     plan: &OpenPlan,
     user_root: &Path,
     retry_delay_ms: u64,
-) -> Result<(i32, CleanupResult), String> {
+) -> Result<(OpenProcessResult, CleanupResult), String> {
     wait_and_burn_with(
         plan,
         user_root,
@@ -199,7 +300,7 @@ pub fn wait_and_burn(
     )
 }
 
-fn spawn_plan(plan: &OpenPlan) -> Result<i32, String> {
+fn spawn_plan(plan: &OpenPlan) -> Result<OpenProcessResult, String> {
     let mut command = Command::new(&plan.bin);
     command.args(&plan.args);
     for (key, value) in &plan.env {
@@ -211,10 +312,12 @@ fn spawn_plan(plan: &OpenPlan) -> Result<i32, String> {
         .stderr(Stdio::null());
     let mut child = command.spawn().map_err(|err| err.to_string())?;
     let (status_tx, status_rx) = mpsc::channel();
+    let readiness = InjectionReadiness::default();
     if plan.debug_port != 0 {
         let port = plan.debug_port;
         let child_pid = child.id();
         let source_bounds = plan.source_bounds;
+        let injection_readiness = readiness.clone();
         let options = InjectionOptions {
             locale: plan.locale.clone(),
         };
@@ -252,7 +355,11 @@ fn spawn_plan(plan: &OpenPlan) -> Result<i32, String> {
                 if bounds_ready {
                     if let Some(target_id) = primary_target_id.take() {
                         start_lifecycle_monitor(port, target_id);
-                        let _ = status_tx.send(InjectionStatus::Ready);
+                        publish_injection_status(
+                            &status_tx,
+                            &injection_readiness,
+                            InjectionStatus::Ready,
+                        );
                         return;
                     }
                 }
@@ -268,12 +375,18 @@ fn spawn_plan(plan: &OpenPlan) -> Result<i32, String> {
             } else {
                 "the window could not inherit the main window bounds".to_string()
             };
-            let _ = status_tx.send(InjectionStatus::Failed(detail));
+            publish_injection_status(
+                &status_tx,
+                &injection_readiness,
+                InjectionStatus::Failed(detail),
+            );
         });
     } else {
-        let _ = status_tx.send(InjectionStatus::Failed(
-            "a localhost CDP port could not be allocated".into(),
-        ));
+        publish_injection_status(
+            &status_tx,
+            &readiness,
+            InjectionStatus::Failed("a localhost CDP port could not be allocated".into()),
+        );
     }
 
     let (_, opened, waiting) = open_progress_copy();
@@ -283,6 +396,7 @@ fn spawn_plan(plan: &OpenPlan) -> Result<i32, String> {
         if !reported {
             match status_rx.try_recv() {
                 Ok(InjectionStatus::Ready) => {
+                    readiness.observe(&InjectionStatus::Ready);
                     spinner.stop();
                     println!("{}", format_ok(opened, None));
                     let _ = std::io::stdout().flush();
@@ -305,7 +419,10 @@ fn spawn_plan(plan: &OpenPlan) -> Result<i32, String> {
         }
         if let Some(status) = child.try_wait().map_err(|err| err.to_string())? {
             spinner.stop();
-            return Ok(status.code().unwrap_or(1));
+            return Ok(OpenProcessResult::Exited {
+                code: status.code().unwrap_or(1),
+                ui_ready: readiness.is_ready(),
+            });
         }
         thread::sleep(Duration::from_millis(50));
     }
@@ -317,14 +434,14 @@ pub fn wait_and_burn_with<S, B>(
     retry_delay_ms: u64,
     spawn: S,
     mut burn: B,
-) -> Result<(i32, CleanupResult), String>
+) -> Result<(OpenProcessResult, CleanupResult), String>
 where
-    S: FnOnce(&OpenPlan) -> Result<i32, String>,
+    S: FnOnce(&OpenPlan) -> Result<OpenProcessResult, String>,
     B: FnMut(&Path, &BurnExpected<'_>) -> Result<(), String>,
 {
-    let code = match spawn(plan) {
-        Ok(code) => code,
-        Err(_) => 1,
+    let process = match spawn(plan) {
+        Ok(process) => process,
+        Err(error) => OpenProcessResult::SpawnFailed { error },
     };
     let expected = BurnExpected {
         user_root,
@@ -333,7 +450,7 @@ where
         dev: None,
     };
     let cleanup = burn_with_retries(&plan.session_root, &expected, retry_delay_ms, &mut burn);
-    Ok((code, cleanup))
+    Ok((process, cleanup))
 }
 
 fn burn_with_retries<B>(
@@ -379,7 +496,7 @@ where
     }
 }
 
-pub fn run_open(parsed: &ParsedCli) -> Result<(), String> {
+pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
     let app_path = parsed
         .app
         .as_deref()
@@ -422,7 +539,7 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), String> {
         format_kv("Home", &plan.home.display().to_string(), None)
     );
     println!("{}", format_kv("Session", &plan.session_id, None));
-    let (_code, cleanup) = wait_and_burn(&plan, &root, 250)?;
+    let (process, cleanup) = wait_and_burn(&plan, &root, 250)?;
     let (ok, message) = format_session_cleanup(&cleanup);
     if ok {
         println!("{}", format_ok(&message, None));
@@ -430,7 +547,15 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), String> {
         println!("{}", format_warn(&message, None));
     }
     println!();
-    Ok(())
+    let code = process.exit_code(&cleanup);
+    if code == OpenExitCode::Success {
+        Ok(())
+    } else {
+        Err(CliFailure::with_code(
+            code.as_i32(),
+            process.failure_message(&cleanup, code),
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -452,7 +577,15 @@ mod tests {
         let app = root.join("ChatGPT.app");
         let mac = app.join("Contents/MacOS");
         fs::create_dir_all(&mac).unwrap();
-        fs::write(mac.join("ChatGPT"), "#!/bin/sh\nexit 0\n").unwrap();
+        let executable = mac.join("ChatGPT");
+        fs::write(&executable, "#!/bin/sh\nexit 0\n").unwrap();
+        let mut permissions = fs::metadata(&executable).unwrap().permissions();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            permissions.set_mode(0o755);
+        }
+        fs::set_permissions(executable, permissions).unwrap();
         app
     }
 
@@ -490,6 +623,76 @@ mod tests {
     }
 
     #[test]
+    fn ready_published_between_status_poll_and_child_exit_is_not_lost() {
+        let (status_tx, status_rx) = mpsc::channel();
+        let readiness = InjectionReadiness::default();
+
+        // spawn_plan polls status_rx before child.try_wait. The first poll is
+        // empty; the producer then publishes Ready while the child exits.
+        assert!(matches!(
+            status_rx.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        publish_injection_status(&status_tx, &readiness, InjectionStatus::Ready);
+
+        // No second channel poll happens before this child-exit observation.
+        // The producer's acceptance must already be visible here.
+        assert!(
+            readiness.is_ready(),
+            "Ready published between lifecycle polls must survive child exit"
+        );
+    }
+
+    #[test]
+    fn lifecycle_exit_codes_distinguish_process_ui_and_cleanup_failures() {
+        let removed = CleanupResult::Removed { attempts: 1 };
+        let retained = CleanupResult::Retained {
+            attempts: 5,
+            retained_path: PathBuf::from("/tmp/session"),
+            reason: "EPERM".into(),
+        };
+        assert_eq!(
+            OpenProcessResult::Exited {
+                code: 0,
+                ui_ready: true,
+            }
+            .exit_code(&removed),
+            OpenExitCode::Success
+        );
+        assert_eq!(
+            OpenProcessResult::SpawnFailed {
+                error: "ENOENT".into()
+            }
+            .exit_code(&removed),
+            OpenExitCode::ProcessFailure
+        );
+        assert_eq!(
+            OpenProcessResult::Exited {
+                code: 7,
+                ui_ready: true,
+            }
+            .exit_code(&removed),
+            OpenExitCode::ProcessFailure
+        );
+        assert_eq!(
+            OpenProcessResult::Exited {
+                code: 0,
+                ui_ready: false,
+            }
+            .exit_code(&removed),
+            OpenExitCode::UiInjectionFailure
+        );
+        assert_eq!(
+            OpenProcessResult::Exited {
+                code: 0,
+                ui_ready: true,
+            }
+            .exit_code(&retained),
+            OpenExitCode::CleanupRetained
+        );
+    }
+
+    #[test]
     fn burn_failure_does_not_claim_removed() {
         let root = temp_root();
         let app = fake_app(&root);
@@ -498,8 +701,24 @@ mod tests {
         fs::create_dir_all(&source).unwrap();
         fs::write(source.join("auth.json"), "{}\n").unwrap();
         let plan = prepare_incognito_open(&app, &user, &source, 1).unwrap();
-        let (_code, cleanup) =
-            wait_and_burn_with(&plan, &user, 0, |_| Ok(0), |_, _| Err("EPERM".into())).unwrap();
+        let (process, cleanup) = wait_and_burn_with(
+            &plan,
+            &user,
+            0,
+            |_| {
+                Ok(OpenProcessResult::Exited {
+                    code: 0,
+                    ui_ready: true,
+                })
+            },
+            |_, _| Err("EPERM".into()),
+        )
+        .unwrap();
+        assert_eq!(
+            process.exit_code(&cleanup),
+            OpenExitCode::CleanupRetained,
+            "retained session must have a distinct lifecycle code"
+        );
         assert!(plan.session_root.exists());
         assert_eq!(
             cleanup,
@@ -523,7 +742,7 @@ mod tests {
         fs::create_dir_all(&source).unwrap();
         fs::write(source.join("auth.json"), "{}\n").unwrap();
         let plan = prepare_incognito_open(&app, &user, &source, 1).unwrap();
-        let (_code, cleanup) = wait_and_burn_with(
+        let (_process, cleanup) = wait_and_burn_with(
             &plan,
             &user,
             0,
@@ -533,6 +752,34 @@ mod tests {
         .unwrap();
         assert!(!plan.session_root.exists());
         assert!(cleanup.removed());
+    }
+
+    #[test]
+    fn cdp_port_failure_is_not_success() {
+        let root = temp_root();
+        let app = fake_app(&root);
+        let user = root.join("home");
+        let source = root.join("codex");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("auth.json"), "{}\n").unwrap();
+        let mut plan = prepare_incognito_open(&app, &user, &source, 1).unwrap();
+        plan.debug_port = 0;
+        let process = spawn_plan(&plan).unwrap();
+        assert_eq!(
+            process.exit_code(&CleanupResult::Removed { attempts: 1 }),
+            OpenExitCode::UiInjectionFailure,
+            "missing CDP port must be a UI acceptance failure"
+        );
+        burn_session_home(
+            &plan.session_root,
+            &BurnExpected {
+                user_root: &user,
+                session_id: Some(&plan.session_id),
+                ino: None,
+                dev: None,
+            },
+        )
+        .unwrap();
     }
 
     #[test]

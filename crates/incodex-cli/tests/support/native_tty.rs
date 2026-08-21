@@ -119,7 +119,7 @@ fn native_open_animates_while_waiting_for_cdp_readiness_and_clears_its_line() {
         "Closed. Isolated session removed.",
         "",
     );
-    assert_eq!(rust.status, 0, "{}", rust.stdout);
+    assert_eq!(rust.status, 3, "{}", rust.stdout);
     assert!(
         rust.stdout.contains("Waiting for Codex UI to become ready"),
         "missing opening readiness animation: {}",
