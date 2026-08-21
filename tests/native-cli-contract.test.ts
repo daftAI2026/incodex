@@ -3,6 +3,10 @@ import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
 const root = join(import.meta.dir, "..");
+const frozenTypeScriptFixtures = new Set([
+  "legacy_typescript.rs",
+  "support/legacy_typescript_matrix.rs",
+]);
 
 function text(relativePath: string): string {
   return readFileSync(join(root, relativePath), "utf8");
@@ -27,7 +31,7 @@ function rustTestSources(relativeDir: string): string[] {
 }
 
 function isLegacyFixtureSource(relativePath: string): boolean {
-  return /(^|\/)legacy_[^/]+\.rs$/.test(relativePath);
+  return frozenTypeScriptFixtures.has(relativePath);
 }
 
 describe("native CLI contract boundary", () => {
@@ -40,6 +44,15 @@ describe("native CLI contract boundary", () => {
     expect(sources).toContain("probe.rs");
     expect(sources).toContain("readonly.rs");
     expect(sources).toContain("support/tty.rs");
+    expect(sources).toContain("legacy_proof.rs");
+    expect(sources).toContain("legacy_uninstall.rs");
+    expect(sources).not.toContain("legacy_typescript.rs");
+    expect(sources).not.toContain("support/legacy_typescript_matrix.rs");
+    expect(isLegacyFixtureSource("legacy_typescript.rs")).toBe(true);
+    expect(isLegacyFixtureSource("support/legacy_typescript_matrix.rs")).toBe(true);
+    expect(isLegacyFixtureSource("legacy_anything.rs")).toBe(false);
+    expect(isLegacyFixtureSource("legacy_proof.rs")).toBe(false);
+    expect(isLegacyFixtureSource("legacy_uninstall.rs")).toBe(false);
     for (const relativePath of sources) {
       const source = text(join("crates/incodex-cli/tests", relativePath));
       expect(source).not.toMatch(/\bbun\b/);
