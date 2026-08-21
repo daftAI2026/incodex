@@ -253,7 +253,14 @@ function readOwnerRecords(stateRoot) {
     for (const name of names) {
       if (isOwnerQuarantinePath(name)) {
         const file = path.join(stateRoot, name);
-        records.push({ path: file, state: readOwnerLockStateAt(file) });
+        const state = readOwnerLockStateAt(file);
+        records.push({
+          path: file,
+          state:
+            state.kind === "unverifiable"
+              ? state
+              : { kind: "unverifiable", owner: state.owner, reason: "retained quarantine requires manual resolution" },
+        });
         continue;
       }
       if (!name.startsWith(ACTIVE_LOCK_PREFIX)) continue;
