@@ -258,7 +258,10 @@ pub fn validate_signing_inventory(inventory: &SigningInventory) -> Result<(), St
     validate_nested_components(&inventory.nested)
 }
 
-fn validate_generic_signing_inventory(inventory: &SigningInventory) -> Result<(), String> {
+/// 对自定义 `--app` 的 generic verifier 复用 deep/strict 与 identity evidence policy。
+pub fn validate_generic_signing_inventory(
+    inventory: &SigningInventory,
+) -> Result<(), String> {
     if !inventory.deep_strict {
         return Err("bundle failed deep strict signature verification".into());
     }

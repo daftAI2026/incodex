@@ -6,12 +6,13 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use incodex_asar::Archive;
+use incodex_core::canonical::is_official_app;
 use incodex_core::paths::{user_root, ASAR_REL, RUNTIME_CURRENT_NAME, RUNTIME_DIR_NAME};
 use incodex_core::target_id;
 use incodex_macos::{
     diagnose_spctl, has_hardened_runtime, inspect_signing_inventory, plan_adhoc_entitlements,
     read_architecture, read_asar_integrity, read_plist_info, validate_signing_inventory,
-    verify_app, SignatureKind, VENDOR_TEAM_IDENTIFIER,
+    validate_generic_signing_inventory, verify_app, SignatureKind, VENDOR_TEAM_IDENTIFIER,
 };
 use incodex_transaction::{journal_v2, load_journal, validate_backup_snapshot};
 
@@ -105,7 +106,14 @@ pub fn diagnose_with_root(app_path: &Path, root: &Path) -> Diagnosis {
         .as_ref()
         .map(|package| package.already_patched)
         .unwrap_or(false);
-    let (signing, signing_check) = inspect_signing(spctl.as_ref(), codesign_ok, app_path, patched);
+    let official_target = is_official_app(app_path, None);
+    let (signing, signing_check) = inspect_signing(
+        spctl.as_ref(),
+        codesign_ok,
+        app_path,
+        patched,
+        official_target,
+    );
     let owner_scan = scan_owner_processes(root);
     let session_scan = scan_sessions(root);
     let current_install_id = package
@@ -340,6 +348,7 @@ fn inspect_signing(
     codesign_ok: bool,
     app_path: &Path,
     patched: bool,
+    official_target: bool,
 ) -> (Option<serde_json::Value>, CheckResult) {
     let Some(spctl) = spctl else {
         return (
@@ -404,7 +413,11 @@ fn inspect_signing(
             Some(app_path),
         ));
     }
-    let acceptance = validate_signing_inventory(&inventory);
+    let acceptance = if patched || official_target {
+        validate_signing_inventory(&inventory)
+    } else {
+        validate_generic_signing_inventory(&inventory)
+    };
     if let Err(error) = &acceptance {
         let mut emitted_component_finding = false;
         for component in &inventory.nested {
@@ -452,22 +465,30 @@ fn inspect_signing(
         }
     }
     let expected_kind = if patched {
-        SignatureKind::Adhoc
+        Some(SignatureKind::Adhoc)
+    } else if official_target {
+        Some(SignatureKind::Vendor)
     } else {
-        SignatureKind::Vendor
+        None
     };
-    if inventory.outer.kind != expected_kind {
-        findings.push(DiagnosticFinding::warning(
-            "signing.outer-identity",
-            format!(
-                "outer bundle is {}; expected {} for this target state",
-                inventory.outer.kind.as_str(),
-                expected_kind.as_str()
-            ),
-            Some(app_path),
-        ));
+    if let Some(expected_kind) = expected_kind {
+        if inventory.outer.kind != expected_kind {
+            findings.push(DiagnosticFinding::warning(
+                "signing.outer-identity",
+                format!(
+                    "outer bundle is {}; expected {} for this target state",
+                    inventory.outer.kind.as_str(),
+                    expected_kind.as_str()
+                ),
+                Some(app_path),
+            ));
+        }
     }
-    let verified = codesign_ok && acceptance.is_ok() && inventory.outer.kind == expected_kind;
+    let verified = codesign_ok
+        && acceptance.is_ok()
+        && expected_kind
+            .map(|expected| inventory.outer.kind == expected)
+            .unwrap_or(true);
     let components = inventory
         .nested
         .iter()
