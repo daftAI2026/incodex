@@ -333,9 +333,9 @@ pub fn has_hardened_runtime(app: &Path) -> bool {
 
 /// 使用共享 entitlement/component policy 完成 ad-hoc 签名。
 pub fn sign_app(app: &Path) -> Result<(), String> {
-    let before = read_entitlements(app)?;
-    let plan = plan_adhoc_entitlements(&before)?;
-    let preserve = collect_vendor_helper_roots(app)?;
+    let inventory = inspect_signing_inventory(app)?;
+    let plan = plan_adhoc_entitlements(&inventory.entitlements)?;
+    let preserve = collect_vendor_helper_roots_from_inventory(&inventory)?;
     let stash_root = if preserve.is_empty() {
         None
     } else {
@@ -390,12 +390,23 @@ pub fn sign_app(app: &Path) -> Result<(), String> {
 
 /// 返回当前 app 中需要保持 vendor identity 的顶层 sidecar。
 pub fn collect_vendor_helper_roots(app: &Path) -> Result<Vec<PathBuf>, String> {
-    let inventory = inspect_nested_components(app)?;
-    validate_nested_components(&inventory)?;
+    let inventory = inspect_signing_inventory(app)?;
+    collect_vendor_helper_roots_from_inventory(&inventory)
+}
+
+fn collect_vendor_helper_roots_from_inventory(
+    inventory: &SigningInventory,
+) -> Result<Vec<PathBuf>, String> {
+    if inventory.outer.kind == SignatureKind::Other {
+        validate_generic_signing_inventory(inventory)?;
+    } else {
+        validate_signing_inventory(inventory)?;
+    }
     let mut vendors = inventory
-        .into_iter()
+        .nested
+        .iter()
         .filter(|component| component.kind == SignatureKind::Vendor)
-        .map(|component| component.path)
+        .map(|component| component.path.clone())
         .collect::<Vec<_>>();
     vendors.sort_by_key(|path| path.components().count());
     let mut roots = Vec::new();

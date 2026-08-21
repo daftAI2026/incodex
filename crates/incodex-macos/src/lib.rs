@@ -8,6 +8,7 @@ mod signing;
 mod signing_policy;
 mod entitlements;
 pub use signing::*;
+pub use signing_policy::validate_generic_nested_components;
 
 #[derive(Debug, Clone, Default)]
 pub struct PlistInfo {

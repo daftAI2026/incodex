@@ -1,6 +1,6 @@
 use crate::signing::{validate_nested_components, SignatureKind, SignedComponent};
 
-pub(crate) fn validate_generic_nested_components(
+pub fn validate_generic_nested_components(
     components: &[SignedComponent],
 ) -> Result<(), String> {
     for component in components {

@@ -12,8 +12,9 @@ use incodex_core::target_id;
 use incodex_macos::{
     diagnose_spctl, has_hardened_runtime, inspect_signing_inventory, plan_adhoc_entitlements,
     read_architecture, read_asar_integrity, read_plist_info, validate_signing_inventory,
-    validate_generic_signing_inventory, validate_official_signing_inventory, verify_app,
-    SignatureKind, SigningInventory, VENDOR_TEAM_IDENTIFIER,
+    validate_generic_nested_components, validate_generic_signing_inventory,
+    validate_nested_components, validate_official_signing_inventory, verify_app, SignatureKind,
+    SignedComponent, SigningInventory, VENDOR_TEAM_IDENTIFIER,
 };
 use incodex_transaction::{journal_v2, load_journal, validate_backup_snapshot};
 
@@ -358,6 +359,19 @@ fn validate_doctor_signing_inventory(
     }
 }
 
+fn validate_doctor_nested_component(
+    component: &SignedComponent,
+    patched: bool,
+    official_target: bool,
+) -> Result<(), String> {
+    let component = std::slice::from_ref(component);
+    if patched || official_target {
+        validate_nested_components(component)
+    } else {
+        validate_generic_nested_components(component)
+    }
+}
+
 fn inspect_signing(
     spctl: Option<&serde_json::Value>,
     codesign_ok: bool,
@@ -432,6 +446,9 @@ fn inspect_signing(
     if let Err(error) = &acceptance {
         let mut emitted_component_finding = false;
         for component in &inventory.nested {
+            if validate_doctor_nested_component(component, patched, official_target).is_ok() {
+                continue;
+            }
             let finding = match component.kind {
                 SignatureKind::Other | SignatureKind::Unknown | SignatureKind::Unsigned => Some((
                     "signing.component-identity-unsupported",
