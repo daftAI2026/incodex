@@ -1,0 +1,251 @@
+use std::ffi::OsString;
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
+use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use incodex_macos::{
+    inspect_signing_inventory, sign_app, verify_app, verify_original_vendor_bundle,
+};
+
+static PATH_LOCK: Mutex<()> = Mutex::new(());
+
+struct PathGuard(Option<OsString>);
+
+impl Drop for PathGuard {
+    fn drop(&mut self) {
+        match &self.0 {
+            Some(path) => std::env::set_var("PATH", path),
+            None => std::env::remove_var("PATH"),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum NestedIdentity {
+    Vendor,
+    VendorWithoutAuthority,
+    Other,
+}
+
+struct Fixture {
+    root: PathBuf,
+    app: PathBuf,
+    fake_bin: PathBuf,
+    malformed_entitlements: bool,
+}
+
+impl Fixture {
+    fn new(
+        nested_identity: NestedIdentity,
+        deep_nested: bool,
+        outer_vendor: bool,
+        outer_identifier: &'static str,
+        malformed_entitlements: bool,
+    ) -> Self {
+        let root = std::env::temp_dir().join(format!(
+            "incodex-signing-regression-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let app = root.join("ChatGPT.app");
+        let fake_bin = root.join("fake-bin");
+        fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
+        fs::create_dir_all(&fake_bin).unwrap();
+        fs::write(app.join("Contents/MacOS/ChatGPT"), "binary\n").unwrap();
+        fs::write(
+            app.join("Contents/Info.plist"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.expected.bundle</string>
+<key>CFBundleShortVersionString</key><string>1.0.0</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleExecutable</key><string>ChatGPT</string>
+</dict></plist>
+"#,
+        )
+        .unwrap();
+
+        let component = if deep_nested {
+            let parent = app.join("Contents/Frameworks/OuterVendor.app");
+            let deep = parent.join("Contents/Frameworks/DeepVendor.xpc");
+            fs::create_dir_all(deep.join("Contents/_CodeSignature")).unwrap();
+            parent
+        } else {
+            let nested = app.join("Contents/Frameworks/NestedVendor.xpc");
+            fs::create_dir_all(nested.join("Contents/_CodeSignature")).unwrap();
+            nested
+        };
+        if deep_nested {
+            fs::create_dir_all(component.join("Contents/_CodeSignature")).unwrap();
+        }
+
+        let nested_display = match nested_identity {
+            NestedIdentity::Vendor => {
+                "printf '%s\\n' 'Identifier=com.example.vendor' 'TeamIdentifier=2DC432GLL2' 'Authority=Developer ID Application: fixture'"
+            }
+            NestedIdentity::VendorWithoutAuthority => {
+                "printf '%s\\n' 'Identifier=com.example.vendor' 'TeamIdentifier=2DC432GLL2'"
+            }
+            NestedIdentity::Other => {
+                "printf '%s\\n' 'Identifier=com.example.other' 'TeamIdentifier=OTHERTEAM' 'Authority=Other Signer'"
+            }
+        };
+        let outer_display = if outer_vendor {
+            format!(
+                "printf '%s\\n' 'Identifier={outer_identifier}' 'TeamIdentifier=2DC432GLL2' 'Authority=Developer ID Application: fixture'"
+            )
+        } else {
+            "printf '%s\\n' 'Identifier=com.example.fixture' 'Signature=adhoc'".to_string()
+        };
+        let script = format!(
+            r#"#!/bin/sh
+target=""
+for arg in "$@"; do target="$arg"; done
+if [ "$1" = "--display" ] && [ "$2" = "--entitlements" ]; then
+  printf '%s' "$INCODEX_CODESIGN_ENTITLEMENTS_OUTPUT"
+  exit 0
+fi
+if [ "$1" = "--display" ] && [ "$2" = "--verbose=4" ]; then
+  case "$target" in
+    *NestedVendor.xpc|*OuterVendor.app|*DeepVendor.xpc)
+      {nested_display}
+      ;;
+    *)
+      {outer_display}
+      ;;
+  esac
+  exit 0
+fi
+if [ "$1" = "--force" ] && [ "$2" = "--sign" ]; then
+  printf '%s\n' signed > "$INCODEX_SIGN_CAPTURE"
+  exit 0
+fi
+if [ "$1" = "--force" ] && [ "$2" = "--deep" ]; then exit 0; fi
+if [ "$1" = "--verify" ]; then exit 0; fi
+exit 0
+"#
+        );
+        let codesign = fake_bin.join("codesign");
+        fs::write(&codesign, script).unwrap();
+        let mut permissions = fs::metadata(&codesign).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&codesign, permissions).unwrap();
+        Self {
+            root,
+            app,
+            fake_bin,
+            malformed_entitlements,
+        }
+    }
+
+    fn install_path(&self) -> OsString {
+        let mut path = OsString::from(self.fake_bin.as_os_str());
+        path.push(":");
+        if let Some(existing) = std::env::var_os("PATH") {
+            path.push(existing);
+        }
+        path
+    }
+
+    fn configure_environment(&self) -> PathGuard {
+        let original_path = std::env::var_os("PATH");
+        let guard = PathGuard(original_path);
+        std::env::set_var("PATH", self.install_path());
+        std::env::set_var(
+            "INCODEX_CODESIGN_ENTITLEMENTS_OUTPUT",
+            if self.malformed_entitlements {
+                "not a plist"
+            } else {
+                "<?xml version=\"1.0\"?><plist><dict><key>com.apple.security.cs.allow-jit</key><true/></dict></plist>"
+            },
+        );
+        std::env::set_var(
+            "INCODEX_SIGN_CAPTURE",
+            self.root.join("sign-capture"),
+        );
+        guard
+    }
+}
+
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+#[test]
+fn generic_verify_rejects_a_deep_strict_bundle_with_other_nested_identity() {
+    let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let fixture = Fixture::new(NestedIdentity::Other, false, true, "com.expected.bundle", false);
+    let _path = fixture.configure_environment();
+
+    assert!(!verify_app(&fixture.app));
+}
+
+#[test]
+fn official_vendor_acceptance_requires_outer_signature_identifier() {
+    let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let fixture = Fixture::new(
+        NestedIdentity::Vendor,
+        false,
+        true,
+        "com.actual.bundle",
+        false,
+    );
+    let _path = fixture.configure_environment();
+
+    let result = verify_original_vendor_bundle(
+        &fixture.app,
+        Some("com.expected.bundle"),
+        None,
+        None,
+    );
+    assert!(result.is_err(), "outer signature identifier must match the expected bundle");
+}
+
+#[test]
+fn inventory_recurses_into_signed_bundle_components() {
+    let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let fixture = Fixture::new(NestedIdentity::Vendor, true, false, "unused", false);
+    let _path = fixture.configure_environment();
+
+    let inventory = inspect_signing_inventory(&fixture.app).unwrap();
+    assert!(inventory
+        .nested
+        .iter()
+        .any(|component| component.path.ends_with("DeepVendor.xpc")));
+}
+
+#[test]
+fn nested_vendor_without_authority_is_rejected_before_signing() {
+    let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let fixture = Fixture::new(
+        NestedIdentity::VendorWithoutAuthority,
+        false,
+        false,
+        "unused",
+        false,
+    );
+    let _path = fixture.configure_environment();
+
+    let result = sign_app(&fixture.app);
+    assert!(result.is_err(), "vendor components need authority evidence");
+    assert!(!fixture.root.join("sign-capture").exists());
+}
+
+#[test]
+fn successful_nonempty_malformed_entitlements_fail_closed() {
+    let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let fixture = Fixture::new(NestedIdentity::Vendor, false, false, "unused", true);
+    let _path = fixture.configure_environment();
+
+    let result = sign_app(&fixture.app);
+    assert!(result.is_err(), "malformed successful entitlement output must fail closed");
+    assert!(!fixture.root.join("sign-capture").exists());
+}
