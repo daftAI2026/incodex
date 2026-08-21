@@ -332,9 +332,28 @@ pub fn scan_sessions(root: &Path) -> SessionScan {
                         } else {
                             match read_directory(&child) {
                                 Ok(Some(nested)) => {
-                                    roots.extend(nested.into_iter().filter(|path| {
-                                        is_directory(path) && file_name_starts(path, "s-")
-                                    }))
+                                    for path in nested {
+                                        if !file_name_starts(&path, "s-") {
+                                            continue;
+                                        }
+                                        if is_symlink(&path) {
+                                            unknown = true;
+                                            let message =
+                                                "session root is a symlink and was not inspected";
+                                            orphan_findings.push(DiagnosticFinding::warning(
+                                                "session.symlink",
+                                                message,
+                                                Some(&path),
+                                            ));
+                                            chromium_findings.push(DiagnosticFinding::warning(
+                                                "session.symlink",
+                                                message,
+                                                Some(&path),
+                                            ));
+                                        } else if is_directory(&path) {
+                                            roots.push(path);
+                                        }
+                                    }
                                 }
                                 Ok(None) => {
                                     unknown = true;
