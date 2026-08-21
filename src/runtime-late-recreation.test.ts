@@ -57,4 +57,26 @@ describe("Runtime late session recreation", () => {
     expect(() => runtimeSafeHome.burnSessionHome(session.root, conservative)).toThrow(/inode|device/);
     expect(existsSync(join(session.root, "replacement"))).toBe(true);
   });
+
+  test("a child deletion proof lets orphan cleanup remove a late root replacement", () => {
+    const writeBurnProof = (runtimeSafeHome as any).writeBurnProof;
+    expect(typeof writeBurnProof).toBe("function");
+
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const session = runtimeSafeHome.createSessionHome(userRoot, { pid: 999999 });
+    const expected = {
+      userRoot,
+      sessionId: session.sessionId,
+      ino: session.ino,
+      dev: session.dev,
+    };
+    expect(runtimeSafeHome.burnSessionHome(session.root, expected)).toBe(true);
+    expect(writeBurnProof(session.root, expected)).toBe(true);
+
+    mkdirSync(session.root);
+    writeFileSync(join(session.root, "late-plugin-cache"), "late\n");
+    expect(runtimeSafeHome.sweepOrphanSessions(userRoot)).toBe(1);
+    expect(existsSync(session.root)).toBe(false);
+  });
 });
