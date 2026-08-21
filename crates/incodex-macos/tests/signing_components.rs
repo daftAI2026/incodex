@@ -27,10 +27,19 @@ struct Fixture {
     entitlements: PathBuf,
     marker: PathBuf,
     sign_capture: PathBuf,
+    deep_capture: PathBuf,
 }
 
 impl Fixture {
     fn new(identity: &str) -> Self {
+        Self::with_outer(identity, false)
+    }
+
+    fn new_custom_outer(identity: &str) -> Self {
+        Self::with_outer(identity, true)
+    }
+
+    fn with_outer(identity: &str, custom_outer: bool) -> Self {
         let root = std::env::temp_dir().join(format!(
             "incodex-signing-components-{}-{}",
             std::process::id(),
@@ -68,6 +77,21 @@ impl Fixture {
         )
         .unwrap();
         let sign_capture = root.join("outer-sign-count");
+        let deep_capture = root.join("deep-sign-count");
+        let nested_display = if custom_outer {
+            format!(
+                "if [ -f \"$INCODEX_DEEP_SIGN_CAPTURE\" ]; then printf '%s\\\\n' 'Identifier=com.example.fixture' 'Signature=adhoc'; else printf '%s\\\\n' 'Identifier=com.example.renamed-vendor' 'TeamIdentifier={identity}' 'Authority=Developer ID Application: fixture'; fi"
+            )
+        } else {
+            format!(
+                "printf '%s\\\\n' 'Identifier=com.example.renamed-vendor' 'TeamIdentifier={identity}' 'Authority=Developer ID Application: fixture'"
+            )
+        };
+        let outer_display = if custom_outer {
+            "if [ -f \"$INCODEX_SIGN_CAPTURE\" ]; then printf '%s\\n' 'Identifier=com.example.fixture' 'Signature=adhoc'; else printf '%s\\n' 'Identifier=com.example.third-party' 'TeamIdentifier=THIRDPARTY' 'Authority=Developer ID Application: third-party fixture'; fi"
+        } else {
+            "printf '%s\\n' 'Identifier=com.openai.codex' 'Signature=adhoc'"
+        };
         let script = format!(
             r#"#!/bin/sh
 target=""
@@ -78,12 +102,13 @@ if [ "$1" = "--display" ] && [ "$2" = "--entitlements" ]; then
 fi
 if [ "$1" = "--display" ] && [ "$2" = "--verbose=4" ]; then
   case "$target" in
-    *RenamedVendor.xpc) printf '%s\n' 'Identifier=com.example.renamed-vendor' 'TeamIdentifier={identity}' 'Authority=Developer ID Application: fixture' ;;
-    *) printf '%s\n' 'Identifier=com.openai.codex' 'Signature=adhoc' ;;
+    *RenamedVendor.xpc) {nested_display} ;;
+    *) {outer_display} ;;
   esac
   exit 0
 fi
 if [ "$1" = "--force" ] && [ "$2" = "--deep" ]; then
+  printf '%s\n' signed > "$INCODEX_DEEP_SIGN_CAPTURE"
   marker="$target/Contents/Frameworks/RenamedVendor.xpc/Contents/vendor-marker"
   if [ -f "$marker" ]; then printf '%s\n' mutated-by-deep-sign > "$marker"; fi
   exit 0
@@ -112,6 +137,7 @@ exit 0
             entitlements,
             marker,
             sign_capture,
+            deep_capture,
         }
     }
 
@@ -137,9 +163,11 @@ fn run_sign(fixture: &Fixture) -> Result<(), String> {
     std::env::set_var("PATH", fixture.install_path());
     std::env::set_var("INCODEX_CODESIGN_ENTITLEMENTS", &fixture.entitlements);
     std::env::set_var("INCODEX_SIGN_CAPTURE", &fixture.sign_capture);
+    std::env::set_var("INCODEX_DEEP_SIGN_CAPTURE", &fixture.deep_capture);
     let result = sign_app(&fixture.app);
     std::env::remove_var("INCODEX_CODESIGN_ENTITLEMENTS");
     std::env::remove_var("INCODEX_SIGN_CAPTURE");
+    std::env::remove_var("INCODEX_DEEP_SIGN_CAPTURE");
     result
 }
 
@@ -175,6 +203,17 @@ fn unknown_signed_component_is_rejected_before_outer_signing() {
         "original-vendor-component\n",
         "rejection must happen before any destructive signing step"
     );
+}
+
+#[test]
+fn verified_generic_nested_component_can_be_resigned_with_third_party_outer() {
+    let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let fixture = Fixture::new_custom_outer("OTHERTEAM");
+
+    let result = run_sign(&fixture);
+
+    assert!(result.is_ok(), "verified generic nested components should be signable: {result:?}");
+    assert!(fixture.sign_capture.exists());
 }
 
 #[test]
