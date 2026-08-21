@@ -20,6 +20,8 @@ const MAIN: &str = include_str!("../../../dist/incodex-main.cjs");
 const PRELOAD: &str = include_str!("../../../dist/incodex-preload.cjs");
 const SAFE_HOME: &str = include_str!("../../../dist/incodex-safe-home.cjs");
 const IPC_GUARD: &str = include_str!("../../../dist/incodex-ipc-guard.cjs");
+const OWNER_CORE: &str = include_str!("../../../dist/incodex-owner-core.cjs");
+const OWNER_RECOVERY: &str = include_str!("../../../dist/incodex-owner-recovery.cjs");
 const INSTANCE: &str = include_str!("../../../dist/incodex-instance.cjs");
 const RUNTIME_LOAD: &str = include_str!("../../../dist/incodex-runtime-load.cjs");
 const WINDOW_KIND: &str = include_str!("../../../dist/incodex-window-kind.cjs");
@@ -32,6 +34,8 @@ const EXTERNAL_FILES: &[(&str, &str)] = &[
     ("incodex-inject.js", INJECT),
     ("incodex-safe-home.cjs", SAFE_HOME),
     ("incodex-ipc-guard.cjs", IPC_GUARD),
+    ("incodex-owner-core.cjs", OWNER_CORE),
+    ("incodex-owner-recovery.cjs", OWNER_RECOVERY),
     ("incodex-instance.cjs", INSTANCE),
     ("incodex-window-kind.cjs", WINDOW_KIND),
     ("incodex-runtime-load.cjs", RUNTIME_LOAD),

@@ -88,6 +88,8 @@ fn compressed_binary_and_runtime_resources_stay_inside_release_gates() {
         "incodex-inject.js",
         "incodex-safe-home.cjs",
         "incodex-ipc-guard.cjs",
+        "incodex-owner-core.cjs",
+        "incodex-owner-recovery.cjs",
         "incodex-instance.cjs",
         "incodex-window-kind.cjs",
         "incodex-runtime-load.cjs",
