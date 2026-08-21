@@ -1,7 +1,7 @@
 use std::io;
 use std::path::PathBuf;
 
-use super::collect_directory_entries;
+use super::diagnose_fs::collect_directory_entries;
 
 #[test]
 fn directory_entry_error_does_not_return_a_partial_checked_list() {

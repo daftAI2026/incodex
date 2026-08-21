@@ -1,9 +1,15 @@
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::Path;
 
 use incodex_transaction::{journal_v2, parse_journal, recover_action, recover_action_phase};
 use serde::Serialize;
+
+#[path = "diagnose_fs.rs"]
+mod diagnose_fs;
+use diagnose_fs::{
+    basename, file_name, file_name_starts, is_directory, is_symlink, live_process_identity,
+    looks_like_uuid, pid_alive, read_directory,
+};
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -130,21 +136,27 @@ pub fn empty_checks() -> DiagnosticChecks {
 
 pub fn scan_owner_processes(root: &Path) -> ProcessScan {
     let targets = root.join("targets");
-    let Some(entries) = read_directory(&targets) else {
-        return if !targets.exists() {
-            ProcessScan {
+    let entries = match read_directory(&targets) {
+        Ok(Some(entries)) => entries,
+        Ok(None) => {
+            return ProcessScan {
                 stale_pid: false,
                 check: CheckResult::checked(Vec::new()),
-            }
-        } else {
-            ProcessScan {
+            };
+        }
+        Err(error) => {
+            return ProcessScan {
                 stale_pid: false,
-                check: CheckResult::unknown(
-                    "owner.scan-failed",
-                    "cannot enumerate Runtime owner records",
-                ),
-            }
-        };
+                check: CheckResult {
+                    status: CheckStatus::Unknown,
+                    findings: vec![DiagnosticFinding::warning(
+                        "owner.scan-failed",
+                        format!("cannot enumerate Runtime owner records: {error}"),
+                        Some(&targets),
+                    )],
+                },
+            };
+        }
     };
     let mut findings = Vec::new();
     let mut stale_pid = false;
@@ -153,14 +165,26 @@ pub fn scan_owner_processes(root: &Path) -> ProcessScan {
         if !is_directory(&target) {
             continue;
         }
-        let Some(records) = read_directory(&target) else {
-            unknown = true;
-            findings.push(DiagnosticFinding::warning(
-                "owner.scan-failed",
-                "cannot enumerate target owner records",
-                Some(&target),
-            ));
-            continue;
+        let records = match read_directory(&target) {
+            Ok(Some(records)) => records,
+            Ok(None) => {
+                unknown = true;
+                findings.push(DiagnosticFinding::warning(
+                    "owner.scan-failed",
+                    "target owner records disappeared during enumeration",
+                    Some(&target),
+                ));
+                continue;
+            }
+            Err(error) => {
+                unknown = true;
+                findings.push(DiagnosticFinding::warning(
+                    "owner.scan-failed",
+                    format!("cannot enumerate target owner records: {error}"),
+                    Some(&target),
+                ));
+                continue;
+            }
         };
         for record in records.into_iter().filter(|path| {
             path.file_name().and_then(|name| name.to_str()) == Some("incognito.lock")
@@ -305,16 +329,36 @@ pub fn scan_sessions(root: &Path) -> SessionScan {
     let mut orphan_findings = Vec::new();
     let mut chromium_findings = Vec::new();
     let mut unknown = false;
-    let Some(targets) = read_directory(&sessions) else {
-        return SessionScan {
-            orphan_sessions: Vec::new(),
-            leftover_chromium: Vec::new(),
-            orphan_check: CheckResult::unknown("session.scan-failed", "cannot enumerate sessions"),
-            chromium_check: CheckResult::unknown(
-                "chromium.scan-failed",
-                "cannot enumerate sessions",
-            ),
-        };
+    let targets = match read_directory(&sessions) {
+        Ok(Some(targets)) => targets,
+        Ok(None) => {
+            return SessionScan {
+                orphan_sessions: Vec::new(),
+                leftover_chromium: Vec::new(),
+                orphan_check: CheckResult::unknown(
+                    "session.scan-failed",
+                    "sessions disappeared during enumeration",
+                ),
+                chromium_check: CheckResult::unknown(
+                    "chromium.scan-failed",
+                    "sessions disappeared during enumeration",
+                ),
+            };
+        }
+        Err(error) => {
+            return SessionScan {
+                orphan_sessions: Vec::new(),
+                leftover_chromium: Vec::new(),
+                orphan_check: CheckResult::unknown(
+                    "session.scan-failed",
+                    format!("cannot enumerate sessions: {error}"),
+                ),
+                chromium_check: CheckResult::unknown(
+                    "chromium.scan-failed",
+                    format!("cannot enumerate sessions: {error}"),
+                ),
+            };
+        }
     };
     for child in targets {
         if !is_directory(&child) {
@@ -322,19 +366,30 @@ pub fn scan_sessions(root: &Path) -> SessionScan {
         }
         if file_name_starts(&child, "s-") {
             roots.push(child);
-        } else if let Some(nested) = read_directory(&child) {
-            roots.extend(
-                nested
-                    .into_iter()
-                    .filter(|path| is_directory(path) && file_name_starts(path, "s-")),
-            );
         } else {
-            unknown = true;
-            orphan_findings.push(DiagnosticFinding::warning(
-                "session.scan-failed",
-                "cannot enumerate target sessions",
-                Some(&child),
-            ));
+            match read_directory(&child) {
+                Ok(Some(nested)) => roots.extend(
+                    nested
+                        .into_iter()
+                        .filter(|path| is_directory(path) && file_name_starts(path, "s-")),
+                ),
+                Ok(None) => {
+                    unknown = true;
+                    orphan_findings.push(DiagnosticFinding::warning(
+                        "session.scan-failed",
+                        "target sessions disappeared during enumeration",
+                        Some(&child),
+                    ));
+                }
+                Err(error) => {
+                    unknown = true;
+                    orphan_findings.push(DiagnosticFinding::warning(
+                        "session.scan-failed",
+                        format!("cannot enumerate target sessions: {error}"),
+                        Some(&child),
+                    ));
+                }
+            }
         }
     }
     let mut orphan_sessions = Vec::new();
@@ -526,12 +581,28 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
             ),
         };
     }
-    let Some(entries) = read_directory(&dir) else {
-        return JournalScan {
-            interrupted: Vec::new(),
-            records: Vec::new(),
-            check: CheckResult::unknown("journal.scan-failed", "cannot enumerate transactions"),
-        };
+    let entries = match read_directory(&dir) {
+        Ok(Some(entries)) => entries,
+        Ok(None) => {
+            return JournalScan {
+                interrupted: Vec::new(),
+                records: Vec::new(),
+                check: CheckResult::unknown(
+                    "journal.scan-failed",
+                    "transactions disappeared during enumeration",
+                ),
+            };
+        }
+        Err(error) => {
+            return JournalScan {
+                interrupted: Vec::new(),
+                records: Vec::new(),
+                check: CheckResult::unknown(
+                    "journal.scan-failed",
+                    format!("cannot enumerate transactions: {error}"),
+                ),
+            };
+        }
     };
     let mut records = Vec::new();
     let mut interrupted = Vec::new();
@@ -706,85 +777,6 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
         records,
         check: CheckResult::checked(findings),
     }
-}
-
-fn read_directory(path: &Path) -> Option<Vec<PathBuf>> {
-    fs::read_dir(path)
-        .ok()
-        .map(|entries| entries.flatten().map(|entry| entry.path()).collect())
-}
-
-fn is_directory(path: &Path) -> bool {
-    fs::symlink_metadata(path)
-        .map(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
-        .unwrap_or(false)
-}
-
-fn is_symlink(path: &Path) -> bool {
-    fs::symlink_metadata(path)
-        .map(|metadata| metadata.file_type().is_symlink())
-        .unwrap_or(false)
-}
-
-fn file_name(path: &Path) -> String {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or_default()
-        .to_string()
-}
-
-fn file_name_starts(path: &Path, prefix: &str) -> bool {
-    file_name(path).starts_with(prefix)
-}
-
-fn looks_like_uuid(value: &str) -> bool {
-    value.len() == 36
-        && value.as_bytes().iter().enumerate().all(|(index, byte)| {
-            if [8, 13, 18, 23].contains(&index) {
-                *byte == b'-'
-            } else {
-                byte.is_ascii_hexdigit()
-            }
-        })
-}
-
-fn basename(value: &str) -> &str {
-    value.rsplit('/').next().unwrap_or(value)
-}
-
-#[derive(Debug, Clone)]
-struct LiveProcess {
-    start: String,
-    exec: String,
-}
-
-fn live_process_identity(pid: i32) -> Option<LiveProcess> {
-    if pid <= 0 {
-        return None;
-    }
-    let output = Command::new("ps")
-        .args(["-p", &pid.to_string(), "-o", "lstart=,comm="])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let line = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let (start, exec) = line.rsplit_once(char::is_whitespace)?;
-    if start.trim().is_empty() || exec.trim().is_empty() {
-        return None;
-    }
-    Some(LiveProcess {
-        start: start.trim().to_string(),
-        exec: exec.trim().to_string(),
-    })
-}
-
-fn pid_alive(pid: i32) -> bool {
-    if pid <= 0 {
-        return false;
-    }
-    unsafe { libc::kill(pid, 0) == 0 }
 }
 
 #[cfg(test)]
