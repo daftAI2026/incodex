@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createConnection, createServer } from "node:net";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,6 +20,7 @@ import {
 } from "./runtime/incodex-instance.cts";
 
 const target = (root: string) => join(root, "target-executable");
+const fsModule = require("node:fs") as typeof import("node:fs");
 
 const waitForCount = async (directory: string, expected: number, timeoutMs = 30_000) => {
   const deadline = Date.now() + timeoutMs;
@@ -355,15 +356,18 @@ describe("kernel-held TCP owner lease", () => {
       })}\n`,
     );
     let quarantinePath = "";
+    const originalRmSync = fsModule.rmSync;
     setOwnerRecordTestHook(({ quarantinePath: movedPath }: { quarantinePath: string }) => {
       quarantinePath = movedPath;
-      chmodSync(root, 0o500);
+      fsModule.rmSync = (() => {
+        throw new Error("deterministic test removal failure");
+      }) as typeof fsModule.rmSync;
     });
     let records: Array<{ path: string; state: any }>;
     try {
       records = readOwnerRecords(root);
     } finally {
-      chmodSync(root, 0o700);
+      fsModule.rmSync = originalRmSync;
       setOwnerRecordTestHook(null);
     }
     expect(records.some(({ path, state }: any) => path === quarantinePath && state.kind === "unverifiable")).toBe(true);
@@ -382,6 +386,50 @@ describe("kernel-held TCP owner lease", () => {
       server.close();
     }
     expect(existsSync(quarantinePath)).toBe(true);
+  });
+
+  test("fails closed when the stale-sidecar cleanup cap leaves residue", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-tcp-sidecar-quarantine-cap-"));
+    for (let index = 0; index < 129; index += 1) {
+      const token = index.toString(16).padStart(32, "0");
+      writeFileSync(
+        join(root, `incognito.lock.active.${token}`),
+        `${JSON.stringify({
+          pid: 920000 + index,
+          startedAt: "dead-fixture",
+          processStartIdentity: "dead-fixture",
+          execPath: target(root),
+          execIdentity: "target-executable",
+          sessionId: `quarantine-cap-${index}`,
+          token,
+          nonce: token,
+        })}\n`,
+      );
+    }
+    const originalRmSync = fsModule.rmSync;
+    fsModule.rmSync = (() => {
+      throw new Error("deterministic test removal failure");
+    }) as typeof fsModule.rmSync;
+    try {
+      const records = readOwnerRecords(root);
+      expect(records.some(({ state }: any) => state.kind === "unverifiable" && state.reason.includes("cleanup cap"))).toBe(true);
+
+      const port = ownerPortFromExec(target(root));
+      let connections = 0;
+      const server = createServer((socket) => {
+        connections += 1;
+        socket.destroy();
+      });
+      await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", resolve));
+      try {
+        expect(await connectExistingWithRetry(root, "", { attempts: 5, timeoutMs: 100, delayMs: 0 })).toBe(false);
+        expect(connections).toBe(0);
+      } finally {
+        server.close();
+      }
+    } finally {
+      fsModule.rmSync = originalRmSync;
+    }
   });
 
   test("a SIGKILL releases the listener so the next process can acquire", async () => {
