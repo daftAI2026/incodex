@@ -15,6 +15,7 @@ use incodex_cli::legacy_typescript::load_legacy_ts_v1;
 use incodex_macos::{ditto, sign_app};
 use incodex_transaction::{journal_v2, tree_digest};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 #[path = "support/legacy_fixture.rs"]
 mod legacy_fixture;
@@ -365,6 +366,89 @@ fn recovery_refuses_a_modified_outgoing_before_replacement() {
     assert!(!output.status.success());
     assert_eq!(fs::read(fixture.app_asar()).unwrap(), patched);
     assert!(outgoing.exists());
+}
+
+#[test]
+fn recovery_keeps_outgoing_source_when_it_changes_after_restore_intent() {
+    let fixture = Fixture::create();
+    let outgoing = fixture
+        .root
+        .join("transactions")
+        .join(INSTALL_ID)
+        .join("outgoing/ChatGPT.app");
+    ditto(&fixture.original_app, &outgoing).unwrap();
+    fs::remove_dir_all(&fixture.original_app).unwrap();
+    fixture.set_phase("SWAPPED");
+
+    let result = recover_legacy_ts_v1_with_checkpoint(&fixture.root, INSTALL_ID, |checkpoint| {
+        if checkpoint == "AFTER_RESTORE_INTENT" {
+            fs::write(
+                outgoing.join("Contents/Info.plist"),
+                b"changed after intent",
+            )
+            .unwrap();
+        }
+    });
+
+    assert!(result.is_err());
+    assert!(outgoing.exists(), "changed source must remain recoverable");
+    assert!(
+        fixture.app.exists(),
+        "live target must not be consumed on proof failure"
+    );
+}
+
+#[test]
+fn pre_swap_recovery_keeps_outgoing_source_when_it_changes_after_restore_intent() {
+    let fixture = Fixture::create();
+    let outgoing = fixture
+        .root
+        .join("transactions")
+        .join(INSTALL_ID)
+        .join("outgoing/ChatGPT.app");
+    ditto(&fixture.original_app, &outgoing).unwrap();
+    fs::remove_dir_all(&fixture.app).unwrap();
+    fixture.set_phase("PATCHED");
+
+    let result = recover_legacy_ts_v1_with_checkpoint(&fixture.root, INSTALL_ID, |checkpoint| {
+        if checkpoint == "AFTER_RESTORE_INTENT" {
+            fs::write(
+                outgoing.join("Contents/Info.plist"),
+                b"changed after intent",
+            )
+            .unwrap();
+        }
+    });
+
+    assert!(result.is_err());
+    assert!(outgoing.exists(), "changed source must remain recoverable");
+    assert!(
+        !fixture.app.exists(),
+        "target must remain absent on proof failure"
+    );
+}
+
+#[test]
+fn status_reports_actual_legacy_backup_hash_and_incomplete_state() {
+    let fixture = Fixture::create();
+    let backup_asar = fixture.original_app.join("Contents/Resources/app.asar");
+    fs::OpenOptions::new()
+        .append(true)
+        .open(&backup_asar)
+        .unwrap()
+        .write_all(b"tampered backup")
+        .unwrap();
+    let expected = Sha256::digest(fs::read(&backup_asar).unwrap())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+
+    let report = incodex_cli::diagnose::diagnose_with_root(&fixture.app, &fixture.root);
+    let backup = report.backup.expect("legacy backup report");
+    assert_eq!(backup["legacy"], true);
+    assert_eq!(backup["complete"], false);
+    assert_eq!(backup["originalExists"], true);
+    assert_eq!(backup["originalAsarFileHash"], expected);
 }
 
 #[test]
