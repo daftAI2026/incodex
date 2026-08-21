@@ -1,13 +1,17 @@
+use std::env;
 use std::fs;
 use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
 use std::os::unix::fs::symlink;
+use std::os::unix::fs::PermissionsExt;
+use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_asar::{pack_dir, patch_asar, Archive, LOADER_NAME};
-use incodex_cli::legacy_migration::migrate_legacy_ts_v1;
+use incodex_cli::legacy_migration::{
+    migrate_legacy_ts_v1, recover_legacy_ts_v1, recover_legacy_ts_v1_with_checkpoint,
+};
 use incodex_cli::legacy_proof::prove_legacy_ts_v1;
 use incodex_cli::legacy_typescript::load_legacy_ts_v1;
 use incodex_core::{canonical_path, target_id};
@@ -319,7 +323,11 @@ fn migration_replaces_an_interrupted_partial_v2_backup() {
 fn recovery_refuses_a_symlinked_legacy_journal_temporary() {
     let fixture = Fixture::create();
     fixture.set_phase("PATCHED");
-    let outside = fixture.root.parent().unwrap().join("legacy-journal-sentinel");
+    let outside = fixture
+        .root
+        .parent()
+        .unwrap()
+        .join("legacy-journal-sentinel");
     fs::write(&outside, b"sentinel").unwrap();
     let temporary = fixture.legacy_journal().with_extension("json.tmp");
     symlink(&outside, &temporary).unwrap();
@@ -337,7 +345,11 @@ fn recovery_refuses_a_symlinked_legacy_journal_temporary() {
 fn recovery_verifies_the_restore_candidate_before_replacing_target() {
     let fixture = Fixture::create();
     let patched = fs::read(fixture.app_asar()).unwrap();
-    fs::write(fixture.original_app.join("Contents/Resources/app.asar"), b"damaged backup").unwrap();
+    fs::write(
+        fixture.original_app.join("Contents/Resources/app.asar"),
+        b"damaged backup",
+    )
+    .unwrap();
     fixture.set_phase("SWAPPED");
     let output = Command::new(env!("CARGO_BIN_EXE_incodex"))
         .args(["recover", "--transaction", INSTALL_ID])
@@ -361,7 +373,11 @@ fn recovery_accepts_an_already_restored_target_after_replace_boundary() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let journal: serde_json::Value =
         serde_json::from_slice(&fs::read(fixture.legacy_journal()).unwrap()).unwrap();
     assert_eq!(journal["phase"], "ROLLED_BACK");
@@ -379,15 +395,25 @@ fn recovery_replaces_a_stale_regular_legacy_journal_temp() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(!temporary.exists());
 }
 
 #[test]
 fn adopted_legacy_record_is_historical_after_an_official_upgrade() {
     let fixture = Fixture::create();
-    let state = load_legacy_ts_v1(&fixture.root, &fixture.app).unwrap().unwrap();
-    migrate_legacy_ts_v1(&fixture.root, prove_legacy_ts_v1(&fixture.root, state).unwrap()).unwrap();
+    let state = load_legacy_ts_v1(&fixture.root, &fixture.app)
+        .unwrap()
+        .unwrap();
+    migrate_legacy_ts_v1(
+        &fixture.root,
+        prove_legacy_ts_v1(&fixture.root, state).unwrap(),
+    )
+    .unwrap();
     fs::remove_dir_all(&fixture.app).unwrap();
     ditto(&fixture.original_app, &fixture.app).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_incodex"))
@@ -396,13 +422,21 @@ fn adopted_legacy_record_is_historical_after_an_official_upgrade() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
 fn outgoing_restore_intent_makes_a_completed_rename_restartable() {
     let fixture = Fixture::create();
-    let outgoing = fixture.root.join("transactions").join(INSTALL_ID).join("outgoing/ChatGPT.app");
+    let outgoing = fixture
+        .root
+        .join("transactions")
+        .join(INSTALL_ID)
+        .join("outgoing/ChatGPT.app");
     ditto(&fixture.original_app, &outgoing).unwrap();
     let digest = tree_digest(&outgoing).unwrap();
     fs::remove_dir_all(&fixture.original_app).unwrap();
@@ -421,20 +455,31 @@ fn outgoing_restore_intent_makes_a_completed_rename_restartable() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
 fn recovery_refuses_a_modified_outgoing_before_replacement() {
     let fixture = Fixture::create();
     let patched = fs::read(fixture.app_asar()).unwrap();
-    let outgoing = fixture.root.join("transactions").join(INSTALL_ID).join("outgoing/ChatGPT.app");
+    let outgoing = fixture
+        .root
+        .join("transactions")
+        .join(INSTALL_ID)
+        .join("outgoing/ChatGPT.app");
     ditto(&fixture.original_app, &outgoing).unwrap();
     fs::remove_dir_all(&fixture.original_app).unwrap();
     let foreign_source = fixture.root.join("foreign-outgoing-source");
     fs::create_dir_all(&foreign_source).unwrap();
-    fs::write(foreign_source.join("package.json"), "{\"main\":\"index.js\"}\n")
-        .unwrap();
+    fs::write(
+        foreign_source.join("package.json"),
+        "{\"main\":\"index.js\"}\n",
+    )
+    .unwrap();
     fs::write(foreign_source.join("index.js"), "foreign outgoing\n").unwrap();
     pack_dir(
         &foreign_source,
@@ -457,7 +502,11 @@ fn recovery_refuses_a_modified_outgoing_before_replacement() {
 #[test]
 fn pre_swap_recovery_keeps_outgoing_when_target_reappears_foreign() {
     let fixture = Fixture::create();
-    let outgoing = fixture.root.join("transactions").join(INSTALL_ID).join("outgoing/ChatGPT.app");
+    let outgoing = fixture
+        .root
+        .join("transactions")
+        .join(INSTALL_ID)
+        .join("outgoing/ChatGPT.app");
     ditto(&fixture.original_app, &outgoing).unwrap();
     fs::write(fixture.app_asar(), b"foreign target").unwrap();
     fixture.set_phase("PATCHED");
@@ -474,12 +523,21 @@ fn pre_swap_recovery_keeps_outgoing_when_target_reappears_foreign() {
 #[test]
 fn upgraded_legacy_record_rejects_a_foreign_modified_clean_app() {
     let fixture = Fixture::create();
-    let state = load_legacy_ts_v1(&fixture.root, &fixture.app).unwrap().unwrap();
-    migrate_legacy_ts_v1(&fixture.root, prove_legacy_ts_v1(&fixture.root, state).unwrap()).unwrap();
+    let state = load_legacy_ts_v1(&fixture.root, &fixture.app)
+        .unwrap()
+        .unwrap();
+    migrate_legacy_ts_v1(
+        &fixture.root,
+        prove_legacy_ts_v1(&fixture.root, state).unwrap(),
+    )
+    .unwrap();
     let foreign_source = fixture.root.join("foreign-clean-source");
     fs::create_dir_all(&foreign_source).unwrap();
-    fs::write(foreign_source.join("package.json"), "{\"main\":\"index.js\"}\n")
-        .unwrap();
+    fs::write(
+        foreign_source.join("package.json"),
+        "{\"main\":\"index.js\"}\n",
+    )
+    .unwrap();
     fs::write(foreign_source.join("index.js"), "foreign modified\n").unwrap();
     pack_dir(&foreign_source, &fixture.app_asar()).unwrap();
     sign_app(&fixture.app).unwrap();
@@ -495,7 +553,11 @@ fn upgraded_legacy_record_rejects_a_foreign_modified_clean_app() {
 #[test]
 fn recovery_rejects_a_symlinked_legacy_recovery_root() {
     let fixture = Fixture::create();
-    let outside = fixture.root.parent().unwrap().join("legacy-recovery-outside");
+    let outside = fixture
+        .root
+        .parent()
+        .unwrap()
+        .join("legacy-recovery-outside");
     fs::create_dir_all(&outside).unwrap();
     let recovery_root = fixture.root.join("legacy-recovery");
     symlink(&outside, &recovery_root).unwrap();
@@ -641,6 +703,60 @@ fn status_reports_a_committed_legacy_install_instead_of_a_missing_backup() {
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["backup"]["legacy"], true);
     assert_eq!(report["backup"]["installId"], INSTALL_ID);
+}
+
+#[test]
+fn legacy_recovery_sigkill_child() {
+    let (Some(root), Some(point)) = (
+        env::var_os("INCODEX_LEGACY_SIGKILL_ROOT"),
+        env::var("INCODEX_LEGACY_SIGKILL_POINT").ok(),
+    ) else {
+        return;
+    };
+    let install_id = env::var("INCODEX_LEGACY_SIGKILL_INSTALL_ID").unwrap();
+    let _ = recover_legacy_ts_v1_with_checkpoint(Path::new(&root), &install_id, |checkpoint| {
+        if checkpoint == point {
+            let result = unsafe { libc::kill(libc::getpid(), libc::SIGKILL) };
+            assert_eq!(result, 0);
+            loop {
+                std::thread::park();
+            }
+        }
+    });
+}
+
+#[test]
+fn legacy_recovery_survives_real_subprocess_sigkill_boundaries() {
+    for point in [
+        "AFTER_RESTORE_INTENT",
+        "AFTER_RESTORE_RENAME",
+        "AFTER_RECOVERY_CLEANUP",
+        "BEFORE_ROLLED_BACK_JOURNAL",
+    ] {
+        let fixture = Fixture::create();
+        let outgoing = fixture
+            .root
+            .join("transactions")
+            .join(INSTALL_ID)
+            .join("outgoing/ChatGPT.app");
+        ditto(&fixture.original_app, &outgoing).unwrap();
+        fs::remove_dir_all(&fixture.original_app).unwrap();
+        fixture.set_phase("SWAPPED");
+        let child = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "legacy_recovery_sigkill_child", "--nocapture"])
+            .env("INCODEX_LEGACY_SIGKILL_ROOT", &fixture.root)
+            .env("INCODEX_LEGACY_SIGKILL_INSTALL_ID", INSTALL_ID)
+            .env("INCODEX_LEGACY_SIGKILL_POINT", point)
+            .output()
+            .unwrap();
+        assert_eq!(child.status.signal(), Some(libc::SIGKILL), "point={point}");
+        let recovered = recover_legacy_ts_v1(&fixture.root, INSTALL_ID).unwrap();
+        assert_eq!(recovered.phase, "ROLLED_BACK", "point={point}");
+        assert_eq!(
+            fs::read(fixture.app_asar()).unwrap(),
+            fixture.original_bytes
+        );
+    }
 }
 
 fn compile_executable(path: &Path) {
