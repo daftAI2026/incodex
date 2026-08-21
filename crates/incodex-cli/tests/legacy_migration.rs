@@ -334,6 +334,40 @@ fn recovery_refuses_a_symlinked_legacy_journal_temporary() {
 }
 
 #[test]
+fn recovery_verifies_the_restore_candidate_before_replacing_target() {
+    let fixture = Fixture::create();
+    let patched = fs::read(fixture.app_asar()).unwrap();
+    fs::write(fixture.original_app.join("Contents/Resources/app.asar"), b"damaged backup").unwrap();
+    fixture.set_phase("SWAPPED");
+    let output = Command::new(env!("CARGO_BIN_EXE_incodex"))
+        .args(["recover", "--transaction", INSTALL_ID])
+        .env("HOME", fixture.root.parent().unwrap())
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(fs::read(fixture.app_asar()).unwrap(), patched);
+}
+
+#[test]
+fn recovery_accepts_an_already_restored_target_after_replace_boundary() {
+    let fixture = Fixture::create();
+    fs::remove_dir_all(&fixture.app).unwrap();
+    ditto(&fixture.original_app, &fixture.app).unwrap();
+    fixture.set_phase("SWAPPED");
+    let output = Command::new(env!("CARGO_BIN_EXE_incodex"))
+        .args(["recover", "--transaction", INSTALL_ID])
+        .env("HOME", fixture.root.parent().unwrap())
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let journal: serde_json::Value =
+        serde_json::from_slice(&fs::read(fixture.legacy_journal()).unwrap()).unwrap();
+    assert_eq!(journal["phase"], "ROLLED_BACK");
+}
+
+#[test]
 fn rust_install_adopts_legacy_state_without_using_patched_live_as_original() {
     let fixture = Fixture::create();
     let output = Command::new(env!("CARGO_BIN_EXE_incodex"))
