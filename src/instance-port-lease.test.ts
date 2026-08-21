@@ -109,13 +109,25 @@ describe("kernel-held TCP owner lease", () => {
     const worker = String.raw`
       (async () => {
       const { existsSync, writeFileSync } = require("node:fs");
+      const { randomBytes } = require("node:crypto");
       const { join } = require("node:path");
       const instance = require(process.env.INCODEX_TEST_MODULE);
       const root = process.env.INCODEX_TEST_ROOT;
       const index = process.env.INCODEX_TEST_INDEX;
       const releaseFile = process.env.INCODEX_TEST_RELEASE_FILE;
       writeFileSync(join(process.env.INCODEX_TEST_READY_ROOT, index), "ready\n");
-      const owner = instance.currentOwner("tcp-contender", process.env.INCODEX_TEST_TARGET_EXEC);
+      while (!existsSync(join(root, "start"))) await new Promise((resolve) => setTimeout(resolve, 5));
+      const token = randomBytes(16).toString("hex");
+      const owner = {
+        pid: process.pid,
+        startedAt: "fixture",
+        processStartIdentity: "fixture",
+        execPath: process.env.INCODEX_TEST_TARGET_EXEC,
+        execIdentity: "target-executable",
+        sessionId: "tcp-contender-" + index,
+        token,
+        nonce: token,
+      };
       let exitCode = 0;
       let outcome = "";
       try {
@@ -130,7 +142,16 @@ describe("kernel-held TCP owner lease", () => {
       while (!existsSync(releaseFile)) await new Promise((resolve) => setTimeout(resolve, 5));
       if (outcome.startsWith("WINNER ")) instance.clearOwnerLock(root, owner);
       process.exit(exitCode);
-      })().catch((error) => { console.error(error); process.exit(3); });
+      })().catch((error) => {
+        const { writeFileSync } = require("node:fs");
+        const { join } = require("node:path");
+        const index = process.env.INCODEX_TEST_INDEX;
+        const message = "ERROR " + String(error?.stack || error);
+        writeFileSync(join(process.env.INCODEX_TEST_RESULT_ROOT, index), message + "\n");
+        writeFileSync(join(process.env.INCODEX_TEST_DONE_ROOT, index), "done\n");
+        console.error(error);
+        process.exit(3);
+      });
     `;
     const children = Array.from({ length: 20 }, (_, index) =>
       spawn(process.execPath, ["-e", worker], {
