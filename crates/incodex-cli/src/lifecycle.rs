@@ -64,7 +64,7 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
     match install_channel(&exe) {
         InstallChannel::Source => {
             return Err(
-                "this copy is running from source\n  git pull && bun install --frozen-lockfile && bun link"
+                "this copy is running from source\n  git pull && cargo install --locked --path crates/incodex-cli"
                     .into(),
             )
         }
@@ -488,7 +488,7 @@ pub fn run_self_uninstall(parsed: &ParsedCli) -> Result<(), String> {
     let exe = current_exe()?;
     match install_channel(&exe) {
         InstallChannel::Source => {
-            return Err("this copy is running from source\n  bun unlink".into())
+            return Err("this copy is running from source\n  cargo uninstall incodex-cli".into())
         }
         InstallChannel::Homebrew => {
             return Err("this copy was installed with Homebrew\n  brew uninstall incodex".into())

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
@@ -49,14 +49,20 @@ describe("architecture boundaries", () => {
     }
   });
 
-  test("legacy TypeScript CLI cannot remain a second live updater", () => {
+  test("retired TypeScript router cannot remain a product entry", () => {
     const agents = src("AGENTS.md");
-    const legacyCli = src("src/cli.ts");
+    const packageJson = JSON.parse(src("package.json")) as {
+      bin?: Record<string, string>;
+      scripts?: Record<string, string>;
+    };
 
     expect(agents).toContain("The Rust CLI is the sole product CLI");
-    expect(agents).toContain("The legacy TypeScript CLI must not perform live self-updates");
-    expect(legacyCli).not.toContain("raw.githubusercontent.com/daftAI2026/incodex/main/install.sh");
-    expect(legacyCli).not.toMatch(/spawnSync\(\s*["']bash["']/);
+    expect(agents).toContain("The TypeScript product router and parser have been retired");
+    expect(existsSync(join(root, "src/cli.ts"))).toBe(false);
+    expect(existsSync(join(root, "src/parse-cli.ts"))).toBe(false);
+    expect(packageJson.bin?.incodex).toBeUndefined();
+    expect(packageJson.bin?.inc).toBeUndefined();
+    expect(packageJson.scripts?.incodex).toBeUndefined();
   });
 
   test("UI adapter has no file deletion, process control, or auth handling", () => {
@@ -98,11 +104,11 @@ describe("architecture boundaries", () => {
     expect(install).not.toMatch(/spawnSync\(\s*["']bun["']/);
   });
 
-  test("open path does not patch asar or resign", () => {
-    const open = src("src/open-incognito.ts");
-    expect(open).not.toContain('from "./asar"');
-    expect(open).not.toContain('from "./codesign"');
-    expect(open).not.toContain("signApp");
-    expect(open).not.toContain("patchAsar");
+  test("native open path does not patch asar or resign", () => {
+    const open = src("crates/incodex-cli/src/open.rs");
+    expect(open).not.toContain("incodex_asar");
+    expect(open).not.toContain("codesign");
+    expect(open).not.toContain("patch_asar");
+    expect(open).toContain("inject_shared_ui_with_options");
   });
 });

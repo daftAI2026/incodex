@@ -109,7 +109,7 @@ Incodex 会改本机已安装的 Electron 应用包。高风险操作默认要�
 - 官方升级会冲掉补丁。再跑一次 `incodex install`，打的是**当前这份**新官方包
 - 如果官方已经升成新版本，`incodex uninstall` 不会用旧备份盖回去
 - 原始包备份按应用路径隔离，在 `~/.incodex/installations/`
-- Homebrew 装的用 `brew upgrade incodex`；脚本装的用 `incodex update`；源码用 `git pull && cargo install --locked --path crates/incodex-cli`
+- Homebrew 装的用 `brew upgrade incodex`；脚本装的用 `incodex update`；源码更新用 `git pull && cargo install --locked --path crates/incodex-cli`；源码卸载用 `cargo uninstall incodex-cli`
 - 菜单支持方向键、Vim `j/k`、数字立刻执行、`V` 看版本、`q` 退出
 - 脚本安装若找不到命令，把 `~/.local/bin` 加进 PATH
 - 按钮和说明跟主窗口语言走

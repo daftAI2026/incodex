@@ -16,11 +16,10 @@ session cleanup, and IPC as the dangerous surface.
 git clone https://github.com/daftAI2026/incodex.git
 cd incodex
 bun install --frozen-lockfile
-bun link
 bun run check
 ```
 
-`bun link` puts the frozen TypeScript reference `incodex` and `inc` on PATH for legacy fixture work. It does not build the native binary.
+The package no longer exposes a Bun CLI entry point. Use the native Rust binary for product commands; Bun remains responsible for Electron Runtime build and test tooling.
 
 `check` runs typecheck, lint, unit tests, and a deterministic `dist` rebuild.
 
@@ -48,7 +47,7 @@ runs `tsc` to emit portable CJS into `dist/*.cjs`. The emitted files must use
 
 ## Native CLI
 
-Rust CLI source is on `main`. The migration gates are complete, and v0.3.1 published the native Rust CLI under the stable asset names. It is the only product CLI; the remaining TypeScript CLI code exists only for legacy fixtures and must not gain new behavior.
+Rust CLI source is on `main`. The migration gates are complete, and v0.3.1 published the native Rust CLI under the stable asset names. It is the only product CLI; the remaining TypeScript mutation modules exist only as frozen legacy sources until dedicated PR-D cleanup and must not gain new behavior.
 
 ```bash
 git fetch origin
@@ -90,8 +89,5 @@ That is the product path. `--clone` patches a copy;
 On a terminal, official install/uninstall prints a plan and asks once.
 Without a terminal they require `--yes`. `--dry-run` and `--clone` do not ask.
 
-`--live` and `--confirm-live` still parse as hidden aliases (`--live` means the
-official app, `--confirm-live` means `--yes`). Do not document them as the
-user-facing command.
-
-Do not add a second installer that shells out to the old flag string.
+The Rust parser owns the product command language. Do not restore a TypeScript router
+or add a second installer around the native CLI.
