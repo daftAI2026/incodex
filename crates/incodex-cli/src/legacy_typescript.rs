@@ -427,6 +427,9 @@ fn validate_manifest(
             manifest.transaction_state
         ));
     }
+    if manifest.target_real_path.is_empty() {
+        return Err("legacy manifest targetRealPath is empty".into());
+    }
     if canonical_path(&manifest.target_real_path) != target_real_path {
         return Err("legacy manifest targetRealPath does not match the target".into());
     }
