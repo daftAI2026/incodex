@@ -1,19 +1,8 @@
 export type CopyKey = "open" | "exit" | "title" | "body" | "dismiss" | "errorTitle" | "errorBody" | "errorRetry" | "errorClose";
 export type CopyTable = Record<CopyKey, string>;
 
-// Official Codex UI locales from ../locales/*.json (plus English source).
+// Official Codex UI locales from ../locales/*.json; source copy stays in the resolver.
 export const COPY: Record<string, CopyTable> = {
-  en: {
-    open: "Open incognito window",
-    exit: "Exit incognito window",
-    title: "Incognito window",
-    body: "Same account and settings as usual, without earlier chats. This conversation will not show up in your everyday chat list. Temporary data is removed after a normal exit.",
-    dismiss: "Dismiss incognito banner",
-    errorTitle: 'Couldn’t open the incognito window',
-    errorBody: 'Try again. If it still fails, quit Codex and open it again.',
-    errorRetry: 'Try again',
-    errorClose: 'Close',
-  },
   am: {
     open: "የግል መስኮት ክፈት",
     exit: "የግል መስኮትን ውጣ",
@@ -24,8 +13,7 @@ export const COPY: Record<string, CopyTable> = {
     errorBody: 'እንደገና ይሞክሩ። ካልሆነ Codex ን ዝጉና እንደገና ይክፈቱ።',
     errorRetry: 'እንደገና ሞክር',
     errorClose: 'ዝጋ',
-  },
-  ar: {
+  },  ar: {
     open: "فتح نافذة التصفح المتخفي",
     exit: "الخروج من نافذة التصفح المتخفي",
     title: "نافذة التصفح المتخفي",
@@ -156,8 +144,7 @@ export const COPY: Record<string, CopyTable> = {
     errorBody: 'Proovi uuesti. Kui ikka ei õnnestu, sulge Codex ja ava see uuesti.',
     errorRetry: 'Proovi uuesti',
     errorClose: 'Sulge',
-  },
-  fa: {
+  },  fa: {
     open: "باز کردن پنجره ناشناس",
     exit: "خروج از پنجره ناشناس",
     title: "پنجره ناشناس",
@@ -310,8 +297,7 @@ export const COPY: Record<string, CopyTable> = {
     errorBody: 'სცადეთ თავიდან. თუ ისევ ვერ გაიხსნა, დახურეთ Codex და გახსენით ხელახლა.',
     errorRetry: 'თავიდან ცდა',
     errorClose: 'დახურვა',
-  },
-  kk: {
+  },  kk: {
     open: "Инкогнито терезесін ашу",
     exit: "Инкогнито терезесінен шығу",
     title: "Инкогнито терезесі",
@@ -343,8 +329,7 @@ export const COPY: Record<string, CopyTable> = {
     errorBody: '다시 시도하세요. 그래도 안 되면 Codex를 종료한 뒤 다시 여세요.',
     errorRetry: '다시 시도',
     errorClose: '닫기',
-  },
-  lt: {
+  },  lt: {
     open: "Atidaryti inkognito langą",
     exit: "Išeiti iš inkognito lango",
     title: "Inkognito langas",
@@ -376,8 +361,7 @@ export const COPY: Record<string, CopyTable> = {
     errorBody: 'Обидете се повторно. Ако пак не успее, затворете го Codex и отворете го повторно.',
     errorRetry: 'Обиди се повторно',
     errorClose: 'Затвори',
-  },
-  ml: {
+  },  ml: {
     open: "ഇൻകോഗ്നിറ്റോ വിൻഡോ തുറക്കുക",
     exit: "ഇൻകോഗ്നിറ്റോ വിൻഡോയിൽ നിന്ന് പുറത്തുകടക്കുക",
     title: "ഇൻകോഗ്നിറ്റോ വിൻഡോ",
@@ -387,8 +371,7 @@ export const COPY: Record<string, CopyTable> = {
     errorBody: 'വീണ്ടും ശ്രമിക്കുക. ഇനിയും ആയില്ലെങ്കിൽ Codex അടച്ച് വീണ്ടും തുറക്കുക.',
     errorRetry: 'വീണ്ടും ശ്രമിക്കുക',
     errorClose: 'അടയ്ക്കുക',
-  },
-  mn: {
+  },  mn: {
     open: "Нууц цонх нээх",
     exit: "Нууц цонхноос гарах",
     title: "Нууц цонх",
@@ -453,8 +436,7 @@ export const COPY: Record<string, CopyTable> = {
     errorBody: 'Probeer het opnieuw. Lukt het nog niet, sluit Codex en open het opnieuw.',
     errorRetry: 'Opnieuw proberen',
     errorClose: 'Sluiten',
-  },
-  pa: {
+  },  pa: {
     open: "ਇਨਕੌਗਨੀਟੋ ਵਿੰਡੋ ਖੋਲ੍ਹੋ",
     exit: "ਇਨਕੌਗਨੀਟੋ ਵਿੰਡੋ ਤੋਂ ਬਾਹਰ ਜਾਓ",
     title: "ਇਨਕੌਗਨੀਟੋ ਵਿੰਡੋ",
@@ -629,8 +611,7 @@ export const COPY: Record<string, CopyTable> = {
     errorBody: 'ลองอีกครั้ง หากยังไม่ได้ ให้ปิด Codex แล้วเปิดใหม่',
     errorRetry: 'ลองอีกครั้ง',
     errorClose: 'ปิด',
-  },
-  tl: {
+  },  tl: {
     open: "Buksan ang incognito window",
     exit: "Lumabas sa incognito window",
     title: "Incognito window",
@@ -662,8 +643,7 @@ export const COPY: Record<string, CopyTable> = {
     errorBody: 'Спробуйте ще раз. Якщо знову не вийде, закрийте Codex і відкрийте його знову.',
     errorRetry: 'Спробувати ще раз',
     errorClose: 'Закрити',
-  },
-  ur: {
+  },  ur: {
     open: "خفیہ ونڈو کھولیں",
     exit: "خفیہ ونڈو سے باہر نکلیں",
     title: "خفیہ ونڈو",
@@ -684,38 +664,5 @@ export const COPY: Record<string, CopyTable> = {
     errorBody: 'Thử lại. Nếu vẫn không được, hãy thoát Codex rồi mở lại.',
     errorRetry: 'Thử lại',
     errorClose: 'Đóng',
-  },
-  "zh-CN": {
-    open: "打开无痕窗口",
-    exit: "退出无痕窗口",
-    title: "无痕窗口",
-    body: "账号和设置跟平时一样，看不到以前的对话，这次的聊天也不会进平时的列表。正常关掉后，这次的临时数据会清掉。",
-    dismiss: "关闭无痕窗口横幅",
-    errorTitle: '无法打开无痕窗口',
-    errorBody: '再试一次。如果还是不行，先退出 Codex 再打开。',
-    errorRetry: '再试一次',
-    errorClose: '关闭',
-  },
-  "zh-HK": {
-    open: "開啟無痕視窗",
-    exit: "離開無痕視窗",
-    title: "無痕視窗",
-    body: "帳戶和設定跟平時一樣，看不到以前的對話，這次的聊天也不會進平時的列表。正常關掉後，這次的臨時資料會清掉。",
-    dismiss: "關閉無痕視窗橫額",
-    errorTitle: '無法開啟無痕視窗',
-    errorBody: '再試一次。如果仍然不行，先退出 Codex 再開。',
-    errorRetry: '再試一次',
-    errorClose: '關閉',
-  },
-  "zh-TW": {
-    open: "開啟無痕視窗",
-    exit: "離開無痕視窗",
-    title: "無痕視窗",
-    body: "帳號和設定跟平時一樣，看不到以前的對話，這次的聊天也不會進平時的列表。正常關掉後，這次的臨時資料會清掉。",
-    dismiss: "關閉無痕視窗橫幅",
-    errorTitle: '無法開啟無痕視窗',
-    errorBody: '再試一次。如果還是不行，先退出 Codex 再開啟。',
-    errorRetry: '再試一次',
-    errorClose: '關閉',
   },
 };

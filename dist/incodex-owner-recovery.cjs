@@ -198,6 +198,9 @@ function acquireReclaimMarker(stateRoot) {
         }
         if (settledGeneration !== generation)
             continue;
+        if (generation >= RECLAIM_GENERATION_MAX) {
+            throw new OwnerLeaseError("OWNER_RECLAIM_UNREADABLE", "reclaim marker generation exhausted");
+        }
         try {
             writeAtomicRecord(reclaimMarkerPath(stateRoot, generation + 1), owner);
             return owner;
