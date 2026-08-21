@@ -216,10 +216,13 @@ pub fn verify_original_vendor_bundle(
 
 /// 保持旧调用方的 bool seam，但底层已经升级为 deep/strict 验收。
 pub fn verify_app(app: &Path) -> bool {
-    verify_patched_adhoc_bundle_deep_strict(app, None).is_ok()
-        || inspect_signing_inventory(app)
-            .and_then(|inventory| validate_generic_signing_inventory(&inventory))
-            .is_ok()
+    let Ok(inventory) = inspect_signing_inventory(app) else {
+        return false;
+    };
+    let patched = validate_signing_inventory(&inventory).is_ok()
+        && inventory.outer.kind == SignatureKind::Adhoc
+        && verify_plist_identity(app, None, None).is_ok();
+    patched || validate_generic_signing_inventory(&inventory).is_ok()
 }
 
 /// 对 install、uninstall 与 Doctor 共享的签名清单做唯一 verdict 判断。
