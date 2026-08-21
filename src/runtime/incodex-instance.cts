@@ -127,6 +127,22 @@ function pauseBeforeTakeoverUnlink() {
   }
 }
 
+function pauseAfterLegacyTakeoverRecheck() {
+  const pauseFile = process.env.INCODEX_TEST_LEGACY_TAKEOVER_RECHECK_PAUSE_FILE;
+  const releaseFile = process.env.INCODEX_TEST_LEGACY_TAKEOVER_RECHECK_RELEASE_FILE;
+  if (!pauseFile || !releaseFile) return;
+  try {
+    fs.writeFileSync(pauseFile, `${process.pid}\n`, { flag: "wx", mode: 0o600 });
+  } catch {
+    return;
+  }
+  const deadline = Date.now() + 5000;
+  const waiter = new Int32Array(new SharedArrayBuffer(4));
+  while (!fs.existsSync(releaseFile) && Date.now() < deadline) {
+    Atomics.wait(waiter, 0, 0, 5);
+  }
+}
+
 function pauseBeforeReclaimHandoff() {
   const pauseFile = process.env.INCODEX_TEST_RECLAIM_HANDOFF_PAUSE_FILE;
   const releaseFile = process.env.INCODEX_TEST_RECLAIM_HANDOFF_RELEASE_FILE;
@@ -467,6 +483,7 @@ function removeLegacyTakeoverClaimIfStale(stateRoot, expectedState) {
   const final = readTakeoverClaimState(stateRoot);
   if (final.kind !== expectedState.kind || (final.kind === "valid" && !takeoverClaimIsStale(final.owner))) return false;
   if (!sameTakeoverClaimMetadata(before, takeoverClaimMetadata(stateRoot))) return false;
+  pauseAfterLegacyTakeoverRecheck();
   try {
     fs.rmSync(takeoverClaimPath(stateRoot));
     return true;
