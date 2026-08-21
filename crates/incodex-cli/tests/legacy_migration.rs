@@ -1,6 +1,7 @@
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -312,6 +313,24 @@ fn migration_replaces_an_interrupted_partial_v2_backup() {
         .unwrap(),
         fixture.original_bytes
     );
+}
+
+#[test]
+fn recovery_refuses_a_symlinked_legacy_journal_temporary() {
+    let fixture = Fixture::create();
+    fixture.set_phase("PATCHED");
+    let outside = fixture.root.parent().unwrap().join("legacy-journal-sentinel");
+    fs::write(&outside, b"sentinel").unwrap();
+    let temporary = fixture.legacy_journal().with_extension("json.tmp");
+    symlink(&outside, &temporary).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_incodex"))
+        .args(["recover", "--transaction", INSTALL_ID])
+        .env("HOME", fixture.root.parent().unwrap())
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(fs::read(&outside).unwrap(), b"sentinel");
 }
 
 #[test]
