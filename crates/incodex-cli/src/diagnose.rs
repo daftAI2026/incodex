@@ -12,7 +12,8 @@ use incodex_core::target_id;
 use incodex_macos::{
     diagnose_spctl, has_hardened_runtime, inspect_signing_inventory, plan_adhoc_entitlements,
     read_architecture, read_asar_integrity, read_plist_info, validate_signing_inventory,
-    validate_generic_signing_inventory, verify_app, SignatureKind, VENDOR_TEAM_IDENTIFIER,
+    validate_generic_signing_inventory, validate_official_signing_inventory, verify_app,
+    SignatureKind, VENDOR_TEAM_IDENTIFIER,
 };
 use incodex_transaction::{journal_v2, load_journal, validate_backup_snapshot};
 
@@ -413,8 +414,10 @@ fn inspect_signing(
             Some(app_path),
         ));
     }
-    let acceptance = if patched || official_target {
+    let acceptance = if patched {
         validate_signing_inventory(&inventory)
+    } else if official_target {
+        validate_official_signing_inventory(&inventory, None)
     } else {
         validate_generic_signing_inventory(&inventory)
     };

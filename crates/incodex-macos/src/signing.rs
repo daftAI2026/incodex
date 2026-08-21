@@ -202,24 +202,10 @@ pub fn verify_original_vendor_bundle(
     expected_version: Option<&str>,
     expected_build: Option<&str>,
 ) -> Result<SigningInventory, String> {
-    verify_deep_strict(app)?;
     let inventory = inspect_signing_inventory(app)?;
-    validate_signing_inventory(&inventory)?;
-    if inventory.outer.kind != SignatureKind::Vendor
-        || inventory.outer.team_identifier.as_deref() != Some(VENDOR_TEAM_IDENTIFIER)
-    {
-        return Err("official original vendor signature is ad hoc or incomplete".into());
-    }
-    if inventory.outer.authorities.is_empty() {
-        return Err("official original vendor signature has no authority chain".into());
-    }
     let expected_bundle_identifier =
         expected_bundle_identifier.unwrap_or(OFFICIAL_BUNDLE_IDENTIFIER);
-    if inventory.outer.identifier.as_deref() != Some(expected_bundle_identifier) {
-        return Err(format!(
-            "official original vendor signature identifier mismatch: expected {expected_bundle_identifier}"
-        ));
-    }
+    validate_official_signing_inventory(&inventory, Some(expected_bundle_identifier))?;
     verify_plist_identity(
         app,
         None,
@@ -256,6 +242,30 @@ pub fn validate_signing_inventory(inventory: &SigningInventory) -> Result<(), St
         }
     }
     validate_nested_components(&inventory.nested)
+}
+
+/// 对官方 original bundle 追加 vendor 身份与 outer bundle identifier 验收。
+pub fn validate_official_signing_inventory(
+    inventory: &SigningInventory,
+    expected_bundle_identifier: Option<&str>,
+) -> Result<(), String> {
+    validate_signing_inventory(inventory)?;
+    if inventory.outer.kind != SignatureKind::Vendor
+        || inventory.outer.team_identifier.as_deref() != Some(VENDOR_TEAM_IDENTIFIER)
+    {
+        return Err("official original vendor signature is ad hoc or incomplete".into());
+    }
+    if inventory.outer.authorities.is_empty() {
+        return Err("official original vendor signature has no authority chain".into());
+    }
+    let expected_bundle_identifier =
+        expected_bundle_identifier.unwrap_or(OFFICIAL_BUNDLE_IDENTIFIER);
+    if inventory.outer.identifier.as_deref() != Some(expected_bundle_identifier) {
+        return Err(format!(
+            "official original vendor signature identifier mismatch: expected {expected_bundle_identifier}"
+        ));
+    }
+    Ok(())
 }
 
 /// 对自定义 `--app` 的 generic verifier 复用 deep/strict 与 identity evidence policy。
