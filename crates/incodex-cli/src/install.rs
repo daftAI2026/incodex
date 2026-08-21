@@ -281,8 +281,7 @@ fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<Comma
         .join("original")
         .join("ChatGPT.app");
     progress.stage("Backing up original app");
-    ditto(app, &original)?;
-    tx.mark_backup_committed()?;
+    snapshot_original(&mut tx, app, &original)?;
     let staged = root
         .join("scratch")
         .join(format!("ChatGPT.app.staged-{install_id}"));
@@ -416,6 +415,11 @@ where
         };
     }
     Ok(tx)
+}
+
+fn snapshot_original(tx: &mut Engine, app: &Path, original: &Path) -> Result<(), String> {
+    ditto(app, original)?;
+    tx.mark_backup_committed()
 }
 
 fn inspect_existing_install(
@@ -629,6 +633,46 @@ mod tests {
             .join(transaction)
             .join("original/ChatGPT.app")
             .exists());
+        fs::remove_dir_all(sandbox).unwrap();
+    }
+
+    #[test]
+    fn target_replacement_after_locked_validation_does_not_leave_a_snapshot() {
+        let sandbox = std::env::temp_dir().join(format!(
+            "incodex-target-replacement-before-snapshot-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let root = sandbox.join("state");
+        let app = sandbox.join("ChatGPT.app");
+        fs::create_dir_all(&app).unwrap();
+        fs::write(app.join("marker"), "original\n").unwrap();
+
+        let mut tx = begin_verified_transaction(&root, &app, |_locked_target| {
+            let moved = sandbox.join("ChatGPT-updater-old.app");
+            fs::rename(&app, &moved).unwrap();
+            fs::create_dir_all(&app).unwrap();
+            fs::write(app.join("marker"), "updater replacement\n").unwrap();
+            Ok(())
+        })
+        .unwrap();
+        let install_id = tx.install_id().to_string();
+        let original = root
+            .join("transactions")
+            .join(&install_id)
+            .join("original/ChatGPT.app");
+
+        let error = snapshot_original(&mut tx, &app, &original).unwrap_err();
+
+        assert!(error.contains("changed"), "{error}");
+        assert_eq!(
+            journal_v2(&root, &install_id).unwrap().phase,
+            "ROLLED_BACK"
+        );
+        assert!(!original.exists());
         fs::remove_dir_all(sandbox).unwrap();
     }
 }
