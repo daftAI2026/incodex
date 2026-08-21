@@ -258,7 +258,7 @@ describe("kernel-held TCP owner lease", () => {
     await new Promise<void>((resolve) => foreign.listen(ownerPortFromExec(targetExec), "127.0.0.1", resolve));
     try {
       const result = await Promise.race([
-        acquireOwnerLease(root, currentOwner("streaming-foreign", targetExec)).then(() => "acquired", (error) => error.code),
+        acquireOwnerLease(root, currentOwner("streaming-foreign", targetExec)).then(() => "acquired", (error: any) => error.code),
         new Promise<string>((resolve) => setTimeout(() => resolve("hung"), 1_000)),
       ]);
       expect(result).toBe("OWNER_PORT_UNAVAILABLE");
