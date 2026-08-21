@@ -164,6 +164,15 @@ describe("kernel-held TCP owner lease", () => {
     }
   });
 
+  test("any legacy takeover residue is foreign and is never removed", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-tcp-legacy-claim-"));
+    const targetExec = join(root, "target-executable");
+    const claim = join(root, ".incognito.lock.takeover");
+    mkdirSync(claim);
+    await expect(acquireOwnerLease(root, currentOwner("legacy-claim", targetExec))).rejects.toMatchObject({ code: "OWNER_FOREIGN_CLAIM" });
+    expect(existsSync(claim)).toBe(true);
+  });
+
   test("old metadata cleanup cannot break a replacement listener", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-tcp-replacement-"));
     const targetExec = join(root, "target-executable");
