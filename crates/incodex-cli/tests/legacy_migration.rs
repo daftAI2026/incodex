@@ -729,6 +729,7 @@ fn legacy_recovery_survives_real_subprocess_sigkill_boundaries() {
         "AFTER_RESTORE_RENAME",
         "AFTER_RECOVERY_CLEANUP",
         "BEFORE_ROLLED_BACK_JOURNAL",
+        "BEFORE_LEGACY_JOURNAL_RENAME",
     ] {
         let fixture = Fixture::create();
         let outgoing = fixture
@@ -749,6 +750,8 @@ fn legacy_recovery_survives_real_subprocess_sigkill_boundaries() {
         assert_eq!(child.status.signal(), Some(libc::SIGKILL), "point={point}");
         let recovered = recover_legacy_ts_v1(&fixture.root, INSTALL_ID).unwrap();
         assert_eq!(recovered.phase, "ROLLED_BACK", "point={point}");
+        let recovered_again = recover_legacy_ts_v1(&fixture.root, INSTALL_ID).unwrap();
+        assert_eq!(recovered_again.action, "done", "point={point}");
         assert_eq!(
             fs::read(fixture.app_asar()).unwrap(),
             fixture.original_bytes
