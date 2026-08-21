@@ -5,6 +5,7 @@ use incodex_core::canonical::inspect_target;
 use incodex_macos::ditto;
 use sha2::{Digest, Sha256};
 
+use crate::durable::sync_tree_and_ancestors;
 use crate::journal::{
     load_v2, tx_paths, validate_path_ancestors, write_journal, JournalTarget, JournalV2, RelPaths,
     ORIGINAL_REL, OUTGOING_REL, STAGED_REL,
@@ -95,6 +96,7 @@ pub fn adopt_legacy_committed_locked(
         "migrated original Info.plist",
     )?;
     fs::rename(&partial, &paths.original).map_err(|error| error.to_string())?;
+    flush_adopted_backup(&paths.original, &paths.dir)?;
     let backup_digest = tree_digest(&paths.original)?;
     let live_identity = directory_identity(&input.real_path)?;
     let live_digest = tree_digest(&input.real_path)?;
@@ -138,6 +140,10 @@ pub fn adopt_legacy_committed_locked(
     load_v2(root, &input.install_id)
 }
 
+fn flush_adopted_backup(tree: &Path, transaction_dir: &Path) -> Result<(), String> {
+    sync_tree_and_ancestors(tree, transaction_dir)
+}
+
 fn remove_incomplete_backup(path: &Path) -> Result<(), String> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => Err(format!(
@@ -159,13 +165,16 @@ mod tests {
 
     #[test]
     fn adopted_backup_flushes_the_tree_before_commit() {
-        let root = std::env::temp_dir().join(format!("incodex-migration-sync-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("incodex-migration-sync-{}", std::process::id()));
         let tree = root.join("transactions/id/original/ChatGPT.app");
         fs::create_dir_all(tree.join("Contents")).unwrap();
         fs::write(tree.join("Contents/Info.plist"), b"plist").unwrap();
         crate::durable::reset_sync_trace();
         flush_adopted_backup(&tree, &root).unwrap();
-        assert!(crate::durable::sync_trace().iter().any(|path| path == &tree));
+        assert!(crate::durable::sync_trace()
+            .iter()
+            .any(|path| path == &tree));
         let _ = fs::remove_dir_all(root);
     }
 }
