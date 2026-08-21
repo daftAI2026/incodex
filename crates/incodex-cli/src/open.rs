@@ -1,7 +1,8 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Duration;
 
@@ -115,6 +116,31 @@ impl OpenProcessResult {
 enum InjectionStatus {
     Ready,
     Failed(String),
+}
+
+#[derive(Clone, Default)]
+struct InjectionReadiness {
+    ready: Arc<AtomicBool>,
+}
+
+impl InjectionReadiness {
+    fn observe(&self, status: &InjectionStatus) {
+        if matches!(status, InjectionStatus::Ready) {
+            self.ready.store(true, Ordering::Release);
+        }
+    }
+
+    fn is_ready(&self) -> bool {
+        self.ready.load(Ordering::Acquire)
+    }
+}
+
+fn publish_injection_status(
+    status_tx: &mpsc::Sender<InjectionStatus>,
+    _readiness: &InjectionReadiness,
+    status: InjectionStatus,
+) {
+    let _ = status_tx.send(status);
 }
 
 impl CleanupResult {
@@ -279,10 +305,12 @@ fn spawn_plan(plan: &OpenPlan) -> Result<OpenProcessResult, String> {
         .stderr(Stdio::null());
     let mut child = command.spawn().map_err(|err| err.to_string())?;
     let (status_tx, status_rx) = mpsc::channel();
+    let readiness = InjectionReadiness::default();
     if plan.debug_port != 0 {
         let port = plan.debug_port;
         let child_pid = child.id();
         let source_bounds = plan.source_bounds;
+        let injection_readiness = readiness.clone();
         let options = InjectionOptions {
             locale: plan.locale.clone(),
         };
@@ -320,7 +348,11 @@ fn spawn_plan(plan: &OpenPlan) -> Result<OpenProcessResult, String> {
                 if bounds_ready {
                     if let Some(target_id) = primary_target_id.take() {
                         start_lifecycle_monitor(port, target_id);
-                        let _ = status_tx.send(InjectionStatus::Ready);
+                        publish_injection_status(
+                            &status_tx,
+                            &injection_readiness,
+                            InjectionStatus::Ready,
+                        );
                         return;
                     }
                 }
@@ -336,23 +368,28 @@ fn spawn_plan(plan: &OpenPlan) -> Result<OpenProcessResult, String> {
             } else {
                 "the window could not inherit the main window bounds".to_string()
             };
-            let _ = status_tx.send(InjectionStatus::Failed(detail));
+            publish_injection_status(
+                &status_tx,
+                &injection_readiness,
+                InjectionStatus::Failed(detail),
+            );
         });
     } else {
-        let _ = status_tx.send(InjectionStatus::Failed(
-            "a localhost CDP port could not be allocated".into(),
-        ));
+        publish_injection_status(
+            &status_tx,
+            &readiness,
+            InjectionStatus::Failed("a localhost CDP port could not be allocated".into()),
+        );
     }
 
     let (_, opened, waiting) = open_progress_copy();
     let mut spinner = crate::spinner::Spinner::start("Waiting for Codex UI to become ready");
     let mut reported = false;
-    let mut ui_ready = false;
     loop {
         if !reported {
             match status_rx.try_recv() {
                 Ok(InjectionStatus::Ready) => {
-                    ui_ready = true;
+                    readiness.observe(&InjectionStatus::Ready);
                     spinner.stop();
                     println!("{}", format_ok(opened, None));
                     let _ = std::io::stdout().flush();
@@ -377,7 +414,7 @@ fn spawn_plan(plan: &OpenPlan) -> Result<OpenProcessResult, String> {
             spinner.stop();
             return Ok(OpenProcessResult::Exited {
                 code: status.code().unwrap_or(1),
-                ui_ready,
+                ui_ready: readiness.is_ready(),
             });
         }
         thread::sleep(Duration::from_millis(50));
@@ -576,6 +613,27 @@ mod tests {
         assert_eq!(opening, "Opening incognito Codex window");
         assert_eq!(opened, "Opened. Incognito Codex window is ready.");
         assert_eq!(waiting, "Waiting for the window to close");
+    }
+
+    #[test]
+    fn ready_published_between_status_poll_and_child_exit_is_not_lost() {
+        let (status_tx, status_rx) = mpsc::channel();
+        let readiness = InjectionReadiness::default();
+
+        // spawn_plan polls status_rx before child.try_wait. The first poll is
+        // empty; the producer then publishes Ready while the child exits.
+        assert!(matches!(
+            status_rx.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        publish_injection_status(&status_tx, &readiness, InjectionStatus::Ready);
+
+        // No second channel poll happens before this child-exit observation.
+        // The producer's acceptance must already be visible here.
+        assert!(
+            readiness.is_ready(),
+            "Ready published between lifecycle polls must survive child exit"
+        );
     }
 
     #[test]
