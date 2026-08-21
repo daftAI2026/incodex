@@ -562,4 +562,42 @@ mod tests {
         let error = ensure_official_bundle_identifier(&info).unwrap_err();
         assert!(error.contains("foreign bundle"), "{error}");
     }
+
+    #[test]
+    fn locked_target_validation_failure_rolls_back_before_original_snapshot() {
+        let sandbox = std::env::temp_dir().join(format!(
+            "incodex-locked-install-validation-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let root = sandbox.join("state");
+        let app = sandbox.join("ChatGPT.app");
+        fs::create_dir_all(&app).unwrap();
+        fs::write(app.join("marker"), "replacement\n").unwrap();
+
+        let result = begin_verified_transaction(&root, &app, |_| {
+            Err("locked target validation failed".to_string())
+        });
+
+        assert!(result.is_err());
+        let transaction = fs::read_dir(root.join("transactions"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .into_owned();
+        let journal = journal_v2(&root, &transaction).unwrap();
+        assert_eq!(journal.phase, "ROLLED_BACK");
+        assert!(!root
+            .join("transactions")
+            .join(transaction)
+            .join("original/ChatGPT.app")
+            .exists());
+        fs::remove_dir_all(sandbox).unwrap();
+    }
 }
