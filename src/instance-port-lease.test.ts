@@ -306,6 +306,36 @@ describe("kernel-held TCP owner lease", () => {
     expect(existsSync(quarantine)).toBe(true);
   });
 
+  test("does not publish while a valid retained quarantine is unresolved", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-tcp-sidecar-quarantine-valid-"));
+    const quarantine = join(root, ".incognito.lock.quarantine.stale");
+    const retained = {
+      pid: 900004,
+      startedAt: "dead-fixture",
+      processStartIdentity: "dead-fixture",
+      execPath: target(root),
+      execIdentity: "target-executable",
+      sessionId: "quarantine-valid",
+      token: "dddddddddddddddddddddddddddddddd",
+      nonce: "dddddddddddddddddddddddddddddddd",
+    };
+    writeFileSync(quarantine, `${JSON.stringify(retained)}\n`);
+    expect(readOwnerRecords(root).some(({ state }: any) => state.kind === "valid")).toBe(true);
+
+    const candidate = currentOwner("quarantine-valid-candidate", target(root));
+    let acquired = false;
+    try {
+      await acquireOwnerLease(root, candidate);
+      acquired = true;
+    } catch (error) {
+      expect(error).toMatchObject({ code: "OWNER_UNVERIFIABLE" });
+    } finally {
+      if (acquired) await releaseOwnerLease(root, candidate);
+    }
+    expect(acquired).toBe(false);
+    expect(existsSync(quarantine)).toBe(true);
+  });
+
   test("a SIGKILL releases the listener so the next process can acquire", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-tcp-sigkill-"));
     const ready = join(root, "ready");
