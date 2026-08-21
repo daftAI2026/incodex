@@ -615,13 +615,9 @@ function releaseTakeoverClaim(stateRoot, claim) {
         return Boolean(error && error.code === "ENOENT");
     }
     if (!stats.isDirectory()) {
-        try {
-            fs.rmSync(file);
-            return true;
-        }
-        catch (error) {
-            return Boolean(error && error.code === "ENOENT");
-        }
+        // Legacy regular claims have no identity-pinned no-replace release.
+        // Never delete one during migration; acquisition already fails closed.
+        return false;
     }
     const beforeMetadata = takeoverClaimMetadata(stateRoot);
     const markerOwner = acquireReclaimMarker(stateRoot);
