@@ -289,8 +289,8 @@ pub fn format_diagnosis(report: &Diagnosis) -> String {
         if let Some(recovery) = &record.recovery {
             lines.push(incodex_core::format_kv("Recovery", recovery, None));
         }
-        for scratch in &record.scratch {
-            lines.push(incodex_core::format_kv("Scratch", scratch, None));
+        for artifact in &record.artifacts {
+            lines.push(incodex_core::format_kv("Artifact", artifact, None));
         }
     }
     if !report.interrupted_transactions.is_empty() {

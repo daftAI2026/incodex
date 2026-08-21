@@ -125,7 +125,7 @@ pub struct JournalRecord {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub original_valid: Option<bool>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub scratch: Vec<String>,
+    pub artifacts: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recovery: Option<String>,
 }
@@ -427,7 +427,7 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                 error: Some(message.to_string()),
                 retained_original: None,
                 original_valid: None,
-                scratch: Vec::new(),
+                artifacts: Vec::new(),
                 recovery: None,
             });
             findings.push(DiagnosticFinding::warning(
@@ -451,7 +451,7 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                     error: Some("journal file is a symlink and was not inspected".to_string()),
                     retained_original: None,
                     original_valid: None,
-                    scratch: Vec::new(),
+                    artifacts: Vec::new(),
                     recovery: None,
                 });
                 findings.push(DiagnosticFinding::warning(
@@ -464,7 +464,7 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
             match journal_v2(root, &install_id) {
                 Ok(journal) => {
                     let action = recover_action_phase(&journal.phase);
-                    let (retained_original, original_valid, scratch, recovery) =
+                    let (retained_original, original_valid, artifacts, recovery) =
                         transaction_evidence(root, &journal.install_id, &journal.phase, action);
                     let kind = if action != incodex_transaction::Recovery::Done {
                         interrupted.push((
@@ -491,7 +491,7 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                         error: None,
                         retained_original,
                         original_valid,
-                        scratch,
+                        artifacts,
                         recovery,
                     });
                     if kind == "staleCommitted" {
@@ -516,7 +516,7 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                         error: Some(error.clone()),
                         retained_original: None,
                         original_valid: None,
-                        scratch: Vec::new(),
+                        artifacts: Vec::new(),
                         recovery: None,
                     });
                     findings.push(DiagnosticFinding::warning(
@@ -540,7 +540,7 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                     error: Some(error.to_string()),
                     retained_original: None,
                     original_valid: None,
-                    scratch: Vec::new(),
+                    artifacts: Vec::new(),
                     recovery: None,
                 });
                 findings.push(DiagnosticFinding::warning(
@@ -580,7 +580,7 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                         error: None,
                         retained_original: None,
                         original_valid: None,
-                        scratch: Vec::new(),
+                        artifacts: Vec::new(),
                         recovery: None,
                     });
                     if kind == "staleCommitted" {
@@ -614,7 +614,7 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                         error: Some("journal schema is not recognized".to_string()),
                         retained_original: None,
                         original_valid: None,
-                        scratch: Vec::new(),
+                        artifacts: Vec::new(),
                         recovery: None,
                     });
                     findings.push(DiagnosticFinding::warning(
@@ -638,7 +638,7 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                     error: Some(error.to_string()),
                     retained_original: None,
                     original_valid: None,
-                    scratch: Vec::new(),
+                    artifacts: Vec::new(),
                     recovery: None,
                 });
                 findings.push(DiagnosticFinding::warning(
@@ -686,26 +686,25 @@ fn transaction_evidence(
         root.join("scratch")
             .join(format!("ChatGPT.app.staged-{install_id}")),
     ];
-    let scratch: Vec<String> = candidates
+    let artifacts: Vec<String> = candidates
         .into_iter()
         .filter(|path| fs::symlink_metadata(path).is_ok())
         .map(|path| path.display().to_string())
         .collect();
-    let recovery = if action != incodex_transaction::Recovery::Done {
-        Some(if original_valid == Some(true) {
-            "recoverable"
-        } else {
-            "manual"
-        })
-        .map(str::to_string)
-    } else if !scratch.is_empty() {
-        Some("cleanup".to_string())
-    } else if phase == "ROLLED_BACK" && original_valid == Some(true) {
-        Some("retained".to_string())
-    } else {
-        None
+    let recovery = match action {
+        incodex_transaction::Recovery::Rollback => Some("rollback".to_string()),
+        incodex_transaction::Recovery::Refuse => Some("manual".to_string()),
+        incodex_transaction::Recovery::Done if !artifacts.is_empty() => {
+            Some("cleanup".to_string())
+        }
+        incodex_transaction::Recovery::Done
+            if phase == "ROLLED_BACK" && original_valid == Some(true) =>
+        {
+            Some("retained".to_string())
+        }
+        incodex_transaction::Recovery::Done => None,
     };
-    (retained_original, original_valid, scratch, recovery)
+    (retained_original, original_valid, artifacts, recovery)
 }
 
 #[cfg(test)]
