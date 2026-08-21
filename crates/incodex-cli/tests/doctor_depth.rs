@@ -111,9 +111,7 @@ fn run_fixture_with_env(
     for (key, value) in env {
         command.env(key, value);
     }
-    let output = command
-        .output()
-        .expect("spawn incodex");
+    let output = command.output().expect("spawn incodex");
     (
         output.status.code().unwrap_or(1),
         String::from_utf8_lossy(&output.stdout).into_owned(),

@@ -47,15 +47,23 @@ pub fn inspect_outer_signing(path: &Path) -> Result<SignedComponent, String> {
     } else {
         SignatureKind::Unknown
     };
+    let verified = kind != SignatureKind::Unsigned && verify_outer_strict(path);
     Ok(SignedComponent {
         path: path.to_path_buf(),
         identifier,
         team_identifier,
         authorities,
         kind,
-        // codesign --display succeeded; cryptographic verification is deep-only.
-        verified: kind != SignatureKind::Unsigned,
+        verified,
     })
+}
+
+fn verify_outer_strict(path: &Path) -> bool {
+    Command::new("codesign")
+        .args(["--verify", "--strict", "--verbose=4", "--"])
+        .arg(path)
+        .output()
+        .is_ok_and(|output| output.status.success())
 }
 
 fn signature_field(text: &str, prefix: &str) -> Option<String> {
