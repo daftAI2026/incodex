@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
@@ -8,15 +8,44 @@ function text(relativePath: string): string {
   return readFileSync(join(root, relativePath), "utf8");
 }
 
+function rustTestSources(relativeDir: string): string[] {
+  const absoluteDir = join(root, relativeDir);
+  const sources: string[] = [];
+  const visit = (directory: string, prefix: string) => {
+    for (const entry of readdirSync(directory).sort()) {
+      const absolutePath = join(directory, entry);
+      const relativePath = join(prefix, entry);
+      if (statSync(absolutePath).isDirectory()) {
+        visit(absolutePath, relativePath);
+      } else if (entry.endsWith(".rs")) {
+        sources.push(relativePath);
+      }
+    }
+  };
+  visit(absoluteDir, "");
+  return sources;
+}
+
+function isLegacyFixtureSource(relativePath: string): boolean {
+  return /(^|\/)legacy_[^/]+\.rs$/.test(relativePath);
+}
+
 describe("native CLI contract boundary", () => {
   test("does not execute the retired TypeScript product CLI or observe global ChatGPT", () => {
     expect(existsSync(join(root, "tests/cli-golden.test.ts"))).toBe(false);
 
-    const nativeContract = text("crates/incodex-cli/tests/native_contract.rs");
-    const nativeTty = text("crates/incodex-cli/tests/support/native_tty.rs");
-    for (const source of [nativeContract, nativeTty]) {
-      expect(source).not.toContain("bun src/cli.ts");
+    const sources = rustTestSources("crates/incodex-cli/tests").filter(
+      (relativePath) => !isLegacyFixtureSource(relativePath),
+    );
+    expect(sources).toContain("probe.rs");
+    expect(sources).toContain("readonly.rs");
+    expect(sources).toContain("support/tty.rs");
+    for (const relativePath of sources) {
+      const source = text(join("crates/incodex-cli/tests", relativePath));
+      expect(source).not.toMatch(/\bbun\b/);
       expect(source).not.toContain("run_ts");
+      expect(source).not.toContain("listOfficialPids");
+      expect(source).not.toMatch(/Command::new\(["']ps["']\)/);
       expect(source).not.toContain("/Applications/ChatGPT.app/Contents/MacOS/ChatGPT");
       expect(source).not.toContain("ChatGPT is running");
     }

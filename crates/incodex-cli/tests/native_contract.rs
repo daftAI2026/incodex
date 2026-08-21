@@ -190,3 +190,59 @@ fn native_non_tty_mutations_print_auditable_progress_stages() {
     );
     assert!(!uninstall.stdout.contains('\u{1b}'), "{uninstall:?}");
 }
+
+#[test]
+fn native_non_tty_uninstall_requires_yes_and_leaves_the_target_untouched() {
+    let home = scratch("uninstall-non-tty-refusal");
+    let app = marker_app(&home);
+    let marker = app.join("marker");
+    let before = fs::read(&marker).unwrap();
+
+    let uninstall = run_rust(&["uninstall", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(uninstall.status, 1, "{uninstall:?}");
+    assert!(
+        uninstall.stdout.contains("➤ Uninstall")
+            && uninstall
+                .stdout
+                .contains(&format!("  App          {}", app.display())),
+        "refusal must still print the auditable plan: {uninstall:?}"
+    );
+    assert_eq!(
+        uninstall.stderr,
+        "  ✗ non-interactive uninstall requires --yes\n  incodex uninstall --yes\n"
+    );
+    assert_eq!(fs::read(&marker).unwrap(), before);
+}
+
+#[test]
+fn native_runtime_dry_run_does_not_create_or_modify_runtime_state() {
+    let missing_home = scratch("runtime-dry-run-missing");
+    let missing_runtime = missing_home.join(".incodex/runtime");
+    let dry_run = run_rust(&["runtime", "--dry-run"], &missing_home);
+    assert_eq!(dry_run.status, 0, "{dry_run:?}");
+    assert_eq!(dry_run.stderr, "");
+    assert_eq!(
+        dry_run.stdout,
+        "would update ~/.incodex/runtime/ without modifying Codex\n"
+    );
+    assert!(
+        !missing_runtime.exists(),
+        "a dry run must not create the runtime directory"
+    );
+
+    let home = scratch("runtime-dry-run-existing");
+    let runtime = home.join(".incodex/runtime");
+    fs::create_dir_all(&runtime).unwrap();
+    let sentinel = runtime.join("sentinel");
+    fs::write(&sentinel, "keep\n").unwrap();
+
+    let dry_run = run_rust(&["runtime", "--dry-run"], &home);
+    assert_eq!(dry_run.status, 0, "{dry_run:?}");
+    assert_eq!(dry_run.stderr, "");
+    assert_eq!(
+        dry_run.stdout,
+        "would update ~/.incodex/runtime/ without modifying Codex\n"
+    );
+    assert_eq!(fs::read(&sentinel).unwrap(), b"keep\n");
+    assert!(!runtime.join("current.json").exists());
+}
