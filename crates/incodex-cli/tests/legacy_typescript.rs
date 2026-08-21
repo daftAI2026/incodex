@@ -15,6 +15,7 @@ const INSTALL_ID: &str = "11111111-1111-4111-8111-111111111111";
 const ORPHAN_INSTALL_ID: &str = "22222222-2222-4222-8222-222222222222";
 const SECOND_ORPHAN_INSTALL_ID: &str = "33333333-3333-4333-8333-333333333333";
 const ROLLED_BACK_INSTALL_ID: &str = "44444444-4444-4444-8444-444444444444";
+const MISSING_CURRENT_INSTALL_ID: &str = "55555555-5555-4555-8555-555555555555";
 const INFO_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -319,6 +320,78 @@ fn write_flat_journal(
     journal_path
 }
 
+#[derive(Debug, Clone, Copy)]
+enum MatrixCurrent {
+    Absent,
+    MatchingCommitted,
+    MissingJournal,
+    RolledBack,
+}
+
+impl MatrixCurrent {
+    fn install_id(self) -> Option<&'static str> {
+        match self {
+            Self::Absent => None,
+            Self::MatchingCommitted => Some(INSTALL_ID),
+            Self::MissingJournal => Some(MISSING_CURRENT_INSTALL_ID),
+            Self::RolledBack => Some(ROLLED_BACK_INSTALL_ID),
+        }
+    }
+}
+
+fn empty_legacy_state_root() -> (PathBuf, PathBuf) {
+    let root = temp_root();
+    let app = root.join("ChatGPT.app");
+    fs::create_dir_all(&app).unwrap();
+    (root.join(".incodex"), app)
+}
+
+fn write_current_pointer(root: &std::path::Path, app: &std::path::Path, install_id: &str) {
+    let target_store = root.join("installations").join(target_id(app));
+    fs::create_dir_all(&target_store).unwrap();
+    fs::write(
+        target_store.join("current.json"),
+        format!("{}\n", json!({"installId": install_id})),
+    )
+    .unwrap();
+}
+
+fn build_matrix_state(interrupted_count: usize, current: MatrixCurrent) -> (PathBuf, PathBuf) {
+    let (root, app) = if matches!(current, MatrixCurrent::MatchingCommitted) {
+        let fixture = LegacyTsV1Fixture::create();
+        (fixture.root, fixture.app)
+    } else {
+        empty_legacy_state_root()
+    };
+    let interrupted_ids = if matches!(current, MatrixCurrent::MatchingCommitted) {
+        [ORPHAN_INSTALL_ID, SECOND_ORPHAN_INSTALL_ID]
+    } else {
+        [INSTALL_ID, ORPHAN_INSTALL_ID]
+    };
+    for (index, install_id) in interrupted_ids.iter().take(interrupted_count).enumerate() {
+        write_flat_journal(
+            &root,
+            &app,
+            install_id,
+            "DISCOVERED",
+            &format!("2026-08-21T00:1{index}:00.000Z"),
+        );
+    }
+    if matches!(current, MatrixCurrent::RolledBack) {
+        write_flat_journal(
+            &root,
+            &app,
+            ROLLED_BACK_INSTALL_ID,
+            "ROLLED_BACK",
+            "2026-08-21T00:20:00.000Z",
+        );
+    }
+    if let Some(install_id) = current.install_id() {
+        write_current_pointer(&root, &app, install_id);
+    }
+    (root, app)
+}
+
 fn temp_root() -> PathBuf {
     let sequence = SEQ.fetch_add(1, Ordering::Relaxed);
     let now = SystemTime::now()
@@ -612,6 +685,7 @@ fn legacy_typescript_fixture_requires_metadata_for_a_committed_journal() {
 fn legacy_typescript_fixture_does_not_attach_committed_metadata_to_an_interrupted_journal() {
     let fixture = LegacyTsV1Fixture::create();
     set_journal_phase_at(&fixture.journal_path(), "TARGET_VERIFIED");
+    fs::remove_file(fixture.target_store().join("current.json")).unwrap();
     let state = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
         .expect("post-metadata interrupted state should be structurally readable")
         .expect("journal should be detected");
@@ -626,7 +700,7 @@ fn legacy_typescript_fixture_does_not_attach_committed_metadata_to_an_interrupte
 }
 
 #[test]
-fn legacy_typescript_fixture_prefers_a_new_orphan_journal_over_an_old_committed_pointer() {
+fn legacy_typescript_fixture_rejects_a_new_orphan_journal_next_to_an_old_committed_pointer() {
     let fixture = LegacyTsV1Fixture::create();
     let orphan = write_flat_journal(
         &fixture.root,
@@ -637,18 +711,67 @@ fn legacy_typescript_fixture_prefers_a_new_orphan_journal_over_an_old_committed_
     );
     set_journal_phase_at(&orphan, "SWAPPED");
 
-    let state = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
-        .expect("orphan journal should be structurally readable")
-        .expect("new orphan journal must not be hidden by current.json");
-    assert_eq!(state.install_id, ORPHAN_INSTALL_ID);
-    assert_eq!(
-        state.state.kind(),
-        incodex_cli::legacy_typescript::LegacyStateKind::Interrupted
-    );
-    assert!(matches!(
-        state.state,
-        incodex_cli::legacy_typescript::LegacyState::Interrupted
-    ));
+    let error = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
+        .expect_err("orphan journal and current committed pointer are ambiguous");
+    assert!(error.contains(INSTALL_ID), "{error}");
+    assert!(error.contains(ORPHAN_INSTALL_ID), "{error}");
+}
+
+#[test]
+fn legacy_typescript_fixture_covers_interrupted_and_current_state_matrix() {
+    for interrupted_count in 0..=2 {
+        for current in [
+            MatrixCurrent::Absent,
+            MatrixCurrent::MatchingCommitted,
+            MatrixCurrent::MissingJournal,
+            MatrixCurrent::RolledBack,
+        ] {
+            let (root, app) = build_matrix_state(interrupted_count, current);
+            let label = format!("interrupted={interrupted_count}, current={current:?}");
+            let result = incodex_cli::legacy_typescript::load_legacy_ts_v1(&root, &app);
+            match (interrupted_count, current) {
+                (0, MatrixCurrent::Absent) => {
+                    assert!(matches!(result, Ok(None)), "{label}: {result:?}");
+                }
+                (0, MatrixCurrent::MatchingCommitted) => {
+                    let state = result
+                        .expect("matching committed state should be readable")
+                        .expect("matching committed state should be detected");
+                    assert!(matches!(
+                        state.state,
+                        incodex_cli::legacy_typescript::LegacyState::Committed { .. }
+                    ));
+                }
+                (1, MatrixCurrent::Absent) => {
+                    let state = result
+                        .expect("a lone interrupted state should be readable")
+                        .expect("a lone interrupted journal should be detected");
+                    assert!(matches!(
+                        state.state,
+                        incodex_cli::legacy_typescript::LegacyState::Interrupted
+                    ));
+                }
+                _ => {
+                    let error = result.expect_err(&format!(
+                        "{label} must fail closed instead of selecting a journal"
+                    ));
+                    if interrupted_count > 0 {
+                        if let Some(current_id) = current.install_id() {
+                            assert!(error.contains(current_id), "{label}: {error}");
+                        }
+                    }
+                    let interrupted_ids = if matches!(current, MatrixCurrent::MatchingCommitted) {
+                        [ORPHAN_INSTALL_ID, SECOND_ORPHAN_INSTALL_ID]
+                    } else {
+                        [INSTALL_ID, ORPHAN_INSTALL_ID]
+                    };
+                    for install_id in interrupted_ids.iter().take(interrupted_count) {
+                        assert!(error.contains(install_id), "{label}: {error}");
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[test]
