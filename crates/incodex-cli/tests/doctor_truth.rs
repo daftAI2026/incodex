@@ -490,6 +490,59 @@ fn doctor_json_does_not_call_a_committed_journal_with_a_missing_backup_clean() {
 }
 
 #[test]
+fn doctor_json_rejects_a_present_but_truncated_committed_backup() {
+    let home = isolated_home();
+    let root = home.join(".incodex");
+    let app = home.join("ChatGPT.app");
+    let source = home.join("asar-source");
+    let candidate = home.join("candidate.app");
+    let asar = app.join("Contents/Resources/app.asar");
+    fs::create_dir_all(&source).unwrap();
+    fs::create_dir_all(asar.parent().unwrap()).unwrap();
+    fs::write(source.join("index.js"), b"official\n").unwrap();
+    fs::write(source.join("package.json"), b"{\"main\":\"index.js\"}\n").unwrap();
+    pack_dir(&source, &asar).unwrap();
+
+    let mut transaction = Engine::begin(&root, &app, "test").unwrap();
+    let install_id = transaction.install_id().to_string();
+    let original = root
+        .join("transactions")
+        .join(&install_id)
+        .join("original/ChatGPT.app");
+    fs::create_dir_all(original.parent().unwrap()).unwrap();
+    ditto(&app, &original).unwrap();
+    transaction.mark_backup_committed().unwrap();
+    ditto(&app, &candidate).unwrap();
+    patch_asar(
+        &candidate.join("Contents/Resources/app.asar"),
+        "module.exports = {};\n",
+        Some(&install_id),
+    )
+    .unwrap();
+    transaction.place_staging(&candidate).unwrap();
+    transaction.swap().unwrap();
+    transaction.commit().unwrap();
+    fs::write(
+        original.join("Contents/Resources/app.asar"),
+        b"truncated backup",
+    )
+    .unwrap();
+
+    let (_status, stdout, stderr) =
+        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(stderr, "");
+    let report = parse_json(&stdout);
+    assert_eq!(report["backup"]["status"], "unknown");
+    assert_eq!(report["checks"]["backup"]["status"], "unknown");
+    assert!(report["checks"]["backup"]["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|finding| finding["code"] == "backup.digest-mismatch"));
+    assert_ne!(report["backup"]["complete"], true);
+}
+
+#[test]
 fn doctor_json_marks_unverifiable_owner_and_session_records_unknown() {
     let home = isolated_home();
     let app = home.join("Missing.app");
