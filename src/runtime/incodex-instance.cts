@@ -16,6 +16,7 @@ const {
   ownerToken,
   ownerMatchesLive,
   writeOwnerLock,
+  writeOwnerLockExclusive,
   readOwnerLockState,
   readOwnerLock,
   currentOwner,
@@ -42,13 +43,16 @@ function connectExisting(stateRoot, timeoutMs = 400, token = "") {
     const socket = net.connect({ host: "127.0.0.1", port: ownerPortFromExec(owner.execPath) });
     let done = false;
     let response = "";
+    let deadline;
     const finish = (ok) => {
       if (done) return;
       done = true;
+      clearTimeout(deadline);
       socket.destroy();
       resolve(ok);
     };
     socket.setTimeout(timeoutMs);
+    deadline = setTimeout(() => finish(false), timeoutMs);
     socket.once("connect", () => {
       try {
         socket.write(`${expectedToken ? `raise ${expectedToken}` : "raise"}\n`);
@@ -58,6 +62,10 @@ function connectExisting(stateRoot, timeoutMs = 400, token = "") {
     });
     socket.on("data", (buf) => {
       response += String(buf);
+      if (Buffer.byteLength(response, "utf8") > 256) {
+        finish(false);
+        return;
+      }
       if (response.split("\n").some((line) => line.trim() === "ok")) finish(true);
       else if (response.split("\n").some((line) => line.trim() === "denied")) finish(false);
     });
@@ -103,6 +111,7 @@ if (typeof module !== "undefined") module.exports = {
   ownerToken,
   ownerMatchesLive,
   writeOwnerLock,
+  writeOwnerLockExclusive,
   readOwnerLockState,
   readOwnerLock,
   clearOwnerLock,
@@ -129,6 +138,7 @@ export {
   ownerToken,
   ownerMatchesLive,
   writeOwnerLock,
+  writeOwnerLockExclusive,
   readOwnerLockState,
   readOwnerLock,
   clearOwnerLock,
