@@ -42,6 +42,7 @@ struct Fixture {
     root: PathBuf,
     app: PathBuf,
     fake_bin: PathBuf,
+    display_count: PathBuf,
     malformed_entitlements: bool,
 }
 
@@ -62,6 +63,7 @@ impl Fixture {
         ));
         let app = root.join("ChatGPT.app");
         let fake_bin = root.join("fake-bin");
+        let display_count = root.join("display-count");
         fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
         fs::create_dir_all(&fake_bin).unwrap();
         fs::write(app.join("Contents/MacOS/ChatGPT"), "binary\n").unwrap();
@@ -122,6 +124,8 @@ if [ "$1" = "--display" ] && [ "$2" = "--entitlements" ]; then
   exit 0
 fi
 if [ "$1" = "--display" ] && [ "$2" = "--verbose=4" ]; then
+  count="$(cat "$INCODEX_CODESIGN_DISPLAY_COUNT" 2>/dev/null || echo 0)"
+  echo $((count + 1)) > "$INCODEX_CODESIGN_DISPLAY_COUNT"
   case "$target" in
     *NestedVendor.xpc|*OuterVendor.app|*DeepVendor.xpc)
       {nested_display}
@@ -151,6 +155,7 @@ exit 0
             root,
             app,
             fake_bin,
+            display_count,
             malformed_entitlements,
         }
     }
@@ -180,6 +185,7 @@ exit 0
             "INCODEX_SIGN_CAPTURE",
             self.root.join("sign-capture"),
         );
+        std::env::set_var("INCODEX_CODESIGN_DISPLAY_COUNT", &self.display_count);
         guard
     }
 }
@@ -232,6 +238,27 @@ fn generic_verify_accepts_a_verified_third_party_outer_with_identity_evidence() 
     assert!(verify_patched_adhoc_bundle_deep_strict(&fixture.app, None).is_err());
     assert!(verify_original_vendor_bundle(&fixture.app, Some("com.expected.bundle"), None, None)
         .is_err());
+}
+
+#[test]
+fn verify_app_reuses_one_signing_inventory() {
+    let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let fixture = Fixture::new(
+        NestedIdentity::Vendor,
+        false,
+        OuterIdentity::ThirdParty,
+        false,
+    );
+    let _path = fixture.configure_environment();
+
+    assert!(verify_app(&fixture.app));
+    let count = fs::read_to_string(&fixture.display_count)
+        .unwrap()
+        .trim()
+        .parse::<u32>()
+        .unwrap();
+    assert_eq!(count, 2, "outer and nested components should be inspected once");
+    std::env::remove_var("INCODEX_CODESIGN_DISPLAY_COUNT");
 }
 
 #[test]
