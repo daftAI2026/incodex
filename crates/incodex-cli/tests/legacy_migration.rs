@@ -368,6 +368,22 @@ fn recovery_accepts_an_already_restored_target_after_replace_boundary() {
 }
 
 #[test]
+fn recovery_replaces_a_stale_regular_legacy_journal_temp() {
+    let fixture = Fixture::create();
+    fixture.set_phase("PATCHED");
+    let temporary = fixture.legacy_journal().with_extension("json.tmp");
+    fs::write(&temporary, b"stale partial journal").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_incodex"))
+        .args(["recover", "--transaction", INSTALL_ID])
+        .env("HOME", fixture.root.parent().unwrap())
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(!temporary.exists());
+}
+
+#[test]
 fn rust_install_adopts_legacy_state_without_using_patched_live_as_original() {
     let fixture = Fixture::create();
     let output = Command::new(env!("CARGO_BIN_EXE_incodex"))
