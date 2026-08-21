@@ -267,6 +267,63 @@ describe("kernel-held TCP owner lease", () => {
     }
   });
 
+  test("absolute protocol deadline releases 32 slowloris connections", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-tcp-slowloris-"));
+    const owner = currentOwner("slowloris", target(root));
+    await acquireOwnerLease(root, owner);
+    const sockets = Array.from({ length: 32 }, () => createConnection({ host: "127.0.0.1", port: ownerPortFromExec(owner.execPath) }));
+    const closed = sockets.map((socket) => new Promise<boolean>((resolve) => socket.once("close", () => resolve(true))));
+    const timers = sockets.map((socket) => {
+      socket.once("connect", () => socket.write("x"));
+      return setInterval(() => { if (!socket.destroyed) socket.write("x"); }, 20);
+    });
+    try {
+      expect(await Promise.race([Promise.all(closed).then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 2_000))])).toBe(true);
+      expect(await connectExisting(root, 500, owner.token)).toBe(true);
+    } finally {
+      timers.forEach(clearInterval);
+      sockets.forEach((socket) => socket.destroy());
+      await releaseOwnerLease(root, owner);
+    }
+  });
+
+  test("new TCP and stable Unix Runtime have one owner in either launch order", async () => {
+    const fixture = join(import.meta.dir, "../tests/fixtures/legacy-owner-runtime.cjs");
+    const targetExec = join(mkdtempSync(join(tmpdir(), "incodex-cross-version-target-")), "target-executable");
+    const newRoot = mkdtempSync(join(tmpdir(), "incodex-cross-version-new-first-"));
+    const newResult = join(newRoot, "legacy-result");
+    const release = join(newRoot, "release");
+    const modern = currentOwner("modern-first", targetExec);
+    await acquireOwnerLease(newRoot, modern);
+    const legacyAfterModern = spawn(process.execPath, [fixture], {
+      env: { ...process.env, INCODEX_LEGACY_ROOT: newRoot, INCODEX_LEGACY_RESULT: newResult, INCODEX_LEGACY_RELEASE: release },
+      stdio: "ignore",
+    });
+    const deadline = Date.now() + 5_000;
+    while (!existsSync(newResult) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(readFileSync(newResult, "utf8").trim()).toBe("UNIX_BLOCKED");
+    expect(await connectExisting(newRoot, 500, modern.token)).toBe(true);
+    legacyAfterModern.kill("SIGKILL");
+    await releaseOwnerLease(newRoot, modern);
+
+    const oldRoot = mkdtempSync(join(tmpdir(), "incodex-cross-version-old-first-"));
+    const oldResult = join(oldRoot, "legacy-result");
+    const oldRelease = join(oldRoot, "release");
+    const legacyFirst = spawn(process.execPath, [fixture], {
+      env: { ...process.env, INCODEX_LEGACY_ROOT: oldRoot, INCODEX_LEGACY_RESULT: oldResult, INCODEX_LEGACY_RELEASE: oldRelease },
+      stdio: "ignore",
+    });
+    const oldDeadline = Date.now() + 5_000;
+    while (!existsSync(oldResult) && Date.now() < oldDeadline) await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(readFileSync(oldResult, "utf8").trim()).toBe("UNIX_WON");
+    const modernAfterLegacy = currentOwner("modern-after-legacy", targetExec);
+    await expect(acquireOwnerLease(oldRoot, modernAfterLegacy)).rejects.toMatchObject({ code: "OWNER_LEGACY_SOCKET" });
+    writeFileSync(oldRelease, "release\n");
+    await new Promise<void>((resolve) => legacyFirst.once("close", () => resolve()));
+    await expect(acquireOwnerLease(oldRoot, modernAfterLegacy)).resolves.toBeTruthy();
+    await releaseOwnerLease(oldRoot, modernAfterLegacy);
+  });
+
   test("an old Unix socket is foreign and is never removed", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-tcp-legacy-"));
     const targetExec = join(root, "target-executable");
