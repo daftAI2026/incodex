@@ -441,6 +441,18 @@ fn ensure_official_bundle_identifier(info: &incodex_macos::PlistInfo) -> Result<
 }
 
 fn installed_install_id(app: &Path, root: &Path, archive: &Archive) -> Option<String> {
+    let install_id = installed_marker_id(app, root, archive)?;
+    if validate_committed_live_snapshot(root, &install_id, app).is_err()
+        || validate_backup_snapshot(root, &install_id).is_err()
+    {
+        return None;
+    }
+    Some(install_id)
+}
+
+/// Read the live marker for uninstall's legacy migration path. The migration
+/// proof performs the stronger backup/live validation before any restore.
+fn installed_marker_id(app: &Path, root: &Path, archive: &Archive) -> Option<String> {
     if !archive.has_only_loader() {
         return None;
     }
@@ -465,18 +477,13 @@ fn installed_install_id(app: &Path, root: &Path, archive: &Archive) -> Option<St
     if !original.exists() || read_asar_integrity(app) != Some(archive.header_hash()) {
         return None;
     }
-    if validate_committed_live_snapshot(root, &install_id, app).is_err()
-        || validate_backup_snapshot(root, &install_id).is_err()
-    {
-        return None;
-    }
     Some(install_id)
 }
 
 fn verified_live_install_id(root: &Path, app: &Path) -> Option<String> {
     Archive::open(&app.join(ASAR_REL))
         .ok()
-        .and_then(|archive| installed_install_id(app, root, &archive))
+        .and_then(|archive| installed_marker_id(app, root, &archive))
 }
 
 fn find_committed(root: &Path, app: &Path) -> Result<incodex_transaction::JournalV2, String> {
