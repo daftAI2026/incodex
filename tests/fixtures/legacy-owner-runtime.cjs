@@ -5,16 +5,27 @@ const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const { spawnSync } = require("node:child_process");
 
 const lockPath = (root) => path.join(root, "incognito.lock");
 const socketPath = (root) => path.join(root, "incognito.sock");
-const owner = () => ({
-  pid: process.pid,
-  startedAt: new Date().toISOString(),
-  execPath: process.execPath,
-  sessionId: "legacy-fixture",
-  nonce: crypto.randomBytes(16).toString("hex"),
-});
+const owner = () => {
+  const listed = spawnSync("ps", ["-p", String(process.pid), "-o", "pid=,lstart=,comm="], { encoding: "utf8" });
+  const match = listed.stdout.trim().match(/^\d+\s+(.+?)\s+(\S+)$/);
+  const startedAt = match?.[1]?.trim() || "fixture";
+  const execIdentity = path.basename(match?.[2] || process.execPath);
+  const nonce = crypto.randomBytes(16).toString("hex");
+  return {
+    pid: process.pid,
+    startedAt,
+    processStartIdentity: startedAt,
+    execPath: process.execPath,
+    execIdentity,
+    sessionId: "legacy-fixture",
+    token: nonce,
+    nonce,
+  };
+};
 
 function writeOwnerLock(root, value) {
   fs.mkdirSync(root, { recursive: true, mode: 0o700 });
@@ -33,9 +44,18 @@ function listenForRaise(root) {
 const root = process.env.INCODEX_LEGACY_ROOT;
 const result = process.env.INCODEX_LEGACY_RESULT;
 const release = process.env.INCODEX_LEGACY_RELEASE;
+const ready = process.env.INCODEX_LEGACY_READY;
 let server;
 try { writeOwnerLock(root, owner()); } catch { /* stable Runtime continued after O_EXCL failure */ }
-try {
+if (ready) {
+  fs.writeFileSync(ready, "owner-record-published\n");
+  const timer = setInterval(() => {
+    if (!fs.existsSync(release)) return;
+    clearInterval(timer);
+    try { fs.rmSync(lockPath(root)); } catch {}
+    process.exit(0);
+  }, 5);
+} else try {
   server = listenForRaise(root);
   server.once("listening", () => {
     fs.writeFileSync(result, "UNIX_WON\n");

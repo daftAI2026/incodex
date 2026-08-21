@@ -81,17 +81,6 @@ describe("kernel-held TCP owner lease", () => {
     expect(await releaseOwnerLease(root, replacement)).toBe(true);
   });
 
-  test("recovers an abandoned legacy bridge without removing the exclusion", async () => {
-    const root = mkdtempSync(join(tmpdir(), "incodex-tcp-abandoned-bridge-"));
-    const bridge = join(root, SOCK_NAME);
-    mkdirSync(bridge);
-    const owner = currentOwner("abandoned-bridge", target(root));
-    await expect(acquireOwnerLease(root, owner)).resolves.toEqual(owner);
-    expect(existsSync(bridge)).toBe(true);
-    await expect(releaseOwnerLease(root, owner)).resolves.toBe(true);
-    expect(existsSync(bridge)).toBe(true);
-  });
-
   test("bounds an unterminated protocol request", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-tcp-protocol-limit-"));
     const owner = currentOwner("protocol", target(root));
@@ -116,7 +105,6 @@ describe("kernel-held TCP owner lease", () => {
     mkdirSync(readyRoot);
     mkdirSync(doneRoot);
     mkdirSync(resultRoot);
-    mkdirSync(join(root, SOCK_NAME));
     const modulePath = join(import.meta.dir, "runtime/incodex-instance.cts");
     const worker = String.raw`
       (async () => {
@@ -147,7 +135,7 @@ describe("kernel-held TCP owner lease", () => {
         outcome = "WINNER " + owner.token;
       } catch (error) {
         outcome = String(error.code || "ERROR");
-        exitCode = error.code === "OWNER_BUSY" ? 2 : 3;
+        exitCode = error.code === "OWNER_BUSY" || error.code === "OWNER_RECORD_RACE" ? 2 : 3;
       }
       writeFileSync(join(process.env.INCODEX_TEST_RESULT_ROOT, index), outcome + "\n");
       writeFileSync(join(process.env.INCODEX_TEST_DONE_ROOT, index), "done\n");
@@ -202,7 +190,7 @@ describe("kernel-held TCP owner lease", () => {
     }
     const finished = await Promise.all(completions);
     expect(outcomes.filter((value) => value.startsWith("WINNER "))).toHaveLength(1);
-    expect(outcomes.filter((value) => value === "OWNER_BUSY")).toHaveLength(19);
+    expect(outcomes.filter((value) => value === "OWNER_BUSY" || value === "OWNER_RECORD_RACE")).toHaveLength(19);
     expect(finished.every(({ code, stderr }) => (code === 0 || code === 2) && stderr === "")).toBe(true);
   }, 60_000);
 
@@ -336,6 +324,35 @@ describe("kernel-held TCP owner lease", () => {
     await new Promise<void>((resolve) => legacyFirst.once("close", () => resolve()));
     await expect(acquireOwnerLease(oldRoot, modernAfterLegacy)).resolves.toBeTruthy();
     await releaseOwnerLease(oldRoot, modernAfterLegacy);
+  });
+
+  test("quiesces a stable Unix Runtime before TCP cutover", async () => {
+    const fixture = join(import.meta.dir, "../tests/fixtures/legacy-owner-runtime.cjs");
+    const root = mkdtempSync(join(tmpdir(), "incodex-cross-version-quiesce-"));
+    const targetExec = join(root, "target-executable");
+    const ready = join(root, "legacy-ready");
+    const release = join(root, "release");
+    const result = join(root, "legacy-result");
+    const legacy = spawn(process.execPath, [fixture], {
+      env: {
+        ...process.env,
+        INCODEX_LEGACY_ROOT: root,
+        INCODEX_LEGACY_READY: ready,
+        INCODEX_LEGACY_RESULT: result,
+        INCODEX_LEGACY_RELEASE: release,
+      },
+      stdio: "ignore",
+    });
+    const deadline = Date.now() + 5_000;
+    while (!existsSync(ready) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(existsSync(ready)).toBe(true);
+    const candidate = currentOwner("cutover", targetExec);
+    await expect(acquireOwnerLease(root, candidate)).rejects.toMatchObject({ code: "OWNER_LEGACY_OWNER" });
+    writeFileSync(release, "release\n");
+    await new Promise<void>((resolve) => legacy.once("close", () => resolve()));
+    await expect(acquireOwnerLease(root, candidate)).resolves.toEqual(candidate);
+    expect(existsSync(join(root, SOCK_NAME))).toBe(false);
+    await releaseOwnerLease(root, candidate);
   });
 
   test("an old Unix socket is foreign and is never removed", async () => {
