@@ -7,6 +7,7 @@ use incodex_cli::legacy_migration::{
     migrate_legacy_if_needed, recover_legacy_ts_v1, recover_legacy_ts_v1_with_checkpoint,
 };
 use incodex_macos::{ditto, sign_app};
+use incodex_transaction::tree_digest;
 
 #[path = "support/legacy_fixture.rs"]
 mod legacy_fixture;
@@ -105,6 +106,31 @@ fn status_rejects_a_legacy_backup_with_a_modified_executable() {
         .unwrap()
         .write_all(b"tampered executable")
         .unwrap();
+
+    let report = incodex_cli::diagnose::diagnose_with_root(&fixture.app, &fixture.root);
+    assert_eq!(report.backup.unwrap()["complete"], false);
+}
+
+#[test]
+fn status_rejects_a_re_signed_legacy_backup_with_non_asar_tree_drift() {
+    let fixture = Fixture::create();
+    let target_dir = fs::read_dir(fixture.root.join("installations"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let manifest_path = target_dir.join(INSTALL_ID).join("manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    manifest["originalTreeDigest"] = serde_json::json!(tree_digest(&fixture.original_app).unwrap());
+    fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    fs::write(
+        fixture.original_app.join("Contents/Resources/foreign.txt"),
+        "foreign member",
+    )
+    .unwrap();
+    sign_app(&fixture.original_app).unwrap();
 
     let report = incodex_cli::diagnose::diagnose_with_root(&fixture.app, &fixture.root);
     assert_eq!(report.backup.unwrap()["complete"], false);
