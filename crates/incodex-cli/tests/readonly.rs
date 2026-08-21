@@ -1,4 +1,5 @@
 use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -503,6 +504,160 @@ fn doctor_json_names_interrupted_journals() {
     assert_eq!(txs[0]["installId"], "tx-contract");
     assert_eq!(txs[0]["phase"], "PATCHED");
     assert_eq!(txs[0]["action"], "rollback");
+}
+
+#[test]
+fn doctor_json_exposes_explicit_check_truth_and_unknown_signing() {
+    let home = isolated_home();
+    let app = home.join("Missing.app");
+    let (_status, stdout, stderr) = run(
+        &["doctor", "--json", "--app", app.to_str().unwrap()],
+        &home,
+    );
+    assert_eq!(stderr, "");
+    let report = parse_json(&stdout);
+    assert_eq!(report["checks"]["processIdentity"]["status"], "checked");
+    assert_eq!(report["checks"]["orphanSessions"]["status"], "checked");
+    assert_eq!(report["checks"]["runtime"]["status"], "checked");
+    assert_eq!(report["checks"]["signing"]["status"], "unknown");
+    assert!(report["checks"]["signing"]["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|finding| finding["code"] == "signing.not-checked"));
+    assert!(report["findings"].is_array());
+}
+
+#[test]
+fn doctor_json_classifies_owner_orphans_and_runtime_residue() {
+    let home = isolated_home();
+    let app = home.join("Missing.app");
+    let root = home.join(".incodex");
+    let target_id = "target-contract";
+    let state_root = root.join("targets").join(target_id);
+    fs::create_dir_all(&state_root).unwrap();
+    fs::write(
+        state_root.join("incognito.lock"),
+        serde_json::json!({
+            "pid": 999_999_999_i64,
+            "processStartIdentity": "never-started",
+            "execIdentity": "ChatGPT",
+            "token": "0123456789abcdef0123456789abcdef"
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let session_root = root
+        .join("sessions")
+        .join(target_id)
+        .join("s-orphan-contract");
+    fs::create_dir_all(session_root.join("chromium")).unwrap();
+    let metadata = fs::symlink_metadata(&session_root).unwrap();
+    fs::write(
+        session_root.join("owner.json"),
+        serde_json::json!({
+            "sessionId": "s-orphan-contract",
+            "pid": 999_999_999_i64,
+            "ino": metadata.ino(),
+            "dev": metadata.dev()
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let release = root.join("runtime/releases/0.3.1");
+    fs::create_dir_all(&release).unwrap();
+    std::os::unix::fs::symlink(
+        home.join("outside-runtime"),
+        release.join("incodex-main.cjs"),
+    )
+    .unwrap();
+    fs::write(
+        root.join("runtime/current.json"),
+        serde_json::json!({
+            "schemaVersion": 1,
+            "version": "0.3.1",
+            "release": "releases/0.3.1",
+            "files": { "incodex-main.cjs": "00".repeat(32) }
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let (_status, stdout, stderr) = run(
+        &["doctor", "--json", "--app", app.to_str().unwrap()],
+        &home,
+    );
+    assert_eq!(stderr, "");
+    let report = parse_json(&stdout);
+    assert_eq!(report["stalePid"], true);
+    assert_eq!(report["checks"]["processIdentity"]["status"], "checked");
+    assert_eq!(report["checks"]["orphanSessions"]["status"], "checked");
+    assert!(report["orphanSessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|path| path.as_str().unwrap().contains("s-orphan-contract")));
+    assert_eq!(report["checks"]["runtime"]["status"], "checked");
+    assert!(report["checks"]["runtime"]["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|finding| finding["code"] == "runtime.symlink"));
+}
+
+#[test]
+fn doctor_json_keeps_malformed_legacy_and_stale_committed_journals_visible() {
+    let home = isolated_home();
+    let app = home.join("Missing.app");
+    let tx_dir = home.join(".incodex").join("transactions");
+    fs::create_dir_all(&tx_dir).unwrap();
+    fs::write(tx_dir.join("malformed.json"), b"{not-json\n").unwrap();
+    fs::write(
+        tx_dir.join("legacy.json"),
+        serde_json::json!({ "schemaVersion": 99, "installId": "legacy" }).to_string(),
+    )
+    .unwrap();
+    fs::write(
+        tx_dir.join("committed.json"),
+        serde_json::json!({
+            "schemaVersion": 1,
+            "installId": "committed",
+            "targetRealPath": app.to_str().unwrap(),
+            "stagedApp": home.join("staged").to_str().unwrap(),
+            "originalSnapshot": home.join("original").to_str().unwrap(),
+            "phase": "COMMITTED",
+            "updatedAt": "2026-01-01T00:00:00.000Z"
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let (_status, stdout, stderr) = run(
+        &["doctor", "--json", "--app", app.to_str().unwrap()],
+        &home,
+    );
+    assert_eq!(stderr, "");
+    let report = parse_json(&stdout);
+    let records = report["journalRecords"].as_array().unwrap();
+    assert!(records.iter().any(|record| {
+        record["kind"] == "malformed" && record["path"].as_str().unwrap().contains("malformed.json")
+    }));
+    assert!(records.iter().any(|record| {
+        record["kind"] == "unrecognizedLegacy"
+            && record["path"].as_str().unwrap().contains("legacy.json")
+    }));
+    assert!(records.iter().any(|record| {
+        record["kind"] == "staleCommitted"
+            && record["installId"] == "committed"
+    }));
+    assert_eq!(report["checks"]["journals"]["status"], "checked");
+    assert!(report["checks"]["journals"]["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|finding| finding["code"] == "journal.malformed"));
 }
 
 #[test]
