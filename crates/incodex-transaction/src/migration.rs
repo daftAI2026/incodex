@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use incodex_core::canonical::inspect_target;
@@ -49,7 +50,11 @@ pub fn adopt_legacy_committed_locked(
         return Err("legacy migration target identity changed before v2 adoption".into());
     }
     let paths = tx_paths(root, &input.install_id);
-    if let Ok(existing) = load_v2(root, &input.install_id) {
+    validate_path_ancestors(
+        root,
+        &format!("transactions/{}/journal.json", input.install_id),
+    )?;
+    if let Some(existing) = load_existing_v2(root, &input.install_id)? {
         if existing.phase != "COMMITTED"
             || existing.target.real_path != input.real_path.display().to_string()
         {
@@ -147,6 +152,21 @@ pub fn adopt_legacy_committed_locked(
     };
     write_journal(root, &journal)?;
     load_v2(root, &input.install_id)
+}
+
+fn load_existing_v2(root: &Path, install_id: &str) -> Result<Option<JournalV2>, String> {
+    let path = tx_paths(root, install_id).journal;
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            Err("existing v2 journal is a symlink".into())
+        }
+        Ok(metadata) if !metadata.is_file() => Err("existing v2 journal is not a file".into()),
+        Ok(_) => load_v2(root, install_id)
+            .map(Some)
+            .map_err(|error| format!("existing v2 journal is invalid: {error}")),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("cannot inspect existing v2 journal: {error}")),
+    }
 }
 
 fn flush_adopted_backup(tree: &Path, transaction_dir: &Path) -> Result<(), String> {
