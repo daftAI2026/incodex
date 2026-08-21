@@ -186,6 +186,24 @@ mod tests {
             .any(|path| path == &tree));
         let _ = fs::remove_dir_all(root);
     }
+
+    #[test]
+    fn adopted_backup_flushes_the_transactions_parent_before_commit() {
+        let root = std::env::temp_dir().join(format!(
+            "incodex-migration-parent-sync-{}",
+            std::process::id()
+        ));
+        let transaction_dir = root.join("transactions/id");
+        let tree = transaction_dir.join("original/ChatGPT.app");
+        fs::create_dir_all(tree.join("Contents")).unwrap();
+        fs::write(tree.join("Contents/Info.plist"), b"plist").unwrap();
+        crate::durable::reset_sync_trace();
+        flush_adopted_backup(&tree, &transaction_dir).unwrap();
+        assert!(crate::durable::sync_trace()
+            .iter()
+            .any(|path| path == &root.join("transactions")));
+        let _ = fs::remove_dir_all(root);
+    }
 }
 
 fn verify_file_hash(path: &Path, expected: &str, label: &str) -> Result<(), String> {
