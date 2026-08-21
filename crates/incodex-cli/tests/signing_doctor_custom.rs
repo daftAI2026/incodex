@@ -24,6 +24,7 @@ struct Fixture {
     root: PathBuf,
     app: PathBuf,
     fake_bin: PathBuf,
+    display_count: PathBuf,
 }
 
 impl Fixture {
@@ -39,6 +40,7 @@ impl Fixture {
         let app = root.join("ThirdParty.app");
         let nested = app.join("Contents/Frameworks/NestedVendor.xpc");
         let fake_bin = root.join("fake-bin");
+        let display_count = root.join("display-count");
         fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
         fs::create_dir_all(nested.join("Contents/_CodeSignature")).unwrap();
         fs::create_dir_all(&fake_bin).unwrap();
@@ -68,6 +70,8 @@ if [ "$1" = "--display" ] && [ "$2" = "--verbose=2" ]; then
   exit 0
 fi
 if [ "$1" = "--display" ] && [ "$2" = "--verbose=4" ]; then
+  count="$(cat "$INCODEX_CODESIGN_DISPLAY_COUNT" 2>/dev/null || echo 0)"
+  echo $((count + 1)) > "$INCODEX_CODESIGN_DISPLAY_COUNT"
   case "$target" in
     *NestedVendor.xpc) printf '%s\n' 'Identifier=com.example.vendor' 'TeamIdentifier=2DC432GLL2' 'Authority=Developer ID Application: fixture' ;;
     *) printf '%s\n' 'Identifier=com.example.third-party' 'TeamIdentifier=THIRDPARTY' 'Authority=Developer ID Application: third-party fixture' ;;
@@ -86,6 +90,7 @@ exit 0
             root,
             app,
             fake_bin,
+            display_count,
         }
     }
 
@@ -112,11 +117,19 @@ fn doctor_uses_generic_acceptance_for_an_unpatched_custom_bundle() {
     let original_path = std::env::var_os("PATH");
     let _path_guard = PathGuard(original_path);
     std::env::set_var("PATH", fixture.path());
+    std::env::set_var("INCODEX_CODESIGN_DISPLAY_COUNT", &fixture.display_count);
 
     let report = serde_json::to_value(diagnose_with_root(&fixture.app, &fixture.root)).unwrap();
+    let display_count = fs::read_to_string(&fixture.display_count)
+        .unwrap()
+        .trim()
+        .parse::<u32>()
+        .unwrap();
+    std::env::remove_var("INCODEX_CODESIGN_DISPLAY_COUNT");
     let signing = &report["signing"];
     assert_eq!(signing["verified"], true);
     assert_eq!(signing["outer"]["kind"], "other");
+    assert_eq!(display_count, 2, "Doctor should inspect outer and nested components once");
     assert!(!report["checks"]["signing"]["findings"]
         .as_array()
         .unwrap()
