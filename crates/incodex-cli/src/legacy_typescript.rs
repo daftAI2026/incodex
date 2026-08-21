@@ -231,6 +231,12 @@ fn enumerate_target_journals(
         let path = entry.path();
         validate_storage_path(root, &path, "legacy transaction journal")?;
         let journal: TransactionJournal = read_json(&path, "legacy transaction journal")?;
+        if journal.target_real_path.is_empty() {
+            return Err(format!(
+                "legacy journal targetRealPath is empty: {}",
+                path.display()
+            ));
+        }
         if canonical_path(&journal.target_real_path) != target_real_path {
             continue;
         }
