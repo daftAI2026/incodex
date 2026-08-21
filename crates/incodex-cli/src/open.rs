@@ -296,7 +296,7 @@ pub fn wait_and_burn(
         user_root,
         retry_delay_ms,
         spawn_plan,
-        |root, expected| burn_session_home(root, expected).map_err(|err| err),
+        |root, expected| burn_session_home(root, expected),
     )
 }
 
@@ -437,7 +437,7 @@ pub fn wait_and_burn_with<S, B>(
 ) -> Result<(OpenProcessResult, CleanupResult), String>
 where
     S: FnOnce(&OpenPlan) -> Result<OpenProcessResult, String>,
-    B: FnMut(&Path, &BurnExpected<'_>) -> Result<(), String>,
+    B: FnMut(&Path, &BurnExpected<'_>) -> Result<bool, String>,
 {
     let process = match spawn(plan) {
         Ok(process) => process,
@@ -460,22 +460,42 @@ fn burn_with_retries<B>(
     burn: &mut B,
 ) -> CleanupResult
 where
-    B: FnMut(&Path, &BurnExpected<'_>) -> Result<(), String>,
+    B: FnMut(&Path, &BurnExpected<'_>) -> Result<bool, String>,
 {
     let mut reason = "session directory still present".to_string();
+    let mut original_removed = false;
+    let late_expected = BurnExpected {
+        user_root: expected.user_root,
+        session_id: expected.session_id,
+        ino: None,
+        dev: None,
+    };
     for attempt in 1u8..=5 {
-        if let Err(error) = burn(session_root, expected) {
-            reason = error;
-            if attempt == 5 {
-                return if session_root.exists() {
-                    CleanupResult::Retained {
-                        attempts: attempt,
-                        retained_path: session_root.to_path_buf(),
-                        reason,
-                    }
-                } else {
-                    CleanupResult::Removed { attempts: attempt }
-                };
+        let attempt_expected = if original_removed {
+            &late_expected
+        } else {
+            expected
+        };
+        match burn(session_root, attempt_expected) {
+            Ok(removed) => {
+                // +--------------------------------------------------------------------+
+                // | 只有本次已证明删除创建时 root，后续重建才允许路径证明 fallback。 |
+                // +--------------------------------------------------------------------+
+                original_removed |= removed;
+            }
+            Err(error) => {
+                reason = error;
+                if attempt == 5 {
+                    return if session_root.exists() {
+                        CleanupResult::Retained {
+                            attempts: attempt,
+                            retained_path: session_root.to_path_buf(),
+                            reason,
+                        }
+                    } else {
+                        CleanupResult::Removed { attempts: attempt }
+                    };
+                }
             }
         }
         if !session_root.exists() {

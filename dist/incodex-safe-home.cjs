@@ -9,6 +9,7 @@ exports.writePrivateFile = writePrivateFile;
 exports.exclusiveCopyFile = exclusiveCopyFile;
 exports.createSessionHome = createSessionHome;
 exports.burnSessionHome = burnSessionHome;
+exports.cleanupExpectedForAttempt = cleanupExpectedForAttempt;
 exports.copySettings = copySettings;
 exports.resolveSourceHome = resolveSourceHome;
 exports.isManagedSessionHome = isManagedSessionHome;
@@ -199,7 +200,7 @@ function burnSessionHome(target, expected) {
     const home = sessionRootFromHome(target);
     const stats = assertNotSymlink(home, "session root");
     if (!stats)
-        return;
+        return false;
     if (!stats.isDirectory()) {
         throw new Error(`[incodex] refuse to burn non-directory: ${home}`);
     }
@@ -214,6 +215,16 @@ function burnSessionHome(target, expected) {
     assertInsideParent(realHome, sessions);
     assertBurnIdentity(home, expected);
     fs.rmSync(home, { recursive: true, force: false });
+    return true;
+}
+function cleanupExpectedForAttempt(expected, originalRemoved) {
+    if (!originalRemoved)
+        return expected;
+    // +--------------------------------------------------------------------+
+    // | 只有删除过有 inode/dev 证明的原 root，才允许同一路径重建后降级。 |
+    // +--------------------------------------------------------------------+
+    const { ino: _ino, dev: _dev, ...late } = expected;
+    return late;
 }
 function copySettings(home, sourceHome) {
     const homeStat = assertNotSymlink(home, "session home");
@@ -257,13 +268,14 @@ function sweepOrphanSessions(userRoot, options = {}) {
                 continue;
             if (!Number.isSafeInteger(owner.ino) || !Number.isSafeInteger(owner.dev))
                 continue;
-            burnSessionHome(root, {
+            const removed = burnSessionHome(root, {
                 userRoot,
                 sessionId: owner.sessionId,
                 ino: owner.ino,
                 dev: owner.dev,
             });
-            swept += 1;
+            if (removed)
+                swept += 1;
         }
         catch {
             /* leave it if we cannot prove it is safe */

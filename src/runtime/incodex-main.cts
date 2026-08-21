@@ -456,9 +456,12 @@ async function launchIncognitoOnce() {
         ino: session.ino,
         dev: session.dev,
       };
+      let originalRemoved = false;
       const tryBurn = (attempt) => {
+        const attemptExpected = safeHome.cleanupExpectedForAttempt(expected, originalRemoved);
         try {
-          safeHome.burnSessionHome(session.root, expected);
+          const removed = safeHome.burnSessionHome(session.root, attemptExpected);
+          if (removed) originalRemoved = true;
         } catch (error) {
           if (attempt < 5) {
             setTimeout(() => tryBurn(attempt + 1), 250 * attempt);

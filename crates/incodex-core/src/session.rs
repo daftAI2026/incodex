@@ -102,10 +102,10 @@ pub fn copy_settings(home: &Path, source_home: &Path) -> Result<usize, String> {
     Ok(copied)
 }
 
-pub fn burn_session_home(target: &Path, expected: &BurnExpected<'_>) -> Result<(), String> {
+pub fn burn_session_home(target: &Path, expected: &BurnExpected<'_>) -> Result<bool, String> {
     let home = session_root_from_home(target);
     let stats = match assert_not_symlink(&home, "session root")? {
-        None => return Ok(()),
+        None => return Ok(false),
         Some(stats) => stats,
     };
     if !stats.is_dir() {
@@ -126,7 +126,7 @@ pub fn burn_session_home(target: &Path, expected: &BurnExpected<'_>) -> Result<(
     assert_inside_parent(&real_home, &sessions)?;
     assert_burn_identity(&home, expected)?;
     fs::remove_dir_all(&home).map_err(|err| err.to_string())?;
-    Ok(())
+    Ok(true)
 }
 
 pub fn sweep_orphan_sessions(user_root: &Path, target_id: Option<&str>) -> usize {
@@ -177,7 +177,7 @@ pub fn sweep_orphan_sessions(user_root: &Path, target_id: Option<&str>) -> usize
             ino: Some(ino),
             dev: Some(dev),
         };
-        if burn_session_home(&root, &expected).is_ok() {
+        if burn_session_home(&root, &expected).is_ok_and(|removed| removed) {
             swept += 1;
         }
     }
