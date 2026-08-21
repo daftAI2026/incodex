@@ -289,25 +289,9 @@ describe("kernel-held TCP owner lease", () => {
     }
   });
 
-  test("new TCP and stable Unix Runtime have one owner in either launch order", async () => {
+  test("stable Unix Runtime must quiesce before TCP cutover", async () => {
     const fixture = join(import.meta.dir, "../tests/fixtures/legacy-owner-runtime.cjs");
     const targetExec = join(mkdtempSync(join(tmpdir(), "incodex-cross-version-target-")), "target-executable");
-    const newRoot = mkdtempSync(join(tmpdir(), "incodex-cross-version-new-first-"));
-    const newResult = join(newRoot, "legacy-result");
-    const release = join(newRoot, "release");
-    const modern = currentOwner("modern-first", targetExec);
-    await acquireOwnerLease(newRoot, modern);
-    const legacyAfterModern = spawn(process.execPath, [fixture], {
-      env: { ...process.env, INCODEX_LEGACY_ROOT: newRoot, INCODEX_LEGACY_RESULT: newResult, INCODEX_LEGACY_RELEASE: release },
-      stdio: "ignore",
-    });
-    const deadline = Date.now() + 5_000;
-    while (!existsSync(newResult) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(readFileSync(newResult, "utf8").trim()).toBe("UNIX_BLOCKED");
-    expect(await connectExisting(newRoot, 500, modern.token)).toBe(true);
-    legacyAfterModern.kill("SIGKILL");
-    await releaseOwnerLease(newRoot, modern);
-
     const oldRoot = mkdtempSync(join(tmpdir(), "incodex-cross-version-old-first-"));
     const oldResult = join(oldRoot, "legacy-result");
     const oldRelease = join(oldRoot, "release");
