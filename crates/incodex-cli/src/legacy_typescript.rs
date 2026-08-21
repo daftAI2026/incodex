@@ -58,6 +58,9 @@ pub struct InstallManifest {
     pub runtime_version: String,
     pub created_at: String,
     pub transaction_state: String,
+    /// Newer writers seal the complete backup tree; old v1 records may omit it.
+    #[serde(default)]
+    pub original_tree_digest: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]

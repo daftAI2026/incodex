@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use incodex_asar::{pack_dir, patch_asar, Archive};
 use incodex_core::{canonical_path, target_id};
 use incodex_macos::{ditto, read_architecture, sign_app};
+use incodex_transaction::tree_digest;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
@@ -86,7 +87,8 @@ impl Fixture {
                     "originalPlistFileHash": original_plist, "patchedAsarHeaderHash": patched_header,
                     "patchedAsarFileHash": patched_file, "originalMain": "index.js",
                     "runtimeVersion": "0.2.0", "createdAt": "2026-08-20T00:00:00.000Z",
-                    "transactionState": "committed"
+                    "transactionState": "committed",
+                    "originalTreeDigest": tree_digest(&original_app).unwrap()
                 })
             ),
         )
