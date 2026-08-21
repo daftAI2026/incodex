@@ -88,12 +88,16 @@ function burnIncognitoHome() {
         return;
     }
     try {
-        safeHome.burnSessionHome(home, {
+        const expected = {
             userRoot: USER_ROOT,
             sessionId: session.sessionId,
             ino: session.ino,
             dev: session.dev,
-        });
+        };
+        const removed = safeHome.burnSessionHome(home, expected);
+        if (removed && !safeHome.writeBurnProof(home, expected)) {
+            logLaunch("burn-proof-write-failed", { home });
+        }
         logLaunch("burn", { home });
     }
     catch (error) {
@@ -460,7 +464,8 @@ async function launchIncognitoOnce() {
                 ino: session.ino,
                 dev: session.dev,
             };
-            let originalRemoved = false;
+            const childProof = safeHome.readBurnProof(session.root, USER_ROOT, session.sessionId);
+            let originalRemoved = Boolean(childProof && childProof.ino === expected.ino && childProof.dev === expected.dev);
             const tryBurn = (attempt) => {
                 const attemptExpected = safeHome.cleanupExpectedForAttempt(expected, originalRemoved);
                 try {
@@ -478,8 +483,11 @@ async function launchIncognitoOnce() {
                 }
                 // Thread-writer / plugin cache can recreate the folder after a
                 // successful rm. Keep sweeping for a short window.
-                if (attempt < 5 && fs.existsSync(session.root)) {
+                if (attempt < 5 && (originalRemoved || fs.existsSync(session.root))) {
                     setTimeout(() => tryBurn(attempt + 1), 400 * attempt);
+                }
+                else if (!fs.existsSync(session.root)) {
+                    safeHome.clearBurnProof(USER_ROOT, session.sessionId);
                 }
             };
             tryBurn(1);
