@@ -428,7 +428,15 @@ function clearOwnerLock(stateRoot, expectedOwner) {
     const beforeMetadata = ownerLockMetadata(file);
     if (current.kind !== "valid" || !sameOwnerToken(current.owner, expectedOwner) || !beforeMetadata)
         return false;
-    const claim = acquireTakeoverClaim(stateRoot);
+    let claim;
+    try {
+        claim = acquireTakeoverClaim(stateRoot);
+    }
+    catch (error) {
+        if (error?.code === "OWNER_FOREIGN_CLAIM")
+            return false;
+        throw error;
+    }
     if (!claim)
         return false;
     try {
@@ -549,6 +557,10 @@ function acquireOwnerLease(stateRoot, owner) {
     }
     let sawUnreadable = false;
     for (let attempt = 0; attempt < OWNER_RETRY_COUNT; attempt += 1) {
+        const claim = readTakeoverClaimState(stateRoot);
+        if (claim.kind === "foreign") {
+            throw new OwnerLeaseError("OWNER_FOREIGN_CLAIM", claim.reason);
+        }
         try {
             writeOwnerLock(stateRoot, owner);
             const current = readOwnerLock(stateRoot);
