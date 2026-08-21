@@ -418,8 +418,22 @@ where
 }
 
 fn snapshot_original(tx: &mut Engine, app: &Path, original: &Path) -> Result<(), String> {
-    ditto(app, original)?;
-    tx.mark_backup_committed()
+    if let Err(error) = ditto(app, original) {
+        return Err(rollback_snapshot_failure(tx, error));
+    }
+    if let Err(error) = tx.mark_backup_committed() {
+        return Err(rollback_snapshot_failure(tx, error));
+    }
+    Ok(())
+}
+
+fn rollback_snapshot_failure(tx: &mut Engine, error: String) -> String {
+    match tx.abort_discovered_snapshot() {
+        Ok(()) => error,
+        Err(rollback) => format!(
+            "{error}; failed to roll back rejected snapshot transaction: {rollback}"
+        ),
+    }
 }
 
 fn inspect_existing_install(

@@ -175,6 +175,19 @@ impl Engine {
         self.advance("BACKUP_COMMITTED")
     }
 
+    pub fn abort_discovered_snapshot(&mut self) -> Result<(), String> {
+        if self.journal.phase != "DISCOVERED" {
+            return Err(format!(
+                "cannot abort original snapshot in phase {}",
+                self.journal.phase
+            ));
+        }
+        reconstructed(&self.root, &self.journal)?;
+        validate_recovery_proofs(&self.journal)?;
+        cleanup_pre_swap(&self.root, &self.journal)?;
+        self.advance("ROLLED_BACK")
+    }
+
     pub fn swap(&mut self) -> Result<(), String> {
         self.swap_with_checkpoint(|_| {})
     }
