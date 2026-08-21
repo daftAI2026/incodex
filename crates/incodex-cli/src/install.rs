@@ -11,8 +11,8 @@ use incodex_macos::{
 };
 use incodex_runtime_bundle::{loader_source, publish, runtime_version};
 use incodex_transaction::{
-    journal_v2, migrate_legacy_committed, recover_with, restore_committed, Engine, Recovery,
-    TxError,
+    acquire_target_lock, journal_v2, migrate_legacy_committed, recover_with, restore_committed,
+    Engine, Recovery, TxError,
 };
 
 use crate::legacy_migration::{migrate_legacy_if_needed, recover_legacy_ts_v1};
@@ -267,13 +267,23 @@ fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<Comma
         }
     }
     if let Some(journal) = migrated {
-        return Ok(CommandResult {
-            skipped: true,
-            install_id: Some(journal.install_id),
-            runtime_version: Some(published.version),
-            app: app.display().to_string(),
-            warning: None,
-        });
+        // Migration released its proof lock before returning.  Reclassify the
+        // target while holding a fresh lock: an official upgrade between those
+        // boundaries must not turn a stale `migrated` result into "Already
+        // current".  Only the still-bound marker may short-circuit install.
+        let _lock = acquire_target_lock(root, app, "migration-recheck", Some(&journal.install_id))?;
+        let latest = migrate_legacy_if_needed(root, app)?;
+        if latest.is_some()
+            && crate::legacy_migration::legacy_marker_matches_for_install(app, &journal.install_id)
+        {
+            return Ok(CommandResult {
+                skipped: true,
+                install_id: Some(journal.install_id),
+                runtime_version: Some(published.version),
+                app: app.display().to_string(),
+                warning: None,
+            });
+        }
     }
     let mut tx = Engine::begin(root, app, "install")?;
     let install_id = tx.install_id().to_string();
