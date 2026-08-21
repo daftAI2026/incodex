@@ -125,6 +125,22 @@ function pauseBeforeTakeoverUnlink() {
   }
 }
 
+function pauseBeforeReclaimHandoff() {
+  const pauseFile = process.env.INCODEX_TEST_RECLAIM_HANDOFF_PAUSE_FILE;
+  const releaseFile = process.env.INCODEX_TEST_RECLAIM_HANDOFF_RELEASE_FILE;
+  if (!pauseFile || !releaseFile) return;
+  try {
+    fs.writeFileSync(pauseFile, `${process.pid}\n`, { flag: "wx", mode: 0o600 });
+  } catch {
+    return;
+  }
+  const deadline = Date.now() + 5000;
+  const waiter = new Int32Array(new SharedArrayBuffer(4));
+  while (!fs.existsSync(releaseFile) && Date.now() < deadline) {
+    Atomics.wait(waiter, 0, 0, 5);
+  }
+}
+
 function writeAtomicRecord(file, value) {
   const temp = path.join(
     path.dirname(file),
@@ -364,6 +380,7 @@ function acquireReclaimMarker(stateRoot) {
       stateRoot,
       `.${TAKEOVER_CLAIM_NAME}.reclaim.stale.${process.pid}.${Date.now()}.${crypto.randomBytes(8).toString("hex")}`,
     );
+    pauseBeforeReclaimHandoff();
     try {
       fs.renameSync(marker, staleMarker);
     } catch (error) {

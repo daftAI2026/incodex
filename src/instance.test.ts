@@ -300,33 +300,54 @@ describe("cross-process owner contention", () => {
   test("twenty OS processes produce one winner and never steal its lease", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-os-contenders-"));
     const barrier = join(root, "start");
+    const readyRoot = join(root, "ready");
+    const doneRoot = join(root, "done");
+    const releaseFile = join(root, "release");
+    mkdirSync(readyRoot);
+    mkdirSync(doneRoot);
     const modulePath = join(import.meta.dir, "runtime/incodex-instance.cts");
     const worker = String.raw`
-      const { existsSync } = require("node:fs");
+      const { existsSync, writeFileSync } = require("node:fs");
+      const { join } = require("node:path");
       const instance = require(process.env.INCODEX_TEST_MODULE);
       const root = process.env.INCODEX_TEST_ROOT;
       const barrier = process.env.INCODEX_TEST_BARRIER;
+      const readyRoot = process.env.INCODEX_TEST_READY_ROOT;
+      const doneRoot = process.env.INCODEX_TEST_DONE_ROOT;
+      const releaseFile = process.env.INCODEX_TEST_RELEASE_FILE;
+      const index = process.env.INCODEX_TEST_INDEX;
+      writeFileSync(join(readyRoot, index), "ready\n");
       while (!existsSync(barrier)) {
         const until = Date.now() + 5;
         while (Date.now() < until) {}
       }
       const owner = instance.currentOwner("worker", process.execPath);
+      let exitCode = 0;
       try {
         instance.acquireOwnerLease(root, owner);
         process.stdout.write("WINNER\n");
-        setTimeout(() => process.exit(0), 1500);
       } catch (error) {
         process.stdout.write(String(error.code || "ERROR") + "\n");
-        process.exit(error.code === "OWNER_BUSY" || error.code === "OWNER_RACE" ? 2 : 3);
+        exitCode = error.code === "OWNER_BUSY" || error.code === "OWNER_RACE" ? 2 : 3;
       }
+      writeFileSync(join(doneRoot, index), "done\n");
+      const waiter = new Int32Array(new SharedArrayBuffer(4));
+      while (!existsSync(releaseFile)) {
+        Atomics.wait(waiter, 0, 0, 5);
+      }
+      process.exit(exitCode);
     `;
-    const children = Array.from({ length: 20 }, () =>
+    const children = Array.from({ length: 20 }, (_, index) =>
       spawn(process.execPath, ["-e", worker], {
         env: {
           ...process.env,
           INCODEX_TEST_MODULE: modulePath,
           INCODEX_TEST_ROOT: root,
           INCODEX_TEST_BARRIER: barrier,
+          INCODEX_TEST_READY_ROOT: readyRoot,
+          INCODEX_TEST_DONE_ROOT: doneRoot,
+          INCODEX_TEST_RELEASE_FILE: releaseFile,
+          INCODEX_TEST_INDEX: String(index),
         },
         stdio: ["ignore", "pipe", "pipe"],
       }),
@@ -342,13 +363,25 @@ describe("cross-process owner contention", () => {
           child.once("error", (error) => resolve({ code: 3, stdout, stderr: String(error) }));
         }),
     );
+    const waitForCount = async (directory: string, expected: number) => {
+      const deadline = Date.now() + 5000;
+      while (readdirSync(directory).length < expected && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      return readdirSync(directory).length === expected;
+    };
+    const allReady = await waitForCount(readyRoot, children.length);
     writeFileSync(barrier, "go\n");
+    const allDone = await waitForCount(doneRoot, children.length);
+    writeFileSync(releaseFile, "release\n");
     const completed = await Promise.all(results);
     const winners = completed.filter((result) => result.stdout.trim() === "WINNER");
     const rejected = completed.filter((result) => ["OWNER_BUSY", "OWNER_RACE"].includes(result.stdout.trim()));
 
     expect(winners).toHaveLength(1);
     expect(rejected).toHaveLength(19);
+    expect(allReady).toBe(true);
+    expect(allDone).toBe(true);
     expect(completed.every((result) => result.code === 0 || result.code === 2)).toBe(true);
     expect(completed.every((result) => result.stderr === "")).toBe(true);
   });
@@ -516,7 +549,7 @@ describe("cross-process owner contention", () => {
       }),
     );
     writeFileSync(
-      join(reclaimRoot, "owner"),
+      join(reclaimRoot, "marker.00000000000001"),
       JSON.stringify({
         pid: 999999,
         startedAt: "never",
@@ -540,7 +573,115 @@ describe("cross-process owner contention", () => {
     acquireOwnerLease(root, replacement);
 
     expect(readOwnerLock(root)?.token).toBe(replacement.token);
-    expect(!existsSync(claimRoot) || !readdirSync(claimRoot).includes(".reclaim")).toBe(true);
+    expect(!existsSync(claimRoot) || !readdirSync(join(claimRoot, ".reclaim")).some((name) => name.startsWith("marker."))).toBe(
+      true,
+    );
+  });
+
+  test("a reclaimer cannot hand off a marker that another process replaced", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-reclaim-marker-window-"));
+    const claimRoot = join(root, ".incognito.lock.takeover");
+    const reclaimRoot = join(claimRoot, ".reclaim");
+    const pauseFile = join(root, "reclaim-paused");
+    const releaseFile = join(root, "reclaim-release");
+    const modulePath = join(import.meta.dir, "runtime/incodex-instance.cts");
+    mkdirSync(reclaimRoot, { recursive: true });
+    writeFileSync(
+      join(claimRoot, "owner"),
+      JSON.stringify({
+        pid: 999999,
+        startedAt: "never",
+        processStartIdentity: "never",
+        execIdentity: "/nope",
+        token: "stale-claim-token",
+      }),
+    );
+    writeFileSync(
+      join(root, LOCK_NAME),
+      JSON.stringify({
+        pid: 999999,
+        startedAt: "never",
+        execPath: "/nope",
+        sessionId: "stale",
+        token: "stale-token",
+      }),
+    );
+    writeFileSync(
+      join(reclaimRoot, "owner"),
+      JSON.stringify({
+        pid: 999999,
+        startedAt: "never",
+        processStartIdentity: "never",
+        execIdentity: "/nope",
+        token: "stale-reclaimer-token",
+      }),
+    );
+
+    const worker = String.raw`
+      const instance = require(process.env.INCODEX_TEST_MODULE);
+      const root = process.env.INCODEX_TEST_ROOT;
+      const owner = instance.currentOwner("reclaim-marker-cleaner", process.execPath);
+      try {
+        instance.acquireOwnerLease(root, owner);
+        process.stdout.write("UNEXPECTED_WINNER\n");
+        process.exit(3);
+      } catch (error) {
+        process.stdout.write(String(error.code || "ERROR") + "\n");
+        process.exit(error.code === "OWNER_BUSY" || error.code === "OWNER_RACE" ? 0 : 2);
+      }
+    `;
+    const child = spawn(process.execPath, ["-e", worker], {
+      env: {
+        ...process.env,
+        INCODEX_TEST_MODULE: modulePath,
+        INCODEX_TEST_ROOT: root,
+        INCODEX_TEST_RECLAIM_HANDOFF_PAUSE_FILE: pauseFile,
+        INCODEX_TEST_RECLAIM_HANDOFF_RELEASE_FILE: releaseFile,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let closed = false;
+    child.stdout?.on("data", (chunk) => (stdout += String(chunk)));
+    child.stderr?.on("data", (chunk) => (stderr += String(chunk)));
+    const closePromise = new Promise<{ code: number | null }>((resolve) => {
+      child.once("close", (code) => {
+        closed = true;
+        resolve({ code });
+      });
+      child.once("error", () => {
+        closed = true;
+        resolve({ code: 2 });
+      });
+    });
+
+    try {
+      const deadline = Date.now() + 3000;
+      while (!existsSync(pauseFile) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(existsSync(pauseFile)).toBe(true);
+      if (!existsSync(pauseFile)) return;
+
+      const oldReclaim = join(claimRoot, ".reclaim");
+      const quarantined = join(root, ".reclaim-before-replacement");
+      renameSync(oldReclaim, quarantined);
+      mkdirSync(oldReclaim);
+      const replacement = currentOwner("replacement-reclaimer", process.execPath);
+      writeFileSync(join(oldReclaim, "owner"), JSON.stringify(replacement));
+      writeFileSync(releaseFile, "release\n");
+
+      const result = await closePromise;
+      expect(result.code).toBe(0);
+      expect(["OWNER_BUSY", "OWNER_RACE"]).toContain(stdout.trim());
+      expect(stderr).toBe("");
+      expect(readFileSync(join(oldReclaim, "owner"), "utf8")).toContain(replacement.token);
+    } finally {
+      writeFileSync(releaseFile, "release\n");
+      if (!closed) child.kill();
+      await closePromise;
+    }
   });
 
   test("a stale claim cleaner cannot remove a replacement claim in its unlink window", async () => {
