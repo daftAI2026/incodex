@@ -168,6 +168,32 @@ fn recovery_rejects_foreign_electron_integrity_entries_after_resign() {
 }
 
 #[test]
+fn recovery_rejects_a_wrong_app_asar_integrity_hash_after_resign() {
+    let fixture = Fixture::create();
+    fixture.set_phase("SWAPPED");
+    let plist = fixture.app.join("Contents/Info.plist");
+    let integrity = serde_json::json!({
+        "Resources/app.asar": {"algorithm": "SHA256", "hash": "wrong"}
+    });
+    let status = Command::new("plutil")
+        .args([
+            "-replace",
+            "ElectronAsarIntegrity",
+            "-json",
+            &serde_json::to_string(&integrity).unwrap(),
+            "--",
+        ])
+        .arg(&plist)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    sign_app(&fixture.app).unwrap();
+
+    let result = recover_legacy_ts_v1(&fixture.root, INSTALL_ID);
+    assert!(result.is_err(), "wrong app.asar integrity hash must fail closed");
+}
+
+#[test]
 fn status_rejects_a_legacy_backup_with_a_modified_executable() {
     let fixture = Fixture::create();
     fs::OpenOptions::new()
