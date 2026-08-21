@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use incodex_core::canonical::canonical_path;
 use incodex_macos::{ditto, verify_app};
-use incodex_transaction::{acquire_target_lock, JournalV2};
+use incodex_transaction::{acquire_target_lock, journal_v2, JournalV2};
 
 use crate::legacy_proof::LegacyProvenState;
 use crate::legacy_typescript::{
@@ -22,6 +22,14 @@ pub fn migrate_legacy_if_needed(root: &Path, target: &Path) -> Result<Option<Jou
     };
     match state.state {
         LegacyState::Committed { .. } => {
+            // Native uninstall preserves the legacy record for rollback/audit, but
+            // leaves a rolled-back v2 journal.  Do not re-prove the now-clean app
+            // as a legacy patched target on a later invocation.
+            if let Ok(native) = journal_v2(root, &state.install_id) {
+                if native.phase == "ROLLED_BACK" {
+                    return Ok(None);
+                }
+            }
             let proven = crate::legacy_proof::prove_legacy_ts_v1(root, state)?;
             migrate_legacy_ts_v1(root, proven).map(Some)
         }
