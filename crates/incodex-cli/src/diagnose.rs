@@ -407,8 +407,10 @@ fn inspect_backup(
         .join(install_id)
         .join(&journal.paths.original);
     let belongs_to_target = target == journal_target;
-    let complete = journal.phase == "COMMITTED";
-    let original_exists = original.exists();
+    let complete_phase = journal.phase == "COMMITTED";
+    let original_exists = fs::symlink_metadata(&original)
+        .map(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+        .unwrap_or(false);
     let mut findings = Vec::new();
     if !belongs_to_target {
         findings.push(DiagnosticFinding::warning(
@@ -424,17 +426,32 @@ fn inspect_backup(
             Some(&original),
         ));
     }
+    if !complete_phase {
+        findings.push(DiagnosticFinding::warning(
+            "backup.incomplete",
+            format!("native backup journal is in phase {}", journal.phase),
+            Some(&original),
+        ));
+    }
+    let verified = belongs_to_target && complete_phase && original_exists;
     (
         Some(serde_json::json!({
-            "status": "checked",
+            "status": if verified { "checked" } else { "unknown" },
             "belongsToTarget": belongs_to_target,
-            "complete": complete,
+            "complete": verified,
             "originalExists": original_exists,
             "runtimeVersion": runtime_version,
             "originalAsarFileHash": hash_file(&original.join(ASAR_REL)),
             "patchedAsarFileHash": hash_file(&app_path.join(ASAR_REL)),
         })),
-        CheckResult::checked(findings),
+        if verified {
+            CheckResult::checked(findings)
+        } else {
+            CheckResult {
+                status: CheckStatus::Unknown,
+                findings,
+            }
+        },
     )
 }
 
