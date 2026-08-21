@@ -52,6 +52,14 @@ pub fn migrate_legacy_if_needed(root: &Path, target: &Path) -> Result<Option<Jou
                     state.install_id, native.phase
                 ));
             }
+            // A legacy record can outlive an official upgrade.  If the live
+            // target is already the sealed original (or a verified vendor
+            // bundle), the old record is historical rather than a patched
+            // state that must be adopted.  A merely well-signed foreign app
+            // still falls through to the proof gate and fails closed.
+            if legacy_target_is_clean_or_vendor(target, &state)? {
+                return Ok(None);
+            }
             let proven = crate::legacy_proof::prove_legacy_ts_v1(root, state)?;
             migrate_legacy_ts_v1(root, proven).map(Some)
         }
