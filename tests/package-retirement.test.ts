@@ -83,10 +83,14 @@ describe("native CLI package boundary", () => {
     }
   });
 
-  test("native lifecycle source-checkout guidance does not use Bun links", () => {
+  test("native lifecycle source-checkout guidance names the Cargo package", () => {
     const lifecycle = read("crates/incodex-cli/src/lifecycle.rs");
     expect(lifecycle).not.toContain("bun link");
     expect(lifecycle).not.toContain("bun unlink");
+    expect(lifecycle).toContain("cargo install --locked --path crates/incodex-cli");
+    expect(lifecycle).toContain("cargo uninstall incodex-cli");
+    expect(read("README.md")).toContain("source removal: `cargo uninstall incodex-cli`");
+    expect(read("README_CN.md")).toContain("源码卸载用 `cargo uninstall incodex-cli`");
   });
 
   test("active guides point at native Rust paths", () => {
