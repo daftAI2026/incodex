@@ -303,90 +303,83 @@ pub fn scan_owner_processes(root: &Path) -> ProcessScan {
 
 pub fn scan_sessions(root: &Path) -> SessionScan {
     let sessions = root.join("sessions");
-    if !sessions.exists() {
-        return SessionScan {
-            orphan_sessions: Vec::new(),
-            leftover_chromium: Vec::new(),
-            orphan_check: CheckResult::checked(Vec::new()),
-            chromium_check: CheckResult::checked(Vec::new()),
-        };
-    }
-    if !is_directory(&sessions) {
-        return SessionScan {
-            orphan_sessions: Vec::new(),
-            leftover_chromium: Vec::new(),
-            orphan_check: CheckResult::unknown(
-                "session.scan-failed",
-                "sessions path is not a directory",
-            ),
-            chromium_check: CheckResult::unknown(
-                "chromium.scan-failed",
-                "sessions path is not a directory",
-            ),
-        };
-    }
     let mut roots = Vec::new();
     let mut orphan_findings = Vec::new();
     let mut chromium_findings = Vec::new();
     let mut unknown = false;
-    let targets = match read_directory(&sessions) {
-        Ok(Some(targets)) => targets,
-        Ok(None) => {
-            return SessionScan {
-                orphan_sessions: Vec::new(),
-                leftover_chromium: Vec::new(),
-                orphan_check: CheckResult::unknown(
-                    "session.scan-failed",
-                    "sessions disappeared during enumeration",
-                ),
-                chromium_check: CheckResult::unknown(
-                    "chromium.scan-failed",
-                    "sessions disappeared during enumeration",
-                ),
-            };
-        }
-        Err(error) => {
-            return SessionScan {
-                orphan_sessions: Vec::new(),
-                leftover_chromium: Vec::new(),
-                orphan_check: CheckResult::unknown(
-                    "session.scan-failed",
-                    format!("cannot enumerate sessions: {error}"),
-                ),
-                chromium_check: CheckResult::unknown(
-                    "chromium.scan-failed",
-                    format!("cannot enumerate sessions: {error}"),
-                ),
-            };
-        }
-    };
-    for child in targets {
-        if !is_directory(&child) {
-            continue;
-        }
-        if file_name_starts(&child, "s-") {
-            roots.push(child);
+    if sessions.exists() {
+        if !is_directory(&sessions) {
+            unknown = true;
+            orphan_findings.push(DiagnosticFinding::warning(
+                "session.scan-failed",
+                "sessions path is not a directory",
+                Some(&sessions),
+            ));
+            chromium_findings.push(DiagnosticFinding::warning(
+                "chromium.scan-failed",
+                "sessions path is not a directory",
+                Some(&sessions),
+            ));
         } else {
-            match read_directory(&child) {
-                Ok(Some(nested)) => roots.extend(
-                    nested
-                        .into_iter()
-                        .filter(|path| is_directory(path) && file_name_starts(path, "s-")),
-                ),
+            match read_directory(&sessions) {
+                Ok(Some(targets)) => {
+                    for child in targets {
+                        if !is_directory(&child) {
+                            continue;
+                        }
+                        if file_name_starts(&child, "s-") {
+                            roots.push(child);
+                        } else {
+                            match read_directory(&child) {
+                                Ok(Some(nested)) => {
+                                    roots.extend(nested.into_iter().filter(|path| {
+                                        is_directory(path) && file_name_starts(path, "s-")
+                                    }))
+                                }
+                                Ok(None) => {
+                                    unknown = true;
+                                    orphan_findings.push(DiagnosticFinding::warning(
+                                        "session.scan-failed",
+                                        "target sessions disappeared during enumeration",
+                                        Some(&child),
+                                    ));
+                                }
+                                Err(error) => {
+                                    unknown = true;
+                                    orphan_findings.push(DiagnosticFinding::warning(
+                                        "session.scan-failed",
+                                        format!("cannot enumerate target sessions: {error}"),
+                                        Some(&child),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
                 Ok(None) => {
                     unknown = true;
                     orphan_findings.push(DiagnosticFinding::warning(
                         "session.scan-failed",
-                        "target sessions disappeared during enumeration",
-                        Some(&child),
+                        "sessions disappeared during enumeration",
+                        Some(&sessions),
+                    ));
+                    chromium_findings.push(DiagnosticFinding::warning(
+                        "chromium.scan-failed",
+                        "sessions disappeared during enumeration",
+                        Some(&sessions),
                     ));
                 }
                 Err(error) => {
                     unknown = true;
                     orphan_findings.push(DiagnosticFinding::warning(
                         "session.scan-failed",
-                        format!("cannot enumerate target sessions: {error}"),
-                        Some(&child),
+                        format!("cannot enumerate sessions: {error}"),
+                        Some(&sessions),
+                    ));
+                    chromium_findings.push(DiagnosticFinding::warning(
+                        "chromium.scan-failed",
+                        format!("cannot enumerate sessions: {error}"),
+                        Some(&sessions),
                     ));
                 }
             }
