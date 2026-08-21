@@ -522,7 +522,7 @@ fn post_swap_verification_failure_rolls_back_the_original_app() {
     write_executable(
         &fake_bin.join("codesign"),
         &format!(
-            "#!/bin/sh\nlast=''\nfor arg in \"$@\"; do last=\"$arg\"; done\nif [ \"$1\" = \"--verify\" ] && [ \"$last\" = '{}' ]; then\n  printf '%s\\n' 'forced post-swap verification failure' >&2\n  exit 1\nfi\nexit 0\n",
+            "#!/bin/sh\nlast=''\nfor arg in \"$@\"; do last=\"$arg\"; done\nif [ \"$1\" = \"--display\" ] && [ \"$2\" = \"--entitlements\" ]; then\n  printf '%s\\n' '<plist><dict></dict></plist>'\n  exit 0\nfi\nif [ \"$1\" = \"--display\" ] && [ \"$2\" = \"--verbose=4\" ]; then\n  case \"$last\" in *CUALockScreenGuardian.app) printf '%s\\n' 'Identifier=com.example.cua-guardian' 'TeamIdentifier=2DC432GLL2' 'Authority=Developer ID Application: fixture' ;; *) printf '%s\\n' 'Identifier=com.example.incodex-fixture' 'Signature=adhoc' ;; esac\n  exit 0\nfi\nif [ \"$1\" = \"--verify\" ] && [ \"$last\" = \"{}\" ]; then\n  printf '%s\\n' 'forced post-swap verification failure' >&2\n  exit 1\nfi\nexit 0\n",
             app.display()
         ),
     );

@@ -77,6 +77,7 @@ pub struct SignedComponent {
     pub path: PathBuf,
     pub identifier: Option<String>,
     pub team_identifier: Option<String>,
+    pub authorities: Vec<String>,
     pub kind: SignatureKind,
     pub verified: bool,
 }
@@ -218,6 +219,11 @@ pub fn verify_original_vendor_bundle(
 pub fn verify_app(app: &Path) -> bool {
     verify_patched_adhoc_bundle_deep_strict(app, None).is_ok()
         || verify_deep_strict(app).is_ok()
+}
+
+/// 供迁移 proof 等只需要 deep/strict 的调用方复用同一验收命令。
+pub fn verify_bundle_deep_strict(app: &Path) -> Result<(), String> {
+    verify_deep_strict(app)
 }
 
 pub fn has_hardened_runtime(app: &Path) -> bool {
@@ -372,6 +378,7 @@ fn inspect_component(path: &Path) -> Result<SignedComponent, String> {
             path: path.to_path_buf(),
             identifier: None,
             team_identifier: None,
+            authorities: Vec::new(),
             kind: SignatureKind::Unsigned,
             verified: false,
         });
@@ -383,6 +390,10 @@ fn inspect_component(path: &Path) -> Result<SignedComponent, String> {
     );
     let identifier = signature_field(&text, "Identifier=");
     let team_identifier = signature_field(&text, "TeamIdentifier=");
+    let authorities = text
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("Authority=").map(str::to_string))
+        .collect::<Vec<_>>();
     let adhoc = text.lines().any(|line| line.trim() == "Signature=adhoc");
     let kind = if adhoc {
         SignatureKind::Adhoc
@@ -402,6 +413,7 @@ fn inspect_component(path: &Path) -> Result<SignedComponent, String> {
         path: path.to_path_buf(),
         identifier,
         team_identifier,
+        authorities,
         kind,
         verified,
     })
