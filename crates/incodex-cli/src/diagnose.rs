@@ -378,6 +378,34 @@ fn inspect_backup(
     install_id: &str,
     runtime_version: Option<&str>,
 ) -> (Option<serde_json::Value>, CheckResult) {
+    let transaction = root.join("transactions").join(install_id);
+    let journal_path = transaction.join("journal.json");
+    let symlink_path = if is_symlink(&transaction) {
+        Some(transaction)
+    } else if is_symlink(&journal_path) {
+        Some(journal_path)
+    } else {
+        None
+    };
+    if let Some(path) = symlink_path {
+        let error = format!(
+            "native backup journal path is a symlink: {}",
+            path.display()
+        );
+        return (
+            Some(serde_json::json!({
+                "status": "unknown",
+                "complete": false,
+                "originalExists": false,
+                "runtimeVersion": runtime_version,
+                "error": error,
+            })),
+            CheckResult::unknown(
+                "backup.symlink",
+                "native backup journal path is a symlink and was not inspected",
+            ),
+        );
+    }
     let journal = match journal_v2(root, install_id) {
         Ok(journal) => journal,
         Err(error) => {
