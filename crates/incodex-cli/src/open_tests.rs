@@ -2,6 +2,9 @@
 // implementation remains below the repository's per-file size budget.
 use super::*;
 use std::fs;
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 
 fn temp_root() -> PathBuf {
     let n = std::time::SystemTime::now()
@@ -254,6 +257,47 @@ fn late_recreation_after_proven_delete_uses_session_path_proof() {
         "late recreation must use path proof only after the original root was deleted"
     );
     assert!(cleanup.removed(), "late recreation must not be retained");
+    assert!(!plan.session_root.exists());
+}
+
+#[test]
+fn async_recreation_after_proven_delete_is_observed_before_removed() {
+    let root = temp_root();
+    let app = fake_app(&root);
+    let user = root.join("home");
+    let source = root.join("codex");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("auth.json"), "{}\n").unwrap();
+    let plan = prepare_incognito_open(&app, &user, &source, 1).unwrap();
+    let writer_path = plan.session_root.clone();
+    let (writer_ready_tx, writer_ready_rx) = mpsc::channel();
+    let writer = thread::spawn(move || {
+        writer_ready_tx.send(()).unwrap();
+        while writer_path.exists() {
+            thread::yield_now();
+        }
+        thread::sleep(Duration::from_millis(2));
+        fs::create_dir(&writer_path).unwrap();
+        fs::write(writer_path.join("late-plugin-cache"), "late\n").unwrap();
+    });
+    writer_ready_rx.recv().unwrap();
+
+    let (_process, cleanup) = wait_and_burn_with(
+        &plan,
+        &user,
+        10,
+        |_| {
+            Ok(OpenProcessResult::Exited {
+                code: 0,
+                ui_ready: true,
+            })
+        },
+        |session_root, expected| burn_session_home(session_root, expected),
+    )
+    .unwrap();
+    writer.join().unwrap();
+
+    assert!(cleanup.removed(), "late recreation must be observed and burned");
     assert!(!plan.session_root.exists());
 }
 

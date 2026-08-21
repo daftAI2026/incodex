@@ -1,10 +1,24 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import * as runtimeSafeHome from "./runtime/incodex-safe-home.cts";
 
 function tempRoot(): string {
   return mkdtempSync(join("/tmp", "incodex-late-recreation-"));
+}
+
+function prepareDistinctReplacement(sessionRoot: string, fileName: string, content: string): string {
+  const original = lstatSync(sessionRoot);
+  const replacement = join(dirname(sessionRoot), `${basename(sessionRoot)}-replacement`);
+  mkdirSync(replacement);
+  expect(lstatSync(replacement).ino).not.toBe(original.ino);
+  writeFileSync(join(replacement, fileName), content);
+  return replacement;
+}
+
+function installReplacement(sessionRoot: string, replacement: string): void {
+  rmSync(sessionRoot, { recursive: true, force: true });
+  renameSync(replacement, sessionRoot);
 }
 
 describe("Runtime late session recreation", () => {
@@ -21,14 +35,14 @@ describe("Runtime late session recreation", () => {
       ino: session.ino,
       dev: session.dev,
     };
+    const replacement = prepareDistinctReplacement(session.root, "late-plugin-cache", "late\n");
 
     const firstExpected = cleanupExpectedForAttempt(expected, false);
     expect(firstExpected.ino).toBe(session.ino);
     expect(firstExpected.dev).toBe(session.dev);
     expect(runtimeSafeHome.burnSessionHome(session.root, firstExpected)).toBe(true);
 
-    mkdirSync(session.root);
-    writeFileSync(join(session.root, "late-plugin-cache"), "late\n");
+    installReplacement(session.root, replacement);
     const lateExpected = cleanupExpectedForAttempt(expected, true);
     expect(lateExpected.ino).toBeUndefined();
     expect(lateExpected.dev).toBeUndefined();
@@ -49,9 +63,8 @@ describe("Runtime late session recreation", () => {
       ino: session.ino,
       dev: session.dev,
     };
-    rmSync(session.root, { recursive: true, force: true });
-    mkdirSync(session.root);
-    writeFileSync(join(session.root, "replacement"), "keep\n");
+    const replacement = prepareDistinctReplacement(session.root, "replacement", "keep\n");
+    installReplacement(session.root, replacement);
 
     const conservative = cleanupExpectedForAttempt(expected, false);
     expect(() => runtimeSafeHome.burnSessionHome(session.root, conservative)).toThrow(/inode|device/);
@@ -71,11 +84,11 @@ describe("Runtime late session recreation", () => {
       ino: session.ino,
       dev: session.dev,
     };
+    const replacement = prepareDistinctReplacement(session.root, "late-plugin-cache", "late\n");
     expect(runtimeSafeHome.burnSessionHome(session.root, expected)).toBe(true);
     expect(writeBurnProof(session.root, expected)).toBe(true);
 
-    mkdirSync(session.root);
-    writeFileSync(join(session.root, "late-plugin-cache"), "late\n");
+    installReplacement(session.root, replacement);
     expect(runtimeSafeHome.sweepOrphanSessions(userRoot)).toBe(1);
     expect(existsSync(session.root)).toBe(false);
   });
