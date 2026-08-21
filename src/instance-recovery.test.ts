@@ -146,13 +146,16 @@ describe("cross-process owner recovery", () => {
       }
       const owner = instance.currentOwner("invalid-recovery", process.execPath);
       let exitCode = 0;
+      let outcome = "";
       try {
         instance.acquireOwnerLease(root, owner);
-        process.stdout.write("WINNER " + owner.token + "\n");
+        outcome = "WINNER " + owner.token;
       } catch (error) {
-        process.stdout.write(String(error.code || "ERROR") + "\n");
+        outcome = String(error.code || "ERROR");
         exitCode = error.code === "OWNER_BUSY" || error.code === "OWNER_RACE" ? 2 : 3;
       }
+      writeFileSync(join(resultRoot, index), outcome + "\n");
+      process.stdout.write(outcome + "\n");
       writeFileSync(join(doneRoot, index), "done\n");
       const waiter = new Int32Array(new SharedArrayBuffer(4));
       while (!existsSync(releaseFile)) {
@@ -197,9 +200,10 @@ describe("cross-process owner recovery", () => {
     const allReady = await waitForCount(readyRoot, children.length);
     writeFileSync(barrier, "go\n");
     const allDone = await waitForCount(doneRoot, children.length);
+    const allResults = await waitForCount(resultRoot, children.length);
     writeFileSync(releaseFile, "release\n");
     const completed = await Promise.all(results);
-    const outcomes = children.map((_, index) => readFileSync(join(resultRoot, String(index)), "utf8").trim());
+    const outcomes = readdirSync(resultRoot).map((index) => readFileSync(join(resultRoot, index), "utf8").trim());
     const winners = outcomes.filter((result) => result.startsWith("WINNER "));
     const rejected = outcomes.filter((result) => ["OWNER_BUSY", "OWNER_RACE"].includes(result));
     const winnerToken = winners[0]?.slice("WINNER ".length);
@@ -209,6 +213,7 @@ describe("cross-process owner recovery", () => {
     expect(rejected).toHaveLength(19);
     expect(allReady).toBe(true);
     expect(allDone).toBe(true);
+    expect(allResults).toBe(true);
     expect(winnerToken).toBeString();
     expect(quarantine.length).toBeGreaterThan(0);
     expect(readOwnerLock(root)?.token).toBe(winnerToken);
