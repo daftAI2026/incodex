@@ -232,7 +232,7 @@ pub fn verify_original_vendor_bundle(
 pub fn verify_app(app: &Path) -> bool {
     verify_patched_adhoc_bundle_deep_strict(app, None).is_ok()
         || inspect_signing_inventory(app)
-            .and_then(|inventory| validate_nested_components(&inventory.nested))
+            .and_then(|inventory| validate_signing_inventory(&inventory))
             .is_ok()
 }
 
