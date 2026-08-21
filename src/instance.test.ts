@@ -90,7 +90,8 @@ catch (error) { process.stdout.write(String(error.message)); }`,
 
   test("main preflight lets malformed owners reach acquisition recovery", () => {
     const source = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
-    expect(source).toContain('if (state.kind === "invalid") return false;');
+    expect(source).toContain("instance.readOwnerRecords(stateRoot())");
+    expect(source).toContain('state.kind === "unverifiable"');
   });
 });
 
@@ -149,9 +150,25 @@ describe("raise listener", () => {
     const replacement = currentOwner("replacement", target(root));
     await acquireOwnerLease(root, replacement);
     expect(readOwnerLock(root)).toBeNull();
-    expect(readOwnerRecords(root).some(({ owner }) => owner?.token === replacement.token)).toBe(true);
+    expect(readOwnerRecords(root).some((record: any) => record.state.owner?.token === replacement.token)).toBe(true);
     expect(readFileSync(join(root, LOCK_NAME), "utf8")).toBe(truncated);
     expect(readdirSync(root).some((name) => name.includes("tmp"))).toBe(false);
+    expect(clearOwnerLock(root, replacement)).toBe(true);
+  });
+
+  test("raise preflight skips a stale canonical record for the active sidecar lease", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-stale-diagnostic-"));
+    const stale = currentOwner("stale", target(root));
+    stale.pid = 99999999;
+    writeOwnerLock(root, stale);
+    const replacement = currentOwner("replacement", target(root));
+    await acquireOwnerLease(root, replacement);
+    let raised = false;
+    listenForRaise(root, () => {
+      raised = true;
+    }, replacement);
+    expect(await connectExisting(root, 500)).toBe(true);
+    expect(raised).toBe(true);
     expect(clearOwnerLock(root, replacement)).toBe(true);
   });
 });
