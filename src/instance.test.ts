@@ -389,6 +389,11 @@ describe("cross-process owner contention", () => {
   test("twenty OS processes replacing a stale owner preserve the winner lease", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-os-stale-contenders-"));
     const barrier = join(root, "start");
+    const readyRoot = join(root, "ready");
+    const doneRoot = join(root, "done");
+    const releaseFile = join(root, "release");
+    mkdirSync(readyRoot);
+    mkdirSync(doneRoot);
     const modulePath = join(import.meta.dir, "runtime/incodex-instance.cts");
     writeFileSync(join(root, LOCK_NAME), JSON.stringify({
       pid: 999999,
@@ -398,31 +403,47 @@ describe("cross-process owner contention", () => {
       token: "stale-token",
     }));
     const worker = String.raw`
-      const { existsSync } = require("node:fs");
+      const { existsSync, writeFileSync } = require("node:fs");
+      const { join } = require("node:path");
       const instance = require(process.env.INCODEX_TEST_MODULE);
       const root = process.env.INCODEX_TEST_ROOT;
       const barrier = process.env.INCODEX_TEST_BARRIER;
+      const readyRoot = process.env.INCODEX_TEST_READY_ROOT;
+      const doneRoot = process.env.INCODEX_TEST_DONE_ROOT;
+      const releaseFile = process.env.INCODEX_TEST_RELEASE_FILE;
+      const index = process.env.INCODEX_TEST_INDEX;
+      writeFileSync(join(readyRoot, index), "ready\n");
       while (!existsSync(barrier)) {
         const until = Date.now() + 5;
         while (Date.now() < until) {}
       }
       const owner = instance.currentOwner("stale-replacement", process.execPath);
+      let exitCode = 0;
       try {
         instance.acquireOwnerLease(root, owner);
         process.stdout.write("WINNER " + owner.token + "\n");
-        setTimeout(() => process.exit(0), 1500);
       } catch (error) {
         process.stdout.write(String(error.code || "ERROR") + "\n");
-        process.exit(error.code === "OWNER_BUSY" || error.code === "OWNER_RACE" ? 2 : 3);
+        exitCode = error.code === "OWNER_BUSY" || error.code === "OWNER_RACE" ? 2 : 3;
       }
+      writeFileSync(join(doneRoot, index), "done\n");
+      const waiter = new Int32Array(new SharedArrayBuffer(4));
+      while (!existsSync(releaseFile)) {
+        Atomics.wait(waiter, 0, 0, 5);
+      }
+      process.exit(exitCode);
     `;
-    const children = Array.from({ length: 20 }, () =>
+    const children = Array.from({ length: 20 }, (_, index) =>
       spawn(process.execPath, ["-e", worker], {
         env: {
           ...process.env,
           INCODEX_TEST_MODULE: modulePath,
           INCODEX_TEST_ROOT: root,
           INCODEX_TEST_BARRIER: barrier,
+          INCODEX_TEST_READY_ROOT: readyRoot,
+          INCODEX_TEST_DONE_ROOT: doneRoot,
+          INCODEX_TEST_RELEASE_FILE: releaseFile,
+          INCODEX_TEST_INDEX: String(index),
         },
         stdio: ["ignore", "pipe", "pipe"],
       }),
@@ -438,7 +459,17 @@ describe("cross-process owner contention", () => {
           child.once("error", (error) => resolve({ code: 3, stdout, stderr: String(error) }));
         }),
     );
+    const waitForCount = async (directory: string, expected: number) => {
+      const deadline = Date.now() + 5000;
+      while (readdirSync(directory).length < expected && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      return readdirSync(directory).length === expected;
+    };
+    const allReady = await waitForCount(readyRoot, children.length);
     writeFileSync(barrier, "go\n");
+    const allDone = await waitForCount(doneRoot, children.length);
+    writeFileSync(releaseFile, "release\n");
     const completed = await Promise.all(results);
     const winners = completed.filter((result) => result.stdout.trim().startsWith("WINNER "));
     const rejected = completed.filter((result) => ["OWNER_BUSY", "OWNER_RACE"].includes(result.stdout.trim()));
@@ -446,6 +477,8 @@ describe("cross-process owner contention", () => {
 
     expect(winners).toHaveLength(1);
     expect(rejected).toHaveLength(19);
+    expect(allReady).toBe(true);
+    expect(allDone).toBe(true);
     expect(winnerToken).toBeString();
     expect(readOwnerLock(root)?.token).toBe(winnerToken);
     expect(completed.every((result) => result.code === 0 || result.code === 2)).toBe(true);
@@ -455,6 +488,11 @@ describe("cross-process owner contention", () => {
   test("stale takeover claims have one OS winner and cannot delete its lease", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-os-stale-claim-"));
     const barrier = join(root, "start");
+    const readyRoot = join(root, "ready");
+    const doneRoot = join(root, "done");
+    const releaseFile = join(root, "release");
+    mkdirSync(readyRoot);
+    mkdirSync(doneRoot);
     const modulePath = join(import.meta.dir, "runtime/incodex-instance.cts");
     const claimRoot = join(root, ".incognito.lock.takeover");
     mkdirSync(claimRoot);
@@ -479,31 +517,47 @@ describe("cross-process owner contention", () => {
       }),
     );
     const worker = String.raw`
-      const { existsSync } = require("node:fs");
+      const { existsSync, writeFileSync } = require("node:fs");
+      const { join } = require("node:path");
       const instance = require(process.env.INCODEX_TEST_MODULE);
       const root = process.env.INCODEX_TEST_ROOT;
       const barrier = process.env.INCODEX_TEST_BARRIER;
+      const readyRoot = process.env.INCODEX_TEST_READY_ROOT;
+      const doneRoot = process.env.INCODEX_TEST_DONE_ROOT;
+      const releaseFile = process.env.INCODEX_TEST_RELEASE_FILE;
+      const index = process.env.INCODEX_TEST_INDEX;
+      writeFileSync(join(readyRoot, index), "ready\n");
       while (!existsSync(barrier)) {
         const until = Date.now() + 5;
         while (Date.now() < until) {}
       }
       const owner = instance.currentOwner("stale-claim-replacement", process.execPath);
+      let exitCode = 0;
       try {
         instance.acquireOwnerLease(root, owner);
         process.stdout.write("WINNER " + owner.token + "\n");
-        setTimeout(() => process.exit(0), 1000);
       } catch (error) {
         process.stdout.write(String(error.code || "ERROR") + "\n");
-        process.exit(error.code === "OWNER_BUSY" || error.code === "OWNER_RACE" ? 2 : 3);
+        exitCode = error.code === "OWNER_BUSY" || error.code === "OWNER_RACE" ? 2 : 3;
       }
+      writeFileSync(join(doneRoot, index), "done\n");
+      const waiter = new Int32Array(new SharedArrayBuffer(4));
+      while (!existsSync(releaseFile)) {
+        Atomics.wait(waiter, 0, 0, 5);
+      }
+      process.exit(exitCode);
     `;
-    const children = Array.from({ length: 8 }, () =>
+    const children = Array.from({ length: 8 }, (_, index) =>
       spawn(process.execPath, ["-e", worker], {
         env: {
           ...process.env,
           INCODEX_TEST_MODULE: modulePath,
           INCODEX_TEST_ROOT: root,
           INCODEX_TEST_BARRIER: barrier,
+          INCODEX_TEST_READY_ROOT: readyRoot,
+          INCODEX_TEST_DONE_ROOT: doneRoot,
+          INCODEX_TEST_RELEASE_FILE: releaseFile,
+          INCODEX_TEST_INDEX: String(index),
         },
         stdio: ["ignore", "pipe", "pipe"],
       }),
@@ -519,7 +573,17 @@ describe("cross-process owner contention", () => {
           child.once("error", (error) => resolve({ code: 3, stdout, stderr: String(error) }));
         }),
     );
+    const waitForCount = async (directory: string, expected: number) => {
+      const deadline = Date.now() + 5000;
+      while (readdirSync(directory).length < expected && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      return readdirSync(directory).length === expected;
+    };
+    const allReady = await waitForCount(readyRoot, children.length);
     writeFileSync(barrier, "go\n");
+    const allDone = await waitForCount(doneRoot, children.length);
+    writeFileSync(releaseFile, "release\n");
     const completed = await Promise.all(results);
     const winners = completed.filter((result) => result.stdout.trim().startsWith("WINNER "));
     const rejected = completed.filter((result) => ["OWNER_BUSY", "OWNER_RACE"].includes(result.stdout.trim()));
@@ -527,6 +591,8 @@ describe("cross-process owner contention", () => {
 
     expect(winners).toHaveLength(1);
     expect(rejected).toHaveLength(7);
+    expect(allReady).toBe(true);
+    expect(allDone).toBe(true);
     expect(winnerToken).toBeString();
     expect(readOwnerLock(root)?.token).toBe(winnerToken);
     expect(completed.every((result) => result.code === 0 || result.code === 2)).toBe(true);
@@ -782,35 +848,56 @@ describe("cross-process owner contention", () => {
   test("twenty OS processes recover one truncated lock without deleting the winner", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-os-invalid-contenders-"));
     const barrier = join(root, "start");
+    const readyRoot = join(root, "ready");
+    const doneRoot = join(root, "done");
+    const releaseFile = join(root, "release");
+    mkdirSync(readyRoot);
+    mkdirSync(doneRoot);
     const modulePath = join(import.meta.dir, "runtime/incodex-instance.cts");
     const truncated = "{\"pid\":";
     writeFileSync(join(root, LOCK_NAME), truncated);
     const worker = String.raw`
-      const { existsSync } = require("node:fs");
+      const { existsSync, writeFileSync } = require("node:fs");
+      const { join } = require("node:path");
       const instance = require(process.env.INCODEX_TEST_MODULE);
       const root = process.env.INCODEX_TEST_ROOT;
       const barrier = process.env.INCODEX_TEST_BARRIER;
+      const readyRoot = process.env.INCODEX_TEST_READY_ROOT;
+      const doneRoot = process.env.INCODEX_TEST_DONE_ROOT;
+      const releaseFile = process.env.INCODEX_TEST_RELEASE_FILE;
+      const index = process.env.INCODEX_TEST_INDEX;
+      writeFileSync(join(readyRoot, index), "ready\n");
       while (!existsSync(barrier)) {
         const until = Date.now() + 5;
         while (Date.now() < until) {}
       }
       const owner = instance.currentOwner("invalid-recovery", process.execPath);
+      let exitCode = 0;
       try {
         instance.acquireOwnerLease(root, owner);
         process.stdout.write("WINNER " + owner.token + "\n");
-        setTimeout(() => process.exit(0), 1500);
       } catch (error) {
         process.stdout.write(String(error.code || "ERROR") + "\n");
-        process.exit(error.code === "OWNER_BUSY" || error.code === "OWNER_RACE" ? 2 : 3);
+        exitCode = error.code === "OWNER_BUSY" || error.code === "OWNER_RACE" ? 2 : 3;
       }
+      writeFileSync(join(doneRoot, index), "done\n");
+      const waiter = new Int32Array(new SharedArrayBuffer(4));
+      while (!existsSync(releaseFile)) {
+        Atomics.wait(waiter, 0, 0, 5);
+      }
+      process.exit(exitCode);
     `;
-    const children = Array.from({ length: 20 }, () =>
+    const children = Array.from({ length: 20 }, (_, index) =>
       spawn(process.execPath, ["-e", worker], {
         env: {
           ...process.env,
           INCODEX_TEST_MODULE: modulePath,
           INCODEX_TEST_ROOT: root,
           INCODEX_TEST_BARRIER: barrier,
+          INCODEX_TEST_READY_ROOT: readyRoot,
+          INCODEX_TEST_DONE_ROOT: doneRoot,
+          INCODEX_TEST_RELEASE_FILE: releaseFile,
+          INCODEX_TEST_INDEX: String(index),
         },
         stdio: ["ignore", "pipe", "pipe"],
       }),
@@ -826,7 +913,17 @@ describe("cross-process owner contention", () => {
           child.once("error", (error) => resolve({ code: 3, stdout, stderr: String(error) }));
         }),
     );
+    const waitForCount = async (directory: string, expected: number) => {
+      const deadline = Date.now() + 5000;
+      while (readdirSync(directory).length < expected && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      return readdirSync(directory).length === expected;
+    };
+    const allReady = await waitForCount(readyRoot, children.length);
     writeFileSync(barrier, "go\n");
+    const allDone = await waitForCount(doneRoot, children.length);
+    writeFileSync(releaseFile, "release\n");
     const completed = await Promise.all(results);
     const winners = completed.filter((result) => result.stdout.trim().startsWith("WINNER "));
     const rejected = completed.filter((result) => ["OWNER_BUSY", "OWNER_RACE"].includes(result.stdout.trim()));
@@ -835,6 +932,8 @@ describe("cross-process owner contention", () => {
 
     expect(winners).toHaveLength(1);
     expect(rejected).toHaveLength(19);
+    expect(allReady).toBe(true);
+    expect(allDone).toBe(true);
     expect(winnerToken).toBeString();
     expect(quarantine.length).toBeGreaterThan(0);
     expect(readOwnerLock(root)?.token).toBe(winnerToken);
