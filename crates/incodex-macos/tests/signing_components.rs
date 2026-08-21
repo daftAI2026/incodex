@@ -92,6 +92,10 @@ if [ "$1" = "--force" ] && [ "$2" = "--sign" ]; then
   printf '%s\n' signed >> "$INCODEX_SIGN_CAPTURE"
   exit 0
 fi
+if [ "$1" = "--verify" ] && [ "$2" = "--test-requirement" ]; then
+  if [ "$INCODEX_CODESIGN_VENDOR_TRUST_FAILURE" = "1" ]; then exit 1; fi
+  exit 0
+fi
 if [ "$1" = "--verify" ]; then exit 0; fi
 exit 0
 "#
@@ -170,5 +174,29 @@ fn unknown_signed_component_is_rejected_before_outer_signing() {
         fs::read_to_string(&fixture.marker).unwrap(),
         "original-vendor-component\n",
         "rejection must happen before any destructive signing step"
+    );
+}
+
+#[test]
+fn self_issued_vendor_lookalike_is_rejected_before_outer_signing() {
+    let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let fixture = Fixture::new("2DC432GLL2");
+    let original_path = std::env::var_os("PATH");
+    let _path_guard = PathGuard(original_path);
+    std::env::set_var("PATH", fixture.install_path());
+    std::env::set_var("INCODEX_CODESIGN_ENTITLEMENTS", &fixture.entitlements);
+    std::env::set_var("INCODEX_SIGN_CAPTURE", &fixture.sign_capture);
+    std::env::set_var("INCODEX_CODESIGN_VENDOR_TRUST_FAILURE", "1");
+
+    let result = sign_app(&fixture.app);
+
+    std::env::remove_var("INCODEX_CODESIGN_ENTITLEMENTS");
+    std::env::remove_var("INCODEX_SIGN_CAPTURE");
+    std::env::remove_var("INCODEX_CODESIGN_VENDOR_TRUST_FAILURE");
+    assert!(result.is_err(), "self-issued vendor lookalikes must fail closed");
+    assert!(!fixture.sign_capture.exists());
+    assert_eq!(
+        fs::read_to_string(&fixture.marker).unwrap(),
+        "original-vendor-component\n"
     );
 }
