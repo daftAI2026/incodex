@@ -185,6 +185,17 @@ fn migration_round_trip_restores_exact_original_and_keeps_legacy_record() {
         "{}",
         String::from_utf8_lossy(&install.stderr)
     );
+    let reinstall = Command::new(env!("CARGO_BIN_EXE_incodex"))
+        .args(["install", "--yes", "--app", fixture.app.to_str().unwrap()])
+        .env("HOME", fixture.root.parent().unwrap())
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        reinstall.status.success(),
+        "{}",
+        String::from_utf8_lossy(&reinstall.stderr)
+    );
     let output = Command::new(env!("CARGO_BIN_EXE_incodex"))
         .args(["uninstall", "--yes", "--app", fixture.app.to_str().unwrap()])
         .env("HOME", fixture.root.parent().unwrap())

@@ -249,6 +249,7 @@ fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<Comma
     if !app.exists() {
         return Err(format!("Codex app not found: {}", app.display()));
     }
+    let migrated = migrate_legacy_if_needed(root, app)?;
     progress.stage("Publishing Runtime");
     let published = publish(root)?;
     let asar = app.join(ASAR_REL);
@@ -265,7 +266,7 @@ fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<Comma
             }
         }
     }
-    if let Some(journal) = migrate_legacy_if_needed(root, app)? {
+    if let Some(journal) = migrated {
         return Ok(CommandResult {
             skipped: true,
             install_id: Some(journal.install_id),
