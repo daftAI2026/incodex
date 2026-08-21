@@ -236,12 +236,16 @@ fn doctor_json_rejects_symlinked_target_and_native_journal_paths() {
 
 #[test]
 fn doctor_json_does_not_verify_backup_through_symlinked_native_journal_paths() {
-    for path_kind in ["journal", "transaction"] {
+    for path_kind in ["root", "journal", "transaction"] {
         let home = isolated_home();
         let (root, app, install_id) = committed_install(&home);
         let transaction = root.join("transactions").join(&install_id);
         let outside = home.join(format!("outside-{path_kind}"));
-        if path_kind == "transaction" {
+        if path_kind == "root" {
+            let transactions = root.join("transactions");
+            fs::rename(&transactions, &outside).unwrap();
+            std::os::unix::fs::symlink(&outside, transactions).unwrap();
+        } else if path_kind == "transaction" {
             fs::rename(&transaction, &outside).unwrap();
             std::os::unix::fs::symlink(&outside, &transaction).unwrap();
         } else {
