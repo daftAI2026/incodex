@@ -251,8 +251,15 @@ fn recovery_uses_outgoing_when_legacy_original_is_missing() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    assert_eq!(fs::read(fixture.app_asar()).unwrap(), fixture.original_bytes);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read(fixture.app_asar()).unwrap(),
+        fixture.original_bytes
+    );
     assert!(!outgoing.exists());
 }
 
@@ -289,7 +296,9 @@ fn migration_replaces_an_interrupted_partial_v2_backup() {
         .join("original/ChatGPT.app");
     fs::create_dir_all(&partial).unwrap();
     fs::write(partial.join("partial"), b"incomplete").unwrap();
-    let state = load_legacy_ts_v1(&fixture.root, &fixture.app).unwrap().unwrap();
+    let state = load_legacy_ts_v1(&fixture.root, &fixture.app)
+        .unwrap()
+        .unwrap();
     let proven = prove_legacy_ts_v1(&fixture.root, state).unwrap();
     migrate_legacy_ts_v1(&fixture.root, proven).unwrap();
     assert_eq!(

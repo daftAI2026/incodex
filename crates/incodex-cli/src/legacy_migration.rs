@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use incodex_asar::Archive;
 use incodex_core::canonical::canonical_path;
 use incodex_macos::{ditto, verify_app};
 use incodex_transaction::{acquire_target_lock, journal_v2, JournalV2};
@@ -71,6 +72,7 @@ pub fn recover_legacy_ts_v1(root: &Path, install_id: &str) -> Result<LegacyRecov
     );
     let mut outgoing_restored = false;
     if needs_original && original.is_dir() {
+        ensure_staged_target_or_absent(&target, &journal.install_id)?;
         let restore_root = root.join("legacy-recovery").join(install_id);
         let restore = restore_root.join("ChatGPT.app");
         remove_path(&restore)?;
@@ -80,6 +82,18 @@ pub fn recover_legacy_ts_v1(root: &Path, install_id: &str) -> Result<LegacyRecov
         if !verify_app(&target) {
             return Err("recovered legacy original failed codesign verification".into());
         }
+    } else if needs_original {
+        let outgoing = outgoing
+            .as_ref()
+            .filter(|path| path.is_dir())
+            .ok_or("legacy recovery has no intact original or outgoing restore source")?;
+        ensure_staged_target_or_absent(&target, &journal.install_id)?;
+        replace_bundle(
+            outgoing,
+            &target,
+            &root.join("legacy-recovery").join(install_id),
+        )?;
+        outgoing_restored = true;
     } else if let Some(outgoing) = &outgoing {
         if outgoing.is_dir() && !target.exists() {
             fs::rename(outgoing, &target).map_err(|error| error.to_string())?;
@@ -130,6 +144,19 @@ fn replace_bundle(source: &Path, target: &Path, work_root: &Path) -> Result<(), 
         return Err(error.to_string());
     }
     remove_path(&trash)
+}
+
+fn ensure_staged_target_or_absent(target: &Path, install_id: &str) -> Result<(), String> {
+    if !target.exists() {
+        return Ok(());
+    }
+    let archive = Archive::open(target.join("Contents/Resources/app.asar"))?;
+    let package = archive.read_package_main()?;
+    if package.already_patched && package.install_id.as_deref() == Some(install_id) {
+        Ok(())
+    } else {
+        Err("legacy recovery target no longer belongs to this transaction".into())
+    }
 }
 
 fn remove_path(path: &Path) -> Result<(), String> {

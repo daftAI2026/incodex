@@ -6,8 +6,8 @@ use incodex_macos::ditto;
 use sha2::{Digest, Sha256};
 
 use crate::journal::{
-    load_v2, tx_paths, write_journal, JournalTarget, JournalV2, RelPaths, ORIGINAL_REL,
-    OUTGOING_REL, STAGED_REL,
+    load_v2, tx_paths, validate_path_ancestors, write_journal, JournalTarget, JournalV2, RelPaths,
+    ORIGINAL_REL, OUTGOING_REL, STAGED_REL,
 };
 use crate::lock::TargetLock;
 use crate::proof::{directory_identity, tree_digest};
@@ -78,21 +78,23 @@ pub fn adopt_legacy_committed_locked(
         &input.original_plist_file_hash,
         "legacy original Info.plist",
     )?;
-    if paths.original.exists() {
-        return Err("legacy migration destination already contains an unrecognized backup".into());
-    }
+    validate_path_ancestors(root, &format!("transactions/{}/original", input.install_id))?;
+    remove_incomplete_backup(&paths.original)?;
     fs::create_dir_all(paths.original.parent().unwrap()).map_err(|error| error.to_string())?;
-    ditto(&input.original_source, &paths.original)?;
+    let partial = paths.original.with_extension("partial");
+    remove_incomplete_backup(&partial)?;
+    ditto(&input.original_source, &partial)?;
     verify_file_hash(
-        &paths.original.join("Contents/Resources/app.asar"),
+        &partial.join("Contents/Resources/app.asar"),
         &input.original_asar_file_hash,
         "migrated original ASAR",
     )?;
     verify_file_hash(
-        &paths.original.join("Contents/Info.plist"),
+        &partial.join("Contents/Info.plist"),
         &input.original_plist_file_hash,
         "migrated original Info.plist",
     )?;
+    fs::rename(&partial, &paths.original).map_err(|error| error.to_string())?;
     let backup_digest = tree_digest(&paths.original)?;
     let live_identity = directory_identity(&input.real_path)?;
     let live_digest = tree_digest(&input.real_path)?;
@@ -134,6 +136,21 @@ pub fn adopt_legacy_committed_locked(
     };
     write_journal(root, &journal)?;
     load_v2(root, &input.install_id)
+}
+
+fn remove_incomplete_backup(path: &Path) -> Result<(), String> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(format!(
+            "legacy migration backup is a symlink: {}",
+            path.display()
+        )),
+        Ok(metadata) if metadata.is_dir() => {
+            fs::remove_dir_all(path).map_err(|error| error.to_string())
+        }
+        Ok(_) => fs::remove_file(path).map_err(|error| error.to_string()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 fn verify_file_hash(path: &Path, expected: &str, label: &str) -> Result<(), String> {
