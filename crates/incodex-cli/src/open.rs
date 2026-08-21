@@ -30,6 +30,8 @@ pub struct OpenPlan {
     pub chromium: PathBuf,
     pub session_id: String,
     pub session_root: PathBuf,
+    pub session_ino: u64,
+    pub session_dev: u64,
     pub debug_port: u16,
     pub locale: Option<String>,
     pub source_bounds: Option<WindowBounds>,
@@ -186,7 +188,7 @@ pub fn prepare_incognito_open(
         pid,
         &source_home.to_string_lossy(),
     )?;
-    if let Err(error) = copy_settings(&session.home, source_home, user_root) {
+    if let Err(error) = copy_settings(&session.home, source_home) {
         let _ = burn_session_home(
             &session.root,
             &BurnExpected {
@@ -218,6 +220,8 @@ fn plan_from_session(bin: PathBuf, session: SessionHome, source_home: &Path) -> 
                 "INCODEX_SESSION_ROOT".into(),
                 session.root.display().to_string(),
             ),
+            ("INCODEX_SESSION_INO".into(), session.ino.to_string()),
+            ("INCODEX_SESSION_DEV".into(), session.dev.to_string()),
             (
                 "CODEX_ELECTRON_USER_DATA_PATH".into(),
                 session.chromium.display().to_string(),
@@ -231,6 +235,8 @@ fn plan_from_session(bin: PathBuf, session: SessionHome, source_home: &Path) -> 
         chromium: session.chromium,
         session_id: session.session_id,
         session_root: session.root,
+        session_ino: session.ino,
+        session_dev: session.dev,
         bin,
         debug_port,
         locale: read_locale_override(source_home),
@@ -440,8 +446,8 @@ where
     let expected = BurnExpected {
         user_root,
         session_id: Some(&plan.session_id),
-        ino: None,
-        dev: None,
+        ino: Some(plan.session_ino),
+        dev: Some(plan.session_dev),
     };
     let cleanup = burn_with_retries(&plan.session_root, &expected, retry_delay_ms, &mut burn);
     Ok((process, cleanup))
@@ -599,7 +605,7 @@ mod tests {
         let target_id = target_id_from_exec(&bin.to_string_lossy());
         let session = create_session_home(&user, Some(&target_id), 1, "").unwrap();
         fs::remove_dir_all(&session.home).unwrap();
-        assert!(copy_settings(&session.home, &source, &user).is_err());
+        assert!(copy_settings(&session.home, &source).is_err());
         burn_session_home(
             &session.root,
             &BurnExpected {

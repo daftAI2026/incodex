@@ -57,7 +57,7 @@ describe("symlink burn and copy", () => {
     writeFileSync(outside, "secret");
     symlinkSync(outside, join(session.home, "auth.json"));
 
-    expect(() => copySettings(session.home, source, userRoot)).toThrow(/symlink|overwrite/);
+    expect(() => copySettings(session.home, source)).toThrow(/symlink|overwrite/);
     expect(readFileSync(outside, "utf8")).toBe("secret");
   });
 
@@ -119,7 +119,7 @@ describe("symlink burn and copy", () => {
     mkdirSync(source);
     writeFileSync(join(source, "auth.json"), '{"token":"x"}');
     const session = createSessionHome(userRoot);
-    expect(copySettings(session.home, source, userRoot)).toBe(1);
+    expect(copySettings(session.home, source)).toBe(1);
     expect(readFileSync(join(session.home, "auth.json"), "utf8")).toBe('{"token":"x"}');
     expect(lstatSync(join(session.home, "auth.json")).mode & 0o777).toBe(FILE_MODE);
     writeFileSync(join(session.chromium, "Cache"), "cookie");
@@ -175,7 +175,7 @@ describe("session lifecycle", () => {
     mkdirSync(join(userRoot, "identity"), { recursive: true });
     writeFileSync(join(userRoot, "identity", "auth.json"), "legacy-cache\n");
     const first = createSessionHome(userRoot);
-    copySettings(first.home, source, userRoot);
+    copySettings(first.home, source);
     expect(readFileSync(join(userRoot, "identity", "auth.json"), "utf8")).toBe("legacy-cache\n");
     expect(readFileSync(join(first.home, "auth.json"), "utf8")).toBe('{"token":"source"}');
     expect(readFileSync(join(first.home, "config.toml"), "utf8")).toBe('localeOverride = "zh-CN"\n');

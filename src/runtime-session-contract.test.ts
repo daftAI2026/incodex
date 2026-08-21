@@ -7,8 +7,6 @@ describe("Electron session identity contract", () => {
     const source = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
     expect(source).toContain("INCODEX_SESSION_INO");
     expect(source).toContain("INCODEX_SESSION_DEV");
-    expect(source).toContain("ino: session?.ino");
-    expect(source).toContain("dev: session?.dev");
     expect(source).toContain("ino: session.ino");
     expect(source).toContain("dev: session.dev");
   });

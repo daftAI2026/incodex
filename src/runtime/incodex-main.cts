@@ -51,7 +51,15 @@ function sessionFromEnv() {
   const sessionId = process.env.INCODEX_SESSION_ID;
   const root = process.env.INCODEX_SESSION_ROOT || (home ? safeHome.sessionRootFromHome(home) : "");
   if (!home || !sessionId) return null;
-  return { home, sessionId, root };
+  const ino = Number(process.env.INCODEX_SESSION_INO);
+  const dev = Number(process.env.INCODEX_SESSION_DEV);
+  return {
+    home,
+    sessionId,
+    root,
+    ino: Number.isSafeInteger(ino) ? ino : null,
+    dev: Number.isSafeInteger(dev) ? dev : null,
+  };
 }
 
 function pickFile(name) {
@@ -80,10 +88,16 @@ function burnIncognitoHome() {
   const session = sessionFromEnv();
   const home = session?.root || session?.home || process.env.CODEX_HOME;
   if (!home) return;
+  if (!session || session.ino == null || session.dev == null) {
+    logLaunch("burn-refused", { home, reason: "session identity is unavailable" });
+    return;
+  }
   try {
     safeHome.burnSessionHome(home, {
       userRoot: USER_ROOT,
-      sessionId: session?.sessionId || process.env.INCODEX_SESSION_ID,
+      sessionId: session.sessionId,
+      ino: session.ino,
+      dev: session.dev,
     });
     logLaunch("burn", { home });
   } catch (error) {
@@ -346,7 +360,7 @@ async function launchIncognitoOnce() {
       pid: process.pid,
       sourceHome: sourceHome(),
     });
-    safeHome.copySettings(session.home, sourceHome(), USER_ROOT);
+    safeHome.copySettings(session.home, sourceHome());
   } catch (error) {
     logLaunch("prepare-failed", { error: String(error) });
     return Promise.resolve({ ok: false, reason: "prepare-failed" });
@@ -354,7 +368,12 @@ async function launchIncognitoOnce() {
   const bin = process.execPath;
   if (!bin) {
     try {
-      safeHome.burnSessionHome(session.root, { userRoot: USER_ROOT, sessionId: session.sessionId });
+      safeHome.burnSessionHome(session.root, {
+        userRoot: USER_ROOT,
+        sessionId: session.sessionId,
+        ino: session.ino,
+        dev: session.dev,
+      });
     } catch {
       /* ignore */
     }
@@ -388,6 +407,8 @@ async function launchIncognitoOnce() {
           INCODEX_INCOGNITO: "1",
           INCODEX_SESSION_ID: session.sessionId,
           INCODEX_SESSION_ROOT: session.root,
+          INCODEX_SESSION_INO: String(session.ino),
+          INCODEX_SESSION_DEV: String(session.dev),
           CODEX_ELECTRON_USER_DATA_PATH: session.chromium,
           INCODEX_SOURCE_BOUNDS: sourceBounds,
           INCODEX_SOURCE_HOME: sourceHome(),
@@ -396,7 +417,12 @@ async function launchIncognitoOnce() {
     } catch (error) {
       logLaunch("spawn-threw", { error: String(error) });
       try {
-        safeHome.burnSessionHome(session.root, { userRoot: USER_ROOT, sessionId: session.sessionId });
+        safeHome.burnSessionHome(session.root, {
+          userRoot: USER_ROOT,
+          sessionId: session.sessionId,
+          ino: session.ino,
+          dev: session.dev,
+        });
       } catch {
         /* ignore */
       }
@@ -406,7 +432,12 @@ async function launchIncognitoOnce() {
     if (!child.pid) {
       logLaunch("spawn-no-pid");
       try {
-        safeHome.burnSessionHome(session.root, { userRoot: USER_ROOT, sessionId: session.sessionId });
+        safeHome.burnSessionHome(session.root, {
+          userRoot: USER_ROOT,
+          sessionId: session.sessionId,
+          ino: session.ino,
+          dev: session.dev,
+        });
       } catch {
         /* ignore */
       }
@@ -419,7 +450,12 @@ async function launchIncognitoOnce() {
     });
     child.on("exit", (code) => {
       logLaunch("child-exit", { code, sessionId: session.sessionId });
-      const expected = { userRoot: USER_ROOT, sessionId: session.sessionId };
+      const expected = {
+        userRoot: USER_ROOT,
+        sessionId: session.sessionId,
+        ino: session.ino,
+        dev: session.dev,
+      };
       const tryBurn = (attempt) => {
         try {
           safeHome.burnSessionHome(session.root, expected);
