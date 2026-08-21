@@ -5,13 +5,15 @@
 //! prefer `app://-/index.html`, skip chrome:// and prewarm routes). The
 //! payload is our MIT `inject.js`, not a third-party injector.
 
-use std::io::{Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
-use tungstenite::{client, Message};
+use tungstenite::client::IntoClientRequest;
+use tungstenite::handshake::{client::ClientHandshake, HandshakeError};
+use tungstenite::{Message, WebSocket};
 
 const INJECT_JS: &str = include_str!("../../../dist/incodex-inject.js");
 const INJECT_PREFIX: &str = "window.__incodexIncognito=true;";
@@ -244,36 +246,62 @@ fn close_browser(debug_port: u16) -> Result<(), String> {
 }
 
 fn send_cdp(
-    socket: &mut tungstenite::WebSocket<TcpStream>,
+    socket: &mut WebSocket<TcpStream>,
     id: u64,
     method: &str,
     params: Value,
 ) -> Result<Value, String> {
     let body = json!({ "id": id, "method": method, "params": params });
-    socket
-        .send(Message::Text(body.to_string()))
-        .map_err(|err| err.to_string())?;
     let deadline = Instant::now() + CDP_IO_TIMEOUT;
-    for _ in 0..20 {
-        if Instant::now() >= deadline {
-            return Err(format!("cdp {method} timed out"));
-        }
-        let msg = socket.read().map_err(|err| err.to_string())?;
-        let Message::Text(text) = msg else {
-            continue;
-        };
-        let parsed: Value = serde_json::from_str(&text).map_err(|err| err.to_string())?;
-        if parsed.get("id").and_then(Value::as_u64) == Some(id) {
-            if parsed.get("error").is_some() {
-                return Err(format!("cdp {method} failed: {text}"));
+    socket
+        .get_mut()
+        .set_nonblocking(true)
+        .map_err(|error| error.to_string())?;
+    let result = (|| {
+        loop {
+            match socket.send(Message::Text(body.to_string())) {
+                Ok(()) => break,
+                Err(tungstenite::Error::Io(error)) if error.kind() == ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        return Err(format!("cdp {method} timed out"));
+                    }
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => return Err(error.to_string()),
             }
-            if parsed.pointer("/result/exceptionDetails").is_some() {
-                return Err(format!("cdp {method} exception: {text}"));
-            }
-            return Ok(parsed);
         }
+
+        loop {
+            if Instant::now() >= deadline {
+                return Err(format!("cdp {method} timed out"));
+            }
+            match socket.read() {
+                Ok(Message::Text(text)) => {
+                    let parsed: Value =
+                        serde_json::from_str(&text).map_err(|err| err.to_string())?;
+                    if parsed.get("id").and_then(Value::as_u64) == Some(id) {
+                        if parsed.get("error").is_some() {
+                            return Err(format!("cdp {method} failed: {text}"));
+                        }
+                        if parsed.pointer("/result/exceptionDetails").is_some() {
+                            return Err(format!("cdp {method} exception: {text}"));
+                        }
+                        return Ok(parsed);
+                    }
+                }
+                Ok(_) => {}
+                Err(tungstenite::Error::Io(error)) if error.kind() == ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => return Err(error.to_string()),
+            }
+        }
+    })();
+    let restore = socket.get_mut().set_nonblocking(false);
+    if let Err(error) = restore {
+        return Err(error.to_string());
     }
-    Err(format!("cdp {method} timed out"))
+    result
 }
 
 fn connect_cdp_websocket(
@@ -281,7 +309,7 @@ fn connect_cdp_websocket(
     expected_port: u16,
 ) -> Result<
     (
-        tungstenite::WebSocket<TcpStream>,
+        WebSocket<TcpStream>,
         tungstenite::handshake::client::Response,
     ),
     String,
@@ -290,12 +318,42 @@ fn connect_cdp_websocket(
     let stream = TcpStream::connect_timeout(&addr, CDP_IO_TIMEOUT)
         .map_err(|error| format!("CDP WebSocket connect timed out or failed: {error}"))?;
     stream
+        .set_nonblocking(true)
+        .map_err(|error| error.to_string())?;
+    let request = url
+        .into_client_request()
+        .map_err(|error| format!("invalid CDP WebSocket request: {error}"))?;
+    let mut handshake = ClientHandshake::start(stream, request, None)
+        .map_err(|error| format!("CDP WebSocket handshake failed: {error}"))?;
+    let deadline = Instant::now() + CDP_IO_TIMEOUT;
+    let (mut socket, response) = loop {
+        if Instant::now() >= deadline {
+            return Err("CDP WebSocket handshake timed out".into());
+        }
+        match handshake.handshake() {
+            Ok(result) => break result,
+            Err(HandshakeError::Interrupted(next)) => {
+                handshake = next;
+                thread::sleep(Duration::from_millis(5));
+            }
+            Err(HandshakeError::Failure(error)) => {
+                return Err(format!("CDP WebSocket handshake failed: {error}"));
+            }
+        }
+    };
+    socket
+        .get_mut()
+        .set_nonblocking(false)
+        .map_err(|error| error.to_string())?;
+    socket
+        .get_mut()
         .set_read_timeout(Some(CDP_IO_TIMEOUT))
         .map_err(|error| error.to_string())?;
-    stream
+    socket
+        .get_mut()
         .set_write_timeout(Some(CDP_IO_TIMEOUT))
         .map_err(|error| error.to_string())?;
-    client(url, stream).map_err(|error| error.to_string())
+    Ok((socket, response))
 }
 
 fn websocket_socket_addr(url: &str, expected_port: u16) -> Result<SocketAddr, String> {
