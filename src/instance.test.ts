@@ -673,7 +673,7 @@ describe("cross-process owner contention", () => {
       }),
     );
     writeFileSync(
-      join(reclaimRoot, "owner"),
+      join(reclaimRoot, "marker.0000000000000001"),
       JSON.stringify({
         pid: 999999,
         startedAt: "never",
@@ -735,14 +735,14 @@ describe("cross-process owner contention", () => {
       renameSync(oldReclaim, quarantined);
       mkdirSync(oldReclaim);
       const replacement = currentOwner("replacement-reclaimer", process.execPath);
-      writeFileSync(join(oldReclaim, "owner"), JSON.stringify(replacement));
+      writeFileSync(join(oldReclaim, "marker.0000000000000002"), JSON.stringify(replacement));
       writeFileSync(releaseFile, "release\n");
 
       const result = await closePromise;
       expect(result.code).toBe(0);
       expect(["OWNER_BUSY", "OWNER_RACE"]).toContain(stdout.trim());
       expect(stderr).toBe("");
-      expect(readFileSync(join(oldReclaim, "owner"), "utf8")).toContain(replacement.token);
+      expect(readFileSync(join(oldReclaim, "marker.0000000000000002"), "utf8")).toContain(replacement.token);
     } finally {
       writeFileSync(releaseFile, "release\n");
       if (!closed) child.kill();

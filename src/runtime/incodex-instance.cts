@@ -16,6 +16,8 @@ const TAKEOVER_CLAIM_OWNER_NAME = "owner";
 const TAKEOVER_CLAIM_RECLAIM_NAME = ".reclaim";
 const RECLAIM_MARKER_PREFIX = "marker.";
 const RECLAIM_RELEASED_STATE = "released";
+const RECLAIM_GENERATION_WIDTH = 16;
+const RECLAIM_GENERATION_MAX = Number.MAX_SAFE_INTEGER - 1;
 
 function targetIdFromExec(execPath) {
   return crypto.createHash("sha256").update(execPath || "unknown").digest("hex").slice(0, 12);
@@ -114,22 +116,6 @@ function sleepForOwnerRecovery(ms) {
 function pauseBeforeTakeoverUnlink() {
   const pauseFile = process.env.INCODEX_TEST_TAKEOVER_PAUSE_FILE;
   const releaseFile = process.env.INCODEX_TEST_TAKEOVER_RELEASE_FILE;
-  if (!pauseFile || !releaseFile) return;
-  try {
-    fs.writeFileSync(pauseFile, `${process.pid}\n`, { flag: "wx", mode: 0o600 });
-  } catch {
-    return;
-  }
-  const deadline = Date.now() + 5000;
-  const waiter = new Int32Array(new SharedArrayBuffer(4));
-  while (!fs.existsSync(releaseFile) && Date.now() < deadline) {
-    Atomics.wait(waiter, 0, 0, 5);
-  }
-}
-
-function pauseAfterLegacyTakeoverRecheck() {
-  const pauseFile = process.env.INCODEX_TEST_LEGACY_TAKEOVER_RECHECK_PAUSE_FILE;
-  const releaseFile = process.env.INCODEX_TEST_LEGACY_TAKEOVER_RECHECK_RELEASE_FILE;
   if (!pauseFile || !releaseFile) return;
   try {
     fs.writeFileSync(pauseFile, `${process.pid}\n`, { flag: "wx", mode: 0o600 });
@@ -302,9 +288,11 @@ function readTakeoverClaimState(stateRoot) {
       ? { kind: "invalid", owner: null, reason: "takeover claim has no owner record" }
       : owner;
   }
-  // A regular claim can only be left by an older runtime. It is read for a
-  // bounded migration window, but new claims are always published as dirs.
-  return readOwnerLockStateAt(file);
+  return {
+    kind: "foreign",
+    owner: null,
+    reason: "takeover claim is a foreign regular file; refusing cleanup",
+  };
 }
 
 function takeoverClaimMetadata(stateRoot) {
@@ -343,8 +331,24 @@ function takeoverClaimIsStale(owner) {
 function reclaimMarkerPath(stateRoot, generation) {
   return path.join(
     takeoverClaimReclaimPath(stateRoot),
-    `${RECLAIM_MARKER_PREFIX}${String(generation).padStart(16, "0")}`,
+    `${RECLAIM_MARKER_PREFIX}${String(generation).padStart(RECLAIM_GENERATION_WIDTH, "0")}`,
   );
+}
+
+function parseReclaimGeneration(name) {
+  if (name === TAKEOVER_CLAIM_OWNER_NAME) {
+    return { error: "foreign reclaim marker record; refusing cleanup" };
+  }
+  if (!name.startsWith(RECLAIM_MARKER_PREFIX)) return null;
+  const digits = name.slice(RECLAIM_MARKER_PREFIX.length);
+  if (!/^\d{1,16}$/.test(digits)) {
+    return { error: `reclaim marker generation is malformed: ${name}` };
+  }
+  const generation = Number(digits);
+  if (!Number.isSafeInteger(generation) || generation < 1 || generation > RECLAIM_GENERATION_MAX) {
+    return { error: `reclaim marker generation is out of bounds: ${name}` };
+  }
+  return { generation };
 }
 
 function reclaimMarkerEntries(stateRoot) {
@@ -356,15 +360,20 @@ function reclaimMarkerEntries(stateRoot) {
     if (error?.code === "ENOENT") return [];
     return null;
   }
-  return names
-    .map((name) => {
-      const generation = name === TAKEOVER_CLAIM_OWNER_NAME ? 0 : Number(name.slice(RECLAIM_MARKER_PREFIX.length));
-      if (name !== TAKEOVER_CLAIM_OWNER_NAME && !/^marker\.\d+$/.test(name)) return null;
-      const file = path.join(root, name);
-      const state = readOwnerLockStateAt(file);
-      return { file, generation, state };
-    })
-    .filter(Boolean);
+  const entries = [];
+  for (const name of names) {
+    const parsed = parseReclaimGeneration(name);
+    if (parsed?.error) return { error: parsed.error };
+    if (!parsed) continue;
+    const file = path.join(root, name);
+    entries.push({ file, generation: parsed.generation, state: readOwnerLockStateAt(file) });
+  }
+  return entries;
+}
+
+function reclaimMarkerEntriesError(entries) {
+  if (Array.isArray(entries)) return null;
+  return entries?.error || "reclaim markers are unreadable";
 }
 
 function reclaimMarkerIsReleased(entry) {
@@ -378,7 +387,10 @@ function acquireReclaimMarker(stateRoot) {
   fs.mkdirSync(root, { recursive: true, mode: 0o700 });
   for (let attempt = 0; attempt < OWNER_RETRY_COUNT; attempt += 1) {
     const entries = reclaimMarkerEntries(stateRoot);
-    if (!entries) return null;
+    const entriesError = reclaimMarkerEntriesError(entries);
+    if (entriesError) {
+      throw new OwnerLeaseError("OWNER_RECLAIM_UNREADABLE", entriesError);
+    }
     let generation = 0;
     for (const entry of entries) {
       generation = Math.max(generation, entry.generation);
@@ -392,7 +404,10 @@ function acquireReclaimMarker(stateRoot) {
     // unique slot; it cannot move a newer live marker out from under it.
     pauseBeforeReclaimHandoff();
     const settled = reclaimMarkerEntries(stateRoot);
-    if (!settled) return null;
+    const settledError = reclaimMarkerEntriesError(settled);
+    if (settledError) {
+      throw new OwnerLeaseError("OWNER_RECLAIM_UNREADABLE", settledError);
+    }
     let settledGeneration = generation;
     for (const entry of settled) {
       settledGeneration = Math.max(settledGeneration, entry.generation);
@@ -416,7 +431,7 @@ function acquireReclaimMarker(stateRoot) {
 function releaseReclaimMarker(stateRoot, expectedOwner) {
   if (!expectedOwner || !ownerToken(expectedOwner)) return false;
   const entries = reclaimMarkerEntries(stateRoot);
-  if (!entries) return false;
+  if (!Array.isArray(entries)) return false;
   const entry = entries.find(
     (candidate) => candidate.state.kind === "valid" && sameOwnerToken(candidate.state.owner, expectedOwner),
   );
@@ -474,16 +489,6 @@ function publishTakeoverClaim(stateRoot, owner) {
   }
 }
 
-function removeLegacyTakeoverClaimIfStale(stateRoot, expectedState) {
-  // A regular claim has no identity-pinned no-replace cleanup primitive. It
-  // may have been published by an older runtime between any two reads, so the
-  // migration path refuses to reclaim it rather than deleting a live claim.
-  // The hook only keeps the regression fixture deterministic; production has
-  // no wait and returns fail closed immediately.
-  pauseAfterLegacyTakeoverRecheck();
-  return false;
-}
-
 function removeTakeoverClaimIfStale(stateRoot, expectedState) {
   const file = takeoverClaimPath(stateRoot);
   const current = readTakeoverClaimState(stateRoot);
@@ -497,7 +502,7 @@ function removeTakeoverClaimIfStale(stateRoot, expectedState) {
   } catch {
     return false;
   }
-  if (!stats.isDirectory()) return removeLegacyTakeoverClaimIfStale(stateRoot, expectedState);
+  if (!stats.isDirectory()) return false;
 
   const beforeMetadata = takeoverClaimMetadata(stateRoot);
   if (!beforeMetadata) return false;
@@ -562,6 +567,9 @@ function acquireTakeoverClaim(stateRoot) {
 
     const state = readTakeoverClaimState(stateRoot);
     if (state.kind === "missing") continue;
+    if (state.kind === "foreign") {
+      throw new OwnerLeaseError("OWNER_FOREIGN_CLAIM", state.reason);
+    }
     if (state.kind === "valid" && !takeoverClaimIsStale(state.owner)) return null;
     if (state.kind === "unverifiable") return null;
     if (state.kind === "invalid") {
@@ -592,8 +600,6 @@ function releaseTakeoverClaim(stateRoot, claim) {
     return Boolean(error && error.code === "ENOENT");
   }
   if (!stats.isDirectory()) {
-    // Legacy regular claims have no identity-pinned no-replace release.
-    // Never delete one during migration; acquisition already fails closed.
     return false;
   }
 
