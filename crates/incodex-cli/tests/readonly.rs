@@ -147,7 +147,7 @@ const DIAGNOSIS_KEYS: &[&str] = &[
 ];
 
 #[test]
-fn command_help_matches_typescript() {
+fn command_help_contract_covers_every_product_command() {
     let home = isolated_home();
     let cases: &[(&str, &str)] = &[
         (
@@ -195,6 +195,95 @@ Examples:
   incodex install --yes
   incodex install --dry-run
   incodex install --clone
+",
+        ),
+        (
+            "uninstall",
+            "\
+Usage:
+  incodex uninstall [flags]
+
+Restore Codex to the snapshot taken at install. With no flags this is
+/Applications/ChatGPT.app.
+
+Flags:
+  --yes            Skip the confirmation prompt (required when stdin is not a terminal)
+  --dry-run, -n    Print the plan and exit
+  --clone          Restore ~/.incodex/scratch/ChatGPT.app
+  --app <path>     Restore a specific .app
+
+Examples:
+  incodex uninstall
+  incodex uninstall --yes
+  incodex uninstall --dry-run
+",
+        ),
+        (
+            "runtime",
+            "\
+Usage:
+  incodex runtime
+
+Write Incodex's own code to ~/.incodex/runtime/. Does not modify Codex.
+Reopen Codex to load it.
+
+Examples:
+  incodex runtime
+",
+        ),
+        (
+            "recover",
+            "\
+Usage:
+  incodex recover --transaction <id>
+
+Roll back an install that stopped halfway. Uncommitted work is never continued.
+
+Examples:
+  incodex recover --transaction <id>
+",
+        ),
+        (
+            "open",
+            "\
+Usage:
+  incodex open [--dry-run] [--app <path>]
+
+Open an incognito window without patching Codex. Uses an isolated CODEX_HOME
+and Chromium user-data-dir. The hat-glasses control and banner still appear
+in that window. Closing the window burns that session.
+
+Examples:
+  incodex open
+  incodex open --dry-run
+",
+        ),
+        (
+            "update",
+            "\
+Usage:
+  incodex update [--dry-run]
+
+Update the CLI. Script installs re-run install.sh. Homebrew installs should
+use brew upgrade incodex. Source checkouts should git pull.
+
+Examples:
+  incodex update
+  incodex update --dry-run
+",
+        ),
+        (
+            "self-uninstall",
+            "\
+Usage:
+  incodex self-uninstall [--restore-app] [--yes] [--dry-run]
+
+Remove the CLI from PATH. Does not restore Codex unless --restore-app.
+
+Examples:
+  incodex self-uninstall
+  incodex self-uninstall --restore-app --yes
+  incodex self-uninstall --dry-run
 ",
         ),
     ];
@@ -388,10 +477,10 @@ fn doctor_json_names_interrupted_journals() {
     let tx_dir = home.join(".incodex").join("transactions");
     fs::create_dir_all(&tx_dir).unwrap();
     fs::write(
-        tx_dir.join("tx-golden.json"),
+        tx_dir.join("tx-contract.json"),
         serde_json::json!({
             "schemaVersion": 1,
-            "installId": "tx-golden",
+            "installId": "tx-contract",
             "targetRealPath": app.to_str().unwrap(),
             "stagedApp": home.join("staged").to_str().unwrap(),
             "originalSnapshot": home.join("original").to_str().unwrap(),
@@ -411,7 +500,7 @@ fn doctor_json_names_interrupted_journals() {
     let rec = parse_json(&stdout);
     let txs = rec["interruptedTransactions"].as_array().unwrap();
     assert_eq!(txs.len(), 1);
-    assert_eq!(txs[0]["installId"], "tx-golden");
+    assert_eq!(txs[0]["installId"], "tx-contract");
     assert_eq!(txs[0]["phase"], "PATCHED");
     assert_eq!(txs[0]["action"], "rollback");
 }

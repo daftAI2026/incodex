@@ -20,7 +20,7 @@ bun link
 bun run check
 ```
 
-`bun link` puts the TypeScript golden/reference `incodex` and `inc` on PATH. It does not build the native binary.
+`bun link` puts the frozen TypeScript reference `incodex` and `inc` on PATH for legacy fixture work. It does not build the native binary.
 
 `check` runs typecheck, lint, unit tests, and a deterministic `dist` rebuild.
 
@@ -58,7 +58,7 @@ git checkout -b feat/your-change
 # Rust CLI PRs use base `main`.
 ```
 
-Each behavior change starts with a failing `cargo test` repro, followed by the implementation. Run `cargo test --workspace --release`; keep `tests/cli-golden.test.ts` and the same-fixture parity suite green.
+Each behavior change starts with a failing `cargo test` repro, followed by the implementation. Run `cargo test --workspace --release`; keep the native CLI contract and frozen legacy fixture suites green. The retired TypeScript CLI is not a test oracle.
 
 ```bash
 cargo run -p incodex-cli -- --help

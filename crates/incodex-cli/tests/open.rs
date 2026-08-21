@@ -115,7 +115,7 @@ fn incodex_paths(home: &Path) -> Vec<String> {
 }
 
 #[test]
-fn open_help_matches_golden() {
+fn open_help_contract_is_stable() {
     let home = isolated_home();
     let expected = "\
 Usage:

@@ -48,7 +48,7 @@ If the answer is no or unclear, decline or narrow.
 ## Repository Map
 
 - `AGENTS.md` is the contract. `CLAUDE.md` must stay a symlink to it.
-- `src/cli.ts` / `src/parse-cli.ts` are a frozen TypeScript reference used by legacy fixtures. They are not a second product CLI and must not perform live self-updates.
+- `src/cli.ts` / `src/parse-cli.ts` are a frozen TypeScript reference used only to describe legacy fixture shape. They are not a second product CLI and must not perform live self-updates.
 - `src/install.ts` / `src/uninstall.ts` / `src/recover.ts` remain only to reproduce legacy states until the dedicated TypeScript CLI cleanup; they are not product paths.
 - `crates/incodex-cli` is the native CLI: `parse.rs` owns its command language, while `install.rs` and `open.rs` dispatch dangerous operations through the lower crates.
 - `crates/incodex-transaction` owns native mutation locks, durable journals, rollback, and recovery. `crates/incodex-asar` and `crates/incodex-macos` own ASAR and macOS signing/plist mechanics.
@@ -62,7 +62,9 @@ If the answer is no or unclear, decline or narrow.
 
 ## Native CLI integration
 
-Rust workspace now lives on `main`. The migration passed `tests/cli-golden.test.ts`, same-fixture TypeScript/Rust comparisons, the 10 MB size gate, the 50 ms product cold-start probe, and manual TTY/open verification. The v0.3.1 compatibility release published the native Rust CLI under the stable asset names. The Rust CLI is the sole product CLI. Bun remains responsible for building the embedded Electron Runtime and running legacy fixtures, not for producing a new shipped CLI binary.
+Rust workspace now lives on `main`. The migration passed the native Rust contract suites, the frozen legacy fixture reader, the 10 MB size gate, the 50 ms product cold-start probe, and manual TTY/open verification. The v0.3.1 compatibility release published the native Rust CLI under the stable asset names. The Rust CLI is the sole product CLI. Bun remains responsible for building the embedded Electron Runtime and running legacy fixture tooling, not for producing a new shipped CLI binary.
+
+The native Rust contract tests are the product behavior source of truth. The legacy TypeScript surface is a minimum frozen fixture contract only: it may describe old on-disk records, but it must not be launched by golden/parity tests or used as an output oracle.
 
 ### Branching and TDD
 
