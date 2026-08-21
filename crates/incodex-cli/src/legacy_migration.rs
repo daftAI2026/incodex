@@ -103,6 +103,11 @@ where
     let staged = PathBuf::from(&journal.staged_app);
     let outgoing = journal.outgoing_app.as_deref().map(PathBuf::from);
     validate_path_ancestors(root, &format!("legacy-recovery/{install_id}/trash"))?;
+    validate_path_ancestors(
+        root,
+        &format!("legacy-recovery/{install_id}/outgoing-proof"),
+    )?;
+    let outgoing_proof = outgoing_proof_path(root, install_id);
     let needs_original = matches!(
         journal.phase.as_str(),
         "TARGET_MOVED_OUT" | "SWAPPED" | "TARGET_VERIFIED"
@@ -118,7 +123,26 @@ where
             .ok_or("legacy outgoing restore intent has no digest")?;
         if target.exists() && tree_digest(&target)? == digest {
             verify_restore_candidate(root, &target, &target, &journal.install_id)?;
+            finalize_bundle_replace(&root.join("legacy-recovery").join(install_id))?;
             outgoing_already_restored = true;
+        } else if let Some(outgoing) = &outgoing {
+            if outgoing.exists() && outgoing_proof.is_dir() {
+                return Err("legacy outgoing restore has two competing sources".into());
+            }
+            if !outgoing.exists() && outgoing_proof.is_dir() {
+                fs::create_dir_all(outgoing.parent().ok_or("legacy outgoing has no parent")?)
+                    .map_err(|error| error.to_string())?;
+                ditto(&outgoing_proof, outgoing)?;
+            }
+            if outgoing.is_dir() {
+                // Re-enter the normal source validation below.  The proof copy
+                // is retained until that validation and the post-rename proof
+                // have both completed.
+            } else {
+                return Err(
+                    "legacy outgoing restore intent cannot prove the restored target".into(),
+                );
+            }
         } else {
             return Err("legacy outgoing restore intent cannot prove the restored target".into());
         }
@@ -134,7 +158,15 @@ where
             verify_restore_candidate(root, &target, &restore, &journal.install_id)?;
             replace_bundle(&restore, &target, &restore_root)?;
             checkpoint("AFTER_RESTORE_RENAME");
-            verify_restore_candidate(root, &target, &target, &journal.install_id)?;
+            if let Err(error) =
+                verify_restore_candidate(root, &target, &target, &journal.install_id)
+            {
+                undo_bundle_replace(&restore, &target, &restore_root)?;
+                return Err(error);
+            }
+            finalize_bundle_replace(&restore_root)?;
+        } else {
+            finalize_bundle_replace(&root.join("legacy-recovery").join(install_id))?;
         }
     } else if needs_original && !outgoing_already_restored {
         let outgoing = outgoing
@@ -145,20 +177,37 @@ where
         let mut intent = journal.clone();
         intent.recovery_intent = Some("restore-outgoing".into());
         let outgoing_digest = tree_digest(outgoing)?;
+        prepare_outgoing_proof(root, install_id, outgoing, &outgoing_digest)?;
         intent.recovery_digest = Some(outgoing_digest.clone());
         write_legacy_journal(root, &intent)?;
         checkpoint("AFTER_RESTORE_INTENT");
         ensure_staged_target_or_absent(root, &target, &staged, &journal.install_id)?;
+        if tree_digest(outgoing)? != outgoing_digest {
+            return Err("legacy outgoing source changed after restore intent".into());
+        }
         replace_bundle(
             outgoing,
             &target,
             &root.join("legacy-recovery").join(install_id),
         )?;
         checkpoint("AFTER_RESTORE_RENAME");
-        verify_restore_candidate(root, &target, &target, &journal.install_id)?;
-        if tree_digest(&target)? != outgoing_digest {
-            return Err("recovered legacy outgoing full-tree proof mismatch".into());
+        if let Err(error) = verify_restore_candidate(root, &target, &target, &journal.install_id)
+            .and_then(|_| {
+                if tree_digest(&target)? != outgoing_digest {
+                    return Err("recovered legacy outgoing full-tree proof mismatch".into());
+                }
+                Ok(())
+            })
+        {
+            undo_bundle_replace(
+                outgoing,
+                &target,
+                &root.join("legacy-recovery").join(install_id),
+            )?;
+            return Err(error);
         }
+        finalize_bundle_replace(&root.join("legacy-recovery").join(install_id))?;
+        remove_path(&outgoing_proof)?;
         outgoing_restored = true;
     } else if let Some(outgoing) = &outgoing {
         if outgoing.is_dir() {
@@ -171,12 +220,41 @@ where
             } else {
                 let mut intent = journal.clone();
                 intent.recovery_intent = Some("restore-outgoing".into());
-                intent.recovery_digest = Some(tree_digest(outgoing)?);
+                let outgoing_digest = tree_digest(outgoing)?;
+                prepare_outgoing_proof(root, install_id, outgoing, &outgoing_digest)?;
+                intent.recovery_digest = Some(outgoing_digest.clone());
                 write_legacy_journal(root, &intent)?;
                 checkpoint("AFTER_RESTORE_INTENT");
-                fs::rename(outgoing, &target).map_err(|error| error.to_string())?;
+                if tree_digest(outgoing)? != outgoing_digest {
+                    return Err("legacy outgoing source changed after restore intent".into());
+                }
+                replace_bundle(
+                    outgoing,
+                    &target,
+                    &root.join("legacy-recovery").join(install_id),
+                )?;
                 checkpoint("AFTER_RESTORE_RENAME");
-                verify_restore_candidate(root, &target, &target, &journal.install_id)?;
+                if let Err(error) =
+                    verify_restore_candidate(root, &target, &target, &journal.install_id).and_then(
+                        |_| {
+                            if tree_digest(&target)? != outgoing_digest {
+                                return Err(
+                                    "recovered legacy outgoing full-tree proof mismatch".into()
+                                );
+                            }
+                            Ok(())
+                        },
+                    )
+                {
+                    undo_bundle_replace(
+                        outgoing,
+                        &target,
+                        &root.join("legacy-recovery").join(install_id),
+                    )?;
+                    return Err(error);
+                }
+                finalize_bundle_replace(&root.join("legacy-recovery").join(install_id))?;
+                remove_path(&outgoing_proof)?;
                 outgoing_restored = true;
             }
         }
@@ -185,6 +263,8 @@ where
     if let Some(outgoing) = &outgoing {
         remove_path(outgoing)?;
     }
+    remove_path(&outgoing_proof)?;
+    finalize_bundle_replace(&root.join("legacy-recovery").join(install_id))?;
     checkpoint("AFTER_RECOVERY_CLEANUP");
     if target.is_dir() {
         sync_tree_and_ancestors(&target, target.parent().ok_or("target has no parent")?)?;
@@ -230,7 +310,52 @@ fn replace_bundle(source: &Path, target: &Path, work_root: &Path) -> Result<(), 
         }
         return Err(error.to_string());
     }
-    remove_path(&trash)
+    Ok(())
+}
+
+fn finalize_bundle_replace(work_root: &Path) -> Result<(), String> {
+    remove_path(&work_root.join("trash/ChatGPT.app"))
+}
+
+fn undo_bundle_replace(source: &Path, target: &Path, work_root: &Path) -> Result<(), String> {
+    if source.exists() {
+        return Err("cannot undo legacy replacement: source path already exists".into());
+    }
+    if target.exists() {
+        fs::rename(target, source).map_err(|error| error.to_string())?;
+    }
+    let trash = work_root.join("trash/ChatGPT.app");
+    if trash.exists() {
+        fs::rename(&trash, target).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn outgoing_proof_path(root: &Path, install_id: &str) -> PathBuf {
+    root.join("legacy-recovery")
+        .join(install_id)
+        .join("outgoing-proof/ChatGPT.app")
+}
+
+fn prepare_outgoing_proof(
+    root: &Path,
+    install_id: &str,
+    outgoing: &Path,
+    expected_digest: &str,
+) -> Result<(), String> {
+    let proof = outgoing_proof_path(root, install_id);
+    remove_path(&proof)?;
+    fs::create_dir_all(
+        proof
+            .parent()
+            .ok_or("legacy outgoing proof has no parent")?,
+    )
+    .map_err(|error| error.to_string())?;
+    ditto(outgoing, &proof)?;
+    if tree_digest(&proof)? != expected_digest {
+        return Err("legacy outgoing proof copy does not match source".into());
+    }
+    Ok(())
 }
 
 fn ensure_staged_target_or_absent(

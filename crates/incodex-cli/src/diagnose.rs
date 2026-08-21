@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use crate::legacy_typescript::{load_legacy_ts_v1, LegacyState};
 use incodex_asar::Archive;
 use incodex_core::paths::{user_root, ASAR_REL, RUNTIME_CURRENT_NAME, RUNTIME_DIR_NAME};
-use incodex_core::target_id;
+use incodex_core::{canonical::canonical_path, target_id};
 use incodex_macos::{
     diagnose_spctl, has_hardened_runtime, read_architecture, read_asar_integrity, read_plist_info,
     verify_app,
@@ -273,14 +273,24 @@ fn inspect_legacy_backup(root: &Path, app_path: &Path) -> Option<serde_json::Val
     else {
         return None;
     };
+    let belongs_to_target = canonical_path(app_path) == canonical_path(&manifest.target_real_path);
+    let original_exists = original_app.is_dir();
+    let original_asar_hash = hash_file(&original_app.join(ASAR_REL));
+    let patched_asar_hash = hash_file(&app_path.join(ASAR_REL));
+    let original_plist_hash = hash_file(&original_app.join("Contents/Info.plist"));
+    let complete = belongs_to_target
+        && original_exists
+        && original_asar_hash.as_deref() == Some(manifest.original_asar_file_hash.as_str())
+        && patched_asar_hash.as_deref() == Some(manifest.patched_asar_file_hash.as_str())
+        && original_plist_hash.as_deref() == Some(manifest.original_plist_file_hash.as_str());
     Some(serde_json::json!({
         "legacy": true,
-        "complete": true,
+        "complete": complete,
         "installId": state.install_id,
-        "belongsToTarget": true,
-        "originalExists": original_app.is_dir(),
-        "originalAsarFileHash": manifest.original_asar_file_hash,
-        "patchedAsarFileHash": manifest.patched_asar_file_hash,
+        "belongsToTarget": belongs_to_target,
+        "originalExists": original_exists,
+        "originalAsarFileHash": original_asar_hash,
+        "patchedAsarFileHash": patched_asar_hash,
         "runtimeVersion": manifest.runtime_version,
     }))
 }
@@ -445,11 +455,7 @@ pub fn format_diagnosis(report: &Diagnosis) -> String {
             report.bundle_id.as_deref().unwrap_or("unknown"),
             None,
         ),
-        incodex_core::format_kv(
-            "Version",
-            app_version.trim(),
-            None,
-        ),
+        incodex_core::format_kv("Version", app_version.trim(), None),
         incodex_core::format_kv(
             "Arch",
             report.architecture.as_deref().unwrap_or("unknown"),
