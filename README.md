@@ -141,28 +141,6 @@ Run `inc` in a terminal:
 ↑↓ | Enter | V Version | Q Quit | 1-6 Jump
 ```
 
-### Install
-
-```bash
-$ incodex install
-
-➤ Install
-  App          /Applications/ChatGPT.app
-  Version      26.814.41957 6744
-  Signed       yes
-  ! Replaces the app in place and resigns it ad hoc.
-  ! Official Appshot (smart snapshot) stops until uninstall.
-  Backup       ~/.incodex/installations/
-  ✓ Official app patched
-  Install id   0778f0fa-…
-  Runtime      0.3.1
-  App          /Applications/ChatGPT.app
-➤ Relaunch
-  ✓ ChatGPT.app relaunched.
-```
-
-After install, the hat-glasses control appears left of Search. Click it or press `Shift+Command+N` for an incognito window.
-
 ### Open without patching
 
 ```bash
@@ -184,6 +162,28 @@ $ incodex open
   Home         ~/.incodex/sessions/…
   ✓ Closed. Isolated session removed.
 ```
+
+### Install
+
+```bash
+$ incodex install
+
+➤ Install
+  App          /Applications/ChatGPT.app
+  Version      26.814.41957 6744
+  Signed       yes
+  ! Replaces the app in place and resigns it ad hoc.
+  ! Official Appshot (smart snapshot) stops until uninstall.
+  Backup       ~/.incodex/installations/
+  ✓ Official app patched
+  Install id   0778f0fa-…
+  Runtime      0.3.1
+  App          /Applications/ChatGPT.app
+➤ Relaunch
+  ✓ ChatGPT.app relaunched.
+```
+
+After install, the hat-glasses control appears left of Search. Click it or press `Shift+Command+N` for an incognito window.
 
 ### Status
 
