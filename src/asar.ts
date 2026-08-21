@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LOADER_NAME, INJECT_NAME, MAIN_NAME, PRELOAD_NAME, SAFE_HOME_NAME, IPC_GUARD_NAME, INSTANCE_NAME, RUNTIME_LOAD_NAME, WINDOW_KIND_NAME, MARKER_KEY } from "./paths";
+import { LOADER_NAME, INJECT_NAME, MAIN_NAME, PRELOAD_NAME, SAFE_HOME_NAME, IPC_GUARD_NAME, OWNER_CORE_NAME, OWNER_RECOVERY_NAME, INSTANCE_NAME, RUNTIME_LOAD_NAME, WINDOW_KIND_NAME, MARKER_KEY } from "./paths";
 
 export function headerHash(asarPath: string): string {
   const raw = getRawHeader(asarPath);
@@ -63,6 +63,8 @@ const ASAR_RUNTIME_LEFTOVERS = [
   PRELOAD_NAME,
   SAFE_HOME_NAME,
   IPC_GUARD_NAME,
+  OWNER_CORE_NAME,
+  OWNER_RECOVERY_NAME,
   INSTANCE_NAME,
   RUNTIME_LOAD_NAME,
   WINDOW_KIND_NAME,
