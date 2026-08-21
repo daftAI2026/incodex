@@ -9,7 +9,7 @@ const { LOCK_NAME, SOCK_NAME, ownerPortFromExec, ownerToken, writeOwnerLock, rea
 const activeLeases = new Map();
 const PROTOCOL_MAX_BYTES = 256;
 const PROTOCOL_IDLE_TIMEOUT_MS = 1_000;
-const MAX_LEASE_CONNECTIONS = 8;
+const MAX_LEASE_CONNECTIONS = 32;
 function claimPath(stateRoot) {
     return path.join(stateRoot, ".incognito.lock.takeover");
 }
@@ -94,15 +94,15 @@ async function validateDiagnosticBeforePublication(stateRoot, owner, beforeBind 
     }
     if (sameOwnerToken(state.owner, owner))
         return;
-    if (!staleOwnerRecord(state.owner)) {
-        if (beforeBind) {
-            const probe = await probeOwnerPort(owner);
-            if (probe.kind === "owner")
-                return;
-            if (probe.kind === "foreign") {
-                throw new OwnerLeaseError("OWNER_FOREIGN_PORT", "target port is held by an unknown listener", state.owner);
-            }
+    if (beforeBind) {
+        const probe = await probeOwnerPort(owner);
+        if (probe.kind === "owner")
+            return;
+        if (probe.kind === "foreign") {
+            throw new OwnerLeaseError("OWNER_FOREIGN_PORT", "target port is held by an unknown listener", state.owner);
         }
+    }
+    if (!staleOwnerRecord(state.owner)) {
         throw new OwnerLeaseError("OWNER_LEGACY_OWNER", "live legacy owner record has no kernel handshake; refusing takeover", state.owner);
     }
 }
@@ -176,6 +176,7 @@ function probeOwnerPort(owner) {
             }
         });
         socket.on("error", () => finish({ kind: "unavailable" }));
+        socket.on("close", () => finish({ kind: "unavailable" }));
         socket.on("timeout", () => finish({ kind: "unavailable" }));
     });
 }
