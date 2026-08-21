@@ -703,3 +703,116 @@ fn hash_file(path: &Path) -> Option<String> {
             .collect(),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::Mutex;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static PATH_LOCK: Mutex<()> = Mutex::new(());
+
+    struct PathGuard(Option<OsString>);
+
+    impl Drop for PathGuard {
+        fn drop(&mut self) {
+            match &self.0 {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+    }
+
+    struct Fixture {
+        root: PathBuf,
+        app: PathBuf,
+        fake_bin: PathBuf,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "incodex-doctor-official-signing-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("system clock must be after unix epoch")
+                    .as_nanos()
+            ));
+            let app = root.join("ChatGPT.app");
+            let fake_bin = root.join("fake-bin");
+            fs::create_dir_all(&app).unwrap();
+            fs::create_dir_all(&fake_bin).unwrap();
+            let codesign = fake_bin.join("codesign");
+            fs::write(
+                &codesign,
+                r#"#!/bin/sh
+if [ "$1" = "--display" ] && [ "$2" = "--entitlements" ]; then
+  printf '%s' '<?xml version="1.0"?><plist><dict></dict></plist>'
+  exit 0
+fi
+if [ "$1" = "--display" ] && [ "$2" = "--verbose=2" ]; then
+  printf '%s\n' 'flags=0x10000(runtime)'
+  exit 0
+fi
+if [ "$1" = "--display" ] && [ "$2" = "--verbose=4" ]; then
+  printf '%s\n' 'Identifier=com.attacker.replaced' 'TeamIdentifier=2DC432GLL2' 'Authority=Developer ID Application: fixture'
+  exit 0
+fi
+if [ "$1" = "--verify" ]; then exit 0; fi
+exit 0
+"#,
+            )
+            .unwrap();
+            let mut permissions = fs::metadata(&codesign).unwrap().permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&codesign, permissions).unwrap();
+            Self {
+                root,
+                app,
+                fake_bin,
+            }
+        }
+
+        fn path(&self) -> OsString {
+            let mut path = OsString::from(self.fake_bin.as_os_str());
+            path.push(":");
+            if let Some(existing) = std::env::var_os("PATH") {
+                path.push(existing);
+            }
+            path
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn doctor_official_target_rejects_wrong_outer_signature_identifier() {
+        let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let fixture = Fixture::new();
+        let original_path = std::env::var_os("PATH");
+        let _path_guard = PathGuard(original_path);
+        std::env::set_var("PATH", fixture.path());
+
+        let (report, checks) = inspect_signing(
+            Some(&serde_json::json!({"status": "checked"})),
+            true,
+            &fixture.app,
+            false,
+            true,
+        );
+        let report = report.expect("Doctor must report signing for an existing app");
+        assert_eq!(report["verified"], false);
+        assert!(checks
+            .findings
+            .iter()
+            .any(|finding| finding.code == "signing.acceptance-failed"));
+    }
+}
