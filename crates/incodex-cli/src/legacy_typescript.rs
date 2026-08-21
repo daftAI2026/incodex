@@ -255,26 +255,33 @@ fn select_journal<'a>(
     target_key: &str,
     records: &'a [LegacyJournalRecord],
 ) -> Result<&'a LegacyJournalRecord, String> {
+    let current_id = read_current_install_id(root, target_key)?;
     let interrupted = records
         .iter()
         .filter(|record| record.kind == LegacyStateKind::Interrupted)
         .collect::<Vec<_>>();
-    if interrupted.len() > 1 {
-        let mut install_ids = interrupted
+    if !interrupted.is_empty() {
+        let mut interrupted_ids = interrupted
             .iter()
-            .map(|record| record.journal.install_id.as_str())
+            .map(|record| record.journal.install_id.clone())
             .collect::<Vec<_>>();
-        install_ids.sort_unstable();
-        return Err(format!(
-            "multiple actionable interrupted legacy journals for target; refusing to choose one: {}",
-            install_ids.join(", ")
-        ));
-    }
-    if let Some(record) = interrupted.first() {
-        return Ok(record);
+        interrupted_ids.sort_unstable();
+        if let Some(current_id) = current_id.as_deref() {
+            return Err(format!(
+                "ambiguous legacy journals for target: interrupted [{}] conflicts with current.json installId {current_id}; refusing to choose one",
+                interrupted_ids.join(", ")
+            ));
+        }
+        if interrupted.len() > 1 {
+            return Err(format!(
+                "multiple actionable interrupted legacy journals for target; refusing to choose one: {}",
+                interrupted_ids.join(", ")
+            ));
+        }
+        return Ok(interrupted[0]);
     }
 
-    if let Some(current_id) = read_current_install_id(root, target_key)? {
+    if let Some(current_id) = current_id {
         if let Some(record) = records.iter().find(|record| {
             record.kind == LegacyStateKind::Committed && record.journal.install_id == current_id
         }) {
