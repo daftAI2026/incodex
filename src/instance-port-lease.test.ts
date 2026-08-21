@@ -320,7 +320,7 @@ describe("kernel-held TCP owner lease", () => {
       nonce: "dddddddddddddddddddddddddddddddd",
     };
     writeFileSync(quarantine, `${JSON.stringify(retained)}\n`);
-    expect(readOwnerRecords(root).some(({ state }: any) => state.kind === "valid")).toBe(true);
+    expect(readOwnerRecords(root).some(({ state }: any) => state.kind === "unverifiable")).toBe(true);
 
     const candidate = currentOwner("quarantine-valid-candidate", target(root));
     let acquired = false;

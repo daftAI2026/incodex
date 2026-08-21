@@ -8,6 +8,7 @@ import {
   acquireOwnerLease,
   clearOwnerLock,
   connectExisting,
+  connectExistingWithRetry,
   currentOwner,
   LOCK_NAME,
   listenForRaise,
@@ -171,6 +172,42 @@ describe("raise listener", () => {
     expect(await connectExisting(root, 500)).toBe(true);
     expect(raised).toBe(true);
     expect(clearOwnerLock(root, replacement)).toBe(true);
+  });
+
+  test("does not probe retained quarantines during raise retries", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-retained-quarantine-retry-"));
+    for (const [index, token] of [
+      "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "ffffffffffffffffffffffffffffffff",
+      "11111111111111111111111111111111",
+    ].entries()) {
+      writeFileSync(
+        join(root, `.incognito.lock.quarantine.retained-${index}`),
+        `${JSON.stringify({
+          pid: 910000 + index,
+          startedAt: "dead-fixture",
+          processStartIdentity: "dead-fixture",
+          execPath: target(root),
+          execIdentity: "target-executable",
+          sessionId: `retained-${index}`,
+          token,
+          nonce: token,
+        })}\n`,
+      );
+    }
+    const port = ownerPortFromExec(target(root));
+    let connections = 0;
+    const server = createServer((socket) => {
+      connections += 1;
+      socket.destroy();
+    });
+    await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", resolve));
+    try {
+      expect(await connectExistingWithRetry(root, "", { attempts: 5, timeoutMs: 100, delayMs: 0 })).toBe(false);
+      expect(connections).toBe(0);
+    } finally {
+      server.close();
+    }
   });
 });
 
