@@ -150,7 +150,10 @@ pub fn adopt_legacy_committed_locked(
 }
 
 fn flush_adopted_backup(tree: &Path, transaction_dir: &Path) -> Result<(), String> {
-    sync_tree_and_ancestors(tree, transaction_dir)
+    let transactions_root = transaction_dir
+        .parent()
+        .ok_or("adopted backup transaction directory has no parent")?;
+    sync_tree_and_ancestors(tree, transactions_root)
 }
 
 fn remove_incomplete_backup(path: &Path) -> Result<(), String> {
