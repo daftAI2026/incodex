@@ -222,7 +222,7 @@ describe("kernel-held TCP owner lease", () => {
     expect(await connectExisting(root, 500, live.token)).toBe(true);
     expect(Date.now() - started).toBeLessThan(2_000);
     const records = readOwnerRecords(root);
-    expect(records.filter(({ path }) => path.includes(".active.")).map(({ path }) => path)).toEqual([
+    expect(records.filter(({ path }: { path: string }) => path.includes(".active.")).map(({ path }: { path: string }) => path)).toEqual([
       join(root, `incognito.lock.active.${live.token}`),
     ]);
     expect(existsSync(join(root, "incognito.lock"))).toBe(true);

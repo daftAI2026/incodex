@@ -194,6 +194,20 @@ function readOwnerLock(stateRoot) {
     const state = readOwnerLockState(stateRoot);
     return state.kind === "valid" ? state.owner : null;
 }
+function reclaimStaleActiveOwnerRecord(file, expectedOwner) {
+    if (!staleOwnerRecord(expectedOwner))
+        return false;
+    const latest = readOwnerLockStateAt(file);
+    if (latest.kind !== "valid" || !sameOwnerToken(latest.owner, expectedOwner) || !staleOwnerRecord(latest.owner))
+        return false;
+    try {
+        fs.rmSync(file);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
 function readOwnerRecords(stateRoot) {
     const records = [];
     const canonical = lockPath(stateRoot);
@@ -204,7 +218,10 @@ function readOwnerRecords(stateRoot) {
             if (!name.startsWith(ACTIVE_LOCK_PREFIX))
                 continue;
             const file = path.join(stateRoot, name);
-            records.push({ path: file, state: readOwnerLockStateAt(file) });
+            const state = readOwnerLockStateAt(file);
+            if (state.kind === "valid" && reclaimStaleActiveOwnerRecord(file, state.owner))
+                continue;
+            records.push({ path: file, state });
         }
     }
     catch {
@@ -248,9 +265,11 @@ function staleOwnerRecord(owner) {
         return true;
     if (!hasReliableOwnerIdentity(owner))
         return false;
+    if (!pidAlive(owner.pid))
+        return true;
     const live = processIdentity(owner.pid);
     if (!live)
-        return !pidAlive(owner.pid);
+        return false;
     return !ownerMatchesLive(owner, live);
 }
 function staleOwner(stateRoot) {
