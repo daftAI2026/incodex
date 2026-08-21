@@ -3,6 +3,7 @@
 //! 结构读取器只回答“记录长什么样”；本模块回答“当前磁盘对象仍然是它
 //! 所描述的对象吗”。证明期间持有 target lock，并在关键边界重新检查身份。
 
+use std::fmt;
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
@@ -11,7 +12,7 @@ use std::process::Command;
 use incodex_asar::{Archive, PackageMain, MARKER_KEY};
 use incodex_core::{inspect_target, recheck_target, CanonicalTarget};
 use incodex_macos::{read_architecture, read_plist_info, verify_app, PlistInfo};
-use incodex_transaction::acquire_target_lock;
+use incodex_transaction::{acquire_target_lock, TargetLock};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -23,19 +24,31 @@ const VENDOR_TEAM_IDENTIFIER: &str = "2DC432GLL2";
 const OFFICIAL_BUNDLE_IDENTIFIER: &str = "com.openai.codex";
 
 /// 证明后才可交给迁移器的状态。结构状态本身不实现任何 mutation 能力。
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LegacyProvenState {
     structural: LegacyStructuralState,
     evidence: LegacyProofEvidence,
+    /// Lock remains owned until the proven state is consumed by migration.
+    #[allow(dead_code)]
+    lock: TargetLock,
+}
+
+impl fmt::Debug for LegacyProvenState {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LegacyProvenState")
+            .field("structural", &self.structural)
+            .field("evidence", &self.evidence)
+            .finish_non_exhaustive()
+    }
 }
 
 impl LegacyProvenState {
-    pub fn structural(&self) -> &LegacyStructuralState {
-        &self.structural
-    }
-
-    pub fn evidence(&self) -> &LegacyProofEvidence {
-        &self.evidence
+    /// Migration consumers run while this value still owns the target lock.
+    pub fn with_locked<R>(
+        &self,
+        consumer: impl FnOnce(&LegacyStructuralState, &LegacyProofEvidence) -> R,
+    ) -> R {
+        consumer(&self.structural, &self.evidence)
     }
 }
 
@@ -66,7 +79,7 @@ pub fn prove_legacy_ts_v1(
     root: &Path,
     structural: LegacyStructuralState,
 ) -> Result<LegacyProvenState, String> {
-    prove_legacy_ts_v1_with_checkpoint(root, structural, || Ok(()))
+    prove_legacy_ts_v1_with_boundaries(root, structural, || Ok(()), || Ok(()))
 }
 
 /// 测试用的锁内 checkpoint；产品调用方应使用不注入 callback 的入口。
@@ -78,6 +91,21 @@ pub fn prove_legacy_ts_v1_with_checkpoint<F>(
 ) -> Result<LegacyProvenState, String>
 where
     F: FnOnce() -> Result<(), String>,
+{
+    prove_legacy_ts_v1_with_boundaries(root, structural, after_lock, || Ok(()))
+}
+
+/// 测试用的最终边界 checkpoint；产品调用方应使用不注入 callback 的入口。
+#[doc(hidden)]
+pub fn prove_legacy_ts_v1_with_boundaries<F, G>(
+    root: &Path,
+    structural: LegacyStructuralState,
+    after_lock: F,
+    after_initial_evidence: G,
+) -> Result<LegacyProvenState, String>
+where
+    F: FnOnce() -> Result<(), String>,
+    G: FnOnce() -> Result<(), String>,
 {
     let (manifest, runtime, original_app) = match &structural.state {
         LegacyState::Committed {
@@ -123,7 +151,7 @@ where
         .map_err(|error| format!("legacy live target changed during proof: {error}"))?;
     ensure_no_symlink_path(target, "legacy live target")?;
 
-    let live_info = require_plist(target, "live target")?;
+    let live_info = require_plist(target, "live target", None)?;
     check_identity_fields(
         &live_info,
         &manifest.bundle_identifier,
@@ -131,6 +159,7 @@ where
         &manifest.app_build,
         "live target",
     )?;
+    let _live_executable = executable_path(target, &live_info, "live target", None)?;
     let live_architecture = read_architecture(target, &live_info.executable)
         .ok_or("legacy live target architecture is unreadable")?;
     if live_architecture != manifest.architecture {
@@ -139,6 +168,8 @@ where
             manifest.architecture, live_architecture
         ));
     }
+    let live_plist = plist_path(target, "live target", None)?;
+    let live_plist_hash = sha256_file(&live_plist)?;
     let live_asar_path = asar_path(target, "live target", None)?;
     let live_asar_identity = object_identity(&live_asar_path, "live target ASAR")?;
     let live_archive = Archive::open(&live_asar_path)
@@ -163,7 +194,9 @@ where
     if live_archive.file_hash() != manifest.patched_asar_file_hash {
         return Err("live target patched ASAR file hash mismatch".into());
     }
-    if !verify_app(target) {
+    if before_lock.is_official {
+        verify_bundle_deep_strict(target, "official live target")?;
+    } else if !verify_app(target) {
         return Err("live target signature verification failed".into());
     }
     if object_identity(&live_asar_path, "live target ASAR")? != live_asar_identity {
@@ -176,13 +209,19 @@ where
     if original_identity != expected_original {
         return Err("legacy original backup identity changed since structural read".into());
     }
-    let original_info = require_plist(original_app, "legacy original backup")?;
+    let original_info = require_plist(original_app, "legacy original backup", Some(root))?;
     check_identity_fields(
         &original_info,
         &manifest.bundle_identifier,
         &manifest.app_version,
         &manifest.app_build,
         "legacy original backup",
+    )?;
+    let _original_executable = executable_path(
+        original_app,
+        &original_info,
+        "legacy original backup",
+        Some(root),
     )?;
     let original_architecture = read_architecture(original_app, &original_info.executable)
         .ok_or("legacy original backup architecture is unreadable")?;
@@ -194,7 +233,8 @@ where
     }
     let original_plist = original_app.join("Contents/Info.plist");
     ensure_no_symlink_under(root, &original_plist, "legacy original backup Info.plist")?;
-    if sha256_file(&original_plist)? != manifest.original_plist_file_hash {
+    let original_plist_hash = sha256_file(&original_plist)?;
+    if original_plist_hash != manifest.original_plist_file_hash {
         return Err("legacy original backup plist hash mismatch".into());
     }
     let original_asar_path = asar_path(original_app, "legacy original backup", Some(root))?;
@@ -221,13 +261,15 @@ where
         return Err("legacy original backup signature verification failed".into());
     }
     let vendor_signature = if before_lock.is_official {
-        Some(read_vendor_signature(
+        Some(verify_official_vendor_bundle(
             original_app,
             &manifest.bundle_identifier,
         )?)
     } else {
         None
     };
+
+    after_initial_evidence()?;
 
     ensure_no_symlink_under(root, original_app, "legacy original backup")?;
     ensure_no_symlink_under(root, &original_asar_path, "legacy original ASAR")?;
@@ -237,6 +279,102 @@ where
     if object_identity(&original_asar_path, "legacy original ASAR")? != original_asar_identity {
         return Err("legacy original ASAR identity changed during proof".into());
     }
+    let final_live_info = require_plist(target, "final live target", None)
+        .map_err(|error| format!("final live identity proof failed: {error}"))?;
+    check_identity_fields(
+        &final_live_info,
+        &manifest.bundle_identifier,
+        &manifest.app_version,
+        &manifest.app_build,
+        "final live target",
+    )?;
+    let _ = executable_path(target, &final_live_info, "final live target", None)?;
+    let final_live_architecture = read_architecture(target, &final_live_info.executable)
+        .ok_or("final live target architecture is unreadable")?;
+    if final_live_architecture != manifest.architecture {
+        return Err("final live target architecture mismatch".into());
+    }
+    if sha256_file(&plist_path(target, "final live target", None)?)? != live_plist_hash {
+        return Err("final live target Info.plist hash mismatch".into());
+    }
+    let final_live_asar_path = asar_path(target, "final live target", None)?;
+    let final_live_archive = Archive::open(&final_live_asar_path)
+        .map_err(|error| format!("final live ASAR proof failed: {error}"))?;
+    let (final_live_package, final_live_package_json) =
+        package_metadata(&final_live_archive, "final live target")?;
+    require_live_marker(
+        &final_live_package_json,
+        &structural.install_id,
+        &manifest.original_main,
+    )?;
+    if !final_live_package.already_patched
+        || final_live_package.install_id.as_deref() != Some(&structural.install_id)
+        || final_live_package.main != manifest.original_main
+    {
+        return Err("final live target marker identity mismatch".into());
+    }
+    if final_live_archive.header_hash() != manifest.patched_asar_header_hash
+        || final_live_archive.file_hash() != manifest.patched_asar_file_hash
+    {
+        return Err("final live target patched ASAR hash mismatch".into());
+    }
+    let final_original_info = require_plist(original_app, "final original backup", Some(root))
+        .map_err(|error| format!("final original identity proof failed: {error}"))?;
+    check_identity_fields(
+        &final_original_info,
+        &manifest.bundle_identifier,
+        &manifest.app_version,
+        &manifest.app_build,
+        "final original backup",
+    )?;
+    let _ = executable_path(
+        original_app,
+        &final_original_info,
+        "final original backup",
+        Some(root),
+    )?;
+    let final_original_architecture =
+        read_architecture(original_app, &final_original_info.executable)
+            .ok_or("final original backup architecture is unreadable")?;
+    if final_original_architecture != manifest.architecture {
+        return Err("final original backup architecture mismatch".into());
+    }
+    if sha256_file(&plist_path(
+        original_app,
+        "final original backup",
+        Some(root),
+    )?)? != original_plist_hash
+    {
+        return Err("final original backup Info.plist hash mismatch".into());
+    }
+    let final_original_asar_path = asar_path(original_app, "final original backup", Some(root))?;
+    let final_original_archive = Archive::open(&final_original_asar_path)
+        .map_err(|error| format!("final original ASAR proof failed: {error}"))?;
+    let (final_original_package, final_original_package_json) =
+        package_metadata(&final_original_archive, "final original backup")?;
+    if final_original_package_json.get(MARKER_KEY).is_some()
+        || final_original_package.already_patched
+        || final_original_package.install_id.is_some()
+        || final_original_package.main != manifest.original_main
+    {
+        return Err("final original backup clean marker identity mismatch".into());
+    }
+    if final_original_archive.header_hash() != manifest.original_asar_header_hash
+        || final_original_archive.file_hash() != manifest.original_asar_file_hash
+    {
+        return Err("final original backup ASAR hash mismatch".into());
+    }
+    if before_lock.is_official {
+        verify_bundle_deep_strict(target, "final official live target")?;
+        let _ = verify_official_vendor_bundle(original_app, &manifest.bundle_identifier)?;
+    } else {
+        if !verify_app(target) {
+            return Err("final live target signature verification failed".into());
+        }
+        if !verify_app(original_app) {
+            return Err("final original backup signature verification failed".into());
+        }
+    }
     ensure_no_symlink_path(target, "legacy live target")?;
     ensure_no_symlink_path(&live_asar_path, "live target ASAR")?;
     if object_identity(&live_asar_path, "live target ASAR")? != live_asar_identity {
@@ -244,7 +382,6 @@ where
     }
     recheck_target(&before_lock)
         .map_err(|error| format!("legacy live target changed after proof: {error}"))?;
-    drop(lock);
     let live_install_id = structural.install_id.clone();
     let live_asar_header_hash = manifest.patched_asar_header_hash.clone();
     let live_asar_file_hash = manifest.patched_asar_file_hash.clone();
@@ -264,6 +401,7 @@ where
             original_asar_file_hash,
             vendor_signature,
         },
+        lock,
     })
 }
 
@@ -299,8 +437,37 @@ fn object_identity(path: &Path, label: &str) -> Result<LegacyFsIdentity, String>
     })
 }
 
-fn require_plist(app: &Path, label: &str) -> Result<PlistInfo, String> {
+fn require_plist(app: &Path, label: &str, root: Option<&Path>) -> Result<PlistInfo, String> {
+    let _ = plist_path(app, label, root)?;
     read_plist_info(app).ok_or_else(|| format!("{label} Info.plist is unreadable"))
+}
+
+fn plist_path(app: &Path, label: &str, root: Option<&Path>) -> Result<PathBuf, String> {
+    let path = app.join("Contents/Info.plist");
+    if let Some(root) = root {
+        ensure_no_symlink_under(root, &path, &format!("{label} Info.plist"))?;
+    } else {
+        ensure_no_symlink_path(&path, &format!("{label} Info.plist"))?;
+    }
+    Ok(path)
+}
+
+fn executable_path(
+    app: &Path,
+    info: &PlistInfo,
+    label: &str,
+    root: Option<&Path>,
+) -> Result<PathBuf, String> {
+    if info.executable.is_empty() {
+        return Err(format!("{label} executable identity is empty"));
+    }
+    let path = app.join("Contents/MacOS").join(&info.executable);
+    if let Some(root) = root {
+        ensure_no_symlink_under(root, &path, &format!("{label} executable"))?;
+    } else {
+        ensure_no_symlink_path(&path, &format!("{label} executable"))?;
+    }
+    Ok(path)
 }
 
 fn check_identity_fields(
@@ -382,10 +549,26 @@ fn hex_digest(bytes: &[u8]) -> String {
         .collect()
 }
 
-fn read_vendor_signature(
+fn verify_bundle_deep_strict(app: &Path, label: &str) -> Result<(), String> {
+    let output = Command::new("codesign")
+        .args(["--verify", "--deep", "--strict", "--verbose=4", "--"])
+        .arg(app)
+        .output()
+        .map_err(|error| format!("{label} verification failed to start: {error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!("{label} deep strict signature verification failed"))
+    }
+}
+
+/// Verify official vendor identity; an ad-hoc fixture is never accepted.
+#[doc(hidden)]
+pub fn verify_official_vendor_bundle(
     app: &Path,
     expected_identifier: &str,
 ) -> Result<LegacyVendorSignature, String> {
+    verify_bundle_deep_strict(app, "official vendor bundle")?;
     let output = Command::new("codesign")
         .args(["--display", "--verbose=4", "--"])
         .arg(app)

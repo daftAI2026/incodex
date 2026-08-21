@@ -167,18 +167,25 @@ impl ProofFixture {
 fn committed_typescript_state_proves_live_and_backup_identity() {
     let fixture = ProofFixture::create();
     let proven = prove_legacy_ts_v1(&fixture.root, fixture.state).expect("proof gate");
-    assert_eq!(proven.structural().install_id, INSTALL_ID);
-    assert_eq!(proven.evidence().live_install_id, INSTALL_ID);
-    assert_eq!(
-        proven.evidence().original_asar_file_hash,
-        sha256(&fixture.original_asar)
-    );
+    proven.with_locked(|structural, evidence| {
+        assert_eq!(structural.install_id, INSTALL_ID);
+        assert_eq!(evidence.live_install_id, INSTALL_ID);
+        assert_eq!(
+            evidence.original_asar_file_hash,
+            sha256(&fixture.original_asar)
+        );
+    });
 }
 
 #[test]
 fn proof_rejects_live_marker_hash_build_and_bundle_mismatches() {
     let fixture = ProofFixture::create();
-    patch_asar(&fixture.live_asar(), "legacy-loader\n", Some(OTHER_INSTALL_ID)).unwrap();
+    patch_asar(
+        &fixture.live_asar(),
+        "legacy-loader\n",
+        Some(OTHER_INSTALL_ID),
+    )
+    .unwrap();
     sign_app(&fixture.app);
     let error = prove_legacy_ts_v1(&fixture.root, fixture.state).unwrap_err();
     assert!(error.contains("installId"), "{error}");
@@ -197,7 +204,11 @@ fn proof_rejects_live_marker_hash_build_and_bundle_mismatches() {
         let fixture = ProofFixture::create();
         let mut manifest: serde_json::Value =
             serde_json::from_slice(&fs::read(&fixture.manifest).unwrap()).unwrap();
-        manifest[field] = json!(if field == "appBuild" { "different" } else { "other.bundle" });
+        manifest[field] = json!(if field == "appBuild" {
+            "different"
+        } else {
+            "other.bundle"
+        });
         fs::write(
             &fixture.manifest,
             format!("{}\n", serde_json::to_string_pretty(&manifest).unwrap()),
@@ -214,7 +225,12 @@ fn proof_rejects_live_marker_hash_build_and_bundle_mismatches() {
 #[test]
 fn proof_rejects_patched_or_changed_or_unsigned_backup() {
     let fixture = ProofFixture::create();
-    patch_asar(&fixture.original_asar_path(), "legacy-loader\n", Some(INSTALL_ID)).unwrap();
+    patch_asar(
+        &fixture.original_asar_path(),
+        "legacy-loader\n",
+        Some(INSTALL_ID),
+    )
+    .unwrap();
     let error = prove_legacy_ts_v1(&fixture.root, fixture.state).unwrap_err();
     assert!(error.contains("marker"), "{error}");
 
@@ -273,7 +289,10 @@ fn proof_requires_the_target_lock_and_rechecks_toctou_identity() {
         Ok(())
     })
     .unwrap_err();
-    assert!(error.contains("inode") || error.contains("real path"), "{error}");
+    assert!(
+        error.contains("inode") || error.contains("real path"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -339,11 +358,16 @@ fn proof_rejects_live_internal_info_and_executable_symlinks() {
     for relative in ["Contents/Info.plist", "Contents/MacOS/ChatGPT"] {
         let fixture = ProofFixture::create();
         let path = fixture.app.join(relative);
-        let victim = fixture.root.join(format!("victim-{}", relative.replace('/', "-")));
+        let victim = fixture
+            .root
+            .join(format!("victim-{}", relative.replace('/', "-")));
         fs::rename(&path, &victim).unwrap();
         std::os::unix::fs::symlink(&victim, &path).unwrap();
         let error = prove_legacy_ts_v1(&fixture.root, fixture.state).unwrap_err();
-        assert!(error.to_lowercase().contains("symlink"), "{relative}: {error}");
+        assert!(
+            error.to_lowercase().contains("symlink"),
+            "{relative}: {error}"
+        );
     }
 }
 
