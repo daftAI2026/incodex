@@ -5,8 +5,8 @@ use incodex_asar::{Archive, MARKER_KEY};
 use incodex_core::{canonical::canonical_path, is_official_app, target_id};
 use incodex_macos::{ditto, read_plist_info, verify_app};
 use incodex_transaction::{
-    acquire_target_lock, journal_v2, sync_tree_and_ancestors, tree_digest, validate_path_ancestors,
-    JournalV2,
+    acquire_target_lock, journal_v2, sync_tree_and_ancestors, tree_digest, tree_digest_excluding,
+    validate_path_ancestors, JournalV2,
 };
 
 use crate::legacy_proof::LegacyProvenState;
@@ -156,7 +156,13 @@ where
     }
     if needs_original && original.is_dir() {
         if !already_restored(root, &target, &original, &journal.install_id)? {
-            ensure_staged_target_or_absent(root, &target, &staged, &journal.install_id)?;
+            ensure_staged_target_or_absent(
+                root,
+                &target,
+                &staged,
+                &journal.install_id,
+                Some(&original),
+            )?;
             let restore_root = root.join("legacy-recovery").join(install_id);
             let restore = restore_root.join("ChatGPT.app");
             remove_path(&restore)?;
@@ -188,7 +194,13 @@ where
         intent.recovery_digest = Some(outgoing_digest.clone());
         write_legacy_journal(root, &intent)?;
         checkpoint("AFTER_RESTORE_INTENT");
-        ensure_staged_target_or_absent(root, &target, &staged, &journal.install_id)?;
+        ensure_staged_target_or_absent(
+            root,
+            &target,
+            &staged,
+            &journal.install_id,
+            Some(outgoing),
+        )?;
         if tree_digest(outgoing)? != outgoing_digest {
             return Err("legacy outgoing source changed after restore intent".into());
         }
@@ -373,6 +385,7 @@ fn ensure_staged_target_or_absent(
     target: &Path,
     staged: &Path,
     install_id: &str,
+    proof_source: Option<&Path>,
 ) -> Result<(), String> {
     if !target.exists() {
         return Ok(());
@@ -383,6 +396,7 @@ fn ensure_staged_target_or_absent(
         if !verify_app(target) {
             return Err("legacy recovery target failed signature verification".into());
         }
+        verify_patched_target_seal(root, target, install_id, proof_source)?;
         if staged.is_dir() && tree_digest(target)? != tree_digest(staged)? {
             return Err("legacy recovery target does not match staged tree".into());
         }
@@ -390,6 +404,48 @@ fn ensure_staged_target_or_absent(
     } else {
         Err("legacy recovery target no longer belongs to this transaction".into())
     }
+}
+
+fn verify_patched_target_seal(
+    root: &Path,
+    target: &Path,
+    install_id: &str,
+    proof_source: Option<&Path>,
+) -> Result<(), String> {
+    let manifest = legacy_manifest(root, target, install_id)?;
+    let asar = target.join("Contents/Resources/app.asar");
+    let archive = Archive::open(&asar)?;
+    if archive.header_hash() != manifest.patched_asar_header_hash
+        || sha256_file(&asar)? != manifest.patched_asar_file_hash
+    {
+        return Err("legacy recovery target does not match the sealed patched ASAR".into());
+    }
+    let original = proof_source.map(Path::to_path_buf).unwrap_or_else(|| {
+        root.join("installations")
+            .join(target_id(target))
+            .join(install_id)
+            .join("original/ChatGPT.app")
+    });
+    if !original.is_dir() {
+        return Err("legacy recovery has no sealed original for patched tree proof".into());
+    }
+    // The ASAR and code signature are the only bundle members the retired
+    // installer is allowed to rewrite.  Comparing the remaining tree against
+    // the sealed original catches a different non-ASAR app even when it was
+    // re-signed and still passes a shallow signature check.
+    let info = read_plist_info(target).ok_or("legacy recovery target Info.plist is unreadable")?;
+    let executable_member = format!("Contents/MacOS/{}", info.executable);
+    let patched_members = vec![
+        "Contents/Resources/app.asar",
+        "Contents/_CodeSignature",
+        executable_member.as_str(),
+    ];
+    if tree_digest_excluding(target, &patched_members)?
+        != tree_digest_excluding(&original, &patched_members)?
+    {
+        return Err("legacy recovery target full-tree proof mismatch".into());
+    }
+    Ok(())
 }
 
 fn already_restored(

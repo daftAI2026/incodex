@@ -97,6 +97,13 @@ struct TreeEntry {
 }
 
 pub fn tree_digest(root: &Path) -> Result<String, String> {
+    tree_digest_excluding(root, &[])
+}
+
+/// Hash a tree while omitting paths whose contents are expected to be
+/// rewritten by a bundle patch (for example ASAR and the code signature).
+/// The remaining entries retain the normal tree proof semantics.
+pub fn tree_digest_excluding(root: &Path, excluded: &[&str]) -> Result<String, String> {
     #[cfg(test)]
     TREE_DIGEST_CALLS.with(|calls| calls.set(calls.get() + 1));
     let root_metadata = fs::symlink_metadata(root).map_err(|error| error.to_string())?;
@@ -113,7 +120,7 @@ pub fn tree_digest(root: &Path) -> Result<String, String> {
         size: 0,
         payload: TreePayload::Empty,
     }];
-    collect_tree(root, root, &mut entries)?;
+    collect_tree(root, root, &mut entries, excluded)?;
     entries.sort_by(|left, right| left.relative.cmp(&right.relative));
     let mut digest = Sha256::new();
     for entry in entries {
@@ -158,7 +165,12 @@ pub fn tree_digest(root: &Path) -> Result<String, String> {
         .collect())
 }
 
-fn collect_tree(root: &Path, current: &Path, entries: &mut Vec<TreeEntry>) -> Result<(), String> {
+fn collect_tree(
+    root: &Path,
+    current: &Path,
+    entries: &mut Vec<TreeEntry>,
+    excluded: &[&str],
+) -> Result<(), String> {
     let mut children = fs::read_dir(current)
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
@@ -172,6 +184,16 @@ fn collect_tree(root: &Path, current: &Path, entries: &mut Vec<TreeEntry>) -> Re
             .as_os_str()
             .as_bytes()
             .to_vec();
+        let relative_path = path
+            .strip_prefix(root)
+            .map_err(|error| error.to_string())?;
+        if excluded
+            .iter()
+            .map(Path::new)
+            .any(|prefix| relative_path == prefix || relative_path.starts_with(prefix))
+        {
+            continue;
+        }
         let file_type = entry.file_type().map_err(|error| error.to_string())?;
         let mode = fs::symlink_metadata(&path)
             .map_err(|error| error.to_string())?
@@ -194,7 +216,7 @@ fn collect_tree(root: &Path, current: &Path, entries: &mut Vec<TreeEntry>) -> Re
                 size: 0,
                 payload: TreePayload::Empty,
             });
-            collect_tree(root, &path, entries)?;
+            collect_tree(root, &path, entries, excluded)?;
         } else if file_type.is_file() {
             let size = fs::symlink_metadata(&path)
                 .map_err(|error| error.to_string())?
