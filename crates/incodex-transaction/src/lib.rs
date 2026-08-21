@@ -11,7 +11,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 pub use engine::{recover, recover_with, CommitResult, Engine, RecoverResult, TxError};
-pub use journal::{new_install_id, JournalV2};
+pub use journal::{new_install_id, validate_path_ancestors, JournalV2};
 pub use uninstall::{
     migrate_legacy_committed, restore_committed, restore_committed_with_checkpoint,
 };
