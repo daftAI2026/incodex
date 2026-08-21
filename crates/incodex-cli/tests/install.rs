@@ -512,6 +512,24 @@ fn uninstall_refuses_while_another_command_holds_the_target_lock() {
 }
 
 #[test]
+fn install_rechecks_already_current_inside_the_target_lock() {
+    let home = isolated_home();
+    let app = patchable_app(&home);
+    let (status, _, stderr) = run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(status, 0, "{stderr}");
+    let root = home.join(".incodex");
+    let _lock = acquire_target_lock(&root, &app, "test-holder", None).unwrap();
+
+    let (status, _stdout, stderr) =
+        run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(status, 1, "already-current must not bypass a held target lock: {stderr}");
+    assert!(
+        stderr.contains("another incodex command is modifying this app"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn post_swap_verification_failure_rolls_back_the_original_app() {
     let home = isolated_home();
     let app = patchable_app(&home);
