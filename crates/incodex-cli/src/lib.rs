@@ -3,6 +3,7 @@ pub mod confirm;
 pub mod diagnose;
 pub mod help;
 pub mod install;
+pub mod legacy_proof;
 pub mod legacy_typescript;
 pub mod lifecycle;
 pub mod menu;

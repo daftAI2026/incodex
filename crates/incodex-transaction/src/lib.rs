@@ -19,7 +19,7 @@ pub use uninstall::{
 pub fn journal_v2(root: &Path, install_id: &str) -> Result<JournalV2, String> {
     journal::load_v2(root, install_id)
 }
-pub use lock::{acquire_target_lock, lock_path_for};
+pub use lock::{acquire_target_lock, lock_path_for, TargetLock};
 
 pub const PHASES: &[&str] = &[
     "DISCOVERED",
