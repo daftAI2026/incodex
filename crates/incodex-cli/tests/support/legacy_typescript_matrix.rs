@@ -130,3 +130,81 @@ fn legacy_typescript_fixture_covers_interrupted_and_current_state_matrix() {
         }
     }
 }
+
+#[test]
+fn legacy_typescript_fixture_rejects_empty_target_before_canonicalizing() {
+    let root = temp_root().join(".incodex");
+    let target = std::env::current_dir().expect("test working directory");
+    let journal_path = write_flat_journal(
+        &root,
+        &target,
+        INSTALL_ID,
+        "DISCOVERED",
+        "2026-08-21T00:30:00.000Z",
+    );
+    let mut raw: serde_json::Value =
+        serde_json::from_slice(&fs::read(&journal_path).unwrap()).unwrap();
+    raw["targetRealPath"] = json!("");
+    fs::write(
+        &journal_path,
+        format!("{}\n", serde_json::to_string_pretty(&raw).unwrap()),
+    )
+    .unwrap();
+
+    let error = incodex_cli::legacy_typescript::load_legacy_ts_v1(&root, &target)
+        .expect_err("an empty targetRealPath must be rejected before canonicalization");
+    assert!(error.contains("targetRealPath"), "{error}");
+}
+
+#[test]
+fn legacy_typescript_fixture_matches_parse_journal_field_guards() {
+    // These are the retired src/transaction.ts parseJournal non-empty/type guards.
+    let invalid_fields = [
+        ("schemaVersion", json!(0)),
+        ("schemaVersion", json!("1")),
+        ("installId", json!("")),
+        ("installId", json!(123)),
+        ("targetRealPath", json!(123)),
+        ("stagedApp", json!("")),
+        ("stagedApp", json!(false)),
+        ("originalSnapshot", json!("")),
+        ("originalSnapshot", json!([])),
+        ("outgoingApp", json!("")),
+        ("outgoingApp", json!(false)),
+        ("phase", json!("UNKNOWN")),
+        ("phase", json!(123)),
+        // Rust deliberately keeps the stronger existing non-empty timestamp guard.
+        ("updatedAt", json!("")),
+    ];
+
+    for (field, replacement) in invalid_fields {
+        let fixture = LegacyTsV1JournalFixture::create();
+        let mut raw: serde_json::Value =
+            serde_json::from_slice(&fs::read(&fixture.journal_path).unwrap()).unwrap();
+        raw[field] = replacement;
+        fs::write(
+            &fixture.journal_path,
+            format!("{}\n", serde_json::to_string_pretty(&raw).unwrap()),
+        )
+        .unwrap();
+        let error = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
+            .expect_err(&format!("legacy field {field} accepted invalid value"));
+        assert!(
+            !error.is_empty(),
+            "legacy field {field} returned an empty error"
+        );
+    }
+
+    let fixture = LegacyTsV1JournalFixture::create();
+    let mut raw: serde_json::Value =
+        serde_json::from_slice(&fs::read(&fixture.journal_path).unwrap()).unwrap();
+    raw.as_object_mut().unwrap().remove("outgoingApp");
+    fs::write(
+        &fixture.journal_path,
+        format!("{}\n", serde_json::to_string_pretty(&raw).unwrap()),
+    )
+    .unwrap();
+    incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
+        .expect("omitting optional outgoingApp should remain compatible")
+        .expect("journal without optional outgoingApp should be detected");
+}
