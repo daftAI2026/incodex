@@ -260,9 +260,7 @@ fn rust_install_adopts_legacy_state_without_using_patched_live_as_original() {
 #[test]
 fn rust_install_refuses_a_modified_legacy_backup_before_writing_v2() {
     let fixture = Fixture::create();
-    let backup_asar = fixture
-        .original_app
-        .join("Contents/Resources/app.asar");
+    let backup_asar = fixture.original_app.join("Contents/Resources/app.asar");
     fs::OpenOptions::new()
         .append(true)
         .open(backup_asar)
