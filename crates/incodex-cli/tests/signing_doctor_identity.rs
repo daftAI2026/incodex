@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use incodex_cli::diagnose::diagnose_with_root;
+use incodex_macos::{inspect_signing_inventory, validate_official_signing_inventory};
 
 static PATH_LOCK: Mutex<()> = Mutex::new(());
 
@@ -28,6 +29,10 @@ struct Fixture {
 
 impl Fixture {
     fn new(identity: &'static str) -> Self {
+        Self::new_with_outer_identifier(identity, "com.openai.codex")
+    }
+
+    fn new_with_outer_identifier(identity: &'static str, outer_identifier: &'static str) -> Self {
         let root = std::env::temp_dir().join(format!(
             "incodex-signing-doctor-identity-{}-{}",
             std::process::id(),
@@ -71,7 +76,7 @@ fi
 if [ "$1" = "--display" ] && [ "$2" = "--verbose=4" ]; then
   case "$target" in
     *Nested.xpc) {identity_display} ;;
-    *) printf '%s\n' 'Identifier=com.openai.codex' 'TeamIdentifier=2DC432GLL2' 'Authority=Developer ID Application: fixture' ;;
+    *) printf '%s\n' 'Identifier={outer_identifier}' 'TeamIdentifier=2DC432GLL2' 'Authority=Developer ID Application: fixture' ;;
   esac
   exit 0
 fi
@@ -79,6 +84,7 @@ if [ "$1" = "--verify" ]; then exit 0; fi
 exit 0
 "#,
             identity_display = match identity {
+                "vendor" => "printf '%s\\n' 'Identifier=com.example.vendor' 'TeamIdentifier=2DC432GLL2' 'Authority=Developer ID Application: fixture'",
                 "other" => "printf '%s\\n' 'Identifier=com.example.other' 'TeamIdentifier=OTHERTEAM' 'Authority=Other Signer'",
                 "unknown" => "printf '%s\\n' 'Identifier=com.example.unknown'",
                 _ => unreachable!(),
@@ -110,6 +116,18 @@ impl Drop for Fixture {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.root);
     }
+}
+
+#[test]
+fn doctor_official_acceptance_rejects_wrong_outer_signature_identifier() {
+    let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let fixture = Fixture::new_with_outer_identifier("vendor", "com.attacker.replaced");
+    let original_path = std::env::var_os("PATH");
+    let _path_guard = PathGuard(original_path);
+    std::env::set_var("PATH", fixture.path());
+
+    let inventory = inspect_signing_inventory(&fixture.app).unwrap();
+    assert!(validate_official_signing_inventory(&inventory, None).is_err());
 }
 
 #[test]
