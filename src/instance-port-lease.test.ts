@@ -282,7 +282,9 @@ describe("kernel-held TCP owner lease", () => {
       expect(await connectExisting(root, 500, owner.token)).toBe(true);
     } finally {
       timers.forEach(clearInterval);
-      sockets.forEach((socket) => socket.destroy());
+      sockets.forEach((socket) => {
+        socket.destroy();
+      });
       await releaseOwnerLease(root, owner);
     }
   });
