@@ -193,6 +193,7 @@ fn legacy_typescript_fixture_matches_parse_journal_field_guards() {
         ("originalSnapshot", json!([])),
         ("outgoingApp", json!("")),
         ("outgoingApp", json!(false)),
+        ("outgoingApp", serde_json::Value::Null),
         ("phase", json!("UNKNOWN")),
         ("phase", json!(123)),
         // Rust deliberately keeps the stronger existing non-empty timestamp guard.
