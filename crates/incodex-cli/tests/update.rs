@@ -35,6 +35,39 @@ fn installed_cli(home: &std::path::Path) -> (PathBuf, PathBuf) {
     (prefix, installed)
 }
 
+#[test]
+fn update_pty_harness_reaps_after_child_closes_before_exit() {
+    let home = scratch("pty-close-before-exit");
+    let fake_update = home.join("fake-update");
+    write_executable(&fake_update, "#!/bin/sh\nexec 0<&- 1>&- 2>&-\nsleep 30\n");
+
+    let started = Instant::now();
+    let result = support::tty::run_with_timeout_env(
+        fake_update.to_str().unwrap(),
+        &["update"],
+        &[],
+        &home,
+        "update prompt that never arrives",
+        "",
+        Duration::from_millis(100),
+        &[("PATH", "/usr/bin:/bin")],
+    );
+
+    assert_eq!(
+        result.status, 124,
+        "update PTY timeout was not reported: {result:?}"
+    );
+    assert!(
+        result.stderr.contains("timed out"),
+        "update PTY timeout lacked diagnostics: {result:?}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "update PTY harness waited for a closed child: {:?}",
+        started.elapsed()
+    );
+}
+
 fn run_tty(program: &std::path::Path, home: &std::path::Path, path: &str) -> (i32, String) {
     let _pty_gate = support::tty::acquire();
     let script = r#"
