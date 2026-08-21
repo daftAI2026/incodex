@@ -720,6 +720,7 @@ mod tests {
     use super::*;
     use incodex_macos::{EntitlementSnapshot, SignedComponent};
     use std::collections::BTreeSet;
+    use std::os::unix::fs::PermissionsExt;
 
     fn vendor_inventory(identifier: &str) -> SigningInventory {
         SigningInventory {
@@ -743,8 +744,33 @@ mod tests {
     #[test]
     fn doctor_selector_uses_official_policy_for_official_target() {
         let inventory = vendor_inventory("com.attacker.replaced");
+        let root = std::env::temp_dir().join(format!(
+            "incodex-doctor-selector-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let codesign = root.join("codesign");
+        std::fs::write(&codesign, "#!/bin/sh\nexit 0\n").unwrap();
+        let mut permissions = std::fs::metadata(&codesign).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&codesign, permissions).unwrap();
+        let previous_path = std::env::var_os("PATH");
+        let mut path = std::ffi::OsString::from(root.as_os_str());
+        path.push(":");
+        if let Some(previous) = &previous_path {
+            path.push(previous);
+        }
+        std::env::set_var("PATH", path);
 
-        assert!(validate_doctor_signing_inventory(&inventory, false, true).is_err());
-        assert!(validate_doctor_signing_inventory(&inventory, false, false).is_ok());
+        let official = validate_doctor_signing_inventory(&inventory, false, true);
+        let custom = validate_doctor_signing_inventory(&inventory, false, false);
+
+        match previous_path {
+            Some(path) => std::env::set_var("PATH", path),
+            None => std::env::remove_var("PATH"),
+        }
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(official.is_err());
+        assert!(custom.is_ok());
     }
 }
