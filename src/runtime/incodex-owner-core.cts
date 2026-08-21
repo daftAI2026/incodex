@@ -8,12 +8,15 @@ const crypto = require("node:crypto");
 
 const LOCK_NAME = "incognito.lock";
 const ACTIVE_LOCK_PREFIX = `${LOCK_NAME}.active.`;
+const QUARANTINE_PREFIX = `${LOCK_NAME}.quarantine.`;
 const OWNER_TOKEN_PATTERN = /^[a-f0-9]{32}$/;
+const MAX_SIDECAR_QUARANTINES = 128;
 const SOCK_NAME = "incognito.sock";
 const OWNER_RETRY_COUNT = 5;
 const OWNER_RETRY_DELAY_MS = 100;
 const OWNER_PORT_BASE = 45000;
 const OWNER_PORT_SPAN = 15000;
+let ownerRecordTestHook = null;
 
 function targetIdFromExec(execPath) {
   return crypto.createHash("sha256").update(execPath || "unknown").digest("hex").slice(0, 12);
@@ -113,6 +116,10 @@ function activeOwnerTokenFromPath(file) {
   return name.startsWith(ACTIVE_LOCK_PREFIX) ? name.slice(ACTIVE_LOCK_PREFIX.length) : "";
 }
 
+function setOwnerRecordTestHook(hook) {
+  ownerRecordTestHook = typeof hook === "function" ? hook : null;
+}
+
 function writeAtomicRecord(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const temporary = path.join(
@@ -205,24 +212,46 @@ function readOwnerLock(stateRoot) {
 }
 
 function reclaimStaleActiveOwnerRecord(file, expectedOwner) {
-  if (!staleOwnerRecord(expectedOwner)) return false;
-  const latest = readOwnerLockStateAt(file);
-  if (latest.kind !== "valid" || !sameOwnerToken(latest.owner, expectedOwner) || !staleOwnerRecord(latest.owner)) return false;
+  if (!staleOwnerRecord(expectedOwner)) return { removed: false };
+  const quarantine = path.join(
+    path.dirname(file),
+    `.${QUARANTINE_PREFIX}${process.pid}.${Date.now()}.${crypto.randomBytes(8).toString("hex")}`,
+  );
   try {
-    fs.rmSync(file);
-    return true;
+    fs.renameSync(file, quarantine);
   } catch {
-    return false;
+    return { removed: false };
   }
+  const latest = readOwnerLockStateAt(quarantine);
+  if (latest.kind === "valid" && sameOwnerToken(latest.owner, expectedOwner) && staleOwnerRecord(latest.owner)) {
+    try {
+      ownerRecordTestHook?.({ originalPath: file, quarantinePath: quarantine, owner: latest.owner });
+    } catch {
+      /* Test hooks must not change the production cleanup decision. */
+    }
+    try {
+      fs.rmSync(quarantine);
+      return { removed: true };
+    } catch {
+      return { removed: false, path: quarantine, state: latest };
+    }
+  }
+  return { removed: false, path: quarantine, state: latest };
 }
 
 function readOwnerRecords(stateRoot) {
   const records = [];
   const canonical = lockPath(stateRoot);
   let names = [];
+  let quarantineAttempts = 0;
   try {
     names = fs.readdirSync(stateRoot);
     for (const name of names) {
+      if (name.startsWith(QUARANTINE_PREFIX)) {
+        const file = path.join(stateRoot, name);
+        records.push({ path: file, state: readOwnerLockStateAt(file) });
+        continue;
+      }
       if (!name.startsWith(ACTIVE_LOCK_PREFIX)) continue;
       const file = path.join(stateRoot, name);
       const state = readOwnerLockStateAt(file);
@@ -234,7 +263,15 @@ function readOwnerRecords(stateRoot) {
         });
         continue;
       }
-      if (state.kind === "valid" && reclaimStaleActiveOwnerRecord(file, state.owner)) continue;
+      if (state.kind === "valid" && quarantineAttempts < MAX_SIDECAR_QUARANTINES) {
+        quarantineAttempts += 1;
+        const result = reclaimStaleActiveOwnerRecord(file, state.owner);
+        if (result.removed) continue;
+        if (result.path) {
+          records.push({ path: result.path, state: result.state });
+          continue;
+        }
+      }
       records.push({ path: file, state });
     }
   } catch {
@@ -315,6 +352,7 @@ module.exports = {
   ownerPortFromExec,
   lockPath,
   activeOwnerPath,
+  setOwnerRecordTestHook,
   processIdentity,
   ownerToken,
   hasReliableOwnerIdentity,

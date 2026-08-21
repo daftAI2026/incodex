@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.acquireOwnerLease = exports.ownsOwnerLease = exports.OwnerLeaseError = exports.staleOwnerRecord = exports.staleOwner = exports.currentOwner = exports.releaseOwnerLease = exports.clearOwnerLock = exports.readOwnerRecords = exports.readOwnerLock = exports.readOwnerLockState = exports.writeOwnerLockExclusive = exports.writeOwnerLock = exports.ownerMatchesLive = exports.ownerToken = exports.processIdentity = exports.ownerPortFromExec = exports.targetStateDir = exports.targetIdFromExec = exports.SOCK_NAME = exports.LOCK_NAME = void 0;
+exports.acquireOwnerLease = exports.ownsOwnerLease = exports.OwnerLeaseError = exports.staleOwnerRecord = exports.staleOwner = exports.currentOwner = exports.releaseOwnerLease = exports.clearOwnerLock = exports.setOwnerRecordTestHook = exports.readOwnerRecords = exports.readOwnerLock = exports.readOwnerLockState = exports.writeOwnerLockExclusive = exports.writeOwnerLock = exports.ownerMatchesLive = exports.ownerToken = exports.processIdentity = exports.ownerPortFromExec = exports.targetStateDir = exports.targetIdFromExec = exports.SOCK_NAME = exports.LOCK_NAME = void 0;
 exports.sockPath = sockPath;
 exports.connectExisting = connectExisting;
 exports.connectExistingWithRetry = connectExistingWithRetry;
@@ -12,7 +12,7 @@ const net = require("node:net");
 const path = require("node:path");
 const core = require("./incodex-owner-core.cjs");
 const recovery = require("./incodex-owner-recovery.cjs");
-const { LOCK_NAME, SOCK_NAME, targetIdFromExec, targetStateDir, ownerPortFromExec, ownerToken, ownerMatchesLive, writeOwnerLock, writeOwnerLockExclusive, readOwnerLockState, readOwnerLock, readOwnerRecords, currentOwner, staleOwner, staleOwnerRecord, OwnerLeaseError, ownsOwnerLease, } = core;
+const { LOCK_NAME, SOCK_NAME, targetIdFromExec, targetStateDir, ownerPortFromExec, ownerToken, ownerMatchesLive, writeOwnerLock, writeOwnerLockExclusive, readOwnerLockState, readOwnerLock, readOwnerRecords, setOwnerRecordTestHook, currentOwner, staleOwner, staleOwnerRecord, OwnerLeaseError, ownsOwnerLease, } = core;
 exports.LOCK_NAME = LOCK_NAME;
 exports.SOCK_NAME = SOCK_NAME;
 exports.targetIdFromExec = targetIdFromExec;
@@ -25,6 +25,7 @@ exports.writeOwnerLockExclusive = writeOwnerLockExclusive;
 exports.readOwnerLockState = readOwnerLockState;
 exports.readOwnerLock = readOwnerLock;
 exports.readOwnerRecords = readOwnerRecords;
+exports.setOwnerRecordTestHook = setOwnerRecordTestHook;
 exports.currentOwner = currentOwner;
 exports.staleOwner = staleOwner;
 exports.staleOwnerRecord = staleOwnerRecord;
@@ -136,6 +137,7 @@ if (typeof module !== "undefined")
         readOwnerLockState,
         readOwnerLock,
         readOwnerRecords,
+        setOwnerRecordTestHook,
         clearOwnerLock,
         releaseOwnerLease,
         currentOwner,
