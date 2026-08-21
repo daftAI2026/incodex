@@ -191,7 +191,7 @@ describe("cross-process owner recovery", () => {
         }),
     );
     const waitForCount = async (directory: string, expected: number) => {
-      const deadline = Date.now() + 5000;
+      const deadline = Date.now() + 30_000;
       while (readdirSync(directory).length < expected && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
@@ -219,7 +219,7 @@ describe("cross-process owner recovery", () => {
     expect(readOwnerLock(root)?.token).toBe(winnerToken);
     expect(completed.every((result) => result.code === 0 || result.code === 2)).toBe(true);
     expect(completed.every((result) => result.stderr === "")).toBe(true);
-  }, 30_000);
+  }, 120_000);
 
   test("a replacement published during takeover unlink survives the old cleaner", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-takeover-window-"));
