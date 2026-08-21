@@ -105,6 +105,7 @@ describe("kernel-held TCP owner lease", () => {
     mkdirSync(readyRoot);
     mkdirSync(doneRoot);
     mkdirSync(resultRoot);
+    writeFileSync(join(root, "incognito.lock"), "{\"pid\":");
     const modulePath = join(import.meta.dir, "runtime/incodex-instance.cts");
     const worker = String.raw`
       (async () => {

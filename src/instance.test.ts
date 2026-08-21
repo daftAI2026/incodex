@@ -14,6 +14,7 @@ import {
   ownerMatchesLive,
   ownerPortFromExec,
   readOwnerLock,
+  readOwnerRecords,
   readOwnerLockState,
   singleFlight,
   staleOwner,
@@ -141,13 +142,15 @@ describe("raise listener", () => {
     expect(clearOwnerLock(root, current)).toBe(true);
   });
 
-  test("a truncated diagnostic record is replaced after the kernel lease is acquired", async () => {
+  test("a truncated diagnostic record is preserved beside the active lease record", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-truncated-lock-"));
     const truncated = "{\"pid\":";
     writeFileSync(join(root, LOCK_NAME), truncated);
     const replacement = currentOwner("replacement", target(root));
     await acquireOwnerLease(root, replacement);
-    expect(readOwnerLock(root)?.token).toBe(replacement.token);
+    expect(readOwnerLock(root)).toBeNull();
+    expect(readOwnerRecords(root).some(({ owner }) => owner?.token === replacement.token)).toBe(true);
+    expect(readFileSync(join(root, LOCK_NAME), "utf8")).toBe(truncated);
     expect(readdirSync(root).some((name) => name.includes("tmp"))).toBe(false);
     expect(clearOwnerLock(root, replacement)).toBe(true);
   });
