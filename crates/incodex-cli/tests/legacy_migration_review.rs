@@ -1,5 +1,6 @@
 use std::fs;
 use std::io::Write;
+use std::os::unix::fs::PermissionsExt;
 
 use incodex_cli::legacy_migration::{recover_legacy_ts_v1, recover_legacy_ts_v1_with_checkpoint};
 use incodex_macos::ditto;
@@ -48,6 +49,34 @@ fn recovery_reconciles_a_mutated_outgoing_with_the_sealed_proof_on_retry() {
         .join(INSTALL_ID)
         .join("outgoing-proof/ChatGPT.app")
         .exists());
+}
+
+#[test]
+fn recovery_rejects_an_extra_file_added_after_the_outgoing_rename() {
+    let fixture = Fixture::create();
+    let outgoing = fixture
+        .root
+        .join("transactions")
+        .join(INSTALL_ID)
+        .join("outgoing/ChatGPT.app");
+    ditto(&fixture.original_app, &outgoing).unwrap();
+    fs::remove_dir_all(&fixture.original_app).unwrap();
+    fixture.set_phase("SWAPPED");
+
+    let result = recover_legacy_ts_v1_with_checkpoint(&fixture.root, INSTALL_ID, |checkpoint| {
+        if checkpoint == "AFTER_RESTORE_RENAME" {
+            let plist = fixture.app.join("Contents/Info.plist");
+            let mut permissions = fs::metadata(&plist).unwrap().permissions();
+            permissions.set_mode(0o600);
+            fs::set_permissions(plist, permissions).unwrap();
+        }
+    });
+
+    assert!(result.is_err());
+    assert!(
+        outgoing.exists(),
+        "post-rename tree mismatch must retain source"
+    );
 }
 
 #[test]
