@@ -153,6 +153,23 @@ fn remove_incomplete_backup(path: &Path) -> Result<(), String> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adopted_backup_flushes_the_tree_before_commit() {
+        let root = std::env::temp_dir().join(format!("incodex-migration-sync-{}", std::process::id()));
+        let tree = root.join("transactions/id/original/ChatGPT.app");
+        fs::create_dir_all(tree.join("Contents")).unwrap();
+        fs::write(tree.join("Contents/Info.plist"), b"plist").unwrap();
+        crate::durable::reset_sync_trace();
+        flush_adopted_backup(&tree, &root).unwrap();
+        assert!(crate::durable::sync_trace().iter().any(|path| path == &tree));
+        let _ = fs::remove_dir_all(root);
+    }
+}
+
 fn verify_file_hash(path: &Path, expected: &str, label: &str) -> Result<(), String> {
     let bytes = fs::read(path).map_err(|error| format!("cannot read {label}: {error}"))?;
     let actual = Sha256::digest(bytes)
