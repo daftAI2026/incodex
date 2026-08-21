@@ -727,4 +727,38 @@ mod tests {
         assert!(!original.exists());
         fs::remove_dir_all(sandbox).unwrap();
     }
+
+    #[test]
+    fn snapshot_failure_after_backup_commit_rolls_back_the_transaction() {
+        let sandbox = std::env::temp_dir().join(format!(
+            "incodex-snapshot-failure-after-backup-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let root = sandbox.join("state");
+        let app = sandbox.join("ChatGPT.app");
+        fs::create_dir_all(&app).unwrap();
+        fs::write(app.join("marker"), "original\n").unwrap();
+
+        let mut tx = Engine::begin(&root, &app, "snapshot-failure-test").unwrap();
+        let install_id = tx.install_id().to_string();
+        let original = root
+            .join("transactions")
+            .join(&install_id)
+            .join("original/ChatGPT.app");
+        fs::create_dir_all(&original).unwrap();
+        fs::copy(app.join("marker"), original.join("marker")).unwrap();
+        tx.mark_backup_committed().unwrap();
+
+        // mark_backup_committed() may return after BACKUP_COMMITTED is durable.
+        let error = rollback_snapshot_failure(&mut tx, "injected snapshot failure".into());
+
+        assert!(error.contains("injected snapshot failure"), "{error}");
+        assert_eq!(journal_v2(&root, &install_id).unwrap().phase, "ROLLED_BACK");
+        assert!(original.exists());
+        fs::remove_dir_all(sandbox).unwrap();
+    }
 }
