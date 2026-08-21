@@ -83,6 +83,20 @@ fn recovery_rejects_an_extra_file_added_after_the_outgoing_rename() {
 }
 
 #[test]
+fn recovery_rejects_patched_target_tree_drift_when_staged_is_absent() {
+    let fixture = Fixture::create();
+    fixture.set_phase("SWAPPED");
+    let plist = fixture.app.join("Contents/Info.plist");
+    let mut permissions = fs::metadata(&plist).unwrap().permissions();
+    permissions.set_mode(0o600);
+    fs::set_permissions(plist, permissions).unwrap();
+
+    let result = recover_legacy_ts_v1(&fixture.root, INSTALL_ID);
+    assert!(result.is_err(), "staged-less recovery must prove the full target tree");
+    assert!(fixture.app.exists(), "failed proof must not replace the target");
+}
+
+#[test]
 fn status_rejects_a_legacy_backup_with_a_modified_executable() {
     let fixture = Fixture::create();
     fs::OpenOptions::new()
