@@ -8,6 +8,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(test)]
 use std::cell::RefCell;
 #[cfg(test)]
+use std::cell::Cell;
+#[cfg(test)]
 use std::path::PathBuf;
 
 const FILE_MODE: u32 = 0o600;
@@ -16,6 +18,7 @@ const DIR_MODE: u32 = 0o700;
 #[cfg(test)]
 thread_local! {
     static SYNC_TRACE: RefCell<Vec<PathBuf>> = const { RefCell::new(Vec::new()) };
+    static FAIL_NEXT_WRITE_AFTER_RENAME: Cell<bool> = const { Cell::new(false) };
 }
 
 #[cfg(test)]
@@ -26,6 +29,11 @@ pub(crate) fn reset_sync_trace() {
 #[cfg(test)]
 pub(crate) fn sync_trace() -> Vec<PathBuf> {
     SYNC_TRACE.with(|trace| trace.borrow().clone())
+}
+
+#[cfg(test)]
+pub(crate) fn fail_next_write_after_rename() {
+    FAIL_NEXT_WRITE_AFTER_RENAME.with(|failure| failure.set(true));
 }
 
 #[cfg(test)]
@@ -66,6 +74,10 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
         }
     }
     fs::rename(&tmp, path).map_err(|err| err.to_string())?;
+    #[cfg(test)]
+    if FAIL_NEXT_WRITE_AFTER_RENAME.with(|failure| failure.replace(false)) {
+        return Err("injected post-rename journal write failure".into());
+    }
     sync_dir(parent)?;
     let mut perms = fs::metadata(path).map_err(|err| err.to_string())?.permissions();
     perms.set_mode(FILE_MODE);

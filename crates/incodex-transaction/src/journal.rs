@@ -1,6 +1,9 @@
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+#[cfg(test)]
+use std::cell::Cell;
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -9,6 +12,11 @@ use crate::durable::write_atomic;
 pub const STAGED_REL: &str = "staging/ChatGPT.app";
 pub const OUTGOING_REL: &str = "outgoing/ChatGPT.app";
 pub const ORIGINAL_REL: &str = "original/ChatGPT.app";
+
+#[cfg(test)]
+thread_local! {
+    static FAIL_NEXT_LOAD: Cell<bool> = const { Cell::new(false) };
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -228,6 +236,10 @@ pub fn load_v2(root: &Path, install_id: &str) -> Result<JournalV2, String> {
     if !is_uuid(install_id) {
         return Err("install id must be an RFC 4122 UUID".into());
     }
+    #[cfg(test)]
+    if FAIL_NEXT_LOAD.with(|failure| failure.replace(false)) {
+        return Err("injected journal readback failure".into());
+    }
     let path = tx_paths(root, install_id).journal;
     let body = fs::read_to_string(&path).map_err(|err| err.to_string())?;
     let raw: serde_json::Value = serde_json::from_str(&body).map_err(|err| err.to_string())?;
@@ -249,6 +261,11 @@ pub fn load_v2(root: &Path, install_id: &str) -> Result<JournalV2, String> {
     }
     validate_rel_paths(&journal)?;
     Ok(journal)
+}
+
+#[cfg(test)]
+pub(crate) fn fail_next_load() {
+    FAIL_NEXT_LOAD.with(|failure| failure.set(true));
 }
 
 pub(crate) fn validate_recovery_proofs(journal: &JournalV2) -> Result<(), String> {
