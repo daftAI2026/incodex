@@ -52,7 +52,7 @@ Omit the Thanks block when the cycle has no external reporters or contributors.
 - Order by user-perceived impact, not commit chronology. Headline change first; install/signing/runtime hardening after.
 - No em dash. No inline PR numbers. No inline `@handle` except in Thanks.
 - No emoji in the body. Section headers stay plain `### Changelog` / `### 更新日志` / `### Thanks`.
-- Every command named in the notes must exist in HEAD (`incodex --help` / `src/parse-cli.ts`). Do not advertise `--live` or `--confirm-live`.
+- Every command named in the notes must exist in HEAD (`cargo run -p incodex-cli -- --help` / `crates/incodex-cli/src/parse.rs`). Do not advertise `--live` or `--confirm-live`.
 - Do not claim “no traces on the machine”.
 - Do not mention third-party CLIs by name.
 

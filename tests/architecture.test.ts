@@ -104,11 +104,11 @@ describe("architecture boundaries", () => {
     expect(install).not.toMatch(/spawnSync\(\s*["']bun["']/);
   });
 
-  test("open path does not patch asar or resign", () => {
-    const open = src("src/open-incognito.ts");
-    expect(open).not.toContain('from "./asar"');
-    expect(open).not.toContain('from "./codesign"');
-    expect(open).not.toContain("signApp");
-    expect(open).not.toContain("patchAsar");
+  test("native open path does not patch asar or resign", () => {
+    const open = src("crates/incodex-cli/src/open.rs");
+    expect(open).not.toContain("incodex_asar");
+    expect(open).not.toContain("codesign");
+    expect(open).not.toContain("patch_asar");
+    expect(open).toContain("inject_shared_ui_with_options");
   });
 });

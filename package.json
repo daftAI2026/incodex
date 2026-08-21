@@ -4,12 +4,7 @@
   "private": true,
   "license": "MIT",
   "description": "Incognito toggle for the Codex desktop app",
-  "bin": {
-    "incodex": "./src/cli.ts",
-    "inc": "./src/cli.ts"
-  },
   "scripts": {
-    "incodex": "bun src/cli.ts",
     "release:prepare": "bun scripts/prepare-release.ts",
     "build:runtime": "bun src/build-runtime.ts",
     "deploy:runtime": "bun src/deploy-runtime.ts",

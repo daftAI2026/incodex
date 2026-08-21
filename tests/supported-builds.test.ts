@@ -14,8 +14,6 @@ describe("Codex builds are not an allowlist", () => {
   });
 
   test("install does not warn about an unknown Codex build number", () => {
-    expect(src("src/cli.ts")).not.toContain("unknown Codex build");
-    expect(src("src/cli.ts")).not.toContain("liveSupportNote");
     expect(src("src/install.ts")).not.toContain("unknown Codex build");
     expect(src("src/install.ts")).not.toContain("findSupportedBuild");
   });

@@ -30,10 +30,10 @@ Users launch the official Codex icon as usual. After `incodex install`, a hat-gl
 - Do not change the bundle id or force a re-login.
 - Do not restore a valid OpenAI signature after asar changes. Appshot (智能快照) is a hard triangle; document it, do not fake Team ID `2DC432GLL2`.
 - Do not sign vendor CUA sidecars. Stash them, `--deep` the rest, restore, then outer `signOne`.
-- Do not default live-patch from `install.sh` / `bun link` / `incodex update`. Those only manage the CLI.
+- Do not default live-patch from `install.sh` / `incodex update`. Those only manage the CLI.
 - Do not add Overlay, an independent Session Agent, LaunchAgent auto-repair, runtime pubkeys, or Homebrew core. Own tap is `daftAI2026/homebrew-tap`; bump it from `release.yml`. Do not open a Homebrew/homebrew-core PR.
 - Do not use CDP as the everyday Dock / `install` launch path. `incodex open` may start the official binary with `--remote-debugging-port` on `127.0.0.1` and inject `dist/incodex-inject.js`. Do not clone the official app for `open`. Do not copy AGPL injector scripts.
-- Do not add `--yes` as a hidden alias that agents will hallucinate onto live patching beyond the documented flag. `--confirm-live` stays a hidden compat alias of `--yes`.
+- Do not add hidden confirmation aliases beyond the native parser's tested compatibility surface.
 - Do not write tests after the implementation to match it. Write a failing repro first.
 
 ### Product Decision Filter
@@ -48,8 +48,7 @@ If the answer is no or unclear, decline or narrow.
 ## Repository Map
 
 - `AGENTS.md` is the contract. `CLAUDE.md` must stay a symlink to it.
-- `src/cli.ts` / `src/parse-cli.ts` are a frozen TypeScript reference used only to describe legacy fixture shape. They are not a second product CLI and must not perform live self-updates.
-- `src/install.ts` / `src/uninstall.ts` / `src/recover.ts` remain only to reproduce legacy states until the dedicated TypeScript CLI cleanup; they are not product paths.
+- The TypeScript product router and parser have been retired. Rust owns the product CLI; the remaining `src/install.ts` / `src/uninstall.ts` / `src/recover.ts` mutation modules are frozen legacy sources until dedicated PR-D cleanup and are not product paths.
 - `crates/incodex-cli` is the native CLI: `parse.rs` owns its command language, while `install.rs` and `open.rs` dispatch dangerous operations through the lower crates.
 - `crates/incodex-transaction` owns native mutation locks, durable journals, rollback, and recovery. `crates/incodex-asar` and `crates/incodex-macos` own ASAR and macOS signing/plist mechanics.
 - `crates/incodex-core/src/session.rs` owns native `open` session create/burn; it must stay behaviorally aligned with `src/runtime/incodex-safe-home.cts` without sharing language-specific code.
@@ -62,15 +61,15 @@ If the answer is no or unclear, decline or narrow.
 
 ## Native CLI integration
 
-Rust workspace now lives on `main`. The migration passed the native Rust contract suites, the frozen legacy fixture reader, the 10 MB size gate, the 50 ms product cold-start probe, and manual TTY/open verification. The v0.3.1 compatibility release published the native Rust CLI under the stable asset names. The Rust CLI is the sole product CLI. Bun remains responsible for building the embedded Electron Runtime and running legacy fixture tooling, not for producing a new shipped CLI binary.
+Rust workspace now lives on `main`. The migration passed the native Rust contract suites, the frozen legacy fixture reader, the 10 MB size gate, the 50 ms product cold-start probe, and manual TTY/open verification. The v0.3.1 compatibility release published the native Rust CLI under the stable asset names. The Rust CLI is the sole product CLI. Bun remains responsible for building the embedded Electron Runtime and its checks, not for producing or launching a shipped TypeScript CLI binary.
 
-The native Rust contract tests are the product behavior source of truth. The legacy TypeScript surface is a minimum frozen fixture contract only: it may describe old on-disk records, but it must not be launched by golden/parity tests or used as an output oracle.
+The native Rust contract tests are the product behavior source of truth. The remaining TypeScript source is limited to frozen mutation/fixture material pending PR-D; it must not be launched as a product CLI, by golden/parity tests, or used as an output oracle.
 
 ### Branching and TDD
 
 1. New Rust CLI PRs target `main`. One review-sized change per PR.
 2. Each behavior change starts with a failing `cargo test` repro commit, followed by the implementation commit. Do not land tests and code in the same first commit.
-3. The legacy TypeScript CLI must not perform live self-updates. Keep it only where a legacy fixture still proves a migration or product-language contract; remove the remaining CLI surface in a dedicated cleanup PR rather than extending it.
+3. The retired TypeScript product router must not return. Keep only the remaining frozen mutation/fixture modules until dedicated PR-D cleanup; do not extend them or create new TypeScript parity paths.
 4. Rust `install` / `uninstall` / `recover` / `open` / `status` / `doctor` are the product paths. Preserve their proven safety contracts without creating new TypeScript parity work.
 
 ### Runtime boundary
@@ -101,21 +100,18 @@ Do not add ratatui, cursive, crossterm, or an AGPL asar crate. The native menu i
 
 ```bash
 bun install --frozen-lockfile
-bun link
 bun run check
 bun run build:runtime
-bun src/cli.ts --help
-bun src/cli.ts install --dry-run
 INCODEX_DEV_HOT=1 bun run deploy:runtime
 cargo test --workspace --release
 ```
 
-Public docs use `incodex` / `inc`. Use `bun src/cli.ts` only inside this repo.
+Public docs use the native `incodex` / `inc` binaries. Bun is retained for Electron Runtime build/checks, not as a CLI entry point.
 
 ## Critical Safety Rules
 
 - Official install/uninstall default to `/Applications/ChatGPT.app`. That is intentional. Confirm on TTY; require `--yes` without a TTY.
-- Never write a second installer that shells out to `install --live --confirm-live`.
+- Never write a second installer or restore a TypeScript router around the native CLI.
 - Only sign what must be signed. Leave official CUA sidecars official.
 - Do not enable required GitHub reviews. Do not force-push `main`.
 - Pin GitHub Actions to a 40-character commit SHA with a version comment: `uses: owner/repo@<sha> # vX.Y.Z`. Do not leave floating `@v4` tags.
