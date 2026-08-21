@@ -157,6 +157,28 @@ fn legacy_typescript_fixture_rejects_empty_target_before_canonicalizing() {
 }
 
 #[test]
+fn legacy_typescript_fixture_does_not_skip_empty_target_for_a_non_cwd_target() {
+    let fixture = LegacyTsV1JournalFixture::create();
+    assert_ne!(
+        canonical_path(&fixture.app),
+        std::env::current_dir().expect("test working directory"),
+        "the regression requires a target different from the process cwd"
+    );
+    let mut raw: serde_json::Value =
+        serde_json::from_slice(&fs::read(&fixture.journal_path).unwrap()).unwrap();
+    raw["targetRealPath"] = json!("");
+    fs::write(
+        &fixture.journal_path,
+        format!("{}\n", serde_json::to_string_pretty(&raw).unwrap()),
+    )
+    .unwrap();
+
+    let error = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
+        .expect_err("an empty targetRealPath must be an error, not a skipped journal");
+    assert!(error.contains("targetRealPath"), "{error}");
+}
+
+#[test]
 fn legacy_typescript_fixture_matches_parse_journal_field_guards() {
     // These are the retired src/transaction.ts parseJournal non-empty/type guards.
     let invalid_fields = [
