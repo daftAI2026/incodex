@@ -97,9 +97,9 @@ function markSessionReady() {
         /* already written */
     }
 }
-function writePid() {
+async function writePid() {
     try {
-        return instance.acquireOwnerLease(stateRoot(), instance.currentOwner(process.env.INCODEX_SESSION_ID, process.execPath));
+        return await instance.acquireOwnerLease(stateRoot(), instance.currentOwner(process.env.INCODEX_SESSION_ID, process.execPath));
     }
     catch (error) {
         logLaunch("lock-refused", { error: String(error) });
@@ -122,9 +122,8 @@ async function incognitoAlreadyRunning() {
     const state = instance.readOwnerLockState(stateRoot());
     if (state.kind === "missing")
         return false;
-    // Malformed records are recoverable by acquireOwnerLease, which quarantines
-    // the old inode before publishing a complete replacement. Do not turn a
-    // crash-truncated record into a permanent owner-unavailable preflight.
+    // The diagnostic record is not the lease. A malformed record must not turn
+    // a released TCP port into a permanent owner-unavailable preflight.
     if (state.kind === "invalid")
         return false;
     if (state.kind !== "valid")
@@ -136,10 +135,10 @@ async function incognitoAlreadyRunning() {
     const latest = instance.readOwnerLockState(stateRoot());
     if (latest.kind === "missing")
         return false;
-    if (latest.kind === "valid" && instance.staleOwner(stateRoot())) {
-        if (instance.clearOwnerLock(stateRoot(), owner))
-            return false;
-    }
+    // The TCP listener is the lease. A stale diagnostic record is harmless and
+    // will be replaced after the next process binds the fixed target port.
+    if (latest.kind === "valid" && instance.staleOwner(stateRoot()))
+        return false;
     throw new Error("owner lease is active but its raise socket is unavailable");
 }
 function raisePid(pid) {
@@ -515,7 +514,7 @@ function hookWindow(win, source) {
     win.webContents.on("did-finish-load", run);
     run();
 }
-function attachElectron() {
+async function attachElectron() {
     let electron;
     try {
         electron = require("electron");
@@ -604,7 +603,7 @@ function attachElectron() {
         });
     });
     if (isIncognito()) {
-        ownerLease = writePid();
+        ownerLease = await writePid();
         if (!ownerLease) {
             try {
                 electron.app.exit(1);
@@ -661,7 +660,7 @@ function attachElectron() {
         void electron.app.whenReady().then(ready);
 }
 try {
-    attachElectron();
+    void attachElectron();
 }
 catch (error) {
     console.error("[incodex] main attach failed", error);

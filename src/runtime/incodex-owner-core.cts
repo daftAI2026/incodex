@@ -10,13 +10,8 @@ const LOCK_NAME = "incognito.lock";
 const SOCK_NAME = "incognito.sock";
 const OWNER_RETRY_COUNT = 5;
 const OWNER_RETRY_DELAY_MS = 100;
-const TAKEOVER_CLAIM_NAME = ".incognito.lock.takeover";
-const TAKEOVER_CLAIM_OWNER_NAME = "owner";
-const TAKEOVER_CLAIM_RECLAIM_NAME = ".reclaim";
-const RECLAIM_MARKER_PREFIX = "marker.";
-const RECLAIM_RELEASED_STATE = "released";
-const RECLAIM_GENERATION_WIDTH = 16;
-const RECLAIM_GENERATION_MAX = Number.MAX_SAFE_INTEGER - 1;
+const OWNER_PORT_BASE = 45000;
+const OWNER_PORT_SPAN = 15000;
 
 function targetIdFromExec(execPath) {
   return crypto.createHash("sha256").update(execPath || "unknown").digest("hex").slice(0, 12);
@@ -26,8 +21,9 @@ function targetStateDir(userRoot, execPath) {
   return path.join(userRoot, "targets", targetIdFromExec(execPath));
 }
 
-function lockPath(stateRoot) {
-  return path.join(stateRoot, LOCK_NAME);
+function ownerPortFromExec(execPath) {
+  const digest = crypto.createHash("sha256").update(execPath || "unknown").digest();
+  return OWNER_PORT_BASE + digest.readUInt32BE(0) % OWNER_PORT_SPAN;
 }
 
 function processIdentity(pid) {
@@ -54,20 +50,16 @@ function ownerToken(owner) {
   return "";
 }
 
-function hasOwnerProcessIdentity(owner) {
-  return Boolean(owner && (nonEmptyString(owner.processStartIdentity) || nonEmptyString(owner.startedAt)));
-}
-
-function hasOwnerExecutableIdentity(owner) {
-  return Boolean(owner && (nonEmptyString(owner.execIdentity) || nonEmptyString(owner.execPath)));
-}
-
 function nonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
 
 function hasReliableOwnerIdentity(owner) {
-  return hasOwnerProcessIdentity(owner) && hasOwnerExecutableIdentity(owner);
+  return Boolean(
+    owner &&
+      (nonEmptyString(owner.processStartIdentity) || nonEmptyString(owner.startedAt)) &&
+      (nonEmptyString(owner.execIdentity) || nonEmptyString(owner.execPath)),
+  );
 }
 
 function executableIdentity(owner) {
@@ -102,53 +94,40 @@ function pidAlive(pid) {
   }
 }
 
-function sleepForOwnerRecovery(ms) {
-  if (ms <= 0) return;
-  const waiter = new Int32Array(new SharedArrayBuffer(4));
-  Atomics.wait(waiter, 0, 0, ms);
+function lockPath(stateRoot) {
+  return path.join(stateRoot, LOCK_NAME);
 }
 
 function writeAtomicRecord(file, value) {
-  const temp = path.join(
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const temporary = path.join(
     path.dirname(file),
     `.${path.basename(file)}.tmp.${process.pid}.${Date.now()}.${crypto.randomBytes(8).toString("hex")}`,
   );
-  let fd = null;
+  const fd = fs.openSync(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
   try {
-    fd = fs.openSync(
-      temp,
-      fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0),
-      0o600,
-    );
     const contents = Buffer.from(`${JSON.stringify(value)}\n`);
-    let offset = 0;
-    while (offset < contents.length) {
-      offset += fs.writeSync(fd, contents, offset, contents.length - offset, offset);
-    }
+    fs.writeSync(fd, contents, 0, contents.length, 0);
     try {
       fs.fsyncSync(fd);
     } catch {
-      /* Some test filesystems do not support fsync; the complete temp file remains private. */
+      /* Some test filesystems do not expose fsync; the temp record is complete. */
     }
   } finally {
-    if (fd !== null) fs.closeSync(fd);
+    fs.closeSync(fd);
   }
   try {
-    // A hard-link publish makes the canonical path either absent or complete.
-    // A crash before this point leaves only an ignored temp file, never a
-    // truncated record that can poison the next launch.
-    fs.linkSync(temp, file);
+    fs.renameSync(temporary, file);
   } finally {
     try {
-      fs.rmSync(temp, { force: true });
+      fs.rmSync(temporary, { force: true });
     } catch {
-      /* The published hard link is still the authoritative record. */
+      /* Best effort cleanup; the canonical record is already authoritative. */
     }
   }
 }
 
 function writeOwnerLock(stateRoot, owner) {
-  fs.mkdirSync(stateRoot, { recursive: true, mode: 0o700 });
   return writeAtomicRecord(lockPath(stateRoot), owner);
 }
 
@@ -157,12 +136,10 @@ function readOwnerLockStateAt(file) {
   try {
     stats = fs.lstatSync(file);
   } catch (error) {
-    if (error && error.code === "ENOENT") return { kind: "missing", owner: null };
+    if (error?.code === "ENOENT") return { kind: "missing", owner: null };
     return { kind: "invalid", owner: null, reason: String(error) };
   }
-  if (stats.isSymbolicLink() || !stats.isFile()) {
-    return { kind: "invalid", owner: null, reason: "owner lock is not a regular file" };
-  }
+  if (stats.isSymbolicLink() || !stats.isFile()) return { kind: "invalid", owner: null, reason: "not a regular file" };
   try {
     const owner = JSON.parse(fs.readFileSync(file, "utf8"));
     if (!owner || typeof owner !== "object" || !Number.isInteger(owner.pid) || !ownerToken(owner)) {
@@ -196,14 +173,7 @@ function ownerLockMetadata(file) {
 }
 
 function sameOwnerLockMetadata(left, right) {
-  return Boolean(
-    left &&
-      right &&
-      left.dev === right.dev &&
-      left.ino === right.ino &&
-      left.size === right.size &&
-      left.mtimeMs === right.mtimeMs,
-  );
+  return Boolean(left && right && left.dev === right.dev && left.ino === right.ino);
 }
 
 function currentOwner(sessionId, execPath) {
@@ -214,10 +184,10 @@ function currentOwner(sessionId, execPath) {
   const token = crypto.randomBytes(16).toString("hex");
   return {
     pid: process.pid,
-    startedAt: live?.startedAt || "",
-    processStartIdentity: live?.startedAt || "",
+    startedAt: live.startedAt || "",
+    processStartIdentity: live.processStartIdentity || "",
     execPath: execPath || process.execPath,
-    execIdentity: live?.execIdentity || "",
+    execIdentity: live.execIdentity || "",
     sessionId: sessionId || "",
     token,
     nonce: token,
@@ -234,8 +204,7 @@ function staleOwnerRecord(owner) {
 
 function staleOwner(stateRoot) {
   const state = readOwnerLockState(stateRoot);
-  if (state.kind !== "valid") return state.kind === "missing";
-  return staleOwnerRecord(state.owner);
+  return state.kind === "missing" || (state.kind === "valid" && staleOwnerRecord(state.owner));
 }
 
 class OwnerLeaseError extends Error {
@@ -248,8 +217,7 @@ class OwnerLeaseError extends Error {
 }
 
 function ownsOwnerLease(stateRoot, expectedOwner) {
-  const current = readOwnerLock(stateRoot);
-  return sameOwnerToken(current, expectedOwner);
+  return sameOwnerToken(readOwnerLock(stateRoot), expectedOwner);
 }
 
 module.exports = {
@@ -257,15 +225,11 @@ module.exports = {
   SOCK_NAME,
   OWNER_RETRY_COUNT,
   OWNER_RETRY_DELAY_MS,
-  TAKEOVER_CLAIM_NAME,
-  TAKEOVER_CLAIM_OWNER_NAME,
-  TAKEOVER_CLAIM_RECLAIM_NAME,
-  RECLAIM_MARKER_PREFIX,
-  RECLAIM_RELEASED_STATE,
-  RECLAIM_GENERATION_WIDTH,
-  RECLAIM_GENERATION_MAX,
+  OWNER_PORT_BASE,
+  OWNER_PORT_SPAN,
   targetIdFromExec,
   targetStateDir,
+  ownerPortFromExec,
   lockPath,
   processIdentity,
   ownerToken,
@@ -273,7 +237,6 @@ module.exports = {
   ownerMatchesLive,
   sameOwnerToken,
   pidAlive,
-  sleepForOwnerRecovery,
   writeAtomicRecord,
   writeOwnerLock,
   readOwnerLockStateAt,

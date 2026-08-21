@@ -10,10 +10,9 @@ const recovery = require("./incodex-owner-recovery.cts");
 const {
   LOCK_NAME,
   SOCK_NAME,
-  OWNER_RETRY_COUNT,
-  OWNER_RETRY_DELAY_MS,
   targetIdFromExec,
   targetStateDir,
+  ownerPortFromExec,
   ownerToken,
   ownerMatchesLive,
   writeOwnerLock,
@@ -23,31 +22,12 @@ const {
   staleOwner,
   OwnerLeaseError,
   ownsOwnerLease,
-  sameOwnerToken,
 } = core;
-const { clearOwnerLock, acquireOwnerLease } = recovery;
+const { clearOwnerLock, acquireOwnerLease, setRaiseHandler } = recovery;
 const processIdentity = core.processIdentity;
 
 function sockPath(stateRoot) {
   return path.join(stateRoot, SOCK_NAME);
-}
-
-function removeSocket(stateRoot) {
-  const file = sockPath(stateRoot);
-  let stats;
-  try {
-    stats = fs.lstatSync(file);
-  } catch (error) {
-    if (error && error.code === "ENOENT") return true;
-    return false;
-  }
-  if (stats.isSymbolicLink()) return false;
-  try {
-    fs.rmSync(file);
-    return true;
-  } catch (error) {
-    return Boolean(error && error.code === "ENOENT");
-  }
 }
 
 function connectExisting(stateRoot, timeoutMs = 400, token = "") {
@@ -55,9 +35,11 @@ function connectExisting(stateRoot, timeoutMs = 400, token = "") {
     token = timeoutMs;
     timeoutMs = 400;
   }
-  const expectedToken = token || ownerToken(readOwnerLock(stateRoot));
+  const owner = readOwnerLock(stateRoot);
+  if (!owner) return Promise.resolve(false);
+  const expectedToken = token || ownerToken(owner);
   return new Promise((resolve) => {
-    const socket = net.connect(sockPath(stateRoot));
+    const socket = net.connect({ host: "127.0.0.1", port: ownerPortFromExec(owner.execPath) });
     let done = false;
     let response = "";
     const finish = (ok) => {
@@ -85,9 +67,9 @@ function connectExisting(stateRoot, timeoutMs = 400, token = "") {
 }
 
 async function connectExistingWithRetry(stateRoot, token, options = {}) {
-  const attempts = options.attempts ?? OWNER_RETRY_COUNT;
+  const attempts = options.attempts ?? 5;
   const timeoutMs = options.timeoutMs ?? 400;
-  const delayMs = options.delayMs ?? OWNER_RETRY_DELAY_MS;
+  const delayMs = options.delayMs ?? 100;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (await connectExisting(stateRoot, timeoutMs, token)) return true;
     if (attempt + 1 < attempts && delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -96,45 +78,8 @@ async function connectExistingWithRetry(stateRoot, token, options = {}) {
 }
 
 function listenForRaise(stateRoot, onRaise, lease) {
-  if (!lease || !ownerToken(lease)) {
-    throw new OwnerLeaseError("OWNER_INVALID", "raise socket requires an owner lease");
-  }
-  if (!ownsOwnerLease(stateRoot, lease)) {
-    throw new OwnerLeaseError("OWNER_NOT_HELD", "cannot listen without the current owner lease");
-  }
-  if (!removeSocket(stateRoot)) {
-    throw new Error("cannot replace the existing raise socket");
-  }
-  fs.mkdirSync(stateRoot, { recursive: true, mode: 0o700 });
-  const expectedToken = ownerToken(lease);
-  const server = net.createServer((socket) => {
-    let request = "";
-    socket.on("error", () => {
-      /* Client may already be gone; do not crash the main process. */
-    });
-    socket.on("data", (buf) => {
-      request += String(buf);
-      if (!request.includes("\n")) return;
-      const line = request.slice(0, request.indexOf("\n")).trim();
-      const expectedRequest = expectedToken ? `raise ${expectedToken}` : "raise";
-      if (line !== expectedRequest) {
-        try {
-          socket.end("denied\n");
-        } catch {
-          /* EPIPE: peer already closed. */
-        }
-        return;
-      }
-      onRaise();
-      try {
-        if (!socket.destroyed) socket.end("ok\n");
-      } catch {
-        /* EPIPE: peer already closed. */
-      }
-    });
-  });
-  server.listen(sockPath(stateRoot));
-  return server;
+  if (!lease || !ownerToken(lease)) throw new OwnerLeaseError("OWNER_INVALID", "raise socket requires an owner lease");
+  return setRaiseHandler(stateRoot, lease, onRaise);
 }
 
 function singleFlight(holder, start) {
@@ -147,11 +92,38 @@ function singleFlight(holder, start) {
   return holder.current;
 }
 
+if (typeof module !== "undefined") module.exports = {
+  LOCK_NAME,
+  SOCK_NAME,
+  targetIdFromExec,
+  targetStateDir,
+  ownerPortFromExec,
+  sockPath,
+  processIdentity,
+  ownerToken,
+  ownerMatchesLive,
+  writeOwnerLock,
+  readOwnerLockState,
+  readOwnerLock,
+  clearOwnerLock,
+  currentOwner,
+  staleOwner,
+  OwnerLeaseError,
+  ownsOwnerLease,
+  acquireOwnerLease,
+  connectExisting,
+  connectExistingWithRetry,
+  listenForRaise,
+  singleFlight,
+};
+
 export {
   LOCK_NAME,
   SOCK_NAME,
   targetIdFromExec,
   targetStateDir,
+  ownerPortFromExec,
+  sockPath,
   processIdentity,
   ownerToken,
   ownerMatchesLive,

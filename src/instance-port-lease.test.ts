@@ -21,8 +21,6 @@ const waitForCount = async (directory: string, expected: number, timeoutMs = 10_
   return readdirSync(directory).length === expected;
 };
 
-const errorCode = (error: unknown) => (error as { code?: string })?.code;
-
 describe("kernel-held TCP owner lease", () => {
   test("twenty OS contenders have one listener owner and keep it until completion", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-tcp-contenders-"));
@@ -103,7 +101,7 @@ describe("kernel-held TCP owner lease", () => {
     const ready = join(root, "ready");
     const targetExec = join(root, "target-executable");
     const modulePath = join(import.meta.dir, "runtime/incodex-instance.cts");
-    const worker = String.raw`
+    const worker = `
       (async () => {
       const { writeFileSync } = require("node:fs");
       const instance = require(process.env.INCODEX_TEST_MODULE);
