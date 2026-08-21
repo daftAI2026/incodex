@@ -29,6 +29,7 @@ enum NestedIdentity {
     Vendor,
     VendorWithoutAuthority,
     Other,
+    OtherWithoutAuthority,
 }
 
 #[derive(Clone, Copy)]
@@ -104,6 +105,9 @@ impl Fixture {
             }
             NestedIdentity::Other => {
                 "printf '%s\\n' 'Identifier=com.example.other' 'TeamIdentifier=OTHERTEAM' 'Authority=Other Signer'"
+            }
+            NestedIdentity::OtherWithoutAuthority => {
+                "printf '%s\\n' 'Identifier=com.example.other' 'TeamIdentifier=OTHERTEAM'"
             }
         };
         let outer_display = match outer_identity {
@@ -197,10 +201,10 @@ impl Drop for Fixture {
 }
 
 #[test]
-fn generic_verify_rejects_a_deep_strict_bundle_with_other_nested_identity() {
+fn generic_verify_rejects_a_nested_other_without_identity_evidence() {
     let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let fixture = Fixture::new(
-        NestedIdentity::Other,
+        NestedIdentity::OtherWithoutAuthority,
         false,
         OuterIdentity::Vendor("com.expected.bundle"),
         false,
@@ -238,6 +242,20 @@ fn generic_verify_accepts_a_verified_third_party_outer_with_identity_evidence() 
     assert!(verify_patched_adhoc_bundle_deep_strict(&fixture.app, None).is_err());
     assert!(verify_original_vendor_bundle(&fixture.app, Some("com.expected.bundle"), None, None)
         .is_err());
+}
+
+#[test]
+fn generic_verify_accepts_a_verified_third_party_nested_component() {
+    let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let fixture = Fixture::new(
+        NestedIdentity::Other,
+        false,
+        OuterIdentity::ThirdParty,
+        false,
+    );
+    let _path = fixture.configure_environment();
+
+    assert!(verify_app(&fixture.app));
 }
 
 #[test]
