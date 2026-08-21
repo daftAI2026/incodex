@@ -351,3 +351,18 @@ fn strips_a_self_closing_unretainable_entitlement_value() {
     assert!(plan.stripped_keys.contains(&key));
     assert!(!plan.xml.contains("<array/>"));
 }
+
+#[test]
+fn adds_entitlement_to_the_root_dictionary() {
+    let source = EntitlementSnapshot {
+        xml: "<?xml version=\"1.0\"?><plist><dict><key>nested</key><dict><key>child</key><string>x</string></dict></dict></plist>".to_string(),
+        keys: BTreeSet::new(),
+    };
+
+    let plan = plan_adhoc_entitlements(&source).expect("nested entitlement plist is valid");
+    let marker = "<key>com.apple.security.cs.disable-library-validation</key>";
+    let marker_position = plan.xml.find(marker).unwrap();
+    let nested_close = plan.xml.find("</dict>").unwrap();
+    let root_close = plan.xml.rfind("</dict>").unwrap();
+    assert!(nested_close < marker_position && marker_position < root_close);
+}
