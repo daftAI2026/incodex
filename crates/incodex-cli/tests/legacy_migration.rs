@@ -431,7 +431,17 @@ fn recovery_refuses_a_modified_outgoing_before_replacement() {
     let outgoing = fixture.root.join("transactions").join(INSTALL_ID).join("outgoing/ChatGPT.app");
     ditto(&fixture.original_app, &outgoing).unwrap();
     fs::remove_dir_all(&fixture.original_app).unwrap();
-    fs::write(outgoing.join("Contents/Resources/app.asar"), b"damaged outgoing").unwrap();
+    let foreign_source = fixture.root.join("foreign-outgoing-source");
+    fs::create_dir_all(&foreign_source).unwrap();
+    fs::write(foreign_source.join("package.json"), "{\"main\":\"index.js\"}\n")
+        .unwrap();
+    fs::write(foreign_source.join("index.js"), "foreign outgoing\n").unwrap();
+    pack_dir(
+        &foreign_source,
+        &outgoing.join("Contents/Resources/app.asar"),
+    )
+    .unwrap();
+    sign_app(&outgoing).unwrap();
     fixture.set_phase("SWAPPED");
     let output = Command::new(env!("CARGO_BIN_EXE_incodex"))
         .args(["recover", "--transaction", INSTALL_ID])
