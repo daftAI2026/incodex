@@ -9,8 +9,8 @@ use incodex_asar::Archive;
 use incodex_core::paths::{user_root, ASAR_REL, RUNTIME_CURRENT_NAME, RUNTIME_DIR_NAME};
 use incodex_core::target_id;
 use incodex_macos::{
-    diagnose_spctl, has_hardened_runtime, read_architecture, read_asar_integrity, read_plist_info,
-    verify_app,
+    diagnose_spctl, has_hardened_runtime, inspect_signing_inventory, plan_adhoc_entitlements,
+    read_architecture, read_asar_integrity, read_plist_info, verify_app, SignatureKind,
 };
 use incodex_transaction::{journal_v2, load_journal, validate_backup_snapshot};
 
@@ -100,8 +100,11 @@ pub fn diagnose_with_root(app_path: &Path, root: &Path) -> Diagnosis {
         Some(install_id) => inspect_backup(root, app_path, install_id, runtime_version.as_deref()),
         None => (None, CheckResult::checked(Vec::new())),
     };
-    let (signing, signing_check) =
-        inspect_signing(backup.as_ref(), spctl.as_ref(), codesign_ok, app_path);
+    let patched = package
+        .as_ref()
+        .map(|package| package.already_patched)
+        .unwrap_or(false);
+    let (signing, signing_check) = inspect_signing(spctl.as_ref(), codesign_ok, app_path, patched);
     let owner_scan = scan_owner_processes(root);
     let session_scan = scan_sessions(root);
     let current_install_id = package
@@ -332,10 +335,10 @@ fn verify_external_runtime(root: &Path, current_path: &Path) -> Result<(String, 
 }
 
 fn inspect_signing(
-    backup: Option<&serde_json::Value>,
     spctl: Option<&serde_json::Value>,
     codesign_ok: bool,
     app_path: &Path,
+    patched: bool,
 ) -> (Option<serde_json::Value>, CheckResult) {
     let Some(spctl) = spctl else {
         return (
@@ -346,30 +349,121 @@ fn inspect_signing(
             ),
         );
     };
-    if backup.is_none() {
-        return (
-            None,
-            CheckResult::unknown(
-                "signing.not-checked",
-                "no verified install backup binds signing diagnostics to this target",
-            ),
-        );
+    let inventory = match inspect_signing_inventory(app_path) {
+        Ok(inventory) => inventory,
+        Err(error) => {
+            let report = serde_json::json!({
+                "status": "unknown",
+                "verified": codesign_ok,
+                "componentCount": serde_json::Value::Null,
+                "hardenedRuntimeOk": has_hardened_runtime(app_path),
+                "unretainable": serde_json::Value::Null,
+                "error": error,
+                "spctl": spctl,
+            });
+            return (
+                Some(report),
+                CheckResult::unknown(
+                    "signing.inspect-failed",
+                    "signature inventory could not be inspected",
+                ),
+            );
+        }
+    };
+
+    let mut findings = Vec::new();
+    let plan = plan_adhoc_entitlements(&inventory.entitlements);
+    let unretainable = match &plan {
+        Ok(plan) => plan
+            .stripped_keys
+            .iter()
+            .cloned()
+            .map(serde_json::Value::String)
+            .collect::<Vec<_>>(),
+        Err(error) => {
+            findings.push(DiagnosticFinding::warning(
+                "signing.entitlements-invalid",
+                format!("entitlement policy could not be evaluated: {error}"),
+                Some(app_path),
+            ));
+            Vec::new()
+        }
+    };
+    if !unretainable.is_empty() {
+        findings.push(DiagnosticFinding::info(
+            "signing.entitlements-unretainable",
+            "some vendor entitlements cannot be retained by an ad-hoc outer signature",
+            Some(app_path),
+        ));
     }
+    if !inventory.deep_strict {
+        findings.push(DiagnosticFinding::warning(
+            "signing.deep-strict-failed",
+            "bundle did not pass deep strict signature verification",
+            Some(app_path),
+        ));
+    }
+    for component in &inventory.nested {
+        if !component.verified {
+            findings.push(DiagnosticFinding::warning(
+                "signing.component-invalid",
+                format!(
+                    "nested {} component failed deep strict verification",
+                    component.kind.as_str()
+                ),
+                Some(&component.path),
+            ));
+        }
+    }
+    let expected_kind = if patched {
+        SignatureKind::Adhoc
+    } else {
+        SignatureKind::Vendor
+    };
+    if inventory.outer.kind != expected_kind {
+        findings.push(DiagnosticFinding::warning(
+            "signing.outer-identity",
+            format!(
+                "outer bundle is {}; expected {} for this target state",
+                inventory.outer.kind.as_str(),
+                expected_kind.as_str()
+            ),
+            Some(app_path),
+        ));
+    }
+    let verified = codesign_ok
+        && inventory.deep_strict
+        && inventory.nested.iter().all(|component| component.verified)
+        && inventory.outer.kind == expected_kind;
+    let components = inventory
+        .nested
+        .iter()
+        .map(|component| {
+            serde_json::json!({
+                "path": component.path,
+                "identifier": component.identifier,
+                "teamIdentifier": component.team_identifier,
+                "kind": component.kind.as_str(),
+                "verified": component.verified,
+            })
+        })
+        .collect::<Vec<_>>();
     let report = serde_json::json!({
-        "status": "unknown",
-        "verified": codesign_ok,
-        "componentCount": serde_json::Value::Null,
+        "status": "checked",
+        "verified": verified,
+        "componentCount": inventory.nested.len(),
+        "components": components,
+        "outer": {
+            "identifier": inventory.outer.identifier,
+            "teamIdentifier": inventory.outer.team_identifier,
+            "kind": inventory.outer.kind.as_str(),
+            "verified": inventory.outer.verified,
+        },
         "hardenedRuntimeOk": has_hardened_runtime(app_path),
-        "unretainable": serde_json::Value::Null,
+        "unretainable": unretainable,
         "spctl": spctl,
     });
-    (
-        Some(report),
-        CheckResult::unknown(
-            "signing.components-unknown",
-            "nested signing components and entitlement retention were not inspected",
-        ),
-    )
+    (Some(report), CheckResult::checked(findings))
 }
 
 fn inspect_backup(
