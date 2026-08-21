@@ -3,7 +3,7 @@ use std::os::unix::fs::MetadataExt;
 
 use incodex_asar::{pack_dir, patch_asar, MARKER_KEY};
 use incodex_macos::ditto;
-use incodex_transaction::Engine;
+use incodex_transaction::{Engine, JournalV2};
 use sha2::{Digest, Sha256};
 
 #[path = "support/readonly.rs"]
@@ -526,6 +526,56 @@ fn doctor_json_reports_retained_original_and_artifacts_for_interrupted_install()
     assert!(human.contains("Retained original"), "{human}");
     assert!(human.contains("Artifact"), "{human}");
 }
+
+#[test]
+fn doctor_marks_a_checksum_valid_unknown_transaction_phase_manual() {
+    let home = isolated_home();
+    let root = home.join(".incodex");
+    let app = home.join("ChatGPT.app");
+    fs::create_dir_all(&app).unwrap();
+    fs::write(app.join("marker"), "original\n").unwrap();
+
+    let mut tx = Engine::begin(&root, &app, "test-unknown-phase").unwrap();
+    let id = tx.install_id().to_string();
+    let original = root
+        .join("transactions")
+        .join(&id)
+        .join("original/ChatGPT.app");
+    ditto(&app, &original).unwrap();
+    tx.mark_backup_committed().unwrap();
+    drop(tx);
+
+    let journal_path = root.join("transactions").join(&id).join("journal.json");
+    let mut journal: JournalV2 =
+        serde_json::from_str(&fs::read_to_string(&journal_path).unwrap()).unwrap();
+    journal.phase = "FUTURE_PHASE".into();
+    journal.checksum.clear();
+    let checksum = Sha256::digest(serde_json::to_vec(&journal).unwrap());
+    journal.checksum =
+        checksum
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+    fs::write(
+        &journal_path,
+        format!("{}\n", serde_json::to_string_pretty(&journal).unwrap()),
+    )
+    .unwrap();
+
+    let (_status, stdout, stderr) = run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(stderr, "");
+    let report = parse_json(&stdout);
+    let record = report["journalRecords"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|record| record["installId"] == id)
+        .expect("unknown-phase journal record");
+    assert_eq!(record["action"], "refuse");
+    assert_eq!(record["originalValid"], true);
+    assert_eq!(record["recovery"], "manual");
+}
+
 
 #[test]
 fn doctor_json_refuses_clean_backup_for_a_patched_marker_without_native_backup() {
