@@ -18,6 +18,7 @@ import {
   staleOwner,
   targetStateDir,
   writeOwnerLock,
+  writeOwnerLockExclusive,
 } from "./runtime/incodex-instance.cts";
 
 const target = (root: string) => join(root, "target-executable");
@@ -74,6 +75,15 @@ catch (error) { process.stdout.write(String(error.message)); }`,
     const legacy = mkdtempSync(join(tmpdir(), "incodex-legacy-owner-"));
     writeOwnerLock(legacy, { pid: 999999, startedAt: "never", execPath: "/nope", sessionId: "legacy", token: "legacy-token" });
     expect(readOwnerLockState(legacy).kind).toBe("valid");
+  });
+
+  test("exclusive diagnostic publication refuses a concurrent record", () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-exclusive-owner-"));
+    const existing = currentOwner("existing", process.execPath);
+    const candidate = currentOwner("candidate", process.execPath);
+    writeOwnerLock(root, existing);
+    expect(() => writeOwnerLockExclusive(root, candidate)).toThrow();
+    expect(readOwnerLock(root)?.token).toBe(existing.token);
   });
 
   test("main preflight lets malformed owners reach acquisition recovery", () => {

@@ -248,6 +248,25 @@ describe("kernel-held TCP owner lease", () => {
     }
   });
 
+  test("a streaming foreign probe is bounded and fails closed", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-tcp-streaming-foreign-"));
+    const targetExec = join(root, "target-executable");
+    const foreign = createServer((socket) => {
+      const timer = setInterval(() => socket.write("x".repeat(128)), 10);
+      socket.once("close", () => clearInterval(timer));
+    });
+    await new Promise<void>((resolve) => foreign.listen(ownerPortFromExec(targetExec), "127.0.0.1", resolve));
+    try {
+      const result = await Promise.race([
+        acquireOwnerLease(root, currentOwner("streaming-foreign", targetExec)).then(() => "acquired", (error) => error.code),
+        new Promise<string>((resolve) => setTimeout(() => resolve("hung"), 1_000)),
+      ]);
+      expect(result).toBe("OWNER_PORT_UNAVAILABLE");
+    } finally {
+      foreign.close();
+    }
+  });
+
   test("an old Unix socket is foreign and is never removed", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-tcp-legacy-"));
     const targetExec = join(root, "target-executable");
