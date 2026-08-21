@@ -220,6 +220,18 @@ fn migration_round_trip_restores_exact_original_and_keeps_legacy_record() {
         journal_v2(&fixture.root, INSTALL_ID).unwrap().phase,
         "ROLLED_BACK"
     );
+    let second_uninstall = Command::new(env!("CARGO_BIN_EXE_incodex"))
+        .args(["uninstall", "--yes", "--app", fixture.app.to_str().unwrap()])
+        .env("HOME", fixture.root.parent().unwrap())
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(!second_uninstall.status.success());
+    assert!(
+        String::from_utf8_lossy(&second_uninstall.stderr).contains("no installation record"),
+        "{}",
+        String::from_utf8_lossy(&second_uninstall.stderr)
+    );
 }
 
 #[test]
