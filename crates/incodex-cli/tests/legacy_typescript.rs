@@ -13,6 +13,8 @@ static SEQ: AtomicU64 = AtomicU64::new(0);
 
 const INSTALL_ID: &str = "11111111-1111-4111-8111-111111111111";
 const ORPHAN_INSTALL_ID: &str = "22222222-2222-4222-8222-222222222222";
+const SECOND_ORPHAN_INSTALL_ID: &str = "33333333-3333-4333-8333-333333333333";
+const ROLLED_BACK_INSTALL_ID: &str = "44444444-4444-4444-8444-444444444444";
 const INFO_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -578,7 +580,7 @@ fn legacy_typescript_fixture_requires_metadata_for_a_committed_journal() {
 }
 
 #[test]
-fn legacy_typescript_fixture_keeps_post_metadata_separate_from_commit_state() {
+fn legacy_typescript_fixture_does_not_attach_committed_metadata_to_an_interrupted_journal() {
     let fixture = LegacyTsV1Fixture::create();
     set_journal_phase_at(&fixture.journal_path(), "TARGET_VERIFIED");
     let state = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
@@ -588,10 +590,10 @@ fn legacy_typescript_fixture_keeps_post_metadata_separate_from_commit_state() {
         state.kind,
         incodex_cli::legacy_typescript::LegacyStateKind::Interrupted
     );
-    assert!(state.current.is_some());
-    assert!(state.manifest.is_some());
-    assert!(state.runtime.is_some());
-    assert!(state.original_app.is_some());
+    assert!(state.current.is_none());
+    assert!(state.manifest.is_none());
+    assert!(state.runtime.is_none());
+    assert!(state.original_app.is_none());
 }
 
 #[test]
@@ -618,6 +620,32 @@ fn legacy_typescript_fixture_prefers_a_new_orphan_journal_over_an_old_committed_
     assert!(state.manifest.is_none());
     assert!(state.runtime.is_none());
     assert!(state.original_app.is_none());
+}
+
+#[test]
+fn legacy_typescript_fixture_rejects_multiple_actionable_interrupted_journals() {
+    let fixture = LegacyTsV1JournalFixture::create();
+    let second = write_flat_journal(
+        &fixture.root,
+        &fixture.app,
+        SECOND_ORPHAN_INSTALL_ID,
+        "DISCOVERED",
+        "2026-08-21T00:02:00.000Z",
+    );
+    set_journal_phase_at(&second, "SWAPPED");
+    write_flat_journal(
+        &fixture.root,
+        &fixture.app,
+        ROLLED_BACK_INSTALL_ID,
+        "ROLLED_BACK",
+        "2026-08-21T00:03:00.000Z",
+    );
+
+    let error = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
+        .expect_err("multiple actionable interrupted journals must fail closed");
+    assert!(error.contains(INSTALL_ID), "{error}");
+    assert!(error.contains(SECOND_ORPHAN_INSTALL_ID), "{error}");
+    assert!(!error.contains(ROLLED_BACK_INSTALL_ID), "{error}");
 }
 
 #[test]
