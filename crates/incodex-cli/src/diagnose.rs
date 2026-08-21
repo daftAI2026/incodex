@@ -104,7 +104,10 @@ pub fn diagnose_with_root(app_path: &Path, root: &Path) -> Diagnosis {
         inspect_signing(backup.as_ref(), spctl.as_ref(), codesign_ok, app_path);
     let owner_scan = scan_owner_processes(root);
     let session_scan = scan_sessions(root);
-    let journal_scan = scan_journals(root);
+    let current_install_id = package
+        .as_ref()
+        .and_then(|package| package.install_id.clone());
+    let journal_scan = scan_journals(root, current_install_id.as_deref());
     let mut checks = empty_checks();
     checks.process_identity = owner_scan.check;
     checks.orphan_sessions = session_scan.orphan_check;

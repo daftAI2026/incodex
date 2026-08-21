@@ -148,11 +148,13 @@ pub fn scan_owner_processes(root: &Path) -> ProcessScan {
     };
     let mut findings = Vec::new();
     let mut stale_pid = false;
+    let mut unknown = false;
     for target in entries {
         if !is_directory(&target) {
             continue;
         }
         let Some(records) = read_directory(&target) else {
+            unknown = true;
             findings.push(DiagnosticFinding::warning(
                 "owner.scan-failed",
                 "cannot enumerate target owner records",
@@ -168,6 +170,7 @@ pub fn scan_owner_processes(root: &Path) -> ProcessScan {
                     .is_some_and(|name| name.starts_with("incognito.lock.active."))
         }) {
             if is_symlink(&record) {
+                unknown = true;
                 findings.push(DiagnosticFinding::warning(
                     "owner.symlink",
                     "owner record is a symlink and was not inspected",
@@ -178,6 +181,7 @@ pub fn scan_owner_processes(root: &Path) -> ProcessScan {
             let body = match fs::read_to_string(&record) {
                 Ok(body) => body,
                 Err(error) => {
+                    unknown = true;
                     findings.push(DiagnosticFinding::warning(
                         "owner.unreadable",
                         error.to_string(),
@@ -189,6 +193,7 @@ pub fn scan_owner_processes(root: &Path) -> ProcessScan {
             let owner: serde_json::Value = match serde_json::from_str(&body) {
                 Ok(owner) => owner,
                 Err(error) => {
+                    unknown = true;
                     findings.push(DiagnosticFinding::warning(
                         "owner.invalid",
                         error.to_string(),
@@ -209,6 +214,7 @@ pub fn scan_owner_processes(root: &Path) -> ProcessScan {
                 .and_then(serde_json::Value::as_str)
                 .filter(|value| !value.is_empty());
             let Some(pid) = pid.and_then(|value| i32::try_from(value).ok()) else {
+                unknown = true;
                 findings.push(DiagnosticFinding::warning(
                     "owner.invalid",
                     "owner record has no valid pid",
@@ -217,6 +223,7 @@ pub fn scan_owner_processes(root: &Path) -> ProcessScan {
                 continue;
             };
             if expected_start.is_none() || expected_exec.is_none() {
+                unknown = true;
                 findings.push(DiagnosticFinding::warning(
                     "owner.identity-missing",
                     "owner record lacks process start or executable identity",
@@ -233,11 +240,14 @@ pub fn scan_owner_processes(root: &Path) -> ProcessScan {
                         Some(&record),
                     ));
                 }
-                None => findings.push(DiagnosticFinding::warning(
-                    "owner.identity-unknown",
-                    format!("cannot verify process identity for pid {pid}"),
-                    Some(&record),
-                )),
+                None => {
+                    unknown = true;
+                    findings.push(DiagnosticFinding::warning(
+                        "owner.identity-unknown",
+                        format!("cannot verify process identity for pid {pid}"),
+                        Some(&record),
+                    ));
+                }
                 Some(live) => {
                     let start_matches = expected_start == Some(live.start.as_str());
                     let exec_matches = expected_exec
@@ -256,7 +266,14 @@ pub fn scan_owner_processes(root: &Path) -> ProcessScan {
     }
     ProcessScan {
         stale_pid,
-        check: CheckResult::checked(findings),
+        check: if unknown {
+            CheckResult {
+                status: CheckStatus::Unknown,
+                findings,
+            }
+        } else {
+            CheckResult::checked(findings)
+        },
     }
 }
 
@@ -287,6 +304,7 @@ pub fn scan_sessions(root: &Path) -> SessionScan {
     let mut roots = Vec::new();
     let mut orphan_findings = Vec::new();
     let mut chromium_findings = Vec::new();
+    let mut unknown = false;
     let Some(targets) = read_directory(&sessions) else {
         return SessionScan {
             orphan_sessions: Vec::new(),
@@ -311,6 +329,7 @@ pub fn scan_sessions(root: &Path) -> SessionScan {
                     .filter(|path| is_directory(path) && file_name_starts(path, "s-")),
             );
         } else {
+            unknown = true;
             orphan_findings.push(DiagnosticFinding::warning(
                 "session.scan-failed",
                 "cannot enumerate target sessions",
@@ -323,6 +342,12 @@ pub fn scan_sessions(root: &Path) -> SessionScan {
     for session in roots {
         let owner_path = session.join("owner.json");
         if is_symlink(&owner_path) {
+            unknown = true;
+            chromium_findings.push(DiagnosticFinding::warning(
+                "chromium.session-unknown",
+                "session owner record is unavailable; Chromium residue cannot be classified",
+                Some(&owner_path),
+            ));
             orphan_findings.push(DiagnosticFinding::warning(
                 "session.owner-symlink",
                 "session owner record is a symlink and was not inspected",
@@ -333,6 +358,12 @@ pub fn scan_sessions(root: &Path) -> SessionScan {
         let body = match fs::read_to_string(&owner_path) {
             Ok(body) => body,
             Err(error) => {
+                unknown = true;
+                chromium_findings.push(DiagnosticFinding::warning(
+                    "chromium.session-unknown",
+                    "session owner record is unreadable; Chromium residue cannot be classified",
+                    Some(&owner_path),
+                ));
                 orphan_findings.push(DiagnosticFinding::warning(
                     "session.owner-unreadable",
                     error.to_string(),
@@ -344,6 +375,12 @@ pub fn scan_sessions(root: &Path) -> SessionScan {
         let owner: serde_json::Value = match serde_json::from_str(&body) {
             Ok(owner) => owner,
             Err(error) => {
+                unknown = true;
+                chromium_findings.push(DiagnosticFinding::warning(
+                    "chromium.session-unknown",
+                    "session owner record is invalid; Chromium residue cannot be classified",
+                    Some(&owner_path),
+                ));
                 orphan_findings.push(DiagnosticFinding::warning(
                     "session.owner-invalid",
                     error.to_string(),
@@ -372,6 +409,12 @@ pub fn scan_sessions(root: &Path) -> SessionScan {
                 Some(expected) => match live_process_identity(pid) {
                     Some(live) => expected != live.start,
                     None => {
+                        unknown = true;
+                        chromium_findings.push(DiagnosticFinding::warning(
+                            "chromium.session-unknown",
+                            "session process identity cannot be verified; Chromium residue cannot be classified",
+                            Some(&owner_path),
+                        ));
                         orphan_findings.push(DiagnosticFinding::warning(
                             "session.identity-unknown",
                             format!("cannot verify process identity for pid {pid}"),
@@ -382,6 +425,12 @@ pub fn scan_sessions(root: &Path) -> SessionScan {
                 },
             },
             None => {
+                unknown = true;
+                chromium_findings.push(DiagnosticFinding::warning(
+                    "chromium.session-unknown",
+                    "session owner has no valid pid; Chromium residue cannot be classified",
+                    Some(&owner_path),
+                ));
                 orphan_findings.push(DiagnosticFinding::warning(
                     "session.owner-invalid",
                     "session owner has no valid pid",
@@ -424,12 +473,26 @@ pub fn scan_sessions(root: &Path) -> SessionScan {
     SessionScan {
         orphan_sessions,
         leftover_chromium,
-        orphan_check: CheckResult::checked(orphan_findings),
-        chromium_check: CheckResult::checked(chromium_findings),
+        orphan_check: if unknown {
+            CheckResult {
+                status: CheckStatus::Unknown,
+                findings: orphan_findings,
+            }
+        } else {
+            CheckResult::checked(orphan_findings)
+        },
+        chromium_check: if unknown {
+            CheckResult {
+                status: CheckStatus::Unknown,
+                findings: chromium_findings,
+            }
+        } else {
+            CheckResult::checked(chromium_findings)
+        },
     }
 }
 
-pub fn scan_journals(root: &Path) -> JournalScan {
+pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalScan {
     let dir = root.join("transactions");
     if !dir.exists() {
         return JournalScan {
@@ -471,6 +534,10 @@ pub fn scan_journals(root: &Path) -> JournalScan {
                             action.as_str().to_string(),
                         ));
                         "validInterrupted"
+                    } else if journal.phase == "COMMITTED"
+                        && current_install_id == Some(journal.install_id.as_str())
+                    {
+                        "currentCommitted"
                     } else if journal.phase == "COMMITTED" {
                         "staleCommitted"
                     } else {
@@ -544,6 +611,10 @@ pub fn scan_journals(root: &Path) -> JournalScan {
                             action.as_str().to_string(),
                         ));
                         "validInterrupted"
+                    } else if journal.phase == "COMMITTED"
+                        && current_install_id == Some(journal.install_id.as_str())
+                    {
+                        "currentCommitted"
                     } else if journal.phase == "COMMITTED" {
                         "staleCommitted"
                     } else {
