@@ -266,9 +266,31 @@ impl Engine {
         let mut next = self.journal.clone();
         next.phase = phase.to_string();
         next.sequence += 1;
-        write_journal(&self.root, &next)?;
-        self.journal = load_v2(&self.root, self.install_id())?;
-        Ok(())
+        let sealed = crate::journal::seal(next);
+        let install_id = sealed.install_id.clone();
+        let write_error = write_journal(&self.root, &sealed).err();
+        match load_v2(&self.root, &install_id) {
+            Ok(journal) => {
+                self.journal = journal;
+                match write_error {
+                    Some(error) => Err(error),
+                    None => Ok(()),
+                }
+            }
+            Err(read_error) => {
+                // +-----------------------------------------------------------+
+                // | 写入后读不回时，磁盘可能已经进入 next；保守采用 next，       |
+                // | 尤其不能把 durable COMMITTED 当成旧 SWAPPED 去回滚。        |
+                // +-----------------------------------------------------------+
+                self.journal = sealed;
+                match write_error {
+                    Some(write_error) => Err(format!(
+                        "{write_error}; journal readback also failed: {read_error}"
+                    )),
+                    None => Err(read_error),
+                }
+            }
+        }
     }
 }
 
