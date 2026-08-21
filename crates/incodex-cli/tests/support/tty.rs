@@ -1,8 +1,50 @@
 use std::path::Path;
 use std::process::Command;
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Barrier, Mutex, OnceLock};
 
 static PTY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+pub struct Probe {
+    start: Barrier,
+    active: AtomicUsize,
+    maximum: AtomicUsize,
+}
+
+impl Probe {
+    pub fn new(contenders: usize) -> Arc<Self> {
+        assert!(contenders > 0);
+        Arc::new(Self {
+            start: Barrier::new(contenders),
+            active: AtomicUsize::new(0),
+            maximum: AtomicUsize::new(0),
+        })
+    }
+
+    fn wait_for_start(&self) {
+        self.start.wait();
+    }
+
+    fn enter(&self) -> ProbeGuard<'_> {
+        let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+        self.maximum.fetch_max(active, Ordering::SeqCst);
+        ProbeGuard { probe: self }
+    }
+
+    pub fn max_concurrency(&self) -> usize {
+        self.maximum.load(Ordering::SeqCst)
+    }
+}
+
+struct ProbeGuard<'a> {
+    probe: &'a Probe,
+}
+
+impl Drop for ProbeGuard<'_> {
+    fn drop(&mut self) {
+        self.probe.active.fetch_sub(1, Ordering::SeqCst);
+    }
+}
 
 #[derive(Debug)]
 pub struct Result {
@@ -11,6 +53,7 @@ pub struct Result {
     pub stderr: String,
 }
 
+#[allow(dead_code)]
 pub fn run(
     program: &str,
     prefix: &[&str],
@@ -19,10 +62,36 @@ pub fn run(
     wait_for: &str,
     keys: &str,
 ) -> Result {
+    run_inner(program, prefix, args, home, wait_for, keys, None)
+}
+
+pub fn run_with_probe(
+    program: &str,
+    prefix: &[&str],
+    args: &[&str],
+    home: &Path,
+    wait_for: &str,
+    keys: &str,
+    probe: &Probe,
+) -> Result {
+    probe.wait_for_start();
+    run_inner(program, prefix, args, home, wait_for, keys, Some(probe))
+}
+
+fn run_inner(
+    program: &str,
+    prefix: &[&str],
+    args: &[&str],
+    home: &Path,
+    wait_for: &str,
+    keys: &str,
+    probe: Option<&Probe>,
+) -> Result {
     let _guard = PTY_LOCK
         .get_or_init(|| Mutex::new(()))
         .lock()
         .expect("PTY harness lock");
+    let _probe_guard = probe.map(Probe::enter);
     let script = r#"
 import os, pty, select, sys, time
 home, wait_for, keys = sys.argv[1], sys.argv[2].encode("utf-8"), sys.argv[3].encode("latin-1")
