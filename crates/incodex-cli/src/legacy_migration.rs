@@ -27,9 +27,19 @@ pub fn migrate_legacy_if_needed(root: &Path, target: &Path) -> Result<Option<Jou
             // leaves a rolled-back v2 journal.  Do not re-prove the now-clean app
             // as a legacy patched target on a later invocation.
             if let Ok(native) = journal_v2(root, &state.install_id) {
-                if native.phase == "ROLLED_BACK" {
-                    return Ok(None);
+                if native.phase == "COMMITTED" || native.phase == "ROLLED_BACK" {
+                    return if native.phase == "COMMITTED"
+                        && legacy_marker_matches(target, &state.install_id)
+                    {
+                        Ok(Some(native))
+                    } else {
+                        Ok(None)
+                    };
                 }
+                return Err(format!(
+                    "adopted native transaction {} is not settled (phase {})",
+                    state.install_id, native.phase
+                ));
             }
             let proven = crate::legacy_proof::prove_legacy_ts_v1(root, state)?;
             migrate_legacy_ts_v1(root, proven).map(Some)
@@ -71,6 +81,20 @@ pub fn recover_legacy_ts_v1(root: &Path, install_id: &str) -> Result<LegacyRecov
         "TARGET_MOVED_OUT" | "SWAPPED" | "TARGET_VERIFIED"
     );
     let mut outgoing_restored = false;
+    let mut outgoing_already_restored = false;
+    if journal.recovery_intent.as_deref() == Some("restore-outgoing")
+        && outgoing.as_ref().is_none_or(|path| !path.exists())
+    {
+        let digest = journal
+            .recovery_digest
+            .as_deref()
+            .ok_or("legacy outgoing restore intent has no digest")?;
+        if target.exists() && tree_digest(&target)? == digest && verify_app(&target) {
+            outgoing_already_restored = true;
+        } else {
+            return Err("legacy outgoing restore intent cannot prove the restored target".into());
+        }
+    }
     if needs_original && original.is_dir() {
         if !already_restored(&target, &original)? {
             ensure_staged_target_or_absent(&target, &journal.install_id)?;
@@ -89,28 +113,51 @@ pub fn recover_legacy_ts_v1(root: &Path, install_id: &str) -> Result<LegacyRecov
                 return Err("recovered legacy original failed codesign verification".into());
             }
         }
-    } else if needs_original {
+    } else if needs_original && !outgoing_already_restored {
         let outgoing = outgoing
             .as_ref()
             .filter(|path| path.is_dir())
             .ok_or("legacy recovery has no intact original or outgoing restore source")?;
+        verify_outgoing_candidate(outgoing)?;
+        let mut intent = journal.clone();
+        intent.recovery_intent = Some("restore-outgoing".into());
+        intent.recovery_digest = Some(tree_digest(outgoing)?);
+        write_legacy_journal(root, &intent)?;
         ensure_staged_target_or_absent(&target, &journal.install_id)?;
         replace_bundle(
             outgoing,
             &target,
             &root.join("legacy-recovery").join(install_id),
         )?;
+        if !verify_app(&target) {
+            return Err("recovered legacy outgoing failed codesign verification".into());
+        }
         outgoing_restored = true;
     } else if let Some(outgoing) = &outgoing {
-        if outgoing.is_dir() && !target.exists() {
-            fs::rename(outgoing, &target).map_err(|error| error.to_string())?;
-            outgoing_restored = true;
+        if outgoing.is_dir() {
+            verify_outgoing_candidate(outgoing)?;
+            if target.exists() {
+                if tree_digest(&target)? != tree_digest(outgoing)? || !verify_app(&target) {
+                    return Err("legacy pre-swap target reappeared and is not the original".into());
+                }
+            } else {
+                let mut intent = journal.clone();
+                intent.recovery_intent = Some("restore-outgoing".into());
+                intent.recovery_digest = Some(tree_digest(outgoing)?);
+                write_legacy_journal(root, &intent)?;
+                fs::rename(outgoing, &target).map_err(|error| error.to_string())?;
+                if !verify_app(&target) {
+                    return Err("recovered legacy outgoing failed codesign verification".into());
+                }
+                outgoing_restored = true;
+            }
         }
     }
     remove_path(&staged)?;
     if let Some(outgoing) = &outgoing {
         remove_path(outgoing)?;
     }
+    sync_recovery_mutations(root, &target, &staged, outgoing.as_deref())?;
     let mut rolled_back = journal;
     rolled_back.phase = "ROLLED_BACK".into();
     write_legacy_journal(root, &rolled_back)?;
@@ -174,6 +221,57 @@ fn already_restored(target: &Path, original: &Path) -> Result<bool, String> {
         return Ok(false);
     }
     Ok(verify_app(target))
+}
+
+fn verify_outgoing_candidate(outgoing: &Path) -> Result<(), String> {
+    if !outgoing.is_dir() || !verify_app(outgoing) {
+        return Err("legacy outgoing restore candidate failed codesign verification".into());
+    }
+    Ok(())
+}
+
+fn legacy_marker_matches(target: &Path, install_id: &str) -> bool {
+    Archive::open(target.join("Contents/Resources/app.asar"))
+        .ok()
+        .and_then(|archive| archive.read_package_main().ok())
+        .is_some_and(|package| {
+            package.already_patched && package.install_id.as_deref() == Some(install_id)
+        })
+}
+
+fn sync_recovery_mutations(
+    root: &Path,
+    target: &Path,
+    staged: &Path,
+    outgoing: Option<&Path>,
+) -> Result<(), String> {
+    if let Some(directory) = target.parent() {
+        sync_directory(directory)?;
+    }
+    if let Some(directory) = staged.parent() {
+        sync_directory(directory)?;
+    }
+    if let Some(directory) = outgoing.and_then(Path::parent) {
+        sync_directory(directory)?;
+    }
+    sync_directory(&root.join("transactions"))?;
+    Ok(())
+}
+
+fn sync_directory(path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        return Ok(());
+    }
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut options = fs::OpenOptions::new();
+    options
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW);
+    options
+        .open(path)
+        .map_err(|error| error.to_string())?
+        .sync_all()
+        .map_err(|error| error.to_string())
 }
 
 fn remove_path(path: &Path) -> Result<(), String> {

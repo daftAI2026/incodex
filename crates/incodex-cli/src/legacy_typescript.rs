@@ -91,6 +91,10 @@ pub struct TransactionJournal {
     pub outgoing_app: Option<String>,
     pub phase: String,
     pub updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery_intent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery_digest: Option<String>,
 }
 
 fn deserialize_optional_non_null<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
