@@ -124,9 +124,13 @@ struct InjectionReadiness {
 }
 
 impl InjectionReadiness {
+    fn mark_ready(&self) {
+        self.ready.store(true, Ordering::Release);
+    }
+
     fn observe(&self, status: &InjectionStatus) {
         if matches!(status, InjectionStatus::Ready) {
-            self.ready.store(true, Ordering::Release);
+            self.mark_ready();
         }
     }
 
@@ -137,9 +141,12 @@ impl InjectionReadiness {
 
 fn publish_injection_status(
     status_tx: &mpsc::Sender<InjectionStatus>,
-    _readiness: &InjectionReadiness,
+    readiness: &InjectionReadiness,
     status: InjectionStatus,
 ) {
+    if matches!(status, InjectionStatus::Ready) {
+        readiness.mark_ready();
+    }
     let _ = status_tx.send(status);
 }
 
