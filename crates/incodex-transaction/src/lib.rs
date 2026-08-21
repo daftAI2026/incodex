@@ -2,6 +2,7 @@ mod durable;
 mod engine;
 mod journal;
 mod lock;
+mod migration;
 mod proof;
 mod uninstall;
 
@@ -12,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 pub use engine::{recover, recover_with, CommitResult, Engine, RecoverResult, TxError};
 pub use journal::{new_install_id, validate_path_ancestors, JournalV2};
+pub use migration::{adopt_legacy_committed_locked, LegacyMigrationInput};
 pub use uninstall::{
     migrate_legacy_committed, restore_committed, restore_committed_with_checkpoint,
 };

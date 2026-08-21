@@ -12,7 +12,9 @@ use std::process::Command;
 use incodex_asar::{Archive, PackageMain, MARKER_KEY};
 use incodex_core::{inspect_target, recheck_target, CanonicalTarget};
 use incodex_macos::{read_architecture, read_plist_info, verify_app, PlistInfo};
-use incodex_transaction::{acquire_target_lock, TargetLock};
+use incodex_transaction::{
+    acquire_target_lock, adopt_legacy_committed_locked, JournalV2, LegacyMigrationInput, TargetLock,
+};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -50,6 +52,39 @@ impl LegacyProvenState {
     ) -> R {
         consumer(&self.structural, &self.evidence)
     }
+
+    /// Consume the proof while its target lock remains held and adopt its
+    /// verified backup as a native committed transaction.
+    pub fn migrate(self, root: &Path) -> Result<JournalV2, String> {
+        let LegacyProvenState {
+            structural,
+            evidence,
+            lock,
+        } = self;
+        let target = structural
+            .target_identity
+            .ok_or("legacy proof has no target identity")?;
+        let original_source = match &structural.state {
+            LegacyState::Committed { original_app, .. } => original_app.clone(),
+            _ => return Err("legacy proof is not committed".into()),
+        };
+        let input = LegacyMigrationInput {
+            install_id: structural.install_id,
+            requested_path: PathBuf::from(&structural.journal.target_real_path),
+            real_path: structural.target_real_path,
+            target_device: target.target.device,
+            target_inode: target.target.inode,
+            parent_device: target.parent.device,
+            parent_inode: target.parent.inode,
+            original_source,
+            live_asar_file_hash: evidence.live_asar_file_hash,
+            original_asar_file_hash: evidence.original_asar_file_hash,
+            original_plist_file_hash: evidence.original_plist_file_hash,
+        };
+        let journal = adopt_legacy_committed_locked(root, &lock, &input)?;
+        let _ = evidence;
+        Ok(journal)
+    }
 }
 
 /// 迁移器可审计的 live、backup 与 vendor 证据。
@@ -63,6 +98,7 @@ pub struct LegacyProofEvidence {
     pub live_asar_file_hash: String,
     pub original_asar_header_hash: String,
     pub original_asar_file_hash: String,
+    pub original_plist_file_hash: String,
     pub vendor_signature: Option<LegacyVendorSignature>,
 }
 
@@ -387,6 +423,7 @@ where
     let live_asar_file_hash = manifest.patched_asar_file_hash.clone();
     let original_asar_header_hash = manifest.original_asar_header_hash.clone();
     let original_asar_file_hash = manifest.original_asar_file_hash.clone();
+    let original_plist_file_hash = manifest.original_plist_file_hash.clone();
 
     Ok(LegacyProvenState {
         structural,
@@ -399,6 +436,7 @@ where
             live_asar_file_hash,
             original_asar_header_hash,
             original_asar_file_hash,
+            original_plist_file_hash,
             vendor_signature,
         },
         lock,

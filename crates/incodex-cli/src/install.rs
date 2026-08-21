@@ -15,6 +15,7 @@ use incodex_transaction::{
     TxError,
 };
 
+use crate::legacy_migration::{migrate_legacy_if_needed, recover_legacy_ts_v1};
 use crate::parse::ParsedCli;
 use crate::spinner::Progress;
 
@@ -98,6 +99,18 @@ pub fn run_recover(parsed: &ParsedCli) -> Result<(), String> {
     }
     let mut progress = Progress::new();
     progress.stage("Recovering transaction");
+    if !v2.exists() {
+        let result = recover_legacy_ts_v1(&root, id)?;
+        progress.stop();
+        println!("phase: {}", result.phase);
+        println!("action: {}", result.action);
+        println!("target: {}", result.target.display());
+        println!("target present: {}", result.target.exists());
+        println!("backup intact: {}", result.backup_intact);
+        println!("staged removed: {}", result.staged_removed);
+        println!("outgoing restored: {}", result.outgoing_restored);
+        return Ok(());
+    }
     let result = recover_with(&root, id, verify_app).map_err(map_tx)?;
     progress.stop();
     println!("phase: {}", result.journal.phase);
@@ -252,6 +265,15 @@ fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<Comma
             }
         }
     }
+    if let Some(journal) = migrate_legacy_if_needed(root, app)? {
+        return Ok(CommandResult {
+            skipped: true,
+            install_id: Some(journal.install_id),
+            runtime_version: Some(published.version),
+            app: app.display().to_string(),
+            warning: None,
+        });
+    }
     let mut tx = Engine::begin(root, app, "install")?;
     let install_id = tx.install_id().to_string();
     let original = root
@@ -327,6 +349,7 @@ fn uninstall_app(
         progress.stage("Closing ChatGPT");
         let _ = quit_official_app();
     }
+    let _ = migrate_legacy_if_needed(root, app)?;
     progress.stage("Locating verified backup");
     let journal = find_committed(root, app)?;
     progress.stage("Restoring original app");
@@ -394,7 +417,8 @@ fn find_committed(root: &Path, app: &Path) -> Result<incodex_transaction::Journa
     let real = inspect_target(app, None)
         .map(|t| t.real_path)
         .unwrap_or_else(|_| app.to_path_buf());
-    let live_install_id = verified_live_install_id(root, app);
+    let live_install_id =
+        verified_live_install_id(root, app).or_else(|| legacy_live_install_id(root, app));
     let dir = root.join("transactions");
     let entries = fs::read_dir(&dir).map_err(|_| {
         "no installation record for this target. refusing to use ~/.incodex/backup because it is not bound to this app"
@@ -430,6 +454,23 @@ fn find_committed(root: &Path, app: &Path) -> Result<incodex_transaction::Journa
         "no installation record for this target. refusing to use ~/.incodex/backup because it is not bound to this app"
             .to_string()
     })
+}
+
+fn legacy_live_install_id(root: &Path, app: &Path) -> Option<String> {
+    let archive = Archive::open(&app.join(ASAR_REL)).ok()?;
+    let package = archive.read_package_main().ok()?;
+    if !package.already_patched {
+        return None;
+    }
+    let install_id = package.install_id?;
+    let journal = journal_v2(root, &install_id).ok()?;
+    if journal.phase != "COMMITTED"
+        || incodex_core::canonical_path(&journal.target.real_path)
+            != incodex_core::canonical_path(app)
+    {
+        return None;
+    }
+    Some(install_id)
 }
 
 fn print_command_result(result: &CommandResult) {

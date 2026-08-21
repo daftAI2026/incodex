@@ -5,6 +5,7 @@ use std::path::{Component, Path, PathBuf};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+use crate::legacy_typescript::{load_legacy_ts_v1, LegacyState};
 use incodex_asar::Archive;
 use incodex_core::paths::{user_root, ASAR_REL, RUNTIME_CURRENT_NAME, RUNTIME_DIR_NAME};
 use incodex_core::target_id;
@@ -89,7 +90,8 @@ pub fn diagnose_with_root(app_path: &Path, root: &Path) -> Diagnosis {
         .and_then(|package| package.install_id.as_deref())
         .and_then(|install_id| {
             inspect_backup(root, app_path, install_id, runtime_version.as_deref())
-        });
+        })
+        .or_else(|| inspect_legacy_backup(root, app_path));
     let signing = backup.as_ref().and_then(|_| {
         spctl.as_ref().map(|spctl| {
             serde_json::json!({
@@ -258,6 +260,28 @@ fn inspect_backup(
         "runtimeVersion": runtime_version,
         "originalAsarFileHash": hash_file(&original.join(ASAR_REL)),
         "patchedAsarFileHash": hash_file(&app_path.join(ASAR_REL)),
+    }))
+}
+
+fn inspect_legacy_backup(root: &Path, app_path: &Path) -> Option<serde_json::Value> {
+    let state = load_legacy_ts_v1(root, app_path).ok()??;
+    let LegacyState::Committed {
+        manifest,
+        original_app,
+        ..
+    } = state.state
+    else {
+        return None;
+    };
+    Some(serde_json::json!({
+        "legacy": true,
+        "complete": true,
+        "installId": state.install_id,
+        "belongsToTarget": true,
+        "originalExists": original_app.is_dir(),
+        "originalAsarFileHash": manifest.original_asar_file_hash,
+        "patchedAsarFileHash": manifest.patched_asar_file_hash,
+        "runtimeVersion": manifest.runtime_version,
     }))
 }
 

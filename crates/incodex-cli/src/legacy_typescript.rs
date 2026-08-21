@@ -73,7 +73,7 @@ pub struct CurrentPointer {
     pub install_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionJournal {
     pub schema_version: u32,
@@ -81,7 +81,11 @@ pub struct TransactionJournal {
     pub target_real_path: String,
     pub staged_app: String,
     pub original_snapshot: String,
-    #[serde(default, deserialize_with = "deserialize_optional_non_null")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub outgoing_app: Option<String>,
     pub phase: String,
     pub updated_at: String,
@@ -250,6 +254,40 @@ pub fn load_legacy_ts_v1(root: &Path, target: &Path) -> Result<Option<LegacyTsV1
         target_identity,
         original_identity,
     }))
+}
+
+/// Read one flat journal by install id for the explicit recover command.
+pub fn load_legacy_journal(root: &Path, install_id: &str) -> Result<TransactionJournal, String> {
+    validate_install_id(install_id, "journal installId")?;
+    let path = root.join("transactions").join(format!("{install_id}.json"));
+    validate_storage_path(root, &path, "legacy transaction journal")?;
+    let journal: TransactionJournal = read_json(&path, "legacy transaction journal")?;
+    if journal.install_id != install_id {
+        return Err("legacy transaction filename does not match installId".into());
+    }
+    if journal.target_real_path.is_empty() {
+        return Err("legacy journal targetRealPath is empty".into());
+    }
+    let target = canonical_path(&journal.target_real_path);
+    validate_journal(root, &journal, &target_id(&target), &target)?;
+    Ok(journal)
+}
+
+/// Atomically advance a validated flat journal during explicit recovery.
+pub fn write_legacy_journal(root: &Path, journal: &TransactionJournal) -> Result<(), String> {
+    let path = root
+        .join("transactions")
+        .join(format!("{}.json", journal.install_id));
+    validate_storage_path(root, &path, "legacy transaction journal")?;
+    let target = canonical_path(&journal.target_real_path);
+    validate_journal(root, journal, &target_id(&target), &target)?;
+    let temporary = path.with_extension("json.tmp");
+    let body = format!(
+        "{}\n",
+        serde_json::to_string_pretty(journal).map_err(|error| error.to_string())?
+    );
+    fs::write(&temporary, body).map_err(|error| error.to_string())?;
+    fs::rename(temporary, path).map_err(|error| error.to_string())
 }
 
 fn enumerate_target_journals(
