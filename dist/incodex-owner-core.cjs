@@ -208,6 +208,11 @@ function readOwnerLock(stateRoot) {
 function isOwnerQuarantinePath(file) {
     return typeof file === "string" && path.basename(file).startsWith(QUARANTINE_PREFIX);
 }
+function retainedQuarantineState(state) {
+    return state.kind === "unverifiable"
+        ? state
+        : { kind: "unverifiable", owner: state.owner, reason: "retained quarantine requires manual resolution" };
+}
 function reclaimStaleActiveOwnerRecord(file, expectedOwner) {
     if (!staleOwnerRecord(expectedOwner))
         return { removed: false };
@@ -246,13 +251,7 @@ function readOwnerRecords(stateRoot) {
         for (const name of names) {
             if (isOwnerQuarantinePath(name)) {
                 const file = path.join(stateRoot, name);
-                const state = readOwnerLockStateAt(file);
-                records.push({
-                    path: file,
-                    state: state.kind === "unverifiable"
-                        ? state
-                        : { kind: "unverifiable", owner: state.owner, reason: "retained quarantine requires manual resolution" },
-                });
+                records.push({ path: file, state: retainedQuarantineState(readOwnerLockStateAt(file)) });
                 continue;
             }
             if (!name.startsWith(ACTIVE_LOCK_PREFIX))
@@ -273,7 +272,7 @@ function readOwnerRecords(stateRoot) {
                 if (result.removed)
                     continue;
                 if (result.path) {
-                    records.push({ path: result.path, state: result.state });
+                    records.push({ path: result.path, state: retainedQuarantineState(result.state) });
                     continue;
                 }
             }

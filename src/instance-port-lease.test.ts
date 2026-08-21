@@ -359,7 +359,7 @@ describe("kernel-held TCP owner lease", () => {
       quarantinePath = movedPath;
       chmodSync(root, 0o500);
     });
-    let records;
+    let records: Array<{ path: string; state: any }>;
     try {
       records = readOwnerRecords(root);
     } finally {
