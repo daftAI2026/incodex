@@ -14,6 +14,7 @@ import {
   readOwnerLock,
   readOwnerRecords,
   releaseOwnerLease,
+  setOwnerRecordTestHook,
   writeOwnerLock,
 } from "./runtime/incodex-instance.cts";
 
@@ -254,6 +255,39 @@ describe("kernel-held TCP owner lease", () => {
     const candidate = currentOwner("mismatch-candidate", targetExec);
     await expect(acquireOwnerLease(root, candidate)).rejects.toMatchObject({ code: "OWNER_UNVERIFIABLE" });
     expect(existsSync(mismatchPath)).toBe(true);
+  });
+
+  test("quarantines a stale sidecar before a replacement can be published", () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-tcp-sidecar-quarantine-"));
+    const targetExec = join(root, "target-executable");
+    const token = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const stalePath = join(root, `incognito.lock.active.${token}`);
+    const stale = {
+      pid: 900002,
+      startedAt: "dead-fixture",
+      processStartIdentity: "dead-fixture",
+      execPath: targetExec,
+      execIdentity: "target-executable",
+      sessionId: "quarantine-stale",
+      token,
+      nonce: token,
+    };
+    const replacement = { ...stale, sessionId: "quarantine-replacement", token: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", nonce: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" };
+    writeFileSync(stalePath, `${JSON.stringify(stale)}\n`);
+    let replaced = false;
+    setOwnerRecordTestHook(({ originalPath }: { originalPath: string }) => {
+      if (replaced) return;
+      replaced = true;
+      writeFileSync(originalPath, `${JSON.stringify(replacement)}\n`);
+    });
+    try {
+      readOwnerRecords(root);
+    } finally {
+      setOwnerRecordTestHook(null);
+    }
+    expect(replaced).toBe(true);
+    expect(readFileSync(stalePath, "utf8")).toContain(replacement.token);
+    expect(readOwnerRecords(root).some(({ state }: any) => state.owner?.token === replacement.token)).toBe(true);
   });
 
   test("a SIGKILL releases the listener so the next process can acquire", async () => {
