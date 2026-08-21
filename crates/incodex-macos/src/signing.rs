@@ -677,6 +677,9 @@ fn xml_value_end(xml: &str, start: usize) -> Option<usize> {
     }
     let open_end = rest.find('>')?;
     let open = &rest[1..open_end];
+    if open.trim_end().ends_with('/') {
+        return Some(start + open_end + 1);
+    }
     let name = open.split_whitespace().next()?.trim_end_matches('/');
     let close = format!("</{name}>");
     let close_start = rest[open_end + 1..].find(&close)? + open_end + 1;
