@@ -7,6 +7,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 
 const LOCK_NAME = "incognito.lock";
+const ACTIVE_LOCK_PREFIX = `${LOCK_NAME}.active.`;
 const SOCK_NAME = "incognito.sock";
 const OWNER_RETRY_COUNT = 5;
 const OWNER_RETRY_DELAY_MS = 100;
@@ -102,6 +103,10 @@ function lockPath(stateRoot) {
   return path.join(stateRoot, LOCK_NAME);
 }
 
+function activeOwnerPath(stateRoot, token) {
+  return path.join(stateRoot, `${ACTIVE_LOCK_PREFIX}${token}`);
+}
+
 function writeAtomicRecord(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const temporary = path.join(
@@ -135,8 +140,7 @@ function writeOwnerLock(stateRoot, owner) {
   return writeAtomicRecord(lockPath(stateRoot), owner);
 }
 
-function writeOwnerLockExclusive(stateRoot, owner) {
-  const file = lockPath(stateRoot);
+function writeOwnerRecordExclusive(file, owner) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const temporary = path.join(
     path.dirname(file),
@@ -156,6 +160,10 @@ function writeOwnerLockExclusive(stateRoot, owner) {
   } finally {
     try { fs.rmSync(temporary, { force: true }); } catch { /* Best effort temp cleanup. */ }
   }
+}
+
+function writeOwnerLockExclusive(stateRoot, owner) {
+  return writeOwnerRecordExclusive(lockPath(stateRoot), owner);
 }
 
 function readOwnerLockStateAt(file) {
@@ -188,6 +196,25 @@ function readOwnerLockState(stateRoot) {
 function readOwnerLock(stateRoot) {
   const state = readOwnerLockState(stateRoot);
   return state.kind === "valid" ? state.owner : null;
+}
+
+function readOwnerRecords(stateRoot) {
+  const records = [];
+  const canonical = lockPath(stateRoot);
+  let names = [];
+  try {
+    names = fs.readdirSync(stateRoot);
+    for (const name of names) {
+      if (!name.startsWith(ACTIVE_LOCK_PREFIX)) continue;
+      const file = path.join(stateRoot, name);
+      records.push({ path: file, state: readOwnerLockStateAt(file) });
+    }
+  } catch {
+    /* A missing state root still has a missing canonical diagnostic. */
+  }
+  // 活跃旁路记录优先；canonical 记录只保留为历史诊断元数据。
+  records.push({ path: canonical, state: readOwnerLockStateAt(canonical) });
+  return records;
 }
 
 function ownerLockMetadata(file) {
@@ -258,6 +285,7 @@ module.exports = {
   targetStateDir,
   ownerPortFromExec,
   lockPath,
+  activeOwnerPath,
   processIdentity,
   ownerToken,
   hasReliableOwnerIdentity,
@@ -265,11 +293,13 @@ module.exports = {
   sameOwnerToken,
   pidAlive,
   writeAtomicRecord,
+  writeOwnerRecordExclusive,
   writeOwnerLock,
   writeOwnerLockExclusive,
   readOwnerLockStateAt,
   readOwnerLockState,
   readOwnerLock,
+  readOwnerRecords,
   ownerLockMetadata,
   sameOwnerLockMetadata,
   currentOwner,

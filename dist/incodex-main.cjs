@@ -122,25 +122,16 @@ async function clearPid(lease, server) {
     }
 }
 async function incognitoAlreadyRunning() {
-    const state = instance.readOwnerLockState(stateRoot());
-    if (state.kind === "missing")
-        return false;
-    // The diagnostic record is not the lease. A malformed record must not turn
-    // a released TCP port into a permanent owner-unavailable preflight.
-    if (state.kind === "invalid")
-        return false;
-    if (state.kind !== "valid")
-        throw new Error(`owner lease is ${state.kind}`);
-    const owner = state.owner;
-    const connected = await instance.connectExistingWithRetry(stateRoot(), instance.ownerToken(owner));
-    if (connected)
-        return true;
-    const latest = instance.readOwnerLockState(stateRoot());
-    if (latest.kind === "missing")
-        return false;
-    // The TCP listener is the lease. A stale diagnostic record is harmless and
-    // will be replaced after the next process binds the fixed target port.
-    if (latest.kind === "valid" && instance.staleOwner(stateRoot()))
+    const records = instance.readOwnerRecords(stateRoot());
+    if (records.some(({ state }) => state.kind === "unverifiable")) {
+        throw new Error("owner lease is unverifiable");
+    }
+    const owners = records.filter(({ state }) => state.kind === "valid").map(({ state }) => state.owner);
+    for (const owner of owners) {
+        if (await instance.connectExistingWithRetry(stateRoot(), instance.ownerToken(owner)))
+            return true;
+    }
+    if (owners.length === 0 || owners.every((owner) => instance.staleOwnerRecord(owner)))
         return false;
     throw new Error("owner lease is active but its raise socket is unavailable");
 }

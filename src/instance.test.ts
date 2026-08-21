@@ -154,6 +154,7 @@ describe("raise listener", () => {
     expect(readFileSync(join(root, LOCK_NAME), "utf8")).toBe(truncated);
     expect(readdirSync(root).some((name) => name.includes("tmp"))).toBe(false);
     expect(clearOwnerLock(root, replacement)).toBe(true);
+    expect(readFileSync(join(root, LOCK_NAME), "utf8")).toBe(truncated);
   });
 
   test("raise preflight skips a stale canonical record for the active sidecar lease", async () => {

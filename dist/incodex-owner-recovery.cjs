@@ -5,7 +5,7 @@ const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
 const core = require("./incodex-owner-core.cjs");
-const { LOCK_NAME, SOCK_NAME, ownerPortFromExec, ownerToken, writeOwnerLockExclusive, readOwnerLockState, readOwnerLock, sameOwnerToken, staleOwnerRecord, ownerLockMetadata, sameOwnerLockMetadata, OwnerLeaseError, lockPath, } = core;
+const { LOCK_NAME, SOCK_NAME, ownerPortFromExec, ownerToken, writeOwnerLockExclusive, writeOwnerRecordExclusive, readOwnerLockState, readOwnerLock, readOwnerLockStateAt, sameOwnerToken, staleOwnerRecord, OwnerLeaseError, lockPath, activeOwnerPath, } = core;
 const activeLeases = new Map();
 const PROTOCOL_MAX_BYTES = 256;
 const PROTOCOL_IDLE_TIMEOUT_MS = 1_000;
@@ -120,23 +120,12 @@ function prepareInitialDiagnostic(stateRoot) {
     if (state.kind === "unverifiable") {
         throw new OwnerLeaseError("OWNER_UNVERIFIABLE", "owner record cannot be verified for replacement", state.owner);
     }
-    const expected = ownerLockMetadata(lockPath(stateRoot));
-    const latest = readOwnerLockState(stateRoot);
-    if (latest.kind !== state.kind || !sameOwnerLockMetadata(expected, ownerLockMetadata(lockPath(stateRoot)))) {
-        throw new OwnerLeaseError("OWNER_RECORD_RACE", "owner record changed during publication");
-    }
-    try {
-        fs.rmSync(lockPath(stateRoot), { force: true });
-    }
-    catch {
-        throw new OwnerLeaseError("OWNER_RECORD_RACE", "owner record could not be removed for publication");
-    }
 }
-function removeOwnedDiagnosticRecord(stateRoot, expectedOwner) {
-    if (!sameOwnerToken(readOwnerLock(stateRoot), expectedOwner))
+function removeOwnedDiagnosticRecord(stateRoot, expectedOwner, diagnosticPath = lockPath(stateRoot)) {
+    if (!sameOwnerToken(readOwnerLockStateAt(diagnosticPath).owner, expectedOwner))
         return false;
     try {
-        fs.rmSync(lockPath(stateRoot), { force: true });
+        fs.rmSync(diagnosticPath, { force: true });
         return true;
     }
     catch {
@@ -224,20 +213,23 @@ async function acquireOwnerLease(stateRoot, owner) {
     }
     await validateDiagnosticBeforePublication(stateRoot, owner, true);
     let lease;
+    let diagnosticPath = lockPath(stateRoot);
     try {
         prepareInitialDiagnostic(stateRoot);
         try {
             writeOwnerLockExclusive(stateRoot, owner);
         }
         catch (error) {
-            if (error?.code === "EEXIST")
-                throw new OwnerLeaseError("OWNER_RECORD_RACE", "another runtime published owner metadata first");
-            throw error;
+            if (error?.code !== "EEXIST")
+                throw error;
+            diagnosticPath = activeOwnerPath(stateRoot, ownerToken(owner));
+            writeOwnerRecordExclusive(diagnosticPath, owner);
         }
         lease = await bindOwnerPort(owner);
+        lease.diagnosticPath = diagnosticPath;
     }
     catch (error) {
-        removeOwnedDiagnosticRecord(stateRoot, owner);
+        removeOwnedDiagnosticRecord(stateRoot, owner, diagnosticPath);
         if (error?.code !== "EADDRINUSE")
             throw error;
         const probe = await probeOwnerPort(owner);
@@ -248,10 +240,8 @@ async function acquireOwnerLease(stateRoot, owner) {
         throw new OwnerLeaseError("OWNER_PORT_UNAVAILABLE", "target port is occupied but does not answer the owner handshake");
     }
     try {
-        await validateDiagnosticBeforePublication(stateRoot, owner);
-        if (!sameOwnerToken(readOwnerLock(stateRoot), owner)) {
-            throw new OwnerLeaseError("OWNER_RECORD_RACE", "owner record changed during kernel lease publication");
-        }
+        if (!lease?.server?.listening)
+            throw new OwnerLeaseError("OWNER_NOT_HELD", "kernel owner listener is not active");
         return owner;
     }
     catch (error) {
@@ -267,7 +257,7 @@ async function acquireOwnerLease(stateRoot, owner) {
 }
 function setRaiseHandler(stateRoot, owner, onRaise) {
     const lease = activeLeases.get(ownerToken(owner));
-    if (!lease || !sameOwnerToken(readOwnerLock(stateRoot), owner)) {
+    if (!lease || !lease.server?.listening) {
         throw new OwnerLeaseError("OWNER_NOT_HELD", "cannot listen without the current owner lease");
     }
     lease.onRaise = onRaise;
@@ -278,7 +268,7 @@ function clearOwnerLock(stateRoot, expectedOwner) {
     const lease = activeLeases.get(token);
     if (!lease)
         return false;
-    if (!removeOwnedDiagnosticRecord(stateRoot, expectedOwner))
+    if (!removeOwnedDiagnosticRecord(stateRoot, expectedOwner, lease.diagnosticPath))
         return false;
     activeLeases.delete(token);
     try {
@@ -290,7 +280,7 @@ function clearOwnerLock(stateRoot, expectedOwner) {
 async function releaseOwnerLease(stateRoot, expectedOwner) {
     const token = ownerToken(expectedOwner);
     const lease = activeLeases.get(token);
-    if (!lease || !removeOwnedDiagnosticRecord(stateRoot, expectedOwner))
+    if (!lease || !removeOwnedDiagnosticRecord(stateRoot, expectedOwner, lease.diagnosticPath))
         return false;
     activeLeases.delete(token);
     await closeLeaseServer(lease.server);

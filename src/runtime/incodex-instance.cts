@@ -19,8 +19,10 @@ const {
   writeOwnerLockExclusive,
   readOwnerLockState,
   readOwnerLock,
+  readOwnerRecords,
   currentOwner,
   staleOwner,
+  staleOwnerRecord,
   OwnerLeaseError,
   ownsOwnerLease,
 } = core;
@@ -31,14 +33,7 @@ function sockPath(stateRoot) {
   return path.join(stateRoot, SOCK_NAME);
 }
 
-function connectExisting(stateRoot, timeoutMs = 400, token = "") {
-  if (typeof timeoutMs !== "number") {
-    token = timeoutMs;
-    timeoutMs = 400;
-  }
-  const owner = readOwnerLock(stateRoot);
-  if (!owner) return Promise.resolve(false);
-  const expectedToken = token || ownerToken(owner);
+function connectToOwner(owner, expectedToken, timeoutMs) {
   return new Promise((resolve) => {
     const socket = net.connect({ host: "127.0.0.1", port: ownerPortFromExec(owner.execPath) });
     let done = false;
@@ -72,6 +67,21 @@ function connectExisting(stateRoot, timeoutMs = 400, token = "") {
     socket.once("error", () => finish(false));
     socket.once("timeout", () => finish(false));
   });
+}
+
+async function connectExisting(stateRoot, timeoutMs = 400, token = "") {
+  if (typeof timeoutMs !== "number") {
+    token = timeoutMs;
+    timeoutMs = 400;
+  }
+  const records = readOwnerRecords(stateRoot).filter(({ state }) => state.kind === "valid");
+  const candidates = token
+    ? records.filter(({ state }) => ownerToken(state.owner) === token)
+    : records;
+  for (const { state } of candidates) {
+    if (await connectToOwner(state.owner, token || ownerToken(state.owner), timeoutMs)) return true;
+  }
+  return false;
 }
 
 async function connectExistingWithRetry(stateRoot, token, options = {}) {
@@ -114,10 +124,12 @@ if (typeof module !== "undefined") module.exports = {
   writeOwnerLockExclusive,
   readOwnerLockState,
   readOwnerLock,
+  readOwnerRecords,
   clearOwnerLock,
   releaseOwnerLease,
   currentOwner,
   staleOwner,
+  staleOwnerRecord,
   OwnerLeaseError,
   ownsOwnerLease,
   acquireOwnerLease,
@@ -141,10 +153,12 @@ export {
   writeOwnerLockExclusive,
   readOwnerLockState,
   readOwnerLock,
+  readOwnerRecords,
   clearOwnerLock,
   releaseOwnerLease,
   currentOwner,
   staleOwner,
+  staleOwnerRecord,
   OwnerLeaseError,
   ownsOwnerLease,
   acquireOwnerLease,

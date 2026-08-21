@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.acquireOwnerLease = exports.ownsOwnerLease = exports.OwnerLeaseError = exports.staleOwner = exports.currentOwner = exports.releaseOwnerLease = exports.clearOwnerLock = exports.readOwnerLock = exports.readOwnerLockState = exports.writeOwnerLockExclusive = exports.writeOwnerLock = exports.ownerMatchesLive = exports.ownerToken = exports.processIdentity = exports.ownerPortFromExec = exports.targetStateDir = exports.targetIdFromExec = exports.SOCK_NAME = exports.LOCK_NAME = void 0;
+exports.acquireOwnerLease = exports.ownsOwnerLease = exports.OwnerLeaseError = exports.staleOwnerRecord = exports.staleOwner = exports.currentOwner = exports.releaseOwnerLease = exports.clearOwnerLock = exports.readOwnerRecords = exports.readOwnerLock = exports.readOwnerLockState = exports.writeOwnerLockExclusive = exports.writeOwnerLock = exports.ownerMatchesLive = exports.ownerToken = exports.processIdentity = exports.ownerPortFromExec = exports.targetStateDir = exports.targetIdFromExec = exports.SOCK_NAME = exports.LOCK_NAME = void 0;
 exports.sockPath = sockPath;
 exports.connectExisting = connectExisting;
 exports.connectExistingWithRetry = connectExistingWithRetry;
@@ -12,7 +12,7 @@ const net = require("node:net");
 const path = require("node:path");
 const core = require("./incodex-owner-core.cjs");
 const recovery = require("./incodex-owner-recovery.cjs");
-const { LOCK_NAME, SOCK_NAME, targetIdFromExec, targetStateDir, ownerPortFromExec, ownerToken, ownerMatchesLive, writeOwnerLock, writeOwnerLockExclusive, readOwnerLockState, readOwnerLock, currentOwner, staleOwner, OwnerLeaseError, ownsOwnerLease, } = core;
+const { LOCK_NAME, SOCK_NAME, targetIdFromExec, targetStateDir, ownerPortFromExec, ownerToken, ownerMatchesLive, writeOwnerLock, writeOwnerLockExclusive, readOwnerLockState, readOwnerLock, readOwnerRecords, currentOwner, staleOwner, staleOwnerRecord, OwnerLeaseError, ownsOwnerLease, } = core;
 exports.LOCK_NAME = LOCK_NAME;
 exports.SOCK_NAME = SOCK_NAME;
 exports.targetIdFromExec = targetIdFromExec;
@@ -24,8 +24,10 @@ exports.writeOwnerLock = writeOwnerLock;
 exports.writeOwnerLockExclusive = writeOwnerLockExclusive;
 exports.readOwnerLockState = readOwnerLockState;
 exports.readOwnerLock = readOwnerLock;
+exports.readOwnerRecords = readOwnerRecords;
 exports.currentOwner = currentOwner;
 exports.staleOwner = staleOwner;
+exports.staleOwnerRecord = staleOwnerRecord;
 exports.OwnerLeaseError = OwnerLeaseError;
 exports.ownsOwnerLease = ownsOwnerLease;
 const { clearOwnerLock, releaseOwnerLease, acquireOwnerLease, setRaiseHandler } = recovery;
@@ -37,15 +39,7 @@ exports.processIdentity = processIdentity;
 function sockPath(stateRoot) {
     return path.join(stateRoot, SOCK_NAME);
 }
-function connectExisting(stateRoot, timeoutMs = 400, token = "") {
-    if (typeof timeoutMs !== "number") {
-        token = timeoutMs;
-        timeoutMs = 400;
-    }
-    const owner = readOwnerLock(stateRoot);
-    if (!owner)
-        return Promise.resolve(false);
-    const expectedToken = token || ownerToken(owner);
+function connectToOwner(owner, expectedToken, timeoutMs) {
     return new Promise((resolve) => {
         const socket = net.connect({ host: "127.0.0.1", port: ownerPortFromExec(owner.execPath) });
         let done = false;
@@ -83,6 +77,21 @@ function connectExisting(stateRoot, timeoutMs = 400, token = "") {
         socket.once("error", () => finish(false));
         socket.once("timeout", () => finish(false));
     });
+}
+async function connectExisting(stateRoot, timeoutMs = 400, token = "") {
+    if (typeof timeoutMs !== "number") {
+        token = timeoutMs;
+        timeoutMs = 400;
+    }
+    const records = readOwnerRecords(stateRoot).filter(({ state }) => state.kind === "valid");
+    const candidates = token
+        ? records.filter(({ state }) => ownerToken(state.owner) === token)
+        : records;
+    for (const { state } of candidates) {
+        if (await connectToOwner(state.owner, token || ownerToken(state.owner), timeoutMs))
+            return true;
+    }
+    return false;
 }
 async function connectExistingWithRetry(stateRoot, token, options = {}) {
     const attempts = options.attempts ?? 5;
@@ -126,10 +135,12 @@ if (typeof module !== "undefined")
         writeOwnerLockExclusive,
         readOwnerLockState,
         readOwnerLock,
+        readOwnerRecords,
         clearOwnerLock,
         releaseOwnerLease,
         currentOwner,
         staleOwner,
+        staleOwnerRecord,
         OwnerLeaseError,
         ownsOwnerLease,
         acquireOwnerLease,
