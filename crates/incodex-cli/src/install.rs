@@ -256,13 +256,32 @@ fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<Comma
     if asar.exists() {
         if let Ok(archive) = Archive::open(&asar) {
             if let Some(install_id) = current_install_id(app, root, &archive) {
-                return Ok(CommandResult {
-                    skipped: true,
-                    install_id: Some(install_id),
-                    runtime_version: Some(published.version),
-                    app: app.display().to_string(),
-                    warning: None,
-                });
+                // The initial classification is only a hint.  Re-open and
+                // reclassify while holding the same target lock mutation
+                // uses; otherwise an already-current fast path can bypass a
+                // concurrent install/uninstall operation.
+                let still_current = {
+                    let _lock = acquire_target_lock(
+                        root,
+                        app,
+                        "install-recheck",
+                        Some(&install_id),
+                    )?;
+                    Archive::open(&asar)
+                        .ok()
+                        .and_then(|latest| current_install_id(app, root, &latest))
+                        .as_deref()
+                        == Some(&install_id)
+                };
+                if still_current {
+                    return Ok(CommandResult {
+                        skipped: true,
+                        install_id: Some(install_id),
+                        runtime_version: Some(published.version),
+                        app: app.display().to_string(),
+                        warning: None,
+                    });
+                }
             }
         }
     }
