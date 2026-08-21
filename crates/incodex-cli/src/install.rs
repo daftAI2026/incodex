@@ -12,8 +12,8 @@ use incodex_macos::{
 };
 use incodex_runtime_bundle::{loader_source, publish, runtime_version};
 use incodex_transaction::{
-    journal_v2, migrate_legacy_committed, recover_with, restore_committed, Engine, Recovery,
-    TxError,
+    journal_v2, migrate_legacy_committed, recover_with, restore_committed,
+    validate_backup_snapshot, validate_committed_live_snapshot, Engine, Recovery, TxError,
 };
 
 use crate::parse::ParsedCli;
@@ -237,24 +237,43 @@ fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<Comma
     if !app.exists() {
         return Err(format!("Codex app not found: {}", app.display()));
     }
+    let asar = app.join(ASAR_REL);
+    let existing = inspect_existing_install(app, root, &asar)?;
+    if existing.is_none() {
+        ensure_official_target_is_verified(app)?;
+    }
     progress.stage("Publishing Runtime");
     let published = publish(root)?;
-    let asar = app.join(ASAR_REL);
-    if asar.exists() {
-        if let Ok(archive) = Archive::open(&asar) {
-            if let Some(install_id) = current_install_id(app, root, &archive) {
-                return Ok(CommandResult {
-                    skipped: true,
-                    install_id: Some(install_id),
-                    runtime_version: Some(published.version),
-                    app: app.display().to_string(),
-                    warning: None,
-                });
+    if let Some(install_id) = inspect_existing_install(app, root, &asar)? {
+        return Ok(CommandResult {
+            skipped: true,
+            install_id: Some(install_id),
+            runtime_version: Some(published.version),
+            app: app.display().to_string(),
+            warning: None,
+        });
+    }
+    if let Some(archive) = Archive::open(&asar).ok() {
+        let has_loader = archive.extract(LOADER_NAME).is_ok();
+        if let Ok(package) = archive.read_package_main() {
+            if has_loader || package.already_patched || package.install_id.is_some() {
+                return Err(unbound_patch_error());
             }
+        } else if has_loader {
+            return Err(unbound_patch_error());
         }
     }
     let expected_plist = read_plist_info(app);
-    let mut tx = Engine::begin(root, app, "install")?;
+    let mut tx = begin_verified_transaction(root, app, |locked_app| {
+        let locked_asar = locked_app.join(ASAR_REL);
+        if inspect_existing_install(locked_app, root, &locked_asar)?.is_some() {
+            return Err(
+                "live app changed into an existing Incodex installation after preflight; refusing to snapshot it"
+                    .into(),
+            );
+        }
+        ensure_official_target_is_verified(locked_app)
+    })?;
     let install_id = tx.install_id().to_string();
     let original = root
         .join("transactions")
@@ -262,8 +281,7 @@ fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<Comma
         .join("original")
         .join("ChatGPT.app");
     progress.stage("Backing up original app");
-    ditto(app, &original)?;
-    tx.mark_backup_committed()?;
+    snapshot_original(&mut tx, app, &original)?;
     let staged = root
         .join("scratch")
         .join(format!("ChatGPT.app.staged-{install_id}"));
@@ -356,9 +374,9 @@ fn uninstall_app(
 fn verify_restored_app(app: &Path, official_target: bool) -> Result<(), String> {
     let archive = Archive::open(app.join(ASAR_REL))
         .map_err(|error| format!("restored app ASAR could not be inspected: {error}"))?;
-    let package = archive
-        .read_package_main()
-        .map_err(|error| format!("restored app package metadata could not be inspected: {error}"))?;
+    let package = archive.read_package_main().map_err(|error| {
+        format!("restored app package metadata could not be inspected: {error}")
+    })?;
     if package.already_patched || package.install_id.is_some() {
         return Err("restored app still contains an Incodex marker".into());
     }
@@ -366,13 +384,8 @@ fn verify_restored_app(app: &Path, official_target: bool) -> Result<(), String> 
         return Err("restored app still contains the Incodex loader".into());
     }
     if official_target {
-        verify_original_vendor_bundle(
-            app,
-            Some(OFFICIAL_BUNDLE_IDENTIFIER),
-            None,
-            None,
-        )
-        .map_err(|error| format!("restored official app failed vendor acceptance: {error}"))?;
+        verify_original_vendor_bundle(app, Some(OFFICIAL_BUNDLE_IDENTIFIER), None, None)
+            .map_err(|error| format!("restored official app failed vendor acceptance: {error}"))?;
     }
     Ok(())
 }
@@ -384,7 +397,111 @@ fn current_install_id(app: &Path, root: &Path, archive: &Archive) -> Option<Stri
     installed_install_id(app, root, archive)
 }
 
+fn begin_verified_transaction<F>(
+    root: &Path,
+    app: &Path,
+    validate_locked_target: F,
+) -> Result<Engine, String>
+where
+    F: FnOnce(&Path) -> Result<(), String>,
+{
+    let mut tx = Engine::begin(root, app, "install")?;
+    if let Err(error) = validate_locked_target(tx.target_path()) {
+        return match tx.rollback(&error) {
+            Ok(()) => Err(error),
+            Err(rollback) => Err(format!(
+                "{error}; failed to roll back rejected transaction: {rollback}"
+            )),
+        };
+    }
+    Ok(tx)
+}
+
+fn snapshot_original(tx: &mut Engine, app: &Path, original: &Path) -> Result<(), String> {
+    if let Err(error) = ditto(app, original) {
+        return Err(rollback_snapshot_failure(tx, error));
+    }
+    if let Err(error) = tx.mark_backup_committed() {
+        return Err(rollback_snapshot_failure(tx, error));
+    }
+    Ok(())
+}
+
+fn rollback_snapshot_failure(tx: &mut Engine, error: String) -> String {
+    match tx.abort_discovered_snapshot() {
+        Ok(()) => error,
+        Err(rollback) => format!(
+            "{error}; failed to roll back rejected snapshot transaction: {rollback}"
+        ),
+    }
+}
+
+fn inspect_existing_install(
+    app: &Path,
+    root: &Path,
+    asar: &Path,
+) -> Result<Option<String>, String> {
+    let Ok(archive) = Archive::open(asar) else {
+        return Ok(None);
+    };
+    let has_loader = archive.extract(LOADER_NAME).is_ok();
+    let package = match archive.read_package_main() {
+        Ok(package) => package,
+        Err(_) if has_loader => return Err(unbound_patch_error()),
+        Err(_) => return Ok(None),
+    };
+    if !has_loader && !package.already_patched && package.install_id.is_none() {
+        return Ok(None);
+    }
+    current_install_id(app, root, &archive)
+        .map(Some)
+        .ok_or_else(unbound_patch_error)
+}
+
+fn unbound_patch_error() -> String {
+    "live app contains an Incodex marker or loader without a trusted committed installation record; refusing to create a new original snapshot".into()
+}
+
+fn ensure_official_target_is_verified(app: &Path) -> Result<(), String> {
+    if !is_official_app(app, None) {
+        return Ok(());
+    }
+    let info = read_plist_info(app).ok_or_else(|| {
+        "default target has no readable Info.plist; refusing to snapshot it".to_string()
+    })?;
+    ensure_official_bundle_identifier(&info)?;
+    verify_original_vendor_bundle(
+        app,
+        Some(OFFICIAL_BUNDLE_IDENTIFIER),
+        Some(&info.app_version),
+        Some(&info.app_build),
+    )
+    .map(|_| ())
+    .map_err(|error| format!("default target is not a verified official Codex app: {error}"))
+}
+
+fn ensure_official_bundle_identifier(info: &incodex_macos::PlistInfo) -> Result<(), String> {
+    if info.bundle_identifier == OFFICIAL_BUNDLE_IDENTIFIER {
+        return Ok(());
+    }
+    Err(format!(
+        "default target bundle identifier is not {OFFICIAL_BUNDLE_IDENTIFIER}; refusing to snapshot a foreign bundle"
+    ))
+}
+
 fn installed_install_id(app: &Path, root: &Path, archive: &Archive) -> Option<String> {
+    let install_id = installed_marker_id(app, root, archive)?;
+    if validate_committed_live_snapshot(root, &install_id, app).is_err()
+        || validate_backup_snapshot(root, &install_id).is_err()
+    {
+        return None;
+    }
+    Some(install_id)
+}
+
+/// Read the live marker for uninstall's legacy migration path. The migration
+/// proof performs the stronger backup/live validation before any restore.
+fn installed_marker_id(app: &Path, root: &Path, archive: &Archive) -> Option<String> {
     if !archive.has_only_loader() {
         return None;
     }
@@ -415,7 +532,7 @@ fn installed_install_id(app: &Path, root: &Path, archive: &Archive) -> Option<St
 fn verified_live_install_id(root: &Path, app: &Path) -> Option<String> {
     Archive::open(&app.join(ASAR_REL))
         .ok()
-        .and_then(|archive| installed_install_id(app, root, &archive))
+        .and_then(|archive| installed_marker_id(app, root, &archive))
 }
 
 fn find_committed(root: &Path, app: &Path) -> Result<incodex_transaction::JournalV2, String> {
@@ -477,4 +594,99 @@ fn print_command_result(result: &CommandResult) {
         println!("{}", format_kv("Runtime", version, None));
     }
     println!("{}", format_kv("App", &result.app, None));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_path_foreign_bundle_is_rejected_before_snapshot() {
+        let info = incodex_macos::PlistInfo {
+            bundle_identifier: "com.example.foreign".into(),
+            ..Default::default()
+        };
+        let error = ensure_official_bundle_identifier(&info).unwrap_err();
+        assert!(error.contains("foreign bundle"), "{error}");
+    }
+
+    #[test]
+    fn locked_target_validation_failure_rolls_back_before_original_snapshot() {
+        let sandbox = std::env::temp_dir().join(format!(
+            "incodex-locked-install-validation-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let root = sandbox.join("state");
+        let app = sandbox.join("ChatGPT.app");
+        fs::create_dir_all(&app).unwrap();
+        fs::write(app.join("marker"), "replacement\n").unwrap();
+        let canonical = fs::canonicalize(&app).unwrap();
+
+        let result = begin_verified_transaction(&root, &app, |locked_target| {
+            assert_eq!(locked_target, canonical);
+            Err("locked target validation failed".to_string())
+        });
+
+        assert!(result.is_err());
+        let transaction = fs::read_dir(root.join("transactions"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .into_owned();
+        let journal = journal_v2(&root, &transaction).unwrap();
+        assert_eq!(journal.phase, "ROLLED_BACK");
+        assert!(!root
+            .join("transactions")
+            .join(transaction)
+            .join("original/ChatGPT.app")
+            .exists());
+        fs::remove_dir_all(sandbox).unwrap();
+    }
+
+    #[test]
+    fn target_replacement_after_locked_validation_does_not_leave_a_snapshot() {
+        let sandbox = std::env::temp_dir().join(format!(
+            "incodex-target-replacement-before-snapshot-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let root = sandbox.join("state");
+        let app = sandbox.join("ChatGPT.app");
+        fs::create_dir_all(&app).unwrap();
+        fs::write(app.join("marker"), "original\n").unwrap();
+
+        let mut tx = begin_verified_transaction(&root, &app, |_locked_target| {
+            let moved = sandbox.join("ChatGPT-updater-old.app");
+            fs::rename(&app, &moved).unwrap();
+            fs::create_dir_all(&app).unwrap();
+            fs::write(app.join("marker"), "updater replacement\n").unwrap();
+            Ok(())
+        })
+        .unwrap();
+        let install_id = tx.install_id().to_string();
+        let original = root
+            .join("transactions")
+            .join(&install_id)
+            .join("original/ChatGPT.app");
+
+        let error = snapshot_original(&mut tx, &app, &original).unwrap_err();
+
+        assert!(error.contains("changed"), "{error}");
+        assert_eq!(
+            journal_v2(&root, &install_id).unwrap().phase,
+            "ROLLED_BACK"
+        );
+        assert!(!original.exists());
+        fs::remove_dir_all(sandbox).unwrap();
+    }
 }

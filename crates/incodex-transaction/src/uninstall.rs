@@ -147,7 +147,7 @@ fn begin_uninstall(root: &Path, journal: &JournalV2) -> Result<JournalV2, String
     load_v2(root, &journal.install_id)
 }
 
-fn validate_committed_restore_target(
+pub(crate) fn validate_committed_restore_target(
     root: &Path,
     journal: &JournalV2,
     live: &Path,
