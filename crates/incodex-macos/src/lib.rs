@@ -6,6 +6,7 @@ use std::process::Command;
 
 mod signing;
 mod signing_policy;
+mod entitlements;
 pub use signing::*;
 
 #[derive(Debug, Clone, Default)]

@@ -10,6 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use super::entitlements::add_entitlement_key;
 use super::{read_plist_info, PlistInfo};
 use super::signing_policy::validate_generic_nested_components;
 
@@ -682,20 +683,6 @@ fn strip_unretainable_entitlements(
         return Err("entitlement plist became malformed after filtering".into());
     }
     Ok(next)
-}
-
-fn add_entitlement_key(xml: &str, key: &str) -> Result<String, String> {
-    if xml.contains(&format!("<key>{key}</key>")) {
-        return Ok(xml.to_string());
-    }
-    if !xml.contains("</dict>") {
-        return Err("entitlement plist has no dictionary close".into());
-    }
-    Ok(xml.replacen(
-        "</dict>",
-        &format!("  <key>{key}</key><true/>\n</dict>"),
-        1,
-    ))
 }
 
 fn empty_entitlements_xml() -> String {
