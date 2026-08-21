@@ -2,6 +2,8 @@ pub mod app_bundle;
 pub mod cdp;
 pub mod confirm;
 pub mod diagnose;
+pub(crate) mod diagnose_checks;
+pub(crate) mod diagnose_format;
 pub mod help;
 pub mod install;
 pub mod legacy_proof;
@@ -16,7 +18,8 @@ pub mod version;
 
 use std::path::PathBuf;
 
-use diagnose::{diagnose, diagnosis_json, format_diagnosis, format_status};
+use diagnose::diagnose;
+use diagnose_format::{diagnosis_json, format_diagnosis, format_status};
 use help::{command_help, ROOT_HELP};
 use incodex_core::paths::DEFAULT_APP;
 use parse::{parse_cli, CliCommand};

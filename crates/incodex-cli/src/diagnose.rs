@@ -12,11 +12,17 @@ use incodex_macos::{
     diagnose_spctl, has_hardened_runtime, read_architecture, read_asar_integrity, read_plist_info,
     verify_app,
 };
-use incodex_transaction::{journal_v2, list_interrupted};
+use incodex_transaction::{journal_v2, load_journal, validate_backup_snapshot};
+
+use crate::diagnose_checks::{
+    empty_checks, scan_journals, scan_owner_processes, scan_sessions, CheckResult, CheckStatus,
+    DiagnosticChecks, DiagnosticFinding, JournalRecord,
+};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalRuntimeReport {
+    pub status: CheckStatus,
     pub present: bool,
     pub ok: bool,
     pub version: Option<String>,
@@ -59,6 +65,9 @@ pub struct Diagnosis {
     pub signing: Option<serde_json::Value>,
     pub spctl: Option<serde_json::Value>,
     pub interrupted_transactions: Vec<InterruptedTransaction>,
+    pub journal_records: Vec<JournalRecord>,
+    pub checks: DiagnosticChecks,
+    pub findings: Vec<DiagnosticFinding>,
 }
 
 pub fn diagnose(app_path: &Path) -> Diagnosis {
@@ -77,30 +86,48 @@ pub fn diagnose_with_root(app_path: &Path, root: &Path) -> Diagnosis {
     let package = archive
         .as_ref()
         .and_then(|archive| archive.read_package_main().ok());
-    let external_runtime = inspect_external_runtime(root);
+    let (external_runtime, runtime_check) = inspect_external_runtime(root);
     let runtime_version = package
         .as_ref()
         .filter(|package| package.already_patched)
         .and_then(|_| external_runtime.version.clone());
     let codesign_ok = exists && verify_app(app_path);
     let spctl = exists.then(|| diagnose_spctl(app_path));
-    let backup = package
+    let (backup, backup_check) = match package
         .as_ref()
         .and_then(|package| package.install_id.as_deref())
-        .and_then(|install_id| {
-            inspect_backup(root, app_path, install_id, runtime_version.as_deref())
-        });
-    let signing = backup.as_ref().and_then(|_| {
-        spctl.as_ref().map(|spctl| {
-            serde_json::json!({
-                "verified": codesign_ok,
-                "componentCount": 0,
-                "hardenedRuntimeOk": has_hardened_runtime(app_path),
-                "unretainable": [],
-                "spctl": spctl,
-            })
-        })
-    });
+    {
+        Some(install_id) => inspect_backup(root, app_path, install_id, runtime_version.as_deref()),
+        None => (None, CheckResult::checked(Vec::new())),
+    };
+    let (signing, signing_check) =
+        inspect_signing(backup.as_ref(), spctl.as_ref(), codesign_ok, app_path);
+    let owner_scan = scan_owner_processes(root);
+    let session_scan = scan_sessions(root);
+    let current_install_id = package
+        .as_ref()
+        .and_then(|package| package.install_id.clone());
+    let journal_scan = scan_journals(root, current_install_id.as_deref());
+    let mut checks = empty_checks();
+    checks.process_identity = owner_scan.check;
+    checks.orphan_sessions = session_scan.orphan_check;
+    checks.chromium_residue = session_scan.chromium_check;
+    checks.runtime = runtime_check;
+    checks.backup = backup_check;
+    checks.signing = signing_check;
+    checks.journals = journal_scan.check;
+    let mut findings = Vec::new();
+    for check in [
+        &checks.process_identity,
+        &checks.orphan_sessions,
+        &checks.chromium_residue,
+        &checks.runtime,
+        &checks.backup,
+        &checks.signing,
+        &checks.journals,
+    ] {
+        findings.extend(check.findings.clone());
+    }
     Diagnosis {
         target: app_path.display().to_string(),
         target_id: target_id(app_path),
@@ -132,14 +159,15 @@ pub fn diagnose_with_root(app_path: &Path, root: &Path) -> Diagnosis {
         original_main: package.map(|package| package.main).unwrap_or_default(),
         codesign_ok,
         backup,
-        stale_pid: false,
-        orphan_sessions: Vec::new(),
-        leftover_chromium: Vec::new(),
+        stale_pid: owner_scan.stale_pid,
+        orphan_sessions: session_scan.orphan_sessions,
+        leftover_chromium: session_scan.leftover_chromium,
         asar_loader_only: archive.as_ref().map(Archive::has_only_loader),
         external_runtime,
         signing,
         spctl,
-        interrupted_transactions: list_interrupted(root)
+        interrupted_transactions: journal_scan
+            .interrupted
             .into_iter()
             .map(|(install_id, phase, action)| InterruptedTransaction {
                 install_id,
@@ -147,35 +175,100 @@ pub fn diagnose_with_root(app_path: &Path, root: &Path) -> Diagnosis {
                 action: action.as_str().to_string(),
             })
             .collect(),
+        journal_records: journal_scan.records,
+        checks,
+        findings,
     }
 }
 
-fn inspect_external_runtime(root: &Path) -> ExternalRuntimeReport {
-    let current = root.join(RUNTIME_DIR_NAME).join(RUNTIME_CURRENT_NAME);
+fn inspect_external_runtime(root: &Path) -> (ExternalRuntimeReport, CheckResult) {
+    let runtime_root = root.join(RUNTIME_DIR_NAME);
+    let current = runtime_root.join(RUNTIME_CURRENT_NAME);
+    if is_symlink(&runtime_root) {
+        let error = "runtime root is a symlink".to_string();
+        return (
+            ExternalRuntimeReport {
+                status: CheckStatus::Checked,
+                present: true,
+                ok: false,
+                version: None,
+                release: None,
+                error: Some(error.clone()),
+            },
+            CheckResult::checked(vec![DiagnosticFinding::warning(
+                "runtime.symlink",
+                error,
+                Some(&runtime_root),
+            )]),
+        );
+    }
+    if is_symlink(&current) {
+        let error = "current.json is a symlink".to_string();
+        return (
+            ExternalRuntimeReport {
+                status: CheckStatus::Checked,
+                present: true,
+                ok: false,
+                version: None,
+                release: None,
+                error: Some(error.clone()),
+            },
+            CheckResult::checked(vec![DiagnosticFinding::warning(
+                "runtime.symlink",
+                error,
+                Some(&current),
+            )]),
+        );
+    }
     if !current.exists() {
-        return ExternalRuntimeReport {
+        let report = ExternalRuntimeReport {
+            status: CheckStatus::Checked,
             present: false,
             ok: false,
             version: None,
             release: None,
             error: Some("missing current.json".to_string()),
         };
+        return (
+            report,
+            CheckResult::checked(vec![DiagnosticFinding::info(
+                "runtime.missing",
+                "external Runtime has not been published",
+                Some(&current),
+            )]),
+        );
     }
     match verify_external_runtime(root, &current) {
-        Ok((version, release)) => ExternalRuntimeReport {
-            present: true,
-            ok: true,
-            version: Some(version),
-            release: Some(release),
-            error: None,
-        },
-        Err(error) => ExternalRuntimeReport {
-            present: true,
-            ok: false,
-            version: None,
-            release: None,
-            error: Some(error),
-        },
+        Ok((version, release)) => (
+            ExternalRuntimeReport {
+                status: CheckStatus::Checked,
+                present: true,
+                ok: true,
+                version: Some(version),
+                release: Some(release),
+                error: None,
+            },
+            CheckResult::checked(Vec::new()),
+        ),
+        Err(error) => (
+            ExternalRuntimeReport {
+                status: CheckStatus::Checked,
+                present: true,
+                ok: false,
+                version: None,
+                release: None,
+                error: Some(error.clone()),
+            },
+            CheckResult::checked(vec![DiagnosticFinding::warning(
+                if error_contains_symlink(&error) {
+                    "runtime.symlink"
+                } else {
+                    "runtime.invalid"
+                },
+                error,
+                Some(&current),
+            )]),
+        ),
     }
 }
 
@@ -196,6 +289,7 @@ fn verify_external_runtime(root: &Path, current_path: &Path) -> Result<(String, 
         return Err("runtime release is not a safe relative path".to_string());
     }
     let runtime_root = root.join(RUNTIME_DIR_NAME);
+    reject_symlink(&runtime_root, "runtime root")?;
     let release_dir = runtime_root.join(&release);
     reject_symlink(&release_dir, "runtime release")?;
     let release_real = fs::canonicalize(&release_dir).map_err(|error| error.to_string())?;
@@ -237,13 +331,105 @@ fn verify_external_runtime(root: &Path, current_path: &Path) -> Result<(String, 
     Ok((version, release))
 }
 
+fn inspect_signing(
+    backup: Option<&serde_json::Value>,
+    spctl: Option<&serde_json::Value>,
+    codesign_ok: bool,
+    app_path: &Path,
+) -> (Option<serde_json::Value>, CheckResult) {
+    let Some(spctl) = spctl else {
+        return (
+            None,
+            CheckResult::unknown(
+                "signing.not-checked",
+                "the application does not exist, so nested signing was not inspected",
+            ),
+        );
+    };
+    if backup.is_none() {
+        return (
+            None,
+            CheckResult::unknown(
+                "signing.not-checked",
+                "no verified install backup binds signing diagnostics to this target",
+            ),
+        );
+    }
+    let report = serde_json::json!({
+        "status": "unknown",
+        "verified": codesign_ok,
+        "componentCount": serde_json::Value::Null,
+        "hardenedRuntimeOk": has_hardened_runtime(app_path),
+        "unretainable": serde_json::Value::Null,
+        "spctl": spctl,
+    });
+    (
+        Some(report),
+        CheckResult::unknown(
+            "signing.components-unknown",
+            "nested signing components and entitlement retention were not inspected",
+        ),
+    )
+}
+
 fn inspect_backup(
     root: &Path,
     app_path: &Path,
     install_id: &str,
     runtime_version: Option<&str>,
-) -> Option<serde_json::Value> {
-    let journal = journal_v2(root, install_id).ok()?;
+) -> (Option<serde_json::Value>, CheckResult) {
+    let transactions = root.join("transactions");
+    let transaction = transactions.join(install_id);
+    let journal_path = transaction.join("journal.json");
+    let symlink_path = if is_symlink(&transactions) {
+        Some(transactions)
+    } else if is_symlink(&transaction) {
+        Some(transaction)
+    } else if is_symlink(&journal_path) {
+        Some(journal_path)
+    } else {
+        None
+    };
+    if let Some(path) = symlink_path {
+        let error = format!(
+            "native backup journal path is a symlink: {}",
+            path.display()
+        );
+        return (
+            Some(serde_json::json!({
+                "status": "unknown",
+                "complete": false,
+                "originalExists": false,
+                "runtimeVersion": runtime_version,
+                "error": error,
+            })),
+            CheckResult::unknown(
+                "backup.symlink",
+                "native backup journal path is a symlink and was not inspected",
+            ),
+        );
+    }
+    let journal = match journal_v2(root, install_id) {
+        Ok(journal) => journal,
+        Err(error) => {
+            let legacy = load_journal(install_id, root).is_some();
+            let message = if legacy {
+                "legacy TypeScript journal is visible but not a native backup proof"
+            } else {
+                "native backup journal is missing or malformed"
+            };
+            return (
+                Some(serde_json::json!({
+                    "status": "unknown",
+                    "complete": false,
+                    "originalExists": false,
+                    "error": error,
+                    "legacy": legacy,
+                })),
+                CheckResult::unknown("backup.unverified", message),
+            );
+        }
+    };
     let target = fs::canonicalize(app_path).unwrap_or_else(|_| app_path.to_path_buf());
     let journal_target = fs::canonicalize(&journal.target.real_path)
         .unwrap_or_else(|_| PathBuf::from(&journal.target.real_path));
@@ -251,14 +437,78 @@ fn inspect_backup(
         .join("transactions")
         .join(install_id)
         .join(&journal.paths.original);
-    Some(serde_json::json!({
-        "belongsToTarget": target == journal_target,
-        "complete": journal.phase == "COMMITTED",
-        "originalExists": original.exists(),
-        "runtimeVersion": runtime_version,
-        "originalAsarFileHash": hash_file(&original.join(ASAR_REL)),
-        "patchedAsarFileHash": hash_file(&app_path.join(ASAR_REL)),
-    }))
+    let belongs_to_target = target == journal_target;
+    let complete_phase = journal.phase == "COMMITTED";
+    let original_exists = fs::symlink_metadata(&original)
+        .map(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+        .unwrap_or(false);
+    let mut findings = Vec::new();
+    if !belongs_to_target {
+        findings.push(DiagnosticFinding::warning(
+            "backup.target-mismatch",
+            "backup journal target does not match the inspected application",
+            Some(&original),
+        ));
+    }
+    if !original_exists {
+        findings.push(DiagnosticFinding::warning(
+            "backup.missing",
+            "native original backup is missing",
+            Some(&original),
+        ));
+    }
+    if !complete_phase {
+        findings.push(DiagnosticFinding::warning(
+            "backup.incomplete",
+            format!("native backup journal is in phase {}", journal.phase),
+            Some(&original),
+        ));
+    }
+    let digest_ok = if original_exists {
+        match validate_backup_snapshot(root, install_id) {
+            Ok(()) => true,
+            Err(error) => {
+                findings.push(DiagnosticFinding::warning(
+                    "backup.digest-mismatch",
+                    error,
+                    Some(&original),
+                ));
+                false
+            }
+        }
+    } else {
+        false
+    };
+    let verified = belongs_to_target && complete_phase && original_exists && digest_ok;
+    (
+        Some(serde_json::json!({
+            "status": if verified { "checked" } else { "unknown" },
+            "belongsToTarget": belongs_to_target,
+            "complete": verified,
+            "originalExists": original_exists,
+            "runtimeVersion": runtime_version,
+            "originalAsarFileHash": hash_file(&original.join(ASAR_REL)),
+            "patchedAsarFileHash": hash_file(&app_path.join(ASAR_REL)),
+        })),
+        if verified {
+            CheckResult::checked(findings)
+        } else {
+            CheckResult {
+                status: CheckStatus::Unknown,
+                findings,
+            }
+        },
+    )
+}
+
+fn error_contains_symlink(error: &str) -> bool {
+    error.contains("symlink")
+}
+
+fn is_symlink(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
 }
 
 fn required_string(raw: &serde_json::Value, key: &str) -> Result<String, String> {
@@ -304,284 +554,4 @@ fn hash_file(path: &Path) -> Option<String> {
             .map(|byte| format!("{byte:02x}"))
             .collect(),
     )
-}
-
-pub fn format_status(report: &Diagnosis) -> String {
-    let mut lines = vec![incodex_core::format_step("Status", None)];
-    let app_path = Path::new(&report.target);
-    if !report.exists {
-        lines.push(incodex_core::format_warn(
-            &format!("Codex app not found: {}", app_path.display()),
-            None,
-        ));
-        lines.push(String::new());
-        return lines.join("\n");
-    }
-    lines.push(incodex_core::format_kv("App", &report.target, None));
-    lines.push(incodex_core::format_kv(
-        "Exists",
-        if report.exists { "yes" } else { "no" },
-        None,
-    ));
-    lines.push(incodex_core::format_kv(
-        "Installed",
-        if report.patched { "yes" } else { "no" },
-        None,
-    ));
-    if report.patched {
-        if let Some(loader_only) = report.asar_loader_only {
-            lines.push(incodex_core::format_kv(
-                "Loader",
-                if loader_only {
-                    "asar loader only"
-                } else {
-                    "mixed"
-                },
-                None,
-            ));
-        }
-    }
-    let runtime = if app_path.join(ASAR_REL).exists() {
-        runtime_description(&report)
-    } else {
-        "missing".to_string()
-    };
-    lines.push(incodex_core::format_kv("Runtime", &runtime, None));
-    if report.patched {
-        if let Some(version) = app_version_description(&report) {
-            lines.push(incodex_core::format_kv("Version", &version, None));
-        }
-        if let Some(package) = Archive::open(app_path.join(ASAR_REL))
-            .ok()
-            .and_then(|archive| archive.read_package_main().ok())
-        {
-            if let Some(install_id) = package.install_id {
-                lines.push(incodex_core::format_kv("Install id", &install_id, None));
-            }
-        }
-    }
-    lines.push(incodex_core::format_kv("Target", &report.target_id, None));
-    if !app_path.join(ASAR_REL).exists() {
-        lines.push(incodex_core::format_warn("asar missing", None));
-    } else if report.patched {
-        if !report.original_main.is_empty() {
-            lines.push(incodex_core::format_kv("Main", &report.original_main, None));
-        }
-        lines.push(incodex_core::format_ok(
-            "Incodex is installed. Use doctor for hashes and signing.",
-            None,
-        ));
-    }
-    lines.push(String::new());
-    lines.join("\n")
-}
-
-pub fn format_diagnosis(report: &Diagnosis) -> String {
-    let runtime = if report.external_runtime.ok {
-        format!(
-            "{} {}",
-            report
-                .external_runtime
-                .version
-                .as_deref()
-                .unwrap_or("unknown"),
-            report.external_runtime.release.as_deref().unwrap_or("")
-        )
-        .trim()
-        .to_string()
-    } else if report.external_runtime.present {
-        "invalid".to_string()
-    } else {
-        "missing".to_string()
-    };
-    let backup = match report.backup.as_ref() {
-        Some(backup) if json_bool(backup, "originalExists") && json_bool(backup, "complete") => {
-            "ok"
-        }
-        Some(_) => "incomplete",
-        None => "none",
-    };
-    let loader = match report.asar_loader_only {
-        None => "unknown",
-        Some(true) => "asar only",
-        Some(false) => "mixed",
-    };
-    let app_version = format!(
-        "{} {}",
-        report.app_version.as_deref().unwrap_or("unknown"),
-        report.app_build.as_deref().unwrap_or("")
-    );
-    let mut lines = vec![
-        incodex_core::format_step("App", None),
-        incodex_core::format_kv("Path", &report.target, None),
-        incodex_core::format_kv("Exists", if report.exists { "yes" } else { "no" }, None),
-        incodex_core::format_kv("Installed", if report.patched { "yes" } else { "no" }, None),
-        incodex_core::format_kv(
-            "Bundle",
-            report.bundle_id.as_deref().unwrap_or("unknown"),
-            None,
-        ),
-        incodex_core::format_kv(
-            "Version",
-            app_version.trim(),
-            None,
-        ),
-        incodex_core::format_kv(
-            "Arch",
-            report.architecture.as_deref().unwrap_or("unknown"),
-            None,
-        ),
-        String::new(),
-        incodex_core::format_step("Runtime", None),
-        incodex_core::format_kv(
-            "Version",
-            report.runtime_version.as_deref().unwrap_or("unknown"),
-            None,
-        ),
-        incodex_core::format_kv("External", &runtime, None),
-    ];
-    if let Some(error) = &report.external_runtime.error {
-        lines.push(incodex_core::format_warn(error, None));
-    }
-    let main = if report.original_main.is_empty() {
-        "unknown"
-    } else {
-        report.original_main.as_str()
-    };
-    lines.extend([
-        incodex_core::format_kv("Loader", loader, None),
-        incodex_core::format_kv("Main", main, None),
-        String::new(),
-        incodex_core::format_step("Signing", None),
-        incodex_core::format_kv(
-            "Verify",
-            if report.codesign_ok { "ok" } else { "failed" },
-            None,
-        ),
-    ]);
-    if let Some(signing) = &report.signing {
-        lines.push(incodex_core::format_kv(
-            "Hardened",
-            if json_bool(signing, "hardenedRuntimeOk") {
-                "yes"
-            } else {
-                "no"
-            },
-            None,
-        ));
-        let dropped = signing
-            .get("unretainable")
-            .and_then(serde_json::Value::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(serde_json::Value::as_str)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            })
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| "none".to_string());
-        lines.push(incodex_core::format_kv("Dropped", &dropped, None));
-    }
-    if let Some(spctl) = &report.spctl {
-        lines.push(incodex_core::format_kv(
-            "Gatekeeper",
-            if json_bool(spctl, "accepted") {
-                "accepted"
-            } else {
-                "not accepted (diagnostic)"
-            },
-            None,
-        ));
-    }
-    lines.extend([
-        String::new(),
-        incodex_core::format_step("Backup", None),
-        incodex_core::format_kv("State", backup, None),
-    ]);
-    if let Some(backup) = &report.backup {
-        lines.push(incodex_core::format_kv(
-            "Matches",
-            if json_bool(backup, "belongsToTarget") {
-                "yes"
-            } else {
-                "no"
-            },
-            None,
-        ));
-    }
-    lines.extend([
-        String::new(),
-        incodex_core::format_step("Sessions", None),
-        incodex_core::format_kv("Orphans", &report.orphan_sessions.len().to_string(), None),
-        incodex_core::format_kv(
-            "Chromium",
-            &report.leftover_chromium.len().to_string(),
-            None,
-        ),
-        incodex_core::format_kv(
-            "Stale pid",
-            if report.stale_pid { "yes" } else { "no" },
-            None,
-        ),
-        incodex_core::format_kv(
-            "Journals",
-            &report.interrupted_transactions.len().to_string(),
-            None,
-        ),
-    ]);
-    for item in &report.interrupted_transactions {
-        lines.push(incodex_core::format_kv(
-            "Journal",
-            &format!("{}  {} -> {}", item.install_id, item.phase, item.action),
-            None,
-        ));
-    }
-    if !report.interrupted_transactions.is_empty() {
-        lines.push(incodex_core::format_warn(
-            "Old install journals are leftover. They do not mean the current app is broken.",
-            None,
-        ));
-    }
-    lines.push(String::new());
-    lines.join("\n")
-}
-
-pub fn diagnosis_json(report: &Diagnosis) -> String {
-    format!("{}\n", serde_json::to_string_pretty(report).expect("json"))
-}
-
-fn runtime_description(report: &Diagnosis) -> String {
-    if report.external_runtime.ok {
-        format!(
-            "{} {}",
-            report
-                .external_runtime
-                .version
-                .as_deref()
-                .unwrap_or("unknown"),
-            report.external_runtime.release.as_deref().unwrap_or("")
-        )
-        .trim()
-        .to_string()
-    } else if report.external_runtime.present {
-        "invalid".to_string()
-    } else {
-        "missing".to_string()
-    }
-}
-
-fn app_version_description(report: &Diagnosis) -> Option<String> {
-    report.app_version.as_ref().map(|version| {
-        format!("{} {}", version, report.app_build.as_deref().unwrap_or(""))
-            .trim()
-            .to_string()
-    })
-}
-
-fn json_bool(value: &serde_json::Value, key: &str) -> bool {
-    value
-        .get(key)
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
 }
