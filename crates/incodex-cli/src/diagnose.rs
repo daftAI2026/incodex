@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use crate::legacy_typescript::{load_legacy_ts_v1, LegacyState};
 use incodex_asar::Archive;
 use incodex_core::paths::{user_root, ASAR_REL, RUNTIME_CURRENT_NAME, RUNTIME_DIR_NAME};
-use incodex_core::{canonical::canonical_path, target_id};
+use incodex_core::{canonical::canonical_path, is_official_app, target_id};
 use incodex_macos::{
     diagnose_spctl, has_hardened_runtime, read_architecture, read_asar_integrity, read_plist_info,
     verify_app,
@@ -278,11 +278,32 @@ fn inspect_legacy_backup(root: &Path, app_path: &Path) -> Option<serde_json::Val
     let original_asar_hash = hash_file(&original_app.join(ASAR_REL));
     let patched_asar_hash = hash_file(&app_path.join(ASAR_REL));
     let original_plist_hash = hash_file(&original_app.join("Contents/Info.plist"));
+    let original_info = read_plist_info(&original_app);
+    let original_path_integrity = original_info.as_ref().is_some_and(|info| {
+        [
+            &original_app.join("Contents/Info.plist"),
+            &original_app.join(ASAR_REL),
+            &original_app.join("Contents/MacOS").join(&info.executable),
+        ]
+        .into_iter()
+        .all(|path| reject_symlink(path, "legacy backup").is_ok())
+    });
+    let original_signature = if is_official_app(app_path, None) {
+        crate::legacy_proof::verify_official_vendor_bundle(
+            &original_app,
+            &manifest.bundle_identifier,
+        )
+        .is_ok()
+    } else {
+        verify_app(&original_app)
+    };
     let complete = belongs_to_target
         && original_exists
         && original_asar_hash.as_deref() == Some(manifest.original_asar_file_hash.as_str())
         && patched_asar_hash.as_deref() == Some(manifest.patched_asar_file_hash.as_str())
-        && original_plist_hash.as_deref() == Some(manifest.original_plist_file_hash.as_str());
+        && original_plist_hash.as_deref() == Some(manifest.original_plist_file_hash.as_str())
+        && original_path_integrity
+        && original_signature;
     Some(serde_json::json!({
         "legacy": true,
         "complete": complete,
@@ -291,6 +312,8 @@ fn inspect_legacy_backup(root: &Path, app_path: &Path) -> Option<serde_json::Val
         "originalExists": original_exists,
         "originalAsarFileHash": original_asar_hash,
         "patchedAsarFileHash": patched_asar_hash,
+        "originalPathIntegrity": original_path_integrity,
+        "originalSignatureOk": original_signature,
         "runtimeVersion": manifest.runtime_version,
     }))
 }

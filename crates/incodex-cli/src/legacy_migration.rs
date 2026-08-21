@@ -114,22 +114,21 @@ where
     );
     let mut outgoing_restored = false;
     let mut outgoing_already_restored = false;
-    if journal.recovery_intent.as_deref() == Some("restore-outgoing")
-        && outgoing.as_ref().is_none_or(|path| !path.exists())
-    {
+    if journal.recovery_intent.as_deref() == Some("restore-outgoing") {
         let digest = journal
             .recovery_digest
             .as_deref()
             .ok_or("legacy outgoing restore intent has no digest")?;
+        if outgoing_proof.is_dir() && tree_digest(&outgoing_proof)? != digest {
+            return Err("legacy outgoing proof copy does not match its durable digest".into());
+        }
         if target.exists() && tree_digest(&target)? == digest {
             verify_restore_candidate(root, &target, &target, &journal.install_id)?;
             finalize_bundle_replace(&root.join("legacy-recovery").join(install_id))?;
             outgoing_already_restored = true;
         } else if let Some(outgoing) = &outgoing {
-            if outgoing.exists() && outgoing_proof.is_dir() {
-                return Err("legacy outgoing restore has two competing sources".into());
-            }
-            if !outgoing.exists() && outgoing_proof.is_dir() {
+            if outgoing_proof.is_dir() && (!outgoing.exists() || tree_digest(outgoing)? != digest) {
+                remove_path(outgoing)?;
                 fs::create_dir_all(outgoing.parent().ok_or("legacy outgoing has no parent")?)
                     .map_err(|error| error.to_string())?;
                 ditto(&outgoing_proof, outgoing)?;
@@ -259,6 +258,11 @@ where
             }
         }
     }
+    // Make the restored bundle durable before deleting the alternate restore
+    // sources.  The journal must never outlive both its target and its proof.
+    if target.is_dir() {
+        sync_tree_and_ancestors(&target, target.parent().ok_or("target has no parent")?)?;
+    }
     remove_path(&staged)?;
     if let Some(outgoing) = &outgoing {
         remove_path(outgoing)?;
@@ -266,9 +270,6 @@ where
     remove_path(&outgoing_proof)?;
     finalize_bundle_replace(&root.join("legacy-recovery").join(install_id))?;
     checkpoint("AFTER_RECOVERY_CLEANUP");
-    if target.is_dir() {
-        sync_tree_and_ancestors(&target, target.parent().ok_or("target has no parent")?)?;
-    }
     sync_recovery_mutations(root, &target, &staged, outgoing.as_deref())?;
     let mut rolled_back = journal;
     rolled_back.phase = "ROLLED_BACK".into();
