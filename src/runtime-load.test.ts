@@ -43,6 +43,17 @@ describe("runtime load", () => {
     expect(loader).toContain("current.json");
   });
 
+  test("the loader gates official main on the incognito lease startup", () => {
+    const loader = readFileSync(join(import.meta.dir, "runtime/incodex-loader.cts"), "utf8");
+    const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
+    expect(loader).toContain("const runtime = require(file);");
+    expect(loader).toContain("await runtime.startupGate");
+    expect(loader).toContain('error?.code === "INCODEX_STARTUP_BLOCKED"');
+    expect(loader.indexOf("require(originalMain())")).toBeGreaterThan(loader.indexOf("await loadMain()"));
+    expect(main).toContain("const startupGate = attachElectron();");
+    expect(main).toContain('error.code = "INCODEX_STARTUP_BLOCKED"');
+  });
+
   test("an ordinary incognito click starts a child that reloads the current Runtime", () => {
     const loader = readFileSync(join(import.meta.dir, "runtime/incodex-loader.cts"), "utf8");
     const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
