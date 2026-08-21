@@ -452,7 +452,15 @@ mod tests {
         let app = root.join("ChatGPT.app");
         let mac = app.join("Contents/MacOS");
         fs::create_dir_all(&mac).unwrap();
-        fs::write(mac.join("ChatGPT"), "#!/bin/sh\nexit 0\n").unwrap();
+        let executable = mac.join("ChatGPT");
+        fs::write(&executable, "#!/bin/sh\nexit 0\n").unwrap();
+        let mut permissions = fs::metadata(&executable).unwrap().permissions();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            permissions.set_mode(0o755);
+        }
+        fs::set_permissions(executable, permissions).unwrap();
         app
     }
 
@@ -498,8 +506,9 @@ mod tests {
         fs::create_dir_all(&source).unwrap();
         fs::write(source.join("auth.json"), "{}\n").unwrap();
         let plan = prepare_incognito_open(&app, &user, &source, 1).unwrap();
-        let (_code, cleanup) =
+        let (code, cleanup) =
             wait_and_burn_with(&plan, &user, 0, |_| Ok(0), |_, _| Err("EPERM".into())).unwrap();
+        assert_eq!(code, 2, "retained session must have a distinct lifecycle code");
         assert!(plan.session_root.exists());
         assert_eq!(
             cleanup,
@@ -533,6 +542,30 @@ mod tests {
         .unwrap();
         assert!(!plan.session_root.exists());
         assert!(cleanup.removed());
+    }
+
+    #[test]
+    fn cdp_port_failure_is_not_success() {
+        let root = temp_root();
+        let app = fake_app(&root);
+        let user = root.join("home");
+        let source = root.join("codex");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("auth.json"), "{}\n").unwrap();
+        let mut plan = prepare_incognito_open(&app, &user, &source, 1).unwrap();
+        plan.debug_port = 0;
+        let code = spawn_plan(&plan).unwrap();
+        assert_eq!(code, 3, "missing CDP port must be a UI acceptance failure");
+        burn_session_home(
+            &plan.session_root,
+            &BurnExpected {
+                user_root: &user,
+                session_id: Some(&plan.session_id),
+                ino: None,
+                dev: None,
+            },
+        )
+        .unwrap();
     }
 
     #[test]
