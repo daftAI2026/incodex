@@ -462,6 +462,40 @@ fn pre_swap_recovery_keeps_outgoing_when_target_reappears_foreign() {
 }
 
 #[test]
+fn upgraded_legacy_record_rejects_a_foreign_modified_clean_app() {
+    let fixture = Fixture::create();
+    let state = load_legacy_ts_v1(&fixture.root, &fixture.app).unwrap().unwrap();
+    migrate_legacy_ts_v1(&fixture.root, prove_legacy_ts_v1(&fixture.root, state).unwrap()).unwrap();
+    fs::write(fixture.app_asar(), b"foreign modified").unwrap();
+    sign_app(&fixture.app).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_incodex"))
+        .args(["install", "--yes", "--app", fixture.app.to_str().unwrap()])
+        .env("HOME", fixture.root.parent().unwrap())
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+}
+
+#[test]
+fn recovery_rejects_a_symlinked_legacy_recovery_root() {
+    let fixture = Fixture::create();
+    let outside = fixture.root.parent().unwrap().join("legacy-recovery-outside");
+    fs::create_dir_all(&outside).unwrap();
+    let recovery_root = fixture.root.join("legacy-recovery");
+    symlink(&outside, &recovery_root).unwrap();
+    fixture.set_phase("SWAPPED");
+    let output = Command::new(env!("CARGO_BIN_EXE_incodex"))
+        .args(["recover", "--transaction", INSTALL_ID])
+        .env("HOME", fixture.root.parent().unwrap())
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(fs::read_dir(&outside).unwrap().next().is_none());
+}
+
+#[test]
 fn rust_install_adopts_legacy_state_without_using_patched_live_as_original() {
     let fixture = Fixture::create();
     let output = Command::new(env!("CARGO_BIN_EXE_incodex"))
