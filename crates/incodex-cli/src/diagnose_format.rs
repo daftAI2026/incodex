@@ -152,7 +152,11 @@ pub fn format_diagnosis(report: &Diagnosis) -> String {
         incodex_core::format_step("Signing", None),
         incodex_core::format_kv(
             "Verify",
-            if report.codesign_ok { "ok" } else { "failed" },
+            match report.codesign_ok {
+                Some(true) => "ok",
+                Some(false) => "failed",
+                None => "unknown",
+            },
             None,
         ),
         incodex_core::format_kv("Nested", check_status(&report.checks.signing), None),

@@ -60,7 +60,7 @@ pub struct Diagnosis {
     pub plist_integrity_hash: Option<String>,
     pub runtime_version: Option<String>,
     pub original_main: String,
-    pub codesign_ok: bool,
+    pub codesign_ok: Option<bool>,
     pub backup: Option<serde_json::Value>,
     pub stale_pid: bool,
     pub orphan_sessions: Vec<String>,
@@ -121,7 +121,7 @@ pub fn diagnose_with_root_mode(app_path: &Path, root: &Path, mode: DiagnosisMode
     let official_target = is_official_app(app_path, None);
     let (codesign_ok, signing, spctl, signing_check) = if !exists {
         (
-            false,
+            Some(false),
             None,
             None,
             CheckResult::unknown(
@@ -132,7 +132,7 @@ pub fn diagnose_with_root_mode(app_path: &Path, root: &Path, mode: DiagnosisMode
     } else {
         match mode {
             DiagnosisMode::Status => (
-                false,
+                None,
                 Some(not_requested_signing(None)),
                 Some(not_requested_spctl()),
                 CheckResult::unknown(
@@ -148,7 +148,7 @@ pub fn diagnose_with_root_mode(app_path: &Path, root: &Path, mode: DiagnosisMode
                         .as_ref()
                         .is_some_and(|plist| !plist.executable.trim().is_empty());
                 (
-                    codesign_ok,
+                    Some(codesign_ok),
                     signing,
                     Some(not_requested_spctl()),
                     signing_check,
@@ -177,7 +177,7 @@ pub fn diagnose_with_root_mode(app_path: &Path, root: &Path, mode: DiagnosisMode
                     patched,
                     official_target,
                 );
-                (codesign_ok, signing, spctl, signing_check)
+                (Some(codesign_ok), signing, spctl, signing_check)
             }
         }
     };
