@@ -5,7 +5,9 @@
 //! so a future migration can validate that state before touching the target.
 
 use std::fs;
-use std::os::unix::fs::MetadataExt;
+use std::io::Write;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::os::unix::io::AsRawFd;
 use std::path::{Component, Path, PathBuf};
 
 use serde::de::{self, Deserializer};
@@ -286,7 +288,22 @@ pub fn write_legacy_journal(root: &Path, journal: &TransactionJournal) -> Result
         "{}\n",
         serde_json::to_string_pretty(journal).map_err(|error| error.to_string())?
     );
-    fs::write(&temporary, body).map_err(|error| error.to_string())?;
+    let mut options = fs::OpenOptions::new();
+    options
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW);
+    let mut file = options
+        .open(&temporary)
+        .map_err(|error| error.to_string())?;
+    file.write_all(body.as_bytes())
+        .map_err(|error| error.to_string())?;
+    file.sync_data().map_err(|error| error.to_string())?;
+    unsafe {
+        libc::fchmod(file.as_raw_fd(), 0o600);
+    }
+    drop(file);
     fs::rename(temporary, path).map_err(|error| error.to_string())
 }
 
