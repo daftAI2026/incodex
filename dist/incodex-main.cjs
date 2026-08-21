@@ -335,6 +335,49 @@ const launchHolder = { current: null };
 function launchIncognito() {
     return instance.singleFlight(launchHolder, launchIncognitoOnce);
 }
+function prepareIncognitoSession(options = {}) {
+    const { userRoot = USER_ROOT, sourceHomePath = sourceHome(), appTarget = targetId(), pid = process.pid, createSessionHome = safeHome.createSessionHome, copySettings = safeHome.copySettings, burnSessionHome = safeHome.burnSessionHome, log = logLaunch, } = options;
+    let session;
+    try {
+        session = createSessionHome(userRoot, {
+            targetId: appTarget,
+            pid,
+            sourceHome: sourceHomePath,
+        });
+        copySettings(session.home, sourceHomePath);
+        return { ok: true, session };
+    }
+    catch (error) {
+        if (session) {
+            try {
+                burnSessionHome(session.root, {
+                    userRoot,
+                    sessionId: session.sessionId,
+                    ino: session.ino,
+                    dev: session.dev,
+                });
+            }
+            catch (cleanupError) {
+                try {
+                    log("prepare-burn-refused", {
+                        error: String(cleanupError),
+                        sessionId: session.sessionId,
+                    });
+                }
+                catch {
+                    /* Cleanup logging must not replace the preparation failure. */
+                }
+            }
+        }
+        try {
+            log("prepare-failed", { error: String(error) });
+        }
+        catch {
+            /* Logging is best effort; the caller still receives prepare-failed. */
+        }
+        return { ok: false, reason: "prepare-failed" };
+    }
+}
 async function launchIncognitoOnce() {
     let alreadyRunning;
     try {
@@ -355,19 +398,10 @@ async function launchIncognitoOnce() {
     catch (error) {
         logLaunch("janitor-failed", { error: String(error) });
     }
-    let session;
-    try {
-        session = safeHome.createSessionHome(USER_ROOT, {
-            targetId: appTarget,
-            pid: process.pid,
-            sourceHome: sourceHome(),
-        });
-        safeHome.copySettings(session.home, sourceHome());
-    }
-    catch (error) {
-        logLaunch("prepare-failed", { error: String(error) });
-        return Promise.resolve({ ok: false, reason: "prepare-failed" });
-    }
+    const prepared = prepareIncognitoSession();
+    if (!prepared.ok)
+        return Promise.resolve(prepared);
+    const { session } = prepared;
     const bin = process.execPath;
     if (!bin) {
         try {
@@ -707,7 +741,7 @@ async function attachElectron() {
 }
 const startupGate = attachElectron();
 if (typeof module !== "undefined")
-    module.exports = { startupGate };
+    module.exports = { startupGate, prepareIncognitoSession };
 startupGate.catch((error) => {
     console.error("[incodex] main attach failed", error);
 });
