@@ -434,6 +434,48 @@ fn recovery_keeps_outgoing_proof_when_target_changes_after_restore_rename() {
 }
 
 #[test]
+fn recovery_reconciles_a_mutated_outgoing_with_the_sealed_proof_on_retry() {
+    let fixture = Fixture::create();
+    let outgoing = fixture
+        .root
+        .join("transactions")
+        .join(INSTALL_ID)
+        .join("outgoing/ChatGPT.app");
+    ditto(&fixture.original_app, &outgoing).unwrap();
+    fs::remove_dir_all(&fixture.original_app).unwrap();
+    fixture.set_phase("SWAPPED");
+
+    let first = recover_legacy_ts_v1_with_checkpoint(&fixture.root, INSTALL_ID, |checkpoint| {
+        if checkpoint == "AFTER_RESTORE_RENAME" {
+            fs::write(
+                fixture.app.join("Contents/Info.plist"),
+                b"changed after rename",
+            )
+            .unwrap();
+        }
+    });
+    assert!(first.is_err());
+    assert!(outgoing.exists());
+
+    let second = recover_legacy_ts_v1(&fixture.root, INSTALL_ID);
+    assert!(
+        second.is_ok(),
+        "sealed proof should win on retry: {second:?}"
+    );
+    assert_eq!(
+        fs::read(fixture.app_asar()).unwrap(),
+        fixture.original_bytes
+    );
+    assert!(!outgoing.exists());
+    assert!(!fixture
+        .root
+        .join("legacy-recovery")
+        .join(INSTALL_ID)
+        .join("outgoing-proof/ChatGPT.app")
+        .exists());
+}
+
+#[test]
 fn pre_swap_recovery_keeps_outgoing_source_when_it_changes_after_restore_intent() {
     let fixture = Fixture::create();
     let outgoing = fixture
@@ -484,6 +526,20 @@ fn status_reports_actual_legacy_backup_hash_and_incomplete_state() {
     assert_eq!(backup["complete"], false);
     assert_eq!(backup["originalExists"], true);
     assert_eq!(backup["originalAsarFileHash"], expected);
+}
+
+#[test]
+fn status_rejects_a_legacy_backup_with_a_modified_executable() {
+    let fixture = Fixture::create();
+    fs::OpenOptions::new()
+        .append(true)
+        .open(fixture.original_app.join("Contents/MacOS/ChatGPT"))
+        .unwrap()
+        .write_all(b"tampered executable")
+        .unwrap();
+
+    let report = incodex_cli::diagnose::diagnose_with_root(&fixture.app, &fixture.root);
+    assert_eq!(report.backup.unwrap()["complete"], false);
 }
 
 #[test]
