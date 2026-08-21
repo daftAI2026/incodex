@@ -537,8 +537,14 @@ mod tests {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let port = listener.local_addr().unwrap().port();
         let server = thread::spawn(move || {
-            let (_stream, _) = listener.accept().unwrap();
-            thread::sleep(Duration::from_millis(2_500));
+            let (mut stream, _) = listener.accept().unwrap();
+            let response = b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: invalid\r\n\r\n";
+            for byte in response {
+                if stream.write_all(&[*byte]).is_err() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(60));
+            }
         });
 
         let started = Instant::now();
@@ -548,6 +554,38 @@ mod tests {
         assert!(
             started.elapsed() < Duration::from_millis(2_500),
             "CDP WebSocket handshake was not bounded"
+        );
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn cdp_command_read_has_an_overall_deadline_for_a_fragmented_frame() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut socket = tungstenite::accept(stream).unwrap();
+            let payload = br#"{"id":1,"result":{"value":"0123456789abcdef"}}"#;
+            let mut frame = vec![0x81, payload.len() as u8];
+            frame.extend_from_slice(payload);
+            let raw = socket.get_mut();
+            for byte in frame {
+                if raw.write_all(&[byte]).is_err() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(70));
+            }
+        });
+
+        let (mut socket, _) =
+            connect_cdp_websocket(&format!("ws://127.0.0.1:{port}/devtools/page/test"), port)
+                .unwrap();
+        let started = Instant::now();
+        let result = send_cdp(&mut socket, 1, "Runtime.evaluate", json!({}));
+        assert!(result.is_err(), "a slow fragmented response must time out");
+        assert!(
+            started.elapsed() < Duration::from_millis(2_500),
+            "fragmented CDP command exceeded its overall deadline"
         );
         server.join().unwrap();
     }
