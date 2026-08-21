@@ -4,6 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use support::tty;
 
@@ -57,4 +58,33 @@ fn concurrent_pty_harnesses_report_every_child() {
         }
     });
     assert_eq!(probe.max_concurrency(), 1);
+}
+
+#[test]
+fn pty_harness_terminates_a_child_when_the_prompt_never_arrives() {
+    let home = scratch();
+    let started = Instant::now();
+    let result = tty::run_with_timeout(
+        "/bin/sh",
+        &["-c"],
+        &["read ignored"],
+        &home,
+        "prompt that never arrives",
+        "q",
+        Duration::from_millis(100),
+    );
+
+    assert_eq!(
+        result.status, 124,
+        "PTY timeout was not reported: {result:?}"
+    );
+    assert!(
+        result.stderr.contains("timed out"),
+        "PTY timeout lacked diagnostics: {result:?}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "PTY timeout waited for an unreaped child: {:?}",
+        started.elapsed()
+    );
 }
