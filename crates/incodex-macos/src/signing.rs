@@ -333,9 +333,10 @@ pub fn has_hardened_runtime(app: &Path) -> bool {
 
 /// 使用共享 entitlement/component policy 完成 ad-hoc 签名。
 pub fn sign_app(app: &Path) -> Result<(), String> {
-    let inventory = inspect_signing_inventory(app)?;
-    let plan = plan_adhoc_entitlements(&inventory.entitlements)?;
-    let preserve = collect_vendor_helper_roots_from_inventory(&inventory)?;
+    let before = read_entitlements(app)?;
+    let plan = plan_adhoc_entitlements(&before)?;
+    let outer = inspect_component(app)?;
+    let preserve = collect_vendor_helper_roots_for_outer(app, &outer)?;
     let stash_root = if preserve.is_empty() {
         None
     } else {
@@ -390,20 +391,26 @@ pub fn sign_app(app: &Path) -> Result<(), String> {
 
 /// 返回当前 app 中需要保持 vendor identity 的顶层 sidecar。
 pub fn collect_vendor_helper_roots(app: &Path) -> Result<Vec<PathBuf>, String> {
-    let inventory = inspect_signing_inventory(app)?;
-    collect_vendor_helper_roots_from_inventory(&inventory)
+    let outer = inspect_component(app)?;
+    collect_vendor_helper_roots_for_outer(app, &outer)
 }
 
-fn collect_vendor_helper_roots_from_inventory(
-    inventory: &SigningInventory,
+fn collect_vendor_helper_roots_for_outer(
+    app: &Path,
+    outer: &SignedComponent,
 ) -> Result<Vec<PathBuf>, String> {
-    if inventory.outer.kind == SignatureKind::Other {
-        validate_generic_signing_inventory(inventory)?;
+    let components = inspect_nested_components(app)?;
+    let generic_outer = outer.kind == SignatureKind::Other
+        && outer.identifier.is_some()
+        && outer.team_identifier.is_some()
+        && !outer.authorities.is_empty()
+        && outer.verified;
+    if generic_outer {
+        validate_generic_nested_components(&components)?;
     } else {
-        validate_signing_inventory(inventory)?;
+        validate_nested_components(&components)?;
     }
-    let mut vendors = inventory
-        .nested
+    let mut vendors = components
         .iter()
         .filter(|component| component.kind == SignatureKind::Vendor)
         .map(|component| component.path.clone())
