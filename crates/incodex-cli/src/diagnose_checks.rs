@@ -6,10 +6,13 @@ use serde::Serialize;
 
 #[path = "diagnose_fs.rs"]
 mod diagnose_fs;
+#[path = "diagnose_sessions.rs"]
+mod diagnose_sessions;
 use diagnose_fs::{
-    basename, file_name, file_name_starts, is_directory, is_symlink, live_process_identity,
-    looks_like_uuid, pid_alive, read_directory,
+    basename, file_name, is_directory, is_symlink, live_process_identity, looks_like_uuid,
+    pid_alive, read_directory,
 };
+pub use diagnose_sessions::scan_sessions;
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -97,14 +100,6 @@ pub struct SessionScan {
     pub chromium_check: CheckResult,
 }
 
-fn session_symlink_finding(path: &Path) -> DiagnosticFinding {
-    DiagnosticFinding::warning(
-        "session.symlink",
-        "session root is a symlink and was not inspected",
-        Some(path),
-    )
-}
-
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct JournalRecord {
@@ -144,6 +139,19 @@ pub fn empty_checks() -> DiagnosticChecks {
 
 pub fn scan_owner_processes(root: &Path) -> ProcessScan {
     let targets = root.join("targets");
+    if is_symlink(&targets) {
+        return ProcessScan {
+            stale_pid: false,
+            check: CheckResult {
+                status: CheckStatus::Unknown,
+                findings: vec![DiagnosticFinding::warning(
+                    "owner.targets-symlink",
+                    "Runtime targets root is a symlink and was not inspected",
+                    Some(&targets),
+                )],
+            },
+        };
+    }
     let entries = match read_directory(&targets) {
         Ok(Some(entries)) => entries,
         Ok(None) => {
@@ -309,277 +317,22 @@ pub fn scan_owner_processes(root: &Path) -> ProcessScan {
     }
 }
 
-pub fn scan_sessions(root: &Path) -> SessionScan {
-    let sessions = root.join("sessions");
-    let mut roots = Vec::new();
-    let mut orphan_findings = Vec::new();
-    let mut chromium_findings = Vec::new();
-    let mut unknown = false;
-    if sessions.exists() {
-        if !is_directory(&sessions) {
-            unknown = true;
-            orphan_findings.push(DiagnosticFinding::warning(
-                "session.scan-failed",
-                "sessions path is not a directory",
-                Some(&sessions),
-            ));
-            chromium_findings.push(DiagnosticFinding::warning(
-                "chromium.scan-failed",
-                "sessions path is not a directory",
-                Some(&sessions),
-            ));
-        } else {
-            match read_directory(&sessions) {
-                Ok(Some(targets)) => {
-                    for child in targets {
-                        if file_name_starts(&child, "s-") && is_symlink(&child) {
-                            unknown = true;
-                            orphan_findings.push(session_symlink_finding(&child));
-                            chromium_findings.push(session_symlink_finding(&child));
-                            continue;
-                        }
-                        if !is_directory(&child) {
-                            continue;
-                        }
-                        if file_name_starts(&child, "s-") {
-                            roots.push(child);
-                        } else {
-                            match read_directory(&child) {
-                                Ok(Some(nested)) => {
-                                    for path in nested {
-                                        if !file_name_starts(&path, "s-") {
-                                            continue;
-                                        }
-                                        if is_symlink(&path) {
-                                            unknown = true;
-                                            orphan_findings.push(session_symlink_finding(&path));
-                                            chromium_findings.push(session_symlink_finding(&path));
-                                        } else if is_directory(&path) {
-                                            roots.push(path);
-                                        }
-                                    }
-                                }
-                                Ok(None) => {
-                                    unknown = true;
-                                    orphan_findings.push(DiagnosticFinding::warning(
-                                        "session.scan-failed",
-                                        "target sessions disappeared during enumeration",
-                                        Some(&child),
-                                    ));
-                                }
-                                Err(error) => {
-                                    unknown = true;
-                                    orphan_findings.push(DiagnosticFinding::warning(
-                                        "session.scan-failed",
-                                        format!("cannot enumerate target sessions: {error}"),
-                                        Some(&child),
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                }
-                Ok(None) => {
-                    unknown = true;
-                    orphan_findings.push(DiagnosticFinding::warning(
-                        "session.scan-failed",
-                        "sessions disappeared during enumeration",
-                        Some(&sessions),
-                    ));
-                    chromium_findings.push(DiagnosticFinding::warning(
-                        "chromium.scan-failed",
-                        "sessions disappeared during enumeration",
-                        Some(&sessions),
-                    ));
-                }
-                Err(error) => {
-                    unknown = true;
-                    orphan_findings.push(DiagnosticFinding::warning(
-                        "session.scan-failed",
-                        format!("cannot enumerate sessions: {error}"),
-                        Some(&sessions),
-                    ));
-                    chromium_findings.push(DiagnosticFinding::warning(
-                        "chromium.scan-failed",
-                        format!("cannot enumerate sessions: {error}"),
-                        Some(&sessions),
-                    ));
-                }
-            }
-        }
-    }
-    let mut orphan_sessions = Vec::new();
-    let mut leftover_chromium = Vec::new();
-    for session in roots {
-        let owner_path = session.join("owner.json");
-        if is_symlink(&owner_path) {
-            unknown = true;
-            chromium_findings.push(DiagnosticFinding::warning(
-                "chromium.session-unknown",
-                "session owner record is unavailable; Chromium residue cannot be classified",
-                Some(&owner_path),
-            ));
-            orphan_findings.push(DiagnosticFinding::warning(
-                "session.owner-symlink",
-                "session owner record is a symlink and was not inspected",
-                Some(&owner_path),
-            ));
-            continue;
-        }
-        let body = match fs::read_to_string(&owner_path) {
-            Ok(body) => body,
-            Err(error) => {
-                unknown = true;
-                chromium_findings.push(DiagnosticFinding::warning(
-                    "chromium.session-unknown",
-                    "session owner record is unreadable; Chromium residue cannot be classified",
-                    Some(&owner_path),
-                ));
-                orphan_findings.push(DiagnosticFinding::warning(
-                    "session.owner-unreadable",
-                    error.to_string(),
-                    Some(&owner_path),
-                ));
-                continue;
-            }
-        };
-        let owner: serde_json::Value = match serde_json::from_str(&body) {
-            Ok(owner) => owner,
-            Err(error) => {
-                unknown = true;
-                chromium_findings.push(DiagnosticFinding::warning(
-                    "chromium.session-unknown",
-                    "session owner record is invalid; Chromium residue cannot be classified",
-                    Some(&owner_path),
-                ));
-                orphan_findings.push(DiagnosticFinding::warning(
-                    "session.owner-invalid",
-                    error.to_string(),
-                    Some(&owner_path),
-                ));
-                continue;
-            }
-        };
-        let pid = owner
-            .get("pid")
-            .and_then(serde_json::Value::as_i64)
-            .and_then(|value| i32::try_from(value).ok());
-        let session_id = owner
-            .get("sessionId")
-            .and_then(serde_json::Value::as_str)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-            .unwrap_or_else(|| file_name(&session));
-        let orphan = match pid {
-            Some(pid) if !pid_alive(pid) => true,
-            Some(pid) => match owner
-                .get("processStartIdentity")
-                .or_else(|| owner.get("startedAt"))
-                .and_then(serde_json::Value::as_str)
-                .filter(|value| !value.is_empty())
-            {
-                None => {
-                    unknown = true;
-                    chromium_findings.push(DiagnosticFinding::warning(
-                        "chromium.session-unknown",
-                        "session owner has no process identity; Chromium residue cannot be classified",
-                        Some(&owner_path),
-                    ));
-                    orphan_findings.push(DiagnosticFinding::warning(
-                        "session.identity-missing",
-                        "session owner has no process identity",
-                        Some(&owner_path),
-                    ));
-                    false
-                }
-                Some(expected) => match live_process_identity(pid) {
-                    Some(live) => expected != live.start,
-                    None => {
-                        unknown = true;
-                        chromium_findings.push(DiagnosticFinding::warning(
-                            "chromium.session-unknown",
-                            "session process identity cannot be verified; Chromium residue cannot be classified",
-                            Some(&owner_path),
-                        ));
-                        orphan_findings.push(DiagnosticFinding::warning(
-                            "session.identity-unknown",
-                            format!("cannot verify process identity for pid {pid}"),
-                            Some(&owner_path),
-                        ));
-                        false
-                    }
-                },
-            },
-            None => {
-                unknown = true;
-                chromium_findings.push(DiagnosticFinding::warning(
-                    "chromium.session-unknown",
-                    "session owner has no valid pid; Chromium residue cannot be classified",
-                    Some(&owner_path),
-                ));
-                orphan_findings.push(DiagnosticFinding::warning(
-                    "session.owner-invalid",
-                    "session owner has no valid pid",
-                    Some(&owner_path),
-                ));
-                false
-            }
-        };
-        if orphan {
-            orphan_sessions.push(session.display().to_string());
-            orphan_findings.push(DiagnosticFinding::warning(
-                "session.orphan",
-                format!("session {session_id} belongs to a dead or changed process"),
-                Some(&session),
-            ));
-            for name in ["chromium", "incognito-chromium"] {
-                let chromium = session.join(name);
-                if is_directory(&chromium) {
-                    leftover_chromium.push(chromium.display().to_string());
-                    chromium_findings.push(DiagnosticFinding::warning(
-                        "chromium.residue",
-                        "orphan session Chromium data remains",
-                        Some(&chromium),
-                    ));
-                }
-            }
-        }
-    }
-    for name in ["incognito-home", "incognito-chromium"] {
-        let path = root.join(name);
-        if is_directory(&path) {
-            leftover_chromium.push(path.display().to_string());
-            chromium_findings.push(DiagnosticFinding::warning(
-                "chromium.residue",
-                "legacy Chromium residue remains outside a session",
-                Some(&path),
-            ));
-        }
-    }
-    SessionScan {
-        orphan_sessions,
-        leftover_chromium,
-        orphan_check: if unknown {
-            CheckResult {
-                status: CheckStatus::Unknown,
-                findings: orphan_findings,
-            }
-        } else {
-            CheckResult::checked(orphan_findings)
-        },
-        chromium_check: if unknown {
-            CheckResult {
-                status: CheckStatus::Unknown,
-                findings: chromium_findings,
-            }
-        } else {
-            CheckResult::checked(chromium_findings)
-        },
-    }
-}
-
 pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalScan {
     let dir = root.join("transactions");
+    if is_symlink(&dir) {
+        return JournalScan {
+            interrupted: Vec::new(),
+            records: Vec::new(),
+            check: CheckResult {
+                status: CheckStatus::Unknown,
+                findings: vec![DiagnosticFinding::warning(
+                    "journal.root-symlink",
+                    "transactions root is a symlink and was not inspected",
+                    Some(&dir),
+                )],
+            },
+        };
+    }
     if !dir.exists() {
         return JournalScan {
             interrupted: Vec::new(),
@@ -623,7 +376,25 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
     let mut records = Vec::new();
     let mut interrupted = Vec::new();
     let mut findings = Vec::new();
+    let mut unknown = false;
     for path in entries {
+        if is_symlink(&path) {
+            unknown = true;
+            records.push(JournalRecord {
+                kind: "symlink".to_string(),
+                path: path.display().to_string(),
+                install_id: None,
+                phase: None,
+                action: None,
+                error: Some("journal file is a symlink and was not inspected".to_string()),
+            });
+            findings.push(DiagnosticFinding::warning(
+                "journal.file-symlink",
+                "journal file is a symlink and was not inspected",
+                Some(&path),
+            ));
+            continue;
+        }
         if is_directory(&path) {
             let install_id = file_name(&path);
             match journal_v2(root, &install_id) {
@@ -791,7 +562,14 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
     JournalScan {
         interrupted,
         records,
-        check: CheckResult::checked(findings),
+        check: if unknown {
+            CheckResult {
+                status: CheckStatus::Unknown,
+                findings,
+            }
+        } else {
+            CheckResult::checked(findings)
+        },
     }
 }
 #[cfg(test)]
