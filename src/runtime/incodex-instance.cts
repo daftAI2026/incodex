@@ -475,21 +475,13 @@ function publishTakeoverClaim(stateRoot, owner) {
 }
 
 function removeLegacyTakeoverClaimIfStale(stateRoot, expectedState) {
-  const before = takeoverClaimMetadata(stateRoot);
-  if (!before) return false;
-  const current = readTakeoverClaimState(stateRoot);
-  if (current.kind !== expectedState.kind || (current.kind === "valid" && !takeoverClaimIsStale(current.owner))) return false;
-  pauseBeforeTakeoverUnlink();
-  const final = readTakeoverClaimState(stateRoot);
-  if (final.kind !== expectedState.kind || (final.kind === "valid" && !takeoverClaimIsStale(final.owner))) return false;
-  if (!sameTakeoverClaimMetadata(before, takeoverClaimMetadata(stateRoot))) return false;
+  // A regular claim has no identity-pinned no-replace cleanup primitive. It
+  // may have been published by an older runtime between any two reads, so the
+  // migration path refuses to reclaim it rather than deleting a live claim.
+  // The hook only keeps the regression fixture deterministic; production has
+  // no wait and returns fail closed immediately.
   pauseAfterLegacyTakeoverRecheck();
-  try {
-    fs.rmSync(takeoverClaimPath(stateRoot));
-    return true;
-  } catch (error) {
-    return Boolean(error && error.code === "ENOENT");
-  }
+  return false;
 }
 
 function removeTakeoverClaimIfStale(stateRoot, expectedState) {

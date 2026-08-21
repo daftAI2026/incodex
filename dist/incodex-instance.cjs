@@ -144,6 +144,23 @@ function pauseBeforeTakeoverUnlink() {
         Atomics.wait(waiter, 0, 0, 5);
     }
 }
+function pauseAfterLegacyTakeoverRecheck() {
+    const pauseFile = process.env.INCODEX_TEST_LEGACY_TAKEOVER_RECHECK_PAUSE_FILE;
+    const releaseFile = process.env.INCODEX_TEST_LEGACY_TAKEOVER_RECHECK_RELEASE_FILE;
+    if (!pauseFile || !releaseFile)
+        return;
+    try {
+        fs.writeFileSync(pauseFile, `${process.pid}\n`, { flag: "wx", mode: 0o600 });
+    }
+    catch {
+        return;
+    }
+    const deadline = Date.now() + 5000;
+    const waiter = new Int32Array(new SharedArrayBuffer(4));
+    while (!fs.existsSync(releaseFile) && Date.now() < deadline) {
+        Atomics.wait(waiter, 0, 0, 5);
+    }
+}
 function pauseBeforeReclaimHandoff() {
     const pauseFile = process.env.INCODEX_TEST_RECLAIM_HANDOFF_PAUSE_FILE;
     const releaseFile = process.env.INCODEX_TEST_RECLAIM_HANDOFF_RELEASE_FILE;
@@ -475,25 +492,13 @@ function publishTakeoverClaim(stateRoot, owner) {
     }
 }
 function removeLegacyTakeoverClaimIfStale(stateRoot, expectedState) {
-    const before = takeoverClaimMetadata(stateRoot);
-    if (!before)
-        return false;
-    const current = readTakeoverClaimState(stateRoot);
-    if (current.kind !== expectedState.kind || (current.kind === "valid" && !takeoverClaimIsStale(current.owner)))
-        return false;
-    pauseBeforeTakeoverUnlink();
-    const final = readTakeoverClaimState(stateRoot);
-    if (final.kind !== expectedState.kind || (final.kind === "valid" && !takeoverClaimIsStale(final.owner)))
-        return false;
-    if (!sameTakeoverClaimMetadata(before, takeoverClaimMetadata(stateRoot)))
-        return false;
-    try {
-        fs.rmSync(takeoverClaimPath(stateRoot));
-        return true;
-    }
-    catch (error) {
-        return Boolean(error && error.code === "ENOENT");
-    }
+    // A regular claim has no identity-pinned no-replace cleanup primitive. It
+    // may have been published by an older runtime between any two reads, so the
+    // migration path refuses to reclaim it rather than deleting a live claim.
+    // The hook only keeps the regression fixture deterministic; production has
+    // no wait and returns fail closed immediately.
+    pauseAfterLegacyTakeoverRecheck();
+    return false;
 }
 function removeTakeoverClaimIfStale(stateRoot, expectedState) {
     const file = takeoverClaimPath(stateRoot);
