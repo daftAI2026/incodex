@@ -598,7 +598,7 @@ fn post_swap_verification_failure_rolls_back_the_original_app() {
     assert!(!home
         .join(".incodex/transactions")
         .join(id)
-        .join("staged/ChatGPT.app")
+        .join("staging/ChatGPT.app")
         .exists());
     assert!(!home
         .join(".incodex/transactions")
