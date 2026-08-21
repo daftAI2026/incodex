@@ -47,6 +47,17 @@ catch (error) { process.stdout.write(String(error.message)); }`,
     expect(ownerMatchesLive(owner, live)).toBe(false);
   });
 
+  test("normalizes legacy full executable identities before liveness checks", () => {
+    const owner = {
+      pid: 12,
+      startedAt: "Mon Aug 18 10:00:00 2026",
+      execIdentity: "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+      execPath: "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+    };
+    const live = { ...owner, execIdentity: "ChatGPT" };
+    expect(ownerMatchesLive(owner, live)).toBe(true);
+  });
+
   test("complete owner metadata is diagnostic and reports a dead process", () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-lock-"));
     writeOwnerLock(root, { pid: 999999, startedAt: "never", execPath: "/nope", sessionId: "s", token: "n" });

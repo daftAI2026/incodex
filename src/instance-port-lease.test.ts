@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createServer } from "node:net";
+import { createConnection, createServer } from "node:net";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -11,6 +11,9 @@ import {
   connectExisting,
   currentOwner,
   ownerPortFromExec,
+  readOwnerLock,
+  releaseOwnerLease,
+  writeOwnerLock,
 } from "./runtime/incodex-instance.cts";
 
 const waitForCount = async (directory: string, expected: number, timeoutMs = 10_000) => {
@@ -22,6 +25,74 @@ const waitForCount = async (directory: string, expected: number, timeoutMs = 10_
 };
 
 describe("kernel-held TCP owner lease", () => {
+  test("includes the macOS uid in the fixed port derivation", () => {
+    const execPath = "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT";
+    expect(ownerPortFromExec(execPath, 501)).not.toBe(ownerPortFromExec(execPath, 502));
+    expect(ownerPortFromExec(execPath, 501)).toBe(ownerPortFromExec(execPath, 501));
+  });
+
+  test("does not overwrite a live legacy owner record before publication", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-tcp-legacy-record-"));
+    const legacy = currentOwner("legacy-runtime", process.execPath);
+    delete (legacy as Record<string, unknown>).execIdentity;
+    writeOwnerLock(root, legacy);
+    const candidate = currentOwner("new-runtime", process.execPath);
+    await expect(acquireOwnerLease(root, candidate)).rejects.toMatchObject({ code: "OWNER_LEGACY_OWNER" });
+    expect(readOwnerLock(root)?.token).toBe(legacy.token);
+  });
+
+  test("probe returns only a non-secret marker while token raise still works", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-tcp-probe-"));
+    const owner = currentOwner("probe", targetExec(root));
+    await acquireOwnerLease(root, owner);
+    const response = await new Promise<string>((resolve, reject) => {
+      const socket = createConnection({ host: "127.0.0.1", port: ownerPortFromExec(owner.execPath) });
+      let output = "";
+      socket.setEncoding("utf8");
+      socket.once("error", reject);
+      socket.on("data", (chunk) => {
+        output += chunk;
+        if (output.includes("\n")) {
+          socket.destroy();
+          resolve(output.trim());
+        }
+      });
+      socket.once("connect", () => socket.write("probe\n"));
+    });
+    expect(response).toBe("owner-ready");
+    expect(response).not.toContain(owner.token);
+    expect(await connectExisting(root, 500, owner.token)).toBe(true);
+    clearOwnerLock(root, owner);
+  });
+
+  test("deletes only its diagnostic record before asynchronously releasing the port", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-tcp-release-"));
+    const owner = currentOwner("release", targetExec(root));
+    await acquireOwnerLease(root, owner);
+    const wrongOwner = { ...owner, token: "wrong-token", nonce: "wrong-token" };
+    expect(await releaseOwnerLease(root, wrongOwner)).toBe(false);
+    expect(await connectExisting(root, 500, owner.token)).toBe(true);
+    expect(await releaseOwnerLease(root, owner)).toBe(true);
+    expect(readOwnerLock(root)).toBeNull();
+    const replacement = currentOwner("reopen", targetExec(root));
+    await expect(acquireOwnerLease(root, replacement)).resolves.toEqual(replacement);
+    expect(await releaseOwnerLease(root, replacement)).toBe(true);
+  });
+
+  test("bounds an unterminated protocol request", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-tcp-protocol-limit-"));
+    const owner = currentOwner("protocol", targetExec(root));
+    await acquireOwnerLease(root, owner);
+    const closed = new Promise<boolean>((resolve) => {
+      const socket = createConnection({ host: "127.0.0.1", port: ownerPortFromExec(owner.execPath) });
+      socket.once("close", () => resolve(true));
+      socket.once("connect", () => socket.write("x".repeat(300)));
+      socket.once("error", () => resolve(true));
+    });
+    expect(await Promise.race([closed, new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 2_000))])).toBe(true);
+    await releaseOwnerLease(root, owner);
+  });
+
   test("twenty OS contenders have one listener owner and keep it until completion", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-tcp-contenders-"));
     const readyRoot = join(root, "ready");
