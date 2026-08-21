@@ -13,9 +13,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   acquireOwnerLease,
+  clearOwnerLock,
   currentOwner,
   LOCK_NAME,
   readOwnerLock,
+  writeOwnerLock,
 } from "./runtime/incodex-instance.cts";
 
 describe("cross-process owner contention", () => {
@@ -497,6 +499,38 @@ describe("cross-process owner contention", () => {
 
     expect((caught as { code?: string })?.code).toBe("OWNER_FOREIGN_CLAIM");
     expect(String((caught as { message?: string })?.message)).toMatch(/foreign regular file/);
+    expect(readFileSync(claimPath, "utf8")).toBe(foreignRecord);
+  });
+
+  test("a foreign claim blocks the no-owner fast path without publishing a lease", () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-foreign-fast-path-"));
+    const claimPath = join(root, ".incognito.lock.takeover");
+    const foreignRecord = JSON.stringify({ pid: 999999, token: "foreign-fast-path" });
+    writeFileSync(claimPath, foreignRecord);
+
+    let caught: unknown;
+    try {
+      acquireOwnerLease(root, currentOwner("foreign-fast-path", process.execPath));
+    } catch (error) {
+      caught = error;
+    }
+
+    expect((caught as { code?: string })?.code).toBe("OWNER_FOREIGN_CLAIM");
+    expect(existsSync(join(root, LOCK_NAME))).toBe(false);
+    expect(readFileSync(claimPath, "utf8")).toBe(foreignRecord);
+  });
+
+  test("owner cleanup treats a foreign claim as non-releasable without throwing", () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-foreign-cleanup-"));
+    const claimPath = join(root, ".incognito.lock.takeover");
+    const foreignRecord = JSON.stringify({ pid: 999999, token: "foreign-cleanup" });
+    const owner = currentOwner("foreign-cleanup", process.execPath);
+    writeOwnerLock(root, owner);
+    writeFileSync(claimPath, foreignRecord);
+
+    expect(() => clearOwnerLock(root, owner)).not.toThrow();
+    expect(clearOwnerLock(root, owner)).toBe(false);
+    expect(readOwnerLock(root)?.token).toBe(owner.token);
     expect(readFileSync(claimPath, "utf8")).toBe(foreignRecord);
   });
 

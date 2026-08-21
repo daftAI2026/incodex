@@ -4,8 +4,8 @@ import { createPackageWithOptions, extractFile, listPackage, uncache } from "@el
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { asarHasOnlyLoader, collectUnpackOptions, headerHash, patchAsar, readPackageMain } from "./asar";
-import { LOADER_NAME, MARKER_KEY } from "./paths";
+import { asarHasOnlyLoader, collectUnpackOptions, headerHash, patchAsar, readPackageMain, restoreAsarMain } from "./asar";
+import { INJECT_NAME, LOADER_NAME, MAIN_NAME, MARKER_KEY, OWNER_CORE_NAME, OWNER_RECOVERY_NAME, PRELOAD_NAME, SAFE_HOME_NAME, IPC_GUARD_NAME, INSTANCE_NAME, RUNTIME_LOAD_NAME, WINDOW_KIND_NAME } from "./paths";
 
 const runtime = {
   loaderSource: "/* loader */",
@@ -153,6 +153,33 @@ describe("ASAR fixtures", () => {
     expect(listed).not.toContain("/incodex-main.cjs");
     expect(listed).not.toContain("/incodex-inject.js");
     expect(asarHasOnlyLoader(archive)).toBe(true);
+  });
+
+  test("restore removes every Runtime artifact, including split owner modules", async () => {
+    const runtimeFiles = [
+      INJECT_NAME,
+      LOADER_NAME,
+      MAIN_NAME,
+      PRELOAD_NAME,
+      SAFE_HOME_NAME,
+      IPC_GUARD_NAME,
+      OWNER_CORE_NAME,
+      OWNER_RECOVERY_NAME,
+      INSTANCE_NAME,
+      RUNTIME_LOAD_NAME,
+      WINDOW_KIND_NAME,
+    ];
+    const archive = await pack({
+      "package.json": `${JSON.stringify({ main: LOADER_NAME, [MARKER_KEY]: { originalMain: "index.js" } })}\n`,
+      "index.js": "ok\n",
+      ...Object.fromEntries(runtimeFiles.map((name) => [name, `OLD ${name}\n`])),
+    });
+
+    await restoreAsarMain(archive);
+
+    const listed = listPackage(archive, { isPack: false });
+    for (const name of runtimeFiles) expect(listed).not.toContain(`/${name}`);
+    expect(readPackageMain(archive)).toEqual({ main: "index.js", alreadyPatched: false, installId: null });
   });
 
   test("a nonsense file offset is refused", () => {

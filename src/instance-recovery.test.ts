@@ -120,9 +120,11 @@ describe("cross-process owner recovery", () => {
     const barrier = join(root, "start");
     const readyRoot = join(root, "ready");
     const doneRoot = join(root, "done");
+    const resultRoot = join(root, "result");
     const releaseFile = join(root, "release");
     mkdirSync(readyRoot);
     mkdirSync(doneRoot);
+    mkdirSync(resultRoot);
     const modulePath = join(import.meta.dir, "runtime/incodex-instance.cts");
     const truncated = "{\"pid\":";
     writeFileSync(join(root, LOCK_NAME), truncated);
@@ -134,6 +136,7 @@ describe("cross-process owner recovery", () => {
       const barrier = process.env.INCODEX_TEST_BARRIER;
       const readyRoot = process.env.INCODEX_TEST_READY_ROOT;
       const doneRoot = process.env.INCODEX_TEST_DONE_ROOT;
+      const resultRoot = process.env.INCODEX_TEST_RESULT_ROOT;
       const releaseFile = process.env.INCODEX_TEST_RELEASE_FILE;
       const index = process.env.INCODEX_TEST_INDEX;
       writeFileSync(join(readyRoot, index), "ready\n");
@@ -166,6 +169,7 @@ describe("cross-process owner recovery", () => {
           INCODEX_TEST_BARRIER: barrier,
           INCODEX_TEST_READY_ROOT: readyRoot,
           INCODEX_TEST_DONE_ROOT: doneRoot,
+          INCODEX_TEST_RESULT_ROOT: resultRoot,
           INCODEX_TEST_RELEASE_FILE: releaseFile,
           INCODEX_TEST_INDEX: String(index),
         },
@@ -195,9 +199,10 @@ describe("cross-process owner recovery", () => {
     const allDone = await waitForCount(doneRoot, children.length);
     writeFileSync(releaseFile, "release\n");
     const completed = await Promise.all(results);
-    const winners = completed.filter((result) => result.stdout.trim().startsWith("WINNER "));
-    const rejected = completed.filter((result) => ["OWNER_BUSY", "OWNER_RACE"].includes(result.stdout.trim()));
-    const winnerToken = winners[0]?.stdout.trim().slice("WINNER ".length);
+    const outcomes = children.map((_, index) => readFileSync(join(resultRoot, String(index)), "utf8").trim());
+    const winners = outcomes.filter((result) => result.startsWith("WINNER "));
+    const rejected = outcomes.filter((result) => ["OWNER_BUSY", "OWNER_RACE"].includes(result));
+    const winnerToken = winners[0]?.slice("WINNER ".length);
     const quarantine = readdirSync(root).filter((name) => name.startsWith(`.${LOCK_NAME}.invalid.`));
 
     expect(winners).toHaveLength(1);
