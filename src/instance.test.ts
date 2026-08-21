@@ -750,22 +750,11 @@ describe("cross-process owner contention", () => {
     }
   });
 
-  test("legacy regular takeover claims fail closed during a replacement race", async () => {
-    const root = mkdtempSync(join(tmpdir(), "incodex-legacy-claim-race-"));
+  test("a foreign regular takeover residue fails closed without deletion", () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-foreign-claim-"));
     const claimPath = join(root, ".incognito.lock.takeover");
-    const pauseFile = join(root, "legacy-claim-paused");
-    const releaseFile = join(root, "legacy-claim-release");
-    const modulePath = join(import.meta.dir, "runtime/incodex-instance.cts");
-    writeFileSync(
-      claimPath,
-      JSON.stringify({
-        pid: 999999,
-        startedAt: "never",
-        processStartIdentity: "never",
-        execIdentity: "/nope",
-        token: "stale-legacy-claim-token",
-      }),
-    );
+    const foreignRecord = JSON.stringify({ pid: 999999, token: "foreign-record" });
+    writeFileSync(claimPath, foreignRecord);
     writeFileSync(
       join(root, LOCK_NAME),
       JSON.stringify({
@@ -777,68 +766,69 @@ describe("cross-process owner contention", () => {
       }),
     );
 
-    const worker = String.raw`
-      const instance = require(process.env.INCODEX_TEST_MODULE);
-      const root = process.env.INCODEX_TEST_ROOT;
-      const owner = instance.currentOwner("legacy-claim-race", process.execPath);
-      try {
-        instance.acquireOwnerLease(root, owner);
-        process.stdout.write("UNEXPECTED_WINNER\n");
-        process.exit(3);
-      } catch (error) {
-        process.stdout.write(String(error.code || "ERROR") + "\n");
-        process.exit(error.code === "OWNER_BUSY" || error.code === "OWNER_RACE" ? 0 : 2);
-      }
-    `;
-    const child = spawn(process.execPath, ["-e", worker], {
-      env: {
-        ...process.env,
-        INCODEX_TEST_MODULE: modulePath,
-        INCODEX_TEST_ROOT: root,
-        INCODEX_TEST_LEGACY_TAKEOVER_RECHECK_PAUSE_FILE: pauseFile,
-        INCODEX_TEST_LEGACY_TAKEOVER_RECHECK_RELEASE_FILE: releaseFile,
-      },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    let closed = false;
-    child.stdout?.on("data", (chunk) => (stdout += String(chunk)));
-    child.stderr?.on("data", (chunk) => (stderr += String(chunk)));
-    const closePromise = new Promise<{ code: number | null }>((resolve) => {
-      child.once("close", (code) => {
-        closed = true;
-        resolve({ code });
-      });
-      child.once("error", () => {
-        closed = true;
-        resolve({ code: 2 });
-      });
-    });
-
+    let caught: unknown;
     try {
-      const deadline = Date.now() + 3000;
-      while (!existsSync(pauseFile) && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-      expect(existsSync(pauseFile)).toBe(true);
-      if (!existsSync(pauseFile)) return;
-
-      const replacement = currentOwner("legacy-claim-replacement", process.execPath);
-      writeFileSync(claimPath, JSON.stringify(replacement));
-      writeFileSync(releaseFile, "release\n");
-
-      const result = await closePromise;
-      expect(result.code).toBe(0);
-      expect(["OWNER_BUSY", "OWNER_RACE"]).toContain(stdout.trim());
-      expect(stderr).toBe("");
-      expect(readFileSync(claimPath, "utf8")).toContain(replacement.token);
-    } finally {
-      writeFileSync(releaseFile, "release\n");
-      if (!closed) child.kill();
-      await closePromise;
+      acquireOwnerLease(root, currentOwner("foreign-claim", process.execPath));
+    } catch (error) {
+      caught = error;
     }
-  }, 10_000);
+
+    expect((caught as { code?: string })?.code).toBe("OWNER_FOREIGN_CLAIM");
+    expect(String((caught as { message?: string })?.message)).toMatch(/foreign regular file/);
+    expect(readFileSync(claimPath, "utf8")).toBe(foreignRecord);
+  });
+
+  test("malformed reclaim generations fail closed without cleanup", () => {
+    for (const generation of ["9007199254740992", "00000000000000000001", "0"]) {
+      const root = mkdtempSync(join(tmpdir(), "incodex-malformed-generation-"));
+      const claimRoot = join(root, ".incognito.lock.takeover");
+      const reclaimRoot = join(claimRoot, ".reclaim");
+      mkdirSync(reclaimRoot, { recursive: true });
+      writeFileSync(
+        join(claimRoot, "owner"),
+        JSON.stringify({
+          pid: 999999,
+          startedAt: "never",
+          processStartIdentity: "never",
+          execIdentity: "/nope",
+          token: "stale-claim-token",
+        }),
+      );
+      const marker = join(reclaimRoot, `marker.${generation}`);
+      writeFileSync(
+        marker,
+        JSON.stringify({
+          pid: 999999,
+          startedAt: "never",
+          processStartIdentity: "never",
+          execIdentity: "/nope",
+          token: `malformed-${generation}`,
+        }),
+      );
+      writeFileSync(
+        join(root, LOCK_NAME),
+        JSON.stringify({
+          pid: 999999,
+          startedAt: "never",
+          execPath: "/nope",
+          sessionId: "stale",
+          token: "stale-owner-token",
+        }),
+      );
+
+      let caught: unknown;
+      try {
+        acquireOwnerLease(root, currentOwner(`malformed-${generation}`, process.execPath));
+      } catch (error) {
+        caught = error;
+      }
+
+      expect((caught as { code?: string })?.code).toBe("OWNER_RECLAIM_UNREADABLE");
+      expect(String((caught as { message?: string })?.message)).toMatch(/generation/);
+      expect(readFileSync(marker, "utf8")).toContain(`malformed-${generation}`);
+      expect(readFileSync(join(claimRoot, "owner"), "utf8")).toContain("stale-claim-token");
+    }
+  });
 
   test("a stale claim cleaner cannot remove a replacement claim in its unlink window", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-takeover-claim-window-"));
