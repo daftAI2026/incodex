@@ -235,6 +235,77 @@ fn migration_round_trip_restores_exact_original_and_keeps_legacy_record() {
 }
 
 #[test]
+fn recovery_uses_outgoing_when_legacy_original_is_missing() {
+    let fixture = Fixture::create();
+    let outgoing = fixture
+        .root
+        .join("transactions")
+        .join(INSTALL_ID)
+        .join("outgoing/ChatGPT.app");
+    ditto(&fixture.original_app, &outgoing).unwrap();
+    fs::remove_dir_all(&fixture.original_app).unwrap();
+    fixture.set_phase("SWAPPED");
+    let output = Command::new(env!("CARGO_BIN_EXE_incodex"))
+        .args(["recover", "--transaction", INSTALL_ID])
+        .env("HOME", fixture.root.parent().unwrap())
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(fs::read(fixture.app_asar()).unwrap(), fixture.original_bytes);
+    assert!(!outgoing.exists());
+}
+
+#[test]
+fn recovery_refuses_to_replace_a_foreign_target_when_original_is_missing() {
+    let fixture = Fixture::create();
+    let outgoing = fixture
+        .root
+        .join("transactions")
+        .join(INSTALL_ID)
+        .join("outgoing/ChatGPT.app");
+    ditto(&fixture.original_app, &outgoing).unwrap();
+    fs::remove_dir_all(&fixture.original_app).unwrap();
+    fs::write(fixture.app_asar(), b"foreign target").unwrap();
+    fixture.set_phase("SWAPPED");
+    let output = Command::new(env!("CARGO_BIN_EXE_incodex"))
+        .args(["recover", "--transaction", INSTALL_ID])
+        .env("HOME", fixture.root.parent().unwrap())
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(outgoing.exists());
+    assert_eq!(fs::read(fixture.app_asar()).unwrap(), b"foreign target");
+}
+
+#[test]
+fn migration_replaces_an_interrupted_partial_v2_backup() {
+    let fixture = Fixture::create();
+    let partial = fixture
+        .root
+        .join("transactions")
+        .join(INSTALL_ID)
+        .join("original/ChatGPT.app");
+    fs::create_dir_all(&partial).unwrap();
+    fs::write(partial.join("partial"), b"incomplete").unwrap();
+    let state = load_legacy_ts_v1(&fixture.root, &fixture.app).unwrap().unwrap();
+    let proven = prove_legacy_ts_v1(&fixture.root, state).unwrap();
+    migrate_legacy_ts_v1(&fixture.root, proven).unwrap();
+    assert_eq!(
+        fs::read(
+            fixture
+                .root
+                .join("transactions")
+                .join(INSTALL_ID)
+                .join("original/ChatGPT.app/Contents/Resources/app.asar"),
+        )
+        .unwrap(),
+        fixture.original_bytes
+    );
+}
+
+#[test]
 fn rust_install_adopts_legacy_state_without_using_patched_live_as_original() {
     let fixture = Fixture::create();
     let output = Command::new(env!("CARGO_BIN_EXE_incodex"))
