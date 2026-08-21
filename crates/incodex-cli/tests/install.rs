@@ -590,7 +590,10 @@ fn interrupted_recover_refuses_uninstall_then_reinstall_round_trips_original() {
 
     let fake_bin = home.join("fake-bin");
     fs::create_dir_all(&fake_bin).unwrap();
-    write_executable(&fake_bin.join("codesign"), "#!/bin/sh\nexit 0\n");
+    write_executable(
+        &fake_bin.join("codesign"),
+        "#!/bin/sh\nlast=''\nfor arg in \"$@\"; do last=\"$arg\"; done\nif [ \"$1\" = \"--display\" ] && [ \"$2\" = \"--entitlements\" ]; then printf '%s\\n' '<plist><dict></dict></plist>'; exit 0; fi\nif [ \"$1\" = \"--display\" ] && [ \"$2\" = \"--verbose=4\" ]; then case \"$last\" in *CUALockScreenGuardian.app) printf '%s\\n' 'Identifier=com.example.cua-guardian' 'TeamIdentifier=2DC432GLL2' 'Authority=Developer ID Application: fixture' ;; *) printf '%s\\n' 'Identifier=com.example.incodex-fixture' 'Signature=adhoc' ;; esac; exit 0; fi\nexit 0\n",
+    );
     let (status, stdout, stderr) = run_with_path(
         &["recover", "--transaction", &id],
         &home,

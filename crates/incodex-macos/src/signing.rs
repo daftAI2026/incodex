@@ -232,7 +232,7 @@ pub fn verify_original_vendor_bundle(
 pub fn verify_app(app: &Path) -> bool {
     verify_patched_adhoc_bundle_deep_strict(app, None).is_ok()
         || inspect_signing_inventory(app)
-            .and_then(|inventory| validate_signing_inventory(&inventory))
+            .and_then(|inventory| validate_nested_components(&inventory.nested))
             .is_ok()
 }
 
@@ -463,7 +463,8 @@ fn inspect_component(path: &Path) -> Result<SignedComponent, String> {
     })
 }
 
-fn validate_nested_components(components: &[SignedComponent]) -> Result<(), String> {
+/// 对 generic deep/strict fallback 复用 nested component policy。
+pub fn validate_nested_components(components: &[SignedComponent]) -> Result<(), String> {
     for component in components {
         match component.kind {
             SignatureKind::Vendor => validate_vendor_component(component, "nested component")?,
