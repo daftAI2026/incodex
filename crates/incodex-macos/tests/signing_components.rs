@@ -80,11 +80,11 @@ impl Fixture {
         let deep_capture = root.join("deep-sign-count");
         let nested_display = if custom_outer {
             format!(
-                "if [ -f \"$INCODEX_DEEP_SIGN_CAPTURE\" ]; then printf '%s\\\\n' 'Identifier=com.example.fixture' 'Signature=adhoc'; else printf '%s\\\\n' 'Identifier=com.example.renamed-vendor' 'TeamIdentifier={identity}' 'Authority=Developer ID Application: fixture'; fi"
+                "if [ -f \"$INCODEX_DEEP_SIGN_CAPTURE\" ]; then printf '%s\\n' 'Identifier=com.example.fixture' 'Signature=adhoc'; else printf '%s\\n' 'Identifier=com.example.renamed-vendor' 'TeamIdentifier={identity}' 'Authority=Developer ID Application: fixture'; fi"
             )
         } else {
             format!(
-                "printf '%s\\\\n' 'Identifier=com.example.renamed-vendor' 'TeamIdentifier={identity}' 'Authority=Developer ID Application: fixture'"
+                "printf '%s\\n' 'Identifier=com.example.renamed-vendor' 'TeamIdentifier={identity}' 'Authority=Developer ID Application: fixture'"
             )
         };
         let outer_display = if custom_outer {
