@@ -6,6 +6,8 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use sha2::{Digest, Sha256};
 
+mod support;
+
 static HOME_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn bin() -> &'static str {
@@ -43,6 +45,7 @@ fn run(args: &[&str], home: &std::path::Path) -> (i32, String, String) {
 }
 
 fn run_with_stdout_redirected(args: &[&str], home: &std::path::Path) -> (i32, String, String) {
+    let _pty_gate = support::tty::acquire();
     let stdout_path = home.join("redirected.out");
     let script = r#"
 import os, pty, select, sys, time
