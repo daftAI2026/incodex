@@ -254,10 +254,13 @@ fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<Comma
         });
     }
     if let Some(archive) = Archive::open(&asar).ok() {
+        let has_loader = archive.extract(LOADER_NAME).is_ok();
         if let Ok(package) = archive.read_package_main() {
-            if package.already_patched || package.install_id.is_some() {
-                return Err(unbound_marker_error());
+            if has_loader || package.already_patched || package.install_id.is_some() {
+                return Err(unbound_patch_error());
             }
+        } else if has_loader {
+            return Err(unbound_patch_error());
         }
     }
     let expected_plist = read_plist_info(app);
@@ -363,9 +366,9 @@ fn uninstall_app(
 fn verify_restored_app(app: &Path, official_target: bool) -> Result<(), String> {
     let archive = Archive::open(app.join(ASAR_REL))
         .map_err(|error| format!("restored app ASAR could not be inspected: {error}"))?;
-    let package = archive
-        .read_package_main()
-        .map_err(|error| format!("restored app package metadata could not be inspected: {error}"))?;
+    let package = archive.read_package_main().map_err(|error| {
+        format!("restored app package metadata could not be inspected: {error}")
+    })?;
     if package.already_patched || package.install_id.is_some() {
         return Err("restored app still contains an Incodex marker".into());
     }
@@ -373,13 +376,8 @@ fn verify_restored_app(app: &Path, official_target: bool) -> Result<(), String> 
         return Err("restored app still contains the Incodex loader".into());
     }
     if official_target {
-        verify_original_vendor_bundle(
-            app,
-            Some(OFFICIAL_BUNDLE_IDENTIFIER),
-            None,
-            None,
-        )
-        .map_err(|error| format!("restored official app failed vendor acceptance: {error}"))?;
+        verify_original_vendor_bundle(app, Some(OFFICIAL_BUNDLE_IDENTIFIER), None, None)
+            .map_err(|error| format!("restored official app failed vendor acceptance: {error}"))?;
     }
     Ok(())
 }
@@ -399,27 +397,31 @@ fn inspect_existing_install(
     let Ok(archive) = Archive::open(asar) else {
         return Ok(None);
     };
-    let Ok(package) = archive.read_package_main() else {
-        return Ok(None);
+    let has_loader = archive.extract(LOADER_NAME).is_ok();
+    let package = match archive.read_package_main() {
+        Ok(package) => package,
+        Err(_) if has_loader => return Err(unbound_patch_error()),
+        Err(_) => return Ok(None),
     };
-    if !package.already_patched && package.install_id.is_none() {
+    if !has_loader && !package.already_patched && package.install_id.is_none() {
         return Ok(None);
     }
     current_install_id(app, root, &archive)
         .map(Some)
-        .ok_or_else(unbound_marker_error)
+        .ok_or_else(unbound_patch_error)
 }
 
-fn unbound_marker_error() -> String {
-    "live app contains an Incodex marker without a trusted committed installation record; refusing to create a new original snapshot".into()
+fn unbound_patch_error() -> String {
+    "live app contains an Incodex marker or loader without a trusted committed installation record; refusing to create a new original snapshot".into()
 }
 
 fn ensure_official_target_is_verified(app: &Path) -> Result<(), String> {
     if !is_official_app(app, None) {
         return Ok(());
     }
-    let info = read_plist_info(app)
-        .ok_or_else(|| "default target has no readable Info.plist; refusing to snapshot it".to_string())?;
+    let info = read_plist_info(app).ok_or_else(|| {
+        "default target has no readable Info.plist; refusing to snapshot it".to_string()
+    })?;
     ensure_official_bundle_identifier(&info)?;
     verify_original_vendor_bundle(
         app,

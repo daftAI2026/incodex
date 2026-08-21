@@ -3,11 +3,19 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, MutexGuard};
 
 use incodex_asar::{pack_dir, Archive, LOADER_NAME, MARKER_KEY};
 use incodex_macos::sign_app;
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
+static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+fn serialize_signing() -> MutexGuard<'static, ()> {
+    TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 fn home() -> PathBuf {
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
@@ -119,6 +127,7 @@ fn replace_with_unbound_loader(home: &Path, app: &Path) {
 
 #[test]
 fn install_refuses_marked_live_app_without_trusted_record_before_snapshot() {
+    let _guard = serialize_signing();
     let home = home();
     let app = patchable_app(&home);
     replace_with_unbound_marker(&home, &app);
@@ -139,6 +148,7 @@ fn install_refuses_marked_live_app_without_trusted_record_before_snapshot() {
 
 #[test]
 fn install_refuses_unbound_loader_without_marker_before_snapshot() {
+    let _guard = serialize_signing();
     let home = home();
     let app = patchable_app(&home);
     replace_with_unbound_loader(&home, &app);
@@ -159,6 +169,7 @@ fn install_refuses_unbound_loader_without_marker_before_snapshot() {
 
 #[test]
 fn install_refuses_trusted_record_with_tampered_live_tree() {
+    let _guard = serialize_signing();
     let home = home();
     let app = patchable_app(&home);
     let install_id = install(&home, &app);
@@ -183,6 +194,7 @@ fn install_refuses_trusted_record_with_tampered_live_tree() {
 
 #[test]
 fn install_refuses_trusted_record_with_tampered_original_backup() {
+    let _guard = serialize_signing();
     let home = home();
     let app = patchable_app(&home);
     let install_id = install(&home, &app);
