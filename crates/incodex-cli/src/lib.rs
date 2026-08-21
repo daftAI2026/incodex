@@ -21,7 +21,61 @@ use incodex_core::paths::DEFAULT_APP;
 use parse::{parse_cli, CliCommand};
 use version::{collect_version_facts, format_version_report};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CliFailure {
+    message: String,
+    exit_code: i32,
+}
+
+impl CliFailure {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self::with_code(1, message)
+    }
+
+    pub fn with_code(exit_code: i32, message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            exit_code,
+        }
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    pub fn exit_code(&self) -> i32 {
+        self.exit_code
+    }
+
+    fn into_message(self) -> String {
+        self.message
+    }
+}
+
+impl From<String> for CliFailure {
+    fn from(message: String) -> Self {
+        Self::new(message)
+    }
+}
+
+impl From<&str> for CliFailure {
+    fn from(message: &str) -> Self {
+        Self::new(message)
+    }
+}
+
+/// Backward-compatible library entry point for callers that only need text.
+/// The native executable uses [`run_with_exit_code`] to preserve lifecycle
+/// failure classes at the process boundary.
 pub fn run<I, S>(args: I) -> Result<(), String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    run_with_exit_code(args).map_err(CliFailure::into_message)
+}
+
+pub fn run_with_exit_code<I, S>(args: I) -> Result<(), CliFailure>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
@@ -59,12 +113,14 @@ where
 
     match parsed.command {
         CliCommand::Open => crate::open::run_open(&parsed),
-        CliCommand::Runtime => crate::lifecycle::run_runtime(&parsed),
-        CliCommand::Update => crate::lifecycle::run_update(&parsed),
-        CliCommand::SelfUninstall => crate::lifecycle::run_self_uninstall(&parsed),
-        CliCommand::Install => crate::install::run_install(&parsed),
-        CliCommand::Uninstall => crate::install::run_uninstall(&parsed),
-        CliCommand::Recover => crate::install::run_recover(&parsed),
+        CliCommand::Runtime => crate::lifecycle::run_runtime(&parsed).map_err(CliFailure::from),
+        CliCommand::Update => crate::lifecycle::run_update(&parsed).map_err(CliFailure::from),
+        CliCommand::SelfUninstall => {
+            crate::lifecycle::run_self_uninstall(&parsed).map_err(CliFailure::from)
+        }
+        CliCommand::Install => crate::install::run_install(&parsed).map_err(CliFailure::from),
+        CliCommand::Uninstall => crate::install::run_uninstall(&parsed).map_err(CliFailure::from),
+        CliCommand::Recover => crate::install::run_recover(&parsed).map_err(CliFailure::from),
         CliCommand::Status | CliCommand::Doctor => {
             let target = parsed
                 .app
@@ -91,9 +147,9 @@ where
             }
             Ok(())
         }
-        other => Err(format!(
+        other => Err(CliFailure::new(format!(
             "{} is not implemented in the native CLI yet",
             other.as_str()
-        )),
+        ))),
     }
 }

@@ -189,8 +189,8 @@ fn open_waits_then_burns_and_does_not_patch_asar() {
     let asar = app.join("Contents/Resources/app.asar");
     assert!(!asar.exists());
     let (status, stdout, stderr) = run(&["open", "--app", app.to_str().unwrap()], &home);
-    assert_eq!(stderr, "", "{stdout}");
     assert_eq!(status, 3, "a window that never passes UI injection must fail");
+    assert!(stderr.contains("UI injection was not accepted"), "{stderr}");
     assert!(stdout.contains("➤ Opening incognito Codex window"));
     assert!(!stdout.contains("Opened. Incognito Codex window is ready."));
     assert!(stdout.contains("Closed. Isolated session removed."));
@@ -216,7 +216,7 @@ fn open_spawns_official_binary_with_localhost_debug_port_and_does_not_patch() {
     let official_before = official.exists().then(|| fs::read(&official).ok()).flatten();
     let (status, stdout, stderr) = run(&["open", "--app", app.to_str().unwrap()], &home);
     assert_eq!(status, 3, "stdout={stdout}\nstderr={stderr}");
-    assert_eq!(stderr, "");
+    assert!(stderr.contains("UI injection was not accepted"), "{stderr}");
     let argv = fs::read_to_string(home.join("open-argv.txt")).unwrap_or_default();
     assert!(
         argv.lines().any(|line| line.starts_with("--remote-debugging-port=")),
@@ -248,6 +248,7 @@ fn open_spawn_error_still_burns() {
     fs::write(source.join("auth.json"), "{}\n").unwrap();
     let (status, stdout, stderr) = run(&["open", "--app", app.to_str().unwrap()], &home);
     assert_eq!(status, 1, "spawn failure must be observable: stderr={stderr} stdout={stdout}");
+    assert!(stderr.contains("Unable to start the incognito window"), "{stderr}");
     let leftover: Vec<_> = incodex_paths(&home)
         .into_iter()
         .filter(|path| path.contains("codex-home") || path.contains("/chromium"))
@@ -264,7 +265,7 @@ fn open_child_nonzero_is_not_success() {
     fs::write(source.join("auth.json"), "{}\n").unwrap();
     let (status, stdout, stderr) = run(&["open", "--app", app.to_str().unwrap()], &home);
     assert_eq!(status, 1, "child failure must be observable: stderr={stderr} stdout={stdout}");
-    assert!(stderr.is_empty(), "open keeps lifecycle diagnostics on stdout: {stderr}");
+    assert!(stderr.contains("exited with status 7"), "{stderr}");
     let leftover: Vec<_> = incodex_paths(&home)
         .into_iter()
         .filter(|path| path.contains("codex-home") || path.contains("/chromium"))
