@@ -85,10 +85,34 @@ pub struct TransactionJournal {
     pub updated_at: String,
 }
 
-/// A structurally consistent view of one retired TS v1 journal and its
-/// optional post-metadata records. This is not proof of the live target,
-/// backup contents, signature, hashes, or inode identity; migration must add
-/// those target-lock and backup-proof checks before acting on this record.
+/// The only state in which post-commit metadata is available. Interrupted and
+/// rolled-back journals deliberately cannot carry a stale committed snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LegacyState {
+    Committed {
+        current: CurrentPointer,
+        manifest: InstallManifest,
+        runtime: RuntimeManifest,
+        original_app: PathBuf,
+    },
+    Interrupted,
+    RolledBack,
+}
+
+impl LegacyState {
+    pub fn kind(&self) -> LegacyStateKind {
+        match self {
+            Self::Committed { .. } => LegacyStateKind::Committed,
+            Self::Interrupted => LegacyStateKind::Interrupted,
+            Self::RolledBack => LegacyStateKind::RolledBack,
+        }
+    }
+}
+
+/// A structurally consistent view of one retired TS v1 journal. This is not
+/// proof of the live target, backup contents, signature, hashes, or inode
+/// identity; migration must add those target-lock and backup-proof checks
+/// before acting on this record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LegacyTsV1State {
     pub target_id: String,
@@ -96,11 +120,7 @@ pub struct LegacyTsV1State {
     pub install_id: String,
     pub target_store: PathBuf,
     pub install_dir: PathBuf,
-    pub original_app: Option<PathBuf>,
-    pub kind: LegacyStateKind,
-    pub current: Option<CurrentPointer>,
-    pub manifest: Option<InstallManifest>,
-    pub runtime: Option<RuntimeManifest>,
+    pub state: LegacyState,
     pub journal: TransactionJournal,
 }
 
@@ -143,13 +163,19 @@ pub fn load_legacy_ts_v1(root: &Path, target: &Path) -> Result<Option<LegacyTsV1
     }
 
     let selected = select_journal(root, &target_key, &journals)?;
-    let metadata = load_metadata(
-        root,
-        &target_key,
-        &target_real_path,
-        &selected.journal,
-        selected.kind == LegacyStateKind::Committed,
-    )?;
+    let state = match selected.kind {
+        LegacyStateKind::Committed => {
+            let metadata = load_metadata(root, &target_key, &target_real_path, &selected.journal)?;
+            LegacyState::Committed {
+                current: metadata.current,
+                manifest: metadata.manifest,
+                runtime: metadata.runtime,
+                original_app: metadata.original_app,
+            }
+        }
+        LegacyStateKind::Interrupted => LegacyState::Interrupted,
+        LegacyStateKind::RolledBack => LegacyState::RolledBack,
+    };
     let install_dir = target_store.join(&selected.journal.install_id);
 
     Ok(Some(LegacyTsV1State {
@@ -158,11 +184,7 @@ pub fn load_legacy_ts_v1(root: &Path, target: &Path) -> Result<Option<LegacyTsV1
         install_id: selected.journal.install_id.clone(),
         target_store,
         install_dir,
-        original_app: metadata.as_ref().map(|value| value.original_app.clone()),
-        kind: selected.kind,
-        current: metadata.as_ref().map(|value| value.current.clone()),
-        manifest: metadata.as_ref().map(|value| value.manifest.clone()),
-        runtime: metadata.as_ref().map(|value| value.runtime.clone()),
+        state,
         journal: selected.journal.clone(),
     }))
 }
@@ -233,7 +255,22 @@ fn select_journal<'a>(
     target_key: &str,
     records: &'a [LegacyJournalRecord],
 ) -> Result<&'a LegacyJournalRecord, String> {
-    if let Some(record) = newest_record(records, LegacyStateKind::Interrupted) {
+    let interrupted = records
+        .iter()
+        .filter(|record| record.kind == LegacyStateKind::Interrupted)
+        .collect::<Vec<_>>();
+    if interrupted.len() > 1 {
+        let mut install_ids = interrupted
+            .iter()
+            .map(|record| record.journal.install_id.as_str())
+            .collect::<Vec<_>>();
+        install_ids.sort_unstable();
+        return Err(format!(
+            "multiple actionable interrupted legacy journals for target; refusing to choose one: {}",
+            install_ids.join(", ")
+        ));
+    }
+    if let Some(record) = interrupted.first() {
         return Ok(record);
     }
 
@@ -258,7 +295,12 @@ fn newest_record(
     records
         .iter()
         .filter(|record| record.kind == kind)
-        .max_by(|left, right| left.journal.updated_at.cmp(&right.journal.updated_at))
+        .max_by(|left, right| {
+            left.journal
+                .updated_at
+                .cmp(&right.journal.updated_at)
+                .then_with(|| left.journal.install_id.cmp(&right.journal.install_id))
+        })
 }
 
 fn read_current_install_id(root: &Path, target_key: &str) -> Result<Option<String>, String> {
@@ -282,8 +324,7 @@ fn load_metadata(
     target_key: &str,
     target_real_path: &Path,
     journal: &TransactionJournal,
-    required: bool,
-) -> Result<Option<LegacyMetadata>, String> {
+) -> Result<LegacyMetadata, String> {
     let target_store = root.join("installations").join(target_key);
     let install_dir = target_store.join(&journal.install_id);
     let current_path = target_store.join("current.json");
@@ -311,46 +352,34 @@ fn load_metadata(
         .iter()
         .map(|(path, label)| storage_path_exists(path, label))
         .collect::<Result<Vec<_>, _>>()?;
-    if !present.iter().any(|value| *value) {
-        if required {
+    if !present.iter().all(|value| *value) {
+        if present.iter().all(|value| !*value) {
             return Err("committed legacy journal has no installation metadata".into());
         }
-        return Ok(None);
-    }
-    if !present.iter().all(|value| *value) {
-        if required {
-            return Err("committed legacy journal has incomplete installation metadata".into());
-        }
-        return Ok(None);
+        return Err("committed legacy journal has incomplete installation metadata".into());
     }
 
     let current: CurrentPointer = read_json(&current_path, "legacy current.json")?;
     validate_install_id(&current.install_id, "current installId")?;
     if current.install_id != journal.install_id {
-        if required {
-            return Err("legacy current installId does not match the selected journal".into());
-        }
-        return Ok(None);
+        return Err("legacy current installId does not match the selected journal".into());
     }
     let manifest: InstallManifest = read_json(&manifest_path, "legacy manifest.json")?;
     validate_manifest(&manifest, &journal.install_id, target_real_path)?;
     let runtime: RuntimeManifest = read_json(&runtime_path, "legacy runtime-manifest.json")?;
     validate_runtime(&runtime, &manifest)?;
     if !original_app.is_dir() {
-        if required {
-            return Err(format!(
-                "legacy original backup is missing: {}",
-                original_app.display()
-            ));
-        }
-        return Ok(None);
+        return Err(format!(
+            "legacy original backup is missing: {}",
+            original_app.display()
+        ));
     }
-    Ok(Some(LegacyMetadata {
+    Ok(LegacyMetadata {
         current,
         manifest,
         runtime,
         original_app,
-    }))
+    })
 }
 
 fn storage_path_exists(path: &Path, label: &str) -> Result<bool, String> {

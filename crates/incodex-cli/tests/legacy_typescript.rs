@@ -336,14 +336,14 @@ fn legacy_typescript_fixture_reproduces_the_v1_disk_contract_without_running_ts_
     let state = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
         .expect("legacy TS v1 fixture should be readable")
         .expect("fixture should be detected");
-    let manifest = state
-        .manifest
-        .as_ref()
-        .expect("committed state should include manifest metadata");
-    let original_app = state
-        .original_app
-        .as_ref()
-        .expect("committed state should include the original backup path");
+    let incodex_cli::legacy_typescript::LegacyState::Committed {
+        manifest,
+        original_app,
+        ..
+    } = &state.state
+    else {
+        panic!("committed state should include manifest metadata");
+    };
 
     assert_eq!(state.install_id, INSTALL_ID);
     assert_eq!(manifest.schema_version, 1);
@@ -529,26 +529,14 @@ fn legacy_typescript_fixture_reads_real_writer_order_before_installation_metadat
             .expect("journal must be detected before installation metadata exists");
         assert_eq!(state.install_id, INSTALL_ID, "phase {phase} was lost");
         assert_eq!(
-            state.kind,
+            state.state.kind(),
             incodex_cli::legacy_typescript::LegacyStateKind::Interrupted,
             "phase {phase} was misclassified"
         );
-        assert!(
-            state.current.is_none(),
-            "phase {phase} borrowed stale current.json"
-        );
-        assert!(
-            state.manifest.is_none(),
-            "phase {phase} invented a manifest"
-        );
-        assert!(
-            state.runtime.is_none(),
-            "phase {phase} invented a runtime record"
-        );
-        assert!(
-            state.original_app.is_none(),
-            "phase {phase} invented a backup"
-        );
+        assert!(matches!(
+            state.state,
+            incodex_cli::legacy_typescript::LegacyState::Interrupted
+        ));
     }
 }
 
@@ -561,13 +549,13 @@ fn legacy_typescript_fixture_reads_a_real_rolled_back_journal_without_metadata()
         .expect("rolled back journal must be detected");
     assert_eq!(state.install_id, INSTALL_ID);
     assert_eq!(
-        state.kind,
+        state.state.kind(),
         incodex_cli::legacy_typescript::LegacyStateKind::RolledBack
     );
-    assert!(state.current.is_none());
-    assert!(state.manifest.is_none());
-    assert!(state.runtime.is_none());
-    assert!(state.original_app.is_none());
+    assert!(matches!(
+        state.state,
+        incodex_cli::legacy_typescript::LegacyState::RolledBack
+    ));
 }
 
 #[test]
@@ -587,13 +575,13 @@ fn legacy_typescript_fixture_does_not_attach_committed_metadata_to_an_interrupte
         .expect("post-metadata interrupted state should be structurally readable")
         .expect("journal should be detected");
     assert_eq!(
-        state.kind,
+        state.state.kind(),
         incodex_cli::legacy_typescript::LegacyStateKind::Interrupted
     );
-    assert!(state.current.is_none());
-    assert!(state.manifest.is_none());
-    assert!(state.runtime.is_none());
-    assert!(state.original_app.is_none());
+    assert!(matches!(
+        state.state,
+        incodex_cli::legacy_typescript::LegacyState::Interrupted
+    ));
 }
 
 #[test]
@@ -613,13 +601,13 @@ fn legacy_typescript_fixture_prefers_a_new_orphan_journal_over_an_old_committed_
         .expect("new orphan journal must not be hidden by current.json");
     assert_eq!(state.install_id, ORPHAN_INSTALL_ID);
     assert_eq!(
-        state.kind,
+        state.state.kind(),
         incodex_cli::legacy_typescript::LegacyStateKind::Interrupted
     );
-    assert!(state.current.is_none());
-    assert!(state.manifest.is_none());
-    assert!(state.runtime.is_none());
-    assert!(state.original_app.is_none());
+    assert!(matches!(
+        state.state,
+        incodex_cli::legacy_typescript::LegacyState::Interrupted
+    ));
 }
 
 #[test]
