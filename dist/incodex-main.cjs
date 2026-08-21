@@ -46,7 +46,15 @@ function sessionFromEnv() {
     const root = process.env.INCODEX_SESSION_ROOT || (home ? safeHome.sessionRootFromHome(home) : "");
     if (!home || !sessionId)
         return null;
-    return { home, sessionId, root };
+    const ino = Number(process.env.INCODEX_SESSION_INO);
+    const dev = Number(process.env.INCODEX_SESSION_DEV);
+    return {
+        home,
+        sessionId,
+        root,
+        ino: Number.isSafeInteger(ino) ? ino : null,
+        dev: Number.isSafeInteger(dev) ? dev : null,
+    };
 }
 function pickFile(name) {
     const { resolveRuntimeFile } = require("./incodex-runtime-load.cjs");
@@ -75,11 +83,21 @@ function burnIncognitoHome() {
     const home = session?.root || session?.home || process.env.CODEX_HOME;
     if (!home)
         return;
+    if (!session || session.ino == null || session.dev == null) {
+        logLaunch("burn-refused", { home, reason: "session identity is unavailable" });
+        return;
+    }
     try {
-        safeHome.burnSessionHome(home, {
+        const expected = {
             userRoot: USER_ROOT,
-            sessionId: session?.sessionId || process.env.INCODEX_SESSION_ID,
-        });
+            sessionId: session.sessionId,
+            ino: session.ino,
+            dev: session.dev,
+        };
+        const removed = safeHome.burnSessionHome(home, expected);
+        if (removed && !safeHome.writeBurnProof(home, expected)) {
+            logLaunch("burn-proof-write-failed", { home });
+        }
         logLaunch("burn", { home });
     }
     catch (error) {
@@ -317,6 +335,49 @@ const launchHolder = { current: null };
 function launchIncognito() {
     return instance.singleFlight(launchHolder, launchIncognitoOnce);
 }
+function prepareIncognitoSession(options = {}) {
+    const { userRoot = USER_ROOT, sourceHomePath = sourceHome(), appTarget = targetId(), pid = process.pid, createSessionHome = safeHome.createSessionHome, copySettings = safeHome.copySettings, burnSessionHome = safeHome.burnSessionHome, log = logLaunch, } = options;
+    let session;
+    try {
+        session = createSessionHome(userRoot, {
+            targetId: appTarget,
+            pid,
+            sourceHome: sourceHomePath,
+        });
+        copySettings(session.home, sourceHomePath);
+        return { ok: true, session };
+    }
+    catch (error) {
+        if (session) {
+            try {
+                burnSessionHome(session.root, {
+                    userRoot,
+                    sessionId: session.sessionId,
+                    ino: session.ino,
+                    dev: session.dev,
+                });
+            }
+            catch (cleanupError) {
+                try {
+                    log("prepare-burn-refused", {
+                        error: String(cleanupError),
+                        sessionId: session.sessionId,
+                    });
+                }
+                catch {
+                    /* Cleanup logging must not replace the preparation failure. */
+                }
+            }
+        }
+        try {
+            log("prepare-failed", { error: String(error) });
+        }
+        catch {
+            /* Logging is best effort; the caller still receives prepare-failed. */
+        }
+        return { ok: false, reason: "prepare-failed" };
+    }
+}
 async function launchIncognitoOnce() {
     let alreadyRunning;
     try {
@@ -337,23 +398,19 @@ async function launchIncognitoOnce() {
     catch (error) {
         logLaunch("janitor-failed", { error: String(error) });
     }
-    let session;
-    try {
-        session = safeHome.createSessionHome(USER_ROOT, {
-            targetId: appTarget,
-            pid: process.pid,
-            sourceHome: sourceHome(),
-        });
-        safeHome.copySettings(session.home, sourceHome(), USER_ROOT);
-    }
-    catch (error) {
-        logLaunch("prepare-failed", { error: String(error) });
-        return Promise.resolve({ ok: false, reason: "prepare-failed" });
-    }
+    const prepared = prepareIncognitoSession();
+    if (!prepared.ok)
+        return Promise.resolve(prepared);
+    const { session } = prepared;
     const bin = process.execPath;
     if (!bin) {
         try {
-            safeHome.burnSessionHome(session.root, { userRoot: USER_ROOT, sessionId: session.sessionId });
+            safeHome.burnSessionHome(session.root, {
+                userRoot: USER_ROOT,
+                sessionId: session.sessionId,
+                ino: session.ino,
+                dev: session.dev,
+            });
         }
         catch {
             /* ignore */
@@ -389,6 +446,8 @@ async function launchIncognitoOnce() {
                     INCODEX_INCOGNITO: "1",
                     INCODEX_SESSION_ID: session.sessionId,
                     INCODEX_SESSION_ROOT: session.root,
+                    INCODEX_SESSION_INO: String(session.ino),
+                    INCODEX_SESSION_DEV: String(session.dev),
                     CODEX_ELECTRON_USER_DATA_PATH: session.chromium,
                     INCODEX_SOURCE_BOUNDS: sourceBounds,
                     INCODEX_SOURCE_HOME: sourceHome(),
@@ -398,7 +457,12 @@ async function launchIncognitoOnce() {
         catch (error) {
             logLaunch("spawn-threw", { error: String(error) });
             try {
-                safeHome.burnSessionHome(session.root, { userRoot: USER_ROOT, sessionId: session.sessionId });
+                safeHome.burnSessionHome(session.root, {
+                    userRoot: USER_ROOT,
+                    sessionId: session.sessionId,
+                    ino: session.ino,
+                    dev: session.dev,
+                });
             }
             catch {
                 /* ignore */
@@ -409,7 +473,12 @@ async function launchIncognitoOnce() {
         if (!child.pid) {
             logLaunch("spawn-no-pid");
             try {
-                safeHome.burnSessionHome(session.root, { userRoot: USER_ROOT, sessionId: session.sessionId });
+                safeHome.burnSessionHome(session.root, {
+                    userRoot: USER_ROOT,
+                    sessionId: session.sessionId,
+                    ino: session.ino,
+                    dev: session.dev,
+                });
             }
             catch {
                 /* ignore */
@@ -423,10 +492,20 @@ async function launchIncognitoOnce() {
         });
         child.on("exit", (code) => {
             logLaunch("child-exit", { code, sessionId: session.sessionId });
-            const expected = { userRoot: USER_ROOT, sessionId: session.sessionId };
+            const expected = {
+                userRoot: USER_ROOT,
+                sessionId: session.sessionId,
+                ino: session.ino,
+                dev: session.dev,
+            };
+            const childProof = safeHome.readBurnProof(session.root, USER_ROOT, session.sessionId);
+            let originalRemoved = Boolean(childProof && childProof.ino === expected.ino && childProof.dev === expected.dev);
             const tryBurn = (attempt) => {
+                const attemptExpected = safeHome.cleanupExpectedForAttempt(expected, originalRemoved);
                 try {
-                    safeHome.burnSessionHome(session.root, expected);
+                    const removed = safeHome.burnSessionHome(session.root, attemptExpected);
+                    if (removed)
+                        originalRemoved = true;
                 }
                 catch (error) {
                     if (attempt < 5) {
@@ -438,8 +517,11 @@ async function launchIncognitoOnce() {
                 }
                 // Thread-writer / plugin cache can recreate the folder after a
                 // successful rm. Keep sweeping for a short window.
-                if (attempt < 5 && fs.existsSync(session.root)) {
+                if (attempt < 5 && (originalRemoved || fs.existsSync(session.root))) {
                     setTimeout(() => tryBurn(attempt + 1), 400 * attempt);
+                }
+                else if (!fs.existsSync(session.root)) {
+                    safeHome.clearBurnProof(USER_ROOT, session.sessionId);
                 }
             };
             tryBurn(1);
@@ -659,7 +741,7 @@ async function attachElectron() {
 }
 const startupGate = attachElectron();
 if (typeof module !== "undefined")
-    module.exports = { startupGate };
+    module.exports = { startupGate, prepareIncognitoSession };
 startupGate.catch((error) => {
     console.error("[incodex] main attach failed", error);
 });

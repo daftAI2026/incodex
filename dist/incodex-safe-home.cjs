@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.LOG_LIMIT = exports.FILE_MODE = exports.DIR_MODE = exports.SETTINGS_FILES = exports.READY_NAME = exports.LOCK_NAME = exports.OWNER_NAME = exports.LOGS_NAME = exports.IDENTITY_NAME = exports.SESSIONS_NAME = void 0;
+exports.LOG_LIMIT = exports.FILE_MODE = exports.DIR_MODE = exports.SETTINGS_FILES = exports.READY_NAME = exports.LOCK_NAME = exports.OWNER_NAME = exports.LOGS_NAME = exports.SESSIONS_NAME = void 0;
 exports.assertNotSymlink = assertNotSymlink;
 exports.assertInsideParent = assertInsideParent;
 exports.ensurePrivateDir = ensurePrivateDir;
@@ -9,8 +9,11 @@ exports.writePrivateFile = writePrivateFile;
 exports.exclusiveCopyFile = exclusiveCopyFile;
 exports.createSessionHome = createSessionHome;
 exports.burnSessionHome = burnSessionHome;
+exports.cleanupExpectedForAttempt = cleanupExpectedForAttempt;
+exports.writeBurnProof = writeBurnProof;
+exports.readBurnProof = readBurnProof;
+exports.clearBurnProof = clearBurnProof;
 exports.copySettings = copySettings;
-exports.syncIdentity = syncIdentity;
 exports.resolveSourceHome = resolveSourceHome;
 exports.isManagedSessionHome = isManagedSessionHome;
 exports.sweepOrphanSessions = sweepOrphanSessions;
@@ -25,8 +28,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const SESSIONS_NAME = "sessions";
 exports.SESSIONS_NAME = SESSIONS_NAME;
-const IDENTITY_NAME = "identity";
-exports.IDENTITY_NAME = IDENTITY_NAME;
+const BURN_PROOF_PREFIX = ".incodex-burned-";
+const BURN_PROOF_SUFFIX = ".json";
 const LOGS_NAME = "logs";
 exports.LOGS_NAME = LOGS_NAME;
 const OWNER_NAME = "owner.json";
@@ -136,7 +139,6 @@ function sessionsBase(userRoot, targetId) {
 function createSessionHome(userRoot, options = {}) {
     const parent = path.dirname(userRoot);
     ensurePrivateDir(userRoot, parent);
-    ensurePrivateDir(path.join(userRoot, IDENTITY_NAME), userRoot);
     ensurePrivateDir(path.join(userRoot, LOGS_NAME), userRoot);
     const sessionParent = sessionsBase(userRoot, options.targetId);
     const root = fs.mkdtempSync(path.join(sessionParent.real, "s-"));
@@ -165,7 +167,6 @@ function createSessionHome(userRoot, options = {}) {
         root: realRoot,
         home: home.real,
         chromium: chromium.real,
-        identity: realExisting(path.join(userRoot, IDENTITY_NAME)),
         ino: rootStat.ino,
         dev: rootStat.dev,
     };
@@ -204,7 +205,7 @@ function burnSessionHome(target, expected) {
     const home = sessionRootFromHome(target);
     const stats = assertNotSymlink(home, "session root");
     if (!stats)
-        return;
+        return false;
     if (!stats.isDirectory()) {
         throw new Error(`[incodex] refuse to burn non-directory: ${home}`);
     }
@@ -219,36 +220,97 @@ function burnSessionHome(target, expected) {
     assertInsideParent(realHome, sessions);
     assertBurnIdentity(home, expected);
     fs.rmSync(home, { recursive: true, force: false });
+    return true;
 }
-function removePrivateFile(dest) {
-    const stats = assertNotSymlink(dest, "file");
-    if (!stats)
-        return;
-    fs.rmSync(dest);
+function cleanupExpectedForAttempt(expected, originalRemoved) {
+    if (!originalRemoved)
+        return expected;
+    // +--------------------------------------------------------------------+
+    // | 只有删除过有 inode/dev 证明的原 root，才允许同一路径重建后降级。 |
+    // +--------------------------------------------------------------------+
+    const { ino: _ino, dev: _dev, ...late } = expected;
+    return late;
 }
-function syncIdentity(userRoot, sourceHome) {
-    const identity = ensurePrivateDir(path.join(userRoot, IDENTITY_NAME), userRoot);
-    for (const name of SETTINGS_FILES) {
-        const src = path.join(sourceHome, name);
-        const dest = path.join(identity.real, name);
-        if (fs.existsSync(src)) {
-            writePrivateFile(dest, fs.readFileSync(src));
-        }
-        else {
-            removePrivateFile(dest);
-        }
+function validSessionId(sessionId) {
+    return typeof sessionId === "string" && /^s-[A-Za-z0-9]+$/.test(sessionId);
+}
+function burnProofPath(userRoot, sessionId) {
+    if (!validSessionId(sessionId))
+        return null;
+    const sessions = path.join(userRoot, SESSIONS_NAME);
+    const stats = assertNotSymlink(sessions, "sessions directory");
+    if (!stats?.isDirectory())
+        return null;
+    const realSessions = realExisting(sessions);
+    const proof = path.join(realSessions, `${BURN_PROOF_PREFIX}${sessionId}${BURN_PROOF_SUFFIX}`);
+    assertInsideParent(proof, realSessions);
+    return proof;
+}
+function writeBurnProof(root, expected) {
+    if (!expected || !validSessionId(expected.sessionId))
+        return false;
+    if (!Number.isSafeInteger(expected.ino) || !Number.isSafeInteger(expected.dev))
+        return false;
+    try {
+        const proof = burnProofPath(expected.userRoot, expected.sessionId);
+        if (!proof)
+            return false;
+        writePrivateFile(proof, `${JSON.stringify({
+            sessionId: expected.sessionId,
+            root: path.resolve(root),
+            ino: expected.ino,
+            dev: expected.dev,
+        })}\n`, { exclusive: true });
+        return true;
     }
-    return identity.real;
+    catch {
+        return false;
+    }
 }
-function copySettings(home, sourceHome, userRoot) {
+function readBurnProof(root, userRoot, sessionId) {
+    if (!validSessionId(sessionId))
+        return null;
+    try {
+        const proof = burnProofPath(userRoot, sessionId);
+        if (!proof || !assertNotSymlink(proof, "burn proof"))
+            return null;
+        const rootStats = lstatOrNull(root);
+        if (rootStats?.isSymbolicLink())
+            return null;
+        const currentRoot = rootStats ? realExisting(root) : path.resolve(root);
+        const record = JSON.parse(fs.readFileSync(proof, "utf8"));
+        if (record.sessionId !== sessionId ||
+            record.root !== currentRoot ||
+            !Number.isSafeInteger(record.ino) ||
+            !Number.isSafeInteger(record.dev)) {
+            return null;
+        }
+        return { userRoot, sessionId, ino: record.ino, dev: record.dev };
+    }
+    catch {
+        return null;
+    }
+}
+function clearBurnProof(userRoot, sessionId) {
+    try {
+        const proof = burnProofPath(userRoot, sessionId);
+        if (!proof || !assertNotSymlink(proof, "burn proof"))
+            return false;
+        fs.rmSync(proof, { force: false });
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+function copySettings(home, sourceHome) {
     const homeStat = assertNotSymlink(home, "session home");
     if (!homeStat?.isDirectory())
         throw new Error(`[incodex] session home missing: ${home}`);
-    const identityDir = syncIdentity(userRoot, sourceHome);
     let copied = 0;
     for (const name of SETTINGS_FILES) {
-        const src = path.join(identityDir, name);
-        if (!fs.existsSync(src))
+        const src = path.join(sourceHome, name);
+        if (!assertNotSymlink(src, "source setting"))
             continue;
         exclusiveCopyFile(src, path.join(home, name));
         copied += 1;
@@ -275,21 +337,40 @@ function sweepOrphanSessions(userRoot, options = {}) {
     for (const root of roots) {
         if (options.keepSessionId && path.basename(root) === options.keepSessionId)
             continue;
-        try {
-            const owner = readOwner(root);
-            if (owner.pid && pidAlive(owner.pid))
-                continue;
-            burnSessionHome(root, { userRoot, sessionId: owner.sessionId });
-            swept += 1;
-        }
-        catch {
+        const sessionId = path.basename(root);
+        const proof = readBurnProof(root, userRoot, sessionId);
+        if (proof) {
             try {
-                burnSessionHome(root, { userRoot });
-                swept += 1;
+                const removed = burnSessionHome(root, cleanupExpectedForAttempt(proof, true));
+                if (removed) {
+                    clearBurnProof(userRoot, sessionId);
+                    swept += 1;
+                }
             }
             catch {
-                /* leave it if we cannot prove it is safe */
+                /* leave a proven late root for the next bounded janitor pass */
             }
+            continue;
+        }
+        try {
+            const owner = readOwner(root);
+            if (!Number.isInteger(owner.pid))
+                continue;
+            if (owner.pid && pidAlive(owner.pid))
+                continue;
+            if (!Number.isSafeInteger(owner.ino) || !Number.isSafeInteger(owner.dev))
+                continue;
+            const removed = burnSessionHome(root, {
+                userRoot,
+                sessionId: owner.sessionId,
+                ino: owner.ino,
+                dev: owner.dev,
+            });
+            if (removed)
+                swept += 1;
+        }
+        catch {
+            /* leave it if we cannot prove it is safe */
         }
     }
     for (const name of ["incognito-home", "incognito-chromium"]) {

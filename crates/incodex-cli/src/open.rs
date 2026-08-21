@@ -30,6 +30,8 @@ pub struct OpenPlan {
     pub chromium: PathBuf,
     pub session_id: String,
     pub session_root: PathBuf,
+    pub session_ino: u64,
+    pub session_dev: u64,
     pub debug_port: u16,
     pub locale: Option<String>,
     pub source_bounds: Option<WindowBounds>,
@@ -186,7 +188,7 @@ pub fn prepare_incognito_open(
         pid,
         &source_home.to_string_lossy(),
     )?;
-    if let Err(error) = copy_settings(&session.home, source_home, user_root) {
+    if let Err(error) = copy_settings(&session.home, source_home) {
         let _ = burn_session_home(
             &session.root,
             &BurnExpected {
@@ -218,6 +220,8 @@ fn plan_from_session(bin: PathBuf, session: SessionHome, source_home: &Path) -> 
                 "INCODEX_SESSION_ROOT".into(),
                 session.root.display().to_string(),
             ),
+            ("INCODEX_SESSION_INO".into(), session.ino.to_string()),
+            ("INCODEX_SESSION_DEV".into(), session.dev.to_string()),
             (
                 "CODEX_ELECTRON_USER_DATA_PATH".into(),
                 session.chromium.display().to_string(),
@@ -231,6 +235,8 @@ fn plan_from_session(bin: PathBuf, session: SessionHome, source_home: &Path) -> 
         chromium: session.chromium,
         session_id: session.session_id,
         session_root: session.root,
+        session_ino: session.ino,
+        session_dev: session.dev,
         bin,
         debug_port,
         locale: read_locale_override(source_home),
@@ -290,7 +296,7 @@ pub fn wait_and_burn(
         user_root,
         retry_delay_ms,
         spawn_plan,
-        |root, expected| burn_session_home(root, expected).map_err(|err| err),
+        |root, expected| burn_session_home(root, expected),
     )
 }
 
@@ -431,7 +437,7 @@ pub fn wait_and_burn_with<S, B>(
 ) -> Result<(OpenProcessResult, CleanupResult), String>
 where
     S: FnOnce(&OpenPlan) -> Result<OpenProcessResult, String>,
-    B: FnMut(&Path, &BurnExpected<'_>) -> Result<(), String>,
+    B: FnMut(&Path, &BurnExpected<'_>) -> Result<bool, String>,
 {
     let process = match spawn(plan) {
         Ok(process) => process,
@@ -440,8 +446,8 @@ where
     let expected = BurnExpected {
         user_root,
         session_id: Some(&plan.session_id),
-        ino: None,
-        dev: None,
+        ino: Some(plan.session_ino),
+        dev: Some(plan.session_dev),
     };
     let cleanup = burn_with_retries(&plan.session_root, &expected, retry_delay_ms, &mut burn);
     Ok((process, cleanup))
@@ -454,26 +460,49 @@ fn burn_with_retries<B>(
     burn: &mut B,
 ) -> CleanupResult
 where
-    B: FnMut(&Path, &BurnExpected<'_>) -> Result<(), String>,
+    B: FnMut(&Path, &BurnExpected<'_>) -> Result<bool, String>,
 {
     let mut reason = "session directory still present".to_string();
+    let mut original_removed = false;
+    let late_expected = BurnExpected {
+        user_root: expected.user_root,
+        session_id: expected.session_id,
+        ino: None,
+        dev: None,
+    };
     for attempt in 1u8..=5 {
-        if let Err(error) = burn(session_root, expected) {
-            reason = error;
-            if attempt == 5 {
-                return if session_root.exists() {
-                    CleanupResult::Retained {
-                        attempts: attempt,
-                        retained_path: session_root.to_path_buf(),
-                        reason,
-                    }
-                } else {
-                    CleanupResult::Removed { attempts: attempt }
-                };
+        let attempt_expected = if original_removed {
+            &late_expected
+        } else {
+            expected
+        };
+        match burn(session_root, attempt_expected) {
+            Ok(removed) => {
+                // +--------------------------------------------------------------------+
+                // | 只有本次已证明删除创建时 root，后续重建才允许路径证明 fallback。 |
+                // +--------------------------------------------------------------------+
+                original_removed |= removed;
+            }
+            Err(error) => {
+                reason = error;
+                if attempt == 5 {
+                    return if session_root.exists() {
+                        CleanupResult::Retained {
+                            attempts: attempt,
+                            retained_path: session_root.to_path_buf(),
+                            reason,
+                        }
+                    } else {
+                        CleanupResult::Removed { attempts: attempt }
+                    };
+                }
             }
         }
         if !session_root.exists() {
-            return CleanupResult::Removed { attempts: attempt };
+            if !original_removed {
+                return CleanupResult::Removed { attempts: attempt };
+            }
+            // 已证明原始 root 删除后，仍保留当前有界观察窗口，捕捉迟到的重建。
         }
         if attempt < 5 && retry_delay_ms > 0 {
             thread::sleep(Duration::from_millis(retry_delay_ms * u64::from(attempt)));
@@ -553,247 +582,5 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-
-    fn temp_root() -> PathBuf {
-        let n = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!("incodex-open-unit-{n}"));
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    fn fake_app(root: &Path) -> PathBuf {
-        let app = root.join("ChatGPT.app");
-        let mac = app.join("Contents/MacOS");
-        fs::create_dir_all(&mac).unwrap();
-        fs::write(
-            app.join("Contents/Info.plist"),
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>ChatGPT</string></dict></plist>\n",
-        )
-        .unwrap();
-        let executable = mac.join("ChatGPT");
-        fs::write(&executable, "#!/bin/sh\nexit 0\n").unwrap();
-        let mut permissions = fs::metadata(&executable).unwrap().permissions();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            permissions.set_mode(0o755);
-        }
-        fs::set_permissions(executable, permissions).unwrap();
-        app
-    }
-
-    #[test]
-    fn copy_failure_burns_the_session() {
-        let root = temp_root();
-        let app = fake_app(&root);
-        let user = root.join("home");
-        let source = root.join("codex");
-        fs::create_dir_all(&source).unwrap();
-        let bin = resolve_executable(&app).unwrap();
-        let target_id = target_id_from_exec(&bin.to_string_lossy());
-        let session = create_session_home(&user, Some(&target_id), 1, "").unwrap();
-        fs::remove_dir_all(&session.home).unwrap();
-        assert!(copy_settings(&session.home, &source, &user).is_err());
-        burn_session_home(
-            &session.root,
-            &BurnExpected {
-                user_root: &user,
-                session_id: Some(&session.session_id),
-                ino: Some(session.ino),
-                dev: Some(session.dev),
-            },
-        )
-        .unwrap();
-        assert!(!session.root.exists());
-    }
-
-    #[test]
-    fn open_progress_distinguishes_launch_ready_and_waiting() {
-        let (opening, opened, waiting) = open_progress_copy();
-        assert_eq!(opening, "Opening incognito Codex window");
-        assert_eq!(opened, "Opened. Incognito Codex window is ready.");
-        assert_eq!(waiting, "Waiting for the window to close");
-    }
-
-    #[test]
-    fn ready_published_between_status_poll_and_child_exit_is_not_lost() {
-        let (status_tx, status_rx) = mpsc::channel();
-        let readiness = InjectionReadiness::default();
-
-        // spawn_plan polls status_rx before child.try_wait. The first poll is
-        // empty; the producer then publishes Ready while the child exits.
-        assert!(matches!(
-            status_rx.try_recv(),
-            Err(mpsc::TryRecvError::Empty)
-        ));
-        publish_injection_status(&status_tx, &readiness, InjectionStatus::Ready);
-
-        // No second channel poll happens before this child-exit observation.
-        // The producer's acceptance must already be visible here.
-        assert!(
-            readiness.is_ready(),
-            "Ready published between lifecycle polls must survive child exit"
-        );
-    }
-
-    #[test]
-    fn lifecycle_exit_codes_distinguish_process_ui_and_cleanup_failures() {
-        let removed = CleanupResult::Removed { attempts: 1 };
-        let retained = CleanupResult::Retained {
-            attempts: 5,
-            retained_path: PathBuf::from("/tmp/session"),
-            reason: "EPERM".into(),
-        };
-        assert_eq!(
-            OpenProcessResult::Exited {
-                code: 0,
-                ui_ready: true,
-            }
-            .exit_code(&removed),
-            OpenExitCode::Success
-        );
-        assert_eq!(
-            OpenProcessResult::SpawnFailed {
-                error: "ENOENT".into()
-            }
-            .exit_code(&removed),
-            OpenExitCode::ProcessFailure
-        );
-        assert_eq!(
-            OpenProcessResult::Exited {
-                code: 7,
-                ui_ready: true,
-            }
-            .exit_code(&removed),
-            OpenExitCode::ProcessFailure
-        );
-        assert_eq!(
-            OpenProcessResult::Exited {
-                code: 0,
-                ui_ready: false,
-            }
-            .exit_code(&removed),
-            OpenExitCode::UiInjectionFailure
-        );
-        assert_eq!(
-            OpenProcessResult::Exited {
-                code: 0,
-                ui_ready: true,
-            }
-            .exit_code(&retained),
-            OpenExitCode::CleanupRetained
-        );
-    }
-
-    #[test]
-    fn burn_failure_does_not_claim_removed() {
-        let root = temp_root();
-        let app = fake_app(&root);
-        let user = root.join("home");
-        let source = root.join("codex");
-        fs::create_dir_all(&source).unwrap();
-        fs::write(source.join("auth.json"), "{}\n").unwrap();
-        let plan = prepare_incognito_open(&app, &user, &source, 1).unwrap();
-        let (process, cleanup) = wait_and_burn_with(
-            &plan,
-            &user,
-            0,
-            |_| {
-                Ok(OpenProcessResult::Exited {
-                    code: 0,
-                    ui_ready: true,
-                })
-            },
-            |_, _| Err("EPERM".into()),
-        )
-        .unwrap();
-        assert_eq!(
-            process.exit_code(&cleanup),
-            OpenExitCode::CleanupRetained,
-            "retained session must have a distinct lifecycle code"
-        );
-        assert!(plan.session_root.exists());
-        assert_eq!(
-            cleanup,
-            CleanupResult::Retained {
-                attempts: 5,
-                retained_path: plan.session_root.clone(),
-                reason: "EPERM".into(),
-            }
-        );
-        let (ok, message) = format_session_cleanup(&cleanup);
-        assert!(!ok);
-        assert!(!message.to_lowercase().contains("removed"));
-    }
-
-    #[test]
-    fn spawn_error_still_burns() {
-        let root = temp_root();
-        let app = fake_app(&root);
-        let user = root.join("home");
-        let source = root.join("codex");
-        fs::create_dir_all(&source).unwrap();
-        fs::write(source.join("auth.json"), "{}\n").unwrap();
-        let plan = prepare_incognito_open(&app, &user, &source, 1).unwrap();
-        let (_process, cleanup) = wait_and_burn_with(
-            &plan,
-            &user,
-            0,
-            |_| Err("ENOENT".into()),
-            |root, expected| burn_session_home(root, expected),
-        )
-        .unwrap();
-        assert!(!plan.session_root.exists());
-        assert!(cleanup.removed());
-    }
-
-    #[test]
-    fn cdp_port_failure_is_not_success() {
-        let root = temp_root();
-        let app = fake_app(&root);
-        let user = root.join("home");
-        let source = root.join("codex");
-        fs::create_dir_all(&source).unwrap();
-        fs::write(source.join("auth.json"), "{}\n").unwrap();
-        let mut plan = prepare_incognito_open(&app, &user, &source, 1).unwrap();
-        plan.debug_port = 0;
-        let process = spawn_plan(&plan).unwrap();
-        assert_eq!(
-            process.exit_code(&CleanupResult::Removed { attempts: 1 }),
-            OpenExitCode::UiInjectionFailure,
-            "missing CDP port must be a UI acceptance failure"
-        );
-        burn_session_home(
-            &plan.session_root,
-            &BurnExpected {
-                user_root: &user,
-                session_id: Some(&plan.session_id),
-                ino: None,
-                dev: None,
-            },
-        )
-        .unwrap();
-    }
-
-    #[test]
-    fn locale_override_is_carried_into_the_cdp_injection_plan() {
-        let root = temp_root();
-        let app = fake_app(&root);
-        let user = root.join("home");
-        let source = root.join("codex");
-        fs::create_dir_all(&source).unwrap();
-        fs::write(
-            source.join("config.toml"),
-            "model = \"test\"\nlocaleOverride = \"zh-CN\"\n",
-        )
-        .unwrap();
-        let plan = prepare_incognito_open(&app, &user, &source, 1).unwrap();
-        assert_eq!(plan.locale.as_deref(), Some("zh-CN"));
-    }
-}
+#[path = "open_tests.rs"]
+mod open_tests;

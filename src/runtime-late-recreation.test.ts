@@ -1,0 +1,95 @@
+import { describe, expect, test } from "bun:test";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
+import * as runtimeSafeHome from "./runtime/incodex-safe-home.cts";
+
+function tempRoot(): string {
+  return mkdtempSync(join("/tmp", "incodex-late-recreation-"));
+}
+
+function prepareDistinctReplacement(sessionRoot: string, fileName: string, content: string): string {
+  const original = lstatSync(sessionRoot);
+  const replacement = join(dirname(sessionRoot), `${basename(sessionRoot)}-replacement`);
+  mkdirSync(replacement);
+  expect(lstatSync(replacement).ino).not.toBe(original.ino);
+  writeFileSync(join(replacement, fileName), content);
+  return replacement;
+}
+
+function installReplacement(sessionRoot: string, replacement: string): void {
+  rmSync(sessionRoot, { recursive: true, force: true });
+  renameSync(replacement, sessionRoot);
+}
+
+describe("Runtime late session recreation", () => {
+  test("only a proven deletion permits path-only cleanup of a late replacement", () => {
+    const cleanupExpectedForAttempt = (runtimeSafeHome as any).cleanupExpectedForAttempt;
+    expect(typeof cleanupExpectedForAttempt).toBe("function");
+
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const session = runtimeSafeHome.createSessionHome(userRoot, { pid: 999999 });
+    const expected = {
+      userRoot,
+      sessionId: session.sessionId,
+      ino: session.ino,
+      dev: session.dev,
+    };
+    const replacement = prepareDistinctReplacement(session.root, "late-plugin-cache", "late\n");
+
+    const firstExpected = cleanupExpectedForAttempt(expected, false);
+    expect(firstExpected.ino).toBe(session.ino);
+    expect(firstExpected.dev).toBe(session.dev);
+    expect(runtimeSafeHome.burnSessionHome(session.root, firstExpected)).toBe(true);
+
+    installReplacement(session.root, replacement);
+    const lateExpected = cleanupExpectedForAttempt(expected, true);
+    expect(lateExpected.ino).toBeUndefined();
+    expect(lateExpected.dev).toBeUndefined();
+    expect(runtimeSafeHome.burnSessionHome(session.root, lateExpected)).toBe(true);
+    expect(existsSync(session.root)).toBe(false);
+  });
+
+  test("replacement before the first proven deletion keeps inode/device binding", () => {
+    const cleanupExpectedForAttempt = (runtimeSafeHome as any).cleanupExpectedForAttempt;
+    expect(typeof cleanupExpectedForAttempt).toBe("function");
+
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const session = runtimeSafeHome.createSessionHome(userRoot, { pid: 999999 });
+    const expected = {
+      userRoot,
+      sessionId: session.sessionId,
+      ino: session.ino,
+      dev: session.dev,
+    };
+    const replacement = prepareDistinctReplacement(session.root, "replacement", "keep\n");
+    installReplacement(session.root, replacement);
+
+    const conservative = cleanupExpectedForAttempt(expected, false);
+    expect(() => runtimeSafeHome.burnSessionHome(session.root, conservative)).toThrow(/inode|device/);
+    expect(existsSync(join(session.root, "replacement"))).toBe(true);
+  });
+
+  test("a child deletion proof lets orphan cleanup remove a late root replacement", () => {
+    const writeBurnProof = (runtimeSafeHome as any).writeBurnProof;
+    expect(typeof writeBurnProof).toBe("function");
+
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const session = runtimeSafeHome.createSessionHome(userRoot, { pid: 999999 });
+    const expected = {
+      userRoot,
+      sessionId: session.sessionId,
+      ino: session.ino,
+      dev: session.dev,
+    };
+    const replacement = prepareDistinctReplacement(session.root, "late-plugin-cache", "late\n");
+    expect(runtimeSafeHome.burnSessionHome(session.root, expected)).toBe(true);
+    expect(writeBurnProof(session.root, expected)).toBe(true);
+
+    installReplacement(session.root, replacement);
+    expect(runtimeSafeHome.sweepOrphanSessions(userRoot)).toBe(1);
+    expect(existsSync(session.root)).toBe(false);
+  });
+});

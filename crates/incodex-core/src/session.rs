@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const SESSIONS_NAME: &str = "sessions";
-const IDENTITY_NAME: &str = "identity";
 const LOGS_NAME: &str = "logs";
 const OWNER_NAME: &str = "owner.json";
 const LOCK_NAME: &str = "lock";
@@ -39,7 +38,6 @@ pub fn create_session_home(
 ) -> Result<SessionHome, String> {
     let parent = user_root.parent().ok_or("session user root has no parent")?;
     ensure_private_dir(user_root, parent)?;
-    ensure_private_dir(&user_root.join(IDENTITY_NAME), user_root)?;
     ensure_private_dir(&user_root.join(LOGS_NAME), user_root)?;
     let session_parent = sessions_base(user_root, target_id)?;
     let root = mkdtemp(&session_parent)?;
@@ -87,16 +85,15 @@ fn unix_now() -> String {
     format!("{secs}")
 }
 
-pub fn copy_settings(home: &Path, source_home: &Path, user_root: &Path) -> Result<usize, String> {
+pub fn copy_settings(home: &Path, source_home: &Path) -> Result<usize, String> {
     let home_stat = assert_not_symlink(home, "session home")?;
     if !home_stat.map(|s| s.is_dir()).unwrap_or(false) {
         return Err(format!("session home missing: {}", home.display()));
     }
-    let identity_dir = sync_identity(user_root, source_home)?;
     let mut copied = 0;
     for name in SETTINGS_FILES {
-        let src = identity_dir.join(name);
-        if !src.exists() {
+        let src = source_home.join(name);
+        if assert_not_symlink(&src, "source setting")?.is_none() {
             continue;
         }
         exclusive_copy_file(&src, &home.join(name))?;
@@ -105,10 +102,10 @@ pub fn copy_settings(home: &Path, source_home: &Path, user_root: &Path) -> Resul
     Ok(copied)
 }
 
-pub fn burn_session_home(target: &Path, expected: &BurnExpected<'_>) -> Result<(), String> {
+pub fn burn_session_home(target: &Path, expected: &BurnExpected<'_>) -> Result<bool, String> {
     let home = session_root_from_home(target);
     let stats = match assert_not_symlink(&home, "session root")? {
-        None => return Ok(()),
+        None => return Ok(false),
         Some(stats) => stats,
     };
     if !stats.is_dir() {
@@ -129,7 +126,7 @@ pub fn burn_session_home(target: &Path, expected: &BurnExpected<'_>) -> Result<(
     assert_inside_parent(&real_home, &sessions)?;
     assert_burn_identity(&home, expected)?;
     fs::remove_dir_all(&home).map_err(|err| err.to_string())?;
-    Ok(())
+    Ok(true)
 }
 
 pub fn sweep_orphan_sessions(user_root: &Path, target_id: Option<&str>) -> usize {
@@ -143,22 +140,44 @@ pub fn sweep_orphan_sessions(user_root: &Path, target_id: Option<&str>) -> usize
     let mut swept = 0;
     for root in roots {
         let owner_path = root.join(OWNER_NAME);
-        if let Ok(body) = fs::read_to_string(&owner_path) {
-            if let Ok(owner) = serde_json::from_str::<serde_json::Value>(&body) {
-                if let Some(pid) = owner.get("pid").and_then(|v| v.as_i64()) {
-                    if pid_alive(pid as i32) {
-                        continue;
-                    }
-                }
-            }
+        let body = match fs::read_to_string(&owner_path) {
+            Ok(body) => body,
+            Err(_) => continue,
+        };
+        let owner = match serde_json::from_str::<serde_json::Value>(&body) {
+            Ok(owner) => owner,
+            Err(_) => continue,
+        };
+        let session_id = match owner.get("sessionId").and_then(|v| v.as_str()) {
+            Some(value) if !value.is_empty() => value.to_string(),
+            _ => continue,
+        };
+        let pid = match owner
+            .get("pid")
+            .and_then(|v| v.as_i64())
+            .and_then(|value| i32::try_from(value).ok())
+        {
+            Some(value) => value,
+            None => continue,
+        };
+        let ino = match owner.get("ino").and_then(|v| v.as_u64()) {
+            Some(value) => value,
+            None => continue,
+        };
+        let dev = match owner.get("dev").and_then(|v| v.as_u64()) {
+            Some(value) => value,
+            None => continue,
+        };
+        if pid_alive(pid) {
+            continue;
         }
         let expected = BurnExpected {
             user_root,
-            session_id: None,
-            ino: None,
-            dev: None,
+            session_id: Some(&session_id),
+            ino: Some(ino),
+            dev: Some(dev),
         };
-        if burn_session_home(&root, &expected).is_ok() {
+        if burn_session_home(&root, &expected).is_ok_and(|removed| removed) {
             swept += 1;
         }
     }
@@ -249,21 +268,6 @@ fn mkdtemp(parent: &Path) -> Result<PathBuf, String> {
         }
     }
     Err("failed to allocate a session directory".into())
-}
-
-fn sync_identity(user_root: &Path, source_home: &Path) -> Result<PathBuf, String> {
-    let identity = ensure_private_dir(&user_root.join(IDENTITY_NAME), user_root)?;
-    for name in SETTINGS_FILES {
-        let src = source_home.join(name);
-        let dest = identity.join(name);
-        if src.exists() {
-            let data = fs::read(&src).map_err(|err| err.to_string())?;
-            write_private_file(&dest, &data, false)?;
-        } else if dest.exists() {
-            let _ = fs::remove_file(&dest);
-        }
-    }
-    Ok(identity)
 }
 
 fn exclusive_copy_file(src: &Path, dest: &Path) -> Result<(), String> {
@@ -411,15 +415,20 @@ fn file_name(path: &Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static TEMP_ROOT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     fn temp_root() -> PathBuf {
         let n = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("incodex-session-{n}"));
-        fs::create_dir_all(&dir).unwrap();
+        let counter = TEMP_ROOT_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let pid = std::process::id();
+        let dir = std::env::temp_dir().join(format!("incodex-session-{pid}-{n}-{counter}"));
+        fs::create_dir(&dir).unwrap();
         dir
     }
 
@@ -449,7 +458,7 @@ mod tests {
         fs::create_dir_all(&source).unwrap();
         fs::write(source.join("auth.json"), "{\"token\":\"x\"}").unwrap();
         let session = create_session_home(&user_root, None, 0, "").unwrap();
-        assert_eq!(copy_settings(&session.home, &source, &user_root).unwrap(), 1);
+        assert_eq!(copy_settings(&session.home, &source).unwrap(), 1);
         assert_eq!(
             fs::read_to_string(session.home.join("auth.json")).unwrap(),
             "{\"token\":\"x\"}"
@@ -469,6 +478,57 @@ mod tests {
             fs::read_to_string(source.join("auth.json")).unwrap(),
             "{\"token\":\"x\"}"
         );
+    }
+
+    #[test]
+    fn session_lifecycle_does_not_create_or_mutate_identity_cache() {
+        let root = temp_root();
+        let user_root = root.join(".incodex");
+        let source = root.join("codex");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("auth.json"), "{\"token\":\"source\"}\n").unwrap();
+        fs::write(source.join("config.toml"), "localeOverride = \"zh-CN\"\n").unwrap();
+        let identity = user_root.join("identity");
+        fs::create_dir_all(&identity).unwrap();
+        fs::write(identity.join("auth.json"), "legacy-cache\n").unwrap();
+
+        let source_before = (
+            fs::read(source.join("auth.json")).unwrap(),
+            fs::read(source.join("config.toml")).unwrap(),
+        );
+        let session = create_session_home(&user_root, None, 0, "").unwrap();
+        assert_eq!(copy_settings(&session.home, &source).unwrap(), 2);
+        assert_eq!(fs::read(identity.join("auth.json")).unwrap(), b"legacy-cache\n");
+        assert_eq!(fs::read(session.home.join("auth.json")).unwrap(), source_before.0);
+        assert_eq!(fs::read(session.home.join("config.toml")).unwrap(), source_before.1);
+
+        burn_session_home(
+            &session.root,
+            &BurnExpected {
+                user_root: &user_root,
+                session_id: Some(&session.session_id),
+                ino: Some(session.ino),
+                dev: Some(session.dev),
+            },
+        )
+        .unwrap();
+        assert_eq!(fs::read(source.join("auth.json")).unwrap(), source_before.0);
+        assert_eq!(fs::read(source.join("config.toml")).unwrap(), source_before.1);
+        assert_eq!(fs::read(identity.join("auth.json")).unwrap(), b"legacy-cache\n");
+    }
+
+    #[test]
+    fn orphan_sweep_refuses_a_replaced_session_root_without_recorded_identity() {
+        let root = temp_root();
+        let user_root = root.join(".incodex");
+        let session = create_session_home(&user_root, None, 999999, "").unwrap();
+        fs::remove_dir_all(&session.root).unwrap();
+        fs::create_dir(&session.root).unwrap();
+        fs::write(session.root.join("replacement.txt"), "keep-me").unwrap();
+
+        assert_eq!(sweep_orphan_sessions(&user_root, None), 0);
+        assert!(session.root.exists());
+        assert_eq!(fs::read_to_string(session.root.join("replacement.txt")).unwrap(), "keep-me");
     }
 
     #[test]
