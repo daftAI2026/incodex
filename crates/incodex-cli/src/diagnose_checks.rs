@@ -403,9 +403,24 @@ pub fn scan_sessions(root: &Path) -> SessionScan {
             Some(pid) if !pid_alive(pid) => true,
             Some(pid) => match owner
                 .get("processStartIdentity")
+                .or_else(|| owner.get("startedAt"))
                 .and_then(serde_json::Value::as_str)
+                .filter(|value| !value.is_empty())
             {
-                None => false,
+                None => {
+                    unknown = true;
+                    chromium_findings.push(DiagnosticFinding::warning(
+                        "chromium.session-unknown",
+                        "session owner has no process identity; Chromium residue cannot be classified",
+                        Some(&owner_path),
+                    ));
+                    orphan_findings.push(DiagnosticFinding::warning(
+                        "session.identity-missing",
+                        "session owner has no process identity",
+                        Some(&owner_path),
+                    ));
+                    false
+                }
                 Some(expected) => match live_process_identity(pid) {
                     Some(live) => expected != live.start,
                     None => {
