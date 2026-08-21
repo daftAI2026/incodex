@@ -11,7 +11,8 @@ use incodex_transaction::{
 
 use crate::legacy_proof::LegacyProvenState;
 use crate::legacy_typescript::{
-    load_legacy_journal, load_legacy_ts_v1, write_legacy_journal, LegacyState, TransactionJournal,
+    load_legacy_journal, load_legacy_ts_v1, write_legacy_journal_with_checkpoint, LegacyState,
+    TransactionJournal,
 };
 
 /// Migrate one already-proven TS v1 state without invoking the retired CLI.
@@ -192,7 +193,9 @@ where
         let outgoing_digest = tree_digest(outgoing)?;
         prepare_outgoing_proof(root, install_id, outgoing, &outgoing_digest)?;
         intent.recovery_digest = Some(outgoing_digest.clone());
-        write_legacy_journal(root, &intent)?;
+        write_legacy_journal_with_checkpoint(root, &intent, || {
+            checkpoint("BEFORE_LEGACY_JOURNAL_RENAME")
+        })?;
         checkpoint("AFTER_RESTORE_INTENT");
         ensure_staged_target_or_absent(
             root,
@@ -242,7 +245,9 @@ where
                 let outgoing_digest = tree_digest(outgoing)?;
                 prepare_outgoing_proof(root, install_id, outgoing, &outgoing_digest)?;
                 intent.recovery_digest = Some(outgoing_digest.clone());
-                write_legacy_journal(root, &intent)?;
+                write_legacy_journal_with_checkpoint(root, &intent, || {
+                    checkpoint("BEFORE_LEGACY_JOURNAL_RENAME")
+                })?;
                 checkpoint("AFTER_RESTORE_INTENT");
                 if tree_digest(outgoing)? != outgoing_digest {
                     return Err("legacy outgoing source changed after restore intent".into());
@@ -295,7 +300,9 @@ where
     let mut rolled_back = journal;
     rolled_back.phase = "ROLLED_BACK".into();
     checkpoint("BEFORE_ROLLED_BACK_JOURNAL");
-    write_legacy_journal(root, &rolled_back)?;
+    write_legacy_journal_with_checkpoint(root, &rolled_back, || {
+        checkpoint("BEFORE_LEGACY_JOURNAL_RENAME")
+    })?;
     Ok(LegacyRecoveryResult {
         install_id: rolled_back.install_id,
         phase: rolled_back.phase,

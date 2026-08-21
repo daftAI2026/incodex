@@ -284,6 +284,20 @@ pub fn load_legacy_journal(root: &Path, install_id: &str) -> Result<TransactionJ
 
 /// Atomically advance a validated flat journal during explicit recovery.
 pub fn write_legacy_journal(root: &Path, journal: &TransactionJournal) -> Result<(), String> {
+    write_legacy_journal_with_checkpoint(root, journal, || {})
+}
+
+/// Test-only variant that exposes the final temporary-file boundary without
+/// adding a product kill switch.
+#[doc(hidden)]
+pub fn write_legacy_journal_with_checkpoint<F>(
+    root: &Path,
+    journal: &TransactionJournal,
+    mut checkpoint: F,
+) -> Result<(), String>
+where
+    F: FnMut(),
+{
     let path = root
         .join("transactions")
         .join(format!("{}.json", journal.install_id));
@@ -322,6 +336,7 @@ pub fn write_legacy_journal(root: &Path, journal: &TransactionJournal) -> Result
         libc::fchmod(file.as_raw_fd(), 0o600);
     }
     drop(file);
+    checkpoint();
     fs::rename(temporary, &path).map_err(|error| error.to_string())?;
     let parent = path
         .parent()
