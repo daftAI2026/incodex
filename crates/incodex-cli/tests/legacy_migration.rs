@@ -399,6 +399,41 @@ fn recovery_keeps_outgoing_source_when_it_changes_after_restore_intent() {
 }
 
 #[test]
+fn recovery_keeps_outgoing_proof_when_target_changes_after_restore_rename() {
+    let fixture = Fixture::create();
+    let outgoing = fixture
+        .root
+        .join("transactions")
+        .join(INSTALL_ID)
+        .join("outgoing/ChatGPT.app");
+    ditto(&fixture.original_app, &outgoing).unwrap();
+    fs::remove_dir_all(&fixture.original_app).unwrap();
+    fixture.set_phase("SWAPPED");
+
+    let result = recover_legacy_ts_v1_with_checkpoint(&fixture.root, INSTALL_ID, |checkpoint| {
+        if checkpoint == "AFTER_RESTORE_RENAME" {
+            fs::write(
+                fixture.app.join("Contents/Info.plist"),
+                b"changed after rename",
+            )
+            .unwrap();
+        }
+    });
+
+    assert!(result.is_err());
+    assert!(
+        outgoing.exists(),
+        "source must remain recoverable after post-rename proof failure"
+    );
+    assert!(fixture
+        .root
+        .join("legacy-recovery")
+        .join(INSTALL_ID)
+        .join("outgoing-proof/ChatGPT.app")
+        .exists());
+}
+
+#[test]
 fn pre_swap_recovery_keeps_outgoing_source_when_it_changes_after_restore_intent() {
     let fixture = Fixture::create();
     let outgoing = fixture
