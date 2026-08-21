@@ -18,6 +18,7 @@ const {
   staleOwnerRecord,
   ownerLockMetadata,
   sameOwnerLockMetadata,
+  pidAlive,
   OwnerLeaseError,
   lockPath,
 } = core;
@@ -25,6 +26,7 @@ const {
 const activeLeases = new Map();
 const PROTOCOL_MAX_BYTES = 256;
 const PROTOCOL_IDLE_TIMEOUT_MS = 1_000;
+const PROTOCOL_DEADLINE_MS = 1_000;
 const MAX_LEASE_CONNECTIONS = 32;
 
 function claimPath(stateRoot) {
@@ -49,10 +51,38 @@ function hasLegacySocket(stateRoot) {
   }
 }
 
+function claimLegacyBridge(stateRoot) {
+  fs.mkdirSync(stateRoot, { recursive: true, mode: 0o700 });
+  try {
+    fs.mkdirSync(path.join(stateRoot, SOCK_NAME), { mode: 0o700 });
+    return true;
+  } catch (error) {
+    if (error?.code === "EEXIST") {
+      throw new OwnerLeaseError("OWNER_BRIDGE_BUSY", "another Runtime is claiming the legacy bridge endpoint");
+    }
+    throw error;
+  }
+}
+
+function removeLegacyBridge(stateRoot) {
+  try { fs.rmdirSync(path.join(stateRoot, SOCK_NAME)); } catch { /* absent or replaced legacy endpoint */ }
+}
+
+async function probeBridgeOwner(owner) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const probe = await probeOwnerPort(owner);
+    if (probe.kind !== "unavailable") return probe;
+    if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return { kind: "unavailable" };
+}
+
 function protocolLine(socket, onLine) {
   let input = "";
   socket.setEncoding("utf8");
+  const deadline = setTimeout(() => socket.destroy(), PROTOCOL_DEADLINE_MS);
   socket.setTimeout(PROTOCOL_IDLE_TIMEOUT_MS, () => socket.destroy());
+  socket.once("close", () => clearTimeout(deadline));
   socket.on("data", (chunk) => {
     input += chunk;
     if (Buffer.byteLength(input, "utf8") > PROTOCOL_MAX_BYTES) {
@@ -123,7 +153,7 @@ async function validateDiagnosticBeforePublication(stateRoot, owner, beforeBind 
   }
 }
 
-function prepareDiagnosticForExclusivePublication(stateRoot) {
+function prepareInitialDiagnostic(stateRoot) {
   const state = readOwnerLockState(stateRoot);
   if (state.kind === "missing") return;
   if (state.kind === "valid" && !staleOwnerRecord(state.owner)) {
@@ -227,14 +257,53 @@ async function acquireOwnerLease(stateRoot, owner) {
     throw new OwnerLeaseError("OWNER_FOREIGN_CLAIM", "foreign takeover claim is present; refusing cleanup");
   }
   if (hasLegacySocket(stateRoot)) {
-    throw new OwnerLeaseError("OWNER_LEGACY_SOCKET", "legacy Unix owner socket is present; refusing a second runtime");
+    let endpointIsBridge = false;
+    try { endpointIsBridge = fs.lstatSync(path.join(stateRoot, SOCK_NAME)).isDirectory(); } catch {}
+    if (endpointIsBridge) {
+      const probe = await probeBridgeOwner(owner);
+      if (probe.kind === "owner") throw new OwnerLeaseError("OWNER_BUSY", "another Incognito owner holds the target port");
+      const bridgeState = readOwnerLockState(stateRoot);
+      if (bridgeState.kind === "valid" && pidAlive(bridgeState.owner.pid)) {
+        throw new OwnerLeaseError("OWNER_BUSY", "another Incognito owner is publishing its kernel lease");
+      }
+      if (bridgeState.kind === "valid" && !staleOwnerRecord(bridgeState.owner)) {
+        throw new OwnerLeaseError("OWNER_LEGACY_OWNER", "live owner record has no kernel handshake");
+      }
+      if (bridgeState.kind !== "valid") {
+        throw new OwnerLeaseError("OWNER_PORT_UNAVAILABLE", "owner bridge is present without a verifiable publisher");
+      }
+      removeLegacyBridge(stateRoot);
+    } else {
+      throw new OwnerLeaseError("OWNER_LEGACY_SOCKET", "legacy Unix owner socket is present; refusing a second runtime");
+    }
   }
   await validateDiagnosticBeforePublication(stateRoot, owner, true);
 
   let lease;
+  let bridgeClaimed = false;
   try {
+    bridgeClaimed = claimLegacyBridge(stateRoot);
+    // The bridge is the kernel-held legacy exclusion. Only now may stale
+    // diagnostic cleanup run; an old Runtime cannot publish behind it.
+    prepareInitialDiagnostic(stateRoot);
+    try {
+      writeOwnerLockExclusive(stateRoot, owner);
+    } catch (error) {
+      if (error?.code === "EEXIST") throw new OwnerLeaseError("OWNER_RECORD_RACE", "another runtime published owner metadata first");
+      throw error;
+    }
     lease = await bindOwnerPort(owner);
+    lease.bridgeClaimed = bridgeClaimed;
   } catch (error) {
+    if (bridgeClaimed) {
+      removeOwnedDiagnosticRecord(stateRoot, owner);
+      removeLegacyBridge(stateRoot);
+    }
+    if (error?.code === "OWNER_BRIDGE_BUSY") {
+      const probe = await probeBridgeOwner(owner);
+      if (probe.kind === "owner") throw new OwnerLeaseError("OWNER_BUSY", "another Incognito owner holds the target port");
+      throw new OwnerLeaseError("OWNER_PORT_UNAVAILABLE", "owner bridge is claimed but does not answer the kernel handshake");
+    }
     if (error?.code !== "EADDRINUSE") throw error;
     const probe = await probeOwnerPort(owner);
     if (probe.kind === "owner") throw new OwnerLeaseError("OWNER_BUSY", "another Incognito owner holds the target port");
@@ -244,14 +313,8 @@ async function acquireOwnerLease(stateRoot, owner) {
 
   try {
     await validateDiagnosticBeforePublication(stateRoot, owner);
-    prepareDiagnosticForExclusivePublication(stateRoot);
-    try {
-      writeOwnerLockExclusive(stateRoot, owner);
-    } catch (error) {
-      if (error?.code === "EEXIST") {
-        throw new OwnerLeaseError("OWNER_RECORD_RACE", "another runtime published owner metadata first");
-      }
-      throw error;
+    if (!sameOwnerToken(readOwnerLock(stateRoot), owner)) {
+      throw new OwnerLeaseError("OWNER_RECORD_RACE", "owner record changed during kernel lease publication");
     }
     return owner;
   } catch (error) {
@@ -261,6 +324,7 @@ async function acquireOwnerLease(stateRoot, owner) {
     } catch {
       /* The listener is best effort after publication refusal. */
     }
+    if (lease.bridgeClaimed) removeLegacyBridge(stateRoot);
     throw error;
   }
 }
@@ -281,6 +345,7 @@ function clearOwnerLock(stateRoot, expectedOwner) {
   if (!removeOwnedDiagnosticRecord(stateRoot, expectedOwner)) return false;
   activeLeases.delete(token);
   try { lease.server.close(); } catch { /* The kernel listener is already gone. */ }
+  if (lease.bridgeClaimed) removeLegacyBridge(stateRoot);
   return true;
 }
 
@@ -290,6 +355,7 @@ async function releaseOwnerLease(stateRoot, expectedOwner) {
   if (!lease || !removeOwnedDiagnosticRecord(stateRoot, expectedOwner)) return false;
   activeLeases.delete(token);
   await closeLeaseServer(lease.server);
+  if (lease.bridgeClaimed) removeLegacyBridge(stateRoot);
   return true;
 }
 
