@@ -22,7 +22,7 @@ describe("architecture boundaries", () => {
     expect(agents).toContain("New releases do not publish legacy Bun CLI assets");
     expect(agents).toContain("Never delete old Release assets");
     expect(agents).toContain("New Rust CLI PRs target `main`");
-    expect(agents).toContain("tests/cli-golden.test.ts");
+    expect(agents).toContain("native Rust contract tests");
     expect(agents).toContain("Incognito-window hover");
     expect(agents).toContain("failing `cargo test` repro commit");
     expect(agents).toContain("Do not use CDP as the everyday Dock / `install` launch path");

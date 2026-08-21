@@ -50,25 +50,12 @@ fn assert_menu_order(text: &str, expected: &[&str]) {
 }
 
 #[test]
-fn native_tty_menu_matches_the_typescript_menu_contract() {
+fn native_tty_menu_prints_the_product_order_and_controls() {
     let home = scratch("menu");
-    let ts = run_tty("bun", &["src/cli.ts"], &[], &home, "Quit", "q");
     let rust = run_tty(rust_bin(), &[], &[], &home, "Quit", "q");
-    assert_eq!(rust.status, ts.status);
-    assert_eq!(rust.stderr, ts.stderr);
-    let ts = visible(&ts.stdout);
+    assert_eq!(rust.status, 0, "{}", visible(&rust.stdout));
+    assert_eq!(rust.stderr, "");
     let rust = visible(&rust.stdout);
-    assert_menu_order(
-        &ts,
-        &[
-            "1. Install",
-            "2. Uninstall",
-            "3. Open",
-            "4. Status",
-            "5. Doctor",
-            "6. Quit",
-        ],
-    );
     assert_menu_order(
         &rust,
         &[
@@ -89,24 +76,19 @@ fn native_tty_menu_matches_the_typescript_menu_contract() {
         "6. Quit",
         "↑↓ | Enter | V Version | Q Quit | 1-6 Jump",
     ] {
-        assert!(ts.contains(text), "TS menu lost {text:?}: {ts}");
         assert!(rust.contains(text), "Rust menu missing {text:?}: {rust}");
     }
 }
 
 #[test]
-fn native_menu_shows_the_same_cached_update_notice_and_shortcut_as_typescript() {
-    let ts_home = scratch("menu-update-ts");
-    let rust_home = scratch("menu-update-rust");
-    for home in [&ts_home, &rust_home] {
-        let cache = home.join(".incodex/cache/update_message");
-        fs::create_dir_all(cache.parent().unwrap()).unwrap();
-        fs::write(&cache, "Update 9.9.9 available, run incodex update\n").unwrap();
-    }
+fn native_menu_shows_the_cached_update_notice_and_shortcut() {
+    let rust_home = scratch("menu-update");
+    let cache = rust_home.join(".incodex/cache/update_message");
+    fs::create_dir_all(cache.parent().unwrap()).unwrap();
+    fs::write(&cache, "Update 9.9.9 available, run incodex update\n").unwrap();
     let rust_install = rust_home.join("prefix/bin/incodex");
     fs::create_dir_all(rust_install.parent().unwrap()).unwrap();
     fs::copy(rust_bin(), &rust_install).unwrap();
-    let ts = run_tty("bun", &["src/cli.ts"], &[], &ts_home, "Quit", "q");
     let rust = run_tty(
         rust_install.to_str().unwrap(),
         &[],
@@ -115,13 +97,11 @@ fn native_menu_shows_the_same_cached_update_notice_and_shortcut_as_typescript() 
         "Quit",
         "q",
     );
-    let ts = visible(&ts.stdout);
     let rust = visible(&rust.stdout);
     for text in [
         "Update 9.9.9 available, run incodex update",
         "↑↓ | Enter | U Update | V Version | Q Quit | 1-6 Jump",
     ] {
-        assert!(ts.contains(text), "TS menu lost {text:?}: {ts}");
         assert!(rust.contains(text), "Rust menu missing {text:?}: {rust}");
     }
 }

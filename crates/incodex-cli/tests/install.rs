@@ -278,7 +278,7 @@ fn install_short_n_is_the_same_as_dry_run() {
 }
 
 #[test]
-fn uninstall_dry_run_app_matches_golden() {
+fn uninstall_dry_run_app_contract_is_stable() {
     let home = isolated_home();
     let app = marker_app(&home);
     let (status, stdout, stderr) = run(
@@ -328,7 +328,7 @@ fn clone_dry_run_does_not_create_scratch() {
 }
 
 #[test]
-fn recover_missing_transaction_matches_golden() {
+fn recover_missing_transaction_is_explicit() {
     let home = isolated_home();
     let (status, stdout, stderr) = run(&["recover", "--transaction", "does-not-exist"], &home);
     assert_eq!(status, 1);
