@@ -12,6 +12,7 @@ import {
   currentOwner,
   ownerPortFromExec,
   readOwnerLock,
+  readOwnerRecords,
   releaseOwnerLease,
   writeOwnerLock,
 } from "./runtime/incodex-instance.cts";
@@ -194,6 +195,39 @@ describe("kernel-held TCP owner lease", () => {
     expect(outcomes.filter((value) => value === "OWNER_BUSY" || value === "OWNER_RECORD_RACE")).toHaveLength(19);
     expect(finished.every(({ code, stderr }) => (code === 0 || code === 2) && stderr === "")).toBe(true);
   }, 60_000);
+
+  test("bounds startup after repeated crashes without deleting a live sidecar", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-tcp-sidecar-gc-"));
+    const targetExec = join(root, "target-executable");
+    const staleRecord = (index: number) => ({
+      pid: 900000 + index,
+      startedAt: "dead-fixture",
+      processStartIdentity: "dead-fixture",
+      execPath: targetExec,
+      execIdentity: "target-executable",
+      sessionId: `stale-${index}`,
+      token: `stale-token-${index}`,
+      nonce: `stale-token-${index}`,
+    });
+    for (let index = 0; index < 100; index += 1) {
+      writeFileSync(
+        join(root, `incognito.lock.active.stale-token-${index}`),
+        `${JSON.stringify(staleRecord(index))}\n`,
+      );
+    }
+    writeFileSync(join(root, "incognito.lock"), "{\"pid\":");
+    const live = currentOwner("live-sidecar", targetExec);
+    await acquireOwnerLease(root, live);
+    const started = Date.now();
+    expect(await connectExisting(root, 500, live.token)).toBe(true);
+    expect(Date.now() - started).toBeLessThan(2_000);
+    const records = readOwnerRecords(root);
+    expect(records.filter(({ path }) => path.includes(".active.")).map(({ path }) => path)).toEqual([
+      join(root, `incognito.lock.active.${live.token}`),
+    ]);
+    expect(existsSync(join(root, "incognito.lock"))).toBe(true);
+    expect(clearOwnerLock(root, live)).toBe(true);
+  }, 30_000);
 
   test("a SIGKILL releases the listener so the next process can acquire", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-tcp-sigkill-"));
