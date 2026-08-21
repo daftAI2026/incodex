@@ -478,6 +478,9 @@ fn validate_journal(
         ));
     }
     validate_install_id(&journal.install_id, "journal installId")?;
+    if journal.target_real_path.is_empty() {
+        return Err("legacy journal targetRealPath is empty".into());
+    }
     if canonical_path(&journal.target_real_path) != target_real_path {
         return Err("legacy journal targetRealPath does not match the target".into());
     }
