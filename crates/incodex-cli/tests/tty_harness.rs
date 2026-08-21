@@ -88,3 +88,32 @@ fn pty_harness_terminates_a_child_when_the_prompt_never_arrives() {
         started.elapsed()
     );
 }
+
+#[test]
+fn pty_harness_kills_a_child_that_closes_the_pty_before_exit() {
+    let home = scratch();
+    let started = Instant::now();
+    let result = tty::run_with_timeout(
+        "/bin/sh",
+        &["-c"],
+        &["exec 0<&- 1>&- 2>&-; sleep 30"],
+        &home,
+        "prompt that never arrives",
+        "q",
+        Duration::from_millis(100),
+    );
+
+    assert_eq!(
+        result.status, 124,
+        "PTY timeout was not reported after close: {result:?}"
+    );
+    assert!(
+        result.stderr.contains("timed out"),
+        "PTY timeout lacked diagnostics after close: {result:?}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "PTY timeout waited for a child after the PTY closed: {:?}",
+        started.elapsed()
+    );
+}
