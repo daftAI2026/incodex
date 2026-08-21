@@ -232,7 +232,7 @@ pub fn verify_original_vendor_bundle(
 pub fn verify_app(app: &Path) -> bool {
     verify_patched_adhoc_bundle_deep_strict(app, None).is_ok()
         || inspect_signing_inventory(app)
-            .and_then(|inventory| validate_signing_inventory(&inventory))
+            .and_then(|inventory| validate_generic_signing_inventory(&inventory))
             .is_ok()
 }
 
@@ -249,6 +249,38 @@ pub fn validate_signing_inventory(inventory: &SigningInventory) -> Result<(), St
         }
         SignatureKind::Vendor => validate_vendor_component(&inventory.outer, "outer bundle")?,
         SignatureKind::Other | SignatureKind::Unknown | SignatureKind::Unsigned => {
+            return Err(format!(
+                "unsupported outer signature identity: {}",
+                inventory.outer.kind.as_str()
+            ));
+        }
+    }
+    validate_nested_components(&inventory.nested)
+}
+
+fn validate_generic_signing_inventory(inventory: &SigningInventory) -> Result<(), String> {
+    if !inventory.deep_strict {
+        return Err("bundle failed deep strict signature verification".into());
+    }
+    match inventory.outer.kind {
+        SignatureKind::Adhoc => {
+            if !inventory.outer.verified {
+                return Err("outer ad-hoc signature verification failed".into());
+            }
+        }
+        SignatureKind::Vendor => validate_vendor_component(&inventory.outer, "outer bundle")?,
+        SignatureKind::Other => {
+            if inventory.outer.identifier.is_none()
+                || inventory.outer.team_identifier.is_none()
+                || inventory.outer.authorities.is_empty()
+            {
+                return Err("third-party outer signature lacks identity evidence".into());
+            }
+            if !inventory.outer.verified {
+                return Err("third-party outer signature verification failed".into());
+            }
+        }
+        SignatureKind::Unknown | SignatureKind::Unsigned => {
             return Err(format!(
                 "unsupported outer signature identity: {}",
                 inventory.outer.kind.as_str()
