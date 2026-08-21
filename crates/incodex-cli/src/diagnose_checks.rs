@@ -178,6 +178,15 @@ pub fn scan_owner_processes(root: &Path) -> ProcessScan {
     let mut stale_pid = false;
     let mut unknown = false;
     for target in entries {
+        if is_symlink(&target) {
+            unknown = true;
+            findings.push(DiagnosticFinding::warning(
+                "owner.target-symlink",
+                "Runtime target is a symlink and was not inspected",
+                Some(&target),
+            ));
+            continue;
+        }
         if !is_directory(&target) {
             continue;
         }
@@ -379,6 +388,20 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
     let mut unknown = false;
     for path in entries {
         if is_symlink(&path) {
+            let is_transaction = looks_like_uuid(&file_name(&path));
+            let (kind, code, message) = if is_transaction {
+                (
+                    "transaction symlink",
+                    "journal.transaction-symlink",
+                    "transaction directory is a symlink and was not inspected",
+                )
+            } else {
+                (
+                    "journal file symlink",
+                    "journal.file-symlink",
+                    "journal file is a symlink and was not inspected",
+                )
+            };
             unknown = true;
             records.push(JournalRecord {
                 kind: "symlink".to_string(),
@@ -386,17 +409,35 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                 install_id: None,
                 phase: None,
                 action: None,
-                error: Some("journal file is a symlink and was not inspected".to_string()),
+                error: Some(message.to_string()),
             });
             findings.push(DiagnosticFinding::warning(
-                "journal.file-symlink",
-                "journal file is a symlink and was not inspected",
+                code,
+                format!("{kind} was not inspected"),
                 Some(&path),
             ));
             continue;
         }
         if is_directory(&path) {
             let install_id = file_name(&path);
+            let journal_path = path.join("journal.json");
+            if is_symlink(&journal_path) {
+                unknown = true;
+                records.push(JournalRecord {
+                    kind: "symlink".to_string(),
+                    path: journal_path.display().to_string(),
+                    install_id: Some(install_id),
+                    phase: None,
+                    action: None,
+                    error: Some("journal file is a symlink and was not inspected".to_string()),
+                });
+                findings.push(DiagnosticFinding::warning(
+                    "journal.file-symlink",
+                    "journal file is a symlink and was not inspected",
+                    Some(&journal_path),
+                ));
+                continue;
+            }
             match journal_v2(root, &install_id) {
                 Ok(journal) => {
                     let action = recover_action_phase(&journal.phase);
