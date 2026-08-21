@@ -9,7 +9,7 @@ use std::path::{Component, Path, PathBuf};
 
 use serde::Deserialize;
 
-use incodex_core::{canonical_path, target_id};
+use incodex_core::{canonical_path, is_official_app, target_id};
 use incodex_transaction::validate_path_ancestors;
 
 pub const SCHEMA_VERSION: u32 = 1;
@@ -280,6 +280,9 @@ fn select_journal<'a>(
         }) {
             return Ok(record);
         }
+        return Err(format!(
+            "legacy current.json points to installId {current_id}, but no matching committed journal exists; refusing to fall back"
+        ));
     }
     if let Some(record) = newest_record(records, LegacyStateKind::Committed) {
         return Ok(record);
@@ -476,7 +479,7 @@ fn validate_journal(
     }
     let staged_app = Path::new(&journal.staged_app);
     validate_storage_path(root, staged_app, "legacy stagedApp")?;
-    validate_emitted_staged_path(root, staged_app, &journal.install_id)?;
+    validate_emitted_staged_path(root, staged_app, &journal.install_id, target_real_path)?;
     validate_storage_path(
         root,
         Path::new(&journal.original_snapshot),
@@ -514,16 +517,26 @@ fn validate_journal(
     })
 }
 
-fn validate_emitted_staged_path(root: &Path, path: &Path, install_id: &str) -> Result<(), String> {
+fn validate_emitted_staged_path(
+    root: &Path,
+    path: &Path,
+    install_id: &str,
+    target_real_path: &Path,
+) -> Result<(), String> {
     let live_path = root.join("ChatGPT.app.live");
     let clone_path = root
         .join("scratch")
         .join(format!("ChatGPT.app.staged-{install_id}"));
-    if path == live_path || path == clone_path {
+    let expected = if is_official_app(target_real_path, None) {
+        live_path
+    } else {
+        clone_path
+    };
+    if path == expected {
         return Ok(());
     }
     Err(format!(
-        "legacy stagedApp is not an emitted TypeScript v1 staging path: {}",
+        "legacy stagedApp is not the emitted TypeScript v1 staging path for this target: {}",
         path.display()
     ))
 }
