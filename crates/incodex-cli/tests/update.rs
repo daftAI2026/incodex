@@ -4,6 +4,8 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+mod support;
+
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
 fn scratch(label: &str) -> PathBuf {
@@ -34,6 +36,7 @@ fn installed_cli(home: &std::path::Path) -> (PathBuf, PathBuf) {
 }
 
 fn run_tty(program: &std::path::Path, home: &std::path::Path, path: &str) -> (i32, String) {
+    let _pty_gate = support::tty::acquire();
     let script = r#"
 import os, pty, select, sys, time
 program, home, path = sys.argv[1:]
@@ -101,6 +104,7 @@ fn open_menu_long_enough_for_background_refresh(
     path: &str,
     keys: &str,
 ) {
+    let _pty_gate = support::tty::acquire();
     let script = r#"
 import os, pty, select, sys, time
 program, home, path, keys = sys.argv[1:]
