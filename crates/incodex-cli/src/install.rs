@@ -12,8 +12,8 @@ use incodex_macos::{
 };
 use incodex_runtime_bundle::{loader_source, publish, runtime_version};
 use incodex_transaction::{
-    journal_v2, migrate_legacy_committed, recover_with, restore_committed, Engine, Recovery,
-    TxError,
+    journal_v2, migrate_legacy_committed, recover_with, restore_committed,
+    validate_backup_snapshot, validate_committed_live_snapshot, Engine, Recovery, TxError,
 };
 
 use crate::parse::ParsedCli;
@@ -237,19 +237,26 @@ fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<Comma
     if !app.exists() {
         return Err(format!("Codex app not found: {}", app.display()));
     }
+    let asar = app.join(ASAR_REL);
+    let existing = inspect_existing_install(app, root, &asar)?;
+    if existing.is_none() {
+        ensure_official_target_is_verified(app)?;
+    }
     progress.stage("Publishing Runtime");
     let published = publish(root)?;
-    let asar = app.join(ASAR_REL);
-    if asar.exists() {
-        if let Ok(archive) = Archive::open(&asar) {
-            if let Some(install_id) = current_install_id(app, root, &archive) {
-                return Ok(CommandResult {
-                    skipped: true,
-                    install_id: Some(install_id),
-                    runtime_version: Some(published.version),
-                    app: app.display().to_string(),
-                    warning: None,
-                });
+    if let Some(install_id) = inspect_existing_install(app, root, &asar)? {
+        return Ok(CommandResult {
+            skipped: true,
+            install_id: Some(install_id),
+            runtime_version: Some(published.version),
+            app: app.display().to_string(),
+            warning: None,
+        });
+    }
+    if let Some(archive) = Archive::open(&asar).ok() {
+        if let Ok(package) = archive.read_package_main() {
+            if package.already_patched || package.install_id.is_some() {
+                return Err(unbound_marker_error());
             }
         }
     }
@@ -384,6 +391,55 @@ fn current_install_id(app: &Path, root: &Path, archive: &Archive) -> Option<Stri
     installed_install_id(app, root, archive)
 }
 
+fn inspect_existing_install(
+    app: &Path,
+    root: &Path,
+    asar: &Path,
+) -> Result<Option<String>, String> {
+    let Ok(archive) = Archive::open(asar) else {
+        return Ok(None);
+    };
+    let Ok(package) = archive.read_package_main() else {
+        return Ok(None);
+    };
+    if !package.already_patched && package.install_id.is_none() {
+        return Ok(None);
+    }
+    current_install_id(app, root, &archive)
+        .map(Some)
+        .ok_or_else(unbound_marker_error)
+}
+
+fn unbound_marker_error() -> String {
+    "live app contains an Incodex marker without a trusted committed installation record; refusing to create a new original snapshot".into()
+}
+
+fn ensure_official_target_is_verified(app: &Path) -> Result<(), String> {
+    if !is_official_app(app, None) {
+        return Ok(());
+    }
+    let info = read_plist_info(app)
+        .ok_or_else(|| "default target has no readable Info.plist; refusing to snapshot it".to_string())?;
+    ensure_official_bundle_identifier(&info)?;
+    verify_original_vendor_bundle(
+        app,
+        Some(OFFICIAL_BUNDLE_IDENTIFIER),
+        Some(&info.app_version),
+        Some(&info.app_build),
+    )
+    .map(|_| ())
+    .map_err(|error| format!("default target is not a verified official Codex app: {error}"))
+}
+
+fn ensure_official_bundle_identifier(info: &incodex_macos::PlistInfo) -> Result<(), String> {
+    if info.bundle_identifier == OFFICIAL_BUNDLE_IDENTIFIER {
+        return Ok(());
+    }
+    Err(format!(
+        "default target bundle identifier is not {OFFICIAL_BUNDLE_IDENTIFIER}; refusing to snapshot a foreign bundle"
+    ))
+}
+
 fn installed_install_id(app: &Path, root: &Path, archive: &Archive) -> Option<String> {
     if !archive.has_only_loader() {
         return None;
@@ -407,6 +463,11 @@ fn installed_install_id(app: &Path, root: &Path, archive: &Archive) -> Option<St
         .join(&install_id)
         .join(&journal.paths.original);
     if !original.exists() || read_asar_integrity(app) != Some(archive.header_hash()) {
+        return None;
+    }
+    if validate_committed_live_snapshot(root, &install_id, app).is_err()
+        || validate_backup_snapshot(root, &install_id).is_err()
+    {
         return None;
     }
     Some(install_id)
@@ -477,4 +538,19 @@ fn print_command_result(result: &CommandResult) {
         println!("{}", format_kv("Runtime", version, None));
     }
     println!("{}", format_kv("App", &result.app, None));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_path_foreign_bundle_is_rejected_before_snapshot() {
+        let info = incodex_macos::PlistInfo {
+            bundle_identifier: "com.example.foreign".into(),
+            ..Default::default()
+        };
+        let error = ensure_official_bundle_identifier(&info).unwrap_err();
+        assert!(error.contains("foreign bundle"), "{error}");
+    }
 }

@@ -11,10 +11,8 @@ static SEQ: AtomicU64 = AtomicU64::new(0);
 
 fn home() -> PathBuf {
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
-    let root = std::env::temp_dir().join(format!(
-        "incodex-install-guard-{}-{n}",
-        std::process::id()
-    ));
+    let root =
+        std::env::temp_dir().join(format!("incodex-install-guard-{}-{n}", std::process::id()));
     fs::create_dir_all(&root).unwrap();
     root
 }
@@ -60,15 +58,12 @@ fn patchable_app(root: &Path) -> PathBuf {
     fs::write(source.join("package.json"), "{\"main\":\"index.js\"}\n").unwrap();
     fs::write(source.join("index.js"), "original\n").unwrap();
     pack_dir(&source, &contents.join("Resources/app.asar")).unwrap();
-    sign_app(&app).unwrap();
     app
 }
 
 fn install(home: &Path, app: &Path) -> String {
-    let (status, stdout, stderr) = run(
-        &["install", "--yes", "--app", app.to_str().unwrap()],
-        home,
-    );
+    sign_app(app).unwrap();
+    let (status, stdout, stderr) = run(&["install", "--yes", "--app", app.to_str().unwrap()], home);
     assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
     Archive::open(app.join("Contents/Resources/app.asar"))
         .unwrap()
@@ -110,11 +105,7 @@ fn replace_with_unbound_marker(home: &Path, app: &Path) {
     .unwrap();
     fs::write(source.join(LOADER_NAME), "unbound loader\n").unwrap();
     fs::write(source.join("index.js"), "already patched\n").unwrap();
-    pack_dir(
-        &source,
-        &app.join("Contents/Resources/app.asar"),
-    )
-    .unwrap();
+    pack_dir(&source, &app.join("Contents/Resources/app.asar")).unwrap();
 }
 
 #[test]
@@ -129,7 +120,10 @@ fn install_refuses_marked_live_app_without_trusted_record_before_snapshot() {
         run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
 
     assert_eq!(status, 1, "unbound patched app was accepted: {stderr}");
-    assert!(stderr.contains("marker"), "refusal should name the marker: {stderr}");
+    assert!(
+        stderr.contains("marker"),
+        "refusal should name the marker: {stderr}"
+    );
     assert_eq!(fs::read(&asar).unwrap(), before);
     assert!(transaction_ids(&home).is_empty());
 }
@@ -146,7 +140,10 @@ fn install_refuses_trusted_record_with_tampered_live_tree() {
         run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
 
     assert_eq!(status, 1, "tampered live target was accepted: {stderr}");
-    assert!(stderr.contains("marker"), "refusal should name the marker: {stderr}");
+    assert!(
+        stderr.contains("marker"),
+        "refusal should name the marker: {stderr}"
+    );
     assert_eq!(transaction_ids(&home), ids_before);
     assert!(home
         .join(".incodex/transactions")
@@ -171,7 +168,10 @@ fn install_refuses_trusted_record_with_tampered_original_backup() {
         run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
 
     assert_eq!(status, 1, "tampered original backup was accepted: {stderr}");
-    assert!(stderr.contains("marker"), "refusal should name the marker: {stderr}");
+    assert!(
+        stderr.contains("marker"),
+        "refusal should name the marker: {stderr}"
+    );
     assert_eq!(transaction_ids(&home), ids_before);
     assert!(original.join("Contents/backup-tamper").exists());
 }

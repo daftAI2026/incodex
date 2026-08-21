@@ -457,7 +457,7 @@ fn install_aborts_when_asar_integrity_cannot_be_written() {
 }
 
 #[test]
-fn install_does_not_skip_a_stale_loader_without_a_committed_transaction() {
+fn install_refuses_stale_loader_without_a_committed_transaction() {
     let home = isolated_home();
     let app = patchable_app(&home);
     let fake = home.join("fake-loader-only");
@@ -478,14 +478,17 @@ fn install_does_not_skip_a_stale_loader_without_a_committed_transaction() {
     .unwrap();
     fs::write(fake.join(LOADER_NAME), "stale loader\n").unwrap();
     fs::write(fake.join("index.js"), "ok\n").unwrap();
-    pack_dir(&fake, &app.join("Contents/Resources/app.asar")).unwrap();
+    let asar = app.join("Contents/Resources/app.asar");
+    pack_dir(&fake, &asar).unwrap();
+    let before = fs::read(&asar).unwrap();
 
-    let (status, stdout, stderr) =
+    let (status, _stdout, stderr) =
         run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
-    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
-    assert!(!stdout.contains("Already current"), "{stdout}");
-    let archive = Archive::open(app.join("Contents/Resources/app.asar")).unwrap();
-    assert_ne!(archive.extract(LOADER_NAME).unwrap(), b"stale loader\n");
+    assert_eq!(status, 1, "stale patched app was accepted: {stderr}");
+    assert!(stderr.contains("marker"), "{stderr}");
+    assert_eq!(fs::read(&asar).unwrap(), before);
+    let transactions = home.join(".incodex/transactions");
+    assert!(!transactions.exists() || fs::read_dir(transactions).unwrap().next().is_none());
 }
 
 #[test]

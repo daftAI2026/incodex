@@ -26,6 +26,19 @@ pub fn validate_backup_snapshot(root: &Path, install_id: &str) -> Result<(), Str
     let paths = journal::reconstructed(root, &journal)?;
     proof::validate_backup_digest(&paths.original, &journal)
 }
+
+/// Validate that a committed live target still matches its sealed transaction.
+///
+/// Install uses this read-only proof before deciding that a marker is safe to
+/// reuse.  A marker alone is not an original snapshot authority.
+pub fn validate_committed_live_snapshot(
+    root: &Path,
+    install_id: &str,
+    live_path: &Path,
+) -> Result<(), String> {
+    let journal = journal::load_v2(root, install_id)?;
+    uninstall::validate_committed_restore_target(root, &journal, live_path)
+}
 pub use lock::{acquire_target_lock, lock_path_for, TargetLock};
 
 pub const PHASES: &[&str] = &[
