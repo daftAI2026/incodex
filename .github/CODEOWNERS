@@ -2,10 +2,9 @@
 * @daftAI2026
 
 /src/runtime/ @daftAI2026
-/src/install.ts @daftAI2026
-/src/uninstall.ts @daftAI2026
-/src/codesign.ts @daftAI2026
-/src/asar.ts @daftAI2026
-/src/transaction.ts @daftAI2026
+/crates/incodex-cli/src/install.rs @daftAI2026
+/crates/incodex-asar/ @daftAI2026
+/crates/incodex-macos/ @daftAI2026
+/crates/incodex-transaction/ @daftAI2026
 /dist/ @daftAI2026
 /.github/ @daftAI2026

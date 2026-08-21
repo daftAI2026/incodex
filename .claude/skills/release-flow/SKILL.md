@@ -5,7 +5,7 @@ description: Incodex CLI release runbook. Tag vX.Y.Z, wait for release.yml to at
 
 # Incodex CLI release flow
 
-Tag-driven. `.github/workflows/release.yml` watches `'v*'` (lowercase). It cross-compiles the native Rust CLI as `incodex-darwin-arm64` and `incodex-darwin-x64`, writes `SHA256SUMS`, attests, and creates a GitHub Release **without notes**. Bun still builds the embedded Electron Runtime and runs the TypeScript reference tests; it does not produce a release CLI asset.
+Tag-driven. `.github/workflows/release.yml` watches `'v*'` (lowercase). It cross-compiles the native Rust CLI as `incodex-darwin-arm64` and `incodex-darwin-x64`, writes `SHA256SUMS`, attests, and creates a GitHub Release **without notes**. Bun still builds/checks the embedded Electron Runtime; Rust owns the product and legacy fixture/proof tests and produces the release CLI assets.
 
 ## Channels
 

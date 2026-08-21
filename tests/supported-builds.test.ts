@@ -13,9 +13,9 @@ describe("Codex builds are not an allowlist", () => {
     expect(existsSync(join(root, "src/compatibility/supported-builds.ts"))).toBe(false);
   });
 
-  test("install does not warn about an unknown Codex build number", () => {
-    expect(src("src/install.ts")).not.toContain("unknown Codex build");
-    expect(src("src/install.ts")).not.toContain("findSupportedBuild");
+  test("native install does not warn about an unknown Codex build number", () => {
+    expect(src("crates/incodex-cli/src/install.rs")).not.toContain("unknown Codex build");
+    expect(src("crates/incodex-cli/src/install.rs")).not.toContain("findSupportedBuild");
   });
 
   test("the default adapter is not named after one observed build", () => {
