@@ -7,6 +7,7 @@
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+use serde::de::{self, Deserializer};
 use serde::Deserialize;
 
 use incodex_core::{canonical_path, is_official_app, target_id};
@@ -79,10 +80,22 @@ pub struct TransactionJournal {
     pub target_real_path: String,
     pub staged_app: String,
     pub original_snapshot: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_optional_non_null")]
     pub outgoing_app: Option<String>,
     pub phase: String,
     pub updated_at: String,
+}
+
+fn deserialize_optional_non_null<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    match Option::<String>::deserialize(deserializer)? {
+        Some(value) => Ok(Some(value)),
+        None => Err(de::Error::custom(
+            "legacy journal outgoingApp cannot be null",
+        )),
+    }
 }
 
 /// The only state in which post-commit metadata is available. Interrupted and
