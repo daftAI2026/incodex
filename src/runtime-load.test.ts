@@ -42,4 +42,14 @@ describe("runtime load", () => {
     expect(loader).not.toContain('require("./incodex-main.cjs")');
     expect(loader).toContain("current.json");
   });
+
+  test("an ordinary incognito click starts a child that reloads the current Runtime", () => {
+    const loader = readFileSync(join(import.meta.dir, "runtime/incodex-loader.cts"), "utf8");
+    const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
+    expect(loader).toContain("const current = JSON.parse(fs.readFileSync(currentPath, \"utf8\"));");
+    expect(main).toContain("child = spawn(bin, args");
+    expect(main).toContain('INCODEX_INCOGNITO: "1"');
+    expect(main).toContain("CODEX_ELECTRON_USER_DATA_PATH: session.chromium");
+    expect(main).toContain("const args = [`--user-data-dir=${session.chromium}`]");
+  });
 });
