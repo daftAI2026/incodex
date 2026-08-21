@@ -93,6 +93,23 @@ fn install_mutations(home: &Path) -> Vec<String> {
         .collect()
 }
 
+fn transaction_journal(home: &Path) -> (String, serde_json::Value) {
+    let transactions = home.join(".incodex/transactions");
+    let mut entries = fs::read_dir(&transactions)
+        .unwrap()
+        .flatten()
+        .filter(|entry| entry.path().is_dir())
+        .collect::<Vec<_>>();
+    assert_eq!(entries.len(), 1, "expected one transaction: {entries:?}");
+    let entry = entries.pop().unwrap();
+    let id = entry.file_name().to_string_lossy().into_owned();
+    let journal: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(entry.path().join("journal.json")).unwrap(),
+    )
+    .unwrap();
+    (id, journal)
+}
+
 fn marker_app(home: &Path) -> PathBuf {
     let app = home.join("Marker.app");
     fs::create_dir_all(&app).unwrap();
@@ -430,6 +447,17 @@ fn install_codesign_failure_aborts_custom_target_before_swap() {
         cua.exists(),
         "vendor helper must be restored after sign failure"
     );
+    let (id, journal) = transaction_journal(&home);
+    assert_eq!(journal["phase"], "ROLLED_BACK");
+    assert!(home
+        .join(".incodex/transactions")
+        .join(&id)
+        .join("original/ChatGPT.app")
+        .exists());
+    assert!(!home
+        .join(".incodex/scratch")
+        .join(format!("ChatGPT.app.staged-{id}"))
+        .exists());
 }
 
 #[test]
@@ -454,6 +482,17 @@ fn install_aborts_when_asar_integrity_cannot_be_written() {
         "{stderr}"
     );
     assert_eq!(fs::read(&asar).unwrap(), before);
+    let (id, journal) = transaction_journal(&home);
+    assert_eq!(journal["phase"], "ROLLED_BACK");
+    assert!(home
+        .join(".incodex/transactions")
+        .join(&id)
+        .join("original/ChatGPT.app")
+        .exists());
+    assert!(!home
+        .join(".incodex/scratch")
+        .join(format!("ChatGPT.app.staged-{id}"))
+        .exists());
 }
 
 #[test]
@@ -550,6 +589,22 @@ fn post_swap_verification_failure_rolls_back_the_original_app() {
     )
     .unwrap();
     assert_eq!(journal["phase"], "ROLLED_BACK");
+    let id = journal["installId"].as_str().unwrap();
+    assert!(home
+        .join(".incodex/transactions")
+        .join(id)
+        .join("original/ChatGPT.app")
+        .exists());
+    assert!(!home
+        .join(".incodex/transactions")
+        .join(id)
+        .join("staged/ChatGPT.app")
+        .exists());
+    assert!(!home
+        .join(".incodex/transactions")
+        .join(id)
+        .join("outgoing/ChatGPT.app")
+        .exists());
 }
 
 #[test]
@@ -691,10 +746,27 @@ fn recover_does_not_finish_until_the_restored_app_verifies() {
         "{stderr}"
     );
     let journal: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(root.join("transactions").join(id).join("journal.json")).unwrap(),
+        &fs::read_to_string(root.join("transactions").join(&id).join("journal.json")).unwrap(),
     )
     .unwrap();
     assert_eq!(journal["phase"], "SWAPPED");
+
+    let (status, stdout, stderr) = run(
+        &["recover", "--transaction", &id],
+        &home,
+    );
+    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
+    assert!(stdout.contains("phase: ROLLED_BACK"), "{stdout}");
+    let journal: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(root.join("transactions").join(&id).join("journal.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(journal["phase"], "ROLLED_BACK");
+    assert!(root
+        .join("transactions")
+        .join(&id)
+        .join("original/ChatGPT.app")
+        .exists());
 }
 
 #[test]

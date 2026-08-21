@@ -478,6 +478,56 @@ fn doctor_json_keeps_malformed_legacy_and_stale_committed_journals_visible() {
 }
 
 #[test]
+fn doctor_json_reports_retained_original_and_artifacts_for_interrupted_install() {
+    let home = isolated_home();
+    let root = home.join(".incodex");
+    let app = home.join("ChatGPT.app");
+    let candidate = home.join("candidate.app");
+    fs::create_dir_all(&app).unwrap();
+    fs::write(app.join("marker"), "original\n").unwrap();
+    fs::create_dir_all(&candidate).unwrap();
+    fs::write(candidate.join("marker"), "staged\n").unwrap();
+
+    let mut tx = Engine::begin(&root, &app, "test-interrupted-install").unwrap();
+    let id = tx.install_id().to_string();
+    let original = root
+        .join("transactions")
+        .join(&id)
+        .join("original/ChatGPT.app");
+    ditto(&app, &original).unwrap();
+    tx.mark_backup_committed().unwrap();
+    tx.place_staging(&candidate).unwrap();
+    drop(tx);
+
+    let (_status, stdout, stderr) =
+        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(stderr, "");
+    let report = parse_json(&stdout);
+    let record = report["journalRecords"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|record| record["installId"] == id && record["kind"] == "validInterrupted")
+        .expect("interrupted transaction record");
+    assert_eq!(
+        record["retainedOriginal"],
+        original.display().to_string()
+    );
+    assert_eq!(record["originalValid"], true);
+    assert_eq!(record["recovery"], "rollback");
+    assert!(record["artifacts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|path| path.as_str().unwrap().ends_with("staging/ChatGPT.app")));
+
+    let (_status, human, stderr) = run(&["doctor", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(stderr, "");
+    assert!(human.contains("Retained original"), "{human}");
+    assert!(human.contains("Artifact"), "{human}");
+}
+
+#[test]
 fn doctor_json_refuses_clean_backup_for_a_patched_marker_without_native_backup() {
     let home = isolated_home();
     let app = home.join("ChatGPT.app");
