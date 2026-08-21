@@ -169,6 +169,7 @@ fn status_skips_signing_inventory_and_gatekeeper() {
     assert_eq!(status, 0, "{stderr}");
     assert_eq!(stderr, "");
     let report = parse_json(&stdout);
+    assert!(report["codesignOk"].is_null());
     assert_eq!(report["signing"]["status"], "not-requested");
     assert_eq!(report["spctl"]["status"], "not-requested");
     assert!(fixture.command("codesign").is_empty());
