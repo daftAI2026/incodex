@@ -38,6 +38,9 @@ printf 'codesign %s\n' "$*" >> "$INCODEX_DOCTOR_COMMAND_LOG"
 if [ "$1" = "--display" ] && [ "$2" = "--verbose=4" ]; then
   printf '%s\n' 'Identifier=com.openai.codex' 'TeamIdentifier=2DC432GLL2' 'Authority=Developer ID Application: fixture'
 fi
+if [ "$1" = "--verify" ] && [ "${INCODEX_DOCTOR_CODESIGN_VERIFY_FAIL:-0}" = "1" ]; then
+  exit 1
+fi
 exit 0
 "##,
         )
@@ -88,13 +91,27 @@ impl Drop for Fixture {
 }
 
 fn run_fixture(args: &[&str], fixture: &Fixture, home: &Path) -> (i32, String, String) {
-    let output = std::process::Command::new(readonly_support::bin())
+    run_fixture_with_env(args, fixture, home, &[])
+}
+
+fn run_fixture_with_env(
+    args: &[&str],
+    fixture: &Fixture,
+    home: &Path,
+    env: &[(&str, &str)],
+) -> (i32, String, String) {
+    let mut command = std::process::Command::new(readonly_support::bin());
+    command
         .args(args)
         .env("HOME", home)
         .env("PATH", fixture.path())
         .env("INCODEX_DOCTOR_COMMAND_LOG", &fixture.log)
         .env("TERM", "dumb")
-        .env("NO_COLOR", "1")
+        .env("NO_COLOR", "1");
+    for (key, value) in env {
+        command.env(key, value);
+    }
+    let output = command
         .output()
         .expect("spawn incodex");
     (
@@ -102,6 +119,28 @@ fn run_fixture(args: &[&str], fixture: &Fixture, home: &Path) -> (i32, String, S
         String::from_utf8_lossy(&output.stdout).into_owned(),
         String::from_utf8_lossy(&output.stderr).into_owned(),
     )
+}
+
+#[test]
+fn default_doctor_does_not_call_displayed_identity_verified_when_outer_verify_fails() {
+    let home = isolated_home();
+    let fixture = Fixture::new();
+    let app = fixture.app.to_str().expect("app");
+    let (status, stdout, stderr) = run_fixture_with_env(
+        &["doctor", "--json", "--app", app],
+        &fixture,
+        &home,
+        &[("INCODEX_DOCTOR_CODESIGN_VERIFY_FAIL", "1")],
+    );
+    assert_eq!(status, 0, "{stderr}");
+    assert_eq!(stderr, "");
+    let report = parse_json(&stdout);
+    assert_eq!(report["codesignOk"], false);
+    assert_eq!(report["signing"]["outer"]["verified"], false);
+    assert!(fixture
+        .command("codesign")
+        .iter()
+        .any(|line| line.contains("--verify") && !line.contains("--deep")));
 }
 
 #[test]
