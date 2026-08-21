@@ -109,14 +109,17 @@ fn deep_is_a_doctor_only_flag_and_is_documented() {
     let home = isolated_home();
     let (status, stdout, stderr) = run(&["doctor", "--help"], &home);
     assert_eq!(status, 0);
-    assert!(stdout.contains("doctor [--deep]"), "{stdout}");
+    assert!(stdout.contains("doctor [--json] [--deep]"), "{stdout}");
     assert!(stdout.contains("--deep"), "{stdout}");
     assert_eq!(stderr, "");
 
     let (status, stdout, stderr) = run(&["status", "--deep"], &home);
     assert_eq!(status, 1);
     assert_eq!(stdout, "");
-    assert!(stderr.contains("--deep is only valid for doctor"), "{stderr}");
+    assert!(
+        stderr.contains("--deep is only valid for doctor"),
+        "{stderr}"
+    );
 }
 
 #[test]
@@ -124,7 +127,8 @@ fn status_skips_signing_inventory_and_gatekeeper() {
     let home = isolated_home();
     let fixture = Fixture::new();
     let app = fixture.app.to_str().expect("app");
-    let (status, stdout, stderr) = run_fixture(&["status", "--json", "--app", app], &fixture, &home);
+    let (status, stdout, stderr) =
+        run_fixture(&["status", "--json", "--app", app], &fixture, &home);
     assert_eq!(status, 0, "{stderr}");
     assert_eq!(stderr, "");
     let report = parse_json(&stdout);
@@ -132,6 +136,11 @@ fn status_skips_signing_inventory_and_gatekeeper() {
     assert_eq!(report["spctl"]["status"], "not-requested");
     assert!(fixture.command("codesign").is_empty());
     assert!(fixture.command("spctl").is_empty());
+
+    let (status, stdout, stderr) = run_fixture(&["status", "--app", app], &fixture, &home);
+    assert_eq!(status, 0, "{stderr}");
+    assert!(stdout.starts_with("➤ Status\n"));
+    assert!(!stdout.contains("Gatekeeper   "));
 }
 
 #[test]
@@ -140,7 +149,8 @@ fn default_doctor_checks_only_outer_signing_and_deep_expands_inventory() {
     let fixture = Fixture::new();
     let app = fixture.app.to_str().expect("app");
 
-    let (status, stdout, stderr) = run_fixture(&["doctor", "--json", "--app", app], &fixture, &home);
+    let (status, stdout, stderr) =
+        run_fixture(&["doctor", "--json", "--app", app], &fixture, &home);
     assert_eq!(status, 0, "{stderr}");
     assert_eq!(stderr, "");
     let report = parse_json(&stdout);
@@ -149,12 +159,24 @@ fn default_doctor_checks_only_outer_signing_and_deep_expands_inventory() {
     let shallow_commands = fixture.command("codesign");
     assert!(!shallow_commands.is_empty());
     assert!(shallow_commands.iter().all(|line| !line.contains("--deep")));
-    assert!(shallow_commands.iter().all(|line| !line.contains("--entitlements")));
+    assert!(shallow_commands
+        .iter()
+        .all(|line| !line.contains("--entitlements")));
     assert!(fixture.command("spctl").is_empty());
 
+    let (status, stdout, stderr) = run_fixture(&["doctor", "--app", app], &fixture, &home);
+    assert_eq!(status, 0, "{stderr}");
+    assert!(stdout.contains("➤ App\n"));
+    assert!(stdout.contains("Nested       unknown"));
+    assert!(!stdout.contains("Hardened"));
+    assert!(!stdout.contains("Gatekeeper   "));
+
     fs::write(&fixture.log, "").expect("reset command log");
-    let (status, stdout, stderr) =
-        run_fixture(&["doctor", "--deep", "--json", "--app", app], &fixture, &home);
+    let (status, stdout, stderr) = run_fixture(
+        &["doctor", "--deep", "--json", "--app", app],
+        &fixture,
+        &home,
+    );
     assert_eq!(status, 0, "{stderr}");
     assert_eq!(stderr, "");
     let report = parse_json(&stdout);
@@ -169,4 +191,10 @@ fn default_doctor_checks_only_outer_signing_and_deep_expands_inventory() {
         .iter()
         .any(|line| line.contains("--entitlements")));
     assert_eq!(fixture.command("spctl").len(), 1);
+
+    let (status, stdout, stderr) =
+        run_fixture(&["doctor", "--deep", "--app", app], &fixture, &home);
+    assert_eq!(status, 0, "{stderr}");
+    assert!(stdout.contains("Hardened"));
+    assert!(stdout.contains("Gatekeeper"));
 }

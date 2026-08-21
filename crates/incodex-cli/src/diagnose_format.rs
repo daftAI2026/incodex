@@ -158,43 +158,52 @@ pub fn format_diagnosis(report: &Diagnosis) -> String {
         incodex_core::format_kv("Nested", check_status(&report.checks.signing), None),
     ]);
     if let Some(signing) = &report.signing {
-        lines.push(incodex_core::format_kv(
-            "Hardened",
-            if json_bool(signing, "hardenedRuntimeOk") {
-                "yes"
-            } else {
-                "no"
-            },
-            None,
-        ));
-        let dropped = signing
-            .get("unretainable")
-            .and_then(serde_json::Value::as_array)
-            .map(|items| {
-                let names = items
-                    .iter()
-                    .filter_map(serde_json::Value::as_str)
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                if names.is_empty() {
-                    "none".to_string()
+        let deep_signing_requested = signing
+            .get("spctl")
+            .and_then(|spctl| spctl.get("status"))
+            .and_then(serde_json::Value::as_str)
+            != Some("not-requested");
+        if deep_signing_requested {
+            lines.push(incodex_core::format_kv(
+                "Hardened",
+                if json_bool(signing, "hardenedRuntimeOk") {
+                    "yes"
                 } else {
-                    names
-                }
-            })
-            .unwrap_or_else(|| "unknown".to_string());
-        lines.push(incodex_core::format_kv("Dropped", &dropped, None));
+                    "no"
+                },
+                None,
+            ));
+            let dropped = signing
+                .get("unretainable")
+                .and_then(serde_json::Value::as_array)
+                .map(|items| {
+                    let names = items
+                        .iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    if names.is_empty() {
+                        "none".to_string()
+                    } else {
+                        names
+                    }
+                })
+                .unwrap_or_else(|| "unknown".to_string());
+            lines.push(incodex_core::format_kv("Dropped", &dropped, None));
+        }
     }
     if let Some(spctl) = &report.spctl {
-        lines.push(incodex_core::format_kv(
-            "Gatekeeper",
-            if json_bool(spctl, "accepted") {
-                "accepted"
-            } else {
-                "not accepted (diagnostic)"
-            },
-            None,
-        ));
+        if spctl.get("status").and_then(serde_json::Value::as_str) != Some("not-requested") {
+            lines.push(incodex_core::format_kv(
+                "Gatekeeper",
+                if json_bool(spctl, "accepted") {
+                    "accepted"
+                } else {
+                    "not accepted (diagnostic)"
+                },
+                None,
+            ));
+        }
     }
     lines.extend([
         String::new(),

@@ -74,6 +74,7 @@ incodex install --clone     # Dev: patch a copy
 incodex uninstall           # Restore the official app
 incodex status
 incodex doctor
+incodex doctor --deep        # Full nested signing / entitlement / Gatekeeper evidence
 incodex runtime             # Update the button logic without re-signing Codex
 incodex open                # Incognito window, no patch
 incodex recover --transaction <id>
@@ -91,6 +92,7 @@ incodex update --dry-run
 incodex self-uninstall --dry-run
 incodex status --json
 incodex doctor --json
+incodex doctor --deep --json
 ```
 
 `brew install`, `curl … | bash`, and `cargo install` only put the command on PATH. The command that changes `/Applications/ChatGPT.app` is `incodex install`.
@@ -223,8 +225,7 @@ $ incodex doctor
 
 ➤ Signing
   Verify       ok
-  Hardened     yes
-  Gatekeeper   not accepted (diagnostic)
+  Nested       unknown
 
 ➤ Backup
   State        ok
@@ -237,7 +238,7 @@ $ incodex doctor
   Journals     0
 ```
 
-The Gatekeeper line is diagnostic, not an install failure. After the bundle changes, the official signature will not pass Gatekeeper.
+The default Doctor checks Incodex-owned Runtime, backup, journal, session, and marker state plus minimal outer app identity. It does not recurse into nested signing or invoke Gatekeeper. Run `incodex doctor --deep` for the full nested signing, entitlement, and Gatekeeper report. The Gatekeeper result is diagnostic, not an install failure; after the bundle changes, the official signature will not pass Gatekeeper.
 
 ### Version
 

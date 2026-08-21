@@ -79,13 +79,19 @@ Examples:
         CliCommand::Doctor => {
             "\
 Usage:
-  incodex doctor [--json] [--app <path>]
+  incodex doctor [--json] [--deep] [--app <path>]
 
-Diagnose the install, runtime files, and leftover sessions.
+Diagnose the install, Runtime files, backup, journals, and leftover sessions.
+The default checks Incodex-owned state and minimal app identity evidence.
+Use --deep to inspect nested signing, entitlements, and Gatekeeper.
+
+Flags:
+  --deep            Inspect nested signing, entitlements, and Gatekeeper
 
 Examples:
   incodex doctor
   incodex doctor --json
+  incodex doctor --deep
 "
         }
         CliCommand::Runtime => {

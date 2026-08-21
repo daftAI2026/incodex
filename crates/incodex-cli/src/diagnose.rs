@@ -15,7 +15,9 @@ use incodex_macos::{
 };
 use incodex_transaction::{journal_v2, load_journal, validate_backup_snapshot};
 
-use crate::diagnose_signing::inspect_signing;
+use crate::diagnose_signing::{
+    inspect_outer, inspect_signing, not_requested_signing, not_requested_spctl,
+};
 
 use crate::diagnose_checks::{
     empty_checks, scan_journals, scan_owner_processes, scan_sessions, CheckResult, CheckStatus,
@@ -73,11 +75,22 @@ pub struct Diagnosis {
     pub findings: Vec<DiagnosticFinding>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagnosisMode {
+    Status,
+    Doctor,
+    DoctorDeep,
+}
+
 pub fn diagnose(app_path: &Path) -> Diagnosis {
     diagnose_with_root(app_path, &user_root())
 }
 
 pub fn diagnose_with_root(app_path: &Path, root: &Path) -> Diagnosis {
+    diagnose_with_root_mode(app_path, root, DiagnosisMode::DoctorDeep)
+}
+
+pub fn diagnose_with_root_mode(app_path: &Path, root: &Path, mode: DiagnosisMode) -> Diagnosis {
     let exists = app_path.exists();
     let asar_path = app_path.join(ASAR_REL);
     let asar_exists = asar_path.exists();
@@ -94,17 +107,6 @@ pub fn diagnose_with_root(app_path: &Path, root: &Path) -> Diagnosis {
         .as_ref()
         .filter(|package| package.already_patched)
         .and_then(|_| external_runtime.version.clone());
-    let signing_inventory = exists.then(|| inspect_signing_inventory(app_path));
-    let codesign_ok = signing_inventory
-        .as_ref()
-        .and_then(|result| result.as_ref().ok())
-        .map(|inventory| {
-            let accepted = validate_signing_inventory(inventory).is_ok()
-                || validate_generic_signing_inventory(inventory).is_ok();
-            accepted && plist.as_ref().is_some_and(|plist| !plist.executable.trim().is_empty())
-        })
-        .unwrap_or(false);
-    let spctl = exists.then(|| diagnose_spctl(app_path));
     let (backup, backup_check) = match package
         .as_ref()
         .and_then(|package| package.install_id.as_deref())
@@ -117,14 +119,68 @@ pub fn diagnose_with_root(app_path: &Path, root: &Path) -> Diagnosis {
         .map(|package| package.already_patched)
         .unwrap_or(false);
     let official_target = is_official_app(app_path, None);
-    let (signing, signing_check) = inspect_signing(
-        spctl.as_ref(),
-        codesign_ok,
-        app_path,
-        signing_inventory.as_ref(),
-        patched,
-        official_target,
-    );
+    let (codesign_ok, signing, spctl, signing_check) = if !exists {
+        (
+            false,
+            None,
+            None,
+            CheckResult::unknown(
+                "signing.not-checked",
+                "the application does not exist, so nested signing was not inspected",
+            ),
+        )
+    } else {
+        match mode {
+            DiagnosisMode::Status => (
+                false,
+                Some(not_requested_signing(None)),
+                Some(not_requested_spctl()),
+                CheckResult::unknown(
+                    "signing.not-requested",
+                    "nested signing, entitlements, and Gatekeeper were not inspected",
+                ),
+            ),
+            DiagnosisMode::Doctor => {
+                let (signing, outer_ok, signing_check) =
+                    inspect_outer(app_path, patched, official_target);
+                let codesign_ok = outer_ok
+                    && plist
+                        .as_ref()
+                        .is_some_and(|plist| !plist.executable.trim().is_empty());
+                (
+                    codesign_ok,
+                    signing,
+                    Some(not_requested_spctl()),
+                    signing_check,
+                )
+            }
+            DiagnosisMode::DoctorDeep => {
+                let signing_inventory = Some(inspect_signing_inventory(app_path));
+                let codesign_ok = signing_inventory
+                    .as_ref()
+                    .and_then(|result| result.as_ref().ok())
+                    .map(|inventory| {
+                        let accepted = validate_signing_inventory(inventory).is_ok()
+                            || validate_generic_signing_inventory(inventory).is_ok();
+                        accepted
+                            && plist
+                                .as_ref()
+                                .is_some_and(|plist| !plist.executable.trim().is_empty())
+                    })
+                    .unwrap_or(false);
+                let spctl = Some(diagnose_spctl(app_path));
+                let (signing, signing_check) = inspect_signing(
+                    spctl.as_ref(),
+                    codesign_ok,
+                    app_path,
+                    signing_inventory.as_ref(),
+                    patched,
+                    official_target,
+                );
+                (codesign_ok, signing, spctl, signing_check)
+            }
+        }
+    };
     let owner_scan = scan_owner_processes(root);
     let session_scan = scan_sessions(root);
     let current_install_id = package
@@ -541,11 +597,11 @@ fn hash_file(path: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnose_signing::validate_doctor_signing_inventory;
     use incodex_macos::{
         EntitlementSnapshot, SignatureKind, SignedComponent, SigningInventory,
         VENDOR_TEAM_IDENTIFIER,
     };
-    use crate::diagnose_signing::validate_doctor_signing_inventory;
     use std::collections::BTreeSet;
     use std::os::unix::fs::PermissionsExt;
 
@@ -571,10 +627,8 @@ mod tests {
     #[test]
     fn doctor_selector_uses_official_policy_for_official_target() {
         let inventory = vendor_inventory("com.attacker.replaced");
-        let root = std::env::temp_dir().join(format!(
-            "incodex-doctor-selector-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("incodex-doctor-selector-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let codesign = root.join("codesign");
         std::fs::write(&codesign, "#!/bin/sh\nexit 0\n").unwrap();
