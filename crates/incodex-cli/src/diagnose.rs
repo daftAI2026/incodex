@@ -10,7 +10,8 @@ use incodex_core::paths::{user_root, ASAR_REL, RUNTIME_CURRENT_NAME, RUNTIME_DIR
 use incodex_core::target_id;
 use incodex_macos::{
     diagnose_spctl, has_hardened_runtime, inspect_signing_inventory, plan_adhoc_entitlements,
-    read_architecture, read_asar_integrity, read_plist_info, verify_app, SignatureKind,
+    read_architecture, read_asar_integrity, read_plist_info, validate_signing_inventory,
+    verify_app, SignatureKind, VENDOR_TEAM_IDENTIFIER,
 };
 use incodex_transaction::{journal_v2, load_journal, validate_backup_snapshot};
 
@@ -403,15 +404,50 @@ fn inspect_signing(
             Some(app_path),
         ));
     }
-    for component in &inventory.nested {
-        if !component.verified {
+    let acceptance = validate_signing_inventory(&inventory);
+    if let Err(error) = &acceptance {
+        let mut emitted_component_finding = false;
+        for component in &inventory.nested {
+            let finding = match component.kind {
+                SignatureKind::Other | SignatureKind::Unknown | SignatureKind::Unsigned => Some((
+                    "signing.component-identity-unsupported",
+                    format!(
+                        "nested {} component has an unsupported signing identity",
+                        component.kind.as_str()
+                    ),
+                )),
+                SignatureKind::Vendor
+                    if component.team_identifier.as_deref() != Some(VENDOR_TEAM_IDENTIFIER)
+                        || component.authorities.is_empty() =>
+                {
+                    Some((
+                        "signing.component-identity-unsupported",
+                        "nested vendor component lacks the required identity evidence".to_string(),
+                    ))
+                }
+                _ if !component.verified => Some((
+                    "signing.component-invalid",
+                    format!(
+                        "nested {} component failed deep strict verification",
+                        component.kind.as_str()
+                    ),
+                )),
+                _ => None,
+            };
+            if let Some((code, message)) = finding {
+                emitted_component_finding = true;
+                findings.push(DiagnosticFinding::warning(
+                    code,
+                    message,
+                    Some(&component.path),
+                ));
+            }
+        }
+        if !emitted_component_finding {
             findings.push(DiagnosticFinding::warning(
-                "signing.component-invalid",
-                format!(
-                    "nested {} component failed deep strict verification",
-                    component.kind.as_str()
-                ),
-                Some(&component.path),
+                "signing.acceptance-failed",
+                error.clone(),
+                Some(app_path),
             ));
         }
     }
@@ -431,10 +467,7 @@ fn inspect_signing(
             Some(app_path),
         ));
     }
-    let verified = codesign_ok
-        && inventory.deep_strict
-        && inventory.nested.iter().all(|component| component.verified)
-        && inventory.outer.kind == expected_kind;
+    let verified = codesign_ok && acceptance.is_ok() && inventory.outer.kind == expected_kind;
     let components = inventory
         .nested
         .iter()

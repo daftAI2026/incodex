@@ -115,8 +115,14 @@ pub fn read_entitlements(target: &Path) -> Result<EntitlementSnapshot, String> {
         ));
     }
     let xml = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if xml.is_empty() || !xml.contains("<plist") {
+    if xml.is_empty() {
         return Ok(EntitlementSnapshot::empty());
+    }
+    if !xml.contains("<plist") {
+        return Err(format!(
+            "entitlement inspection returned non-plist output for {}",
+            target.display()
+        ));
     }
     let keys = parse_entitlement_keys(&xml)?;
     Ok(EntitlementSnapshot { xml, keys })
@@ -177,8 +183,8 @@ pub fn verify_patched_adhoc_bundle_deep_strict(
     app: &Path,
     expected: Option<&PlistInfo>,
 ) -> Result<SigningInventory, String> {
-    verify_deep_strict(app)?;
     let inventory = inspect_signing_inventory(app)?;
+    validate_signing_inventory(&inventory)?;
     if inventory.outer.kind != SignatureKind::Adhoc {
         return Err(format!(
             "patched bundle is not ad hoc signed: {}",
@@ -186,7 +192,6 @@ pub fn verify_patched_adhoc_bundle_deep_strict(
         ));
     }
     verify_plist_identity(app, expected, None)?;
-    reject_unknown_signed_components(&inventory.nested)?;
     Ok(inventory)
 }
 
@@ -199,6 +204,7 @@ pub fn verify_original_vendor_bundle(
 ) -> Result<SigningInventory, String> {
     verify_deep_strict(app)?;
     let inventory = inspect_signing_inventory(app)?;
+    validate_signing_inventory(&inventory)?;
     if inventory.outer.kind != SignatureKind::Vendor
         || inventory.outer.team_identifier.as_deref() != Some(VENDOR_TEAM_IDENTIFIER)
     {
@@ -209,19 +215,47 @@ pub fn verify_original_vendor_bundle(
     }
     let expected_bundle_identifier =
         expected_bundle_identifier.unwrap_or(OFFICIAL_BUNDLE_IDENTIFIER);
+    if inventory.outer.identifier.as_deref() != Some(expected_bundle_identifier) {
+        return Err(format!(
+            "official original vendor signature identifier mismatch: expected {expected_bundle_identifier}"
+        ));
+    }
     verify_plist_identity(
         app,
         None,
         Some((expected_bundle_identifier, expected_version, expected_build)),
     )?;
-    reject_unknown_signed_components(&inventory.nested)?;
     Ok(inventory)
 }
 
 /// 保持旧调用方的 bool seam，但底层已经升级为 deep/strict 验收。
 pub fn verify_app(app: &Path) -> bool {
     verify_patched_adhoc_bundle_deep_strict(app, None).is_ok()
-        || verify_deep_strict(app).is_ok()
+        || inspect_signing_inventory(app)
+            .and_then(|inventory| validate_signing_inventory(&inventory))
+            .is_ok()
+}
+
+/// 对 install、uninstall 与 Doctor 共享的签名清单做唯一 verdict 判断。
+pub fn validate_signing_inventory(inventory: &SigningInventory) -> Result<(), String> {
+    if !inventory.deep_strict {
+        return Err("bundle failed deep strict signature verification".into());
+    }
+    match inventory.outer.kind {
+        SignatureKind::Adhoc => {
+            if !inventory.outer.verified {
+                return Err("outer ad-hoc signature verification failed".into());
+            }
+        }
+        SignatureKind::Vendor => validate_vendor_component(&inventory.outer, "outer bundle")?,
+        SignatureKind::Other | SignatureKind::Unknown | SignatureKind::Unsigned => {
+            return Err(format!(
+                "unsupported outer signature identity: {}",
+                inventory.outer.kind.as_str()
+            ));
+        }
+    }
+    validate_nested_components(&inventory.nested)
 }
 
 /// 供迁移 proof 等只需要 deep/strict 的调用方复用同一验收命令。
@@ -307,12 +341,20 @@ pub fn sign_app(app: &Path) -> Result<(), String> {
 /// 返回当前 app 中需要保持 vendor identity 的顶层 sidecar。
 pub fn collect_vendor_helper_roots(app: &Path) -> Result<Vec<PathBuf>, String> {
     let inventory = inspect_nested_components(app)?;
-    reject_unknown_signed_components(&inventory)?;
-    Ok(inventory
+    validate_nested_components(&inventory)?;
+    let mut vendors = inventory
         .into_iter()
         .filter(|component| component.kind == SignatureKind::Vendor)
         .map(|component| component.path)
-        .collect())
+        .collect::<Vec<_>>();
+    vendors.sort_by_key(|path| path.components().count());
+    let mut roots = Vec::new();
+    for path in vendors {
+        if !roots.iter().any(|root: &PathBuf| path.starts_with(root)) {
+            roots.push(path);
+        }
+    }
+    Ok(roots)
 }
 
 fn inspect_nested_components(app: &Path) -> Result<Vec<SignedComponent>, String> {
@@ -353,8 +395,7 @@ fn walk_component_paths(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String
             continue;
         }
         if is_bundle_component(&path) {
-            out.push(path);
-            continue;
+            out.push(path.clone());
         }
         walk_component_paths(&path, out)?;
     }
@@ -402,7 +443,7 @@ fn inspect_component(path: &Path) -> Result<SignedComponent, String> {
         SignatureKind::Adhoc
     } else if team_identifier.as_deref() == Some(VENDOR_TEAM_IDENTIFIER) {
         SignatureKind::Vendor
-    } else if team_identifier.is_some() || text.lines().any(|line| line.starts_with("Authority=")) {
+    } else if team_identifier.is_some() || !authorities.is_empty() {
         SignatureKind::Other
     } else {
         SignatureKind::Unknown
@@ -422,26 +463,40 @@ fn inspect_component(path: &Path) -> Result<SignedComponent, String> {
     })
 }
 
-fn reject_unknown_signed_components(components: &[SignedComponent]) -> Result<(), String> {
+fn validate_nested_components(components: &[SignedComponent]) -> Result<(), String> {
     for component in components {
-        if component.kind == SignatureKind::Unknown {
-            return Err(format!(
-                "unknown signed nested component: {}",
-                component.path.display()
-            ));
+        match component.kind {
+            SignatureKind::Vendor => validate_vendor_component(component, "nested component")?,
+            SignatureKind::Adhoc => {
+                if !component.verified {
+                    return Err(format!(
+                        "nested ad-hoc component signature verification failed: {}",
+                        component.path.display()
+                    ));
+                }
+            }
+            SignatureKind::Other | SignatureKind::Unknown | SignatureKind::Unsigned => {
+                return Err(format!(
+                    "unsupported signed nested component identity: {}",
+                    component.path.display()
+                ));
+            }
         }
-        if component.kind == SignatureKind::Other {
-            return Err(format!(
-                "unsupported signed nested component identity: {}",
-                component.path.display()
-            ));
-        }
-        if !component.verified {
-            return Err(format!(
-                "nested component signature verification failed: {}",
-                component.path.display()
-            ));
-        }
+    }
+    Ok(())
+}
+
+fn validate_vendor_component(component: &SignedComponent, label: &str) -> Result<(), String> {
+    if component.team_identifier.as_deref() != Some(VENDOR_TEAM_IDENTIFIER) {
+        return Err(format!(
+            "{label} has an unexpected vendor TeamIdentifier"
+        ));
+    }
+    if component.authorities.is_empty() {
+        return Err(format!("{label} has no vendor authority evidence"));
+    }
+    if !component.verified {
+        return Err(format!("{label} signature verification failed"));
     }
     Ok(())
 }
