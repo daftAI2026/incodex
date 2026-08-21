@@ -185,7 +185,7 @@ fn open_missing_binary_does_not_leave_a_session() {
     let (status, stdout, stderr) = run(&["open", "--app", app.to_str().unwrap()], &home);
     assert_eq!(status, 1);
     assert_eq!(stdout, "");
-    assert!(stderr.contains("Codex binary not found"));
+    assert!(stderr.contains("CFBundleExecutable not found"));
     assert!(
         incodex_paths(&home)
             .iter()
@@ -287,7 +287,7 @@ fn open_spawn_error_still_burns() {
     let app = fake_app(&home, "#!/bin/sh\nexit 0\n");
     let exe = app.join("Contents/MacOS/ChatGPT");
     fs::remove_file(&exe).unwrap();
-    fs::create_dir(&exe).unwrap();
+    fs::write(&exe, "not executable\n").unwrap();
     let source = home.join(".codex");
     fs::create_dir_all(&source).unwrap();
     fs::write(source.join("auth.json"), "{}\n").unwrap();

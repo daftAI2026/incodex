@@ -6,17 +6,18 @@
 //! payload is our MIT `inject.js`, not a third-party injector.
 
 use std::io::{Read, Write};
-use std::net::{IpAddr, TcpListener, TcpStream};
+use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
-use tungstenite::{connect, Message};
+use tungstenite::{client, Message};
 
 const INJECT_JS: &str = include_str!("../../../dist/incodex-inject.js");
 const INJECT_PREFIX: &str = "window.__incodexIncognito=true;";
 const MAX_HTTP_RESPONSE_BYTES: usize = 1024 * 1024;
 const MACOS_WINDOW_TILE_PIXELS: i32 = 22;
+const CDP_IO_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone)]
 pub struct CdpTarget {
@@ -55,6 +56,8 @@ enum CdpLifecycleAction {
 }
 
 pub fn allocate_debug_port() -> Result<u16, String> {
+    // Chromium 必须在 listener 释放后自行 bind；这是不可避免的短暂 TOCTOU。
+    // 后续 HTTP/CDP 操作均有硬截止时间，抢占或 bind 失败只会得到有界的 UI 错误。
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|err| err.to_string())?;
     let port = listener.local_addr().map_err(|err| err.to_string())?.port();
     drop(listener);
@@ -163,7 +166,7 @@ fn try_inject(debug_port: u16, source: &str) -> Result<String, String> {
     let targets = list_targets(debug_port)?;
     let page = pick_codex_page_target(&targets).ok_or("no Codex page target")?;
     validate_cdp_websocket_url(&page.ws, debug_port)?;
-    let (mut socket, _) = connect(&page.ws).map_err(|err| err.to_string())?;
+    let (mut socket, _) = connect_cdp_websocket(&page.ws, debug_port)?;
     send_cdp(&mut socket, 1, "Page.enable", json!({}))?;
     send_cdp(
         &mut socket,
@@ -234,14 +237,14 @@ fn close_browser(debug_port: u16) -> Result<(), String> {
         .and_then(Value::as_str)
         .ok_or("CDP browser target has no WebSocket URL")?;
     validate_cdp_websocket_url(websocket, debug_port)?;
-    let (mut socket, _) = connect(websocket).map_err(|err| err.to_string())?;
+    let (mut socket, _) = connect_cdp_websocket(websocket, debug_port)?;
     socket
         .send(Message::Text(browser_close_message().to_string()))
         .map_err(|err| err.to_string())
 }
 
 fn send_cdp(
-    socket: &mut tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<TcpStream>>,
+    socket: &mut tungstenite::WebSocket<TcpStream>,
     id: u64,
     method: &str,
     params: Value,
@@ -250,7 +253,11 @@ fn send_cdp(
     socket
         .send(Message::Text(body.to_string()))
         .map_err(|err| err.to_string())?;
+    let deadline = Instant::now() + CDP_IO_TIMEOUT;
     for _ in 0..20 {
+        if Instant::now() >= deadline {
+            return Err(format!("cdp {method} timed out"));
+        }
         let msg = socket.read().map_err(|err| err.to_string())?;
         let Message::Text(text) = msg else {
             continue;
@@ -267,6 +274,43 @@ fn send_cdp(
         }
     }
     Err(format!("cdp {method} timed out"))
+}
+
+fn connect_cdp_websocket(
+    url: &str,
+    expected_port: u16,
+) -> Result<
+    (
+        tungstenite::WebSocket<TcpStream>,
+        tungstenite::handshake::client::Response,
+    ),
+    String,
+> {
+    let addr = websocket_socket_addr(url, expected_port)?;
+    let stream = TcpStream::connect_timeout(&addr, CDP_IO_TIMEOUT)
+        .map_err(|error| format!("CDP WebSocket connect timed out or failed: {error}"))?;
+    stream
+        .set_read_timeout(Some(CDP_IO_TIMEOUT))
+        .map_err(|error| error.to_string())?;
+    stream
+        .set_write_timeout(Some(CDP_IO_TIMEOUT))
+        .map_err(|error| error.to_string())?;
+    client(url, stream).map_err(|error| error.to_string())
+}
+
+fn websocket_socket_addr(url: &str, expected_port: u16) -> Result<SocketAddr, String> {
+    let uri: tungstenite::http::Uri = url
+        .parse()
+        .map_err(|error| format!("invalid CDP WebSocket URL: {error}"))?;
+    validate_cdp_websocket_url(url, expected_port)?;
+    let host = uri.host().ok_or("CDP WebSocket URL has no host")?;
+    let ip: IpAddr = host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse()
+        .map_err(|_| "CDP WebSocket host must be a loopback IP address".to_string())?;
+    let port = uri.port_u16().ok_or("CDP WebSocket URL has no port")?;
+    Ok(SocketAddr::new(ip, port))
 }
 
 fn list_targets(debug_port: u16) -> Result<Vec<CdpTarget>, String> {
@@ -322,12 +366,20 @@ fn http_get_json_host(host: &str, debug_port: u16, path: &str) -> Result<Value, 
     } else {
         format!("127.0.0.1:{debug_port}")
     };
-    let mut stream = TcpStream::connect(&addr).map_err(|err| err.to_string())?;
+    let socket_addr: SocketAddr = addr
+        .parse()
+        .map_err(|error| format!("invalid CDP address {addr}: {error}"))?;
+    let deadline = Instant::now() + CDP_IO_TIMEOUT;
+    let mut stream =
+        TcpStream::connect_timeout(&socket_addr, CDP_IO_TIMEOUT).map_err(|err| err.to_string())?;
+    let remaining = deadline
+        .checked_duration_since(Instant::now())
+        .ok_or("cdp http operation timed out")?;
     stream
-        .set_read_timeout(Some(Duration::from_secs(2)))
+        .set_read_timeout(Some(remaining))
         .map_err(|err| err.to_string())?;
     stream
-        .set_write_timeout(Some(Duration::from_secs(2)))
+        .set_write_timeout(Some(remaining))
         .map_err(|err| err.to_string())?;
     let request =
         format!("GET {path} HTTP/1.1\r\nHost: {host}:{debug_port}\r\nConnection: close\r\n\r\n");
@@ -337,6 +389,12 @@ fn http_get_json_host(host: &str, debug_port: u16, path: &str) -> Result<Value, 
     let mut response = Vec::new();
     let mut chunk = [0_u8; 8192];
     loop {
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .ok_or("cdp http operation timed out")?;
+        stream
+            .set_read_timeout(Some(remaining))
+            .map_err(|err| err.to_string())?;
         if let Some((body_start, content_length)) = response_frame(&response)? {
             let end = body_start + content_length;
             if response.len() >= end {
@@ -454,14 +512,19 @@ mod tests {
             let _ = stream.read(&mut request);
             let response = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n[]";
             for byte in response {
-                stream.write_all(&[*byte]).unwrap();
+                if stream.write_all(&[*byte]).is_err() {
+                    break;
+                }
                 thread::sleep(Duration::from_millis(100));
             }
         });
 
         let started = Instant::now();
         let result = http_get_json_host("127.0.0.1", port, "/json/list");
-        assert!(result.is_err(), "a slow endpoint must not complete normally");
+        assert!(
+            result.is_err(),
+            "a slow endpoint must not complete normally"
+        );
         assert!(
             started.elapsed() < Duration::from_millis(2_500),
             "slow CDP endpoint exceeded its bounded operation deadline"
@@ -479,10 +542,8 @@ mod tests {
         });
 
         let started = Instant::now();
-        let result = connect_cdp_websocket(
-            &format!("ws://127.0.0.1:{port}/devtools/page/test"),
-            port,
-        );
+        let result =
+            connect_cdp_websocket(&format!("ws://127.0.0.1:{port}/devtools/page/test"), port);
         assert!(result.is_err());
         assert!(
             started.elapsed() < Duration::from_millis(2_500),

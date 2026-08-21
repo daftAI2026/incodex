@@ -77,6 +77,11 @@ fn sleeping_open_app(home: &Path) -> PathBuf {
     let app = home.join("ChatGPT.app");
     let macos = app.join("Contents/MacOS");
     fs::create_dir_all(&macos).unwrap();
+    fs::write(
+        app.join("Contents/Info.plist"),
+        plist("com.example.incodex-open", "ChatGPT"),
+    )
+    .unwrap();
     let executable = macos.join("ChatGPT");
     fs::write(&executable, "#!/bin/sh\nsleep 0.8\n").unwrap();
     let mut permissions = fs::metadata(&executable).unwrap().permissions();

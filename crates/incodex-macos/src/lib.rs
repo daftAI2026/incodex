@@ -87,6 +87,35 @@ pub fn read_plist_info(app: &Path) -> Option<PlistInfo> {
     })
 }
 
+/// 读取 `CFBundleExecutable` 的严格版本，供启动路径使用。
+pub fn read_plist_executable(app: &Path) -> Result<String, String> {
+    let plist = app.join("Contents").join("Info.plist");
+    if !plist.is_file() {
+        return Err(format!("Info.plist not found: {}", plist.display()));
+    }
+    let output = Command::new("plutil")
+        .args(["-convert", "json", "-o", "-", "--"])
+        .arg(&plist)
+        .output()
+        .map_err(|error| format!("cannot read {}: {error}", plist.display()))?;
+    if !output.status.success() {
+        return Err(format!("Info.plist is invalid: {}", plist.display()));
+    }
+    let raw: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("Info.plist is not valid JSON: {error}"))?;
+    raw.get("CFBundleExecutable")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            format!(
+                "Info.plist has no valid CFBundleExecutable: {}",
+                plist.display()
+            )
+        })
+}
+
 pub fn read_architecture(app: &Path, executable: &str) -> Option<String> {
     let binary = app.join("Contents").join("MacOS").join(executable);
     let output = Command::new("lipo")

@@ -1,3 +1,4 @@
+pub mod app_bundle;
 pub mod cdp;
 pub mod confirm;
 pub mod diagnose;
