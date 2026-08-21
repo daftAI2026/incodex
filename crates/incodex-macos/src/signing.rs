@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::{read_plist_info, PlistInfo};
+use super::signing_policy::validate_generic_nested_components;
 
 pub const VENDOR_TEAM_IDENTIFIER: &str = "2DC432GLL2";
 pub const OFFICIAL_BUNDLE_IDENTIFIER: &str = "com.openai.codex";
@@ -303,7 +304,7 @@ pub fn validate_generic_signing_inventory(
             ));
         }
     }
-    validate_nested_components(&inventory.nested)
+    validate_generic_nested_components(&inventory.nested)
 }
 
 /// 供迁移 proof 等只需要 deep/strict 的调用方复用同一验收命令。

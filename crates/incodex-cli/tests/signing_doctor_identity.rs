@@ -79,7 +79,7 @@ if [ "$1" = "--verify" ]; then exit 0; fi
 exit 0
 "#,
             identity_display = match identity {
-                "other" => "printf '%s\\n' 'Identifier=com.example.other' 'TeamIdentifier=OTHERTEAM' 'Authority=Other Signer'",
+                "other" => "printf '%s\\n' 'Identifier=com.example.other' 'TeamIdentifier=OTHERTEAM'",
                 "unknown" => "printf '%s\\n' 'Identifier=com.example.unknown'",
                 _ => unreachable!(),
             }

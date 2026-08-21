@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 mod signing;
+mod signing_policy;
 pub use signing::*;
 
 #[derive(Debug, Clone, Default)]
