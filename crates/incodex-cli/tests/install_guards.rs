@@ -108,6 +108,15 @@ fn replace_with_unbound_marker(home: &Path, app: &Path) {
     pack_dir(&source, &app.join("Contents/Resources/app.asar")).unwrap();
 }
 
+fn replace_with_unbound_loader(home: &Path, app: &Path) {
+    let source = home.join("unbound-loader");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("package.json"), "{\"main\":\"index.js\"}\n").unwrap();
+    fs::write(source.join(LOADER_NAME), "unbound loader\n").unwrap();
+    fs::write(source.join("index.js"), "already modified\n").unwrap();
+    pack_dir(&source, &app.join("Contents/Resources/app.asar")).unwrap();
+}
+
 #[test]
 fn install_refuses_marked_live_app_without_trusted_record_before_snapshot() {
     let home = home();
@@ -123,6 +132,26 @@ fn install_refuses_marked_live_app_without_trusted_record_before_snapshot() {
     assert!(
         stderr.contains("marker"),
         "refusal should name the marker: {stderr}"
+    );
+    assert_eq!(fs::read(&asar).unwrap(), before);
+    assert!(transaction_ids(&home).is_empty());
+}
+
+#[test]
+fn install_refuses_unbound_loader_without_marker_before_snapshot() {
+    let home = home();
+    let app = patchable_app(&home);
+    replace_with_unbound_loader(&home, &app);
+    let asar = app.join("Contents/Resources/app.asar");
+    let before = fs::read(&asar).unwrap();
+
+    let (status, _stdout, stderr) =
+        run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
+
+    assert_eq!(status, 1, "unbound loader was accepted: {stderr}");
+    assert!(
+        stderr.contains("loader"),
+        "refusal should name the loader: {stderr}"
     );
     assert_eq!(fs::read(&asar).unwrap(), before);
     assert!(transaction_ids(&home).is_empty());
