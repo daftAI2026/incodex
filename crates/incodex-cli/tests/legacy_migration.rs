@@ -466,7 +466,12 @@ fn upgraded_legacy_record_rejects_a_foreign_modified_clean_app() {
     let fixture = Fixture::create();
     let state = load_legacy_ts_v1(&fixture.root, &fixture.app).unwrap().unwrap();
     migrate_legacy_ts_v1(&fixture.root, prove_legacy_ts_v1(&fixture.root, state).unwrap()).unwrap();
-    fs::write(fixture.app_asar(), b"foreign modified").unwrap();
+    let foreign_source = fixture.root.join("foreign-clean-source");
+    fs::create_dir_all(&foreign_source).unwrap();
+    fs::write(foreign_source.join("package.json"), "{\"main\":\"index.js\"}\n")
+        .unwrap();
+    fs::write(foreign_source.join("index.js"), "foreign modified\n").unwrap();
+    pack_dir(&foreign_source, &fixture.app_asar()).unwrap();
     sign_app(&fixture.app).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_incodex"))
         .args(["install", "--yes", "--app", fixture.app.to_str().unwrap()])
