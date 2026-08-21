@@ -20,6 +20,7 @@ use crate::legacy_typescript::{
 };
 
 const VENDOR_TEAM_IDENTIFIER: &str = "2DC432GLL2";
+const OFFICIAL_BUNDLE_IDENTIFIER: &str = "com.openai.codex";
 
 /// 证明后才可交给迁移器的状态。结构状态本身不实现任何 mutation 能力。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,6 +112,9 @@ where
     let before_lock = inspect_target(target, None)
         .map_err(|error| format!("cannot inspect legacy live target: {error}"))?;
     assert_target_identity(&before_lock, &expected_target, "before target lock")?;
+    if before_lock.is_official && manifest.bundle_identifier != OFFICIAL_BUNDLE_IDENTIFIER {
+        return Err("official target bundle identifier is not com.openai.codex".into());
+    }
     let lock = acquire_target_lock(root, target, "legacy-proof", Some(&structural.install_id))?;
     recheck_target(&before_lock)
         .map_err(|error| format!("legacy live target changed at lock boundary: {error}"))?;
