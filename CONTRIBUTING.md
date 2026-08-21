@@ -47,7 +47,7 @@ runs `tsc` to emit portable CJS into `dist/*.cjs`. The emitted files must use
 
 ## Native CLI
 
-Rust CLI source is on `main`. The migration gates are complete, and v0.3.1 published the native Rust CLI under the stable asset names. It is the only product CLI; the remaining TypeScript mutation modules exist only as frozen legacy sources until dedicated PR-D cleanup and must not gain new behavior.
+Rust CLI source is on `main`. The migration gates are complete, and v0.3.1 published the native Rust CLI under the stable asset names. It is the only product CLI; legacy v1 fixture/proof coverage is native Rust and the remaining TypeScript source belongs to Electron Runtime/forensics.
 
 ```bash
 git fetch origin
@@ -57,7 +57,7 @@ git checkout -b feat/your-change
 # Rust CLI PRs use base `main`.
 ```
 
-Each behavior change starts with a failing `cargo test` repro, followed by the implementation. Run `cargo test --workspace --release`; keep the native CLI contract and frozen legacy fixture suites green. The retired TypeScript CLI is not a test oracle.
+Each behavior change starts with a failing `cargo test` repro, followed by the implementation. Run `cargo test --workspace --release`; keep the native CLI contract and legacy fixture/proof suites green. The retired TypeScript CLI and mutation implementation are not test oracles.
 
 ```bash
 cargo run -p incodex-cli -- --help

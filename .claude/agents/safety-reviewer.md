@@ -1,6 +1,6 @@
 ---
 name: safety-reviewer
-description: Audits Incodex changes for installer, signing, asar, session burn, and IPC regressions. Use before merging changes under src/install.ts, src/uninstall.ts, src/codesign.ts, src/asar.ts, src/runtime/**, crates/incodex-cli/src/install.rs, crates/incodex-cli/src/open.rs, crates/incodex-cli/src/cdp.rs, crates/incodex-core/src/session.rs, crates/incodex-transaction/**, crates/incodex-asar/**, crates/incodex-macos/**, or install.sh.
+description: Audits Incodex changes for installer, signing, asar, session burn, and IPC regressions. Use before merging changes under src/runtime/**, crates/incodex-cli/src/install.rs, crates/incodex-cli/src/open.rs, crates/incodex-cli/src/cdp.rs, crates/incodex-core/src/session.rs, crates/incodex-transaction/**, crates/incodex-asar/**, crates/incodex-macos/**, or install.sh.
 tools: Read, Grep, Glob, Bash
 ---
 

@@ -57,7 +57,9 @@ describe("architecture boundaries", () => {
     };
 
     expect(agents).toContain("The Rust CLI is the sole product CLI");
-    expect(agents).toContain("The TypeScript product router and parser have been retired");
+    expect(agents).toContain(
+      "The TypeScript product router, parser, mutation implementation, and old Runtime publishers have been retired",
+    );
     expect(existsSync(join(root, "src/cli.ts"))).toBe(false);
     expect(existsSync(join(root, "src/parse-cli.ts"))).toBe(false);
     expect(packageJson.bin?.incodex).toBeUndefined();
@@ -84,24 +86,13 @@ describe("architecture boundaries", () => {
     }
   });
 
-  test("patcher is a staged transform and does not touch the official app or home overrides", () => {
-    const patcher = src("src/patcher.ts");
-    expect(patcher).toContain("export async function patchStagedBundle");
-    expect(patcher).not.toContain("DEFAULT_APP");
-    expect(patcher).not.toContain("signApp");
-    expect(patcher).not.toContain("swapBundle");
-    expect(patcher).not.toContain("USER_ROOT");
-    expect(patcher).not.toContain(".incodex/targets");
-    expect(src("src/install.ts")).toContain("patchStagedBundle");
-    expect(src("src/asar.ts")).toContain("ASAR_RUNTIME_LEFTOVERS");
-    expect(src("src/patcher.ts")).toContain("loaderSource: options.artifacts.loader");
-    expect(src("src/patcher.ts")).not.toContain("mainSource:");
-  });
-
-  test("installer does not rebuild runtime by spawning bun", () => {
-    const install = src("src/install.ts");
-    expect(install).not.toContain("src/build-runtime.ts");
-    expect(install).not.toMatch(/spawnSync\(\s*["']bun["']/);
+  test("native installer owns patching while Bun only builds Runtime", () => {
+    const install = src("crates/incodex-cli/src/install.rs");
+    const runtime = src("src/build-runtime.ts");
+    expect(install).toContain("incodex_asar::");
+    expect(install).not.toMatch(/Command::new\(["']bun["']\)/);
+    expect(runtime).toContain("src/runtime/inject.ts");
+    expect(runtime).toContain("writeRuntimeManifest");
   });
 
   test("native open path does not patch asar or resign", () => {

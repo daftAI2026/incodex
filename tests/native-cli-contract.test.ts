@@ -70,7 +70,7 @@ describe("native CLI contract boundary", () => {
     expect(readme).toContain("native CLI contract");
     expect(readme).toContain("legacy_typescript.rs");
     expect(agents).toContain("The Rust CLI is the sole product CLI");
-    expect(agents).toContain("frozen mutation/fixture material");
+    expect(agents).toContain("legacy v1 fixture/proof material");
     expect(agents).not.toContain("tests/cli-golden.test.ts");
   });
 });

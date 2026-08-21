@@ -48,11 +48,11 @@ If the answer is no or unclear, decline or narrow.
 ## Repository Map
 
 - `AGENTS.md` is the contract. `CLAUDE.md` must stay a symlink to it.
-- The TypeScript product router and parser have been retired. Rust owns the product CLI; the remaining `src/install.ts` / `src/uninstall.ts` / `src/recover.ts` mutation modules are frozen legacy sources until dedicated PR-D cleanup and are not product paths.
+- The TypeScript product router, parser, mutation implementation, and old Runtime publishers have been retired. Rust owns the product CLI and native mutation path; legacy TypeScript v1 disk compatibility is limited to the Rust `legacy_typescript.rs` reader and `legacy_proof.rs` safety fixtures.
 - `crates/incodex-cli` is the native CLI: `parse.rs` owns its command language, while `install.rs` and `open.rs` dispatch dangerous operations through the lower crates.
 - `crates/incodex-transaction` owns native mutation locks, durable journals, rollback, and recovery. `crates/incodex-asar` and `crates/incodex-macos` own ASAR and macOS signing/plist mechanics.
 - `crates/incodex-core/src/session.rs` owns native `open` session create/burn; it must stay behaviorally aligned with `src/runtime/incodex-safe-home.cts` without sharing language-specific code.
-- `src/packaged-runtime.ts` reads committed `dist/` (or `INCODEX_DIST`). The installer must not `spawn bun src/build-runtime.ts`.
+- `src/build-runtime.ts` builds committed `dist/` artifacts. Native `incodex-runtime-bundle` publishes them; the installer must not rebuild Runtime by spawning Bun.
 - `src/runtime/*.cts` is Electron-side source. `bun run build:runtime` emits portable `dist/*.cjs` with `__dirname`, never a machine-absolute path.
 - `src/runtime/incodex-loader.cts` is the only file that belongs in official asar. Everything else loads from `~/.incodex/runtime/` after hash check and fail-opens to official main.
 - `install.sh` installs the CLI binary only. It must verify `SHA256SUMS` and must not run `incodex install`.
@@ -63,13 +63,13 @@ If the answer is no or unclear, decline or narrow.
 
 Rust workspace now lives on `main`. The migration passed the native Rust contract suites, the frozen legacy fixture reader, the 10 MB size gate, the 50 ms product cold-start probe, and manual TTY/open verification. The v0.3.1 compatibility release published the native Rust CLI under the stable asset names. The Rust CLI is the sole product CLI. Bun remains responsible for building the embedded Electron Runtime and its checks, not for producing or launching a shipped TypeScript CLI binary.
 
-The native Rust contract tests are the product behavior source of truth. The remaining TypeScript source is limited to frozen mutation/fixture material pending PR-D; it must not be launched as a product CLI, by golden/parity tests, or used as an output oracle.
+The native Rust contract tests are the product behavior source of truth. The remaining TypeScript source is limited to Electron Runtime and forensics; legacy v1 fixture/proof material lives in Rust and must not be launched as a product CLI or used as an output oracle.
 
 ### Branching and TDD
 
 1. New Rust CLI PRs target `main`. One review-sized change per PR.
 2. Each behavior change starts with a failing `cargo test` repro commit, followed by the implementation commit. Do not land tests and code in the same first commit.
-3. The retired TypeScript product router must not return. Keep only the remaining frozen mutation/fixture modules until dedicated PR-D cleanup; do not extend them or create new TypeScript parity paths.
+3. The retired TypeScript product router and mutation implementation must not return. Keep legacy v1 compatibility only in the named Rust fixture/proof modules; do not create new TypeScript parity paths.
 4. Rust `install` / `uninstall` / `recover` / `open` / `status` / `doctor` are the product paths. Preserve their proven safety contracts without creating new TypeScript parity work.
 
 ### Runtime boundary

@@ -12,8 +12,8 @@ Read `AGENTS.md` first. Load only the shapes the diff actually touches. A fix sh
 | 1 | Tests written after the code to match it | Any change |
 | 2 | Destructive CLI without a plan / `--yes` | `crates/incodex-cli/src/parse.rs`, `crates/incodex-cli/src/confirm.rs`, `crates/incodex-cli/src/install.rs` |
 | 3 | `install.sh` patches Codex | `install.sh` |
-| 4 | Installer spawns `bun` to rebuild runtime | `src/install.ts`, `src/packaged-runtime.ts` |
-| 5 | `--deep` signs vendor CUA sidecars | `src/codesign.ts` |
+| 4 | Installer spawns `bun` to rebuild runtime | `crates/incodex-cli/src/install.rs`, `crates/incodex-runtime-bundle/**`, `src/build-runtime.ts` |
+| 5 | `--deep` signs vendor CUA sidecars | `crates/incodex-macos/**` |
 | 6 | Fake OpenAI Team ID or hidden IPC proxy | signing, runtime IPC |
 | 7 | Writes or deletes `~/.codex` session DBs | session / forensics |
 | 8 | `open` patches asar or resigns | `crates/incodex-cli/src/open.rs`, `crates/incodex-cli/src/cdp.rs` |
