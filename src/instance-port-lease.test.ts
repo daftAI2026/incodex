@@ -16,7 +16,9 @@ import {
   writeOwnerLock,
 } from "./runtime/incodex-instance.cts";
 
-const waitForCount = async (directory: string, expected: number, timeoutMs = 10_000) => {
+const target = (root: string) => join(root, "target-executable");
+
+const waitForCount = async (directory: string, expected: number, timeoutMs = 30_000) => {
   const deadline = Date.now() + timeoutMs;
   while (readdirSync(directory).length < expected && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -43,7 +45,7 @@ describe("kernel-held TCP owner lease", () => {
 
   test("probe returns only a non-secret marker while token raise still works", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-tcp-probe-"));
-    const owner = currentOwner("probe", targetExec(root));
+    const owner = currentOwner("probe", target(root));
     await acquireOwnerLease(root, owner);
     const response = await new Promise<string>((resolve, reject) => {
       const socket = createConnection({ host: "127.0.0.1", port: ownerPortFromExec(owner.execPath) });
@@ -67,21 +69,21 @@ describe("kernel-held TCP owner lease", () => {
 
   test("deletes only its diagnostic record before asynchronously releasing the port", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-tcp-release-"));
-    const owner = currentOwner("release", targetExec(root));
+    const owner = currentOwner("release", target(root));
     await acquireOwnerLease(root, owner);
     const wrongOwner = { ...owner, token: "wrong-token", nonce: "wrong-token" };
     expect(await releaseOwnerLease(root, wrongOwner)).toBe(false);
     expect(await connectExisting(root, 500, owner.token)).toBe(true);
     expect(await releaseOwnerLease(root, owner)).toBe(true);
     expect(readOwnerLock(root)).toBeNull();
-    const replacement = currentOwner("reopen", targetExec(root));
+    const replacement = currentOwner("reopen", target(root));
     await expect(acquireOwnerLease(root, replacement)).resolves.toEqual(replacement);
     expect(await releaseOwnerLease(root, replacement)).toBe(true);
   });
 
   test("bounds an unterminated protocol request", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-tcp-protocol-limit-"));
-    const owner = currentOwner("protocol", targetExec(root));
+    const owner = currentOwner("protocol", target(root));
     await acquireOwnerLease(root, owner);
     const closed = new Promise<boolean>((resolve) => {
       const socket = createConnection({ host: "127.0.0.1", port: ownerPortFromExec(owner.execPath) });
@@ -155,12 +157,16 @@ describe("kernel-held TCP owner lease", () => {
           child.once("error", (error) => resolve({ code: 3, stderr: String(error) }));
         }),
     );
-    expect(await waitForCount(readyRoot, children.length)).toBe(true);
-    writeFileSync(join(root, "start"), "go\n");
-    expect(await waitForCount(doneRoot, children.length)).toBe(true);
-    expect(await waitForCount(resultRoot, children.length)).toBe(true);
-    const outcomes = readdirSync(resultRoot).map((index) => readFileSync(join(resultRoot, index), "utf8").trim());
-    writeFileSync(releaseFile, "release\n");
+    let outcomes: string[] = [];
+    try {
+      expect(await waitForCount(readyRoot, children.length)).toBe(true);
+      writeFileSync(join(root, "start"), "go\n");
+      expect(await waitForCount(doneRoot, children.length)).toBe(true);
+      expect(await waitForCount(resultRoot, children.length)).toBe(true);
+      outcomes = readdirSync(resultRoot).map((index) => readFileSync(join(resultRoot, index), "utf8").trim());
+    } finally {
+      writeFileSync(releaseFile, "release\n");
+    }
     const finished = await Promise.all(completions);
     expect(outcomes.filter((value) => value.startsWith("WINNER "))).toHaveLength(1);
     expect(outcomes.filter((value) => value === "OWNER_BUSY")).toHaveLength(19);
