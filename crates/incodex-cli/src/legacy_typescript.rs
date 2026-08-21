@@ -5,12 +5,13 @@
 //! so a future migration can validate that state before touching the target.
 
 use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
 
 use serde::de::{self, Deserializer};
 use serde::Deserialize;
 
-use incodex_core::{canonical_path, is_official_app, target_id};
+use incodex_core::{canonical_path, inspect_target, is_official_app, target_id};
 use incodex_transaction::validate_path_ancestors;
 
 pub const SCHEMA_VERSION: u32 = 1;
@@ -135,7 +136,31 @@ pub struct LegacyTsV1State {
     pub install_dir: PathBuf,
     pub state: LegacyState,
     pub journal: TransactionJournal,
+    /// Identities observed while reading the committed structural record.
+    /// They are evidence inputs for the target-lock proof gate, not proof by
+    /// themselves; the gate rechecks both identities while holding the lock.
+    pub target_identity: Option<LegacyTargetIdentity>,
+    pub original_identity: Option<LegacyFsIdentity>,
 }
+
+/// Device/inode identity for one legacy filesystem object.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LegacyFsIdentity {
+    pub device: u64,
+    pub inode: u64,
+}
+
+/// The target and its parent identity captured by the structural reader.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LegacyTargetIdentity {
+    pub target: LegacyFsIdentity,
+    pub parent: LegacyFsIdentity,
+}
+
+/// Compatibility name used by the migration proof API. It intentionally
+/// remains an alias: the proof gate, rather than a second state model, adds
+/// the stronger live/backup evidence.
+pub type LegacyStructuralState = LegacyTsV1State;
 
 #[derive(Debug, Clone)]
 struct LegacyJournalRecord {
@@ -190,6 +215,29 @@ pub fn load_legacy_ts_v1(root: &Path, target: &Path) -> Result<Option<LegacyTsV1
         LegacyStateKind::RolledBack => LegacyState::RolledBack,
     };
     let install_dir = target_store.join(&selected.journal.install_id);
+    let (target_identity, original_identity) = match &state {
+        LegacyState::Committed { original_app, .. } => (
+            inspect_target(&target_real_path, None)
+                .ok()
+                .map(|target| LegacyTargetIdentity {
+                    target: LegacyFsIdentity {
+                        device: target.target_device,
+                        inode: target.target_inode,
+                    },
+                    parent: LegacyFsIdentity {
+                        device: target.parent_device,
+                        inode: target.parent_inode,
+                    },
+                }),
+            fs::symlink_metadata(original_app)
+                .ok()
+                .map(|metadata| LegacyFsIdentity {
+                    device: metadata.dev(),
+                    inode: metadata.ino(),
+                }),
+        ),
+        LegacyState::Interrupted | LegacyState::RolledBack => (None, None),
+    };
 
     Ok(Some(LegacyTsV1State {
         target_id: target_key,
@@ -199,6 +247,8 @@ pub fn load_legacy_ts_v1(root: &Path, target: &Path) -> Result<Option<LegacyTsV1
         install_dir,
         state,
         journal: selected.journal.clone(),
+        target_identity,
+        original_identity,
     }))
 }
 
