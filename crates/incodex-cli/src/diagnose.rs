@@ -378,9 +378,12 @@ fn inspect_backup(
     install_id: &str,
     runtime_version: Option<&str>,
 ) -> (Option<serde_json::Value>, CheckResult) {
-    let transaction = root.join("transactions").join(install_id);
+    let transactions = root.join("transactions");
+    let transaction = transactions.join(install_id);
     let journal_path = transaction.join("journal.json");
-    let symlink_path = if is_symlink(&transaction) {
+    let symlink_path = if is_symlink(&transactions) {
+        Some(transactions)
+    } else if is_symlink(&transaction) {
         Some(transaction)
     } else if is_symlink(&journal_path) {
         Some(journal_path)
