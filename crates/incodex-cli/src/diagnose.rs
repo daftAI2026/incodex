@@ -10,13 +10,12 @@ use incodex_core::canonical::is_official_app;
 use incodex_core::paths::{user_root, ASAR_REL, RUNTIME_CURRENT_NAME, RUNTIME_DIR_NAME};
 use incodex_core::target_id;
 use incodex_macos::{
-    diagnose_spctl, has_hardened_runtime, inspect_signing_inventory, plan_adhoc_entitlements,
-    read_architecture, read_asar_integrity, read_plist_info, validate_signing_inventory,
-    validate_generic_nested_components, validate_generic_signing_inventory,
-    validate_nested_components, validate_official_signing_inventory, verify_app, SignatureKind,
-    SignedComponent, SigningInventory, VENDOR_TEAM_IDENTIFIER,
+    diagnose_spctl, inspect_signing_inventory, read_architecture, read_asar_integrity,
+    read_plist_info, validate_generic_signing_inventory, validate_signing_inventory,
 };
 use incodex_transaction::{journal_v2, load_journal, validate_backup_snapshot};
+
+use crate::diagnose_signing::inspect_signing;
 
 use crate::diagnose_checks::{
     empty_checks, scan_journals, scan_owner_processes, scan_sessions, CheckResult, CheckStatus,
@@ -95,7 +94,16 @@ pub fn diagnose_with_root(app_path: &Path, root: &Path) -> Diagnosis {
         .as_ref()
         .filter(|package| package.already_patched)
         .and_then(|_| external_runtime.version.clone());
-    let codesign_ok = exists && verify_app(app_path);
+    let signing_inventory = exists.then(|| inspect_signing_inventory(app_path));
+    let codesign_ok = signing_inventory
+        .as_ref()
+        .and_then(|result| result.as_ref().ok())
+        .map(|inventory| {
+            let accepted = validate_signing_inventory(inventory).is_ok()
+                || validate_generic_signing_inventory(inventory).is_ok();
+            accepted && plist.as_ref().is_some_and(|plist| !plist.executable.trim().is_empty())
+        })
+        .unwrap_or(false);
     let spctl = exists.then(|| diagnose_spctl(app_path));
     let (backup, backup_check) = match package
         .as_ref()
@@ -113,6 +121,7 @@ pub fn diagnose_with_root(app_path: &Path, root: &Path) -> Diagnosis {
         spctl.as_ref(),
         codesign_ok,
         app_path,
+        signing_inventory.as_ref(),
         patched,
         official_target,
     );
@@ -345,209 +354,6 @@ fn verify_external_runtime(root: &Path, current_path: &Path) -> Result<(String, 
     Ok((version, release))
 }
 
-fn validate_doctor_signing_inventory(
-    inventory: &SigningInventory,
-    patched: bool,
-    official_target: bool,
-) -> Result<(), String> {
-    if patched {
-        validate_signing_inventory(inventory)
-    } else if official_target {
-        validate_official_signing_inventory(inventory, None)
-    } else {
-        validate_generic_signing_inventory(inventory)
-    }
-}
-
-fn validate_doctor_nested_component(
-    component: &SignedComponent,
-    patched: bool,
-    official_target: bool,
-) -> Result<(), String> {
-    let component = std::slice::from_ref(component);
-    if patched || official_target {
-        validate_nested_components(component)
-    } else {
-        validate_generic_nested_components(component)
-    }
-}
-
-fn inspect_signing(
-    spctl: Option<&serde_json::Value>,
-    codesign_ok: bool,
-    app_path: &Path,
-    patched: bool,
-    official_target: bool,
-) -> (Option<serde_json::Value>, CheckResult) {
-    let Some(spctl) = spctl else {
-        return (
-            None,
-            CheckResult::unknown(
-                "signing.not-checked",
-                "the application does not exist, so nested signing was not inspected",
-            ),
-        );
-    };
-    let inventory = match inspect_signing_inventory(app_path) {
-        Ok(inventory) => inventory,
-        Err(error) => {
-            let report = serde_json::json!({
-                "status": "unknown",
-                "verified": codesign_ok,
-                "componentCount": serde_json::Value::Null,
-                "hardenedRuntimeOk": has_hardened_runtime(app_path),
-                "unretainable": serde_json::Value::Null,
-                "error": error,
-                "spctl": spctl,
-            });
-            return (
-                Some(report),
-                CheckResult::unknown(
-                    "signing.inspect-failed",
-                    "signature inventory could not be inspected",
-                ),
-            );
-        }
-    };
-
-    let mut findings = Vec::new();
-    let plan = plan_adhoc_entitlements(&inventory.entitlements);
-    let unretainable = match &plan {
-        Ok(plan) => plan
-            .stripped_keys
-            .iter()
-            .cloned()
-            .map(serde_json::Value::String)
-            .collect::<Vec<_>>(),
-        Err(error) => {
-            findings.push(DiagnosticFinding::warning(
-                "signing.entitlements-invalid",
-                format!("entitlement policy could not be evaluated: {error}"),
-                Some(app_path),
-            ));
-            Vec::new()
-        }
-    };
-    if !unretainable.is_empty() {
-        findings.push(DiagnosticFinding::info(
-            "signing.entitlements-unretainable",
-            "some vendor entitlements cannot be retained by an ad-hoc outer signature",
-            Some(app_path),
-        ));
-    }
-    if !inventory.deep_strict {
-        findings.push(DiagnosticFinding::warning(
-            "signing.deep-strict-failed",
-            "bundle did not pass deep strict signature verification",
-            Some(app_path),
-        ));
-    }
-    let acceptance = validate_doctor_signing_inventory(&inventory, patched, official_target);
-    if let Err(error) = &acceptance {
-        let mut emitted_component_finding = false;
-        for component in &inventory.nested {
-            if validate_doctor_nested_component(component, patched, official_target).is_ok() {
-                continue;
-            }
-            let finding = match component.kind {
-                SignatureKind::Other | SignatureKind::Unknown | SignatureKind::Unsigned => Some((
-                    "signing.component-identity-unsupported",
-                    format!(
-                        "nested {} component has an unsupported signing identity",
-                        component.kind.as_str()
-                    ),
-                )),
-                SignatureKind::Vendor
-                    if component.team_identifier.as_deref() != Some(VENDOR_TEAM_IDENTIFIER)
-                        || component.authorities.is_empty() =>
-                {
-                    Some((
-                        "signing.component-identity-unsupported",
-                        "nested vendor component lacks the required identity evidence".to_string(),
-                    ))
-                }
-                _ if !component.verified => Some((
-                    "signing.component-invalid",
-                    format!(
-                        "nested {} component failed deep strict verification",
-                        component.kind.as_str()
-                    ),
-                )),
-                _ => None,
-            };
-            if let Some((code, message)) = finding {
-                emitted_component_finding = true;
-                findings.push(DiagnosticFinding::warning(
-                    code,
-                    message,
-                    Some(&component.path),
-                ));
-            }
-        }
-        if !emitted_component_finding {
-            findings.push(DiagnosticFinding::warning(
-                "signing.acceptance-failed",
-                error.clone(),
-                Some(app_path),
-            ));
-        }
-    }
-    let expected_kind = if patched {
-        Some(SignatureKind::Adhoc)
-    } else if official_target {
-        Some(SignatureKind::Vendor)
-    } else {
-        None
-    };
-    if let Some(expected_kind) = expected_kind {
-        if inventory.outer.kind != expected_kind {
-            findings.push(DiagnosticFinding::warning(
-                "signing.outer-identity",
-                format!(
-                    "outer bundle is {}; expected {} for this target state",
-                    inventory.outer.kind.as_str(),
-                    expected_kind.as_str()
-                ),
-                Some(app_path),
-            ));
-        }
-    }
-    let verified = codesign_ok
-        && acceptance.is_ok()
-        && expected_kind
-            .map(|expected| inventory.outer.kind == expected)
-            .unwrap_or(true);
-    let components = inventory
-        .nested
-        .iter()
-        .map(|component| {
-            serde_json::json!({
-                "path": component.path,
-                "identifier": component.identifier,
-                "teamIdentifier": component.team_identifier,
-                "kind": component.kind.as_str(),
-                "verified": component.verified,
-            })
-        })
-        .collect::<Vec<_>>();
-    let report = serde_json::json!({
-        "status": "checked",
-        "verified": verified,
-        "componentCount": inventory.nested.len(),
-        "components": components,
-        "outer": {
-            "identifier": inventory.outer.identifier,
-            "teamIdentifier": inventory.outer.team_identifier,
-            "kind": inventory.outer.kind.as_str(),
-            "verified": inventory.outer.verified,
-        },
-        "hardenedRuntimeOk": has_hardened_runtime(app_path),
-        "unretainable": unretainable,
-        "spctl": spctl,
-    });
-    (Some(report), CheckResult::checked(findings))
-}
-
 fn inspect_backup(
     root: &Path,
     app_path: &Path,
@@ -735,7 +541,11 @@ fn hash_file(path: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use incodex_macos::{EntitlementSnapshot, SignedComponent};
+    use incodex_macos::{
+        EntitlementSnapshot, SignatureKind, SignedComponent, SigningInventory,
+        VENDOR_TEAM_IDENTIFIER,
+    };
+    use crate::diagnose_signing::validate_doctor_signing_inventory;
     use std::collections::BTreeSet;
     use std::os::unix::fs::PermissionsExt;
 

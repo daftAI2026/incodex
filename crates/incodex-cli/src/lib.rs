@@ -2,6 +2,7 @@ pub mod app_bundle;
 pub mod cdp;
 pub mod confirm;
 pub mod diagnose;
+pub(crate) mod diagnose_signing;
 pub(crate) mod diagnose_checks;
 pub(crate) mod diagnose_format;
 pub mod help;
