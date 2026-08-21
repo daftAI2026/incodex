@@ -28,6 +28,14 @@ struct Fixture {
 
 impl Fixture {
     fn new(identity: &'static str) -> Self {
+        Self::with_outer(identity, false)
+    }
+
+    fn new_with_invalid_outer(identity: &'static str) -> Self {
+        Self::with_outer(identity, true)
+    }
+
+    fn with_outer(identity: &'static str, invalid_outer: bool) -> Self {
         let root = std::env::temp_dir().join(format!(
             "incodex-signing-doctor-identity-{}-{}",
             std::process::id(),
@@ -56,6 +64,11 @@ impl Fixture {
 "#,
         )
         .unwrap();
+        let outer_display = if invalid_outer {
+            "printf '%s\\n' 'Identifier=com.example.third-party' 'TeamIdentifier=THIRDPARTY'"
+        } else {
+            "printf '%s\\n' 'Identifier=com.openai.codex' 'TeamIdentifier=2DC432GLL2' 'Authority=Developer ID Application: fixture'"
+        };
         let script = format!(
             r#"#!/bin/sh
 target=""
@@ -71,7 +84,7 @@ fi
 if [ "$1" = "--display" ] && [ "$2" = "--verbose=4" ]; then
   case "$target" in
     *Nested.xpc) {identity_display} ;;
-    *) printf '%s\n' 'Identifier=com.openai.codex' 'TeamIdentifier=2DC432GLL2' 'Authority=Developer ID Application: fixture' ;;
+    *) {outer_display} ;;
   esac
   exit 0
 fi
@@ -82,7 +95,8 @@ exit 0
                 "other" => "printf '%s\\n' 'Identifier=com.example.other' 'TeamIdentifier=OTHERTEAM'",
                 "unknown" => "printf '%s\\n' 'Identifier=com.example.unknown'",
                 _ => unreachable!(),
-            }
+            },
+            outer_display = outer_display,
         );
         let codesign = fake_bin.join("codesign");
         fs::write(&codesign, script).unwrap();
@@ -132,4 +146,19 @@ fn doctor_does_not_report_other_or_unknown_nested_identity_as_clean() {
             .any(|finding| finding["code"] == "signing.component-identity-unsupported"), "identity={identity}");
         std::env::remove_var("PATH");
     }
+}
+
+#[test]
+fn doctor_generic_other_component_does_not_hide_outer_acceptance_failure() {
+    let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let fixture = Fixture::new_with_invalid_outer("other");
+    let original_path = std::env::var_os("PATH");
+    let _path_guard = PathGuard(original_path);
+    std::env::set_var("PATH", fixture.path());
+
+    let report = serde_json::to_value(diagnose_with_root(&fixture.app, &fixture.root)).unwrap();
+    let findings = report["checks"]["signing"]["findings"].as_array().unwrap();
+    assert!(findings
+        .iter()
+        .any(|finding| finding["code"] == "signing.acceptance-failed"));
 }
