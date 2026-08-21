@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { createServer } from "node:net";
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -93,6 +94,26 @@ catch (error) { process.stdout.write(String(error.message)); }`,
 });
 
 describe("raise listener", () => {
+  test("connectExisting bounds a streaming foreign response", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-streaming-raise-"));
+    const owner = currentOwner("streaming-raise", target(root));
+    writeOwnerLock(root, owner);
+    const foreign = createServer((socket) => {
+      const timer = setInterval(() => socket.write("x".repeat(128)), 10);
+      socket.once("close", () => clearInterval(timer));
+    });
+    await new Promise<void>((resolve) => foreign.listen(ownerPortFromExec(owner.execPath), "127.0.0.1", resolve));
+    try {
+      const result = await Promise.race([
+        connectExisting(root, 100, owner.token),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 1_000)),
+      ]);
+      expect(result).toBe(false);
+    } finally {
+      foreign.close();
+    }
+  });
+
   test("a valid owner listener accepts only its token", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-tcp-sock-"));
     const owner = currentOwner("socket", target(root));
