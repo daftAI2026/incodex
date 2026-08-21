@@ -350,7 +350,7 @@ fn reject_symlink(path: &Path, label: &str) -> Result<(), String> {
     }
 }
 
-fn validate_path_ancestors(base: &Path, rel: &str) -> Result<(), String> {
+pub fn validate_path_ancestors(base: &Path, rel: &str) -> Result<(), String> {
     let mut current = base.to_path_buf();
     let components: Vec<_> = Path::new(rel).components().collect();
     let component_count = components.len();
