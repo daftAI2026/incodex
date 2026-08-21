@@ -19,6 +19,13 @@ pub use uninstall::{
 pub fn journal_v2(root: &Path, install_id: &str) -> Result<JournalV2, String> {
     journal::load_v2(root, install_id)
 }
+
+/// Validate the sealed original snapshot for a diagnostic consumer.
+pub fn validate_backup_snapshot(root: &Path, install_id: &str) -> Result<(), String> {
+    let journal = journal::load_v2(root, install_id)?;
+    let paths = journal::reconstructed(root, &journal)?;
+    proof::validate_backup_digest(&paths.original, &journal)
+}
 pub use lock::{acquire_target_lock, lock_path_for, TargetLock};
 
 pub const PHASES: &[&str] = &[

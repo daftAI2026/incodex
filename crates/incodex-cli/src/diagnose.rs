@@ -12,7 +12,7 @@ use incodex_macos::{
     diagnose_spctl, has_hardened_runtime, read_architecture, read_asar_integrity, read_plist_info,
     verify_app,
 };
-use incodex_transaction::{journal_v2, load_journal};
+use incodex_transaction::{journal_v2, load_journal, validate_backup_snapshot};
 
 use crate::diagnose_checks::{
     empty_checks, scan_journals, scan_owner_processes, scan_sessions, CheckResult, CheckStatus,
@@ -433,7 +433,22 @@ fn inspect_backup(
             Some(&original),
         ));
     }
-    let verified = belongs_to_target && complete_phase && original_exists;
+    let digest_ok = if original_exists {
+        match validate_backup_snapshot(root, install_id) {
+            Ok(()) => true,
+            Err(error) => {
+                findings.push(DiagnosticFinding::warning(
+                    "backup.digest-mismatch",
+                    error,
+                    Some(&original),
+                ));
+                false
+            }
+        }
+    } else {
+        false
+    };
+    let verified = belongs_to_target && complete_phase && original_exists && digest_ok;
     (
         Some(serde_json::json!({
             "status": if verified { "checked" } else { "unknown" },
