@@ -4,7 +4,10 @@ use std::path::{Path, PathBuf};
 use incodex_asar::Archive;
 use incodex_core::canonical::canonical_path;
 use incodex_macos::{ditto, verify_app};
-use incodex_transaction::{acquire_target_lock, journal_v2, tree_digest, JournalV2};
+use incodex_transaction::{
+    acquire_target_lock, journal_v2, sync_tree_and_ancestors, tree_digest, validate_path_ancestors,
+    JournalV2,
+};
 
 use crate::legacy_proof::LegacyProvenState;
 use crate::legacy_typescript::{
@@ -76,6 +79,7 @@ pub fn recover_legacy_ts_v1(root: &Path, install_id: &str) -> Result<LegacyRecov
     let original = PathBuf::from(&journal.original_snapshot);
     let staged = PathBuf::from(&journal.staged_app);
     let outgoing = journal.outgoing_app.as_deref().map(PathBuf::from);
+    validate_path_ancestors(root, &format!("legacy-recovery/{install_id}/trash"))?;
     let needs_original = matches!(
         journal.phase.as_str(),
         "TARGET_MOVED_OUT" | "SWAPPED" | "TARGET_VERIFIED"
@@ -156,6 +160,9 @@ pub fn recover_legacy_ts_v1(root: &Path, install_id: &str) -> Result<LegacyRecov
     remove_path(&staged)?;
     if let Some(outgoing) = &outgoing {
         remove_path(outgoing)?;
+    }
+    if target.is_dir() {
+        sync_tree_and_ancestors(&target, target.parent().ok_or("target has no parent")?)?;
     }
     sync_recovery_mutations(root, &target, &staged, outgoing.as_deref())?;
     let mut rolled_back = journal;

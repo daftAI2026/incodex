@@ -84,7 +84,7 @@ pub(crate) fn sync_dir(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn sync_tree_and_ancestors(tree: &Path, boundary: &Path) -> Result<(), String> {
+pub fn sync_tree_and_ancestors(tree: &Path, boundary: &Path) -> Result<(), String> {
     if !tree.starts_with(boundary) || tree == boundary {
         return Err(format!(
             "durable tree {} is outside ancestor boundary {}",

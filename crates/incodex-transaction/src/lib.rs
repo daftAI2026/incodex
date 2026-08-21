@@ -11,6 +11,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+pub use durable::sync_tree_and_ancestors;
 pub use engine::{recover, recover_with, CommitResult, Engine, RecoverResult, TxError};
 pub use journal::{new_install_id, validate_path_ancestors, JournalV2};
 pub use migration::{adopt_legacy_committed_locked, LegacyMigrationInput};
