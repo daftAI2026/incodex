@@ -544,7 +544,35 @@ fn validate_vendor_component(component: &SignedComponent, label: &str) -> Result
     if !component.verified {
         return Err(format!("{label} signature verification failed"));
     }
+    let identifier = component
+        .identifier
+        .as_deref()
+        .ok_or_else(|| format!("{label} has no vendor identifier evidence"))?;
+    verify_apple_vendor_requirement(component.path.as_path(), identifier, label)?;
     Ok(())
+}
+
+fn verify_apple_vendor_requirement(
+    path: &Path,
+    identifier: &str,
+    label: &str,
+) -> Result<(), String> {
+    let escaped = identifier.replace('\\', "\\\\").replace('"', "\\\"");
+    let requirement = format!("=anchor apple generic and identifier \"{escaped}\"");
+    let output = Command::new("codesign")
+        .args(["--verify", "--test-requirement", &requirement, "--"])
+        .arg(path)
+        .output()
+        .map_err(|error| format!("cannot verify Apple vendor trust for {label}: {error}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(if detail.is_empty() {
+        format!("{label} is not anchored to an Apple vendor signature")
+    } else {
+        format!("{label} failed Apple vendor trust requirement: {detail}")
+    })
 }
 
 fn has_signature_marker(path: &Path) -> bool {
