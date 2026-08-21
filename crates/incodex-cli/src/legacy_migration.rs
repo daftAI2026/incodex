@@ -190,7 +190,14 @@ where
             &root.join("legacy-recovery").join(install_id),
         )?;
         checkpoint("AFTER_RESTORE_RENAME");
-        if let Err(error) = verify_restore_candidate(root, &target, &target, &journal.install_id) {
+        if let Err(error) = verify_restore_candidate(root, &target, &target, &journal.install_id)
+            .and_then(|_| {
+                if tree_digest(&target)? != outgoing_digest {
+                    return Err("recovered legacy outgoing full-tree proof mismatch".into());
+                }
+                Ok(())
+            })
+        {
             undo_bundle_replace(
                 outgoing,
                 &target,
@@ -226,8 +233,18 @@ where
                     &root.join("legacy-recovery").join(install_id),
                 )?;
                 checkpoint("AFTER_RESTORE_RENAME");
-                if let Err(error) =
-                    verify_restore_candidate(root, &target, &target, &journal.install_id)
+                if let Err(error) = verify_restore_candidate(
+                    root,
+                    &target,
+                    &target,
+                    &journal.install_id,
+                )
+                .and_then(|_| {
+                    if tree_digest(&target)? != outgoing_digest {
+                        return Err("recovered legacy outgoing full-tree proof mismatch".into());
+                    }
+                    Ok(())
+                })
                 {
                     undo_bundle_replace(
                         outgoing,
