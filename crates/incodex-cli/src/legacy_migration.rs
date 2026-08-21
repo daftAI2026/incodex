@@ -116,7 +116,8 @@ where
             .recovery_digest
             .as_deref()
             .ok_or("legacy outgoing restore intent has no digest")?;
-        if target.exists() && tree_digest(&target)? == digest && verify_app(&target) {
+        if target.exists() && tree_digest(&target)? == digest {
+            verify_restore_candidate(root, &target, &target, &journal.install_id)?;
             outgoing_already_restored = true;
         } else {
             return Err("legacy outgoing restore intent cannot prove the restored target".into());
@@ -143,7 +144,8 @@ where
         verify_outgoing_candidate(root, &target, outgoing, &journal.install_id)?;
         let mut intent = journal.clone();
         intent.recovery_intent = Some("restore-outgoing".into());
-        intent.recovery_digest = Some(tree_digest(outgoing)?);
+        let outgoing_digest = tree_digest(outgoing)?;
+        intent.recovery_digest = Some(outgoing_digest.clone());
         write_legacy_journal(root, &intent)?;
         checkpoint("AFTER_RESTORE_INTENT");
         ensure_staged_target_or_absent(root, &target, &staged, &journal.install_id)?;
@@ -154,6 +156,9 @@ where
         )?;
         checkpoint("AFTER_RESTORE_RENAME");
         verify_restore_candidate(root, &target, &target, &journal.install_id)?;
+        if tree_digest(&target)? != outgoing_digest {
+            return Err("recovered legacy outgoing full-tree proof mismatch".into());
+        }
         outgoing_restored = true;
     } else if let Some(outgoing) = &outgoing {
         if outgoing.is_dir() {
