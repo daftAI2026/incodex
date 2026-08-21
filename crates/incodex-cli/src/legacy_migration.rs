@@ -1,11 +1,10 @@
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use incodex_asar::{Archive, MARKER_KEY};
 use incodex_core::{canonical::canonical_path, is_official_app, target_id};
-use incodex_macos::{ditto, read_plist_info, verify_app};
+use incodex_macos::{ditto, read_plist_info, read_plist_json_file, verify_app};
 use incodex_transaction::{
     acquire_target_lock, journal_v2, sync_tree_and_ancestors, tree_digest, tree_digest_excluding,
     validate_path_ancestors, JournalV2,
@@ -457,7 +456,9 @@ fn verify_patched_target_seal(
     }
     let target_plist = target.join("Contents/Info.plist");
     let original_plist = original.join("Contents/Info.plist");
-    if normalized_plist_hash(&target_plist)? != normalized_plist_hash(&original_plist)? {
+    if normalized_plist(&target_plist, Some(&manifest.patched_asar_file_hash))?
+        != normalized_plist(&original_plist, None)?
+    {
         return Err("legacy recovery target Info.plist proof mismatch".into());
     }
     let target_mode = fs::symlink_metadata(&target_plist)
@@ -474,31 +475,66 @@ fn verify_patched_target_seal(
     Ok(())
 }
 
-fn normalized_plist_hash(path: &Path) -> Result<String, String> {
-    const SCRIPT: &str = r#"
-import json, plistlib, sys
-with open(sys.argv[1], "rb") as handle:
-    value = plistlib.load(handle)
-value.pop("ElectronAsarIntegrity", None)
-print(json.dumps(value, sort_keys=True, separators=(",", ":")))
-"#;
-    let output = Command::new("python3")
-        .args(["-c", SCRIPT])
-        .arg(path)
-        .output()
-        .map_err(|error| format!("cannot normalize Info.plist: {error}"))?;
-    if !output.status.success() {
+fn normalized_plist(
+    path: &Path,
+    expected_patched_hash: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let mut plist = read_plist_json_file(path)?;
+    let Some(root) = plist.as_object_mut() else {
+        return Err(format!("Info.plist {} is not a dictionary", path.display()));
+    };
+    let Some(integrity) = root.get_mut("ElectronAsarIntegrity") else {
+        if expected_patched_hash.is_some() {
+            return Err(format!(
+                "Info.plist {} has no ElectronAsarIntegrity",
+                path.display()
+            ));
+        }
+        return Ok(plist);
+    };
+    let Some(entries) = integrity.as_object_mut() else {
         return Err(format!(
-            "cannot normalize Info.plist {}: {}",
-            path.display(),
-            String::from_utf8_lossy(&output.stderr)
+            "Info.plist {} has invalid ElectronAsarIntegrity",
+            path.display()
         ));
+    };
+    let app_entry = "Resources/app.asar";
+    let Some(entry) = entries.get_mut(app_entry) else {
+        if expected_patched_hash.is_some() {
+            return Err(format!(
+                "Info.plist {} has no Resources/app.asar integrity entry",
+                path.display()
+            ));
+        }
+        return Ok(plist);
+    };
+    let Some(entry) = entry.as_object_mut() else {
+        return Err(format!(
+            "Info.plist {} has invalid Resources/app.asar integrity entry",
+            path.display()
+        ));
+    };
+    if let Some(expected_hash) = expected_patched_hash {
+        if entry.get("algorithm").and_then(serde_json::Value::as_str) != Some("SHA256")
+            || entry.get("hash").and_then(serde_json::Value::as_str) != Some(expected_hash)
+        {
+            return Err(format!(
+                "Info.plist {} has an invalid Resources/app.asar integrity entry",
+                path.display()
+            ));
+        }
     }
-    use sha2::{Digest, Sha256};
-    Ok(Sha256::digest(output.stdout)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect())
+    // TS v1 changes only these two fields. Preserve every other integrity
+    // entry and field so unrelated plist drift remains a hard failure.
+    entry.remove("algorithm");
+    entry.remove("hash");
+    if entry.is_empty() {
+        entries.remove(app_entry);
+    }
+    if entries.is_empty() {
+        root.remove("ElectronAsarIntegrity");
+    }
+    Ok(plist)
 }
 
 fn already_restored(

@@ -63,18 +63,7 @@ pub fn restore_original(source: &Path, dest: &Path) -> Result<(), String> {
 
 pub fn read_plist_info(app: &Path) -> Option<PlistInfo> {
     let plist = app.join("Contents").join("Info.plist");
-    if !plist.exists() {
-        return None;
-    }
-    let output = Command::new("plutil")
-        .args(["-convert", "json", "-o", "-", "--"])
-        .arg(&plist)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let raw: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    let raw = read_plist_json_file(&plist).ok()?;
     Some(PlistInfo {
         bundle_identifier: json_string(&raw, "CFBundleIdentifier"),
         app_version: json_string(&raw, "CFBundleShortVersionString"),
@@ -85,6 +74,23 @@ pub fn read_plist_info(app: &Path) -> Option<PlistInfo> {
             .unwrap_or("ChatGPT")
             .to_string(),
     })
+}
+
+pub fn read_plist_json_file(path: &Path) -> Result<serde_json::Value, String> {
+    let output = Command::new("/usr/bin/plutil")
+        .args(["-convert", "json", "-o", "-", "--"])
+        .arg(path)
+        .output()
+        .map_err(|error| format!("cannot read plist {}: {error}", path.display()))?;
+    if !output.status.success() {
+        return Err(format!(
+            "cannot read plist {}: {}",
+            path.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("cannot parse plist {} as JSON: {error}", path.display()))
 }
 
 pub fn read_architecture(app: &Path, executable: &str) -> Option<String> {
