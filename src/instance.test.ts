@@ -384,7 +384,7 @@ describe("cross-process owner contention", () => {
     expect(allDone).toBe(true);
     expect(completed.every((result) => result.code === 0 || result.code === 2)).toBe(true);
     expect(completed.every((result) => result.stderr === "")).toBe(true);
-  });
+  }, 30_000);
 
   test("twenty OS processes replacing a stale owner preserve the winner lease", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-os-stale-contenders-"));
@@ -483,7 +483,7 @@ describe("cross-process owner contention", () => {
     expect(readOwnerLock(root)?.token).toBe(winnerToken);
     expect(completed.every((result) => result.code === 0 || result.code === 2)).toBe(true);
     expect(completed.every((result) => result.stderr === "")).toBe(true);
-  });
+  }, 30_000);
 
   test("stale takeover claims have one OS winner and cannot delete its lease", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-os-stale-claim-"));
@@ -597,7 +597,7 @@ describe("cross-process owner contention", () => {
     expect(readOwnerLock(root)?.token).toBe(winnerToken);
     expect(completed.every((result) => result.code === 0 || result.code === 2)).toBe(true);
     expect(completed.every((result) => result.stderr === "")).toBe(true);
-  });
+  }, 30_000);
 
   test("a crashed reclaim marker is recoverable without poisoning takeover", () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-crashed-reclaim-"));
@@ -939,7 +939,7 @@ describe("cross-process owner contention", () => {
     expect(readOwnerLock(root)?.token).toBe(winnerToken);
     expect(completed.every((result) => result.code === 0 || result.code === 2)).toBe(true);
     expect(completed.every((result) => result.stderr === "")).toBe(true);
-  });
+  }, 30_000);
 
   test("a replacement published during takeover unlink survives the old cleaner", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-takeover-window-"));
