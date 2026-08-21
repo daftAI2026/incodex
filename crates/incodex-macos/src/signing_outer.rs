@@ -3,7 +3,7 @@ use std::process::Command;
 
 use crate::signing::{SignatureKind, SignedComponent, VENDOR_TEAM_IDENTIFIER};
 
-/// 读取 outer 签名声明，不递归 nested components，也不执行 deep/strict 验证。
+/// 读取并严格验证 outer 签名，不递归枚举或 deep 验证 nested components。
 pub fn inspect_outer_signing(path: &Path) -> Result<SignedComponent, String> {
     let output = Command::new("codesign")
         .args(["--display", "--verbose=4", "--"])
