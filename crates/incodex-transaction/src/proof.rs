@@ -96,7 +96,7 @@ struct TreeEntry {
     payload: TreePayload,
 }
 
-pub(crate) fn tree_digest(root: &Path) -> Result<String, String> {
+pub fn tree_digest(root: &Path) -> Result<String, String> {
     #[cfg(test)]
     TREE_DIGEST_CALLS.with(|calls| calls.set(calls.get() + 1));
     let root_metadata = fs::symlink_metadata(root).map_err(|error| error.to_string())?;

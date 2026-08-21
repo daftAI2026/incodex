@@ -13,7 +13,8 @@ use incodex_asar::{Archive, PackageMain, MARKER_KEY};
 use incodex_core::{inspect_target, recheck_target, CanonicalTarget};
 use incodex_macos::{read_architecture, read_plist_info, verify_app, PlistInfo};
 use incodex_transaction::{
-    acquire_target_lock, adopt_legacy_committed_locked, JournalV2, LegacyMigrationInput, TargetLock,
+    acquire_target_lock, adopt_legacy_committed_locked, tree_digest, JournalV2,
+    LegacyMigrationInput, TargetLock,
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -80,6 +81,7 @@ impl LegacyProvenState {
             live_asar_file_hash: evidence.live_asar_file_hash,
             original_asar_file_hash: evidence.original_asar_file_hash,
             original_plist_file_hash: evidence.original_plist_file_hash,
+            original_tree_digest: evidence.original_tree_digest,
         };
         let journal = adopt_legacy_committed_locked(root, &lock, &input)?;
         let _ = evidence;
@@ -99,6 +101,7 @@ pub struct LegacyProofEvidence {
     pub original_asar_header_hash: String,
     pub original_asar_file_hash: String,
     pub original_plist_file_hash: String,
+    pub original_tree_digest: String,
     pub vendor_signature: Option<LegacyVendorSignature>,
 }
 
@@ -424,6 +427,7 @@ where
     let original_asar_header_hash = manifest.original_asar_header_hash.clone();
     let original_asar_file_hash = manifest.original_asar_file_hash.clone();
     let original_plist_file_hash = manifest.original_plist_file_hash.clone();
+    let original_tree_digest = tree_digest(original_app)?;
 
     Ok(LegacyProvenState {
         structural,
@@ -437,6 +441,7 @@ where
             original_asar_header_hash,
             original_asar_file_hash,
             original_plist_file_hash,
+            original_tree_digest,
             vendor_signature,
         },
         lock,

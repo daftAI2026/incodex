@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use incodex_asar::Archive;
 use incodex_core::canonical::canonical_path;
 use incodex_macos::{ditto, verify_app};
-use incodex_transaction::{acquire_target_lock, journal_v2, JournalV2};
+use incodex_transaction::{acquire_target_lock, journal_v2, tree_digest, JournalV2};
 
 use crate::legacy_proof::LegacyProvenState;
 use crate::legacy_typescript::{
@@ -72,15 +72,22 @@ pub fn recover_legacy_ts_v1(root: &Path, install_id: &str) -> Result<LegacyRecov
     );
     let mut outgoing_restored = false;
     if needs_original && original.is_dir() {
-        ensure_staged_target_or_absent(&target, &journal.install_id)?;
-        let restore_root = root.join("legacy-recovery").join(install_id);
-        let restore = restore_root.join("ChatGPT.app");
-        remove_path(&restore)?;
-        fs::create_dir_all(&restore_root).map_err(|error| error.to_string())?;
-        ditto(&original, &restore)?;
-        replace_bundle(&restore, &target, &restore_root)?;
-        if !verify_app(&target) {
-            return Err("recovered legacy original failed codesign verification".into());
+        if !already_restored(&target, &original)? {
+            ensure_staged_target_or_absent(&target, &journal.install_id)?;
+            let restore_root = root.join("legacy-recovery").join(install_id);
+            let restore = restore_root.join("ChatGPT.app");
+            remove_path(&restore)?;
+            fs::create_dir_all(&restore_root).map_err(|error| error.to_string())?;
+            ditto(&original, &restore)?;
+            if !verify_app(&restore) {
+                return Err(
+                    "legacy original restore candidate failed codesign verification".into(),
+                );
+            }
+            replace_bundle(&restore, &target, &restore_root)?;
+            if !verify_app(&target) {
+                return Err("recovered legacy original failed codesign verification".into());
+            }
         }
     } else if needs_original {
         let outgoing = outgoing
@@ -157,6 +164,16 @@ fn ensure_staged_target_or_absent(target: &Path, install_id: &str) -> Result<(),
     } else {
         Err("legacy recovery target no longer belongs to this transaction".into())
     }
+}
+
+fn already_restored(target: &Path, original: &Path) -> Result<bool, String> {
+    if !target.exists() {
+        return Ok(false);
+    }
+    if tree_digest(target)? != tree_digest(original)? {
+        return Ok(false);
+    }
+    Ok(verify_app(target))
 }
 
 fn remove_path(path: &Path) -> Result<(), String> {

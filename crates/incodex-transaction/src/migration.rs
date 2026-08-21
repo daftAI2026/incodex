@@ -27,6 +27,7 @@ pub struct LegacyMigrationInput {
     pub live_asar_file_hash: String,
     pub original_asar_file_hash: String,
     pub original_plist_file_hash: String,
+    pub original_tree_digest: String,
 }
 
 /// Adopt a verified TS v1 backup as a committed Rust v2 transaction.
@@ -64,6 +65,9 @@ pub fn adopt_legacy_committed_locked(
             input.original_source.display()
         ));
     }
+    if tree_digest(&input.original_source)? != input.original_tree_digest {
+        return Err("legacy original backup tree changed before migration".into());
+    }
     verify_file_hash(
         &input.real_path.join("Contents/Resources/app.asar"),
         &input.live_asar_file_hash,
@@ -97,6 +101,11 @@ pub fn adopt_legacy_committed_locked(
     )?;
     fs::rename(&partial, &paths.original).map_err(|error| error.to_string())?;
     flush_adopted_backup(&paths.original, &paths.dir)?;
+    if tree_digest(&paths.original)? != input.original_tree_digest
+        || tree_digest(&input.original_source)? != input.original_tree_digest
+    {
+        return Err("legacy original backup tree changed during migration".into());
+    }
     let backup_digest = tree_digest(&paths.original)?;
     let live_identity = directory_identity(&input.real_path)?;
     let live_digest = tree_digest(&input.real_path)?;
