@@ -470,3 +470,32 @@ fn doctor_json_marks_unverifiable_owner_and_session_records_unknown() {
         .iter()
         .any(|finding| { finding["code"] == "owner.invalid" }));
 }
+
+#[test]
+fn doctor_json_marks_a_live_session_without_process_identity_unknown() {
+    let home = isolated_home();
+    let app = home.join("Missing.app");
+    let session = home.join(".incodex/sessions/target-contract/s-live-without-identity");
+    fs::create_dir_all(session.join("chromium")).unwrap();
+    fs::write(
+        session.join("owner.json"),
+        serde_json::json!({
+            "sessionId": "s-live-without-identity",
+            "pid": std::process::id(),
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let (_status, stdout, stderr) =
+        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(stderr, "");
+    let report = parse_json(&stdout);
+    assert_eq!(report["checks"]["orphanSessions"]["status"], "unknown");
+    assert_eq!(report["checks"]["chromiumResidue"]["status"], "unknown");
+    assert!(report["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|finding| finding["code"] == "session.identity-missing"));
+}
