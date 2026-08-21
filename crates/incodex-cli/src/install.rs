@@ -466,7 +466,12 @@ fn snapshot_original(tx: &mut Engine, app: &Path, original: &Path) -> Result<(),
 }
 
 fn rollback_snapshot_failure(tx: &mut Engine, error: String) -> String {
-    match tx.abort_discovered_snapshot() {
+    let rollback = if tx.journal().phase == "DISCOVERED" {
+        tx.abort_discovered_snapshot()
+    } else {
+        tx.rollback(&error)
+    };
+    match rollback {
         Ok(()) => error,
         Err(rollback) => format!(
             "{error}; failed to roll back rejected snapshot transaction: {rollback}"
