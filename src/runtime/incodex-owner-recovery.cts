@@ -16,6 +16,7 @@ const {
   readOwnerLockState,
   readOwnerLock,
   readOwnerLockStateAt,
+  readOwnerRecords,
   sameOwnerToken,
   staleOwnerRecord,
   OwnerLeaseError,
@@ -219,6 +220,10 @@ function probeOwnerPort(owner) {
 
 async function acquireOwnerLease(stateRoot, owner) {
   if (!owner || !ownerToken(owner)) throw new OwnerLeaseError("OWNER_INVALID", "owner lease requires a token");
+  const records = readOwnerRecords(stateRoot);
+  if (records.some(({ state }) => state.kind === "unverifiable")) {
+    throw new OwnerLeaseError("OWNER_UNVERIFIABLE", "existing owner record cannot be verified; refusing publication");
+  }
   if (hasForeignClaim(stateRoot)) {
     throw new OwnerLeaseError("OWNER_FOREIGN_CLAIM", "foreign takeover claim is present; refusing cleanup");
   }
