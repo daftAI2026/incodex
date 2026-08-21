@@ -456,7 +456,7 @@ fn verify_patched_target_seal(
     }
     let target_plist = target.join("Contents/Info.plist");
     let original_plist = original.join("Contents/Info.plist");
-    if normalized_plist(&target_plist, Some(&manifest.patched_asar_file_hash))?
+    if normalized_plist(&target_plist, Some(&manifest.patched_asar_header_hash))?
         != normalized_plist(&original_plist, None)?
     {
         return Err("legacy recovery target Info.plist proof mismatch".into());
