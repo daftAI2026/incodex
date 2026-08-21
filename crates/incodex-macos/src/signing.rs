@@ -98,6 +98,11 @@ pub fn read_entitlements(target: &Path) -> Result<EntitlementSnapshot, String> {
         .map_err(|error| format!("cannot inspect entitlements for {}: {error}", target.display()))?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if detail.contains("code object is not signed at all") {
+            // 未签名的自定义 target 没有可继承的 entitlement；这不是检查失败。
+            // 其他错误仍然 fail closed，禁止回退到猜测的宽权限集合。
+            return Ok(EntitlementSnapshot::empty());
+        }
         return Err(format!(
             "entitlement inspection failed for {}{}",
             target.display(),
