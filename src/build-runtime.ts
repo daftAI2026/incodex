@@ -22,6 +22,10 @@ const injectSrc = readFileSync(join(root, "src/runtime/inject.ts"), "utf8").repl
   embedSvg(circleXSvg),
 );
 writeFileSync(join(outDir, "incognito-copy.ts"), readFileSync(join(root, "src/runtime/incognito-copy.ts")));
+writeFileSync(
+  join(outDir, "incognito-copy-data.ts"),
+  readFileSync(join(root, "src/runtime/incognito-copy-data.ts")),
+);
 const injectTmp = join(root, "src/runtime/_inject.src.ts");
 writeFileSync(injectTmp, injectSrc);
 

@@ -6,6 +6,7 @@ node_modules/
 .runtime-cjs/
 dist/_inject.src.ts
 dist/incognito-copy.ts
+dist/incognito-copy-data.ts
 .incodex-backup/
 docs
 release-cli/

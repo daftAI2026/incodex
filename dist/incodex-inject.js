@@ -62,7 +62,7 @@ var STRIP_CLONE_ATTRS = [
   "tabindex"
 ];
 
-// src/runtime/incognito-copy.ts
+// src/runtime/incognito-copy-data.ts
 var COPY = {
   en: {
     open: "Open incognito window",
@@ -780,6 +780,8 @@ var COPY = {
     errorClose: "關閉"
   }
 };
+
+// src/runtime/incognito-copy.ts
 var DEFAULT_BY_LANGUAGE = {
   bg: "bg-BG",
   bn: "bn-BD",
