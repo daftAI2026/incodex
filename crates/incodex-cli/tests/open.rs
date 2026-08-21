@@ -39,10 +39,21 @@ fn run(args: &[&str], home: &Path) -> (i32, String, String) {
 }
 
 fn fake_app(root: &Path, script: &str) -> PathBuf {
+    fake_app_with_executable(root, "ChatGPT", script)
+}
+
+fn fake_app_with_executable(root: &Path, executable: &str, script: &str) -> PathBuf {
     let app = root.join("ChatGPT.app");
     let mac = app.join("Contents").join("MacOS");
     fs::create_dir_all(&mac).unwrap();
-    let exe = mac.join("ChatGPT");
+    fs::write(
+        app.join("Contents/Info.plist"),
+        format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>{executable}</string></dict></plist>\n"
+        ),
+    )
+    .unwrap();
+    let exe = mac.join(executable);
     fs::write(&exe, script).unwrap();
     let mut perms = fs::metadata(&exe).unwrap().permissions();
     perms.set_mode(0o755);
@@ -141,8 +152,7 @@ Examples:
 #[test]
 fn open_dry_run_does_not_create_a_session_or_touch_asar() {
     let home = isolated_home();
-    let app = home.join("Marker.app");
-    fs::create_dir_all(&app).unwrap();
+    let app = fake_app(&home, "#!/bin/sh\nexit 0\n");
     fs::write(app.join("marker"), "do-not-touch\n").unwrap();
     let (status, stdout, stderr) = run(
         &["open", "--dry-run", "--app", app.to_str().unwrap()],
@@ -166,16 +176,51 @@ fn open_dry_run_does_not_create_a_session_or_touch_asar() {
 fn open_missing_binary_does_not_leave_a_session() {
     let home = isolated_home();
     let app = home.join("Empty.app");
-    fs::create_dir_all(&app).unwrap();
+    fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
+    fs::write(
+        app.join("Contents/Info.plist"),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>Missing</string></dict></plist>\n",
+    )
+    .unwrap();
     let (status, stdout, stderr) = run(&["open", "--app", app.to_str().unwrap()], &home);
     assert_eq!(status, 1);
     assert_eq!(stdout, "");
-    assert!(stderr.contains("Codex binary not found"));
+    assert!(stderr.contains("CFBundleExecutable not found"));
     assert!(
         incodex_paths(&home)
             .iter()
             .all(|path| !path.contains("sessions") && !path.contains("codex-home"))
     );
+}
+
+#[test]
+fn open_rejects_an_app_without_a_valid_info_plist() {
+    let home = isolated_home();
+    let app = home.join("NoPlist.app");
+    fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
+    fs::write(app.join("Contents/MacOS/ChatGPT"), "#!/bin/sh\nexit 0\n").unwrap();
+    let (status, stdout, stderr) = run(&["open", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(status, 1);
+    assert_eq!(stdout, "");
+    assert!(stderr.contains("Info.plist"), "{stderr}");
+    assert!(incodex_paths(&home).is_empty());
+}
+
+#[test]
+fn open_uses_cf_bundle_executable_instead_of_a_hardcoded_chatgpt_name() {
+    let home = isolated_home();
+    let app = fake_app_with_executable(
+        &home,
+        "CodexFixture",
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$HOME/open-argv.txt\"\nexit 0\n",
+    );
+    let source = home.join(".codex");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("auth.json"), "{}\n").unwrap();
+    let (status, stdout, stderr) = run(&["open", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(status, 3, "stdout={stdout}\nstderr={stderr}");
+    assert!(stderr.contains("UI injection was not accepted"), "{stderr}");
+    assert!(home.join("open-argv.txt").exists(), "binary from plist was not launched");
 }
 
 #[test]
@@ -242,7 +287,7 @@ fn open_spawn_error_still_burns() {
     let app = fake_app(&home, "#!/bin/sh\nexit 0\n");
     let exe = app.join("Contents/MacOS/ChatGPT");
     fs::remove_file(&exe).unwrap();
-    fs::create_dir(&exe).unwrap();
+    fs::write(&exe, "not executable\n").unwrap();
     let source = home.join(".codex");
     fs::create_dir_all(&source).unwrap();
     fs::write(source.join("auth.json"), "{}\n").unwrap();

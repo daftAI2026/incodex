@@ -13,6 +13,7 @@ use incodex_core::session::{
 };
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
 
+use crate::app_bundle::resolve_executable;
 use crate::cdp::{
     allocate_debug_port, debug_launch_args, inject_shared_ui_with_options, start_lifecycle_monitor,
     InjectionOptions, WindowBounds,
@@ -156,15 +157,11 @@ impl CleanupResult {
     }
 }
 
-pub fn chat_gpt_binary(app_path: &Path) -> PathBuf {
-    app_path.join("Contents/MacOS/ChatGPT")
-}
-
-pub fn describe_incognito_open(app_path: &Path) -> (PathBuf, Vec<String>) {
-    (
-        chat_gpt_binary(app_path),
+pub fn describe_incognito_open(app_path: &Path) -> Result<(PathBuf, Vec<String>), String> {
+    Ok((
+        resolve_executable(app_path)?,
         vec!["--user-data-dir=<isolated-chromium>".to_string()],
-    )
+    ))
 }
 
 pub fn default_source_home() -> PathBuf {
@@ -180,10 +177,7 @@ pub fn prepare_incognito_open(
     source_home: &Path,
     pid: i32,
 ) -> Result<OpenPlan, String> {
-    let bin = chat_gpt_binary(app_path);
-    if !bin.exists() {
-        return Err(format!("Codex binary not found: {}", bin.display()));
-    }
+    let bin = resolve_executable(app_path)?;
     let target_id = target_id_from_exec(&bin.to_string_lossy());
     let _ = sweep_orphan_sessions(user_root, Some(&target_id));
     let session = create_session_home(
@@ -503,7 +497,7 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(incodex_core::DEFAULT_APP));
     if parsed.dry_run {
-        let (bin, _) = describe_incognito_open(&app_path);
+        let (bin, _) = describe_incognito_open(&app_path).map_err(CliFailure::from)?;
         println!(
             "{}",
             format_step("Open incognito without patching Codex", None)
@@ -577,6 +571,11 @@ mod tests {
         let app = root.join("ChatGPT.app");
         let mac = app.join("Contents/MacOS");
         fs::create_dir_all(&mac).unwrap();
+        fs::write(
+            app.join("Contents/Info.plist"),
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>ChatGPT</string></dict></plist>\n",
+        )
+        .unwrap();
         let executable = mac.join("ChatGPT");
         fs::write(&executable, "#!/bin/sh\nexit 0\n").unwrap();
         let mut permissions = fs::metadata(&executable).unwrap().permissions();
@@ -596,7 +595,7 @@ mod tests {
         let user = root.join("home");
         let source = root.join("codex");
         fs::create_dir_all(&source).unwrap();
-        let bin = chat_gpt_binary(&app);
+        let bin = resolve_executable(&app).unwrap();
         let target_id = target_id_from_exec(&bin.to_string_lossy());
         let session = create_session_home(&user, Some(&target_id), 1, "").unwrap();
         fs::remove_dir_all(&session.home).unwrap();
