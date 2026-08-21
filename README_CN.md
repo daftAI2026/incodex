@@ -74,6 +74,7 @@ incodex install --clone     # 开发：打到副本
 incodex uninstall           # 还原官方包
 incodex status
 incodex doctor
+incodex doctor --deep        # 完整 nested 签名 / entitlement / Gatekeeper 证据
 incodex runtime             # 只更新按钮逻辑，不重签 Codex
 incodex open                # 不改官方包，直接开无痕窗
 incodex recover --transaction <id>
@@ -91,6 +92,7 @@ incodex update --dry-run
 incodex self-uninstall --dry-run
 incodex status --json
 incodex doctor --json
+incodex doctor --deep --json
 ```
 
 `brew install`、`curl … | bash`、`cargo install` 都只把命令装到 PATH。改 `/Applications/ChatGPT.app` 的是随后那条 `incodex install`。
@@ -223,8 +225,7 @@ $ incodex doctor
 
 ➤ Signing
   Verify       ok
-  Hardened     yes
-  Gatekeeper   not accepted (diagnostic)
+  Nested       unknown
 
 ➤ Backup
   State        ok
@@ -237,7 +238,7 @@ $ incodex doctor
   Journals     0
 ```
 
-Gatekeeper 那一行是诊断，不是安装失败。改包之后官方签名本来就不会过 Gatekeeper。
+默认 Doctor 会检查 Incodex 自己的 Runtime、备份、journal、session 和 marker 状态，以及目标应用最小的 outer identity 证据；不会递归 nested 签名，也不会调用 Gatekeeper。要看完整的 nested 签名、entitlement 和 Gatekeeper 报告，请运行 `incodex doctor --deep`。Gatekeeper 结果只是诊断，不是安装失败；改包之后官方签名本来就不会过 Gatekeeper。
 
 ### Version
 
