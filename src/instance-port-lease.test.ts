@@ -81,6 +81,17 @@ describe("kernel-held TCP owner lease", () => {
     expect(await releaseOwnerLease(root, replacement)).toBe(true);
   });
 
+  test("recovers an abandoned legacy bridge without removing the exclusion", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-tcp-abandoned-bridge-"));
+    const bridge = join(root, SOCK_NAME);
+    mkdirSync(bridge);
+    const owner = currentOwner("abandoned-bridge", target(root));
+    await expect(acquireOwnerLease(root, owner)).resolves.toEqual(owner);
+    expect(existsSync(bridge)).toBe(true);
+    await expect(releaseOwnerLease(root, owner)).resolves.toBe(true);
+    expect(existsSync(bridge)).toBe(true);
+  });
+
   test("bounds an unterminated protocol request", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-tcp-protocol-limit-"));
     const owner = currentOwner("protocol", target(root));
@@ -105,6 +116,7 @@ describe("kernel-held TCP owner lease", () => {
     mkdirSync(readyRoot);
     mkdirSync(doneRoot);
     mkdirSync(resultRoot);
+    mkdirSync(join(root, SOCK_NAME));
     const modulePath = join(import.meta.dir, "runtime/incodex-instance.cts");
     const worker = String.raw`
       (async () => {
