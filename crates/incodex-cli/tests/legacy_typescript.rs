@@ -695,3 +695,78 @@ fn legacy_typescript_fixture_rejects_a_manifest_target_mismatch() {
         .expect_err("mismatched target must not be accepted");
     assert!(error.contains("targetRealPath"), "{error}");
 }
+
+#[test]
+fn legacy_typescript_fixture_rejects_an_empty_manifest_target_before_canonicalizing() {
+    let target = std::env::current_dir().expect("test working directory");
+    let root = temp_root().join(".incodex");
+    let target_store = root.join("installations").join(target_id(&target));
+    let install_dir = target_store.join(INSTALL_ID);
+    let original_app = install_dir.join("original/ChatGPT.app");
+    fs::create_dir_all(&original_app).unwrap();
+    fs::create_dir_all(install_dir.join("patched")).unwrap();
+    fs::write(
+        target_store.join("current.json"),
+        format!("{}\n", json!({"installId": INSTALL_ID})),
+    )
+    .unwrap();
+    fs::write(
+        install_dir.join("manifest.json"),
+        format!(
+            "{}\n",
+            json!({
+                "schemaVersion": 1,
+                "installId": INSTALL_ID,
+                "targetRealPath": canonical_path(&target),
+                "bundleIdentifier": "com.example.incodex",
+                "appVersion": "1.0.0",
+                "appBuild": "100",
+                "architecture": "arm64",
+                "originalAsarHeaderHash": "original-header",
+                "originalAsarFileHash": "original-file",
+                "originalPlistFileHash": "original-plist",
+                "patchedAsarHeaderHash": "patched-header",
+                "patchedAsarFileHash": "patched-file",
+                "originalMain": "index.js",
+                "runtimeVersion": "0.2.0",
+                "createdAt": "2026-08-20T00:00:00.000Z",
+                "transactionState": "committed"
+            })
+        ),
+    )
+    .unwrap();
+    fs::write(
+        install_dir.join("patched/runtime-manifest.json"),
+        format!(
+            "{}\n",
+            json!({
+                "installId": INSTALL_ID,
+                "originalMain": "index.js",
+                "patchedAsarHeaderHash": "patched-header",
+                "patchedAsarFileHash": "patched-file"
+            })
+        ),
+    )
+    .unwrap();
+    let journal_path = write_flat_journal(
+        &root,
+        &target,
+        INSTALL_ID,
+        "COMMITTED",
+        "2026-08-20T00:00:00.000Z",
+    );
+    let manifest_path = install_dir.join("manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    manifest["targetRealPath"] = json!("");
+    fs::write(
+        &manifest_path,
+        format!("{}\n", serde_json::to_string_pretty(&manifest).unwrap()),
+    )
+    .unwrap();
+
+    let error = incodex_cli::legacy_typescript::load_legacy_ts_v1(&root, &target)
+        .expect_err("empty manifest targetRealPath must be rejected before canonicalization");
+    assert!(error.contains("targetRealPath"), "{error}");
+    assert!(journal_path.exists());
+}
