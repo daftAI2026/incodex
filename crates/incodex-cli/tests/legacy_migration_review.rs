@@ -2,8 +2,11 @@ use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 
-use incodex_cli::legacy_migration::{recover_legacy_ts_v1, recover_legacy_ts_v1_with_checkpoint};
-use incodex_macos::ditto;
+use incodex_asar::pack_dir;
+use incodex_cli::legacy_migration::{
+    migrate_legacy_if_needed, recover_legacy_ts_v1, recover_legacy_ts_v1_with_checkpoint,
+};
+use incodex_macos::{ditto, sign_app};
 
 #[path = "support/legacy_fixture.rs"]
 mod legacy_fixture;
@@ -91,4 +94,31 @@ fn status_rejects_a_legacy_backup_with_a_modified_executable() {
 
     let report = incodex_cli::diagnose::diagnose_with_root(&fixture.app, &fixture.root);
     assert_eq!(report.backup.unwrap()["complete"], false);
+}
+
+#[test]
+fn unadopted_legacy_record_becomes_historical_after_clean_vendor_upgrade() {
+    let fixture = Fixture::create();
+    ditto(&fixture.original_app, &fixture.app).unwrap();
+
+    let result = migrate_legacy_if_needed(&fixture.root, &fixture.app);
+    assert_eq!(result.unwrap(), None);
+}
+
+#[test]
+fn unadopted_legacy_record_rejects_a_foreign_modified_app() {
+    let fixture = Fixture::create();
+    let foreign_source = fixture.root.join("foreign-clean-source");
+    fs::create_dir_all(&foreign_source).unwrap();
+    fs::write(
+        foreign_source.join("package.json"),
+        "{\"main\":\"index.js\"}\n",
+    )
+    .unwrap();
+    fs::write(foreign_source.join("index.js"), "foreign modified\n").unwrap();
+    pack_dir(&foreign_source, &fixture.app_asar()).unwrap();
+    sign_app(&fixture.app).unwrap();
+
+    let result = migrate_legacy_if_needed(&fixture.root, &fixture.app);
+    assert!(result.is_err(), "foreign app must fail closed: {result:?}");
 }
