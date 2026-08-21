@@ -508,7 +508,17 @@ fn pre_swap_recovery_keeps_outgoing_when_target_reappears_foreign() {
         .join(INSTALL_ID)
         .join("outgoing/ChatGPT.app");
     ditto(&fixture.original_app, &outgoing).unwrap();
-    fs::write(fixture.app_asar(), b"foreign target").unwrap();
+    let foreign_source = fixture.root.join("foreign-pre-swap-source");
+    fs::create_dir_all(&foreign_source).unwrap();
+    fs::write(
+        foreign_source.join("package.json"),
+        "{\"main\":\"index.js\"}\n",
+    )
+    .unwrap();
+    fs::write(foreign_source.join("index.js"), "foreign pre-swap\n").unwrap();
+    pack_dir(&foreign_source, &fixture.app_asar()).unwrap();
+    patch_asar(&fixture.app_asar(), "legacy-loader\n", Some(INSTALL_ID)).unwrap();
+    sign_app(&fixture.app).unwrap();
     fixture.set_phase("PATCHED");
     let output = Command::new(env!("CARGO_BIN_EXE_incodex"))
         .args(["recover", "--transaction", INSTALL_ID])
