@@ -22,7 +22,8 @@ function targetStateDir(userRoot, execPath) {
 }
 
 function ownerPortFromExec(execPath) {
-  const digest = crypto.createHash("sha256").update(execPath || "unknown").digest();
+  const uid = arguments.length > 1 ? arguments[1] : (typeof process.getuid === "function" ? process.getuid() : 0);
+  const digest = crypto.createHash("sha256").update(`${uid}:${execPath || "unknown"}`).digest();
   return OWNER_PORT_BASE + digest.readUInt32BE(0) % OWNER_PORT_SPAN;
 }
 
@@ -63,9 +64,12 @@ function hasReliableOwnerIdentity(owner) {
 }
 
 function executableIdentity(owner) {
-  if (nonEmptyString(owner?.execIdentity)) return owner.execIdentity;
-  if (nonEmptyString(owner?.comm)) return owner.comm;
-  return nonEmptyString(owner?.execPath) ? path.basename(owner.execPath) : "";
+  const raw = nonEmptyString(owner?.execIdentity)
+    ? owner.execIdentity
+    : nonEmptyString(owner?.comm)
+      ? owner.comm
+      : owner?.execPath;
+  return nonEmptyString(raw) ? path.basename(String(raw).replace(/[/\\]+$/, "")) : "";
 }
 
 function ownerMatchesLive(owner, live) {

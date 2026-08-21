@@ -23,7 +23,7 @@ const {
   OwnerLeaseError,
   ownsOwnerLease,
 } = core;
-const { clearOwnerLock, acquireOwnerLease, setRaiseHandler } = recovery;
+const { clearOwnerLock, releaseOwnerLease, acquireOwnerLease, setRaiseHandler } = recovery;
 const processIdentity = core.processIdentity;
 
 function sockPath(stateRoot) {
@@ -106,6 +106,7 @@ if (typeof module !== "undefined") module.exports = {
   readOwnerLockState,
   readOwnerLock,
   clearOwnerLock,
+  releaseOwnerLease,
   currentOwner,
   staleOwner,
   OwnerLeaseError,
@@ -131,6 +132,7 @@ export {
   readOwnerLockState,
   readOwnerLock,
   clearOwnerLock,
+  releaseOwnerLease,
   currentOwner,
   staleOwner,
   OwnerLeaseError,
