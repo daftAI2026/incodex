@@ -316,7 +316,6 @@ mod tests {
         );
         assert_eq!(parse_window_bounds_output("missing"), None);
     }
-}
 
     #[test]
     fn notify_launch_services_captures_tool_output() {
@@ -364,3 +363,4 @@ mod tests {
         assert!(!stdout.contains("LSREGISTER-OUT"), "{stdout:?}");
         assert!(!stderr.contains("LSREGISTER-ERR"), "{stderr:?}");
     }
+}
