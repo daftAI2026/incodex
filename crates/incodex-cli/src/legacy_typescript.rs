@@ -774,7 +774,6 @@ fn reject_symlink(path: &Path, label: &str) -> Result<(), String> {
         Err(error) => Err(format!("cannot inspect {label}: {error}")),
     }
 }
-
 fn validate_storage_path(root: &Path, path: &Path, label: &str) -> Result<(), String> {
     reject_symlink(root, "legacy state root")?;
     let relative = path
