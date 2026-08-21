@@ -139,6 +139,7 @@ pub fn run(
         keys,
         None,
         Duration::from_secs(12),
+        &[],
     )
 }
 
@@ -162,6 +163,7 @@ pub fn run_with_probe(
         keys,
         Some(probe),
         Duration::from_secs(12),
+        &[],
     )
 }
 
@@ -175,7 +177,33 @@ pub fn run_with_timeout(
     keys: &str,
     timeout: Duration,
 ) -> Result {
-    run_inner(program, prefix, args, home, wait_for, keys, None, timeout)
+    run_inner(
+        program,
+        prefix,
+        args,
+        home,
+        wait_for,
+        keys,
+        None,
+        timeout,
+        &[],
+    )
+}
+
+#[allow(dead_code)]
+pub fn run_with_timeout_env(
+    program: &str,
+    prefix: &[&str],
+    args: &[&str],
+    home: &Path,
+    wait_for: &str,
+    keys: &str,
+    timeout: Duration,
+    extra_env: &[(&str, &str)],
+) -> Result {
+    run_inner(
+        program, prefix, args, home, wait_for, keys, None, timeout, extra_env,
+    )
 }
 
 fn run_inner(
@@ -187,11 +215,12 @@ fn run_inner(
     keys: &str,
     probe: Option<&Probe>,
     timeout: Duration,
+    extra_env: &[(&str, &str)],
 ) -> Result {
     let _guard = PtyGate::acquire();
     let _probe_guard = probe.map(Probe::enter);
     let script = r#"
-import os, pty, select, sys, time
+import errno, os, pty, select, sys, time
 home, wait_for, keys = sys.argv[1], sys.argv[2].encode("utf-8"), sys.argv[3].encode("latin-1")
 timeout = float(sys.argv[4])
 program = sys.argv[5]
@@ -228,7 +257,17 @@ while time.monotonic() < deadline:
         break
     buf.extend(chunk)
     if not sent and wait_for in buf:
-        os.write(fd, keys)
+        try:
+            offset = 0
+            while offset < len(keys):
+                written = os.write(fd, keys[offset:])
+                if written <= 0:
+                    raise OSError(errno.EIO, "PTY input closed")
+                offset += written
+        except OSError as error:
+            pty_closed = True
+            sys.stderr.write("PTY input write failed: %s\n" % error)
+            break
         sent = True
     done, status = os.waitpid(pid, os.WNOHANG)
     if done == pid:
@@ -287,6 +326,9 @@ sys.stdout.buffer.write(bytes(buf))
         .args(args)
         .current_dir(&root)
         .env("INCODEX_TEST_ROOT", &root);
+    for (key, value) in extra_env {
+        command.env(key, value);
+    }
     let output = command.output().expect("spawn PTY harness");
     let raw = String::from_utf8_lossy(&output.stdout).into_owned();
     let (status_line, stdout) = raw.split_once('\n').unwrap_or((&raw, ""));
