@@ -290,6 +290,22 @@ describe("kernel-held TCP owner lease", () => {
     expect(readOwnerRecords(root).some(({ state }: any) => state.owner?.token === replacement.token)).toBe(true);
   });
 
+  test("keeps a retained quarantine visible and fail-closed across reads", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-tcp-sidecar-quarantine-visible-"));
+    const quarantine = join(root, ".incognito.lock.quarantine.foreign");
+    writeFileSync(
+      quarantine,
+      `${JSON.stringify({ pid: 900003, token: "cccccccccccccccccccccccccccccccc", execPath: target(root) })}\n`,
+    );
+
+    const records = readOwnerRecords(root);
+    expect(records.some(({ path }: { path: string }) => path === quarantine)).toBe(true);
+
+    const candidate = currentOwner("quarantine-visible", target(root));
+    await expect(acquireOwnerLease(root, candidate)).rejects.toMatchObject({ code: "OWNER_UNVERIFIABLE" });
+    expect(existsSync(quarantine)).toBe(true);
+  });
+
   test("a SIGKILL releases the listener so the next process can acquire", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-tcp-sigkill-"));
     const ready = join(root, "ready");
