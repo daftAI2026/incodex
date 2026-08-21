@@ -251,57 +251,64 @@ fn send_cdp(
     method: &str,
     params: Value,
 ) -> Result<Value, String> {
-    let body = json!({ "id": id, "method": method, "params": params });
     let deadline = Instant::now() + CDP_IO_TIMEOUT;
     socket
         .get_mut()
         .set_nonblocking(true)
         .map_err(|error| error.to_string())?;
-    let result = (|| {
-        loop {
-            match socket.send(Message::Text(body.to_string())) {
-                Ok(()) => break,
-                Err(tungstenite::Error::Io(error)) if error.kind() == ErrorKind::WouldBlock => {
-                    if Instant::now() >= deadline {
-                        return Err(format!("cdp {method} timed out"));
-                    }
-                    thread::sleep(Duration::from_millis(5));
-                }
-                Err(error) => return Err(error.to_string()),
-            }
-        }
-
-        loop {
-            if Instant::now() >= deadline {
-                return Err(format!("cdp {method} timed out"));
-            }
-            match socket.read() {
-                Ok(Message::Text(text)) => {
-                    let parsed: Value =
-                        serde_json::from_str(&text).map_err(|err| err.to_string())?;
-                    if parsed.get("id").and_then(Value::as_u64) == Some(id) {
-                        if parsed.get("error").is_some() {
-                            return Err(format!("cdp {method} failed: {text}"));
-                        }
-                        if parsed.pointer("/result/exceptionDetails").is_some() {
-                            return Err(format!("cdp {method} exception: {text}"));
-                        }
-                        return Ok(parsed);
-                    }
-                }
-                Ok(_) => {}
-                Err(tungstenite::Error::Io(error)) if error.kind() == ErrorKind::WouldBlock => {
-                    thread::sleep(Duration::from_millis(5));
-                }
-                Err(error) => return Err(error.to_string()),
-            }
-        }
-    })();
+    let result = send_cdp_with_deadline(socket, id, method, params, deadline);
     let restore = socket.get_mut().set_nonblocking(false);
     if let Err(error) = restore {
         return Err(error.to_string());
     }
     result
+}
+
+fn send_cdp_with_deadline<S: Read + Write>(
+    socket: &mut WebSocket<S>,
+    id: u64,
+    method: &str,
+    params: Value,
+    deadline: Instant,
+) -> Result<Value, String> {
+    let body = json!({ "id": id, "method": method, "params": params });
+    loop {
+        match socket.send(Message::Text(body.to_string())) {
+            Ok(()) => break,
+            Err(tungstenite::Error::Io(error)) if error.kind() == ErrorKind::WouldBlock => {
+                if Instant::now() >= deadline {
+                    return Err(format!("cdp {method} timed out"));
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+
+    loop {
+        if Instant::now() >= deadline {
+            return Err(format!("cdp {method} timed out"));
+        }
+        match socket.read() {
+            Ok(Message::Text(text)) => {
+                let parsed: Value = serde_json::from_str(&text).map_err(|err| err.to_string())?;
+                if parsed.get("id").and_then(Value::as_u64) == Some(id) {
+                    if parsed.get("error").is_some() {
+                        return Err(format!("cdp {method} failed: {text}"));
+                    }
+                    if parsed.pointer("/result/exceptionDetails").is_some() {
+                        return Err(format!("cdp {method} exception: {text}"));
+                    }
+                    return Ok(parsed);
+                }
+            }
+            Ok(_) => {}
+            Err(tungstenite::Error::Io(error)) if error.kind() == ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    }
 }
 
 fn connect_cdp_websocket(
@@ -706,3 +713,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "cdp_partial_flush_tests.rs"]
+mod partial_flush_tests;
