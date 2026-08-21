@@ -279,11 +279,6 @@ fn inspect_legacy_backup(root: &Path, app_path: &Path) -> Option<serde_json::Val
     let patched_asar_hash = hash_file(&app_path.join(ASAR_REL));
     let original_plist_hash = hash_file(&original_app.join("Contents/Info.plist"));
     let original_tree_hash = tree_digest(&original_app).ok();
-    let original_tree_sealed = manifest
-        .original_tree_digest
-        .as_deref()
-        .zip(original_tree_hash.as_deref())
-        .is_some_and(|(expected, actual)| expected == actual);
     let original_info = read_plist_info(&original_app);
     let original_path_integrity = original_info.as_ref().is_some_and(|info| {
         [
@@ -308,7 +303,6 @@ fn inspect_legacy_backup(root: &Path, app_path: &Path) -> Option<serde_json::Val
         && original_asar_hash.as_deref() == Some(manifest.original_asar_file_hash.as_str())
         && patched_asar_hash.as_deref() == Some(manifest.patched_asar_file_hash.as_str())
         && original_plist_hash.as_deref() == Some(manifest.original_plist_file_hash.as_str())
-        && original_tree_sealed
         && original_path_integrity
         && original_signature;
     Some(serde_json::json!({
@@ -321,7 +315,7 @@ fn inspect_legacy_backup(root: &Path, app_path: &Path) -> Option<serde_json::Val
         "patchedAsarFileHash": patched_asar_hash,
         "originalPathIntegrity": original_path_integrity,
         "originalTreeDigest": original_tree_hash,
-        "originalTreeSealed": original_tree_sealed,
+        "originalTreeProof": "not recorded by TS v1",
         "originalSignatureOk": original_signature,
         "runtimeVersion": manifest.runtime_version,
     }))

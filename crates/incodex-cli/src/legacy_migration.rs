@@ -1,5 +1,7 @@
 use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use incodex_asar::{Archive, MARKER_KEY};
 use incodex_core::{canonical::canonical_path, is_official_app, target_id};
@@ -445,6 +447,7 @@ fn verify_patched_target_seal(
     let patched_members = vec![
         "Contents/Resources/app.asar",
         "Contents/_CodeSignature",
+        "Contents/Info.plist",
         executable_member.as_str(),
     ];
     if tree_digest_excluding(target, &patched_members)?
@@ -452,7 +455,50 @@ fn verify_patched_target_seal(
     {
         return Err("legacy recovery target full-tree proof mismatch".into());
     }
+    let target_plist = target.join("Contents/Info.plist");
+    let original_plist = original.join("Contents/Info.plist");
+    if normalized_plist_hash(&target_plist)? != normalized_plist_hash(&original_plist)? {
+        return Err("legacy recovery target Info.plist proof mismatch".into());
+    }
+    let target_mode = fs::symlink_metadata(&target_plist)
+        .map_err(|error| error.to_string())?
+        .mode()
+        & 0o7777;
+    let original_mode = fs::symlink_metadata(&original_plist)
+        .map_err(|error| error.to_string())?
+        .mode()
+        & 0o7777;
+    if target_mode != original_mode {
+        return Err("legacy recovery target Info.plist mode mismatch".into());
+    }
     Ok(())
+}
+
+fn normalized_plist_hash(path: &Path) -> Result<String, String> {
+    const SCRIPT: &str = r#"
+import json, plistlib, sys
+with open(sys.argv[1], "rb") as handle:
+    value = plistlib.load(handle)
+value.pop("ElectronAsarIntegrity", None)
+print(json.dumps(value, sort_keys=True, separators=(",", ":")))
+"#;
+    let output = Command::new("python3")
+        .args(["-c", SCRIPT])
+        .arg(path)
+        .output()
+        .map_err(|error| format!("cannot normalize Info.plist: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "cannot normalize Info.plist {}: {}",
+            path.display(),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    use sha2::{Digest, Sha256};
+    Ok(Sha256::digest(output.stdout)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
 }
 
 fn already_restored(

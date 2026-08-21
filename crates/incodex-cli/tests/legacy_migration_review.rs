@@ -123,7 +123,9 @@ fn status_rejects_a_legacy_backup_with_a_modified_executable() {
 fn status_does_not_require_a_nonexistent_legacy_tree_seal() {
     let fixture = Fixture::create();
     let report = incodex_cli::diagnose::diagnose_with_root(&fixture.app, &fixture.root);
-    assert_eq!(report.backup.unwrap()["complete"], true);
+    let backup = report.backup.unwrap();
+    assert_eq!(backup["complete"], true);
+    assert_eq!(backup["originalTreeProof"], "not recorded by TS v1");
 }
 
 #[test]
