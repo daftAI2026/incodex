@@ -14,6 +14,8 @@ const OWNER_RETRY_DELAY_MS = 100;
 const TAKEOVER_CLAIM_NAME = ".incognito.lock.takeover";
 const TAKEOVER_CLAIM_OWNER_NAME = "owner";
 const TAKEOVER_CLAIM_RECLAIM_NAME = ".reclaim";
+const RECLAIM_MARKER_PREFIX = "marker.";
+const RECLAIM_RELEASED_STATE = "released";
 
 function targetIdFromExec(execPath) {
   return crypto.createHash("sha256").update(execPath || "unknown").digest("hex").slice(0, 12);
@@ -269,10 +271,6 @@ function takeoverClaimReclaimPath(stateRoot) {
   return path.join(takeoverClaimPath(stateRoot), TAKEOVER_CLAIM_RECLAIM_NAME);
 }
 
-function reclaimMarkerOwnerPath(stateRoot) {
-  return path.join(takeoverClaimReclaimPath(stateRoot), TAKEOVER_CLAIM_OWNER_NAME);
-}
-
 function readTakeoverClaimState(stateRoot) {
   const file = takeoverClaimPath(stateRoot);
   let stats;
@@ -326,76 +324,73 @@ function takeoverClaimIsStale(owner) {
   return !ownerMatchesLive(owner, live);
 }
 
-function readReclaimMarkerState(stateRoot) {
-  const marker = takeoverClaimReclaimPath(stateRoot);
-  let stats;
-  try {
-    stats = fs.lstatSync(marker);
-  } catch (error) {
-    if (error?.code === "ENOENT") return { kind: "missing", owner: null };
-    return { kind: "invalid", owner: null, reason: String(error) };
-  }
-  if (!stats.isDirectory()) return { kind: "invalid", owner: null, reason: "reclaim marker is not a directory" };
-  const owner = readOwnerLockStateAt(reclaimMarkerOwnerPath(stateRoot));
-  return owner.kind === "missing" ? { kind: "invalid", owner: null, reason: "reclaim marker has no owner" } : owner;
+function reclaimMarkerPath(stateRoot, generation) {
+  return path.join(
+    takeoverClaimReclaimPath(stateRoot),
+    `${RECLAIM_MARKER_PREFIX}${String(generation).padStart(16, "0")}`,
+  );
 }
 
-function createReclaimMarkerTemp(stateRoot, owner) {
-  const temporary = path.join(
-    stateRoot,
-    `.${TAKEOVER_CLAIM_NAME}.reclaim.tmp.${process.pid}.${Date.now()}.${crypto.randomBytes(8).toString("hex")}`,
-  );
-  fs.mkdirSync(temporary, { mode: 0o700 });
+function reclaimMarkerEntries(stateRoot) {
+  const root = takeoverClaimReclaimPath(stateRoot);
+  let names;
   try {
-    writeAtomicRecord(path.join(temporary, TAKEOVER_CLAIM_OWNER_NAME), owner);
-    return temporary;
+    names = fs.readdirSync(root);
   } catch (error) {
-    fs.rmSync(temporary, { recursive: true, force: true });
-    throw error;
+    if (error?.code === "ENOENT") return [];
+    return null;
   }
+  return names
+    .map((name) => {
+      const generation = name === TAKEOVER_CLAIM_OWNER_NAME ? 0 : Number(name.slice(RECLAIM_MARKER_PREFIX.length));
+      if (name !== TAKEOVER_CLAIM_OWNER_NAME && !/^marker\.\d+$/.test(name)) return null;
+      const file = path.join(root, name);
+      const state = readOwnerLockStateAt(file);
+      return { file, generation, state };
+    })
+    .filter(Boolean);
+}
+
+function reclaimMarkerIsReleased(entry) {
+  return entry.state.kind === "valid" && entry.state.owner?.leaseState === RECLAIM_RELEASED_STATE;
 }
 
 function acquireReclaimMarker(stateRoot) {
   const owner = takeoverClaimOwner();
   if (!hasReliableOwnerIdentity(owner)) return null;
-  const marker = takeoverClaimReclaimPath(stateRoot);
+  const root = takeoverClaimReclaimPath(stateRoot);
+  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
   for (let attempt = 0; attempt < OWNER_RETRY_COUNT; attempt += 1) {
-    const current = readReclaimMarkerState(stateRoot);
-    if (current.kind === "valid" && !takeoverClaimIsStale(current.owner)) return null;
-    if (current.kind !== "missing" && current.kind !== "valid") return null;
-
-    const temporary = createReclaimMarkerTemp(stateRoot, owner);
-    if (current.kind === "missing") {
-      try {
-        fs.renameSync(temporary, marker);
-        return owner;
-      } catch (error) {
-        fs.rmSync(temporary, { recursive: true, force: true });
-        if (["EEXIST", "ENOTEMPTY", "ENOTDIR"].includes(error?.code)) continue;
-        return null;
-      }
+    const entries = reclaimMarkerEntries(stateRoot);
+    if (!entries) return null;
+    let generation = 0;
+    for (const entry of entries) {
+      generation = Math.max(generation, entry.generation);
+      if (reclaimMarkerIsReleased(entry)) continue;
+      if (entry.state.kind === "invalid" || entry.state.kind === "unverifiable") return null;
+      if (entry.state.kind === "valid" && !takeoverClaimIsStale(entry.state.owner)) return null;
     }
 
-    const staleMarker = path.join(
-      stateRoot,
-      `.${TAKEOVER_CLAIM_NAME}.reclaim.stale.${process.pid}.${Date.now()}.${crypto.randomBytes(8).toString("hex")}`,
-    );
+    // Markers are append-only generations. A stale generation is never
+    // renamed or deleted, so a delayed reclaimer can only publish the next
+    // unique slot; it cannot move a newer live marker out from under it.
     pauseBeforeReclaimHandoff();
-    try {
-      fs.renameSync(marker, staleMarker);
-    } catch (error) {
-      fs.rmSync(temporary, { recursive: true, force: true });
-      if (error?.code === "ENOENT") continue;
-      return null;
+    const settled = reclaimMarkerEntries(stateRoot);
+    if (!settled) return null;
+    let settledGeneration = generation;
+    for (const entry of settled) {
+      settledGeneration = Math.max(settledGeneration, entry.generation);
+      if (reclaimMarkerIsReleased(entry)) continue;
+      if (entry.state.kind === "invalid" || entry.state.kind === "unverifiable") return null;
+      if (entry.state.kind === "valid" && !takeoverClaimIsStale(entry.state.owner)) return null;
     }
+    if (settledGeneration !== generation) continue;
+
     try {
-      fs.renameSync(temporary, marker);
-      fs.rmSync(staleMarker, { recursive: true, force: true });
+      writeAtomicRecord(reclaimMarkerPath(stateRoot, generation + 1), owner);
       return owner;
     } catch (error) {
-      fs.rmSync(temporary, { recursive: true, force: true });
-      fs.rmSync(staleMarker, { recursive: true, force: true });
-      if (["EEXIST", "ENOTEMPTY", "ENOTDIR"].includes(error?.code)) continue;
+      if (error?.code === "EEXIST") continue;
       return null;
     }
   }
@@ -404,18 +399,30 @@ function acquireReclaimMarker(stateRoot) {
 
 function releaseReclaimMarker(stateRoot, expectedOwner) {
   if (!expectedOwner || !ownerToken(expectedOwner)) return false;
-  const current = readReclaimMarkerState(stateRoot);
-  if (current.kind !== "valid" || !sameOwnerToken(current.owner, expectedOwner)) return false;
-  const released = path.join(
-    stateRoot,
-    `.${TAKEOVER_CLAIM_NAME}.reclaim.released.${process.pid}.${Date.now()}.${crypto.randomBytes(8).toString("hex")}`,
+  const entries = reclaimMarkerEntries(stateRoot);
+  if (!entries) return false;
+  const entry = entries.find(
+    (candidate) => candidate.state.kind === "valid" && sameOwnerToken(candidate.state.owner, expectedOwner),
+  );
+  if (!entry) return false;
+  const released = {
+    ...entry.state.owner,
+    leaseState: RECLAIM_RELEASED_STATE,
+  };
+  const temporary = path.join(
+    path.dirname(entry.file),
+    `.${path.basename(entry.file)}.released.${process.pid}.${Date.now()}.${crypto.randomBytes(8).toString("hex")}`,
   );
   try {
-    fs.renameSync(takeoverClaimReclaimPath(stateRoot), released);
-    fs.rmSync(released, { recursive: true, force: true });
+    writeAtomicRecord(temporary, released);
+    fs.renameSync(temporary, entry.file);
     return true;
   } catch (error) {
-    fs.rmSync(released, { recursive: true, force: true });
+    try {
+      fs.rmSync(temporary, { force: true });
+    } catch {
+      /* Keep the live marker when an atomic release cannot be published. */
+    }
     return Boolean(error?.code === "ENOENT");
   }
 }
@@ -529,10 +536,7 @@ function removeTakeoverClaimIfStale(stateRoot, expectedState) {
       return false;
     }
   } finally {
-    if (fs.existsSync(file)) {
-      const currentMetadata = takeoverClaimMetadata(stateRoot);
-      if (sameTakeoverClaimMetadata(beforeMetadata, currentMetadata)) releaseReclaimMarker(stateRoot, markerOwner);
-    }
+    releaseReclaimMarker(stateRoot, markerOwner);
   }
 }
 
@@ -617,10 +621,7 @@ function releaseTakeoverClaim(stateRoot, claim) {
       return false;
     }
   } finally {
-    if (fs.existsSync(file)) {
-      const currentMetadata = takeoverClaimMetadata(stateRoot);
-      if (sameTakeoverClaimMetadata(beforeMetadata, currentMetadata)) releaseReclaimMarker(stateRoot, markerOwner);
-    }
+    releaseReclaimMarker(stateRoot, markerOwner);
   }
 }
 
