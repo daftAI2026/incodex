@@ -204,6 +204,9 @@ pub fn verify_original_vendor_bundle(
     {
         return Err("official original vendor signature is ad hoc or incomplete".into());
     }
+    if inventory.outer.authorities.is_empty() {
+        return Err("official original vendor signature has no authority chain".into());
+    }
     let expected_bundle_identifier =
         expected_bundle_identifier.unwrap_or(OFFICIAL_BUNDLE_IDENTIFIER);
     verify_plist_identity(
