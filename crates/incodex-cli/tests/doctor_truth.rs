@@ -307,6 +307,62 @@ fn doctor_json_classifies_owner_orphans_and_runtime_residue() {
 }
 
 #[test]
+fn doctor_json_marks_a_symlinked_session_root_unknown_without_following_it() {
+    let home = isolated_home();
+    let app = home.join("Missing.app");
+    let target = home.join(".incodex/sessions/target-contract");
+    let outside = home.join("outside-session");
+    let session = target.join("s-symlink-contract");
+    fs::create_dir_all(&target).unwrap();
+    fs::create_dir_all(outside.join("chromium")).unwrap();
+    std::os::unix::fs::symlink(&outside, &session).unwrap();
+
+    let (_status, stdout, stderr) =
+        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(stderr, "");
+    let report = parse_json(&stdout);
+    assert_eq!(report["orphanSessions"], serde_json::json!([]));
+    assert_eq!(report["leftoverChromium"], serde_json::json!([]));
+    assert_eq!(report["checks"]["orphanSessions"]["status"], "unknown");
+    assert_eq!(report["checks"]["chromiumResidue"]["status"], "unknown");
+    assert!(report["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|finding| finding["code"] == "session.symlink"));
+    assert!(fs::symlink_metadata(&session)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert!(outside.join("chromium").is_dir());
+}
+
+#[test]
+fn doctor_json_reports_a_symlinked_runtime_root_as_checked_finding() {
+    let home = isolated_home();
+    let app = home.join("Missing.app");
+    let runtime_parent = home.join(".incodex");
+    let outside = home.join("outside-runtime");
+    let runtime_root = runtime_parent.join("runtime");
+    fs::create_dir_all(&runtime_parent).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    std::os::unix::fs::symlink(&outside, &runtime_root).unwrap();
+
+    let (_status, stdout, stderr) =
+        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(stderr, "");
+    let report = parse_json(&stdout);
+    assert_eq!(report["externalRuntime"]["present"], true);
+    assert_eq!(report["externalRuntime"]["ok"], false);
+    assert_eq!(report["checks"]["runtime"]["status"], "checked");
+    assert!(report["checks"]["runtime"]["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|finding| finding["code"] == "runtime.symlink"));
+}
+
+#[test]
 fn doctor_json_scans_legacy_chromium_residue_without_modern_sessions() {
     let home = isolated_home();
     let app = home.join("Missing.app");
