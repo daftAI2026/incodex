@@ -132,6 +132,8 @@ export async function restoreAsarMain(asarPath: string): Promise<void> {
     rmSync(join(extractDir, PRELOAD_NAME), { force: true });
     rmSync(join(extractDir, SAFE_HOME_NAME), { force: true });
     rmSync(join(extractDir, IPC_GUARD_NAME), { force: true });
+    rmSync(join(extractDir, OWNER_CORE_NAME), { force: true });
+    rmSync(join(extractDir, OWNER_RECOVERY_NAME), { force: true });
     rmSync(join(extractDir, INSTANCE_NAME), { force: true });
     rmSync(join(extractDir, RUNTIME_LOAD_NAME), { force: true });
     rmSync(join(extractDir, WINDOW_KIND_NAME), { force: true });
