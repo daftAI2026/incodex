@@ -72,6 +72,13 @@ impl CheckResult {
             findings: vec![DiagnosticFinding::warning(code, message, None)],
         }
     }
+
+    pub fn not_requested() -> Self {
+        Self {
+            status: CheckStatus::Unknown,
+            findings: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

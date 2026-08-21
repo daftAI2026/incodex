@@ -71,22 +71,18 @@ pub(crate) fn inspect_outer(
         }
     };
     let accepted = accepts_outer_identity(&outer, patched, official_target);
-    let (code, message) = if accepted {
-        (
-            "signing.not-requested",
-            "nested signing, entitlements, and Gatekeeper were not inspected; use doctor --deep"
-                .to_string(),
-        )
+    let signing_check = if accepted {
+        CheckResult::not_requested()
     } else {
-        (
+        CheckResult::unknown(
             "signing.outer-identity",
-            "outer signature identity evidence does not match this target".to_string(),
+            "outer signature identity evidence does not match this target",
         )
     };
     (
         Some(not_requested_signing(Some(&outer))),
         accepted,
-        CheckResult::unknown(code, message),
+        signing_check,
     )
 }
 
