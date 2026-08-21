@@ -499,7 +499,10 @@ where
             }
         }
         if !session_root.exists() {
-            return CleanupResult::Removed { attempts: attempt };
+            if !original_removed {
+                return CleanupResult::Removed { attempts: attempt };
+            }
+            // 已证明原始 root 删除后，仍保留当前有界观察窗口，捕捉迟到的重建。
         }
         if attempt < 5 && retry_delay_ms > 0 {
             thread::sleep(Duration::from_millis(retry_delay_ms * u64::from(attempt)));

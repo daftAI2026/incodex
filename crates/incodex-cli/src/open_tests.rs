@@ -197,7 +197,7 @@ fn wait_and_burn_passes_the_created_session_identity_to_cleanup() {
         owner.get("ino").and_then(serde_json::Value::as_u64),
         owner.get("dev").and_then(serde_json::Value::as_u64),
     );
-    let mut observed = (None, None);
+    let mut observed = Vec::new();
     let (_process, cleanup) = wait_and_burn_with(
         &plan,
         &user,
@@ -209,13 +209,13 @@ fn wait_and_burn_passes_the_created_session_identity_to_cleanup() {
             })
         },
         |root, expected| {
-            observed = (expected.ino, expected.dev);
+            observed.push((expected.ino, expected.dev));
             burn_session_home(root, expected)
         },
     )
     .unwrap();
     assert!(cleanup.removed());
-    assert_eq!(observed, recorded_identity);
+    assert_eq!(observed.first().copied(), Some(recorded_identity));
 }
 
 #[test]
