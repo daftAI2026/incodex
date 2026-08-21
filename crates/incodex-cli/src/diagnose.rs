@@ -6,13 +6,16 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use incodex_asar::Archive;
+use incodex_core::canonical::is_official_app;
 use incodex_core::paths::{user_root, ASAR_REL, RUNTIME_CURRENT_NAME, RUNTIME_DIR_NAME};
 use incodex_core::target_id;
 use incodex_macos::{
-    diagnose_spctl, has_hardened_runtime, read_architecture, read_asar_integrity, read_plist_info,
-    verify_app,
+    diagnose_spctl, inspect_signing_inventory, read_architecture, read_asar_integrity,
+    read_plist_info, validate_generic_signing_inventory, validate_signing_inventory,
 };
 use incodex_transaction::{journal_v2, load_journal, validate_backup_snapshot};
+
+use crate::diagnose_signing::inspect_signing;
 
 use crate::diagnose_checks::{
     empty_checks, scan_journals, scan_owner_processes, scan_sessions, CheckResult, CheckStatus,
@@ -91,7 +94,16 @@ pub fn diagnose_with_root(app_path: &Path, root: &Path) -> Diagnosis {
         .as_ref()
         .filter(|package| package.already_patched)
         .and_then(|_| external_runtime.version.clone());
-    let codesign_ok = exists && verify_app(app_path);
+    let signing_inventory = exists.then(|| inspect_signing_inventory(app_path));
+    let codesign_ok = signing_inventory
+        .as_ref()
+        .and_then(|result| result.as_ref().ok())
+        .map(|inventory| {
+            let accepted = validate_signing_inventory(inventory).is_ok()
+                || validate_generic_signing_inventory(inventory).is_ok();
+            accepted && plist.as_ref().is_some_and(|plist| !plist.executable.trim().is_empty())
+        })
+        .unwrap_or(false);
     let spctl = exists.then(|| diagnose_spctl(app_path));
     let (backup, backup_check) = match package
         .as_ref()
@@ -100,8 +112,19 @@ pub fn diagnose_with_root(app_path: &Path, root: &Path) -> Diagnosis {
         Some(install_id) => inspect_backup(root, app_path, install_id, runtime_version.as_deref()),
         None => (None, CheckResult::checked(Vec::new())),
     };
-    let (signing, signing_check) =
-        inspect_signing(backup.as_ref(), spctl.as_ref(), codesign_ok, app_path);
+    let patched = package
+        .as_ref()
+        .map(|package| package.already_patched)
+        .unwrap_or(false);
+    let official_target = is_official_app(app_path, None);
+    let (signing, signing_check) = inspect_signing(
+        spctl.as_ref(),
+        codesign_ok,
+        app_path,
+        signing_inventory.as_ref(),
+        patched,
+        official_target,
+    );
     let owner_scan = scan_owner_processes(root);
     let session_scan = scan_sessions(root);
     let current_install_id = package
@@ -331,47 +354,6 @@ fn verify_external_runtime(root: &Path, current_path: &Path) -> Result<(String, 
     Ok((version, release))
 }
 
-fn inspect_signing(
-    backup: Option<&serde_json::Value>,
-    spctl: Option<&serde_json::Value>,
-    codesign_ok: bool,
-    app_path: &Path,
-) -> (Option<serde_json::Value>, CheckResult) {
-    let Some(spctl) = spctl else {
-        return (
-            None,
-            CheckResult::unknown(
-                "signing.not-checked",
-                "the application does not exist, so nested signing was not inspected",
-            ),
-        );
-    };
-    if backup.is_none() {
-        return (
-            None,
-            CheckResult::unknown(
-                "signing.not-checked",
-                "no verified install backup binds signing diagnostics to this target",
-            ),
-        );
-    }
-    let report = serde_json::json!({
-        "status": "unknown",
-        "verified": codesign_ok,
-        "componentCount": serde_json::Value::Null,
-        "hardenedRuntimeOk": has_hardened_runtime(app_path),
-        "unretainable": serde_json::Value::Null,
-        "spctl": spctl,
-    });
-    (
-        Some(report),
-        CheckResult::unknown(
-            "signing.components-unknown",
-            "nested signing components and entitlement retention were not inspected",
-        ),
-    )
-}
-
 fn inspect_backup(
     root: &Path,
     app_path: &Path,
@@ -554,4 +536,68 @@ fn hash_file(path: &Path) -> Option<String> {
             .map(|byte| format!("{byte:02x}"))
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use incodex_macos::{
+        EntitlementSnapshot, SignatureKind, SignedComponent, SigningInventory,
+        VENDOR_TEAM_IDENTIFIER,
+    };
+    use crate::diagnose_signing::validate_doctor_signing_inventory;
+    use std::collections::BTreeSet;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn vendor_inventory(identifier: &str) -> SigningInventory {
+        SigningInventory {
+            outer: SignedComponent {
+                path: PathBuf::from("ChatGPT.app"),
+                identifier: Some(identifier.to_string()),
+                team_identifier: Some(VENDOR_TEAM_IDENTIFIER.to_string()),
+                authorities: vec!["Developer ID Application: fixture".to_string()],
+                kind: SignatureKind::Vendor,
+                verified: true,
+            },
+            nested: Vec::new(),
+            entitlements: EntitlementSnapshot {
+                xml: String::new(),
+                keys: BTreeSet::new(),
+            },
+            deep_strict: true,
+        }
+    }
+
+    #[test]
+    fn doctor_selector_uses_official_policy_for_official_target() {
+        let inventory = vendor_inventory("com.attacker.replaced");
+        let root = std::env::temp_dir().join(format!(
+            "incodex-doctor-selector-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let codesign = root.join("codesign");
+        std::fs::write(&codesign, "#!/bin/sh\nexit 0\n").unwrap();
+        let mut permissions = std::fs::metadata(&codesign).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&codesign, permissions).unwrap();
+        let previous_path = std::env::var_os("PATH");
+        let mut path = std::ffi::OsString::from(root.as_os_str());
+        path.push(":");
+        if let Some(previous) = &previous_path {
+            path.push(previous);
+        }
+        std::env::set_var("PATH", path);
+
+        let official = validate_doctor_signing_inventory(&inventory, false, true);
+        let custom = validate_doctor_signing_inventory(&inventory, false, false);
+
+        match previous_path {
+            Some(path) => std::env::set_var("PATH", path),
+            None => std::env::remove_var("PATH"),
+        }
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(official.is_err());
+        assert!(custom.is_ok());
+    }
 }

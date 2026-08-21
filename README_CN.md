@@ -141,28 +141,6 @@ Incodex 会改本机已安装的 Electron 应用包。高风险操作默认要�
 ↑↓ | Enter | V Version | Q Quit | 1-6 Jump
 ```
 
-### Install
-
-```bash
-$ incodex install
-
-➤ Install
-  App          /Applications/ChatGPT.app
-  Version      26.814.41957 6744
-  Signed       yes
-  ! Replaces the app in place and resigns it ad hoc.
-  ! Official Appshot (smart snapshot) stops until uninstall.
-  Backup       ~/.incodex/installations/
-  ✓ Official app patched
-  Install id   0778f0fa-…
-  Runtime      0.3.1
-  App          /Applications/ChatGPT.app
-➤ Relaunch
-  ✓ ChatGPT.app relaunched.
-```
-
-装进去之后，搜索左边会出现帽子墨镜。点它或 `Shift+Command+N` 开无痕窗。
-
 ### Open without patching
 
 ```bash
@@ -184,6 +162,28 @@ $ incodex open
   Home         ~/.incodex/sessions/…
   ✓ Closed. Isolated session removed.
 ```
+
+### Install
+
+```bash
+$ incodex install
+
+➤ Install
+  App          /Applications/ChatGPT.app
+  Version      26.814.41957 6744
+  Signed       yes
+  ! Replaces the app in place and resigns it ad hoc.
+  ! Official Appshot (smart snapshot) stops until uninstall.
+  Backup       ~/.incodex/installations/
+  ✓ Official app patched
+  Install id   0778f0fa-…
+  Runtime      0.3.1
+  App          /Applications/ChatGPT.app
+➤ Relaunch
+  ✓ ChatGPT.app relaunched.
+```
+
+装进去之后，搜索左边会出现帽子墨镜。点它或 `Shift+Command+N` 开无痕窗。
 
 ### Status
 

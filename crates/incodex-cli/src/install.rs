@@ -1,13 +1,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use incodex_asar::{patch_asar, Archive};
+use incodex_asar::{patch_asar, Archive, LOADER_NAME};
 use incodex_core::canonical::{inspect_target, is_official_app};
 use incodex_core::paths::{user_root, ASAR_REL, DEFAULT_APP};
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
 use incodex_macos::{
     ditto, notify_launch_services, quit_official_app, read_asar_integrity, read_plist_info,
-    sign_app, verify_app, write_asar_integrity,
+    sign_app, verify_app, verify_original_vendor_bundle, verify_patched_adhoc_bundle_deep_strict,
+    write_asar_integrity, OFFICIAL_BUNDLE_IDENTIFIER,
 };
 use incodex_runtime_bundle::{loader_source, publish, runtime_version};
 use incodex_transaction::{
@@ -252,6 +253,7 @@ fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<Comma
             }
         }
     }
+    let expected_plist = read_plist_info(app);
     let mut tx = Engine::begin(root, app, "install")?;
     let install_id = tx.install_id().to_string();
     let original = root
@@ -286,8 +288,8 @@ fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<Comma
         return Err(error);
     }
     progress.stage("Verifying installation");
-    if !verify_app(app) {
-        let error = "post-swap codesign verification failed".to_string();
+    if let Err(error) = verify_patched_adhoc_bundle_deep_strict(app, expected_plist.as_ref()) {
+        let error = format!("post-swap codesign verification failed: {error}");
         tx.rollback(&error)?;
         return Err(error);
     }
@@ -323,7 +325,8 @@ fn uninstall_app(
     if !app.exists() {
         return Err(format!("Codex app not found: {}", app.display()));
     }
-    if is_official_app(app, None) {
+    let official_target = is_official_app(app, None);
+    if official_target {
         progress.stage("Closing ChatGPT");
         let _ = quit_official_app();
     }
@@ -338,6 +341,7 @@ fn uninstall_app(
     } else {
         restore_committed(root, &journal.install_id, app)?;
     }
+    verify_restored_app(app, official_target)?;
     progress.stage("Refreshing Dock registration");
     let _ = notify_launch_services(app);
     Ok(CommandResult {
@@ -347,6 +351,30 @@ fn uninstall_app(
         app: app.display().to_string(),
         warning: None,
     })
+}
+
+fn verify_restored_app(app: &Path, official_target: bool) -> Result<(), String> {
+    let archive = Archive::open(app.join(ASAR_REL))
+        .map_err(|error| format!("restored app ASAR could not be inspected: {error}"))?;
+    let package = archive
+        .read_package_main()
+        .map_err(|error| format!("restored app package metadata could not be inspected: {error}"))?;
+    if package.already_patched || package.install_id.is_some() {
+        return Err("restored app still contains an Incodex marker".into());
+    }
+    if archive.extract(LOADER_NAME).is_ok() {
+        return Err("restored app still contains the Incodex loader".into());
+    }
+    if official_target {
+        verify_original_vendor_bundle(
+            app,
+            Some(OFFICIAL_BUNDLE_IDENTIFIER),
+            None,
+            None,
+        )
+        .map_err(|error| format!("restored official app failed vendor acceptance: {error}"))?;
+    }
+    Ok(())
 }
 
 fn current_install_id(app: &Path, root: &Path, archive: &Archive) -> Option<String> {

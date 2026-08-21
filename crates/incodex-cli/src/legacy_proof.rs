@@ -7,11 +7,14 @@ use std::fmt;
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
-use std::process::Command;
 
 use incodex_asar::{Archive, PackageMain, MARKER_KEY};
 use incodex_core::{inspect_target, recheck_target, CanonicalTarget};
-use incodex_macos::{read_architecture, read_plist_info, verify_app, PlistInfo};
+use incodex_macos::{
+    read_architecture, read_plist_info, verify_app,
+    verify_bundle_deep_strict as verify_native_bundle_deep_strict,
+    verify_original_vendor_bundle, PlistInfo,
+};
 use incodex_transaction::{acquire_target_lock, TargetLock};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -19,9 +22,6 @@ use sha2::{Digest, Sha256};
 use crate::legacy_typescript::{
     LegacyFsIdentity, LegacyState, LegacyStructuralState, LegacyTargetIdentity,
 };
-
-const VENDOR_TEAM_IDENTIFIER: &str = "2DC432GLL2";
-const OFFICIAL_BUNDLE_IDENTIFIER: &str = "com.openai.codex";
 
 /// 证明后才可交给迁移器的状态。结构状态本身不实现任何 mutation 能力。
 pub struct LegacyProvenState {
@@ -140,7 +140,7 @@ where
     let before_lock = inspect_target(target, None)
         .map_err(|error| format!("cannot inspect legacy live target: {error}"))?;
     assert_target_identity(&before_lock, &expected_target, "before target lock")?;
-    if before_lock.is_official && manifest.bundle_identifier != OFFICIAL_BUNDLE_IDENTIFIER {
+    if before_lock.is_official && manifest.bundle_identifier != incodex_macos::OFFICIAL_BUNDLE_IDENTIFIER {
         return Err("official target bundle identifier is not com.openai.codex".into());
     }
     let lock = acquire_target_lock(root, target, "legacy-proof", Some(&structural.install_id))?;
@@ -550,16 +550,7 @@ fn hex_digest(bytes: &[u8]) -> String {
 }
 
 fn verify_bundle_deep_strict(app: &Path, label: &str) -> Result<(), String> {
-    let output = Command::new("codesign")
-        .args(["--verify", "--deep", "--strict", "--verbose=4", "--"])
-        .arg(app)
-        .output()
-        .map_err(|error| format!("{label} verification failed to start: {error}"))?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(format!("{label} deep strict signature verification failed"))
-    }
+    verify_native_bundle_deep_strict(app).map_err(|error| format!("{label}: {error}"))
 }
 
 /// Verify official vendor identity; an ad-hoc fixture is never accepted.
@@ -568,46 +559,22 @@ pub fn verify_official_vendor_bundle(
     app: &Path,
     expected_identifier: &str,
 ) -> Result<LegacyVendorSignature, String> {
-    verify_bundle_deep_strict(app, "official vendor bundle")?;
-    let output = Command::new("codesign")
-        .args(["--display", "--verbose=4", "--"])
-        .arg(app)
-        .output()
-        .map_err(|error| format!("cannot inspect vendor signature: {error}"))?;
-    if !output.status.success() {
-        return Err("official original vendor signature inspection failed".into());
-    }
-    let text = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let identifier = signature_field(&text, "Identifier=");
-    let team_identifier = signature_field(&text, "TeamIdentifier=");
-    let authorities = text
-        .lines()
-        .filter_map(|line| line.strip_prefix("Authority=").map(str::to_string))
-        .collect::<Vec<_>>();
-    if identifier != expected_identifier {
-        return Err("official original vendor bundle identifier mismatch".into());
-    }
-    if team_identifier != VENDOR_TEAM_IDENTIFIER {
-        return Err("official original vendor team identifier mismatch".into());
-    }
-    if authorities.is_empty() || text.lines().any(|line| line.trim() == "Signature=adhoc") {
+    let inventory = verify_original_vendor_bundle(app, Some(expected_identifier), None, None)?;
+    let outer = inventory.outer;
+    let identifier = outer
+        .identifier
+        .ok_or("official original vendor identifier is missing")?;
+    let team_identifier = outer
+        .team_identifier
+        .ok_or("official original vendor team identifier is missing")?;
+    if outer.authorities.is_empty() {
         return Err("official original vendor signature is ad hoc or incomplete".into());
     }
     Ok(LegacyVendorSignature {
         identifier,
         team_identifier,
-        authorities,
+        authorities: outer.authorities,
     })
-}
-
-fn signature_field(text: &str, prefix: &str) -> String {
-    text.lines()
-        .find_map(|line| line.strip_prefix(prefix).map(str::trim).map(str::to_string))
-        .unwrap_or_default()
 }
 
 fn assert_directory(path: &Path, label: &str) -> Result<(), String> {
