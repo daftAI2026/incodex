@@ -1,143 +1,115 @@
 // @ts-nocheck
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.SOCK_NAME = exports.LOCK_NAME = void 0;
-exports.targetIdFromExec = targetIdFromExec;
-exports.targetStateDir = targetStateDir;
-exports.processIdentity = processIdentity;
-exports.ownerMatchesLive = ownerMatchesLive;
-exports.writeOwnerLock = writeOwnerLock;
-exports.readOwnerLock = readOwnerLock;
-exports.clearOwnerLock = clearOwnerLock;
-exports.currentOwner = currentOwner;
-exports.staleOwner = staleOwner;
+exports.acquireOwnerLease = exports.ownsOwnerLease = exports.OwnerLeaseError = exports.staleOwnerRecord = exports.staleOwner = exports.currentOwner = exports.releaseOwnerLease = exports.clearOwnerLock = exports.setOwnerRecordTestHook = exports.readOwnerRecords = exports.readOwnerLock = exports.readOwnerLockState = exports.writeOwnerLockExclusive = exports.writeOwnerLock = exports.ownerMatchesLive = exports.ownerToken = exports.processIdentity = exports.ownerPortFromExec = exports.targetStateDir = exports.targetIdFromExec = exports.SOCK_NAME = exports.LOCK_NAME = void 0;
+exports.sockPath = sockPath;
 exports.connectExisting = connectExisting;
+exports.connectExistingWithRetry = connectExistingWithRetry;
 exports.listenForRaise = listenForRaise;
 exports.singleFlight = singleFlight;
-const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
-const crypto = require("node:crypto");
-const LOCK_NAME = "incognito.lock";
+const core = require("./incodex-owner-core.cjs");
+const recovery = require("./incodex-owner-recovery.cjs");
+const { LOCK_NAME, SOCK_NAME, targetIdFromExec, targetStateDir, ownerPortFromExec, ownerToken, ownerMatchesLive, writeOwnerLock, writeOwnerLockExclusive, readOwnerLockState, readOwnerLock, readOwnerRecords, setOwnerRecordTestHook, currentOwner, staleOwner, staleOwnerRecord, OwnerLeaseError, ownsOwnerLease, } = core;
 exports.LOCK_NAME = LOCK_NAME;
-const SOCK_NAME = "incognito.sock";
 exports.SOCK_NAME = SOCK_NAME;
-function targetIdFromExec(execPath) {
-    return crypto.createHash("sha256").update(execPath || "unknown").digest("hex").slice(0, 12);
-}
-function targetStateDir(userRoot, execPath) {
-    return path.join(userRoot, "targets", targetIdFromExec(execPath));
-}
-function lockPath(stateRoot) {
-    return path.join(stateRoot, LOCK_NAME);
-}
+exports.targetIdFromExec = targetIdFromExec;
+exports.targetStateDir = targetStateDir;
+exports.ownerPortFromExec = ownerPortFromExec;
+exports.ownerToken = ownerToken;
+exports.ownerMatchesLive = ownerMatchesLive;
+exports.writeOwnerLock = writeOwnerLock;
+exports.writeOwnerLockExclusive = writeOwnerLockExclusive;
+exports.readOwnerLockState = readOwnerLockState;
+exports.readOwnerLock = readOwnerLock;
+exports.readOwnerRecords = readOwnerRecords;
+exports.setOwnerRecordTestHook = setOwnerRecordTestHook;
+exports.currentOwner = currentOwner;
+exports.staleOwner = staleOwner;
+exports.staleOwnerRecord = staleOwnerRecord;
+exports.OwnerLeaseError = OwnerLeaseError;
+exports.ownsOwnerLease = ownsOwnerLease;
+const { clearOwnerLock, releaseOwnerLease, acquireOwnerLease, setRaiseHandler } = recovery;
+exports.clearOwnerLock = clearOwnerLock;
+exports.releaseOwnerLease = releaseOwnerLease;
+exports.acquireOwnerLease = acquireOwnerLease;
+const processIdentity = core.processIdentity;
+exports.processIdentity = processIdentity;
 function sockPath(stateRoot) {
     return path.join(stateRoot, SOCK_NAME);
 }
-function processIdentity(pid) {
-    if (!Number.isInteger(pid) || pid <= 0)
-        return null;
-    const listed = spawnSync("ps", ["-p", String(pid), "-o", "pid=,lstart=,comm="], { encoding: "utf8" });
-    if (listed.status !== 0 || !listed.stdout.trim())
-        return null;
-    const line = listed.stdout.trim();
-    const match = line.match(/^(\d+)\s+(.+?)\s+(\S+)$/);
-    if (!match)
-        return null;
-    return { pid: Number(match[1]), startedAt: match[2].trim(), comm: match[3] };
-}
-function ownerMatchesLive(owner, live) {
-    if (!owner || !live)
-        return false;
-    return (owner.pid === live.pid &&
-        owner.startedAt === live.startedAt &&
-        owner.execPath === live.execPath);
-}
-function writeOwnerLock(stateRoot, owner) {
-    fs.mkdirSync(stateRoot, { recursive: true, mode: 0o700 });
-    const file = lockPath(stateRoot);
-    const fd = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o600);
-    try {
-        fs.writeSync(fd, `${JSON.stringify(owner)}\n`);
-    }
-    finally {
-        fs.closeSync(fd);
-    }
-}
-function readOwnerLock(stateRoot) {
-    const file = lockPath(stateRoot);
-    try {
-        const stats = fs.lstatSync(file);
-        if (stats.isSymbolicLink())
-            return null;
-        return JSON.parse(fs.readFileSync(file, "utf8"));
-    }
-    catch {
-        return null;
-    }
-}
-function clearOwnerLock(stateRoot) {
-    const file = lockPath(stateRoot);
-    try {
-        const stats = fs.lstatSync(file);
-        if (stats.isSymbolicLink())
-            return;
-        fs.rmSync(file);
-    }
-    catch {
-        /* ignore */
-    }
-    try {
-        fs.rmSync(sockPath(stateRoot));
-    }
-    catch {
-        /* ignore */
-    }
-}
-function currentOwner(sessionId, execPath) {
-    const live = processIdentity(process.pid);
-    return {
-        pid: process.pid,
-        startedAt: live?.startedAt || "",
-        execPath: execPath || process.execPath,
-        sessionId: sessionId || "",
-        nonce: crypto.randomBytes(16).toString("hex"),
-    };
-}
-function staleOwner(stateRoot) {
-    const owner = readOwnerLock(stateRoot);
-    if (!owner)
-        return true;
-    const live = processIdentity(owner.pid);
-    if (!live)
-        return true;
-    return !ownerMatchesLive(owner, { ...live, execPath: owner.execPath });
-}
-function connectExisting(stateRoot, timeoutMs = 400) {
+function connectToOwner(owner, expectedToken, timeoutMs) {
     return new Promise((resolve) => {
-        const socket = net.connect(sockPath(stateRoot));
+        const socket = net.connect({ host: "127.0.0.1", port: ownerPortFromExec(owner.execPath) });
         let done = false;
+        let response = "";
+        let deadline;
         const finish = (ok) => {
             if (done)
                 return;
             done = true;
+            clearTimeout(deadline);
             socket.destroy();
             resolve(ok);
         };
         socket.setTimeout(timeoutMs);
+        deadline = setTimeout(() => finish(false), timeoutMs);
         socket.once("connect", () => {
             try {
-                socket.write("raise\n");
+                socket.write(`${expectedToken ? `raise ${expectedToken}` : "raise"}\n`);
             }
             catch {
-                /* ignore */
+                finish(false);
             }
-            finish(true);
+        });
+        socket.on("data", (buf) => {
+            response += String(buf);
+            if (Buffer.byteLength(response, "utf8") > 256) {
+                finish(false);
+                return;
+            }
+            if (response.split("\n").some((line) => line.trim() === "ok"))
+                finish(true);
+            else if (response.split("\n").some((line) => line.trim() === "denied"))
+                finish(false);
         });
         socket.once("error", () => finish(false));
         socket.once("timeout", () => finish(false));
     });
+}
+async function connectExisting(stateRoot, timeoutMs = 400, token = "") {
+    if (typeof timeoutMs !== "number") {
+        token = timeoutMs;
+        timeoutMs = 400;
+    }
+    const records = readOwnerRecords(stateRoot).filter(({ state }) => state.kind === "valid");
+    const candidates = token
+        ? records.filter(({ state }) => ownerToken(state.owner) === token)
+        : records;
+    for (const { state } of candidates) {
+        if (await connectToOwner(state.owner, token || ownerToken(state.owner), timeoutMs))
+            return true;
+    }
+    return false;
+}
+async function connectExistingWithRetry(stateRoot, token, options = {}) {
+    const attempts = options.attempts ?? 5;
+    const timeoutMs = options.timeoutMs ?? 400;
+    const delayMs = options.delayMs ?? 100;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+        if (await connectExisting(stateRoot, timeoutMs, token))
+            return true;
+        if (attempt + 1 < attempts && delayMs > 0)
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+    return false;
+}
+function listenForRaise(stateRoot, onRaise, lease) {
+    if (!lease || !ownerToken(lease))
+        throw new OwnerLeaseError("OWNER_INVALID", "raise socket requires an owner lease");
+    return setRaiseHandler(stateRoot, lease, onRaise);
 }
 function singleFlight(holder, start) {
     if (holder.current)
@@ -149,30 +121,33 @@ function singleFlight(holder, start) {
     });
     return holder.current;
 }
-function listenForRaise(stateRoot, onRaise) {
-    try {
-        fs.rmSync(sockPath(stateRoot));
-    }
-    catch {
-        /* ignore */
-    }
-    fs.mkdirSync(stateRoot, { recursive: true, mode: 0o700 });
-    const server = net.createServer((socket) => {
-        socket.on("error", () => {
-            /* client may already be gone; do not crash the main process */
-        });
-        socket.on("data", (buf) => {
-            if (String(buf).includes("raise"))
-                onRaise();
-            try {
-                if (!socket.destroyed)
-                    socket.end("ok\n");
-            }
-            catch {
-                /* EPIPE: peer already closed */
-            }
-        });
-    });
-    server.listen(sockPath(stateRoot));
-    return server;
-}
+if (typeof module !== "undefined")
+    module.exports = {
+        LOCK_NAME,
+        SOCK_NAME,
+        targetIdFromExec,
+        targetStateDir,
+        ownerPortFromExec,
+        sockPath,
+        processIdentity,
+        ownerToken,
+        ownerMatchesLive,
+        writeOwnerLock,
+        writeOwnerLockExclusive,
+        readOwnerLockState,
+        readOwnerLock,
+        readOwnerRecords,
+        setOwnerRecordTestHook,
+        clearOwnerLock,
+        releaseOwnerLease,
+        currentOwner,
+        staleOwner,
+        staleOwnerRecord,
+        OwnerLeaseError,
+        ownsOwnerLease,
+        acquireOwnerLease,
+        connectExisting,
+        connectExistingWithRetry,
+        listenForRaise,
+        singleFlight,
+    };

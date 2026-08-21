@@ -62,19 +62,8 @@ var STRIP_CLONE_ATTRS = [
   "tabindex"
 ];
 
-// src/runtime/incognito-copy.ts
+// src/runtime/incognito-copy-data.ts
 var COPY = {
-  en: {
-    open: "Open incognito window",
-    exit: "Exit incognito window",
-    title: "Incognito window",
-    body: "Same account and settings as usual, without earlier chats. This conversation will not show up in your everyday chat list. Temporary data is removed after a normal exit.",
-    dismiss: "Dismiss incognito banner",
-    errorTitle: "Couldn’t open the incognito window",
-    errorBody: "Try again. If it still fails, quit Codex and open it again.",
-    errorRetry: "Try again",
-    errorClose: "Close"
-  },
   am: {
     open: "የግል መስኮት ክፈት",
     exit: "የግል መስኮትን ውጣ",
@@ -745,6 +734,21 @@ var COPY = {
     errorBody: "Thử lại. Nếu vẫn không được, hãy thoát Codex rồi mở lại.",
     errorRetry: "Thử lại",
     errorClose: "Đóng"
+  }
+};
+
+// src/runtime/incognito-copy.ts
+var CORE_COPY = {
+  en: {
+    open: "Open incognito window",
+    exit: "Exit incognito window",
+    title: "Incognito window",
+    body: "Same account and settings as usual, without earlier chats. This conversation will not show up in your everyday chat list. Temporary data is removed after a normal exit.",
+    dismiss: "Dismiss incognito banner",
+    errorTitle: "Couldn’t open the incognito window",
+    errorBody: "Try again. If it still fails, quit Codex and open it again.",
+    errorRetry: "Try again",
+    errorClose: "Close"
   },
   "zh-CN": {
     open: "打开无痕窗口",
@@ -779,6 +783,10 @@ var COPY = {
     errorRetry: "再試一次",
     errorClose: "關閉"
   }
+};
+var COPY2 = {
+  ...COPY,
+  ...CORE_COPY
 };
 var DEFAULT_BY_LANGUAGE = {
   bg: "bg-BG",
@@ -836,10 +844,10 @@ function resolveLocale(raw) {
   const normalized = raw.trim().replaceAll("_", "-");
   if (!normalized)
     return "en";
-  if (COPY[normalized])
+  if (COPY2[normalized])
     return normalized;
   const lower = normalized.toLowerCase();
-  const exact = Object.keys(COPY).find((key) => key.toLowerCase() === lower);
+  const exact = Object.keys(COPY2).find((key) => key.toLowerCase() === lower);
   if (exact)
     return exact;
   if (lower.startsWith("zh-hant-hk") || lower.startsWith("zh-hk"))
@@ -851,12 +859,12 @@ function resolveLocale(raw) {
   if (lower === "en" || lower.startsWith("en-"))
     return "en";
   const language = lower.split("-")[0] ?? "en";
-  if (COPY[language])
+  if (COPY2[language])
     return language;
-  if (DEFAULT_BY_LANGUAGE[language] && COPY[DEFAULT_BY_LANGUAGE[language]]) {
+  if (DEFAULT_BY_LANGUAGE[language] && COPY2[DEFAULT_BY_LANGUAGE[language]]) {
     return DEFAULT_BY_LANGUAGE[language];
   }
-  const regional = Object.keys(COPY).find((key) => key.toLowerCase().startsWith(`${language}-`));
+  const regional = Object.keys(COPY2).find((key) => key.toLowerCase().startsWith(`${language}-`));
   return regional ?? "en";
 }
 var TIGHT_BODY = {
@@ -869,7 +877,7 @@ function translate(locale, key) {
   const resolved = resolveLocale(locale);
   if (key === "body")
     return TIGHT_BODY[resolved] ?? TIGHT_BODY.en;
-  return COPY[resolved]?.[key] ?? COPY.en[key];
+  return COPY2[resolved]?.[key] ?? COPY2.en[key];
 }
 
 // src/runtime/incognito-icon.ts

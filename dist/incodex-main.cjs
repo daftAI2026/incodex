@@ -97,29 +97,47 @@ function markSessionReady() {
         /* already written */
     }
 }
-function writePid() {
+async function writePid() {
     try {
-        instance.writeOwnerLock(stateRoot(), instance.currentOwner(process.env.INCODEX_SESSION_ID, process.execPath));
+        return await instance.acquireOwnerLease(stateRoot(), instance.currentOwner(process.env.INCODEX_SESSION_ID, process.execPath));
     }
     catch (error) {
-        if (instance.staleOwner(stateRoot())) {
-            instance.clearOwnerLock(stateRoot());
-            instance.writeOwnerLock(stateRoot(), instance.currentOwner(process.env.INCODEX_SESSION_ID, process.execPath));
-            return;
-        }
         logLaunch("lock-refused", { error: String(error) });
+        return null;
     }
 }
-function clearPid() {
-    instance.clearOwnerLock(stateRoot());
+function startupBlocked(error) {
+    error.code = "INCODEX_STARTUP_BLOCKED";
+    return error;
+}
+async function clearPid(lease, server) {
+    if (lease && instance.releaseOwnerLease) {
+        if (!(await instance.releaseOwnerLease(stateRoot(), lease))) {
+            logLaunch("lock-clear-refused", { sessionId: lease.sessionId });
+        }
+        return;
+    }
+    try {
+        if (server?.listening)
+            server.close();
+    }
+    catch {
+        /* Server shutdown is best effort when no managed lease remains. */
+    }
 }
 async function incognitoAlreadyRunning() {
-    const connected = await instance.connectExisting(stateRoot());
-    if (connected)
-        return true;
-    if (instance.staleOwner(stateRoot()))
-        instance.clearOwnerLock(stateRoot());
-    return false;
+    const records = instance.readOwnerRecords(stateRoot());
+    if (records.some(({ state }) => state.kind === "unverifiable")) {
+        throw new Error("owner lease is unverifiable");
+    }
+    const owners = records.filter(({ state }) => state.kind === "valid").map(({ state }) => state.owner);
+    for (const owner of owners) {
+        if (await instance.connectExistingWithRetry(stateRoot(), instance.ownerToken(owner)))
+            return true;
+    }
+    if (owners.length === 0 || owners.every((owner) => instance.staleOwnerRecord(owner)))
+        return false;
+    throw new Error("owner lease is active but its raise socket is unavailable");
 }
 function raisePid(pid) {
     if (!Number.isInteger(pid) || pid <= 0)
@@ -300,7 +318,15 @@ function launchIncognito() {
     return instance.singleFlight(launchHolder, launchIncognitoOnce);
 }
 async function launchIncognitoOnce() {
-    if (await incognitoAlreadyRunning()) {
+    let alreadyRunning;
+    try {
+        alreadyRunning = await incognitoAlreadyRunning();
+    }
+    catch (error) {
+        logLaunch("owner-unavailable", { error: String(error) });
+        return { ok: false, reason: "owner-unavailable" };
+    }
+    if (alreadyRunning) {
         await raiseExistingIncognito();
         return { ok: true, reason: "already-running" };
     }
@@ -486,7 +512,7 @@ function hookWindow(win, source) {
     win.webContents.on("did-finish-load", run);
     run();
 }
-function attachElectron() {
+async function attachElectron() {
     let electron;
     try {
         electron = require("electron");
@@ -507,6 +533,8 @@ function attachElectron() {
         process.env.INCODEX_INCOGNITO = "1";
     }
     const source = injectSource();
+    let ownerLease = null;
+    let raiseServer = null;
     electron.ipcMain.handle("incodex-action", async (event, payload) => {
         const requestId = typeof payload?.requestId === "string" ? payload.requestId : "";
         const gate = authorizeEvent(event);
@@ -529,7 +557,7 @@ function attachElectron() {
                 return ipcGuard.actionResponse(requestId, { ok: false, code: "NOT_INCOGNITO", reason: "not-incognito" });
             }
             burnIncognitoHome();
-            clearPid();
+            await clearPid(ownerLease, raiseServer);
             electron.app.quit();
             return ipcGuard.actionResponse(requestId, { ok: true, code: "OK" });
         }
@@ -568,21 +596,53 @@ function attachElectron() {
             if (mainWindows(electron).some((open) => open !== win && !open.isDestroyed()))
                 return;
             burnIncognitoHome();
-            clearPid();
+            void clearPid(ownerLease, raiseServer);
             electron.app.exit(0);
         });
     });
     if (isIncognito()) {
-        writePid();
-        instance.listenForRaise(stateRoot(), () => raiseOurWindows());
+        ownerLease = await writePid();
+        if (!ownerLease) {
+            try {
+                electron.app.exit(1);
+            }
+            catch {
+                /* Electron may not be ready yet; returning still prevents a second owner. */
+            }
+            throw startupBlocked(new Error("[incodex] owner lease refused"));
+        }
+        try {
+            raiseServer = instance.listenForRaise(stateRoot(), () => raiseOurWindows(), ownerLease);
+            raiseServer.once("error", (error) => {
+                logLaunch("raise-socket-failed", { error: String(error) });
+                void clearPid(ownerLease, raiseServer);
+                try {
+                    electron.app.exit(1);
+                }
+                catch {
+                    /* ignore */
+                }
+            });
+        }
+        catch (error) {
+            logLaunch("raise-socket-failed", { error: String(error) });
+            void clearPid(ownerLease, raiseServer);
+            try {
+                electron.app.exit(1);
+            }
+            catch {
+                /* ignore */
+            }
+            throw startupBlocked(error instanceof Error ? error : new Error(String(error)));
+        }
         electron.app.on("window-all-closed", () => {
             burnIncognitoHome();
-            clearPid();
+            void clearPid(ownerLease, raiseServer);
             electron.app.exit(0);
         });
         electron.app.on("before-quit", () => {
             burnIncognitoHome();
-            clearPid();
+            void clearPid(ownerLease, raiseServer);
         });
     }
     const ready = () => {
@@ -597,9 +657,9 @@ function attachElectron() {
     else
         void electron.app.whenReady().then(ready);
 }
-try {
-    attachElectron();
-}
-catch (error) {
+const startupGate = attachElectron();
+if (typeof module !== "undefined")
+    module.exports = { startupGate };
+startupGate.catch((error) => {
     console.error("[incodex] main attach failed", error);
-}
+});

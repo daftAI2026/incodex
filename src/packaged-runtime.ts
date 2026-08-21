@@ -23,6 +23,10 @@ import bundledSafeHome from "../dist/incodex-safe-home.cjs" with { type: "file" 
 // @ts-expect-error
 import bundledIpcGuard from "../dist/incodex-ipc-guard.cjs" with { type: "file" };
 // @ts-expect-error
+import bundledOwnerCore from "../dist/incodex-owner-core.cjs" with { type: "file" };
+// @ts-expect-error
+import bundledOwnerRecovery from "../dist/incodex-owner-recovery.cjs" with { type: "file" };
+// @ts-expect-error
 import bundledInstance from "../dist/incodex-instance.cjs" with { type: "file" };
 // @ts-expect-error
 import bundledRuntimeLoad from "../dist/incodex-runtime-load.cjs" with { type: "file" };
@@ -37,6 +41,8 @@ const BUNDLED_FILES: Record<string, string> = {
   "incodex-preload.cjs": bundledPreload,
   "incodex-safe-home.cjs": bundledSafeHome,
   "incodex-ipc-guard.cjs": bundledIpcGuard,
+  "incodex-owner-core.cjs": bundledOwnerCore,
+  "incodex-owner-recovery.cjs": bundledOwnerRecovery,
   "incodex-instance.cjs": bundledInstance,
   "incodex-runtime-load.cjs": bundledRuntimeLoad,
   "incodex-window-kind.cjs": bundledWindowKind,
