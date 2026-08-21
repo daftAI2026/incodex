@@ -445,6 +445,53 @@ mod tests {
     }
 
     #[test]
+    fn cdp_http_has_an_overall_deadline_for_a_slow_local_endpoint() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request);
+            let response = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n[]";
+            for byte in response {
+                stream.write_all(&[*byte]).unwrap();
+                thread::sleep(Duration::from_millis(100));
+            }
+        });
+
+        let started = Instant::now();
+        let result = http_get_json_host("127.0.0.1", port, "/json/list");
+        assert!(result.is_err(), "a slow endpoint must not complete normally");
+        assert!(
+            started.elapsed() < Duration::from_millis(2_500),
+            "slow CDP endpoint exceeded its bounded operation deadline"
+        );
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn cdp_websocket_handshake_has_a_finite_timeout() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            let (_stream, _) = listener.accept().unwrap();
+            thread::sleep(Duration::from_millis(2_500));
+        });
+
+        let started = Instant::now();
+        let result = connect_cdp_websocket(
+            &format!("ws://127.0.0.1:{port}/devtools/page/test"),
+            port,
+        );
+        assert!(result.is_err());
+        assert!(
+            started.elapsed() < Duration::from_millis(2_500),
+            "CDP WebSocket handshake was not bounded"
+        );
+        server.join().unwrap();
+    }
+
+    #[test]
     fn cdp_websocket_is_confined_to_the_allocated_loopback_port() {
         assert!(validate_cdp_websocket_url("ws://127.0.0.1:43123/devtools/page/a", 43123).is_ok());
         assert!(validate_cdp_websocket_url("ws://[::1]:43123/devtools/page/a", 43123).is_ok());
