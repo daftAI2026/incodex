@@ -1,4 +1,9 @@
 use std::fs;
+use std::path::{Path, PathBuf};
+
+use incodex_asar::{pack_dir, patch_asar};
+use incodex_macos::ditto;
+use incodex_transaction::Engine;
 
 #[path = "support/readonly.rs"]
 mod readonly_support;
@@ -20,6 +25,40 @@ fn assert_unknown_finding(report: &serde_json::Value, check: &str, code: &str) {
         "{check} is missing {code}: {}",
         report["checks"][check]["findings"]
     );
+}
+
+fn committed_install(home: &Path) -> (PathBuf, PathBuf, String) {
+    let root = home.join(".incodex");
+    let app = home.join("ChatGPT.app");
+    let source = home.join("asar-source");
+    let candidate = home.join("candidate.app");
+    let asar = app.join("Contents/Resources/app.asar");
+    fs::create_dir_all(&source).unwrap();
+    fs::create_dir_all(asar.parent().unwrap()).unwrap();
+    fs::write(source.join("index.js"), b"official\n").unwrap();
+    fs::write(source.join("package.json"), b"{\"main\":\"index.js\"}\n").unwrap();
+    pack_dir(&source, &asar).unwrap();
+
+    let mut transaction = Engine::begin(&root, &app, "test").unwrap();
+    let install_id = transaction.install_id().to_string();
+    let original = root
+        .join("transactions")
+        .join(&install_id)
+        .join("original/ChatGPT.app");
+    fs::create_dir_all(original.parent().unwrap()).unwrap();
+    ditto(&app, &original).unwrap();
+    transaction.mark_backup_committed().unwrap();
+    ditto(&app, &candidate).unwrap();
+    patch_asar(
+        &candidate.join("Contents/Resources/app.asar"),
+        "module.exports = {};\n",
+        Some(&install_id),
+    )
+    .unwrap();
+    transaction.place_staging(&candidate).unwrap();
+    transaction.swap().unwrap();
+    transaction.commit().unwrap();
+    (root, app, install_id)
 }
 
 #[test]
@@ -193,4 +232,41 @@ fn doctor_json_rejects_symlinked_target_and_native_journal_paths() {
         fs::read_to_string(outside_transaction.join("journal.json")).unwrap(),
         "{}"
     );
+}
+
+#[test]
+fn doctor_json_does_not_verify_backup_through_symlinked_native_journal_paths() {
+    for path_kind in ["journal", "transaction"] {
+        let home = isolated_home();
+        let (root, app, install_id) = committed_install(&home);
+        let transaction = root.join("transactions").join(&install_id);
+        let outside = home.join(format!("outside-{path_kind}"));
+        if path_kind == "transaction" {
+            fs::rename(&transaction, &outside).unwrap();
+            std::os::unix::fs::symlink(&outside, &transaction).unwrap();
+        } else {
+            let journal = transaction.join("journal.json");
+            fs::rename(&journal, &outside).unwrap();
+            std::os::unix::fs::symlink(&outside, journal).unwrap();
+        }
+
+        let (_status, stdout, stderr) =
+            run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
+        assert_eq!(stderr, "", "{path_kind}");
+        let report = parse_json(&stdout);
+        assert_eq!(report["backup"]["status"], "unknown", "{path_kind}");
+        assert_ne!(report["backup"]["complete"], true, "{path_kind}");
+        assert_eq!(
+            report["checks"]["backup"]["status"], "unknown",
+            "{path_kind}"
+        );
+        assert!(
+            report["checks"]["backup"]["findings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|finding| finding["code"] == "backup.symlink"),
+            "{path_kind}"
+        );
+    }
 }
