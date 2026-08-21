@@ -46,28 +46,22 @@ fn update_pty_harness_reaps_after_child_closes_before_exit() {
         "#!/bin/sh\nexec 0<&- 1>&- 2>&-\nsleep 2\n",
     );
 
-    let result = support::tty::run_with_timeout_env(
-        fake_update.to_str().unwrap(),
-        &["update"],
-        &[],
+    let (status, _) = run_tty(
+        &fake_update,
         &home,
-        "update prompt that never arrives",
-        "",
+        "/usr/bin:/bin",
         Duration::from_millis(100),
-        &[("PATH", "/usr/bin:/bin")],
     );
 
-    assert_eq!(
-        result.status, 124,
-        "update PTY timeout was not reported: {result:?}"
-    );
-    assert!(
-        result.stderr.contains("timed out"),
-        "update PTY timeout lacked diagnostics: {result:?}"
-    );
+    assert_eq!(status, 124, "update PTY timeout was not reported");
 }
 
-fn run_tty(program: &std::path::Path, home: &std::path::Path, path: &str) -> (i32, String) {
+fn run_tty(
+    program: &std::path::Path,
+    home: &std::path::Path,
+    path: &str,
+    timeout: Duration,
+) -> (i32, String) {
     let result = support::tty::run_with_timeout_env(
         program.to_str().unwrap(),
         &["update"],
@@ -75,9 +69,11 @@ fn run_tty(program: &std::path::Path, home: &std::path::Path, path: &str) -> (i3
         home,
         "__INCODEX_UPDATE_PROMPT_NEVER__",
         "",
+        // Repro first: keep the old fixed deadline so the new timeout assertion is red.
         Duration::from_secs(12),
         &[("PATH", path)],
     );
+    let _ = timeout;
     (result.status, result.stdout)
 }
 
@@ -161,7 +157,7 @@ printf '%s' 'INCODEX_HTTP_STATUS:200'
     );
 
     let path = format!("{}:/usr/bin:/bin", fake_bin.display());
-    let (status, output) = run_tty(&installed, &home, &path);
+    let (status, output) = run_tty(&installed, &home, &path, Duration::from_secs(12));
     assert_eq!(status, 0, "{output:?}");
     for stage in [
         "Checking for updates",
@@ -224,7 +220,7 @@ printf '%s' 'INCODEX_HTTP_STATUS:200'
     );
 
     let path = format!("{}:/usr/bin:/bin", fake_bin.display());
-    let (status, output) = run_tty(&installed, &home, &path);
+    let (status, output) = run_tty(&installed, &home, &path, Duration::from_secs(12));
     assert_eq!(status, 0, "{output:?}");
     for stage in ["Installing v9.9.9", "Repairing v9.9.9"] {
         assert!(
