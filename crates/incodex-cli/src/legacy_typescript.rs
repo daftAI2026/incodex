@@ -288,6 +288,17 @@ pub fn write_legacy_journal(root: &Path, journal: &TransactionJournal) -> Result
         "{}\n",
         serde_json::to_string_pretty(journal).map_err(|error| error.to_string())?
     );
+    match fs::symlink_metadata(&temporary) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err("legacy journal temporary is a symlink".into());
+        }
+        Ok(metadata) if metadata.file_type().is_file() => {
+            fs::remove_file(&temporary).map_err(|error| error.to_string())?;
+        }
+        Ok(_) => return Err("legacy journal temporary is not a regular file".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.to_string()),
+    }
     let mut options = fs::OpenOptions::new();
     options
         .write(true)
@@ -304,7 +315,19 @@ pub fn write_legacy_journal(root: &Path, journal: &TransactionJournal) -> Result
         libc::fchmod(file.as_raw_fd(), 0o600);
     }
     drop(file);
-    fs::rename(temporary, path).map_err(|error| error.to_string())
+    fs::rename(temporary, &path).map_err(|error| error.to_string())?;
+    let parent = path
+        .parent()
+        .ok_or("legacy journal has no parent directory")?;
+    let mut directory = fs::OpenOptions::new();
+    directory
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW);
+    directory
+        .open(parent)
+        .map_err(|error| error.to_string())?
+        .sync_all()
+        .map_err(|error| error.to_string())
 }
 
 fn enumerate_target_journals(
