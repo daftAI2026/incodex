@@ -272,14 +272,30 @@ fn send_cdp_with_deadline<S: Read + Write>(
     deadline: Instant,
 ) -> Result<Value, String> {
     let body = json!({ "id": id, "method": method, "params": params });
+    let message = Message::Text(body.to_string());
+
+    // 先把命令写入 WebSocket 缓冲区；即使底层只写了一部分，也只能重试 flush。
+    // 再次 write/send 会重新排队同一命令，导致 CDP 收到重复请求。
+    match socket.write(message) {
+        Ok(()) => {}
+        Err(tungstenite::Error::Io(error)) if error.kind() == ErrorKind::WouldBlock => {}
+        Err(tungstenite::Error::WriteBufferFull(_)) => {
+            return Err(format!("cdp {method} write buffer full"));
+        }
+        Err(error) => return Err(error.to_string()),
+    }
+
     loop {
-        match socket.send(Message::Text(body.to_string())) {
+        if Instant::now() >= deadline {
+            return Err(format!("cdp {method} timed out"));
+        }
+        match socket.flush() {
             Ok(()) => break,
             Err(tungstenite::Error::Io(error)) if error.kind() == ErrorKind::WouldBlock => {
-                if Instant::now() >= deadline {
-                    return Err(format!("cdp {method} timed out"));
-                }
                 thread::sleep(Duration::from_millis(5));
+            }
+            Err(tungstenite::Error::WriteBufferFull(_)) => {
+                return Err(format!("cdp {method} write buffer full"));
             }
             Err(error) => return Err(error.to_string()),
         }
