@@ -93,6 +93,7 @@ exit 0
 "#,
             identity_display = match identity {
                 "other" => "printf '%s\\n' 'Identifier=com.example.other' 'TeamIdentifier=OTHERTEAM'",
+                "valid-other" => "printf '%s\\n' 'Identifier=com.example.other' 'TeamIdentifier=OTHERTEAM' 'Authority=Other Signer'",
                 "unknown" => "printf '%s\\n' 'Identifier=com.example.unknown'",
                 _ => unreachable!(),
             },
@@ -151,7 +152,7 @@ fn doctor_does_not_report_other_or_unknown_nested_identity_as_clean() {
 #[test]
 fn doctor_generic_other_component_does_not_hide_outer_acceptance_failure() {
     let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
-    let fixture = Fixture::new_with_invalid_outer("other");
+    let fixture = Fixture::new_with_invalid_outer("valid-other");
     let original_path = std::env::var_os("PATH");
     let _path_guard = PathGuard(original_path);
     std::env::set_var("PATH", fixture.path());
