@@ -1,4 +1,6 @@
 use std::fs;
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -6,6 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use incodex_asar::pack_dir;
 use incodex_macos::ditto;
 use incodex_transaction::Engine;
+use sha2::{Digest, Sha256};
 
 #[path = "support/native_tty.rs"]
 mod native_tty;
@@ -163,6 +166,69 @@ fn patchable_app(home: &Path) -> PathBuf {
     app
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct RuntimeTreeEntry {
+    relative: PathBuf,
+    kind: u8,
+    mode: u32,
+    size: u64,
+    content_hash: Option<[u8; 32]>,
+    mtime: (i64, i64),
+}
+
+fn runtime_tree(root: &Path) -> Vec<RuntimeTreeEntry> {
+    fn collect(root: &Path, current: &Path, entries: &mut Vec<RuntimeTreeEntry>) {
+        let metadata = fs::symlink_metadata(current).unwrap();
+        let file_type = metadata.file_type();
+        let relative = if current == root {
+            PathBuf::from(".")
+        } else {
+            current
+                .strip_prefix(root)
+                .unwrap_or_else(|_| panic!("runtime path escaped root: {}", current.display()))
+                .to_path_buf()
+        };
+        let (kind, size, content_hash) = if file_type.is_dir() {
+            (b'D', metadata.len(), None)
+        } else if file_type.is_symlink() {
+            let target = fs::read_link(current).unwrap();
+            (
+                b'L',
+                target.as_os_str().as_bytes().len() as u64,
+                Some(Sha256::digest(target.as_os_str().as_bytes()).into()),
+            )
+        } else if file_type.is_file() {
+            let body = fs::read(current).unwrap();
+            (b'F', metadata.len(), Some(Sha256::digest(body).into()))
+        } else {
+            (b'O', metadata.len(), None)
+        };
+        entries.push(RuntimeTreeEntry {
+            relative,
+            kind,
+            mode: metadata.mode() & 0o7777,
+            size,
+            content_hash,
+            mtime: (metadata.mtime(), metadata.mtime_nsec()),
+        });
+        if file_type.is_dir() {
+            let mut children = fs::read_dir(current)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .collect::<Vec<_>>();
+            children.sort();
+            for child in children {
+                collect(root, &child, entries);
+            }
+        }
+    }
+
+    let mut entries = Vec::new();
+    collect(root, root, &mut entries);
+    entries.sort_by(|left, right| left.relative.cmp(&right.relative));
+    entries
+}
+
 #[test]
 fn native_non_tty_mutations_print_auditable_progress_stages() {
     let home = scratch("mutation-progress-non-tty");
@@ -235,6 +301,7 @@ fn native_runtime_dry_run_does_not_create_or_modify_runtime_state() {
     fs::create_dir_all(&runtime).unwrap();
     let sentinel = runtime.join("sentinel");
     fs::write(&sentinel, "keep\n").unwrap();
+    let before = runtime_tree(&runtime);
 
     let dry_run = run_rust(&["runtime", "--dry-run"], &home);
     assert_eq!(dry_run.status, 0, "{dry_run:?}");
@@ -243,6 +310,5 @@ fn native_runtime_dry_run_does_not_create_or_modify_runtime_state() {
         dry_run.stdout,
         "would update ~/.incodex/runtime/ without modifying Codex\n"
     );
-    assert_eq!(fs::read(&sentinel).unwrap(), b"keep\n");
-    assert!(!runtime.join("current.json").exists());
+    assert_eq!(runtime_tree(&runtime), before);
 }
