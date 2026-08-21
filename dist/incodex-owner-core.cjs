@@ -128,6 +128,33 @@ function writeAtomicRecord(file, value) {
 function writeOwnerLock(stateRoot, owner) {
     return writeAtomicRecord(lockPath(stateRoot), owner);
 }
+function writeOwnerLockExclusive(stateRoot, owner) {
+    const file = lockPath(stateRoot);
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    const temporary = path.join(path.dirname(file), `.${path.basename(file)}.tmp.${process.pid}.${Date.now()}.${crypto.randomBytes(8).toString("hex")}`);
+    const fd = fs.openSync(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+    try {
+        const contents = Buffer.from(`${JSON.stringify(owner)}\n`);
+        fs.writeSync(fd, contents, 0, contents.length, 0);
+        try {
+            fs.fsyncSync(fd);
+        }
+        catch { /* The complete temp record is still valid. */ }
+    }
+    finally {
+        fs.closeSync(fd);
+    }
+    try {
+        // link(2) is atomic no-replace publication on the same filesystem.
+        fs.linkSync(temporary, file);
+    }
+    finally {
+        try {
+            fs.rmSync(temporary, { force: true });
+        }
+        catch { /* Best effort temp cleanup. */ }
+    }
+}
 function readOwnerLockStateAt(file) {
     let stats;
     try {
@@ -234,6 +261,7 @@ module.exports = {
     pidAlive,
     writeAtomicRecord,
     writeOwnerLock,
+    writeOwnerLockExclusive,
     readOwnerLockStateAt,
     readOwnerLockState,
     readOwnerLock,

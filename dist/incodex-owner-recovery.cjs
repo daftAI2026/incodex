@@ -5,7 +5,7 @@ const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
 const core = require("./incodex-owner-core.cjs");
-const { LOCK_NAME, SOCK_NAME, ownerPortFromExec, ownerToken, writeOwnerLock, readOwnerLockState, readOwnerLock, sameOwnerToken, staleOwnerRecord, OwnerLeaseError, lockPath, } = core;
+const { LOCK_NAME, SOCK_NAME, ownerPortFromExec, ownerToken, writeOwnerLockExclusive, readOwnerLockState, readOwnerLock, sameOwnerToken, staleOwnerRecord, ownerLockMetadata, sameOwnerLockMetadata, OwnerLeaseError, lockPath, } = core;
 const activeLeases = new Map();
 const PROTOCOL_MAX_BYTES = 256;
 const PROTOCOL_IDLE_TIMEOUT_MS = 1_000;
@@ -106,6 +106,28 @@ async function validateDiagnosticBeforePublication(stateRoot, owner, beforeBind 
         throw new OwnerLeaseError("OWNER_LEGACY_OWNER", "live legacy owner record has no kernel handshake; refusing takeover", state.owner);
     }
 }
+function prepareDiagnosticForExclusivePublication(stateRoot) {
+    const state = readOwnerLockState(stateRoot);
+    if (state.kind === "missing")
+        return;
+    if (state.kind === "valid" && !staleOwnerRecord(state.owner)) {
+        throw new OwnerLeaseError("OWNER_LEGACY_OWNER", "live owner record won diagnostic publication", state.owner);
+    }
+    if (state.kind === "unverifiable") {
+        throw new OwnerLeaseError("OWNER_UNVERIFIABLE", "owner record cannot be verified for replacement", state.owner);
+    }
+    const expected = ownerLockMetadata(lockPath(stateRoot));
+    const latest = readOwnerLockState(stateRoot);
+    if (latest.kind !== state.kind || !sameOwnerLockMetadata(expected, ownerLockMetadata(lockPath(stateRoot)))) {
+        throw new OwnerLeaseError("OWNER_RECORD_RACE", "owner record changed during publication");
+    }
+    try {
+        fs.rmSync(lockPath(stateRoot), { force: true });
+    }
+    catch {
+        throw new OwnerLeaseError("OWNER_RECORD_RACE", "owner record could not be removed for publication");
+    }
+}
 function removeOwnedDiagnosticRecord(stateRoot, expectedOwner) {
     if (!sameOwnerToken(readOwnerLock(stateRoot), expectedOwner))
         return false;
@@ -156,17 +178,24 @@ function probeOwnerPort(owner) {
         const socket = net.connect({ host: "127.0.0.1", port: ownerPortFromExec(owner.execPath) });
         let response = "";
         let done = false;
+        let deadline;
         const finish = (result) => {
             if (done)
                 return;
             done = true;
+            clearTimeout(deadline);
             socket.destroy();
             resolve(result);
         };
         socket.setTimeout(250);
+        deadline = setTimeout(() => finish({ kind: "unavailable" }), 250);
         socket.on("connect", () => socket.write("probe\n"));
         socket.on("data", (chunk) => {
             response += String(chunk);
+            if (Buffer.byteLength(response, "utf8") > 256) {
+                finish({ kind: "unavailable" });
+                return;
+            }
             if (response.includes("\n")) {
                 const line = response.trim();
                 if (line === "owner-ready")
@@ -206,7 +235,16 @@ async function acquireOwnerLease(stateRoot, owner) {
     }
     try {
         await validateDiagnosticBeforePublication(stateRoot, owner);
-        writeOwnerLock(stateRoot, owner);
+        prepareDiagnosticForExclusivePublication(stateRoot);
+        try {
+            writeOwnerLockExclusive(stateRoot, owner);
+        }
+        catch (error) {
+            if (error?.code === "EEXIST") {
+                throw new OwnerLeaseError("OWNER_RECORD_RACE", "another runtime published owner metadata first");
+            }
+            throw error;
+        }
         return owner;
     }
     catch (error) {
