@@ -43,11 +43,24 @@ impl Fixture {
         fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
         fs::create_dir_all(&fake_bin).unwrap();
         fs::write(app.join("Contents/MacOS/ChatGPT"), "binary\n").unwrap();
+        fs::write(
+            app.join("Contents/Info.plist"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.openai.codex</string>
+<key>CFBundleShortVersionString</key><string>1.0.0</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleExecutable</key><string>ChatGPT</string>
+</dict></plist>
+"#,
+        )
+        .unwrap();
         fs::write(root.join("host-entitlements.plist"), entitlements).unwrap();
         let capture = root.join("captured-entitlements.plist");
         let display_status = if display_succeeds { "0" } else { "1" };
         let script = format!(
-            "#!/bin/sh\nif [ \"$1\" = \"--display\" ] && [ \"$2\" = \"--entitlements\" ]; then\n  cat \"$INCODEX_CODESIGN_ENTITLEMENTS\"\n  exit {display_status}\nfi\nprevious=\"\"\nfor arg in \"$@\"; do\n  if [ \"$previous\" = \"--entitlements\" ] && [ \"$arg\" != \":-\" ]; then\n    cat \"$arg\" > \"$INCODEX_CODESIGN_CAPTURE\"\n  fi\n  previous=\"$arg\"\ndone\nexit 0\n"
+            "#!/bin/sh\nif [ \"$1\" = \"--display\" ] && [ \"$2\" = \"--entitlements\" ]; then\n  cat \"$INCODEX_CODESIGN_ENTITLEMENTS\"\n  exit {display_status}\nfi\nif [ \"$1\" = \"--display\" ] && [ \"$2\" = \"--verbose=4\" ]; then\n  printf '%s\\n' 'Identifier=com.example.fixture' 'Signature=adhoc'\n  exit 0\nfi\nprevious=\"\"\nfor arg in \"$@\"; do\n  if [ \"$previous\" = \"--entitlements\" ] && [ \"$arg\" != \":-\" ]; then\n    cat \"$arg\" > \"$INCODEX_CODESIGN_CAPTURE\"\n  fi\n  previous=\"$arg\"\ndone\nexit 0\n"
         );
         let codesign = fake_bin.join("codesign");
         fs::write(&codesign, script).unwrap();
