@@ -7,6 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use incodex_macos::{
     inspect_signing_inventory, sign_app, verify_app, verify_original_vendor_bundle,
+    verify_patched_adhoc_bundle_deep_strict,
 };
 
 static PATH_LOCK: Mutex<()> = Mutex::new(());
@@ -29,6 +30,13 @@ enum NestedIdentity {
     Other,
 }
 
+#[derive(Clone, Copy)]
+enum OuterIdentity {
+    Adhoc,
+    Vendor(&'static str),
+    ThirdParty,
+}
+
 struct Fixture {
     root: PathBuf,
     app: PathBuf,
@@ -40,8 +48,7 @@ impl Fixture {
     fn new(
         nested_identity: NestedIdentity,
         deep_nested: bool,
-        outer_vendor: bool,
-        outer_identifier: &'static str,
+        outer_identity: OuterIdentity,
         malformed_entitlements: bool,
     ) -> Self {
         let root = std::env::temp_dir().join(format!(
@@ -96,12 +103,14 @@ impl Fixture {
                 "printf '%s\\n' 'Identifier=com.example.other' 'TeamIdentifier=OTHERTEAM' 'Authority=Other Signer'"
             }
         };
-        let outer_display = if outer_vendor {
-            format!(
-                "printf '%s\\n' 'Identifier={outer_identifier}' 'TeamIdentifier=2DC432GLL2' 'Authority=Developer ID Application: fixture'"
-            )
-        } else {
-            "printf '%s\\n' 'Identifier=com.example.fixture' 'Signature=adhoc'".to_string()
+        let outer_display = match outer_identity {
+            OuterIdentity::Vendor(identifier) => format!(
+                "printf '%s\\n' 'Identifier={identifier}' 'TeamIdentifier=2DC432GLL2' 'Authority=Developer ID Application: fixture'"
+            ),
+            OuterIdentity::ThirdParty => "printf '%s\\n' 'Identifier=com.example.third-party' 'TeamIdentifier=THIRDPARTY' 'Authority=Developer ID Application: third-party fixture'".to_string(),
+            OuterIdentity::Adhoc => {
+                "printf '%s\\n' 'Identifier=com.example.fixture' 'Signature=adhoc'".to_string()
+            }
         };
         let script = format!(
             r#"#!/bin/sh
@@ -183,7 +192,12 @@ impl Drop for Fixture {
 #[test]
 fn generic_verify_rejects_a_deep_strict_bundle_with_other_nested_identity() {
     let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
-    let fixture = Fixture::new(NestedIdentity::Other, false, true, "com.expected.bundle", false);
+    let fixture = Fixture::new(
+        NestedIdentity::Other,
+        false,
+        OuterIdentity::Vendor("com.expected.bundle"),
+        false,
+    );
     let _path = fixture.configure_environment();
 
     assert!(!verify_app(&fixture.app));
@@ -192,7 +206,7 @@ fn generic_verify_rejects_a_deep_strict_bundle_with_other_nested_identity() {
 #[test]
 fn generic_verify_rejects_deep_strict_invalid_outer_without_nested_components() {
     let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
-    let fixture = Fixture::new(NestedIdentity::Vendor, false, false, "unused", false);
+    let fixture = Fixture::new(NestedIdentity::Vendor, false, OuterIdentity::Adhoc, false);
     let _path = fixture.configure_environment();
     fs::remove_dir_all(fixture.app.join("Contents/Frameworks/NestedVendor.xpc")).unwrap();
     std::env::set_var("INCODEX_CODESIGN_VERIFY_FAILURE", "1");
@@ -203,13 +217,29 @@ fn generic_verify_rejects_deep_strict_invalid_outer_without_nested_components() 
 }
 
 #[test]
+fn generic_verify_accepts_a_verified_third_party_outer_with_identity_evidence() {
+    let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let fixture = Fixture::new(
+        NestedIdentity::Vendor,
+        false,
+        OuterIdentity::ThirdParty,
+        false,
+    );
+    let _path = fixture.configure_environment();
+
+    assert!(verify_app(&fixture.app));
+    assert!(verify_patched_adhoc_bundle_deep_strict(&fixture.app, None).is_err());
+    assert!(verify_original_vendor_bundle(&fixture.app, Some("com.expected.bundle"), None, None)
+        .is_err());
+}
+
+#[test]
 fn official_vendor_acceptance_requires_outer_signature_identifier() {
     let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let fixture = Fixture::new(
         NestedIdentity::Vendor,
         false,
-        true,
-        "com.actual.bundle",
+        OuterIdentity::Vendor("com.actual.bundle"),
         false,
     );
     let _path = fixture.configure_environment();
@@ -226,7 +256,7 @@ fn official_vendor_acceptance_requires_outer_signature_identifier() {
 #[test]
 fn inventory_recurses_into_signed_bundle_components() {
     let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
-    let fixture = Fixture::new(NestedIdentity::Vendor, true, false, "unused", false);
+    let fixture = Fixture::new(NestedIdentity::Vendor, true, OuterIdentity::Adhoc, false);
     let _path = fixture.configure_environment();
 
     let inventory = inspect_signing_inventory(&fixture.app).unwrap();
@@ -242,8 +272,7 @@ fn nested_vendor_without_authority_is_rejected_before_signing() {
     let fixture = Fixture::new(
         NestedIdentity::VendorWithoutAuthority,
         false,
-        false,
-        "unused",
+        OuterIdentity::Adhoc,
         false,
     );
     let _path = fixture.configure_environment();
@@ -256,7 +285,7 @@ fn nested_vendor_without_authority_is_rejected_before_signing() {
 #[test]
 fn successful_nonempty_malformed_entitlements_fail_closed() {
     let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
-    let fixture = Fixture::new(NestedIdentity::Vendor, false, false, "unused", true);
+    let fixture = Fixture::new(NestedIdentity::Vendor, false, OuterIdentity::Adhoc, true);
     let _path = fixture.configure_environment();
 
     let result = sign_app(&fixture.app);
