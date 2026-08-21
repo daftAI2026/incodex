@@ -7,6 +7,7 @@ pub mod legacy_proof;
 pub mod legacy_typescript;
 pub mod lifecycle;
 pub mod menu;
+pub mod legacy_migration;
 pub mod open;
 pub mod parse;
 pub mod spinner;
