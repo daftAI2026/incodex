@@ -264,7 +264,16 @@ fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<Comma
         }
     }
     let expected_plist = read_plist_info(app);
-    let mut tx = Engine::begin(root, app, "install")?;
+    let mut tx = begin_verified_transaction(root, app, |locked_app| {
+        let locked_asar = locked_app.join(ASAR_REL);
+        if inspect_existing_install(locked_app, root, &locked_asar)?.is_some() {
+            return Err(
+                "live app changed into an existing Incodex installation after preflight; refusing to snapshot it"
+                    .into(),
+            );
+        }
+        ensure_official_target_is_verified(locked_app)
+    })?;
     let install_id = tx.install_id().to_string();
     let original = root
         .join("transactions")
@@ -387,6 +396,26 @@ fn current_install_id(app: &Path, root: &Path, archive: &Archive) -> Option<Stri
         return None;
     }
     installed_install_id(app, root, archive)
+}
+
+fn begin_verified_transaction<F>(
+    root: &Path,
+    app: &Path,
+    validate_locked_target: F,
+) -> Result<Engine, String>
+where
+    F: FnOnce(&Path) -> Result<(), String>,
+{
+    let mut tx = Engine::begin(root, app, "install")?;
+    if let Err(error) = validate_locked_target(tx.target_path()) {
+        return match tx.rollback(&error) {
+            Ok(()) => Err(error),
+            Err(rollback) => Err(format!(
+                "{error}; failed to roll back rejected transaction: {rollback}"
+            )),
+        };
+    }
+    Ok(tx)
 }
 
 fn inspect_existing_install(
@@ -577,8 +606,10 @@ mod tests {
         let app = sandbox.join("ChatGPT.app");
         fs::create_dir_all(&app).unwrap();
         fs::write(app.join("marker"), "replacement\n").unwrap();
+        let canonical = fs::canonicalize(&app).unwrap();
 
-        let result = begin_verified_transaction(&root, &app, |_| {
+        let result = begin_verified_transaction(&root, &app, |locked_target| {
+            assert_eq!(locked_target, canonical);
             Err("locked target validation failed".to_string())
         });
 

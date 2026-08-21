@@ -111,6 +111,10 @@ impl Engine {
         &self.journal
     }
 
+    pub fn target_path(&self) -> &Path {
+        &self.target.real_path
+    }
+
     pub fn staging_app(&self) -> PathBuf {
         tx_paths(&self.root, self.install_id()).staged
     }
