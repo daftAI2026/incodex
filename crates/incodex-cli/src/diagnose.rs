@@ -13,7 +13,7 @@ use incodex_macos::{
     diagnose_spctl, has_hardened_runtime, inspect_signing_inventory, plan_adhoc_entitlements,
     read_architecture, read_asar_integrity, read_plist_info, validate_signing_inventory,
     validate_generic_signing_inventory, validate_official_signing_inventory, verify_app,
-    SignatureKind, VENDOR_TEAM_IDENTIFIER,
+    SignatureKind, SigningInventory, VENDOR_TEAM_IDENTIFIER,
 };
 use incodex_transaction::{journal_v2, load_journal, validate_backup_snapshot};
 
@@ -344,6 +344,20 @@ fn verify_external_runtime(root: &Path, current_path: &Path) -> Result<(String, 
     Ok((version, release))
 }
 
+fn validate_doctor_signing_inventory(
+    inventory: &SigningInventory,
+    patched: bool,
+    official_target: bool,
+) -> Result<(), String> {
+    if patched {
+        validate_signing_inventory(inventory)
+    } else if official_target {
+        validate_official_signing_inventory(inventory, None)
+    } else {
+        validate_generic_signing_inventory(inventory)
+    }
+}
+
 fn inspect_signing(
     spctl: Option<&serde_json::Value>,
     codesign_ok: bool,
@@ -414,13 +428,7 @@ fn inspect_signing(
             Some(app_path),
         ));
     }
-    let acceptance = if patched {
-        validate_signing_inventory(&inventory)
-    } else if official_target {
-        validate_official_signing_inventory(&inventory, None)
-    } else {
-        validate_generic_signing_inventory(&inventory)
-    };
+    let acceptance = validate_doctor_signing_inventory(&inventory, patched, official_target);
     if let Err(error) = &acceptance {
         let mut emitted_component_finding = false;
         for component in &inventory.nested {
@@ -705,4 +713,38 @@ fn hash_file(path: &Path) -> Option<String> {
             .map(|byte| format!("{byte:02x}"))
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use incodex_macos::{EntitlementSnapshot, SignedComponent};
+    use std::collections::BTreeSet;
+
+    fn vendor_inventory(identifier: &str) -> SigningInventory {
+        SigningInventory {
+            outer: SignedComponent {
+                path: PathBuf::from("ChatGPT.app"),
+                identifier: Some(identifier.to_string()),
+                team_identifier: Some(VENDOR_TEAM_IDENTIFIER.to_string()),
+                authorities: vec!["Developer ID Application: fixture".to_string()],
+                kind: SignatureKind::Vendor,
+                verified: true,
+            },
+            nested: Vec::new(),
+            entitlements: EntitlementSnapshot {
+                xml: String::new(),
+                keys: BTreeSet::new(),
+            },
+            deep_strict: true,
+        }
+    }
+
+    #[test]
+    fn doctor_selector_uses_official_policy_for_official_target() {
+        let inventory = vendor_inventory("com.attacker.replaced");
+
+        assert!(validate_doctor_signing_inventory(&inventory, false, true).is_err());
+        assert!(validate_doctor_signing_inventory(&inventory, false, false).is_ok());
+    }
 }
