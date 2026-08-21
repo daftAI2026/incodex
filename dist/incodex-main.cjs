@@ -660,7 +660,9 @@ async function attachElectron() {
         void electron.app.whenReady().then(ready);
 }
 try {
-    void attachElectron();
+    void attachElectron().catch((error) => {
+        console.error("[incodex] main attach failed", error);
+    });
 }
 catch (error) {
     console.error("[incodex] main attach failed", error);
