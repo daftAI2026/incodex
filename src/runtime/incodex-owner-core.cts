@@ -8,6 +8,7 @@ const crypto = require("node:crypto");
 
 const LOCK_NAME = "incognito.lock";
 const ACTIVE_LOCK_PREFIX = `${LOCK_NAME}.active.`;
+const OWNER_TOKEN_PATTERN = /^[a-f0-9]{32}$/;
 const SOCK_NAME = "incognito.sock";
 const OWNER_RETRY_COUNT = 5;
 const OWNER_RETRY_DELAY_MS = 100;
@@ -105,6 +106,11 @@ function lockPath(stateRoot) {
 
 function activeOwnerPath(stateRoot, token) {
   return path.join(stateRoot, `${ACTIVE_LOCK_PREFIX}${token}`);
+}
+
+function activeOwnerTokenFromPath(file) {
+  const name = path.basename(file);
+  return name.startsWith(ACTIVE_LOCK_PREFIX) ? name.slice(ACTIVE_LOCK_PREFIX.length) : "";
 }
 
 function writeAtomicRecord(file, value) {
@@ -220,6 +226,14 @@ function readOwnerRecords(stateRoot) {
       if (!name.startsWith(ACTIVE_LOCK_PREFIX)) continue;
       const file = path.join(stateRoot, name);
       const state = readOwnerLockStateAt(file);
+      const fileToken = activeOwnerTokenFromPath(file);
+      if (state.kind === "valid" && (!OWNER_TOKEN_PATTERN.test(fileToken) || ownerToken(state.owner) !== fileToken)) {
+        records.push({
+          path: file,
+          state: { kind: "unverifiable", owner: state.owner, reason: "sidecar filename token does not match owner token" },
+        });
+        continue;
+      }
       if (state.kind === "valid" && reclaimStaleActiveOwnerRecord(file, state.owner)) continue;
       records.push({ path: file, state });
     }
