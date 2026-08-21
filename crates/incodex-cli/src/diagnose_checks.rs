@@ -120,6 +120,14 @@ pub struct JournalRecord {
     pub action: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retained_original: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_valid: Option<bool>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub scratch: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recovery: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -417,6 +425,10 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                 phase: None,
                 action: None,
                 error: Some(message.to_string()),
+                retained_original: None,
+                original_valid: None,
+                scratch: Vec::new(),
+                recovery: None,
             });
             findings.push(DiagnosticFinding::warning(
                 code,
@@ -437,6 +449,10 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                     phase: None,
                     action: None,
                     error: Some("journal file is a symlink and was not inspected".to_string()),
+                    retained_original: None,
+                    original_valid: None,
+                    scratch: Vec::new(),
+                    recovery: None,
                 });
                 findings.push(DiagnosticFinding::warning(
                     "journal.file-symlink",
@@ -448,6 +464,8 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
             match journal_v2(root, &install_id) {
                 Ok(journal) => {
                     let action = recover_action_phase(&journal.phase);
+                    let (retained_original, original_valid, scratch, recovery) =
+                        transaction_evidence(root, &journal.install_id, &journal.phase, action);
                     let kind = if action != incodex_transaction::Recovery::Done {
                         interrupted.push((
                             journal.install_id.clone(),
@@ -471,6 +489,10 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                         phase: Some(journal.phase),
                         action: Some(action.as_str().to_string()),
                         error: None,
+                        retained_original,
+                        original_valid,
+                        scratch,
+                        recovery,
                     });
                     if kind == "staleCommitted" {
                         findings.push(DiagnosticFinding::info(
@@ -492,6 +514,10 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                         phase: None,
                         action: None,
                         error: Some(error.clone()),
+                        retained_original: None,
+                        original_valid: None,
+                        scratch: Vec::new(),
+                        recovery: None,
                     });
                     findings.push(DiagnosticFinding::warning(
                         "journal.malformed",
@@ -512,6 +538,10 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                     phase: None,
                     action: None,
                     error: Some(error.to_string()),
+                    retained_original: None,
+                    original_valid: None,
+                    scratch: Vec::new(),
+                    recovery: None,
                 });
                 findings.push(DiagnosticFinding::warning(
                     "journal.malformed",
@@ -548,6 +578,10 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                         phase: Some(journal.phase),
                         action: Some(action.as_str().to_string()),
                         error: None,
+                        retained_original: None,
+                        original_valid: None,
+                        scratch: Vec::new(),
+                        recovery: None,
                     });
                     if kind == "staleCommitted" {
                         findings.push(DiagnosticFinding::info(
@@ -578,6 +612,10 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                             .map(str::to_string),
                         action: None,
                         error: Some("journal schema is not recognized".to_string()),
+                        retained_original: None,
+                        original_valid: None,
+                        scratch: Vec::new(),
+                        recovery: None,
                     });
                     findings.push(DiagnosticFinding::warning(
                         if kind == "malformed" {
@@ -598,6 +636,10 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                     phase: None,
                     action: None,
                     error: Some(error.to_string()),
+                    retained_original: None,
+                    original_valid: None,
+                    scratch: Vec::new(),
+                    recovery: None,
                 });
                 findings.push(DiagnosticFinding::warning(
                     "journal.malformed",
@@ -620,6 +662,52 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
         },
     }
 }
+
+fn transaction_evidence(
+    root: &Path,
+    install_id: &str,
+    phase: &str,
+    action: incodex_transaction::Recovery,
+) -> (Option<String>, Option<bool>, Vec<String>, Option<String>) {
+    let transaction = root.join("transactions").join(install_id);
+    let original = transaction.join("original/ChatGPT.app");
+    let original_exists = fs::symlink_metadata(&original)
+        .ok()
+        .filter(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+        .is_some();
+    let retained_original = original_exists.then(|| original.display().to_string());
+    let original_valid = original_exists
+        .then(|| incodex_transaction::validate_backup_snapshot(root, install_id).is_ok());
+    let candidates = [
+        transaction.join("staging/ChatGPT.app"),
+        transaction.join("outgoing/ChatGPT.app"),
+        transaction.join("restore/ChatGPT.app"),
+        transaction.join("trash/ChatGPT.app"),
+        root.join("scratch")
+            .join(format!("ChatGPT.app.staged-{install_id}")),
+    ];
+    let scratch: Vec<String> = candidates
+        .into_iter()
+        .filter(|path| fs::symlink_metadata(path).is_ok())
+        .map(|path| path.display().to_string())
+        .collect();
+    let recovery = if action != incodex_transaction::Recovery::Done {
+        Some(if original_valid == Some(true) {
+            "recoverable"
+        } else {
+            "manual"
+        })
+        .map(str::to_string)
+    } else if !scratch.is_empty() {
+        Some("cleanup".to_string())
+    } else if phase == "ROLLED_BACK" && original_valid == Some(true) {
+        Some("retained".to_string())
+    } else {
+        None
+    };
+    (retained_original, original_valid, scratch, recovery)
+}
+
 #[cfg(test)]
 #[path = "diagnose_checks_tests.rs"]
 mod tests;

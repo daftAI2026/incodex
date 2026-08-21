@@ -286,38 +286,37 @@ fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<Comma
         .join("scratch")
         .join(format!("ChatGPT.app.staged-{install_id}"));
     progress.stage("Patching and signing app");
-    ditto(app, &staged)?;
-    let (hash, _) = patch_asar(&staged.join(ASAR_REL), loader_source(), Some(&install_id))?;
-    write_asar_integrity(&staged, &hash)?;
+    if let Err(error) = ditto(app, &staged) {
+        return Err(rollback_install(&mut tx, Some(&staged), error));
+    }
+    let (hash, _) = match patch_asar(&staged.join(ASAR_REL), loader_source(), Some(&install_id)) {
+        Ok(result) => result,
+        Err(error) => return Err(rollback_install(&mut tx, Some(&staged), error)),
+    };
+    if let Err(error) = write_asar_integrity(&staged, &hash) {
+        return Err(rollback_install(&mut tx, Some(&staged), error));
+    }
     if is_official_app(app, None) || verify_app(app) || app.join("Contents/MacOS").exists() {
         if let Err(err) = sign_app(&staged) {
-            if is_official_app(app, None) {
-                tx.rollback(&err)?;
-            }
-            return Err(err);
+            return Err(rollback_install(&mut tx, Some(&staged), err));
         }
     }
     progress.stage("Replacing application");
-    tx.place_staging(&staged)?;
+    if let Err(error) = tx.place_staging(&staged) {
+        return Err(rollback_install(&mut tx, Some(&staged), error));
+    }
     if let Err(error) = tx.swap() {
-        if matches!(tx.journal().phase.as_str(), "TARGET_MOVED_OUT" | "SWAPPED") {
-            let _ = tx.rollback(&error);
-        }
-        return Err(error);
+        return Err(rollback_install(&mut tx, Some(&staged), error));
     }
     progress.stage("Verifying installation");
     if let Err(error) = verify_patched_adhoc_bundle_deep_strict(app, expected_plist.as_ref()) {
         let error = format!("post-swap codesign verification failed: {error}");
-        tx.rollback(&error)?;
-        return Err(error);
+        return Err(rollback_install(&mut tx, Some(&staged), error));
     }
     let commit = match tx.commit() {
         Ok(result) => result,
         Err(error) => {
-            if tx.journal().phase != "COMMITTED" {
-                tx.rollback(&error)?;
-            }
-            return Err(error);
+            return Err(rollback_install(&mut tx, Some(&staged), error));
         }
     };
     let warning = commit.cleanup_warning.map(|error| {
@@ -333,6 +332,45 @@ fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<Comma
         app: app.display().to_string(),
         warning,
     })
+}
+
+fn rollback_install(tx: &mut Engine, scratch: Option<&Path>, error: String) -> String {
+    let rollback_error = match tx.journal().phase.as_str() {
+        "COMMITTED" | "ROLLED_BACK" => None,
+        _ => tx.rollback(&error).err(),
+    };
+    let scratch_error = if rollback_error.is_none() {
+        scratch.and_then(|path| remove_install_scratch(path).err())
+    } else {
+        None
+    };
+    let mut details = Vec::new();
+    if let Some(rollback_error) = rollback_error {
+        details.push(format!(
+            "transaction rollback failed; recover the retained journal: {rollback_error}"
+        ));
+    }
+    if let Some(scratch_error) = scratch_error {
+        details.push(format!("install scratch cleanup failed: {scratch_error}"));
+    }
+    if details.is_empty() {
+        error
+    } else {
+        format!("{error}; {}", details.join("; "))
+    }
+}
+
+fn remove_install_scratch(path: &Path) -> Result<(), String> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.to_string()),
+    };
+    if metadata.file_type().is_dir() {
+        fs::remove_dir_all(path).map_err(|error| error.to_string())
+    } else {
+        fs::remove_file(path).map_err(|error| error.to_string())
+    }
 }
 
 fn uninstall_app(

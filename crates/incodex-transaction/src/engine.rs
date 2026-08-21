@@ -263,9 +263,10 @@ impl Engine {
     }
 
     fn advance(&mut self, phase: &str) -> Result<(), String> {
-        self.journal.phase = phase.to_string();
-        self.journal.sequence += 1;
-        write_journal(&self.root, &self.journal)?;
+        let mut next = self.journal.clone();
+        next.phase = phase.to_string();
+        next.sequence += 1;
+        write_journal(&self.root, &next)?;
         self.journal = load_v2(&self.root, self.install_id())?;
         Ok(())
     }

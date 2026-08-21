@@ -273,6 +273,26 @@ pub fn format_diagnosis(report: &Diagnosis) -> String {
             None,
         ));
     }
+    for record in &report.journal_records {
+        if let Some(original) = &record.retained_original {
+            lines.push(incodex_core::format_kv("Retained original", original, None));
+            lines.push(incodex_core::format_kv(
+                "Original proof",
+                if record.original_valid == Some(true) {
+                    "valid"
+                } else {
+                    "invalid"
+                },
+                None,
+            ));
+        }
+        if let Some(recovery) = &record.recovery {
+            lines.push(incodex_core::format_kv("Recovery", recovery, None));
+        }
+        for scratch in &record.scratch {
+            lines.push(incodex_core::format_kv("Scratch", scratch, None));
+        }
+    }
     if !report.interrupted_transactions.is_empty() {
         lines.push(incodex_core::format_warn(
             "Old install journals are leftover. They do not mean the current app is broken.",
