@@ -3,12 +3,14 @@ use std::os::unix::fs::MetadataExt;
 
 use incodex_asar::{pack_dir, patch_asar, MARKER_KEY};
 use incodex_macos::ditto;
-use incodex_transaction::{Engine, JournalV2};
+use incodex_transaction::Engine;
 use sha2::{Digest, Sha256};
 
 #[path = "support/readonly.rs"]
 mod readonly_support;
 mod support;
+#[path = "doctor/transaction_evidence.rs"]
+mod transaction_evidence;
 
 use readonly_support::{
     isolated_home, parse_json, run, run_with_stdout_redirected, top_level_json_keys, DIAGNOSIS_KEYS,
@@ -117,51 +119,6 @@ fn status_json_and_doctor_json_share_diagnosis_object() {
     assert_eq!(runtime["ok"], false);
     assert!(runtime["version"].is_null());
     assert_eq!(runtime["error"], "missing current.json");
-}
-
-#[test]
-fn status_skips_transaction_original_proof_but_doctor_checks_it() {
-    let home = isolated_home();
-    let root = home.join(".incodex");
-    let app = home.join("ChatGPT.app");
-    fs::create_dir_all(&app).unwrap();
-    fs::write(app.join("marker"), "original\n").unwrap();
-
-    let mut tx = Engine::begin(&root, &app, "status-proof-test").unwrap();
-    let id = tx.install_id().to_string();
-    let original = root
-        .join("transactions")
-        .join(&id)
-        .join("original/ChatGPT.app");
-    ditto(&app, &original).unwrap();
-    tx.mark_backup_committed().unwrap();
-    drop(tx);
-
-    let app_arg = app.to_str().unwrap();
-    let (_status, status_stdout, status_stderr) =
-        run(&["status", "--json", "--app", app_arg], &home);
-    assert_eq!(status_stderr, "");
-    let status_report = parse_json(&status_stdout);
-    let status_record = status_report["journalRecords"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|record| record["installId"] == id)
-        .expect("status transaction record");
-    assert_eq!(status_record["retainedOriginal"], original.display().to_string());
-    assert!(status_record["originalValid"].is_null());
-
-    let (_status, doctor_stdout, doctor_stderr) =
-        run(&["doctor", "--json", "--app", app_arg], &home);
-    assert_eq!(doctor_stderr, "");
-    let doctor_report = parse_json(&doctor_stdout);
-    let doctor_record = doctor_report["journalRecords"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|record| record["installId"] == id)
-        .expect("doctor transaction record");
-    assert_eq!(doctor_record["originalValid"], true);
 }
 
 #[test]
@@ -521,193 +478,6 @@ fn doctor_json_keeps_malformed_legacy_and_stale_committed_journals_visible() {
         .iter()
         .any(|finding| finding["code"] == "journal.malformed"));
 }
-
-#[test]
-fn doctor_json_reports_retained_original_and_artifacts_for_interrupted_install() {
-    let home = isolated_home();
-    let root = home.join(".incodex");
-    let app = home.join("ChatGPT.app");
-    let candidate = home.join("candidate.app");
-    fs::create_dir_all(&app).unwrap();
-    fs::write(app.join("marker"), "original\n").unwrap();
-    fs::create_dir_all(&candidate).unwrap();
-    fs::write(candidate.join("marker"), "staged\n").unwrap();
-
-    let mut tx = Engine::begin(&root, &app, "test-interrupted-install").unwrap();
-    let id = tx.install_id().to_string();
-    let original = root
-        .join("transactions")
-        .join(&id)
-        .join("original/ChatGPT.app");
-    ditto(&app, &original).unwrap();
-    tx.mark_backup_committed().unwrap();
-    tx.place_staging(&candidate).unwrap();
-    drop(tx);
-
-    let (_status, stdout, stderr) =
-        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
-    assert_eq!(stderr, "");
-    let report = parse_json(&stdout);
-    let record = report["journalRecords"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|record| record["installId"] == id && record["kind"] == "validInterrupted")
-        .expect("interrupted transaction record");
-    assert_eq!(
-        record["retainedOriginal"],
-        original.display().to_string()
-    );
-    assert_eq!(record["originalValid"], true);
-    assert_eq!(record["recovery"], "rollback");
-    assert!(record["artifacts"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|path| path.as_str().unwrap().ends_with("staging/ChatGPT.app")));
-
-    let (_status, human, stderr) = run(&["doctor", "--app", app.to_str().unwrap()], &home);
-    assert_eq!(stderr, "");
-    assert!(human.contains("Retained original"), "{human}");
-    assert!(human.contains("Artifact"), "{human}");
-}
-
-#[test]
-fn doctor_marks_rolled_back_external_staging_manual() {
-    let home = isolated_home();
-    let root = home.join(".incodex");
-    let app = home.join("ChatGPT.app");
-    fs::create_dir_all(&app).unwrap();
-    fs::write(app.join("marker"), "original\n").unwrap();
-
-    let mut tx = Engine::begin(&root, &app, "rolled-back-artifact-test").unwrap();
-    let id = tx.install_id().to_string();
-    let original = root
-        .join("transactions")
-        .join(&id)
-        .join("original/ChatGPT.app");
-    ditto(&app, &original).unwrap();
-    tx.mark_backup_committed().unwrap();
-    tx.rollback("test rollback").unwrap();
-    drop(tx);
-
-    let scratch = root
-        .join("scratch")
-        .join(format!("ChatGPT.app.staged-{id}"));
-    fs::create_dir_all(&scratch).unwrap();
-    fs::write(scratch.join("marker"), "leftover\n").unwrap();
-
-    let (_status, stdout, stderr) =
-        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
-    assert_eq!(stderr, "");
-    let report = parse_json(&stdout);
-    let record = report["journalRecords"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|record| record["installId"] == id)
-        .expect("rolled-back transaction record");
-    assert_eq!(record["phase"], "ROLLED_BACK");
-    assert_eq!(record["recovery"], "manual");
-    assert!(record["artifacts"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|path| path.as_str().unwrap() == scratch.display().to_string()));
-}
-
-#[test]
-fn doctor_marks_committed_external_staging_manual() {
-    let home = isolated_home();
-    let root = home.join(".incodex");
-    let app = home.join("ChatGPT.app");
-    let candidate = home.join("candidate.app");
-    fs::create_dir_all(&app).unwrap();
-    fs::write(app.join("marker"), "original\n").unwrap();
-    fs::create_dir_all(&candidate).unwrap();
-    fs::write(candidate.join("marker"), "patched\n").unwrap();
-
-    let mut tx = Engine::begin(&root, &app, "committed-artifact-test").unwrap();
-    let id = tx.install_id().to_string();
-    let original = root
-        .join("transactions")
-        .join(&id)
-        .join("original/ChatGPT.app");
-    ditto(&app, &original).unwrap();
-    tx.mark_backup_committed().unwrap();
-    tx.place_staging(&candidate).unwrap();
-    tx.swap().unwrap();
-    tx.commit().unwrap();
-    drop(tx);
-
-    let scratch = root
-        .join("scratch")
-        .join(format!("ChatGPT.app.staged-{id}"));
-    fs::create_dir_all(&scratch).unwrap();
-
-    let (_status, stdout, stderr) =
-        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
-    assert_eq!(stderr, "");
-    let report = parse_json(&stdout);
-    let record = report["journalRecords"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|record| record["installId"] == id)
-        .expect("committed transaction record");
-    assert_eq!(record["phase"], "COMMITTED");
-    assert_eq!(record["recovery"], "manual");
-}
-
-#[test]
-fn doctor_marks_a_checksum_valid_unknown_transaction_phase_manual() {
-    let home = isolated_home();
-    let root = home.join(".incodex");
-    let app = home.join("ChatGPT.app");
-    fs::create_dir_all(&app).unwrap();
-    fs::write(app.join("marker"), "original\n").unwrap();
-
-    let mut tx = Engine::begin(&root, &app, "test-unknown-phase").unwrap();
-    let id = tx.install_id().to_string();
-    let original = root
-        .join("transactions")
-        .join(&id)
-        .join("original/ChatGPT.app");
-    ditto(&app, &original).unwrap();
-    tx.mark_backup_committed().unwrap();
-    drop(tx);
-
-    let journal_path = root.join("transactions").join(&id).join("journal.json");
-    let mut journal: JournalV2 =
-        serde_json::from_str(&fs::read_to_string(&journal_path).unwrap()).unwrap();
-    journal.phase = "FUTURE_PHASE".into();
-    journal.checksum.clear();
-    let checksum = Sha256::digest(serde_json::to_vec(&journal).unwrap());
-    journal.checksum =
-        checksum
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect();
-    fs::write(
-        &journal_path,
-        format!("{}\n", serde_json::to_string_pretty(&journal).unwrap()),
-    )
-    .unwrap();
-
-    let (_status, stdout, stderr) = run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
-    assert_eq!(stderr, "");
-    let report = parse_json(&stdout);
-    let record = report["journalRecords"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|record| record["installId"] == id)
-        .expect("unknown-phase journal record");
-    assert_eq!(record["action"], "refuse");
-    assert_eq!(record["originalValid"], true);
-    assert_eq!(record["recovery"], "manual");
-}
-
 
 #[test]
 fn doctor_json_refuses_clean_backup_for_a_patched_marker_without_native_backup() {
