@@ -786,3 +786,7 @@ fn pid_alive(pid: i32) -> bool {
     }
     unsafe { libc::kill(pid, 0) == 0 }
 }
+
+#[cfg(test)]
+#[path = "diagnose_checks_tests.rs"]
+mod tests;
