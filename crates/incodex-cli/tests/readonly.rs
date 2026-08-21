@@ -5,6 +5,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use incodex_asar::{pack_dir, MARKER_KEY};
 use sha2::{Digest, Sha256};
 
 mod support;
@@ -21,10 +22,8 @@ fn isolated_home() -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("time")
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!(
-        "incodex-ro-{}-{n}-{sequence}",
-        std::process::id()
-    ));
+    let dir =
+        std::env::temp_dir().join(format!("incodex-ro-{}-{n}-{sequence}", std::process::id()));
     fs::create_dir_all(&dir).expect("home");
     dir
 }
@@ -145,6 +144,9 @@ const DIAGNOSIS_KEYS: &[&str] = &[
     "signing",
     "spctl",
     "interruptedTransactions",
+    "journalRecords",
+    "checks",
+    "findings",
 ];
 
 #[test]
@@ -349,21 +351,27 @@ fn doctor_missing_app_prints_labeled_sections() {
 ➤ Runtime
   Version      unknown
   External     missing
+  External check checked
   ! missing current.json
   Loader       unknown
   Main         unknown
 
 ➤ Signing
   Verify       failed
+  Nested       unknown
 
 ➤ Backup
   State        none
+  Proof        checked
 
 ➤ Sessions
-  Orphans      0
-  Chromium     0
-  Stale pid    no
-  Journals     0
+  Orphans      0 (checked)
+  Chromium     0 (checked)
+  Stale pid    no (checked)
+  Journals     0 (checked)
+
+➤ Findings
+  ! signing.not-checked: the application does not exist, so nested signing was not inspected
 
 ",
             app = app.display()
@@ -452,10 +460,8 @@ fn doctor_rejects_runtime_manifest_missing_required_artifacts() {
 
     let app = home.join("Missing.app");
     for command in ["status", "doctor"] {
-        let (status, stdout, stderr) = run(
-            &[command, "--json", "--app", app.to_str().unwrap()],
-            &home,
-        );
+        let (status, stdout, stderr) =
+            run(&[command, "--json", "--app", app.to_str().unwrap()], &home);
         assert_eq!(status, 0, "{command}");
         assert_eq!(stderr, "", "{command}");
         let runtime = &parse_json(&stdout)["externalRuntime"];
@@ -492,10 +498,8 @@ fn doctor_json_names_interrupted_journals() {
             + "\n",
     )
     .unwrap();
-    let (status, stdout, stderr) = run(
-        &["doctor", "--json", "--app", app.to_str().unwrap()],
-        &home,
-    );
+    let (status, stdout, stderr) =
+        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
     assert_eq!(status, 0);
     assert_eq!(stderr, "");
     let rec = parse_json(&stdout);
@@ -510,10 +514,8 @@ fn doctor_json_names_interrupted_journals() {
 fn doctor_json_exposes_explicit_check_truth_and_unknown_signing() {
     let home = isolated_home();
     let app = home.join("Missing.app");
-    let (_status, stdout, stderr) = run(
-        &["doctor", "--json", "--app", app.to_str().unwrap()],
-        &home,
-    );
+    let (_status, stdout, stderr) =
+        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
     assert_eq!(stderr, "");
     let report = parse_json(&stdout);
     assert_eq!(report["checks"]["processIdentity"]["status"], "checked");
@@ -573,22 +575,34 @@ fn doctor_json_classifies_owner_orphans_and_runtime_residue() {
         release.join("incodex-main.cjs"),
     )
     .unwrap();
+    let mut files = serde_json::Map::new();
+    for name in incodex_runtime_bundle::required_runtime_files() {
+        let hash = if name == "incodex-main.cjs" {
+            "00".repeat(32)
+        } else {
+            let body = b"runtime artifact";
+            fs::write(release.join(name), body).unwrap();
+            Sha256::digest(body)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        };
+        files.insert(name.to_string(), serde_json::Value::String(hash));
+    }
     fs::write(
         root.join("runtime/current.json"),
         serde_json::json!({
             "schemaVersion": 1,
             "version": "0.3.1",
             "release": "releases/0.3.1",
-            "files": { "incodex-main.cjs": "00".repeat(32) }
+            "files": files
         })
         .to_string(),
     )
     .unwrap();
 
-    let (_status, stdout, stderr) = run(
-        &["doctor", "--json", "--app", app.to_str().unwrap()],
-        &home,
-    );
+    let (_status, stdout, stderr) =
+        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
     assert_eq!(stderr, "");
     let report = parse_json(&stdout);
     assert_eq!(report["stalePid"], true);
@@ -634,10 +648,8 @@ fn doctor_json_keeps_malformed_legacy_and_stale_committed_journals_visible() {
     )
     .unwrap();
 
-    let (_status, stdout, stderr) = run(
-        &["doctor", "--json", "--app", app.to_str().unwrap()],
-        &home,
-    );
+    let (_status, stdout, stderr) =
+        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
     assert_eq!(stderr, "");
     let report = parse_json(&stdout);
     let records = report["journalRecords"].as_array().unwrap();
@@ -649,8 +661,7 @@ fn doctor_json_keeps_malformed_legacy_and_stale_committed_journals_visible() {
             && record["path"].as_str().unwrap().contains("legacy.json")
     }));
     assert!(records.iter().any(|record| {
-        record["kind"] == "staleCommitted"
-            && record["installId"] == "committed"
+        record["kind"] == "staleCommitted" && record["installId"] == "committed"
     }));
     assert_eq!(report["checks"]["journals"]["status"], "checked");
     assert!(report["checks"]["journals"]["findings"]
@@ -661,12 +672,55 @@ fn doctor_json_keeps_malformed_legacy_and_stale_committed_journals_visible() {
 }
 
 #[test]
+fn doctor_json_refuses_clean_backup_for_a_patched_marker_without_native_backup() {
+    let home = isolated_home();
+    let app = home.join("ChatGPT.app");
+    let source = home.join("asar-source");
+    let asar = app.join("Contents/Resources/app.asar");
+    fs::create_dir_all(&source).unwrap();
+    fs::create_dir_all(asar.parent().unwrap()).unwrap();
+    fs::write(source.join("index.js"), b"official\n").unwrap();
+    let install_id = "00000000-0000-4000-8000-000000000001";
+    let mut package = serde_json::json!({ "main": "index.js" });
+    package[MARKER_KEY] = serde_json::json!({
+        "originalMain": "index.js",
+        "installId": install_id,
+    });
+    fs::write(
+        source.join("package.json"),
+        format!("{}\n", serde_json::to_string(&package).unwrap()),
+    )
+    .unwrap();
+    pack_dir(&source, &asar).unwrap();
+
+    let (_status, stdout, stderr) =
+        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(stderr, "");
+    let report = parse_json(&stdout);
+    assert_eq!(report["patched"], true);
+    assert_eq!(report["backup"]["status"], "unknown");
+    assert_eq!(report["checks"]["backup"]["status"], "unknown");
+    assert!(report["checks"]["backup"]["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|finding| finding["code"] == "backup.unverified"));
+    assert_ne!(report["backup"]["complete"], true);
+}
+
+#[test]
 fn unknown_flags_fail_closed() {
     let home = isolated_home();
     let cases: &[(&[&str], &str)] = &[
         (&["wipe"], "  ✗ unknown command: wipe\n  incodex --help\n"),
-        (&["status", "--please"], "  ✗ unknown flag: --please\n  incodex --help\n"),
-        (&["status", "--app"], "  ✗ --app requires a path, not another flag\n"),
+        (
+            &["status", "--please"],
+            "  ✗ unknown flag: --please\n  incodex --help\n",
+        ),
+        (
+            &["status", "--app"],
+            "  ✗ --app requires a path, not another flag\n",
+        ),
         (
             &["recover"],
             "  ✗ recover requires --transaction <id>\n  incodex recover --transaction <id>\n",
