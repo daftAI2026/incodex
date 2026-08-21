@@ -6,8 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_asar::{pack_dir, patch_asar, Archive};
 use incodex_core::{canonical_path, target_id};
-use incodex_macos::{ditto, read_architecture, sign_app};
-use incodex_transaction::tree_digest;
+use incodex_macos::{ditto, read_architecture, sign_app, write_asar_integrity};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
@@ -64,6 +63,9 @@ impl Fixture {
         ditto(&app, &original_app).unwrap();
         let (patched_header, _) = patch_asar(&asar, "legacy-loader\n", Some(INSTALL_ID)).unwrap();
         let patched_file = Archive::open(&asar).unwrap().file_hash();
+        // Match the retired TS writer: patching the ASAR also rewrites the
+        // live Info.plist ElectronAsarIntegrity entry before signing.
+        write_asar_integrity(&app, &patched_file).unwrap();
         sign_app(&app).unwrap();
         let architecture = read_architecture(&app, "ChatGPT").unwrap();
         fs::create_dir_all(install_dir.join("patched")).unwrap();
@@ -87,8 +89,7 @@ impl Fixture {
                     "originalPlistFileHash": original_plist, "patchedAsarHeaderHash": patched_header,
                     "patchedAsarFileHash": patched_file, "originalMain": "index.js",
                     "runtimeVersion": "0.2.0", "createdAt": "2026-08-20T00:00:00.000Z",
-                    "transactionState": "committed",
-                    "originalTreeDigest": tree_digest(&original_app).unwrap()
+                    "transactionState": "committed"
                 })
             ),
         )
