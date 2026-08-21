@@ -7,7 +7,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const LOCK_NAME = "incognito.lock";
 const ACTIVE_LOCK_PREFIX = `${LOCK_NAME}.active.`;
-const QUARANTINE_PREFIX = `${LOCK_NAME}.quarantine.`;
+const QUARANTINE_PREFIX = `.${LOCK_NAME}.quarantine.`;
 const OWNER_TOKEN_PATTERN = /^[a-f0-9]{32}$/;
 const MAX_SIDECAR_QUARANTINES = 128;
 const SOCK_NAME = "incognito.sock";
@@ -208,7 +208,7 @@ function readOwnerLock(stateRoot) {
 function reclaimStaleActiveOwnerRecord(file, expectedOwner) {
     if (!staleOwnerRecord(expectedOwner))
         return { removed: false };
-    const quarantine = path.join(path.dirname(file), `.${QUARANTINE_PREFIX}${process.pid}.${Date.now()}.${crypto.randomBytes(8).toString("hex")}`);
+    const quarantine = path.join(path.dirname(file), `${QUARANTINE_PREFIX}${process.pid}.${Date.now()}.${crypto.randomBytes(8).toString("hex")}`);
     try {
         fs.renameSync(file, quarantine);
     }
