@@ -69,11 +69,9 @@ fn run_tty(
         home,
         "__INCODEX_UPDATE_PROMPT_NEVER__",
         "",
-        // Repro first: keep the old fixed deadline so the new timeout assertion is red.
-        Duration::from_secs(12),
+        timeout,
         &[("PATH", path)],
     );
-    let _ = timeout;
     (result.status, result.stdout)
 }
 
