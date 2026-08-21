@@ -1,5 +1,8 @@
 use std::path::Path;
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
+
+static PTY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 #[derive(Debug)]
 pub struct Result {
@@ -16,6 +19,10 @@ pub fn run(
     wait_for: &str,
     keys: &str,
 ) -> Result {
+    let _guard = PTY_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("PTY harness lock");
     let script = r#"
 import os, pty, select, sys, time
 home, wait_for, keys = sys.argv[1], sys.argv[2].encode("utf-8"), sys.argv[3].encode("latin-1")
@@ -74,12 +81,20 @@ sys.stdout.buffer.write(bytes(buf))
     let output = command.output().expect("spawn PTY harness");
     let raw = String::from_utf8_lossy(&output.stdout).into_owned();
     let (status_line, stdout) = raw.split_once('\n').unwrap_or((&raw, ""));
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let stderr = if output.status.success() {
+        stderr
+    } else if stderr.is_empty() {
+        format!("PTY harness exited with {}", output.status)
+    } else {
+        format!("{stderr} (PTY harness exited with {})", output.status)
+    };
     Result {
         status: status_line
             .strip_prefix("STATUS ")
             .and_then(|value| value.trim().parse().ok())
             .unwrap_or(1),
         stdout: stdout.to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        stderr,
     }
 }

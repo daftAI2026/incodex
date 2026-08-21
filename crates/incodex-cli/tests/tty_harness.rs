@@ -43,6 +43,10 @@ fn concurrent_pty_harnesses_report_every_child() {
                 "PTY child was not reported successfully: {result:?}"
             );
             assert!(
+                result.stderr.is_empty(),
+                "PTY harness emitted diagnostics: {result:?}"
+            );
+            assert!(
                 result.stdout.contains("6. Quit"),
                 "PTY child output was truncated: {result:?}"
             );
