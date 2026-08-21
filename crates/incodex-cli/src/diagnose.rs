@@ -135,10 +135,7 @@ pub fn diagnose_with_root_mode(app_path: &Path, root: &Path, mode: DiagnosisMode
                 None,
                 Some(not_requested_signing(None)),
                 Some(not_requested_spctl()),
-                CheckResult::unknown(
-                    "signing.not-requested",
-                    "nested signing, entitlements, and Gatekeeper were not inspected",
-                ),
+                CheckResult::not_requested(),
             ),
             DiagnosisMode::Doctor => {
                 let (signing, outer_ok, signing_check) =

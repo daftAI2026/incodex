@@ -172,6 +172,11 @@ fn status_skips_signing_inventory_and_gatekeeper() {
     assert!(report["codesignOk"].is_null());
     assert_eq!(report["signing"]["status"], "not-requested");
     assert_eq!(report["spctl"]["status"], "not-requested");
+    assert!(report["findings"]
+        .as_array()
+        .expect("findings")
+        .iter()
+        .all(|finding| finding["code"] != "signing.not-requested"));
     assert!(fixture.command("codesign").is_empty());
     assert!(fixture.command("spctl").is_empty());
 
@@ -194,6 +199,11 @@ fn default_doctor_checks_only_outer_signing_and_deep_expands_inventory() {
     let report = parse_json(&stdout);
     assert_eq!(report["signing"]["status"], "not-requested");
     assert_eq!(report["spctl"]["status"], "not-requested");
+    assert!(report["findings"]
+        .as_array()
+        .expect("findings")
+        .iter()
+        .all(|finding| finding["code"] != "signing.not-requested"));
     let shallow_commands = fixture.command("codesign");
     assert!(!shallow_commands.is_empty());
     assert!(shallow_commands.iter().all(|line| !line.contains("--deep")));
@@ -208,6 +218,7 @@ fn default_doctor_checks_only_outer_signing_and_deep_expands_inventory() {
     assert!(stdout.contains("Nested       unknown"));
     assert!(!stdout.contains("Hardened"));
     assert!(!stdout.contains("Gatekeeper   "));
+    assert!(!stdout.contains("signing.not-requested"));
 
     fs::write(&fixture.log, "").expect("reset command log");
     let (status, stdout, stderr) = run_fixture(
