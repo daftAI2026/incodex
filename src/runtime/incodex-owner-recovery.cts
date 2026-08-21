@@ -27,8 +27,8 @@ function claimPath(stateRoot) {
 
 function hasForeignClaim(stateRoot) {
   try {
-    const stats = fs.lstatSync(claimPath(stateRoot));
-    return !stats.isDirectory();
+    fs.lstatSync(claimPath(stateRoot));
+    return true;
   } catch (error) {
     return error?.code !== "ENOENT";
   }
