@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -109,6 +109,7 @@ describe("symlink burn and copy", () => {
     expect(lstatSync(join(first.root, "owner.json")).mode & 0o777).toBe(FILE_MODE);
     expect(lstatSync(join(first.root, "lock")).mode & 0o777).toBe(FILE_MODE);
     expect(lstatSync(first.root).isSymbolicLink()).toBe(false);
+    expect(existsSync(join(userRoot, "identity"))).toBe(false);
   });
 
   test("copySettings writes private files and burn removes the whole session", () => {
@@ -164,20 +165,22 @@ describe("symlink burn and copy", () => {
 });
 
 describe("session lifecycle", () => {
-  test("drops stale identity auth when the source auth.json is gone", () => {
+  test("copies source settings directly and leaves an existing identity cache untouched", () => {
     const root = tempRoot();
     const userRoot = join(root, ".incodex");
     const source = join(root, "codex");
     mkdirSync(source);
-    writeFileSync(join(source, "auth.json"), '{"token":"old"}');
+    writeFileSync(join(source, "auth.json"), '{"token":"source"}');
+    writeFileSync(join(source, "config.toml"), 'localeOverride = "zh-CN"\n');
+    mkdirSync(join(userRoot, "identity"), { recursive: true });
+    writeFileSync(join(userRoot, "identity", "auth.json"), "legacy-cache\n");
     const first = createSessionHome(userRoot);
     copySettings(first.home, source, userRoot);
-    expect(readFileSync(join(userRoot, "identity", "auth.json"), "utf8")).toBe('{"token":"old"}');
-    rmSync(join(source, "auth.json"));
-    const second = createSessionHome(userRoot);
-    expect(copySettings(second.home, source, userRoot)).toBe(0);
-    expect(() => lstatSync(join(userRoot, "identity", "auth.json"))).toThrow();
-    expect(() => lstatSync(join(second.home, "auth.json"))).toThrow();
+    expect(readFileSync(join(userRoot, "identity", "auth.json"), "utf8")).toBe("legacy-cache\n");
+    expect(readFileSync(join(first.home, "auth.json"), "utf8")).toBe('{"token":"source"}');
+    expect(readFileSync(join(first.home, "config.toml"), "utf8")).toBe('localeOverride = "zh-CN"\n');
+    expect(readFileSync(join(source, "auth.json"), "utf8")).toBe('{"token":"source"}');
+    expect(readFileSync(join(source, "config.toml"), "utf8")).toBe('localeOverride = "zh-CN"\n');
   });
 
   test("janitor burns sessions whose owner pid is dead and leaves a live one", () => {
@@ -190,6 +193,18 @@ describe("session lifecycle", () => {
     expect(swept).toBeGreaterThanOrEqual(1);
     expect(() => lstatSync(dead.root)).toThrow();
     expect(lstatSync(live.root).isDirectory()).toBe(true);
+  });
+
+  test("janitor refuses a replaced session root without recorded identity", () => {
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const dead = createSessionHome(userRoot, { pid: 999999 });
+    rmSync(dead.root, { recursive: true, force: true });
+    mkdirSync(dead.root);
+    writeFileSync(join(dead.root, "replacement.txt"), "keep-me");
+
+    expect(sweepOrphanSessions(userRoot)).toBe(0);
+    expect(readFileSync(join(dead.root, "replacement.txt"), "utf8")).toBe("keep-me");
   });
 
   test("clone and live targets do not share a session or chromium directory", () => {

@@ -472,6 +472,57 @@ mod tests {
     }
 
     #[test]
+    fn session_lifecycle_does_not_create_or_mutate_identity_cache() {
+        let root = temp_root();
+        let user_root = root.join(".incodex");
+        let source = root.join("codex");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("auth.json"), "{\"token\":\"source\"}\n").unwrap();
+        fs::write(source.join("config.toml"), "localeOverride = \"zh-CN\"\n").unwrap();
+        let identity = user_root.join("identity");
+        fs::create_dir_all(&identity).unwrap();
+        fs::write(identity.join("auth.json"), "legacy-cache\n").unwrap();
+
+        let source_before = (
+            fs::read(source.join("auth.json")).unwrap(),
+            fs::read(source.join("config.toml")).unwrap(),
+        );
+        let session = create_session_home(&user_root, None, 0, "").unwrap();
+        assert_eq!(copy_settings(&session.home, &source, &user_root).unwrap(), 2);
+        assert_eq!(fs::read(identity.join("auth.json")).unwrap(), b"legacy-cache\n");
+        assert_eq!(fs::read(session.home.join("auth.json")).unwrap(), source_before.0);
+        assert_eq!(fs::read(session.home.join("config.toml")).unwrap(), source_before.1);
+
+        burn_session_home(
+            &session.root,
+            &BurnExpected {
+                user_root: &user_root,
+                session_id: Some(&session.session_id),
+                ino: Some(session.ino),
+                dev: Some(session.dev),
+            },
+        )
+        .unwrap();
+        assert_eq!(fs::read(source.join("auth.json")).unwrap(), source_before.0);
+        assert_eq!(fs::read(source.join("config.toml")).unwrap(), source_before.1);
+        assert_eq!(fs::read(identity.join("auth.json")).unwrap(), b"legacy-cache\n");
+    }
+
+    #[test]
+    fn orphan_sweep_refuses_a_replaced_session_root_without_recorded_identity() {
+        let root = temp_root();
+        let user_root = root.join(".incodex");
+        let session = create_session_home(&user_root, None, 999999, "").unwrap();
+        fs::remove_dir_all(&session.root).unwrap();
+        fs::create_dir(&session.root).unwrap();
+        fs::write(session.root.join("replacement.txt"), "keep-me").unwrap();
+
+        assert_eq!(sweep_orphan_sessions(&user_root, None), 0);
+        assert!(session.root.exists());
+        assert_eq!(fs::read_to_string(session.root.join("replacement.txt")).unwrap(), "keep-me");
+    }
+
+    #[test]
     fn burn_refuses_a_session_id_mismatch() {
         let root = temp_root();
         let user_root = root.join(".incodex");

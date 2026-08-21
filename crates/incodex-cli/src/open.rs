@@ -733,6 +733,43 @@ mod tests {
     }
 
     #[test]
+    fn wait_and_burn_passes_the_created_session_identity_to_cleanup() {
+        let root = temp_root();
+        let app = fake_app(&root);
+        let user = root.join("home");
+        let source = root.join("codex");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("auth.json"), "{}\n").unwrap();
+        let plan = prepare_incognito_open(&app, &user, &source, 1).unwrap();
+        let owner: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(plan.session_root.join("owner.json")).unwrap())
+                .unwrap();
+        let recorded_identity = (
+            owner.get("ino").and_then(serde_json::Value::as_u64),
+            owner.get("dev").and_then(serde_json::Value::as_u64),
+        );
+        let mut observed = (None, None);
+        let (_process, cleanup) = wait_and_burn_with(
+            &plan,
+            &user,
+            0,
+            |_| {
+                Ok(OpenProcessResult::Exited {
+                    code: 0,
+                    ui_ready: true,
+                })
+            },
+            |root, expected| {
+                observed = (expected.ino, expected.dev);
+                burn_session_home(root, expected)
+            },
+        )
+        .unwrap();
+        assert!(cleanup.removed());
+        assert_eq!(observed, recorded_identity);
+    }
+
+    #[test]
     fn spawn_error_still_burns() {
         let root = temp_root();
         let app = fake_app(&root);
