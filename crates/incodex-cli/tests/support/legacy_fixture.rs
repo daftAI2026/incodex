@@ -65,7 +65,7 @@ impl Fixture {
         let patched_file = Archive::open(&asar).unwrap().file_hash();
         // Match the retired TS writer: patching the ASAR also rewrites the
         // live Info.plist ElectronAsarIntegrity entry before signing.
-        write_asar_integrity(&app, &patched_file).unwrap();
+        write_asar_integrity(&app, &patched_header).unwrap();
         sign_app(&app).unwrap();
         let architecture = read_architecture(&app, "ChatGPT").unwrap();
         fs::create_dir_all(install_dir.join("patched")).unwrap();

@@ -729,7 +729,8 @@ fn legacy_recovery_survives_real_subprocess_sigkill_boundaries() {
         "AFTER_RESTORE_RENAME",
         "AFTER_RECOVERY_CLEANUP",
         "BEFORE_ROLLED_BACK_JOURNAL",
-        "BEFORE_LEGACY_JOURNAL_RENAME",
+        "BEFORE_LEGACY_INTENT_JOURNAL_RENAME",
+        "BEFORE_LEGACY_ROLLED_BACK_JOURNAL_RENAME",
     ] {
         let fixture = Fixture::create();
         let outgoing = fixture
