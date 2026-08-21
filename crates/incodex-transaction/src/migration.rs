@@ -207,6 +207,53 @@ mod tests {
             .any(|path| path == &root.join("transactions")));
         let _ = fs::remove_dir_all(root);
     }
+
+    #[test]
+    fn adoption_refuses_to_replace_an_existing_corrupt_v2_journal() {
+        let root = std::env::temp_dir().join(format!(
+            "incodex-migration-corrupt-journal-{}",
+            std::process::id()
+        ));
+        let target = root.join("apps/ChatGPT.app");
+        let original = root.join("legacy-original/ChatGPT.app");
+        for app in [&target, &original] {
+            fs::create_dir_all(app.join("Contents/Resources")).unwrap();
+            fs::write(app.join("Contents/Info.plist"), b"plist").unwrap();
+        }
+        fs::write(target.join("Contents/Resources/app.asar"), b"live").unwrap();
+        fs::write(original.join("Contents/Resources/app.asar"), b"original").unwrap();
+        let id = "55555555-5555-4555-8555-555555555555";
+        let inspected = incodex_core::inspect_target(&target, None).unwrap();
+        let hash = |path: &Path| {
+            Sha256::digest(fs::read(path).unwrap())
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        };
+        let input = LegacyMigrationInput {
+            install_id: id.into(),
+            requested_path: target.clone(),
+            real_path: inspected.real_path.clone(),
+            target_device: inspected.target_device,
+            target_inode: inspected.target_inode,
+            parent_device: inspected.parent_device,
+            parent_inode: inspected.parent_inode,
+            original_source: original.clone(),
+            live_asar_file_hash: hash(&target.join("Contents/Resources/app.asar")),
+            original_asar_file_hash: hash(&original.join("Contents/Resources/app.asar")),
+            original_plist_file_hash: hash(&original.join("Contents/Info.plist")),
+            original_tree_digest: tree_digest(&original).unwrap(),
+        };
+        let lock = crate::lock::acquire_target_lock(&root, &target, "test", Some(id)).unwrap();
+        let journal = root.join("transactions").join(id).join("journal.json");
+        fs::create_dir_all(journal.parent().unwrap()).unwrap();
+        fs::write(&journal, b"truncated journal").unwrap();
+
+        let result = adopt_legacy_committed_locked(&root, &lock, &input);
+        assert!(result.is_err());
+        assert_eq!(fs::read(&journal).unwrap(), b"truncated journal");
+        let _ = fs::remove_dir_all(root);
+    }
 }
 
 fn verify_file_hash(path: &Path, expected: &str, label: &str) -> Result<(), String> {
