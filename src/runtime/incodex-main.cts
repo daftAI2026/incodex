@@ -113,6 +113,11 @@ async function writePid() {
   }
 }
 
+function startupBlocked(error) {
+  error.code = "INCODEX_STARTUP_BLOCKED";
+  return error;
+}
+
 async function clearPid(lease, server) {
   if (lease && instance.releaseOwnerLease) {
     if (!(await instance.releaseOwnerLease(stateRoot(), lease))) {
@@ -592,7 +597,7 @@ async function attachElectron() {
       } catch {
         /* Electron may not be ready yet; returning still prevents a second owner. */
       }
-      return;
+      throw startupBlocked(new Error("[incodex] owner lease refused"));
     }
     try {
       raiseServer = instance.listenForRaise(stateRoot(), () => raiseOurWindows(), ownerLease);
@@ -613,7 +618,7 @@ async function attachElectron() {
       } catch {
         /* ignore */
       }
-      return;
+      throw startupBlocked(error instanceof Error ? error : new Error(String(error)));
     }
     electron.app.on("window-all-closed", () => {
       burnIncognitoHome();
@@ -635,10 +640,8 @@ async function attachElectron() {
   else void electron.app.whenReady().then(ready);
 }
 
-try {
-  void attachElectron().catch((error) => {
-    console.error("[incodex] main attach failed", error);
-  });
-} catch (error) {
+const startupGate = attachElectron();
+if (typeof module !== "undefined") module.exports = { startupGate };
+startupGate.catch((error) => {
   console.error("[incodex] main attach failed", error);
-}
+});

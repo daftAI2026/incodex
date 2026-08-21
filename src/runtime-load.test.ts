@@ -34,11 +34,12 @@ describe("runtime load", () => {
     ).toBe(join(dest, "incodex-main.cjs"));
   });
 
-  test("the asar loader fail-opens: it always requires originalMain after attach", () => {
+  test("the asar loader fail-opens non-blocking attach errors", () => {
     const loader = readFileSync(join(import.meta.dir, "runtime/incodex-loader.cts"), "utf8");
-    expect(loader).toContain("try {\n  loadMain();\n} catch");
+    expect(loader).toContain("await loadMain();");
     expect(loader).toContain("require(originalMain())");
-    expect(loader.indexOf("require(originalMain())")).toBeGreaterThan(loader.indexOf("loadMain()"));
+    expect(loader).toContain('error?.code === "INCODEX_STARTUP_BLOCKED"');
+    expect(loader.indexOf("require(originalMain())")).toBeGreaterThan(loader.indexOf("await loadMain()"));
     expect(loader).not.toContain('require("./incodex-main.cjs")');
     expect(loader).toContain("current.json");
   });
