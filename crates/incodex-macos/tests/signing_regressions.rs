@@ -1,4 +1,5 @@
 use std::ffi::OsString;
+use std::collections::BTreeSet;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
@@ -6,8 +7,8 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use incodex_macos::{
-    inspect_signing_inventory, sign_app, verify_app, verify_original_vendor_bundle,
-    verify_patched_adhoc_bundle_deep_strict,
+    inspect_signing_inventory, plan_adhoc_entitlements, sign_app, verify_app,
+    verify_original_vendor_bundle, verify_patched_adhoc_bundle_deep_strict, EntitlementSnapshot,
 };
 
 static PATH_LOCK: Mutex<()> = Mutex::new(());
@@ -291,4 +292,17 @@ fn successful_nonempty_malformed_entitlements_fail_closed() {
     let result = sign_app(&fixture.app);
     assert!(result.is_err(), "malformed successful entitlement output must fail closed");
     assert!(!fixture.root.join("sign-capture").exists());
+}
+
+#[test]
+fn strips_a_self_closing_unretainable_entitlement_value() {
+    let key = "com.apple.application-identifier".to_string();
+    let source = EntitlementSnapshot {
+        xml: "<?xml version=\"1.0\"?><plist><dict><key>com.apple.application-identifier</key><array/></dict></plist>".to_string(),
+        keys: BTreeSet::from([key.clone()]),
+    };
+
+    let plan = plan_adhoc_entitlements(&source).expect("self-closing plist values are valid");
+    assert!(plan.stripped_keys.contains(&key));
+    assert!(!plan.xml.contains("<array/>"));
 }
