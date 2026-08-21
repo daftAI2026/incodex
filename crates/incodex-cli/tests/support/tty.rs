@@ -235,12 +235,7 @@ while time.monotonic() < deadline:
         child_status = status
         break
 if child_status is None:
-    if pty_closed:
-        try:
-            _, child_status = os.waitpid(pid, 0)
-        except ChildProcessError:
-            child_status = 0
-    else:
+    while pty_closed and time.monotonic() < deadline:
         try:
             done, status = os.waitpid(pid, os.WNOHANG)
         except ChildProcessError:
@@ -248,6 +243,18 @@ if child_status is None:
             status = 0
         if done == pid:
             child_status = status
+            break
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            select.select([], [], [], min(0.05, remaining))
+if child_status is None:
+    try:
+        done, status = os.waitpid(pid, os.WNOHANG)
+    except ChildProcessError:
+        done = pid
+        status = 0
+    if done == pid:
+        child_status = status
 timed_out = child_status is None
 if timed_out:
     try:
