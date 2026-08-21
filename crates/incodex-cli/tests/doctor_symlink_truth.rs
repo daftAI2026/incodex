@@ -129,3 +129,68 @@ fn doctor_json_rejects_a_symlinked_journal_file_without_reading_target() {
         }));
     assert_eq!(fs::read_to_string(outside).unwrap(), "{}");
 }
+
+#[test]
+fn doctor_json_rejects_symlinked_target_and_native_journal_paths() {
+    let home = isolated_home();
+    let app = home.join("Missing.app");
+    let root = home.join(".incodex");
+
+    let targets = root.join("targets");
+    let outside_target = home.join("outside-target");
+    fs::create_dir_all(&outside_target).unwrap();
+    fs::write(
+        outside_target.join("incognito.lock"),
+        serde_json::json!({
+            "pid": 999_999_999_i64,
+            "processStartIdentity": "never-started",
+            "execIdentity": "ChatGPT",
+            "token": "0123456789abcdef0123456789abcdef"
+        })
+        .to_string(),
+    )
+    .unwrap();
+    fs::create_dir_all(&targets).unwrap();
+    std::os::unix::fs::symlink(&outside_target, targets.join("target-symlink")).unwrap();
+
+    let transactions = root.join("transactions");
+    let native_id = "01234567-89ab-4cde-8123-456789abcdef";
+    let native_transaction = transactions.join(native_id);
+    let outside_journal = home.join("outside-native-journal.json");
+    fs::create_dir_all(&native_transaction).unwrap();
+    fs::write(&outside_journal, b"{}").unwrap();
+    std::os::unix::fs::symlink(&outside_journal, native_transaction.join("journal.json")).unwrap();
+
+    let direct_id = "fedcba98-7654-4321-8fed-cba987654321";
+    let outside_transaction = home.join("outside-transaction");
+    fs::create_dir_all(&outside_transaction).unwrap();
+    fs::write(outside_transaction.join("journal.json"), b"{}").unwrap();
+    std::os::unix::fs::symlink(&outside_transaction, transactions.join(direct_id)).unwrap();
+
+    let (_status, stdout, stderr) =
+        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(stderr, "");
+    let report = parse_json(&stdout);
+    assert_unknown_finding(&report, "processIdentity", "owner.target-symlink");
+    assert_unknown_finding(&report, "journals", "journal.file-symlink");
+    assert_unknown_finding(&report, "journals", "journal.transaction-symlink");
+    assert!(fs::symlink_metadata(targets.join("target-symlink"))
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert!(
+        fs::symlink_metadata(native_transaction.join("journal.json"))
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert!(fs::symlink_metadata(transactions.join(direct_id))
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(fs::read_to_string(outside_journal).unwrap(), "{}");
+    assert_eq!(
+        fs::read_to_string(outside_transaction.join("journal.json")).unwrap(),
+        "{}"
+    );
+}
