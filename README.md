@@ -109,7 +109,7 @@ Incodex patches a locally installed Electron app. Destructive commands print a p
 - An official upgrade wipes the patch. Run `incodex install` again on the **current** official package
 - If Codex has already been upgraded, `incodex uninstall` will not put an old backup back
 - Original-bundle backups are isolated per app path under `~/.incodex/installations/`
-- Homebrew: `brew upgrade incodex`. Script: `incodex update`. Source update: `git pull && cargo install --locked --path crates/incodex-cli`; source removal: `cargo uninstall incodex`
+- Homebrew: `brew upgrade incodex`. Script: `incodex update`. Source update: `git pull && cargo install --locked --path crates/incodex-cli`; source removal: `cargo uninstall incodex-cli`
 - The menu supports arrows, Vim `j/k`, digits that run immediately, `V` for version, `q` to quit
 - If a script install cannot find the command, add `~/.local/bin` to PATH
 - Button and copy follow the main window language
