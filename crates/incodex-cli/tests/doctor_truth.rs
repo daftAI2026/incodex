@@ -307,6 +307,40 @@ fn doctor_json_classifies_owner_orphans_and_runtime_residue() {
 }
 
 #[test]
+fn doctor_json_scans_legacy_chromium_residue_without_modern_sessions() {
+    let home = isolated_home();
+    let app = home.join("Missing.app");
+    let root = home.join(".incodex");
+    fs::create_dir_all(root.join("incognito-home")).unwrap();
+    fs::create_dir_all(root.join("incognito-chromium")).unwrap();
+
+    let (_status, stdout, stderr) =
+        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(stderr, "");
+    let report = parse_json(&stdout);
+    let residue = report["leftoverChromium"].as_array().unwrap();
+    assert_eq!(residue.len(), 2);
+    assert!(residue.iter().any(|path| {
+        path.as_str()
+            .is_some_and(|path| path.ends_with(".incodex/incognito-home"))
+    }));
+    assert!(residue.iter().any(|path| {
+        path.as_str()
+            .is_some_and(|path| path.ends_with(".incodex/incognito-chromium"))
+    }));
+    assert_eq!(report["checks"]["chromiumResidue"]["status"], "checked");
+    assert!(
+        report["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|finding| finding["code"] == "chromium.residue")
+            .count()
+            >= 2
+    );
+}
+
+#[test]
 fn doctor_json_keeps_malformed_legacy_and_stale_committed_journals_visible() {
     let home = isolated_home();
     let app = home.join("Missing.app");
