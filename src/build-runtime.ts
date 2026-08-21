@@ -31,6 +31,8 @@ const mainOut = join(outDir, "incodex-main.cjs");
 const preloadOut = join(outDir, "incodex-preload.cjs");
 const safeHomeOut = join(outDir, "incodex-safe-home.cjs");
 const ipcGuardOut = join(outDir, "incodex-ipc-guard.cjs");
+const ownerCoreOut = join(outDir, "incodex-owner-core.cjs");
+const ownerRecoveryOut = join(outDir, "incodex-owner-recovery.cjs");
 const instanceOut = join(outDir, "incodex-instance.cjs");
 const runtimeLoadOut = join(outDir, "incodex-runtime-load.cjs");
 const windowKindOut = join(outDir, "incodex-window-kind.cjs");
@@ -69,6 +71,8 @@ const copies: Array<[string, string]> = [
   [join(emitDir, "incodex-preload.cjs"), preloadOut],
   [join(emitDir, "incodex-safe-home.cjs"), safeHomeOut],
   [join(emitDir, "incodex-ipc-guard.cjs"), ipcGuardOut],
+  [join(emitDir, "incodex-owner-core.cjs"), ownerCoreOut],
+  [join(emitDir, "incodex-owner-recovery.cjs"), ownerRecoveryOut],
   [join(emitDir, "incodex-instance.cjs"), instanceOut],
   [join(emitDir, "incodex-runtime-load.cjs"), runtimeLoadOut],
   [join(emitDir, "incodex-window-kind.cjs"), windowKindOut],
@@ -89,6 +93,8 @@ const artifactPaths = [
   preloadOut,
   safeHomeOut,
   ipcGuardOut,
+  ownerCoreOut,
+  ownerRecoveryOut,
   instanceOut,
   runtimeLoadOut,
   windowKindOut,

@@ -14,6 +14,8 @@ const RUNTIME_FILES = [
   "incodex-inject.js",
   "incodex-safe-home.cjs",
   "incodex-ipc-guard.cjs",
+  "incodex-owner-core.cjs",
+  "incodex-owner-recovery.cjs",
   "incodex-instance.cjs",
   "incodex-window-kind.cjs",
   "incodex-runtime-load.cjs",

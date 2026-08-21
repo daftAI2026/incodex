@@ -17,6 +17,8 @@ const files = [
   "incodex-preload.cjs",
   "incodex-safe-home.cjs",
   "incodex-ipc-guard.cjs",
+  "incodex-owner-core.cjs",
+  "incodex-owner-recovery.cjs",
   "incodex-instance.cjs",
   "incodex-runtime-load.cjs",
   "incodex-window-kind.cjs",
