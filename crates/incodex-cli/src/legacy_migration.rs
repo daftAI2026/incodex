@@ -195,7 +195,7 @@ where
         prepare_outgoing_proof(root, install_id, outgoing, &outgoing_digest)?;
         intent.recovery_digest = Some(outgoing_digest.clone());
         write_legacy_journal_with_checkpoint(root, &intent, || {
-            checkpoint("BEFORE_LEGACY_JOURNAL_RENAME")
+            checkpoint("BEFORE_LEGACY_INTENT_JOURNAL_RENAME")
         })?;
         checkpoint("AFTER_RESTORE_INTENT");
         ensure_staged_target_or_absent(
@@ -247,7 +247,7 @@ where
                 prepare_outgoing_proof(root, install_id, outgoing, &outgoing_digest)?;
                 intent.recovery_digest = Some(outgoing_digest.clone());
                 write_legacy_journal_with_checkpoint(root, &intent, || {
-                    checkpoint("BEFORE_LEGACY_JOURNAL_RENAME")
+                    checkpoint("BEFORE_LEGACY_INTENT_JOURNAL_RENAME")
                 })?;
                 checkpoint("AFTER_RESTORE_INTENT");
                 if tree_digest(outgoing)? != outgoing_digest {
@@ -302,7 +302,7 @@ where
     rolled_back.phase = "ROLLED_BACK".into();
     checkpoint("BEFORE_ROLLED_BACK_JOURNAL");
     write_legacy_journal_with_checkpoint(root, &rolled_back, || {
-        checkpoint("BEFORE_LEGACY_JOURNAL_RENAME")
+        checkpoint("BEFORE_LEGACY_ROLLED_BACK_JOURNAL_RENAME")
     })?;
     Ok(LegacyRecoveryResult {
         install_id: rolled_back.install_id,
