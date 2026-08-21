@@ -6,7 +6,10 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_asar::{pack_dir, patch_asar, Archive};
-use incodex_cli::legacy_proof::{prove_legacy_ts_v1, prove_legacy_ts_v1_with_checkpoint};
+use incodex_cli::legacy_proof::{
+    prove_legacy_ts_v1, prove_legacy_ts_v1_with_boundaries, prove_legacy_ts_v1_with_checkpoint,
+    verify_official_vendor_bundle,
+};
 use incodex_cli::legacy_typescript::load_legacy_ts_v1;
 use incodex_core::{canonical_path, target_id};
 use incodex_macos::{ditto, read_architecture};
@@ -271,6 +274,99 @@ fn proof_requires_the_target_lock_and_rechecks_toctou_identity() {
     })
     .unwrap_err();
     assert!(error.contains("inode") || error.contains("real path"), "{error}");
+}
+
+#[test]
+fn proof_reopens_and_rehashes_same_inode_live_files_at_the_final_boundary() {
+    let fixture = ProofFixture::create();
+    let live_asar = fixture.live_asar();
+    let live_plist = fixture.app.join("Contents/Info.plist");
+    let error = prove_legacy_ts_v1_with_boundaries(
+        &fixture.root,
+        fixture.state,
+        || Ok(()),
+        move || {
+            fs::OpenOptions::new()
+                .append(true)
+                .open(&live_asar)
+                .unwrap()
+                .write_all(b"same-inode-live-tamper")
+                .unwrap();
+            fs::OpenOptions::new()
+                .append(true)
+                .open(&live_plist)
+                .unwrap()
+                .write_all(b"same-inode-live-plist-tamper")
+                .unwrap();
+            Ok(())
+        },
+    )
+    .unwrap_err();
+    assert!(error.contains("final") || error.contains("hash"), "{error}");
+}
+
+#[test]
+fn proof_reopens_and_rehashes_same_inode_backup_files_at_the_final_boundary() {
+    let fixture = ProofFixture::create();
+    let original_asar = fixture.original_asar_path();
+    let original_plist = fixture.original_app.join("Contents/Info.plist");
+    let error = prove_legacy_ts_v1_with_boundaries(
+        &fixture.root,
+        fixture.state,
+        || Ok(()),
+        move || {
+            fs::OpenOptions::new()
+                .append(true)
+                .open(&original_asar)
+                .unwrap()
+                .write_all(b"same-inode-backup-tamper")
+                .unwrap();
+            fs::OpenOptions::new()
+                .append(true)
+                .open(&original_plist)
+                .unwrap()
+                .write_all(b"same-inode-backup-plist-tamper")
+                .unwrap();
+            Ok(())
+        },
+    )
+    .unwrap_err();
+    assert!(error.contains("final") || error.contains("hash"), "{error}");
+}
+
+#[test]
+fn proof_rejects_live_internal_info_and_executable_symlinks() {
+    for relative in ["Contents/Info.plist", "Contents/MacOS/ChatGPT"] {
+        let fixture = ProofFixture::create();
+        let path = fixture.app.join(relative);
+        let victim = fixture.root.join(format!("victim-{}", relative.replace('/', "-")));
+        fs::rename(&path, &victim).unwrap();
+        std::os::unix::fs::symlink(&victim, &path).unwrap();
+        let error = prove_legacy_ts_v1(&fixture.root, fixture.state).unwrap_err();
+        assert!(error.to_lowercase().contains("symlink"), "{relative}: {error}");
+    }
+}
+
+#[test]
+fn proof_rejects_backup_internal_info_symlink() {
+    let fixture = ProofFixture::create();
+    let path = fixture.original_app.join("Contents/Info.plist");
+    let victim = fixture.root.join("backup-info-victim");
+    fs::rename(&path, &victim).unwrap();
+    std::os::unix::fs::symlink(&victim, &path).unwrap();
+    let error = prove_legacy_ts_v1(&fixture.root, fixture.state).unwrap_err();
+    assert!(error.to_lowercase().contains("symlink"), "{error}");
+}
+
+#[test]
+fn ad_hoc_fixture_cannot_pass_the_official_vendor_verifier() {
+    let fixture = ProofFixture::create();
+    let error = verify_official_vendor_bundle(&fixture.original_app, "com.example.incodex-proof")
+        .unwrap_err();
+    assert!(
+        error.to_lowercase().contains("ad hoc") || error.contains("vendor"),
+        "{error}"
+    );
 }
 
 fn compile_executable(path: &Path) {
