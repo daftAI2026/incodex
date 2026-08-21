@@ -615,4 +615,52 @@ describe("cross-process owner contention", () => {
       expect(readFileSync(join(claimRoot, "owner"), "utf8")).toContain("stale-claim-token");
     }
   });
+
+  test("reclaim generation exhaustion fails closed without publishing a rejected marker", () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-generation-exhausted-"));
+    const claimRoot = join(root, ".incognito.lock.takeover");
+    const reclaimRoot = join(claimRoot, ".reclaim");
+    mkdirSync(reclaimRoot, { recursive: true });
+    writeFileSync(
+      join(claimRoot, "owner"),
+      JSON.stringify({
+        pid: 999999,
+        startedAt: "never",
+        processStartIdentity: "never",
+        execIdentity: "/nope",
+        token: "stale-claim-token",
+      }),
+    );
+    writeFileSync(
+      join(reclaimRoot, "marker.9007199254740990"),
+      JSON.stringify({
+        pid: 999999,
+        startedAt: "never",
+        processStartIdentity: "never",
+        execIdentity: "/nope",
+        token: "last-generation-token",
+      }),
+    );
+    writeFileSync(
+      join(root, LOCK_NAME),
+      JSON.stringify({
+        pid: 999999,
+        startedAt: "never",
+        execPath: "/nope",
+        sessionId: "stale",
+        token: "stale-owner-token",
+      }),
+    );
+
+    let caught: unknown;
+    try {
+      acquireOwnerLease(root, currentOwner("generation-exhausted", process.execPath));
+    } catch (error) {
+      caught = error;
+    }
+
+    expect((caught as { code?: string })?.code).toBe("OWNER_RECLAIM_UNREADABLE");
+    expect(existsSync(join(reclaimRoot, "marker.9007199254740991"))).toBe(false);
+    expect(readFileSync(join(reclaimRoot, "marker.9007199254740990"), "utf8")).toContain("last-generation-token");
+  });
 });
