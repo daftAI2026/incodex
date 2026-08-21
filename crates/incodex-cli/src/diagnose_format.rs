@@ -171,13 +171,17 @@ pub fn format_diagnosis(report: &Diagnosis) -> String {
             .get("unretainable")
             .and_then(serde_json::Value::as_array)
             .map(|items| {
-                items
+                let names = items
                     .iter()
                     .filter_map(serde_json::Value::as_str)
                     .collect::<Vec<_>>()
-                    .join(", ")
+                    .join(", ");
+                if names.is_empty() {
+                    "none".to_string()
+                } else {
+                    names
+                }
             })
-            .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "unknown".to_string());
         lines.push(incodex_core::format_kv("Dropped", &dropped, None));
     }
