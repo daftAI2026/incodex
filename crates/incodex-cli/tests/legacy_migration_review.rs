@@ -1,12 +1,13 @@
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
+use std::process::Command;
 
 use incodex_asar::pack_dir;
 use incodex_cli::legacy_migration::{
     migrate_legacy_if_needed, recover_legacy_ts_v1, recover_legacy_ts_v1_with_checkpoint,
 };
-use incodex_macos::{ditto, sign_app};
+use incodex_macos::{ditto, read_asar_integrity, sign_app};
 
 #[path = "support/legacy_fixture.rs"]
 mod legacy_fixture;
@@ -103,6 +104,67 @@ fn recovery_accepts_the_real_ts_integrity_plist_rewrite_when_staged_is_absent() 
 
     let result = recover_legacy_ts_v1(&fixture.root, INSTALL_ID);
     assert!(result.is_ok(), "real TS integrity rewrite is allowed: {result:?}");
+}
+
+#[test]
+fn recovery_does_not_depend_on_python3_in_path() {
+    let fixture = Fixture::create();
+    fixture.set_phase("SWAPPED");
+    let fake_bin = fixture.root.join("fake-bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let python = fake_bin.join("python3");
+    fs::write(&python, "#!/bin/sh\nexit 127\n").unwrap();
+    let mut permissions = fs::metadata(&python).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&python, permissions).unwrap();
+    let path = format!(
+        "{}:/usr/bin:/bin:/usr/sbin:/sbin",
+        fake_bin.display()
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_incodex"))
+        .args(["recover", "--transaction", INSTALL_ID])
+        .env("HOME", fixture.root.parent().unwrap())
+        .env("PATH", path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "plutil-based proof must not require python3: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn recovery_rejects_foreign_electron_integrity_entries_after_resign() {
+    let fixture = Fixture::create();
+    fixture.set_phase("SWAPPED");
+    let plist = fixture.app.join("Contents/Info.plist");
+    let patched_hash = read_asar_integrity(&fixture.app).unwrap();
+    let integrity = serde_json::json!({
+        "Resources/app.asar": {"algorithm": "SHA256", "hash": patched_hash},
+        "Other.app": {"algorithm": "SHA256", "hash": "foreign"}
+    });
+    let status = Command::new("plutil")
+        .args([
+            "-replace",
+            "ElectronAsarIntegrity",
+            "-json",
+            &serde_json::to_string(&integrity).unwrap(),
+            "--",
+        ])
+        .arg(&plist)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    sign_app(&fixture.app).unwrap();
+
+    let result = recover_legacy_ts_v1(&fixture.root, INSTALL_ID);
+    assert!(
+        result.is_err(),
+        "unrelated ElectronAsarIntegrity entries must not be normalized away"
+    );
 }
 
 #[test]
