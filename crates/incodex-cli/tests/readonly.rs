@@ -5,7 +5,9 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use incodex_asar::{pack_dir, MARKER_KEY};
+use incodex_asar::{pack_dir, patch_asar, MARKER_KEY};
+use incodex_macos::ditto;
+use incodex_transaction::Engine;
 use sha2::{Digest, Sha256};
 
 mod support;
@@ -706,6 +708,84 @@ fn doctor_json_refuses_clean_backup_for_a_patched_marker_without_native_backup()
         .iter()
         .any(|finding| finding["code"] == "backup.unverified"));
     assert_ne!(report["backup"]["complete"], true);
+}
+
+#[test]
+fn doctor_json_does_not_call_the_live_committed_journal_stale() {
+    let home = isolated_home();
+    let root = home.join(".incodex");
+    let app = home.join("ChatGPT.app");
+    let source = home.join("asar-source");
+    let candidate = home.join("candidate.app");
+    let asar = app.join("Contents/Resources/app.asar");
+    fs::create_dir_all(&source).unwrap();
+    fs::create_dir_all(asar.parent().unwrap()).unwrap();
+    fs::write(source.join("index.js"), b"official\n").unwrap();
+    fs::write(source.join("package.json"), b"{\"main\":\"index.js\"}\n").unwrap();
+    pack_dir(&source, &asar).unwrap();
+
+    let mut transaction = Engine::begin(&root, &app, "test").unwrap();
+    let install_id = transaction.install_id().to_string();
+    let original = root
+        .join("transactions")
+        .join(&install_id)
+        .join("original/ChatGPT.app");
+    fs::create_dir_all(original.parent().unwrap()).unwrap();
+    ditto(&app, &original).unwrap();
+    transaction.mark_backup_committed().unwrap();
+    ditto(&app, &candidate).unwrap();
+    patch_asar(
+        &candidate.join("Contents/Resources/app.asar"),
+        "module.exports = {};\n",
+        Some(&install_id),
+    )
+    .unwrap();
+    transaction.place_staging(&candidate).unwrap();
+    transaction.swap().unwrap();
+    transaction.commit().unwrap();
+
+    let (_status, stdout, stderr) =
+        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(stderr, "");
+    let report = parse_json(&stdout);
+    let records = report["journalRecords"].as_array().unwrap();
+    assert!(records.iter().any(|record| {
+        record["kind"] == "currentCommitted" && record["installId"] == install_id
+    }));
+    assert!(!records
+        .iter()
+        .any(|record| record["kind"] == "staleCommitted"));
+}
+
+#[test]
+fn doctor_json_marks_unverifiable_owner_and_session_records_unknown() {
+    let home = isolated_home();
+    let app = home.join("Missing.app");
+    let root = home.join(".incodex");
+    let target_id = "invalid-contract";
+    let state_root = root.join("targets").join(target_id);
+    fs::create_dir_all(&state_root).unwrap();
+    fs::write(state_root.join("incognito.lock"), b"{}\n").unwrap();
+    let session = root
+        .join("sessions")
+        .join(target_id)
+        .join("s-invalid-contract");
+    fs::create_dir_all(&session).unwrap();
+    fs::write(session.join("owner.json"), b"{}\n").unwrap();
+
+    let (_status, stdout, stderr) =
+        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(stderr, "");
+    let report = parse_json(&stdout);
+    assert_eq!(report["stalePid"], false);
+    assert_eq!(report["orphanSessions"], serde_json::json!([]));
+    assert_eq!(report["checks"]["processIdentity"]["status"], "unknown");
+    assert_eq!(report["checks"]["orphanSessions"]["status"], "unknown");
+    assert!(report["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|finding| { finding["code"] == "owner.invalid" }));
 }
 
 #[test]
