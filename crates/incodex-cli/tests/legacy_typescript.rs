@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use incodex_asar::{pack_dir, patch_asar, Archive};
-use incodex_core::target_id;
+use incodex_core::{canonical_path, is_official_app, target_id};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
@@ -284,12 +284,15 @@ fn write_flat_journal(
     phase: &str,
     updated_at: &str,
 ) -> PathBuf {
-    let target = fs::canonicalize(app).unwrap();
+    let target = canonical_path(app);
     let target_store = root.join("installations").join(target_id(app));
     let original = target_store.join(install_id).join("original/ChatGPT.app");
-    let staged = root
-        .join("scratch")
-        .join(format!("ChatGPT.app.staged-{install_id}"));
+    let staged = if is_official_app(app, None) {
+        root.join("ChatGPT.app.live")
+    } else {
+        root.join("scratch")
+            .join(format!("ChatGPT.app.staged-{install_id}"))
+    };
     let outgoing = root
         .join("transactions")
         .join(install_id)
@@ -455,9 +458,29 @@ fn legacy_typescript_fixture_accepts_only_emitted_staging_layouts() {
         "stagedApp",
         &fixture.root.join("ChatGPT.app.live"),
     );
+    let error = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
+        .expect_err("official live staging layout must not be accepted for a clone target");
+    assert!(error.contains("stagedApp"), "{error}");
+
+    let fixture = LegacyTsV1Fixture::create();
     incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
-        .expect("official live staging layout should be structurally valid")
-        .expect("fixture should be detected");
+        .expect("clone scratch staging layout should be structurally valid")
+        .expect("clone journal should be detected");
+
+    let official_root = temp_root();
+    write_flat_journal(
+        &official_root,
+        std::path::Path::new("/Applications/ChatGPT.app"),
+        INSTALL_ID,
+        "DISCOVERED",
+        "2026-08-21T00:04:00.000Z",
+    );
+    incodex_cli::legacy_typescript::load_legacy_ts_v1(
+        &official_root,
+        std::path::Path::new("/Applications/ChatGPT.app"),
+    )
+    .expect("official live staging layout should be structurally valid")
+    .expect("official journal should be detected");
 
     let fixture = LegacyTsV1Fixture::create();
     set_journal_path(&fixture, "stagedApp", &fixture.root);
@@ -474,6 +497,24 @@ fn legacy_typescript_fixture_accepts_only_emitted_staging_layouts() {
     let error = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
         .expect_err("an unrelated staging path must be rejected");
     assert!(error.contains("stagedApp"), "{error}");
+}
+
+#[test]
+fn legacy_typescript_fixture_rejects_current_pointer_without_a_committed_journal() {
+    let fixture = LegacyTsV1Fixture::create();
+    fs::remove_file(fixture.journal_path()).unwrap();
+    write_flat_journal(
+        &fixture.root,
+        &fixture.app,
+        ORPHAN_INSTALL_ID,
+        "ROLLED_BACK",
+        "2026-08-21T00:05:00.000Z",
+    );
+
+    let error = incodex_cli::legacy_typescript::load_legacy_ts_v1(&fixture.root, &fixture.app)
+        .expect_err("current metadata without its committed journal must fail closed");
+    assert!(error.contains("current"), "{error}");
+    assert!(error.contains(INSTALL_ID), "{error}");
 }
 
 #[test]
