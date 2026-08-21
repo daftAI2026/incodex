@@ -127,6 +127,7 @@ if [ "$1" = "--force" ] && [ "$2" = "--sign" ]; then
   exit 0
 fi
 if [ "$1" = "--force" ] && [ "$2" = "--deep" ]; then exit 0; fi
+if [ "$1" = "--verify" ] && [ "$INCODEX_CODESIGN_VERIFY_FAILURE" = "1" ]; then exit 1; fi
 if [ "$1" = "--verify" ]; then exit 0; fi
 exit 0
 "#
@@ -186,6 +187,19 @@ fn generic_verify_rejects_a_deep_strict_bundle_with_other_nested_identity() {
     let _path = fixture.configure_environment();
 
     assert!(!verify_app(&fixture.app));
+}
+
+#[test]
+fn generic_verify_rejects_deep_strict_invalid_outer_without_nested_components() {
+    let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let fixture = Fixture::new(NestedIdentity::Vendor, false, false, "unused", false);
+    let _path = fixture.configure_environment();
+    fs::remove_dir_all(fixture.app.join("Contents/Frameworks/NestedVendor.xpc")).unwrap();
+    std::env::set_var("INCODEX_CODESIGN_VERIFY_FAILURE", "1");
+
+    assert!(!verify_app(&fixture.app));
+
+    std::env::remove_var("INCODEX_CODESIGN_VERIFY_FAILURE");
 }
 
 #[test]
