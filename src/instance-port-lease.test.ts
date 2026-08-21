@@ -199,28 +199,35 @@ describe("kernel-held TCP owner lease", () => {
   test("bounds startup after repeated crashes without deleting a live sidecar", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-tcp-sidecar-gc-"));
     const targetExec = join(root, "target-executable");
-    const staleRecord = (index: number) => ({
-      pid: 900000 + index,
-      startedAt: "dead-fixture",
-      processStartIdentity: "dead-fixture",
-      execPath: targetExec,
-      execIdentity: "target-executable",
-      sessionId: `stale-${index}`,
-      token: `stale-token-${index}`,
-      nonce: `stale-token-${index}`,
-    });
+    const staleRecord = (index: number) => {
+      const token = index.toString(16).padStart(32, "0");
+      return {
+        pid: 900000 + index,
+        startedAt: "dead-fixture",
+        processStartIdentity: "dead-fixture",
+        execPath: targetExec,
+        execIdentity: "target-executable",
+        sessionId: `stale-${index}`,
+        token,
+        nonce: token,
+      };
+    };
     for (let index = 0; index < 100; index += 1) {
+      const token = index.toString(16).padStart(32, "0");
       writeFileSync(
-        join(root, `incognito.lock.active.stale-token-${index}`),
+        join(root, `incognito.lock.active.${token}`),
         `${JSON.stringify(staleRecord(index))}\n`,
       );
     }
     writeFileSync(join(root, "incognito.lock"), "{\"pid\":");
     const live = currentOwner("live-sidecar", targetExec);
-    await acquireOwnerLease(root, live);
     const started = Date.now();
-    expect(await connectExisting(root, 500, live.token)).toBe(true);
+    await acquireOwnerLease(root, live);
     expect(Date.now() - started).toBeLessThan(2_000);
+    expect(readdirSync(root).filter((name) => name.startsWith("incognito.lock.active.")).sort()).toEqual([
+      `incognito.lock.active.${live.token}`,
+    ]);
+    expect(await connectExisting(root, 500, live.token)).toBe(true);
     const records = readOwnerRecords(root);
     expect(records.filter(({ path }: { path: string }) => path.includes(".active.")).map(({ path }: { path: string }) => path)).toEqual([
       join(root, `incognito.lock.active.${live.token}`),
@@ -228,6 +235,26 @@ describe("kernel-held TCP owner lease", () => {
     expect(existsSync(join(root, "incognito.lock"))).toBe(true);
     expect(clearOwnerLock(root, live)).toBe(true);
   }, 30_000);
+
+  test("rejects a sidecar whose filename token differs from its record token", async () => {
+    const root = mkdtempSync(join(tmpdir(), "incodex-tcp-sidecar-mismatch-"));
+    const targetExec = join(root, "target-executable");
+    const record = {
+      pid: 900001,
+      startedAt: "dead-fixture",
+      processStartIdentity: "dead-fixture",
+      execPath: targetExec,
+      execIdentity: "target-executable",
+      sessionId: "mismatch",
+      token: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      nonce: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    };
+    const mismatchPath = join(root, "incognito.lock.active.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    writeFileSync(mismatchPath, `${JSON.stringify(record)}\n`);
+    const candidate = currentOwner("mismatch-candidate", targetExec);
+    await expect(acquireOwnerLease(root, candidate)).rejects.toMatchObject({ code: "OWNER_UNVERIFIABLE" });
+    expect(existsSync(mismatchPath)).toBe(true);
+  });
 
   test("a SIGKILL releases the listener so the next process can acquire", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-tcp-sigkill-"));
