@@ -97,6 +97,14 @@ pub struct SessionScan {
     pub chromium_check: CheckResult,
 }
 
+fn session_symlink_finding(path: &Path) -> DiagnosticFinding {
+    DiagnosticFinding::warning(
+        "session.symlink",
+        "session root is a symlink and was not inspected",
+        Some(path),
+    )
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct JournalRecord {
@@ -324,6 +332,12 @@ pub fn scan_sessions(root: &Path) -> SessionScan {
             match read_directory(&sessions) {
                 Ok(Some(targets)) => {
                     for child in targets {
+                        if file_name_starts(&child, "s-") && is_symlink(&child) {
+                            unknown = true;
+                            orphan_findings.push(session_symlink_finding(&child));
+                            chromium_findings.push(session_symlink_finding(&child));
+                            continue;
+                        }
                         if !is_directory(&child) {
                             continue;
                         }
@@ -338,18 +352,8 @@ pub fn scan_sessions(root: &Path) -> SessionScan {
                                         }
                                         if is_symlink(&path) {
                                             unknown = true;
-                                            let message =
-                                                "session root is a symlink and was not inspected";
-                                            orphan_findings.push(DiagnosticFinding::warning(
-                                                "session.symlink",
-                                                message,
-                                                Some(&path),
-                                            ));
-                                            chromium_findings.push(DiagnosticFinding::warning(
-                                                "session.symlink",
-                                                message,
-                                                Some(&path),
-                                            ));
+                                            orphan_findings.push(session_symlink_finding(&path));
+                                            chromium_findings.push(session_symlink_finding(&path));
                                         } else if is_directory(&path) {
                                             roots.push(path);
                                         }
@@ -790,7 +794,6 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
         check: CheckResult::checked(findings),
     }
 }
-
 #[cfg(test)]
 #[path = "diagnose_checks_tests.rs"]
 mod tests;
