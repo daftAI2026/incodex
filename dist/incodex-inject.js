@@ -961,7 +961,7 @@ var TIP_ATTR = "data-incodex-tooltip";
 var LANDING_ATTR = "data-incodex-landing";
 var ERROR_ATTR = "data-incodex-launch-error";
 var SHORTCUT_LABEL = "⇧⌘N";
-var TOOLTIP_DELAY_MS = 700;
+var TOOLTIP_FALLBACK_DELAY_MS = 700;
 var TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
 var activeTooltipLifecycle = null;
 function dismissActiveTooltip() {
@@ -1196,7 +1196,7 @@ function buildButton(search) {
   if (svg)
     btn.append(svg);
   const tooltipLifecycle = createTooltipLifecycle({
-    delayMs: TOOLTIP_DELAY_MS,
+    delayMs: TOOLTIP_FALLBACK_DELAY_MS,
     schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
     cancel: (id) => window.clearTimeout(id),
     canShow: () => btn.isConnected && (btn.getAttribute("data-incodex-hovered") === "true" || document.activeElement === btn),

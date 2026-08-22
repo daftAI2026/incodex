@@ -11,7 +11,7 @@ const TIP_ATTR = "data-incodex-tooltip";
 const LANDING_ATTR = "data-incodex-landing";
 const ERROR_ATTR = "data-incodex-launch-error";
 const SHORTCUT_LABEL = "⇧⌘N";
-const TOOLTIP_DELAY_MS = 700;
+const TOOLTIP_FALLBACK_DELAY_MS = 700;
 const TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
 
 let activeTooltipLifecycle: TooltipLifecycle | null = null;
@@ -262,7 +262,7 @@ function buildButton(search: HTMLElement): HTMLElement {
   const svg = createButtonIcon(ICON_SVG, "hat-glasses", search.querySelector("svg"));
   if (svg) btn.append(svg);
   const tooltipLifecycle = createTooltipLifecycle({
-    delayMs: TOOLTIP_DELAY_MS,
+    delayMs: TOOLTIP_FALLBACK_DELAY_MS,
     schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
     cancel: (id) => window.clearTimeout(id),
     canShow: () =>

@@ -57,8 +57,8 @@ describe("incognito button exit affordance", () => {
 });
 
 describe("incodex tooltip lifecycle", () => {
-  test("uses the same 700ms default delay as the current official tooltip provider", () => {
-    expect(inject).toContain("const TOOLTIP_DELAY_MS = 700");
+  test("keeps a stable fallback delay without reading private provider state", () => {
+    expect(inject).toContain("const TOOLTIP_FALLBACK_DELAY_MS = 700");
   });
 
   test("listens to the app-wide dismissal signal without dispatching the private event", () => {
@@ -84,5 +84,4 @@ describe("incodex tooltip lifecycle", () => {
       /function onKeydown\(event: KeyboardEvent\): void \{[\s\S]*event\.key === "Escape"[\s\S]*dismissActiveTooltip\(\);/,
     );
   });
-
 });
