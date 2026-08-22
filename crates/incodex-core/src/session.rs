@@ -715,10 +715,22 @@ fn file_name(path: &Path) -> Result<String, String> {
 pub fn is_canonical_process_start_identity(value: &str) -> bool {
     let parts: Vec<&str> = value.split_whitespace().collect();
     if parts.len() != 5
-        || parts[0].len() != 3
-        || parts[1].len() != 3
-        || !parts[0].bytes().all(|byte| byte.is_ascii_alphabetic())
-        || !parts[1].bytes().all(|byte| byte.is_ascii_alphabetic())
+        || !matches!(parts[0], "Sun" | "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat")
+        || !matches!(
+            parts[1],
+            "Jan"
+                | "Feb"
+                | "Mar"
+                | "Apr"
+                | "May"
+                | "Jun"
+                | "Jul"
+                | "Aug"
+                | "Sep"
+                | "Oct"
+                | "Nov"
+                | "Dec"
+        )
         || !(1..=2).contains(&parts[2].len())
         || !parts[2].bytes().all(|byte| byte.is_ascii_digit())
         || parts[3].len() != 8

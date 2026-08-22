@@ -46,6 +46,18 @@ function isIncognito() {
   return safeHome.isManagedSessionHome(resolvedCodexHome(), USER_ROOT);
 }
 
+function captureChildOwnerSnapshot() {
+  if (!isIncognito() || typeof instance.processIdentity !== "function") return null;
+  const live = instance.processIdentity(process.pid);
+  if (!live?.processStartIdentity) return null;
+  return Object.freeze({
+    pid: process.pid,
+    processStartIdentity: live.processStartIdentity,
+  });
+}
+
+const childOwnerSnapshot = captureChildOwnerSnapshot();
+
 function sessionFromEnv() {
   const home = process.env.CODEX_HOME;
   const sessionId = process.env.INCODEX_SESSION_ID;
@@ -84,6 +96,30 @@ function readLocaleOverride() {
   }
 }
 
+function burnIncognitoSession(session, ownerSnapshot, userRoot = USER_ROOT) {
+  if (
+    !session ||
+    !ownerSnapshot ||
+    !Number.isInteger(ownerSnapshot.pid) ||
+    ownerSnapshot.pid <= 0 ||
+    typeof ownerSnapshot.processStartIdentity !== "string" ||
+    !ownerSnapshot.processStartIdentity
+  ) {
+    return false;
+  }
+  const expected = {
+    userRoot,
+    sessionId: session.sessionId,
+    ino: session.ino,
+    dev: session.dev,
+  };
+  const removed = safeHome.burnSessionHomeWithOwner(session.root, expected, ownerSnapshot);
+  if (removed && !safeHome.writeBurnProof(session.root, expected)) {
+    logLaunch("burn-proof-write-failed", { home: session.root });
+  }
+  return removed;
+}
+
 function burnIncognitoHome() {
   const session = sessionFromEnv();
   const home = session?.root || session?.home || process.env.CODEX_HOME;
@@ -92,17 +128,12 @@ function burnIncognitoHome() {
     logLaunch("burn-refused", { home, reason: "session identity is unavailable" });
     return;
   }
+  if (!childOwnerSnapshot) {
+    logLaunch("burn-refused", { home, reason: "process identity is unavailable" });
+    return;
+  }
   try {
-    const expected = {
-      userRoot: USER_ROOT,
-      sessionId: session.sessionId,
-      ino: session.ino,
-      dev: session.dev,
-    };
-    const removed = safeHome.burnSessionHome(home, expected);
-    if (removed && !safeHome.writeBurnProof(home, expected)) {
-      logLaunch("burn-proof-write-failed", { home });
-    }
+    burnIncognitoSession(session, childOwnerSnapshot);
     logLaunch("burn", { home });
   } catch (error) {
     logLaunch("burn-refused", { error: String(error), home });
@@ -745,7 +776,9 @@ async function attachElectron() {
 }
 
 const startupGate = attachElectron();
-if (typeof module !== "undefined") module.exports = { startupGate, prepareIncognitoSession };
+if (typeof module !== "undefined") {
+  module.exports = { startupGate, prepareIncognitoSession, burnIncognitoSession };
+}
 startupGate.catch((error) => {
   console.error("[incodex] main attach failed", error);
 });

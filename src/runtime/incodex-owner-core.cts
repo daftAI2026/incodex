@@ -58,8 +58,8 @@ function isCanonicalProcessStartIdentity(value) {
   const parts = value.trim().split(/\s+/);
   return (
     parts.length === 5 &&
-    /^[A-Za-z]{3}$/.test(parts[0]) &&
-    /^[A-Za-z]{3}$/.test(parts[1]) &&
+    ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].includes(parts[0]) &&
+    ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].includes(parts[1]) &&
     /^\d{1,2}$/.test(parts[2]) &&
     /^\d{2}:\d{2}:\d{2}$/.test(parts[3]) &&
     /^\d{4}$/.test(parts[4])
