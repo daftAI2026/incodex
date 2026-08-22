@@ -240,6 +240,16 @@ fn native_non_tty_mutations_print_auditable_progress_stages() {
     let app = patchable_app(&home);
     let install = run_rust(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
     assert_eq!(install.status, 0, "{install:?}");
+    let version = install.stdout.find("  Version").unwrap();
+    let checking = install
+        .stdout
+        .find("➤ Checking app signature")
+        .expect("install plan must announce its signing preflight");
+    let signed = install.stdout.find("  Signed").unwrap();
+    assert!(
+        version < checking && checking < signed,
+        "signing preflight must be visible between Version and Signed: {install:?}"
+    );
     assert!(
         install.stdout.contains("➤ Publishing Runtime")
             && install.stdout.contains("➤ Backing up original app")
@@ -249,6 +259,10 @@ fn native_non_tty_mutations_print_auditable_progress_stages() {
         "install must expose durable stages without TTY controls: {install:?}"
     );
     assert!(!install.stdout.contains('\u{1b}'), "{install:?}");
+    assert!(
+        !install.stdout.contains("Codex Storage Key"),
+        "a foreign custom bundle must not receive Codex-specific Keychain advice: {install:?}"
+    );
 
     let uninstall = run_rust(
         &["uninstall", "--yes", "--app", app.to_str().unwrap()],
@@ -268,6 +282,35 @@ fn native_non_tty_mutations_print_auditable_progress_stages() {
         "custom app uninstall must not claim an official target or Dock refresh: {uninstall:?}"
     );
     assert!(!uninstall.stdout.contains('\u{1b}'), "{uninstall:?}");
+}
+
+#[test]
+fn native_install_does_not_give_persistent_keychain_advice_to_an_explicit_target() {
+    let home = scratch("install-custom-keychain-advice");
+    let app = patchable_app(&home);
+    fs::write(
+        app.join("Contents/Info.plist"),
+        plist("com.openai.codex", "ChatGPT"),
+    )
+    .unwrap();
+
+    let dry_run = run_rust(
+        &["install", "--dry-run", "--app", app.to_str().unwrap()],
+        &home,
+    );
+    assert_eq!(dry_run.status, 0, "{dry_run:?}");
+    assert!(
+        !dry_run.stdout.contains("Codex Storage Key"),
+        "a dry run must not predict that a Keychain prompt will occur: {dry_run:?}"
+    );
+
+    let install = run_rust(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(install.status, 0, "{install:?}");
+    assert!(
+        !install.stdout.contains("Codex Storage Key")
+            && !install.stdout.contains("Always Allow"),
+        "an explicit path must not receive persistent Keychain authorization advice based only on its bundle id: {install:?}"
+    );
 }
 
 #[test]

@@ -46,13 +46,13 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
     if parsed.clone && parsed.app.is_none() {
         println!("{}", format_kv("Clone", &app.display().to_string(), None));
     }
-    print_install_plan(&app, parsed.clone)?;
+    let mut progress = Progress::new();
+    print_install_plan(&app, parsed.clone, &mut progress)?;
     if parsed.dry_run {
         println!("{}", format_warn("Dry run. No files changed.", None));
         return Ok(());
     }
     ensure_confirmed(parsed, "install")?;
-    let mut progress = Progress::new();
     let official_default = is_official_app(&app, None);
     if parsed.clone && parsed.app.is_none() {
         progress.stage("Cloning official app");
@@ -87,6 +87,9 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
             "{}",
             format_ok("Restart that app copy to see the Incognito button.", None)
         );
+    }
+    if should_print_keychain_advice(&app, &result, parsed.app.is_some()) {
+        print_keychain_advice();
     }
     println!();
     Ok(())
@@ -226,7 +229,7 @@ fn resolve_target(parsed: &ParsedCli, root: &Path) -> PathBuf {
     PathBuf::from(DEFAULT_APP)
 }
 
-fn print_install_plan(app: &Path, clone: bool) -> Result<(), String> {
+fn print_install_plan(app: &Path, clone: bool, progress: &mut Progress) -> Result<(), String> {
     let source = if clone {
         PathBuf::from(DEFAULT_APP)
     } else {
@@ -260,13 +263,12 @@ fn print_install_plan(app: &Path, clone: bool) -> Result<(), String> {
         _ => "unknown".to_string(),
     };
     println!("{}", format_kv("Version", &version, None));
+    progress.stage("Checking app signature");
+    let signed = verify_app(&source);
+    progress.stop();
     println!(
         "{}",
-        format_kv(
-            "Signed",
-            if verify_app(&source) { "yes" } else { "no" },
-            None
-        )
+        format_kv("Signed", if signed { "yes" } else { "no" }, None)
     );
     if !clone {
         println!(
@@ -785,6 +787,37 @@ fn print_command_result(result: &CommandResult) {
         println!("{}", format_kv("Runtime", version, None));
     }
     println!("{}", format_kv("App", &result.app, None));
+}
+
+fn should_print_keychain_advice(app: &Path, result: &CommandResult, explicit_target: bool) -> bool {
+    keychain_advice_is_allowed(
+        !result.skipped,
+        is_official_app(app, None),
+        read_plist_info(app)
+            .is_some_and(|info| info.bundle_identifier == OFFICIAL_BUNDLE_IDENTIFIER),
+        explicit_target,
+    )
+}
+
+fn keychain_advice_is_allowed(
+    new_install: bool,
+    official_target: bool,
+    codex_bundle: bool,
+    explicit_target: bool,
+) -> bool {
+    cfg!(target_os = "macos") && new_install && official_target && codex_bundle && !explicit_target
+}
+
+fn print_keychain_advice() {
+    for message in [
+        "Keychain: On next launch, macOS may ask this patched Codex app to access Codex Storage Key.",
+        "Confirm the dialog names this app and the Codex Storage Key item.",
+        "If both match, enter your Mac login password (not your ChatGPT password) and choose Always Allow.",
+        "Allow or Allow Once grants only that access and may prompt again later.",
+        "If the details do not match, choose Deny; Incodex and Terminal never need that password.",
+    ] {
+        println!("{}", format_warn(message, None));
+    }
 }
 
 #[cfg(test)]
