@@ -636,7 +636,7 @@ where
         if !session_root.exists() && !original_removed {
             return CleanupResult::Removed { attempts: attempt };
         }
-        // 已证明原始 root 删除后，仍保留当前有界观察窗口，捕捉迟到的重建。
+        // 若原始 root 已证明删除但路径暂时不存在，仍保留有界观察窗口以捕捉迟到重建。
         if attempt < 5 && retry_delay_ms > 0 {
             thread::sleep(Duration::from_millis(retry_delay_ms * u64::from(attempt)));
         }
