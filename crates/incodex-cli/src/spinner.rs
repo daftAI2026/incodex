@@ -7,6 +7,36 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 const FRAMES: &[char] = &['|', '/', '-', '\\'];
+const SPINNER_PREFIX_COLUMNS: usize = 4;
+const SPINNER_RESERVED_COLUMNS: usize = 8;
+const MIN_MESSAGE_COLUMNS: usize = 20;
+
+fn format_spinner_message(message: &str, columns: usize) -> String {
+    let sanitized = message.to_string();
+    let maximum = columns.saturating_sub(SPINNER_PREFIX_COLUMNS);
+    let preferred = columns
+        .saturating_sub(SPINNER_RESERVED_COLUMNS)
+        .max(MIN_MESSAGE_COLUMNS);
+    let available = preferred.min(maximum);
+    let length = sanitized.chars().count();
+    if length <= available {
+        return sanitized;
+    }
+    if available > 3 {
+        format!(
+            "{}...",
+            sanitized.chars().take(available - 3).collect::<String>()
+        )
+    } else {
+        sanitized.chars().take(available).collect()
+    }
+}
+
+fn format_spinner_frame(frame: char, message: &str, columns: usize, clear: bool) -> String {
+    let lead = if clear { "\r\u{1b}[2K" } else { "\r" };
+    let message = format_spinner_message(message, columns);
+    format!("{lead}  \u{1b}[1;34m{frame}\u{1b}[0m {message}")
+}
 
 pub struct Progress {
     interactive: bool,
@@ -86,19 +116,36 @@ impl Spinner {
         let stopped = Arc::new(AtomicBool::new(false));
         let worker_stopped = Arc::clone(&stopped);
         let worker_message = Arc::clone(&message);
-        eprint!("\r\u{1b}[2K  {} {}", FRAMES[0], message.lock().unwrap());
+        let initial_message = message.lock().unwrap().clone();
+        eprint!(
+            "{}",
+            format_spinner_frame(
+                FRAMES[0],
+                &initial_message,
+                crate::terminal::stderr_columns(),
+                true,
+            )
+        );
         let _ = std::io::stderr().flush();
         let worker = thread::spawn(move || {
             let mut frame = 1_usize;
+            let mut current_message = initial_message;
             while !worker_stopped.load(Ordering::Relaxed) {
                 thread::park_timeout(frame_interval);
                 if worker_stopped.load(Ordering::Relaxed) {
                     break;
                 }
+                let next_message = worker_message.lock().unwrap().clone();
+                let clear = next_message != current_message;
+                current_message = next_message;
                 eprint!(
-                    "\r\u{1b}[2K  {} {}",
-                    FRAMES[frame % FRAMES.len()],
-                    worker_message.lock().unwrap()
+                    "{}",
+                    format_spinner_frame(
+                        FRAMES[frame % FRAMES.len()],
+                        &current_message,
+                        crate::terminal::stderr_columns(),
+                        clear,
+                    )
                 );
                 let _ = std::io::stderr().flush();
                 frame += 1;
@@ -114,10 +161,6 @@ impl Spinner {
     fn update_message(&mut self, message: &str) {
         let mut current = self.message.lock().unwrap();
         *current = message.to_string();
-        if self.worker.is_some() {
-            eprint!("\r\u{1b}[2K  {} {current}", FRAMES[0]);
-            let _ = std::io::stderr().flush();
-        }
     }
 
     pub fn stop(&mut self) {
