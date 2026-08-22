@@ -36,5 +36,8 @@ jobs:
           bun-version-file: .bun-version
       - name: Frozen install
         run: bun install --frozen-lockfile
-      - name: Cargo test
-        run: cargo test --workspace --release
+      - name: Cargo quality gates
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo test --workspace --release --locked
