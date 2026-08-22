@@ -82,6 +82,40 @@ describe("release CLI artifacts", () => {
     expect(releaseYml).toContain('verify_runtime_pointer "$X64_SMOKE_HOME"');
   });
 
+  test("behavior-smokes each final signed Rust asset with the same ignored harness", () => {
+    const harnessPath = join(root, "crates/incodex-cli/tests/release_asset_smoke.rs");
+    expect(existsSync(harnessPath)).toBe(true);
+    const harness = existsSync(harnessPath) ? readFileSync(harnessPath, "utf8") : "";
+
+    const workflow = releaseYml.replace(/\\\n\s*/g, " ");
+    const command =
+      "cargo test --locked --release --package incodex-cli --test release_asset_smoke -- --ignored --exact release_asset_behavior_smoke";
+    const armInvocation =
+      `INCODEX_RELEASE_BINARY="$ARM_BINARY" INCODEX_RELEASE_ARCH="arm64" ${command}`;
+    const x64Invocation =
+      `INCODEX_RELEASE_BINARY="$X64_BINARY" INCODEX_RELEASE_ARCH="x86_64" ${command}`;
+    const finalSignature = workflow.indexOf(
+      "codesign --sign - --force release-cli/incodex-darwin-x64",
+    );
+
+    expect(finalSignature).toBeGreaterThanOrEqual(0);
+    expect(workflow.indexOf(armInvocation)).toBeGreaterThan(finalSignature);
+    expect(workflow.indexOf(x64Invocation)).toBeGreaterThan(finalSignature);
+
+    expect(harness).toContain("INCODEX_RELEASE_BINARY");
+    expect(harness).toContain("INCODEX_RELEASE_ARCH");
+    expect(harness).toContain("Command::new");
+    expect(harness).toContain('arg("--version")');
+    expect(harness).toContain('arg("--help")');
+    expect(harness).toContain('args(["status", "--json"])');
+    expect(harness).toContain('args(["open", "--dry-run"])');
+    expect(harness).toContain('args(["install", "--yes"])');
+    expect(harness).toContain('args(["uninstall", "--yes"])');
+    expect(harness).toMatch(/original_snapshot/);
+    expect(harness).toMatch(/restored_snapshot/);
+    expect(harness).toMatch(/assert_eq!\(\s*restored_snapshot,\s*original_snapshot/);
+  });
+
   test("smoke validates external and manifest Runtime file sets separately", () => {
     expect(externalFileNames).toHaveLength(10);
     expect(manifestFileNames).toHaveLength(11);
