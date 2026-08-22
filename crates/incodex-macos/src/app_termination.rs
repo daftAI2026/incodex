@@ -14,9 +14,9 @@ function run(argv) {
   for (const rawPid of argv.slice(1)) {
     const pid = Number(rawPid);
     const app = $.NSRunningApplication.runningApplicationWithProcessIdentifier(pid);
-    if (!app || app.js === null) continue;
+    if (!app || app.isNil()) continue;
     const url = app.executableURL;
-    const actual = url && url.js !== null ? ObjC.unwrap(url.path) : "";
+    const actual = url && !url.isNil() ? ObjC.unwrap(url.path) : "";
     if (actual !== expected) {
       throw new Error(`process ${pid} executable changed; refusing termination request`);
     }
