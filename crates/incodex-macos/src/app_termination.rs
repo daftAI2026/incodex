@@ -108,4 +108,13 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn process_that_exits_before_the_request_is_ignored() {
+        request_normal_termination(
+            Path::new("/Applications/ChatGPT.app/Contents/MacOS/ChatGPT"),
+            &[i32::MAX],
+        )
+        .unwrap();
+    }
 }
