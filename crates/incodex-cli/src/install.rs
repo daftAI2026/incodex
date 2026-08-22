@@ -119,7 +119,7 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
     progress.stop();
     println!(
         "{}",
-        format_ok("Official app restored. Dock was refreshed.", None)
+        format_ok("App restored. App registration was refreshed.", None)
     );
     print_command_result(&result);
     println!();
@@ -396,7 +396,7 @@ where
             return Err(rollback_install(&mut tx, Some(&staged), err));
         }
     }
-    progress.stage("Replacing application");
+    progress.stage("Replacing the app");
     if let Err(error) = quiescence.ensure_quiescent(app) {
         return Err(rollback_install(&mut tx, Some(&staged), error));
     }
@@ -527,7 +527,7 @@ where
         )?;
     }
     verify_restored_app(app, official_target)?;
-    progress.stage("Refreshing Dock registration");
+    progress.stage("Refreshing app registration");
     let _ = notify_launch_services(app);
     Ok(CommandResult {
         skipped: false,

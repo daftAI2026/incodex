@@ -16,6 +16,24 @@ fn run_tty(
     }
 }
 
+fn run_tty_with_columns(
+    program: &str,
+    prefix: &[&str],
+    args: &[&str],
+    home: &Path,
+    wait_for: &str,
+    keys: &str,
+    columns: u16,
+) -> CliResult {
+    let result =
+        support::tty::run_with_columns(program, prefix, args, home, wait_for, keys, columns);
+    CliResult {
+        status: result.status,
+        stdout: result.stdout,
+        stderr: result.stderr,
+    }
+}
+
 fn visible(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
@@ -36,6 +54,13 @@ fn visible(text: &str) -> String {
 
 fn count(text: &str, needle: &str) -> usize {
     text.match_indices(needle).count()
+}
+
+fn has_spinner_frame(text: &str, message: &str) -> bool {
+    let text = visible(text);
+    ["|", "/", "-", "\\"]
+        .iter()
+        .any(|frame| text.contains(&format!("  {frame} {message}")))
 }
 
 fn assert_menu_order(text: &str, expected: &[&str]) {
@@ -126,9 +151,7 @@ fn native_open_animates_while_waiting_for_cdp_readiness_and_clears_its_line() {
         visible(&rust.stdout)
     );
     assert!(
-        ["|", "/", "-", "\\"].iter().any(|frame| rust
-            .stdout
-            .contains(&format!("  {frame} Waiting for Codex UI to become ready"))),
+        has_spinner_frame(&rust.stdout, "Waiting for Codex UI to become ready"),
         "missing spinner frames: {:?}",
         rust.stdout
     );
@@ -136,6 +159,58 @@ fn native_open_animates_while_waiting_for_cdp_readiness_and_clears_its_line() {
         rust.stdout.contains("\r\u{1b}[2K"),
         "spinner must clear the current line: {:?}",
         rust.stdout
+    );
+}
+
+#[test]
+fn native_spinner_styles_the_glyph_and_avoids_repeated_line_erases() {
+    let home = scratch("spinner-rendering");
+    let app = sleeping_open_app(&home);
+    let rust = run_tty(
+        rust_bin(),
+        &[],
+        &["open", "--app", app.to_str().unwrap()],
+        &home,
+        "Closed. Isolated session removed.",
+        "",
+    );
+    assert_eq!(rust.status, 3, "{}", visible(&rust.stdout));
+    assert!(
+        rust.stdout.contains("  \u{1b}[1;34m|\u{1b}[0m Waiting"),
+        "spinner glyph must be blue and bold without styling the message: {:?}",
+        rust.stdout
+    );
+    assert!(
+        ["/", "-", "\\"].iter().any(|frame| rust
+            .stdout
+            .contains(&format!("\r  \u{1b}[1;34m{frame}\u{1b}[0m Waiting"))),
+        "unchanged frames should return to column zero without erasing the line: {:?}",
+        rust.stdout
+    );
+}
+
+#[test]
+fn native_spinner_truncates_long_messages_in_a_narrow_terminal() {
+    let home = scratch("spinner-narrow");
+    let app = sleeping_open_app(&home);
+    let rust = run_tty_with_columns(
+        rust_bin(),
+        &[],
+        &["open", "--app", app.to_str().unwrap()],
+        &home,
+        "Closed. Isolated session removed.",
+        "",
+        24,
+    );
+    assert_eq!(rust.status, 3, "{}", visible(&rust.stdout));
+    let output = visible(&rust.stdout);
+    assert!(
+        output.contains("  | Waiting for Codex..."),
+        "narrow spinner did not preserve a single visible line: {output:?}"
+    );
+    assert!(
+        !output.contains("Waiting for Codex UI to become ready"),
+        "narrow spinner leaked the unbounded message: {output:?}"
     );
 }
 
@@ -156,9 +231,7 @@ fn native_tty_uninstall_animates_immediately_after_confirmation() {
     );
     assert_eq!(rust.status, 0, "{}", visible(&rust.stdout));
     assert!(
-        ["|", "/", "-", "\\"].iter().any(|frame| rust
-            .stdout
-            .contains(&format!("  {frame} Restoring original app"))),
+        has_spinner_frame(&rust.stdout, "Restoring original app"),
         "confirmation was followed by a silent uninstall: {:?}",
         rust.stdout
     );
@@ -168,7 +241,7 @@ fn native_tty_uninstall_animates_immediately_after_confirmation() {
         rust.stdout
     );
     assert!(
-        visible(&rust.stdout).contains("Official app restored. Dock was refreshed."),
+        visible(&rust.stdout).contains("App restored. App registration was refreshed."),
         "missing final uninstall result: {}",
         visible(&rust.stdout)
     );
@@ -188,9 +261,7 @@ fn native_tty_install_animates_immediately_after_confirmation() {
     );
     assert_eq!(rust.status, 0, "{}", visible(&rust.stdout));
     assert!(
-        ["|", "/", "-", "\\"].iter().any(|frame| rust
-            .stdout
-            .contains(&format!("  {frame} Backing up original app"))),
+        has_spinner_frame(&rust.stdout, "Backing up original app"),
         "confirmation was followed by a silent install: {:?}",
         rust.stdout
     );
@@ -200,9 +271,7 @@ fn native_tty_install_animates_immediately_after_confirmation() {
         rust.stdout
     );
     assert!(
-        ["|", "/", "-", "\\"].iter().any(|frame| rust
-            .stdout
-            .contains(&format!("  {frame} Replacing application"))),
+        has_spinner_frame(&rust.stdout, "Replacing the app"),
         "install should expose a product phase instead of a transaction primitive: {:?}",
         rust.stdout
     );
@@ -261,9 +330,7 @@ fn native_tty_runtime_animates_and_clears_its_line() {
     );
     assert_eq!(rust.status, 0, "{}", visible(&rust.stdout));
     assert!(
-        ["|", "/", "-", "\\"].iter().any(|frame| rust
-            .stdout
-            .contains(&format!("  {frame} Publishing Runtime"))),
+        has_spinner_frame(&rust.stdout, "Publishing Runtime"),
         "runtime publish was silent: {:?}",
         rust.stdout
     );
@@ -292,9 +359,7 @@ fn native_tty_status_and_doctor_animate_without_changing_machine_output() {
         );
         assert_eq!(rust.status, 0, "{command}: {}", visible(&rust.stdout));
         assert!(
-            ["|", "/", "-", "\\"]
-                .iter()
-                .any(|frame| rust.stdout.contains(&format!("  {frame} {stage}"))),
+            has_spinner_frame(&rust.stdout, stage),
             "{command} was silent: {:?}",
             rust.stdout
         );
@@ -354,9 +419,7 @@ fn native_tty_recover_animates_until_the_transaction_is_restored() {
     );
     assert_eq!(rust.status, 0, "{}", visible(&rust.stdout));
     assert!(
-        ["|", "/", "-", "\\"].iter().any(|frame| rust
-            .stdout
-            .contains(&format!("  {frame} Recovering transaction"))),
+        has_spinner_frame(&rust.stdout, "Recovering transaction"),
         "recover was silent: {:?}",
         rust.stdout
     );
@@ -386,9 +449,7 @@ fn native_tty_self_uninstall_animates_while_removing_the_cli() {
     );
     assert_eq!(rust.status, 0, "{}", visible(&rust.stdout));
     assert!(
-        ["|", "/", "-", "\\"].iter().any(|frame| rust
-            .stdout
-            .contains(&format!("  {frame} Removing Incodex CLI"))),
+        has_spinner_frame(&rust.stdout, "Removing Incodex CLI"),
         "self-uninstall was silent: {:?}",
         rust.stdout
     );

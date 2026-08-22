@@ -20,7 +20,7 @@ pub fn format_kv(label: &str, value: &str, color: Option<bool>) -> String {
 }
 
 pub fn format_step(message: &str, color: Option<bool>) -> String {
-    format!("{} {message}", paint(use_color(color), "1;35", "➤"))
+    paint(use_color(color), "1;35", &format!("➤ {message}"))
 }
 
 pub fn format_ok(message: &str, color: Option<bool>) -> String {
@@ -50,6 +50,14 @@ mod tests {
         assert_eq!(
             format_error("operation failed", Some(false)),
             "  ✗ operation failed"
+        );
+    }
+
+    #[test]
+    fn step_styles_the_complete_line_when_color_is_enabled() {
+        assert_eq!(
+            format_step("Install", Some(true)),
+            "\u{001b}[1;35m➤ Install\u{001b}[0m"
         );
     }
 }

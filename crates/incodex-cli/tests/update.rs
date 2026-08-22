@@ -72,6 +72,24 @@ fn run_tty(
     (result.status, result.stdout)
 }
 
+fn visible(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' && chars.peek() == Some(&'[') {
+            chars.next();
+            for code in chars.by_ref() {
+                if code.is_ascii() && ('@'..='~').contains(&code) {
+                    break;
+                }
+            }
+            continue;
+        }
+        out.push(ch);
+    }
+    out
+}
+
 #[test]
 fn update_does_not_retry_a_permanent_http_failure() {
     let home = scratch("download-failure");
@@ -154,6 +172,7 @@ printf '%s' 'INCODEX_HTTP_STATUS:200'
     let path = format!("{}:/usr/bin:/bin", fake_bin.display());
     let (status, output) = run_tty(&installed, &home, &path, Duration::from_secs(12));
     assert_eq!(status, 0, "{output:?}");
+    let visible_output = visible(&output);
     for stage in [
         "Checking for updates",
         "Downloading stable installer",
@@ -162,7 +181,7 @@ printf '%s' 'INCODEX_HTTP_STATUS:200'
         assert!(
             ["|", "/", "-", "\\"]
                 .iter()
-                .any(|frame| output.contains(&format!("  {frame} {stage}"))),
+                .any(|frame| visible_output.contains(&format!("  {frame} {stage}"))),
             "update stage {stage:?} did not animate: {output:?}"
         );
     }
@@ -217,11 +236,12 @@ printf '%s' 'INCODEX_HTTP_STATUS:200'
     let path = format!("{}:/usr/bin:/bin", fake_bin.display());
     let (status, output) = run_tty(&installed, &home, &path, Duration::from_secs(12));
     assert_eq!(status, 0, "{output:?}");
+    let visible_output = visible(&output);
     for stage in ["Installing v9.9.9", "Repairing v9.9.9"] {
         assert!(
             ["|", "/", "-", "\\"]
                 .iter()
-                .any(|frame| output.contains(&format!("  {frame} {stage}"))),
+                .any(|frame| visible_output.contains(&format!("  {frame} {stage}"))),
             "update stage {stage:?} did not animate: {output:?}"
         );
     }

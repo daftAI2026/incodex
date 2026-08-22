@@ -244,7 +244,7 @@ fn native_non_tty_mutations_print_auditable_progress_stages() {
         install.stdout.contains("➤ Publishing Runtime")
             && install.stdout.contains("➤ Backing up original app")
             && install.stdout.contains("➤ Patching and signing app")
-            && install.stdout.contains("➤ Replacing application")
+            && install.stdout.contains("➤ Replacing the app")
             && install.stdout.contains("➤ Verifying installation"),
         "install must expose durable stages without TTY controls: {install:?}"
     );
@@ -256,8 +256,16 @@ fn native_non_tty_mutations_print_auditable_progress_stages() {
     );
     assert_eq!(uninstall.status, 0, "{uninstall:?}");
     assert!(
-        uninstall.stdout.contains("➤ Restoring original app"),
+        uninstall.stdout.contains("➤ Restoring original app")
+            && uninstall.stdout.contains("➤ Refreshing app registration")
+            && uninstall
+                .stdout
+                .contains("App restored. App registration was refreshed."),
         "uninstall must expose its active stage: {uninstall:?}"
+    );
+    assert!(
+        !uninstall.stdout.contains("Official app") && !uninstall.stdout.contains("Dock"),
+        "custom app uninstall must not claim an official target or Dock refresh: {uninstall:?}"
     );
     assert!(!uninstall.stdout.contains('\u{1b}'), "{uninstall:?}");
 }

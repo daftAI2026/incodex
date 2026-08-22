@@ -7,6 +7,36 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 const FRAMES: &[char] = &['|', '/', '-', '\\'];
+const SPINNER_PREFIX_COLUMNS: usize = 4;
+const SPINNER_RESERVED_COLUMNS: usize = 8;
+const MIN_MESSAGE_COLUMNS: usize = 20;
+
+fn format_spinner_message(message: &str, columns: usize) -> String {
+    let sanitized = message.replace(['\r', '\n'], " ");
+    let maximum = columns.saturating_sub(SPINNER_PREFIX_COLUMNS);
+    let preferred = columns
+        .saturating_sub(SPINNER_RESERVED_COLUMNS)
+        .max(MIN_MESSAGE_COLUMNS);
+    let available = preferred.min(maximum);
+    let length = sanitized.chars().count();
+    if length <= available {
+        return sanitized;
+    }
+    if available > 3 {
+        format!(
+            "{}...",
+            sanitized.chars().take(available - 3).collect::<String>()
+        )
+    } else {
+        sanitized.chars().take(available).collect()
+    }
+}
+
+fn format_spinner_frame(frame: char, message: &str, columns: usize, clear: bool) -> String {
+    let lead = if clear { "\r\u{1b}[2K" } else { "\r" };
+    let message = format_spinner_message(message, columns);
+    format!("{lead}  \u{1b}[1;34m{frame}\u{1b}[0m {message}")
+}
 
 pub struct Progress {
     interactive: bool,
@@ -58,8 +88,22 @@ impl Drop for Progress {
 
 pub struct Spinner {
     stopped: Arc<AtomicBool>,
-    message: Arc<Mutex<String>>,
+    state: Arc<Mutex<SpinnerState>>,
     worker: Option<JoinHandle<()>>,
+}
+
+struct SpinnerState {
+    message: String,
+    next_frame: usize,
+    last_columns: usize,
+}
+
+impl SpinnerState {
+    fn line_needs_clear(&mut self, columns: usize, message_changed: bool) -> bool {
+        let columns_changed = self.last_columns != columns;
+        self.last_columns = columns;
+        message_changed || columns_changed
+    }
 }
 
 impl Spinner {
@@ -75,47 +119,84 @@ impl Spinner {
     }
 
     fn start_for_interval(message: &str, interactive: bool, frame_interval: Duration) -> Self {
-        let message = Arc::new(Mutex::new(message.to_string()));
+        let initial_columns = crate::terminal::stderr_columns();
+        let state = Arc::new(Mutex::new(SpinnerState {
+            message: message.to_string(),
+            next_frame: 0,
+            last_columns: initial_columns,
+        }));
         if !interactive {
             return Self {
                 stopped: Arc::new(AtomicBool::new(true)),
-                message,
+                state,
                 worker: None,
             };
         }
         let stopped = Arc::new(AtomicBool::new(false));
         let worker_stopped = Arc::clone(&stopped);
-        let worker_message = Arc::clone(&message);
-        eprint!("\r\u{1b}[2K  {} {}", FRAMES[0], message.lock().unwrap());
-        let _ = std::io::stderr().flush();
+        let worker_state = Arc::clone(&state);
+        {
+            let mut state = state.lock().unwrap();
+            eprint!(
+                "{}",
+                format_spinner_frame(
+                    FRAMES[state.next_frame],
+                    &state.message,
+                    initial_columns,
+                    true,
+                )
+            );
+            state.next_frame += 1;
+            let _ = std::io::stderr().flush();
+        }
         let worker = thread::spawn(move || {
-            let mut frame = 1_usize;
             while !worker_stopped.load(Ordering::Relaxed) {
                 thread::park_timeout(frame_interval);
                 if worker_stopped.load(Ordering::Relaxed) {
                     break;
                 }
+                let mut state = worker_state.lock().unwrap();
+                let columns = crate::terminal::stderr_columns();
+                let clear = state.line_needs_clear(columns, false);
                 eprint!(
-                    "\r\u{1b}[2K  {} {}",
-                    FRAMES[frame % FRAMES.len()],
-                    worker_message.lock().unwrap()
+                    "{}",
+                    format_spinner_frame(
+                        FRAMES[state.next_frame % FRAMES.len()],
+                        &state.message,
+                        columns,
+                        clear,
+                    )
                 );
+                state.next_frame += 1;
                 let _ = std::io::stderr().flush();
-                frame += 1;
             }
         });
         Self {
             stopped,
-            message,
+            state,
             worker: Some(worker),
         }
     }
 
     fn update_message(&mut self, message: &str) {
-        let mut current = self.message.lock().unwrap();
-        *current = message.to_string();
+        let mut state = self.state.lock().unwrap();
+        if state.message == message {
+            return;
+        }
+        state.message = message.to_string();
         if self.worker.is_some() {
-            eprint!("\r\u{1b}[2K  {} {current}", FRAMES[0]);
+            let columns = crate::terminal::stderr_columns();
+            let clear = state.line_needs_clear(columns, true);
+            eprint!(
+                "{}",
+                format_spinner_frame(
+                    FRAMES[state.next_frame % FRAMES.len()],
+                    &state.message,
+                    columns,
+                    clear,
+                )
+            );
+            state.next_frame += 1;
             let _ = std::io::stderr().flush();
         }
     }
@@ -141,7 +222,26 @@ impl Drop for Spinner {
 mod tests {
     use std::time::{Duration, Instant};
 
-    use super::{Progress, Spinner};
+    use super::{format_spinner_message, Progress, Spinner, SpinnerState};
+
+    #[test]
+    fn spinner_clears_the_line_when_terminal_width_changes() {
+        let mut state = SpinnerState {
+            message: "Working".into(),
+            next_frame: 1,
+            last_columns: 80,
+        };
+        assert!(state.line_needs_clear(24, false));
+        assert!(state.line_needs_clear(100, false));
+    }
+
+    #[test]
+    fn spinner_message_replaces_line_breaks_with_spaces() {
+        assert_eq!(
+            format_spinner_message("First\rSecond\nThird", 80),
+            "First Second Third"
+        );
+    }
 
     #[test]
     fn stopping_wakes_worker_before_long_frame_timeout() {

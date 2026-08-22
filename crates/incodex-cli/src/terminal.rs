@@ -8,6 +8,16 @@ pub fn is_tty() -> bool {
     io::stdin().is_terminal() && io::stdout().is_terminal()
 }
 
+pub fn stderr_columns() -> usize {
+    let mut size = unsafe { std::mem::zeroed::<libc::winsize>() };
+    let result = unsafe { libc::ioctl(libc::STDERR_FILENO, libc::TIOCGWINSZ, &mut size) };
+    if result == 0 && size.ws_col > 0 {
+        usize::from(size.ws_col)
+    } else {
+        80
+    }
+}
+
 pub fn read_key() -> Result<Vec<u8>, String> {
     read_key_with_timeout(ESCAPE_BYTE_TIMEOUT_MS)
 }
