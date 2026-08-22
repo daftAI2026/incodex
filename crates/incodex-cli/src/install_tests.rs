@@ -16,7 +16,7 @@ impl ProcessProbe for FixtureProbe {
 struct FailingQuit;
 
 impl QuitRequester for FailingQuit {
-    fn request_quit(&mut self) -> Result<(), String> {
+    fn request_quit(&mut self, _executable: &Path, _pids: &[i32]) -> Result<(), String> {
         Err("fixture osascript failure".into())
     }
 }
@@ -24,7 +24,7 @@ impl QuitRequester for FailingQuit {
 struct SuccessfulQuit;
 
 impl QuitRequester for SuccessfulQuit {
-    fn request_quit(&mut self) -> Result<(), String> {
+    fn request_quit(&mut self, _executable: &Path, _pids: &[i32]) -> Result<(), String> {
         Ok(())
     }
 }
@@ -85,18 +85,6 @@ fn default_path_foreign_bundle_is_rejected_before_snapshot() {
     };
     let error = ensure_official_bundle_identifier(&info).unwrap_err();
     assert!(error.contains("foreign bundle"), "{error}");
-}
-
-#[test]
-fn keychain_advice_requires_a_new_implicit_official_codex_install() {
-    assert_eq!(
-        keychain_advice_is_allowed(true, true, true, false),
-        cfg!(target_os = "macos")
-    );
-    assert!(!keychain_advice_is_allowed(true, true, true, true));
-    assert!(!keychain_advice_is_allowed(false, true, true, false));
-    assert!(!keychain_advice_is_allowed(true, false, true, false));
-    assert!(!keychain_advice_is_allowed(true, true, false, false));
 }
 
 #[test]

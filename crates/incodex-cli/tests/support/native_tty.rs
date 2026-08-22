@@ -246,8 +246,15 @@ fn native_tty_uninstall_animates_immediately_after_confirmation() {
         rust.stdout
     );
     assert!(
-        visible(&rust.stdout).contains("App restored. App registration was refreshed."),
+        visible(&rust.stdout).contains("Uninstalled. ChatGPT.app restored."),
         "missing final uninstall result: {}",
+        visible(&rust.stdout)
+    );
+    assert!(
+        !visible(&rust.stdout).contains("  Install id")
+            && !visible(&rust.stdout).contains("  Runtime")
+            && visible(&rust.stdout).matches("  App").count() == 1,
+        "successful uninstall repeated removed installation metadata: {}",
         visible(&rust.stdout)
     );
 }

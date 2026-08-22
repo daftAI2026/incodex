@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+mod app_termination;
 mod entitlements;
 mod signing;
 mod signing_outer;
@@ -35,7 +36,7 @@ pub trait ProcessProbe {
 
 /// 发送官方 Codex 退出请求的最小接口，测试可替换而不触碰真实 osascript。
 pub trait QuitRequester {
-    fn request_quit(&mut self) -> Result<(), String>;
+    fn request_quit(&mut self, executable: &Path, pids: &[i32]) -> Result<(), String>;
 }
 
 /// 可注入的单调时钟，避免超时测试依赖真实 60 秒。
@@ -152,13 +153,13 @@ impl AppQuiescence {
         Q: QuitRequester,
         C: QuiescenceClock,
     {
-        // 没有精确匹配的 executable 时，osascript 可能启动一个原本未运行的 App；
-        // 先观察、后退出，避免无谓闪现与启动副作用。
-        if self.running_pids_with(probe)?.is_empty() {
+        // 先锁定每个精确 executable PID，没有存活实例就不发退出请求。
+        let pids = self.running_pids_with(probe)?;
+        if pids.is_empty() {
             return Ok(());
         }
         requester
-            .request_quit()
+            .request_quit(&self.executable, &pids)
             .map_err(|error| format!("failed to ask official Codex to quit: {error}"))?;
         let deadline = clock.now() + QUIESCENCE_TIMEOUT;
         loop {
@@ -213,8 +214,8 @@ impl ProcessProbe for SystemProcessProbe {
 struct SystemQuitRequester;
 
 impl QuitRequester for SystemQuitRequester {
-    fn request_quit(&mut self) -> Result<(), String> {
-        quit_official_app()
+    fn request_quit(&mut self, executable: &Path, pids: &[i32]) -> Result<(), String> {
+        app_termination::request_normal_termination(executable, pids)
     }
 }
 
@@ -450,18 +451,6 @@ pub fn write_asar_integrity(app: &Path, hash: &str) -> Result<(), String> {
     ))
 }
 
-pub fn quit_official_app() -> Result<(), String> {
-    let script = r#"tell application id "com.openai.codex" to quit"#;
-    let output = Command::new("osascript")
-        .args(["-e", script])
-        .output()
-        .map_err(|err| err.to_string())?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
-    Ok(())
-}
-
 pub fn front_codex_window_bounds() -> Option<(i32, i32, i32, i32)> {
     let script = r#"tell application "System Events" to tell first process whose bundle identifier is "com.openai.codex" to get {position, size} of front window"#;
     let output = Command::new("osascript")
@@ -604,6 +593,7 @@ mod tests {
 mod quiescence_tests {
     use super::*;
     use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
     struct FixtureProbe {
@@ -619,7 +609,7 @@ mod quiescence_tests {
     struct FailingQuit;
 
     impl QuitRequester for FailingQuit {
-        fn request_quit(&mut self) -> Result<(), String> {
+        fn request_quit(&mut self, _executable: &Path, _pids: &[i32]) -> Result<(), String> {
             Err("fixture quit failed".into())
         }
     }
@@ -643,7 +633,30 @@ mod quiescence_tests {
     struct SuccessfulQuit;
 
     impl QuitRequester for SuccessfulQuit {
-        fn request_quit(&mut self) -> Result<(), String> {
+        fn request_quit(&mut self, _executable: &Path, _pids: &[i32]) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    struct SharedProbe {
+        paths: Arc<Mutex<Vec<(i32, PathBuf)>>>,
+    }
+
+    impl ProcessProbe for SharedProbe {
+        fn process_paths(&self) -> Result<Vec<(i32, PathBuf)>, String> {
+            Ok(self.paths.lock().unwrap().clone())
+        }
+    }
+
+    struct ProcessAwareQuit {
+        paths: Arc<Mutex<Vec<(i32, PathBuf)>>>,
+        requested: Arc<Mutex<Vec<i32>>>,
+    }
+
+    impl QuitRequester for ProcessAwareQuit {
+        fn request_quit(&mut self, _executable: &Path, pids: &[i32]) -> Result<(), String> {
+            *self.requested.lock().unwrap() = pids.to_vec();
+            self.paths.lock().unwrap().clear();
             Ok(())
         }
     }
@@ -728,5 +741,31 @@ mod quiescence_tests {
             .unwrap_err();
         assert!(error.contains("timed out"), "{error}");
         assert!(!clock.sleeps.is_empty());
+    }
+
+    #[test]
+    fn official_quit_targets_every_exact_running_instance() {
+        let expected = PathBuf::from("/Applications/ChatGPT.app/Contents/MacOS/ChatGPT");
+        let quiescence = AppQuiescence::from_executable(expected.clone()).unwrap();
+        let paths = Arc::new(Mutex::new(vec![(42, expected.clone()), (43, expected)]));
+        let requested = Arc::new(Mutex::new(Vec::new()));
+        let probe = SharedProbe {
+            paths: Arc::clone(&paths),
+        };
+        let mut requester = ProcessAwareQuit {
+            paths,
+            requested: Arc::clone(&requested),
+        };
+        let mut clock = FakeClock {
+            now: Instant::now(),
+            sleeps: VecDeque::new(),
+        };
+
+        quiescence
+            .quit_official_app_and_wait_with(&probe, &mut requester, &mut clock)
+            .unwrap();
+
+        assert_eq!(*requested.lock().unwrap(), vec![42, 43]);
+        assert!(clock.sleeps.is_empty());
     }
 }

@@ -274,8 +274,14 @@ fn native_non_tty_mutations_print_auditable_progress_stages() {
             && uninstall.stdout.contains("➤ Refreshing app registration")
             && uninstall
                 .stdout
-                .contains("App restored. App registration was refreshed."),
+                .contains("Uninstalled. ChatGPT.app restored."),
         "uninstall must expose its active stage: {uninstall:?}"
+    );
+    assert!(
+        !uninstall.stdout.contains("  Install id")
+            && !uninstall.stdout.contains("  Runtime")
+            && uninstall.stdout.matches("  App").count() == 1,
+        "successful uninstall must not repeat removed installation metadata: {uninstall:?}"
     );
     assert!(
         !uninstall.stdout.contains("Official app") && !uninstall.stdout.contains("Dock"),

@@ -14,7 +14,7 @@ impl ProcessProbe for EmptyProbe {
 struct MustNotQuit;
 
 impl QuitRequester for MustNotQuit {
-    fn request_quit(&mut self) -> Result<(), String> {
+    fn request_quit(&mut self, _executable: &std::path::Path, _pids: &[i32]) -> Result<(), String> {
         Err("requester must not be called when no exact PID is live".into())
     }
 }
