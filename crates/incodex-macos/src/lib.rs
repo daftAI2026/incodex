@@ -56,7 +56,10 @@ pub struct AppQuiescence {
 impl AppQuiescence {
     /// 从 app 的 CFBundleExecutable 构造严格 executable path。
     pub fn for_app(app: &Path) -> Result<Self, String> {
-        let quiescence = Self::for_bundle_at(app, app)?;
+        // CLI 接受相对 `--app`；先绑定现有 bundle 的真实路径，再构造进程身份。
+        let app = fs::canonicalize(app)
+            .map_err(|error| format!("cannot resolve Codex app {}: {error}", app.display()))?;
+        let quiescence = Self::for_bundle_at(&app, &app)?;
         let executable = quiescence.executable;
         if !executable.is_file() {
             return Err(format!(
