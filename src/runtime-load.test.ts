@@ -66,6 +66,17 @@ describe("runtime load", () => {
     expect(main).toContain("safeHome.handoffSessionOwner");
   });
 
+  test("an ordinary incognito click launches the official Codex route", () => {
+    const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
+    const launchStart = main.indexOf("async function launchIncognitoOnce()");
+    const launchEnd = main.indexOf("\nconst allowedWindows", launchStart);
+    const launch = main.slice(launchStart, launchEnd);
+
+    expect(launch).toMatch(
+      /const args\s*=\s*\[`--user-data-dir=\$\{session\.chromium\}`,[\s\S]*codex:\/\/new\?mode=codex/,
+    );
+  });
+
   test("an ordinary incognito click marks its session pending before child handoff", () => {
     const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
     expect(main).toContain("handoffPending: true");
