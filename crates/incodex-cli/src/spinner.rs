@@ -44,6 +44,12 @@ impl Progress {
     }
 }
 
+impl Default for Progress {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Drop for Progress {
     fn drop(&mut self) {
         self.stop();

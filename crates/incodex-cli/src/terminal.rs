@@ -202,8 +202,10 @@ mod tests {
             for (index, byte) in input.iter().enumerate() {
                 let written = libc::write(master, std::slice::from_ref(byte).as_ptr().cast(), 1);
                 assert_eq!(written, 1, "pty write failed");
-                if gap_us.is_some() && index + 1 < input.len() {
-                    libc::usleep(gap_us.unwrap());
+                if let Some(gap_us) = gap_us {
+                    if index + 1 < input.len() {
+                        libc::usleep(gap_us);
+                    }
                 }
             }
             let mut length = [0_u8; 1];

@@ -455,7 +455,7 @@ fn async_recreation_after_proven_delete_is_observed_before_removed() {
                 ui_ready: true,
             })
         },
-        |session_root, expected| burn_session_home(session_root, expected),
+        burn_session_home,
     )
     .unwrap();
     writer.join().unwrap();
@@ -476,14 +476,8 @@ fn spawn_error_still_burns() {
     fs::create_dir_all(&source).unwrap();
     fs::write(source.join("auth.json"), "{}\n").unwrap();
     let plan = prepare_incognito_open(&app, &user, &source, 1).unwrap();
-    let (_process, cleanup) = wait_and_burn_with(
-        &plan,
-        &user,
-        0,
-        |_| Err("ENOENT".into()),
-        |root, expected| burn_session_home(root, expected),
-    )
-    .unwrap();
+    let (_process, cleanup) =
+        wait_and_burn_with(&plan, &user, 0, |_| Err("ENOENT".into()), burn_session_home).unwrap();
     assert!(!plan.session_root.exists());
     assert!(cleanup.removed());
 }

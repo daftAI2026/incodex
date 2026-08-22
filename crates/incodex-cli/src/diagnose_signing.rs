@@ -217,7 +217,7 @@ pub(crate) fn inspect_signing(
             Some(app_path),
         ));
     }
-    let acceptance = validate_doctor_signing_inventory(&inventory, patched, official_target);
+    let acceptance = validate_doctor_signing_inventory(inventory, patched, official_target);
     if let Err(error) = &acceptance {
         let mut emitted_component_finding = false;
         for component in &inventory.nested {

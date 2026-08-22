@@ -167,7 +167,7 @@ fn run_installer(
     let mut bash = Command::new("bash")
         .env_remove("INCODEX_ARCH")
         .env_remove("INCODEX_DOWNLOAD_DIR")
-        .env("INCODEX_PREFIX", &prefix)
+        .env("INCODEX_PREFIX", prefix)
         .env("INCODEX_DOWNLOAD_BASE", download_base)
         .env("INCODEX_EXPECTED_VERSION", expected_version)
         .stdin(Stdio::piped())

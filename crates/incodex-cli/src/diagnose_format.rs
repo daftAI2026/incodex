@@ -42,13 +42,13 @@ pub fn format_status(report: &Diagnosis) -> String {
         }
     }
     let runtime = if app_path.join(ASAR_REL).exists() {
-        runtime_description(&report)
+        runtime_description(report)
     } else {
         "missing".to_string()
     };
     lines.push(incodex_core::format_kv("Runtime", &runtime, None));
     if report.patched {
-        if let Some(version) = app_version_description(&report) {
+        if let Some(version) = app_version_description(report) {
             lines.push(incodex_core::format_kv("Version", &version, None));
         }
         if let Some(package) = Archive::open(app_path.join(ASAR_REL))
