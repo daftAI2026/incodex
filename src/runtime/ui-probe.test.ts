@@ -52,4 +52,10 @@ describe("minimal Runtime UI injection snapshot", () => {
     expect(inject).toContain("window.__incodexUiProbe = deriveUiProbe");
     expect(inject).not.toMatch(/capabilit|appVersion|buildVersion/i);
   });
+
+  test("refreshes a stale snapshot when did-finish-load reinjects the bundle", () => {
+    expect(inject).toMatch(
+      /if \(window\.__incodexStarted\) \{\s*refreshUiProbe\(\);\s*return;\s*\}/,
+    );
+  });
 });
