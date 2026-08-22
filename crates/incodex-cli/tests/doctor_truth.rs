@@ -182,7 +182,7 @@ fn doctor_rejects_runtime_manifest_missing_required_artifacts() {
 }
 
 #[test]
-fn doctor_json_names_interrupted_journals() {
+fn doctor_json_marks_legacy_flat_interruption_as_manual_only() {
     let home = isolated_home();
     let app = home.join("Missing.app");
     let tx_dir = home.join(".incodex").join("transactions");
@@ -211,7 +211,15 @@ fn doctor_json_names_interrupted_journals() {
     assert_eq!(txs.len(), 1);
     assert_eq!(txs[0]["installId"], "tx-contract");
     assert_eq!(txs[0]["phase"], "PATCHED");
-    assert_eq!(txs[0]["action"], "rollback");
+    assert_eq!(txs[0]["action"], "manual");
+    let record = rec["journalRecords"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|record| record["installId"] == "tx-contract")
+        .expect("legacy flat journal record");
+    assert_eq!(record["action"], "manual");
+    assert_eq!(record["recovery"], "manual");
 }
 
 #[test]

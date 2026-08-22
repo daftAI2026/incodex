@@ -357,6 +357,117 @@ fn recover_missing_transaction_is_explicit() {
 }
 
 #[test]
+fn recover_dry_run_preserves_native_v2_transaction() {
+    let home = isolated_home();
+    let app = patchable_app(&home);
+    let root = home.join(".incodex");
+    let staged_source = home.join("dry-run-staged.app");
+    ditto(&app, &staged_source).unwrap();
+    fs::write(staged_source.join("dry-run-marker"), "must remain staged\n").unwrap();
+
+    let mut tx = Engine::begin(&root, &app, "recover-dry-run-test").unwrap();
+    let id = tx.install_id().to_string();
+    let original = root
+        .join("transactions")
+        .join(&id)
+        .join("original/ChatGPT.app");
+    ditto(&app, &original).unwrap();
+    tx.mark_backup_committed().unwrap();
+    tx.place_staging(&staged_source).unwrap();
+    assert_eq!(tx.journal().phase, "STAGED");
+    drop(tx);
+
+    let tx_dir = root.join("transactions").join(&id);
+    let journal = tx_dir.join("journal.json");
+    let staged = tx_dir.join("staging/ChatGPT.app");
+    let root_before = tree_digest(&root);
+    let app_before = tree_digest(&app);
+    let journal_before = fs::read(&journal).unwrap();
+    let staged_before = tree_digest(&staged);
+
+    let fake_bin = home.join("fake-bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    write_executable(&fake_bin.join("codesign"), "#!/bin/sh\nexit 0\n");
+    let (status, stdout, stderr) = run_with_path(
+        &["recover", "--dry-run", "--transaction", &id],
+        &home,
+        &path_with_fake_bin(&fake_bin),
+    );
+
+    assert_eq!(status, 1, "recover dry-run must fail closed");
+    assert_eq!(stdout, "");
+    assert_eq!(
+        stderr,
+        "  ✗ recover --dry-run is not supported; no files changed\n"
+    );
+    assert_eq!(
+        tree_digest(&root),
+        root_before,
+        "dry-run changed INCODEX_HOME"
+    );
+    assert_eq!(
+        tree_digest(&app),
+        app_before,
+        "dry-run changed the live app"
+    );
+    assert_eq!(fs::read(&journal).unwrap(), journal_before);
+    assert!(
+        staged.exists(),
+        "dry-run removed the staged transaction tree"
+    );
+    assert_eq!(tree_digest(&staged), staged_before);
+}
+
+#[test]
+fn recover_legacy_flat_journal_fails_explicitly_without_changes() {
+    let home = isolated_home();
+    let app = marker_app(&home);
+    let root = home.join(".incodex");
+    let transactions = root.join("transactions");
+    fs::create_dir_all(&transactions).unwrap();
+    let id = "00000000-0000-4000-8000-000000000042";
+    let journal = transactions.join(format!("{id}.json"));
+    fs::write(
+        &journal,
+        format!(
+            "{}\n",
+            serde_json::json!({
+                "schemaVersion": 1,
+                "installId": id,
+                "targetRealPath": app,
+                "stagedApp": root.join("scratch/legacy-staged.app"),
+                "originalSnapshot": root.join("installations/legacy/original/ChatGPT.app"),
+                "phase": "STAGED",
+                "updatedAt": "2026-01-01T00:00:00.000Z"
+            })
+        ),
+    )
+    .unwrap();
+    let root_before = tree_digest(&root);
+    let app_before = tree_digest(&app);
+    let journal_before = fs::read(&journal).unwrap();
+
+    for args in [
+        vec!["recover", "--transaction", id],
+        vec!["recover", "--dry-run", "--transaction", id],
+    ] {
+        let (status, stdout, stderr) = run(&args, &home);
+        assert_eq!(status, 1, "legacy recovery must fail closed");
+        assert_eq!(stdout, "");
+        assert!(stderr.to_lowercase().contains("legacy"), "{stderr}");
+        assert!(stderr.to_lowercase().contains("not supported"), "{stderr}");
+        assert!(
+            stderr.to_lowercase().contains("no files changed"),
+            "{stderr}"
+        );
+        assert!(!stderr.contains("No such file or directory"), "{stderr}");
+    }
+    assert_eq!(tree_digest(&root), root_before);
+    assert_eq!(tree_digest(&app), app_before);
+    assert_eq!(fs::read(&journal).unwrap(), journal_before);
+}
+
+#[test]
 fn install_yes_app_patches_asar_writes_runtime_and_commits() {
     let home = isolated_home();
     let app = patchable_app(&home);
