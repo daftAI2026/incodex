@@ -132,7 +132,7 @@ fn native_menu_shows_the_cached_update_notice_and_shortcut() {
 }
 
 #[test]
-fn native_open_animates_while_waiting_for_cdp_readiness_and_clears_its_line() {
+fn native_open_animates_while_waiting_for_readiness_and_session_cleanup() {
     let home = scratch("open-spinner");
     let app = sleeping_open_app(&home);
     let args = ["open", "--app", app.to_str().unwrap()];
@@ -153,6 +153,11 @@ fn native_open_animates_while_waiting_for_cdp_readiness_and_clears_its_line() {
     assert!(
         has_spinner_frame(&rust.stdout, "Waiting for Codex UI to become ready"),
         "missing spinner frames: {:?}",
+        rust.stdout
+    );
+    assert!(
+        has_spinner_frame(&rust.stdout, "Removing isolated session"),
+        "window exit left a silent gap before cleanup completed: {:?}",
         rust.stdout
     );
     assert!(
