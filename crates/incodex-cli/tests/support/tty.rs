@@ -141,6 +141,31 @@ pub fn run(
         None,
         Duration::from_secs(12),
         &[],
+        80,
+    )
+}
+
+#[allow(dead_code)]
+pub fn run_with_columns(
+    program: &str,
+    prefix: &[&str],
+    args: &[&str],
+    home: &Path,
+    wait_for: &str,
+    keys: &str,
+    columns: u16,
+) -> Result {
+    run_inner(
+        program,
+        prefix,
+        args,
+        home,
+        wait_for,
+        keys,
+        None,
+        Duration::from_secs(12),
+        &[],
+        columns,
     )
 }
 
@@ -165,6 +190,7 @@ pub fn run_with_probe(
         Some(probe),
         Duration::from_secs(12),
         &[],
+        80,
     )
 }
 
@@ -188,6 +214,7 @@ pub fn run_with_timeout(
         None,
         timeout,
         &[],
+        80,
     )
 }
 
@@ -207,7 +234,7 @@ pub fn run_with_timeout_env(
     extra_env: &[(&str, &str)],
 ) -> Result {
     run_inner(
-        program, prefix, args, home, wait_for, keys, None, timeout, extra_env,
+        program, prefix, args, home, wait_for, keys, None, timeout, extra_env, 80,
     )
 }
 
@@ -225,15 +252,17 @@ fn run_inner(
     probe: Option<&Probe>,
     timeout: Duration,
     extra_env: &[(&str, &str)],
+    columns: u16,
 ) -> Result {
     let _guard = PtyGate::acquire();
     let _probe_guard = probe.map(Probe::enter);
     let script = r#"
-import errno, os, pty, select, sys, time
+import errno, fcntl, os, pty, select, struct, sys, termios, time
 home, wait_for, keys = sys.argv[1], sys.argv[2].encode("utf-8"), sys.argv[3].encode("latin-1")
 timeout = float(sys.argv[4])
-program = sys.argv[5]
-argv = sys.argv[5:]
+columns = int(sys.argv[5])
+program = sys.argv[6]
+argv = sys.argv[6:]
 env = os.environ.copy()
 env["HOME"] = home
 env["TERM"] = "xterm-256color"
@@ -241,6 +270,7 @@ env["NO_COLOR"] = "1"
 env["SHELL"] = "/bin/zsh"
 pid, fd = pty.fork()
 if pid == 0:
+    fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", 24, columns, 0, 0))
     os.chdir(env["INCODEX_TEST_ROOT"])
     os.execvpe(program, argv, env)
 buf = bytearray()
@@ -330,6 +360,7 @@ sys.stdout.buffer.write(bytes(buf))
         .arg(wait_for)
         .arg(keys)
         .arg(timeout.as_secs_f64().to_string())
+        .arg(columns.to_string())
         .arg(program)
         .args(prefix)
         .args(args)
