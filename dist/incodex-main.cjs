@@ -634,6 +634,17 @@ function reportInjectionProbe(win) {
         logLaunch("ui-probe", probe);
     });
 }
+function selectOfficialCodexMode(win) {
+    if (!isIncognito())
+        return;
+    try {
+        win.webContents.sendInputEvent({ type: "keyDown", keyCode: "3", modifiers: ["control"] });
+        win.webContents.sendInputEvent({ type: "keyUp", keyCode: "3", modifiers: ["control"] });
+    }
+    catch (error) {
+        logLaunch("codex-mode-selection-failed", { error: String(error) });
+    }
+}
 function hookWindow(win, source) {
     if (!win?.webContents || isAuxiliaryWindow(win))
         return;
@@ -729,6 +740,7 @@ async function attachElectron() {
             raiseOurWindows();
         };
         win.once("ready-to-show", () => {
+            selectOfficialCodexMode(win);
             markSessionReady();
             bringForward();
         });
