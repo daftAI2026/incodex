@@ -49,15 +49,54 @@ describe("release CLI artifacts", () => {
 
   test("smoke-tests the host binary and verifies the published runtime pointer", () => {
     expect(releaseYml).toContain('case "$(uname -m)" in');
-    expect(releaseYml).toContain('"$BINARY" --version');
-    expect(releaseYml).toContain('"$BINARY" --help');
-    expect(releaseYml).toContain('"$BINARY" runtime');
+    expect(releaseYml).toContain('"$ARM_BINARY" --version');
+    expect(releaseYml).toContain('"$ARM_BINARY" --help');
+    expect(releaseYml).toContain('"$ARM_BINARY" runtime');
     expect(releaseYml).toContain("current.schemaVersion !== 1");
     expect(releaseYml).toContain("manifestSha256");
     expect(releaseYml).toContain("sourceCommit");
     expect(releaseYml).toContain("runtime-manifest.json");
     expect(releaseYml).toContain("crypto.createHash(\"sha256\")");
     expect(releaseYml).toContain("current.release");
+  });
+
+  test("smokes both stable assets on the arm64 release host", () => {
+    expect(releaseYml).toContain('case "$(uname -m)" in');
+    expect(releaseYml).toContain("arm64) ;;");
+    expect(releaseYml).toContain('ARM_BINARY="release-cli/incodex-darwin-arm64"');
+    expect(releaseYml).toContain('X64_BINARY="release-cli/incodex-darwin-x64"');
+    expect(releaseYml).toContain('"$ARM_BINARY" --version');
+    expect(releaseYml).toContain('"$ARM_BINARY" --help >/dev/null');
+    expect(releaseYml).toContain('HOME="$ARM_SMOKE_HOME" "$ARM_BINARY" runtime');
+    expect(releaseYml).toContain('/usr/bin/arch -x86_64 "$X64_BINARY" --version');
+    expect(releaseYml).toContain('/usr/bin/arch -x86_64 "$X64_BINARY" --help >/dev/null');
+    expect(releaseYml).toContain(
+      'HOME="$X64_SMOKE_HOME" /usr/bin/arch -x86_64 "$X64_BINARY" runtime',
+    );
+    expect(releaseYml).toContain('verify_runtime_pointer "$ARM_SMOKE_HOME"');
+    expect(releaseYml).toContain('verify_runtime_pointer "$X64_SMOKE_HOME"');
+  });
+
+  test("smoke validates the exact ten-file Runtime set", () => {
+    expect(releaseYml).toContain("const REQUIRED_RUNTIME_FILES = [");
+    for (const name of [
+      "incodex-main.cjs",
+      "incodex-preload.cjs",
+      "incodex-inject.js",
+      "incodex-safe-home.cjs",
+      "incodex-ipc-guard.cjs",
+      "incodex-owner-core.cjs",
+      "incodex-owner-recovery.cjs",
+      "incodex-instance.cjs",
+      "incodex-window-kind.cjs",
+      "incodex-runtime-load.cjs",
+    ]) {
+      expect(releaseYml).toContain(`"${name}"`);
+    }
+    expect(releaseYml).toContain('currentFileNames.join("\\0")');
+    expect(releaseYml).toContain('manifestFileNames.join("\\0")');
+    expect(releaseYml).toContain('REQUIRED_RUNTIME_FILES.slice().sort().join("\\0")');
+    expect(releaseYml).toContain("manifest.files[name] !== expected");
   });
 
   test("publishes only the two stable Rust assets and their checksums", () => {
