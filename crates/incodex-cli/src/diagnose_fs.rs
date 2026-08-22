@@ -3,6 +3,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use incodex_core::session::is_canonical_process_start_identity;
+
 pub(crate) fn collect_directory_entries<I>(entries: I) -> Result<Vec<PathBuf>, io::Error>
 where
     I: IntoIterator<Item = io::Result<PathBuf>>,
@@ -74,6 +76,7 @@ pub(crate) fn live_process_identity(pid: i32) -> Option<LiveProcess> {
     }
     let output = Command::new("ps")
         .args(["-p", &pid.to_string(), "-o", "lstart=,comm="])
+        .env("LC_ALL", "C")
         .output()
         .ok()?;
     if !output.status.success() {
@@ -81,7 +84,7 @@ pub(crate) fn live_process_identity(pid: i32) -> Option<LiveProcess> {
     }
     let line = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let (start, exec) = line.rsplit_once(char::is_whitespace)?;
-    if start.trim().is_empty() || exec.trim().is_empty() {
+    if !is_canonical_process_start_identity(start.trim()) || exec.trim().is_empty() {
         return None;
     }
     Some(LiveProcess {

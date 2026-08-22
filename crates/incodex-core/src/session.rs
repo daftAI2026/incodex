@@ -712,7 +712,7 @@ fn file_name(path: &Path) -> Result<String, String> {
         .ok_or_else(|| format!("invalid path: {}", path.display()))
 }
 
-fn is_canonical_process_start_identity(value: &str) -> bool {
+pub fn is_canonical_process_start_identity(value: &str) -> bool {
     let parts: Vec<&str> = value.split_whitespace().collect();
     if parts.len() != 5
         || parts[0].len() != 3

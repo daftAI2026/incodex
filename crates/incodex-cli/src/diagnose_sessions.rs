@@ -1,6 +1,8 @@
 use std::fs;
 use std::path::Path;
 
+use incodex_core::session::is_canonical_process_start_identity;
+
 use super::{
     diagnose_fs::{
         file_name, file_name_starts, is_directory, is_symlink, live_process_identity, pid_alive,
@@ -237,6 +239,20 @@ pub fn scan_sessions(root: &Path) -> SessionScan {
                     false
                 }
                 Some(expected) => match live_process_identity(pid) {
+                    Some(_) if !is_canonical_process_start_identity(expected) => {
+                        unknown = true;
+                        chromium_findings.push(DiagnosticFinding::warning(
+                            "chromium.session-unknown",
+                            "session process identity cannot be normalized; Chromium residue cannot be classified",
+                            Some(&owner_path),
+                        ));
+                        orphan_findings.push(DiagnosticFinding::warning(
+                            "session.identity-unknown",
+                            format!("cannot normalize process identity for pid {pid}"),
+                            Some(&owner_path),
+                        ));
+                        false
+                    }
                     Some(live) => expected != live.start,
                     None => {
                         unknown = true;
