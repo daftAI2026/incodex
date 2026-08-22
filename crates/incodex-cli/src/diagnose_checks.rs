@@ -718,15 +718,9 @@ fn transaction_evidence(
     let recovery = match action {
         incodex_transaction::Recovery::Rollback => Some("rollback".to_string()),
         incodex_transaction::Recovery::Refuse => Some("manual".to_string()),
-        incodex_transaction::Recovery::Done if has_external_artifacts => {
-            Some("manual".to_string())
-        }
-        incodex_transaction::Recovery::Done if internal_cleanup_safe => {
-            Some("cleanup".to_string())
-        }
-        incodex_transaction::Recovery::Done if !artifacts.is_empty() => {
-            Some("manual".to_string())
-        }
+        incodex_transaction::Recovery::Done if has_external_artifacts => Some("manual".to_string()),
+        incodex_transaction::Recovery::Done if internal_cleanup_safe => Some("cleanup".to_string()),
+        incodex_transaction::Recovery::Done if !artifacts.is_empty() => Some("manual".to_string()),
         incodex_transaction::Recovery::Done
             if phase == "ROLLED_BACK" && original_valid == Some(true) =>
         {
