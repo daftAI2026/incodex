@@ -8,7 +8,8 @@ session cleanup, and IPC as the dangerous surface.
 - macOS for install / uninstall / codesign work
 - [Bun](https://bun.sh) **1.3.14** (see `.bun-version`)
 - A local Codex / ChatGPT desktop app only if you are running install tests
-- Rust / Cargo for native CLI work
+- Rust **1.98.0** for native CLI work (installed automatically by `rustup` from
+  `rust-toolchain.toml`)
 
 ## Setup
 
@@ -64,6 +65,25 @@ cargo run -p incodex-cli -- --help
 cargo run -p incodex-cli -- status --json
 cargo test --workspace --release
 ```
+
+## Rust toolchain upgrades
+
+`rust-toolchain.toml` is the single compiler source of truth for local builds,
+CI, and release builds. The workspace `rust-version` records the minimum Rust
+minor release supported by every crate; it is inherited by each crate manifest.
+
+Upgrade Rust in a dedicated PR. Change the exact channel in
+`rust-toolchain.toml`, raise `rust-version` only when the supported minimum also
+changes, and update the requirement above. Then run:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --release --locked
+bun run check
+```
+
+Do not create a tag or GitHub Release as part of a toolchain upgrade PR.
 
 Do not add a TUI crate or an AGPL ASAR crate. Electron Runtime stays TypeScript and Bun-built; Rust embeds committed `dist/`. Incognito hover remains shared Runtime behavior, not a separate Rust UI implementation.
 
