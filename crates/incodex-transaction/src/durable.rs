@@ -18,6 +18,7 @@ const DIR_MODE: u32 = 0o700;
 #[cfg(test)]
 thread_local! {
     static SYNC_TRACE: RefCell<Vec<PathBuf>> = const { RefCell::new(Vec::new()) };
+    static FAIL_NEXT_WRITE_BEFORE_RENAME: Cell<bool> = const { Cell::new(false) };
     static FAIL_NEXT_WRITE_AFTER_RENAME: Cell<bool> = const { Cell::new(false) };
 }
 
@@ -34,6 +35,11 @@ pub(crate) fn sync_trace() -> Vec<PathBuf> {
 #[cfg(test)]
 pub(crate) fn fail_next_write_after_rename() {
     FAIL_NEXT_WRITE_AFTER_RENAME.with(|failure| failure.set(true));
+}
+
+#[cfg(test)]
+pub(crate) fn fail_next_write_before_rename() {
+    FAIL_NEXT_WRITE_BEFORE_RENAME.with(|failure| failure.set(true));
 }
 
 #[cfg(test)]
@@ -72,6 +78,11 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
         unsafe {
             libc::fchmod(file.as_raw_fd(), FILE_MODE as libc::mode_t);
         }
+    }
+    #[cfg(test)]
+    if FAIL_NEXT_WRITE_BEFORE_RENAME.with(|failure| failure.replace(false)) {
+        let _ = fs::remove_file(&tmp);
+        return Err("injected pre-rename journal write failure".into());
     }
     fs::rename(&tmp, path).map_err(|err| err.to_string())?;
     #[cfg(test)]

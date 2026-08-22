@@ -241,6 +241,55 @@ fn doctor_marks_committed_restore_symlink_manual() {
 }
 
 #[test]
+fn doctor_marks_committed_internal_artifact_manual() {
+    let home = isolated_home();
+    let root = home.join(".incodex");
+    let app = home.join("ChatGPT.app");
+    let candidate = home.join("candidate.app");
+    fs::create_dir_all(&app).unwrap();
+    fs::write(app.join("marker"), "original\n").unwrap();
+    fs::create_dir_all(&candidate).unwrap();
+    fs::write(candidate.join("marker"), "patched\n").unwrap();
+
+    let mut tx = Engine::begin(&root, &app, "committed-internal-artifact-test").unwrap();
+    let id = tx.install_id().to_string();
+    let original = root
+        .join("transactions")
+        .join(&id)
+        .join("original/ChatGPT.app");
+    ditto(&app, &original).unwrap();
+    tx.mark_backup_committed().unwrap();
+    tx.place_staging(&candidate).unwrap();
+    tx.swap().unwrap();
+    tx.commit().unwrap();
+    drop(tx);
+
+    let staging = root
+        .join("transactions")
+        .join(&id)
+        .join("staging/ChatGPT.app");
+    fs::create_dir_all(&staging).unwrap();
+
+    let (_status, stdout, stderr) =
+        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(stderr, "");
+    let report = parse_json(&stdout);
+    let record = report["journalRecords"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|record| record["installId"] == id)
+        .expect("committed transaction record");
+    assert_eq!(record["phase"], "COMMITTED");
+    assert_eq!(record["recovery"], "manual");
+    assert!(record["artifacts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|path| path.as_str().unwrap() == staging.display().to_string()));
+}
+
+#[test]
 fn doctor_marks_a_checksum_valid_unknown_transaction_phase_manual() {
     let home = isolated_home();
     let root = home.join(".incodex");

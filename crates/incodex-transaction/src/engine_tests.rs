@@ -2,7 +2,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::Engine;
-use crate::durable::{fail_next_write_after_rename, reset_sync_trace, sync_trace};
+use crate::durable::{
+    fail_next_write_after_rename, fail_next_write_before_rename, reset_sync_trace, sync_trace,
+};
 use crate::journal::{fail_next_load, load_v2};
 use crate::proof::{digest_call_count, reset_digest_call_count};
 
@@ -51,7 +53,29 @@ fn durable_commit_readback_failure_keeps_the_new_phase_in_memory() {
 }
 
 #[test]
-fn post_rename_write_failure_keeps_the_durable_phase_in_memory() {
+fn pre_rename_write_and_readback_failure_keeps_the_old_phase_for_rollback() {
+    let root = std::env::temp_dir().join(format!(
+        "incodex-commit-pre-rename-readback-failure-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let mut tx = swapped_transaction(&root);
+
+    fail_next_write_before_rename();
+    fail_next_load();
+    let error = tx.commit().unwrap_err();
+
+    assert!(error.contains("injected pre-rename journal write failure"));
+    assert!(error.contains("journal readback also failed"));
+    assert_eq!(tx.journal().phase, "SWAPPED");
+    tx.rollback("pre-rename write failed").unwrap();
+    assert_eq!(tx.journal().phase, "ROLLED_BACK");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn post_rename_write_and_readback_failure_keeps_the_durable_phase_in_memory() {
     let root = std::env::temp_dir().join(format!(
         "incodex-commit-post-rename-failure-{}",
         std::process::id()
@@ -62,6 +86,7 @@ fn post_rename_write_failure_keeps_the_durable_phase_in_memory() {
     let id = tx.install_id().to_string();
 
     fail_next_write_after_rename();
+    fail_next_load();
     let error = tx.commit().unwrap_err();
 
     assert!(error.contains("injected post-rename journal write failure"));
