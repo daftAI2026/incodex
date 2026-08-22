@@ -123,4 +123,13 @@ describe("Rust workspace", () => {
     );
     expect(contributing).toContain("cargo test --workspace --release --locked");
   });
+
+  test("source install docs require the pinned Rust toolchain", () => {
+    for (const path of ["README.md", "README_CN.md"]) {
+      const readme = read(path);
+      expect(readme).toContain("rust-toolchain.toml");
+      expect(readme).not.toMatch(/requires stable Rust|需要稳定版 Rust/);
+    }
+    expect(read("CONTRIBUTING.md")).not.toMatch(/Rust \*\*\d+\.\d+\.\d+\*\*/);
+  });
 });
