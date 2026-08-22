@@ -17,7 +17,7 @@ use incodex_core::{format_kv, format_ok, format_step, format_warn};
 use crate::app_bundle::resolve_executable;
 use crate::cdp::{
     allocate_debug_port, debug_launch_args, inject_shared_ui_with_options, start_lifecycle_monitor,
-    InjectionOptions, WindowBounds,
+    start_primary_lifecycle_monitor, InjectionOptions, WindowBounds,
 };
 use crate::parse::ParsedCli;
 use crate::CliFailure;
@@ -373,6 +373,7 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
         thread::spawn(move || {
             let mut bounds_ready = source_bounds.is_none();
             let mut primary_target_id = None;
+            let mut lifecycle_started = false;
             let mut last_injection_error = None;
             for attempt in 1u8..=40 {
                 if !bounds_ready {
@@ -384,6 +385,9 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                         )
                         .is_ok();
                     }
+                }
+                if !lifecycle_started && start_primary_lifecycle_monitor(port).is_ok() {
+                    lifecycle_started = true;
                 }
                 if primary_target_id.is_none() {
                     match inject_shared_ui_with_options(port, &options) {
@@ -403,7 +407,9 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                 }
                 if bounds_ready {
                     if let Some(target_id) = primary_target_id.take() {
-                        start_lifecycle_monitor(port, target_id);
+                        if !lifecycle_started {
+                            start_lifecycle_monitor(port, target_id);
+                        }
                         publish_injection_status(
                             &status_tx,
                             &injection_readiness,

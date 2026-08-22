@@ -193,21 +193,22 @@ fn try_inject(debug_port: u16, source: &str) -> Result<String, String> {
     validate_cdp_websocket_url(&page.ws, debug_port)?;
     let (mut socket, _) = connect_cdp_websocket(&page.ws, debug_port)?;
     send_cdp(&mut socket, 1, "Page.enable", json!({}))?;
+    select_official_codex_mode(&mut socket)?;
     send_cdp(
         &mut socket,
-        2,
+        4,
         "Page.addScriptToEvaluateOnNewDocument",
         json!({ "source": source }),
     )?;
     send_cdp(
         &mut socket,
-        3,
+        5,
         "Runtime.evaluate",
         json!({ "expression": source, "returnByValue": true }),
     )?;
     let health = send_cdp(
         &mut socket,
-        4,
+        6,
         "Runtime.evaluate",
         json!({ "expression": ui_ready_expression(), "returnByValue": true }),
     )?;
@@ -215,6 +216,31 @@ fn try_inject(debug_port: u16, source: &str) -> Result<String, String> {
     let target_id = page.id.clone();
     let _ = socket.close(None);
     Ok(target_id)
+}
+
+fn select_official_codex_mode(socket: &mut WebSocket<TcpStream>) -> Result<(), String> {
+    let key = |r#type: &str| {
+        json!({
+            "type": r#type,
+            "modifiers": 2,
+            "key": "3",
+            "code": "Digit3",
+            "windowsVirtualKeyCode": 51
+        })
+    };
+    send_cdp(socket, 2, "Input.dispatchKeyEvent", key("rawKeyDown"))?;
+    send_cdp(socket, 3, "Input.dispatchKeyEvent", key("keyUp"))?;
+    Ok(())
+}
+
+pub fn start_primary_lifecycle_monitor(debug_port: u16) -> Result<(), String> {
+    let targets = list_targets(debug_port)?;
+    let target_id = pick_codex_page_target(&targets)
+        .ok_or("no Codex page target")?
+        .id
+        .clone();
+    start_lifecycle_monitor(debug_port, target_id);
+    Ok(())
 }
 
 pub fn start_lifecycle_monitor(debug_port: u16, primary_target_id: String) {
