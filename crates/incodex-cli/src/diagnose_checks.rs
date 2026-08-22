@@ -721,6 +721,7 @@ fn transaction_evidence(
         match action {
             incodex_transaction::Recovery::Rollback
                 if matches!(phase, "BACKUP_COMMITTED" | "STAGED")
+                    && include_original_proof
                     && original_valid != Some(true) =>
             {
                 Some("manual".to_string())
