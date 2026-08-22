@@ -83,14 +83,24 @@ describe("runtime load", () => {
     const selectorEnd = main.indexOf("\nfunction ", selectorStart + 1);
     const selector = main.slice(selectorStart, selectorEnd);
 
+    expect(main).toContain("let codexModeSelected = false");
     expect(selector).toContain("if (!isIncognito()) return");
+    expect(selector).toContain("if (codexModeSelected) return");
     expect(selector).toContain(
       'win.webContents.sendInputEvent({ type: "keyDown", keyCode: "3", modifiers: ["control"] })',
     );
     expect(selector).toContain(
       'win.webContents.sendInputEvent({ type: "keyUp", keyCode: "3", modifiers: ["control"] })',
     );
-    expect(main).toContain('win.once("ready-to-show", () => {\n      selectOfficialCodexMode(win);');
+    expect(selector).toContain("codexModeSelected = true");
+    const readyStart = main.indexOf('win.once("ready-to-show", () => {');
+    const readyEnd = main.indexOf("\n    });", readyStart);
+    const ready = main.slice(readyStart, readyEnd);
+    expect(ready.indexOf("bringForward();")).toBeLessThan(
+      ready.indexOf("selectOfficialCodexMode(win)"),
+    );
+    expect(ready).toContain("if (win.isFocused()) selectOfficialCodexMode(win)");
+    expect(ready).toContain('else win.once("focus", () => selectOfficialCodexMode(win))');
   });
 
   test("an ordinary incognito click marks its session pending before child handoff", () => {
