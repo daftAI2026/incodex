@@ -46,13 +46,13 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
     if parsed.clone && parsed.app.is_none() {
         println!("{}", format_kv("Clone", &app.display().to_string(), None));
     }
-    print_install_plan(&app, parsed.clone)?;
+    let mut progress = Progress::new();
+    print_install_plan(&app, parsed.clone, &mut progress)?;
     if parsed.dry_run {
         println!("{}", format_warn("Dry run. No files changed.", None));
         return Ok(());
     }
     ensure_confirmed(parsed, "install")?;
-    let mut progress = Progress::new();
     let official_default = is_official_app(&app, None);
     if parsed.clone && parsed.app.is_none() {
         progress.stage("Cloning official app");
@@ -226,7 +226,7 @@ fn resolve_target(parsed: &ParsedCli, root: &Path) -> PathBuf {
     PathBuf::from(DEFAULT_APP)
 }
 
-fn print_install_plan(app: &Path, clone: bool) -> Result<(), String> {
+fn print_install_plan(app: &Path, clone: bool, progress: &mut Progress) -> Result<(), String> {
     let source = if clone {
         PathBuf::from(DEFAULT_APP)
     } else {
@@ -260,13 +260,12 @@ fn print_install_plan(app: &Path, clone: bool) -> Result<(), String> {
         _ => "unknown".to_string(),
     };
     println!("{}", format_kv("Version", &version, None));
+    progress.stage("Checking app signature");
+    let signed = verify_app(&source);
+    progress.stop();
     println!(
         "{}",
-        format_kv(
-            "Signed",
-            if verify_app(&source) { "yes" } else { "no" },
-            None
-        )
+        format_kv("Signed", if signed { "yes" } else { "no" }, None)
     );
     if !clone {
         println!(
