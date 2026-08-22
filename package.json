@@ -20,12 +20,12 @@
     "bun": "1.3.14"
   },
   "dependencies": {
-    "@electron/asar": "4.2.1"
+    "@electron/asar": "4.3.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.2.4",
-    "@types/bun": "1.2.20",
-    "@types/node": "22.15.3",
-    "typescript": "5.9.2"
+    "@biomejs/biome": "2.5.9",
+    "@types/bun": "1.3.14",
+    "@types/node": "24.13.3",
+    "typescript": "7.0.2"
   }
 }

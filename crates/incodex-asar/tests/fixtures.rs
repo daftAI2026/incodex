@@ -397,6 +397,76 @@ fn rust_reads_electron_packed_archive() {
 }
 
 #[test]
+fn electron_deduplicated_offsets_survive_rust_patch() {
+    if !bun_available() {
+        return;
+    }
+    let root = scratch();
+    let src = write_src(
+        &root,
+        &[
+            (
+                "package.json",
+                &format!("{}\n", serde_json::json!({"main":"index.js"})),
+            ),
+            ("index.js", "hello-oracle\n"),
+            ("duplicate-a.txt", "shared-content\n"),
+            ("duplicate-b.txt", "shared-content\n"),
+        ],
+    );
+    let archive_path = root.join("app.asar");
+    let pack_script = format!(
+        r#"import {{ createPackageWithOptions }} from "@electron/asar"; await createPackageWithOptions({src}, {dest}, {{}});"#,
+        src = serde_json::to_string(&src).unwrap(),
+        dest = serde_json::to_string(&archive_path).unwrap()
+    );
+    let packed = Command::new("bun")
+        .args(["-e", &pack_script])
+        .current_dir(repo_root())
+        .status()
+        .unwrap();
+    assert!(packed.success());
+
+    let electron_archive = Archive::open(&archive_path).unwrap();
+    assert_eq!(
+        electron_archive.header["files"]["duplicate-a.txt"]["offset"],
+        electron_archive.header["files"]["duplicate-b.txt"]["offset"]
+    );
+    assert_eq!(
+        electron_archive.extract("duplicate-a.txt").unwrap(),
+        electron_archive.extract("duplicate-b.txt").unwrap()
+    );
+
+    patch_asar(&archive_path, "/* loader */", Some("deduplicated")).unwrap();
+    let patched = Archive::open(&archive_path).unwrap();
+    assert_eq!(
+        patched.extract("duplicate-a.txt").unwrap(),
+        b"shared-content\n"
+    );
+    assert_eq!(
+        patched.extract("duplicate-b.txt").unwrap(),
+        b"shared-content\n"
+    );
+    assert_eq!(patched.read_package_main().unwrap().main, "index.js");
+
+    let extract_script = format!(
+        r#"import {{ extractFile }} from "@electron/asar"; const a = extractFile({archive}, "duplicate-a.txt"); const b = extractFile({archive}, "duplicate-b.txt"); if (!a.equals(b)) process.exit(1); process.stdout.write(a);"#,
+        archive = serde_json::to_string(&archive_path).unwrap()
+    );
+    let extracted = Command::new("bun")
+        .args(["-e", &extract_script])
+        .current_dir(repo_root())
+        .output()
+        .unwrap();
+    assert!(
+        extracted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&extracted.stderr)
+    );
+    assert_eq!(extracted.stdout, b"shared-content\n");
+}
+
+#[test]
 fn electron_reads_rust_packed_archive() {
     if !bun_available() {
         return;

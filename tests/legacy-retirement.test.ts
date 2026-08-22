@@ -104,7 +104,7 @@ describe("legacy TypeScript retirement boundary", () => {
       dependencies?: Record<string, string>;
       scripts?: Record<string, string>;
     };
-    expect(packageJson.dependencies?.["@electron/asar"]).toBe("4.2.1");
+    expect(packageJson.dependencies?.["@electron/asar"]).toBe("4.3.0");
     expect(read("crates/incodex-asar/tests/fixtures.rs")).toContain('from "@electron/asar"');
     expect(packageJson.scripts?.["build:runtime"]).toBe("bun src/build-runtime.ts");
     expect(packageJson.scripts?.["check:dist"]).toBeDefined();
