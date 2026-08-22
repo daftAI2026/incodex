@@ -42,6 +42,23 @@ fn run(args: &[&str], home: &Path) -> (i32, String, String) {
     )
 }
 
+fn run_from(args: &[&str], home: &Path, current_dir: &Path) -> (i32, String, String) {
+    let output = Command::new(bin())
+        .args(args)
+        .current_dir(current_dir)
+        .env("HOME", home)
+        .env("TERM", "dumb")
+        .env("NO_COLOR", "1")
+        .env("SHELL", "/bin/zsh")
+        .output()
+        .expect("spawn incodex");
+    (
+        output.status.code().unwrap_or(1),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
 fn run_with_path(args: &[&str], home: &Path, path: &Path) -> (i32, String, String) {
     let output = Command::new(bin())
         .args(args)
@@ -404,6 +421,24 @@ fn install_yes_app_patches_asar_writes_runtime_and_commits() {
     if let Some(before) = official_before {
         assert_eq!(fs::read(&official).unwrap(), before);
     }
+}
+
+#[test]
+fn install_accepts_an_existing_relative_app_path() {
+    let home = isolated_home();
+    let app = patchable_app(&home);
+
+    let (status, stdout, stderr) = run_from(
+        &["install", "--yes", "--app", "bundle/ChatGPT.app"],
+        &home,
+        &home,
+    );
+
+    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
+    assert!(
+        app.join("Contents/Resources/app.asar").exists(),
+        "relative target must resolve to the requested app"
+    );
 }
 
 #[test]

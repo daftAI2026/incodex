@@ -7,4 +7,5 @@ repository.workspace = true
 description = "codesign, plist, Launch Services, and quit helpers"
 
 [dependencies]
+libc.workspace = true
 serde_json.workspace = true

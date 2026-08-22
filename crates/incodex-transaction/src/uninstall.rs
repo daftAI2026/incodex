@@ -13,9 +13,16 @@ use crate::proof::{
     directory_identity, parse_identity, record_restore_intent, require_identity, restore_source,
     tree_digest, validate_tree_digest,
 };
+use crate::{NoopQuiescenceGuard, QuiescenceGuard};
 
 pub fn restore_committed(root: &Path, install_id: &str, live_path: &Path) -> Result<(), String> {
-    restore_committed_with_checkpoint(root, install_id, live_path, |_| {})
+    restore_committed_with_quiescence(
+        root,
+        install_id,
+        live_path,
+        NoopQuiescenceGuard,
+        |_| {},
+    )
 }
 
 #[doc(hidden)]
@@ -23,9 +30,23 @@ pub fn restore_committed_with_checkpoint<F>(
     root: &Path,
     install_id: &str,
     live_path: &Path,
+    checkpoint: F,
+) -> Result<(), String>
+where
+    F: FnMut(&str),
+{
+    restore_committed_with_quiescence(root, install_id, live_path, NoopQuiescenceGuard, checkpoint)
+}
+
+pub fn restore_committed_with_quiescence<G, F>(
+    root: &Path,
+    install_id: &str,
+    live_path: &Path,
+    quiescence: G,
     mut checkpoint: F,
 ) -> Result<(), String>
 where
+    G: QuiescenceGuard,
     F: FnMut(&str),
 {
     let initial = load_v2(root, install_id)?;
@@ -44,7 +65,7 @@ where
             journal.phase
         ));
     }
-    restore_committed_locked(root, &journal, live_path, &mut checkpoint).map(|_| ())
+    restore_committed_locked(root, &journal, live_path, &quiescence, &mut checkpoint).map(|_| ())
 }
 
 pub fn migrate_legacy_committed<F, G>(
@@ -58,6 +79,29 @@ where
     F: FnOnce(&Path) -> bool,
     G: FnOnce(&Path) -> bool,
 {
+    migrate_legacy_committed_with_quiescence(
+        root,
+        install_id,
+        live_path,
+        NoopQuiescenceGuard,
+        verify_backup,
+        verify_live,
+    )
+}
+
+pub fn migrate_legacy_committed_with_quiescence<Q, F, G>(
+    root: &Path,
+    install_id: &str,
+    live_path: &Path,
+    quiescence: Q,
+    verify_backup: F,
+    verify_live: G,
+) -> Result<(), String>
+where
+    Q: QuiescenceGuard,
+    F: FnOnce(&Path) -> bool,
+    G: FnOnce(&Path) -> bool,
+{
     let initial = load_v2(root, install_id)?;
     if !is_legacy_committed(&initial) {
         return Err("transaction is not a legacy COMMITTED journal".into());
@@ -68,6 +112,7 @@ where
     if !is_legacy_committed(&journal) {
         return Err("legacy transaction changed before migration".into());
     }
+    quiescence.ensure_quiescent(live_path)?;
     let current = inspect_target(live_path, None)?;
     if current.real_path != PathBuf::from(&journal.target.real_path) {
         return Err("legacy committed target real path changed before migration".into());
@@ -97,7 +142,7 @@ where
     migrated.sequence += 1;
     write_journal(root, &migrated)?;
     let migrated = load_v2(root, install_id)?;
-    restore_committed_locked(root, &migrated, live_path, &mut |_| {}).map(|_| ())
+    restore_committed_locked(root, &migrated, live_path, &quiescence, &mut |_| {}).map(|_| ())
 }
 
 fn is_legacy_committed(journal: &JournalV2) -> bool {
@@ -118,14 +163,23 @@ fn restore_committed_locked<F>(
     root: &Path,
     journal: &JournalV2,
     live_path: &Path,
+    quiescence: &dyn QuiescenceGuard,
     checkpoint: &mut F,
 ) -> Result<JournalV2, String>
 where
     F: FnMut(&str),
 {
+    // 不要先把 COMMITTED journal 推进成 UNINSTALLING；拒绝时 journal 必须保持真相。
+    quiescence.ensure_quiescent(live_path)?;
     validate_committed_restore_target(root, journal, live_path)?;
     let uninstalling = begin_uninstall(root, journal)?;
-    let restored = restore_live_with_checkpoint(root, live_path, &uninstalling, checkpoint)?;
+    let restored = restore_live_with_quiescence(
+        root,
+        live_path,
+        &uninstalling,
+        quiescence,
+        checkpoint,
+    )?;
     let mut done = restored;
     done.phase = "ROLLED_BACK".into();
     done.sequence += 1;
@@ -181,23 +235,18 @@ pub(crate) fn validate_committed_restore_target(
     validate_tree_digest(live, &journal.staged_digest, "committed live target")
 }
 
-pub(crate) fn restore_live(
+pub(crate) fn restore_live_with_quiescence<F>(
     root: &Path,
     live: &Path,
     journal: &JournalV2,
-) -> Result<JournalV2, String> {
-    restore_live_with_checkpoint(root, live, journal, &mut |_| {})
-}
-
-fn restore_live_with_checkpoint<F>(
-    root: &Path,
-    live: &Path,
-    journal: &JournalV2,
+    quiescence: &dyn QuiescenceGuard,
     checkpoint: &mut F,
 ) -> Result<JournalV2, String>
 where
     F: FnMut(&str),
 {
+    // restore 之前重新观察；调用方不能把之前的 quiescent 结果当永久事实。
+    quiescence.ensure_quiescent(live)?;
     let paths = tx_paths(root, &journal.install_id);
     let source = restore_source(root, journal)?;
     let candidate = if source == paths.original {

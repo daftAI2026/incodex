@@ -6,18 +6,40 @@ use incodex_core::canonical::{inspect_target, is_official_app};
 use incodex_core::paths::{user_root, ASAR_REL, DEFAULT_APP};
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
 use incodex_macos::{
-    ditto, notify_launch_services, quit_official_app, read_asar_integrity, read_plist_info,
-    sign_app, verify_app, verify_original_vendor_bundle, verify_patched_adhoc_bundle_deep_strict,
-    write_asar_integrity, OFFICIAL_BUNDLE_IDENTIFIER,
+    ditto, notify_launch_services, read_asar_integrity, read_plist_info, sign_app, verify_app,
+    verify_original_vendor_bundle, verify_patched_adhoc_bundle_deep_strict, write_asar_integrity,
+    OFFICIAL_BUNDLE_IDENTIFIER,
 };
+#[cfg(test)]
+use incodex_macos::AppQuiescence;
 use incodex_runtime_bundle::{loader_source, publish, runtime_version};
 use incodex_transaction::{
-    journal_v2, migrate_legacy_committed, recover_with, restore_committed,
-    validate_backup_snapshot, validate_committed_live_snapshot, Engine, Recovery, TxError,
+    journal_v2, migrate_legacy_committed_with_quiescence, recover_with_quiescence,
+    restore_committed_with_quiescence,
+    validate_backup_snapshot, validate_committed_live_snapshot, Engine, QuiescenceGuard, Recovery,
+    TxError,
 };
+#[cfg(test)]
+use incodex_transaction::NoopQuiescenceGuard;
 
+use crate::app_quiescence::AppGuard;
 use crate::parse::ParsedCli;
 use crate::spinner::Progress;
+
+#[cfg(test)]
+fn close_official_app_with<P, Q, C>(
+    app: &AppQuiescence,
+    probe: &P,
+    requester: &mut Q,
+    clock: &mut C,
+) -> Result<(), String>
+where
+    P: incodex_macos::ProcessProbe,
+    Q: incodex_macos::QuitRequester,
+    C: incodex_macos::QuiescenceClock,
+{
+    app.quit_official_app_and_wait_with(probe, requester, clock)
+}
 
 pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
     let root = user_root();
@@ -32,6 +54,7 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
     }
     ensure_confirmed(parsed, "install")?;
     let mut progress = Progress::new();
+    let official_default = is_official_app(&app, None);
     if parsed.clone && parsed.app.is_none() {
         progress.stage("Cloning official app");
         if !Path::new(DEFAULT_APP).exists() {
@@ -42,11 +65,17 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
         println!("{}", format_ok("Cloned official app", None));
         println!("{}", format_kv("Target", &app.display().to_string(), None));
     }
-    if parsed.live && parsed.app.is_none() {
-        progress.stage("Closing ChatGPT");
-        let _ = quit_official_app();
+    if !app.exists() {
+        return Err(format!("Codex app not found: {}", app.display()));
     }
-    let result = install_app(&app, &root, &mut progress)?;
+    let guard = AppGuard::for_app(&app)?;
+    if official_default {
+        progress.stage("Closing ChatGPT");
+        guard.close_official()?;
+    } else {
+        guard.ensure()?;
+    }
+    let result = install_app_with_quiescence(&app, &root, &mut progress, guard)?;
     progress.stop();
     print_command_result(&result);
     if parsed.live && parsed.app.is_none() {
@@ -74,8 +103,20 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
         return Ok(());
     }
     ensure_confirmed(parsed, "uninstall")?;
+    if !app.exists() {
+        return Err(format!("Codex app not found: {}", app.display()));
+    }
     let mut progress = Progress::new();
-    let result = uninstall_app(&app, &root, &mut progress)?;
+    let official_default = is_official_app(&app, None);
+    let guard = AppGuard::for_app(&app)?;
+    if official_default {
+        progress.stage("Closing ChatGPT");
+        guard.close_official()?;
+    } else {
+        guard.ensure()?;
+    }
+    let result =
+        uninstall_app_with_quiescence(&app, &root, &mut progress, guard, official_default)?;
     progress.stop();
     println!(
         "{}",
@@ -97,9 +138,31 @@ pub fn run_recover(parsed: &ParsedCli) -> Result<(), String> {
     if !v2.exists() && !v1.exists() {
         return Err(format!("no journal for {id}"));
     }
+    let journal = journal_v2(&root, id)?;
+    let terminal_cleanup = matches!(journal.phase.as_str(), "COMMITTED" | "ROLLED_BACK");
+    let target = PathBuf::from(&journal.target.real_path);
+    let guard = if terminal_cleanup {
+        AppGuard::noop()
+    } else {
+        let guard = if target.exists() {
+            AppGuard::for_app(&target)?
+        } else {
+            let original = root
+                .join("transactions")
+                .join(id)
+                .join(&journal.paths.original);
+            AppGuard::for_bundle_at(&original, &target)?
+        };
+        if is_official_app(&target, None) {
+            guard.close_official()?;
+        } else {
+            guard.ensure()?;
+        }
+        guard
+    };
     let mut progress = Progress::new();
     progress.stage("Recovering transaction");
-    let result = recover_with(&root, id, verify_app).map_err(map_tx)?;
+    let result = recover_with_quiescence(&root, id, guard, verify_app).map_err(map_tx)?;
     progress.stop();
     println!("phase: {}", result.journal.phase);
     println!("action: {}", result.action.as_str());
@@ -124,18 +187,16 @@ pub fn run_recover(parsed: &ParsedCli) -> Result<(), String> {
 }
 
 pub(crate) fn restore_default_for_self_uninstall(progress: &mut Progress) -> Result<(), String> {
-    uninstall_app(Path::new(DEFAULT_APP), &user_root(), progress).map(|_| ())
+    let app = Path::new(DEFAULT_APP);
+    let guard = AppGuard::for_app(app)?;
+    progress.stage("Closing ChatGPT");
+    guard.close_official()?;
+    uninstall_app_with_quiescence(app, &user_root(), progress, guard, true).map(|_| ())
 }
 
 fn map_tx(err: TxError) -> String {
     match err {
-        TxError::Refuse { message } | TxError::Other(message) => {
-            if message.contains("No such file") || message.contains("not found") {
-                message
-            } else {
-                message
-            }
-        }
+        TxError::Refuse { message } | TxError::Other(message) => message,
     }
 }
 
@@ -233,10 +294,19 @@ fn ensure_confirmed(parsed: &ParsedCli, command: &str) -> Result<(), String> {
     ))
 }
 
-fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<CommandResult, String> {
+fn install_app_with_quiescence<G>(
+    app: &Path,
+    root: &Path,
+    progress: &mut Progress,
+    quiescence: G,
+) -> Result<CommandResult, String>
+where
+    G: QuiescenceGuard + Clone,
+{
     if !app.exists() {
         return Err(format!("Codex app not found: {}", app.display()));
     }
+    quiescence.ensure_quiescent(app)?;
     let asar = app.join(ASAR_REL);
     let existing = inspect_existing_install(app, root, &asar)?;
     if existing.is_none() {
@@ -264,7 +334,8 @@ fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<Comma
         }
     }
     let expected_plist = read_plist_info(app);
-    let mut tx = begin_verified_transaction(root, app, |locked_app| {
+    let transaction_quiescence = quiescence.clone();
+    let mut tx = begin_verified_transaction_with_quiescence(root, app, transaction_quiescence, |locked_app| {
         let locked_asar = locked_app.join(ASAR_REL);
         if inspect_existing_install(locked_app, root, &locked_asar)?.is_some() {
             return Err(
@@ -281,12 +352,21 @@ fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<Comma
         .join("original")
         .join("ChatGPT.app");
     progress.stage("Backing up original app");
+    if let Err(error) = quiescence.ensure_quiescent(app) {
+        return Err(rollback_install(&mut tx, None, error));
+    }
     snapshot_original(&mut tx, app, &original)?;
     let staged = root
         .join("scratch")
         .join(format!("ChatGPT.app.staged-{install_id}"));
     progress.stage("Patching and signing app");
+    if let Err(error) = quiescence.ensure_quiescent(app) {
+        return Err(rollback_install(&mut tx, Some(&staged), error));
+    }
     if let Err(error) = ditto(app, &staged) {
+        return Err(rollback_install(&mut tx, Some(&staged), error));
+    }
+    if let Err(error) = quiescence.ensure_quiescent(app) {
         return Err(rollback_install(&mut tx, Some(&staged), error));
     }
     let (hash, _) = match patch_asar(&staged.join(ASAR_REL), loader_source(), Some(&install_id)) {
@@ -296,13 +376,22 @@ fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<Comma
     if let Err(error) = write_asar_integrity(&staged, &hash) {
         return Err(rollback_install(&mut tx, Some(&staged), error));
     }
+    if let Err(error) = quiescence.ensure_quiescent(app) {
+        return Err(rollback_install(&mut tx, Some(&staged), error));
+    }
     if is_official_app(app, None) || verify_app(app) || app.join("Contents/MacOS").exists() {
         if let Err(err) = sign_app(&staged) {
             return Err(rollback_install(&mut tx, Some(&staged), err));
         }
     }
     progress.stage("Replacing application");
+    if let Err(error) = quiescence.ensure_quiescent(app) {
+        return Err(rollback_install(&mut tx, Some(&staged), error));
+    }
     if let Err(error) = tx.place_staging(&staged) {
+        return Err(rollback_install(&mut tx, Some(&staged), error));
+    }
+    if let Err(error) = quiescence.ensure_quiescent(app) {
         return Err(rollback_install(&mut tx, Some(&staged), error));
     }
     if let Err(error) = tx.swap() {
@@ -389,29 +478,36 @@ fn remove_install_scratch(path: &Path) -> Result<(), String> {
     }
 }
 
-fn uninstall_app(
+fn uninstall_app_with_quiescence<Q>(
     app: &Path,
     root: &Path,
     progress: &mut Progress,
-) -> Result<CommandResult, String> {
+    quiescence: Q,
+    official_target: bool,
+) -> Result<CommandResult, String>
+where
+    Q: QuiescenceGuard + Clone,
+{
     if !app.exists() {
         return Err(format!("Codex app not found: {}", app.display()));
     }
-    let official_target = is_official_app(app, None);
-    if official_target {
-        progress.stage("Closing ChatGPT");
-        let _ = quit_official_app();
-    }
+    quiescence.ensure_quiescent(app)?;
     progress.stage("Locating verified backup");
     let journal = find_committed(root, app)?;
     progress.stage("Restoring original app");
     if journal.target.parent_device.is_empty() {
         let install_id = journal.install_id.clone();
-        migrate_legacy_committed(root, &install_id, app, verify_app, |live| {
+        migrate_legacy_committed_with_quiescence(root, &install_id, app, quiescence.clone(), verify_app, |live| {
             verified_live_install_id(root, live).as_deref() == Some(install_id.as_str())
         })?;
     } else {
-        restore_committed(root, &journal.install_id, app)?;
+        restore_committed_with_quiescence(
+            root,
+            &journal.install_id,
+            app,
+            quiescence.clone(),
+            |_| {},
+        )?;
     }
     verify_restored_app(app, official_target)?;
     progress.stage("Refreshing Dock registration");
@@ -451,6 +547,7 @@ fn current_install_id(app: &Path, root: &Path, archive: &Archive) -> Option<Stri
     installed_install_id(app, root, archive)
 }
 
+#[cfg(test)]
 fn begin_verified_transaction<F>(
     root: &Path,
     app: &Path,
@@ -459,7 +556,25 @@ fn begin_verified_transaction<F>(
 where
     F: FnOnce(&Path) -> Result<(), String>,
 {
-    let mut tx = Engine::begin(root, app, "install")?;
+    begin_verified_transaction_with_quiescence(
+        root,
+        app,
+        NoopQuiescenceGuard,
+        validate_locked_target,
+    )
+}
+
+fn begin_verified_transaction_with_quiescence<Q, F>(
+    root: &Path,
+    app: &Path,
+    quiescence: Q,
+    validate_locked_target: F,
+) -> Result<Engine, String>
+where
+    Q: QuiescenceGuard + Clone,
+    F: FnOnce(&Path) -> Result<(), String>,
+{
+    let mut tx = Engine::begin_with_quiescence(root, app, "install", quiescence.clone())?;
     if let Err(error) = validate_locked_target(tx.target_path()) {
         return match tx.rollback(&error) {
             Ok(()) => Err(error),

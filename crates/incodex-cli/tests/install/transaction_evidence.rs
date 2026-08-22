@@ -65,7 +65,10 @@ fn install_aborts_when_asar_integrity_cannot_be_written() {
     let before = fs::read(&asar).unwrap();
     let fake_bin = home.join("fake-bin");
     fs::create_dir_all(&fake_bin).unwrap();
-    write_executable(&fake_bin.join("plutil"), "#!/bin/sh\nexit 1\n");
+    write_executable(
+        &fake_bin.join("plutil"),
+        "#!/bin/sh\nif [ \"$1\" = \"-convert\" ]; then exec /usr/bin/plutil \"$@\"; fi\nexit 1\n",
+    );
     write_executable(&fake_bin.join("codesign"), "#!/bin/sh\nexit 0\n");
 
     let (status, _stdout, stderr) = run_with_path(
