@@ -119,14 +119,16 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
     } else {
         guard.ensure()?;
     }
-    let result =
-        uninstall_app_with_quiescence(&app, &root, &mut progress, guard, official_default)?;
+    uninstall_app_with_quiescence(&app, &root, &mut progress, guard, official_default)?;
     progress.stop();
+    let app_name = app
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("App");
     println!(
         "{}",
-        format_ok("App restored. App registration was refreshed.", None)
+        format_ok(&format!("Uninstalled. {app_name} restored."), None)
     );
-    print_command_result(&result);
     println!();
     Ok(())
 }
@@ -203,7 +205,7 @@ pub(crate) fn restore_default_for_self_uninstall(progress: &mut Progress) -> Res
     let guard = AppGuard::for_app(app)?;
     progress.stage("Closing ChatGPT");
     guard.close_official()?;
-    uninstall_app_with_quiescence(app, &user_root(), progress, guard, true).map(|_| ())
+    uninstall_app_with_quiescence(app, &user_root(), progress, guard, true)
 }
 
 fn map_tx(err: TxError) -> String {
@@ -500,7 +502,7 @@ fn uninstall_app_with_quiescence<Q>(
     progress: &mut Progress,
     quiescence: Q,
     official_target: bool,
-) -> Result<CommandResult, String>
+) -> Result<(), String>
 where
     Q: QuiescenceGuard + Clone,
 {
@@ -533,13 +535,7 @@ where
     verify_restored_app(app, official_target)?;
     progress.stage("Refreshing app registration");
     let _ = notify_launch_services(app);
-    Ok(CommandResult {
-        skipped: false,
-        install_id: Some(journal.install_id),
-        runtime_version: Some(runtime_version()),
-        app: app.display().to_string(),
-        warning: None,
-    })
+    Ok(())
 }
 
 fn verify_restored_app(app: &Path, official_target: bool) -> Result<(), String> {

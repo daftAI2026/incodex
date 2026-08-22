@@ -16,7 +16,7 @@ impl ProcessProbe for FixtureProbe {
 struct FailingQuit;
 
 impl QuitRequester for FailingQuit {
-    fn request_quit(&mut self) -> Result<(), String> {
+    fn request_quit(&mut self, _executable: &Path, _pids: &[i32]) -> Result<(), String> {
         Err("fixture osascript failure".into())
     }
 }
@@ -24,7 +24,7 @@ impl QuitRequester for FailingQuit {
 struct SuccessfulQuit;
 
 impl QuitRequester for SuccessfulQuit {
-    fn request_quit(&mut self) -> Result<(), String> {
+    fn request_quit(&mut self, _executable: &Path, _pids: &[i32]) -> Result<(), String> {
         Ok(())
     }
 }
