@@ -36,6 +36,14 @@ pub trait ProcessProbe {
 /// 发送官方 Codex 退出请求的最小接口，测试可替换而不触碰真实 osascript。
 pub trait QuitRequester {
     fn request_quit(&mut self) -> Result<(), String>;
+
+    fn request_quit_instances(
+        &mut self,
+        _executable: &Path,
+        _pids: &[i32],
+    ) -> Result<(), String> {
+        self.request_quit()
+    }
 }
 
 /// 可注入的单调时钟，避免超时测试依赖真实 60 秒。
@@ -604,6 +612,7 @@ mod tests {
 mod quiescence_tests {
     use super::*;
     use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
     struct FixtureProbe {
@@ -644,6 +653,38 @@ mod quiescence_tests {
 
     impl QuitRequester for SuccessfulQuit {
         fn request_quit(&mut self) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    struct SharedProbe {
+        paths: Arc<Mutex<Vec<(i32, PathBuf)>>>,
+    }
+
+    impl ProcessProbe for SharedProbe {
+        fn process_paths(&self) -> Result<Vec<(i32, PathBuf)>, String> {
+            Ok(self.paths.lock().unwrap().clone())
+        }
+    }
+
+    struct ProcessAwareQuit {
+        paths: Arc<Mutex<Vec<(i32, PathBuf)>>>,
+        requested: Arc<Mutex<Vec<i32>>>,
+    }
+
+    impl QuitRequester for ProcessAwareQuit {
+        fn request_quit(&mut self) -> Result<(), String> {
+            self.paths.lock().unwrap().retain(|(pid, _)| *pid == 43);
+            Ok(())
+        }
+
+        fn request_quit_instances(
+            &mut self,
+            _executable: &Path,
+            pids: &[i32],
+        ) -> Result<(), String> {
+            *self.requested.lock().unwrap() = pids.to_vec();
+            self.paths.lock().unwrap().clear();
             Ok(())
         }
     }
@@ -728,5 +769,31 @@ mod quiescence_tests {
             .unwrap_err();
         assert!(error.contains("timed out"), "{error}");
         assert!(!clock.sleeps.is_empty());
+    }
+
+    #[test]
+    fn official_quit_targets_every_exact_running_instance() {
+        let expected = PathBuf::from("/Applications/ChatGPT.app/Contents/MacOS/ChatGPT");
+        let quiescence = AppQuiescence::from_executable(expected.clone()).unwrap();
+        let paths = Arc::new(Mutex::new(vec![(42, expected.clone()), (43, expected)]));
+        let requested = Arc::new(Mutex::new(Vec::new()));
+        let probe = SharedProbe {
+            paths: Arc::clone(&paths),
+        };
+        let mut requester = ProcessAwareQuit {
+            paths,
+            requested: Arc::clone(&requested),
+        };
+        let mut clock = FakeClock {
+            now: Instant::now(),
+            sleeps: VecDeque::new(),
+        };
+
+        quiescence
+            .quit_official_app_and_wait_with(&probe, &mut requester, &mut clock)
+            .unwrap();
+
+        assert_eq!(*requested.lock().unwrap(), vec![42, 43]);
+        assert!(clock.sleeps.is_empty());
     }
 }
