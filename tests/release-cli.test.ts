@@ -41,6 +41,24 @@ describe("release CLI artifacts", () => {
     expect(releaseYml).toContain("unexpected release asset set");
   });
 
+  test("binds the built runtime manifest to the release commit", () => {
+    expect(releaseYml).toContain('SOURCE_COMMIT="${' + 'GITHUB_SHA}"');
+    expect(releaseYml).toContain('[[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]');
+    expect(releaseYml).toContain('[[ "$BUILT_SOURCE_COMMIT" == "$SOURCE_COMMIT" ]]');
+  });
+
+  test("smoke-tests the host binary and verifies the published runtime pointer", () => {
+    expect(releaseYml).toContain('case "$(uname -m)" in');
+    expect(releaseYml).toContain('"$BINARY" --version');
+    expect(releaseYml).toContain('"$BINARY" --help');
+    expect(releaseYml).toContain('"$BINARY" runtime');
+    expect(releaseYml).toContain("manifestSha256");
+    expect(releaseYml).toContain("sourceCommit");
+    expect(releaseYml).toContain("runtime-manifest.json");
+    expect(releaseYml).toContain("crypto.createHash(\"sha256\")");
+    expect(releaseYml).toContain("current.release");
+  });
+
   test("publishes only the two stable Rust assets and their checksums", () => {
     expect(releaseYml).toContain("SHA256SUMS");
     expect(releaseYml).toMatch(/files:[\s\S]*incodex-darwin-arm64/);
