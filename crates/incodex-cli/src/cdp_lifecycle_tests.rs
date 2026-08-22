@@ -244,3 +244,72 @@ fn lifecycle_retries_browser_close_after_a_transient_cdp_failure() {
     );
     assert!(close_received, "the retry must deliver Browser.close");
 }
+
+#[test]
+fn lifecycle_survives_a_transient_target_list_failure() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut failed_first_poll = false;
+        let mut successful_list_requests = 0;
+        let mut close_received = false;
+
+        while let Some(mut stream) = accept_until(&listener, deadline) {
+            match read_request_path(&mut stream).as_str() {
+                "/json/list" if !failed_first_poll => {
+                    failed_first_poll = true;
+                    write_error(&mut stream);
+                }
+                "/json" if successful_list_requests == 0 => write_error(&mut stream),
+                "/json/list" => {
+                    successful_list_requests += 1;
+                    if successful_list_requests == 1 {
+                        write_json(
+                            &mut stream,
+                            &json!([page(port, "main", "app://-/index.html")]),
+                        );
+                    } else {
+                        write_json(&mut stream, &json!([overlay(port)]));
+                    }
+                }
+                "/json/version" => {
+                    write_json(
+                        &mut stream,
+                        &json!({
+                            "webSocketDebuggerUrl": format!("ws://127.0.0.1:{port}/devtools/browser/close")
+                        }),
+                    );
+                    let Some(stream) = accept_until(&listener, deadline) else {
+                        break;
+                    };
+                    let mut socket = tungstenite::accept(stream).unwrap();
+                    let Message::Text(command) = socket.read().unwrap() else {
+                        panic!("Browser.close must be a text CDP command");
+                    };
+                    close_received = serde_json::from_str::<Value>(&command)
+                        .ok()
+                        .and_then(|value| value.get("method").cloned())
+                        == Some(json!("Browser.close"));
+                    break;
+                }
+                path => panic!("unexpected mock CDP path: {path}"),
+            }
+        }
+
+        (successful_list_requests, close_received)
+    });
+
+    monitor_primary_target(port, "main");
+    let (successful_list_requests, close_received) = server.join().unwrap();
+
+    assert!(
+        successful_list_requests >= 3,
+        "the monitor must resume after a transient target-list failure"
+    );
+    assert!(
+        close_received,
+        "closing the recovered primary must still close the isolated browser"
+    );
+}
