@@ -61,6 +61,9 @@ fn doctor_uses_the_transaction_restore_source_proof_for_post_swap_recovery() {
         ("both-missing", "manual"),
         ("invalid-outgoing", "manual"),
         ("valid-outgoing", "rollback"),
+        ("modified-live", "manual"),
+        ("replaced-live", "manual"),
+        ("already-restored", "rollback"),
     ];
     for (case, expected_recovery) in cases {
         let home = isolated_home();
@@ -109,6 +112,16 @@ fn doctor_uses_the_transaction_restore_source_proof_for_post_swap_recovery() {
                 fs::write(outgoing.join("marker"), "tampered\n").unwrap();
             }
             "valid-outgoing" => fs::remove_dir_all(&original).unwrap(),
+            "modified-live" => fs::write(app.join("marker"), "tampered\n").unwrap(),
+            "replaced-live" => {
+                fs::remove_dir_all(&app).unwrap();
+                fs::create_dir_all(&app).unwrap();
+                fs::write(app.join("marker"), "replacement\n").unwrap();
+            }
+            "already-restored" => {
+                assert!(incodex_transaction::recover_with(&root, &id, |_| false).is_err());
+                fs::remove_dir_all(&original).unwrap();
+            }
             _ => unreachable!("unknown restore-source fixture: {case}"),
         }
 
