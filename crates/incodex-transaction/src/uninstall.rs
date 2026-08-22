@@ -16,13 +16,7 @@ use crate::proof::{
 use crate::{NoopQuiescenceGuard, QuiescenceGuard};
 
 pub fn restore_committed(root: &Path, install_id: &str, live_path: &Path) -> Result<(), String> {
-    restore_committed_with_quiescence(
-        root,
-        install_id,
-        live_path,
-        NoopQuiescenceGuard,
-        |_| {},
-    )
+    restore_committed_with_quiescence(root, install_id, live_path, NoopQuiescenceGuard, |_| {})
 }
 
 #[doc(hidden)]
@@ -173,13 +167,8 @@ where
     quiescence.ensure_quiescent(live_path)?;
     validate_committed_restore_target(root, journal, live_path)?;
     let uninstalling = begin_uninstall(root, journal)?;
-    let restored = restore_live_with_quiescence(
-        root,
-        live_path,
-        &uninstalling,
-        quiescence,
-        checkpoint,
-    )?;
+    let restored =
+        restore_live_with_quiescence(root, live_path, &uninstalling, quiescence, checkpoint)?;
     let mut done = restored;
     done.phase = "ROLLED_BACK".into();
     done.sequence += 1;

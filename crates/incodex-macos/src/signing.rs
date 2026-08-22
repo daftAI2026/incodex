@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::entitlements::add_entitlement_key;
-use super::{read_plist_info, PlistInfo};
 use super::signing_policy::validate_generic_nested_components;
+use super::{read_plist_info, PlistInfo};
 
 pub const VENDOR_TEAM_IDENTIFIER: &str = "2DC432GLL2";
 pub const OFFICIAL_BUNDLE_IDENTIFIER: &str = "com.openai.codex";
@@ -25,8 +25,7 @@ const ADHOC_UNRETAINABLE_ENTITLEMENTS: &[&str] = &[
     "keychain-access-groups",
 ];
 
-const DISABLE_LIBRARY_VALIDATION: &str =
-    "com.apple.security.cs.disable-library-validation";
+const DISABLE_LIBRARY_VALIDATION: &str = "com.apple.security.cs.disable-library-validation";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EntitlementSnapshot {
@@ -98,7 +97,12 @@ pub fn read_entitlements(target: &Path) -> Result<EntitlementSnapshot, String> {
         .args(["--display", "--entitlements", ":-", "--"])
         .arg(target)
         .output()
-        .map_err(|error| format!("cannot inspect entitlements for {}: {error}", target.display()))?;
+        .map_err(|error| {
+            format!(
+                "cannot inspect entitlements for {}: {error}",
+                target.display()
+            )
+        })?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
         if detail.contains("code object is not signed at all") {
@@ -139,11 +143,7 @@ pub fn plan_adhoc_entitlements(source: &EntitlementSnapshot) -> Result<Entitleme
         .filter(|key| ADHOC_UNRETAINABLE_ENTITLEMENTS.contains(&key.as_str()))
         .cloned()
         .collect();
-    let retained_keys: BTreeSet<_> = source
-        .keys
-        .difference(&stripped_keys)
-        .cloned()
-        .collect();
+    let retained_keys: BTreeSet<_> = source.keys.difference(&stripped_keys).cloned().collect();
 
     let mut xml = if source.xml.is_empty() {
         empty_entitlements_xml()
@@ -274,9 +274,7 @@ pub fn validate_official_signing_inventory(
 }
 
 /// 对自定义 `--app` 的 generic verifier 复用 deep/strict 与 identity evidence policy。
-pub fn validate_generic_signing_inventory(
-    inventory: &SigningInventory,
-) -> Result<(), String> {
+pub fn validate_generic_signing_inventory(inventory: &SigningInventory) -> Result<(), String> {
     if !inventory.deep_strict {
         return Err("bundle failed deep strict signature verification".into());
     }
@@ -386,7 +384,9 @@ pub fn sign_app(app: &Path) -> Result<(), String> {
     sign_outer_with_entitlements(app, &plan.xml)?;
     verify_patched_adhoc_bundle_deep_strict(app, None)
         .map(|_| ())
-        .map_err(|error| format!("codesign --verify --deep --strict failed after adhoc resign: {error}"))
+        .map_err(|error| {
+            format!("codesign --verify --deep --strict failed after adhoc resign: {error}")
+        })
 }
 
 /// 返回当前 app 中需要保持 vendor identity 的顶层 sidecar。
@@ -450,7 +450,8 @@ fn enumerate_component_paths(app: &Path) -> Result<Vec<PathBuf>, String> {
 }
 
 fn walk_component_paths(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
-    let entries = fs::read_dir(dir).map_err(|error| format!("cannot scan {}: {error}", dir.display()))?;
+    let entries =
+        fs::read_dir(dir).map_err(|error| format!("cannot scan {}: {error}", dir.display()))?;
     for entry in entries {
         let entry = entry.map_err(|error| format!("cannot scan {}: {error}", dir.display()))?;
         let path = entry.path();
@@ -484,7 +485,10 @@ fn inspect_component(path: &Path) -> Result<SignedComponent, String> {
         .map_err(|error| format!("cannot inspect signature {}: {error}", path.display()))?;
     if !output.status.success() {
         if has_signature_marker(path) {
-            return Err(format!("signed component could not be inspected: {}", path.display()));
+            return Err(format!(
+                "signed component could not be inspected: {}",
+                path.display()
+            ));
         }
         return Ok(SignedComponent {
             path: path.to_path_buf(),
@@ -557,9 +561,7 @@ pub fn validate_nested_components(components: &[SignedComponent]) -> Result<(), 
 
 fn validate_vendor_component(component: &SignedComponent, label: &str) -> Result<(), String> {
     if component.team_identifier.as_deref() != Some(VENDOR_TEAM_IDENTIFIER) {
-        return Err(format!(
-            "{label} has an unexpected vendor TeamIdentifier"
-        ));
+        return Err(format!("{label} has an unexpected vendor TeamIdentifier"));
     }
     if component.authorities.is_empty() {
         return Err(format!("{label} has no vendor authority evidence"));
@@ -627,7 +629,8 @@ fn verify_plist_identity(
     expected: Option<&PlistInfo>,
     vendor: Option<(&str, Option<&str>, Option<&str>)>,
 ) -> Result<(), String> {
-    let info = read_plist_info(app).ok_or_else(|| format!("Info.plist unreadable: {}", app.display()))?;
+    let info =
+        read_plist_info(app).ok_or_else(|| format!("Info.plist unreadable: {}", app.display()))?;
     if info.executable.trim().is_empty() {
         return Err("CFBundleExecutable is missing".into());
     }
@@ -764,7 +767,9 @@ fn sign_outer_with_entitlements(app: &Path, entitlements: &str) -> Result<(), St
         (Ok(()), Ok(())) => Ok(()),
         (Err(error), Ok(())) => Err(error),
         (Ok(()), Err(error)) => Err(error),
-        (Err(sign), Err(cleanup)) => Err(format!("{sign}; failed to clean entitlements: {cleanup}")),
+        (Err(sign), Err(cleanup)) => {
+            Err(format!("{sign}; failed to clean entitlements: {cleanup}"))
+        }
     }
 }
 
@@ -781,7 +786,10 @@ fn restore_stashed_helpers(
     if failures.is_empty() {
         if let Some(root) = stash_root {
             if let Err(error) = fs::remove_dir_all(root) {
-                failures.push(format!("failed to remove vendor stash {}: {error}", root.display()));
+                failures.push(format!(
+                    "failed to remove vendor stash {}: {error}",
+                    root.display()
+                ));
             }
         }
     }
@@ -793,6 +801,11 @@ fn restore_stashed_helpers(
 }
 
 fn signature_field(text: &str, prefix: &str) -> Option<String> {
-    text.lines()
-        .find_map(|line| line.trim().strip_prefix(prefix).map(str::trim).filter(|value| !value.is_empty()).map(str::to_string))
+    text.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix(prefix)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    })
 }

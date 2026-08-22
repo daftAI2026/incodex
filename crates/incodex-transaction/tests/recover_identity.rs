@@ -55,8 +55,14 @@ fn recover_refuses_to_overwrite_a_replaced_live_after_swap() {
 
     let result = recover_with(&root, &id, |_| true);
 
-    assert!(result.is_err(), "old transaction overwrote a later live app");
-    assert_eq!(fs::read_to_string(target.join("marker")).unwrap(), "later-upgrade");
+    assert!(
+        result.is_err(),
+        "old transaction overwrote a later live app"
+    );
+    assert_eq!(
+        fs::read_to_string(target.join("marker")).unwrap(),
+        "later-upgrade"
+    );
     assert_eq!(journal_v2(&root, &id).unwrap().phase, "SWAPPED");
 }
 
@@ -70,7 +76,10 @@ fn recover_refuses_to_finish_a_pre_swap_transaction_after_live_replacement() {
     let result = recover_with(&root, &id, |_| true);
 
     assert!(result.is_err(), "stale pre-swap transaction was accepted");
-    assert_eq!(fs::read_to_string(target.join("marker")).unwrap(), "later-upgrade");
+    assert_eq!(
+        fs::read_to_string(target.join("marker")).unwrap(),
+        "later-upgrade"
+    );
     assert_eq!(journal_v2(&root, &id).unwrap().phase, "BACKUP_COMMITTED");
 }
 
@@ -81,7 +90,10 @@ fn recover_accepts_the_inode_change_caused_by_its_own_swap() {
     let result = recover_with(&root, &id, |_| true).unwrap();
 
     assert!(result.action.as_str() == "rollback");
-    assert_eq!(fs::read_to_string(target.join("marker")).unwrap(), "original");
+    assert_eq!(
+        fs::read_to_string(target.join("marker")).unwrap(),
+        "original"
+    );
     assert_eq!(journal_v2(&root, &id).unwrap().phase, "ROLLED_BACK");
 }
 
@@ -98,6 +110,9 @@ fn recover_refuses_a_foreign_live_with_the_same_backup_tree() {
         result.is_err(),
         "a same-content later replacement was treated as this transaction's restore"
     );
-    assert_eq!(fs::read_to_string(target.join("marker")).unwrap(), "original");
+    assert_eq!(
+        fs::read_to_string(target.join("marker")).unwrap(),
+        "original"
+    );
     assert_eq!(journal_v2(&root, &id).unwrap().phase, "SWAPPED");
 }

@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use incodex_transaction::{
-    recover_with_quiescence, restore_committed_with_quiescence, journal_v2, Engine,
+    journal_v2, recover_with_quiescence, restore_committed_with_quiescence, Engine,
 };
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
@@ -76,14 +76,17 @@ fn begin_quiescence_refusal_happens_after_lock_before_digest_or_journal() {
     let target = app(&root);
     let before = fs::read(target.join("marker")).unwrap();
     let error = Engine::begin_with_quiescence(&root, &target, "test", refuse_quiescence)
-    .err()
-    .unwrap();
+        .err()
+        .unwrap();
 
     assert!(error.contains("fixture app is still running"), "{error}");
     assert_eq!(fs::read(target.join("marker")).unwrap(), before);
     assert!(
         !root.join("transactions").exists()
-            || fs::read_dir(root.join("transactions")).unwrap().next().is_none(),
+            || fs::read_dir(root.join("transactions"))
+                .unwrap()
+                .next()
+                .is_none(),
         "quiescence refusal must not create a journal"
     );
     fs::remove_dir_all(root).unwrap();
@@ -136,14 +139,9 @@ fn committed_restore_quiescence_refusal_does_not_advance_journal_or_target() {
     drop(tx);
     let before = fs::read(target.join("marker")).unwrap();
 
-    let error = restore_committed_with_quiescence(
-        &root,
-        &install_id,
-        &target,
-        refuse_quiescence,
-        |_| {},
-    )
-    .unwrap_err();
+    let error =
+        restore_committed_with_quiescence(&root, &install_id, &target, refuse_quiescence, |_| {})
+            .unwrap_err();
 
     assert!(error.contains("still running"), "{error}");
     assert_eq!(fs::read(target.join("marker")).unwrap(), before);
@@ -165,13 +163,8 @@ fn recover_restore_quiescence_refusal_keeps_swapped_truth() {
     drop(tx);
     let before = fs::read(target.join("marker")).unwrap();
 
-    let error = recover_with_quiescence(
-        &root,
-        &install_id,
-        refuse_quiescence,
-        |_| true,
-    )
-    .unwrap_err();
+    let error =
+        recover_with_quiescence(&root, &install_id, refuse_quiescence, |_| true).unwrap_err();
 
     assert!(error.to_string().contains("still running"), "{error}");
     assert_eq!(fs::read(target.join("marker")).unwrap(), before);

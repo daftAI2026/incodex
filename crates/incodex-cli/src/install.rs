@@ -5,22 +5,21 @@ use incodex_asar::{patch_asar, Archive, LOADER_NAME};
 use incodex_core::canonical::{inspect_target, is_official_app};
 use incodex_core::paths::{user_root, ASAR_REL, DEFAULT_APP};
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
+#[cfg(test)]
+use incodex_macos::AppQuiescence;
 use incodex_macos::{
     ditto, notify_launch_services, read_asar_integrity, read_plist_info, sign_app, verify_app,
     verify_original_vendor_bundle, verify_patched_adhoc_bundle_deep_strict, write_asar_integrity,
     OFFICIAL_BUNDLE_IDENTIFIER,
 };
-#[cfg(test)]
-use incodex_macos::AppQuiescence;
 use incodex_runtime_bundle::{loader_source, publish, runtime_version};
-use incodex_transaction::{
-    journal_v2, migrate_legacy_committed_with_quiescence, recover_with_quiescence,
-    restore_committed_with_quiescence,
-    validate_backup_snapshot, validate_committed_live_snapshot, Engine, QuiescenceGuard, Recovery,
-    TxError,
-};
 #[cfg(test)]
 use incodex_transaction::NoopQuiescenceGuard;
+use incodex_transaction::{
+    journal_v2, migrate_legacy_committed_with_quiescence, recover_with_quiescence,
+    restore_committed_with_quiescence, validate_backup_snapshot, validate_committed_live_snapshot,
+    Engine, QuiescenceGuard, Recovery, TxError,
+};
 
 use crate::app_quiescence::AppGuard;
 use crate::parse::ParsedCli;
@@ -335,16 +334,21 @@ where
     }
     let expected_plist = read_plist_info(app);
     let transaction_quiescence = quiescence.clone();
-    let mut tx = begin_verified_transaction_with_quiescence(root, app, transaction_quiescence, |locked_app| {
-        let locked_asar = locked_app.join(ASAR_REL);
-        if inspect_existing_install(locked_app, root, &locked_asar)?.is_some() {
-            return Err(
+    let mut tx = begin_verified_transaction_with_quiescence(
+        root,
+        app,
+        transaction_quiescence,
+        |locked_app| {
+            let locked_asar = locked_app.join(ASAR_REL);
+            if inspect_existing_install(locked_app, root, &locked_asar)?.is_some() {
+                return Err(
                 "live app changed into an existing Incodex installation after preflight; refusing to snapshot it"
                     .into(),
             );
-        }
-        ensure_official_target_is_verified(locked_app)
-    })?;
+            }
+            ensure_official_target_is_verified(locked_app)
+        },
+    )?;
     let install_id = tx.install_id().to_string();
     let original = root
         .join("transactions")
@@ -497,9 +501,14 @@ where
     progress.stage("Restoring original app");
     if journal.target.parent_device.is_empty() {
         let install_id = journal.install_id.clone();
-        migrate_legacy_committed_with_quiescence(root, &install_id, app, quiescence.clone(), verify_app, |live| {
-            verified_live_install_id(root, live).as_deref() == Some(install_id.as_str())
-        })?;
+        migrate_legacy_committed_with_quiescence(
+            root,
+            &install_id,
+            app,
+            quiescence.clone(),
+            verify_app,
+            |live| verified_live_install_id(root, live).as_deref() == Some(install_id.as_str()),
+        )?;
     } else {
         restore_committed_with_quiescence(
             root,
@@ -604,9 +613,9 @@ fn rollback_snapshot_failure(tx: &mut Engine, error: String) -> String {
     };
     match rollback {
         Ok(()) => error,
-        Err(rollback) => format!(
-            "{error}; failed to roll back rejected snapshot transaction: {rollback}"
-        ),
+        Err(rollback) => {
+            format!("{error}; failed to roll back rejected snapshot transaction: {rollback}")
+        }
     }
 }
 

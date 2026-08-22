@@ -1,5 +1,5 @@
-use std::ffi::OsString;
 use std::collections::BTreeSet;
+use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
@@ -185,10 +185,7 @@ exit 0
                 "<?xml version=\"1.0\"?><plist><dict><key>com.apple.security.cs.allow-jit</key><true/></dict></plist>"
             },
         );
-        std::env::set_var(
-            "INCODEX_SIGN_CAPTURE",
-            self.root.join("sign-capture"),
-        );
+        std::env::set_var("INCODEX_SIGN_CAPTURE", self.root.join("sign-capture"));
         std::env::set_var("INCODEX_CODESIGN_DISPLAY_COUNT", &self.display_count);
         guard
     }
@@ -240,8 +237,10 @@ fn generic_verify_accepts_a_verified_third_party_outer_with_identity_evidence() 
 
     assert!(verify_app(&fixture.app));
     assert!(verify_patched_adhoc_bundle_deep_strict(&fixture.app, None).is_err());
-    assert!(verify_original_vendor_bundle(&fixture.app, Some("com.expected.bundle"), None, None)
-        .is_err());
+    assert!(
+        verify_original_vendor_bundle(&fixture.app, Some("com.expected.bundle"), None, None)
+            .is_err()
+    );
 }
 
 #[test]
@@ -275,7 +274,10 @@ fn verify_app_reuses_one_signing_inventory() {
         .trim()
         .parse::<u32>()
         .unwrap();
-    assert_eq!(count, 2, "outer and nested components should be inspected once");
+    assert_eq!(
+        count, 2,
+        "outer and nested components should be inspected once"
+    );
     std::env::remove_var("INCODEX_CODESIGN_DISPLAY_COUNT");
 }
 
@@ -290,13 +292,12 @@ fn official_vendor_acceptance_requires_outer_signature_identifier() {
     );
     let _path = fixture.configure_environment();
 
-    let result = verify_original_vendor_bundle(
-        &fixture.app,
-        Some("com.expected.bundle"),
-        None,
-        None,
+    let result =
+        verify_original_vendor_bundle(&fixture.app, Some("com.expected.bundle"), None, None);
+    assert!(
+        result.is_err(),
+        "outer signature identifier must match the expected bundle"
     );
-    assert!(result.is_err(), "outer signature identifier must match the expected bundle");
 }
 
 #[test]
@@ -335,7 +336,10 @@ fn successful_nonempty_malformed_entitlements_fail_closed() {
     let _path = fixture.configure_environment();
 
     let result = sign_app(&fixture.app);
-    assert!(result.is_err(), "malformed successful entitlement output must fail closed");
+    assert!(
+        result.is_err(),
+        "malformed successful entitlement output must fail closed"
+    );
     assert!(!fixture.root.join("sign-capture").exists());
 }
 

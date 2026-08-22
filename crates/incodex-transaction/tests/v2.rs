@@ -1,7 +1,7 @@
 use std::fs;
 use std::io::Write;
-use std::os::unix::net::UnixListener;
 use std::os::unix::fs::{symlink, PermissionsExt};
+use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -417,10 +417,8 @@ fn durable_commit_cleans_special_cleanup_leaves_after_commit() {
     let result = tx.commit_with_checkpoint(|phase| {
         if phase == "COMMITTED_BEFORE_CLEANUP" {
             fs::remove_dir_all(&outgoing).unwrap();
-            let socket = std::env::temp_dir().join(format!(
-                "incodex-cleanup-warning-{}",
-                std::process::id()
-            ));
+            let socket = std::env::temp_dir()
+                .join(format!("incodex-cleanup-warning-{}", std::process::id()));
             let _ = fs::remove_file(&socket);
             let listener = UnixListener::bind(&socket).unwrap();
             fs::rename(&socket, &outgoing).unwrap();
@@ -433,9 +431,15 @@ fn durable_commit_cleans_special_cleanup_leaves_after_commit() {
         "durable COMMITTED must not be returned as an install failure: {result:?}"
     );
     let result = result.unwrap();
-    assert!(result.cleanup_warning.is_none(), "special leaf was not cleaned: {result:?}");
+    assert!(
+        result.cleanup_warning.is_none(),
+        "special leaf was not cleaned: {result:?}"
+    );
     assert_eq!(tx.journal().phase, "COMMITTED");
-    assert_eq!(fs::read_to_string(target_app.join("marker")).unwrap(), "patched");
+    assert_eq!(
+        fs::read_to_string(target_app.join("marker")).unwrap(),
+        "patched"
+    );
     assert!(!outgoing.exists(), "special cleanup leaf survived");
 }
 

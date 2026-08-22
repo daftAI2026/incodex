@@ -119,22 +119,30 @@ pub fn pack_dir(src: &Path, dest: &Path) -> Result<(), String> {
     pack_dir_unpacked(src, dest, &[])
 }
 
-pub fn pack_dir_unpacked(src: &Path, dest: &Path, unpacked_prefixes: &[&str]) -> Result<(), String> {
+pub fn pack_dir_unpacked(
+    src: &Path,
+    dest: &Path,
+    unpacked_prefixes: &[&str],
+) -> Result<(), String> {
     let mut files = Map::new();
     let mut blobs = Vec::new();
     collect_pack(src, src, &mut files, &mut blobs, dest, unpacked_prefixes)?;
     write_archive(dest, &files, &blobs)
 }
 
-pub fn patch_asar(asar_path: &Path, loader_source: &str, install_id: Option<&str>) -> Result<(String, String), String> {
+pub fn patch_asar(
+    asar_path: &Path,
+    loader_source: &str,
+    install_id: Option<&str>,
+) -> Result<(String, String), String> {
     let archive = Archive::open(asar_path)?;
     let pkg_main = archive.read_package_main()?;
     if pkg_main.main.is_empty() {
         return Err("package.json has no main".into());
     }
     let keep_main = pkg_main.main.clone();
-    let mut pkg: Value = serde_json::from_slice(&archive.extract("package.json")?)
-        .map_err(|err| err.to_string())?;
+    let mut pkg: Value =
+        serde_json::from_slice(&archive.extract("package.json")?).map_err(|err| err.to_string())?;
     pkg["main"] = json!(LOADER_NAME);
     let mut marker = Map::new();
     marker.insert("originalMain".into(), json!(keep_main));
@@ -160,7 +168,12 @@ pub fn patch_asar(asar_path: &Path, loader_source: &str, install_id: Option<&str
     let mut pkg_bytes = serde_json::to_vec_pretty(&pkg).map_err(|err| err.to_string())?;
     pkg_bytes.push(b'\n');
     insert_packed_file(&mut files, &mut blobs, "package.json", pkg_bytes);
-    insert_packed_file(&mut files, &mut blobs, LOADER_NAME, loader_source.as_bytes().to_vec());
+    insert_packed_file(
+        &mut files,
+        &mut blobs,
+        LOADER_NAME,
+        loader_source.as_bytes().to_vec(),
+    );
     write_archive(asar_path, &files, &blobs)?;
     let patched = Archive::open(asar_path)?;
     Ok((patched.header_hash(), keep_main))
@@ -185,22 +198,35 @@ fn list_files(files: &Map<String, Value>, prefix: &str, out: &mut Vec<String>) {
     }
 }
 
-fn extract_node(archive: &Archive, files: &Map<String, Value>, rel: &str) -> Result<Vec<u8>, String> {
+fn extract_node(
+    archive: &Archive,
+    files: &Map<String, Value>,
+    rel: &str,
+) -> Result<Vec<u8>, String> {
     let mut current = files;
     let parts: Vec<&str> = rel.split('/').filter(|p| !p.is_empty()).collect();
     for (i, part) in parts.iter().enumerate() {
-        let node = current.get(*part).ok_or_else(|| format!("missing asar entry: {rel}"))?;
+        let node = current
+            .get(*part)
+            .ok_or_else(|| format!("missing asar entry: {rel}"))?;
         if i + 1 == parts.len() {
             if let Some(link) = node.get("link").and_then(Value::as_str) {
                 let parent = Path::new(rel).parent().unwrap_or(Path::new(""));
                 let target = parent.join(link);
                 return extract_node(archive, files, &target.to_string_lossy());
             }
-            if node.get("unpacked").and_then(Value::as_bool).unwrap_or(false) {
+            if node
+                .get("unpacked")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
                 let sibling = PathBuf::from(format!("{}.unpacked", archive.path.display()));
                 return fs::read(sibling.join(rel)).map_err(|err| err.to_string());
             }
-            let size = node.get("size").and_then(Value::as_u64).ok_or("file missing size")? as usize;
+            let size = node
+                .get("size")
+                .and_then(Value::as_u64)
+                .ok_or("file missing size")? as usize;
             let offset = node
                 .get("offset")
                 .and_then(Value::as_str)
@@ -244,12 +270,17 @@ fn collect_pack(
             collect_pack(root, &path, &mut child, blobs, dest, unpacked_prefixes)?;
             files.insert(name, json!({ "files": child }));
         } else {
-            let rel = path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
-            let unpacked = unpacked_prefixes.iter().any(|prefix| {
-                rel == *prefix || rel.starts_with(&format!("{prefix}/"))
-            });
+            let rel = path
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            let unpacked = unpacked_prefixes
+                .iter()
+                .any(|prefix| rel == *prefix || rel.starts_with(&format!("{prefix}/")));
             if unpacked {
-                let unpacked_path = PathBuf::from(format!("{}.unpacked", dest.display())).join(&rel);
+                let unpacked_path =
+                    PathBuf::from(format!("{}.unpacked", dest.display())).join(&rel);
                 if let Some(parent) = unpacked_path.parent() {
                     fs::create_dir_all(parent).map_err(|err| err.to_string())?;
                 }
@@ -288,7 +319,11 @@ fn copy_tree(
             dest.insert(name.clone(), json!({ "link": link }));
             continue;
         }
-        if node.get("unpacked").and_then(Value::as_bool).unwrap_or(false) {
+        if node
+            .get("unpacked")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
             dest.insert(name.clone(), node.clone());
             continue;
         }
@@ -298,7 +333,12 @@ fn copy_tree(
     Ok(())
 }
 
-fn insert_packed_file(files: &mut Map<String, Value>, blobs: &mut Vec<u8>, name: &str, data: Vec<u8>) {
+fn insert_packed_file(
+    files: &mut Map<String, Value>,
+    blobs: &mut Vec<u8>,
+    name: &str,
+    data: Vec<u8>,
+) {
     let offset = blobs.len() as u64;
     let size = data.len() as u64;
     let integrity = file_integrity(&data);
@@ -346,7 +386,10 @@ fn write_archive(dest: &Path, files: &Map<String, Value>, blobs: &[u8]) -> Resul
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
-    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 pub fn electron_asar_integrity(asar_path: &Path) -> Result<String, String> {

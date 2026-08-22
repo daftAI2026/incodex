@@ -228,8 +228,7 @@ fn native_open_handoff_publishes_the_spawned_process_identity() {
     let source = root.join("codex");
     fs::create_dir_all(&source).unwrap();
     fs::write(source.join("auth.json"), "{}\n").unwrap();
-    let mut plan =
-        prepare_incognito_open(&app, &user, &source, std::process::id() as i32).unwrap();
+    let mut plan = prepare_incognito_open(&app, &user, &source, std::process::id() as i32).unwrap();
     plan.debug_port = 0;
     let executable = plan.bin.clone();
     fs::write(
@@ -287,8 +286,7 @@ fn native_open_keeps_the_handoff_snapshot_when_owner_manifest_changes_after_exit
     let source = root.join("codex");
     fs::create_dir_all(&source).unwrap();
     fs::write(source.join("auth.json"), "{}\n").unwrap();
-    let mut plan =
-        prepare_incognito_open(&app, &user, &source, std::process::id() as i32).unwrap();
+    let mut plan = prepare_incognito_open(&app, &user, &source, std::process::id() as i32).unwrap();
     plan.debug_port = 0;
     let executable = plan.bin.clone();
     fs::write(
@@ -334,7 +332,9 @@ fn native_open_marks_pending_until_handoff_and_sweep_retains_it() {
     let owner: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&owner_path).unwrap()).unwrap();
     assert_eq!(
-        owner.get("handoffPending").and_then(serde_json::Value::as_bool),
+        owner
+            .get("handoffPending")
+            .and_then(serde_json::Value::as_bool),
         Some(true),
         "only a newly opened session needs conservative pre-handoff retention"
     );
@@ -356,7 +356,9 @@ fn native_open_handoff_clears_pending_atomically() {
         serde_json::from_str(&fs::read_to_string(plan.session_root.join("owner.json")).unwrap())
             .unwrap();
     assert_eq!(
-        owner.get("handoffPending").and_then(serde_json::Value::as_bool),
+        owner
+            .get("handoffPending")
+            .and_then(serde_json::Value::as_bool),
         Some(false),
         "handoff must publish the owner and clear pending in one atomic record"
     );
@@ -458,7 +460,10 @@ fn async_recreation_after_proven_delete_is_observed_before_removed() {
     .unwrap();
     writer.join().unwrap();
 
-    assert!(cleanup.removed(), "late recreation must be observed and burned");
+    assert!(
+        cleanup.removed(),
+        "late recreation must be observed and burned"
+    );
     assert!(!plan.session_root.exists());
 }
 

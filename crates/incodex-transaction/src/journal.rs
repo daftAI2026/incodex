@@ -229,8 +229,8 @@ pub(crate) fn write_journal_tracked(
     root: &Path,
     journal: &JournalV2,
 ) -> Result<(), AtomicWriteError> {
-    let (path, body) = journal_body(root, journal)
-        .map_err(|error| AtomicWriteError::new(error, false))?;
+    let (path, body) =
+        journal_body(root, journal).map_err(|error| AtomicWriteError::new(error, false))?;
     write_atomic_tracked(&path, &body)
 }
 

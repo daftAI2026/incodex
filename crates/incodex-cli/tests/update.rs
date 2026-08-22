@@ -41,10 +41,7 @@ fn installed_cli(home: &std::path::Path) -> (PathBuf, PathBuf) {
 fn update_pty_harness_reaps_after_child_closes_before_exit() {
     let home = scratch("pty-close-before-exit");
     let fake_update = home.join("fake-update");
-    write_executable(
-        &fake_update,
-        "#!/bin/sh\nexec 0<&- 1>&- 2>&-\nsleep 2\n",
-    );
+    write_executable(&fake_update, "#!/bin/sh\nexec 0<&- 1>&- 2>&-\nsleep 2\n");
 
     let (status, _) = run_tty(
         &fake_update,
@@ -234,7 +231,11 @@ printf '%s' 'INCODEX_HTTP_STATUS:200'
         ),
         "{output:?}"
     );
-    assert_eq!(output.matches("TAGGED-INSTALLER-ERROR").count(), 1, "{output:?}");
+    assert_eq!(
+        output.matches("TAGGED-INSTALLER-ERROR").count(),
+        1,
+        "{output:?}"
+    );
     assert!(!output.contains("COMPAT-INSTALLER-OUT"), "{output:?}");
     assert!(!output.contains("COMPAT-INSTALLER-ERR"), "{output:?}");
     assert!(output.contains("Verified Incodex 9.9.9"), "{output:?}");

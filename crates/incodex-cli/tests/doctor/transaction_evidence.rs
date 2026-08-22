@@ -31,7 +31,10 @@ fn status_skips_transaction_original_proof_but_doctor_checks_it() {
         .iter()
         .find(|record| record["installId"] == id)
         .expect("status transaction record");
-    assert_eq!(status_record["retainedOriginal"], original.display().to_string());
+    assert_eq!(
+        status_record["retainedOriginal"],
+        original.display().to_string()
+    );
     assert!(status_record["originalValid"].is_null());
     assert_eq!(status_record["recovery"], "rollback");
 
@@ -172,10 +175,7 @@ fn doctor_json_reports_retained_original_and_artifacts_for_interrupted_install()
         .iter()
         .find(|record| record["installId"] == id && record["kind"] == "validInterrupted")
         .expect("interrupted transaction record");
-    assert_eq!(
-        record["retainedOriginal"],
-        original.display().to_string()
-    );
+    assert_eq!(record["retainedOriginal"], original.display().to_string());
     assert_eq!(record["originalValid"], true);
     assert_eq!(record["recovery"], "rollback");
     assert!(record["artifacts"]
@@ -479,18 +479,15 @@ fn doctor_marks_a_checksum_valid_unknown_transaction_phase_manual() {
     journal.phase = "FUTURE_PHASE".into();
     journal.checksum.clear();
     let checksum = Sha256::digest(serde_json::to_vec(&journal).unwrap());
-    journal.checksum =
-        checksum
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect();
+    journal.checksum = checksum.iter().map(|byte| format!("{byte:02x}")).collect();
     fs::write(
         &journal_path,
         format!("{}\n", serde_json::to_string_pretty(&journal).unwrap()),
     )
     .unwrap();
 
-    let (_status, stdout, stderr) = run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
+    let (_status, stdout, stderr) =
+        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
     assert_eq!(stderr, "");
     let report = parse_json(&stdout);
     let record = report["journalRecords"]

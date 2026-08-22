@@ -7,10 +7,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+mod entitlements;
 mod signing;
 mod signing_outer;
 mod signing_policy;
-mod entitlements;
 pub use signing::*;
 pub use signing_outer::inspect_outer_signing;
 pub use signing_policy::validate_generic_nested_components;
@@ -234,13 +234,7 @@ impl QuiescenceClock for SystemQuiescenceClock {
 fn process_executable_path(pid: i32) -> Option<PathBuf> {
     const MAX_PATH: usize = 4096;
     let mut buffer = vec![0u8; MAX_PATH];
-    let size = unsafe {
-        libc::proc_pidpath(
-            pid,
-            buffer.as_mut_ptr().cast(),
-            buffer.len() as u32,
-        )
-    };
+    let size = unsafe { libc::proc_pidpath(pid, buffer.as_mut_ptr().cast(), buffer.len() as u32) };
     if size <= 0 || size as usize > buffer.len() {
         return None;
     }
@@ -689,7 +683,10 @@ mod quiescence_tests {
         let expected = PathBuf::from("/tmp/incodex/ChatGPT.app/Contents/MacOS/ChatGPT");
         let quiescence = AppQuiescence::from_executable(expected.clone()).unwrap();
         let probe = FixtureProbe {
-            paths: vec![(42, PathBuf::from("/tmp/other/ChatGPT.app/Contents/MacOS/ChatGPT"))],
+            paths: vec![(
+                42,
+                PathBuf::from("/tmp/other/ChatGPT.app/Contents/MacOS/ChatGPT"),
+            )],
         };
         quiescence.ensure_quiescent_with(&probe).unwrap();
     }
