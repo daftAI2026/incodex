@@ -58,6 +58,28 @@ describe("tooltip lifecycle", () => {
     expect(harness.events).toEqual(["hide"]);
   });
 
+  test("按钮仍有焦点时 pointer leave 也必须取消显示", () => {
+    const harness = createHarness();
+
+    harness.lifecycle.pointerEnter();
+    harness.lifecycle.focus();
+    harness.lifecycle.pointerLeave();
+    harness.runScheduled();
+
+    expect(harness.events).toEqual(["hide"]);
+  });
+
+  test("指针仍在按钮上时 blur 也必须关闭已经显示的 tooltip", () => {
+    const harness = createHarness();
+
+    harness.lifecycle.pointerEnter();
+    harness.runScheduled();
+    harness.lifecycle.focus();
+    harness.lifecycle.blur();
+
+    expect(harness.events).toEqual(["show", "hide"]);
+  });
+
   test("延迟结束时重新确认按钮仍可显示", () => {
     const harness = createHarness(false);
 

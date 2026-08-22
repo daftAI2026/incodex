@@ -71,4 +71,10 @@ describe("incodex tooltip lifecycle", () => {
   test("does not override the official fit-content width utility", () => {
     expect(inject).not.toContain("width: max-content");
   });
+
+  test("disposes an open tooltip as soon as its Search anchor disappears", () => {
+    expect(inject).toMatch(
+      /function ensureButton\(\): void \{[\s\S]*if \(!search\?\.parentElement\) \{[\s\S]*disposeActiveTooltip\(\);[\s\S]*return;/,
+    );
+  });
 });
