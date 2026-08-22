@@ -27,6 +27,22 @@ pub fn validate_backup_snapshot(root: &Path, install_id: &str) -> Result<(), Str
     proof::validate_backup_digest(&paths.original, &journal)
 }
 
+/// Validate that a post-swap transaction has a safe read-only restore source.
+pub fn validate_post_swap_rollback(root: &Path, install_id: &str) -> Result<(), String> {
+    let journal = journal::load_v2(root, install_id)?;
+    if !matches!(
+        journal.phase.as_str(),
+        "TARGET_MOVED_OUT" | "SWAPPED" | "TARGET_VERIFIED" | "UNINSTALLING"
+    ) {
+        return Err(format!(
+            "transaction {install_id} is not post-swap: {}",
+            journal.phase
+        ));
+    }
+    journal::reconstructed(root, &journal)?;
+    proof::restore_source(root, &journal).map(|_| ())
+}
+
 /// Validate that a committed live target still matches its sealed transaction.
 ///
 /// Install uses this read-only proof before deciding that a marker is safe to

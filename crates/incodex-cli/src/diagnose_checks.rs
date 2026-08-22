@@ -731,7 +731,8 @@ fn transaction_evidence(
                     phase,
                     "TARGET_MOVED_OUT" | "SWAPPED" | "TARGET_VERIFIED" | "UNINSTALLING"
                 ) && include_original_proof
-                    && original_valid == Some(false) =>
+                    && incodex_transaction::validate_post_swap_rollback(root, install_id)
+                        .is_err() =>
             {
                 Some("manual".to_string())
             }
