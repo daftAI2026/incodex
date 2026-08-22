@@ -62,8 +62,45 @@ describe("runtime load", () => {
     expect(main).toContain("child = spawn(bin, args");
     expect(main).toContain('INCODEX_INCOGNITO: "1"');
     expect(main).toContain("CODEX_ELECTRON_USER_DATA_PATH: session.chromium");
-    expect(main).toContain("const args = [`--user-data-dir=$" + "{session.chromium}`]");
+    expect(main).toContain("`--user-data-dir=$" + "{session.chromium}`");
     expect(main).toContain("safeHome.handoffSessionOwner");
+  });
+
+  test("an ordinary incognito click launches the official Codex route", () => {
+    const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
+    const launchStart = main.indexOf("async function launchIncognitoOnce()");
+    const launchEnd = main.indexOf("\nconst allowedWindows", launchStart);
+    const launch = main.slice(launchStart, launchEnd);
+
+    expect(launch).toMatch(
+      /const args\s*=\s*\[`--user-data-dir=\$\{session\.chromium\}`,[\s\S]*codex:\/\/new\?mode=codex/,
+    );
+  });
+
+  test("the installed Runtime confirms Codex mode with Control+3", () => {
+    const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
+    const selectorStart = main.indexOf("function selectOfficialCodexMode(win)");
+    const selectorEnd = main.indexOf("\nfunction ", selectorStart + 1);
+    const selector = main.slice(selectorStart, selectorEnd);
+
+    expect(main).toContain("let codexModeSelected = false");
+    expect(selector).toContain("if (!isIncognito()) return");
+    expect(selector).toContain("if (codexModeSelected) return");
+    expect(selector).toContain(
+      'win.webContents.sendInputEvent({ type: "keyDown", keyCode: "3", modifiers: ["control"] })',
+    );
+    expect(selector).toContain(
+      'win.webContents.sendInputEvent({ type: "keyUp", keyCode: "3", modifiers: ["control"] })',
+    );
+    expect(selector).toContain("codexModeSelected = true");
+    const readyStart = main.indexOf('win.once("ready-to-show", () => {');
+    const readyEnd = main.indexOf("\n    });", readyStart);
+    const ready = main.slice(readyStart, readyEnd);
+    expect(ready.indexOf("bringForward();")).toBeLessThan(
+      ready.indexOf("selectOfficialCodexMode(win)"),
+    );
+    expect(ready).toContain("if (win.isFocused()) selectOfficialCodexMode(win)");
+    expect(ready).toContain('else win.once("focus", () => selectOfficialCodexMode(win))');
   });
 
   test("an ordinary incognito click marks its session pending before child handoff", () => {

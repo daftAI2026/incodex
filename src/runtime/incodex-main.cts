@@ -455,7 +455,7 @@ async function launchIncognitoOnce() {
     }
     return Promise.resolve({ ok: false, reason: "spawn-failed" });
   }
-  const args = [`--user-data-dir=${session.chromium}`];
+  const args = [`--user-data-dir=${session.chromium}`, "codex://new?mode=codex"];
   const sourceBounds = captureSourceBounds();
   logLaunch("launch", {
     bin,
@@ -599,6 +599,7 @@ async function launchIncognitoOnce() {
 
 const allowedWindows = new Map();
 const trustedOrigins = new Set(["app://-", "https://chatgpt.com"]);
+let codexModeSelected = false;
 
 function rememberWindow(win) {
   if (!win || typeof win.id !== "number") return;
@@ -634,6 +635,18 @@ function reportInjectionProbe(win) {
   return win.webContents.executeJavaScript("window.__incodexUiProbe", false).then((probe) => {
     logLaunch("ui-probe", probe);
   });
+}
+
+function selectOfficialCodexMode(win) {
+  if (!isIncognito()) return;
+  if (codexModeSelected) return;
+  try {
+    win.webContents.sendInputEvent({ type: "keyDown", keyCode: "3", modifiers: ["control"] });
+    win.webContents.sendInputEvent({ type: "keyUp", keyCode: "3", modifiers: ["control"] });
+    codexModeSelected = true;
+  } catch (error) {
+    logLaunch("codex-mode-selection-failed", { error: String(error) });
+  }
 }
 
 function hookWindow(win, source) {
@@ -728,8 +741,10 @@ async function attachElectron() {
       raiseOurWindows();
     };
     win.once("ready-to-show", () => {
-      markSessionReady();
       bringForward();
+      if (win.isFocused()) selectOfficialCodexMode(win);
+      else win.once("focus", () => selectOfficialCodexMode(win));
+      markSessionReady();
     });
     win.once("show", () => {
       bringForward();
