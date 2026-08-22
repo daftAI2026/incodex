@@ -57,7 +57,7 @@ cd incodex
 cargo install --locked --path crates/incodex-cli
 ```
 
-Homebrew and script installs use prebuilt native Rust binaries and do not require Bun. A source install requires stable Rust and an installed Codex / ChatGPT desktop app. Contributors rebuilding the Electron Runtime also need [Bun](https://bun.sh) 1.3.14 (see `.bun-version`).
+Homebrew and script installs use prebuilt native Rust binaries and do not require Bun. A source install requires [rustup](https://rustup.rs/); the repository's `rust-toolchain.toml` selects the supported Rust compiler. An installed Codex / ChatGPT desktop app is needed only for app integration work. Contributors rebuilding the Electron Runtime also need [Bun](https://bun.sh) 1.3.14 (see `.bun-version`).
 
 **Run**
 

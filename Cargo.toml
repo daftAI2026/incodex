@@ -12,6 +12,7 @@ members = [
 [workspace.package]
 version = "0.3.1"
 edition = "2021"
+rust-version = "1.98"
 license = "MIT"
 repository = "https://github.com/daftAI2026/incodex"
 

@@ -2,6 +2,7 @@
 name = "incodex-core"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Paths, locks, JSON, and hashes for the Incodex native CLI"

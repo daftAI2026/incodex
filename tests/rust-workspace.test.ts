@@ -26,6 +26,8 @@ const TUI_CRATES = [
   "tuirs",
 ];
 
+const RUST_WORKFLOWS = [".github/workflows/ci.yml", ".github/workflows/release.yml"];
+
 function read(rel: string): string {
   return readFileSync(join(root, rel), "utf8");
 }
@@ -87,5 +89,47 @@ describe("Rust workspace", () => {
     for (const line of uses) {
       expect(line).toMatch(/uses:\s+\S+@[0-9a-f]{40}\s+#\s+\S+/);
     }
+  });
+
+  test("pins one exact Rust toolchain across workspace and release paths", () => {
+    const toolchain = read("rust-toolchain.toml");
+    const channel = toolchain.match(/^channel\s*=\s*"([^"]+)"\s*$/m)?.[1];
+    expect(channel).toMatch(/^\d+\.\d+\.\d+$/);
+
+    const cargo = read("Cargo.toml");
+    const msrv = channel?.split(".").slice(0, 2).join(".");
+    expect(cargo).toMatch(new RegExp(`^rust-version\\s*=\\s*"${msrv}"\\s*$`, "m"));
+    for (const member of WORKSPACE_MEMBERS) {
+      expect(read(`${member}/Cargo.toml`)).toMatch(
+        /^rust-version\.workspace\s*=\s*true\s*$/m,
+      );
+    }
+
+    for (const workflowPath of RUST_WORKFLOWS) {
+      const workflow = read(workflowPath);
+      expect(workflow).toContain("actions-rust-lang/setup-rust-toolchain@");
+      expect(workflow).not.toMatch(/^\s*toolchain\s*:/m);
+    }
+  });
+
+  test("documents the Rust toolchain upgrade procedure", () => {
+    const contributing = read("CONTRIBUTING.md");
+    expect(contributing).toMatch(/^## Rust toolchain upgrades\s*$/m);
+    expect(contributing).toContain("rust-toolchain.toml");
+    expect(contributing).toContain("rust-version");
+    expect(contributing).toContain("cargo fmt --all -- --check");
+    expect(contributing).toContain(
+      "cargo clippy --workspace --all-targets --locked -- -D warnings",
+    );
+    expect(contributing).toContain("cargo test --workspace --release --locked");
+  });
+
+  test("source install docs require the pinned Rust toolchain", () => {
+    for (const path of ["README.md", "README_CN.md"]) {
+      const readme = read(path);
+      expect(readme).toContain("rust-toolchain.toml");
+      expect(readme).not.toMatch(/requires stable Rust|需要稳定版 Rust/);
+    }
+    expect(read("CONTRIBUTING.md")).not.toMatch(/Rust \*\*\d+\.\d+\.\d+\*\*/);
   });
 });
