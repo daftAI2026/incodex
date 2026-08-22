@@ -99,7 +99,7 @@ jobs:
               const crypto = require("node:crypto");
               const fs = require("node:fs");
               const path = require("node:path");
-              const REQUIRED_RUNTIME_FILES = [
+              const REQUIRED_EXTERNAL_FILES = [
                 "incodex-main.cjs",
                 "incodex-preload.cjs",
                 "incodex-inject.js",
@@ -110,6 +110,19 @@ jobs:
                 "incodex-instance.cjs",
                 "incodex-window-kind.cjs",
                 "incodex-runtime-load.cjs",
+              ];
+              const REQUIRED_MANIFEST_FILES = [
+                "incodex-main.cjs",
+                "incodex-preload.cjs",
+                "incodex-inject.js",
+                "incodex-safe-home.cjs",
+                "incodex-ipc-guard.cjs",
+                "incodex-owner-core.cjs",
+                "incodex-owner-recovery.cjs",
+                "incodex-instance.cjs",
+                "incodex-window-kind.cjs",
+                "incodex-runtime-load.cjs",
+                "incodex-loader.cjs",
               ];
               const root = path.join(process.env.SMOKE_HOME, ".incodex", "runtime");
               const current = JSON.parse(fs.readFileSync(path.join(root, "current.json"), "utf8"));
@@ -126,11 +139,13 @@ jobs:
               if (manifest.runtimeVersion !== current.version || manifest.sourceCommit !== current.sourceCommit) throw new Error("runtime manifest provenance mismatch");
               const currentFileNames = Object.keys(current.files || {}).sort();
               const manifestFileNames = Object.keys(manifest.files || {}).sort();
+              const loaderManifestHash = manifest.files["incodex-loader.cjs"];
               if (
-                currentFileNames.join("\0") !== REQUIRED_RUNTIME_FILES.slice().sort().join("\0") ||
-                manifestFileNames.join("\0") !== REQUIRED_RUNTIME_FILES.slice().sort().join("\0")
+                currentFileNames.join("\0") !== REQUIRED_EXTERNAL_FILES.slice().sort().join("\0") ||
+                manifestFileNames.join("\0") !== REQUIRED_MANIFEST_FILES.slice().sort().join("\0")
               ) throw new Error("runtime file set mismatch");
-              for (const name of REQUIRED_RUNTIME_FILES) {
+              if (!/^[0-9a-f]{64}$/.test(loaderManifestHash)) throw new Error("invalid loader manifest hash");
+              for (const name of REQUIRED_EXTERNAL_FILES) {
                 const expected = current.files[name];
                 if (!/^[0-9a-f]{64}$/.test(expected) || manifest.files[name] !== expected) throw new Error(`runtime pointer hash mismatch: ${name}`);
                 const actual = crypto.createHash("sha256").update(fs.readFileSync(path.join(release, name))).digest("hex");
