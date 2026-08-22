@@ -285,8 +285,8 @@ fn native_non_tty_mutations_print_auditable_progress_stages() {
 }
 
 #[test]
-fn native_install_prints_keychain_advice_only_after_a_new_codex_patch() {
-    let home = scratch("install-keychain-advice");
+fn native_install_does_not_give_persistent_keychain_advice_to_an_explicit_target() {
+    let home = scratch("install-custom-keychain-advice");
     let app = patchable_app(&home);
     fs::write(
         app.join("Contents/Info.plist"),
@@ -307,20 +307,9 @@ fn native_install_prints_keychain_advice_only_after_a_new_codex_patch() {
     let install = run_rust(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
     assert_eq!(install.status, 0, "{install:?}");
     assert!(
-        install.stdout.contains("Codex Storage Key")
-            && install.stdout.contains("Mac login password")
-            && install.stdout.contains("not your ChatGPT password")
-            && install.stdout.contains("Always Allow")
-            && install.stdout.contains("Deny or Cancel"),
-        "a committed Codex patch must explain the possible Keychain prompt safely: {install:?}"
-    );
-
-    let repeated = run_rust(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
-    assert_eq!(repeated.status, 0, "{repeated:?}");
-    assert!(
-        repeated.stdout.contains("Already current")
-            && !repeated.stdout.contains("Codex Storage Key"),
-        "an already-current install must not repeat first-patch Keychain advice: {repeated:?}"
+        !install.stdout.contains("Codex Storage Key")
+            && !install.stdout.contains("Always Allow"),
+        "an explicit path must not receive persistent Keychain authorization advice based only on its bundle id: {install:?}"
     );
 }
 
