@@ -16,8 +16,9 @@ use incodex_core::{format_kv, format_ok, format_step, format_warn};
 
 use crate::app_bundle::resolve_executable;
 use crate::cdp::{
-    allocate_debug_port, debug_launch_args, inject_shared_ui_with_options, start_lifecycle_monitor,
-    InjectionOptions, WindowBounds,
+    allocate_debug_port, debug_launch_args, inject_shared_ui_with_options_and_target,
+    start_lifecycle_monitor, start_primary_lifecycle_monitor, InjectionOptions, WindowBounds,
+    OFFICIAL_NEW_CODEX_URL,
 };
 use crate::parse::ParsedCli;
 use crate::CliFailure;
@@ -220,7 +221,10 @@ pub fn prepare_incognito_open(
 fn plan_from_session(bin: PathBuf, session: SessionHome, source_home: &Path) -> OpenPlan {
     let debug_port = allocate_debug_port().unwrap_or(0);
     let args = if debug_port == 0 {
-        vec![format!("--user-data-dir={}", session.chromium.display())]
+        vec![
+            format!("--user-data-dir={}", session.chromium.display()),
+            OFFICIAL_NEW_CODEX_URL.to_string(),
+        ]
     } else {
         debug_launch_args(&session.chromium.display().to_string(), debug_port)
     };
@@ -362,17 +366,20 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
     };
     let (status_tx, status_rx) = mpsc::channel();
     let readiness = InjectionReadiness::default();
+    let process_alive = Arc::new(AtomicBool::new(true));
     if plan.debug_port != 0 {
         let port = plan.debug_port;
         let child_pid = child.id();
         let source_bounds = plan.source_bounds;
         let injection_readiness = readiness.clone();
+        let lifecycle_process_alive = process_alive.clone();
         let options = InjectionOptions {
             locale: plan.locale.clone(),
         };
         thread::spawn(move || {
             let mut bounds_ready = source_bounds.is_none();
             let mut primary_target_id = None;
+            let mut lifecycle_started = false;
             let mut last_injection_error = None;
             for attempt in 1u8..=40 {
                 if !bounds_ready {
@@ -385,8 +392,25 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                         .is_ok();
                     }
                 }
+                if !lifecycle_started
+                    && start_primary_lifecycle_monitor(port, lifecycle_process_alive.clone())
+                        .is_ok()
+                {
+                    lifecycle_started = true;
+                }
                 if primary_target_id.is_none() {
-                    match inject_shared_ui_with_options(port, &options) {
+                    let injection =
+                        inject_shared_ui_with_options_and_target(port, &options, |target_id| {
+                            if !lifecycle_started {
+                                start_lifecycle_monitor(
+                                    port,
+                                    target_id.to_string(),
+                                    lifecycle_process_alive.clone(),
+                                );
+                                lifecycle_started = true;
+                            }
+                        });
+                    match injection {
                         Ok(target_id) => {
                             primary_target_id = Some(target_id);
                             if std::env::var_os("INCODEX_CDP_LOG").is_some() {
@@ -403,7 +427,13 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                 }
                 if bounds_ready {
                     if let Some(target_id) = primary_target_id.take() {
-                        start_lifecycle_monitor(port, target_id);
+                        if !lifecycle_started {
+                            start_lifecycle_monitor(
+                                port,
+                                target_id,
+                                lifecycle_process_alive.clone(),
+                            );
+                        }
                         publish_injection_status(
                             &status_tx,
                             &injection_readiness,
@@ -468,6 +498,7 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
         }
         match child.try_wait() {
             Ok(Some(status)) => {
+                process_alive.store(false, Ordering::Release);
                 spinner.stop();
                 return Ok(SpawnOutcome {
                     process: OpenProcessResult::Exited {
@@ -480,6 +511,7 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
             }
             Ok(None) => {}
             Err(error) => {
+                process_alive.store(false, Ordering::Release);
                 spinner.stop();
                 let reason = format!("child exit could not be proven: {error}");
                 return Ok(SpawnOutcome {

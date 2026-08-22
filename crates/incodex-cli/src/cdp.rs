@@ -7,6 +7,8 @@
 
 use std::io::{ErrorKind, Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -20,6 +22,10 @@ const INJECT_PREFIX: &str = "window.__incodexIncognito=true;";
 const MAX_HTTP_RESPONSE_BYTES: usize = 1024 * 1024;
 const MACOS_WINDOW_TILE_PIXELS: i32 = 22;
 const CDP_IO_TIMEOUT: Duration = Duration::from_secs(2);
+const LIFECYCLE_POLL_INTERVAL: Duration = Duration::from_millis(200);
+const PRIMARY_TARGET_MISSING_POLLS: u8 = 2;
+const BROWSER_CLOSE_ATTEMPTS: u8 = 3;
+pub const OFFICIAL_NEW_CODEX_URL: &str = "codex://new?mode=codex";
 
 #[derive(Debug, Clone)]
 pub struct CdpTarget {
@@ -51,12 +57,6 @@ pub struct InjectionOptions {
     pub locale: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CdpLifecycleAction {
-    Wait,
-    CloseBrowser,
-}
-
 pub fn allocate_debug_port() -> Result<u16, String> {
     // Chromium 必须在 listener 释放后自行 bind；这是不可避免的短暂 TOCTOU。
     // 后续 HTTP/CDP 操作均有硬截止时间，抢占或 bind 失败只会得到有界的 UI 错误。
@@ -71,6 +71,7 @@ pub fn debug_launch_args(user_data_dir: &str, debug_port: u16) -> Vec<String> {
         format!("--user-data-dir={user_data_dir}"),
         format!("--remote-debugging-port={debug_port}"),
         format!("--remote-allow-origins=http://127.0.0.1:{debug_port}"),
+        OFFICIAL_NEW_CODEX_URL.to_string(),
     ]
 }
 
@@ -162,11 +163,22 @@ pub fn inject_shared_ui_with_options(
     debug_port: u16,
     options: &InjectionOptions,
 ) -> Result<String, String> {
+    inject_shared_ui_with_options_and_target(debug_port, options, |_| {})
+}
+
+pub fn inject_shared_ui_with_options_and_target<F>(
+    debug_port: u16,
+    options: &InjectionOptions,
+    mut on_target: F,
+) -> Result<String, String>
+where
+    F: FnMut(&str),
+{
     let source = inject_source_for_locale(options.locale.as_deref());
     let mut last = "cdp page not ready".to_string();
     let mut refused = 0u8;
     for _ in 0..8 {
-        match try_inject(debug_port, &source) {
+        match try_inject(debug_port, &source, &mut on_target) {
             Ok(target_id) => return Ok(target_id),
             Err(err) => {
                 let refused_now = err.contains("Connection refused")
@@ -187,27 +199,32 @@ pub fn inject_shared_ui_with_options(
     Err(last)
 }
 
-fn try_inject(debug_port: u16, source: &str) -> Result<String, String> {
+fn try_inject<F>(debug_port: u16, source: &str, on_target: &mut F) -> Result<String, String>
+where
+    F: FnMut(&str),
+{
     let targets = list_targets(debug_port)?;
     let page = pick_codex_page_target(&targets).ok_or("no Codex page target")?;
+    on_target(&page.id);
     validate_cdp_websocket_url(&page.ws, debug_port)?;
     let (mut socket, _) = connect_cdp_websocket(&page.ws, debug_port)?;
     send_cdp(&mut socket, 1, "Page.enable", json!({}))?;
+    select_official_codex_mode(&mut socket)?;
     send_cdp(
         &mut socket,
-        2,
+        4,
         "Page.addScriptToEvaluateOnNewDocument",
         json!({ "source": source }),
     )?;
     send_cdp(
         &mut socket,
-        3,
+        5,
         "Runtime.evaluate",
         json!({ "expression": source, "returnByValue": true }),
     )?;
     let health = send_cdp(
         &mut socket,
-        4,
+        6,
         "Runtime.evaluate",
         json!({ "expression": ui_ready_expression(), "returnByValue": true }),
     )?;
@@ -217,31 +234,67 @@ fn try_inject(debug_port: u16, source: &str) -> Result<String, String> {
     Ok(target_id)
 }
 
-pub fn start_lifecycle_monitor(debug_port: u16, primary_target_id: String) {
-    thread::spawn(move || monitor_primary_target(debug_port, &primary_target_id));
+fn select_official_codex_mode(socket: &mut WebSocket<TcpStream>) -> Result<(), String> {
+    let key = |r#type: &str| {
+        json!({
+            "type": r#type,
+            "modifiers": 2,
+            "key": "3",
+            "code": "Digit3",
+            "windowsVirtualKeyCode": 51
+        })
+    };
+    send_cdp(socket, 2, "Input.dispatchKeyEvent", key("rawKeyDown"))?;
+    send_cdp(socket, 3, "Input.dispatchKeyEvent", key("keyUp"))?;
+    Ok(())
 }
 
-fn monitor_primary_target(debug_port: u16, primary_target_id: &str) {
-    loop {
-        thread::sleep(Duration::from_millis(200));
-        let Ok(targets) = list_targets(debug_port) else {
-            return;
+pub fn start_primary_lifecycle_monitor(
+    debug_port: u16,
+    process_alive: Arc<AtomicBool>,
+) -> Result<(), String> {
+    let targets = list_targets(debug_port)?;
+    let target_id = pick_codex_page_target(&targets)
+        .ok_or("no Codex page target")?
+        .id
+        .clone();
+    start_lifecycle_monitor(debug_port, target_id, process_alive);
+    Ok(())
+}
+
+pub fn start_lifecycle_monitor(
+    debug_port: u16,
+    primary_target_id: String,
+    process_alive: Arc<AtomicBool>,
+) {
+    thread::spawn(move || monitor_primary_target(debug_port, &primary_target_id, &process_alive));
+}
+
+fn monitor_primary_target(debug_port: u16, primary_target_id: &str, process_alive: &AtomicBool) {
+    let mut primary_target_id = primary_target_id.to_string();
+    let mut missing_polls = 0u8;
+    while process_alive.load(Ordering::Acquire) {
+        thread::sleep(LIFECYCLE_POLL_INTERVAL);
+        let targets = match list_targets(debug_port) {
+            Ok(targets) => targets,
+            Err(_) => continue,
         };
-        match lifecycle_action(primary_target_id, &targets) {
-            CdpLifecycleAction::Wait => {}
-            CdpLifecycleAction::CloseBrowser => {
-                let _ = close_browser(debug_port);
-                return;
-            }
+        if targets.iter().any(|target| target.id == primary_target_id) {
+            missing_polls = 0;
+            continue;
         }
-    }
-}
+        if let Some(replacement) = pick_codex_page_target(&targets) {
+            primary_target_id.clone_from(&replacement.id);
+            missing_polls = 0;
+            continue;
+        }
 
-fn lifecycle_action(primary_target_id: &str, targets: &[CdpTarget]) -> CdpLifecycleAction {
-    if targets.iter().any(|target| target.id == primary_target_id) {
-        CdpLifecycleAction::Wait
-    } else {
-        CdpLifecycleAction::CloseBrowser
+        missing_polls = missing_polls.saturating_add(1);
+        if missing_polls < PRIMARY_TARGET_MISSING_POLLS {
+            continue;
+        }
+        let _ = close_browser_with_retries(debug_port);
+        missing_polls = 0;
     }
 }
 
@@ -260,6 +313,20 @@ fn close_browser(debug_port: u16) -> Result<(), String> {
     socket
         .send(Message::Text(browser_close_message().to_string().into()))
         .map_err(|err| err.to_string())
+}
+
+fn close_browser_with_retries(debug_port: u16) -> Result<(), String> {
+    let mut last_error = "Browser.close was not attempted".to_string();
+    for attempt in 0..BROWSER_CLOSE_ATTEMPTS {
+        match close_browser(debug_port) {
+            Ok(()) => return Ok(()),
+            Err(error) => last_error = error,
+        }
+        if attempt + 1 < BROWSER_CLOSE_ATTEMPTS {
+            thread::sleep(LIFECYCLE_POLL_INTERVAL);
+        }
+    }
+    Err(last_error)
 }
 
 fn send_cdp(
@@ -536,221 +603,20 @@ fn response_frame(response: &[u8]) -> Result<Option<(usize, usize)>, String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::net::Ipv4Addr;
-    use std::time::Instant;
-
-    #[test]
-    fn prefers_codex_app_page_and_skips_chrome_and_prewarm() {
-        let targets = vec![
-            CdpTarget {
-                id: "a".into(),
-                r#type: "page".into(),
-                url: "chrome://newtab".into(),
-                ws: "ws://127.0.0.1:1/devtools/page/a".into(),
-            },
-            CdpTarget {
-                id: "d".into(),
-                r#type: "page".into(),
-                url: "app://-/index.html?initialRoute=%2Favatar-overlay".into(),
-                ws: "ws://127.0.0.1:1/devtools/page/d".into(),
-            },
-            CdpTarget {
-                id: "b".into(),
-                r#type: "page".into(),
-                url: "app://-/index.html?initialRoute=%2Fchatgpt%2Fquick-chat-prewarm".into(),
-                ws: "ws://127.0.0.1:1/devtools/page/b".into(),
-            },
-            CdpTarget {
-                id: "c".into(),
-                r#type: "page".into(),
-                url: "app://-/index.html".into(),
-                ws: "ws://127.0.0.1:1/devtools/page/c".into(),
-            },
-        ];
-        let picked = pick_codex_page_target(&targets).unwrap();
-        assert_eq!(picked.url, "app://-/index.html");
-        assert!(inject_source().contains("__incodexIncognito=true"));
-        assert!(inject_source().contains("data-incodex-privacy-toggle"));
-    }
-
-    #[test]
-    fn cdp_http_finishes_at_content_length_even_when_chromium_keeps_socket_open() {
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request = [0_u8; 1024];
-            let _ = stream.read(&mut request);
-            let body = "[]";
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\r\n{body}",
-                body.len()
-            );
-            stream.write_all(response.as_bytes()).unwrap();
-            thread::sleep(Duration::from_millis(2_500));
-        });
-
-        let started = Instant::now();
-        let value = http_get_json_host("127.0.0.1", port, "/json/list")
-            .expect("a complete Content-Length body must not wait for EOF");
-        assert_eq!(value, json!([]));
-        assert!(started.elapsed() < Duration::from_millis(500));
-        server.join().unwrap();
-    }
-
-    #[test]
-    fn cdp_http_has_an_overall_deadline_for_a_slow_local_endpoint() {
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request = [0_u8; 1024];
-            let _ = stream.read(&mut request);
-            let response = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n[]";
-            for byte in response {
-                if stream.write_all(&[*byte]).is_err() {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(100));
-            }
-        });
-
-        let started = Instant::now();
-        let result = http_get_json_host("127.0.0.1", port, "/json/list");
-        assert!(
-            result.is_err(),
-            "a slow endpoint must not complete normally"
-        );
-        assert!(
-            started.elapsed() < Duration::from_millis(2_500),
-            "slow CDP endpoint exceeded its bounded operation deadline"
-        );
-        server.join().unwrap();
-    }
-
-    #[test]
-    fn cdp_websocket_handshake_has_a_finite_timeout() {
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let response = b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: invalid\r\n\r\n";
-            for byte in response {
-                if stream.write_all(&[*byte]).is_err() {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(60));
-            }
-        });
-
-        let started = Instant::now();
-        let result =
-            connect_cdp_websocket(&format!("ws://127.0.0.1:{port}/devtools/page/test"), port);
-        assert!(result.is_err());
-        assert!(
-            started.elapsed() < Duration::from_millis(2_500),
-            "CDP WebSocket handshake was not bounded"
-        );
-        server.join().unwrap();
-    }
-
-    #[test]
-    fn cdp_command_read_has_an_overall_deadline_for_a_fragmented_frame() {
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let server = thread::spawn(move || {
-            let (stream, _) = listener.accept().unwrap();
-            let mut socket = tungstenite::accept(stream).unwrap();
-            let payload = br#"{"id":1,"result":{"value":"0123456789abcdef"}}"#;
-            let mut frame = vec![0x81, payload.len() as u8];
-            frame.extend_from_slice(payload);
-            let raw = socket.get_mut();
-            for byte in frame {
-                if raw.write_all(&[byte]).is_err() {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(70));
-            }
-        });
-
-        let (mut socket, _) =
-            connect_cdp_websocket(&format!("ws://127.0.0.1:{port}/devtools/page/test"), port)
-                .unwrap();
-        let started = Instant::now();
-        let result = send_cdp(&mut socket, 1, "Runtime.evaluate", json!({}));
-        assert!(result.is_err(), "a slow fragmented response must time out");
-        assert!(
-            started.elapsed() < Duration::from_millis(2_500),
-            "fragmented CDP command exceeded its overall deadline"
-        );
-        server.join().unwrap();
-    }
-
-    #[test]
-    fn cdp_websocket_is_confined_to_the_allocated_loopback_port() {
-        assert!(validate_cdp_websocket_url("ws://127.0.0.1:43123/devtools/page/a", 43123).is_ok());
-        assert!(validate_cdp_websocket_url("ws://[::1]:43123/devtools/page/a", 43123).is_ok());
-        assert!(validate_cdp_websocket_url("ws://127.0.0.1:43124/devtools/page/a", 43123).is_err());
-        assert!(
-            validate_cdp_websocket_url("ws://example.com:43123/devtools/page/a", 43123).is_err()
-        );
-    }
-
-    #[test]
-    fn injected_ui_carries_locale_and_requires_button_and_banner_health() {
-        let source = inject_source_for_locale(Some("zh-CN"));
-        assert!(source.contains("window.__incodexIncognito=true"));
-        assert!(source.contains("window.__incodexLocale=\"zh-CN\""));
-        let health = ui_ready_expression();
-        assert!(health.contains("data-incodex-privacy-toggle"));
-        assert!(health.contains("data-incodex-banner-host"));
-    }
-
-    #[test]
-    fn open_window_uses_chromiums_macos_tile_offset_and_keeps_source_size() {
-        let source = WindowBounds {
-            x: 100,
-            y: 80,
-            width: 1280,
-            height: 800,
-        };
-        assert_eq!(
-            chrome_tile_bounds(source),
-            WindowBounds {
-                x: 122,
-                y: 102,
-                width: 1280,
-                height: 800,
-            }
-        );
-    }
-
-    #[test]
-    fn losing_the_primary_page_closes_the_whole_isolated_browser() {
-        let targets = vec![CdpTarget {
-            id: "overlay".into(),
-            r#type: "page".into(),
-            url: "app://-/index.html?initialRoute=%2Favatar-overlay".into(),
-            ws: "ws://127.0.0.1:43123/devtools/page/overlay".into(),
-        }];
-
-        assert_eq!(
-            lifecycle_action("main", &targets),
-            CdpLifecycleAction::CloseBrowser
-        );
-        assert_eq!(
-            browser_close_message(),
-            json!({ "id": 1, "method": "Browser.close", "params": {} })
-        );
-    }
-}
-
-#[cfg(test)]
 #[path = "cdp_partial_flush_tests.rs"]
 mod partial_flush_tests;
+#[cfg(test)]
+#[path = "cdp_unit_tests.rs"]
+mod unit_tests;
 
 #[cfg(test)]
 #[path = "cdp_ui_probe_tests.rs"]
 mod ui_probe_tests;
+
+#[cfg(test)]
+#[path = "cdp_mode_tests.rs"]
+mod mode_tests;
+
+#[cfg(test)]
+#[path = "cdp_lifecycle_tests.rs"]
+mod lifecycle_tests;

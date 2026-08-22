@@ -3,10 +3,14 @@
 use super::*;
 use incodex_core::session::create_session_home;
 use std::fs;
+use std::io::{Read, Write};
+use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::process::Command;
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use tungstenite::Message;
 
 fn temp_root() -> PathBuf {
     let n = std::time::SystemTime::now()
@@ -37,6 +41,116 @@ fn fake_app(root: &Path) -> PathBuf {
     }
     fs::set_permissions(executable, permissions).unwrap();
     app
+}
+
+fn write_cdp_http(stream: &mut TcpStream, value: &serde_json::Value) {
+    let body = value.to_string();
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(response.as_bytes()).unwrap();
+}
+
+fn serve_early_close_cdp(
+    listener: TcpListener,
+    marker: PathBuf,
+    ui_probed: Arc<AtomicBool>,
+    browser_closed: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+    hide_primary_on_first_list: bool,
+) {
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let mut list_requests = 0_u32;
+    while !stop.load(Ordering::Acquire) {
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                stream.set_nonblocking(false).unwrap();
+                let mut peek = [0_u8; 2048];
+                let size = stream.peek(&mut peek).unwrap();
+                let request = String::from_utf8_lossy(&peek[..size]);
+                if request.starts_with("GET /devtools/") {
+                    let browser = request.starts_with("GET /devtools/browser/");
+                    let probed = ui_probed.clone();
+                    let closed = browser_closed.clone();
+                    let marker = marker.clone();
+                    thread::spawn(move || {
+                        let mut socket = tungstenite::accept(stream).unwrap();
+                        while let Ok(Message::Text(text)) = socket.read() {
+                            let command: serde_json::Value = serde_json::from_str(&text).unwrap();
+                            let id = command
+                                .get("id")
+                                .and_then(serde_json::Value::as_u64)
+                                .unwrap();
+                            let method = command.get("method").and_then(serde_json::Value::as_str);
+                            let health = method == Some("Runtime.evaluate")
+                                && command
+                                    .pointer("/params/expression")
+                                    .and_then(serde_json::Value::as_str)
+                                    == Some(crate::cdp::ui_ready_expression());
+                            let response = if health {
+                                probed.store(true, Ordering::Release);
+                                serde_json::json!({
+                                    "id": id,
+                                    "result": {"result": {"value": {"button": true, "banner": false}}}
+                                })
+                            } else {
+                                serde_json::json!({"id": id, "result": {}})
+                            };
+                            socket
+                                .send(Message::Text(response.to_string().into()))
+                                .unwrap();
+                            if browser && method == Some("Browser.close") {
+                                closed.store(true, Ordering::Release);
+                                fs::write(&marker, "closed\n").unwrap();
+                                break;
+                            }
+                            if health {
+                                break;
+                            }
+                        }
+                    });
+                } else {
+                    let mut raw = [0_u8; 2048];
+                    let size = stream.read(&mut raw).unwrap();
+                    let request = String::from_utf8_lossy(&raw[..size]);
+                    if request.starts_with("GET /json/version ") {
+                        write_cdp_http(
+                            &mut stream,
+                            &serde_json::json!({
+                                "webSocketDebuggerUrl": format!("ws://127.0.0.1:{port}/devtools/browser/test")
+                            }),
+                        );
+                    } else {
+                        list_requests += 1;
+                        let targets = if hide_primary_on_first_list && list_requests == 1 {
+                            serde_json::json!([])
+                        } else if ui_probed.load(Ordering::Acquire) {
+                            serde_json::json!([{
+                                "id": "overlay",
+                                "type": "page",
+                                "url": "app://-/index.html?initialRoute=%2Favatar-overlay",
+                                "webSocketDebuggerUrl": format!("ws://127.0.0.1:{port}/devtools/page/overlay")
+                            }])
+                        } else {
+                            serde_json::json!([{
+                                "id": "main",
+                                "type": "page",
+                                "url": "app://-/index.html",
+                                "webSocketDebuggerUrl": format!("ws://127.0.0.1:{port}/devtools/page/main")
+                            }])
+                        };
+                        write_cdp_http(&mut stream, &targets);
+                    }
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => panic!("CDP test server failed: {error}"),
+        }
+    }
 }
 
 #[test]
@@ -70,6 +184,128 @@ fn open_progress_distinguishes_launch_ready_and_waiting() {
     assert_eq!(opening, "Opening incognito Codex window");
     assert_eq!(opened, "Opened. Incognito Codex window is ready.");
     assert_eq!(waiting, "Waiting for the window to close");
+}
+
+#[test]
+fn closing_the_primary_window_before_ui_ready_still_stops_the_isolated_process() {
+    let root = temp_root();
+    let app = fake_app(&root);
+    let source = root.join("codex");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("auth.json"), "{}\n").unwrap();
+    let marker = source.join("browser-closed");
+    let executable = app.join("Contents/MacOS/ChatGPT");
+    fs::write(
+        &executable,
+        "#!/bin/sh\nwhile [ ! -f \"$INCODEX_SOURCE_HOME/browser-closed\" ]; do sleep 0.02; done\n",
+    )
+    .unwrap();
+
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let ui_probed = Arc::new(AtomicBool::new(false));
+    let browser_closed = Arc::new(AtomicBool::new(false));
+    let stop = Arc::new(AtomicBool::new(false));
+    let server = {
+        let marker = marker.clone();
+        let ui_probed = ui_probed.clone();
+        let browser_closed = browser_closed.clone();
+        let stop = stop.clone();
+        thread::spawn(move || {
+            serve_early_close_cdp(listener, marker, ui_probed, browser_closed, stop, false)
+        })
+    };
+
+    let user = root.join("home");
+    let mut plan = prepare_incognito_open(&app, &user, &source, std::process::id() as i32).unwrap();
+    plan.debug_port = port;
+    let (done_tx, done_rx) = mpsc::channel();
+    thread::spawn(move || {
+        done_tx.send(spawn_plan(&plan)).unwrap();
+    });
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < deadline && !browser_closed.load(Ordering::Acquire) {
+        thread::sleep(Duration::from_millis(20));
+    }
+    if !browser_closed.load(Ordering::Acquire) {
+        fs::write(&marker, "test cleanup\n").unwrap();
+    }
+    let result = done_rx
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap()
+        .unwrap();
+    stop.store(true, Ordering::Release);
+    server.join().unwrap();
+
+    assert!(
+        browser_closed.load(Ordering::Acquire),
+        "the lifecycle monitor must start when the primary target is discovered, not after UI health"
+    );
+    assert!(matches!(result, OpenProcessResult::Exited { .. }));
+}
+
+#[test]
+fn primary_discovered_during_failed_injection_still_gets_a_lifecycle_monitor() {
+    let root = temp_root();
+    let app = fake_app(&root);
+    let source = root.join("codex");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("auth.json"), "{}\n").unwrap();
+    let marker = source.join("browser-closed");
+    let executable = app.join("Contents/MacOS/ChatGPT");
+    fs::write(
+        &executable,
+        "#!/bin/sh\nwhile [ ! -f \"$INCODEX_SOURCE_HOME/browser-closed\" ]; do sleep 0.02; done\n",
+    )
+    .unwrap();
+
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let ui_probed = Arc::new(AtomicBool::new(false));
+    let browser_closed = Arc::new(AtomicBool::new(false));
+    let stop = Arc::new(AtomicBool::new(false));
+    let server = {
+        let marker = marker.clone();
+        let ui_probed = ui_probed.clone();
+        let browser_closed = browser_closed.clone();
+        let stop = stop.clone();
+        thread::spawn(move || {
+            serve_early_close_cdp(listener, marker, ui_probed, browser_closed, stop, true)
+        })
+    };
+
+    let user = root.join("home");
+    let mut plan = prepare_incognito_open(&app, &user, &source, std::process::id() as i32).unwrap();
+    plan.debug_port = port;
+    let (done_tx, done_rx) = mpsc::channel();
+    thread::spawn(move || {
+        done_tx.send(spawn_plan(&plan)).unwrap();
+    });
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < deadline && !browser_closed.load(Ordering::Acquire) {
+        thread::sleep(Duration::from_millis(20));
+    }
+    if !browser_closed.load(Ordering::Acquire) {
+        fs::write(&marker, "test cleanup\n").unwrap();
+    }
+    let result = done_rx
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap()
+        .unwrap();
+    stop.store(true, Ordering::Release);
+    server.join().unwrap();
+
+    assert!(
+        ui_probed.load(Ordering::Acquire),
+        "the primary must appear during injection before this regression is exercised"
+    );
+    assert!(
+        browser_closed.load(Ordering::Acquire),
+        "a primary first discovered inside a failed injection attempt must still be monitored"
+    );
+    assert!(matches!(result, OpenProcessResult::Exited { .. }));
 }
 
 #[test]
