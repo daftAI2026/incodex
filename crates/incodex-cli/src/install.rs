@@ -348,17 +348,23 @@ fn finish_rollback(
     error: String,
     rollback_error: Option<String>,
 ) -> String {
-    let _ = tx;
-    let scratch_error = if rollback_error.is_none() {
+    let rollback_is_durable = tx.journal().phase == "ROLLED_BACK";
+    let scratch_error = if rollback_error.is_none() || rollback_is_durable {
         scratch.and_then(|path| remove_install_scratch(path).err())
     } else {
         None
     };
     let mut details = Vec::new();
     if let Some(rollback_error) = rollback_error {
-        details.push(format!(
-            "transaction rollback failed; recover the retained journal: {rollback_error}"
-        ));
+        if rollback_is_durable {
+            details.push(format!(
+                "rollback reached ROLLED_BACK, but durability confirmation reported an error: {rollback_error}"
+            ));
+        } else {
+            details.push(format!(
+                "transaction rollback failed; recover the retained journal: {rollback_error}"
+            ));
+        }
     }
     if let Some(scratch_error) = scratch_error {
         details.push(format!("install scratch cleanup failed: {scratch_error}"));

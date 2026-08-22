@@ -702,6 +702,13 @@ fn transaction_evidence(
     let external_scratch = root
         .join("scratch")
         .join(format!("ChatGPT.app.staged-{install_id}"));
+    let has_external_artifacts = fs::symlink_metadata(&external_scratch).is_ok();
+    let has_internal_artifacts = internal_candidates
+        .iter()
+        .any(|path| fs::symlink_metadata(path).is_ok());
+    let internal_cleanup_safe = phase == "COMMITTED"
+        && has_internal_artifacts
+        && incodex_transaction::validate_committed_cleanup(root, install_id).is_ok();
     let artifacts: Vec<String> = internal_candidates
         .into_iter()
         .chain(std::iter::once(external_scratch))
@@ -711,6 +718,12 @@ fn transaction_evidence(
     let recovery = match action {
         incodex_transaction::Recovery::Rollback => Some("rollback".to_string()),
         incodex_transaction::Recovery::Refuse => Some("manual".to_string()),
+        incodex_transaction::Recovery::Done if has_external_artifacts => {
+            Some("manual".to_string())
+        }
+        incodex_transaction::Recovery::Done if internal_cleanup_safe => {
+            Some("cleanup".to_string())
+        }
         incodex_transaction::Recovery::Done if !artifacts.is_empty() => {
             Some("manual".to_string())
         }

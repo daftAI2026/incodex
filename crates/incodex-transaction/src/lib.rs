@@ -39,6 +39,18 @@ pub fn validate_committed_live_snapshot(
     let journal = journal::load_v2(root, install_id)?;
     uninstall::validate_committed_restore_target(root, &journal, live_path)
 }
+
+/// Validate that a committed transaction's cleanup paths remain recoverable.
+pub fn validate_committed_cleanup(root: &Path, install_id: &str) -> Result<(), String> {
+    let journal = journal::load_v2(root, install_id)?;
+    if journal.phase != "COMMITTED" {
+        return Err(format!(
+            "transaction {install_id} is not committed: {}",
+            journal.phase
+        ));
+    }
+    journal::reconstructed(root, &journal).map(|_| ())
+}
 pub use lock::{acquire_target_lock, lock_path_for, TargetLock};
 
 pub const PHASES: &[&str] = &[
