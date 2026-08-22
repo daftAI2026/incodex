@@ -276,15 +276,13 @@ pub fn format_diagnosis(report: &Diagnosis) -> String {
     for record in &report.journal_records {
         if let Some(original) = &record.retained_original {
             lines.push(incodex_core::format_kv("Retained original", original, None));
-            lines.push(incodex_core::format_kv(
-                "Original proof",
-                if record.original_valid == Some(true) {
-                    "valid"
-                } else {
-                    "invalid"
-                },
-                None,
-            ));
+            if let Some(original_valid) = record.original_valid {
+                lines.push(incodex_core::format_kv(
+                    "Original proof",
+                    if original_valid { "valid" } else { "invalid" },
+                    None,
+                ));
+            }
         }
         if let Some(recovery) = &record.recovery {
             lines.push(incodex_core::format_kv("Recovery", recovery, None));
