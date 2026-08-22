@@ -2,6 +2,7 @@
 "use strict";
 
 const APP_ASAR_ROOT = /\/[^/]+\.app\/Contents\/Resources\/app\.asar(?:\/|$)/;
+const guardedContents = new WeakSet();
 
 function navigationOrigin(raw) {
   if (!raw || typeof raw !== "string") return null;
@@ -75,8 +76,29 @@ function identityFromWindow(win) {
   };
 }
 
+function revokeWindowIdentityOnNavigation(allowlist, win, raw) {
+  const current = allowlist.get(win?.id);
+  if (!current || current.revoked || navigationOrigin(raw) === current.origin) return false;
+  allowlist.set(win.id, { ...current, revoked: true });
+  return true;
+}
+
+function watchWindowNavigation(allowlist, win) {
+  const contents = win?.webContents;
+  if (!contents?.on || guardedContents.has(contents)) return;
+  guardedContents.add(contents);
+  const revoke = (details, url, _isSameDocument, isMainFrame) => {
+    const modern = typeof details?.url === "string";
+    if ((modern ? details.isMainFrame : isMainFrame) !== true) return;
+    revokeWindowIdentityOnNavigation(allowlist, win, modern ? details.url : url);
+  };
+  contents.on("did-start-navigation", revoke);
+  contents.on("will-redirect", revoke);
+}
+
 function bindWindowIdentity(allowlist, win, trustedOrigins) {
   if (!win || typeof win.id !== "number") return false;
+  watchWindowNavigation(allowlist, win);
   const current = allowlist.get(win.id);
   if (current?.revoked) return false;
   const next = identityFromWindow(win);

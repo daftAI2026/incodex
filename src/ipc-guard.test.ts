@@ -129,29 +129,29 @@ describe("urlAllowed", () => {
 describe("bindWindowIdentity", () => {
   function windowFixture() {
     const session = {};
+    const listeners = new Map<string, (...args: unknown[]) => void>();
     const state = {
       url: "app://-/index.html",
       frameProcessId: 22,
       frameRoutingId: 33,
     };
-    return {
-      state,
-      win: {
-        id: 1,
-        webContents: {
-          id: 11,
-          session,
-          isDestroyed: () => false,
-          getURL: () => state.url,
-          get mainFrame() {
-            return {
-              processId: state.frameProcessId,
-              routingId: state.frameRoutingId,
-            };
-          },
+    const win = {
+      id: 1,
+      webContents: {
+        id: 11,
+        session,
+        isDestroyed: () => false,
+        getURL: () => state.url,
+        get mainFrame() {
+          return {
+            processId: state.frameProcessId,
+            routingId: state.frameRoutingId,
+          };
         },
+        on: (name: string, callback: (...args: unknown[]) => void) => listeners.set(name, callback),
       },
     };
+    return { state, win, listeners };
   }
 
   test("refreshes a same-origin main frame without widening its origin", () => {
@@ -180,6 +180,39 @@ describe("bindWindowIdentity", () => {
     state.url = "https://evil.example/bridge";
     expect(bindWindowIdentity(allowed, win, trustedOrigins)).toBe(false);
     state.url = "app://-/index.html";
+    expect(bindWindowIdentity(allowed, win, trustedOrigins)).toBe(false);
+  });
+
+  test("navigation start revokes before an untrusted redirect can commit", () => {
+    const allowed = new Map();
+    const { win, listeners } = windowFixture();
+    expect(bindWindowIdentity(allowed, win, trustedOrigins)).toBe(true);
+    listeners.get("did-start-navigation")!({
+      url: "https://evil.example/redirect-back",
+      isMainFrame: true,
+    });
+    expect(bindWindowIdentity(allowed, win, trustedOrigins)).toBe(false);
+  });
+
+  test("subframe navigation does not revoke the bound main frame", () => {
+    const allowed = new Map();
+    const { win, listeners } = windowFixture();
+    expect(bindWindowIdentity(allowed, win, trustedOrigins)).toBe(true);
+    listeners.get("did-start-navigation")!({
+      url: "https://evil.example/iframe",
+      isMainFrame: false,
+    });
+    expect(bindWindowIdentity(allowed, win, trustedOrigins)).toBe(true);
+  });
+
+  test("server redirects revoke before the foreign document commits", () => {
+    const allowed = new Map();
+    const { win, listeners } = windowFixture();
+    expect(bindWindowIdentity(allowed, win, trustedOrigins)).toBe(true);
+    listeners.get("will-redirect")!({
+      url: "https://evil.example/server-redirect",
+      isMainFrame: true,
+    });
     expect(bindWindowIdentity(allowed, win, trustedOrigins)).toBe(false);
   });
 
