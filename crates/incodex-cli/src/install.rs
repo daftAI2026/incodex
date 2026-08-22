@@ -137,6 +137,14 @@ pub fn run_recover(parsed: &ParsedCli) -> Result<(), String> {
     if !v2.exists() && !v1.exists() {
         return Err(format!("no journal for {id}"));
     }
+    if !v2.exists() {
+        return Err(format!(
+            "legacy transaction {id} is not supported by native recover; no files changed"
+        ));
+    }
+    if parsed.dry_run {
+        return Err("recover --dry-run is not supported; no files changed".into());
+    }
     let journal = journal_v2(&root, id)?;
     let terminal_cleanup = matches!(journal.phase.as_str(), "COMMITTED" | "ROLLED_BACK");
     let target = PathBuf::from(&journal.target.real_path);
