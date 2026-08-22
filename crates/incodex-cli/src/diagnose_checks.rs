@@ -715,18 +715,25 @@ fn transaction_evidence(
         .filter(|path| fs::symlink_metadata(path).is_ok())
         .map(|path| path.display().to_string())
         .collect();
-    let recovery = match action {
-        incodex_transaction::Recovery::Rollback => Some("rollback".to_string()),
-        incodex_transaction::Recovery::Refuse => Some("manual".to_string()),
-        incodex_transaction::Recovery::Done if has_external_artifacts => Some("manual".to_string()),
-        incodex_transaction::Recovery::Done if internal_cleanup_safe => Some("cleanup".to_string()),
-        incodex_transaction::Recovery::Done if !artifacts.is_empty() => Some("manual".to_string()),
-        incodex_transaction::Recovery::Done
-            if phase == "ROLLED_BACK" && original_valid == Some(true) =>
-        {
-            Some("retained".to_string())
+    let recovery = if has_external_artifacts {
+        Some("manual".to_string())
+    } else {
+        match action {
+            incodex_transaction::Recovery::Rollback => Some("rollback".to_string()),
+            incodex_transaction::Recovery::Refuse => Some("manual".to_string()),
+            incodex_transaction::Recovery::Done if internal_cleanup_safe => {
+                Some("cleanup".to_string())
+            }
+            incodex_transaction::Recovery::Done if !artifacts.is_empty() => {
+                Some("manual".to_string())
+            }
+            incodex_transaction::Recovery::Done
+                if phase == "ROLLED_BACK" && original_valid == Some(true) =>
+            {
+                Some("retained".to_string())
+            }
+            incodex_transaction::Recovery::Done => None,
         }
-        incodex_transaction::Recovery::Done => None,
     };
     (retained_original, original_valid, artifacts, recovery)
 }
