@@ -132,4 +132,13 @@ describe("Rust workspace", () => {
     }
     expect(read("CONTRIBUTING.md")).not.toMatch(/Rust \*\*\d+\.\d+\.\d+\*\*/);
   });
+
+  test("CI runs the locked Rust quality gates on macos", () => {
+    const ci = read(".github/workflows/ci.yml");
+    expect(ci).toContain("cargo fmt --all -- --check");
+    expect(ci).toContain(
+      "cargo clippy --workspace --all-targets --locked -- -D warnings",
+    );
+    expect(ci).toContain("cargo test --workspace --release --locked");
+  });
 });
