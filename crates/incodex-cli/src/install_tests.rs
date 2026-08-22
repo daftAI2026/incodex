@@ -88,18 +88,6 @@ fn default_path_foreign_bundle_is_rejected_before_snapshot() {
 }
 
 #[test]
-fn keychain_advice_requires_a_new_implicit_official_codex_install() {
-    assert_eq!(
-        keychain_advice_is_allowed(true, true, true, false),
-        cfg!(target_os = "macos")
-    );
-    assert!(!keychain_advice_is_allowed(true, true, true, true));
-    assert!(!keychain_advice_is_allowed(false, true, true, false));
-    assert!(!keychain_advice_is_allowed(true, false, true, false));
-    assert!(!keychain_advice_is_allowed(true, true, false, false));
-}
-
-#[test]
 fn locked_target_validation_failure_rolls_back_before_original_snapshot() {
     let sandbox = std::env::temp_dir().join(format!(
         "incodex-locked-install-validation-{}-{}",

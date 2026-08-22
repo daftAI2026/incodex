@@ -88,9 +88,11 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
             format_ok("Restart that app copy to see the Incognito button.", None)
         );
     }
-    if should_print_keychain_advice(&app, &result, parsed.app.is_some()) {
-        print_keychain_advice();
-    }
+    crate::install_keychain_advice::print_if_applicable(
+        &app,
+        !result.skipped,
+        parsed.app.is_some(),
+    );
     println!();
     Ok(())
 }
@@ -787,37 +789,6 @@ fn print_command_result(result: &CommandResult) {
         println!("{}", format_kv("Runtime", version, None));
     }
     println!("{}", format_kv("App", &result.app, None));
-}
-
-fn should_print_keychain_advice(app: &Path, result: &CommandResult, explicit_target: bool) -> bool {
-    keychain_advice_is_allowed(
-        !result.skipped,
-        is_official_app(app, None),
-        read_plist_info(app)
-            .is_some_and(|info| info.bundle_identifier == OFFICIAL_BUNDLE_IDENTIFIER),
-        explicit_target,
-    )
-}
-
-fn keychain_advice_is_allowed(
-    new_install: bool,
-    official_target: bool,
-    codex_bundle: bool,
-    explicit_target: bool,
-) -> bool {
-    cfg!(target_os = "macos") && new_install && official_target && codex_bundle && !explicit_target
-}
-
-fn print_keychain_advice() {
-    for message in [
-        "Keychain: On next launch, macOS may ask this patched Codex app to access Codex Storage Key.",
-        "Confirm the dialog names this app and the Codex Storage Key item.",
-        "If both match, enter your Mac login password (not your ChatGPT password) and choose Always Allow.",
-        "Allow or Allow Once grants only that access and may prompt again later.",
-        "If the details do not match, choose Deny; Incodex and Terminal never need that password.",
-    ] {
-        println!("{}", format_warn(message, None));
-    }
 }
 
 #[cfg(test)]
