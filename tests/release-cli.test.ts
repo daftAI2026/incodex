@@ -87,7 +87,17 @@ describe("release CLI artifacts", () => {
     expect(existsSync(harnessPath)).toBe(true);
     const harness = existsSync(harnessPath) ? readFileSync(harnessPath, "utf8") : "";
 
+    const behaviorStepStart = releaseYml.indexOf("- name: Smoke final asset behavior");
+    const behaviorStepEnd = releaseYml.indexOf("\n      - name:", behaviorStepStart + 1);
+    expect(behaviorStepStart).toBeGreaterThanOrEqual(0);
+    expect(behaviorStepEnd).toBeGreaterThan(behaviorStepStart);
+    const behaviorStep = releaseYml.slice(behaviorStepStart, behaviorStepEnd);
+    expect(behaviorStep).toMatch(
+      /case "\$\(uname -m\)" in[\s\S]*arm64\) ;;[\s\S]*\*\)[\s\S]*exit 1[\s\S]*;;[\s\S]*esac/,
+    );
+
     const workflow = releaseYml.replace(/\\\n\s*/g, " ");
+    const normalizedBehaviorStep = behaviorStep.replace(/\\\n\s*/g, " ");
     const command =
       "cargo test --locked --release --package incodex-cli --test release_asset_smoke -- --ignored --exact release_asset_behavior_smoke";
     const armInvocation =
@@ -101,16 +111,28 @@ describe("release CLI artifacts", () => {
     expect(finalSignature).toBeGreaterThanOrEqual(0);
     expect(workflow.indexOf(armInvocation)).toBeGreaterThan(finalSignature);
     expect(workflow.indexOf(x64Invocation)).toBeGreaterThan(finalSignature);
+    const guardEnd = normalizedBehaviorStep.indexOf("esac");
+    expect(guardEnd).toBeGreaterThanOrEqual(0);
+    expect(normalizedBehaviorStep.indexOf(armInvocation)).toBeGreaterThan(guardEnd);
+    expect(normalizedBehaviorStep.indexOf(x64Invocation)).toBeGreaterThan(guardEnd);
 
     expect(harness).toContain("INCODEX_RELEASE_BINARY");
     expect(harness).toContain("INCODEX_RELEASE_ARCH");
     expect(harness).toContain("Command::new");
-    expect(harness).toContain('arg("--version")');
-    expect(harness).toContain('arg("--help")');
-    expect(harness).toContain('args(["status", "--json"])');
-    expect(harness).toContain('args(["open", "--dry-run"])');
-    expect(harness).toContain('args(["install", "--yes"])');
-    expect(harness).toContain('args(["uninstall", "--yes"])');
+    expect(harness).not.toContain("The release contract exercises");
+    const normalizedHarness = harness.replace(/\s+/g, " ");
+    expect(normalizedHarness).toMatch(/runner\.run\(\s*&\["--version"\]/);
+    expect(normalizedHarness).toMatch(/runner\.run\(\s*&\["--help"\]/);
+    expect(normalizedHarness).toMatch(/runner\.run\(\s*&\["status", "--json", "--app"/);
+    expect(normalizedHarness).toMatch(/runner\.run\(\s*&\["open", "--dry-run", "--app"/);
+    expect(normalizedHarness).toMatch(/runner\.run\(\s*&\["install", "--yes", "--app"/);
+    expect(normalizedHarness).toMatch(/runner\.run\(\s*&\["uninstall", "--yes", "--app"/);
+    expect(normalizedHarness).toMatch(/assert_status_json\([^;]*&app,\s*false\)/);
+    expect(normalizedHarness).toMatch(/assert_status_json\([^;]*&app,\s*true\)/);
+    const uninstall = normalizedHarness.indexOf('runner.run( &["uninstall", "--yes", "--app"');
+    const noTransientDirs = normalizedHarness.indexOf("assert_no_transient_transaction_dirs(&home)");
+    expect(uninstall).toBeGreaterThanOrEqual(0);
+    expect(noTransientDirs).toBeGreaterThan(uninstall);
     expect(harness).toMatch(/original_snapshot/);
     expect(harness).toMatch(/restored_snapshot/);
     expect(harness).toMatch(/assert_eq!\(\s*restored_snapshot,\s*original_snapshot/);
