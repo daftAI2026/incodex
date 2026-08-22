@@ -22,6 +22,7 @@ const MACOS_WINDOW_TILE_PIXELS: i32 = 22;
 const CDP_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const LIFECYCLE_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const PRIMARY_TARGET_MISSING_POLLS: u8 = 2;
+const TARGET_LIST_FAILURE_LIMIT: u8 = 3;
 const BROWSER_CLOSE_ATTEMPTS: u8 = 3;
 pub const OFFICIAL_NEW_CODEX_URL: &str = "codex://new?mode=codex";
 
@@ -249,10 +250,21 @@ pub fn start_lifecycle_monitor(debug_port: u16, primary_target_id: String) {
 fn monitor_primary_target(debug_port: u16, primary_target_id: &str) {
     let mut primary_target_id = primary_target_id.to_string();
     let mut missing_polls = 0u8;
+    let mut list_failures = 0u8;
     loop {
         thread::sleep(LIFECYCLE_POLL_INTERVAL);
-        let Ok(targets) = list_targets(debug_port) else {
-            return;
+        let targets = match list_targets(debug_port) {
+            Ok(targets) => {
+                list_failures = 0;
+                targets
+            }
+            Err(_) => {
+                list_failures = list_failures.saturating_add(1);
+                if list_failures >= TARGET_LIST_FAILURE_LIMIT {
+                    return;
+                }
+                continue;
+            }
         };
         if targets.iter().any(|target| target.id == primary_target_id) {
             missing_polls = 0;
