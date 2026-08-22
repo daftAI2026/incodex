@@ -259,6 +259,10 @@ fn native_non_tty_mutations_print_auditable_progress_stages() {
         "install must expose durable stages without TTY controls: {install:?}"
     );
     assert!(!install.stdout.contains('\u{1b}'), "{install:?}");
+    assert!(
+        !install.stdout.contains("Codex Storage Key"),
+        "a foreign custom bundle must not receive Codex-specific Keychain advice: {install:?}"
+    );
 
     let uninstall = run_rust(
         &["uninstall", "--yes", "--app", app.to_str().unwrap()],
@@ -278,6 +282,51 @@ fn native_non_tty_mutations_print_auditable_progress_stages() {
         "custom app uninstall must not claim an official target or Dock refresh: {uninstall:?}"
     );
     assert!(!uninstall.stdout.contains('\u{1b}'), "{uninstall:?}");
+}
+
+#[test]
+fn native_install_prints_keychain_advice_only_after_a_new_codex_patch() {
+    let home = scratch("install-keychain-advice");
+    let app = patchable_app(&home);
+    fs::write(
+        app.join("Contents/Info.plist"),
+        plist("com.openai.codex", "ChatGPT"),
+    )
+    .unwrap();
+
+    let dry_run = run_rust(
+        &[
+            "install",
+            "--dry-run",
+            "--app",
+            app.to_str().unwrap(),
+        ],
+        &home,
+    );
+    assert_eq!(dry_run.status, 0, "{dry_run:?}");
+    assert!(
+        !dry_run.stdout.contains("Codex Storage Key"),
+        "a dry run must not predict that a Keychain prompt will occur: {dry_run:?}"
+    );
+
+    let install = run_rust(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(install.status, 0, "{install:?}");
+    assert!(
+        install.stdout.contains("Codex Storage Key")
+            && install.stdout.contains("Mac login password")
+            && install.stdout.contains("not your ChatGPT password")
+            && install.stdout.contains("Always Allow")
+            && install.stdout.contains("Deny or Cancel"),
+        "a committed Codex patch must explain the possible Keychain prompt safely: {install:?}"
+    );
+
+    let repeated = run_rust(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(repeated.status, 0, "{repeated:?}");
+    assert!(
+        repeated.stdout.contains("Already current")
+            && !repeated.stdout.contains("Codex Storage Key"),
+        "an already-current install must not repeat first-patch Keychain advice: {repeated:?}"
+    );
 }
 
 #[test]
