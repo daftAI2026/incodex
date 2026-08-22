@@ -127,6 +127,25 @@ describe("release CLI artifacts", () => {
     expect(normalizedHarness).toMatch(/runner\.run\(\s*&\["open", "--dry-run", "--app"/);
     expect(normalizedHarness).toMatch(/runner\.run\(\s*&\["install", "--yes", "--app"/);
     expect(normalizedHarness).toMatch(/runner\.run\(\s*&\["uninstall", "--yes", "--app"/);
+    const dryRun = normalizedHarness.search(
+      /runner\.run\(\s*&\["open", "--dry-run", "--app"/,
+    );
+    const homeBefore = normalizedHarness.indexOf("let dry_run_home_before = snapshot(&home);");
+    const codexHomeBefore = normalizedHarness.indexOf(
+      "let dry_run_codex_home_before = snapshot(&codex_home);",
+    );
+    const homeAfter = normalizedHarness.search(
+      /assert_eq!\(\s*snapshot\(&home\),\s*dry_run_home_before/,
+    );
+    const codexHomeAfter = normalizedHarness.search(
+      /assert_eq!\(\s*snapshot\(&codex_home\),\s*dry_run_codex_home_before/,
+    );
+    expect(homeBefore).toBeGreaterThanOrEqual(0);
+    expect(codexHomeBefore).toBeGreaterThanOrEqual(0);
+    expect(homeBefore).toBeLessThan(dryRun);
+    expect(codexHomeBefore).toBeLessThan(dryRun);
+    expect(homeAfter).toBeGreaterThan(dryRun);
+    expect(codexHomeAfter).toBeGreaterThan(dryRun);
     expect(normalizedHarness).toMatch(/assert_status_json\([^;]*&app,\s*false\)/);
     expect(normalizedHarness).toMatch(/assert_status_json\([^;]*&app,\s*true\)/);
     const uninstall = normalizedHarness.indexOf('runner.run( &["uninstall", "--yes", "--app"');
@@ -136,6 +155,8 @@ describe("release CLI artifacts", () => {
     expect(harness).toMatch(/original_snapshot/);
     expect(harness).toMatch(/restored_snapshot/);
     expect(harness).toMatch(/assert_eq!\(\s*restored_snapshot,\s*original_snapshot/);
+    expect(harness).toMatch(/#\[ignore\s*=\s*"[^"]+"\]/);
+    expect(harness).not.toContain("#[ignore]");
   });
 
   test("smoke validates external and manifest Runtime file sets separately", () => {
