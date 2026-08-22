@@ -7,6 +7,11 @@ const releaseYml = readFileSync(join(root, ".github/workflows/release.yml"), "ut
 const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
   scripts?: Record<string, string>;
 };
+const runtimeManifest = JSON.parse(readFileSync(join(root, "dist/runtime-manifest.json"), "utf8")) as {
+  files: Record<string, string>;
+};
+const manifestFileNames = Object.keys(runtimeManifest.files).sort();
+const externalFileNames = manifestFileNames.filter((name) => name !== "incodex-loader.cjs");
 
 describe("release CLI artifacts", () => {
   test("cross-compiles the native Rust CLI into the stable macOS asset names", () => {
@@ -77,26 +82,29 @@ describe("release CLI artifacts", () => {
     expect(releaseYml).toContain('verify_runtime_pointer "$X64_SMOKE_HOME"');
   });
 
-  test("smoke validates the exact ten-file Runtime set", () => {
-    expect(releaseYml).toContain("const REQUIRED_RUNTIME_FILES = [");
-    for (const name of [
-      "incodex-main.cjs",
-      "incodex-preload.cjs",
-      "incodex-inject.js",
-      "incodex-safe-home.cjs",
-      "incodex-ipc-guard.cjs",
-      "incodex-owner-core.cjs",
-      "incodex-owner-recovery.cjs",
-      "incodex-instance.cjs",
-      "incodex-window-kind.cjs",
-      "incodex-runtime-load.cjs",
-    ]) {
+  test("smoke validates external and manifest Runtime file sets separately", () => {
+    expect(externalFileNames).toHaveLength(10);
+    expect(manifestFileNames).toHaveLength(11);
+    expect(manifestFileNames.filter((name) => !externalFileNames.includes(name))).toEqual([
+      "incodex-loader.cjs",
+    ]);
+    expect(releaseYml).toContain("const REQUIRED_EXTERNAL_FILES = [");
+    expect(releaseYml).toContain("const REQUIRED_MANIFEST_FILES = [");
+    for (const name of manifestFileNames) {
       expect(releaseYml).toContain(`"${name}"`);
     }
-    expect(releaseYml).toContain('currentFileNames.join("\\0")');
-    expect(releaseYml).toContain('manifestFileNames.join("\\0")');
-    expect(releaseYml).toContain('REQUIRED_RUNTIME_FILES.slice().sort().join("\\0")');
+    expect(releaseYml).toContain(
+      'currentFileNames.join("\\0") !== REQUIRED_EXTERNAL_FILES.slice().sort().join("\\0")',
+    );
+    expect(releaseYml).toContain(
+      'manifestFileNames.join("\\0") !== REQUIRED_MANIFEST_FILES.slice().sort().join("\\0")',
+    );
     expect(releaseYml).toContain("manifest.files[name] !== expected");
+    expect(releaseYml).toContain(
+      'const loaderManifestHash = manifest.files["incodex-loader.cjs"];',
+    );
+    expect(releaseYml).toContain('if (!/^[0-9a-f]{64}$/.test(loaderManifestHash))');
+    expect(releaseYml).not.toContain('path.join(release, "incodex-loader.cjs")');
   });
 
   test("publishes only the two stable Rust assets and their checksums", () => {
