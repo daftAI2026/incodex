@@ -803,9 +803,9 @@ fn keychain_advice_is_allowed(
     new_install: bool,
     official_target: bool,
     codex_bundle: bool,
-    _explicit_target: bool,
+    explicit_target: bool,
 ) -> bool {
-    cfg!(target_os = "macos") && new_install && official_target && codex_bundle
+    cfg!(target_os = "macos") && new_install && official_target && codex_bundle && !explicit_target
 }
 
 fn print_keychain_advice() {
