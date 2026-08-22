@@ -17,6 +17,7 @@ impl PtyGate {
     fn acquire() -> Self {
         let file = OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .open(lock_path())
@@ -191,6 +192,10 @@ pub fn run_with_timeout(
 }
 
 #[allow(dead_code)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "PTY harness keeps process, interaction, timing, and environment inputs explicit"
+)]
 pub fn run_with_timeout_env(
     program: &str,
     prefix: &[&str],
@@ -206,6 +211,10 @@ pub fn run_with_timeout_env(
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "PTY harness keeps process, interaction, timing, and environment inputs explicit"
+)]
 fn run_inner(
     program: &str,
     prefix: &[&str],

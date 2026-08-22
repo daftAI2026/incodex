@@ -27,14 +27,14 @@ fn concurrent_pty_harnesses_report_every_child() {
     let probe = tty::Probe::new(CONTENDERS);
     std::thread::scope(|scope| {
         let mut handles = Vec::new();
-        for home in home.iter().cloned() {
+        for home in home.iter() {
             let probe = Arc::clone(&probe);
             handles.push(scope.spawn(move || {
                 tty::run_with_probe(
                     env!("CARGO_BIN_EXE_incodex"),
                     &[],
                     &[],
-                    &home,
+                    home,
                     "6. Quit",
                     "q",
                     &probe,
