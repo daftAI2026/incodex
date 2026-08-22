@@ -55,3 +55,20 @@ describe("incognito button exit affordance", () => {
     expect(clickHandler).toContain("void activate()");
   });
 });
+
+describe("incodex tooltip lifecycle", () => {
+  test("uses the same 700ms default delay as the current official tooltip provider", () => {
+    expect(inject).toContain("const TOOLTIP_DELAY_MS = 700");
+  });
+
+  test("listens to the app-wide dismissal signal without dispatching the private event", () => {
+    expect(inject).toContain(
+      'window.addEventListener(TOOLTIP_DISMISS_EVENT, () => activeTooltipLifecycle?.dismiss())',
+    );
+    expect(inject).not.toContain("dispatchEvent(new Event(TOOLTIP_DISMISS_EVENT))");
+  });
+
+  test("does not override the official fit-content width utility", () => {
+    expect(inject).not.toContain("width: max-content");
+  });
+});
