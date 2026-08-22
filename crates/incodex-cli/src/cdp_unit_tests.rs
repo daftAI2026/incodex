@@ -1,0 +1,202 @@
+use super::*;
+use std::net::Ipv4Addr;
+use std::time::Instant;
+
+#[test]
+fn prefers_codex_app_page_and_skips_chrome_and_prewarm() {
+    let targets = vec![
+        CdpTarget {
+            id: "a".into(),
+            r#type: "page".into(),
+            url: "chrome://newtab".into(),
+            ws: "ws://127.0.0.1:1/devtools/page/a".into(),
+        },
+        CdpTarget {
+            id: "d".into(),
+            r#type: "page".into(),
+            url: "app://-/index.html?initialRoute=%2Favatar-overlay".into(),
+            ws: "ws://127.0.0.1:1/devtools/page/d".into(),
+        },
+        CdpTarget {
+            id: "b".into(),
+            r#type: "page".into(),
+            url: "app://-/index.html?initialRoute=%2Fchatgpt%2Fquick-chat-prewarm".into(),
+            ws: "ws://127.0.0.1:1/devtools/page/b".into(),
+        },
+        CdpTarget {
+            id: "c".into(),
+            r#type: "page".into(),
+            url: "app://-/index.html".into(),
+            ws: "ws://127.0.0.1:1/devtools/page/c".into(),
+        },
+    ];
+    let picked = pick_codex_page_target(&targets).unwrap();
+    assert_eq!(picked.url, "app://-/index.html");
+    assert!(inject_source().contains("__incodexIncognito=true"));
+    assert!(inject_source().contains("data-incodex-privacy-toggle"));
+}
+
+#[test]
+fn isolated_launch_uses_the_official_new_codex_deep_link() {
+    let args = debug_launch_args("/tmp/incodex-chromium", 43123);
+    assert_eq!(
+        args.last().map(String::as_str),
+        Some("codex://new?mode=codex")
+    );
+}
+
+#[test]
+fn cdp_http_finishes_at_content_length_even_when_chromium_keeps_socket_open() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = [0_u8; 1024];
+        let _ = stream.read(&mut request);
+        let body = "[]";
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\r\n{body}",
+            body.len()
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+        thread::sleep(Duration::from_millis(2_500));
+    });
+
+    let started = Instant::now();
+    let value = http_get_json_host("127.0.0.1", port, "/json/list")
+        .expect("a complete Content-Length body must not wait for EOF");
+    assert_eq!(value, json!([]));
+    assert!(started.elapsed() < Duration::from_millis(500));
+    server.join().unwrap();
+}
+
+#[test]
+fn cdp_http_has_an_overall_deadline_for_a_slow_local_endpoint() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = [0_u8; 1024];
+        let _ = stream.read(&mut request);
+        let response = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n[]";
+        for byte in response {
+            if stream.write_all(&[*byte]).is_err() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    });
+
+    let started = Instant::now();
+    let result = http_get_json_host("127.0.0.1", port, "/json/list");
+    assert!(
+        result.is_err(),
+        "a slow endpoint must not complete normally"
+    );
+    assert!(
+        started.elapsed() < Duration::from_millis(2_500),
+        "slow CDP endpoint exceeded its bounded operation deadline"
+    );
+    server.join().unwrap();
+}
+
+#[test]
+fn cdp_websocket_handshake_has_a_finite_timeout() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let response = b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: invalid\r\n\r\n";
+        for byte in response {
+            if stream.write_all(&[*byte]).is_err() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(60));
+        }
+    });
+
+    let started = Instant::now();
+    let result = connect_cdp_websocket(&format!("ws://127.0.0.1:{port}/devtools/page/test"), port);
+    assert!(result.is_err());
+    assert!(
+        started.elapsed() < Duration::from_millis(2_500),
+        "CDP WebSocket handshake was not bounded"
+    );
+    server.join().unwrap();
+}
+
+#[test]
+fn cdp_command_read_has_an_overall_deadline_for_a_fragmented_frame() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut socket = tungstenite::accept(stream).unwrap();
+        let payload = br#"{"id":1,"result":{"value":"0123456789abcdef"}}"#;
+        let mut frame = vec![0x81, payload.len() as u8];
+        frame.extend_from_slice(payload);
+        let raw = socket.get_mut();
+        for byte in frame {
+            if raw.write_all(&[byte]).is_err() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(70));
+        }
+    });
+
+    let (mut socket, _) =
+        connect_cdp_websocket(&format!("ws://127.0.0.1:{port}/devtools/page/test"), port).unwrap();
+    let started = Instant::now();
+    let result = send_cdp(&mut socket, 1, "Runtime.evaluate", json!({}));
+    assert!(result.is_err(), "a slow fragmented response must time out");
+    assert!(
+        started.elapsed() < Duration::from_millis(2_500),
+        "fragmented CDP command exceeded its overall deadline"
+    );
+    server.join().unwrap();
+}
+
+#[test]
+fn cdp_websocket_is_confined_to_the_allocated_loopback_port() {
+    assert!(validate_cdp_websocket_url("ws://127.0.0.1:43123/devtools/page/a", 43123).is_ok());
+    assert!(validate_cdp_websocket_url("ws://[::1]:43123/devtools/page/a", 43123).is_ok());
+    assert!(validate_cdp_websocket_url("ws://127.0.0.1:43124/devtools/page/a", 43123).is_err());
+    assert!(validate_cdp_websocket_url("ws://example.com:43123/devtools/page/a", 43123).is_err());
+}
+
+#[test]
+fn injected_ui_carries_locale_and_requires_button_and_banner_health() {
+    let source = inject_source_for_locale(Some("zh-CN"));
+    assert!(source.contains("window.__incodexIncognito=true"));
+    assert!(source.contains("window.__incodexLocale=\"zh-CN\""));
+    let health = ui_ready_expression();
+    assert!(health.contains("data-incodex-privacy-toggle"));
+    assert!(health.contains("data-incodex-banner-host"));
+}
+
+#[test]
+fn open_window_uses_chromiums_macos_tile_offset_and_keeps_source_size() {
+    let source = WindowBounds {
+        x: 100,
+        y: 80,
+        width: 1280,
+        height: 800,
+    };
+    assert_eq!(
+        chrome_tile_bounds(source),
+        WindowBounds {
+            x: 122,
+            y: 102,
+            width: 1280,
+            height: 800,
+        }
+    );
+}
+
+#[test]
+fn browser_close_uses_the_cdp_browser_command() {
+    assert_eq!(
+        browser_close_message(),
+        json!({ "id": 1, "method": "Browser.close", "params": {} })
+    );
+}

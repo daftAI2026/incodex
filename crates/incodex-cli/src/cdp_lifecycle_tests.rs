@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use tungstenite::Message;
 
-use super::super::monitor_primary_target;
+use super::monitor_primary_target;
 
 fn read_request_path(stream: &mut TcpStream) -> String {
     stream
