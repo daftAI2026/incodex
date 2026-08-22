@@ -240,6 +240,16 @@ fn native_non_tty_mutations_print_auditable_progress_stages() {
     let app = patchable_app(&home);
     let install = run_rust(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
     assert_eq!(install.status, 0, "{install:?}");
+    let version = install.stdout.find("  Version").unwrap();
+    let checking = install
+        .stdout
+        .find("➤ Checking app signature")
+        .expect("install plan must announce its signing preflight");
+    let signed = install.stdout.find("  Signed").unwrap();
+    assert!(
+        version < checking && checking < signed,
+        "signing preflight must be visible between Version and Signed: {install:?}"
+    );
     assert!(
         install.stdout.contains("➤ Publishing Runtime")
             && install.stdout.contains("➤ Backing up original app")

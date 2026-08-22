@@ -261,6 +261,11 @@ fn native_tty_install_animates_immediately_after_confirmation() {
     );
     assert_eq!(rust.status, 0, "{}", visible(&rust.stdout));
     assert!(
+        has_spinner_frame(&rust.stdout, "Checking app signature"),
+        "install plan left a silent gap between Version and Signed: {:?}",
+        rust.stdout
+    );
+    assert!(
         has_spinner_frame(&rust.stdout, "Backing up original app"),
         "confirmation was followed by a silent install: {:?}",
         rust.stdout
