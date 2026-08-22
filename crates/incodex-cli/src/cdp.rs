@@ -280,9 +280,7 @@ fn monitor_primary_target(debug_port: u16, primary_target_id: &str) {
         if missing_polls < PRIMARY_TARGET_MISSING_POLLS {
             continue;
         }
-        if close_browser_with_retries(debug_port).is_ok() {
-            return;
-        }
+        let _ = close_browser_with_retries(debug_port);
         missing_polls = 0;
     }
 }
