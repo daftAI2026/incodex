@@ -449,3 +449,70 @@ fn lifecycle_recovers_after_three_complete_target_list_failures() {
         "the recovered primary's disappearance must still close the browser"
     );
 }
+
+#[test]
+fn lifecycle_reissues_close_after_post_close_cdp_recovery() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(4);
+        let mut failed_polls_after_first_close = 0;
+        let mut close_commands = 0;
+
+        while let Some(mut stream) = accept_until(&listener, deadline) {
+            match read_request_path(&mut stream).as_str() {
+                "/json/list" if close_commands == 1 && failed_polls_after_first_close < 3 => {
+                    write_error(&mut stream);
+                }
+                "/json" if close_commands == 1 && failed_polls_after_first_close < 3 => {
+                    failed_polls_after_first_close += 1;
+                    write_error(&mut stream);
+                }
+                "/json/list" => write_json(&mut stream, &json!([overlay(port)])),
+                "/json/version" => {
+                    write_json(
+                        &mut stream,
+                        &json!({
+                            "webSocketDebuggerUrl": format!(
+                                "ws://127.0.0.1:{port}/devtools/browser/{}",
+                                close_commands + 1
+                            )
+                        }),
+                    );
+                    let Some(stream) = accept_until(&listener, deadline) else {
+                        break;
+                    };
+                    let mut socket = tungstenite::accept(stream).unwrap();
+                    let Message::Text(command) = socket.read().unwrap() else {
+                        panic!("Browser.close must be a text CDP command");
+                    };
+                    let is_close = serde_json::from_str::<Value>(&command)
+                        .ok()
+                        .and_then(|value| value.get("method").cloned())
+                        == Some(json!("Browser.close"));
+                    assert!(is_close, "expected Browser.close, got {command}");
+                    close_commands += 1;
+                    if close_commands == 2 {
+                        break;
+                    }
+                }
+                path => panic!("unexpected mock CDP path: {path}"),
+            }
+        }
+
+        (failed_polls_after_first_close, close_commands)
+    });
+
+    monitor_primary_target(port, "main");
+    let (failed_polls_after_first_close, close_commands) = server.join().unwrap();
+
+    assert_eq!(
+        failed_polls_after_first_close, 3,
+        "the mock must exercise three complete post-close polling failures"
+    );
+    assert_eq!(
+        close_commands, 2,
+        "temporary post-close CDP loss is not proof of exit; recovered auxiliary targets require another close"
+    );
+}
