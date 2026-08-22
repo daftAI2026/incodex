@@ -53,16 +53,26 @@ fn status_skips_transaction_original_proof_but_doctor_checks_it() {
 }
 
 #[test]
-fn doctor_marks_post_swap_invalid_original_manual_but_missing_original_can_rollback() {
-    for (remove_original, expected_recovery) in [(false, "manual"), (true, "rollback")] {
+fn doctor_uses_the_transaction_restore_source_proof_for_post_swap_recovery() {
+    let cases = [
+        ("tampered-original", "manual"),
+        ("original-symlink", "manual"),
+        ("original-file", "manual"),
+        ("both-missing", "manual"),
+        ("invalid-outgoing", "manual"),
+        ("valid-outgoing", "rollback"),
+    ];
+    for (case, expected_recovery) in cases {
         let home = isolated_home();
         let root = home.join(".incodex");
         let app = home.join("ChatGPT.app");
         let candidate = home.join("candidate.app");
+        let outside = home.join("outside.app");
         fs::create_dir_all(&app).unwrap();
         fs::write(app.join("marker"), "original\n").unwrap();
         fs::create_dir_all(&candidate).unwrap();
         fs::write(candidate.join("marker"), "patched\n").unwrap();
+        fs::create_dir_all(&outside).unwrap();
 
         let mut tx = Engine::begin(&root, &app, "post-swap-original-proof-test").unwrap();
         let id = tx.install_id().to_string();
@@ -76,10 +86,30 @@ fn doctor_marks_post_swap_invalid_original_manual_but_missing_original_can_rollb
         tx.swap().unwrap();
         drop(tx);
 
-        if remove_original {
-            fs::remove_dir_all(&original).unwrap();
-        } else {
-            fs::write(original.join("marker"), "tampered\n").unwrap();
+        let outgoing = root
+            .join("transactions")
+            .join(&id)
+            .join("outgoing/ChatGPT.app");
+        match case {
+            "tampered-original" => fs::write(original.join("marker"), "tampered\n").unwrap(),
+            "original-symlink" => {
+                fs::remove_dir_all(&original).unwrap();
+                symlink(&outside, &original).unwrap();
+            }
+            "original-file" => {
+                fs::remove_dir_all(&original).unwrap();
+                fs::write(&original, "not a directory\n").unwrap();
+            }
+            "both-missing" => {
+                fs::remove_dir_all(&original).unwrap();
+                fs::remove_dir_all(&outgoing).unwrap();
+            }
+            "invalid-outgoing" => {
+                fs::remove_dir_all(&original).unwrap();
+                fs::write(outgoing.join("marker"), "tampered\n").unwrap();
+            }
+            "valid-outgoing" => fs::remove_dir_all(&original).unwrap(),
+            _ => unreachable!("unknown restore-source fixture: {case}"),
         }
 
         let (_status, stdout, stderr) =
@@ -93,11 +123,6 @@ fn doctor_marks_post_swap_invalid_original_manual_but_missing_original_can_rollb
             .find(|record| record["installId"] == id)
             .expect("post-swap transaction record");
         assert_eq!(record["phase"], "SWAPPED");
-        if remove_original {
-            assert!(record["originalValid"].is_null());
-        } else {
-            assert_eq!(record["originalValid"], false);
-        }
         assert_eq!(record["recovery"], expected_recovery);
     }
 }
