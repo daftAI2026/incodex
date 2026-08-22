@@ -86,12 +86,15 @@ function identityFromWindow(win) {
 function bindWindowIdentity(allowlist, win, trustedOrigins) {
     if (!win || typeof win.id !== "number")
         return false;
-    const next = identityFromWindow(win);
-    if (!next || !trustedOrigins?.has?.(next.origin))
-        return false;
     const current = allowlist.get(win.id);
     if (current?.revoked)
         return false;
+    const next = identityFromWindow(win);
+    if (!next || !trustedOrigins?.has?.(next.origin)) {
+        if (current)
+            allowlist.set(win.id, { ...current, revoked: true });
+        return false;
+    }
     if (current &&
         (current.webContentsId !== next.webContentsId ||
             current.session !== next.session ||
