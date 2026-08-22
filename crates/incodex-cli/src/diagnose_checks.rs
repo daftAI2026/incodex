@@ -575,11 +575,16 @@ pub fn scan_journals(
             Ok(raw) => match parse_journal(&raw) {
                 Some(journal) => {
                     let action = recover_action(&journal);
+                    let action_name = if action != incodex_transaction::Recovery::Done {
+                        "manual"
+                    } else {
+                        action.as_str()
+                    };
                     let kind = if action != incodex_transaction::Recovery::Done {
                         interrupted.push((
                             journal.install_id.clone(),
                             journal.phase.clone(),
-                            action.as_str().to_string(),
+                            action_name.to_string(),
                         ));
                         "validInterrupted"
                     } else if journal.phase == "COMMITTED"
@@ -596,12 +601,13 @@ pub fn scan_journals(
                         path: path.display().to_string(),
                         install_id: Some(journal.install_id),
                         phase: Some(journal.phase),
-                        action: Some(action.as_str().to_string()),
+                        action: Some(action_name.to_string()),
                         error: None,
                         retained_original: None,
                         original_valid: None,
                         artifacts: Vec::new(),
-                        recovery: None,
+                        recovery: (action != incodex_transaction::Recovery::Done)
+                            .then(|| "manual".to_string()),
                     });
                     if kind == "staleCommitted" {
                         findings.push(DiagnosticFinding::info(
