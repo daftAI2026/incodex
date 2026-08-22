@@ -904,6 +904,58 @@ function deriveUiProbe(input) {
   };
 }
 
+// src/runtime/tooltip-lifecycle.ts
+function createTooltipLifecycle(deps) {
+  let hovering = false;
+  let focused = false;
+  let pending = null;
+  const cancelPending = () => {
+    if (pending === null)
+      return;
+    deps.cancel(pending);
+    pending = null;
+  };
+  const hide = () => {
+    cancelPending();
+    deps.hide();
+  };
+  const scheduleShow = () => {
+    cancelPending();
+    pending = deps.schedule(() => {
+      pending = null;
+      if (!(hovering || focused) || !deps.canShow())
+        return;
+      deps.show();
+    }, deps.delayMs);
+  };
+  return {
+    pointerEnter() {
+      hovering = true;
+      scheduleShow();
+    },
+    pointerLeave() {
+      hovering = false;
+      if (!focused)
+        hide();
+    },
+    focus() {
+      focused = true;
+      scheduleShow();
+    },
+    blur() {
+      focused = false;
+      if (!hovering)
+        hide();
+    },
+    dismiss: hide,
+    dispose() {
+      hovering = false;
+      focused = false;
+      hide();
+    }
+  };
+}
+
 // src/runtime/_inject.src.ts
 var STYLE_ID = "incodex-privacy-style";
 var BTN_ATTR = "data-incodex-privacy-toggle";
@@ -911,6 +963,9 @@ var TIP_ATTR = "data-incodex-tooltip";
 var LANDING_ATTR = "data-incodex-landing";
 var ERROR_ATTR = "data-incodex-launch-error";
 var SHORTCUT_LABEL = "⇧⌘N";
+var TOOLTIP_DELAY_MS = 700;
+var TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
+var activeTooltipLifecycle = null;
 var ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
   <path d="M14 18a2 2 0 0 0-4 0"/>
   <path d="m19 11-2.11-6.657a2 2 0 0 0-2.752-1.148l-1.276.61A2 2 0 0 1 12 4H8.5a2 2 0 0 0-1.925 1.456L5 11"/>
@@ -1008,7 +1063,7 @@ async function requestAction(action) {
   }
 }
 async function activate() {
-  hideTooltip();
+  activeTooltipLifecycle?.dismiss();
   if (isIncognitoWindow()) {
     const result2 = await requestAction("quit");
     if (!result2.ok)
@@ -1034,7 +1089,6 @@ function ensureStyle() {
       position: fixed;
       z-index: 50;
       display: none;
-      width: max-content;
       max-width: min(20rem, calc(100vw - 16px));
       pointer-events: none !important;
       user-select: none;
@@ -1121,6 +1175,7 @@ function needsInject() {
   return !buttonStillBesideSearch() || !landingStillMounted();
 }
 function buildButton(search) {
+  activeTooltipLifecycle?.dispose();
   const btn = search.cloneNode(false);
   for (const name of STRIP_CLONE_ATTRS)
     btn.removeAttribute(name);
@@ -1135,6 +1190,15 @@ function buildButton(search) {
   const svg = createButtonIcon(ICON_SVG, "hat-glasses", search.querySelector("svg"));
   if (svg)
     btn.append(svg);
+  const tooltipLifecycle = createTooltipLifecycle({
+    delayMs: TOOLTIP_DELAY_MS,
+    schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
+    cancel: (id) => window.clearTimeout(id),
+    canShow: () => btn.isConnected && (btn.getAttribute("data-incodex-hovered") === "true" || document.activeElement === btn),
+    show: () => showTooltip(btn),
+    hide: hideTooltip
+  });
+  activeTooltipLifecycle = tooltipLifecycle;
   btn.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -1142,14 +1206,14 @@ function buildButton(search) {
   }, true);
   btn.addEventListener("pointerenter", () => {
     setButtonHover(btn, true);
-    showTooltip(btn);
+    tooltipLifecycle.pointerEnter();
   });
   btn.addEventListener("pointerleave", () => {
     setButtonHover(btn, false);
-    hideTooltip();
+    tooltipLifecycle.pointerLeave();
   });
-  btn.addEventListener("focus", () => showTooltip(btn));
-  btn.addEventListener("blur", hideTooltip);
+  btn.addEventListener("focus", tooltipLifecycle.focus);
+  btn.addEventListener("blur", tooltipLifecycle.blur);
   return btn;
 }
 function tooltipEl() {
@@ -1374,6 +1438,7 @@ function start() {
   ensureLanding();
   refreshUiProbe();
   window.addEventListener("keydown", onHotkey, true);
+  window.addEventListener(TOOLTIP_DISMISS_EVENT, () => activeTooltipLifecycle?.dismiss());
   let scheduled = false;
   const observer = new MutationObserver(() => {
     if (!needsInject())

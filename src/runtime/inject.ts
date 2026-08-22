@@ -3,6 +3,7 @@ import { isSearchLabel } from "./compatibility/search-labels";
 import { type CopyKey, translate, resolveLocale as matchLocale } from "./incognito-copy";
 import { iconFor, type IncognitoButtonIcon } from "./incognito-icon";
 import { deriveUiProbe } from "./incodex-ui-probe";
+import { createTooltipLifecycle, type TooltipLifecycle } from "./tooltip-lifecycle";
 
 const STYLE_ID = "incodex-privacy-style";
 const BTN_ATTR = "data-incodex-privacy-toggle";
@@ -10,6 +11,10 @@ const TIP_ATTR = "data-incodex-tooltip";
 const LANDING_ATTR = "data-incodex-landing";
 const ERROR_ATTR = "data-incodex-launch-error";
 const SHORTCUT_LABEL = "⇧⌘N";
+const TOOLTIP_DELAY_MS = 700;
+const TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
+
+let activeTooltipLifecycle: TooltipLifecycle | null = null;
 
 const ICON_SVG = `{{HAT_GLASSES_SVG}}`;
 const EXIT_ICON_SVG = `{{CIRCLE_X_SVG}}`;
@@ -103,7 +108,7 @@ async function requestAction(action: "open" | "quit"): Promise<{ ok: boolean; re
 }
 
 async function activate(): Promise<void> {
-  hideTooltip();
+  activeTooltipLifecycle?.dismiss();
   if (isIncognitoWindow()) {
     const result = await requestAction("quit");
     if (!result.ok) window.close();
@@ -129,7 +134,6 @@ function ensureStyle(): void {
       position: fixed;
       z-index: 50;
       display: none;
-      width: max-content;
       max-width: min(20rem, calc(100vw - 16px));
       pointer-events: none !important;
       user-select: none;
@@ -236,6 +240,7 @@ function needsInject(): boolean {
 }
 
 function buildButton(search: HTMLElement): HTMLElement {
+  activeTooltipLifecycle?.dispose();
   const btn = search.cloneNode(false) as HTMLElement;
   for (const name of STRIP_CLONE_ATTRS) btn.removeAttribute(name);
   for (const name of [...btn.attributes].map((attr) => attr.name)) {
@@ -247,6 +252,17 @@ function buildButton(search: HTMLElement): HTMLElement {
   btn.className = search.className;
   const svg = createButtonIcon(ICON_SVG, "hat-glasses", search.querySelector("svg"));
   if (svg) btn.append(svg);
+  const tooltipLifecycle = createTooltipLifecycle({
+    delayMs: TOOLTIP_DELAY_MS,
+    schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
+    cancel: (id) => window.clearTimeout(id),
+    canShow: () =>
+      btn.isConnected &&
+      (btn.getAttribute("data-incodex-hovered") === "true" || document.activeElement === btn),
+    show: () => showTooltip(btn),
+    hide: hideTooltip,
+  });
+  activeTooltipLifecycle = tooltipLifecycle;
   btn.addEventListener(
     "click",
     (event) => {
@@ -258,14 +274,14 @@ function buildButton(search: HTMLElement): HTMLElement {
   );
   btn.addEventListener("pointerenter", () => {
     setButtonHover(btn, true);
-    showTooltip(btn);
+    tooltipLifecycle.pointerEnter();
   });
   btn.addEventListener("pointerleave", () => {
     setButtonHover(btn, false);
-    hideTooltip();
+    tooltipLifecycle.pointerLeave();
   });
-  btn.addEventListener("focus", () => showTooltip(btn));
-  btn.addEventListener("blur", hideTooltip);
+  btn.addEventListener("focus", tooltipLifecycle.focus);
+  btn.addEventListener("blur", tooltipLifecycle.blur);
   return btn;
 }
 
@@ -521,6 +537,7 @@ function start(): void {
   ensureLanding();
   refreshUiProbe();
   window.addEventListener("keydown", onHotkey, true);
+  window.addEventListener(TOOLTIP_DISMISS_EVENT, () => activeTooltipLifecycle?.dismiss());
   let scheduled = false;
   const observer = new MutationObserver(() => {
     if (!needsInject()) return;
