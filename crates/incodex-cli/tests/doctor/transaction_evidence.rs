@@ -146,6 +146,49 @@ fn doctor_marks_rolled_back_external_staging_manual() {
 }
 
 #[test]
+fn doctor_marks_backup_committed_external_staging_manual() {
+    let home = isolated_home();
+    let root = home.join(".incodex");
+    let app = home.join("ChatGPT.app");
+    fs::create_dir_all(&app).unwrap();
+    fs::write(app.join("marker"), "original\n").unwrap();
+
+    let mut tx = Engine::begin(&root, &app, "backup-committed-artifact-test").unwrap();
+    let id = tx.install_id().to_string();
+    let original = root
+        .join("transactions")
+        .join(&id)
+        .join("original/ChatGPT.app");
+    ditto(&app, &original).unwrap();
+    tx.mark_backup_committed().unwrap();
+    drop(tx);
+
+    let scratch = root
+        .join("scratch")
+        .join(format!("ChatGPT.app.staged-{id}"));
+    fs::create_dir_all(&scratch).unwrap();
+    fs::write(scratch.join("marker"), "leftover\n").unwrap();
+
+    let (_status, stdout, stderr) =
+        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(stderr, "");
+    let report = parse_json(&stdout);
+    let record = report["journalRecords"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|record| record["installId"] == id)
+        .expect("backup-committed transaction record");
+    assert_eq!(record["phase"], "BACKUP_COMMITTED");
+    assert_eq!(record["recovery"], "manual");
+    assert!(record["artifacts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|path| path.as_str().unwrap() == scratch.display().to_string()));
+}
+
+#[test]
 fn doctor_marks_committed_external_staging_manual() {
     let home = isolated_home();
     let root = home.join(".incodex");
