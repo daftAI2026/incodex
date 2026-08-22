@@ -20,7 +20,7 @@ pub fn format_kv(label: &str, value: &str, color: Option<bool>) -> String {
 }
 
 pub fn format_step(message: &str, color: Option<bool>) -> String {
-    format!("{} {message}", paint(use_color(color), "1;35", "➤"))
+    paint(use_color(color), "1;35", &format!("➤ {message}"))
 }
 
 pub fn format_ok(message: &str, color: Option<bool>) -> String {
