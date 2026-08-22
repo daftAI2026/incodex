@@ -1,4 +1,81 @@
 use super::*;
+use incodex_macos::{AppQuiescence, ProcessProbe, QuiescenceClock, QuitRequester};
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
+struct FixtureProbe {
+    paths: Vec<(i32, PathBuf)>,
+}
+
+impl ProcessProbe for FixtureProbe {
+    fn process_paths(&self) -> Result<Vec<(i32, PathBuf)>, String> {
+        Ok(self.paths.clone())
+    }
+}
+
+struct FailingQuit;
+
+impl QuitRequester for FailingQuit {
+    fn request_quit(&mut self) -> Result<(), String> {
+        Err("fixture osascript failure".into())
+    }
+}
+
+struct SuccessfulQuit;
+
+impl QuitRequester for SuccessfulQuit {
+    fn request_quit(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+struct FixtureClock(Instant);
+
+impl QuiescenceClock for FixtureClock {
+    fn now(&self) -> Instant {
+        self.0
+    }
+
+    fn sleep(&mut self, duration: Duration) {
+        self.0 += duration;
+    }
+}
+
+#[test]
+fn cli_official_quit_propagates_request_errors() {
+    let quiescence = AppQuiescence::from_executable(PathBuf::from(
+        "/tmp/incodex/ChatGPT.app/Contents/MacOS/ChatGPT",
+    ))
+    .unwrap();
+    let probe = FixtureProbe {
+        paths: vec![(42, quiescence.executable().to_path_buf())],
+    };
+    let mut requester = FailingQuit;
+    let mut clock = FixtureClock(Instant::now());
+
+    let error = close_official_app_with(&quiescence, &probe, &mut requester, &mut clock)
+        .unwrap_err();
+
+    assert!(error.contains("fixture osascript failure"), "{error}");
+}
+
+#[test]
+fn cli_official_quit_propagates_timeout() {
+    let quiescence = AppQuiescence::from_executable(PathBuf::from(
+        "/tmp/incodex/ChatGPT.app/Contents/MacOS/ChatGPT",
+    ))
+    .unwrap();
+    let probe = FixtureProbe {
+        paths: vec![(42, quiescence.executable().to_path_buf())],
+    };
+    let mut requester = SuccessfulQuit;
+    let mut clock = FixtureClock(Instant::now());
+
+    let error = close_official_app_with(&quiescence, &probe, &mut requester, &mut clock)
+        .unwrap_err();
+
+    assert!(error.contains("timed out"), "{error}");
+}
 
 #[test]
 fn default_path_foreign_bundle_is_rejected_before_snapshot() {
