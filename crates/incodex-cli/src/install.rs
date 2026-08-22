@@ -790,14 +790,15 @@ fn print_command_result(result: &CommandResult) {
 }
 
 fn should_print_keychain_advice(app: &Path, result: &CommandResult) -> bool {
-    !result.skipped
+    cfg!(target_os = "macos")
+        && !result.skipped
         && read_plist_info(app)
             .is_some_and(|info| info.bundle_identifier == OFFICIAL_BUNDLE_IDENTIFIER)
 }
 
 fn print_keychain_advice() {
     for message in [
-        "Keychain: On next launch, macOS may ask ChatGPT.app to access Codex Storage Key.",
+        "Keychain: On next launch, macOS may ask this patched Codex app to access Codex Storage Key.",
         "Confirm the dialog names this app and the Codex Storage Key item.",
         "If both match, enter your Mac login password (not your ChatGPT password) and choose Always Allow.",
         "Otherwise, choose Deny or Cancel; Incodex and Terminal never need that password.",
