@@ -602,13 +602,18 @@ where
         dev: Some(plan.session_dev),
     };
     let cleanup = match outcome.cleanup {
-        CleanupDisposition::Burn => burn_with_retries_with_owner(
-            &plan.session_root,
-            &expected,
-            outcome.owner.as_ref(),
-            retry_delay_ms,
-            &mut burn,
-        ),
+        CleanupDisposition::Burn => {
+            let mut spinner = crate::spinner::Spinner::start("Removing isolated session");
+            let cleanup = burn_with_retries_with_owner(
+                &plan.session_root,
+                &expected,
+                outcome.owner.as_ref(),
+                retry_delay_ms,
+                &mut burn,
+            );
+            spinner.stop();
+            cleanup
+        }
         CleanupDisposition::Retain(reason) => CleanupResult::Retained {
             attempts: 0,
             retained_path: plan.session_root.clone(),
