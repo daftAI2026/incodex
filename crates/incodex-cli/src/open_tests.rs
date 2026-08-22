@@ -58,9 +58,11 @@ fn serve_early_close_cdp(
     ui_probed: Arc<AtomicBool>,
     browser_closed: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
+    hide_primary_on_first_list: bool,
 ) {
     listener.set_nonblocking(true).unwrap();
     let port = listener.local_addr().unwrap().port();
+    let mut list_requests = 0_u32;
     while !stop.load(Ordering::Acquire) {
         match listener.accept() {
             Ok((mut stream, _)) => {
@@ -121,7 +123,10 @@ fn serve_early_close_cdp(
                             }),
                         );
                     } else {
-                        let targets = if ui_probed.load(Ordering::Acquire) {
+                        list_requests += 1;
+                        let targets = if hide_primary_on_first_list && list_requests == 1 {
+                            serde_json::json!([])
+                        } else if ui_probed.load(Ordering::Acquire) {
                             serde_json::json!([{
                                 "id": "overlay",
                                 "type": "page",
@@ -207,7 +212,7 @@ fn closing_the_primary_window_before_ui_ready_still_stops_the_isolated_process()
         let browser_closed = browser_closed.clone();
         let stop = stop.clone();
         thread::spawn(move || {
-            serve_early_close_cdp(listener, marker, ui_probed, browser_closed, stop)
+            serve_early_close_cdp(listener, marker, ui_probed, browser_closed, stop, false)
         })
     };
 
@@ -236,6 +241,69 @@ fn closing_the_primary_window_before_ui_ready_still_stops_the_isolated_process()
     assert!(
         browser_closed.load(Ordering::Acquire),
         "the lifecycle monitor must start when the primary target is discovered, not after UI health"
+    );
+    assert!(matches!(result, OpenProcessResult::Exited { .. }));
+}
+
+#[test]
+fn primary_discovered_during_failed_injection_still_gets_a_lifecycle_monitor() {
+    let root = temp_root();
+    let app = fake_app(&root);
+    let source = root.join("codex");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("auth.json"), "{}\n").unwrap();
+    let marker = source.join("browser-closed");
+    let executable = app.join("Contents/MacOS/ChatGPT");
+    fs::write(
+        &executable,
+        "#!/bin/sh\nwhile [ ! -f \"$INCODEX_SOURCE_HOME/browser-closed\" ]; do sleep 0.02; done\n",
+    )
+    .unwrap();
+
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let ui_probed = Arc::new(AtomicBool::new(false));
+    let browser_closed = Arc::new(AtomicBool::new(false));
+    let stop = Arc::new(AtomicBool::new(false));
+    let server = {
+        let marker = marker.clone();
+        let ui_probed = ui_probed.clone();
+        let browser_closed = browser_closed.clone();
+        let stop = stop.clone();
+        thread::spawn(move || {
+            serve_early_close_cdp(listener, marker, ui_probed, browser_closed, stop, true)
+        })
+    };
+
+    let user = root.join("home");
+    let mut plan = prepare_incognito_open(&app, &user, &source, std::process::id() as i32).unwrap();
+    plan.debug_port = port;
+    let (done_tx, done_rx) = mpsc::channel();
+    thread::spawn(move || {
+        done_tx.send(spawn_plan(&plan)).unwrap();
+    });
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < deadline && !browser_closed.load(Ordering::Acquire) {
+        thread::sleep(Duration::from_millis(20));
+    }
+    if !browser_closed.load(Ordering::Acquire) {
+        fs::write(&marker, "test cleanup\n").unwrap();
+    }
+    let result = done_rx
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap()
+        .unwrap();
+    stop.store(true, Ordering::Release);
+    server.join().unwrap();
+
+    assert!(
+        ui_probed.load(Ordering::Acquire),
+        "the primary must appear during injection before this regression is exercised"
+    );
+    assert!(
+        browser_closed.load(Ordering::Acquire),
+        "a primary first discovered inside a failed injection attempt must still be monitored"
     );
     assert!(matches!(result, OpenProcessResult::Exited { .. }));
 }
