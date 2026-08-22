@@ -183,6 +183,25 @@ describe("symlink burn and copy", () => {
     expect(owner.processStartIdentity).toBe(processIdentity(process.pid).processStartIdentity);
   });
 
+  test("an open-created session stays pending until handoff and janitor retains it", () => {
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const session = createSessionHome(userRoot, { pid: 999999, handoffPending: true });
+    const owner = JSON.parse(readFileSync(join(session.root, "owner.json"), "utf8"));
+    expect(owner.handoffPending).toBe(true);
+    expect(sweepOrphanSessions(userRoot)).toBe(0);
+    expect(existsSync(session.root)).toBe(true);
+  });
+
+  test("handoff clears the open pending marker in the same owner publication", () => {
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const session = createSessionHome(userRoot, { pid: 999999, handoffPending: true });
+    handoffSessionOwner(session.root, process.pid);
+    const owner = JSON.parse(readFileSync(join(session.root, "owner.json"), "utf8"));
+    expect(owner.handoffPending).toBe(false);
+  });
+
   test("copySettings writes private files and burn removes the whole session", () => {
     const root = tempRoot();
     const userRoot = join(root, ".incodex");

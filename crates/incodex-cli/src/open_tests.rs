@@ -278,6 +278,89 @@ cat \"$INCODEX_SESSION_ROOT/owner.json\" > \"$INCODEX_SOURCE_HOME/handoff-owner.
 }
 
 #[test]
+fn native_open_keeps_the_handoff_snapshot_when_owner_manifest_changes_after_exit() {
+    let root = temp_root();
+    let app = fake_app(&root);
+    let user = root.join("home");
+    let source = root.join("codex");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("auth.json"), "{}\n").unwrap();
+    let mut plan =
+        prepare_incognito_open(&app, &user, &source, std::process::id() as i32).unwrap();
+    plan.debug_port = 0;
+    let executable = plan.bin.clone();
+    fs::write(
+        &executable,
+        "#!/bin/sh\n\
+for i in $(seq 1 100); do\n\
+  if grep -q \"\\\"pid\\\":$$\" \"$INCODEX_SESSION_ROOT/owner.json\"; then\n\
+    sed 's/\\\"processStartIdentity\\\":\\\"[^\\\"]*\\\"/\\\"processStartIdentity\\\":\\\"tampered-after-handoff\\\"/' \"$INCODEX_SESSION_ROOT/owner.json\" > \"$INCODEX_SESSION_ROOT/owner.json.tmp\"\n\
+    mv \"$INCODEX_SESSION_ROOT/owner.json.tmp\" \"$INCODEX_SESSION_ROOT/owner.json\"\n\
+    exit 0\n\
+  fi\n\
+  sleep 0.01\n\
+done\n\
+exit 2\n",
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(&executable).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(0o755);
+    }
+    fs::set_permissions(&executable, permissions).unwrap();
+
+    let (_process, cleanup) = wait_and_burn(&plan, &user, 0).unwrap();
+    assert!(
+        matches!(cleanup, CleanupResult::Retained { .. }),
+        "a post-handoff owner replacement must be rejected by the captured snapshot"
+    );
+    assert!(plan.session_root.exists());
+}
+
+#[test]
+fn native_open_marks_pending_until_handoff_and_sweep_retains_it() {
+    let root = temp_root();
+    let app = fake_app(&root);
+    let user = root.join("home");
+    let source = root.join("codex");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("auth.json"), "{}\n").unwrap();
+    let plan = prepare_incognito_open(&app, &user, &source, 999999).unwrap();
+    let owner_path = plan.session_root.join("owner.json");
+    let owner: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&owner_path).unwrap()).unwrap();
+    assert_eq!(
+        owner.get("handoffPending").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "only a newly opened session needs conservative pre-handoff retention"
+    );
+    assert_eq!(sweep_orphan_sessions(&user, None), 0);
+    assert!(plan.session_root.exists());
+}
+
+#[test]
+fn native_open_handoff_clears_pending_atomically() {
+    let root = temp_root();
+    let app = fake_app(&root);
+    let user = root.join("home");
+    let source = root.join("codex");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("auth.json"), "{}\n").unwrap();
+    let plan = prepare_incognito_open(&app, &user, &source, 999999).unwrap();
+    handoff_session_owner(&plan.session_root, std::process::id() as i32).unwrap();
+    let owner: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(plan.session_root.join("owner.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        owner.get("handoffPending").and_then(serde_json::Value::as_bool),
+        Some(false),
+        "handoff must publish the owner and clear pending in one atomic record"
+    );
+}
+
+#[test]
 fn late_recreation_after_proven_delete_uses_session_path_proof() {
     let root = temp_root();
     let app = fake_app(&root);
