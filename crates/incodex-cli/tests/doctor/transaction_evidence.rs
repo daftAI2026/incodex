@@ -1,5 +1,6 @@
 use super::*;
 use incodex_transaction::JournalV2;
+use std::os::unix::fs::symlink;
 
 #[test]
 fn status_skips_transaction_original_proof_but_doctor_checks_it() {
@@ -185,6 +186,58 @@ fn doctor_marks_committed_external_staging_manual() {
         .expect("committed transaction record");
     assert_eq!(record["phase"], "COMMITTED");
     assert_eq!(record["recovery"], "manual");
+}
+
+#[test]
+fn doctor_marks_committed_restore_symlink_manual() {
+    let home = isolated_home();
+    let root = home.join(".incodex");
+    let app = home.join("ChatGPT.app");
+    let candidate = home.join("candidate.app");
+    let outside = home.join("outside.app");
+    fs::create_dir_all(&app).unwrap();
+    fs::write(app.join("marker"), "original\n").unwrap();
+    fs::create_dir_all(&candidate).unwrap();
+    fs::write(candidate.join("marker"), "patched\n").unwrap();
+    fs::create_dir_all(&outside).unwrap();
+
+    let mut tx = Engine::begin(&root, &app, "committed-restore-symlink-test").unwrap();
+    let id = tx.install_id().to_string();
+    let original = root
+        .join("transactions")
+        .join(&id)
+        .join("original/ChatGPT.app");
+    ditto(&app, &original).unwrap();
+    tx.mark_backup_committed().unwrap();
+    tx.place_staging(&candidate).unwrap();
+    tx.swap().unwrap();
+    tx.commit().unwrap();
+    drop(tx);
+
+    let restore = root
+        .join("transactions")
+        .join(&id)
+        .join("restore/ChatGPT.app");
+    fs::create_dir_all(restore.parent().unwrap()).unwrap();
+    symlink(&outside, &restore).unwrap();
+
+    let (_status, stdout, stderr) =
+        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(stderr, "");
+    let report = parse_json(&stdout);
+    let record = report["journalRecords"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|record| record["installId"] == id)
+        .expect("committed transaction record");
+    assert_eq!(record["phase"], "COMMITTED");
+    assert_eq!(record["recovery"], "manual");
+    assert!(record["artifacts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|path| path.as_str().unwrap() == restore.display().to_string()));
 }
 
 #[test]
