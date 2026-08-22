@@ -36,8 +36,9 @@ function navigationOrigin(raw) {
     const end = match.index + match[0].replace(/\/$/, "").length;
     return `${parsed.protocol}//${parsed.pathname.slice(0, end)}`;
 }
-function urlAllowed(raw) {
-    return navigationOrigin(raw) !== null;
+function urlAllowed(raw, trustedOrigins) {
+    const origin = navigationOrigin(raw);
+    return origin !== null && Boolean(trustedOrigins?.has?.(origin));
 }
 function authorizeSender(snapshot, allowlist) {
     if (!snapshot?.hasFrame)
@@ -46,7 +47,8 @@ function authorizeSender(snapshot, allowlist) {
         return { ok: false, code: "SENDER_DESTROYED" };
     if (!snapshot.isMainFrame)
         return { ok: false, code: "NOT_TOP_FRAME" };
-    if (!urlAllowed(snapshot.url))
+    const origin = navigationOrigin(snapshot.url);
+    if (!origin)
         return { ok: false, code: "URL_NOT_ALLOWED" };
     const expected = snapshot.windowId == null ? null : allowlist.get(snapshot.windowId);
     if (!expected || expected.revoked) {
@@ -62,7 +64,7 @@ function authorizeSender(snapshot, allowlist) {
         snapshot.frameRoutingId !== expected.frameRoutingId) {
         return { ok: false, code: "FRAME_NOT_ALLOWED" };
     }
-    if (navigationOrigin(snapshot.url) !== expected.origin) {
+    if (origin !== expected.origin) {
         return { ok: false, code: "ORIGIN_NOT_ALLOWED" };
     }
     return { ok: true };
@@ -81,11 +83,11 @@ function identityFromWindow(win) {
         origin,
     };
 }
-function bindWindowIdentity(allowlist, win) {
+function bindWindowIdentity(allowlist, win, trustedOrigins) {
     if (!win || typeof win.id !== "number")
         return false;
     const next = identityFromWindow(win);
-    if (!next)
+    if (!next || !trustedOrigins?.has?.(next.origin))
         return false;
     const current = allowlist.get(win.id);
     if (current?.revoked)

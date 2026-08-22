@@ -28,15 +28,17 @@ function navigationOrigin(raw) {
   return `${parsed.protocol}//${parsed.pathname.slice(0, end)}`;
 }
 
-function urlAllowed(raw) {
-  return navigationOrigin(raw) !== null;
+function urlAllowed(raw, trustedOrigins) {
+  const origin = navigationOrigin(raw);
+  return origin !== null && Boolean(trustedOrigins?.has?.(origin));
 }
 
 function authorizeSender(snapshot, allowlist) {
   if (!snapshot?.hasFrame) return { ok: false, code: "NO_SENDER_FRAME" };
   if (snapshot.isDestroyed) return { ok: false, code: "SENDER_DESTROYED" };
   if (!snapshot.isMainFrame) return { ok: false, code: "NOT_TOP_FRAME" };
-  if (!urlAllowed(snapshot.url)) return { ok: false, code: "URL_NOT_ALLOWED" };
+  const origin = navigationOrigin(snapshot.url);
+  if (!origin) return { ok: false, code: "URL_NOT_ALLOWED" };
   const expected = snapshot.windowId == null ? null : allowlist.get(snapshot.windowId);
   if (!expected || expected.revoked) {
     return { ok: false, code: "WINDOW_NOT_ALLOWED" };
@@ -53,7 +55,7 @@ function authorizeSender(snapshot, allowlist) {
   ) {
     return { ok: false, code: "FRAME_NOT_ALLOWED" };
   }
-  if (navigationOrigin(snapshot.url) !== expected.origin) {
+  if (origin !== expected.origin) {
     return { ok: false, code: "ORIGIN_NOT_ALLOWED" };
   }
   return { ok: true };
@@ -73,10 +75,10 @@ function identityFromWindow(win) {
   };
 }
 
-function bindWindowIdentity(allowlist, win) {
+function bindWindowIdentity(allowlist, win, trustedOrigins) {
   if (!win || typeof win.id !== "number") return false;
   const next = identityFromWindow(win);
-  if (!next) return false;
+  if (!next || !trustedOrigins?.has?.(next.origin)) return false;
   const current = allowlist.get(win.id);
   if (current?.revoked) return false;
   if (
