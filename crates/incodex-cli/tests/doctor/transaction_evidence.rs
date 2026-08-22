@@ -33,6 +33,10 @@ fn status_skips_transaction_original_proof_but_doctor_checks_it() {
     assert_eq!(status_record["retainedOriginal"], original.display().to_string());
     assert!(status_record["originalValid"].is_null());
 
+    let (_status, status_human, status_stderr) = run(&["status", "--app", app_arg], &home);
+    assert_eq!(status_stderr, "");
+    assert!(!status_human.contains("Original proof"), "{status_human}");
+
     let (_status, doctor_stdout, doctor_stderr) =
         run(&["doctor", "--json", "--app", app_arg], &home);
     assert_eq!(doctor_stderr, "");
