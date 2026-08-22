@@ -89,7 +89,7 @@ function externalMain(env) {
   const current = JSON.parse(fs.readFileSync(currentPath, "utf8"));
   if (
     !current ||
-    (current.schemaVersion !== 1 && current.schemaVersion !== 2) ||
+    current.schemaVersion !== 1 ||
     typeof current.release !== "string" ||
     typeof current.version !== "string" ||
     current.version.length === 0
@@ -109,7 +109,12 @@ function externalMain(env) {
   if (!files || typeof files !== "object" || Array.isArray(files)) {
     throw new Error("[incodex] invalid runtime files");
   }
-  if (current.schemaVersion === 2) {
+  const hasManifestHash = Object.prototype.hasOwnProperty.call(current, "manifestSha256");
+  const hasSourceCommit = Object.prototype.hasOwnProperty.call(current, "sourceCommit");
+  if (hasManifestHash !== hasSourceCommit) {
+    throw new Error("[incodex] invalid runtime manifest pointer");
+  }
+  if (hasManifestHash) {
     if (!isSha256(current.manifestSha256) || !isSourceCommit(current.sourceCommit)) {
       throw new Error("[incodex] invalid runtime manifest pointer");
     }

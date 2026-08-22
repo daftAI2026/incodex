@@ -370,7 +370,11 @@ fn write_loader_fixture(
     });
     let manifest_bytes = format!("{}\n", serde_json::to_string_pretty(&manifest).unwrap());
     let release_name = if new_contract {
-        format!("{}-{}", runtime_version(), sha256_hex(manifest_bytes.as_bytes()))
+        format!(
+            "{}-{}",
+            runtime_version(),
+            sha256_hex(manifest_bytes.as_bytes())
+        )
     } else {
         "legacy-release".to_string()
     };

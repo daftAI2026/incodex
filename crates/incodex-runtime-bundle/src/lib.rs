@@ -12,7 +12,8 @@ use sha2::{Digest, Sha256};
 
 const DIR_MODE: u32 = 0o700;
 const FILE_MODE: u32 = 0o600;
-const CURRENT_SCHEMA: u64 = 2;
+// The pointer remains schema 1; manifest provenance is an optional extension.
+const CURRENT_SCHEMA: u64 = 1;
 const MANIFEST_NAME: &str = "runtime-manifest.json";
 static PUBLISH_LOCK: Mutex<()> = Mutex::new(());
 

@@ -95,7 +95,7 @@ jobs:
             const path = require("node:path");
             const root = path.join(process.env.SMOKE_HOME, ".incodex", "runtime");
             const current = JSON.parse(fs.readFileSync(path.join(root, "current.json"), "utf8"));
-            if (current.schemaVersion !== 2 || current.version !== process.env.EXPECTED_VERSION) throw new Error("invalid runtime pointer");
+            if (current.schemaVersion !== 1 || current.version !== process.env.EXPECTED_VERSION) throw new Error("invalid runtime pointer");
             if (current.sourceCommit !== process.env.EXPECTED_SOURCE_COMMIT) throw new Error("runtime pointer provenance mismatch");
             if (!/^[0-9a-f]{64}$/.test(current.manifestSha256)) throw new Error("invalid manifestSha256");
             if (current.release !== `releases/${current.version}-${current.manifestSha256}`) throw new Error("runtime release name mismatch");
