@@ -189,6 +189,40 @@ fn doctor_marks_backup_committed_external_staging_manual() {
 }
 
 #[test]
+fn doctor_marks_backup_committed_without_valid_original_manual() {
+    let home = isolated_home();
+    let root = home.join(".incodex");
+    let app = home.join("ChatGPT.app");
+    fs::create_dir_all(&app).unwrap();
+    fs::write(app.join("marker"), "original\n").unwrap();
+
+    let mut tx = Engine::begin(&root, &app, "missing-backup-artifact-test").unwrap();
+    let id = tx.install_id().to_string();
+    let original = root
+        .join("transactions")
+        .join(&id)
+        .join("original/ChatGPT.app");
+    ditto(&app, &original).unwrap();
+    tx.mark_backup_committed().unwrap();
+    drop(tx);
+    fs::remove_dir_all(&original).unwrap();
+
+    let (_status, stdout, stderr) =
+        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(stderr, "");
+    let report = parse_json(&stdout);
+    let record = report["journalRecords"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|record| record["installId"] == id)
+        .expect("missing-backup transaction record");
+    assert_eq!(record["phase"], "BACKUP_COMMITTED");
+    assert!(record["originalValid"].is_null());
+    assert_eq!(record["recovery"], "manual");
+}
+
+#[test]
 fn doctor_marks_committed_external_staging_manual() {
     let home = isolated_home();
     let root = home.join(".incodex");
