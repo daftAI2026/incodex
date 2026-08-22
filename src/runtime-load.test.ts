@@ -77,6 +77,22 @@ describe("runtime load", () => {
     );
   });
 
+  test("the installed Runtime confirms Codex mode with Control+3", () => {
+    const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
+    const selectorStart = main.indexOf("function selectOfficialCodexMode(win)");
+    const selectorEnd = main.indexOf("\nfunction ", selectorStart + 1);
+    const selector = main.slice(selectorStart, selectorEnd);
+
+    expect(selector).toContain("if (!isIncognito()) return");
+    expect(selector).toContain(
+      'win.webContents.sendInputEvent({ type: "keyDown", keyCode: "3", modifiers: ["control"] })',
+    );
+    expect(selector).toContain(
+      'win.webContents.sendInputEvent({ type: "keyUp", keyCode: "3", modifiers: ["control"] })',
+    );
+    expect(main).toContain('win.once("ready-to-show", () => {\n      selectOfficialCodexMode(win);');
+  });
+
   test("an ordinary incognito click marks its session pending before child handoff", () => {
     const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
     expect(main).toContain("handoffPending: true");
