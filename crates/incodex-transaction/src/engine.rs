@@ -5,8 +5,9 @@ use incodex_macos::ditto;
 
 use crate::durable::sync_tree_and_ancestors;
 use crate::journal::{
-    load_v2, reconstructed, tx_paths, validate_recovery_proofs, validate_rel_paths, write_journal,
-    JournalTarget, JournalV2, RelPaths, ORIGINAL_REL, OUTGOING_REL, STAGED_REL,
+    load_v2, reconstructed, tx_paths, validate_recovery_proofs, validate_rel_paths,
+    write_journal, write_journal_tracked, JournalTarget, JournalV2, RelPaths, ORIGINAL_REL,
+    OUTGOING_REL, STAGED_REL,
 };
 use crate::lock::{acquire_target_lock, TargetLock};
 use crate::new_install_id;
@@ -268,21 +269,27 @@ impl Engine {
         next.sequence += 1;
         let sealed = crate::journal::seal(next);
         let install_id = sealed.install_id.clone();
-        let write_error = write_journal(&self.root, &sealed).err();
+        let write_error = write_journal_tracked(&self.root, &sealed).err();
         match load_v2(&self.root, &install_id) {
             Ok(journal) => {
                 self.journal = journal;
                 match write_error {
-                    Some(error) => Err(error),
+                    Some(error) => Err(error.to_string()),
                     None => Ok(()),
                 }
             }
             Err(read_error) => {
                 // +-----------------------------------------------------------+
-                // | 写入后读不回时，磁盘可能已经进入 next；保守采用 next，       |
-                // | 尤其不能把 durable COMMITTED 当成旧 SWAPPED 去回滚。        |
+                // | 只有确认 rename 已发生，才把内存推进到 next；否则保留 old。   |
+                // | 不能把 pre-rename 失败误判成 durable phase。                 |
                 // +-----------------------------------------------------------+
-                self.journal = sealed;
+                if write_error
+                    .as_ref()
+                    .map(|error| error.renamed)
+                    .unwrap_or(true)
+                {
+                    self.journal = sealed;
+                }
                 match write_error {
                     Some(write_error) => Err(format!(
                         "{write_error}; journal readback also failed: {read_error}"

@@ -7,7 +7,7 @@ use std::cell::Cell;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::durable::write_atomic;
+use crate::durable::{write_atomic, write_atomic_tracked, AtomicWriteError};
 
 pub const STAGED_REL: &str = "staging/ChatGPT.app";
 pub const OUTGOING_REL: &str = "outgoing/ChatGPT.app";
@@ -220,6 +220,20 @@ pub fn seal(mut journal: JournalV2) -> JournalV2 {
 }
 
 pub fn write_journal(root: &Path, journal: &JournalV2) -> Result<(), String> {
+    let (path, body) = journal_body(root, journal)?;
+    write_atomic(&path, &body)
+}
+
+pub(crate) fn write_journal_tracked(
+    root: &Path,
+    journal: &JournalV2,
+) -> Result<(), AtomicWriteError> {
+    let (path, body) = journal_body(root, journal)
+        .map_err(|error| AtomicWriteError::new(error, false))?;
+    write_atomic_tracked(&path, &body)
+}
+
+fn journal_body(root: &Path, journal: &JournalV2) -> Result<(std::path::PathBuf, Vec<u8>), String> {
     if journal.install_id.is_empty() || !is_uuid(&journal.install_id) {
         return Err("install id must be an RFC 4122 UUID".into());
     }
@@ -228,8 +242,9 @@ pub fn write_journal(root: &Path, journal: &JournalV2) -> Result<(), String> {
     let body = format!(
         "{}\n",
         serde_json::to_string_pretty(&sealed).map_err(|err| err.to_string())?
-    );
-    write_atomic(&path, body.as_bytes())
+    )
+    .into_bytes();
+    Ok((path, body))
 }
 
 pub fn load_v2(root: &Path, install_id: &str) -> Result<JournalV2, String> {

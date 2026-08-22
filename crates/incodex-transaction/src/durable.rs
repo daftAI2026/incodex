@@ -15,6 +15,27 @@ use std::path::PathBuf;
 const FILE_MODE: u32 = 0o600;
 const DIR_MODE: u32 = 0o700;
 
+#[derive(Debug)]
+pub(crate) struct AtomicWriteError {
+    pub(crate) message: String,
+    pub(crate) renamed: bool,
+}
+
+impl AtomicWriteError {
+    pub(crate) fn new(message: impl Into<String>, renamed: bool) -> Self {
+        Self {
+            message: message.into(),
+            renamed,
+        }
+    }
+}
+
+impl std::fmt::Display for AtomicWriteError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
 #[cfg(test)]
 thread_local! {
     static SYNC_TRACE: RefCell<Vec<PathBuf>> = const { RefCell::new(Vec::new()) };
@@ -59,8 +80,17 @@ pub fn ensure_private_dir(dir: &Path) -> Result<(), String> {
 }
 
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let parent = path.parent().ok_or("durable write needs a parent directory")?;
-    ensure_private_dir(parent)?;
+    write_atomic_tracked(path, bytes).map_err(|error| error.message)
+}
+
+pub(crate) fn write_atomic_tracked(
+    path: &Path,
+    bytes: &[u8],
+) -> Result<(), AtomicWriteError> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| AtomicWriteError::new("durable write needs a parent directory", false))?;
+    ensure_private_dir(parent).map_err(|error| AtomicWriteError::new(error, false))?;
     let n = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
@@ -72,9 +102,13 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
             .create_new(true)
             .mode(FILE_MODE)
             .custom_flags(libc::O_NOFOLLOW);
-        let mut file = opts.open(&tmp).map_err(|err| err.to_string())?;
-        file.write_all(bytes).map_err(|err| err.to_string())?;
-        file.sync_data().map_err(|err| err.to_string())?;
+        let mut file = opts
+            .open(&tmp)
+            .map_err(|err| AtomicWriteError::new(err.to_string(), false))?;
+        file.write_all(bytes)
+            .map_err(|err| AtomicWriteError::new(err.to_string(), false))?;
+        file.sync_data()
+            .map_err(|err| AtomicWriteError::new(err.to_string(), false))?;
         unsafe {
             libc::fchmod(file.as_raw_fd(), FILE_MODE as libc::mode_t);
         }
@@ -82,17 +116,27 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     #[cfg(test)]
     if FAIL_NEXT_WRITE_BEFORE_RENAME.with(|failure| failure.replace(false)) {
         let _ = fs::remove_file(&tmp);
-        return Err("injected pre-rename journal write failure".into());
+        return Err(AtomicWriteError::new(
+            "injected pre-rename journal write failure",
+            false,
+        ));
     }
-    fs::rename(&tmp, path).map_err(|err| err.to_string())?;
+    fs::rename(&tmp, path)
+        .map_err(|err| AtomicWriteError::new(err.to_string(), false))?;
     #[cfg(test)]
     if FAIL_NEXT_WRITE_AFTER_RENAME.with(|failure| failure.replace(false)) {
-        return Err("injected post-rename journal write failure".into());
+        return Err(AtomicWriteError::new(
+            "injected post-rename journal write failure",
+            true,
+        ));
     }
-    sync_dir(parent)?;
-    let mut perms = fs::metadata(path).map_err(|err| err.to_string())?.permissions();
+    sync_dir(parent).map_err(|error| AtomicWriteError::new(error, true))?;
+    let mut perms = fs::metadata(path)
+        .map_err(|err| AtomicWriteError::new(err.to_string(), true))?
+        .permissions();
     perms.set_mode(FILE_MODE);
-    fs::set_permissions(path, perms).map_err(|err| err.to_string())?;
+    fs::set_permissions(path, perms)
+        .map_err(|err| AtomicWriteError::new(err.to_string(), true))?;
     Ok(())
 }
 
