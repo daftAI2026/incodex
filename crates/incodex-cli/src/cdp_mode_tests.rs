@@ -96,3 +96,7 @@ fn open_selects_the_official_codex_mode_before_injecting_its_ui() {
         "official mode selection must run first"
     );
 }
+
+mod lifecycle_tests {
+    include!("cdp_lifecycle_tests.rs");
+}
