@@ -129,7 +129,7 @@ describe("symlink burn and copy", () => {
     const session = createSessionHome(userRoot, { pid: process.pid });
     const ownerPath = join(session.root, "owner.json");
     const owner = JSON.parse(readFileSync(ownerPath, "utf8"));
-    owner.processStartIdentity = "old-process-start";
+    owner.processStartIdentity = "Fri Aug 22 10:37:03 2025";
     writeFileSync(ownerPath, `${JSON.stringify(owner)}\n`);
 
     expect(sweepOrphanSessions(userRoot)).toBe(1);
@@ -147,6 +147,29 @@ describe("symlink burn and copy", () => {
       }),
     ).toBe(0);
     expect(existsSync(session.root)).toBe(true);
+  });
+
+  test("janitor retains a live session with an unparseable legacy process identity", () => {
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const session = createSessionHome(userRoot, { pid: process.pid });
+    const ownerPath = join(session.root, "owner.json");
+    const owner = JSON.parse(readFileSync(ownerPath, "utf8"));
+    owner.processStartIdentity = "六  8月/22 10:37:03 2026";
+    writeFileSync(ownerPath, `${JSON.stringify(owner)}\n`);
+
+    expect(
+      sweepOrphanSessions(userRoot, {
+        pidAlive: () => true,
+        processIdentity: () => ({ processStartIdentity: "Sat Aug 22 10:37:03 2026" }),
+      }),
+    ).toBe(0);
+    expect(existsSync(session.root)).toBe(true);
+  });
+
+  test("process identity probe pins the C locale for ps output", () => {
+    const source = readFileSync(join(import.meta.dir, "runtime/incodex-owner-core.cts"), "utf8");
+    expect(source).toContain("LC_ALL: \"C\"");
   });
 
   test("burn revalidates the owner snapshot before deleting the session", () => {

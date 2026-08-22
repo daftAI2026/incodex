@@ -165,7 +165,7 @@ fn orphan_sweep_treats_a_reused_pid_as_orphan() {
     let owner_path = session.root.join(OWNER_NAME);
     let mut owner: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&owner_path).unwrap()).unwrap();
-    owner["processStartIdentity"] = serde_json::json!("old-process-start");
+    owner["processStartIdentity"] = serde_json::json!("Fri Aug 22 10:37:03 2025");
     fs::write(&owner_path, format!("{owner}\n")).unwrap();
 
     assert_eq!(sweep_orphan_sessions(&user_root, None), 1);
@@ -203,6 +203,36 @@ fn orphan_sweep_retains_a_live_session_when_identity_probe_is_unknown() {
         0
     );
     assert!(session.root.exists());
+}
+
+#[test]
+fn orphan_sweep_retains_an_unparseable_legacy_process_identity() {
+    let root = temp_root();
+    let user_root = root.join(".incodex");
+    let pid = std::process::id() as i32;
+    let session = create_session_home(&user_root, None, pid, "").unwrap();
+    let owner_path = session.root.join(OWNER_NAME);
+    let mut owner: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&owner_path).unwrap()).unwrap();
+    owner["processStartIdentity"] = serde_json::json!("六  8月/22 10:37:03 2026");
+    fs::write(&owner_path, format!("{owner}\n")).unwrap();
+
+    assert_eq!(
+        sweep_orphan_sessions_with_probe(&user_root, None, |_| {
+            ProcessProbe::Live("Sat Aug 22 10:37:03 2026".into())
+        }),
+        0,
+        "a locale-dependent legacy identity is unverifiable, not a PID-reuse mismatch"
+    );
+    assert!(session.root.exists());
+}
+
+#[test]
+fn process_identity_probe_pins_the_c_locale() {
+    assert!(
+        include_str!("session.rs").contains(".env(\"LC_ALL\", \"C\")"),
+        "owner identity must have one locale-independent ps representation"
+    );
 }
 
 #[test]

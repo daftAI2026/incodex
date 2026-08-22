@@ -2,6 +2,7 @@
 // implementation remains below the repository's per-file size budget.
 use super::*;
 use std::fs;
+use std::process::Command;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -357,6 +358,23 @@ fn native_open_handoff_clears_pending_atomically() {
         owner.get("handoffPending").and_then(serde_json::Value::as_bool),
         Some(false),
         "handoff must publish the owner and clear pending in one atomic record"
+    );
+}
+
+#[test]
+fn failed_handoff_kill_waits_for_a_reaped_child() {
+    let mut child = Command::new("/bin/sh")
+        .args(["-c", "sleep 30"])
+        .spawn()
+        .unwrap();
+    let pid = child.id();
+    let status = kill_and_reap(&mut child).unwrap();
+    assert!(!status.success());
+    assert!(child.try_wait().unwrap().is_some());
+    assert_ne!(
+        unsafe { libc::kill(pid as i32, 0) },
+        0,
+        "a failed handoff must not leave its killed child unreaped"
     );
 }
 
