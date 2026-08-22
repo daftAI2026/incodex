@@ -455,7 +455,7 @@ async function launchIncognitoOnce() {
     }
     return Promise.resolve({ ok: false, reason: "spawn-failed" });
   }
-  const args = [`--user-data-dir=${session.chromium}`];
+  const args = [`--user-data-dir=${session.chromium}`, "codex://new?mode=codex"];
   const sourceBounds = captureSourceBounds();
   logLaunch("launch", {
     bin,

@@ -62,7 +62,7 @@ describe("runtime load", () => {
     expect(main).toContain("child = spawn(bin, args");
     expect(main).toContain('INCODEX_INCOGNITO: "1"');
     expect(main).toContain("CODEX_ELECTRON_USER_DATA_PATH: session.chromium");
-    expect(main).toContain("const args = [`--user-data-dir=$" + "{session.chromium}`]");
+    expect(main).toContain("`--user-data-dir=$" + "{session.chromium}`");
     expect(main).toContain("safeHome.handoffSessionOwner");
   });
 
