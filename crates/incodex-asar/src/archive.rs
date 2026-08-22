@@ -153,14 +153,7 @@ pub fn patch_asar(
 
     let mut files = Map::new();
     let mut blobs = Vec::new();
-    copy_tree(
-        &archive,
-        archive.files(),
-        "",
-        &mut files,
-        &mut blobs,
-        asar_path,
-    )?;
+    copy_tree(&archive, archive.files(), "", &mut files, &mut blobs)?;
     files.remove("incodex-loader.cjs");
     for leftover in LEFTOVERS {
         files.remove(*leftover);
@@ -301,7 +294,6 @@ fn copy_tree(
     prefix: &str,
     dest: &mut Map<String, Value>,
     blobs: &mut Vec<u8>,
-    asar_path: &Path,
 ) -> Result<(), String> {
     for (name, node) in files {
         let rel = if prefix.is_empty() {
@@ -311,7 +303,7 @@ fn copy_tree(
         };
         if let Some(children) = files_of(node) {
             let mut child = Map::new();
-            copy_tree(archive, children, &rel, &mut child, blobs, asar_path)?;
+            copy_tree(archive, children, &rel, &mut child, blobs)?;
             dest.insert(name.clone(), json!({ "files": child }));
             continue;
         }

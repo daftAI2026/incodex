@@ -108,7 +108,7 @@ where
     }
     quiescence.ensure_quiescent(live_path)?;
     let current = inspect_target(live_path, None)?;
-    if current.real_path != PathBuf::from(&journal.target.real_path) {
+    if current.real_path != Path::new(&journal.target.real_path) {
         return Err("legacy committed target real path changed before migration".into());
     }
     let paths = reconstructed(root, &journal)?;
