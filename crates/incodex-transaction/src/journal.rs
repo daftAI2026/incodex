@@ -16,6 +16,7 @@ pub const ORIGINAL_REL: &str = "original/ChatGPT.app";
 #[cfg(test)]
 thread_local! {
     static FAIL_NEXT_LOAD: Cell<bool> = const { Cell::new(false) };
+    static FAIL_ON_LOAD_CALL: Cell<u8> = const { Cell::new(0) };
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -252,7 +253,20 @@ pub fn load_v2(root: &Path, install_id: &str) -> Result<JournalV2, String> {
         return Err("install id must be an RFC 4122 UUID".into());
     }
     #[cfg(test)]
-    if FAIL_NEXT_LOAD.with(|failure| failure.replace(false)) {
+    if FAIL_NEXT_LOAD.with(|failure| failure.replace(false))
+        || FAIL_ON_LOAD_CALL.with(|remaining| {
+            let call = remaining.get();
+            if call == 0 {
+                false
+            } else if call == 1 {
+                remaining.set(0);
+                true
+            } else {
+                remaining.set(call - 1);
+                false
+            }
+        })
+    {
         return Err("injected journal readback failure".into());
     }
     let path = tx_paths(root, install_id).journal;
@@ -281,6 +295,11 @@ pub fn load_v2(root: &Path, install_id: &str) -> Result<JournalV2, String> {
 #[cfg(test)]
 pub(crate) fn fail_next_load() {
     FAIL_NEXT_LOAD.with(|failure| failure.set(true));
+}
+
+#[cfg(test)]
+pub(crate) fn fail_load_on_call(call: u8) {
+    FAIL_ON_LOAD_CALL.with(|remaining| remaining.set(call));
 }
 
 pub(crate) fn validate_recovery_proofs(journal: &JournalV2) -> Result<(), String> {

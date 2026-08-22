@@ -5,7 +5,7 @@ use super::Engine;
 use crate::durable::{
     fail_next_write_after_rename, fail_next_write_before_rename, reset_sync_trace, sync_trace,
 };
-use crate::journal::{fail_next_load, load_v2};
+use crate::journal::{fail_load_on_call, fail_next_load, load_v2};
 use crate::proof::{digest_call_count, reset_digest_call_count};
 
 fn app(root: &Path, name: &str, marker: &str) -> PathBuf {
@@ -42,6 +42,7 @@ fn durable_commit_readback_failure_keeps_the_new_phase_in_memory() {
     let mut tx = swapped_transaction(&root);
     let id = tx.install_id().to_string();
 
+    fail_next_write_after_rename();
     fail_next_load();
     let error = tx.commit().unwrap_err();
 
@@ -107,11 +108,10 @@ fn rollback_post_rename_readback_failure_keeps_the_durable_rollback_phase() {
     let mut tx = swapped_transaction(&root);
     let id = tx.install_id().to_string();
 
-    fail_next_write_after_rename();
-    fail_next_load();
+    fail_load_on_call(2);
     let error = tx.rollback("injected rollback journal failure").unwrap_err();
 
-    assert!(error.contains("injected post-rename journal write failure"));
+    assert!(error.contains("injected journal readback failure"));
     assert_eq!(tx.journal().phase, "ROLLED_BACK");
     assert_eq!(load_v2(&root, &id).unwrap().phase, "ROLLED_BACK");
     fs::remove_dir_all(root).unwrap();
