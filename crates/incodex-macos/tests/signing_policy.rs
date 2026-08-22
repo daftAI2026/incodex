@@ -134,7 +134,10 @@ fn missing_camera_does_not_trigger_broad_entitlement_fallback() {
 
     std::env::remove_var("INCODEX_CODESIGN_ENTITLEMENTS");
     std::env::remove_var("INCODEX_CODESIGN_CAPTURE");
-    assert!(result.is_ok(), "source entitlements should remain signable: {result:?}");
+    assert!(
+        result.is_ok(),
+        "source entitlements should remain signable: {result:?}"
+    );
     let captured = fs::read_to_string(&fixture.capture).unwrap();
     assert!(captured.contains("com.apple.security.cs.allow-jit"));
     assert!(captured.contains("com.apple.security.cs.disable-library-validation"));
@@ -144,6 +147,9 @@ fn missing_camera_does_not_trigger_broad_entitlement_fallback() {
         "com.apple.security.personal-information.calendars",
         "com.apple.security.network.client",
     ] {
-        assert!(!captured.contains(broad), "unexpected broad entitlement: {broad}");
+        assert!(
+            !captured.contains(broad),
+            "unexpected broad entitlement: {broad}"
+        );
     }
 }

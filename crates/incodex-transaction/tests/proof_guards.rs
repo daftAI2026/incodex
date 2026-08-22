@@ -54,7 +54,10 @@ fn backup_seal_rejects_live_content_changed_after_begin() {
 
     let result = tx.mark_backup_committed();
 
-    assert!(result.is_err(), "backup sealed a target changed after begin");
+    assert!(
+        result.is_err(),
+        "backup sealed a target changed after begin"
+    );
     assert_eq!(tx.journal().phase, "DISCOVERED");
 }
 
@@ -86,7 +89,10 @@ fn swap_rejects_staged_content_changed_after_place() {
 
     let result = tx.swap();
 
-    assert!(result.is_err(), "swap accepted a staging tree changed after place");
+    assert!(
+        result.is_err(),
+        "swap accepted a staging tree changed after place"
+    );
     assert_eq!(tx.journal().phase, "STAGED");
     assert_eq!(fs::read_to_string(target.join("marker")).unwrap(), "live");
 }
@@ -108,7 +114,10 @@ fn swap_rejects_staged_permissions_changed_after_place() {
 
     let result = tx.swap();
 
-    assert!(result.is_err(), "swap accepted a staging mode changed after place");
+    assert!(
+        result.is_err(),
+        "swap accepted a staging mode changed after place"
+    );
     assert_eq!(tx.journal().phase, "STAGED");
     assert_eq!(fs::read_to_string(target.join("marker")).unwrap(), "live");
 }

@@ -129,7 +129,10 @@ fn doctor_uses_generic_acceptance_for_an_unpatched_custom_bundle() {
     let signing = &report["signing"];
     assert_eq!(signing["verified"], true);
     assert_eq!(signing["outer"]["kind"], "other");
-    assert_eq!(display_count, 2, "Doctor should inspect outer and nested components once");
+    assert_eq!(
+        display_count, 2,
+        "Doctor should inspect outer and nested components once"
+    );
     assert!(!report["checks"]["signing"]["findings"]
         .as_array()
         .unwrap()

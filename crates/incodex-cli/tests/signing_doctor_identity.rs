@@ -140,11 +140,14 @@ fn doctor_does_not_report_other_or_unknown_nested_identity_as_clean() {
         let signing = &report["signing"];
         assert_eq!(signing["verified"], false, "identity={identity}");
         assert_eq!(report["checks"]["signing"]["status"], "checked");
-        assert!(report["checks"]["signing"]["findings"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|finding| finding["code"] == "signing.component-identity-unsupported"), "identity={identity}");
+        assert!(
+            report["checks"]["signing"]["findings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|finding| finding["code"] == "signing.component-identity-unsupported"),
+            "identity={identity}"
+        );
         std::env::remove_var("PATH");
     }
 }

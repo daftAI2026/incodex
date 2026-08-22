@@ -251,8 +251,7 @@ fn run_child_mode() -> bool {
                 PathBuf::from(env::var(ID_FILE_ENV).expect("partial transaction id file"));
             fs::write(id_file, &id).expect("publish install id");
             seed_original(&root, &app, &id);
-            tx.mark_backup_committed()
-                .expect("commit backup snapshot");
+            tx.mark_backup_committed().expect("commit backup snapshot");
             tx.place_staging(&candidate).expect("stage candidate");
             tx.swap().expect("swap candidate");
             // +--------------------------------------------------------------------+
@@ -270,8 +269,7 @@ fn run_child_mode() -> bool {
             let id_file = PathBuf::from(env::var(ID_FILE_ENV).expect("commit id file"));
             fs::write(id_file, &id).expect("publish install id");
             seed_original(&root, &app, &id);
-            tx.mark_backup_committed()
-                .expect("commit backup snapshot");
+            tx.mark_backup_committed().expect("commit backup snapshot");
             tx.place_staging(&candidate).expect("stage candidate");
             tx.swap().expect("swap candidate");
             let outgoing = tx.outgoing_app();
@@ -296,8 +294,7 @@ fn run_child_mode() -> bool {
             let id_file = PathBuf::from(env::var(ID_FILE_ENV).expect("swap id file"));
             fs::write(id_file, &id).expect("publish install id");
             seed_original(&root, &app, &id);
-            tx.mark_backup_committed()
-                .expect("commit backup snapshot");
+            tx.mark_backup_committed().expect("commit backup snapshot");
             tx.place_staging(&candidate).expect("stage candidate");
             tx.swap_with_checkpoint(|phase| {
                 if phase == gap.as_str() {

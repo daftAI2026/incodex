@@ -40,8 +40,14 @@ fn pre_swap_recovery_cleans_a_leaf_symlink_without_touching_its_target() {
 
     recover(&root, &id).unwrap();
 
-    assert_eq!(fs::read_to_string(target.join("marker")).unwrap(), "healthy");
+    assert_eq!(
+        fs::read_to_string(target.join("marker")).unwrap(),
+        "healthy"
+    );
     assert!(!staged.exists(), "pre-swap staging symlink was not cleaned");
-    assert_eq!(fs::read_to_string(victim.join("marker")).unwrap(), "do-not-delete");
+    assert_eq!(
+        fs::read_to_string(victim.join("marker")).unwrap(),
+        "do-not-delete"
+    );
     assert_eq!(journal_v2(&root, &id).unwrap().phase, "ROLLED_BACK");
 }

@@ -4,10 +4,7 @@ pub(crate) fn add_entitlement_key(xml: &str, key: &str) -> Result<String, String
     }
     let close = root_dict_close(xml).ok_or("entitlement plist has no dictionary close")?;
     let mut output = xml.to_string();
-    output.insert_str(
-        close,
-        &format!("  <key>{key}</key><true/>\n"),
-    );
+    output.insert_str(close, &format!("  <key>{key}</key><true/>\n"));
     Ok(output)
 }
 

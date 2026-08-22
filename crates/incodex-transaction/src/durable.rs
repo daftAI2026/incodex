@@ -6,9 +6,9 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(test)]
-use std::cell::RefCell;
-#[cfg(test)]
 use std::cell::Cell;
+#[cfg(test)]
+use std::cell::RefCell;
 #[cfg(test)]
 use std::path::PathBuf;
 
@@ -73,7 +73,9 @@ fn record_sync(_path: &Path) {}
 
 pub fn ensure_private_dir(dir: &Path) -> Result<(), String> {
     fs::create_dir_all(dir).map_err(|err| err.to_string())?;
-    let mut perms = fs::metadata(dir).map_err(|err| err.to_string())?.permissions();
+    let mut perms = fs::metadata(dir)
+        .map_err(|err| err.to_string())?
+        .permissions();
     perms.set_mode(DIR_MODE);
     fs::set_permissions(dir, perms).map_err(|err| err.to_string())?;
     Ok(())
@@ -83,10 +85,7 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     write_atomic_tracked(path, bytes).map_err(|error| error.message)
 }
 
-pub(crate) fn write_atomic_tracked(
-    path: &Path,
-    bytes: &[u8],
-) -> Result<(), AtomicWriteError> {
+pub(crate) fn write_atomic_tracked(path: &Path, bytes: &[u8]) -> Result<(), AtomicWriteError> {
     let parent = path
         .parent()
         .ok_or_else(|| AtomicWriteError::new("durable write needs a parent directory", false))?;
@@ -121,8 +120,7 @@ pub(crate) fn write_atomic_tracked(
             false,
         ));
     }
-    fs::rename(&tmp, path)
-        .map_err(|err| AtomicWriteError::new(err.to_string(), false))?;
+    fs::rename(&tmp, path).map_err(|err| AtomicWriteError::new(err.to_string(), false))?;
     #[cfg(test)]
     if FAIL_NEXT_WRITE_AFTER_RENAME.with(|failure| failure.replace(false)) {
         return Err(AtomicWriteError::new(
@@ -135,8 +133,7 @@ pub(crate) fn write_atomic_tracked(
         .map_err(|err| AtomicWriteError::new(err.to_string(), true))?
         .permissions();
     perms.set_mode(FILE_MODE);
-    fs::set_permissions(path, perms)
-        .map_err(|err| AtomicWriteError::new(err.to_string(), true))?;
+    fs::set_permissions(path, perms).map_err(|err| AtomicWriteError::new(err.to_string(), true))?;
     Ok(())
 }
 

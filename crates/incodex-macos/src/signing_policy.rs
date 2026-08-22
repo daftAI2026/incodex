@@ -1,8 +1,6 @@
 use crate::signing::{validate_nested_components, SignatureKind, SignedComponent};
 
-pub fn validate_generic_nested_components(
-    components: &[SignedComponent],
-) -> Result<(), String> {
+pub fn validate_generic_nested_components(components: &[SignedComponent]) -> Result<(), String> {
     for component in components {
         if component.kind != SignatureKind::Other {
             validate_nested_components(std::slice::from_ref(component))?;

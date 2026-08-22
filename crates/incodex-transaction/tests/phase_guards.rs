@@ -56,7 +56,10 @@ fn swap_requires_the_staged_phase() {
 
     assert!(result.is_err(), "swap escaped from DISCOVERED");
     assert_eq!(tx.journal().phase, "DISCOVERED");
-    assert_eq!(fs::read_to_string(target.join("marker")).unwrap(), "original");
+    assert_eq!(
+        fs::read_to_string(target.join("marker")).unwrap(),
+        "original"
+    );
     assert!(!tx.outgoing_app().exists());
 }
 
@@ -73,7 +76,10 @@ fn commit_requires_the_swapped_phase() {
 
     assert!(result.is_err(), "commit escaped from STAGED");
     assert_eq!(tx.journal().phase, "STAGED");
-    assert_eq!(fs::read_to_string(target.join("marker")).unwrap(), "original");
+    assert_eq!(
+        fs::read_to_string(target.join("marker")).unwrap(),
+        "original"
+    );
 }
 
 #[test]
@@ -102,7 +108,10 @@ fn commit_rejects_live_content_changed_after_swap() {
 
     assert!(result.is_err(), "commit accepted a changed swapped live");
     assert_eq!(tx.journal().phase, "SWAPPED");
-    assert_eq!(fs::read_to_string(target.join("marker")).unwrap(), "foreign");
+    assert_eq!(
+        fs::read_to_string(target.join("marker")).unwrap(),
+        "foreign"
+    );
 }
 
 #[test]
@@ -117,5 +126,8 @@ fn rolled_back_transaction_rejects_a_second_rollback() {
 
     assert!(result.is_err(), "second rollback was accepted");
     assert_eq!(tx.journal().phase, "ROLLED_BACK");
-    assert_eq!(fs::read_to_string(target.join("marker")).unwrap(), "original");
+    assert_eq!(
+        fs::read_to_string(target.join("marker")).unwrap(),
+        "original"
+    );
 }

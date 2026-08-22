@@ -178,7 +178,10 @@ fn renamed_vendor_component_is_preserved_by_signature_identity() {
 
     let result = run_sign(&fixture);
 
-    assert!(result.is_ok(), "vendor sidecar should remain signable: {result:?}");
+    assert!(
+        result.is_ok(),
+        "vendor sidecar should remain signable: {result:?}"
+    );
     assert_eq!(
         fs::read_to_string(&fixture.marker).unwrap(),
         "original-vendor-component\n",
@@ -212,7 +215,10 @@ fn verified_generic_nested_component_can_be_resigned_with_third_party_outer() {
 
     let result = run_sign(&fixture);
 
-    assert!(result.is_ok(), "verified generic nested components should be signable: {result:?}");
+    assert!(
+        result.is_ok(),
+        "verified generic nested components should be signable: {result:?}"
+    );
     assert!(fixture.sign_capture.exists());
 }
 
@@ -232,7 +238,10 @@ fn self_issued_vendor_lookalike_is_rejected_before_outer_signing() {
     std::env::remove_var("INCODEX_CODESIGN_ENTITLEMENTS");
     std::env::remove_var("INCODEX_SIGN_CAPTURE");
     std::env::remove_var("INCODEX_CODESIGN_VENDOR_TRUST_FAILURE");
-    assert!(result.is_err(), "self-issued vendor lookalikes must fail closed");
+    assert!(
+        result.is_err(),
+        "self-issued vendor lookalikes must fail closed"
+    );
     assert!(!fixture.sign_capture.exists());
     assert_eq!(
         fs::read_to_string(&fixture.marker).unwrap(),

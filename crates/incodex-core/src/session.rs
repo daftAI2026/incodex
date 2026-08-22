@@ -715,7 +715,10 @@ fn file_name(path: &Path) -> Result<String, String> {
 pub fn is_canonical_process_start_identity(value: &str) -> bool {
     let parts: Vec<&str> = value.split_whitespace().collect();
     if parts.len() != 5
-        || !matches!(parts[0], "Sun" | "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat")
+        || !matches!(
+            parts[0],
+            "Sun" | "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat"
+        )
         || !matches!(
             parts[1],
             "Jan"

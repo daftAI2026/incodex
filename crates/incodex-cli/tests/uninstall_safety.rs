@@ -102,7 +102,10 @@ fn uninstall_refuses_symlink_backup_and_foreign_live() {
         &root,
     );
     assert_eq!(status, 1, "symlink backup was accepted: {stderr}");
-    assert_eq!(fs::read(app.join("Contents/Resources/app.asar")).unwrap(), asar_before);
+    assert_eq!(
+        fs::read(app.join("Contents/Resources/app.asar")).unwrap(),
+        asar_before
+    );
     assert!(victim.exists());
 
     let root = home();

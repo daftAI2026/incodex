@@ -4,9 +4,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use incodex_asar::{
-    pack_dir, pack_dir_unpacked, patch_asar, Archive, LOADER_NAME, MARKER_KEY,
-};
+use incodex_asar::{pack_dir, pack_dir_unpacked, patch_asar, Archive, LOADER_NAME, MARKER_KEY};
 use sha2::{Digest, Sha256};
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
@@ -39,13 +37,23 @@ fn pack(files: &[(&str, &str)]) -> PathBuf {
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
-    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 #[test]
 fn package_json_with_no_main_is_refused() {
     let archive = pack(&[("package.json", "{}\n"), ("index.js", "ok\n")]);
-    assert_eq!(Archive::open(&archive).unwrap().read_package_main().unwrap().main, "");
+    assert_eq!(
+        Archive::open(&archive)
+            .unwrap()
+            .read_package_main()
+            .unwrap()
+            .main,
+        ""
+    );
     let err = patch_asar(&archive, "/* loader */", None).unwrap_err();
     assert!(err.contains("no main"));
 }
@@ -57,7 +65,11 @@ fn missing_main_file_is_still_recorded() {
         &format!("{}\n", serde_json::json!({"main":"missing.js"})),
     )]);
     assert_eq!(
-        Archive::open(&archive).unwrap().read_package_main().unwrap().main,
+        Archive::open(&archive)
+            .unwrap()
+            .read_package_main()
+            .unwrap()
+            .main,
         "missing.js"
     );
 }
@@ -90,12 +102,19 @@ fn already_patched_keeps_original_main() {
         ("index.js", "ok\n"),
     ]);
     patch_asar(&archive, "/* loader */", Some("one")).unwrap();
-    let first = Archive::open(&archive).unwrap().read_package_main().unwrap();
+    let first = Archive::open(&archive)
+        .unwrap()
+        .read_package_main()
+        .unwrap();
     assert!(first.already_patched);
     assert_eq!(first.main, "index.js");
     patch_asar(&archive, "/* loader */", Some("two")).unwrap();
     assert_eq!(
-        Archive::open(&archive).unwrap().read_package_main().unwrap().main,
+        Archive::open(&archive)
+            .unwrap()
+            .read_package_main()
+            .unwrap()
+            .main,
         "index.js"
     );
 }
@@ -202,7 +221,13 @@ fn injected_loader_overwrites_existing() {
         (LOADER_NAME, "OLD LOADER\n"),
     ]);
     assert_eq!(
-        String::from_utf8(Archive::open(&archive).unwrap().extract(LOADER_NAME).unwrap()).unwrap(),
+        String::from_utf8(
+            Archive::open(&archive)
+                .unwrap()
+                .extract(LOADER_NAME)
+                .unwrap()
+        )
+        .unwrap(),
         "OLD LOADER\n"
     );
     patch_asar(&archive, "/* loader */", Some("clash")).unwrap();
@@ -246,7 +271,13 @@ fn nonsense_file_offset_is_refused() {
     bytes.extend_from_slice(header_s.as_bytes());
     bytes.extend_from_slice(b"no");
     fs::write(&archive, bytes).unwrap();
-    assert!(Archive::open(&archive).is_err() || Archive::open(&archive).unwrap().extract("index.js").is_err());
+    assert!(
+        Archive::open(&archive).is_err()
+            || Archive::open(&archive)
+                .unwrap()
+                .extract("index.js")
+                .is_err()
+    );
 }
 
 #[test]
@@ -260,7 +291,10 @@ fn multi_megabyte_blob_keeps_hash() {
         ("index.js", "ok\n"),
         ("blob.bin", &big),
     ]);
-    let before = Archive::open(&archive).unwrap().extract("blob.bin").unwrap();
+    let before = Archive::open(&archive)
+        .unwrap()
+        .extract("blob.bin")
+        .unwrap();
     patch_asar(&archive, "/* loader */", Some("big")).unwrap();
     let after = Archive::open(&archive).unwrap();
     assert_eq!(after.extract("blob.bin").unwrap(), before);
@@ -284,10 +318,7 @@ fn packed_integrity_splits_files_into_electron_blocks() {
     assert_eq!(integrity["hash"], sha256_hex(big.as_bytes()));
     assert_eq!(
         integrity["blocks"],
-        serde_json::json!([
-            sha256_hex(&first_block),
-            sha256_hex(&last_block),
-        ])
+        serde_json::json!([sha256_hex(&first_block), sha256_hex(&last_block),])
     );
 }
 
@@ -318,7 +349,11 @@ fn real_codex_asar_is_readable_when_present() {
 }
 
 fn bun_available() -> bool {
-    Command::new("bun").arg("--version").output().map(|o| o.status.success()).unwrap_or(false)
+    Command::new("bun")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 fn repo_root() -> PathBuf {
@@ -382,7 +417,11 @@ fn electron_reads_rust_packed_archive() {
         .current_dir(repo_root())
         .output()
         .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&out.stdout), "from-rust\n");
 }
 

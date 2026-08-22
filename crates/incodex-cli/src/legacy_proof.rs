@@ -12,8 +12,8 @@ use incodex_asar::{Archive, PackageMain, MARKER_KEY};
 use incodex_core::{inspect_target, recheck_target, CanonicalTarget};
 use incodex_macos::{
     read_architecture, read_plist_info, verify_app,
-    verify_bundle_deep_strict as verify_native_bundle_deep_strict,
-    verify_original_vendor_bundle, PlistInfo,
+    verify_bundle_deep_strict as verify_native_bundle_deep_strict, verify_original_vendor_bundle,
+    PlistInfo,
 };
 use incodex_transaction::{acquire_target_lock, TargetLock};
 use serde_json::Value;
@@ -140,7 +140,9 @@ where
     let before_lock = inspect_target(target, None)
         .map_err(|error| format!("cannot inspect legacy live target: {error}"))?;
     assert_target_identity(&before_lock, &expected_target, "before target lock")?;
-    if before_lock.is_official && manifest.bundle_identifier != incodex_macos::OFFICIAL_BUNDLE_IDENTIFIER {
+    if before_lock.is_official
+        && manifest.bundle_identifier != incodex_macos::OFFICIAL_BUNDLE_IDENTIFIER
+    {
         return Err("official target bundle identifier is not com.openai.codex".into());
     }
     let lock = acquire_target_lock(root, target, "legacy-proof", Some(&structural.install_id))?;

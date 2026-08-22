@@ -559,14 +559,8 @@ where
     } else if already_restored {
         cleanup_restored(root, &journal).map_err(TxError::Other)?;
     } else {
-        journal = restore_live_with_quiescence(
-            root,
-            &live,
-            &journal,
-            &quiescence,
-            &mut |_| {},
-        )
-        .map_err(TxError::Other)?;
+        journal = restore_live_with_quiescence(root, &live, &journal, &quiescence, &mut |_| {})
+            .map_err(TxError::Other)?;
     }
     if !verify_restored(&live) {
         return Err(TxError::Other(

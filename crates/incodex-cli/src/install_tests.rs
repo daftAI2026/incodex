@@ -53,8 +53,8 @@ fn cli_official_quit_propagates_request_errors() {
     let mut requester = FailingQuit;
     let mut clock = FixtureClock(Instant::now());
 
-    let error = close_official_app_with(&quiescence, &probe, &mut requester, &mut clock)
-        .unwrap_err();
+    let error =
+        close_official_app_with(&quiescence, &probe, &mut requester, &mut clock).unwrap_err();
 
     assert!(error.contains("fixture osascript failure"), "{error}");
 }
@@ -71,8 +71,8 @@ fn cli_official_quit_propagates_timeout() {
     let mut requester = SuccessfulQuit;
     let mut clock = FixtureClock(Instant::now());
 
-    let error = close_official_app_with(&quiescence, &probe, &mut requester, &mut clock)
-        .unwrap_err();
+    let error =
+        close_official_app_with(&quiescence, &probe, &mut requester, &mut clock).unwrap_err();
 
     assert!(error.contains("timed out"), "{error}");
 }
@@ -159,10 +159,7 @@ fn target_replacement_after_locked_validation_does_not_leave_a_snapshot() {
     let error = snapshot_original(&mut tx, &app, &original).unwrap_err();
 
     assert!(error.contains("changed"), "{error}");
-    assert_eq!(
-        journal_v2(&root, &install_id).unwrap().phase,
-        "ROLLED_BACK"
-    );
+    assert_eq!(journal_v2(&root, &install_id).unwrap().phase, "ROLLED_BACK");
     assert!(!original.exists());
     fs::remove_dir_all(sandbox).unwrap();
 }

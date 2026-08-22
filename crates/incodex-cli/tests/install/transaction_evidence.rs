@@ -10,10 +10,9 @@ fn transaction_journal(home: &Path) -> (String, serde_json::Value) {
     assert_eq!(entries.len(), 1, "expected one transaction: {entries:?}");
     let entry = entries.pop().unwrap();
     let id = entry.file_name().to_string_lossy().into_owned();
-    let journal: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(entry.path().join("journal.json")).unwrap(),
-    )
-    .unwrap();
+    let journal: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(entry.path().join("journal.json")).unwrap())
+            .unwrap();
     (id, journal)
 }
 

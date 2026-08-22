@@ -109,7 +109,9 @@ fn rollback_post_rename_readback_failure_keeps_the_durable_rollback_phase() {
     let id = tx.install_id().to_string();
 
     fail_load_on_call(2);
-    let error = tx.rollback("injected rollback journal failure").unwrap_err();
+    let error = tx
+        .rollback("injected rollback journal failure")
+        .unwrap_err();
 
     assert!(error.contains("injected journal readback failure"));
     assert_eq!(tx.journal().phase, "ROLLED_BACK");

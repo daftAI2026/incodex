@@ -168,7 +168,10 @@ fn open_dry_run_does_not_create_a_session_or_touch_asar() {
     )));
     assert!(stdout.contains("  ! Dry run. No window opened."));
     assert_eq!(incodex_paths(&home), Vec::<String>::new());
-    assert_eq!(fs::read_to_string(app.join("marker")).unwrap(), "do-not-touch\n");
+    assert_eq!(
+        fs::read_to_string(app.join("marker")).unwrap(),
+        "do-not-touch\n"
+    );
     assert!(!app.join("Contents/Resources/app.asar").exists());
 }
 
@@ -186,11 +189,9 @@ fn open_missing_binary_does_not_leave_a_session() {
     assert_eq!(status, 1);
     assert_eq!(stdout, "");
     assert!(stderr.contains("CFBundleExecutable not found"));
-    assert!(
-        incodex_paths(&home)
-            .iter()
-            .all(|path| !path.contains("sessions") && !path.contains("codex-home"))
-    );
+    assert!(incodex_paths(&home)
+        .iter()
+        .all(|path| !path.contains("sessions") && !path.contains("codex-home")));
 }
 
 #[test]
@@ -220,7 +221,10 @@ fn open_uses_cf_bundle_executable_instead_of_a_hardcoded_chatgpt_name() {
     let (status, stdout, stderr) = run(&["open", "--app", app.to_str().unwrap()], &home);
     assert_eq!(status, 3, "stdout={stdout}\nstderr={stderr}");
     assert!(stderr.contains("UI injection was not accepted"), "{stderr}");
-    assert!(home.join("open-argv.txt").exists(), "binary from plist was not launched");
+    assert!(
+        home.join("open-argv.txt").exists(),
+        "binary from plist was not launched"
+    );
 }
 
 #[test]
@@ -234,7 +238,10 @@ fn open_waits_then_burns_and_does_not_patch_asar() {
     let asar = app.join("Contents/Resources/app.asar");
     assert!(!asar.exists());
     let (status, stdout, stderr) = run(&["open", "--app", app.to_str().unwrap()], &home);
-    assert_eq!(status, 3, "a window that never passes UI injection must fail");
+    assert_eq!(
+        status, 3,
+        "a window that never passes UI injection must fail"
+    );
     assert!(stderr.contains("UI injection was not accepted"), "{stderr}");
     assert!(stdout.contains("➤ Opening incognito Codex window"));
     assert!(!stdout.contains("Opened. Incognito Codex window is ready."));
@@ -258,21 +265,27 @@ fn open_spawns_official_binary_with_localhost_debug_port_and_does_not_patch() {
     fs::create_dir_all(&source).unwrap();
     fs::write(source.join("auth.json"), "{}\n").unwrap();
     let official = PathBuf::from("/Applications/ChatGPT.app/Contents/Resources/app.asar");
-    let official_before = official.exists().then(|| fs::read(&official).ok()).flatten();
+    let official_before = official
+        .exists()
+        .then(|| fs::read(&official).ok())
+        .flatten();
     let (status, stdout, stderr) = run(&["open", "--app", app.to_str().unwrap()], &home);
     assert_eq!(status, 3, "stdout={stdout}\nstderr={stderr}");
     assert!(stderr.contains("UI injection was not accepted"), "{stderr}");
     let argv = fs::read_to_string(home.join("open-argv.txt")).unwrap_or_default();
     assert!(
-        argv.lines().any(|line| line.starts_with("--remote-debugging-port=")),
+        argv.lines()
+            .any(|line| line.starts_with("--remote-debugging-port=")),
         "missing debug port flag in {argv:?}"
     );
     assert!(
-        argv.lines().any(|line| line.starts_with("--remote-allow-origins=")),
+        argv.lines()
+            .any(|line| line.starts_with("--remote-allow-origins=")),
         "missing allow-origins flag in {argv:?}"
     );
     assert!(
-        argv.lines().any(|line| line.starts_with("--user-data-dir=")),
+        argv.lines()
+            .any(|line| line.starts_with("--user-data-dir=")),
         "missing user-data-dir in {argv:?}"
     );
     assert!(!app.join("Contents/Resources/app.asar").exists());
@@ -292,8 +305,14 @@ fn open_spawn_error_still_burns() {
     fs::create_dir_all(&source).unwrap();
     fs::write(source.join("auth.json"), "{}\n").unwrap();
     let (status, stdout, stderr) = run(&["open", "--app", app.to_str().unwrap()], &home);
-    assert_eq!(status, 1, "spawn failure must be observable: stderr={stderr} stdout={stdout}");
-    assert!(stderr.contains("Unable to start the incognito window"), "{stderr}");
+    assert_eq!(
+        status, 1,
+        "spawn failure must be observable: stderr={stderr} stdout={stdout}"
+    );
+    assert!(
+        stderr.contains("Unable to start the incognito window"),
+        "{stderr}"
+    );
     let leftover: Vec<_> = incodex_paths(&home)
         .into_iter()
         .filter(|path| path.contains("codex-home") || path.contains("/chromium"))
@@ -309,7 +328,10 @@ fn open_child_nonzero_is_not_success() {
     fs::create_dir_all(&source).unwrap();
     fs::write(source.join("auth.json"), "{}\n").unwrap();
     let (status, stdout, stderr) = run(&["open", "--app", app.to_str().unwrap()], &home);
-    assert_eq!(status, 1, "child failure must be observable: stderr={stderr} stdout={stdout}");
+    assert_eq!(
+        status, 1,
+        "child failure must be observable: stderr={stderr} stdout={stdout}"
+    );
     assert!(stderr.contains("exited with status 7"), "{stderr}");
     let leftover: Vec<_> = incodex_paths(&home)
         .into_iter()
@@ -354,8 +376,14 @@ while [ ! -e \"$HOME/release-$id\" ]; do sleep 0.01; done\n",
     let second_removed_after_release = !second_root.exists();
 
     assert!(first_removed_before_second, "first session was not burned");
-    assert!(second_survived_first, "first close burned the second session");
-    assert!(second_removed_after_release, "second session was not burned");
+    assert!(
+        second_survived_first,
+        "first close burned the second session"
+    );
+    assert!(
+        second_removed_after_release,
+        "second session was not burned"
+    );
     let first_stdout = String::from_utf8_lossy(&first_output.stdout);
     let second_stdout = String::from_utf8_lossy(&second_output.stdout);
     assert!(

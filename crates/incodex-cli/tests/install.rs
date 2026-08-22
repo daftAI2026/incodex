@@ -697,10 +697,7 @@ fn recover_does_not_finish_until_the_restored_app_verifies() {
     .unwrap();
     assert_eq!(journal["phase"], "SWAPPED");
 
-    let (status, stdout, stderr) = run(
-        &["recover", "--transaction", &id],
-        &home,
-    );
+    let (status, stdout, stderr) = run(&["recover", "--transaction", &id], &home);
     assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
     assert!(stdout.contains("phase: ROLLED_BACK"), "{stdout}");
     let journal: serde_json::Value = serde_json::from_str(

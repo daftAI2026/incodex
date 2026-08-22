@@ -134,7 +134,10 @@ fn doctor_reports_nested_signature_damage_and_unretainable_entitlements() {
 
     assert_eq!(signing["status"], "checked");
     assert_eq!(signing["componentCount"], 1);
-    assert_eq!(signing["unretainable"], serde_json::json!(["com.apple.application-identifier"]));
+    assert_eq!(
+        signing["unretainable"],
+        serde_json::json!(["com.apple.application-identifier"])
+    );
     assert_eq!(signing["components"][0]["verified"], false);
     assert_eq!(json["checks"]["signing"]["status"], "checked");
     assert!(json["checks"]["signing"]["findings"]
