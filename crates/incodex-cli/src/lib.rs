@@ -1,4 +1,5 @@
 pub mod app_bundle;
+pub(crate) mod app_quiescence;
 pub mod cdp;
 pub mod confirm;
 pub mod diagnose;

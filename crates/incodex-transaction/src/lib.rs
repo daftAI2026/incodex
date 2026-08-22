@@ -11,12 +11,13 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 pub use engine::{
-    recover, recover_with, validate_post_swap_rollback, CommitResult, Engine, RecoverResult,
-    TxError,
+    recover, recover_with, recover_with_quiescence, validate_post_swap_rollback, CommitResult,
+    Engine, RecoverResult, TxError,
 };
 pub use journal::{new_install_id, validate_path_ancestors, JournalV2};
 pub use uninstall::{
-    migrate_legacy_committed, restore_committed, restore_committed_with_checkpoint,
+    migrate_legacy_committed, migrate_legacy_committed_with_quiescence, restore_committed,
+    restore_committed_with_checkpoint, restore_committed_with_quiescence,
 };
 
 pub fn journal_v2(root: &Path, install_id: &str) -> Result<JournalV2, String> {
@@ -55,6 +56,31 @@ pub fn validate_committed_cleanup(root: &Path, install_id: &str) -> Result<(), S
     journal::reconstructed(root, &journal).map(|_| ())
 }
 pub use lock::{acquire_target_lock, lock_path_for, TargetLock};
+
+/// 事务只依赖这一条窄 seam；具体的 macOS 进程策略由 CLI 注入。
+///
+/// Guard 不保存“已 quiescent”的事实。每次调用都必须重新观察目标进程。
+pub trait QuiescenceGuard: 'static {
+    fn ensure_quiescent(&self, target: &Path) -> Result<(), String>;
+}
+
+impl<F> QuiescenceGuard for F
+where
+    F: Fn(&Path) -> Result<(), String> + 'static,
+{
+    fn ensure_quiescent(&self, target: &Path) -> Result<(), String> {
+        self(target)
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NoopQuiescenceGuard;
+
+impl QuiescenceGuard for NoopQuiescenceGuard {
+    fn ensure_quiescent(&self, _target: &Path) -> Result<(), String> {
+        Ok(())
+    }
+}
 
 pub const PHASES: &[&str] = &[
     "DISCOVERED",

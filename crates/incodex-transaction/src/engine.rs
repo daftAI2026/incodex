@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use incodex_macos::ditto;
 
@@ -19,8 +20,10 @@ use crate::proof::{
 };
 #[cfg(test)]
 use crate::uninstall::replace_live_with_checkpoint;
-use crate::uninstall::{cleanup_restored, remove_path, restore_live, sync_rename_parents};
-use crate::Recovery;
+use crate::uninstall::{
+    cleanup_restored, remove_path, restore_live_with_quiescence, sync_rename_parents,
+};
+use crate::{NoopQuiescenceGuard, QuiescenceGuard, Recovery};
 use incodex_core::canonical::{inspect_target, recheck_target, CanonicalTarget};
 
 #[cfg(test)]
@@ -58,14 +61,32 @@ pub struct Engine {
     target: CanonicalTarget,
     journal: JournalV2,
     _lock: TargetLock,
+    quiescence: Arc<dyn QuiescenceGuard>,
 }
 
 impl Engine {
     pub fn begin(root: &Path, live_path: &Path, command: &str) -> Result<Self, String> {
+        Self::begin_with_quiescence(root, live_path, command, NoopQuiescenceGuard)
+    }
+
+    pub fn begin_with_quiescence<G>(
+        root: &Path,
+        live_path: &Path,
+        command: &str,
+        quiescence: G,
+    ) -> Result<Self, String>
+    where
+        G: QuiescenceGuard,
+    {
         let target = inspect_target(live_path, None)?;
         let install_id = new_install_id();
         let lock = acquire_target_lock(root, live_path, command, Some(&install_id))?;
         recheck_target(&target)?;
+        // +---------------------------------------------------------------+
+        // | lock 之后重新观察 executable；这次观察不能在锁外提前完成。      |
+        // | guard 失败时只留下可释放的 target lock，不落 journal 或 digest。  |
+        // +---------------------------------------------------------------+
+        quiescence.ensure_quiescent(&target.real_path)?;
         let pre_swap_digest = tree_digest(&target.real_path)?;
         let journal = JournalV2 {
             schema_version: 2,
@@ -101,6 +122,7 @@ impl Engine {
             target,
             journal: load_v2(root, &install_id)?,
             _lock: lock,
+            quiescence: Arc::new(quiescence),
         })
     }
 
@@ -114,6 +136,11 @@ impl Engine {
 
     pub fn target_path(&self) -> &Path {
         &self.target.real_path
+    }
+
+    /// 在 CLI 的 live copy/sign 边界复用同一把 guard，而不是另造一份状态机。
+    pub fn ensure_quiescent(&self) -> Result<(), String> {
+        self.quiescence.ensure_quiescent(&self.target.real_path)
     }
 
     pub fn staging_app(&self) -> PathBuf {
@@ -135,6 +162,7 @@ impl Engine {
         validate_pre_swap_identity(&self.target)?;
         directory_identity(staged)
             .map_err(|error| format!("cannot use staging source: {error}"))?;
+        self.ensure_quiescent()?;
         let dest = self.staging_app();
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent).map_err(|err| err.to_string())?;
@@ -165,6 +193,7 @@ impl Engine {
         if backup_digest != self.journal.pre_swap_digest {
             return Err("backup snapshot does not match the sealed pre-swap tree".into());
         }
+        self.ensure_quiescent()?;
         let transaction_dir = original.parent().and_then(Path::parent).ok_or_else(|| {
             format!(
                 "backup snapshot has no transaction root: {}",
@@ -205,6 +234,7 @@ impl Engine {
             &self.journal,
         )?;
         validate_staged_snapshot(&self.staging_app(), &self.journal)?;
+        self.ensure_quiescent()?;
         self.advance("TARGET_MOVED_OUT")?;
         checkpoint("TARGET_MOVED_OUT");
         let outgoing = self.outgoing_app();
@@ -240,6 +270,7 @@ impl Engine {
         let paths = reconstructed(&self.root, &self.journal)?;
         validate_recovery_target(&self.journal, &paths, &self.target.real_path)?;
         validate_backup_digest(&paths.original, &self.journal)?;
+        self.ensure_quiescent()?;
         self.advance("COMMITTED")?;
         checkpoint("COMMITTED_BEFORE_CLEANUP");
         let cleanup_warning = cleanup_outgoing(&self.outgoing_app()).err();
@@ -253,12 +284,19 @@ impl Engine {
             phase if is_pre_swap_phase(phase) || is_post_swap_phase(phase) => {}
             phase => return Err(format!("cannot rollback transaction in phase {phase}")),
         }
+        self.ensure_quiescent()?;
         let paths = reconstructed(&self.root, &self.journal)?;
         validate_recovery_target(&self.journal, &paths, &self.target.real_path)?;
         if is_pre_swap_phase(&self.journal.phase) {
             cleanup_pre_swap(&self.root, &self.journal)?;
         } else {
-            self.journal = restore_live(&self.root, &self.target.real_path, &self.journal)?;
+            self.journal = restore_live_with_quiescence(
+                &self.root,
+                &self.target.real_path,
+                &self.journal,
+                &*self.quiescence,
+                &mut |_| {},
+            )?;
         }
         self.advance("ROLLED_BACK")
     }
@@ -433,7 +471,7 @@ fn validate_recovery_target(
 }
 
 pub fn recover(root: &Path, install_id: &str) -> Result<RecoverResult, TxError> {
-    recover_with(root, install_id, |_| true)
+    recover_with_quiescence(root, install_id, NoopQuiescenceGuard, |_| true)
 }
 
 /// Validate post-swap rollback readiness without taking a lock or changing state.
@@ -460,6 +498,20 @@ pub fn recover_with<F>(
     verify_restored: F,
 ) -> Result<RecoverResult, TxError>
 where
+    F: FnOnce(&Path) -> bool,
+{
+    recover_with_quiescence(root, install_id, NoopQuiescenceGuard, verify_restored)
+}
+
+/// Recover while checking the live executable at every destructive boundary.
+pub fn recover_with_quiescence<G, F>(
+    root: &Path,
+    install_id: &str,
+    quiescence: G,
+    verify_restored: F,
+) -> Result<RecoverResult, TxError>
+where
+    G: QuiescenceGuard,
     F: FnOnce(&Path) -> bool,
 {
     let mut journal = load_v2(root, install_id).map_err(|message| TxError::Refuse { message })?;
@@ -494,6 +546,9 @@ where
         }
         return Ok(RecoverResult { action, journal });
     }
+    quiescence
+        .ensure_quiescent(&live)
+        .map_err(|message| TxError::Refuse { message })?;
     validate_recovery_target(&journal, &paths, &live)
         .map_err(|message| TxError::Refuse { message })?;
     let already_restored = is_post_swap_phase(&journal.phase)
@@ -504,7 +559,14 @@ where
     } else if already_restored {
         cleanup_restored(root, &journal).map_err(TxError::Other)?;
     } else {
-        journal = restore_live(root, &live, &journal).map_err(TxError::Other)?;
+        journal = restore_live_with_quiescence(
+            root,
+            &live,
+            &journal,
+            &quiescence,
+            &mut |_| {},
+        )
+        .map_err(TxError::Other)?;
     }
     if !verify_restored(&live) {
         return Err(TxError::Other(
