@@ -168,3 +168,39 @@ fn status_and_doctor_retain_unparseable_legacy_session_and_owner_identity() {
 
     let _ = fs::remove_dir_all(root);
 }
+
+#[test]
+fn status_and_doctor_retain_pending_session_with_dead_launcher() {
+    let root = fixture_root("pending");
+    let session = root.join("sessions/s-pending");
+    fs::create_dir_all(session.join("chromium")).unwrap();
+    fs::write(
+        session.join("owner.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "sessionId": "s-pending",
+            "pid": 999_999_999_i64,
+            "processStartIdentity": CANONICAL_START,
+            "handoffPending": true,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    for mode in [DiagnosisMode::Status, DiagnosisMode::Doctor] {
+        let report = diagnose(&root, mode);
+        assert_eq!(report["stalePid"], false, "mode={mode:?}");
+        assert!(report["orphanSessions"].as_array().unwrap().is_empty());
+        assert!(report["leftoverChromium"].as_array().unwrap().is_empty());
+        assert_eq!(report["checks"]["orphanSessions"]["status"], "unknown");
+        assert_eq!(report["checks"]["chromiumResidue"]["status"], "unknown");
+        assert!(!report["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| {
+                finding["code"] == "session.orphan" || finding["code"] == "chromium.residue"
+            }));
+    }
+
+    let _ = fs::remove_dir_all(root);
+}
