@@ -70,4 +70,11 @@ describe("runtime load", () => {
     const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
     expect(main).toContain("handoffPending: true");
   });
+
+  test("IPC identity is revoked when a main-frame navigation starts", () => {
+    const guard = readFileSync(join(import.meta.dir, "runtime/incodex-ipc-guard.cts"), "utf8");
+    expect(guard).toContain('"did-start-navigation"');
+    expect(guard).toContain('"will-redirect"');
+    expect(guard).toContain("revokeWindowIdentityOnNavigation");
+  });
 });
