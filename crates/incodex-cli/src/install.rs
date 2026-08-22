@@ -322,7 +322,7 @@ where
             warning: None,
         });
     }
-    if let Some(archive) = Archive::open(&asar).ok() {
+    if let Ok(archive) = Archive::open(&asar) {
         let has_loader = archive.extract(LOADER_NAME).is_ok();
         if let Ok(package) = archive.read_package_main() {
             if has_loader || package.already_patched || package.install_id.is_some() {
@@ -713,7 +713,7 @@ fn installed_marker_id(app: &Path, root: &Path, archive: &Archive) -> Option<Str
 }
 
 fn verified_live_install_id(root: &Path, app: &Path) -> Option<String> {
-    Archive::open(&app.join(ASAR_REL))
+    Archive::open(app.join(ASAR_REL))
         .ok()
         .and_then(|archive| installed_marker_id(app, root, &archive))
 }
