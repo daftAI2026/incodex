@@ -122,6 +122,23 @@ fn status_json_and_doctor_json_share_diagnosis_object() {
 }
 
 #[test]
+fn doctor_accepts_a_runtime_publisher_pointer_with_optional_manifest_fields() {
+    let home = isolated_home();
+    let app = home.join("Missing.app");
+    let published = incodex_runtime_bundle::publish(&home.join(".incodex")).unwrap();
+
+    let (status, stdout, stderr) =
+        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(status, 0);
+    assert_eq!(stderr, "");
+    let runtime = &parse_json(&stdout)["externalRuntime"];
+    assert_eq!(runtime["present"], true);
+    assert_eq!(runtime["ok"], true);
+    assert_eq!(runtime["version"], published.version);
+    assert_eq!(runtime["release"], published.release);
+}
+
+#[test]
 fn doctor_rejects_runtime_manifest_missing_required_artifacts() {
     let home = isolated_home();
     let release = home.join(".incodex/runtime/releases/0.2.0");

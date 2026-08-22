@@ -86,7 +86,13 @@ fn verify_current_complete(user_root: &Path) -> serde_json::Value {
             "hash {name}"
         );
     }
-    if current["schemaVersion"] == 2 {
+    let has_manifest_hash = current.get("manifestSha256").is_some();
+    assert_eq!(
+        has_manifest_hash,
+        current.get("sourceCommit").is_some(),
+        "new pointer fields must be present together"
+    );
+    if has_manifest_hash {
         let manifest_hash = current["manifestSha256"].as_str().unwrap();
         let manifest_path = release_dir.join("runtime-manifest.json");
         let manifest_bytes = fs::read(&manifest_path).unwrap();
@@ -128,7 +134,7 @@ fn concurrent_publishers_share_one_complete_runtime() {
         handle.join().unwrap().unwrap();
     }
     let current = verify_current_complete(&root);
-    assert_eq!(current["schemaVersion"], 2);
+    assert_eq!(current["schemaVersion"], 1);
     assert_eq!(
         current["release"],
         format!("releases/{}", expected_new_release())
@@ -310,7 +316,7 @@ fn sigkill_matrix_exposes_only_complete_old_or_new_pointer() {
         if current_is_old {
             assert_eq!(current, old_release);
         } else {
-            assert_eq!(current["schemaVersion"], 2);
+            assert_eq!(current["schemaVersion"], 1);
             assert_eq!(
                 current["release"],
                 format!("releases/{}", expected_new_release())
@@ -331,19 +337,12 @@ fn sigkill_matrix_exposes_only_complete_old_or_new_pointer() {
 
 fn write_loader_fixture(
     user_root: &Path,
-    schema: u64,
+    new_contract: bool,
     invalid_manifest: bool,
 ) -> (PathBuf, PathBuf, PathBuf) {
     let home = user_root.parent().unwrap().to_path_buf();
     let app = home.join("App");
     let runtime = runtime_root(user_root);
-    let release_name = if schema == 1 {
-        "legacy-release".to_string()
-    } else {
-        expected_new_release()
-    };
-    let release = runtime.join("releases").join(&release_name);
-    fs::create_dir_all(&release).unwrap();
     fs::create_dir_all(&app).unwrap();
     fs::write(app.join("incodex-loader.cjs"), loader_source()).unwrap();
     fs::write(
@@ -359,7 +358,6 @@ fn write_loader_fixture(
     let runtime_body = b"require('node:fs').writeFileSync(process.env.INCODEX_RUNTIME_MARKER, 'runtime'); module.exports = {};";
     let mut files = serde_json::Map::new();
     for name in required_runtime_files() {
-        fs::write(release.join(name), runtime_body).unwrap();
         files.insert(
             name.to_string(),
             serde_json::Value::String(sha256_hex(runtime_body)),
@@ -371,16 +369,26 @@ fn write_loader_fixture(
         "files": files,
     });
     let manifest_bytes = format!("{}\n", serde_json::to_string_pretty(&manifest).unwrap());
-    if schema == 2 {
+    let release_name = if new_contract {
+        format!("{}-{}", runtime_version(), sha256_hex(manifest_bytes.as_bytes()))
+    } else {
+        "legacy-release".to_string()
+    };
+    let release = runtime.join("releases").join(&release_name);
+    fs::create_dir_all(&release).unwrap();
+    for name in required_runtime_files() {
+        fs::write(release.join(name), runtime_body).unwrap();
+    }
+    if new_contract {
         fs::write(release.join("runtime-manifest.json"), &manifest_bytes).unwrap();
     }
     let mut current = serde_json::json!({
-        "schemaVersion": schema,
+        "schemaVersion": 1,
         "version": runtime_version(),
         "release": format!("releases/{release_name}"),
         "files": files,
     });
-    if schema == 2 {
+    if new_contract {
         current["manifestSha256"] = serde_json::Value::String(if invalid_manifest {
             "0".repeat(64)
         } else {
@@ -412,7 +420,7 @@ fn run_loader(home: &Path, loader: &Path, runtime_marker: &Path, official_marker
 fn loader_uses_real_filesystem_and_accepts_old_pointer_without_manifest_hash() {
     let home_root = scratch("loader-old");
     let root = home_root.join(".incodex");
-    let (home, loader, _) = write_loader_fixture(&root, 1, false);
+    let (home, loader, _) = write_loader_fixture(&root, false, false);
     let runtime_marker = home.join("runtime-marker");
     let official_marker = home.join("official-marker");
     run_loader(&home, &loader, &runtime_marker, &official_marker);
@@ -425,7 +433,7 @@ fn loader_uses_real_filesystem_and_accepts_old_pointer_without_manifest_hash() {
 fn loader_verifies_new_manifest_hash_and_fails_open_on_mismatch() {
     let home_root = scratch("loader-new");
     let root = home_root.join(".incodex");
-    let (home, loader, _) = write_loader_fixture(&root, 2, true);
+    let (home, loader, _) = write_loader_fixture(&root, true, true);
     let runtime_marker = home.join("runtime-marker");
     let official_marker = home.join("official-marker");
     run_loader(&home, &loader, &runtime_marker, &official_marker);
@@ -438,7 +446,7 @@ fn loader_verifies_new_manifest_hash_and_fails_open_on_mismatch() {
 fn loader_fails_open_on_new_release_path_mismatch() {
     let home_root = scratch("loader-path");
     let root = home_root.join(".incodex");
-    let (home, loader, _) = write_loader_fixture(&root, 2, false);
+    let (home, loader, _) = write_loader_fixture(&root, true, false);
     let current_path = runtime_root(&root).join("current.json");
     let mut current = read_current(&root);
     current["release"] = serde_json::Value::String("releases/not-the-address".into());
@@ -447,6 +455,23 @@ fn loader_fails_open_on_new_release_path_mismatch() {
     let official_marker = home.join("official-marker");
     run_loader(&home, &loader, &runtime_marker, &official_marker);
     assert!(!runtime_marker.exists(), "invalid release path was loaded");
+    assert_eq!(fs::read_to_string(official_marker).unwrap(), "official");
+    fs::remove_dir_all(home_root).unwrap();
+}
+
+#[test]
+fn loader_rejects_partial_new_pointer_fields() {
+    let home_root = scratch("loader-partial");
+    let root = home_root.join(".incodex");
+    let (home, loader, _) = write_loader_fixture(&root, false, false);
+    let current_path = runtime_root(&root).join("current.json");
+    let mut current = read_current(&root);
+    current["manifestSha256"] = serde_json::Value::String("0".repeat(64));
+    write_json(&current_path, &current);
+    let runtime_marker = home.join("runtime-marker");
+    let official_marker = home.join("official-marker");
+    run_loader(&home, &loader, &runtime_marker, &official_marker);
+    assert!(!runtime_marker.exists(), "partial pointer was loaded");
     assert_eq!(fs::read_to_string(official_marker).unwrap(), "official");
     fs::remove_dir_all(home_root).unwrap();
 }

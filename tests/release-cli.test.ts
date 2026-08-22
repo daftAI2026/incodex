@@ -52,6 +52,7 @@ describe("release CLI artifacts", () => {
     expect(releaseYml).toContain('"$BINARY" --version');
     expect(releaseYml).toContain('"$BINARY" --help');
     expect(releaseYml).toContain('"$BINARY" runtime');
+    expect(releaseYml).toContain("current.schemaVersion !== 1");
     expect(releaseYml).toContain("manifestSha256");
     expect(releaseYml).toContain("sourceCommit");
     expect(releaseYml).toContain("runtime-manifest.json");

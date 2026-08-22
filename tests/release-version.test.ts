@@ -36,9 +36,9 @@ function fixture(): string {
   );
   const readme = [
     "  Runtime      0.2.0",
-    "  Runtime      0.2.0 releases/0.2.0",
+    "  Runtime      0.2.0 releases/0.2.0-<manifestSha256>",
     "  Version      0.2.0",
-    "  External     0.2.0 releases/0.2.0",
+    "  External     0.2.0 releases/0.2.0-<manifestSha256>",
     "Incodex version 0.2.0",
     "",
   ].join("\n");
@@ -65,6 +65,7 @@ describe("release version preparation", () => {
     for (const path of ["README.md", "README_CN.md"]) {
       expect(read(dir, path)).not.toContain("0.2.0");
       expect(read(dir, path)).toContain("Incodex version 0.3.0");
+      expect(read(dir, path)).toContain("releases/0.3.0-<manifestSha256>");
     }
   });
 
@@ -86,6 +87,7 @@ describe("release version preparation", () => {
     for (const path of ["README.md", "README_CN.md"]) {
       expect(read(root, path)).toContain(`Incodex version ${version}`);
       expect(read(root, path)).toContain(`Runtime      ${version}`);
+      expect(read(root, path)).toContain(`releases/${version}-<manifestSha256>`);
     }
   });
 
