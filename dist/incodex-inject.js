@@ -964,6 +964,9 @@ var SHORTCUT_LABEL = "⇧⌘N";
 var TOOLTIP_DELAY_MS = 700;
 var TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
 var activeTooltipLifecycle = null;
+function dismissActiveTooltip() {
+  activeTooltipLifecycle?.dismiss();
+}
 function disposeActiveTooltip() {
   activeTooltipLifecycle?.dispose();
   activeTooltipLifecycle = null;
@@ -1065,7 +1068,7 @@ async function requestAction(action) {
   }
 }
 async function activate() {
-  activeTooltipLifecycle?.dismiss();
+  dismissActiveTooltip();
   if (isIncognitoWindow()) {
     const result2 = await requestAction("quit");
     if (!result2.ok)
@@ -1408,12 +1411,15 @@ function ensureLanding() {
   mount.parent.insertBefore(host, mount.before);
 }
 function ensureButton() {
+  let btn = document.querySelector(`[${BTN_ATTR}]`);
   const search = findSearchButton();
   if (!search?.parentElement) {
-    disposeActiveTooltip();
+    if (btn?.isConnected)
+      dismissActiveTooltip();
+    else
+      disposeActiveTooltip();
     return;
   }
-  let btn = document.querySelector(`[${BTN_ATTR}]`);
   if (!btn)
     btn = buildButton(search);
   if (!isParkedLeftOfSearch(btn, search)) {
@@ -1421,7 +1427,11 @@ function ensureButton() {
   }
   apply();
 }
-function onHotkey(event) {
+function onKeydown(event) {
+  if (event.key === "Escape") {
+    dismissActiveTooltip();
+    return;
+  }
   if (!(event.metaKey || event.ctrlKey) || !event.shiftKey)
     return;
   if (event.code !== "KeyN" && event.key.toLowerCase() !== "n")
@@ -1441,7 +1451,8 @@ function start() {
   apply();
   ensureLanding();
   refreshUiProbe();
-  window.addEventListener("keydown", onHotkey, true);
+  window.addEventListener("keydown", onKeydown, true);
+  window.addEventListener("blur", dismissActiveTooltip);
   window.addEventListener(TOOLTIP_DISMISS_EVENT, () => activeTooltipLifecycle?.dismiss());
   let scheduled = false;
   const observer = new MutationObserver(() => {

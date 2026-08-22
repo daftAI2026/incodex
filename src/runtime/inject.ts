@@ -16,6 +16,10 @@ const TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
 
 let activeTooltipLifecycle: TooltipLifecycle | null = null;
 
+function dismissActiveTooltip(): void {
+  activeTooltipLifecycle?.dismiss();
+}
+
 function disposeActiveTooltip(): void {
   activeTooltipLifecycle?.dispose();
   activeTooltipLifecycle = null;
@@ -113,7 +117,7 @@ async function requestAction(action: "open" | "quit"): Promise<{ ok: boolean; re
 }
 
 async function activate(): Promise<void> {
-  activeTooltipLifecycle?.dismiss();
+  dismissActiveTooltip();
   if (isIncognitoWindow()) {
     const result = await requestAction("quit");
     if (!result.ok) window.close();
@@ -511,13 +515,14 @@ function ensureLanding(): void {
 }
 
 function ensureButton(): void {
+  let btn = document.querySelector<HTMLElement>(`[${BTN_ATTR}]`);
   const search = findSearchButton();
   if (!search?.parentElement) {
-    disposeActiveTooltip();
+    if (btn?.isConnected) dismissActiveTooltip();
+    else disposeActiveTooltip();
     return;
   }
 
-  let btn = document.querySelector<HTMLElement>(`[${BTN_ATTR}]`);
   if (!btn) btn = buildButton(search);
   if (!isParkedLeftOfSearch(btn, search)) {
     search.parentElement.insertBefore(btn, search);
@@ -525,7 +530,11 @@ function ensureButton(): void {
   apply();
 }
 
-function onHotkey(event: KeyboardEvent): void {
+function onKeydown(event: KeyboardEvent): void {
+  if (event.key === "Escape") {
+    dismissActiveTooltip();
+    return;
+  }
   if (!(event.metaKey || event.ctrlKey) || !event.shiftKey) return;
   if (event.code !== "KeyN" && event.key.toLowerCase() !== "n") return;
   event.preventDefault();
@@ -544,7 +553,8 @@ function start(): void {
   apply();
   ensureLanding();
   refreshUiProbe();
-  window.addEventListener("keydown", onHotkey, true);
+  window.addEventListener("keydown", onKeydown, true);
+  window.addEventListener("blur", dismissActiveTooltip);
   window.addEventListener(TOOLTIP_DISMISS_EVENT, () => activeTooltipLifecycle?.dismiss());
   let scheduled = false;
   const observer = new MutationObserver(() => {
