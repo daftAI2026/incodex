@@ -97,6 +97,27 @@ fn post_rename_write_and_readback_failure_keeps_the_durable_phase_in_memory() {
 }
 
 #[test]
+fn rollback_post_rename_readback_failure_keeps_the_durable_rollback_phase() {
+    let root = std::env::temp_dir().join(format!(
+        "incodex-rollback-post-rename-readback-failure-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let mut tx = swapped_transaction(&root);
+    let id = tx.install_id().to_string();
+
+    fail_next_write_after_rename();
+    fail_next_load();
+    let error = tx.rollback("injected rollback journal failure").unwrap_err();
+
+    assert!(error.contains("injected post-rename journal write failure"));
+    assert_eq!(tx.journal().phase, "ROLLED_BACK");
+    assert_eq!(load_v2(&root, &id).unwrap().phase, "ROLLED_BACK");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn install_phases_bound_repeated_tree_digest_scans() {
     let root = std::env::temp_dir().join(format!("incodex-digest-budget-{}", std::process::id()));
     fs::create_dir_all(&root).unwrap();

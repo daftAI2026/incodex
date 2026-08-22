@@ -241,7 +241,7 @@ fn doctor_marks_committed_restore_symlink_manual() {
 }
 
 #[test]
-fn doctor_marks_committed_internal_artifact_manual() {
+fn doctor_marks_committed_internal_artifact_cleanup() {
     let home = isolated_home();
     let root = home.join(".incodex");
     let app = home.join("ChatGPT.app");
@@ -281,7 +281,7 @@ fn doctor_marks_committed_internal_artifact_manual() {
         .find(|record| record["installId"] == id)
         .expect("committed transaction record");
     assert_eq!(record["phase"], "COMMITTED");
-    assert_eq!(record["recovery"], "manual");
+    assert_eq!(record["recovery"], "cleanup");
     assert!(record["artifacts"]
         .as_array()
         .unwrap()
