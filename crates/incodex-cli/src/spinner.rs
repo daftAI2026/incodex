@@ -184,7 +184,15 @@ impl Drop for Spinner {
 mod tests {
     use std::time::{Duration, Instant};
 
-    use super::{Progress, Spinner};
+    use super::{format_spinner_message, Progress, Spinner};
+
+    #[test]
+    fn spinner_message_replaces_line_breaks_with_spaces() {
+        assert_eq!(
+            format_spinner_message("First\rSecond\nThird", 80),
+            "First Second Third"
+        );
+    }
 
     #[test]
     fn stopping_wakes_worker_before_long_frame_timeout() {
