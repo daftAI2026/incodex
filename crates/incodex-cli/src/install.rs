@@ -792,6 +792,7 @@ fn print_command_result(result: &CommandResult) {
 fn should_print_keychain_advice(app: &Path, result: &CommandResult) -> bool {
     cfg!(target_os = "macos")
         && !result.skipped
+        && is_official_app(app, None)
         && read_plist_info(app)
             .is_some_and(|info| info.bundle_identifier == OFFICIAL_BUNDLE_IDENTIFIER)
 }
