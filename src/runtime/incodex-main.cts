@@ -597,11 +597,11 @@ async function launchIncognitoOnce() {
   });
 }
 
-const allowedWindows = new Set();
+const allowedWindows = new Map();
 
 function rememberWindow(win) {
   if (!win || typeof win.id !== "number") return;
-  allowedWindows.add(win.id);
+  ipcGuard.bindWindowIdentity(allowedWindows, win);
   win.once("closed", () => allowedWindows.delete(win.id));
 }
 
@@ -631,6 +631,7 @@ function hookWindow(win, source) {
   hookPreload(win.webContents.session);
   const run = () => {
     if (!source || win.webContents.isDestroyed()) return;
+    if (!ipcGuard.bindWindowIdentity(allowedWindows, win)) return;
     const locale = JSON.stringify(readLocaleOverride());
     const prefix = `window.__incodexIncognito=${isIncognito() ? "true" : "false"};window.__incodexLocale=${locale};`;
     win.webContents.executeJavaScript(prefix + source, false).catch(() => {});
