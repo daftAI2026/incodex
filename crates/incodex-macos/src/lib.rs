@@ -1,7 +1,8 @@
 //! codesign, plist, ditto, Launch Services, and quit.
 
-use std::ffi::CStr;
+use std::ffi::OsString;
 use std::fs;
+use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -240,11 +241,11 @@ fn process_executable_path(pid: i32) -> Option<PathBuf> {
     if size <= 0 || size as usize > buffer.len() {
         return None;
     }
-    let bytes = &buffer[..size as usize];
-    CStr::from_bytes_until_nul(bytes)
-        .ok()
-        .and_then(|path| path.to_str().ok())
-        .map(PathBuf::from)
+    let mut length = size as usize;
+    while length > 0 && buffer[length - 1] == 0 {
+        length -= 1;
+    }
+    (length > 0).then(|| PathBuf::from(OsString::from_vec(buffer[..length].to_vec())))
 }
 
 #[cfg(not(target_os = "macos"))]
