@@ -64,6 +64,7 @@ fn probe_process(pid: i32) -> ProcessProbe {
     }
     let output = Command::new("ps")
         .args(["-p", &pid.to_string(), "-o", "lstart="])
+        .env("LC_ALL", "C")
         .output()
         .ok();
     let Some(output) = output else {
@@ -73,7 +74,7 @@ fn probe_process(pid: i32) -> ProcessProbe {
         return ProcessProbe::Unknown;
     }
     let identity = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if identity.is_empty() {
+    if !is_canonical_process_start_identity(&identity) {
         ProcessProbe::Unknown
     } else {
         ProcessProbe::Live(identity)
@@ -85,6 +86,26 @@ pub fn create_session_home(
     target_id: Option<&str>,
     pid: i32,
     source_home: &str,
+) -> Result<SessionHome, String> {
+    create_session_home_inner(user_root, target_id, pid, source_home, false)
+}
+
+/// 为 `open` 创建带有短暂 owner handoff 保护的 session。
+pub fn create_session_home_for_open(
+    user_root: &Path,
+    target_id: Option<&str>,
+    pid: i32,
+    source_home: &str,
+) -> Result<SessionHome, String> {
+    create_session_home_inner(user_root, target_id, pid, source_home, true)
+}
+
+fn create_session_home_inner(
+    user_root: &Path,
+    target_id: Option<&str>,
+    pid: i32,
+    source_home: &str,
+    handoff_pending: bool,
 ) -> Result<SessionHome, String> {
     let parent = user_root
         .parent()
@@ -125,6 +146,9 @@ pub fn create_session_home(
     });
     if let Some(identity) = process_start_identity.as_deref() {
         owner["processStartIdentity"] = serde_json::json!(identity);
+    }
+    if handoff_pending {
+        owner["handoffPending"] = serde_json::json!(true);
     }
     write_private_file(
         &real_root.join(OWNER_NAME),
@@ -176,6 +200,13 @@ pub fn handoff_session_owner(
     }
     owner["pid"] = serde_json::json!(pid);
     owner["processStartIdentity"] = serde_json::json!(&identity);
+    if owner
+        .get("handoffPending")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+    {
+        owner["handoffPending"] = serde_json::json!(false);
+    }
     write_private_file_atomic(&owner_path, format!("{owner}\n").as_bytes())?;
     Ok(SessionOwnerSnapshot {
         pid,
@@ -208,7 +239,7 @@ pub fn session_owner_snapshot(session_root: &Path) -> Result<Option<SessionOwner
         .get("processStartIdentity")
         .or_else(|| owner.get("startedAt"))
         .and_then(serde_json::Value::as_str)
-        .filter(|value| !value.is_empty())
+        .filter(|value| is_canonical_process_start_identity(value))
     else {
         return Ok(None);
     };
@@ -344,6 +375,16 @@ where
             .or_else(|| owner.get("startedAt"))
             .and_then(serde_json::Value::as_str)
             .filter(|value| !value.is_empty());
+        if expected_start.is_some_and(|value| !is_canonical_process_start_identity(value)) {
+            continue;
+        }
+        if owner
+            .get("handoffPending")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+        {
+            continue;
+        }
         let stale = match probe(pid) {
             ProcessProbe::Dead => true,
             ProcessProbe::Unknown => false,
@@ -669,6 +710,31 @@ fn file_name(path: &Path) -> Result<String, String> {
         .and_then(|name| name.to_str())
         .map(str::to_string)
         .ok_or_else(|| format!("invalid path: {}", path.display()))
+}
+
+fn is_canonical_process_start_identity(value: &str) -> bool {
+    let parts: Vec<&str> = value.split_whitespace().collect();
+    if parts.len() != 5
+        || parts[0].len() != 3
+        || parts[1].len() != 3
+        || !parts[0].bytes().all(|byte| byte.is_ascii_alphabetic())
+        || !parts[1].bytes().all(|byte| byte.is_ascii_alphabetic())
+        || !(1..=2).contains(&parts[2].len())
+        || !parts[2].bytes().all(|byte| byte.is_ascii_digit())
+        || parts[3].len() != 8
+        || !parts[3].bytes().enumerate().all(|(index, byte)| {
+            if matches!(index, 2 | 5) {
+                byte == b':'
+            } else {
+                byte.is_ascii_digit()
+            }
+        })
+        || parts[4].len() != 4
+        || !parts[4].bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return false;
+    }
+    true
 }
 
 #[cfg(test)]

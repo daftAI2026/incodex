@@ -356,6 +356,7 @@ function prepareIncognitoSession(options = {}) {
       targetId: appTarget,
       pid,
       sourceHome: sourceHomePath,
+      handoffPending: true,
     });
     copySettings(session.home, sourceHomePath);
     return { ok: true, session };

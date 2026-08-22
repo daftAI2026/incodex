@@ -34,11 +34,15 @@ function ownerPortFromExec(execPath) {
 
 function processIdentity(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return null;
-  const listed = spawnSync("ps", ["-p", String(pid), "-o", "pid=,lstart=,comm="], { encoding: "utf8" });
+  const listed = spawnSync("ps", ["-p", String(pid), "-o", "pid=,lstart=,comm="], {
+    encoding: "utf8",
+    env: { ...process.env, LC_ALL: "C" },
+  });
   if (listed.status !== 0 || !listed.stdout.trim()) return null;
   const line = listed.stdout.trim();
   const match = line.match(/^(\d+)\s+(.+?)\s+(\S+)$/);
   if (!match) return null;
+  if (!isCanonicalProcessStartIdentity(match[2].trim())) return null;
   const comm = match[3];
   return {
     pid: Number(match[1]),
@@ -47,6 +51,19 @@ function processIdentity(pid) {
     comm,
     execIdentity: comm,
   };
+}
+
+function isCanonicalProcessStartIdentity(value) {
+  if (typeof value !== "string") return false;
+  const parts = value.trim().split(/\s+/);
+  return (
+    parts.length === 5 &&
+    /^[A-Za-z]{3}$/.test(parts[0]) &&
+    /^[A-Za-z]{3}$/.test(parts[1]) &&
+    /^\d{1,2}$/.test(parts[2]) &&
+    /^\d{2}:\d{2}:\d{2}$/.test(parts[3]) &&
+    /^\d{4}$/.test(parts[4])
+  );
 }
 
 function ownerToken(owner) {
@@ -334,6 +351,7 @@ function staleOwnerRecord(owner) {
   if (!owner || !Number.isInteger(owner.pid) || owner.pid <= 0) return true;
   if (!hasReliableOwnerIdentity(owner)) return false;
   if (!pidAlive(owner.pid)) return true;
+  if (!isCanonicalProcessStartIdentity(owner.processStartIdentity || owner.startedAt)) return false;
   const live = processIdentity(owner.pid);
   if (!live) return false;
   return !ownerMatchesLive(owner, live);
@@ -371,6 +389,7 @@ module.exports = {
   activeOwnerPath,
   setOwnerRecordTestHook,
   processIdentity,
+  isCanonicalProcessStartIdentity,
   ownerToken,
   hasReliableOwnerIdentity,
   ownerMatchesLive,

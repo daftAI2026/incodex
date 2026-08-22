@@ -170,6 +170,7 @@ function createSessionHome(userRoot, options = {}) {
     dev: rootStat.dev,
     processStartIdentity,
   };
+  if (options.handoffPending === true) owner.handoffPending = true;
   writePrivateFile(path.join(realRoot, OWNER_NAME), `${JSON.stringify(owner)}\n`, { exclusive: true });
   return {
     sessionId,
@@ -195,6 +196,7 @@ function handoffSessionOwner(sessionRoot, pid) {
   }
   owner.pid = pid;
   owner.processStartIdentity = live.processStartIdentity;
+  if (owner.handoffPending === true) owner.handoffPending = false;
   writePrivateFileAtomic(ownerPath, `${JSON.stringify(owner)}\n`);
   return { pid, processStartIdentity: live.processStartIdentity };
 }
@@ -393,7 +395,9 @@ function sweepOrphanSessions(userRoot, options = {}) {
     try {
       const owner = readOwner(root);
       if (!Number.isInteger(owner.pid)) continue;
+      if (owner.handoffPending === true) continue;
       const expectedStart = owner.processStartIdentity || owner.startedAt;
+      if (expectedStart && !ownerCore.isCanonicalProcessStartIdentity(expectedStart)) continue;
       const status = options.pidAlive
         ? (options.pidAlive(owner.pid) ? "live" : "dead")
         : processStatus(owner.pid);

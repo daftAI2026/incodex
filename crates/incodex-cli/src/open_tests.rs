@@ -1,6 +1,7 @@
 // Tests for the native `open` lifecycle. Kept outside open.rs so the product
 // implementation remains below the repository's per-file size budget.
 use super::*;
+use incodex_core::session::create_session_home;
 use std::fs;
 use std::process::Command;
 use std::sync::mpsc;
