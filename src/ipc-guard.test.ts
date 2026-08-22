@@ -173,6 +173,16 @@ describe("bindWindowIdentity", () => {
     expect(bindWindowIdentity(allowed, win, trustedOrigins)).toBe(false);
   });
 
+  test("an untrusted navigation cannot regain IPC after returning to the app", () => {
+    const allowed = new Map();
+    const { state, win } = windowFixture();
+    expect(bindWindowIdentity(allowed, win, trustedOrigins)).toBe(true);
+    state.url = "https://evil.example/bridge";
+    expect(bindWindowIdentity(allowed, win, trustedOrigins)).toBe(false);
+    state.url = "app://-/index.html";
+    expect(bindWindowIdentity(allowed, win, trustedOrigins)).toBe(false);
+  });
+
   test("does not bind a packaged file origin outside the current app", () => {
     const allowed = new Map();
     const { state, win } = windowFixture();
