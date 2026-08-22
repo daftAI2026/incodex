@@ -726,6 +726,15 @@ fn transaction_evidence(
             {
                 Some("manual".to_string())
             }
+            incodex_transaction::Recovery::Rollback
+                if matches!(
+                    phase,
+                    "TARGET_MOVED_OUT" | "SWAPPED" | "TARGET_VERIFIED" | "UNINSTALLING"
+                ) && include_original_proof
+                    && original_valid == Some(false) =>
+            {
+                Some("manual".to_string())
+            }
             incodex_transaction::Recovery::Rollback => Some("rollback".to_string()),
             incodex_transaction::Recovery::Refuse => Some("manual".to_string()),
             incodex_transaction::Recovery::Done if internal_cleanup_safe => {
