@@ -88,7 +88,7 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
             format_ok("Restart that app copy to see the Incognito button.", None)
         );
     }
-    if should_print_keychain_advice(&app, &result) {
+    if should_print_keychain_advice(&app, &result, parsed.app.is_some()) {
         print_keychain_advice();
     }
     println!();
@@ -789,12 +789,23 @@ fn print_command_result(result: &CommandResult) {
     println!("{}", format_kv("App", &result.app, None));
 }
 
-fn should_print_keychain_advice(app: &Path, result: &CommandResult) -> bool {
-    cfg!(target_os = "macos")
-        && !result.skipped
-        && is_official_app(app, None)
-        && read_plist_info(app)
-            .is_some_and(|info| info.bundle_identifier == OFFICIAL_BUNDLE_IDENTIFIER)
+fn should_print_keychain_advice(app: &Path, result: &CommandResult, explicit_target: bool) -> bool {
+    keychain_advice_is_allowed(
+        !result.skipped,
+        is_official_app(app, None),
+        read_plist_info(app)
+            .is_some_and(|info| info.bundle_identifier == OFFICIAL_BUNDLE_IDENTIFIER),
+        explicit_target,
+    )
+}
+
+fn keychain_advice_is_allowed(
+    new_install: bool,
+    official_target: bool,
+    codex_bundle: bool,
+    _explicit_target: bool,
+) -> bool {
+    cfg!(target_os = "macos") && new_install && official_target && codex_bundle
 }
 
 fn print_keychain_advice() {
