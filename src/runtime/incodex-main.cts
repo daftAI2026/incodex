@@ -597,11 +597,12 @@ async function launchIncognitoOnce() {
   });
 }
 
-const allowedWindows = new Set();
+const allowedWindows = new Map();
+const trustedOrigins = new Set(["app://-", "https://chatgpt.com"]);
 
 function rememberWindow(win) {
   if (!win || typeof win.id !== "number") return;
-  allowedWindows.add(win.id);
+  ipcGuard.bindWindowIdentity(allowedWindows, win, trustedOrigins);
   win.once("closed", () => allowedWindows.delete(win.id));
 }
 
@@ -631,6 +632,7 @@ function hookWindow(win, source) {
   hookPreload(win.webContents.session);
   const run = () => {
     if (!source || win.webContents.isDestroyed()) return;
+    if (!ipcGuard.bindWindowIdentity(allowedWindows, win, trustedOrigins)) return;
     const locale = JSON.stringify(readLocaleOverride());
     const prefix = `window.__incodexIncognito=${isIncognito() ? "true" : "false"};window.__incodexLocale=${locale};`;
     win.webContents.executeJavaScript(prefix + source, false).catch(() => {});
@@ -647,6 +649,10 @@ async function attachElectron() {
   } catch {
     return;
   }
+  const packagedOrigin = ipcGuard.navigationOrigin(
+    require("node:url").pathToFileURL(electron.app.getAppPath()).href,
+  );
+  packagedOrigin && trustedOrigins.add(packagedOrigin);
   captureSourceHome();
 
   if (!isIncognito()) {

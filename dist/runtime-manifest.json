@@ -4,10 +4,10 @@
   "files": {
     "incodex-inject.js": "1d6b7c5909ef7005b1164b92a51d8ce5136ad68386b8c45d21185de9a5141a7c",
     "incodex-loader.cjs": "071f0bf552b1289eec93250e23dc1162225254b8d1d2d58de6c75cb960cb0f52",
-    "incodex-main.cjs": "0fd8827f197aac98fd24e120caa3535377d37949ba69555e6035a6cefa920c45",
+    "incodex-main.cjs": "9c169adb62a5b23f9105e768bbbae6d24a5f3b515bed775fdd707312faed3c59",
     "incodex-preload.cjs": "d97ae1ae39028c90ff3687b375c8614fc1fe228b3a3d149ead1c5d95d1a6bc55",
     "incodex-safe-home.cjs": "8406d1b25bc04393f99f4de27bc1992ecea8995d1063797199b2e7cdd5d62cf8",
-    "incodex-ipc-guard.cjs": "1abbc914a8e2a627bb047cda385a216cbd17ef446d8a6dfe993b732fba380395",
+    "incodex-ipc-guard.cjs": "5b424edf0effc67b1ce87c69c9519babf230c6565b3bdc5a5d0432959f6c044b",
     "incodex-owner-core.cjs": "0b7c02bfc3f7197375d23a7b003548013ea4034d61f7bb51a74c83b600384255",
     "incodex-owner-recovery.cjs": "1273e8856cb47b597a1d7e96b24ac462df5ef22988072536c35691e1d4acaf67",
     "incodex-instance.cjs": "862df9b9dcb8fc8e55b5cf6097fd45b2e5150d1ab891c1c2223fca36c8da18d7",
