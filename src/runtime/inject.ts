@@ -2,6 +2,7 @@ import { STRIP_CLONE_ATTRS } from "./compatibility/default-adapter";
 import { isSearchLabel } from "./compatibility/search-labels";
 import { type CopyKey, translate, resolveLocale as matchLocale } from "./incognito-copy";
 import { iconFor, type IncognitoButtonIcon } from "./incognito-icon";
+import { deriveUiProbe } from "./incodex-ui-probe";
 
 const STYLE_ID = "incodex-privacy-style";
 const BTN_ATTR = "data-incodex-privacy-toggle";
@@ -335,6 +336,18 @@ function bannerDismissed(): boolean {
   }
 }
 
+function refreshUiProbe(): void {
+  const incognito = isIncognitoWindow();
+  window.__incodexUiProbe = deriveUiProbe({
+    incognito,
+    buttonPresent: buttonStillBesideSearch(),
+    bannerPresent: Boolean(
+      document.querySelector(`[${BANNER_HOST_ATTR}]`)?.querySelector(`[${LANDING_ATTR}]`),
+    ),
+    bannerDismissed: incognito && bannerDismissed(),
+  });
+}
+
 function dismissBanner(): void {
   try {
     window.sessionStorage.setItem(BANNER_DISMISS_KEY, "1");
@@ -343,6 +356,7 @@ function dismissBanner(): void {
   }
   document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`)?.closest(`[${BANNER_HOST_ATTR}]`)?.remove();
   document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`)?.remove();
+  refreshUiProbe();
 }
 
 function classNameOf(el: Element): string {
@@ -502,6 +516,7 @@ function start(): void {
   ensureButton();
   apply();
   ensureLanding();
+  refreshUiProbe();
   window.addEventListener("keydown", onHotkey, true);
   let scheduled = false;
   const observer = new MutationObserver(() => {
@@ -513,6 +528,7 @@ function start(): void {
       if (!needsInject()) return;
       ensureButton();
       ensureLanding();
+      refreshUiProbe();
     });
   });
   observer.observe(document.documentElement, { childList: true, subtree: true });
@@ -523,6 +539,7 @@ declare global {
     __incodexStarted?: boolean;
     __incodexIncognito?: boolean;
     __incodexLocale?: string;
+    __incodexUiProbe?: ReturnType<typeof deriveUiProbe>;
     incodex?: {
       requestIncognitoAction?: (payload: {
         action: "open" | "quit";

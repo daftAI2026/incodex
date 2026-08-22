@@ -626,23 +626,34 @@ function hookPreload(session) {
         console.error("[incodex] preload failed", error);
     }
 }
+function reportInjectionError(error) {
+    logLaunch("ui-injection-failed", { error: String(error) });
+}
+function reportInjectionProbe(win) {
+    return win.webContents.executeJavaScript("window.__incodexUiProbe", false).then((probe) => {
+        logLaunch("ui-probe", probe);
+    });
+}
 function hookWindow(win, source) {
     if (!win?.webContents || isAuxiliaryWindow(win))
         return;
     rememberWindow(win);
     hookPreload(win.webContents.session);
-    const run = () => {
+    const run = (report) => {
         if (!source || win.webContents.isDestroyed())
             return;
         if (!ipcGuard.bindWindowIdentity(allowedWindows, win, trustedOrigins))
             return;
         const locale = JSON.stringify(readLocaleOverride());
         const prefix = `window.__incodexIncognito=${isIncognito() ? "true" : "false"};window.__incodexLocale=${locale};`;
-        win.webContents.executeJavaScript(prefix + source, false).catch(() => { });
+        win.webContents
+            .executeJavaScript(prefix + source, false)
+            .then(() => (report ? reportInjectionProbe(win) : undefined))
+            .catch((error) => reportInjectionError(error));
     };
-    win.webContents.on("dom-ready", run);
-    win.webContents.on("did-finish-load", run);
-    run();
+    win.webContents.on("dom-ready", () => run(false));
+    win.webContents.on("did-finish-load", () => run(true));
+    run(false);
 }
 async function attachElectron() {
     let electron;
