@@ -301,7 +301,7 @@ fn assert_no_transient_transaction_dirs(home: &Path) {
     walk(&transactions);
 }
 
-#[ignore]
+#[ignore = "requires a finalized signed release asset"]
 #[test]
 fn release_asset_behavior_smoke() {
     #[cfg(not(target_os = "macos"))]
@@ -326,6 +326,8 @@ fn release_asset_behavior_smoke() {
         &codex_home,
     );
     assert_status_json(status_before, &app, false);
+    let dry_run_home_before = snapshot(&home);
+    let dry_run_codex_home_before = snapshot(&codex_home);
     let dry_run_before = snapshot(&app);
     assert_success(
         runner.run(
@@ -339,6 +341,16 @@ fn release_asset_behavior_smoke() {
         snapshot(&app),
         dry_run_before,
         "open --dry-run mutated fixture"
+    );
+    assert_eq!(
+        snapshot(&home),
+        dry_run_home_before,
+        "open --dry-run mutated HOME"
+    );
+    assert_eq!(
+        snapshot(&codex_home),
+        dry_run_codex_home_before,
+        "open --dry-run mutated CODEX_HOME"
     );
 
     let original_snapshot = snapshot(&app);
