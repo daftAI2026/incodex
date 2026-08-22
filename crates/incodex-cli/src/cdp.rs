@@ -258,7 +258,7 @@ fn close_browser(debug_port: u16) -> Result<(), String> {
     validate_cdp_websocket_url(websocket, debug_port)?;
     let (mut socket, _) = connect_cdp_websocket(websocket, debug_port)?;
     socket
-        .send(Message::Text(browser_close_message().to_string()))
+        .send(Message::Text(browser_close_message().to_string().into()))
         .map_err(|err| err.to_string())
 }
 
@@ -289,7 +289,7 @@ fn send_cdp_with_deadline<S: Read + Write>(
     deadline: Instant,
 ) -> Result<Value, String> {
     let body = json!({ "id": id, "method": method, "params": params });
-    let message = Message::Text(body.to_string());
+    let message = Message::Text(body.to_string().into());
 
     // 先把命令写入 WebSocket 缓冲区；即使底层只写了一部分，也只能重试 flush。
     // 再次 write/send 会重新排队同一命令，导致 CDP 收到重复请求。
