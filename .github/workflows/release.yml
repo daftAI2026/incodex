@@ -74,43 +74,72 @@ jobs:
           lipo release-cli/incodex-darwin-x64 -verify_arch x86_64
           codesign --verify --strict release-cli/incodex-darwin-arm64
           codesign --verify --strict release-cli/incodex-darwin-x64
-      - name: Smoke test host runtime publisher
+      - name: Smoke test both stable Runtime publishers
         run: |
           set -euo pipefail
           case "$(uname -m)" in
-            arm64) BINARY=release-cli/incodex-darwin-arm64 ;;
-            x86_64) BINARY=release-cli/incodex-darwin-x64 ;;
-            *) echo "unsupported host architecture: $(uname -m)" >&2; exit 1 ;;
+            arm64) ;;
+            *) echo "release smoke requires an arm64 host: $(uname -m)" >&2; exit 1 ;;
           esac
-          "$BINARY" --version
-          "$BINARY" --help >/dev/null
-          SMOKE_HOME="$(mktemp -d)"
-          trap 'rm -rf "$SMOKE_HOME"' EXIT
-          HOME="$SMOKE_HOME" "$BINARY" runtime
+          ARM_BINARY="release-cli/incodex-darwin-arm64"
+          X64_BINARY="release-cli/incodex-darwin-x64"
+          "$ARM_BINARY" --version
+          "$ARM_BINARY" --help >/dev/null
+          /usr/bin/arch -x86_64 "$X64_BINARY" --version
+          /usr/bin/arch -x86_64 "$X64_BINARY" --help >/dev/null
+          ARM_SMOKE_HOME="$(mktemp -d)"
+          X64_SMOKE_HOME="$(mktemp -d)"
+          trap 'rm -rf "$ARM_SMOKE_HOME" "$X64_SMOKE_HOME"' EXIT
+          HOME="$ARM_SMOKE_HOME" "$ARM_BINARY" runtime
+          HOME="$X64_SMOKE_HOME" /usr/bin/arch -x86_64 "$X64_BINARY" runtime
           TAG="${GITHUB_REF#refs/tags/}"
           VERSION="${TAG#v}"
-          SMOKE_HOME="$SMOKE_HOME" EXPECTED_VERSION="$VERSION" EXPECTED_SOURCE_COMMIT="$GITHUB_SHA" bun -e '
-            const crypto = require("node:crypto");
-            const fs = require("node:fs");
-            const path = require("node:path");
-            const root = path.join(process.env.SMOKE_HOME, ".incodex", "runtime");
-            const current = JSON.parse(fs.readFileSync(path.join(root, "current.json"), "utf8"));
-            if (current.schemaVersion !== 1 || current.version !== process.env.EXPECTED_VERSION) throw new Error("invalid runtime pointer");
-            if (current.sourceCommit !== process.env.EXPECTED_SOURCE_COMMIT) throw new Error("runtime pointer provenance mismatch");
-            if (!/^[0-9a-f]{64}$/.test(current.manifestSha256)) throw new Error("invalid manifestSha256");
-            if (current.release !== `releases/${current.version}-${current.manifestSha256}`) throw new Error("runtime release name mismatch");
-            const release = path.join(root, current.release);
-            const manifestPath = path.join(release, "runtime-manifest.json");
-            const manifestBytes = fs.readFileSync(manifestPath);
-            const manifestHash = crypto.createHash("sha256").update(manifestBytes).digest("hex");
-            if (manifestHash !== current.manifestSha256) throw new Error("runtime manifest hash mismatch");
-            const manifest = JSON.parse(manifestBytes);
-            if (manifest.runtimeVersion !== current.version || manifest.sourceCommit !== current.sourceCommit) throw new Error("runtime manifest provenance mismatch");
-            for (const [name, expected] of Object.entries(current.files || {})) {
-              const actual = crypto.createHash("sha256").update(fs.readFileSync(path.join(release, name))).digest("hex");
-              if (actual !== expected || manifest.files[name] !== expected) throw new Error(`runtime file hash mismatch: ${name}`);
-            }
-          '
+          verify_runtime_pointer() {
+            SMOKE_HOME="$1" EXPECTED_VERSION="$VERSION" EXPECTED_SOURCE_COMMIT="$GITHUB_SHA" bun -e '
+              const crypto = require("node:crypto");
+              const fs = require("node:fs");
+              const path = require("node:path");
+              const REQUIRED_RUNTIME_FILES = [
+                "incodex-main.cjs",
+                "incodex-preload.cjs",
+                "incodex-inject.js",
+                "incodex-safe-home.cjs",
+                "incodex-ipc-guard.cjs",
+                "incodex-owner-core.cjs",
+                "incodex-owner-recovery.cjs",
+                "incodex-instance.cjs",
+                "incodex-window-kind.cjs",
+                "incodex-runtime-load.cjs",
+              ];
+              const root = path.join(process.env.SMOKE_HOME, ".incodex", "runtime");
+              const current = JSON.parse(fs.readFileSync(path.join(root, "current.json"), "utf8"));
+              if (current.schemaVersion !== 1 || current.version !== process.env.EXPECTED_VERSION) throw new Error("invalid runtime pointer");
+              if (current.sourceCommit !== process.env.EXPECTED_SOURCE_COMMIT) throw new Error("runtime pointer provenance mismatch");
+              if (!/^[0-9a-f]{64}$/.test(current.manifestSha256)) throw new Error("invalid manifestSha256");
+              if (current.release !== `releases/${current.version}-${current.manifestSha256}`) throw new Error("runtime release name mismatch");
+              const release = path.join(root, current.release);
+              const manifestPath = path.join(release, "runtime-manifest.json");
+              const manifestBytes = fs.readFileSync(manifestPath);
+              const manifestHash = crypto.createHash("sha256").update(manifestBytes).digest("hex");
+              if (manifestHash !== current.manifestSha256) throw new Error("runtime manifest hash mismatch");
+              const manifest = JSON.parse(manifestBytes);
+              if (manifest.runtimeVersion !== current.version || manifest.sourceCommit !== current.sourceCommit) throw new Error("runtime manifest provenance mismatch");
+              const currentFileNames = Object.keys(current.files || {}).sort();
+              const manifestFileNames = Object.keys(manifest.files || {}).sort();
+              if (
+                currentFileNames.join("\0") !== REQUIRED_RUNTIME_FILES.slice().sort().join("\0") ||
+                manifestFileNames.join("\0") !== REQUIRED_RUNTIME_FILES.slice().sort().join("\0")
+              ) throw new Error("runtime file set mismatch");
+              for (const name of REQUIRED_RUNTIME_FILES) {
+                const expected = current.files[name];
+                if (!/^[0-9a-f]{64}$/.test(expected) || manifest.files[name] !== expected) throw new Error(`runtime pointer hash mismatch: ${name}`);
+                const actual = crypto.createHash("sha256").update(fs.readFileSync(path.join(release, name))).digest("hex");
+                if (actual !== expected) throw new Error(`runtime file hash mismatch: ${name}`);
+              }
+            '
+          }
+          verify_runtime_pointer "$ARM_SMOKE_HOME"
+          verify_runtime_pointer "$X64_SMOKE_HOME"
       - name: Checksums
         run: |
           set -euo pipefail
