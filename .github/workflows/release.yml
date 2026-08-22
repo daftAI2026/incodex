@@ -76,6 +76,10 @@ jobs:
       - name: Smoke final asset behavior
         run: |
           set -euo pipefail
+          case "$(uname -m)" in
+            arm64) ;;
+            *) echo "release asset behavior smoke requires an arm64 host: $(uname -m)" >&2; exit 1 ;;
+          esac
           ARM_BINARY="release-cli/incodex-darwin-arm64"
           X64_BINARY="release-cli/incodex-darwin-x64"
           INCODEX_RELEASE_BINARY="$PWD/$ARM_BINARY" INCODEX_RELEASE_ARCH="arm64" cargo test --locked --release --package incodex-cli --test release_asset_smoke -- --ignored --exact release_asset_behavior_smoke

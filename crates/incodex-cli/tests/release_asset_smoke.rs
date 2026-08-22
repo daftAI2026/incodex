@@ -253,24 +253,60 @@ fn assert_success(output: Output, command: &str) {
     );
 }
 
-fn assert_json_success(output: Output, command: &str) {
+fn assert_status_json(output: Output, app: &Path, expected_patched: bool) {
     assert!(
         output.status.success(),
-        "{command} failed\nstdout:\n{}\nstderr:\n{}",
+        "status --json failed\nstdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    serde_json::from_slice::<Value>(&output.stdout)
-        .unwrap_or_else(|error| panic!("{command} did not emit JSON: {error}"));
+    let report: Value =
+        serde_json::from_slice(&output.stdout).expect("status --json must emit a JSON diagnosis");
+    assert_eq!(report["target"].as_str(), app.to_str());
+    assert_eq!(report["exists"], true);
+    assert_eq!(report["patched"], expected_patched);
+}
+
+fn assert_no_transient_transaction_dirs(home: &Path) {
+    let transactions = home.join(".incodex/transactions");
+    if !transactions.exists() {
+        return;
+    }
+    fn walk(path: &Path) {
+        for entry in fs::read_dir(path).expect("read transaction directory") {
+            let entry = entry.expect("transaction entry");
+            let child = entry.path();
+            let name = entry.file_name();
+            if name == "staging" || name == "outgoing" {
+                assert!(
+                    entry.file_type().expect("transaction entry type").is_dir(),
+                    "transient transaction path is not a directory: {}",
+                    child.display()
+                );
+                assert!(
+                    fs::read_dir(&child)
+                        .expect("read transient transaction directory")
+                        .next()
+                        .is_none(),
+                    "transient transaction directory is not empty: {}",
+                    child.display()
+                );
+                continue;
+            }
+            if entry.file_type().expect("transaction entry type").is_dir() {
+                walk(&child);
+            }
+        }
+    }
+    walk(&transactions);
 }
 
 #[ignore]
 #[test]
 fn release_asset_behavior_smoke() {
-    if !cfg!(target_os = "macos") {
-        eprintln!("release asset smoke requires macOS");
-        return;
-    }
+    #[cfg(not(target_os = "macos"))]
+    panic!("release asset smoke requires macOS");
+
     let runner = ReleaseRunner::from_environment();
     let temp = TempDir::new(&runner.arch);
     let home = temp.path().join("home");
@@ -284,17 +320,12 @@ fn release_asset_behavior_smoke() {
     assert_success(runner.run(&["--version"], &home, &codex_home), "--version");
     assert_success(runner.run(&["--help"], &home, &codex_home), "--help");
 
-    // The release contract exercises Command::new(binary).arg("--version") and
-    // arg("--help"),
-    // args(["status", "--json"]),
-    // args(["open", "--dry-run"]), args(["install", "--yes"]),
-    // and args(["uninstall", "--yes"]) against this custom fixture.
     let status_before = runner.run(
         &["status", "--json", "--app", app.to_str().unwrap()],
         &home,
         &codex_home,
     );
-    assert_json_success(status_before, "status --json before install");
+    assert_status_json(status_before, &app, false);
     let dry_run_before = snapshot(&app);
     assert_success(
         runner.run(
@@ -330,7 +361,7 @@ fn release_asset_behavior_smoke() {
         &home,
         &codex_home,
     );
-    assert_json_success(status_after, "status --json after install");
+    assert_status_json(status_after, &app, true);
     assert_success(
         runner.run(
             &["uninstall", "--yes", "--app", app.to_str().unwrap()],
@@ -339,6 +370,7 @@ fn release_asset_behavior_smoke() {
         ),
         "uninstall --yes",
     );
+    assert_no_transient_transaction_dirs(&home);
     let restored_snapshot = snapshot(&app);
     assert_eq!(restored_snapshot, original_snapshot);
 }
