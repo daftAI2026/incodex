@@ -366,11 +366,13 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
     };
     let (status_tx, status_rx) = mpsc::channel();
     let readiness = InjectionReadiness::default();
+    let process_alive = Arc::new(AtomicBool::new(true));
     if plan.debug_port != 0 {
         let port = plan.debug_port;
         let child_pid = child.id();
         let source_bounds = plan.source_bounds;
         let injection_readiness = readiness.clone();
+        let lifecycle_process_alive = process_alive.clone();
         let options = InjectionOptions {
             locale: plan.locale.clone(),
         };
@@ -390,14 +392,21 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                         .is_ok();
                     }
                 }
-                if !lifecycle_started && start_primary_lifecycle_monitor(port).is_ok() {
+                if !lifecycle_started
+                    && start_primary_lifecycle_monitor(port, lifecycle_process_alive.clone())
+                        .is_ok()
+                {
                     lifecycle_started = true;
                 }
                 if primary_target_id.is_none() {
                     let injection =
                         inject_shared_ui_with_options_and_target(port, &options, |target_id| {
                             if !lifecycle_started {
-                                start_lifecycle_monitor(port, target_id.to_string());
+                                start_lifecycle_monitor(
+                                    port,
+                                    target_id.to_string(),
+                                    lifecycle_process_alive.clone(),
+                                );
                                 lifecycle_started = true;
                             }
                         });
@@ -419,7 +428,11 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                 if bounds_ready {
                     if let Some(target_id) = primary_target_id.take() {
                         if !lifecycle_started {
-                            start_lifecycle_monitor(port, target_id);
+                            start_lifecycle_monitor(
+                                port,
+                                target_id,
+                                lifecycle_process_alive.clone(),
+                            );
                         }
                         publish_injection_status(
                             &status_tx,
@@ -485,6 +498,7 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
         }
         match child.try_wait() {
             Ok(Some(status)) => {
+                process_alive.store(false, Ordering::Release);
                 spinner.stop();
                 return Ok(SpawnOutcome {
                     process: OpenProcessResult::Exited {
@@ -497,6 +511,7 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
             }
             Ok(None) => {}
             Err(error) => {
+                process_alive.store(false, Ordering::Release);
                 spinner.stop();
                 let reason = format!("child exit could not be proven: {error}");
                 return Ok(SpawnOutcome {

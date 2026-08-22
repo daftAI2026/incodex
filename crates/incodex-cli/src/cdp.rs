@@ -7,6 +7,8 @@
 
 use std::io::{ErrorKind, Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -22,7 +24,6 @@ const MACOS_WINDOW_TILE_PIXELS: i32 = 22;
 const CDP_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const LIFECYCLE_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const PRIMARY_TARGET_MISSING_POLLS: u8 = 2;
-const BROWSER_EXIT_FAILURE_POLLS: u8 = 3;
 const BROWSER_CLOSE_ATTEMPTS: u8 = 3;
 pub const OFFICIAL_NEW_CODEX_URL: &str = "codex://new?mode=codex";
 
@@ -248,39 +249,34 @@ fn select_official_codex_mode(socket: &mut WebSocket<TcpStream>) -> Result<(), S
     Ok(())
 }
 
-pub fn start_primary_lifecycle_monitor(debug_port: u16) -> Result<(), String> {
+pub fn start_primary_lifecycle_monitor(
+    debug_port: u16,
+    process_alive: Arc<AtomicBool>,
+) -> Result<(), String> {
     let targets = list_targets(debug_port)?;
     let target_id = pick_codex_page_target(&targets)
         .ok_or("no Codex page target")?
         .id
         .clone();
-    start_lifecycle_monitor(debug_port, target_id);
+    start_lifecycle_monitor(debug_port, target_id, process_alive);
     Ok(())
 }
 
-pub fn start_lifecycle_monitor(debug_port: u16, primary_target_id: String) {
-    thread::spawn(move || monitor_primary_target(debug_port, &primary_target_id));
+pub fn start_lifecycle_monitor(
+    debug_port: u16,
+    primary_target_id: String,
+    process_alive: Arc<AtomicBool>,
+) {
+    thread::spawn(move || monitor_primary_target(debug_port, &primary_target_id, &process_alive));
 }
 
-fn monitor_primary_target(debug_port: u16, primary_target_id: &str) {
+fn monitor_primary_target(debug_port: u16, primary_target_id: &str, process_alive: &AtomicBool) {
     let mut primary_target_id = primary_target_id.to_string();
     let mut missing_polls = 0u8;
-    let mut close_requested = false;
-    let mut post_close_failures = 0u8;
-    loop {
+    while process_alive.load(Ordering::Acquire) {
         thread::sleep(LIFECYCLE_POLL_INTERVAL);
         let targets = match list_targets(debug_port) {
-            Ok(targets) => {
-                post_close_failures = 0;
-                targets
-            }
-            Err(_) if close_requested => {
-                post_close_failures = post_close_failures.saturating_add(1);
-                if post_close_failures >= BROWSER_EXIT_FAILURE_POLLS {
-                    return;
-                }
-                continue;
-            }
+            Ok(targets) => targets,
             Err(_) => continue,
         };
         if targets.iter().any(|target| target.id == primary_target_id) {
@@ -297,9 +293,7 @@ fn monitor_primary_target(debug_port: u16, primary_target_id: &str) {
         if missing_polls < PRIMARY_TARGET_MISSING_POLLS {
             continue;
         }
-        if close_browser_with_retries(debug_port).is_ok() {
-            close_requested = true;
-        }
+        let _ = close_browser_with_retries(debug_port);
         missing_polls = 0;
     }
 }

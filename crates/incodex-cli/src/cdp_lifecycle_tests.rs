@@ -1,5 +1,7 @@
 use std::io::{ErrorKind, Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -7,6 +9,19 @@ use serde_json::{json, Value};
 use tungstenite::Message;
 
 use super::monitor_primary_target;
+
+fn monitor_while_server<T>(port: u16, primary_target_id: &str, server: thread::JoinHandle<T>) -> T {
+    let process_alive = Arc::new(AtomicBool::new(true));
+    let monitor_process_alive = process_alive.clone();
+    let primary_target_id = primary_target_id.to_string();
+    let monitor = thread::spawn(move || {
+        monitor_primary_target(port, &primary_target_id, &monitor_process_alive)
+    });
+    let result = server.join().unwrap();
+    process_alive.store(false, Ordering::Release);
+    monitor.join().unwrap();
+    result
+}
 
 fn read_request_path(stream: &mut TcpStream) -> String {
     stream
@@ -128,8 +143,7 @@ fn lifecycle_adopts_a_replacement_primary_after_a_transient_gap() {
         (list_requests_at_close, close_received)
     });
 
-    monitor_primary_target(port, "original");
-    let (list_requests_at_close, close_received) = server.join().unwrap();
+    let (list_requests_at_close, close_received) = monitor_while_server(port, "original", server);
 
     assert!(
         list_requests_at_close.unwrap_or_default() >= 5,
@@ -186,8 +200,7 @@ fn lifecycle_requires_consecutive_primary_absence_before_closing() {
         (list_requests_at_close, close_received)
     });
 
-    monitor_primary_target(port, "main");
-    let (list_requests_at_close, close_received) = server.join().unwrap();
+    let (list_requests_at_close, close_received) = monitor_while_server(port, "main", server);
 
     assert!(
         close_received,
@@ -246,8 +259,7 @@ fn lifecycle_retries_browser_close_after_a_transient_cdp_failure() {
         (version_requests, close_received)
     });
 
-    monitor_primary_target(port, "main");
-    let (version_requests, close_received) = server.join().unwrap();
+    let (version_requests, close_received) = monitor_while_server(port, "main", server);
 
     assert!(
         version_requests >= 2,
@@ -312,8 +324,7 @@ fn lifecycle_survives_a_transient_target_list_failure() {
         (successful_list_requests, close_received)
     });
 
-    monitor_primary_target(port, "main");
-    let (successful_list_requests, close_received) = server.join().unwrap();
+    let (successful_list_requests, close_received) = monitor_while_server(port, "main", server);
 
     assert!(
         successful_list_requests >= 3,
@@ -371,8 +382,7 @@ fn lifecycle_reissues_browser_close_while_the_browser_is_still_alive() {
         close_commands
     });
 
-    monitor_primary_target(port, "main");
-    let close_commands = server.join().unwrap();
+    let close_commands = monitor_while_server(port, "main", server);
 
     assert_eq!(
         close_commands, 2,
@@ -436,8 +446,8 @@ fn lifecycle_recovers_after_three_complete_target_list_failures() {
         (failed_polls, successful_list_requests, close_received)
     });
 
-    monitor_primary_target(port, "main");
-    let (failed_polls, successful_list_requests, close_received) = server.join().unwrap();
+    let (failed_polls, successful_list_requests, close_received) =
+        monitor_while_server(port, "main", server);
 
     assert_eq!(failed_polls, 3, "the mock must exercise three failed polls");
     assert!(
@@ -504,8 +514,8 @@ fn lifecycle_reissues_close_after_post_close_cdp_recovery() {
         (failed_polls_after_first_close, close_commands)
     });
 
-    monitor_primary_target(port, "main");
-    let (failed_polls_after_first_close, close_commands) = server.join().unwrap();
+    let (failed_polls_after_first_close, close_commands) =
+        monitor_while_server(port, "main", server);
 
     assert_eq!(
         failed_polls_after_first_close, 3,
