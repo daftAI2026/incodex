@@ -197,7 +197,7 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      0.3.1 releases/0.3.1
+  Runtime      0.3.1 releases/0.3.1-<manifestSha256>
   Version      26.814.41957 6744
   Install id   0778f0fa-…
   Target       official-404f3389062b
@@ -219,7 +219,7 @@ $ incodex doctor
 
 ➤ Runtime
   Version      0.3.1
-  External     0.3.1 releases/0.3.1
+  External     0.3.1 releases/0.3.1-<manifestSha256>
   Loader       asar only
   Main         .vite/build/early-bootstrap.js
 

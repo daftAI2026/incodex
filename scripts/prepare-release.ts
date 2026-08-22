@@ -26,8 +26,8 @@ function updateReadme(source: string, version: string, path: string): string {
   let next = source;
   next = replaceRequired(
     next,
-    /^(\s+Runtime\s+)\d+\.\d+\.\d+( releases\/)\d+\.\d+\.\d+(\s*)$/m,
-    `$1${version}$2${version}$3`,
+    /^(\s+Runtime\s+)\d+\.\d+\.\d+( releases\/)\d+\.\d+\.\d+(-[^\s]+)?(\s*)$/m,
+    `$1${version}$2${version}$3$4`,
     `${path} status Runtime version`,
   );
   next = replaceRequired(
@@ -44,8 +44,8 @@ function updateReadme(source: string, version: string, path: string): string {
   );
   next = replaceRequired(
     next,
-    /^(\s+External\s+)\d+\.\d+\.\d+( releases\/)\d+\.\d+\.\d+(\s*)$/m,
-    `$1${version}$2${version}$3`,
+    /^(\s+External\s+)\d+\.\d+\.\d+( releases\/)\d+\.\d+\.\d+(-[^\s]+)?(\s*)$/m,
+    `$1${version}$2${version}$3$4`,
     `${path} external Runtime version`,
   );
   return replaceRequired(

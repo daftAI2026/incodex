@@ -408,6 +408,58 @@ fn verify_external_runtime(root: &Path, current_path: &Path) -> Result<(String, 
             return Err(format!("runtime hash mismatch: {name}"));
         }
     }
+    let manifest_hash = current.get("manifestSha256");
+    let source_commit = current.get("sourceCommit");
+    match (manifest_hash, source_commit) {
+        (None, None) => {}
+        (Some(manifest_hash), Some(source_commit)) => {
+            let manifest_hash = manifest_hash
+                .as_str()
+                .filter(|hash| is_lower_sha256(hash))
+                .ok_or("runtime manifestSha256 is invalid")?;
+            let source_commit = source_commit
+                .as_str()
+                .filter(|commit| is_source_commit(commit))
+                .ok_or("runtime sourceCommit is invalid")?;
+            let expected_release = format!("{version}-{manifest_hash}");
+            if release_real.file_name().and_then(|name| name.to_str())
+                != Some(expected_release.as_str())
+            {
+                return Err("runtime release name does not match manifest hash".to_string());
+            }
+            let manifest_path = release_dir.join("runtime-manifest.json");
+            reject_symlink(&manifest_path, "runtime manifest")?;
+            let actual_manifest_hash =
+                hash_file(&manifest_path).ok_or("runtime manifest is missing")?;
+            if actual_manifest_hash != manifest_hash {
+                return Err("runtime manifest hash mismatch".to_string());
+            }
+            let manifest_body = fs::read(&manifest_path).map_err(|error| error.to_string())?;
+            let manifest: serde_json::Value = serde_json::from_slice(&manifest_body)
+                .map_err(|error| format!("invalid runtime manifest: {error}"))?;
+            if manifest
+                .get("runtimeVersion")
+                .and_then(serde_json::Value::as_str)
+                != Some(version.as_str())
+                || manifest
+                    .get("sourceCommit")
+                    .and_then(serde_json::Value::as_str)
+                    != Some(source_commit)
+            {
+                return Err("runtime manifest provenance mismatch".to_string());
+            }
+            let manifest_files = manifest
+                .get("files")
+                .and_then(serde_json::Value::as_object)
+                .ok_or("runtime manifest files are missing")?;
+            for name in incodex_runtime_bundle::required_runtime_files() {
+                if manifest_files.get(name) != files.get(name) {
+                    return Err(format!("runtime manifest entry mismatch: {name}"));
+                }
+            }
+        }
+        _ => return Err("runtime manifest pointer fields must be paired".to_string()),
+    }
     Ok((version, release))
 }
 
@@ -556,6 +608,17 @@ fn required_string(raw: &serde_json::Value, key: &str) -> Result<String, String>
         .filter(|value| !value.is_empty())
         .map(str::to_string)
         .ok_or_else(|| format!("runtime {key} is missing"))
+}
+
+fn is_lower_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn is_source_commit(value: &str) -> bool {
+    value.is_empty() || (value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
 }
 
 fn safe_relative(value: &str) -> bool {
