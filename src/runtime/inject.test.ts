@@ -55,3 +55,33 @@ describe("incognito button exit affordance", () => {
     expect(clickHandler).toContain("void activate()");
   });
 });
+
+describe("incodex tooltip lifecycle", () => {
+  test("keeps a stable fallback delay without reading private provider state", () => {
+    expect(inject).toContain("const TOOLTIP_FALLBACK_DELAY_MS = 700");
+  });
+
+  test("listens to the app-wide dismissal signal without dispatching the private event", () => {
+    expect(inject).toContain(
+      'window.addEventListener(TOOLTIP_DISMISS_EVENT, () => activeTooltipLifecycle?.dismiss())',
+    );
+    expect(inject).not.toContain("dispatchEvent(new Event(TOOLTIP_DISMISS_EVENT))");
+  });
+
+  test("does not override the official fit-content width utility", () => {
+    expect(inject).not.toContain("width: max-content");
+  });
+
+  test("clears an open tooltip without losing a connected button lifecycle", () => {
+    expect(inject).toMatch(
+      /function ensureButton\(\): void \{[\s\S]*if \(!search\?\.parentElement\) \{[\s\S]*if \(btn\?\.isConnected\) dismissActiveTooltip\(\);[\s\S]*else disposeActiveTooltip\(\);[\s\S]*return;/,
+    );
+  });
+
+  test("cancels pending and open tooltips on window blur and Escape", () => {
+    expect(inject).toContain('window.addEventListener("blur", dismissActiveTooltip)');
+    expect(inject).toMatch(
+      /function onKeydown\(event: KeyboardEvent\): void \{[\s\S]*event\.key === "Escape"[\s\S]*dismissActiveTooltip\(\);/,
+    );
+  });
+});
