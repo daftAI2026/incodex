@@ -705,6 +705,16 @@ fn transaction_evidence(
     let has_internal_artifacts = internal_candidates
         .iter()
         .any(|path| fs::symlink_metadata(path).is_ok());
+    let has_unrecoverable_internal_artifacts = [
+        transaction.join("restore/ChatGPT.app"),
+        transaction.join("trash/ChatGPT.app"),
+    ]
+    .iter()
+    .any(|path| {
+        fs::symlink_metadata(path)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+    });
     let has_external_artifacts = fs::symlink_metadata(&external_scratch).is_ok();
     let artifacts: Vec<String> = internal_candidates
         .into_iter()
@@ -716,6 +726,11 @@ fn transaction_evidence(
         incodex_transaction::Recovery::Rollback => Some("rollback".to_string()),
         incodex_transaction::Recovery::Refuse => Some("manual".to_string()),
         incodex_transaction::Recovery::Done if phase == "COMMITTED" && has_external_artifacts => {
+            Some("manual".to_string())
+        }
+        incodex_transaction::Recovery::Done
+            if phase == "COMMITTED" && has_unrecoverable_internal_artifacts =>
+        {
             Some("manual".to_string())
         }
         incodex_transaction::Recovery::Done if phase == "COMMITTED" && has_internal_artifacts => {
