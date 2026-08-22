@@ -241,7 +241,7 @@ fn native_tty_uninstall_animates_immediately_after_confirmation() {
         rust.stdout
     );
     assert!(
-        visible(&rust.stdout).contains("Official app restored. Dock was refreshed."),
+        visible(&rust.stdout).contains("App restored. App registration was refreshed."),
         "missing final uninstall result: {}",
         visible(&rust.stdout)
     );
@@ -271,7 +271,7 @@ fn native_tty_install_animates_immediately_after_confirmation() {
         rust.stdout
     );
     assert!(
-        has_spinner_frame(&rust.stdout, "Replacing application"),
+        has_spinner_frame(&rust.stdout, "Replacing the app"),
         "install should expose a product phase instead of a transaction primitive: {:?}",
         rust.stdout
     );
