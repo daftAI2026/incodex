@@ -162,11 +162,22 @@ pub fn inject_shared_ui_with_options(
     debug_port: u16,
     options: &InjectionOptions,
 ) -> Result<String, String> {
+    inject_shared_ui_with_options_and_target(debug_port, options, |_| {})
+}
+
+pub fn inject_shared_ui_with_options_and_target<F>(
+    debug_port: u16,
+    options: &InjectionOptions,
+    mut on_target: F,
+) -> Result<String, String>
+where
+    F: FnMut(&str),
+{
     let source = inject_source_for_locale(options.locale.as_deref());
     let mut last = "cdp page not ready".to_string();
     let mut refused = 0u8;
     for _ in 0..8 {
-        match try_inject(debug_port, &source) {
+        match try_inject(debug_port, &source, &mut on_target) {
             Ok(target_id) => return Ok(target_id),
             Err(err) => {
                 let refused_now = err.contains("Connection refused")
@@ -187,9 +198,13 @@ pub fn inject_shared_ui_with_options(
     Err(last)
 }
 
-fn try_inject(debug_port: u16, source: &str) -> Result<String, String> {
+fn try_inject<F>(debug_port: u16, source: &str, on_target: &mut F) -> Result<String, String>
+where
+    F: FnMut(&str),
+{
     let targets = list_targets(debug_port)?;
     let page = pick_codex_page_target(&targets).ok_or("no Codex page target")?;
+    on_target(&page.id);
     validate_cdp_websocket_url(&page.ws, debug_port)?;
     let (mut socket, _) = connect_cdp_websocket(&page.ws, debug_port)?;
     send_cdp(&mut socket, 1, "Page.enable", json!({}))?;

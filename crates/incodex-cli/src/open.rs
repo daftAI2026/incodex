@@ -16,8 +16,9 @@ use incodex_core::{format_kv, format_ok, format_step, format_warn};
 
 use crate::app_bundle::resolve_executable;
 use crate::cdp::{
-    allocate_debug_port, debug_launch_args, inject_shared_ui_with_options, start_lifecycle_monitor,
-    start_primary_lifecycle_monitor, InjectionOptions, WindowBounds, OFFICIAL_NEW_CODEX_URL,
+    allocate_debug_port, debug_launch_args, inject_shared_ui_with_options_and_target,
+    start_lifecycle_monitor, start_primary_lifecycle_monitor, InjectionOptions, WindowBounds,
+    OFFICIAL_NEW_CODEX_URL,
 };
 use crate::parse::ParsedCli;
 use crate::CliFailure;
@@ -393,7 +394,14 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                     lifecycle_started = true;
                 }
                 if primary_target_id.is_none() {
-                    match inject_shared_ui_with_options(port, &options) {
+                    let injection =
+                        inject_shared_ui_with_options_and_target(port, &options, |target_id| {
+                            if !lifecycle_started {
+                                start_lifecycle_monitor(port, target_id.to_string());
+                                lifecycle_started = true;
+                            }
+                        });
+                    match injection {
                         Ok(target_id) => {
                             primary_target_id = Some(target_id);
                             if std::env::var_os("INCODEX_CDP_LOG").is_some() {
