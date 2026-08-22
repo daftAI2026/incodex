@@ -802,7 +802,8 @@ fn print_keychain_advice() {
         "Keychain: On next launch, macOS may ask this patched Codex app to access Codex Storage Key.",
         "Confirm the dialog names this app and the Codex Storage Key item.",
         "If both match, enter your Mac login password (not your ChatGPT password) and choose Always Allow.",
-        "Otherwise, choose Deny or Cancel; Incodex and Terminal never need that password.",
+        "Allow or Allow Once grants only that access and may prompt again later.",
+        "If the details do not match, choose Deny; Incodex and Terminal never need that password.",
     ] {
         println!("{}", format_warn(message, None));
     }

@@ -102,7 +102,7 @@ incodex doctor --deep --json
 Incodex patches a locally installed Electron app. Destructive commands print a plan first: TTY asks once, non-TTY needs `--yes`, `--dry-run` only prints.
 
 - Official plugins cannot add this button. The app bundle has to change
-- After the default official-app install, a valid OpenAI signature cannot be kept. On the next launch, macOS may ask the patched app to access **Codex Storage Key**. Only if the dialog names the expected app and Keychain item should you enter your **Mac login password** (not your ChatGPT password) and choose **Always Allow**; otherwise choose **Deny** or **Cancel**. The CLI does not give permanent-authorization advice for `--clone` or `--app` targets
+- After the default official-app install, a valid OpenAI signature cannot be kept. On the next launch, macOS may ask the patched app to access **Codex Storage Key**. Only if the dialog names the expected app and Keychain item should you enter your **Mac login password** (not your ChatGPT password) and choose **Always Allow**. **Allow** / **Allow Once** grants only that access and may prompt again later; if the details do not match, choose **Deny**. The CLI does not give permanent-authorization advice for `--clone` or `--app` targets
 - Official **Appshot** (smart snapshot: photo / screenshot attachments) then stops working. This is not a missing camera permission. Computer Use usually still works. `incodex uninstall` restores Appshot
 - Report vulnerabilities via [SECURITY.md](SECURITY.md). Do not open a public issue
 
