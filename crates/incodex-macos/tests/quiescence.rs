@@ -44,3 +44,13 @@ fn official_quit_skips_applescript_when_no_exact_pid_is_live() {
         .quit_official_app_and_wait_with(&EmptyProbe, &mut requester, &mut clock)
         .unwrap();
 }
+
+#[test]
+fn system_probe_observes_the_current_executable_by_exact_path() {
+    let executable = std::fs::canonicalize(std::env::current_exe().unwrap()).unwrap();
+    let quiescence = AppQuiescence::from_executable(executable).unwrap();
+
+    let error = quiescence.ensure_quiescent().unwrap_err();
+
+    assert!(error.contains(&std::process::id().to_string()), "{error}");
+}
