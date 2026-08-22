@@ -57,7 +57,7 @@ cd incodex
 cargo install --locked --path crates/incodex-cli
 ```
 
-Homebrew 和脚本安装直接使用预编译的原生 Rust 二进制，不需要 Bun。从源码安装需要稳定版 Rust 和已安装的 Codex / ChatGPT 桌面端；只有参与开发、重建 Electron Runtime 时才需要 [Bun](https://bun.sh) 1.3.14（见 `.bun-version`）。
+Homebrew 和脚本安装直接使用预编译的原生 Rust 二进制，不需要 Bun。从源码安装需要 [rustup](https://rustup.rs/)，仓库中的 `rust-toolchain.toml` 会选择受支持的 Rust 编译器；只有涉及应用集成时才需要已安装的 Codex / ChatGPT 桌面端，参与开发、重建 Electron Runtime 时还需要 [Bun](https://bun.sh) 1.3.14（见 `.bun-version`）。
 
 **Run**
 
