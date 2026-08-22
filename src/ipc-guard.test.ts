@@ -7,6 +7,8 @@ import {
 } from "./runtime/incodex-ipc-guard.cts";
 
 const mainSession = {};
+const packagedOrigin = "file:///Applications/ChatGPT.app/Contents/Resources/app.asar";
+const trustedOrigins = new Set(["app://-", packagedOrigin, "https://chatgpt.com"]);
 
 function identity(over: Record<string, unknown> = {}) {
   return {
@@ -14,7 +16,7 @@ function identity(over: Record<string, unknown> = {}) {
     session: mainSession,
     frameProcessId: 22,
     frameRoutingId: 33,
-    origin: "file:///Applications/ChatGPT.app/Contents/Resources/app.asar",
+    origin: packagedOrigin,
     ...over,
   };
 }
@@ -101,22 +103,26 @@ describe("authorizeSender", () => {
 
 describe("urlAllowed", () => {
   test("allows only the packaged app roots and exact hosted app origin", () => {
-    expect(urlAllowed("app://-/index.html")).toBe(true);
+    expect(urlAllowed("app://-/index.html", trustedOrigins)).toBe(true);
     expect(
       urlAllowed(
         "file:///Applications/ChatGPT.app/Contents/Resources/app.asar/index.html",
+        trustedOrigins,
       ),
     ).toBe(true);
-    expect(urlAllowed("https://chatgpt.com/codex")).toBe(true);
-    expect(urlAllowed("app://evil.local/index.html")).toBe(false);
-    expect(urlAllowed("file:///tmp/attacker.html")).toBe(false);
-    expect(urlAllowed("https://auth.openai.com/login")).toBe(false);
-    expect(urlAllowed("https://evil.chatgpt.com/codex")).toBe(false);
+    expect(urlAllowed("https://chatgpt.com/codex", trustedOrigins)).toBe(true);
+    expect(urlAllowed("app://evil.local/index.html", trustedOrigins)).toBe(false);
+    expect(urlAllowed("file:///tmp/attacker.html", trustedOrigins)).toBe(false);
+    expect(
+      urlAllowed("file:///tmp/Evil.app/Contents/Resources/app.asar/index.html", trustedOrigins),
+    ).toBe(false);
+    expect(urlAllowed("https://auth.openai.com/login", trustedOrigins)).toBe(false);
+    expect(urlAllowed("https://evil.chatgpt.com/codex", trustedOrigins)).toBe(false);
   });
 
   test("beacon-style and opaque URLs are not enough", () => {
-    expect(urlAllowed("https://incodex.invalid/open")).toBe(false);
-    expect(urlAllowed("")).toBe(false);
+    expect(urlAllowed("https://incodex.invalid/open", trustedOrigins)).toBe(false);
+    expect(urlAllowed("", trustedOrigins)).toBe(false);
   });
 });
 
@@ -151,20 +157,28 @@ describe("bindWindowIdentity", () => {
   test("refreshes a same-origin main frame without widening its origin", () => {
     const allowed = new Map();
     const { state, win } = windowFixture();
-    expect(bindWindowIdentity(allowed, win)).toBe(true);
+    expect(bindWindowIdentity(allowed, win, trustedOrigins)).toBe(true);
     state.frameRoutingId = 34;
-    expect(bindWindowIdentity(allowed, win)).toBe(true);
+    expect(bindWindowIdentity(allowed, win, trustedOrigins)).toBe(true);
     expect(allowed.get(1)?.frameRoutingId).toBe(34);
   });
 
   test("cross-origin navigation permanently revokes that window identity", () => {
     const allowed = new Map();
     const { state, win } = windowFixture();
-    expect(bindWindowIdentity(allowed, win)).toBe(true);
+    expect(bindWindowIdentity(allowed, win, trustedOrigins)).toBe(true);
     state.url = "https://chatgpt.com/codex";
-    expect(bindWindowIdentity(allowed, win)).toBe(false);
+    expect(bindWindowIdentity(allowed, win, trustedOrigins)).toBe(false);
     state.url = "app://-/index.html";
-    expect(bindWindowIdentity(allowed, win)).toBe(false);
+    expect(bindWindowIdentity(allowed, win, trustedOrigins)).toBe(false);
+  });
+
+  test("does not bind a packaged file origin outside the current app", () => {
+    const allowed = new Map();
+    const { state, win } = windowFixture();
+    state.url = "file:///tmp/Evil.app/Contents/Resources/app.asar/index.html";
+    expect(bindWindowIdentity(allowed, win, trustedOrigins)).toBe(false);
+    expect(allowed.size).toBe(0);
   });
 });
 
