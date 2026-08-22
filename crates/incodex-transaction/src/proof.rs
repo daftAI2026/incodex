@@ -328,5 +328,5 @@ pub(crate) fn record_restore_intent(
     next.restored_digest = digest;
     next.sequence += 1;
     write_journal(root, &next)?;
-    Ok(load_v2(root, &journal.install_id)?)
+    load_v2(root, &journal.install_id)
 }
