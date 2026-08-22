@@ -339,6 +339,16 @@ fn rollback_install(tx: &mut Engine, scratch: Option<&Path>, error: String) -> S
         "COMMITTED" | "ROLLED_BACK" => None,
         _ => tx.rollback(&error).err(),
     };
+    finish_rollback(tx, scratch, error, rollback_error)
+}
+
+fn finish_rollback(
+    tx: &Engine,
+    scratch: Option<&Path>,
+    error: String,
+    rollback_error: Option<String>,
+) -> String {
+    let _ = tx;
     let scratch_error = if rollback_error.is_none() {
         scratch.and_then(|path| remove_install_scratch(path).err())
     } else {
@@ -764,6 +774,38 @@ mod tests {
         assert!(error.contains("injected snapshot failure"), "{error}");
         assert_eq!(journal_v2(&root, &install_id).unwrap().phase, "ROLLED_BACK");
         assert!(original.exists());
+        fs::remove_dir_all(sandbox).unwrap();
+    }
+
+    #[test]
+    fn durable_rollback_error_cleans_scratch_without_claiming_recover_completed() {
+        let sandbox = std::env::temp_dir().join(format!(
+            "incodex-durable-rollback-error-{}",
+            std::process::id()
+        ));
+        let root = sandbox.join("state");
+        let app = sandbox.join("ChatGPT.app");
+        fs::create_dir_all(&app).unwrap();
+        fs::write(app.join("marker"), "original\n").unwrap();
+
+        let mut tx = Engine::begin(&root, &app, "durable-rollback-error-test").unwrap();
+        tx.rollback("test rollback").unwrap();
+        assert_eq!(tx.journal().phase, "ROLLED_BACK");
+        let scratch = root
+            .join("scratch")
+            .join(format!("ChatGPT.app.staged-{}", tx.install_id()));
+        fs::create_dir_all(&scratch).unwrap();
+
+        let output = finish_rollback(
+            &tx,
+            Some(&scratch),
+            "install failed".into(),
+            Some("journal readback failed".into()),
+        );
+
+        assert!(!scratch.exists(), "durable rollback must still clean scratch");
+        assert!(output.contains("rollback reached ROLLED_BACK"), "{output}");
+        assert!(!output.contains("recover"), "{output}");
         fs::remove_dir_all(sandbox).unwrap();
     }
 }
