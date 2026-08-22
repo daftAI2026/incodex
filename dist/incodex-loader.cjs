@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const MAIN_NAME = "incodex-main.cjs";
+const MANIFEST_NAME = "runtime-manifest.json";
 const RUNTIME_FILES = [
     "incodex-main.cjs",
     "incodex-preload.cjs",
@@ -42,7 +43,16 @@ function refuseSymlink(target, label) {
     }
     if (stats.isSymbolicLink())
         throw new Error(`[incodex] refuse symlink ${label}`);
+    if (label !== "runtime root" && !stats.isFile() && !stats.isDirectory()) {
+        throw new Error(`[incodex] invalid ${label}`);
+    }
     return stats;
+}
+function isSha256(value) {
+    return typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+}
+function isSourceCommit(value) {
+    return value === "" || (typeof value === "string" && /^[0-9a-fA-F]{40}$/.test(value));
 }
 function hotMain(env, execPath) {
     if (env.INCODEX_DEV_HOT !== "1")
@@ -76,7 +86,11 @@ function externalMain(env) {
     const currentPath = path.join(root, "current.json");
     refuseSymlink(currentPath, "current.json");
     const current = JSON.parse(fs.readFileSync(currentPath, "utf8"));
-    if (!current || current.schemaVersion !== 1 || typeof current.release !== "string") {
+    if (!current ||
+        (current.schemaVersion !== 1 && current.schemaVersion !== 2) ||
+        typeof current.release !== "string" ||
+        typeof current.version !== "string" ||
+        current.version.length === 0) {
         throw new Error("[incodex] invalid current.json");
     }
     if (current.release.includes("..") || current.release.startsWith("/") || current.release.includes("\\")) {
@@ -88,10 +102,42 @@ function externalMain(env) {
         throw new Error("[incodex] runtime release escaped");
     }
     refuseSymlink(releaseDir, "release directory");
-    const files = current.files || {};
+    const files = current.files;
+    if (!files || typeof files !== "object" || Array.isArray(files)) {
+        throw new Error("[incodex] invalid runtime files");
+    }
+    if (current.schemaVersion === 2) {
+        if (!isSha256(current.manifestSha256) || !isSourceCommit(current.sourceCommit)) {
+            throw new Error("[incodex] invalid runtime manifest pointer");
+        }
+        const releaseName = path.basename(releaseDir);
+        if (releaseName !== `${current.version}-${current.manifestSha256}`) {
+            throw new Error("[incodex] runtime release name does not match manifest hash");
+        }
+        const manifestPath = path.join(releaseDir, MANIFEST_NAME);
+        refuseSymlink(manifestPath, MANIFEST_NAME);
+        const manifestBytes = fs.readFileSync(manifestPath);
+        if (sha256Bytes(manifestBytes) !== current.manifestSha256) {
+            throw new Error("[incodex] runtime manifest hash mismatch");
+        }
+        const manifest = JSON.parse(manifestBytes.toString("utf8"));
+        if (!manifest ||
+            manifest.runtimeVersion !== current.version ||
+            manifest.sourceCommit !== current.sourceCommit ||
+            !manifest.files ||
+            typeof manifest.files !== "object" ||
+            Array.isArray(manifest.files)) {
+            throw new Error("[incodex] invalid runtime manifest");
+        }
+        for (const name of RUNTIME_FILES) {
+            if (manifest.files[name] !== files[name]) {
+                throw new Error(`[incodex] runtime manifest entry mismatch ${name}`);
+            }
+        }
+    }
     for (const name of RUNTIME_FILES) {
         const expected = files[name];
-        if (typeof expected !== "string")
+        if (!isSha256(expected))
             throw new Error(`[incodex] current.json missing ${name}`);
         const file = path.join(releaseDir, name);
         refuseSymlink(file, name);
@@ -99,6 +145,9 @@ function externalMain(env) {
             throw new Error(`[incodex] hash mismatch ${name}`);
     }
     return path.join(releaseDir, MAIN_NAME);
+}
+function sha256Bytes(bytes) {
+    return crypto.createHash("sha256").update(bytes).digest("hex");
 }
 async function loadMain() {
     const hot = hotMain(process.env, process.execPath);

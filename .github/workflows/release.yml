@@ -29,6 +29,9 @@ jobs:
           SOURCE_COMMIT: ${{ github.sha }}
         run: |
           set -euo pipefail
+          SOURCE_COMMIT="${GITHUB_SHA}"
+          export SOURCE_COMMIT
+          [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "GITHUB_SHA must be a 40-character hex SHA" >&2; exit 1; }
           bun run build:runtime
 
           TAG="${GITHUB_REF#refs/tags/}"
@@ -44,9 +47,11 @@ jobs:
             workspace && /^\[/ { exit }
           ' Cargo.toml)
           RUNTIME_VERSION=$(bun -e 'process.stdout.write(require("./dist/runtime-manifest.json").runtimeVersion)')
+          BUILT_SOURCE_COMMIT=$(bun -e 'process.stdout.write(require("./dist/runtime-manifest.json").sourceCommit)')
           [[ "$PACKAGE_VERSION" == "$VERSION" ]] || { echo "package.json version $PACKAGE_VERSION does not match $TAG" >&2; exit 1; }
           [[ "$CARGO_VERSION" == "$VERSION" ]] || { echo "Cargo workspace version $CARGO_VERSION does not match $TAG" >&2; exit 1; }
           [[ "$RUNTIME_VERSION" == "$VERSION" ]] || { echo "Runtime version $RUNTIME_VERSION does not match $TAG" >&2; exit 1; }
+          [[ "$BUILT_SOURCE_COMMIT" == "$SOURCE_COMMIT" ]] || { echo "Runtime sourceCommit $BUILT_SOURCE_COMMIT does not match GITHUB_SHA $SOURCE_COMMIT" >&2; exit 1; }
 
           bun run typecheck
           bun run lint
@@ -69,6 +74,43 @@ jobs:
           lipo release-cli/incodex-darwin-x64 -verify_arch x86_64
           codesign --verify --strict release-cli/incodex-darwin-arm64
           codesign --verify --strict release-cli/incodex-darwin-x64
+      - name: Smoke test host runtime publisher
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            arm64) BINARY=release-cli/incodex-darwin-arm64 ;;
+            x86_64) BINARY=release-cli/incodex-darwin-x64 ;;
+            *) echo "unsupported host architecture: $(uname -m)" >&2; exit 1 ;;
+          esac
+          "$BINARY" --version
+          "$BINARY" --help >/dev/null
+          SMOKE_HOME="$(mktemp -d)"
+          trap 'rm -rf "$SMOKE_HOME"' EXIT
+          HOME="$SMOKE_HOME" "$BINARY" runtime
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          SMOKE_HOME="$SMOKE_HOME" EXPECTED_VERSION="$VERSION" EXPECTED_SOURCE_COMMIT="$GITHUB_SHA" bun -e '
+            const crypto = require("node:crypto");
+            const fs = require("node:fs");
+            const path = require("node:path");
+            const root = path.join(process.env.SMOKE_HOME, ".incodex", "runtime");
+            const current = JSON.parse(fs.readFileSync(path.join(root, "current.json"), "utf8"));
+            if (current.schemaVersion !== 2 || current.version !== process.env.EXPECTED_VERSION) throw new Error("invalid runtime pointer");
+            if (current.sourceCommit !== process.env.EXPECTED_SOURCE_COMMIT) throw new Error("runtime pointer provenance mismatch");
+            if (!/^[0-9a-f]{64}$/.test(current.manifestSha256)) throw new Error("invalid manifestSha256");
+            if (current.release !== `releases/${current.version}-${current.manifestSha256}`) throw new Error("runtime release name mismatch");
+            const release = path.join(root, current.release);
+            const manifestPath = path.join(release, "runtime-manifest.json");
+            const manifestBytes = fs.readFileSync(manifestPath);
+            const manifestHash = crypto.createHash("sha256").update(manifestBytes).digest("hex");
+            if (manifestHash !== current.manifestSha256) throw new Error("runtime manifest hash mismatch");
+            const manifest = JSON.parse(manifestBytes);
+            if (manifest.runtimeVersion !== current.version || manifest.sourceCommit !== current.sourceCommit) throw new Error("runtime manifest provenance mismatch");
+            for (const [name, expected] of Object.entries(current.files || {})) {
+              const actual = crypto.createHash("sha256").update(fs.readFileSync(path.join(release, name))).digest("hex");
+              if (actual !== expected || manifest.files[name] !== expected) throw new Error(`runtime file hash mismatch: ${name}`);
+            }
+          '
       - name: Checksums
         run: |
           set -euo pipefail
