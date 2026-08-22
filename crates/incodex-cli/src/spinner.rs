@@ -12,7 +12,7 @@ const SPINNER_RESERVED_COLUMNS: usize = 8;
 const MIN_MESSAGE_COLUMNS: usize = 20;
 
 fn format_spinner_message(message: &str, columns: usize) -> String {
-    let sanitized = message.to_string();
+    let sanitized = message.replace(['\r', '\n'], " ");
     let maximum = columns.saturating_sub(SPINNER_PREFIX_COLUMNS);
     let preferred = columns
         .saturating_sub(SPINNER_RESERVED_COLUMNS)
