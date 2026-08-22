@@ -88,6 +88,9 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
             format_ok("Restart that app copy to see the Incognito button.", None)
         );
     }
+    if should_print_keychain_advice(&app, &result) {
+        print_keychain_advice();
+    }
     println!();
     Ok(())
 }
@@ -784,6 +787,23 @@ fn print_command_result(result: &CommandResult) {
         println!("{}", format_kv("Runtime", version, None));
     }
     println!("{}", format_kv("App", &result.app, None));
+}
+
+fn should_print_keychain_advice(app: &Path, result: &CommandResult) -> bool {
+    !result.skipped
+        && read_plist_info(app)
+            .is_some_and(|info| info.bundle_identifier == OFFICIAL_BUNDLE_IDENTIFIER)
+}
+
+fn print_keychain_advice() {
+    for message in [
+        "Keychain: On next launch, macOS may ask ChatGPT.app to access Codex Storage Key.",
+        "Confirm the dialog names this app and the Codex Storage Key item.",
+        "If both match, enter your Mac login password (not your ChatGPT password) and choose Always Allow.",
+        "Otherwise, choose Deny or Cancel; Incodex and Terminal never need that password.",
+    ] {
+        println!("{}", format_warn(message, None));
+    }
 }
 
 #[cfg(test)]

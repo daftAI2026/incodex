@@ -295,12 +295,7 @@ fn native_install_prints_keychain_advice_only_after_a_new_codex_patch() {
     .unwrap();
 
     let dry_run = run_rust(
-        &[
-            "install",
-            "--dry-run",
-            "--app",
-            app.to_str().unwrap(),
-        ],
+        &["install", "--dry-run", "--app", app.to_str().unwrap()],
         &home,
     );
     assert_eq!(dry_run.status, 0, "{dry_run:?}");
