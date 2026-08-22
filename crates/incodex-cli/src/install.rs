@@ -286,38 +286,37 @@ fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<Comma
         .join("scratch")
         .join(format!("ChatGPT.app.staged-{install_id}"));
     progress.stage("Patching and signing app");
-    ditto(app, &staged)?;
-    let (hash, _) = patch_asar(&staged.join(ASAR_REL), loader_source(), Some(&install_id))?;
-    write_asar_integrity(&staged, &hash)?;
+    if let Err(error) = ditto(app, &staged) {
+        return Err(rollback_install(&mut tx, Some(&staged), error));
+    }
+    let (hash, _) = match patch_asar(&staged.join(ASAR_REL), loader_source(), Some(&install_id)) {
+        Ok(result) => result,
+        Err(error) => return Err(rollback_install(&mut tx, Some(&staged), error)),
+    };
+    if let Err(error) = write_asar_integrity(&staged, &hash) {
+        return Err(rollback_install(&mut tx, Some(&staged), error));
+    }
     if is_official_app(app, None) || verify_app(app) || app.join("Contents/MacOS").exists() {
         if let Err(err) = sign_app(&staged) {
-            if is_official_app(app, None) {
-                tx.rollback(&err)?;
-            }
-            return Err(err);
+            return Err(rollback_install(&mut tx, Some(&staged), err));
         }
     }
     progress.stage("Replacing application");
-    tx.place_staging(&staged)?;
+    if let Err(error) = tx.place_staging(&staged) {
+        return Err(rollback_install(&mut tx, Some(&staged), error));
+    }
     if let Err(error) = tx.swap() {
-        if matches!(tx.journal().phase.as_str(), "TARGET_MOVED_OUT" | "SWAPPED") {
-            let _ = tx.rollback(&error);
-        }
-        return Err(error);
+        return Err(rollback_install(&mut tx, Some(&staged), error));
     }
     progress.stage("Verifying installation");
     if let Err(error) = verify_patched_adhoc_bundle_deep_strict(app, expected_plist.as_ref()) {
         let error = format!("post-swap codesign verification failed: {error}");
-        tx.rollback(&error)?;
-        return Err(error);
+        return Err(rollback_install(&mut tx, Some(&staged), error));
     }
     let commit = match tx.commit() {
         Ok(result) => result,
         Err(error) => {
-            if tx.journal().phase != "COMMITTED" {
-                tx.rollback(&error)?;
-            }
-            return Err(error);
+            return Err(rollback_install(&mut tx, Some(&staged), error));
         }
     };
     let warning = commit.cleanup_warning.map(|error| {
@@ -333,6 +332,61 @@ fn install_app(app: &Path, root: &Path, progress: &mut Progress) -> Result<Comma
         app: app.display().to_string(),
         warning,
     })
+}
+
+fn rollback_install(tx: &mut Engine, scratch: Option<&Path>, error: String) -> String {
+    let rollback_error = match tx.journal().phase.as_str() {
+        "COMMITTED" | "ROLLED_BACK" => None,
+        _ => tx.rollback(&error).err(),
+    };
+    finish_rollback(tx, scratch, error, rollback_error)
+}
+
+fn finish_rollback(
+    tx: &Engine,
+    scratch: Option<&Path>,
+    error: String,
+    rollback_error: Option<String>,
+) -> String {
+    let rollback_is_durable = tx.journal().phase == "ROLLED_BACK";
+    let scratch_error = if rollback_error.is_none() || rollback_is_durable {
+        scratch.and_then(|path| remove_install_scratch(path).err())
+    } else {
+        None
+    };
+    let mut details = Vec::new();
+    if let Some(rollback_error) = rollback_error {
+        if rollback_is_durable {
+            details.push(format!(
+                "rollback reached ROLLED_BACK, but durability confirmation reported an error: {rollback_error}"
+            ));
+        } else {
+            details.push(format!(
+                "transaction rollback failed; recover the retained journal: {rollback_error}"
+            ));
+        }
+    }
+    if let Some(scratch_error) = scratch_error {
+        details.push(format!("install scratch cleanup failed: {scratch_error}"));
+    }
+    if details.is_empty() {
+        error
+    } else {
+        format!("{error}; {}", details.join("; "))
+    }
+}
+
+fn remove_install_scratch(path: &Path) -> Result<(), String> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.to_string()),
+    };
+    if metadata.file_type().is_dir() {
+        fs::remove_dir_all(path).map_err(|error| error.to_string())
+    } else {
+        fs::remove_file(path).map_err(|error| error.to_string())
+    }
 }
 
 fn uninstall_app(
@@ -428,7 +482,12 @@ fn snapshot_original(tx: &mut Engine, app: &Path, original: &Path) -> Result<(),
 }
 
 fn rollback_snapshot_failure(tx: &mut Engine, error: String) -> String {
-    match tx.abort_discovered_snapshot() {
+    let rollback = if tx.journal().phase == "DISCOVERED" {
+        tx.abort_discovered_snapshot()
+    } else {
+        tx.rollback(&error)
+    };
+    match rollback {
         Ok(()) => error,
         Err(rollback) => format!(
             "{error}; failed to roll back rejected snapshot transaction: {rollback}"
@@ -597,96 +656,5 @@ fn print_command_result(result: &CommandResult) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_path_foreign_bundle_is_rejected_before_snapshot() {
-        let info = incodex_macos::PlistInfo {
-            bundle_identifier: "com.example.foreign".into(),
-            ..Default::default()
-        };
-        let error = ensure_official_bundle_identifier(&info).unwrap_err();
-        assert!(error.contains("foreign bundle"), "{error}");
-    }
-
-    #[test]
-    fn locked_target_validation_failure_rolls_back_before_original_snapshot() {
-        let sandbox = std::env::temp_dir().join(format!(
-            "incodex-locked-install-validation-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let root = sandbox.join("state");
-        let app = sandbox.join("ChatGPT.app");
-        fs::create_dir_all(&app).unwrap();
-        fs::write(app.join("marker"), "replacement\n").unwrap();
-        let canonical = fs::canonicalize(&app).unwrap();
-
-        let result = begin_verified_transaction(&root, &app, |locked_target| {
-            assert_eq!(locked_target, canonical);
-            Err("locked target validation failed".to_string())
-        });
-
-        assert!(result.is_err());
-        let transaction = fs::read_dir(root.join("transactions"))
-            .unwrap()
-            .next()
-            .unwrap()
-            .unwrap()
-            .file_name()
-            .to_string_lossy()
-            .into_owned();
-        let journal = journal_v2(&root, &transaction).unwrap();
-        assert_eq!(journal.phase, "ROLLED_BACK");
-        assert!(!root
-            .join("transactions")
-            .join(transaction)
-            .join("original/ChatGPT.app")
-            .exists());
-        fs::remove_dir_all(sandbox).unwrap();
-    }
-
-    #[test]
-    fn target_replacement_after_locked_validation_does_not_leave_a_snapshot() {
-        let sandbox = std::env::temp_dir().join(format!(
-            "incodex-target-replacement-before-snapshot-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let root = sandbox.join("state");
-        let app = sandbox.join("ChatGPT.app");
-        fs::create_dir_all(&app).unwrap();
-        fs::write(app.join("marker"), "original\n").unwrap();
-
-        let mut tx = begin_verified_transaction(&root, &app, |_locked_target| {
-            let moved = sandbox.join("ChatGPT-updater-old.app");
-            fs::rename(&app, &moved).unwrap();
-            fs::create_dir_all(&app).unwrap();
-            fs::write(app.join("marker"), "updater replacement\n").unwrap();
-            Ok(())
-        })
-        .unwrap();
-        let install_id = tx.install_id().to_string();
-        let original = root
-            .join("transactions")
-            .join(&install_id)
-            .join("original/ChatGPT.app");
-
-        let error = snapshot_original(&mut tx, &app, &original).unwrap_err();
-
-        assert!(error.contains("changed"), "{error}");
-        assert_eq!(
-            journal_v2(&root, &install_id).unwrap().phase,
-            "ROLLED_BACK"
-        );
-        assert!(!original.exists());
-        fs::remove_dir_all(sandbox).unwrap();
-    }
-}
+#[path = "install_tests.rs"]
+mod tests;

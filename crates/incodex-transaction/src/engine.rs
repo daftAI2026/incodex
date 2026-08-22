@@ -6,13 +6,14 @@ use incodex_macos::ditto;
 use crate::durable::sync_tree_and_ancestors;
 use crate::journal::{
     load_v2, reconstructed, tx_paths, validate_recovery_proofs, validate_rel_paths, write_journal,
-    JournalTarget, JournalV2, RelPaths, ORIGINAL_REL, OUTGOING_REL, STAGED_REL,
+    write_journal_tracked, JournalTarget, JournalV2, RelPaths, ORIGINAL_REL, OUTGOING_REL,
+    STAGED_REL,
 };
 use crate::lock::{acquire_target_lock, TargetLock};
 use crate::new_install_id;
 use crate::proof::{
     directory_identity, matches_recorded_restore, matches_recorded_restore_path,
-    optional_directory_identity, parse_identity, require_identity, tree_digest,
+    optional_directory_identity, parse_identity, require_identity, restore_source, tree_digest,
     validate_backup_digest, validate_pre_swap_identity, validate_pre_swap_live,
     validate_staged_snapshot, validate_tree_digest,
 };
@@ -263,11 +264,40 @@ impl Engine {
     }
 
     fn advance(&mut self, phase: &str) -> Result<(), String> {
-        self.journal.phase = phase.to_string();
-        self.journal.sequence += 1;
-        write_journal(&self.root, &self.journal)?;
-        self.journal = load_v2(&self.root, self.install_id())?;
-        Ok(())
+        let mut next = self.journal.clone();
+        next.phase = phase.to_string();
+        next.sequence += 1;
+        let sealed = crate::journal::seal(next);
+        let install_id = sealed.install_id.clone();
+        let write_error = write_journal_tracked(&self.root, &sealed).err();
+        match load_v2(&self.root, &install_id) {
+            Ok(journal) => {
+                self.journal = journal;
+                match write_error {
+                    Some(error) => Err(error.to_string()),
+                    None => Ok(()),
+                }
+            }
+            Err(read_error) => {
+                // +-----------------------------------------------------------+
+                // | 只有确认 rename 已发生，才把内存推进到 next；否则保留 old。   |
+                // | 不能把 pre-rename 失败误判成 durable phase。                 |
+                // +-----------------------------------------------------------+
+                if write_error
+                    .as_ref()
+                    .map(|error| error.renamed)
+                    .unwrap_or(true)
+                {
+                    self.journal = sealed;
+                }
+                match write_error {
+                    Some(write_error) => Err(format!(
+                        "{write_error}; journal readback also failed: {read_error}"
+                    )),
+                    None => Err(read_error),
+                }
+            }
+        }
     }
 }
 
@@ -404,6 +434,24 @@ fn validate_recovery_target(
 
 pub fn recover(root: &Path, install_id: &str) -> Result<RecoverResult, TxError> {
     recover_with(root, install_id, |_| true)
+}
+
+/// Validate post-swap rollback readiness without taking a lock or changing state.
+pub fn validate_post_swap_rollback(root: &Path, install_id: &str) -> Result<(), String> {
+    let journal = load_v2(root, install_id)?;
+    let paths = reconstructed(root, &journal)?;
+    if !is_post_swap_phase(&journal.phase) {
+        return Err(format!(
+            "transaction {install_id} is not post-swap: {}",
+            journal.phase
+        ));
+    }
+    let live = PathBuf::from(&journal.target.real_path);
+    validate_recovery_target(&journal, &paths, &live)?;
+    if matches_recorded_restore(&live, &journal)? {
+        return Ok(());
+    }
+    restore_source(root, &journal).map(|_| ())
 }
 
 pub fn recover_with<F>(

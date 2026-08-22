@@ -120,6 +120,14 @@ pub struct JournalRecord {
     pub action: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retained_original: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_valid: Option<bool>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub artifacts: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recovery: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -333,7 +341,11 @@ pub fn scan_owner_processes(root: &Path) -> ProcessScan {
     }
 }
 
-pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalScan {
+pub fn scan_journals(
+    root: &Path,
+    current_install_id: Option<&str>,
+    include_original_proof: bool,
+) -> JournalScan {
     let dir = root.join("transactions");
     if is_symlink(&dir) {
         return JournalScan {
@@ -417,6 +429,10 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                 phase: None,
                 action: None,
                 error: Some(message.to_string()),
+                retained_original: None,
+                original_valid: None,
+                artifacts: Vec::new(),
+                recovery: None,
             });
             findings.push(DiagnosticFinding::warning(
                 code,
@@ -437,6 +453,10 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                     phase: None,
                     action: None,
                     error: Some("journal file is a symlink and was not inspected".to_string()),
+                    retained_original: None,
+                    original_valid: None,
+                    artifacts: Vec::new(),
+                    recovery: None,
                 });
                 findings.push(DiagnosticFinding::warning(
                     "journal.file-symlink",
@@ -448,6 +468,14 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
             match journal_v2(root, &install_id) {
                 Ok(journal) => {
                     let action = recover_action_phase(&journal.phase);
+                    let (retained_original, original_valid, artifacts, recovery) =
+                        transaction_evidence(
+                            root,
+                            &journal.install_id,
+                            &journal.phase,
+                            action,
+                            include_original_proof,
+                        );
                     let kind = if action != incodex_transaction::Recovery::Done {
                         interrupted.push((
                             journal.install_id.clone(),
@@ -471,6 +499,10 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                         phase: Some(journal.phase),
                         action: Some(action.as_str().to_string()),
                         error: None,
+                        retained_original,
+                        original_valid,
+                        artifacts,
+                        recovery,
                     });
                     if kind == "staleCommitted" {
                         findings.push(DiagnosticFinding::info(
@@ -492,6 +524,10 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                         phase: None,
                         action: None,
                         error: Some(error.clone()),
+                        retained_original: None,
+                        original_valid: None,
+                        artifacts: Vec::new(),
+                        recovery: None,
                     });
                     findings.push(DiagnosticFinding::warning(
                         "journal.malformed",
@@ -512,6 +548,10 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                     phase: None,
                     action: None,
                     error: Some(error.to_string()),
+                    retained_original: None,
+                    original_valid: None,
+                    artifacts: Vec::new(),
+                    recovery: None,
                 });
                 findings.push(DiagnosticFinding::warning(
                     "journal.malformed",
@@ -548,6 +588,10 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                         phase: Some(journal.phase),
                         action: Some(action.as_str().to_string()),
                         error: None,
+                        retained_original: None,
+                        original_valid: None,
+                        artifacts: Vec::new(),
+                        recovery: None,
                     });
                     if kind == "staleCommitted" {
                         findings.push(DiagnosticFinding::info(
@@ -578,6 +622,10 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                             .map(str::to_string),
                         action: None,
                         error: Some("journal schema is not recognized".to_string()),
+                        retained_original: None,
+                        original_valid: None,
+                        artifacts: Vec::new(),
+                        recovery: None,
                     });
                     findings.push(DiagnosticFinding::warning(
                         if kind == "malformed" {
@@ -598,6 +646,10 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
                     phase: None,
                     action: None,
                     error: Some(error.to_string()),
+                    retained_original: None,
+                    original_valid: None,
+                    artifacts: Vec::new(),
+                    recovery: None,
                 });
                 findings.push(DiagnosticFinding::warning(
                     "journal.malformed",
@@ -620,6 +672,89 @@ pub fn scan_journals(root: &Path, current_install_id: Option<&str>) -> JournalSc
         },
     }
 }
+
+fn transaction_evidence(
+    root: &Path,
+    install_id: &str,
+    phase: &str,
+    action: incodex_transaction::Recovery,
+    include_original_proof: bool,
+) -> (Option<String>, Option<bool>, Vec<String>, Option<String>) {
+    let transaction = root.join("transactions").join(install_id);
+    let original = transaction.join("original/ChatGPT.app");
+    let original_exists = fs::symlink_metadata(&original)
+        .ok()
+        .filter(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+        .is_some();
+    let retained_original = original_exists.then(|| original.display().to_string());
+    let original_valid = if include_original_proof {
+        original_exists
+            .then(|| incodex_transaction::validate_backup_snapshot(root, install_id).is_ok())
+    } else {
+        None
+    };
+    let internal_candidates = [
+        transaction.join("staging/ChatGPT.app"),
+        transaction.join("outgoing/ChatGPT.app"),
+        transaction.join("restore/ChatGPT.app"),
+        transaction.join("trash/ChatGPT.app"),
+    ];
+    let external_scratch = root
+        .join("scratch")
+        .join(format!("ChatGPT.app.staged-{install_id}"));
+    let has_external_artifacts = fs::symlink_metadata(&external_scratch).is_ok();
+    let has_internal_artifacts = internal_candidates
+        .iter()
+        .any(|path| fs::symlink_metadata(path).is_ok());
+    let internal_cleanup_safe = phase == "COMMITTED"
+        && has_internal_artifacts
+        && incodex_transaction::validate_committed_cleanup(root, install_id).is_ok();
+    let artifacts: Vec<String> = internal_candidates
+        .into_iter()
+        .chain(std::iter::once(external_scratch))
+        .filter(|path| fs::symlink_metadata(path).is_ok())
+        .map(|path| path.display().to_string())
+        .collect();
+    let recovery = if has_external_artifacts {
+        Some("manual".to_string())
+    } else {
+        match action {
+            incodex_transaction::Recovery::Rollback
+                if matches!(phase, "BACKUP_COMMITTED" | "STAGED")
+                    && include_original_proof
+                    && original_valid != Some(true) =>
+            {
+                Some("manual".to_string())
+            }
+            incodex_transaction::Recovery::Rollback
+                if matches!(
+                    phase,
+                    "TARGET_MOVED_OUT" | "SWAPPED" | "TARGET_VERIFIED" | "UNINSTALLING"
+                ) && include_original_proof
+                    && incodex_transaction::validate_post_swap_rollback(root, install_id)
+                        .is_err() =>
+            {
+                Some("manual".to_string())
+            }
+            incodex_transaction::Recovery::Rollback => Some("rollback".to_string()),
+            incodex_transaction::Recovery::Refuse => Some("manual".to_string()),
+            incodex_transaction::Recovery::Done if internal_cleanup_safe => {
+                Some("cleanup".to_string())
+            }
+            incodex_transaction::Recovery::Done if !artifacts.is_empty() => {
+                Some("manual".to_string())
+            }
+            incodex_transaction::Recovery::Done
+                if phase == "ROLLED_BACK" && original_valid == Some(true) =>
+            {
+                Some("retained".to_string())
+            }
+            incodex_transaction::Recovery::Done => None,
+        }
+    };
+    (retained_original, original_valid, artifacts, recovery)
+}
+
 #[cfg(test)]
 #[path = "diagnose_checks_tests.rs"]
 mod tests;

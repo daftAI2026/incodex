@@ -2,7 +2,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::Engine;
-use crate::durable::{reset_sync_trace, sync_trace};
+use crate::durable::{
+    fail_next_write_after_rename, fail_next_write_before_rename, reset_sync_trace, sync_trace,
+};
+use crate::journal::{fail_load_on_call, fail_next_load, load_v2};
 use crate::proof::{digest_call_count, reset_digest_call_count};
 
 fn app(root: &Path, name: &str, marker: &str) -> PathBuf {
@@ -10,6 +13,108 @@ fn app(root: &Path, name: &str, marker: &str) -> PathBuf {
     fs::create_dir_all(&path).unwrap();
     fs::write(path.join("marker"), marker).unwrap();
     path
+}
+
+fn swapped_transaction(root: &Path) -> Engine {
+    let target = app(root, "ChatGPT.app", "original");
+    let candidate = app(root, "candidate.app", "patched");
+    let mut tx = Engine::begin(root, &target, "journal-readback-test").unwrap();
+    let original = root
+        .join("transactions")
+        .join(tx.install_id())
+        .join("original/ChatGPT.app");
+    fs::create_dir_all(&original).unwrap();
+    fs::copy(target.join("marker"), original.join("marker")).unwrap();
+    tx.mark_backup_committed().unwrap();
+    tx.place_staging(&candidate).unwrap();
+    tx.swap().unwrap();
+    tx
+}
+
+#[test]
+fn durable_commit_readback_failure_keeps_the_new_phase_in_memory() {
+    let root = std::env::temp_dir().join(format!(
+        "incodex-commit-readback-failure-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let mut tx = swapped_transaction(&root);
+    let id = tx.install_id().to_string();
+
+    fail_next_write_after_rename();
+    fail_next_load();
+    let error = tx.commit().unwrap_err();
+
+    assert!(error.contains("injected journal readback failure"));
+    assert_eq!(tx.journal().phase, "COMMITTED");
+    assert_eq!(load_v2(&root, &id).unwrap().phase, "COMMITTED");
+    assert!(tx.rollback("must not roll back durable commit").is_err());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn pre_rename_write_and_readback_failure_keeps_the_old_phase_for_rollback() {
+    let root = std::env::temp_dir().join(format!(
+        "incodex-commit-pre-rename-readback-failure-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let mut tx = swapped_transaction(&root);
+
+    fail_next_write_before_rename();
+    fail_next_load();
+    let error = tx.commit().unwrap_err();
+
+    assert!(error.contains("injected pre-rename journal write failure"));
+    assert!(error.contains("journal readback also failed"));
+    assert_eq!(tx.journal().phase, "SWAPPED");
+    tx.rollback("pre-rename write failed").unwrap();
+    assert_eq!(tx.journal().phase, "ROLLED_BACK");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn post_rename_write_and_readback_failure_keeps_the_durable_phase_in_memory() {
+    let root = std::env::temp_dir().join(format!(
+        "incodex-commit-post-rename-failure-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let mut tx = swapped_transaction(&root);
+    let id = tx.install_id().to_string();
+
+    fail_next_write_after_rename();
+    fail_next_load();
+    let error = tx.commit().unwrap_err();
+
+    assert!(error.contains("injected post-rename journal write failure"));
+    assert_eq!(tx.journal().phase, "COMMITTED");
+    assert_eq!(load_v2(&root, &id).unwrap().phase, "COMMITTED");
+    assert!(tx.rollback("must not roll back durable commit").is_err());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn rollback_post_rename_readback_failure_keeps_the_durable_rollback_phase() {
+    let root = std::env::temp_dir().join(format!(
+        "incodex-rollback-post-rename-readback-failure-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let mut tx = swapped_transaction(&root);
+    let id = tx.install_id().to_string();
+
+    fail_load_on_call(2);
+    let error = tx.rollback("injected rollback journal failure").unwrap_err();
+
+    assert!(error.contains("injected journal readback failure"));
+    assert_eq!(tx.journal().phase, "ROLLED_BACK");
+    assert_eq!(load_v2(&root, &id).unwrap().phase, "ROLLED_BACK");
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

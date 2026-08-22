@@ -273,6 +273,24 @@ pub fn format_diagnosis(report: &Diagnosis) -> String {
             None,
         ));
     }
+    for record in &report.journal_records {
+        if let Some(original) = &record.retained_original {
+            lines.push(incodex_core::format_kv("Retained original", original, None));
+            if let Some(original_valid) = record.original_valid {
+                lines.push(incodex_core::format_kv(
+                    "Original proof",
+                    if original_valid { "valid" } else { "invalid" },
+                    None,
+                ));
+            }
+        }
+        if let Some(recovery) = &record.recovery {
+            lines.push(incodex_core::format_kv("Recovery", recovery, None));
+        }
+        for artifact in &record.artifacts {
+            lines.push(incodex_core::format_kv("Artifact", artifact, None));
+        }
+    }
     if !report.interrupted_transactions.is_empty() {
         lines.push(incodex_core::format_warn(
             "Old install journals are leftover. They do not mean the current app is broken.",
@@ -341,5 +359,68 @@ fn check_status(check: &CheckResult) -> &'static str {
     match check.status {
         CheckStatus::Checked => "checked",
         CheckStatus::Unknown => "unknown",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::diagnose::{ExternalRuntimeReport, InterruptedTransaction};
+    use crate::diagnose_checks::{empty_checks, JournalRecord};
+
+    #[test]
+    fn diagnosis_omits_proof_line_when_proof_was_not_requested() {
+        let report = Diagnosis {
+            target: "/tmp/ChatGPT.app".into(),
+            target_id: "app-test".into(),
+            exists: true,
+            patched: false,
+            bundle_id: None,
+            app_version: None,
+            app_build: None,
+            architecture: None,
+            asar_file_hash: None,
+            asar_header_hash: None,
+            plist_file_hash: None,
+            plist_integrity_hash: None,
+            runtime_version: None,
+            original_main: String::new(),
+            codesign_ok: None,
+            backup: None,
+            stale_pid: false,
+            orphan_sessions: Vec::new(),
+            leftover_chromium: Vec::new(),
+            asar_loader_only: None,
+            external_runtime: ExternalRuntimeReport {
+                status: CheckStatus::Unknown,
+                present: false,
+                ok: false,
+                version: None,
+                release: None,
+                error: None,
+            },
+            signing: None,
+            spctl: None,
+            interrupted_transactions: Vec::<InterruptedTransaction>::new(),
+            journal_records: vec![JournalRecord {
+                kind: "completed".into(),
+                path: "/tmp/transaction".into(),
+                install_id: Some("test".into()),
+                phase: Some("ROLLED_BACK".into()),
+                action: Some("done".into()),
+                error: None,
+                retained_original: Some("/tmp/original/ChatGPT.app".into()),
+                original_valid: None,
+                artifacts: Vec::new(),
+                recovery: Some("retained".into()),
+            }],
+            checks: empty_checks(),
+            findings: Vec::new(),
+        };
+
+        let output = format_diagnosis(&report);
+
+        assert!(output.contains("Retained original"), "{output}");
+        assert!(!output.contains("Original proof"), "{output}");
     }
 }

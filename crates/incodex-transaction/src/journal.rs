@@ -1,14 +1,23 @@
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+#[cfg(test)]
+use std::cell::Cell;
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::durable::write_atomic;
+use crate::durable::{write_atomic, write_atomic_tracked, AtomicWriteError};
 
 pub const STAGED_REL: &str = "staging/ChatGPT.app";
 pub const OUTGOING_REL: &str = "outgoing/ChatGPT.app";
 pub const ORIGINAL_REL: &str = "original/ChatGPT.app";
+
+#[cfg(test)]
+thread_local! {
+    static FAIL_NEXT_LOAD: Cell<bool> = const { Cell::new(false) };
+    static FAIL_ON_LOAD_CALL: Cell<u8> = const { Cell::new(0) };
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -212,6 +221,20 @@ pub fn seal(mut journal: JournalV2) -> JournalV2 {
 }
 
 pub fn write_journal(root: &Path, journal: &JournalV2) -> Result<(), String> {
+    let (path, body) = journal_body(root, journal)?;
+    write_atomic(&path, &body)
+}
+
+pub(crate) fn write_journal_tracked(
+    root: &Path,
+    journal: &JournalV2,
+) -> Result<(), AtomicWriteError> {
+    let (path, body) = journal_body(root, journal)
+        .map_err(|error| AtomicWriteError::new(error, false))?;
+    write_atomic_tracked(&path, &body)
+}
+
+fn journal_body(root: &Path, journal: &JournalV2) -> Result<(std::path::PathBuf, Vec<u8>), String> {
     if journal.install_id.is_empty() || !is_uuid(&journal.install_id) {
         return Err("install id must be an RFC 4122 UUID".into());
     }
@@ -220,13 +243,31 @@ pub fn write_journal(root: &Path, journal: &JournalV2) -> Result<(), String> {
     let body = format!(
         "{}\n",
         serde_json::to_string_pretty(&sealed).map_err(|err| err.to_string())?
-    );
-    write_atomic(&path, body.as_bytes())
+    )
+    .into_bytes();
+    Ok((path, body))
 }
 
 pub fn load_v2(root: &Path, install_id: &str) -> Result<JournalV2, String> {
     if !is_uuid(install_id) {
         return Err("install id must be an RFC 4122 UUID".into());
+    }
+    #[cfg(test)]
+    if FAIL_NEXT_LOAD.with(|failure| failure.replace(false))
+        || FAIL_ON_LOAD_CALL.with(|remaining| {
+            let call = remaining.get();
+            if call == 0 {
+                false
+            } else if call == 1 {
+                remaining.set(0);
+                true
+            } else {
+                remaining.set(call - 1);
+                false
+            }
+        })
+    {
+        return Err("injected journal readback failure".into());
     }
     let path = tx_paths(root, install_id).journal;
     let body = fs::read_to_string(&path).map_err(|err| err.to_string())?;
@@ -249,6 +290,16 @@ pub fn load_v2(root: &Path, install_id: &str) -> Result<JournalV2, String> {
     }
     validate_rel_paths(&journal)?;
     Ok(journal)
+}
+
+#[cfg(test)]
+pub(crate) fn fail_next_load() {
+    FAIL_NEXT_LOAD.with(|failure| failure.set(true));
+}
+
+#[cfg(test)]
+pub(crate) fn fail_load_on_call(call: u8) {
+    FAIL_ON_LOAD_CALL.with(|remaining| remaining.set(call));
 }
 
 pub(crate) fn validate_recovery_proofs(journal: &JournalV2) -> Result<(), String> {

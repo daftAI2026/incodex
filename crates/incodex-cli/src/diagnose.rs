@@ -183,7 +183,11 @@ pub fn diagnose_with_root_mode(app_path: &Path, root: &Path, mode: DiagnosisMode
     let current_install_id = package
         .as_ref()
         .and_then(|package| package.install_id.clone());
-    let journal_scan = scan_journals(root, current_install_id.as_deref());
+    let journal_scan = scan_journals(
+        root,
+        current_install_id.as_deref(),
+        mode != DiagnosisMode::Status,
+    );
     let mut checks = empty_checks();
     checks.process_identity = owner_scan.check;
     checks.orphan_sessions = session_scan.orphan_check;

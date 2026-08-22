@@ -10,6 +10,9 @@ use incodex_macos::ditto;
 use incodex_transaction::{acquire_target_lock, journal_v2, Engine};
 use sha2::{Digest, Sha256};
 
+#[path = "install/transaction_evidence.rs"]
+mod transaction_evidence;
+
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_incodex")
 }
@@ -404,59 +407,6 @@ fn install_yes_app_patches_asar_writes_runtime_and_commits() {
 }
 
 #[test]
-fn install_codesign_failure_aborts_custom_target_before_swap() {
-    let home = isolated_home();
-    let app = patchable_app(&home);
-    let asar = app.join("Contents/Resources/app.asar");
-    let before = fs::read(&asar).unwrap();
-    let cua = app
-        .join("Contents/Frameworks/CUALockScreenGuardian.app/Contents/MacOS/CUALockScreenGuardian");
-    let fake_bin = home.join("fake-bin");
-    fs::create_dir_all(&fake_bin).unwrap();
-    write_executable(
-        &fake_bin.join("codesign"),
-        "#!/bin/sh\nprintf '%s\\n' 'forced codesign failure' >&2\nexit 1\n",
-    );
-
-    let (status, _stdout, stderr) = run_with_path(
-        &["install", "--yes", "--app", app.to_str().unwrap()],
-        &home,
-        &path_with_fake_bin(&fake_bin),
-    );
-    assert_eq!(status, 1, "stderr={stderr}");
-    assert!(stderr.contains("forced codesign failure"), "{stderr}");
-    assert_eq!(fs::read(&asar).unwrap(), before);
-    assert!(
-        cua.exists(),
-        "vendor helper must be restored after sign failure"
-    );
-}
-
-#[test]
-fn install_aborts_when_asar_integrity_cannot_be_written() {
-    let home = isolated_home();
-    let app = patchable_app(&home);
-    let asar = app.join("Contents/Resources/app.asar");
-    let before = fs::read(&asar).unwrap();
-    let fake_bin = home.join("fake-bin");
-    fs::create_dir_all(&fake_bin).unwrap();
-    write_executable(&fake_bin.join("plutil"), "#!/bin/sh\nexit 1\n");
-    write_executable(&fake_bin.join("codesign"), "#!/bin/sh\nexit 0\n");
-
-    let (status, _stdout, stderr) = run_with_path(
-        &["install", "--yes", "--app", app.to_str().unwrap()],
-        &home,
-        &path_with_fake_bin(&fake_bin),
-    );
-    assert_eq!(status, 1, "stderr={stderr}");
-    assert!(
-        stderr.contains("ElectronAsarIntegrity") || stderr.contains("plutil"),
-        "{stderr}"
-    );
-    assert_eq!(fs::read(&asar).unwrap(), before);
-}
-
-#[test]
 fn install_refuses_stale_loader_without_a_committed_transaction() {
     let home = isolated_home();
     let app = patchable_app(&home);
@@ -550,6 +500,22 @@ fn post_swap_verification_failure_rolls_back_the_original_app() {
     )
     .unwrap();
     assert_eq!(journal["phase"], "ROLLED_BACK");
+    let id = journal["installId"].as_str().unwrap();
+    assert!(home
+        .join(".incodex/transactions")
+        .join(id)
+        .join("original/ChatGPT.app")
+        .exists());
+    assert!(!home
+        .join(".incodex/transactions")
+        .join(id)
+        .join("staging/ChatGPT.app")
+        .exists());
+    assert!(!home
+        .join(".incodex/transactions")
+        .join(id)
+        .join("outgoing/ChatGPT.app")
+        .exists());
 }
 
 #[test]
@@ -691,10 +657,27 @@ fn recover_does_not_finish_until_the_restored_app_verifies() {
         "{stderr}"
     );
     let journal: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(root.join("transactions").join(id).join("journal.json")).unwrap(),
+        &fs::read_to_string(root.join("transactions").join(&id).join("journal.json")).unwrap(),
     )
     .unwrap();
     assert_eq!(journal["phase"], "SWAPPED");
+
+    let (status, stdout, stderr) = run(
+        &["recover", "--transaction", &id],
+        &home,
+    );
+    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
+    assert!(stdout.contains("phase: ROLLED_BACK"), "{stdout}");
+    let journal: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(root.join("transactions").join(&id).join("journal.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(journal["phase"], "ROLLED_BACK");
+    assert!(root
+        .join("transactions")
+        .join(&id)
+        .join("original/ChatGPT.app")
+        .exists());
 }
 
 #[test]

@@ -10,7 +10,10 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-pub use engine::{recover, recover_with, CommitResult, Engine, RecoverResult, TxError};
+pub use engine::{
+    recover, recover_with, validate_post_swap_rollback, CommitResult, Engine, RecoverResult,
+    TxError,
+};
 pub use journal::{new_install_id, validate_path_ancestors, JournalV2};
 pub use uninstall::{
     migrate_legacy_committed, restore_committed, restore_committed_with_checkpoint,
@@ -38,6 +41,18 @@ pub fn validate_committed_live_snapshot(
 ) -> Result<(), String> {
     let journal = journal::load_v2(root, install_id)?;
     uninstall::validate_committed_restore_target(root, &journal, live_path)
+}
+
+/// Validate that a committed transaction's cleanup paths remain recoverable.
+pub fn validate_committed_cleanup(root: &Path, install_id: &str) -> Result<(), String> {
+    let journal = journal::load_v2(root, install_id)?;
+    if journal.phase != "COMMITTED" {
+        return Err(format!(
+            "transaction {install_id} is not committed: {}",
+            journal.phase
+        ));
+    }
+    journal::reconstructed(root, &journal).map(|_| ())
 }
 pub use lock::{acquire_target_lock, lock_path_for, TargetLock};
 

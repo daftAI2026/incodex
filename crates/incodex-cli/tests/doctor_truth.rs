@@ -9,6 +9,8 @@ use sha2::{Digest, Sha256};
 #[path = "support/readonly.rs"]
 mod readonly_support;
 mod support;
+#[path = "doctor/transaction_evidence.rs"]
+mod transaction_evidence;
 
 use readonly_support::{
     isolated_home, parse_json, run, run_with_stdout_redirected, top_level_json_keys, DIAGNOSIS_KEYS,
