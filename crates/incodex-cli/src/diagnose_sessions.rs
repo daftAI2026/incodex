@@ -216,6 +216,21 @@ pub fn scan_sessions(root: &Path) -> SessionScan {
             .filter(|value| !value.is_empty())
             .map(str::to_string)
             .unwrap_or_else(|| file_name(&session));
+        if owner
+            .get("handoffPending")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+        {
+            mark_pair(
+                &mut unknown,
+                &mut orphan_findings,
+                &mut chromium_findings,
+                "session.handoff-pending",
+                "session owner handoff is pending; session and Chromium residue were retained",
+                &owner_path,
+            );
+            continue;
+        }
         let orphan = match pid {
             Some(pid) if !pid_alive(pid) => true,
             Some(pid) => match owner
