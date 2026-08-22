@@ -100,8 +100,9 @@ struct SpinnerState {
 
 impl SpinnerState {
     fn line_needs_clear(&mut self, columns: usize, message_changed: bool) -> bool {
+        let columns_changed = self.last_columns != columns;
         self.last_columns = columns;
-        message_changed
+        message_changed || columns_changed
     }
 }
 
