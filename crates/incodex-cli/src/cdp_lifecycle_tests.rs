@@ -313,3 +313,58 @@ fn lifecycle_survives_a_transient_target_list_failure() {
         "closing the recovered primary must still close the isolated browser"
     );
 }
+
+#[test]
+fn lifecycle_reissues_browser_close_while_the_browser_is_still_alive() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut close_commands = 0;
+
+        while let Some(mut stream) = accept_until(&listener, deadline) {
+            match read_request_path(&mut stream).as_str() {
+                "/json/list" => write_json(&mut stream, &json!([overlay(port)])),
+                "/json/version" => {
+                    write_json(
+                        &mut stream,
+                        &json!({
+                            "webSocketDebuggerUrl": format!(
+                                "ws://127.0.0.1:{port}/devtools/browser/{}",
+                                close_commands + 1
+                            )
+                        }),
+                    );
+                    let Some(stream) = accept_until(&listener, deadline) else {
+                        break;
+                    };
+                    let mut socket = tungstenite::accept(stream).unwrap();
+                    let Message::Text(command) = socket.read().unwrap() else {
+                        panic!("Browser.close must be a text CDP command");
+                    };
+                    let is_close = serde_json::from_str::<Value>(&command)
+                        .ok()
+                        .and_then(|value| value.get("method").cloned())
+                        == Some(json!("Browser.close"));
+                    assert!(is_close, "expected Browser.close, got {command}");
+                    close_commands += 1;
+                    if close_commands == 2 {
+                        break;
+                    }
+                }
+                path => panic!("unexpected mock CDP path: {path}"),
+            }
+        }
+
+        close_commands
+    });
+
+    monitor_primary_target(port, "main");
+    let close_commands = server.join().unwrap();
+
+    assert_eq!(
+        close_commands, 2,
+        "sending Browser.close is not proof of exit; a live browser must be checked and closed again"
+    );
+}
