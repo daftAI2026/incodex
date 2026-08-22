@@ -102,6 +102,10 @@ where
 /// The only state in which post-commit metadata is available. Interrupted and
 /// rolled-back journals deliberately cannot carry a stale committed snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "frozen v1 evidence stays a direct cold-path state model"
+)]
 pub enum LegacyState {
     Committed {
         current: CurrentPointer,
