@@ -488,6 +488,7 @@ async function launchIncognitoOnce() {
       done({ ok: false, reason: "spawn-failed" });
       return;
     }
+    let childOwner = null;
     child.on("error", (error) => {
       logLaunch("spawn-error", { error: String(error) });
       done({ ok: false, reason: "spawn-failed" });
@@ -507,7 +508,9 @@ async function launchIncognitoOnce() {
       const tryBurn = (attempt) => {
         const attemptExpected = safeHome.cleanupExpectedForAttempt(expected, originalRemoved);
         try {
-          const removed = safeHome.burnSessionHome(session.root, attemptExpected);
+          const removed = childOwner && !originalRemoved
+            ? safeHome.burnSessionHomeWithOwner(session.root, attemptExpected, childOwner)
+            : safeHome.burnSessionHome(session.root, attemptExpected);
           if (removed) originalRemoved = true;
         } catch (error) {
           if (attempt < 5) {
@@ -528,6 +531,18 @@ async function launchIncognitoOnce() {
       tryBurn(1);
       if (!settled) done({ ok: false, reason: "exited-early" });
     });
+    try {
+      childOwner = safeHome.handoffSessionOwner(session.root, child.pid);
+    } catch (error) {
+      logLaunch("owner-handoff-failed", { error: String(error), sessionId: session.sessionId });
+      try {
+        if (!child.killed) child.kill();
+      } catch {
+        /* child exit handler still owns bounded cleanup. */
+      }
+      done({ ok: false, reason: "spawn-failed" });
+      return;
+    }
     raiseChildWhenReady(child.pid);
     const started = Date.now();
     const timer = setInterval(() => {

@@ -6,9 +6,11 @@ exports.assertNotSymlink = assertNotSymlink;
 exports.assertInsideParent = assertInsideParent;
 exports.ensurePrivateDir = ensurePrivateDir;
 exports.writePrivateFile = writePrivateFile;
+exports.handoffSessionOwner = handoffSessionOwner;
 exports.exclusiveCopyFile = exclusiveCopyFile;
 exports.createSessionHome = createSessionHome;
 exports.burnSessionHome = burnSessionHome;
+exports.burnSessionHomeWithOwner = burnSessionHomeWithOwner;
 exports.cleanupExpectedForAttempt = cleanupExpectedForAttempt;
 exports.writeBurnProof = writeBurnProof;
 exports.readBurnProof = readBurnProof;
@@ -26,6 +28,7 @@ exports.readPidFile = readPidFile;
 exports.sessionRootFromHome = sessionRootFromHome;
 const fs = require("node:fs");
 const path = require("node:path");
+const ownerCore = require("./incodex-owner-core.cjs");
 const SESSIONS_NAME = "sessions";
 exports.SESSIONS_NAME = SESSIONS_NAME;
 const BURN_PROOF_PREFIX = ".incodex-burned-";
@@ -121,6 +124,35 @@ function writePrivateFile(dest, data, { exclusive = false } = {}) {
         fs.closeSync(fd);
     }
 }
+function writePrivateFileAtomic(dest, data) {
+    const parent = path.dirname(dest);
+    const temporary = path.join(parent, `.${path.basename(dest)}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}`);
+    const fd = fs.openSync(temporary, OPEN_EXCLUSIVE, FILE_MODE);
+    try {
+        fs.writeSync(fd, data);
+        try {
+            fs.fsyncSync(fd);
+        }
+        catch {
+            /* 某些测试文件系统不提供 fsync；临时文件仍保持完整。 */
+        }
+    }
+    finally {
+        fs.closeSync(fd);
+    }
+    try {
+        assertNotSymlink(dest, "file");
+        fs.renameSync(temporary, dest);
+    }
+    finally {
+        try {
+            fs.rmSync(temporary, { force: true });
+        }
+        catch {
+            /* 原子 rename 成功后，临时文件清理只是 best effort。 */
+        }
+    }
+}
 function exclusiveCopyFile(src, dest) {
     const destStat = assertNotSymlink(dest, "copy destination");
     if (destStat) {
@@ -152,6 +184,7 @@ function createSessionHome(userRoot, options = {}) {
     const chromium = ensurePrivateDir(path.join(realRoot, "chromium"), realRoot);
     const sessionId = path.basename(realRoot);
     writePrivateFile(path.join(realRoot, LOCK_NAME), `${options.pid || ""}\n`, { exclusive: true });
+    const processStartIdentity = ownerCore.processIdentity(options.pid || 0)?.processStartIdentity || "";
     const owner = {
         sessionId,
         targetId: options.targetId || "",
@@ -160,6 +193,7 @@ function createSessionHome(userRoot, options = {}) {
         createdAt: new Date().toISOString(),
         ino: rootStat.ino,
         dev: rootStat.dev,
+        processStartIdentity,
     };
     writePrivateFile(path.join(realRoot, OWNER_NAME), `${JSON.stringify(owner)}\n`, { exclusive: true });
     return {
@@ -170,6 +204,24 @@ function createSessionHome(userRoot, options = {}) {
         ino: rootStat.ino,
         dev: rootStat.dev,
     };
+}
+function handoffSessionOwner(sessionRoot, pid) {
+    const live = ownerCore.processIdentity(pid);
+    if (!live?.processStartIdentity) {
+        throw new Error(`[incodex] cannot hand off session owner: process identity unavailable for pid ${pid}`);
+    }
+    const rootStats = assertNotSymlink(sessionRoot, "session root");
+    if (!rootStats?.isDirectory())
+        throw new Error(`[incodex] session root is not a directory: ${sessionRoot}`);
+    const ownerPath = path.join(sessionRoot, OWNER_NAME);
+    const owner = readOwner(sessionRoot);
+    if (owner.ino !== rootStats.ino || owner.dev !== rootStats.dev) {
+        throw new Error("[incodex] session root identity changed; refusing owner handoff");
+    }
+    owner.pid = pid;
+    owner.processStartIdentity = live.processStartIdentity;
+    writePrivateFileAtomic(ownerPath, `${JSON.stringify(owner)}\n`);
+    return { pid, processStartIdentity: live.processStartIdentity };
 }
 function readOwner(home) {
     const file = path.join(home, OWNER_NAME);
@@ -202,6 +254,12 @@ function sessionRootFromHome(home) {
     return home;
 }
 function burnSessionHome(target, expected) {
+    return burnSessionHomeInner(target, expected, null);
+}
+function burnSessionHomeWithOwner(target, expected, ownerSnapshot) {
+    return burnSessionHomeInner(target, expected, ownerSnapshot);
+}
+function burnSessionHomeInner(target, expected, ownerSnapshot) {
     const home = sessionRootFromHome(target);
     const stats = assertNotSymlink(home, "session root");
     if (!stats)
@@ -219,8 +277,17 @@ function burnSessionHome(target, expected) {
     const sessions = realExisting(path.join(expected.userRoot, SESSIONS_NAME));
     assertInsideParent(realHome, sessions);
     assertBurnIdentity(home, expected);
+    if (ownerSnapshot)
+        assertBurnOwner(home, ownerSnapshot);
     fs.rmSync(home, { recursive: true, force: false });
     return true;
+}
+function assertBurnOwner(home, expected) {
+    const owner = readOwner(home);
+    const start = owner.processStartIdentity || owner.startedAt;
+    if (owner.pid !== expected.pid || start !== expected.processStartIdentity) {
+        throw new Error("[incodex] session owner changed; refusing to burn");
+    }
 }
 function cleanupExpectedForAttempt(expected, originalRemoved) {
     if (!originalRemoved)
@@ -317,15 +384,15 @@ function copySettings(home, sourceHome) {
     }
     return copied;
 }
-function pidAlive(pid) {
+function processStatus(pid) {
     if (!Number.isInteger(pid) || pid <= 0)
-        return false;
+        return "dead";
     try {
         process.kill(pid, 0);
-        return true;
+        return "live";
     }
-    catch {
-        return false;
+    catch (error) {
+        return error?.code === "ESRCH" ? "dead" : "unknown";
     }
 }
 function sweepOrphanSessions(userRoot, options = {}) {
@@ -356,16 +423,34 @@ function sweepOrphanSessions(userRoot, options = {}) {
             const owner = readOwner(root);
             if (!Number.isInteger(owner.pid))
                 continue;
-            if (owner.pid && pidAlive(owner.pid))
+            const expectedStart = owner.processStartIdentity || owner.startedAt;
+            const status = options.pidAlive
+                ? (options.pidAlive(owner.pid) ? "live" : "dead")
+                : processStatus(owner.pid);
+            if (status === "unknown")
                 continue;
+            if (status === "live") {
+                if (!expectedStart)
+                    continue;
+                const identify = options.processIdentity || ownerCore.processIdentity;
+                const live = identify(owner.pid);
+                if (!live || live.processStartIdentity === expectedStart)
+                    continue;
+            }
             if (!Number.isSafeInteger(owner.ino) || !Number.isSafeInteger(owner.dev))
                 continue;
-            const removed = burnSessionHome(root, {
+            const expected = {
                 userRoot,
                 sessionId: owner.sessionId,
                 ino: owner.ino,
                 dev: owner.dev,
-            });
+            };
+            const removed = expectedStart
+                ? burnSessionHomeWithOwner(root, expected, {
+                    pid: owner.pid,
+                    processStartIdentity: expectedStart,
+                })
+                : burnSessionHome(root, expected);
             if (removed)
                 swept += 1;
         }

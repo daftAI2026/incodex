@@ -8,8 +8,9 @@ use std::time::Duration;
 
 use incodex_core::paths::{home_dir, user_root};
 use incodex_core::session::{
-    burn_session_home, copy_settings, create_session_home, sweep_orphan_sessions,
-    target_id_from_exec, BurnExpected, SessionHome,
+    burn_session_home, burn_session_home_with_owner, copy_settings, create_session_home,
+    handoff_session_owner, session_owner_snapshot, sweep_orphan_sessions, target_id_from_exec,
+    BurnExpected, SessionHome,
 };
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
 
@@ -296,7 +297,10 @@ pub fn wait_and_burn(
         user_root,
         retry_delay_ms,
         spawn_plan,
-        |root, expected| burn_session_home(root, expected),
+        |root, expected| match session_owner_snapshot(root)? {
+            Some(owner) => burn_session_home_with_owner(root, expected, &owner),
+            None => burn_session_home(root, expected),
+        },
     )
 }
 
@@ -311,6 +315,26 @@ fn spawn_plan(plan: &OpenPlan) -> Result<OpenProcessResult, String> {
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     let mut child = command.spawn().map_err(|err| err.to_string())?;
+    if let Err(error) = handoff_session_owner(&plan.session_root, child.id() as i32) {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                return Ok(OpenProcessResult::Exited {
+                    code: status.code().unwrap_or(1),
+                    ui_ready: false,
+                });
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                return Err(format!("session owner handoff failed: {error}"));
+            }
+            Err(wait_error) => {
+                let _ = child.kill();
+                return Err(format!(
+                    "session owner handoff failed: {error}; child wait failed: {wait_error}"
+                ));
+            }
+        }
+    }
     let (status_tx, status_rx) = mpsc::channel();
     let readiness = InjectionReadiness::default();
     if plan.debug_port != 0 {

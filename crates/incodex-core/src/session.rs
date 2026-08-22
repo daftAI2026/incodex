@@ -2,6 +2,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const SESSIONS_NAME: &str = "sessions";
@@ -30,30 +31,90 @@ pub struct BurnExpected<'a> {
     pub dev: Option<u64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionOwnerSnapshot {
+    pub pid: i32,
+    pub process_start_identity: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ProcessProbe {
+    Live(String),
+    Dead,
+    Unknown,
+}
+
+/// 读取与 Electron Runtime owner 相同格式的 macOS process-start identity。
+pub fn process_start_identity(pid: i32) -> Option<String> {
+    match probe_process(pid) {
+        ProcessProbe::Live(identity) => Some(identity),
+        ProcessProbe::Dead | ProcessProbe::Unknown => None,
+    }
+}
+
+fn probe_process(pid: i32) -> ProcessProbe {
+    if pid <= 0 {
+        return ProcessProbe::Dead;
+    }
+    if unsafe { libc::kill(pid, 0) } != 0 {
+        return match std::io::Error::last_os_error().raw_os_error() {
+            Some(libc::ESRCH) => ProcessProbe::Dead,
+            _ => ProcessProbe::Unknown,
+        };
+    }
+    let output = Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "lstart="])
+        .output()
+        .ok();
+    let Some(output) = output else {
+        return ProcessProbe::Unknown;
+    };
+    if !output.status.success() {
+        return ProcessProbe::Unknown;
+    }
+    let identity = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if identity.is_empty() {
+        ProcessProbe::Unknown
+    } else {
+        ProcessProbe::Live(identity)
+    }
+}
+
 pub fn create_session_home(
     user_root: &Path,
     target_id: Option<&str>,
     pid: i32,
     source_home: &str,
 ) -> Result<SessionHome, String> {
-    let parent = user_root.parent().ok_or("session user root has no parent")?;
+    let parent = user_root
+        .parent()
+        .ok_or("session user root has no parent")?;
     ensure_private_dir(user_root, parent)?;
     ensure_private_dir(&user_root.join(LOGS_NAME), user_root)?;
     let session_parent = sessions_base(user_root, target_id)?;
     let root = mkdtemp(&session_parent)?;
     chmod(&root, DIR_MODE)?;
     let root_stat = assert_not_symlink(&root, "session root")?;
-    let root_stat = root_stat.ok_or_else(|| format!("session root is not a directory: {}", root.display()))?;
+    let root_stat =
+        root_stat.ok_or_else(|| format!("session root is not a directory: {}", root.display()))?;
     if !root_stat.is_dir() {
-        return Err(format!("session root is not a directory: {}", root.display()));
+        return Err(format!(
+            "session root is not a directory: {}",
+            root.display()
+        ));
     }
     let real_root = real_existing(&root)?;
     assert_inside_parent(&real_root, &session_parent)?;
     let home = ensure_private_dir(&real_root.join("codex-home"), &real_root)?;
     let chromium = ensure_private_dir(&real_root.join("chromium"), &real_root)?;
     let session_id = file_name(&real_root)?;
-    write_private_file(&real_root.join(LOCK_NAME), format!("{pid}\n").as_bytes(), true)?;
-    let owner = serde_json::json!({
+    write_private_file(
+        &real_root.join(LOCK_NAME),
+        format!("{pid}\n").as_bytes(),
+        true,
+    )?;
+    let process_start_identity = process_start_identity(pid);
+    let mut owner = serde_json::json!({
         "sessionId": session_id,
         "targetId": target_id.unwrap_or(""),
         "pid": pid,
@@ -62,6 +123,9 @@ pub fn create_session_home(
         "ino": root_stat.ino(),
         "dev": root_stat.dev(),
     });
+    if let Some(identity) = process_start_identity.as_deref() {
+        owner["processStartIdentity"] = serde_json::json!(identity);
+    }
     write_private_file(
         &real_root.join(OWNER_NAME),
         format!("{owner}\n").as_bytes(),
@@ -75,6 +139,83 @@ pub fn create_session_home(
         ino: root_stat.ino(),
         dev: root_stat.dev(),
     })
+}
+
+/// 将 session owner 从 launcher 原子移交给已经 spawn 的 child。
+pub fn handoff_session_owner(
+    session_root: &Path,
+    pid: i32,
+) -> Result<SessionOwnerSnapshot, String> {
+    let identity = process_start_identity(pid).ok_or_else(|| {
+        format!("cannot hand off session owner: process identity unavailable for pid {pid}")
+    })?;
+    let root_stats = assert_not_symlink(session_root, "session root")?
+        .ok_or_else(|| format!("session root missing: {}", session_root.display()))?;
+    if !root_stats.is_dir() {
+        return Err(format!(
+            "session root is not a directory: {}",
+            session_root.display()
+        ));
+    }
+    let owner_path = session_root.join(OWNER_NAME);
+    let owner_stats = assert_not_symlink(&owner_path, "owner manifest")?
+        .ok_or_else(|| format!("session owner missing: {}", owner_path.display()))?;
+    if !owner_stats.is_file() {
+        return Err(format!(
+            "session owner is not a file: {}",
+            owner_path.display()
+        ));
+    }
+    let mut owner: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&owner_path).map_err(|err| err.to_string())?)
+            .map_err(|err| err.to_string())?;
+    if owner.get("ino").and_then(serde_json::Value::as_u64) != Some(root_stats.ino())
+        || owner.get("dev").and_then(serde_json::Value::as_u64) != Some(root_stats.dev())
+    {
+        return Err("session root identity changed; refusing owner handoff".into());
+    }
+    owner["pid"] = serde_json::json!(pid);
+    owner["processStartIdentity"] = serde_json::json!(&identity);
+    write_private_file_atomic(&owner_path, format!("{owner}\n").as_bytes())?;
+    Ok(SessionOwnerSnapshot {
+        pid,
+        process_start_identity: identity,
+    })
+}
+
+pub fn session_owner_snapshot(session_root: &Path) -> Result<Option<SessionOwnerSnapshot>, String> {
+    let owner_path = session_root.join(OWNER_NAME);
+    let Some(stats) = assert_not_symlink(&owner_path, "owner manifest")? else {
+        return Ok(None);
+    };
+    if !stats.is_file() {
+        return Err(format!(
+            "session owner is not a file: {}",
+            owner_path.display()
+        ));
+    }
+    let owner: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&owner_path).map_err(|err| err.to_string())?)
+            .map_err(|err| err.to_string())?;
+    let Some(pid) = owner
+        .get("pid")
+        .and_then(serde_json::Value::as_i64)
+        .and_then(|value| i32::try_from(value).ok())
+    else {
+        return Ok(None);
+    };
+    let Some(process_start_identity) = owner
+        .get("processStartIdentity")
+        .or_else(|| owner.get("startedAt"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    Ok(Some(SessionOwnerSnapshot {
+        pid,
+        process_start_identity: process_start_identity.to_string(),
+    }))
 }
 
 fn unix_now() -> String {
@@ -103,6 +244,22 @@ pub fn copy_settings(home: &Path, source_home: &Path) -> Result<usize, String> {
 }
 
 pub fn burn_session_home(target: &Path, expected: &BurnExpected<'_>) -> Result<bool, String> {
+    burn_session_home_inner(target, expected, None)
+}
+
+pub fn burn_session_home_with_owner(
+    target: &Path,
+    expected: &BurnExpected<'_>,
+    owner: &SessionOwnerSnapshot,
+) -> Result<bool, String> {
+    burn_session_home_inner(target, expected, Some(owner))
+}
+
+fn burn_session_home_inner(
+    target: &Path,
+    expected: &BurnExpected<'_>,
+    owner: Option<&SessionOwnerSnapshot>,
+) -> Result<bool, String> {
     let home = session_root_from_home(target);
     let stats = match assert_not_symlink(&home, "session root")? {
         None => return Ok(false),
@@ -125,11 +282,25 @@ pub fn burn_session_home(target: &Path, expected: &BurnExpected<'_>) -> Result<b
     let sessions = real_existing(&expected.user_root.join(SESSIONS_NAME))?;
     assert_inside_parent(&real_home, &sessions)?;
     assert_burn_identity(&home, expected)?;
+    if let Some(owner) = owner {
+        assert_burn_owner(&home, owner)?;
+    }
     fs::remove_dir_all(&home).map_err(|err| err.to_string())?;
     Ok(true)
 }
 
 pub fn sweep_orphan_sessions(user_root: &Path, target_id: Option<&str>) -> usize {
+    sweep_orphan_sessions_with_probe(user_root, target_id, probe_process)
+}
+
+fn sweep_orphan_sessions_with_probe<F>(
+    user_root: &Path,
+    target_id: Option<&str>,
+    mut probe: F,
+) -> usize
+where
+    F: FnMut(i32) -> ProcessProbe,
+{
     let sessions = user_root.join(SESSIONS_NAME);
     let stats = match lstat_or_null(&sessions) {
         Some(stats) if stats.is_dir() && !stats.file_type().is_symlink() => stats,
@@ -168,7 +339,19 @@ pub fn sweep_orphan_sessions(user_root: &Path, target_id: Option<&str>) -> usize
             Some(value) => value,
             None => continue,
         };
-        if pid_alive(pid) {
+        let expected_start = owner
+            .get("processStartIdentity")
+            .or_else(|| owner.get("startedAt"))
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty());
+        let stale = match probe(pid) {
+            ProcessProbe::Dead => true,
+            ProcessProbe::Unknown => false,
+            ProcessProbe::Live(live_start) => expected_start
+                .map(|expected| expected != live_start.as_str())
+                .unwrap_or(false),
+        };
+        if !stale {
             continue;
         }
         let expected = BurnExpected {
@@ -177,18 +360,22 @@ pub fn sweep_orphan_sessions(user_root: &Path, target_id: Option<&str>) -> usize
             ino: Some(ino),
             dev: Some(dev),
         };
-        if burn_session_home(&root, &expected).is_ok_and(|removed| removed) {
+        let removed = match expected_start {
+            Some(process_start_identity) => burn_session_home_with_owner(
+                &root,
+                &expected,
+                &SessionOwnerSnapshot {
+                    pid,
+                    process_start_identity: process_start_identity.to_string(),
+                },
+            ),
+            None => burn_session_home(&root, &expected),
+        };
+        if removed.is_ok_and(|removed| removed) {
             swept += 1;
         }
     }
     swept
-}
-
-fn pid_alive(pid: i32) -> bool {
-    if pid <= 0 {
-        return false;
-    }
-    unsafe { libc::kill(pid, 0) == 0 }
 }
 
 pub fn target_id_from_exec(exec_path: &str) -> String {
@@ -272,7 +459,10 @@ fn mkdtemp(parent: &Path) -> Result<PathBuf, String> {
 
 fn exclusive_copy_file(src: &Path, dest: &Path) -> Result<(), String> {
     if assert_not_symlink(dest, "copy destination")?.is_some() {
-        return Err(format!("refuse to overwrite existing file: {}", dest.display()));
+        return Err(format!(
+            "refuse to overwrite existing file: {}",
+            dest.display()
+        ));
     }
     let data = fs::read(src).map_err(|err| err.to_string())?;
     write_private_file(dest, &data, true)
@@ -281,14 +471,22 @@ fn exclusive_copy_file(src: &Path, dest: &Path) -> Result<(), String> {
 fn write_private_file(dest: &Path, data: &[u8], exclusive: bool) -> Result<(), String> {
     if let Some(prior) = assert_not_symlink(dest, "file")? {
         if prior.file_type().is_symlink() {
-            return Err(format!("refuse to overwrite symlink file: {}", dest.display()));
+            return Err(format!(
+                "refuse to overwrite symlink file: {}",
+                dest.display()
+            ));
         }
         if exclusive {
-            return Err(format!("refuse to overwrite existing file: {}", dest.display()));
+            return Err(format!(
+                "refuse to overwrite existing file: {}",
+                dest.display()
+            ));
         }
     }
     let mut opts = OpenOptions::new();
-    opts.write(true).mode(FILE_MODE).custom_flags(libc::O_NOFOLLOW);
+    opts.write(true)
+        .mode(FILE_MODE)
+        .custom_flags(libc::O_NOFOLLOW);
     if exclusive {
         opts.create_new(true);
     } else {
@@ -296,10 +494,41 @@ fn write_private_file(dest: &Path, data: &[u8], exclusive: bool) -> Result<(), S
     }
     let mut file = opts.open(dest).map_err(|err| err.to_string())?;
     file.write_all(data).map_err(|err| err.to_string())?;
-    let mut perms = file.metadata().map_err(|err| err.to_string())?.permissions();
+    let mut perms = file
+        .metadata()
+        .map_err(|err| err.to_string())?
+        .permissions();
     perms.set_mode(FILE_MODE);
     fs::set_permissions(dest, perms).map_err(|err| err.to_string())?;
     Ok(())
+}
+
+fn write_private_file_atomic(dest: &Path, data: &[u8]) -> Result<(), String> {
+    let parent = dest
+        .parent()
+        .ok_or_else(|| format!("file has no parent: {}", dest.display()))?;
+    let sequence = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let temporary = parent.join(format!(
+        ".{OWNER_NAME}.tmp.{}-{sequence}",
+        std::process::id()
+    ));
+    let mut opts = OpenOptions::new();
+    opts.write(true)
+        .create_new(true)
+        .mode(FILE_MODE)
+        .custom_flags(libc::O_NOFOLLOW);
+    let result = (|| {
+        let mut file = opts.open(&temporary).map_err(|err| err.to_string())?;
+        file.write_all(data).map_err(|err| err.to_string())?;
+        file.sync_all().map_err(|err| err.to_string())?;
+        drop(file);
+        fs::rename(&temporary, dest).map_err(|err| err.to_string())
+    })();
+    let _ = fs::remove_file(&temporary);
+    result
 }
 
 fn ensure_private_dir(dir: &Path, parent: &Path) -> Result<PathBuf, String> {
@@ -329,16 +558,19 @@ fn ensure_private_dir(dir: &Path, parent: &Path) -> Result<PathBuf, String> {
 }
 
 fn chmod(path: &Path, mode: u32) -> Result<(), String> {
-    let mut perms = fs::metadata(path).map_err(|err| err.to_string())?.permissions();
+    let mut perms = fs::metadata(path)
+        .map_err(|err| err.to_string())?
+        .permissions();
     perms.set_mode(mode);
     fs::set_permissions(path, perms).map_err(|err| err.to_string())
 }
 
 fn assert_not_symlink(target: &Path, label: &str) -> Result<Option<fs::Metadata>, String> {
     match lstat_or_null(target) {
-        Some(stats) if stats.file_type().is_symlink() => {
-            Err(format!("refuse to use symlink {label}: {}", target.display()))
-        }
+        Some(stats) if stats.file_type().is_symlink() => Err(format!(
+            "refuse to use symlink {label}: {}",
+            target.display()
+        )),
         other => Ok(other),
     }
 }
@@ -395,7 +627,10 @@ fn assert_burn_identity(home: &Path, expected: &BurnExpected<'_>) -> Result<(), 
             let owner: serde_json::Value =
                 serde_json::from_str(&fs::read_to_string(&file).map_err(|err| err.to_string())?)
                     .map_err(|err| err.to_string())?;
-            let actual = owner.get("sessionId").and_then(|v| v.as_str()).unwrap_or("");
+            let actual = owner
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             if actual != session_id {
                 Err("session id mismatch; refusing to burn".into())
             } else {
@@ -403,6 +638,30 @@ fn assert_burn_identity(home: &Path, expected: &BurnExpected<'_>) -> Result<(), 
             }
         }
     }
+}
+
+fn assert_burn_owner(home: &Path, expected: &SessionOwnerSnapshot) -> Result<(), String> {
+    let file = home.join(OWNER_NAME);
+    let stats = assert_not_symlink(&file, "owner manifest")?
+        .ok_or_else(|| format!("missing session owner: {}", file.display()))?;
+    if !stats.is_file() {
+        return Err(format!("session owner is not a file: {}", file.display()));
+    }
+    let owner: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&file).map_err(|err| err.to_string())?)
+            .map_err(|err| err.to_string())?;
+    let pid = owner
+        .get("pid")
+        .and_then(serde_json::Value::as_i64)
+        .and_then(|value| i32::try_from(value).ok());
+    let start = owner
+        .get("processStartIdentity")
+        .or_else(|| owner.get("startedAt"))
+        .and_then(serde_json::Value::as_str);
+    if pid != Some(expected.pid) || start != Some(expected.process_start_identity.as_str()) {
+        return Err("session owner changed; refusing to burn".into());
+    }
+    Ok(())
 }
 
 fn file_name(path: &Path) -> Result<String, String> {
@@ -413,257 +672,5 @@ fn file_name(path: &Path) -> Result<String, String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    static TEMP_ROOT_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-    fn temp_root() -> PathBuf {
-        let n = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let counter = TEMP_ROOT_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let pid = std::process::id();
-        let dir = std::env::temp_dir().join(format!("incodex-session-{pid}-{n}-{counter}"));
-        fs::create_dir(&dir).unwrap();
-        dir
-    }
-
-    #[test]
-    fn create_session_uses_random_directory_under_sessions() {
-        let root = temp_root();
-        let user_root = root.join(".incodex");
-        let first = create_session_home(&user_root, Some("t1"), 1, "").unwrap();
-        let second = create_session_home(&user_root, Some("t1"), 1, "").unwrap();
-        assert_ne!(first.home, second.home);
-        assert_ne!(first.session_id, second.session_id);
-        let sessions = fs::canonicalize(user_root.join("sessions")).unwrap();
-        assert!(first.root.starts_with(sessions));
-        assert!(first.home.ends_with("codex-home"));
-        assert!(first.chromium.ends_with("chromium"));
-        let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode(&user_root), 0o700);
-        assert_eq!(mode(&first.root), 0o700);
-        assert_eq!(mode(&first.root.join("owner.json")), 0o600);
-    }
-
-    #[test]
-    fn copy_settings_then_burn_removes_the_session() {
-        let root = temp_root();
-        let user_root = root.join(".incodex");
-        let source = root.join("codex");
-        fs::create_dir_all(&source).unwrap();
-        fs::write(source.join("auth.json"), "{\"token\":\"x\"}").unwrap();
-        let session = create_session_home(&user_root, None, 0, "").unwrap();
-        assert_eq!(copy_settings(&session.home, &source).unwrap(), 1);
-        assert_eq!(
-            fs::read_to_string(session.home.join("auth.json")).unwrap(),
-            "{\"token\":\"x\"}"
-        );
-        burn_session_home(
-            &session.root,
-            &BurnExpected {
-                user_root: &user_root,
-                session_id: Some(&session.session_id),
-                ino: Some(session.ino),
-                dev: Some(session.dev),
-            },
-        )
-        .unwrap();
-        assert!(!session.root.exists());
-        assert_eq!(
-            fs::read_to_string(source.join("auth.json")).unwrap(),
-            "{\"token\":\"x\"}"
-        );
-    }
-
-    #[test]
-    fn session_lifecycle_does_not_create_or_mutate_identity_cache() {
-        let root = temp_root();
-        let user_root = root.join(".incodex");
-        let source = root.join("codex");
-        fs::create_dir_all(&source).unwrap();
-        fs::write(source.join("auth.json"), "{\"token\":\"source\"}\n").unwrap();
-        fs::write(source.join("config.toml"), "localeOverride = \"zh-CN\"\n").unwrap();
-        let identity = user_root.join("identity");
-        fs::create_dir_all(&identity).unwrap();
-        fs::write(identity.join("auth.json"), "legacy-cache\n").unwrap();
-
-        let source_before = (
-            fs::read(source.join("auth.json")).unwrap(),
-            fs::read(source.join("config.toml")).unwrap(),
-        );
-        let session = create_session_home(&user_root, None, 0, "").unwrap();
-        assert_eq!(copy_settings(&session.home, &source).unwrap(), 2);
-        assert_eq!(fs::read(identity.join("auth.json")).unwrap(), b"legacy-cache\n");
-        assert_eq!(fs::read(session.home.join("auth.json")).unwrap(), source_before.0);
-        assert_eq!(fs::read(session.home.join("config.toml")).unwrap(), source_before.1);
-
-        burn_session_home(
-            &session.root,
-            &BurnExpected {
-                user_root: &user_root,
-                session_id: Some(&session.session_id),
-                ino: Some(session.ino),
-                dev: Some(session.dev),
-            },
-        )
-        .unwrap();
-        assert_eq!(fs::read(source.join("auth.json")).unwrap(), source_before.0);
-        assert_eq!(fs::read(source.join("config.toml")).unwrap(), source_before.1);
-        assert_eq!(fs::read(identity.join("auth.json")).unwrap(), b"legacy-cache\n");
-    }
-
-    #[test]
-    fn orphan_sweep_refuses_a_replaced_session_root_without_recorded_identity() {
-        let root = temp_root();
-        let user_root = root.join(".incodex");
-        let session = create_session_home(&user_root, None, 999999, "").unwrap();
-        fs::remove_dir_all(&session.root).unwrap();
-        fs::create_dir(&session.root).unwrap();
-        fs::write(session.root.join("replacement.txt"), "keep-me").unwrap();
-
-        assert_eq!(sweep_orphan_sessions(&user_root, None), 0);
-        assert!(session.root.exists());
-        assert_eq!(fs::read_to_string(session.root.join("replacement.txt")).unwrap(), "keep-me");
-    }
-
-    #[test]
-    fn session_owner_records_process_start_identity() {
-        let root = temp_root();
-        let user_root = root.join(".incodex");
-        let pid = std::process::id() as i32;
-        let session = create_session_home(&user_root, None, pid, "").unwrap();
-        let owner: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(session.root.join(OWNER_NAME)).unwrap())
-                .unwrap();
-        let expected = process_start_identity(pid).expect("current process identity");
-        assert_eq!(owner.get("pid").and_then(serde_json::Value::as_i64), Some(i64::from(pid)));
-        assert_eq!(
-            owner
-                .get("processStartIdentity")
-                .and_then(serde_json::Value::as_str),
-            Some(expected.as_str()),
-            "session owner must use the same start identity source as Runtime owner records"
-        );
-    }
-
-    #[test]
-    fn orphan_sweep_treats_a_reused_pid_as_orphan() {
-        let root = temp_root();
-        let user_root = root.join(".incodex");
-        let pid = std::process::id() as i32;
-        let session = create_session_home(&user_root, None, pid, "").unwrap();
-        let owner_path = session.root.join(OWNER_NAME);
-        let mut owner: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(&owner_path).unwrap()).unwrap();
-        owner["processStartIdentity"] = serde_json::json!("old-process-start");
-        fs::write(&owner_path, format!("{owner}\n")).unwrap();
-
-        assert_eq!(sweep_orphan_sessions(&user_root, None), 1);
-        assert!(!session.root.exists());
-    }
-
-    #[test]
-    fn live_session_without_process_start_identity_is_not_swept() {
-        let root = temp_root();
-        let user_root = root.join(".incodex");
-        let pid = std::process::id() as i32;
-        let session = create_session_home(&user_root, None, pid, "").unwrap();
-        let owner_path = session.root.join(OWNER_NAME);
-        let mut owner: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(&owner_path).unwrap()).unwrap();
-        owner.as_object_mut().unwrap().remove("processStartIdentity");
-        fs::write(&owner_path, format!("{owner}\n")).unwrap();
-
-        assert_eq!(sweep_orphan_sessions(&user_root, None), 0);
-        assert!(session.root.exists());
-    }
-
-    #[test]
-    fn orphan_sweep_retains_a_live_session_when_identity_probe_is_unknown() {
-        let root = temp_root();
-        let user_root = root.join(".incodex");
-        let pid = std::process::id() as i32;
-        let session = create_session_home(&user_root, None, pid, "").unwrap();
-
-        assert_eq!(
-            sweep_orphan_sessions_with_probe(&user_root, None, |_| ProcessProbe::Unknown),
-            0
-        );
-        assert!(session.root.exists());
-    }
-
-    #[test]
-    fn burn_revalidates_the_owner_snapshot_before_delete() {
-        let root = temp_root();
-        let user_root = root.join(".incodex");
-        let pid = std::process::id() as i32;
-        let session = create_session_home(&user_root, None, pid, "").unwrap();
-        let start = process_start_identity(pid).unwrap();
-        let snapshot = SessionOwnerSnapshot {
-            pid,
-            process_start_identity: start,
-        };
-        let owner_path = session.root.join(OWNER_NAME);
-        let mut owner: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(&owner_path).unwrap()).unwrap();
-        owner["pid"] = serde_json::json!(999999);
-        fs::write(&owner_path, format!("{owner}\n")).unwrap();
-
-        let error = burn_session_home_with_owner(
-            &session.root,
-            &BurnExpected {
-                user_root: &user_root,
-                session_id: Some(&session.session_id),
-                ino: Some(session.ino),
-                dev: Some(session.dev),
-            },
-            &snapshot,
-        )
-        .unwrap_err();
-        assert!(error.contains("owner"));
-        assert!(session.root.exists());
-    }
-
-    #[test]
-    fn session_owner_handoff_records_the_child_process_identity() {
-        let root = temp_root();
-        let user_root = root.join(".incodex");
-        let session = create_session_home(&user_root, None, 999999, "").unwrap();
-        let pid = std::process::id() as i32;
-        handoff_session_owner(&session.root, pid).unwrap();
-        let owner: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(session.root.join(OWNER_NAME)).unwrap())
-                .unwrap();
-        assert_eq!(owner.get("pid").and_then(serde_json::Value::as_i64), Some(i64::from(pid)));
-        assert_eq!(
-            owner
-                .get("processStartIdentity")
-                .and_then(serde_json::Value::as_str),
-            process_start_identity(pid).as_deref()
-        );
-    }
-
-    #[test]
-    fn burn_refuses_a_session_id_mismatch() {
-        let root = temp_root();
-        let user_root = root.join(".incodex");
-        let session = create_session_home(&user_root, None, 0, "").unwrap();
-        let err = burn_session_home(
-            &session.root,
-            &BurnExpected {
-                user_root: &user_root,
-                session_id: Some("other"),
-                ino: None,
-                dev: None,
-            },
-        )
-        .unwrap_err();
-        assert!(err.contains("mismatch"));
-        assert!(session.root.exists());
-    }
-}
+#[path = "session_tests.rs"]
+mod tests;
