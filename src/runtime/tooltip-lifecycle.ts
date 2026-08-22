@@ -48,7 +48,7 @@ export function createTooltipLifecycle(deps: TooltipLifecycleDeps): TooltipLifec
     },
     pointerLeave() {
       hovering = false;
-      if (!focused) hide();
+      hide();
     },
     focus() {
       focused = true;
@@ -56,7 +56,7 @@ export function createTooltipLifecycle(deps: TooltipLifecycleDeps): TooltipLifec
     },
     blur() {
       focused = false;
-      if (!hovering) hide();
+      hide();
     },
     dismiss: hide,
     dispose() {

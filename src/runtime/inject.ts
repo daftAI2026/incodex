@@ -16,6 +16,11 @@ const TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
 
 let activeTooltipLifecycle: TooltipLifecycle | null = null;
 
+function disposeActiveTooltip(): void {
+  activeTooltipLifecycle?.dispose();
+  activeTooltipLifecycle = null;
+}
+
 const ICON_SVG = `{{HAT_GLASSES_SVG}}`;
 const EXIT_ICON_SVG = `{{CIRCLE_X_SVG}}`;
 function isIncognitoWindow(): boolean {
@@ -240,7 +245,7 @@ function needsInject(): boolean {
 }
 
 function buildButton(search: HTMLElement): HTMLElement {
-  activeTooltipLifecycle?.dispose();
+  disposeActiveTooltip();
   const btn = search.cloneNode(false) as HTMLElement;
   for (const name of STRIP_CLONE_ATTRS) btn.removeAttribute(name);
   for (const name of [...btn.attributes].map((attr) => attr.name)) {
@@ -507,7 +512,10 @@ function ensureLanding(): void {
 
 function ensureButton(): void {
   const search = findSearchButton();
-  if (!search?.parentElement) return;
+  if (!search?.parentElement) {
+    disposeActiveTooltip();
+    return;
+  }
 
   let btn = document.querySelector<HTMLElement>(`[${BTN_ATTR}]`);
   if (!btn) btn = buildButton(search);
