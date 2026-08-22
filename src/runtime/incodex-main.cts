@@ -46,6 +46,18 @@ function isIncognito() {
   return safeHome.isManagedSessionHome(resolvedCodexHome(), USER_ROOT);
 }
 
+function captureChildOwnerSnapshot() {
+  if (!isIncognito() || typeof instance.processIdentity !== "function") return null;
+  const live = instance.processIdentity(process.pid);
+  if (!live?.processStartIdentity) return null;
+  return Object.freeze({
+    pid: process.pid,
+    processStartIdentity: live.processStartIdentity,
+  });
+}
+
+const childOwnerSnapshot = captureChildOwnerSnapshot();
+
 function sessionFromEnv() {
   const home = process.env.CODEX_HOME;
   const sessionId = process.env.INCODEX_SESSION_ID;
@@ -84,6 +96,30 @@ function readLocaleOverride() {
   }
 }
 
+function burnIncognitoSession(session, ownerSnapshot, userRoot = USER_ROOT) {
+  if (
+    !session ||
+    !ownerSnapshot ||
+    !Number.isInteger(ownerSnapshot.pid) ||
+    ownerSnapshot.pid <= 0 ||
+    typeof ownerSnapshot.processStartIdentity !== "string" ||
+    !ownerSnapshot.processStartIdentity
+  ) {
+    return false;
+  }
+  const expected = {
+    userRoot,
+    sessionId: session.sessionId,
+    ino: session.ino,
+    dev: session.dev,
+  };
+  const removed = safeHome.burnSessionHomeWithOwner(session.root, expected, ownerSnapshot);
+  if (removed && !safeHome.writeBurnProof(session.root, expected)) {
+    logLaunch("burn-proof-write-failed", { home: session.root });
+  }
+  return removed;
+}
+
 function burnIncognitoHome() {
   const session = sessionFromEnv();
   const home = session?.root || session?.home || process.env.CODEX_HOME;
@@ -92,17 +128,12 @@ function burnIncognitoHome() {
     logLaunch("burn-refused", { home, reason: "session identity is unavailable" });
     return;
   }
+  if (!childOwnerSnapshot) {
+    logLaunch("burn-refused", { home, reason: "process identity is unavailable" });
+    return;
+  }
   try {
-    const expected = {
-      userRoot: USER_ROOT,
-      sessionId: session.sessionId,
-      ino: session.ino,
-      dev: session.dev,
-    };
-    const removed = safeHome.burnSessionHome(home, expected);
-    if (removed && !safeHome.writeBurnProof(home, expected)) {
-      logLaunch("burn-proof-write-failed", { home });
-    }
+    burnIncognitoSession(session, childOwnerSnapshot);
     logLaunch("burn", { home });
   } catch (error) {
     logLaunch("burn-refused", { error: String(error), home });
@@ -356,6 +387,7 @@ function prepareIncognitoSession(options = {}) {
       targetId: appTarget,
       pid,
       sourceHome: sourceHomePath,
+      handoffPending: true,
     });
     copySettings(session.home, sourceHomePath);
     return { ok: true, session };
@@ -488,6 +520,7 @@ async function launchIncognitoOnce() {
       done({ ok: false, reason: "spawn-failed" });
       return;
     }
+    let childOwner = null;
     child.on("error", (error) => {
       logLaunch("spawn-error", { error: String(error) });
       done({ ok: false, reason: "spawn-failed" });
@@ -507,7 +540,9 @@ async function launchIncognitoOnce() {
       const tryBurn = (attempt) => {
         const attemptExpected = safeHome.cleanupExpectedForAttempt(expected, originalRemoved);
         try {
-          const removed = safeHome.burnSessionHome(session.root, attemptExpected);
+          const removed = childOwner && !originalRemoved
+            ? safeHome.burnSessionHomeWithOwner(session.root, attemptExpected, childOwner)
+            : safeHome.burnSessionHome(session.root, attemptExpected);
           if (removed) originalRemoved = true;
         } catch (error) {
           if (attempt < 5) {
@@ -528,6 +563,18 @@ async function launchIncognitoOnce() {
       tryBurn(1);
       if (!settled) done({ ok: false, reason: "exited-early" });
     });
+    try {
+      childOwner = safeHome.handoffSessionOwner(session.root, child.pid);
+    } catch (error) {
+      logLaunch("owner-handoff-failed", { error: String(error), sessionId: session.sessionId });
+      try {
+        if (!child.killed) child.kill();
+      } catch {
+        /* child exit handler still owns bounded cleanup. */
+      }
+      done({ ok: false, reason: "spawn-failed" });
+      return;
+    }
     raiseChildWhenReady(child.pid);
     const started = Date.now();
     const timer = setInterval(() => {
@@ -729,7 +776,9 @@ async function attachElectron() {
 }
 
 const startupGate = attachElectron();
-if (typeof module !== "undefined") module.exports = { startupGate, prepareIncognitoSession };
+if (typeof module !== "undefined") {
+  module.exports = { startupGate, prepareIncognitoSession, burnIncognitoSession };
+}
 startupGate.catch((error) => {
   console.error("[incodex] main attach failed", error);
 });

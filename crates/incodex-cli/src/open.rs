@@ -8,8 +8,9 @@ use std::time::Duration;
 
 use incodex_core::paths::{home_dir, user_root};
 use incodex_core::session::{
-    burn_session_home, copy_settings, create_session_home, sweep_orphan_sessions,
-    target_id_from_exec, BurnExpected, SessionHome,
+    burn_session_home, burn_session_home_with_owner, copy_settings, create_session_home_for_open,
+    handoff_session_owner, sweep_orphan_sessions, target_id_from_exec, BurnExpected, SessionHome,
+    SessionOwnerSnapshot,
 };
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
 
@@ -121,6 +122,19 @@ enum InjectionStatus {
     Failed(String),
 }
 
+#[derive(Debug)]
+enum CleanupDisposition {
+    Burn,
+    Retain(String),
+}
+
+#[derive(Debug)]
+struct SpawnOutcome {
+    process: OpenProcessResult,
+    owner: Option<SessionOwnerSnapshot>,
+    cleanup: CleanupDisposition,
+}
+
 #[derive(Clone, Default)]
 struct InjectionReadiness {
     ready: Arc<AtomicBool>,
@@ -182,7 +196,7 @@ pub fn prepare_incognito_open(
     let bin = resolve_executable(app_path)?;
     let target_id = target_id_from_exec(&bin.to_string_lossy());
     let _ = sweep_orphan_sessions(user_root, Some(&target_id));
-    let session = create_session_home(
+    let session = create_session_home_for_open(
         user_root,
         Some(&target_id),
         pid,
@@ -291,16 +305,24 @@ pub fn wait_and_burn(
     user_root: &Path,
     retry_delay_ms: u64,
 ) -> Result<(OpenProcessResult, CleanupResult), String> {
-    wait_and_burn_with(
+    wait_and_burn_with_owner(
         plan,
         user_root,
         retry_delay_ms,
-        spawn_plan,
-        |root, expected| burn_session_home(root, expected),
+        spawn_plan_with_owner,
+        |root, expected, owner| match owner {
+            Some(owner) => burn_session_home_with_owner(root, expected, owner),
+            None => burn_session_home(root, expected),
+        },
     )
 }
 
+#[cfg(test)]
 fn spawn_plan(plan: &OpenPlan) -> Result<OpenProcessResult, String> {
+    spawn_plan_with_owner(plan).map(|outcome| outcome.process)
+}
+
+fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
     let mut command = Command::new(&plan.bin);
     command.args(&plan.args);
     for (key, value) in &plan.env {
@@ -311,6 +333,33 @@ fn spawn_plan(plan: &OpenPlan) -> Result<OpenProcessResult, String> {
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     let mut child = command.spawn().map_err(|err| err.to_string())?;
+    let owner = match handoff_session_owner(&plan.session_root, child.id() as i32) {
+        Ok(owner) => owner,
+        Err(error) => {
+            return Ok(match kill_and_reap(&mut child) {
+                Ok(status) => SpawnOutcome {
+                    process: OpenProcessResult::Exited {
+                        code: status.code().unwrap_or(1),
+                        ui_ready: false,
+                    },
+                    owner: None,
+                    cleanup: CleanupDisposition::Burn,
+                },
+                Err(reap_error) => {
+                    let reason = format!(
+                        "session owner handoff failed: {error}; child exit could not be proven: {reap_error}"
+                    );
+                    SpawnOutcome {
+                        process: OpenProcessResult::SpawnFailed {
+                            error: reason.clone(),
+                        },
+                        owner: None,
+                        cleanup: CleanupDisposition::Retain(reason),
+                    }
+                }
+            });
+        }
+    };
     let (status_tx, status_rx) = mpsc::channel();
     let readiness = InjectionReadiness::default();
     if plan.debug_port != 0 {
@@ -417,15 +466,56 @@ fn spawn_plan(plan: &OpenPlan) -> Result<OpenProcessResult, String> {
                 Err(mpsc::TryRecvError::Disconnected) => reported = true,
             }
         }
-        if let Some(status) = child.try_wait().map_err(|err| err.to_string())? {
-            spinner.stop();
-            return Ok(OpenProcessResult::Exited {
-                code: status.code().unwrap_or(1),
-                ui_ready: readiness.is_ready(),
-            });
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                spinner.stop();
+                return Ok(SpawnOutcome {
+                    process: OpenProcessResult::Exited {
+                        code: status.code().unwrap_or(1),
+                        ui_ready: readiness.is_ready(),
+                    },
+                    owner: Some(owner),
+                    cleanup: CleanupDisposition::Burn,
+                });
+            }
+            Ok(None) => {}
+            Err(error) => {
+                spinner.stop();
+                let reason = format!("child exit could not be proven: {error}");
+                return Ok(SpawnOutcome {
+                    process: OpenProcessResult::SpawnFailed {
+                        error: reason.clone(),
+                    },
+                    owner: Some(owner),
+                    cleanup: CleanupDisposition::Retain(reason),
+                });
+            }
         }
         thread::sleep(Duration::from_millis(50));
     }
+}
+
+fn kill_and_reap(child: &mut std::process::Child) -> Result<std::process::ExitStatus, String> {
+    let mut probe_error = None;
+    match child.try_wait() {
+        Ok(Some(status)) => return Ok(status),
+        Ok(None) => {}
+        Err(error) => probe_error = Some(error.to_string()),
+    }
+    let mut kill_error = None;
+    if let Err(error) = child.kill() {
+        kill_error = Some(error.to_string());
+    }
+    child.wait().map_err(|wait_error| {
+        let mut detail = format!("wait/reap failed: {wait_error}");
+        if let Some(error) = probe_error {
+            detail.push_str(&format!("; initial wait probe failed: {error}"));
+        }
+        if let Some(error) = kill_error {
+            detail.push_str(&format!("; kill failed: {error}"));
+        }
+        detail
+    })
 }
 
 pub fn wait_and_burn_with<S, B>(
@@ -439,9 +529,39 @@ where
     S: FnOnce(&OpenPlan) -> Result<OpenProcessResult, String>,
     B: FnMut(&Path, &BurnExpected<'_>) -> Result<bool, String>,
 {
-    let process = match spawn(plan) {
-        Ok(process) => process,
-        Err(error) => OpenProcessResult::SpawnFailed { error },
+    wait_and_burn_with_owner(
+        plan,
+        user_root,
+        retry_delay_ms,
+        |plan| {
+            spawn(plan).map(|process| SpawnOutcome {
+                process,
+                owner: None,
+                cleanup: CleanupDisposition::Burn,
+            })
+        },
+        |root, expected, _owner| burn(root, expected),
+    )
+}
+
+fn wait_and_burn_with_owner<S, B>(
+    plan: &OpenPlan,
+    user_root: &Path,
+    retry_delay_ms: u64,
+    spawn: S,
+    mut burn: B,
+) -> Result<(OpenProcessResult, CleanupResult), String>
+where
+    S: FnOnce(&OpenPlan) -> Result<SpawnOutcome, String>,
+    B: FnMut(&Path, &BurnExpected<'_>, Option<&SessionOwnerSnapshot>) -> Result<bool, String>,
+{
+    let outcome = match spawn(plan) {
+        Ok(outcome) => outcome,
+        Err(error) => SpawnOutcome {
+            process: OpenProcessResult::SpawnFailed { error },
+            owner: None,
+            cleanup: CleanupDisposition::Burn,
+        },
     };
     let expected = BurnExpected {
         user_root,
@@ -449,18 +569,32 @@ where
         ino: Some(plan.session_ino),
         dev: Some(plan.session_dev),
     };
-    let cleanup = burn_with_retries(&plan.session_root, &expected, retry_delay_ms, &mut burn);
-    Ok((process, cleanup))
+    let cleanup = match outcome.cleanup {
+        CleanupDisposition::Burn => burn_with_retries_with_owner(
+            &plan.session_root,
+            &expected,
+            outcome.owner.as_ref(),
+            retry_delay_ms,
+            &mut burn,
+        ),
+        CleanupDisposition::Retain(reason) => CleanupResult::Retained {
+            attempts: 0,
+            retained_path: plan.session_root.clone(),
+            reason,
+        },
+    };
+    Ok((outcome.process, cleanup))
 }
 
-fn burn_with_retries<B>(
+fn burn_with_retries_with_owner<B>(
     session_root: &Path,
     expected: &BurnExpected<'_>,
+    owner: Option<&SessionOwnerSnapshot>,
     retry_delay_ms: u64,
     burn: &mut B,
 ) -> CleanupResult
 where
-    B: FnMut(&Path, &BurnExpected<'_>) -> Result<bool, String>,
+    B: FnMut(&Path, &BurnExpected<'_>, Option<&SessionOwnerSnapshot>) -> Result<bool, String>,
 {
     let mut reason = "session directory still present".to_string();
     let mut original_removed = false;
@@ -476,7 +610,8 @@ where
         } else {
             expected
         };
-        match burn(session_root, attempt_expected) {
+        let attempt_owner = if original_removed { None } else { owner };
+        match burn(session_root, attempt_expected, attempt_owner) {
             Ok(removed) => {
                 // +--------------------------------------------------------------------+
                 // | 只有本次已证明删除创建时 root，后续重建才允许路径证明 fallback。 |

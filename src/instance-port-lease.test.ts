@@ -39,10 +39,11 @@ describe("kernel-held TCP owner lease", () => {
 
   test("does not overwrite a live legacy owner record before publication", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-tcp-legacy-record-"));
-    const legacy = currentOwner("legacy-runtime", process.execPath);
+    const execPath = join(root, process.execPath.split("/").pop() || "runtime");
+    const legacy = currentOwner("legacy-runtime", execPath);
     delete (legacy as Record<string, unknown>).execIdentity;
     writeOwnerLock(root, legacy);
-    const candidate = currentOwner("new-runtime", process.execPath);
+    const candidate = currentOwner("new-runtime", execPath);
     await expect(acquireOwnerLease(root, candidate)).rejects.toMatchObject({ code: "OWNER_LEGACY_OWNER" });
     expect(readOwnerLock(root)?.token).toBe(legacy.token);
   });

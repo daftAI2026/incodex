@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::Path;
 
+use incodex_core::session::is_canonical_process_start_identity;
 use incodex_transaction::{journal_v2, parse_journal, recover_action, recover_action_phase};
 use serde::Serialize;
 
@@ -313,6 +314,15 @@ pub fn scan_owner_processes(root: &Path) -> ProcessScan {
                     ));
                 }
                 Some(live) => {
+                    if !is_canonical_process_start_identity(expected_start.unwrap()) {
+                        unknown = true;
+                        findings.push(DiagnosticFinding::warning(
+                            "owner.identity-unknown",
+                            format!("cannot normalize process identity for pid {pid}"),
+                            Some(&record),
+                        ));
+                        continue;
+                    }
                     let start_matches = expected_start == Some(live.start.as_str());
                     let exec_matches = expected_exec
                         .is_some_and(|expected| basename(expected) == basename(&live.exec));

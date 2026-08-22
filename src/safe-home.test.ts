@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   burnSessionHome,
+  burnSessionHomeWithOwner,
   copySettings,
   createSessionHome,
   exclusiveCopyFile,
@@ -12,7 +13,9 @@ import {
   rotateAndAppendLog,
   resolveSourceHome,
   sweepOrphanSessions,
+  handoffSessionOwner,
 } from "./runtime/incodex-safe-home.cts";
+import { processIdentity } from "./runtime/incodex-instance.cts";
 
 function tempRoot(): string {
   return mkdtempSync(join(tmpdir(), "incodex-safe-"));
@@ -110,6 +113,134 @@ describe("symlink burn and copy", () => {
     expect(lstatSync(join(first.root, "lock")).mode & 0o777).toBe(FILE_MODE);
     expect(lstatSync(first.root).isSymbolicLink()).toBe(false);
     expect(existsSync(join(userRoot, "identity"))).toBe(false);
+  });
+
+  test("session owner records the same process start identity as Runtime owner metadata", () => {
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const session = createSessionHome(userRoot, { pid: process.pid });
+    const owner = JSON.parse(readFileSync(join(session.root, "owner.json"), "utf8"));
+    expect(owner.processStartIdentity).toBe(processIdentity(process.pid).processStartIdentity);
+  });
+
+  test("janitor treats a reused PID as an orphan and burns its session", () => {
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const session = createSessionHome(userRoot, { pid: process.pid });
+    const ownerPath = join(session.root, "owner.json");
+    const owner = JSON.parse(readFileSync(ownerPath, "utf8"));
+    owner.processStartIdentity = "Fri Aug 22 10:37:03 2025";
+    writeFileSync(ownerPath, `${JSON.stringify(owner)}\n`);
+
+    expect(sweepOrphanSessions(userRoot)).toBe(1);
+    expect(existsSync(session.root)).toBe(false);
+  });
+
+  test("janitor retains a live session when process identity is unknown", () => {
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const session = createSessionHome(userRoot, { pid: process.pid });
+    expect(
+      sweepOrphanSessions(userRoot, {
+        pidAlive: () => true,
+        processIdentity: () => null,
+      }),
+    ).toBe(0);
+    expect(existsSync(session.root)).toBe(true);
+  });
+
+  test("janitor retains a live session with an unparseable legacy process identity", () => {
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const session = createSessionHome(userRoot, { pid: process.pid });
+    const ownerPath = join(session.root, "owner.json");
+    const owner = JSON.parse(readFileSync(ownerPath, "utf8"));
+    owner.processStartIdentity = "六  8月/22 10:37:03 2026";
+    writeFileSync(ownerPath, `${JSON.stringify(owner)}\n`);
+
+    expect(
+      sweepOrphanSessions(userRoot, {
+        pidAlive: () => true,
+        processIdentity: () => ({ processStartIdentity: "Sat Aug 22 10:37:03 2026" }),
+      }),
+    ).toBe(0);
+    expect(existsSync(session.root)).toBe(true);
+  });
+
+  test("janitor retains a live session with non-C locale identity words", () => {
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const session = createSessionHome(userRoot, { pid: process.pid });
+    const ownerPath = join(session.root, "owner.json");
+    const owner = JSON.parse(readFileSync(ownerPath, "utf8"));
+    owner.processStartIdentity = "Sab Ago 22 10:37:03 2025";
+    writeFileSync(ownerPath, `${JSON.stringify(owner)}\n`);
+
+    expect(
+      sweepOrphanSessions(userRoot, {
+        pidAlive: () => true,
+        processIdentity: () => ({ processStartIdentity: "Sat Aug 22 10:37:03 2025" }),
+      }),
+    ).toBe(0);
+    expect(existsSync(session.root)).toBe(true);
+  });
+
+  test("process identity probe pins the C locale for ps output", () => {
+    const source = readFileSync(join(import.meta.dir, "runtime/incodex-owner-core.cts"), "utf8");
+    expect(source).toContain("LC_ALL: \"C\"");
+  });
+
+  test("burn revalidates the owner snapshot before deleting the session", () => {
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const session = createSessionHome(userRoot, { pid: process.pid });
+    const ownerPath = join(session.root, "owner.json");
+    const owner = JSON.parse(readFileSync(ownerPath, "utf8"));
+    const snapshot = {
+      pid: owner.pid,
+      processStartIdentity: owner.processStartIdentity,
+    };
+    owner.pid = 999999;
+    writeFileSync(ownerPath, `${JSON.stringify(owner)}\n`);
+
+    expect(() =>
+      burnSessionHomeWithOwner(session.root, {
+        userRoot,
+        sessionId: session.sessionId,
+        ino: session.ino,
+        dev: session.dev,
+      }, snapshot),
+    ).toThrow(/owner/);
+    expect(existsSync(session.root)).toBe(true);
+  });
+
+  test("session owner handoff updates PID and process start identity atomically", () => {
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const session = createSessionHome(userRoot, { pid: 999999 });
+    handoffSessionOwner(session.root, process.pid);
+    const owner = JSON.parse(readFileSync(join(session.root, "owner.json"), "utf8"));
+    expect(owner.pid).toBe(process.pid);
+    expect(owner.processStartIdentity).toBe(processIdentity(process.pid).processStartIdentity);
+  });
+
+  test("an open-created session stays pending until handoff and janitor retains it", () => {
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const session = createSessionHome(userRoot, { pid: 999999, handoffPending: true });
+    const owner = JSON.parse(readFileSync(join(session.root, "owner.json"), "utf8"));
+    expect(owner.handoffPending).toBe(true);
+    expect(sweepOrphanSessions(userRoot)).toBe(0);
+    expect(existsSync(session.root)).toBe(true);
+  });
+
+  test("handoff clears the open pending marker in the same owner publication", () => {
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const session = createSessionHome(userRoot, { pid: 999999, handoffPending: true });
+    handoffSessionOwner(session.root, process.pid);
+    const owner = JSON.parse(readFileSync(join(session.root, "owner.json"), "utf8"));
+    expect(owner.handoffPending).toBe(false);
   });
 
   test("copySettings writes private files and burn removes the whole session", () => {

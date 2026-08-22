@@ -63,5 +63,11 @@ describe("runtime load", () => {
     expect(main).toContain('INCODEX_INCOGNITO: "1"');
     expect(main).toContain("CODEX_ELECTRON_USER_DATA_PATH: session.chromium");
     expect(main).toContain("const args = [`--user-data-dir=$" + "{session.chromium}`]");
+    expect(main).toContain("safeHome.handoffSessionOwner");
+  });
+
+  test("an ordinary incognito click marks its session pending before child handoff", () => {
+    const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
+    expect(main).toContain("handoffPending: true");
   });
 });

@@ -30,12 +30,17 @@ function ownerPortFromExec(execPath) {
 function processIdentity(pid) {
     if (!Number.isInteger(pid) || pid <= 0)
         return null;
-    const listed = spawnSync("ps", ["-p", String(pid), "-o", "pid=,lstart=,comm="], { encoding: "utf8" });
+    const listed = spawnSync("ps", ["-p", String(pid), "-o", "pid=,lstart=,comm="], {
+        encoding: "utf8",
+        env: { ...process.env, LC_ALL: "C" },
+    });
     if (listed.status !== 0 || !listed.stdout.trim())
         return null;
     const line = listed.stdout.trim();
     const match = line.match(/^(\d+)\s+(.+?)\s+(\S+)$/);
     if (!match)
+        return null;
+    if (!isCanonicalProcessStartIdentity(match[2].trim()))
         return null;
     const comm = match[3];
     return {
@@ -45,6 +50,17 @@ function processIdentity(pid) {
         comm,
         execIdentity: comm,
     };
+}
+function isCanonicalProcessStartIdentity(value) {
+    if (typeof value !== "string")
+        return false;
+    const parts = value.trim().split(/\s+/);
+    return (parts.length === 5 &&
+        ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].includes(parts[0]) &&
+        ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].includes(parts[1]) &&
+        /^\d{1,2}$/.test(parts[2]) &&
+        /^\d{2}:\d{2}:\d{2}$/.test(parts[3]) &&
+        /^\d{4}$/.test(parts[4]));
 }
 function ownerToken(owner) {
     if (!owner || typeof owner !== "object")
@@ -329,6 +345,8 @@ function staleOwnerRecord(owner) {
         return false;
     if (!pidAlive(owner.pid))
         return true;
+    if (!isCanonicalProcessStartIdentity(owner.processStartIdentity || owner.startedAt))
+        return false;
     const live = processIdentity(owner.pid);
     if (!live)
         return false;
@@ -363,6 +381,7 @@ module.exports = {
     activeOwnerPath,
     setOwnerRecordTestHook,
     processIdentity,
+    isCanonicalProcessStartIdentity,
     ownerToken,
     hasReliableOwnerIdentity,
     ownerMatchesLive,
