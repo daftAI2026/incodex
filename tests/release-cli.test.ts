@@ -91,9 +91,9 @@ describe("release CLI artifacts", () => {
     const command =
       "cargo test --locked --release --package incodex-cli --test release_asset_smoke -- --ignored --exact release_asset_behavior_smoke";
     const armInvocation =
-      `INCODEX_RELEASE_BINARY="$ARM_BINARY" INCODEX_RELEASE_ARCH="arm64" ${command}`;
+      `INCODEX_RELEASE_BINARY="$PWD/$ARM_BINARY" INCODEX_RELEASE_ARCH="arm64" ${command}`;
     const x64Invocation =
-      `INCODEX_RELEASE_BINARY="$X64_BINARY" INCODEX_RELEASE_ARCH="x86_64" ${command}`;
+      `INCODEX_RELEASE_BINARY="$PWD/$X64_BINARY" INCODEX_RELEASE_ARCH="x86_64" ${command}`;
     const finalSignature = workflow.indexOf(
       "codesign --sign - --force release-cli/incodex-darwin-x64",
     );
