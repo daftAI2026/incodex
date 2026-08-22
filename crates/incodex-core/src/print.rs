@@ -52,4 +52,12 @@ mod tests {
             "  ✗ operation failed"
         );
     }
+
+    #[test]
+    fn step_styles_the_complete_line_when_color_is_enabled() {
+        assert_eq!(
+            format_step("Install", Some(true)),
+            "\u{001b}[1;35m➤ Install\u{001b}[0m"
+        );
+    }
 }
