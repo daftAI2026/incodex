@@ -95,6 +95,14 @@ pub struct Spinner {
 struct SpinnerState {
     message: String,
     next_frame: usize,
+    last_columns: usize,
+}
+
+impl SpinnerState {
+    fn line_needs_clear(&mut self, columns: usize, message_changed: bool) -> bool {
+        self.last_columns = columns;
+        message_changed
+    }
 }
 
 impl Spinner {
@@ -110,9 +118,11 @@ impl Spinner {
     }
 
     fn start_for_interval(message: &str, interactive: bool, frame_interval: Duration) -> Self {
+        let initial_columns = crate::terminal::stderr_columns();
         let state = Arc::new(Mutex::new(SpinnerState {
             message: message.to_string(),
             next_frame: 0,
+            last_columns: initial_columns,
         }));
         if !interactive {
             return Self {
@@ -131,7 +141,7 @@ impl Spinner {
                 format_spinner_frame(
                     FRAMES[state.next_frame],
                     &state.message,
-                    crate::terminal::stderr_columns(),
+                    initial_columns,
                     true,
                 )
             );
@@ -145,13 +155,15 @@ impl Spinner {
                     break;
                 }
                 let mut state = worker_state.lock().unwrap();
+                let columns = crate::terminal::stderr_columns();
+                let clear = state.line_needs_clear(columns, false);
                 eprint!(
                     "{}",
                     format_spinner_frame(
                         FRAMES[state.next_frame % FRAMES.len()],
                         &state.message,
-                        crate::terminal::stderr_columns(),
-                        false,
+                        columns,
+                        clear,
                     )
                 );
                 state.next_frame += 1;
@@ -172,13 +184,15 @@ impl Spinner {
         }
         state.message = message.to_string();
         if self.worker.is_some() {
+            let columns = crate::terminal::stderr_columns();
+            let clear = state.line_needs_clear(columns, true);
             eprint!(
                 "{}",
                 format_spinner_frame(
                     FRAMES[state.next_frame % FRAMES.len()],
                     &state.message,
-                    crate::terminal::stderr_columns(),
-                    true,
+                    columns,
+                    clear,
                 )
             );
             state.next_frame += 1;
@@ -207,7 +221,18 @@ impl Drop for Spinner {
 mod tests {
     use std::time::{Duration, Instant};
 
-    use super::{format_spinner_message, Progress, Spinner};
+    use super::{format_spinner_message, Progress, Spinner, SpinnerState};
+
+    #[test]
+    fn spinner_clears_the_line_when_terminal_width_changes() {
+        let mut state = SpinnerState {
+            message: "Working".into(),
+            next_frame: 1,
+            last_columns: 80,
+        };
+        assert!(state.line_needs_clear(24, false));
+        assert!(state.line_needs_clear(100, false));
+    }
 
     #[test]
     fn spinner_message_replaces_line_breaks_with_spaces() {
