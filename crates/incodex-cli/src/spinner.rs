@@ -88,8 +88,13 @@ impl Drop for Progress {
 
 pub struct Spinner {
     stopped: Arc<AtomicBool>,
-    message: Arc<Mutex<String>>,
+    state: Arc<Mutex<SpinnerState>>,
     worker: Option<JoinHandle<()>>,
+}
+
+struct SpinnerState {
+    message: String,
+    next_frame: usize,
 }
 
 impl Spinner {
@@ -105,62 +110,80 @@ impl Spinner {
     }
 
     fn start_for_interval(message: &str, interactive: bool, frame_interval: Duration) -> Self {
-        let message = Arc::new(Mutex::new(message.to_string()));
+        let state = Arc::new(Mutex::new(SpinnerState {
+            message: message.to_string(),
+            next_frame: 0,
+        }));
         if !interactive {
             return Self {
                 stopped: Arc::new(AtomicBool::new(true)),
-                message,
+                state,
                 worker: None,
             };
         }
         let stopped = Arc::new(AtomicBool::new(false));
         let worker_stopped = Arc::clone(&stopped);
-        let worker_message = Arc::clone(&message);
-        let initial_message = message.lock().unwrap().clone();
-        eprint!(
-            "{}",
-            format_spinner_frame(
-                FRAMES[0],
-                &initial_message,
-                crate::terminal::stderr_columns(),
-                true,
-            )
-        );
-        let _ = std::io::stderr().flush();
+        let worker_state = Arc::clone(&state);
+        {
+            let mut state = state.lock().unwrap();
+            eprint!(
+                "{}",
+                format_spinner_frame(
+                    FRAMES[state.next_frame],
+                    &state.message,
+                    crate::terminal::stderr_columns(),
+                    true,
+                )
+            );
+            state.next_frame += 1;
+            let _ = std::io::stderr().flush();
+        }
         let worker = thread::spawn(move || {
-            let mut frame = 1_usize;
-            let mut current_message = initial_message;
             while !worker_stopped.load(Ordering::Relaxed) {
                 thread::park_timeout(frame_interval);
                 if worker_stopped.load(Ordering::Relaxed) {
                     break;
                 }
-                let next_message = worker_message.lock().unwrap().clone();
-                let clear = next_message != current_message;
-                current_message = next_message;
+                let mut state = worker_state.lock().unwrap();
                 eprint!(
                     "{}",
                     format_spinner_frame(
-                        FRAMES[frame % FRAMES.len()],
-                        &current_message,
+                        FRAMES[state.next_frame % FRAMES.len()],
+                        &state.message,
                         crate::terminal::stderr_columns(),
-                        clear,
+                        false,
                     )
                 );
+                state.next_frame += 1;
                 let _ = std::io::stderr().flush();
-                frame += 1;
             }
         });
         Self {
             stopped,
-            message,
+            state,
             worker: Some(worker),
         }
     }
 
     fn update_message(&mut self, message: &str) {
-        let mut current = self.message.lock().unwrap();
-        *current = message.to_string();
+        let mut state = self.state.lock().unwrap();
+        if state.message == message {
+            return;
+        }
+        state.message = message.to_string();
+        if self.worker.is_some() {
+            eprint!(
+                "{}",
+                format_spinner_frame(
+                    FRAMES[state.next_frame % FRAMES.len()],
+                    &state.message,
+                    crate::terminal::stderr_columns(),
+                    true,
+                )
+            );
+            state.next_frame += 1;
+            let _ = std::io::stderr().flush();
+        }
     }
 
     pub fn stop(&mut self) {
