@@ -20,6 +20,7 @@ const INJECT_PREFIX: &str = "window.__incodexIncognito=true;";
 const MAX_HTTP_RESPONSE_BYTES: usize = 1024 * 1024;
 const MACOS_WINDOW_TILE_PIXELS: i32 = 22;
 const CDP_IO_TIMEOUT: Duration = Duration::from_secs(2);
+pub const OFFICIAL_NEW_CODEX_URL: &str = "codex://new?mode=codex";
 
 #[derive(Debug, Clone)]
 pub struct CdpTarget {
@@ -71,6 +72,7 @@ pub fn debug_launch_args(user_data_dir: &str, debug_port: u16) -> Vec<String> {
         format!("--user-data-dir={user_data_dir}"),
         format!("--remote-debugging-port={debug_port}"),
         format!("--remote-allow-origins=http://127.0.0.1:{debug_port}"),
+        OFFICIAL_NEW_CODEX_URL.to_string(),
     ]
 }
 

@@ -17,7 +17,7 @@ use incodex_core::{format_kv, format_ok, format_step, format_warn};
 use crate::app_bundle::resolve_executable;
 use crate::cdp::{
     allocate_debug_port, debug_launch_args, inject_shared_ui_with_options, start_lifecycle_monitor,
-    start_primary_lifecycle_monitor, InjectionOptions, WindowBounds,
+    start_primary_lifecycle_monitor, InjectionOptions, WindowBounds, OFFICIAL_NEW_CODEX_URL,
 };
 use crate::parse::ParsedCli;
 use crate::CliFailure;
@@ -220,7 +220,10 @@ pub fn prepare_incognito_open(
 fn plan_from_session(bin: PathBuf, session: SessionHome, source_home: &Path) -> OpenPlan {
     let debug_port = allocate_debug_port().unwrap_or(0);
     let args = if debug_port == 0 {
-        vec![format!("--user-data-dir={}", session.chromium.display())]
+        vec![
+            format!("--user-data-dir={}", session.chromium.display()),
+            OFFICIAL_NEW_CODEX_URL.to_string(),
+        ]
     } else {
         debug_launch_args(&session.chromium.display().to_string(), debug_port)
     };
