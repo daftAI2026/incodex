@@ -369,3 +369,126 @@ mod tests {
         assert!(!stderr.contains("LSREGISTER-ERR"), "{stderr:?}");
     }
 }
+
+#[cfg(test)]
+mod quiescence_tests {
+    use super::*;
+    use std::collections::VecDeque;
+    use std::time::{Duration, Instant};
+
+    struct FixtureProbe {
+        paths: Vec<(i32, PathBuf)>,
+    }
+
+    impl ProcessProbe for FixtureProbe {
+        fn process_paths(&self) -> Result<Vec<(i32, PathBuf)>, String> {
+            Ok(self.paths.clone())
+        }
+    }
+
+    struct FailingQuit;
+
+    impl QuitRequester for FailingQuit {
+        fn request_quit(&mut self) -> Result<(), String> {
+            Err("fixture quit failed".into())
+        }
+    }
+
+    struct FakeClock {
+        now: Instant,
+        sleeps: VecDeque<Duration>,
+    }
+
+    impl QuiescenceClock for FakeClock {
+        fn now(&self) -> Instant {
+            self.now
+        }
+
+        fn sleep(&mut self, duration: Duration) {
+            self.now += duration;
+            self.sleeps.push_back(duration);
+        }
+    }
+
+    struct SuccessfulQuit;
+
+    impl QuitRequester for SuccessfulQuit {
+        fn request_quit(&mut self) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn explicit_app_uses_future_cf_bundle_executable() {
+        let root = std::env::temp_dir().join(format!(
+            "incodex-quiescence-plist-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let app = root.join("Future.app");
+        fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
+        fs::write(
+            app.join("Contents/Info.plist"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>CFBundleExecutable</key><string>FutureCodex</string></dict></plist>
+"#,
+        )
+        .unwrap();
+        fs::write(app.join("Contents/MacOS/FutureCodex"), b"fixture").unwrap();
+
+        let quiescence = AppQuiescence::for_app(&app).unwrap();
+        assert_eq!(quiescence.executable(), app.join("Contents/MacOS/FutureCodex"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn exact_executable_path_does_not_match_same_name_elsewhere() {
+        let expected = PathBuf::from("/tmp/incodex/ChatGPT.app/Contents/MacOS/ChatGPT");
+        let quiescence = AppQuiescence::from_executable(expected.clone()).unwrap();
+        let probe = FixtureProbe {
+            paths: vec![(42, PathBuf::from("/tmp/other/ChatGPT.app/Contents/MacOS/ChatGPT"))],
+        };
+        quiescence.ensure_quiescent_with(&probe).unwrap();
+    }
+
+    #[test]
+    fn official_quit_error_is_propagated() {
+        let expected = PathBuf::from("/tmp/incodex/ChatGPT.app/Contents/MacOS/ChatGPT");
+        let quiescence = AppQuiescence::from_executable(expected).unwrap();
+        let probe = FixtureProbe { paths: Vec::new() };
+        let mut requester = FailingQuit;
+        let mut clock = FakeClock {
+            now: Instant::now(),
+            sleeps: VecDeque::new(),
+        };
+        let error = quiescence
+            .quit_official_app_and_wait_with(&probe, &mut requester, &mut clock)
+            .unwrap_err();
+        assert!(error.contains("fixture quit failed"), "{error}");
+        assert!(clock.sleeps.is_empty());
+    }
+
+    #[test]
+    fn official_quit_timeout_is_reported() {
+        let expected = PathBuf::from("/tmp/incodex/ChatGPT.app/Contents/MacOS/ChatGPT");
+        let quiescence = AppQuiescence::from_executable(expected).unwrap();
+        let probe = FixtureProbe {
+            paths: vec![(42, quiescence.executable().to_path_buf())],
+        };
+        let mut requester = SuccessfulQuit;
+        let start = Instant::now();
+        let mut clock = FakeClock {
+            now: start,
+            sleeps: VecDeque::new(),
+        };
+        let error = quiescence
+            .quit_official_app_and_wait_with(&probe, &mut requester, &mut clock)
+            .unwrap_err();
+        assert!(error.contains("timed out"), "{error}");
+        assert!(!clock.sleeps.is_empty());
+    }
+}
