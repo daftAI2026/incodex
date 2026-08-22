@@ -81,7 +81,8 @@ fn lifecycle_adopts_a_replacement_primary_after_a_transient_gap() {
     let server = thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_secs(2);
         let mut list_requests = 0;
-        let mut browser_close_requested = false;
+        let mut list_requests_at_close = None;
+        let mut close_received = false;
 
         while let Some(mut stream) = accept_until(&listener, deadline) {
             match read_request_path(&mut stream).as_str() {
@@ -96,37 +97,47 @@ fn lifecycle_adopts_a_replacement_primary_after_a_transient_gap() {
                                 overlay(port)
                             ]),
                         ),
-                        _ => write_error(&mut stream),
-                    }
-                }
-                "/json" => {
-                    write_error(&mut stream);
-                    if list_requests >= 4 {
-                        break;
+                        _ => write_json(&mut stream, &json!([overlay(port)])),
                     }
                 }
                 "/json/version" => {
-                    browser_close_requested = true;
-                    write_json(&mut stream, &json!({}));
+                    list_requests_at_close = Some(list_requests);
+                    write_json(
+                        &mut stream,
+                        &json!({
+                            "webSocketDebuggerUrl": format!("ws://127.0.0.1:{port}/devtools/browser/close")
+                        }),
+                    );
+                    let Some(stream) = accept_until(&listener, deadline) else {
+                        break;
+                    };
+                    let mut socket = tungstenite::accept(stream).unwrap();
+                    let Message::Text(command) = socket.read().unwrap() else {
+                        panic!("Browser.close must be a text CDP command");
+                    };
+                    close_received = serde_json::from_str::<Value>(&command)
+                        .ok()
+                        .and_then(|value| value.get("method").cloned())
+                        == Some(json!("Browser.close"));
                     break;
                 }
                 path => panic!("unexpected mock CDP path: {path}"),
             }
         }
 
-        (list_requests, browser_close_requested)
+        (list_requests_at_close, close_received)
     });
 
     monitor_primary_target(port, "original");
-    let (list_requests, browser_close_requested) = server.join().unwrap();
+    let (list_requests_at_close, close_received) = server.join().unwrap();
 
     assert!(
-        list_requests >= 3,
-        "the replacement primary must remain under lifecycle monitoring"
+        list_requests_at_close.unwrap_or_default() >= 5,
+        "the replacement primary must be adopted and observed before its later close"
     );
     assert!(
-        !browser_close_requested,
-        "a one-poll target handoff must not close the isolated browser"
+        close_received,
+        "the replacement primary's normal disappearance must close the browser"
     );
 }
 
@@ -366,5 +377,75 @@ fn lifecycle_reissues_browser_close_while_the_browser_is_still_alive() {
     assert_eq!(
         close_commands, 2,
         "sending Browser.close is not proof of exit; a live browser must be checked and closed again"
+    );
+}
+
+#[test]
+fn lifecycle_recovers_after_three_complete_target_list_failures() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut failed_polls = 0;
+        let mut successful_list_requests = 0;
+        let mut close_received = false;
+
+        while let Some(mut stream) = accept_until(&listener, deadline) {
+            match read_request_path(&mut stream).as_str() {
+                "/json/list" if failed_polls < 3 => write_error(&mut stream),
+                "/json" if failed_polls < 3 => {
+                    failed_polls += 1;
+                    write_error(&mut stream);
+                }
+                "/json/list" => {
+                    successful_list_requests += 1;
+                    if successful_list_requests == 1 {
+                        write_json(
+                            &mut stream,
+                            &json!([page(port, "main", "app://-/index.html")]),
+                        );
+                    } else {
+                        write_json(&mut stream, &json!([overlay(port)]));
+                    }
+                }
+                "/json/version" => {
+                    write_json(
+                        &mut stream,
+                        &json!({
+                            "webSocketDebuggerUrl": format!("ws://127.0.0.1:{port}/devtools/browser/close")
+                        }),
+                    );
+                    let Some(stream) = accept_until(&listener, deadline) else {
+                        break;
+                    };
+                    let mut socket = tungstenite::accept(stream).unwrap();
+                    let Message::Text(command) = socket.read().unwrap() else {
+                        panic!("Browser.close must be a text CDP command");
+                    };
+                    close_received = serde_json::from_str::<Value>(&command)
+                        .ok()
+                        .and_then(|value| value.get("method").cloned())
+                        == Some(json!("Browser.close"));
+                    break;
+                }
+                path => panic!("unexpected mock CDP path: {path}"),
+            }
+        }
+
+        (failed_polls, successful_list_requests, close_received)
+    });
+
+    monitor_primary_target(port, "main");
+    let (failed_polls, successful_list_requests, close_received) = server.join().unwrap();
+
+    assert_eq!(failed_polls, 3, "the mock must exercise three failed polls");
+    assert!(
+        successful_list_requests >= 3,
+        "the monitor must remain alive long enough to observe recovery and the later close"
+    );
+    assert!(
+        close_received,
+        "the recovered primary's disappearance must still close the browser"
     );
 }
