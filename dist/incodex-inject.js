@@ -1363,8 +1363,10 @@ function onHotkey(event) {
   activate();
 }
 function start() {
-  if (window.__incodexStarted)
+  if (window.__incodexStarted) {
+    refreshUiProbe();
     return;
+  }
   window.__incodexStarted = true;
   ensureStyle();
   ensureButton();

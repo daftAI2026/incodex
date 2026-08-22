@@ -510,7 +510,10 @@ function onHotkey(event: KeyboardEvent): void {
 }
 
 function start(): void {
-  if (window.__incodexStarted) return;
+  if (window.__incodexStarted) {
+    refreshUiProbe();
+    return;
+  }
   window.__incodexStarted = true;
   ensureStyle();
   ensureButton();
