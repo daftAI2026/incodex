@@ -10,7 +10,10 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-pub use engine::{recover, recover_with, CommitResult, Engine, RecoverResult, TxError};
+pub use engine::{
+    recover, recover_with, validate_post_swap_rollback, CommitResult, Engine, RecoverResult,
+    TxError,
+};
 pub use journal::{new_install_id, validate_path_ancestors, JournalV2};
 pub use uninstall::{
     migrate_legacy_committed, restore_committed, restore_committed_with_checkpoint,
@@ -25,22 +28,6 @@ pub fn validate_backup_snapshot(root: &Path, install_id: &str) -> Result<(), Str
     let journal = journal::load_v2(root, install_id)?;
     let paths = journal::reconstructed(root, &journal)?;
     proof::validate_backup_digest(&paths.original, &journal)
-}
-
-/// Validate that a post-swap transaction has a safe read-only restore source.
-pub fn validate_post_swap_rollback(root: &Path, install_id: &str) -> Result<(), String> {
-    let journal = journal::load_v2(root, install_id)?;
-    if !matches!(
-        journal.phase.as_str(),
-        "TARGET_MOVED_OUT" | "SWAPPED" | "TARGET_VERIFIED" | "UNINSTALLING"
-    ) {
-        return Err(format!(
-            "transaction {install_id} is not post-swap: {}",
-            journal.phase
-        ));
-    }
-    journal::reconstructed(root, &journal)?;
-    proof::restore_source(root, &journal).map(|_| ())
 }
 
 /// Validate that a committed live target still matches its sealed transaction.
