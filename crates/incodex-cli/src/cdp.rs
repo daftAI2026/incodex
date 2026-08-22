@@ -733,3 +733,7 @@ mod tests {
 #[cfg(test)]
 #[path = "cdp_partial_flush_tests.rs"]
 mod partial_flush_tests;
+
+#[cfg(test)]
+#[path = "cdp_ui_probe_tests.rs"]
+mod ui_probe_tests;
