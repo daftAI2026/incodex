@@ -82,6 +82,83 @@ describe("release CLI artifacts", () => {
     expect(releaseYml).toContain('verify_runtime_pointer "$X64_SMOKE_HOME"');
   });
 
+  test("behavior-smokes each final signed Rust asset with the same ignored harness", () => {
+    const harnessPath = join(root, "crates/incodex-cli/tests/release_asset_smoke.rs");
+    expect(existsSync(harnessPath)).toBe(true);
+    const harness = existsSync(harnessPath) ? readFileSync(harnessPath, "utf8") : "";
+
+    const behaviorStepStart = releaseYml.indexOf("- name: Smoke final asset behavior");
+    const behaviorStepEnd = releaseYml.indexOf("\n      - name:", behaviorStepStart + 1);
+    expect(behaviorStepStart).toBeGreaterThanOrEqual(0);
+    expect(behaviorStepEnd).toBeGreaterThan(behaviorStepStart);
+    const behaviorStep = releaseYml.slice(behaviorStepStart, behaviorStepEnd);
+    expect(behaviorStep).toMatch(
+      /case "\$\(uname -m\)" in[\s\S]*arm64\) ;;[\s\S]*\*\)[\s\S]*exit 1[\s\S]*;;[\s\S]*esac/,
+    );
+
+    const workflow = releaseYml.replace(/\\\n\s*/g, " ").replace(/\s+/g, " ");
+    const normalizedBehaviorStep = behaviorStep.replace(/\\\n\s*/g, " ").replace(/\s+/g, " ");
+    const command =
+      "cargo test --locked --release --package incodex-cli --test release_asset_smoke -- --ignored --exact release_asset_behavior_smoke";
+    const armInvocation =
+      `INCODEX_RELEASE_BINARY="$PWD/$ARM_BINARY" INCODEX_RELEASE_ARCH="arm64" ${command}`;
+    const x64Invocation =
+      `INCODEX_RELEASE_BINARY="$PWD/$X64_BINARY" INCODEX_RELEASE_ARCH="x86_64" ${command}`;
+    const finalSignature = workflow.indexOf(
+      "codesign --sign - --force release-cli/incodex-darwin-x64",
+    );
+
+    expect(finalSignature).toBeGreaterThanOrEqual(0);
+    expect(workflow.indexOf(armInvocation)).toBeGreaterThan(finalSignature);
+    expect(workflow.indexOf(x64Invocation)).toBeGreaterThan(finalSignature);
+    const guardEnd = normalizedBehaviorStep.indexOf("esac");
+    expect(guardEnd).toBeGreaterThanOrEqual(0);
+    expect(normalizedBehaviorStep.indexOf(armInvocation)).toBeGreaterThan(guardEnd);
+    expect(normalizedBehaviorStep.indexOf(x64Invocation)).toBeGreaterThan(guardEnd);
+
+    expect(harness).toContain("INCODEX_RELEASE_BINARY");
+    expect(harness).toContain("INCODEX_RELEASE_ARCH");
+    expect(harness).toContain("Command::new");
+    expect(harness).not.toContain("The release contract exercises");
+    const normalizedHarness = harness.replace(/\s+/g, " ");
+    expect(normalizedHarness).toMatch(/runner\.run\(\s*&\["--version"\]/);
+    expect(normalizedHarness).toMatch(/runner\.run\(\s*&\["--help"\]/);
+    expect(normalizedHarness).toMatch(/runner\.run\(\s*&\["status", "--json", "--app"/);
+    expect(normalizedHarness).toMatch(/runner\.run\(\s*&\["open", "--dry-run", "--app"/);
+    expect(normalizedHarness).toMatch(/runner\.run\(\s*&\["install", "--yes", "--app"/);
+    expect(normalizedHarness).toMatch(/runner\.run\(\s*&\["uninstall", "--yes", "--app"/);
+    const dryRun = normalizedHarness.search(
+      /runner\.run\(\s*&\["open", "--dry-run", "--app"/,
+    );
+    const homeBefore = normalizedHarness.indexOf("let dry_run_home_before = snapshot(&home);");
+    const codexHomeBefore = normalizedHarness.indexOf(
+      "let dry_run_codex_home_before = snapshot(&codex_home);",
+    );
+    const homeAfter = normalizedHarness.search(
+      /assert_eq!\(\s*snapshot\(&home\),\s*dry_run_home_before/,
+    );
+    const codexHomeAfter = normalizedHarness.search(
+      /assert_eq!\(\s*snapshot\(&codex_home\),\s*dry_run_codex_home_before/,
+    );
+    expect(homeBefore).toBeGreaterThanOrEqual(0);
+    expect(codexHomeBefore).toBeGreaterThanOrEqual(0);
+    expect(homeBefore).toBeLessThan(dryRun);
+    expect(codexHomeBefore).toBeLessThan(dryRun);
+    expect(homeAfter).toBeGreaterThan(dryRun);
+    expect(codexHomeAfter).toBeGreaterThan(dryRun);
+    expect(normalizedHarness).toMatch(/assert_status_json\([^;]*&app,\s*false\)/);
+    expect(normalizedHarness).toMatch(/assert_status_json\([^;]*&app,\s*true\)/);
+    const uninstall = normalizedHarness.indexOf('runner.run( &["uninstall", "--yes", "--app"');
+    const noTransientDirs = normalizedHarness.indexOf("assert_no_transient_transaction_dirs(&home)");
+    expect(uninstall).toBeGreaterThanOrEqual(0);
+    expect(noTransientDirs).toBeGreaterThan(uninstall);
+    expect(harness).toMatch(/original_snapshot/);
+    expect(harness).toMatch(/restored_snapshot/);
+    expect(harness).toMatch(/assert_eq!\(\s*restored_snapshot,\s*original_snapshot/);
+    expect(harness).toMatch(/#\[ignore\s*=\s*"[^"]+"\]/);
+    expect(harness).not.toContain("#[ignore]");
+  });
+
   test("smoke validates external and manifest Runtime file sets separately", () => {
     expect(externalFileNames).toHaveLength(10);
     expect(manifestFileNames).toHaveLength(11);
