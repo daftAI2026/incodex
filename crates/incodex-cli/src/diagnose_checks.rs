@@ -719,6 +719,12 @@ fn transaction_evidence(
         Some("manual".to_string())
     } else {
         match action {
+            incodex_transaction::Recovery::Rollback
+                if matches!(phase, "BACKUP_COMMITTED" | "STAGED")
+                    && original_valid != Some(true) =>
+            {
+                Some("manual".to_string())
+            }
             incodex_transaction::Recovery::Rollback => Some("rollback".to_string()),
             incodex_transaction::Recovery::Refuse => Some("manual".to_string()),
             incodex_transaction::Recovery::Done if internal_cleanup_safe => {
