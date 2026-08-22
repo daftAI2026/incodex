@@ -219,6 +219,65 @@ fn wait_and_burn_passes_the_created_session_identity_to_cleanup() {
 }
 
 #[test]
+fn native_open_handoff_publishes_the_spawned_process_identity() {
+    let root = temp_root();
+    let app = fake_app(&root);
+    let user = root.join("home");
+    let source = root.join("codex");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("auth.json"), "{}\n").unwrap();
+    let mut plan =
+        prepare_incognito_open(&app, &user, &source, std::process::id() as i32).unwrap();
+    plan.debug_port = 0;
+    let executable = plan.bin.clone();
+    fs::write(
+        &executable,
+        "#!/bin/sh\n\
+for i in $(seq 1 100); do\n\
+  if grep -q \"\\\"pid\\\":$$\" \"$INCODEX_SESSION_ROOT/owner.json\"; then\n\
+    cat \"$INCODEX_SESSION_ROOT/owner.json\" > \"$INCODEX_SOURCE_HOME/handoff-owner.json\"\n\
+    exit 0\n\
+  fi\n\
+  sleep 0.01\n\
+done\n\
+cat \"$INCODEX_SESSION_ROOT/owner.json\" > \"$INCODEX_SOURCE_HOME/handoff-owner.json\"\n",
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(&executable).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(0o755);
+    }
+    fs::set_permissions(&executable, permissions).unwrap();
+
+    let process = spawn_plan(&plan).unwrap();
+    assert!(matches!(process, OpenProcessResult::Exited { code: 0, .. }));
+    let owner: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(source.join("handoff-owner.json")).unwrap())
+            .unwrap();
+    assert_ne!(
+        owner.get("pid").and_then(serde_json::Value::as_i64),
+        Some(i64::from(std::process::id() as i32)),
+        "the session owner must follow the spawned process, not the launcher"
+    );
+    assert!(owner
+        .get("processStartIdentity")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| !value.is_empty()));
+    burn_session_home(
+        &plan.session_root,
+        &BurnExpected {
+            user_root: &user,
+            session_id: Some(&plan.session_id),
+            ino: Some(plan.session_ino),
+            dev: Some(plan.session_dev),
+        },
+    )
+    .unwrap();
+}
+
+#[test]
 fn late_recreation_after_proven_delete_uses_session_path_proof() {
     let root = temp_root();
     let app = fake_app(&root);

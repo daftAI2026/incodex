@@ -532,6 +532,123 @@ mod tests {
     }
 
     #[test]
+    fn session_owner_records_process_start_identity() {
+        let root = temp_root();
+        let user_root = root.join(".incodex");
+        let pid = std::process::id() as i32;
+        let session = create_session_home(&user_root, None, pid, "").unwrap();
+        let owner: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(session.root.join(OWNER_NAME)).unwrap())
+                .unwrap();
+        let expected = process_start_identity(pid).expect("current process identity");
+        assert_eq!(owner.get("pid").and_then(serde_json::Value::as_i64), Some(i64::from(pid)));
+        assert_eq!(
+            owner
+                .get("processStartIdentity")
+                .and_then(serde_json::Value::as_str),
+            Some(expected.as_str()),
+            "session owner must use the same start identity source as Runtime owner records"
+        );
+    }
+
+    #[test]
+    fn orphan_sweep_treats_a_reused_pid_as_orphan() {
+        let root = temp_root();
+        let user_root = root.join(".incodex");
+        let pid = std::process::id() as i32;
+        let session = create_session_home(&user_root, None, pid, "").unwrap();
+        let owner_path = session.root.join(OWNER_NAME);
+        let mut owner: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&owner_path).unwrap()).unwrap();
+        owner["processStartIdentity"] = serde_json::json!("old-process-start");
+        fs::write(&owner_path, format!("{owner}\n")).unwrap();
+
+        assert_eq!(sweep_orphan_sessions(&user_root, None), 1);
+        assert!(!session.root.exists());
+    }
+
+    #[test]
+    fn live_session_without_process_start_identity_is_not_swept() {
+        let root = temp_root();
+        let user_root = root.join(".incodex");
+        let pid = std::process::id() as i32;
+        let session = create_session_home(&user_root, None, pid, "").unwrap();
+        let owner_path = session.root.join(OWNER_NAME);
+        let mut owner: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&owner_path).unwrap()).unwrap();
+        owner.as_object_mut().unwrap().remove("processStartIdentity");
+        fs::write(&owner_path, format!("{owner}\n")).unwrap();
+
+        assert_eq!(sweep_orphan_sessions(&user_root, None), 0);
+        assert!(session.root.exists());
+    }
+
+    #[test]
+    fn orphan_sweep_retains_a_live_session_when_identity_probe_is_unknown() {
+        let root = temp_root();
+        let user_root = root.join(".incodex");
+        let pid = std::process::id() as i32;
+        let session = create_session_home(&user_root, None, pid, "").unwrap();
+
+        assert_eq!(
+            sweep_orphan_sessions_with_probe(&user_root, None, |_| ProcessProbe::Unknown),
+            0
+        );
+        assert!(session.root.exists());
+    }
+
+    #[test]
+    fn burn_revalidates_the_owner_snapshot_before_delete() {
+        let root = temp_root();
+        let user_root = root.join(".incodex");
+        let pid = std::process::id() as i32;
+        let session = create_session_home(&user_root, None, pid, "").unwrap();
+        let start = process_start_identity(pid).unwrap();
+        let snapshot = SessionOwnerSnapshot {
+            pid,
+            process_start_identity: start,
+        };
+        let owner_path = session.root.join(OWNER_NAME);
+        let mut owner: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&owner_path).unwrap()).unwrap();
+        owner["pid"] = serde_json::json!(999999);
+        fs::write(&owner_path, format!("{owner}\n")).unwrap();
+
+        let error = burn_session_home_with_owner(
+            &session.root,
+            &BurnExpected {
+                user_root: &user_root,
+                session_id: Some(&session.session_id),
+                ino: Some(session.ino),
+                dev: Some(session.dev),
+            },
+            &snapshot,
+        )
+        .unwrap_err();
+        assert!(error.contains("owner"));
+        assert!(session.root.exists());
+    }
+
+    #[test]
+    fn session_owner_handoff_records_the_child_process_identity() {
+        let root = temp_root();
+        let user_root = root.join(".incodex");
+        let session = create_session_home(&user_root, None, 999999, "").unwrap();
+        let pid = std::process::id() as i32;
+        handoff_session_owner(&session.root, pid).unwrap();
+        let owner: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(session.root.join(OWNER_NAME)).unwrap())
+                .unwrap();
+        assert_eq!(owner.get("pid").and_then(serde_json::Value::as_i64), Some(i64::from(pid)));
+        assert_eq!(
+            owner
+                .get("processStartIdentity")
+                .and_then(serde_json::Value::as_str),
+            process_start_identity(pid).as_deref()
+        );
+    }
+
+    #[test]
     fn burn_refuses_a_session_id_mismatch() {
         let root = temp_root();
         let user_root = root.join(".incodex");
