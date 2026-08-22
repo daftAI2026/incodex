@@ -228,6 +228,28 @@ fn orphan_sweep_retains_an_unparseable_legacy_process_identity() {
 }
 
 #[test]
+fn orphan_sweep_retains_a_live_session_with_non_c_locale_identity_words() {
+    let root = temp_root();
+    let user_root = root.join(".incodex");
+    let pid = std::process::id() as i32;
+    let session = create_session_home(&user_root, None, pid, "").unwrap();
+    let owner_path = session.root.join(OWNER_NAME);
+    let mut owner: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&owner_path).unwrap()).unwrap();
+    owner["processStartIdentity"] = serde_json::json!("Sab Ago 22 10:37:03 2025");
+    fs::write(&owner_path, format!("{owner}\n")).unwrap();
+
+    assert_eq!(
+        sweep_orphan_sessions_with_probe(&user_root, None, |_| {
+            ProcessProbe::Live("Sat Aug 22 10:37:03 2025".into())
+        }),
+        0,
+        "a non-C locale identity is unverifiable, not a PID-reuse mismatch"
+    );
+    assert!(session.root.exists());
+}
+
+#[test]
 fn process_identity_probe_pins_the_c_locale() {
     assert!(
         include_str!("session.rs").contains(".env(\"LC_ALL\", \"C\")"),

@@ -167,6 +167,24 @@ describe("symlink burn and copy", () => {
     expect(existsSync(session.root)).toBe(true);
   });
 
+  test("janitor retains a live session with non-C locale identity words", () => {
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const session = createSessionHome(userRoot, { pid: process.pid });
+    const ownerPath = join(session.root, "owner.json");
+    const owner = JSON.parse(readFileSync(ownerPath, "utf8"));
+    owner.processStartIdentity = "Sab Ago 22 10:37:03 2025";
+    writeFileSync(ownerPath, `${JSON.stringify(owner)}\n`);
+
+    expect(
+      sweepOrphanSessions(userRoot, {
+        pidAlive: () => true,
+        processIdentity: () => ({ processStartIdentity: "Sat Aug 22 10:37:03 2025" }),
+      }),
+    ).toBe(0);
+    expect(existsSync(session.root)).toBe(true);
+  });
+
   test("process identity probe pins the C locale for ps output", () => {
     const source = readFileSync(join(import.meta.dir, "runtime/incodex-owner-core.cts"), "utf8");
     expect(source).toContain("LC_ALL: \"C\"");

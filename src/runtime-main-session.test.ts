@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as runtimeMain from "../dist/incodex-main.cjs";
@@ -47,5 +47,44 @@ describe("Electron session preparation", () => {
     expect(result).toEqual({ ok: false, reason: "prepare-failed" });
     expect(sessionRoot).not.toBe("");
     expect(existsSync(sessionRoot)).toBe(false);
+  });
+
+  test("child burn refuses a replaced owner manifest after handoff", () => {
+    const burnIncognitoSession = (runtimeMain as any).burnIncognitoSession;
+    expect(typeof burnIncognitoSession).toBe("function");
+
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const session = safeHome.createSessionHome(userRoot, { pid: process.pid });
+    const ownerPath = join(session.root, "owner.json");
+    const owner = JSON.parse(readFileSync(ownerPath, "utf8"));
+    const snapshot = {
+      pid: owner.pid,
+      processStartIdentity: owner.processStartIdentity,
+    };
+    owner.processStartIdentity = "tampered-after-handoff";
+    writeFileSync(ownerPath, `${JSON.stringify(owner)}\n`);
+
+    expect(() => burnIncognitoSession(session, snapshot, userRoot)).toThrow(/owner/);
+    expect(existsSync(session.root)).toBe(true);
+    expect(safeHome.readBurnProof(session.root, userRoot, session.sessionId)).toBeNull();
+  });
+
+  test("child burn removes the session and writes proof with its handoff snapshot", () => {
+    const burnIncognitoSession = (runtimeMain as any).burnIncognitoSession;
+    expect(typeof burnIncognitoSession).toBe("function");
+
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const session = safeHome.createSessionHome(userRoot, { pid: process.pid });
+    const owner = JSON.parse(readFileSync(join(session.root, "owner.json"), "utf8"));
+    const snapshot = {
+      pid: owner.pid,
+      processStartIdentity: owner.processStartIdentity,
+    };
+
+    expect(burnIncognitoSession(session, snapshot, userRoot)).toBe(true);
+    expect(existsSync(session.root)).toBe(false);
+    expect(safeHome.readBurnProof(session.root, userRoot, session.sessionId)).not.toBeNull();
   });
 });
