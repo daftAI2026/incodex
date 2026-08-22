@@ -84,7 +84,30 @@ pub fn inject_source_for_locale(locale: Option<&str>) -> String {
 }
 
 pub fn ui_ready_expression() -> &'static str {
-    "Boolean(document.querySelector('[data-incodex-privacy-toggle]') && document.querySelector('[data-incodex-banner-host]'))"
+    "(() => ({button: Boolean(document.querySelector('[data-incodex-privacy-toggle]')), banner: Boolean((document.querySelector('[data-incodex-banner-host]') && document.querySelector('[data-incodex-landing]')) || (() => { try { return sessionStorage.getItem('incodex-banner-dismissed') === '1'; } catch { return false; } })())}))()"
+}
+
+pub fn validate_ui_probe_result(response: &Value) -> Result<(), String> {
+    let malformed = || "malformed Incodex UI probe result".to_string();
+    let value = response
+        .pointer("/result/result/value")
+        .ok_or_else(malformed)?;
+    let object = value.as_object().ok_or_else(malformed)?;
+    let button = object
+        .get("button")
+        .and_then(Value::as_bool)
+        .ok_or_else(malformed)?;
+    let banner = object
+        .get("banner")
+        .and_then(Value::as_bool)
+        .ok_or_else(malformed)?;
+
+    match (button, banner) {
+        (true, true) => Ok(()),
+        (false, true) => Err("Incodex button is not mounted yet".into()),
+        (true, false) => Err("Incodex banner is not mounted yet".into()),
+        (false, false) => Err("Incodex button and banner are not mounted yet".into()),
+    }
 }
 
 pub fn validate_cdp_websocket_url(url: &str, expected_port: u16) -> Result<(), String> {
@@ -188,13 +211,7 @@ fn try_inject(debug_port: u16, source: &str) -> Result<String, String> {
         "Runtime.evaluate",
         json!({ "expression": ui_ready_expression(), "returnByValue": true }),
     )?;
-    if health
-        .pointer("/result/result/value")
-        .and_then(Value::as_bool)
-        != Some(true)
-    {
-        return Err("Incodex button and banner are not mounted yet".into());
-    }
+    validate_ui_probe_result(&health)?;
     let target_id = page.id.clone();
     let _ = socket.close(None);
     Ok(target_id)
@@ -733,3 +750,7 @@ mod tests {
 #[cfg(test)]
 #[path = "cdp_partial_flush_tests.rs"]
 mod partial_flush_tests;
+
+#[cfg(test)]
+#[path = "cdp_ui_probe_tests.rs"]
+mod ui_probe_tests;

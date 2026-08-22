@@ -885,6 +885,25 @@ function iconFor(input) {
   return input.incognito && input.hovered ? "circle-x" : "hat-glasses";
 }
 
+// src/runtime/incodex-ui-probe.ts
+function deriveUiProbe(input) {
+  const button = input.buttonPresent ? "present" : "missing";
+  let banner;
+  if (!input.incognito)
+    banner = "not-applicable";
+  else if (input.bannerPresent)
+    banner = "present";
+  else if (input.bannerDismissed)
+    banner = "dismissed";
+  else
+    banner = "missing";
+  return {
+    button,
+    banner,
+    accepted: button === "present" && banner !== "missing"
+  };
+}
+
 // src/runtime/_inject.src.ts
 var STYLE_ID = "incodex-privacy-style";
 var BTN_ATTR = "data-incodex-privacy-toggle";
@@ -1190,12 +1209,22 @@ function bannerDismissed() {
     return false;
   }
 }
+function refreshUiProbe() {
+  const incognito = isIncognitoWindow();
+  window.__incodexUiProbe = deriveUiProbe({
+    incognito,
+    buttonPresent: buttonStillBesideSearch(),
+    bannerPresent: Boolean(document.querySelector(`[${BANNER_HOST_ATTR}]`)?.querySelector(`[${LANDING_ATTR}]`)),
+    bannerDismissed: incognito && bannerDismissed()
+  });
+}
 function dismissBanner() {
   try {
     window.sessionStorage.setItem(BANNER_DISMISS_KEY, "1");
   } catch {}
   document.querySelector(`[${LANDING_ATTR}]`)?.closest(`[${BANNER_HOST_ATTR}]`)?.remove();
   document.querySelector(`[${LANDING_ATTR}]`)?.remove();
+  refreshUiProbe();
 }
 function classNameOf(el) {
   const value = el.getAttribute("class") || "";
@@ -1334,13 +1363,16 @@ function onHotkey(event) {
   activate();
 }
 function start() {
-  if (window.__incodexStarted)
+  if (window.__incodexStarted) {
+    refreshUiProbe();
     return;
+  }
   window.__incodexStarted = true;
   ensureStyle();
   ensureButton();
   apply();
   ensureLanding();
+  refreshUiProbe();
   window.addEventListener("keydown", onHotkey, true);
   let scheduled = false;
   const observer = new MutationObserver(() => {
@@ -1355,6 +1387,7 @@ function start() {
         return;
       ensureButton();
       ensureLanding();
+      refreshUiProbe();
     });
   });
   observer.observe(document.documentElement, { childList: true, subtree: true });
