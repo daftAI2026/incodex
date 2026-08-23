@@ -678,6 +678,19 @@ mod quiescence_tests {
     }
 
     #[test]
+    fn isolated_user_data_launch_is_not_treated_as_the_official_source_process() {
+        assert!(!is_isolated_launch_command(
+            "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT"
+        ));
+        assert!(is_isolated_launch_command(
+            "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT --user-data-dir=/tmp/incodex/chromium"
+        ));
+        assert!(is_isolated_launch_command(
+            "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT --user-data-dir /tmp/incodex/chromium"
+        ));
+    }
+
+    #[test]
     fn official_quit_error_is_propagated() {
         let expected = PathBuf::from("/tmp/incodex/ChatGPT.app/Contents/MacOS/ChatGPT");
         let quiescence = AppQuiescence::from_executable(expected).unwrap();
