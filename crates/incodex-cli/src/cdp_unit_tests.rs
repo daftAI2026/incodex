@@ -46,6 +46,15 @@ fn isolated_launch_uses_the_official_new_codex_deep_link() {
 }
 
 #[test]
+fn isolated_launch_disables_the_native_window_birth_animation() {
+    let args = debug_launch_args("/tmp/incodex-chromium", 43123);
+    assert_eq!(
+        &args[..2],
+        ["-NSAutomaticWindowAnimationsEnabled", "false"]
+    );
+}
+
+#[test]
 fn cdp_http_finishes_at_content_length_even_when_chromium_keeps_socket_open() {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
