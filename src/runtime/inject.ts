@@ -3,6 +3,7 @@ import { isSearchLabel } from "./compatibility/search-labels";
 import { type CopyKey, translate, resolveLocale as matchLocale } from "./incognito-copy";
 import { iconFor, type IncognitoButtonIcon } from "./incognito-icon";
 import { deriveUiProbe } from "./incodex-ui-probe";
+import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement";
 import { createTooltipLifecycle, type TooltipLifecycle } from "./tooltip-lifecycle";
 
 const STYLE_ID = "incodex-privacy-style";
@@ -228,14 +229,25 @@ function findSearchButton(): HTMLElement | null {
 }
 
 function isParkedLeftOfSearch(btn: HTMLElement, search: HTMLElement): boolean {
-  return btn.parentElement === search.parentElement && btn.nextElementSibling === search;
+  const placement = searchButtonPlacement(search);
+  return Boolean(
+    placement && btn.parentElement === placement.parent && btn.nextElementSibling === placement.before,
+  );
 }
 
 function buttonStillBesideSearch(): boolean {
   const btn = document.querySelector<HTMLElement>(`[${BTN_ATTR}]`);
-  if (!btn?.isConnected) return false;
-  const next = btn.nextElementSibling;
-  return Boolean(next && next.tagName === "BUTTON" && isSearchLabel(next.getAttribute("aria-label")));
+  const search = findSearchButton();
+  return Boolean(btn?.isConnected && search && isParkedLeftOfSearch(btn, search));
+}
+
+function injectedTooltipCanShow(btn: HTMLElement): boolean {
+  const search = findSearchButton();
+  return (
+    btn.isConnected &&
+    (btn.getAttribute("data-incodex-hovered") === "true" || document.activeElement === btn) &&
+    !(search && searchTooltipOpen(search))
+  );
 }
 
 function landingStillMounted(): boolean {
@@ -265,9 +277,7 @@ function buildButton(search: HTMLElement): HTMLElement {
     delayMs: TOOLTIP_FALLBACK_DELAY_MS,
     schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
     cancel: (id) => window.clearTimeout(id),
-    canShow: () =>
-      btn.isConnected &&
-      (btn.getAttribute("data-incodex-hovered") === "true" || document.activeElement === btn),
+    canShow: () => injectedTooltipCanShow(btn),
     show: () => showTooltip(btn),
     hide: hideTooltip,
   });
@@ -517,7 +527,8 @@ function ensureLanding(): void {
 function ensureButton(): void {
   let btn = document.querySelector<HTMLElement>(`[${BTN_ATTR}]`);
   const search = findSearchButton();
-  if (!search?.parentElement) {
+  const placement = search ? searchButtonPlacement(search) : null;
+  if (!search || !placement) {
     if (btn?.isConnected) dismissActiveTooltip();
     else disposeActiveTooltip();
     return;
@@ -525,7 +536,7 @@ function ensureButton(): void {
 
   if (!btn) btn = buildButton(search);
   if (!isParkedLeftOfSearch(btn, search)) {
-    search.parentElement.insertBefore(btn, search);
+    placement.parent.insertBefore(btn, placement.before);
   }
   apply();
 }

@@ -904,6 +904,28 @@ function deriveUiProbe(input) {
   };
 }
 
+// src/runtime/search-button-placement.ts
+var TOOLTIP_TRIGGER_STATES = new Set(["closed", "delayed-open", "instant-open"]);
+function isSearchTooltipTrigger(element) {
+  const state = element.getAttribute("data-state");
+  return element.tagName === "SPAN" && state !== null && TOOLTIP_TRIGGER_STATES.has(state);
+}
+function searchButtonPlacement(search) {
+  const parent = search.parentElement;
+  if (!parent)
+    return null;
+  if (isSearchTooltipTrigger(parent) && parent.parentElement) {
+    return { parent: parent.parentElement, before: parent };
+  }
+  return { parent, before: search };
+}
+function searchTooltipOpen(search) {
+  const parent = search.parentElement;
+  if (!parent || !isSearchTooltipTrigger(parent))
+    return false;
+  return parent.getAttribute("data-state") !== "closed" || parent.hasAttribute("aria-describedby");
+}
+
 // src/runtime/tooltip-lifecycle.ts
 function createTooltipLifecycle(deps) {
   let hovering = false;
@@ -1161,14 +1183,17 @@ function findSearchButton() {
   return [...document.querySelectorAll("button")].find((btn) => isSearchLabel(btn.getAttribute("aria-label"))) ?? null;
 }
 function isParkedLeftOfSearch(btn, search) {
-  return btn.parentElement === search.parentElement && btn.nextElementSibling === search;
+  const placement = searchButtonPlacement(search);
+  return Boolean(placement && btn.parentElement === placement.parent && btn.nextElementSibling === placement.before);
 }
 function buttonStillBesideSearch() {
   const btn = document.querySelector(`[${BTN_ATTR}]`);
-  if (!btn?.isConnected)
-    return false;
-  const next = btn.nextElementSibling;
-  return Boolean(next && next.tagName === "BUTTON" && isSearchLabel(next.getAttribute("aria-label")));
+  const search = findSearchButton();
+  return Boolean(btn?.isConnected && search && isParkedLeftOfSearch(btn, search));
+}
+function injectedTooltipCanShow(btn) {
+  const search = findSearchButton();
+  return btn.isConnected && (btn.getAttribute("data-incodex-hovered") === "true" || document.activeElement === btn) && !(search && searchTooltipOpen(search));
 }
 function landingStillMounted() {
   const landing = document.querySelector(`[${LANDING_ATTR}]`);
@@ -1199,7 +1224,7 @@ function buildButton(search) {
     delayMs: TOOLTIP_FALLBACK_DELAY_MS,
     schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
     cancel: (id) => window.clearTimeout(id),
-    canShow: () => btn.isConnected && (btn.getAttribute("data-incodex-hovered") === "true" || document.activeElement === btn),
+    canShow: () => injectedTooltipCanShow(btn),
     show: () => showTooltip(btn),
     hide: hideTooltip
   });
@@ -1413,7 +1438,8 @@ function ensureLanding() {
 function ensureButton() {
   let btn = document.querySelector(`[${BTN_ATTR}]`);
   const search = findSearchButton();
-  if (!search?.parentElement) {
+  const placement = search ? searchButtonPlacement(search) : null;
+  if (!search || !placement) {
     if (btn?.isConnected)
       dismissActiveTooltip();
     else
@@ -1423,7 +1449,7 @@ function ensureButton() {
   if (!btn)
     btn = buildButton(search);
   if (!isParkedLeftOfSearch(btn, search)) {
-    search.parentElement.insertBefore(btn, search);
+    placement.parent.insertBefore(btn, placement.before);
   }
   apply();
 }
