@@ -35,25 +35,23 @@ describe("Search button placement", () => {
     const tooltipTrigger = node({
       tagName: "SPAN",
       parent: header,
-      classes: ["contents"],
+      classes: ["future-display-contents"],
       attributes: { "data-state": "closed" },
     });
     const search = node({ tagName: "BUTTON", parent: tooltipTrigger });
 
-    expect(searchButtonPlacement(search as unknown as HTMLElement)).toEqual({
-      parent: header,
-      before: tooltipTrigger,
-    });
+    const placement = searchButtonPlacement(search as unknown as HTMLElement);
+    expect(placement?.parent).toBe(header as unknown as HTMLElement);
+    expect(placement?.before).toBe(tooltipTrigger as unknown as HTMLElement);
   });
 
   test("keeps the direct sibling placement when Search has no tooltip trigger wrapper", () => {
     const header = node();
     const search = node({ tagName: "BUTTON", parent: header });
 
-    expect(searchButtonPlacement(search as unknown as HTMLElement)).toEqual({
-      parent: header,
-      before: search,
-    });
+    const placement = searchButtonPlacement(search as unknown as HTMLElement);
+    expect(placement?.parent).toBe(header as unknown as HTMLElement);
+    expect(placement?.before).toBe(search as unknown as HTMLElement);
   });
 
   test("does not escape an unrelated stateful wrapper", () => {
@@ -66,9 +64,8 @@ describe("Search button placement", () => {
     });
     const search = node({ tagName: "BUTTON", parent: unrelated });
 
-    expect(searchButtonPlacement(search as unknown as HTMLElement)).toEqual({
-      parent: unrelated,
-      before: search,
-    });
+    const placement = searchButtonPlacement(search as unknown as HTMLElement);
+    expect(placement?.parent).toBe(unrelated as unknown as HTMLElement);
+    expect(placement?.before).toBe(search as unknown as HTMLElement);
   });
 });

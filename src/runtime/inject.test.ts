@@ -13,8 +13,10 @@ describe("hat-glasses stays after header remount", () => {
     expect(inject).not.toMatch(/if \(uiReady\(\)\) return;/);
   });
 
-  test("parks the button as the previous sibling of Search", () => {
-    expect(inject).toContain("insertBefore(btn, search)");
+  test("parks the button before the Search tooltip trigger boundary", () => {
+    expect(inject).toContain("searchButtonPlacement(search)");
+    expect(inject).toContain("placement.parent.insertBefore(btn, placement.before)");
+    expect(inject).not.toContain("search.parentElement.insertBefore(btn, search)");
     expect(inject).not.toContain("cluster.insertBefore(btn, cluster.firstElementChild)");
   });
 
@@ -23,7 +25,7 @@ describe("hat-glasses stays after header remount", () => {
     expect(inject).not.toContain("observer.observe(observeRoot()");
   });
 
-  test("skips ensureButton while the hat is still the previous sibling of Search", () => {
+  test("skips ensureButton while the hat is still beside the Search trigger", () => {
     expect(inject).toContain("buttonStillBesideSearch");
     expect(inject).toContain("if (!needsInject()) return");
   });
@@ -74,7 +76,7 @@ describe("incodex tooltip lifecycle", () => {
 
   test("clears an open tooltip without losing a connected button lifecycle", () => {
     expect(inject).toMatch(
-      /function ensureButton\(\): void \{[\s\S]*if \(!search\?\.parentElement\) \{[\s\S]*if \(btn\?\.isConnected\) dismissActiveTooltip\(\);[\s\S]*else disposeActiveTooltip\(\);[\s\S]*return;/,
+      /function ensureButton\(\): void \{[\s\S]*if \(!search \|\| !placement\) \{[\s\S]*if \(btn\?\.isConnected\) dismissActiveTooltip\(\);[\s\S]*else disposeActiveTooltip\(\);[\s\S]*return;/,
     );
   });
 
