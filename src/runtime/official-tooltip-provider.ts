@@ -6,8 +6,29 @@ export type OfficialTooltipProvider = {
     variant: string,
     close: () => void,
   ) => void;
+  clearHoverHandoffLock: (id: string) => void;
   deactivateTooltip: (id: string) => void;
+  isHoverOpenBlocked: (id: string) => boolean;
+  registerOpenTooltip: (id: string, variant: string, close: () => void) => () => void;
+  registerTooltipDismissHandler: (id: string, close: () => void) => () => void;
+  setHoverHandoffLockTooltipId: (id: string) => void;
 };
+
+export type OfficialTooltipTimingBridge = {
+  resolveDelay: (fallbackMs: number) => number;
+  activate: (close: () => void) => void;
+  deactivate: () => void;
+};
+
+export function createOfficialTooltipTimingBridge(
+  _currentTrigger: () => HTMLElement | null,
+): OfficialTooltipTimingBridge {
+  return {
+    resolveDelay: (fallbackMs) => fallbackMs,
+    activate: () => {},
+    deactivate: () => {},
+  };
+}
 
 type ReactContextDependency = {
   memoizedValue?: unknown;
