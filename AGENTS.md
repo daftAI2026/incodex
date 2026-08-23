@@ -18,7 +18,7 @@ Users launch the official Codex icon as usual. After `incodex install`, a hat-gl
 
 - Keep the official icon and bundle id. Do not invent a second app the user launches every day.
 - Isolate incognito data under `~/.incodex/sessions/`. Do not write or delete `~/.codex` session databases.
-- Copy only `auth.json` and `config.toml` into the isolated home. For first-frame window parity, synthesize a minimal `.codex-global-state.json` containing only a validated `electron-main-window-bounds`; never copy any other global-state key.
+- Copy only `auth.json` and `config.toml` into the isolated home. For first-frame window parity, synthesize a minimal `.codex-global-state.json` containing stable validated geometry plus the official fresh-home timestamp and announcement sentinels; never copy broad source Global State.
 - Burn on a normal close. Do not claim “no traces on the machine” unless forensics say so (`absolutePrivacyClaimAllowed()` is false).
 - Default `incodex install` / `uninstall` to `/Applications/ChatGPT.app`. `--clone` and `--app` are exceptions.
 - Keep `--help` and a TTY menu. Non-TTY with no args prints help. Destructive commands print a plan; TTY asks once; non-TTY requires `--yes`.

@@ -47,6 +47,10 @@ const SETTINGS_FILES = ["auth.json", "config.toml"];
 exports.SETTINGS_FILES = SETTINGS_FILES;
 const GLOBAL_STATE_NAME = ".codex-global-state.json";
 const MAIN_WINDOW_BOUNDS_KEY = "electron-main-window-bounds";
+const DESKTOP_FIRST_SEEN_AT_MS_KEY = "desktop-first-seen-at-ms";
+const PERSISTED_ATOM_STATE_KEY = "electron-persisted-atom-state";
+const MIGRATION_ANNOUNCEMENT_KEY = "chatgpt-migration-announcement-completed-v1";
+const UPDATE_ANNOUNCEMENT_KEY = "chatgpt-update-downloaded-announcement-seen-v1";
 const DIR_MODE = 0o700;
 exports.DIR_MODE = DIR_MODE;
 const FILE_MODE = 0o600;
@@ -408,9 +412,9 @@ function validatedWindowBounds(value) {
         return null;
     if (typeof isMaximized !== "boolean")
         return null;
-    return { x, y, width, height, isMaximized };
+    return { x, y, width, height };
 }
-// 只投影 BrowserWindow 出生前需要的尺寸；线程、项目与 UI 状态不得跨 home。
+// 投影稳定几何，并补回官方因文件预建而跳过的空 Home 初始化哨兵。
 function seedWindowState(home, sourceHome) {
     const homeStat = assertNotSymlink(home, "session home");
     if (!homeStat?.isDirectory())
@@ -432,7 +436,15 @@ function seedWindowState(home, sourceHome) {
     const bounds = validatedWindowBounds(sourceState?.[MAIN_WINDOW_BOUNDS_KEY]);
     if (!bounds)
         return false;
-    writePrivateFile(path.join(home, GLOBAL_STATE_NAME), `${JSON.stringify({ [MAIN_WINDOW_BOUNDS_KEY]: bounds })}\n`, { exclusive: true });
+    const state = {
+        [DESKTOP_FIRST_SEEN_AT_MS_KEY]: Date.now(),
+        [MAIN_WINDOW_BOUNDS_KEY]: bounds,
+        [PERSISTED_ATOM_STATE_KEY]: {
+            [MIGRATION_ANNOUNCEMENT_KEY]: true,
+            [UPDATE_ANNOUNCEMENT_KEY]: true,
+        },
+    };
+    writePrivateFile(path.join(home, GLOBAL_STATE_NAME), `${JSON.stringify(state)}\n`, { exclusive: true });
     return true;
 }
 function processStatus(pid) {
