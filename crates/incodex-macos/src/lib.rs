@@ -630,6 +630,54 @@ mod quiescence_tests {
     }
 
     #[test]
+    fn live_window_selection_uses_the_largest_standard_window_for_the_official_pid() {
+        let windows = vec![
+            WindowCandidate {
+                pid: 41,
+                layer: 0,
+                x: 597,
+                y: 34,
+                width: 869,
+                height: 1073,
+            },
+            WindowCandidate {
+                pid: 41,
+                layer: 0,
+                x: 10,
+                y: 10,
+                width: 300,
+                height: 200,
+            },
+            WindowCandidate {
+                pid: 42,
+                layer: 0,
+                x: 0,
+                y: 38,
+                width: 1710,
+                height: 1073,
+            },
+            WindowCandidate {
+                pid: 41,
+                layer: 1,
+                x: 0,
+                y: 0,
+                width: 2000,
+                height: 1200,
+            },
+        ];
+
+        assert_eq!(
+            select_live_main_window_bounds(&[41], &windows),
+            Some(WindowBounds {
+                x: 597,
+                y: 34,
+                width: 869,
+                height: 1073,
+            })
+        );
+    }
+
+    #[test]
     fn official_quit_error_is_propagated() {
         let expected = PathBuf::from("/tmp/incodex/ChatGPT.app/Contents/MacOS/ChatGPT");
         let quiescence = AppQuiescence::from_executable(expected).unwrap();

@@ -130,6 +130,50 @@ fn window_state_seed_projects_stable_geometry_and_fresh_home_markers() {
 }
 
 #[test]
+fn window_state_seed_prefers_live_geometry_over_stale_persisted_bounds() {
+    let root = temp_root();
+    let user_root = root.join(".incodex");
+    let source = root.join("codex");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(
+        source.join(".codex-global-state.json"),
+        r#"{
+          "electron-main-window-bounds": {
+            "x": 0,
+            "y": 38,
+            "width": 1710,
+            "height": 1073,
+            "isMaximized": true
+          }
+        }"#,
+    )
+    .unwrap();
+    let session = create_session_home(&user_root, None, 0, "").unwrap();
+
+    let live = WindowGeometry {
+        x: 597,
+        y: 34,
+        width: 869,
+        height: 1073,
+    };
+    assert!(seed_window_state_with_geometry(&session.home, &source, Some(live)).unwrap());
+
+    let state: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(session.home.join(".codex-global-state.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        state.get("electron-main-window-bounds"),
+        Some(&serde_json::json!({
+            "x": 597,
+            "y": 34,
+            "width": 869,
+            "height": 1073
+        }))
+    );
+}
+
+#[test]
 fn window_state_seed_ignores_missing_or_malformed_bounds_without_touching_settings() {
     let root = temp_root();
     let user_root = root.join(".incodex");

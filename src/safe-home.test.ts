@@ -111,6 +111,43 @@ describe("symlink burn and copy", () => {
     expect(lstatSync(destination).mode & 0o777).toBe(FILE_MODE);
   });
 
+  test("seedWindowState prefers live geometry over stale persisted bounds", () => {
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const source = join(root, "codex");
+    mkdirSync(source);
+    writeFileSync(
+      join(source, ".codex-global-state.json"),
+      JSON.stringify({
+        "electron-main-window-bounds": {
+          x: 0,
+          y: 38,
+          width: 1710,
+          height: 1073,
+          isMaximized: true,
+        },
+      }),
+    );
+    const session = createSessionHome(userRoot);
+
+    expect(
+      seedWindowState(session.home, source, {
+        x: 597,
+        y: 34,
+        width: 869,
+        height: 1073,
+      }),
+    ).toBe(true);
+
+    const state = JSON.parse(readFileSync(join(session.home, ".codex-global-state.json"), "utf8"));
+    expect(state["electron-main-window-bounds"]).toEqual({
+      x: 597,
+      y: 34,
+      width: 869,
+      height: 1073,
+    });
+  });
+
   test("seedWindowState skips malformed bounds and preserves copied language settings", () => {
     const root = tempRoot();
     const userRoot = join(root, ".incodex");

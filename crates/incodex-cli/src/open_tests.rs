@@ -179,6 +179,48 @@ fn copy_failure_burns_the_session() {
 }
 
 #[test]
+fn open_preparation_seeds_live_bounds_instead_of_stale_disk_bounds() {
+    let root = temp_root();
+    let app = fake_app(&root);
+    let user = root.join("home");
+    let source = root.join("codex");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(
+        source.join(".codex-global-state.json"),
+        r#"{"electron-main-window-bounds":{"x":0,"y":38,"width":1710,"height":1073,"isMaximized":true}}"#,
+    )
+    .unwrap();
+
+    let plan = prepare_incognito_open_with_geometry(
+        &app,
+        &user,
+        &source,
+        1,
+        Some(incodex_core::session::WindowGeometry {
+            x: 597,
+            y: 34,
+            width: 869,
+            height: 1073,
+        }),
+    )
+    .unwrap();
+    let state: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(plan.home.join(".codex-global-state.json")).unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        state.get("electron-main-window-bounds"),
+        Some(&serde_json::json!({
+            "x": 597,
+            "y": 34,
+            "width": 869,
+            "height": 1073
+        }))
+    );
+}
+
+#[test]
 fn open_progress_distinguishes_launch_ready_and_waiting() {
     let (opening, opened, waiting) = open_progress_copy();
     assert_eq!(opening, "Opening incognito Codex window");
