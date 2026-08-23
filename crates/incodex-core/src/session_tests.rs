@@ -65,6 +65,101 @@ fn copy_settings_then_burn_removes_the_session() {
 }
 
 #[test]
+fn window_state_seed_projects_only_validated_main_bounds() {
+    let root = temp_root();
+    let user_root = root.join(".incodex");
+    let source = root.join("codex");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(
+        source.join(".codex-global-state.json"),
+        r#"{
+          "electron-main-window-bounds": {
+            "x": -40,
+            "y": 38,
+            "width": 1710,
+            "height": 1073,
+            "isMaximized": true
+          },
+          "thread-titles": {"secret-thread": "must-not-cross"},
+          "selected-project": "/private/project",
+          "electron-persisted-atom-state": {"secret": true}
+        }"#,
+    )
+    .unwrap();
+    let session = create_session_home(&user_root, None, 0, "").unwrap();
+
+    assert!(seed_window_state(&session.home, &source).unwrap());
+
+    let destination = session.home.join(".codex-global-state.json");
+    let state: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&destination).unwrap()).unwrap();
+    assert_eq!(
+        state,
+        serde_json::json!({
+            "electron-main-window-bounds": {
+                "x": -40,
+                "y": 38,
+                "width": 1710,
+                "height": 1073,
+                "isMaximized": true
+            }
+        })
+    );
+    assert_eq!(
+        fs::metadata(destination).unwrap().permissions().mode() & 0o777,
+        FILE_MODE
+    );
+}
+
+#[test]
+fn window_state_seed_ignores_missing_or_malformed_bounds_without_touching_settings() {
+    let root = temp_root();
+    let user_root = root.join(".incodex");
+    let source = root.join("codex");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("auth.json"), "{\"token\":\"source\"}\n").unwrap();
+    fs::write(source.join("config.toml"), "localeOverride = \"zh-CN\"\n").unwrap();
+    fs::write(
+        source.join(".codex-global-state.json"),
+        r#"{"electron-main-window-bounds":{"x":0,"y":0,"width":"wide","height":820,"isMaximized":false}}"#,
+    )
+    .unwrap();
+    let session = create_session_home(&user_root, None, 0, "").unwrap();
+
+    assert_eq!(copy_settings(&session.home, &source).unwrap(), 2);
+    assert!(!seed_window_state(&session.home, &source).unwrap());
+
+    assert!(!session.home.join(".codex-global-state.json").exists());
+    assert_eq!(
+        fs::read_to_string(session.home.join("config.toml")).unwrap(),
+        "localeOverride = \"zh-CN\"\n"
+    );
+    assert_eq!(
+        fs::read_to_string(session.home.join("auth.json")).unwrap(),
+        "{\"token\":\"source\"}\n"
+    );
+}
+
+#[test]
+fn window_state_seed_refuses_a_symlink_source() {
+    let root = temp_root();
+    let user_root = root.join(".incodex");
+    let source = root.join("codex");
+    fs::create_dir_all(&source).unwrap();
+    let outside = root.join("outside-global-state.json");
+    fs::write(
+        &outside,
+        r#"{"electron-main-window-bounds":{"x":0,"y":0,"width":900,"height":700,"isMaximized":false}}"#,
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(&outside, source.join(".codex-global-state.json")).unwrap();
+    let session = create_session_home(&user_root, None, 0, "").unwrap();
+
+    assert!(seed_window_state(&session.home, &source).is_err());
+    assert!(!session.home.join(".codex-global-state.json").exists());
+}
+
+#[test]
 fn session_lifecycle_does_not_create_or_mutate_identity_cache() {
     let root = temp_root();
     let user_root = root.join(".incodex");
