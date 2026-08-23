@@ -14,8 +14,12 @@ const LOCK_NAME = "lock";
 const READY_NAME = "ready";
 const PID_NAME = "incognito.pid";
 const SETTINGS_FILES = ["auth.json", "config.toml"];
+const GLOBAL_STATE_NAME = ".codex-global-state.json";
+const MAIN_WINDOW_BOUNDS_KEY = "electron-main-window-bounds";
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
+const MAIN_WINDOW_MIN_WIDTH = 480;
+const MAIN_WINDOW_MIN_HEIGHT = 600;
 const LOG_LIMIT = 1024 * 1024;
 const LOG_KEEP = 3;
 
@@ -358,7 +362,45 @@ function copySettings(home, sourceHome) {
     exclusiveCopyFile(src, path.join(home, name));
     copied += 1;
   }
+  seedWindowState(home, sourceHome);
   return copied;
+}
+
+function validatedWindowBounds(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { x, y, width, height, isMaximized } = value;
+  if (![x, y, width, height].every(Number.isSafeInteger)) return null;
+  if (x < -0x80000000 || x > 0x7fffffff || y < -0x80000000 || y > 0x7fffffff) return null;
+  if (width < MAIN_WINDOW_MIN_WIDTH || width > 0x7fffffff) return null;
+  if (height < MAIN_WINDOW_MIN_HEIGHT || height > 0x7fffffff) return null;
+  if (typeof isMaximized !== "boolean") return null;
+  return { x, y, width, height, isMaximized };
+}
+
+// 只投影 BrowserWindow 出生前需要的尺寸；线程、项目与 UI 状态不得跨 home。
+function seedWindowState(home, sourceHome) {
+  const homeStat = assertNotSymlink(home, "session home");
+  if (!homeStat?.isDirectory()) throw new Error(`[incodex] session home missing: ${home}`);
+  const source = path.join(sourceHome, GLOBAL_STATE_NAME);
+  const sourceStat = assertNotSymlink(source, "source global state");
+  if (!sourceStat) return false;
+  if (!sourceStat.isFile()) {
+    throw new Error(`[incodex] source global state is not a file: ${source}`);
+  }
+  let sourceState;
+  try {
+    sourceState = JSON.parse(fs.readFileSync(source, "utf8"));
+  } catch {
+    return false;
+  }
+  const bounds = validatedWindowBounds(sourceState?.[MAIN_WINDOW_BOUNDS_KEY]);
+  if (!bounds) return false;
+  writePrivateFile(
+    path.join(home, GLOBAL_STATE_NAME),
+    `${JSON.stringify({ [MAIN_WINDOW_BOUNDS_KEY]: bounds })}\n`,
+    { exclusive: true },
+  );
+  return true;
 }
 
 function processStatus(pid) {
@@ -571,6 +613,7 @@ export {
   readBurnProof,
   clearBurnProof,
   copySettings,
+  seedWindowState,
   resolveSourceHome,
   isManagedSessionHome,
   sweepOrphanSessions,

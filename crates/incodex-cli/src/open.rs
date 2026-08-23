@@ -17,7 +17,7 @@ use incodex_core::{format_kv, format_ok, format_step, format_warn};
 use crate::app_bundle::resolve_executable;
 use crate::cdp::{
     allocate_debug_port, debug_launch_args, inject_shared_ui_with_options_and_target,
-    start_lifecycle_monitor, start_primary_lifecycle_monitor, InjectionOptions, WindowBounds,
+    start_lifecycle_monitor, start_primary_lifecycle_monitor, InjectionOptions,
     OFFICIAL_NEW_CODEX_URL,
 };
 use crate::parse::ParsedCli;
@@ -36,7 +36,6 @@ pub struct OpenPlan {
     pub session_dev: u64,
     pub debug_port: u16,
     pub locale: Option<String>,
-    pub source_bounds: Option<WindowBounds>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -258,7 +257,6 @@ fn plan_from_session(bin: PathBuf, session: SessionHome, source_home: &Path) -> 
         bin,
         debug_port,
         locale: read_locale_override(source_home),
-        source_bounds: None,
     }
 }
 
@@ -369,29 +367,16 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
     let process_alive = Arc::new(AtomicBool::new(true));
     if plan.debug_port != 0 {
         let port = plan.debug_port;
-        let child_pid = child.id();
-        let source_bounds = plan.source_bounds;
         let injection_readiness = readiness.clone();
         let lifecycle_process_alive = process_alive.clone();
         let options = InjectionOptions {
             locale: plan.locale.clone(),
         };
         thread::spawn(move || {
-            let mut bounds_ready = source_bounds.is_none();
             let mut primary_target_id = None;
             let mut lifecycle_started = false;
             let mut last_injection_error = None;
             for attempt in 1u8..=40 {
-                if !bounds_ready {
-                    if let Some(bounds) = source_bounds {
-                        bounds_ready = incodex_macos::tile_process_front_window(
-                            child_pid,
-                            (bounds.x, bounds.y, bounds.width, bounds.height),
-                            22,
-                        )
-                        .is_ok();
-                    }
-                }
                 if !lifecycle_started
                     && start_primary_lifecycle_monitor(port, lifecycle_process_alive.clone())
                         .is_ok()
@@ -425,35 +410,25 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                         }
                     }
                 }
-                if bounds_ready {
-                    if let Some(target_id) = primary_target_id.take() {
-                        if !lifecycle_started {
-                            start_lifecycle_monitor(
-                                port,
-                                target_id,
-                                lifecycle_process_alive.clone(),
-                            );
-                        }
-                        publish_injection_status(
-                            &status_tx,
-                            &injection_readiness,
-                            InjectionStatus::Ready,
-                        );
-                        return;
+                if let Some(target_id) = primary_target_id.take() {
+                    if !lifecycle_started {
+                        start_lifecycle_monitor(port, target_id, lifecycle_process_alive.clone());
                     }
+                    publish_injection_status(
+                        &status_tx,
+                        &injection_readiness,
+                        InjectionStatus::Ready,
+                    );
+                    return;
                 }
                 thread::sleep(Duration::from_millis(400));
             }
-            let detail = if primary_target_id.is_none() {
-                format!(
-                    "UI injection failed: {}",
-                    last_injection_error
-                        .as_deref()
-                        .unwrap_or("unknown CDP error")
-                )
-            } else {
-                "the window could not inherit the main window bounds".to_string()
-            };
+            let detail = format!(
+                "UI injection failed: {}",
+                last_injection_error
+                    .as_deref()
+                    .unwrap_or("unknown CDP error")
+            );
             publish_injection_status(
                 &status_tx,
                 &injection_readiness,
@@ -711,16 +686,7 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
     }
     let root = user_root();
     let source = default_source_home();
-    let mut plan = prepare_incognito_open(&app_path, &root, &source, std::process::id() as i32)?;
-    if app_path == Path::new(incodex_core::DEFAULT_APP) {
-        plan.source_bounds =
-            incodex_macos::front_codex_window_bounds().map(|(x, y, width, height)| WindowBounds {
-                x,
-                y,
-                width,
-                height,
-            });
-    }
+    let plan = prepare_incognito_open(&app_path, &root, &source, std::process::id() as i32)?;
     let (opening, _, _) = open_progress_copy();
     println!("{}", format_step(opening, None));
     println!(

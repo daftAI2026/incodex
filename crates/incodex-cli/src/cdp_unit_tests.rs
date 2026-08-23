@@ -175,25 +175,6 @@ fn injected_ui_carries_locale_and_requires_button_and_banner_health() {
 }
 
 #[test]
-fn open_window_uses_chromiums_macos_tile_offset_and_keeps_source_size() {
-    let source = WindowBounds {
-        x: 100,
-        y: 80,
-        width: 1280,
-        height: 800,
-    };
-    assert_eq!(
-        chrome_tile_bounds(source),
-        WindowBounds {
-            x: 122,
-            y: 102,
-            width: 1280,
-            height: 800,
-        }
-    );
-}
-
-#[test]
 fn browser_close_uses_the_cdp_browser_command() {
     assert_eq!(
         browser_close_message(),

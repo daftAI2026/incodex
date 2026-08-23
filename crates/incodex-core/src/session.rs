@@ -13,6 +13,9 @@ const SETTINGS_FILES: &[&str] = &["auth.json", "config.toml"];
 const DIR_MODE: u32 = 0o700;
 const FILE_MODE: u32 = 0o600;
 
+mod window_state;
+pub use window_state::seed_window_state;
+
 #[derive(Debug, Clone)]
 pub struct SessionHome {
     pub session_id: String,
@@ -271,6 +274,7 @@ pub fn copy_settings(home: &Path, source_home: &Path) -> Result<usize, String> {
         exclusive_copy_file(&src, &home.join(name))?;
         copied += 1;
     }
+    seed_window_state(home, source_home)?;
     Ok(copied)
 }
 

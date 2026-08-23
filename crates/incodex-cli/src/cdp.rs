@@ -20,7 +20,6 @@ use tungstenite::{Message, WebSocket};
 const INJECT_JS: &str = include_str!("../../../dist/incodex-inject.js");
 const INJECT_PREFIX: &str = "window.__incodexIncognito=true;";
 const MAX_HTTP_RESPONSE_BYTES: usize = 1024 * 1024;
-const MACOS_WINDOW_TILE_PIXELS: i32 = 22;
 const CDP_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const LIFECYCLE_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const PRIMARY_TARGET_MISSING_POLLS: u8 = 2;
@@ -33,23 +32,6 @@ pub struct CdpTarget {
     pub r#type: String,
     pub url: String,
     pub ws: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WindowBounds {
-    pub x: i32,
-    pub y: i32,
-    pub width: i32,
-    pub height: i32,
-}
-
-pub fn chrome_tile_bounds(source: WindowBounds) -> WindowBounds {
-    WindowBounds {
-        x: source.x + MACOS_WINDOW_TILE_PIXELS,
-        y: source.y + MACOS_WINDOW_TILE_PIXELS,
-        width: source.width,
-        height: source.height,
-    }
 }
 
 #[derive(Debug, Clone, Default)]

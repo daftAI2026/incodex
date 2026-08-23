@@ -46,7 +46,7 @@ Appshot dies after asar/plist changes. Do not fake `2DC432GLL2` or proxy officia
 
 ### 7. Touching `~/.codex` sessions
 
-Copy only `auth.json` and `config.toml` into the isolated home. Never delete or rewrite official session DBs.
+Copy only `auth.json` and `config.toml` into the isolated home. The sole derived exception is a minimal isolated `.codex-global-state.json` containing validated `electron-main-window-bounds`; never copy another global-state key, and never delete or rewrite official session DBs.
 
 ### 8. `open` mutates the app
 
