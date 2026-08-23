@@ -46,11 +46,11 @@ Appshot dies after asar/plist changes. Do not fake `2DC432GLL2` or proxy officia
 
 ### 7. Touching `~/.codex` sessions
 
-Copy only `auth.json` and `config.toml` into the isolated home. The sole derived exception is a minimal isolated `.codex-global-state.json`: stable validated window geometry plus the official fresh-home bootstrap timestamp and two announcement-completion flags. Never copy source atom state or another global-state key, and never delete or rewrite official session DBs.
+Copy only `auth.json` and `config.toml` into the isolated home. The sole derived exception is a minimal isolated `.codex-global-state.json`: stable validated window geometry plus the official fresh-home bootstrap timestamp and two announcement-completion flags. When the official main window is live, its current geometry overrides stale persisted bounds; when it is absent or cannot be read, persisted geometry is the fallback. Never copy source atom state or another global-state key, and never delete or rewrite official session DBs.
 
 ### 8. `open` mutates the app
 
-`incodex open` spawns the official binary with `--user-data-dir`, `CODEX_HOME`, `CODEX_ELECTRON_USER_DATA_PATH`, an exact loopback `--remote-debugging-port`, matching `--remote-allow-origins`, and the AppKit argument that suppresses the native window-birth animation. It injects the shared `dist/incodex-inject.js` over CDP and verifies the button/banner. No asar, clone, or codesign.
+`incodex open` first discovers the exact official executable process and its visible layer-0 main window, excluding any same-binary process carrying an isolated `--user-data-dir`. It then spawns the official binary with `--user-data-dir`, `CODEX_HOME`, `CODEX_ELECTRON_USER_DATA_PATH`, an exact loopback `--remote-debugging-port`, matching `--remote-allow-origins`, and the AppKit argument that suppresses the native window-birth animation. It injects the shared `dist/incodex-inject.js` over CDP and verifies the button/banner. No asar, clone, or codesign.
 
 ### 9. Leftover session dirs
 

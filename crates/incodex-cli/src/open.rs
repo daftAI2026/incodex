@@ -7,10 +7,12 @@ use std::thread;
 use std::time::Duration;
 
 use incodex_core::paths::{home_dir, user_root};
+#[cfg(test)]
+use incodex_core::session::copy_settings;
 use incodex_core::session::{
-    burn_session_home, burn_session_home_with_owner, copy_settings, create_session_home_for_open,
-    handoff_session_owner, sweep_orphan_sessions, target_id_from_exec, BurnExpected, SessionHome,
-    SessionOwnerSnapshot,
+    burn_session_home, burn_session_home_with_owner, copy_settings_with_window_geometry,
+    create_session_home_for_open, handoff_session_owner, sweep_orphan_sessions,
+    target_id_from_exec, BurnExpected, SessionHome, SessionOwnerSnapshot, WindowGeometry,
 };
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
 
@@ -194,6 +196,37 @@ pub fn prepare_incognito_open(
     pid: i32,
 ) -> Result<OpenPlan, String> {
     let bin = resolve_executable(app_path)?;
+    let live_geometry = incodex_macos::live_main_window_bounds(&bin)
+        .ok()
+        .flatten()
+        .map(|bounds| WindowGeometry {
+            x: bounds.x,
+            y: bounds.y,
+            width: bounds.width,
+            height: bounds.height,
+        });
+    prepare_incognito_open_with_geometry_from_bin(bin, user_root, source_home, pid, live_geometry)
+}
+
+#[cfg(test)]
+fn prepare_incognito_open_with_geometry(
+    app_path: &Path,
+    user_root: &Path,
+    source_home: &Path,
+    pid: i32,
+    live_geometry: Option<WindowGeometry>,
+) -> Result<OpenPlan, String> {
+    let bin = resolve_executable(app_path)?;
+    prepare_incognito_open_with_geometry_from_bin(bin, user_root, source_home, pid, live_geometry)
+}
+
+fn prepare_incognito_open_with_geometry_from_bin(
+    bin: PathBuf,
+    user_root: &Path,
+    source_home: &Path,
+    pid: i32,
+    live_geometry: Option<WindowGeometry>,
+) -> Result<OpenPlan, String> {
     let target_id = target_id_from_exec(&bin.to_string_lossy());
     let _ = sweep_orphan_sessions(user_root, Some(&target_id));
     let session = create_session_home_for_open(
@@ -202,7 +235,9 @@ pub fn prepare_incognito_open(
         pid,
         &source_home.to_string_lossy(),
     )?;
-    if let Err(error) = copy_settings(&session.home, source_home) {
+    if let Err(error) =
+        copy_settings_with_window_geometry(&session.home, source_home, live_geometry)
+    {
         let _ = burn_session_home(
             &session.root,
             &BurnExpected {

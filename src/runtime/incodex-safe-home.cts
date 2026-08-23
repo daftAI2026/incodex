@@ -356,7 +356,7 @@ function clearBurnProof(userRoot, sessionId) {
   }
 }
 
-function copySettings(home, sourceHome) {
+function copySettings(home, sourceHome, liveBounds: any = null) {
   const homeStat = assertNotSymlink(home, "session home");
   if (!homeStat?.isDirectory()) throw new Error(`[incodex] session home missing: ${home}`);
   let copied = 0;
@@ -366,38 +366,41 @@ function copySettings(home, sourceHome) {
     exclusiveCopyFile(src, path.join(home, name));
     copied += 1;
   }
-  seedWindowState(home, sourceHome);
+  seedWindowState(home, sourceHome, liveBounds);
   return copied;
 }
 
-function validatedWindowBounds(value) {
+function validatedWindowBounds(value, requireMaximized = true) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const { x, y, width, height, isMaximized } = value;
   if (![x, y, width, height].every(Number.isSafeInteger)) return null;
   if (x < -0x80000000 || x > 0x7fffffff || y < -0x80000000 || y > 0x7fffffff) return null;
   if (width < MAIN_WINDOW_MIN_WIDTH || width > 0x7fffffff) return null;
   if (height < MAIN_WINDOW_MIN_HEIGHT || height > 0x7fffffff) return null;
-  if (typeof isMaximized !== "boolean") return null;
+  if (requireMaximized && typeof isMaximized !== "boolean") return null;
   return { x, y, width, height };
 }
 
 // 投影稳定几何，并补回官方因文件预建而跳过的空 Home 初始化哨兵。
-function seedWindowState(home, sourceHome) {
+function seedWindowState(home, sourceHome, liveBounds: any = null) {
   const homeStat = assertNotSymlink(home, "session home");
   if (!homeStat?.isDirectory()) throw new Error(`[incodex] session home missing: ${home}`);
-  const source = path.join(sourceHome, GLOBAL_STATE_NAME);
-  const sourceStat = assertNotSymlink(source, "source global state");
-  if (!sourceStat) return false;
-  if (!sourceStat.isFile()) {
-    throw new Error(`[incodex] source global state is not a file: ${source}`);
+  let bounds = validatedWindowBounds(liveBounds, false);
+  if (!bounds) {
+    const source = path.join(sourceHome, GLOBAL_STATE_NAME);
+    const sourceStat = assertNotSymlink(source, "source global state");
+    if (!sourceStat) return false;
+    if (!sourceStat.isFile()) {
+      throw new Error(`[incodex] source global state is not a file: ${source}`);
+    }
+    let sourceState;
+    try {
+      sourceState = JSON.parse(fs.readFileSync(source, "utf8"));
+    } catch {
+      return false;
+    }
+    bounds = validatedWindowBounds(sourceState?.[MAIN_WINDOW_BOUNDS_KEY]);
   }
-  let sourceState;
-  try {
-    sourceState = JSON.parse(fs.readFileSync(source, "utf8"));
-  } catch {
-    return false;
-  }
-  const bounds = validatedWindowBounds(sourceState?.[MAIN_WINDOW_BOUNDS_KEY]);
   if (!bounds) return false;
   const state = {
     [DESKTOP_FIRST_SEEN_AT_MS_KEY]: Date.now(),

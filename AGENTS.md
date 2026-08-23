@@ -18,7 +18,7 @@ Users launch the official Codex icon as usual. After `incodex install`, a hat-gl
 
 - Keep the official icon and bundle id. Do not invent a second app the user launches every day.
 - Isolate incognito data under `~/.incodex/sessions/`. Do not write or delete `~/.codex` session databases.
-- Copy only `auth.json` and `config.toml` into the isolated home. For first-frame window parity, synthesize a minimal `.codex-global-state.json` containing stable validated geometry plus the official fresh-home timestamp and announcement sentinels; never copy broad source Global State.
+- Copy only `auth.json` and `config.toml` into the isolated home. For first-frame window parity, synthesize a minimal `.codex-global-state.json` containing stable validated geometry plus the official fresh-home timestamp and announcement sentinels; prefer the live official main-window geometry when that window exists, and use persisted geometry only as the no-window fallback. Never copy broad source Global State.
 - Burn on a normal close. Do not claim “no traces on the machine” unless forensics say so (`absolutePrivacyClaimAllowed()` is false).
 - Default `incodex install` / `uninstall` to `/Applications/ChatGPT.app`. `--clone` and `--app` are exceptions.
 - Keep `--help` and a TTY menu. Non-TTY with no args prints help. Destructive commands print a plan; TTY asks once; non-TTY requires `--yes`.
@@ -50,7 +50,7 @@ If the answer is no or unclear, decline or narrow.
 - `AGENTS.md` is the contract. `CLAUDE.md` must stay a symlink to it.
 - The TypeScript product router, parser, mutation implementation, and old Runtime publishers have been retired. Rust owns the product CLI and native mutation path; legacy TypeScript v1 disk compatibility is limited to the Rust `legacy_typescript.rs` reader and `legacy_proof.rs` safety fixtures.
 - `crates/incodex-cli` is the native CLI: `parse.rs` owns its command language, while `install.rs` and `open.rs` dispatch dangerous operations through the lower crates.
-- `crates/incodex-transaction` owns native mutation locks, durable journals, rollback, and recovery. `crates/incodex-asar` and `crates/incodex-macos` own ASAR and macOS signing/plist mechanics.
+- `crates/incodex-transaction` owns native mutation locks, durable journals, rollback, and recovery. `crates/incodex-asar` owns ASAR mechanics; `crates/incodex-macos` owns signing/plist mechanics and read-only discovery of the official live main window.
 - `crates/incodex-core/src/session.rs` owns native `open` session create/burn; it must stay behaviorally aligned with `src/runtime/incodex-safe-home.cts` without sharing language-specific code.
 - `src/build-runtime.ts` builds committed `dist/` artifacts. Native `incodex-runtime-bundle` publishes them; the installer must not rebuild Runtime by spawning Bun.
 - `src/runtime/*.cts` is Electron-side source. `bun run build:runtime` emits portable `dist/*.cjs` with `__dirname`, never a machine-absolute path.
@@ -117,7 +117,7 @@ Public docs use the native `incodex` / `inc` binaries. Bun is retained for Elect
 - Pin GitHub Actions to a 40-character commit SHA with a version comment: `uses: owner/repo@<sha> # vX.Y.Z`. Do not leave floating `@v4` tags.
 - Official CLI packages are git tags `vX.Y.Z`. Follow `.claude/skills/release-flow/SKILL.md`, then `.claude/skills/release-notes/SKILL.md`. Do not `gh release create` and do not turn `generate_release_notes` back on.
 - Route Electron Runtime session create/burn through `src/runtime/incodex-safe-home.cts` and native CLI session create/burn through `crates/incodex-core/src/session.rs`. Keep their safety contract aligned; do not fork a third implementation.
-- `incodex open` must not patch asar, resign, or clone the official app. It spawns the official binary with isolated data paths, disables AppKit's native window-birth animation, opens a localhost `--remote-debugging-port`, then injects the shared `inject.js`.
+- `incodex open` must not patch asar, resign, or clone the official app. Before spawn it reads the visible layer-0 window owned by the exact official executable process, excluding any process launched with an isolated `--user-data-dir`; failure or absence falls back to persisted bounds. It then spawns the official binary with isolated data paths, disables AppKit's native window-birth animation, opens a localhost `--remote-debugging-port`, and injects the shared `inject.js`.
 - A second instance needs that Chromium user-data-dir pair. `CODEX_HOME` alone is swallowed by SingletonLock.
 
 ## Working Rules
