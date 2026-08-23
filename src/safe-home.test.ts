@@ -65,7 +65,7 @@ describe("symlink burn and copy", () => {
     expect(readFileSync(outside, "utf8")).toBe("secret");
   });
 
-  test("seedWindowState projects only validated main-window bounds", () => {
+  test("seedWindowState projects stable geometry and official fresh-home markers", () => {
     const root = tempRoot();
     const userRoot = join(root, ".incodex");
     const source = join(root, "codex");
@@ -87,16 +87,25 @@ describe("symlink burn and copy", () => {
     );
     const session = createSessionHome(userRoot);
 
+    const before = Date.now();
     expect(seedWindowState(session.home, source)).toBe(true);
+    const after = Date.now();
 
     const destination = join(session.home, ".codex-global-state.json");
-    expect(JSON.parse(readFileSync(destination, "utf8"))).toEqual({
+    const state = JSON.parse(readFileSync(destination, "utf8"));
+    expect(state["desktop-first-seen-at-ms"]).toBeGreaterThanOrEqual(before);
+    expect(state["desktop-first-seen-at-ms"]).toBeLessThanOrEqual(after);
+    delete state["desktop-first-seen-at-ms"];
+    expect(state).toEqual({
       "electron-main-window-bounds": {
         x: -40,
         y: 38,
         width: 1710,
         height: 1073,
-        isMaximized: true,
+      },
+      "electron-persisted-atom-state": {
+        "chatgpt-migration-announcement-completed-v1": true,
+        "chatgpt-update-downloaded-announcement-seen-v1": true,
       },
     });
     expect(lstatSync(destination).mode & 0o777).toBe(FILE_MODE);

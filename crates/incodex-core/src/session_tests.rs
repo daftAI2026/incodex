@@ -65,7 +65,7 @@ fn copy_settings_then_burn_removes_the_session() {
 }
 
 #[test]
-fn window_state_seed_projects_only_validated_main_bounds() {
+fn window_state_seed_projects_stable_geometry_and_fresh_home_markers() {
     let root = temp_root();
     let user_root = root.join(".incodex");
     let source = root.join("codex");
@@ -88,11 +88,26 @@ fn window_state_seed_projects_only_validated_main_bounds() {
     .unwrap();
     let session = create_session_home(&user_root, None, 0, "").unwrap();
 
+    let before = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
     assert!(seed_window_state(&session.home, &source).unwrap());
+    let after = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
 
     let destination = session.home.join(".codex-global-state.json");
-    let state: serde_json::Value =
+    let mut state: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&destination).unwrap()).unwrap();
+    let first_seen = state
+        .as_object_mut()
+        .unwrap()
+        .remove("desktop-first-seen-at-ms")
+        .and_then(|value| value.as_u64())
+        .expect("seeded state must preserve official fresh-home initialization");
+    assert!((before..=after).contains(&first_seen));
     assert_eq!(
         state,
         serde_json::json!({
@@ -100,8 +115,11 @@ fn window_state_seed_projects_only_validated_main_bounds() {
                 "x": -40,
                 "y": 38,
                 "width": 1710,
-                "height": 1073,
-                "isMaximized": true
+                "height": 1073
+            },
+            "electron-persisted-atom-state": {
+                "chatgpt-migration-announcement-completed-v1": true,
+                "chatgpt-update-downloaded-announcement-seen-v1": true
             }
         })
     );
