@@ -49,11 +49,20 @@ pub fn allocate_debug_port() -> Result<u16, String> {
 }
 
 pub fn debug_launch_args(user_data_dir: &str, debug_port: u16) -> Vec<String> {
-    vec![
-        format!("--user-data-dir={user_data_dir}"),
+    let mut args = launch_arg_prefix(user_data_dir);
+    args.extend([
         format!("--remote-debugging-port={debug_port}"),
         format!("--remote-allow-origins=http://127.0.0.1:{debug_port}"),
         OFFICIAL_NEW_CODEX_URL.to_string(),
+    ]);
+    args
+}
+
+pub(crate) fn launch_arg_prefix(user_data_dir: &str) -> Vec<String> {
+    vec![
+        "-NSAutomaticWindowAnimationsEnabled".to_string(),
+        "false".to_string(),
+        format!("--user-data-dir={user_data_dir}"),
     ]
 }
 

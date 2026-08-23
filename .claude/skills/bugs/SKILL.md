@@ -50,7 +50,7 @@ Copy only `auth.json` and `config.toml` into the isolated home. The sole derived
 
 ### 8. `open` mutates the app
 
-`incodex open` spawns the official binary with `--user-data-dir`, `CODEX_HOME`, `CODEX_ELECTRON_USER_DATA_PATH`, an exact loopback `--remote-debugging-port`, and matching `--remote-allow-origins`. It injects the shared `dist/incodex-inject.js` over CDP and verifies the button/banner. No asar, clone, or codesign.
+`incodex open` spawns the official binary with `--user-data-dir`, `CODEX_HOME`, `CODEX_ELECTRON_USER_DATA_PATH`, an exact loopback `--remote-debugging-port`, matching `--remote-allow-origins`, and the AppKit argument that suppresses the native window-birth animation. It injects the shared `dist/incodex-inject.js` over CDP and verifies the button/banner. No asar, clone, or codesign.
 
 ### 9. Leftover session dirs
 

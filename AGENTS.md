@@ -117,7 +117,7 @@ Public docs use the native `incodex` / `inc` binaries. Bun is retained for Elect
 - Pin GitHub Actions to a 40-character commit SHA with a version comment: `uses: owner/repo@<sha> # vX.Y.Z`. Do not leave floating `@v4` tags.
 - Official CLI packages are git tags `vX.Y.Z`. Follow `.claude/skills/release-flow/SKILL.md`, then `.claude/skills/release-notes/SKILL.md`. Do not `gh release create` and do not turn `generate_release_notes` back on.
 - Route Electron Runtime session create/burn through `src/runtime/incodex-safe-home.cts` and native CLI session create/burn through `crates/incodex-core/src/session.rs`. Keep their safety contract aligned; do not fork a third implementation.
-- `incodex open` must not patch asar, resign, or clone the official app. It spawns the official binary with `--user-data-dir`, `CODEX_HOME`, `CODEX_ELECTRON_USER_DATA_PATH`, and a localhost `--remote-debugging-port`, then injects the shared `inject.js`.
+- `incodex open` must not patch asar, resign, or clone the official app. It spawns the official binary with isolated data paths, disables AppKit's native window-birth animation, opens a localhost `--remote-debugging-port`, then injects the shared `inject.js`.
 - A second instance needs that Chromium user-data-dir pair. `CODEX_HOME` alone is swallowed by SingletonLock.
 
 ## Working Rules
