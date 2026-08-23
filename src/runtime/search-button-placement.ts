@@ -23,6 +23,8 @@ export function searchButtonPlacement(search: HTMLElement): SearchButtonPlacemen
   return { parent, before: search };
 }
 
-export function searchTooltipOpen(_search: HTMLElement): boolean {
-  return false;
+export function searchTooltipOpen(search: HTMLElement): boolean {
+  const parent = search.parentElement;
+  if (!parent || !isSearchTooltipTrigger(parent)) return false;
+  return parent.getAttribute("data-state") !== "closed" || parent.hasAttribute("aria-describedby");
 }

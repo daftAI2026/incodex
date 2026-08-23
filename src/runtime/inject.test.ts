@@ -86,4 +86,10 @@ describe("incodex tooltip lifecycle", () => {
       /function onKeydown\(event: KeyboardEvent\): void \{[\s\S]*event\.key === "Escape"[\s\S]*dismissActiveTooltip\(\);/,
     );
   });
+
+  test("does not open while the official Search tooltip remains visible", () => {
+    expect(inject).toMatch(
+      /function injectedTooltipCanShow[\s\S]*!\(search && searchTooltipOpen\(search\)\)/,
+    );
+  });
 });

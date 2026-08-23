@@ -3,7 +3,7 @@ import { isSearchLabel } from "./compatibility/search-labels";
 import { type CopyKey, translate, resolveLocale as matchLocale } from "./incognito-copy";
 import { iconFor, type IncognitoButtonIcon } from "./incognito-icon";
 import { deriveUiProbe } from "./incodex-ui-probe";
-import { searchButtonPlacement } from "./search-button-placement";
+import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement";
 import { createTooltipLifecycle, type TooltipLifecycle } from "./tooltip-lifecycle";
 
 const STYLE_ID = "incodex-privacy-style";
@@ -241,6 +241,15 @@ function buttonStillBesideSearch(): boolean {
   return Boolean(btn?.isConnected && search && isParkedLeftOfSearch(btn, search));
 }
 
+function injectedTooltipCanShow(btn: HTMLElement): boolean {
+  const search = findSearchButton();
+  return (
+    btn.isConnected &&
+    (btn.getAttribute("data-incodex-hovered") === "true" || document.activeElement === btn) &&
+    !(search && searchTooltipOpen(search))
+  );
+}
+
 function landingStillMounted(): boolean {
   const landing = document.querySelector(`[${LANDING_ATTR}]`);
   if (!isIncognitoWindow() || bannerDismissed()) return !landing;
@@ -268,9 +277,7 @@ function buildButton(search: HTMLElement): HTMLElement {
     delayMs: TOOLTIP_FALLBACK_DELAY_MS,
     schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
     cancel: (id) => window.clearTimeout(id),
-    canShow: () =>
-      btn.isConnected &&
-      (btn.getAttribute("data-incodex-hovered") === "true" || document.activeElement === btn),
+    canShow: () => injectedTooltipCanShow(btn),
     show: () => showTooltip(btn),
     hide: hideTooltip,
   });

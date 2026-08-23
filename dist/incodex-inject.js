@@ -919,6 +919,12 @@ function searchButtonPlacement(search) {
   }
   return { parent, before: search };
 }
+function searchTooltipOpen(search) {
+  const parent = search.parentElement;
+  if (!parent || !isSearchTooltipTrigger(parent))
+    return false;
+  return parent.getAttribute("data-state") !== "closed" || parent.hasAttribute("aria-describedby");
+}
 
 // src/runtime/tooltip-lifecycle.ts
 function createTooltipLifecycle(deps) {
@@ -1185,6 +1191,10 @@ function buttonStillBesideSearch() {
   const search = findSearchButton();
   return Boolean(btn?.isConnected && search && isParkedLeftOfSearch(btn, search));
 }
+function injectedTooltipCanShow(btn) {
+  const search = findSearchButton();
+  return btn.isConnected && (btn.getAttribute("data-incodex-hovered") === "true" || document.activeElement === btn) && !(search && searchTooltipOpen(search));
+}
 function landingStillMounted() {
   const landing = document.querySelector(`[${LANDING_ATTR}]`);
   if (!isIncognitoWindow() || bannerDismissed())
@@ -1214,7 +1224,7 @@ function buildButton(search) {
     delayMs: TOOLTIP_FALLBACK_DELAY_MS,
     schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
     cancel: (id) => window.clearTimeout(id),
-    canShow: () => btn.isConnected && (btn.getAttribute("data-incodex-hovered") === "true" || document.activeElement === btn),
+    canShow: () => injectedTooltipCanShow(btn),
     show: () => showTooltip(btn),
     hide: hideTooltip
   });
