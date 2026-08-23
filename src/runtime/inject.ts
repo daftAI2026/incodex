@@ -3,6 +3,7 @@ import { isSearchLabel } from "./compatibility/search-labels";
 import { type CopyKey, translate, resolveLocale as matchLocale } from "./incognito-copy";
 import { iconFor, type IncognitoButtonIcon } from "./incognito-icon";
 import { deriveUiProbe } from "./incodex-ui-probe";
+import { createOfficialTooltipTimingBridge } from "./official-tooltip-provider";
 import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement";
 import { createTooltipLifecycle, type TooltipLifecycle } from "./tooltip-lifecycle";
 
@@ -273,11 +274,16 @@ function buildButton(search: HTMLElement): HTMLElement {
   btn.className = search.className;
   const svg = createButtonIcon(ICON_SVG, "hat-glasses", search.querySelector("svg"));
   if (svg) btn.append(svg);
-  const tooltipLifecycle = createTooltipLifecycle({
+  const providerTiming = createOfficialTooltipTimingBridge(findSearchButton);
+  let tooltipLifecycle: TooltipLifecycle;
+  tooltipLifecycle = createTooltipLifecycle({
     delayMs: TOOLTIP_FALLBACK_DELAY_MS,
+    resolveDelay: providerTiming.resolveDelay,
     schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
     cancel: (id) => window.clearTimeout(id),
     canShow: () => injectedTooltipCanShow(btn),
+    onOpen: providerTiming.activate,
+    onClose: providerTiming.deactivate,
     show: () => showTooltip(btn),
     hide: hideTooltip,
   });

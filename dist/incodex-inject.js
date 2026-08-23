@@ -904,6 +904,80 @@ function deriveUiProbe(input) {
   };
 }
 
+// src/runtime/official-tooltip-provider.ts
+function createOfficialTooltipTimingBridge(currentTrigger) {
+  let activeProvider = null;
+  const currentProvider = () => {
+    const trigger = currentTrigger();
+    return trigger ? findOfficialTooltipProvider(trigger) : null;
+  };
+  const deactivate = () => {
+    const provider = activeProvider;
+    activeProvider = null;
+    if (!provider)
+      return;
+    try {
+      provider.deactivateTooltip(PROVIDER_ID);
+    } catch {}
+  };
+  return {
+    resolveDelay(fallbackMs) {
+      try {
+        const delayMs = currentProvider()?.getOpenDelay(PROVIDER_KEY, fallbackMs) ?? fallbackMs;
+        return Number.isFinite(delayMs) && delayMs >= 0 ? delayMs : fallbackMs;
+      } catch {
+        return fallbackMs;
+      }
+    },
+    activate(close) {
+      deactivate();
+      const provider = currentProvider();
+      if (!provider)
+        return;
+      try {
+        provider.activateTooltip(PROVIDER_ID, PROVIDER_KEY, PROVIDER_VARIANT, close);
+        activeProvider = provider;
+      } catch {
+        try {
+          provider.deactivateTooltip(PROVIDER_ID);
+        } catch {}
+      }
+    },
+    deactivate
+  };
+}
+var REACT_FIBER_PREFIX = "__reactFiber$";
+var MAX_FIBER_DEPTH = 64;
+var MAX_CONTEXTS_PER_FIBER = 64;
+var PROVIDER_ID = "incodex-privacy-toggle";
+var PROVIDER_KEY = "default";
+var PROVIDER_VARIANT = "tooltip";
+function isOfficialTooltipProvider(value) {
+  if (typeof value !== "object" || value === null)
+    return false;
+  const candidate = value;
+  return typeof candidate.getOpenDelay === "function" && typeof candidate.activateTooltip === "function" && typeof candidate.clearHoverHandoffLock === "function" && typeof candidate.deactivateTooltip === "function" && typeof candidate.isHoverOpenBlocked === "function" && typeof candidate.registerOpenTooltip === "function" && typeof candidate.registerTooltipDismissHandler === "function" && typeof candidate.setHoverHandoffLockTooltipId === "function";
+}
+function reactFiber(trigger) {
+  const key = Object.keys(trigger).find((name) => name.startsWith(REACT_FIBER_PREFIX));
+  if (!key)
+    return null;
+  return trigger[key] ?? null;
+}
+function findOfficialTooltipProvider(trigger) {
+  let fiber = reactFiber(trigger);
+  for (let fiberDepth = 0;fiber && fiberDepth < MAX_FIBER_DEPTH; fiberDepth += 1) {
+    let context = fiber.dependencies?.firstContext;
+    for (let contextIndex = 0;context && contextIndex < MAX_CONTEXTS_PER_FIBER; contextIndex += 1) {
+      if (isOfficialTooltipProvider(context.memoizedValue))
+        return context.memoizedValue;
+      context = context.next;
+    }
+    fiber = fiber.return ?? null;
+  }
+  return null;
+}
+
 // src/runtime/search-button-placement.ts
 var TOOLTIP_TRIGGER_STATES = new Set(["closed", "delayed-open", "instant-open"]);
 function isSearchTooltipTrigger(element) {
@@ -930,6 +1004,7 @@ function searchTooltipOpen(search) {
 function createTooltipLifecycle(deps) {
   let hovering = false;
   let focused = false;
+  let open = false;
   let pending = null;
   const cancelPending = () => {
     if (pending === null)
@@ -939,6 +1014,10 @@ function createTooltipLifecycle(deps) {
   };
   const hide = () => {
     cancelPending();
+    if (open) {
+      open = false;
+      deps.onClose?.();
+    }
     deps.hide();
   };
   const scheduleShow = () => {
@@ -947,8 +1026,12 @@ function createTooltipLifecycle(deps) {
       pending = null;
       if (!(hovering || focused) || !deps.canShow())
         return;
+      open = true;
+      deps.onOpen?.(hide);
+      if (!open)
+        return;
       deps.show();
-    }, deps.delayMs);
+    }, deps.resolveDelay?.(deps.delayMs) ?? deps.delayMs);
   };
   return {
     pointerEnter() {
@@ -1220,11 +1303,16 @@ function buildButton(search) {
   const svg = createButtonIcon(ICON_SVG, "hat-glasses", search.querySelector("svg"));
   if (svg)
     btn.append(svg);
-  const tooltipLifecycle = createTooltipLifecycle({
+  const providerTiming = createOfficialTooltipTimingBridge(findSearchButton);
+  let tooltipLifecycle;
+  tooltipLifecycle = createTooltipLifecycle({
     delayMs: TOOLTIP_FALLBACK_DELAY_MS,
+    resolveDelay: providerTiming.resolveDelay,
     schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
     cancel: (id) => window.clearTimeout(id),
     canShow: () => injectedTooltipCanShow(btn),
+    onOpen: providerTiming.activate,
+    onClose: providerTiming.deactivate,
     show: () => showTooltip(btn),
     hide: hideTooltip
   });

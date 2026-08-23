@@ -9,9 +9,12 @@ export type TooltipLifecycle = {
 
 type TooltipLifecycleDeps = {
   delayMs: number;
+  resolveDelay?: (fallbackMs: number) => number;
   schedule: (callback: () => void, delayMs: number) => number;
   cancel: (id: number) => void;
   canShow: () => boolean;
+  onOpen?: (close: () => void) => void;
+  onClose?: () => void;
   show: () => void;
   hide: () => void;
 };
@@ -19,6 +22,7 @@ type TooltipLifecycleDeps = {
 export function createTooltipLifecycle(deps: TooltipLifecycleDeps): TooltipLifecycle {
   let hovering = false;
   let focused = false;
+  let open = false;
   let pending: number | null = null;
 
   const cancelPending = (): void => {
@@ -29,6 +33,10 @@ export function createTooltipLifecycle(deps: TooltipLifecycleDeps): TooltipLifec
 
   const hide = (): void => {
     cancelPending();
+    if (open) {
+      open = false;
+      deps.onClose?.();
+    }
     deps.hide();
   };
 
@@ -37,8 +45,11 @@ export function createTooltipLifecycle(deps: TooltipLifecycleDeps): TooltipLifec
     pending = deps.schedule(() => {
       pending = null;
       if (!(hovering || focused) || !deps.canShow()) return;
+      open = true;
+      deps.onOpen?.(hide);
+      if (!open) return;
       deps.show();
-    }, deps.delayMs);
+    }, deps.resolveDelay?.(deps.delayMs) ?? deps.delayMs);
   };
 
   return {

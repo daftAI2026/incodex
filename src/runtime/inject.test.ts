@@ -59,8 +59,15 @@ describe("incognito button exit affordance", () => {
 });
 
 describe("incodex tooltip lifecycle", () => {
-  test("keeps a stable fallback delay without reading private provider state", () => {
+  test("keeps a stable delay when the official provider cannot be discovered", () => {
     expect(inject).toContain("const TOOLTIP_FALLBACK_DELAY_MS = 700");
+  });
+
+  test("joins the discovered provider timing group without making it mandatory", () => {
+    expect(inject).toContain("createOfficialTooltipTimingBridge(findSearchButton)");
+    expect(inject).toContain("resolveDelay: providerTiming.resolveDelay");
+    expect(inject).toContain("onOpen: providerTiming.activate");
+    expect(inject).toContain("onClose: providerTiming.deactivate");
   });
 
   test("listens to the app-wide dismissal signal without dispatching the private event", () => {
