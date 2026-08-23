@@ -6,15 +6,24 @@ type ScheduledTask = {
   cancelled: boolean;
 };
 
-function createHarness(canShow = true) {
+function createHarness(
+  canShow = true,
+  timing: {
+    resolveDelay?: (fallbackMs: number) => number;
+    onOpen?: (close: () => void) => void;
+    onClose?: () => void;
+  } = {},
+) {
   const tasks = new Map<number, ScheduledTask>();
   const events: string[] = [];
+  const delays: number[] = [];
   let nextId = 1;
   const lifecycle = createTooltipLifecycle({
     delayMs: 700,
-    schedule(callback) {
+    schedule(callback, delayMs) {
       const id = nextId++;
       tasks.set(id, { callback, cancelled: false });
+      delays.push(delayMs);
       return id;
     },
     cancel(id) {
@@ -24,11 +33,13 @@ function createHarness(canShow = true) {
     canShow: () => canShow,
     show: () => events.push("show"),
     hide: () => events.push("hide"),
+    ...timing,
   });
 
   return {
     lifecycle,
     events,
+    delays,
     runScheduled() {
       for (const task of tasks.values()) {
         if (!task.cancelled) task.callback();
@@ -97,5 +108,25 @@ describe("tooltip lifecycle", () => {
     harness.runScheduled();
 
     expect(harness.events).toEqual(["hide"]);
+  });
+
+  test("共享官方 provider 的快速切换延迟并登记打开与关闭", () => {
+    const providerEvents: string[] = [];
+    const harness = createHarness(true, {
+      resolveDelay: () => 0,
+      onOpen: () => providerEvents.push("activate"),
+      onClose: () => providerEvents.push("deactivate"),
+    });
+
+    harness.lifecycle.pointerEnter();
+    expect(harness.delays).toEqual([0]);
+
+    harness.runScheduled();
+    expect(harness.events).toEqual(["show"]);
+    expect(providerEvents).toEqual(["activate"]);
+
+    harness.lifecycle.pointerLeave();
+    expect(harness.events).toEqual(["show", "hide"]);
+    expect(providerEvents).toEqual(["activate", "deactivate"]);
   });
 });
