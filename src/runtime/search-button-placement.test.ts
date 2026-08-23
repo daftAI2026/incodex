@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { searchButtonPlacement } from "./search-button-placement";
+import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement";
 
 type FakeNode = {
   tagName: string;
@@ -67,5 +67,29 @@ describe("Search button placement", () => {
     const placement = searchButtonPlacement(search as unknown as HTMLElement);
     expect(placement?.parent).toBe(unrelated as unknown as HTMLElement);
     expect(placement?.before).toBe(search as unknown as HTMLElement);
+  });
+
+  test("reports an official Search tooltip that remains open through keyboard focus", () => {
+    const header = node();
+    const tooltipTrigger = node({
+      tagName: "SPAN",
+      parent: header,
+      attributes: { "data-state": "instant-open", "aria-describedby": "_r_tip_" },
+    });
+    const search = node({ tagName: "BUTTON", parent: tooltipTrigger });
+
+    expect(searchTooltipOpen(search as unknown as HTMLElement)).toBe(true);
+  });
+
+  test("does not suppress the injected tooltip after Search closes", () => {
+    const header = node();
+    const tooltipTrigger = node({
+      tagName: "SPAN",
+      parent: header,
+      attributes: { "data-state": "closed" },
+    });
+    const search = node({ tagName: "BUTTON", parent: tooltipTrigger });
+
+    expect(searchTooltipOpen(search as unknown as HTMLElement)).toBe(false);
   });
 });

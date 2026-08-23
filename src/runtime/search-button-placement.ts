@@ -22,3 +22,7 @@ export function searchButtonPlacement(search: HTMLElement): SearchButtonPlacemen
   }
   return { parent, before: search };
 }
+
+export function searchTooltipOpen(_search: HTMLElement): boolean {
+  return false;
+}
