@@ -64,10 +64,10 @@ describe("incodex tooltip lifecycle", () => {
   });
 
   test("joins the discovered provider timing group without making it mandatory", () => {
-    expect(inject).toContain("findOfficialTooltipProvider(search)");
-    expect(inject).toContain('getOpenDelay("default", fallbackMs)');
-    expect(inject).toContain('activateTooltip(TOOLTIP_PROVIDER_ID, "default", "tooltip"');
-    expect(inject).toContain("deactivateTooltip(TOOLTIP_PROVIDER_ID)");
+    expect(inject).toContain("createOfficialTooltipTimingBridge(findSearchButton)");
+    expect(inject).toContain("resolveDelay: providerTiming.resolveDelay");
+    expect(inject).toContain("onOpen: providerTiming.activate");
+    expect(inject).toContain("onClose: providerTiming.deactivate");
   });
 
   test("listens to the app-wide dismissal signal without dispatching the private event", () => {

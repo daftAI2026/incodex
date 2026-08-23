@@ -905,14 +905,58 @@ function deriveUiProbe(input) {
 }
 
 // src/runtime/official-tooltip-provider.ts
+function createOfficialTooltipTimingBridge(currentTrigger) {
+  let activeProvider = null;
+  const currentProvider = () => {
+    const trigger = currentTrigger();
+    return trigger ? findOfficialTooltipProvider(trigger) : null;
+  };
+  const deactivate = () => {
+    const provider = activeProvider;
+    activeProvider = null;
+    if (!provider)
+      return;
+    try {
+      provider.deactivateTooltip(PROVIDER_ID);
+    } catch {}
+  };
+  return {
+    resolveDelay(fallbackMs) {
+      try {
+        const delayMs = currentProvider()?.getOpenDelay(PROVIDER_KEY, fallbackMs) ?? fallbackMs;
+        return Number.isFinite(delayMs) && delayMs >= 0 ? delayMs : fallbackMs;
+      } catch {
+        return fallbackMs;
+      }
+    },
+    activate(close) {
+      deactivate();
+      const provider = currentProvider();
+      if (!provider)
+        return;
+      try {
+        provider.activateTooltip(PROVIDER_ID, PROVIDER_KEY, PROVIDER_VARIANT, close);
+        activeProvider = provider;
+      } catch {
+        try {
+          provider.deactivateTooltip(PROVIDER_ID);
+        } catch {}
+      }
+    },
+    deactivate
+  };
+}
 var REACT_FIBER_PREFIX = "__reactFiber$";
 var MAX_FIBER_DEPTH = 64;
 var MAX_CONTEXTS_PER_FIBER = 64;
+var PROVIDER_ID = "incodex-privacy-toggle";
+var PROVIDER_KEY = "default";
+var PROVIDER_VARIANT = "tooltip";
 function isOfficialTooltipProvider(value) {
   if (typeof value !== "object" || value === null)
     return false;
   const candidate = value;
-  return typeof candidate.getOpenDelay === "function" && typeof candidate.activateTooltip === "function" && typeof candidate.deactivateTooltip === "function";
+  return typeof candidate.getOpenDelay === "function" && typeof candidate.activateTooltip === "function" && typeof candidate.clearHoverHandoffLock === "function" && typeof candidate.deactivateTooltip === "function" && typeof candidate.isHoverOpenBlocked === "function" && typeof candidate.registerOpenTooltip === "function" && typeof candidate.registerTooltipDismissHandler === "function" && typeof candidate.setHoverHandoffLockTooltipId === "function";
 }
 function reactFiber(trigger) {
   const key = Object.keys(trigger).find((name) => name.startsWith(REACT_FIBER_PREFIX));
@@ -1024,7 +1068,6 @@ var ERROR_ATTR = "data-incodex-launch-error";
 var SHORTCUT_LABEL = "⇧⌘N";
 var TOOLTIP_FALLBACK_DELAY_MS = 700;
 var TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
-var TOOLTIP_PROVIDER_ID = "incodex-privacy-toggle";
 var activeTooltipLifecycle = null;
 function dismissActiveTooltip() {
   activeTooltipLifecycle?.dismiss();
@@ -1260,31 +1303,16 @@ function buildButton(search) {
   const svg = createButtonIcon(ICON_SVG, "hat-glasses", search.querySelector("svg"));
   if (svg)
     btn.append(svg);
-  const provider = findOfficialTooltipProvider(search);
+  const providerTiming = createOfficialTooltipTimingBridge(findSearchButton);
   let tooltipLifecycle;
   tooltipLifecycle = createTooltipLifecycle({
     delayMs: TOOLTIP_FALLBACK_DELAY_MS,
-    resolveDelay: (fallbackMs) => {
-      try {
-        const delayMs = provider?.getOpenDelay("default", fallbackMs) ?? fallbackMs;
-        return Number.isFinite(delayMs) && delayMs >= 0 ? delayMs : fallbackMs;
-      } catch {
-        return fallbackMs;
-      }
-    },
+    resolveDelay: providerTiming.resolveDelay,
     schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
     cancel: (id) => window.clearTimeout(id),
     canShow: () => injectedTooltipCanShow(btn),
-    onOpen: (close) => {
-      try {
-        provider?.activateTooltip(TOOLTIP_PROVIDER_ID, "default", "tooltip", close);
-      } catch {}
-    },
-    onClose: () => {
-      try {
-        provider?.deactivateTooltip(TOOLTIP_PROVIDER_ID);
-      } catch {}
-    },
+    onOpen: providerTiming.activate,
+    onClose: providerTiming.deactivate,
     show: () => showTooltip(btn),
     hide: hideTooltip
   });

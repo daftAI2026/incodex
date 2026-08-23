@@ -3,7 +3,7 @@ import { isSearchLabel } from "./compatibility/search-labels";
 import { type CopyKey, translate, resolveLocale as matchLocale } from "./incognito-copy";
 import { iconFor, type IncognitoButtonIcon } from "./incognito-icon";
 import { deriveUiProbe } from "./incodex-ui-probe";
-import { findOfficialTooltipProvider } from "./official-tooltip-provider";
+import { createOfficialTooltipTimingBridge } from "./official-tooltip-provider";
 import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement";
 import { createTooltipLifecycle, type TooltipLifecycle } from "./tooltip-lifecycle";
 
@@ -15,7 +15,6 @@ const ERROR_ATTR = "data-incodex-launch-error";
 const SHORTCUT_LABEL = "⇧⌘N";
 const TOOLTIP_FALLBACK_DELAY_MS = 700;
 const TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
-const TOOLTIP_PROVIDER_ID = "incodex-privacy-toggle";
 
 let activeTooltipLifecycle: TooltipLifecycle | null = null;
 
@@ -275,35 +274,16 @@ function buildButton(search: HTMLElement): HTMLElement {
   btn.className = search.className;
   const svg = createButtonIcon(ICON_SVG, "hat-glasses", search.querySelector("svg"));
   if (svg) btn.append(svg);
-  const provider = findOfficialTooltipProvider(search);
+  const providerTiming = createOfficialTooltipTimingBridge(findSearchButton);
   let tooltipLifecycle: TooltipLifecycle;
   tooltipLifecycle = createTooltipLifecycle({
     delayMs: TOOLTIP_FALLBACK_DELAY_MS,
-    resolveDelay: (fallbackMs) => {
-      try {
-        const delayMs = provider?.getOpenDelay("default", fallbackMs) ?? fallbackMs;
-        return Number.isFinite(delayMs) && delayMs >= 0 ? delayMs : fallbackMs;
-      } catch {
-        return fallbackMs;
-      }
-    },
+    resolveDelay: providerTiming.resolveDelay,
     schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
     cancel: (id) => window.clearTimeout(id),
     canShow: () => injectedTooltipCanShow(btn),
-    onOpen: (close) => {
-      try {
-        provider?.activateTooltip(TOOLTIP_PROVIDER_ID, "default", "tooltip", close);
-      } catch {
-        /* 官方内部结构变化时，独立 Tooltip 仍可继续工作。 */
-      }
-    },
-    onClose: () => {
-      try {
-        provider?.deactivateTooltip(TOOLTIP_PROVIDER_ID);
-      } catch {
-        /* 官方内部结构变化时，独立 Tooltip 仍可继续工作。 */
-      }
-    },
+    onOpen: providerTiming.activate,
+    onClose: providerTiming.deactivate,
     show: () => showTooltip(btn),
     hide: hideTooltip,
   });

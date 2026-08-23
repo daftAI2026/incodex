@@ -21,12 +21,51 @@ export type OfficialTooltipTimingBridge = {
 };
 
 export function createOfficialTooltipTimingBridge(
-  _currentTrigger: () => HTMLElement | null,
+  currentTrigger: () => HTMLElement | null,
 ): OfficialTooltipTimingBridge {
+  let activeProvider: OfficialTooltipProvider | null = null;
+
+  const currentProvider = (): OfficialTooltipProvider | null => {
+    const trigger = currentTrigger();
+    return trigger ? findOfficialTooltipProvider(trigger) : null;
+  };
+
+  const deactivate = (): void => {
+    const provider = activeProvider;
+    activeProvider = null;
+    if (!provider) return;
+    try {
+      provider.deactivateTooltip(PROVIDER_ID);
+    } catch {
+      /* 官方内部结构变化时保持本地降级，不传播异常。 */
+    }
+  };
+
   return {
-    resolveDelay: (fallbackMs) => fallbackMs,
-    activate: () => {},
-    deactivate: () => {},
+    resolveDelay(fallbackMs) {
+      try {
+        const delayMs = currentProvider()?.getOpenDelay(PROVIDER_KEY, fallbackMs) ?? fallbackMs;
+        return Number.isFinite(delayMs) && delayMs >= 0 ? delayMs : fallbackMs;
+      } catch {
+        return fallbackMs;
+      }
+    },
+    activate(close) {
+      deactivate();
+      const provider = currentProvider();
+      if (!provider) return;
+      try {
+        provider.activateTooltip(PROVIDER_ID, PROVIDER_KEY, PROVIDER_VARIANT, close);
+        activeProvider = provider;
+      } catch {
+        try {
+          provider.deactivateTooltip(PROVIDER_ID);
+        } catch {
+          /* 官方内部结构变化时保持本地降级，不传播异常。 */
+        }
+      }
+    },
+    deactivate,
   };
 }
 
@@ -45,6 +84,9 @@ type ReactFiber = {
 const REACT_FIBER_PREFIX = "__reactFiber$";
 const MAX_FIBER_DEPTH = 64;
 const MAX_CONTEXTS_PER_FIBER = 64;
+const PROVIDER_ID = "incodex-privacy-toggle";
+const PROVIDER_KEY = "default";
+const PROVIDER_VARIANT = "tooltip";
 
 function isOfficialTooltipProvider(value: unknown): value is OfficialTooltipProvider {
   if (typeof value !== "object" || value === null) return false;
@@ -52,7 +94,12 @@ function isOfficialTooltipProvider(value: unknown): value is OfficialTooltipProv
   return (
     typeof candidate.getOpenDelay === "function" &&
     typeof candidate.activateTooltip === "function" &&
-    typeof candidate.deactivateTooltip === "function"
+    typeof candidate.clearHoverHandoffLock === "function" &&
+    typeof candidate.deactivateTooltip === "function" &&
+    typeof candidate.isHoverOpenBlocked === "function" &&
+    typeof candidate.registerOpenTooltip === "function" &&
+    typeof candidate.registerTooltipDismissHandler === "function" &&
+    typeof candidate.setHoverHandoffLockTooltipId === "function"
   );
 }
 
