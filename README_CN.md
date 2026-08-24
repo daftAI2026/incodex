@@ -24,7 +24,7 @@
 ## Features
 
 - **无痕窗口**：登录和设置跟平时一样，看不到以前的对话，这次的聊天也不会进平时的列表
-- **跟随主窗口**：无痕窗口以相同的大小和位置打开
+- **跟随主窗口**：无痕窗口参照主窗口的大小和位置打开
 - **侧栏按钮**：装进正在用的 Codex 后，搜索左边会出现帽子墨镜；`Shift+Command+N` 也能开
 - **关窗即焚**：正常关掉后清掉这次的临时会话（含独立 Chromium 档案）；登录和设置会留着
 - **可选不改包**：`incodex open` 直接开一扇无痕窗，不碰官方签名
@@ -160,9 +160,11 @@ $ incodex open --dry-run
 ```bash
 $ incodex open
 
-➤ Opening incognito window
+➤ Opening incognito Codex window
   Binary       /Applications/ChatGPT.app/Contents/MacOS/ChatGPT
   Home         ~/.incodex/sessions/…
+  Session      s-…
+  ✓ Opened. Incognito Codex window is ready.
   ✓ Closed. Isolated session removed.
 ```
 
@@ -178,12 +180,15 @@ $ incodex install
   ! Replaces the app in place and resigns it ad hoc.
   ! Official Appshot (smart snapshot) stops until uninstall.
   Backup       ~/.incodex/installations/
-  ✓ Official app patched
   Install id   0778f0fa-…
   Runtime      0.4.0
   App          /Applications/ChatGPT.app
-➤ Relaunch
-  ✓ ChatGPT.app relaunched.
+  ✓ Done. Open ChatGPT.app when you want Incognito.
+  ! Keychain: On next launch, macOS may ask this patched Codex app to access Codex Storage Key.
+  ! Confirm the dialog names this app and the Codex Storage Key item.
+  ! If both match, enter your Mac login password (not your ChatGPT password) and choose Always Allow.
+  ! Allow or Allow Once grants only that access and may prompt again later.
+  ! If the details do not match, choose Deny; Incodex and Terminal never need that password.
 ```
 
 装进去之后，搜索左边会出现帽子墨镜。点它或 `Shift+Command+N` 开无痕窗。
@@ -203,6 +208,7 @@ $ incodex status
   Install id   0778f0fa-…
   Target       official-404f3389062b
   Main         .vite/build/early-bootstrap.js
+  ✓ Incodex is installed. Use doctor for hashes and signing.
 ```
 
 ### Doctor
@@ -221,6 +227,7 @@ $ incodex doctor
 ➤ Runtime
   Version      0.4.0
   External     0.4.0 releases/0.4.0-<manifestSha256>
+  External check checked
   Loader       asar only
   Main         .vite/build/early-bootstrap.js
 
@@ -230,13 +237,14 @@ $ incodex doctor
 
 ➤ Backup
   State        ok
+  Proof        checked
   Matches      yes
 
 ➤ Sessions
-  Orphans      0
-  Chromium     0
-  Stale pid    no
-  Journals     0
+  Orphans      0 (checked)
+  Chromium     0 (checked)
+  Stale pid    no (checked)
+  Journals     0 (checked)
 ```
 
 默认 Doctor 会检查 Incodex 自己的 Runtime、备份、journal、session 和 marker 状态，以及目标应用最小的 outer identity 证据；不会递归 nested 签名，也不会调用 Gatekeeper。要看完整的 nested 签名、entitlement 和 Gatekeeper 报告，请运行 `incodex doctor --deep`。Gatekeeper 结果只是诊断，不是安装失败；改包之后官方签名本来就不会过 Gatekeeper。
@@ -256,7 +264,7 @@ Install: Homebrew
 Shell: /bin/zsh
 ```
 
-`Install` 会区分 Homebrew、脚本和源码。Homebrew 装的不要跑 `incodex update`，用 `brew upgrade incodex`。
+`Install` 能识别 Homebrew 路径；其他原生二进制目前显示为 Script。Homebrew 装的不要跑 `incodex update`，用 `brew upgrade incodex`。
 
 ## License
 
