@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 /**
  * [INPUT]: 接收 OpenPlan 派生的 InjectionOptions 与 localhost CDP target
  * [OUTPUT]: 对外提供 launch 参数、profile mask bootstrap、注入与 UI 验收
@@ -11,6 +10,7 @@ use std::collections::HashSet;
 // pattern used by other desktop launchers (debug port + allow-origins,
 // prefer `app://-/index.html`, skip chrome:// and prewarm routes). The
 // payload is our MIT `inject.js`, not a third-party injector.
+use std::collections::HashSet;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
