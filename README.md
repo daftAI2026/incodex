@@ -70,16 +70,16 @@ Install three launchers for Open, Status, and Doctor:
 curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/scripts/setup-quick-launchers.sh | bash
 ```
 
-Alfred opens its normal import confirmation. Raycast needs one manual setup; v1 and v2 load the same generated scripts, but expose the directory picker in different places:
+The script writes Raycast commands to `~/Library/Application Support/Raycast/script-commands` and opens Alfred's normal import confirmation. Raycast needs one manual setup; v1 and v2 load the same scripts, but expose the directory picker in different places:
 
-1. **Raycast v2:** open **Settings → Script Commands → Add Script Directory**.
+1. **Raycast v2:** open **Settings → Script Commands**, then click **+** beside **Script Folders**.
 2. **Raycast v1:** open **Settings → Extensions**, click **+**, then choose **Add Script Directory**.
-3. Select `~/.incodex/quick-launchers/raycast`.
-4. If the commands do not appear, run **Reload Script Directories** in Raycast. Raycast v2 normally picks up script changes automatically.
+3. Select `~/Library/Application Support/Raycast/script-commands`.
+4. Run **Reload Script Commands** in Raycast.
 
 Status and Doctor auto-detect Terminal, iTerm2, Alacritty, kitty, WezTerm, Ghostty, Hyper, WindTerm, and Warp. Set `INCODEX_LAUNCHER_APP=<name>` to choose one. Open launches the incognito window directly.
 
-Remove generated files with the same setup script, then remove the imported Alfred workflow and Raycast Script Directory in their settings:
+Remove only the Incodex-owned generated files with the same setup script, then remove the imported Alfred workflow and Raycast Script Directory in their settings if nothing else uses that directory:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/scripts/setup-quick-launchers.sh | bash -s -- uninstall

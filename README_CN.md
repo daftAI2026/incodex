@@ -70,16 +70,16 @@ Homebrew 和脚本安装直接使用预编译的原生 Rust 二进制，不需�
 curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/scripts/setup-quick-launchers.sh | bash
 ```
 
-Alfred 会走正常的导入确认。Raycast 需要手动设置一次；v1 和 v2 加载的是同一套生成脚本，只是添加目录的入口不同：
+脚本会把 Raycast 命令写入 `~/Library/Application Support/Raycast/script-commands`，并打开 Alfred 的正常导入确认。Raycast 需要手动设置一次；v1 和 v2 加载的是同一套脚本，只是添加目录的入口不同：
 
-1. **Raycast v2：**打开 **Settings → Script Commands → Add Script Directory**。
+1. **Raycast v2：**打开 **Settings → Script Commands**，在 **Script Folders** 右侧点击 **+**。
 2. **Raycast v1：**打开 **Settings → Extensions**，点击 **+**，再选 **Add Script Directory**。
-3. 选择 `~/.incodex/quick-launchers/raycast`。
-4. 如果命令没有出现，再运行 **Reload Script Directories**；Raycast v2 通常会自动拾取脚本变更。
+3. 选择 `~/Library/Application Support/Raycast/script-commands`。
+4. 在 Raycast 中运行 **Reload Script Commands**。
 
 Status 和 Doctor 会自动识别 Terminal、iTerm2、Alacritty、kitty、WezTerm、Ghostty、Hyper、WindTerm、Warp；也可以用 `INCODEX_LAUNCHER_APP=<name>` 指定。Open 会直接打开无痕窗口。
 
-卸载时用同一份设置脚本删除生成文件，再到 Alfred 和 Raycast 设置中移除已导入的 workflow / Script Directory：
+卸载时用同一份设置脚本只删除 Incodex 自己生成的文件；再移除 Alfred workflow。如果该 Raycast Script Directory 没有被其他工具共用，也可从设置中移除：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/scripts/setup-quick-launchers.sh | bash -s -- uninstall

@@ -1,7 +1,7 @@
 #!/bin/bash
 # [INPUT]: 依赖已安装的 incodex/inc 二进制、macOS zip/unzip/open/osascript 与用户显式的 Raycast/Alfred 导入操作
-# [OUTPUT]: 生成 Incodex 独占的 Raycast Script Commands 目录与稳定 Bundle ID 的 Alfred .alfredworkflow 导入包
-# [POS]: scripts 的可选 Quick Launchers 安装器，不修改 Raycast/Alfred 私有配置，不依赖 CLI 安装器或官方 App 补丁路径
+# [OUTPUT]: 向 Raycast 标准 Script Commands 目录写入 Incodex 专属脚本，并生成稳定 Bundle ID 的 Alfred .alfredworkflow 导入包
+# [POS]: scripts 的可选 Quick Launchers 安装器，对齐 Mole 的公开脚本目录但不修改 Raycast/Alfred 私有配置
 # [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
 set -euo pipefail
@@ -10,7 +10,7 @@ OWNER_MARKER="incodex-quick-launchers owner=daftAI2026/incodex schema=1"
 ROOT="${INCODEX_QUICK_LAUNCHERS_ROOT:-$HOME/.incodex/quick-launchers}"
 MARKER="$ROOT/.incodex-quick-launchers"
 MANIFEST="$ROOT/manifest.sha256"
-RAYCAST_DIR="$ROOT/raycast"
+RAYCAST_DIR="${INCODEX_RAYCAST_SCRIPT_DIR:-$HOME/Library/Application Support/Raycast/script-commands}"
 ALFRED_DIR="$ROOT/alfred"
 ALFRED_WORKFLOW="$ALFRED_DIR/Incodex Quick Launchers.alfredworkflow"
 OWNED_KEYS=(raycast-open raycast-status raycast-doctor alfred-workflow)
@@ -73,12 +73,22 @@ require_owned_root() {
     fi
 }
 
-owned_relative_path() {
+owned_staged_relative_path() {
     case "$1" in
         raycast-open) printf '%s\n' "raycast/incodex-open.sh" ;;
         raycast-status) printf '%s\n' "raycast/incodex-status.sh" ;;
         raycast-doctor) printf '%s\n' "raycast/incodex-doctor.sh" ;;
         alfred-workflow) printf '%s\n' "alfred/Incodex Quick Launchers.alfredworkflow" ;;
+        *) die "unknown launcher manifest key: $1" ;;
+    esac
+}
+
+owned_artifact_path() {
+    case "$1" in
+        raycast-open) printf '%s\n' "$RAYCAST_DIR/incodex-open.sh" ;;
+        raycast-status) printf '%s\n' "$RAYCAST_DIR/incodex-status.sh" ;;
+        raycast-doctor) printf '%s\n' "$RAYCAST_DIR/incodex-doctor.sh" ;;
+        alfred-workflow) printf '%s\n' "$ALFRED_WORKFLOW" ;;
         *) die "unknown launcher manifest key: $1" ;;
     esac
 }
@@ -105,24 +115,24 @@ require_manifest() {
 
 verify_installed_artifacts() {
     local key
-    local relative
+    local path
     local expected
     for key in "${OWNED_KEYS[@]}"; do
-        relative="$(owned_relative_path "$key")"
+        path="$(owned_artifact_path "$key")"
         expected="$(manifest_hash "$key")"
-        if [[ ! -f "$ROOT/$relative" ]] || [[ "$(sha256_file "$ROOT/$relative")" != "$expected" ]]; then
-            die "launcher is modified; refusing to overwrite it: $ROOT/$relative"
+        if [[ ! -f "$path" ]] || [[ "$(sha256_file "$path")" != "$expected" ]]; then
+            die "launcher is modified; refusing to overwrite it: $path"
         fi
     done
 }
 
 assert_fresh_targets_absent() {
     local key
-    local relative
+    local path
     for key in "${OWNED_KEYS[@]}"; do
-        relative="$(owned_relative_path "$key")"
-        if [[ -e "$ROOT/$relative" ]]; then
-            die "refusing to overwrite a launcher without installation ownership: $ROOT/$relative"
+        path="$(owned_artifact_path "$key")"
+        if [[ -e "$path" ]]; then
+            die "refusing to overwrite a launcher without installation ownership: $path"
         fi
     done
     if [[ -e "$MANIFEST" ]]; then
@@ -147,7 +157,7 @@ write_manifest() {
     local relative
     printf '# %s\n' "$OWNER_MARKER" >"$target"
     for key in "${OWNED_KEYS[@]}"; do
-        relative="$(owned_relative_path "$key")"
+        relative="$(owned_staged_relative_path "$key")"
         printf '%s\t%s\n' "$(sha256_file "$base/$relative")" "$key" >>"$target"
     done
 }
@@ -536,14 +546,13 @@ install_launchers() {
     rm -rf "$stage"
 
     printf 'Quick launchers are ready.\n'
-    printf 'Raycast: Settings > Script Commands > Add Script Directory:\n  %s\n' "$RAYCAST_DIR"
+    printf 'Raycast v2: Settings > Script Commands > Script Folders > +:\n  %s\n' "$RAYCAST_DIR"
     printf 'Alfred package:\n  %s\n' "$ALFRED_WORKFLOW"
     maybe_open_alfred_import
 }
 
 uninstall_launchers() {
     local key
-    local relative
     local path
     local expected
     local modified=0
@@ -552,8 +561,7 @@ uninstall_launchers() {
     require_owned_root
     require_manifest
     for key in "${OWNED_KEYS[@]}"; do
-        relative="$(owned_relative_path "$key")"
-        path="$ROOT/$relative"
+        path="$(owned_artifact_path "$key")"
         expected="$(manifest_hash "$key")"
         if [[ ! -e "$path" ]]; then
             continue
@@ -571,7 +579,7 @@ uninstall_launchers() {
     fi
 
     rm -f "$MANIFEST" "$MARKER"
-    rmdir "$RAYCAST_DIR" "$ALFRED_DIR" "$ROOT" 2>/dev/null || true
+    rmdir "$ALFRED_DIR" "$ROOT" 2>/dev/null || true
     printf 'Removed Incodex-owned launcher files.\n'
     printf 'Remove the imported workflow manually in Alfred Preferences > Workflows.\n'
     printf 'Remove the Script Directory manually in Raycast Settings if you no longer want it registered.\n'
