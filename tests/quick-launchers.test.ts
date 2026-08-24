@@ -95,6 +95,20 @@ exec /bin/mv "$@"
   );
 }
 
+function terminateOnceMovingRaycastStatus(binDir: string): void {
+  writeExecutable(
+    join(binDir, "mv"),
+    `#!/bin/sh
+if [ "$3" = "$HOME/Library/Application Support/Raycast/script-commands/incodex-status.sh" ] && [ ! -e "$HOME/mv-terminated" ]; then
+    /usr/bin/touch "$HOME/mv-terminated"
+    kill -TERM "$PPID"
+    exit 75
+fi
+exec /bin/mv "$@"
+`,
+  );
+}
+
 function unzipEntry(archive: string, entry: string): string {
   const result = spawnSync("/usr/bin/unzip", ["-p", archive, entry], { encoding: "utf8" });
   if (result.status !== 0) throw new Error(result.stderr || `cannot read ${entry}`);
@@ -368,6 +382,34 @@ describe("setup-quick-launchers.sh", () => {
     mkdirSync(secondBin, { recursive: true });
     writeExecutable(join(secondBin, "incodex"), "#!/bin/sh\nprintf '%s\\n' \"incodex-v2:$*\"\n");
     failOnceMovingRaycastStatus(secondBin);
+
+    const installed = runSetup(context, [], {
+      PATH: `${secondBin}:${context.fakeBin}:/usr/bin:/bin`,
+    });
+    expect(installed.status).not.toBe(0);
+    expect(ownedArtifacts(context).map((artifact) => readFileSync(artifact))).toEqual(before);
+  });
+
+  test("a SIGTERM during fresh publication leaves no launcher residue", () => {
+    const context = fixture();
+    terminateOnceMovingRaycastStatus(context.fakeBin);
+
+    const installed = runSetup(context);
+    expect(installed.status).not.toBe(0);
+    for (const artifact of ownedArtifacts(context)) {
+      expect(existsSync(artifact)).toBe(false);
+    }
+  });
+
+  test("a SIGTERM during reinstall restores the previous complete collection", () => {
+    const context = fixture();
+    expect(runSetup(context).status).toBe(0);
+    const before = ownedArtifacts(context).map((artifact) => readFileSync(artifact));
+
+    const secondBin = join(context.home, "second-bin");
+    mkdirSync(secondBin, { recursive: true });
+    writeExecutable(join(secondBin, "incodex"), "#!/bin/sh\nprintf '%s\\n' \"incodex-v2:$*\"\n");
+    terminateOnceMovingRaycastStatus(secondBin);
 
     const installed = runSetup(context, [], {
       PATH: `${secondBin}:${context.fakeBin}:/usr/bin:/bin`,
