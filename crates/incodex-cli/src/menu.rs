@@ -126,7 +126,13 @@ fn draw(
         format!("↑↓ | Enter | V Version | Q Quit | 1-{} Jump", ITEMS.len())
     };
     lines.push(paint("0;38;5;244", &controls));
-    print!("\u{1b}[?25l\u{1b}[H{}\n\u{1b}[J", lines.join("\n"));
+    let body = lines.join("\n");
+    let frame = body
+        .lines()
+        .map(|line| format!("\r\u{1b}[2K{line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    print!("\u{1b}[?25l\u{1b}[H\u{1b}[J{frame}\n\u{1b}[J");
     io::stdout().flush().map_err(|err| err.to_string())
 }
 
