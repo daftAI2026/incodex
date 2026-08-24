@@ -528,7 +528,7 @@ fn lifecycle_reissues_close_after_post_close_cdp_recovery() {
 }
 
 #[test]
-fn persistent_profile_mask_health_failure_closes_the_browser() {
+fn persistent_profile_mask_health_failure_is_reported_to_the_parent() {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
     listener.set_nonblocking(true).unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -575,39 +575,28 @@ fn persistent_profile_mask_health_failure_closes_the_browser() {
             health_probes += 1;
         }
 
-        let Some(mut stream) = accept_until(&listener, deadline) else {
-            return (health_probes, false);
-        };
-        assert_eq!(read_request_path(&mut stream), "/json/version");
-        write_json(
-            &mut stream,
-            &json!({
-                "webSocketDebuggerUrl": format!("ws://127.0.0.1:{port}/devtools/browser/close")
-            }),
-        );
-        let Some(stream) = accept_until(&listener, deadline) else {
-            return (health_probes, false);
-        };
-        let mut socket = tungstenite::accept(stream).unwrap();
-        let Message::Text(command) = socket.read().unwrap() else {
-            panic!("Browser.close must be a text CDP command");
-        };
-        let close_received = serde_json::from_str::<Value>(&command)
-            .ok()
-            .and_then(|value| value.get("method").cloned())
-            == Some(json!("Browser.close"));
-        (health_probes, close_received)
+        let direct_close_attempted = accept_until(
+            &listener,
+            Instant::now() + Duration::from_millis(600),
+        )
+        .map(|mut stream| read_request_path(&mut stream) == "/json/version")
+        .unwrap_or(false);
+        (health_probes, direct_close_attempted)
     });
 
     let process_alive = AtomicBool::new(true);
-    let result = monitor_profile_mask_health(port, &process_alive, |_| {});
+    let mut failure_reported = false;
+    let result = monitor_profile_mask_health(port, &process_alive, |_| {
+        failure_reported = true;
+    });
     process_alive.store(false, Ordering::Release);
-    let (health_probes, close_received) = server.join().unwrap();
+    let (health_probes, direct_close_attempted) = server.join().unwrap();
 
     assert!(result.is_err(), "persistent mask failure must be reported");
     assert_eq!(health_probes, 2, "one transient failure may recover");
+    assert!(failure_reported, "the parent lifecycle must receive the failure");
     assert!(
-        close_received,
-        "persistent mask failure must close the browser"
+        !direct_close_attempted,
+        "the health monitor must leave termination and session cleanup to the parent"
     );
 }
