@@ -246,13 +246,25 @@ describe("setup-quick-launchers.sh", () => {
     const context = fixture();
     expect(runSetup(context).status).toBe(0);
     const raycast = context.raycast;
+    const wrapperEnv = {
+      ...process.env,
+      HOME: context.home,
+      PATH: `${context.fakeBin}:/usr/bin:/bin`,
+      TERM: "xterm",
+    };
 
-    const status = spawnSync("/bin/bash", [join(raycast, "incodex-status.sh")], { encoding: "utf8" });
+    const status = spawnSync("/bin/bash", [join(raycast, "incodex-status.sh")], {
+      encoding: "utf8",
+      env: wrapperEnv,
+    });
     expect(status.status).toBe(0);
     expect(status.stdout).toContain("incodex:status");
 
     unlinkSync(join(context.fakeBin, "incodex"));
-    const open = spawnSync("/bin/bash", [join(raycast, "incodex-open.sh")], { encoding: "utf8" });
+    const open = spawnSync("/bin/bash", [join(raycast, "incodex-open.sh")], {
+      encoding: "utf8",
+      env: wrapperEnv,
+    });
     expect(open.status).not.toBe(0);
     expect(open.stdout + open.stderr).toContain("no longer executable");
   });
