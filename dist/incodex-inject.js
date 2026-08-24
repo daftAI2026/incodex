@@ -1263,13 +1263,15 @@ function profileAvatarDecoded(dataUrl) {
   const current = window.__incodexProfileAvatarDecodeState;
   if (current?.dataUrl === dataUrl)
     return current.status === "ready";
-  const state = { dataUrl, status: "loading" };
+  const state = { dataUrl, probe: null, status: "loading" };
   window.__incodexProfileAvatarDecodeState = state;
   const probe = new Image;
+  state.probe = probe;
   const finish = (status) => {
     if (window.__incodexProfileAvatarDecodeState !== state)
       return;
     state.status = status;
+    state.probe = null;
     window.__incodexProfileMaskHealth = profileMaskHealth();
   };
   probe.addEventListener("load", () => finish(probe.naturalWidth > 0 && probe.naturalHeight > 0 ? "ready" : "failed"), { once: true });

@@ -39,6 +39,7 @@ type ResolvedProfileMask = {
 
 type ProfileAvatarDecodeState = {
   dataUrl: string;
+  probe: HTMLImageElement | null;
   status: "loading" | "ready" | "failed";
 };
 
@@ -177,12 +178,14 @@ function profileAvatarDecoded(dataUrl: string): boolean {
   const current = window.__incodexProfileAvatarDecodeState;
   if (current?.dataUrl === dataUrl) return current.status === "ready";
 
-  const state: ProfileAvatarDecodeState = { dataUrl, status: "loading" };
+  const state: ProfileAvatarDecodeState = { dataUrl, probe: null, status: "loading" };
   window.__incodexProfileAvatarDecodeState = state;
   const probe = new Image();
+  state.probe = probe;
   const finish = (status: ProfileAvatarDecodeState["status"]): void => {
     if (window.__incodexProfileAvatarDecodeState !== state) return;
     state.status = status;
+    state.probe = null;
     window.__incodexProfileMaskHealth = profileMaskHealth();
   };
   probe.addEventListener(
