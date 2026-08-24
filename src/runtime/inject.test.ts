@@ -125,6 +125,8 @@ describe("incognito profile mask", () => {
 
   test("waits for avatar decoding before accepting the profile mask", () => {
     expect(profileMask).toContain("new Image()");
+    expect(profileMask).toContain("probe: HTMLImageElement");
+    expect(profileMask).toContain("state.probe = probe");
     expect(profileMask).toMatch(/addEventListener\(\s*"load"/);
     expect(profileMask).toMatch(/addEventListener\(\s*"error"/);
     expect(profileMask).toMatch(/\.status === "ready"/);
