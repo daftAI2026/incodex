@@ -132,7 +132,7 @@ fn draw(
         .map(|line| format!("\r\u{1b}[2K{line}"))
         .collect::<Vec<_>>()
         .join("\n");
-    print!("\u{1b}[?25l\u{1b}[H{frame}\n\u{1b}[J");
+    print!("\u{1b}[?25l\u{1b}[H\u{1b}[J{frame}\n\u{1b}[J");
     io::stdout().flush().map_err(|err| err.to_string())
 }
 

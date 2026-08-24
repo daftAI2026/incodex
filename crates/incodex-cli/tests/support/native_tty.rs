@@ -111,7 +111,8 @@ fn native_tty_menu_erases_every_physical_line_before_redrawing() {
     let rust = run_tty(rust_bin(), &[], &[], &home, "Jump", "q");
     assert_eq!(rust.status, 0, "{}", visible(&rust.stdout));
     assert!(
-        rust.stdout.starts_with("\u{1b}[?25l\u{1b}[H\r\u{1b}[2K"),
+        rust.stdout
+            .starts_with("\u{1b}[?25l\u{1b}[H\u{1b}[J\r\u{1b}[2K"),
         "the first menu frame must erase each old terminal line before drawing: {:?}",
         rust.stdout
     );
