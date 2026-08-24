@@ -1,5 +1,4 @@
-//! codesign, plist, ditto, Launch Services, and quit.
-
+//! codesign, plist, ditto, Launch Services, window discovery, and process cleanup.
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::ffi::OsStringExt;
@@ -10,12 +9,14 @@ use std::time::{Duration, Instant};
 mod app_termination;
 mod entitlements;
 mod live_window;
+mod session_process;
 mod signing;
 mod signing_outer;
 mod signing_policy;
 #[cfg(test)]
 use live_window::{is_isolated_launch_command, select_live_main_window_bounds, WindowCandidate};
 pub use live_window::{live_main_window_bounds, WindowBounds};
+pub use session_process::{quiesce_session_processes, session_process_ids_from_ps};
 pub use signing::*;
 pub use signing_outer::inspect_outer_signing;
 pub use signing_policy::validate_generic_nested_components;

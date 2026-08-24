@@ -12,7 +12,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tungstenite::Message;
 
-fn temp_root() -> PathBuf {
+pub(super) fn temp_root() -> PathBuf {
     let n = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -22,7 +22,7 @@ fn temp_root() -> PathBuf {
     dir
 }
 
-fn fake_app(root: &Path) -> PathBuf {
+pub(super) fn fake_app(root: &Path) -> PathBuf {
     let app = root.join("ChatGPT.app");
     let mac = app.join("Contents/MacOS");
     fs::create_dir_all(&mac).unwrap();
@@ -743,100 +743,4 @@ fn async_recreation_after_proven_delete_is_observed_before_removed() {
         "late recreation must be observed and burned"
     );
     assert!(!plan.session_root.exists());
-}
-
-#[test]
-fn wait_and_burn_quiesces_session_helpers_before_first_burn() {
-    let root = temp_root();
-    let app = fake_app(&root);
-    let user = root.join("home");
-    let source = root.join("codex");
-    fs::create_dir_all(&source).unwrap();
-    fs::write(source.join("auth.json"), "{}\n").unwrap();
-    let plan = prepare_incognito_open(&app, &user, &source, 1).unwrap();
-    let events = std::cell::RefCell::new(Vec::new());
-
-    let (_process, cleanup) = wait_and_burn_with_quiescence(
-        &plan,
-        &user,
-        0,
-        |_| {
-            Ok(OpenProcessResult::Exited {
-                code: 0,
-                ui_ready: true,
-            })
-        },
-        |session_root| {
-            assert_eq!(session_root, plan.session_root);
-            events.borrow_mut().push("quiesce");
-            Ok(())
-        },
-        |session_root, expected| {
-            events.borrow_mut().push("burn");
-            burn_session_home(session_root, expected)
-        },
-    )
-    .unwrap();
-
-    assert!(cleanup.removed());
-    assert_eq!(events.into_inner(), vec!["quiesce", "burn"]);
-}
-
-#[test]
-fn spawn_error_still_burns() {
-    let root = temp_root();
-    let app = fake_app(&root);
-    let user = root.join("home");
-    let source = root.join("codex");
-    fs::create_dir_all(&source).unwrap();
-    fs::write(source.join("auth.json"), "{}\n").unwrap();
-    let plan = prepare_incognito_open(&app, &user, &source, 1).unwrap();
-    let (_process, cleanup) =
-        wait_and_burn_with(&plan, &user, 0, |_| Err("ENOENT".into()), burn_session_home).unwrap();
-    assert!(!plan.session_root.exists());
-    assert!(cleanup.removed());
-}
-
-#[test]
-fn cdp_port_failure_is_not_success() {
-    let root = temp_root();
-    let app = fake_app(&root);
-    let user = root.join("home");
-    let source = root.join("codex");
-    fs::create_dir_all(&source).unwrap();
-    fs::write(source.join("auth.json"), "{}\n").unwrap();
-    let mut plan = prepare_incognito_open(&app, &user, &source, 1).unwrap();
-    plan.debug_port = 0;
-    let process = spawn_plan(&plan).unwrap();
-    assert_eq!(
-        process.exit_code(&CleanupResult::Removed { attempts: 1 }),
-        OpenExitCode::UiInjectionFailure,
-        "missing CDP port must be a UI acceptance failure"
-    );
-    burn_session_home(
-        &plan.session_root,
-        &BurnExpected {
-            user_root: &user,
-            session_id: Some(&plan.session_id),
-            ino: None,
-            dev: None,
-        },
-    )
-    .unwrap();
-}
-
-#[test]
-fn locale_override_is_carried_into_the_cdp_injection_plan() {
-    let root = temp_root();
-    let app = fake_app(&root);
-    let user = root.join("home");
-    let source = root.join("codex");
-    fs::create_dir_all(&source).unwrap();
-    fs::write(
-        source.join("config.toml"),
-        "model = \"test\"\nlocaleOverride = \"zh-CN\"\n",
-    )
-    .unwrap();
-    let plan = prepare_incognito_open(&app, &user, &source, 1).unwrap();
-    assert_eq!(plan.locale.as_deref(), Some("zh-CN"));
 }
