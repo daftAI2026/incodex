@@ -60,6 +60,14 @@ cargo install --locked --path crates/incodex-cli
 
 Homebrew 和脚本安装直接使用预编译的原生 Rust 二进制，不需要 Bun。从源码安装需要 [rustup](https://rustup.rs/)，仓库中的 `rust-toolchain.toml` 会选择受支持的 Rust 编译器；只有涉及应用集成时才需要已安装的 Codex / ChatGPT 桌面端，参与开发、重建 Electron Runtime 时还需要 [Bun](https://bun.sh) 1.3.14（见 `.bun-version`）。
 
+**可选：Raycast / Alfred 快捷入口**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/scripts/setup-quick-launchers.sh | bash
+```
+
+这会准备 Open、Status、Doctor 三个入口。Alfred 会走正常的导入确认；Raycast 需要把脚本打印出的目录加到 **Settings → Extensions → Script Commands**，再运行 **Reload Script Directories**。
+
 **Run**
 
 ```bash

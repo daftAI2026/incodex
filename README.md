@@ -60,6 +60,14 @@ cargo install --locked --path crates/incodex-cli
 
 Homebrew and script installs use prebuilt native Rust binaries and do not require Bun. A source install requires [rustup](https://rustup.rs/); the repository's `rust-toolchain.toml` selects the supported Rust compiler. An installed Codex / ChatGPT desktop app is needed only for app integration work. Contributors rebuilding the Electron Runtime also need [Bun](https://bun.sh) 1.3.14 (see `.bun-version`).
 
+**Optional Raycast and Alfred quick launchers**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/scripts/setup-quick-launchers.sh | bash
+```
+
+This prepares Open, Status, and Doctor launchers. Alfred opens its normal import confirmation. In Raycast, add the printed directory under **Settings → Extensions → Script Commands**, then run **Reload Script Directories**.
+
 **Run**
 
 ```bash
