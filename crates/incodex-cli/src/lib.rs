@@ -15,6 +15,7 @@ pub mod lifecycle;
 pub mod menu;
 pub mod open;
 pub mod parse;
+pub mod profile_mask;
 pub mod spinner;
 pub mod terminal;
 pub mod version;
