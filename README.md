@@ -28,6 +28,7 @@
 - **Sidebar button**: After install, a hat-glasses control sits left of Search; `Shift+Command+N` also works
 - **Burns on close**: A normal close clears this temp session (including the isolated Chromium profile); login and settings stay
 - **Optional no-patch path**: `incodex open` launches an incognito window without touching the official signature
+- **Temporary profile mask**: `incodex open --mask [--name <text>] [--avatar <local-file>]` gives the window a temporary two-word name and deterministic offline avatar. The optional avatar must be a local PNG, JPEG, or WebP; this changes only the sidebar footer, not account data. Opening the account menu may still show the real profile
 - **Local CLI**: Terminal menu, Homebrew or script install, `status` / `doctor` / `runtime`. Not an official plugin
 
 This is not a forensics claim that the machine keeps no traces.
@@ -129,6 +130,15 @@ $ incodex open
   ✓ Opened. Incognito Codex window is ready.
   ✓ Closed. Isolated session removed.
 ```
+
+For a temporary visual identity, use `--mask` on the open path only:
+
+```bash
+$ incodex open --mask
+$ incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
+```
+
+The mask changes only the current incognito renderer's sidebar profile footer. It does not change the real account, and opening the account menu may still show the real profile.
 
 ### Install
 
@@ -266,6 +276,8 @@ incodex doctor
 incodex doctor --deep        # Full nested signing / entitlement / Gatekeeper evidence
 incodex runtime             # Update the button logic without re-signing Codex
 incodex open                # Incognito window, no patch
+incodex open --mask         # Temporary sidebar name and offline avatar
+incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
 incodex recover --transaction <id>
 incodex update              # Update this CLI (script installs)
 incodex self-uninstall      # Remove the CLI; add --restore-app to restore Codex
