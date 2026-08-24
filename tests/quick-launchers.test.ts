@@ -242,6 +242,21 @@ describe("setup-quick-launchers.sh", () => {
     expect(source).not.toMatch(/(?:curl|wget).*(?:main|master)/);
   });
 
+  test("does not expose a launcher uninstall route or public uninstall curl command", () => {
+    const context = fixture();
+    expect(runSetup(context).status).toBe(0);
+    const rejected = runSetup(context, ["uninstall"]);
+    expect(rejected.status).not.toBe(0);
+    expect(existsSync(join(context.raycast, "incodex-open.sh"))).toBe(true);
+    expect(rejected.stdout + rejected.stderr).toContain("usage");
+
+    const source = readFileSync(setupScript, "utf8");
+    expect(source).not.toContain("uninstall");
+    for (const readme of ["README.md", "README_CN.md"]) {
+      expect(readFileSync(join(repo, readme), "utf8")).not.toMatch(/\| bash -s -- uninstall\b/);
+    }
+  });
+
   test("generated Raycast wrappers execute the quoted binary and reject a missing one", () => {
     const context = fixture();
     expect(runSetup(context).status).toBe(0);
