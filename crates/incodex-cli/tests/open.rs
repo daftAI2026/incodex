@@ -130,15 +130,20 @@ fn open_help_contract_is_stable() {
     let home = isolated_home();
     let expected = "\
 Usage:
-  incodex open [--dry-run] [--app <path>]
+  incodex open [--dry-run] [--mask] [--name <text>] [--avatar <local-file>] [--app <path>]
 
 Open an incognito window without patching Codex. Uses an isolated CODEX_HOME
 and Chromium user-data-dir. The hat-glasses control and banner still appear
 in that window. Closing the window burns that session.
 
+Profile masking is only available with --mask. Without --name, Incodex creates
+a temporary name and deterministic avatar. --avatar accepts a local PNG,
+JPEG, or WebP file.
+
 Examples:
   incodex open
   incodex open --dry-run
+  incodex open --mask --name \"Temporary\" --avatar ./avatar.png
 
 ";
     for flag in ["--help", "-h"] {
