@@ -251,6 +251,17 @@ mod tests {
     }
 
     #[test]
+    fn avatar_validation_rejects_symlinks_with_a_clear_error() {
+        let root = temp_root();
+        let real = write_avatar(&root, "real.png", b"\x89PNG\r\n\x1a\nfixture");
+        let link = root.join("alias.png");
+        std::os::unix::fs::symlink(&real, &link).expect("avatar symlink");
+
+        let error = resolve_profile_mask(true, Some("Local"), Some(&link)).unwrap_err();
+        assert!(error.contains("symlink"), "{error}");
+    }
+
+    #[test]
     fn profile_names_are_bounded_and_control_free() {
         for invalid in [
             "",
