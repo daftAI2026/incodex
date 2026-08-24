@@ -235,6 +235,31 @@ describe("setup-quick-launchers.sh", () => {
     expect(second.stdout).toContain("incodex-v2:status");
   });
 
+  test("the runner finds supported stable CLI paths with a minimal GUI PATH", () => {
+    const context = fixture();
+    expect(runSetup(context, [], { PATH: "/usr/bin:/bin" }).status).toBe(0);
+    const stableBin = join(context.home, ".local", "bin");
+    mkdirSync(join(stableBin, "incodex"), { recursive: true });
+    writeExecutable(join(stableBin, "inc"), "#!/bin/sh\nprintf '%s\\n' \"stable-home:$*\"\n");
+
+    const generated = paths(context);
+    const result = runGenerated(context, generated.status, [], { TERM: "xterm", PATH: "" });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("stable-home:status");
+
+    const runner = readFileSync(generated.runner, "utf8");
+    for (const location of [
+      "$HOME/.local/bin/incodex",
+      "$HOME/.local/bin/inc",
+      "/opt/homebrew/bin/incodex",
+      "/opt/homebrew/bin/inc",
+      "/usr/local/bin/incodex",
+      "/usr/local/bin/inc",
+    ]) {
+      expect(runner).toContain(location);
+    }
+  });
+
   test("Raycast status and doctor use TERM directly or route through a terminal fallback", () => {
     const context = fixture();
     expect(runSetup(context).status).toBe(0);
