@@ -9,6 +9,7 @@ pub(crate) mod diagnose_signing;
 pub mod help;
 pub mod install;
 mod install_keychain_advice;
+pub(crate) mod friendly_name;
 pub mod legacy_proof;
 pub mod legacy_typescript;
 pub mod lifecycle;
