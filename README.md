@@ -60,63 +60,6 @@ cargo install --locked --path crates/incodex-cli
 
 Homebrew and script installs use prebuilt native Rust binaries and do not require Bun. A source install requires [rustup](https://rustup.rs/); the repository's `rust-toolchain.toml` selects the supported Rust compiler. An installed Codex / ChatGPT desktop app is needed only for app integration work. Contributors rebuilding the Electron Runtime also need [Bun](https://bun.sh) 1.3.14 (see `.bun-version`).
 
-### Quick Launchers
-
-**Raycast and Alfred setup**
-
-Install three launchers for Open, Status, and Doctor:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/scripts/setup-quick-launchers.sh | bash
-```
-
-The script writes Raycast commands to `~/Library/Application Support/Raycast/script-commands`; when Alfred is detected, it creates the standard `.alfredworkflow` package and opens Alfred's normal import confirmation. Raycast needs one manual setup; v1 and v2 load the same scripts, but expose the directory picker in different places:
-
-1. **Raycast v2:** open **Settings → Script Commands**, then click **+** beside **Script Folders**.
-2. **Raycast v1:** open **Settings → Extensions**, click **+**, then choose **Add Script Directory**.
-3. Select `~/Library/Application Support/Raycast/script-commands`.
-4. Run **Reload Script Commands** in Raycast.
-
-When Raycast provides a usable `TERM`, Status and Doctor run directly in its `fullOutput` pane. Without a usable `TERM`, they route through Terminal, iTerm2, Alacritty, kitty, WezTerm, Ghostty, Hyper, WindTerm, or Warp; set `INCODEX_LAUNCHER_APP=<name>` to choose one. If the selected app cannot be started, the launcher falls back to Terminal. Open launches the incognito window directly.
-
-**Run**
-
-```bash
-inc                         # Interactive menu (terminal only)
-incodex --help
-incodex --version
-
-incodex install             # Patch the official Codex you are using
-incodex install --dry-run   # Print the plan
-incodex install --yes       # Required when stdin is not a terminal
-incodex install --clone     # Dev: patch a copy
-
-incodex uninstall           # Restore the official app
-incodex status
-incodex doctor
-incodex doctor --deep        # Full nested signing / entitlement / Gatekeeper evidence
-incodex runtime             # Update the button logic without re-signing Codex
-incodex open                # Incognito window, no patch
-incodex recover --transaction <id>
-incodex update              # Update this CLI (script installs)
-incodex self-uninstall      # Remove the CLI; add --restore-app to restore Codex
-```
-
-**Preview safely**
-
-```bash
-incodex install --dry-run
-incodex uninstall --dry-run
-incodex open --dry-run
-incodex update --dry-run
-incodex self-uninstall --dry-run
-incodex status --json
-incodex doctor --json
-incodex doctor --deep --json
-```
-
-`brew install`, `curl … | bash`, and `cargo install` only put the command on PATH. The command that changes `/Applications/ChatGPT.app` is `incodex install`.
-
 ## Security & Safety Design
 
 Incodex patches a locally installed Electron app. Destructive commands print a plan first: TTY asks once, non-TTY needs `--yes`, `--dry-run` only prints.
@@ -284,6 +227,66 @@ Shell: /bin/zsh
 ```
 
 `Install` reports Homebrew when the executable is recognized in its Homebrew location; other native binaries currently report Script. Homebrew installs should not run `incodex update`; use `brew upgrade incodex`.
+
+## Quick Launchers
+
+<details>
+<summary><strong>Raycast and Alfred setup</strong></summary>
+
+Install three launchers for Open, Status, and Doctor:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/scripts/setup-quick-launchers.sh | bash
+```
+
+The script writes Raycast commands to `~/Library/Application Support/Raycast/script-commands`; when Alfred is detected, it creates the standard `.alfredworkflow` package and opens Alfred's normal import confirmation. Raycast needs one manual setup; v1 and v2 load the same scripts, but expose the directory picker in different places:
+
+1. **Raycast v2:** open **Settings → Script Commands**, then click **+** beside **Script Folders**.
+2. **Raycast v1:** open **Settings → Extensions**, click **+**, then choose **Add Script Directory**.
+3. Select `~/Library/Application Support/Raycast/script-commands`.
+4. Run **Reload Script Commands** in Raycast.
+
+When Raycast provides a usable `TERM`, Status and Doctor run directly in its `fullOutput` pane. Without a usable `TERM`, they route through Terminal, iTerm2, Alacritty, kitty, WezTerm, Ghostty, Hyper, WindTerm, or Warp; set `INCODEX_LAUNCHER_APP=<name>` to choose one. If the selected app cannot be started, the launcher falls back to Terminal. Open launches the incognito window directly.
+
+**Run**
+
+```bash
+inc                         # Interactive menu (terminal only)
+incodex --help
+incodex --version
+
+incodex install             # Patch the official Codex you are using
+incodex install --dry-run   # Print the plan
+incodex install --yes       # Required when stdin is not a terminal
+incodex install --clone     # Dev: patch a copy
+
+incodex uninstall           # Restore the official app
+incodex status
+incodex doctor
+incodex doctor --deep        # Full nested signing / entitlement / Gatekeeper evidence
+incodex runtime             # Update the button logic without re-signing Codex
+incodex open                # Incognito window, no patch
+incodex recover --transaction <id>
+incodex update              # Update this CLI (script installs)
+incodex self-uninstall      # Remove the CLI; add --restore-app to restore Codex
+```
+
+**Preview safely**
+
+```bash
+incodex install --dry-run
+incodex uninstall --dry-run
+incodex open --dry-run
+incodex update --dry-run
+incodex self-uninstall --dry-run
+incodex status --json
+incodex doctor --json
+incodex doctor --deep --json
+```
+
+`brew install`, `curl … | bash`, and `cargo install` only put the command on PATH. The command that changes `/Applications/ChatGPT.app` is `incodex install`.
+
+</details>
 
 ## License
 
