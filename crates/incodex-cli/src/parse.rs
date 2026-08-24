@@ -202,4 +202,41 @@ mod tests {
             "--app requires a path, not another flag"
         );
     }
+
+    #[test]
+    fn profile_mask_options_are_parsed_only_for_open() {
+        let parsed = parse_cli(&args(&[
+            "open",
+            "--mask",
+            "--name",
+            "Temporary",
+            "--avatar",
+            "/tmp/avatar.png",
+        ]))
+        .unwrap();
+
+        assert!(parsed.mask);
+        assert_eq!(parsed.name.as_deref(), Some("Temporary"));
+        assert_eq!(parsed.avatar.as_deref(), Some("/tmp/avatar.png"));
+    }
+
+    #[test]
+    fn profile_name_and_avatar_require_mask() {
+        for flag in ["--name", "--avatar"] {
+            let result = parse_cli(&args(&["open", flag, "value"]));
+            assert_eq!(
+                result.unwrap_err(),
+                format!("{flag} requires --mask\n  incodex open --mask {flag} <value>")
+            );
+        }
+    }
+
+    #[test]
+    fn profile_mask_flags_are_rejected_by_other_commands() {
+        let result = parse_cli(&args(&["status", "--mask"]));
+        assert_eq!(
+            result.unwrap_err(),
+            "--mask is only valid for open\n  incodex open --mask"
+        );
+    }
 }
