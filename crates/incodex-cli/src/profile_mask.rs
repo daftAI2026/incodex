@@ -16,7 +16,7 @@ pub const MAX_PROFILE_NAME_CHARS: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProfileAvatar {
-    Generated { seed: String },
+    Generated,
     DataUrl(String),
 }
 
@@ -47,7 +47,7 @@ pub fn resolve_profile_mask(
     };
     let avatar = match avatar_path {
         Some(path) => ProfileAvatar::DataUrl(read_avatar_data_url(path)?),
-        None => ProfileAvatar::Generated { seed: name.clone() },
+        None => ProfileAvatar::Generated,
     };
     Ok(Some(ProfileMask { name, avatar }))
 }
@@ -185,10 +185,7 @@ mod tests {
             .expect("mask");
 
         assert_eq!(first.name, "Temporary");
-        assert_eq!(
-            first.avatar,
-            ProfileAvatar::Generated
-        );
+        assert_eq!(first.avatar, ProfileAvatar::Generated);
         assert_eq!(first.avatar, second.avatar);
         assert_eq!(first.avatar, other.avatar);
     }
@@ -207,10 +204,7 @@ mod tests {
         assert!(words.iter().all(|word| word
             .chars()
             .all(|character| character.is_ascii_alphabetic())));
-        assert_eq!(
-            generated.avatar,
-            ProfileAvatar::Generated
-        );
+        assert_eq!(generated.avatar, ProfileAvatar::Generated);
         assert_eq!(generated.avatar, replayed.avatar);
     }
 

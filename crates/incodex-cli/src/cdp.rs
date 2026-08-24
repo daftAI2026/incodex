@@ -112,10 +112,7 @@ pub fn inject_source_for_options(options: &InjectionOptions) -> String {
 fn profile_mask_json(mask: &ProfileMask) -> String {
     let name = serde_json::to_string(&mask.name).unwrap_or_else(|_| "\"\"".into());
     let avatar = match &mask.avatar {
-        ProfileAvatar::Generated { seed } => {
-            let seed = serde_json::to_string(seed).unwrap_or_else(|_| "\"\"".into());
-            format!("{{\"seed\":{seed}}}")
-        }
+        ProfileAvatar::Generated => "{\"kind\":\"generated\"}".to_string(),
         ProfileAvatar::DataUrl(data_url) => {
             let data_url = serde_json::to_string(data_url).unwrap_or_else(|_| "\"\"".into());
             format!("{{\"dataUrl\":{data_url}}}")

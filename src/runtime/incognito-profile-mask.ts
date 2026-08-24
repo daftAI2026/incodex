@@ -19,8 +19,8 @@ const PROFILE_NAME_MAX_CHARS = 64;
 const PROFILE_AVATAR_MAX_DATA_URL_CHARS = 8 * 1024 * 1024;
 
 type ProfileMaskAvatar =
-  | { seed: string; dataUrl?: never }
-  | { dataUrl: string; seed?: never };
+  | { kind: "generated"; dataUrl?: never }
+  | { dataUrl: string; kind?: never };
 
 type ProfileMaskBootstrap = {
   name: string;
@@ -54,11 +54,11 @@ function readProfileMask(): ResolvedProfileMask | null {
 
   const avatar = value.avatar;
   if (typeof avatar !== "object" || Array.isArray(avatar)) return null;
-  if (typeof avatar.seed === "string") {
-    if (avatar.seed !== name || avatar.dataUrl !== undefined) return null;
+  if (avatar.kind === "generated") {
+    if (avatar.dataUrl !== undefined) return null;
     return { name, avatarDataUrl: blobatarUri(name) };
   }
-  if (typeof avatar.dataUrl !== "string" || avatar.seed !== undefined) return null;
+  if (typeof avatar.dataUrl !== "string" || avatar.kind !== undefined) return null;
   if (
     avatar.dataUrl.length > PROFILE_AVATAR_MAX_DATA_URL_CHARS ||
     !/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(avatar.dataUrl)
