@@ -60,13 +60,29 @@ cargo install --locked --path crates/incodex-cli
 
 Homebrew 和脚本安装直接使用预编译的原生 Rust 二进制，不需要 Bun。从源码安装需要 [rustup](https://rustup.rs/)，仓库中的 `rust-toolchain.toml` 会选择受支持的 Rust 编译器；只有涉及应用集成时才需要已安装的 Codex / ChatGPT 桌面端，参与开发、重建 Electron Runtime 时还需要 [Bun](https://bun.sh) 1.3.14（见 `.bun-version`）。
 
-**可选：Raycast / Alfred 快捷入口**
+### Quick Launchers
+
+**Raycast 和 Alfred 设置**
+
+安装 Open、Status、Doctor 三个快捷入口：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/scripts/setup-quick-launchers.sh | bash
+curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/5289f2e574297b2cc1ed386d09774cd4e013d34b/scripts/setup-quick-launchers.sh | bash
 ```
 
-这会准备 Open、Status、Doctor 三个入口。Alfred 会走正常的导入确认；Raycast 需要把脚本打印出的目录加到 **Settings → Extensions → Script Commands**，再运行 **Reload Script Directories**。
+Alfred 会走正常的导入确认。Raycast 需要手动设置一次：
+
+1. 打开 **Raycast Settings → Extensions → Script Commands**。
+2. 把 `~/.incodex/quick-launchers/raycast` 添加为脚本目录。
+3. 在 Raycast 里运行 **Reload Script Directories**。
+
+Status 和 Doctor 会自动识别 Terminal、iTerm2、Alacritty、kitty、WezTerm、Ghostty、Hyper、WindTerm、Warp；也可以用 `INCODEX_LAUNCHER_APP=<name>` 指定。Open 会直接打开无痕窗口。
+
+卸载时用同一份固定版本脚本删除生成文件，再到 Alfred 和 Raycast 设置中移除已导入的 workflow / Script Directory：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/5289f2e574297b2cc1ed386d09774cd4e013d34b/scripts/setup-quick-launchers.sh | bash -s -- uninstall
+```
 
 **Run**
 
