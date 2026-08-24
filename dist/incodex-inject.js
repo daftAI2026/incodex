@@ -1259,6 +1259,24 @@ function profileAvatarHealth(avatar, mask) {
   }
   return avatar.style.backgroundImage === `url("${mask.avatarDataUrl}")` && avatar.style.backgroundSize === "cover" && avatar.style.backgroundPosition === "center center";
 }
+function profileAvatarDecoded(dataUrl) {
+  const current = window.__incodexProfileAvatarDecodeState;
+  if (current?.dataUrl === dataUrl)
+    return current.status === "ready";
+  const state = { dataUrl, status: "loading" };
+  window.__incodexProfileAvatarDecodeState = state;
+  const probe = new Image;
+  const finish = (status) => {
+    if (window.__incodexProfileAvatarDecodeState !== state)
+      return;
+    state.status = status;
+    window.__incodexProfileMaskHealth = profileMaskHealth();
+  };
+  probe.addEventListener("load", () => finish(probe.naturalWidth > 0 && probe.naturalHeight > 0 ? "ready" : "failed"), { once: true });
+  probe.addEventListener("error", () => finish("failed"), { once: true });
+  probe.src = dataUrl;
+  return false;
+}
 function identityMaskHealth(identity, nameSelector, avatarSelector, mask) {
   const nameHost = identity.querySelector(PROFILE_NAME_MARKER_SELECTOR) ?? identity.querySelector(nameSelector);
   const avatar = identity.querySelector(PROFILE_AVATAR_MARKER_SELECTOR) ?? identity.querySelector(avatarSelector);
@@ -1269,7 +1287,7 @@ function profileMaskHealth() {
     return true;
   const mask = readProfileMask();
   const profileFooter = mask ? findProfileFooter() : null;
-  if (!mask || !profileFooter)
+  if (!mask || !profileAvatarDecoded(mask.avatarDataUrl) || !profileFooter)
     return false;
   if (!identityMaskHealth(profileFooter, PROFILE_NAME_SELECTOR, PROFILE_AVATAR_SELECTOR, mask)) {
     return false;

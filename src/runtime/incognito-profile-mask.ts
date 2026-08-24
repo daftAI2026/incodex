@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 window.__incodexProfileMask、blobatar@2.4.0 与当前 renderer 的 profile DOM
- * [OUTPUT]: 对外提供唯一 profile footer、已打开账号菜单身份行的遮罩、重渲染补挂与 health 判断
+ * [OUTPUT]: 对外提供唯一 profile footer、已打开账号菜单身份行的遮罩、头像解码门禁、重渲染补挂与 health 判断
  * [POS]: Runtime profile 隐私边界；只改无痕窗口身份视觉，不接管账号数据、语义或交互行为
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -37,9 +37,15 @@ type ResolvedProfileMask = {
   avatarDataUrl: string;
 };
 
+type ProfileAvatarDecodeState = {
+  dataUrl: string;
+  status: "loading" | "ready" | "failed";
+};
+
 declare global {
   interface Window {
     __incodexIncognito?: boolean;
+    __incodexProfileAvatarDecodeState?: ProfileAvatarDecodeState;
     __incodexProfileMask?: ProfileMaskBootstrap | null;
     __incodexProfileMaskHealth?: boolean;
   }
@@ -167,6 +173,28 @@ function profileAvatarHealth(avatar: HTMLElement, mask: ResolvedProfileMask): bo
   );
 }
 
+function profileAvatarDecoded(dataUrl: string): boolean {
+  const current = window.__incodexProfileAvatarDecodeState;
+  if (current?.dataUrl === dataUrl) return current.status === "ready";
+
+  const state: ProfileAvatarDecodeState = { dataUrl, status: "loading" };
+  window.__incodexProfileAvatarDecodeState = state;
+  const probe = new Image();
+  const finish = (status: ProfileAvatarDecodeState["status"]): void => {
+    if (window.__incodexProfileAvatarDecodeState !== state) return;
+    state.status = status;
+    window.__incodexProfileMaskHealth = profileMaskHealth();
+  };
+  probe.addEventListener(
+    "load",
+    () => finish(probe.naturalWidth > 0 && probe.naturalHeight > 0 ? "ready" : "failed"),
+    { once: true },
+  );
+  probe.addEventListener("error", () => finish("failed"), { once: true });
+  probe.src = dataUrl;
+  return false;
+}
+
 function identityMaskHealth(
   identity: HTMLElement,
   nameSelector: string,
@@ -194,7 +222,7 @@ export function profileMaskHealth(): boolean {
   if (!profileMaskConfigured()) return true;
   const mask = readProfileMask();
   const profileFooter = mask ? findProfileFooter() : null;
-  if (!mask || !profileFooter) return false;
+  if (!mask || !profileAvatarDecoded(mask.avatarDataUrl) || !profileFooter) return false;
   if (!identityMaskHealth(profileFooter, PROFILE_NAME_SELECTOR, PROFILE_AVATAR_SELECTOR, mask)) {
     return false;
   }
