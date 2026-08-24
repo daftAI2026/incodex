@@ -70,7 +70,7 @@ Homebrew 和脚本安装直接使用预编译的原生 Rust 二进制，不需�
 curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/scripts/setup-quick-launchers.sh | bash
 ```
 
-脚本会把 Raycast 命令写入 `~/Library/Application Support/Raycast/script-commands`，并打开 Alfred 的正常导入确认。Raycast 需要手动设置一次；v1 和 v2 加载的是同一套脚本，只是添加目录的入口不同：
+脚本会把 Raycast 命令写入 `~/Library/Application Support/Raycast/script-commands`；检测到 Alfred 时，才会生成标准 `.alfredworkflow` 包并打开 Alfred 的正常导入确认。Raycast 需要手动设置一次；v1 和 v2 加载的是同一套脚本，只是添加目录的入口不同：
 
 1. **Raycast v2：**打开 **Settings → Script Commands**，在 **Script Folders** 右侧点击 **+**。
 2. **Raycast v1：**打开 **Settings → Extensions**，点击 **+**，再选 **Add Script Directory**。

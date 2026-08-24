@@ -70,7 +70,7 @@ Install three launchers for Open, Status, and Doctor:
 curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/scripts/setup-quick-launchers.sh | bash
 ```
 
-The script writes Raycast commands to `~/Library/Application Support/Raycast/script-commands` and opens Alfred's normal import confirmation. Raycast needs one manual setup; v1 and v2 load the same scripts, but expose the directory picker in different places:
+The script writes Raycast commands to `~/Library/Application Support/Raycast/script-commands`; when Alfred is detected, it creates the standard `.alfredworkflow` package and opens Alfred's normal import confirmation. Raycast needs one manual setup; v1 and v2 load the same scripts, but expose the directory picker in different places:
 
 1. **Raycast v2:** open **Settings → Script Commands**, then click **+** beside **Script Folders**.
 2. **Raycast v1:** open **Settings → Extensions**, click **+**, then choose **Add Script Directory**.

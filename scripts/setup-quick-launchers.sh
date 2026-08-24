@@ -115,14 +115,24 @@ write_runner() {
 # incodex-quick-launchers generated
 set -euo pipefail
 resolve_incodex() {
-    local candidate
+    local candidate resolved
     for candidate in incodex inc; do
-        if command -v "$candidate" >/dev/null 2>&1; then
-            command -v "$candidate"
+        resolved="$(command -v "$candidate" 2>/dev/null || true)"
+        if [[ -n "$resolved" && -f "$resolved" && -x "$resolved" ]]; then
+            printf '%s\n' "$resolved"
             return 0
         fi
     done
-    printf 'Error: incodex was not found in PATH; install the CLI first\n' >&2
+    for candidate in \
+        "$HOME/.local/bin/incodex" "$HOME/.local/bin/inc" \
+        "/opt/homebrew/bin/incodex" "/opt/homebrew/bin/inc" \
+        "/usr/local/bin/incodex" "/usr/local/bin/inc"; do
+        if [[ -f "$candidate" && -x "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    printf 'Error: incodex was not found in PATH or supported install paths; install the CLI first\n' >&2
     exit 1
 }
 has_app() {
