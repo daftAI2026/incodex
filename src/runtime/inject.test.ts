@@ -104,8 +104,9 @@ describe("incognito profile mask", () => {
     expect(profileMask).toContain("profileMaskHealth");
   });
 
-  test("distinguishes a generated seed from a validated explicit data URL", () => {
-    expect(profileMask).toContain("avatar.seed");
+  test("distinguishes a generated kind from a validated explicit data URL", () => {
+    expect(profileMask).toContain('avatar.kind === "generated"');
+    expect(profileMask).not.toContain("avatar.seed");
     expect(profileMask).toContain("avatar.dataUrl");
     expect(profileMask).toContain("blobatarUri(name)");
   });

@@ -85,9 +85,7 @@ fn cdp_ui_probe_requires_a_unique_profile_mask_surface_when_requested() {
         locale: None,
         profile_mask: Some(ProfileMask {
             name: "Temporary".into(),
-            avatar: ProfileAvatar::Generated {
-                seed: "Temporary".into(),
-            },
+            avatar: ProfileAvatar::Generated,
         }),
     };
     let expression = ui_ready_expression_for_options(&options);

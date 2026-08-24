@@ -188,14 +188,12 @@ fn injected_ui_carries_profile_mask_as_a_json_bootstrap_value() {
         locale: Some("en-US".into()),
         profile_mask: Some(ProfileMask {
             name: "Temporary".into(),
-            avatar: ProfileAvatar::Generated {
-                seed: "Temporary".into(),
-            },
+            avatar: ProfileAvatar::Generated,
         }),
     });
 
     assert!(source.contains(
-        "window.__incodexProfileMask=(window.top===window&&window.location.href===\"app://-/index.html\")?{\"name\":\"Temporary\",\"avatar\":{\"seed\":\"Temporary\"}}:null"
+        "window.__incodexProfileMask=(window.top===window&&window.location.href===\"app://-/index.html\")?{\"name\":\"Temporary\",\"avatar\":{\"kind\":\"generated\"}}:null"
     ));
     assert!(source.contains("window.__incodexLocale=\"en-US\""));
 }
@@ -206,9 +204,7 @@ fn profile_payload_is_null_outside_the_exact_top_level_codex_page() {
         locale: None,
         profile_mask: Some(ProfileMask {
             name: "Quiet Otter".into(),
-            avatar: ProfileAvatar::Generated {
-                seed: "Quiet Otter".into(),
-            },
+            avatar: ProfileAvatar::Generated,
         }),
     });
 
@@ -223,7 +219,10 @@ fn persistent_script_registration_is_once_per_target_across_retries() {
     assert!(should_register_persistent_script(&registered, "main"));
     registered.insert("main".to_string());
     assert!(!should_register_persistent_script(&registered, "main"));
-    assert!(should_register_persistent_script(&registered, "replacement"));
+    assert!(should_register_persistent_script(
+        &registered,
+        "replacement"
+    ));
     registered.insert("replacement".to_string());
     assert!(!should_register_persistent_script(&registered, "main"));
 }

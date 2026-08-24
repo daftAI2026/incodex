@@ -117,9 +117,7 @@ fn profile_mask_is_carried_from_open_preparation_to_the_plan() {
     fs::write(source.join("auth.json"), "{}\n").unwrap();
     let profile_mask = ProfileMask {
         name: "Temporary".into(),
-        avatar: ProfileAvatar::Generated {
-            seed: "Temporary".into(),
-        },
+        avatar: ProfileAvatar::Generated,
     };
 
     let plan = prepare_incognito_open_with_profile_mask(

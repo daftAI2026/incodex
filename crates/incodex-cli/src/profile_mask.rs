@@ -173,7 +173,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_avatar_is_deterministic_from_the_final_name() {
+    fn generated_avatar_is_a_runtime_discriminant_for_the_final_name() {
         let first = resolve_profile_mask(true, Some("Temporary"), None)
             .unwrap()
             .expect("mask");
@@ -187,12 +187,10 @@ mod tests {
         assert_eq!(first.name, "Temporary");
         assert_eq!(
             first.avatar,
-            ProfileAvatar::Generated {
-                seed: "Temporary".into()
-            }
+            ProfileAvatar::Generated
         );
         assert_eq!(first.avatar, second.avatar);
-        assert_ne!(first.avatar, other.avatar);
+        assert_eq!(first.avatar, other.avatar);
     }
 
     #[test]
@@ -211,9 +209,7 @@ mod tests {
             .all(|character| character.is_ascii_alphabetic())));
         assert_eq!(
             generated.avatar,
-            ProfileAvatar::Generated {
-                seed: generated.name.clone()
-            }
+            ProfileAvatar::Generated
         );
         assert_eq!(generated.avatar, replayed.avatar);
     }
