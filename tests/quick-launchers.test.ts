@@ -91,6 +91,20 @@ describe("setup-quick-launchers.sh", () => {
     expect(plist).toContain("incodex.quick.doctor.action");
     expect(runner).not.toContain("--yes");
     expect(runner).not.toContain("Alfred.alfredpreferences");
+    expect(runner).toContain("INCODEX_LAUNCHER_APP");
+    for (const terminal of [
+      "Terminal",
+      "iTerm2",
+      "Alacritty",
+      "kitty",
+      "WezTerm",
+      "Ghostty",
+      "Hyper",
+      "WindTerm",
+      "Warp",
+    ]) {
+      expect(runner).toContain(terminal);
+    }
 
     const second = runSetup(context);
     expect(second.status).toBe(0);
@@ -116,6 +130,7 @@ describe("setup-quick-launchers.sh", () => {
       expect(source).toContain(install);
       expect(source).toContain("Raycast");
       expect(source).toContain("Alfred");
+      expect(source).toContain("INCODEX_LAUNCHER_APP");
     }
   });
 
