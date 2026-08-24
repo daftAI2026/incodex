@@ -24,6 +24,7 @@
 ## Features
 
 - **Incognito window**: Same login and settings as usual. No old chats, and this session does not join the everyday list
+- **Window continuity**: The incognito window opens at the main window's current size and position
 - **Sidebar button**: After install, a hat-glasses control sits left of Search; `Shift+Command+N` also works
 - **Burns on close**: A normal close clears this temp session (including the isolated Chromium profile); login and settings stay
 - **Optional no-patch path**: `incodex open` launches an incognito window without touching the official signature
@@ -179,7 +180,7 @@ $ incodex install
   Backup       ~/.incodex/installations/
   ✓ Official app patched
   Install id   0778f0fa-…
-  Runtime      0.3.1
+  Runtime      0.4.0
   App          /Applications/ChatGPT.app
 ➤ Relaunch
   ✓ ChatGPT.app relaunched.
@@ -197,7 +198,7 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      0.3.1 releases/0.3.1-<manifestSha256>
+  Runtime      0.4.0 releases/0.4.0-<manifestSha256>
   Version      26.814.41957 6744
   Install id   0778f0fa-…
   Target       official-404f3389062b
@@ -218,8 +219,8 @@ $ incodex doctor
   Arch         arm64
 
 ➤ Runtime
-  Version      0.3.1
-  External     0.3.1 releases/0.3.1-<manifestSha256>
+  Version      0.4.0
+  External     0.4.0 releases/0.4.0-<manifestSha256>
   Loader       asar only
   Main         .vite/build/early-bootstrap.js
 
@@ -245,7 +246,7 @@ The default Doctor checks Incodex-owned Runtime, backup, journal, session, and m
 ```bash
 $ incodex --version
 
-Incodex version 0.3.1
+Incodex version 0.4.0
 macOS: 26.6
 Architecture: arm64
 Kernel: 25.6.0
