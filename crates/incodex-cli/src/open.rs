@@ -7,17 +7,19 @@ use std::thread;
 use std::time::Duration;
 
 use incodex_core::paths::{home_dir, user_root};
+#[cfg(test)]
+use incodex_core::session::copy_settings;
 use incodex_core::session::{
-    burn_session_home, burn_session_home_with_owner, copy_settings, create_session_home_for_open,
-    handoff_session_owner, sweep_orphan_sessions, target_id_from_exec, BurnExpected, SessionHome,
-    SessionOwnerSnapshot,
+    burn_session_home, burn_session_home_with_owner, copy_settings_with_window_geometry,
+    create_session_home_for_open, handoff_session_owner, sweep_orphan_sessions,
+    target_id_from_exec, BurnExpected, SessionHome, SessionOwnerSnapshot, WindowGeometry,
 };
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
 
 use crate::app_bundle::resolve_executable;
 use crate::cdp::{
     allocate_debug_port, debug_launch_args, inject_shared_ui_with_options_and_target,
-    start_lifecycle_monitor, start_primary_lifecycle_monitor, InjectionOptions, WindowBounds,
+    launch_arg_prefix, start_lifecycle_monitor, start_primary_lifecycle_monitor, InjectionOptions,
     OFFICIAL_NEW_CODEX_URL,
 };
 use crate::parse::ParsedCli;
@@ -36,7 +38,6 @@ pub struct OpenPlan {
     pub session_dev: u64,
     pub debug_port: u16,
     pub locale: Option<String>,
-    pub source_bounds: Option<WindowBounds>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -195,6 +196,37 @@ pub fn prepare_incognito_open(
     pid: i32,
 ) -> Result<OpenPlan, String> {
     let bin = resolve_executable(app_path)?;
+    let live_geometry = incodex_macos::live_main_window_bounds(&bin)
+        .ok()
+        .flatten()
+        .map(|bounds| WindowGeometry {
+            x: bounds.x,
+            y: bounds.y,
+            width: bounds.width,
+            height: bounds.height,
+        });
+    prepare_incognito_open_with_geometry_from_bin(bin, user_root, source_home, pid, live_geometry)
+}
+
+#[cfg(test)]
+fn prepare_incognito_open_with_geometry(
+    app_path: &Path,
+    user_root: &Path,
+    source_home: &Path,
+    pid: i32,
+    live_geometry: Option<WindowGeometry>,
+) -> Result<OpenPlan, String> {
+    let bin = resolve_executable(app_path)?;
+    prepare_incognito_open_with_geometry_from_bin(bin, user_root, source_home, pid, live_geometry)
+}
+
+fn prepare_incognito_open_with_geometry_from_bin(
+    bin: PathBuf,
+    user_root: &Path,
+    source_home: &Path,
+    pid: i32,
+    live_geometry: Option<WindowGeometry>,
+) -> Result<OpenPlan, String> {
     let target_id = target_id_from_exec(&bin.to_string_lossy());
     let _ = sweep_orphan_sessions(user_root, Some(&target_id));
     let session = create_session_home_for_open(
@@ -203,7 +235,9 @@ pub fn prepare_incognito_open(
         pid,
         &source_home.to_string_lossy(),
     )?;
-    if let Err(error) = copy_settings(&session.home, source_home) {
+    if let Err(error) =
+        copy_settings_with_window_geometry(&session.home, source_home, live_geometry)
+    {
         let _ = burn_session_home(
             &session.root,
             &BurnExpected {
@@ -221,10 +255,9 @@ pub fn prepare_incognito_open(
 fn plan_from_session(bin: PathBuf, session: SessionHome, source_home: &Path) -> OpenPlan {
     let debug_port = allocate_debug_port().unwrap_or(0);
     let args = if debug_port == 0 {
-        vec![
-            format!("--user-data-dir={}", session.chromium.display()),
-            OFFICIAL_NEW_CODEX_URL.to_string(),
-        ]
+        let mut args = launch_arg_prefix(&session.chromium.display().to_string());
+        args.push(OFFICIAL_NEW_CODEX_URL.to_string());
+        args
     } else {
         debug_launch_args(&session.chromium.display().to_string(), debug_port)
     };
@@ -258,7 +291,6 @@ fn plan_from_session(bin: PathBuf, session: SessionHome, source_home: &Path) -> 
         bin,
         debug_port,
         locale: read_locale_override(source_home),
-        source_bounds: None,
     }
 }
 
@@ -369,29 +401,16 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
     let process_alive = Arc::new(AtomicBool::new(true));
     if plan.debug_port != 0 {
         let port = plan.debug_port;
-        let child_pid = child.id();
-        let source_bounds = plan.source_bounds;
         let injection_readiness = readiness.clone();
         let lifecycle_process_alive = process_alive.clone();
         let options = InjectionOptions {
             locale: plan.locale.clone(),
         };
         thread::spawn(move || {
-            let mut bounds_ready = source_bounds.is_none();
             let mut primary_target_id = None;
             let mut lifecycle_started = false;
             let mut last_injection_error = None;
             for attempt in 1u8..=40 {
-                if !bounds_ready {
-                    if let Some(bounds) = source_bounds {
-                        bounds_ready = incodex_macos::tile_process_front_window(
-                            child_pid,
-                            (bounds.x, bounds.y, bounds.width, bounds.height),
-                            22,
-                        )
-                        .is_ok();
-                    }
-                }
                 if !lifecycle_started
                     && start_primary_lifecycle_monitor(port, lifecycle_process_alive.clone())
                         .is_ok()
@@ -425,35 +444,25 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                         }
                     }
                 }
-                if bounds_ready {
-                    if let Some(target_id) = primary_target_id.take() {
-                        if !lifecycle_started {
-                            start_lifecycle_monitor(
-                                port,
-                                target_id,
-                                lifecycle_process_alive.clone(),
-                            );
-                        }
-                        publish_injection_status(
-                            &status_tx,
-                            &injection_readiness,
-                            InjectionStatus::Ready,
-                        );
-                        return;
+                if let Some(target_id) = primary_target_id.take() {
+                    if !lifecycle_started {
+                        start_lifecycle_monitor(port, target_id, lifecycle_process_alive.clone());
                     }
+                    publish_injection_status(
+                        &status_tx,
+                        &injection_readiness,
+                        InjectionStatus::Ready,
+                    );
+                    return;
                 }
                 thread::sleep(Duration::from_millis(400));
             }
-            let detail = if primary_target_id.is_none() {
-                format!(
-                    "UI injection failed: {}",
-                    last_injection_error
-                        .as_deref()
-                        .unwrap_or("unknown CDP error")
-                )
-            } else {
-                "the window could not inherit the main window bounds".to_string()
-            };
+            let detail = format!(
+                "UI injection failed: {}",
+                last_injection_error
+                    .as_deref()
+                    .unwrap_or("unknown CDP error")
+            );
             publish_injection_status(
                 &status_tx,
                 &injection_readiness,
@@ -711,16 +720,7 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
     }
     let root = user_root();
     let source = default_source_home();
-    let mut plan = prepare_incognito_open(&app_path, &root, &source, std::process::id() as i32)?;
-    if app_path == Path::new(incodex_core::DEFAULT_APP) {
-        plan.source_bounds =
-            incodex_macos::front_codex_window_bounds().map(|(x, y, width, height)| WindowBounds {
-                x,
-                y,
-                width,
-                height,
-            });
-    }
+    let plan = prepare_incognito_open(&app_path, &root, &source, std::process::id() as i32)?;
     let (opening, _, _) = open_progress_copy();
     println!("{}", format_step(opening, None));
     println!(

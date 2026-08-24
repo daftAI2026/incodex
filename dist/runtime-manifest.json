@@ -6,7 +6,7 @@
     "incodex-loader.cjs": "071f0bf552b1289eec93250e23dc1162225254b8d1d2d58de6c75cb960cb0f52",
     "incodex-main.cjs": "559e00a0bbc5d0dae8be09990370804ea360c907c92a57ff88c332a5301c6a82",
     "incodex-preload.cjs": "d97ae1ae39028c90ff3687b375c8614fc1fe228b3a3d149ead1c5d95d1a6bc55",
-    "incodex-safe-home.cjs": "8406d1b25bc04393f99f4de27bc1992ecea8995d1063797199b2e7cdd5d62cf8",
+    "incodex-safe-home.cjs": "9a88713b7f37e3921b704d2907594e49ab3f4375d711deebfcd4f0455ddcbdc2",
     "incodex-ipc-guard.cjs": "5b424edf0effc67b1ce87c69c9519babf230c6565b3bdc5a5d0432959f6c044b",
     "incodex-owner-core.cjs": "0b7c02bfc3f7197375d23a7b003548013ea4034d61f7bb51a74c83b600384255",
     "incodex-owner-recovery.cjs": "1273e8856cb47b597a1d7e96b24ac462df5ef22988072536c35691e1d4acaf67",

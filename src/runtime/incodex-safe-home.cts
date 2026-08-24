@@ -14,8 +14,16 @@ const LOCK_NAME = "lock";
 const READY_NAME = "ready";
 const PID_NAME = "incognito.pid";
 const SETTINGS_FILES = ["auth.json", "config.toml"];
+const GLOBAL_STATE_NAME = ".codex-global-state.json";
+const MAIN_WINDOW_BOUNDS_KEY = "electron-main-window-bounds";
+const DESKTOP_FIRST_SEEN_AT_MS_KEY = "desktop-first-seen-at-ms";
+const PERSISTED_ATOM_STATE_KEY = "electron-persisted-atom-state";
+const MIGRATION_ANNOUNCEMENT_KEY = "chatgpt-migration-announcement-completed-v1";
+const UPDATE_ANNOUNCEMENT_KEY = "chatgpt-update-downloaded-announcement-seen-v1";
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
+const MAIN_WINDOW_MIN_WIDTH = 480;
+const MAIN_WINDOW_MIN_HEIGHT = 600;
 const LOG_LIMIT = 1024 * 1024;
 const LOG_KEEP = 3;
 
@@ -348,7 +356,7 @@ function clearBurnProof(userRoot, sessionId) {
   }
 }
 
-function copySettings(home, sourceHome) {
+function copySettings(home, sourceHome, liveBounds: any = null) {
   const homeStat = assertNotSymlink(home, "session home");
   if (!homeStat?.isDirectory()) throw new Error(`[incodex] session home missing: ${home}`);
   let copied = 0;
@@ -358,7 +366,56 @@ function copySettings(home, sourceHome) {
     exclusiveCopyFile(src, path.join(home, name));
     copied += 1;
   }
+  seedWindowState(home, sourceHome, liveBounds);
   return copied;
+}
+
+function validatedWindowBounds(value, requireMaximized = true) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { x, y, width, height, isMaximized } = value;
+  if (![x, y, width, height].every(Number.isSafeInteger)) return null;
+  if (x < -0x80000000 || x > 0x7fffffff || y < -0x80000000 || y > 0x7fffffff) return null;
+  if (width < MAIN_WINDOW_MIN_WIDTH || width > 0x7fffffff) return null;
+  if (height < MAIN_WINDOW_MIN_HEIGHT || height > 0x7fffffff) return null;
+  if (requireMaximized && typeof isMaximized !== "boolean") return null;
+  return { x, y, width, height };
+}
+
+// 投影稳定几何，并补回官方因文件预建而跳过的空 Home 初始化哨兵。
+function seedWindowState(home, sourceHome, liveBounds: any = null) {
+  const homeStat = assertNotSymlink(home, "session home");
+  if (!homeStat?.isDirectory()) throw new Error(`[incodex] session home missing: ${home}`);
+  let bounds = validatedWindowBounds(liveBounds, false);
+  if (!bounds) {
+    const source = path.join(sourceHome, GLOBAL_STATE_NAME);
+    const sourceStat = assertNotSymlink(source, "source global state");
+    if (!sourceStat) return false;
+    if (!sourceStat.isFile()) {
+      throw new Error(`[incodex] source global state is not a file: ${source}`);
+    }
+    let sourceState;
+    try {
+      sourceState = JSON.parse(fs.readFileSync(source, "utf8"));
+    } catch {
+      return false;
+    }
+    bounds = validatedWindowBounds(sourceState?.[MAIN_WINDOW_BOUNDS_KEY]);
+  }
+  if (!bounds) return false;
+  const state = {
+    [DESKTOP_FIRST_SEEN_AT_MS_KEY]: Date.now(),
+    [MAIN_WINDOW_BOUNDS_KEY]: bounds,
+    [PERSISTED_ATOM_STATE_KEY]: {
+      [MIGRATION_ANNOUNCEMENT_KEY]: true,
+      [UPDATE_ANNOUNCEMENT_KEY]: true,
+    },
+  };
+  writePrivateFile(
+    path.join(home, GLOBAL_STATE_NAME),
+    `${JSON.stringify(state)}\n`,
+    { exclusive: true },
+  );
+  return true;
 }
 
 function processStatus(pid) {
@@ -571,6 +628,7 @@ export {
   readBurnProof,
   clearBurnProof,
   copySettings,
+  seedWindowState,
   resolveSourceHome,
   isManagedSessionHome,
   sweepOrphanSessions,

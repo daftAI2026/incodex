@@ -13,6 +13,9 @@ const SETTINGS_FILES: &[&str] = &["auth.json", "config.toml"];
 const DIR_MODE: u32 = 0o700;
 const FILE_MODE: u32 = 0o600;
 
+mod window_state;
+pub use window_state::{seed_window_state, seed_window_state_with_geometry, WindowGeometry};
+
 #[derive(Debug, Clone)]
 pub struct SessionHome {
     pub session_id: String,
@@ -258,6 +261,14 @@ fn unix_now() -> String {
 }
 
 pub fn copy_settings(home: &Path, source_home: &Path) -> Result<usize, String> {
+    copy_settings_with_window_geometry(home, source_home, None)
+}
+
+pub fn copy_settings_with_window_geometry(
+    home: &Path,
+    source_home: &Path,
+    live_geometry: Option<WindowGeometry>,
+) -> Result<usize, String> {
     let home_stat = assert_not_symlink(home, "session home")?;
     if !home_stat.map(|s| s.is_dir()).unwrap_or(false) {
         return Err(format!("session home missing: {}", home.display()));
@@ -271,6 +282,7 @@ pub fn copy_settings(home: &Path, source_home: &Path) -> Result<usize, String> {
         exclusive_copy_file(&src, &home.join(name))?;
         copied += 1;
     }
+    seed_window_state_with_geometry(home, source_home, live_geometry)?;
     Ok(copied)
 }
 

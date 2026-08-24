@@ -9,9 +9,13 @@ use std::time::{Duration, Instant};
 
 mod app_termination;
 mod entitlements;
+mod live_window;
 mod signing;
 mod signing_outer;
 mod signing_policy;
+#[cfg(test)]
+use live_window::{is_isolated_launch_command, select_live_main_window_bounds, WindowCandidate};
+pub use live_window::{live_main_window_bounds, WindowBounds};
 pub use signing::*;
 pub use signing_outer::inspect_outer_signing;
 pub use signing_policy::validate_generic_nested_components;
@@ -451,72 +455,6 @@ pub fn write_asar_integrity(app: &Path, hash: &str) -> Result<(), String> {
     ))
 }
 
-pub fn front_codex_window_bounds() -> Option<(i32, i32, i32, i32)> {
-    let script = r#"tell application "System Events" to tell first process whose bundle identifier is "com.openai.codex" to get {position, size} of front window"#;
-    let output = Command::new("osascript")
-        .args(["-e", script])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    parse_window_bounds_output(&String::from_utf8_lossy(&output.stdout))
-}
-
-pub fn tile_process_front_window(
-    pid: u32,
-    source: (i32, i32, i32, i32),
-    offset: i32,
-) -> Result<(), String> {
-    let desired = (source.0 + offset, source.1 + offset, source.2, source.3);
-    set_process_front_window_bounds(pid, desired)?;
-    let actual = process_front_window_bounds(pid).ok_or("child window bounds unavailable")?;
-    if actual.2 != source.2 || actual.3 != source.3 {
-        set_process_front_window_bounds(pid, source)?;
-    }
-    Ok(())
-}
-
-fn process_front_window_bounds(pid: u32) -> Option<(i32, i32, i32, i32)> {
-    let script = format!(
-        "tell application \"System Events\" to tell first process whose unix id is {pid} to get {{position, size}} of front window"
-    );
-    let output = Command::new("osascript")
-        .args(["-e", &script])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    parse_window_bounds_output(&String::from_utf8_lossy(&output.stdout))
-}
-
-fn set_process_front_window_bounds(pid: u32, bounds: (i32, i32, i32, i32)) -> Result<(), String> {
-    let script = format!(
-        "tell application \"System Events\" to tell first process whose unix id is {pid} to tell front window to set {{position, size}} to {{{{{}, {}}}, {{{}, {}}}}}",
-        bounds.0, bounds.1, bounds.2, bounds.3
-    );
-    let output = Command::new("osascript")
-        .args(["-e", &script])
-        .output()
-        .map_err(|err| err.to_string())?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
-    Ok(())
-}
-
-fn parse_window_bounds_output(raw: &str) -> Option<(i32, i32, i32, i32)> {
-    let values: Vec<i32> = raw
-        .trim()
-        .split(',')
-        .map(str::trim)
-        .map(str::parse)
-        .collect::<Result<_, _>>()
-        .ok()?;
-    (values.len() == 4).then(|| (values[0], values[1], values[2], values[3]))
-}
-
 pub fn notify_launch_services(app: &Path) -> Result<(), String> {
     let _ = Command::new("lsregister")
         .args(["-f", "-R", "-trusted"])
@@ -531,15 +469,6 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     #[test]
     fn crate_compiles() {}
-
-    #[test]
-    fn parses_system_events_position_and_size() {
-        assert_eq!(
-            parse_window_bounds_output("0, 34, 1710, 1073\n"),
-            Some((0, 34, 1710, 1073))
-        );
-        assert_eq!(parse_window_bounds_output("missing"), None);
-    }
 
     #[test]
     fn notify_launch_services_captures_tool_output() {
@@ -702,6 +631,67 @@ mod quiescence_tests {
             )],
         };
         quiescence.ensure_quiescent_with(&probe).unwrap();
+    }
+
+    #[test]
+    fn live_window_selection_uses_the_largest_standard_window_for_the_official_pid() {
+        let windows = vec![
+            WindowCandidate {
+                pid: 41,
+                layer: 0,
+                x: 597,
+                y: 34,
+                width: 869,
+                height: 1073,
+            },
+            WindowCandidate {
+                pid: 41,
+                layer: 0,
+                x: 10,
+                y: 10,
+                width: 300,
+                height: 200,
+            },
+            WindowCandidate {
+                pid: 42,
+                layer: 0,
+                x: 0,
+                y: 38,
+                width: 1710,
+                height: 1073,
+            },
+            WindowCandidate {
+                pid: 41,
+                layer: 1,
+                x: 0,
+                y: 0,
+                width: 2000,
+                height: 1200,
+            },
+        ];
+
+        assert_eq!(
+            select_live_main_window_bounds(&[41], &windows),
+            Some(WindowBounds {
+                x: 597,
+                y: 34,
+                width: 869,
+                height: 1073,
+            })
+        );
+    }
+
+    #[test]
+    fn isolated_user_data_launch_is_not_treated_as_the_official_source_process() {
+        assert!(!is_isolated_launch_command(
+            "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT"
+        ));
+        assert!(is_isolated_launch_command(
+            "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT --user-data-dir=/tmp/incodex/chromium"
+        ));
+        assert!(is_isolated_launch_command(
+            "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT --user-data-dir /tmp/incodex/chromium"
+        ));
     }
 
     #[test]

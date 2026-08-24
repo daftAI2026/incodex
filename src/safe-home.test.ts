@@ -12,6 +12,7 @@ import {
   LOG_LIMIT,
   rotateAndAppendLog,
   resolveSourceHome,
+  seedWindowState,
   sweepOrphanSessions,
   handoffSessionOwner,
 } from "./runtime/incodex-safe-home.cts";
@@ -62,6 +63,147 @@ describe("symlink burn and copy", () => {
 
     expect(() => copySettings(session.home, source)).toThrow(/symlink|overwrite/);
     expect(readFileSync(outside, "utf8")).toBe("secret");
+  });
+
+  test("seedWindowState projects stable geometry and official fresh-home markers", () => {
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const source = join(root, "codex");
+    mkdirSync(source);
+    writeFileSync(
+      join(source, ".codex-global-state.json"),
+      JSON.stringify({
+        "electron-main-window-bounds": {
+          x: -40,
+          y: 38,
+          width: 1710,
+          height: 1073,
+          isMaximized: true,
+        },
+        "thread-titles": { secret: "must-not-cross" },
+        "selected-project": "/private/project",
+        "electron-persisted-atom-state": { secret: true },
+      }),
+    );
+    const session = createSessionHome(userRoot);
+
+    const before = Date.now();
+    expect(seedWindowState(session.home, source)).toBe(true);
+    const after = Date.now();
+
+    const destination = join(session.home, ".codex-global-state.json");
+    const state = JSON.parse(readFileSync(destination, "utf8"));
+    expect(state["desktop-first-seen-at-ms"]).toBeGreaterThanOrEqual(before);
+    expect(state["desktop-first-seen-at-ms"]).toBeLessThanOrEqual(after);
+    delete state["desktop-first-seen-at-ms"];
+    expect(state).toEqual({
+      "electron-main-window-bounds": {
+        x: -40,
+        y: 38,
+        width: 1710,
+        height: 1073,
+      },
+      "electron-persisted-atom-state": {
+        "chatgpt-migration-announcement-completed-v1": true,
+        "chatgpt-update-downloaded-announcement-seen-v1": true,
+      },
+    });
+    expect(lstatSync(destination).mode & 0o777).toBe(FILE_MODE);
+  });
+
+  test("seedWindowState prefers live geometry over stale persisted bounds", () => {
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const source = join(root, "codex");
+    mkdirSync(source);
+    writeFileSync(
+      join(source, ".codex-global-state.json"),
+      JSON.stringify({
+        "electron-main-window-bounds": {
+          x: 0,
+          y: 38,
+          width: 1710,
+          height: 1073,
+          isMaximized: true,
+        },
+      }),
+    );
+    const session = createSessionHome(userRoot);
+
+    expect(
+      seedWindowState(session.home, source, {
+        x: 597,
+        y: 34,
+        width: 869,
+        height: 1073,
+      }),
+    ).toBe(true);
+
+    const state = JSON.parse(readFileSync(join(session.home, ".codex-global-state.json"), "utf8"));
+    expect(state["electron-main-window-bounds"]).toEqual({
+      x: 597,
+      y: 34,
+      width: 869,
+      height: 1073,
+    });
+  });
+
+  test("seedWindowState skips malformed bounds and preserves copied language settings", () => {
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const source = join(root, "codex");
+    mkdirSync(source);
+    writeFileSync(join(source, "auth.json"), '{"token":"source"}\n');
+    writeFileSync(join(source, "config.toml"), 'localeOverride = "zh-CN"\n');
+    writeFileSync(
+      join(source, ".codex-global-state.json"),
+      JSON.stringify({
+        "electron-main-window-bounds": {
+          x: 0,
+          y: 0,
+          width: "wide",
+          height: 820,
+          isMaximized: false,
+        },
+      }),
+    );
+    const session = createSessionHome(userRoot);
+
+    expect(copySettings(session.home, source)).toBe(2);
+    expect(seedWindowState(session.home, source)).toBe(false);
+
+    expect(existsSync(join(session.home, ".codex-global-state.json"))).toBe(false);
+    expect(readFileSync(join(session.home, "config.toml"), "utf8")).toBe(
+      'localeOverride = "zh-CN"\n',
+    );
+    expect(readFileSync(join(session.home, "auth.json"), "utf8")).toBe(
+      '{"token":"source"}\n',
+    );
+  });
+
+  test("seedWindowState refuses a source global-state symlink", () => {
+    const root = tempRoot();
+    const userRoot = join(root, ".incodex");
+    const source = join(root, "codex");
+    mkdirSync(source);
+    const outside = join(root, "outside-global-state.json");
+    writeFileSync(
+      outside,
+      JSON.stringify({
+        "electron-main-window-bounds": {
+          x: 0,
+          y: 0,
+          width: 900,
+          height: 700,
+          isMaximized: false,
+        },
+      }),
+    );
+    symlinkSync(outside, join(source, ".codex-global-state.json"));
+    const session = createSessionHome(userRoot);
+
+    expect(() => seedWindowState(session.home, source)).toThrow(/symlink/);
+    expect(existsSync(join(session.home, ".codex-global-state.json"))).toBe(false);
   });
 
   test("exclusiveCopyFile does not overwrite an existing unknown file", () => {
