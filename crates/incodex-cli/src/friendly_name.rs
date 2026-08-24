@@ -45,7 +45,9 @@ pub(crate) fn random_friendly_name() -> Result<String, String> {
 mod tests {
     use std::io::{self, Read};
 
-    use super::{friendly_name_from_entropy_digest, friendly_name_from_reader};
+    use super::{
+        friendly_name_from_entropy_digest, friendly_name_from_reader, ADJECTIVES, ANIMALS,
+    };
 
     #[test]
     fn deterministic_entropy_produces_two_title_case_words_without_hex_placeholder() {
@@ -84,5 +86,13 @@ mod tests {
 
         let error = friendly_name_from_reader(FailingReader).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn reviewed_word_lists_have_power_of_two_width_for_a_wide_collision_space() {
+        assert!(ADJECTIVES.len() >= 64);
+        assert!(ANIMALS.len() >= 64);
+        assert!(ADJECTIVES.len().is_power_of_two());
+        assert!(ANIMALS.len().is_power_of_two());
     }
 }
