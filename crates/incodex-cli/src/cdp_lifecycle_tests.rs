@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use tungstenite::Message;
 
-use super::monitor_primary_target;
+use super::{monitor_primary_target, monitor_profile_mask_health};
 
 fn monitor_while_server<T>(port: u16, primary_target_id: &str, server: thread::JoinHandle<T>) -> T {
     let process_alive = Arc::new(AtomicBool::new(true));
@@ -524,5 +524,90 @@ fn lifecycle_reissues_close_after_post_close_cdp_recovery() {
     assert_eq!(
         close_commands, 2,
         "temporary post-close CDP loss is not proof of exit; recovered auxiliary targets require another close"
+    );
+}
+
+#[test]
+fn persistent_profile_mask_health_failure_closes_the_browser() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut health_probes = 0;
+
+        for _ in 0..2 {
+            let Some(mut stream) = accept_until(&listener, deadline) else {
+                return (health_probes, false);
+            };
+            assert_eq!(read_request_path(&mut stream), "/json/list");
+            write_json(
+                &mut stream,
+                &json!([page(port, "main", "app://-/index.html")]),
+            );
+
+            let Some(stream) = accept_until(&listener, deadline) else {
+                return (health_probes, false);
+            };
+            let mut socket = tungstenite::accept(stream).unwrap();
+            let Message::Text(command) = socket.read().unwrap() else {
+                panic!("profile health probe must be a text CDP command");
+            };
+            let command: Value = serde_json::from_str(&command).unwrap();
+            assert_eq!(
+                command.get("method").and_then(Value::as_str),
+                Some("Runtime.evaluate")
+            );
+            assert_eq!(
+                command
+                    .pointer("/params/expression")
+                    .and_then(Value::as_str),
+                Some("window.__incodexProfileMaskHealth === true")
+            );
+            let id = command.get("id").and_then(Value::as_u64).unwrap();
+            socket
+                .send(Message::Text(
+                    json!({"id": id, "result": {"result": {"value": false}}})
+                        .to_string()
+                        .into(),
+                ))
+                .unwrap();
+            health_probes += 1;
+        }
+
+        let Some(mut stream) = accept_until(&listener, deadline) else {
+            return (health_probes, false);
+        };
+        assert_eq!(read_request_path(&mut stream), "/json/version");
+        write_json(
+            &mut stream,
+            &json!({
+                "webSocketDebuggerUrl": format!("ws://127.0.0.1:{port}/devtools/browser/close")
+            }),
+        );
+        let Some(stream) = accept_until(&listener, deadline) else {
+            return (health_probes, false);
+        };
+        let mut socket = tungstenite::accept(stream).unwrap();
+        let Message::Text(command) = socket.read().unwrap() else {
+            panic!("Browser.close must be a text CDP command");
+        };
+        let close_received = serde_json::from_str::<Value>(&command)
+            .ok()
+            .and_then(|value| value.get("method").cloned())
+            == Some(json!("Browser.close"));
+        (health_probes, close_received)
+    });
+
+    let process_alive = AtomicBool::new(true);
+    let result = monitor_profile_mask_health(port, &process_alive);
+    process_alive.store(false, Ordering::Release);
+    let (health_probes, close_received) = server.join().unwrap();
+
+    assert!(result.is_err(), "persistent mask failure must be reported");
+    assert_eq!(health_probes, 2, "one transient failure may recover");
+    assert!(
+        close_received,
+        "persistent mask failure must close the browser"
     );
 }

@@ -372,6 +372,25 @@ fn ready_published_between_status_poll_and_child_exit_is_not_lost() {
 }
 
 #[test]
+fn profile_mask_failure_after_ready_revokes_ui_acceptance() {
+    let (status_tx, _status_rx) = mpsc::channel();
+    let readiness = InjectionReadiness::default();
+
+    publish_injection_status(&status_tx, &readiness, InjectionStatus::Ready);
+    assert!(readiness.is_ready());
+    publish_injection_status(
+        &status_tx,
+        &readiness,
+        InjectionStatus::Failed("profile mask health failed".into()),
+    );
+
+    assert!(
+        !readiness.is_ready(),
+        "a post-start mask failure must revoke the accepted UI state"
+    );
+}
+
+#[test]
 fn lifecycle_exit_codes_distinguish_process_ui_and_cleanup_failures() {
     let removed = CleanupResult::Removed { attempts: 1 };
     let retained = CleanupResult::Retained {

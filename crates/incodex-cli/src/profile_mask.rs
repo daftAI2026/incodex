@@ -148,10 +148,13 @@ fn base64_encode(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::CString;
     use std::fs;
+    use std::os::unix::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
+    use std::process::Command;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -256,6 +259,47 @@ mod tests {
 
         let error = resolve_profile_mask(true, Some("Local"), Some(&link)).unwrap_err();
         assert!(error.contains("symlink"), "{error}");
+    }
+
+    #[test]
+    fn avatar_fifo_helper() {
+        let Some(path) = std::env::var_os("INCODEX_FIFO_AVATAR_TEST") else {
+            return;
+        };
+        let error = resolve_profile_mask(true, Some("Local"), Some(Path::new(&path)))
+            .expect_err("FIFO must be rejected");
+        assert!(error.contains("ordinary file"), "{error}");
+    }
+
+    #[test]
+    fn avatar_validation_rejects_a_fifo_without_blocking() {
+        let root = temp_root();
+        let fifo = root.join("avatar.png");
+        let raw = CString::new(fifo.as_os_str().as_bytes()).expect("FIFO path");
+        assert_eq!(unsafe { libc::mkfifo(raw.as_ptr(), 0o600) }, 0);
+
+        let mut child = Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "profile_mask::tests::avatar_fifo_helper",
+                "--nocapture",
+            ])
+            .env("INCODEX_FIFO_AVATAR_TEST", &fifo)
+            .spawn()
+            .expect("FIFO helper");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(status) = child.try_wait().expect("FIFO helper status") {
+                assert!(status.success(), "FIFO helper rejected the contract");
+                break;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("avatar validation blocked while opening a FIFO");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]

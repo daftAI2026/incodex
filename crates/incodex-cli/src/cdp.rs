@@ -391,6 +391,13 @@ pub fn start_lifecycle_monitor(
     thread::spawn(move || monitor_primary_target(debug_port, &primary_target_id, &process_alive));
 }
 
+pub(crate) fn monitor_profile_mask_health(
+    _debug_port: u16,
+    _process_alive: &AtomicBool,
+) -> Result<(), String> {
+    Ok(())
+}
+
 fn monitor_primary_target(debug_port: u16, primary_target_id: &str, process_alive: &AtomicBool) {
     let mut primary_target_id = primary_target_id.to_string();
     let mut missing_polls = 0u8;
