@@ -1,5 +1,6 @@
 use super::*;
 use crate::profile_mask::{ProfileAvatar, ProfileMask};
+use std::collections::HashSet;
 use std::net::Ipv4Addr;
 use std::time::Instant;
 
@@ -218,12 +219,13 @@ fn profile_payload_is_null_outside_the_exact_top_level_codex_page() {
 
 #[test]
 fn persistent_script_registration_is_once_per_target_across_retries() {
-    assert!(should_register_persistent_script(None, "main"));
-    assert!(!should_register_persistent_script(Some("main"), "main"));
-    assert!(should_register_persistent_script(
-        Some("main"),
-        "replacement"
-    ));
+    let mut registered = HashSet::new();
+    assert!(should_register_persistent_script(&registered, "main"));
+    registered.insert("main".to_string());
+    assert!(!should_register_persistent_script(&registered, "main"));
+    assert!(should_register_persistent_script(&registered, "replacement"));
+    registered.insert("replacement".to_string());
+    assert!(!should_register_persistent_script(&registered, "main"));
 }
 
 #[test]
