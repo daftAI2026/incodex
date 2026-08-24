@@ -746,6 +746,43 @@ fn async_recreation_after_proven_delete_is_observed_before_removed() {
 }
 
 #[test]
+fn wait_and_burn_quiesces_session_helpers_before_first_burn() {
+    let root = temp_root();
+    let app = fake_app(&root);
+    let user = root.join("home");
+    let source = root.join("codex");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("auth.json"), "{}\n").unwrap();
+    let plan = prepare_incognito_open(&app, &user, &source, 1).unwrap();
+    let events = std::cell::RefCell::new(Vec::new());
+
+    let (_process, cleanup) = wait_and_burn_with_quiescence(
+        &plan,
+        &user,
+        0,
+        |_| {
+            Ok(OpenProcessResult::Exited {
+                code: 0,
+                ui_ready: true,
+            })
+        },
+        |session_root| {
+            assert_eq!(session_root, plan.session_root);
+            events.borrow_mut().push("quiesce");
+            Ok(())
+        },
+        |session_root, expected| {
+            events.borrow_mut().push("burn");
+            burn_session_home(session_root, expected)
+        },
+    )
+    .unwrap();
+
+    assert!(cleanup.removed());
+    assert_eq!(events.into_inner(), vec!["quiesce", "burn"]);
+}
+
+#[test]
 fn spawn_error_still_burns() {
     let root = temp_root();
     let app = fake_app(&root);
