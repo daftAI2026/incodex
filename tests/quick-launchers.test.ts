@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 scripts/setup-quick-launchers.sh 的本地生成器，依赖 macOS unzip 读取 Alfred 导入包
- * [OUTPUT]: 验证 Raycast/Alfred 产物的幂等性、官方导入边界、所有权与安全卸载契约
- * [POS]: tests 的 Quick Launchers 产品契约，阻止生成器写入 Raycast/Alfred 私有配置或伪造 TTY 确认
+ * [OUTPUT]: 验证 Raycast/Alfred 产物的幂等性、官方导入边界、所有权与发布事务契约
+ * [POS]: tests 的 Quick Launchers 产品契约，阻止生成器写入 Raycast/Alfred 私有配置或暴露不支持的卸载路由
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { describe, expect, test } from "bun:test";

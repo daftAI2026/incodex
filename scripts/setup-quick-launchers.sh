@@ -3,9 +3,7 @@
 # [OUTPUT]: 向 Raycast 标准 Script Commands 目录写入 Incodex 专属脚本，并生成稳定 Bundle ID 的 Alfred .alfredworkflow 导入包
 # [POS]: scripts 的可选 Quick Launchers 安装器，对齐 Mole 的公开脚本目录但不修改 Raycast/Alfred 私有配置
 # [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
-
 set -euo pipefail
-
 OWNER_MARKER="incodex-quick-launchers owner=daftAI2026/incodex schema=1"
 ROOT="${INCODEX_QUICK_LAUNCHERS_ROOT:-$HOME/.incodex/quick-launchers}"
 MARKER="$ROOT/.incodex-quick-launchers"
@@ -16,12 +14,16 @@ ALFRED_WORKFLOW="$ALFRED_DIR/Incodex Quick Launchers.alfredworkflow"
 OWNED_KEYS=(raycast-open raycast-status raycast-doctor alfred-workflow)
 MARKER_TOKEN_VALUE=""
 MARKER_MANIFEST_HASH=""
-
+INSTALL_STAGE=""
+INSTALL_BACKUP=""
 die() {
     printf 'Error: %s\n' "$1" >&2
     exit 1
 }
-
+cleanup_install() {
+    if [[ -n "$INSTALL_STAGE" ]]; then rm -rf "$INSTALL_STAGE"; fi
+    if [[ -n "$INSTALL_BACKUP" ]]; then rm -rf "$INSTALL_BACKUP"; fi
+}
 resolve_incodex() {
     local candidate
     for candidate in incodex inc; do
@@ -32,18 +34,15 @@ resolve_incodex() {
     done
     die "incodex was not found in PATH; install the CLI first"
 }
-
 shell_quote() {
     printf '%q' "$1"
 }
-
 assert_path_not_redirected() {
     local raw_path="$1"
     local label="$2"
     local path="$raw_path"
     local probe
     local parent
-
     if [[ "$path" != /* ]]; then
         path="$PWD/$path"
     fi
@@ -52,7 +51,6 @@ assert_path_not_redirected() {
             die "$label contains '..'; refusing launcher filesystem changes"
             ;;
     esac
-
     probe="$path"
     while :; do
         case "$probe" in
@@ -73,7 +71,6 @@ assert_path_not_redirected() {
         probe="$parent"
     done
 }
-
 assert_directory_not_redirected() {
     local path="$1"
     local label="$2"
@@ -84,7 +81,6 @@ assert_directory_not_redirected() {
         die "$label is not a directory; refusing launcher filesystem changes"
     fi
 }
-
 inspect_owned_directories() {
     assert_path_not_redirected "$ROOT" "launcher root"
     assert_path_not_redirected "$RAYCAST_DIR" "Raycast launcher directory"
@@ -99,16 +95,13 @@ inspect_owned_directories() {
         die "ownership manifest is a symlink; refusing launcher filesystem changes"
     fi
 }
-
 prepare_owned_directories() {
     inspect_owned_directories
     mkdir -p "$ROOT"
     inspect_owned_directories
 }
-
 require_owned_root() {
     local parsed
-
     if [[ ! -f "$MARKER" ]]; then
         die "ownership marker is missing; refusing to remove launcher files"
     fi
@@ -144,7 +137,6 @@ require_owned_root() {
     MARKER_TOKEN_VALUE="${parsed%%$'\t'*}"
     MARKER_MANIFEST_HASH="${parsed#*$'\t'}"
 }
-
 owned_staged_relative_path() {
     case "$1" in
         raycast-open) printf '%s\n' "raycast/incodex-open.sh" ;;
@@ -154,7 +146,6 @@ owned_staged_relative_path() {
         *) die "unknown launcher manifest key: $1" ;;
     esac
 }
-
 owned_artifact_path() {
     case "$1" in
         raycast-open) printf '%s\n' "$RAYCAST_DIR/incodex-open.sh" ;;
@@ -164,11 +155,9 @@ owned_artifact_path() {
         *) die "unknown launcher manifest key: $1" ;;
     esac
 }
-
 sha256_file() {
     /usr/bin/shasum -a 256 "$1" | /usr/bin/awk '{print $1}'
 }
-
 manifest_hash() {
     local key="$1"
     local line
@@ -189,7 +178,6 @@ manifest_hash() {
     fi
     printf '%s\n' "$line"
 }
-
 require_manifest() {
     local actual_manifest_hash
     if [[ ! -f "$MANIFEST" ]]; then
@@ -230,7 +218,6 @@ require_manifest() {
         die "ownership manifest is missing or invalid; refusing launcher filesystem changes"
     fi
 }
-
 verify_installed_artifacts() {
     local key
     local path
@@ -243,7 +230,6 @@ verify_installed_artifacts() {
         fi
     done
 }
-
 assert_fresh_targets_absent() {
     local key
     local path
@@ -257,7 +243,6 @@ assert_fresh_targets_absent() {
         die "refusing to overwrite an unowned launcher manifest: $MANIFEST"
     fi
 }
-
 preflight_install_ownership() {
     if [[ -e "$MARKER" ]]; then
         require_owned_root
@@ -267,7 +252,6 @@ preflight_install_ownership() {
         assert_fresh_targets_absent
     fi
 }
-
 new_marker_token() {
     local token
     token="$(/usr/bin/od -An -N16 -tx1 /dev/urandom | /usr/bin/tr -d ' \n')"
@@ -276,7 +260,6 @@ new_marker_token() {
     fi
     printf '%s\n' "$token"
 }
-
 write_manifest() {
     local base="$1"
     local token="$2"
@@ -449,22 +432,18 @@ write_raycast_script() {
     local command="$5"
     local quoted_binary="$6"
     local temporary="$target.tmp.$$"
-
     cat >"$temporary" <<EOF
 #!/bin/bash
 # $OWNER_MARKER
-
 # Required parameters:
 # @raycast.schemaVersion 1
 # @raycast.title $title
 # @raycast.mode $mode
-
 # Optional parameters:
 # @raycast.packageName Incodex
 # @raycast.description $description
 # @raycast.icon 🕶️
 # @raycast.platform macos
-
 set -euo pipefail
 INCODEX_BIN=$quoted_binary
 if [[ ! -x "\$INCODEX_BIN" ]]; then
@@ -472,7 +451,6 @@ if [[ ! -x "\$INCODEX_BIN" ]]; then
     exit 1
 fi
 EOF
-
     if [[ "$command" == "open" ]]; then
         cat >>"$temporary" <<'EOF'
 nohup "$INCODEX_BIN" open </dev/null >/dev/null 2>&1 &
@@ -490,7 +468,6 @@ EOF
     chmod 0755 "$temporary"
     mv -f "$temporary" "$target"
 }
-
 write_raycast_launchers() {
     local quoted_binary="$1"
     mkdir -p "$RAYCAST_DIR"
@@ -516,7 +493,6 @@ write_raycast_launchers() {
         "doctor" \
         "$quoted_binary"
 }
-
 write_alfred_runner() {
     local target="$1"
     local quoted_binary="$2"
@@ -543,7 +519,6 @@ esac
 EOF
     chmod 0755 "$target"
 }
-
 write_alfred_plist() {
     local target="$1"
     cat >"$target" <<'EOF'
@@ -658,14 +633,12 @@ write_alfred_plist() {
 </plist>
 EOF
 }
-
 write_alfred_workflow() {
     local quoted_binary="$1"
     local temporary_dir
     local temporary_archive="$ALFRED_WORKFLOW.tmp.$$"
     temporary_dir="$(mktemp -d "${TMPDIR:-/tmp}/incodex-alfred.XXXXXX")"
     trap 'rm -rf "$temporary_dir" "$temporary_archive"' RETURN
-
     mkdir -p "$ALFRED_DIR"
     write_alfred_runner "$temporary_dir/run.sh" "$quoted_binary"
     write_alfred_plist "$temporary_dir/info.plist"
@@ -678,7 +651,6 @@ write_alfred_workflow() {
     rm -rf "$temporary_dir"
     trap - RETURN
 }
-
 maybe_open_alfred_import() {
     if [[ "${INCODEX_LAUNCHERS_NO_OPEN:-0}" == "1" ]]; then
         return
@@ -698,62 +670,126 @@ maybe_open_alfred_import() {
         printf 'Alfred was not found; double-click this package after installing Alfred:\n  %s\n' "$ALFRED_WORKFLOW"
     fi
 }
-
+publish_staged() {
+    local stage="$1"
+    local backup="$2"
+    local marker_token="$3"
+    local key
+    local path
+    local relative
+    local manifest_digest
+    local failed=0
+    local rollback_failed=0
+    local -a backed_up=()
+    local -a published=()
+    local marker_backed=0
+    local manifest_backed=0
+    local new_marker=0
+    local new_manifest=0
+    local i
+    manifest_digest="$(sha256_file "$stage/manifest.sha256")"
+    {
+        printf '%s\n' "$OWNER_MARKER"
+        printf 'token=%s\n' "$marker_token"
+        printf 'manifest-sha256=%s\n' "$manifest_digest"
+    } >"$stage/.incodex-quick-launchers"
+    inspect_owned_directories
+    mkdir -p "$RAYCAST_DIR" "$ALFRED_DIR" "$backup/raycast" "$backup/alfred"
+    if [[ ! -w "$RAYCAST_DIR" ]] || [[ ! -w "$ALFRED_DIR" ]]; then
+        die "launcher destination is not writable; no launcher files were published"
+    fi
+    for key in "${OWNED_KEYS[@]}"; do
+        path="$(owned_artifact_path "$key")"
+        if [[ -e "$path" ]]; then
+            relative="$(owned_staged_relative_path "$key")"
+            if mv -f "$path" "$backup/$relative"; then
+                backed_up+=("$key")
+            else
+                failed=1
+                break
+            fi
+        fi
+    done
+    if (( failed == 0 )) && [[ -e "$MANIFEST" ]]; then
+        if mv -f "$MANIFEST" "$backup/manifest.sha256"; then manifest_backed=1; else failed=1; fi
+    fi
+    if (( failed == 0 )) && [[ -e "$MARKER" ]]; then
+        if mv -f "$MARKER" "$backup/.incodex-quick-launchers"; then marker_backed=1; else failed=1; fi
+    fi
+    if (( failed == 0 )); then
+        for key in "${OWNED_KEYS[@]}"; do
+            relative="$(owned_staged_relative_path "$key")"
+            path="$(owned_artifact_path "$key")"
+            if mv -f "$stage/$relative" "$path"; then published+=("$key"); else failed=1; break; fi
+        done
+    fi
+    if (( failed == 0 )); then
+        if mv -f "$stage/manifest.sha256" "$MANIFEST"; then new_manifest=1; else failed=1; fi
+    fi
+    if (( failed == 0 )); then
+        if mv -f "$stage/.incodex-quick-launchers" "$MARKER"; then new_marker=1; else failed=1; fi
+    fi
+    if (( failed != 0 )); then
+        if (( new_marker )); then rm -f "$MARKER" || rollback_failed=1; fi
+        if (( new_manifest )); then rm -f "$MANIFEST" || rollback_failed=1; fi
+        for ((i=${#published[@]} - 1; i >= 0; i--)); do
+            key="${published[i]}"
+            path="$(owned_artifact_path "$key")"
+            rm -f "$path" || rollback_failed=1
+        done
+        if (( marker_backed )); then mv -f "$backup/.incodex-quick-launchers" "$MARKER" || rollback_failed=1; fi
+        if (( manifest_backed )); then mv -f "$backup/manifest.sha256" "$MANIFEST" || rollback_failed=1; fi
+        for ((i=${#backed_up[@]} - 1; i >= 0; i--)); do
+            key="${backed_up[i]}"
+            relative="$(owned_staged_relative_path "$key")"
+            path="$(owned_artifact_path "$key")"
+            mv -f "$backup/$relative" "$path" || rollback_failed=1
+        done
+        if (( rollback_failed != 0 )); then
+            die "launcher publication failed and rollback failed; refusing to claim ownership"
+        fi
+        die "launcher publication failed; previous launcher state restored"
+    fi
+}
 install_launchers() {
     local binary
     local quoted_binary
     local stage
     local marker_token
-    local manifest_digest
+    local backup
     local final_raycast_dir="$RAYCAST_DIR"
     local final_alfred_dir="$ALFRED_DIR"
     local final_alfred_workflow="$ALFRED_WORKFLOW"
     binary="$(resolve_incodex)"
     quoted_binary="$(shell_quote "$binary")"
-
     prepare_owned_directories
     preflight_install_ownership
     marker_token="$(new_marker_token)"
     MARKER_TOKEN_VALUE="$marker_token"
-
     stage="$(mktemp -d "${TMPDIR:-/tmp}/incodex-launchers.XXXXXX")"
+    INSTALL_STAGE="$stage"
+    trap cleanup_install EXIT
+    backup="$(mktemp -d "${TMPDIR:-/tmp}/incodex-launchers-backup.XXXXXX")"
+    INSTALL_BACKUP="$backup"
     RAYCAST_DIR="$stage/raycast"
     ALFRED_DIR="$stage/alfred"
     ALFRED_WORKFLOW="$ALFRED_DIR/Incodex Quick Launchers.alfredworkflow"
     write_raycast_launchers "$quoted_binary"
     write_alfred_workflow "$quoted_binary"
     write_manifest "$stage" "$marker_token"
-
     RAYCAST_DIR="$final_raycast_dir"
     ALFRED_DIR="$final_alfred_dir"
     ALFRED_WORKFLOW="$final_alfred_workflow"
-    inspect_owned_directories
-    mkdir -p "$RAYCAST_DIR" "$ALFRED_DIR"
-    if [[ ! -w "$RAYCAST_DIR" ]] || [[ ! -w "$ALFRED_DIR" ]]; then
-        rm -rf "$stage"
-        die "launcher destination is not writable; no launcher files were published"
-    fi
-
-    mv -f "$stage/raycast/incodex-open.sh" "$RAYCAST_DIR/incodex-open.sh"
-    mv -f "$stage/raycast/incodex-status.sh" "$RAYCAST_DIR/incodex-status.sh"
-    mv -f "$stage/raycast/incodex-doctor.sh" "$RAYCAST_DIR/incodex-doctor.sh"
-    mv -f "$stage/alfred/Incodex Quick Launchers.alfredworkflow" "$ALFRED_WORKFLOW"
-    mv -f "$stage/manifest.sha256" "$MANIFEST"
-    manifest_digest="$(sha256_file "$MANIFEST")"
-    {
-        printf '%s\n' "$OWNER_MARKER"
-        printf 'token=%s\n' "$marker_token"
-        printf 'manifest-sha256=%s\n' "$manifest_digest"
-    } >"$MARKER.tmp.$$"
-    mv -f "$MARKER.tmp.$$" "$MARKER"
-    rm -rf "$stage"
-
+    publish_staged "$stage" "$backup" "$marker_token"
+    trap - EXIT
+    cleanup_install
+    INSTALL_STAGE=""
+    INSTALL_BACKUP=""
     printf 'Quick launchers are ready.\n'
     printf 'Raycast v2: Settings > Script Commands > Script Folders > +:\n  %s\n' "$RAYCAST_DIR"
     printf 'Alfred package:\n  %s\n' "$ALFRED_WORKFLOW"
     maybe_open_alfred_import
 }
-
 case "${1:-install}" in
     install) install_launchers ;;
     *) die "usage: setup-quick-launchers.sh [install]" ;;
