@@ -1,6 +1,6 @@
 #!/bin/bash
 # [INPUT]: 依赖 macOS 的 zip/unzip/open/osascript 与用户显式的 Raycast/Alfred 导入操作
-# [OUTPUT]: 生成一个运行时解析 incodex/inc 的 runner.sh、三个 Raycast 薄 wrapper 与标准 Alfred 导入包
+# [OUTPUT]: 生成一个运行时解析 incodex/inc 的 runner.sh、三个 Raycast 薄 wrapper；仅在检测到 Alfred 时生成标准导入包
 # [POS]: scripts 的可选 Quick Launchers 安装器；只管理 Incodex 生成文件，不修改 provider 私有配置
 # [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 set -euo pipefail
@@ -9,6 +9,8 @@ ROOT="${INCODEX_QUICK_LAUNCHERS_ROOT:-$HOME/.incodex/quick-launchers}"
 RAYCAST_DIR="${INCODEX_RAYCAST_SCRIPT_DIR:-$HOME/Library/Application Support/Raycast/script-commands}"
 ALFRED_DIR="$ROOT/alfred"
 ALFRED_WORKFLOW="$ALFRED_DIR/Incodex Quick Launchers.alfredworkflow"
+ALFRED_AVAILABLE=0
+ALFRED_APP=""
 die() {
     printf 'Error: %s\n' "$1" >&2
     exit 1
@@ -36,17 +38,40 @@ assert_directory_not_redirected() {
     if [[ -L "$path" ]]; then die "$label is a symlink; refusing launcher filesystem changes"; fi
     if [[ -e "$path" && ! -d "$path" ]]; then die "$label is not a directory; refusing launcher filesystem changes"; fi
 }
+detect_alfred() {
+    ALFRED_AVAILABLE=0
+    ALFRED_APP=""
+    if [[ -n "${INCODEX_ALFRED_APP:-}" ]]; then
+        if [[ -d "$INCODEX_ALFRED_APP" ]]; then
+            ALFRED_AVAILABLE=1
+            ALFRED_APP="$INCODEX_ALFRED_APP"
+        fi
+        return
+    fi
+    if [[ -d "/Applications/Alfred 5.app" ]]; then
+        ALFRED_AVAILABLE=1
+        ALFRED_APP="/Applications/Alfred 5.app"
+    elif [[ -d "/Applications/Alfred 4.app" ]]; then
+        ALFRED_AVAILABLE=1
+        ALFRED_APP="/Applications/Alfred 4.app"
+    elif [[ -d "$HOME/Library/Application Support/Alfred/Alfred.alfredpreferences" ]]; then
+        ALFRED_AVAILABLE=1
+    fi
+}
 inspect_directories() {
     assert_path_not_redirected "$ROOT" "launcher root"
     assert_path_not_redirected "$RAYCAST_DIR" "Raycast launcher directory"
-    assert_path_not_redirected "$ALFRED_DIR" "Alfred launcher directory"
     assert_directory_not_redirected "$ROOT" "launcher root"
     assert_directory_not_redirected "$RAYCAST_DIR" "Raycast launcher directory"
-    assert_directory_not_redirected "$ALFRED_DIR" "Alfred launcher directory"
+    if (( ALFRED_AVAILABLE )); then
+        assert_path_not_redirected "$ALFRED_DIR" "Alfred launcher directory"
+        assert_directory_not_redirected "$ALFRED_DIR" "Alfred launcher directory"
+    fi
 }
 prepare_directories() {
     inspect_directories
-    mkdir -p "$ROOT" "$RAYCAST_DIR" "$ALFRED_DIR"
+    mkdir -p "$ROOT" "$RAYCAST_DIR"
+    if (( ALFRED_AVAILABLE )); then mkdir -p "$ALFRED_DIR"; fi
     inspect_directories
 }
 is_generated_text() {
@@ -70,7 +95,7 @@ preflight_targets() {
     assert_target_safe "$RAYCAST_DIR/incodex-open.sh" text
     assert_target_safe "$RAYCAST_DIR/incodex-status.sh" text
     assert_target_safe "$RAYCAST_DIR/incodex-doctor.sh" text
-    assert_target_safe "$ALFRED_WORKFLOW" workflow
+    if (( ALFRED_AVAILABLE )); then assert_target_safe "$ALFRED_WORKFLOW" workflow; fi
 }
 shell_quote() {
     printf '%q' "$1"
@@ -313,28 +338,25 @@ write_alfred_workflow() {
 }
 maybe_open_alfred_import() {
     if [[ "${INCODEX_LAUNCHERS_NO_OPEN:-0}" == 1 ]]; then return; fi
-    local app="${INCODEX_ALFRED_APP:-}"
-    if [[ -z "$app" ]]; then
-        if [[ -d "/Applications/Alfred 5.app" ]]; then app="/Applications/Alfred 5.app"
-        elif [[ -d "/Applications/Alfred 4.app" ]]; then app="/Applications/Alfred 4.app"; fi
-    fi
-    if [[ -n "$app" && -d "$app" ]]; then
-        /usr/bin/open -a "$app" "$ALFRED_WORKFLOW"
-        printf 'Alfred import window opened; confirm the import in Alfred.\n'
-    else
-        printf 'Alfred was not found; double-click this package after installing Alfred:\n  %s\n' "$ALFRED_WORKFLOW"
-    fi
+    if [[ -n "$ALFRED_APP" ]]; then /usr/bin/open -a "$ALFRED_APP" "$ALFRED_WORKFLOW"
+    else /usr/bin/open "$ALFRED_WORKFLOW"; fi
+    printf 'Alfred import window opened; confirm the import in Alfred.\n'
 }
 setup_launchers() {
+    detect_alfred
     prepare_directories
     preflight_targets
     write_runner
     write_raycast_launchers
-    write_alfred_workflow
     printf 'Quick launchers are ready.\n'
     printf 'Raycast v2: Settings > Script Commands > Script Folders > +:\n  %s\n' "$RAYCAST_DIR"
-    printf 'Alfred package:\n  %s\n' "$ALFRED_WORKFLOW"
-    maybe_open_alfred_import
+    if (( ALFRED_AVAILABLE )); then
+        write_alfred_workflow
+        printf 'Alfred package:\n  %s\n' "$ALFRED_WORKFLOW"
+        maybe_open_alfred_import
+    else
+        printf 'Alfred not detected; skipped Alfred workflow generation.\n'
+    fi
 }
 case "${1:-install}" in
     install) setup_launchers ;;
