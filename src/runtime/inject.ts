@@ -1,8 +1,20 @@
+/**
+ * [INPUT]: 依赖 window 的 incognito/profile bootstrap 与 Codex 当前 renderer DOM
+ * [OUTPUT]: 对外提供帽子按钮、banner，以及仅限无痕 sidebar footer 的视觉遮罩
+ * [POS]: Electron Runtime 的共享 inject.js；不拥有账号、菜单、IPC 或持久化状态
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 import { STRIP_CLONE_ATTRS } from "./compatibility/default-adapter";
 import { isSearchLabel } from "./compatibility/search-labels";
 import { type CopyKey, translate, resolveLocale as matchLocale } from "./incognito-copy";
 import { iconFor, type IncognitoButtonIcon } from "./incognito-icon";
 import { deriveUiProbe } from "./incodex-ui-probe";
+import {
+  ensureProfileMask,
+  profileMaskHealth,
+  profileMaskNeedsInject,
+} from "./incognito-profile-mask";
 import { createOfficialTooltipTimingBridge } from "./official-tooltip-provider";
 import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement";
 import { createTooltipLifecycle, type TooltipLifecycle } from "./tooltip-lifecycle";
@@ -258,7 +270,7 @@ function landingStillMounted(): boolean {
 }
 
 function needsInject(): boolean {
-  return !buttonStillBesideSearch() || !landingStillMounted();
+  return !buttonStillBesideSearch() || !landingStillMounted() || profileMaskNeedsInject();
 }
 
 function buildButton(search: HTMLElement): HTMLElement {
@@ -379,6 +391,7 @@ function bannerDismissed(): boolean {
 
 function refreshUiProbe(): void {
   const incognito = isIncognitoWindow();
+  window.__incodexProfileMaskHealth = profileMaskHealth();
   window.__incodexUiProbe = deriveUiProbe({
     incognito,
     buttonPresent: buttonStillBesideSearch(),
@@ -561,6 +574,7 @@ function onKeydown(event: KeyboardEvent): void {
 
 function start(): void {
   if (window.__incodexStarted) {
+    ensureProfileMask();
     refreshUiProbe();
     return;
   }
@@ -569,6 +583,7 @@ function start(): void {
   ensureButton();
   apply();
   ensureLanding();
+  ensureProfileMask();
   refreshUiProbe();
   window.addEventListener("keydown", onKeydown, true);
   window.addEventListener("blur", dismissActiveTooltip);
@@ -583,10 +598,16 @@ function start(): void {
       if (!needsInject()) return;
       ensureButton();
       ensureLanding();
+      ensureProfileMask();
       refreshUiProbe();
     });
   });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  observer.observe(document.documentElement, {
+    attributes: true,
+    characterData: true,
+    childList: true,
+    subtree: true,
+  });
 }
 
 declare global {
@@ -594,6 +615,7 @@ declare global {
     __incodexStarted?: boolean;
     __incodexIncognito?: boolean;
     __incodexLocale?: string;
+    __incodexProfileMaskHealth?: boolean;
     __incodexUiProbe?: ReturnType<typeof deriveUiProbe>;
     incodex?: {
       requestIncognitoAction?: (payload: {
