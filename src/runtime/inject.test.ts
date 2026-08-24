@@ -16,7 +16,7 @@ const circleX = readFileSync(join(import.meta.dir, "../../assets/circle-x.svg"),
 
 describe("hat-glasses stays after header remount", () => {
   test("does not disconnect the observer once the button exists", () => {
-    expect(inject).not.toContain("observer.disconnect");
+    expect(inject).not.toMatch(/if \(!needsInject\(\)\)[\s\S]{0,80}observer\.disconnect\(\)/);
     expect(inject).not.toMatch(/if \(uiReady\(\)\) return;/);
   });
 
@@ -156,6 +156,17 @@ describe("incognito profile mask", () => {
     expect(inject).toContain("options.attributeFilter = PROFILE_OBSERVED_ATTRIBUTES");
     expect(inject).toMatch(/isIncognitoWindow\(\)\s*&&\s*window\.__incodexProfileMask !== null/);
     expect(inject).toContain("observer.observe(document.documentElement, observerOptions())");
+  });
+
+  test("reobserves when CDP enables masking after Runtime startup", () => {
+    expect(inject).toContain("__incodexMutationObserver");
+    expect(inject).toContain("__incodexProfileObservationEnabled");
+    expect(inject).toMatch(
+      /if \(window\.__incodexStarted\) \{[\s\S]*ensureMutationObserver\(\);[\s\S]*ensureProfileMask\(\);/,
+    );
+    expect(inject).toMatch(
+      /if \(observer && profileRequired && !window\.__incodexProfileObservationEnabled\) \{[\s\S]*observer\.disconnect\(\);[\s\S]*observer\.observe\(document\.documentElement, observerOptions\(\)\);/,
+    );
   });
 });
 
