@@ -24,7 +24,7 @@
 ## Features
 
 - **Incognito window**: Same login and settings as usual. No old chats, and this session does not join the everyday list
-- **Window continuity**: The incognito window opens at the main window's current size and position
+- **Follows the main window**: The incognito window opens at the same size and position
 - **Sidebar button**: After install, a hat-glasses control sits left of Search; `Shift+Command+N` also works
 - **Burns on close**: A normal close clears this temp session (including the isolated Chromium profile); login and settings stay
 - **Optional no-patch path**: `incodex open` launches an incognito window without touching the official signature
