@@ -5,7 +5,16 @@
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -120,6 +129,21 @@ describe("setup-quick-launchers.sh", () => {
     expect(source).not.toContain("Application Support/Raycast");
     expect(source).not.toContain("Alfred.alfredpreferences");
     expect(source).not.toMatch(/(?:curl|wget).*(?:main|master)/);
+  });
+
+  test("generated Raycast wrappers execute the quoted binary and reject a missing one", () => {
+    const context = fixture();
+    expect(runSetup(context).status).toBe(0);
+    const raycast = join(context.root, "raycast");
+
+    const status = spawnSync("/bin/bash", [join(raycast, "incodex-status.sh")], { encoding: "utf8" });
+    expect(status.status).toBe(0);
+    expect(status.stdout).toContain("incodex:status");
+
+    unlinkSync(join(context.fakeBin, "incodex"));
+    const open = spawnSync("/bin/bash", [join(raycast, "incodex-open.sh")], { encoding: "utf8" });
+    expect(open.status).not.toBe(0);
+    expect(open.stdout + open.stderr).toContain("no longer executable");
   });
 
   test("documents the optional launcher setup in both public readmes", () => {
