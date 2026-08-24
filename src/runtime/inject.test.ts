@@ -110,6 +110,17 @@ describe("incognito profile mask", () => {
     expect(profileMask).toContain("avatar.dataUrl");
     expect(profileMask).toContain("blobatarUri(name)");
   });
+
+  test("keeps ordinary observers on childList and opts into profile text attributes only when masked", () => {
+    expect(inject).toContain("function observerOptions(): MutationObserverInit");
+    expect(inject).toContain("childList: true");
+    expect(inject).toContain("subtree: true");
+    expect(inject).toContain("options.attributes = true");
+    expect(inject).toContain("options.characterData = true");
+    expect(inject).toContain("options.attributeFilter = PROFILE_OBSERVED_ATTRIBUTES");
+    expect(inject).toMatch(/isIncognitoWindow\(\)\s*&&\s*window\.__incodexProfileMask !== null/);
+    expect(inject).toContain("observer.observe(document.documentElement, observerOptions())");
+  });
 });
 
 describe("incodex tooltip lifecycle", () => {
