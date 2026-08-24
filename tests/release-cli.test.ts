@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
 const releaseYml = readFileSync(join(root, ".github/workflows/release.yml"), "utf8");
+const releaseFlow = readFileSync(join(root, ".claude/skills/release-flow/SKILL.md"), "utf8");
 const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
   scripts?: Record<string, string>;
 };
@@ -197,5 +198,11 @@ describe("release CLI artifacts", () => {
   test("creates the GitHub Release without auto-generated notes", () => {
     expect(releaseYml).toContain("generate_release_notes: false");
     expect(releaseYml).not.toContain("generate_release_notes: true");
+    expect(releaseYml).toMatch(
+      /# .*release-notes\/SKILL\.md[^\n]*\n\s*generate_release_notes: false/,
+    );
+    expect(releaseFlow).toContain("README.md");
+    expect(releaseFlow).toContain("README_CN.md");
+    expect(releaseFlow).toMatch(/before pushing the tag/i);
   });
 });
