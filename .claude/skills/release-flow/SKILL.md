@@ -34,6 +34,8 @@ This synchronizes `package.json`, the Cargo workspace and lockfile, the committe
 4. `bun run check` exits 0.
 5. `cargo test --locked --workspace --release` exits 0.
 6. `release.yml` still has `generate_release_notes: false` and contains no Bun CLI compile step or legacy Bun asset.
+7. Before pushing the tag, audit `README.md` and `README_CN.md` against the behavior being released, including feature wording, command examples, output examples, and version references.
+8. Before pushing the tag, draft the bilingual title and notes with `.claude/skills/release-notes/SKILL.md`. Publication still waits until the workflow has created the Release.
 
 ## Tag and publish
 
