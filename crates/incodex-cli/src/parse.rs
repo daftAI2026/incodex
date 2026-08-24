@@ -1,3 +1,10 @@
+/**
+ * [INPUT]: 接收 native CLI 的命令名与未解释的 flag 令牌
+ * [OUTPUT]: 对外提供 ParsedCli，供各命令实现消费已验证的命令边界
+ * [POS]: incodex-cli 的唯一命令语言入口；只在 open 命令暴露 profile mask 选项
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CliCommand {
     Menu,
@@ -64,6 +71,9 @@ pub struct ParsedCli {
     pub restore_app: bool,
     pub app: Option<String>,
     pub transaction: Option<String>,
+    pub mask: bool,
+    pub name: Option<String>,
+    pub avatar: Option<String>,
 }
 
 const SWITCH_FLAGS: &[&str] = &[
@@ -78,9 +88,10 @@ const SWITCH_FLAGS: &[&str] = &[
     "--json",
     "--deep",
     "--restore-app",
+    "--mask",
 ];
 
-const VALUE_FLAGS: &[&str] = &["--app", "--transaction"];
+const VALUE_FLAGS: &[&str] = &["--app", "--transaction", "--name", "--avatar"];
 
 pub fn parse_cli(args: &[String]) -> Result<ParsedCli, String> {
     let raw = args.first().map(String::as_str);
@@ -100,6 +111,9 @@ pub fn parse_cli(args: &[String]) -> Result<ParsedCli, String> {
     let restore_app = flags.iter().any(|flag| flag == "--restore-app");
     let app = value_after(flags, "--app")?;
     let transaction = value_after(flags, "--transaction")?;
+    let mask = flags.iter().any(|flag| flag == "--mask");
+    let name = value_after(flags, "--name")?;
+    let avatar = value_after(flags, "--avatar")?;
 
     if clone && live_flag {
         return Err("--clone and --live cannot be used together".to_string());
@@ -116,6 +130,32 @@ pub fn parse_cli(args: &[String]) -> Result<ParsedCli, String> {
         );
     }
 
+    if command != CliCommand::Open {
+        if mask {
+            return Err("--mask is only valid for open\n  incodex open --mask".to_string());
+        }
+        if name.is_some() {
+            return Err("--name is only valid for open\n  incodex open --mask --name <value>".to_string());
+        }
+        if avatar.is_some() {
+            return Err(
+                "--avatar is only valid for open\n  incodex open --mask --avatar <path>".to_string(),
+            );
+        }
+    }
+    if command == CliCommand::Open && !mask {
+        if name.is_some() {
+            return Err(
+                "--name requires --mask\n  incodex open --mask --name <value>".to_string(),
+            );
+        }
+        if avatar.is_some() {
+            return Err(
+                "--avatar requires --mask\n  incodex open --mask --avatar <path>".to_string(),
+            );
+        }
+    }
+
     let official = !clone && app.is_none();
     let live = matches!(command, CliCommand::Install | CliCommand::Uninstall) && official;
     Ok(ParsedCli {
@@ -130,6 +170,9 @@ pub fn parse_cli(args: &[String]) -> Result<ParsedCli, String> {
         restore_app,
         app,
         transaction,
+        mask,
+        name,
+        avatar,
     })
 }
 
@@ -224,9 +267,10 @@ mod tests {
     fn profile_name_and_avatar_require_mask() {
         for flag in ["--name", "--avatar"] {
             let result = parse_cli(&args(&["open", flag, "value"]));
+            let value_name = if flag == "--avatar" { "path" } else { "value" };
             assert_eq!(
                 result.unwrap_err(),
-                format!("{flag} requires --mask\n  incodex open --mask {flag} <value>")
+                format!("{flag} requires --mask\n  incodex open --mask {flag} <{value_name}>")
             );
         }
     }
