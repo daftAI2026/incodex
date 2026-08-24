@@ -2,6 +2,7 @@
 // file below the repository's size budget.
 use super::open_tests::{fake_app, temp_root};
 use super::*;
+use crate::profile_mask::{ProfileAvatar, ProfileMask};
 use std::fs;
 
 #[test]
@@ -104,4 +105,31 @@ fn locale_override_is_carried_into_the_cdp_injection_plan() {
     .unwrap();
     let plan = prepare_incognito_open(&app, &user, &source, 1).unwrap();
     assert_eq!(plan.locale.as_deref(), Some("zh-CN"));
+}
+
+#[test]
+fn profile_mask_is_carried_from_open_preparation_to_the_plan() {
+    let root = temp_root();
+    let app = fake_app(&root);
+    let user = root.join("home");
+    let source = root.join("codex");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("auth.json"), "{}\n").unwrap();
+    let profile_mask = ProfileMask {
+        name: "Temporary".into(),
+        avatar: ProfileAvatar::Generated {
+            seed: "Temporary".into(),
+        },
+    };
+
+    let plan = prepare_incognito_open_with_profile_mask(
+        &app,
+        &user,
+        &source,
+        1,
+        Some(profile_mask.clone()),
+    )
+    .unwrap();
+
+    assert_eq!(plan.profile_mask, Some(profile_mask));
 }

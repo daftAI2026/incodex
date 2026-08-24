@@ -1,4 +1,5 @@
 use super::*;
+use crate::profile_mask::{ProfileAvatar, ProfileMask};
 use std::net::Ipv4Addr;
 use std::time::Instant;
 
@@ -178,6 +179,24 @@ fn injected_ui_carries_locale_and_requires_button_and_banner_health() {
     let health = ui_ready_expression();
     assert!(health.contains("data-incodex-privacy-toggle"));
     assert!(health.contains("data-incodex-banner-host"));
+}
+
+#[test]
+fn injected_ui_carries_profile_mask_as_a_json_bootstrap_value() {
+    let source = inject_source_for_options(&InjectionOptions {
+        locale: Some("en-US".into()),
+        profile_mask: Some(ProfileMask {
+            name: "Temporary".into(),
+            avatar: ProfileAvatar::Generated {
+                seed: "Temporary".into(),
+            },
+        }),
+    });
+
+    assert!(source.contains(
+        "window.__incodexProfileMask={\"name\":\"Temporary\",\"avatar\":{\"seed\":\"Temporary\"}}"
+    ));
+    assert!(source.contains("window.__incodexLocale=\"en-US\""));
 }
 
 #[test]
