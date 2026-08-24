@@ -108,6 +108,17 @@ describe("setup-quick-launchers.sh", () => {
     expect(source).not.toMatch(/(?:curl|wget).*(?:main|master)/);
   });
 
+  test("documents the optional launcher setup in both public readmes", () => {
+    const install =
+      "curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/scripts/setup-quick-launchers.sh | bash";
+    for (const readme of ["README.md", "README_CN.md"]) {
+      const source = readFileSync(join(repo, readme), "utf8");
+      expect(source).toContain(install);
+      expect(source).toContain("Raycast");
+      expect(source).toContain("Alfred");
+    }
+  });
+
   test("uninstall removes only marker-owned artifacts and leaves user files alone", () => {
     const context = fixture();
     expect(runSetup(context).status).toBe(0);
