@@ -77,7 +77,7 @@ fn assert_menu_order(text: &str, expected: &[&str]) {
 #[test]
 fn native_tty_menu_prints_the_product_order_and_controls() {
     let home = scratch("menu");
-    let rust = run_tty(rust_bin(), &[], &[], &home, "Quit", "q");
+    let rust = run_tty(rust_bin(), &[], &[], &home, "Jump", "q");
     assert_eq!(rust.status, 0, "{}", visible(&rust.stdout));
     assert_eq!(rust.stderr, "");
     let rust = visible(&rust.stdout);
@@ -108,7 +108,7 @@ fn native_tty_menu_prints_the_product_order_and_controls() {
 #[test]
 fn native_tty_menu_erases_every_physical_line_before_redrawing() {
     let home = scratch("menu-clean-redraw");
-    let rust = run_tty(rust_bin(), &[], &[], &home, "Quit", "q");
+    let rust = run_tty(rust_bin(), &[], &[], &home, "Jump", "q");
     assert_eq!(rust.status, 0, "{}", visible(&rust.stdout));
     assert!(
         rust.stdout.starts_with("\u{1b}[?25l\u{1b}[H\r\u{1b}[2K"),
@@ -118,6 +118,19 @@ fn native_tty_menu_erases_every_physical_line_before_redrawing() {
     assert!(
         rust.stdout.matches("\r\u{1b}[2K").count() >= 15,
         "every banner, item, and control line must erase stale text: {:?}",
+        rust.stdout
+    );
+}
+
+#[test]
+fn native_tty_menu_clears_autowrapped_rows_before_redrawing() {
+    let home = scratch("menu-clean-wrapped-redraw");
+    let rust = run_tty_with_columns(rust_bin(), &[], &[], &home, "Jump", "q", 40);
+    assert_eq!(rust.status, 0, "{}", visible(&rust.stdout));
+    assert!(
+        rust.stdout
+            .starts_with("\u{1b}[?25l\u{1b}[H\u{1b}[J\r\u{1b}[2K"),
+        "the frame must clear wrapped continuation rows before drawing: {:?}",
         rust.stdout
     );
 }
@@ -136,7 +149,7 @@ fn native_menu_shows_the_cached_update_notice_and_shortcut() {
         &[],
         &[],
         &rust_home,
-        "Quit",
+        "Jump",
         "q",
     );
     let rust = visible(&rust.stdout);
