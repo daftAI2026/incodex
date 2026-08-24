@@ -14,6 +14,8 @@ RAYCAST_DIR="${INCODEX_RAYCAST_SCRIPT_DIR:-$HOME/Library/Application Support/Ray
 ALFRED_DIR="$ROOT/alfred"
 ALFRED_WORKFLOW="$ALFRED_DIR/Incodex Quick Launchers.alfredworkflow"
 OWNED_KEYS=(raycast-open raycast-status raycast-doctor alfred-workflow)
+MARKER_TOKEN_VALUE=""
+MARKER_MANIFEST_HASH=""
 
 die() {
     printf 'Error: %s\n' "$1" >&2
@@ -35,6 +37,43 @@ shell_quote() {
     printf '%q' "$1"
 }
 
+assert_path_not_redirected() {
+    local raw_path="$1"
+    local label="$2"
+    local path="$raw_path"
+    local probe
+    local parent
+
+    if [[ "$path" != /* ]]; then
+        path="$PWD/$path"
+    fi
+    case "/$path/" in
+        */../*)
+            die "$label contains '..'; refusing launcher filesystem changes"
+            ;;
+    esac
+
+    probe="$path"
+    while :; do
+        case "$probe" in
+            /|/tmp|/var|/private)
+                break
+                ;;
+        esac
+        if [[ -L "$probe" ]]; then
+            die "$label or one of its parent directories is a symlink: $probe"
+        fi
+        if [[ "$probe" == "$HOME" ]]; then
+            break
+        fi
+        parent="${probe%/*}"
+        if [[ -z "$parent" || "$parent" == "$probe" ]]; then
+            parent="/"
+        fi
+        probe="$parent"
+    done
+}
+
 assert_directory_not_redirected() {
     local path="$1"
     local label="$2"
@@ -47,6 +86,9 @@ assert_directory_not_redirected() {
 }
 
 inspect_owned_directories() {
+    assert_path_not_redirected "$ROOT" "launcher root"
+    assert_path_not_redirected "$RAYCAST_DIR" "Raycast launcher directory"
+    assert_path_not_redirected "$ALFRED_DIR" "Alfred launcher directory"
     assert_directory_not_redirected "$ROOT" "launcher root"
     assert_directory_not_redirected "$RAYCAST_DIR" "Raycast launcher directory"
     assert_directory_not_redirected "$ALFRED_DIR" "Alfred launcher directory"
@@ -65,12 +107,42 @@ prepare_owned_directories() {
 }
 
 require_owned_root() {
+    local parsed
+
     if [[ ! -f "$MARKER" ]]; then
         die "ownership marker is missing; refusing to remove launcher files"
     fi
-    if [[ "$(cat "$MARKER")" != "$OWNER_MARKER" ]]; then
-        die "ownership marker changed; refusing to remove launcher files"
+    if ! parsed="$(/usr/bin/awk -v owner="$OWNER_MARKER" '
+        NR == 1 {
+            if ($0 != owner) bad=1
+            next
+        }
+        NR == 2 {
+            if (length($0) != 38 || substr($0, 1, 6) != "token=" || substr($0, 7) ~ /[^0-9a-f]/) {
+                bad=1
+            } else {
+                token=substr($0, 7)
+            }
+            next
+        }
+        NR == 3 {
+            if (length($0) != 80 || substr($0, 1, 16) != "manifest-sha256=" || substr($0, 17) ~ /[^0-9a-f]/) {
+                bad=1
+            } else {
+                digest=substr($0, 17)
+            }
+            next
+        }
+        { bad=1 }
+        END {
+            if (NR != 3 || bad || token == "" || digest == "") exit 1
+            printf "%s\t%s\n", token, digest
+        }
+    ' "$MARKER")"; then
+        die "ownership marker is missing or invalid; refusing launcher filesystem changes"
     fi
+    MARKER_TOKEN_VALUE="${parsed%%$'\t'*}"
+    MARKER_MANIFEST_HASH="${parsed#*$'\t'}"
 }
 
 owned_staged_relative_path() {
@@ -100,15 +172,61 @@ sha256_file() {
 manifest_hash() {
     local key="$1"
     local line
-    line="$(/usr/bin/grep -F "$key" "$MANIFEST" 2>/dev/null || true)"
-    if [[ "$line" != *$'\t'"$key" ]] || [[ "${line%%$'\t'*}" == "$line" ]]; then
+    if ! line="$(/usr/bin/awk -F '\t' -v key="$key" '
+        $2 == key {
+            count++
+            value=$1
+        }
+        END {
+            if (count != 1) exit 1
+            print value
+        }
+    ' "$MANIFEST")"; then
         die "ownership manifest is incomplete; refusing launcher filesystem changes"
     fi
-    printf '%s\n' "${line%%$'\t'*}"
+    if [[ "${#line}" -ne 64 ]] || [[ "$line" == *[!0-9a-f]* ]]; then
+        die "ownership manifest contains an invalid hash; refusing launcher filesystem changes"
+    fi
+    printf '%s\n' "$line"
 }
 
 require_manifest() {
-    if [[ ! -f "$MANIFEST" ]] || ! /usr/bin/grep -Fxq "# $OWNER_MARKER" "$MANIFEST"; then
+    local actual_manifest_hash
+    if [[ ! -f "$MANIFEST" ]]; then
+        die "ownership manifest is missing or invalid; refusing launcher filesystem changes"
+    fi
+    actual_manifest_hash="$(sha256_file "$MANIFEST")"
+    if [[ "$actual_manifest_hash" != "$MARKER_MANIFEST_HASH" ]]; then
+        die "ownership manifest changed; refusing launcher filesystem changes"
+    fi
+    if ! /usr/bin/awk -F '\t' \
+        -v owner="$OWNER_MARKER" \
+        -v token="$MARKER_TOKEN_VALUE" \
+        'BEGIN {
+            split("raycast-open,raycast-status,raycast-doctor,alfred-workflow", names, ",")
+            for (i in names) expected[names[i]]=1
+        }
+        NR == 1 {
+            if ($0 != "# " owner) bad=1
+            next
+        }
+        NR == 2 {
+            if ($0 != "# token=" token) bad=1
+            next
+        }
+        NR >= 3 {
+            if (NF != 2 || $0 != $1 "\t" $2 || !($2 in expected) || seen[$2] > 0 || length($1) != 64 || $1 ~ /[^0-9a-f]/) {
+                bad=1
+            }
+            seen[$2]++
+            count++
+        }
+        END {
+            for (name in expected) {
+                if (seen[name] != 1) bad=1
+            }
+            if (NR != 6 || count != 4 || bad) exit 1
+        }' "$MANIFEST"; then
         die "ownership manifest is missing or invalid; refusing launcher filesystem changes"
     fi
 }
@@ -120,7 +238,7 @@ verify_installed_artifacts() {
     for key in "${OWNED_KEYS[@]}"; do
         path="$(owned_artifact_path "$key")"
         expected="$(manifest_hash "$key")"
-        if [[ ! -f "$path" ]] || [[ "$(sha256_file "$path")" != "$expected" ]]; then
+        if [[ -L "$path" ]] || [[ ! -f "$path" ]] || [[ "$(sha256_file "$path")" != "$expected" ]]; then
             die "launcher is modified; refusing to overwrite it: $path"
         fi
     done
@@ -131,7 +249,7 @@ assert_fresh_targets_absent() {
     local path
     for key in "${OWNED_KEYS[@]}"; do
         path="$(owned_artifact_path "$key")"
-        if [[ -e "$path" ]]; then
+        if [[ -e "$path" || -L "$path" ]]; then
             die "refusing to overwrite a launcher without installation ownership: $path"
         fi
     done
@@ -150,12 +268,22 @@ preflight_install_ownership() {
     fi
 }
 
+new_marker_token() {
+    local token
+    token="$(/usr/bin/od -An -N16 -tx1 /dev/urandom | /usr/bin/tr -d ' \n')"
+    if [[ "${#token}" -ne 32 ]] || [[ "$token" == *[!0-9a-f]* ]]; then
+        die "could not create an ownership token"
+    fi
+    printf '%s\n' "$token"
+}
+
 write_manifest() {
     local base="$1"
+    local token="$2"
     local target="$base/manifest.sha256"
     local key
     local relative
-    printf '# %s\n' "$OWNER_MARKER" >"$target"
+    printf '# %s\n# token=%s\n' "$OWNER_MARKER" "$token" >"$target"
     for key in "${OWNED_KEYS[@]}"; do
         relative="$(owned_staged_relative_path "$key")"
         printf '%s\t%s\n' "$(sha256_file "$base/$relative")" "$key" >>"$target"
@@ -510,6 +638,8 @@ install_launchers() {
     local binary
     local quoted_binary
     local stage
+    local marker_token
+    local manifest_digest
     local final_raycast_dir="$RAYCAST_DIR"
     local final_alfred_dir="$ALFRED_DIR"
     local final_alfred_workflow="$ALFRED_WORKFLOW"
@@ -518,6 +648,8 @@ install_launchers() {
 
     prepare_owned_directories
     preflight_install_ownership
+    marker_token="$(new_marker_token)"
+    MARKER_TOKEN_VALUE="$marker_token"
 
     stage="$(mktemp -d "${TMPDIR:-/tmp}/incodex-launchers.XXXXXX")"
     RAYCAST_DIR="$stage/raycast"
@@ -525,11 +657,12 @@ install_launchers() {
     ALFRED_WORKFLOW="$ALFRED_DIR/Incodex Quick Launchers.alfredworkflow"
     write_raycast_launchers "$quoted_binary"
     write_alfred_workflow "$quoted_binary"
-    write_manifest "$stage"
+    write_manifest "$stage" "$marker_token"
 
     RAYCAST_DIR="$final_raycast_dir"
     ALFRED_DIR="$final_alfred_dir"
     ALFRED_WORKFLOW="$final_alfred_workflow"
+    inspect_owned_directories
     mkdir -p "$RAYCAST_DIR" "$ALFRED_DIR"
     if [[ ! -w "$RAYCAST_DIR" ]] || [[ ! -w "$ALFRED_DIR" ]]; then
         rm -rf "$stage"
@@ -541,7 +674,12 @@ install_launchers() {
     mv -f "$stage/raycast/incodex-doctor.sh" "$RAYCAST_DIR/incodex-doctor.sh"
     mv -f "$stage/alfred/Incodex Quick Launchers.alfredworkflow" "$ALFRED_WORKFLOW"
     mv -f "$stage/manifest.sha256" "$MANIFEST"
-    printf '%s\n' "$OWNER_MARKER" >"$MARKER.tmp.$$"
+    manifest_digest="$(sha256_file "$MANIFEST")"
+    {
+        printf '%s\n' "$OWNER_MARKER"
+        printf 'token=%s\n' "$marker_token"
+        printf 'manifest-sha256=%s\n' "$manifest_digest"
+    } >"$MARKER.tmp.$$"
     mv -f "$MARKER.tmp.$$" "$MARKER"
     rm -rf "$stage"
 
@@ -563,12 +701,10 @@ uninstall_launchers() {
     for key in "${OWNED_KEYS[@]}"; do
         path="$(owned_artifact_path "$key")"
         expected="$(manifest_hash "$key")"
-        if [[ ! -e "$path" ]]; then
+        if [[ ! -e "$path" && ! -L "$path" ]]; then
             continue
         fi
-        if [[ -f "$path" ]] && [[ "$(sha256_file "$path")" == "$expected" ]]; then
-            rm -f "$path"
-        else
+        if [[ -L "$path" ]] || [[ ! -f "$path" ]] || [[ "$(sha256_file "$path")" != "$expected" ]]; then
             printf 'Skipped modified launcher: %s\n' "$path" >&2
             modified=1
         fi
@@ -578,6 +714,12 @@ uninstall_launchers() {
         die "modified launchers remain; ownership proof was preserved"
     fi
 
+    for key in "${OWNED_KEYS[@]}"; do
+        path="$(owned_artifact_path "$key")"
+        if [[ -e "$path" ]]; then
+            rm -f "$path"
+        fi
+    done
     rm -f "$MANIFEST" "$MARKER"
     rmdir "$ALFRED_DIR" "$ROOT" 2>/dev/null || true
     printf 'Removed Incodex-owned launcher files.\n'
