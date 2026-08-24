@@ -60,6 +60,25 @@ cargo install --locked --path crates/incodex-cli
 
 Homebrew 和脚本安装直接使用预编译的原生 Rust 二进制，不需要 Bun。从源码安装需要 [rustup](https://rustup.rs/)，仓库中的 `rust-toolchain.toml` 会选择受支持的 Rust 编译器；只有涉及应用集成时才需要已安装的 Codex / ChatGPT 桌面端，参与开发、重建 Electron Runtime 时还需要 [Bun](https://bun.sh) 1.3.14（见 `.bun-version`）。
 
+### Quick Launchers
+
+**Raycast 和 Alfred 设置**
+
+安装 Open、Status、Doctor 三个快捷入口：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/scripts/setup-quick-launchers.sh | bash
+```
+
+脚本会把 Raycast 命令写入 `~/Library/Application Support/Raycast/script-commands`；检测到 Alfred 时，才会生成标准 `.alfredworkflow` 包并打开 Alfred 的正常导入确认。Raycast 需要手动设置一次；v1 和 v2 加载的是同一套脚本，只是添加目录的入口不同：
+
+1. **Raycast v2：**打开 **Settings → Script Commands**，在 **Script Folders** 右侧点击 **+**。
+2. **Raycast v1：**打开 **Settings → Extensions**，点击 **+**，再选 **Add Script Directory**。
+3. 选择 `~/Library/Application Support/Raycast/script-commands`。
+4. 在 Raycast 中运行 **Reload Script Commands**。
+
+Raycast 提供可用的 `TERM` 时，Status 和 Doctor 直接在它的 `fullOutput` 中运行。没有可用的 `TERM` 时，会通过 Terminal、iTerm2、Alacritty、kitty、WezTerm、Ghostty、Hyper、WindTerm 或 Warp 启动；可以用 `INCODEX_LAUNCHER_APP=<name>` 指定。如果所选应用启动失败，会回退到 Terminal。Open 会直接打开无痕窗口。
+
 **Run**
 
 ```bash

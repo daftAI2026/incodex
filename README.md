@@ -60,6 +60,25 @@ cargo install --locked --path crates/incodex-cli
 
 Homebrew and script installs use prebuilt native Rust binaries and do not require Bun. A source install requires [rustup](https://rustup.rs/); the repository's `rust-toolchain.toml` selects the supported Rust compiler. An installed Codex / ChatGPT desktop app is needed only for app integration work. Contributors rebuilding the Electron Runtime also need [Bun](https://bun.sh) 1.3.14 (see `.bun-version`).
 
+### Quick Launchers
+
+**Raycast and Alfred setup**
+
+Install three launchers for Open, Status, and Doctor:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/scripts/setup-quick-launchers.sh | bash
+```
+
+The script writes Raycast commands to `~/Library/Application Support/Raycast/script-commands`; when Alfred is detected, it creates the standard `.alfredworkflow` package and opens Alfred's normal import confirmation. Raycast needs one manual setup; v1 and v2 load the same scripts, but expose the directory picker in different places:
+
+1. **Raycast v2:** open **Settings → Script Commands**, then click **+** beside **Script Folders**.
+2. **Raycast v1:** open **Settings → Extensions**, click **+**, then choose **Add Script Directory**.
+3. Select `~/Library/Application Support/Raycast/script-commands`.
+4. Run **Reload Script Commands** in Raycast.
+
+When Raycast provides a usable `TERM`, Status and Doctor run directly in its `fullOutput` pane. Without a usable `TERM`, they route through Terminal, iTerm2, Alacritty, kitty, WezTerm, Ghostty, Hyper, WindTerm, or Warp; set `INCODEX_LAUNCHER_APP=<name>` to choose one. If the selected app cannot be started, the launcher falls back to Terminal. Open launches the incognito window directly.
+
 **Run**
 
 ```bash
