@@ -71,7 +71,7 @@ const ADJECTIVES: [&str; 64] = [
     "Tidy",
     "Tranquil",
     "Whispering",
-    "Zephyr",
+    "Zealous",
     "Kindred",
     "Willowy",
     "Zesty",
