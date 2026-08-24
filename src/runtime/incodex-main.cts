@@ -140,6 +140,15 @@ function burnIncognitoHome() {
   }
 }
 
+function cleanupExitedSession(session, childOwner, options = {}) {
+  return safeHome.cleanupExitedSession(session, childOwner, {
+    userRoot: USER_ROOT,
+    quiesceSessionHelpers: instance.quiesceSessionHelpers,
+    log: logLaunch,
+    ...options,
+  });
+}
+
 function markSessionReady() {
   const session = sessionFromEnv();
   if (!session?.root) return;
@@ -527,40 +536,7 @@ async function launchIncognitoOnce() {
     });
     child.on("exit", (code) => {
       logLaunch("child-exit", { code, sessionId: session.sessionId });
-      const expected = {
-        userRoot: USER_ROOT,
-        sessionId: session.sessionId,
-        ino: session.ino,
-        dev: session.dev,
-      };
-      const childProof = safeHome.readBurnProof(session.root, USER_ROOT, session.sessionId);
-      let originalRemoved = Boolean(
-        childProof && childProof.ino === expected.ino && childProof.dev === expected.dev,
-      );
-      const tryBurn = (attempt) => {
-        const attemptExpected = safeHome.cleanupExpectedForAttempt(expected, originalRemoved);
-        try {
-          const removed = childOwner && !originalRemoved
-            ? safeHome.burnSessionHomeWithOwner(session.root, attemptExpected, childOwner)
-            : safeHome.burnSessionHome(session.root, attemptExpected);
-          if (removed) originalRemoved = true;
-        } catch (error) {
-          if (attempt < 5) {
-            setTimeout(() => tryBurn(attempt + 1), 250 * attempt);
-            return;
-          }
-          logLaunch("parent-burn-refused", { error: String(error) });
-          return;
-        }
-        // Thread-writer / plugin cache can recreate the folder after a
-        // successful rm. Keep sweeping for a short window.
-        if (attempt < 5 && (originalRemoved || fs.existsSync(session.root))) {
-          setTimeout(() => tryBurn(attempt + 1), 400 * attempt);
-        } else if (!fs.existsSync(session.root)) {
-          safeHome.clearBurnProof(USER_ROOT, session.sessionId);
-        }
-      };
-      tryBurn(1);
+      void cleanupExitedSession(session, childOwner);
       if (!settled) done({ ok: false, reason: "exited-early" });
     });
     try {
@@ -811,7 +787,13 @@ async function attachElectron() {
 
 const startupGate = attachElectron();
 if (typeof module !== "undefined") {
-  module.exports = { startupGate, prepareIncognitoSession, burnIncognitoSession };
+  module.exports = {
+    startupGate,
+    prepareIncognitoSession,
+    burnIncognitoSession,
+    cleanupExitedSession,
+    sessionProcessIdsFromPs: instance.sessionProcessIdsFromPs,
+  };
 }
 startupGate.catch((error) => {
   console.error("[incodex] main attach failed", error);

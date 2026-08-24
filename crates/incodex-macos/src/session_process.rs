@@ -86,7 +86,7 @@ fn contains_exact_environment_marker(command: &str, marker: &str) -> bool {
 
 fn session_process_ids(session_root: &Path) -> Result<Vec<i32>, String> {
     let output = Command::new("/bin/ps")
-        .args(["axeww", "-o", "pid=,command="])
+        .args(["axEww", "-o", "pid=,command="])
         .env("LC_ALL", "C")
         .output()
         .map_err(|error| format!("unable to inspect isolated helpers: {error}"))?;
@@ -124,6 +124,10 @@ fn wait_for_exit(mut pids: Vec<i32>, rounds: usize) -> Vec<i32> {
 }
 
 fn process_is_live(pid: i32) -> bool {
+    let mut status = 0;
+    if unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) } == pid {
+        return false;
+    }
     if unsafe { libc::kill(pid, 0) } == 0 {
         return true;
     }
@@ -172,7 +176,10 @@ mod tests {
 
         let result = quiesce_session_processes(&root);
         thread::sleep(Duration::from_millis(100));
-        let exited = child.try_wait().unwrap().is_some();
+        let exited = match child.try_wait() {
+            Ok(status) => status.is_some(),
+            Err(error) => error.raw_os_error() == Some(libc::ECHILD),
+        };
         if !exited {
             let _ = child.kill();
             let _ = child.wait();

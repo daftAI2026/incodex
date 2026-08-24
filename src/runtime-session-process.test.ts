@@ -87,13 +87,16 @@ describe("Runtime isolated helper cleanup", () => {
         stdio: "ignore",
       });
       await once(child, "spawn");
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       try {
         await quiesceSessionHelpers(root);
-        const exited = await Promise.race([
-          once(child, "exit").then(() => true),
-          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 300)),
-        ]);
+        const exited = child.exitCode != null || child.signalCode != null
+          ? true
+          : await Promise.race([
+            once(child, "exit").then(() => true),
+            new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 300)),
+          ]);
         expect(exited).toBe(true);
       } finally {
         if (child.exitCode == null && child.signalCode == null) child.kill("SIGKILL");
