@@ -135,19 +135,20 @@ pub fn parse_cli(args: &[String]) -> Result<ParsedCli, String> {
             return Err("--mask is only valid for open\n  incodex open --mask".to_string());
         }
         if name.is_some() {
-            return Err("--name is only valid for open\n  incodex open --mask --name <value>".to_string());
+            return Err(
+                "--name is only valid for open\n  incodex open --mask --name <value>".to_string(),
+            );
         }
         if avatar.is_some() {
             return Err(
-                "--avatar is only valid for open\n  incodex open --mask --avatar <path>".to_string(),
+                "--avatar is only valid for open\n  incodex open --mask --avatar <path>"
+                    .to_string(),
             );
         }
     }
     if command == CliCommand::Open && !mask {
         if name.is_some() {
-            return Err(
-                "--name requires --mask\n  incodex open --mask --name <value>".to_string(),
-            );
+            return Err("--name requires --mask\n  incodex open --mask --name <value>".to_string());
         }
         if avatar.is_some() {
             return Err(
