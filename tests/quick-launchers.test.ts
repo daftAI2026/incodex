@@ -37,6 +37,12 @@ function fixture() {
   return { home, root, raycast, fakeBin };
 }
 
+function enableAlfredApp(context: ReturnType<typeof fixture>): string {
+  const app = join(context.home, "Applications", "Alfred 5.app");
+  mkdirSync(app, { recursive: true });
+  return app;
+}
+
 function paths(context: ReturnType<typeof fixture>) {
   return {
     runner: join(context.root, "runner.sh"),
@@ -151,20 +157,39 @@ describe("setup-quick-launchers.sh", () => {
     assertThinRaycastWrapper(readFileSync(generated.open, "utf8"), "open");
     assertThinRaycastWrapper(readFileSync(generated.status, "utf8"), "status");
     assertThinRaycastWrapper(readFileSync(generated.doctor, "utf8"), "doctor");
+    expect(installed.stdout).toContain("Alfred not detected; skipped");
+    expect(existsSync(generated.workflow)).toBe(false);
+    expect(existsSync(join(context.root, "alfred"))).toBe(false);
+    expect(existsSync(join(context.root, "manifest.sha256"))).toBe(false);
+    expect(existsSync(join(context.root, ".install.lock"))).toBe(false);
+  });
 
+  test("generates the standard Alfred package only when Alfred is detected", () => {
+    const context = fixture();
+    const app = enableAlfredApp(context);
+    const installed = runSetup(context, [], { INCODEX_ALFRED_APP: app });
+    expect(installed.status).toBe(0);
+    const generated = paths(context);
     const alfredRunner = unzipEntry(generated.workflow, "run.sh");
     expect(alfredRunner).toContain(`# ${generatedMarker}`);
     expect(alfredRunner).toMatch(/^exec .*runner\.sh "\$\{1:-\}"$/m);
     expect(alfredRunner).not.toContain("INCODEX_BIN");
     expect(alfredRunner).not.toContain("command -v");
     expect(unzipEntry(generated.workflow, "info.plist")).toContain("com.daftai.incodex.quick-launchers");
-    expect(existsSync(join(context.root, "manifest.sha256"))).toBe(false);
-    expect(existsSync(join(context.root, ".install.lock"))).toBe(false);
+    expect(installed.stdout).toContain("Alfred package:");
+
+    const preferences = fixture();
+    mkdirSync(join(preferences.home, "Library", "Application Support", "Alfred", "Alfred.alfredpreferences"), {
+      recursive: true,
+    });
+    expect(runSetup(preferences).status).toBe(0);
+    expect(existsSync(paths(preferences).workflow)).toBe(true);
   });
 
   test("provider content does not depend on the installation PATH", () => {
     const context = fixture();
-    expect(runSetup(context, [], { PATH: "/usr/bin:/bin" }).status).toBe(0);
+    const app = enableAlfredApp(context);
+    expect(runSetup(context, [], { PATH: "/usr/bin:/bin", INCODEX_ALFRED_APP: app }).status).toBe(0);
     const generated = paths(context);
     const before = {
       runner: readFileSync(generated.runner, "utf8"),
@@ -177,7 +202,7 @@ describe("setup-quick-launchers.sh", () => {
     const secondBin = join(context.home, "second-bin");
     mkdirSync(secondBin, { recursive: true });
     writeExecutable(join(secondBin, "incodex"), "#!/bin/sh\nprintf '%s\\n' \"incodex-v2:$*\"\n");
-    expect(runSetup(context, [], { PATH: `${secondBin}:/usr/bin:/bin` }).status).toBe(0);
+    expect(runSetup(context, [], { PATH: `${secondBin}:/usr/bin:/bin`, INCODEX_ALFRED_APP: app }).status).toBe(0);
 
     expect(readFileSync(generated.runner, "utf8")).toBe(before.runner);
     expect(readFileSync(generated.open, "utf8")).toBe(before.open);
@@ -247,7 +272,8 @@ describe("setup-quick-launchers.sh", () => {
 
   test("Raycast and Alfred preserve terminal-specific Hyper, WindTerm, and Warp routing", () => {
     const context = fixture();
-    expect(runSetup(context).status).toBe(0);
+    const app = enableAlfredApp(context);
+    expect(runSetup(context, [], { INCODEX_ALFRED_APP: app }).status).toBe(0);
     const generated = paths(context);
     writeExecutable(
       join(context.fakeBin, "open"),
@@ -285,7 +311,7 @@ describe("setup-quick-launchers.sh", () => {
     const source = readFileSync(setupScript, "utf8");
     expect(source).toContain("$HOME/Library/Application Support/Raycast/script-commands");
     expect(source).not.toContain("com.raycast.macos.plist");
-    expect(source).not.toContain("Alfred.alfredpreferences");
+    expect(source).not.toContain("defaults write");
     expect(source).not.toMatch(/(?:curl|wget).*(?:main|master)/);
   });
 
@@ -324,7 +350,7 @@ describe("setup-quick-launchers.sh", () => {
     const retried = runSetup(context);
     expect(retried.status).toBe(0);
     const generated = paths(context);
-    for (const artifact of Object.values(generated)) {
+    for (const artifact of [generated.runner, generated.open, generated.status, generated.doctor]) {
       expect(existsSync(artifact)).toBe(true);
     }
     expect(runGenerated(context, generated.status, [], { TERM: "xterm" }).stdout).toContain("incodex:status");
@@ -350,10 +376,11 @@ describe("setup-quick-launchers.sh", () => {
       },
     ];
 
-    for (const prepare of cases) {
+    for (const [index, prepare] of cases.entries()) {
       const context = fixture();
       const foreign = prepare(context);
-      const installed = runSetup(context);
+      const extraEnv: Record<string, string> = index === 2 ? { INCODEX_ALFRED_APP: enableAlfredApp(context) } : {};
+      const installed = runSetup(context, [], extraEnv);
       expect(installed.status).not.toBe(0);
       expect(readFileSync(foreign, "utf8")).toContain("foreign");
       expect(existsSync(paths(context).status)).toBe(false);
@@ -398,7 +425,9 @@ describe("setup-quick-launchers.sh", () => {
         symlinkSync(victim, join(context.root, "alfred"));
       }
 
-      const installed = runSetup(context);
+      const extraEnv: Record<string, string> =
+        provider === "alfred" ? { INCODEX_ALFRED_APP: enableAlfredApp(context) } : {};
+      const installed = runSetup(context, [], extraEnv);
       expect(installed.status).not.toBe(0);
       expect(existsSync(join(victim, "runner.sh"))).toBe(false);
       expect(existsSync(join(victim, "incodex-open.sh"))).toBe(false);
