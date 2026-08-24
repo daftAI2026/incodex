@@ -356,6 +356,67 @@ function clearBurnProof(userRoot, sessionId) {
   }
 }
 
+async function cleanupExitedSession(session, childOwner, options = {}) {
+  const userRoot = options.userRoot;
+  const quiesce = options.quiesceSessionHelpers;
+  const readProof = options.readBurnProof ?? readBurnProof;
+  const burn = options.burnSessionHome ?? burnSessionHome;
+  const burnWithOwner = options.burnSessionHomeWithOwner ?? burnSessionHomeWithOwner;
+  const cleanupExpected = options.cleanupExpectedForAttempt ?? cleanupExpectedForAttempt;
+  const exists = options.exists ?? fs.existsSync;
+  const clearProof = options.clearBurnProof ?? clearBurnProof;
+  const wait = options.wait ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const log = options.log ?? (() => {});
+
+  try {
+    if (typeof quiesce !== "function") throw new Error("session helper quiescence is unavailable");
+    await quiesce(session.root);
+  } catch (error) {
+    log("parent-quiesce-refused", { error: String(error), sessionId: session.sessionId });
+    return false;
+  }
+
+  const expected = {
+    userRoot,
+    sessionId: session.sessionId,
+    ino: session.ino,
+    dev: session.dev,
+  };
+  const childProof = readProof(session.root, userRoot, session.sessionId);
+  let originalRemoved = Boolean(
+    childProof && childProof.ino === expected.ino && childProof.dev === expected.dev,
+  );
+
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    const attemptExpected = cleanupExpected(expected, originalRemoved);
+    try {
+      const removed = childOwner && !originalRemoved
+        ? burnWithOwner(session.root, attemptExpected, childOwner)
+        : burn(session.root, attemptExpected);
+      if (removed) originalRemoved = true;
+    } catch (error) {
+      if (attempt < 5) {
+        await wait(250 * attempt);
+        continue;
+      }
+      log("parent-burn-refused", { error: String(error), sessionId: session.sessionId });
+      return false;
+    }
+    if (attempt < 5 && (originalRemoved || exists(session.root))) {
+      await wait(400 * attempt);
+      continue;
+    }
+    break;
+  }
+
+  if (exists(session.root)) {
+    log("parent-burn-retained", { sessionId: session.sessionId });
+    return false;
+  }
+  clearProof(userRoot, session.sessionId);
+  return true;
+}
+
 function copySettings(home, sourceHome, liveBounds: any = null) {
   const homeStat = assertNotSymlink(home, "session home");
   if (!homeStat?.isDirectory()) throw new Error(`[incodex] session home missing: ${home}`);
@@ -627,6 +688,7 @@ export {
   writeBurnProof,
   readBurnProof,
   clearBurnProof,
+  cleanupExitedSession,
   copySettings,
   seedWindowState,
   resolveSourceHome,

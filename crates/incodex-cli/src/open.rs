@@ -346,6 +346,7 @@ pub fn wait_and_burn(
         user_root,
         retry_delay_ms,
         spawn_plan_with_owner,
+        incodex_macos::quiesce_session_processes,
         |root, expected, owner| match owner {
             Some(owner) => burn_session_home_with_owner(root, expected, owner),
             None => burn_session_home(root, expected),
@@ -581,19 +582,22 @@ where
                 cleanup: CleanupDisposition::Burn,
             })
         },
+        |_| Ok(()),
         |root, expected, _owner| burn(root, expected),
     )
 }
 
-fn wait_and_burn_with_owner<S, B>(
+fn wait_and_burn_with_owner<S, Q, B>(
     plan: &OpenPlan,
     user_root: &Path,
     retry_delay_ms: u64,
     spawn: S,
+    quiesce: Q,
     mut burn: B,
 ) -> Result<(OpenProcessResult, CleanupResult), String>
 where
     S: FnOnce(&OpenPlan) -> Result<SpawnOutcome, String>,
+    Q: FnOnce(&Path) -> Result<(), String>,
     B: FnMut(&Path, &BurnExpected<'_>, Option<&SessionOwnerSnapshot>) -> Result<bool, String>,
 {
     let outcome = match spawn(plan) {
@@ -613,13 +617,20 @@ where
     let cleanup = match outcome.cleanup {
         CleanupDisposition::Burn => {
             let mut spinner = crate::spinner::Spinner::start("Removing isolated session");
-            let cleanup = burn_with_retries_with_owner(
-                &plan.session_root,
-                &expected,
-                outcome.owner.as_ref(),
-                retry_delay_ms,
-                &mut burn,
-            );
+            let cleanup = match quiesce(&plan.session_root) {
+                Ok(()) => burn_with_retries_with_owner(
+                    &plan.session_root,
+                    &expected,
+                    outcome.owner.as_ref(),
+                    retry_delay_ms,
+                    &mut burn,
+                ),
+                Err(reason) => CleanupResult::Retained {
+                    attempts: 0,
+                    retained_path: plan.session_root.clone(),
+                    reason,
+                },
+            };
             spinner.stop();
             cleanup
         }
@@ -751,6 +762,9 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
     }
 }
 
+#[cfg(test)]
+#[path = "open_cleanup_tests.rs"]
+mod open_cleanup_tests;
 #[cfg(test)]
 #[path = "open_tests.rs"]
 mod open_tests;

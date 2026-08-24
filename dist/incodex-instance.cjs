@@ -7,6 +7,9 @@ exports.connectExisting = connectExisting;
 exports.connectExistingWithRetry = connectExistingWithRetry;
 exports.listenForRaise = listenForRaise;
 exports.singleFlight = singleFlight;
+exports.sessionProcessIdsFromPs = sessionProcessIdsFromPs;
+exports.quiesceSessionHelpers = quiesceSessionHelpers;
+const { execFile } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
@@ -121,6 +124,95 @@ function singleFlight(holder, start) {
     });
     return holder.current;
 }
+function sessionProcessIdsFromPs(snapshot, sessionRoot, currentPid = process.pid) {
+    if (typeof snapshot !== "string" ||
+        typeof sessionRoot !== "string" ||
+        !path.isAbsolute(sessionRoot) ||
+        /[\0\r\n]/.test(sessionRoot)) {
+        return [];
+    }
+    const marker = `INCODEX_SESSION_ROOT=${sessionRoot}`;
+    const pids = new Set();
+    for (const line of snapshot.split("\n")) {
+        const match = line.match(/^\s*(\d+)\s+(.+)$/);
+        if (!match)
+            continue;
+        const pid = Number(match[1]);
+        if (!Number.isSafeInteger(pid) || pid <= 0 || pid === currentPid)
+            continue;
+        const command = match[2];
+        let offset = command.indexOf(marker);
+        while (offset >= 0) {
+            const before = offset === 0 ? "" : command[offset - 1];
+            const after = command[offset + marker.length] ?? "";
+            if ((!before || /\s/.test(before)) && (!after || /\s/.test(after))) {
+                pids.add(pid);
+                break;
+            }
+            offset = command.indexOf(marker, offset + marker.length);
+        }
+    }
+    return [...pids].sort((left, right) => left - right);
+}
+function processSnapshot() {
+    return new Promise((resolve, reject) => {
+        execFile("/bin/ps", ["axEww", "-o", "pid=,command="], {
+            encoding: "utf8",
+            env: { ...process.env, LC_ALL: "C" },
+            maxBuffer: 8 * 1024 * 1024,
+        }, (error, stdout) => {
+            if (error)
+                reject(error);
+            else
+                resolve(stdout);
+        });
+    });
+}
+function signalProcesses(pids, signal) {
+    for (const pid of pids) {
+        try {
+            process.kill(pid, signal);
+        }
+        catch (error) {
+            if (error?.code !== "ESRCH")
+                throw error;
+        }
+    }
+}
+async function markedSessionProcesses(sessionRoot) {
+    return sessionProcessIdsFromPs(await processSnapshot(), sessionRoot);
+}
+async function waitForSessionProcesses(sessionRoot, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    let pids = await markedSessionProcesses(sessionRoot);
+    while (pids.length > 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        pids = await markedSessionProcesses(sessionRoot);
+    }
+    return pids;
+}
+async function quiesceSessionHelpers(sessionRoot) {
+    if (process.platform !== "darwin")
+        return;
+    let pids = await markedSessionProcesses(sessionRoot);
+    if (pids.length === 0)
+        return;
+    signalProcesses(pids, "SIGTERM");
+    pids = await waitForSessionProcesses(sessionRoot, 500);
+    if (pids.length > 0)
+        signalProcesses(pids, "SIGKILL");
+    pids = await waitForSessionProcesses(sessionRoot, 500);
+    if (pids.length > 0)
+        throw new Error("isolated helpers survived SIGKILL");
+    // Chromium helpers may be reparented just after the main child exits.
+    pids = await markedSessionProcesses(sessionRoot);
+    if (pids.length > 0) {
+        signalProcesses(pids, "SIGKILL");
+        pids = await waitForSessionProcesses(sessionRoot, 500);
+    }
+    if (pids.length > 0)
+        throw new Error("late isolated helpers survived SIGKILL");
+}
 if (typeof module !== "undefined")
     module.exports = {
         LOCK_NAME,
@@ -150,4 +242,6 @@ if (typeof module !== "undefined")
         connectExistingWithRetry,
         listenForRaise,
         singleFlight,
+        sessionProcessIdsFromPs,
+        quiesceSessionHelpers,
     };
