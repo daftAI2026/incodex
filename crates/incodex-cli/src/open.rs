@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 接收 ParsedCli、ProfileMask 与官方 Codex app 路径
+ * [OUTPUT]: 对外提供隔离 session 的 OpenPlan、spawn 生命周期与关窗清理
+ * [POS]: incodex open 的 native 编排器；ProfileMask 只沿当前 renderer 注入链路流动
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -14,7 +20,7 @@ use incodex_core::session::{
     create_session_home_for_open, handoff_session_owner, sweep_orphan_sessions,
     target_id_from_exec, BurnExpected, SessionHome, SessionOwnerSnapshot, WindowGeometry,
 };
-use incodex_core::{format_kv, format_ok, format_step, format_warn};
+use incodex_core::{format_ok, format_warn};
 
 use crate::app_bundle::resolve_executable;
 use crate::cdp::{
@@ -22,8 +28,7 @@ use crate::cdp::{
     launch_arg_prefix, start_lifecycle_monitor, start_primary_lifecycle_monitor, InjectionOptions,
     OFFICIAL_NEW_CODEX_URL,
 };
-use crate::parse::ParsedCli;
-use crate::CliFailure;
+use crate::profile_mask::ProfileMask;
 
 #[derive(Debug, Clone)]
 pub struct OpenPlan {
@@ -38,6 +43,7 @@ pub struct OpenPlan {
     pub session_dev: u64,
     pub debug_port: u16,
     pub locale: Option<String>,
+    pub profile_mask: Option<ProfileMask>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -195,6 +201,16 @@ pub fn prepare_incognito_open(
     source_home: &Path,
     pid: i32,
 ) -> Result<OpenPlan, String> {
+    prepare_incognito_open_with_profile_mask(app_path, user_root, source_home, pid, None)
+}
+
+pub fn prepare_incognito_open_with_profile_mask(
+    app_path: &Path,
+    user_root: &Path,
+    source_home: &Path,
+    pid: i32,
+    profile_mask: Option<ProfileMask>,
+) -> Result<OpenPlan, String> {
     let bin = resolve_executable(app_path)?;
     let live_geometry = incodex_macos::live_main_window_bounds(&bin)
         .ok()
@@ -205,7 +221,14 @@ pub fn prepare_incognito_open(
             width: bounds.width,
             height: bounds.height,
         });
-    prepare_incognito_open_with_geometry_from_bin(bin, user_root, source_home, pid, live_geometry)
+    prepare_incognito_open_with_geometry_from_bin(
+        bin,
+        user_root,
+        source_home,
+        pid,
+        live_geometry,
+        profile_mask,
+    )
 }
 
 #[cfg(test)]
@@ -217,7 +240,14 @@ fn prepare_incognito_open_with_geometry(
     live_geometry: Option<WindowGeometry>,
 ) -> Result<OpenPlan, String> {
     let bin = resolve_executable(app_path)?;
-    prepare_incognito_open_with_geometry_from_bin(bin, user_root, source_home, pid, live_geometry)
+    prepare_incognito_open_with_geometry_from_bin(
+        bin,
+        user_root,
+        source_home,
+        pid,
+        live_geometry,
+        None,
+    )
 }
 
 fn prepare_incognito_open_with_geometry_from_bin(
@@ -226,6 +256,7 @@ fn prepare_incognito_open_with_geometry_from_bin(
     source_home: &Path,
     pid: i32,
     live_geometry: Option<WindowGeometry>,
+    profile_mask: Option<ProfileMask>,
 ) -> Result<OpenPlan, String> {
     let target_id = target_id_from_exec(&bin.to_string_lossy());
     let _ = sweep_orphan_sessions(user_root, Some(&target_id));
@@ -249,10 +280,15 @@ fn prepare_incognito_open_with_geometry_from_bin(
         );
         return Err(error);
     }
-    Ok(plan_from_session(bin, session, source_home))
+    Ok(plan_from_session(bin, session, source_home, profile_mask))
 }
 
-fn plan_from_session(bin: PathBuf, session: SessionHome, source_home: &Path) -> OpenPlan {
+fn plan_from_session(
+    bin: PathBuf,
+    session: SessionHome,
+    source_home: &Path,
+    profile_mask: Option<ProfileMask>,
+) -> OpenPlan {
     let debug_port = allocate_debug_port().unwrap_or(0);
     let args = if debug_port == 0 {
         let mut args = launch_arg_prefix(&session.chromium.display().to_string());
@@ -291,6 +327,7 @@ fn plan_from_session(bin: PathBuf, session: SessionHome, source_home: &Path) -> 
         bin,
         debug_port,
         locale: read_locale_override(source_home),
+        profile_mask,
     }
 }
 
@@ -406,6 +443,7 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
         let lifecycle_process_alive = process_alive.clone();
         let options = InjectionOptions {
             locale: plan.locale.clone(),
+            profile_mask: plan.profile_mask.clone(),
         };
         thread::spawn(move || {
             let mut primary_target_id = None;
@@ -709,58 +747,9 @@ where
     }
 }
 
-pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
-    let app_path = parsed
-        .app
-        .as_deref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(incodex_core::DEFAULT_APP));
-    if parsed.dry_run {
-        let (bin, _) = describe_incognito_open(&app_path).map_err(CliFailure::from)?;
-        println!(
-            "{}",
-            format_step("Open incognito without patching Codex", None)
-        );
-        println!(
-            "{}",
-            format_kv("App", &app_path.display().to_string(), None)
-        );
-        println!("{}", format_kv("Binary", &bin.display().to_string(), None));
-        println!("{}", format_warn("Dry run. No window opened.", None));
-        return Ok(());
-    }
-    let root = user_root();
-    let source = default_source_home();
-    let plan = prepare_incognito_open(&app_path, &root, &source, std::process::id() as i32)?;
-    let (opening, _, _) = open_progress_copy();
-    println!("{}", format_step(opening, None));
-    println!(
-        "{}",
-        format_kv("Binary", &plan.bin.display().to_string(), None)
-    );
-    println!(
-        "{}",
-        format_kv("Home", &plan.home.display().to_string(), None)
-    );
-    println!("{}", format_kv("Session", &plan.session_id, None));
-    let (process, cleanup) = wait_and_burn(&plan, &root, 250)?;
-    let (ok, message) = format_session_cleanup(&cleanup);
-    if ok {
-        println!("{}", format_ok(&message, None));
-    } else {
-        println!("{}", format_warn(&message, None));
-    }
-    println!();
-    let code = process.exit_code(&cleanup);
-    if code == OpenExitCode::Success {
-        Ok(())
-    } else {
-        Err(CliFailure::with_code(
-            code.as_i32(),
-            process.failure_message(&cleanup, code),
-        ))
-    }
-}
+#[path = "open_command.rs"]
+mod command;
+pub use command::run_open;
 
 #[cfg(test)]
 #[path = "open_cleanup_tests.rs"]

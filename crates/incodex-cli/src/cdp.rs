@@ -1,10 +1,15 @@
-//! Localhost Chrome DevTools Protocol client for `incodex open`.
-//!
-//! Launch flags and the page-target filter follow the packaged-Codex CDP
-//! pattern used by other desktop launchers (debug port + allow-origins,
-//! prefer `app://-/index.html`, skip chrome:// and prewarm routes). The
-//! payload is our MIT `inject.js`, not a third-party injector.
-
+/**
+ * [INPUT]: 接收 OpenPlan 派生的 InjectionOptions 与 localhost CDP target
+ * [OUTPUT]: 对外提供 launch 参数、profile mask bootstrap、注入与 UI 验收
+ * [POS]: incodex open 的 renderer 边界；只向当前 Codex page 注入共享 Runtime
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+// Localhost Chrome DevTools Protocol client for `incodex open`.
+//
+// Launch flags and the page-target filter follow the packaged-Codex CDP
+// pattern used by other desktop launchers (debug port + allow-origins,
+// prefer `app://-/index.html`, skip chrome:// and prewarm routes). The
+// payload is our MIT `inject.js`, not a third-party injector.
 use std::io::{ErrorKind, Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,6 +21,8 @@ use serde_json::{json, Value};
 use tungstenite::client::IntoClientRequest;
 use tungstenite::handshake::{client::ClientHandshake, HandshakeError};
 use tungstenite::{Message, WebSocket};
+
+use crate::profile_mask::{ProfileAvatar, ProfileMask};
 
 const INJECT_JS: &str = include_str!("../../../dist/incodex-inject.js");
 const INJECT_PREFIX: &str = "window.__incodexIncognito=true;";
@@ -37,6 +44,7 @@ pub struct CdpTarget {
 #[derive(Debug, Clone, Default)]
 pub struct InjectionOptions {
     pub locale: Option<String>,
+    pub profile_mask: Option<ProfileMask>,
 }
 
 pub fn allocate_debug_port() -> Result<u16, String> {
@@ -67,19 +75,66 @@ pub(crate) fn launch_arg_prefix(user_data_dir: &str) -> Vec<String> {
 }
 
 pub fn inject_source() -> String {
-    inject_source_for_locale(None)
+    inject_source_for_options(&InjectionOptions::default())
 }
 
 pub fn inject_source_for_locale(locale: Option<&str>) -> String {
-    let locale = serde_json::to_string(locale.unwrap_or("")).unwrap_or_else(|_| "\"\"".into());
-    format!("{INJECT_PREFIX}window.__incodexLocale={locale};\n{INJECT_JS}")
+    inject_source_for_options(&InjectionOptions {
+        locale: locale.map(str::to_string),
+        profile_mask: None,
+    })
+}
+
+pub fn inject_source_for_options(options: &InjectionOptions) -> String {
+    let locale = serde_json::to_string(options.locale.as_deref().unwrap_or(""))
+        .unwrap_or_else(|_| "\"\"".into());
+    let profile_mask = options
+        .profile_mask
+        .as_ref()
+        .map(profile_mask_json)
+        .unwrap_or_else(|| "null".to_string());
+    format!(
+        "{INJECT_PREFIX}window.__incodexLocale={locale};window.__incodexProfileMask={profile_mask};\n{INJECT_JS}"
+    )
+}
+
+fn profile_mask_json(mask: &ProfileMask) -> String {
+    let name = serde_json::to_string(&mask.name).unwrap_or_else(|_| "\"\"".into());
+    let avatar = match &mask.avatar {
+        ProfileAvatar::Generated { seed } => {
+            let seed = serde_json::to_string(seed).unwrap_or_else(|_| "\"\"".into());
+            format!("{{\"seed\":{seed}}}")
+        }
+        ProfileAvatar::DataUrl(data_url) => {
+            let data_url = serde_json::to_string(data_url).unwrap_or_else(|_| "\"\"".into());
+            format!("{{\"dataUrl\":{data_url}}}")
+        }
+    };
+    format!("{{\"name\":{name},\"avatar\":{avatar}}}")
 }
 
 pub fn ui_ready_expression() -> &'static str {
     "(() => ({button: Boolean(document.querySelector('[data-incodex-privacy-toggle]')), banner: Boolean((document.querySelector('[data-incodex-banner-host]') && document.querySelector('[data-incodex-landing]')) || (() => { try { return sessionStorage.getItem('incodex-banner-dismissed') === '1'; } catch { return false; } })())}))()"
 }
 
+pub fn ui_ready_expression_for_options(options: &InjectionOptions) -> String {
+    if options.profile_mask.is_none() {
+        return ui_ready_expression().to_string();
+    }
+    format!(
+        "(() => {{ const base = {base}; base.profileMask = window.__incodexProfileMaskHealth === true; return base; }})()",
+        base = ui_ready_expression()
+    )
+}
+
 pub fn validate_ui_probe_result(response: &Value) -> Result<(), String> {
+    validate_ui_probe_result_for_options(response, false)
+}
+
+pub fn validate_ui_probe_result_for_options(
+    response: &Value,
+    require_profile_mask: bool,
+) -> Result<(), String> {
     let malformed = || "malformed Incodex UI probe result".to_string();
     let value = response
         .pointer("/result/result/value")
@@ -93,6 +148,16 @@ pub fn validate_ui_probe_result(response: &Value) -> Result<(), String> {
         .get("banner")
         .and_then(Value::as_bool)
         .ok_or_else(malformed)?;
+
+    if require_profile_mask {
+        let profile_mask = object
+            .get("profileMask")
+            .and_then(Value::as_bool)
+            .ok_or_else(malformed)?;
+        if !profile_mask {
+            return Err("Incodex profile mask is not mounted uniquely".into());
+        }
+    }
 
     match (button, banner) {
         (true, true) => Ok(()),
@@ -165,11 +230,19 @@ pub fn inject_shared_ui_with_options_and_target<F>(
 where
     F: FnMut(&str),
 {
-    let source = inject_source_for_locale(options.locale.as_deref());
+    let source = inject_source_for_options(options);
+    let health_expression = ui_ready_expression_for_options(options);
+    let require_profile_mask = options.profile_mask.is_some();
     let mut last = "cdp page not ready".to_string();
     let mut refused = 0u8;
     for _ in 0..8 {
-        match try_inject(debug_port, &source, &mut on_target) {
+        match try_inject(
+            debug_port,
+            &source,
+            &health_expression,
+            require_profile_mask,
+            &mut on_target,
+        ) {
             Ok(target_id) => return Ok(target_id),
             Err(err) => {
                 let refused_now = err.contains("Connection refused")
@@ -190,7 +263,13 @@ where
     Err(last)
 }
 
-fn try_inject<F>(debug_port: u16, source: &str, on_target: &mut F) -> Result<String, String>
+fn try_inject<F>(
+    debug_port: u16,
+    source: &str,
+    health_expression: &str,
+    require_profile_mask: bool,
+    on_target: &mut F,
+) -> Result<String, String>
 where
     F: FnMut(&str),
 {
@@ -217,9 +296,9 @@ where
         &mut socket,
         6,
         "Runtime.evaluate",
-        json!({ "expression": ui_ready_expression(), "returnByValue": true }),
+        json!({ "expression": health_expression, "returnByValue": true }),
     )?;
-    validate_ui_probe_result(&health)?;
+    validate_ui_probe_result_for_options(&health, require_profile_mask)?;
     let target_id = page.id.clone();
     let _ = socket.close(None);
     Ok(target_id)
