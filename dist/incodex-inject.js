@@ -1178,12 +1178,12 @@ function readProfileMask() {
   const avatar = value.avatar;
   if (typeof avatar !== "object" || Array.isArray(avatar))
     return null;
-  if (typeof avatar.seed === "string") {
-    if (avatar.seed !== name || avatar.dataUrl !== undefined)
+  if (avatar.kind === "generated") {
+    if (avatar.dataUrl !== undefined)
       return null;
     return { name, avatarDataUrl: hn(name) };
   }
-  if (typeof avatar.dataUrl !== "string" || avatar.seed !== undefined)
+  if (typeof avatar.dataUrl !== "string" || avatar.kind !== undefined)
     return null;
   if (avatar.dataUrl.length > PROFILE_AVATAR_MAX_DATA_URL_CHARS || !/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(avatar.dataUrl)) {
     return null;
@@ -1908,6 +1908,23 @@ function onKeydown(event) {
   event.stopImmediatePropagation();
   activate();
 }
+var PROFILE_OBSERVED_ATTRIBUTES = [
+  "class",
+  "src",
+  "style",
+  "data-incodex-profile-mask",
+  "data-incodex-profile-mask-name",
+  "data-incodex-profile-mask-avatar"
+];
+function observerOptions() {
+  const options = { childList: true, subtree: true };
+  if (isIncognitoWindow() && window.__incodexProfileMask !== null && window.__incodexProfileMask !== undefined) {
+    options.attributes = true;
+    options.characterData = true;
+    options.attributeFilter = PROFILE_OBSERVED_ATTRIBUTES;
+  }
+  return options;
+}
 function start() {
   if (window.__incodexStarted) {
     ensureProfileMask();
@@ -1941,12 +1958,7 @@ function start() {
       refreshUiProbe();
     });
   });
-  observer.observe(document.documentElement, {
-    attributes: true,
-    characterData: true,
-    childList: true,
-    subtree: true
-  });
+  observer.observe(document.documentElement, observerOptions());
 }
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", start, { once: true });
