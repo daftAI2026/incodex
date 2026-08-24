@@ -291,7 +291,6 @@ describe("setup-quick-launchers.sh", () => {
         /curl -fsSL https:\/\/raw\.githubusercontent\.com\/daftAI2026\/incodex\/main\/scripts\/setup-quick-launchers\.sh \| bash/,
       );
       expect(source).not.toMatch(/incodex\/[0-9a-f]{40}\/scripts\/setup-quick-launchers\.sh/);
-      expect(source).toContain("| bash -s -- uninstall");
       expect(source).toContain("Raycast");
       expect(source).toContain("Alfred");
       expect(source).toContain("INCODEX_LAUNCHER_APP");
@@ -310,68 +309,6 @@ describe("setup-quick-launchers.sh", () => {
     expect(english).toContain("falls back to Terminal");
     expect(chinese).toContain("Raycast 提供可用的 `TERM` 时，Status 和 Doctor 直接在它的 `fullOutput` 中运行");
     expect(chinese).toContain("回退到 Terminal");
-  });
-
-  test("uninstall removes only marker-owned artifacts and leaves user files alone", () => {
-    const context = fixture();
-    expect(runSetup(context).status).toBe(0);
-    const userFile = join(context.raycast, "mine.sh");
-    writeFileSync(userFile, "#!/bin/sh\necho mine\n");
-
-    const removed = runSetup(context, ["uninstall"]);
-    expect(removed.status).toBe(0);
-    expect(existsSync(userFile)).toBe(true);
-    expect(existsSync(join(context.raycast, "incodex-open.sh"))).toBe(false);
-    expect(existsSync(join(context.root, "alfred", "Incodex Quick Launchers.alfredworkflow"))).toBe(false);
-    expect(removed.stdout + removed.stderr).toContain("Alfred Preferences");
-  });
-
-  test("uninstall fails closed when the ownership marker changed", () => {
-    const context = fixture();
-    expect(runSetup(context).status).toBe(0);
-    writeFileSync(join(context.root, ".incodex-quick-launchers"), "foreign owner\n");
-
-    const removed = runSetup(context, ["uninstall"]);
-    expect(removed.status).not.toBe(0);
-    expect(existsSync(join(context.raycast, "incodex-open.sh"))).toBe(true);
-    expect(removed.stdout + removed.stderr).toContain("ownership marker");
-  });
-
-  test("uninstall preserves a modified launcher even when its marker remains", () => {
-    const context = fixture();
-    expect(runSetup(context).status).toBe(0);
-    const launcher = join(context.raycast, "incodex-open.sh");
-    writeFileSync(launcher, `${readFileSync(launcher, "utf8")}\nprintf 'user edit\\n'\n`);
-
-    const removed = runSetup(context, ["uninstall"]);
-    expect(removed.status).not.toBe(0);
-    expect(existsSync(launcher)).toBe(true);
-    expect(readFileSync(launcher, "utf8")).toContain("user edit");
-    expect(existsSync(join(context.root, ".incodex-quick-launchers"))).toBe(true);
-    expect(removed.stdout + removed.stderr).toContain("modified");
-  });
-
-  test("uninstall validates every launcher before deleting any", () => {
-    const context = fixture();
-    expect(runSetup(context).status).toBe(0);
-    const modified = join(context.root, "alfred", "Incodex Quick Launchers.alfredworkflow");
-    writeFileSync(modified, `${readFileSync(modified, "utf8")}user edit\n`);
-
-    const removed = runSetup(context, ["uninstall"]);
-    expect(removed.status).not.toBe(0);
-    expect(existsSync(join(context.raycast, "incodex-open.sh"))).toBe(true);
-    expect(existsSync(join(context.raycast, "incodex-status.sh"))).toBe(true);
-    expect(existsSync(modified)).toBe(true);
-    expect(existsSync(join(context.root, ".incodex-quick-launchers"))).toBe(true);
-    expect(removed.stdout + removed.stderr).toContain("modified");
-  });
-
-  test("uninstall of a missing installation does not create its root", () => {
-    const context = fixture();
-    const removed = runSetup(context, ["uninstall"]);
-    expect(removed.status).not.toBe(0);
-    expect(existsSync(context.root)).toBe(false);
-    expect(existsSync(context.raycast)).toBe(false);
   });
 
   test("a generation failure does not publish ownership or partial launchers", () => {

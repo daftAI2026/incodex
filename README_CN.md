@@ -79,12 +79,6 @@ curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/scripts/set
 
 Raycast 提供可用的 `TERM` 时，Status 和 Doctor 直接在它的 `fullOutput` 中运行。没有可用的 `TERM` 时，会通过 Terminal、iTerm2、Alacritty、kitty、WezTerm、Ghostty、Hyper、WindTerm 或 Warp 启动；可以用 `INCODEX_LAUNCHER_APP=<name>` 指定。如果所选应用启动失败，会回退到 Terminal。Open 会直接打开无痕窗口。
 
-卸载时用同一份设置脚本只删除 Incodex 自己生成的文件；再移除 Alfred workflow。如果该 Raycast Script Directory 没有被其他工具共用，也可从设置中移除：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/scripts/setup-quick-launchers.sh | bash -s -- uninstall
-```
-
 **Run**
 
 ```bash

@@ -754,46 +754,7 @@ install_launchers() {
     maybe_open_alfred_import
 }
 
-uninstall_launchers() {
-    local key
-    local path
-    local expected
-    local modified=0
-
-    inspect_owned_directories
-    require_owned_root
-    require_manifest
-    for key in "${OWNED_KEYS[@]}"; do
-        path="$(owned_artifact_path "$key")"
-        expected="$(manifest_hash "$key")"
-        if [[ ! -e "$path" && ! -L "$path" ]]; then
-            continue
-        fi
-        if [[ -L "$path" ]] || [[ ! -f "$path" ]] || [[ "$(sha256_file "$path")" != "$expected" ]]; then
-            printf 'Skipped modified launcher: %s\n' "$path" >&2
-            modified=1
-        fi
-    done
-
-    if [[ "$modified" -ne 0 ]]; then
-        die "modified launchers remain; ownership proof was preserved"
-    fi
-
-    for key in "${OWNED_KEYS[@]}"; do
-        path="$(owned_artifact_path "$key")"
-        if [[ -e "$path" ]]; then
-            rm -f "$path"
-        fi
-    done
-    rm -f "$MANIFEST" "$MARKER"
-    rmdir "$ALFRED_DIR" "$ROOT" 2>/dev/null || true
-    printf 'Removed Incodex-owned launcher files.\n'
-    printf 'Remove the imported workflow manually in Alfred Preferences > Workflows.\n'
-    printf 'Remove the Script Directory manually in Raycast Settings if you no longer want it registered.\n'
-}
-
 case "${1:-install}" in
     install) install_launchers ;;
-    uninstall) uninstall_launchers ;;
-    *) die "usage: setup-quick-launchers.sh [install|uninstall]" ;;
+    *) die "usage: setup-quick-launchers.sh [install]" ;;
 esac
