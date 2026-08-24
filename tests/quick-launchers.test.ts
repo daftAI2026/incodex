@@ -150,12 +150,16 @@ describe("setup-quick-launchers.sh", () => {
     for (const readme of ["README.md", "README_CN.md"]) {
       const source = readFileSync(join(repo, readme), "utf8");
       expect(source).toMatch(
-        /curl -fsSL https:\/\/raw\.githubusercontent\.com\/daftAI2026\/incodex\/[0-9a-f]{40}\/scripts\/setup-quick-launchers\.sh \| bash/,
+        /curl -fsSL https:\/\/raw\.githubusercontent\.com\/daftAI2026\/incodex\/main\/scripts\/setup-quick-launchers\.sh \| bash/,
       );
+      expect(source).not.toMatch(/incodex\/[0-9a-f]{40}\/scripts\/setup-quick-launchers\.sh/);
       expect(source).toContain("| bash -s -- uninstall");
       expect(source).toContain("Raycast");
       expect(source).toContain("Alfred");
       expect(source).toContain("INCODEX_LAUNCHER_APP");
+      expect(source).toContain("Raycast v2");
+      expect(source).toContain("Raycast v1");
+      expect(source).toContain("Settings → Script Commands");
     }
   });
 
