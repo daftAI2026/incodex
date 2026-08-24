@@ -48,10 +48,7 @@ fn isolated_launch_uses_the_official_new_codex_deep_link() {
 #[test]
 fn isolated_launch_disables_the_native_window_birth_animation() {
     let args = debug_launch_args("/tmp/incodex-chromium", 43123);
-    assert_eq!(
-        &args[..2],
-        ["-NSAutomaticWindowAnimationsEnabled", "false"]
-    );
+    assert_eq!(&args[..2], ["-NSAutomaticWindowAnimationsEnabled", "false"]);
 }
 
 #[test]
