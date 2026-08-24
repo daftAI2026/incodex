@@ -200,6 +200,30 @@ fn injected_ui_carries_profile_mask_as_a_json_bootstrap_value() {
 }
 
 #[test]
+fn profile_payload_is_null_outside_the_exact_top_level_codex_page() {
+    let source = inject_source_for_options(&InjectionOptions {
+        locale: None,
+        profile_mask: Some(ProfileMask {
+            name: "Quiet Otter".into(),
+            avatar: ProfileAvatar::Generated {
+                seed: "Quiet Otter".into(),
+            },
+        }),
+    });
+
+    assert!(source.contains("window.top===window"));
+    assert!(source.contains("window.location.href===\"app://-/index.html\""));
+    assert!(source.contains(":null;"));
+}
+
+#[test]
+fn persistent_script_registration_is_once_per_target_across_retries() {
+    assert!(should_register_persistent_script(None, "main"));
+    assert!(!should_register_persistent_script(Some("main"), "main"));
+    assert!(should_register_persistent_script(Some("main"), "replacement"));
+}
+
+#[test]
 fn browser_close_uses_the_cdp_browser_command() {
     assert_eq!(
         browser_close_message(),
