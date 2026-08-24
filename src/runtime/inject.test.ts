@@ -113,6 +113,8 @@ describe("incognito profile mask", () => {
     expect(profileMask).toContain('avatar.style.objectPosition = "center"');
     expect(profileMask).toContain('avatar.style.backgroundSize = "cover"');
     expect(profileMask).toContain('avatar.style.backgroundPosition = "center"');
+    expect(profileMask).toContain('avatar.style.objectPosition === "center center"');
+    expect(profileMask).toContain('avatar.style.backgroundPosition === "center center"');
   });
 
   test("keeps the profile health surface fail-closed when the footer is ambiguous", () => {
