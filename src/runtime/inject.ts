@@ -572,6 +572,29 @@ function onKeydown(event: KeyboardEvent): void {
   void activate();
 }
 
+const PROFILE_OBSERVED_ATTRIBUTES = [
+  "class",
+  "src",
+  "style",
+  "data-incodex-profile-mask",
+  "data-incodex-profile-mask-name",
+  "data-incodex-profile-mask-avatar",
+];
+
+function observerOptions(): MutationObserverInit {
+  const options: MutationObserverInit = { childList: true, subtree: true };
+  if (
+    isIncognitoWindow() &&
+    window.__incodexProfileMask !== null &&
+    window.__incodexProfileMask !== undefined
+  ) {
+    options.attributes = true;
+    options.characterData = true;
+    options.attributeFilter = PROFILE_OBSERVED_ATTRIBUTES;
+  }
+  return options;
+}
+
 function start(): void {
   if (window.__incodexStarted) {
     ensureProfileMask();
@@ -602,12 +625,7 @@ function start(): void {
       refreshUiProbe();
     });
   });
-  observer.observe(document.documentElement, {
-    attributes: true,
-    characterData: true,
-    childList: true,
-    subtree: true,
-  });
+  observer.observe(document.documentElement, observerOptions());
 }
 
 declare global {
