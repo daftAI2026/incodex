@@ -1,6 +1,6 @@
 #!/bin/bash
 # [INPUT]: 依赖已安装的 incodex/inc 二进制、macOS zip/unzip/open/osascript 与用户显式的 Raycast/Alfred 导入操作
-# [OUTPUT]: 向 Raycast 标准 Script Commands 目录写入 Incodex 专属脚本，并生成稳定 Bundle ID 的 Alfred .alfredworkflow 导入包
+# [OUTPUT]: 向 Raycast 标准 Script Commands 目录写入 Incodex 专属脚本并生成稳定 Bundle ID 的 Alfred .alfredworkflow 导入包；发布失败或被终止时恢复原完整集合
 # [POS]: scripts 的可选 Quick Launchers 安装器，对齐 Mole 的公开脚本目录但不修改 Raycast/Alfred 私有配置
 # [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 set -euo pipefail
@@ -16,6 +16,14 @@ MARKER_TOKEN_VALUE=""
 MARKER_MANIFEST_HASH=""
 INSTALL_STAGE=""
 INSTALL_BACKUP=""
+PUBLISH_ACTIVE=0
+PUBLISH_ROLLBACK_FAILED=0
+PUBLISH_BACKED_UP=()
+PUBLISH_PUBLISHED=()
+PUBLISH_MARKER_BACKED=0
+PUBLISH_MANIFEST_BACKED=0
+PUBLISH_NEW_MARKER=0
+PUBLISH_NEW_MANIFEST=0
 die() {
     printf 'Error: %s\n' "$1" >&2
     exit 1
@@ -23,6 +31,35 @@ die() {
 cleanup_install() {
     if [[ -n "$INSTALL_STAGE" ]]; then rm -rf "$INSTALL_STAGE"; fi
     if [[ -n "$INSTALL_BACKUP" ]]; then rm -rf "$INSTALL_BACKUP"; fi
+}
+rollback_staged() {
+    local key path relative i
+    PUBLISH_ROLLBACK_FAILED=0
+    if (( PUBLISH_NEW_MARKER )); then rm -f "$MARKER" || PUBLISH_ROLLBACK_FAILED=1; fi
+    if (( PUBLISH_NEW_MANIFEST )); then rm -f "$MANIFEST" || PUBLISH_ROLLBACK_FAILED=1; fi
+    for ((i=${#PUBLISH_PUBLISHED[@]} - 1; i >= 0; i--)); do
+        key="${PUBLISH_PUBLISHED[i]}"
+        rm -f "$(owned_artifact_path "$key")" || PUBLISH_ROLLBACK_FAILED=1
+    done
+    if (( PUBLISH_MARKER_BACKED )) && [[ -e "$INSTALL_BACKUP/.incodex-quick-launchers" ]]; then
+        mv -f "$INSTALL_BACKUP/.incodex-quick-launchers" "$MARKER" || PUBLISH_ROLLBACK_FAILED=1
+    fi
+    if (( PUBLISH_MANIFEST_BACKED )) && [[ -e "$INSTALL_BACKUP/manifest.sha256" ]]; then
+        mv -f "$INSTALL_BACKUP/manifest.sha256" "$MANIFEST" || PUBLISH_ROLLBACK_FAILED=1
+    fi
+    for ((i=${#PUBLISH_BACKED_UP[@]} - 1; i >= 0; i--)); do
+        key="${PUBLISH_BACKED_UP[i]}"
+        relative="$(owned_staged_relative_path "$key")"
+        path="$(owned_artifact_path "$key")"
+        if [[ -e "$INSTALL_BACKUP/$relative" ]]; then mv -f "$INSTALL_BACKUP/$relative" "$path" || PUBLISH_ROLLBACK_FAILED=1; fi
+    done
+    PUBLISH_ACTIVE=0
+}
+on_install_exit() {
+    local status="$?"
+    if (( PUBLISH_ACTIVE )); then rollback_staged; fi
+    cleanup_install
+    return "$status"
 }
 resolve_incodex() {
     local candidate
@@ -674,19 +711,7 @@ publish_staged() {
     local stage="$1"
     local backup="$2"
     local marker_token="$3"
-    local key
-    local path
-    local relative
-    local manifest_digest
-    local failed=0
-    local rollback_failed=0
-    local -a backed_up=()
-    local -a published=()
-    local marker_backed=0
-    local manifest_backed=0
-    local new_marker=0
-    local new_manifest=0
-    local i
+    local key path relative manifest_digest failed=0
     manifest_digest="$(sha256_file "$stage/manifest.sha256")"
     {
         printf '%s\n' "$OWNER_MARKER"
@@ -698,54 +723,32 @@ publish_staged() {
     if [[ ! -w "$RAYCAST_DIR" ]] || [[ ! -w "$ALFRED_DIR" ]]; then
         die "launcher destination is not writable; no launcher files were published"
     fi
+    PUBLISH_BACKED_UP=()
+    PUBLISH_PUBLISHED=()
+    PUBLISH_MARKER_BACKED=0 PUBLISH_MANIFEST_BACKED=0 PUBLISH_NEW_MARKER=0 PUBLISH_NEW_MANIFEST=0 PUBLISH_ACTIVE=1
     for key in "${OWNED_KEYS[@]}"; do
         path="$(owned_artifact_path "$key")"
         if [[ -e "$path" ]]; then
             relative="$(owned_staged_relative_path "$key")"
-            if mv -f "$path" "$backup/$relative"; then
-                backed_up+=("$key")
-            else
-                failed=1
-                break
-            fi
+            PUBLISH_BACKED_UP+=("$key")
+            if ! mv -f "$path" "$backup/$relative"; then failed=1; break; fi
         fi
     done
-    if (( failed == 0 )) && [[ -e "$MANIFEST" ]]; then
-        if mv -f "$MANIFEST" "$backup/manifest.sha256"; then manifest_backed=1; else failed=1; fi
-    fi
-    if (( failed == 0 )) && [[ -e "$MARKER" ]]; then
-        if mv -f "$MARKER" "$backup/.incodex-quick-launchers"; then marker_backed=1; else failed=1; fi
-    fi
+    if (( failed == 0 )) && [[ -e "$MANIFEST" ]]; then PUBLISH_MANIFEST_BACKED=1; mv -f "$MANIFEST" "$backup/manifest.sha256" || failed=1; fi
+    if (( failed == 0 )) && [[ -e "$MARKER" ]]; then PUBLISH_MARKER_BACKED=1; mv -f "$MARKER" "$backup/.incodex-quick-launchers" || failed=1; fi
     if (( failed == 0 )); then
         for key in "${OWNED_KEYS[@]}"; do
             relative="$(owned_staged_relative_path "$key")"
             path="$(owned_artifact_path "$key")"
-            if mv -f "$stage/$relative" "$path"; then published+=("$key"); else failed=1; break; fi
+            PUBLISH_PUBLISHED+=("$key")
+            if ! mv -f "$stage/$relative" "$path"; then failed=1; break; fi
         done
     fi
-    if (( failed == 0 )); then
-        if mv -f "$stage/manifest.sha256" "$MANIFEST"; then new_manifest=1; else failed=1; fi
-    fi
-    if (( failed == 0 )); then
-        if mv -f "$stage/.incodex-quick-launchers" "$MARKER"; then new_marker=1; else failed=1; fi
-    fi
+    if (( failed == 0 )); then PUBLISH_NEW_MANIFEST=1; mv -f "$stage/manifest.sha256" "$MANIFEST" || failed=1; fi
+    if (( failed == 0 )); then PUBLISH_NEW_MARKER=1; mv -f "$stage/.incodex-quick-launchers" "$MARKER" || failed=1; fi
     if (( failed != 0 )); then
-        if (( new_marker )); then rm -f "$MARKER" || rollback_failed=1; fi
-        if (( new_manifest )); then rm -f "$MANIFEST" || rollback_failed=1; fi
-        for ((i=${#published[@]} - 1; i >= 0; i--)); do
-            key="${published[i]}"
-            path="$(owned_artifact_path "$key")"
-            rm -f "$path" || rollback_failed=1
-        done
-        if (( marker_backed )); then mv -f "$backup/.incodex-quick-launchers" "$MARKER" || rollback_failed=1; fi
-        if (( manifest_backed )); then mv -f "$backup/manifest.sha256" "$MANIFEST" || rollback_failed=1; fi
-        for ((i=${#backed_up[@]} - 1; i >= 0; i--)); do
-            key="${backed_up[i]}"
-            relative="$(owned_staged_relative_path "$key")"
-            path="$(owned_artifact_path "$key")"
-            mv -f "$backup/$relative" "$path" || rollback_failed=1
-        done
-        if (( rollback_failed != 0 )); then
+        rollback_staged
+        if (( PUBLISH_ROLLBACK_FAILED != 0 )); then
             die "launcher publication failed and rollback failed; refusing to claim ownership"
         fi
         die "launcher publication failed; previous launcher state restored"
@@ -768,7 +771,8 @@ install_launchers() {
     MARKER_TOKEN_VALUE="$marker_token"
     stage="$(mktemp -d "${TMPDIR:-/tmp}/incodex-launchers.XXXXXX")"
     INSTALL_STAGE="$stage"
-    trap cleanup_install EXIT
+    trap on_install_exit EXIT
+    trap 'exit 143' HUP INT TERM
     backup="$(mktemp -d "${TMPDIR:-/tmp}/incodex-launchers-backup.XXXXXX")"
     INSTALL_BACKUP="$backup"
     RAYCAST_DIR="$stage/raycast"
@@ -781,7 +785,7 @@ install_launchers() {
     ALFRED_DIR="$final_alfred_dir"
     ALFRED_WORKFLOW="$final_alfred_workflow"
     publish_staged "$stage" "$backup" "$marker_token"
-    trap - EXIT
+    PUBLISH_ACTIVE=0; trap - EXIT HUP INT TERM
     cleanup_install
     INSTALL_STAGE=""
     INSTALL_BACKUP=""
