@@ -206,6 +206,21 @@ describe("setup-quick-launchers.sh", () => {
     expect(removed.stdout + removed.stderr).toContain("modified");
   });
 
+  test("uninstall validates every launcher before deleting any", () => {
+    const context = fixture();
+    expect(runSetup(context).status).toBe(0);
+    const modified = join(context.root, "alfred", "Incodex Quick Launchers.alfredworkflow");
+    writeFileSync(modified, `${readFileSync(modified, "utf8")}user edit\n`);
+
+    const removed = runSetup(context, ["uninstall"]);
+    expect(removed.status).not.toBe(0);
+    expect(existsSync(join(context.raycast, "incodex-open.sh"))).toBe(true);
+    expect(existsSync(join(context.raycast, "incodex-status.sh"))).toBe(true);
+    expect(existsSync(modified)).toBe(true);
+    expect(existsSync(join(context.root, ".incodex-quick-launchers"))).toBe(true);
+    expect(removed.stdout + removed.stderr).toContain("modified");
+  });
+
   test("uninstall of a missing installation does not create its root", () => {
     const context = fixture();
     const removed = runSetup(context, ["uninstall"]);
