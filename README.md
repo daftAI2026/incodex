@@ -77,7 +77,7 @@ The script writes Raycast commands to `~/Library/Application Support/Raycast/scr
 3. Select `~/Library/Application Support/Raycast/script-commands`.
 4. Run **Reload Script Commands** in Raycast.
 
-Status and Doctor auto-detect Terminal, iTerm2, Alacritty, kitty, WezTerm, Ghostty, Hyper, WindTerm, and Warp. Set `INCODEX_LAUNCHER_APP=<name>` to choose one. Open launches the incognito window directly.
+When Raycast provides a usable `TERM`, Status and Doctor run directly in its `fullOutput` pane. Without a usable `TERM`, they route through Terminal, iTerm2, Alacritty, kitty, WezTerm, Ghostty, Hyper, WindTerm, or Warp; set `INCODEX_LAUNCHER_APP=<name>` to choose one. If the selected app cannot be started, the launcher falls back to Terminal. Open launches the incognito window directly.
 
 Remove only the Incodex-owned generated files with the same setup script, then remove the imported Alfred workflow and Raycast Script Directory in their settings if nothing else uses that directory:
 

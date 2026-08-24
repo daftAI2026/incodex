@@ -144,10 +144,11 @@ describe("setup-quick-launchers.sh", () => {
   test("Raycast status and doctor use TERM directly or route through a terminal fallback", () => {
     const context = fixture();
     expect(runSetup(context).status).toBe(0);
+    const termGuard = 'if [[ -n "' + "$" + '{TERM:-}" && "' + "$" + '{TERM}" != "dumb" ]]';
 
     for (const command of ["status", "doctor"]) {
       const source = readFileSync(join(context.raycast, `incodex-${command}.sh`), "utf8");
-      expect(source).toContain('if [[ -n "${TERM:-}" && "${TERM}" != "dumb" ]]');
+      expect(source).toContain(termGuard);
       expect(source).toContain('"$INCODEX_BIN"');
       expect(source).toContain('TERM_APP="$(detect_launcher_app)"');
       expect(source).toContain('launch_with_app "$TERM_APP"');

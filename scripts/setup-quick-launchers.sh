@@ -289,7 +289,158 @@ write_manifest() {
         printf '%s\t%s\n' "$(sha256_file "$base/$relative")" "$key" >>"$target"
     done
 }
-
+write_terminal_router() {
+    local target="$1"
+    cat >>"$target" <<'EOF'
+has_app() {
+    local name="$1"
+    [[ -d "/Applications/${name}.app" || -d "$HOME/Applications/${name}.app" ]]
+}
+has_bin() {
+    command -v "$1" >/dev/null 2>&1
+}
+launcher_available() {
+    case "$1" in
+        Terminal) return 0 ;;
+        iTerm|iTerm2) has_app "iTerm" || has_app "iTerm2" ;;
+        Alacritty) has_app "Alacritty" ;;
+        kitty|Kitty) has_bin "kitty" || has_app "kitty" ;;
+        WezTerm) has_bin "wezterm" || has_app "WezTerm" ;;
+        Ghostty) has_bin "ghostty" || has_app "Ghostty" ;;
+        Hyper) has_app "Hyper" ;;
+        WindTerm) has_app "WindTerm" ;;
+        Warp) has_app "Warp" ;;
+        *) return 1 ;;
+    esac
+}
+detect_launcher_app() {
+    if [[ -n "${INCODEX_LAUNCHER_APP:-}" ]]; then
+        if launcher_available "$INCODEX_LAUNCHER_APP"; then
+            printf '%s\n' "$INCODEX_LAUNCHER_APP"
+            return
+        fi
+        printf 'Requested terminal is unavailable; falling back to Terminal.\n' >&2
+        printf '%s\n' 'Terminal'
+        return
+    fi
+    local candidate
+    for candidate in Warp Ghostty Alacritty kitty WezTerm WindTerm Hyper iTerm2 Terminal; do
+        if launcher_available "$candidate"; then
+            printf '%s\n' "$candidate"
+            return
+        fi
+    done
+    printf '%s\n' 'Terminal'
+}
+launch_with_app() {
+    local app="$1"
+    local target_command="$2"
+    local osascript_command
+    case "$app" in
+        Terminal)
+            osascript_command="$(command -v osascript 2>/dev/null || true)"
+            if [[ -z "$osascript_command" ]]; then
+                return 1
+            fi
+            "$osascript_command" - "$target_command" <<'APPLESCRIPT'
+on run argv
+    tell application "Terminal"
+        activate
+        do script item 1 of argv
+    end tell
+end run
+APPLESCRIPT
+            ;;
+        iTerm|iTerm2)
+            osascript_command="$(command -v osascript 2>/dev/null || true)"
+            if [[ -z "$osascript_command" ]]; then
+                return 1
+            fi
+            "$osascript_command" - "$target_command" <<'APPLESCRIPT'
+on run argv
+    tell application "iTerm2"
+        activate
+        if (count of windows) is 0 then create window with default profile
+        tell current session of current window to write text item 1 of argv
+    end tell
+end run
+APPLESCRIPT
+            ;;
+        Alacritty)
+            if ! command -v open >/dev/null 2>&1; then
+                return 1
+            fi
+            open -na "Alacritty" --args -e /bin/zsh -lc "$target_command"
+            ;;
+        Ghostty)
+            if ! command -v open >/dev/null 2>&1; then
+                return 1
+            fi
+            open -na "Ghostty" --args -e /bin/zsh -lc "$target_command; exec /bin/zsh -l"
+            ;;
+        Hyper)
+            if ! command -v open >/dev/null 2>&1; then
+                return 1
+            fi
+            open -na "Hyper" --args /bin/zsh -lc "$target_command"
+            ;;
+        WindTerm)
+            if ! command -v open >/dev/null 2>&1; then
+                return 1
+            fi
+            open -na "WindTerm" --args /bin/zsh -lc "$target_command"
+            ;;
+        Warp)
+            if ! command -v open >/dev/null 2>&1; then
+                return 1
+            fi
+            open -na "Warp" --args /bin/zsh -lc "$target_command"
+            ;;
+        kitty|Kitty)
+            if has_bin "kitty"; then
+                kitty --hold /bin/zsh -lc "$target_command"
+            else
+                if ! command -v open >/dev/null 2>&1; then
+                    return 1
+                fi
+                open -na "kitty" --args --hold /bin/zsh -lc "$target_command"
+            fi
+            ;;
+        WezTerm)
+            if has_bin "wezterm"; then
+                wezterm start -- /bin/zsh -lc "$target_command"
+            else
+                if ! command -v open >/dev/null 2>&1; then
+                    return 1
+                fi
+                open -na "WezTerm" --args start -- /bin/zsh -lc "$target_command"
+            fi
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+launch_in_terminal() {
+    local subcommand="$1"
+    local target_command
+    local TERM_APP
+    printf -v target_command '%q %q' "$INCODEX_BIN" "$subcommand"
+    TERM_APP="$(detect_launcher_app)"
+    if launch_with_app "$TERM_APP" "$target_command"; then
+        return 0
+    fi
+    if [[ "$TERM_APP" != "Terminal" ]]; then
+        printf 'Could not start %s; falling back to Terminal.\n' "$TERM_APP" >&2
+        if launch_with_app "Terminal" "$target_command"; then
+            return 0
+        fi
+    fi
+    printf 'No terminal launcher succeeded. Run manually: %q %q\n' "$INCODEX_BIN" "$subcommand" >&2
+    return 1
+}
+EOF
+}
 write_raycast_script() {
     local target="$1"
     local title="$2"
@@ -328,7 +479,13 @@ nohup "$INCODEX_BIN" open </dev/null >/dev/null 2>&1 &
 printf '%s\n' 'Opening an incognito Codex window'
 EOF
     else
-        printf 'exec "$INCODEX_BIN" %s\n' "$command" >>"$temporary"
+        write_terminal_router "$temporary"
+        {
+            printf '%s\n' 'if [[ -n "${TERM:-}" && "${TERM}" != "dumb" ]]; then'
+            printf '    exec "$INCODEX_BIN" %s\n' "$command"
+            printf '%s\n' 'fi'
+            printf 'launch_in_terminal %s\n' "$command"
+        } >>"$temporary"
     fi
     chmod 0755 "$temporary"
     mv -f "$temporary" "$target"
@@ -369,100 +526,8 @@ write_alfred_runner() {
 set -euo pipefail
 INCODEX_BIN=$quoted_binary
 EOF
+    write_terminal_router "$target"
     cat >>"$target" <<'EOF'
-
-has_app() {
-    local name="$1"
-    [[ -d "/Applications/${name}.app" || -d "$HOME/Applications/${name}.app" ]]
-}
-
-has_bin() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-launcher_available() {
-    case "$1" in
-        Terminal) return 0 ;;
-        iTerm2) has_app "iTerm" || has_app "iTerm2" ;;
-        Alacritty) has_app "Alacritty" ;;
-        kitty) has_bin "kitty" || has_app "kitty" ;;
-        WezTerm) has_bin "wezterm" || has_app "WezTerm" ;;
-        Ghostty) has_bin "ghostty" || has_app "Ghostty" ;;
-        Hyper) has_app "Hyper" ;;
-        WindTerm) has_app "WindTerm" ;;
-        Warp) has_app "Warp" ;;
-        *) return 1 ;;
-    esac
-}
-
-detect_launcher_app() {
-    if [[ -n "${INCODEX_LAUNCHER_APP:-}" ]]; then
-        if ! launcher_available "$INCODEX_LAUNCHER_APP"; then
-            printf 'Requested terminal is unavailable: %s\n' "$INCODEX_LAUNCHER_APP" >&2
-            return 1
-        fi
-        printf '%s\n' "$INCODEX_LAUNCHER_APP"
-        return
-    fi
-
-    local candidate
-    for candidate in Warp Ghostty Alacritty kitty WezTerm WindTerm Hyper iTerm2 Terminal; do
-        if launcher_available "$candidate"; then
-            printf '%s\n' "$candidate"
-            return
-        fi
-    done
-}
-
-launch_in_terminal() {
-    local subcommand="$1"
-    local terminal
-    local target_command
-    printf -v target_command '%q %q' "$INCODEX_BIN" "$subcommand"
-    terminal="$(detect_launcher_app)" || return 1
-
-    case "$terminal" in
-        Terminal)
-            /usr/bin/osascript - "$target_command" <<'APPLESCRIPT'
-on run argv
-    tell application "Terminal"
-        activate
-        do script item 1 of argv
-    end tell
-end run
-APPLESCRIPT
-            ;;
-        iTerm2)
-            /usr/bin/osascript - "$target_command" <<'APPLESCRIPT'
-on run argv
-    tell application "iTerm2"
-        activate
-        if (count of windows) is 0 then create window with default profile
-        tell current session of current window to write text item 1 of argv
-    end tell
-end run
-APPLESCRIPT
-            ;;
-        Alacritty|Ghostty|Hyper|WindTerm|Warp)
-            /usr/bin/open -na "$terminal" --args -e /bin/zsh -lc "$target_command; exec /bin/zsh -l"
-            ;;
-        kitty)
-            if has_bin kitty; then
-                kitty --hold /bin/zsh -lc "$target_command"
-            else
-                /usr/bin/open -na "kitty" --args --hold /bin/zsh -lc "$target_command"
-            fi
-            ;;
-        WezTerm)
-            if has_bin wezterm; then
-                wezterm start -- /bin/zsh -lc "$target_command; exec /bin/zsh -l"
-            else
-                /usr/bin/open -na "WezTerm" --args start -- /bin/zsh -lc "$target_command; exec /bin/zsh -l"
-            fi
-            ;;
-    esac
-}
-
 case "${1:-}" in
     open)
         nohup "$INCODEX_BIN" open </dev/null >/dev/null 2>&1 &
