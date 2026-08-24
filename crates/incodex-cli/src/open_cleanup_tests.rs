@@ -4,6 +4,7 @@ use super::open_tests::{fake_app, temp_root};
 use super::*;
 use crate::profile_mask::{ProfileAvatar, ProfileMask};
 use std::fs;
+use std::time::{Duration, Instant};
 
 #[test]
 fn wait_and_burn_quiesces_session_helpers_before_first_burn() {
@@ -72,8 +73,14 @@ fn cdp_port_failure_is_not_success() {
     fs::create_dir_all(&source).unwrap();
     fs::write(source.join("auth.json"), "{}\n").unwrap();
     let mut plan = prepare_incognito_open(&app, &user, &source, 1).unwrap();
+    fs::write(&plan.bin, "#!/bin/sh\nsleep 3\n").unwrap();
     plan.debug_port = 0;
+    let started = Instant::now();
     let process = spawn_plan(&plan).unwrap();
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "a rejected UI must close the child instead of leaving the window visible"
+    );
     assert_eq!(
         process.exit_code(&CleanupResult::Removed { attempts: 1 }),
         OpenExitCode::UiInjectionFailure,
