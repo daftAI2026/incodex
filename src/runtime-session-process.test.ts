@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import * as runtimeMain from "../dist/incodex-main.cjs";
+import * as runtimeInstance from "../dist/incodex-instance.cjs";
 
 describe("Runtime isolated helper cleanup", () => {
   test("matches only the exact inherited session root marker", () => {
@@ -72,4 +75,29 @@ describe("Runtime isolated helper cleanup", () => {
     expect(removed).toBe(false);
     expect(burned).toBe(false);
   });
+
+  test.skipIf(process.platform !== "darwin")(
+    "finds the inherited marker in a real macOS process snapshot",
+    async () => {
+      const quiesceSessionHelpers = (runtimeInstance as any).quiesceSessionHelpers;
+      expect(typeof quiesceSessionHelpers).toBe("function");
+      const root = `/tmp/incodex runtime marker ${process.pid}-${Date.now()}`;
+      const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+        env: { ...process.env, INCODEX_SESSION_ROOT: root },
+        stdio: "ignore",
+      });
+      await once(child, "spawn");
+
+      try {
+        await quiesceSessionHelpers(root);
+        const exited = await Promise.race([
+          once(child, "exit").then(() => true),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 300)),
+        ]);
+        expect(exited).toBe(true);
+      } finally {
+        if (child.exitCode == null && child.signalCode == null) child.kill("SIGKILL");
+      }
+    },
+  );
 });

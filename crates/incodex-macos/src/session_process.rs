@@ -136,3 +136,49 @@ fn format_pids(pids: &[i32]) -> String {
         .collect::<Vec<_>>()
         .join(", ")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn marked_helper_fixture() {
+        if std::env::var_os("INCODEX_PROCESS_MARKER_FIXTURE").is_none() {
+            return;
+        }
+        loop {
+            thread::sleep(Duration::from_secs(60));
+        }
+    }
+
+    #[test]
+    fn quiescence_finds_marker_in_actual_macos_snapshot() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "incodex runtime marker {}-{nonce}",
+            std::process::id()
+        ));
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args(["marked_helper_fixture", "--nocapture"])
+            .env("INCODEX_PROCESS_MARKER_FIXTURE", "1")
+            .env("INCODEX_SESSION_ROOT", &root)
+            .spawn()
+            .unwrap();
+        thread::sleep(Duration::from_millis(100));
+
+        let result = quiesce_session_processes(&root);
+        thread::sleep(Duration::from_millis(100));
+        let exited = child.try_wait().unwrap().is_some();
+        if !exited {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+
+        assert!(result.is_ok(), "{result:?}");
+        assert!(exited, "marked helper survived process quiescence");
+    }
+}
