@@ -17,7 +17,7 @@ import {
 } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 const repo = join(import.meta.dir, "..");
 const setupScript = join(repo, "scripts", "setup-quick-launchers.sh");
@@ -30,10 +30,11 @@ function writeExecutable(path: string, body: string): void {
 function fixture() {
   const home = mkdtempSync(join(tmpdir(), "incodex-launchers-home-"));
   const root = join(home, "owned launchers");
+  const raycast = join(home, "Library", "Application Support", "Raycast", "script-commands");
   const fakeBin = join(home, "fake bin ' &");
   mkdirSync(fakeBin, { recursive: true });
   writeExecutable(join(fakeBin, "incodex"), "#!/bin/sh\nprintf '%s\\n' \"incodex:$*\"\n");
-  return { home, root, fakeBin };
+  return { home, root, raycast, fakeBin };
 }
 
 function runSetup(
@@ -66,7 +67,7 @@ describe("setup-quick-launchers.sh", () => {
     const first = runSetup(context);
     expect(first.status).toBe(0);
 
-    const raycast = join(context.root, "raycast");
+    const raycast = context.raycast;
     const expectedScripts = ["incodex-doctor.sh", "incodex-open.sh", "incodex-status.sh"];
     for (const filename of expectedScripts) {
       expect(existsSync(join(raycast, filename))).toBe(true);
@@ -117,16 +118,17 @@ describe("setup-quick-launchers.sh", () => {
 
     const second = runSetup(context);
     expect(second.status).toBe(0);
-    const listed = spawnSync("/usr/bin/find", [context.root, "-type", "f"], { encoding: "utf8" });
+    const listed = spawnSync("/usr/bin/find", [context.home, "-type", "f"], { encoding: "utf8" });
     expect(Array.from(listed.stdout.match(/incodex-(?:open|status|doctor)\.sh/g) ?? []).sort()).toEqual(
       expectedScripts,
     );
     expect(listed.stdout.match(/\.alfredworkflow/g)?.length).toBe(1);
   });
 
-  test("never writes launcher files into Raycast or Alfred private preferences", () => {
+  test("uses Raycast's documented shared script directory without writing provider preferences", () => {
     const source = readFileSync(setupScript, "utf8");
-    expect(source).not.toContain("Application Support/Raycast");
+    expect(source).toContain("$HOME/Library/Application Support/Raycast/script-commands");
+    expect(source).not.toContain("com.raycast.macos.plist");
     expect(source).not.toContain("Alfred.alfredpreferences");
     expect(source).not.toMatch(/(?:curl|wget).*(?:main|master)/);
   });
@@ -134,7 +136,7 @@ describe("setup-quick-launchers.sh", () => {
   test("generated Raycast wrappers execute the quoted binary and reject a missing one", () => {
     const context = fixture();
     expect(runSetup(context).status).toBe(0);
-    const raycast = join(context.root, "raycast");
+    const raycast = context.raycast;
 
     const status = spawnSync("/bin/bash", [join(raycast, "incodex-status.sh")], { encoding: "utf8" });
     expect(status.status).toBe(0);
@@ -161,19 +163,20 @@ describe("setup-quick-launchers.sh", () => {
       expect(source).toContain("Raycast v1");
       expect(source).toContain("Settings → Script Commands");
       expect(source).toContain("Script Folders");
+      expect(source).toContain("~/Library/Application Support/Raycast/script-commands");
     }
   });
 
   test("uninstall removes only marker-owned artifacts and leaves user files alone", () => {
     const context = fixture();
     expect(runSetup(context).status).toBe(0);
-    const userFile = join(context.root, "raycast", "mine.sh");
+    const userFile = join(context.raycast, "mine.sh");
     writeFileSync(userFile, "#!/bin/sh\necho mine\n");
 
     const removed = runSetup(context, ["uninstall"]);
     expect(removed.status).toBe(0);
     expect(existsSync(userFile)).toBe(true);
-    expect(existsSync(join(context.root, "raycast", "incodex-open.sh"))).toBe(false);
+    expect(existsSync(join(context.raycast, "incodex-open.sh"))).toBe(false);
     expect(existsSync(join(context.root, "alfred", "Incodex Quick Launchers.alfredworkflow"))).toBe(false);
     expect(removed.stdout + removed.stderr).toContain("Alfred Preferences");
   });
@@ -185,14 +188,14 @@ describe("setup-quick-launchers.sh", () => {
 
     const removed = runSetup(context, ["uninstall"]);
     expect(removed.status).not.toBe(0);
-    expect(existsSync(join(context.root, "raycast", "incodex-open.sh"))).toBe(true);
+    expect(existsSync(join(context.raycast, "incodex-open.sh"))).toBe(true);
     expect(removed.stdout + removed.stderr).toContain("ownership marker");
   });
 
   test("uninstall preserves a modified launcher even when its marker remains", () => {
     const context = fixture();
     expect(runSetup(context).status).toBe(0);
-    const launcher = join(context.root, "raycast", "incodex-open.sh");
+    const launcher = join(context.raycast, "incodex-open.sh");
     writeFileSync(launcher, `${readFileSync(launcher, "utf8")}\nprintf 'user edit\\n'\n`);
 
     const removed = runSetup(context, ["uninstall"]);
@@ -208,6 +211,7 @@ describe("setup-quick-launchers.sh", () => {
     const removed = runSetup(context, ["uninstall"]);
     expect(removed.status).not.toBe(0);
     expect(existsSync(context.root)).toBe(false);
+    expect(existsSync(context.raycast)).toBe(false);
   });
 
   test("a generation failure does not publish ownership or partial launchers", () => {
@@ -219,13 +223,13 @@ describe("setup-quick-launchers.sh", () => {
     const installed = runSetup(context);
     expect(installed.status).not.toBe(0);
     expect(existsSync(join(context.root, ".incodex-quick-launchers"))).toBe(false);
-    expect(existsSync(join(context.root, "raycast", "incodex-open.sh"))).toBe(false);
+    expect(existsSync(join(context.raycast, "incodex-open.sh"))).toBe(false);
     chmodSync(alfred, 0o700);
   });
 
   test("install refuses fixed-name Raycast files it does not own without claiming the root", () => {
     const context = fixture();
-    const raycast = join(context.root, "raycast");
+    const raycast = context.raycast;
     const foreign = join(raycast, "incodex-open.sh");
     mkdirSync(raycast, { recursive: true });
     writeFileSync(foreign, "#!/bin/sh\necho foreign\n");
@@ -253,9 +257,12 @@ describe("setup-quick-launchers.sh", () => {
       const victim = mkdtempSync(join(tmpdir(), `incodex-launchers-${redirected}-victim-`));
       if (redirected === "root") {
         symlinkSync(victim, context.root);
+      } else if (redirected === "raycast") {
+        mkdirSync(dirname(context.raycast), { recursive: true });
+        symlinkSync(victim, context.raycast);
       } else {
         mkdirSync(context.root, { recursive: true });
-        symlinkSync(victim, join(context.root, redirected));
+        symlinkSync(victim, join(context.root, "alfred"));
       }
 
       const installed = runSetup(context);
