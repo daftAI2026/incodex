@@ -7,10 +7,8 @@
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
-use sha2::{Digest, Sha256};
+use crate::friendly_name::random_friendly_name;
 
 pub const MAX_AVATAR_BYTES: u64 = 5 * 1024 * 1024;
 pub const MAX_PROFILE_NAME_CHARS: usize = 64;
@@ -26,8 +24,6 @@ pub struct ProfileMask {
     pub name: String,
     pub avatar: ProfileAvatar,
 }
-
-static NAME_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub fn resolve_profile_mask(
     mask: bool,
@@ -46,7 +42,7 @@ pub fn resolve_profile_mask(
 
     let name = match name {
         Some(value) => validate_profile_name(value)?,
-        None => random_profile_name(),
+        None => random_friendly_name()?,
     };
     let avatar = match avatar_path {
         Some(path) => ProfileAvatar::DataUrl(read_avatar_data_url(path)?),
@@ -69,32 +65,6 @@ fn validate_profile_name(value: &str) -> Result<String, String> {
         return Err("profile name must not contain control characters".into());
     }
     Ok(name.to_string())
-}
-
-fn random_profile_name() -> String {
-    let sequence = NAME_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let mut entropy = [0_u8; 32];
-    let random_ok = File::open("/dev/urandom")
-        .and_then(|mut file| file.read_exact(&mut entropy))
-        .is_ok();
-    if !random_ok {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|duration| duration.as_nanos())
-            .unwrap_or_default();
-        entropy[..16].copy_from_slice(&now.to_le_bytes());
-        entropy[16..24].copy_from_slice(&(std::process::id() as u64).to_le_bytes());
-        entropy[24..].copy_from_slice(&sequence.to_le_bytes());
-    } else {
-        entropy[..8]
-            .iter_mut()
-            .zip(sequence.to_le_bytes())
-            .for_each(|(byte, extra)| {
-                *byte ^= extra;
-            });
-    }
-    let digest = Sha256::digest(entropy);
-    format!("Incognito {}", hex_encode(&digest[..6]))
 }
 
 fn read_avatar_data_url(path: &Path) -> Result<String, String> {
@@ -143,16 +113,6 @@ fn avatar_mime(bytes: &[u8]) -> Option<&'static str> {
     } else {
         None
     }
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(HEX[(byte >> 4) as usize] as char);
-        out.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    out
 }
 
 fn base64_encode(bytes: &[u8]) -> String {
@@ -237,7 +197,11 @@ mod tests {
             .unwrap()
             .expect("mask");
 
-        assert!(generated.name.starts_with("Incognito "));
+        let words: Vec<&str> = generated.name.split(' ').collect();
+        assert_eq!(words.len(), 2);
+        assert!(words.iter().all(|word| word
+            .chars()
+            .all(|character| character.is_ascii_alphabetic())));
         assert_eq!(
             generated.avatar,
             ProfileAvatar::Generated {
