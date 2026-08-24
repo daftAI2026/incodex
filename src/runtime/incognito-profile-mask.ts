@@ -15,9 +15,9 @@ const PROFILE_NAME_SELECTOR = ":scope > span.min-w-0.flex-1.truncate";
 const PROFILE_AVATAR_SELECTOR = ":scope > img.rounded-full, :scope > span.rounded-full";
 const PROFILE_MENU_SELECTOR = '[role="menu"]';
 const PROFILE_MENU_ITEM_SELECTOR = '[role="menuitem"]';
-const PROFILE_MENU_NAME_SELECTOR = ":scope > span.flex-1.min-w-0.truncate";
+const PROFILE_MENU_NAME_SELECTOR = ":scope > div > span.flex-1.min-w-0.truncate";
 const PROFILE_MENU_AVATAR_SELECTOR =
-  ":scope > img.icon-sm.rounded-full, :scope > span.rounded-full";
+  ":scope > div > span > img.icon-sm.rounded-full, :scope > div > span > span.rounded-full";
 const PROFILE_NAME_MARKER_SELECTOR = ":scope > [data-incodex-profile-mask-name]";
 const PROFILE_AVATAR_MARKER_SELECTOR = ":scope > [data-incodex-profile-mask-avatar]";
 const PROFILE_NAME_MAX_CHARS = 64;
@@ -81,14 +81,17 @@ export function findProfileFooter(): HTMLElement | null {
   return candidates.length === 1 ? candidates[0] : null;
 }
 
-export function findProfileMenuIdentity(): HTMLElement | null {
-  const candidates = [...document.querySelectorAll<HTMLElement>(PROFILE_MENU_SELECTOR)].flatMap(
-    (menu) =>
-      [...menu.querySelectorAll<HTMLElement>(PROFILE_MENU_ITEM_SELECTOR)].filter(
-        (item) =>
-          item.querySelector(PROFILE_MENU_NAME_SELECTOR) &&
-          item.querySelector(PROFILE_MENU_AVATAR_SELECTOR),
-      ),
+function findControlledProfileMenu(profileFooter: HTMLElement): HTMLElement | null {
+  const menuId = profileFooter.getAttribute("aria-controls");
+  const menu = menuId ? document.getElementById(menuId) : null;
+  return menu?.matches(PROFILE_MENU_SELECTOR) ? menu : null;
+}
+
+export function findProfileMenuIdentity(profileMenu: HTMLElement): HTMLElement | null {
+  const candidates = [...profileMenu.querySelectorAll<HTMLElement>(PROFILE_MENU_ITEM_SELECTOR)].filter(
+    (item) =>
+      item.querySelector(PROFILE_MENU_NAME_SELECTOR) &&
+      item.querySelector(PROFILE_MENU_AVATAR_SELECTOR),
   );
   return candidates.length === 1 ? candidates[0] : null;
 }
@@ -131,8 +134,9 @@ function ensureIdentityMask(
   return true;
 }
 
-function ensureProfileMenuMask(mask: ResolvedProfileMask): void {
-  const identity = findProfileMenuIdentity();
+function ensureProfileMenuMask(profileFooter: HTMLElement, mask: ResolvedProfileMask): void {
+  const profileMenu = findControlledProfileMenu(profileFooter);
+  const identity = profileMenu ? findProfileMenuIdentity(profileMenu) : null;
   if (!identity) return;
   ensureIdentityMask(identity, PROFILE_MENU_NAME_SELECTOR, PROFILE_MENU_AVATAR_SELECTOR, mask);
 }
@@ -145,7 +149,7 @@ export function ensureProfileMask(): void {
   if (!ensureIdentityMask(profileFooter, PROFILE_NAME_SELECTOR, PROFILE_AVATAR_SELECTOR, mask)) {
     return;
   }
-  ensureProfileMenuMask(mask);
+  ensureProfileMenuMask(profileFooter, mask);
 }
 
 function profileAvatarHealth(avatar: HTMLElement, mask: ResolvedProfileMask): boolean {
@@ -194,15 +198,16 @@ export function profileMaskHealth(): boolean {
   if (!identityMaskHealth(profileFooter, PROFILE_NAME_SELECTOR, PROFILE_AVATAR_SELECTOR, mask)) {
     return false;
   }
-  const menuIdentity = findProfileMenuIdentity();
-  return menuIdentity
-    ? identityMaskHealth(
-        menuIdentity,
-        PROFILE_MENU_NAME_SELECTOR,
-        PROFILE_MENU_AVATAR_SELECTOR,
-        mask,
-      )
-    : true;
+  const profileMenu = findControlledProfileMenu(profileFooter);
+  if (!profileMenu) return true;
+  const menuIdentity = findProfileMenuIdentity(profileMenu);
+  if (!menuIdentity) return false;
+  return identityMaskHealth(
+    menuIdentity,
+    PROFILE_MENU_NAME_SELECTOR,
+    PROFILE_MENU_AVATAR_SELECTOR,
+    mask,
+  );
 }
 
 export function profileMaskNeedsInject(): boolean {
