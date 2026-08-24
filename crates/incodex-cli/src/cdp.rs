@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 接收 OpenPlan 派生的 InjectionOptions、子进程存活信号与 localhost CDP target
- * [OUTPUT]: 对外提供 launch 参数、profile mask bootstrap、注入、持续健康监控与 fail-closed 关窗
+ * [OUTPUT]: 对外提供 launch 参数、profile mask bootstrap、注入、持续健康失败上报与 target lifecycle 关窗
  * [POS]: incodex open 的 renderer 边界；只向当前 Codex page 注入共享 Runtime
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -412,11 +412,7 @@ where
             continue;
         }
         on_failure(&last_error);
-        let close_error = close_browser_with_retries(debug_port).err();
-        return Err(match close_error {
-            Some(error) => format!("{last_error}; Browser.close failed: {error}"),
-            None => last_error,
-        });
+        return Err(last_error);
     }
     Ok(())
 }

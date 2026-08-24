@@ -575,12 +575,10 @@ fn persistent_profile_mask_health_failure_is_reported_to_the_parent() {
             health_probes += 1;
         }
 
-        let direct_close_attempted = accept_until(
-            &listener,
-            Instant::now() + Duration::from_millis(600),
-        )
-        .map(|mut stream| read_request_path(&mut stream) == "/json/version")
-        .unwrap_or(false);
+        let direct_close_attempted =
+            accept_until(&listener, Instant::now() + Duration::from_millis(600))
+                .map(|mut stream| read_request_path(&mut stream) == "/json/version")
+                .unwrap_or(false);
         (health_probes, direct_close_attempted)
     });
 
@@ -594,7 +592,10 @@ fn persistent_profile_mask_health_failure_is_reported_to_the_parent() {
 
     assert!(result.is_err(), "persistent mask failure must be reported");
     assert_eq!(health_probes, 2, "one transient failure may recover");
-    assert!(failure_reported, "the parent lifecycle must receive the failure");
+    assert!(
+        failure_reported,
+        "the parent lifecycle must receive the failure"
+    );
     assert!(
         !direct_close_attempted,
         "the health monitor must leave termination and session cleanup to the parent"
