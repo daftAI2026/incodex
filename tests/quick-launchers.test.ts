@@ -130,4 +130,28 @@ describe("setup-quick-launchers.sh", () => {
     expect(existsSync(join(context.root, "raycast", "incodex-open.sh"))).toBe(true);
     expect(removed.stdout + removed.stderr).toContain("ownership marker");
   });
+
+  test("install refuses fixed-name Raycast files it does not own without claiming the root", () => {
+    const context = fixture();
+    const raycast = join(context.root, "raycast");
+    const foreign = join(raycast, "incodex-open.sh");
+    mkdirSync(raycast, { recursive: true });
+    writeFileSync(foreign, "#!/bin/sh\necho foreign\n");
+
+    const installed = runSetup(context);
+    expect(installed.status).not.toBe(0);
+    expect(readFileSync(foreign, "utf8")).toContain("foreign");
+    expect(existsSync(join(context.root, ".incodex-quick-launchers"))).toBe(false);
+  });
+
+  test("reinstall refuses an Alfred package whose ownership proof is missing", () => {
+    const context = fixture();
+    expect(runSetup(context).status).toBe(0);
+    const workflow = join(context.root, "alfred", "Incodex Quick Launchers.alfredworkflow");
+    writeFileSync(workflow, "foreign workflow");
+
+    const installed = runSetup(context);
+    expect(installed.status).not.toBe(0);
+    expect(readFileSync(workflow, "utf8")).toBe("foreign workflow");
+  });
 });
