@@ -21,7 +21,7 @@ function writeExecutable(path: string, body: string): void {
 function fixture() {
   const home = mkdtempSync(join(tmpdir(), "incodex-launchers-home-"));
   const root = join(home, "owned launchers");
-  const fakeBin = join(home, "fake bin");
+  const fakeBin = join(home, "fake bin ' &");
   mkdirSync(fakeBin, { recursive: true });
   writeExecutable(join(fakeBin, "incodex"), "#!/bin/sh\nprintf '%s\\n' \"incodex:$*\"\n");
   return { home, root, fakeBin };
@@ -157,6 +157,40 @@ describe("setup-quick-launchers.sh", () => {
     expect(removed.status).not.toBe(0);
     expect(existsSync(join(context.root, "raycast", "incodex-open.sh"))).toBe(true);
     expect(removed.stdout + removed.stderr).toContain("ownership marker");
+  });
+
+  test("uninstall preserves a modified launcher even when its marker remains", () => {
+    const context = fixture();
+    expect(runSetup(context).status).toBe(0);
+    const launcher = join(context.root, "raycast", "incodex-open.sh");
+    writeFileSync(launcher, `${readFileSync(launcher, "utf8")}\nprintf 'user edit\\n'\n`);
+
+    const removed = runSetup(context, ["uninstall"]);
+    expect(removed.status).not.toBe(0);
+    expect(existsSync(launcher)).toBe(true);
+    expect(readFileSync(launcher, "utf8")).toContain("user edit");
+    expect(existsSync(join(context.root, ".incodex-quick-launchers"))).toBe(true);
+    expect(removed.stdout + removed.stderr).toContain("modified");
+  });
+
+  test("uninstall of a missing installation does not create its root", () => {
+    const context = fixture();
+    const removed = runSetup(context, ["uninstall"]);
+    expect(removed.status).not.toBe(0);
+    expect(existsSync(context.root)).toBe(false);
+  });
+
+  test("a generation failure does not publish ownership or partial launchers", () => {
+    const context = fixture();
+    const alfred = join(context.root, "alfred");
+    mkdirSync(alfred, { recursive: true });
+    chmodSync(alfred, 0o500);
+
+    const installed = runSetup(context);
+    expect(installed.status).not.toBe(0);
+    expect(existsSync(join(context.root, ".incodex-quick-launchers"))).toBe(false);
+    expect(existsSync(join(context.root, "raycast", "incodex-open.sh"))).toBe(false);
+    chmodSync(alfred, 0o700);
   });
 
   test("install refuses fixed-name Raycast files it does not own without claiming the root", () => {
