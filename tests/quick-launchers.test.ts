@@ -287,6 +287,21 @@ describe("setup-quick-launchers.sh", () => {
     expect(installed.stdout + installed.stderr).toContain("manifest");
   });
 
+  test("install refuses a symlink in a launcher root parent", () => {
+    const context = fixture();
+    const victim = mkdtempSync(join(tmpdir(), "incodex-launchers-parent-victim-"));
+    const redirectedParent = join(context.home, "redirected-parent");
+    symlinkSync(victim, redirectedParent);
+    const redirectedRoot = join(redirectedParent, "quick-launchers");
+
+    const installed = runSetup(context, [], {
+      INCODEX_QUICK_LAUNCHERS_ROOT: redirectedRoot,
+    });
+    expect(installed.status).not.toBe(0);
+    expect(existsSync(join(victim, "quick-launchers"))).toBe(false);
+    expect(installed.stdout + installed.stderr).toMatch(/symlink|redirect/i);
+  });
+
   test("install refuses symlinked ownership and provider directories", () => {
     for (const redirected of ["root", "raycast", "alfred"] as const) {
       const context = fixture();
