@@ -1160,6 +1160,10 @@ var PROFILE_MASK_AVATAR_ATTR = "data-incodex-profile-mask-avatar";
 var PROFILE_FOOTER_SELECTOR = 'button.sidebar-item[type="button"]';
 var PROFILE_NAME_SELECTOR = ":scope > span.min-w-0.flex-1.truncate";
 var PROFILE_AVATAR_SELECTOR = ":scope > img.rounded-full, :scope > span.rounded-full";
+var PROFILE_MENU_SELECTOR = '[role="menu"]';
+var PROFILE_MENU_ITEM_SELECTOR = '[role="menuitem"]';
+var PROFILE_MENU_NAME_SELECTOR = ":scope > span.flex-1.min-w-0.truncate";
+var PROFILE_MENU_AVATAR_SELECTOR = ":scope > img.icon-sm.rounded-full, :scope > span.rounded-full";
 var PROFILE_NAME_MARKER_SELECTOR = ":scope > [data-incodex-profile-mask-name]";
 var PROFILE_AVATAR_MARKER_SELECTOR = ":scope > [data-incodex-profile-mask-avatar]";
 var PROFILE_NAME_MAX_CHARS = 64;
@@ -1181,7 +1185,7 @@ function readProfileMask() {
   if (avatar.kind === "generated") {
     if (avatar.dataUrl !== undefined)
       return null;
-    return { name, avatarDataUrl: hn(name) };
+    return { name, avatarDataUrl: hn(name, { background: "circle" }) };
   }
   if (typeof avatar.dataUrl !== "string" || avatar.kind !== undefined)
     return null;
@@ -1194,29 +1198,42 @@ function findProfileFooter() {
   const candidates = [...document.querySelectorAll(PROFILE_FOOTER_SELECTOR)].filter((element) => element.querySelector(PROFILE_NAME_SELECTOR) && element.querySelector(PROFILE_AVATAR_SELECTOR));
   return candidates.length === 1 ? candidates[0] : null;
 }
-function findProfileNameHost(profileFooter) {
-  const marked = profileFooter.querySelector(PROFILE_NAME_MARKER_SELECTOR);
-  if (marked)
-    return marked;
-  return profileFooter.querySelector(PROFILE_NAME_SELECTOR);
-}
-function findProfileAvatarHost(profileFooter) {
-  const marked = profileFooter.querySelector(PROFILE_AVATAR_MARKER_SELECTOR);
-  if (marked)
-    return marked;
-  return profileFooter.querySelector(PROFILE_AVATAR_SELECTOR);
+function findProfileMenuIdentity() {
+  const candidates = [...document.querySelectorAll(PROFILE_MENU_SELECTOR)].flatMap((menu) => [...menu.querySelectorAll(PROFILE_MENU_ITEM_SELECTOR)].filter((item) => item.querySelector(PROFILE_MENU_NAME_SELECTOR) && item.querySelector(PROFILE_MENU_AVATAR_SELECTOR)));
+  return candidates.length === 1 ? candidates[0] : null;
 }
 function writeProfileAvatar(avatar, mask) {
   if (avatar instanceof HTMLImageElement) {
     avatar.src = mask.avatarDataUrl;
+    avatar.style.objectFit = "cover";
+    avatar.style.objectPosition = "center";
     return true;
   }
   if (avatar.matches("span.rounded-full")) {
     avatar.textContent = "";
     avatar.style.backgroundImage = `url("${mask.avatarDataUrl}")`;
+    avatar.style.backgroundSize = "cover";
+    avatar.style.backgroundPosition = "center";
     return true;
   }
   return false;
+}
+function ensureIdentityMask(identity, nameSelector, avatarSelector, mask) {
+  const nameHost = identity.querySelector(PROFILE_NAME_MARKER_SELECTOR) ?? identity.querySelector(nameSelector);
+  const avatar = identity.querySelector(PROFILE_AVATAR_MARKER_SELECTOR) ?? identity.querySelector(avatarSelector);
+  if (!nameHost || !avatar || !writeProfileAvatar(avatar, mask))
+    return false;
+  nameHost.setAttribute(PROFILE_MASK_NAME_ATTR, "true");
+  nameHost.textContent = mask.name;
+  avatar.setAttribute(PROFILE_MASK_AVATAR_ATTR, "true");
+  identity.setAttribute(PROFILE_MASK_ATTR, "true");
+  return true;
+}
+function ensureProfileMenuMask(mask) {
+  const identity = findProfileMenuIdentity();
+  if (!identity)
+    return;
+  ensureIdentityMask(identity, PROFILE_MENU_NAME_SELECTOR, PROFILE_MENU_AVATAR_SELECTOR, mask);
 }
 function ensureProfileMask() {
   if (!window.__incodexIncognito || !profileMaskConfigured())
@@ -1225,14 +1242,21 @@ function ensureProfileMask() {
   const profileFooter = mask ? findProfileFooter() : null;
   if (!mask || !profileFooter)
     return;
-  const nameHost = findProfileNameHost(profileFooter);
-  const avatar = findProfileAvatarHost(profileFooter);
-  if (!nameHost || !avatar || !writeProfileAvatar(avatar, mask))
+  if (!ensureIdentityMask(profileFooter, PROFILE_NAME_SELECTOR, PROFILE_AVATAR_SELECTOR, mask)) {
     return;
-  nameHost.setAttribute(PROFILE_MASK_NAME_ATTR, "true");
-  nameHost.textContent = mask.name;
-  avatar.setAttribute(PROFILE_MASK_AVATAR_ATTR, "true");
-  profileFooter.setAttribute(PROFILE_MASK_ATTR, "true");
+  }
+  ensureProfileMenuMask(mask);
+}
+function profileAvatarHealth(avatar, mask) {
+  if (avatar instanceof HTMLImageElement) {
+    return avatar.getAttribute("src") === mask.avatarDataUrl && avatar.style.objectFit === "cover" && avatar.style.objectPosition === "center";
+  }
+  return avatar.style.backgroundImage === `url("${mask.avatarDataUrl}")` && avatar.style.backgroundSize === "cover" && avatar.style.backgroundPosition === "center";
+}
+function identityMaskHealth(identity, nameSelector, avatarSelector, mask) {
+  const nameHost = identity.querySelector(PROFILE_NAME_MARKER_SELECTOR) ?? identity.querySelector(nameSelector);
+  const avatar = identity.querySelector(PROFILE_AVATAR_MARKER_SELECTOR) ?? identity.querySelector(avatarSelector);
+  return Boolean(nameHost && avatar && identity.getAttribute(PROFILE_MASK_ATTR) === "true" && nameHost.getAttribute(PROFILE_MASK_NAME_ATTR) === "true" && avatar.getAttribute(PROFILE_MASK_AVATAR_ATTR) === "true" && nameHost.textContent === mask.name && profileAvatarHealth(avatar, mask));
 }
 function profileMaskHealth() {
   if (!profileMaskConfigured())
@@ -1241,15 +1265,11 @@ function profileMaskHealth() {
   const profileFooter = mask ? findProfileFooter() : null;
   if (!mask || !profileFooter)
     return false;
-  const nameHost = findProfileNameHost(profileFooter);
-  const avatar = findProfileAvatarHost(profileFooter);
-  if (!nameHost || !avatar || profileFooter.getAttribute(PROFILE_MASK_ATTR) !== "true" || nameHost.getAttribute(PROFILE_MASK_NAME_ATTR) !== "true" || avatar.getAttribute(PROFILE_MASK_AVATAR_ATTR) !== "true" || nameHost.textContent !== mask.name) {
+  if (!identityMaskHealth(profileFooter, PROFILE_NAME_SELECTOR, PROFILE_AVATAR_SELECTOR, mask)) {
     return false;
   }
-  if (avatar instanceof HTMLImageElement) {
-    return avatar.getAttribute("src") === mask.avatarDataUrl;
-  }
-  return avatar.style.backgroundImage === `url("${mask.avatarDataUrl}")`;
+  const menuIdentity = findProfileMenuIdentity();
+  return menuIdentity ? identityMaskHealth(menuIdentity, PROFILE_MENU_NAME_SELECTOR, PROFILE_MENU_AVATAR_SELECTOR, mask) : true;
 }
 function profileMaskNeedsInject() {
   if (!profileMaskConfigured())

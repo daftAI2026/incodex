@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 window 的 incognito/profile bootstrap 与 Codex 当前 renderer DOM
- * [OUTPUT]: 对外提供帽子按钮、banner，以及仅限无痕 sidebar footer 的视觉遮罩
- * [POS]: Electron Runtime 的共享 inject.js；不拥有账号、菜单、IPC 或持久化状态
+ * [OUTPUT]: 对外提供帽子按钮、banner，以及无痕 profile footer/账号菜单身份行的视觉遮罩
+ * [POS]: Electron Runtime 的共享 inject.js；只改菜单身份视觉，不拥有账号数据、菜单交互、IPC 或持久化状态
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 

@@ -93,7 +93,7 @@ describe("incognito profile mask", () => {
   test("writes visual name and avatar values without taking over account semantics", () => {
     expect(profileMask).toContain("textContent = mask.name");
     expect(profileMask).toContain("avatar.src = mask.avatarDataUrl");
-    expect(profileMask).toContain("profileFooter.setAttribute(PROFILE_MASK_ATTR, \"true\")");
+    expect(profileMask).toContain("identity.setAttribute(PROFILE_MASK_ATTR, \"true\")");
     expect(profileMask).not.toContain("profileFooter.setAttribute(\"aria-label\"");
     expect(profileMask).not.toContain("profileFooter.addEventListener(\"click\"");
   });
@@ -117,7 +117,8 @@ describe("incognito profile mask", () => {
 
   test("keeps the profile health surface fail-closed when the footer is ambiguous", () => {
     expect(profileMask).toContain("candidates.length === 1 ? candidates[0] : null");
-    expect(profileMask).toContain("nameHost.textContent !== mask.name");
+    expect(profileMask).toContain("nameHost.textContent === mask.name");
+    expect(profileMask).toContain("identityMaskHealth");
     expect(profileMask).toContain("profileMaskHealth");
   });
 
@@ -125,7 +126,7 @@ describe("incognito profile mask", () => {
     expect(profileMask).toContain('avatar.kind === "generated"');
     expect(profileMask).not.toContain("avatar.seed");
     expect(profileMask).toContain("avatar.dataUrl");
-    expect(profileMask).toContain("blobatarUri(name)");
+    expect(profileMask).toContain("blobatarUri(name,");
   });
 
   test("keeps ordinary observers on childList and opts into profile text attributes only when masked", () => {
