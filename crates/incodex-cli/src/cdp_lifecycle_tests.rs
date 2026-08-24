@@ -600,7 +600,7 @@ fn persistent_profile_mask_health_failure_closes_the_browser() {
     });
 
     let process_alive = AtomicBool::new(true);
-    let result = monitor_profile_mask_health(port, &process_alive);
+    let result = monitor_profile_mask_health(port, &process_alive, |_| {});
     process_alive.store(false, Ordering::Release);
     let (health_probes, close_received) = server.join().unwrap();
 

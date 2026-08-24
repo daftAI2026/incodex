@@ -71,7 +71,7 @@ fn validate_profile_name(value: &str) -> Result<String, String> {
 fn read_avatar_data_url(path: &Path) -> Result<String, String> {
     let file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
         .open(path)
         .map_err(|error| {
             if error.raw_os_error() == Some(libc::ELOOP) {

@@ -25,8 +25,8 @@ use incodex_core::{format_ok, format_warn};
 use crate::app_bundle::resolve_executable;
 use crate::cdp::{
     allocate_debug_port, debug_launch_args, inject_shared_ui_with_options_while_alive,
-    launch_arg_prefix, start_lifecycle_monitor, start_primary_lifecycle_monitor, InjectionOptions,
-    OFFICIAL_NEW_CODEX_URL,
+    launch_arg_prefix, monitor_profile_mask_health, start_lifecycle_monitor,
+    start_primary_lifecycle_monitor, InjectionOptions, OFFICIAL_NEW_CODEX_URL,
 };
 use crate::profile_mask::ProfileMask;
 
@@ -147,16 +147,6 @@ struct InjectionReadiness {
 }
 
 impl InjectionReadiness {
-    fn mark_ready(&self) {
-        self.ready.store(true, Ordering::Release);
-    }
-
-    fn observe(&self, status: &InjectionStatus) {
-        if matches!(status, InjectionStatus::Ready) {
-            self.mark_ready();
-        }
-    }
-
     fn is_ready(&self) -> bool {
         self.ready.load(Ordering::Acquire)
     }
@@ -167,9 +157,9 @@ fn publish_injection_status(
     readiness: &InjectionReadiness,
     status: InjectionStatus,
 ) {
-    if matches!(status, InjectionStatus::Ready) {
-        readiness.mark_ready();
-    }
+    readiness
+        .ready
+        .store(matches!(status, InjectionStatus::Ready), Ordering::Release);
     let _ = status_tx.send(status);
 }
 
@@ -497,6 +487,18 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                         &injection_readiness,
                         InjectionStatus::Ready,
                     );
+                    if options.profile_mask.is_some() {
+                        let _ =
+                            monitor_profile_mask_health(port, &lifecycle_process_alive, |error| {
+                                publish_injection_status(
+                                    &status_tx,
+                                    &injection_readiness,
+                                    InjectionStatus::Failed(format!(
+                                        "profile mask health failed: {error}"
+                                    )),
+                                );
+                            });
+                    }
                     return;
                 }
                 thread::sleep(Duration::from_millis(400));
@@ -526,59 +528,57 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
     let mut spinner = crate::spinner::Spinner::start("Waiting for Codex UI to become ready");
     let mut reported = false;
     loop {
-        if !reported {
-            match status_rx.try_recv() {
-                Ok(InjectionStatus::Ready) => {
-                    readiness.observe(&InjectionStatus::Ready);
-                    spinner.stop();
-                    println!("{}", format_ok(opened, None));
-                    let _ = std::io::stdout().flush();
-                    spinner = crate::spinner::Spinner::start(waiting);
-                    reported = true;
-                }
-                Ok(InjectionStatus::Failed(detail)) => {
-                    spinner.stop();
-                    if plan.profile_mask.is_some() {
-                        println!(
-                            "{}",
-                            format_warn(&format!("Window closed: {detail}."), None)
-                        );
-                        let _ = std::io::stdout().flush();
-                        stop_injection_worker(&process_alive, &mut injection_worker);
-                        return Ok(match kill_and_reap(&mut child) {
-                            Ok(_) => SpawnOutcome {
-                                process: OpenProcessResult::Exited {
-                                    code: 0,
-                                    ui_ready: false,
-                                },
-                                owner: Some(owner),
-                                cleanup: CleanupDisposition::Burn,
-                            },
-                            Err(error) => {
-                                let reason = format!(
-                                    "UI injection failed and child exit could not be proven: {error}"
-                                );
-                                SpawnOutcome {
-                                    process: OpenProcessResult::SpawnFailed {
-                                        error: reason.clone(),
-                                    },
-                                    owner: Some(owner),
-                                    cleanup: CleanupDisposition::Retain(reason),
-                                }
-                            }
-                        });
-                    }
+        match status_rx.try_recv() {
+            Ok(InjectionStatus::Ready) if !reported => {
+                spinner.stop();
+                println!("{}", format_ok(opened, None));
+                let _ = std::io::stdout().flush();
+                spinner = crate::spinner::Spinner::start(waiting);
+                reported = true;
+            }
+            Ok(InjectionStatus::Ready) => {}
+            Ok(InjectionStatus::Failed(detail)) => {
+                spinner.stop();
+                if plan.profile_mask.is_some() {
                     println!(
                         "{}",
-                        format_warn(&format!("Window opened, but {detail}."), None)
+                        format_warn(&format!("Window closed: {detail}."), None)
                     );
                     let _ = std::io::stdout().flush();
-                    spinner = crate::spinner::Spinner::start(waiting);
-                    reported = true;
+                    stop_injection_worker(&process_alive, &mut injection_worker);
+                    return Ok(match kill_and_reap(&mut child) {
+                        Ok(_) => SpawnOutcome {
+                            process: OpenProcessResult::Exited {
+                                code: 0,
+                                ui_ready: false,
+                            },
+                            owner: Some(owner),
+                            cleanup: CleanupDisposition::Burn,
+                        },
+                        Err(error) => {
+                            let reason = format!(
+                                "UI injection failed and child exit could not be proven: {error}"
+                            );
+                            SpawnOutcome {
+                                process: OpenProcessResult::SpawnFailed {
+                                    error: reason.clone(),
+                                },
+                                owner: Some(owner),
+                                cleanup: CleanupDisposition::Retain(reason),
+                            }
+                        }
+                    });
                 }
-                Err(mpsc::TryRecvError::Empty) => {}
-                Err(mpsc::TryRecvError::Disconnected) => reported = true,
+                println!(
+                    "{}",
+                    format_warn(&format!("Window opened, but {detail}."), None)
+                );
+                let _ = std::io::stdout().flush();
+                spinner = crate::spinner::Spinner::start(waiting);
+                reported = true;
             }
+            Err(mpsc::TryRecvError::Empty) => {}
+            Err(mpsc::TryRecvError::Disconnected) => reported = true,
         }
         match child.try_wait() {
             Ok(Some(status)) => {

@@ -139,6 +139,7 @@ $ incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
 ```
 
 遮罩只改当前无痕 renderer 的 profile footer 与已打开账号菜单中的身份行，不改真实账号。
+如果遮罩无法挂载，或在 renderer 重挂载后无法恢复，Incodex 会关闭该窗口，而不是暴露真实身份。
 
 ### Install
 

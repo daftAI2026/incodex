@@ -1,15 +1,9 @@
 /**
  * [INPUT]: 接收 OpenPlan 派生的 InjectionOptions、子进程存活信号与 localhost CDP target
- * [OUTPUT]: 对外提供 launch 参数、profile mask bootstrap、注入与 UI 验收
+ * [OUTPUT]: 对外提供 launch 参数、profile mask bootstrap、注入、持续健康监控与 fail-closed 关窗
  * [POS]: incodex open 的 renderer 边界；只向当前 Codex page 注入共享 Runtime
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
-// Localhost Chrome DevTools Protocol client for `incodex open`.
-//
-// Launch flags and the page-target filter follow the packaged-Codex CDP
-// pattern used by other desktop launchers (debug port + allow-origins,
-// prefer `app://-/index.html`, skip chrome:// and prewarm routes). The
-// payload is our MIT `inject.js`, not a third-party injector.
 use std::collections::HashSet;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
@@ -32,6 +26,7 @@ const MAX_HTTP_RESPONSE_BYTES: usize = 1024 * 1024;
 const CDP_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const LIFECYCLE_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const PRIMARY_TARGET_MISSING_POLLS: u8 = 2;
+const PROFILE_MASK_FAILURE_POLLS: u8 = 2;
 const BROWSER_CLOSE_ATTEMPTS: u8 = 3;
 pub const OFFICIAL_NEW_CODEX_URL: &str = "codex://new?mode=codex";
 
@@ -391,11 +386,65 @@ pub fn start_lifecycle_monitor(
     thread::spawn(move || monitor_primary_target(debug_port, &primary_target_id, &process_alive));
 }
 
-pub(crate) fn monitor_profile_mask_health(
-    _debug_port: u16,
-    _process_alive: &AtomicBool,
-) -> Result<(), String> {
+pub(crate) fn monitor_profile_mask_health<F>(
+    debug_port: u16,
+    process_alive: &AtomicBool,
+    mut on_failure: F,
+) -> Result<(), String>
+where
+    F: FnMut(&str),
+{
+    let mut failures = 0u8;
+    let mut last_error = "profile mask health was not checked".to_string();
+    while process_alive.load(Ordering::Acquire) {
+        thread::sleep(LIFECYCLE_POLL_INTERVAL);
+        if !process_alive.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        match probe_profile_mask_health(debug_port, process_alive) {
+            Ok(()) => failures = 0,
+            Err(error) => {
+                failures = failures.saturating_add(1);
+                last_error = error;
+            }
+        }
+        if failures < PROFILE_MASK_FAILURE_POLLS {
+            continue;
+        }
+        on_failure(&last_error);
+        let close_error = close_browser_with_retries(debug_port).err();
+        return Err(match close_error {
+            Some(error) => format!("{last_error}; Browser.close failed: {error}"),
+            None => last_error,
+        });
+    }
     Ok(())
+}
+
+fn probe_profile_mask_health(debug_port: u16, process_alive: &AtomicBool) -> Result<(), String> {
+    ensure_injection_active(process_alive)?;
+    let targets = list_targets(debug_port)?;
+    let page = pick_codex_page_target(&targets).ok_or("no Codex page target")?;
+    validate_cdp_websocket_url(&page.ws, debug_port)?;
+    let (mut socket, _) = connect_cdp_websocket(&page.ws, debug_port)?;
+    let response = send_cdp(
+        &mut socket,
+        1,
+        "Runtime.evaluate",
+        json!({
+            "expression": "window.__incodexProfileMaskHealth === true",
+            "returnByValue": true
+        }),
+    )?;
+    let healthy = response
+        .pointer("/result/result/value")
+        .and_then(Value::as_bool)
+        .ok_or("malformed profile mask health result")?;
+    if healthy {
+        Ok(())
+    } else {
+        Err("Incodex profile mask could not be restored".into())
+    }
 }
 
 fn monitor_primary_target(debug_port: u16, primary_target_id: &str, process_alive: &AtomicBool) {

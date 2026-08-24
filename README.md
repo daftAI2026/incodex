@@ -139,6 +139,7 @@ $ incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
 ```
 
 The mask changes only the current incognito renderer's profile footer and the identity row in its open account menu. It does not change the real account.
+If the mask cannot mount or later recover after a renderer remount, Incodex closes that window rather than expose the real identity.
 
 ### Install
 
