@@ -160,6 +160,7 @@ describe("setup-quick-launchers.sh", () => {
       expect(source).toContain("Raycast v2");
       expect(source).toContain("Raycast v1");
       expect(source).toContain("Settings → Script Commands");
+      expect(source).toContain("Script Folders");
     }
   });
 
