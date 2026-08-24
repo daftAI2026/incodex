@@ -71,6 +71,30 @@ function runGenerated(
   });
 }
 
+function ownedArtifacts(context: ReturnType<typeof fixture>): string[] {
+  return [
+    join(context.raycast, "incodex-open.sh"),
+    join(context.raycast, "incodex-status.sh"),
+    join(context.raycast, "incodex-doctor.sh"),
+    join(context.root, "alfred", "Incodex Quick Launchers.alfredworkflow"),
+    join(context.root, "manifest.sha256"),
+    join(context.root, ".incodex-quick-launchers"),
+  ];
+}
+
+function failOnceMovingRaycastStatus(binDir: string): void {
+  writeExecutable(
+    join(binDir, "mv"),
+    `#!/bin/sh
+if [ "$3" = "$HOME/Library/Application Support/Raycast/script-commands/incodex-status.sh" ] && [ ! -e "$HOME/mv-failed" ]; then
+    /usr/bin/touch "$HOME/mv-failed"
+    exit 75
+fi
+exec /bin/mv "$@"
+`,
+  );
+}
+
 function unzipEntry(archive: string, entry: string): string {
   const result = spawnSync("/usr/bin/unzip", ["-p", archive, entry], { encoding: "utf8" });
   if (result.status !== 0) throw new Error(result.stderr || `cannot read ${entry}`);
@@ -322,6 +346,34 @@ describe("setup-quick-launchers.sh", () => {
     expect(existsSync(join(context.root, ".incodex-quick-launchers"))).toBe(false);
     expect(existsSync(join(context.raycast, "incodex-open.sh"))).toBe(false);
     chmodSync(alfred, 0o700);
+  });
+
+  test("a fresh publication failure leaves no launcher residue", () => {
+    const context = fixture();
+    failOnceMovingRaycastStatus(context.fakeBin);
+
+    const installed = runSetup(context);
+    expect(installed.status).not.toBe(0);
+    for (const artifact of ownedArtifacts(context)) {
+      expect(existsSync(artifact)).toBe(false);
+    }
+  });
+
+  test("a reinstall publication failure restores the previous complete collection", () => {
+    const context = fixture();
+    expect(runSetup(context).status).toBe(0);
+    const before = ownedArtifacts(context).map((artifact) => readFileSync(artifact));
+
+    const secondBin = join(context.home, "second-bin");
+    mkdirSync(secondBin, { recursive: true });
+    writeExecutable(join(secondBin, "incodex"), "#!/bin/sh\nprintf '%s\\n' \"incodex-v2:$*\"\n");
+    failOnceMovingRaycastStatus(secondBin);
+
+    const installed = runSetup(context, [], {
+      PATH: `${secondBin}:${context.fakeBin}:/usr/bin:/bin`,
+    });
+    expect(installed.status).not.toBe(0);
+    expect(ownedArtifacts(context).map((artifact) => readFileSync(artifact))).toEqual(before);
   });
 
   test("install refuses fixed-name Raycast files it does not own without claiming the root", () => {
