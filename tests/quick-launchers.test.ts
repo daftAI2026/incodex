@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 scripts/setup-quick-launchers.sh 的本地生成器，依赖 macOS unzip 读取 Alfred 导入包
- * [OUTPUT]: 验证 Raycast/Alfred 产物的幂等性、官方导入边界、所有权与发布事务契约
- * [POS]: tests 的 Quick Launchers 产品契约，阻止生成器写入 Raycast/Alfred 私有配置或暴露不支持的卸载路由
+ * [OUTPUT]: 验证动态 runner、薄 provider wrapper、官方导入边界、原子重生成与所有权拒写契约
+ * [POS]: tests 的 Quick Launchers 产品契约，阻止安装器固化 CLI 路径或管理 provider 私有配置
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { describe, expect, test } from "bun:test";
@@ -12,7 +12,6 @@ import {
   mkdtempSync,
   readFileSync,
   symlinkSync,
-  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
@@ -21,6 +20,7 @@ import { dirname, join } from "node:path";
 
 const repo = join(import.meta.dir, "..");
 const setupScript = join(repo, "scripts", "setup-quick-launchers.sh");
+const generatedMarker = "incodex-quick-launchers generated";
 
 function writeExecutable(path: string, body: string): void {
   writeFileSync(path, body);
@@ -35,6 +35,16 @@ function fixture() {
   mkdirSync(fakeBin, { recursive: true });
   writeExecutable(join(fakeBin, "incodex"), "#!/bin/sh\nprintf '%s\\n' \"incodex:$*\"\n");
   return { home, root, raycast, fakeBin };
+}
+
+function paths(context: ReturnType<typeof fixture>) {
+  return {
+    runner: join(context.root, "runner.sh"),
+    open: join(context.raycast, "incodex-open.sh"),
+    status: join(context.raycast, "incodex-status.sh"),
+    doctor: join(context.raycast, "incodex-doctor.sh"),
+    workflow: join(context.root, "alfred", "Incodex Quick Launchers.alfredworkflow"),
+  };
 }
 
 function runSetup(
@@ -55,7 +65,7 @@ function runSetup(
   });
 }
 
-function runSetupAsync(context: ReturnType<typeof fixture>, extraEnv: Record<string, string> = {}) {
+function runSetupAsync(context: ReturnType<typeof fixture>) {
   const child = spawn("/bin/bash", [setupScript], {
     env: {
       ...process.env,
@@ -63,7 +73,6 @@ function runSetupAsync(context: ReturnType<typeof fixture>, extraEnv: Record<str
       PATH: `${context.fakeBin}:/usr/bin:/bin`,
       INCODEX_QUICK_LAUNCHERS_ROOT: context.root,
       INCODEX_LAUNCHERS_NO_OPEN: "1",
-      ...extraEnv,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -81,20 +90,13 @@ function runSetupAsync(context: ReturnType<typeof fixture>, extraEnv: Record<str
   });
 }
 
-async function waitForFile(path: string): Promise<void> {
-  const deadline = Date.now() + 5000;
-  while (!existsSync(path)) {
-    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${path}`);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
-
 function runGenerated(
   context: ReturnType<typeof fixture>,
   script: string,
+  args: string[] = [],
   extraEnv: Record<string, string> = {},
 ) {
-  return spawnSync("/bin/bash", [script], {
+  return spawnSync("/bin/bash", [script, ...args], {
     encoding: "utf8",
     env: {
       ...process.env,
@@ -105,18 +107,13 @@ function runGenerated(
   });
 }
 
-function ownedArtifacts(context: ReturnType<typeof fixture>): string[] {
-  return [
-    join(context.raycast, "incodex-open.sh"),
-    join(context.raycast, "incodex-status.sh"),
-    join(context.raycast, "incodex-doctor.sh"),
-    join(context.root, "alfred", "Incodex Quick Launchers.alfredworkflow"),
-    join(context.root, "manifest.sha256"),
-    join(context.root, ".incodex-quick-launchers"),
-  ];
+function unzipEntry(archive: string, entry: string): string {
+  const result = spawnSync("/usr/bin/unzip", ["-p", archive, entry], { encoding: "utf8" });
+  if (result.status !== 0) throw new Error(result.stderr || `cannot read ${entry}`);
+  return result.stdout;
 }
 
-function failOnceMovingRaycastStatus(binDir: string): void {
+function writeFailOnceStatusMove(binDir: string): void {
   writeExecutable(
     join(binDir, "mv"),
     `#!/bin/sh
@@ -129,125 +126,101 @@ exec /bin/mv "$@"
   );
 }
 
-function terminateOnceMovingRaycastStatus(binDir: string): void {
-  writeExecutable(
-    join(binDir, "mv"),
-    `#!/bin/sh
-if [ "$3" = "$HOME/Library/Application Support/Raycast/script-commands/incodex-status.sh" ] && [ ! -e "$HOME/mv-terminated" ]; then
-    /usr/bin/touch "$HOME/mv-terminated"
-    kill -TERM "$PPID"
-    exit 75
-fi
-exec /bin/mv "$@"
-`,
-  );
-}
-
-function holdFirstRaycastOpen(binDir: string): void {
-  writeExecutable(
-    join(binDir, "mv"),
-    `#!/bin/sh
-if [ "$3" = "$HOME/Library/Application Support/Raycast/script-commands/incodex-open.sh" ] && [ ! -e "$HOME/publish-held" ]; then
-    /usr/bin/touch "$HOME/publish-held"
-    while [ ! -e "$HOME/release-publish" ]; do /bin/sleep 0.01; done
-fi
-exec /bin/mv "$@"
-`,
-  );
-}
-
-function unzipEntry(archive: string, entry: string): string {
-  const result = spawnSync("/usr/bin/unzip", ["-p", archive, entry], { encoding: "utf8" });
-  if (result.status !== 0) throw new Error(result.stderr || `cannot read ${entry}`);
-  return result.stdout;
+function assertThinRaycastWrapper(source: string, command: string): void {
+  expect(source).toContain(`# ${generatedMarker}`);
+  expect(source).toMatch(new RegExp(`^exec .*runner\\.sh ${command}$`, "m"));
+  expect(source).not.toContain("INCODEX_BIN");
+  expect(source).not.toContain("command -v");
+  expect(source).not.toContain("TERM");
+  expect(source).not.toContain("osascript");
 }
 
 describe("setup-quick-launchers.sh", () => {
-  test("generates a stable Raycast directory and a standard Alfred import package", () => {
+  test("creates one dynamic runner and thin Raycast/Alfred wrappers", () => {
     const context = fixture();
-    const first = runSetup(context);
+    const installed = runSetup(context, [], { PATH: "/usr/bin:/bin" });
+    expect(installed.status).toBe(0);
+
+    const generated = paths(context);
+    const runner = readFileSync(generated.runner, "utf8");
+    expect(runner).toContain(`# ${generatedMarker}`);
+    expect(runner).toContain("resolve_incodex");
+    expect(runner).toContain('INCODEX_BIN="$(resolve_incodex)"');
+    expect(runner).toContain("launch_in_terminal");
+
+    assertThinRaycastWrapper(readFileSync(generated.open, "utf8"), "open");
+    assertThinRaycastWrapper(readFileSync(generated.status, "utf8"), "status");
+    assertThinRaycastWrapper(readFileSync(generated.doctor, "utf8"), "doctor");
+
+    const alfredRunner = unzipEntry(generated.workflow, "run.sh");
+    expect(alfredRunner).toContain(`# ${generatedMarker}`);
+    expect(alfredRunner).toMatch(/^exec .*runner\.sh "\$\{1:-\}"$/m);
+    expect(alfredRunner).not.toContain("INCODEX_BIN");
+    expect(alfredRunner).not.toContain("command -v");
+    expect(unzipEntry(generated.workflow, "info.plist")).toContain("com.daftai.incodex.quick-launchers");
+    expect(existsSync(join(context.root, "manifest.sha256"))).toBe(false);
+    expect(existsSync(join(context.root, ".install.lock"))).toBe(false);
+  });
+
+  test("provider content does not depend on the installation PATH", () => {
+    const context = fixture();
+    expect(runSetup(context, [], { PATH: "/usr/bin:/bin" }).status).toBe(0);
+    const generated = paths(context);
+    const before = {
+      runner: readFileSync(generated.runner, "utf8"),
+      open: readFileSync(generated.open, "utf8"),
+      status: readFileSync(generated.status, "utf8"),
+      doctor: readFileSync(generated.doctor, "utf8"),
+      alfred: unzipEntry(generated.workflow, "run.sh"),
+    };
+
+    const secondBin = join(context.home, "second-bin");
+    mkdirSync(secondBin, { recursive: true });
+    writeExecutable(join(secondBin, "incodex"), "#!/bin/sh\nprintf '%s\\n' \"incodex-v2:$*\"\n");
+    expect(runSetup(context, [], { PATH: `${secondBin}:/usr/bin:/bin` }).status).toBe(0);
+
+    expect(readFileSync(generated.runner, "utf8")).toBe(before.runner);
+    expect(readFileSync(generated.open, "utf8")).toBe(before.open);
+    expect(readFileSync(generated.status, "utf8")).toBe(before.status);
+    expect(readFileSync(generated.doctor, "utf8")).toBe(before.doctor);
+    expect(unzipEntry(generated.workflow, "run.sh")).toBe(before.alfred);
+    for (const source of Object.values(before)) {
+      expect(source).not.toContain(context.fakeBin);
+      expect(source).not.toContain(secondBin);
+    }
+  });
+
+  test("the runner resolves the current incodex binary at execution time", () => {
+    const context = fixture();
+    expect(runSetup(context, [], { PATH: "/usr/bin:/bin" }).status).toBe(0);
+    const generated = paths(context);
+
+    const first = runGenerated(context, generated.status, [], { TERM: "xterm" });
     expect(first.status).toBe(0);
+    expect(first.stdout).toContain("incodex:status");
 
-    const raycast = context.raycast;
-    const expectedScripts = ["incodex-doctor.sh", "incodex-open.sh", "incodex-status.sh"];
-    for (const filename of expectedScripts) {
-      expect(existsSync(join(raycast, filename))).toBe(true);
-    }
-
-    const openScript = readFileSync(join(raycast, "incodex-open.sh"), "utf8");
-    expect(openScript).toContain("@raycast.schemaVersion 1");
-    expect(openScript).toContain("@raycast.title Incodex Open");
-    expect(openScript).toContain("@raycast.mode silent");
-    expect(openScript).toContain("@raycast.packageName Incodex");
-    expect(openScript).toContain("@raycast.platform macos");
-    expect(openScript).toContain("nohup");
-    expect(openScript).not.toContain("--yes");
-
-    for (const command of ["status", "doctor"]) {
-      const script = readFileSync(join(raycast, `incodex-${command}.sh`), "utf8");
-      expect(script).toContain("@raycast.mode fullOutput");
-      expect(script).toContain(`" ${command}`);
-      expect(script).not.toContain("--yes");
-    }
-
-    const workflow = join(context.root, "alfred", "Incodex Quick Launchers.alfredworkflow");
-    expect(existsSync(workflow)).toBe(true);
-    const plist = unzipEntry(workflow, "info.plist");
-    const runner = unzipEntry(workflow, "run.sh");
-    expect(plist).toContain("com.daftai.incodex.quick-launchers");
-    expect(plist).toContain("incognito");
-    expect(plist).toContain("inc-status");
-    expect(plist).toContain("inc-doctor");
-    expect(plist).toContain("incodex.quick.open.input");
-    expect(plist).toContain("incodex.quick.doctor.action");
-    expect(runner).not.toContain("--yes");
-    expect(runner).not.toContain("Alfred.alfredpreferences");
-    expect(runner).toContain("INCODEX_LAUNCHER_APP");
-    for (const terminal of [
-      "Terminal",
-      "iTerm2",
-      "Alacritty",
-      "kitty",
-      "WezTerm",
-      "Ghostty",
-      "Hyper",
-      "WindTerm",
-      "Warp",
-    ]) {
-      expect(runner).toContain(terminal);
-    }
-
-    const second = runSetup(context);
+    const secondBin = join(context.home, "second-bin");
+    mkdirSync(secondBin, { recursive: true });
+    writeExecutable(join(secondBin, "incodex"), "#!/bin/sh\nprintf '%s\\n' \"incodex-v2:$*\"\n");
+    const second = runGenerated(context, generated.status, [], {
+      TERM: "xterm",
+      PATH: `${secondBin}:${context.fakeBin}:/usr/bin:/bin`,
+    });
     expect(second.status).toBe(0);
-    const listed = spawnSync("/usr/bin/find", [context.home, "-type", "f"], { encoding: "utf8" });
-    expect(Array.from(listed.stdout.match(/incodex-(?:open|status|doctor)\.sh/g) ?? []).sort()).toEqual(
-      expectedScripts,
-    );
-    expect(listed.stdout.match(/\.alfredworkflow/g)?.length).toBe(1);
+    expect(second.stdout).toContain("incodex-v2:status");
   });
 
   test("Raycast status and doctor use TERM directly or route through a terminal fallback", () => {
     const context = fixture();
     expect(runSetup(context).status).toBe(0);
-    const termGuard = 'if [[ -n "' + "$" + '{TERM:-}" && "' + "$" + '{TERM}" != "dumb" ]]';
-
-    for (const command of ["status", "doctor"]) {
-      const source = readFileSync(join(context.raycast, `incodex-${command}.sh`), "utf8");
-      expect(source).toContain(termGuard);
-      expect(source).toContain('"$INCODEX_BIN"');
-      expect(source).toContain('TERM_APP="$(detect_launcher_app)"');
-      expect(source).toContain('launch_with_app "$TERM_APP"');
-      expect(source).toContain('if [[ "$TERM_APP" != "Terminal" ]]');
-      expect(source).toContain('launch_with_app "Terminal"');
+    const generated = paths(context);
+    for (const command of ["status", "doctor"] as const) {
+      const source = readFileSync(generated[command], "utf8");
+      expect(source).toContain("@raycast.mode fullOutput");
+      expect(source).toContain(`# ${generatedMarker}`);
     }
-  });
 
-  test("Raycast routes unavailable TERM through an app and falls back to Terminal", () => {
-    const context = fixture();
-    expect(runSetup(context).status).toBe(0);
-    const script = join(context.raycast, "incodex-status.sh");
-
-    const direct = runGenerated(context, script, { TERM: "xterm-256color" });
+    const direct = runGenerated(context, generated.status, [], { TERM: "xterm-256color" });
     expect(direct.status).toBe(0);
     expect(direct.stdout).toContain("incodex:status");
 
@@ -261,7 +234,7 @@ describe("setup-quick-launchers.sh", () => {
       "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$HOME/osascript-args\"\ncat > \"$HOME/osascript-script\"\nexit 0\n",
     );
 
-    const fallback = runGenerated(context, script, {
+    const fallback = runGenerated(context, generated.status, [], {
       TERM: "dumb",
       INCODEX_LAUNCHER_APP: "Hyper",
     });
@@ -270,21 +243,12 @@ describe("setup-quick-launchers.sh", () => {
     expect(readFileSync(join(context.home, "osascript-script"), "utf8")).toContain(
       'tell application "Terminal"',
     );
-
-    const unavailable = runGenerated(context, script, {
-      TERM: "dumb",
-      INCODEX_LAUNCHER_APP: "MissingTerminal",
-    });
-    expect(unavailable.status).toBe(0);
-    expect(readFileSync(join(context.home, "osascript-script"), "utf8")).toContain(
-      'tell application "Terminal"',
-    );
   });
 
-  test("Raycast sends terminal-specific arguments to Hyper, WindTerm, and Warp", () => {
+  test("Raycast and Alfred preserve terminal-specific Hyper, WindTerm, and Warp routing", () => {
     const context = fixture();
     expect(runSetup(context).status).toBe(0);
-    const script = join(context.raycast, "incodex-status.sh");
+    const generated = paths(context);
     writeExecutable(
       join(context.fakeBin, "open"),
       "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$HOME/open-args\"\nexit 0\n",
@@ -292,7 +256,7 @@ describe("setup-quick-launchers.sh", () => {
 
     for (const terminal of ["Hyper", "WindTerm", "Warp"]) {
       mkdirSync(join(context.home, "Applications", `${terminal}.app`), { recursive: true });
-      const launched = runGenerated(context, script, {
+      const launched = runGenerated(context, generated.status, [], {
         TERM: "dumb",
         INCODEX_LAUNCHER_APP: terminal,
       });
@@ -302,24 +266,22 @@ describe("setup-quick-launchers.sh", () => {
       expect(args).toContain("--args");
       expect(args).not.toContain("-e");
     }
-  });
 
-  test("Alfred uses terminal-specific Hyper, WindTerm, and Warp arguments", () => {
-    const context = fixture();
-    expect(runSetup(context).status).toBe(0);
-    const workflow = join(context.root, "alfred", "Incodex Quick Launchers.alfredworkflow");
-    const runner = unzipEntry(workflow, "run.sh");
-
+    const alfredRunner = unzipEntry(generated.workflow, "run.sh");
     for (const terminal of ["Hyper", "WindTerm", "Warp"]) {
-      expect(runner).toMatch(
-        new RegExp(`${terminal}\\)[\\s\\S]*open -na "${terminal}" --args /bin/zsh -lc`),
-      );
+      expect(readFileSync(generated.runner, "utf8")).toContain(terminal);
     }
-    expect(runner).not.toContain("Alacritty|Ghostty|Hyper|WindTerm|Warp");
-    expect(runner).toContain('if launch_with_app "Terminal"');
+    expect(alfredRunner).toContain(`# ${generatedMarker}`);
+    expect(unzipEntry(generated.workflow, "info.plist")).not.toContain("Alfred.alfredpreferences");
+
+    const extracted = join(context.home, "alfred-run.sh");
+    writeExecutable(extracted, alfredRunner);
+    const launched = runGenerated(context, extracted, ["status"], { TERM: "xterm" });
+    expect(launched.status).toBe(0);
+    expect(launched.stdout).toContain("incodex:status");
   });
 
-  test("uses Raycast's documented shared script directory without writing provider preferences", () => {
+  test("uses Raycast's documented shared script directory without provider preferences", () => {
     const source = readFileSync(setupScript, "utf8");
     expect(source).toContain("$HOME/Library/Application Support/Raycast/script-commands");
     expect(source).not.toContain("com.raycast.macos.plist");
@@ -327,214 +289,87 @@ describe("setup-quick-launchers.sh", () => {
     expect(source).not.toMatch(/(?:curl|wget).*(?:main|master)/);
   });
 
-  test("does not expose a launcher uninstall route or public uninstall curl command", () => {
-    const context = fixture();
-    expect(runSetup(context).status).toBe(0);
-    const rejected = runSetup(context, ["uninstall"]);
-    expect(rejected.status).not.toBe(0);
-    expect(existsSync(join(context.raycast, "incodex-open.sh"))).toBe(true);
-    expect(rejected.stdout + rejected.stderr).toContain("usage");
-
+  test("keeps setup install-only and free of the retired transaction machinery", () => {
     const source = readFileSync(setupScript, "utf8");
     expect(source).not.toContain("uninstall");
-    for (const readme of ["README.md", "README_CN.md"]) {
-      expect(readFileSync(join(repo, readme), "utf8")).not.toMatch(/\| bash -s -- uninstall\b/);
+    for (const retired of ["manifest", "PUBLISH_", "rollback", "install.lock", "LOCK_", "token"]) {
+      expect(source).not.toContain(retired);
     }
+    const context = fixture();
+    expect(runSetup(context, ["uninstall"]).status).not.toBe(0);
   });
 
-  test("generated Raycast wrappers execute the quoted binary and reject a missing one", () => {
+  test("repeated and concurrent setup leave executable generated outputs", async () => {
     const context = fixture();
     expect(runSetup(context).status).toBe(0);
-    const raycast = context.raycast;
-    const wrapperEnv = {
-      ...process.env,
-      HOME: context.home,
-      PATH: `${context.fakeBin}:/usr/bin:/bin`,
-      TERM: "xterm",
-    };
+    const generated = paths(context);
+    writeFileSync(generated.runner, `#!/bin/bash\n# ${generatedMarker}\n# stale body\n`);
+    expect(runSetup(context).status).toBe(0);
+    expect(readFileSync(generated.runner, "utf8")).toContain("resolve_incodex");
 
-    const status = spawnSync("/bin/bash", [join(raycast, "incodex-status.sh")], {
-      encoding: "utf8",
-      env: wrapperEnv,
-    });
+    const [first, second] = await Promise.all([runSetupAsync(context), runSetupAsync(context)]);
+    expect(first.status).toBe(0);
+    expect(second.status).toBe(0);
+    const status = runGenerated(context, generated.status, [], { TERM: "xterm" });
     expect(status.status).toBe(0);
     expect(status.stdout).toContain("incodex:status");
-
-    unlinkSync(join(context.fakeBin, "incodex"));
-    const open = spawnSync("/bin/bash", [join(raycast, "incodex-open.sh")], {
-      encoding: "utf8",
-      env: wrapperEnv,
-    });
-    expect(open.status).not.toBe(0);
-    expect(open.stdout + open.stderr).toContain("no longer executable");
   });
 
-  test("documents the optional launcher setup in both public readmes", () => {
-    for (const readme of ["README.md", "README_CN.md"]) {
-      const source = readFileSync(join(repo, readme), "utf8");
-      expect(source).toMatch(
-        /curl -fsSL https:\/\/raw\.githubusercontent\.com\/daftAI2026\/incodex\/main\/scripts\/setup-quick-launchers\.sh \| bash/,
-      );
-      expect(source).not.toMatch(/incodex\/[0-9a-f]{40}\/scripts\/setup-quick-launchers\.sh/);
-      expect(source).toContain("Raycast");
-      expect(source).toContain("Alfred");
-      expect(source).toContain("INCODEX_LAUNCHER_APP");
-      expect(source).toContain("Raycast v2");
-      expect(source).toContain("Raycast v1");
-      expect(source).toContain("Settings → Script Commands");
-      expect(source).toContain("Script Folders");
-      expect(source).toContain("~/Library/Application Support/Raycast/script-commands");
+  test("a per-target publication failure is healed by rerunning setup", () => {
+    const context = fixture();
+    writeFailOnceStatusMove(context.fakeBin);
+    const failed = runSetup(context);
+    expect(failed.status).not.toBe(0);
+
+    const retried = runSetup(context);
+    expect(retried.status).toBe(0);
+    const generated = paths(context);
+    for (const artifact of Object.values(generated)) {
+      expect(existsSync(artifact)).toBe(true);
+    }
+    expect(runGenerated(context, generated.status, [], { TERM: "xterm" }).stdout).toContain("incodex:status");
+  });
+
+  test("foreign fixed-name files are never overwritten", () => {
+    const cases = [
+      (context: ReturnType<typeof fixture>) => {
+        mkdirSync(context.root, { recursive: true });
+        writeFileSync(join(context.root, "runner.sh"), "foreign runner\n");
+        return join(context.root, "runner.sh");
+      },
+      (context: ReturnType<typeof fixture>) => {
+        mkdirSync(context.raycast, { recursive: true });
+        writeFileSync(join(context.raycast, "incodex-open.sh"), "foreign Raycast script\n");
+        return join(context.raycast, "incodex-open.sh");
+      },
+      (context: ReturnType<typeof fixture>) => {
+        const workflow = paths(context).workflow;
+        mkdirSync(dirname(workflow), { recursive: true });
+        writeFileSync(workflow, "foreign Alfred package\n");
+        return workflow;
+      },
+    ];
+
+    for (const prepare of cases) {
+      const context = fixture();
+      const foreign = prepare(context);
+      const installed = runSetup(context);
+      expect(installed.status).not.toBe(0);
+      expect(readFileSync(foreign, "utf8")).toContain("foreign");
+      expect(existsSync(paths(context).status)).toBe(false);
     }
   });
 
-  test("documents Raycast TERM routing and Terminal fallback truthfully", () => {
-    const english = readFileSync(join(repo, "README.md"), "utf8");
-    const chinese = readFileSync(join(repo, "README_CN.md"), "utf8");
-    expect(english).toContain("When Raycast provides a usable `TERM`, Status and Doctor run directly in its `fullOutput` pane");
-    expect(english).toContain("falls back to Terminal");
-    expect(chinese).toContain("Raycast 提供可用的 `TERM` 时，Status 和 Doctor 直接在它的 `fullOutput` 中运行");
-    expect(chinese).toContain("回退到 Terminal");
-  });
-
-  test("a generation failure does not publish ownership or partial launchers", () => {
-    const context = fixture();
-    const alfred = join(context.root, "alfred");
-    mkdirSync(alfred, { recursive: true });
-    chmodSync(alfred, 0o500);
-
-    const installed = runSetup(context);
-    expect(installed.status).not.toBe(0);
-    expect(existsSync(join(context.root, ".incodex-quick-launchers"))).toBe(false);
-    expect(existsSync(join(context.raycast, "incodex-open.sh"))).toBe(false);
-    chmodSync(alfred, 0o700);
-  });
-
-  test("a fresh publication failure leaves no launcher residue", () => {
-    const context = fixture();
-    failOnceMovingRaycastStatus(context.fakeBin);
-
-    const installed = runSetup(context);
-    expect(installed.status).not.toBe(0);
-    for (const artifact of ownedArtifacts(context)) {
-      expect(existsSync(artifact)).toBe(false);
-    }
-  });
-
-  test("a reinstall publication failure restores the previous complete collection", () => {
+  test("the generated marker permits rewriting a self-owned target", () => {
     const context = fixture();
     expect(runSetup(context).status).toBe(0);
-    const before = ownedArtifacts(context).map((artifact) => readFileSync(artifact));
+    const generated = paths(context);
+    writeFileSync(generated.open, `${readFileSync(generated.open, "utf8")}# user edit\n`);
+    writeFileSync(generated.runner, `${readFileSync(generated.runner, "utf8")}# user edit\n`);
 
-    const secondBin = join(context.home, "second-bin");
-    mkdirSync(secondBin, { recursive: true });
-    writeExecutable(join(secondBin, "incodex"), "#!/bin/sh\nprintf '%s\\n' \"incodex-v2:$*\"\n");
-    failOnceMovingRaycastStatus(secondBin);
-
-    const installed = runSetup(context, [], {
-      PATH: `${secondBin}:${context.fakeBin}:/usr/bin:/bin`,
-    });
-    expect(installed.status).not.toBe(0);
-    expect(ownedArtifacts(context).map((artifact) => readFileSync(artifact))).toEqual(before);
-  });
-
-  test("a SIGTERM during fresh publication leaves no launcher residue", () => {
-    const context = fixture();
-    terminateOnceMovingRaycastStatus(context.fakeBin);
-
-    const installed = runSetup(context);
-    expect(installed.status).not.toBe(0);
-    for (const artifact of ownedArtifacts(context)) {
-      expect(existsSync(artifact)).toBe(false);
-    }
-  });
-
-  test("a SIGTERM during reinstall restores the previous complete collection", () => {
-    const context = fixture();
     expect(runSetup(context).status).toBe(0);
-    const before = ownedArtifacts(context).map((artifact) => readFileSync(artifact));
-
-    const secondBin = join(context.home, "second-bin");
-    mkdirSync(secondBin, { recursive: true });
-    writeExecutable(join(secondBin, "incodex"), "#!/bin/sh\nprintf '%s\\n' \"incodex-v2:$*\"\n");
-    terminateOnceMovingRaycastStatus(secondBin);
-
-    const installed = runSetup(context, [], {
-      PATH: `${secondBin}:${context.fakeBin}:/usr/bin:/bin`,
-    });
-    expect(installed.status).not.toBe(0);
-    expect(ownedArtifacts(context).map((artifact) => readFileSync(artifact))).toEqual(before);
-  });
-
-  test("concurrent setup keeps one complete winner instead of mixing binaries", async () => {
-    const context = fixture();
-    holdFirstRaycastOpen(context.fakeBin);
-    const first = runSetupAsync(context);
-    await waitForFile(join(context.home, "publish-held"));
-
-    const secondBin = join(context.home, "second-bin");
-    mkdirSync(secondBin, { recursive: true });
-    writeExecutable(join(secondBin, "incodex"), "#!/bin/sh\nprintf '%s\\n' \"incodex-v2:$*\"\n");
-    writeExecutable(join(secondBin, "mv"), "#!/bin/sh\nexec /bin/mv \"$@\"\n");
-    const second = runSetupAsync(context, {
-      PATH: `${secondBin}:${context.fakeBin}:/usr/bin:/bin`,
-    });
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    writeFileSync(join(context.home, "release-publish"), "release\n");
-
-    const [firstResult, secondResult] = await Promise.all([first, second]);
-    expect([firstResult.status, secondResult.status].filter((status) => status === 0)).toHaveLength(1);
-    expect(firstResult.status === 0 ? secondResult.status : firstResult.status).not.toBe(0);
-    for (const artifact of ownedArtifacts(context).slice(0, 3)) {
-      const source = readFileSync(artifact, "utf8").replaceAll("\\", "");
-      expect(source).toContain(context.fakeBin);
-      expect(source).not.toContain(secondBin);
-    }
-    expect(existsSync(join(context.root, ".install.lock"))).toBe(false);
-  });
-
-  test("install refuses fixed-name Raycast files it does not own without claiming the root", () => {
-    const context = fixture();
-    const raycast = context.raycast;
-    const foreign = join(raycast, "incodex-open.sh");
-    mkdirSync(raycast, { recursive: true });
-    writeFileSync(foreign, "#!/bin/sh\necho foreign\n");
-
-    const installed = runSetup(context);
-    expect(installed.status).not.toBe(0);
-    expect(readFileSync(foreign, "utf8")).toContain("foreign");
-    expect(existsSync(join(context.root, ".incodex-quick-launchers"))).toBe(false);
-  });
-
-  test("reinstall refuses an Alfred package whose ownership proof is missing", () => {
-    const context = fixture();
-    expect(runSetup(context).status).toBe(0);
-    const workflow = join(context.root, "alfred", "Incodex Quick Launchers.alfredworkflow");
-    writeFileSync(workflow, "foreign workflow");
-
-    const installed = runSetup(context);
-    expect(installed.status).not.toBe(0);
-    expect(readFileSync(workflow, "utf8")).toBe("foreign workflow");
-  });
-
-  test("reinstall refuses a tampered ownership manifest", () => {
-    const context = fixture();
-    expect(runSetup(context).status).toBe(0);
-    const launcher = join(context.raycast, "incodex-open.sh");
-    writeFileSync(launcher, "foreign launcher\n");
-    const hash = spawnSync("/usr/bin/shasum", ["-a", "256", launcher], { encoding: "utf8" }).stdout
-      .trim()
-      .split(/\s+/)[0];
-    const manifest = join(context.root, "manifest.sha256");
-    const tampered = readFileSync(manifest, "utf8").replace(
-      /^.*\traycast-open$/m,
-      `${hash}\traycast-open`,
-    );
-    writeFileSync(manifest, tampered);
-
-    const installed = runSetup(context);
-    expect(installed.status).not.toBe(0);
-    expect(readFileSync(launcher, "utf8")).toBe("foreign launcher\n");
-    expect(installed.stdout + installed.stderr).toContain("manifest");
+    expect(readFileSync(generated.open, "utf8")).not.toContain("# user edit");
+    expect(readFileSync(generated.runner, "utf8")).not.toContain("# user edit");
   });
 
   test("install refuses a symlink in a launcher root parent", () => {
@@ -542,23 +377,20 @@ describe("setup-quick-launchers.sh", () => {
     const victim = mkdtempSync(join(tmpdir(), "incodex-launchers-parent-victim-"));
     const redirectedParent = join(context.home, "redirected-parent");
     symlinkSync(victim, redirectedParent);
-    const redirectedRoot = join(redirectedParent, "quick-launchers");
 
     const installed = runSetup(context, [], {
-      INCODEX_QUICK_LAUNCHERS_ROOT: redirectedRoot,
+      INCODEX_QUICK_LAUNCHERS_ROOT: join(redirectedParent, "quick-launchers"),
     });
     expect(installed.status).not.toBe(0);
-    expect(existsSync(join(victim, "quick-launchers"))).toBe(false);
+    expect(existsSync(join(victim, "runner.sh"))).toBe(false);
     expect(installed.stdout + installed.stderr).toMatch(/symlink|redirect/i);
   });
 
-  test("install refuses symlinked ownership and provider directories", () => {
-    for (const redirected of ["root", "raycast", "alfred"] as const) {
+  test("install refuses symlinked provider directories", () => {
+    for (const provider of ["raycast", "alfred"] as const) {
       const context = fixture();
-      const victim = mkdtempSync(join(tmpdir(), `incodex-launchers-${redirected}-victim-`));
-      if (redirected === "root") {
-        symlinkSync(victim, context.root);
-      } else if (redirected === "raycast") {
+      const victim = mkdtempSync(join(tmpdir(), `incodex-launchers-${provider}-victim-`));
+      if (provider === "raycast") {
         mkdirSync(dirname(context.raycast), { recursive: true });
         symlinkSync(victim, context.raycast);
       } else {
@@ -568,9 +400,9 @@ describe("setup-quick-launchers.sh", () => {
 
       const installed = runSetup(context);
       expect(installed.status).not.toBe(0);
-      expect(existsSync(join(victim, ".incodex-quick-launchers"))).toBe(false);
+      expect(existsSync(join(victim, "runner.sh"))).toBe(false);
       expect(existsSync(join(victim, "incodex-open.sh"))).toBe(false);
-      expect(existsSync(join(victim, "Incodex Quick Launchers.alfredworkflow"))).toBe(false);
+      expect(installed.stdout + installed.stderr).toMatch(/symlink|redirect/i);
     }
   });
 });
