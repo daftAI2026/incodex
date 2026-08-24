@@ -98,6 +98,23 @@ describe("incognito profile mask", () => {
     expect(profileMask).not.toContain("profileFooter.addEventListener(\"click\"");
   });
 
+  test("masks the open account menu without changing its interaction semantics", () => {
+    expect(profileMask).toContain("findProfileMenuIdentity");
+    expect(profileMask).toContain('[role="menu"]');
+    expect(profileMask).toContain('[role="menuitem"]');
+    expect(profileMask).toContain("ensureProfileMenuMask");
+    expect(profileMask).not.toContain('setAttribute("role"');
+    expect(profileMask).not.toContain('addEventListener("click"');
+  });
+
+  test("fills the native circular slot without distorting explicit images", () => {
+    expect(profileMask).toContain('background: "circle"');
+    expect(profileMask).toContain('avatar.style.objectFit = "cover"');
+    expect(profileMask).toContain('avatar.style.objectPosition = "center"');
+    expect(profileMask).toContain('avatar.style.backgroundSize = "cover"');
+    expect(profileMask).toContain('avatar.style.backgroundPosition = "center"');
+  });
+
   test("keeps the profile health surface fail-closed when the footer is ambiguous", () => {
     expect(profileMask).toContain("candidates.length === 1 ? candidates[0] : null");
     expect(profileMask).toContain("nameHost.textContent !== mask.name");
