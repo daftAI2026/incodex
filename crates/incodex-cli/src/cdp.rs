@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 /**
  * [INPUT]: 接收 OpenPlan 派生的 InjectionOptions 与 localhost CDP target
  * [OUTPUT]: 对外提供 launch 参数、profile mask bootstrap、注入与 UI 验收
@@ -221,8 +222,11 @@ pub fn is_primary_codex_page(target: &CdpTarget) -> bool {
     url == OFFICIAL_CODEX_PAGE_URL
 }
 
-fn should_register_persistent_script(previous_target_id: Option<&str>, target_id: &str) -> bool {
-    previous_target_id != Some(target_id)
+fn should_register_persistent_script(
+    registered_targets: &HashSet<String>,
+    target_id: &str,
+) -> bool {
+    !registered_targets.contains(target_id)
 }
 
 pub fn inject_shared_ui(debug_port: u16) -> Result<(), String> {
@@ -247,7 +251,7 @@ where
     let source = inject_source_for_options(options);
     let health_expression = ui_ready_expression_for_options(options);
     let require_profile_mask = options.profile_mask.is_some();
-    let mut registered_script_target = None;
+    let mut registered_script_targets = HashSet::new();
     let mut last = "cdp page not ready".to_string();
     let mut refused = 0u8;
     for _ in 0..8 {
@@ -256,7 +260,7 @@ where
             &source,
             &health_expression,
             require_profile_mask,
-            &mut registered_script_target,
+            &mut registered_script_targets,
             &mut on_target,
         ) {
             Ok(target_id) => return Ok(target_id),
@@ -284,7 +288,7 @@ fn try_inject<F>(
     source: &str,
     health_expression: &str,
     require_profile_mask: bool,
-    registered_script_target: &mut Option<String>,
+    registered_script_targets: &mut HashSet<String>,
     on_target: &mut F,
 ) -> Result<String, String>
 where
@@ -297,14 +301,14 @@ where
     let (mut socket, _) = connect_cdp_websocket(&page.ws, debug_port)?;
     send_cdp(&mut socket, 1, "Page.enable", json!({}))?;
     select_official_codex_mode(&mut socket)?;
-    if should_register_persistent_script(registered_script_target.as_deref(), &page.id) {
+    if should_register_persistent_script(registered_script_targets, &page.id) {
         send_cdp(
             &mut socket,
             4,
             "Page.addScriptToEvaluateOnNewDocument",
             json!({ "source": source }),
         )?;
-        *registered_script_target = Some(page.id.clone());
+        registered_script_targets.insert(page.id.clone());
     }
     send_cdp(
         &mut socket,
