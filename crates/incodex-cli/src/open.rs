@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 接收 ParsedCli、ProfileMask 与官方 Codex app 路径
- * [OUTPUT]: 对外提供隔离 session 的 OpenPlan、spawn 生命周期与关窗清理
+ * [OUTPUT]: 对外提供隔离 session 的 OpenPlan、可取消注入的 spawn 生命周期与关窗清理
  * [POS]: incodex open 的 native 编排器；ProfileMask 只沿当前 renderer 注入链路流动
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -24,7 +24,7 @@ use incodex_core::{format_ok, format_warn};
 
 use crate::app_bundle::resolve_executable;
 use crate::cdp::{
-    allocate_debug_port, debug_launch_args, inject_shared_ui_with_options_and_target,
+    allocate_debug_port, debug_launch_args, inject_shared_ui_with_options_while_alive,
     launch_arg_prefix, start_lifecycle_monitor, start_primary_lifecycle_monitor, InjectionOptions,
     OFFICIAL_NEW_CODEX_URL,
 };
@@ -105,9 +105,7 @@ impl OpenProcessResult {
 
     fn failure_message(&self, _cleanup: &CleanupResult, code: OpenExitCode) -> String {
         match code {
-            // The retained-path warning was already printed on stdout. Do not
-            // duplicate it on stderr; the distinct process code carries the
-            // machine-readable failure class.
+            // 保留路径已在 stdout 告警；退出码负责机器可读分类，stderr 不重复。
             OpenExitCode::CleanupRetained => String::new(),
             OpenExitCode::ProcessFailure => match self {
                 Self::SpawnFailed { error } => {
@@ -437,7 +435,7 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
     let (status_tx, status_rx) = mpsc::channel();
     let readiness = InjectionReadiness::default();
     let process_alive = Arc::new(AtomicBool::new(true));
-    if plan.debug_port != 0 {
+    let mut injection_worker = if plan.debug_port != 0 {
         let port = plan.debug_port;
         let injection_readiness = readiness.clone();
         let lifecycle_process_alive = process_alive.clone();
@@ -445,11 +443,14 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
             locale: plan.locale.clone(),
             profile_mask: plan.profile_mask.clone(),
         };
-        thread::spawn(move || {
+        Some(thread::spawn(move || {
             let mut primary_target_id = None;
             let mut lifecycle_started = false;
             let mut last_injection_error = None;
             for attempt in 1u8..=40 {
+                if !lifecycle_process_alive.load(Ordering::Acquire) {
+                    return;
+                }
                 if !lifecycle_started
                     && start_primary_lifecycle_monitor(port, lifecycle_process_alive.clone())
                         .is_ok()
@@ -457,8 +458,11 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                     lifecycle_started = true;
                 }
                 if primary_target_id.is_none() {
-                    let injection =
-                        inject_shared_ui_with_options_and_target(port, &options, |target_id| {
+                    let injection = inject_shared_ui_with_options_while_alive(
+                        port,
+                        &options,
+                        &lifecycle_process_alive,
+                        |target_id| {
                             if !lifecycle_started {
                                 start_lifecycle_monitor(
                                     port,
@@ -467,7 +471,8 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                                 );
                                 lifecycle_started = true;
                             }
-                        });
+                        },
+                    );
                     match injection {
                         Ok(target_id) => {
                             primary_target_id = Some(target_id);
@@ -507,14 +512,15 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                 &injection_readiness,
                 InjectionStatus::Failed(detail),
             );
-        });
+        }))
     } else {
         publish_injection_status(
             &status_tx,
             &readiness,
             InjectionStatus::Failed("a localhost CDP port could not be allocated".into()),
         );
-    }
+        None
+    };
 
     let (_, opened, waiting) = open_progress_copy();
     let mut spinner = crate::spinner::Spinner::start("Waiting for Codex UI to become ready");
@@ -538,7 +544,7 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                             format_warn(&format!("Window closed: {detail}."), None)
                         );
                         let _ = std::io::stdout().flush();
-                        process_alive.store(false, Ordering::Release);
+                        stop_injection_worker(&process_alive, &mut injection_worker);
                         return Ok(match kill_and_reap(&mut child) {
                             Ok(_) => SpawnOutcome {
                                 process: OpenProcessResult::Exited {
@@ -576,7 +582,7 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
         }
         match child.try_wait() {
             Ok(Some(status)) => {
-                process_alive.store(false, Ordering::Release);
+                stop_injection_worker(&process_alive, &mut injection_worker);
                 spinner.stop();
                 return Ok(SpawnOutcome {
                     process: OpenProcessResult::Exited {
@@ -589,7 +595,7 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
             }
             Ok(None) => {}
             Err(error) => {
-                process_alive.store(false, Ordering::Release);
+                stop_injection_worker(&process_alive, &mut injection_worker);
                 spinner.stop();
                 let reason = format!("child exit could not be proven: {error}");
                 return Ok(SpawnOutcome {
@@ -602,6 +608,13 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
             }
         }
         thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn stop_injection_worker(process_alive: &AtomicBool, worker: &mut Option<thread::JoinHandle<()>>) {
+    process_alive.store(false, Ordering::Release);
+    if let Some(worker) = worker.take() {
+        let _ = worker.join();
     }
 }
 
@@ -738,9 +751,7 @@ where
         let attempt_owner = if original_removed { None } else { owner };
         match burn(session_root, attempt_expected, attempt_owner) {
             Ok(removed) => {
-                // +--------------------------------------------------------------------+
-                // | 只有本次已证明删除创建时 root，后续重建才允许路径证明 fallback。 |
-                // +--------------------------------------------------------------------+
+                // 只有已证明删除创建时 root，后续重建才允许路径证明 fallback。
                 original_removed |= removed;
             }
             Err(error) => {

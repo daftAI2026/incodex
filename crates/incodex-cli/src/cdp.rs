@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 接收 OpenPlan 派生的 InjectionOptions 与 localhost CDP target
+ * [INPUT]: 接收 OpenPlan 派生的 InjectionOptions、子进程存活信号与 localhost CDP target
  * [OUTPUT]: 对外提供 launch 参数、profile mask bootstrap、注入与 UI 验收
  * [POS]: incodex open 的 renderer 边界；只向当前 Codex page 注入共享 Runtime
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -240,6 +240,19 @@ pub fn inject_shared_ui_with_options(
 pub fn inject_shared_ui_with_options_and_target<F>(
     debug_port: u16,
     options: &InjectionOptions,
+    on_target: F,
+) -> Result<String, String>
+where
+    F: FnMut(&str),
+{
+    let process_alive = AtomicBool::new(true);
+    inject_shared_ui_with_options_while_alive(debug_port, options, &process_alive, on_target)
+}
+
+pub(crate) fn inject_shared_ui_with_options_while_alive<F>(
+    debug_port: u16,
+    options: &InjectionOptions,
+    process_alive: &AtomicBool,
     mut on_target: F,
 ) -> Result<String, String>
 where
@@ -252,12 +265,14 @@ where
     let mut last = "cdp page not ready".to_string();
     let mut refused = 0u8;
     for _ in 0..8 {
+        ensure_injection_active(process_alive)?;
         match try_inject(
             debug_port,
             &source,
             &health_expression,
             require_profile_mask,
             &mut registered_script_targets,
+            process_alive,
             &mut on_target,
         ) {
             Ok(target_id) => return Ok(target_id),
@@ -286,18 +301,23 @@ fn try_inject<F>(
     health_expression: &str,
     require_profile_mask: bool,
     registered_script_targets: &mut HashSet<String>,
+    process_alive: &AtomicBool,
     on_target: &mut F,
 ) -> Result<String, String>
 where
     F: FnMut(&str),
 {
+    ensure_injection_active(process_alive)?;
     let targets = list_targets(debug_port)?;
+    ensure_injection_active(process_alive)?;
     let page = pick_codex_page_target(&targets).ok_or("no Codex page target")?;
     on_target(&page.id);
     validate_cdp_websocket_url(&page.ws, debug_port)?;
     let (mut socket, _) = connect_cdp_websocket(&page.ws, debug_port)?;
+    ensure_injection_active(process_alive)?;
     send_cdp(&mut socket, 1, "Page.enable", json!({}))?;
     select_official_codex_mode(&mut socket)?;
+    ensure_injection_active(process_alive)?;
     if should_register_persistent_script(registered_script_targets, &page.id) {
         send_cdp(
             &mut socket,
@@ -307,12 +327,14 @@ where
         )?;
         registered_script_targets.insert(page.id.clone());
     }
+    ensure_injection_active(process_alive)?;
     send_cdp(
         &mut socket,
         5,
         "Runtime.evaluate",
         json!({ "expression": source, "returnByValue": true }),
     )?;
+    ensure_injection_active(process_alive)?;
     let health = send_cdp(
         &mut socket,
         6,
@@ -323,6 +345,14 @@ where
     let target_id = page.id.clone();
     let _ = socket.close(None);
     Ok(target_id)
+}
+
+fn ensure_injection_active(process_alive: &AtomicBool) -> Result<(), String> {
+    if process_alive.load(Ordering::Acquire) {
+        Ok(())
+    } else {
+        Err("CDP injection cancelled after child exit".into())
+    }
 }
 
 fn select_official_codex_mode(socket: &mut WebSocket<TcpStream>) -> Result<(), String> {
