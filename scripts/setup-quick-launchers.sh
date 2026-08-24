@@ -33,6 +33,28 @@ shell_quote() {
     printf '%q' "$1"
 }
 
+assert_directory_not_redirected() {
+    local path="$1"
+    local label="$2"
+    if [[ -L "$path" ]]; then
+        die "$label is a symlink; refusing launcher filesystem changes"
+    fi
+    if [[ -e "$path" ]] && [[ ! -d "$path" ]]; then
+        die "$label is not a directory; refusing launcher filesystem changes"
+    fi
+}
+
+prepare_owned_directories() {
+    assert_directory_not_redirected "$ROOT" "launcher root"
+    mkdir -p "$ROOT"
+    assert_directory_not_redirected "$ROOT" "launcher root"
+    assert_directory_not_redirected "$RAYCAST_DIR" "Raycast launcher directory"
+    assert_directory_not_redirected "$ALFRED_DIR" "Alfred launcher directory"
+    if [[ -L "$MARKER" ]]; then
+        die "ownership marker is a symlink; refusing launcher filesystem changes"
+    fi
+}
+
 require_owned_root() {
     if [[ ! -f "$MARKER" ]]; then
         die "ownership marker is missing; refusing to remove launcher files"
@@ -328,7 +350,7 @@ install_launchers() {
     binary="$(resolve_incodex)"
     quoted_binary="$(shell_quote "$binary")"
 
-    mkdir -p "$ROOT"
+    prepare_owned_directories
     if [[ -e "$MARKER" ]] && [[ "$(cat "$MARKER")" != "$OWNER_MARKER" ]]; then
         die "ownership marker changed; refusing to install launcher files"
     fi
@@ -356,6 +378,7 @@ remove_if_owned() {
 }
 
 uninstall_launchers() {
+    prepare_owned_directories
     require_owned_root
     remove_if_owned "$RAYCAST_DIR/incodex-open.sh"
     remove_if_owned "$RAYCAST_DIR/incodex-status.sh"
