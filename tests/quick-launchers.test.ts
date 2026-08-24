@@ -15,7 +15,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -53,6 +53,40 @@ function runSetup(
       ...extraEnv,
     },
   });
+}
+
+function runSetupAsync(context: ReturnType<typeof fixture>, extraEnv: Record<string, string> = {}) {
+  const child = spawn("/bin/bash", [setupScript], {
+    env: {
+      ...process.env,
+      HOME: context.home,
+      PATH: `${context.fakeBin}:/usr/bin:/bin`,
+      INCODEX_QUICK_LAUNCHERS_ROOT: context.root,
+      INCODEX_LAUNCHERS_NO_OPEN: "1",
+      ...extraEnv,
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  return new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", reject);
+    child.on("close", (status) => resolve({ status, stdout, stderr }));
+  });
+}
+
+async function waitForFile(path: string): Promise<void> {
+  const deadline = Date.now() + 5000;
+  while (!existsSync(path)) {
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${path}`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 function runGenerated(
@@ -103,6 +137,19 @@ if [ "$3" = "$HOME/Library/Application Support/Raycast/script-commands/incodex-s
     /usr/bin/touch "$HOME/mv-terminated"
     kill -TERM "$PPID"
     exit 75
+fi
+exec /bin/mv "$@"
+`,
+  );
+}
+
+function holdFirstRaycastOpen(binDir: string): void {
+  writeExecutable(
+    join(binDir, "mv"),
+    `#!/bin/sh
+if [ "$3" = "$HOME/Library/Application Support/Raycast/script-commands/incodex-open.sh" ] && [ ! -e "$HOME/publish-held" ]; then
+    /usr/bin/touch "$HOME/publish-held"
+    while [ ! -e "$HOME/release-publish" ]; do /bin/sleep 0.01; done
 fi
 exec /bin/mv "$@"
 `,
@@ -416,6 +463,33 @@ describe("setup-quick-launchers.sh", () => {
     });
     expect(installed.status).not.toBe(0);
     expect(ownedArtifacts(context).map((artifact) => readFileSync(artifact))).toEqual(before);
+  });
+
+  test("concurrent setup keeps one complete winner instead of mixing binaries", async () => {
+    const context = fixture();
+    holdFirstRaycastOpen(context.fakeBin);
+    const first = runSetupAsync(context);
+    await waitForFile(join(context.home, "publish-held"));
+
+    const secondBin = join(context.home, "second-bin");
+    mkdirSync(secondBin, { recursive: true });
+    writeExecutable(join(secondBin, "incodex"), "#!/bin/sh\nprintf '%s\\n' \"incodex-v2:$*\"\n");
+    writeExecutable(join(secondBin, "mv"), "#!/bin/sh\nexec /bin/mv \"$@\"\n");
+    const second = runSetupAsync(context, {
+      PATH: `${secondBin}:${context.fakeBin}:/usr/bin:/bin`,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    writeFileSync(join(context.home, "release-publish"), "release\n");
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    expect([firstResult.status, secondResult.status].filter((status) => status === 0)).toHaveLength(1);
+    expect(firstResult.status === 0 ? secondResult.status : firstResult.status).not.toBe(0);
+    for (const artifact of ownedArtifacts(context).slice(0, 3)) {
+      const source = readFileSync(artifact, "utf8").replaceAll("\\", "");
+      expect(source).toContain(context.fakeBin);
+      expect(source).not.toContain(secondBin);
+    }
+    expect(existsSync(join(context.root, ".install.lock"))).toBe(false);
   });
 
   test("install refuses fixed-name Raycast files it does not own without claiming the root", () => {
