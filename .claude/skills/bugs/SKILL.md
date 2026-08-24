@@ -15,7 +15,7 @@ Read `AGENTS.md` first. Load only the shapes the diff actually touches. A fix sh
 | 4 | Installer spawns `bun` to rebuild runtime | `crates/incodex-cli/src/install.rs`, `crates/incodex-runtime-bundle/**`, `src/build-runtime.ts` |
 | 5 | `--deep` signs vendor CUA sidecars | `crates/incodex-macos/**` |
 | 6 | Fake OpenAI Team ID or hidden IPC proxy | signing, runtime IPC |
-| 7 | Copies broad `~/.codex` global state or touches session DBs | session / forensics |
+| 7 | Writes or deletes `~/.codex` session DBs | session / forensics |
 | 8 | `open` patches asar or resigns | `crates/incodex-cli/src/open.rs`, `crates/incodex-cli/src/cdp.rs` |
 | 9 | Close does not burn the isolated home | `incodex-safe-home`, `waitAndBurn` |
 | 10 | Help or status output matches a temp path | `crates/incodex-cli/src/help.rs`, `crates/incodex-cli/src/diagnose.rs`, tests with `incodex-` in tmp names |
@@ -46,11 +46,11 @@ Appshot dies after asar/plist changes. Do not fake `2DC432GLL2` or proxy officia
 
 ### 7. Touching `~/.codex` sessions
 
-Copy only `auth.json` and `config.toml` into the isolated home. The sole derived exception is a minimal isolated `.codex-global-state.json`: stable validated window geometry plus the official fresh-home bootstrap timestamp and two announcement-completion flags. When the official main window is live, its current geometry overrides stale persisted bounds; when it is absent or cannot be read, persisted geometry is the fallback. Never copy source atom state or another global-state key, and never delete or rewrite official session DBs.
+Copy only `auth.json` and `config.toml` into the isolated home. Never delete or rewrite official session DBs.
 
 ### 8. `open` mutates the app
 
-`incodex open` first discovers the exact official executable process and its visible layer-0 main window, excluding any same-binary process carrying an isolated `--user-data-dir`. It then spawns the official binary with `--user-data-dir`, `CODEX_HOME`, `CODEX_ELECTRON_USER_DATA_PATH`, an exact loopback `--remote-debugging-port`, matching `--remote-allow-origins`, and the AppKit argument that suppresses the native window-birth animation. It injects the shared `dist/incodex-inject.js` over CDP and verifies the button/banner. No asar, clone, or codesign.
+`incodex open` spawns the official binary with `--user-data-dir`, `CODEX_HOME`, `CODEX_ELECTRON_USER_DATA_PATH`, an exact loopback `--remote-debugging-port`, and matching `--remote-allow-origins`. It injects the shared `dist/incodex-inject.js` over CDP and verifies the button/banner. No asar, clone, or codesign.
 
 ### 9. Leftover session dirs
 
