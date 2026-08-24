@@ -4,6 +4,8 @@ use super::open_tests::{fake_app, temp_root};
 use super::*;
 use crate::profile_mask::{ProfileAvatar, ProfileMask};
 use std::fs;
+use std::io::ErrorKind;
+use std::net::TcpListener;
 use std::time::{Duration, Instant};
 
 #[test]
@@ -125,6 +127,53 @@ fn unmasked_cdp_failure_keeps_the_existing_window_lifecycle() {
         process.exit_code(&CleanupResult::Removed { attempts: 1 }),
         OpenExitCode::UiInjectionFailure
     );
+    burn_session_home(
+        &plan.session_root,
+        &BurnExpected {
+            user_root: &user,
+            session_id: Some(&plan.session_id),
+            ino: None,
+            dev: None,
+        },
+    )
+    .unwrap();
+}
+
+#[test]
+fn child_exit_cancels_mask_injection_before_the_debug_port_can_be_reused() {
+    let root = temp_root();
+    let app = fake_app(&root);
+    let user = root.join("home");
+    let source = root.join("codex");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("auth.json"), "{}\n").unwrap();
+    let mut plan = prepare_incognito_open(&app, &user, &source, 1).unwrap();
+    fs::write(&plan.bin, "#!/bin/sh\nsleep 0.1\n").unwrap();
+    let lease = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = lease.local_addr().unwrap();
+    plan.debug_port = address.port();
+    plan.profile_mask = Some(ProfileMask {
+        name: "Previous Profile".into(),
+        avatar: ProfileAvatar::Generated,
+    });
+    drop(lease);
+
+    let process = spawn_plan(&plan).unwrap();
+    assert!(matches!(process, OpenProcessResult::Exited { .. }));
+
+    let replacement = TcpListener::bind(address).unwrap();
+    replacement.set_nonblocking(true).unwrap();
+    let deadline = Instant::now() + Duration::from_millis(700);
+    while Instant::now() < deadline {
+        match replacement.accept() {
+            Ok(_) => panic!("a stale mask worker contacted a reused debug port"),
+            Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => panic!("replacement debug listener failed: {error}"),
+        }
+    }
+
     burn_session_home(
         &plan.session_root,
         &BurnExpected {
