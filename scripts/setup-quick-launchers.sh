@@ -16,6 +16,9 @@ MARKER_TOKEN_VALUE=""
 MARKER_MANIFEST_HASH=""
 INSTALL_STAGE=""
 INSTALL_BACKUP=""
+LOCK_DIR=""
+LOCK_TOKEN=""
+LOCK_OWNED=0
 PUBLISH_ACTIVE=0
 PUBLISH_ROLLBACK_FAILED=0
 PUBLISH_BACKED_UP=()
@@ -59,7 +62,29 @@ on_install_exit() {
     local status="$?"
     if (( PUBLISH_ACTIVE )); then rollback_staged; fi
     cleanup_install
+    release_install_lock
     return "$status"
+}
+acquire_install_lock() {
+    local lock="$ROOT/.install.lock"
+    assert_path_not_redirected "$ROOT" "launcher root"
+    assert_directory_not_redirected "$ROOT" "launcher root"
+    mkdir -p "$ROOT"
+    if ! mkdir "$lock" 2>/dev/null; then
+        die "another quick launcher install is active or left a stale lock; refusing concurrent setup"
+    fi
+    LOCK_DIR="$lock"
+    LOCK_OWNED=1
+    LOCK_TOKEN="$(new_marker_token)"
+    printf '%s:%s\n' "$$" "$LOCK_TOKEN" >"$LOCK_DIR/owner"
+}
+release_install_lock() {
+    local owner
+    if (( LOCK_OWNED )) && [[ -d "$LOCK_DIR" && ! -L "$LOCK_DIR" ]] && owner="$(cat "$LOCK_DIR/owner" 2>/dev/null)" && [[ "$owner" == "$$:$LOCK_TOKEN" ]]; then
+        rm -f "$LOCK_DIR/owner"
+        rmdir "$LOCK_DIR" 2>/dev/null || true
+    fi
+    LOCK_OWNED=0
 }
 resolve_incodex() {
     local candidate
@@ -75,11 +100,7 @@ shell_quote() {
     printf '%q' "$1"
 }
 assert_path_not_redirected() {
-    local raw_path="$1"
-    local label="$2"
-    local path="$raw_path"
-    local probe
-    local parent
+    local raw_path="$1" label="$2" path="$1" probe parent
     if [[ "$path" != /* ]]; then
         path="$PWD/$path"
     fi
@@ -109,8 +130,7 @@ assert_path_not_redirected() {
     done
 }
 assert_directory_not_redirected() {
-    local path="$1"
-    local label="$2"
+    local path="$1" label="$2"
     if [[ -L "$path" ]]; then
         die "$label is a symlink; refusing launcher filesystem changes"
     fi
@@ -196,8 +216,7 @@ sha256_file() {
     /usr/bin/shasum -a 256 "$1" | /usr/bin/awk '{print $1}'
 }
 manifest_hash() {
-    local key="$1"
-    local line
+    local key="$1" line
     if ! line="$(/usr/bin/awk -F '\t' -v key="$key" '
         $2 == key {
             count++
@@ -256,9 +275,7 @@ require_manifest() {
     fi
 }
 verify_installed_artifacts() {
-    local key
-    local path
-    local expected
+    local key path expected
     for key in "${OWNED_KEYS[@]}"; do
         path="$(owned_artifact_path "$key")"
         expected="$(manifest_hash "$key")"
@@ -268,8 +285,7 @@ verify_installed_artifacts() {
     done
 }
 assert_fresh_targets_absent() {
-    local key
-    local path
+    local key path
     for key in "${OWNED_KEYS[@]}"; do
         path="$(owned_artifact_path "$key")"
         if [[ -e "$path" || -L "$path" ]]; then
@@ -298,11 +314,7 @@ new_marker_token() {
     printf '%s\n' "$token"
 }
 write_manifest() {
-    local base="$1"
-    local token="$2"
-    local target="$base/manifest.sha256"
-    local key
-    local relative
+    local base="$1" token="$2" target="$1/manifest.sha256" key relative
     printf '# %s\n# token=%s\n' "$OWNER_MARKER" "$token" >"$target"
     for key in "${OWNED_KEYS[@]}"; do
         relative="$(owned_staged_relative_path "$key")"
@@ -353,9 +365,7 @@ detect_launcher_app() {
     printf '%s\n' 'Terminal'
 }
 launch_with_app() {
-    local app="$1"
-    local target_command="$2"
-    local osascript_command
+    local app="$1" target_command="$2" osascript_command
     case "$app" in
         Terminal)
             osascript_command="$(command -v osascript 2>/dev/null || true)"
@@ -462,13 +472,7 @@ launch_in_terminal() {
 EOF
 }
 write_raycast_script() {
-    local target="$1"
-    local title="$2"
-    local mode="$3"
-    local description="$4"
-    local command="$5"
-    local quoted_binary="$6"
-    local temporary="$target.tmp.$$"
+    local target="$1" title="$2" mode="$3" description="$4" command="$5" quoted_binary="$6" temporary="$1.tmp.$$"
     cat >"$temporary" <<EOF
 #!/bin/bash
 # $OWNER_MARKER
@@ -531,8 +535,7 @@ write_raycast_launchers() {
         "$quoted_binary"
 }
 write_alfred_runner() {
-    local target="$1"
-    local quoted_binary="$2"
+    local target="$1" quoted_binary="$2"
     cat >"$target" <<EOF
 #!/bin/bash
 # $OWNER_MARKER
@@ -671,9 +674,7 @@ write_alfred_plist() {
 EOF
 }
 write_alfred_workflow() {
-    local quoted_binary="$1"
-    local temporary_dir
-    local temporary_archive="$ALFRED_WORKFLOW.tmp.$$"
+    local quoted_binary="$1" temporary_dir temporary_archive="$ALFRED_WORKFLOW.tmp.$$"
     temporary_dir="$(mktemp -d "${TMPDIR:-/tmp}/incodex-alfred.XXXXXX")"
     trap 'rm -rf "$temporary_dir" "$temporary_archive"' RETURN
     mkdir -p "$ALFRED_DIR"
@@ -708,10 +709,7 @@ maybe_open_alfred_import() {
     fi
 }
 publish_staged() {
-    local stage="$1"
-    local backup="$2"
-    local marker_token="$3"
-    local key path relative manifest_digest failed=0
+    local stage="$1" backup="$2" marker_token="$3" key path relative manifest_digest failed=0
     manifest_digest="$(sha256_file "$stage/manifest.sha256")"
     {
         printf '%s\n' "$OWNER_MARKER"
@@ -755,24 +753,17 @@ publish_staged() {
     fi
 }
 install_launchers() {
-    local binary
-    local quoted_binary
-    local stage
-    local marker_token
-    local backup
-    local final_raycast_dir="$RAYCAST_DIR"
-    local final_alfred_dir="$ALFRED_DIR"
-    local final_alfred_workflow="$ALFRED_WORKFLOW"
+    local binary quoted_binary stage marker_token backup final_raycast_dir="$RAYCAST_DIR" final_alfred_dir="$ALFRED_DIR" final_alfred_workflow="$ALFRED_WORKFLOW"
     binary="$(resolve_incodex)"
     quoted_binary="$(shell_quote "$binary")"
+    trap on_install_exit EXIT
+    trap 'exit 143' HUP INT TERM
+    acquire_install_lock
     prepare_owned_directories
     preflight_install_ownership
     marker_token="$(new_marker_token)"
-    MARKER_TOKEN_VALUE="$marker_token"
     stage="$(mktemp -d "${TMPDIR:-/tmp}/incodex-launchers.XXXXXX")"
     INSTALL_STAGE="$stage"
-    trap on_install_exit EXIT
-    trap 'exit 143' HUP INT TERM
     backup="$(mktemp -d "${TMPDIR:-/tmp}/incodex-launchers-backup.XXXXXX")"
     INSTALL_BACKUP="$backup"
     RAYCAST_DIR="$stage/raycast"
@@ -787,6 +778,7 @@ install_launchers() {
     publish_staged "$stage" "$backup" "$marker_token"
     PUBLISH_ACTIVE=0; trap - EXIT HUP INT TERM
     cleanup_install
+    release_install_lock
     INSTALL_STAGE=""
     INSTALL_BACKUP=""
     printf 'Quick launchers are ready.\n'
