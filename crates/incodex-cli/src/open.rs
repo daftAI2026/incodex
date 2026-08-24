@@ -532,34 +532,43 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                 }
                 Ok(InjectionStatus::Failed(detail)) => {
                     spinner.stop();
-                    println!(
-                        "{}",
-                        format_warn(&format!("Window closed: {detail}."), None)
-                    );
-                    let _ = std::io::stdout().flush();
-                    process_alive.store(false, Ordering::Release);
-                    return Ok(match kill_and_reap(&mut child) {
-                        Ok(_) => SpawnOutcome {
-                            process: OpenProcessResult::Exited {
-                                code: 0,
-                                ui_ready: false,
-                            },
-                            owner: Some(owner),
-                            cleanup: CleanupDisposition::Burn,
-                        },
-                        Err(error) => {
-                            let reason = format!(
-                                "UI injection failed and child exit could not be proven: {error}"
-                            );
-                            SpawnOutcome {
-                                process: OpenProcessResult::SpawnFailed {
-                                    error: reason.clone(),
+                    if plan.profile_mask.is_some() {
+                        println!(
+                            "{}",
+                            format_warn(&format!("Window closed: {detail}."), None)
+                        );
+                        let _ = std::io::stdout().flush();
+                        process_alive.store(false, Ordering::Release);
+                        return Ok(match kill_and_reap(&mut child) {
+                            Ok(_) => SpawnOutcome {
+                                process: OpenProcessResult::Exited {
+                                    code: 0,
+                                    ui_ready: false,
                                 },
                                 owner: Some(owner),
-                                cleanup: CleanupDisposition::Retain(reason),
+                                cleanup: CleanupDisposition::Burn,
+                            },
+                            Err(error) => {
+                                let reason = format!(
+                                    "UI injection failed and child exit could not be proven: {error}"
+                                );
+                                SpawnOutcome {
+                                    process: OpenProcessResult::SpawnFailed {
+                                        error: reason.clone(),
+                                    },
+                                    owner: Some(owner),
+                                    cleanup: CleanupDisposition::Retain(reason),
+                                }
                             }
-                        }
-                    });
+                        });
+                    }
+                    println!(
+                        "{}",
+                        format_warn(&format!("Window opened, but {detail}."), None)
+                    );
+                    let _ = std::io::stdout().flush();
+                    spinner = crate::spinner::Spinner::start(waiting);
+                    reported = true;
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
                 Err(mpsc::TryRecvError::Disconnected) => reported = true,
