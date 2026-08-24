@@ -595,8 +595,46 @@ function observerOptions(): MutationObserverInit {
   return options;
 }
 
+function profileObservationRequired(): boolean {
+  return (
+    isIncognitoWindow() &&
+    window.__incodexProfileMask !== null &&
+    window.__incodexProfileMask !== undefined
+  );
+}
+
+function createMutationObserver(): MutationObserver {
+  let scheduled = false;
+  return new MutationObserver(() => {
+    if (!needsInject()) return;
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(() => {
+      scheduled = false;
+      if (!needsInject()) return;
+      ensureButton();
+      ensureLanding();
+      ensureProfileMask();
+      refreshUiProbe();
+    });
+  });
+}
+
+function ensureMutationObserver(): void {
+  const profileRequired = profileObservationRequired();
+  let observer = window.__incodexMutationObserver;
+  if (observer && (!profileRequired || window.__incodexProfileObservationEnabled)) return;
+  if (!observer) {
+    observer = createMutationObserver();
+    window.__incodexMutationObserver = observer;
+  }
+  observer.observe(document.documentElement, observerOptions());
+  window.__incodexProfileObservationEnabled = profileRequired;
+}
+
 function start(): void {
   if (window.__incodexStarted) {
+    ensureMutationObserver();
     ensureProfileMask();
     refreshUiProbe();
     return;
@@ -611,21 +649,7 @@ function start(): void {
   window.addEventListener("keydown", onKeydown, true);
   window.addEventListener("blur", dismissActiveTooltip);
   window.addEventListener(TOOLTIP_DISMISS_EVENT, () => activeTooltipLifecycle?.dismiss());
-  let scheduled = false;
-  const observer = new MutationObserver(() => {
-    if (!needsInject()) return;
-    if (scheduled) return;
-    scheduled = true;
-    requestAnimationFrame(() => {
-      scheduled = false;
-      if (!needsInject()) return;
-      ensureButton();
-      ensureLanding();
-      ensureProfileMask();
-      refreshUiProbe();
-    });
-  });
-  observer.observe(document.documentElement, observerOptions());
+  ensureMutationObserver();
 }
 
 declare global {
@@ -633,6 +657,8 @@ declare global {
     __incodexStarted?: boolean;
     __incodexIncognito?: boolean;
     __incodexLocale?: string;
+    __incodexMutationObserver?: MutationObserver;
+    __incodexProfileObservationEnabled?: boolean;
     __incodexProfileMaskHealth?: boolean;
     __incodexUiProbe?: ReturnType<typeof deriveUiProbe>;
     incodex?: {

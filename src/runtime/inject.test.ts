@@ -165,8 +165,9 @@ describe("incognito profile mask", () => {
       /if \(window\.__incodexStarted\) \{[\s\S]*ensureMutationObserver\(\);[\s\S]*ensureProfileMask\(\);/,
     );
     expect(inject).toMatch(
-      /if \(observer && profileRequired && !window\.__incodexProfileObservationEnabled\) \{[\s\S]*observer\.disconnect\(\);[\s\S]*observer\.observe\(document\.documentElement, observerOptions\(\)\);/,
+      /if \(observer && \(!profileRequired \|\| window\.__incodexProfileObservationEnabled\)\) return;[\s\S]*observer\.observe\(document\.documentElement, observerOptions\(\)\);/,
     );
+    expect(inject).not.toContain("observer.disconnect()");
   });
 });
 

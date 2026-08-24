@@ -1976,24 +1976,12 @@ function observerOptions() {
   }
   return options;
 }
-function start() {
-  if (window.__incodexStarted) {
-    ensureProfileMask();
-    refreshUiProbe();
-    return;
-  }
-  window.__incodexStarted = true;
-  ensureStyle();
-  ensureButton();
-  apply();
-  ensureLanding();
-  ensureProfileMask();
-  refreshUiProbe();
-  window.addEventListener("keydown", onKeydown, true);
-  window.addEventListener("blur", dismissActiveTooltip);
-  window.addEventListener(TOOLTIP_DISMISS_EVENT, () => activeTooltipLifecycle?.dismiss());
+function profileObservationRequired() {
+  return isIncognitoWindow() && window.__incodexProfileMask !== null && window.__incodexProfileMask !== undefined;
+}
+function createMutationObserver() {
   let scheduled = false;
-  const observer = new MutationObserver(() => {
+  return new MutationObserver(() => {
     if (!needsInject())
       return;
     if (scheduled)
@@ -2009,7 +1997,37 @@ function start() {
       refreshUiProbe();
     });
   });
+}
+function ensureMutationObserver() {
+  const profileRequired = profileObservationRequired();
+  let observer = window.__incodexMutationObserver;
+  if (observer && (!profileRequired || window.__incodexProfileObservationEnabled))
+    return;
+  if (!observer) {
+    observer = createMutationObserver();
+    window.__incodexMutationObserver = observer;
+  }
   observer.observe(document.documentElement, observerOptions());
+  window.__incodexProfileObservationEnabled = profileRequired;
+}
+function start() {
+  if (window.__incodexStarted) {
+    ensureMutationObserver();
+    ensureProfileMask();
+    refreshUiProbe();
+    return;
+  }
+  window.__incodexStarted = true;
+  ensureStyle();
+  ensureButton();
+  apply();
+  ensureLanding();
+  ensureProfileMask();
+  refreshUiProbe();
+  window.addEventListener("keydown", onKeydown, true);
+  window.addEventListener("blur", dismissActiveTooltip);
+  window.addEventListener(TOOLTIP_DISMISS_EVENT, () => activeTooltipLifecycle?.dismiss());
+  ensureMutationObserver();
 }
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", start, { once: true });
