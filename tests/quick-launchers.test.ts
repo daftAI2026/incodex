@@ -95,7 +95,9 @@ describe("setup-quick-launchers.sh", () => {
     const second = runSetup(context);
     expect(second.status).toBe(0);
     const listed = spawnSync("/usr/bin/find", [context.root, "-type", "f"], { encoding: "utf8" });
-    expect(listed.stdout.match(/incodex-(?:open|status|doctor)\.sh/g)?.sort()).toEqual(expectedScripts);
+    expect(Array.from(listed.stdout.match(/incodex-(?:open|status|doctor)\.sh/g) ?? []).sort()).toEqual(
+      expectedScripts,
+    );
     expect(listed.stdout.match(/\.alfredworkflow/g)?.length).toBe(1);
   });
 
