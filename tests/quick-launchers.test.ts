@@ -5,7 +5,7 @@
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -155,5 +155,24 @@ describe("setup-quick-launchers.sh", () => {
     const installed = runSetup(context);
     expect(installed.status).not.toBe(0);
     expect(readFileSync(workflow, "utf8")).toBe("foreign workflow");
+  });
+
+  test("install refuses symlinked ownership and provider directories", () => {
+    for (const redirected of ["root", "raycast", "alfred"] as const) {
+      const context = fixture();
+      const victim = mkdtempSync(join(tmpdir(), `incodex-launchers-${redirected}-victim-`));
+      if (redirected === "root") {
+        symlinkSync(victim, context.root);
+      } else {
+        mkdirSync(context.root, { recursive: true });
+        symlinkSync(victim, join(context.root, redirected));
+      }
+
+      const installed = runSetup(context);
+      expect(installed.status).not.toBe(0);
+      expect(existsSync(join(victim, ".incodex-quick-launchers"))).toBe(false);
+      expect(existsSync(join(victim, "incodex-open.sh"))).toBe(false);
+      expect(existsSync(join(victim, "Incodex Quick Launchers.alfredworkflow"))).toBe(false);
+    }
   });
 });
