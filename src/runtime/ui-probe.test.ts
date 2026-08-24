@@ -55,7 +55,7 @@ describe("minimal Runtime UI injection snapshot", () => {
 
   test("refreshes a stale snapshot when did-finish-load reinjects the bundle", () => {
     expect(inject).toMatch(
-      /if \(window\.__incodexStarted\) \{\s*refreshUiProbe\(\);\s*return;\s*\}/,
+      /if \(window\.__incodexStarted\) \{\s*ensureProfileMask\(\);\s*refreshUiProbe\(\);\s*return;\s*\}/,
     );
   });
 });

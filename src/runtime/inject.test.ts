@@ -1,9 +1,16 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { blobatarUri } from "blobatar/uri";
 import { iconFor } from "./incognito-icon";
 
 const inject = readFileSync(join(import.meta.dir, "inject.ts"), "utf8");
+const profileMask = readFileSync(join(import.meta.dir, "incognito-profile-mask.ts"), "utf8");
+const notice = readFileSync(join(import.meta.dir, "../../NOTICE"), "utf8");
+const packageJson = JSON.parse(readFileSync(join(import.meta.dir, "../../package.json"), "utf8")) as {
+  dependencies?: Record<string, string>;
+};
 const hatGlasses = readFileSync(join(import.meta.dir, "../../assets/hat-glasses.svg"), "utf8");
 const circleX = readFileSync(join(import.meta.dir, "../../assets/circle-x.svg"), "utf8");
 
@@ -55,6 +62,52 @@ describe("incognito button exit affordance", () => {
     expect(clickHandler).toContain("event.preventDefault()");
     expect(clickHandler).toContain("event.stopImmediatePropagation()");
     expect(clickHandler).toContain("void activate()");
+  });
+});
+
+describe("incognito profile mask", () => {
+  test("pins the official Blobatar core for offline generated avatars", () => {
+    expect(packageJson.dependencies?.blobatar).toBe("2.4.0");
+    expect(profileMask).toContain('from "blobatar/uri"');
+    expect(profileMask).toContain("blobatarUri");
+    expect(notice).toContain("blobatar@2.4.0");
+    expect(notice).toContain("Copyright (c) 2026 Alain");
+  });
+
+  test("keeps the Blobatar 2.4.0 Temporary golden output stable", () => {
+    const digest = createHash("sha256").update(blobatarUri("Temporary")).digest("hex");
+    expect(digest).toBe("05377318e542508086482ec3208f61e342e19a123cc1293e862959c19a493df0");
+  });
+
+  test("uses the CDP bootstrap value and only the unique sidebar profile footer", () => {
+    expect(profileMask).toContain("__incodexProfileMask");
+    expect(profileMask).toContain("findProfileFooter");
+    expect(profileMask).toContain('button.sidebar-item[type="button"]');
+    expect(profileMask).toContain(":scope > span.min-w-0.flex-1.truncate");
+    expect(profileMask).toContain(":scope > img.rounded-full, :scope > span.rounded-full");
+    expect(profileMask).toContain(":scope > [data-incodex-profile-mask-name]");
+    expect(profileMask).toContain("candidates.length === 1");
+    expect(inject).toContain("ensureProfileMask");
+  });
+
+  test("writes visual name and avatar values without taking over account semantics", () => {
+    expect(profileMask).toContain("textContent = mask.name");
+    expect(profileMask).toContain("avatar.src = mask.avatarDataUrl");
+    expect(profileMask).toContain("profileFooter.setAttribute(PROFILE_MASK_ATTR, \"true\")");
+    expect(profileMask).not.toContain("profileFooter.setAttribute(\"aria-label\"");
+    expect(profileMask).not.toContain("profileFooter.addEventListener(\"click\"");
+  });
+
+  test("keeps the profile health surface fail-closed when the footer is ambiguous", () => {
+    expect(profileMask).toContain("candidates.length === 1 ? candidates[0] : null");
+    expect(profileMask).toContain("nameHost.textContent !== mask.name");
+    expect(profileMask).toContain("profileMaskHealth");
+  });
+
+  test("distinguishes a generated seed from a validated explicit data URL", () => {
+    expect(profileMask).toContain("avatar.seed");
+    expect(profileMask).toContain("avatar.dataUrl");
+    expect(profileMask).toContain("blobatarUri(name)");
   });
 });
 
