@@ -4,8 +4,9 @@
  * [POS]: incodex-cli 的隐私身份值对象；在 session 创建前完成离线解析，默认头像交给 Runtime Blobatar
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
-use std::fs::{self, File};
+use std::fs::OpenOptions;
 use std::io::Read;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
 use crate::friendly_name::random_friendly_name;
@@ -68,20 +69,26 @@ fn validate_profile_name(value: &str) -> Result<String, String> {
 }
 
 fn read_avatar_data_url(path: &Path) -> Result<String, String> {
-    let link_metadata = fs::symlink_metadata(path)
-        .map_err(|error| format!("cannot read avatar file {}: {error}", path.display()))?;
-    if !link_metadata.file_type().is_file() {
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)
+        .map_err(|error| {
+            if error.raw_os_error() == Some(libc::ELOOP) {
+                format!("avatar path must not be a symlink: {}", path.display())
+            } else {
+                format!("cannot open avatar file {}: {error}", path.display())
+            }
+        })?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("cannot stat avatar file {}: {error}", path.display()))?;
+    if !metadata.file_type().is_file() {
         return Err(format!(
             "avatar path is not an ordinary file: {}",
             path.display()
         ));
     }
-
-    let file = File::open(path)
-        .map_err(|error| format!("cannot open avatar file {}: {error}", path.display()))?;
-    let metadata = file
-        .metadata()
-        .map_err(|error| format!("cannot stat avatar file {}: {error}", path.display()))?;
     if metadata.len() > MAX_AVATAR_BYTES {
         return Err(format!(
             "avatar file is too large (maximum {MAX_AVATAR_BYTES} bytes)"
