@@ -102,6 +102,12 @@ describe("incognito profile mask", () => {
     expect(profileMask).toContain("findProfileMenuIdentity");
     expect(profileMask).toContain('[role="menu"]');
     expect(profileMask).toContain('[role="menuitem"]');
+    expect(profileMask).toContain(":scope > div > span.flex-1.min-w-0.truncate");
+    expect(profileMask).toContain(":scope > div > span > img.icon-sm.rounded-full");
+    expect(profileMask).toContain('profileFooter.getAttribute("aria-controls")');
+    expect(profileMask).toMatch(
+      /if \(!profileMenu\) return true;[\s\S]*if \(!menuIdentity\) return false;/,
+    );
     expect(profileMask).toContain("ensureProfileMenuMask");
     expect(profileMask).not.toContain('setAttribute("role"');
     expect(profileMask).not.toContain('addEventListener("click"');
