@@ -123,11 +123,12 @@ describe("setup-quick-launchers.sh", () => {
   });
 
   test("documents the optional launcher setup in both public readmes", () => {
-    const install =
-      "curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/scripts/setup-quick-launchers.sh | bash";
     for (const readme of ["README.md", "README_CN.md"]) {
       const source = readFileSync(join(repo, readme), "utf8");
-      expect(source).toContain(install);
+      expect(source).toMatch(
+        /curl -fsSL https:\/\/raw\.githubusercontent\.com\/daftAI2026\/incodex\/[0-9a-f]{40}\/scripts\/setup-quick-launchers\.sh \| bash/,
+      );
+      expect(source).toContain("| bash -s -- uninstall");
       expect(source).toContain("Raycast");
       expect(source).toContain("Alfred");
       expect(source).toContain("INCODEX_LAUNCHER_APP");
