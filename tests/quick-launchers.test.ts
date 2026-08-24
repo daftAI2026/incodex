@@ -55,6 +55,22 @@ function runSetup(
   });
 }
 
+function runGenerated(
+  context: ReturnType<typeof fixture>,
+  script: string,
+  extraEnv: Record<string, string> = {},
+) {
+  return spawnSync("/bin/bash", [script], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      HOME: context.home,
+      PATH: `${context.fakeBin}:/usr/bin:/bin`,
+      ...extraEnv,
+    },
+  });
+}
+
 function unzipEntry(archive: string, entry: string): string {
   const result = spawnSync("/usr/bin/unzip", ["-p", archive, entry], { encoding: "utf8" });
   if (result.status !== 0) throw new Error(result.stderr || `cannot read ${entry}`);
@@ -125,6 +141,98 @@ describe("setup-quick-launchers.sh", () => {
     expect(listed.stdout.match(/\.alfredworkflow/g)?.length).toBe(1);
   });
 
+  test("Raycast status and doctor use TERM directly or route through a terminal fallback", () => {
+    const context = fixture();
+    expect(runSetup(context).status).toBe(0);
+
+    for (const command of ["status", "doctor"]) {
+      const source = readFileSync(join(context.raycast, `incodex-${command}.sh`), "utf8");
+      expect(source).toContain('if [[ -n "${TERM:-}" && "${TERM}" != "dumb" ]]');
+      expect(source).toContain('"$INCODEX_BIN"');
+      expect(source).toContain('TERM_APP="$(detect_launcher_app)"');
+      expect(source).toContain('launch_with_app "$TERM_APP"');
+      expect(source).toContain('if [[ "$TERM_APP" != "Terminal" ]]');
+      expect(source).toContain('launch_with_app "Terminal"');
+    }
+  });
+
+  test("Raycast routes unavailable TERM through an app and falls back to Terminal", () => {
+    const context = fixture();
+    expect(runSetup(context).status).toBe(0);
+    const script = join(context.raycast, "incodex-status.sh");
+
+    const direct = runGenerated(context, script, { TERM: "xterm-256color" });
+    expect(direct.status).toBe(0);
+    expect(direct.stdout).toContain("incodex:status");
+
+    mkdirSync(join(context.home, "Applications", "Hyper.app"), { recursive: true });
+    writeExecutable(
+      join(context.fakeBin, "open"),
+      "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$HOME/open-args\"\nexit 1\n",
+    );
+    writeExecutable(
+      join(context.fakeBin, "osascript"),
+      "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$HOME/osascript-args\"\ncat > \"$HOME/osascript-script\"\nexit 0\n",
+    );
+
+    const fallback = runGenerated(context, script, {
+      TERM: "dumb",
+      INCODEX_LAUNCHER_APP: "Hyper",
+    });
+    expect(fallback.status).toBe(0);
+    expect(readFileSync(join(context.home, "open-args"), "utf8")).toContain("Hyper");
+    expect(readFileSync(join(context.home, "osascript-script"), "utf8")).toContain(
+      'tell application "Terminal"',
+    );
+
+    const unavailable = runGenerated(context, script, {
+      TERM: "dumb",
+      INCODEX_LAUNCHER_APP: "MissingTerminal",
+    });
+    expect(unavailable.status).toBe(0);
+    expect(readFileSync(join(context.home, "osascript-script"), "utf8")).toContain(
+      'tell application "Terminal"',
+    );
+  });
+
+  test("Raycast sends terminal-specific arguments to Hyper, WindTerm, and Warp", () => {
+    const context = fixture();
+    expect(runSetup(context).status).toBe(0);
+    const script = join(context.raycast, "incodex-status.sh");
+    writeExecutable(
+      join(context.fakeBin, "open"),
+      "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$HOME/open-args\"\nexit 0\n",
+    );
+
+    for (const terminal of ["Hyper", "WindTerm", "Warp"]) {
+      mkdirSync(join(context.home, "Applications", `${terminal}.app`), { recursive: true });
+      const launched = runGenerated(context, script, {
+        TERM: "dumb",
+        INCODEX_LAUNCHER_APP: terminal,
+      });
+      expect(launched.status).toBe(0);
+      const args = readFileSync(join(context.home, "open-args"), "utf8").split("\n");
+      expect(args).toContain(terminal);
+      expect(args).toContain("--args");
+      expect(args).not.toContain("-e");
+    }
+  });
+
+  test("Alfred uses terminal-specific Hyper, WindTerm, and Warp arguments", () => {
+    const context = fixture();
+    expect(runSetup(context).status).toBe(0);
+    const workflow = join(context.root, "alfred", "Incodex Quick Launchers.alfredworkflow");
+    const runner = unzipEntry(workflow, "run.sh");
+
+    for (const terminal of ["Hyper", "WindTerm", "Warp"]) {
+      expect(runner).toMatch(
+        new RegExp(`${terminal}\\)[\\s\\S]*open -na "${terminal}" --args /bin/zsh -lc`),
+      );
+    }
+    expect(runner).not.toContain("Alacritty|Ghostty|Hyper|WindTerm|Warp");
+    expect(runner).toContain('if launch_with_app "Terminal"');
+  });
+
   test("uses Raycast's documented shared script directory without writing provider preferences", () => {
     const source = readFileSync(setupScript, "utf8");
     expect(source).toContain("$HOME/Library/Application Support/Raycast/script-commands");
@@ -165,6 +273,15 @@ describe("setup-quick-launchers.sh", () => {
       expect(source).toContain("Script Folders");
       expect(source).toContain("~/Library/Application Support/Raycast/script-commands");
     }
+  });
+
+  test("documents Raycast TERM routing and Terminal fallback truthfully", () => {
+    const english = readFileSync(join(repo, "README.md"), "utf8");
+    const chinese = readFileSync(join(repo, "README_CN.md"), "utf8");
+    expect(english).toContain("When Raycast provides a usable `TERM`, Status and Doctor run directly in its `fullOutput` pane");
+    expect(english).toContain("falls back to Terminal");
+    expect(chinese).toContain("Raycast 提供可用的 `TERM` 时，Status 和 Doctor 直接在它的 `fullOutput` 中运行");
+    expect(chinese).toContain("回退到 Terminal");
   });
 
   test("uninstall removes only marker-owned artifacts and leaves user files alone", () => {
