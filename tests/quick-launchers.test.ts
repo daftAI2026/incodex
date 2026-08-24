@@ -251,6 +251,27 @@ describe("setup-quick-launchers.sh", () => {
     expect(readFileSync(workflow, "utf8")).toBe("foreign workflow");
   });
 
+  test("reinstall refuses a tampered ownership manifest", () => {
+    const context = fixture();
+    expect(runSetup(context).status).toBe(0);
+    const launcher = join(context.raycast, "incodex-open.sh");
+    writeFileSync(launcher, "foreign launcher\n");
+    const hash = spawnSync("/usr/bin/shasum", ["-a", "256", launcher], { encoding: "utf8" }).stdout
+      .trim()
+      .split(/\s+/)[0];
+    const manifest = join(context.root, "manifest.sha256");
+    const tampered = readFileSync(manifest, "utf8").replace(
+      /^.*\traycast-open$/m,
+      `${hash}\traycast-open`,
+    );
+    writeFileSync(manifest, tampered);
+
+    const installed = runSetup(context);
+    expect(installed.status).not.toBe(0);
+    expect(readFileSync(launcher, "utf8")).toBe("foreign launcher\n");
+    expect(installed.stdout + installed.stderr).toContain("manifest");
+  });
+
   test("install refuses symlinked ownership and provider directories", () => {
     for (const redirected of ["root", "raycast", "alfred"] as const) {
       const context = fixture();
