@@ -26,6 +26,7 @@ use crate::profile_mask::{ProfileAvatar, ProfileMask};
 
 const INJECT_JS: &str = include_str!("../../../dist/incodex-inject.js");
 const INJECT_PREFIX: &str = "window.__incodexIncognito=true;";
+const OFFICIAL_CODEX_PAGE_URL: &str = "app://-/index.html";
 const MAX_HTTP_RESPONSE_BYTES: usize = 1024 * 1024;
 const CDP_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const LIFECYCLE_POLL_INTERVAL: Duration = Duration::from_millis(200);
@@ -93,8 +94,17 @@ pub fn inject_source_for_options(options: &InjectionOptions) -> String {
         .as_ref()
         .map(profile_mask_json)
         .unwrap_or_else(|| "null".to_string());
+    let official_page_url = serde_json::to_string(OFFICIAL_CODEX_PAGE_URL)
+        .unwrap_or_else(|_| "\"app://-/index.html\"".into());
+    let profile_bootstrap = if options.profile_mask.is_some() {
+        format!(
+            "(window.top===window&&window.location.href==={official_page_url})?{profile_mask}:null"
+        )
+    } else {
+        "null".to_string()
+    };
     format!(
-        "{INJECT_PREFIX}window.__incodexLocale={locale};window.__incodexProfileMask={profile_mask};\n{INJECT_JS}"
+        "{INJECT_PREFIX}window.__incodexLocale={locale};window.__incodexProfileMask={profile_bootstrap};\n{INJECT_JS}"
     )
 }
 
@@ -208,7 +218,11 @@ pub fn is_primary_codex_page(target: &CdpTarget) -> bool {
     if url.contains("quick-chat-prewarm") || url.contains("avatar-overlay") {
         return false;
     }
-    url == "app://-/index.html"
+    url == OFFICIAL_CODEX_PAGE_URL
+}
+
+fn should_register_persistent_script(previous_target_id: Option<&str>, target_id: &str) -> bool {
+    previous_target_id != Some(target_id)
 }
 
 pub fn inject_shared_ui(debug_port: u16) -> Result<(), String> {
@@ -233,6 +247,7 @@ where
     let source = inject_source_for_options(options);
     let health_expression = ui_ready_expression_for_options(options);
     let require_profile_mask = options.profile_mask.is_some();
+    let mut registered_script_target = None;
     let mut last = "cdp page not ready".to_string();
     let mut refused = 0u8;
     for _ in 0..8 {
@@ -241,6 +256,7 @@ where
             &source,
             &health_expression,
             require_profile_mask,
+            &mut registered_script_target,
             &mut on_target,
         ) {
             Ok(target_id) => return Ok(target_id),
@@ -268,6 +284,7 @@ fn try_inject<F>(
     source: &str,
     health_expression: &str,
     require_profile_mask: bool,
+    registered_script_target: &mut Option<String>,
     on_target: &mut F,
 ) -> Result<String, String>
 where
@@ -280,12 +297,15 @@ where
     let (mut socket, _) = connect_cdp_websocket(&page.ws, debug_port)?;
     send_cdp(&mut socket, 1, "Page.enable", json!({}))?;
     select_official_codex_mode(&mut socket)?;
-    send_cdp(
-        &mut socket,
-        4,
-        "Page.addScriptToEvaluateOnNewDocument",
-        json!({ "source": source }),
-    )?;
+    if should_register_persistent_script(registered_script_target.as_deref(), &page.id) {
+        send_cdp(
+            &mut socket,
+            4,
+            "Page.addScriptToEvaluateOnNewDocument",
+            json!({ "source": source }),
+        )?;
+        *registered_script_target = Some(page.id.clone());
+    }
     send_cdp(
         &mut socket,
         5,
