@@ -9,9 +9,11 @@ set -euo pipefail
 OWNER_MARKER="incodex-quick-launchers owner=daftAI2026/incodex schema=1"
 ROOT="${INCODEX_QUICK_LAUNCHERS_ROOT:-$HOME/.incodex/quick-launchers}"
 MARKER="$ROOT/.incodex-quick-launchers"
+MANIFEST="$ROOT/manifest.sha256"
 RAYCAST_DIR="$ROOT/raycast"
 ALFRED_DIR="$ROOT/alfred"
 ALFRED_WORKFLOW="$ALFRED_DIR/Incodex Quick Launchers.alfredworkflow"
+OWNED_KEYS=(raycast-open raycast-status raycast-doctor alfred-workflow)
 
 die() {
     printf 'Error: %s\n' "$1" >&2
@@ -44,15 +46,22 @@ assert_directory_not_redirected() {
     fi
 }
 
-prepare_owned_directories() {
-    assert_directory_not_redirected "$ROOT" "launcher root"
-    mkdir -p "$ROOT"
+inspect_owned_directories() {
     assert_directory_not_redirected "$ROOT" "launcher root"
     assert_directory_not_redirected "$RAYCAST_DIR" "Raycast launcher directory"
     assert_directory_not_redirected "$ALFRED_DIR" "Alfred launcher directory"
     if [[ -L "$MARKER" ]]; then
         die "ownership marker is a symlink; refusing launcher filesystem changes"
     fi
+    if [[ -L "$MANIFEST" ]]; then
+        die "ownership manifest is a symlink; refusing launcher filesystem changes"
+    fi
+}
+
+prepare_owned_directories() {
+    inspect_owned_directories
+    mkdir -p "$ROOT"
+    inspect_owned_directories
 }
 
 require_owned_root() {
@@ -64,27 +73,83 @@ require_owned_root() {
     fi
 }
 
-assert_owned_or_absent() {
-    local path="$1"
-    if [[ -e "$path" ]] && ! grep -Fq "$OWNER_MARKER" "$path"; then
-        die "refusing to overwrite a launcher not owned by Incodex: $path"
+owned_relative_path() {
+    case "$1" in
+        raycast-open) printf '%s\n' "raycast/incodex-open.sh" ;;
+        raycast-status) printf '%s\n' "raycast/incodex-status.sh" ;;
+        raycast-doctor) printf '%s\n' "raycast/incodex-doctor.sh" ;;
+        alfred-workflow) printf '%s\n' "alfred/Incodex Quick Launchers.alfredworkflow" ;;
+        *) die "unknown launcher manifest key: $1" ;;
+    esac
+}
+
+sha256_file() {
+    /usr/bin/shasum -a 256 "$1" | /usr/bin/awk '{print $1}'
+}
+
+manifest_hash() {
+    local key="$1"
+    local line
+    line="$(/usr/bin/grep -F "$key" "$MANIFEST" 2>/dev/null || true)"
+    if [[ "$line" != *$'\t'"$key" ]] || [[ "${line%%$'\t'*}" == "$line" ]]; then
+        die "ownership manifest is incomplete; refusing launcher filesystem changes"
+    fi
+    printf '%s\n' "${line%%$'\t'*}"
+}
+
+require_manifest() {
+    if [[ ! -f "$MANIFEST" ]] || ! /usr/bin/grep -Fxq "# $OWNER_MARKER" "$MANIFEST"; then
+        die "ownership manifest is missing or invalid; refusing launcher filesystem changes"
     fi
 }
 
-assert_alfred_owned_or_absent() {
-    if [[ ! -e "$ALFRED_WORKFLOW" ]]; then
-        return
-    fi
-    if ! /usr/bin/unzip -p "$ALFRED_WORKFLOW" run.sh 2>/dev/null | grep -Fq "$OWNER_MARKER"; then
-        die "refusing to overwrite an Alfred package not owned by Incodex: $ALFRED_WORKFLOW"
+verify_installed_artifacts() {
+    local key
+    local relative
+    local expected
+    for key in "${OWNED_KEYS[@]}"; do
+        relative="$(owned_relative_path "$key")"
+        expected="$(manifest_hash "$key")"
+        if [[ ! -f "$ROOT/$relative" ]] || [[ "$(sha256_file "$ROOT/$relative")" != "$expected" ]]; then
+            die "launcher is modified; refusing to overwrite it: $ROOT/$relative"
+        fi
+    done
+}
+
+assert_fresh_targets_absent() {
+    local key
+    local relative
+    for key in "${OWNED_KEYS[@]}"; do
+        relative="$(owned_relative_path "$key")"
+        if [[ -e "$ROOT/$relative" ]]; then
+            die "refusing to overwrite a launcher without installation ownership: $ROOT/$relative"
+        fi
+    done
+    if [[ -e "$MANIFEST" ]]; then
+        die "refusing to overwrite an unowned launcher manifest: $MANIFEST"
     fi
 }
 
 preflight_install_ownership() {
-    assert_owned_or_absent "$RAYCAST_DIR/incodex-open.sh"
-    assert_owned_or_absent "$RAYCAST_DIR/incodex-status.sh"
-    assert_owned_or_absent "$RAYCAST_DIR/incodex-doctor.sh"
-    assert_alfred_owned_or_absent
+    if [[ -e "$MARKER" ]]; then
+        require_owned_root
+        require_manifest
+        verify_installed_artifacts
+    else
+        assert_fresh_targets_absent
+    fi
+}
+
+write_manifest() {
+    local base="$1"
+    local target="$base/manifest.sha256"
+    local key
+    local relative
+    printf '# %s\n' "$OWNER_MARKER" >"$target"
+    for key in "${OWNED_KEYS[@]}"; do
+        relative="$(owned_relative_path "$key")"
+        printf '%s\t%s\n' "$(sha256_file "$base/$relative")" "$key" >>"$target"
+    done
 }
 
 write_raycast_script() {
@@ -96,7 +161,6 @@ write_raycast_script() {
     local quoted_binary="$6"
     local temporary="$target.tmp.$$"
 
-    assert_owned_or_absent "$target"
     cat >"$temporary" <<EOF
 #!/bin/bash
 # $OWNER_MARKER
@@ -114,6 +178,10 @@ write_raycast_script() {
 
 set -euo pipefail
 INCODEX_BIN=$quoted_binary
+if [[ ! -x "\$INCODEX_BIN" ]]; then
+    printf 'Incodex binary is no longer executable: %s\n' "\$INCODEX_BIN" >&2
+    exit 1
+fi
 EOF
 
     if [[ "$command" == "open" ]]; then
@@ -162,26 +230,110 @@ write_alfred_runner() {
 # $OWNER_MARKER
 set -euo pipefail
 INCODEX_BIN=$quoted_binary
+EOF
+    cat >>"$target" <<'EOF'
 
-case "\${1:-}" in
-    open)
-        nohup "\$INCODEX_BIN" open </dev/null >/dev/null 2>&1 &
-        ;;
-    status|doctor)
-        /usr/bin/osascript - "\$INCODEX_BIN" "\$1" <<'APPLESCRIPT'
+has_app() {
+    local name="$1"
+    [[ -d "/Applications/${name}.app" || -d "$HOME/Applications/${name}.app" ]]
+}
+
+has_bin() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+launcher_available() {
+    case "$1" in
+        Terminal) return 0 ;;
+        iTerm2) has_app "iTerm" || has_app "iTerm2" ;;
+        Alacritty) has_app "Alacritty" ;;
+        kitty) has_bin "kitty" || has_app "kitty" ;;
+        WezTerm) has_bin "wezterm" || has_app "WezTerm" ;;
+        Ghostty) has_bin "ghostty" || has_app "Ghostty" ;;
+        Hyper) has_app "Hyper" ;;
+        WindTerm) has_app "WindTerm" ;;
+        Warp) has_app "Warp" ;;
+        *) return 1 ;;
+    esac
+}
+
+detect_launcher_app() {
+    if [[ -n "${INCODEX_LAUNCHER_APP:-}" ]]; then
+        if ! launcher_available "$INCODEX_LAUNCHER_APP"; then
+            printf 'Requested terminal is unavailable: %s\n' "$INCODEX_LAUNCHER_APP" >&2
+            return 1
+        fi
+        printf '%s\n' "$INCODEX_LAUNCHER_APP"
+        return
+    fi
+
+    local candidate
+    for candidate in Warp Ghostty Alacritty kitty WezTerm WindTerm Hyper iTerm2 Terminal; do
+        if launcher_available "$candidate"; then
+            printf '%s\n' "$candidate"
+            return
+        fi
+    done
+}
+
+launch_in_terminal() {
+    local subcommand="$1"
+    local terminal
+    local target_command
+    printf -v target_command '%q %q' "$INCODEX_BIN" "$subcommand"
+    terminal="$(detect_launcher_app)" || return 1
+
+    case "$terminal" in
+        Terminal)
+            /usr/bin/osascript - "$target_command" <<'APPLESCRIPT'
 on run argv
-    set binaryPath to item 1 of argv
-    set subcommandName to item 2 of argv
-    set targetCommand to quoted form of binaryPath & " " & quoted form of subcommandName
     tell application "Terminal"
         activate
-        do script targetCommand
+        do script item 1 of argv
     end tell
 end run
 APPLESCRIPT
+            ;;
+        iTerm2)
+            /usr/bin/osascript - "$target_command" <<'APPLESCRIPT'
+on run argv
+    tell application "iTerm2"
+        activate
+        if (count of windows) is 0 then create window with default profile
+        tell current session of current window to write text item 1 of argv
+    end tell
+end run
+APPLESCRIPT
+            ;;
+        Alacritty|Ghostty|Hyper|WindTerm|Warp)
+            /usr/bin/open -na "$terminal" --args -e /bin/zsh -lc "$target_command; exec /bin/zsh -l"
+            ;;
+        kitty)
+            if has_bin kitty; then
+                kitty --hold /bin/zsh -lc "$target_command"
+            else
+                /usr/bin/open -na "kitty" --args --hold /bin/zsh -lc "$target_command"
+            fi
+            ;;
+        WezTerm)
+            if has_bin wezterm; then
+                wezterm start -- /bin/zsh -lc "$target_command; exec /bin/zsh -l"
+            else
+                /usr/bin/open -na "WezTerm" --args start -- /bin/zsh -lc "$target_command; exec /bin/zsh -l"
+            fi
+            ;;
+    esac
+}
+
+case "${1:-}" in
+    open)
+        nohup "$INCODEX_BIN" open </dev/null >/dev/null 2>&1 &
+        ;;
+    status|doctor)
+        launch_in_terminal "$1"
         ;;
     *)
-        printf 'Unknown Incodex launcher: %s\\n' "\${1:-}" >&2
+        printf 'Unknown Incodex launcher: %s\n' "${1:-}" >&2
         exit 64
         ;;
 esac
@@ -347,17 +499,41 @@ maybe_open_alfred_import() {
 install_launchers() {
     local binary
     local quoted_binary
+    local stage
+    local final_raycast_dir="$RAYCAST_DIR"
+    local final_alfred_dir="$ALFRED_DIR"
+    local final_alfred_workflow="$ALFRED_WORKFLOW"
     binary="$(resolve_incodex)"
     quoted_binary="$(shell_quote "$binary")"
 
     prepare_owned_directories
-    if [[ -e "$MARKER" ]] && [[ "$(cat "$MARKER")" != "$OWNER_MARKER" ]]; then
-        die "ownership marker changed; refusing to install launcher files"
-    fi
     preflight_install_ownership
-    printf '%s\n' "$OWNER_MARKER" >"$MARKER"
+
+    stage="$(mktemp -d "${TMPDIR:-/tmp}/incodex-launchers.XXXXXX")"
+    RAYCAST_DIR="$stage/raycast"
+    ALFRED_DIR="$stage/alfred"
+    ALFRED_WORKFLOW="$ALFRED_DIR/Incodex Quick Launchers.alfredworkflow"
     write_raycast_launchers "$quoted_binary"
     write_alfred_workflow "$quoted_binary"
+    write_manifest "$stage"
+
+    RAYCAST_DIR="$final_raycast_dir"
+    ALFRED_DIR="$final_alfred_dir"
+    ALFRED_WORKFLOW="$final_alfred_workflow"
+    mkdir -p "$RAYCAST_DIR" "$ALFRED_DIR"
+    if [[ ! -w "$RAYCAST_DIR" ]] || [[ ! -w "$ALFRED_DIR" ]]; then
+        rm -rf "$stage"
+        die "launcher destination is not writable; no launcher files were published"
+    fi
+
+    mv -f "$stage/raycast/incodex-open.sh" "$RAYCAST_DIR/incodex-open.sh"
+    mv -f "$stage/raycast/incodex-status.sh" "$RAYCAST_DIR/incodex-status.sh"
+    mv -f "$stage/raycast/incodex-doctor.sh" "$RAYCAST_DIR/incodex-doctor.sh"
+    mv -f "$stage/alfred/Incodex Quick Launchers.alfredworkflow" "$ALFRED_WORKFLOW"
+    mv -f "$stage/manifest.sha256" "$MANIFEST"
+    printf '%s\n' "$OWNER_MARKER" >"$MARKER.tmp.$$"
+    mv -f "$MARKER.tmp.$$" "$MARKER"
+    rm -rf "$stage"
 
     printf 'Quick launchers are ready.\n'
     printf 'Raycast: Settings > Script Commands > Add Script Directory:\n  %s\n' "$RAYCAST_DIR"
@@ -365,32 +541,37 @@ install_launchers() {
     maybe_open_alfred_import
 }
 
-remove_if_owned() {
-    local path="$1"
-    if [[ ! -e "$path" ]]; then
-        return
-    fi
-    if grep -Fq "$OWNER_MARKER" "$path"; then
-        rm -f "$path"
-    else
-        printf 'Skipped modified or foreign file: %s\n' "$path" >&2
-    fi
-}
-
 uninstall_launchers() {
-    prepare_owned_directories
+    local key
+    local relative
+    local path
+    local expected
+    local modified=0
+
+    inspect_owned_directories
     require_owned_root
-    remove_if_owned "$RAYCAST_DIR/incodex-open.sh"
-    remove_if_owned "$RAYCAST_DIR/incodex-status.sh"
-    remove_if_owned "$RAYCAST_DIR/incodex-doctor.sh"
-    if [[ -f "$ALFRED_WORKFLOW" ]]; then
-        if /usr/bin/unzip -p "$ALFRED_WORKFLOW" run.sh 2>/dev/null | grep -Fq "$OWNER_MARKER"; then
-            rm -f "$ALFRED_WORKFLOW"
-        else
-            printf 'Skipped modified or foreign Alfred package: %s\n' "$ALFRED_WORKFLOW" >&2
+    require_manifest
+    for key in "${OWNED_KEYS[@]}"; do
+        relative="$(owned_relative_path "$key")"
+        path="$ROOT/$relative"
+        expected="$(manifest_hash "$key")"
+        if [[ ! -e "$path" ]]; then
+            continue
         fi
+        if [[ -f "$path" ]] && [[ "$(sha256_file "$path")" == "$expected" ]]; then
+            rm -f "$path"
+        else
+            printf 'Skipped modified launcher: %s\n' "$path" >&2
+            modified=1
+        fi
+    done
+
+    if [[ "$modified" -ne 0 ]]; then
+        die "modified launchers remain; ownership proof was preserved"
     fi
-    rm -f "$MARKER"
+
+    rm -f "$MANIFEST" "$MARKER"
+    rmdir "$RAYCAST_DIR" "$ALFRED_DIR" "$ROOT" 2>/dev/null || true
     printf 'Removed Incodex-owned launcher files.\n'
     printf 'Remove the imported workflow manually in Alfred Preferences > Workflows.\n'
     printf 'Remove the Script Directory manually in Raycast Settings if you no longer want it registered.\n'
