@@ -153,13 +153,13 @@ function profileAvatarHealth(avatar: HTMLElement, mask: ResolvedProfileMask): bo
     return (
       avatar.getAttribute("src") === mask.avatarDataUrl &&
       avatar.style.objectFit === "cover" &&
-      avatar.style.objectPosition === "center"
+      avatar.style.objectPosition === "center center"
     );
   }
   return (
     avatar.style.backgroundImage === `url("${mask.avatarDataUrl}")` &&
     avatar.style.backgroundSize === "cover" &&
-    avatar.style.backgroundPosition === "center"
+    avatar.style.backgroundPosition === "center center"
   );
 }
 

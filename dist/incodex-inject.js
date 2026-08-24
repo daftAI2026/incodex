@@ -1249,9 +1249,9 @@ function ensureProfileMask() {
 }
 function profileAvatarHealth(avatar, mask) {
   if (avatar instanceof HTMLImageElement) {
-    return avatar.getAttribute("src") === mask.avatarDataUrl && avatar.style.objectFit === "cover" && avatar.style.objectPosition === "center";
+    return avatar.getAttribute("src") === mask.avatarDataUrl && avatar.style.objectFit === "cover" && avatar.style.objectPosition === "center center";
   }
-  return avatar.style.backgroundImage === `url("${mask.avatarDataUrl}")` && avatar.style.backgroundSize === "cover" && avatar.style.backgroundPosition === "center";
+  return avatar.style.backgroundImage === `url("${mask.avatarDataUrl}")` && avatar.style.backgroundSize === "cover" && avatar.style.backgroundPosition === "center center";
 }
 function identityMaskHealth(identity, nameSelector, avatarSelector, mask) {
   const nameHost = identity.querySelector(PROFILE_NAME_MARKER_SELECTOR) ?? identity.querySelector(nameSelector);
