@@ -218,5 +218,6 @@ mod tests {
         assert!(ANIMALS.len() >= 64);
         assert!(ADJECTIVES.len().is_power_of_two());
         assert!(ANIMALS.len().is_power_of_two());
+        assert_eq!(ADJECTIVES[60], "Zealous");
     }
 }
