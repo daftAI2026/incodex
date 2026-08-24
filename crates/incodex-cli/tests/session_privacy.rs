@@ -35,6 +35,9 @@ fn source_self_uninstall_refusal_does_not_touch_codex_home() {
         restore_app: false,
         app: None,
         transaction: None,
+        mask: false,
+        name: None,
+        avatar: None,
     };
     let error =
         run_self_uninstall(&parsed).expect_err("source self-uninstall must not remove itself");

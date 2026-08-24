@@ -904,6 +904,410 @@ function deriveUiProbe(input) {
   };
 }
 
+// node_modules/blobatar/dist/uri.js
+function L({ l: t, c: n, h: r }) {
+  let o = r * Math.PI / 180, a = n * Math.cos(o), e = n * Math.sin(o), s = t + 0.3963377774 * a + 0.2158037573 * e, c = t - 0.1055613458 * a - 0.0638541728 * e, i = t - 0.0894841775 * a - 1.291485548 * e, m = s * s * s, l = c * c * c, u = i * i * i;
+  return [4.0767416621 * m - 3.3077115913 * l + 0.2309699292 * u, -1.2684380046 * m + 2.6097574011 * l - 0.3413193965 * u, -0.0041960863 * m - 0.7034186147 * l + 1.707614701 * u];
+}
+var H = (t) => t.every((n) => n >= -0.0001 && n <= 1.0001);
+function Z(t) {
+  let n = L(t);
+  if (!H(n)) {
+    let r = 0, o = t.c;
+    for (let a = 0;a < 12; a++) {
+      let e = (r + o) / 2;
+      if (H(L({ ...t, c: e })))
+        r = e;
+      else
+        o = e;
+    }
+    n = L({ ...t, c: r });
+  }
+  return n.map((r) => Math.min(1, Math.max(0, r)));
+}
+function _(t) {
+  let [n, r, o] = Z(t);
+  return 0.2126 * n + 0.7152 * r + 0.0722 * o;
+}
+function O(t, n) {
+  let r = _(t), o = _(n);
+  return (Math.max(r, o) + 0.05) / (Math.min(r, o) + 0.05);
+}
+function T(t, n, r) {
+  if (O(t, n) >= r)
+    return t;
+  let o = t.l >= n.l ? 1 : -1;
+  for (let s of [o, -o]) {
+    let c = { ...t };
+    for (let i = 0;i < 60; i++) {
+      if (c.l = Math.min(1, Math.max(0, c.l + s * 0.02)), O(c, n) >= r)
+        return c;
+      if (c.l === 0 || c.l === 1)
+        break;
+    }
+  }
+  let a = { ...t, l: 0, c: 0 }, e = { ...t, l: 1, c: 0 };
+  return O(a, n) >= O(e, n) ? a : e;
+}
+function P(t) {
+  return "#" + Z(t).map((n) => {
+    let r = n <= 0.0031308 ? 12.92 * n : 1.055 * Math.pow(n, 0.4166666666666667) - 0.055;
+    return Math.round(r * 255).toString(16).padStart(2, "0");
+  }).join("");
+}
+var D = [[0.2, { l: 0.86, c: 0.085 }], [0.36, { l: 0.9, c: 0.028 }], [0.62, { l: 0.73, c: 0.135 }], [0.8, { l: 0.62, c: 0.165 }], [0.93, { l: 0.87, c: 0.16 }], [1, { l: 0.34, c: 0.035 }]];
+var Tt = (t) => D.find(([n]) => t < n)?.[1] ?? D[0][1];
+var N = { l: 0.145, c: 0, h: 0 };
+var V = 1.5;
+var St = (t, n) => {
+  let r = Tt(n), o = T({ l: r.l, c: r.c, h: t }, N, V);
+  return { bg: { l: 0.965, c: 0.01, h: t }, head: o, eye: o.l >= 0.5 ? { l: 0.17, c: 0.02, h: t } : { l: 0.97, c: 0.012, h: t } };
+};
+var Et = [["head", "bg", 1.25], ["eye", "head", 4.5]];
+function Lt(t, n = true, r = 0) {
+  let o = St(t, r);
+  if (n)
+    for (let [a, e, s] of Et)
+      o[a] = T(o[a], o[e], s);
+  return o;
+}
+function K(t, n = true, r = 0) {
+  let o = Lt(t, n, r), a = {};
+  for (let e in o)
+    a[e] = P(o[e]);
+  return a;
+}
+var y = (t) => {
+  let n = Math.round(t * 100) / 100;
+  return Object.is(n, -0) ? "0" : String(n);
+};
+function B({ cx: t, cy: n, rx: r, ry: o, n: a = 4, rot: e = 0 }) {
+  let s = Math.min(1, (8 * Math.pow(2, -1 / a) - 4) / 3), c = r, i = o, m = c * s, l = i * s, u = [[c, 0], [c, l], [m, i], [0, i], [-m, i], [-c, l], [-c, 0], [-c, -l], [-m, -i], [0, -i], [m, -i], [c, -l], [c, 0]], b = e * Math.PI / 180, p = Math.cos(b), d = Math.sin(b), h = (x) => {
+    let [g, M] = u[x];
+    return `${y(t + g * p - M * d)} ${y(n + g * d + M * p)}`;
+  }, f = `M${h(0)}`;
+  for (let x = 1;x < 13; x += 3)
+    f += `C${h(x)} ${h(x + 1)} ${h(x + 2)}`;
+  return f + "Z";
+}
+function Q(t, n, r, o, a, e = 0) {
+  let s = a.length, c = e * Math.PI / 180, i = a.map((u, b) => {
+    let p = c + 2 * Math.PI * b / s;
+    return [t + r * u * Math.cos(p), n + o * u * Math.sin(p)];
+  }), m = (u) => i[(u % s + s) % s], l = `M${y(m(0)[0])} ${y(m(0)[1])}`;
+  for (let u = 0;u < s; u++) {
+    let [b, p] = m(u - 1), [d, h] = m(u), [f, x] = m(u + 1), [g, M] = m(u + 2);
+    l += `C${y(d + (f - b) / 6)} ${y(h + (x - p) / 6)} ${y(f - (g - d) / 6)} ${y(x - (M - h) / 6)} ${y(f)} ${y(x)}`;
+  }
+  return l + "Z";
+}
+function X({ cx: t, cy: n, rx: r, ry: o, sides: a, round: e = 0.3, rot: s = 0 }) {
+  let c = e > 0 ? e < 1 ? e / 2 : 0.5 : 0, i = s * Math.PI / 180 - Math.PI / 2, m = Array.from({ length: a }, (p, d) => {
+    let h = i + 2 * Math.PI * d / a;
+    return [t + r * Math.cos(h), n + o * Math.sin(h)];
+  }), l = (p) => m[(p % a + a) % a], u = (p, d) => {
+    let [h, f] = l(p), [x, g] = l(d);
+    return `${y(h + (x - h) * c)} ${y(f + (g - f) * c)}`;
+  }, b = `M${u(0, -1)}`;
+  for (let p = 0;p < a; p++) {
+    let [d, h] = l(p);
+    if (b += `Q${y(d)} ${y(h)} ${u(p, p + 1)}`, c < 0.5)
+      b += `L${u(p + 1, p)}`;
+  }
+  return b + "Z";
+}
+function Y(t, n, r, o) {
+  let a = y(t - r), e = y(t + r);
+  return `M${a} ${y(n - o)}H${e}V${y(n + o)}H${a}Z`;
+}
+function G(t, n, r, o, a) {
+  let e = Math.max(1.05, a), s = r * Math.sqrt(1 - 1 / (e * e)), c = n - o / e, i = n - e * o, m = s * 0.14, l = c + 0.86 * (i - c);
+  return `M${y(t - s)} ${y(c)}L${y(t - m)} ${y(l)}Q${y(t)} ${y(i)} ${y(t + m)} ${y(l)}L${y(t + s)} ${y(c)}Z`;
+}
+function w(t, n) {
+  for (let r = 0;r < n.length; r++)
+    t = Math.imul(t ^ n[r], 3432918353), t = t << 13 | t >>> 19;
+  return t;
+}
+function wt(t) {
+  return t = Math.imul(t ^ t >>> 16, 2246822507), t = Math.imul(t ^ t >>> 13, 3266489909), (t ^ t >>> 16) >>> 0;
+}
+var J = new TextEncoder;
+function vt(t) {
+  return t.normalize("NFC").trim().toLowerCase();
+}
+function W(t, n = true) {
+  let r = n ? vt(t) : t;
+  return w(1779033703 ^ r.length, J.encode(r));
+}
+function v(t, n) {
+  return wt(w(w(t, Uint8Array.of(255)), J.encode(n))) / 4294967296;
+}
+function tt(t, n = true, r) {
+  let o = W(t, n), a = (e) => {
+    let s = r?.[e], c = Array.isArray(s) ? s[Math.floor(v(o, e) * s.length)] : s;
+    return c === undefined ? v(o, e) : c > 0 ? c < 1 ? c : 0.999999 : 0;
+  };
+  return a.num = (e, s, c) => s + a(e) * (c - s), a.int = (e, s, c) => s + Math.floor(a(e) * (c - s + 1)), a.pick = (e, s) => s[Math.floor(a(e) * s.length)], a.bool = (e, s = 0.5) => a(e) < s, a.jitter = (e, s) => (a(e) * 2 - 1) * s, a;
+}
+function nt(t, n, r) {
+  let o = n.expression;
+  if (r || !o)
+    return { l: t, wrap: "" };
+  return o.bake(t, o.p);
+}
+var At = (t, n) => n?.tint ? n.tint(t, n.p) : t;
+var rt = (t, n) => n ? `<g transform="${n}">${t}</g>` : t;
+var It = (t) => t.replace(/[&<>]/g, (n) => n === "&" ? "&amp;" : n === "<" ? "&lt;" : "&gt;");
+function S(t, n) {
+  let r = tt(t, n.normalize ?? true, n.traits);
+  return { t: r, palette: { ...K(n.hue ?? r.num("hue", 0, 360), n.contrast ?? true, n.tone ?? r("tone")), ...n.palette } };
+}
+var Rt = (t) => t.title ? `<title>${It(t.title)}</title>` : "";
+function et(t, n, r) {
+  let o = n.background ?? t.background;
+  if (o === false)
+    return;
+  return { d: o === "square" ? "M0 0H100V100H0Z" : B({ cx: 50, cy: 50, rx: 50, ry: 50, n: o === "circle" ? 2 : 6 }), fill: r.bg };
+}
+var Ft = (t) => t ? `<path d="${t.d}" fill="${t.fill}"/>` : "";
+function ot(t) {
+  return (n, r = {}) => {
+    let { t: o, palette: a } = S(n, r), e = At(a, r.expression), s = r.size ? ` width="${r.size}" height="${r.size}"` : "", c = nt(t.layout(o), r), i = Rt(r) + Ft(et(t, r, e)) + rt(t.render(c.l, e), c.wrap);
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"${s}>${i}</svg>`;
+  };
+}
+var st = (t, n, r) => {
+  let o = n.rx, a = t.num("eye.rx", 0.075, 0.105) * o, e = t.num("eye.ratio", 1.9, 3.2), s = t.num("eye.scale", 0.78, 1.24), c = t.num("eye.stretch", 0.85, 1.18), i = t.num("eye.gap", 0.1, 0.24) * o, m = a * Math.max(1, s), l = a * e * Math.max(1, s * c), u = m + o * 0.03 + i, b = t.jitter("gaze.x", 0.09) * r.rx, p = t.num("gaze.y", -0.2, 0.08) * r.ry, d = t.jitter("eye.dy", 0.04) * r.ry, h = Math.hypot(m, l), f = Math.hypot((Math.abs(b) + u + h) / r.rx, (Math.abs(p) + Math.abs(d) + h) / r.ry), x = f > 0.9 ? 0.9 / f : 1, g = a * x, M = g * e, I = u * x, kt = Math.max(0, Math.min(1, i / l)), Ot = Math.min(12, Math.asin(kt) * 180 / Math.PI), R = t.num("eye.lean", -1, 1) * Ot, Pt = Math.max(-12, Math.min(12, R + t.jitter("eye.lean2", 3.5))), F = r.cx + b * x, j = r.cy + p * x;
+  return [{ cx: F - I, cy: j, rx: g, ry: M, n: t.num("eye.n", 3.5, 6), rot: R }, { cx: F + I, cy: j + d * x, rx: g * s, ry: M * s * c, n: t.num("eye.n", 3.5, 6), rot: Pt }];
+};
+function ct(t, n) {
+  let r = (e) => (t.find(([, s]) => e < s) ?? t[t.length - 1])[0];
+  function o(e) {
+    let s = r(e("shape")), c = e.num("body.r", 31, 38) * s.core, i = { cx: 50 + e.jitter("body.x", 1.5), cy: 50 + e.jitter("body.y", 1.5), rx: c, ry: c * e.num("body.ratio", 0.92, 1.08), n: e.num("body.n", 1.9, 2.5), rot: 0, radii: Array.from({ length: e.int("body.pts", 6, 8) }, (u, b) => 1 + e.jitter(`body.r${b}`, 0.16)) };
+    s.body?.(e, i);
+    let m = s.face?.(i) ?? i, l = { petals: [], extra: [] };
+    return s.decorate?.(e, i, l), { shape: s.name, draw: s.path, body: i, face: m, petals: l.petals, extra: l.extra, eyes: n(e, i, m) };
+  }
+  function a(e, s, c) {
+    let i = (u) => Math.round(u * 100) / 100, m = (u, b) => {
+      let p = `<path d="${B(u)}"/>`;
+      return c ? `<g class="mo-eye" style="--mo-wrap:${b ? 1 : -1};--mo-lean:${i(u.rot)};transform-origin:${i(u.cx)}px ${i(u.cy)}px">${p}</g>` : p;
+    }, l = `<g fill="${s.head}">` + e.petals.map((u) => `<circle cx="${i(u.cx)}" cy="${i(u.cy)}" r="${i(u.r)}"/>`).join("") + e.extra.map((u) => `<path d="${u}"/>`).join("") + `<path d="${e.draw ? e.draw(e.body) : B(e.body)}"/></g><g fill="${s.eye}"${c ? ' class="mo-eyes"' : ""}>` + e.eyes.map(m).join("") + "</g>";
+    return c ? `<g class="mo-breathe"><g class="mo-bob">${l}</g></g>` : l;
+  }
+  return { layout: o, render: a, background: false };
+}
+var it = (t) => X(t);
+var ut = (t) => Q(t.cx, t.cy, t.rx, t.ry, t.radii, t.rot);
+var A = (t) => (n) => ({ cx: n.cx, cy: n.cy, rx: n.rx * t, ry: n.ry * t });
+var mt = (t) => A(Math.min(...t.radii) * 0.95)(t);
+var jt = (t) => A(0.84)(t);
+var lt = { name: "round", core: 1 };
+var pt = { name: "organic", core: 0.98, path: ut, face: mt };
+var yt = { name: "boxy", core: 0.86, body: (t, n) => {
+  n.n = t.num("body.n", 3.4, 6), n.rot = t.num("body.rot", -20, 20);
+} };
+var bt = { name: "capsule", core: 1.02, body: (t, n) => {
+  n.ry *= t.num("capsule.squat", 0.55, 0.68);
+}, face: A(0.94), decorate: (t, n, r) => {
+  for (let o of [-1, 1])
+    r.petals.push({ cx: n.cx + o * (n.rx - n.ry), cy: n.cy, r: n.ry });
+}, path: (t) => Y(t.cx, t.cy, t.rx - t.ry, t.ry) };
+var xt = { name: "nub", core: 0.88, decorate: (t, n, r) => {
+  let o = t.int("nub.n", 1, 2);
+  for (let a = 0;a < o; a++) {
+    let e = t.num(`nub.a${a}`, 0, 2 * Math.PI);
+    r.petals.push({ cx: n.cx + Math.cos(e) * n.rx * 0.88, cy: n.cy + Math.sin(e) * n.rx * 0.88, r: n.rx * t.num(`nub.r${a}`, 0.24, 0.4) });
+  }
+} };
+var ht = { name: "cloud", core: 0.78, face: mt, path: ut, decorate: (t, n, r) => {
+  let o = t.int("cloud.n", 4, 6);
+  for (let a = 0;a < o; a++) {
+    let e = Math.PI + Math.PI * (a + 0.5) / o;
+    r.petals.push({ cx: n.cx + Math.cos(e) * n.rx * 0.8, cy: n.cy + Math.sin(e) * n.rx * 0.5, r: n.rx * t.num(`cloud.r${a}`, 0.44, 0.62) });
+  }
+} };
+var dt = { name: "droplet", core: 0.78, body: (t, n) => {
+  n.cy += 0.22 * n.ry, n.n = 2;
+}, face: (t) => ({ cx: t.cx, cy: t.cy + t.ry * 0.05, rx: t.rx * 0.88, ry: t.ry * 0.88 }), decorate: (t, n, r) => {
+  r.extra.push(G(n.cx, n.cy, n.rx, n.ry, t.num("droplet.tip", 1.4, 1.65)));
+} };
+var ft = { name: "hexagon", core: 1.05, path: it, face: jt, body: (t, n) => {
+  n.sides = 6, n.rot = t.num("body.rot", -12, 12), n.round = t.num("poly.round", 0.24, 0.5);
+} };
+var gt = { name: "sun", core: 0.7, decorate: (t, n, r) => {
+  let o = t.int("sun.n", 6, 9), a = n.rx * t.num("sun.dist", 1, 1.08), e = n.rx * t.num("sun.r", 0.2, 0.26), s = t.num("sun.rot", 0, 2 * Math.PI);
+  for (let c = 0;c < o; c++) {
+    let i = s + 2 * Math.PI * c / o;
+    r.petals.push({ cx: n.cx + Math.cos(i) * a, cy: n.cy + Math.sin(i) * a, r: e });
+  }
+} };
+var Mt = { name: "triangle", core: 1.15, path: it, body: (t, n) => {
+  n.sides = 3, n.rot = t.num("body.rot", -5, 5), n.round = t.num("poly.round", 0.24, 0.5);
+}, face: (t) => ({ cx: t.cx, cy: t.cy + t.ry * 0.1, rx: t.rx * 0.54, ry: t.ry * 0.36 }) };
+var Ct = [[lt, 0.22], [pt, 0.48], [yt, 0.6], [bt, 0.7], [xt, 0.79], [ht, 0.86], [dt, 0.915], [ft, 0.95], [gt, 0.98], [Mt, 1]];
+var E = ct(Ct, st);
+var $t = ot(E);
+function hn(t, n) {
+  return "data:image/svg+xml," + $t(t, n).replace(/"/g, "'").replace(/[%#<>{}|\\^[\]`]/g, (o) => "%" + o.charCodeAt(0).toString(16).toUpperCase()).replace(/\s+/g, " ");
+}
+
+// src/runtime/incognito-profile-mask.ts
+var PROFILE_MASK_ATTR = "data-incodex-profile-mask";
+var PROFILE_MASK_NAME_ATTR = "data-incodex-profile-mask-name";
+var PROFILE_MASK_AVATAR_ATTR = "data-incodex-profile-mask-avatar";
+var PROFILE_FOOTER_SELECTOR = 'button.sidebar-item[type="button"]';
+var PROFILE_NAME_SELECTOR = ":scope > span.min-w-0.flex-1.truncate";
+var PROFILE_AVATAR_SELECTOR = ":scope > img.rounded-full, :scope > span.rounded-full";
+var PROFILE_MENU_SELECTOR = '[role="menu"]';
+var PROFILE_MENU_ITEM_SELECTOR = '[role="menuitem"]';
+var PROFILE_MENU_NAME_SELECTOR = ":scope > div > span.flex-1.min-w-0.truncate";
+var PROFILE_MENU_AVATAR_SELECTOR = ":scope > div > span > img.icon-sm.rounded-full, :scope > div > span > span.rounded-full";
+var PROFILE_NAME_MARKER_SELECTOR = ":scope > [data-incodex-profile-mask-name]";
+var PROFILE_AVATAR_MARKER_SELECTOR = ":scope > [data-incodex-profile-mask-avatar]";
+var PROFILE_NAME_MAX_CHARS = 64;
+var PROFILE_AVATAR_MAX_DATA_URL_CHARS = 8 * 1024 * 1024;
+function profileMaskConfigured() {
+  return window.__incodexProfileMask !== null && window.__incodexProfileMask !== undefined;
+}
+function readProfileMask() {
+  const value = window.__incodexProfileMask;
+  if (!value || typeof value.name !== "string" || !value.avatar)
+    return null;
+  const name = value.name.trim();
+  if (!name || [...name].length > PROFILE_NAME_MAX_CHARS || /\p{Cc}/u.test(name)) {
+    return null;
+  }
+  const avatar = value.avatar;
+  if (typeof avatar !== "object" || Array.isArray(avatar))
+    return null;
+  if (avatar.kind === "generated") {
+    if (avatar.dataUrl !== undefined)
+      return null;
+    return { name, avatarDataUrl: hn(name, { background: "circle" }) };
+  }
+  if (typeof avatar.dataUrl !== "string" || avatar.kind !== undefined)
+    return null;
+  if (avatar.dataUrl.length > PROFILE_AVATAR_MAX_DATA_URL_CHARS || !/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(avatar.dataUrl)) {
+    return null;
+  }
+  return { name, avatarDataUrl: avatar.dataUrl };
+}
+function findProfileFooter() {
+  const candidates = [...document.querySelectorAll(PROFILE_FOOTER_SELECTOR)].filter((element) => element.querySelector(PROFILE_NAME_SELECTOR) && element.querySelector(PROFILE_AVATAR_SELECTOR));
+  return candidates.length === 1 ? candidates[0] : null;
+}
+function findControlledProfileMenu(profileFooter) {
+  const menuId = profileFooter.getAttribute("aria-controls");
+  const menu = menuId ? document.getElementById(menuId) : null;
+  return menu?.matches(PROFILE_MENU_SELECTOR) ? menu : null;
+}
+function findProfileMenuIdentity(profileMenu) {
+  const candidates = [...profileMenu.querySelectorAll(PROFILE_MENU_ITEM_SELECTOR)].filter((item) => item.querySelector(PROFILE_MENU_NAME_SELECTOR) && item.querySelector(PROFILE_MENU_AVATAR_SELECTOR));
+  return candidates.length === 1 ? candidates[0] : null;
+}
+function writeProfileAvatar(avatar, mask) {
+  if (avatar instanceof HTMLImageElement) {
+    avatar.src = mask.avatarDataUrl;
+    avatar.style.objectFit = "cover";
+    avatar.style.objectPosition = "center";
+    return true;
+  }
+  if (avatar.matches("span.rounded-full")) {
+    avatar.textContent = "";
+    avatar.style.backgroundImage = `url("${mask.avatarDataUrl}")`;
+    avatar.style.backgroundSize = "cover";
+    avatar.style.backgroundPosition = "center";
+    return true;
+  }
+  return false;
+}
+function ensureIdentityMask(identity, nameSelector, avatarSelector, mask) {
+  const nameHost = identity.querySelector(PROFILE_NAME_MARKER_SELECTOR) ?? identity.querySelector(nameSelector);
+  const avatar = identity.querySelector(PROFILE_AVATAR_MARKER_SELECTOR) ?? identity.querySelector(avatarSelector);
+  if (!nameHost || !avatar || !writeProfileAvatar(avatar, mask))
+    return false;
+  nameHost.setAttribute(PROFILE_MASK_NAME_ATTR, "true");
+  nameHost.textContent = mask.name;
+  avatar.setAttribute(PROFILE_MASK_AVATAR_ATTR, "true");
+  identity.setAttribute(PROFILE_MASK_ATTR, "true");
+  return true;
+}
+function ensureProfileMenuMask(profileFooter, mask) {
+  const profileMenu = findControlledProfileMenu(profileFooter);
+  const identity = profileMenu ? findProfileMenuIdentity(profileMenu) : null;
+  if (!identity)
+    return;
+  ensureIdentityMask(identity, PROFILE_MENU_NAME_SELECTOR, PROFILE_MENU_AVATAR_SELECTOR, mask);
+}
+function ensureProfileMask() {
+  if (!window.__incodexIncognito || !profileMaskConfigured())
+    return;
+  const mask = readProfileMask();
+  const profileFooter = mask ? findProfileFooter() : null;
+  if (!mask || !profileFooter)
+    return;
+  if (!ensureIdentityMask(profileFooter, PROFILE_NAME_SELECTOR, PROFILE_AVATAR_SELECTOR, mask)) {
+    return;
+  }
+  ensureProfileMenuMask(profileFooter, mask);
+}
+function profileAvatarHealth(avatar, mask) {
+  if (avatar instanceof HTMLImageElement) {
+    return avatar.getAttribute("src") === mask.avatarDataUrl && avatar.style.objectFit === "cover" && avatar.style.objectPosition === "center center";
+  }
+  return avatar.style.backgroundImage === `url("${mask.avatarDataUrl}")` && avatar.style.backgroundSize === "cover" && avatar.style.backgroundPosition === "center center";
+}
+function profileAvatarDecoded(dataUrl) {
+  const current = window.__incodexProfileAvatarDecodeState;
+  if (current?.dataUrl === dataUrl)
+    return current.status === "ready";
+  const state = { dataUrl, probe: null, status: "loading" };
+  window.__incodexProfileAvatarDecodeState = state;
+  const probe = new Image;
+  state.probe = probe;
+  const finish = (status) => {
+    if (window.__incodexProfileAvatarDecodeState !== state)
+      return;
+    state.status = status;
+    state.probe = null;
+    window.__incodexProfileMaskHealth = profileMaskHealth();
+  };
+  probe.addEventListener("load", () => finish(probe.naturalWidth > 0 && probe.naturalHeight > 0 ? "ready" : "failed"), { once: true });
+  probe.addEventListener("error", () => finish("failed"), { once: true });
+  probe.src = dataUrl;
+  return false;
+}
+function identityMaskHealth(identity, nameSelector, avatarSelector, mask) {
+  const nameHost = identity.querySelector(PROFILE_NAME_MARKER_SELECTOR) ?? identity.querySelector(nameSelector);
+  const avatar = identity.querySelector(PROFILE_AVATAR_MARKER_SELECTOR) ?? identity.querySelector(avatarSelector);
+  return Boolean(nameHost && avatar && identity.getAttribute(PROFILE_MASK_ATTR) === "true" && nameHost.getAttribute(PROFILE_MASK_NAME_ATTR) === "true" && avatar.getAttribute(PROFILE_MASK_AVATAR_ATTR) === "true" && nameHost.textContent === mask.name && profileAvatarHealth(avatar, mask));
+}
+function profileMaskHealth() {
+  if (!profileMaskConfigured())
+    return true;
+  const mask = readProfileMask();
+  const profileFooter = mask ? findProfileFooter() : null;
+  if (!mask || !profileAvatarDecoded(mask.avatarDataUrl) || !profileFooter)
+    return false;
+  if (!identityMaskHealth(profileFooter, PROFILE_NAME_SELECTOR, PROFILE_AVATAR_SELECTOR, mask)) {
+    return false;
+  }
+  const profileMenu = findControlledProfileMenu(profileFooter);
+  if (!profileMenu)
+    return true;
+  const menuIdentity = findProfileMenuIdentity(profileMenu);
+  if (!menuIdentity)
+    return false;
+  return identityMaskHealth(menuIdentity, PROFILE_MENU_NAME_SELECTOR, PROFILE_MENU_AVATAR_SELECTOR, mask);
+}
+function profileMaskNeedsInject() {
+  if (!profileMaskConfigured())
+    return false;
+  return !profileMaskHealth();
+}
+
 // src/runtime/official-tooltip-provider.ts
 function createOfficialTooltipTimingBridge(currentTrigger) {
   let activeProvider = null;
@@ -1285,7 +1689,7 @@ function landingStillMounted() {
   return Boolean(landing);
 }
 function needsInject() {
-  return !buttonStillBesideSearch() || !landingStillMounted();
+  return !buttonStillBesideSearch() || !landingStillMounted() || profileMaskNeedsInject();
 }
 function buildButton(search) {
   disposeActiveTooltip();
@@ -1393,6 +1797,7 @@ function bannerDismissed() {
 }
 function refreshUiProbe() {
   const incognito = isIncognitoWindow();
+  window.__incodexProfileMaskHealth = profileMaskHealth();
   window.__incodexUiProbe = deriveUiProbe({
     incognito,
     buttonPresent: buttonStillBesideSearch(),
@@ -1554,22 +1959,29 @@ function onKeydown(event) {
   event.stopImmediatePropagation();
   activate();
 }
-function start() {
-  if (window.__incodexStarted) {
-    refreshUiProbe();
-    return;
+var PROFILE_OBSERVED_ATTRIBUTES = [
+  "class",
+  "src",
+  "style",
+  "data-incodex-profile-mask",
+  "data-incodex-profile-mask-name",
+  "data-incodex-profile-mask-avatar"
+];
+function observerOptions() {
+  const options = { childList: true, subtree: true };
+  if (isIncognitoWindow() && window.__incodexProfileMask !== null && window.__incodexProfileMask !== undefined) {
+    options.attributes = true;
+    options.characterData = true;
+    options.attributeFilter = PROFILE_OBSERVED_ATTRIBUTES;
   }
-  window.__incodexStarted = true;
-  ensureStyle();
-  ensureButton();
-  apply();
-  ensureLanding();
-  refreshUiProbe();
-  window.addEventListener("keydown", onKeydown, true);
-  window.addEventListener("blur", dismissActiveTooltip);
-  window.addEventListener(TOOLTIP_DISMISS_EVENT, () => activeTooltipLifecycle?.dismiss());
+  return options;
+}
+function profileObservationRequired() {
+  return isIncognitoWindow() && window.__incodexProfileMask !== null && window.__incodexProfileMask !== undefined;
+}
+function createMutationObserver() {
   let scheduled = false;
-  const observer = new MutationObserver(() => {
+  return new MutationObserver(() => {
     if (!needsInject())
       return;
     if (scheduled)
@@ -1581,10 +1993,41 @@ function start() {
         return;
       ensureButton();
       ensureLanding();
+      ensureProfileMask();
       refreshUiProbe();
     });
   });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+}
+function ensureMutationObserver() {
+  const profileRequired = profileObservationRequired();
+  let observer = window.__incodexMutationObserver;
+  if (observer && (!profileRequired || window.__incodexProfileObservationEnabled))
+    return;
+  if (!observer) {
+    observer = createMutationObserver();
+    window.__incodexMutationObserver = observer;
+  }
+  observer.observe(document.documentElement, observerOptions());
+  window.__incodexProfileObservationEnabled = profileRequired;
+}
+function start() {
+  if (window.__incodexStarted) {
+    ensureMutationObserver();
+    ensureProfileMask();
+    refreshUiProbe();
+    return;
+  }
+  window.__incodexStarted = true;
+  ensureStyle();
+  ensureButton();
+  apply();
+  ensureLanding();
+  ensureProfileMask();
+  refreshUiProbe();
+  window.addEventListener("keydown", onKeydown, true);
+  window.addEventListener("blur", dismissActiveTooltip);
+  window.addEventListener(TOOLTIP_DISMISS_EVENT, () => activeTooltipLifecycle?.dismiss());
+  ensureMutationObserver();
 }
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", start, { once: true });

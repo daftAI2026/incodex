@@ -1,0 +1,322 @@
+/**
+ * [INPUT]: 接收 open 命令给出的临时名称与本地头像路径
+ * [OUTPUT]: 对外提供 ProfileMask/ProfileAvatar、随机名称与安全本地图片校验
+ * [POS]: incodex-cli 的隐私身份值对象；在 session 创建前完成离线解析，默认头像交给 Runtime Blobatar
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+use std::fs::OpenOptions;
+use std::io::Read;
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::Path;
+
+use crate::friendly_name::random_friendly_name;
+
+pub const MAX_AVATAR_BYTES: u64 = 5 * 1024 * 1024;
+pub const MAX_PROFILE_NAME_CHARS: usize = 64;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProfileAvatar {
+    Generated,
+    DataUrl(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileMask {
+    pub name: String,
+    pub avatar: ProfileAvatar,
+}
+
+pub fn resolve_profile_mask(
+    mask: bool,
+    name: Option<&str>,
+    avatar_path: Option<&Path>,
+) -> Result<Option<ProfileMask>, String> {
+    if !mask {
+        if name.is_some() {
+            return Err("--name requires --mask".into());
+        }
+        if avatar_path.is_some() {
+            return Err("--avatar requires --mask".into());
+        }
+        return Ok(None);
+    }
+
+    let name = match name {
+        Some(value) => validate_profile_name(value)?,
+        None => random_friendly_name()?,
+    };
+    let avatar = match avatar_path {
+        Some(path) => ProfileAvatar::DataUrl(read_avatar_data_url(path)?),
+        None => ProfileAvatar::Generated,
+    };
+    Ok(Some(ProfileMask { name, avatar }))
+}
+
+fn validate_profile_name(value: &str) -> Result<String, String> {
+    let name = value.trim();
+    if name.is_empty() {
+        return Err("profile name must not be empty".into());
+    }
+    if name.chars().count() > MAX_PROFILE_NAME_CHARS {
+        return Err(format!(
+            "profile name must be at most {MAX_PROFILE_NAME_CHARS} characters"
+        ));
+    }
+    if name.chars().any(char::is_control) {
+        return Err("profile name must not contain control characters".into());
+    }
+    Ok(name.to_string())
+}
+
+fn read_avatar_data_url(path: &Path) -> Result<String, String> {
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
+        .open(path)
+        .map_err(|error| {
+            if error.raw_os_error() == Some(libc::ELOOP) {
+                format!("avatar path must not be a symlink: {}", path.display())
+            } else {
+                format!("cannot open avatar file {}: {error}", path.display())
+            }
+        })?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("cannot stat avatar file {}: {error}", path.display()))?;
+    if !metadata.file_type().is_file() {
+        return Err(format!(
+            "avatar path is not an ordinary file: {}",
+            path.display()
+        ));
+    }
+    if metadata.len() > MAX_AVATAR_BYTES {
+        return Err(format!(
+            "avatar file is too large (maximum {MAX_AVATAR_BYTES} bytes)"
+        ));
+    }
+
+    let mut bytes = Vec::new();
+    file.take(MAX_AVATAR_BYTES.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("cannot read avatar file {}: {error}", path.display()))?;
+    if bytes.len() as u64 > MAX_AVATAR_BYTES {
+        return Err(format!(
+            "avatar file is too large (maximum {MAX_AVATAR_BYTES} bytes)"
+        ));
+    }
+    let mime = avatar_mime(&bytes).ok_or_else(|| {
+        "avatar must be a PNG, JPEG, or WebP file with a recognized signature".to_string()
+    })?;
+    Ok(format!("data:{mime};base64,{}", base64_encode(&bytes)))
+}
+
+fn avatar_mime(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if bytes.starts_with(b"\xff\xd8\xff") {
+        Some("image/jpeg")
+    } else if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else {
+        None
+    }
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let a = chunk[0];
+        let b = chunk.get(1).copied().unwrap_or(0);
+        let c = chunk.get(2).copied().unwrap_or(0);
+        out.push(TABLE[(a >> 2) as usize] as char);
+        out.push(TABLE[(((a & 0x03) << 4) | (b >> 4)) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[(((b & 0x0f) << 2) | (c >> 6)) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[(c & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CString;
+    use std::fs;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_root() -> PathBuf {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!("incodex-profile-mask-{now}-{sequence}"));
+        fs::create_dir_all(&root).expect("profile mask temp root");
+        root
+    }
+
+    fn write_avatar(root: &Path, name: &str, bytes: &[u8]) -> PathBuf {
+        let path = root.join(name);
+        fs::write(&path, bytes).expect("avatar");
+        path
+    }
+
+    #[test]
+    fn generated_avatar_is_a_runtime_discriminant_for_the_final_name() {
+        let first = resolve_profile_mask(true, Some("Temporary"), None)
+            .unwrap()
+            .expect("mask");
+        let second = resolve_profile_mask(true, Some("Temporary"), None)
+            .unwrap()
+            .expect("mask");
+        let other = resolve_profile_mask(true, Some("Another"), None)
+            .unwrap()
+            .expect("mask");
+
+        assert_eq!(first.name, "Temporary");
+        assert_eq!(first.avatar, ProfileAvatar::Generated);
+        assert_eq!(first.avatar, second.avatar);
+        assert_eq!(first.avatar, other.avatar);
+    }
+
+    #[test]
+    fn default_mask_has_a_temporary_name_and_uses_that_name_for_the_avatar() {
+        let generated = resolve_profile_mask(true, None, None)
+            .unwrap()
+            .expect("mask");
+        let replayed = resolve_profile_mask(true, Some(&generated.name), None)
+            .unwrap()
+            .expect("mask");
+
+        let words: Vec<&str> = generated.name.split(' ').collect();
+        assert_eq!(words.len(), 2);
+        assert!(words.iter().all(|word| word
+            .chars()
+            .all(|character| character.is_ascii_alphabetic())));
+        assert_eq!(generated.avatar, ProfileAvatar::Generated);
+        assert_eq!(generated.avatar, replayed.avatar);
+    }
+
+    #[test]
+    fn local_png_jpeg_and_webp_are_converted_to_safe_data_urls() {
+        let root = temp_root();
+        let png = write_avatar(&root, "avatar.png", b"\x89PNG\r\n\x1a\nfixture");
+        let jpeg = write_avatar(&root, "avatar.jpeg", b"\xff\xd8\xff\xe0fixture");
+        let webp = write_avatar(&root, "avatar.webp", b"RIFF\x08\x00\x00\x00WEBPfixture");
+
+        for (path, mime) in [
+            (png, "data:image/png;base64,"),
+            (jpeg, "data:image/jpeg;base64,"),
+            (webp, "data:image/webp;base64,"),
+        ] {
+            let mask = resolve_profile_mask(true, Some("Local"), Some(&path))
+                .unwrap()
+                .expect("mask");
+            let expected = format!(
+                "{mime}{}",
+                base64_encode(fs::read(&path).unwrap().as_slice())
+            );
+            assert_eq!(mask.avatar, ProfileAvatar::DataUrl(expected));
+        }
+    }
+
+    #[test]
+    fn avatar_validation_rejects_non_images_and_oversized_files() {
+        let root = temp_root();
+        let text = write_avatar(&root, "avatar.txt", b"not an image");
+        let huge = write_avatar(
+            &root,
+            "avatar.png",
+            &vec![0_u8; MAX_AVATAR_BYTES as usize + 1],
+        );
+
+        let unsupported = resolve_profile_mask(true, Some("Local"), Some(&text)).unwrap_err();
+        assert!(unsupported.contains("PNG, JPEG, or WebP"), "{unsupported}");
+        let oversized = resolve_profile_mask(true, Some("Local"), Some(&huge)).unwrap_err();
+        assert!(oversized.contains("too large"), "{oversized}");
+    }
+
+    #[test]
+    fn avatar_validation_rejects_symlinks_with_a_clear_error() {
+        let root = temp_root();
+        let real = write_avatar(&root, "real.png", b"\x89PNG\r\n\x1a\nfixture");
+        let link = root.join("alias.png");
+        std::os::unix::fs::symlink(&real, &link).expect("avatar symlink");
+
+        let error = resolve_profile_mask(true, Some("Local"), Some(&link)).unwrap_err();
+        assert!(error.contains("symlink"), "{error}");
+    }
+
+    #[test]
+    fn avatar_fifo_helper() {
+        let Some(path) = std::env::var_os("INCODEX_FIFO_AVATAR_TEST") else {
+            return;
+        };
+        let error = resolve_profile_mask(true, Some("Local"), Some(Path::new(&path)))
+            .expect_err("FIFO must be rejected");
+        assert!(error.contains("ordinary file"), "{error}");
+    }
+
+    #[test]
+    fn avatar_validation_rejects_a_fifo_without_blocking() {
+        let root = temp_root();
+        let fifo = root.join("avatar.png");
+        let raw = CString::new(fifo.as_os_str().as_bytes()).expect("FIFO path");
+        assert_eq!(unsafe { libc::mkfifo(raw.as_ptr(), 0o600) }, 0);
+
+        let mut child = Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "profile_mask::tests::avatar_fifo_helper",
+                "--nocapture",
+            ])
+            .env("INCODEX_FIFO_AVATAR_TEST", &fifo)
+            .spawn()
+            .expect("FIFO helper");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(status) = child.try_wait().expect("FIFO helper status") {
+                assert!(status.success(), "FIFO helper rejected the contract");
+                break;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("avatar validation blocked while opening a FIFO");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn profile_names_are_bounded_and_control_free() {
+        for invalid in [
+            "",
+            "   ",
+            "bad\nname",
+            &"x".repeat(MAX_PROFILE_NAME_CHARS + 1),
+        ] {
+            let error = resolve_profile_mask(true, Some(invalid), None).unwrap_err();
+            assert!(error.contains("name"), "{error}");
+        }
+    }
+
+    #[test]
+    fn no_mask_means_no_profile_mutation() {
+        assert_eq!(resolve_profile_mask(false, None, None).unwrap(), None);
+    }
+}

@@ -1,10 +1,10 @@
-//! Localhost Chrome DevTools Protocol client for `incodex open`.
-//!
-//! Launch flags and the page-target filter follow the packaged-Codex CDP
-//! pattern used by other desktop launchers (debug port + allow-origins,
-//! prefer `app://-/index.html`, skip chrome:// and prewarm routes). The
-//! payload is our MIT `inject.js`, not a third-party injector.
-
+/**
+ * [INPUT]: 接收 OpenPlan 派生的 InjectionOptions、子进程存活信号与 localhost CDP target
+ * [OUTPUT]: 对外提供 launch 参数、profile mask bootstrap、注入、持续健康失败上报与 target lifecycle 关窗
+ * [POS]: incodex open 的 renderer 边界；只向当前 Codex page 注入共享 Runtime
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+use std::collections::HashSet;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,12 +17,16 @@ use tungstenite::client::IntoClientRequest;
 use tungstenite::handshake::{client::ClientHandshake, HandshakeError};
 use tungstenite::{Message, WebSocket};
 
+use crate::profile_mask::{ProfileAvatar, ProfileMask};
+
 const INJECT_JS: &str = include_str!("../../../dist/incodex-inject.js");
 const INJECT_PREFIX: &str = "window.__incodexIncognito=true;";
+const OFFICIAL_CODEX_PAGE_URL: &str = "app://-/index.html";
 const MAX_HTTP_RESPONSE_BYTES: usize = 1024 * 1024;
 const CDP_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const LIFECYCLE_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const PRIMARY_TARGET_MISSING_POLLS: u8 = 2;
+const PROFILE_MASK_FAILURE_POLLS: u8 = 2;
 const BROWSER_CLOSE_ATTEMPTS: u8 = 3;
 pub const OFFICIAL_NEW_CODEX_URL: &str = "codex://new?mode=codex";
 
@@ -37,6 +41,7 @@ pub struct CdpTarget {
 #[derive(Debug, Clone, Default)]
 pub struct InjectionOptions {
     pub locale: Option<String>,
+    pub profile_mask: Option<ProfileMask>,
 }
 
 pub fn allocate_debug_port() -> Result<u16, String> {
@@ -67,19 +72,72 @@ pub(crate) fn launch_arg_prefix(user_data_dir: &str) -> Vec<String> {
 }
 
 pub fn inject_source() -> String {
-    inject_source_for_locale(None)
+    inject_source_for_options(&InjectionOptions::default())
 }
 
 pub fn inject_source_for_locale(locale: Option<&str>) -> String {
-    let locale = serde_json::to_string(locale.unwrap_or("")).unwrap_or_else(|_| "\"\"".into());
-    format!("{INJECT_PREFIX}window.__incodexLocale={locale};\n{INJECT_JS}")
+    inject_source_for_options(&InjectionOptions {
+        locale: locale.map(str::to_string),
+        profile_mask: None,
+    })
+}
+
+pub fn inject_source_for_options(options: &InjectionOptions) -> String {
+    let locale = serde_json::to_string(options.locale.as_deref().unwrap_or(""))
+        .unwrap_or_else(|_| "\"\"".into());
+    let profile_mask = options
+        .profile_mask
+        .as_ref()
+        .map(profile_mask_json)
+        .unwrap_or_else(|| "null".to_string());
+    let official_page_url = serde_json::to_string(OFFICIAL_CODEX_PAGE_URL)
+        .unwrap_or_else(|_| "\"app://-/index.html\"".into());
+    let profile_bootstrap = if options.profile_mask.is_some() {
+        format!(
+            "(window.top===window&&window.location.href==={official_page_url})?{profile_mask}:null"
+        )
+    } else {
+        "null".to_string()
+    };
+    format!(
+        "{INJECT_PREFIX}window.__incodexLocale={locale};window.__incodexProfileMask={profile_bootstrap};\n{INJECT_JS}"
+    )
+}
+
+fn profile_mask_json(mask: &ProfileMask) -> String {
+    let name = serde_json::to_string(&mask.name).unwrap_or_else(|_| "\"\"".into());
+    let avatar = match &mask.avatar {
+        ProfileAvatar::Generated => "{\"kind\":\"generated\"}".to_string(),
+        ProfileAvatar::DataUrl(data_url) => {
+            let data_url = serde_json::to_string(data_url).unwrap_or_else(|_| "\"\"".into());
+            format!("{{\"dataUrl\":{data_url}}}")
+        }
+    };
+    format!("{{\"name\":{name},\"avatar\":{avatar}}}")
 }
 
 pub fn ui_ready_expression() -> &'static str {
     "(() => ({button: Boolean(document.querySelector('[data-incodex-privacy-toggle]')), banner: Boolean((document.querySelector('[data-incodex-banner-host]') && document.querySelector('[data-incodex-landing]')) || (() => { try { return sessionStorage.getItem('incodex-banner-dismissed') === '1'; } catch { return false; } })())}))()"
 }
 
+pub fn ui_ready_expression_for_options(options: &InjectionOptions) -> String {
+    if options.profile_mask.is_none() {
+        return ui_ready_expression().to_string();
+    }
+    format!(
+        "(() => {{ const base = {base}; base.profileMask = window.__incodexProfileMaskHealth === true; return base; }})()",
+        base = ui_ready_expression()
+    )
+}
+
 pub fn validate_ui_probe_result(response: &Value) -> Result<(), String> {
+    validate_ui_probe_result_for_options(response, false)
+}
+
+pub fn validate_ui_probe_result_for_options(
+    response: &Value,
+    require_profile_mask: bool,
+) -> Result<(), String> {
     let malformed = || "malformed Incodex UI probe result".to_string();
     let value = response
         .pointer("/result/result/value")
@@ -93,6 +151,16 @@ pub fn validate_ui_probe_result(response: &Value) -> Result<(), String> {
         .get("banner")
         .and_then(Value::as_bool)
         .ok_or_else(malformed)?;
+
+    if require_profile_mask {
+        let profile_mask = object
+            .get("profileMask")
+            .and_then(Value::as_bool)
+            .ok_or_else(malformed)?;
+        if !profile_mask {
+            return Err("Incodex profile mask is not mounted uniquely".into());
+        }
+    }
 
     match (button, banner) {
         (true, true) => Ok(()),
@@ -143,7 +211,14 @@ pub fn is_primary_codex_page(target: &CdpTarget) -> bool {
     if url.contains("quick-chat-prewarm") || url.contains("avatar-overlay") {
         return false;
     }
-    url == "app://-/index.html"
+    url == OFFICIAL_CODEX_PAGE_URL
+}
+
+fn should_register_persistent_script(
+    registered_targets: &HashSet<String>,
+    target_id: &str,
+) -> bool {
+    !registered_targets.contains(target_id)
 }
 
 pub fn inject_shared_ui(debug_port: u16) -> Result<(), String> {
@@ -160,16 +235,41 @@ pub fn inject_shared_ui_with_options(
 pub fn inject_shared_ui_with_options_and_target<F>(
     debug_port: u16,
     options: &InjectionOptions,
+    on_target: F,
+) -> Result<String, String>
+where
+    F: FnMut(&str),
+{
+    let process_alive = AtomicBool::new(true);
+    inject_shared_ui_with_options_while_alive(debug_port, options, &process_alive, on_target)
+}
+
+pub(crate) fn inject_shared_ui_with_options_while_alive<F>(
+    debug_port: u16,
+    options: &InjectionOptions,
+    process_alive: &AtomicBool,
     mut on_target: F,
 ) -> Result<String, String>
 where
     F: FnMut(&str),
 {
-    let source = inject_source_for_locale(options.locale.as_deref());
+    let source = inject_source_for_options(options);
+    let health_expression = ui_ready_expression_for_options(options);
+    let require_profile_mask = options.profile_mask.is_some();
+    let mut registered_script_targets = HashSet::new();
     let mut last = "cdp page not ready".to_string();
     let mut refused = 0u8;
     for _ in 0..8 {
-        match try_inject(debug_port, &source, &mut on_target) {
+        ensure_injection_active(process_alive)?;
+        match try_inject(
+            debug_port,
+            &source,
+            &health_expression,
+            require_profile_mask,
+            &mut registered_script_targets,
+            process_alive,
+            &mut on_target,
+        ) {
             Ok(target_id) => return Ok(target_id),
             Err(err) => {
                 let refused_now = err.contains("Connection refused")
@@ -190,39 +290,64 @@ where
     Err(last)
 }
 
-fn try_inject<F>(debug_port: u16, source: &str, on_target: &mut F) -> Result<String, String>
+fn try_inject<F>(
+    debug_port: u16,
+    source: &str,
+    health_expression: &str,
+    require_profile_mask: bool,
+    registered_script_targets: &mut HashSet<String>,
+    process_alive: &AtomicBool,
+    on_target: &mut F,
+) -> Result<String, String>
 where
     F: FnMut(&str),
 {
+    ensure_injection_active(process_alive)?;
     let targets = list_targets(debug_port)?;
+    ensure_injection_active(process_alive)?;
     let page = pick_codex_page_target(&targets).ok_or("no Codex page target")?;
     on_target(&page.id);
     validate_cdp_websocket_url(&page.ws, debug_port)?;
     let (mut socket, _) = connect_cdp_websocket(&page.ws, debug_port)?;
+    ensure_injection_active(process_alive)?;
     send_cdp(&mut socket, 1, "Page.enable", json!({}))?;
     select_official_codex_mode(&mut socket)?;
-    send_cdp(
-        &mut socket,
-        4,
-        "Page.addScriptToEvaluateOnNewDocument",
-        json!({ "source": source }),
-    )?;
+    ensure_injection_active(process_alive)?;
+    if should_register_persistent_script(registered_script_targets, &page.id) {
+        send_cdp(
+            &mut socket,
+            4,
+            "Page.addScriptToEvaluateOnNewDocument",
+            json!({ "source": source }),
+        )?;
+        registered_script_targets.insert(page.id.clone());
+    }
+    ensure_injection_active(process_alive)?;
     send_cdp(
         &mut socket,
         5,
         "Runtime.evaluate",
         json!({ "expression": source, "returnByValue": true }),
     )?;
+    ensure_injection_active(process_alive)?;
     let health = send_cdp(
         &mut socket,
         6,
         "Runtime.evaluate",
-        json!({ "expression": ui_ready_expression(), "returnByValue": true }),
+        json!({ "expression": health_expression, "returnByValue": true }),
     )?;
-    validate_ui_probe_result(&health)?;
+    validate_ui_probe_result_for_options(&health, require_profile_mask)?;
     let target_id = page.id.clone();
     let _ = socket.close(None);
     Ok(target_id)
+}
+
+fn ensure_injection_active(process_alive: &AtomicBool) -> Result<(), String> {
+    if process_alive.load(Ordering::Acquire) {
+        Ok(())
+    } else {
+        Err("CDP injection cancelled after child exit".into())
+    }
 }
 
 fn select_official_codex_mode(socket: &mut WebSocket<TcpStream>) -> Result<(), String> {
@@ -259,6 +384,63 @@ pub fn start_lifecycle_monitor(
     process_alive: Arc<AtomicBool>,
 ) {
     thread::spawn(move || monitor_primary_target(debug_port, &primary_target_id, &process_alive));
+}
+
+pub(crate) fn monitor_profile_mask_health<F>(
+    debug_port: u16,
+    process_alive: &AtomicBool,
+    mut on_failure: F,
+) -> Result<(), String>
+where
+    F: FnMut(&str),
+{
+    let mut failures = 0u8;
+    let mut last_error = "profile mask health was not checked".to_string();
+    while process_alive.load(Ordering::Acquire) {
+        thread::sleep(LIFECYCLE_POLL_INTERVAL);
+        if !process_alive.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        match probe_profile_mask_health(debug_port, process_alive) {
+            Ok(()) => failures = 0,
+            Err(error) => {
+                failures = failures.saturating_add(1);
+                last_error = error;
+            }
+        }
+        if failures < PROFILE_MASK_FAILURE_POLLS {
+            continue;
+        }
+        on_failure(&last_error);
+        return Err(last_error);
+    }
+    Ok(())
+}
+
+fn probe_profile_mask_health(debug_port: u16, process_alive: &AtomicBool) -> Result<(), String> {
+    ensure_injection_active(process_alive)?;
+    let targets = list_targets(debug_port)?;
+    let page = pick_codex_page_target(&targets).ok_or("no Codex page target")?;
+    validate_cdp_websocket_url(&page.ws, debug_port)?;
+    let (mut socket, _) = connect_cdp_websocket(&page.ws, debug_port)?;
+    let response = send_cdp(
+        &mut socket,
+        1,
+        "Runtime.evaluate",
+        json!({
+            "expression": "window.__incodexProfileMaskHealth === true",
+            "returnByValue": true
+        }),
+    )?;
+    let healthy = response
+        .pointer("/result/result/value")
+        .and_then(Value::as_bool)
+        .ok_or("malformed profile mask health result")?;
+    if healthy {
+        Ok(())
+    } else {
+        Err("Incodex profile mask could not be restored".into())
+    }
 }
 
 fn monitor_primary_target(debug_port: u16, primary_target_id: &str, process_alive: &AtomicBool) {

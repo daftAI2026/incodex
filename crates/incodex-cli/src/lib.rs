@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 接收 native CLI 参数，并协调命令、生命周期、CDP 与身份值对象
+ * [OUTPUT]: 对外提供 incodex-cli 的命令入口、公共模块与错误边界
+ * [POS]: incodex-cli crate 根编排器；具体 open/profile/runtime 职责下沉到各自模块
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 pub mod app_bundle;
 pub(crate) mod app_quiescence;
 pub mod cdp;
@@ -6,6 +12,7 @@ pub mod diagnose;
 pub(crate) mod diagnose_checks;
 pub(crate) mod diagnose_format;
 pub(crate) mod diagnose_signing;
+pub(crate) mod friendly_name;
 pub mod help;
 pub mod install;
 mod install_keychain_advice;
@@ -15,6 +22,7 @@ pub mod lifecycle;
 pub mod menu;
 pub mod open;
 pub mod parse;
+pub mod profile_mask;
 pub mod spinner;
 pub mod terminal;
 pub mod version;

@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 接收 ParsedCli、ProfileMask 与官方 Codex app 路径
+ * [OUTPUT]: 对外提供隔离 session 的 OpenPlan、可取消注入的 spawn 生命周期与关窗清理
+ * [POS]: incodex open 的 native 编排器；ProfileMask 只沿当前 renderer 注入链路流动
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -14,16 +20,15 @@ use incodex_core::session::{
     create_session_home_for_open, handoff_session_owner, sweep_orphan_sessions,
     target_id_from_exec, BurnExpected, SessionHome, SessionOwnerSnapshot, WindowGeometry,
 };
-use incodex_core::{format_kv, format_ok, format_step, format_warn};
+use incodex_core::{format_ok, format_warn};
 
 use crate::app_bundle::resolve_executable;
 use crate::cdp::{
-    allocate_debug_port, debug_launch_args, inject_shared_ui_with_options_and_target,
-    launch_arg_prefix, start_lifecycle_monitor, start_primary_lifecycle_monitor, InjectionOptions,
-    OFFICIAL_NEW_CODEX_URL,
+    allocate_debug_port, debug_launch_args, inject_shared_ui_with_options_while_alive,
+    launch_arg_prefix, monitor_profile_mask_health, start_lifecycle_monitor,
+    start_primary_lifecycle_monitor, InjectionOptions, OFFICIAL_NEW_CODEX_URL,
 };
-use crate::parse::ParsedCli;
-use crate::CliFailure;
+use crate::profile_mask::ProfileMask;
 
 #[derive(Debug, Clone)]
 pub struct OpenPlan {
@@ -38,6 +43,7 @@ pub struct OpenPlan {
     pub session_dev: u64,
     pub debug_port: u16,
     pub locale: Option<String>,
+    pub profile_mask: Option<ProfileMask>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,9 +105,7 @@ impl OpenProcessResult {
 
     fn failure_message(&self, _cleanup: &CleanupResult, code: OpenExitCode) -> String {
         match code {
-            // The retained-path warning was already printed on stdout. Do not
-            // duplicate it on stderr; the distinct process code carries the
-            // machine-readable failure class.
+            // 保留路径已在 stdout 告警；退出码负责机器可读分类，stderr 不重复。
             OpenExitCode::CleanupRetained => String::new(),
             OpenExitCode::ProcessFailure => match self {
                 Self::SpawnFailed { error } => {
@@ -143,16 +147,6 @@ struct InjectionReadiness {
 }
 
 impl InjectionReadiness {
-    fn mark_ready(&self) {
-        self.ready.store(true, Ordering::Release);
-    }
-
-    fn observe(&self, status: &InjectionStatus) {
-        if matches!(status, InjectionStatus::Ready) {
-            self.mark_ready();
-        }
-    }
-
     fn is_ready(&self) -> bool {
         self.ready.load(Ordering::Acquire)
     }
@@ -163,9 +157,9 @@ fn publish_injection_status(
     readiness: &InjectionReadiness,
     status: InjectionStatus,
 ) {
-    if matches!(status, InjectionStatus::Ready) {
-        readiness.mark_ready();
-    }
+    readiness
+        .ready
+        .store(matches!(status, InjectionStatus::Ready), Ordering::Release);
     let _ = status_tx.send(status);
 }
 
@@ -195,6 +189,16 @@ pub fn prepare_incognito_open(
     source_home: &Path,
     pid: i32,
 ) -> Result<OpenPlan, String> {
+    prepare_incognito_open_with_profile_mask(app_path, user_root, source_home, pid, None)
+}
+
+pub fn prepare_incognito_open_with_profile_mask(
+    app_path: &Path,
+    user_root: &Path,
+    source_home: &Path,
+    pid: i32,
+    profile_mask: Option<ProfileMask>,
+) -> Result<OpenPlan, String> {
     let bin = resolve_executable(app_path)?;
     let live_geometry = incodex_macos::live_main_window_bounds(&bin)
         .ok()
@@ -205,7 +209,14 @@ pub fn prepare_incognito_open(
             width: bounds.width,
             height: bounds.height,
         });
-    prepare_incognito_open_with_geometry_from_bin(bin, user_root, source_home, pid, live_geometry)
+    prepare_incognito_open_with_geometry_from_bin(
+        bin,
+        user_root,
+        source_home,
+        pid,
+        live_geometry,
+        profile_mask,
+    )
 }
 
 #[cfg(test)]
@@ -217,7 +228,14 @@ fn prepare_incognito_open_with_geometry(
     live_geometry: Option<WindowGeometry>,
 ) -> Result<OpenPlan, String> {
     let bin = resolve_executable(app_path)?;
-    prepare_incognito_open_with_geometry_from_bin(bin, user_root, source_home, pid, live_geometry)
+    prepare_incognito_open_with_geometry_from_bin(
+        bin,
+        user_root,
+        source_home,
+        pid,
+        live_geometry,
+        None,
+    )
 }
 
 fn prepare_incognito_open_with_geometry_from_bin(
@@ -226,6 +244,7 @@ fn prepare_incognito_open_with_geometry_from_bin(
     source_home: &Path,
     pid: i32,
     live_geometry: Option<WindowGeometry>,
+    profile_mask: Option<ProfileMask>,
 ) -> Result<OpenPlan, String> {
     let target_id = target_id_from_exec(&bin.to_string_lossy());
     let _ = sweep_orphan_sessions(user_root, Some(&target_id));
@@ -249,10 +268,15 @@ fn prepare_incognito_open_with_geometry_from_bin(
         );
         return Err(error);
     }
-    Ok(plan_from_session(bin, session, source_home))
+    Ok(plan_from_session(bin, session, source_home, profile_mask))
 }
 
-fn plan_from_session(bin: PathBuf, session: SessionHome, source_home: &Path) -> OpenPlan {
+fn plan_from_session(
+    bin: PathBuf,
+    session: SessionHome,
+    source_home: &Path,
+    profile_mask: Option<ProfileMask>,
+) -> OpenPlan {
     let debug_port = allocate_debug_port().unwrap_or(0);
     let args = if debug_port == 0 {
         let mut args = launch_arg_prefix(&session.chromium.display().to_string());
@@ -291,6 +315,7 @@ fn plan_from_session(bin: PathBuf, session: SessionHome, source_home: &Path) -> 
         bin,
         debug_port,
         locale: read_locale_override(source_home),
+        profile_mask,
     }
 }
 
@@ -400,18 +425,22 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
     let (status_tx, status_rx) = mpsc::channel();
     let readiness = InjectionReadiness::default();
     let process_alive = Arc::new(AtomicBool::new(true));
-    if plan.debug_port != 0 {
+    let mut injection_worker = if plan.debug_port != 0 {
         let port = plan.debug_port;
         let injection_readiness = readiness.clone();
         let lifecycle_process_alive = process_alive.clone();
         let options = InjectionOptions {
             locale: plan.locale.clone(),
+            profile_mask: plan.profile_mask.clone(),
         };
-        thread::spawn(move || {
+        Some(thread::spawn(move || {
             let mut primary_target_id = None;
             let mut lifecycle_started = false;
             let mut last_injection_error = None;
             for attempt in 1u8..=40 {
+                if !lifecycle_process_alive.load(Ordering::Acquire) {
+                    return;
+                }
                 if !lifecycle_started
                     && start_primary_lifecycle_monitor(port, lifecycle_process_alive.clone())
                         .is_ok()
@@ -419,8 +448,11 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                     lifecycle_started = true;
                 }
                 if primary_target_id.is_none() {
-                    let injection =
-                        inject_shared_ui_with_options_and_target(port, &options, |target_id| {
+                    let injection = inject_shared_ui_with_options_while_alive(
+                        port,
+                        &options,
+                        &lifecycle_process_alive,
+                        |target_id| {
                             if !lifecycle_started {
                                 start_lifecycle_monitor(
                                     port,
@@ -429,7 +461,8 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                                 );
                                 lifecycle_started = true;
                             }
-                        });
+                        },
+                    );
                     match injection {
                         Ok(target_id) => {
                             primary_target_id = Some(target_id);
@@ -454,6 +487,18 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                         &injection_readiness,
                         InjectionStatus::Ready,
                     );
+                    if options.profile_mask.is_some() {
+                        let _ =
+                            monitor_profile_mask_health(port, &lifecycle_process_alive, |error| {
+                                publish_injection_status(
+                                    &status_tx,
+                                    &injection_readiness,
+                                    InjectionStatus::Failed(format!(
+                                        "profile mask health failed: {error}"
+                                    )),
+                                );
+                            });
+                    }
                     return;
                 }
                 thread::sleep(Duration::from_millis(400));
@@ -469,46 +514,75 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                 &injection_readiness,
                 InjectionStatus::Failed(detail),
             );
-        });
+        }))
     } else {
         publish_injection_status(
             &status_tx,
             &readiness,
             InjectionStatus::Failed("a localhost CDP port could not be allocated".into()),
         );
-    }
+        None
+    };
 
     let (_, opened, waiting) = open_progress_copy();
     let mut spinner = crate::spinner::Spinner::start("Waiting for Codex UI to become ready");
     let mut reported = false;
     loop {
-        if !reported {
-            match status_rx.try_recv() {
-                Ok(InjectionStatus::Ready) => {
-                    readiness.observe(&InjectionStatus::Ready);
-                    spinner.stop();
-                    println!("{}", format_ok(opened, None));
-                    let _ = std::io::stdout().flush();
-                    spinner = crate::spinner::Spinner::start(waiting);
-                    reported = true;
-                }
-                Ok(InjectionStatus::Failed(detail)) => {
-                    spinner.stop();
+        match status_rx.try_recv() {
+            Ok(InjectionStatus::Ready) if !reported => {
+                spinner.stop();
+                println!("{}", format_ok(opened, None));
+                let _ = std::io::stdout().flush();
+                spinner = crate::spinner::Spinner::start(waiting);
+                reported = true;
+            }
+            Ok(InjectionStatus::Ready) => {}
+            Ok(InjectionStatus::Failed(detail)) => {
+                spinner.stop();
+                if plan.profile_mask.is_some() {
                     println!(
                         "{}",
-                        format_warn(&format!("Window opened, but {detail}."), None)
+                        format_warn(&format!("Window closed: {detail}."), None)
                     );
                     let _ = std::io::stdout().flush();
-                    spinner = crate::spinner::Spinner::start(waiting);
-                    reported = true;
+                    stop_injection_worker(&process_alive, &mut injection_worker);
+                    return Ok(match kill_and_reap(&mut child) {
+                        Ok(_) => SpawnOutcome {
+                            process: OpenProcessResult::Exited {
+                                code: 0,
+                                ui_ready: false,
+                            },
+                            owner: Some(owner),
+                            cleanup: CleanupDisposition::Burn,
+                        },
+                        Err(error) => {
+                            let reason = format!(
+                                "UI injection failed and child exit could not be proven: {error}"
+                            );
+                            SpawnOutcome {
+                                process: OpenProcessResult::SpawnFailed {
+                                    error: reason.clone(),
+                                },
+                                owner: Some(owner),
+                                cleanup: CleanupDisposition::Retain(reason),
+                            }
+                        }
+                    });
                 }
-                Err(mpsc::TryRecvError::Empty) => {}
-                Err(mpsc::TryRecvError::Disconnected) => reported = true,
+                println!(
+                    "{}",
+                    format_warn(&format!("Window opened, but {detail}."), None)
+                );
+                let _ = std::io::stdout().flush();
+                spinner = crate::spinner::Spinner::start(waiting);
+                reported = true;
             }
+            Err(mpsc::TryRecvError::Empty) => {}
+            Err(mpsc::TryRecvError::Disconnected) => reported = true,
         }
         match child.try_wait() {
             Ok(Some(status)) => {
-                process_alive.store(false, Ordering::Release);
+                stop_injection_worker(&process_alive, &mut injection_worker);
                 spinner.stop();
                 return Ok(SpawnOutcome {
                     process: OpenProcessResult::Exited {
@@ -521,7 +595,7 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
             }
             Ok(None) => {}
             Err(error) => {
-                process_alive.store(false, Ordering::Release);
+                stop_injection_worker(&process_alive, &mut injection_worker);
                 spinner.stop();
                 let reason = format!("child exit could not be proven: {error}");
                 return Ok(SpawnOutcome {
@@ -534,6 +608,13 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
             }
         }
         thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn stop_injection_worker(process_alive: &AtomicBool, worker: &mut Option<thread::JoinHandle<()>>) {
+    process_alive.store(false, Ordering::Release);
+    if let Some(worker) = worker.take() {
+        let _ = worker.join();
     }
 }
 
@@ -670,9 +751,7 @@ where
         let attempt_owner = if original_removed { None } else { owner };
         match burn(session_root, attempt_expected, attempt_owner) {
             Ok(removed) => {
-                // +--------------------------------------------------------------------+
-                // | 只有本次已证明删除创建时 root，后续重建才允许路径证明 fallback。 |
-                // +--------------------------------------------------------------------+
+                // 只有已证明删除创建时 root，后续重建才允许路径证明 fallback。
                 original_removed |= removed;
             }
             Err(error) => {
@@ -709,58 +788,9 @@ where
     }
 }
 
-pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
-    let app_path = parsed
-        .app
-        .as_deref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(incodex_core::DEFAULT_APP));
-    if parsed.dry_run {
-        let (bin, _) = describe_incognito_open(&app_path).map_err(CliFailure::from)?;
-        println!(
-            "{}",
-            format_step("Open incognito without patching Codex", None)
-        );
-        println!(
-            "{}",
-            format_kv("App", &app_path.display().to_string(), None)
-        );
-        println!("{}", format_kv("Binary", &bin.display().to_string(), None));
-        println!("{}", format_warn("Dry run. No window opened.", None));
-        return Ok(());
-    }
-    let root = user_root();
-    let source = default_source_home();
-    let plan = prepare_incognito_open(&app_path, &root, &source, std::process::id() as i32)?;
-    let (opening, _, _) = open_progress_copy();
-    println!("{}", format_step(opening, None));
-    println!(
-        "{}",
-        format_kv("Binary", &plan.bin.display().to_string(), None)
-    );
-    println!(
-        "{}",
-        format_kv("Home", &plan.home.display().to_string(), None)
-    );
-    println!("{}", format_kv("Session", &plan.session_id, None));
-    let (process, cleanup) = wait_and_burn(&plan, &root, 250)?;
-    let (ok, message) = format_session_cleanup(&cleanup);
-    if ok {
-        println!("{}", format_ok(&message, None));
-    } else {
-        println!("{}", format_warn(&message, None));
-    }
-    println!();
-    let code = process.exit_code(&cleanup);
-    if code == OpenExitCode::Success {
-        Ok(())
-    } else {
-        Err(CliFailure::with_code(
-            code.as_i32(),
-            process.failure_message(&cleanup, code),
-        ))
-    }
-}
+#[path = "open_command.rs"]
+mod command;
+pub use command::run_open;
 
 #[cfg(test)]
 #[path = "open_cleanup_tests.rs"]

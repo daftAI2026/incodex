@@ -1,15 +1,22 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { blobatarUri } from "blobatar/uri";
 import { iconFor } from "./incognito-icon";
 
 const inject = readFileSync(join(import.meta.dir, "inject.ts"), "utf8");
+const profileMask = readFileSync(join(import.meta.dir, "incognito-profile-mask.ts"), "utf8");
+const notice = readFileSync(join(import.meta.dir, "../../NOTICE"), "utf8");
+const packageJson = JSON.parse(readFileSync(join(import.meta.dir, "../../package.json"), "utf8")) as {
+  dependencies?: Record<string, string>;
+};
 const hatGlasses = readFileSync(join(import.meta.dir, "../../assets/hat-glasses.svg"), "utf8");
 const circleX = readFileSync(join(import.meta.dir, "../../assets/circle-x.svg"), "utf8");
 
 describe("hat-glasses stays after header remount", () => {
   test("does not disconnect the observer once the button exists", () => {
-    expect(inject).not.toContain("observer.disconnect");
+    expect(inject).not.toMatch(/if \(!needsInject\(\)\)[\s\S]{0,80}observer\.disconnect\(\)/);
     expect(inject).not.toMatch(/if \(uiReady\(\)\) return;/);
   });
 
@@ -55,6 +62,112 @@ describe("incognito button exit affordance", () => {
     expect(clickHandler).toContain("event.preventDefault()");
     expect(clickHandler).toContain("event.stopImmediatePropagation()");
     expect(clickHandler).toContain("void activate()");
+  });
+});
+
+describe("incognito profile mask", () => {
+  test("pins the official Blobatar core for offline generated avatars", () => {
+    expect(packageJson.dependencies?.blobatar).toBe("2.4.0");
+    expect(profileMask).toContain('from "blobatar/uri"');
+    expect(profileMask).toContain("blobatarUri");
+    expect(notice).toContain("blobatar@2.4.0");
+    expect(notice).toContain("Copyright (c) 2026 Alain");
+  });
+
+  test("keeps the Blobatar 2.4.0 Temporary golden output stable", () => {
+    const digest = createHash("sha256").update(blobatarUri("Temporary")).digest("hex");
+    expect(digest).toBe("05377318e542508086482ec3208f61e342e19a123cc1293e862959c19a493df0");
+  });
+
+  test("uses the CDP bootstrap value and only the unique sidebar profile footer", () => {
+    expect(profileMask).toContain("__incodexProfileMask");
+    expect(profileMask).toContain("findProfileFooter");
+    expect(profileMask).toContain('button.sidebar-item[type="button"]');
+    expect(profileMask).toContain(":scope > span.min-w-0.flex-1.truncate");
+    expect(profileMask).toContain(":scope > img.rounded-full, :scope > span.rounded-full");
+    expect(profileMask).toContain(":scope > [data-incodex-profile-mask-name]");
+    expect(profileMask).toContain("candidates.length === 1");
+    expect(inject).toContain("ensureProfileMask");
+  });
+
+  test("writes visual name and avatar values without taking over account semantics", () => {
+    expect(profileMask).toContain("textContent = mask.name");
+    expect(profileMask).toContain("avatar.src = mask.avatarDataUrl");
+    expect(profileMask).toContain("identity.setAttribute(PROFILE_MASK_ATTR, \"true\")");
+    expect(profileMask).not.toContain("profileFooter.setAttribute(\"aria-label\"");
+    expect(profileMask).not.toContain("profileFooter.addEventListener(\"click\"");
+  });
+
+  test("masks the open account menu without changing its interaction semantics", () => {
+    expect(profileMask).toContain("findProfileMenuIdentity");
+    expect(profileMask).toContain('[role="menu"]');
+    expect(profileMask).toContain('[role="menuitem"]');
+    expect(profileMask).toContain(":scope > div > span.flex-1.min-w-0.truncate");
+    expect(profileMask).toContain(":scope > div > span > img.icon-sm.rounded-full");
+    expect(profileMask).toContain('profileFooter.getAttribute("aria-controls")');
+    expect(profileMask).toMatch(
+      /if \(!profileMenu\) return true;[\s\S]*if \(!menuIdentity\) return false;/,
+    );
+    expect(profileMask).toContain("ensureProfileMenuMask");
+    expect(profileMask).not.toContain('setAttribute("role"');
+    expect(profileMask).not.toContain('addEventListener("click"');
+  });
+
+  test("fills the native circular slot without distorting explicit images", () => {
+    expect(profileMask).toContain('background: "circle"');
+    expect(profileMask).toContain('avatar.style.objectFit = "cover"');
+    expect(profileMask).toContain('avatar.style.objectPosition = "center"');
+    expect(profileMask).toContain('avatar.style.backgroundSize = "cover"');
+    expect(profileMask).toContain('avatar.style.backgroundPosition = "center"');
+    expect(profileMask).toContain('avatar.style.objectPosition === "center center"');
+    expect(profileMask).toContain('avatar.style.backgroundPosition === "center center"');
+  });
+
+  test("waits for avatar decoding before accepting the profile mask", () => {
+    expect(profileMask).toContain("new Image()");
+    expect(profileMask).toContain("probe: HTMLImageElement");
+    expect(profileMask).toContain("state.probe = probe");
+    expect(profileMask).toMatch(/addEventListener\(\s*"load"/);
+    expect(profileMask).toMatch(/addEventListener\(\s*"error"/);
+    expect(profileMask).toMatch(/\.status === "ready"/);
+    expect(profileMask).toContain("profileAvatarDecoded(mask.avatarDataUrl)");
+  });
+
+  test("keeps the profile health surface fail-closed when the footer is ambiguous", () => {
+    expect(profileMask).toContain("candidates.length === 1 ? candidates[0] : null");
+    expect(profileMask).toContain("nameHost.textContent === mask.name");
+    expect(profileMask).toContain("identityMaskHealth");
+    expect(profileMask).toContain("profileMaskHealth");
+  });
+
+  test("distinguishes a generated kind from a validated explicit data URL", () => {
+    expect(profileMask).toContain('avatar.kind === "generated"');
+    expect(profileMask).not.toContain("avatar.seed");
+    expect(profileMask).toContain("avatar.dataUrl");
+    expect(profileMask).toContain("blobatarUri(name,");
+  });
+
+  test("keeps ordinary observers on childList and opts into profile text attributes only when masked", () => {
+    expect(inject).toContain("function observerOptions(): MutationObserverInit");
+    expect(inject).toContain("childList: true");
+    expect(inject).toContain("subtree: true");
+    expect(inject).toContain("options.attributes = true");
+    expect(inject).toContain("options.characterData = true");
+    expect(inject).toContain("options.attributeFilter = PROFILE_OBSERVED_ATTRIBUTES");
+    expect(inject).toMatch(/isIncognitoWindow\(\)\s*&&\s*window\.__incodexProfileMask !== null/);
+    expect(inject).toContain("observer.observe(document.documentElement, observerOptions())");
+  });
+
+  test("reobserves when CDP enables masking after Runtime startup", () => {
+    expect(inject).toContain("__incodexMutationObserver");
+    expect(inject).toContain("__incodexProfileObservationEnabled");
+    expect(inject).toMatch(
+      /if \(window\.__incodexStarted\) \{[\s\S]*ensureMutationObserver\(\);[\s\S]*ensureProfileMask\(\);/,
+    );
+    expect(inject).toMatch(
+      /if \(observer && \(!profileRequired \|\| window\.__incodexProfileObservationEnabled\)\) return;[\s\S]*observer\.observe\(document\.documentElement, observerOptions\(\)\);/,
+    );
+    expect(inject).not.toContain("observer.disconnect()");
   });
 });
 

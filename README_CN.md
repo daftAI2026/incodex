@@ -28,6 +28,7 @@
 - **侧栏按钮**：装进正在用的 Codex 后，搜索左边会出现帽子墨镜；`Shift+Command+N` 也能开
 - **关窗即焚**：正常关掉后清掉这次的临时会话（含独立 Chromium 档案）；登录和设置会留着
 - **可选不改包**：`incodex open` 直接开一扇无痕窗，不碰官方签名
+- **临时资料遮罩**：`incodex open --mask [--name <text>] [--avatar <local-file>]` 给这扇窗口一个临时两词名称和离线确定性头像。头像只能用本地 PNG、JPEG 或 WebP；它只改当前窗口的 profile footer 与已打开账号菜单，不改真实账号
 - **本机 CLI**：终端菜单、Homebrew / 脚本安装、`status` / `doctor` / `runtime`，不经过官方插件
 
 这还不是「本机完全不留记录」的取证结论。
@@ -129,6 +130,16 @@ $ incodex open
   ✓ Opened. Incognito Codex window is ready.
   ✓ Closed. Isolated session removed.
 ```
+
+需要临时视觉身份时，只在 `open` 路径加 `--mask`：
+
+```bash
+$ incodex open --mask
+$ incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
+```
+
+遮罩只改当前无痕 renderer 的 profile footer 与已打开账号菜单中的身份行，不改真实账号。
+如果遮罩无法挂载，或在 renderer 重挂载后无法恢复，Incodex 会关闭该窗口，而不是暴露真实身份。
 
 ### Install
 
@@ -266,6 +277,8 @@ incodex doctor
 incodex doctor --deep        # 完整 nested 签名 / entitlement / Gatekeeper 证据
 incodex runtime             # 只更新按钮逻辑，不重签 Codex
 incodex open                # 不改官方包，直接开无痕窗
+incodex open --mask         # 临时侧栏名称和离线头像
+incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
 incodex recover --transaction <id>
 incodex update              # 更新这个 CLI（脚本安装）
 incodex self-uninstall      # 卸掉 CLI；还原 Codex 要加 --restore-app

@@ -1,4 +1,6 @@
 use super::*;
+use crate::profile_mask::{ProfileAvatar, ProfileMask};
+use std::collections::HashSet;
 use std::net::Ipv4Addr;
 use std::time::Instant;
 
@@ -178,6 +180,51 @@ fn injected_ui_carries_locale_and_requires_button_and_banner_health() {
     let health = ui_ready_expression();
     assert!(health.contains("data-incodex-privacy-toggle"));
     assert!(health.contains("data-incodex-banner-host"));
+}
+
+#[test]
+fn injected_ui_carries_profile_mask_as_a_json_bootstrap_value() {
+    let source = inject_source_for_options(&InjectionOptions {
+        locale: Some("en-US".into()),
+        profile_mask: Some(ProfileMask {
+            name: "Temporary".into(),
+            avatar: ProfileAvatar::Generated,
+        }),
+    });
+
+    assert!(source.contains(
+        "window.__incodexProfileMask=(window.top===window&&window.location.href===\"app://-/index.html\")?{\"name\":\"Temporary\",\"avatar\":{\"kind\":\"generated\"}}:null"
+    ));
+    assert!(source.contains("window.__incodexLocale=\"en-US\""));
+}
+
+#[test]
+fn profile_payload_is_null_outside_the_exact_top_level_codex_page() {
+    let source = inject_source_for_options(&InjectionOptions {
+        locale: None,
+        profile_mask: Some(ProfileMask {
+            name: "Quiet Otter".into(),
+            avatar: ProfileAvatar::Generated,
+        }),
+    });
+
+    assert!(source.contains("window.top===window"));
+    assert!(source.contains("window.location.href===\"app://-/index.html\""));
+    assert!(source.contains(":null;"));
+}
+
+#[test]
+fn persistent_script_registration_is_once_per_target_across_retries() {
+    let mut registered = HashSet::new();
+    assert!(should_register_persistent_script(&registered, "main"));
+    registered.insert("main".to_string());
+    assert!(!should_register_persistent_script(&registered, "main"));
+    assert!(should_register_persistent_script(
+        &registered,
+        "replacement"
+    ));
+    registered.insert("replacement".to_string());
+    assert!(!should_register_persistent_script(&registered, "main"));
 }
 
 #[test]

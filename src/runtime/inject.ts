@@ -1,8 +1,20 @@
+/**
+ * [INPUT]: 依赖 window 的 incognito/profile bootstrap 与 Codex 当前 renderer DOM
+ * [OUTPUT]: 对外提供帽子按钮、banner，以及无痕 profile footer/账号菜单身份行的视觉遮罩
+ * [POS]: Electron Runtime 的共享 inject.js；只改菜单身份视觉，不拥有账号数据、菜单交互、IPC 或持久化状态
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 import { STRIP_CLONE_ATTRS } from "./compatibility/default-adapter";
 import { isSearchLabel } from "./compatibility/search-labels";
 import { type CopyKey, translate, resolveLocale as matchLocale } from "./incognito-copy";
 import { iconFor, type IncognitoButtonIcon } from "./incognito-icon";
 import { deriveUiProbe } from "./incodex-ui-probe";
+import {
+  ensureProfileMask,
+  profileMaskHealth,
+  profileMaskNeedsInject,
+} from "./incognito-profile-mask";
 import { createOfficialTooltipTimingBridge } from "./official-tooltip-provider";
 import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement";
 import { createTooltipLifecycle, type TooltipLifecycle } from "./tooltip-lifecycle";
@@ -258,7 +270,7 @@ function landingStillMounted(): boolean {
 }
 
 function needsInject(): boolean {
-  return !buttonStillBesideSearch() || !landingStillMounted();
+  return !buttonStillBesideSearch() || !landingStillMounted() || profileMaskNeedsInject();
 }
 
 function buildButton(search: HTMLElement): HTMLElement {
@@ -379,6 +391,7 @@ function bannerDismissed(): boolean {
 
 function refreshUiProbe(): void {
   const incognito = isIncognitoWindow();
+  window.__incodexProfileMaskHealth = profileMaskHealth();
   window.__incodexUiProbe = deriveUiProbe({
     incognito,
     buttonPresent: buttonStillBesideSearch(),
@@ -559,22 +572,40 @@ function onKeydown(event: KeyboardEvent): void {
   void activate();
 }
 
-function start(): void {
-  if (window.__incodexStarted) {
-    refreshUiProbe();
-    return;
+const PROFILE_OBSERVED_ATTRIBUTES = [
+  "class",
+  "src",
+  "style",
+  "data-incodex-profile-mask",
+  "data-incodex-profile-mask-name",
+  "data-incodex-profile-mask-avatar",
+];
+
+function observerOptions(): MutationObserverInit {
+  const options: MutationObserverInit = { childList: true, subtree: true };
+  if (
+    isIncognitoWindow() &&
+    window.__incodexProfileMask !== null &&
+    window.__incodexProfileMask !== undefined
+  ) {
+    options.attributes = true;
+    options.characterData = true;
+    options.attributeFilter = PROFILE_OBSERVED_ATTRIBUTES;
   }
-  window.__incodexStarted = true;
-  ensureStyle();
-  ensureButton();
-  apply();
-  ensureLanding();
-  refreshUiProbe();
-  window.addEventListener("keydown", onKeydown, true);
-  window.addEventListener("blur", dismissActiveTooltip);
-  window.addEventListener(TOOLTIP_DISMISS_EVENT, () => activeTooltipLifecycle?.dismiss());
+  return options;
+}
+
+function profileObservationRequired(): boolean {
+  return (
+    isIncognitoWindow() &&
+    window.__incodexProfileMask !== null &&
+    window.__incodexProfileMask !== undefined
+  );
+}
+
+function createMutationObserver(): MutationObserver {
   let scheduled = false;
-  const observer = new MutationObserver(() => {
+  return new MutationObserver(() => {
     if (!needsInject()) return;
     if (scheduled) return;
     scheduled = true;
@@ -583,10 +614,42 @@ function start(): void {
       if (!needsInject()) return;
       ensureButton();
       ensureLanding();
+      ensureProfileMask();
       refreshUiProbe();
     });
   });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+}
+
+function ensureMutationObserver(): void {
+  const profileRequired = profileObservationRequired();
+  let observer = window.__incodexMutationObserver;
+  if (observer && (!profileRequired || window.__incodexProfileObservationEnabled)) return;
+  if (!observer) {
+    observer = createMutationObserver();
+    window.__incodexMutationObserver = observer;
+  }
+  observer.observe(document.documentElement, observerOptions());
+  window.__incodexProfileObservationEnabled = profileRequired;
+}
+
+function start(): void {
+  if (window.__incodexStarted) {
+    ensureMutationObserver();
+    ensureProfileMask();
+    refreshUiProbe();
+    return;
+  }
+  window.__incodexStarted = true;
+  ensureStyle();
+  ensureButton();
+  apply();
+  ensureLanding();
+  ensureProfileMask();
+  refreshUiProbe();
+  window.addEventListener("keydown", onKeydown, true);
+  window.addEventListener("blur", dismissActiveTooltip);
+  window.addEventListener(TOOLTIP_DISMISS_EVENT, () => activeTooltipLifecycle?.dismiss());
+  ensureMutationObserver();
 }
 
 declare global {
@@ -594,6 +657,9 @@ declare global {
     __incodexStarted?: boolean;
     __incodexIncognito?: boolean;
     __incodexLocale?: string;
+    __incodexMutationObserver?: MutationObserver;
+    __incodexProfileObservationEnabled?: boolean;
+    __incodexProfileMaskHealth?: boolean;
     __incodexUiProbe?: ReturnType<typeof deriveUiProbe>;
     incodex?: {
       requestIncognitoAction?: (payload: {
