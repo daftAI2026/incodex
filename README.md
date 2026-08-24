@@ -24,7 +24,7 @@
 ## Features
 
 - **Incognito window**: Same login and settings as usual. No old chats, and this session does not join the everyday list
-- **Follows the main window**: The incognito window opens at the same size and position
+- **Follows the main window**: The incognito window opens using the main window’s size and placement
 - **Sidebar button**: After install, a hat-glasses control sits left of Search; `Shift+Command+N` also works
 - **Burns on close**: A normal close clears this temp session (including the isolated Chromium profile); login and settings stay
 - **Optional no-patch path**: `incodex open` launches an incognito window without touching the official signature
@@ -160,9 +160,11 @@ Closing the window burns the isolated session:
 ```bash
 $ incodex open
 
-➤ Opening incognito window
+➤ Opening incognito Codex window
   Binary       /Applications/ChatGPT.app/Contents/MacOS/ChatGPT
   Home         ~/.incodex/sessions/…
+  Session      s-…
+  ✓ Opened. Incognito Codex window is ready.
   ✓ Closed. Isolated session removed.
 ```
 
@@ -178,12 +180,15 @@ $ incodex install
   ! Replaces the app in place and resigns it ad hoc.
   ! Official Appshot (smart snapshot) stops until uninstall.
   Backup       ~/.incodex/installations/
-  ✓ Official app patched
   Install id   0778f0fa-…
   Runtime      0.4.0
   App          /Applications/ChatGPT.app
-➤ Relaunch
-  ✓ ChatGPT.app relaunched.
+  ✓ Done. Open ChatGPT.app when you want Incognito.
+  ! Keychain: On next launch, macOS may ask this patched Codex app to access Codex Storage Key.
+  ! Confirm the dialog names this app and the Codex Storage Key item.
+  ! If both match, enter your Mac login password (not your ChatGPT password) and choose Always Allow.
+  ! Allow or Allow Once grants only that access and may prompt again later.
+  ! If the details do not match, choose Deny; Incodex and Terminal never need that password.
 ```
 
 After install, the hat-glasses control appears left of Search. Click it or press `Shift+Command+N` for an incognito window.
@@ -203,6 +208,7 @@ $ incodex status
   Install id   0778f0fa-…
   Target       official-404f3389062b
   Main         .vite/build/early-bootstrap.js
+  ✓ Incodex is installed. Use doctor for hashes and signing.
 ```
 
 ### Doctor
@@ -221,6 +227,7 @@ $ incodex doctor
 ➤ Runtime
   Version      0.4.0
   External     0.4.0 releases/0.4.0-<manifestSha256>
+  External check checked
   Loader       asar only
   Main         .vite/build/early-bootstrap.js
 
@@ -230,13 +237,14 @@ $ incodex doctor
 
 ➤ Backup
   State        ok
+  Proof        checked
   Matches      yes
 
 ➤ Sessions
-  Orphans      0
-  Chromium     0
-  Stale pid    no
-  Journals     0
+  Orphans      0 (checked)
+  Chromium     0 (checked)
+  Stale pid    no (checked)
+  Journals     0 (checked)
 ```
 
 The default Doctor checks Incodex-owned Runtime, backup, journal, session, and marker state plus minimal outer app identity. It does not recurse into nested signing or invoke Gatekeeper. Run `incodex doctor --deep` for the full nested signing, entitlement, and Gatekeeper report. The Gatekeeper result is diagnostic, not an install failure; after the bundle changes, the official signature will not pass Gatekeeper.
@@ -256,7 +264,7 @@ Install: Homebrew
 Shell: /bin/zsh
 ```
 
-`Install` is Homebrew, Script, or Source. Homebrew installs should not run `incodex update`; use `brew upgrade incodex`.
+`Install` reports Homebrew when the executable is recognized in its Homebrew location; other native binaries currently report Script. Homebrew installs should not run `incodex update`; use `brew upgrade incodex`.
 
 ## License
 
