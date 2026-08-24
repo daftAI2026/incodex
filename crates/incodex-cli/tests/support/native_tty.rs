@@ -106,6 +106,23 @@ fn native_tty_menu_prints_the_product_order_and_controls() {
 }
 
 #[test]
+fn native_tty_menu_erases_every_physical_line_before_redrawing() {
+    let home = scratch("menu-clean-redraw");
+    let rust = run_tty(rust_bin(), &[], &[], &home, "Quit", "q");
+    assert_eq!(rust.status, 0, "{}", visible(&rust.stdout));
+    assert!(
+        rust.stdout.starts_with("\u{1b}[?25l\u{1b}[H\r\u{1b}[2K"),
+        "the first menu frame must erase each old terminal line before drawing: {:?}",
+        rust.stdout
+    );
+    assert!(
+        rust.stdout.matches("\r\u{1b}[2K").count() >= 15,
+        "every banner, item, and control line must erase stale text: {:?}",
+        rust.stdout
+    );
+}
+
+#[test]
 fn native_menu_shows_the_cached_update_notice_and_shortcut() {
     let rust_home = scratch("menu-update");
     let cache = rust_home.join(".incodex/cache/update_message");
