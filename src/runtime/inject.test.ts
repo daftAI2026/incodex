@@ -123,6 +123,14 @@ describe("incognito profile mask", () => {
     expect(profileMask).toContain('avatar.style.backgroundPosition === "center center"');
   });
 
+  test("waits for avatar decoding before accepting the profile mask", () => {
+    expect(profileMask).toContain("new Image()");
+    expect(profileMask).toContain('addEventListener("load"');
+    expect(profileMask).toContain('addEventListener("error"');
+    expect(profileMask).toContain('state.status === "ready"');
+    expect(profileMask).toContain("profileAvatarDecoded(mask.avatarDataUrl)");
+  });
+
   test("keeps the profile health surface fail-closed when the footer is ambiguous", () => {
     expect(profileMask).toContain("candidates.length === 1 ? candidates[0] : null");
     expect(profileMask).toContain("nameHost.textContent === mask.name");
