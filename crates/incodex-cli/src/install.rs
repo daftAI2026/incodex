@@ -625,9 +625,9 @@ fn inspect_existing_install(
     if !has_loader && !package.already_patched && package.install_id.is_none() {
         return Ok(None);
     }
-    if archive.extract(LOADER_NAME).ok().as_deref() != Some(loader_source().as_bytes()) {
-        return Err(unbound_patch_error());
-    }
+    // The committed transaction seals the complete live tree, so it is the
+    // compatibility authority. Requiring today's loader bytes here would
+    // reject a valid older install before its external Runtime can self-heal.
     installed_install_id(app, root, &archive)
         .map(Some)
         .ok_or_else(unbound_patch_error)

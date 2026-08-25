@@ -5,8 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use incodex_asar::{pack_dir, Archive, LOADER_NAME, MARKER_KEY};
-use incodex_transaction::{acquire_target_lock, journal_v2};
+use incodex_asar::{pack_dir, patch_asar, Archive, LOADER_NAME, MARKER_KEY};
+use incodex_macos::{ditto, sign_app, write_asar_integrity};
+use incodex_transaction::{acquire_target_lock, journal_v2, Engine};
 use sha2::{Digest, Sha256};
 
 #[path = "install/recovery.rs"]
@@ -389,6 +390,52 @@ fn install_reuses_a_matching_runtime_pointer_without_rewriting_it() {
     assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
     assert_eq!(stderr, "");
     assert_eq!(fs::metadata(current).unwrap().ino(), pointer_inode);
+}
+
+#[test]
+fn trusted_older_loader_does_not_block_runtime_synchronization() {
+    let home = isolated_home();
+    let app = patchable_app(&home);
+    let root = home.join(".incodex");
+    let candidate = home.join("older-loader.app");
+    let mut transaction = Engine::begin(&root, &app, "install").unwrap();
+    let install_id = transaction.install_id().to_string();
+    let original = root
+        .join("transactions")
+        .join(&install_id)
+        .join("original/ChatGPT.app");
+    fs::create_dir_all(original.parent().unwrap()).unwrap();
+    ditto(&app, &original).unwrap();
+    transaction.mark_backup_committed().unwrap();
+    ditto(&app, &candidate).unwrap();
+    let older_loader = "module.exports = { legacyLoader: true };\n";
+    let (asar_hash, _) = patch_asar(
+        &candidate.join("Contents/Resources/app.asar"),
+        older_loader,
+        Some(&install_id),
+    )
+    .unwrap();
+    write_asar_integrity(&candidate, &asar_hash).unwrap();
+    sign_app(&candidate).unwrap();
+    transaction.place_staging(&candidate).unwrap();
+    transaction.swap().unwrap();
+    transaction.commit().unwrap();
+    make_legacy_version_runtime_stale(&home);
+
+    let (status, stdout, stderr) =
+        run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
+
+    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
+    assert_eq!(stderr, "");
+    let archive = Archive::open(app.join("Contents/Resources/app.asar")).unwrap();
+    assert_eq!(
+        archive.extract(LOADER_NAME).unwrap(),
+        older_loader.as_bytes()
+    );
+    let current: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join("runtime/current.json")).unwrap()).unwrap();
+    assert_eq!(current["version"], env!("CARGO_PKG_VERSION"));
+    assert!(current["manifestSha256"].is_string());
 }
 
 #[test]
