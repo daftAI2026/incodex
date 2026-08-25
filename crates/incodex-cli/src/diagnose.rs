@@ -20,8 +20,8 @@ use crate::diagnose_signing::{
 };
 
 use crate::diagnose_checks::{
-    empty_checks, scan_journals, scan_owner_processes, scan_sessions, CheckResult, CheckStatus,
-    DiagnosticChecks, DiagnosticFinding, JournalRecord,
+    empty_checks, is_symlink, scan_journals, scan_owner_processes, scan_sessions, CheckResult,
+    CheckStatus, DiagnosticChecks, DiagnosticFinding, JournalRecord,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -102,11 +102,15 @@ pub fn diagnose_with_root_mode(app_path: &Path, root: &Path, mode: DiagnosisMode
     let package = archive
         .as_ref()
         .and_then(|archive| archive.read_package_main().ok());
-    let (external_runtime, runtime_check) = inspect_external_runtime(root);
-    let runtime_version = package
+    let patched = package
         .as_ref()
-        .filter(|package| package.already_patched)
-        .and_then(|_| external_runtime.version.clone());
+        .is_some_and(|package| package.already_patched);
+    let (external_runtime, runtime_check) = inspect_external_runtime(root);
+    let runtime_version = if patched {
+        external_runtime.version.clone()
+    } else {
+        None
+    };
     let (backup, backup_check) = match package
         .as_ref()
         .and_then(|package| package.install_id.as_deref())
@@ -114,10 +118,6 @@ pub fn diagnose_with_root_mode(app_path: &Path, root: &Path, mode: DiagnosisMode
         Some(install_id) => inspect_backup(root, app_path, install_id, runtime_version.as_deref()),
         None => (None, CheckResult::checked(Vec::new())),
     };
-    let patched = package
-        .as_ref()
-        .map(|package| package.already_patched)
-        .unwrap_or(false);
     let official_target = is_official_app(app_path, None);
     let (codesign_ok, signing, spctl, signing_check) = if !exists {
         (
@@ -212,10 +212,7 @@ pub fn diagnose_with_root_mode(app_path: &Path, root: &Path, mode: DiagnosisMode
         target: app_path.display().to_string(),
         target_id: target_id(app_path),
         exists,
-        patched: package
-            .as_ref()
-            .map(|package| package.already_patched)
-            .unwrap_or(false),
+        patched,
         bundle_id: plist
             .as_ref()
             .map(|plist| plist.bundle_identifier.clone())
@@ -594,12 +591,6 @@ fn inspect_backup(
 
 fn error_contains_symlink(error: &str) -> bool {
     error.contains("symlink")
-}
-
-fn is_symlink(path: &Path) -> bool {
-    fs::symlink_metadata(path)
-        .map(|metadata| metadata.file_type().is_symlink())
-        .unwrap_or(false)
 }
 
 fn required_string(raw: &serde_json::Value, key: &str) -> Result<String, String> {

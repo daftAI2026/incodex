@@ -77,23 +77,7 @@ pub fn format_status(report: &Diagnosis) -> String {
 }
 
 pub fn format_diagnosis(report: &Diagnosis) -> String {
-    let runtime = if report.external_runtime.ok {
-        format!(
-            "{} {}",
-            report
-                .external_runtime
-                .version
-                .as_deref()
-                .unwrap_or("unknown"),
-            report.external_runtime.release.as_deref().unwrap_or("")
-        )
-        .trim()
-        .to_string()
-    } else if report.external_runtime.present {
-        "invalid".to_string()
-    } else {
-        "missing".to_string()
-    };
+    let runtime = runtime_description(report);
     let backup = match report.backup.as_ref() {
         Some(backup) if json_bool(backup, "originalExists") && json_bool(backup, "complete") => {
             "ok"

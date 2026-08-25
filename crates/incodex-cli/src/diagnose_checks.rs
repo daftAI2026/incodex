@@ -9,9 +9,10 @@ use serde::Serialize;
 mod diagnose_fs;
 #[path = "diagnose_sessions.rs"]
 mod diagnose_sessions;
+pub(crate) use diagnose_fs::is_symlink;
 use diagnose_fs::{
-    basename, file_name, is_directory, is_symlink, live_process_identity, looks_like_uuid,
-    pid_alive, read_directory,
+    basename, file_name, is_directory, live_process_identity, looks_like_uuid, pid_alive,
+    read_directory,
 };
 pub use diagnose_sessions::scan_sessions;
 
