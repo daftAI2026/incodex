@@ -322,16 +322,7 @@ pub fn read_plist_executable(app: &Path) -> Result<String, String> {
     if !plist.is_file() {
         return Err(format!("Info.plist not found: {}", plist.display()));
     }
-    let output = Command::new("plutil")
-        .args(["-convert", "json", "-o", "-", "--"])
-        .arg(&plist)
-        .output()
-        .map_err(|error| format!("cannot read {}: {error}", plist.display()))?;
-    if !output.status.success() {
-        return Err(format!("Info.plist is invalid: {}", plist.display()));
-    }
-    let raw: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .map_err(|error| format!("Info.plist is not valid JSON: {error}"))?;
+    let raw = read_plist_json_result(&plist)?;
     raw.get("CFBundleExecutable")
         .and_then(serde_json::Value::as_str)
         .map(str::trim)
@@ -374,15 +365,20 @@ pub fn read_asar_integrity(app: &Path) -> Option<String> {
 }
 
 fn read_plist_json(plist: &Path) -> Option<serde_json::Value> {
+    read_plist_json_result(plist).ok()
+}
+
+fn read_plist_json_result(plist: &Path) -> Result<serde_json::Value, String> {
     let output = Command::new("plutil")
         .args(["-convert", "json", "-o", "-", "--"])
         .arg(plist)
         .output()
-        .ok()?;
+        .map_err(|error| format!("cannot read {}: {error}", plist.display()))?;
     if !output.status.success() {
-        return None;
+        return Err(format!("Info.plist is invalid: {}", plist.display()));
     }
-    serde_json::from_slice(&output.stdout).ok()
+    serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("Info.plist is not valid JSON: {error}"))
 }
 
 pub fn diagnose_spctl(app: &Path) -> serde_json::Value {

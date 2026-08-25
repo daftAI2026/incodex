@@ -61,6 +61,12 @@ pub enum SignatureKind {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SigningPolicy {
+    Official,
+    Generic,
+}
+
 impl SignatureKind {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -229,24 +235,7 @@ pub fn verify_app(app: &Path) -> bool {
 
 /// 对 install、uninstall 与 Doctor 共享的签名清单做唯一 verdict 判断。
 pub fn validate_signing_inventory(inventory: &SigningInventory) -> Result<(), String> {
-    if !inventory.deep_strict {
-        return Err("bundle failed deep strict signature verification".into());
-    }
-    match inventory.outer.kind {
-        SignatureKind::Adhoc => {
-            if !inventory.outer.verified {
-                return Err("outer ad-hoc signature verification failed".into());
-            }
-        }
-        SignatureKind::Vendor => validate_vendor_component(&inventory.outer, "outer bundle")?,
-        SignatureKind::Other | SignatureKind::Unknown | SignatureKind::Unsigned => {
-            return Err(format!(
-                "unsupported outer signature identity: {}",
-                inventory.outer.kind.as_str()
-            ));
-        }
-    }
-    validate_nested_components(&inventory.nested)
+    validate_inventory_with_policy(inventory, SigningPolicy::Official)
 }
 
 /// 对官方 original bundle 追加 vendor 身份与 outer bundle identifier 验收。
@@ -275,32 +264,18 @@ pub fn validate_official_signing_inventory(
 
 /// 对自定义 `--app` 的 generic verifier 复用 deep/strict 与 identity evidence policy。
 pub fn validate_generic_signing_inventory(inventory: &SigningInventory) -> Result<(), String> {
+    validate_inventory_with_policy(inventory, SigningPolicy::Generic)
+}
+
+fn validate_inventory_with_policy(
+    inventory: &SigningInventory,
+    policy: SigningPolicy,
+) -> Result<(), String> {
     if !inventory.deep_strict {
         return Err("bundle failed deep strict signature verification".into());
     }
-    match inventory.outer.kind {
-        SignatureKind::Adhoc => {
-            if !inventory.outer.verified {
-                return Err("outer ad-hoc signature verification failed".into());
-            }
-        }
-        SignatureKind::Vendor => validate_vendor_component(&inventory.outer, "outer bundle")?,
-        SignatureKind::Other => {
-            if !has_identity_evidence(&inventory.outer) {
-                return Err("third-party outer signature lacks identity evidence".into());
-            }
-            if !inventory.outer.verified {
-                return Err("third-party outer signature verification failed".into());
-            }
-        }
-        SignatureKind::Unknown | SignatureKind::Unsigned => {
-            return Err(format!(
-                "unsupported outer signature identity: {}",
-                inventory.outer.kind.as_str()
-            ));
-        }
-    }
-    validate_generic_nested_components(&inventory.nested)
+    validate_outer_component(&inventory.outer, policy)?;
+    validate_nested_components_with_policy(&inventory.nested, policy)
 }
 
 /// 供迁移 proof 等只需要 deep/strict 的调用方复用同一验收命令。
@@ -464,23 +439,51 @@ fn inspect_component(path: &Path) -> Result<SignedComponent, String> {
 
 /// 对 generic deep/strict fallback 复用 nested component policy。
 pub fn validate_nested_components(components: &[SignedComponent]) -> Result<(), String> {
-    for component in components {
-        validate_nested_component(component)?;
-    }
-    Ok(())
+    validate_nested_components_with_policy(components, SigningPolicy::Official)
 }
 
 pub fn validate_generic_nested_components(components: &[SignedComponent]) -> Result<(), String> {
-    for component in components {
-        if component.kind != SignatureKind::Other {
-            validate_nested_component(component)?;
-            continue;
+    validate_nested_components_with_policy(components, SigningPolicy::Generic)
+}
+
+fn validate_outer_component(
+    component: &SignedComponent,
+    policy: SigningPolicy,
+) -> Result<(), String> {
+    match component.kind {
+        SignatureKind::Adhoc if component.verified => Ok(()),
+        SignatureKind::Adhoc => Err("outer ad-hoc signature verification failed".into()),
+        SignatureKind::Vendor => validate_vendor_component(component, "outer bundle"),
+        SignatureKind::Other if policy == SigningPolicy::Generic => {
+            if !has_identity_evidence(component) {
+                return Err("third-party outer signature lacks identity evidence".into());
+            }
+            if !component.verified {
+                return Err("third-party outer signature verification failed".into());
+            }
+            Ok(())
         }
-        if !has_identity_evidence(component) || !component.verified {
-            return Err(format!(
-                "third-party nested component lacks identity evidence: {}",
-                component.path.display()
-            ));
+        SignatureKind::Other | SignatureKind::Unknown | SignatureKind::Unsigned => Err(format!(
+            "unsupported outer signature identity: {}",
+            component.kind.as_str()
+        )),
+    }
+}
+
+fn validate_nested_components_with_policy(
+    components: &[SignedComponent],
+    policy: SigningPolicy,
+) -> Result<(), String> {
+    for component in components {
+        if policy == SigningPolicy::Generic && component.kind == SignatureKind::Other {
+            if !has_identity_evidence(component) || !component.verified {
+                return Err(format!(
+                    "third-party nested component lacks identity evidence: {}",
+                    component.path.display()
+                ));
+            }
+        } else {
+            validate_nested_component(component)?;
         }
     }
     Ok(())
