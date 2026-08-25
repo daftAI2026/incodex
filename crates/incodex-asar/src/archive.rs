@@ -183,8 +183,8 @@ fn list_files(files: &Map<String, Value>, prefix: &str, out: &mut Vec<String>) {
         } else {
             format!("{prefix}/{name}")
         };
-        if files_of(node).is_some() {
-            list_files(files_of(node).unwrap(), &path, out);
+        if let Some(children) = files_of(node) {
+            list_files(children, &path, out);
         } else {
             out.push(path);
         }

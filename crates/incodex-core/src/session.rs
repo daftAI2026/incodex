@@ -345,11 +345,9 @@ where
     F: FnMut(i32) -> ProcessProbe,
 {
     let sessions = user_root.join(SESSIONS_NAME);
-    let stats = match lstat_or_null(&sessions) {
-        Some(stats) if stats.is_dir() && !stats.file_type().is_symlink() => stats,
-        _ => return 0,
-    };
-    let _ = stats;
+    if !is_real_directory(&sessions) {
+        return 0;
+    }
     let roots = list_session_roots(&sessions, target_id);
     let mut swept = 0;
     for root in roots {
@@ -443,11 +441,9 @@ fn list_session_roots(sessions: &Path, target_id: Option<&str>) -> Vec<PathBuf> 
         Some(id) => sessions.join(id),
         None => sessions.to_path_buf(),
     };
-    let start_stat = match lstat_or_null(&start) {
-        Some(stats) if stats.is_dir() && !stats.file_type().is_symlink() => stats,
-        _ => return Vec::new(),
-    };
-    let _ = start_stat;
+    if !is_real_directory(&start) {
+        return Vec::new();
+    }
     let mut roots = Vec::new();
     let entries = match fs::read_dir(&start) {
         Ok(entries) => entries,
@@ -457,11 +453,9 @@ fn list_session_roots(sessions: &Path, target_id: Option<&str>) -> Vec<PathBuf> 
         let name = entry.file_name();
         let name = name.to_string_lossy();
         let child = start.join(name.as_ref());
-        let stats = match lstat_or_null(&child) {
-            Some(stats) if stats.is_dir() && !stats.file_type().is_symlink() => stats,
-            _ => continue,
-        };
-        let _ = stats;
+        if !is_real_directory(&child) {
+            continue;
+        }
         if name.starts_with("s-") {
             roots.push(child);
         } else if target_id.is_none() {
@@ -470,13 +464,8 @@ fn list_session_roots(sessions: &Path, target_id: Option<&str>) -> Vec<PathBuf> 
                     let nested_name = nest.file_name();
                     let nested_name = nested_name.to_string_lossy();
                     let nest_path = child.join(nested_name.as_ref());
-                    if let Some(nest_stat) = lstat_or_null(&nest_path) {
-                        if nest_stat.is_dir()
-                            && !nest_stat.file_type().is_symlink()
-                            && nested_name.starts_with("s-")
-                        {
-                            roots.push(nest_path);
-                        }
+                    if is_real_directory(&nest_path) && nested_name.starts_with("s-") {
+                        roots.push(nest_path);
                     }
                 }
             }
@@ -522,19 +511,11 @@ fn exclusive_copy_file(src: &Path, dest: &Path) -> Result<(), String> {
 }
 
 fn write_private_file(dest: &Path, data: &[u8], exclusive: bool) -> Result<(), String> {
-    if let Some(prior) = assert_not_symlink(dest, "file")? {
-        if prior.file_type().is_symlink() {
-            return Err(format!(
-                "refuse to overwrite symlink file: {}",
-                dest.display()
-            ));
-        }
-        if exclusive {
-            return Err(format!(
-                "refuse to overwrite existing file: {}",
-                dest.display()
-            ));
-        }
+    if assert_not_symlink(dest, "file")?.is_some() && exclusive {
+        return Err(format!(
+            "refuse to overwrite existing file: {}",
+            dest.display()
+        ));
     }
     let mut opts = OpenOptions::new();
     opts.write(true)
@@ -630,6 +611,10 @@ fn assert_not_symlink(target: &Path, label: &str) -> Result<Option<fs::Metadata>
 
 fn lstat_or_null(target: &Path) -> Option<fs::Metadata> {
     fs::symlink_metadata(target).ok()
+}
+
+fn is_real_directory(target: &Path) -> bool {
+    lstat_or_null(target).is_some_and(|stats| stats.is_dir() && !stats.file_type().is_symlink())
 }
 
 fn real_existing(target: &Path) -> Result<PathBuf, String> {
