@@ -20,10 +20,25 @@ use incodex_transaction::{
     restore_committed_with_quiescence, validate_backup_snapshot, validate_committed_live_snapshot,
     Engine, QuiescenceGuard, Recovery, TxError,
 };
+use sha2::{Digest, Sha256};
 
 use crate::app_quiescence::AppGuard;
 use crate::parse::ParsedCli;
 use crate::spinner::Progress;
+
+// 仅放行已验证能加载本代 external Runtime 协议的已发布 Loader。
+const COMPATIBLE_HISTORICAL_LOADER_SHA256: &[[u8; 32]] = &[
+    [
+        0x6d, 0x03, 0x7a, 0x91, 0xc1, 0xec, 0x7a, 0x1f, 0xce, 0x92, 0x80, 0xfd, 0xfd, 0xba, 0x78,
+        0x71, 0x6f, 0x99, 0xc6, 0xf9, 0x68, 0x32, 0x26, 0x18, 0x0f, 0x02, 0x4f, 0x2f, 0x9f, 0x97,
+        0x3c, 0x23,
+    ],
+    [
+        0x07, 0x1f, 0x0b, 0xf5, 0x52, 0xb1, 0x28, 0x9e, 0xec, 0x93, 0x25, 0x0e, 0x23, 0xdc, 0x11,
+        0x62, 0x22, 0x52, 0x54, 0xb8, 0xd1, 0xd2, 0xd5, 0x8d, 0xe6, 0xc7, 0x5c, 0xb9, 0x60, 0xcb,
+        0x0f, 0x52,
+    ],
+];
 
 #[cfg(test)]
 fn close_official_app_with<P, Q, C>(
@@ -616,7 +631,8 @@ fn inspect_existing_install(
     let Ok(archive) = Archive::open(asar) else {
         return Ok(None);
     };
-    let has_loader = archive.extract(LOADER_NAME).is_ok();
+    let loader = archive.extract(LOADER_NAME).ok();
+    let has_loader = loader.is_some();
     let package = match archive.read_package_main() {
         Ok(package) => package,
         Err(_) if has_loader => return Err(unbound_patch_error()),
@@ -625,12 +641,22 @@ fn inspect_existing_install(
     if !has_loader && !package.already_patched && package.install_id.is_none() {
         return Ok(None);
     }
-    // The committed transaction seals the complete live tree, so it is the
-    // compatibility authority. Requiring today's loader bytes here would
-    // reject a valid older install before its external Runtime can self-heal.
-    installed_install_id(app, root, &archive)
-        .map(Some)
-        .ok_or_else(unbound_patch_error)
+    let install_id = installed_install_id(app, root, &archive).ok_or_else(unbound_patch_error)?;
+    if loader
+        .as_deref()
+        .is_some_and(|bytes| !loader_is_compatible(bytes))
+    {
+        return Err(
+            "live app contains an Incodex loader that is not compatible with this CLI; refusing to synchronize Runtime"
+                .into(),
+        );
+    }
+    Ok(Some(install_id))
+}
+
+fn loader_is_compatible(loader: &[u8]) -> bool {
+    let digest: [u8; 32] = Sha256::digest(loader).into();
+    loader == loader_source().as_bytes() || COMPATIBLE_HISTORICAL_LOADER_SHA256.contains(&digest)
 }
 
 fn unbound_patch_error() -> String {
