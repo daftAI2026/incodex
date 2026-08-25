@@ -17,8 +17,9 @@ function read(root: string, path: string): string {
 }
 
 function replaceRequired(source: string, pattern: RegExp, replacement: string, label: string): string {
-  if (!pattern.test(source)) throw new Error(`cannot find ${label}`);
-  pattern.lastIndex = 0;
+  if (source.search(pattern) < 0) {
+    throw new Error(`cannot find ${label}`);
+  }
   return source.replace(pattern, replacement);
 }
 
@@ -64,9 +65,8 @@ export function prepareRelease(root: string, version: string): void {
   const packageJson = JSON.parse(read(root, "package.json")) as Record<string, unknown>;
   packageJson.version = version;
 
-  let cargo = read(root, "Cargo.toml");
-  cargo = replaceRequired(
-    cargo,
+  const cargo = replaceRequired(
+    read(root, "Cargo.toml"),
     /(\[workspace\.package\][\s\S]*?\nversion = ")[^"]+("[\s\S]*)/,
     `$1${version}$2`,
     "Cargo workspace version",
@@ -94,10 +94,12 @@ export function prepareRelease(root: string, version: string): void {
     ["README_CN.md", updateReadme(read(root, "README_CN.md"), version, "README_CN.md")],
   ]);
 
-  for (const [path, content] of changes) writeFileSync(join(root, path), content);
+  for (const [path, content] of changes) {
+    writeFileSync(join(root, path), content);
+  }
 }
 
-if (import.meta.main) {
+function main(): void {
   const [version, ...extra] = process.argv.slice(2);
   if (!version || extra.length > 0) {
     process.stderr.write("usage: bun run release:prepare -- X.Y.Z\n");
@@ -106,4 +108,8 @@ if (import.meta.main) {
   const root = join(dirname(fileURLToPath(import.meta.url)), "..");
   prepareRelease(root, version);
   process.stdout.write(`Prepared Incodex v${version}. Review and commit the changes before tagging.\n`);
+}
+
+if (import.meta.main) {
+  main();
 }

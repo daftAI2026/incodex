@@ -1,8 +1,4 @@
 #!/bin/bash
-# [INPUT]: 依赖 macOS 的 zip/unzip/open/osascript 与用户显式的 Raycast/Alfred 导入操作
-# [OUTPUT]: 生成一个运行时解析 incodex/inc 的 runner.sh、三个 Raycast 薄 wrapper；仅在检测到 Alfred 时生成标准导入包
-# [POS]: scripts 的可选 Quick Launchers 安装器；只管理 Incodex 生成文件，不修改 provider 私有配置
-# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 set -euo pipefail
 GENERATED_MARKER="incodex-quick-launchers generated"
 ROOT="${INCODEX_QUICK_LAUNCHERS_ROOT:-$HOME/.incodex/quick-launchers}"
