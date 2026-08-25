@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { blobatarUri } from "blobatar/uri";
-import { iconFor } from "./incognito-icon.ts";
 
 const inject = readFileSync(join(import.meta.dir, "inject.ts"), "utf8");
 const profileMask = readFileSync(join(import.meta.dir, "incognito-profile-mask.ts"), "utf8");
@@ -46,9 +45,9 @@ describe("incognito button exit affordance", () => {
   });
 
   test("shows circle-x only while an incognito button is hovered", () => {
-    expect(iconFor({ incognito: true, hovered: false })).toBe("hat-glasses");
-    expect(iconFor({ incognito: true, hovered: true })).toBe("circle-x");
-    expect(iconFor({ incognito: false, hovered: true })).toBe("hat-glasses");
+    expect(inject).toMatch(
+      /isIncognitoWindow\(\)\s*&&\s*btn\.getAttribute\("data-incodex-hovered"\) === "true"\s*\? "circle-x"\s*:\s*"hat-glasses"/,
+    );
   });
 
   test("routes pointer enter and leave through icon switching without changing click semantics", () => {
@@ -62,6 +61,14 @@ describe("incognito button exit affordance", () => {
     expect(clickHandler).toContain("event.preventDefault()");
     expect(clickHandler).toContain("event.stopImmediatePropagation()");
     expect(clickHandler).toContain("void activate()");
+  });
+});
+
+describe("incognito banner placement", () => {
+  test("uses the one official banner slot without a second mount model", () => {
+    expect(inject).toContain("const slot = findOfficialBannerSlot()");
+    expect(inject).toContain("slot.insertBefore(host, slot.firstChild)");
+    expect(inject).not.toContain("findLandingMount");
   });
 });
 

@@ -52,31 +52,24 @@ const emitted = spawnSync(join(root, "node_modules/typescript/bin/tsc"), ["-p", 
 if (emitted.status !== 0) process.exit(emitted.status ?? 1);
 
 const emitDir = join(root, ".runtime-cjs");
-const copies: Array<[string, string]> = [];
-const cjsOutputPaths: string[] = [];
-for (const name of RUNTIME_ARTIFACT_NAMES) {
-  if (!name.endsWith(".cjs")) continue;
+const cjsNames = RUNTIME_ARTIFACT_NAMES.filter((name) => name.endsWith(".cjs"));
+for (const name of cjsNames) {
   const outputPath = join(outDir, name);
-  copies.push([join(emitDir, name), outputPath]);
-  cjsOutputPaths.push(outputPath);
-}
-for (const [from, to] of copies) {
-  const text = readFileSync(from, "utf8").replace(
+  const text = readFileSync(join(emitDir, name), "utf8").replace(
     /require\("\.\/(incodex-[a-z-]+)\.cts"\)/g,
     'require("./$1.cjs")',
   );
-  writeFileSync(to, text);
+  writeFileSync(outputPath, text);
 }
-assertPortableCjs(cjsOutputPaths);
+assertPortableCjs(cjsNames.map((name) => join(outDir, name)));
 
-const artifactPaths: string[] = [];
-for (const name of RUNTIME_ARTIFACT_NAMES) {
-  artifactPaths.push(join(outDir, name));
-}
-const files: Record<string, string> = {};
-for (const file of artifactPaths) {
-  files[file.slice(outDir.length + 1)] = createHash("sha256").update(readFileSync(file)).digest("hex");
-}
+const artifactPaths = RUNTIME_ARTIFACT_NAMES.map((name) => join(outDir, name));
+const files = Object.fromEntries(
+  artifactPaths.map((file) => [
+    file.slice(outDir.length + 1),
+    createHash("sha256").update(readFileSync(file)).digest("hex"),
+  ]),
+);
 writeRuntimeManifest(outDir, {
   runtimeVersion: packageVersion(),
   sourceCommit: process.env.SOURCE_COMMIT || "",

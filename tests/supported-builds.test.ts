@@ -18,9 +18,11 @@ describe("Codex builds are not an allowlist", () => {
     expect(src("crates/incodex-cli/src/install.rs")).not.toContain("findSupportedBuild");
   });
 
-  test("the default adapter is not named after one observed build", () => {
-    expect(src("src/runtime/compatibility/default-adapter.ts")).not.toMatch(/26\.810\.52044|6662/);
-    expect(src("src/runtime/compatibility/registry.ts")).not.toMatch(/26\.810\.52044|6662/);
+  test("the renderer policy has no adapter registry or observed-build implementation", () => {
+    expect(existsSync(join(root, "src/runtime/compatibility/default-adapter.ts"))).toBe(false);
+    expect(existsSync(join(root, "src/runtime/compatibility/registry.ts"))).toBe(false);
+    expect(existsSync(join(root, "src/runtime/compatibility/types.ts"))).toBe(false);
     expect(existsSync(join(root, "src/runtime/compatibility/build-26.810.52044.ts"))).toBe(false);
+    expect(src("src/runtime/compatibility/search-labels.ts")).not.toMatch(/26\.810\.52044|6662/);
   });
 });

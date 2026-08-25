@@ -17,7 +17,15 @@ describe("locale fallback", () => {
   });
 
   test("language-only tags pick a regional default when needed", () => {
-    expect(resolveLocale("pt")).toMatch(/^pt/);
+    expect(resolveLocale("de")).toBe("de-DE");
+    expect(resolveLocale("es")).toBe("es-419");
+    expect(resolveLocale("fr")).toBe("fr-FR");
+    expect(resolveLocale("no")).toBe("nb-NO");
+    expect(resolveLocale("pt")).toBe("pt-BR");
     expect(resolveLocale("en-GB")).toBe("en");
+  });
+
+  test("regional locales keep the intentionally tight English body fallback", () => {
+    expect(translate("fr-FR", "body")).toBe(translate("en", "body"));
   });
 });

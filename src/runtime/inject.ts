@@ -1,8 +1,6 @@
-import { STRIP_CLONE_ATTRS } from "./compatibility/default-adapter.ts";
 import { isSearchLabel } from "./compatibility/search-labels.ts";
 import { deriveUiProbe } from "./incodex-ui-probe.ts";
 import { resolveLocale as matchLocale, translate, type CopyKey } from "./incognito-copy.ts";
-import { iconFor, type IncognitoButtonIcon } from "./incognito-icon.ts";
 import {
   ensureProfileMask,
   profileMaskHealth,
@@ -22,6 +20,7 @@ const TOOLTIP_FALLBACK_DELAY_MS = 700;
 const TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
 
 type IncognitoAction = "open" | "quit";
+type IncognitoButtonIcon = "hat-glasses" | "circle-x";
 
 type IncognitoActionResponse = {
   code?: string;
@@ -29,6 +28,22 @@ type IncognitoActionResponse = {
   reason?: string;
   requestId?: string;
 };
+
+const STRIP_CLONE_ATTRS = [
+  "id",
+  "name",
+  "aria-haspopup",
+  "aria-expanded",
+  "aria-controls",
+  "aria-describedby",
+  "aria-labelledby",
+  "data-state",
+  "data-testid",
+  "data-test-id",
+  "disabled",
+  "title",
+  "tabindex",
+];
 
 let activeTooltipLifecycle: TooltipLifecycle | null = null;
 
@@ -62,13 +77,6 @@ function labelFor(on: boolean): string {
   return on ? t("exit") : t("open");
 }
 
-function buttonIcon(btn: HTMLElement): IncognitoButtonIcon {
-  return iconFor({
-    incognito: isIncognitoWindow(),
-    hovered: btn.getAttribute("data-incodex-hovered") === "true",
-  });
-}
-
 function createButtonIcon(source: string, name: IncognitoButtonIcon, sample: SVGElement | null): SVGElement | null {
   const wrap = document.createElement("span");
   wrap.innerHTML = source.trim();
@@ -83,7 +91,10 @@ function createButtonIcon(source: string, name: IncognitoButtonIcon, sample: SVG
 }
 
 function setButtonIcon(btn: HTMLElement): void {
-  const name = buttonIcon(btn);
+  const name: IncognitoButtonIcon =
+    isIncognitoWindow() && btn.getAttribute("data-incodex-hovered") === "true"
+      ? "circle-x"
+      : "hat-glasses";
   const current = btn.querySelector<SVGElement>("svg[data-incodex-icon]");
   if (current?.getAttribute("data-incodex-icon") === name) return;
   const source = name === "circle-x" ? EXIT_ICON_SVG : ICON_SVG;
@@ -429,16 +440,9 @@ function findOfficialBannerSlot(): HTMLElement | null {
   );
 }
 
-function findLandingMount(): { parent: HTMLElement; before: Node | null } | null {
-  const slot = findOfficialBannerSlot();
-  if (slot) return { parent: slot, before: slot.firstChild };
-  return null;
-}
-
 function buildLanding(): HTMLElement {
   const host = document.createElement("div");
   host.setAttribute(BANNER_HOST_ATTR, "true");
-  host.className = "home-banners flex w-full min-w-0 flex-col gap-2 pt-2";
 
   const card = document.createElement("aside");
   card.setAttribute(LANDING_ATTR, "true");
@@ -525,23 +529,14 @@ function ensureLanding(): void {
     return;
   }
 
-  const mount = findLandingMount();
-  if (!mount) return;
+  const slot = findOfficialBannerSlot();
+  if (!slot) return;
 
   let host = document.querySelector<HTMLElement>(`[${BANNER_HOST_ATTR}]`);
   if (!host) host = buildLanding();
   syncLandingCopy(host);
-
-  const officialSlot = findOfficialBannerSlot();
-  if (officialSlot) {
-    host.className = "";
-    if (officialSlot.firstElementChild !== host) officialSlot.insertBefore(host, officialSlot.firstChild);
-    return;
-  }
-  if (mount.before === host) return;
-  if (host.parentElement === mount.parent && host.nextSibling === mount.before) return;
-  host.className = "home-banners flex w-full min-w-0 flex-col gap-2 pt-2";
-  mount.parent.insertBefore(host, mount.before);
+  host.className = "";
+  if (slot.firstElementChild !== host) slot.insertBefore(host, slot.firstChild);
 }
 
 function ensureButton(): void {

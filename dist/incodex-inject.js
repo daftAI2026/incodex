@@ -45,23 +45,6 @@ function isSearchLabel(label) {
   return lower === "search" || lower.startsWith("search ");
 }
 
-// src/runtime/compatibility/default-adapter.ts
-var STRIP_CLONE_ATTRS = [
-  "id",
-  "name",
-  "aria-haspopup",
-  "aria-expanded",
-  "aria-controls",
-  "aria-describedby",
-  "aria-labelledby",
-  "data-state",
-  "data-testid",
-  "data-test-id",
-  "disabled",
-  "title",
-  "tabindex"
-];
-
 // src/runtime/incodex-ui-probe.ts
 function deriveUiProbe(input) {
   const button = input.buttonPresent ? "present" : "missing";
@@ -808,57 +791,11 @@ var COPY2 = {
   ...COPY,
   ...CORE_COPY
 };
-var DEFAULT_BY_LANGUAGE = {
-  bg: "bg-BG",
-  bn: "bn-BD",
-  bs: "bs-BA",
-  ca: "ca-ES",
-  cs: "cs-CZ",
-  da: "da-DK",
-  de: "de-DE",
-  el: "el-GR",
+var LANGUAGE_DEFAULT_OVERRIDES = {
   es: "es-419",
-  et: "et-EE",
-  fi: "fi-FI",
   fr: "fr-FR",
-  gu: "gu-IN",
-  hi: "hi-IN",
-  hr: "hr-HR",
-  hu: "hu-HU",
-  hy: "hy-AM",
-  id: "id-ID",
-  is: "is-IS",
-  it: "it-IT",
-  ja: "ja-JP",
-  ka: "ka-GE",
-  kn: "kn-IN",
-  ko: "ko-KR",
-  lv: "lv-LV",
-  mk: "mk-MK",
-  mr: "mr-IN",
-  ms: "ms-MY",
-  my: "my-MM",
-  nb: "nb-NO",
   no: "nb-NO",
-  nl: "nl-NL",
-  pl: "pl-PL",
-  pt: "pt-BR",
-  ro: "ro-RO",
-  ru: "ru-RU",
-  sk: "sk-SK",
-  sl: "sl-SI",
-  so: "so-SO",
-  sq: "sq-AL",
-  sr: "sr-RS",
-  sv: "sv-SE",
-  sw: "sw-TZ",
-  ta: "ta-IN",
-  te: "te-IN",
-  th: "th-TH",
-  tr: "tr-TR",
-  uk: "uk-UA",
-  vi: "vi-VN",
-  zh: "zh-CN"
+  pt: "pt-BR"
 };
 function resolveLocale(raw) {
   const normalized = raw.trim().replaceAll("_", "-");
@@ -881,28 +818,18 @@ function resolveLocale(raw) {
   const language = lower.split("-")[0] ?? "en";
   if (COPY2[language])
     return language;
-  if (DEFAULT_BY_LANGUAGE[language] && COPY2[DEFAULT_BY_LANGUAGE[language]]) {
-    return DEFAULT_BY_LANGUAGE[language];
+  const defaultOverride = LANGUAGE_DEFAULT_OVERRIDES[language];
+  if (defaultOverride) {
+    return defaultOverride;
   }
   const regional = Object.keys(COPY2).find((key) => key.toLowerCase().startsWith(`${language}-`));
   return regional ?? "en";
 }
-var TIGHT_BODY = {
-  en: "Same account and settings as usual, without earlier chats. This conversation will not show up in your everyday chat list. Temporary data is removed after a normal exit.",
-  "zh-CN": "账号和设置跟平时一样，看不到以前的对话，这次的聊天也不会进平时的列表。正常关掉后，这次的临时数据会清掉。",
-  "zh-TW": "帳號和設定跟平時一樣，看不到以前的對話，這次的聊天也不會進平時的列表。正常關掉後，這次的臨時資料會清掉。",
-  "zh-HK": "帳戶和設定跟平時一樣，看不到以前的對話，這次的聊天也不會進平時的列表。正常關掉後，這次的臨時資料會清掉。"
-};
 function translate(locale, key) {
   const resolved = resolveLocale(locale);
   if (key === "body")
-    return TIGHT_BODY[resolved] ?? TIGHT_BODY.en;
+    return CORE_COPY[resolved]?.body ?? CORE_COPY.en.body;
   return COPY2[resolved]?.[key] ?? COPY2.en[key];
-}
-
-// src/runtime/incognito-icon.ts
-function iconFor(input) {
-  return input.incognito && input.hovered ? "circle-x" : "hat-glasses";
 }
 
 // node_modules/blobatar/dist/uri.js
@@ -1494,6 +1421,21 @@ var ERROR_ATTR = "data-incodex-launch-error";
 var SHORTCUT_LABEL = "⇧⌘N";
 var TOOLTIP_FALLBACK_DELAY_MS = 700;
 var TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
+var STRIP_CLONE_ATTRS = [
+  "id",
+  "name",
+  "aria-haspopup",
+  "aria-expanded",
+  "aria-controls",
+  "aria-describedby",
+  "aria-labelledby",
+  "data-state",
+  "data-testid",
+  "data-test-id",
+  "disabled",
+  "title",
+  "tabindex"
+];
 var activeTooltipLifecycle = null;
 function dismissActiveTooltip() {
   activeTooltipLifecycle?.dismiss();
@@ -1529,12 +1471,6 @@ function t(key) {
 function labelFor(on) {
   return on ? t("exit") : t("open");
 }
-function buttonIcon(btn) {
-  return iconFor({
-    incognito: isIncognitoWindow(),
-    hovered: btn.getAttribute("data-incodex-hovered") === "true"
-  });
-}
 function createButtonIcon(source, name, sample) {
   const wrap = document.createElement("span");
   wrap.innerHTML = source.trim();
@@ -1549,7 +1485,7 @@ function createButtonIcon(source, name, sample) {
   return svg;
 }
 function setButtonIcon(btn) {
-  const name = buttonIcon(btn);
+  const name = isIncognitoWindow() && btn.getAttribute("data-incodex-hovered") === "true" ? "circle-x" : "hat-glasses";
   const current = btn.querySelector("svg[data-incodex-icon]");
   if (current?.getAttribute("data-incodex-icon") === name)
     return;
@@ -1845,16 +1781,9 @@ function findOfficialBannerSlot() {
     return classNameOf(el).split(/\s+/).includes("home-banners");
   }) ?? null;
 }
-function findLandingMount() {
-  const slot = findOfficialBannerSlot();
-  if (slot)
-    return { parent: slot, before: slot.firstChild };
-  return null;
-}
 function buildLanding() {
   const host = document.createElement("div");
   host.setAttribute(BANNER_HOST_ATTR, "true");
-  host.className = "home-banners flex w-full min-w-0 flex-col gap-2 pt-2";
   const card = document.createElement("aside");
   card.setAttribute(LANDING_ATTR, "true");
   card.setAttribute("aria-live", "polite");
@@ -1926,26 +1855,16 @@ function ensureLanding() {
     removeLanding();
     return;
   }
-  const mount = findLandingMount();
-  if (!mount)
+  const slot = findOfficialBannerSlot();
+  if (!slot)
     return;
   let host = document.querySelector(`[${BANNER_HOST_ATTR}]`);
   if (!host)
     host = buildLanding();
   syncLandingCopy(host);
-  const officialSlot = findOfficialBannerSlot();
-  if (officialSlot) {
-    host.className = "";
-    if (officialSlot.firstElementChild !== host)
-      officialSlot.insertBefore(host, officialSlot.firstChild);
-    return;
-  }
-  if (mount.before === host)
-    return;
-  if (host.parentElement === mount.parent && host.nextSibling === mount.before)
-    return;
-  host.className = "home-banners flex w-full min-w-0 flex-col gap-2 pt-2";
-  mount.parent.insertBefore(host, mount.before);
+  host.className = "";
+  if (slot.firstElementChild !== host)
+    slot.insertBefore(host, slot.firstChild);
 }
 function ensureButton() {
   let btn = document.querySelector(`[${BTN_ATTR}]`);
