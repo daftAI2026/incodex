@@ -281,6 +281,10 @@ fn install_dry_run_app_prints_plan_and_does_not_mutate() {
     assert_eq!(stderr, "");
     assert!(stdout.contains("➤ Install"));
     assert!(stdout.contains(&format!("  App          {}", app.display())));
+    assert!(
+        stdout.contains("  Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app")
+    );
+    assert!(!stdout.contains("~/.incodex/installations/"));
     assert!(stdout.contains("  ! Dry run. No files changed."));
     assert_eq!(install_mutations(&home), Vec::<String>::new());
     assert_eq!(

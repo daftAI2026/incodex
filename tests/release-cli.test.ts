@@ -5,6 +5,9 @@ import { join } from "node:path";
 const root = join(import.meta.dir, "..");
 const releaseYml = readFileSync(join(root, ".github/workflows/release.yml"), "utf8");
 const releaseFlow = readFileSync(join(root, ".claude/skills/release-flow/SKILL.md"), "utf8");
+const readmes = ["README.md", "README_CN.md"].map((path) =>
+  readFileSync(join(root, path), "utf8"),
+);
 const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
   scripts?: Record<string, string>;
 };
@@ -204,5 +207,27 @@ describe("release CLI artifacts", () => {
     expect(releaseFlow).toContain("README.md");
     expect(releaseFlow).toContain("README_CN.md");
     expect(releaseFlow).toMatch(/before pushing the tag/i);
+  });
+});
+
+describe("release documentation truth", () => {
+  test("documents the native transaction backup and Runtime diagnostics", () => {
+    for (const readme of readmes) {
+      expect(readme).toContain(
+        "~/.incodex/transactions/<install-id>/original/ChatGPT.app",
+      );
+      expect(readme).not.toContain("~/.incodex/installations/");
+      expect(readme).toContain("CLI Runtime");
+      expect(readme).toContain("CLI manifest");
+      expect(readme).toContain("Deployed manifest");
+      expect(readme).toContain("Runtime state current");
+    }
+  });
+
+  test("documents recover as an explicit transaction exception", () => {
+    expect(readmes[0]).toContain("`recover` is the explicit transaction-recovery exception");
+    expect(readmes[0]).toContain("does not accept `--dry-run`");
+    expect(readmes[1]).toContain("`recover` 是显式事务恢复例外");
+    expect(readmes[1]).toContain("不接受 `--dry-run`");
   });
 });
