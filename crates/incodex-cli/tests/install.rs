@@ -1,6 +1,6 @@
 use std::ffi::OsString;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -11,8 +11,12 @@ use sha2::{Digest, Sha256};
 
 #[path = "install/recovery.rs"]
 mod recovery;
+#[path = "support/mod.rs"]
+mod support;
 #[path = "install/transaction_evidence.rs"]
 mod transaction_evidence;
+
+use support::runtime::make_legacy_version_runtime_stale;
 
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_incodex")
@@ -346,6 +350,45 @@ fn clone_dry_run_does_not_create_scratch() {
     assert!(stdout.contains("➤ Clone install"));
     assert!(stdout.contains("  ! Dry run. No files changed."));
     assert!(!home.join(".incodex").join("scratch").exists());
+}
+
+#[test]
+fn install_synchronizes_stale_runtime_while_patching_the_app() {
+    let home = isolated_home();
+    let app = patchable_app(&home);
+    make_legacy_version_runtime_stale(&home);
+
+    let (status, stdout, stderr) =
+        run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
+    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
+    assert_eq!(stderr, "");
+
+    let current: serde_json::Value =
+        serde_json::from_slice(&fs::read(home.join(".incodex/runtime/current.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        current["version"],
+        incodex_runtime_bundle::runtime_version()
+    );
+    assert!(current["manifestSha256"].is_string());
+    assert!(stdout.contains("Runtime"));
+}
+
+#[test]
+fn install_reuses_a_matching_runtime_pointer_without_rewriting_it() {
+    let home = isolated_home();
+    let app = patchable_app(&home);
+    let root = home.join(".incodex");
+    incodex_runtime_bundle::publish(&root).unwrap();
+    let current = root.join("runtime/current.json");
+    let pointer_inode = fs::metadata(&current).unwrap().ino();
+
+    let (status, stdout, stderr) =
+        run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
+
+    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
+    assert_eq!(stderr, "");
+    assert_eq!(fs::metadata(current).unwrap().ino(), pointer_inode);
 }
 
 #[test]

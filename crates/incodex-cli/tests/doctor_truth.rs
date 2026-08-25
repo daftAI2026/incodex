@@ -1,5 +1,5 @@
 use std::fs;
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
 use incodex_asar::{pack_dir, MARKER_KEY};
 use incodex_macos::ditto;
@@ -24,6 +24,10 @@ use committed_install_support::committed_install;
 fn doctor_missing_app_prints_labeled_sections() {
     let home = isolated_home();
     let app = home.join("Missing.app");
+    let runtime_manifest = Sha256::digest(include_bytes!("../../../dist/runtime-manifest.json"))
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
     let (status, stdout, stderr) = run(&["doctor", "--app", app.to_str().unwrap()], &home);
     assert_eq!(status, 0);
     assert_eq!(stderr, "");
@@ -43,6 +47,10 @@ fn doctor_missing_app_prints_labeled_sections() {
   Version      unknown
   External     missing
   External check checked
+  CLI Runtime  {runtime_version}
+  CLI manifest {runtime_manifest}
+  Deployed manifest not published
+  Runtime state missing
   ! missing current.json
   Loader       unknown
   Main         unknown
@@ -65,7 +73,9 @@ fn doctor_missing_app_prints_labeled_sections() {
   ! signing.not-checked: the application does not exist, so nested signing was not inspected
 
 ",
-            app = app.display()
+            app = app.display(),
+            runtime_version = env!("CARGO_PKG_VERSION"),
+            runtime_manifest = runtime_manifest,
         )
     );
 }
@@ -165,6 +175,19 @@ fn doctor_rejects_runtime_manifest_missing_required_artifacts() {
         .to_string(),
     )
     .expect("runtime manifest");
+    for path in [
+        home.join(".incodex/runtime"),
+        home.join(".incodex/runtime/releases"),
+        release.clone(),
+    ] {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    for path in [
+        release.join("incodex-main.cjs"),
+        home.join(".incodex/runtime/current.json"),
+    ] {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
 
     let app = home.join("Missing.app");
     for command in ["status", "doctor"] {
@@ -316,6 +339,28 @@ fn doctor_json_classifies_owner_orphans_and_runtime_residue() {
         .to_string(),
     )
     .unwrap();
+    for path in [
+        root.join("runtime"),
+        root.join("runtime/releases"),
+        release.clone(),
+    ] {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    fs::set_permissions(
+        root.join("runtime/current.json"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    for name in incodex_runtime_bundle::required_runtime_files() {
+        let path = release.join(name);
+        if !fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+        {
+            fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+    }
 
     let (_status, stdout, stderr) =
         run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);

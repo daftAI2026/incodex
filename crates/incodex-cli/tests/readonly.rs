@@ -193,7 +193,11 @@ fn status_missing_app_warns_and_does_not_write_incodex() {
     assert_eq!(stderr, "");
     assert_eq!(
         stdout,
-        format!("➤ Status\n  ! Codex app not found: {}\n\n", app.display())
+        format!(
+            "➤ Status\n  ! Codex app not found: {}\n  CLI Runtime  {}\n  Runtime state missing\n\n",
+            app.display(),
+            env!("CARGO_PKG_VERSION")
+        )
     );
     assert!(!home.join(".incodex").exists());
 }

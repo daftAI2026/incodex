@@ -43,6 +43,32 @@ pub(super) fn fake_app(root: &Path) -> PathBuf {
     app
 }
 
+#[test]
+fn native_open_plan_claims_native_cleanup_ownership() {
+    let root = temp_root();
+    let app = fake_app(&root);
+    let user = root.join("home");
+    let source = root.join("codex");
+    fs::create_dir_all(&source).unwrap();
+
+    let plan = prepare_incognito_open(&app, &user, &source, 1).unwrap();
+    assert!(plan
+        .env
+        .iter()
+        .any(|(key, value)| key == "INCODEX_CLEANUP_OWNER" && value == "native"));
+    burn_session_home(
+        &plan.session_root,
+        &BurnExpected {
+            user_root: &user,
+            session_id: Some(&plan.session_id),
+            ino: Some(plan.session_ino),
+            dev: Some(plan.session_dev),
+        },
+    )
+    .unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
 fn write_cdp_http(stream: &mut TcpStream, value: &serde_json::Value) {
     let body = value.to_string();
     let response = format!(

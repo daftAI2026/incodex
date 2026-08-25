@@ -5,6 +5,11 @@ use std::process::{Child, Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[path = "support/mod.rs"]
+mod support;
+
+use support::runtime::make_legacy_version_runtime_stale;
+
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_incodex")
 }
@@ -178,6 +183,46 @@ fn open_dry_run_does_not_create_a_session_or_touch_asar() {
         "do-not-touch\n"
     );
     assert!(!app.join("Contents/Resources/app.asar").exists());
+}
+
+#[test]
+fn open_synchronizes_stale_runtime_before_spawning_the_child() {
+    let home = isolated_home();
+    let app = fake_app(
+        &home,
+        "#!/bin/sh\ncat \"$HOME/.incodex/runtime/current.json\" > \"$INCODEX_SOURCE_HOME/runtime-at-spawn.json\"\nexit 0\n",
+    );
+    let source = home.join(".codex");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("auth.json"), "{}\n").unwrap();
+    fs::write(source.join("config.toml"), "model = \"test\"\n").unwrap();
+    make_legacy_version_runtime_stale(&home);
+
+    let (status, stdout, stderr) = run(&["open", "--app", app.to_str().unwrap()], &home);
+    let observed =
+        fs::read_to_string(source.join("runtime-at-spawn.json")).unwrap_or_else(|error| {
+            panic!("child did not observe Runtime sync: {error}; {stdout}; {stderr}")
+        });
+    let current: serde_json::Value = serde_json::from_slice(observed.as_bytes()).unwrap();
+    assert_eq!(
+        current["version"],
+        incodex_runtime_bundle::runtime_version()
+    );
+    assert!(current["manifestSha256"].is_string());
+    assert_eq!(
+        status, 3,
+        "fake child exits before UI injection, but Runtime sync must happen first: {stderr}"
+    );
+    assert!(
+        stdout.contains("Closed. Isolated session removed."),
+        "{stdout}"
+    );
+    assert!(
+        incodex_paths(&home)
+            .iter()
+            .all(|path| !path.contains("codex-home") && !path.contains("chromium")),
+        "open must burn the temporary session"
+    );
 }
 
 #[test]
