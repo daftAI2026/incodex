@@ -35,5 +35,6 @@ export const ADAPTER: UiAdapter = {
   },
 };
 
-export const probeUi = (root: ParentNode) => ADAPTER.probeUi(root);
-
+export function probeUi(root: ParentNode): { search: boolean; banners: boolean } {
+  return ADAPTER.probeUi(root);
+}

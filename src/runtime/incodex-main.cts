@@ -61,7 +61,8 @@ const childOwnerSnapshot = captureChildOwnerSnapshot();
 function sessionFromEnv() {
   const home = process.env.CODEX_HOME;
   const sessionId = process.env.INCODEX_SESSION_ID;
-  const root = process.env.INCODEX_SESSION_ROOT || (home ? safeHome.sessionRootFromHome(home) : "");
+  let root = process.env.INCODEX_SESSION_ROOT || "";
+  if (!root && home) root = safeHome.sessionRootFromHome(home);
   if (!home || !sessionId) return null;
   const ino = Number(process.env.INCODEX_SESSION_INO);
   const dev = Number(process.env.INCODEX_SESSION_DEV);
@@ -71,6 +72,15 @@ function sessionFromEnv() {
     root,
     ino: Number.isSafeInteger(ino) ? ino : null,
     dev: Number.isSafeInteger(dev) ? dev : null,
+  };
+}
+
+function sessionIdentity(session, userRoot) {
+  return {
+    userRoot,
+    sessionId: session.sessionId,
+    ino: session.ino,
+    dev: session.dev,
   };
 }
 
@@ -107,12 +117,7 @@ function burnIncognitoSession(session, ownerSnapshot, userRoot = USER_ROOT) {
   ) {
     return false;
   }
-  const expected = {
-    userRoot,
-    sessionId: session.sessionId,
-    ino: session.ino,
-    dev: session.dev,
-  };
+  const expected = sessionIdentity(session, userRoot);
   const removed = safeHome.burnSessionHomeWithOwner(session.root, expected, ownerSnapshot);
   if (removed && !safeHome.writeBurnProof(session.root, expected)) {
     logLaunch("burn-proof-write-failed", { home: session.root });
@@ -241,11 +246,26 @@ function mainWindows(electron) {
 function hideAuxiliaryWindows(electron) {
   for (const win of electron.BrowserWindow.getAllWindows()) {
     if (!isAuxiliaryWindow(win)) continue;
-    try {
-      win.hide();
-    } catch {
-      /* ignore */
-    }
+    hideWindow(win);
+  }
+}
+
+function hideWindow(win) {
+  try {
+    win.hide();
+  } catch {
+    /* ignore */
+  }
+}
+
+function raiseWindow(win) {
+  try {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    if (typeof win.moveTop === "function") win.moveTop();
+  } catch {
+    /* ignore */
   }
 }
 
@@ -263,16 +283,7 @@ function raiseOurWindows() {
   } catch {
     /* ignore */
   }
-  for (const win of mainWindows(electron)) {
-    try {
-      if (win.isMinimized()) win.restore();
-      win.show();
-      win.focus();
-      if (typeof win.moveTop === "function") win.moveTop();
-    } catch {
-      /* ignore */
-    }
-  }
+  for (const win of mainWindows(electron)) raiseWindow(win);
   raisePid(process.pid);
 }
 
@@ -403,12 +414,7 @@ function prepareIncognitoSession(options = {}) {
   } catch (error) {
     if (session) {
       try {
-        burnSessionHome(session.root, {
-          userRoot,
-          sessionId: session.sessionId,
-          ino: session.ino,
-          dev: session.dev,
-        });
+        burnSessionHome(session.root, sessionIdentity(session, userRoot));
       } catch (cleanupError) {
         try {
           log("prepare-burn-refused", {
@@ -431,12 +437,7 @@ function prepareIncognitoSession(options = {}) {
 
 function discardPreparedSession(session) {
   try {
-    safeHome.burnSessionHome(session.root, {
-      userRoot: USER_ROOT,
-      sessionId: session.sessionId,
-      ino: session.ino,
-      dev: session.dev,
-    });
+    safeHome.burnSessionHome(session.root, sessionIdentity(session, USER_ROOT));
   } catch {
     /* ignore */
   }
@@ -660,17 +661,29 @@ async function attachElectron() {
     burnIncognitoHome();
     void clearPid(ownerLease, raiseServer);
   }
+  function failRaiseStartup(error) {
+    logLaunch("raise-socket-failed", { error: String(error) });
+    void clearPid(ownerLease, raiseServer);
+    try {
+      electron.app.exit(1);
+    } catch {
+      /* ignore */
+    }
+  }
   electron.ipcMain.handle("incodex-action", async (event, payload) => {
     const requestId = typeof payload?.requestId === "string" ? payload.requestId : "";
+    function reply(response) {
+      return ipcGuard.actionResponse(requestId, response);
+    }
     const gate = authorizeEvent(event);
-    if (!gate.ok) return ipcGuard.actionResponse(requestId, gate);
+    if (!gate.ok) return reply(gate);
     const action = payload?.action;
     if (action === "open") {
       if (isIncognito()) {
-        return ipcGuard.actionResponse(requestId, { ok: false, code: "ALREADY_INCOGNITO", reason: "already-incognito" });
+        return reply({ ok: false, code: "ALREADY_INCOGNITO", reason: "already-incognito" });
       }
       const result = await launchIncognito();
-      return ipcGuard.actionResponse(requestId, {
+      return reply({
         ok: result.ok === true,
         code: result.ok ? "OK" : String(result.reason || "FAILED").toUpperCase(),
         reason: result.reason,
@@ -678,24 +691,20 @@ async function attachElectron() {
     }
     if (action === "quit") {
       if (!isIncognito()) {
-        return ipcGuard.actionResponse(requestId, { ok: false, code: "NOT_INCOGNITO", reason: "not-incognito" });
+        return reply({ ok: false, code: "NOT_INCOGNITO", reason: "not-incognito" });
       }
       burnIncognitoHome();
       await clearPid(ownerLease, raiseServer);
       electron.app.quit();
-      return ipcGuard.actionResponse(requestId, { ok: true, code: "OK" });
+      return reply({ ok: true, code: "OK" });
     }
-    return ipcGuard.actionResponse(requestId, { ok: false, code: "UNKNOWN_ACTION" });
+    return reply({ ok: false, code: "UNKNOWN_ACTION" });
   });
 
   electron.app.on("browser-window-created", (_event, win) => {
     if (isAuxiliaryWindow(win)) {
       if (isIncognito()) {
-        try {
-          win.hide();
-        } catch {
-          /* ignore */
-        }
+        hideWindow(win);
       }
       return;
     }
@@ -735,23 +744,9 @@ async function attachElectron() {
     }
     try {
       raiseServer = instance.listenForRaise(stateRoot(), () => raiseOurWindows(), ownerLease);
-      raiseServer.once("error", (error) => {
-        logLaunch("raise-socket-failed", { error: String(error) });
-        void clearPid(ownerLease, raiseServer);
-        try {
-          electron.app.exit(1);
-        } catch {
-          /* ignore */
-        }
-      });
+      raiseServer.once("error", failRaiseStartup);
     } catch (error) {
-      logLaunch("raise-socket-failed", { error: String(error) });
-      void clearPid(ownerLease, raiseServer);
-      try {
-        electron.app.exit(1);
-      } catch {
-        /* ignore */
-      }
+      failRaiseStartup(error);
       throw startupBlocked(error instanceof Error ? error : new Error(String(error)));
     }
     electron.app.on("window-all-closed", () => {
