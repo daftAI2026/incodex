@@ -397,29 +397,8 @@ fn trusted_older_loader_does_not_block_runtime_synchronization() {
     let home = isolated_home();
     let app = patchable_app(&home);
     let root = home.join(".incodex");
-    let candidate = home.join("older-loader.app");
-    let mut transaction = Engine::begin(&root, &app, "install").unwrap();
-    let install_id = transaction.install_id().to_string();
-    let original = root
-        .join("transactions")
-        .join(&install_id)
-        .join("original/ChatGPT.app");
-    fs::create_dir_all(original.parent().unwrap()).unwrap();
-    ditto(&app, &original).unwrap();
-    transaction.mark_backup_committed().unwrap();
-    ditto(&app, &candidate).unwrap();
-    let older_loader = "module.exports = { legacyLoader: true };\n";
-    let (asar_hash, _) = patch_asar(
-        &candidate.join("Contents/Resources/app.asar"),
-        older_loader,
-        Some(&install_id),
-    )
-    .unwrap();
-    write_asar_integrity(&candidate, &asar_hash).unwrap();
-    sign_app(&candidate).unwrap();
-    transaction.place_staging(&candidate).unwrap();
-    transaction.swap().unwrap();
-    transaction.commit().unwrap();
+    let older_loader = include_str!("fixtures/incodex-loader-v0.3.1.cjs");
+    commit_install_with_loader(&home, &app, older_loader);
     make_legacy_version_runtime_stale(&home);
 
     let (status, stdout, stderr) =
@@ -436,6 +415,53 @@ fn trusted_older_loader_does_not_block_runtime_synchronization() {
         serde_json::from_slice(&fs::read(root.join("runtime/current.json")).unwrap()).unwrap();
     assert_eq!(current["version"], env!("CARGO_PKG_VERSION"));
     assert!(current["manifestSha256"].is_string());
+}
+
+#[test]
+fn trusted_transaction_does_not_authorize_an_unknown_loader() {
+    let home = isolated_home();
+    let app = patchable_app(&home);
+    let root = home.join(".incodex");
+    let unknown_loader = "module.exports = { unknownLoader: true };\n";
+    commit_install_with_loader(&home, &app, unknown_loader);
+    let before = fs::read(app.join("Contents/Resources/app.asar")).unwrap();
+
+    let (status, _stdout, stderr) =
+        run(&["install", "--yes", "--app", app.to_str().unwrap()], &home);
+
+    assert_eq!(status, 1, "unknown committed loader was accepted");
+    assert!(stderr.contains("loader"), "{stderr}");
+    assert_eq!(
+        fs::read(app.join("Contents/Resources/app.asar")).unwrap(),
+        before
+    );
+    assert!(!root.join("runtime/current.json").exists());
+}
+
+fn commit_install_with_loader(home: &Path, app: &Path, loader: &str) {
+    let root = home.join(".incodex");
+    let candidate = home.join("historical-loader.app");
+    let mut transaction = Engine::begin(&root, app, "install").unwrap();
+    let install_id = transaction.install_id().to_string();
+    let original = root
+        .join("transactions")
+        .join(&install_id)
+        .join("original/ChatGPT.app");
+    fs::create_dir_all(original.parent().unwrap()).unwrap();
+    ditto(app, &original).unwrap();
+    transaction.mark_backup_committed().unwrap();
+    ditto(app, &candidate).unwrap();
+    let (asar_hash, _) = patch_asar(
+        &candidate.join("Contents/Resources/app.asar"),
+        loader,
+        Some(&install_id),
+    )
+    .unwrap();
+    write_asar_integrity(&candidate, &asar_hash).unwrap();
+    sign_app(&candidate).unwrap();
+    transaction.place_staging(&candidate).unwrap();
+    transaction.swap().unwrap();
+    transaction.commit().unwrap();
 }
 
 #[test]
