@@ -141,6 +141,26 @@ struct SpawnOutcome {
     cleanup: CleanupDisposition,
 }
 
+impl SpawnOutcome {
+    fn burn(process: OpenProcessResult, owner: Option<SessionOwnerSnapshot>) -> Self {
+        Self {
+            process,
+            owner,
+            cleanup: CleanupDisposition::Burn,
+        }
+    }
+
+    fn retained_failure(reason: String, owner: Option<SessionOwnerSnapshot>) -> Self {
+        Self {
+            process: OpenProcessResult::SpawnFailed {
+                error: reason.clone(),
+            },
+            owner,
+            cleanup: CleanupDisposition::Retain(reason),
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 struct InjectionReadiness {
     ready: Arc<AtomicBool>,
@@ -399,25 +419,18 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
         Ok(owner) => owner,
         Err(error) => {
             return Ok(match kill_and_reap(&mut child) {
-                Ok(status) => SpawnOutcome {
-                    process: OpenProcessResult::Exited {
+                Ok(status) => SpawnOutcome::burn(
+                    OpenProcessResult::Exited {
                         code: status.code().unwrap_or(1),
                         ui_ready: false,
                     },
-                    owner: None,
-                    cleanup: CleanupDisposition::Burn,
-                },
+                    None,
+                ),
                 Err(reap_error) => {
                     let reason = format!(
                         "session owner handoff failed: {error}; child exit could not be proven: {reap_error}"
                     );
-                    SpawnOutcome {
-                        process: OpenProcessResult::SpawnFailed {
-                            error: reason.clone(),
-                        },
-                        owner: None,
-                        cleanup: CleanupDisposition::Retain(reason),
-                    }
+                    SpawnOutcome::retained_failure(reason, None)
                 }
             });
         }
@@ -547,25 +560,18 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                     let _ = std::io::stdout().flush();
                     stop_injection_worker(&process_alive, &mut injection_worker);
                     return Ok(match kill_and_reap(&mut child) {
-                        Ok(_) => SpawnOutcome {
-                            process: OpenProcessResult::Exited {
+                        Ok(_) => SpawnOutcome::burn(
+                            OpenProcessResult::Exited {
                                 code: 0,
                                 ui_ready: false,
                             },
-                            owner: Some(owner),
-                            cleanup: CleanupDisposition::Burn,
-                        },
+                            Some(owner),
+                        ),
                         Err(error) => {
                             let reason = format!(
                                 "UI injection failed and child exit could not be proven: {error}"
                             );
-                            SpawnOutcome {
-                                process: OpenProcessResult::SpawnFailed {
-                                    error: reason.clone(),
-                                },
-                                owner: Some(owner),
-                                cleanup: CleanupDisposition::Retain(reason),
-                            }
+                            SpawnOutcome::retained_failure(reason, Some(owner))
                         }
                     });
                 }
@@ -584,27 +590,20 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
             Ok(Some(status)) => {
                 stop_injection_worker(&process_alive, &mut injection_worker);
                 spinner.stop();
-                return Ok(SpawnOutcome {
-                    process: OpenProcessResult::Exited {
+                return Ok(SpawnOutcome::burn(
+                    OpenProcessResult::Exited {
                         code: status.code().unwrap_or(1),
                         ui_ready: readiness.is_ready(),
                     },
-                    owner: Some(owner),
-                    cleanup: CleanupDisposition::Burn,
-                });
+                    Some(owner),
+                ));
             }
             Ok(None) => {}
             Err(error) => {
                 stop_injection_worker(&process_alive, &mut injection_worker);
                 spinner.stop();
                 let reason = format!("child exit could not be proven: {error}");
-                return Ok(SpawnOutcome {
-                    process: OpenProcessResult::SpawnFailed {
-                        error: reason.clone(),
-                    },
-                    owner: Some(owner),
-                    cleanup: CleanupDisposition::Retain(reason),
-                });
+                return Ok(SpawnOutcome::retained_failure(reason, Some(owner)));
             }
         }
         thread::sleep(Duration::from_millis(50));
@@ -656,13 +655,7 @@ where
         plan,
         user_root,
         retry_delay_ms,
-        |plan| {
-            spawn(plan).map(|process| SpawnOutcome {
-                process,
-                owner: None,
-                cleanup: CleanupDisposition::Burn,
-            })
-        },
+        |plan| spawn(plan).map(|process| SpawnOutcome::burn(process, None)),
         |_| Ok(()),
         |root, expected, _owner| burn(root, expected),
     )
@@ -683,11 +676,7 @@ where
 {
     let outcome = match spawn(plan) {
         Ok(outcome) => outcome,
-        Err(error) => SpawnOutcome {
-            process: OpenProcessResult::SpawnFailed { error },
-            owner: None,
-            cleanup: CleanupDisposition::Burn,
-        },
+        Err(error) => SpawnOutcome::burn(OpenProcessResult::SpawnFailed { error }, None),
     };
     let expected = BurnExpected {
         user_root,
