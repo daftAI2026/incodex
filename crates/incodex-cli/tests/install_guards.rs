@@ -267,3 +267,25 @@ fn a_new_install_removes_a_superseded_restored_backup() {
     assert_ne!(first_install_id, second_install_id);
     assert_eq!(transaction_ids(&home), vec![second_install_id]);
 }
+
+#[test]
+fn recover_removes_a_restored_terminal_transaction() {
+    let _guard = serialize_signing();
+    let home = home();
+    let app = patchable_app(&home);
+    let install_id = install(&home, &app);
+    let root = home.join(".incodex");
+    let transaction = root.join("transactions").join(&install_id);
+    restore_committed(&root, &install_id, &app).unwrap();
+
+    let (status, stdout, stderr) = run(
+        &["recover", "--transaction", install_id.as_str()],
+        &home,
+    );
+
+    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
+    assert!(
+        !transaction.exists(),
+        "recover retained restored transaction {install_id}"
+    );
+}
