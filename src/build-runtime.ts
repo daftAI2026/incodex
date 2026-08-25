@@ -30,16 +30,18 @@ const injectTmp = join(root, "src/runtime/_inject.src.ts");
 writeFileSync(injectTmp, injectSrc);
 
 const injectOut = join(outDir, "incodex-inject.js");
-const loaderOut = join(outDir, "incodex-loader.cjs");
-const mainOut = join(outDir, "incodex-main.cjs");
-const preloadOut = join(outDir, "incodex-preload.cjs");
-const safeHomeOut = join(outDir, "incodex-safe-home.cjs");
-const ipcGuardOut = join(outDir, "incodex-ipc-guard.cjs");
-const ownerCoreOut = join(outDir, "incodex-owner-core.cjs");
-const ownerRecoveryOut = join(outDir, "incodex-owner-recovery.cjs");
-const instanceOut = join(outDir, "incodex-instance.cjs");
-const runtimeLoadOut = join(outDir, "incodex-runtime-load.cjs");
-const windowKindOut = join(outDir, "incodex-window-kind.cjs");
+const runtimeModuleNames = [
+  "loader",
+  "main",
+  "preload",
+  "safe-home",
+  "ipc-guard",
+  "owner-core",
+  "owner-recovery",
+  "instance",
+  "runtime-load",
+  "window-kind",
+] as const;
 
 const inject = Bun.spawnSync({
   cmd: ["bun", "build", injectTmp, "--outfile", injectOut, "--target", "browser"],
@@ -69,18 +71,10 @@ const emitted = spawnSync(join(root, "node_modules/typescript/bin/tsc"), ["-p", 
 if (emitted.status !== 0) process.exit(emitted.status ?? 1);
 
 const emitDir = join(root, ".runtime-cjs");
-const copies: Array<[string, string]> = [
-  [join(emitDir, "incodex-loader.cjs"), loaderOut],
-  [join(emitDir, "incodex-main.cjs"), mainOut],
-  [join(emitDir, "incodex-preload.cjs"), preloadOut],
-  [join(emitDir, "incodex-safe-home.cjs"), safeHomeOut],
-  [join(emitDir, "incodex-ipc-guard.cjs"), ipcGuardOut],
-  [join(emitDir, "incodex-owner-core.cjs"), ownerCoreOut],
-  [join(emitDir, "incodex-owner-recovery.cjs"), ownerRecoveryOut],
-  [join(emitDir, "incodex-instance.cjs"), instanceOut],
-  [join(emitDir, "incodex-runtime-load.cjs"), runtimeLoadOut],
-  [join(emitDir, "incodex-window-kind.cjs"), windowKindOut],
-];
+const copies: Array<[string, string]> = runtimeModuleNames.map((name) => {
+  const filename = `incodex-${name}.cjs`;
+  return [join(emitDir, filename), join(outDir, filename)];
+});
 for (const [from, to] of copies) {
   const text = readFileSync(from, "utf8").replace(
     /require\("\.\/(incodex-[a-z-]+)\.cts"\)/g,
@@ -92,16 +86,7 @@ assertPortableCjs(copies.map(([, to]) => to));
 
 const artifactPaths = [
   injectOut,
-  loaderOut,
-  mainOut,
-  preloadOut,
-  safeHomeOut,
-  ipcGuardOut,
-  ownerCoreOut,
-  ownerRecoveryOut,
-  instanceOut,
-  runtimeLoadOut,
-  windowKindOut,
+  ...copies.map(([, to]) => to),
 ];
 const files: Record<string, string> = {};
 for (const file of artifactPaths) {
