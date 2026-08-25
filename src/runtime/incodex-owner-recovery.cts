@@ -14,7 +14,6 @@ const {
   writeOwnerLockExclusive,
   writeOwnerRecordExclusive,
   readOwnerLockState,
-  readOwnerLock,
   readOwnerLockStateAt,
   readOwnerRecords,
   isOwnerQuarantinePath,
@@ -71,11 +70,6 @@ function protocolLine(socket, onLine) {
     onLine(line, socket);
   });
   socket.on("error", () => {});
-}
-
-function listenForLease(owner, server) {
-  protocolLine(server, () => {});
-  return server;
 }
 
 function createLeaseServer(owner) {

@@ -118,9 +118,6 @@ function ensurePrivateDir(dir, parent) {
 }
 function writePrivateFile(dest, data, { exclusive = false } = {}) {
     const prior = assertNotSymlink(dest, "file");
-    if (prior?.isSymbolicLink()) {
-        throw new Error(`[incodex] refuse to overwrite symlink file: ${dest}`);
-    }
     if (exclusive && prior) {
         throw new Error(`[incodex] refuse to overwrite existing file: ${dest}`);
     }

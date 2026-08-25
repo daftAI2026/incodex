@@ -512,15 +512,14 @@ function syncLandingCopy(host: HTMLElement): void {
   if (close) close.setAttribute("aria-label", t("dismiss"));
 }
 
+function removeLanding(): void {
+  document.querySelector<HTMLElement>(`[${BANNER_HOST_ATTR}]`)?.remove();
+  document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`)?.remove();
+}
+
 function ensureLanding(): void {
-  if (!isIncognitoWindow()) {
-    document.querySelector<HTMLElement>(`[${BANNER_HOST_ATTR}]`)?.remove();
-    document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`)?.remove();
-    return;
-  }
-  if (bannerDismissed()) {
-    document.querySelector<HTMLElement>(`[${BANNER_HOST_ATTR}]`)?.remove();
-    document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`)?.remove();
+  if (!isIncognitoWindow() || bannerDismissed()) {
+    removeLanding();
     return;
   }
 
@@ -583,11 +582,7 @@ const PROFILE_OBSERVED_ATTRIBUTES = [
 
 function observerOptions(): MutationObserverInit {
   const options: MutationObserverInit = { childList: true, subtree: true };
-  if (
-    isIncognitoWindow() &&
-    window.__incodexProfileMask !== null &&
-    window.__incodexProfileMask !== undefined
-  ) {
+  if (profileObservationRequired()) {
     options.attributes = true;
     options.characterData = true;
     options.attributeFilter = PROFILE_OBSERVED_ATTRIBUTES;

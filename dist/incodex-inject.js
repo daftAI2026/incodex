@@ -1896,15 +1896,13 @@ function syncLandingCopy(host) {
   if (close)
     close.setAttribute("aria-label", t("dismiss"));
 }
+function removeLanding() {
+  document.querySelector(`[${BANNER_HOST_ATTR}]`)?.remove();
+  document.querySelector(`[${LANDING_ATTR}]`)?.remove();
+}
 function ensureLanding() {
-  if (!isIncognitoWindow()) {
-    document.querySelector(`[${BANNER_HOST_ATTR}]`)?.remove();
-    document.querySelector(`[${LANDING_ATTR}]`)?.remove();
-    return;
-  }
-  if (bannerDismissed()) {
-    document.querySelector(`[${BANNER_HOST_ATTR}]`)?.remove();
-    document.querySelector(`[${LANDING_ATTR}]`)?.remove();
+  if (!isIncognitoWindow() || bannerDismissed()) {
+    removeLanding();
     return;
   }
   const mount = findLandingMount();
@@ -1969,7 +1967,7 @@ var PROFILE_OBSERVED_ATTRIBUTES = [
 ];
 function observerOptions() {
   const options = { childList: true, subtree: true };
-  if (isIncognitoWindow() && window.__incodexProfileMask !== null && window.__incodexProfileMask !== undefined) {
+  if (profileObservationRequired()) {
     options.attributes = true;
     options.characterData = true;
     options.attributeFilter = PROFILE_OBSERVED_ATTRIBUTES;

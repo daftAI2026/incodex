@@ -5,7 +5,7 @@ const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
 const core = require("./incodex-owner-core.cjs");
-const { LOCK_NAME, SOCK_NAME, ownerPortFromExec, ownerToken, writeOwnerLockExclusive, writeOwnerRecordExclusive, readOwnerLockState, readOwnerLock, readOwnerLockStateAt, readOwnerRecords, isOwnerQuarantinePath, sameOwnerToken, staleOwnerRecord, OwnerLeaseError, lockPath, activeOwnerPath, } = core;
+const { LOCK_NAME, SOCK_NAME, ownerPortFromExec, ownerToken, writeOwnerLockExclusive, writeOwnerRecordExclusive, readOwnerLockState, readOwnerLockStateAt, readOwnerRecords, isOwnerQuarantinePath, sameOwnerToken, staleOwnerRecord, OwnerLeaseError, lockPath, activeOwnerPath, } = core;
 const activeLeases = new Map();
 const PROTOCOL_MAX_BYTES = 256;
 const PROTOCOL_IDLE_TIMEOUT_MS = 1_000;
@@ -51,10 +51,6 @@ function protocolLine(socket, onLine) {
         onLine(line, socket);
     });
     socket.on("error", () => { });
-}
-function listenForLease(owner, server) {
-    protocolLine(server, () => { });
-    return server;
 }
 function createLeaseServer(owner) {
     const lease = { owner, onRaise: null, server: net.createServer() };

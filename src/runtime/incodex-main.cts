@@ -429,6 +429,19 @@ function prepareIncognitoSession(options = {}) {
   }
 }
 
+function discardPreparedSession(session) {
+  try {
+    safeHome.burnSessionHome(session.root, {
+      userRoot: USER_ROOT,
+      sessionId: session.sessionId,
+      ino: session.ino,
+      dev: session.dev,
+    });
+  } catch {
+    /* ignore */
+  }
+}
+
 async function launchIncognitoOnce() {
   let alreadyRunning;
   try {
@@ -452,16 +465,7 @@ async function launchIncognitoOnce() {
   const { session } = prepared;
   const bin = process.execPath;
   if (!bin) {
-    try {
-      safeHome.burnSessionHome(session.root, {
-        userRoot: USER_ROOT,
-        sessionId: session.sessionId,
-        ino: session.ino,
-        dev: session.dev,
-      });
-    } catch {
-      /* ignore */
-    }
+    discardPreparedSession(session);
     return Promise.resolve({ ok: false, reason: "spawn-failed" });
   }
   const args = [`--user-data-dir=${session.chromium}`, "codex://new?mode=codex"];
@@ -501,31 +505,13 @@ async function launchIncognitoOnce() {
       });
     } catch (error) {
       logLaunch("spawn-threw", { error: String(error) });
-      try {
-        safeHome.burnSessionHome(session.root, {
-          userRoot: USER_ROOT,
-          sessionId: session.sessionId,
-          ino: session.ino,
-          dev: session.dev,
-        });
-      } catch {
-        /* ignore */
-      }
+      discardPreparedSession(session);
       done({ ok: false, reason: "spawn-failed" });
       return;
     }
     if (!child.pid) {
       logLaunch("spawn-no-pid");
-      try {
-        safeHome.burnSessionHome(session.root, {
-          userRoot: USER_ROOT,
-          sessionId: session.sessionId,
-          ino: session.ino,
-          dev: session.dev,
-        });
-      } catch {
-        /* ignore */
-      }
+      discardPreparedSession(session);
       done({ ok: false, reason: "spawn-failed" });
       return;
     }
@@ -670,6 +656,10 @@ async function attachElectron() {
   const source = injectSource();
   let ownerLease = null;
   let raiseServer = null;
+  function cleanupIncognitoLifecycle() {
+    burnIncognitoHome();
+    void clearPid(ownerLease, raiseServer);
+  }
   electron.ipcMain.handle("incodex-action", async (event, payload) => {
     const requestId = typeof payload?.requestId === "string" ? payload.requestId : "";
     const gate = authorizeEvent(event);
@@ -729,8 +719,7 @@ async function attachElectron() {
     });
     win.on("closed", () => {
       if (mainWindows(electron).some((open) => open !== win && !open.isDestroyed())) return;
-      burnIncognitoHome();
-      void clearPid(ownerLease, raiseServer);
+      cleanupIncognitoLifecycle();
       electron.app.exit(0);
     });
   });
@@ -766,14 +755,10 @@ async function attachElectron() {
       throw startupBlocked(error instanceof Error ? error : new Error(String(error)));
     }
     electron.app.on("window-all-closed", () => {
-      burnIncognitoHome();
-      void clearPid(ownerLease, raiseServer);
+      cleanupIncognitoLifecycle();
       electron.app.exit(0);
     });
-    electron.app.on("before-quit", () => {
-      burnIncognitoHome();
-      void clearPid(ownerLease, raiseServer);
-    });
+    electron.app.on("before-quit", cleanupIncognitoLifecycle);
   }
 
   const ready = () => {
