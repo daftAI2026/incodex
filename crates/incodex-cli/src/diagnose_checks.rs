@@ -80,6 +80,17 @@ impl CheckResult {
             findings: Vec::new(),
         }
     }
+
+    pub(crate) fn scanned(findings: Vec<DiagnosticFinding>, unknown: bool) -> Self {
+        Self {
+            status: if unknown {
+                CheckStatus::Unknown
+            } else {
+                CheckStatus::Checked
+            },
+            findings,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -129,6 +140,29 @@ pub struct JournalRecord {
     pub artifacts: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recovery: Option<String>,
+}
+
+impl JournalRecord {
+    fn invalid(
+        kind: &str,
+        path: &Path,
+        install_id: Option<String>,
+        phase: Option<String>,
+        error: impl Into<String>,
+    ) -> Self {
+        Self {
+            kind: kind.to_string(),
+            path: path.display().to_string(),
+            install_id,
+            phase,
+            action: None,
+            error: Some(error.into()),
+            retained_original: None,
+            original_valid: None,
+            artifacts: Vec::new(),
+            recovery: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -340,14 +374,7 @@ pub fn scan_owner_processes(root: &Path) -> ProcessScan {
     }
     ProcessScan {
         stale_pid,
-        check: if unknown {
-            CheckResult {
-                status: CheckStatus::Unknown,
-                findings,
-            }
-        } else {
-            CheckResult::checked(findings)
-        },
+        check: CheckResult::scanned(findings, unknown),
     }
 }
 
@@ -432,18 +459,9 @@ pub fn scan_journals(
                 )
             };
             unknown = true;
-            records.push(JournalRecord {
-                kind: "symlink".to_string(),
-                path: path.display().to_string(),
-                install_id: None,
-                phase: None,
-                action: None,
-                error: Some(message.to_string()),
-                retained_original: None,
-                original_valid: None,
-                artifacts: Vec::new(),
-                recovery: None,
-            });
+            records.push(JournalRecord::invalid(
+                "symlink", &path, None, None, message,
+            ));
             findings.push(DiagnosticFinding::warning(
                 code,
                 format!("{kind} was not inspected"),
@@ -456,18 +474,13 @@ pub fn scan_journals(
             let journal_path = path.join("journal.json");
             if is_symlink(&journal_path) {
                 unknown = true;
-                records.push(JournalRecord {
-                    kind: "symlink".to_string(),
-                    path: journal_path.display().to_string(),
-                    install_id: Some(install_id),
-                    phase: None,
-                    action: None,
-                    error: Some("journal file is a symlink and was not inspected".to_string()),
-                    retained_original: None,
-                    original_valid: None,
-                    artifacts: Vec::new(),
-                    recovery: None,
-                });
+                records.push(JournalRecord::invalid(
+                    "symlink",
+                    &journal_path,
+                    Some(install_id),
+                    None,
+                    "journal file is a symlink and was not inspected",
+                ));
                 findings.push(DiagnosticFinding::warning(
                     "journal.file-symlink",
                     "journal file is a symlink and was not inspected",
@@ -523,22 +536,18 @@ pub fn scan_journals(
                     }
                 }
                 Err(error) => {
-                    records.push(JournalRecord {
-                        kind: if looks_like_uuid(&install_id) {
-                            "malformed".to_string()
-                        } else {
-                            "unrecognizedLegacy".to_string()
-                        },
-                        path: path.display().to_string(),
-                        install_id: Some(install_id),
-                        phase: None,
-                        action: None,
-                        error: Some(error.clone()),
-                        retained_original: None,
-                        original_valid: None,
-                        artifacts: Vec::new(),
-                        recovery: None,
-                    });
+                    let kind = if looks_like_uuid(&install_id) {
+                        "malformed"
+                    } else {
+                        "unrecognizedLegacy"
+                    };
+                    records.push(JournalRecord::invalid(
+                        kind,
+                        &path,
+                        Some(install_id),
+                        None,
+                        error.clone(),
+                    ));
                     findings.push(DiagnosticFinding::warning(
                         "journal.malformed",
                         error,
@@ -551,18 +560,13 @@ pub fn scan_journals(
         let body = match fs::read_to_string(&path) {
             Ok(body) => body,
             Err(error) => {
-                records.push(JournalRecord {
-                    kind: "malformed".to_string(),
-                    path: path.display().to_string(),
-                    install_id: None,
-                    phase: None,
-                    action: None,
-                    error: Some(error.to_string()),
-                    retained_original: None,
-                    original_valid: None,
-                    artifacts: Vec::new(),
-                    recovery: None,
-                });
+                records.push(JournalRecord::invalid(
+                    "malformed",
+                    &path,
+                    None,
+                    None,
+                    error.to_string(),
+                ));
                 findings.push(DiagnosticFinding::warning(
                     "journal.malformed",
                     error.to_string(),
@@ -625,24 +629,17 @@ pub fn scan_journals(
                     } else {
                         "unrecognizedLegacy"
                     };
-                    records.push(JournalRecord {
-                        kind: kind.to_string(),
-                        path: path.display().to_string(),
-                        install_id: raw
-                            .get("installId")
+                    records.push(JournalRecord::invalid(
+                        kind,
+                        &path,
+                        raw.get("installId")
                             .and_then(serde_json::Value::as_str)
                             .map(str::to_string),
-                        phase: raw
-                            .get("phase")
+                        raw.get("phase")
                             .and_then(serde_json::Value::as_str)
                             .map(str::to_string),
-                        action: None,
-                        error: Some("journal schema is not recognized".to_string()),
-                        retained_original: None,
-                        original_valid: None,
-                        artifacts: Vec::new(),
-                        recovery: None,
-                    });
+                        "journal schema is not recognized",
+                    ));
                     findings.push(DiagnosticFinding::warning(
                         if kind == "malformed" {
                             "journal.malformed"
@@ -655,18 +652,13 @@ pub fn scan_journals(
                 }
             },
             Err(error) => {
-                records.push(JournalRecord {
-                    kind: "malformed".to_string(),
-                    path: path.display().to_string(),
-                    install_id: None,
-                    phase: None,
-                    action: None,
-                    error: Some(error.to_string()),
-                    retained_original: None,
-                    original_valid: None,
-                    artifacts: Vec::new(),
-                    recovery: None,
-                });
+                records.push(JournalRecord::invalid(
+                    "malformed",
+                    &path,
+                    None,
+                    None,
+                    error.to_string(),
+                ));
                 findings.push(DiagnosticFinding::warning(
                     "journal.malformed",
                     error.to_string(),
@@ -678,14 +670,7 @@ pub fn scan_journals(
     JournalScan {
         interrupted,
         records,
-        check: if unknown {
-            CheckResult {
-                status: CheckStatus::Unknown,
-                findings,
-            }
-        } else {
-            CheckResult::checked(findings)
-        },
+        check: CheckResult::scanned(findings, unknown),
     }
 }
 

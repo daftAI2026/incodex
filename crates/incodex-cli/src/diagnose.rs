@@ -212,10 +212,7 @@ pub fn diagnose_with_root_mode(app_path: &Path, root: &Path, mode: DiagnosisMode
         target: app_path.display().to_string(),
         target_id: target_id(app_path),
         exists,
-        patched: package
-            .as_ref()
-            .map(|package| package.already_patched)
-            .unwrap_or(false),
+        patched,
         bundle_id: plist
             .as_ref()
             .map(|plist| plist.bundle_identifier.clone())
@@ -340,7 +337,7 @@ fn inspect_external_runtime(root: &Path) -> (ExternalRuntimeReport, CheckResult)
                 error: Some(error.clone()),
             },
             CheckResult::checked(vec![DiagnosticFinding::warning(
-                if error_contains_symlink(&error) {
+                if error.contains("symlink") {
                     "runtime.symlink"
                 } else {
                     "runtime.invalid"
@@ -592,10 +589,6 @@ fn inspect_backup(
     )
 }
 
-fn error_contains_symlink(error: &str) -> bool {
-    error.contains("symlink")
-}
-
 fn is_symlink(path: &Path) -> bool {
     fs::symlink_metadata(path)
         .map(|metadata| metadata.file_type().is_symlink())
@@ -630,10 +623,7 @@ fn safe_relative(value: &str) -> bool {
 }
 
 fn reject_symlink(path: &Path, label: &str) -> Result<(), String> {
-    if fs::symlink_metadata(path)
-        .map(|metadata| metadata.file_type().is_symlink())
-        .unwrap_or(false)
-    {
+    if is_symlink(path) {
         return Err(format!("{label} is a symlink: {}", path.display()));
     }
     Ok(())
