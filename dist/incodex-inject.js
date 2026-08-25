@@ -1168,6 +1168,14 @@ var PROFILE_NAME_MARKER_SELECTOR = ":scope > [data-incodex-profile-mask-name]";
 var PROFILE_AVATAR_MARKER_SELECTOR = ":scope > [data-incodex-profile-mask-avatar]";
 var PROFILE_NAME_MAX_CHARS = 64;
 var PROFILE_AVATAR_MAX_DATA_URL_CHARS = 8 * 1024 * 1024;
+var PROFILE_FOOTER_IDENTITY_SELECTORS = {
+  name: PROFILE_NAME_SELECTOR,
+  avatar: PROFILE_AVATAR_SELECTOR
+};
+var PROFILE_MENU_IDENTITY_SELECTORS = {
+  name: PROFILE_MENU_NAME_SELECTOR,
+  avatar: PROFILE_MENU_AVATAR_SELECTOR
+};
 function profileMaskConfigured() {
   return window.__incodexProfileMask !== null && window.__incodexProfileMask !== undefined;
 }
@@ -1194,18 +1202,33 @@ function readProfileMask() {
   }
   return { name, avatarDataUrl: avatar.dataUrl };
 }
-function findProfileFooter() {
-  const candidates = [...document.querySelectorAll(PROFILE_FOOTER_SELECTOR)].filter((element) => element.querySelector(PROFILE_NAME_SELECTOR) && element.querySelector(PROFILE_AVATAR_SELECTOR));
+function findUniqueCandidate(candidates) {
   return candidates.length === 1 ? candidates[0] : null;
+}
+function findUniqueProfileIdentity(root, candidateSelector, selectors) {
+  const candidates = [...root.querySelectorAll(candidateSelector)].filter((element) => Boolean(element.querySelector(selectors.name) && element.querySelector(selectors.avatar)));
+  return findUniqueCandidate(candidates);
+}
+function findProfileFooter() {
+  return findUniqueProfileIdentity(document, PROFILE_FOOTER_SELECTOR, PROFILE_FOOTER_IDENTITY_SELECTORS);
 }
 function findControlledProfileMenu(profileFooter) {
   const menuId = profileFooter.getAttribute("aria-controls");
-  const menu = menuId ? document.getElementById(menuId) : null;
-  return menu?.matches(PROFILE_MENU_SELECTOR) ? menu : null;
+  if (!menuId)
+    return null;
+  const menu = document.getElementById(menuId);
+  if (!menu?.matches(PROFILE_MENU_SELECTOR))
+    return null;
+  return menu;
 }
 function findProfileMenuIdentity(profileMenu) {
-  const candidates = [...profileMenu.querySelectorAll(PROFILE_MENU_ITEM_SELECTOR)].filter((item) => item.querySelector(PROFILE_MENU_NAME_SELECTOR) && item.querySelector(PROFILE_MENU_AVATAR_SELECTOR));
-  return candidates.length === 1 ? candidates[0] : null;
+  return findUniqueProfileIdentity(profileMenu, PROFILE_MENU_ITEM_SELECTOR, PROFILE_MENU_IDENTITY_SELECTORS);
+}
+function findProfileMenuTarget(profileFooter) {
+  const profileMenu = findControlledProfileMenu(profileFooter);
+  if (!profileMenu)
+    return null;
+  return { identity: findProfileMenuIdentity(profileMenu) };
 }
 function writeProfileAvatar(avatar, mask) {
   if (avatar instanceof HTMLImageElement) {
@@ -1223,9 +1246,9 @@ function writeProfileAvatar(avatar, mask) {
   }
   return false;
 }
-function ensureIdentityMask(identity, nameSelector, avatarSelector, mask) {
-  const nameHost = identity.querySelector(PROFILE_NAME_MARKER_SELECTOR) ?? identity.querySelector(nameSelector);
-  const avatar = identity.querySelector(PROFILE_AVATAR_MARKER_SELECTOR) ?? identity.querySelector(avatarSelector);
+function ensureIdentityMask(identity, selectors, mask) {
+  const nameHost = identity.querySelector(PROFILE_NAME_MARKER_SELECTOR) ?? identity.querySelector(selectors.name);
+  const avatar = identity.querySelector(PROFILE_AVATAR_MARKER_SELECTOR) ?? identity.querySelector(selectors.avatar);
   if (!nameHost || !avatar || !writeProfileAvatar(avatar, mask))
     return false;
   nameHost.setAttribute(PROFILE_MASK_NAME_ATTR, "true");
@@ -1235,11 +1258,10 @@ function ensureIdentityMask(identity, nameSelector, avatarSelector, mask) {
   return true;
 }
 function ensureProfileMenuMask(profileFooter, mask) {
-  const profileMenu = findControlledProfileMenu(profileFooter);
-  const identity = profileMenu ? findProfileMenuIdentity(profileMenu) : null;
-  if (!identity)
+  const profileMenu = findProfileMenuTarget(profileFooter);
+  if (!profileMenu?.identity)
     return;
-  ensureIdentityMask(identity, PROFILE_MENU_NAME_SELECTOR, PROFILE_MENU_AVATAR_SELECTOR, mask);
+  ensureIdentityMask(profileMenu.identity, PROFILE_MENU_IDENTITY_SELECTORS, mask);
 }
 function ensureProfileMask() {
   if (!window.__incodexIncognito || !profileMaskConfigured())
@@ -1248,7 +1270,7 @@ function ensureProfileMask() {
   const profileFooter = mask ? findProfileFooter() : null;
   if (!mask || !profileFooter)
     return;
-  if (!ensureIdentityMask(profileFooter, PROFILE_NAME_SELECTOR, PROFILE_AVATAR_SELECTOR, mask)) {
+  if (!ensureIdentityMask(profileFooter, PROFILE_FOOTER_IDENTITY_SELECTORS, mask)) {
     return;
   }
   ensureProfileMenuMask(profileFooter, mask);
@@ -1279,9 +1301,9 @@ function profileAvatarDecoded(dataUrl) {
   probe.src = dataUrl;
   return false;
 }
-function identityMaskHealth(identity, nameSelector, avatarSelector, mask) {
-  const nameHost = identity.querySelector(PROFILE_NAME_MARKER_SELECTOR) ?? identity.querySelector(nameSelector);
-  const avatar = identity.querySelector(PROFILE_AVATAR_MARKER_SELECTOR) ?? identity.querySelector(avatarSelector);
+function identityMaskHealth(identity, selectors, mask) {
+  const nameHost = identity.querySelector(PROFILE_NAME_MARKER_SELECTOR) ?? identity.querySelector(selectors.name);
+  const avatar = identity.querySelector(PROFILE_AVATAR_MARKER_SELECTOR) ?? identity.querySelector(selectors.avatar);
   return Boolean(nameHost && avatar && identity.getAttribute(PROFILE_MASK_ATTR) === "true" && nameHost.getAttribute(PROFILE_MASK_NAME_ATTR) === "true" && avatar.getAttribute(PROFILE_MASK_AVATAR_ATTR) === "true" && nameHost.textContent === mask.name && profileAvatarHealth(avatar, mask));
 }
 function profileMaskHealth() {
@@ -1291,16 +1313,16 @@ function profileMaskHealth() {
   const profileFooter = mask ? findProfileFooter() : null;
   if (!mask || !profileAvatarDecoded(mask.avatarDataUrl) || !profileFooter)
     return false;
-  if (!identityMaskHealth(profileFooter, PROFILE_NAME_SELECTOR, PROFILE_AVATAR_SELECTOR, mask)) {
+  if (!identityMaskHealth(profileFooter, PROFILE_FOOTER_IDENTITY_SELECTORS, mask)) {
     return false;
   }
-  const profileMenu = findControlledProfileMenu(profileFooter);
+  const profileMenu = findProfileMenuTarget(profileFooter);
   if (!profileMenu)
     return true;
-  const menuIdentity = findProfileMenuIdentity(profileMenu);
+  const menuIdentity = profileMenu.identity;
   if (!menuIdentity)
     return false;
-  return identityMaskHealth(menuIdentity, PROFILE_MENU_NAME_SELECTOR, PROFILE_MENU_AVATAR_SELECTOR, mask);
+  return identityMaskHealth(menuIdentity, PROFILE_MENU_IDENTITY_SELECTORS, mask);
 }
 function profileMaskNeedsInject() {
   if (!profileMaskConfigured())
@@ -1506,6 +1528,9 @@ function t(key) {
 function labelFor(on) {
   return on ? t("exit") : t("open");
 }
+function unavailableActionResult() {
+  return { ok: false, reason: "unavailable", code: "UNAVAILABLE" };
+}
 function buttonIcon(btn) {
   return iconFor({
     incognito: isIncognitoWindow(),
@@ -1564,14 +1589,11 @@ function newRequestId() {
 }
 async function requestAction(action) {
   if (!window.incodex?.requestIncognitoAction) {
-    return { ok: false, reason: "unavailable", code: "UNAVAILABLE" };
+    return unavailableActionResult();
   }
   try {
-    return await window.incodex.requestIncognitoAction({ action, requestId: newRequestId() }) ?? {
-      ok: false,
-      reason: "unavailable",
-      code: "UNAVAILABLE"
-    };
+    const result = await window.incodex.requestIncognitoAction({ action, requestId: newRequestId() });
+    return result ?? unavailableActionResult();
   } catch {
     return { ok: false, reason: "ipc-failed", code: "IPC_FAILED" };
   }

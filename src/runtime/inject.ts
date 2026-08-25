@@ -58,6 +58,12 @@ function labelFor(on: boolean): string {
   return on ? t("exit") : t("open");
 }
 
+type IncognitoActionResult = { ok: boolean; reason?: string; code?: string };
+
+function unavailableActionResult(): IncognitoActionResult {
+  return { ok: false, reason: "unavailable", code: "UNAVAILABLE" };
+}
+
 function buttonIcon(btn: HTMLElement): IncognitoButtonIcon {
   return iconFor({
     incognito: isIncognitoWindow(),
@@ -113,18 +119,13 @@ function newRequestId(): string {
   return `incodex-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-async function requestAction(action: "open" | "quit"): Promise<{ ok: boolean; reason?: string; code?: string }> {
+async function requestAction(action: "open" | "quit"): Promise<IncognitoActionResult> {
   if (!window.incodex?.requestIncognitoAction) {
-    return { ok: false, reason: "unavailable", code: "UNAVAILABLE" };
+    return unavailableActionResult();
   }
   try {
-    return (
-      (await window.incodex.requestIncognitoAction({ action, requestId: newRequestId() })) ?? {
-        ok: false,
-        reason: "unavailable",
-        code: "UNAVAILABLE",
-      }
-    );
+    const result = await window.incodex.requestIncognitoAction({ action, requestId: newRequestId() });
+    return result ?? unavailableActionResult();
   } catch {
     return { ok: false, reason: "ipc-failed", code: "IPC_FAILED" };
   }
