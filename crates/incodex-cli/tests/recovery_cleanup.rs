@@ -11,7 +11,7 @@ static SEQ: AtomicU64 = AtomicU64::new(0);
 
 fn scratch() -> PathBuf {
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
-    let root = std::env::temp_dir().join(format!("incodex-cleanup-{n}"));
+    let root = std::env::temp_dir().join(format!("incodex-cleanup-{}-{n}", std::process::id()));
     fs::create_dir_all(&root).unwrap();
     root
 }
