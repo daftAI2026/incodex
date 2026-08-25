@@ -216,3 +216,38 @@ fn install_refuses_trusted_record_with_tampered_original_backup() {
     assert_eq!(transaction_ids(&home), ids_before);
     assert!(original.join("Contents/backup-tamper").exists());
 }
+
+#[test]
+fn uninstall_removes_the_restored_transaction_backup() {
+    let _guard = serialize_signing();
+    let home = home();
+    let app = patchable_app(&home);
+    let install_id = install(&home, &app);
+    let transaction = home.join(".incodex/transactions").join(&install_id);
+
+    let (status, stdout, stderr) = run(
+        &["uninstall", "--yes", "--app", app.to_str().unwrap()],
+        &home,
+    );
+
+    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
+    assert!(
+        !transaction.exists(),
+        "successful uninstall retained transaction {install_id}"
+    );
+}
+
+#[test]
+fn a_new_install_removes_the_superseded_committed_backup() {
+    let _guard = serialize_signing();
+    let home = home();
+    let app = patchable_app(&home);
+    let first_install_id = install(&home, &app);
+
+    fs::remove_dir_all(&app).unwrap();
+    let replacement = patchable_app(&home);
+    let second_install_id = install(&home, &replacement);
+
+    assert_ne!(first_install_id, second_install_id);
+    assert_eq!(transaction_ids(&home), vec![second_install_id]);
+}
