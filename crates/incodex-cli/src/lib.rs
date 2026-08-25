@@ -1,9 +1,3 @@
-/**
- * [INPUT]: 接收 native CLI 参数，并协调命令、生命周期、CDP 与身份值对象
- * [OUTPUT]: 对外提供 incodex-cli 的命令入口、公共模块与错误边界
- * [POS]: incodex-cli crate 根编排器；具体 open/profile/runtime 职责下沉到各自模块
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
- */
 pub mod app_bundle;
 pub(crate) mod app_quiescence;
 pub mod cdp;
@@ -136,41 +130,43 @@ where
         CliCommand::Install => crate::install::run_install(&parsed).map_err(CliFailure::from),
         CliCommand::Uninstall => crate::install::run_uninstall(&parsed).map_err(CliFailure::from),
         CliCommand::Recover => crate::install::run_recover(&parsed).map_err(CliFailure::from),
-        CliCommand::Status | CliCommand::Doctor => {
-            let target = parsed
-                .app
-                .as_deref()
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from(DEFAULT_APP));
-            let mut spinner = (!parsed.json).then(|| {
-                crate::spinner::Spinner::start(if parsed.command == CliCommand::Status {
-                    "Inspecting installation status"
-                } else {
-                    "Running diagnostics"
-                })
-            });
-            let mode = match parsed.command {
-                CliCommand::Status => DiagnosisMode::Status,
-                CliCommand::Doctor if parsed.deep => DiagnosisMode::DoctorDeep,
-                CliCommand::Doctor => DiagnosisMode::Doctor,
-                _ => unreachable!("diagnosis branch only handles status and doctor"),
-            };
-            let report = diagnose_with_root_mode(&target, &incodex_core::paths::user_root(), mode);
-            if let Some(spinner) = &mut spinner {
-                spinner.stop();
-            }
-            if parsed.json {
-                print!("{}", diagnosis_json(&report));
-            } else if parsed.command == CliCommand::Status {
-                println!("{}", format_status(&report));
-            } else {
-                println!("{}", format_diagnosis(&report));
-            }
-            Ok(())
-        }
+        CliCommand::Status | CliCommand::Doctor => run_diagnosis(&parsed),
         other => Err(CliFailure::new(format!(
             "{} is not implemented in the native CLI yet",
             other.as_str()
         ))),
     }
+}
+
+fn run_diagnosis(parsed: &parse::ParsedCli) -> Result<(), CliFailure> {
+    let target = parsed
+        .app
+        .as_deref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_APP));
+    let mut spinner = (!parsed.json).then(|| {
+        crate::spinner::Spinner::start(if parsed.command == CliCommand::Status {
+            "Inspecting installation status"
+        } else {
+            "Running diagnostics"
+        })
+    });
+    let mode = match parsed.command {
+        CliCommand::Status => DiagnosisMode::Status,
+        CliCommand::Doctor if parsed.deep => DiagnosisMode::DoctorDeep,
+        CliCommand::Doctor => DiagnosisMode::Doctor,
+        _ => unreachable!("diagnosis branch only handles status and doctor"),
+    };
+    let report = diagnose_with_root_mode(&target, &incodex_core::paths::user_root(), mode);
+    if let Some(spinner) = &mut spinner {
+        spinner.stop();
+    }
+    if parsed.json {
+        print!("{}", diagnosis_json(&report));
+    } else if parsed.command == CliCommand::Status {
+        println!("{}", format_status(&report));
+    } else {
+        println!("{}", format_diagnosis(&report));
+    }
+    Ok(())
 }

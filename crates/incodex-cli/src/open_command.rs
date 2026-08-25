@@ -1,9 +1,3 @@
-/**
- * [INPUT]: 接收 ParsedCli 的 open 选项，并调用隔离 session 生命周期
- * [OUTPUT]: 对外提供 run_open 的 CLI 边界与 dry-run/清理输出
- * [POS]: open 编排器的命令壳；危险细节留在父模块的 session/CDP 流程
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
- */
 use std::path::{Path, PathBuf};
 
 use incodex_core::{format_kv, format_ok, format_step, format_warn};

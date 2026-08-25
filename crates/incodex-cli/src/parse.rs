@@ -1,10 +1,3 @@
-/**
- * [INPUT]: 接收 native CLI 的命令名与未解释的 flag 令牌
- * [OUTPUT]: 对外提供 ParsedCli，供各命令实现消费已验证的命令边界
- * [POS]: incodex-cli 的唯一命令语言入口；只在 open 命令暴露 profile mask 选项
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
- */
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CliCommand {
     Menu,
@@ -35,7 +28,6 @@ impl CliCommand {
             "open" => Ok(Self::Open),
             "update" => Ok(Self::Update),
             "self-uninstall" => Ok(Self::SelfUninstall),
-            "menu" => Err(format!("unknown command: {raw}\n  incodex --help")),
             _ => Err(format!("unknown command: {raw}\n  incodex --help")),
         }
     }
@@ -98,20 +90,17 @@ pub fn parse_cli(args: &[String]) -> Result<ParsedCli, String> {
     let flags = if args.is_empty() { &[][..] } else { &args[1..] };
     let command = parse_command(raw)?;
     reject_unknown_args(flags)?;
-    let help =
-        command == CliCommand::Help || flags.iter().any(|flag| flag == "--help" || flag == "-h");
-    let clone = flags.iter().any(|flag| flag == "--clone");
-    let live_flag = flags.iter().any(|flag| flag == "--live");
-    let yes = flags
-        .iter()
-        .any(|flag| flag == "--yes" || flag == "--confirm-live");
-    let dry_run = flags.iter().any(|flag| flag == "--dry-run" || flag == "-n");
-    let json = flags.iter().any(|flag| flag == "--json");
-    let deep = flags.iter().any(|flag| flag == "--deep");
-    let restore_app = flags.iter().any(|flag| flag == "--restore-app");
+    let help = command == CliCommand::Help || has_flag(flags, &["--help", "-h"]);
+    let clone = has_flag(flags, &["--clone"]);
+    let live_flag = has_flag(flags, &["--live"]);
+    let yes = has_flag(flags, &["--yes", "--confirm-live"]);
+    let dry_run = has_flag(flags, &["--dry-run", "-n"]);
+    let json = has_flag(flags, &["--json"]);
+    let deep = has_flag(flags, &["--deep"]);
+    let restore_app = has_flag(flags, &["--restore-app"]);
     let app = value_after(flags, "--app")?;
     let transaction = value_after(flags, "--transaction")?;
-    let mask = flags.iter().any(|flag| flag == "--mask");
+    let mask = has_flag(flags, &["--mask"]);
     let name = value_after(flags, "--name")?;
     let avatar = value_after(flags, "--avatar")?;
 
@@ -130,32 +119,7 @@ pub fn parse_cli(args: &[String]) -> Result<ParsedCli, String> {
         );
     }
 
-    if command != CliCommand::Open {
-        if mask {
-            return Err("--mask is only valid for open\n  incodex open --mask".to_string());
-        }
-        if name.is_some() {
-            return Err(
-                "--name is only valid for open\n  incodex open --mask --name <value>".to_string(),
-            );
-        }
-        if avatar.is_some() {
-            return Err(
-                "--avatar is only valid for open\n  incodex open --mask --avatar <path>"
-                    .to_string(),
-            );
-        }
-    }
-    if command == CliCommand::Open && !mask {
-        if name.is_some() {
-            return Err("--name requires --mask\n  incodex open --mask --name <value>".to_string());
-        }
-        if avatar.is_some() {
-            return Err(
-                "--avatar requires --mask\n  incodex open --mask --avatar <path>".to_string(),
-            );
-        }
-    }
+    validate_profile_flags(command, mask, name.as_deref(), avatar.as_deref())?;
 
     let official = !clone && app.is_none();
     let live = matches!(command, CliCommand::Install | CliCommand::Uninstall) && official;
@@ -175,6 +139,43 @@ pub fn parse_cli(args: &[String]) -> Result<ParsedCli, String> {
         name,
         avatar,
     })
+}
+
+fn has_flag(flags: &[String], names: &[&str]) -> bool {
+    flags.iter().any(|flag| names.contains(&flag.as_str()))
+}
+
+fn validate_profile_flags(
+    command: CliCommand,
+    mask: bool,
+    name: Option<&str>,
+    avatar: Option<&str>,
+) -> Result<(), String> {
+    if command == CliCommand::Open {
+        if mask {
+            return Ok(());
+        }
+        if name.is_some() {
+            return Err("--name requires --mask\n  incodex open --mask --name <value>".into());
+        }
+        if avatar.is_some() {
+            return Err("--avatar requires --mask\n  incodex open --mask --avatar <path>".into());
+        }
+        return Ok(());
+    }
+
+    if mask {
+        return Err("--mask is only valid for open\n  incodex open --mask".into());
+    }
+    if name.is_some() {
+        return Err("--name is only valid for open\n  incodex open --mask --name <value>".into());
+    }
+    if avatar.is_some() {
+        return Err(
+            "--avatar is only valid for open\n  incodex open --mask --avatar <path>".into(),
+        );
+    }
+    Ok(())
 }
 
 fn parse_command(raw: Option<&str>) -> Result<CliCommand, String> {
