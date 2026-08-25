@@ -85,7 +85,6 @@ impl OpenProcessResult {
         }
         match self {
             Self::SpawnFailed { .. } => OpenExitCode::ProcessFailure,
-            Self::Exited { code, .. } if *code != 0 => OpenExitCode::ProcessFailure,
             Self::Exited {
                 code: 0,
                 ui_ready: false,
@@ -98,7 +97,7 @@ impl OpenProcessResult {
         }
     }
 
-    fn failure_message(&self, _cleanup: &CleanupResult, code: OpenExitCode) -> String {
+    fn failure_message(&self, code: OpenExitCode) -> String {
         match code {
             // 保留路径已在 stdout 告警；退出码负责机器可读分类，stderr 不重复。
             OpenExitCode::CleanupRetained => String::new(),
@@ -136,25 +135,12 @@ struct SpawnOutcome {
     cleanup: CleanupDisposition,
 }
 
-#[derive(Clone, Default)]
-struct InjectionReadiness {
-    ready: Arc<AtomicBool>,
-}
-
-impl InjectionReadiness {
-    fn is_ready(&self) -> bool {
-        self.ready.load(Ordering::Acquire)
-    }
-}
-
 fn publish_injection_status(
     status_tx: &mpsc::Sender<InjectionStatus>,
-    readiness: &InjectionReadiness,
+    readiness: &AtomicBool,
     status: InjectionStatus,
 ) {
-    readiness
-        .ready
-        .store(matches!(status, InjectionStatus::Ready), Ordering::Release);
+    readiness.store(matches!(status, InjectionStatus::Ready), Ordering::Release);
     let _ = status_tx.send(status);
 }
 
@@ -418,7 +404,7 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
         }
     };
     let (status_tx, status_rx) = mpsc::channel();
-    let readiness = InjectionReadiness::default();
+    let readiness = Arc::new(AtomicBool::new(false));
     let process_alive = Arc::new(AtomicBool::new(true));
     let mut injection_worker = if plan.debug_port != 0 {
         let port = plan.debug_port;
@@ -507,7 +493,7 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                 return Ok(SpawnOutcome {
                     process: OpenProcessResult::Exited {
                         code: status.code().unwrap_or(1),
-                        ui_ready: readiness.is_ready(),
+                        ui_ready: readiness.load(Ordering::Acquire),
                     },
                     owner: Some(owner),
                     cleanup: CleanupDisposition::Burn,
@@ -535,7 +521,7 @@ fn start_injection_worker(
     port: u16,
     options: InjectionOptions,
     status_tx: mpsc::Sender<InjectionStatus>,
-    readiness: InjectionReadiness,
+    readiness: Arc<AtomicBool>,
     process_alive: Arc<AtomicBool>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {

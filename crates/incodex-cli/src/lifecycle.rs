@@ -507,7 +507,7 @@ pub fn run_self_uninstall(parsed: &ParsedCli) -> Result<(), String> {
         println!("no changes made.");
         return Ok(());
     }
-    ensure_confirmed(parsed, "self-uninstall")?;
+    crate::confirm::require("self-uninstall", parsed.yes)?;
     let mut progress = Progress::new();
     if parsed.restore_app {
         crate::install::restore_default_for_self_uninstall(&mut progress)?;
@@ -558,20 +558,4 @@ fn install_prefix(exe: &Path) -> PathBuf {
 fn self_uninstall_paths(exe: &Path) -> [PathBuf; 2] {
     let dir = exe.parent().unwrap_or_else(|| Path::new("."));
     [dir.join("incodex"), dir.join("inc")]
-}
-
-fn ensure_confirmed(parsed: &ParsedCli, command: &str) -> Result<(), String> {
-    if parsed.yes {
-        return Ok(());
-    }
-    if crate::terminal::is_tty() {
-        return if crate::confirm::ask_to_continue()? {
-            Ok(())
-        } else {
-            Err("aborted".into())
-        };
-    }
-    Err(format!(
-        "non-interactive {command} requires --yes\n  incodex {command} --yes"
-    ))
 }

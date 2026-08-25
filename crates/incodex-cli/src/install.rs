@@ -52,7 +52,9 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
         println!("{}", format_warn("Dry run. No files changed.", None));
         return Ok(());
     }
-    ensure_confirmed(parsed, "install")?;
+    if !parsed.clone {
+        crate::confirm::require("install", parsed.yes)?;
+    }
     let official_default = is_official_app(&app, None);
     if parsed.clone && parsed.app.is_none() {
         progress.stage("Cloning official app");
@@ -106,7 +108,9 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
         println!("{}", format_warn("Dry run. No files changed.", None));
         return Ok(());
     }
-    ensure_confirmed(parsed, "uninstall")?;
+    if !parsed.clone {
+        crate::confirm::require("uninstall", parsed.yes)?;
+    }
     if !app.exists() {
         return Err(format!("Codex app not found: {}", app.display()));
     }
@@ -289,22 +293,6 @@ fn print_install_plan(app: &Path, clone: bool, progress: &mut Progress) -> Resul
         println!("{}", format_kv("Backup", "~/.incodex/installations/", None));
     }
     Ok(())
-}
-
-fn ensure_confirmed(parsed: &ParsedCli, command: &str) -> Result<(), String> {
-    if parsed.clone || parsed.dry_run || parsed.yes {
-        return Ok(());
-    }
-    if crate::terminal::is_tty() {
-        return if crate::confirm::ask_to_continue()? {
-            Ok(())
-        } else {
-            Err("aborted".into())
-        };
-    }
-    Err(format!(
-        "non-interactive {command} requires --yes\n  incodex {command} --yes"
-    ))
 }
 
 fn install_app_with_quiescence<G>(

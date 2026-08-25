@@ -76,7 +76,7 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
     } else {
         Err(CliFailure::with_code(
             code.as_i32(),
-            process.failure_message(&cleanup, code),
+            process.failure_message(code),
         ))
     }
 }
