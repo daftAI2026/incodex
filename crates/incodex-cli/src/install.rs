@@ -545,13 +545,6 @@ fn verify_restored_app(app: &Path, official_target: bool) -> Result<(), String> 
     Ok(())
 }
 
-fn current_install_id(app: &Path, root: &Path, archive: &Archive) -> Option<String> {
-    if archive.extract("incodex-loader.cjs").ok()? != loader_source().as_bytes() {
-        return None;
-    }
-    installed_install_id(app, root, archive)
-}
-
 #[cfg(test)]
 fn begin_verified_transaction<F>(
     root: &Path,
@@ -632,7 +625,10 @@ fn inspect_existing_install(
     if !has_loader && !package.already_patched && package.install_id.is_none() {
         return Ok(None);
     }
-    current_install_id(app, root, &archive)
+    if archive.extract(LOADER_NAME).ok().as_deref() != Some(loader_source().as_bytes()) {
+        return Err(unbound_patch_error());
+    }
+    installed_install_id(app, root, &archive)
         .map(Some)
         .ok_or_else(unbound_patch_error)
 }
