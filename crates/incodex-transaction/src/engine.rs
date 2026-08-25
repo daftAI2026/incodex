@@ -21,7 +21,8 @@ use crate::proof::{
 #[cfg(test)]
 use crate::uninstall::replace_live_with_checkpoint;
 use crate::uninstall::{
-    cleanup_transient_paths, remove_path, restore_live_with_quiescence, sync_rename_parents,
+    cleanup_transient_paths, remove_path, remove_transaction_dir, restore_live_with_quiescence,
+    sync_rename_parents,
 };
 use crate::{recover_action_phase, NoopQuiescenceGuard, QuiescenceGuard, Recovery};
 use incodex_core::canonical::{inspect_target, recheck_target, CanonicalTarget};
@@ -537,6 +538,15 @@ where
     if action == Recovery::Done {
         if journal.phase == "COMMITTED" {
             cleanup_transient_paths(root, &journal).map_err(TxError::Other)?;
+        } else if matches_recorded_restore(&live, &journal)
+            .map_err(|message| TxError::Refuse { message })?
+        {
+            if !verify_restored(&live) {
+                return Err(TxError::Other(
+                    "restored target failed codesign verification".into(),
+                ));
+            }
+            remove_transaction_dir(root, &journal).map_err(TxError::Other)?;
         }
         return Ok(RecoverResult { action, journal });
     }

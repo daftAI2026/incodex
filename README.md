@@ -74,7 +74,7 @@ The primary `incodex open` path does not patch Codex. The optional `incodex inst
 
 - An official upgrade wipes the patch. Run `incodex install` again on the **current** official package
 - If Codex has already been upgraded, `incodex uninstall` will not put an old backup back
-- Each original-bundle backup stays inside its native transaction at `~/.incodex/transactions/<install-id>/original/ChatGPT.app`
+- The current original-bundle backup lives at `~/.incodex/transactions/<install-id>/original/ChatGPT.app`; verified uninstall removes it, and a later successful install prunes superseded terminal backups for the same app
 - Homebrew: `brew upgrade incodex`. Script: `incodex update`. Source update: `git pull && cargo install --locked --path crates/incodex-cli`; source removal: `cargo uninstall incodex-cli`
 - The menu supports arrows, Vim `j/k`, digits that run immediately, `V` for version, `q` to quit
 - If a script install cannot find the command, add `~/.local/bin` to PATH

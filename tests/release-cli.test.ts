@@ -216,6 +216,7 @@ describe("release documentation truth", () => {
       expect(readme).toContain(
         "~/.incodex/transactions/<install-id>/original/ChatGPT.app",
       );
+      expect(readme).toMatch(/verified uninstall removes|卸载恢复并验证成功后会删除/);
       expect(readme).not.toContain("~/.incodex/installations/");
       expect(readme).toContain("CLI Runtime");
       expect(readme).toContain("CLI manifest");

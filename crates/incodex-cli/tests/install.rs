@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_asar::{pack_dir, patch_asar, Archive, LOADER_NAME, MARKER_KEY};
 use incodex_macos::{ditto, sign_app, write_asar_integrity};
-use incodex_transaction::{acquire_target_lock, journal_v2, Engine};
+use incodex_transaction::{acquire_target_lock, Engine};
 use sha2::{Digest, Sha256};
 
 #[path = "install/recovery.rs"]
@@ -696,10 +696,5 @@ fn uninstall_yes_app_restores_original_asar() {
         String::from_utf8(archive.extract("index.js").unwrap()).unwrap(),
         "ok\n"
     );
-    assert_eq!(
-        journal_v2(&home.join(".incodex"), &install_id)
-            .unwrap()
-            .phase,
-        "ROLLED_BACK"
-    );
+    assert!(!home.join(".incodex/transactions").join(install_id).exists());
 }

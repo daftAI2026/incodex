@@ -16,7 +16,8 @@ pub use engine::{
 };
 pub use journal::{new_install_id, validate_path_ancestors, JournalV2};
 pub use uninstall::{
-    migrate_legacy_committed, migrate_legacy_committed_with_quiescence, restore_committed,
+    finalize_restored_transaction, migrate_legacy_committed,
+    migrate_legacy_committed_with_quiescence, prune_superseded_terminal, restore_committed,
     restore_committed_with_checkpoint, restore_committed_with_quiescence,
 };
 

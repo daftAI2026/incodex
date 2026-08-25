@@ -11,13 +11,98 @@ use crate::journal::{
 };
 use crate::lock::acquire_target_lock;
 use crate::proof::{
-    directory_identity, parse_identity, record_restore_intent, require_identity, restore_source,
-    tree_digest, validate_tree_digest,
+    directory_identity, matches_recorded_restore, parse_identity, record_restore_intent,
+    require_identity, restore_source, tree_digest, validate_tree_digest,
 };
 use crate::{NoopQuiescenceGuard, QuiescenceGuard};
 
 pub fn restore_committed(root: &Path, install_id: &str, live_path: &Path) -> Result<(), String> {
     restore_committed_with_quiescence(root, install_id, live_path, NoopQuiescenceGuard, |_| {})
+}
+
+pub fn finalize_restored_transaction(
+    root: &Path,
+    install_id: &str,
+    live_path: &Path,
+) -> Result<(), String> {
+    let initial = load_v2(root, install_id)?;
+    if initial.phase != "ROLLED_BACK" {
+        return Err(format!(
+            "cannot finalize transaction {install_id} in phase {}",
+            initial.phase
+        ));
+    }
+    let lock_target = PathBuf::from(&initial.target.real_path);
+    let _lock = acquire_target_lock(root, &lock_target, "uninstall-cleanup", Some(install_id))?;
+    let journal = load_v2(root, install_id)?;
+    if journal.phase != "ROLLED_BACK" {
+        return Err(format!(
+            "transaction changed to phase {} before cleanup",
+            journal.phase
+        ));
+    }
+    reconstructed(root, &journal)?;
+    let live = inspect_target(live_path, None)?.real_path;
+    if Path::new(&journal.target.real_path) != live || !matches_recorded_restore(&live, &journal)? {
+        return Err("restored target changed before transaction cleanup".into());
+    }
+    remove_transaction_dir(root, &journal)
+}
+
+pub fn prune_superseded_terminal(
+    root: &Path,
+    current_install_id: &str,
+    live_path: &Path,
+) -> Result<Vec<String>, String> {
+    let initial = load_v2(root, current_install_id)?;
+    if initial.phase != "COMMITTED" {
+        return Err(format!(
+            "current transaction {current_install_id} is not committed: {}",
+            initial.phase
+        ));
+    }
+    let lock_target = PathBuf::from(&initial.target.real_path);
+    let _lock = acquire_target_lock(
+        root,
+        &lock_target,
+        "install-cleanup",
+        Some(current_install_id),
+    )?;
+    let current = load_v2(root, current_install_id)?;
+    validate_committed_restore_target(root, &current, live_path)?;
+    reconstructed(root, &current)?;
+
+    let transactions = root.join("transactions");
+    let mut removed = Vec::new();
+    for entry in fs::read_dir(&transactions).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if !entry
+            .file_type()
+            .map_err(|error| error.to_string())?
+            .is_dir()
+        {
+            continue;
+        }
+        let install_id = entry.file_name().to_string_lossy().into_owned();
+        if install_id == current_install_id {
+            continue;
+        }
+        let Ok(journal) = load_v2(root, &install_id) else {
+            continue;
+        };
+        if !matches!(journal.phase.as_str(), "COMMITTED" | "ROLLED_BACK")
+            || journal.target.real_path != current.target.real_path
+        {
+            continue;
+        }
+        let paths = reconstructed(root, &journal)?;
+        remove_path(&paths.dir)?;
+        removed.push(install_id);
+    }
+    if !removed.is_empty() {
+        sync_dir(&transactions)?;
+    }
+    Ok(removed)
 }
 
 #[doc(hidden)]
@@ -267,6 +352,12 @@ pub(crate) fn cleanup_transient_paths(root: &Path, journal: &JournalV2) -> Resul
         remove_path(&path)?;
     }
     Ok(())
+}
+
+pub(crate) fn remove_transaction_dir(root: &Path, journal: &JournalV2) -> Result<(), String> {
+    let paths = reconstructed(root, journal)?;
+    remove_path(&paths.dir)?;
+    sync_dir(&root.join("transactions"))
 }
 
 pub(crate) fn replace_live_with_checkpoint<F>(

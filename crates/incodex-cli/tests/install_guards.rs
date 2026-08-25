@@ -278,10 +278,7 @@ fn recover_removes_a_restored_terminal_transaction() {
     let transaction = root.join("transactions").join(&install_id);
     restore_committed(&root, &install_id, &app).unwrap();
 
-    let (status, stdout, stderr) = run(
-        &["recover", "--transaction", install_id.as_str()],
-        &home,
-    );
+    let (status, stdout, stderr) = run(&["recover", "--transaction", install_id.as_str()], &home);
 
     assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
     assert!(

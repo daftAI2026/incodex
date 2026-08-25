@@ -16,9 +16,10 @@ use incodex_runtime_bundle::{ensure_current, loader_source, runtime_version};
 #[cfg(test)]
 use incodex_transaction::NoopQuiescenceGuard;
 use incodex_transaction::{
-    journal_v2, migrate_legacy_committed_with_quiescence, recover_with_quiescence,
-    restore_committed_with_quiescence, validate_backup_snapshot, validate_committed_live_snapshot,
-    Engine, QuiescenceGuard, Recovery, TxError,
+    finalize_restored_transaction, journal_v2, migrate_legacy_committed_with_quiescence,
+    prune_superseded_terminal, recover_with_quiescence, restore_committed_with_quiescence,
+    validate_backup_snapshot, validate_committed_live_snapshot, Engine, QuiescenceGuard, Recovery,
+    TxError,
 };
 use sha2::{Digest, Sha256};
 
@@ -338,12 +339,13 @@ where
     progress.stage("Publishing Runtime");
     let published = ensure_current(root)?;
     if let Some(install_id) = inspect_existing_install(app, root, &asar)? {
+        let warning = prune_warning(root, app, &install_id);
         return Ok(CommandResult {
             skipped: true,
             install_id: Some(install_id),
             runtime_version: Some(published.version),
             app: app.display().to_string(),
-            warning: None,
+            warning,
         });
     }
     if let Ok(archive) = Archive::open(&asar) {
@@ -436,11 +438,20 @@ where
             return Err(rollback_install(&mut tx, Some(&staged), error));
         }
     };
-    let warning = commit.cleanup_warning.map(|error| {
-        format!(
-            "Install committed, but transaction cleanup failed: {error}. Run `incodex recover --transaction {install_id}` to retry cleanup."
-        )
-    });
+    drop(tx);
+    let mut warnings = commit
+        .cleanup_warning
+        .map(|error| {
+            format!(
+                "Install committed, but transaction cleanup failed: {error}. Run `incodex recover --transaction {install_id}` to retry cleanup."
+            )
+        })
+        .into_iter()
+        .collect::<Vec<_>>();
+    if let Some(warning) = prune_warning(root, app, &install_id) {
+        warnings.push(warning);
+    }
+    let warning = (!warnings.is_empty()).then(|| warnings.join(" "));
     let _ = notify_launch_services(app);
     Ok(CommandResult {
         skipped: false,
@@ -543,9 +554,23 @@ where
         )?;
     }
     verify_restored_app(app, official_target)?;
+    finalize_restored_transaction(root, &journal.install_id, app).map_err(|error| {
+        format!(
+            "ChatGPT.app was restored, but transaction {0} could not be removed: {error}. Run `incodex recover --transaction {0}` to retry cleanup.",
+            journal.install_id,
+        )
+    })?;
     progress.stage("Refreshing app registration");
     let _ = notify_launch_services(app);
     Ok(())
+}
+
+fn prune_warning(root: &Path, app: &Path, install_id: &str) -> Option<String> {
+    prune_superseded_terminal(root, install_id, app)
+        .err()
+        .map(|error| {
+            format!("Current install is valid, but old transaction cleanup failed: {error}")
+        })
 }
 
 fn verify_restored_app(app: &Path, official_target: bool) -> Result<(), String> {
