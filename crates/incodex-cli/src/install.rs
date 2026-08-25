@@ -354,62 +354,38 @@ where
         .join("original")
         .join("ChatGPT.app");
     progress.stage("Backing up original app");
-    if let Err(error) = quiescence.ensure_quiescent(app) {
-        return Err(rollback_install(&mut tx, None, error));
-    }
+    rollback_install_result(quiescence.ensure_quiescent(app), &mut tx, None)?;
     snapshot_original(&mut tx, app, &original)?;
     let staged = root
         .join("scratch")
         .join(format!("ChatGPT.app.staged-{install_id}"));
     progress.stage("Patching and signing app");
-    if let Err(error) = quiescence.ensure_quiescent(app) {
-        return Err(rollback_install(&mut tx, Some(&staged), error));
-    }
-    if let Err(error) = ditto(app, &staged) {
-        return Err(rollback_install(&mut tx, Some(&staged), error));
-    }
-    if let Err(error) = quiescence.ensure_quiescent(app) {
-        return Err(rollback_install(&mut tx, Some(&staged), error));
-    }
-    let (hash, _) = match patch_asar(&staged.join(ASAR_REL), loader_source(), Some(&install_id)) {
-        Ok(result) => result,
-        Err(error) => return Err(rollback_install(&mut tx, Some(&staged), error)),
-    };
-    if let Err(error) = write_asar_integrity(&staged, &hash) {
-        return Err(rollback_install(&mut tx, Some(&staged), error));
-    }
-    if let Err(error) = quiescence.ensure_quiescent(app) {
-        return Err(rollback_install(&mut tx, Some(&staged), error));
-    }
+    rollback_install_result(quiescence.ensure_quiescent(app), &mut tx, Some(&staged))?;
+    rollback_install_result(ditto(app, &staged), &mut tx, Some(&staged))?;
+    rollback_install_result(quiescence.ensure_quiescent(app), &mut tx, Some(&staged))?;
+    let (hash, _) = rollback_install_result(
+        patch_asar(&staged.join(ASAR_REL), loader_source(), Some(&install_id)),
+        &mut tx,
+        Some(&staged),
+    )?;
+    rollback_install_result(write_asar_integrity(&staged, &hash), &mut tx, Some(&staged))?;
+    rollback_install_result(quiescence.ensure_quiescent(app), &mut tx, Some(&staged))?;
     if is_official_app(app, None) || verify_app(app) || app.join("Contents/MacOS").exists() {
-        if let Err(err) = sign_app(&staged) {
-            return Err(rollback_install(&mut tx, Some(&staged), err));
-        }
+        rollback_install_result(sign_app(&staged), &mut tx, Some(&staged))?;
     }
     progress.stage("Replacing the app");
-    if let Err(error) = quiescence.ensure_quiescent(app) {
-        return Err(rollback_install(&mut tx, Some(&staged), error));
-    }
-    if let Err(error) = tx.place_staging(&staged) {
-        return Err(rollback_install(&mut tx, Some(&staged), error));
-    }
-    if let Err(error) = quiescence.ensure_quiescent(app) {
-        return Err(rollback_install(&mut tx, Some(&staged), error));
-    }
-    if let Err(error) = tx.swap() {
-        return Err(rollback_install(&mut tx, Some(&staged), error));
-    }
+    rollback_install_result(quiescence.ensure_quiescent(app), &mut tx, Some(&staged))?;
+    rollback_install_result(tx.place_staging(&staged), &mut tx, Some(&staged))?;
+    rollback_install_result(quiescence.ensure_quiescent(app), &mut tx, Some(&staged))?;
+    rollback_install_result(tx.swap(), &mut tx, Some(&staged))?;
     progress.stage("Verifying installation");
-    if let Err(error) = verify_patched_adhoc_bundle_deep_strict(app, expected_plist.as_ref()) {
-        let error = format!("post-swap codesign verification failed: {error}");
-        return Err(rollback_install(&mut tx, Some(&staged), error));
-    }
-    let commit = match tx.commit() {
-        Ok(result) => result,
-        Err(error) => {
-            return Err(rollback_install(&mut tx, Some(&staged), error));
-        }
-    };
+    rollback_install_result(
+        verify_patched_adhoc_bundle_deep_strict(app, expected_plist.as_ref())
+            .map_err(|error| format!("post-swap codesign verification failed: {error}")),
+        &mut tx,
+        Some(&staged),
+    )?;
+    let commit = rollback_install_result(tx.commit(), &mut tx, Some(&staged))?;
     let warning = commit.cleanup_warning.map(|error| {
         format!(
             "Install committed, but transaction cleanup failed: {error}. Run `incodex recover --transaction {install_id}` to retry cleanup."
@@ -431,6 +407,14 @@ fn rollback_install(tx: &mut Engine, scratch: Option<&Path>, error: String) -> S
         _ => tx.rollback(&error).err(),
     };
     finish_rollback(tx, scratch, error, rollback_error)
+}
+
+fn rollback_install_result<T>(
+    result: Result<T, String>,
+    tx: &mut Engine,
+    scratch: Option<&Path>,
+) -> Result<T, String> {
+    result.map_err(|error| rollback_install(tx, scratch, error))
 }
 
 fn finish_rollback(
