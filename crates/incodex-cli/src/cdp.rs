@@ -171,6 +171,10 @@ pub fn validate_ui_probe_result_for_options(
 }
 
 pub fn validate_cdp_websocket_url(url: &str, expected_port: u16) -> Result<(), String> {
+    websocket_socket_addr(url, expected_port).map(|_| ())
+}
+
+fn websocket_socket_addr(url: &str, expected_port: u16) -> Result<SocketAddr, String> {
     let uri: tungstenite::http::Uri = url
         .parse()
         .map_err(|err| format!("invalid CDP WebSocket URL: {err}"))?;
@@ -193,7 +197,7 @@ pub fn validate_cdp_websocket_url(url: &str, expected_port: u16) -> Result<(), S
             uri.port_u16()
         ));
     }
-    Ok(())
+    Ok(SocketAddr::new(ip, expected_port))
 }
 
 pub fn pick_codex_page_target(targets: &[CdpTarget]) -> Option<&CdpTarget> {
@@ -472,7 +476,7 @@ fn monitor_primary_target(debug_port: u16, primary_target_id: &str, process_aliv
 }
 
 fn browser_close_message() -> Value {
-    json!({ "id": 1, "method": "Browser.close", "params": {} })
+    cdp_command(1, "Browser.close", json!({}))
 }
 
 fn close_browser(debug_port: u16) -> Result<(), String> {
@@ -521,6 +525,10 @@ fn send_cdp(
     result
 }
 
+fn cdp_command(id: u64, method: &str, params: Value) -> Value {
+    json!({ "id": id, "method": method, "params": params })
+}
+
 fn send_cdp_with_deadline<S: Read + Write>(
     socket: &mut WebSocket<S>,
     id: u64,
@@ -528,7 +536,7 @@ fn send_cdp_with_deadline<S: Read + Write>(
     params: Value,
     deadline: Instant,
 ) -> Result<Value, String> {
-    let body = json!({ "id": id, "method": method, "params": params });
+    let body = cdp_command(id, method, params);
     let message = Message::Text(body.to_string().into());
 
     // 先把命令写入 WebSocket 缓冲区；即使底层只写了一部分，也只能重试 flush。
@@ -634,21 +642,6 @@ fn connect_cdp_websocket(
         .set_write_timeout(Some(CDP_IO_TIMEOUT))
         .map_err(|error| error.to_string())?;
     Ok((socket, response))
-}
-
-fn websocket_socket_addr(url: &str, expected_port: u16) -> Result<SocketAddr, String> {
-    let uri: tungstenite::http::Uri = url
-        .parse()
-        .map_err(|error| format!("invalid CDP WebSocket URL: {error}"))?;
-    validate_cdp_websocket_url(url, expected_port)?;
-    let host = uri.host().ok_or("CDP WebSocket URL has no host")?;
-    let ip: IpAddr = host
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .parse()
-        .map_err(|_| "CDP WebSocket host must be a loopback IP address".to_string())?;
-    let port = uri.port_u16().ok_or("CDP WebSocket URL has no port")?;
-    Ok(SocketAddr::new(ip, port))
 }
 
 fn list_targets(debug_port: u16) -> Result<Vec<CdpTarget>, String> {
