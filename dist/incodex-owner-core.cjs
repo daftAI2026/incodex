@@ -22,8 +22,17 @@ function targetIdFromExec(execPath) {
 function targetStateDir(userRoot, execPath) {
     return path.join(userRoot, "targets", targetIdFromExec(execPath));
 }
-function ownerPortFromExec(execPath) {
-    const uid = arguments.length > 1 ? arguments[1] : (typeof process.getuid === "function" ? process.getuid() : 0);
+function ownerPortFromExec(execPath, uidOverride) {
+    let uid;
+    if (arguments.length > 1) {
+        uid = uidOverride;
+    }
+    else if (typeof process.getuid === "function") {
+        uid = process.getuid();
+    }
+    else {
+        uid = 0;
+    }
     const digest = crypto.createHash("sha256").update(`${uid}:${execPath || "unknown"}`).digest();
     return OWNER_PORT_BASE + digest.readUInt32BE(0) % OWNER_PORT_SPAN;
 }

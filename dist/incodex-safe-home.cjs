@@ -550,9 +550,13 @@ function sweepOrphanSessions(userRoot, options = {}) {
             const expectedStart = owner.processStartIdentity || owner.startedAt;
             if (expectedStart && !ownerCore.isCanonicalProcessStartIdentity(expectedStart))
                 continue;
-            const status = options.pidAlive
-                ? (options.pidAlive(owner.pid) ? "live" : "dead")
-                : processStatus(owner.pid);
+            let status;
+            if (options.pidAlive) {
+                status = options.pidAlive(owner.pid) ? "live" : "dead";
+            }
+            else {
+                status = processStatus(owner.pid);
+            }
             if (status === "unknown")
                 continue;
             if (status === "live") {
