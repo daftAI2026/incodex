@@ -39,6 +39,12 @@ function updateReadme(source: string, version: string, path: string): string {
   );
   next = replaceRequired(
     next,
+    /^(\s+CLI Runtime\s+)\d+\.\d+\.\d+(\s*)$/gm,
+    `$1${version}$2`,
+    `${path} CLI Runtime versions`,
+  );
+  next = replaceRequired(
+    next,
     /^(\s+Version\s+)\d+\.\d+\.\d+(\s*)$/m,
     `$1${version}$2`,
     `${path} doctor Runtime version`,
