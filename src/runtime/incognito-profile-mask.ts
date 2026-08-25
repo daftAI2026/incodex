@@ -133,16 +133,6 @@ export function findProfileMenuIdentity(profileMenu: HTMLElement): HTMLElement |
   );
 }
 
-type ProfileMenuTarget = {
-  identity: HTMLElement | null;
-};
-
-function findProfileMenuTarget(profileFooter: HTMLElement): ProfileMenuTarget | null {
-  const profileMenu = findControlledProfileMenu(profileFooter);
-  if (!profileMenu) return null;
-  return { identity: findProfileMenuIdentity(profileMenu) };
-}
-
 function writeProfileAvatar(avatar: HTMLElement, mask: ResolvedProfileMask): boolean {
   if (avatar instanceof HTMLImageElement) {
     avatar.src = mask.avatarDataUrl;
@@ -181,9 +171,11 @@ function ensureIdentityMask(
 }
 
 function ensureProfileMenuMask(profileFooter: HTMLElement, mask: ResolvedProfileMask): void {
-  const profileMenu = findProfileMenuTarget(profileFooter);
-  if (!profileMenu?.identity) return;
-  ensureIdentityMask(profileMenu.identity, PROFILE_MENU_IDENTITY_SELECTORS, mask);
+  const profileMenu = findControlledProfileMenu(profileFooter);
+  if (!profileMenu) return;
+  const menuIdentity = findProfileMenuIdentity(profileMenu);
+  if (!menuIdentity) return;
+  ensureIdentityMask(menuIdentity, PROFILE_MENU_IDENTITY_SELECTORS, mask);
 }
 
 export function ensureProfileMask(): void {
@@ -266,9 +258,9 @@ export function profileMaskHealth(): boolean {
   if (!identityMaskHealth(profileFooter, PROFILE_FOOTER_IDENTITY_SELECTORS, mask)) {
     return false;
   }
-  const profileMenu = findProfileMenuTarget(profileFooter);
+  const profileMenu = findControlledProfileMenu(profileFooter);
   if (!profileMenu) return true;
-  const menuIdentity = profileMenu.identity;
+  const menuIdentity = findProfileMenuIdentity(profileMenu);
   if (!menuIdentity) return false;
   return identityMaskHealth(menuIdentity, PROFILE_MENU_IDENTITY_SELECTORS, mask);
 }
