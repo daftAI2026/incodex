@@ -5,6 +5,7 @@ pub mod confirm;
 pub mod diagnose;
 pub(crate) mod diagnose_checks;
 pub(crate) mod diagnose_format;
+mod diagnose_runtime;
 pub(crate) mod diagnose_signing;
 pub(crate) mod friendly_name;
 pub mod help;

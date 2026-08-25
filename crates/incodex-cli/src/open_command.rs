@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
+use incodex_runtime_bundle::ensure_current;
 
 use crate::parse::ParsedCli;
 use crate::profile_mask::resolve_profile_mask;
@@ -43,7 +44,10 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
         return Ok(());
     }
 
+    // Validate the executable before touching Runtime or creating a session.
+    describe_incognito_open(&app_path).map_err(CliFailure::from)?;
     let root = user_root();
+    ensure_current(&root).map_err(CliFailure::from)?;
     let source = default_source_home();
     let plan = prepare_incognito_open_with_profile_mask(
         &app_path,

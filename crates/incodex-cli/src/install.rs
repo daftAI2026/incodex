@@ -12,7 +12,7 @@ use incodex_macos::{
     verify_original_vendor_bundle, verify_patched_adhoc_bundle_deep_strict, write_asar_integrity,
     OFFICIAL_BUNDLE_IDENTIFIER,
 };
-use incodex_runtime_bundle::{loader_source, publish, runtime_version};
+use incodex_runtime_bundle::{ensure_current, loader_source, runtime_version};
 #[cfg(test)]
 use incodex_transaction::NoopQuiescenceGuard;
 use incodex_transaction::{
@@ -314,7 +314,7 @@ where
         ensure_official_target_is_verified(app)?;
     }
     progress.stage("Publishing Runtime");
-    let published = publish(root)?;
+    let published = ensure_current(root)?;
     if let Some(install_id) = inspect_existing_install(app, root, &asar)? {
         return Ok(CommandResult {
             skipped: true,

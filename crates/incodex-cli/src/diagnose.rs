@@ -1,19 +1,22 @@
 use std::fs::{self, File};
 use std::io::Read;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use incodex_asar::Archive;
 use incodex_core::canonical::is_official_app;
-use incodex_core::paths::{user_root, ASAR_REL, RUNTIME_CURRENT_NAME, RUNTIME_DIR_NAME};
+use incodex_core::paths::{user_root, ASAR_REL};
 use incodex_core::target_id;
 use incodex_macos::{
     diagnose_spctl, inspect_signing_inventory, read_architecture, read_asar_integrity,
     read_plist_info, validate_generic_signing_inventory, validate_signing_inventory,
 };
 use incodex_transaction::{journal_v2, load_journal, validate_backup_snapshot};
+
+use crate::diagnose_runtime::inspect_external_runtime;
+pub use crate::diagnose_runtime::ExternalRuntimeReport;
 
 use crate::diagnose_signing::{
     inspect_outer, inspect_signing, not_requested_signing, not_requested_spctl,
@@ -23,17 +26,6 @@ use crate::diagnose_checks::{
     empty_checks, scan_journals, scan_owner_processes, scan_sessions, CheckResult, CheckStatus,
     DiagnosticChecks, DiagnosticFinding, JournalRecord,
 };
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ExternalRuntimeReport {
-    pub status: CheckStatus,
-    pub present: bool,
-    pub ok: bool,
-    pub version: Option<String>,
-    pub release: Option<String>,
-    pub error: Option<String>,
-}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -258,208 +250,6 @@ pub fn diagnose_with_root_mode(app_path: &Path, root: &Path, mode: DiagnosisMode
     }
 }
 
-fn inspect_external_runtime(root: &Path) -> (ExternalRuntimeReport, CheckResult) {
-    let runtime_root = root.join(RUNTIME_DIR_NAME);
-    let current = runtime_root.join(RUNTIME_CURRENT_NAME);
-    if is_symlink(&runtime_root) {
-        let error = "runtime root is a symlink".to_string();
-        return (
-            ExternalRuntimeReport {
-                status: CheckStatus::Checked,
-                present: true,
-                ok: false,
-                version: None,
-                release: None,
-                error: Some(error.clone()),
-            },
-            CheckResult::checked(vec![DiagnosticFinding::warning(
-                "runtime.symlink",
-                error,
-                Some(&runtime_root),
-            )]),
-        );
-    }
-    if is_symlink(&current) {
-        let error = "current.json is a symlink".to_string();
-        return (
-            ExternalRuntimeReport {
-                status: CheckStatus::Checked,
-                present: true,
-                ok: false,
-                version: None,
-                release: None,
-                error: Some(error.clone()),
-            },
-            CheckResult::checked(vec![DiagnosticFinding::warning(
-                "runtime.symlink",
-                error,
-                Some(&current),
-            )]),
-        );
-    }
-    if !current.exists() {
-        let report = ExternalRuntimeReport {
-            status: CheckStatus::Checked,
-            present: false,
-            ok: false,
-            version: None,
-            release: None,
-            error: Some("missing current.json".to_string()),
-        };
-        return (
-            report,
-            CheckResult::checked(vec![DiagnosticFinding::info(
-                "runtime.missing",
-                "external Runtime has not been published",
-                Some(&current),
-            )]),
-        );
-    }
-    match verify_external_runtime(root, &current) {
-        Ok((version, release)) => (
-            ExternalRuntimeReport {
-                status: CheckStatus::Checked,
-                present: true,
-                ok: true,
-                version: Some(version),
-                release: Some(release),
-                error: None,
-            },
-            CheckResult::checked(Vec::new()),
-        ),
-        Err(error) => (
-            ExternalRuntimeReport {
-                status: CheckStatus::Checked,
-                present: true,
-                ok: false,
-                version: None,
-                release: None,
-                error: Some(error.clone()),
-            },
-            CheckResult::checked(vec![DiagnosticFinding::warning(
-                if error.contains("symlink") {
-                    "runtime.symlink"
-                } else {
-                    "runtime.invalid"
-                },
-                error,
-                Some(&current),
-            )]),
-        ),
-    }
-}
-
-fn verify_external_runtime(root: &Path, current_path: &Path) -> Result<(String, String), String> {
-    let body = fs::read(current_path).map_err(|error| error.to_string())?;
-    let current: serde_json::Value =
-        serde_json::from_slice(&body).map_err(|error| error.to_string())?;
-    if current
-        .get("schemaVersion")
-        .and_then(serde_json::Value::as_u64)
-        != Some(1)
-    {
-        return Err("invalid current.json schema".to_string());
-    }
-    let version = required_string(&current, "version")?;
-    let release = required_string(&current, "release")?;
-    if !safe_relative(&release) {
-        return Err("runtime release is not a safe relative path".to_string());
-    }
-    let runtime_root = root.join(RUNTIME_DIR_NAME);
-    reject_symlink(&runtime_root, "runtime root")?;
-    let release_dir = runtime_root.join(&release);
-    reject_symlink(&release_dir, "runtime release")?;
-    let release_real = fs::canonicalize(&release_dir).map_err(|error| error.to_string())?;
-    let runtime_real = fs::canonicalize(&runtime_root).map_err(|error| error.to_string())?;
-    if !release_real.starts_with(&runtime_real) {
-        return Err("runtime release escaped runtime root".to_string());
-    }
-    let files = current
-        .get("files")
-        .and_then(serde_json::Value::as_object)
-        .ok_or("runtime files are missing")?;
-    if files.is_empty() {
-        return Err("runtime files are empty".to_string());
-    }
-    for name in incodex_runtime_bundle::required_runtime_files() {
-        if !files.contains_key(name) {
-            return Err(format!("runtime file is missing: {name}"));
-        }
-    }
-    for (name, expected) in files {
-        if !safe_relative(name) {
-            return Err(format!("runtime file is not a safe relative path: {name}"));
-        }
-        let expected = expected
-            .as_str()
-            .filter(|hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
-            .ok_or_else(|| format!("runtime hash is invalid: {name}"))?;
-        let path = release_dir.join(name);
-        reject_symlink(&path, "runtime file")?;
-        let file_real = fs::canonicalize(&path).map_err(|error| error.to_string())?;
-        if !file_real.starts_with(&release_real) {
-            return Err(format!("runtime file escaped release: {name}"));
-        }
-        let actual = hash_file(&path).ok_or_else(|| format!("runtime file is missing: {name}"))?;
-        if actual != expected {
-            return Err(format!("runtime hash mismatch: {name}"));
-        }
-    }
-    let manifest_hash = current.get("manifestSha256");
-    let source_commit = current.get("sourceCommit");
-    match (manifest_hash, source_commit) {
-        (None, None) => {}
-        (Some(manifest_hash), Some(source_commit)) => {
-            let manifest_hash = manifest_hash
-                .as_str()
-                .filter(|hash| is_lower_sha256(hash))
-                .ok_or("runtime manifestSha256 is invalid")?;
-            let source_commit = source_commit
-                .as_str()
-                .filter(|commit| is_source_commit(commit))
-                .ok_or("runtime sourceCommit is invalid")?;
-            let expected_release = format!("{version}-{manifest_hash}");
-            if release_real.file_name().and_then(|name| name.to_str())
-                != Some(expected_release.as_str())
-            {
-                return Err("runtime release name does not match manifest hash".to_string());
-            }
-            let manifest_path = release_dir.join("runtime-manifest.json");
-            reject_symlink(&manifest_path, "runtime manifest")?;
-            let actual_manifest_hash =
-                hash_file(&manifest_path).ok_or("runtime manifest is missing")?;
-            if actual_manifest_hash != manifest_hash {
-                return Err("runtime manifest hash mismatch".to_string());
-            }
-            let manifest_body = fs::read(&manifest_path).map_err(|error| error.to_string())?;
-            let manifest: serde_json::Value = serde_json::from_slice(&manifest_body)
-                .map_err(|error| format!("invalid runtime manifest: {error}"))?;
-            if manifest
-                .get("runtimeVersion")
-                .and_then(serde_json::Value::as_str)
-                != Some(version.as_str())
-                || manifest
-                    .get("sourceCommit")
-                    .and_then(serde_json::Value::as_str)
-                    != Some(source_commit)
-            {
-                return Err("runtime manifest provenance mismatch".to_string());
-            }
-            let manifest_files = manifest
-                .get("files")
-                .and_then(serde_json::Value::as_object)
-                .ok_or("runtime manifest files are missing")?;
-            for name in incodex_runtime_bundle::required_runtime_files() {
-                if manifest_files.get(name) != files.get(name) {
-                    return Err(format!("runtime manifest entry mismatch: {name}"));
-                }
-            }
-        }
-        _ => return Err("runtime manifest pointer fields must be paired".to_string()),
-    }
-    Ok((version, release))
-}
-
 fn inspect_backup(
     root: &Path,
     app_path: &Path,
@@ -593,40 +383,6 @@ fn is_symlink(path: &Path) -> bool {
     fs::symlink_metadata(path)
         .map(|metadata| metadata.file_type().is_symlink())
         .unwrap_or(false)
-}
-
-fn required_string(raw: &serde_json::Value, key: &str) -> Result<String, String> {
-    raw.get(key)
-        .and_then(serde_json::Value::as_str)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .ok_or_else(|| format!("runtime {key} is missing"))
-}
-
-fn is_lower_sha256(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
-
-fn is_source_commit(value: &str) -> bool {
-    value.is_empty() || (value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
-}
-
-fn safe_relative(value: &str) -> bool {
-    !value.is_empty()
-        && !Path::new(value).is_absolute()
-        && Path::new(value)
-            .components()
-            .all(|component| matches!(component, Component::Normal(_)))
-}
-
-fn reject_symlink(path: &Path, label: &str) -> Result<(), String> {
-    if is_symlink(path) {
-        return Err(format!("{label} is a symlink: {}", path.display()));
-    }
-    Ok(())
 }
 
 fn hash_file(path: &Path) -> Option<String> {
