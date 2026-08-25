@@ -109,6 +109,8 @@ Incodex 会改本机已安装的 Electron 应用包。高风险操作默认要�
 
 ### Open without patching
 
+`open` 使用一份全新的隔离 Chromium 档案和 `CODEX_HOME` 启动官方 Codex 二进制。登录和使用所需的基础配置会保留，但旧对话不会进入这扇窗口，官方应用也不会被修改或重新签名。正常关窗后，隔离会话会被清掉。
+
 ```bash
 $ incodex open --dry-run
 
@@ -118,7 +120,7 @@ $ incodex open --dry-run
   ! Dry run. No window opened.
 ```
 
-关窗后隔离会话会被清掉：
+打开窗口：
 
 ```bash
 $ incodex open
@@ -134,11 +136,15 @@ $ incodex open
 需要临时视觉身份时，只在 `open` 路径加 `--mask`：
 
 ```bash
-$ incodex open --mask
+$ incodex open --mask                                      # 随机名字和生成头像
+$ incodex open --mask --name "Quiet Otter"                # 指定名字和生成头像
+$ incodex open --mask --avatar ./avatar.png                # 随机名字和本地头像
 $ incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
 ```
 
-遮罩只改当前无痕 renderer 的 profile footer 与已打开账号菜单中的身份行，不改真实账号。
+没有 `--name` 时，每次启动会获得一个友好的随机两词名字；没有 `--avatar` 时，Incodex 会根据最终名字离线生成头像，因此同一个名字会得到同一个头像。自定义头像必须是普通本地 PNG、JPEG 或 WebP 文件，且不超过 5 MiB；原文件不会被修改，显示时会居中放进 Codex 的圆形头像槽。`--name` 和 `--avatar` 都必须与 `--mask` 一起使用，含空格的名字需要 shell 引号。
+
+遮罩只改当前无痕窗口的 profile footer 与账号菜单身份行，不改真实账号、认证或已存资料。
 如果遮罩无法挂载，或在 renderer 重挂载后无法恢复，Incodex 会关闭该窗口，而不是暴露真实身份。
 
 ### Install

@@ -109,6 +109,8 @@ Run `inc` in a terminal:
 
 ### Open without patching
 
+`open` starts the official Codex binary with a fresh isolated Chromium profile and `CODEX_HOME`. It keeps the login and base configuration needed for use, but does not bring old chats into the window or modify and re-sign the official app. A normal close burns the isolated session.
+
 ```bash
 $ incodex open --dry-run
 
@@ -118,7 +120,7 @@ $ incodex open --dry-run
   ! Dry run. No window opened.
 ```
 
-Closing the window burns the isolated session:
+Open the window:
 
 ```bash
 $ incodex open
@@ -131,14 +133,18 @@ $ incodex open
   ✓ Closed. Isolated session removed.
 ```
 
-For a temporary visual identity, use `--mask` on the open path only:
+For a temporary visual identity, use `--mask` on the `open` path only:
 
 ```bash
-$ incodex open --mask
+$ incodex open --mask                                      # Random name and generated avatar
+$ incodex open --mask --name "Quiet Otter"                # Chosen name and generated avatar
+$ incodex open --mask --avatar ./avatar.png                # Random name and local avatar
 $ incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
 ```
 
-The mask changes only the current incognito renderer's profile footer and the identity row in its open account menu. It does not change the real account.
+Without `--name`, each launch gets a friendly random two-word name. Without `--avatar`, Incodex generates an offline avatar from the final name, so the same name produces the same avatar. A custom avatar must be a regular local PNG, JPEG, or WebP no larger than 5 MiB; the original file is left unchanged and centered into Codex's circular avatar slot. `--name` and `--avatar` require `--mask`, and names containing spaces need shell quotes.
+
+The mask changes only the current incognito window's profile footer and account-menu identity row. It does not change the real account, authentication, or stored profile.
 If the mask cannot mount or later recover after a renderer remount, Incodex closes that window rather than expose the real identity.
 
 ### Install
