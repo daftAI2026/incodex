@@ -7,6 +7,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use incodex_asar::{pack_dir, Archive, LOADER_NAME, MARKER_KEY};
 use incodex_macos::sign_app;
+use incodex_transaction::restore_committed;
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 static TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -247,6 +248,21 @@ fn a_new_install_removes_the_superseded_committed_backup() {
     fs::remove_dir_all(&app).unwrap();
     let replacement = patchable_app(&home);
     let second_install_id = install(&home, &replacement);
+
+    assert_ne!(first_install_id, second_install_id);
+    assert_eq!(transaction_ids(&home), vec![second_install_id]);
+}
+
+#[test]
+fn a_new_install_removes_a_superseded_restored_backup() {
+    let _guard = serialize_signing();
+    let home = home();
+    let app = patchable_app(&home);
+    let first_install_id = install(&home, &app);
+    let root = home.join(".incodex");
+    restore_committed(&root, &first_install_id, &app).unwrap();
+
+    let second_install_id = install(&home, &app);
 
     assert_ne!(first_install_id, second_install_id);
     assert_eq!(transaction_ids(&home), vec![second_install_id]);
