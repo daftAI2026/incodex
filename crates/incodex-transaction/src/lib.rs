@@ -199,9 +199,8 @@ pub fn load_journal(install_id: &str, root: &Path) -> Option<Journal> {
 
 pub fn list_journals(root: &Path) -> Vec<Journal> {
     let dir = root.join("transactions");
-    let entries = match fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(_) => return Vec::new(),
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
     };
     let mut out = Vec::new();
     for entry in entries.flatten() {

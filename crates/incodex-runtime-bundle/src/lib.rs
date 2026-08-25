@@ -67,9 +67,10 @@ pub fn required_runtime_files() -> impl Iterator<Item = &'static str> {
 }
 
 pub fn runtime_version() -> String {
-    embedded_manifest()
-        .map(|manifest| manifest.version)
-        .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string())
+    embedded_manifest().map_or_else(
+        |_| env!("CARGO_PKG_VERSION").to_string(),
+        |manifest| manifest.version,
+    )
 }
 
 pub fn publish(user_root: &Path) -> Result<PublishedRuntime, String> {
@@ -85,6 +86,7 @@ where
     validate_path_component(&version, "runtime version")?;
     let manifest_hash = sha256_hex(MANIFEST.as_bytes());
     let release_name = format!("{version}-{manifest_hash}");
+    let release = format!("releases/{release_name}");
 
     let root = user_root.join("runtime");
     mkdir_mode(&root)?;
@@ -133,7 +135,7 @@ where
     let current = serde_json::json!({
         "schemaVersion": CURRENT_SCHEMA,
         "version": version,
-        "release": format!("releases/{release_name}"),
+        "release": release,
         "manifestSha256": manifest_hash,
         "sourceCommit": manifest.source_commit,
         "files": files,
@@ -143,10 +145,7 @@ where
         serde_json::to_string_pretty(&current).map_err(|error| error.to_string())?
     );
     write_current(&root, current_body.as_bytes(), &mut hook)?;
-    Ok(PublishedRuntime {
-        version,
-        release: format!("releases/{release_name}"),
-    })
+    Ok(PublishedRuntime { version, release })
 }
 
 fn embedded_manifest() -> Result<EmbeddedManifest, String> {
@@ -326,19 +325,20 @@ fn write_current<F>(root: &Path, body: &[u8], hook: &mut F) -> Result<(), String
 where
     F: FnMut(&str),
 {
+    let current = root.join("current.json");
     let temporary = root.join(format!(
         ".current.json.tmp-{}-{}",
         std::process::id(),
         unique_suffix()
     ));
     write_durable(&temporary, body)?;
-    if let Ok(metadata) = fs::symlink_metadata(root.join("current.json")) {
+    if let Ok(metadata) = fs::symlink_metadata(&current) {
         if metadata.file_type().is_symlink() {
             return Err("refusing symlink current.json".into());
         }
     }
     hook("current-rename-before");
-    fs::rename(&temporary, root.join("current.json")).map_err(|error| error.to_string())?;
+    fs::rename(&temporary, current).map_err(|error| error.to_string())?;
     hook("current-rename-after");
     sync_dir(root)
 }
@@ -373,8 +373,7 @@ fn validate_source_commit(value: &str) -> Result<(), String> {
 fn unique_suffix() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0)
+        .map_or(0, |duration| duration.as_nanos())
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {

@@ -85,16 +85,15 @@ impl Archive {
         let raw: Value = serde_json::from_slice(&self.extract("package.json")?)
             .map_err(|err| err.to_string())?;
         let marker = raw.get(MARKER_KEY);
-        let original = marker
+        let original_main = marker
             .and_then(|m| m.get("originalMain"))
-            .and_then(Value::as_str)
-            .map(str::to_string);
-        let main = original
-            .clone()
-            .or_else(|| raw.get("main").and_then(Value::as_str).map(str::to_string))
-            .unwrap_or_default();
+            .and_then(Value::as_str);
+        let main = original_main
+            .or_else(|| raw.get("main").and_then(Value::as_str))
+            .unwrap_or_default()
+            .to_string();
         Ok(PackageMain {
-            already_patched: original.is_some(),
+            already_patched: original_main.is_some(),
             install_id: marker
                 .and_then(|m| m.get("installId"))
                 .and_then(Value::as_str)
@@ -140,7 +139,7 @@ pub fn patch_asar(
     if pkg_main.main.is_empty() {
         return Err("package.json has no main".into());
     }
-    let keep_main = pkg_main.main.clone();
+    let keep_main = pkg_main.main;
     let mut pkg: Value =
         serde_json::from_slice(&archive.extract("package.json")?).map_err(|err| err.to_string())?;
     pkg["main"] = json!(LOADER_NAME);
@@ -183,8 +182,8 @@ fn list_files(files: &Map<String, Value>, prefix: &str, out: &mut Vec<String>) {
         } else {
             format!("{prefix}/{name}")
         };
-        if files_of(node).is_some() {
-            list_files(files_of(node).unwrap(), &path, out);
+        if let Some(children) = files_of(node) {
+            list_files(children, &path, out);
         } else {
             out.push(path);
         }
@@ -270,7 +269,7 @@ fn collect_pack(
                 .replace('\\', "/");
             let unpacked = unpacked_prefixes
                 .iter()
-                .any(|prefix| rel == *prefix || rel.starts_with(&format!("{prefix}/")));
+                .any(|prefix| has_path_prefix(&rel, prefix));
             if unpacked {
                 let unpacked_path =
                     PathBuf::from(format!("{}.unpacked", dest.display())).join(&rel);
@@ -325,6 +324,13 @@ fn copy_tree(
     Ok(())
 }
 
+fn has_path_prefix(path: &str, prefix: &str) -> bool {
+    path == prefix
+        || path
+            .strip_prefix(prefix)
+            .is_some_and(|remainder| remainder.starts_with('/'))
+}
+
 fn insert_packed_file(
     files: &mut Map<String, Value>,
     blobs: &mut Vec<u8>,
@@ -373,14 +379,13 @@ fn write_archive(dest: &Path, files: &Map<String, Value>, blobs: &[u8]) -> Resul
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent).map_err(|err| err.to_string())?;
     }
-    fs::write(dest, out).map_err(|err| err.to_string())?;
-    Ok(())
+    fs::write(dest, out).map_err(|err| err.to_string())
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
-        .map(|b| format!("{b:02x}"))
+        .map(|byte| format!("{byte:02x}"))
         .collect()
 }
 

@@ -9,7 +9,10 @@ use std::time::{Duration, Instant};
 mod app_termination;
 mod entitlements;
 mod live_window;
+#[cfg(target_os = "macos")]
+mod live_window_macos;
 mod session_process;
+mod signature_inspection;
 mod signing;
 mod signing_outer;
 mod signing_policy;
@@ -303,15 +306,7 @@ pub fn read_plist_info(app: &Path) -> Option<PlistInfo> {
     if !plist.exists() {
         return None;
     }
-    let output = Command::new("plutil")
-        .args(["-convert", "json", "-o", "-", "--"])
-        .arg(&plist)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let raw: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    let raw = read_plist_json(&plist)?;
     Some(PlistInfo {
         bundle_identifier: json_string(&raw, "CFBundleIdentifier"),
         app_version: json_string(&raw, "CFBundleShortVersionString"),
@@ -374,6 +369,14 @@ pub fn read_architecture(app: &Path, executable: &str) -> Option<String> {
 
 pub fn read_asar_integrity(app: &Path) -> Option<String> {
     let plist = app.join("Contents").join("Info.plist");
+    let raw = read_plist_json(&plist)?;
+    raw.pointer("/ElectronAsarIntegrity/Resources~1app.asar/hash")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn read_plist_json(plist: &Path) -> Option<serde_json::Value> {
     let output = Command::new("plutil")
         .args(["-convert", "json", "-o", "-", "--"])
         .arg(plist)
@@ -382,11 +385,7 @@ pub fn read_asar_integrity(app: &Path) -> Option<String> {
     if !output.status.success() {
         return None;
     }
-    let raw: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
-    raw.pointer("/ElectronAsarIntegrity/Resources~1app.asar/hash")
-        .and_then(serde_json::Value::as_str)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
+    serde_json::from_slice(&output.stdout).ok()
 }
 
 pub fn diagnose_spctl(app: &Path) -> serde_json::Value {

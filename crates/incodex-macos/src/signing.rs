@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::entitlements::add_entitlement_key;
+use super::signature_inspection::{has_identity_evidence, inspect_codesign};
 use super::signing_policy::validate_generic_nested_components;
 use super::{read_plist_info, PlistInfo};
 
@@ -286,10 +287,7 @@ pub fn validate_generic_signing_inventory(inventory: &SigningInventory) -> Resul
         }
         SignatureKind::Vendor => validate_vendor_component(&inventory.outer, "outer bundle")?,
         SignatureKind::Other => {
-            if inventory.outer.identifier.is_none()
-                || inventory.outer.team_identifier.is_none()
-                || inventory.outer.authorities.is_empty()
-            {
+            if !has_identity_evidence(&inventory.outer) {
                 return Err("third-party outer signature lacks identity evidence".into());
             }
             if !inventory.outer.verified {
@@ -338,14 +336,7 @@ pub fn sign_app(app: &Path) -> Result<(), String> {
     let stash_root = if preserve.is_empty() {
         None
     } else {
-        let dir = std::env::temp_dir().join(format!(
-            "incodex-vendor-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        ));
+        let dir = temporary_dir("incodex-vendor");
         fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
         Some(dir)
     };
@@ -366,13 +357,7 @@ pub fn sign_app(app: &Path) -> Result<(), String> {
         .arg(app)
         .output()
         .map_err(|error| error.to_string())
-        .and_then(|output| {
-            if output.status.success() {
-                Ok(())
-            } else {
-                Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
-            }
-        });
+        .and_then(command_success);
     let restore = restore_stashed_helpers(&stashed, stash_root.as_deref());
     if let Err(error) = restore {
         return Err(match deep {
@@ -400,11 +385,8 @@ fn collect_vendor_helper_roots_for_outer(
     outer: &SignedComponent,
 ) -> Result<Vec<PathBuf>, String> {
     let components = inspect_nested_components(app)?;
-    let generic_outer = outer.kind == SignatureKind::Other
-        && outer.identifier.is_some()
-        && outer.team_identifier.is_some()
-        && !outer.authorities.is_empty()
-        && outer.verified;
+    let generic_outer =
+        outer.kind == SignatureKind::Other && has_identity_evidence(outer) && outer.verified;
     if generic_outer {
         validate_generic_nested_components(&components)?;
     } else {
@@ -478,61 +460,7 @@ fn is_bundle_component(path: &Path) -> bool {
 }
 
 fn inspect_component(path: &Path) -> Result<SignedComponent, String> {
-    let output = Command::new("codesign")
-        .args(["--display", "--verbose=4", "--"])
-        .arg(path)
-        .output()
-        .map_err(|error| format!("cannot inspect signature {}: {error}", path.display()))?;
-    if !output.status.success() {
-        if has_signature_marker(path) {
-            return Err(format!(
-                "signed component could not be inspected: {}",
-                path.display()
-            ));
-        }
-        return Ok(SignedComponent {
-            path: path.to_path_buf(),
-            identifier: None,
-            team_identifier: None,
-            authorities: Vec::new(),
-            kind: SignatureKind::Unsigned,
-            verified: false,
-        });
-    }
-    let text = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let identifier = signature_field(&text, "Identifier=");
-    let team_identifier = signature_field(&text, "TeamIdentifier=");
-    let authorities = text
-        .lines()
-        .filter_map(|line| line.trim().strip_prefix("Authority=").map(str::to_string))
-        .collect::<Vec<_>>();
-    let adhoc = text.lines().any(|line| line.trim() == "Signature=adhoc");
-    let kind = if adhoc {
-        SignatureKind::Adhoc
-    } else if team_identifier.as_deref() == Some(VENDOR_TEAM_IDENTIFIER) {
-        SignatureKind::Vendor
-    } else if team_identifier.is_some() || !authorities.is_empty() {
-        SignatureKind::Other
-    } else {
-        SignatureKind::Unknown
-    };
-    let verified = if kind == SignatureKind::Unsigned {
-        false
-    } else {
-        verify_deep_strict(path).is_ok()
-    };
-    Ok(SignedComponent {
-        path: path.to_path_buf(),
-        identifier,
-        team_identifier,
-        authorities,
-        kind,
-        verified,
-    })
+    inspect_codesign(path, |path| verify_deep_strict(path).is_ok())
 }
 
 /// 对 generic deep/strict fallback 复用 nested component policy。
@@ -598,12 +526,6 @@ fn verify_apple_vendor_requirement(
     } else {
         format!("{label} failed Apple vendor trust requirement: {detail}")
     })
-}
-
-fn has_signature_marker(path: &Path) -> bool {
-    path.join("Contents/_CodeSignature").exists()
-        || path.join("_CodeSignature").exists()
-        || path.join("Contents/CodeResources").exists()
 }
 
 fn verify_deep_strict(app: &Path) -> Result<(), String> {
@@ -727,14 +649,7 @@ fn xml_value_end(xml: &str, start: usize) -> Option<usize> {
 }
 
 fn sign_outer_with_entitlements(app: &Path, entitlements: &str) -> Result<(), String> {
-    let root = std::env::temp_dir().join(format!(
-        "incodex-ent-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_nanos())
-            .unwrap_or(0)
-    ));
+    let root = temporary_dir("incodex-ent");
     fs::create_dir_all(&root).map_err(|error| error.to_string())?;
     let file = root.join("entitlements.plist");
     if let Err(error) = fs::write(&file, entitlements) {
@@ -755,13 +670,7 @@ fn sign_outer_with_entitlements(app: &Path, entitlements: &str) -> Result<(), St
         .arg(app)
         .output()
         .map_err(|error| error.to_string())
-        .and_then(|output| {
-            if output.status.success() {
-                Ok(())
-            } else {
-                Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
-            }
-        });
+        .and_then(command_success);
     let cleanup = fs::remove_dir_all(root).map_err(|error| error.to_string());
     match (result, cleanup) {
         (Ok(()), Ok(())) => Ok(()),
@@ -771,6 +680,21 @@ fn sign_outer_with_entitlements(app: &Path, entitlements: &str) -> Result<(), St
             Err(format!("{sign}; failed to clean entitlements: {cleanup}"))
         }
     }
+}
+
+fn command_success(output: std::process::Output) -> Result<(), String> {
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
+fn temporary_dir(prefix: &str) -> PathBuf {
+    let suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    std::env::temp_dir().join(format!("{prefix}-{}-{suffix}", std::process::id()))
 }
 
 fn restore_stashed_helpers(
@@ -798,14 +722,4 @@ fn restore_stashed_helpers(
     } else {
         Err(failures.join("; "))
     }
-}
-
-fn signature_field(text: &str, prefix: &str) -> Option<String> {
-    text.lines().find_map(|line| {
-        line.trim()
-            .strip_prefix(prefix)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-    })
 }

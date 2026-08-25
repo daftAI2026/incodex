@@ -141,16 +141,20 @@ where
 
 fn is_legacy_committed(journal: &JournalV2) -> bool {
     journal.phase == "COMMITTED"
-        && journal.target.parent_device.is_empty()
-        && journal.target.parent_inode.is_empty()
-        && journal.pre_swap_digest.is_empty()
-        && journal.backup_digest.is_empty()
-        && journal.staged_device.is_empty()
-        && journal.staged_inode.is_empty()
-        && journal.staged_digest.is_empty()
-        && journal.restored_device.is_empty()
-        && journal.restored_inode.is_empty()
-        && journal.restored_digest.is_empty()
+        && [
+            journal.target.parent_device.as_str(),
+            journal.target.parent_inode.as_str(),
+            journal.pre_swap_digest.as_str(),
+            journal.backup_digest.as_str(),
+            journal.staged_device.as_str(),
+            journal.staged_inode.as_str(),
+            journal.staged_digest.as_str(),
+            journal.restored_device.as_str(),
+            journal.restored_inode.as_str(),
+            journal.restored_digest.as_str(),
+        ]
+        .into_iter()
+        .all(str::is_empty)
 }
 
 fn restore_committed_locked<F>(
@@ -167,13 +171,12 @@ where
     quiescence.ensure_quiescent(live_path)?;
     validate_committed_restore_target(root, journal, live_path)?;
     let uninstalling = begin_uninstall(root, journal)?;
-    let restored =
+    let mut restored =
         restore_live_with_quiescence(root, live_path, &uninstalling, quiescence, checkpoint)?;
-    let mut done = restored;
-    done.phase = "ROLLED_BACK".into();
-    done.sequence += 1;
-    write_journal(root, &done)?;
-    load_v2(root, &done.install_id)
+    restored.phase = "ROLLED_BACK".into();
+    restored.sequence += 1;
+    write_journal(root, &restored)?;
+    load_v2(root, &restored.install_id)
 }
 
 fn begin_uninstall(root: &Path, journal: &JournalV2) -> Result<JournalV2, String> {

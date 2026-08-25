@@ -23,7 +23,7 @@ use crate::uninstall::replace_live_with_checkpoint;
 use crate::uninstall::{
     cleanup_restored, remove_path, restore_live_with_quiescence, sync_rename_parents,
 };
-use crate::{NoopQuiescenceGuard, QuiescenceGuard, Recovery};
+use crate::{recover_action_phase, NoopQuiescenceGuard, QuiescenceGuard, Recovery};
 use incodex_core::canonical::{inspect_target, recheck_target, CanonicalTarget};
 
 #[cfg(test)]
@@ -383,7 +383,8 @@ fn validate_recovery_target(
     )?;
 
     let live_identity = optional_directory_identity(live, "live target")?;
-    let staged_expected = if is_post_swap_phase(&journal.phase) {
+    let is_post_swap = is_post_swap_phase(&journal.phase);
+    let staged_expected = if is_post_swap {
         Some(parse_identity(
             &journal.staged_device,
             &journal.staged_inode,
@@ -392,7 +393,7 @@ fn validate_recovery_target(
     } else {
         None
     };
-    let staged_identity = if is_post_swap_phase(&journal.phase) {
+    let staged_identity = if is_post_swap {
         optional_directory_identity(&paths.staged, "staged target")?
     } else {
         None
@@ -524,14 +525,7 @@ where
     // | 路径检查必须在拿到 target lock 后再做一次，避免锁外检查的 TOCTOU。 |
     // +---------------------------------------------------------------+
     let paths = reconstructed(root, &journal).map_err(|message| TxError::Refuse { message })?;
-    let action = match journal.phase.as_str() {
-        "COMMITTED" | "ROLLED_BACK" => Recovery::Done,
-        "DISCOVERED" | "INTENT" | "BACKUP_COMMITTED" | "STAGED" | "PATCHED" | "SIGNED"
-        | "VERIFIED" | "TARGET_MOVED_OUT" | "SWAPPED" | "TARGET_VERIFIED" | "UNINSTALLING" => {
-            Recovery::Rollback
-        }
-        _ => Recovery::Refuse,
-    };
+    let action = recover_action_phase(&journal.phase);
     if action == Recovery::Refuse {
         return Err(TxError::Refuse {
             message: format!(

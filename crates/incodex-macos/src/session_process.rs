@@ -37,34 +37,13 @@ pub fn quiesce_session_processes(session_root: &Path) -> Result<(), String> {
         return Err("session root cannot be represented safely in a process marker".into());
     }
 
-    let mut pids = session_process_ids(session_root)?;
-    signal_processes(&pids, libc::SIGTERM);
-    pids = wait_for_exit(pids, TERM_WAIT_ROUNDS);
-    if !pids.is_empty() {
-        signal_processes(&pids, libc::SIGKILL);
-        let survivors = wait_for_exit(pids, KILL_WAIT_ROUNDS);
-        if !survivors.is_empty() {
-            return Err(format!(
-                "isolated helper processes still running: {}",
-                format_pids(&survivors)
-            ));
-        }
-    }
+    let pids = session_process_ids(session_root)?;
+    let remaining = signal_and_wait(pids, libc::SIGTERM, TERM_WAIT_ROUNDS);
+    force_kill(remaining)?;
 
     // 再取一次完整快照，捕捉 TERM 窗口内刚派生、随后被 reparent 的辅助进程。
     let late = session_process_ids(session_root)?;
-    if !late.is_empty() {
-        signal_processes(&late, libc::SIGKILL);
-        let survivors = wait_for_exit(late, KILL_WAIT_ROUNDS);
-        if !survivors.is_empty() {
-            return Err(format!(
-                "isolated helper processes still running: {}",
-                format_pids(&survivors)
-            ));
-        }
-    }
-
-    Ok(())
+    force_kill(late)
 }
 
 fn contains_exact_environment_marker(command: &str, marker: &str) -> bool {
@@ -109,6 +88,22 @@ fn signal_processes(pids: &[i32], signal: i32) {
             libc::kill(*pid, signal);
         }
     }
+}
+
+fn signal_and_wait(pids: Vec<i32>, signal: i32, rounds: usize) -> Vec<i32> {
+    signal_processes(&pids, signal);
+    wait_for_exit(pids, rounds)
+}
+
+fn force_kill(pids: Vec<i32>) -> Result<(), String> {
+    let survivors = signal_and_wait(pids, libc::SIGKILL, KILL_WAIT_ROUNDS);
+    if survivors.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "isolated helper processes still running: {}",
+        format_pids(&survivors)
+    ))
 }
 
 fn wait_for_exit(mut pids: Vec<i32>, rounds: usize) -> Vec<i32> {
