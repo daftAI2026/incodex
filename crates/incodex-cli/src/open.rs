@@ -275,6 +275,8 @@ fn plan_from_session(
         env: vec![
             ("CODEX_HOME".into(), session.home.display().to_string()),
             ("INCODEX_INCOGNITO".into(), "1".into()),
+            // Native `open` owns the isolated session and its final burn.
+            ("INCODEX_CLEANUP_OWNER".into(), "native".into()),
             ("INCODEX_SESSION_ID".into(), session.session_id.clone()),
             (
                 "INCODEX_SESSION_ROOT".into(),

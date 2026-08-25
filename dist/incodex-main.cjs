@@ -115,6 +115,8 @@ function burnIncognitoSession(session, ownerSnapshot, userRoot = USER_ROOT) {
     return removed;
 }
 function burnIncognitoHome() {
+    if (process.env.INCODEX_CLEANUP_OWNER === "native")
+        return;
     const session = sessionFromEnv();
     const home = session?.root || session?.home || process.env.CODEX_HOME;
     if (!home)
@@ -376,6 +378,21 @@ const launchHolder = { current: null };
 function launchIncognito() {
     return instance.singleFlight(launchHolder, launchIncognitoOnce);
 }
+function runtimeOwnedSessionEnv(session, sourceBounds) {
+    return {
+        ...process.env,
+        CODEX_HOME: session.home,
+        INCODEX_INCOGNITO: "1",
+        INCODEX_CLEANUP_OWNER: "runtime",
+        INCODEX_SESSION_ID: session.sessionId,
+        INCODEX_SESSION_ROOT: session.root,
+        INCODEX_SESSION_INO: String(session.ino),
+        INCODEX_SESSION_DEV: String(session.dev),
+        CODEX_ELECTRON_USER_DATA_PATH: session.chromium,
+        INCODEX_SOURCE_BOUNDS: sourceBounds,
+        INCODEX_SOURCE_HOME: sourceHome(),
+    };
+}
 function prepareIncognitoSession(options = {}) {
     const { userRoot = USER_ROOT, sourceHomePath = sourceHome(), appTarget = targetId(), pid = process.pid, createSessionHome = safeHome.createSessionHome, copySettings = safeHome.copySettings, burnSessionHome = safeHome.burnSessionHome, log = logLaunch, } = options;
     let session;
@@ -472,18 +489,7 @@ async function launchIncognitoOnce() {
             child = spawn(bin, args, {
                 detached: true,
                 stdio: "ignore",
-                env: {
-                    ...process.env,
-                    CODEX_HOME: session.home,
-                    INCODEX_INCOGNITO: "1",
-                    INCODEX_SESSION_ID: session.sessionId,
-                    INCODEX_SESSION_ROOT: session.root,
-                    INCODEX_SESSION_INO: String(session.ino),
-                    INCODEX_SESSION_DEV: String(session.dev),
-                    CODEX_ELECTRON_USER_DATA_PATH: session.chromium,
-                    INCODEX_SOURCE_BOUNDS: sourceBounds,
-                    INCODEX_SOURCE_HOME: sourceHome(),
-                },
+                env: runtimeOwnedSessionEnv(session, sourceBounds),
             });
         }
         catch (error) {
@@ -794,6 +800,7 @@ if (typeof module !== "undefined") {
     module.exports = {
         startupGate,
         prepareIncognitoSession,
+        runtimeOwnedSessionEnv,
         burnIncognitoSession,
         cleanupExitedSession,
         sessionProcessIdsFromPs: instance.sessionProcessIdsFromPs,
