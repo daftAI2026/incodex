@@ -99,10 +99,24 @@ struct SpinnerState {
 }
 
 impl SpinnerState {
-    fn line_needs_clear(&mut self, columns: usize, message_changed: bool) -> bool {
+    fn should_clear_line(&mut self, columns: usize, message_changed: bool) -> bool {
         let columns_changed = self.last_columns != columns;
         self.last_columns = columns;
         message_changed || columns_changed
+    }
+
+    fn render_next_frame(&mut self, columns: usize, clear: bool) {
+        eprint!(
+            "{}",
+            format_spinner_frame(
+                FRAMES[self.next_frame % FRAMES.len()],
+                &self.message,
+                columns,
+                clear,
+            )
+        );
+        self.next_frame += 1;
+        let _ = std::io::stderr().flush();
     }
 }
 
@@ -137,17 +151,7 @@ impl Spinner {
         let worker_state = Arc::clone(&state);
         {
             let mut state = state.lock().unwrap();
-            eprint!(
-                "{}",
-                format_spinner_frame(
-                    FRAMES[state.next_frame],
-                    &state.message,
-                    initial_columns,
-                    true,
-                )
-            );
-            state.next_frame += 1;
-            let _ = std::io::stderr().flush();
+            state.render_next_frame(initial_columns, true);
         }
         let worker = thread::spawn(move || {
             while !worker_stopped.load(Ordering::Relaxed) {
@@ -157,18 +161,8 @@ impl Spinner {
                 }
                 let mut state = worker_state.lock().unwrap();
                 let columns = crate::terminal::stderr_columns();
-                let clear = state.line_needs_clear(columns, false);
-                eprint!(
-                    "{}",
-                    format_spinner_frame(
-                        FRAMES[state.next_frame % FRAMES.len()],
-                        &state.message,
-                        columns,
-                        clear,
-                    )
-                );
-                state.next_frame += 1;
-                let _ = std::io::stderr().flush();
+                let clear = state.should_clear_line(columns, false);
+                state.render_next_frame(columns, clear);
             }
         });
         Self {
@@ -186,18 +180,8 @@ impl Spinner {
         state.message = message.to_string();
         if self.worker.is_some() {
             let columns = crate::terminal::stderr_columns();
-            let clear = state.line_needs_clear(columns, true);
-            eprint!(
-                "{}",
-                format_spinner_frame(
-                    FRAMES[state.next_frame % FRAMES.len()],
-                    &state.message,
-                    columns,
-                    clear,
-                )
-            );
-            state.next_frame += 1;
-            let _ = std::io::stderr().flush();
+            let clear = state.should_clear_line(columns, true);
+            state.render_next_frame(columns, clear);
         }
     }
 
@@ -231,8 +215,8 @@ mod tests {
             next_frame: 1,
             last_columns: 80,
         };
-        assert!(state.line_needs_clear(24, false));
-        assert!(state.line_needs_clear(100, false));
+        assert!(state.should_clear_line(24, false));
+        assert!(state.should_clear_line(100, false));
     }
 
     #[test]
