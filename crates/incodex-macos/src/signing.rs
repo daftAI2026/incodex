@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::entitlements::add_entitlement_key;
+use super::signing_outer::{has_signature_marker, signature_field};
 use super::signing_policy::validate_generic_nested_components;
 use super::{read_plist_info, PlistInfo};
 
@@ -600,12 +601,6 @@ fn verify_apple_vendor_requirement(
     })
 }
 
-fn has_signature_marker(path: &Path) -> bool {
-    path.join("Contents/_CodeSignature").exists()
-        || path.join("_CodeSignature").exists()
-        || path.join("Contents/CodeResources").exists()
-}
-
 fn verify_deep_strict(app: &Path) -> Result<(), String> {
     let output = Command::new("codesign")
         .args(["--verify", "--deep", "--strict", "--verbose=4", "--"])
@@ -798,14 +793,4 @@ fn restore_stashed_helpers(
     } else {
         Err(failures.join("; "))
     }
-}
-
-fn signature_field(text: &str, prefix: &str) -> Option<String> {
-    text.lines().find_map(|line| {
-        line.trim()
-            .strip_prefix(prefix)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-    })
 }

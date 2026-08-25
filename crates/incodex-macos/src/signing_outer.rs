@@ -66,7 +66,7 @@ fn verify_outer_strict(path: &Path) -> bool {
         .is_ok_and(|output| output.status.success())
 }
 
-fn signature_field(text: &str, prefix: &str) -> Option<String> {
+pub(crate) fn signature_field(text: &str, prefix: &str) -> Option<String> {
     text.lines().find_map(|line| {
         line.trim()
             .strip_prefix(prefix)
@@ -76,7 +76,7 @@ fn signature_field(text: &str, prefix: &str) -> Option<String> {
     })
 }
 
-fn has_signature_marker(path: &Path) -> bool {
+pub(crate) fn has_signature_marker(path: &Path) -> bool {
     path.join("Contents/_CodeSignature").exists()
         || path.join("_CodeSignature").exists()
         || path.join("Contents/CodeResources").exists()
