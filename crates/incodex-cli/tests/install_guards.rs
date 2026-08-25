@@ -7,7 +7,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use incodex_asar::{pack_dir, Archive, LOADER_NAME, MARKER_KEY};
 use incodex_macos::sign_app;
-use incodex_transaction::restore_committed;
+use incodex_transaction::{finalize_restored_transaction_with_checkpoint, restore_committed};
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 static TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -285,4 +285,36 @@ fn recover_removes_a_restored_terminal_transaction() {
         !transaction.exists(),
         "recover retained restored transaction {install_id}"
     );
+}
+
+#[test]
+fn recover_retries_an_interrupted_terminal_cleanup_without_the_tombstone_journal() {
+    let _guard = serialize_signing();
+    let home = home();
+    let app = patchable_app(&home);
+    let install_id = install(&home, &app);
+    let root = home.join(".incodex");
+    restore_committed(&root, &install_id, &app).unwrap();
+
+    let interrupted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        finalize_restored_transaction_with_checkpoint(&root, &install_id, &app, |checkpoint| {
+            if checkpoint == "CLEANUP_TOMBSTONE_DURABLE" {
+                panic!("simulated cleanup interruption");
+            }
+        })
+        .unwrap();
+    }));
+    assert!(interrupted.is_err());
+
+    let transactions = root.join("transactions");
+    let tombstone = transactions.join(format!(".deleting-{install_id}"));
+    let manifest = transactions.join(format!(".cleanup-{install_id}.json"));
+    fs::remove_file(tombstone.join("journal.json")).unwrap();
+
+    let (status, stdout, stderr) = run(&["recover", "--transaction", &install_id], &home);
+
+    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
+    assert!(stdout.contains("action: done"), "stdout={stdout}");
+    assert!(!tombstone.exists());
+    assert!(!manifest.exists());
 }

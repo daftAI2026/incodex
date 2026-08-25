@@ -6,8 +6,9 @@ use incodex_macos::ditto;
 
 use crate::durable::sync_dir;
 use crate::journal::{
-    load_v2, reconstructed, transition_phase, tx_paths, validate_recovery_proofs, write_journal,
-    JournalV2,
+    cleanup_manifest_path, cleanup_tombstone_path, load_cleanup_manifest, load_v2, reconstructed,
+    reconstructed_cleanup_tombstone, transition_phase, tx_paths, validate_recovery_proofs,
+    write_cleanup_manifest, write_journal, JournalV2,
 };
 use crate::lock::acquire_target_lock;
 use crate::proof::{
@@ -25,6 +26,19 @@ pub fn finalize_restored_transaction(
     install_id: &str,
     live_path: &Path,
 ) -> Result<(), String> {
+    finalize_restored_transaction_with_checkpoint(root, install_id, live_path, |_| {})
+}
+
+#[doc(hidden)]
+pub fn finalize_restored_transaction_with_checkpoint<F>(
+    root: &Path,
+    install_id: &str,
+    live_path: &Path,
+    checkpoint: F,
+) -> Result<(), String>
+where
+    F: FnMut(&str),
+{
     let initial = load_v2(root, install_id)?;
     if initial.phase != "ROLLED_BACK" {
         return Err(format!(
@@ -46,7 +60,7 @@ pub fn finalize_restored_transaction(
     if Path::new(&journal.target.real_path) != live || !matches_recorded_restore(&live, &journal)? {
         return Err("restored target changed before transaction cleanup".into());
     }
-    remove_transaction_dir(root, &journal)
+    remove_transaction_dir_with_checkpoint(root, &journal, checkpoint)
 }
 
 pub fn prune_superseded_terminal(
@@ -95,8 +109,8 @@ pub fn prune_superseded_terminal(
         {
             continue;
         }
-        let paths = reconstructed(root, &journal)?;
-        remove_path(&paths.dir)?;
+        reconstructed(root, &journal)?;
+        remove_transaction_dir(root, &journal)?;
         removed.push(install_id);
     }
     if !removed.is_empty() {
@@ -355,9 +369,69 @@ pub(crate) fn cleanup_transient_paths(root: &Path, journal: &JournalV2) -> Resul
 }
 
 pub(crate) fn remove_transaction_dir(root: &Path, journal: &JournalV2) -> Result<(), String> {
+    remove_transaction_dir_with_checkpoint(root, journal, |_| {})
+}
+
+pub(crate) fn resume_terminal_cleanup(root: &Path, journal: &JournalV2) -> Result<(), String> {
+    remove_transaction_dir_with_checkpoint(root, journal, |_| {})
+}
+
+fn remove_transaction_dir_with_checkpoint<F>(
+    root: &Path,
+    journal: &JournalV2,
+    mut checkpoint: F,
+) -> Result<(), String>
+where
+    F: FnMut(&str),
+{
     let paths = reconstructed(root, journal)?;
-    remove_path(&paths.dir)?;
-    sync_dir(&root.join("transactions"))
+    let transactions = root.join("transactions");
+    let tombstone = cleanup_tombstone_path(root, &journal.install_id);
+    let manifest = cleanup_manifest_path(root, &journal.install_id);
+    write_cleanup_manifest(root, journal)?;
+    checkpoint("CLEANUP_MANIFEST_DURABLE");
+
+    let active_exists = fs::symlink_metadata(&paths.dir).is_ok();
+    let tombstone_exists = fs::symlink_metadata(&tombstone).is_ok();
+    match (active_exists, tombstone_exists) {
+        (true, false) => {
+            fs::rename(&paths.dir, &tombstone).map_err(|error| error.to_string())?;
+            sync_dir(&transactions)?;
+        }
+        (false, true) | (false, false) => {}
+        (true, true) => {
+            return Err("active transaction and cleanup tombstone both exist".into());
+        }
+    }
+    checkpoint("CLEANUP_TOMBSTONE_DURABLE");
+
+    if fs::symlink_metadata(&tombstone).is_ok() {
+        let tombstone_paths = reconstructed_cleanup_tombstone(root, journal)?;
+        remove_path(&tombstone_paths.dir)?;
+        sync_dir(&transactions)?;
+    }
+    checkpoint("CLEANUP_TRANSACTION_DURABLE");
+
+    match fs::remove_file(&manifest) {
+        Ok(()) => {
+            // +--------------------------------------------------------------+
+            // | The transaction deletion is already durable. This final     |
+            // | fsync can only resurrect a rebuildable intent marker.        |
+            // +--------------------------------------------------------------+
+            let _ = sync_dir(&transactions);
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.to_string()),
+    }
+    Ok(())
+}
+
+pub(crate) fn cleanup_manifest(root: &Path, install_id: &str) -> Result<JournalV2, String> {
+    load_cleanup_manifest(root, install_id)
+}
+
+pub(crate) fn cleanup_pending(root: &Path, install_id: &str) -> bool {
+    fs::symlink_metadata(cleanup_manifest_path(root, install_id)).is_ok()
 }
 
 pub(crate) fn replace_live_with_checkpoint<F>(

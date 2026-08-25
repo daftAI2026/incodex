@@ -21,7 +21,8 @@ use crate::proof::{
 #[cfg(test)]
 use crate::uninstall::replace_live_with_checkpoint;
 use crate::uninstall::{
-    cleanup_transient_paths, remove_path, remove_transaction_dir, restore_live_with_quiescence,
+    cleanup_manifest, cleanup_pending, cleanup_transient_paths, remove_path,
+    remove_transaction_dir, restore_live_with_quiescence, resume_terminal_cleanup,
     sync_rename_parents,
 };
 use crate::{recover_action_phase, NoopQuiescenceGuard, QuiescenceGuard, Recovery};
@@ -516,6 +517,20 @@ where
     G: QuiescenceGuard,
     F: FnOnce(&Path) -> bool,
 {
+    if cleanup_pending(root, install_id) {
+        let initial =
+            cleanup_manifest(root, install_id).map_err(|message| TxError::Refuse { message })?;
+        let live = PathBuf::from(&initial.target.real_path);
+        let _lock = acquire_target_lock(root, &live, "recover-cleanup", Some(install_id))
+            .map_err(|message| TxError::Refuse { message })?;
+        let journal =
+            cleanup_manifest(root, install_id).map_err(|message| TxError::Refuse { message })?;
+        resume_terminal_cleanup(root, &journal).map_err(TxError::Other)?;
+        return Ok(RecoverResult {
+            action: Recovery::Done,
+            journal,
+        });
+    }
     let mut journal = load_v2(root, install_id).map_err(|message| TxError::Refuse { message })?;
     validate_rel_paths(&journal).map_err(|message| TxError::Refuse { message })?;
     reconstructed(root, &journal).map_err(|message| TxError::Refuse { message })?;

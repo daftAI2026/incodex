@@ -16,13 +16,25 @@ pub use engine::{
 };
 pub use journal::{new_install_id, validate_path_ancestors, JournalV2};
 pub use uninstall::{
-    finalize_restored_transaction, migrate_legacy_committed,
-    migrate_legacy_committed_with_quiescence, prune_superseded_terminal, restore_committed,
-    restore_committed_with_checkpoint, restore_committed_with_quiescence,
+    finalize_restored_transaction, finalize_restored_transaction_with_checkpoint,
+    migrate_legacy_committed, migrate_legacy_committed_with_quiescence, prune_superseded_terminal,
+    restore_committed, restore_committed_with_checkpoint, restore_committed_with_quiescence,
 };
 
 pub fn journal_v2(root: &Path, install_id: &str) -> Result<JournalV2, String> {
     journal::load_v2(root, install_id)
+}
+
+pub fn journal_for_recovery(root: &Path, install_id: &str) -> Result<JournalV2, String> {
+    if uninstall::cleanup_pending(root, install_id) {
+        uninstall::cleanup_manifest(root, install_id)
+    } else {
+        journal::load_v2(root, install_id)
+    }
+}
+
+pub fn terminal_cleanup_pending(root: &Path, install_id: &str) -> bool {
+    uninstall::cleanup_pending(root, install_id)
 }
 
 /// Validate the sealed original snapshot for a diagnostic consumer.

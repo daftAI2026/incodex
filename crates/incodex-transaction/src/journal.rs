@@ -1,4 +1,6 @@
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Read;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Component, Path, PathBuf};
 
 #[cfg(test)]
@@ -82,6 +84,20 @@ pub fn tx_dir(root: &Path, install_id: &str) -> PathBuf {
 
 pub fn tx_paths(root: &Path, install_id: &str) -> TxPaths {
     let dir = tx_dir(root, install_id);
+    tx_paths_in(dir)
+}
+
+pub(crate) fn cleanup_manifest_path(root: &Path, install_id: &str) -> PathBuf {
+    root.join("transactions")
+        .join(format!(".cleanup-{install_id}.json"))
+}
+
+pub(crate) fn cleanup_tombstone_path(root: &Path, install_id: &str) -> PathBuf {
+    root.join("transactions")
+        .join(format!(".deleting-{install_id}"))
+}
+
+fn tx_paths_in(dir: PathBuf) -> TxPaths {
     TxPaths {
         journal: dir.join("journal.json"),
         staged: dir.join(STAGED_REL),
@@ -277,7 +293,27 @@ pub fn load_v2(root: &Path, install_id: &str) -> Result<JournalV2, String> {
         return Err("injected journal readback failure".into());
     }
     let path = tx_paths(root, install_id).journal;
-    let body = fs::read_to_string(&path).map_err(|err| err.to_string())?;
+    load_v2_at(&path, install_id)
+}
+
+pub(crate) fn load_cleanup_manifest(root: &Path, install_id: &str) -> Result<JournalV2, String> {
+    if !is_uuid(install_id) {
+        return Err("install id must be an RFC 4122 UUID".into());
+    }
+    load_v2_at(&cleanup_manifest_path(root, install_id), install_id)
+}
+
+fn load_v2_at(path: &Path, install_id: &str) -> Result<JournalV2, String> {
+    let mut options = OpenOptions::new();
+    options.read(true).custom_flags(libc::O_NOFOLLOW);
+    let mut file = options.open(path).map_err(|error| error.to_string())?;
+    let metadata = file.metadata().map_err(|error| error.to_string())?;
+    if !metadata.file_type().is_file() {
+        return Err(format!("journal is not a regular file: {}", path.display()));
+    }
+    let mut body = String::new();
+    file.read_to_string(&mut body)
+        .map_err(|error| error.to_string())?;
     let raw: serde_json::Value = serde_json::from_str(&body).map_err(|err| err.to_string())?;
     let legacy = is_legacy_shape(&raw);
     let journal: JournalV2 = serde_json::from_value(raw).map_err(|err| err.to_string())?;
@@ -297,6 +333,31 @@ pub fn load_v2(root: &Path, install_id: &str) -> Result<JournalV2, String> {
     }
     validate_rel_paths(&journal)?;
     Ok(journal)
+}
+
+pub(crate) fn write_cleanup_manifest(root: &Path, journal: &JournalV2) -> Result<(), String> {
+    if !is_uuid(&journal.install_id) {
+        return Err("install id must be an RFC 4122 UUID".into());
+    }
+    let path = cleanup_manifest_path(root, &journal.install_id);
+    if path.exists() {
+        let existing = load_cleanup_manifest(root, &journal.install_id)?;
+        return if existing == *journal {
+            Ok(())
+        } else {
+            Err("cleanup manifest does not match the transaction journal".into())
+        };
+    }
+    let body = format!(
+        "{}\n",
+        serde_json::to_string_pretty(journal).map_err(|error| error.to_string())?
+    );
+    write_atomic(&path, body.as_bytes())?;
+    let written = load_cleanup_manifest(root, &journal.install_id)?;
+    if written != *journal {
+        return Err("cleanup manifest readback does not match the transaction journal".into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -362,8 +423,27 @@ pub fn validate_rel_paths(journal: &JournalV2) -> Result<(), String> {
 }
 
 pub fn reconstructed(root: &Path, journal: &JournalV2) -> Result<TxPaths, String> {
+    reconstructed_in(root, journal, tx_dir(root, &journal.install_id))
+}
+
+pub(crate) fn reconstructed_cleanup_tombstone(
+    root: &Path,
+    journal: &JournalV2,
+) -> Result<TxPaths, String> {
+    reconstructed_in(
+        root,
+        journal,
+        cleanup_tombstone_path(root, &journal.install_id),
+    )
+}
+
+fn reconstructed_in(
+    root: &Path,
+    journal: &JournalV2,
+    transaction_dir: PathBuf,
+) -> Result<TxPaths, String> {
     validate_rel_paths(journal)?;
-    let paths = tx_paths(root, &journal.install_id);
+    let paths = tx_paths_in(transaction_dir);
     reject_symlink(&root.join("transactions"), "transactions directory")?;
     reject_symlink(&paths.dir, "transaction directory")?;
     for (rel, allow_leaf_symlink) in [

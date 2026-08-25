@@ -16,10 +16,10 @@ use incodex_runtime_bundle::{ensure_current, loader_source, runtime_version};
 #[cfg(test)]
 use incodex_transaction::NoopQuiescenceGuard;
 use incodex_transaction::{
-    finalize_restored_transaction, journal_v2, migrate_legacy_committed_with_quiescence,
-    prune_superseded_terminal, recover_with_quiescence, restore_committed_with_quiescence,
-    validate_backup_snapshot, validate_committed_live_snapshot, Engine, QuiescenceGuard, Recovery,
-    TxError,
+    finalize_restored_transaction, journal_for_recovery, journal_v2,
+    migrate_legacy_committed_with_quiescence, prune_superseded_terminal, recover_with_quiescence,
+    restore_committed_with_quiescence, terminal_cleanup_pending, validate_backup_snapshot,
+    validate_committed_live_snapshot, Engine, QuiescenceGuard, Recovery, TxError,
 };
 use sha2::{Digest, Sha256};
 
@@ -161,10 +161,11 @@ pub fn run_recover(parsed: &ParsedCli) -> Result<(), String> {
         .ok_or("recover requires --transaction <id>\n  incodex recover --transaction <id>")?;
     let v2 = root.join("transactions").join(id).join("journal.json");
     let v1 = root.join("transactions").join(format!("{id}.json"));
-    if !v2.exists() && !v1.exists() {
+    let cleanup_pending = terminal_cleanup_pending(&root, id);
+    if !v2.exists() && !v1.exists() && !cleanup_pending {
         return Err(format!("no journal for {id}"));
     }
-    if !v2.exists() {
+    if !v2.exists() && !cleanup_pending {
         return Err(format!(
             "legacy transaction {id} is not supported by native recover; no files changed"
         ));
@@ -172,7 +173,7 @@ pub fn run_recover(parsed: &ParsedCli) -> Result<(), String> {
     if parsed.dry_run {
         return Err("recover --dry-run is not supported; no files changed".into());
     }
-    let journal = journal_v2(&root, id)?;
+    let journal = journal_for_recovery(&root, id)?;
     let terminal_cleanup = matches!(journal.phase.as_str(), "COMMITTED" | "ROLLED_BACK");
     let target = PathBuf::from(&journal.target.real_path);
     let guard = if terminal_cleanup {
