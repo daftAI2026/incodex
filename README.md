@@ -31,7 +31,7 @@
 - **Optional sidebar button**: After `incodex install`, a hat-glasses control sits left of Search; `Shift+Command+N` also works
 - **Local CLI**: Terminal menu, Homebrew or script install, `status` / `doctor` / `runtime`. Not an official plugin
 
-This is not a forensics claim that the machine keeps no traces.
+A normal close removes the isolated session managed by Incodex; this is not a claim of forensic erasure from the device or remote services.
 
 ## Quick Start
 

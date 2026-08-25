@@ -31,7 +31,7 @@
 - **可选侧栏按钮**：运行 `incodex install` 后，搜索左边会出现帽子墨镜；`Shift+Command+N` 也能开
 - **本机 CLI**：终端菜单、Homebrew / 脚本安装、`status` / `doctor` / `runtime`，不经过官方插件
 
-这还不是「本机完全不留记录」的取证结论。
+正常关窗会清理 Incodex 管理的隔离会话；这不等于对本机存储或远端服务作取证级零痕迹承诺。
 
 ## Quick Start
 
