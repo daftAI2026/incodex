@@ -160,7 +160,7 @@ $ incodex install
   ! Official Appshot (smart snapshot) stops until uninstall.
   Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app
   Install id   0778f0fa-…
-  Runtime      0.4.0
+  Runtime      0.5.0
   App          /Applications/ChatGPT.app
   ✓ Done. Open ChatGPT.app when you want Incognito.
   ! Keychain: On next launch, macOS may ask this patched Codex app to access Codex Storage Key.
@@ -182,8 +182,8 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      0.4.0 releases/0.4.0-<manifestSha256>
-  CLI Runtime  0.4.0
+  Runtime      0.5.0 releases/0.5.0-<manifestSha256>
+  CLI Runtime  0.5.0
   Runtime state current
   Version      26.814.41957 6744
   Install id   0778f0fa-…
@@ -206,10 +206,10 @@ $ incodex doctor
   Arch         arm64
 
 ➤ Runtime
-  Version      0.4.0
-  External     0.4.0 releases/0.4.0-<manifestSha256>
+  Version      0.5.0
+  External     0.5.0 releases/0.5.0-<manifestSha256>
   External check checked
-  CLI Runtime  0.4.0
+  CLI Runtime  0.5.0
   CLI manifest <manifestSha256>
   Deployed manifest <manifestSha256>
   Runtime state current
@@ -239,7 +239,7 @@ The default Doctor checks Incodex-owned Runtime, backup, journal, session, and m
 ```bash
 $ incodex --version
 
-Incodex version 0.4.0
+Incodex version 0.5.0
 macOS: 26.6
 Architecture: arm64
 Kernel: 25.6.0
