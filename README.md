@@ -23,12 +23,12 @@
 
 ## Features
 
-- **Incognito window**: Same login and settings as usual. No old chats, and this session does not join the everyday list
-- **Follows the main window**: The incognito window opens using the main window’s size and placement
-- **Sidebar button**: After install, a hat-glasses control sits left of Search; `Shift+Command+N` also works
-- **Burns on close**: A normal close clears this temp session (including the isolated Chromium profile); login and settings stay
-- **Optional no-patch path**: `incodex open` launches an incognito window without touching the official signature
+- **No-patch incognito**: `incodex open` launches the official Codex binary with an isolated profile, without modifying the app or its signature
+- **Separate history**: Same login and settings as usual. No old chats, and this session does not join the everyday list
 - **Temporary profile mask**: `incodex open --mask [--name <text>] [--avatar <local-file>]` gives the window a temporary two-word name and deterministic offline avatar. The optional avatar must be a local PNG, JPEG, or WebP; this changes the current window's profile footer and open account menu, not account data
+- **Follows the main window**: The incognito window opens using the main window’s size and placement
+- **Burns on close**: A normal close clears this temp session (including the isolated Chromium profile); login and settings stay
+- **Optional sidebar button**: After `incodex install`, a hat-glasses control sits left of Search; `Shift+Command+N` also works
 - **Local CLI**: Terminal menu, Homebrew or script install, `status` / `doctor` / `runtime`. Not an official plugin
 
 This is not a forensics claim that the machine keeps no traces.
@@ -43,7 +43,7 @@ This is not a forensics claim that the machine keeps no traces.
 brew install daftAI2026/tap/incodex
 ```
 
-This only puts `incodex` and `inc` on PATH. Patching Codex is still `incodex install`. Update with `brew upgrade incodex`.
+This only puts `incodex` and `inc` on PATH. The optional in-app button is added separately with `incodex install`. Update with `brew upgrade incodex`.
 
 **Or via script**
 
@@ -63,7 +63,7 @@ Homebrew and script installs use prebuilt native Rust binaries and do not requir
 
 ## Security & Safety Design
 
-Incodex patches a locally installed Electron app. Destructive commands print a plan first: TTY asks once, non-TTY needs `--yes`, `--dry-run` only prints.
+The primary `incodex open` path does not patch Codex. The optional `incodex install` path adds the in-app button by modifying the locally installed Electron app. Destructive commands print a plan first: TTY asks once, non-TTY needs `--yes`, `--dry-run` only prints.
 
 - Official plugins cannot add this button. The app bundle has to change
 - After the default official-app install, a valid OpenAI signature cannot be kept. On the next launch, macOS may ask the patched app to access **Codex Storage Key**. Only if the dialog names the expected app and Keychain item should you enter your **Mac login password** (not your ChatGPT password) and choose **Always Allow**. **Allow** / **Allow Once** grants only that access and may prompt again later; if the details do not match, choose **Deny**. The CLI does not give permanent-authorization advice for `--clone` or `--app` targets
@@ -245,27 +245,7 @@ Shell: /bin/zsh
 
 `Install` reports Homebrew when the executable is recognized in its Homebrew location; other native binaries currently report Script. Homebrew installs should not run `incodex update`; use `brew upgrade incodex`.
 
-## Quick Launchers
-
-<details>
-<summary><strong>Raycast and Alfred setup</strong></summary>
-
-Install three launchers for Open, Status, and Doctor:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/scripts/setup-quick-launchers.sh | bash
-```
-
-The script writes Raycast commands to `~/Library/Application Support/Raycast/script-commands`; when Alfred is detected, it creates the standard `.alfredworkflow` package and opens Alfred's normal import confirmation. Raycast needs one manual setup; v1 and v2 load the same scripts, but expose the directory picker in different places:
-
-1. **Raycast v2:** open **Settings → Script Commands**, then click **+** beside **Script Folders**.
-2. **Raycast v1:** open **Settings → Extensions**, click **+**, then choose **Add Script Directory**.
-3. Select `~/Library/Application Support/Raycast/script-commands`.
-4. Run **Reload Script Commands** in Raycast.
-
-When Raycast provides a usable `TERM`, Status and Doctor run directly in its `fullOutput` pane. Without a usable `TERM`, they route through Terminal, iTerm2, Alacritty, kitty, WezTerm, Ghostty, Hyper, WindTerm, or Warp; set `INCODEX_LAUNCHER_APP=<name>` to choose one. If the selected app cannot be started, the launcher falls back to Terminal. Open launches the incognito window directly.
-
-**Run**
+### Command reference
 
 ```bash
 inc                         # Interactive menu (terminal only)
@@ -280,7 +260,7 @@ incodex install --clone     # Dev: patch a copy
 incodex uninstall           # Restore the official app
 incodex status
 incodex doctor
-incodex doctor --deep        # Full nested signing / entitlement / Gatekeeper evidence
+incodex doctor --deep       # Full nested signing / entitlement / Gatekeeper evidence
 incodex runtime             # Update the button logic without re-signing Codex
 incodex open                # Incognito window, no patch
 incodex open --mask         # Temporary sidebar name and offline avatar
@@ -304,6 +284,26 @@ incodex doctor --deep --json
 ```
 
 `brew install`, `curl … | bash`, and `cargo install` only put the command on PATH. The command that changes `/Applications/ChatGPT.app` is `incodex install`.
+
+## Quick Launchers
+
+<details>
+<summary><strong>Raycast and Alfred setup</strong></summary>
+
+Install three launchers for Open, Status, and Doctor:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/scripts/setup-quick-launchers.sh | bash
+```
+
+The script writes Raycast commands to `~/Library/Application Support/Raycast/script-commands`; when Alfred is detected, it creates the standard `.alfredworkflow` package and opens Alfred's normal import confirmation. Raycast needs one manual setup; v1 and v2 load the same scripts, but expose the directory picker in different places:
+
+1. **Raycast v2:** open **Settings → Script Commands**, then click **+** beside **Script Folders**.
+2. **Raycast v1:** open **Settings → Extensions**, click **+**, then choose **Add Script Directory**.
+3. Select `~/Library/Application Support/Raycast/script-commands`.
+4. Run **Reload Script Commands** in Raycast.
+
+When Raycast provides a usable `TERM`, Status and Doctor run directly in its `fullOutput` pane. Without a usable `TERM`, they route through Terminal, iTerm2, Alacritty, kitty, WezTerm, Ghostty, Hyper, WindTerm, or Warp; set `INCODEX_LAUNCHER_APP=<name>` to choose one. If the selected app cannot be started, the launcher falls back to Terminal. Open launches the incognito window directly.
 
 </details>
 

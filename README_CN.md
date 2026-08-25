@@ -23,12 +23,12 @@
 
 ## Features
 
-- **无痕窗口**：登录和设置跟平时一样，看不到以前的对话，这次的聊天也不会进平时的列表
-- **跟随主窗口**：无痕窗口参照主窗口的大小和位置打开
-- **侧栏按钮**：装进正在用的 Codex 后，搜索左边会出现帽子墨镜；`Shift+Command+N` 也能开
-- **关窗即焚**：正常关掉后清掉这次的临时会话（含独立 Chromium 档案）；登录和设置会留着
-- **可选不改包**：`incodex open` 直接开一扇无痕窗，不碰官方签名
+- **免改包无痕窗口**：`incodex open` 使用隔离档案启动官方 Codex 二进制，不修改应用或官方签名
+- **对话隔离**：登录和设置跟平时一样，看不到以前的对话，这次的聊天也不会进平时的列表
 - **临时资料遮罩**：`incodex open --mask [--name <text>] [--avatar <local-file>]` 给这扇窗口一个临时两词名称和离线确定性头像。头像只能用本地 PNG、JPEG 或 WebP；它只改当前窗口的 profile footer 与已打开账号菜单，不改真实账号
+- **跟随主窗口**：无痕窗口参照主窗口的大小和位置打开
+- **关窗即焚**：正常关掉后清掉这次的临时会话（含独立 Chromium 档案）；登录和设置会留着
+- **可选侧栏按钮**：运行 `incodex install` 后，搜索左边会出现帽子墨镜；`Shift+Command+N` 也能开
 - **本机 CLI**：终端菜单、Homebrew / 脚本安装、`status` / `doctor` / `runtime`，不经过官方插件
 
 这还不是「本机完全不留记录」的取证结论。
@@ -37,21 +37,21 @@
 
 **支持平台：** Apple Silicon（arm64）和 Intel（x86_64）Mac。当前不支持 Windows 或 Linux，因为 Incodex 依赖 macOS 的 Codex 应用包、代码签名、钥匙串和 Launch Services。
 
-**Install via Homebrew**
+**通过 Homebrew 安装**
 
 ```bash
 brew install daftAI2026/tap/incodex
 ```
 
-只把 `incodex` 和 `inc` 放到 PATH。改 Codex 仍然是随后那条 `incodex install`。更新用 `brew upgrade incodex`。
+这里只把 `incodex` 和 `inc` 放到 PATH。可选的应用内按钮需要另行运行 `incodex install`。更新用 `brew upgrade incodex`。
 
-**Or via script**
+**或使用安装脚本**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/install.sh | bash
 ```
 
-**从源码**
+**从源码安装**
 
 ```bash
 git clone https://github.com/daftAI2026/incodex.git
@@ -63,7 +63,7 @@ Homebrew 和脚本安装直接使用预编译的原生 Rust 二进制，不需�
 
 ## Security & Safety Design
 
-Incodex 会改本机已安装的 Electron 应用包。高风险操作默认要看计划：TTY 问一次，非 TTY 要 `--yes`，`--dry-run` 只打印。
+主路径 `incodex open` 不会修改 Codex。可选的 `incodex install` 路径为了加入应用内按钮，会修改本机安装的 Electron 应用包。高风险操作默认要看计划：TTY 问一次，非 TTY 要 `--yes`，`--dry-run` 只打印。
 
 - 官方插件加不了这个按钮，必须改应用包
 - 默认安装到官方应用后，改包没法继续保留有效的 OpenAI 签名。下次启动时，macOS 可能要求这个已修改的应用访问钥匙串中的 **Codex Storage Key**。只有对话框里的应用和钥匙串项目都符合预期时，才输入 **Mac 登录密码**（不是 ChatGPT 账号密码）并选择 **始终允许**。**允许** / **允许一次**只授权本次访问，之后还可能再次询问；信息不符合预期时选择 **拒绝**。CLI 不会对 `--clone` 或 `--app` 目标给出永久授权建议
@@ -245,6 +245,46 @@ Shell: /bin/zsh
 
 `Install` 能识别 Homebrew 路径；其他原生二进制目前显示为 Script。Homebrew 装的不要跑 `incodex update`，用 `brew upgrade incodex`。
 
+### 命令速查
+
+```bash
+inc                         # 交互菜单（终端里）
+incodex --help
+incodex --version
+
+incodex install             # 打进正在用的官方 Codex
+incodex install --dry-run   # 只看计划
+incodex install --yes       # 没有终端时必须加
+incodex install --clone     # 开发：打到副本
+
+incodex uninstall           # 还原官方包
+incodex status
+incodex doctor
+incodex doctor --deep       # 完整 nested 签名 / entitlement / Gatekeeper 证据
+incodex runtime             # 只更新按钮逻辑，不重签 Codex
+incodex open                # 不改官方包，直接开无痕窗
+incodex open --mask         # 临时侧栏名称和离线头像
+incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
+incodex recover --transaction <id>
+incodex update              # 更新这个 CLI（脚本安装）
+incodex self-uninstall      # 卸掉 CLI；还原 Codex 要加 --restore-app
+```
+
+**安全预览**
+
+```bash
+incodex install --dry-run
+incodex uninstall --dry-run
+incodex open --dry-run
+incodex update --dry-run
+incodex self-uninstall --dry-run
+incodex status --json
+incodex doctor --json
+incodex doctor --deep --json
+```
+
+`brew install`、`curl … | bash`、`cargo install` 都只把命令装到 PATH。改 `/Applications/ChatGPT.app` 的是随后那条 `incodex install`。
+
 ## Quick Launchers
 
 <details>
@@ -264,46 +304,6 @@ curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/scripts/set
 4. 在 Raycast 中运行 **Reload Script Commands**。
 
 Raycast 提供可用的 `TERM` 时，Status 和 Doctor 直接在它的 `fullOutput` 中运行。没有可用的 `TERM` 时，会通过 Terminal、iTerm2、Alacritty、kitty、WezTerm、Ghostty、Hyper、WindTerm 或 Warp 启动；可以用 `INCODEX_LAUNCHER_APP=<name>` 指定。如果所选应用启动失败，会回退到 Terminal。Open 会直接打开无痕窗口。
-
-**Run**
-
-```bash
-inc                         # 交互菜单（终端里）
-incodex --help
-incodex --version
-
-incodex install             # 打进正在用的官方 Codex
-incodex install --dry-run   # 只看计划
-incodex install --yes       # 没有终端时必须加
-incodex install --clone     # 开发：打到副本
-
-incodex uninstall           # 还原官方包
-incodex status
-incodex doctor
-incodex doctor --deep        # 完整 nested 签名 / entitlement / Gatekeeper 证据
-incodex runtime             # 只更新按钮逻辑，不重签 Codex
-incodex open                # 不改官方包，直接开无痕窗
-incodex open --mask         # 临时侧栏名称和离线头像
-incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
-incodex recover --transaction <id>
-incodex update              # 更新这个 CLI（脚本安装）
-incodex self-uninstall      # 卸掉 CLI；还原 Codex 要加 --restore-app
-```
-
-**Preview safely**
-
-```bash
-incodex install --dry-run
-incodex uninstall --dry-run
-incodex open --dry-run
-incodex update --dry-run
-incodex self-uninstall --dry-run
-incodex status --json
-incodex doctor --json
-incodex doctor --deep --json
-```
-
-`brew install`、`curl … | bash`、`cargo install` 都只把命令装到 PATH。改 `/Applications/ChatGPT.app` 的是随后那条 `incodex install`。
 
 </details>
 
