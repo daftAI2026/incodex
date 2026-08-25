@@ -5,6 +5,17 @@ use crate::signing::{SignatureKind, SignedComponent, VENDOR_TEAM_IDENTIFIER};
 
 /// 读取并严格验证 outer 签名，不递归枚举或 deep 验证 nested components。
 pub fn inspect_outer_signing(path: &Path) -> Result<SignedComponent, String> {
+    inspect_component_with_verifier(path, verify_outer_strict)
+}
+
+/// 读取一个 bundle component 的签名声明，并由调用方选择验证深度。
+///
+/// outer 诊断与 install inventory 使用同一套 metadata 解析；两者只在
+/// 验证命令上不同，避免身份分类和未签名处理逐渐分叉。
+pub(crate) fn inspect_component_with_verifier(
+    path: &Path,
+    verify: impl Fn(&Path) -> bool,
+) -> Result<SignedComponent, String> {
     let output = Command::new("codesign")
         .args(["--display", "--verbose=4", "--"])
         .arg(path)
@@ -47,7 +58,7 @@ pub fn inspect_outer_signing(path: &Path) -> Result<SignedComponent, String> {
     } else {
         SignatureKind::Unknown
     };
-    let verified = kind != SignatureKind::Unsigned && verify_outer_strict(path);
+    let verified = kind != SignatureKind::Unsigned && verify(path);
     Ok(SignedComponent {
         path: path.to_path_buf(),
         identifier,
