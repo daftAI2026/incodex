@@ -3,7 +3,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 use std::time::{Duration, Instant};
 
 mod app_termination;
@@ -303,11 +303,7 @@ pub fn read_plist_info(app: &Path) -> Option<PlistInfo> {
     if !plist.exists() {
         return None;
     }
-    let output = Command::new("plutil")
-        .args(["-convert", "json", "-o", "-", "--"])
-        .arg(&plist)
-        .output()
-        .ok()?;
+    let output = plist_json_output(&plist).ok()?;
     if !output.status.success() {
         return None;
     }
@@ -330,10 +326,7 @@ pub fn read_plist_executable(app: &Path) -> Result<String, String> {
     if !plist.is_file() {
         return Err(format!("Info.plist not found: {}", plist.display()));
     }
-    let output = Command::new("plutil")
-        .args(["-convert", "json", "-o", "-", "--"])
-        .arg(&plist)
-        .output()
+    let output = plist_json_output(&plist)
         .map_err(|error| format!("cannot read {}: {error}", plist.display()))?;
     if !output.status.success() {
         return Err(format!("Info.plist is invalid: {}", plist.display()));
@@ -374,11 +367,7 @@ pub fn read_architecture(app: &Path, executable: &str) -> Option<String> {
 
 pub fn read_asar_integrity(app: &Path) -> Option<String> {
     let plist = app.join("Contents").join("Info.plist");
-    let output = Command::new("plutil")
-        .args(["-convert", "json", "-o", "-", "--"])
-        .arg(plist)
-        .output()
-        .ok()?;
+    let output = plist_json_output(&plist).ok()?;
     if !output.status.success() {
         return None;
     }
@@ -387,6 +376,13 @@ pub fn read_asar_integrity(app: &Path) -> Option<String> {
         .and_then(serde_json::Value::as_str)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+fn plist_json_output(plist: &Path) -> std::io::Result<Output> {
+    Command::new("plutil")
+        .args(["-convert", "json", "-o", "-", "--"])
+        .arg(plist)
+        .output()
 }
 
 pub fn diagnose_spctl(app: &Path) -> serde_json::Value {
