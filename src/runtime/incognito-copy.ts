@@ -1,6 +1,6 @@
-import { COPY as REGIONAL_COPY, type CopyKey, type CopyTable } from "./incognito-copy-data";
+import { COPY as REGIONAL_COPY, type CopyKey, type CopyTable } from "./incognito-copy-data.ts";
 
-export type { CopyKey, CopyTable } from "./incognito-copy-data";
+export type { CopyKey, CopyTable } from "./incognito-copy-data.ts";
 
 // English and Chinese are the source copy; keep them beside locale resolution.
 const CORE_COPY: Record<string, CopyTable> = {

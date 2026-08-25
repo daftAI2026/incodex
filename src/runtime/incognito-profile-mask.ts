@@ -1,10 +1,3 @@
-/**
- * [INPUT]: 依赖 window.__incodexProfileMask、blobatar@2.4.0 与当前 renderer 的 profile DOM
- * [OUTPUT]: 对外提供唯一 profile footer、已打开账号菜单身份行的遮罩、头像解码门禁、重渲染补挂与 health 判断
- * [POS]: Runtime profile 隐私边界；只改无痕窗口身份视觉，不接管账号数据、语义或交互行为
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
- */
-
 import { blobatarUri } from "blobatar/uri";
 
 const PROFILE_MASK_ATTR = "data-incodex-profile-mask";
@@ -41,6 +34,11 @@ type ProfileAvatarDecodeState = {
   dataUrl: string;
   probe: HTMLImageElement | null;
   status: "loading" | "ready" | "failed";
+};
+
+type ProfileIdentityElements = {
+  avatar: HTMLElement;
+  nameHost: HTMLElement;
 };
 
 declare global {
@@ -90,8 +88,10 @@ export function findProfileFooter(): HTMLElement | null {
 
 function findControlledProfileMenu(profileFooter: HTMLElement): HTMLElement | null {
   const menuId = profileFooter.getAttribute("aria-controls");
-  const menu = menuId ? document.getElementById(menuId) : null;
-  return menu?.matches(PROFILE_MENU_SELECTOR) ? menu : null;
+  if (!menuId) return null;
+  const menu = document.getElementById(menuId);
+  if (!menu?.matches(PROFILE_MENU_SELECTOR)) return null;
+  return menu;
 }
 
 export function findProfileMenuIdentity(profileMenu: HTMLElement): HTMLElement | null {
@@ -126,19 +126,30 @@ function ensureIdentityMask(
   avatarSelector: string,
   mask: ResolvedProfileMask,
 ): boolean {
-  const nameHost =
-    identity.querySelector<HTMLElement>(PROFILE_NAME_MARKER_SELECTOR) ??
-    identity.querySelector<HTMLElement>(nameSelector);
-  const avatar =
-    identity.querySelector<HTMLElement>(PROFILE_AVATAR_MARKER_SELECTOR) ??
-    identity.querySelector<HTMLElement>(avatarSelector);
-  if (!nameHost || !avatar || !writeProfileAvatar(avatar, mask)) return false;
+  const elements = profileIdentityElements(identity, nameSelector, avatarSelector);
+  if (!elements || !writeProfileAvatar(elements.avatar, mask)) return false;
+  const { avatar, nameHost } = elements;
 
   nameHost.setAttribute(PROFILE_MASK_NAME_ATTR, "true");
   nameHost.textContent = mask.name;
   avatar.setAttribute(PROFILE_MASK_AVATAR_ATTR, "true");
   identity.setAttribute(PROFILE_MASK_ATTR, "true");
   return true;
+}
+
+function profileIdentityElements(
+  identity: HTMLElement,
+  nameSelector: string,
+  avatarSelector: string,
+): ProfileIdentityElements | null {
+  const nameHost =
+    identity.querySelector<HTMLElement>(PROFILE_NAME_MARKER_SELECTOR) ??
+    identity.querySelector<HTMLElement>(nameSelector);
+  const avatar =
+    identity.querySelector<HTMLElement>(PROFILE_AVATAR_MARKER_SELECTOR) ??
+    identity.querySelector<HTMLElement>(avatarSelector);
+  if (!nameHost || !avatar) return null;
+  return { avatar, nameHost };
 }
 
 function ensureProfileMenuMask(profileFooter: HTMLElement, mask: ResolvedProfileMask): void {
@@ -182,18 +193,27 @@ function profileAvatarDecoded(dataUrl: string): boolean {
   window.__incodexProfileAvatarDecodeState = state;
   const probe = new Image();
   state.probe = probe;
-  const finish = (status: ProfileAvatarDecodeState["status"]): void => {
+  function finish(status: ProfileAvatarDecodeState["status"]): void {
     if (window.__incodexProfileAvatarDecodeState !== state) return;
     state.status = status;
     state.probe = null;
     window.__incodexProfileMaskHealth = profileMaskHealth();
-  };
+  }
+
   probe.addEventListener(
     "load",
-    () => finish(probe.naturalWidth > 0 && probe.naturalHeight > 0 ? "ready" : "failed"),
+    function handleAvatarLoad(): void {
+      finish(probe.naturalWidth > 0 && probe.naturalHeight > 0 ? "ready" : "failed");
+    },
     { once: true },
   );
-  probe.addEventListener("error", () => finish("failed"), { once: true });
+  probe.addEventListener(
+    "error",
+    function handleAvatarError(): void {
+      finish("failed");
+    },
+    { once: true },
+  );
   probe.src = dataUrl;
   return false;
 }
@@ -204,16 +224,12 @@ function identityMaskHealth(
   avatarSelector: string,
   mask: ResolvedProfileMask,
 ): boolean {
-  const nameHost =
-    identity.querySelector<HTMLElement>(PROFILE_NAME_MARKER_SELECTOR) ??
-    identity.querySelector<HTMLElement>(nameSelector);
-  const avatar =
-    identity.querySelector<HTMLElement>(PROFILE_AVATAR_MARKER_SELECTOR) ??
-    identity.querySelector<HTMLElement>(avatarSelector);
+  const elements = profileIdentityElements(identity, nameSelector, avatarSelector);
+  if (!elements) return false;
+  const { avatar, nameHost } = elements;
+
   return Boolean(
-    nameHost &&
-      avatar &&
-      identity.getAttribute(PROFILE_MASK_ATTR) === "true" &&
+    identity.getAttribute(PROFILE_MASK_ATTR) === "true" &&
       nameHost.getAttribute(PROFILE_MASK_NAME_ATTR) === "true" &&
       avatar.getAttribute(PROFILE_MASK_AVATAR_ATTR) === "true" &&
       nameHost.textContent === mask.name &&

@@ -1,5 +1,5 @@
-import { ADAPTER } from "./default-adapter";
-import type { UiAdapter } from "./types";
+import { ADAPTER } from "./default-adapter.ts";
+import type { UiAdapter } from "./types.ts";
 
 export function activeAdapter(): UiAdapter {
   return ADAPTER;

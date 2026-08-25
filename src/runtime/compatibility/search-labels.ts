@@ -37,7 +37,7 @@ export const SEARCH_LABELS = new Set([
 ]);
 
 export function isSearchLabel(label: string | null | undefined): boolean {
-  const value = (label || "").trim();
+  const value = label?.trim() ?? "";
   if (!value) return false;
   if (SEARCH_LABELS.has(value)) return true;
   const lower = value.toLowerCase();

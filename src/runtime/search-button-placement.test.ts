@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement";
+import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement.ts";
 
 type FakeNode = {
   tagName: string;

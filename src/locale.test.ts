@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { resolveLocale, translate } from "./runtime/incognito-copy";
+import { resolveLocale, translate } from "./runtime/incognito-copy.ts";
 
 describe("locale fallback", () => {
   test("empty and unknown values fall back to English", () => {

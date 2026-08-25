@@ -2,9 +2,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 /** @typedef {{ __incodex?: { originalMain?: string } }} IncodexPackage */
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
-const crypto = require("node:crypto");
 const MAIN_NAME = "incodex-main.cjs";
 const MANIFEST_NAME = "runtime-manifest.json";
 const RUNTIME_FILES = [
@@ -30,6 +30,9 @@ function originalMain() {
 }
 function sha256File(file) {
     return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+}
+function sha256Bytes(bytes) {
+    return crypto.createHash("sha256").update(bytes).digest("hex");
 }
 function refuseSymlink(target, label) {
     let stats;
@@ -76,13 +79,7 @@ function hotMain(env, execPath) {
     }
     return null;
 }
-function externalMain(env) {
-    const home = env.HOME;
-    if (typeof home !== "string" || home.length === 0) {
-        throw new Error("[incodex] HOME is unset");
-    }
-    const root = path.join(home, ".incodex", "runtime");
-    refuseSymlink(root, "runtime root");
+function readCurrentRuntime(root) {
     const currentPath = path.join(root, "current.json");
     refuseSymlink(currentPath, "current.json");
     const current = JSON.parse(fs.readFileSync(currentPath, "utf8"));
@@ -96,50 +93,61 @@ function externalMain(env) {
     if (current.release.includes("..") || current.release.startsWith("/") || current.release.includes("\\")) {
         throw new Error("[incodex] invalid runtime release path");
     }
-    const releaseDir = path.resolve(root, current.release);
+    return current;
+}
+function resolveReleaseDirectory(root, release) {
+    const releaseDir = path.resolve(root, release);
     const prefix = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
     if (releaseDir !== root && !releaseDir.startsWith(prefix)) {
         throw new Error("[incodex] runtime release escaped");
     }
     refuseSymlink(releaseDir, "release directory");
+    return releaseDir;
+}
+function runtimeFiles(current) {
     const files = current.files;
     if (!files || typeof files !== "object" || Array.isArray(files)) {
         throw new Error("[incodex] invalid runtime files");
     }
+    return files;
+}
+function verifyRuntimeManifest(releaseDir, current, files) {
     const hasManifestHash = Object.prototype.hasOwnProperty.call(current, "manifestSha256");
     const hasSourceCommit = Object.prototype.hasOwnProperty.call(current, "sourceCommit");
     if (hasManifestHash !== hasSourceCommit) {
         throw new Error("[incodex] invalid runtime manifest pointer");
     }
-    if (hasManifestHash) {
-        if (!isSha256(current.manifestSha256) || !isSourceCommit(current.sourceCommit)) {
-            throw new Error("[incodex] invalid runtime manifest pointer");
-        }
-        const releaseName = path.basename(releaseDir);
-        if (releaseName !== `${current.version}-${current.manifestSha256}`) {
-            throw new Error("[incodex] runtime release name does not match manifest hash");
-        }
-        const manifestPath = path.join(releaseDir, MANIFEST_NAME);
-        refuseSymlink(manifestPath, MANIFEST_NAME);
-        const manifestBytes = fs.readFileSync(manifestPath);
-        if (sha256Bytes(manifestBytes) !== current.manifestSha256) {
-            throw new Error("[incodex] runtime manifest hash mismatch");
-        }
-        const manifest = JSON.parse(manifestBytes.toString("utf8"));
-        if (!manifest ||
-            manifest.runtimeVersion !== current.version ||
-            manifest.sourceCommit !== current.sourceCommit ||
-            !manifest.files ||
-            typeof manifest.files !== "object" ||
-            Array.isArray(manifest.files)) {
-            throw new Error("[incodex] invalid runtime manifest");
-        }
-        for (const name of RUNTIME_FILES) {
-            if (manifest.files[name] !== files[name]) {
-                throw new Error(`[incodex] runtime manifest entry mismatch ${name}`);
-            }
+    if (!hasManifestHash)
+        return;
+    if (!isSha256(current.manifestSha256) || !isSourceCommit(current.sourceCommit)) {
+        throw new Error("[incodex] invalid runtime manifest pointer");
+    }
+    const releaseName = path.basename(releaseDir);
+    if (releaseName !== `${current.version}-${current.manifestSha256}`) {
+        throw new Error("[incodex] runtime release name does not match manifest hash");
+    }
+    const manifestPath = path.join(releaseDir, MANIFEST_NAME);
+    refuseSymlink(manifestPath, MANIFEST_NAME);
+    const manifestBytes = fs.readFileSync(manifestPath);
+    if (sha256Bytes(manifestBytes) !== current.manifestSha256) {
+        throw new Error("[incodex] runtime manifest hash mismatch");
+    }
+    const manifest = JSON.parse(manifestBytes.toString("utf8"));
+    if (!manifest ||
+        manifest.runtimeVersion !== current.version ||
+        manifest.sourceCommit !== current.sourceCommit ||
+        !manifest.files ||
+        typeof manifest.files !== "object" ||
+        Array.isArray(manifest.files)) {
+        throw new Error("[incodex] invalid runtime manifest");
+    }
+    for (const name of RUNTIME_FILES) {
+        if (manifest.files[name] !== files[name]) {
+            throw new Error(`[incodex] runtime manifest entry mismatch ${name}`);
         }
     }
+}
+function verifyRuntimeFiles(releaseDir, files) {
     for (const name of RUNTIME_FILES) {
         const expected = files[name];
         if (!isSha256(expected))
@@ -149,10 +157,20 @@ function externalMain(env) {
         if (sha256File(file) !== expected)
             throw new Error(`[incodex] hash mismatch ${name}`);
     }
-    return path.join(releaseDir, MAIN_NAME);
 }
-function sha256Bytes(bytes) {
-    return crypto.createHash("sha256").update(bytes).digest("hex");
+function externalMain(env) {
+    const home = env.HOME;
+    if (typeof home !== "string" || home.length === 0) {
+        throw new Error("[incodex] HOME is unset");
+    }
+    const root = path.join(home, ".incodex", "runtime");
+    refuseSymlink(root, "runtime root");
+    const current = readCurrentRuntime(root);
+    const releaseDir = resolveReleaseDirectory(root, current.release);
+    const files = runtimeFiles(current);
+    verifyRuntimeManifest(releaseDir, current, files);
+    verifyRuntimeFiles(releaseDir, files);
+    return path.join(releaseDir, MAIN_NAME);
 }
 async function loadMain() {
     const hot = hotMain(process.env, process.execPath);
@@ -168,7 +186,7 @@ async function bootstrap() {
         await loadMain();
     }
     catch (error) {
-        const text = String(error && error.message ? error.message : error);
+        const text = error && error.message ? String(error.message) : String(error);
         console.error("[incodex] attach failed", text.slice(0, 300));
         if (error?.code === "INCODEX_STARTUP_BLOCKED")
             return;

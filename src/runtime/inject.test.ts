@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { blobatarUri } from "blobatar/uri";
-import { iconFor } from "./incognito-icon";
+import { iconFor } from "./incognito-icon.ts";
 
 const inject = readFileSync(join(import.meta.dir, "inject.ts"), "utf8");
 const profileMask = readFileSync(join(import.meta.dir, "incognito-profile-mask.ts"), "utf8");

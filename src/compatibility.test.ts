@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { ADAPTER, probeUi } from "./runtime/compatibility/default-adapter";
-import { activeAdapter } from "./runtime/compatibility/registry";
-import { isSearchLabel } from "./runtime/compatibility/search-labels";
+import { ADAPTER, probeUi } from "./runtime/compatibility/default-adapter.ts";
+import { activeAdapter } from "./runtime/compatibility/registry.ts";
+import { isSearchLabel } from "./runtime/compatibility/search-labels.ts";
 
 describe("search labels", () => {
   test("covers English, simplified, and traditional Chinese", () => {
@@ -35,5 +35,4 @@ describe("default UI adapter", () => {
     expect(activeAdapter()).toBe(ADAPTER);
   });
 });
-
 

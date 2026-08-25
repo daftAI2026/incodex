@@ -96,6 +96,15 @@ function readLocaleOverride() {
   }
 }
 
+function sessionBurnExpectation(session, userRoot = USER_ROOT) {
+  return {
+    userRoot,
+    sessionId: session.sessionId,
+    ino: session.ino,
+    dev: session.dev,
+  };
+}
+
 function burnIncognitoSession(session, ownerSnapshot, userRoot = USER_ROOT) {
   if (
     !session ||
@@ -107,12 +116,7 @@ function burnIncognitoSession(session, ownerSnapshot, userRoot = USER_ROOT) {
   ) {
     return false;
   }
-  const expected = {
-    userRoot,
-    sessionId: session.sessionId,
-    ino: session.ino,
-    dev: session.dev,
-  };
+  const expected = sessionBurnExpectation(session, userRoot);
   const removed = safeHome.burnSessionHomeWithOwner(session.root, expected, ownerSnapshot);
   if (removed && !safeHome.writeBurnProof(session.root, expected)) {
     logLaunch("burn-proof-write-failed", { home: session.root });
@@ -195,7 +199,9 @@ async function incognitoAlreadyRunning() {
   if (records.some(({ state }) => state.kind === "unverifiable")) {
     throw new Error("owner lease is unverifiable");
   }
-  const owners = records.filter(({ state }) => state.kind === "valid").map(({ state }) => state.owner);
+  const owners = records
+    .filter(({ state }) => state.kind === "valid")
+    .map(({ state }) => state.owner);
   for (const owner of owners) {
     if (await instance.connectExistingWithRetry(stateRoot(), instance.ownerToken(owner))) return true;
   }
@@ -403,12 +409,7 @@ function prepareIncognitoSession(options = {}) {
   } catch (error) {
     if (session) {
       try {
-        burnSessionHome(session.root, {
-          userRoot,
-          sessionId: session.sessionId,
-          ino: session.ino,
-          dev: session.dev,
-        });
+        burnSessionHome(session.root, sessionBurnExpectation(session, userRoot));
       } catch (cleanupError) {
         try {
           log("prepare-burn-refused", {
@@ -453,12 +454,7 @@ async function launchIncognitoOnce() {
   const bin = process.execPath;
   if (!bin) {
     try {
-      safeHome.burnSessionHome(session.root, {
-        userRoot: USER_ROOT,
-        sessionId: session.sessionId,
-        ino: session.ino,
-        dev: session.dev,
-      });
+      safeHome.burnSessionHome(session.root, sessionBurnExpectation(session));
     } catch {
       /* ignore */
     }
@@ -476,11 +472,11 @@ async function launchIncognitoOnce() {
   });
   return new Promise((resolve) => {
     let settled = false;
-    const done = (result) => {
+    function done(result) {
       if (settled) return;
       settled = true;
       resolve(result);
-    };
+    }
     let child;
     try {
       child = spawn(bin, args, {
@@ -502,12 +498,7 @@ async function launchIncognitoOnce() {
     } catch (error) {
       logLaunch("spawn-threw", { error: String(error) });
       try {
-        safeHome.burnSessionHome(session.root, {
-          userRoot: USER_ROOT,
-          sessionId: session.sessionId,
-          ino: session.ino,
-          dev: session.dev,
-        });
+        safeHome.burnSessionHome(session.root, sessionBurnExpectation(session));
       } catch {
         /* ignore */
       }
@@ -517,12 +508,7 @@ async function launchIncognitoOnce() {
     if (!child.pid) {
       logLaunch("spawn-no-pid");
       try {
-        safeHome.burnSessionHome(session.root, {
-          userRoot: USER_ROOT,
-          sessionId: session.sessionId,
-          ino: session.ino,
-          dev: session.dev,
-        });
+        safeHome.burnSessionHome(session.root, sessionBurnExpectation(session));
       } catch {
         /* ignore */
       }
@@ -629,7 +615,7 @@ function hookWindow(win, source) {
   if (!win?.webContents || isAuxiliaryWindow(win)) return;
   rememberWindow(win);
   hookPreload(win.webContents.session);
-  const run = (report) => {
+  function run(report) {
     if (!source || win.webContents.isDestroyed()) return;
     if (!ipcGuard.bindWindowIdentity(allowedWindows, win, trustedOrigins)) return;
     const locale = JSON.stringify(readLocaleOverride());
@@ -638,7 +624,7 @@ function hookWindow(win, source) {
       .executeJavaScript(prefix + source, false)
       .then(() => (report ? reportInjectionProbe(win) : undefined))
       .catch((error) => reportInjectionError(error));
-  };
+  }
   win.webContents.on("dom-ready", () => run(false));
   win.webContents.on("did-finish-load", () => run(true));
   run(false);
@@ -654,7 +640,7 @@ async function attachElectron() {
   const packagedOrigin = ipcGuard.navigationOrigin(
     require("node:url").pathToFileURL(electron.app.getAppPath()).href,
   );
-  packagedOrigin && trustedOrigins.add(packagedOrigin);
+  if (packagedOrigin) trustedOrigins.add(packagedOrigin);
   captureSourceHome();
 
   if (!isIncognito()) {
@@ -677,7 +663,11 @@ async function attachElectron() {
     const action = payload?.action;
     if (action === "open") {
       if (isIncognito()) {
-        return ipcGuard.actionResponse(requestId, { ok: false, code: "ALREADY_INCOGNITO", reason: "already-incognito" });
+        return ipcGuard.actionResponse(requestId, {
+          ok: false,
+          code: "ALREADY_INCOGNITO",
+          reason: "already-incognito",
+        });
       }
       const result = await launchIncognito();
       return ipcGuard.actionResponse(requestId, {
@@ -688,7 +678,11 @@ async function attachElectron() {
     }
     if (action === "quit") {
       if (!isIncognito()) {
-        return ipcGuard.actionResponse(requestId, { ok: false, code: "NOT_INCOGNITO", reason: "not-incognito" });
+        return ipcGuard.actionResponse(requestId, {
+          ok: false,
+          code: "NOT_INCOGNITO",
+          reason: "not-incognito",
+        });
       }
       burnIncognitoHome();
       await clearPid(ownerLease, raiseServer);
@@ -712,10 +706,10 @@ async function attachElectron() {
     hookWindow(win, source);
     if (!isIncognito()) return;
     applyChromeWindowTile(win);
-    const bringForward = () => {
+    function bringForward() {
       applyChromeWindowTile(win);
       raiseOurWindows();
-    };
+    }
     win.once("ready-to-show", () => {
       bringForward();
       if (win.isFocused()) selectOfficialCodexMode(win);
@@ -776,11 +770,11 @@ async function attachElectron() {
     });
   }
 
-  const ready = () => {
+  function ready() {
     hookPreload(electron.session.defaultSession);
     for (const win of electron.BrowserWindow.getAllWindows()) hookWindow(win, source);
     if (isIncognito()) raiseOurWindows();
-  };
+  }
   if (electron.app.isReady()) ready();
   else void electron.app.whenReady().then(ready);
 }

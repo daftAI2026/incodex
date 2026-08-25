@@ -20,14 +20,15 @@ function navigationOrigin(raw) {
         return null;
     }
     if (parsed.protocol === "https:") {
-        return parsed.hostname === "chatgpt.com" && !parsed.username && !parsed.password && !parsed.port
-            ? parsed.origin
-            : null;
+        if (parsed.hostname !== "chatgpt.com" || parsed.username || parsed.password || parsed.port) {
+            return null;
+        }
+        return parsed.origin;
     }
     if (parsed.protocol === "app:") {
-        return parsed.hostname === "-" && parsed.pathname === "/index.html"
-            ? `${parsed.protocol}//-`
-            : null;
+        if (parsed.hostname !== "-" || parsed.pathname !== "/index.html")
+            return null;
+        return `${parsed.protocol}//-`;
     }
     if (parsed.protocol !== "file:" || parsed.host)
         return null;
@@ -96,12 +97,12 @@ function watchWindowNavigation(allowlist, win) {
     if (!contents?.on || guardedContents.has(contents))
         return;
     guardedContents.add(contents);
-    const revoke = (details, url, _isSameDocument, isMainFrame) => {
+    function revoke(details, url, _isSameDocument, isMainFrame) {
         const modern = typeof details?.url === "string";
         if ((modern ? details.isMainFrame : isMainFrame) !== true)
             return;
         revokeWindowIdentityOnNavigation(allowlist, win, modern ? details.url : url);
-    };
+    }
     contents.on("did-start-navigation", revoke);
     contents.on("will-redirect", revoke);
 }

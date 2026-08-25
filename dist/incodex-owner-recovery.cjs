@@ -52,10 +52,6 @@ function protocolLine(socket, onLine) {
     });
     socket.on("error", () => { });
 }
-function listenForLease(owner, server) {
-    protocolLine(server, () => { });
-    return server;
-}
 function createLeaseServer(owner) {
     const lease = { owner, onRaise: null, server: net.createServer() };
     let connections = 0;
@@ -148,7 +144,7 @@ function bindOwnerPort(owner) {
     const port = ownerPortFromExec(owner.execPath);
     const lease = createLeaseServer(owner);
     return new Promise((resolve, reject) => {
-        const fail = (error) => {
+        function fail(error) {
             lease.server.removeAllListeners();
             try {
                 lease.server.close();
@@ -157,7 +153,7 @@ function bindOwnerPort(owner) {
                 /* The server never reached listening. */
             }
             reject(error);
-        };
+        }
         lease.server.once("error", fail);
         lease.server.listen({ host: "127.0.0.1", port, exclusive: true }, () => {
             lease.server.removeListener("error", fail);
@@ -172,14 +168,14 @@ function probeOwnerPort(owner) {
         let response = "";
         let done = false;
         let deadline;
-        const finish = (result) => {
+        function finish(result) {
             if (done)
                 return;
             done = true;
             clearTimeout(deadline);
             socket.destroy();
             resolve(result);
-        };
+        }
         socket.setTimeout(250);
         deadline = setTimeout(() => finish({ kind: "unavailable" }), 250);
         socket.on("connect", () => socket.write("probe\n"));
@@ -278,7 +274,9 @@ function clearOwnerLock(stateRoot, expectedOwner) {
     try {
         lease.server.close();
     }
-    catch { /* The kernel listener is already gone. */ }
+    catch {
+        /* 内核监听器可能已经关闭。 */
+    }
     return true;
 }
 async function releaseOwnerLease(stateRoot, expectedOwner) {

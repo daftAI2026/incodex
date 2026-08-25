@@ -36,7 +36,7 @@ var SEARCH_LABELS = new Set([
   "Pencarian"
 ]);
 function isSearchLabel(label) {
-  const value = (label || "").trim();
+  const value = label?.trim() ?? "";
   if (!value)
     return false;
   if (SEARCH_LABELS.has(value))
@@ -61,6 +61,26 @@ var STRIP_CLONE_ATTRS = [
   "title",
   "tabindex"
 ];
+
+// src/runtime/incodex-ui-probe.ts
+function deriveUiProbe(input) {
+  const button = input.buttonPresent ? "present" : "missing";
+  let banner;
+  if (!input.incognito) {
+    banner = "not-applicable";
+  } else if (input.bannerPresent) {
+    banner = "present";
+  } else if (input.bannerDismissed) {
+    banner = "dismissed";
+  } else {
+    banner = "missing";
+  }
+  return {
+    button,
+    banner,
+    accepted: button === "present" && banner !== "missing"
+  };
+}
 
 // src/runtime/incognito-copy-data.ts
 var COPY = {
@@ -885,25 +905,6 @@ function iconFor(input) {
   return input.incognito && input.hovered ? "circle-x" : "hat-glasses";
 }
 
-// src/runtime/incodex-ui-probe.ts
-function deriveUiProbe(input) {
-  const button = input.buttonPresent ? "present" : "missing";
-  let banner;
-  if (!input.incognito)
-    banner = "not-applicable";
-  else if (input.bannerPresent)
-    banner = "present";
-  else if (input.bannerDismissed)
-    banner = "dismissed";
-  else
-    banner = "missing";
-  return {
-    button,
-    banner,
-    accepted: button === "present" && banner !== "missing"
-  };
-}
-
 // node_modules/blobatar/dist/uri.js
 function L({ l: t, c: n, h: r }) {
   let o = r * Math.PI / 180, a = n * Math.cos(o), e = n * Math.sin(o), s = t + 0.3963377774 * a + 0.2158037573 * e, c = t - 0.1055613458 * a - 0.0638541728 * e, i = t - 0.0894841775 * a - 1.291485548 * e, m = s * s * s, l = c * c * c, u = i * i * i;
@@ -1200,8 +1201,12 @@ function findProfileFooter() {
 }
 function findControlledProfileMenu(profileFooter) {
   const menuId = profileFooter.getAttribute("aria-controls");
-  const menu = menuId ? document.getElementById(menuId) : null;
-  return menu?.matches(PROFILE_MENU_SELECTOR) ? menu : null;
+  if (!menuId)
+    return null;
+  const menu = document.getElementById(menuId);
+  if (!menu?.matches(PROFILE_MENU_SELECTOR))
+    return null;
+  return menu;
 }
 function findProfileMenuIdentity(profileMenu) {
   const candidates = [...profileMenu.querySelectorAll(PROFILE_MENU_ITEM_SELECTOR)].filter((item) => item.querySelector(PROFILE_MENU_NAME_SELECTOR) && item.querySelector(PROFILE_MENU_AVATAR_SELECTOR));
@@ -1224,15 +1229,22 @@ function writeProfileAvatar(avatar, mask) {
   return false;
 }
 function ensureIdentityMask(identity, nameSelector, avatarSelector, mask) {
-  const nameHost = identity.querySelector(PROFILE_NAME_MARKER_SELECTOR) ?? identity.querySelector(nameSelector);
-  const avatar = identity.querySelector(PROFILE_AVATAR_MARKER_SELECTOR) ?? identity.querySelector(avatarSelector);
-  if (!nameHost || !avatar || !writeProfileAvatar(avatar, mask))
+  const elements = profileIdentityElements(identity, nameSelector, avatarSelector);
+  if (!elements || !writeProfileAvatar(elements.avatar, mask))
     return false;
+  const { avatar, nameHost } = elements;
   nameHost.setAttribute(PROFILE_MASK_NAME_ATTR, "true");
   nameHost.textContent = mask.name;
   avatar.setAttribute(PROFILE_MASK_AVATAR_ATTR, "true");
   identity.setAttribute(PROFILE_MASK_ATTR, "true");
   return true;
+}
+function profileIdentityElements(identity, nameSelector, avatarSelector) {
+  const nameHost = identity.querySelector(PROFILE_NAME_MARKER_SELECTOR) ?? identity.querySelector(nameSelector);
+  const avatar = identity.querySelector(PROFILE_AVATAR_MARKER_SELECTOR) ?? identity.querySelector(avatarSelector);
+  if (!nameHost || !avatar)
+    return null;
+  return { avatar, nameHost };
 }
 function ensureProfileMenuMask(profileFooter, mask) {
   const profileMenu = findControlledProfileMenu(profileFooter);
@@ -1267,22 +1279,28 @@ function profileAvatarDecoded(dataUrl) {
   window.__incodexProfileAvatarDecodeState = state;
   const probe = new Image;
   state.probe = probe;
-  const finish = (status) => {
+  function finish(status) {
     if (window.__incodexProfileAvatarDecodeState !== state)
       return;
     state.status = status;
     state.probe = null;
     window.__incodexProfileMaskHealth = profileMaskHealth();
-  };
-  probe.addEventListener("load", () => finish(probe.naturalWidth > 0 && probe.naturalHeight > 0 ? "ready" : "failed"), { once: true });
-  probe.addEventListener("error", () => finish("failed"), { once: true });
+  }
+  probe.addEventListener("load", function handleAvatarLoad() {
+    finish(probe.naturalWidth > 0 && probe.naturalHeight > 0 ? "ready" : "failed");
+  }, { once: true });
+  probe.addEventListener("error", function handleAvatarError() {
+    finish("failed");
+  }, { once: true });
   probe.src = dataUrl;
   return false;
 }
 function identityMaskHealth(identity, nameSelector, avatarSelector, mask) {
-  const nameHost = identity.querySelector(PROFILE_NAME_MARKER_SELECTOR) ?? identity.querySelector(nameSelector);
-  const avatar = identity.querySelector(PROFILE_AVATAR_MARKER_SELECTOR) ?? identity.querySelector(avatarSelector);
-  return Boolean(nameHost && avatar && identity.getAttribute(PROFILE_MASK_ATTR) === "true" && nameHost.getAttribute(PROFILE_MASK_NAME_ATTR) === "true" && avatar.getAttribute(PROFILE_MASK_AVATAR_ATTR) === "true" && nameHost.textContent === mask.name && profileAvatarHealth(avatar, mask));
+  const elements = profileIdentityElements(identity, nameSelector, avatarSelector);
+  if (!elements)
+    return false;
+  const { avatar, nameHost } = elements;
+  return Boolean(identity.getAttribute(PROFILE_MASK_ATTR) === "true" && nameHost.getAttribute(PROFILE_MASK_NAME_ATTR) === "true" && avatar.getAttribute(PROFILE_MASK_AVATAR_ATTR) === "true" && nameHost.textContent === mask.name && profileAvatarHealth(avatar, mask));
 }
 function profileMaskHealth() {
   if (!profileMaskConfigured())
@@ -1311,11 +1329,13 @@ function profileMaskNeedsInject() {
 // src/runtime/official-tooltip-provider.ts
 function createOfficialTooltipTimingBridge(currentTrigger) {
   let activeProvider = null;
-  const currentProvider = () => {
+  function currentProvider() {
     const trigger = currentTrigger();
-    return trigger ? findOfficialTooltipProvider(trigger) : null;
-  };
-  const deactivate = () => {
+    if (!trigger)
+      return null;
+    return findOfficialTooltipProvider(trigger);
+  }
+  function deactivate() {
     const provider = activeProvider;
     activeProvider = null;
     if (!provider)
@@ -1323,12 +1343,14 @@ function createOfficialTooltipTimingBridge(currentTrigger) {
     try {
       provider.deactivateTooltip(PROVIDER_ID);
     } catch {}
-  };
+  }
   return {
     resolveDelay(fallbackMs) {
       try {
         const delayMs = currentProvider()?.getOpenDelay(PROVIDER_KEY, fallbackMs) ?? fallbackMs;
-        return Number.isFinite(delayMs) && delayMs >= 0 ? delayMs : fallbackMs;
+        if (!Number.isFinite(delayMs) || delayMs < 0)
+          return fallbackMs;
+        return delayMs;
       } catch {
         return fallbackMs;
       }
@@ -1410,21 +1432,21 @@ function createTooltipLifecycle(deps) {
   let focused = false;
   let open = false;
   let pending = null;
-  const cancelPending = () => {
+  function cancelPending() {
     if (pending === null)
       return;
     deps.cancel(pending);
     pending = null;
-  };
-  const hide = () => {
+  }
+  function hide() {
     cancelPending();
     if (open) {
       open = false;
       deps.onClose?.();
     }
     deps.hide();
-  };
-  const scheduleShow = () => {
+  }
+  function scheduleShow() {
     cancelPending();
     pending = deps.schedule(() => {
       pending = null;
@@ -1436,7 +1458,7 @@ function createTooltipLifecycle(deps) {
         return;
       deps.show();
     }, deps.resolveDelay?.(deps.delayMs) ?? deps.delayMs);
-  };
+  }
   return {
     pointerEnter() {
       hovering = true;
@@ -1498,7 +1520,8 @@ function isIncognitoWindow() {
   return false;
 }
 function currentLocale() {
-  return resolveLocale(window.__incodexLocale || document.documentElement.lang || navigator.language || "en");
+  const locale = window.__incodexLocale || document.documentElement.lang || navigator.language || "en";
+  return resolveLocale(locale);
 }
 function t(key) {
   return translate(currentLocale(), key);
@@ -1708,8 +1731,7 @@ function buildButton(search) {
   if (svg)
     btn.append(svg);
   const providerTiming = createOfficialTooltipTimingBridge(findSearchButton);
-  let tooltipLifecycle;
-  tooltipLifecycle = createTooltipLifecycle({
+  const tooltipLifecycle = createTooltipLifecycle({
     delayMs: TOOLTIP_FALLBACK_DELAY_MS,
     resolveDelay: providerTiming.resolveDelay,
     schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
@@ -1813,9 +1835,8 @@ function dismissBanner() {
   document.querySelector(`[${LANDING_ATTR}]`)?.remove();
   refreshUiProbe();
 }
-function classNameOf(el) {
-  const value = el.getAttribute("class") || "";
-  return typeof value === "string" ? value : "";
+function classNameOf(element) {
+  return element.getAttribute("class") ?? "";
 }
 function findOfficialBannerSlot() {
   return [...document.querySelectorAll("div")].find((el) => {
@@ -1896,15 +1917,13 @@ function syncLandingCopy(host) {
   if (close)
     close.setAttribute("aria-label", t("dismiss"));
 }
+function removeLanding() {
+  document.querySelector(`[${BANNER_HOST_ATTR}]`)?.remove();
+  document.querySelector(`[${LANDING_ATTR}]`)?.remove();
+}
 function ensureLanding() {
-  if (!isIncognitoWindow()) {
-    document.querySelector(`[${BANNER_HOST_ATTR}]`)?.remove();
-    document.querySelector(`[${LANDING_ATTR}]`)?.remove();
-    return;
-  }
-  if (bannerDismissed()) {
-    document.querySelector(`[${BANNER_HOST_ATTR}]`)?.remove();
-    document.querySelector(`[${LANDING_ATTR}]`)?.remove();
+  if (!isIncognitoWindow() || bannerDismissed()) {
+    removeLanding();
     return;
   }
   const mount = findLandingMount();
@@ -1969,7 +1988,7 @@ var PROFILE_OBSERVED_ATTRIBUTES = [
 ];
 function observerOptions() {
   const options = { childList: true, subtree: true };
-  if (isIncognitoWindow() && window.__incodexProfileMask !== null && window.__incodexProfileMask !== undefined) {
+  if (profileObservationRequired()) {
     options.attributes = true;
     options.characterData = true;
     options.attributeFilter = PROFILE_OBSERVED_ATTRIBUTES;
@@ -1981,13 +2000,11 @@ function profileObservationRequired() {
 }
 function createMutationObserver() {
   let scheduled = false;
-  return new MutationObserver(() => {
-    if (!needsInject())
-      return;
-    if (scheduled)
+  return new MutationObserver(function handleMutation() {
+    if (!needsInject() || scheduled)
       return;
     scheduled = true;
-    requestAnimationFrame(() => {
+    requestAnimationFrame(function injectOnAnimationFrame() {
       scheduled = false;
       if (!needsInject())
         return;

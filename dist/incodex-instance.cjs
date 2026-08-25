@@ -49,14 +49,14 @@ function connectToOwner(owner, expectedToken, timeoutMs) {
         let done = false;
         let response = "";
         let deadline;
-        const finish = (ok) => {
+        function finish(ok) {
             if (done)
                 return;
             done = true;
             clearTimeout(deadline);
             socket.destroy();
             resolve(ok);
-        };
+        }
         socket.setTimeout(timeoutMs);
         deadline = setTimeout(() => finish(false), timeoutMs);
         socket.once("connect", () => {
@@ -73,9 +73,10 @@ function connectToOwner(owner, expectedToken, timeoutMs) {
                 finish(false);
                 return;
             }
-            if (response.split("\n").some((line) => line.trim() === "ok"))
+            const lines = response.split("\n").map((line) => line.trim());
+            if (lines.includes("ok"))
                 finish(true);
-            else if (response.split("\n").some((line) => line.trim() === "denied"))
+            else if (lines.includes("denied"))
                 finish(false);
         });
         socket.once("error", () => finish(false));
@@ -105,7 +106,7 @@ async function connectExistingWithRetry(stateRoot, token, options = {}) {
         if (await connectExisting(stateRoot, timeoutMs, token))
             return true;
         if (attempt + 1 < attempts && delayMs > 0)
-            await new Promise((resolve) => setTimeout(resolve, delayMs));
+            await wait(delayMs);
     }
     return false;
 }
@@ -119,10 +120,13 @@ function singleFlight(holder, start) {
         return holder.current;
     holder.current = Promise.resolve()
         .then(start)
-        .finally(() => {
+        .finally(function clearSingleFlight() {
         holder.current = null;
     });
     return holder.current;
+}
+function wait(delayMs) {
+    return new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 function sessionProcessIdsFromPs(snapshot, sessionRoot, currentPid = process.pid) {
     if (typeof snapshot !== "string" ||
@@ -186,7 +190,7 @@ async function waitForSessionProcesses(sessionRoot, timeoutMs) {
     const deadline = Date.now() + timeoutMs;
     let pids = await markedSessionProcesses(sessionRoot);
     while (pids.length > 0 && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 25));
+        await wait(25);
         pids = await markedSessionProcesses(sessionRoot);
     }
     return pids;
@@ -213,7 +217,7 @@ async function quiesceSessionHelpers(sessionRoot) {
     if (pids.length > 0)
         throw new Error("late isolated helpers survived SIGKILL");
 }
-if (typeof module !== "undefined")
+if (typeof module !== "undefined") {
     module.exports = {
         LOCK_NAME,
         SOCK_NAME,
@@ -245,3 +249,4 @@ if (typeof module !== "undefined")
         sessionProcessIdsFromPs,
         quiesceSessionHelpers,
     };
+}

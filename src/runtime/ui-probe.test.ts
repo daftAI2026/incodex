@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { deriveUiProbe } from "./incodex-ui-probe";
+import { deriveUiProbe } from "./incodex-ui-probe.ts";
 
 const inject = readFileSync(join(import.meta.dir, "inject.ts"), "utf8");
 

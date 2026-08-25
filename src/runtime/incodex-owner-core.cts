@@ -2,9 +2,9 @@
 "use strict";
 
 const { spawnSync } = require("node:child_process");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
-const crypto = require("node:crypto");
 
 const LOCK_NAME = "incognito.lock";
 const ACTIVE_LOCK_PREFIX = `${LOCK_NAME}.active.`;
@@ -16,6 +16,21 @@ const OWNER_RETRY_COUNT = 5;
 const OWNER_RETRY_DELAY_MS = 100;
 const OWNER_PORT_BASE = 45000;
 const OWNER_PORT_SPAN = 15000;
+const PROCESS_START_MONTHS = new Set([
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+]);
+const PROCESS_START_WEEKDAYS = new Set(["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]);
 let ownerRecordTestHook = null;
 
 function targetIdFromExec(execPath) {
@@ -27,9 +42,16 @@ function targetStateDir(userRoot, execPath) {
 }
 
 function ownerPortFromExec(execPath) {
-  const uid = arguments.length > 1 ? arguments[1] : (typeof process.getuid === "function" ? process.getuid() : 0);
+  let uid;
+  if (arguments.length > 1) {
+    uid = arguments[1];
+  } else if (typeof process.getuid === "function") {
+    uid = process.getuid();
+  } else {
+    uid = 0;
+  }
   const digest = crypto.createHash("sha256").update(`${uid}:${execPath || "unknown"}`).digest();
-  return OWNER_PORT_BASE + digest.readUInt32BE(0) % OWNER_PORT_SPAN;
+  return OWNER_PORT_BASE + (digest.readUInt32BE(0) % OWNER_PORT_SPAN);
 }
 
 function processIdentity(pid) {
@@ -58,8 +80,8 @@ function isCanonicalProcessStartIdentity(value) {
   const parts = value.trim().split(/\s+/);
   return (
     parts.length === 5 &&
-    ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].includes(parts[0]) &&
-    ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].includes(parts[1]) &&
+    PROCESS_START_WEEKDAYS.has(parts[0]) &&
+    PROCESS_START_MONTHS.has(parts[1]) &&
     /^\d{1,2}$/.test(parts[2]) &&
     /^\d{2}:\d{2}:\d{2}$/.test(parts[3]) &&
     /^\d{4}$/.test(parts[4])
@@ -86,11 +108,14 @@ function hasReliableOwnerIdentity(owner) {
 }
 
 function executableIdentity(owner) {
-  const raw = nonEmptyString(owner?.execIdentity)
-    ? owner.execIdentity
-    : nonEmptyString(owner?.comm)
-      ? owner.comm
-      : owner?.execPath;
+  let raw;
+  if (nonEmptyString(owner?.execIdentity)) {
+    raw = owner.execIdentity;
+  } else if (nonEmptyString(owner?.comm)) {
+    raw = owner.comm;
+  } else {
+    raw = owner?.execPath;
+  }
   return nonEmptyString(raw) ? path.basename(String(raw).replace(/[/\\]+$/, "")) : "";
 }
 
@@ -137,13 +162,14 @@ function setOwnerRecordTestHook(hook) {
   ownerRecordTestHook = typeof hook === "function" ? hook : null;
 }
 
-function writeAtomicRecord(file, value) {
+function writeTemporaryRecord(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const temporary = path.join(
     path.dirname(file),
     `.${path.basename(file)}.tmp.${process.pid}.${Date.now()}.${crypto.randomBytes(8).toString("hex")}`,
   );
-  const fd = fs.openSync(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+  const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL;
+  const fd = fs.openSync(temporary, flags, 0o600);
   try {
     const contents = Buffer.from(`${JSON.stringify(value)}\n`);
     fs.writeSync(fd, contents, 0, contents.length, 0);
@@ -155,14 +181,23 @@ function writeAtomicRecord(file, value) {
   } finally {
     fs.closeSync(fd);
   }
+  return temporary;
+}
+
+function removeTemporaryRecord(temporary) {
+  try {
+    fs.rmSync(temporary, { force: true });
+  } catch {
+    /* 临时文件清理只做 best effort。 */
+  }
+}
+
+function writeAtomicRecord(file, value) {
+  const temporary = writeTemporaryRecord(file, value);
   try {
     fs.renameSync(temporary, file);
   } finally {
-    try {
-      fs.rmSync(temporary, { force: true });
-    } catch {
-      /* Best effort cleanup; the canonical record is already authoritative. */
-    }
+    removeTemporaryRecord(temporary);
   }
 }
 
@@ -171,24 +206,12 @@ function writeOwnerLock(stateRoot, owner) {
 }
 
 function writeOwnerRecordExclusive(file, owner) {
-  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  const temporary = path.join(
-    path.dirname(file),
-    `.${path.basename(file)}.tmp.${process.pid}.${Date.now()}.${crypto.randomBytes(8).toString("hex")}`,
-  );
-  const fd = fs.openSync(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
-  try {
-    const contents = Buffer.from(`${JSON.stringify(owner)}\n`);
-    fs.writeSync(fd, contents, 0, contents.length, 0);
-    try { fs.fsyncSync(fd); } catch { /* The complete temp record is still valid. */ }
-  } finally {
-    fs.closeSync(fd);
-  }
+  const temporary = writeTemporaryRecord(file, owner);
   try {
     // link(2) is atomic no-replace publication on the same filesystem.
     fs.linkSync(temporary, file);
   } finally {
-    try { fs.rmSync(temporary, { force: true }); } catch { /* Best effort temp cleanup. */ }
+    removeTemporaryRecord(temporary);
   }
 }
 
@@ -269,10 +292,9 @@ function reclaimStaleActiveOwnerRecord(file, expectedOwner) {
 function readOwnerRecords(stateRoot) {
   const records = [];
   const canonical = lockPath(stateRoot);
-  let names = [];
   let quarantineAttempts = 0;
   try {
-    names = fs.readdirSync(stateRoot);
+    const names = fs.readdirSync(stateRoot);
     for (const name of names) {
       if (isOwnerQuarantinePath(name)) {
         const file = path.join(stateRoot, name);

@@ -77,6 +77,16 @@ describe("runtime load", () => {
     );
   });
 
+  test("failed launches remain single-flight through promise settlement", () => {
+    const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
+    const launchStart = main.indexOf("async function launchIncognitoOnce()");
+    const launchEnd = main.indexOf("\nconst allowedWindows", launchStart);
+    const launch = main.slice(launchStart, launchEnd);
+
+    expect(launch).toContain("if (!prepared.ok) return Promise.resolve(prepared);");
+    expect(launch).toContain('return Promise.resolve({ ok: false, reason: "spawn-failed" });');
+  });
+
   test("the installed Runtime confirms Codex mode with Control+3", () => {
     const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
     const selectorStart = main.indexOf("function selectOfficialCodexMode(win)");

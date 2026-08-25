@@ -3,7 +3,7 @@ import {
   createOfficialTooltipTimingBridge,
   findOfficialTooltipProvider,
   type OfficialTooltipProvider,
-} from "./official-tooltip-provider";
+} from "./official-tooltip-provider.ts";
 
 type TestFiber = {
   return?: TestFiber | null;

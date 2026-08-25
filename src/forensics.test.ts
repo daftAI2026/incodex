@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { translate } from "./runtime/incognito-copy";
+import { translate } from "./runtime/incognito-copy.ts";
 import {
   EXIT_PATHS,
   absolutePrivacyClaimAllowed,
@@ -13,7 +13,7 @@ import {
   sessionEvidenceGone,
   uniquePrompt,
   type ScanRoots,
-} from "./forensics";
+} from "./forensics.ts";
 
 describe("privacy forensics", () => {
   test.each([...EXIT_PATHS])("%s does not leave the unique prompt in managed session dirs", (kind) => {

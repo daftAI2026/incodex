@@ -7,11 +7,7 @@ const TOOLTIP_TRIGGER_STATES = new Set(["closed", "delayed-open", "instant-open"
 
 function isSearchTooltipTrigger(element: HTMLElement): boolean {
   const state = element.getAttribute("data-state");
-  return (
-    element.tagName === "SPAN" &&
-    state !== null &&
-    TOOLTIP_TRIGGER_STATES.has(state)
-  );
+  return element.tagName === "SPAN" && state !== null && TOOLTIP_TRIGGER_STATES.has(state);
 }
 
 export function searchButtonPlacement(search: HTMLElement): SearchButtonPlacement | null {

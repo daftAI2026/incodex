@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createTooltipLifecycle } from "./tooltip-lifecycle";
+import { createTooltipLifecycle } from "./tooltip-lifecycle.ts";
 
 type ScheduledTask = {
   callback: () => void;

@@ -25,22 +25,22 @@ export function createTooltipLifecycle(deps: TooltipLifecycleDeps): TooltipLifec
   let open = false;
   let pending: number | null = null;
 
-  const cancelPending = (): void => {
+  function cancelPending(): void {
     if (pending === null) return;
     deps.cancel(pending);
     pending = null;
-  };
+  }
 
-  const hide = (): void => {
+  function hide(): void {
     cancelPending();
     if (open) {
       open = false;
       deps.onClose?.();
     }
     deps.hide();
-  };
+  }
 
-  const scheduleShow = (): void => {
+  function scheduleShow(): void {
     cancelPending();
     pending = deps.schedule(() => {
       pending = null;
@@ -50,7 +50,7 @@ export function createTooltipLifecycle(deps: TooltipLifecycleDeps): TooltipLifec
       if (!open) return;
       deps.show();
     }, deps.resolveDelay?.(deps.delayMs) ?? deps.delayMs);
-  };
+  }
 
   return {
     pointerEnter() {

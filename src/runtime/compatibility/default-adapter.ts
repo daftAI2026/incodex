@@ -1,5 +1,5 @@
-import { isSearchLabel } from "./search-labels";
-import type { UiAdapter } from "./types";
+import { isSearchLabel } from "./search-labels.ts";
+import type { UiAdapter } from "./types.ts";
 
 export const SELECTORS = {
   headerCluster: ".ms-auto.flex.items-center",
@@ -29,11 +29,12 @@ export const ADAPTER: UiAdapter = {
   probeUi(root) {
     const buttons = [...root.querySelectorAll("button")];
     return {
-      search: buttons.some((btn) => isSearchLabel(btn.getAttribute("aria-label"))),
+      search: buttons.some((button) => isSearchLabel(button.getAttribute("aria-label"))),
       banners: Boolean(root.querySelector?.(ADAPTER.selectors.homeBanners)),
     };
   },
 };
 
-export const probeUi = (root: ParentNode) => ADAPTER.probeUi(root);
-
+export function probeUi(root: ParentNode): { search: boolean; banners: boolean } {
+  return ADAPTER.probeUi(root);
+}
