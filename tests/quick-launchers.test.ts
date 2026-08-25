@@ -1,9 +1,3 @@
-/**
- * [INPUT]: 依赖 scripts/setup-quick-launchers.sh 的本地生成器，依赖 macOS unzip 读取 Alfred 导入包
- * [OUTPUT]: 验证动态 runner、薄 provider wrapper、官方导入边界、原子重生成与所有权拒写契约
- * [POS]: tests 的 Quick Launchers 产品契约，阻止安装器固化 CLI 路径或管理 provider 私有配置
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
- */
 import { describe, expect, test } from "bun:test";
 import {
   chmodSync,

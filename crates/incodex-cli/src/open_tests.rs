@@ -43,6 +43,32 @@ pub(super) fn fake_app(root: &Path) -> PathBuf {
     app
 }
 
+#[test]
+fn native_open_plan_claims_native_cleanup_ownership() {
+    let root = temp_root();
+    let app = fake_app(&root);
+    let user = root.join("home");
+    let source = root.join("codex");
+    fs::create_dir_all(&source).unwrap();
+
+    let plan = prepare_incognito_open(&app, &user, &source, 1).unwrap();
+    assert!(plan
+        .env
+        .iter()
+        .any(|(key, value)| key == "INCODEX_CLEANUP_OWNER" && value == "native"));
+    burn_session_home(
+        &plan.session_root,
+        &BurnExpected {
+            user_root: &user,
+            session_id: Some(&plan.session_id),
+            ino: Some(plan.session_ino),
+            dev: Some(plan.session_dev),
+        },
+    )
+    .unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
 fn write_cdp_http(stream: &mut TcpStream, value: &serde_json::Value) {
     let body = value.to_string();
     let response = format!(
@@ -222,10 +248,9 @@ fn open_preparation_seeds_live_bounds_instead_of_stale_disk_bounds() {
 
 #[test]
 fn open_progress_distinguishes_launch_ready_and_waiting() {
-    let (opening, opened, waiting) = open_progress_copy();
-    assert_eq!(opening, "Opening incognito Codex window");
-    assert_eq!(opened, "Opened. Incognito Codex window is ready.");
-    assert_eq!(waiting, "Waiting for the window to close");
+    assert_eq!(OPENING_MESSAGE, "Opening incognito Codex window");
+    assert_eq!(OPENED_MESSAGE, "Opened. Incognito Codex window is ready.");
+    assert_eq!(WAITING_MESSAGE, "Waiting for the window to close");
 }
 
 #[test]
@@ -353,7 +378,7 @@ fn primary_discovered_during_failed_injection_still_gets_a_lifecycle_monitor() {
 #[test]
 fn ready_published_between_status_poll_and_child_exit_is_not_lost() {
     let (status_tx, status_rx) = mpsc::channel();
-    let readiness = InjectionReadiness::default();
+    let readiness = AtomicBool::new(false);
 
     // spawn_plan polls status_rx before child.try_wait. The first poll is
     // empty; the producer then publishes Ready while the child exits.
@@ -366,7 +391,7 @@ fn ready_published_between_status_poll_and_child_exit_is_not_lost() {
     // No second channel poll happens before this child-exit observation.
     // The producer's acceptance must already be visible here.
     assert!(
-        readiness.is_ready(),
+        readiness.load(Ordering::Acquire),
         "Ready published between lifecycle polls must survive child exit"
     );
 }
@@ -374,10 +399,10 @@ fn ready_published_between_status_poll_and_child_exit_is_not_lost() {
 #[test]
 fn profile_mask_failure_after_ready_revokes_ui_acceptance() {
     let (status_tx, _status_rx) = mpsc::channel();
-    let readiness = InjectionReadiness::default();
+    let readiness = AtomicBool::new(false);
 
     publish_injection_status(&status_tx, &readiness, InjectionStatus::Ready);
-    assert!(readiness.is_ready());
+    assert!(readiness.load(Ordering::Acquire));
     publish_injection_status(
         &status_tx,
         &readiness,
@@ -385,7 +410,7 @@ fn profile_mask_failure_after_ready_revokes_ui_acceptance() {
     );
 
     assert!(
-        !readiness.is_ready(),
+        !readiness.load(Ordering::Acquire),
         "a post-start mask failure must revoke the accepted UI state"
     );
 }

@@ -8,7 +8,7 @@ use super::{
         file_name, file_name_starts, is_directory, is_symlink, live_process_identity, pid_alive,
         read_directory,
     },
-    CheckResult, CheckStatus, DiagnosticFinding, SessionScan,
+    CheckResult, DiagnosticFinding, SessionScan,
 };
 
 fn mark_pair(
@@ -350,21 +350,7 @@ pub fn scan_sessions(root: &Path) -> SessionScan {
     SessionScan {
         orphan_sessions,
         leftover_chromium,
-        orphan_check: if unknown {
-            CheckResult {
-                status: CheckStatus::Unknown,
-                findings: orphan_findings,
-            }
-        } else {
-            CheckResult::checked(orphan_findings)
-        },
-        chromium_check: if unknown {
-            CheckResult {
-                status: CheckStatus::Unknown,
-                findings: chromium_findings,
-            }
-        } else {
-            CheckResult::checked(chromium_findings)
-        },
+        orphan_check: CheckResult::scanned(orphan_findings, unknown),
+        chromium_check: CheckResult::scanned(chromium_findings, unknown),
     }
 }

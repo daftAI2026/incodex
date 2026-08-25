@@ -16,7 +16,9 @@ if (!isTopFrame()) {
 else {
     const api = {
         /** @param {{ action: string, requestId?: string }} payload */
-        requestIncognitoAction: (payload) => ipcRenderer.invoke("incodex-action", payload),
+        requestIncognitoAction(payload) {
+            return ipcRenderer.invoke("incodex-action", payload);
+        },
     };
     try {
         contextBridge.exposeInMainWorld("incodex", api);

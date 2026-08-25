@@ -36,7 +36,7 @@ var SEARCH_LABELS = new Set([
   "Pencarian"
 ]);
 function isSearchLabel(label) {
-  const value = (label || "").trim();
+  const value = label?.trim() ?? "";
   if (!value)
     return false;
   if (SEARCH_LABELS.has(value))
@@ -45,22 +45,25 @@ function isSearchLabel(label) {
   return lower === "search" || lower.startsWith("search ");
 }
 
-// src/runtime/compatibility/default-adapter.ts
-var STRIP_CLONE_ATTRS = [
-  "id",
-  "name",
-  "aria-haspopup",
-  "aria-expanded",
-  "aria-controls",
-  "aria-describedby",
-  "aria-labelledby",
-  "data-state",
-  "data-testid",
-  "data-test-id",
-  "disabled",
-  "title",
-  "tabindex"
-];
+// src/runtime/incodex-ui-probe.ts
+function deriveUiProbe(input) {
+  const button = input.buttonPresent ? "present" : "missing";
+  let banner;
+  if (!input.incognito) {
+    banner = "not-applicable";
+  } else if (input.bannerPresent) {
+    banner = "present";
+  } else if (input.bannerDismissed) {
+    banner = "dismissed";
+  } else {
+    banner = "missing";
+  }
+  return {
+    button,
+    banner,
+    accepted: button === "present" && banner !== "missing"
+  };
+}
 
 // src/runtime/incognito-copy-data.ts
 var COPY = {
@@ -788,57 +791,11 @@ var COPY2 = {
   ...COPY,
   ...CORE_COPY
 };
-var DEFAULT_BY_LANGUAGE = {
-  bg: "bg-BG",
-  bn: "bn-BD",
-  bs: "bs-BA",
-  ca: "ca-ES",
-  cs: "cs-CZ",
-  da: "da-DK",
-  de: "de-DE",
-  el: "el-GR",
+var LANGUAGE_DEFAULT_OVERRIDES = {
   es: "es-419",
-  et: "et-EE",
-  fi: "fi-FI",
   fr: "fr-FR",
-  gu: "gu-IN",
-  hi: "hi-IN",
-  hr: "hr-HR",
-  hu: "hu-HU",
-  hy: "hy-AM",
-  id: "id-ID",
-  is: "is-IS",
-  it: "it-IT",
-  ja: "ja-JP",
-  ka: "ka-GE",
-  kn: "kn-IN",
-  ko: "ko-KR",
-  lv: "lv-LV",
-  mk: "mk-MK",
-  mr: "mr-IN",
-  ms: "ms-MY",
-  my: "my-MM",
-  nb: "nb-NO",
   no: "nb-NO",
-  nl: "nl-NL",
-  pl: "pl-PL",
-  pt: "pt-BR",
-  ro: "ro-RO",
-  ru: "ru-RU",
-  sk: "sk-SK",
-  sl: "sl-SI",
-  so: "so-SO",
-  sq: "sq-AL",
-  sr: "sr-RS",
-  sv: "sv-SE",
-  sw: "sw-TZ",
-  ta: "ta-IN",
-  te: "te-IN",
-  th: "th-TH",
-  tr: "tr-TR",
-  uk: "uk-UA",
-  vi: "vi-VN",
-  zh: "zh-CN"
+  pt: "pt-BR"
 };
 function resolveLocale(raw) {
   const normalized = raw.trim().replaceAll("_", "-");
@@ -861,47 +818,18 @@ function resolveLocale(raw) {
   const language = lower.split("-")[0] ?? "en";
   if (COPY2[language])
     return language;
-  if (DEFAULT_BY_LANGUAGE[language] && COPY2[DEFAULT_BY_LANGUAGE[language]]) {
-    return DEFAULT_BY_LANGUAGE[language];
+  const defaultOverride = LANGUAGE_DEFAULT_OVERRIDES[language];
+  if (defaultOverride) {
+    return defaultOverride;
   }
   const regional = Object.keys(COPY2).find((key) => key.toLowerCase().startsWith(`${language}-`));
   return regional ?? "en";
 }
-var TIGHT_BODY = {
-  en: "Same account and settings as usual, without earlier chats. This conversation will not show up in your everyday chat list. Temporary data is removed after a normal exit.",
-  "zh-CN": "账号和设置跟平时一样，看不到以前的对话，这次的聊天也不会进平时的列表。正常关掉后，这次的临时数据会清掉。",
-  "zh-TW": "帳號和設定跟平時一樣，看不到以前的對話，這次的聊天也不會進平時的列表。正常關掉後，這次的臨時資料會清掉。",
-  "zh-HK": "帳戶和設定跟平時一樣，看不到以前的對話，這次的聊天也不會進平時的列表。正常關掉後，這次的臨時資料會清掉。"
-};
 function translate(locale, key) {
   const resolved = resolveLocale(locale);
   if (key === "body")
-    return TIGHT_BODY[resolved] ?? TIGHT_BODY.en;
+    return CORE_COPY[resolved]?.body ?? CORE_COPY.en.body;
   return COPY2[resolved]?.[key] ?? COPY2.en[key];
-}
-
-// src/runtime/incognito-icon.ts
-function iconFor(input) {
-  return input.incognito && input.hovered ? "circle-x" : "hat-glasses";
-}
-
-// src/runtime/incodex-ui-probe.ts
-function deriveUiProbe(input) {
-  const button = input.buttonPresent ? "present" : "missing";
-  let banner;
-  if (!input.incognito)
-    banner = "not-applicable";
-  else if (input.bannerPresent)
-    banner = "present";
-  else if (input.bannerDismissed)
-    banner = "dismissed";
-  else
-    banner = "missing";
-  return {
-    button,
-    banner,
-    accepted: button === "present" && banner !== "missing"
-  };
 }
 
 // node_modules/blobatar/dist/uri.js
@@ -1200,8 +1128,12 @@ function findProfileFooter() {
 }
 function findControlledProfileMenu(profileFooter) {
   const menuId = profileFooter.getAttribute("aria-controls");
-  const menu = menuId ? document.getElementById(menuId) : null;
-  return menu?.matches(PROFILE_MENU_SELECTOR) ? menu : null;
+  if (!menuId)
+    return null;
+  const menu = document.getElementById(menuId);
+  if (!menu?.matches(PROFILE_MENU_SELECTOR))
+    return null;
+  return menu;
 }
 function findProfileMenuIdentity(profileMenu) {
   const candidates = [...profileMenu.querySelectorAll(PROFILE_MENU_ITEM_SELECTOR)].filter((item) => item.querySelector(PROFILE_MENU_NAME_SELECTOR) && item.querySelector(PROFILE_MENU_AVATAR_SELECTOR));
@@ -1224,15 +1156,22 @@ function writeProfileAvatar(avatar, mask) {
   return false;
 }
 function ensureIdentityMask(identity, nameSelector, avatarSelector, mask) {
-  const nameHost = identity.querySelector(PROFILE_NAME_MARKER_SELECTOR) ?? identity.querySelector(nameSelector);
-  const avatar = identity.querySelector(PROFILE_AVATAR_MARKER_SELECTOR) ?? identity.querySelector(avatarSelector);
-  if (!nameHost || !avatar || !writeProfileAvatar(avatar, mask))
+  const elements = profileIdentityElements(identity, nameSelector, avatarSelector);
+  if (!elements || !writeProfileAvatar(elements.avatar, mask))
     return false;
+  const { avatar, nameHost } = elements;
   nameHost.setAttribute(PROFILE_MASK_NAME_ATTR, "true");
   nameHost.textContent = mask.name;
   avatar.setAttribute(PROFILE_MASK_AVATAR_ATTR, "true");
   identity.setAttribute(PROFILE_MASK_ATTR, "true");
   return true;
+}
+function profileIdentityElements(identity, nameSelector, avatarSelector) {
+  const nameHost = identity.querySelector(PROFILE_NAME_MARKER_SELECTOR) ?? identity.querySelector(nameSelector);
+  const avatar = identity.querySelector(PROFILE_AVATAR_MARKER_SELECTOR) ?? identity.querySelector(avatarSelector);
+  if (!nameHost || !avatar)
+    return null;
+  return { avatar, nameHost };
 }
 function ensureProfileMenuMask(profileFooter, mask) {
   const profileMenu = findControlledProfileMenu(profileFooter);
@@ -1267,22 +1206,28 @@ function profileAvatarDecoded(dataUrl) {
   window.__incodexProfileAvatarDecodeState = state;
   const probe = new Image;
   state.probe = probe;
-  const finish = (status) => {
+  function finish(status) {
     if (window.__incodexProfileAvatarDecodeState !== state)
       return;
     state.status = status;
     state.probe = null;
     window.__incodexProfileMaskHealth = profileMaskHealth();
-  };
-  probe.addEventListener("load", () => finish(probe.naturalWidth > 0 && probe.naturalHeight > 0 ? "ready" : "failed"), { once: true });
-  probe.addEventListener("error", () => finish("failed"), { once: true });
+  }
+  probe.addEventListener("load", function handleAvatarLoad() {
+    finish(probe.naturalWidth > 0 && probe.naturalHeight > 0 ? "ready" : "failed");
+  }, { once: true });
+  probe.addEventListener("error", function handleAvatarError() {
+    finish("failed");
+  }, { once: true });
   probe.src = dataUrl;
   return false;
 }
 function identityMaskHealth(identity, nameSelector, avatarSelector, mask) {
-  const nameHost = identity.querySelector(PROFILE_NAME_MARKER_SELECTOR) ?? identity.querySelector(nameSelector);
-  const avatar = identity.querySelector(PROFILE_AVATAR_MARKER_SELECTOR) ?? identity.querySelector(avatarSelector);
-  return Boolean(nameHost && avatar && identity.getAttribute(PROFILE_MASK_ATTR) === "true" && nameHost.getAttribute(PROFILE_MASK_NAME_ATTR) === "true" && avatar.getAttribute(PROFILE_MASK_AVATAR_ATTR) === "true" && nameHost.textContent === mask.name && profileAvatarHealth(avatar, mask));
+  const elements = profileIdentityElements(identity, nameSelector, avatarSelector);
+  if (!elements)
+    return false;
+  const { avatar, nameHost } = elements;
+  return Boolean(identity.getAttribute(PROFILE_MASK_ATTR) === "true" && nameHost.getAttribute(PROFILE_MASK_NAME_ATTR) === "true" && avatar.getAttribute(PROFILE_MASK_AVATAR_ATTR) === "true" && nameHost.textContent === mask.name && profileAvatarHealth(avatar, mask));
 }
 function profileMaskHealth() {
   if (!profileMaskConfigured())
@@ -1311,11 +1256,13 @@ function profileMaskNeedsInject() {
 // src/runtime/official-tooltip-provider.ts
 function createOfficialTooltipTimingBridge(currentTrigger) {
   let activeProvider = null;
-  const currentProvider = () => {
+  function currentProvider() {
     const trigger = currentTrigger();
-    return trigger ? findOfficialTooltipProvider(trigger) : null;
-  };
-  const deactivate = () => {
+    if (!trigger)
+      return null;
+    return findOfficialTooltipProvider(trigger);
+  }
+  function deactivate() {
     const provider = activeProvider;
     activeProvider = null;
     if (!provider)
@@ -1323,12 +1270,14 @@ function createOfficialTooltipTimingBridge(currentTrigger) {
     try {
       provider.deactivateTooltip(PROVIDER_ID);
     } catch {}
-  };
+  }
   return {
     resolveDelay(fallbackMs) {
       try {
         const delayMs = currentProvider()?.getOpenDelay(PROVIDER_KEY, fallbackMs) ?? fallbackMs;
-        return Number.isFinite(delayMs) && delayMs >= 0 ? delayMs : fallbackMs;
+        if (!Number.isFinite(delayMs) || delayMs < 0)
+          return fallbackMs;
+        return delayMs;
       } catch {
         return fallbackMs;
       }
@@ -1410,21 +1359,21 @@ function createTooltipLifecycle(deps) {
   let focused = false;
   let open = false;
   let pending = null;
-  const cancelPending = () => {
+  function cancelPending() {
     if (pending === null)
       return;
     deps.cancel(pending);
     pending = null;
-  };
-  const hide = () => {
+  }
+  function hide() {
     cancelPending();
     if (open) {
       open = false;
       deps.onClose?.();
     }
     deps.hide();
-  };
-  const scheduleShow = () => {
+  }
+  function scheduleShow() {
     cancelPending();
     pending = deps.schedule(() => {
       pending = null;
@@ -1436,7 +1385,7 @@ function createTooltipLifecycle(deps) {
         return;
       deps.show();
     }, deps.resolveDelay?.(deps.delayMs) ?? deps.delayMs);
-  };
+  }
   return {
     pointerEnter() {
       hovering = true;
@@ -1472,6 +1421,21 @@ var ERROR_ATTR = "data-incodex-launch-error";
 var SHORTCUT_LABEL = "⇧⌘N";
 var TOOLTIP_FALLBACK_DELAY_MS = 700;
 var TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
+var STRIP_CLONE_ATTRS = [
+  "id",
+  "name",
+  "aria-haspopup",
+  "aria-expanded",
+  "aria-controls",
+  "aria-describedby",
+  "aria-labelledby",
+  "data-state",
+  "data-testid",
+  "data-test-id",
+  "disabled",
+  "title",
+  "tabindex"
+];
 var activeTooltipLifecycle = null;
 function dismissActiveTooltip() {
   activeTooltipLifecycle?.dismiss();
@@ -1498,19 +1462,14 @@ function isIncognitoWindow() {
   return false;
 }
 function currentLocale() {
-  return resolveLocale(window.__incodexLocale || document.documentElement.lang || navigator.language || "en");
+  const locale = window.__incodexLocale || document.documentElement.lang || navigator.language || "en";
+  return resolveLocale(locale);
 }
 function t(key) {
   return translate(currentLocale(), key);
 }
 function labelFor(on) {
   return on ? t("exit") : t("open");
-}
-function buttonIcon(btn) {
-  return iconFor({
-    incognito: isIncognitoWindow(),
-    hovered: btn.getAttribute("data-incodex-hovered") === "true"
-  });
 }
 function createButtonIcon(source, name, sample) {
   const wrap = document.createElement("span");
@@ -1526,7 +1485,7 @@ function createButtonIcon(source, name, sample) {
   return svg;
 }
 function setButtonIcon(btn) {
-  const name = buttonIcon(btn);
+  const name = isIncognitoWindow() && btn.getAttribute("data-incodex-hovered") === "true" ? "circle-x" : "hat-glasses";
   const current = btn.querySelector("svg[data-incodex-icon]");
   if (current?.getAttribute("data-incodex-icon") === name)
     return;
@@ -1708,8 +1667,7 @@ function buildButton(search) {
   if (svg)
     btn.append(svg);
   const providerTiming = createOfficialTooltipTimingBridge(findSearchButton);
-  let tooltipLifecycle;
-  tooltipLifecycle = createTooltipLifecycle({
+  const tooltipLifecycle = createTooltipLifecycle({
     delayMs: TOOLTIP_FALLBACK_DELAY_MS,
     resolveDelay: providerTiming.resolveDelay,
     schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
@@ -1813,9 +1771,8 @@ function dismissBanner() {
   document.querySelector(`[${LANDING_ATTR}]`)?.remove();
   refreshUiProbe();
 }
-function classNameOf(el) {
-  const value = el.getAttribute("class") || "";
-  return typeof value === "string" ? value : "";
+function classNameOf(element) {
+  return element.getAttribute("class") ?? "";
 }
 function findOfficialBannerSlot() {
   return [...document.querySelectorAll("div")].find((el) => {
@@ -1824,16 +1781,9 @@ function findOfficialBannerSlot() {
     return classNameOf(el).split(/\s+/).includes("home-banners");
   }) ?? null;
 }
-function findLandingMount() {
-  const slot = findOfficialBannerSlot();
-  if (slot)
-    return { parent: slot, before: slot.firstChild };
-  return null;
-}
 function buildLanding() {
   const host = document.createElement("div");
   host.setAttribute(BANNER_HOST_ATTR, "true");
-  host.className = "home-banners flex w-full min-w-0 flex-col gap-2 pt-2";
   const card = document.createElement("aside");
   card.setAttribute(LANDING_ATTR, "true");
   card.setAttribute("aria-live", "polite");
@@ -1896,37 +1846,25 @@ function syncLandingCopy(host) {
   if (close)
     close.setAttribute("aria-label", t("dismiss"));
 }
+function removeLanding() {
+  document.querySelector(`[${BANNER_HOST_ATTR}]`)?.remove();
+  document.querySelector(`[${LANDING_ATTR}]`)?.remove();
+}
 function ensureLanding() {
-  if (!isIncognitoWindow()) {
-    document.querySelector(`[${BANNER_HOST_ATTR}]`)?.remove();
-    document.querySelector(`[${LANDING_ATTR}]`)?.remove();
+  if (!isIncognitoWindow() || bannerDismissed()) {
+    removeLanding();
     return;
   }
-  if (bannerDismissed()) {
-    document.querySelector(`[${BANNER_HOST_ATTR}]`)?.remove();
-    document.querySelector(`[${LANDING_ATTR}]`)?.remove();
-    return;
-  }
-  const mount = findLandingMount();
-  if (!mount)
+  const slot = findOfficialBannerSlot();
+  if (!slot)
     return;
   let host = document.querySelector(`[${BANNER_HOST_ATTR}]`);
   if (!host)
     host = buildLanding();
   syncLandingCopy(host);
-  const officialSlot = findOfficialBannerSlot();
-  if (officialSlot) {
-    host.className = "";
-    if (officialSlot.firstElementChild !== host)
-      officialSlot.insertBefore(host, officialSlot.firstChild);
-    return;
-  }
-  if (mount.before === host)
-    return;
-  if (host.parentElement === mount.parent && host.nextSibling === mount.before)
-    return;
-  host.className = "home-banners flex w-full min-w-0 flex-col gap-2 pt-2";
-  mount.parent.insertBefore(host, mount.before);
+  host.className = "";
+  if (slot.firstElementChild !== host)
+    slot.insertBefore(host, slot.firstChild);
 }
 function ensureButton() {
   let btn = document.querySelector(`[${BTN_ATTR}]`);
@@ -1969,7 +1907,7 @@ var PROFILE_OBSERVED_ATTRIBUTES = [
 ];
 function observerOptions() {
   const options = { childList: true, subtree: true };
-  if (isIncognitoWindow() && window.__incodexProfileMask !== null && window.__incodexProfileMask !== undefined) {
+  if (profileObservationRequired()) {
     options.attributes = true;
     options.characterData = true;
     options.attributeFilter = PROFILE_OBSERVED_ATTRIBUTES;
@@ -1981,13 +1919,11 @@ function profileObservationRequired() {
 }
 function createMutationObserver() {
   let scheduled = false;
-  return new MutationObserver(() => {
-    if (!needsInject())
-      return;
-    if (scheduled)
+  return new MutationObserver(function handleMutation() {
+    if (!needsInject() || scheduled)
       return;
     scheduled = true;
-    requestAnimationFrame(() => {
+    requestAnimationFrame(function injectOnAnimationFrame() {
       scheduled = false;
       if (!needsInject())
         return;

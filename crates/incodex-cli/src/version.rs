@@ -63,8 +63,11 @@ fn disk_free() -> String {
         Some(line) => line,
         None => return "Unknown".to_string(),
     };
-    let cols: Vec<&str> = data.split_whitespace().collect();
-    let avail_kb = match cols.get(3).and_then(|col| col.parse::<f64>().ok()) {
+    let avail_kb = match data
+        .split_whitespace()
+        .nth(3)
+        .and_then(|column| column.parse::<f64>().ok())
+    {
         Some(n) if n >= 0.0 => n,
         _ => return "Unknown".to_string(),
     };

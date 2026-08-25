@@ -163,7 +163,7 @@ fn collect_tree(root: &Path, current: &Path, entries: &mut Vec<TreeEntry>) -> Re
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
-    children.sort_by_key(|entry| entry.file_name());
+    children.sort_by_key(fs::DirEntry::file_name);
     for entry in children {
         let path = entry.path();
         let relative = path
@@ -222,27 +222,27 @@ pub(crate) fn validate_backup_digest(path: &Path, journal: &JournalV2) -> Result
 
 pub(crate) fn restore_source(root: &Path, journal: &JournalV2) -> Result<PathBuf, String> {
     let paths = tx_paths(root, &journal.install_id);
-    match fs::symlink_metadata(&paths.original) {
-        Ok(_) => {
-            directory_identity(&paths.original)
-                .map_err(|error| format!("invalid original restore source: {error}"))?;
-            validate_backup_digest(&paths.original, journal)?;
-            return Ok(paths.original);
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(format!("cannot inspect original restore source: {error}")),
+    if let Some(original) = validated_restore_source(&paths.original, journal, "original")? {
+        return Ok(original);
     }
-    match fs::symlink_metadata(&paths.outgoing) {
+    validated_restore_source(&paths.outgoing, journal, "outgoing")?
+        .ok_or_else(|| "no safe restore source exists".into())
+}
+
+fn validated_restore_source(
+    path: &Path,
+    journal: &JournalV2,
+    label: &str,
+) -> Result<Option<PathBuf>, String> {
+    match fs::symlink_metadata(path) {
         Ok(_) => {
-            directory_identity(&paths.outgoing)
-                .map_err(|error| format!("invalid outgoing restore source: {error}"))?;
-            validate_backup_digest(&paths.outgoing, journal)?;
-            Ok(paths.outgoing)
+            directory_identity(path)
+                .map_err(|error| format!("invalid {label} restore source: {error}"))?;
+            validate_backup_digest(path, journal)?;
+            Ok(Some(path.to_path_buf()))
         }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            Err("no safe restore source exists".into())
-        }
-        Err(error) => Err(format!("cannot inspect outgoing restore source: {error}")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("cannot inspect {label} restore source: {error}")),
     }
 }
 

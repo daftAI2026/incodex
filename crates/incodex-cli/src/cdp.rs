@@ -1,9 +1,7 @@
-/**
- * [INPUT]: 接收 OpenPlan 派生的 InjectionOptions、子进程存活信号与 localhost CDP target
- * [OUTPUT]: 对外提供 launch 参数、profile mask bootstrap、注入、持续健康失败上报与 target lifecycle 关窗
- * [POS]: incodex open 的 renderer 边界；只向当前 Codex page 注入共享 Runtime
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
- */
+//! Localhost Chrome DevTools Protocol client for `incodex open`.
+//!
+//! It injects the shared Runtime only into the top-level Codex page and keeps
+//! every HTTP and WebSocket operation bounded by a deadline.
 use std::collections::HashSet;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
@@ -83,33 +81,30 @@ pub fn inject_source_for_locale(locale: Option<&str>) -> String {
 }
 
 pub fn inject_source_for_options(options: &InjectionOptions) -> String {
-    let locale = serde_json::to_string(options.locale.as_deref().unwrap_or(""))
-        .unwrap_or_else(|_| "\"\"".into());
-    let profile_mask = options
-        .profile_mask
-        .as_ref()
-        .map(profile_mask_json)
-        .unwrap_or_else(|| "null".to_string());
-    let official_page_url = serde_json::to_string(OFFICIAL_CODEX_PAGE_URL)
-        .unwrap_or_else(|_| "\"app://-/index.html\"".into());
-    let profile_bootstrap = if options.profile_mask.is_some() {
-        format!(
-            "(window.top===window&&window.location.href==={official_page_url})?{profile_mask}:null"
-        )
-    } else {
-        "null".to_string()
+    let locale = json_string(options.locale.as_deref().unwrap_or(""));
+    let profile_bootstrap = match &options.profile_mask {
+        Some(profile_mask) => format!(
+            "(window.top===window&&window.location.href==={})?{}:null",
+            json_string(OFFICIAL_CODEX_PAGE_URL),
+            profile_mask_json(profile_mask)
+        ),
+        None => "null".to_string(),
     };
     format!(
         "{INJECT_PREFIX}window.__incodexLocale={locale};window.__incodexProfileMask={profile_bootstrap};\n{INJECT_JS}"
     )
 }
 
+fn json_string(value: &str) -> String {
+    Value::String(value.to_string()).to_string()
+}
+
 fn profile_mask_json(mask: &ProfileMask) -> String {
-    let name = serde_json::to_string(&mask.name).unwrap_or_else(|_| "\"\"".into());
+    let name = json_string(&mask.name);
     let avatar = match &mask.avatar {
         ProfileAvatar::Generated => "{\"kind\":\"generated\"}".to_string(),
         ProfileAvatar::DataUrl(data_url) => {
-            let data_url = serde_json::to_string(data_url).unwrap_or_else(|_| "\"\"".into());
+            let data_url = json_string(data_url);
             format!("{{\"dataUrl\":{data_url}}}")
         }
     };
@@ -174,6 +169,13 @@ pub fn validate_cdp_websocket_url(url: &str, expected_port: u16) -> Result<(), S
     let uri: tungstenite::http::Uri = url
         .parse()
         .map_err(|err| format!("invalid CDP WebSocket URL: {err}"))?;
+    websocket_socket_addr_from_uri(&uri, expected_port).map(|_| ())
+}
+
+fn websocket_socket_addr_from_uri(
+    uri: &tungstenite::http::Uri,
+    expected_port: u16,
+) -> Result<SocketAddr, String> {
     match uri.scheme_str() {
         Some("ws" | "wss") => {}
         _ => return Err("CDP WebSocket URL must use ws or wss".into()),
@@ -193,7 +195,7 @@ pub fn validate_cdp_websocket_url(url: &str, expected_port: u16) -> Result<(), S
             uri.port_u16()
         ));
     }
-    Ok(())
+    Ok(SocketAddr::new(ip, expected_port))
 }
 
 pub fn pick_codex_page_target(targets: &[CdpTarget]) -> Option<&CdpTarget> {
@@ -212,13 +214,6 @@ pub fn is_primary_codex_page(target: &CdpTarget) -> bool {
         return false;
     }
     url == OFFICIAL_CODEX_PAGE_URL
-}
-
-fn should_register_persistent_script(
-    registered_targets: &HashSet<String>,
-    target_id: &str,
-) -> bool {
-    !registered_targets.contains(target_id)
 }
 
 pub fn inject_shared_ui(debug_port: u16) -> Result<(), String> {
@@ -307,13 +302,12 @@ where
     ensure_injection_active(process_alive)?;
     let page = pick_codex_page_target(&targets).ok_or("no Codex page target")?;
     on_target(&page.id);
-    validate_cdp_websocket_url(&page.ws, debug_port)?;
-    let (mut socket, _) = connect_cdp_websocket(&page.ws, debug_port)?;
+    let mut socket = connect_cdp_websocket(&page.ws, debug_port)?;
     ensure_injection_active(process_alive)?;
     send_cdp(&mut socket, 1, "Page.enable", json!({}))?;
     select_official_codex_mode(&mut socket)?;
     ensure_injection_active(process_alive)?;
-    if should_register_persistent_script(registered_script_targets, &page.id) {
+    if !registered_script_targets.contains(&page.id) {
         send_cdp(
             &mut socket,
             4,
@@ -395,7 +389,6 @@ where
     F: FnMut(&str),
 {
     let mut failures = 0u8;
-    let mut last_error = "profile mask health was not checked".to_string();
     while process_alive.load(Ordering::Acquire) {
         thread::sleep(LIFECYCLE_POLL_INTERVAL);
         if !process_alive.load(Ordering::Acquire) {
@@ -405,14 +398,12 @@ where
             Ok(()) => failures = 0,
             Err(error) => {
                 failures = failures.saturating_add(1);
-                last_error = error;
+                if failures >= PROFILE_MASK_FAILURE_POLLS {
+                    on_failure(&error);
+                    return Err(error);
+                }
             }
         }
-        if failures < PROFILE_MASK_FAILURE_POLLS {
-            continue;
-        }
-        on_failure(&last_error);
-        return Err(last_error);
     }
     Ok(())
 }
@@ -421,8 +412,7 @@ fn probe_profile_mask_health(debug_port: u16, process_alive: &AtomicBool) -> Res
     ensure_injection_active(process_alive)?;
     let targets = list_targets(debug_port)?;
     let page = pick_codex_page_target(&targets).ok_or("no Codex page target")?;
-    validate_cdp_websocket_url(&page.ws, debug_port)?;
-    let (mut socket, _) = connect_cdp_websocket(&page.ws, debug_port)?;
+    let mut socket = connect_cdp_websocket(&page.ws, debug_port)?;
     let response = send_cdp(
         &mut socket,
         1,
@@ -481,8 +471,7 @@ fn close_browser(debug_port: u16) -> Result<(), String> {
         .get("webSocketDebuggerUrl")
         .and_then(Value::as_str)
         .ok_or("CDP browser target has no WebSocket URL")?;
-    validate_cdp_websocket_url(websocket, debug_port)?;
-    let (mut socket, _) = connect_cdp_websocket(websocket, debug_port)?;
+    let mut socket = connect_cdp_websocket(websocket, debug_port)?;
     socket
         .send(Message::Text(browser_close_message().to_string().into()))
         .map_err(|err| err.to_string())
@@ -584,16 +573,7 @@ fn send_cdp_with_deadline<S: Read + Write>(
     }
 }
 
-fn connect_cdp_websocket(
-    url: &str,
-    expected_port: u16,
-) -> Result<
-    (
-        WebSocket<TcpStream>,
-        tungstenite::handshake::client::Response,
-    ),
-    String,
-> {
+fn connect_cdp_websocket(url: &str, expected_port: u16) -> Result<WebSocket<TcpStream>, String> {
     let addr = websocket_socket_addr(url, expected_port)?;
     let stream = TcpStream::connect_timeout(&addr, CDP_IO_TIMEOUT)
         .map_err(|error| format!("CDP WebSocket connect timed out or failed: {error}"))?;
@@ -606,7 +586,7 @@ fn connect_cdp_websocket(
     let mut handshake = ClientHandshake::start(stream, request, None)
         .map_err(|error| format!("CDP WebSocket handshake failed: {error}"))?;
     let deadline = Instant::now() + CDP_IO_TIMEOUT;
-    let (mut socket, response) = loop {
+    let (mut socket, _) = loop {
         if Instant::now() >= deadline {
             return Err("CDP WebSocket handshake timed out".into());
         }
@@ -633,22 +613,14 @@ fn connect_cdp_websocket(
         .get_mut()
         .set_write_timeout(Some(CDP_IO_TIMEOUT))
         .map_err(|error| error.to_string())?;
-    Ok((socket, response))
+    Ok(socket)
 }
 
 fn websocket_socket_addr(url: &str, expected_port: u16) -> Result<SocketAddr, String> {
     let uri: tungstenite::http::Uri = url
         .parse()
         .map_err(|error| format!("invalid CDP WebSocket URL: {error}"))?;
-    validate_cdp_websocket_url(url, expected_port)?;
-    let host = uri.host().ok_or("CDP WebSocket URL has no host")?;
-    let ip: IpAddr = host
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .parse()
-        .map_err(|_| "CDP WebSocket host must be a loopback IP address".to_string())?;
-    let port = uri.port_u16().ok_or("CDP WebSocket URL has no port")?;
-    Ok(SocketAddr::new(ip, port))
+    websocket_socket_addr_from_uri(&uri, expected_port)
 }
 
 fn list_targets(debug_port: u16) -> Result<Vec<CdpTarget>, String> {
@@ -699,11 +671,7 @@ fn http_get_json(debug_port: u16, path: &str) -> Result<Value, String> {
 }
 
 fn http_get_json_host(host: &str, debug_port: u16, path: &str) -> Result<Value, String> {
-    let addr = if host == "[::1]" {
-        format!("[::1]:{debug_port}")
-    } else {
-        format!("127.0.0.1:{debug_port}")
-    };
+    let addr = format!("{host}:{debug_port}");
     let socket_addr: SocketAddr = addr
         .parse()
         .map_err(|error| format!("invalid CDP address {addr}: {error}"))?;

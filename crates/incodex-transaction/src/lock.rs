@@ -64,7 +64,7 @@ impl TargetLock {
 
 pub fn lock_path_for(root: &Path, target_path: &Path) -> PathBuf {
     let digest = Sha256::digest(canonical_path(target_path).to_string_lossy().as_bytes());
-    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
     root.join("locks").join(format!("{hex}.lock"))
 }
 
@@ -77,11 +77,12 @@ pub fn acquire_target_lock(
     let real_path = canonical_path(target_path);
     let path = lock_path_for(root, target_path);
     ensure_private_dir(path.parent().unwrap())?;
+    let pid = std::process::id();
     let owner_token = new_owner_token();
     let record = LockRecord {
         schema_version: 1,
-        pid: std::process::id(),
-        process_start: process_start(std::process::id() as i32).unwrap_or_default(),
+        pid,
+        process_start: process_start(pid as i32).unwrap_or_default(),
         command: command.to_string(),
         install_id: install_id.map(str::to_string),
         owner_token: Some(owner_token.clone()),
@@ -89,39 +90,29 @@ pub fn acquire_target_lock(
         real_path: real_path.display().to_string(),
         created_at: unix_now(),
     };
-    match write_exclusive(&path, &record) {
-        Ok(()) => Ok(TargetLock {
-            path,
-            pid: std::process::id(),
-            owner_token: owner_token.clone(),
-        }),
-        Err(_) => {
-            if steal_if_stale(&path) {
-                write_exclusive(&path, &record)?;
-                return Ok(TargetLock {
-                    path,
-                    pid: std::process::id(),
-                    owner_token,
-                });
-            }
+    if write_exclusive(&path, &record).is_err() {
+        if !steal_if_stale(&path) {
             let who = fs::read_to_string(&path)
                 .ok()
                 .and_then(|body| serde_json::from_str::<LockRecord>(&body).ok())
                 .map(|holder| format!("{} pid {}", holder.command, holder.pid))
                 .unwrap_or_else(|| "another process".into());
-            Err(format!(
+            return Err(format!(
                 "another incodex command is modifying this app ({who})"
-            ))
+            ));
         }
+        write_exclusive(&path, &record)?;
     }
+    Ok(TargetLock {
+        path,
+        pid,
+        owner_token,
+    })
 }
 
 fn new_owner_token() -> String {
     let sequence = LOCK_OWNER_SEQ.fetch_add(1, Ordering::Relaxed);
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0);
+    let timestamp = unix_nanos();
     format!("{}-{timestamp}-{sequence}", std::process::id())
 }
 
@@ -135,10 +126,7 @@ fn write_exclusive(path: &Path, record: &LockRecord) -> Result<(), String> {
     let temporary = parent.join(format!(
         ".lock-{}-{}-{seq}.tmp",
         std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_nanos())
-            .unwrap_or(0)
+        unix_nanos()
     ));
     let mut opts = OpenOptions::new();
     opts.write(true)
@@ -199,16 +187,17 @@ fn process_start(pid: i32) -> Option<String> {
         return None;
     }
     let start = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if start.is_empty() {
-        None
-    } else {
-        Some(start)
-    }
+    (!start.is_empty()).then_some(start)
+}
+
+fn unix_nanos() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos())
 }
 
 fn unix_now() -> String {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs().to_string())
-        .unwrap_or_else(|_| "0".into())
+        .map_or_else(|_| "0".into(), |duration| duration.as_secs().to_string())
 }

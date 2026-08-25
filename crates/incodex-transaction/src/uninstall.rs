@@ -6,7 +6,8 @@ use incodex_macos::ditto;
 
 use crate::durable::sync_dir;
 use crate::journal::{
-    load_v2, reconstructed, tx_paths, validate_recovery_proofs, write_journal, JournalV2,
+    load_v2, reconstructed, transition_phase, tx_paths, validate_recovery_proofs, write_journal,
+    JournalV2,
 };
 use crate::lock::acquire_target_lock;
 use crate::proof::{
@@ -141,16 +142,20 @@ where
 
 fn is_legacy_committed(journal: &JournalV2) -> bool {
     journal.phase == "COMMITTED"
-        && journal.target.parent_device.is_empty()
-        && journal.target.parent_inode.is_empty()
-        && journal.pre_swap_digest.is_empty()
-        && journal.backup_digest.is_empty()
-        && journal.staged_device.is_empty()
-        && journal.staged_inode.is_empty()
-        && journal.staged_digest.is_empty()
-        && journal.restored_device.is_empty()
-        && journal.restored_inode.is_empty()
-        && journal.restored_digest.is_empty()
+        && [
+            journal.target.parent_device.as_str(),
+            journal.target.parent_inode.as_str(),
+            journal.pre_swap_digest.as_str(),
+            journal.backup_digest.as_str(),
+            journal.staged_device.as_str(),
+            journal.staged_inode.as_str(),
+            journal.staged_digest.as_str(),
+            journal.restored_device.as_str(),
+            journal.restored_inode.as_str(),
+            journal.restored_digest.as_str(),
+        ]
+        .into_iter()
+        .all(str::is_empty)
 }
 
 fn restore_committed_locked<F>(
@@ -169,11 +174,7 @@ where
     let uninstalling = begin_uninstall(root, journal)?;
     let restored =
         restore_live_with_quiescence(root, live_path, &uninstalling, quiescence, checkpoint)?;
-    let mut done = restored;
-    done.phase = "ROLLED_BACK".into();
-    done.sequence += 1;
-    write_journal(root, &done)?;
-    load_v2(root, &done.install_id)
+    transition_phase(root, &restored, "ROLLED_BACK")
 }
 
 fn begin_uninstall(root: &Path, journal: &JournalV2) -> Result<JournalV2, String> {
@@ -183,11 +184,7 @@ fn begin_uninstall(root: &Path, journal: &JournalV2) -> Result<JournalV2, String
             journal.phase
         ));
     }
-    let mut next = journal.clone();
-    next.phase = "UNINSTALLING".into();
-    next.sequence += 1;
-    write_journal(root, &next)?;
-    load_v2(root, &journal.install_id)
+    transition_phase(root, journal, "UNINSTALLING")
 }
 
 pub(crate) fn validate_committed_restore_target(
@@ -255,11 +252,11 @@ where
     // +--------------------------------------------------------------------+
     let journal = record_restore_intent(root, &candidate, journal)?;
     replace_live_with_checkpoint(&candidate, live, &paths.dir, checkpoint)?;
-    cleanup_restored(root, &journal)?;
+    cleanup_transient_paths(root, &journal)?;
     Ok(journal)
 }
 
-pub(crate) fn cleanup_restored(root: &Path, journal: &JournalV2) -> Result<(), String> {
+pub(crate) fn cleanup_transient_paths(root: &Path, journal: &JournalV2) -> Result<(), String> {
     let paths = tx_paths(root, &journal.install_id);
     for path in [
         paths.outgoing,

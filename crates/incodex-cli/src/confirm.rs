@@ -13,3 +13,19 @@ pub fn ask_to_continue() -> Result<bool, String> {
         _ => Ok(false),
     }
 }
+
+pub(crate) fn require(command: &str, yes: bool) -> Result<(), String> {
+    if yes {
+        return Ok(());
+    }
+    if crate::terminal::is_tty() {
+        return if ask_to_continue()? {
+            Ok(())
+        } else {
+            Err("aborted".into())
+        };
+    }
+    Err(format!(
+        "non-interactive {command} requires --yes\n  incodex {command} --yes"
+    ))
+}

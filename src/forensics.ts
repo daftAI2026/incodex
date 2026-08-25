@@ -1,6 +1,6 @@
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { randomBytes } from "node:crypto";
 import {
   burnSessionHome,
   createSessionHome,
@@ -58,11 +58,13 @@ export function createForensicSession(userRoot: string, sourceHome: string, pid 
 
 export function plantPrompt(session: SessionDirs, sandbox: ScanRoots, prompt: string, ambient = false): string[] {
   const planted: string[] = [];
-  const write = (file: string) => {
+
+  function write(file: string): void {
     mkdirSync(join(file, ".."), { recursive: true });
     writeFileSync(file, `${prompt}\n`);
     planted.push(file);
-  };
+  }
+
   write(join(session.home, "sessions", "secret-chat.json"));
   write(join(session.chromium, "Default", "Cache", "prompt.bin"));
   write(join(session.chromium, "Default", "Local Storage", "leveldb", "000003.log"));
@@ -77,13 +79,15 @@ export function plantPrompt(session: SessionDirs, sandbox: ScanRoots, prompt: st
 }
 
 export function handleExit(kind: ExitPath, session: SessionDirs, userRoot: string): void {
-  const burn = () =>
+  function burn(): void {
     burnSessionHome(session.root, {
       userRoot,
       sessionId: session.sessionId,
       ino: session.ino,
       dev: session.dev,
     });
+  }
+
   switch (kind) {
     case "close":
     case "click-exit":

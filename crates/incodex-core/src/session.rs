@@ -193,9 +193,7 @@ pub fn handoff_session_owner(
             owner_path.display()
         ));
     }
-    let mut owner: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&owner_path).map_err(|err| err.to_string())?)
-            .map_err(|err| err.to_string())?;
+    let mut owner = read_owner_manifest(&owner_path)?;
     if owner.get("ino").and_then(serde_json::Value::as_u64) != Some(root_stats.ino())
         || owner.get("dev").and_then(serde_json::Value::as_u64) != Some(root_stats.dev())
     {
@@ -228,21 +226,12 @@ pub fn session_owner_snapshot(session_root: &Path) -> Result<Option<SessionOwner
             owner_path.display()
         ));
     }
-    let owner: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&owner_path).map_err(|err| err.to_string())?)
-            .map_err(|err| err.to_string())?;
-    let Some(pid) = owner
-        .get("pid")
-        .and_then(serde_json::Value::as_i64)
-        .and_then(|value| i32::try_from(value).ok())
-    else {
+    let owner = read_owner_manifest(&owner_path)?;
+    let Some(pid) = owner_pid(&owner) else {
         return Ok(None);
     };
-    let Some(process_start_identity) = owner
-        .get("processStartIdentity")
-        .or_else(|| owner.get("startedAt"))
-        .and_then(serde_json::Value::as_str)
-        .filter(|value| is_canonical_process_start_identity(value))
+    let Some(process_start_identity) =
+        owner_start_identity(&owner).filter(|value| is_canonical_process_start_identity(value))
     else {
         return Ok(None);
     };
@@ -345,20 +334,15 @@ where
     F: FnMut(i32) -> ProcessProbe,
 {
     let sessions = user_root.join(SESSIONS_NAME);
-    let stats = match lstat_or_null(&sessions) {
-        Some(stats) if stats.is_dir() && !stats.file_type().is_symlink() => stats,
+    match lstat_or_null(&sessions) {
+        Some(stats) if stats.is_dir() && !stats.file_type().is_symlink() => {}
         _ => return 0,
-    };
-    let _ = stats;
+    }
     let roots = list_session_roots(&sessions, target_id);
     let mut swept = 0;
     for root in roots {
         let owner_path = root.join(OWNER_NAME);
-        let body = match fs::read_to_string(&owner_path) {
-            Ok(body) => body,
-            Err(_) => continue,
-        };
-        let owner = match serde_json::from_str::<serde_json::Value>(&body) {
+        let owner = match read_owner_manifest(&owner_path) {
             Ok(owner) => owner,
             Err(_) => continue,
         };
@@ -366,11 +350,7 @@ where
             Some(value) if !value.is_empty() => value.to_string(),
             _ => continue,
         };
-        let pid = match owner
-            .get("pid")
-            .and_then(|v| v.as_i64())
-            .and_then(|value| i32::try_from(value).ok())
-        {
+        let pid = match owner_pid(&owner) {
             Some(value) => value,
             None => continue,
         };
@@ -382,11 +362,7 @@ where
             Some(value) => value,
             None => continue,
         };
-        let expected_start = owner
-            .get("processStartIdentity")
-            .or_else(|| owner.get("startedAt"))
-            .and_then(serde_json::Value::as_str)
-            .filter(|value| !value.is_empty());
+        let expected_start = owner_start_identity(&owner).filter(|value| !value.is_empty());
         if expected_start.is_some_and(|value| !is_canonical_process_start_identity(value)) {
             continue;
         }
@@ -443,11 +419,10 @@ fn list_session_roots(sessions: &Path, target_id: Option<&str>) -> Vec<PathBuf> 
         Some(id) => sessions.join(id),
         None => sessions.to_path_buf(),
     };
-    let start_stat = match lstat_or_null(&start) {
-        Some(stats) if stats.is_dir() && !stats.file_type().is_symlink() => stats,
+    match lstat_or_null(&start) {
+        Some(stats) if stats.is_dir() && !stats.file_type().is_symlink() => {}
         _ => return Vec::new(),
-    };
-    let _ = start_stat;
+    }
     let mut roots = Vec::new();
     let entries = match fs::read_dir(&start) {
         Ok(entries) => entries,
@@ -457,11 +432,10 @@ fn list_session_roots(sessions: &Path, target_id: Option<&str>) -> Vec<PathBuf> 
         let name = entry.file_name();
         let name = name.to_string_lossy();
         let child = start.join(name.as_ref());
-        let stats = match lstat_or_null(&child) {
-            Some(stats) if stats.is_dir() && !stats.file_type().is_symlink() => stats,
+        match lstat_or_null(&child) {
+            Some(stats) if stats.is_dir() && !stats.file_type().is_symlink() => {}
             _ => continue,
-        };
-        let _ = stats;
+        }
         if name.starts_with("s-") {
             roots.push(child);
         } else if target_id.is_none() {
@@ -522,19 +496,11 @@ fn exclusive_copy_file(src: &Path, dest: &Path) -> Result<(), String> {
 }
 
 fn write_private_file(dest: &Path, data: &[u8], exclusive: bool) -> Result<(), String> {
-    if let Some(prior) = assert_not_symlink(dest, "file")? {
-        if prior.file_type().is_symlink() {
-            return Err(format!(
-                "refuse to overwrite symlink file: {}",
-                dest.display()
-            ));
-        }
-        if exclusive {
-            return Err(format!(
-                "refuse to overwrite existing file: {}",
-                dest.display()
-            ));
-        }
+    if assert_not_symlink(dest, "file")?.is_some() && exclusive {
+        return Err(format!(
+            "refuse to overwrite existing file: {}",
+            dest.display()
+        ));
     }
     let mut opts = OpenOptions::new();
     opts.write(true)
@@ -677,9 +643,7 @@ fn assert_burn_identity(home: &Path, expected: &BurnExpected<'_>) -> Result<(), 
             }
         }
         Some(_) => {
-            let owner: serde_json::Value =
-                serde_json::from_str(&fs::read_to_string(&file).map_err(|err| err.to_string())?)
-                    .map_err(|err| err.to_string())?;
+            let owner = read_owner_manifest(&file)?;
             let actual = owner
                 .get("sessionId")
                 .and_then(|v| v.as_str())
@@ -700,21 +664,32 @@ fn assert_burn_owner(home: &Path, expected: &SessionOwnerSnapshot) -> Result<(),
     if !stats.is_file() {
         return Err(format!("session owner is not a file: {}", file.display()));
     }
-    let owner: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&file).map_err(|err| err.to_string())?)
-            .map_err(|err| err.to_string())?;
-    let pid = owner
-        .get("pid")
-        .and_then(serde_json::Value::as_i64)
-        .and_then(|value| i32::try_from(value).ok());
-    let start = owner
-        .get("processStartIdentity")
-        .or_else(|| owner.get("startedAt"))
-        .and_then(serde_json::Value::as_str);
+    let owner = read_owner_manifest(&file)?;
+    let pid = owner_pid(&owner);
+    let start = owner_start_identity(&owner);
     if pid != Some(expected.pid) || start != Some(expected.process_start_identity.as_str()) {
         return Err("session owner changed; refusing to burn".into());
     }
     Ok(())
+}
+
+fn read_owner_manifest(path: &Path) -> Result<serde_json::Value, String> {
+    let body = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    serde_json::from_str(&body).map_err(|error| error.to_string())
+}
+
+fn owner_pid(owner: &serde_json::Value) -> Option<i32> {
+    owner
+        .get("pid")
+        .and_then(serde_json::Value::as_i64)
+        .and_then(|value| i32::try_from(value).ok())
+}
+
+fn owner_start_identity(owner: &serde_json::Value) -> Option<&str> {
+    owner
+        .get("processStartIdentity")
+        .or_else(|| owner.get("startedAt"))
+        .and_then(serde_json::Value::as_str)
 }
 
 fn file_name(path: &Path) -> Result<String, String> {

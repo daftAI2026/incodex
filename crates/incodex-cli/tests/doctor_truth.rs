@@ -1,11 +1,13 @@
 use std::fs;
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
-use incodex_asar::{pack_dir, patch_asar, MARKER_KEY};
+use incodex_asar::{pack_dir, MARKER_KEY};
 use incodex_macos::ditto;
 use incodex_transaction::Engine;
 use sha2::{Digest, Sha256};
 
+#[path = "support/committed_install.rs"]
+mod committed_install_support;
 #[path = "support/readonly.rs"]
 mod readonly_support;
 mod support;
@@ -16,10 +18,16 @@ use readonly_support::{
     isolated_home, parse_json, run, run_with_stdout_redirected, top_level_json_keys, DIAGNOSIS_KEYS,
 };
 
+use committed_install_support::committed_install;
+
 #[test]
 fn doctor_missing_app_prints_labeled_sections() {
     let home = isolated_home();
     let app = home.join("Missing.app");
+    let runtime_manifest = Sha256::digest(include_bytes!("../../../dist/runtime-manifest.json"))
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
     let (status, stdout, stderr) = run(&["doctor", "--app", app.to_str().unwrap()], &home);
     assert_eq!(status, 0);
     assert_eq!(stderr, "");
@@ -39,6 +47,10 @@ fn doctor_missing_app_prints_labeled_sections() {
   Version      unknown
   External     missing
   External check checked
+  CLI Runtime  {runtime_version}
+  CLI manifest {runtime_manifest}
+  Deployed manifest not published
+  Runtime state missing
   ! missing current.json
   Loader       unknown
   Main         unknown
@@ -61,7 +73,9 @@ fn doctor_missing_app_prints_labeled_sections() {
   ! signing.not-checked: the application does not exist, so nested signing was not inspected
 
 ",
-            app = app.display()
+            app = app.display(),
+            runtime_version = env!("CARGO_PKG_VERSION"),
+            runtime_manifest = runtime_manifest,
         )
     );
 }
@@ -161,6 +175,20 @@ fn doctor_rejects_runtime_manifest_missing_required_artifacts() {
         .to_string(),
     )
     .expect("runtime manifest");
+    for path in [
+        home.join(".incodex"),
+        home.join(".incodex/runtime"),
+        home.join(".incodex/runtime/releases"),
+        release.clone(),
+    ] {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    for path in [
+        release.join("incodex-main.cjs"),
+        home.join(".incodex/runtime/current.json"),
+    ] {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
 
     let app = home.join("Missing.app");
     for command in ["status", "doctor"] {
@@ -312,6 +340,29 @@ fn doctor_json_classifies_owner_orphans_and_runtime_residue() {
         .to_string(),
     )
     .unwrap();
+    for path in [
+        root.clone(),
+        root.join("runtime"),
+        root.join("runtime/releases"),
+        release.clone(),
+    ] {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    fs::set_permissions(
+        root.join("runtime/current.json"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    for name in incodex_runtime_bundle::required_runtime_files() {
+        let path = release.join(name);
+        if !fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+        {
+            fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+    }
 
     let (_status, stdout, stderr) =
         run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
@@ -403,6 +454,7 @@ fn doctor_json_reports_a_symlinked_runtime_root_as_checked_finding() {
     let outside = home.join("outside-runtime");
     let runtime_root = runtime_parent.join("runtime");
     fs::create_dir_all(&runtime_parent).unwrap();
+    fs::set_permissions(&runtime_parent, fs::Permissions::from_mode(0o700)).unwrap();
     fs::create_dir_all(&outside).unwrap();
     std::os::unix::fs::symlink(&outside, &runtime_root).unwrap();
 
@@ -544,42 +596,16 @@ fn doctor_json_refuses_clean_backup_for_a_patched_marker_without_native_backup()
 #[test]
 fn doctor_json_does_not_call_the_live_committed_journal_stale() {
     let home = isolated_home();
-    let root = home.join(".incodex");
-    let app = home.join("ChatGPT.app");
-    let source = home.join("asar-source");
-    let candidate = home.join("candidate.app");
-    let asar = app.join("Contents/Resources/app.asar");
-    fs::create_dir_all(&source).unwrap();
-    fs::create_dir_all(asar.parent().unwrap()).unwrap();
-    fs::write(source.join("index.js"), b"official\n").unwrap();
-    fs::write(source.join("package.json"), b"{\"main\":\"index.js\"}\n").unwrap();
-    pack_dir(&source, &asar).unwrap();
+    let install = committed_install(&home);
 
-    let mut transaction = Engine::begin(&root, &app, "test").unwrap();
-    let install_id = transaction.install_id().to_string();
-    let original = root
-        .join("transactions")
-        .join(&install_id)
-        .join("original/ChatGPT.app");
-    fs::create_dir_all(original.parent().unwrap()).unwrap();
-    ditto(&app, &original).unwrap();
-    transaction.mark_backup_committed().unwrap();
-    ditto(&app, &candidate).unwrap();
-    patch_asar(
-        &candidate.join("Contents/Resources/app.asar"),
-        "module.exports = {};\n",
-        Some(&install_id),
-    )
-    .unwrap();
-    transaction.place_staging(&candidate).unwrap();
-    transaction.swap().unwrap();
-    transaction.commit().unwrap();
-
-    let (_status, stdout, stderr) =
-        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
+    let (_status, stdout, stderr) = run(
+        &["doctor", "--json", "--app", install.app.to_str().unwrap()],
+        &home,
+    );
     assert_eq!(stderr, "");
     let report = parse_json(&stdout);
     let records = report["journalRecords"].as_array().unwrap();
+    let install_id = install.transaction.file_name().unwrap().to_str().unwrap();
     assert!(records.iter().any(|record| {
         record["kind"] == "currentCommitted" && record["installId"] == install_id
     }));
@@ -591,40 +617,13 @@ fn doctor_json_does_not_call_the_live_committed_journal_stale() {
 #[test]
 fn doctor_json_does_not_call_a_committed_journal_with_a_missing_backup_clean() {
     let home = isolated_home();
-    let root = home.join(".incodex");
-    let app = home.join("ChatGPT.app");
-    let source = home.join("asar-source");
-    let candidate = home.join("candidate.app");
-    let asar = app.join("Contents/Resources/app.asar");
-    fs::create_dir_all(&source).unwrap();
-    fs::create_dir_all(asar.parent().unwrap()).unwrap();
-    fs::write(source.join("index.js"), b"official\n").unwrap();
-    fs::write(source.join("package.json"), b"{\"main\":\"index.js\"}\n").unwrap();
-    pack_dir(&source, &asar).unwrap();
+    let install = committed_install(&home);
+    fs::remove_dir_all(install.transaction.join("original/ChatGPT.app")).unwrap();
 
-    let mut transaction = Engine::begin(&root, &app, "test").unwrap();
-    let install_id = transaction.install_id().to_string();
-    let original = root
-        .join("transactions")
-        .join(&install_id)
-        .join("original/ChatGPT.app");
-    fs::create_dir_all(original.parent().unwrap()).unwrap();
-    ditto(&app, &original).unwrap();
-    transaction.mark_backup_committed().unwrap();
-    ditto(&app, &candidate).unwrap();
-    patch_asar(
-        &candidate.join("Contents/Resources/app.asar"),
-        "module.exports = {};\n",
-        Some(&install_id),
-    )
-    .unwrap();
-    transaction.place_staging(&candidate).unwrap();
-    transaction.swap().unwrap();
-    transaction.commit().unwrap();
-    fs::remove_dir_all(&original).unwrap();
-
-    let (_status, stdout, stderr) =
-        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
+    let (_status, stdout, stderr) = run(
+        &["doctor", "--json", "--app", install.app.to_str().unwrap()],
+        &home,
+    );
     assert_eq!(stderr, "");
     let report = parse_json(&stdout);
     assert_eq!(report["backup"]["status"], "unknown");
@@ -640,44 +639,19 @@ fn doctor_json_does_not_call_a_committed_journal_with_a_missing_backup_clean() {
 #[test]
 fn doctor_json_rejects_a_present_but_truncated_committed_backup() {
     let home = isolated_home();
-    let root = home.join(".incodex");
-    let app = home.join("ChatGPT.app");
-    let source = home.join("asar-source");
-    let candidate = home.join("candidate.app");
-    let asar = app.join("Contents/Resources/app.asar");
-    fs::create_dir_all(&source).unwrap();
-    fs::create_dir_all(asar.parent().unwrap()).unwrap();
-    fs::write(source.join("index.js"), b"official\n").unwrap();
-    fs::write(source.join("package.json"), b"{\"main\":\"index.js\"}\n").unwrap();
-    pack_dir(&source, &asar).unwrap();
-
-    let mut transaction = Engine::begin(&root, &app, "test").unwrap();
-    let install_id = transaction.install_id().to_string();
-    let original = root
-        .join("transactions")
-        .join(&install_id)
-        .join("original/ChatGPT.app");
-    fs::create_dir_all(original.parent().unwrap()).unwrap();
-    ditto(&app, &original).unwrap();
-    transaction.mark_backup_committed().unwrap();
-    ditto(&app, &candidate).unwrap();
-    patch_asar(
-        &candidate.join("Contents/Resources/app.asar"),
-        "module.exports = {};\n",
-        Some(&install_id),
-    )
-    .unwrap();
-    transaction.place_staging(&candidate).unwrap();
-    transaction.swap().unwrap();
-    transaction.commit().unwrap();
+    let install = committed_install(&home);
     fs::write(
-        original.join("Contents/Resources/app.asar"),
+        install
+            .transaction
+            .join("original/ChatGPT.app/Contents/Resources/app.asar"),
         b"truncated backup",
     )
     .unwrap();
 
-    let (_status, stdout, stderr) =
-        run(&["doctor", "--json", "--app", app.to_str().unwrap()], &home);
+    let (_status, stdout, stderr) = run(
+        &["doctor", "--json", "--app", install.app.to_str().unwrap()],
+        &home,
+    );
     assert_eq!(stderr, "");
     let report = parse_json(&stdout);
     assert_eq!(report["backup"]["status"], "unknown");

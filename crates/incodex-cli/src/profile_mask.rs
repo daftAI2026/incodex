@@ -1,9 +1,3 @@
-/**
- * [INPUT]: 接收 open 命令给出的临时名称与本地头像路径
- * [OUTPUT]: 对外提供 ProfileMask/ProfileAvatar、随机名称与安全本地图片校验
- * [POS]: incodex-cli 的隐私身份值对象；在 session 创建前完成离线解析，默认头像交给 Runtime Blobatar
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
- */
 use std::fs::OpenOptions;
 use std::io::Read;
 use std::os::unix::fs::OpenOptionsExt;
@@ -90,9 +84,7 @@ fn read_avatar_data_url(path: &Path) -> Result<String, String> {
         ));
     }
     if metadata.len() > MAX_AVATAR_BYTES {
-        return Err(format!(
-            "avatar file is too large (maximum {MAX_AVATAR_BYTES} bytes)"
-        ));
+        return Err(avatar_too_large_error());
     }
 
     let mut bytes = Vec::new();
@@ -100,14 +92,16 @@ fn read_avatar_data_url(path: &Path) -> Result<String, String> {
         .read_to_end(&mut bytes)
         .map_err(|error| format!("cannot read avatar file {}: {error}", path.display()))?;
     if bytes.len() as u64 > MAX_AVATAR_BYTES {
-        return Err(format!(
-            "avatar file is too large (maximum {MAX_AVATAR_BYTES} bytes)"
-        ));
+        return Err(avatar_too_large_error());
     }
     let mime = avatar_mime(&bytes).ok_or_else(|| {
         "avatar must be a PNG, JPEG, or WebP file with a recognized signature".to_string()
     })?;
     Ok(format!("data:{mime};base64,{}", base64_encode(&bytes)))
+}
+
+fn avatar_too_large_error() -> String {
+    format!("avatar file is too large (maximum {MAX_AVATAR_BYTES} bytes)")
 }
 
 fn avatar_mime(bytes: &[u8]) -> Option<&'static str> {

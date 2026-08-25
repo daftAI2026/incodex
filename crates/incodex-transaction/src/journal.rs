@@ -96,18 +96,13 @@ pub fn is_uuid(id: &str) -> bool {
     if bytes.len() != 36 {
         return false;
     }
-    let hex = |b: u8| b.is_ascii_hexdigit();
-    let dash = |i: usize| bytes[i] == b'-';
-    bytes[8] == b'-'
-        && dash(13)
-        && dash(18)
-        && dash(23)
-        && bytes[14].is_ascii_hexdigit()
-        && (0..8).all(|i| hex(bytes[i]))
-        && (9..13).all(|i| hex(bytes[i]))
-        && (15..18).all(|i| hex(bytes[i]))
-        && (19..23).all(|i| hex(bytes[i]))
-        && (24..36).all(|i| hex(bytes[i]))
+    bytes.iter().enumerate().all(|(index, byte)| {
+        if matches!(index, 8 | 13 | 18 | 23) {
+            *byte == b'-'
+        } else {
+            byte.is_ascii_hexdigit()
+        }
+    })
 }
 
 pub fn new_install_id() -> String {
@@ -225,6 +220,18 @@ pub fn write_journal(root: &Path, journal: &JournalV2) -> Result<(), String> {
     write_atomic(&path, &body)
 }
 
+pub(crate) fn transition_phase(
+    root: &Path,
+    journal: &JournalV2,
+    phase: &str,
+) -> Result<JournalV2, String> {
+    let mut next = journal.clone();
+    next.phase = phase.to_string();
+    next.sequence += 1;
+    write_journal(root, &next)?;
+    load_v2(root, &journal.install_id)
+}
+
 pub(crate) fn write_journal_tracked(
     root: &Path,
     journal: &JournalV2,
@@ -303,7 +310,8 @@ pub(crate) fn fail_load_on_call(call: u8) {
 }
 
 pub(crate) fn validate_recovery_proofs(journal: &JournalV2) -> Result<(), String> {
-    if matches!(journal.phase.as_str(), "COMMITTED" | "ROLLED_BACK") {
+    let phase = journal.phase.as_str();
+    if matches!(phase, "COMMITTED" | "ROLLED_BACK") {
         return Ok(());
     }
     if journal.target.parent_device.is_empty() || journal.target.parent_inode.is_empty() {
@@ -312,13 +320,11 @@ pub(crate) fn validate_recovery_proofs(journal: &JournalV2) -> Result<(), String
     if journal.pre_swap_digest.is_empty() {
         return Err("journal lacks recovery proof: pre-swap tree digest".into());
     }
-    if !matches!(journal.phase.as_str(), "DISCOVERED" | "INTENT")
-        && journal.backup_digest.is_empty()
-    {
+    if !matches!(phase, "DISCOVERED" | "INTENT") && journal.backup_digest.is_empty() {
         return Err("journal lacks recovery proof: backup tree digest".into());
     }
     if matches!(
-        journal.phase.as_str(),
+        phase,
         "STAGED"
             | "PATCHED"
             | "SIGNED"
@@ -370,10 +376,11 @@ pub fn reconstructed(root: &Path, journal: &JournalV2) -> Result<TxPaths, String
         validate_path_ancestors(&paths.dir, rel)?;
         let full = paths.dir.join(rel);
         if let Ok(meta) = fs::symlink_metadata(&full) {
-            if meta.file_type().is_symlink() && !allow_leaf_symlink {
+            let is_symlink = meta.file_type().is_symlink();
+            if is_symlink && !allow_leaf_symlink {
                 return Err(format!("journal path is a symlink: {rel}"));
             }
-            if meta.file_type().is_symlink() {
+            if is_symlink {
                 // +-----------------------------------------------------------+
                 // | 叶子 symlink 只允许进入受控清理；恢复源会在 restore 前拒绝。 |
                 // +-----------------------------------------------------------+
@@ -403,10 +410,9 @@ fn reject_symlink(path: &Path, label: &str) -> Result<(), String> {
 
 pub fn validate_path_ancestors(base: &Path, rel: &str) -> Result<(), String> {
     let mut current = base.to_path_buf();
-    let components: Vec<_> = Path::new(rel).components().collect();
-    let component_count = components.len();
-    for (index, component) in components.into_iter().enumerate() {
-        if index + 1 == component_count {
+    let mut components = Path::new(rel).components().peekable();
+    while let Some(component) = components.next() {
+        if components.peek().is_none() {
             break;
         }
         current.push(component.as_os_str());

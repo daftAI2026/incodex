@@ -1,23 +1,14 @@
-/**
- * [INPUT]: 依赖 window 的 incognito/profile bootstrap 与 Codex 当前 renderer DOM
- * [OUTPUT]: 对外提供帽子按钮、banner，以及无痕 profile footer/账号菜单身份行的视觉遮罩
- * [POS]: Electron Runtime 的共享 inject.js；只改菜单身份视觉，不拥有账号数据、菜单交互、IPC 或持久化状态
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
- */
-
-import { STRIP_CLONE_ATTRS } from "./compatibility/default-adapter";
-import { isSearchLabel } from "./compatibility/search-labels";
-import { type CopyKey, translate, resolveLocale as matchLocale } from "./incognito-copy";
-import { iconFor, type IncognitoButtonIcon } from "./incognito-icon";
-import { deriveUiProbe } from "./incodex-ui-probe";
+import { isSearchLabel } from "./compatibility/search-labels.ts";
+import { deriveUiProbe } from "./incodex-ui-probe.ts";
+import { resolveLocale as matchLocale, translate, type CopyKey } from "./incognito-copy.ts";
 import {
   ensureProfileMask,
   profileMaskHealth,
   profileMaskNeedsInject,
-} from "./incognito-profile-mask";
-import { createOfficialTooltipTimingBridge } from "./official-tooltip-provider";
-import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement";
-import { createTooltipLifecycle, type TooltipLifecycle } from "./tooltip-lifecycle";
+} from "./incognito-profile-mask.ts";
+import { createOfficialTooltipTimingBridge } from "./official-tooltip-provider.ts";
+import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement.ts";
+import { createTooltipLifecycle, type TooltipLifecycle } from "./tooltip-lifecycle.ts";
 
 const STYLE_ID = "incodex-privacy-style";
 const BTN_ATTR = "data-incodex-privacy-toggle";
@@ -27,6 +18,32 @@ const ERROR_ATTR = "data-incodex-launch-error";
 const SHORTCUT_LABEL = "⇧⌘N";
 const TOOLTIP_FALLBACK_DELAY_MS = 700;
 const TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
+
+type IncognitoAction = "open" | "quit";
+type IncognitoButtonIcon = "hat-glasses" | "circle-x";
+
+type IncognitoActionResponse = {
+  code?: string;
+  ok: boolean;
+  reason?: string;
+  requestId?: string;
+};
+
+const STRIP_CLONE_ATTRS = [
+  "id",
+  "name",
+  "aria-haspopup",
+  "aria-expanded",
+  "aria-controls",
+  "aria-describedby",
+  "aria-labelledby",
+  "data-state",
+  "data-testid",
+  "data-test-id",
+  "disabled",
+  "title",
+  "tabindex",
+];
 
 let activeTooltipLifecycle: TooltipLifecycle | null = null;
 
@@ -47,7 +64,9 @@ function isIncognitoWindow(): boolean {
 }
 
 function currentLocale(): string {
-  return matchLocale(window.__incodexLocale || document.documentElement.lang || navigator.language || "en");
+  const locale =
+    window.__incodexLocale || document.documentElement.lang || navigator.language || "en";
+  return matchLocale(locale);
 }
 
 function t(key: CopyKey): string {
@@ -56,13 +75,6 @@ function t(key: CopyKey): string {
 
 function labelFor(on: boolean): string {
   return on ? t("exit") : t("open");
-}
-
-function buttonIcon(btn: HTMLElement): IncognitoButtonIcon {
-  return iconFor({
-    incognito: isIncognitoWindow(),
-    hovered: btn.getAttribute("data-incodex-hovered") === "true",
-  });
 }
 
 function createButtonIcon(source: string, name: IncognitoButtonIcon, sample: SVGElement | null): SVGElement | null {
@@ -79,7 +91,10 @@ function createButtonIcon(source: string, name: IncognitoButtonIcon, sample: SVG
 }
 
 function setButtonIcon(btn: HTMLElement): void {
-  const name = buttonIcon(btn);
+  const name: IncognitoButtonIcon =
+    isIncognitoWindow() && btn.getAttribute("data-incodex-hovered") === "true"
+      ? "circle-x"
+      : "hat-glasses";
   const current = btn.querySelector<SVGElement>("svg[data-incodex-icon]");
   if (current?.getAttribute("data-incodex-icon") === name) return;
   const source = name === "circle-x" ? EXIT_ICON_SVG : ICON_SVG;
@@ -113,7 +128,7 @@ function newRequestId(): string {
   return `incodex-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-async function requestAction(action: "open" | "quit"): Promise<{ ok: boolean; reason?: string; code?: string }> {
+async function requestAction(action: IncognitoAction): Promise<IncognitoActionResponse> {
   if (!window.incodex?.requestIncognitoAction) {
     return { ok: false, reason: "unavailable", code: "UNAVAILABLE" };
   }
@@ -287,8 +302,7 @@ function buildButton(search: HTMLElement): HTMLElement {
   const svg = createButtonIcon(ICON_SVG, "hat-glasses", search.querySelector("svg"));
   if (svg) btn.append(svg);
   const providerTiming = createOfficialTooltipTimingBridge(findSearchButton);
-  let tooltipLifecycle: TooltipLifecycle;
-  tooltipLifecycle = createTooltipLifecycle({
+  const tooltipLifecycle: TooltipLifecycle = createTooltipLifecycle({
     delayMs: TOOLTIP_FALLBACK_DELAY_MS,
     resolveDelay: providerTiming.resolveDelay,
     schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
@@ -413,9 +427,8 @@ function dismissBanner(): void {
   refreshUiProbe();
 }
 
-function classNameOf(el: Element): string {
-  const value = el.getAttribute("class") || "";
-  return typeof value === "string" ? value : "";
+function classNameOf(element: Element): string {
+  return element.getAttribute("class") ?? "";
 }
 
 function findOfficialBannerSlot(): HTMLElement | null {
@@ -427,16 +440,9 @@ function findOfficialBannerSlot(): HTMLElement | null {
   );
 }
 
-function findLandingMount(): { parent: HTMLElement; before: Node | null } | null {
-  const slot = findOfficialBannerSlot();
-  if (slot) return { parent: slot, before: slot.firstChild };
-  return null;
-}
-
 function buildLanding(): HTMLElement {
   const host = document.createElement("div");
   host.setAttribute(BANNER_HOST_ATTR, "true");
-  host.className = "home-banners flex w-full min-w-0 flex-col gap-2 pt-2";
 
   const card = document.createElement("aside");
   card.setAttribute(LANDING_ATTR, "true");
@@ -512,35 +518,25 @@ function syncLandingCopy(host: HTMLElement): void {
   if (close) close.setAttribute("aria-label", t("dismiss"));
 }
 
+function removeLanding(): void {
+  document.querySelector<HTMLElement>(`[${BANNER_HOST_ATTR}]`)?.remove();
+  document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`)?.remove();
+}
+
 function ensureLanding(): void {
-  if (!isIncognitoWindow()) {
-    document.querySelector<HTMLElement>(`[${BANNER_HOST_ATTR}]`)?.remove();
-    document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`)?.remove();
-    return;
-  }
-  if (bannerDismissed()) {
-    document.querySelector<HTMLElement>(`[${BANNER_HOST_ATTR}]`)?.remove();
-    document.querySelector<HTMLElement>(`[${LANDING_ATTR}]`)?.remove();
+  if (!isIncognitoWindow() || bannerDismissed()) {
+    removeLanding();
     return;
   }
 
-  const mount = findLandingMount();
-  if (!mount) return;
+  const slot = findOfficialBannerSlot();
+  if (!slot) return;
 
   let host = document.querySelector<HTMLElement>(`[${BANNER_HOST_ATTR}]`);
   if (!host) host = buildLanding();
   syncLandingCopy(host);
-
-  const officialSlot = findOfficialBannerSlot();
-  if (officialSlot) {
-    host.className = "";
-    if (officialSlot.firstElementChild !== host) officialSlot.insertBefore(host, officialSlot.firstChild);
-    return;
-  }
-  if (mount.before === host) return;
-  if (host.parentElement === mount.parent && host.nextSibling === mount.before) return;
-  host.className = "home-banners flex w-full min-w-0 flex-col gap-2 pt-2";
-  mount.parent.insertBefore(host, mount.before);
+  host.className = "";
+  if (slot.firstElementChild !== host) slot.insertBefore(host, slot.firstChild);
 }
 
 function ensureButton(): void {
@@ -583,11 +579,7 @@ const PROFILE_OBSERVED_ATTRIBUTES = [
 
 function observerOptions(): MutationObserverInit {
   const options: MutationObserverInit = { childList: true, subtree: true };
-  if (
-    isIncognitoWindow() &&
-    window.__incodexProfileMask !== null &&
-    window.__incodexProfileMask !== undefined
-  ) {
+  if (profileObservationRequired()) {
     options.attributes = true;
     options.characterData = true;
     options.attributeFilter = PROFILE_OBSERVED_ATTRIBUTES;
@@ -605,11 +597,10 @@ function profileObservationRequired(): boolean {
 
 function createMutationObserver(): MutationObserver {
   let scheduled = false;
-  return new MutationObserver(() => {
-    if (!needsInject()) return;
-    if (scheduled) return;
+  return new MutationObserver(function handleMutation(): void {
+    if (!needsInject() || scheduled) return;
     scheduled = true;
-    requestAnimationFrame(() => {
+    requestAnimationFrame(function injectOnAnimationFrame(): void {
       scheduled = false;
       if (!needsInject()) return;
       ensureButton();
@@ -663,9 +654,9 @@ declare global {
     __incodexUiProbe?: ReturnType<typeof deriveUiProbe>;
     incodex?: {
       requestIncognitoAction?: (payload: {
-        action: "open" | "quit";
+        action: IncognitoAction;
         requestId: string;
-      }) => Promise<{ ok: boolean; reason?: string; code?: string; requestId?: string }>;
+      }) => Promise<IncognitoActionResponse>;
     };
   }
 }

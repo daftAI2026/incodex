@@ -25,12 +25,13 @@ export function createOfficialTooltipTimingBridge(
 ): OfficialTooltipTimingBridge {
   let activeProvider: OfficialTooltipProvider | null = null;
 
-  const currentProvider = (): OfficialTooltipProvider | null => {
+  function currentProvider(): OfficialTooltipProvider | null {
     const trigger = currentTrigger();
-    return trigger ? findOfficialTooltipProvider(trigger) : null;
-  };
+    if (!trigger) return null;
+    return findOfficialTooltipProvider(trigger);
+  }
 
-  const deactivate = (): void => {
+  function deactivate(): void {
     const provider = activeProvider;
     activeProvider = null;
     if (!provider) return;
@@ -39,13 +40,14 @@ export function createOfficialTooltipTimingBridge(
     } catch {
       /* 官方内部结构变化时保持本地降级，不传播异常。 */
     }
-  };
+  }
 
   return {
     resolveDelay(fallbackMs) {
       try {
         const delayMs = currentProvider()?.getOpenDelay(PROVIDER_KEY, fallbackMs) ?? fallbackMs;
-        return Number.isFinite(delayMs) && delayMs >= 0 ? delayMs : fallbackMs;
+        if (!Number.isFinite(delayMs) || delayMs < 0) return fallbackMs;
+        return delayMs;
       } catch {
         return fallbackMs;
       }

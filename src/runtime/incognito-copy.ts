@@ -1,6 +1,6 @@
-import { COPY as REGIONAL_COPY, type CopyKey, type CopyTable } from "./incognito-copy-data";
+import { COPY as REGIONAL_COPY, type CopyKey, type CopyTable } from "./incognito-copy-data.ts";
 
-export type { CopyKey, CopyTable } from "./incognito-copy-data";
+export type { CopyKey, CopyTable } from "./incognito-copy-data.ts";
 
 // English and Chinese are the source copy; keep them beside locale resolution.
 const CORE_COPY: Record<string, CopyTable> = {
@@ -55,57 +55,12 @@ export const COPY: Record<string, CopyTable> = {
   ...CORE_COPY,
 };
 
-const DEFAULT_BY_LANGUAGE: Record<string, string> = {
-  bg: "bg-BG",
-  bn: "bn-BD",
-  bs: "bs-BA",
-  ca: "ca-ES",
-  cs: "cs-CZ",
-  da: "da-DK",
-  de: "de-DE",
-  el: "el-GR",
+// 只有多个区域候选或跨语言别名需要显式默认；单一候选由下方扫描自然解析。
+const LANGUAGE_DEFAULT_OVERRIDES: Record<string, string> = {
   es: "es-419",
-  et: "et-EE",
-  fi: "fi-FI",
   fr: "fr-FR",
-  gu: "gu-IN",
-  hi: "hi-IN",
-  hr: "hr-HR",
-  hu: "hu-HU",
-  hy: "hy-AM",
-  id: "id-ID",
-  is: "is-IS",
-  it: "it-IT",
-  ja: "ja-JP",
-  ka: "ka-GE",
-  kn: "kn-IN",
-  ko: "ko-KR",
-  lv: "lv-LV",
-  mk: "mk-MK",
-  mr: "mr-IN",
-  ms: "ms-MY",
-  my: "my-MM",
-  nb: "nb-NO",
   no: "nb-NO",
-  nl: "nl-NL",
-  pl: "pl-PL",
   pt: "pt-BR",
-  ro: "ro-RO",
-  ru: "ru-RU",
-  sk: "sk-SK",
-  sl: "sl-SI",
-  so: "so-SO",
-  sq: "sq-AL",
-  sr: "sr-RS",
-  sv: "sv-SE",
-  sw: "sw-TZ",
-  ta: "ta-IN",
-  te: "te-IN",
-  th: "th-TH",
-  tr: "tr-TR",
-  uk: "uk-UA",
-  vi: "vi-VN",
-  zh: "zh-CN",
 };
 
 export function resolveLocale(raw: string): string {
@@ -121,22 +76,16 @@ export function resolveLocale(raw: string): string {
   if (lower === "en" || lower.startsWith("en-")) return "en";
   const language = lower.split("-")[0] ?? "en";
   if (COPY[language]) return language;
-  if (DEFAULT_BY_LANGUAGE[language] && COPY[DEFAULT_BY_LANGUAGE[language]]) {
-    return DEFAULT_BY_LANGUAGE[language];
+  const defaultOverride = LANGUAGE_DEFAULT_OVERRIDES[language];
+  if (defaultOverride) {
+    return defaultOverride;
   }
   const regional = Object.keys(COPY).find((key) => key.toLowerCase().startsWith(`${language}-`));
   return regional ?? "en";
 }
 
-const TIGHT_BODY: Record<string, string> = {
-  en: "Same account and settings as usual, without earlier chats. This conversation will not show up in your everyday chat list. Temporary data is removed after a normal exit.",
-  "zh-CN": "账号和设置跟平时一样，看不到以前的对话，这次的聊天也不会进平时的列表。正常关掉后，这次的临时数据会清掉。",
-  "zh-TW": "帳號和設定跟平時一樣，看不到以前的對話，這次的聊天也不會進平時的列表。正常關掉後，這次的臨時資料會清掉。",
-  "zh-HK": "帳戶和設定跟平時一樣，看不到以前的對話，這次的聊天也不會進平時的列表。正常關掉後，這次的臨時資料會清掉。",
-};
-
 export function translate(locale: string, key: CopyKey): string {
   const resolved = resolveLocale(locale);
-  if (key === "body") return TIGHT_BODY[resolved] ?? TIGHT_BODY.en;
+  if (key === "body") return CORE_COPY[resolved]?.body ?? CORE_COPY.en.body;
   return COPY[resolved]?.[key] ?? COPY.en[key];
 }

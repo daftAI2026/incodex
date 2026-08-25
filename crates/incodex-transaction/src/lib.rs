@@ -98,21 +98,16 @@ pub const PHASES: &[&str] = &[
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct Journal {
-    #[serde(rename = "schemaVersion")]
     pub schema_version: u32,
-    #[serde(rename = "installId")]
     pub install_id: String,
-    #[serde(rename = "targetRealPath")]
     pub target_real_path: String,
-    #[serde(rename = "stagedApp")]
     pub staged_app: String,
-    #[serde(rename = "originalSnapshot")]
     pub original_snapshot: String,
-    #[serde(rename = "outgoingApp", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub outgoing_app: Option<String>,
     pub phase: String,
-    #[serde(rename = "updatedAt")]
     pub updated_at: String,
 }
 
@@ -134,45 +129,23 @@ impl Recovery {
 }
 
 pub fn parse_journal(raw: &serde_json::Value) -> Option<Journal> {
-    let obj = raw.as_object()?;
-    if obj.get("schemaVersion")?.as_u64()? != 1 {
-        return None;
-    }
-    let install_id = obj.get("installId")?.as_str()?.to_string();
-    if install_id.is_empty() {
-        return None;
-    }
-    let target_real_path = obj.get("targetRealPath")?.as_str()?.to_string();
-    let staged_app = obj.get("stagedApp")?.as_str()?.to_string();
-    let original_snapshot = obj.get("originalSnapshot")?.as_str()?.to_string();
-    if target_real_path.is_empty() || staged_app.is_empty() || original_snapshot.is_empty() {
-        return None;
-    }
-    let outgoing_app = match obj.get("outgoingApp") {
-        None => None,
-        Some(value) => {
-            let text = value.as_str()?.to_string();
-            if text.is_empty() {
-                return None;
-            }
-            Some(text)
-        }
-    };
-    let phase = obj.get("phase")?.as_str()?.to_string();
-    if !PHASES.contains(&phase.as_str()) {
-        return None;
-    }
-    let updated_at = obj.get("updatedAt")?.as_str()?.to_string();
-    Some(Journal {
-        schema_version: 1,
-        install_id,
-        target_real_path,
-        staged_app,
-        original_snapshot,
-        outgoing_app,
-        phase,
-        updated_at,
-    })
+    let journal: Journal = serde_json::from_value(raw.clone()).ok()?;
+    let required_paths_are_present = !journal.install_id.is_empty()
+        && !journal.target_real_path.is_empty()
+        && !journal.staged_app.is_empty()
+        && !journal.original_snapshot.is_empty();
+    let outgoing_is_valid = !raw
+        .get("outgoingApp")
+        .is_some_and(serde_json::Value::is_null)
+        && journal
+            .outgoing_app
+            .as_deref()
+            .is_none_or(|path| !path.is_empty());
+    (journal.schema_version == 1
+        && required_paths_are_present
+        && outgoing_is_valid
+        && PHASES.contains(&journal.phase.as_str()))
+    .then_some(journal)
 }
 
 pub fn recover_action(journal: &Journal) -> Recovery {
@@ -199,9 +172,8 @@ pub fn load_journal(install_id: &str, root: &Path) -> Option<Journal> {
 
 pub fn list_journals(root: &Path) -> Vec<Journal> {
     let dir = root.join("transactions");
-    let entries = match fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(_) => return Vec::new(),
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
     };
     let mut out = Vec::new();
     for entry in entries.flatten() {

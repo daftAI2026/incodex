@@ -1,6 +1,5 @@
 use super::*;
 use crate::profile_mask::{ProfileAvatar, ProfileMask};
-use std::collections::HashSet;
 use std::net::Ipv4Addr;
 use std::time::Instant;
 
@@ -152,7 +151,7 @@ fn cdp_command_read_has_an_overall_deadline_for_a_fragmented_frame() {
         }
     });
 
-    let (mut socket, _) =
+    let mut socket =
         connect_cdp_websocket(&format!("ws://127.0.0.1:{port}/devtools/page/test"), port).unwrap();
     let started = Instant::now();
     let result = send_cdp(&mut socket, 1, "Runtime.evaluate", json!({}));
@@ -211,20 +210,6 @@ fn profile_payload_is_null_outside_the_exact_top_level_codex_page() {
     assert!(source.contains("window.top===window"));
     assert!(source.contains("window.location.href===\"app://-/index.html\""));
     assert!(source.contains(":null;"));
-}
-
-#[test]
-fn persistent_script_registration_is_once_per_target_across_retries() {
-    let mut registered = HashSet::new();
-    assert!(should_register_persistent_script(&registered, "main"));
-    registered.insert("main".to_string());
-    assert!(!should_register_persistent_script(&registered, "main"));
-    assert!(should_register_persistent_script(
-        &registered,
-        "replacement"
-    ));
-    registered.insert("replacement".to_string());
-    assert!(!should_register_persistent_script(&registered, "main"));
 }
 
 #[test]

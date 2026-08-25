@@ -77,8 +77,7 @@ pub fn ensure_private_dir(dir: &Path) -> Result<(), String> {
         .map_err(|err| err.to_string())?
         .permissions();
     perms.set_mode(DIR_MODE);
-    fs::set_permissions(dir, perms).map_err(|err| err.to_string())?;
-    Ok(())
+    fs::set_permissions(dir, perms).map_err(|err| err.to_string())
 }
 
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
@@ -90,18 +89,18 @@ pub(crate) fn write_atomic_tracked(path: &Path, bytes: &[u8]) -> Result<(), Atom
         .parent()
         .ok_or_else(|| AtomicWriteError::new("durable write needs a parent directory", false))?;
     ensure_private_dir(parent).map_err(|error| AtomicWriteError::new(error, false))?;
-    let n = SystemTime::now()
+    let suffix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let tmp = parent.join(format!(".{}.tmp", n));
+        .map_or(0, |duration| duration.as_nanos());
+    let tmp = parent.join(format!(".{suffix}.tmp"));
     {
-        let mut opts = OpenOptions::new();
-        opts.write(true)
+        let mut options = OpenOptions::new();
+        options
+            .write(true)
             .create_new(true)
             .mode(FILE_MODE)
             .custom_flags(libc::O_NOFOLLOW);
-        let mut file = opts
+        let mut file = options
             .open(&tmp)
             .map_err(|err| AtomicWriteError::new(err.to_string(), false))?;
         file.write_all(bytes)

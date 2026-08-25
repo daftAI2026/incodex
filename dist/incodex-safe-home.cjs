@@ -1,11 +1,7 @@
 // @ts-nocheck
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.LOG_LIMIT = exports.FILE_MODE = exports.DIR_MODE = exports.SETTINGS_FILES = exports.READY_NAME = exports.LOCK_NAME = exports.OWNER_NAME = exports.LOGS_NAME = exports.SESSIONS_NAME = void 0;
-exports.assertNotSymlink = assertNotSymlink;
-exports.assertInsideParent = assertInsideParent;
-exports.ensurePrivateDir = ensurePrivateDir;
-exports.writePrivateFile = writePrivateFile;
+exports.LOG_LIMIT = exports.FILE_MODE = void 0;
 exports.handoffSessionOwner = handoffSessionOwner;
 exports.exclusiveCopyFile = exclusiveCopyFile;
 exports.createSessionHome = createSessionHome;
@@ -24,28 +20,18 @@ exports.sweepOrphanSessions = sweepOrphanSessions;
 exports.writeReady = writeReady;
 exports.hasReady = hasReady;
 exports.rotateAndAppendLog = rotateAndAppendLog;
-exports.writePidFile = writePidFile;
-exports.clearPidFile = clearPidFile;
-exports.readPidFile = readPidFile;
 exports.sessionRootFromHome = sessionRootFromHome;
 const fs = require("node:fs");
 const path = require("node:path");
 const ownerCore = require("./incodex-owner-core.cjs");
 const SESSIONS_NAME = "sessions";
-exports.SESSIONS_NAME = SESSIONS_NAME;
 const BURN_PROOF_PREFIX = ".incodex-burned-";
 const BURN_PROOF_SUFFIX = ".json";
 const LOGS_NAME = "logs";
-exports.LOGS_NAME = LOGS_NAME;
 const OWNER_NAME = "owner.json";
-exports.OWNER_NAME = OWNER_NAME;
 const LOCK_NAME = "lock";
-exports.LOCK_NAME = LOCK_NAME;
 const READY_NAME = "ready";
-exports.READY_NAME = READY_NAME;
-const PID_NAME = "incognito.pid";
 const SETTINGS_FILES = ["auth.json", "config.toml"];
-exports.SETTINGS_FILES = SETTINGS_FILES;
 const GLOBAL_STATE_NAME = ".codex-global-state.json";
 const MAIN_WINDOW_BOUNDS_KEY = "electron-main-window-bounds";
 const DESKTOP_FIRST_SEEN_AT_MS_KEY = "desktop-first-seen-at-ms";
@@ -53,7 +39,6 @@ const PERSISTED_ATOM_STATE_KEY = "electron-persisted-atom-state";
 const MIGRATION_ANNOUNCEMENT_KEY = "chatgpt-migration-announcement-completed-v1";
 const UPDATE_ANNOUNCEMENT_KEY = "chatgpt-update-downloaded-announcement-seen-v1";
 const DIR_MODE = 0o700;
-exports.DIR_MODE = DIR_MODE;
 const FILE_MODE = 0o600;
 exports.FILE_MODE = FILE_MODE;
 const MAIN_WINDOW_MIN_WIDTH = 480;
@@ -118,9 +103,6 @@ function ensurePrivateDir(dir, parent) {
 }
 function writePrivateFile(dest, data, { exclusive = false } = {}) {
     const prior = assertNotSymlink(dest, "file");
-    if (prior?.isSymbolicLink()) {
-        throw new Error(`[incodex] refuse to overwrite symlink file: ${dest}`);
-    }
     if (exclusive && prior) {
         throw new Error(`[incodex] refuse to overwrite existing file: ${dest}`);
     }
@@ -553,9 +535,13 @@ function sweepOrphanSessions(userRoot, options = {}) {
             const expectedStart = owner.processStartIdentity || owner.startedAt;
             if (expectedStart && !ownerCore.isCanonicalProcessStartIdentity(expectedStart))
                 continue;
-            const status = options.pidAlive
-                ? (options.pidAlive(owner.pid) ? "live" : "dead")
-                : processStatus(owner.pid);
+            let status;
+            if (options.pidAlive) {
+                status = options.pidAlive(owner.pid) ? "live" : "dead";
+            }
+            else {
+                status = processStatus(owner.pid);
+            }
             if (status === "unknown")
                 continue;
             if (status === "live") {
@@ -683,32 +669,4 @@ function isManagedSessionHome(home, userRoot) {
     catch {
         return false;
     }
-}
-function pidFile(userRoot) {
-    return path.join(userRoot, PID_NAME);
-}
-function writePidFile(userRoot, pid) {
-    ensurePrivateDir(userRoot, path.dirname(userRoot));
-    writePrivateFile(pidFile(userRoot), `${pid}\n`);
-}
-function clearPidFile(userRoot) {
-    const file = pidFile(userRoot);
-    const stats = lstatOrNull(file);
-    if (!stats)
-        return;
-    if (stats.isSymbolicLink()) {
-        throw new Error(`[incodex] refuse to remove symlink pid file: ${file}`);
-    }
-    fs.rmSync(file);
-}
-function readPidFile(userRoot) {
-    const file = pidFile(userRoot);
-    const stats = lstatOrNull(file);
-    if (!stats)
-        return 0;
-    if (stats.isSymbolicLink()) {
-        throw new Error(`[incodex] refuse to read symlink pid file: ${file}`);
-    }
-    const pid = Number(fs.readFileSync(file, "utf8").trim());
-    return Number.isInteger(pid) && pid > 0 ? pid : 0;
 }

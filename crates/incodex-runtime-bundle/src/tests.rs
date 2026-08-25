@@ -26,6 +26,30 @@ fn expected_new_release() -> String {
     format!("{}-{}", runtime_version(), manifest_hash())
 }
 
+fn write_legacy_embedded_release(user_root: &Path, release: &str, version: &str) {
+    let root = runtime_root(user_root);
+    let release_dir = root.join("releases").join(release);
+    fs::create_dir_all(&release_dir).unwrap();
+    set_runtime_dir_modes(&root, &release_dir);
+    let mut files = serde_json::Map::new();
+    for (name, body) in EXTERNAL_FILES {
+        let path = release_dir.join(name);
+        fs::write(&path, body.as_bytes()).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(FILE_MODE)).unwrap();
+        files.insert(
+            (*name).to_string(),
+            serde_json::Value::String(sha256_hex(body.as_bytes())),
+        );
+    }
+    let current = serde_json::json!({
+        "schemaVersion": 1,
+        "version": version,
+        "release": format!("releases/{release}"),
+        "files": files,
+    });
+    write_json(&root.join("current.json"), &current);
+}
+
 fn read_current(user_root: &Path) -> serde_json::Value {
     serde_json::from_slice(&fs::read(runtime_root(user_root).join("current.json")).unwrap())
         .unwrap()
@@ -37,6 +61,18 @@ fn write_json(path: &Path, value: &serde_json::Value) {
         format!("{}\n", serde_json::to_string_pretty(value).unwrap()),
     )
     .unwrap();
+    fs::set_permissions(path, fs::Permissions::from_mode(FILE_MODE)).unwrap();
+}
+
+fn set_runtime_dir_modes(root: &Path, release: &Path) {
+    for path in [
+        root.parent().expect("runtime user root"),
+        root,
+        &root.join("releases"),
+        release,
+    ] {
+        fs::set_permissions(path, fs::Permissions::from_mode(DIR_MODE)).unwrap();
+    }
 }
 
 fn hash_map_for_bodies(body: &[u8]) -> serde_json::Map<String, serde_json::Value> {
@@ -54,6 +90,7 @@ fn write_old_release(user_root: &Path, release: &str, body: &[u8]) -> serde_json
     let root = runtime_root(user_root);
     let release_dir = root.join("releases").join(release);
     fs::create_dir_all(&release_dir).unwrap();
+    set_runtime_dir_modes(&root, &release_dir);
     for name in required_runtime_files() {
         let path = release_dir.join(name);
         fs::write(&path, body).unwrap();
@@ -113,6 +150,237 @@ fn verify_current_complete(user_root: &Path) -> serde_json::Value {
 fn loader_is_embedded() {
     assert!(loader_source().contains("incodex") || loader_source().len() > 10);
     assert!(!runtime_version().is_empty());
+}
+
+#[test]
+fn runtime_identity_is_content_addressed_by_the_canonical_manifest() {
+    let identity = runtime_identity().unwrap();
+    assert_eq!(identity.version, runtime_version());
+    assert_eq!(identity.manifest_sha256, manifest_hash());
+}
+
+#[test]
+fn embedded_identity_rejects_an_incomplete_or_mismatched_manifest_file_set() {
+    let mut manifest = embedded_manifest().unwrap();
+    manifest.files.insert(LOADER_NAME.into(), "00".repeat(32));
+    assert!(runtime_file_hashes(&manifest)
+        .unwrap_err()
+        .contains(LOADER_NAME));
+
+    let mut manifest = embedded_manifest().unwrap();
+    manifest
+        .files
+        .insert("unexpected.cjs".into(), "00".repeat(32));
+    assert_eq!(
+        declared_runtime_file_hashes(&manifest).unwrap_err(),
+        "runtime manifest files do not match required artifacts"
+    );
+}
+
+#[test]
+fn inspect_deployed_returns_the_verified_pointer_identity() {
+    let root = scratch("inspect");
+    let published = publish(&root).unwrap();
+    let inspected = inspect_deployed(&root).unwrap().unwrap();
+
+    assert_eq!(inspected.version, published.version);
+    assert_eq!(inspected.release, published.release);
+    assert_eq!(
+        inspected.manifest_sha256.as_deref(),
+        Some(manifest_hash().as_str())
+    );
+    assert_eq!(inspected.files.len(), required_runtime_files().count());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn ensure_current_repairs_insecure_runtime_container_modes() {
+    for (label, relative) in [
+        ("root", "runtime"),
+        ("releases", "runtime/releases"),
+        ("pointer", "runtime/current.json"),
+    ] {
+        let root = scratch(&format!("mode-{label}"));
+        publish(&root).unwrap();
+        fs::set_permissions(
+            root.join(relative),
+            fs::Permissions::from_mode(if label == "pointer" { 0o666 } else { 0o777 }),
+        )
+        .unwrap();
+
+        assert!(inspect_deployed(&root).is_err(), "{label}");
+        ensure_current(&root).unwrap();
+        assert!(deployed_current_matches_embedded(&root).unwrap(), "{label}");
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn inspect_deployed_rejects_a_non_regular_current_pointer() {
+    let root = scratch("pointer-directory");
+    publish(&root).unwrap();
+    let current = runtime_root(&root).join("current.json");
+    fs::remove_file(&current).unwrap();
+    fs::create_dir(&current).unwrap();
+
+    let error = inspect_deployed(&root).unwrap_err();
+    assert!(
+        error.contains("current.json is not a regular file"),
+        "{error}"
+    );
+    assert!(ensure_current(&root).is_err());
+    assert_eq!(
+        fs::read_dir(runtime_root(&root))
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".current.json.tmp-"))
+            .count(),
+        0,
+        "a rejected pointer must not leave a temporary file"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn user_root_symlink_is_never_followed_by_inspection_or_publish() {
+    let parent = scratch("user-root-symlink");
+    let outside = parent.join("outside");
+    let user_root = parent.join(".incodex");
+    fs::create_dir_all(&outside).unwrap();
+    std::os::unix::fs::symlink(&outside, &user_root).unwrap();
+
+    assert!(inspect_deployed(&user_root)
+        .unwrap_err()
+        .contains(".incodex is a symlink"));
+    assert!(publish(&user_root)
+        .unwrap_err()
+        .contains(".incodex is a symlink"));
+    assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
+    fs::remove_dir_all(parent).unwrap();
+}
+
+#[test]
+fn ensure_current_repairs_an_insecure_user_root_mode() {
+    let parent = scratch("user-root-mode");
+    let user_root = parent.join(".incodex");
+    fs::create_dir_all(&user_root).unwrap();
+    fs::set_permissions(&user_root, fs::Permissions::from_mode(0o777)).unwrap();
+
+    assert!(inspect_deployed(&user_root).is_err());
+    ensure_current(&user_root).unwrap();
+
+    assert_eq!(fs::metadata(&user_root).unwrap().mode() & 0o777, DIR_MODE);
+    assert!(deployed_current_matches_embedded(&user_root).unwrap());
+    fs::remove_dir_all(parent).unwrap();
+}
+
+#[test]
+fn no_replace_rename_preserves_an_existing_destination() {
+    let root = scratch("rename-exclusive");
+    let source = root.join("source");
+    let destination = root.join("destination");
+    fs::create_dir_all(&source).unwrap();
+    fs::create_dir_all(&destination).unwrap();
+    fs::write(source.join("source-marker"), b"source").unwrap();
+    fs::write(destination.join("destination-marker"), b"destination").unwrap();
+
+    assert!(rename_noreplace(&source, &destination).is_err());
+    assert!(source.join("source-marker").is_file());
+    assert_eq!(
+        fs::read(destination.join("destination-marker")).unwrap(),
+        b"destination"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn explicit_null_manifest_provenance_is_invalid_and_republished() {
+    let root = scratch("null-provenance");
+    publish(&root).unwrap();
+    let mut current = read_current(&root);
+    current["manifestSha256"] = serde_json::Value::Null;
+    current["sourceCommit"] = serde_json::Value::Null;
+    write_json(&runtime_root(&root).join("current.json"), &current);
+
+    assert_eq!(
+        inspect_deployed(&root).unwrap_err(),
+        "runtime manifest pointer fields must be paired non-null strings"
+    );
+    ensure_current(&root).unwrap();
+
+    let repaired = verify_current_complete(&root);
+    assert!(repaired["manifestSha256"].is_string());
+    assert!(repaired["sourceCommit"].is_string());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn legacy_pointer_with_matching_embedded_files_is_current_without_manifest_provenance() {
+    let root = scratch("legacy-current");
+    write_legacy_embedded_release(&root, &runtime_version(), &runtime_version());
+    let current_before = fs::read(runtime_root(&root).join("current.json")).unwrap();
+
+    assert!(deployed_current_matches_embedded(&root).unwrap());
+    let ensured = ensure_current(&root).unwrap();
+
+    assert_eq!(ensured.version, runtime_version());
+    assert_eq!(ensured.release, format!("releases/{}", runtime_version()));
+    assert_eq!(
+        fs::read(runtime_root(&root).join("current.json")).unwrap(),
+        current_before,
+        "matching legacy content must not be rewritten just because its pointer lacks a manifest hash"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn legacy_pointer_with_old_version_is_stale_even_when_files_match() {
+    let root = scratch("legacy-version-stale");
+    write_legacy_embedded_release(&root, "0.3.1", "0.3.1");
+
+    assert!(!deployed_current_matches_embedded(&root).unwrap());
+    ensure_current(&root).unwrap();
+
+    let current = verify_current_complete(&root);
+    assert_eq!(current["version"], runtime_version());
+    assert_eq!(current["manifestSha256"], manifest_hash());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn ensure_current_publishes_when_a_legacy_pointer_has_stale_content() {
+    let root = scratch("legacy-stale");
+    write_old_release(&root, "0.3.1", b"old runtime");
+
+    assert!(!deployed_current_matches_embedded(&root).unwrap());
+    ensure_current(&root).unwrap();
+
+    let current = verify_current_complete(&root);
+    assert_eq!(
+        current["release"],
+        format!("releases/{}", expected_new_release())
+    );
+    assert_eq!(current["manifestSha256"], manifest_hash());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn ensure_current_does_not_trust_a_same_version_pointer_with_different_content() {
+    let root = scratch("same-version-stale");
+    write_old_release(&root, &runtime_version(), b"old runtime");
+
+    assert!(!deployed_current_matches_embedded(&root).unwrap());
+    ensure_current(&root).unwrap();
+
+    let current = verify_current_complete(&root);
+    assert_eq!(
+        current["release"],
+        format!("releases/{}", expected_new_release())
+    );
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

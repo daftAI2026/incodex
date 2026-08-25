@@ -1,9 +1,3 @@
-/**
- * [INPUT]: 接收 /dev/urandom 原始熵，或用于测试的 Read 实现
- * [OUTPUT]: 对外提供经过 SHA-256 混合的两词临时名称与可测试熵读入
- * [POS]: incodex-cli 的临时身份命名边界；维护 ASCII Title Case 词表并拒绝熵源降级
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
- */
 use std::fs::File;
 use std::io::{self, Read};
 
@@ -152,10 +146,8 @@ pub(crate) fn friendly_name_from_entropy_digest(digest: &[u8; ENTROPY_BYTES]) ->
 pub(crate) fn friendly_name_from_reader(mut reader: impl Read) -> io::Result<String> {
     let mut entropy = [0_u8; ENTROPY_BYTES];
     reader.read_exact(&mut entropy)?;
-    let digest = Sha256::digest(entropy);
-    let mut digest_array = [0_u8; ENTROPY_BYTES];
-    digest_array.copy_from_slice(&digest);
-    Ok(friendly_name_from_entropy_digest(&digest_array))
+    let digest: [u8; ENTROPY_BYTES] = Sha256::digest(entropy).into();
+    Ok(friendly_name_from_entropy_digest(&digest))
 }
 
 pub(crate) fn random_friendly_name() -> Result<String, String> {

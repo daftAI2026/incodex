@@ -1,12 +1,7 @@
-/**
- * [INPUT]: 接收 ParsedCli 的 open 选项，并调用隔离 session 生命周期
- * [OUTPUT]: 对外提供 run_open 的 CLI 边界与 dry-run/清理输出
- * [POS]: open 编排器的命令壳；危险细节留在父模块的 session/CDP 流程
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
- */
 use std::path::{Path, PathBuf};
 
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
+use incodex_runtime_bundle::ensure_current;
 
 use crate::parse::ParsedCli;
 use crate::profile_mask::resolve_profile_mask;
@@ -15,6 +10,7 @@ use crate::CliFailure;
 use super::{
     default_source_home, describe_incognito_open, format_session_cleanup,
     prepare_incognito_open_with_profile_mask, user_root, wait_and_burn, OpenExitCode,
+    OPENING_MESSAGE,
 };
 
 pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
@@ -48,7 +44,10 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
         return Ok(());
     }
 
+    // Validate the executable before touching Runtime or creating a session.
+    describe_incognito_open(&app_path).map_err(CliFailure::from)?;
     let root = user_root();
+    ensure_current(&root).map_err(CliFailure::from)?;
     let source = default_source_home();
     let plan = prepare_incognito_open_with_profile_mask(
         &app_path,
@@ -57,8 +56,7 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
         std::process::id() as i32,
         profile_mask,
     )?;
-    let (opening, _, _) = super::open_progress_copy();
-    println!("{}", format_step(opening, None));
+    println!("{}", format_step(OPENING_MESSAGE, None));
     println!(
         "{}",
         format_kv("Binary", &plan.bin.display().to_string(), None)
@@ -82,7 +80,7 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
     } else {
         Err(CliFailure::with_code(
             code.as_i32(),
-            process.failure_message(&cleanup, code),
+            process.failure_message(code),
         ))
     }
 }

@@ -2,7 +2,6 @@
 "use strict";
 
 const { execFile } = require("node:child_process");
-const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
 const core = require("./incodex-owner-core.cts");
@@ -26,14 +25,9 @@ const {
   staleOwner,
   staleOwnerRecord,
   OwnerLeaseError,
-  ownsOwnerLease,
 } = core;
 const { clearOwnerLock, releaseOwnerLease, acquireOwnerLease, setRaiseHandler } = recovery;
 const processIdentity = core.processIdentity;
-
-function sockPath(stateRoot) {
-  return path.join(stateRoot, SOCK_NAME);
-}
 
 function connectToOwner(owner, expectedToken, timeoutMs) {
   return new Promise((resolve) => {
@@ -41,13 +35,13 @@ function connectToOwner(owner, expectedToken, timeoutMs) {
     let done = false;
     let response = "";
     let deadline;
-    const finish = (ok) => {
+    function finish(ok) {
       if (done) return;
       done = true;
       clearTimeout(deadline);
       socket.destroy();
       resolve(ok);
-    };
+    }
     socket.setTimeout(timeoutMs);
     deadline = setTimeout(() => finish(false), timeoutMs);
     socket.once("connect", () => {
@@ -63,8 +57,9 @@ function connectToOwner(owner, expectedToken, timeoutMs) {
         finish(false);
         return;
       }
-      if (response.split("\n").some((line) => line.trim() === "ok")) finish(true);
-      else if (response.split("\n").some((line) => line.trim() === "denied")) finish(false);
+      const lines = response.split("\n").map((line) => line.trim());
+      if (lines.includes("ok")) finish(true);
+      else if (lines.includes("denied")) finish(false);
     });
     socket.once("error", () => finish(false));
     socket.once("timeout", () => finish(false));
@@ -92,7 +87,7 @@ async function connectExistingWithRetry(stateRoot, token, options = {}) {
   const delayMs = options.delayMs ?? 100;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (await connectExisting(stateRoot, timeoutMs, token)) return true;
-    if (attempt + 1 < attempts && delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+    if (attempt + 1 < attempts && delayMs > 0) await wait(delayMs);
   }
   return false;
 }
@@ -106,10 +101,14 @@ function singleFlight(holder, start) {
   if (holder.current) return holder.current;
   holder.current = Promise.resolve()
     .then(start)
-    .finally(() => {
+    .finally(function clearSingleFlight() {
       holder.current = null;
     });
   return holder.current;
+}
+
+function wait(delayMs) {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
 function sessionProcessIdsFromPs(snapshot, sessionRoot, currentPid = process.pid) {
@@ -179,7 +178,7 @@ async function waitForSessionProcesses(sessionRoot, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   let pids = await markedSessionProcesses(sessionRoot);
   while (pids.length > 0 && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await wait(25);
     pids = await markedSessionProcesses(sessionRoot);
   }
   return pids;
@@ -204,45 +203,12 @@ async function quiesceSessionHelpers(sessionRoot) {
   if (pids.length > 0) throw new Error("late isolated helpers survived SIGKILL");
 }
 
-if (typeof module !== "undefined") module.exports = {
-  LOCK_NAME,
-  SOCK_NAME,
-  targetIdFromExec,
-  targetStateDir,
-  ownerPortFromExec,
-  sockPath,
-  processIdentity,
-  ownerToken,
-  ownerMatchesLive,
-  writeOwnerLock,
-  writeOwnerLockExclusive,
-  readOwnerLockState,
-  readOwnerLock,
-  readOwnerRecords,
-  setOwnerRecordTestHook,
-  clearOwnerLock,
-  releaseOwnerLease,
-  currentOwner,
-  staleOwner,
-  staleOwnerRecord,
-  OwnerLeaseError,
-  ownsOwnerLease,
-  acquireOwnerLease,
-  connectExisting,
-  connectExistingWithRetry,
-  listenForRaise,
-  singleFlight,
-  sessionProcessIdsFromPs,
-  quiesceSessionHelpers,
-};
-
 export {
   LOCK_NAME,
   SOCK_NAME,
   targetIdFromExec,
   targetStateDir,
   ownerPortFromExec,
-  sockPath,
   processIdentity,
   ownerToken,
   ownerMatchesLive,
@@ -258,7 +224,6 @@ export {
   staleOwner,
   staleOwnerRecord,
   OwnerLeaseError,
-  ownsOwnerLease,
   acquireOwnerLease,
   connectExisting,
   connectExistingWithRetry,
