@@ -11,7 +11,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use incodex_core::canonical::{inspect_target, recheck_target};
 use incodex_transaction::{
-    acquire_target_lock, new_install_id, recover, Engine, Recovery, TxError,
+    acquire_target_lock, finalize_restored_transaction_with_checkpoint, new_install_id, recover,
+    restore_committed, Engine, Recovery, TxError,
 };
 
 static SCRATCH_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -506,6 +507,49 @@ fn verify_failure_restores_original_and_rolls_back() {
     drop(tx);
     let again = recover(&root, &id).unwrap();
     assert_eq!(again.action, Recovery::Done);
+}
+
+#[test]
+fn terminal_cleanup_retries_after_the_tombstone_journal_is_partially_deleted() {
+    let root = scratch();
+    let target_app = app_bundle(&root, "ChatGPT.app", "original");
+    let staged = app_bundle(&root, "staged.app", "patched");
+    let mut tx = Engine::begin(&root, &target_app, "install").unwrap();
+    seal_backup(&root, &mut tx, &target_app);
+    tx.place_staging(&staged).unwrap();
+    tx.swap().unwrap();
+    tx.commit().unwrap();
+    let install_id = tx.install_id().to_string();
+    drop(tx);
+    restore_committed(&root, &install_id, &target_app).unwrap();
+
+    let interrupted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        finalize_restored_transaction_with_checkpoint(
+            &root,
+            &install_id,
+            &target_app,
+            |checkpoint| {
+                if checkpoint == "CLEANUP_TOMBSTONE_DURABLE" {
+                    panic!("simulated cleanup interruption");
+                }
+            },
+        )
+        .unwrap();
+    }));
+    assert!(interrupted.is_err());
+
+    let transactions = root.join("transactions");
+    let tombstone = transactions.join(format!(".deleting-{install_id}"));
+    let manifest = transactions.join(format!(".cleanup-{install_id}.json"));
+    fs::remove_file(tombstone.join("journal.json")).unwrap();
+    assert!(manifest.exists(), "durable cleanup intent was not retained");
+
+    let result = recover(&root, &install_id).unwrap();
+
+    assert_eq!(result.action, Recovery::Done);
+    assert!(!transactions.join(&install_id).exists());
+    assert!(!tombstone.exists());
+    assert!(!manifest.exists());
 }
 
 #[test]

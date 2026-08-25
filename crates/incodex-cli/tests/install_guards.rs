@@ -7,6 +7,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use incodex_asar::{pack_dir, Archive, LOADER_NAME, MARKER_KEY};
 use incodex_macos::sign_app;
+use incodex_transaction::{finalize_restored_transaction_with_checkpoint, restore_committed};
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 static TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -215,4 +216,105 @@ fn install_refuses_trusted_record_with_tampered_original_backup() {
     );
     assert_eq!(transaction_ids(&home), ids_before);
     assert!(original.join("Contents/backup-tamper").exists());
+}
+
+#[test]
+fn uninstall_removes_the_restored_transaction_backup() {
+    let _guard = serialize_signing();
+    let home = home();
+    let app = patchable_app(&home);
+    let install_id = install(&home, &app);
+    let transaction = home.join(".incodex/transactions").join(&install_id);
+
+    let (status, stdout, stderr) = run(
+        &["uninstall", "--yes", "--app", app.to_str().unwrap()],
+        &home,
+    );
+
+    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
+    assert!(
+        !transaction.exists(),
+        "successful uninstall retained transaction {install_id}"
+    );
+}
+
+#[test]
+fn a_new_install_removes_the_superseded_committed_backup() {
+    let _guard = serialize_signing();
+    let home = home();
+    let app = patchable_app(&home);
+    let first_install_id = install(&home, &app);
+
+    fs::remove_dir_all(&app).unwrap();
+    let replacement = patchable_app(&home);
+    let second_install_id = install(&home, &replacement);
+
+    assert_ne!(first_install_id, second_install_id);
+    assert_eq!(transaction_ids(&home), vec![second_install_id]);
+}
+
+#[test]
+fn a_new_install_removes_a_superseded_restored_backup() {
+    let _guard = serialize_signing();
+    let home = home();
+    let app = patchable_app(&home);
+    let first_install_id = install(&home, &app);
+    let root = home.join(".incodex");
+    restore_committed(&root, &first_install_id, &app).unwrap();
+
+    let second_install_id = install(&home, &app);
+
+    assert_ne!(first_install_id, second_install_id);
+    assert_eq!(transaction_ids(&home), vec![second_install_id]);
+}
+
+#[test]
+fn recover_removes_a_restored_terminal_transaction() {
+    let _guard = serialize_signing();
+    let home = home();
+    let app = patchable_app(&home);
+    let install_id = install(&home, &app);
+    let root = home.join(".incodex");
+    let transaction = root.join("transactions").join(&install_id);
+    restore_committed(&root, &install_id, &app).unwrap();
+
+    let (status, stdout, stderr) = run(&["recover", "--transaction", install_id.as_str()], &home);
+
+    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
+    assert!(
+        !transaction.exists(),
+        "recover retained restored transaction {install_id}"
+    );
+}
+
+#[test]
+fn recover_retries_an_interrupted_terminal_cleanup_without_the_tombstone_journal() {
+    let _guard = serialize_signing();
+    let home = home();
+    let app = patchable_app(&home);
+    let install_id = install(&home, &app);
+    let root = home.join(".incodex");
+    restore_committed(&root, &install_id, &app).unwrap();
+
+    let interrupted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        finalize_restored_transaction_with_checkpoint(&root, &install_id, &app, |checkpoint| {
+            if checkpoint == "CLEANUP_TOMBSTONE_DURABLE" {
+                panic!("simulated cleanup interruption");
+            }
+        })
+        .unwrap();
+    }));
+    assert!(interrupted.is_err());
+
+    let transactions = root.join("transactions");
+    let tombstone = transactions.join(format!(".deleting-{install_id}"));
+    let manifest = transactions.join(format!(".cleanup-{install_id}.json"));
+    fs::remove_file(tombstone.join("journal.json")).unwrap();
+
+    let (status, stdout, stderr) = run(&["recover", "--transaction", &install_id], &home);
+
+    assert_eq!(status, 0, "stdout={stdout}\nstderr={stderr}");
+    assert!(stdout.contains("action: done"), "stdout={stdout}");
+    assert!(!tombstone.exists());
+    assert!(!manifest.exists());
 }

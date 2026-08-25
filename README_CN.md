@@ -74,7 +74,7 @@ Homebrew 和脚本安装直接使用预编译的原生 Rust 二进制，不需�
 
 - 官方升级会冲掉补丁。再跑一次 `incodex install`，打的是**当前这份**新官方包
 - 如果官方已经升成新版本，`incodex uninstall` 不会用旧备份盖回去
-- 每份原始包备份都留在对应的原生事务中：`~/.incodex/transactions/<install-id>/original/ChatGPT.app`
+- 当前原始包备份位于 `~/.incodex/transactions/<install-id>/original/ChatGPT.app`；卸载恢复并验证成功后会删除，新一代安装成功后也会清理同一应用已被取代的终态备份
 - Homebrew 装的用 `brew upgrade incodex`；脚本装的用 `incodex update`；源码更新用 `git pull && cargo install --locked --path crates/incodex-cli`；源码卸载用 `cargo uninstall incodex-cli`
 - 菜单支持方向键、Vim `j/k`、数字立刻执行、`V` 看版本、`q` 退出
 - 脚本安装若找不到命令，把 `~/.local/bin` 加进 PATH
