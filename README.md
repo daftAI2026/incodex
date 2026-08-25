@@ -63,7 +63,7 @@ Homebrew and script installs use prebuilt native Rust binaries and do not requir
 
 ## Security & Safety Design
 
-The primary `incodex open` path does not patch Codex. The optional `incodex install` path adds the in-app button by modifying the locally installed Electron app. Destructive commands print a plan first: TTY asks once, non-TTY needs `--yes`, `--dry-run` only prints.
+The primary `incodex open` path does not patch Codex. The optional `incodex install` path adds the in-app button by modifying the locally installed Electron app. `install`, `uninstall`, and `self-uninstall` print a plan before destructive work: TTY asks once, non-TTY needs `--yes`, and `--dry-run` only prints. `recover` is the explicit transaction-recovery exception: it requires `--transaction <id>`, does not accept `--dry-run`, and resumes only that existing journal.
 
 - Official plugins cannot add this button. The app bundle has to change
 - After the default official-app install, a valid OpenAI signature cannot be kept. On the next launch, macOS may ask the patched app to access **Codex Storage Key**. Only if the dialog names the expected app and Keychain item should you enter your **Mac login password** (not your ChatGPT password) and choose **Always Allow**. **Allow** / **Allow Once** grants only that access and may prompt again later; if the details do not match, choose **Deny**. The CLI does not give permanent-authorization advice for `--clone` or `--app` targets
@@ -74,7 +74,7 @@ The primary `incodex open` path does not patch Codex. The optional `incodex inst
 
 - An official upgrade wipes the patch. Run `incodex install` again on the **current** official package
 - If Codex has already been upgraded, `incodex uninstall` will not put an old backup back
-- Original-bundle backups are isolated per app path under `~/.incodex/installations/`
+- Each original-bundle backup stays inside its native transaction at `~/.incodex/transactions/<install-id>/original/ChatGPT.app`
 - Homebrew: `brew upgrade incodex`. Script: `incodex update`. Source update: `git pull && cargo install --locked --path crates/incodex-cli`; source removal: `cargo uninstall incodex-cli`
 - The menu supports arrows, Vim `j/k`, digits that run immediately, `V` for version, `q` to quit
 - If a script install cannot find the command, add `~/.local/bin` to PATH
@@ -158,7 +158,7 @@ $ incodex install
   Signed       yes
   ! Replaces the app in place and resigns it ad hoc.
   ! Official Appshot (smart snapshot) stops until uninstall.
-  Backup       ~/.incodex/installations/
+  Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app
   Install id   0778f0fa-…
   Runtime      0.4.0
   App          /Applications/ChatGPT.app
@@ -183,6 +183,8 @@ $ incodex status
   Installed    yes
   Loader       asar loader only
   Runtime      0.4.0 releases/0.4.0-<manifestSha256>
+  CLI Runtime  0.4.0
+  Runtime state current
   Version      26.814.41957 6744
   Install id   0778f0fa-…
   Target       official-404f3389062b
@@ -207,6 +209,10 @@ $ incodex doctor
   Version      0.4.0
   External     0.4.0 releases/0.4.0-<manifestSha256>
   External check checked
+  CLI Runtime  0.4.0
+  CLI manifest <manifestSha256>
+  Deployed manifest <manifestSha256>
+  Runtime state current
   Loader       asar only
   Main         .vite/build/early-bootstrap.js
 

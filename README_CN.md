@@ -63,7 +63,7 @@ Homebrew 和脚本安装直接使用预编译的原生 Rust 二进制，不需�
 
 ## Security & Safety Design
 
-主路径 `incodex open` 不会修改 Codex。可选的 `incodex install` 路径为了加入应用内按钮，会修改本机安装的 Electron 应用包。高风险操作默认要看计划：TTY 问一次，非 TTY 要 `--yes`，`--dry-run` 只打印。
+主路径 `incodex open` 不会修改 Codex。可选的 `incodex install` 路径为了加入应用内按钮，会修改本机安装的 Electron 应用包。`install`、`uninstall` 和 `self-uninstall` 在破坏性操作前都会打印计划：TTY 问一次，非 TTY 要 `--yes`，`--dry-run` 只打印。`recover` 是显式事务恢复例外：它必须带 `--transaction <id>`，不接受 `--dry-run`，并且只会续跑这一本已存在的 journal。
 
 - 官方插件加不了这个按钮，必须改应用包
 - 默认安装到官方应用后，改包没法继续保留有效的 OpenAI 签名。下次启动时，macOS 可能要求这个已修改的应用访问钥匙串中的 **Codex Storage Key**。只有对话框里的应用和钥匙串项目都符合预期时，才输入 **Mac 登录密码**（不是 ChatGPT 账号密码）并选择 **始终允许**。**允许** / **允许一次**只授权本次访问，之后还可能再次询问；信息不符合预期时选择 **拒绝**。CLI 不会对 `--clone` 或 `--app` 目标给出永久授权建议
@@ -74,7 +74,7 @@ Homebrew 和脚本安装直接使用预编译的原生 Rust 二进制，不需�
 
 - 官方升级会冲掉补丁。再跑一次 `incodex install`，打的是**当前这份**新官方包
 - 如果官方已经升成新版本，`incodex uninstall` 不会用旧备份盖回去
-- 原始包备份按应用路径隔离，在 `~/.incodex/installations/`
+- 每份原始包备份都留在对应的原生事务中：`~/.incodex/transactions/<install-id>/original/ChatGPT.app`
 - Homebrew 装的用 `brew upgrade incodex`；脚本装的用 `incodex update`；源码更新用 `git pull && cargo install --locked --path crates/incodex-cli`；源码卸载用 `cargo uninstall incodex-cli`
 - 菜单支持方向键、Vim `j/k`、数字立刻执行、`V` 看版本、`q` 退出
 - 脚本安装若找不到命令，把 `~/.local/bin` 加进 PATH
@@ -158,7 +158,7 @@ $ incodex install
   Signed       yes
   ! Replaces the app in place and resigns it ad hoc.
   ! Official Appshot (smart snapshot) stops until uninstall.
-  Backup       ~/.incodex/installations/
+  Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app
   Install id   0778f0fa-…
   Runtime      0.4.0
   App          /Applications/ChatGPT.app
@@ -183,6 +183,8 @@ $ incodex status
   Installed    yes
   Loader       asar loader only
   Runtime      0.4.0 releases/0.4.0-<manifestSha256>
+  CLI Runtime  0.4.0
+  Runtime state current
   Version      26.814.41957 6744
   Install id   0778f0fa-…
   Target       official-404f3389062b
@@ -207,6 +209,10 @@ $ incodex doctor
   Version      0.4.0
   External     0.4.0 releases/0.4.0-<manifestSha256>
   External check checked
+  CLI Runtime  0.4.0
+  CLI manifest <manifestSha256>
+  Deployed manifest <manifestSha256>
+  Runtime state current
   Loader       asar only
   Main         .vite/build/early-bootstrap.js
 

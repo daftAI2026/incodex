@@ -305,7 +305,14 @@ fn print_install_plan(app: &Path, clone: bool, progress: &mut Progress) -> Resul
                 None
             )
         );
-        println!("{}", format_kv("Backup", "~/.incodex/installations/", None));
+        println!(
+            "{}",
+            format_kv(
+                "Backup",
+                "~/.incodex/transactions/<install-id>/original/ChatGPT.app",
+                None,
+            )
+        );
     }
     Ok(())
 }
