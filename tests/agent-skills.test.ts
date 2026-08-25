@@ -22,7 +22,7 @@ describe("agent skills", () => {
   test("post-reactions.sh posts the six GitHub reactions on a lowercase v tag", () => {
     const script = read(".claude/skills/release-notes/scripts/post-reactions.sh");
     expect(script).toContain("daftAI2026/incodex");
-    expect(script).toContain("repos/${REPO}/releases");
+    expect(script).toContain(`repos/\${REPO}/releases`);
     expect(script).toContain("+1 laugh hooray heart rocket eyes");
     expect(script).toContain('"$TAG" != v*');
     expect(script).not.toContain('"$TAG" != V*');
