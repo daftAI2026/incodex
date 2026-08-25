@@ -216,13 +216,6 @@ pub fn is_primary_codex_page(target: &CdpTarget) -> bool {
     url == OFFICIAL_CODEX_PAGE_URL
 }
 
-fn should_register_persistent_script(
-    registered_targets: &HashSet<String>,
-    target_id: &str,
-) -> bool {
-    !registered_targets.contains(target_id)
-}
-
 pub fn inject_shared_ui(debug_port: u16) -> Result<(), String> {
     inject_shared_ui_with_options(debug_port, &InjectionOptions::default()).map(|_| ())
 }
@@ -309,13 +302,12 @@ where
     ensure_injection_active(process_alive)?;
     let page = pick_codex_page_target(&targets).ok_or("no Codex page target")?;
     on_target(&page.id);
-    validate_cdp_websocket_url(&page.ws, debug_port)?;
-    let (mut socket, _) = connect_cdp_websocket(&page.ws, debug_port)?;
+    let mut socket = connect_cdp_websocket(&page.ws, debug_port)?;
     ensure_injection_active(process_alive)?;
     send_cdp(&mut socket, 1, "Page.enable", json!({}))?;
     select_official_codex_mode(&mut socket)?;
     ensure_injection_active(process_alive)?;
-    if should_register_persistent_script(registered_script_targets, &page.id) {
+    if !registered_script_targets.contains(&page.id) {
         send_cdp(
             &mut socket,
             4,
@@ -420,8 +412,7 @@ fn probe_profile_mask_health(debug_port: u16, process_alive: &AtomicBool) -> Res
     ensure_injection_active(process_alive)?;
     let targets = list_targets(debug_port)?;
     let page = pick_codex_page_target(&targets).ok_or("no Codex page target")?;
-    validate_cdp_websocket_url(&page.ws, debug_port)?;
-    let (mut socket, _) = connect_cdp_websocket(&page.ws, debug_port)?;
+    let mut socket = connect_cdp_websocket(&page.ws, debug_port)?;
     let response = send_cdp(
         &mut socket,
         1,
@@ -480,8 +471,7 @@ fn close_browser(debug_port: u16) -> Result<(), String> {
         .get("webSocketDebuggerUrl")
         .and_then(Value::as_str)
         .ok_or("CDP browser target has no WebSocket URL")?;
-    validate_cdp_websocket_url(websocket, debug_port)?;
-    let (mut socket, _) = connect_cdp_websocket(websocket, debug_port)?;
+    let mut socket = connect_cdp_websocket(websocket, debug_port)?;
     socket
         .send(Message::Text(browser_close_message().to_string().into()))
         .map_err(|err| err.to_string())
@@ -583,16 +573,7 @@ fn send_cdp_with_deadline<S: Read + Write>(
     }
 }
 
-fn connect_cdp_websocket(
-    url: &str,
-    expected_port: u16,
-) -> Result<
-    (
-        WebSocket<TcpStream>,
-        tungstenite::handshake::client::Response,
-    ),
-    String,
-> {
+fn connect_cdp_websocket(url: &str, expected_port: u16) -> Result<WebSocket<TcpStream>, String> {
     let addr = websocket_socket_addr(url, expected_port)?;
     let stream = TcpStream::connect_timeout(&addr, CDP_IO_TIMEOUT)
         .map_err(|error| format!("CDP WebSocket connect timed out or failed: {error}"))?;
@@ -605,7 +586,7 @@ fn connect_cdp_websocket(
     let mut handshake = ClientHandshake::start(stream, request, None)
         .map_err(|error| format!("CDP WebSocket handshake failed: {error}"))?;
     let deadline = Instant::now() + CDP_IO_TIMEOUT;
-    let (mut socket, response) = loop {
+    let (mut socket, _) = loop {
         if Instant::now() >= deadline {
             return Err("CDP WebSocket handshake timed out".into());
         }
@@ -632,7 +613,7 @@ fn connect_cdp_websocket(
         .get_mut()
         .set_write_timeout(Some(CDP_IO_TIMEOUT))
         .map_err(|error| error.to_string())?;
-    Ok((socket, response))
+    Ok(socket)
 }
 
 fn websocket_socket_addr(url: &str, expected_port: u16) -> Result<SocketAddr, String> {

@@ -222,10 +222,9 @@ fn open_preparation_seeds_live_bounds_instead_of_stale_disk_bounds() {
 
 #[test]
 fn open_progress_distinguishes_launch_ready_and_waiting() {
-    let (opening, opened, waiting) = open_progress_copy();
-    assert_eq!(opening, "Opening incognito Codex window");
-    assert_eq!(opened, "Opened. Incognito Codex window is ready.");
-    assert_eq!(waiting, "Waiting for the window to close");
+    assert_eq!(OPENING_MESSAGE, "Opening incognito Codex window");
+    assert_eq!(OPENED_MESSAGE, "Opened. Incognito Codex window is ready.");
+    assert_eq!(WAITING_MESSAGE, "Waiting for the window to close");
 }
 
 #[test]

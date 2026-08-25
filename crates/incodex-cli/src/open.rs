@@ -122,6 +122,10 @@ enum InjectionStatus {
     Failed(String),
 }
 
+const OPENING_MESSAGE: &str = "Opening incognito Codex window";
+const OPENED_MESSAGE: &str = "Opened. Incognito Codex window is ready.";
+const WAITING_MESSAGE: &str = "Waiting for the window to close";
+
 #[derive(Debug)]
 enum CleanupDisposition {
     Burn,
@@ -334,14 +338,6 @@ pub fn format_session_cleanup(cleanup: &CleanupResult) -> (bool, String) {
     }
 }
 
-fn open_progress_copy() -> (&'static str, &'static str, &'static str) {
-    (
-        "Opening incognito Codex window",
-        "Opened. Incognito Codex window is ready.",
-        "Waiting for the window to close",
-    )
-}
-
 pub fn wait_and_burn(
     plan: &OpenPlan,
     user_root: &Path,
@@ -430,16 +426,15 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
         None
     };
 
-    let (_, opened, waiting) = open_progress_copy();
     let mut spinner = crate::spinner::Spinner::start("Waiting for Codex UI to become ready");
     let mut reported = false;
     loop {
         match status_rx.try_recv() {
             Ok(InjectionStatus::Ready) if !reported => {
                 spinner.stop();
-                println!("{}", format_ok(opened, None));
+                println!("{}", format_ok(OPENED_MESSAGE, None));
                 let _ = std::io::stdout().flush();
-                spinner = crate::spinner::Spinner::start(waiting);
+                spinner = crate::spinner::Spinner::start(WAITING_MESSAGE);
                 reported = true;
             }
             Ok(InjectionStatus::Ready) => {}
@@ -480,7 +475,7 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                     format_warn(&format!("Window opened, but {detail}."), None)
                 );
                 let _ = std::io::stdout().flush();
-                spinner = crate::spinner::Spinner::start(waiting);
+                spinner = crate::spinner::Spinner::start(WAITING_MESSAGE);
                 reported = true;
             }
             Err(mpsc::TryRecvError::Empty) => {}
@@ -547,12 +542,11 @@ fn start_injection_worker(
                     }
                 },
             );
-            let target_id = match injection {
-                Ok(target_id) => {
+            match injection {
+                Ok(_) => {
                     if std::env::var_os("INCODEX_CDP_LOG").is_some() {
                         eprintln!("cdp inject ok on attempt {attempt} port {port}");
                     }
-                    target_id
                 }
                 Err(error) => {
                     if std::env::var_os("INCODEX_CDP_LOG").is_some() {
@@ -562,10 +556,6 @@ fn start_injection_worker(
                     thread::sleep(Duration::from_millis(400));
                     continue;
                 }
-            };
-
-            if !lifecycle_started {
-                start_lifecycle_monitor(port, target_id, process_alive.clone());
             }
             publish_injection_status(&status_tx, &readiness, InjectionStatus::Ready);
             if options.profile_mask.is_some() {

@@ -9,6 +9,7 @@ use crate::CliFailure;
 use super::{
     default_source_home, describe_incognito_open, format_session_cleanup,
     prepare_incognito_open_with_profile_mask, user_root, wait_and_burn, OpenExitCode,
+    OPENING_MESSAGE,
 };
 
 pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
@@ -51,8 +52,7 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
         std::process::id() as i32,
         profile_mask,
     )?;
-    let (opening, _, _) = super::open_progress_copy();
-    println!("{}", format_step(opening, None));
+    println!("{}", format_step(OPENING_MESSAGE, None));
     println!(
         "{}",
         format_kv("Binary", &plan.bin.display().to_string(), None)
