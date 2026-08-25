@@ -524,14 +524,7 @@ where
     // | 路径检查必须在拿到 target lock 后再做一次，避免锁外检查的 TOCTOU。 |
     // +---------------------------------------------------------------+
     let paths = reconstructed(root, &journal).map_err(|message| TxError::Refuse { message })?;
-    let action = match journal.phase.as_str() {
-        "COMMITTED" | "ROLLED_BACK" => Recovery::Done,
-        "DISCOVERED" | "INTENT" | "BACKUP_COMMITTED" | "STAGED" | "PATCHED" | "SIGNED"
-        | "VERIFIED" | "TARGET_MOVED_OUT" | "SWAPPED" | "TARGET_VERIFIED" | "UNINSTALLING" => {
-            Recovery::Rollback
-        }
-        _ => Recovery::Refuse,
-    };
+    let action = crate::recover_action_phase(&journal.phase);
     if action == Recovery::Refuse {
         return Err(TxError::Refuse {
             message: format!(
@@ -596,16 +589,7 @@ fn cleanup_outgoing(outgoing: &Path) -> Result<(), String> {
 }
 
 fn cleanup_committed(root: &Path, journal: &JournalV2) -> Result<(), String> {
-    let paths = tx_paths(root, &journal.install_id);
-    cleanup_outgoing(&paths.outgoing)?;
-    for path in [
-        paths.staged,
-        paths.dir.join("restore"),
-        paths.dir.join("trash"),
-    ] {
-        remove_path(&path)?;
-    }
-    Ok(())
+    cleanup_restored(root, journal)
 }
 
 fn cleanup_pre_swap(root: &Path, journal: &JournalV2) -> Result<(), String> {
