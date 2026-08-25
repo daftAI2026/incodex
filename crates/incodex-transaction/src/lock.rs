@@ -90,31 +90,24 @@ pub fn acquire_target_lock(
         real_path: real_path.display().to_string(),
         created_at: unix_now(),
     };
-    match write_exclusive(&path, &record) {
-        Ok(()) => Ok(TargetLock {
-            path,
-            pid,
-            owner_token,
-        }),
-        Err(_) => {
-            if steal_if_stale(&path) {
-                write_exclusive(&path, &record)?;
-                return Ok(TargetLock {
-                    path,
-                    pid,
-                    owner_token,
-                });
-            }
+    if write_exclusive(&path, &record).is_err() {
+        if !steal_if_stale(&path) {
             let who = fs::read_to_string(&path)
                 .ok()
                 .and_then(|body| serde_json::from_str::<LockRecord>(&body).ok())
                 .map(|holder| format!("{} pid {}", holder.command, holder.pid))
                 .unwrap_or_else(|| "another process".into());
-            Err(format!(
+            return Err(format!(
                 "another incodex command is modifying this app ({who})"
-            ))
+            ));
         }
+        write_exclusive(&path, &record)?;
     }
+    Ok(TargetLock {
+        path,
+        pid,
+        owner_token,
+    })
 }
 
 fn new_owner_token() -> String {

@@ -6,7 +6,8 @@ use incodex_macos::ditto;
 
 use crate::durable::sync_dir;
 use crate::journal::{
-    load_v2, reconstructed, tx_paths, validate_recovery_proofs, write_journal, JournalV2,
+    load_v2, reconstructed, transition_phase, tx_paths, validate_recovery_proofs, write_journal,
+    JournalV2,
 };
 use crate::lock::acquire_target_lock;
 use crate::proof::{
@@ -171,12 +172,9 @@ where
     quiescence.ensure_quiescent(live_path)?;
     validate_committed_restore_target(root, journal, live_path)?;
     let uninstalling = begin_uninstall(root, journal)?;
-    let mut restored =
+    let restored =
         restore_live_with_quiescence(root, live_path, &uninstalling, quiescence, checkpoint)?;
-    restored.phase = "ROLLED_BACK".into();
-    restored.sequence += 1;
-    write_journal(root, &restored)?;
-    load_v2(root, &restored.install_id)
+    transition_phase(root, &restored, "ROLLED_BACK")
 }
 
 fn begin_uninstall(root: &Path, journal: &JournalV2) -> Result<JournalV2, String> {
@@ -186,11 +184,7 @@ fn begin_uninstall(root: &Path, journal: &JournalV2) -> Result<JournalV2, String
             journal.phase
         ));
     }
-    let mut next = journal.clone();
-    next.phase = "UNINSTALLING".into();
-    next.sequence += 1;
-    write_journal(root, &next)?;
-    load_v2(root, &journal.install_id)
+    transition_phase(root, journal, "UNINSTALLING")
 }
 
 pub(crate) fn validate_committed_restore_target(
@@ -258,11 +252,11 @@ where
     // +--------------------------------------------------------------------+
     let journal = record_restore_intent(root, &candidate, journal)?;
     replace_live_with_checkpoint(&candidate, live, &paths.dir, checkpoint)?;
-    cleanup_restored(root, &journal)?;
+    cleanup_transient_paths(root, &journal)?;
     Ok(journal)
 }
 
-pub(crate) fn cleanup_restored(root: &Path, journal: &JournalV2) -> Result<(), String> {
+pub(crate) fn cleanup_transient_paths(root: &Path, journal: &JournalV2) -> Result<(), String> {
     let paths = tx_paths(root, &journal.install_id);
     for path in [
         paths.outgoing,

@@ -12,7 +12,6 @@ use std::process::Command;
 
 use super::entitlements::add_entitlement_key;
 use super::signature_inspection::{has_identity_evidence, inspect_codesign};
-use super::signing_policy::validate_generic_nested_components;
 use super::{read_plist_info, PlistInfo};
 
 pub const VENDOR_TEAM_IDENTIFIER: &str = "2DC432GLL2";
@@ -466,25 +465,40 @@ fn inspect_component(path: &Path) -> Result<SignedComponent, String> {
 /// 对 generic deep/strict fallback 复用 nested component policy。
 pub fn validate_nested_components(components: &[SignedComponent]) -> Result<(), String> {
     for component in components {
-        match component.kind {
-            SignatureKind::Vendor => validate_vendor_component(component, "nested component")?,
-            SignatureKind::Adhoc => {
-                if !component.verified {
-                    return Err(format!(
-                        "nested ad-hoc component signature verification failed: {}",
-                        component.path.display()
-                    ));
-                }
-            }
-            SignatureKind::Other | SignatureKind::Unknown | SignatureKind::Unsigned => {
-                return Err(format!(
-                    "unsupported signed nested component identity: {}",
-                    component.path.display()
-                ));
-            }
+        validate_nested_component(component)?;
+    }
+    Ok(())
+}
+
+pub fn validate_generic_nested_components(components: &[SignedComponent]) -> Result<(), String> {
+    for component in components {
+        if component.kind != SignatureKind::Other {
+            validate_nested_component(component)?;
+            continue;
+        }
+        if !has_identity_evidence(component) || !component.verified {
+            return Err(format!(
+                "third-party nested component lacks identity evidence: {}",
+                component.path.display()
+            ));
         }
     }
     Ok(())
+}
+
+fn validate_nested_component(component: &SignedComponent) -> Result<(), String> {
+    match component.kind {
+        SignatureKind::Vendor => validate_vendor_component(component, "nested component"),
+        SignatureKind::Adhoc if component.verified => Ok(()),
+        SignatureKind::Adhoc => Err(format!(
+            "nested ad-hoc component signature verification failed: {}",
+            component.path.display()
+        )),
+        SignatureKind::Other | SignatureKind::Unknown | SignatureKind::Unsigned => Err(format!(
+            "unsupported signed nested component identity: {}",
+            component.path.display()
+        )),
+    }
 }
 
 fn validate_vendor_component(component: &SignedComponent, label: &str) -> Result<(), String> {

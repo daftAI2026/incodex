@@ -220,6 +220,18 @@ pub fn write_journal(root: &Path, journal: &JournalV2) -> Result<(), String> {
     write_atomic(&path, &body)
 }
 
+pub(crate) fn transition_phase(
+    root: &Path,
+    journal: &JournalV2,
+    phase: &str,
+) -> Result<JournalV2, String> {
+    let mut next = journal.clone();
+    next.phase = phase.to_string();
+    next.sequence += 1;
+    write_journal(root, &next)?;
+    load_v2(root, &journal.install_id)
+}
+
 pub(crate) fn write_journal_tracked(
     root: &Path,
     journal: &JournalV2,

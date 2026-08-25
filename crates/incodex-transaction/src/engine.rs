@@ -6,9 +6,9 @@ use incodex_macos::ditto;
 
 use crate::durable::sync_tree_and_ancestors;
 use crate::journal::{
-    load_v2, reconstructed, tx_paths, validate_recovery_proofs, validate_rel_paths, write_journal,
-    write_journal_tracked, JournalTarget, JournalV2, RelPaths, ORIGINAL_REL, OUTGOING_REL,
-    STAGED_REL,
+    load_v2, reconstructed, transition_phase, tx_paths, validate_recovery_proofs,
+    validate_rel_paths, write_journal, write_journal_tracked, JournalTarget, JournalV2, RelPaths,
+    ORIGINAL_REL, OUTGOING_REL, STAGED_REL,
 };
 use crate::lock::{acquire_target_lock, TargetLock};
 use crate::new_install_id;
@@ -21,7 +21,7 @@ use crate::proof::{
 #[cfg(test)]
 use crate::uninstall::replace_live_with_checkpoint;
 use crate::uninstall::{
-    cleanup_restored, remove_path, restore_live_with_quiescence, sync_rename_parents,
+    cleanup_transient_paths, remove_path, restore_live_with_quiescence, sync_rename_parents,
 };
 use crate::{recover_action_phase, NoopQuiescenceGuard, QuiescenceGuard, Recovery};
 use incodex_core::canonical::{inspect_target, recheck_target, CanonicalTarget};
@@ -273,7 +273,7 @@ impl Engine {
         self.ensure_quiescent()?;
         self.advance("COMMITTED")?;
         checkpoint("COMMITTED_BEFORE_CLEANUP");
-        let cleanup_warning = cleanup_outgoing(&self.outgoing_app()).err();
+        let cleanup_warning = remove_path(&self.outgoing_app()).err();
         Ok(CommitResult { cleanup_warning })
     }
 
@@ -536,7 +536,7 @@ where
     }
     if action == Recovery::Done {
         if journal.phase == "COMMITTED" {
-            cleanup_committed(root, &journal).map_err(TxError::Other)?;
+            cleanup_transient_paths(root, &journal).map_err(TxError::Other)?;
         }
         return Ok(RecoverResult { action, journal });
     }
@@ -551,7 +551,7 @@ where
     if is_pre_swap_phase(&journal.phase) {
         cleanup_pre_swap(root, &journal).map_err(TxError::Other)?;
     } else if already_restored {
-        cleanup_restored(root, &journal).map_err(TxError::Other)?;
+        cleanup_transient_paths(root, &journal).map_err(TxError::Other)?;
     } else {
         journal = restore_live_with_quiescence(root, &live, &journal, &quiescence, &mut |_| {})
             .map_err(TxError::Other)?;
@@ -561,13 +561,10 @@ where
             "restored target failed codesign verification".into(),
         ));
     }
-    let mut next = journal.clone();
-    next.phase = "ROLLED_BACK".into();
-    next.sequence += 1;
-    write_journal(root, &next).map_err(TxError::Other)?;
+    let journal = transition_phase(root, &journal, "ROLLED_BACK").map_err(TxError::Other)?;
     Ok(RecoverResult {
         action: Recovery::Rollback,
-        journal: load_v2(root, install_id).map_err(TxError::Other)?,
+        journal,
     })
 }
 
@@ -583,23 +580,6 @@ fn is_post_swap_phase(phase: &str) -> bool {
         phase,
         "TARGET_MOVED_OUT" | "SWAPPED" | "TARGET_VERIFIED" | "UNINSTALLING"
     )
-}
-
-fn cleanup_outgoing(outgoing: &Path) -> Result<(), String> {
-    remove_path(outgoing)
-}
-
-fn cleanup_committed(root: &Path, journal: &JournalV2) -> Result<(), String> {
-    let paths = tx_paths(root, &journal.install_id);
-    cleanup_outgoing(&paths.outgoing)?;
-    for path in [
-        paths.staged,
-        paths.dir.join("restore"),
-        paths.dir.join("trash"),
-    ] {
-        remove_path(&path)?;
-    }
-    Ok(())
 }
 
 fn cleanup_pre_swap(root: &Path, journal: &JournalV2) -> Result<(), String> {

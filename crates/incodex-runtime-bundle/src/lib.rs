@@ -1,5 +1,6 @@
 //! Embed and publish Electron runtime files from committed `dist/`.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -8,6 +9,7 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 const DIR_MODE: u32 = 0o700;
@@ -50,11 +52,12 @@ pub struct PublishedRuntime {
     pub release: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct EmbeddedManifest {
-    version: String,
+    runtime_version: String,
     source_commit: String,
-    files: serde_json::Map<String, serde_json::Value>,
+    files: BTreeMap<String, String>,
 }
 
 pub fn loader_source() -> &'static str {
@@ -69,7 +72,7 @@ pub fn required_runtime_files() -> impl Iterator<Item = &'static str> {
 pub fn runtime_version() -> String {
     embedded_manifest().map_or_else(
         |_| env!("CARGO_PKG_VERSION").to_string(),
-        |manifest| manifest.version,
+        |manifest| manifest.runtime_version,
     )
 }
 
@@ -82,7 +85,7 @@ where
     F: FnMut(&str),
 {
     let manifest = embedded_manifest()?;
-    let version = manifest.version.clone();
+    let version = manifest.runtime_version.clone();
     validate_path_component(&version, "runtime version")?;
     let manifest_hash = sha256_hex(MANIFEST.as_bytes());
     let release_name = format!("{version}-{manifest_hash}");
@@ -97,7 +100,7 @@ where
     let files = runtime_file_hashes(&manifest)?;
 
     match fs::symlink_metadata(&final_dir) {
-        Ok(_) => verify_release(&final_dir, &version, &manifest, &files, &manifest_hash)
+        Ok(_) => verify_release(&final_dir, &version, &manifest_hash)
             .map_err(|error| format!("runtime release {release_name} is not reusable: {error}"))?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             let staging = releases.join(format!(
@@ -149,30 +152,13 @@ where
 }
 
 fn embedded_manifest() -> Result<EmbeddedManifest, String> {
-    let raw: serde_json::Value = serde_json::from_str(MANIFEST)
+    let manifest: EmbeddedManifest = serde_json::from_str(MANIFEST)
         .map_err(|error| format!("invalid embedded runtime manifest: {error}"))?;
-    let version = raw
-        .get("runtimeVersion")
-        .and_then(serde_json::Value::as_str)
-        .filter(|value| !value.is_empty())
-        .ok_or("embedded runtime manifest has no runtimeVersion")?
-        .to_string();
-    let source_commit = raw
-        .get("sourceCommit")
-        .and_then(serde_json::Value::as_str)
-        .ok_or("embedded runtime manifest has no sourceCommit")?
-        .to_string();
-    validate_source_commit(&source_commit)?;
-    let files = raw
-        .get("files")
-        .and_then(serde_json::Value::as_object)
-        .cloned()
-        .ok_or("embedded runtime manifest has no files")?;
-    Ok(EmbeddedManifest {
-        version,
-        source_commit,
-        files,
-    })
+    if manifest.runtime_version.is_empty() {
+        return Err("embedded runtime manifest has no runtimeVersion".into());
+    }
+    validate_source_commit(&manifest.source_commit)?;
+    Ok(manifest)
 }
 
 fn runtime_file_hashes(
@@ -184,9 +170,8 @@ fn runtime_file_hashes(
         let declared = manifest
             .files
             .get(*name)
-            .and_then(serde_json::Value::as_str)
             .ok_or_else(|| format!("embedded runtime manifest is missing {name}"))?;
-        if declared != actual {
+        if declared != &actual {
             return Err(format!("embedded runtime manifest hash mismatch: {name}"));
         }
         files.insert((*name).to_string(), serde_json::Value::String(actual));
@@ -194,13 +179,7 @@ fn runtime_file_hashes(
     Ok(files)
 }
 
-fn verify_release(
-    release: &Path,
-    version: &str,
-    manifest: &EmbeddedManifest,
-    files: &serde_json::Map<String, serde_json::Value>,
-    manifest_hash: &str,
-) -> Result<(), String> {
+fn verify_release(release: &Path, version: &str, manifest_hash: &str) -> Result<(), String> {
     let metadata = fs::symlink_metadata(release).map_err(|error| error.to_string())?;
     if !metadata.file_type().is_dir() {
         return Err("release is not a directory".into());
@@ -213,21 +192,14 @@ fn verify_release(
         return Err("release directory is not named by version and manifest hash".into());
     }
     let manifest_path = release.join(MANIFEST_NAME);
-    verify_file(&manifest_path, MANIFEST.as_bytes(), manifest_hash)?;
+    verify_file(&manifest_path, MANIFEST.as_bytes())?;
     for (name, body) in EXTERNAL_FILES {
-        let expected = files
-            .get(*name)
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| format!("release pointer is missing {name}"))?;
-        verify_file(&release.join(name), body.as_bytes(), expected)?;
-    }
-    if manifest.version != version {
-        return Err("manifest version does not match release".into());
+        verify_file(&release.join(name), body.as_bytes())?;
     }
     Ok(())
 }
 
-fn verify_file(path: &Path, expected_body: &[u8], expected_hash: &str) -> Result<(), String> {
+fn verify_file(path: &Path, expected_body: &[u8]) -> Result<(), String> {
     let metadata = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
     if !metadata.file_type().is_file() {
         return Err(format!("{} is not a regular file", path.display()));
@@ -241,9 +213,6 @@ fn verify_file(path: &Path, expected_body: &[u8], expected_hash: &str) -> Result
             "{} contents are not the embedded release",
             path.display()
         ));
-    }
-    if sha256_hex(&body) != expected_hash {
-        return Err(format!("{} hash mismatch", path.display()));
     }
     Ok(())
 }

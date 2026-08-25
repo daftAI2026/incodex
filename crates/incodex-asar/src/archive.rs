@@ -82,24 +82,7 @@ impl Archive {
     }
 
     pub fn read_package_main(&self) -> Result<PackageMain, String> {
-        let raw: Value = serde_json::from_slice(&self.extract("package.json")?)
-            .map_err(|err| err.to_string())?;
-        let marker = raw.get(MARKER_KEY);
-        let original_main = marker
-            .and_then(|m| m.get("originalMain"))
-            .and_then(Value::as_str);
-        let main = original_main
-            .or_else(|| raw.get("main").and_then(Value::as_str))
-            .unwrap_or_default()
-            .to_string();
-        Ok(PackageMain {
-            already_patched: original_main.is_some(),
-            install_id: marker
-                .and_then(|m| m.get("installId"))
-                .and_then(Value::as_str)
-                .map(str::to_string),
-            main,
-        })
+        Ok(package_main(&self.package_json()?))
     }
 
     pub fn has_only_loader(&self) -> bool {
@@ -111,6 +94,28 @@ impl Archive {
             .get("files")
             .and_then(Value::as_object)
             .expect("asar header missing files")
+    }
+
+    fn package_json(&self) -> Result<Value, String> {
+        serde_json::from_slice(&self.extract("package.json")?).map_err(|err| err.to_string())
+    }
+}
+
+fn package_main(raw: &Value) -> PackageMain {
+    let marker = raw.get(MARKER_KEY);
+    let original_main = marker
+        .and_then(|marker| marker.get("originalMain"))
+        .and_then(Value::as_str);
+    PackageMain {
+        main: original_main
+            .or_else(|| raw.get("main").and_then(Value::as_str))
+            .unwrap_or_default()
+            .to_string(),
+        already_patched: original_main.is_some(),
+        install_id: marker
+            .and_then(|marker| marker.get("installId"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
     }
 }
 
@@ -135,13 +140,12 @@ pub fn patch_asar(
     install_id: Option<&str>,
 ) -> Result<(String, String), String> {
     let archive = Archive::open(asar_path)?;
-    let pkg_main = archive.read_package_main()?;
+    let mut pkg = archive.package_json()?;
+    let pkg_main = package_main(&pkg);
     if pkg_main.main.is_empty() {
         return Err("package.json has no main".into());
     }
     let keep_main = pkg_main.main;
-    let mut pkg: Value =
-        serde_json::from_slice(&archive.extract("package.json")?).map_err(|err| err.to_string())?;
     pkg["main"] = json!(LOADER_NAME);
     let mut marker = Map::new();
     marker.insert("originalMain".into(), json!(keep_main));
@@ -215,26 +219,30 @@ fn extract_node(
                 let sibling = PathBuf::from(format!("{}.unpacked", archive.path.display()));
                 return fs::read(sibling.join(rel)).map_err(|err| err.to_string());
             }
-            let size = node
-                .get("size")
-                .and_then(Value::as_u64)
-                .ok_or("file missing size")? as usize;
-            let offset = node
-                .get("offset")
-                .and_then(Value::as_str)
-                .ok_or("file missing offset")?
-                .parse::<u64>()
-                .map_err(|err| err.to_string())?;
-            let start = archive.data_offset + offset;
-            let end = start as usize + size;
-            if end > archive.bytes.len() {
-                return Err(format!("asar file offset out of range: {rel}"));
-            }
-            return Ok(archive.bytes[start as usize..end].to_vec());
+            return extract_packed_node(archive, node, rel);
         }
         current = files_of(node).ok_or_else(|| format!("not a directory: {part}"))?;
     }
     Err(format!("missing asar entry: {rel}"))
+}
+
+fn extract_packed_node(archive: &Archive, node: &Value, rel: &str) -> Result<Vec<u8>, String> {
+    let size = node
+        .get("size")
+        .and_then(Value::as_u64)
+        .ok_or("file missing size")? as usize;
+    let offset = node
+        .get("offset")
+        .and_then(Value::as_str)
+        .ok_or("file missing offset")?
+        .parse::<u64>()
+        .map_err(|err| err.to_string())?;
+    let start = archive.data_offset + offset;
+    let end = start as usize + size;
+    if end > archive.bytes.len() {
+        return Err(format!("asar file offset out of range: {rel}"));
+    }
+    Ok(archive.bytes[start as usize..end].to_vec())
 }
 
 fn collect_pack(
@@ -318,7 +326,7 @@ fn copy_tree(
             dest.insert(name.clone(), node.clone());
             continue;
         }
-        let data = extract_node(archive, archive.files(), &rel)?;
+        let data = extract_packed_node(archive, node, &rel)?;
         insert_packed_file(dest, blobs, name, data);
     }
     Ok(())
