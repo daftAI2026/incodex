@@ -7,14 +7,12 @@ const path = require("node:path");
 const core = require("./incodex-owner-core.cts");
 
 const {
-  LOCK_NAME,
   SOCK_NAME,
   ownerPortFromExec,
   ownerToken,
   writeOwnerLockExclusive,
   writeOwnerRecordExclusive,
   readOwnerLockState,
-  readOwnerLock,
   readOwnerLockStateAt,
   readOwnerRecords,
   isOwnerQuarantinePath,
@@ -296,16 +294,9 @@ async function releaseOwnerLease(stateRoot, expectedOwner) {
   return true;
 }
 
-function ownsActiveLease(owner) {
-  return Boolean(activeLeases.get(ownerToken(owner)));
-}
-
 module.exports = {
-  LOCK_NAME,
-  SOCK_NAME,
   acquireOwnerLease,
   clearOwnerLock,
   releaseOwnerLease,
   setRaiseHandler,
-  ownsActiveLease,
 };

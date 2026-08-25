@@ -12,7 +12,6 @@ const LOGS_NAME = "logs";
 const OWNER_NAME = "owner.json";
 const LOCK_NAME = "lock";
 const READY_NAME = "ready";
-const PID_NAME = "incognito.pid";
 const SETTINGS_FILES = ["auth.json", "config.toml"];
 const GLOBAL_STATE_NAME = ".codex-global-state.json";
 const MAIN_WINDOW_BOUNDS_KEY = "electron-main-window-bounds";
@@ -635,50 +634,9 @@ function isManagedSessionHome(home, userRoot) {
   }
 }
 
-function pidFile(userRoot) {
-  return path.join(userRoot, PID_NAME);
-}
-
-function writePidFile(userRoot, pid) {
-  ensurePrivateDir(userRoot, path.dirname(userRoot));
-  writePrivateFile(pidFile(userRoot), `${pid}\n`);
-}
-
-function clearPidFile(userRoot) {
-  const file = pidFile(userRoot);
-  const stats = lstatOrNull(file);
-  if (!stats) return;
-  if (stats.isSymbolicLink()) {
-    throw new Error(`[incodex] refuse to remove symlink pid file: ${file}`);
-  }
-  fs.rmSync(file);
-}
-
-function readPidFile(userRoot) {
-  const file = pidFile(userRoot);
-  const stats = lstatOrNull(file);
-  if (!stats) return 0;
-  if (stats.isSymbolicLink()) {
-    throw new Error(`[incodex] refuse to read symlink pid file: ${file}`);
-  }
-  const pid = Number(fs.readFileSync(file, "utf8").trim());
-  return Number.isInteger(pid) && pid > 0 ? pid : 0;
-}
-
 export {
-  SESSIONS_NAME,
-  LOGS_NAME,
-  OWNER_NAME,
-  LOCK_NAME,
-  READY_NAME,
-  SETTINGS_FILES,
-  DIR_MODE,
   FILE_MODE,
   LOG_LIMIT,
-  assertNotSymlink,
-  assertInsideParent,
-  ensurePrivateDir,
-  writePrivateFile,
   handoffSessionOwner,
   exclusiveCopyFile,
   createSessionHome,
@@ -697,8 +655,5 @@ export {
   writeReady,
   hasReady,
   rotateAndAppendLog,
-  writePidFile,
-  clearPidFile,
-  readPidFile,
   sessionRootFromHome,
 };

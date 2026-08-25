@@ -23,9 +23,6 @@ const injectSrc = readFileSync(join(root, "src/runtime/inject.ts"), "utf8").repl
   "{{CIRCLE_X_SVG}}",
   embedSvg(circleXSvg),
 );
-for (const name of ["incognito-copy.ts", "incognito-copy-data.ts"]) {
-  writeFileSync(join(outDir, name), readFileSync(join(root, "src/runtime", name)));
-}
 
 const injectTmp = join(root, "src/runtime/_inject.src.ts");
 writeFileSync(injectTmp, injectSrc);
@@ -38,11 +35,10 @@ const inject = Bun.spawnSync({
   stdout: "inherit",
   stderr: "inherit",
 });
+removeTemporaryFile(injectTmp);
 if (inject.exitCode !== 0) {
-  removeTemporaryFile(injectTmp);
   process.exit(inject.exitCode ?? 1);
 }
-removeTemporaryFile(injectTmp);
 
 const emitted = spawnSync(join(root, "node_modules/typescript/bin/tsc"), ["-p", "tsconfig.runtime-emit.json"], {
   cwd: root,

@@ -11,8 +11,6 @@ const QUARANTINE_PREFIX = `.${LOCK_NAME}.quarantine.`;
 const OWNER_TOKEN_PATTERN = /^[a-f0-9]{32}$/;
 const MAX_SIDECAR_QUARANTINES = 128;
 const SOCK_NAME = "incognito.sock";
-const OWNER_RETRY_COUNT = 5;
-const OWNER_RETRY_DELAY_MS = 100;
 const OWNER_PORT_BASE = 45000;
 const OWNER_PORT_SPAN = 15000;
 const PROCESS_START_MONTHS = new Set([
@@ -329,18 +327,6 @@ function readOwnerRecords(stateRoot) {
     records.push({ path: canonical, state: readOwnerLockStateAt(canonical) });
     return records;
 }
-function ownerLockMetadata(file) {
-    try {
-        const stats = fs.lstatSync(file);
-        return { dev: stats.dev, ino: stats.ino, size: stats.size, mtimeMs: stats.mtimeMs };
-    }
-    catch {
-        return null;
-    }
-}
-function sameOwnerLockMetadata(left, right) {
-    return Boolean(left && right && left.dev === right.dev && left.ino === right.ino);
-}
 function currentOwner(sessionId, execPath) {
     const live = processIdentity(process.pid);
     if (!live?.processStartIdentity || !live?.execIdentity) {
@@ -384,16 +370,9 @@ class OwnerLeaseError extends Error {
         this.owner = owner;
     }
 }
-function ownsOwnerLease(stateRoot, expectedOwner) {
-    return sameOwnerToken(readOwnerLock(stateRoot), expectedOwner);
-}
 module.exports = {
     LOCK_NAME,
     SOCK_NAME,
-    OWNER_RETRY_COUNT,
-    OWNER_RETRY_DELAY_MS,
-    OWNER_PORT_BASE,
-    OWNER_PORT_SPAN,
     targetIdFromExec,
     targetStateDir,
     ownerPortFromExec,
@@ -403,11 +382,9 @@ module.exports = {
     processIdentity,
     isCanonicalProcessStartIdentity,
     ownerToken,
-    hasReliableOwnerIdentity,
     ownerMatchesLive,
     sameOwnerToken,
     pidAlive,
-    writeAtomicRecord,
     writeOwnerRecordExclusive,
     writeOwnerLock,
     writeOwnerLockExclusive,
@@ -416,11 +393,8 @@ module.exports = {
     readOwnerLock,
     readOwnerRecords,
     isOwnerQuarantinePath,
-    ownerLockMetadata,
-    sameOwnerLockMetadata,
     currentOwner,
     staleOwnerRecord,
     staleOwner,
     OwnerLeaseError,
-    ownsOwnerLease,
 };

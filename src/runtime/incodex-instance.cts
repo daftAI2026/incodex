@@ -2,7 +2,6 @@
 "use strict";
 
 const { execFile } = require("node:child_process");
-const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
 const core = require("./incodex-owner-core.cts");
@@ -26,14 +25,9 @@ const {
   staleOwner,
   staleOwnerRecord,
   OwnerLeaseError,
-  ownsOwnerLease,
 } = core;
 const { clearOwnerLock, releaseOwnerLease, acquireOwnerLease, setRaiseHandler } = recovery;
 const processIdentity = core.processIdentity;
-
-function sockPath(stateRoot) {
-  return path.join(stateRoot, SOCK_NAME);
-}
 
 function connectToOwner(owner, expectedToken, timeoutMs) {
   return new Promise((resolve) => {
@@ -209,47 +203,12 @@ async function quiesceSessionHelpers(sessionRoot) {
   if (pids.length > 0) throw new Error("late isolated helpers survived SIGKILL");
 }
 
-if (typeof module !== "undefined") {
-  module.exports = {
-    LOCK_NAME,
-    SOCK_NAME,
-    targetIdFromExec,
-    targetStateDir,
-    ownerPortFromExec,
-    sockPath,
-    processIdentity,
-    ownerToken,
-    ownerMatchesLive,
-    writeOwnerLock,
-    writeOwnerLockExclusive,
-    readOwnerLockState,
-    readOwnerLock,
-    readOwnerRecords,
-    setOwnerRecordTestHook,
-    clearOwnerLock,
-    releaseOwnerLease,
-    currentOwner,
-    staleOwner,
-    staleOwnerRecord,
-    OwnerLeaseError,
-    ownsOwnerLease,
-    acquireOwnerLease,
-    connectExisting,
-    connectExistingWithRetry,
-    listenForRaise,
-    singleFlight,
-    sessionProcessIdsFromPs,
-    quiesceSessionHelpers,
-  };
-}
-
 export {
   LOCK_NAME,
   SOCK_NAME,
   targetIdFromExec,
   targetStateDir,
   ownerPortFromExec,
-  sockPath,
   processIdentity,
   ownerToken,
   ownerMatchesLive,
@@ -265,7 +224,6 @@ export {
   staleOwner,
   staleOwnerRecord,
   OwnerLeaseError,
-  ownsOwnerLease,
   acquireOwnerLease,
   connectExisting,
   connectExistingWithRetry,
