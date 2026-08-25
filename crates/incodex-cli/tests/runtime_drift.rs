@@ -95,6 +95,22 @@ fn make_legacy_version_drift_with_matching_files(home: &Path) {
     write_current(home, &current);
 }
 
+fn make_legacy_pointer_with_forged_manifest_suffix(home: &Path) {
+    let mut current = publish_embedded_runtime(home);
+    let old_release = runtime_root(home).join(current["release"].as_str().unwrap());
+    let version = current["version"].as_str().unwrap();
+    let forged_name = format!("{version}-{}", "0".repeat(64));
+    fs::rename(
+        &old_release,
+        runtime_root(home).join("releases").join(&forged_name),
+    )
+    .unwrap();
+    current["release"] = format!("releases/{forged_name}").into();
+    current.as_object_mut().unwrap().remove("manifestSha256");
+    current.as_object_mut().unwrap().remove("sourceCommit");
+    write_current(home, &current);
+}
+
 fn assert_runtime_drift(command: &str, home: &Path, app: &Path) {
     let app = app.to_str().unwrap();
     let (status, stdout, stderr) = run(&[command, "--json", "--app", app], home);
@@ -198,6 +214,23 @@ fn matching_runtime_is_current_and_text_reports_runtime_state() {
         assert_eq!(status, 0, "{command}: {stderr}");
         assert!(stdout.contains("Runtime state"), "{command}: {stdout}");
         assert!(stdout.contains("current"), "{command}: {stdout}");
+    }
+}
+
+#[test]
+fn legacy_pointer_never_invents_manifest_provenance_from_its_release_name() {
+    let home = isolated_home();
+    let app = diagnostic_app(&home);
+    make_legacy_pointer_with_forged_manifest_suffix(&home);
+
+    for command in ["status", "doctor"] {
+        let (status, stdout, stderr) =
+            run(&[command, "--json", "--app", app.to_str().unwrap()], &home);
+        assert_eq!(status, 0, "{command}: {stderr}");
+        let runtime = &parse_json(&stdout)["externalRuntime"];
+        assert_eq!(runtime["state"], "current", "{command}");
+        assert_eq!(runtime["matchesBundled"], true, "{command}");
+        assert!(runtime["manifestSha256"].is_null(), "{command}: {stdout}");
     }
 }
 

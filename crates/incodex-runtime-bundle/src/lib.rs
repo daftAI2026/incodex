@@ -1,11 +1,13 @@
 //! Embed and publish Electron runtime files from committed `dist/`.
 
 use std::collections::BTreeMap;
+use std::ffi::CString;
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
@@ -168,6 +170,9 @@ pub fn ensure_current(user_root: &Path) -> Result<PublishedRuntime, String> {
 /// Read and verify the deployed Runtime without comparing it to this binary.
 /// None means the runtime pointer has not been published yet.
 pub fn inspect_deployed(user_root: &Path) -> Result<Option<DeployedRuntime>, String> {
+    let Some(_user_root_guard) = inspect_user_root(user_root)? else {
+        return Ok(None);
+    };
     let root = user_root.join("runtime");
     let Some(pointer) = read_current_pointer(&root)? else {
         return Ok(None);
@@ -258,6 +263,7 @@ where
     let release_name = format!("{version}-{manifest_hash}");
     let release = format!("releases/{release_name}");
 
+    let _user_root_guard = ensure_user_root(user_root)?;
     let root = user_root.join("runtime");
     mkdir_mode(&root)?;
     let _lock = RuntimePublishLock::acquire(&root)?;
@@ -294,7 +300,7 @@ where
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(error.to_string()),
             }
-            fs::rename(&staging, &final_dir).map_err(|error| error.to_string())?;
+            rename_noreplace(&staging, &final_dir)?;
             hook("final-rename");
             sync_dir(&releases)?;
         }
@@ -597,6 +603,114 @@ fn hash_private_file(path: &Path) -> Result<String, String> {
         .collect())
 }
 
+fn inspect_user_root(path: &Path) -> Result<Option<File>, String> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(format!("{} is a symlink", path.display()))
+        }
+        Ok(metadata) if !metadata.file_type().is_dir() => {
+            return Err(format!("{} is not a directory", path.display()))
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.to_string()),
+    }
+    let directory = open_directory(path)?;
+    let mode = directory
+        .metadata()
+        .map_err(|error| error.to_string())?
+        .permissions()
+        .mode()
+        & 0o777;
+    if mode != DIR_MODE {
+        return Err(format!("{} mode is not 0700", path.display()));
+    }
+    Ok(Some(directory))
+}
+
+fn ensure_user_root(path: &Path) -> Result<File, String> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(format!("{} is a symlink", path.display()))
+        }
+        Ok(metadata) if !metadata.file_type().is_dir() => {
+            return Err(format!("{} is not a directory", path.display()))
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let mut builder = fs::DirBuilder::new();
+            builder.mode(DIR_MODE);
+            match builder.create(path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error.to_string()),
+            }
+        }
+        Err(error) => return Err(error.to_string()),
+    }
+    let directory = open_directory(path)?;
+    let status = unsafe { libc::fchmod(directory.as_raw_fd(), DIR_MODE as libc::mode_t) };
+    if status != 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    Ok(directory)
+}
+
+fn open_directory(path: &Path) -> Result<File, String> {
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW);
+    options
+        .open(path)
+        .map_err(|error| format!("cannot open {} safely: {error}", path.display()))
+}
+
+fn c_path(path: &Path) -> Result<CString, String> {
+    CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| format!("path contains NUL: {}", path.display()))
+}
+
+#[cfg(target_os = "macos")]
+fn rename_noreplace(from: &Path, to: &Path) -> Result<(), String> {
+    let from = c_path(from)?;
+    let to = c_path(to)?;
+    let status = unsafe { libc::renamex_np(from.as_ptr(), to.as_ptr(), libc::RENAME_EXCL) };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error().to_string())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn rename_noreplace(from: &Path, to: &Path) -> Result<(), String> {
+    let from = c_path(from)?;
+    let to = c_path(to)?;
+    let status = unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            from.as_ptr(),
+            libc::AT_FDCWD,
+            to.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error().to_string())
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn rename_noreplace(from: &Path, to: &Path) -> Result<(), String> {
+    if fs::symlink_metadata(to).is_ok() {
+        return Err(format!("{} already exists", to.display()));
+    }
+    fs::rename(from, to).map_err(|error| error.to_string())
+}
+
 struct RuntimePublishLock {
     file: File,
     _thread: MutexGuard<'static, ()>,
@@ -637,7 +751,11 @@ impl Drop for RuntimePublishLock {
 }
 
 fn mkdir_mode(path: &Path) -> Result<(), String> {
-    fs::create_dir_all(path).map_err(|error| error.to_string())?;
+    match fs::create_dir(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error.to_string()),
+    }
     let metadata = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
     if !metadata.file_type().is_dir() {
         return Err(format!("{} is not a directory", path.display()));

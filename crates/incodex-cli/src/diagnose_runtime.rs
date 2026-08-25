@@ -72,7 +72,11 @@ pub(crate) fn inspect_external_runtime(root: &Path) -> (ExternalRuntimeReport, C
                     release: None,
                     error: Some(error.clone()),
                 },
-                CheckResult::checked(vec![DiagnosticFinding::warning(code, error, None)]),
+                CheckResult::checked(vec![DiagnosticFinding::warning(
+                    code,
+                    error,
+                    Some(&current),
+                )]),
             )
         }
     }

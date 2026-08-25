@@ -15,7 +15,7 @@ pub fn format_status(report: &Diagnosis) -> String {
             &format!("Codex app not found: {}", app_path.display()),
             None,
         ));
-        append_runtime_state(&mut lines, report, false);
+        append_runtime_state(&mut lines, report, None);
         lines.push(String::new());
         return lines.join("\n");
     }
@@ -49,7 +49,7 @@ pub fn format_status(report: &Diagnosis) -> String {
         "missing".to_string()
     };
     lines.push(incodex_core::format_kv("Runtime", &runtime, None));
-    append_runtime_state(&mut lines, report, false);
+    append_runtime_state(&mut lines, report, None);
     if report.patched {
         if let Some(version) = app_version_description(report) {
             lines.push(incodex_core::format_kv("Version", &version, None));
@@ -79,7 +79,7 @@ pub fn format_status(report: &Diagnosis) -> String {
     lines.join("\n")
 }
 
-pub fn format_diagnosis(report: &Diagnosis) -> String {
+pub fn format_diagnosis(report: &Diagnosis, root: &Path) -> String {
     let runtime = runtime_description(report);
     let backup = match report.backup.as_ref() {
         Some(backup) if json_bool(backup, "originalExists") && json_bool(backup, "complete") => {
@@ -124,7 +124,7 @@ pub fn format_diagnosis(report: &Diagnosis) -> String {
         incodex_core::format_kv("External", &runtime, None),
         incodex_core::format_kv("External check", check_status(&report.checks.runtime), None),
     ];
-    append_runtime_state(&mut lines, report, true);
+    append_runtime_state(&mut lines, report, Some(root));
     if let Some(error) = &report.external_runtime.error {
         lines.push(incodex_core::format_warn(error, None));
     }
@@ -304,21 +304,24 @@ pub fn format_diagnosis(report: &Diagnosis) -> String {
     lines.join("\n")
 }
 
-pub fn diagnosis_json(report: &Diagnosis) -> String {
+pub fn diagnosis_json(report: &Diagnosis, root: &Path) -> String {
     format!(
         "{}\n",
-        serde_json::to_string_pretty(&DiagnosisJson(report)).expect("json")
+        serde_json::to_string_pretty(&DiagnosisJson { report, root }).expect("json")
     )
 }
 
-struct DiagnosisJson<'a>(&'a Diagnosis);
+struct DiagnosisJson<'a> {
+    report: &'a Diagnosis,
+    root: &'a Path,
+}
 
 impl Serialize for DiagnosisJson<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let report = self.0;
+        let report = self.report;
         let mut json = serializer.serialize_struct("Diagnosis", 27)?;
         json.serialize_field("target", &report.target)?;
         json.serialize_field("targetId", &report.target_id)?;
@@ -340,7 +343,13 @@ impl Serialize for DiagnosisJson<'_> {
         json.serialize_field("orphanSessions", &report.orphan_sessions)?;
         json.serialize_field("leftoverChromium", &report.leftover_chromium)?;
         json.serialize_field("asarLoaderOnly", &report.asar_loader_only)?;
-        json.serialize_field("externalRuntime", &ExternalRuntimeJson(report))?;
+        json.serialize_field(
+            "externalRuntime",
+            &ExternalRuntimeJson {
+                report,
+                root: self.root,
+            },
+        )?;
         json.serialize_field("signing", &report.signing)?;
         json.serialize_field("spctl", &report.spctl)?;
         json.serialize_field("interruptedTransactions", &report.interrupted_transactions)?;
@@ -351,14 +360,17 @@ impl Serialize for DiagnosisJson<'_> {
     }
 }
 
-struct ExternalRuntimeJson<'a>(&'a Diagnosis);
+struct ExternalRuntimeJson<'a> {
+    report: &'a Diagnosis,
+    root: &'a Path,
+}
 
 impl Serialize for ExternalRuntimeJson<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let report = self.0;
+        let report = self.report;
         let runtime = &report.external_runtime;
         let bundled = incodex_runtime_bundle::runtime_identity();
         let bundled_version = bundled.as_ref().map_or_else(
@@ -384,7 +396,7 @@ impl Serialize for ExternalRuntimeJson<'_> {
         json.serialize_field("error", &runtime.error)?;
         json.serialize_field("bundledVersion", &bundled_version)?;
         json.serialize_field("bundledManifestSha256", &bundled_manifest)?;
-        json.serialize_field("manifestSha256", &deployed_manifest_hash(report))?;
+        json.serialize_field("manifestSha256", &deployed_manifest_hash(report, self.root))?;
         json.serialize_field("matchesBundled", &matches_bundled)?;
         json.serialize_field("state", state.as_str())?;
         json.end()
@@ -484,7 +496,7 @@ fn runtime_state_description(report: &Diagnosis) -> &'static str {
     }
 }
 
-fn append_runtime_state(lines: &mut Vec<String>, report: &Diagnosis, include_manifest: bool) {
+fn append_runtime_state(lines: &mut Vec<String>, report: &Diagnosis, root: Option<&Path>) {
     let bundled = incodex_runtime_bundle::runtime_identity();
     lines.push(incodex_core::format_kv(
         "CLI Runtime",
@@ -494,7 +506,7 @@ fn append_runtime_state(lines: &mut Vec<String>, report: &Diagnosis, include_man
         ),
         None,
     ));
-    if include_manifest {
+    if let Some(root) = root {
         lines.push(incodex_core::format_kv(
             "CLI manifest",
             bundled
@@ -506,7 +518,7 @@ fn append_runtime_state(lines: &mut Vec<String>, report: &Diagnosis, include_man
         ));
         lines.push(incodex_core::format_kv(
             "Deployed manifest",
-            deployed_manifest_description(report),
+            &deployed_manifest_description(report, root),
             None,
         ));
     }
@@ -517,8 +529,8 @@ fn append_runtime_state(lines: &mut Vec<String>, report: &Diagnosis, include_man
     ));
 }
 
-fn deployed_manifest_description(report: &Diagnosis) -> &str {
-    if let Some(hash) = deployed_manifest_hash(report) {
+fn deployed_manifest_description(report: &Diagnosis, root: &Path) -> String {
+    if let Some(hash) = deployed_manifest_hash(report, root) {
         return hash;
     }
     match runtime_state(report) {
@@ -527,33 +539,20 @@ fn deployed_manifest_description(report: &Diagnosis) -> &str {
         RuntimeState::Unknown => "unknown",
         RuntimeState::Current | RuntimeState::Stale => "legacy content hashes",
     }
+    .to_string()
 }
 
-fn deployed_manifest_hash(report: &Diagnosis) -> Option<&str> {
+fn deployed_manifest_hash(report: &Diagnosis, root: &Path) -> Option<String> {
     if !report.external_runtime.ok {
         return None;
     }
-    let version = report.external_runtime.version.as_deref()?;
-    let release = report.external_runtime.release.as_deref()?;
-    let hash = release.strip_prefix(&format!("releases/{version}-"))?;
-    let hash = (hash.len() == 64
-        && hash
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)))
-    .then_some(hash)?;
-    // A verified modern pointer carrying the bundled manifest hash cannot be
-    // stale: that manifest fixes both the version and every file hash. The
-    // only valid stale case with this release suffix is a legacy pointer that
-    // omitted provenance, so do not manufacture a manifest hash for it.
-    if runtime_state(report) == RuntimeState::Stale
-        && incodex_runtime_bundle::runtime_identity()
-            .ok()
-            .is_some_and(|identity| identity.manifest_sha256 == hash)
-    {
-        None
-    } else {
-        Some(hash)
-    }
+    let deployed = incodex_runtime_bundle::inspect_deployed(root)
+        .ok()
+        .flatten()?;
+    (report.external_runtime.version.as_deref() == Some(deployed.version.as_str())
+        && report.external_runtime.release.as_deref() == Some(deployed.release.as_str()))
+    .then_some(deployed.manifest_sha256)
+    .flatten()
 }
 
 #[cfg(test)]
@@ -612,7 +611,7 @@ mod tests {
             findings: Vec::new(),
         };
 
-        let output = format_diagnosis(&report);
+        let output = format_diagnosis(&report, Path::new("/tmp/.incodex"));
 
         assert!(output.contains("Retained original"), "{output}");
         assert!(!output.contains("Original proof"), "{output}");

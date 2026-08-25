@@ -65,7 +65,12 @@ fn write_json(path: &Path, value: &serde_json::Value) {
 }
 
 fn set_runtime_dir_modes(root: &Path, release: &Path) {
-    for path in [root, &root.join("releases"), release] {
+    for path in [
+        root.parent().expect("runtime user root"),
+        root,
+        &root.join("releases"),
+        release,
+    ] {
         fs::set_permissions(path, fs::Permissions::from_mode(DIR_MODE)).unwrap();
     }
 }
@@ -235,6 +240,58 @@ fn inspect_deployed_rejects_a_non_regular_current_pointer() {
             .count(),
         0,
         "a rejected pointer must not leave a temporary file"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn user_root_symlink_is_never_followed_by_inspection_or_publish() {
+    let parent = scratch("user-root-symlink");
+    let outside = parent.join("outside");
+    let user_root = parent.join(".incodex");
+    fs::create_dir_all(&outside).unwrap();
+    std::os::unix::fs::symlink(&outside, &user_root).unwrap();
+
+    assert!(inspect_deployed(&user_root)
+        .unwrap_err()
+        .contains(".incodex is a symlink"));
+    assert!(publish(&user_root)
+        .unwrap_err()
+        .contains(".incodex is a symlink"));
+    assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
+    fs::remove_dir_all(parent).unwrap();
+}
+
+#[test]
+fn ensure_current_repairs_an_insecure_user_root_mode() {
+    let parent = scratch("user-root-mode");
+    let user_root = parent.join(".incodex");
+    fs::create_dir_all(&user_root).unwrap();
+    fs::set_permissions(&user_root, fs::Permissions::from_mode(0o777)).unwrap();
+
+    assert!(inspect_deployed(&user_root).is_err());
+    ensure_current(&user_root).unwrap();
+
+    assert_eq!(fs::metadata(&user_root).unwrap().mode() & 0o777, DIR_MODE);
+    assert!(deployed_current_matches_embedded(&user_root).unwrap());
+    fs::remove_dir_all(parent).unwrap();
+}
+
+#[test]
+fn no_replace_rename_preserves_an_existing_destination() {
+    let root = scratch("rename-exclusive");
+    let source = root.join("source");
+    let destination = root.join("destination");
+    fs::create_dir_all(&source).unwrap();
+    fs::create_dir_all(&destination).unwrap();
+    fs::write(source.join("source-marker"), b"source").unwrap();
+    fs::write(destination.join("destination-marker"), b"destination").unwrap();
+
+    assert!(rename_noreplace(&source, &destination).is_err());
+    assert!(source.join("source-marker").is_file());
+    assert_eq!(
+        fs::read(destination.join("destination-marker")).unwrap(),
+        b"destination"
     );
     fs::remove_dir_all(root).unwrap();
 }

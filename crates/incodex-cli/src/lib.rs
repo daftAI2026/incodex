@@ -158,16 +158,17 @@ fn run_diagnosis(parsed: &parse::ParsedCli) -> Result<(), CliFailure> {
         CliCommand::Doctor => DiagnosisMode::Doctor,
         _ => unreachable!("diagnosis branch only handles status and doctor"),
     };
-    let report = diagnose_with_root_mode(&target, &incodex_core::paths::user_root(), mode);
+    let root = incodex_core::paths::user_root();
+    let report = diagnose_with_root_mode(&target, &root, mode);
     if let Some(spinner) = &mut spinner {
         spinner.stop();
     }
     if parsed.json {
-        print!("{}", diagnosis_json(&report));
+        print!("{}", diagnosis_json(&report, &root));
     } else if parsed.command == CliCommand::Status {
         println!("{}", format_status(&report));
     } else {
-        println!("{}", format_diagnosis(&report));
+        println!("{}", format_diagnosis(&report, &root));
     }
     Ok(())
 }

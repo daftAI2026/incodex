@@ -176,6 +176,7 @@ fn doctor_rejects_runtime_manifest_missing_required_artifacts() {
     )
     .expect("runtime manifest");
     for path in [
+        home.join(".incodex"),
         home.join(".incodex/runtime"),
         home.join(".incodex/runtime/releases"),
         release.clone(),
@@ -340,6 +341,7 @@ fn doctor_json_classifies_owner_orphans_and_runtime_residue() {
     )
     .unwrap();
     for path in [
+        root.clone(),
         root.join("runtime"),
         root.join("runtime/releases"),
         release.clone(),
@@ -452,6 +454,7 @@ fn doctor_json_reports_a_symlinked_runtime_root_as_checked_finding() {
     let outside = home.join("outside-runtime");
     let runtime_root = runtime_parent.join("runtime");
     fs::create_dir_all(&runtime_parent).unwrap();
+    fs::set_permissions(&runtime_parent, fs::Permissions::from_mode(0o700)).unwrap();
     fs::create_dir_all(&outside).unwrap();
     std::os::unix::fs::symlink(&outside, &runtime_root).unwrap();
 
