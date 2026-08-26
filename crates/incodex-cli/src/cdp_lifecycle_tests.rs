@@ -773,3 +773,103 @@ fn missing_profile_target_is_left_to_the_primary_lifecycle_monitor() {
         "target loss belongs to the primary lifecycle monitor, not mask health"
     );
 }
+
+#[test]
+#[cfg(target_os = "windows")]
+fn persistent_profile_probe_transport_failure_is_reported_to_the_parent() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        for _ in 0..2 {
+            let mut stream = accept_until(&listener, Instant::now() + Duration::from_secs(2))
+                .expect("profile monitor did not poll targets");
+            assert_eq!(read_request_path(&mut stream), "/json/list");
+            write_json(
+                &mut stream,
+                &json!([page(port, "main", "app://-/index.html")]),
+            );
+
+            let stream = accept_until(&listener, Instant::now() + Duration::from_secs(2))
+                .expect("profile monitor did not connect to the target");
+            drop(stream);
+        }
+    });
+    let process_alive = Arc::new(AtomicBool::new(true));
+    let cdp_failed = Arc::new(AtomicBool::new(false));
+    let monitor =
+        start_profile_mask_signal_monitor(port, process_alive.clone(), cdp_failed.clone(), |_| {
+            Ok(())
+        });
+
+    server.join().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !cdp_failed.load(Ordering::Acquire) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(25));
+    }
+    process_alive.store(false, Ordering::Release);
+    monitor.join().unwrap();
+
+    assert!(
+        cdp_failed.load(Ordering::Acquire),
+        "a present target with a persistently broken transport is a mask-health failure"
+    );
+}
+
+#[test]
+#[cfg(target_os = "windows")]
+fn missing_profile_target_does_not_erase_a_confirmed_mask_failure() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        for round in 0..3 {
+            let mut stream = accept_until(&listener, Instant::now() + Duration::from_secs(2))
+                .expect("profile monitor did not poll targets");
+            assert_eq!(read_request_path(&mut stream), "/json/list");
+            if round == 1 {
+                write_json(&mut stream, &json!([]));
+                continue;
+            }
+            write_json(
+                &mut stream,
+                &json!([page(port, "main", "app://-/index.html")]),
+            );
+
+            let stream = accept_until(&listener, Instant::now() + Duration::from_secs(2))
+                .expect("profile monitor did not connect to the target");
+            let mut socket = tungstenite::accept(stream).unwrap();
+            let Message::Text(command) = socket.read().unwrap() else {
+                panic!("profile health probe must be a text CDP command");
+            };
+            let command: Value = serde_json::from_str(&command).unwrap();
+            let id = command.get("id").and_then(Value::as_u64).unwrap();
+            socket
+                .send(Message::Text(
+                    json!({"id": id, "result": {"result": {"value": false}}})
+                        .to_string()
+                        .into(),
+                ))
+                .unwrap();
+        }
+    });
+    let process_alive = Arc::new(AtomicBool::new(true));
+    let cdp_failed = Arc::new(AtomicBool::new(false));
+    let monitor =
+        start_profile_mask_signal_monitor(port, process_alive.clone(), cdp_failed.clone(), |_| {
+            Ok(())
+        });
+
+    server.join().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !cdp_failed.load(Ordering::Acquire) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(25));
+    }
+    process_alive.store(false, Ordering::Release);
+    monitor.join().unwrap();
+
+    assert!(
+        cdp_failed.load(Ordering::Acquire),
+        "deferred target loss must not reset an already confirmed unhealthy mask poll"
+    );
+}
