@@ -6,6 +6,7 @@ use crate::diagnosis_presentation::STATUS_PROGRESS_MESSAGE;
 use crate::parse::ParsedCli;
 use crate::spinner::Spinner;
 use crate::windows_app::{discover_codex_package, WindowsCodexApp};
+use crate::windows_install_state::{read_windows_install_state, WindowsInstallPhase};
 use crate::CliFailure;
 
 #[derive(Debug, Serialize)]
@@ -14,6 +15,41 @@ struct WindowsStatus {
     platform: &'static str,
     #[serde(flatten)]
     package: WindowsPackageStatus,
+    integration: WindowsIntegrationStatus,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WindowsIntegrationStatus {
+    pub(crate) installed: bool,
+    pub(crate) phase: Option<WindowsInstallPhase>,
+    pub(crate) desired_enabled: bool,
+    pub(crate) package_full_name: Option<String>,
+    pub(crate) runtime_release: Option<String>,
+}
+
+impl WindowsIntegrationStatus {
+    pub(crate) fn inspect(user_root: &std::path::Path) -> Result<Self, String> {
+        let Some(state) = read_windows_install_state(user_root)? else {
+            return Ok(Self {
+                installed: false,
+                phase: None,
+                desired_enabled: false,
+                package_full_name: None,
+                runtime_release: None,
+            });
+        };
+        Ok(Self {
+            installed: matches!(
+                state.phase,
+                WindowsInstallPhase::EnabledUnobserved | WindowsInstallPhase::EnabledObserved
+            ) && state.desired_enabled(),
+            phase: Some(state.phase),
+            desired_enabled: state.desired_enabled(),
+            package_full_name: Some(state.package_full_name),
+            runtime_release: Some(state.runtime_release),
+        })
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -69,7 +105,10 @@ pub fn run_status(parsed: &ParsedCli) -> Result<(), CliFailure> {
     }
 
     let mut spinner = (!parsed.json).then(|| Spinner::start(STATUS_PROGRESS_MESSAGE));
+    let profile = crate::windows_profile::windows_user_profile().map_err(CliFailure::from)?;
     let package = WindowsPackageStatus::inspect();
+    let integration =
+        WindowsIntegrationStatus::inspect(&profile.join(".incodex")).map_err(CliFailure::from)?;
     if let Some(spinner) = &mut spinner {
         spinner.stop();
     }
@@ -77,19 +116,49 @@ pub fn run_status(parsed: &ParsedCli) -> Result<(), CliFailure> {
         let report = WindowsStatus {
             platform: "windows",
             package,
+            integration,
         };
         println!(
             "{}",
             serde_json::to_string_pretty(&report).expect("Windows status is serializable")
         );
     } else {
-        crate::terminal_presentation::print_terminal_report(&format_status(&package));
+        crate::terminal_presentation::print_terminal_report(&format_status(&package, &integration));
     }
     Ok(())
 }
 
-pub(crate) fn format_status(report: &WindowsPackageStatus) -> String {
-    format_package_status(report, "Status")
+pub(crate) fn format_status(
+    package: &WindowsPackageStatus,
+    integration: &WindowsIntegrationStatus,
+) -> String {
+    format!(
+        "{}\n\n{}",
+        format_package_status(package, "Status"),
+        format_integration_status(integration)
+    )
+}
+
+pub(crate) fn format_integration_status(report: &WindowsIntegrationStatus) -> String {
+    let mut lines = vec![
+        incodex_core::format_step("Integration", None),
+        incodex_core::format_kv(
+            "Installed",
+            if report.installed { "yes" } else { "no" },
+            None,
+        ),
+    ];
+    if let Some(phase) = report.phase {
+        lines.push(incodex_core::format_kv(
+            "Phase",
+            &format!("{phase:?}"),
+            None,
+        ));
+    }
+    if let Some(release) = &report.runtime_release {
+        lines.push(incodex_core::format_kv("Runtime", release, None));
+    }
+    lines.join("\n")
 }
 
 pub(crate) fn format_package_status(report: &WindowsPackageStatus, heading: &str) -> String {
@@ -155,7 +224,14 @@ mod tests {
         assert!(!report.available);
         assert_eq!(report.reason.as_deref(), Some("not installed"));
         assert!(report.package_full_name.is_none());
-        let text = format_status(&report);
+        let integration = WindowsIntegrationStatus {
+            installed: false,
+            phase: None,
+            desired_enabled: false,
+            package_full_name: None,
+            runtime_release: None,
+        };
+        let text = format_status(&report, &integration);
         assert!(text.starts_with("➤ Status"), "{text}");
         assert!(!text.contains("Windows Codex"), "{text}");
         assert!(text.contains("Available    no"), "{text}");

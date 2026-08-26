@@ -3,7 +3,10 @@ use serde::Serialize;
 use crate::diagnosis_presentation::DOCTOR_PROGRESS_MESSAGE;
 use crate::parse::ParsedCli;
 use crate::spinner::Spinner;
-use crate::windows_status::{format_package_status, WindowsPackageStatus};
+use crate::windows_status::{
+    format_integration_status, format_package_status, WindowsIntegrationStatus,
+    WindowsPackageStatus,
+};
 use crate::CliFailure;
 
 #[derive(Debug, Serialize)]
@@ -11,6 +14,7 @@ use crate::CliFailure;
 struct WindowsDoctor {
     platform: &'static str,
     package: WindowsPackageStatus,
+    integration: WindowsIntegrationStatus,
     sessions: WindowsSessions,
 }
 
@@ -51,6 +55,8 @@ pub fn run_doctor(parsed: &ParsedCli) -> Result<(), CliFailure> {
     let report = WindowsDoctor {
         platform: "windows",
         package: WindowsPackageStatus::inspect(),
+        integration: WindowsIntegrationStatus::inspect(&profile.join(".incodex"))
+            .map_err(CliFailure::from)?,
         sessions: incodex_core::windows_session::inspect_windows_sessions(
             &profile.join(".incodex"),
         )
@@ -72,7 +78,11 @@ pub fn run_doctor(parsed: &ParsedCli) -> Result<(), CliFailure> {
 
 fn format_doctor(report: &WindowsDoctor) -> String {
     let sessions = &report.sessions;
-    let mut lines = vec![format_package_status(&report.package, "App")];
+    let mut lines = vec![
+        format_package_status(&report.package, "App"),
+        String::new(),
+        format_integration_status(&report.integration),
+    ];
     lines.extend([
         String::new(),
         incodex_core::format_step("Sessions", None),
@@ -115,6 +125,13 @@ mod tests {
                 executable: None,
                 architecture: None,
                 reason: Some("not installed".to_string()),
+            },
+            integration: WindowsIntegrationStatus {
+                installed: false,
+                phase: None,
+                desired_enabled: false,
+                package_full_name: None,
+                runtime_release: None,
             },
             sessions: WindowsSessions {
                 active: 0,
