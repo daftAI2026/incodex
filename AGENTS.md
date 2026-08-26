@@ -23,7 +23,7 @@ Users launch the official Codex icon as usual. After `incodex install`, a hat-gl
 - Default `incodex install` / `uninstall` to `/Applications/ChatGPT.app`. `--clone` and `--app` are exceptions.
 - Keep `--help` and a TTY menu. Non-TTY with no args prints help. Destructive commands print a plan; TTY asks once; non-TTY requires `--yes`.
 - Update Incodex-only code with `incodex runtime` (writes `~/.incodex/runtime/`, no resign). After an official Codex upgrade, the user must run `incodex install` again on the **current** official package.
-- Keep `inc update` as the public stable-update entry point. Homebrew installs run a bounded `brew update` plus `brew upgrade incodex`; script installs re-run the stable installer; source checkouts receive source-update guidance.
+- Keep `inc update` as the public stable-update entry point and the only command named in update notices. Route by the running binary's install channel: Homebrew performs bounded `brew update` (metadata refresh is best-effort) followed by bounded `brew upgrade incodex` (failure output is preserved), then verifies the installed formula version and clears the notice cache; script installs fetch the latest stable release, run its pinned installer, verify the installed binary version, and retain the main-branch compatibility-installer fallback; source checkouts receive explicit `git pull` / `cargo install` guidance. Both mutable update paths use the transaction target lock so concurrent updates cannot cross generations. Regression coverage lives in `crates/incodex-cli/tests/update.rs` and `crates/incodex-cli/tests/support/update_menu.rs`.
 
 ### What Incodex Should Not Do
 
@@ -31,7 +31,7 @@ Users launch the official Codex icon as usual. After `incodex install`, a hat-gl
 - Do not change the bundle id or force a re-login.
 - Do not restore a valid OpenAI signature after asar changes. Appshot (智能快照) is a hard triangle; document it, do not fake Team ID `2DC432GLL2`.
 - Do not sign vendor CUA sidecars. Stash them, `--deep` the rest, restore, then outer `signOne`.
-- Do not default live-patch from `install.sh` / `incodex update`. Those only manage the CLI.
+- Do not default live-patch from `install.sh` / `inc update`. Those only manage the CLI.
 - Do not add Overlay, an independent Session Agent, LaunchAgent auto-repair, runtime pubkeys, or Homebrew core. Own tap is `daftAI2026/homebrew-tap`; bump it from `release.yml`. Do not open a Homebrew/homebrew-core PR.
 - Do not use CDP as the everyday Dock / `install` launch path. `incodex open` may start the official binary with `--remote-debugging-port` on `127.0.0.1` and inject `dist/incodex-inject.js`. Do not clone the official app for `open`. Do not copy AGPL injector scripts.
 - Do not add hidden confirmation aliases beyond the native parser's tested compatibility surface.
