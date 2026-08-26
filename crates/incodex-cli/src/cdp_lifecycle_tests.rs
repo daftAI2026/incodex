@@ -15,7 +15,10 @@ fn monitor_while_server<T>(port: u16, primary_target_id: &str, server: thread::J
     let monitor_process_alive = process_alive.clone();
     let primary_target_id = primary_target_id.to_string();
     let monitor = thread::spawn(move || {
-        monitor_primary_target(port, &primary_target_id, &monitor_process_alive)
+        monitor_primary_target(port, &primary_target_id, &monitor_process_alive, || {
+            let _ = super::close_browser_with_retries(port);
+            false
+        })
     });
     let result = server.join().unwrap();
     process_alive.store(false, Ordering::Release);

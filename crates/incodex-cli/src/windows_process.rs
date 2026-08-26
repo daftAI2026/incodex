@@ -65,10 +65,18 @@ impl WindowsProcessTree {
     }
 
     pub fn terminate(&mut self) -> io::Result<ExitStatus> {
+        self.terminate_with_code(1)
+    }
+
+    pub fn terminate_successfully(&mut self) -> io::Result<ExitStatus> {
+        self.terminate_with_code(0)
+    }
+
+    fn terminate_with_code(&mut self, exit_code: u32) -> io::Result<ExitStatus> {
         if let Some(status) = self.try_wait()? {
             return Ok(status);
         }
-        if unsafe { TerminateJobObject(self._job.raw(), 1) } == 0 {
+        if unsafe { TerminateJobObject(self._job.raw(), exit_code) } == 0 {
             return Err(io::Error::last_os_error());
         }
         match &mut self.process {

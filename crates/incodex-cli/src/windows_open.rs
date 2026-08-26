@@ -15,7 +15,7 @@ use incodex_core::{format_kv, format_ok, format_step, format_warn};
 
 use crate::cdp::{
     allocate_debug_port, debug_launch_args, inject_shared_ui_with_options_while_alive,
-    start_lifecycle_monitor, InjectionOptions,
+    start_lifecycle_signal_monitor, InjectionOptions,
 };
 use crate::profile_mask::{resolve_profile_mask, ProfileMask};
 use crate::windows_activation::{activate_packaged_kill_on_drop, WindowsActivationRequest};
@@ -186,7 +186,9 @@ fn execute_windows_open_with<L, F>(
 ) -> WindowsOpenOutcome
 where
     L: FnOnce(&WindowsOpenPlan) -> Result<crate::windows_process::WindowsProcessTree, String>,
-    F: FnOnce(u16, InjectionOptions, Arc<AtomicBool>) -> Result<(), String> + Send + 'static,
+    F: FnOnce(u16, InjectionOptions, Arc<AtomicBool>, Arc<AtomicBool>) -> Result<(), String>
+        + Send
+        + 'static,
 {
     let process_tree = match launch(&plan) {
         Ok(process_tree) => process_tree,
@@ -214,7 +216,9 @@ fn run_windows_open_lifecycle<F>(
     inject: F,
 ) -> WindowsOpenOutcome
 where
-    F: FnOnce(u16, InjectionOptions, Arc<AtomicBool>) -> Result<(), String> + Send + 'static,
+    F: FnOnce(u16, InjectionOptions, Arc<AtomicBool>, Arc<AtomicBool>) -> Result<(), String>
+        + Send
+        + 'static,
 {
     if let Err(error) = wait_for_owned_listener(&mut process_tree, plan.debug_port) {
         let _ = process_tree.terminate();
@@ -227,11 +231,18 @@ where
     }
     let alive = Arc::new(AtomicBool::new(true));
     let injection_alive = alive.clone();
+    let close_requested = Arc::new(AtomicBool::new(false));
+    let injection_close_requested = close_requested.clone();
     let debug_port = plan.debug_port;
     let options = plan.injection.clone();
     let (injection_tx, injection_rx) = mpsc::channel();
     let worker = thread::spawn(move || {
-        let _ = injection_tx.send(inject(debug_port, options, injection_alive));
+        let _ = injection_tx.send(inject(
+            debug_port,
+            options,
+            injection_alive,
+            injection_close_requested,
+        ));
     });
 
     let mut ui_ready = false;
@@ -249,6 +260,16 @@ where
                 );
             }
             Err(mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected) => {}
+        }
+        if ui_ready && close_requested.load(Ordering::Acquire) {
+            match process_tree.terminate_successfully() {
+                Ok(status) => {
+                    break WindowsOpenProcessResult::Exited(status.code().unwrap_or(0));
+                }
+                Err(error) => {
+                    break WindowsOpenProcessResult::ProcessStateUnknown(error.to_string());
+                }
+            }
         }
         match process_tree.try_wait() {
             Ok(Some(status)) => {
@@ -326,6 +347,7 @@ fn inject_windows_ui(
     port: u16,
     options: InjectionOptions,
     alive: Arc<AtomicBool>,
+    close_requested: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_secs(45);
     let mut last_error = "Codex CDP page is not ready".to_string();
@@ -336,7 +358,7 @@ fn inject_windows_ui(
         }) {
             Ok(_) => {
                 if let Some(target_id) = primary_target {
-                    start_lifecycle_monitor(port, target_id, alive.clone());
+                    start_lifecycle_signal_monitor(port, target_id, alive.clone(), close_requested);
                 }
                 println!(
                     "{}",
@@ -512,10 +534,14 @@ mod tests {
         let (root, plan) = plan();
         let session_root = plan.session.root.clone();
 
-        let outcome = execute_windows_open_with(plan, launch_fixture, |_port, _options, alive| {
-            assert!(alive.load(Ordering::Acquire));
-            Ok(())
-        });
+        let outcome = execute_windows_open_with(
+            plan,
+            launch_fixture,
+            |_port, _options, alive, _close_requested| {
+                assert!(alive.load(Ordering::Acquire));
+                Ok(())
+            },
+        );
 
         assert_eq!(outcome.process, WindowsOpenProcessResult::Exited(0));
         assert!(outcome.ui_ready);
@@ -553,7 +579,9 @@ mod tests {
         let outcome = execute_windows_open_with(
             plan,
             launch_fixture,
-            |_port, _options, _alive: Arc<AtomicBool>| Err("fixture injection refused".to_string()),
+            |_port, _options, _alive: Arc<AtomicBool>, _close_requested| {
+                Err("fixture injection refused".to_string())
+            },
         );
 
         assert!(matches!(
@@ -575,11 +603,14 @@ mod tests {
         let injected = Arc::new(AtomicBool::new(false));
         let injection_probe = injected.clone();
 
-        let outcome =
-            execute_windows_open_with(plan, launch_fixture, move |_port, _options, _alive| {
+        let outcome = execute_windows_open_with(
+            plan,
+            launch_fixture,
+            move |_port, _options, _alive, _close_requested| {
                 injection_probe.store(true, Ordering::Release);
                 Ok(())
-            });
+            },
+        );
 
         assert!(matches!(
             outcome.process,

@@ -383,7 +383,26 @@ pub fn start_lifecycle_monitor(
     primary_target_id: String,
     process_alive: Arc<AtomicBool>,
 ) {
-    thread::spawn(move || monitor_primary_target(debug_port, &primary_target_id, &process_alive));
+    thread::spawn(move || {
+        monitor_primary_target(debug_port, &primary_target_id, &process_alive, || {
+            let _ = close_browser_with_retries(debug_port);
+            false
+        })
+    });
+}
+
+pub fn start_lifecycle_signal_monitor(
+    debug_port: u16,
+    primary_target_id: String,
+    process_alive: Arc<AtomicBool>,
+    close_requested: Arc<AtomicBool>,
+) {
+    thread::spawn(move || {
+        monitor_primary_target(debug_port, &primary_target_id, &process_alive, || {
+            close_requested.store(true, Ordering::Release);
+            true
+        })
+    });
 }
 
 #[cfg(any(not(target_os = "windows"), test))]
@@ -441,7 +460,14 @@ fn probe_profile_mask_health(debug_port: u16, process_alive: &AtomicBool) -> Res
     }
 }
 
-fn monitor_primary_target(debug_port: u16, primary_target_id: &str, process_alive: &AtomicBool) {
+fn monitor_primary_target<F>(
+    debug_port: u16,
+    primary_target_id: &str,
+    process_alive: &AtomicBool,
+    mut on_close: F,
+) where
+    F: FnMut() -> bool,
+{
     let mut primary_target_id = primary_target_id.to_string();
     let mut missing_polls = 0u8;
     while process_alive.load(Ordering::Acquire) {
@@ -464,7 +490,9 @@ fn monitor_primary_target(debug_port: u16, primary_target_id: &str, process_aliv
         if missing_polls < PRIMARY_TARGET_MISSING_POLLS {
             continue;
         }
-        let _ = close_browser_with_retries(debug_port);
+        if on_close() {
+            return;
+        }
         missing_polls = 0;
     }
 }
