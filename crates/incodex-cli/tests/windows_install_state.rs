@@ -4,11 +4,11 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use incodex_cli::windows_install::install_windows_runtime_with;
 use incodex_cli::windows_install_state::{
     read_windows_install_state, stage_windows_install_state, transition_windows_install_state,
     WindowsInstallPhase,
 };
-use incodex_cli::windows_install::install_windows_runtime_with;
 use incodex_core::windows_session::verify_private_acl;
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -62,6 +62,23 @@ fn stages_and_enables_the_installed_runtime_only_after_proving_codex_is_closed()
     .expect_err("running Codex must block install");
     assert!(error.contains("close Codex"), "{error}");
     assert!(!blocked_root.exists(), "blocked install created state");
+
+    let uncertain_root = scratch_root();
+    let error = install_windows_runtime_with(
+        &uncertain_root,
+        package,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Err("fixture enable uncertainty".to_string()),
+    )
+    .expect_err("uncertain enable must fail");
+    assert!(error.contains("RecoveryRequired"), "{error}");
+    let retained = read_windows_install_state(&uncertain_root)
+        .expect("read retained state")
+        .expect("uncertain state retained");
+    assert_eq!(retained.phase, WindowsInstallPhase::RecoveryRequired);
+    assert!(!retained.desired_enabled());
+    fs::remove_dir_all(uncertain_root).expect("remove uncertain install fixture");
 }
 
 #[test]
