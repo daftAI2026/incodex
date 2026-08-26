@@ -54,6 +54,8 @@ pub mod windows_console;
 #[cfg(target_os = "windows")]
 pub mod windows_doctor;
 #[cfg(target_os = "windows")]
+pub mod windows_install;
+#[cfg(target_os = "windows")]
 pub(crate) mod windows_locale;
 #[cfg(target_os = "windows")]
 pub mod windows_menu;
@@ -192,6 +194,12 @@ where
         }
         if parsed.command == CliCommand::Doctor {
             return crate::windows_doctor::run_doctor(&parsed);
+        }
+        if parsed.command == CliCommand::Install {
+            return crate::windows_install::run_install(&parsed).map_err(CliFailure::from);
+        }
+        if parsed.command == CliCommand::Uninstall {
+            return crate::windows_install::run_uninstall(&parsed).map_err(CliFailure::from);
         }
         Err(CliFailure::new(format!(
             "{} is not supported on Windows yet",

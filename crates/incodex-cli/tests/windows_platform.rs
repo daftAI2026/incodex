@@ -126,10 +126,7 @@ fn install_and_uninstall_dry_run_discover_the_store_package_without_writing_stat
             "{command}: {stdout}"
         );
         assert!(stderr.is_empty(), "{command}: {stderr}");
-        assert!(
-            !profile.exists(),
-            "{command} dry run created product state"
-        );
+        assert!(!profile.exists(), "{command} dry run created product state");
     }
 }
 
