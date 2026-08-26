@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::ffi::c_void;
 use std::ffi::{OsStr, OsString};
 use std::os::windows::ffi::OsStrExt;
+use std::path::Path;
 use std::ptr;
 
 use windows_sys::core::{GUID, HRESULT};
@@ -19,6 +20,7 @@ use crate::windows_process::{
 };
 
 const PACKAGE_DEBUGGER_MODE: &str = "__incodex_windows_package_debugger";
+const INSTALLED_DEBUGGER_MODE: &str = "__incodex_windows_installed_debugger";
 const PACKAGE_ACTIVATION_LOCK_NAME: &str = "Local\\Incodex-OpenAI.Codex-Activation";
 const PACKAGE_ACTIVATION_LOCK_TIMEOUT_MS: u32 = 15_000;
 
@@ -35,6 +37,56 @@ pub struct WindowsActivationRequest {
     app_user_model_id: String,
     arguments: String,
     environment: Vec<u16>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowsInstalledRuntimeRegistration {
+    package_full_name: String,
+    debugger_command_line: String,
+    environment: Vec<u16>,
+}
+
+impl WindowsInstalledRuntimeRegistration {
+    pub fn new(
+        package_full_name: &str,
+        helper_path: &Path,
+        state_path: &Path,
+        environment: BTreeMap<String, OsString>,
+    ) -> Result<Self, String> {
+        validate_text(package_full_name, "package full name")?;
+        if !helper_path.is_absolute() || !state_path.is_absolute() {
+            return Err("Windows installed Runtime paths must be absolute".to_string());
+        }
+        let debugger_command_line = [
+            helper_path.as_os_str().to_os_string(),
+            OsString::from(INSTALLED_DEBUGGER_MODE),
+            OsString::from("--package"),
+            OsString::from(package_full_name),
+            OsString::from("--state"),
+            state_path.as_os_str().to_os_string(),
+        ]
+        .iter()
+        .map(|argument| quote_windows_argument(argument))
+        .collect::<Result<Vec<_>, _>>()?
+        .join(" ");
+        Ok(Self {
+            package_full_name: package_full_name.to_string(),
+            debugger_command_line,
+            environment: environment_block(environment)?,
+        })
+    }
+
+    pub fn package_full_name(&self) -> &str {
+        &self.package_full_name
+    }
+
+    pub fn debugger_command_line(&self) -> &str {
+        &self.debugger_command_line
+    }
+
+    pub fn environment(&self) -> &[u16] {
+        &self.environment
+    }
 }
 
 impl WindowsActivationRequest {

@@ -27,13 +27,9 @@ fn binds_the_persistent_debugger_to_a_stable_helper_state_and_package() {
         "NODE_OPTIONS".to_string(),
         OsString::from(r"--require=C:\Users\Linus Torvalds\.incodex\runtime\bootstrap.cjs"),
     );
-    let registration = WindowsInstalledRuntimeRegistration::new(
-        package,
-        helper,
-        state,
-        environment,
-    )
-    .expect("valid installed Runtime registration");
+    let registration =
+        WindowsInstalledRuntimeRegistration::new(package, helper, state, environment)
+            .expect("valid installed Runtime registration");
 
     assert_eq!(registration.package_full_name(), package);
     assert_eq!(
