@@ -7,7 +7,9 @@ use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use incodex_cli::windows_process::spawn_kill_on_drop;
+use incodex_cli::windows_process::{
+    resume_debugged_package_process, running_package_process_ids, spawn_kill_on_drop,
+};
 use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
 use windows_sys::Win32::System::Threading::{
     GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -19,6 +21,17 @@ const PORT_FILE_ENV: &str = "INCODEX_WINDOWS_JOB_PORT_FILE";
 const ROOT_EXIT_ENV: &str = "INCODEX_WINDOWS_JOB_ROOT_EXIT";
 const WAIT_LIMIT: Duration = Duration::from_secs(10);
 const WAIT_STEP: Duration = Duration::from_millis(25);
+
+#[test]
+fn installed_debugger_rejects_an_unowned_process_before_resuming_any_thread() {
+    let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    assert!(running_package_process_ids(package)
+        .expect("enumerate package processes")
+        .is_empty());
+    let error = resume_debugged_package_process(package, std::process::id(), u32::MAX)
+        .expect_err("unpackaged test process must be rejected");
+    assert!(error.to_string().contains("package identity"), "{error}");
+}
 
 fn scratch_pid_file() -> PathBuf {
     std::env::temp_dir().join(format!(
