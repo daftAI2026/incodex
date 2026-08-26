@@ -21,27 +21,26 @@ pub struct VersionFacts {
     pub shell: String,
 }
 
-#[cfg(not(target_os = "windows"))]
 pub fn format_version_report(facts: &VersionFacts) -> String {
-    format!(
-        "Incodex version {}\nmacOS: {}\nArchitecture: {}\nKernel: {}\nSIP: {}\nDisk Free: {}\nInstall: {}\nShell: {}\n\n",
-        facts.version,
-        facts.macos,
-        facts.architecture,
-        facts.kernel,
-        facts.sip,
-        facts.disk_free,
-        facts.install,
-        facts.shell
-    )
-}
-
-#[cfg(target_os = "windows")]
-pub fn format_version_report(facts: &VersionFacts) -> String {
-    format!(
-        "Incodex version {}\nWindows: {}\nArchitecture: {}\nInstall: {}\nShell: {}\n\n",
-        facts.version, facts.windows, facts.architecture, facts.install, facts.shell
-    )
+    let mut lines = vec![format!("Incodex version {}", facts.version)];
+    #[cfg(not(target_os = "windows"))]
+    lines.extend([
+        format!("macOS: {}", facts.macos),
+        format!("Architecture: {}", facts.architecture),
+        format!("Kernel: {}", facts.kernel),
+        format!("SIP: {}", facts.sip),
+        format!("Disk Free: {}", facts.disk_free),
+    ]);
+    #[cfg(target_os = "windows")]
+    lines.extend([
+        format!("Windows: {}", facts.windows),
+        format!("Architecture: {}", facts.architecture),
+    ]);
+    lines.extend([
+        format!("Install: {}", facts.install),
+        format!("Shell: {}", facts.shell),
+    ]);
+    format!("{}\n\n", lines.join("\n"))
 }
 
 #[cfg(not(target_os = "windows"))]

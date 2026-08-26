@@ -41,6 +41,7 @@ pub mod profile_mask;
 pub mod spinner;
 #[cfg(not(target_os = "windows"))]
 pub mod terminal;
+mod terminal_presentation;
 pub mod version;
 #[cfg(target_os = "windows")]
 pub mod windows_activation;
@@ -265,9 +266,9 @@ fn run_diagnosis(parsed: &parse::ParsedCli) -> Result<(), CliFailure> {
     if parsed.json {
         print!("{}", diagnosis_json(&report, &root));
     } else if parsed.command == CliCommand::Status {
-        println!("{}", format_status(&report));
+        crate::terminal_presentation::print_terminal_report(&format_status(&report));
     } else {
-        println!("{}", format_diagnosis(&report, &root));
+        crate::terminal_presentation::print_terminal_report(&format_diagnosis(&report, &root));
     }
     Ok(())
 }

@@ -65,7 +65,7 @@ pub fn run_doctor(parsed: &ParsedCli) -> Result<(), CliFailure> {
             serde_json::to_string_pretty(&report).expect("Windows doctor is serializable")
         );
     } else {
-        println!("{}", format_doctor(&report));
+        crate::terminal_presentation::print_terminal_report(&format_doctor(&report));
     }
     Ok(())
 }

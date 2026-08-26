@@ -83,7 +83,7 @@ pub fn run_status(parsed: &ParsedCli) -> Result<(), CliFailure> {
             serde_json::to_string_pretty(&report).expect("Windows status is serializable")
         );
     } else {
-        println!("{}", format_status(&package));
+        crate::terminal_presentation::print_terminal_report(&format_status(&package));
     }
     Ok(())
 }

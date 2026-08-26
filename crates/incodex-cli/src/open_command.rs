@@ -66,12 +66,12 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
     println!("{}", format_kv("Session", &plan.session_id, None));
     let (process, cleanup) = wait_and_burn(&plan, &root, 250)?;
     let (ok, message) = format_session_cleanup(&cleanup);
-    if ok {
-        println!("{}", format_ok(&message, None));
+    let result = if ok {
+        format_ok(&message, None)
     } else {
-        println!("{}", format_warn(&message, None));
-    }
-    println!();
+        format_warn(&message, None)
+    };
+    crate::terminal_presentation::print_terminal_result(&result);
     let code = process.exit_code(&cleanup);
     if code == OpenExitCode::Success {
         Ok(())

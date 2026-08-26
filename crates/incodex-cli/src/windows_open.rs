@@ -597,32 +597,31 @@ fn inject_windows_ui(
 }
 
 fn finish_windows_open(outcome: WindowsOpenOutcome) -> Result<(), CliFailure> {
-    match &outcome.cleanup {
+    let cleanup_ok = match &outcome.cleanup {
         WindowsCleanupResult::Removed => {
-            println!("{}", format_ok(CLOSED_REMOVED_MESSAGE, None));
+            crate::terminal_presentation::print_terminal_result(&format_ok(
+                CLOSED_REMOVED_MESSAGE,
+                None,
+            ));
+            true
         }
         WindowsCleanupResult::Retained { reason } => {
-            println!(
-                "{}",
-                format_warn(
-                    &format!("Closed. Isolated session retained: {reason}"),
-                    None
-                )
-            );
-            return Err(CliFailure::with_code(2, ""));
+            crate::terminal_presentation::print_terminal_result(&format_warn(
+                &format!("Closed. Isolated session retained: {reason}"),
+                None,
+            ));
+            false
         }
         WindowsCleanupResult::Unknown { reason } => {
-            println!(
-                "{}",
-                format_warn(
-                    &format!(
-                        "Window state unknown; isolated session retained for safety: {reason}"
-                    ),
-                    None,
-                )
-            );
-            return Err(CliFailure::with_code(2, ""));
+            crate::terminal_presentation::print_terminal_result(&format_warn(
+                &format!("Window state unknown; isolated session retained for safety: {reason}"),
+                None,
+            ));
+            false
         }
+    };
+    if !cleanup_ok {
+        return Err(CliFailure::with_code(2, ""));
     }
     match outcome.process {
         WindowsOpenProcessResult::Exited(0) if outcome.ui_ready => Ok(()),
