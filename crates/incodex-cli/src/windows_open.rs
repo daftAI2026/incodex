@@ -626,8 +626,9 @@ mod tests {
         let outcome = execute_windows_open_with(
             plan,
             launch_fixture,
-            |_port, _options, _alive, close_requested, _cdp_failed, _ownership_guard| {
+            |_port, _options, _alive, close_requested, cdp_failed, _ownership_guard| {
                 close_requested.store(true, Ordering::Release);
+                cdp_failed.store(true, Ordering::Release);
                 Ok(())
             },
         );
