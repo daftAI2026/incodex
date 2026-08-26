@@ -2,7 +2,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -278,31 +278,46 @@ fn run_command_with_timeout(
     let stdout_reader = thread::spawn(move || read_stream(stdout));
     let stderr_reader = thread::spawn(move || read_stream(stderr));
     let deadline = Instant::now() + timeout;
+    let mut exit_status = None;
 
     loop {
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|err| format!("could not wait for command: {err}"))?
-        {
-            return Ok(CommandOutcome::Completed(CapturedOutput {
-                status,
-                stdout: join_reader(stdout_reader),
-                stderr: join_reader(stderr_reader),
-            }));
+        if exit_status.is_none() {
+            match child.try_wait() {
+                Ok(status) => exit_status = status,
+                Err(err) => {
+                    terminate_process_group(&mut child);
+                    let _ = join_reader(stdout_reader);
+                    let _ = join_reader(stderr_reader);
+                    return Err(format!("could not wait for command: {err}"));
+                }
+            }
+        }
+        if stdout_reader.is_finished() && stderr_reader.is_finished() {
+            if let Some(status) = exit_status.take() {
+                return Ok(CommandOutcome::Completed(CapturedOutput {
+                    status,
+                    stdout: join_reader(stdout_reader),
+                    stderr: join_reader(stderr_reader),
+                }));
+            }
         }
         if Instant::now() >= deadline {
-            let process_group = -(child.id() as i32);
-            unsafe {
-                libc::kill(process_group, libc::SIGKILL);
-            }
-            let _ = child.kill();
-            let _ = child.wait();
+            terminate_process_group(&mut child);
             let _ = join_reader(stdout_reader);
             let _ = join_reader(stderr_reader);
             return Ok(CommandOutcome::TimedOut);
         }
         thread::sleep(Duration::from_millis(20));
     }
+}
+
+fn terminate_process_group(child: &mut Child) {
+    let process_group = -(child.id() as i32);
+    unsafe {
+        libc::kill(process_group, libc::SIGKILL);
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn read_stream(mut stream: impl Read) -> Vec<u8> {
