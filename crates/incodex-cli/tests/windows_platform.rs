@@ -142,12 +142,7 @@ fn doctor_reports_package_and_session_health_without_creating_state() {
     assert!(doctor.status.success(), "{}", text(&doctor.stderr));
     let report = text(&doctor.stdout);
     for expected in [
-        "➤ App",
-        "Package",
-        "Sessions",
-        "Active",
-        "Orphaned",
-        "Unknown",
+        "➤ App", "Package", "Sessions", "Active", "Orphaned", "Unknown",
     ] {
         assert!(report.contains(expected), "missing {expected}: {report}");
     }

@@ -19,11 +19,6 @@ const ITEMS: &[MenuItem] = &[
         description: "Diagnose the install and leftover sessions",
     },
     MenuItem {
-        command: Some(CliCommand::Version),
-        title: "Version",
-        description: "Show CLI and Windows support information",
-    },
-    MenuItem {
         command: None,
         title: "Quit",
         description: "Exit this menu",
@@ -47,11 +42,7 @@ mod tests {
 
         assert_eq!(
             commands,
-            [
-                CliCommand::Open,
-                CliCommand::Status,
-                CliCommand::Doctor,
-            ]
+            [CliCommand::Open, CliCommand::Status, CliCommand::Doctor,]
         );
     }
 }

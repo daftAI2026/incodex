@@ -72,11 +72,7 @@ pub fn run_doctor(parsed: &ParsedCli) -> Result<(), CliFailure> {
 
 fn format_doctor(report: &WindowsDoctor) -> String {
     let sessions = &report.sessions;
-    let mut lines = vec![
-        incodex_core::format_step("Windows Doctor", None),
-        String::new(),
-    ];
-    lines.push(format_package_status(&report.package, "Package"));
+    let mut lines = vec![format_package_status(&report.package, "App")];
     lines.extend([
         String::new(),
         incodex_core::format_step("Sessions", None),

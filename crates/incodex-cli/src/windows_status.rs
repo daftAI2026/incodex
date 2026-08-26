@@ -89,7 +89,7 @@ pub fn run_status(parsed: &ParsedCli) -> Result<(), CliFailure> {
 }
 
 pub(crate) fn format_status(report: &WindowsPackageStatus) -> String {
-    format_package_status(report, "Windows Codex")
+    format_package_status(report, "Status")
 }
 
 pub(crate) fn format_package_status(report: &WindowsPackageStatus, heading: &str) -> String {
