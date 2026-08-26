@@ -131,6 +131,19 @@ fn install_and_uninstall_dry_run_discover_the_store_package_without_writing_stat
 }
 
 #[test]
+fn mutating_install_requires_explicit_confirmation_without_a_tty() {
+    let profile = scratch_profile();
+    let output = run(&["install"], &profile);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        text(&output.stderr).contains("non-interactive install requires --yes"),
+        "{}",
+        text(&output.stderr)
+    );
+    assert!(!profile.exists(), "unconfirmed install created state");
+}
+
+#[test]
 fn status_reports_current_user_package_without_creating_state() {
     let profile = scratch_profile();
 
