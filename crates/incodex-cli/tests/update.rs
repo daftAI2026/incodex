@@ -220,7 +220,7 @@ fn homebrew_upgrade_timeout_is_bounded_and_reported() {
     let installed = homebrew_cli(&home);
     write_executable(
         &fake_bin.join("brew"),
-        "#!/bin/sh\ncase \"$*\" in\n  'update') exit 0 ;;\n  'upgrade incodex') sleep 5; exit 0 ;;\nesac\nexit 88\n",
+        "#!/bin/sh\ncase \"$*\" in\n  'update') exit 0 ;;\n  'upgrade incodex') printf '%s\\n' 'Please run xcode-select --install.' >&2; sleep 5; exit 0 ;;\nesac\nexit 88\n",
     );
 
     let started = Instant::now();
@@ -234,7 +234,9 @@ fn homebrew_upgrade_timeout_is_bounded_and_reported() {
 
     assert_eq!(output.status.code(), Some(1));
     assert!(started.elapsed() < Duration::from_secs(2));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("Homebrew upgrade timed out"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Homebrew upgrade timed out"));
+    assert!(stderr.contains("Please run xcode-select --install."));
 }
 
 #[test]
