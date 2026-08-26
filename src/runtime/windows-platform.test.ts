@@ -160,4 +160,36 @@ describe("Windows Runtime lifecycle adapter", () => {
     expect(writes).toEqual(["cancel\n"]);
     expect(exited).toBe(true);
   });
+
+  test("never force-kills a guardian that may still be restoring package state", async () => {
+    const stdout = new EventEmitter() as EventEmitter & { destroy: () => void };
+    stdout.destroy = () => {};
+    let killed = false;
+    const child = new EventEmitter() as EventEmitter & {
+      pid: number;
+      stdout: EventEmitter & { destroy: () => void };
+      stdin: { end: () => void; destroy: () => void };
+      kill: () => boolean;
+      unref: () => void;
+    };
+    child.pid = 44;
+    child.stdout = stdout;
+    child.stdin = { end() {}, destroy() {} };
+    child.kill = () => {
+      killed = true;
+      return true;
+    };
+    child.unref = () => {};
+
+    const result = await windowsPlatform.launchIncognito({
+      helperPath: "C:\\Incodex\\incodex.exe",
+      sourceHome: "C:\\Users\\me\\.codex",
+      readyTimeoutMs: 1,
+      cancelExitTimeoutMs: 1,
+      spawnProcess: () => child,
+    });
+
+    expect(result).toEqual({ ok: false, reason: "cleanup-pending" });
+    expect(killed).toBe(false);
+  });
 });
