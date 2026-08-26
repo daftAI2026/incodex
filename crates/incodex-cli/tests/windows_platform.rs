@@ -40,6 +40,7 @@ fn help_and_version_are_available_without_creating_state() {
     assert!(help_text.contains("Windows"));
     assert!(help_text.contains("Microsoft Store"));
     assert!(!help_text.contains("Patch the Codex app"));
+    assert!(!help_text.contains("inc is the same program"));
     assert!(help.stderr.is_empty());
 
     for (command, forbidden) in [("status", "--app"), ("doctor", "--deep"), ("open", "--app")] {
