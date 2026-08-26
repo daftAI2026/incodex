@@ -24,9 +24,11 @@ use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     PROCESSENTRY32W, TH32CS_SNAPPROCESS, TH32CS_SNAPTHREAD, THREADENTRY32,
 };
 use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, IsProcessInJob, JobObjectExtendedLimitInformation,
-    OpenJobObjectW, SetInformationJobObject, TerminateJobObject,
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    AssignProcessToJobObject, CreateJobObjectW, IsProcessInJob,
+    JobObjectBasicAccountingInformation, JobObjectExtendedLimitInformation, OpenJobObjectW,
+    QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
+    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
 use windows_sys::Win32::System::Threading::{
     GetExitCodeProcess, OpenProcess, OpenThread, ResumeThread, TerminateProcess,
@@ -59,9 +61,14 @@ impl WindowsProcessTree {
     }
 
     pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
-        match &mut self.process {
+        let root_status = match &mut self.process {
             ProcessHandle::Child(child) => child.try_wait(),
             ProcessHandle::Activated(process) => try_wait_handle(process.raw()),
+        }?;
+        if root_status.is_some() && self.job_has_active_processes()? {
+            Ok(None)
+        } else {
+            Ok(root_status)
         }
     }
 
@@ -97,6 +104,23 @@ impl WindowsProcessTree {
             return Err(io::Error::last_os_error());
         }
         Ok(contained != 0)
+    }
+
+    fn job_has_active_processes(&self) -> io::Result<bool> {
+        let mut accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+        if unsafe {
+            QueryInformationJobObject(
+                self._job.raw(),
+                JobObjectBasicAccountingInformation,
+                (&mut accounting as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
+                size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
+                std::ptr::null_mut(),
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(accounting.ActiveProcesses != 0)
     }
 }
 

@@ -1,7 +1,7 @@
 use std::ffi::OsString;
 use std::fs;
 use std::os::windows::ffi::OsStringExt;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use serde::Deserialize;
@@ -18,6 +18,7 @@ pub struct WindowsPackageEvidence {
     pub package_full_name: String,
     pub package_family_name: String,
     pub application_id: String,
+    pub application_executable: PathBuf,
     pub install_location: PathBuf,
     pub architecture: String,
     pub signature_kind: String,
@@ -45,6 +46,7 @@ if ($null -eq $application) { exit 4 }
   packageFullName = $package.PackageFullName
   packageFamilyName = $package.PackageFamilyName
   applicationId = $application.Id
+  applicationExecutable = $application.Executable
   installLocation = $package.InstallLocation
   architecture = $package.Architecture.ToString()
   signatureKind = $package.SignatureKind.ToString()
@@ -134,6 +136,15 @@ pub fn inspect_codex_package(evidence: WindowsPackageEvidence) -> Result<Windows
     if evidence.architecture.is_empty() {
         return Err("Windows Codex package architecture is missing".to_string());
     }
+    if evidence.application_executable.as_os_str().is_empty()
+        || evidence.application_executable.is_absolute()
+        || !evidence
+            .application_executable
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+    {
+        return Err("Windows package application executable path is unsafe".to_string());
+    }
     if !evidence.install_location.is_absolute() {
         return Err(format!(
             "Windows Codex package path is not absolute: {}",
@@ -148,8 +159,8 @@ pub fn inspect_codex_package(evidence: WindowsPackageEvidence) -> Result<Windows
         )
     })?;
     require_file(&install_location.join("AppxManifest.xml"), "AppX manifest")?;
-    let executable = install_location.join("app/ChatGPT.exe");
-    require_file(&executable, "Codex executable")?;
+    let executable = install_location.join(&evidence.application_executable);
+    require_file(&executable, "Codex application executable")?;
 
     Ok(WindowsCodexApp {
         package_full_name: evidence.package_full_name,
