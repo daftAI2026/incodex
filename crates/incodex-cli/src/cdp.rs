@@ -542,39 +542,68 @@ where
     F: FnMut(&str),
     G: Fn(&TcpStream) -> Result<(), String>,
 {
-    let mut failures = 0u8;
+    let mut failures = ProfileMaskFailureCounters::default();
     while process_alive.load(Ordering::Acquire) {
         thread::sleep(LIFECYCLE_POLL_INTERVAL);
         if !process_alive.load(Ordering::Acquire) {
             return Ok(());
         }
-        let (error, failure_limit) =
+        let (error, failure_kind, failure_limit) =
             match probe_profile_mask_health(debug_port, process_alive, connection_guard) {
                 Ok(true) => {
-                    failures = 0;
+                    failures.clear();
                     continue;
                 }
                 Ok(false) => (
                     "Incodex profile mask could not be restored".to_string(),
+                    ProfileMaskFailureKind::Unhealthy,
                     PROFILE_MASK_FAILURE_POLLS,
                 ),
                 Err(ProfileMaskProbeError::TargetMissing) if defer_missing_target => continue,
                 Err(ProfileMaskProbeError::TargetMissing) => (
                     "no Codex page target".to_string(),
+                    ProfileMaskFailureKind::Unhealthy,
                     PROFILE_MASK_FAILURE_POLLS,
                 ),
                 Err(ProfileMaskProbeError::ProbeFailed(error)) => (
                     error,
+                    ProfileMaskFailureKind::Transport,
                     profile_mask_transport_failure_polls(cfg!(target_os = "windows")),
                 ),
             };
-        failures = failures.saturating_add(1);
-        if failures >= failure_limit {
+        if failures.record(failure_kind, failure_limit) {
             on_failure(&error);
             return Err(error);
         }
     }
     Ok(())
+}
+
+#[derive(Default)]
+struct ProfileMaskFailureCounters {
+    unhealthy: u8,
+    transport: u8,
+}
+
+enum ProfileMaskFailureKind {
+    Unhealthy,
+    Transport,
+}
+
+impl ProfileMaskFailureCounters {
+    fn clear(&mut self) {
+        self.unhealthy = 0;
+        self.transport = 0;
+    }
+
+    fn record(&mut self, kind: ProfileMaskFailureKind, limit: u8) -> bool {
+        let counter = match kind {
+            ProfileMaskFailureKind::Unhealthy => &mut self.unhealthy,
+            ProfileMaskFailureKind::Transport => &mut self.transport,
+        };
+        *counter = counter.saturating_add(1);
+        *counter >= limit
+    }
 }
 
 fn profile_mask_transport_failure_polls(windows: bool) -> u8 {
