@@ -134,6 +134,23 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(not(target_os = "windows"))]
+    fn macos_public_version_facts_contract_is_unchanged() {
+        let facts = VersionFacts {
+            version: "0.5.0".into(),
+            macos: "15.4".into(),
+            architecture: "arm64".into(),
+            kernel: "24.4.0".into(),
+            sip: "Enabled".into(),
+            disk_free: "177.88GB".into(),
+            install: "Script".into(),
+            shell: "/bin/zsh".into(),
+        };
+
+        assert!(format_version_report(&facts).contains("macOS: 15.4"));
+    }
+
+    #[test]
     fn format_prints_version_machine_install_and_shell() {
         let text = format_version_report(&VersionFacts {
             version: "0.2.0".into(),
