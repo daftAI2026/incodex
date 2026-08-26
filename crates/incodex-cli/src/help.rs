@@ -30,7 +30,7 @@ Windows support uses the current user's official Microsoft Store Codex package.
 The installed package is never patched or copied.
 
 Usage:
-  incodex                     Show this help when input is not a terminal
+  incodex                     Interactive menu (terminal only)
   incodex <command> [flags]
 
 Commands:

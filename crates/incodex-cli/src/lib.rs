@@ -43,7 +43,11 @@ pub mod windows_activation;
 #[cfg(target_os = "windows")]
 pub mod windows_app;
 #[cfg(target_os = "windows")]
+pub mod windows_console;
+#[cfg(target_os = "windows")]
 pub mod windows_doctor;
+#[cfg(target_os = "windows")]
+pub mod windows_menu;
 #[cfg(target_os = "windows")]
 pub mod windows_open;
 #[cfg(target_os = "windows")]
@@ -132,6 +136,8 @@ where
     if lifecycle::run_update_notice_worker() {
         return Ok(());
     }
+    #[cfg(target_os = "windows")]
+    windows_console::enable_virtual_terminal();
     let args: Vec<String> = args.into_iter().map(|s| s.as_ref().to_string()).collect();
     #[cfg(target_os = "windows")]
     if let Some(result) = windows_activation::try_run_package_debugger(&args) {
@@ -154,9 +160,20 @@ where
 
     #[cfg(target_os = "windows")]
     {
+        let mut parsed = parsed;
         if parsed.command == CliCommand::Menu {
-            println!("{ROOT_HELP}");
-            return Ok(());
+            if !windows_console::is_tty() {
+                println!("{ROOT_HELP}");
+                return Ok(());
+            }
+            let Some(command) = windows_menu::run_menu().map_err(CliFailure::from)? else {
+                return Ok(());
+            };
+            parsed.command = command;
+            if command == CliCommand::Version {
+                print!("{}", format_version_report(&collect_version_facts()));
+                return Ok(());
+            }
         }
         if parsed.command == CliCommand::Open {
             return crate::windows_open::run_open(&parsed);
