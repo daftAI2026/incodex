@@ -60,7 +60,10 @@ use std::path::PathBuf;
 use diagnose::{diagnose_with_root_mode, DiagnosisMode};
 #[cfg(not(target_os = "windows"))]
 use diagnose_format::{diagnosis_json, format_diagnosis, format_status};
+#[cfg(not(target_os = "windows"))]
 use help::{command_help, ROOT_HELP};
+#[cfg(target_os = "windows")]
+use help::{windows_command_help as command_help, WINDOWS_ROOT_HELP as ROOT_HELP};
 #[cfg(not(target_os = "windows"))]
 use incodex_core::paths::DEFAULT_APP;
 use parse::{parse_cli, CliCommand};

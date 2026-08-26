@@ -22,6 +22,76 @@ Run incodex <command> --help for details.
 inc is the same program as incodex.
 ";
 
+#[cfg(target_os = "windows")]
+pub const WINDOWS_ROOT_HELP: &str = "\
+incodex — Incognito toggle for Codex desktop
+
+Windows support uses the current user's official Microsoft Store Codex package.
+The installed package is never patched or copied.
+
+Usage:
+  incodex                     Show this help when input is not a terminal
+  incodex <command> [flags]
+
+Commands:
+  open         Open an isolated incognito Codex window
+  status       Show official Store package availability
+  doctor       Diagnose package health and isolated sessions
+  install      Not available on Windows yet
+  uninstall    Not available on Windows yet
+  runtime      Not available on Windows yet
+  recover      Not available on Windows yet
+  update       Not available on Windows yet
+  self-uninstall  Not available on Windows yet
+
+Run incodex <command> --help for details.
+inc is the same program as incodex.
+";
+
+#[cfg(target_os = "windows")]
+pub fn windows_command_help(command: CliCommand) -> &'static str {
+    match command {
+        CliCommand::Status => {
+            "\
+Usage:
+  incodex status [--json]
+
+Inspect the current user's official Microsoft Store Codex package on Windows.
+This command is read-only and discovers the installed location automatically.
+"
+        }
+        CliCommand::Doctor => {
+            "\
+Usage:
+  incodex doctor [--json]
+
+Verify the official Microsoft Store Codex package on Windows and inspect
+Incodex-owned sessions without changing either one.
+"
+        }
+        CliCommand::Open => {
+            "\
+Usage:
+  incodex open [--dry-run] [--mask] [--name <text>] [--avatar <local-file>]
+
+Open an isolated Codex window on Windows without patching the official Store
+package. The package location is discovered automatically. CODEX_HOME and the
+Chromium user-data directory exist only for the isolated session.
+
+Profile masking is only available with --mask. --avatar accepts a local PNG,
+JPEG, or WebP file.
+"
+        }
+        CliCommand::Install
+        | CliCommand::Uninstall
+        | CliCommand::Runtime
+        | CliCommand::Recover
+        | CliCommand::Update
+        | CliCommand::SelfUninstall => "This command is not available on Windows yet.\n",
+        CliCommand::Menu | CliCommand::Help | CliCommand::Version => WINDOWS_ROOT_HELP,
+    }
+}
+
 pub fn command_help(command: CliCommand) -> &'static str {
     match command {
         CliCommand::Install => {

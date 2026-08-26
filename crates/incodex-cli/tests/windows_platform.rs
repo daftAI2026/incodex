@@ -42,11 +42,7 @@ fn help_and_version_are_available_without_creating_state() {
     assert!(!help_text.contains("Patch the Codex app"));
     assert!(help.stderr.is_empty());
 
-    for (command, forbidden) in [
-        ("status", "--app"),
-        ("doctor", "--deep"),
-        ("open", "--app"),
-    ] {
+    for (command, forbidden) in [("status", "--app"), ("doctor", "--deep"), ("open", "--app")] {
         let command_help = run(&[command, "--help"], &profile);
         assert!(
             command_help.status.success(),
