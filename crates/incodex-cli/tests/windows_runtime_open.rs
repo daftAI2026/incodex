@@ -90,10 +90,14 @@ fn installed_runtime_plan_reuses_native_session_without_cdp_or_duplicate_ui() {
         ]
     );
     assert!(!plan.args.iter().any(|arg| arg.contains("remote-debugging")));
-    assert_eq!(
-        plan.env_remove,
-        vec!["INCODEX_WINDOWS_BOOTSTRAPPED".to_string()]
-    );
+    let activation = plan
+        .activation_request()
+        .expect("build installed Runtime activation");
+    assert_eq!(activation.package_full_name(), app.package_full_name);
+    assert_eq!(activation.app_user_model_id(), app.app_user_model_id);
+    assert!(activation.arguments().contains("--user-data-dir="));
+    assert!(!activation.arguments().contains("remote-debugging"));
+    assert!(!plan.env_flags.contains_key("INCODEX_WINDOWS_BOOTSTRAPPED"));
     assert_eq!(plan.env.get("CODEX_HOME"), Some(&plan.session.home));
     assert_eq!(
         plan.env.get("CODEX_ELECTRON_USER_DATA_PATH"),

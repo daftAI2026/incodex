@@ -5,9 +5,9 @@ use std::ffi::OsString;
 use std::path::Path;
 
 use incodex_cli::windows_activation::{
-    activate_packaged_kill_on_drop, disable_installed_runtime, enable_installed_runtime,
-    try_run_installed_package_debugger, WindowsActivationFailure, WindowsActivationRequest,
-    WindowsInstalledRuntimeRegistration,
+    activate_packaged_kill_on_drop, activate_packaged_with_installed_runtime,
+    disable_installed_runtime, enable_installed_runtime, try_run_installed_package_debugger,
+    WindowsActivationFailure, WindowsActivationRequest, WindowsInstalledRuntimeRegistration,
 };
 use incodex_cli::windows_process::WindowsProcessTree;
 
@@ -16,6 +16,11 @@ fn exposes_one_packaged_activation_backend_for_the_open_lifecycle() {
     let _backend: fn(
         &WindowsActivationRequest,
     ) -> Result<WindowsProcessTree, WindowsActivationFailure> = activate_packaged_kill_on_drop;
+    let _installed_backend: fn(
+        &WindowsActivationRequest,
+        &WindowsInstalledRuntimeRegistration,
+    ) -> Result<WindowsProcessTree, WindowsActivationFailure> =
+        activate_packaged_with_installed_runtime;
 }
 
 #[test]
