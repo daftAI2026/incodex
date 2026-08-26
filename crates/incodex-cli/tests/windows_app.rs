@@ -46,10 +46,7 @@ fn accepts_healthy_store_evidence_with_the_real_electron_layout() {
         app.asar,
         app.install_location.join("app/resources/app.asar")
     );
-    assert_eq!(
-        app.app_user_model_id,
-        "OpenAI.Codex_2p2nqsd0c76g0!App"
-    );
+    assert_eq!(app.app_user_model_id, "OpenAI.Codex_2p2nqsd0c76g0!App");
 
     fs::remove_dir_all(root.parent().unwrap().parent().unwrap()).expect("remove fixture");
 }
@@ -57,10 +54,8 @@ fn accepts_healthy_store_evidence_with_the_real_electron_layout() {
 #[test]
 fn rejects_an_app_user_model_id_outside_the_official_package_family() {
     let root = scratch();
-    let json = evidence_json(&root).replace(
-        "OpenAI.Codex_2p2nqsd0c76g0",
-        "Impostor.Codex_2p2nqsd0c76g0",
-    );
+    let json =
+        evidence_json(&root).replace("OpenAI.Codex_2p2nqsd0c76g0", "Impostor.Codex_2p2nqsd0c76g0");
     let evidence = parse_package_evidence(&json).expect("parse evidence");
 
     let error = inspect_codex_package(evidence).unwrap_err();

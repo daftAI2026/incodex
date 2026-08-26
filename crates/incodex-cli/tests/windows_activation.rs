@@ -29,6 +29,14 @@ fn builds_a_store_activation_request_without_losing_windows_arguments_or_environ
     .expect("valid activation request");
 
     assert_eq!(
+        request.package_full_name(),
+        "OpenAI.Codex_26.820.7780.0_x64__2p2nqsd0c76g0"
+    );
+    assert_eq!(
+        request.app_user_model_id(),
+        "OpenAI.Codex_2p2nqsd0c76g0!App"
+    );
+    assert_eq!(
         request.arguments(),
         r#""--user-data-dir=C:\Users\Linus Torvalds\.incodex\chromium\\" --remote-debugging-address=127.0.0.1 --remote-debugging-port=49321"#
     );
