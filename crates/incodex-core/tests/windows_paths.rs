@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use incodex_core::windows_path::validate_existing_session_dir;
+use incodex_core::windows_path::{require_local_disk_absolute, validate_existing_session_dir};
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -81,4 +81,22 @@ fn rejects_a_junction_even_when_it_points_inside_the_trusted_root() {
 
     fs::remove_dir(&junction).expect("remove junction fixture");
     remove_tree(&root);
+}
+
+#[test]
+fn source_home_preflight_accepts_local_drives_and_rejects_network_or_device_namespaces() {
+    for trusted in [r"C:\Users\fixture\.codex", r"\\?\C:\Users\fixture\.codex"] {
+        require_local_disk_absolute(Path::new(trusted), "Windows Codex source home")
+            .expect("local drive source");
+    }
+
+    for untrusted in [
+        r"\\server\share\.codex",
+        r"\\?\UNC\server\share\.codex",
+        r"\\.\PIPE\incodex",
+    ] {
+        let error = require_local_disk_absolute(Path::new(untrusted), "Windows Codex source home")
+            .expect_err("network and device paths must fail before filesystem access");
+        assert!(error.contains("local disk"), "{error}");
+    }
 }

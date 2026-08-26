@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use incodex_core::windows_session::{
     burn_windows_session, copy_windows_settings, create_windows_session, inspect_windows_sessions,
     sweep_orphan_windows_sessions, verify_private_acl, WindowsCleanupResult,
+    MAX_WINDOWS_AUTH_BYTES, MAX_WINDOWS_CONFIG_BYTES,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -90,6 +91,34 @@ fn missing_source_home_is_an_empty_settings_set() {
         WindowsCleanupResult::Removed
     );
     fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
+fn oversized_settings_fail_without_leaving_partial_session_files() {
+    for (name, limit) in [
+        ("auth.json", MAX_WINDOWS_AUTH_BYTES),
+        ("config.toml", MAX_WINDOWS_CONFIG_BYTES),
+    ] {
+        let root = scratch(name);
+        let user_root = root.join("profile").join(".incodex");
+        let source = root.join("source");
+        fs::create_dir_all(user_root.parent().expect("profile parent")).expect("create profile");
+        fs::create_dir_all(&source).expect("create source");
+        let file = fs::File::create(source.join(name)).expect("create sparse setting");
+        file.set_len(limit + 1).expect("extend sparse setting");
+        let session = create_windows_session(&user_root).expect("create private session");
+
+        let error = copy_windows_settings(&session, &source)
+            .expect_err("oversized setting must be rejected");
+
+        assert!(error.contains("size limit"), "{error}");
+        assert!(!session.home.join(name).exists());
+        assert_eq!(
+            burn_windows_session(&session),
+            WindowsCleanupResult::Removed
+        );
+        fs::remove_dir_all(root).expect("remove fixture");
+    }
 }
 
 #[test]
