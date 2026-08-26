@@ -781,7 +781,7 @@ fn persistent_profile_probe_transport_failure_is_reported_to_the_parent() {
     listener.set_nonblocking(true).unwrap();
     let port = listener.local_addr().unwrap().port();
     let server = thread::spawn(move || {
-        for _ in 0..2 {
+        for _ in 0..4 {
             let mut stream = accept_until(&listener, Instant::now() + Duration::from_secs(2))
                 .expect("profile monitor did not poll targets");
             assert_eq!(read_request_path(&mut stream), "/json/list");
@@ -812,7 +812,7 @@ fn persistent_profile_probe_transport_failure_is_reported_to_the_parent() {
 
     assert!(
         cdp_failed.load(Ordering::Acquire),
-        "a present target with a persistently broken transport is a mask-health failure"
+        "a present target with a persistently broken transport must eventually fail"
     );
 }
 

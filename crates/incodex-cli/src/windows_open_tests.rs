@@ -105,6 +105,38 @@ fn successful_contained_process_exit_removes_the_session() {
 }
 
 #[test]
+fn launch_failure_after_activation_retains_the_session_when_shutdown_is_unproven() {
+    let (root, plan) = plan();
+    let session_root = plan.session.root.clone();
+
+    let outcome = execute_windows_open_with(
+        plan,
+        |_plan| {
+            Err(WindowsActivationFailure::after_start(
+                "fixture activation failed",
+                Err("fixture process shutdown is unproven".to_string()),
+            ))
+        },
+        |_port, _options, _alive, _close_requested, _cdp_failed, _ownership_guard| {
+            panic!("injection must not run after launch failure")
+        },
+    );
+
+    assert!(matches!(
+        outcome.process,
+        WindowsOpenProcessResult::SpawnFailed(ref error)
+            if error == "fixture activation failed"
+    ));
+    assert!(matches!(
+        outcome.cleanup,
+        WindowsCleanupResult::Unknown { ref reason }
+            if reason.contains("shutdown is unproven")
+    ));
+    assert!(session_root.exists(), "an active writer may still own the session");
+    fs::remove_dir_all(root).expect("remove retained lifecycle fixture");
+}
+
+#[test]
 fn closing_the_primary_window_terminates_background_electron_as_success() {
     let (root, plan) = plan();
     let session_root = plan.session.root.clone();
