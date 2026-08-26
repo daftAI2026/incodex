@@ -690,7 +690,7 @@ fn persistent_profile_mask_health_failure_is_reported_to_the_parent() {
                 command
                     .pointer("/params/expression")
                     .and_then(Value::as_str),
-                Some("window.__incodexProfileMaskHealth === true")
+                Some("window.__incodexRefreshProfileMaskHealth?.() === true")
             );
             let id = command.get("id").and_then(Value::as_u64).unwrap();
             socket

@@ -145,6 +145,9 @@ describe("incognito profile mask", () => {
     expect(profileMask).toContain("nameHost.textContent === mask.name");
     expect(profileMask).toContain("identityMaskHealth");
     expect(profileMask).toContain("profileMaskHealth");
+    expect(inject).toContain(
+      "window.__incodexRefreshProfileMaskHealth = profileMaskHealth",
+    );
   });
 
   test("distinguishes a generated kind from a validated explicit data URL", () => {

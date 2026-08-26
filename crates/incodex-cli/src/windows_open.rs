@@ -622,20 +622,29 @@ mod tests {
     fn closing_the_primary_window_terminates_background_electron_as_success() {
         let (root, plan) = plan();
         let session_root = plan.session.root.clone();
+        let monitor_finished = Arc::new(AtomicBool::new(false));
+        let monitor_finished_after_close = monitor_finished.clone();
 
         let outcome = execute_windows_open_with(
             plan,
             launch_fixture,
-            |_port, _options, _alive, close_requested, cdp_failed, _ownership_guard| {
+            move |_port, _options, alive, close_requested, cdp_failed, _ownership_guard| {
                 close_requested.store(true, Ordering::Release);
                 cdp_failed.store(true, Ordering::Release);
-                Ok(())
+                Ok(vec![thread::spawn(move || {
+                    while alive.load(Ordering::Acquire) {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    thread::sleep(Duration::from_millis(100));
+                    monitor_finished_after_close.store(true, Ordering::Release);
+                })])
             },
         );
 
         assert_eq!(outcome.process, WindowsOpenProcessResult::Exited(0));
         assert!(outcome.ui_ready);
         assert_eq!(outcome.cleanup, WindowsCleanupResult::Removed);
+        assert!(monitor_finished.load(Ordering::Acquire));
         assert!(!session_root.exists());
         fs::remove_dir_all(root).expect("remove lifecycle fixture");
     }
