@@ -35,9 +35,11 @@ A normal close removes the isolated session managed by Incodex; this is not a cl
 
 ## Quick Start
 
-**Supported platform:** macOS on Apple Silicon (arm64) and Intel (x86_64). Windows and Linux are not supported because Incodex integrates with the macOS Codex app bundle, code signing, Keychain, and Launch Services.
+**Supported platforms:** macOS on Apple Silicon (arm64) and Intel (x86_64), plus Windows 10/11 on x86_64 with the official Microsoft Store Codex package. Linux is not supported.
 
-**Install via Homebrew**
+Windows currently supports `open`, `open --dry-run`, `status`, `doctor`, `--help`, `--version`, and the terminal menu. It discovers the current user's Store package and real install volume dynamically; it does not patch, copy, or re-sign that package. A prebuilt Windows installer is not published yet, so use the source installation below. `install`, `uninstall`, `runtime`, `recover`, `update`, and `self-uninstall` remain unavailable on Windows.
+
+**Install on macOS via Homebrew**
 
 ```bash
 brew install daftAI2026/tap/incodex
@@ -45,7 +47,7 @@ brew install daftAI2026/tap/incodex
 
 This only puts `incodex` and `inc` on PATH. The optional in-app button is added separately with `incodex install`. Update with `inc update`; Incodex keeps Homebrew installs on the Homebrew upgrade path.
 
-**Or via script**
+**Or on macOS via script**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/install.sh | bash
@@ -59,11 +61,13 @@ cd incodex
 cargo install --locked --path crates/incodex-cli
 ```
 
-Homebrew and script installs use prebuilt native Rust binaries and do not require Bun. A source install requires [rustup](https://rustup.rs/); the repository's `rust-toolchain.toml` selects the supported Rust compiler. An installed Codex / ChatGPT desktop app is needed only for app integration work. Contributors rebuilding the Electron Runtime also need [Bun](https://bun.sh) 1.3.14 (see `.bun-version`).
+Homebrew and script installs use prebuilt macOS Rust binaries and do not require Bun. Windows currently uses the same source command; Cargo chooses the per-user executable location, while Incodex discovers Codex independently through the current user's Store package identity. A source install requires [rustup](https://rustup.rs/); the repository's `rust-toolchain.toml` selects the supported Rust compiler. An installed Codex / ChatGPT desktop app is needed only for app integration work. Contributors rebuilding the Electron Runtime also need [Bun](https://bun.sh) 1.3.14 (see `.bun-version`).
 
 ## Security & Safety Design
 
-The primary `incodex open` path does not patch Codex. The optional `incodex install` path adds the in-app button by modifying the locally installed Electron app. `install`, `uninstall`, and `self-uninstall` print a plan before destructive work: TTY asks once, non-TTY needs `--yes`, and `--dry-run` only prints. `recover` is the explicit transaction-recovery exception: it requires `--transaction <id>`, does not accept `--dry-run`, and resumes only that existing journal.
+The primary `incodex open` path does not patch Codex. On Windows, each open receives private isolated `CODEX_HOME` and Chromium directories; a kill-on-close Job object contains the process tree, and cleanup verifies ACL, owner PID creation time, and directory identity before deletion. Only `auth.json` and `config.toml` are copied into the session.
+
+On macOS, the optional `incodex install` path adds the in-app button by modifying the locally installed Electron app. `install`, `uninstall`, and `self-uninstall` print a plan before destructive work: TTY asks once, non-TTY needs `--yes`, and `--dry-run` only prints. `recover` is the explicit transaction-recovery exception: it requires `--transaction <id>`, does not accept `--dry-run`, and resumes only that existing journal.
 
 - Official plugins cannot add this button. The app bundle has to change
 - After the default official-app install, a valid OpenAI signature cannot be kept. On the next launch, macOS may ask the patched app to access **Codex Storage Key**. Only if the dialog names the expected app and Keychain item should you enter your **Mac login password** (not your ChatGPT password) and choose **Always Allow**. **Allow** / **Allow Once** grants only that access and may prompt again later; if the details do not match, choose **Deny**. The CLI does not give permanent-authorization advice for `--clone` or `--app` targets
@@ -76,7 +80,7 @@ The primary `incodex open` path does not patch Codex. The optional `incodex inst
 - If Codex has already been upgraded, `incodex uninstall` will not put an old backup back
 - The current original-bundle backup lives at `~/.incodex/transactions/<install-id>/original/ChatGPT.app`; verified uninstall removes it, and a later successful install prunes superseded terminal backups for the same app
 - Run `inc update` for Homebrew and script installs; Incodex automatically uses the matching update path. Source update: `git pull && cargo install --locked --path crates/incodex-cli`; source removal: `cargo uninstall incodex-cli`
-- The menu supports arrows, Vim `j/k`, digits that run immediately, `V` for version, `q` to quit
+- The macOS menu supports arrows, Vim `j/k`, immediate digits, `V` for version, and `q` to quit. The Windows Console/Windows Terminal menu uses a numbered prompt and exposes only implemented Windows commands
 - If a script install cannot find the command, add `~/.local/bin` to PATH
 - Button and copy follow the main window language
 
@@ -84,7 +88,7 @@ The primary `incodex open` path does not patch Codex. The optional `incodex inst
 
 ### Interactive menu
 
-Run `inc` in a terminal:
+Run `inc` in a macOS terminal:
 
 ```
   _____   _   _    _____    ____    _____    ______  __   __
@@ -107,9 +111,23 @@ Run `inc` in a terminal:
 ↑↓ | Enter | V Version | Q Quit | 1-6 Jump
 ```
 
+On Windows, the terminal menu deliberately contains only supported operations:
+
+```text
+➤ Incodex for Windows
+1. Open       Open an isolated incognito Codex window
+2. Status     Show official Store package availability
+3. Doctor     Diagnose package health and isolated sessions
+4. Version    Show CLI and Windows support information
+5. Quit       Exit this menu
+Select [1-5]:
+```
+
 ### Open without patching
 
 `open` starts the official Codex binary with a fresh isolated Chromium profile and `CODEX_HOME`. It keeps the login and base configuration needed for use, but does not bring old chats into the window or modify and re-sign the official app. A normal close burns the isolated session.
+
+The paths below show macOS. On Windows, `open --dry-run` reports the current user's discovered Store package and real `ChatGPT.exe` path, which may live on any volume.
 
 ```bash
 $ incodex open --dry-run
@@ -174,6 +192,8 @@ After install, the hat-glasses control appears left of Search. Click it or press
 
 ### Status
 
+The example below is macOS. On Windows, `status` reports Store package availability, package identity, architecture, and the dynamically discovered install and executable paths; `--json` is supported on both platforms.
+
 ```bash
 $ incodex status
 
@@ -193,6 +213,8 @@ $ incodex status
 ```
 
 ### Doctor
+
+The example below is macOS. Windows `doctor` verifies the Store package and reports active, orphaned, and unverifiable Incodex sessions without creating or changing state.
 
 ```bash
 $ incodex doctor
@@ -232,7 +254,7 @@ $ incodex doctor
   Journals     0 (checked)
 ```
 
-The default Doctor checks Incodex-owned Runtime, backup, journal, session, and marker state plus minimal outer app identity. It does not recurse into nested signing or invoke Gatekeeper. Run `incodex doctor --deep` for the full nested signing, entitlement, and Gatekeeper report. The Gatekeeper result is diagnostic, not an install failure; after the bundle changes, the official signature will not pass Gatekeeper.
+On macOS, the default Doctor checks Incodex-owned Runtime, backup, journal, session, and marker state plus minimal outer app identity. It does not recurse into nested signing or invoke Gatekeeper. Run `incodex doctor --deep` for the full nested signing, entitlement, and Gatekeeper report. The Gatekeeper result is diagnostic, not an install failure; after the bundle changes, the official signature will not pass Gatekeeper. Windows does not accept `--deep` because it does not patch or re-sign the Store package.
 
 ### Version
 
