@@ -42,7 +42,13 @@ mod tests {
 
         assert_eq!(
             commands,
-            [CliCommand::Open, CliCommand::Status, CliCommand::Doctor,]
+            [
+                CliCommand::Open,
+                CliCommand::Install,
+                CliCommand::Uninstall,
+                CliCommand::Status,
+                CliCommand::Doctor,
+            ]
         );
     }
 }
