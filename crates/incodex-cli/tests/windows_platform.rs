@@ -163,6 +163,7 @@ fn status_reports_current_user_package_without_creating_state() {
     assert!(report.ends_with("\n\n"), "{report:?}");
     assert!(!report.contains("Windows Codex"), "{report}");
     assert!(report.contains("Available"), "{report}");
+    assert!(report.contains("Installed"), "{report}");
     assert!(status.stderr.is_empty(), "{}", text(&status.stderr));
 
     let json = run(&["status", "--json"], &profile);
@@ -171,6 +172,7 @@ fn status_reports_current_user_package_without_creating_state() {
         serde_json::from_slice(&json.stdout).expect("status emits valid JSON");
     assert_eq!(value["platform"], "windows");
     assert!(value["available"].is_boolean());
+    assert_eq!(value["integration"]["installed"], false);
     assert!(json.stderr.is_empty(), "{}", text(&json.stderr));
 
     assert!(!profile.exists(), "status created user state");
@@ -184,6 +186,8 @@ fn doctor_reports_package_and_session_health_without_creating_state() {
     assert!(doctor.status.success(), "{}", text(&doctor.stderr));
     let report = text(&doctor.stdout);
     assert!(report.ends_with("\n\n"), "{report:?}");
+    assert!(report.contains("Integration"), "{report}");
+    assert!(report.contains("Installed"), "{report}");
     for expected in [
         "➤ App", "Package", "Sessions", "Active", "Orphaned", "Unknown",
     ] {
@@ -201,6 +205,7 @@ fn doctor_reports_package_and_session_health_without_creating_state() {
     assert!(value["sessions"]["active"].is_u64());
     assert!(value["sessions"]["orphaned"].is_u64());
     assert!(value["sessions"]["unknown"].is_u64());
+    assert_eq!(value["integration"]["installed"], false);
     assert!(json.stderr.is_empty(), "{}", text(&json.stderr));
 
     assert!(!profile.exists(), "doctor created user state");
