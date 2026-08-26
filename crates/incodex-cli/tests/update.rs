@@ -223,6 +223,22 @@ fn intel_homebrew_prefix_uses_the_homebrew_update_path() {
 }
 
 #[test]
+fn intel_homebrew_prefix_reports_the_homebrew_install_channel() {
+    let home = scratch("intel-homebrew-version");
+    let installed = intel_homebrew_cli(&home);
+
+    let output = Command::new(installed)
+        .arg("--version")
+        .env("HOME", &home)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Install: Homebrew"), "{stdout}");
+}
+
+#[test]
 fn usr_local_script_prefix_keeps_the_script_update_path() {
     let home = scratch("usr-local-script-routing");
     let installed = usr_local_script_cli(&home);
