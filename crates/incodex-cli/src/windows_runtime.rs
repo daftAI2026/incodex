@@ -15,6 +15,7 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 
 pub const WINDOWS_RUNTIME_FILES: &[&str] = &[
+    "incodex-windows-bootstrap.cjs",
     "incodex-main.cjs",
     "incodex-preload.cjs",
     "incodex-inject.js",
@@ -26,6 +27,9 @@ pub const WINDOWS_RUNTIME_FILES: &[&str] = &[
     "incodex-window-kind.cjs",
     "incodex-runtime-load.cjs",
 ];
+
+const BOOTSTRAP_NAME: &str = "incodex-windows-bootstrap.cjs";
+const BOOTSTRAP: &str = include_str!("../assets/incodex-windows-bootstrap.cjs");
 
 const RUNTIME_FILES: &[(&str, &str)] = &[
     (
@@ -105,7 +109,11 @@ pub fn publish_windows_runtime(user_root: &Path) -> Result<PublishedWindowsRunti
         .map_err(|error| format!("invalid Runtime manifest: {error}"))?;
     validate_manifest(&manifest)?;
     let manifest_hash = sha256_hex(MANIFEST.as_bytes());
-    let release_name = format!("{}-{manifest_hash}", manifest.runtime_version);
+    let bootstrap_hash = sha256_hex(BOOTSTRAP.as_bytes());
+    let release_name = format!(
+        "{}-{manifest_hash}-{bootstrap_hash}",
+        manifest.runtime_version
+    );
 
     let user_root = ensure_private_windows_dir(user_root)?;
     let runtime_root = ensure_private_windows_dir(&user_root.join("runtime"))?;
@@ -161,6 +169,7 @@ fn publish_release(
         for (name, body) in RUNTIME_FILES {
             write_private_file(&staging.join(name), body.as_bytes())?;
         }
+        write_private_file(&staging.join(BOOTSTRAP_NAME), BOOTSTRAP.as_bytes())?;
         write_private_file(&staging.join(MANIFEST_NAME), MANIFEST.as_bytes())?;
         verify_release(&staging, manifest)?;
         match fs::rename(&staging, release_dir) {
@@ -188,6 +197,14 @@ fn verify_release(path: &Path, manifest: &RuntimeManifest) -> Result<(), String>
                 "Runtime artifact does not match embedded release: {name}"
             ));
         }
+    }
+    let bootstrap = path.join(BOOTSTRAP_NAME);
+    ensure_regular_file(&bootstrap)?;
+    verify_private_acl(&bootstrap)?;
+    let actual = fs::read(&bootstrap)
+        .map_err(|error| format!("cannot read Windows Runtime bootstrap: {error}"))?;
+    if actual != BOOTSTRAP.as_bytes() {
+        return Err("Windows Runtime bootstrap does not match embedded release".to_string());
     }
     let manifest_path = path.join(MANIFEST_NAME);
     ensure_regular_file(&manifest_path)?;
