@@ -241,3 +241,18 @@ fn profile_mask_transport_grace_is_windows_only() {
     assert_eq!(profile_mask_transport_failure_polls(false), 2);
     assert_eq!(profile_mask_transport_failure_polls(true), 4);
 }
+
+#[test]
+fn profile_mask_failure_kinds_do_not_borrow_each_others_threshold() {
+    let mut failures = ProfileMaskFailureCounters::default();
+    assert!(!failures.record(ProfileMaskFailureKind::Unhealthy, 2));
+    for _ in 0..3 {
+        assert!(!failures.record(ProfileMaskFailureKind::Transport, 4));
+    }
+
+    let mut reverse = ProfileMaskFailureCounters::default();
+    for _ in 0..3 {
+        assert!(!reverse.record(ProfileMaskFailureKind::Transport, 4));
+    }
+    assert!(!reverse.record(ProfileMaskFailureKind::Unhealthy, 2));
+}
