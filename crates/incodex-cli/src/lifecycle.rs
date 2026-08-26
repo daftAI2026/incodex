@@ -819,8 +819,6 @@ fn install_channel(exe: &Path) -> InstallChannel {
         || text.contains("/usr/local/opt/incodex/")
         || text.ends_with("/opt/homebrew/bin/incodex")
         || text.ends_with("/opt/homebrew/bin/inc")
-        || text.ends_with("/usr/local/bin/incodex")
-        || text.ends_with("/usr/local/bin/inc")
     {
         return InstallChannel::Homebrew;
     }
