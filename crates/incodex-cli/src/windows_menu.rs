@@ -82,7 +82,7 @@ pub fn command_for_selection(selection: &str) -> Option<CliCommand> {
 
 #[cfg(test)]
 mod tests {
-    use super::menu_text;
+    use super::*;
 
     #[test]
     fn windows_menu_preserves_the_product_branding() {
@@ -90,5 +90,23 @@ mod tests {
         assert!(menu.contains("_____   _   _"));
         assert!(menu.contains("https://github.com/daftAI2026/incodex"));
         assert!(menu.contains("Incognito toggle for Codex desktop."));
+    }
+
+    #[test]
+    fn windows_menu_uses_the_same_immediate_navigation_contract() {
+        assert_eq!(apply_menu_key(0, MenuKey::Down), MenuDecision::Select(1));
+        assert_eq!(apply_menu_key(0, MenuKey::Up), MenuDecision::Select(4));
+        assert_eq!(
+            apply_menu_key(0, MenuKey::Activate),
+            MenuDecision::Run(Some(CliCommand::Open))
+        );
+        assert_eq!(
+            apply_menu_key(0, MenuKey::Digit(4)),
+            MenuDecision::Run(Some(CliCommand::Version))
+        );
+        assert_eq!(
+            apply_menu_key(0, MenuKey::Quit),
+            MenuDecision::Run(None)
+        );
     }
 }
