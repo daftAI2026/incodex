@@ -4,7 +4,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use incodex_cli::windows_install::install_windows_runtime_with;
+use incodex_cli::windows_install::{
+    install_windows_runtime_with, uninstall_windows_runtime_with, WindowsUninstallOutcome,
+};
 use incodex_cli::windows_install_state::{
     read_windows_install_state, stage_windows_install_state, transition_windows_install_state,
     WindowsInstallPhase,
@@ -79,6 +81,59 @@ fn stages_and_enables_the_installed_runtime_only_after_proving_codex_is_closed()
     assert_eq!(retained.phase, WindowsInstallPhase::RecoveryRequired);
     assert!(!retained.desired_enabled());
     fs::remove_dir_all(uncertain_root).expect("remove uncertain install fixture");
+}
+
+#[test]
+fn uninstall_publishes_the_kill_switch_before_waiting_then_disables_once() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    install_windows_runtime_with(
+        &user_root,
+        package,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(()),
+    )
+    .expect("install fixture Runtime");
+
+    let waiting = uninstall_windows_runtime_with(
+        &user_root,
+        |_| Ok(vec![42]),
+        |_| panic!("running package must block disable"),
+    )
+    .expect("request uninstall");
+    assert_eq!(
+        waiting,
+        WindowsUninstallOutcome::CloseRequired { process_ids: vec![42] }
+    );
+    let kill_switch = read_windows_install_state(&user_root)
+        .expect("read kill switch")
+        .expect("kill switch retained");
+    assert_eq!(kill_switch.phase, WindowsInstallPhase::DisableRequested);
+    assert!(!kill_switch.desired_enabled());
+
+    let mut disabled = false;
+    let removed = uninstall_windows_runtime_with(
+        &user_root,
+        |_| Ok(Vec::new()),
+        |disabled_package| {
+            disabled = true;
+            assert_eq!(disabled_package, package);
+            Ok(())
+        },
+    )
+    .expect("finish uninstall");
+    assert_eq!(removed, WindowsUninstallOutcome::Removed);
+    assert!(disabled);
+    assert!(
+        read_windows_install_state(&user_root)
+            .expect("read removed state")
+            .is_none(),
+        "disabled registration state was not retired"
+    );
+
+    fs::remove_dir_all(user_root).expect("remove uninstall fixture");
 }
 
 #[test]
