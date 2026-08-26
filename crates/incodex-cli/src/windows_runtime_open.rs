@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use incodex_core::windows_path::require_local_disk_absolute;
 use incodex_core::windows_session::{
-    burn_windows_session, copy_windows_settings, create_windows_session,
+    apply_private_windows_acl, burn_windows_session, copy_windows_settings, create_windows_session,
     sweep_orphan_windows_sessions, verify_private_acl, WindowsCleanupResult, WindowsSessionHome,
 };
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
@@ -196,7 +196,7 @@ fn run_guardian_lifecycle(
                 )
             }
         }
-        match runtime_ready(&session) {
+        match validate_windows_runtime_ready(&session) {
             Ok(true) => break,
             Ok(false) => {}
             Err(error) => return guardian_failure(error, &session, &mut process_tree),
@@ -319,7 +319,7 @@ fn installed_state_from_environment() -> Result<WindowsInstallState, String> {
     Ok(state)
 }
 
-fn runtime_ready(session: &WindowsSessionHome) -> Result<bool, String> {
+pub fn validate_windows_runtime_ready(session: &WindowsSessionHome) -> Result<bool, String> {
     let path = session.root.join("ready");
     let metadata = match fs::symlink_metadata(&path) {
         Ok(metadata) => metadata,
@@ -332,6 +332,7 @@ fn runtime_ready(session: &WindowsSessionHome) -> Result<bool, String> {
     {
         return Err("Windows Runtime readiness marker is unsafe".to_string());
     }
+    apply_private_windows_acl(&path)?;
     verify_private_acl(&path)?;
     let body = fs::read_to_string(&path)
         .map_err(|error| format!("cannot read Windows Runtime readiness: {error}"))?;
