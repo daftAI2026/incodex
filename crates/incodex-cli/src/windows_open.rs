@@ -74,7 +74,37 @@ pub enum WindowsOpenProcessResult {
 }
 
 const LISTENER_SHUTDOWN_GRACE: Duration = Duration::from_millis(200);
+const VISIBLE_WINDOW_CLOSE_GRACE: Duration = Duration::from_millis(250);
 type WindowsMonitorWorkers = Vec<thread::JoinHandle<()>>;
+
+struct VisibleWindowLifecycle {
+    grace: Duration,
+    seen_visible: bool,
+    missing_since: Option<Instant>,
+}
+
+impl VisibleWindowLifecycle {
+    fn new(grace: Duration) -> Self {
+        Self {
+            grace,
+            seen_visible: false,
+            missing_since: None,
+        }
+    }
+
+    fn should_close(&mut self, visible: bool, now: Instant) -> bool {
+        if visible {
+            self.seen_visible = true;
+            self.missing_since = None;
+            return false;
+        }
+        if !self.seen_visible {
+            return false;
+        }
+        let missing_since = self.missing_since.get_or_insert(now);
+        now.saturating_duration_since(*missing_since) >= self.grace
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowsOpenOutcome {
@@ -288,6 +318,7 @@ where
     let mut ui_ready = false;
     let mut monitor_workers = Vec::new();
     let mut listener_missing_since = None;
+    let mut window_lifecycle = VisibleWindowLifecycle::new(VISIBLE_WINDOW_CLOSE_GRACE);
     let (process, shutdown) = loop {
         match injection_rx.try_recv() {
             Ok(Ok(workers)) => {
@@ -327,6 +358,39 @@ where
                     break (
                         WindowsOpenProcessResult::ProcessStateUnknown(reason.clone()),
                         Err(reason),
+                    );
+                }
+            }
+        }
+        if ui_ready {
+            match process_tree.has_visible_window() {
+                Ok(visible) if window_lifecycle.should_close(visible, Instant::now()) => {
+                    match process_tree.terminate_successfully() {
+                        Ok(status) => {
+                            break (
+                                WindowsOpenProcessResult::Exited(status.code().unwrap_or(0)),
+                                Ok(()),
+                            );
+                        }
+                        Err(error) => {
+                            let reason = format!(
+                                "cannot prove Windows Job shutdown after its visible window closed: {error}"
+                            );
+                            break (
+                                WindowsOpenProcessResult::ProcessStateUnknown(reason.clone()),
+                                Err(reason),
+                            );
+                        }
+                    }
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    break terminate_with_outcome(
+                        &mut process_tree,
+                        WindowsOpenProcessResult::ProcessStateUnknown(format!(
+                            "cannot inspect isolated Windows window state: {error}"
+                        )),
+                        "Windows visible-window state query failed",
                     );
                 }
             }

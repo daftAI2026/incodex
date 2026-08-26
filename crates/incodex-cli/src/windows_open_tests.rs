@@ -16,8 +16,10 @@ fn visible_window_loss_closes_background_electron_after_a_grace_period() {
     let mut lifecycle = VisibleWindowLifecycle::new(grace);
 
     assert!(!lifecycle.should_close(true, started));
-    assert!(!lifecycle.should_close(false, started + grace - Duration::from_millis(1)));
-    assert!(lifecycle.should_close(false, started + grace));
+    let missing = started + Duration::from_millis(1);
+    assert!(!lifecycle.should_close(false, missing));
+    assert!(!lifecycle.should_close(false, missing + grace - Duration::from_millis(1)));
+    assert!(lifecycle.should_close(false, missing + grace));
 }
 
 fn plan() -> (PathBuf, WindowsOpenPlan) {

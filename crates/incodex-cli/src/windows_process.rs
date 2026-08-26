@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{
     CloseHandle, DuplicateHandle, APPMODEL_ERROR_NO_PACKAGE, DUPLICATE_SAME_ACCESS,
-    ERROR_INSUFFICIENT_BUFFER, ERROR_NO_MORE_FILES, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0,
-    WAIT_TIMEOUT,
+    ERROR_INSUFFICIENT_BUFFER, ERROR_MORE_DATA, ERROR_NO_MORE_FILES, HANDLE, HWND,
+    INVALID_HANDLE_VALUE, LPARAM, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::NetworkManagement::IpHelper::{
     GetExtendedTcpTable, MIB_TCPROW_OWNER_PID, MIB_TCPTABLE_OWNER_PID, MIB_TCP_STATE_ESTAB,
@@ -29,15 +29,19 @@ use windows_sys::Win32::System::Diagnostics::ToolHelp::{
 };
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, IsProcessInJob,
-    JobObjectBasicAccountingInformation, JobObjectExtendedLimitInformation, OpenJobObjectW,
-    QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
-    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JobObjectBasicAccountingInformation, JobObjectBasicProcessIdList,
+    JobObjectExtendedLimitInformation, OpenJobObjectW, QueryInformationJobObject,
+    SetInformationJobObject, TerminateJobObject, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
+    JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
 use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, GetExitCodeProcess, OpenProcess, OpenThread, ResumeThread, TerminateProcess,
     WaitForSingleObject, CREATE_SUSPENDED, INFINITE, PROCESS_QUERY_LIMITED_INFORMATION,
     PROCESS_SET_QUOTA, PROCESS_TERMINATE, THREAD_SUSPEND_RESUME,
+};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    EnumWindows, GetWindowThreadProcessId, IsWindowVisible,
 };
 
 #[derive(Debug)]
@@ -135,6 +139,11 @@ impl WindowsProcessTree {
         process_is_in_job(owner_pid, self._job.raw())
     }
 
+    pub fn has_visible_window(&self) -> io::Result<bool> {
+        let process_ids = job_process_ids(self._job.raw())?;
+        has_visible_window_for_processes(&process_ids)
+    }
+
     fn job_has_active_processes(&self) -> io::Result<bool> {
         let mut accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
         if unsafe {
@@ -165,6 +174,82 @@ impl WindowsProcessTree {
         }
         Ok(())
     }
+}
+
+fn job_process_ids(job: HANDLE) -> io::Result<HashSet<u32>> {
+    const HEADER_BYTES: usize = size_of::<JOBOBJECT_BASIC_PROCESS_ID_LIST>() - size_of::<usize>();
+    let mut capacity = 16usize;
+    loop {
+        let byte_len = HEADER_BYTES + capacity * size_of::<usize>();
+        let word_len = byte_len.div_ceil(size_of::<usize>());
+        let mut storage = vec![0usize; word_len];
+        let queried = unsafe {
+            QueryInformationJobObject(
+                job,
+                JobObjectBasicProcessIdList,
+                storage.as_mut_ptr().cast(),
+                byte_len as u32,
+                std::ptr::null_mut(),
+            )
+        };
+        if queried != 0 {
+            let list = unsafe { &*storage.as_ptr().cast::<JOBOBJECT_BASIC_PROCESS_ID_LIST>() };
+            let count = list.NumberOfProcessIdsInList as usize;
+            let first = unsafe {
+                storage
+                    .as_ptr()
+                    .cast::<u8>()
+                    .add(HEADER_BYTES)
+                    .cast::<usize>()
+            };
+            let ids = unsafe { std::slice::from_raw_parts(first, count) };
+            return Ok(ids.iter().map(|id| *id as u32).collect());
+        }
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() == Some(ERROR_MORE_DATA as i32) {
+            capacity = capacity
+                .checked_mul(2)
+                .ok_or_else(|| io::Error::other("Windows Job process list capacity overflowed"))?;
+            continue;
+        }
+        return Err(error);
+    }
+}
+
+struct VisibleWindowSearch<'a> {
+    process_ids: &'a HashSet<u32>,
+    found: bool,
+}
+
+fn has_visible_window_for_processes(process_ids: &HashSet<u32>) -> io::Result<bool> {
+    let mut search = VisibleWindowSearch {
+        process_ids,
+        found: false,
+    };
+    let completed = unsafe {
+        EnumWindows(
+            Some(find_visible_process_window),
+            (&mut search as *mut VisibleWindowSearch<'_>) as LPARAM,
+        )
+    };
+    if completed == 0 && !search.found {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(search.found)
+}
+
+unsafe extern "system" fn find_visible_process_window(window: HWND, context: LPARAM) -> i32 {
+    if unsafe { IsWindowVisible(window) } == 0 {
+        return 1;
+    }
+    let mut process_id = 0u32;
+    unsafe { GetWindowThreadProcessId(window, &mut process_id) };
+    let search = unsafe { &mut *(context as *mut VisibleWindowSearch<'_>) };
+    if search.process_ids.contains(&process_id) {
+        search.found = true;
+        return 0;
+    }
+    1
 }
 
 impl WindowsCdpOwnershipGuard {
