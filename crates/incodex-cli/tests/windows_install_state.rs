@@ -8,6 +8,7 @@ use incodex_cli::windows_install_state::{
     read_windows_install_state, stage_windows_install_state, transition_windows_install_state,
     WindowsInstallPhase,
 };
+use incodex_cli::windows_install::install_windows_runtime_with;
 use incodex_core::windows_session::verify_private_acl;
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -18,6 +19,49 @@ fn scratch_root() -> PathBuf {
         "incodex-windows-install-state-{}-{sequence}",
         std::process::id()
     ))
+}
+
+#[test]
+fn stages_and_enables_the_installed_runtime_only_after_proving_codex_is_closed() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    let mut enabled = false;
+    let installed = install_windows_runtime_with(
+        &user_root,
+        package,
+        &helper,
+        |_| Ok(Vec::new()),
+        |registration| {
+            enabled = true;
+            assert_eq!(registration.package_full_name(), package);
+            assert!(registration
+                .debugger_command_line()
+                .contains("__incodex_windows_installed_debugger"));
+            Ok(())
+        },
+    )
+    .expect("enable installed Runtime");
+
+    assert!(enabled);
+    assert_eq!(installed.phase, WindowsInstallPhase::EnabledUnobserved);
+    assert!(installed.desired_enabled());
+    assert!(installed.helper_path.is_file());
+    assert!(user_root.join("runtime/current.json").is_file());
+
+    fs::remove_dir_all(user_root).expect("remove installed Runtime fixture");
+
+    let blocked_root = scratch_root();
+    let error = install_windows_runtime_with(
+        &blocked_root,
+        package,
+        &helper,
+        |_| Ok(vec![42]),
+        |_| panic!("running package must block enable"),
+    )
+    .expect_err("running Codex must block install");
+    assert!(error.contains("close Codex"), "{error}");
+    assert!(!blocked_root.exists(), "blocked install created state");
 }
 
 #[test]
