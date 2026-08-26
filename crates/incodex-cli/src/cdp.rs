@@ -24,6 +24,7 @@ const MAX_HTTP_RESPONSE_BYTES: usize = 1024 * 1024;
 const CDP_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const LIFECYCLE_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const PRIMARY_TARGET_MISSING_POLLS: u8 = 2;
+const WINDOWS_CDP_FAILURE_POLLS: u8 = 1;
 #[cfg(any(not(target_os = "windows"), test))]
 const PROFILE_MASK_FAILURE_POLLS: u8 = 2;
 const BROWSER_CLOSE_ATTEMPTS: u8 = 3;
@@ -53,9 +54,19 @@ pub fn allocate_debug_port() -> Result<u16, String> {
 }
 
 pub fn debug_launch_args(user_data_dir: &str, debug_port: u16) -> Vec<String> {
-    let mut args = launch_arg_prefix(user_data_dir);
+    debug_launch_args_for_platform(user_data_dir, debug_port, cfg!(target_os = "windows"))
+}
+
+fn debug_launch_args_for_platform(
+    user_data_dir: &str,
+    debug_port: u16,
+    windows: bool,
+) -> Vec<String> {
+    let mut args = launch_arg_prefix_for_platform(user_data_dir, windows);
+    if windows {
+        args.push("--remote-debugging-address=127.0.0.1".to_string());
+    }
     args.extend([
-        "--remote-debugging-address=127.0.0.1".to_string(),
         format!("--remote-debugging-port={debug_port}"),
         format!("--remote-allow-origins=http://127.0.0.1:{debug_port}"),
         OFFICIAL_NEW_CODEX_URL.to_string(),
@@ -63,16 +74,21 @@ pub fn debug_launch_args(user_data_dir: &str, debug_port: u16) -> Vec<String> {
     args
 }
 
+#[cfg(not(target_os = "windows"))]
 pub(crate) fn launch_arg_prefix(user_data_dir: &str) -> Vec<String> {
-    #[cfg(not(target_os = "windows"))]
-    let args = vec![
-        "-NSAutomaticWindowAnimationsEnabled".to_string(),
-        "false".to_string(),
-        format!("--user-data-dir={user_data_dir}"),
-    ];
-    #[cfg(target_os = "windows")]
-    let args = vec![format!("--user-data-dir={user_data_dir}")];
-    args
+    launch_arg_prefix_for_platform(user_data_dir, cfg!(target_os = "windows"))
+}
+
+fn launch_arg_prefix_for_platform(user_data_dir: &str, windows: bool) -> Vec<String> {
+    if windows {
+        vec![format!("--user-data-dir={user_data_dir}")]
+    } else {
+        vec![
+            "-NSAutomaticWindowAnimationsEnabled".to_string(),
+            "false".to_string(),
+            format!("--user-data-dir={user_data_dir}"),
+        ]
+    }
 }
 
 pub fn inject_source() -> String {
@@ -398,10 +414,16 @@ pub fn start_lifecycle_signal_monitor(
     close_requested: Arc<AtomicBool>,
 ) {
     thread::spawn(move || {
-        monitor_primary_target(debug_port, &primary_target_id, &process_alive, || {
-            close_requested.store(true, Ordering::Release);
-            true
-        })
+        monitor_primary_target_with_failure_limit(
+            debug_port,
+            &primary_target_id,
+            &process_alive,
+            Some(WINDOWS_CDP_FAILURE_POLLS),
+            || {
+                close_requested.store(true, Ordering::Release);
+                true
+            },
+        )
     });
 }
 
@@ -464,17 +486,47 @@ fn monitor_primary_target<F>(
     debug_port: u16,
     primary_target_id: &str,
     process_alive: &AtomicBool,
+    on_close: F,
+) where
+    F: FnMut() -> bool,
+{
+    monitor_primary_target_with_failure_limit(
+        debug_port,
+        primary_target_id,
+        process_alive,
+        None,
+        on_close,
+    );
+}
+
+fn monitor_primary_target_with_failure_limit<F>(
+    debug_port: u16,
+    primary_target_id: &str,
+    process_alive: &AtomicBool,
+    max_consecutive_errors: Option<u8>,
     mut on_close: F,
 ) where
     F: FnMut() -> bool,
 {
     let mut primary_target_id = primary_target_id.to_string();
     let mut missing_polls = 0u8;
+    let mut consecutive_errors = 0u8;
     while process_alive.load(Ordering::Acquire) {
         thread::sleep(LIFECYCLE_POLL_INTERVAL);
         let targets = match list_targets(debug_port) {
-            Ok(targets) => targets,
-            Err(_) => continue,
+            Ok(targets) => {
+                consecutive_errors = 0;
+                targets
+            }
+            Err(_) => {
+                consecutive_errors = consecutive_errors.saturating_add(1);
+                if max_consecutive_errors.is_some_and(|limit| consecutive_errors >= limit)
+                    && on_close()
+                {
+                    return;
+                }
+                continue;
+            }
         };
         if targets.iter().any(|target| target.id == primary_target_id) {
             missing_polls = 0;
@@ -696,8 +748,22 @@ fn list_targets(debug_port: u16) -> Result<Vec<CdpTarget>, String> {
 }
 
 fn http_get_json(debug_port: u16, path: &str) -> Result<Value, String> {
-    http_get_json_host("127.0.0.1", debug_port, path)
-        .map_err(|error| format!("cdp http failed: 127.0.0.1: {error}"))
+    let mut errors = Vec::new();
+    for host in cdp_hosts_for_platform(cfg!(target_os = "windows")) {
+        match http_get_json_host(host, debug_port, path) {
+            Ok(value) => return Ok(value),
+            Err(error) => errors.push(format!("{host}: {error}")),
+        }
+    }
+    Err(format!("cdp http failed: {}", errors.join("; ")))
+}
+
+fn cdp_hosts_for_platform(windows: bool) -> &'static [&'static str] {
+    if windows {
+        &["127.0.0.1"]
+    } else {
+        &["127.0.0.1", "[::1]"]
+    }
 }
 
 fn http_get_json_host(host: &str, debug_port: u16, path: &str) -> Result<Value, String> {

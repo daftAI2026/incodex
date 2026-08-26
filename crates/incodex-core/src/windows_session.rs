@@ -269,6 +269,16 @@ pub fn copy_windows_settings(
 ) -> Result<usize, String> {
     validate_session_identity(session)?;
     require_absolute(source_home, "Windows Codex source home")?;
+    match fs::symlink_metadata(source_home) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => {
+            return Err(format!(
+                "cannot inspect Windows Codex source home {}: {error}",
+                source_home.display()
+            ))
+        }
+        Ok(_) => {}
+    }
     reject_reparse_ancestors(source_home)?;
     if !source_home.is_dir() {
         return Err(format!(
