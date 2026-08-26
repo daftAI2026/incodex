@@ -168,6 +168,14 @@ describe("incognito profile mask", () => {
     expect(inject).toContain("observer.observe(document.documentElement, observerOptions())");
   });
 
+  test("rechecks masking when a staged profile menu is linked to its footer", () => {
+    const observedAttributes = inject.match(
+      /const PROFILE_OBSERVED_ATTRIBUTES = \[([\s\S]*?)\];/,
+    )?.[1];
+
+    expect(observedAttributes).toContain('"aria-controls"');
+  });
+
   test("reobserves when CDP enables masking after Runtime startup", () => {
     expect(inject).toContain("__incodexMutationObserver");
     expect(inject).toContain("__incodexProfileObservationEnabled");
