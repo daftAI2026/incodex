@@ -307,7 +307,10 @@ fn plan_from_session(
 }
 
 fn read_locale_override(source_home: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(source_home.join("config.toml")).ok()?;
+    let content = std::fs::read_to_string(
+        source_home.join(incodex_core::session_layout::CONFIG_SETTING_FILE),
+    )
+    .ok()?;
     parse_locale_override(&content, &['"'])
 }
 

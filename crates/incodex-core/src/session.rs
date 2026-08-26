@@ -5,11 +5,15 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const SESSIONS_NAME: &str = "sessions";
+use crate::session_layout::{
+    AUTH_SETTING_FILE, CONFIG_SETTING_FILE, OWNER_MANIFEST_FILE, SESSIONS_DIRECTORY,
+};
+
+const SESSIONS_NAME: &str = SESSIONS_DIRECTORY;
 const LOGS_NAME: &str = "logs";
-const OWNER_NAME: &str = "owner.json";
+const OWNER_NAME: &str = OWNER_MANIFEST_FILE;
 const LOCK_NAME: &str = "lock";
-const SETTINGS_FILES: &[&str] = &["auth.json", "config.toml"];
+const SETTINGS_FILES: &[&str] = &[AUTH_SETTING_FILE, CONFIG_SETTING_FILE];
 const DIR_MODE: u32 = 0o700;
 const FILE_MODE: u32 = 0o600;
 

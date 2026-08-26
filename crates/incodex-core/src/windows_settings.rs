@@ -5,6 +5,7 @@ use std::path::Path;
 
 use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
 
+use crate::session_layout::{AUTH_SETTING_FILE, CONFIG_SETTING_FILE};
 use crate::windows_path::{reject_reparse_ancestors, require_local_disk_absolute};
 
 use super::{
@@ -16,8 +17,8 @@ pub const MAX_WINDOWS_AUTH_BYTES: u64 = 16 * 1024 * 1024;
 pub const MAX_WINDOWS_CONFIG_BYTES: u64 = 1024 * 1024;
 
 const SETTINGS_FILES: &[(&str, u64)] = &[
-    ("auth.json", MAX_WINDOWS_AUTH_BYTES),
-    ("config.toml", MAX_WINDOWS_CONFIG_BYTES),
+    (AUTH_SETTING_FILE, MAX_WINDOWS_AUTH_BYTES),
+    (CONFIG_SETTING_FILE, MAX_WINDOWS_CONFIG_BYTES),
 ];
 
 pub fn copy_windows_settings(

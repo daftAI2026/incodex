@@ -5,6 +5,7 @@ pub mod paths;
 pub mod print;
 #[cfg(not(target_os = "windows"))]
 pub mod session;
+pub mod session_layout;
 #[cfg(not(target_os = "windows"))]
 pub mod target;
 #[cfg(target_os = "windows")]

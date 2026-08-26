@@ -26,11 +26,12 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
+use crate::session_layout::{OWNER_MANIFEST_FILE, SESSIONS_DIRECTORY};
 use crate::windows_path::{
     reject_reparse_ancestors, require_absolute, validate_existing_session_dir,
 };
 
-const OWNER_NAME: &str = "owner.json";
+const OWNER_NAME: &str = OWNER_MANIFEST_FILE;
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
 const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
 static SESSION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -96,7 +97,7 @@ pub fn create_windows_session(user_root: &Path) -> Result<WindowsSessionHome, St
     })?;
     reject_reparse_ancestors(parent)?;
     ensure_private_dir(user_root)?;
-    let sessions = ensure_private_dir(&user_root.join("sessions"))?;
+    let sessions = ensure_private_dir(&user_root.join(SESSIONS_DIRECTORY))?;
     let root = create_unique_private_dir(&sessions)?;
     let result = (|| {
         let home = ensure_private_dir(&root.join("codex-home"))?;
@@ -181,7 +182,7 @@ pub fn inspect_windows_sessions(user_root: &Path) -> WindowsSessionInspection {
 
 fn inspect_session_entries(user_root: &Path) -> Result<Vec<WindowsSessionEntry>, String> {
     require_absolute(user_root, "Windows Incodex root")?;
-    let sessions = user_root.join("sessions");
+    let sessions = user_root.join(SESSIONS_DIRECTORY);
     match fs::symlink_metadata(&sessions) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => {
@@ -267,7 +268,7 @@ fn inspect_session_entry(
 }
 
 pub fn burn_windows_session(session: &WindowsSessionHome) -> WindowsCleanupResult {
-    let sessions = session.user_root.join("sessions");
+    let sessions = session.user_root.join(SESSIONS_DIRECTORY);
     let validated = match validate_existing_session_dir(&sessions, &session.root) {
         Ok(path) => path,
         Err(reason) => return classify_unsafe_cleanup(&session.root, reason),
@@ -414,7 +415,8 @@ fn create_unique_private_dir(parent: &Path) -> Result<PathBuf, String> {
 }
 
 fn validate_session_identity(session: &WindowsSessionHome) -> Result<(), String> {
-    let root = validate_existing_session_dir(&session.user_root.join("sessions"), &session.root)?;
+    let root =
+        validate_existing_session_dir(&session.user_root.join(SESSIONS_DIRECTORY), &session.root)?;
     if session_identity(&root)? != session.identity {
         return Err("Windows session file identity changed".to_string());
     }

@@ -5,7 +5,8 @@ use std::path::Path;
 use crate::locale::parse_locale_override;
 
 pub(crate) fn read_locale_override(source_home: &Path) -> Option<String> {
-    let file = File::open(source_home.join("config.toml")).ok()?;
+    let file =
+        File::open(source_home.join(incodex_core::session_layout::CONFIG_SETTING_FILE)).ok()?;
     let limit = incodex_core::windows_session::MAX_WINDOWS_CONFIG_BYTES;
     if file.metadata().ok()?.len() > limit {
         return None;
