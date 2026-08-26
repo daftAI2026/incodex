@@ -128,11 +128,17 @@ pub fn activate_packaged_kill_on_drop(
     let debugger_command = wide_nul(&debugger_command);
     let mut debugging =
         PackageDebugGuard::enable(&package, &debugger_command, request.environment())?;
-    let manager = ComPtr::create(
+    let manager = match ComPtr::create(
         &CLSID_APPLICATION_ACTIVATION_MANAGER,
         &IID_APPLICATION_ACTIVATION_MANAGER,
         "Windows application activation manager",
-    )?;
+    ) {
+        Ok(manager) => manager,
+        Err(error) => {
+            let restoration = debugging.disable();
+            return Err(activation_manager_failure(error, restoration));
+        }
+    };
     let mut process_id = 0;
     let result = unsafe {
         let vtable = *(manager.raw() as *mut *const ApplicationActivationManagerVtable);
@@ -146,25 +152,26 @@ pub fn activate_packaged_kill_on_drop(
     };
     if failed(result) {
         let disable = debugging.disable();
-        let message = join_cleanup_error(
-            hresult_message("cannot activate the Windows Codex package", result),
-            disable,
-        );
-        let shutdown = if process_id != 0 && !existing_processes.contains(&process_id) {
+        let process_shutdown = if process_id != 0 && !existing_processes.contains(&process_id) {
             Err(format!(
                 "activation failed after reporting new Windows process {process_id}; process shutdown is unproven"
             ))
         } else {
             Ok(())
         };
-        return Err(WindowsActivationFailure::after_start(message, shutdown));
+        return Err(activation_failure_after_debugging(
+            hresult_message("cannot activate the Windows Codex package", result),
+            disable,
+            process_shutdown,
+        ));
     }
     if process_id == 0 || existing_processes.contains(&process_id) {
         let disable = debugging.disable();
-        return Err(WindowsActivationFailure::before_start(join_cleanup_error(
+        return Err(activation_failure_after_debugging(
             "Windows package activation did not create a new isolated Codex process".to_string(),
             disable,
-        )));
+            Ok(()),
+        ));
     }
 
     let mut process_tree = match pending_job.attach(process_id, request.package_full_name()) {
@@ -174,8 +181,9 @@ pub fn activate_packaged_kill_on_drop(
             let message = format!(
                 "cannot contain activated Windows Codex process {process_id} in a Job Object: {error}"
             );
-            return Err(WindowsActivationFailure::after_start(
-                join_cleanup_error(message, disable),
+            return Err(activation_failure_after_debugging(
+                message,
+                disable,
                 Err(format!(
                     "cannot prove activated Windows Codex process {process_id} and its descendants exited after Job attachment failed"
                 )),
@@ -183,11 +191,12 @@ pub fn activate_packaged_kill_on_drop(
         }
     };
     if let Err(error) = debugging.disable() {
-        let shutdown = process_tree.terminate().map(|_| ()).map_err(|shutdown_error| {
+        let process_shutdown = process_tree.terminate().map(|_| ()).map_err(|shutdown_error| {
             format!(
                 "cannot prove the isolated Windows Job is empty after package debug restoration failed: {shutdown_error}"
             )
         });
+        let shutdown = cleanup_proof_after_debugging(&Err(error.clone()), process_shutdown);
         return Err(WindowsActivationFailure::after_start(error, shutdown));
     }
     Ok(process_tree)
@@ -280,6 +289,42 @@ fn join_cleanup_error(primary: String, cleanup: Result<(), String>) -> String {
     match cleanup {
         Ok(()) => primary,
         Err(error) => format!("{primary}; {error}"),
+    }
+}
+
+fn activation_manager_failure(
+    primary: String,
+    restoration: Result<(), String>,
+) -> WindowsActivationFailure {
+    activation_failure_after_debugging(primary, restoration, Ok(()))
+}
+
+fn activation_failure_after_debugging(
+    primary: String,
+    restoration: Result<(), String>,
+    process_shutdown: Result<(), String>,
+) -> WindowsActivationFailure {
+    let shutdown = cleanup_proof_after_debugging(&restoration, process_shutdown);
+    WindowsActivationFailure::after_start(join_cleanup_error(primary, restoration), shutdown)
+}
+
+fn cleanup_proof_after_debugging(
+    restoration: &Result<(), String>,
+    process_shutdown: Result<(), String>,
+) -> Result<(), String> {
+    let mut failures = Vec::new();
+    if let Err(error) = restoration {
+        failures.push(format!(
+            "Windows package debug settings restoration is unproven: {error}"
+        ));
+    }
+    if let Err(error) = process_shutdown {
+        failures.push(error);
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("; "))
     }
 }
 
@@ -515,8 +560,7 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        acquire_package_activation_lock, activation_manager_failure,
-        cleanup_proof_after_debugging,
+        acquire_package_activation_lock, activation_manager_failure, cleanup_proof_after_debugging,
     };
 
     #[test]
@@ -527,7 +571,10 @@ mod tests {
         );
         let (message, shutdown) = failure.into_parts();
 
-        assert!(message.contains("cannot create activation manager"), "{message}");
+        assert!(
+            message.contains("cannot create activation manager"),
+            "{message}"
+        );
         assert!(
             message.contains("cannot restore package debug settings"),
             "{message}"
@@ -538,20 +585,16 @@ mod tests {
     #[test]
     fn cleanup_requires_both_debug_restoration_and_process_shutdown_proof() {
         assert!(cleanup_proof_after_debugging(&Ok(()), Ok(())).is_ok());
-        assert!(
-            cleanup_proof_after_debugging(
-                &Err("debug restoration failed".to_string()),
-                Ok(())
-            )
-            .is_err()
-        );
-        assert!(
-            cleanup_proof_after_debugging(
-                &Ok(()),
-                Err("process shutdown is unproven".to_string())
-            )
-            .is_err()
-        );
+        assert!(cleanup_proof_after_debugging(
+            &Err("debug restoration failed".to_string()),
+            Ok(())
+        )
+        .is_err());
+        assert!(cleanup_proof_after_debugging(
+            &Ok(()),
+            Err("process shutdown is unproven".to_string())
+        )
+        .is_err());
     }
 
     #[test]
