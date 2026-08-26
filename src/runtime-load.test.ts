@@ -9,7 +9,7 @@ describe("runtime load", () => {
   test("HOME missing does not yield a relative .incodex path", () => {
     expect(hotHomeRoot({})).toBeNull();
     expect(hotHomeRoot({ HOME: "" })).toBeNull();
-    expect(hotHomeRoot({ HOME: "/Users/me" })).toBe("/Users/me/.incodex");
+    expect(hotHomeRoot({ HOME: "/Users/me" })).toBe(join("/Users/me", ".incodex"));
   });
 
   test("production ignores home overrides unless INCODEX_DEV_HOT=1", () => {
