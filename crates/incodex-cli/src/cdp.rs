@@ -500,7 +500,13 @@ pub(crate) fn monitor_profile_mask_health<F>(
 where
     F: FnMut(&str),
 {
-    monitor_profile_mask_health_with_guard(debug_port, process_alive, on_failure, &|_| Ok(()), true)
+    monitor_profile_mask_health_with_guard(
+        debug_port,
+        process_alive,
+        on_failure,
+        &|_| Ok(()),
+        false,
+    )
 }
 
 #[cfg(any(target_os = "windows", test))]
@@ -519,7 +525,7 @@ where
             &process_alive,
             |_| cdp_failed.store(true, Ordering::Release),
             &connection_guard,
-            false,
+            true,
         );
     })
 }
@@ -529,7 +535,7 @@ fn monitor_profile_mask_health_with_guard<F, G>(
     process_alive: &AtomicBool,
     mut on_failure: F,
     connection_guard: &G,
-    fail_on_probe_error: bool,
+    defer_missing_target: bool,
 ) -> Result<(), String>
 where
     F: FnMut(&str),
@@ -541,15 +547,16 @@ where
         if !process_alive.load(Ordering::Acquire) {
             return Ok(());
         }
-        let failure = match probe_profile_mask_health(debug_port, process_alive, connection_guard) {
-            Ok(true) => None,
-            Ok(false) => Some("Incodex profile mask could not be restored".to_string()),
-            Err(error) if fail_on_probe_error => Some(error),
-            Err(_) => None,
-        };
-        match failure {
-            None => failures = 0,
-            Some(error) => {
+        match probe_profile_mask_health(debug_port, process_alive, connection_guard) {
+            Ok(true) => failures = 0,
+            Err(ProfileMaskProbeError::TargetMissing) if defer_missing_target => {}
+            result => {
+                let error = match result {
+                    Ok(false) => "Incodex profile mask could not be restored".to_string(),
+                    Err(ProfileMaskProbeError::TargetMissing) => "no Codex page target".to_string(),
+                    Err(ProfileMaskProbeError::ProbeFailed(error)) => error,
+                    Ok(true) => unreachable!("healthy profile result handled above"),
+                };
                 failures = failures.saturating_add(1);
                 if failures >= PROFILE_MASK_FAILURE_POLLS {
                     on_failure(&error);
@@ -561,18 +568,24 @@ where
     Ok(())
 }
 
+enum ProfileMaskProbeError {
+    TargetMissing,
+    ProbeFailed(String),
+}
+
 fn probe_profile_mask_health<G>(
     debug_port: u16,
     process_alive: &AtomicBool,
     connection_guard: &G,
-) -> Result<bool, String>
+) -> Result<bool, ProfileMaskProbeError>
 where
     G: Fn(&TcpStream) -> Result<(), String>,
 {
-    ensure_injection_active(process_alive)?;
-    let targets = list_targets(debug_port)?;
-    let page = pick_codex_page_target(&targets).ok_or("no Codex page target")?;
-    let mut socket = connect_cdp_websocket(&page.ws, debug_port)?;
+    ensure_injection_active(process_alive).map_err(ProfileMaskProbeError::ProbeFailed)?;
+    let targets = list_targets(debug_port).map_err(ProfileMaskProbeError::ProbeFailed)?;
+    let page = pick_codex_page_target(&targets).ok_or(ProfileMaskProbeError::TargetMissing)?;
+    let mut socket =
+        connect_cdp_websocket(&page.ws, debug_port).map_err(ProfileMaskProbeError::ProbeFailed)?;
     let response = send_guarded_cdp(
         &mut socket,
         1,
@@ -582,11 +595,14 @@ where
             "returnByValue": true
         }),
         connection_guard,
-    )?;
+    )
+    .map_err(ProfileMaskProbeError::ProbeFailed)?;
     let healthy = response
         .pointer("/result/result/value")
         .and_then(Value::as_bool)
-        .ok_or("malformed profile mask health result")?;
+        .ok_or_else(|| {
+            ProfileMaskProbeError::ProbeFailed("malformed profile mask health result".to_string())
+        })?;
     Ok(healthy)
 }
 

@@ -569,6 +569,7 @@ function onKeydown(event: KeyboardEvent): void {
 }
 
 const PROFILE_OBSERVED_ATTRIBUTES = [
+  "aria-controls",
   "class",
   "src",
   "style",

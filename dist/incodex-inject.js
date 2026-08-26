@@ -1898,6 +1898,7 @@ function onKeydown(event) {
   activate();
 }
 var PROFILE_OBSERVED_ATTRIBUTES = [
+  "aria-controls",
   "class",
   "src",
   "style",

@@ -27,6 +27,16 @@ pub(crate) fn cleanup_windows_session(session: &WindowsSessionHome) -> WindowsCl
     last
 }
 
+pub(crate) fn cleanup_windows_session_after_shutdown(
+    session: &WindowsSessionHome,
+    shutdown: Result<(), String>,
+) -> WindowsCleanupResult {
+    match shutdown {
+        Ok(()) => cleanup_windows_session(session),
+        Err(reason) => WindowsCleanupResult::Unknown { reason },
+    }
+}
+
 fn observe_removed_session(session: &WindowsSessionHome) -> WindowsCleanupResult {
     let deadline = Instant::now() + REMOVAL_OBSERVATION;
     loop {
