@@ -78,6 +78,7 @@ The native Rust contract tests are the product behavior source of truth. The rem
 - Windows support is under development and is not a public product claim until the corresponding behavior has passed real Windows app and lifecycle verification.
 - The initial Windows Rust boundary exposes parsing, help, and version reporting only. Every product command fails closed before creating Incodex state until that command lands behind its own failing Windows test.
 - Windows CI intentionally tests the supported `incodex-core` and `incodex-cli` library/binary surface. The ASAR mutation, transaction, Runtime publishing, and macOS integration crates remain outside that target until a real Windows responsibility exists; do not add placeholder Windows implementations merely to make `cargo test --workspace` compile there.
+- `crates/incodex-core/src/windows_path.rs` owns the first Windows session-path boundary: existing session ancestors must be absolute, remain inside the canonical trusted root, and contain no reparse point before later code may create or delete state.
 - Preserve the shared parser and command names. Add Windows behavior inside the Rust product CLI, one review-sized capability at a time; do not create a second CLI or Runtime.
 - Treat Store/AppX installation, Authenticode, reparse points, ACLs, process trees, and updater behavior as evidence-driven Windows boundaries. Do not implement Windows `install` / `uninstall` without separate repository-owner approval.
 
