@@ -2,39 +2,67 @@ use std::process::Command;
 
 pub struct VersionFacts {
     pub version: String,
-    pub macos: String,
+    pub system_name: String,
+    pub system_version: String,
     pub architecture: String,
-    pub kernel: String,
-    pub sip: String,
-    pub disk_free: String,
+    pub kernel: Option<String>,
+    pub security_name: Option<String>,
+    pub security_status: Option<String>,
+    pub disk_free: Option<String>,
     pub install: String,
     pub shell: String,
 }
 
 pub fn format_version_report(facts: &VersionFacts) -> String {
-    format!(
-        "Incodex version {}\nmacOS: {}\nArchitecture: {}\nKernel: {}\nSIP: {}\nDisk Free: {}\nInstall: {}\nShell: {}\n\n",
-        facts.version,
-        facts.macos,
-        facts.architecture,
-        facts.kernel,
-        facts.sip,
-        facts.disk_free,
-        facts.install,
-        facts.shell
-    )
+    let mut lines = vec![
+        format!("Incodex version {}", facts.version),
+        format!("{}: {}", facts.system_name, facts.system_version),
+        format!("Architecture: {}", facts.architecture),
+    ];
+    if let Some(kernel) = &facts.kernel {
+        lines.push(format!("Kernel: {kernel}"));
+    }
+    if let (Some(name), Some(status)) = (&facts.security_name, &facts.security_status) {
+        lines.push(format!("{name}: {status}"));
+    }
+    if let Some(disk_free) = &facts.disk_free {
+        lines.push(format!("Disk Free: {disk_free}"));
+    }
+    lines.push(format!("Install: {}", facts.install));
+    lines.push(format!("Shell: {}", facts.shell));
+    format!("{}\n\n", lines.join("\n"))
 }
 
+#[cfg(not(target_os = "windows"))]
 pub fn collect_version_facts() -> VersionFacts {
     VersionFacts {
         version: env!("CARGO_PKG_VERSION").to_string(),
-        macos: probe("sw_vers", &["-productVersion"]),
+        system_name: "macOS".to_string(),
+        system_version: probe("sw_vers", &["-productVersion"]),
         architecture: probe("uname", &["-m"]),
-        kernel: probe("uname", &["-r"]),
-        sip: sip_status(),
-        disk_free: disk_free(),
+        kernel: Some(probe("uname", &["-r"])),
+        security_name: Some("SIP".to_string()),
+        security_status: Some(sip_status()),
+        disk_free: Some(disk_free()),
         install: install_channel(),
         shell: std::env::var("SHELL").unwrap_or_else(|_| "Unknown".to_string()),
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn collect_version_facts() -> VersionFacts {
+    let version = probe("cmd", &["/C", "ver"]);
+    VersionFacts {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        system_name: "Windows".to_string(),
+        system_version: version.clone(),
+        architecture: std::env::consts::ARCH.to_string(),
+        kernel: None,
+        security_name: None,
+        security_status: None,
+        disk_free: None,
+        install: install_channel(),
+        shell: std::env::var("COMSPEC").unwrap_or_else(|_| "Unknown".to_string()),
     }
 }
 
@@ -46,6 +74,7 @@ fn probe(cmd: &str, args: &[&str]) -> String {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 fn sip_status() -> String {
     let raw = probe("csrutil", &["status"]).to_lowercase();
     if raw.contains("enabled") {
@@ -57,6 +86,7 @@ fn sip_status() -> String {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 fn disk_free() -> String {
     let raw = probe("df", &["-k", "/"]);
     let data = match raw.lines().nth(1) {
@@ -74,6 +104,12 @@ fn disk_free() -> String {
     format!("{:.2}GB", avail_kb / 1024.0 / 1024.0)
 }
 
+#[cfg(target_os = "windows")]
+fn install_channel() -> String {
+    "Unsupported".to_string()
+}
+
+#[cfg(not(target_os = "windows"))]
 fn install_channel() -> String {
     let exe = std::env::current_exe()
         .ok()
@@ -101,11 +137,13 @@ mod tests {
     fn format_prints_version_machine_install_and_shell() {
         let text = format_version_report(&VersionFacts {
             version: "0.2.0".into(),
-            macos: "15.4".into(),
+            system_name: "macOS".into(),
+            system_version: "15.4".into(),
             architecture: "arm64".into(),
-            kernel: "24.4.0".into(),
-            sip: "Enabled".into(),
-            disk_free: "177.88GB".into(),
+            kernel: Some("24.4.0".into()),
+            security_name: Some("SIP".into()),
+            security_status: Some("Enabled".into()),
+            disk_free: Some("177.88GB".into()),
             install: "Script".into(),
             shell: "/bin/zsh".into(),
         });

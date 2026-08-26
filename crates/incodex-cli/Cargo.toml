@@ -12,8 +12,10 @@ name = "incodex"
 path = "src/main.rs"
 
 [dependencies]
-incodex-asar = { path = "../incodex-asar" }
 incodex-core = { path = "../incodex-core" }
+
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+incodex-asar = { path = "../incodex-asar" }
 incodex-macos = { path = "../incodex-macos" }
 incodex-runtime-bundle = { path = "../incodex-runtime-bundle" }
 incodex-transaction = { path = "../incodex-transaction" }

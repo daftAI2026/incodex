@@ -73,6 +73,14 @@ The native Rust contract tests are the product behavior source of truth. The rem
 3. The retired TypeScript product router and mutation implementation must not return. Keep legacy v1 compatibility only in the named Rust fixture/proof modules; do not create new TypeScript parity paths.
 4. Rust `install` / `uninstall` / `recover` / `open` / `status` / `doctor` are the product paths. Preserve their proven safety contracts without creating new TypeScript parity work.
 
+### Windows adaptation boundary
+
+- Windows support is under development and is not a public product claim until the corresponding behavior has passed real Windows app and lifecycle verification.
+- The initial Windows Rust boundary exposes parsing, help, and version reporting only. Every product command fails closed before creating Incodex state until that command lands behind its own failing Windows test.
+- Windows CI intentionally tests the supported `incodex-core` and `incodex-cli` library/binary surface. The ASAR mutation, transaction, Runtime publishing, and macOS integration crates remain outside that target until a real Windows responsibility exists; do not add placeholder Windows implementations merely to make `cargo test --workspace` compile there.
+- Preserve the shared parser and command names. Add Windows behavior inside the Rust product CLI, one review-sized capability at a time; do not create a second CLI or Runtime.
+- Treat Store/AppX installation, Authenticode, reparse points, ACLs, process trees, and updater behavior as evidence-driven Windows boundaries. Do not implement Windows `install` / `uninstall` without separate repository-owner approval.
+
 ### Runtime boundary
 
 - Electron Runtime stays TypeScript (`src/runtime/*.cts` → `dist/*.cjs`) and is still built by Bun; Rust embeds committed `dist/` artifacts.

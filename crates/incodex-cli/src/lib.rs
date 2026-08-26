@@ -1,32 +1,56 @@
+#[cfg(not(target_os = "windows"))]
 pub mod app_bundle;
+#[cfg(not(target_os = "windows"))]
 pub(crate) mod app_quiescence;
+#[cfg(not(target_os = "windows"))]
 pub mod cdp;
+#[cfg(not(target_os = "windows"))]
 pub mod confirm;
+#[cfg(not(target_os = "windows"))]
 pub mod diagnose;
+#[cfg(not(target_os = "windows"))]
 pub(crate) mod diagnose_checks;
+#[cfg(not(target_os = "windows"))]
 pub(crate) mod diagnose_format;
+#[cfg(not(target_os = "windows"))]
 mod diagnose_runtime;
+#[cfg(not(target_os = "windows"))]
 pub(crate) mod diagnose_signing;
+#[cfg(not(target_os = "windows"))]
 pub(crate) mod friendly_name;
 pub mod help;
+#[cfg(not(target_os = "windows"))]
 pub mod install;
+#[cfg(not(target_os = "windows"))]
 mod install_keychain_advice;
+#[cfg(not(target_os = "windows"))]
 pub mod legacy_proof;
+#[cfg(not(target_os = "windows"))]
 pub mod legacy_typescript;
+#[cfg(not(target_os = "windows"))]
 pub mod lifecycle;
+#[cfg(not(target_os = "windows"))]
 pub mod menu;
+#[cfg(not(target_os = "windows"))]
 pub mod open;
 pub mod parse;
+#[cfg(not(target_os = "windows"))]
 pub mod profile_mask;
+#[cfg(not(target_os = "windows"))]
 pub mod spinner;
+#[cfg(not(target_os = "windows"))]
 pub mod terminal;
 pub mod version;
 
+#[cfg(not(target_os = "windows"))]
 use std::path::PathBuf;
 
+#[cfg(not(target_os = "windows"))]
 use diagnose::{diagnose_with_root_mode, DiagnosisMode};
+#[cfg(not(target_os = "windows"))]
 use diagnose_format::{diagnosis_json, format_diagnosis, format_status};
 use help::{command_help, ROOT_HELP};
+#[cfg(not(target_os = "windows"))]
 use incodex_core::paths::DEFAULT_APP;
 use parse::{parse_cli, CliCommand};
 use version::{collect_version_facts, format_version_report};
@@ -90,11 +114,12 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
+    #[cfg(not(target_os = "windows"))]
     if lifecycle::run_update_notice_worker() {
         return Ok(());
     }
     let args: Vec<String> = args.into_iter().map(|s| s.as_ref().to_string()).collect();
-    let mut parsed = parse_cli(&args)?;
+    let parsed = parse_cli(&args)?;
     if parsed.command == CliCommand::Version {
         print!("{}", format_version_report(&collect_version_facts()));
         return Ok(());
@@ -108,6 +133,23 @@ where
         println!("{text}");
         return Ok(());
     }
+
+    #[cfg(target_os = "windows")]
+    {
+        if parsed.command == CliCommand::Menu {
+            println!("{ROOT_HELP}");
+            return Ok(());
+        }
+        Err(CliFailure::new(format!(
+            "{} is not supported on Windows yet",
+            parsed.command.as_str()
+        )))
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    let mut parsed = parsed;
+
+    #[cfg(not(target_os = "windows"))]
     if parsed.command == CliCommand::Menu {
         if !terminal::is_tty() {
             println!("{ROOT_HELP}");
@@ -124,6 +166,7 @@ where
         }
     }
 
+    #[cfg(not(target_os = "windows"))]
     match parsed.command {
         CliCommand::Open => crate::open::run_open(&parsed),
         CliCommand::Runtime => crate::lifecycle::run_runtime(&parsed).map_err(CliFailure::from),
@@ -142,6 +185,7 @@ where
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 fn run_diagnosis(parsed: &parse::ParsedCli) -> Result<(), CliFailure> {
     let target = parsed
         .app
