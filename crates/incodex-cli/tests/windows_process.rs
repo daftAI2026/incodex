@@ -44,6 +44,7 @@ fn helper_process_tree_fixture() {
         .expect("spawn descendant");
     let pid_file = PathBuf::from(std::env::var_os(PID_FILE_ENV).expect("pid file"));
     fs::write(pid_file, descendant.id().to_string()).expect("publish descendant pid");
+    drop(descendant);
 
     loop {
         thread::sleep(Duration::from_secs(60));

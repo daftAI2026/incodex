@@ -1,21 +1,29 @@
 use std::ffi::c_void;
 use std::io;
 use std::mem::size_of;
+use std::net::Ipv4Addr;
 use std::os::windows::io::AsRawHandle;
 use std::os::windows::process::CommandExt;
 use std::process::{Child, Command, ExitStatus};
 
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, ERROR_INSUFFICIENT_BUFFER, HANDLE, INVALID_HANDLE_VALUE,
+};
+use windows_sys::Win32::NetworkManagement::IpHelper::{
+    GetExtendedTcpTable, MIB_TCPROW_OWNER_PID, MIB_TCPTABLE_OWNER_PID, TCP_TABLE_OWNER_PID_LISTENER,
+};
+use windows_sys::Win32::Networking::WinSock::AF_INET;
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
 };
 use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+    AssignProcessToJobObject, CreateJobObjectW, IsProcessInJob, JobObjectExtendedLimitInformation,
     SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
 use windows_sys::Win32::System::Threading::{
-    OpenThread, ResumeThread, CREATE_SUSPENDED, THREAD_SUSPEND_RESUME,
+    OpenProcess, OpenThread, ResumeThread, CREATE_SUSPENDED, PROCESS_QUERY_LIMITED_INFORMATION,
+    THREAD_SUSPEND_RESUME,
 };
 
 #[derive(Debug)]
@@ -42,6 +50,58 @@ impl WindowsProcessTree {
         }
         self.child.wait()
     }
+
+    pub fn listener_owner_is_in_job(&self, port: u16) -> io::Result<bool> {
+        let Some(owner_pid) = ipv4_listener_owner(port)? else {
+            return Ok(false);
+        };
+        let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, owner_pid) };
+        let process = OwnedHandle::from_nullable(process)?;
+        let mut contained = 0;
+        if unsafe { IsProcessInJob(process.raw(), self._job.raw(), &mut contained) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(contained != 0)
+    }
+}
+
+fn ipv4_listener_owner(port: u16) -> io::Result<Option<u32>> {
+    let mut bytes = 0;
+    let first = unsafe {
+        GetExtendedTcpTable(
+            std::ptr::null_mut(),
+            &mut bytes,
+            0,
+            AF_INET as u32,
+            TCP_TABLE_OWNER_PID_LISTENER,
+            0,
+        )
+    };
+    if first != ERROR_INSUFFICIENT_BUFFER || bytes < size_of::<MIB_TCPTABLE_OWNER_PID>() as u32 {
+        return Err(io::Error::from_raw_os_error(first as i32));
+    }
+    let mut storage = vec![0u32; (bytes as usize).div_ceil(size_of::<u32>())];
+    let status = unsafe {
+        GetExtendedTcpTable(
+            storage.as_mut_ptr().cast(),
+            &mut bytes,
+            0,
+            AF_INET as u32,
+            TCP_TABLE_OWNER_PID_LISTENER,
+            0,
+        )
+    };
+    if status != 0 {
+        return Err(io::Error::from_raw_os_error(status as i32));
+    }
+    let table = unsafe { &*storage.as_ptr().cast::<MIB_TCPTABLE_OWNER_PID>() };
+    let rows =
+        unsafe { std::slice::from_raw_parts(table.table.as_ptr(), table.dwNumEntries as usize) };
+    Ok(rows.iter().find_map(|row: &MIB_TCPROW_OWNER_PID| {
+        let local_address = Ipv4Addr::from(u32::from_be(row.dwLocalAddr));
+        let local_port = u16::from_be(row.dwLocalPort as u16);
+        (local_address == Ipv4Addr::LOCALHOST && local_port == port).then_some(row.dwOwningPid)
+    }))
 }
 
 pub fn spawn_kill_on_drop(command: &mut Command) -> io::Result<WindowsProcessTree> {
