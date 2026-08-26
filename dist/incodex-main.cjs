@@ -149,6 +149,12 @@ function cleanupExitedSession(session, childOwner, options = {}) {
     });
 }
 function markSessionReady() {
+    if (windowsPlatform) {
+        if (!windowsPlatform.markReady(process.env.INCODEX_WINDOWS_READY_PIPE || "")) {
+            logLaunch("ready-refused", { reason: "guardian pipe unavailable" });
+        }
+        return;
+    }
     const session = sessionFromEnv();
     if (!session?.root)
         return;

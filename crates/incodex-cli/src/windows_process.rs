@@ -144,6 +144,10 @@ impl WindowsProcessTree {
         has_visible_window_for_processes(&process_ids)
     }
 
+    pub fn contains_process(&self, process_id: u32) -> io::Result<bool> {
+        process_is_in_job(process_id, self._job.raw())
+    }
+
     fn job_has_active_processes(&self) -> io::Result<bool> {
         let mut accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
         if unsafe {

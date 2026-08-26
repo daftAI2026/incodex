@@ -2,19 +2,32 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;
 use std::io::{BufRead, Write};
-use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use incodex_core::windows_path::require_local_disk_absolute;
 use incodex_core::windows_session::{
-    apply_private_windows_acl, burn_windows_session, copy_windows_settings, create_windows_session,
-    sweep_orphan_windows_sessions, verify_private_acl, WindowsCleanupResult, WindowsSessionHome,
+    burn_windows_session, copy_windows_settings, create_windows_session,
+    sweep_orphan_windows_sessions, WindowsCleanupResult, WindowsSessionHome,
 };
-use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+use windows_sys::Win32::Foundation::{
+    CloseHandle, ERROR_PIPE_CONNECTED, HANDLE, INVALID_HANDLE_VALUE,
+};
+use windows_sys::Win32::Security::Cryptography::{
+    BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+};
+use windows_sys::Win32::Storage::FileSystem::{
+    ReadFile, FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_INBOUND,
+};
+use windows_sys::Win32::System::Pipes::{
+    ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, PIPE_READMODE_MESSAGE,
+    PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_MESSAGE, PIPE_WAIT,
+};
 
 use crate::cdp::OFFICIAL_NEW_CODEX_URL;
 use crate::windows_activation::{
@@ -33,7 +46,119 @@ const RUNTIME_OPEN_MODE: &str = "__incodex_windows_runtime_open";
 const READY_TIMEOUT: Duration = Duration::from_secs(30);
 const VISIBLE_CLOSE_GRACE: Duration = Duration::from_millis(250);
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
-const READY_FILE_LIMIT: u64 = 64;
+const READY_MESSAGE_LIMIT: usize = 64;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowsRuntimeAcceptance {
+    pub process_id: u32,
+    pub message: String,
+}
+
+pub struct WindowsRuntimeReadyPipe {
+    handle: HANDLE,
+    name: String,
+}
+
+unsafe impl Send for WindowsRuntimeReadyPipe {}
+
+impl WindowsRuntimeReadyPipe {
+    pub fn create() -> Result<Self, String> {
+        let mut random = [0u8; 16];
+        let status = unsafe {
+            BCryptGenRandom(
+                ptr::null_mut(),
+                random.as_mut_ptr(),
+                random.len() as u32,
+                BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+            )
+        };
+        if status != 0 {
+            return Err(format!(
+                "cannot generate Windows Runtime ready pipe name: NTSTATUS 0x{:08X}",
+                status as u32
+            ));
+        }
+        let nonce = random
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let name = format!(r"\\.\pipe\Incodex-Runtime-Ready-{nonce}");
+        let wide = name.encode_utf16().chain([0]).collect::<Vec<_>>();
+        let handle = unsafe {
+            CreateNamedPipeW(
+                wide.as_ptr(),
+                PIPE_ACCESS_INBOUND | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+                1,
+                0,
+                READY_MESSAGE_LIMIT as u32,
+                0,
+                ptr::null(),
+            )
+        };
+        if handle == INVALID_HANDLE_VALUE {
+            return Err(format!(
+                "cannot create Windows Runtime ready pipe: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        Ok(Self { handle, name })
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn accept(self) -> Result<WindowsRuntimeAcceptance, String> {
+        let connected = unsafe { ConnectNamedPipe(self.handle, ptr::null_mut()) };
+        if connected == 0
+            && std::io::Error::last_os_error().raw_os_error() != Some(ERROR_PIPE_CONNECTED as i32)
+        {
+            return Err(format!(
+                "cannot accept Windows Runtime readiness: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let mut process_id = 0;
+        if unsafe { GetNamedPipeClientProcessId(self.handle, &mut process_id) } == 0 {
+            return Err(format!(
+                "cannot identify Windows Runtime ready writer: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let mut body = [0u8; READY_MESSAGE_LIMIT];
+        let mut read = 0;
+        if unsafe {
+            ReadFile(
+                self.handle,
+                body.as_mut_ptr(),
+                body.len() as u32,
+                &mut read,
+                ptr::null_mut(),
+            )
+        } == 0
+        {
+            return Err(format!(
+                "cannot read Windows Runtime readiness: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let message = std::str::from_utf8(&body[..read as usize])
+            .map_err(|_| "Windows Runtime readiness is not UTF-8".to_string())?
+            .trim()
+            .to_string();
+        Ok(WindowsRuntimeAcceptance {
+            process_id,
+            message,
+        })
+    }
+}
+
+impl Drop for WindowsRuntimeReadyPipe {
+    fn drop(&mut self) {
+        unsafe { CloseHandle(self.handle) };
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowsRuntimeOpenRequest {
@@ -181,10 +306,16 @@ fn run_windows_runtime_open(request: WindowsRuntimeOpenRequest) -> Result<(), St
 }
 
 fn execute_windows_runtime_open(
-    plan: WindowsRuntimeOpenPlan,
+    mut plan: WindowsRuntimeOpenPlan,
     registration: &WindowsInstalledRuntimeRegistration,
     launch_gate: WindowsInstallStateGuard,
 ) -> Result<(), String> {
+    let ready_pipe = WindowsRuntimeReadyPipe::create()
+        .map_err(|error| with_shutdown_cleanup(error, &plan.session, Ok(())))?;
+    plan.env_flags.insert(
+        "INCODEX_WINDOWS_READY_PIPE".to_string(),
+        ready_pipe.name().to_string(),
+    );
     let activation = match plan.activation_request() {
         Ok(activation) => activation,
         Err(error) => return Err(with_shutdown_cleanup(error, &plan.session, Ok(()))),
@@ -201,12 +332,17 @@ fn execute_windows_runtime_open(
         }
     };
     drop(launch_gate);
-    run_guardian_lifecycle(plan.session, process_tree)
+    let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
+    thread::spawn(move || {
+        let _ = ready_sender.send(ready_pipe.accept());
+    });
+    run_guardian_lifecycle(plan.session, process_tree, ready_receiver)
 }
 
 fn run_guardian_lifecycle(
     session: WindowsSessionHome,
     mut process_tree: WindowsProcessTree,
+    ready_receiver: Receiver<Result<WindowsRuntimeAcceptance, String>>,
 ) -> Result<(), String> {
     let cancelled = listen_for_guardian_cancellation();
     let ready_deadline = Instant::now() + READY_TIMEOUT;
@@ -237,9 +373,45 @@ fn run_guardian_lifecycle(
             }
         }
         if !runtime_accepted {
-            match validate_windows_runtime_ready(&session) {
-                Ok(accepted) => runtime_accepted = accepted,
-                Err(error) => return guardian_failure(error, &session, &mut process_tree),
+            match ready_receiver.try_recv() {
+                Ok(Ok(acceptance)) => {
+                    if acceptance.message != "accepted" {
+                        return guardian_failure(
+                            "Windows Runtime readiness message is invalid".to_string(),
+                            &session,
+                            &mut process_tree,
+                        );
+                    }
+                    match process_tree.contains_process(acceptance.process_id) {
+                        Ok(true) => runtime_accepted = true,
+                        Ok(false) => {
+                            return guardian_failure(
+                                "Windows Runtime readiness writer is outside the isolated Job"
+                                    .to_string(),
+                                &session,
+                                &mut process_tree,
+                            )
+                        }
+                        Err(error) => {
+                            return guardian_failure(
+                                format!(
+                                    "cannot authenticate Windows Runtime readiness writer: {error}"
+                                ),
+                                &session,
+                                &mut process_tree,
+                            )
+                        }
+                    }
+                }
+                Ok(Err(error)) => return guardian_failure(error, &session, &mut process_tree),
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    return guardian_failure(
+                        "Windows Runtime readiness channel closed before acceptance".to_string(),
+                        &session,
+                        &mut process_tree,
+                    )
+                }
             }
         }
         let visible = match process_tree.has_visible_window() {
@@ -382,29 +554,6 @@ fn installed_state_from_environment() -> Result<WindowsInstallState, String> {
         return Err("Windows Runtime environment package identity changed".to_string());
     }
     Ok(state)
-}
-
-pub fn validate_windows_runtime_ready(session: &WindowsSessionHome) -> Result<bool, String> {
-    let path = session.root.join("ready");
-    let metadata = match fs::symlink_metadata(&path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(format!("cannot inspect Windows Runtime readiness: {error}")),
-    };
-    if !metadata.is_file()
-        || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-        || metadata.len() > READY_FILE_LIMIT
-    {
-        return Err("Windows Runtime readiness marker is unsafe".to_string());
-    }
-    apply_private_windows_acl(&path)?;
-    verify_private_acl(&path)?;
-    let body = fs::read_to_string(&path)
-        .map_err(|error| format!("cannot read Windows Runtime readiness: {error}"))?;
-    body.trim()
-        .parse::<u64>()
-        .map(|_| true)
-        .map_err(|_| "Windows Runtime readiness marker is invalid".to_string())
 }
 
 fn guardian_failure(

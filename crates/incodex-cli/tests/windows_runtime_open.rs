@@ -6,12 +6,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_cli::windows_app::WindowsCodexApp;
 use incodex_cli::windows_runtime_open::{
-    parse_windows_runtime_open, prepare_windows_runtime_open, validate_windows_runtime_ready,
-    windows_runtime_ready_for_handshake, WindowsRuntimeReadyPipe,
+    parse_windows_runtime_open, prepare_windows_runtime_open, windows_runtime_ready_for_handshake,
+    WindowsRuntimeReadyPipe,
 };
-use incodex_core::windows_session::{
-    burn_windows_session, verify_private_acl, WindowsCleanupResult,
-};
+use incodex_core::windows_session::{burn_windows_session, WindowsCleanupResult};
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -120,30 +118,6 @@ fn installed_runtime_plan_reuses_native_session_without_cdp_or_duplicate_ui() {
         fs::read(plan.session.home.join("auth.json")).expect("copied auth"),
         b"fixture-auth"
     );
-    assert_eq!(
-        burn_windows_session(&plan.session),
-        WindowsCleanupResult::Removed
-    );
-    fs::remove_dir_all(root).expect("remove fixture");
-}
-
-#[test]
-fn guardian_protects_the_shared_runtime_ready_marker_before_trusting_it() {
-    let root = scratch();
-    let install = root.join("package");
-    let profile = root.join("profile");
-    let source = profile.join(".codex");
-    fs::create_dir_all(install.join("app")).expect("create package fixture");
-    fs::create_dir_all(&source).expect("create source home");
-    let plan =
-        prepare_windows_runtime_open(&app_at(&install), &profile.join(".incodex"), &source, None)
-            .expect("prepare installed Runtime open");
-    let ready = plan.session.root.join("ready");
-    fs::write(&ready, b"1787760000000\n").expect("write inherited ready marker");
-
-    assert!(validate_windows_runtime_ready(&plan.session).expect("validate ready marker"));
-    verify_private_acl(&ready).expect("guardian protected ready marker ACL");
-
     assert_eq!(
         burn_windows_session(&plan.session),
         WindowsCleanupResult::Removed

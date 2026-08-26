@@ -1,14 +1,26 @@
 "use strict";
 
 const { spawn } = require("node:child_process");
+const { writeFileSync } = require("node:fs");
 const path = require("node:path");
 
 const READY_TIMEOUT_MS = 35_000;
 const CANCEL_EXIT_TIMEOUT_MS = 5_000;
 const BOUNDS_PATTERN = /^-?\d{1,10},-?\d{1,10},\d{1,10},\d{1,10}$/;
+const READY_PIPE_PATTERN = /^\\\\\.\\pipe\\Incodex-Runtime-Ready-[a-f0-9]{32}$/;
 
 function validAbsolutePath(value) {
   return typeof value === "string" && !value.includes("\0") && path.win32.isAbsolute(value);
+}
+
+function markReady(pipeName, write = writeFileSync) {
+  if (typeof pipeName !== "string" || !READY_PIPE_PATTERN.test(pipeName)) return false;
+  try {
+    write(pipeName, "accepted\n");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function launchIncognito(options = {}) {
@@ -111,4 +123,4 @@ function launchIncognito(options = {}) {
   });
 }
 
-module.exports = { launchIncognito };
+module.exports = { launchIncognito, markReady };
