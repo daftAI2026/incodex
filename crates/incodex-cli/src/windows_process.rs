@@ -3,7 +3,7 @@ use std::io;
 use std::mem::size_of;
 use std::os::windows::io::AsRawHandle;
 use std::os::windows::process::CommandExt;
-use std::process::{Child, Command};
+use std::process::{Child, Command, ExitStatus};
 
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
@@ -11,7 +11,7 @@ use windows_sys::Win32::System::Diagnostics::ToolHelp::{
 };
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-    SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
 use windows_sys::Win32::System::Threading::{
@@ -27,6 +27,20 @@ pub struct WindowsProcessTree {
 impl WindowsProcessTree {
     pub fn id(&self) -> u32 {
         self.child.id()
+    }
+
+    pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+        self.child.try_wait()
+    }
+
+    pub fn terminate(&mut self) -> io::Result<ExitStatus> {
+        if let Some(status) = self.child.try_wait()? {
+            return Ok(status);
+        }
+        if unsafe { TerminateJobObject(self._job.raw(), 1) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        self.child.wait()
     }
 }
 

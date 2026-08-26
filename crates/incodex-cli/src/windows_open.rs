@@ -1,5 +1,15 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::process::{Command, Stdio};
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(test)]
+use std::sync::{mpsc, Arc};
+#[cfg(test)]
+use std::thread;
+#[cfg(test)]
+use std::time::Duration;
 
 use incodex_core::windows_session::{
     burn_windows_session, copy_windows_settings, create_windows_session, WindowsCleanupResult,
@@ -10,6 +20,8 @@ use incodex_core::{format_kv, format_step, format_warn};
 use crate::cdp::{allocate_debug_port, debug_launch_args, InjectionOptions};
 use crate::profile_mask::ProfileMask;
 use crate::windows_app::{discover_codex_package, WindowsCodexApp};
+#[cfg(test)]
+use crate::windows_process::spawn_kill_on_drop;
 use crate::{parse::ParsedCli, CliFailure};
 
 #[derive(Debug)]
@@ -21,6 +33,21 @@ pub struct WindowsOpenPlan {
     pub session: WindowsSessionHome,
     pub debug_port: u16,
     pub injection: InjectionOptions,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WindowsOpenProcessResult {
+    Exited(i32),
+    SpawnFailed(String),
+    ProcessStateUnknown(String),
+    InjectionFailed(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowsOpenOutcome {
+    pub process: WindowsOpenProcessResult,
+    pub ui_ready: bool,
+    pub cleanup: WindowsCleanupResult,
 }
 
 pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
@@ -101,6 +128,99 @@ pub fn prepare_windows_open(
             )),
         },
     }
+}
+
+#[cfg(test)]
+fn execute_windows_open_with<F>(plan: WindowsOpenPlan, inject: F) -> WindowsOpenOutcome
+where
+    F: FnOnce(u16, InjectionOptions, Arc<AtomicBool>) -> Result<(), String> + Send + 'static,
+{
+    let mut command = Command::new(&plan.bin);
+    command.args(&plan.args);
+    for (key, value) in &plan.env {
+        command.env(key, value);
+    }
+    for (key, value) in &plan.env_flags {
+        command.env(key, value);
+    }
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    let mut process_tree = match spawn_kill_on_drop(&mut command) {
+        Ok(process_tree) => process_tree,
+        Err(error) => {
+            return WindowsOpenOutcome {
+                process: WindowsOpenProcessResult::SpawnFailed(error.to_string()),
+                ui_ready: false,
+                cleanup: cleanup_windows_session(&plan.session),
+            }
+        }
+    };
+    let alive = Arc::new(AtomicBool::new(true));
+    let injection_alive = alive.clone();
+    let debug_port = plan.debug_port;
+    let options = plan.injection.clone();
+    let (injection_tx, injection_rx) = mpsc::channel();
+    let worker = thread::spawn(move || {
+        let _ = injection_tx.send(inject(debug_port, options, injection_alive));
+    });
+
+    let mut ui_ready = false;
+    let process = loop {
+        match injection_rx.try_recv() {
+            Ok(Ok(())) => ui_ready = true,
+            Ok(Err(error)) => {
+                let _ = process_tree.terminate();
+                break WindowsOpenProcessResult::InjectionFailed(error);
+            }
+            Err(mpsc::TryRecvError::Disconnected) if !ui_ready => {
+                let _ = process_tree.terminate();
+                break WindowsOpenProcessResult::InjectionFailed(
+                    "Windows CDP injection worker disconnected".to_string(),
+                );
+            }
+            Err(mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected) => {}
+        }
+        match process_tree.try_wait() {
+            Ok(Some(status)) => {
+                break WindowsOpenProcessResult::Exited(status.code().unwrap_or(1));
+            }
+            Ok(None) => {}
+            Err(error) => {
+                let _ = process_tree.terminate();
+                break WindowsOpenProcessResult::ProcessStateUnknown(error.to_string());
+            }
+        }
+        thread::sleep(Duration::from_millis(25));
+    };
+
+    alive.store(false, Ordering::Release);
+    let _ = worker.join();
+    drop(process_tree);
+    WindowsOpenOutcome {
+        process,
+        ui_ready,
+        cleanup: cleanup_windows_session(&plan.session),
+    }
+}
+
+#[cfg(test)]
+fn cleanup_windows_session(session: &WindowsSessionHome) -> WindowsCleanupResult {
+    let mut last = WindowsCleanupResult::Unknown {
+        reason: "Windows session cleanup was not attempted".to_string(),
+    };
+    for attempt in 1..=5 {
+        last = burn_windows_session(session);
+        if last == WindowsCleanupResult::Removed {
+            return last;
+        }
+        if attempt < 5 {
+            thread::sleep(Duration::from_millis(200 * attempt));
+        }
+    }
+    last
 }
 
 fn read_locale_override(source_home: &Path) -> Option<String> {
