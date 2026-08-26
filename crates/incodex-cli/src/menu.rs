@@ -1,49 +1,35 @@
 use std::io::{self, Write};
 
+use crate::menu_view::{render_menu_lines, MenuItem};
 use crate::parse::CliCommand;
 
-const REPO_URL: &str = "https://github.com/daftAI2026/incodex";
-const TAGLINE: &str = "Incognito toggle for Codex desktop.";
-const BANNER: &str = r#"  _____   _   _    _____    ____    _____    ______  __   __
- |_   _| | \ | |  / ____|  / __ \  |  __ \  |  ____| \ \ / /
-   | |   |  \| | | |      | |  | | | |  | | | |__     \ V /
-   | |   | . ` | | |      | |  | | | |  | | |  __|     > <
-  _| |_  | |\  | | |____  | |__| | | |__| | | |____   / . \
- |_____| |_| \_|  \_____|  \____/  |_____/  |______| /_/ \_\"#;
-
-struct Item {
-    command: Option<CliCommand>,
-    title: &'static str,
-    description: &'static str,
-}
-
-const ITEMS: &[Item] = &[
-    Item {
+const ITEMS: &[MenuItem] = &[
+    MenuItem {
         command: Some(CliCommand::Open),
         title: "Open",
         description: "Open an incognito window without patching",
     },
-    Item {
+    MenuItem {
         command: Some(CliCommand::Install),
         title: "Install",
         description: "Patch the Codex app you are using",
     },
-    Item {
+    MenuItem {
         command: Some(CliCommand::Uninstall),
         title: "Uninstall",
         description: "Restore the official Codex app",
     },
-    Item {
+    MenuItem {
         command: Some(CliCommand::Status),
         title: "Status",
         description: "Show whether Incodex is installed",
     },
-    Item {
+    MenuItem {
         command: Some(CliCommand::Doctor),
         title: "Doctor",
         description: "Diagnose the install and leftover sessions",
     },
-    Item {
+    MenuItem {
         command: None,
         title: "Quit",
         description: "Exit this menu",
@@ -91,32 +77,6 @@ fn draw(
     update_message: Option<&str>,
     self_update_available: bool,
 ) -> Result<(), String> {
-    let mut lines = vec![
-        paint("0;32", BANNER),
-        String::new(),
-        paint("1;34", &format!("  {REPO_URL}")),
-        paint("0;32", &format!("  {TAGLINE}")),
-    ];
-    if let Some(message) = update_message {
-        lines.push(String::new());
-        lines.push(paint("0;32", &format!("  {message}")));
-    }
-    lines.push(String::new());
-    let title_width = ITEMS.iter().map(|item| item.title.len()).max().unwrap_or(0);
-    for (index, item) in ITEMS.iter().enumerate() {
-        let body = format!(
-            "{}. {:title_width$}  {}",
-            index + 1,
-            item.title,
-            item.description
-        );
-        lines.push(if index == selected {
-            paint("0;36", &format!("➤ {body}"))
-        } else {
-            format!("  {body}")
-        });
-    }
-    lines.push(String::new());
     let controls = if self_update_available {
         format!(
             "↑↓ | Enter | U Update | V Version | Q Quit | 1-{} Jump",
@@ -125,7 +85,7 @@ fn draw(
     } else {
         format!("↑↓ | Enter | V Version | Q Quit | 1-{} Jump", ITEMS.len())
     };
-    lines.push(paint("0;38;5;244", &controls));
+    let lines = render_menu_lines(ITEMS, Some(selected), update_message, &controls);
     let body = lines.join("\n");
     let frame = body
         .lines()
@@ -134,10 +94,6 @@ fn draw(
         .join("\n");
     print!("\u{1b}[?25l\u{1b}[H\u{1b}[J{frame}\n\u{1b}[J");
     io::stdout().flush().map_err(|err| err.to_string())
-}
-
-fn paint(code: &str, text: &str) -> String {
-    format!("\u{1b}[{code}m{text}\u{1b}[0m")
 }
 
 struct CursorGuard;

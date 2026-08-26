@@ -29,6 +29,7 @@ pub mod legacy_typescript;
 pub mod lifecycle;
 #[cfg(not(target_os = "windows"))]
 pub mod menu;
+mod menu_view;
 #[cfg(not(target_os = "windows"))]
 pub mod open;
 pub mod parse;

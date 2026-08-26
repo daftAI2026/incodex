@@ -1,18 +1,43 @@
 use std::io::{self, Write};
 
+use crate::menu_view::{render_menu_lines, MenuItem};
 use crate::parse::CliCommand;
 
-const MENU: &str = "\
-1. Open       Open an isolated incognito Codex window
-2. Status     Show official Store package availability
-3. Doctor     Diagnose package health and isolated sessions
-4. Version    Show CLI and Windows support information
-5. Quit       Exit this menu";
+const ITEMS: &[MenuItem] = &[
+    MenuItem {
+        command: Some(CliCommand::Open),
+        title: "Open",
+        description: "Open an incognito window without patching",
+    },
+    MenuItem {
+        command: Some(CliCommand::Status),
+        title: "Status",
+        description: "Show whether Incodex is installed",
+    },
+    MenuItem {
+        command: Some(CliCommand::Doctor),
+        title: "Doctor",
+        description: "Diagnose the install and leftover sessions",
+    },
+    MenuItem {
+        command: Some(CliCommand::Version),
+        title: "Version",
+        description: "Show CLI and Windows support information",
+    },
+    MenuItem {
+        command: None,
+        title: "Quit",
+        description: "Exit this menu",
+    },
+];
+
+fn menu_text() -> String {
+    render_menu_lines(ITEMS, None, None, "Enter a number or name | Q Quit").join("\n")
+}
 
 pub fn run_menu() -> Result<Option<CliCommand>, String> {
     loop {
-        println!("{}", incodex_core::format_step("Incodex for Windows", None));
-        println!("{MENU}");
+        println!("{}", menu_text());
         print!("Select [1-5]: ");
         io::stdout().flush().map_err(|error| error.to_string())?;
 
@@ -39,23 +64,31 @@ pub fn run_menu() -> Result<Option<CliCommand>, String> {
 }
 
 pub fn command_for_selection(selection: &str) -> Option<CliCommand> {
-    match selection.trim().to_ascii_lowercase().as_str() {
-        "1" | "o" | "open" => Some(CliCommand::Open),
-        "2" | "s" | "status" => Some(CliCommand::Status),
-        "3" | "d" | "doctor" => Some(CliCommand::Doctor),
-        "4" | "v" | "version" => Some(CliCommand::Version),
-        _ => None,
+    let selection = selection.trim().to_ascii_lowercase();
+    if let Ok(number) = selection.parse::<usize>() {
+        return number
+            .checked_sub(1)
+            .and_then(|index| ITEMS.get(index))
+            .and_then(|item| item.command);
     }
+    ITEMS
+        .iter()
+        .find(|item| {
+            let title = item.title.to_ascii_lowercase();
+            selection == title || (selection.len() == 1 && title.starts_with(&selection))
+        })
+        .and_then(|item| item.command)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::MENU;
+    use super::menu_text;
 
     #[test]
     fn windows_menu_preserves_the_product_branding() {
-        assert!(MENU.contains("_____   _   _"));
-        assert!(MENU.contains("https://github.com/daftAI2026/incodex"));
-        assert!(MENU.contains("Incognito toggle for Codex desktop."));
+        let menu = menu_text();
+        assert!(menu.contains("_____   _   _"));
+        assert!(menu.contains("https://github.com/daftAI2026/incodex"));
+        assert!(menu.contains("Incognito toggle for Codex desktop."));
     }
 }
