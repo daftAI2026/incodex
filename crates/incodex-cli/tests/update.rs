@@ -57,6 +57,14 @@ fn intel_homebrew_cli(home: &std::path::Path) -> PathBuf {
     installed
 }
 
+fn usr_local_script_cli(home: &std::path::Path) -> PathBuf {
+    let bin = home.join("usr/local/bin");
+    fs::create_dir_all(&bin).unwrap();
+    let installed = bin.join("incodex");
+    fs::copy(env!("CARGO_BIN_EXE_incodex"), &installed).unwrap();
+    installed
+}
+
 #[test]
 fn homebrew_update_refreshes_metadata_then_upgrades_through_brew() {
     let home = scratch("homebrew-routing");
@@ -212,6 +220,23 @@ fn intel_homebrew_prefix_uses_the_homebrew_update_path() {
         stdout.contains("would run brew upgrade incodex"),
         "{stdout}"
     );
+}
+
+#[test]
+fn usr_local_script_prefix_keeps_the_script_update_path() {
+    let home = scratch("usr-local-script-routing");
+    let installed = usr_local_script_cli(&home);
+
+    let output = Command::new(installed)
+        .args(["update", "--dry-run"])
+        .env("HOME", &home)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("update channel: script"), "{stdout}");
+    assert!(stdout.contains("would re-run install.sh"), "{stdout}");
 }
 
 #[test]
