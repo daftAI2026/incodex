@@ -139,6 +139,49 @@ fn native_menu_refresh_survives_an_immediate_exit() {
 }
 
 #[test]
+fn native_menu_clears_a_stale_notice_when_release_lookup_fails() {
+    let home = scratch("menu-failed-refresh");
+    let fake_bin = home.join("fake-bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let (_, installed) = installed_cli(&home);
+    let curl_called = home.join("curl-called");
+    write_executable(
+        &fake_bin.join("curl"),
+        "#!/bin/sh\n: > \"$CURL_CALLED\"\nexit 22\n",
+    );
+    let cache = home.join(".incodex/cache/update_message");
+    fs::create_dir_all(cache.parent().unwrap()).unwrap();
+    fs::write(&cache, "Update 9.9.9 available, run inc update\n").unwrap();
+    let path = format!("{}:/usr/bin:/bin", fake_bin.display());
+    let curl_called_text = curl_called.to_string_lossy();
+
+    let result = support::tty::run_with_timeout_env(
+        installed.to_str().unwrap(),
+        &[],
+        &[],
+        &home,
+        "6. Quit",
+        "q",
+        Duration::from_secs(3),
+        &[
+            ("PATH", path.as_str()),
+            ("CURL_CALLED", curl_called_text.as_ref()),
+        ],
+    );
+    assert_eq!(result.status, 0, "{}", result.stderr);
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !curl_called.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        curl_called.exists(),
+        "background release lookup did not run"
+    );
+    assert_eq!(fs::read_to_string(cache).unwrap(), "");
+}
+
+#[test]
 fn native_homebrew_menu_waits_for_the_formula_and_names_inc_update() {
     let home = scratch("menu-homebrew-refresh");
     let fake_bin = home.join("fake-bin");
