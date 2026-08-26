@@ -124,3 +124,92 @@ fn read_locale_override(source_home: &Path) -> Option<String> {
             .map(str::to_string)
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
+
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+    fn plan() -> (PathBuf, WindowsOpenPlan) {
+        let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "incodex-windows-open-lifecycle-{}-{sequence}",
+            std::process::id()
+        ));
+        let profile = root.join("profile");
+        let source = profile.join(".codex");
+        fs::create_dir_all(&source).expect("create source");
+        fs::write(source.join("auth.json"), b"fixture").expect("write auth");
+        let executable = std::env::current_exe().expect("test executable");
+        let app = WindowsCodexApp {
+            package_full_name: "OpenAI.Codex_fixture_x64__2p2nqsd0c76g0".to_string(),
+            install_location: root.join("package"),
+            executable: executable.clone(),
+            asar: root.join("package/app/resources/app.asar"),
+            asar_unpacked: root.join("package/app/resources/app.asar.unpacked"),
+            architecture: "X64".to_string(),
+        };
+        let mut plan = prepare_windows_open(&app, &profile.join(".incodex"), &source, None)
+            .expect("prepare lifecycle plan");
+        plan.args = vec![
+            "windows_open::tests::open_process_fixture".to_string(),
+            "--exact".to_string(),
+            "--nocapture".to_string(),
+        ];
+        plan.env_flags
+            .insert("INCODEX_WINDOWS_OPEN_FIXTURE".to_string(), "1".to_string());
+        (root, plan)
+    }
+
+    #[test]
+    fn open_process_fixture() {
+        if std::env::var_os("INCODEX_WINDOWS_OPEN_FIXTURE").is_none() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+
+    #[test]
+    fn successful_contained_process_exit_removes_the_session() {
+        let (root, plan) = plan();
+        let session_root = plan.session.root.clone();
+
+        let outcome = execute_windows_open_with(plan, |_port, _options, alive| {
+            assert!(alive.load(Ordering::Acquire));
+            Ok(())
+        });
+
+        assert_eq!(outcome.process, WindowsOpenProcessResult::Exited(0));
+        assert!(outcome.ui_ready);
+        assert_eq!(outcome.cleanup, WindowsCleanupResult::Removed);
+        assert!(!session_root.exists());
+        fs::remove_dir_all(root).expect("remove lifecycle fixture");
+    }
+
+    #[test]
+    fn injection_failure_terminates_the_job_before_removing_the_session() {
+        let (root, plan) = plan();
+        let session_root = plan.session.root.clone();
+
+        let outcome =
+            execute_windows_open_with(plan, |_port, _options, _alive: Arc<AtomicBool>| {
+                Err("fixture injection refused".to_string())
+            });
+
+        assert!(matches!(
+            outcome.process,
+            WindowsOpenProcessResult::InjectionFailed(ref error)
+                if error == "fixture injection refused"
+        ));
+        assert!(!outcome.ui_ready);
+        assert_eq!(outcome.cleanup, WindowsCleanupResult::Removed);
+        assert!(!session_root.exists());
+        fs::remove_dir_all(root).expect("remove lifecycle fixture");
+    }
+}
