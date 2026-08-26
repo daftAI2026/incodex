@@ -1,7 +1,14 @@
+#[cfg(not(target_os = "windows"))]
 use std::fs::File;
+#[cfg(any(not(target_os = "windows"), test))]
 use std::io::{self, Read};
 
 use sha2::{Digest, Sha256};
+
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::Security::Cryptography::{
+    BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+};
 
 const ENTROPY_BYTES: usize = 32;
 const ADJECTIVES: [&str; 64] = [
@@ -143,6 +150,7 @@ pub(crate) fn friendly_name_from_entropy_digest(digest: &[u8; ENTROPY_BYTES]) ->
     format!("{adjective} {animal}")
 }
 
+#[cfg(any(not(target_os = "windows"), test))]
 pub(crate) fn friendly_name_from_reader(mut reader: impl Read) -> io::Result<String> {
     let mut entropy = [0_u8; ENTROPY_BYTES];
     reader.read_exact(&mut entropy)?;
@@ -151,10 +159,34 @@ pub(crate) fn friendly_name_from_reader(mut reader: impl Read) -> io::Result<Str
 }
 
 pub(crate) fn random_friendly_name() -> Result<String, String> {
-    let file = File::open("/dev/urandom")
-        .map_err(|error| format!("cannot open secure random source /dev/urandom: {error}"))?;
-    friendly_name_from_reader(file)
-        .map_err(|error| format!("cannot read secure random source /dev/urandom: {error}"))
+    #[cfg(not(target_os = "windows"))]
+    {
+        let file = File::open("/dev/urandom")
+            .map_err(|error| format!("cannot open secure random source /dev/urandom: {error}"))?;
+        friendly_name_from_reader(file)
+            .map_err(|error| format!("cannot read secure random source /dev/urandom: {error}"))
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let mut entropy = [0_u8; ENTROPY_BYTES];
+        let status = unsafe {
+            BCryptGenRandom(
+                std::ptr::null_mut(),
+                entropy.as_mut_ptr(),
+                entropy.len() as u32,
+                BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+            )
+        };
+        if status != 0 {
+            return Err(format!(
+                "cannot read Windows system random source: NTSTATUS 0x{:08x}",
+                status as u32
+            ));
+        }
+        let digest: [u8; ENTROPY_BYTES] = Sha256::digest(entropy).into();
+        Ok(friendly_name_from_entropy_digest(&digest))
+    }
 }
 
 #[cfg(test)]

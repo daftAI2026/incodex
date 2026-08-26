@@ -24,6 +24,7 @@ const MAX_HTTP_RESPONSE_BYTES: usize = 1024 * 1024;
 const CDP_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const LIFECYCLE_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const PRIMARY_TARGET_MISSING_POLLS: u8 = 2;
+#[cfg(any(not(target_os = "windows"), test))]
 const PROFILE_MASK_FAILURE_POLLS: u8 = 2;
 const BROWSER_CLOSE_ATTEMPTS: u8 = 3;
 pub const OFFICIAL_NEW_CODEX_URL: &str = "codex://new?mode=codex";
@@ -54,6 +55,7 @@ pub fn allocate_debug_port() -> Result<u16, String> {
 pub fn debug_launch_args(user_data_dir: &str, debug_port: u16) -> Vec<String> {
     let mut args = launch_arg_prefix(user_data_dir);
     args.extend([
+        "--remote-debugging-address=127.0.0.1".to_string(),
         format!("--remote-debugging-port={debug_port}"),
         format!("--remote-allow-origins=http://127.0.0.1:{debug_port}"),
         OFFICIAL_NEW_CODEX_URL.to_string(),
@@ -62,11 +64,15 @@ pub fn debug_launch_args(user_data_dir: &str, debug_port: u16) -> Vec<String> {
 }
 
 pub(crate) fn launch_arg_prefix(user_data_dir: &str) -> Vec<String> {
-    vec![
+    #[cfg(not(target_os = "windows"))]
+    let args = vec![
         "-NSAutomaticWindowAnimationsEnabled".to_string(),
         "false".to_string(),
         format!("--user-data-dir={user_data_dir}"),
-    ]
+    ];
+    #[cfg(target_os = "windows")]
+    let args = vec![format!("--user-data-dir={user_data_dir}")];
+    args
 }
 
 pub fn inject_source() -> String {
@@ -380,6 +386,7 @@ pub fn start_lifecycle_monitor(
     thread::spawn(move || monitor_primary_target(debug_port, &primary_target_id, &process_alive));
 }
 
+#[cfg(any(not(target_os = "windows"), test))]
 pub(crate) fn monitor_profile_mask_health<F>(
     debug_port: u16,
     process_alive: &AtomicBool,
@@ -408,6 +415,7 @@ where
     Ok(())
 }
 
+#[cfg(any(not(target_os = "windows"), test))]
 fn probe_profile_mask_health(debug_port: u16, process_alive: &AtomicBool) -> Result<(), String> {
     ensure_injection_active(process_alive)?;
     let targets = list_targets(debug_port)?;
@@ -660,14 +668,8 @@ fn list_targets(debug_port: u16) -> Result<Vec<CdpTarget>, String> {
 }
 
 fn http_get_json(debug_port: u16, path: &str) -> Result<Value, String> {
-    let mut errors = Vec::new();
-    for host in ["127.0.0.1", "[::1]"] {
-        match http_get_json_host(host, debug_port, path) {
-            Ok(value) => return Ok(value),
-            Err(err) => errors.push(format!("{host}: {err}")),
-        }
-    }
-    Err(format!("cdp http failed: {}", errors.join("; ")))
+    http_get_json_host("127.0.0.1", debug_port, path)
+        .map_err(|error| format!("cdp http failed: 127.0.0.1: {error}"))
 }
 
 fn http_get_json_host(host: &str, debug_port: u16, path: &str) -> Result<Value, String> {
