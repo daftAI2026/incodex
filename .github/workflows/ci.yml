@@ -56,6 +56,7 @@ jobs:
           cargo clippy -p incodex-cli --lib --bin incodex --locked -- -D warnings
           cargo test -p incodex-core --lib --release --locked
           cargo test -p incodex-core --test windows_paths --release --locked
+          cargo test -p incodex-core --test windows_session --release --locked
           cargo test -p incodex-cli --lib --release --locked
           cargo test -p incodex-cli --test windows_app --release --locked
           cargo test -p incodex-cli --test windows_process --release --locked

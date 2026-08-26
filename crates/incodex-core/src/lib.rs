@@ -9,6 +9,8 @@ pub mod session;
 pub mod target;
 #[cfg(target_os = "windows")]
 pub mod windows_path;
+#[cfg(target_os = "windows")]
+pub mod windows_session;
 
 #[cfg(not(target_os = "windows"))]
 pub use canonical::{
