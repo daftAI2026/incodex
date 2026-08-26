@@ -3,9 +3,7 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 
-use incodex_cli::windows_activation::{
-    activate_packaged_kill_on_drop, WindowsActivationRequest,
-};
+use incodex_cli::windows_activation::{activate_packaged_kill_on_drop, WindowsActivationRequest};
 use incodex_cli::windows_process::WindowsProcessTree;
 
 #[test]

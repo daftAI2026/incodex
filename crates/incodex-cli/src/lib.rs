@@ -124,6 +124,10 @@ where
         return Ok(());
     }
     let args: Vec<String> = args.into_iter().map(|s| s.as_ref().to_string()).collect();
+    #[cfg(target_os = "windows")]
+    if let Some(result) = windows_activation::try_run_package_debugger(&args) {
+        return result.map_err(CliFailure::from);
+    }
     let parsed = parse_cli(&args)?;
     if parsed.command == CliCommand::Version {
         print!("{}", format_version_report(&collect_version_facts()));

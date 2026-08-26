@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
@@ -19,8 +18,9 @@ use crate::cdp::{
     start_lifecycle_monitor, InjectionOptions,
 };
 use crate::profile_mask::{resolve_profile_mask, ProfileMask};
-use crate::windows_activation::WindowsActivationRequest;
+use crate::windows_activation::{activate_packaged_kill_on_drop, WindowsActivationRequest};
 use crate::windows_app::{discover_codex_package, WindowsCodexApp};
+#[cfg(test)]
 use crate::windows_process::spawn_kill_on_drop;
 use crate::{parse::ParsedCli, CliFailure};
 
@@ -204,20 +204,8 @@ where
 fn launch_windows_open(
     plan: &WindowsOpenPlan,
 ) -> Result<crate::windows_process::WindowsProcessTree, String> {
-    let mut command = Command::new(&plan.bin);
-    command.args(&plan.args);
-    for (key, value) in &plan.env {
-        command.env(key, value);
-    }
-    for (key, value) in &plan.env_flags {
-        command.env(key, value);
-    }
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-
-    spawn_kill_on_drop(&mut command).map_err(|error| error.to_string())
+    let request = plan.activation_request()?;
+    activate_packaged_kill_on_drop(&request)
 }
 
 fn run_windows_open_lifecycle<F>(
@@ -444,6 +432,7 @@ mod tests {
     use super::*;
     use std::fs;
     use std::net::{Ipv4Addr, TcpListener};
+    use std::process::{Command, Stdio};
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::Arc;
     use std::thread;

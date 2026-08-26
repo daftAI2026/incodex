@@ -1,54 +1,80 @@
+use std::collections::HashSet;
 use std::ffi::c_void;
 use std::io;
 use std::mem::size_of;
 use std::net::Ipv4Addr;
 use std::os::windows::io::AsRawHandle;
-use std::os::windows::process::CommandExt;
+use std::os::windows::process::{CommandExt, ExitStatusExt};
 use std::process::{Child, Command, ExitStatus};
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_INSUFFICIENT_BUFFER, HANDLE, INVALID_HANDLE_VALUE,
+    CloseHandle, ERROR_INSUFFICIENT_BUFFER, ERROR_NO_MORE_FILES, HANDLE, INVALID_HANDLE_VALUE,
+    WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::NetworkManagement::IpHelper::{
     GetExtendedTcpTable, MIB_TCPROW_OWNER_PID, MIB_TCPTABLE_OWNER_PID, TCP_TABLE_OWNER_PID_LISTENER,
 };
 use windows_sys::Win32::Networking::WinSock::AF_INET;
+use windows_sys::Win32::Security::Cryptography::{
+    BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-    CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
+    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, Thread32First, Thread32Next,
+    PROCESSENTRY32W, TH32CS_SNAPPROCESS, TH32CS_SNAPTHREAD, THREADENTRY32,
 };
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, IsProcessInJob, JobObjectExtendedLimitInformation,
-    SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    OpenJobObjectW, SetInformationJobObject, TerminateJobObject,
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
 use windows_sys::Win32::System::Threading::{
-    OpenProcess, OpenThread, ResumeThread, CREATE_SUSPENDED, PROCESS_QUERY_LIMITED_INFORMATION,
-    THREAD_SUSPEND_RESUME,
+    GetExitCodeProcess, OpenProcess, OpenThread, ResumeThread, TerminateProcess,
+    WaitForSingleObject, CREATE_SUSPENDED, INFINITE, PROCESS_QUERY_LIMITED_INFORMATION,
+    PROCESS_SET_QUOTA, PROCESS_TERMINATE, THREAD_SUSPEND_RESUME,
 };
 
 #[derive(Debug)]
 pub struct WindowsProcessTree {
-    child: Child,
+    process: ProcessHandle,
+    process_id: u32,
     _job: OwnedHandle,
+}
+
+#[derive(Debug)]
+pub(crate) struct WindowsPendingJob {
+    job: OwnedHandle,
+    name: String,
+}
+
+#[derive(Debug)]
+enum ProcessHandle {
+    Child(Child),
+    Activated(OwnedHandle),
 }
 
 impl WindowsProcessTree {
     pub fn id(&self) -> u32 {
-        self.child.id()
+        self.process_id
     }
 
     pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
-        self.child.try_wait()
+        match &mut self.process {
+            ProcessHandle::Child(child) => child.try_wait(),
+            ProcessHandle::Activated(process) => try_wait_handle(process.raw()),
+        }
     }
 
     pub fn terminate(&mut self) -> io::Result<ExitStatus> {
-        if let Some(status) = self.child.try_wait()? {
+        if let Some(status) = self.try_wait()? {
             return Ok(status);
         }
         if unsafe { TerminateJobObject(self._job.raw(), 1) } == 0 {
             return Err(io::Error::last_os_error());
         }
-        self.child.wait()
+        match &mut self.process {
+            ProcessHandle::Child(child) => child.wait(),
+            ProcessHandle::Activated(process) => wait_handle(process.raw()),
+        }
     }
 
     pub fn listener_owner_is_in_job(&self, port: u16) -> io::Result<bool> {
@@ -105,7 +131,7 @@ fn ipv4_listener_owner(port: u16) -> io::Result<Option<u32>> {
 }
 
 pub fn spawn_kill_on_drop(command: &mut Command) -> io::Result<WindowsProcessTree> {
-    let job = create_kill_on_close_job()?;
+    let job = create_kill_on_close_job(None)?;
     command.creation_flags(CREATE_SUSPENDED);
     let mut child = command.spawn()?;
 
@@ -123,11 +149,165 @@ pub fn spawn_kill_on_drop(command: &mut Command) -> io::Result<WindowsProcessTre
         return Err(error);
     }
 
-    Ok(WindowsProcessTree { child, _job: job })
+    Ok(WindowsProcessTree {
+        process_id: child.id(),
+        process: ProcessHandle::Child(child),
+        _job: job,
+    })
 }
 
-fn create_kill_on_close_job() -> io::Result<OwnedHandle> {
-    let raw = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+impl WindowsPendingJob {
+    pub(crate) fn create() -> io::Result<Self> {
+        let mut random = [0u8; 16];
+        let status = unsafe {
+            BCryptGenRandom(
+                std::ptr::null_mut(),
+                random.as_mut_ptr(),
+                random.len() as u32,
+                BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+            )
+        };
+        if status != 0 {
+            return Err(io::Error::other(format!(
+                "BCryptGenRandom failed with NTSTATUS 0x{:08X}",
+                status as u32
+            )));
+        }
+        let name = format!(
+            "Local\\Incodex-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+            random[0], random[1], random[2], random[3], random[4], random[5], random[6],
+            random[7], random[8], random[9], random[10], random[11], random[12], random[13],
+            random[14], random[15]
+        );
+        let wide: Vec<u16> = name.encode_utf16().chain([0]).collect();
+        Ok(Self {
+            job: create_kill_on_close_job(Some(&wide))?,
+            name,
+        })
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub(crate) fn attach(self, process_id: u32) -> io::Result<WindowsProcessTree> {
+        const REQUIRED_ACCESS: u32 =
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | 0x0010_0000;
+        let process = unsafe { OpenProcess(REQUIRED_ACCESS, 0, process_id) };
+        let process = OwnedHandle::from_nullable(process)?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let mut contained = 0;
+            if unsafe { IsProcessInJob(process.raw(), self.job.raw(), &mut contained) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            if contained != 0 {
+                return Ok(WindowsProcessTree {
+                    process: ProcessHandle::Activated(process),
+                    process_id,
+                    _job: self.job,
+                });
+            }
+            if try_wait_handle(process.raw())?.is_some() {
+                return Err(io::Error::other(
+                    "activated Windows Codex process exited before Job containment",
+                ));
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(io::Error::other(
+                    "timed out waiting for the Windows package debugger to assign the Job",
+                ));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+}
+
+pub(crate) fn assign_debugged_process_to_job(
+    job_name: &str,
+    process_id: u32,
+    thread_id: u32,
+) -> io::Result<()> {
+    let job_name: Vec<u16> = job_name.encode_utf16().chain([0]).collect();
+    const JOB_ASSIGN_AND_QUERY: u32 = 0x0001 | 0x0004;
+    let job = unsafe { OpenJobObjectW(JOB_ASSIGN_AND_QUERY, 0, job_name.as_ptr()) };
+    let job = OwnedHandle::from_nullable(job)?;
+    const REQUIRED_ACCESS: u32 =
+        PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SET_QUOTA | PROCESS_TERMINATE | 0x0010_0000;
+    let process = unsafe { OpenProcess(REQUIRED_ACCESS, 0, process_id) };
+    let process = OwnedHandle::from_nullable(process)?;
+    if unsafe { AssignProcessToJobObject(job.raw(), process.raw()) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, thread_id) };
+    let thread = OwnedHandle::from_nullable(thread)?;
+    if unsafe { ResumeThread(thread.raw()) } == u32::MAX {
+        let error = io::Error::last_os_error();
+        let _ = unsafe { TerminateProcess(process.raw(), 1) };
+        return Err(error);
+    }
+    Ok(())
+}
+
+pub(crate) fn snapshot_process_ids() -> io::Result<HashSet<u32>> {
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    let snapshot = OwnedHandle::from_snapshot(snapshot)?;
+    let mut entry = PROCESSENTRY32W {
+        dwSize: size_of::<PROCESSENTRY32W>() as u32,
+        ..PROCESSENTRY32W::default()
+    };
+    if unsafe { Process32FirstW(snapshot.raw(), &mut entry) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let mut process_ids = HashSet::new();
+    loop {
+        process_ids.insert(entry.th32ProcessID);
+        if unsafe { Process32NextW(snapshot.raw(), &mut entry) } == 0 {
+            let error = io::Error::last_os_error();
+            return if error.raw_os_error() == Some(ERROR_NO_MORE_FILES as i32) {
+                Ok(process_ids)
+            } else {
+                Err(error)
+            };
+        }
+    }
+}
+
+pub(crate) fn terminate_process_id(process_id: u32) -> io::Result<()> {
+    let process = unsafe { OpenProcess(PROCESS_TERMINATE | 0x0010_0000, 0, process_id) };
+    let process = OwnedHandle::from_nullable(process)?;
+    if unsafe { TerminateProcess(process.raw(), 1) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    wait_handle(process.raw()).map(|_| ())
+}
+
+fn try_wait_handle(process: HANDLE) -> io::Result<Option<ExitStatus>> {
+    match unsafe { WaitForSingleObject(process, 0) } {
+        WAIT_OBJECT_0 => exit_status(process).map(Some),
+        WAIT_TIMEOUT => Ok(None),
+        _ => Err(io::Error::last_os_error()),
+    }
+}
+
+fn wait_handle(process: HANDLE) -> io::Result<ExitStatus> {
+    if unsafe { WaitForSingleObject(process, INFINITE) } != WAIT_OBJECT_0 {
+        return Err(io::Error::last_os_error());
+    }
+    exit_status(process)
+}
+
+fn exit_status(process: HANDLE) -> io::Result<ExitStatus> {
+    let mut code = 0;
+    if unsafe { GetExitCodeProcess(process, &mut code) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(ExitStatus::from_raw(code))
+}
+
+fn create_kill_on_close_job(name: Option<&[u16]>) -> io::Result<OwnedHandle> {
+    let name = name.map_or(std::ptr::null(), |value| value.as_ptr());
+    let raw = unsafe { CreateJobObjectW(std::ptr::null(), name) };
     let job = OwnedHandle::from_nullable(raw)?;
     let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
     limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
