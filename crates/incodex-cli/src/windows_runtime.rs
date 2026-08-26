@@ -109,11 +109,8 @@ pub fn publish_windows_runtime(user_root: &Path) -> Result<PublishedWindowsRunti
         .map_err(|error| format!("invalid Runtime manifest: {error}"))?;
     validate_manifest(&manifest)?;
     let manifest_hash = sha256_hex(MANIFEST.as_bytes());
-    let bootstrap_hash = sha256_hex(BOOTSTRAP.as_bytes());
-    let release_name = format!(
-        "{}-{manifest_hash}-{bootstrap_hash}",
-        manifest.runtime_version
-    );
+    let release_hash = windows_release_hash();
+    let release_name = format!("{}-{release_hash}", manifest.runtime_version);
 
     let user_root = ensure_private_windows_dir(user_root)?;
     let runtime_root = ensure_private_windows_dir(&user_root.join("runtime"))?;
@@ -321,6 +318,17 @@ fn wide_nul(path: &Path) -> Result<Vec<u16>, String> {
 
 fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn windows_release_hash() -> String {
+    let mut hash = Sha256::new();
+    hash.update(MANIFEST.as_bytes());
+    hash.update([0]);
+    hash.update(BOOTSTRAP.as_bytes());
+    hash.finalize()
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()

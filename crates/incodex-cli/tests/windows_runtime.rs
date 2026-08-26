@@ -27,6 +27,17 @@ fn publishes_the_shared_runtime_as_one_private_content_addressed_release() {
     assert_eq!(first.main, first.release_dir.join("incodex-main.cjs"));
     assert_eq!(first.files.len(), WINDOWS_RUNTIME_FILES.len());
     assert!(first.pointer.ends_with("runtime/current.json"));
+    let release_name = first
+        .release_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("UTF-8 Runtime release name");
+    let (version, digest) = release_name
+        .split_once('-')
+        .expect("versioned Runtime release name");
+    assert_eq!(version, env!("CARGO_PKG_VERSION"));
+    assert_eq!(digest.len(), 64, "release uses one combined SHA-256");
+    assert!(digest.bytes().all(|byte| byte.is_ascii_hexdigit()));
 
     let directories = [
         user_root.clone(),
