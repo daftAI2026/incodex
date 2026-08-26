@@ -311,10 +311,12 @@ fn ensure_private_dir(path: &Path) -> Result<PathBuf, String> {
     };
     let result = (|| {
         reject_reparse_ancestors(path)?;
-        apply_private_acl(path)?;
-        verify_private_acl(path)?;
-        fs::canonicalize(path)
-            .map_err(|error| format!("cannot resolve {}: {error}", path.display()))
+        let canonical = fs::canonicalize(path)
+            .map_err(|error| format!("cannot resolve {}: {error}", path.display()))?;
+        reject_reparse_ancestors(&canonical)?;
+        apply_private_acl(&canonical)?;
+        verify_private_acl(&canonical)?;
+        Ok(canonical)
     })();
     if created && result.is_err() {
         let _ = fs::remove_dir(path);

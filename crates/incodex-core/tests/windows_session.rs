@@ -88,7 +88,10 @@ fn creates_a_private_session_under_an_extended_unicode_path() {
     let session = create_windows_session(&user_root).expect("create long private session");
 
     verify_private_acl(&session.root).expect("private long session ACL");
-    assert_eq!(burn_windows_session(&session), WindowsCleanupResult::Removed);
+    assert_eq!(
+        burn_windows_session(&session),
+        WindowsCleanupResult::Removed
+    );
     fs::remove_dir_all(root).expect("remove long fixture");
 }
 
