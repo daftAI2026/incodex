@@ -580,6 +580,31 @@ mod tests {
     }
 
     #[test]
+    fn persistent_cdp_loss_is_not_reported_as_a_normal_close() {
+        let (root, plan) = plan();
+        let session_root = plan.session.root.clone();
+
+        let outcome = execute_windows_open_with(
+            plan,
+            launch_fixture,
+            |_port, _options, _alive, _close_requested, cdp_failed| {
+                cdp_failed.store(true, Ordering::Release);
+                Ok(())
+            },
+        );
+
+        assert!(matches!(
+            outcome.process,
+            WindowsOpenProcessResult::InjectionFailed(ref error)
+                if error.contains("CDP lifecycle")
+        ));
+        assert!(outcome.ui_ready);
+        assert_eq!(outcome.cleanup, WindowsCleanupResult::Removed);
+        assert!(!session_root.exists());
+        fs::remove_dir_all(root).expect("remove lifecycle fixture");
+    }
+
+    #[test]
     fn unrelated_debug_listener_is_rejected_before_injection() {
         let (root, plan) = plan();
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, plan.debug_port))

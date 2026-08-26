@@ -18,12 +18,14 @@ fn persistent_cdp_loss_requests_windows_job_shutdown() {
     drop(listener);
     let alive = Arc::new(AtomicBool::new(true));
     let close_requested = Arc::new(AtomicBool::new(false));
+    let cdp_failed = Arc::new(AtomicBool::new(false));
 
     super::start_lifecycle_signal_monitor(
         port,
         "main".to_string(),
         alive.clone(),
         close_requested.clone(),
+        cdp_failed.clone(),
     );
 
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -31,10 +33,106 @@ fn persistent_cdp_loss_requests_windows_job_shutdown() {
         thread::sleep(Duration::from_millis(25));
     }
     alive.store(false, Ordering::Release);
-    assert!(
-        close_requested.load(Ordering::Acquire),
-        "persistent CDP loss left the Windows Job alive"
+    assert!(!close_requested.load(Ordering::Acquire));
+    assert!(cdp_failed.load(Ordering::Acquire));
+}
+
+#[test]
+#[cfg(target_os = "windows")]
+fn windows_lifecycle_survives_one_failed_poll_before_a_normal_close() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut failed_poll = false;
+        let mut healthy_polls = 0;
+        while let Some(mut stream) = accept_until(&listener, deadline) {
+            match read_request_path(&mut stream).as_str() {
+                "/json/list" if !failed_poll => write_error(&mut stream),
+                "/json" if !failed_poll => {
+                    failed_poll = true;
+                    write_error(&mut stream);
+                }
+                "/json/list" => {
+                    healthy_polls += 1;
+                    if healthy_polls == 1 {
+                        write_json(
+                            &mut stream,
+                            &json!([page(port, "main", "app://-/index.html")]),
+                        );
+                    } else {
+                        write_json(&mut stream, &json!([overlay(port)]));
+                    }
+                }
+                path => panic!("unexpected mock CDP path: {path}"),
+            }
+            if healthy_polls >= 3 {
+                break;
+            }
+        }
+    });
+    let alive = Arc::new(AtomicBool::new(true));
+    let close_requested = Arc::new(AtomicBool::new(false));
+    let cdp_failed = Arc::new(AtomicBool::new(false));
+    super::start_lifecycle_signal_monitor(
+        port,
+        "main".to_string(),
+        alive.clone(),
+        close_requested.clone(),
+        cdp_failed.clone(),
     );
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !close_requested.load(Ordering::Acquire) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(25));
+    }
+    alive.store(false, Ordering::Release);
+    server.join().unwrap();
+    assert!(close_requested.load(Ordering::Acquire));
+    assert!(!cdp_failed.load(Ordering::Acquire));
+}
+
+#[test]
+#[cfg(target_os = "windows")]
+fn windows_lifecycle_closes_instead_of_adopting_an_uninjected_replacement() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut polls = 0;
+        while let Some(mut stream) = accept_until(&listener, deadline) {
+            assert_eq!(read_request_path(&mut stream), "/json/list");
+            polls += 1;
+            write_json(
+                &mut stream,
+                &json!([page(port, "replacement", "app://-/index.html")]),
+            );
+            if polls >= 2 {
+                break;
+            }
+        }
+    });
+    let alive = Arc::new(AtomicBool::new(true));
+    let close_requested = Arc::new(AtomicBool::new(false));
+    let cdp_failed = Arc::new(AtomicBool::new(false));
+    super::start_lifecycle_signal_monitor(
+        port,
+        "main".to_string(),
+        alive.clone(),
+        close_requested.clone(),
+        cdp_failed.clone(),
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !close_requested.load(Ordering::Acquire) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(25));
+    }
+    alive.store(false, Ordering::Release);
+    server.join().unwrap();
+    assert!(close_requested.load(Ordering::Acquire));
+    assert!(!cdp_failed.load(Ordering::Acquire));
 }
 
 fn monitor_while_server<T>(port: u16, primary_target_id: &str, server: thread::JoinHandle<T>) -> T {
