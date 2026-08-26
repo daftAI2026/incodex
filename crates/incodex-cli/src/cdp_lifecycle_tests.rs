@@ -10,6 +10,33 @@ use tungstenite::Message;
 
 use super::{monitor_primary_target, monitor_profile_mask_health};
 
+#[test]
+#[cfg(target_os = "windows")]
+fn persistent_cdp_loss_requests_windows_job_shutdown() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    let alive = Arc::new(AtomicBool::new(true));
+    let close_requested = Arc::new(AtomicBool::new(false));
+
+    super::start_lifecycle_signal_monitor(
+        port,
+        "main".to_string(),
+        alive.clone(),
+        close_requested.clone(),
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !close_requested.load(Ordering::Acquire) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(25));
+    }
+    alive.store(false, Ordering::Release);
+    assert!(
+        close_requested.load(Ordering::Acquire),
+        "persistent CDP loss left the Windows Job alive"
+    );
+}
+
 fn monitor_while_server<T>(port: u16, primary_target_id: &str, server: thread::JoinHandle<T>) -> T {
     let process_alive = Arc::new(AtomicBool::new(true));
     let monitor_process_alive = process_alive.clone();

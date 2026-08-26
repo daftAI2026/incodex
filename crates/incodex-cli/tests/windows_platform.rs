@@ -1,5 +1,6 @@
 #![cfg(target_os = "windows")]
 
+use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -163,6 +164,21 @@ fn doctor_reports_package_and_session_health_without_creating_state() {
     assert!(json.stderr.is_empty(), "{}", text(&json.stderr));
 
     assert!(!profile.exists(), "doctor created user state");
+}
+
+#[test]
+fn doctor_uses_the_token_profile_instead_of_overridden_userprofile() {
+    let profile = scratch_profile();
+    fs::create_dir_all(profile.join(".incodex/sessions"))
+        .expect("create misleading environment profile");
+
+    let doctor = run(&["doctor", "--json"], &profile);
+    assert!(doctor.status.success(), "{}", text(&doctor.stderr));
+    let value: serde_json::Value =
+        serde_json::from_slice(&doctor.stdout).expect("doctor emits valid JSON");
+    assert_eq!(value["sessions"]["unknown"], 0);
+
+    fs::remove_dir_all(profile).expect("remove misleading environment profile");
 }
 
 #[test]

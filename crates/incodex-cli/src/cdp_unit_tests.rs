@@ -47,6 +47,21 @@ fn isolated_launch_uses_the_official_new_codex_deep_link() {
 }
 
 #[test]
+fn platform_cdp_networking_preserves_the_macos_contract() {
+    let mac = debug_launch_args_for_platform("/tmp/incodex-chromium", 43123, false);
+    assert!(!mac
+        .iter()
+        .any(|arg| arg.starts_with("--remote-debugging-address=")));
+    assert_eq!(cdp_hosts_for_platform(false), &["127.0.0.1", "[::1]"]);
+
+    let windows = debug_launch_args_for_platform("C:\\tmp\\incodex", 43123, true);
+    assert!(windows
+        .iter()
+        .any(|arg| arg == "--remote-debugging-address=127.0.0.1"));
+    assert_eq!(cdp_hosts_for_platform(true), &["127.0.0.1"]);
+}
+
+#[test]
 #[cfg(not(target_os = "windows"))]
 fn isolated_launch_disables_the_native_window_birth_animation() {
     let args = debug_launch_args("/tmp/incodex-chromium", 43123);

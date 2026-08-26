@@ -74,6 +74,25 @@ fn creates_a_private_session_and_copies_only_safe_settings() {
 }
 
 #[test]
+fn missing_source_home_is_an_empty_settings_set() {
+    let root = scratch("missing-source");
+    let user_root = root.join("profile").join(".incodex");
+    let missing_source = root.join("profile").join(".codex");
+    fs::create_dir_all(user_root.parent().expect("profile parent")).expect("create profile");
+    let session = create_windows_session(&user_root).expect("create private session");
+
+    assert_eq!(
+        copy_windows_settings(&session, &missing_source).expect("missing source is empty"),
+        0
+    );
+    assert_eq!(
+        burn_windows_session(&session),
+        WindowsCleanupResult::Removed
+    );
+    fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
 fn creates_a_private_session_under_an_extended_unicode_path() {
     let root = scratch("extended-path");
     let user_root = root
