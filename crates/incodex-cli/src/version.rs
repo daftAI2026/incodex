@@ -1,49 +1,58 @@
 use std::process::Command;
 
+#[cfg(not(target_os = "windows"))]
 pub struct VersionFacts {
     pub version: String,
-    pub system_name: String,
-    pub system_version: String,
+    pub macos: String,
     pub architecture: String,
-    pub kernel: Option<String>,
-    pub security_name: Option<String>,
-    pub security_status: Option<String>,
-    pub disk_free: Option<String>,
+    pub kernel: String,
+    pub sip: String,
+    pub disk_free: String,
     pub install: String,
     pub shell: String,
 }
 
+#[cfg(target_os = "windows")]
+pub struct VersionFacts {
+    pub version: String,
+    pub windows: String,
+    pub architecture: String,
+    pub install: String,
+    pub shell: String,
+}
+
+#[cfg(not(target_os = "windows"))]
 pub fn format_version_report(facts: &VersionFacts) -> String {
-    let mut lines = vec![
-        format!("Incodex version {}", facts.version),
-        format!("{}: {}", facts.system_name, facts.system_version),
-        format!("Architecture: {}", facts.architecture),
-    ];
-    if let Some(kernel) = &facts.kernel {
-        lines.push(format!("Kernel: {kernel}"));
-    }
-    if let (Some(name), Some(status)) = (&facts.security_name, &facts.security_status) {
-        lines.push(format!("{name}: {status}"));
-    }
-    if let Some(disk_free) = &facts.disk_free {
-        lines.push(format!("Disk Free: {disk_free}"));
-    }
-    lines.push(format!("Install: {}", facts.install));
-    lines.push(format!("Shell: {}", facts.shell));
-    format!("{}\n\n", lines.join("\n"))
+    format!(
+        "Incodex version {}\nmacOS: {}\nArchitecture: {}\nKernel: {}\nSIP: {}\nDisk Free: {}\nInstall: {}\nShell: {}\n\n",
+        facts.version,
+        facts.macos,
+        facts.architecture,
+        facts.kernel,
+        facts.sip,
+        facts.disk_free,
+        facts.install,
+        facts.shell
+    )
+}
+
+#[cfg(target_os = "windows")]
+pub fn format_version_report(facts: &VersionFacts) -> String {
+    format!(
+        "Incodex version {}\nWindows: {}\nArchitecture: {}\nInstall: {}\nShell: {}\n\n",
+        facts.version, facts.windows, facts.architecture, facts.install, facts.shell
+    )
 }
 
 #[cfg(not(target_os = "windows"))]
 pub fn collect_version_facts() -> VersionFacts {
     VersionFacts {
         version: env!("CARGO_PKG_VERSION").to_string(),
-        system_name: "macOS".to_string(),
-        system_version: probe("sw_vers", &["-productVersion"]),
+        macos: probe("sw_vers", &["-productVersion"]),
         architecture: probe("uname", &["-m"]),
-        kernel: Some(probe("uname", &["-r"])),
-        security_name: Some("SIP".to_string()),
-        security_status: Some(sip_status()),
-        disk_free: Some(disk_free()),
+        kernel: probe("uname", &["-r"]),
+        sip: sip_status(),
+        disk_free: disk_free(),
         install: install_channel(),
         shell: std::env::var("SHELL").unwrap_or_else(|_| "Unknown".to_string()),
     }
@@ -54,13 +63,8 @@ pub fn collect_version_facts() -> VersionFacts {
     let version = probe("cmd", &["/C", "ver"]);
     VersionFacts {
         version: env!("CARGO_PKG_VERSION").to_string(),
-        system_name: "Windows".to_string(),
-        system_version: version.clone(),
+        windows: version,
         architecture: std::env::consts::ARCH.to_string(),
-        kernel: None,
-        security_name: None,
-        security_status: None,
-        disk_free: None,
         install: install_channel(),
         shell: std::env::var("COMSPEC").unwrap_or_else(|_| "Unknown".to_string()),
     }
@@ -151,23 +155,19 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "windows")]
     fn format_prints_version_machine_install_and_shell() {
         let text = format_version_report(&VersionFacts {
             version: "0.2.0".into(),
-            system_name: "macOS".into(),
-            system_version: "15.4".into(),
-            architecture: "arm64".into(),
-            kernel: Some("24.4.0".into()),
-            security_name: Some("SIP".into()),
-            security_status: Some("Enabled".into()),
-            disk_free: Some("177.88GB".into()),
-            install: "Script".into(),
-            shell: "/bin/zsh".into(),
+            windows: "Microsoft Windows [Version 10.0.26100.0]".into(),
+            architecture: "x86_64".into(),
+            install: "Unsupported".into(),
+            shell: "cmd.exe".into(),
         });
         assert!(text.starts_with("Incodex version 0.2.0\n"));
-        assert!(text.contains("macOS: 15.4"));
-        assert!(text.contains("Architecture: arm64"));
-        assert!(text.contains("Install: Script"));
+        assert!(text.contains("Windows: Microsoft Windows"));
+        assert!(text.contains("Architecture: x86_64"));
+        assert!(text.contains("Install: Unsupported"));
         assert!(text.ends_with("\n\n"));
     }
 }
