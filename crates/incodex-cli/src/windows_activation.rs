@@ -16,7 +16,8 @@ use windows_sys::Win32::System::Com::{
 use windows_sys::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
 
 use crate::windows_process::{
-    assign_debugged_process_to_job, snapshot_process_ids, WindowsPendingJob, WindowsProcessTree,
+    assign_debugged_process_to_job, resume_debugged_package_process, snapshot_process_ids,
+    WindowsPendingJob, WindowsProcessTree,
 };
 
 const PACKAGE_DEBUGGER_MODE: &str = "__incodex_windows_package_debugger";
@@ -254,6 +255,59 @@ pub fn activate_packaged_kill_on_drop(
     Ok(process_tree)
 }
 
+pub fn enable_installed_runtime(
+    registration: &WindowsInstalledRuntimeRegistration,
+) -> Result<(), String> {
+    let _activation_lock = acquire_package_activation_lock()?;
+    let _apartment = ComApartment::initialize()?;
+    let interface = ComPtr::create(
+        &CLSID_PACKAGE_DEBUG_SETTINGS,
+        &IID_PACKAGE_DEBUG_SETTINGS,
+        "Windows package debug settings",
+    )?;
+    let package = wide_nul(registration.package_full_name());
+    let debugger = wide_nul(registration.debugger_command_line());
+    let vtable = unsafe { *(interface.raw() as *mut *const PackageDebugSettingsVtable) };
+    let result = unsafe {
+        ((*vtable).enable_debugging)(
+            interface.raw(),
+            package.as_ptr(),
+            debugger.as_ptr(),
+            registration.environment().as_ptr(),
+        )
+    };
+    if failed(result) {
+        Err(hresult_message(
+            "cannot enable the installed Windows Runtime",
+            result,
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+pub fn disable_installed_runtime(package_full_name: &str) -> Result<(), String> {
+    validate_text(package_full_name, "package full name")?;
+    let _activation_lock = acquire_package_activation_lock()?;
+    let _apartment = ComApartment::initialize()?;
+    let interface = ComPtr::create(
+        &CLSID_PACKAGE_DEBUG_SETTINGS,
+        &IID_PACKAGE_DEBUG_SETTINGS,
+        "Windows package debug settings",
+    )?;
+    let package = wide_nul(package_full_name);
+    let vtable = unsafe { *(interface.raw() as *mut *const PackageDebugSettingsVtable) };
+    let result = unsafe { ((*vtable).disable_debugging)(interface.raw(), package.as_ptr()) };
+    if failed(result) {
+        Err(hresult_message(
+            "cannot disable the installed Windows Runtime",
+            result,
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 fn acquire_package_activation_lock() -> Result<PackageActivationLock, String> {
     let name: Vec<u16> = PACKAGE_ACTIVATION_LOCK_NAME
         .encode_utf16()
@@ -311,6 +365,31 @@ pub(crate) fn try_run_package_debugger(arguments: &[String]) -> Option<Result<()
             .map_err(|_| "Windows package debugger received an invalid thread id".to_string())?;
         assign_debugged_process_to_job(job_name, process_id, thread_id)
             .map_err(|error| format!("Windows package debugger failed: {error}"))
+    })();
+    Some(parsed)
+}
+
+pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result<(), String>> {
+    if arguments.first().map(String::as_str) != Some(INSTALLED_DEBUGGER_MODE) {
+        return None;
+    }
+    let parsed = (|| {
+        let package_full_name = flag_value(arguments, "--package")?;
+        validate_text(package_full_name, "package full name")?;
+        let state_path = Path::new(flag_value(arguments, "--state")?);
+        if !state_path.is_absolute()
+            || state_path.file_name().and_then(|name| name.to_str()) != Some("windows-install.json")
+        {
+            return Err("Windows installed debugger received an invalid state path".to_string());
+        }
+        let process_id = flag_value(arguments, "-p")?
+            .parse::<u32>()
+            .map_err(|_| "Windows installed debugger received an invalid process id".to_string())?;
+        let thread_id = flag_value(arguments, "-tid")?
+            .parse::<u32>()
+            .map_err(|_| "Windows installed debugger received an invalid thread id".to_string())?;
+        resume_debugged_package_process(package_full_name, process_id, thread_id)
+            .map_err(|error| format!("Windows installed debugger failed: {error}"))
     })();
     Some(parsed)
 }
