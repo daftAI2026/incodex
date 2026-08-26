@@ -174,4 +174,20 @@ describe("Rust workspace", () => {
     expect(windowsStatus).toContain("Spinner::start(STATUS_PROGRESS_MESSAGE)");
     expect(windowsDoctor).toContain("Spinner::start(DOCTOR_PROGRESS_MESSAGE)");
   });
+
+  test("terminal reports keep one shared formatter and main's final spacing", () => {
+    const version = read("crates/incodex-cli/src/version.rs");
+    const lib = read("crates/incodex-cli/src/lib.rs");
+    const openCommand = read("crates/incodex-cli/src/open_command.rs");
+    const windowsOpen = read("crates/incodex-cli/src/windows_open.rs");
+    const windowsStatus = read("crates/incodex-cli/src/windows_status.rs");
+    const windowsDoctor = read("crates/incodex-cli/src/windows_doctor.rs");
+
+    expect(version.match(/pub fn format_version_report/g) ?? []).toHaveLength(1);
+    expect(lib).toContain("print_terminal_report");
+    expect(windowsStatus).toContain("print_terminal_report");
+    expect(windowsDoctor).toContain("print_terminal_report");
+    expect(openCommand).toContain("print_terminal_result");
+    expect(windowsOpen).toContain("print_terminal_result");
+  });
 });

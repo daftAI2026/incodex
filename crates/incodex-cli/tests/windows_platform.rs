@@ -119,6 +119,7 @@ fn status_reports_current_user_package_without_creating_state() {
     assert!(status.status.success(), "{}", text(&status.stderr));
     let report = text(&status.stdout);
     assert!(report.starts_with("➤ Status"), "{report}");
+    assert!(report.ends_with("\n\n"), "{report:?}");
     assert!(!report.contains("Windows Codex"), "{report}");
     assert!(report.contains("Available"), "{report}");
     assert!(status.stderr.is_empty(), "{}", text(&status.stderr));
@@ -141,6 +142,7 @@ fn doctor_reports_package_and_session_health_without_creating_state() {
     let doctor = run(&["doctor"], &profile);
     assert!(doctor.status.success(), "{}", text(&doctor.stderr));
     let report = text(&doctor.stdout);
+    assert!(report.ends_with("\n\n"), "{report:?}");
     for expected in [
         "➤ App", "Package", "Sessions", "Active", "Orphaned", "Unknown",
     ] {
