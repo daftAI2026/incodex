@@ -53,7 +53,6 @@ fn help_and_version_are_available_without_creating_state() {
 #[test]
 fn unsupported_product_commands_fail_closed_before_creating_state() {
     let cases: &[(&str, &[&str])] = &[
-        ("open", &["open", "--dry-run"]),
         ("install", &["install", "--dry-run"]),
         ("uninstall", &["uninstall", "--dry-run"]),
         ("status", &["status"]),
@@ -90,4 +89,29 @@ fn unsupported_product_commands_fail_closed_before_creating_state() {
             "{command} created state before its Windows implementation exists"
         );
     }
+}
+
+#[test]
+fn open_dry_run_enters_windows_discovery_without_creating_state() {
+    let profile = scratch_profile();
+    let output = run(&["open", "--dry-run"], &profile);
+    let stdout = text(&output.stdout);
+    let stderr = text(&output.stderr);
+
+    assert!(
+        !stderr.contains("open is not supported on Windows yet"),
+        "{stderr}"
+    );
+    if output.status.success() {
+        assert!(stdout.contains("Open incognito without patching Codex"));
+        assert!(stdout.contains("ChatGPT.exe"));
+        assert!(stdout.contains("Dry run. No window opened."));
+    } else {
+        assert!(
+            stderr.contains("Microsoft Store package")
+                || stderr.contains("Windows package query failed"),
+            "{stderr}"
+        );
+    }
+    assert!(!profile.exists(), "dry run created Incodex state");
 }
