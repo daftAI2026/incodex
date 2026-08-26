@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{
     CloseHandle, DuplicateHandle, APPMODEL_ERROR_NO_PACKAGE, DUPLICATE_SAME_ACCESS,
-    ERROR_INSUFFICIENT_BUFFER, ERROR_MORE_DATA, ERROR_NO_MORE_FILES, HANDLE, HWND,
-    INVALID_HANDLE_VALUE, LPARAM, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    ERROR_ACCESS_DENIED, ERROR_INSUFFICIENT_BUFFER, ERROR_INVALID_PARAMETER, ERROR_MORE_DATA,
+    ERROR_NO_MORE_FILES, HANDLE, HWND, INVALID_HANDLE_VALUE, LPARAM, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::NetworkManagement::IpHelper::{
     GetExtendedTcpTable, MIB_TCPROW_OWNER_PID, MIB_TCPTABLE_OWNER_PID, MIB_TCP_STATE_ESTAB,
@@ -531,6 +531,61 @@ pub(crate) fn assign_debugged_process_to_job(
     Ok(())
 }
 
+pub fn resume_debugged_package_process(
+    expected_package_full_name: &str,
+    process_id: u32,
+    thread_id: u32,
+) -> io::Result<()> {
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
+    let process = OwnedHandle::from_nullable(process)?;
+    require_process_package_identity(process.raw(), expected_package_full_name)?;
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    let snapshot = OwnedHandle::from_snapshot(snapshot)?;
+    require_thread_owner(snapshot.raw(), thread_id, process_id)?;
+    let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, thread_id) };
+    let thread = OwnedHandle::from_nullable(thread)?;
+    let previous = unsafe { ResumeThread(thread.raw()) };
+    if previous == u32::MAX {
+        return Err(io::Error::last_os_error());
+    }
+    if previous == 0 {
+        return Err(io::Error::other(
+            "Windows package debugger target thread was not suspended",
+        ));
+    }
+    Ok(())
+}
+
+pub fn running_package_process_ids(expected_package_full_name: &str) -> io::Result<Vec<u32>> {
+    let mut matches = Vec::new();
+    for process_id in snapshot_process_ids()? {
+        let raw = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
+        if raw.is_null() {
+            let error = io::Error::last_os_error();
+            if matches!(
+                error.raw_os_error(),
+                Some(code) if code == ERROR_ACCESS_DENIED as i32 || code == ERROR_INVALID_PARAMETER as i32
+            ) {
+                continue;
+            }
+            return Err(error);
+        }
+        let process = OwnedHandle(raw);
+        match process_package_full_name(process.raw()) {
+            Ok(Some(package)) if package == expected_package_full_name => matches.push(process_id),
+            Ok(_) => {}
+            Err(error)
+                if matches!(
+                    error.raw_os_error(),
+                    Some(code) if code == ERROR_ACCESS_DENIED as i32 || code == ERROR_INVALID_PARAMETER as i32
+                ) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    matches.sort_unstable();
+    Ok(matches)
+}
+
 pub(crate) fn snapshot_process_ids() -> io::Result<HashSet<u32>> {
     let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
     let snapshot = OwnedHandle::from_snapshot(snapshot)?;
@@ -559,26 +614,29 @@ fn require_process_package_identity(
     process: HANDLE,
     expected_package_full_name: &str,
 ) -> io::Result<()> {
+    let actual = process_package_full_name(process)?
+        .ok_or_else(|| io::Error::other("activated Windows process has no package identity"))?;
+    if actual != expected_package_full_name {
+        return Err(io::Error::other(format!(
+            "activated Windows process package identity mismatch: {actual}"
+        )));
+    }
+    Ok(())
+}
+
+fn process_package_full_name(process: HANDLE) -> io::Result<Option<String>> {
     let mut length = 0;
     let first = unsafe { GetPackageFullName(process, &mut length, std::ptr::null_mut()) };
     if first == APPMODEL_ERROR_NO_PACKAGE {
-        return Err(io::Error::other(
-            "activated Windows process has no package identity",
-        ));
+        return Ok(None);
     }
     if first != ERROR_INSUFFICIENT_BUFFER || length == 0 {
-        return Err(io::Error::other(format!(
-            "cannot read activated Windows process package identity: {}",
-            io::Error::from_raw_os_error(first as i32)
-        )));
+        return Err(io::Error::from_raw_os_error(first as i32));
     }
     let mut wide = vec![0u16; length as usize];
     let status = unsafe { GetPackageFullName(process, &mut length, wide.as_mut_ptr()) };
     if status != 0 {
-        return Err(io::Error::other(format!(
-            "cannot read activated Windows process package identity: {}",
-            io::Error::from_raw_os_error(status as i32)
-        )));
+        return Err(io::Error::from_raw_os_error(status as i32));
     }
     let end = wide
         .iter()
@@ -586,12 +644,7 @@ fn require_process_package_identity(
         .unwrap_or(wide.len());
     let actual = String::from_utf16(&wide[..end])
         .map_err(|_| io::Error::other("activated Windows process package identity is invalid"))?;
-    if actual != expected_package_full_name {
-        return Err(io::Error::other(format!(
-            "activated Windows process package identity mismatch: {actual}"
-        )));
-    }
-    Ok(())
+    Ok(Some(actual))
 }
 
 fn terminate_exact_process_after_attach_failure(process: HANDLE, primary: io::Error) -> io::Error {
@@ -680,6 +733,33 @@ fn find_process_thread(snapshot: HANDLE, process_id: u32) -> io::Result<u32> {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
                 format!("cannot find the suspended primary thread for process {process_id}"),
+            ));
+        }
+    }
+}
+
+fn require_thread_owner(snapshot: HANDLE, thread_id: u32, process_id: u32) -> io::Result<()> {
+    let mut entry = THREADENTRY32 {
+        dwSize: size_of::<THREADENTRY32>() as u32,
+        ..THREADENTRY32::default()
+    };
+    if unsafe { Thread32First(snapshot, &mut entry) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    loop {
+        if entry.th32ThreadID == thread_id {
+            return if entry.th32OwnerProcessID == process_id {
+                Ok(())
+            } else {
+                Err(io::Error::other(
+                    "Windows package debugger thread does not belong to its process",
+                ))
+            };
+        }
+        if unsafe { Thread32Next(snapshot, &mut entry) } == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("cannot find Windows package debugger thread {thread_id}"),
             ));
         }
     }
