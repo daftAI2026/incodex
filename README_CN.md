@@ -35,11 +35,9 @@
 
 ## Quick Start
 
-**正式支持平台：** Apple Silicon（arm64）和 Intel（x86_64）Mac。x86_64 Windows 10/11 目前仅提供面向微软商店官方 Codex 包的不受支持的 Windows 源码预览。当前不支持 Linux。
+**支持平台：** Apple Silicon（arm64）和 Intel（x86_64）Mac。当前不支持 Windows 或 Linux，因为 Incodex 依赖 macOS 的 Codex 应用包、代码签名、钥匙串和 Launch Services。
 
-Windows 源码预览当前支持 `open`、`open --dry-run`、`status`、`doctor`、`--help`、`--version` 和终端菜单。它按当前用户的 Store 包身份动态发现真实安装盘和路径，不会修改、复制或重签官方包。Windows 预编译安装器尚未发布，因此目前请使用下方源码安装；`install`、`uninstall`、`runtime`、`recover`、`update` 和 `self-uninstall` 在 Windows 上仍不可用。
-
-**macOS 通过 Homebrew 安装**
+**通过 Homebrew 安装**
 
 ```bash
 brew install daftAI2026/tap/incodex
@@ -47,7 +45,7 @@ brew install daftAI2026/tap/incodex
 
 这里只把 `incodex` 和 `inc` 放到 PATH。可选的应用内按钮需要另行运行 `incodex install`。更新统一使用 `inc update`；Homebrew 安装仍会沿 Homebrew 路径升级。
 
-**macOS 或使用安装脚本**
+**或使用安装脚本**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/install.sh | bash
@@ -61,15 +59,11 @@ cd incodex
 cargo install --locked --path crates/incodex-cli
 ```
 
-Homebrew 和脚本安装直接使用预编译的 macOS Rust 二进制，不需要 Bun。Windows 当前使用同一条源码安装命令；Cargo 决定每个用户的 CLI 位置，而 Incodex 独立通过当前用户的 Store 包身份发现 Codex。从源码安装需要 [rustup](https://rustup.rs/)，仓库中的 `rust-toolchain.toml` 会选择受支持的 Rust 编译器；只有涉及应用集成时才需要已安装的 Codex / ChatGPT 桌面端，参与开发、重建 Electron Runtime 时还需要 [Bun](https://bun.sh) 1.3.14（见 `.bun-version`）。
+Homebrew 和脚本安装直接使用预编译的原生 Rust 二进制，不需要 Bun。从源码安装需要 [rustup](https://rustup.rs/)，仓库中的 `rust-toolchain.toml` 会选择受支持的 Rust 编译器；只有涉及应用集成时才需要已安装的 Codex / ChatGPT 桌面端，参与开发、重建 Electron Runtime 时还需要 [Bun](https://bun.sh) 1.3.14（见 `.bun-version`）。
 
 ## Security & Safety Design
 
-主路径 `incodex open` 不会修改 Codex。在 Windows 上，每次打开都有私有隔离的 `CODEX_HOME` 和 Chromium 目录；kill-on-close Job object 约束整棵进程树，清理前会验证 ACL、owner PID 创建时间和目录文件身份。会话只复制 `auth.json` 和 `config.toml`。
-
-Windows Store 激活目前会在一个很短的进程创建窗口内使用包级调试设置。不要在此时同时启动或重启官方 Codex，也不要强制终止正在激活的 Incodex：异常终止可能遗留这份包级状态，而 Incodex 尚未提供持久恢复机制。Chromium 的回环 CDP 端点也没有客户端认证；Incodex 会在发送 UI 代码前同时验证 listener 和已建立连接的进程归属，但这不等于对其他本机用户的操作系统级授权。这两项仍是发布阻塞，因此当前不发布 Windows 安装器。
-
-在 macOS 上，可选的 `incodex install` 路径为了加入应用内按钮，会修改本机安装的 Electron 应用包。`install`、`uninstall` 和 `self-uninstall` 在破坏性操作前都会打印计划：TTY 问一次，非 TTY 要 `--yes`，`--dry-run` 只打印。`recover` 是显式事务恢复例外：它必须带 `--transaction <id>`，不接受 `--dry-run`，并且只会续跑这一本已存在的 journal。
+主路径 `incodex open` 不会修改 Codex。可选的 `incodex install` 路径为了加入应用内按钮，会修改本机安装的 Electron 应用包。`install`、`uninstall` 和 `self-uninstall` 在破坏性操作前都会打印计划：TTY 问一次，非 TTY 要 `--yes`，`--dry-run` 只打印。`recover` 是显式事务恢复例外：它必须带 `--transaction <id>`，不接受 `--dry-run`，并且只会续跑这一本已存在的 journal。
 
 - 官方插件加不了这个按钮，必须改应用包
 - 默认安装到官方应用后，改包没法继续保留有效的 OpenAI 签名。下次启动时，macOS 可能要求这个已修改的应用访问钥匙串中的 **Codex Storage Key**。只有对话框里的应用和钥匙串项目都符合预期时，才输入 **Mac 登录密码**（不是 ChatGPT 账号密码）并选择 **始终允许**。**允许** / **允许一次**只授权本次访问，之后还可能再次询问；信息不符合预期时选择 **拒绝**。CLI 不会对 `--clone` 或 `--app` 目标给出永久授权建议
@@ -82,7 +76,7 @@ Windows Store 激活目前会在一个很短的进程创建窗口内使用包级
 - 如果官方已经升成新版本，`incodex uninstall` 不会用旧备份盖回去
 - 当前原始包备份位于 `~/.incodex/transactions/<install-id>/original/ChatGPT.app`；卸载恢复并验证成功后会删除，新一代安装成功后也会清理同一应用已被取代的终态备份
 - Homebrew 和脚本安装都运行 `inc update`，Incodex 会自动选择对应的升级路径；源码更新用 `git pull && cargo install --locked --path crates/incodex-cli`；源码卸载用 `cargo uninstall incodex-cli`
-- macOS 菜单支持方向键、Vim `j/k`、数字立刻执行、`V` 看版本、`q` 退出。Windows Console / Windows Terminal 菜单使用数字提示，只暴露已实现的 Windows 命令
+- 菜单支持方向键、Vim `j/k`、数字立刻执行、`V` 看版本、`q` 退出
 - 脚本安装若找不到命令，把 `~/.local/bin` 加进 PATH
 - 按钮和说明跟主窗口语言走
 
@@ -90,7 +84,7 @@ Windows Store 激活目前会在一个很短的进程创建窗口内使用包级
 
 ### Interactive menu
 
-macOS 终端里直接跑 `inc`：
+终端里直接跑 `inc`：
 
 ```
   _____   _   _    _____    ____    _____    ______  __   __
@@ -113,23 +107,9 @@ macOS 终端里直接跑 `inc`：
 ↑↓ | Enter | V Version | Q Quit | 1-6 Jump
 ```
 
-Windows 终端菜单只展示已经支持的操作：
-
-```text
-➤ Incodex for Windows
-1. Open       Open an isolated incognito Codex window
-2. Status     Show official Store package availability
-3. Doctor     Diagnose package health and isolated sessions
-4. Version    Show CLI and Windows support information
-5. Quit       Exit this menu
-Select [1-5]:
-```
-
 ### Open without patching
 
 `open` 使用一份全新的隔离 Chromium 档案和 `CODEX_HOME` 启动官方 Codex 二进制。登录和使用所需的基础配置会保留，但旧对话不会进入这扇窗口，官方应用也不会被修改或重新签名。正常关窗后，隔离会话会被清掉。
-
-下方路径是 macOS 示例。Windows 上的 `open --dry-run` 会显示当前用户实际发现的 Store 包和 `ChatGPT.exe` 路径，安装盘可以是任意卷。
 
 ```bash
 $ incodex open --dry-run
@@ -194,8 +174,6 @@ $ incodex install
 
 ### Status
 
-下方是 macOS 示例。Windows 上的 `status` 会报告 Store 包可用性、包身份、架构以及动态发现的安装目录和可执行文件路径；两个平台都支持 `--json`。
-
 ```bash
 $ incodex status
 
@@ -215,8 +193,6 @@ $ incodex status
 ```
 
 ### Doctor
-
-下方是 macOS 示例。Windows `doctor` 会验证 Store 包，并只读报告 active、orphaned 和无法验证的 Incodex 会话，不创建或修改状态。
 
 ```bash
 $ incodex doctor
@@ -256,7 +232,7 @@ $ incodex doctor
   Journals     0 (checked)
 ```
 
-在 macOS 上，默认 Doctor 会检查 Incodex 自己的 Runtime、备份、journal、session 和 marker 状态，以及目标应用最小的 outer identity 证据；不会递归 nested 签名，也不会调用 Gatekeeper。要看完整的 nested 签名、entitlement 和 Gatekeeper 报告，请运行 `incodex doctor --deep`。Gatekeeper 结果只是诊断，不是安装失败；改包之后官方签名本来就不会过 Gatekeeper。Windows 不接受 `--deep`，因为它不会修改或重签 Store 包。
+默认 Doctor 会检查 Incodex 自己的 Runtime、备份、journal、session 和 marker 状态，以及目标应用最小的 outer identity 证据；不会递归 nested 签名，也不会调用 Gatekeeper。要看完整的 nested 签名、entitlement 和 Gatekeeper 报告，请运行 `incodex doctor --deep`。Gatekeeper 结果只是诊断，不是安装失败；改包之后官方签名本来就不会过 Gatekeeper。
 
 ### Version
 
