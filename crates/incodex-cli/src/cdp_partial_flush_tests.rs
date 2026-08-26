@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use tungstenite::WebSocket;
 
-use super::send_cdp_with_deadline;
+use super::{send_cdp_with_deadline, send_guarded_cdp};
 
 struct PartialWouldBlockStream {
     written: Vec<u8>,
@@ -120,5 +120,32 @@ fn cdp_command_partial_flush_does_not_duplicate_frame() {
     assert_eq!(
         command.get("method").and_then(Value::as_str),
         Some("Runtime.evaluate")
+    );
+}
+
+#[test]
+fn guarded_cdp_command_writes_nothing_after_listener_ownership_changes() {
+    let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let client = std::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)).unwrap();
+    let (mut server, _) = listener.accept().unwrap();
+    server
+        .set_read_timeout(Some(Duration::from_millis(100)))
+        .unwrap();
+    let mut socket = WebSocket::from_raw_socket(client, tungstenite::protocol::Role::Client, None);
+
+    let result = send_guarded_cdp(
+        &mut socket,
+        5,
+        "Runtime.evaluate",
+        json!({ "expression": "sensitive profile mask" }),
+        &|_| Err("Windows CDP connection ownership changed".to_string()),
+    );
+
+    assert!(result.is_err());
+    let mut byte = [0_u8; 1];
+    assert!(
+        server.read(&mut byte).is_err(),
+        "ownership must be proven immediately before a CDP command is written"
     );
 }

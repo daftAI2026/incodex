@@ -519,8 +519,12 @@ mod tests {
             .expect("fixture port")
             .parse::<u16>()
             .expect("valid fixture port");
-        let _listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port)).expect("bind fixture CDP");
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port)).expect("bind fixture CDP");
         thread::sleep(Duration::from_millis(250));
+        if std::env::var_os("INCODEX_WINDOWS_OPEN_DROP_LISTENER").is_some() {
+            drop(listener);
+            thread::sleep(Duration::from_secs(2));
+        }
     }
 
     fn launch_fixture(
@@ -656,6 +660,51 @@ mod tests {
         assert!(!injected.load(Ordering::Acquire));
         assert_eq!(outcome.cleanup, WindowsCleanupResult::Removed);
         drop(listener);
+        fs::remove_dir_all(root).expect("remove lifecycle fixture");
+    }
+
+    #[test]
+    fn listener_replacement_after_initial_proof_is_rejected() {
+        let (root, mut plan) = plan();
+        plan.env_flags.insert(
+            "INCODEX_WINDOWS_OPEN_DROP_LISTENER".to_string(),
+            "1".to_string(),
+        );
+        let port = plan.debug_port;
+        let (listener_tx, listener_rx) = mpsc::channel();
+
+        let outcome = execute_windows_open_with(
+            plan,
+            launch_fixture,
+            move |_port, _options, alive, _close_requested, _cdp_failed| {
+                let deadline = Instant::now() + Duration::from_secs(2);
+                let listener = loop {
+                    match TcpListener::bind((Ipv4Addr::LOCALHOST, port)) {
+                        Ok(listener) => break listener,
+                        Err(_) if Instant::now() < deadline => {
+                            thread::sleep(Duration::from_millis(25));
+                        }
+                        Err(error) => panic!("cannot replace fixture listener: {error}"),
+                    }
+                };
+                listener_tx
+                    .send(listener)
+                    .expect("hold replacement listener");
+                while alive.load(Ordering::Acquire) {
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err("fixture stopped after listener ownership loss".to_string())
+            },
+        );
+        let replacement = listener_rx.recv().expect("replacement listener");
+
+        assert!(matches!(
+            outcome.process,
+            WindowsOpenProcessResult::ListenerOwnershipFailed(_)
+        ));
+        assert!(!outcome.ui_ready);
+        assert_eq!(outcome.cleanup, WindowsCleanupResult::Removed);
+        drop(replacement);
         fs::remove_dir_all(root).expect("remove lifecycle fixture");
     }
 }
