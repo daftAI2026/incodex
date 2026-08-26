@@ -1,8 +1,8 @@
 use std::io::{self, IsTerminal};
 
-use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::Console::{
-    GetConsoleMode, GetStdHandle, ReadConsoleInputW, SetConsoleMode,
+    GetConsoleMode, GetStdHandle, ReadConsoleInputW, SetConsoleMode, ENABLE_PROCESSED_INPUT,
     ENABLE_VIRTUAL_TERMINAL_PROCESSING, INPUT_RECORD, KEY_EVENT, STD_ERROR_HANDLE,
     STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
 };
@@ -34,6 +34,7 @@ pub(crate) fn read_menu_key() -> Result<MenuKey, String> {
     if input.is_null() || input == INVALID_HANDLE_VALUE {
         return Err("Windows console input is unavailable".to_string());
     }
+    let _mode = ConsoleInputMode::without_processed_input(input)?;
     loop {
         let mut record = INPUT_RECORD::default();
         let mut read = 0u32;
@@ -66,6 +67,32 @@ pub(crate) fn read_menu_key() -> Result<MenuKey, String> {
             }
             _ => MenuKey::Ignore,
         });
+    }
+}
+
+struct ConsoleInputMode {
+    handle: HANDLE,
+    original: u32,
+}
+
+impl ConsoleInputMode {
+    fn without_processed_input(handle: HANDLE) -> Result<Self, String> {
+        let mut original = 0u32;
+        if unsafe { GetConsoleMode(handle, &mut original) } == 0 {
+            return Err(io::Error::last_os_error().to_string());
+        }
+        if unsafe { SetConsoleMode(handle, original & !ENABLE_PROCESSED_INPUT) } == 0 {
+            return Err(io::Error::last_os_error().to_string());
+        }
+        Ok(Self { handle, original })
+    }
+}
+
+impl Drop for ConsoleInputMode {
+    fn drop(&mut self) {
+        unsafe {
+            SetConsoleMode(self.handle, self.original);
+        }
     }
 }
 
