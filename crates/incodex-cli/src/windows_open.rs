@@ -464,8 +464,6 @@ mod tests {
             app_user_model_id: "OpenAI.Codex_2p2nqsd0c76g0!App".to_string(),
             install_location: root.join("package"),
             executable: executable.clone(),
-            asar: root.join("package/app/resources/app.asar"),
-            asar_unpacked: root.join("package/app/resources/app.asar.unpacked"),
             architecture: "X64".to_string(),
         };
         let mut plan = prepare_windows_open(&app, &profile.join(".incodex"), &source, None)

@@ -16,11 +16,10 @@ fn scratch() -> PathBuf {
     ))
 }
 
-fn electron_fixture(root: &Path) {
-    fs::create_dir_all(root.join("app/resources/app.asar.unpacked")).expect("create resources");
+fn package_fixture(root: &Path) {
+    fs::create_dir_all(root.join("app")).expect("create app directory");
     fs::write(root.join("AppxManifest.xml"), "<Package />").expect("write manifest");
     fs::write(root.join("app/ChatGPT.exe"), b"fixture").expect("write executable");
-    fs::write(root.join("app/resources/app.asar"), b"fixture").expect("write asar");
 }
 
 fn evidence_json(install_location: &Path) -> String {
@@ -33,7 +32,7 @@ fn evidence_json(install_location: &Path) -> String {
 #[test]
 fn accepts_healthy_store_evidence_with_the_real_electron_layout() {
     let root = scratch().join("程序 Files").join("OpenAI.Codex_1.2.3.4");
-    electron_fixture(&root);
+    package_fixture(&root);
 
     let evidence = parse_package_evidence(&evidence_json(&root)).expect("parse evidence");
     let app = inspect_codex_package(evidence).expect("inspect package");
@@ -42,10 +41,6 @@ fn accepts_healthy_store_evidence_with_the_real_electron_layout() {
         root.canonicalize().expect("canonical package")
     );
     assert_eq!(app.executable, app.install_location.join("app/ChatGPT.exe"));
-    assert_eq!(
-        app.asar,
-        app.install_location.join("app/resources/app.asar")
-    );
     assert_eq!(app.app_user_model_id, "OpenAI.Codex_2p2nqsd0c76g0!App");
 
     fs::remove_dir_all(root.parent().unwrap().parent().unwrap()).expect("remove fixture");

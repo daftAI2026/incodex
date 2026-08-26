@@ -30,8 +30,6 @@ pub struct WindowsCodexApp {
     pub app_user_model_id: String,
     pub install_location: PathBuf,
     pub executable: PathBuf,
-    pub asar: PathBuf,
-    pub asar_unpacked: PathBuf,
     pub architecture: String,
 }
 
@@ -151,11 +149,7 @@ pub fn inspect_codex_package(evidence: WindowsPackageEvidence) -> Result<Windows
     })?;
     require_file(&install_location.join("AppxManifest.xml"), "AppX manifest")?;
     let executable = install_location.join("app/ChatGPT.exe");
-    let asar = install_location.join("app/resources/app.asar");
-    let asar_unpacked = install_location.join("app/resources/app.asar.unpacked");
     require_file(&executable, "Codex executable")?;
-    require_file(&asar, "Codex app.asar")?;
-    require_dir(&asar_unpacked, "Codex app.asar.unpacked")?;
 
     Ok(WindowsCodexApp {
         package_full_name: evidence.package_full_name,
@@ -165,8 +159,6 @@ pub fn inspect_codex_package(evidence: WindowsPackageEvidence) -> Result<Windows
         ),
         install_location,
         executable,
-        asar,
-        asar_unpacked,
         architecture: evidence.architecture,
     })
 }
@@ -180,14 +172,6 @@ fn valid_application_id(value: &str) -> bool {
 
 fn require_file(path: &Path, label: &str) -> Result<(), String> {
     if path.is_file() {
-        Ok(())
-    } else {
-        Err(format!("{label} not found: {}", path.display()))
-    }
-}
-
-fn require_dir(path: &Path, label: &str) -> Result<(), String> {
-    if path.is_dir() {
         Ok(())
     } else {
         Err(format!("{label} not found: {}", path.display()))
