@@ -8,12 +8,17 @@ use incodex_cli::windows_install::{
     install_windows_runtime_with, uninstall_windows_runtime_with, WindowsUninstallOutcome,
 };
 use incodex_cli::windows_install_state::{
-    read_windows_install_state, stage_windows_install_state, transition_windows_install_state,
-    WindowsInstallPhase,
+    acquire_windows_install_state, read_windows_install_state, stage_windows_install_state,
+    transition_windows_install_state, WindowsInstallPhase, WindowsInstallStateGuard,
 };
 use incodex_core::windows_session::verify_private_acl;
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[test]
+fn exposes_one_cross_process_gate_for_launch_install_and_uninstall() {
+    let _gate: fn() -> Result<WindowsInstallStateGuard, String> = acquire_windows_install_state;
+}
 
 fn scratch_root() -> PathBuf {
     let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
