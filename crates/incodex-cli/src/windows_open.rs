@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::io::Write;
+use std::fs::File;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
@@ -159,7 +160,7 @@ pub fn prepare_windows_open(
             session: session.clone(),
             debug_port,
             injection: InjectionOptions {
-                locale: read_locale_override(source_home),
+                locale: read_locale_override(&session.home),
                 profile_mask,
             },
         })
@@ -461,7 +462,16 @@ fn finish_windows_open(outcome: WindowsOpenOutcome) -> Result<(), CliFailure> {
 }
 
 fn read_locale_override(source_home: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(source_home.join("config.toml")).ok()?;
+    let file = File::open(source_home.join("config.toml")).ok()?;
+    let limit = incodex_core::windows_session::MAX_WINDOWS_CONFIG_BYTES;
+    if file.metadata().ok()?.len() > limit {
+        return None;
+    }
+    let mut content = String::new();
+    let bytes = file.take(limit + 1).read_to_string(&mut content).ok()? as u64;
+    if bytes > limit {
+        return None;
+    }
     content.lines().find_map(|line| {
         let (name, value) = line.split_once('=')?;
         if name.trim() != "localeOverride" {

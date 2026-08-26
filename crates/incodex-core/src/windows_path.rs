@@ -1,6 +1,6 @@
 use std::fs;
 use std::os::windows::fs::MetadataExt;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, Path, PathBuf, Prefix};
 
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
 
@@ -45,6 +45,23 @@ pub(crate) fn require_absolute(path: &Path, label: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("{label} must be absolute: {}", path.display()))
+    }
+}
+
+pub fn require_local_disk_absolute(path: &Path, label: &str) -> Result<(), String> {
+    require_absolute(path, label)?;
+    let local_disk = matches!(
+        path.components().next(),
+        Some(Component::Prefix(prefix))
+            if matches!(prefix.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_))
+    );
+    if local_disk {
+        Ok(())
+    } else {
+        Err(format!(
+            "{label} must be on a local disk: {}",
+            path.display()
+        ))
     }
 }
 

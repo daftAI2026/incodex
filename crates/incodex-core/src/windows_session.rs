@@ -1,9 +1,9 @@
 use std::ffi::c_void;
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io;
 use std::mem::size_of;
 use std::os::windows::ffi::OsStrExt;
-use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -30,7 +30,6 @@ use crate::windows_path::{
     reject_reparse_ancestors, require_absolute, validate_existing_session_dir,
 };
 
-const SETTINGS_FILES: &[&str] = &["auth.json", "config.toml"];
 const OWNER_NAME: &str = "owner.json";
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
 const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
@@ -42,6 +41,10 @@ use owner::{
     current_process_creation_time, probe_process, read_owner_manifest, write_owner_manifest,
     WindowsProcessProbe, WindowsSessionOwner,
 };
+
+#[path = "windows_settings.rs"]
+mod settings;
+pub use settings::{copy_windows_settings, MAX_WINDOWS_AUTH_BYTES, MAX_WINDOWS_CONFIG_BYTES};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowsSessionIdentity {
@@ -263,45 +266,6 @@ fn inspect_session_entry(
     inspected.unwrap_or_else(WindowsSessionEntry::Unknown)
 }
 
-pub fn copy_windows_settings(
-    session: &WindowsSessionHome,
-    source_home: &Path,
-) -> Result<usize, String> {
-    validate_session_identity(session)?;
-    require_absolute(source_home, "Windows Codex source home")?;
-    match fs::symlink_metadata(source_home) {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(0),
-        Err(error) => {
-            return Err(format!(
-                "cannot inspect Windows Codex source home {}: {error}",
-                source_home.display()
-            ))
-        }
-        Ok(_) => {}
-    }
-    reject_reparse_ancestors(source_home)?;
-    if !source_home.is_dir() {
-        return Err(format!(
-            "Windows Codex source home is not a directory: {}",
-            source_home.display()
-        ));
-    }
-
-    let mut copied = 0;
-    for name in SETTINGS_FILES {
-        let source = source_home.join(name);
-        match fs::symlink_metadata(&source) {
-            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(format!("cannot inspect {}: {error}", source.display())),
-            Ok(_) => {}
-        }
-        reject_reparse_ancestors(&source)?;
-        copy_private_file(&source, &session.home.join(name))?;
-        copied += 1;
-    }
-    Ok(copied)
-}
-
 pub fn burn_windows_session(session: &WindowsSessionHome) -> WindowsCleanupResult {
     let sessions = session.user_root.join("sessions");
     let validated = match validate_existing_session_dir(&sessions, &session.root) {
@@ -447,59 +411,6 @@ fn create_unique_private_dir(parent: &Path) -> Result<PathBuf, String> {
         }
     }
     Err("cannot allocate a unique Windows session directory".to_string())
-}
-
-fn copy_private_file(source: &Path, destination: &Path) -> Result<(), String> {
-    if fs::symlink_metadata(destination).is_ok() {
-        return Err(format!(
-            "refuse to overwrite Windows session setting: {}",
-            destination.display()
-        ));
-    }
-    let mut source_file = OpenOptions::new()
-        .read(true)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(source)
-        .map_err(|error| format!("cannot open source setting {}: {error}", source.display()))?;
-    let metadata = source_file.metadata().map_err(|error| {
-        format!(
-            "cannot inspect source setting {}: {error}",
-            source.display()
-        )
-    })?;
-    if !metadata.is_file() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-        return Err(format!(
-            "source setting is not a plain file: {}",
-            source.display()
-        ));
-    }
-    let mut destination_file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(destination)
-        .map_err(|error| {
-            format!(
-                "cannot create session setting {}: {error}",
-                destination.display()
-            )
-        })?;
-    if let Err(error) =
-        io::copy(&mut source_file, &mut destination_file).and_then(|_| destination_file.sync_all())
-    {
-        drop(destination_file);
-        let _ = fs::remove_file(destination);
-        return Err(format!(
-            "cannot copy session setting {}: {error}",
-            destination.display()
-        ));
-    }
-    drop(destination_file);
-    if let Err(error) = apply_private_acl(destination).and_then(|_| verify_private_acl(destination))
-    {
-        let _ = fs::remove_file(destination);
-        return Err(error);
-    }
-    Ok(())
 }
 
 fn validate_session_identity(session: &WindowsSessionHome) -> Result<(), String> {
