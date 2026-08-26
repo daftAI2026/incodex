@@ -110,9 +110,7 @@ describe("Homebrew tap bump", () => {
     expect(readme).toContain("x.com/singkid9527");
     expect(readme).not.toContain("badge/homebrew");
     expect(readme).toContain("macOS on Apple Silicon (arm64) and Intel (x86_64)");
-    expect(readme).toContain("Windows 10/11 on x86_64");
-    expect(readme).toContain("Linux is not supported");
-    expect(readme).toContain("A prebuilt Windows installer is not published yet");
+    expect(readme).toContain("Windows and Linux are not supported");
     expect(readme).toContain("cargo install --locked --path crates/incodex-cli");
     expect(readme).not.toContain("bun link");
   });
@@ -130,9 +128,7 @@ describe("Homebrew tap bump", () => {
     expect(cn).toContain("brew install daftAI2026/tap/incodex");
     expect(cn).toContain("assets/sidebar.png");
     expect(cn).toContain("Apple Silicon（arm64）和 Intel（x86_64）Mac");
-    expect(cn).toContain("x86_64 Windows 10/11");
-    expect(cn).toContain("当前不支持 Linux");
-    expect(cn).toContain("Windows 预编译安装器尚未发布");
+    expect(cn).toContain("不支持 Windows 或 Linux");
     expect(cn).toContain("cargo install --locked --path crates/incodex-cli");
     expect(cn).not.toContain("bun link");
   });

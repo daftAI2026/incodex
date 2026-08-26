@@ -133,11 +133,6 @@ describe("Rust workspace", () => {
     expect(read("CONTRIBUTING.md")).not.toMatch(/Rust \*\*\d+\.\d+\.\d+\*\*/);
   });
 
-  test("Windows remains explicitly labeled as an unsupported source preview", () => {
-    expect(read("README.md")).toContain("unsupported Windows source preview");
-    expect(read("README_CN.md")).toContain("不受支持的 Windows 源码预览");
-  });
-
   test("CI runs the locked Rust quality gates on macos", () => {
     const ci = read(".github/workflows/ci.yml");
     expect(ci).toContain("cargo fmt --all -- --check");
