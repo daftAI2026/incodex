@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use incodex_cli::windows_app::WindowsCodexApp;
 use incodex_cli::windows_runtime_open::{
     parse_windows_runtime_open, prepare_windows_runtime_open, validate_windows_runtime_ready,
-    windows_runtime_ready_for_handshake,
+    windows_runtime_ready_for_handshake, WindowsRuntimeReadyPipe,
 };
 use incodex_core::windows_session::{
     burn_windows_session, verify_private_acl, WindowsCleanupResult,
@@ -157,4 +157,24 @@ fn guardian_reports_ready_only_after_runtime_acceptance_and_a_visible_window() {
     assert!(!windows_runtime_ready_for_handshake(true, false));
     assert!(!windows_runtime_ready_for_handshake(false, true));
     assert!(windows_runtime_ready_for_handshake(true, true));
+}
+
+#[test]
+fn runtime_acceptance_comes_from_the_connecting_named_pipe_process() {
+    use std::io::Write;
+
+    let pipe = WindowsRuntimeReadyPipe::create().expect("create ready pipe");
+    let pipe_name = pipe.name().to_string();
+    let writer = std::thread::spawn(move || {
+        let mut client = fs::OpenOptions::new()
+            .write(true)
+            .open(pipe_name)
+            .expect("connect ready pipe");
+        client.write_all(b"accepted\n").expect("write acceptance");
+    });
+    let acceptance = pipe.accept().expect("accept Runtime readiness");
+    writer.join().expect("join ready writer");
+
+    assert_eq!(acceptance.process_id, std::process::id());
+    assert_eq!(acceptance.message, "accepted");
 }
