@@ -50,7 +50,7 @@ struct CapturedOutput {
 
 enum CommandOutcome {
     Completed(CapturedOutput),
-    TimedOut,
+    TimedOut { stdout: Vec<u8>, stderr: Vec<u8> },
 }
 
 pub fn run_runtime(parsed: &ParsedCli) -> Result<(), String> {
@@ -224,7 +224,14 @@ fn run_homebrew_update(parsed: &ParsedCli) -> Result<(), String> {
                 format!("Homebrew upgrade failed\n{detail}")
             });
         }
-        Ok(CommandOutcome::TimedOut) => return Err("Homebrew upgrade timed out".into()),
+        Ok(CommandOutcome::TimedOut { stdout, stderr }) => {
+            let detail = output_detail_bytes(&stderr, &stdout);
+            return Err(if detail.is_empty() {
+                "Homebrew upgrade timed out".into()
+            } else {
+                format!("Homebrew upgrade timed out\n{detail}")
+            });
+        }
         Err(err) => return Err(format!("Homebrew upgrade failed: {err}")),
     };
 
@@ -305,9 +312,10 @@ fn run_command_with_timeout(
         }
         if Instant::now() >= deadline {
             terminate_process_group(&mut child);
-            let _ = join_reader(stdout_reader);
-            let _ = join_reader(stderr_reader);
-            return Ok(CommandOutcome::TimedOut);
+            return Ok(CommandOutcome::TimedOut {
+                stdout: join_reader(stdout_reader),
+                stderr: join_reader(stderr_reader),
+            });
         }
         thread::sleep(Duration::from_millis(20));
     }
@@ -342,7 +350,11 @@ fn timeout_from_env(name: &str, default: Duration) -> Duration {
 }
 
 fn output_detail(output: &CapturedOutput) -> String {
-    [&output.stderr, &output.stdout]
+    output_detail_bytes(&output.stderr, &output.stdout)
+}
+
+fn output_detail_bytes(stderr: &[u8], stdout: &[u8]) -> String {
+    [stderr, stdout]
         .into_iter()
         .map(|bytes| String::from_utf8_lossy(bytes))
         .map(|text| text.trim().to_string())
