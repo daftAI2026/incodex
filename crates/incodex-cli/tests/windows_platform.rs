@@ -55,7 +55,6 @@ fn unsupported_product_commands_fail_closed_before_creating_state() {
     let cases: &[(&str, &[&str])] = &[
         ("install", &["install", "--dry-run"]),
         ("uninstall", &["uninstall", "--dry-run"]),
-        ("doctor", &["doctor"]),
         ("runtime", &["runtime"]),
         (
             "recover",
@@ -110,6 +109,39 @@ fn status_reports_current_user_package_without_creating_state() {
     assert!(json.stderr.is_empty(), "{}", text(&json.stderr));
 
     assert!(!profile.exists(), "status created user state");
+}
+
+#[test]
+fn doctor_reports_package_and_session_health_without_creating_state() {
+    let profile = scratch_profile();
+
+    let doctor = run(&["doctor"], &profile);
+    assert!(doctor.status.success(), "{}", text(&doctor.stderr));
+    let report = text(&doctor.stdout);
+    for expected in [
+        "Windows Doctor",
+        "Package",
+        "Sessions",
+        "Active",
+        "Orphaned",
+        "Unknown",
+    ] {
+        assert!(report.contains(expected), "missing {expected}: {report}");
+    }
+    assert!(doctor.stderr.is_empty(), "{}", text(&doctor.stderr));
+
+    let json = run(&["doctor", "--json"], &profile);
+    assert!(json.status.success(), "{}", text(&json.stderr));
+    let value: serde_json::Value =
+        serde_json::from_slice(&json.stdout).expect("doctor emits valid JSON");
+    assert_eq!(value["platform"], "windows");
+    assert!(value["package"]["available"].is_boolean());
+    assert_eq!(value["sessions"]["active"], 0);
+    assert_eq!(value["sessions"]["orphaned"], 0);
+    assert_eq!(value["sessions"]["unknown"], 0);
+    assert!(json.stderr.is_empty(), "{}", text(&json.stderr));
+
+    assert!(!profile.exists(), "doctor created user state");
 }
 
 #[test]
