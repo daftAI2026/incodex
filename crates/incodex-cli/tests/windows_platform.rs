@@ -35,8 +35,32 @@ fn help_and_version_are_available_without_creating_state() {
 
     let help = run(&["--help"], &profile);
     assert!(help.status.success(), "{}", text(&help.stderr));
-    assert!(text(&help.stdout).contains("Usage:\n  incodex"));
+    let help_text = text(&help.stdout);
+    assert!(help_text.contains("Usage:\n  incodex"));
+    assert!(help_text.contains("Windows"));
+    assert!(help_text.contains("Microsoft Store"));
+    assert!(!help_text.contains("Patch the Codex app"));
     assert!(help.stderr.is_empty());
+
+    for (command, forbidden) in [
+        ("status", "--app"),
+        ("doctor", "--deep"),
+        ("open", "--app"),
+    ] {
+        let command_help = run(&[command, "--help"], &profile);
+        assert!(
+            command_help.status.success(),
+            "{}: {}",
+            command,
+            text(&command_help.stderr)
+        );
+        let command_help_text = text(&command_help.stdout);
+        assert!(command_help_text.contains("Windows"), "{command_help_text}");
+        assert!(
+            !command_help_text.contains(forbidden),
+            "{command_help_text}"
+        );
+    }
 
     let version = run(&["--version"], &profile);
     assert!(version.status.success(), "{}", text(&version.stderr));
