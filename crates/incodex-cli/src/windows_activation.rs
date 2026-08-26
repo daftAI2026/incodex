@@ -242,7 +242,7 @@ fn activate_packaged(
     let package = wide_nul(request.package_full_name());
     let app_user_model_id = wide_nul(request.app_user_model_id());
     let arguments = wide_nul(request.arguments());
-    let debugger_command = debugger_command_line(pending_job.name())?;
+    let debugger_command = debugger_command_line(pending_job.name(), request.package_full_name())?;
     let debugger_command = wide_nul(&debugger_command);
     let mut debugging = PackageDebugGuard::enable(
         &package,
@@ -420,19 +420,21 @@ impl Drop for PackageActivationLock {
     }
 }
 
-pub(crate) fn try_run_package_debugger(arguments: &[String]) -> Option<Result<(), String>> {
+pub fn try_run_package_debugger(arguments: &[String]) -> Option<Result<(), String>> {
     if arguments.first().map(String::as_str) != Some(PACKAGE_DEBUGGER_MODE) {
         return None;
     }
     let parsed = (|| {
         let job_name = flag_value(arguments, "--job")?;
+        let package_full_name = flag_value(arguments, "--package")?;
+        validate_text(package_full_name, "package full name")?;
         let process_id = flag_value(arguments, "-p")?
             .parse::<u32>()
             .map_err(|_| "Windows package debugger received an invalid process id".to_string())?;
         let thread_id = flag_value(arguments, "-tid")?
             .parse::<u32>()
             .map_err(|_| "Windows package debugger received an invalid thread id".to_string())?;
-        assign_debugged_process_to_job(job_name, process_id, thread_id)
+        assign_debugged_process_to_job(job_name, package_full_name, process_id, thread_id)
             .map_err(|error| format!("Windows package debugger failed: {error}"))
     })();
     Some(parsed)
@@ -470,7 +472,7 @@ fn flag_value<'a>(arguments: &'a [String], flag: &str) -> Result<&'a str, String
         .ok_or_else(|| format!("Windows package debugger is missing {flag}"))
 }
 
-fn debugger_command_line(job_name: &str) -> Result<String, String> {
+fn debugger_command_line(job_name: &str, package_full_name: &str) -> Result<String, String> {
     let executable = std::env::current_exe()
         .map_err(|error| format!("cannot locate the Incodex package debugger: {error}"))?;
     [
@@ -478,6 +480,8 @@ fn debugger_command_line(job_name: &str) -> Result<String, String> {
         OsString::from(PACKAGE_DEBUGGER_MODE),
         OsString::from("--job"),
         OsString::from(job_name),
+        OsString::from("--package"),
+        OsString::from(package_full_name),
     ]
     .iter()
     .map(|argument| quote_windows_argument(argument))

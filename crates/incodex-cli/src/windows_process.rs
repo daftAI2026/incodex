@@ -507,6 +507,7 @@ impl WindowsPendingJob {
 
 pub(crate) fn assign_debugged_process_to_job(
     job_name: &str,
+    expected_package_full_name: &str,
     process_id: u32,
     thread_id: u32,
 ) -> io::Result<()> {
@@ -518,6 +519,10 @@ pub(crate) fn assign_debugged_process_to_job(
         PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SET_QUOTA | PROCESS_TERMINATE | 0x0010_0000;
     let process = unsafe { OpenProcess(REQUIRED_ACCESS, 0, process_id) };
     let process = OwnedHandle::from_nullable(process)?;
+    require_process_package_identity(process.raw(), expected_package_full_name)?;
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    let snapshot = OwnedHandle::from_snapshot(snapshot)?;
+    require_thread_owner(snapshot.raw(), thread_id, process_id)?;
     if unsafe { AssignProcessToJobObject(job.raw(), process.raw()) } == 0 {
         return Err(io::Error::last_os_error());
     }
