@@ -165,6 +165,19 @@ fn doctor_reports_package_and_session_health_without_creating_state() {
 }
 
 #[test]
+fn menu_selection_exposes_only_supported_windows_commands() {
+    use incodex_cli::parse::CliCommand;
+    use incodex_cli::windows_menu::command_for_selection;
+
+    assert_eq!(command_for_selection("1"), Some(CliCommand::Open));
+    assert_eq!(command_for_selection("status"), Some(CliCommand::Status));
+    assert_eq!(command_for_selection("3"), Some(CliCommand::Doctor));
+    assert_eq!(command_for_selection("version"), Some(CliCommand::Version));
+    assert_eq!(command_for_selection("q"), None);
+    assert_eq!(command_for_selection("install"), None);
+}
+
+#[test]
 fn open_dry_run_enters_windows_discovery_without_creating_state() {
     let profile = scratch_profile();
     let output = run(&["open", "--dry-run"], &profile);
