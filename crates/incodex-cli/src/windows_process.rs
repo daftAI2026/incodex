@@ -8,8 +8,8 @@ use std::os::windows::process::{CommandExt, ExitStatusExt};
 use std::process::{Child, Command, ExitStatus};
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_INSUFFICIENT_BUFFER, ERROR_NO_MORE_FILES, HANDLE, INVALID_HANDLE_VALUE,
-    WAIT_OBJECT_0, WAIT_TIMEOUT,
+    CloseHandle, APPMODEL_ERROR_NO_PACKAGE, ERROR_INSUFFICIENT_BUFFER, ERROR_NO_MORE_FILES, HANDLE,
+    INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::NetworkManagement::IpHelper::{
     GetExtendedTcpTable, MIB_TCPROW_OWNER_PID, MIB_TCPTABLE_OWNER_PID, TCP_TABLE_OWNER_PID_LISTENER,
@@ -18,6 +18,7 @@ use windows_sys::Win32::Networking::WinSock::AF_INET;
 use windows_sys::Win32::Security::Cryptography::{
     BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG,
 };
+use windows_sys::Win32::Storage::Packaging::Appx::GetPackageFullName;
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, Thread32First, Thread32Next,
     PROCESSENTRY32W, TH32CS_SNAPPROCESS, TH32CS_SNAPTHREAD, THREADENTRY32,
@@ -198,16 +199,25 @@ impl WindowsPendingJob {
         &self.name
     }
 
-    pub(crate) fn attach(self, process_id: u32) -> io::Result<WindowsProcessTree> {
+    pub(crate) fn attach(
+        self,
+        process_id: u32,
+        expected_package_full_name: &str,
+    ) -> io::Result<WindowsProcessTree> {
         const REQUIRED_ACCESS: u32 =
             PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | 0x0010_0000;
         let process = unsafe { OpenProcess(REQUIRED_ACCESS, 0, process_id) };
         let process = OwnedHandle::from_nullable(process)?;
+        require_process_package_identity(process.raw(), expected_package_full_name)?;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
             let mut contained = 0;
             if unsafe { IsProcessInJob(process.raw(), self.job.raw(), &mut contained) } == 0 {
-                return Err(io::Error::last_os_error());
+                let error = io::Error::last_os_error();
+                return Err(terminate_exact_process_after_attach_failure(
+                    process.raw(),
+                    error,
+                ));
             }
             if contained != 0 {
                 return Ok(WindowsProcessTree {
@@ -222,8 +232,11 @@ impl WindowsPendingJob {
                 ));
             }
             if std::time::Instant::now() >= deadline {
-                return Err(io::Error::other(
-                    "timed out waiting for the Windows package debugger to assign the Job",
+                return Err(terminate_exact_process_after_attach_failure(
+                    process.raw(),
+                    io::Error::other(
+                        "timed out waiting for the Windows package debugger to assign the Job",
+                    ),
                 ));
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
@@ -281,13 +294,58 @@ pub(crate) fn snapshot_process_ids() -> io::Result<HashSet<u32>> {
     }
 }
 
-pub(crate) fn terminate_process_id(process_id: u32) -> io::Result<()> {
-    let process = unsafe { OpenProcess(PROCESS_TERMINATE | 0x0010_0000, 0, process_id) };
-    let process = OwnedHandle::from_nullable(process)?;
-    if unsafe { TerminateProcess(process.raw(), 1) } == 0 {
-        return Err(io::Error::last_os_error());
+fn require_process_package_identity(
+    process: HANDLE,
+    expected_package_full_name: &str,
+) -> io::Result<()> {
+    let mut length = 0;
+    let first = unsafe { GetPackageFullName(process, &mut length, std::ptr::null_mut()) };
+    if first == APPMODEL_ERROR_NO_PACKAGE {
+        return Err(io::Error::other(
+            "activated Windows process has no package identity",
+        ));
     }
-    wait_handle(process.raw()).map(|_| ())
+    if first != ERROR_INSUFFICIENT_BUFFER || length == 0 {
+        return Err(io::Error::other(format!(
+            "cannot read activated Windows process package identity: {}",
+            io::Error::from_raw_os_error(first as i32)
+        )));
+    }
+    let mut wide = vec![0u16; length as usize];
+    let status = unsafe { GetPackageFullName(process, &mut length, wide.as_mut_ptr()) };
+    if status != 0 {
+        return Err(io::Error::other(format!(
+            "cannot read activated Windows process package identity: {}",
+            io::Error::from_raw_os_error(status as i32)
+        )));
+    }
+    let end = wide
+        .iter()
+        .position(|unit| *unit == 0)
+        .unwrap_or(wide.len());
+    let actual = String::from_utf16(&wide[..end])
+        .map_err(|_| io::Error::other("activated Windows process package identity is invalid"))?;
+    if actual != expected_package_full_name {
+        return Err(io::Error::other(format!(
+            "activated Windows process package identity mismatch: {actual}"
+        )));
+    }
+    Ok(())
+}
+
+fn terminate_exact_process_after_attach_failure(process: HANDLE, primary: io::Error) -> io::Error {
+    if unsafe { TerminateProcess(process, 1) } == 0 {
+        return io::Error::other(format!(
+            "{primary}; cannot terminate the exact activated process: {}",
+            io::Error::last_os_error()
+        ));
+    }
+    match wait_handle(process) {
+        Ok(_) => primary,
+        Err(error) => io::Error::other(format!(
+            "{primary}; cannot wait for the exact activated process: {error}"
+        )),
+    }
 }
 
 fn try_wait_handle(process: HANDLE) -> io::Result<Option<ExitStatus>> {

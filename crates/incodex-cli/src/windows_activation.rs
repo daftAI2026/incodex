@@ -15,8 +15,7 @@ use windows_sys::Win32::System::Com::{
 use windows_sys::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
 
 use crate::windows_process::{
-    assign_debugged_process_to_job, snapshot_process_ids, terminate_process_id, WindowsPendingJob,
-    WindowsProcessTree,
+    assign_debugged_process_to_job, snapshot_process_ids, WindowsPendingJob, WindowsProcessTree,
 };
 
 const PACKAGE_DEBUGGER_MODE: &str = "__incodex_windows_package_debugger";
@@ -128,17 +127,13 @@ pub fn activate_packaged_kill_on_drop(
         ));
     }
 
-    let mut process_tree = match pending_job.attach(process_id) {
+    let mut process_tree = match pending_job.attach(process_id, request.package_full_name()) {
         Ok(process_tree) => process_tree,
         Err(error) => {
-            let terminated = terminate_process_id(process_id);
             let disable = debugging.disable();
-            let mut message = format!(
+            let message = format!(
                 "cannot contain activated Windows Codex process {process_id} in a Job Object: {error}"
             );
-            if let Err(error) = terminated {
-                message.push_str(&format!("; cannot terminate new process: {error}"));
-            }
             return Err(join_cleanup_error(message, disable));
         }
     };
