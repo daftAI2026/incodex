@@ -585,23 +585,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn locale_reader_refuses_an_oversized_config() {
-        let root = std::env::temp_dir().join(format!(
-            "incodex-windows-locale-limit-{}-{}",
-            std::process::id(),
-            SEQUENCE.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir_all(&root).expect("create locale fixture");
-        let file = fs::File::create(root.join("config.toml")).expect("create config");
-        file.set_len(incodex_core::windows_session::MAX_WINDOWS_CONFIG_BYTES + 1)
-            .expect("extend sparse config");
-
-        assert_eq!(read_locale_override(&root), None);
-
-        fs::remove_dir_all(root).expect("remove locale fixture");
-    }
-
     fn launch_fixture(
         plan: &WindowsOpenPlan,
     ) -> Result<crate::windows_process::WindowsProcessTree, String> {
@@ -798,7 +781,6 @@ mod tests {
             "75".to_string(),
         );
         let session_root = plan.session.root.clone();
-
         let outcome = execute_windows_open_with(
             plan,
             launch_fixture,
@@ -812,3 +794,7 @@ mod tests {
         fs::remove_dir_all(root).expect("remove lifecycle fixture");
     }
 }
+
+#[cfg(test)]
+#[path = "windows_locale_tests.rs"]
+mod locale_tests;
