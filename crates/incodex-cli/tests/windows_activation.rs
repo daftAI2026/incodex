@@ -3,7 +3,16 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 
-use incodex_cli::windows_activation::WindowsActivationRequest;
+use incodex_cli::windows_activation::{
+    activate_packaged_kill_on_drop, WindowsActivationRequest,
+};
+use incodex_cli::windows_process::WindowsProcessTree;
+
+#[test]
+fn exposes_one_packaged_activation_backend_for_the_open_lifecycle() {
+    let _backend: fn(&WindowsActivationRequest) -> Result<WindowsProcessTree, String> =
+        activate_packaged_kill_on_drop;
+}
 
 #[test]
 fn builds_a_store_activation_request_without_losing_windows_arguments_or_environment() {
