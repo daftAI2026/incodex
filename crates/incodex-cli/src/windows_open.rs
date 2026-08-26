@@ -187,7 +187,13 @@ fn execute_windows_open_with<L, F>(
 ) -> WindowsOpenOutcome
 where
     L: FnOnce(&WindowsOpenPlan) -> Result<crate::windows_process::WindowsProcessTree, String>,
-    F: FnOnce(u16, InjectionOptions, Arc<AtomicBool>, Arc<AtomicBool>) -> Result<(), String>
+    F: FnOnce(
+            u16,
+            InjectionOptions,
+            Arc<AtomicBool>,
+            Arc<AtomicBool>,
+            Arc<AtomicBool>,
+        ) -> Result<(), String>
         + Send
         + 'static,
 {
@@ -217,7 +223,13 @@ fn run_windows_open_lifecycle<F>(
     inject: F,
 ) -> WindowsOpenOutcome
 where
-    F: FnOnce(u16, InjectionOptions, Arc<AtomicBool>, Arc<AtomicBool>) -> Result<(), String>
+    F: FnOnce(
+            u16,
+            InjectionOptions,
+            Arc<AtomicBool>,
+            Arc<AtomicBool>,
+            Arc<AtomicBool>,
+        ) -> Result<(), String>
         + Send
         + 'static,
 {
@@ -234,6 +246,8 @@ where
     let injection_alive = alive.clone();
     let close_requested = Arc::new(AtomicBool::new(false));
     let injection_close_requested = close_requested.clone();
+    let cdp_failed = Arc::new(AtomicBool::new(false));
+    let injection_cdp_failed = cdp_failed.clone();
     let debug_port = plan.debug_port;
     let options = plan.injection.clone();
     let (injection_tx, injection_rx) = mpsc::channel();
@@ -243,6 +257,7 @@ where
             options,
             injection_alive,
             injection_close_requested,
+            injection_cdp_failed,
         ));
     });
 
@@ -261,6 +276,12 @@ where
                 );
             }
             Err(mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected) => {}
+        }
+        if ui_ready && cdp_failed.load(Ordering::Acquire) {
+            let _ = process_tree.terminate();
+            break WindowsOpenProcessResult::InjectionFailed(
+                "Windows CDP lifecycle became unavailable".to_string(),
+            );
         }
         if ui_ready && close_requested.load(Ordering::Acquire) {
             match process_tree.terminate_successfully() {
@@ -349,6 +370,7 @@ fn inject_windows_ui(
     options: InjectionOptions,
     alive: Arc<AtomicBool>,
     close_requested: Arc<AtomicBool>,
+    cdp_failed: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_secs(45);
     let mut last_error = "Codex CDP page is not ready".to_string();
@@ -359,7 +381,13 @@ fn inject_windows_ui(
         }) {
             Ok(_) => {
                 if let Some(target_id) = primary_target {
-                    start_lifecycle_signal_monitor(port, target_id, alive.clone(), close_requested);
+                    start_lifecycle_signal_monitor(
+                        port,
+                        target_id,
+                        alive.clone(),
+                        close_requested,
+                        cdp_failed,
+                    );
                 }
                 println!(
                     "{}",
@@ -521,7 +549,7 @@ mod tests {
         let outcome = execute_windows_open_with(
             plan,
             launch_fixture,
-            |_port, _options, alive, _close_requested| {
+            |_port, _options, alive, _close_requested, _cdp_failed| {
                 assert!(alive.load(Ordering::Acquire));
                 Ok(())
             },
@@ -542,7 +570,7 @@ mod tests {
         let outcome = execute_windows_open_with(
             plan,
             launch_fixture,
-            |_port, _options, _alive, close_requested| {
+            |_port, _options, _alive, close_requested, _cdp_failed| {
                 close_requested.store(true, Ordering::Release);
                 Ok(())
             },
@@ -563,7 +591,7 @@ mod tests {
         let outcome = execute_windows_open_with(
             plan,
             launch_fixture,
-            |_port, _options, _alive: Arc<AtomicBool>, _close_requested| {
+            |_port, _options, _alive: Arc<AtomicBool>, _close_requested, _cdp_failed| {
                 Err("fixture injection refused".to_string())
             },
         );
@@ -615,7 +643,7 @@ mod tests {
         let outcome = execute_windows_open_with(
             plan,
             launch_fixture,
-            move |_port, _options, _alive, _close_requested| {
+            move |_port, _options, _alive, _close_requested, _cdp_failed| {
                 injection_probe.store(true, Ordering::Release);
                 Ok(())
             },

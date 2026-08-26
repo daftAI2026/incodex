@@ -24,7 +24,8 @@ const MAX_HTTP_RESPONSE_BYTES: usize = 1024 * 1024;
 const CDP_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const LIFECYCLE_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const PRIMARY_TARGET_MISSING_POLLS: u8 = 2;
-const WINDOWS_CDP_FAILURE_POLLS: u8 = 1;
+const WINDOWS_CDP_FAILURE_POLLS: u8 = 3;
+const WINDOWS_LIFECYCLE_CDP_TIMEOUT: Duration = Duration::from_millis(400);
 #[cfg(any(not(target_os = "windows"), test))]
 const PROFILE_MASK_FAILURE_POLLS: u8 = 2;
 const BROWSER_CLOSE_ATTEMPTS: u8 = 3;
@@ -42,6 +43,13 @@ pub struct CdpTarget {
 pub struct InjectionOptions {
     pub locale: Option<String>,
     pub profile_mask: Option<ProfileMask>,
+}
+
+#[derive(Clone, Copy)]
+struct LifecyclePolicy {
+    max_consecutive_errors: Option<u8>,
+    adopt_replacement: bool,
+    cdp_timeout: Option<Duration>,
 }
 
 pub fn allocate_debug_port() -> Result<u16, String> {
@@ -412,17 +420,23 @@ pub fn start_lifecycle_signal_monitor(
     primary_target_id: String,
     process_alive: Arc<AtomicBool>,
     close_requested: Arc<AtomicBool>,
+    cdp_failed: Arc<AtomicBool>,
 ) {
     thread::spawn(move || {
         monitor_primary_target_with_failure_limit(
             debug_port,
             &primary_target_id,
             &process_alive,
-            Some(WINDOWS_CDP_FAILURE_POLLS),
+            LifecyclePolicy {
+                max_consecutive_errors: Some(WINDOWS_CDP_FAILURE_POLLS),
+                adopt_replacement: false,
+                cdp_timeout: Some(WINDOWS_LIFECYCLE_CDP_TIMEOUT),
+            },
             || {
                 close_requested.store(true, Ordering::Release);
                 true
             },
+            || cdp_failed.store(true, Ordering::Release),
         )
     });
 }
@@ -494,8 +508,13 @@ fn monitor_primary_target<F>(
         debug_port,
         primary_target_id,
         process_alive,
-        None,
+        LifecyclePolicy {
+            max_consecutive_errors: None,
+            adopt_replacement: true,
+            cdp_timeout: None,
+        },
         on_close,
+        || {},
     );
 }
 
@@ -503,8 +522,9 @@ fn monitor_primary_target_with_failure_limit<F>(
     debug_port: u16,
     primary_target_id: &str,
     process_alive: &AtomicBool,
-    max_consecutive_errors: Option<u8>,
+    policy: LifecyclePolicy,
     mut on_close: F,
+    mut on_cdp_failure: impl FnMut(),
 ) where
     F: FnMut() -> bool,
 {
@@ -513,16 +533,22 @@ fn monitor_primary_target_with_failure_limit<F>(
     let mut consecutive_errors = 0u8;
     while process_alive.load(Ordering::Acquire) {
         thread::sleep(LIFECYCLE_POLL_INTERVAL);
-        let targets = match list_targets(debug_port) {
+        let targets = match policy
+            .cdp_timeout
+            .map(|timeout| list_targets_with_timeout(debug_port, timeout))
+            .unwrap_or_else(|| list_targets(debug_port))
+        {
             Ok(targets) => {
                 consecutive_errors = 0;
                 targets
             }
             Err(_) => {
                 consecutive_errors = consecutive_errors.saturating_add(1);
-                if max_consecutive_errors.is_some_and(|limit| consecutive_errors >= limit)
-                    && on_close()
+                if policy
+                    .max_consecutive_errors
+                    .is_some_and(|limit| consecutive_errors >= limit)
                 {
+                    on_cdp_failure();
                     return;
                 }
                 continue;
@@ -533,9 +559,11 @@ fn monitor_primary_target_with_failure_limit<F>(
             continue;
         }
         if let Some(replacement) = pick_codex_page_target(&targets) {
-            primary_target_id.clone_from(&replacement.id);
-            missing_polls = 0;
-            continue;
+            if policy.adopt_replacement {
+                primary_target_id.clone_from(&replacement.id);
+                missing_polls = 0;
+                continue;
+            }
         }
 
         missing_polls = missing_polls.saturating_add(1);
@@ -712,8 +740,12 @@ fn websocket_socket_addr(url: &str, expected_port: u16) -> Result<SocketAddr, St
 }
 
 fn list_targets(debug_port: u16) -> Result<Vec<CdpTarget>, String> {
-    let raw =
-        http_get_json(debug_port, "/json/list").or_else(|_| http_get_json(debug_port, "/json"))?;
+    list_targets_with_timeout(debug_port, CDP_IO_TIMEOUT)
+}
+
+fn list_targets_with_timeout(debug_port: u16, timeout: Duration) -> Result<Vec<CdpTarget>, String> {
+    let raw = http_get_json_with_timeout(debug_port, "/json/list", timeout)
+        .or_else(|_| http_get_json_with_timeout(debug_port, "/json", timeout))?;
     let list = raw.as_array().ok_or("cdp /json is not an array")?;
     list.iter()
         .map(|item| {
@@ -748,9 +780,17 @@ fn list_targets(debug_port: u16) -> Result<Vec<CdpTarget>, String> {
 }
 
 fn http_get_json(debug_port: u16, path: &str) -> Result<Value, String> {
+    http_get_json_with_timeout(debug_port, path, CDP_IO_TIMEOUT)
+}
+
+fn http_get_json_with_timeout(
+    debug_port: u16,
+    path: &str,
+    timeout: Duration,
+) -> Result<Value, String> {
     let mut errors = Vec::new();
     for host in cdp_hosts_for_platform(cfg!(target_os = "windows")) {
-        match http_get_json_host(host, debug_port, path) {
+        match http_get_json_host_with_timeout(host, debug_port, path, timeout) {
             Ok(value) => return Ok(value),
             Err(error) => errors.push(format!("{host}: {error}")),
         }
@@ -766,14 +806,24 @@ fn cdp_hosts_for_platform(windows: bool) -> &'static [&'static str] {
     }
 }
 
+#[cfg(test)]
 fn http_get_json_host(host: &str, debug_port: u16, path: &str) -> Result<Value, String> {
+    http_get_json_host_with_timeout(host, debug_port, path, CDP_IO_TIMEOUT)
+}
+
+fn http_get_json_host_with_timeout(
+    host: &str,
+    debug_port: u16,
+    path: &str,
+    timeout: Duration,
+) -> Result<Value, String> {
     let addr = format!("{host}:{debug_port}");
     let socket_addr: SocketAddr = addr
         .parse()
         .map_err(|error| format!("invalid CDP address {addr}: {error}"))?;
-    let deadline = Instant::now() + CDP_IO_TIMEOUT;
+    let deadline = Instant::now() + timeout;
     let mut stream =
-        TcpStream::connect_timeout(&socket_addr, CDP_IO_TIMEOUT).map_err(|err| err.to_string())?;
+        TcpStream::connect_timeout(&socket_addr, timeout).map_err(|err| err.to_string())?;
     let remaining = deadline
         .checked_duration_since(Instant::now())
         .ok_or("cdp http operation timed out")?;
