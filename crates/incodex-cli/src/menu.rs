@@ -1,6 +1,4 @@
-use std::io::{self, Write};
-
-use crate::menu_view::{render_menu_lines, MenuItem};
+use crate::menu_view::{draw_menu_lines, render_menu_lines, CursorGuard, MenuItem};
 use crate::parse::CliCommand;
 
 const ITEMS: &[MenuItem] = &[
@@ -86,21 +84,5 @@ fn draw(
         format!("↑↓ | Enter | V Version | Q Quit | 1-{} Jump", ITEMS.len())
     };
     let lines = render_menu_lines(ITEMS, Some(selected), update_message, &controls);
-    let body = lines.join("\n");
-    let frame = body
-        .lines()
-        .map(|line| format!("\r\u{1b}[2K{line}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    print!("\u{1b}[?25l\u{1b}[H\u{1b}[J{frame}\n\u{1b}[J");
-    io::stdout().flush().map_err(|err| err.to_string())
-}
-
-struct CursorGuard;
-
-impl Drop for CursorGuard {
-    fn drop(&mut self) {
-        print!("\u{1b}[H\u{1b}[J\u{1b}[?25h");
-        let _ = io::stdout().flush();
-    }
+    draw_menu_lines(&lines)
 }

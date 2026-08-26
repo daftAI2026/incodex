@@ -1,3 +1,5 @@
+use std::io::{self, Write};
+
 use crate::parse::CliCommand;
 
 pub(crate) const REPO_URL: &str = "https://github.com/daftAI2026/incodex";
@@ -51,6 +53,26 @@ pub(crate) fn render_menu_lines(
     lines
 }
 
+pub(crate) fn draw_menu_lines(lines: &[String]) -> Result<(), String> {
+    let body = lines.join("\n");
+    let frame = body
+        .lines()
+        .map(|line| format!("\r\u{1b}[2K{line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    print!("\u{1b}[?25l\u{1b}[H\u{1b}[J{frame}\n\u{1b}[J");
+    io::stdout().flush().map_err(|error| error.to_string())
+}
+
 fn paint(code: &str, text: &str) -> String {
     format!("\u{1b}[{code}m{text}\u{1b}[0m")
+}
+
+pub(crate) struct CursorGuard;
+
+impl Drop for CursorGuard {
+    fn drop(&mut self) {
+        print!("\u{1b}[H\u{1b}[J\u{1b}[?25h");
+        let _ = io::stdout().flush();
+    }
 }

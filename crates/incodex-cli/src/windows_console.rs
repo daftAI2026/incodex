@@ -2,9 +2,23 @@ use std::io::{self, IsTerminal};
 
 use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
 use windows_sys::Win32::System::Console::{
-    GetConsoleMode, GetStdHandle, SetConsoleMode, ENABLE_VIRTUAL_TERMINAL_PROCESSING,
-    STD_ERROR_HANDLE, STD_OUTPUT_HANDLE,
+    GetConsoleMode, GetStdHandle, ReadConsoleInputW, SetConsoleMode,
+    ENABLE_VIRTUAL_TERMINAL_PROCESSING, INPUT_RECORD, KEY_EVENT, STD_ERROR_HANDLE,
+    STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
 };
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MenuKey {
+    Up,
+    Down,
+    Activate,
+    Quit,
+    Version,
+    Digit(usize),
+    Interrupt,
+    Ignore,
+}
 
 pub fn is_tty() -> bool {
     io::stdin().is_terminal() && io::stdout().is_terminal()
@@ -13,6 +27,46 @@ pub fn is_tty() -> bool {
 pub fn enable_virtual_terminal() {
     enable_virtual_terminal_for(STD_OUTPUT_HANDLE);
     enable_virtual_terminal_for(STD_ERROR_HANDLE);
+}
+
+pub(crate) fn read_menu_key() -> Result<MenuKey, String> {
+    let input = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
+    if input.is_null() || input == INVALID_HANDLE_VALUE {
+        return Err("Windows console input is unavailable".to_string());
+    }
+    loop {
+        let mut record = INPUT_RECORD::default();
+        let mut read = 0u32;
+        if unsafe { ReadConsoleInputW(input, &mut record, 1, &mut read) } == 0 {
+            return Err(io::Error::last_os_error().to_string());
+        }
+        if read == 0 || u32::from(record.EventType) != KEY_EVENT {
+            continue;
+        }
+        let key = unsafe { record.Event.KeyEvent };
+        if key.bKeyDown == 0 {
+            continue;
+        }
+        match key.wVirtualKeyCode {
+            VK_UP => return Ok(MenuKey::Up),
+            VK_DOWN => return Ok(MenuKey::Down),
+            VK_RETURN => return Ok(MenuKey::Activate),
+            VK_ESCAPE => return Ok(MenuKey::Quit),
+            _ => {}
+        }
+        let character = char::from_u32(u32::from(unsafe { key.uChar.UnicodeChar }));
+        return Ok(match character {
+            Some('k' | 'K') => MenuKey::Up,
+            Some('j' | 'J') => MenuKey::Down,
+            Some('q' | 'Q') => MenuKey::Quit,
+            Some('v' | 'V') => MenuKey::Version,
+            Some('\u{3}') => MenuKey::Interrupt,
+            Some(character @ '1'..='9') => {
+                MenuKey::Digit(character.to_digit(10).unwrap_or(0) as usize)
+            }
+            _ => MenuKey::Ignore,
+        });
+    }
 }
 
 fn enable_virtual_terminal_for(stream: u32) {
