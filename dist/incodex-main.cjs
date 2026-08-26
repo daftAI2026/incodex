@@ -765,6 +765,21 @@ async function attachElectron() {
             electron.app.exit(0);
         });
     });
+    if (isIncognito() && windowsPlatform) {
+        try {
+            raiseServer = windowsPlatform.listenForRaise(process.env.INCODEX_WINDOWS_RAISE_PIPE || "", () => raiseOurWindows());
+            raiseServer.once("error", (error) => {
+                logLaunch("raise-pipe-failed", { error: String(error) });
+                void clearPid(ownerLease, raiseServer);
+                electron.app.exit(1);
+            });
+        }
+        catch (error) {
+            logLaunch("raise-pipe-failed", { error: String(error) });
+            electron.app.exit(1);
+            throw startupBlocked(error instanceof Error ? error : new Error(String(error)));
+        }
+    }
     if (isIncognito() && !windowsPlatform) {
         ownerLease = await writePid();
         if (!ownerLease) {

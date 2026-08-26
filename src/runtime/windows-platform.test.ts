@@ -26,8 +26,8 @@ describe("Windows Runtime lifecycle adapter", () => {
   });
 
   test("raises the existing shared window through the native owner pipe", () => {
-    let connectionHandler: ((socket: EventEmitter & { end: (value: string) => void }) => void) | null =
-      null;
+    type ConnectionHandler = (socket: EventEmitter & { end: (value: string) => void }) => void;
+    const connection: { handler?: ConnectionHandler } = {};
     let listened = "";
     let raised = 0;
     const replies: string[] = [];
@@ -40,14 +40,14 @@ describe("Windows Runtime lifecycle adapter", () => {
     const result = windowsPlatform.listenForRaise(
       pipe,
       () => raised++,
-      (handler: typeof connectionHandler) => {
-        connectionHandler = handler;
+      (handler: ConnectionHandler) => {
+        connection.handler = handler;
         return server;
       },
     );
     const socket = new EventEmitter() as EventEmitter & { end: (value: string) => void };
     socket.end = (value) => replies.push(value);
-    connectionHandler?.(socket);
+    connection.handler?.(socket);
     socket.emit("data", Buffer.from("raise\n"));
 
     expect(result).toBe(server);

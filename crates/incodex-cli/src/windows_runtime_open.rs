@@ -16,7 +16,8 @@ use incodex_core::windows_session::{
     sweep_orphan_windows_sessions, WindowsCleanupResult, WindowsSessionHome,
 };
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_PIPE_CONNECTED, HANDLE, INVALID_HANDLE_VALUE,
+    CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, ERROR_PIPE_CONNECTED, HANDLE,
+    INVALID_HANDLE_VALUE,
 };
 use windows_sys::Win32::Security::Cryptography::{
     BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG,
@@ -25,9 +26,10 @@ use windows_sys::Win32::Storage::FileSystem::{
     ReadFile, FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_INBOUND,
 };
 use windows_sys::Win32::System::Pipes::{
-    ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, PIPE_READMODE_MESSAGE,
-    PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_MESSAGE, PIPE_WAIT,
+    CallNamedPipeW, ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId,
+    PIPE_READMODE_MESSAGE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_MESSAGE, PIPE_WAIT,
 };
+use windows_sys::Win32::System::Threading::{CreateMutexW, ReleaseMutex};
 
 use crate::cdp::OFFICIAL_NEW_CODEX_URL;
 use crate::windows_activation::{
@@ -47,6 +49,49 @@ const READY_TIMEOUT: Duration = Duration::from_secs(30);
 const VISIBLE_CLOSE_GRACE: Duration = Duration::from_millis(250);
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
 const READY_MESSAGE_LIMIT: usize = 64;
+const RUNTIME_OWNER_MUTEX: &str = "Local\\Incodex-OpenAI.Codex-Runtime-Owner";
+const RUNTIME_RAISE_PIPE: &str = r"\\.\pipe\Incodex-Runtime-Raise";
+const RAISE_TIMEOUT_MS: u32 = 3_000;
+
+pub enum WindowsRuntimeOwnerClaim {
+    Owned(WindowsRuntimeOwner),
+    Existing,
+}
+
+pub struct WindowsRuntimeOwner {
+    handle: HANDLE,
+}
+
+impl WindowsRuntimeOwnerClaim {
+    pub fn acquire() -> Result<Self, String> {
+        let name = RUNTIME_OWNER_MUTEX
+            .encode_utf16()
+            .chain([0])
+            .collect::<Vec<_>>();
+        let handle = unsafe { CreateMutexW(ptr::null(), 1, name.as_ptr()) };
+        if handle.is_null() {
+            return Err(format!(
+                "cannot create Windows Runtime owner lock: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+            unsafe { CloseHandle(handle) };
+            Ok(Self::Existing)
+        } else {
+            Ok(Self::Owned(WindowsRuntimeOwner { handle }))
+        }
+    }
+}
+
+impl Drop for WindowsRuntimeOwner {
+    fn drop(&mut self) {
+        unsafe {
+            ReleaseMutex(self.handle);
+            CloseHandle(self.handle);
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowsRuntimeAcceptance {
@@ -264,6 +309,10 @@ pub fn prepare_windows_runtime_open(
         let env_flags = BTreeMap::from([
             ("INCODEX_INCOGNITO".to_string(), "1".to_string()),
             ("INCODEX_CLEANUP_OWNER".to_string(), "native".to_string()),
+            (
+                "INCODEX_WINDOWS_RAISE_PIPE".to_string(),
+                RUNTIME_RAISE_PIPE.to_string(),
+            ),
             ("INCODEX_SESSION_ID".to_string(), session.session_id.clone()),
             (
                 "INCODEX_SOURCE_BOUNDS".to_string(),
@@ -291,6 +340,17 @@ pub fn prepare_windows_runtime_open(
 }
 
 fn run_windows_runtime_open(request: WindowsRuntimeOpenRequest) -> Result<(), String> {
+    let owner = match WindowsRuntimeOwnerClaim::acquire()? {
+        WindowsRuntimeOwnerClaim::Owned(owner) => owner,
+        WindowsRuntimeOwnerClaim::Existing => {
+            raise_existing_windows_runtime()?;
+            println!("ready");
+            std::io::stdout()
+                .flush()
+                .map_err(|error| format!("cannot report existing Windows Runtime: {error}"))?;
+            return Ok(());
+        }
+    };
     let launch_gate = acquire_windows_install_state()?;
     let state = installed_state_from_environment()?;
     let app = discover_codex_package()?;
@@ -310,13 +370,52 @@ fn run_windows_runtime_open(request: WindowsRuntimeOpenRequest) -> Result<(), St
     plan.base_environment =
         WindowsInstalledRuntimeRegistration::environment_from_install_state(&state)?;
     let registration = WindowsInstalledRuntimeRegistration::from_install_state(&state)?;
-    execute_windows_runtime_open(plan, &registration, launch_gate)
+    execute_windows_runtime_open(plan, &registration, launch_gate, owner)
+}
+
+fn raise_existing_windows_runtime() -> Result<(), String> {
+    let pipe = RUNTIME_RAISE_PIPE
+        .encode_utf16()
+        .chain([0])
+        .collect::<Vec<_>>();
+    let deadline = Instant::now() + Duration::from_millis(RAISE_TIMEOUT_MS as u64);
+    loop {
+        let request = b"raise\n";
+        let mut response = [0u8; 32];
+        let mut read = 0;
+        if unsafe {
+            CallNamedPipeW(
+                pipe.as_ptr(),
+                request.as_ptr().cast(),
+                request.len() as u32,
+                response.as_mut_ptr().cast(),
+                response.len() as u32,
+                &mut read,
+                250,
+            )
+        } != 0
+        {
+            return if &response[..read as usize] == b"raised\n" {
+                Ok(())
+            } else {
+                Err("existing Windows Runtime returned an invalid raise response".to_string())
+            };
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "cannot raise the existing Windows Runtime: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
 }
 
 fn execute_windows_runtime_open(
     mut plan: WindowsRuntimeOpenPlan,
     registration: &WindowsInstalledRuntimeRegistration,
     launch_gate: WindowsInstallStateGuard,
+    owner: WindowsRuntimeOwner,
 ) -> Result<(), String> {
     let ready_pipe = WindowsRuntimeReadyPipe::create()
         .map_err(|error| with_shutdown_cleanup(error, &plan.session, Ok(())))?;
@@ -354,7 +453,13 @@ fn execute_windows_runtime_open(
     thread::spawn(move || {
         let _ = close_sender.send(close_pipe.accept());
     });
-    run_guardian_lifecycle(plan.session, process_tree, ready_receiver, close_receiver)
+    run_guardian_lifecycle(
+        plan.session,
+        process_tree,
+        ready_receiver,
+        close_receiver,
+        owner,
+    )
 }
 
 fn run_guardian_lifecycle(
@@ -362,6 +467,7 @@ fn run_guardian_lifecycle(
     mut process_tree: WindowsProcessTree,
     ready_receiver: Receiver<Result<WindowsRuntimeAcceptance, String>>,
     close_receiver: Receiver<Result<WindowsRuntimeAcceptance, String>>,
+    _owner: WindowsRuntimeOwner,
 ) -> Result<(), String> {
     let cancelled = listen_for_guardian_cancellation();
     let ready_deadline = Instant::now() + READY_TIMEOUT;

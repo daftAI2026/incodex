@@ -2,12 +2,14 @@
 
 const { spawn } = require("node:child_process");
 const { writeFileSync } = require("node:fs");
+const { createServer } = require("node:net");
 const path = require("node:path");
 
 const READY_TIMEOUT_MS = 35_000;
 const CANCEL_EXIT_TIMEOUT_MS = 5_000;
 const BOUNDS_PATTERN = /^-?\d{1,10},-?\d{1,10},\d{1,10},\d{1,10}$/;
 const SIGNAL_PIPE_PATTERN = /^\\\\\.\\pipe\\Incodex-Runtime-(Ready|Closed)-[a-f0-9]{32}$/;
+const RAISE_PIPE = "\\\\.\\pipe\\Incodex-Runtime-Raise";
 
 function validAbsolutePath(value) {
   return typeof value === "string" && !value.includes("\0") && path.win32.isAbsolute(value);
@@ -29,6 +31,32 @@ function markReady(pipeName, write = writeFileSync) {
 
 function markClosed(pipeName, write = writeFileSync) {
   return markSignal(pipeName, "closed", write);
+}
+
+function listenForRaise(pipeName, onRaise, create = createServer) {
+  if (pipeName !== RAISE_PIPE || typeof onRaise !== "function") {
+    throw new Error("invalid Windows Runtime raise endpoint");
+  }
+  const server = create((socket) => {
+    let input = "";
+    socket.setEncoding?.("utf8");
+    socket.on("data", (chunk) => {
+      input += String(chunk);
+      if (input.length > 16) {
+        socket.end("refused\n");
+        return;
+      }
+      if (!input.includes("\n")) return;
+      if (input === "raise\n") {
+        onRaise();
+        socket.end("raised\n");
+      } else {
+        socket.end("refused\n");
+      }
+    });
+  });
+  server.listen(pipeName);
+  return server;
 }
 
 function launchIncognito(options = {}) {
@@ -131,4 +159,4 @@ function launchIncognito(options = {}) {
   });
 }
 
-module.exports = { launchIncognito, markClosed, markReady };
+module.exports = { launchIncognito, listenForRaise, markClosed, markReady };
