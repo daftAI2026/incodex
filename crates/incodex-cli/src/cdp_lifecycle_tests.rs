@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use tungstenite::Message;
 
-use super::{monitor_primary_target, monitor_profile_mask_health};
+use super::{monitor_primary_target, start_profile_mask_signal_monitor};
 
 #[test]
 #[cfg(target_os = "windows")]
@@ -710,18 +710,24 @@ fn persistent_profile_mask_health_failure_is_reported_to_the_parent() {
         (health_probes, direct_close_attempted)
     });
 
-    let process_alive = AtomicBool::new(true);
-    let mut failure_reported = false;
-    let result = monitor_profile_mask_health(port, &process_alive, |_| {
-        failure_reported = true;
-    });
+    let process_alive = Arc::new(AtomicBool::new(true));
+    let cdp_failed = Arc::new(AtomicBool::new(false));
+    start_profile_mask_signal_monitor(
+        port,
+        process_alive.clone(),
+        cdp_failed.clone(),
+        |_| Ok(()),
+    );
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !cdp_failed.load(Ordering::Acquire) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(25));
+    }
     process_alive.store(false, Ordering::Release);
     let (health_probes, direct_close_attempted) = server.join().unwrap();
 
-    assert!(result.is_err(), "persistent mask failure must be reported");
     assert_eq!(health_probes, 2, "one transient failure may recover");
     assert!(
-        failure_reported,
+        cdp_failed.load(Ordering::Acquire),
         "the parent lifecycle must receive the failure"
     );
     assert!(

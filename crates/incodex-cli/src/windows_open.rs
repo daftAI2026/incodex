@@ -798,3 +798,7 @@ mod tests {
 #[cfg(test)]
 #[path = "windows_locale_tests.rs"]
 mod locale_tests;
+
+#[cfg(test)]
+#[path = "windows_cleanup_tests.rs"]
+mod cleanup_tests;
