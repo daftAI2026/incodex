@@ -6,6 +6,8 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
 use std::os::windows::io::AsRawHandle;
 use std::os::windows::process::{CommandExt, ExitStatusExt};
 use std::process::{Child, Command, ExitStatus};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{
     CloseHandle, DuplicateHandle, APPMODEL_ERROR_NO_PACKAGE, DUPLICATE_SAME_ACCESS,
@@ -70,6 +72,9 @@ enum ProcessHandle {
     Activated(OwnedHandle),
 }
 
+const JOB_TERMINATION_TIMEOUT: Duration = Duration::from_secs(5);
+const JOB_TERMINATION_POLL: Duration = Duration::from_millis(10);
+
 impl WindowsProcessTree {
     pub fn id(&self) -> u32 {
         self.process_id
@@ -102,10 +107,12 @@ impl WindowsProcessTree {
         if unsafe { TerminateJobObject(self._job.raw(), exit_code) } == 0 {
             return Err(io::Error::last_os_error());
         }
-        match &mut self.process {
+        let status = match &mut self.process {
             ProcessHandle::Child(child) => child.wait(),
             ProcessHandle::Activated(process) => wait_handle(process.raw()),
-        }
+        }?;
+        self.wait_for_empty_job()?;
+        Ok(status)
     }
 
     pub fn cdp_ownership_guard(&self, port: u16) -> io::Result<Option<WindowsCdpOwnershipGuard>> {
@@ -143,6 +150,20 @@ impl WindowsProcessTree {
             return Err(io::Error::last_os_error());
         }
         Ok(accounting.ActiveProcesses != 0)
+    }
+
+    fn wait_for_empty_job(&self) -> io::Result<()> {
+        let deadline = Instant::now() + JOB_TERMINATION_TIMEOUT;
+        while self.job_has_active_processes()? {
+            if Instant::now() >= deadline {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "Windows Job Object still has active processes after termination",
+                ));
+            }
+            thread::sleep(JOB_TERMINATION_POLL);
+        }
+        Ok(())
     }
 }
 

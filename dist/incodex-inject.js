@@ -1965,6 +1965,7 @@ function start() {
   window.addEventListener(TOOLTIP_DISMISS_EVENT, () => activeTooltipLifecycle?.dismiss());
   ensureMutationObserver();
 }
+window.__incodexRefreshProfileMaskHealth = profileMaskHealth;
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", start, { once: true });
 } else {

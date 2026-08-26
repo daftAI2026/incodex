@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
@@ -22,6 +21,7 @@ use crate::profile_mask::{resolve_profile_mask, ProfileMask};
 use crate::windows_activation::{activate_packaged_kill_on_drop, WindowsActivationRequest};
 use crate::windows_app::{discover_codex_package, WindowsCodexApp};
 use crate::windows_cleanup::cleanup_windows_session;
+use crate::windows_locale::read_locale_override;
 #[cfg(test)]
 use crate::windows_process::spawn_kill_on_drop;
 use crate::windows_process::{WindowsCdpListenerStatus, WindowsCdpOwnershipGuard};
@@ -72,6 +72,7 @@ pub enum WindowsOpenProcessResult {
 }
 
 const LISTENER_SHUTDOWN_GRACE: Duration = Duration::from_millis(200);
+type WindowsMonitorWorkers = Vec<thread::JoinHandle<()>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowsOpenOutcome {
@@ -199,7 +200,7 @@ where
             Arc<AtomicBool>,
             Arc<AtomicBool>,
             Arc<WindowsCdpOwnershipGuard>,
-        ) -> Result<(), String>
+        ) -> Result<WindowsMonitorWorkers, String>
         + Send
         + 'static,
 {
@@ -236,7 +237,7 @@ where
             Arc<AtomicBool>,
             Arc<AtomicBool>,
             Arc<WindowsCdpOwnershipGuard>,
-        ) -> Result<(), String>
+        ) -> Result<WindowsMonitorWorkers, String>
         + Send
         + 'static,
 {
@@ -274,10 +275,14 @@ where
     });
 
     let mut ui_ready = false;
+    let mut monitor_workers = Vec::new();
     let mut listener_missing_since = None;
     let process = loop {
         match injection_rx.try_recv() {
-            Ok(Ok(())) => ui_ready = true,
+            Ok(Ok(workers)) => {
+                monitor_workers = workers;
+                ui_ready = true;
+            }
             Ok(Err(error)) => {
                 let _ = process_tree.terminate();
                 break WindowsOpenProcessResult::InjectionFailed(error);
@@ -344,6 +349,14 @@ where
 
     alive.store(false, Ordering::Release);
     let _ = worker.join();
+    if monitor_workers.is_empty() {
+        if let Ok(Ok(workers)) = injection_rx.try_recv() {
+            monitor_workers = workers;
+        }
+    }
+    for monitor in monitor_workers {
+        let _ = monitor.join();
+    }
     drop(ownership_guard);
     drop(process_tree);
     let cleanup = cleanup_windows_session(&plan.session);
@@ -394,7 +407,7 @@ fn inject_windows_ui(
     close_requested: Arc<AtomicBool>,
     cdp_failed: Arc<AtomicBool>,
     ownership_guard: Arc<WindowsCdpOwnershipGuard>,
-) -> Result<(), String> {
+) -> Result<WindowsMonitorWorkers, String> {
     let deadline = Instant::now() + Duration::from_secs(45);
     let mut last_error = "Codex CDP page is not ready".to_string();
     while alive.load(Ordering::Acquire) && Instant::now() < deadline {
@@ -409,30 +422,31 @@ fn inject_windows_ui(
             &|stream| ownership_guard.require_connection_owner(stream),
         ) {
             Ok(_) => {
+                let mut monitor_workers = Vec::with_capacity(2);
                 if let Some(target_id) = primary_target {
                     if options.profile_mask.is_some() {
                         let mask_ownership_guard = ownership_guard.clone();
-                        start_profile_mask_signal_monitor(
+                        monitor_workers.push(start_profile_mask_signal_monitor(
                             port,
                             alive.clone(),
                             cdp_failed.clone(),
                             move |stream| mask_ownership_guard.require_connection_owner(stream),
-                        );
+                        ));
                     }
-                    start_lifecycle_signal_monitor(
+                    monitor_workers.push(start_lifecycle_signal_monitor(
                         port,
                         target_id,
                         alive.clone(),
                         close_requested,
                         cdp_failed,
-                    );
+                    ));
                 }
                 println!(
                     "{}",
                     format_ok("Opened. Incognito Codex window is ready.", None)
                 );
                 let _ = std::io::stdout().flush();
-                return Ok(());
+                return Ok(monitor_workers);
             }
             Err(error) => last_error = error,
         }
@@ -477,37 +491,6 @@ fn finish_windows_open(outcome: WindowsOpenOutcome) -> Result<(), CliFailure> {
         WindowsOpenProcessResult::ListenerOwnershipFailed(error)
         | WindowsOpenProcessResult::InjectionFailed(error) => Err(CliFailure::with_code(3, error)),
     }
-}
-
-fn read_locale_override(source_home: &Path) -> Option<String> {
-    let file = File::open(source_home.join("config.toml")).ok()?;
-    let limit = incodex_core::windows_session::MAX_WINDOWS_CONFIG_BYTES;
-    if file.metadata().ok()?.len() > limit {
-        return None;
-    }
-    let mut content = String::new();
-    let bytes = file.take(limit + 1).read_to_string(&mut content).ok()? as u64;
-    if bytes > limit {
-        return None;
-    }
-    content.lines().find_map(|line| {
-        let (name, value) = line.split_once('=')?;
-        if name.trim() != "localeOverride" {
-            return None;
-        }
-        let value = value.trim();
-        value
-            .strip_prefix('"')
-            .and_then(|value| value.strip_suffix('"'))
-            .or_else(|| {
-                value
-                    .strip_prefix('\'')
-                    .and_then(|value| value.strip_suffix('\''))
-            })
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-    })
 }
 
 #[cfg(test)]
@@ -607,7 +590,7 @@ mod tests {
             launch_fixture,
             |_port, _options, alive, _close_requested, _cdp_failed, _ownership_guard| {
                 assert!(alive.load(Ordering::Acquire));
-                Ok(())
+                Ok(Vec::new())
             },
         );
 
@@ -686,7 +669,7 @@ mod tests {
             launch_fixture,
             |_port, _options, _alive, _close_requested, cdp_failed, _ownership_guard| {
                 cdp_failed.store(true, Ordering::Release);
-                Ok(())
+                Ok(Vec::new())
             },
         );
 
@@ -714,7 +697,7 @@ mod tests {
             launch_fixture,
             move |_port, _options, _alive, _close_requested, _cdp_failed, _ownership_guard| {
                 injection_probe.store(true, Ordering::Release);
-                Ok(())
+                Ok(Vec::new())
             },
         );
 
@@ -788,7 +771,9 @@ mod tests {
         let outcome = execute_windows_open_with(
             plan,
             launch_fixture,
-            |_port, _options, _alive, _close_requested, _cdp_failed, _ownership_guard| Ok(()),
+            |_port, _options, _alive, _close_requested, _cdp_failed, _ownership_guard| {
+                Ok(Vec::new())
+            },
         );
 
         assert_eq!(outcome.process, WindowsOpenProcessResult::Exited(0));
@@ -798,7 +783,3 @@ mod tests {
         fs::remove_dir_all(root).expect("remove lifecycle fixture");
     }
 }
-
-#[cfg(test)]
-#[path = "windows_locale_tests.rs"]
-mod locale_tests;

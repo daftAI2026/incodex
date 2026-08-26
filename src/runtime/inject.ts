@@ -651,6 +651,7 @@ declare global {
     __incodexMutationObserver?: MutationObserver;
     __incodexProfileObservationEnabled?: boolean;
     __incodexProfileMaskHealth?: boolean;
+    __incodexRefreshProfileMaskHealth?: () => boolean;
     __incodexUiProbe?: ReturnType<typeof deriveUiProbe>;
     incodex?: {
       requestIncognitoAction?: (payload: {
@@ -660,6 +661,8 @@ declare global {
     };
   }
 }
+
+window.__incodexRefreshProfileMaskHealth = profileMaskHealth;
 
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", start, { once: true });

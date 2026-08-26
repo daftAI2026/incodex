@@ -20,7 +20,7 @@ fn persistent_cdp_loss_requests_windows_job_shutdown() {
     let close_requested = Arc::new(AtomicBool::new(false));
     let cdp_failed = Arc::new(AtomicBool::new(false));
 
-    super::start_lifecycle_signal_monitor(
+    let monitor = super::start_lifecycle_signal_monitor(
         port,
         "main".to_string(),
         alive.clone(),
@@ -33,6 +33,7 @@ fn persistent_cdp_loss_requests_windows_job_shutdown() {
         thread::sleep(Duration::from_millis(25));
     }
     alive.store(false, Ordering::Release);
+    monitor.join().unwrap();
     assert!(!close_requested.load(Ordering::Acquire));
     assert!(cdp_failed.load(Ordering::Acquire));
 }
@@ -75,7 +76,7 @@ fn windows_lifecycle_survives_one_failed_poll_before_a_normal_close() {
     let alive = Arc::new(AtomicBool::new(true));
     let close_requested = Arc::new(AtomicBool::new(false));
     let cdp_failed = Arc::new(AtomicBool::new(false));
-    super::start_lifecycle_signal_monitor(
+    let monitor = super::start_lifecycle_signal_monitor(
         port,
         "main".to_string(),
         alive.clone(),
@@ -88,6 +89,7 @@ fn windows_lifecycle_survives_one_failed_poll_before_a_normal_close() {
         thread::sleep(Duration::from_millis(25));
     }
     alive.store(false, Ordering::Release);
+    monitor.join().unwrap();
     server.join().unwrap();
     assert!(close_requested.load(Ordering::Acquire));
     assert!(!cdp_failed.load(Ordering::Acquire));
@@ -117,7 +119,7 @@ fn windows_lifecycle_closes_instead_of_adopting_an_uninjected_replacement() {
     let alive = Arc::new(AtomicBool::new(true));
     let close_requested = Arc::new(AtomicBool::new(false));
     let cdp_failed = Arc::new(AtomicBool::new(false));
-    super::start_lifecycle_signal_monitor(
+    let monitor = super::start_lifecycle_signal_monitor(
         port,
         "main".to_string(),
         alive.clone(),
@@ -130,6 +132,7 @@ fn windows_lifecycle_closes_instead_of_adopting_an_uninjected_replacement() {
         thread::sleep(Duration::from_millis(25));
     }
     alive.store(false, Ordering::Release);
+    monitor.join().unwrap();
     server.join().unwrap();
     assert!(close_requested.load(Ordering::Acquire));
     assert!(!cdp_failed.load(Ordering::Acquire));
@@ -690,7 +693,11 @@ fn persistent_profile_mask_health_failure_is_reported_to_the_parent() {
                 command
                     .pointer("/params/expression")
                     .and_then(Value::as_str),
-                Some("window.__incodexRefreshProfileMaskHealth?.() === true")
+                Some(if cfg!(target_os = "windows") {
+                    "window.__incodexRefreshProfileMaskHealth?.() === true"
+                } else {
+                    "window.__incodexProfileMaskHealth === true"
+                })
             );
             let id = command.get("id").and_then(Value::as_u64).unwrap();
             socket
@@ -712,12 +719,16 @@ fn persistent_profile_mask_health_failure_is_reported_to_the_parent() {
 
     let process_alive = Arc::new(AtomicBool::new(true));
     let cdp_failed = Arc::new(AtomicBool::new(false));
-    start_profile_mask_signal_monitor(port, process_alive.clone(), cdp_failed.clone(), |_| Ok(()));
+    let monitor =
+        start_profile_mask_signal_monitor(port, process_alive.clone(), cdp_failed.clone(), |_| {
+            Ok(())
+        });
     let deadline = Instant::now() + Duration::from_secs(3);
     while !cdp_failed.load(Ordering::Acquire) && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(25));
     }
     process_alive.store(false, Ordering::Release);
+    monitor.join().unwrap();
     let (health_probes, direct_close_attempted) = server.join().unwrap();
 
     assert_eq!(health_probes, 2, "one transient failure may recover");

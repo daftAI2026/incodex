@@ -40,11 +40,15 @@ if (inject.exitCode !== 0) {
   process.exit(inject.exitCode ?? 1);
 }
 
-const emitted = spawnSync(join(root, "node_modules/typescript/bin/tsc"), ["-p", "tsconfig.runtime-emit.json"], {
-  cwd: root,
-  encoding: "utf8",
-  stdio: "inherit",
-});
+const emitted = spawnSync(
+  process.execPath,
+  [join(root, "node_modules/typescript/bin/tsc"), "-p", "tsconfig.runtime-emit.json"],
+  {
+    cwd: root,
+    encoding: "utf8",
+    stdio: "inherit",
+  },
+);
 if (emitted.status !== 0) process.exit(emitted.status ?? 1);
 
 const emitDir = join(root, ".runtime-cjs");

@@ -471,7 +471,7 @@ pub fn start_lifecycle_signal_monitor(
     process_alive: Arc<AtomicBool>,
     close_requested: Arc<AtomicBool>,
     cdp_failed: Arc<AtomicBool>,
-) {
+) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         monitor_primary_target_with_failure_limit(
             debug_port,
@@ -488,7 +488,7 @@ pub fn start_lifecycle_signal_monitor(
             },
             || cdp_failed.store(true, Ordering::Release),
         )
-    });
+    })
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -509,7 +509,8 @@ pub(crate) fn start_profile_mask_signal_monitor<G>(
     process_alive: Arc<AtomicBool>,
     cdp_failed: Arc<AtomicBool>,
     connection_guard: G,
-) where
+) -> thread::JoinHandle<()>
+where
     G: Fn(&TcpStream) -> Result<(), String> + Send + 'static,
 {
     thread::spawn(move || {
@@ -519,7 +520,7 @@ pub(crate) fn start_profile_mask_signal_monitor<G>(
             |_| cdp_failed.store(true, Ordering::Release),
             &connection_guard,
         );
-    });
+    })
 }
 
 fn monitor_profile_mask_health_with_guard<F, G>(
@@ -569,7 +570,7 @@ where
         1,
         "Runtime.evaluate",
         json!({
-            "expression": "window.__incodexProfileMaskHealth === true",
+            "expression": profile_mask_health_expression(),
             "returnByValue": true
         }),
         connection_guard,
@@ -582,6 +583,17 @@ where
         Ok(())
     } else {
         Err("Incodex profile mask could not be restored".into())
+    }
+}
+
+fn profile_mask_health_expression() -> &'static str {
+    #[cfg(target_os = "windows")]
+    {
+        "window.__incodexRefreshProfileMaskHealth?.() === true"
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        "window.__incodexProfileMaskHealth === true"
     }
 }
 
