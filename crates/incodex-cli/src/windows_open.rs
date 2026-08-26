@@ -552,7 +552,12 @@ mod tests {
         thread::sleep(Duration::from_millis(250));
         if std::env::var_os("INCODEX_WINDOWS_OPEN_DROP_LISTENER").is_some() {
             drop(listener);
-            thread::sleep(Duration::from_secs(2));
+            let delay = std::env::var("INCODEX_WINDOWS_OPEN_EXIT_AFTER_LISTENER_DROP_MS")
+                .ok()
+                .and_then(|value| value.parse::<u64>().ok())
+                .map(Duration::from_millis)
+                .unwrap_or(Duration::from_secs(2));
+            thread::sleep(delay);
         }
     }
 
@@ -754,6 +759,32 @@ mod tests {
         assert!(!outcome.ui_ready);
         assert_eq!(outcome.cleanup, WindowsCleanupResult::Removed);
         drop(replacement);
+        fs::remove_dir_all(root).expect("remove lifecycle fixture");
+    }
+
+    #[test]
+    fn listener_shutdown_immediately_before_process_exit_is_normal() {
+        let (root, mut plan) = plan();
+        plan.env_flags.insert(
+            "INCODEX_WINDOWS_OPEN_DROP_LISTENER".to_string(),
+            "1".to_string(),
+        );
+        plan.env_flags.insert(
+            "INCODEX_WINDOWS_OPEN_EXIT_AFTER_LISTENER_DROP_MS".to_string(),
+            "75".to_string(),
+        );
+        let session_root = plan.session.root.clone();
+
+        let outcome = execute_windows_open_with(
+            plan,
+            launch_fixture,
+            |_port, _options, _alive, _close_requested, _cdp_failed, _ownership_guard| Ok(()),
+        );
+
+        assert_eq!(outcome.process, WindowsOpenProcessResult::Exited(0));
+        assert!(outcome.ui_ready);
+        assert_eq!(outcome.cleanup, WindowsCleanupResult::Removed);
+        assert!(!session_root.exists());
         fs::remove_dir_all(root).expect("remove lifecycle fixture");
     }
 }
