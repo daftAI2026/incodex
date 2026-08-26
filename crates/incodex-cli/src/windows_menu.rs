@@ -9,6 +9,16 @@ const ITEMS: &[MenuItem] = &[
         description: "Open an incognito window without patching",
     },
     MenuItem {
+        command: Some(CliCommand::Install),
+        title: "Install",
+        description: "Install the Windows Runtime integration",
+    },
+    MenuItem {
+        command: Some(CliCommand::Uninstall),
+        title: "Uninstall",
+        description: "Remove the Windows Runtime integration",
+    },
+    MenuItem {
         command: Some(CliCommand::Status),
         title: "Status",
         description: "Show whether Incodex is installed",
