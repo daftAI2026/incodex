@@ -49,6 +49,14 @@ fn homebrew_cli_generation(home: &std::path::Path, generation: &str) -> PathBuf 
     installed
 }
 
+fn intel_homebrew_cli(home: &std::path::Path) -> PathBuf {
+    let bin = home.join("usr/local/opt/incodex/bin");
+    fs::create_dir_all(&bin).unwrap();
+    let installed = bin.join("incodex");
+    fs::copy(env!("CARGO_BIN_EXE_incodex"), &installed).unwrap();
+    installed
+}
+
 #[test]
 fn homebrew_update_refreshes_metadata_then_upgrades_through_brew() {
     let home = scratch("homebrew-routing");
@@ -183,6 +191,27 @@ fn homebrew_update_dry_run_previews_both_brew_commands() {
         "{stdout}"
     );
     assert!(!brew_log.exists(), "dry-run executed Homebrew");
+}
+
+#[test]
+fn intel_homebrew_prefix_uses_the_homebrew_update_path() {
+    let home = scratch("intel-homebrew-routing");
+    let installed = intel_homebrew_cli(&home);
+
+    let output = Command::new(installed)
+        .args(["update", "--dry-run"])
+        .env("HOME", &home)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("update channel: homebrew"), "{stdout}");
+    assert!(stdout.contains("would run brew update"), "{stdout}");
+    assert!(
+        stdout.contains("would run brew upgrade incodex"),
+        "{stdout}"
+    );
 }
 
 #[test]
