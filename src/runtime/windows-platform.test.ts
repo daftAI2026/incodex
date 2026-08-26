@@ -5,6 +5,16 @@ import { join } from "node:path";
 const windowsPlatform = require("../../crates/incodex-cli/assets/incodex-windows-platform.cjs");
 
 describe("Windows Runtime lifecycle adapter", () => {
+  test("writes Runtime acceptance only to the guardian pipe", () => {
+    const writes: unknown[][] = [];
+    const pipe = "\\\\.\\pipe\\Incodex-Runtime-Ready-0123456789abcdef0123456789abcdef";
+    expect(
+      windowsPlatform.markReady(pipe, (...args: unknown[]) => writes.push(args)),
+    ).toBe(true);
+    expect(writes).toEqual([[pipe, "accepted\n"]]);
+    expect(windowsPlatform.markReady("C:\\Temp\\ready", () => {})).toBe(false);
+  });
+
   test("delegates only native lifecycle data to the installed helper", async () => {
     const helperPath = "C:\\Users\\me\\.incodex\\windows\\helpers\\abc\\incodex-helper.exe";
     const sourceHome = "C:\\Users\\me\\.codex";
