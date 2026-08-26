@@ -525,6 +525,27 @@ mod tests {
     }
 
     #[test]
+    fn closing_the_primary_window_terminates_background_electron_as_success() {
+        let (root, plan) = plan();
+        let session_root = plan.session.root.clone();
+
+        let outcome = execute_windows_open_with(
+            plan,
+            launch_fixture,
+            |_port, _options, _alive, close_requested| {
+                close_requested.store(true, Ordering::Release);
+                Ok(())
+            },
+        );
+
+        assert_eq!(outcome.process, WindowsOpenProcessResult::Exited(0));
+        assert!(outcome.ui_ready);
+        assert_eq!(outcome.cleanup, WindowsCleanupResult::Removed);
+        assert!(!session_root.exists());
+        fs::remove_dir_all(root).expect("remove lifecycle fixture");
+    }
+
+    #[test]
     fn injection_failure_terminates_the_job_before_removing_the_session() {
         let (root, plan) = plan();
         let session_root = plan.session.root.clone();
