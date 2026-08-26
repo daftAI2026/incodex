@@ -4,14 +4,30 @@ use crate::menu_controller::MenuKey;
 
 use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::Console::{
-    GetConsoleMode, GetStdHandle, ReadConsoleInputW, SetConsoleMode, ENABLE_PROCESSED_INPUT,
-    ENABLE_VIRTUAL_TERMINAL_PROCESSING, INPUT_RECORD, KEY_EVENT, STD_ERROR_HANDLE,
-    STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    GetConsoleMode, GetConsoleScreenBufferInfo, GetStdHandle, ReadConsoleInputW, SetConsoleMode,
+    CONSOLE_SCREEN_BUFFER_INFO, ENABLE_PROCESSED_INPUT, ENABLE_VIRTUAL_TERMINAL_PROCESSING,
+    INPUT_RECORD, KEY_EVENT, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP};
 
 pub fn is_tty() -> bool {
     io::stdin().is_terminal() && io::stdout().is_terminal()
+}
+
+pub(crate) fn stderr_columns() -> usize {
+    let handle = unsafe { GetStdHandle(STD_ERROR_HANDLE) };
+    if handle.is_null() || handle == INVALID_HANDLE_VALUE {
+        return 80;
+    }
+    let mut info = CONSOLE_SCREEN_BUFFER_INFO::default();
+    if unsafe { GetConsoleScreenBufferInfo(handle, &mut info) } == 0 {
+        return 80;
+    }
+    let columns = i32::from(info.srWindow.Right) - i32::from(info.srWindow.Left) + 1;
+    usize::try_from(columns)
+        .ok()
+        .filter(|width| *width > 0)
+        .unwrap_or(80)
 }
 
 pub fn enable_virtual_terminal() {

@@ -1,6 +1,8 @@
 use serde::Serialize;
 
+use crate::diagnosis_presentation::DOCTOR_PROGRESS_MESSAGE;
 use crate::parse::ParsedCli;
+use crate::spinner::Spinner;
 use crate::windows_status::{format_package_status, WindowsPackageStatus};
 use crate::CliFailure;
 
@@ -44,6 +46,7 @@ pub fn run_doctor(parsed: &ParsedCli) -> Result<(), CliFailure> {
         ));
     }
 
+    let mut spinner = (!parsed.json).then(|| Spinner::start(DOCTOR_PROGRESS_MESSAGE));
     let profile = crate::windows_profile::windows_user_profile().map_err(CliFailure::from)?;
     let report = WindowsDoctor {
         platform: "windows",
@@ -53,6 +56,9 @@ pub fn run_doctor(parsed: &ParsedCli) -> Result<(), CliFailure> {
         )
         .into(),
     };
+    if let Some(spinner) = &mut spinner {
+        spinner.stop();
+    }
     if parsed.json {
         println!(
             "{}",

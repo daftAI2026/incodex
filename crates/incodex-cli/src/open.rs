@@ -25,7 +25,8 @@ use crate::cdp::{
 };
 use crate::locale::parse_locale_override;
 use crate::open_presentation::{
-    CLOSED_REMOVED_MESSAGE, OPENED_MESSAGE, OPENING_MESSAGE, WAITING_MESSAGE,
+    CLOSED_REMOVED_MESSAGE, OPENED_MESSAGE, OPENING_MESSAGE, REMOVING_SESSION_MESSAGE,
+    UI_READY_WAIT_MESSAGE, WAITING_MESSAGE,
 };
 use crate::profile_mask::ProfileMask;
 
@@ -419,7 +420,7 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
         None
     };
 
-    let mut spinner = crate::spinner::Spinner::start("Waiting for Codex UI to become ready");
+    let mut spinner = crate::spinner::Spinner::start(UI_READY_WAIT_MESSAGE);
     let mut reported = false;
     loop {
         match status_rx.try_recv() {
@@ -658,7 +659,7 @@ where
     };
     let cleanup = match outcome.cleanup {
         CleanupDisposition::Burn => {
-            let mut spinner = crate::spinner::Spinner::start("Removing isolated session");
+            let mut spinner = crate::spinner::Spinner::start(REMOVING_SESSION_MESSAGE);
             let cleanup = match quiesce(&plan.session_root) {
                 Ok(()) => burn_with_retries_with_owner(
                     &plan.session_root,

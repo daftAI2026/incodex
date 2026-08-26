@@ -15,6 +15,7 @@ pub(crate) mod diagnose_format;
 mod diagnose_runtime;
 #[cfg(not(target_os = "windows"))]
 pub(crate) mod diagnose_signing;
+mod diagnosis_presentation;
 pub(crate) mod friendly_name;
 pub mod help;
 #[cfg(not(target_os = "windows"))]
@@ -37,7 +38,6 @@ pub mod open;
 mod open_presentation;
 pub mod parse;
 pub mod profile_mask;
-#[cfg(not(target_os = "windows"))]
 pub mod spinner;
 #[cfg(not(target_os = "windows"))]
 pub mod terminal;
@@ -246,9 +246,9 @@ fn run_diagnosis(parsed: &parse::ParsedCli) -> Result<(), CliFailure> {
         .unwrap_or_else(|| PathBuf::from(DEFAULT_APP));
     let mut spinner = (!parsed.json).then(|| {
         crate::spinner::Spinner::start(if parsed.command == CliCommand::Status {
-            "Inspecting installation status"
+            crate::diagnosis_presentation::STATUS_PROGRESS_MESSAGE
         } else {
-            "Running diagnostics"
+            crate::diagnosis_presentation::DOCTOR_PROGRESS_MESSAGE
         })
     });
     let mode = match parsed.command {

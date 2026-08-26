@@ -2,7 +2,9 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
+use crate::diagnosis_presentation::STATUS_PROGRESS_MESSAGE;
 use crate::parse::ParsedCli;
+use crate::spinner::Spinner;
 use crate::windows_app::{discover_codex_package, WindowsCodexApp};
 use crate::CliFailure;
 
@@ -66,7 +68,11 @@ pub fn run_status(parsed: &ParsedCli) -> Result<(), CliFailure> {
         ));
     }
 
+    let mut spinner = (!parsed.json).then(|| Spinner::start(STATUS_PROGRESS_MESSAGE));
     let package = WindowsPackageStatus::inspect();
+    if let Some(spinner) = &mut spinner {
+        spinner.stop();
+    }
     if parsed.json {
         let report = WindowsStatus {
             platform: "windows",

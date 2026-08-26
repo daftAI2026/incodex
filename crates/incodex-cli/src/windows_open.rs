@@ -19,6 +19,7 @@ use crate::cdp::{
 };
 use crate::open_presentation::{
     CLOSED_REMOVED_MESSAGE, DRY_RUN_COMPLETE, DRY_RUN_HEADING, OPENED_MESSAGE, OPENING_MESSAGE,
+    REMOVING_SESSION_MESSAGE, UI_READY_WAIT_MESSAGE, WAITING_MESSAGE,
 };
 use crate::profile_mask::{resolve_profile_mask, ProfileMask};
 use crate::windows_activation::{
@@ -245,7 +246,7 @@ where
             return WindowsOpenOutcome {
                 process: WindowsOpenProcessResult::SpawnFailed(message),
                 ui_ready: false,
-                cleanup: cleanup_windows_session_after_shutdown(&plan.session, shutdown),
+                cleanup: cleanup_windows_session_with_progress(&plan.session, shutdown),
             };
         }
     };
@@ -278,6 +279,7 @@ where
         + Send
         + 'static,
 {
+    let mut spinner = crate::spinner::Spinner::start(UI_READY_WAIT_MESSAGE);
     let ownership_guard = match wait_for_owned_listener(&mut process_tree, plan.debug_port) {
         Ok(guard) => Arc::new(guard),
         Err(error) => {
@@ -287,10 +289,11 @@ where
                 "Windows CDP listener ownership failed before injection",
             );
             drop(process_tree);
+            spinner.stop();
             return WindowsOpenOutcome {
                 process,
                 ui_ready: false,
-                cleanup: cleanup_windows_session_after_shutdown(&plan.session, shutdown),
+                cleanup: cleanup_windows_session_with_progress(&plan.session, shutdown),
             };
         }
     };
@@ -323,7 +326,13 @@ where
         match injection_rx.try_recv() {
             Ok(Ok(workers)) => {
                 monitor_workers = workers;
-                ui_ready = true;
+                if !ui_ready {
+                    spinner.stop();
+                    println!("{}", format_ok(OPENED_MESSAGE, None));
+                    let _ = std::io::stdout().flush();
+                    spinner = crate::spinner::Spinner::start(WAITING_MESSAGE);
+                    ui_ready = true;
+                }
             }
             Ok(Err(error)) => {
                 break terminate_with_outcome(
@@ -456,6 +465,7 @@ where
         thread::sleep(Duration::from_millis(25));
     };
 
+    spinner.stop();
     alive.store(false, Ordering::Release);
     let _ = worker.join();
     if monitor_workers.is_empty() {
@@ -468,12 +478,22 @@ where
     }
     drop(ownership_guard);
     drop(process_tree);
-    let cleanup = cleanup_windows_session_after_shutdown(&plan.session, shutdown);
+    let cleanup = cleanup_windows_session_with_progress(&plan.session, shutdown);
     WindowsOpenOutcome {
         process,
         ui_ready,
         cleanup,
     }
+}
+
+fn cleanup_windows_session_with_progress(
+    session: &WindowsSessionHome,
+    shutdown: Result<(), String>,
+) -> WindowsCleanupResult {
+    let mut spinner = crate::spinner::Spinner::start(REMOVING_SESSION_MESSAGE);
+    let cleanup = cleanup_windows_session_after_shutdown(session, shutdown);
+    spinner.stop();
+    cleanup
 }
 
 fn terminate_after_failure(
@@ -567,8 +587,6 @@ fn inject_windows_ui(
                         cdp_failed,
                     ));
                 }
-                println!("{}", format_ok(OPENED_MESSAGE, None));
-                let _ = std::io::stdout().flush();
                 return Ok(monitor_workers);
             }
             Err(error) => last_error = error,
