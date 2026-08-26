@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_core::windows_session::{
     burn_windows_session, copy_windows_settings, create_windows_session, verify_private_acl,
-    WindowsCleanupResult,
+    sweep_orphan_windows_sessions, WindowsCleanupResult,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -117,5 +117,51 @@ fn retains_an_identity_changed_session_instead_of_deleting_its_target() {
         b"keep"
     );
     fs::remove_dir(&session.root).expect("remove replacement junction");
+    fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
+fn orphan_session_fixture() {
+    let Some(user_root) = std::env::var_os("INCODEX_WINDOWS_ORPHAN_USER_ROOT") else {
+        return;
+    };
+    let result_path = std::env::var_os("INCODEX_WINDOWS_ORPHAN_RESULT")
+        .map(PathBuf::from)
+        .expect("orphan result path");
+    let session = create_windows_session(Path::new(&user_root)).expect("create orphan session");
+    fs::write(result_path, session.root.to_string_lossy().as_bytes())
+        .expect("publish orphan session path");
+}
+
+#[test]
+fn sweeps_only_sessions_owned_by_dead_processes() {
+    let root = scratch("orphan-sweep");
+    let user_root = root.join("profile").join(".incodex");
+    let result_path = root.join("orphan-path.txt");
+    fs::create_dir_all(user_root.parent().expect("profile parent")).expect("create profile");
+    let active = create_windows_session(&user_root).expect("create active session");
+
+    let output = Command::new(std::env::current_exe().expect("test executable"))
+        .args(["orphan_session_fixture", "--exact", "--nocapture"])
+        .env("INCODEX_WINDOWS_ORPHAN_USER_ROOT", &user_root)
+        .env("INCODEX_WINDOWS_ORPHAN_RESULT", &result_path)
+        .output()
+        .expect("run orphan fixture");
+    assert!(
+        output.status.success(),
+        "orphan fixture failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let orphan = PathBuf::from(fs::read_to_string(&result_path).expect("read orphan path"));
+    assert!(orphan.is_dir());
+
+    assert_eq!(sweep_orphan_windows_sessions(&user_root), 1);
+    assert!(!orphan.exists());
+    assert!(active.root.is_dir());
+
+    assert_eq!(
+        burn_windows_session(&active),
+        WindowsCleanupResult::Removed
+    );
     fs::remove_dir_all(root).expect("remove fixture");
 }
