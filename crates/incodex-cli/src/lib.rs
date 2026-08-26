@@ -2,7 +2,6 @@
 pub mod app_bundle;
 #[cfg(not(target_os = "windows"))]
 pub(crate) mod app_quiescence;
-#[cfg(not(target_os = "windows"))]
 pub mod cdp;
 #[cfg(not(target_os = "windows"))]
 pub mod confirm;
@@ -16,7 +15,6 @@ pub(crate) mod diagnose_format;
 mod diagnose_runtime;
 #[cfg(not(target_os = "windows"))]
 pub(crate) mod diagnose_signing;
-#[cfg(not(target_os = "windows"))]
 pub(crate) mod friendly_name;
 pub mod help;
 #[cfg(not(target_os = "windows"))]
@@ -34,7 +32,6 @@ pub mod menu;
 #[cfg(not(target_os = "windows"))]
 pub mod open;
 pub mod parse;
-#[cfg(not(target_os = "windows"))]
 pub mod profile_mask;
 #[cfg(not(target_os = "windows"))]
 pub mod spinner;
