@@ -51,7 +51,6 @@ mod tests {
                 CliCommand::Open,
                 CliCommand::Status,
                 CliCommand::Doctor,
-                CliCommand::Version,
             ]
         );
     }

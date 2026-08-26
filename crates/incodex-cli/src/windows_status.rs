@@ -156,6 +156,8 @@ mod tests {
         assert_eq!(report.reason.as_deref(), Some("not installed"));
         assert!(report.package_full_name.is_none());
         let text = format_status(&report);
+        assert!(text.starts_with("➤ Status"), "{text}");
+        assert!(!text.contains("Windows Codex"), "{text}");
         assert!(text.contains("Available    no"), "{text}");
         assert!(text.contains("not installed"), "{text}");
     }

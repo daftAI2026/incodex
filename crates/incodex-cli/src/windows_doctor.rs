@@ -129,6 +129,8 @@ mod tests {
         };
 
         let text = format_doctor(&report);
+        assert!(text.starts_with("➤ App"), "{text}");
+        assert!(!text.contains("Windows Doctor"), "{text}");
         assert!(text.contains("Orphaned     1"), "{text}");
         assert!(text.contains("Unknown      1"), "{text}");
         assert!(text.contains("owner cannot be verified"), "{text}");
