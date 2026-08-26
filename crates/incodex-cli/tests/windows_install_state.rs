@@ -88,14 +88,8 @@ fn uninstall_publishes_the_kill_switch_before_waiting_then_disables_once() {
     let user_root = scratch_root();
     let helper = std::env::current_exe().expect("test helper path");
     let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
-    install_windows_runtime_with(
-        &user_root,
-        package,
-        &helper,
-        |_| Ok(Vec::new()),
-        |_| Ok(()),
-    )
-    .expect("install fixture Runtime");
+    install_windows_runtime_with(&user_root, package, &helper, |_| Ok(Vec::new()), |_| Ok(()))
+        .expect("install fixture Runtime");
 
     let waiting = uninstall_windows_runtime_with(
         &user_root,
@@ -105,7 +99,9 @@ fn uninstall_publishes_the_kill_switch_before_waiting_then_disables_once() {
     .expect("request uninstall");
     assert_eq!(
         waiting,
-        WindowsUninstallOutcome::CloseRequired { process_ids: vec![42] }
+        WindowsUninstallOutcome::CloseRequired {
+            process_ids: vec![42]
+        }
     );
     let kill_switch = read_windows_install_state(&user_root)
         .expect("read kill switch")

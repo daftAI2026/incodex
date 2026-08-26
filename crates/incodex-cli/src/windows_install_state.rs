@@ -138,6 +138,27 @@ pub fn read_windows_install_state(user_root: &Path) -> Result<Option<WindowsInst
     read_state_from_root(user_root)
 }
 
+pub fn retire_disabled_windows_install_state(
+    user_root: &Path,
+    expected_epoch: u64,
+) -> Result<(), String> {
+    let _lock = InstallStateLock::acquire()?;
+    let state = read_state_from_root(user_root)?
+        .ok_or_else(|| "Windows install state does not exist".to_string())?;
+    if state.epoch != expected_epoch || state.phase != WindowsInstallPhase::Disabled {
+        return Err("Windows install state is not the expected disabled generation".to_string());
+    }
+    fs::remove_file(&state.state_path)
+        .map_err(|error| format!("cannot retire disabled Windows install state: {error}"))?;
+    match fs::symlink_metadata(&state.state_path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Ok(_) => Err("disabled Windows install state still exists after retirement".to_string()),
+        Err(error) => Err(format!(
+            "cannot verify disabled Windows install state retirement: {error}"
+        )),
+    }
+}
+
 fn read_state_from_root(user_root: &Path) -> Result<Option<WindowsInstallState>, String> {
     require_local_disk_absolute(user_root, "Windows Incodex root")?;
     match fs::symlink_metadata(user_root) {

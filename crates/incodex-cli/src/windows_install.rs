@@ -5,12 +5,14 @@ use std::path::Path;
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
 
 use crate::parse::ParsedCli;
-use crate::windows_activation::{enable_installed_runtime, WindowsInstalledRuntimeRegistration};
+use crate::windows_activation::{
+    disable_installed_runtime, enable_installed_runtime, WindowsInstalledRuntimeRegistration,
+};
 use crate::windows_app::{discover_codex_package, WindowsCodexApp};
 use crate::windows_helper::publish_windows_helper;
 use crate::windows_install_state::{
-    read_windows_install_state, stage_windows_install_state, transition_windows_install_state,
-    WindowsInstallPhase, WindowsInstallState,
+    read_windows_install_state, retire_disabled_windows_install_state, stage_windows_install_state,
+    transition_windows_install_state, WindowsInstallPhase, WindowsInstallState,
 };
 use crate::windows_process::running_package_process_ids;
 use crate::windows_runtime::publish_windows_runtime;
@@ -188,7 +190,117 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
         return Ok(());
     }
     crate::confirm::require("uninstall", parsed.yes)?;
-    Err("Windows uninstall is not implemented yet; no files changed".to_string())
+    let profile = crate::windows_profile::windows_user_profile()?;
+    match uninstall_windows_runtime_with(
+        &profile.join(".incodex"),
+        running_package_process_ids,
+        disable_installed_runtime,
+    )? {
+        WindowsUninstallOutcome::NotInstalled => {
+            println!("{}", format_ok("Incodex is not installed.", None));
+        }
+        WindowsUninstallOutcome::Removed => {
+            println!(
+                "{}",
+                format_ok("Uninstalled Windows Runtime integration.", None)
+            );
+        }
+        WindowsUninstallOutcome::CloseRequired { process_ids } => {
+            return Err(format!(
+                "close Codex to finish uninstalling the Windows Runtime (running package PIDs: {})",
+                process_ids
+                    .iter()
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+    }
+    println!();
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WindowsUninstallOutcome {
+    NotInstalled,
+    CloseRequired { process_ids: Vec<u32> },
+    Removed,
+}
+
+pub fn uninstall_windows_runtime_with<R, D>(
+    user_root: &Path,
+    running_package_processes: R,
+    disable: D,
+) -> Result<WindowsUninstallOutcome, String>
+where
+    R: FnOnce(&str) -> Result<Vec<u32>, std::io::Error>,
+    D: FnOnce(&str) -> Result<(), String>,
+{
+    let Some(mut state) = read_windows_install_state(user_root)? else {
+        return Ok(WindowsUninstallOutcome::NotInstalled);
+    };
+    state = match state.phase {
+        WindowsInstallPhase::EnabledUnobserved | WindowsInstallPhase::EnabledObserved => {
+            transition_windows_install_state(
+                user_root,
+                state.epoch,
+                WindowsInstallPhase::DisableRequested,
+            )?
+        }
+        WindowsInstallPhase::DisableRequested | WindowsInstallPhase::Disabled => state,
+        phase => {
+            return Err(format!(
+                "Windows install state {phase:?} requires recovery before uninstall can continue"
+            ))
+        }
+    };
+    if state.phase == WindowsInstallPhase::Disabled {
+        retire_disabled_windows_install_state(user_root, state.epoch)?;
+        return Ok(WindowsUninstallOutcome::Removed);
+    }
+
+    let running = running_package_processes(&state.package_full_name)
+        .map_err(|error| format!("cannot inspect running Windows Codex processes: {error}"))?;
+    if !running.is_empty() {
+        return Ok(WindowsUninstallOutcome::CloseRequired {
+            process_ids: running,
+        });
+    }
+    let pending = transition_windows_install_state(
+        user_root,
+        state.epoch,
+        WindowsInstallPhase::DisablePending,
+    )?;
+    if let Err(error) = disable(&pending.package_full_name) {
+        let recovery = transition_windows_install_state(
+            user_root,
+            pending.epoch,
+            WindowsInstallPhase::RecoveryRequired,
+        );
+        return Err(join_recovery_error(error, recovery));
+    }
+    let disabled = match transition_windows_install_state(
+        user_root,
+        pending.epoch,
+        WindowsInstallPhase::Disabled,
+    ) {
+        Ok(disabled) => disabled,
+        Err(error) => {
+            let recovery = transition_windows_install_state(
+                user_root,
+                pending.epoch,
+                WindowsInstallPhase::RecoveryRequired,
+            );
+            return Err(join_recovery_error(
+                format!(
+                    "Windows Runtime was disabled but durable state could not be committed: {error}"
+                ),
+                recovery,
+            ));
+        }
+    };
+    retire_disabled_windows_install_state(user_root, disabled.epoch)?;
+    Ok(WindowsUninstallOutcome::Removed)
 }
 
 fn print_plan(action: &str, app: &WindowsCodexApp) {
