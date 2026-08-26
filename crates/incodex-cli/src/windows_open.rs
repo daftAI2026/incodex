@@ -16,11 +16,12 @@ use incodex_core::{format_kv, format_ok, format_step, format_warn};
 
 use crate::cdp::{
     allocate_debug_port, debug_launch_args, inject_shared_ui_with_options_while_alive_and_guard,
-    start_lifecycle_signal_monitor, InjectionOptions,
+    start_lifecycle_signal_monitor, start_profile_mask_signal_monitor, InjectionOptions,
 };
 use crate::profile_mask::{resolve_profile_mask, ProfileMask};
 use crate::windows_activation::{activate_packaged_kill_on_drop, WindowsActivationRequest};
 use crate::windows_app::{discover_codex_package, WindowsCodexApp};
+use crate::windows_cleanup::cleanup_windows_session;
 #[cfg(test)]
 use crate::windows_process::spawn_kill_on_drop;
 use crate::windows_process::{WindowsCdpListenerStatus, WindowsCdpOwnershipGuard};
@@ -353,22 +354,6 @@ where
     }
 }
 
-fn cleanup_windows_session(session: &WindowsSessionHome) -> WindowsCleanupResult {
-    let mut last = WindowsCleanupResult::Unknown {
-        reason: "Windows session cleanup was not attempted".to_string(),
-    };
-    for attempt in 1..=5 {
-        last = burn_windows_session(session);
-        if last == WindowsCleanupResult::Removed {
-            return last;
-        }
-        if attempt < 5 {
-            thread::sleep(Duration::from_millis(200 * attempt));
-        }
-    }
-    last
-}
-
 fn wait_for_owned_listener(
     process_tree: &mut crate::windows_process::WindowsProcessTree,
     port: u16,
@@ -425,6 +410,15 @@ fn inject_windows_ui(
         ) {
             Ok(_) => {
                 if let Some(target_id) = primary_target {
+                    if options.profile_mask.is_some() {
+                        let mask_ownership_guard = ownership_guard.clone();
+                        start_profile_mask_signal_monitor(
+                            port,
+                            alive.clone(),
+                            cdp_failed.clone(),
+                            move |stream| mask_ownership_guard.require_connection_owner(stream),
+                        );
+                    }
                     start_lifecycle_signal_monitor(
                         port,
                         target_id,
@@ -798,7 +792,3 @@ mod tests {
 #[cfg(test)]
 #[path = "windows_locale_tests.rs"]
 mod locale_tests;
-
-#[cfg(test)]
-#[path = "windows_cleanup_tests.rs"]
-mod cleanup_tests;

@@ -43,6 +43,8 @@ pub mod windows_activation;
 #[cfg(target_os = "windows")]
 pub mod windows_app;
 #[cfg(target_os = "windows")]
+pub(crate) mod windows_cleanup;
+#[cfg(target_os = "windows")]
 pub mod windows_console;
 #[cfg(target_os = "windows")]
 pub mod windows_doctor;

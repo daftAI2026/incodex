@@ -35,7 +35,7 @@
 
 ## Quick Start
 
-**支持平台：** Apple Silicon（arm64）和 Intel（x86_64）Mac，以及安装了微软商店官方 Codex 包的 x86_64 Windows 10/11。当前不支持 Linux。
+**正式支持平台：** Apple Silicon（arm64）和 Intel（x86_64）Mac。x86_64 Windows 10/11 目前仅提供面向微软商店官方 Codex 包的不受支持的 Windows 源码预览。当前不支持 Linux。
 
 Windows 源码预览当前支持 `open`、`open --dry-run`、`status`、`doctor`、`--help`、`--version` 和终端菜单。它按当前用户的 Store 包身份动态发现真实安装盘和路径，不会修改、复制或重签官方包。Windows 预编译安装器尚未发布，因此目前请使用下方源码安装；`install`、`uninstall`、`runtime`、`recover`、`update` 和 `self-uninstall` 在 Windows 上仍不可用。
 

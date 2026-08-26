@@ -26,7 +26,6 @@ const LIFECYCLE_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const PRIMARY_TARGET_MISSING_POLLS: u8 = 2;
 const WINDOWS_CDP_FAILURE_POLLS: u8 = 3;
 const WINDOWS_LIFECYCLE_CDP_TIMEOUT: Duration = Duration::from_millis(400);
-#[cfg(any(not(target_os = "windows"), test))]
 const PROFILE_MASK_FAILURE_POLLS: u8 = 2;
 const BROWSER_CLOSE_ATTEMPTS: u8 = 3;
 pub const OFFICIAL_NEW_CODEX_URL: &str = "codex://new?mode=codex";
@@ -492,14 +491,46 @@ pub fn start_lifecycle_signal_monitor(
     });
 }
 
-#[cfg(any(not(target_os = "windows"), test))]
+#[cfg(not(target_os = "windows"))]
 pub(crate) fn monitor_profile_mask_health<F>(
     debug_port: u16,
     process_alive: &AtomicBool,
-    mut on_failure: F,
+    on_failure: F,
 ) -> Result<(), String>
 where
     F: FnMut(&str),
+{
+    monitor_profile_mask_health_with_guard(debug_port, process_alive, on_failure, &|_| Ok(()))
+}
+
+#[cfg(any(target_os = "windows", test))]
+pub(crate) fn start_profile_mask_signal_monitor<G>(
+    debug_port: u16,
+    process_alive: Arc<AtomicBool>,
+    cdp_failed: Arc<AtomicBool>,
+    connection_guard: G,
+) where
+    G: Fn(&TcpStream) -> Result<(), String> + Send + 'static,
+{
+    thread::spawn(move || {
+        let _ = monitor_profile_mask_health_with_guard(
+            debug_port,
+            &process_alive,
+            |_| cdp_failed.store(true, Ordering::Release),
+            &connection_guard,
+        );
+    });
+}
+
+fn monitor_profile_mask_health_with_guard<F, G>(
+    debug_port: u16,
+    process_alive: &AtomicBool,
+    mut on_failure: F,
+    connection_guard: &G,
+) -> Result<(), String>
+where
+    F: FnMut(&str),
+    G: Fn(&TcpStream) -> Result<(), String>,
 {
     let mut failures = 0u8;
     while process_alive.load(Ordering::Acquire) {
@@ -507,7 +538,7 @@ where
         if !process_alive.load(Ordering::Acquire) {
             return Ok(());
         }
-        match probe_profile_mask_health(debug_port, process_alive) {
+        match probe_profile_mask_health(debug_port, process_alive, connection_guard) {
             Ok(()) => failures = 0,
             Err(error) => {
                 failures = failures.saturating_add(1);
@@ -521,13 +552,19 @@ where
     Ok(())
 }
 
-#[cfg(any(not(target_os = "windows"), test))]
-fn probe_profile_mask_health(debug_port: u16, process_alive: &AtomicBool) -> Result<(), String> {
+fn probe_profile_mask_health<G>(
+    debug_port: u16,
+    process_alive: &AtomicBool,
+    connection_guard: &G,
+) -> Result<(), String>
+where
+    G: Fn(&TcpStream) -> Result<(), String>,
+{
     ensure_injection_active(process_alive)?;
     let targets = list_targets(debug_port)?;
     let page = pick_codex_page_target(&targets).ok_or("no Codex page target")?;
     let mut socket = connect_cdp_websocket(&page.ws, debug_port)?;
-    let response = send_cdp(
+    let response = send_guarded_cdp(
         &mut socket,
         1,
         "Runtime.evaluate",
@@ -535,6 +572,7 @@ fn probe_profile_mask_health(debug_port: u16, process_alive: &AtomicBool) -> Res
             "expression": "window.__incodexProfileMaskHealth === true",
             "returnByValue": true
         }),
+        connection_guard,
     )?;
     let healthy = response
         .pointer("/result/result/value")

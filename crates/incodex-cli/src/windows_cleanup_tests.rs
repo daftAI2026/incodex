@@ -11,6 +11,7 @@ fn cleanup_observes_a_session_recreated_after_initial_removal() {
         std::process::id()
     ));
     let user_root = fixture.join(".incodex");
+    fs::create_dir_all(&user_root).expect("create cleanup user root");
     let session = create_windows_session(&user_root).expect("create cleanup fixture");
     let session_root = session.root.clone();
     let recreated_root = session_root.clone();
@@ -19,7 +20,10 @@ fn cleanup_observes_a_session_recreated_after_initial_removal() {
         while recreated_root.exists() && Instant::now() < deadline {
             thread::yield_now();
         }
-        assert!(!recreated_root.exists(), "initial cleanup never removed session");
+        assert!(
+            !recreated_root.exists(),
+            "initial cleanup never removed session"
+        );
         fs::create_dir_all(recreated_root.join("late-writer"))
             .expect("recreate session after initial removal");
     });

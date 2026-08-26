@@ -712,12 +712,7 @@ fn persistent_profile_mask_health_failure_is_reported_to_the_parent() {
 
     let process_alive = Arc::new(AtomicBool::new(true));
     let cdp_failed = Arc::new(AtomicBool::new(false));
-    start_profile_mask_signal_monitor(
-        port,
-        process_alive.clone(),
-        cdp_failed.clone(),
-        |_| Ok(()),
-    );
+    start_profile_mask_signal_monitor(port, process_alive.clone(), cdp_failed.clone(), |_| Ok(()));
     let deadline = Instant::now() + Duration::from_secs(3);
     while !cdp_failed.load(Ordering::Acquire) && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(25));

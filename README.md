@@ -35,7 +35,7 @@ A normal close removes the isolated session managed by Incodex; this is not a cl
 
 ## Quick Start
 
-**Supported platforms:** macOS on Apple Silicon (arm64) and Intel (x86_64), plus Windows 10/11 on x86_64 with the official Microsoft Store Codex package. Linux is not supported.
+**Production support:** macOS on Apple Silicon (arm64) and Intel (x86_64). Windows 10/11 on x86_64 is currently available only as an unsupported Windows source preview for the official Microsoft Store Codex package. Linux is not supported.
 
 The Windows source preview currently supports `open`, `open --dry-run`, `status`, `doctor`, `--help`, `--version`, and the terminal menu. It discovers the current user's Store package and real install volume dynamically; it does not patch, copy, or re-sign that package. A prebuilt Windows installer is not published yet, so use the source installation below. `install`, `uninstall`, `runtime`, `recover`, `update`, and `self-uninstall` remain unavailable on Windows.
 
