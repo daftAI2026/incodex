@@ -74,6 +74,25 @@ fn creates_a_private_session_and_copies_only_safe_settings() {
 }
 
 #[test]
+fn creates_a_private_session_under_an_extended_unicode_path() {
+    let root = scratch("extended-path");
+    let user_root = root
+        .join("Profile With Spaces")
+        .join("中文用户")
+        .join(format!("segment-{}", "a".repeat(100)))
+        .join(format!("segment-{}", "b".repeat(100)))
+        .join(".incodex");
+    assert!(user_root.as_os_str().len() > 260);
+    fs::create_dir_all(user_root.parent().expect("profile parent")).expect("create long profile");
+
+    let session = create_windows_session(&user_root).expect("create long private session");
+
+    verify_private_acl(&session.root).expect("private long session ACL");
+    assert_eq!(burn_windows_session(&session), WindowsCleanupResult::Removed);
+    fs::remove_dir_all(root).expect("remove long fixture");
+}
+
+#[test]
 fn rejects_a_reparse_source_without_copying_through_it() {
     let root = scratch("source-junction");
     let user_root = root.join("profile").join(".incodex");
