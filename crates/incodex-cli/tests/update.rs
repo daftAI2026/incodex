@@ -37,6 +37,129 @@ fn installed_cli(home: &std::path::Path) -> (PathBuf, PathBuf) {
     (prefix, installed)
 }
 
+fn homebrew_cli(home: &std::path::Path) -> PathBuf {
+    let bin = home.join(format!("Cellar/incodex/{}/bin", env!("CARGO_PKG_VERSION")));
+    fs::create_dir_all(&bin).unwrap();
+    let installed = bin.join("incodex");
+    fs::copy(env!("CARGO_BIN_EXE_incodex"), &installed).unwrap();
+    installed
+}
+
+#[test]
+fn homebrew_update_refreshes_metadata_then_upgrades_through_brew() {
+    let home = scratch("homebrew-routing");
+    let fake_bin = home.join("fake-bin");
+    let brew_log = home.join("brew.log");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let installed = homebrew_cli(&home);
+    write_executable(
+        &fake_bin.join("brew"),
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$BREW_LOG\"\ncase \"$*\" in\n  'update') printf '%s\\n' 'simulated metadata failure' >&2; exit 9 ;;\n  'upgrade incodex') printf '%s\\n' 'Upgrading incodex'; exit 0 ;;\n  'list --versions incodex') printf '%s\\n' 'incodex 9.9.9'; exit 0 ;;\n  *) exit 88 ;;\nesac\n",
+    );
+
+    let output = Command::new(installed)
+        .arg("update")
+        .env("HOME", &home)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .env("BREW_LOG", &brew_log)
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let calls = fs::read_to_string(brew_log).unwrap();
+    let calls = calls.lines().collect::<Vec<_>>();
+    assert_eq!(&calls[..2], &["update", "upgrade incodex"]);
+    assert!(calls.contains(&"list --versions incodex"), "{calls:?}");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Updated to latest version, 9.9.9"));
+}
+
+#[test]
+fn homebrew_update_dry_run_previews_both_brew_commands() {
+    let home = scratch("homebrew-dry-run");
+    let fake_bin = home.join("fake-bin");
+    let brew_log = home.join("brew.log");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let installed = homebrew_cli(&home);
+    write_executable(
+        &fake_bin.join("brew"),
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$BREW_LOG\"\nexit 99\n",
+    );
+
+    let output = Command::new(installed)
+        .args(["update", "--dry-run"])
+        .env("HOME", &home)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .env("BREW_LOG", &brew_log)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("would run brew update"), "{stdout}");
+    assert!(
+        stdout.contains("would run brew upgrade incodex"),
+        "{stdout}"
+    );
+    assert!(!brew_log.exists(), "dry-run executed Homebrew");
+}
+
+#[test]
+fn homebrew_update_preserves_actionable_upgrade_failure() {
+    let home = scratch("homebrew-failure");
+    let fake_bin = home.join("fake-bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let installed = homebrew_cli(&home);
+    write_executable(
+        &fake_bin.join("brew"),
+        "#!/bin/sh\ncase \"$*\" in\n  'update') exit 0 ;;\n  'upgrade incodex') printf '%s\\n' 'Please update Xcode before upgrading Incodex.' >&2; exit 7 ;;\nesac\nexit 88\n",
+    );
+
+    let output = Command::new(installed)
+        .arg("update")
+        .env("HOME", &home)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Homebrew upgrade failed"), "{stderr}");
+    assert!(
+        stderr.contains("Please update Xcode before upgrading Incodex."),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn homebrew_upgrade_timeout_is_bounded_and_reported() {
+    let home = scratch("homebrew-timeout");
+    let fake_bin = home.join("fake-bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let installed = homebrew_cli(&home);
+    write_executable(
+        &fake_bin.join("brew"),
+        "#!/bin/sh\ncase \"$*\" in\n  'update') exit 0 ;;\n  'upgrade incodex') sleep 5; exit 0 ;;\nesac\nexit 88\n",
+    );
+
+    let started = Instant::now();
+    let output = Command::new(installed)
+        .arg("update")
+        .env("HOME", &home)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .env("INCODEX_HOMEBREW_UPGRADE_TIMEOUT_MS", "100")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(started.elapsed() < Duration::from_secs(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Homebrew upgrade timed out"));
+}
+
 #[test]
 fn update_pty_harness_reaps_after_child_closes_before_exit() {
     let home = scratch("pty-close-before-exit");

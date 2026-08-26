@@ -141,7 +141,7 @@ fn native_menu_shows_the_cached_update_notice_and_shortcut() {
     let rust_home = scratch("menu-update");
     let cache = rust_home.join(".incodex/cache/update_message");
     fs::create_dir_all(cache.parent().unwrap()).unwrap();
-    fs::write(&cache, "Update 9.9.9 available, run incodex update\n").unwrap();
+    fs::write(&cache, "Update 9.9.9 available, run inc update\n").unwrap();
     let rust_install = rust_home.join("prefix/bin/incodex");
     fs::create_dir_all(rust_install.parent().unwrap()).unwrap();
     fs::copy(rust_bin(), &rust_install).unwrap();
@@ -155,7 +155,7 @@ fn native_menu_shows_the_cached_update_notice_and_shortcut() {
     );
     let rust = visible(&rust.stdout);
     for text in [
-        "Update 9.9.9 available, run incodex update",
+        "Update 9.9.9 available, run inc update",
         "↑↓ | Enter | U Update | V Version | Q Quit | 1-6 Jump",
     ] {
         assert!(rust.contains(text), "Rust menu missing {text:?}: {rust}");

@@ -134,14 +134,15 @@ Examples:
             "update",
             "\
 Usage:
-  incodex update [--dry-run]
+  inc update [--dry-run]
 
-Update the CLI. Script installs re-run install.sh. Homebrew installs should
-use brew upgrade incodex. Source checkouts should git pull.
+Update the CLI through its installation channel. Homebrew installs run
+brew update and brew upgrade incodex. Script installs re-run install.sh.
+Source checkouts should git pull.
 
 Examples:
-  incodex update
-  incodex update --dry-run
+  inc update
+  inc update --dry-run
 ",
         ),
         (
