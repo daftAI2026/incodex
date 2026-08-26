@@ -542,7 +542,7 @@ where
     F: FnMut(&str),
     G: Fn(&TcpStream) -> Result<(), String>,
 {
-    let mut failures = ProfileMaskFailureCounters::default();
+    let mut failures = ProfileMaskFailureCounters::for_platform(cfg!(target_os = "windows"));
     while process_alive.load(Ordering::Acquire) {
         thread::sleep(LIFECYCLE_POLL_INTERVAL);
         if !process_alive.load(Ordering::Acquire) {
@@ -579,10 +579,9 @@ where
     Ok(())
 }
 
-#[derive(Default)]
-struct ProfileMaskFailureCounters {
-    unhealthy: u8,
-    transport: u8,
+enum ProfileMaskFailureCounters {
+    Consecutive(u8),
+    Independent { unhealthy: u8, transport: u8 },
 }
 
 enum ProfileMaskFailureKind {
@@ -591,15 +590,40 @@ enum ProfileMaskFailureKind {
 }
 
 impl ProfileMaskFailureCounters {
+    fn for_platform(windows: bool) -> Self {
+        if windows {
+            Self::Independent {
+                unhealthy: 0,
+                transport: 0,
+            }
+        } else {
+            Self::Consecutive(0)
+        }
+    }
+
     fn clear(&mut self) {
-        self.unhealthy = 0;
-        self.transport = 0;
+        match self {
+            Self::Consecutive(failures) => *failures = 0,
+            Self::Independent {
+                unhealthy,
+                transport,
+            } => {
+                *unhealthy = 0;
+                *transport = 0;
+            }
+        }
     }
 
     fn record(&mut self, kind: ProfileMaskFailureKind, limit: u8) -> bool {
-        let counter = match kind {
-            ProfileMaskFailureKind::Unhealthy => &mut self.unhealthy,
-            ProfileMaskFailureKind::Transport => &mut self.transport,
+        let counter = match self {
+            Self::Consecutive(failures) => failures,
+            Self::Independent {
+                unhealthy,
+                transport,
+            } => match kind {
+                ProfileMaskFailureKind::Unhealthy => unhealthy,
+                ProfileMaskFailureKind::Transport => transport,
+            },
         };
         *counter = counter.saturating_add(1);
         *counter >= limit
