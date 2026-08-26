@@ -22,6 +22,7 @@ const RETRY_DELAY: Duration = Duration::from_millis(200);
 const HOMEBREW_QUERY_TIMEOUT: Duration = Duration::from_secs(5);
 const HOMEBREW_UPDATE_TIMEOUT: Duration = Duration::from_secs(120);
 const HOMEBREW_UPGRADE_TIMEOUT: Duration = Duration::from_secs(120);
+const UPDATE_NOTICE_WORKER_ENV: &str = "INCODEX_INTERNAL_UPDATE_NOTICE_WORKER";
 static UPDATE_NOTICE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Deserialize)]
@@ -640,27 +641,55 @@ pub(crate) fn spawn_update_notice_refresh() {
     let Ok(exe) = current_exe() else {
         return;
     };
+    if install_channel(&exe) == InstallChannel::Source {
+        return;
+    }
+    let child = Command::new(exe)
+        .env(UPDATE_NOTICE_WORKER_ENV, "1")
+        .process_group(0)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+    let Ok(mut child) = child else {
+        return;
+    };
+    thread::spawn(move || {
+        let _ = child.wait();
+    });
+}
+
+pub(crate) fn run_update_notice_worker() -> bool {
+    if std::env::var(UPDATE_NOTICE_WORKER_ENV).as_deref() != Ok("1") {
+        return false;
+    }
+    refresh_update_notice();
+    true
+}
+
+fn refresh_update_notice() {
+    let Ok(exe) = current_exe() else {
+        return;
+    };
     let channel = install_channel(&exe);
     if channel == InstallChannel::Source {
         return;
     }
-    thread::spawn(move || {
-        let Ok(latest) = latest_stable_release() else {
-            return;
-        };
-        let Some(current) = parse_stable_version(env!("CARGO_PKG_VERSION")) else {
-            return;
-        };
-        let message = match channel {
-            InstallChannel::Script if latest.version > current => format!(
-                "Update {} available, run inc update\n",
-                latest.tag.trim_start_matches('v')
-            ),
-            InstallChannel::Homebrew => homebrew_update_notice(current),
-            _ => String::new(),
-        };
-        write_update_notice(&message);
-    });
+    let Ok(latest) = latest_stable_release() else {
+        return;
+    };
+    let Some(current) = parse_stable_version(env!("CARGO_PKG_VERSION")) else {
+        return;
+    };
+    let message = match channel {
+        InstallChannel::Script if latest.version > current => format!(
+            "Update {} available, run inc update\n",
+            latest.tag.trim_start_matches('v')
+        ),
+        InstallChannel::Homebrew => homebrew_update_notice(current),
+        _ => String::new(),
+    };
+    write_update_notice(&message);
 }
 
 fn homebrew_update_notice(current: [u64; 3]) -> String {
