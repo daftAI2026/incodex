@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -18,12 +19,15 @@ use crate::cdp::{
     start_lifecycle_monitor, InjectionOptions,
 };
 use crate::profile_mask::{resolve_profile_mask, ProfileMask};
+use crate::windows_activation::WindowsActivationRequest;
 use crate::windows_app::{discover_codex_package, WindowsCodexApp};
 use crate::windows_process::spawn_kill_on_drop;
 use crate::{parse::ParsedCli, CliFailure};
 
 #[derive(Debug)]
 pub struct WindowsOpenPlan {
+    package_full_name: String,
+    app_user_model_id: String,
     pub bin: PathBuf,
     pub args: Vec<String>,
     pub env: BTreeMap<String, PathBuf>,
@@ -31,6 +35,28 @@ pub struct WindowsOpenPlan {
     pub session: WindowsSessionHome,
     pub debug_port: u16,
     pub injection: InjectionOptions,
+}
+
+impl WindowsOpenPlan {
+    pub fn activation_request(&self) -> Result<WindowsActivationRequest, String> {
+        let mut environment = BTreeMap::new();
+        environment.extend(
+            self.env
+                .iter()
+                .map(|(key, value)| (key.clone(), value.as_os_str().to_os_string())),
+        );
+        environment.extend(
+            self.env_flags
+                .iter()
+                .map(|(key, value)| (key.clone(), OsString::from(value))),
+        );
+        WindowsActivationRequest::new(
+            &self.package_full_name,
+            &self.app_user_model_id,
+            self.args.iter().map(OsString::from),
+            environment,
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -122,6 +148,8 @@ pub fn prepare_windows_open(
             ("INCODEX_SESSION_ID".to_string(), session.session_id.clone()),
         ]);
         Ok(WindowsOpenPlan {
+            package_full_name: app.package_full_name.clone(),
+            app_user_model_id: app.app_user_model_id.clone(),
             bin: app.executable.clone(),
             args,
             env,
