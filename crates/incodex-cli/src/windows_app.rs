@@ -6,12 +6,15 @@ use serde::Deserialize;
 
 const PACKAGE_NAME: &str = "OpenAI.Codex";
 const PACKAGE_FAMILY_SUFFIX: &str = "__2p2nqsd0c76g0";
+const PACKAGE_FAMILY_NAME: &str = "OpenAI.Codex_2p2nqsd0c76g0";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WindowsPackageEvidence {
     pub name: String,
     pub package_full_name: String,
+    pub package_family_name: String,
+    pub application_id: String,
     pub install_location: PathBuf,
     pub architecture: String,
     pub signature_kind: String,
@@ -21,6 +24,7 @@ pub struct WindowsPackageEvidence {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowsCodexApp {
     pub package_full_name: String,
+    pub app_user_model_id: String,
     pub install_location: PathBuf,
     pub executable: PathBuf,
     pub asar: PathBuf,
@@ -32,9 +36,14 @@ pub fn discover_codex_package() -> Result<WindowsCodexApp, String> {
     let script = r#"[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $package = Get-AppxPackage -Name OpenAI.Codex | Sort-Object Version -Descending | Select-Object -First 1
 if ($null -eq $package) { exit 3 }
+$manifest = [xml](Get-Content -LiteralPath (Join-Path $package.InstallLocation 'AppxManifest.xml') -Raw)
+$application = @($manifest.Package.Applications.Application) | Select-Object -First 1
+if ($null -eq $application) { exit 4 }
 [PSCustomObject]@{
   name = $package.Name
   packageFullName = $package.PackageFullName
+  packageFamilyName = $package.PackageFamilyName
+  applicationId = $application.Id
   installLocation = $package.InstallLocation
   architecture = $package.Architecture.ToString()
   signatureKind = $package.SignatureKind.ToString()
@@ -72,6 +81,8 @@ pub fn inspect_codex_package(evidence: WindowsPackageEvidence) -> Result<Windows
     if evidence.name != PACKAGE_NAME
         || !evidence.package_full_name.starts_with("OpenAI.Codex_")
         || !evidence.package_full_name.ends_with(PACKAGE_FAMILY_SUFFIX)
+        || evidence.package_family_name != PACKAGE_FAMILY_NAME
+        || !valid_application_id(&evidence.application_id)
     {
         return Err("Windows package identity is not the official Codex package".to_string());
     }
@@ -104,12 +115,23 @@ pub fn inspect_codex_package(evidence: WindowsPackageEvidence) -> Result<Windows
 
     Ok(WindowsCodexApp {
         package_full_name: evidence.package_full_name,
+        app_user_model_id: format!(
+            "{}!{}",
+            evidence.package_family_name, evidence.application_id
+        ),
         install_location,
         executable,
         asar,
         asar_unpacked,
         architecture: evidence.architecture,
     })
+}
+
+fn valid_application_id(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
 fn require_file(path: &Path, label: &str) -> Result<(), String> {

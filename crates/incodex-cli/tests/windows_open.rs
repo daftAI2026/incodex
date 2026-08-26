@@ -21,6 +21,7 @@ fn scratch() -> PathBuf {
 fn app_at(install_location: &Path) -> WindowsCodexApp {
     WindowsCodexApp {
         package_full_name: "OpenAI.Codex_9.8.7.6_x64__2p2nqsd0c76g0".to_string(),
+        app_user_model_id: "OpenAI.Codex_2p2nqsd0c76g0!App".to_string(),
         install_location: install_location.to_path_buf(),
         executable: install_location.join("app/ChatGPT.exe"),
         asar: install_location.join("app/resources/app.asar"),

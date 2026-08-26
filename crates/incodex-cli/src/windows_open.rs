@@ -414,6 +414,7 @@ mod tests {
         let executable = std::env::current_exe().expect("test executable");
         let app = WindowsCodexApp {
             package_full_name: "OpenAI.Codex_fixture_x64__2p2nqsd0c76g0".to_string(),
+            app_user_model_id: "OpenAI.Codex_2p2nqsd0c76g0!App".to_string(),
             install_location: root.join("package"),
             executable: executable.clone(),
             asar: root.join("package/app/resources/app.asar"),
