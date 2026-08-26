@@ -66,6 +66,8 @@ pub mod windows_process;
 #[cfg(target_os = "windows")]
 pub(crate) mod windows_profile;
 #[cfg(target_os = "windows")]
+pub mod windows_runtime;
+#[cfg(target_os = "windows")]
 pub mod windows_status;
 
 #[cfg(not(target_os = "windows"))]

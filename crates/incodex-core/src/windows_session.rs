@@ -345,6 +345,14 @@ pub fn verify_private_acl(path: &Path) -> Result<(), String> {
     result.map_err(|reason| format!("{}: {}", path.display(), reason))
 }
 
+pub fn ensure_private_windows_dir(path: &Path) -> Result<PathBuf, String> {
+    ensure_private_dir(path)
+}
+
+pub fn apply_private_windows_acl(path: &Path) -> Result<(), String> {
+    apply_private_acl(path)
+}
+
 fn ensure_private_dir(path: &Path) -> Result<PathBuf, String> {
     let created = match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 => {
