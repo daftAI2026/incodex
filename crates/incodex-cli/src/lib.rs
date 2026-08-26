@@ -3,7 +3,6 @@ pub mod app_bundle;
 #[cfg(not(target_os = "windows"))]
 pub(crate) mod app_quiescence;
 pub mod cdp;
-#[cfg(not(target_os = "windows"))]
 pub mod confirm;
 #[cfg(not(target_os = "windows"))]
 pub mod diagnose;

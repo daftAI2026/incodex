@@ -11,6 +11,7 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
         println!();
         return Ok(());
     }
+    crate::confirm::require("install", parsed.yes)?;
     Err("Windows install is not implemented yet; no files changed".to_string())
 }
 
@@ -22,6 +23,7 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
         println!();
         return Ok(());
     }
+    crate::confirm::require("uninstall", parsed.yes)?;
     Err("Windows uninstall is not implemented yet; no files changed".to_string())
 }
 
