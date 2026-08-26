@@ -68,6 +68,21 @@ pub enum WindowsCleanupResult {
     Unknown { reason: String },
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WindowsSessionInspection {
+    pub active: usize,
+    pub orphaned: usize,
+    pub unknown: usize,
+    pub findings: Vec<String>,
+}
+
+enum WindowsSessionEntry {
+    Ignore,
+    Active,
+    Orphaned(WindowsSessionHome),
+    Unknown(String),
+}
+
 pub fn create_windows_session(user_root: &Path) -> Result<WindowsSessionHome, String> {
     require_absolute(user_root, "Windows Incodex root")?;
     let parent = user_root.parent().ok_or_else(|| {
@@ -120,50 +135,108 @@ pub fn create_windows_session(user_root: &Path) -> Result<WindowsSessionHome, St
 }
 
 pub fn sweep_orphan_windows_sessions(user_root: &Path) -> usize {
-    if require_absolute(user_root, "Windows Incodex root").is_err() {
-        return 0;
-    }
-    let sessions = user_root.join("sessions");
-    if reject_reparse_ancestors(&sessions).is_err() || verify_private_acl(&sessions).is_err() {
-        return 0;
-    }
-    let entries = match fs::read_dir(&sessions) {
+    let entries = match inspect_session_entries(user_root) {
         Ok(entries) => entries,
         Err(_) => return 0,
     };
     let mut swept = 0;
-    for entry in entries.flatten() {
-        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
-            continue;
-        };
-        if !name.starts_with("s-") || name.len() <= 2 {
-            continue;
-        }
-        let root = entry.path();
-        let validated = match validate_existing_session_dir(&sessions, &root) {
-            Ok(path) => path,
-            Err(_) => continue,
-        };
-        if verify_private_acl(&validated).is_err() {
-            continue;
-        }
-        let owner = match read_owner_manifest(&validated.join(OWNER_NAME)) {
-            Ok(owner) if owner.session_id == name => owner,
-            _ => continue,
-        };
-        if session_identity(&validated).ok().as_ref() != Some(&owner.identity) {
-            continue;
-        }
-        let stale = match probe_process(owner.pid) {
-            WindowsProcessProbe::Dead => true,
-            WindowsProcessProbe::Live(creation_time) => {
-                creation_time != owner.process_creation_time
+    for entry in entries {
+        if let WindowsSessionEntry::Orphaned(session) = entry {
+            if burn_windows_session(&session) == WindowsCleanupResult::Removed {
+                swept += 1;
             }
-            WindowsProcessProbe::Unknown => false,
-        };
-        if !stale {
-            continue;
         }
+    }
+    swept
+}
+
+pub fn inspect_windows_sessions(user_root: &Path) -> WindowsSessionInspection {
+    let entries = match inspect_session_entries(user_root) {
+        Ok(entries) => entries,
+        Err(reason) => {
+            return WindowsSessionInspection {
+                unknown: 1,
+                findings: vec![reason],
+                ..WindowsSessionInspection::default()
+            };
+        }
+    };
+    let mut report = WindowsSessionInspection::default();
+    for entry in entries {
+        match entry {
+            WindowsSessionEntry::Ignore => {}
+            WindowsSessionEntry::Active => report.active += 1,
+            WindowsSessionEntry::Orphaned(_) => report.orphaned += 1,
+            WindowsSessionEntry::Unknown(reason) => {
+                report.unknown += 1;
+                report.findings.push(reason);
+            }
+        }
+    }
+    report
+}
+
+fn inspect_session_entries(user_root: &Path) -> Result<Vec<WindowsSessionEntry>, String> {
+    require_absolute(user_root, "Windows Incodex root")?;
+    let sessions = user_root.join("sessions");
+    match fs::symlink_metadata(&sessions) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => {
+            return Err(format!(
+                "cannot inspect Windows sessions {}: {error}",
+                sessions.display()
+            ))
+        }
+        Ok(metadata) if !metadata.is_dir() => {
+            return Err(format!(
+                "Windows sessions path is not a directory: {}",
+                sessions.display()
+            ))
+        }
+        Ok(_) => {}
+    }
+    reject_reparse_ancestors(&sessions)?;
+    verify_private_acl(&sessions)?;
+    let entries = fs::read_dir(&sessions).map_err(|error| {
+        format!(
+            "cannot read Windows sessions {}: {error}",
+            sessions.display()
+        )
+    })?;
+    Ok(entries
+        .map(|entry| match entry {
+            Ok(entry) => inspect_session_entry(user_root, &sessions, entry),
+            Err(error) => WindowsSessionEntry::Unknown(format!(
+                "cannot inspect a Windows session entry: {error}"
+            )),
+        })
+        .collect())
+}
+
+fn inspect_session_entry(
+    user_root: &Path,
+    sessions: &Path,
+    entry: fs::DirEntry,
+) -> WindowsSessionEntry {
+    let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+        return WindowsSessionEntry::Unknown(
+            "Windows session entry name is not valid Unicode".to_string(),
+        );
+    };
+    if !name.starts_with("s-") || name.len() <= 2 {
+        return WindowsSessionEntry::Ignore;
+    }
+    let inspected = (|| {
+        let validated = validate_existing_session_dir(sessions, &entry.path())?;
+        verify_private_acl(&validated)?;
+        let owner = read_owner_manifest(&validated.join(OWNER_NAME))?;
+        if owner.session_id != name {
+            return Err(format!("Windows session owner id does not match {name}"));
+        }
+        if session_identity(&validated)? != owner.identity {
+            return Err(format!("Windows session file identity changed: {name}"));
+        }
+        let process = probe_process(owner.pid);
         let session = WindowsSessionHome {
             session_id: owner.session_id,
             home: validated.join("codex-home"),
@@ -174,11 +247,20 @@ pub fn sweep_orphan_windows_sessions(user_root: &Path) -> usize {
             owner_pid: owner.pid,
             owner_creation_time: owner.process_creation_time,
         };
-        if burn_windows_session(&session) == WindowsCleanupResult::Removed {
-            swept += 1;
-        }
-    }
-    swept
+        Ok(match process {
+            WindowsProcessProbe::Dead => WindowsSessionEntry::Orphaned(session),
+            WindowsProcessProbe::Live(creation_time)
+                if creation_time != session.owner_creation_time =>
+            {
+                WindowsSessionEntry::Orphaned(session)
+            }
+            WindowsProcessProbe::Live(_) => WindowsSessionEntry::Active,
+            WindowsProcessProbe::Unknown => WindowsSessionEntry::Unknown(format!(
+                "cannot determine owner process state for Windows session {name}"
+            )),
+        })
+    })();
+    inspected.unwrap_or_else(WindowsSessionEntry::Unknown)
 }
 
 pub fn copy_windows_settings(

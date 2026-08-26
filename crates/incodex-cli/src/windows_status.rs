@@ -10,17 +10,24 @@ use crate::CliFailure;
 #[serde(rename_all = "camelCase")]
 struct WindowsStatus {
     platform: &'static str,
-    available: bool,
-    package_full_name: Option<String>,
-    app_user_model_id: Option<String>,
-    install_location: Option<PathBuf>,
-    executable: Option<PathBuf>,
-    architecture: Option<String>,
-    reason: Option<String>,
+    #[serde(flatten)]
+    package: WindowsPackageStatus,
 }
 
-impl WindowsStatus {
-    fn inspect() -> Self {
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WindowsPackageStatus {
+    pub(crate) available: bool,
+    pub(crate) package_full_name: Option<String>,
+    pub(crate) app_user_model_id: Option<String>,
+    pub(crate) install_location: Option<PathBuf>,
+    pub(crate) executable: Option<PathBuf>,
+    pub(crate) architecture: Option<String>,
+    pub(crate) reason: Option<String>,
+}
+
+impl WindowsPackageStatus {
+    pub(crate) fn inspect() -> Self {
         match discover_codex_package() {
             Ok(app) => Self::available(app),
             Err(reason) => Self::unavailable(reason),
@@ -29,7 +36,6 @@ impl WindowsStatus {
 
     fn available(app: WindowsCodexApp) -> Self {
         Self {
-            platform: "windows",
             available: true,
             package_full_name: Some(app.package_full_name),
             app_user_model_id: Some(app.app_user_model_id),
@@ -42,7 +48,6 @@ impl WindowsStatus {
 
     fn unavailable(reason: String) -> Self {
         Self {
-            platform: "windows",
             available: false,
             package_full_name: None,
             app_user_model_id: None,
@@ -61,21 +66,29 @@ pub fn run_status(parsed: &ParsedCli) -> Result<(), CliFailure> {
         ));
     }
 
-    let report = WindowsStatus::inspect();
+    let package = WindowsPackageStatus::inspect();
     if parsed.json {
+        let report = WindowsStatus {
+            platform: "windows",
+            package,
+        };
         println!(
             "{}",
             serde_json::to_string_pretty(&report).expect("Windows status is serializable")
         );
     } else {
-        println!("{}", format_status(&report));
+        println!("{}", format_status(&package));
     }
     Ok(())
 }
 
-fn format_status(report: &WindowsStatus) -> String {
+pub(crate) fn format_status(report: &WindowsPackageStatus) -> String {
+    format_package_status(report, "Windows Codex")
+}
+
+pub(crate) fn format_package_status(report: &WindowsPackageStatus, heading: &str) -> String {
     let mut lines = vec![
-        incodex_core::format_step("Windows Codex", None),
+        incodex_core::format_step(heading, None),
         incodex_core::format_kv(
             "Available",
             if report.available { "yes" } else { "no" },
@@ -131,7 +144,7 @@ mod tests {
 
     #[test]
     fn unavailable_status_keeps_the_reason_and_no_package_identity() {
-        let report = WindowsStatus::unavailable("not installed".to_string());
+        let report = WindowsPackageStatus::unavailable("not installed".to_string());
 
         assert!(!report.available);
         assert_eq!(report.reason.as_deref(), Some("not installed"));

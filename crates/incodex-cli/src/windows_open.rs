@@ -95,7 +95,7 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
         println!("{}", format_warn("Dry run. No window opened.", None));
         return Ok(());
     }
-    let profile = windows_user_profile().map_err(CliFailure::from)?;
+    let profile = crate::windows_profile::windows_user_profile().map_err(CliFailure::from)?;
     let source_home = std::env::var_os("CODEX_HOME")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
@@ -373,21 +373,6 @@ fn inject_windows_ui(
         thread::sleep(Duration::from_millis(400));
     }
     Err(format!("Windows UI injection failed: {last_error}"))
-}
-
-fn windows_user_profile() -> Result<PathBuf, String> {
-    let profile = std::env::var_os("USERPROFILE")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .ok_or("USERPROFILE is unavailable")?;
-    if profile.is_absolute() {
-        Ok(profile)
-    } else {
-        Err(format!(
-            "USERPROFILE is not absolute: {}",
-            profile.display()
-        ))
-    }
 }
 
 fn finish_windows_open(outcome: WindowsOpenOutcome) -> Result<(), CliFailure> {

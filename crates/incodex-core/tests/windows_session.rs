@@ -6,7 +6,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_core::windows_session::{
-    burn_windows_session, copy_windows_settings, create_windows_session,
+    burn_windows_session, copy_windows_settings, create_windows_session, inspect_windows_sessions,
     sweep_orphan_windows_sessions, verify_private_acl, WindowsCleanupResult,
 };
 
@@ -177,9 +177,36 @@ fn sweeps_only_sessions_owned_by_dead_processes() {
     let orphan = PathBuf::from(fs::read_to_string(&result_path).expect("read orphan path"));
     assert!(orphan.is_dir());
 
+    let before = inspect_windows_sessions(&user_root);
+    assert_eq!(before.active, 1);
+    assert_eq!(before.orphaned, 1);
+    assert_eq!(before.unknown, 0, "{:?}", before.findings);
+
     assert_eq!(sweep_orphan_windows_sessions(&user_root), 1);
     assert!(!orphan.exists());
     assert!(active.root.is_dir());
+
+    assert_eq!(burn_windows_session(&active), WindowsCleanupResult::Removed);
+    fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
+fn inspection_reports_unverifiable_sessions_without_deleting_them() {
+    let root = scratch("inspect-unknown");
+    let user_root = root.join("profile").join(".incodex");
+    fs::create_dir_all(user_root.parent().expect("profile parent")).expect("create profile");
+    let active = create_windows_session(&user_root).expect("create active session");
+    let unknown = user_root.join("sessions/s-unverifiable");
+    fs::create_dir(&unknown).expect("create unverifiable session");
+
+    let report = inspect_windows_sessions(&user_root);
+
+    assert_eq!(report.active, 1);
+    assert_eq!(report.orphaned, 0);
+    assert_eq!(report.unknown, 1);
+    assert!(!report.findings.is_empty());
+    assert_eq!(sweep_orphan_windows_sessions(&user_root), 0);
+    assert!(unknown.is_dir(), "unsafe inspection target was deleted");
 
     assert_eq!(burn_windows_session(&active), WindowsCleanupResult::Removed);
     fs::remove_dir_all(root).expect("remove fixture");

@@ -43,9 +43,13 @@ pub mod windows_activation;
 #[cfg(target_os = "windows")]
 pub mod windows_app;
 #[cfg(target_os = "windows")]
+pub mod windows_doctor;
+#[cfg(target_os = "windows")]
 pub mod windows_open;
 #[cfg(target_os = "windows")]
 pub mod windows_process;
+#[cfg(target_os = "windows")]
+pub(crate) mod windows_profile;
 #[cfg(target_os = "windows")]
 pub mod windows_status;
 
@@ -156,6 +160,9 @@ where
         }
         if parsed.command == CliCommand::Status {
             return crate::windows_status::run_status(&parsed);
+        }
+        if parsed.command == CliCommand::Doctor {
+            return crate::windows_doctor::run_doctor(&parsed);
         }
         Err(CliFailure::new(format!(
             "{} is not supported on Windows yet",
