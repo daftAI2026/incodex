@@ -326,6 +326,14 @@ fn desired_for_phase(phase: WindowsInstallPhase) -> WindowsInstallDesired {
 
 struct InstallStateLock(windows_sys::Win32::Foundation::HANDLE);
 
+pub struct WindowsInstallStateGuard {
+    _lock: InstallStateLock,
+}
+
+pub fn acquire_windows_install_state() -> Result<WindowsInstallStateGuard, String> {
+    InstallStateLock::acquire().map(|lock| WindowsInstallStateGuard { _lock: lock })
+}
+
 impl InstallStateLock {
     fn acquire() -> Result<Self, String> {
         let name = INSTALL_MUTEX_NAME

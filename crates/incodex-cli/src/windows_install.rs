@@ -9,7 +9,8 @@ use crate::windows_activation::{
 use crate::windows_app::{discover_codex_package, WindowsCodexApp};
 use crate::windows_helper::publish_windows_helper;
 use crate::windows_install_state::{
-    read_windows_install_state, retire_disabled_windows_install_state, stage_windows_install_state,
+    acquire_windows_install_state, read_windows_install_state,
+    retire_disabled_windows_install_state, stage_windows_install_state,
     transition_windows_install_state, WindowsInstallPhase, WindowsInstallState,
 };
 use crate::windows_process::running_package_process_ids;
@@ -60,6 +61,7 @@ where
     R: FnOnce(&str) -> Result<Vec<u32>, std::io::Error>,
     E: FnOnce(&WindowsInstalledRuntimeRegistration) -> Result<(), String>,
 {
+    let _transaction = acquire_windows_install_state()?;
     if let Some(existing) = read_windows_install_state(user_root)? {
         return Err(format!(
             "Windows Runtime already has durable state {:?} for {}; uninstall or recover it before installing again",
@@ -206,6 +208,7 @@ where
     R: FnOnce(&str) -> Result<Vec<u32>, std::io::Error>,
     D: FnOnce(&str) -> Result<(), String>,
 {
+    let _transaction = acquire_windows_install_state()?;
     let Some(mut state) = read_windows_install_state(user_root)? else {
         return Ok(WindowsUninstallOutcome::NotInstalled);
     };

@@ -24,7 +24,8 @@ use crate::windows_activation::{
 use crate::windows_app::{discover_codex_package, WindowsCodexApp};
 use crate::windows_cleanup::cleanup_windows_session_after_shutdown;
 use crate::windows_install_state::{
-    read_windows_install_state, WindowsInstallPhase, WindowsInstallState,
+    acquire_windows_install_state, read_windows_install_state, WindowsInstallPhase,
+    WindowsInstallState, WindowsInstallStateGuard,
 };
 use crate::windows_process::WindowsProcessTree;
 
@@ -157,6 +158,7 @@ pub fn prepare_windows_runtime_open(
 }
 
 fn run_windows_runtime_open(request: WindowsRuntimeOpenRequest) -> Result<(), String> {
+    let launch_gate = acquire_windows_install_state()?;
     let state = installed_state_from_environment()?;
     let app = discover_codex_package()?;
     if app.package_full_name != state.package_full_name {
@@ -175,12 +177,13 @@ fn run_windows_runtime_open(request: WindowsRuntimeOpenRequest) -> Result<(), St
     plan.base_environment =
         WindowsInstalledRuntimeRegistration::environment_from_install_state(&state)?;
     let registration = WindowsInstalledRuntimeRegistration::from_install_state(&state)?;
-    execute_windows_runtime_open(plan, &registration)
+    execute_windows_runtime_open(plan, &registration, launch_gate)
 }
 
 fn execute_windows_runtime_open(
     plan: WindowsRuntimeOpenPlan,
     registration: &WindowsInstalledRuntimeRegistration,
+    launch_gate: WindowsInstallStateGuard,
 ) -> Result<(), String> {
     let activation = match plan.activation_request() {
         Ok(activation) => activation,
@@ -197,6 +200,7 @@ fn execute_windows_runtime_open(
             ));
         }
     };
+    drop(launch_gate);
     run_guardian_lifecycle(plan.session, process_tree)
 }
 
