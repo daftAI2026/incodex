@@ -80,6 +80,16 @@ describe("runtime load", () => {
     expect(main).toContain('if (!windowsPlatform) markSessionReady()');
   });
 
+  test("a normal Windows Runtime stays normal while only the macOS janitor is skipped", () => {
+    const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
+
+    expect(main).toContain(
+      'if (!isIncognito()) {\n    if (!windowsPlatform) {\n      try {\n        safeHome.sweepOrphanSessions',
+    );
+    expect(main).toContain('  } else {\n    process.env.INCODEX_INCOGNITO = "1";\n  }');
+    expect(main).not.toContain('if (!isIncognito() && !windowsPlatform)');
+  });
+
   test("an ordinary incognito click launches the official Codex route", () => {
     const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
     const launchStart = main.indexOf("async function launchIncognitoOnce()");
