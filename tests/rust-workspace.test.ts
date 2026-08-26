@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
@@ -140,5 +140,21 @@ describe("Rust workspace", () => {
       "cargo clippy --workspace --all-targets --locked -- -D warnings",
     );
     expect(ci).toContain("cargo test --workspace --release --locked");
+  });
+
+  test("Windows CI runs every supported Windows contract suite", () => {
+    const ci = read(".github/workflows/ci.yml");
+    for (const crate of ["incodex-core", "incodex-cli"]) {
+      const directory = join(root, "crates", crate, "tests");
+      const suites = readdirSync(directory)
+        .filter((name) => name.startsWith("windows_") && name.endsWith(".rs"))
+        .map((name) => name.slice(0, -3));
+      expect(suites.length).toBeGreaterThan(0);
+      for (const suite of suites) {
+        expect(ci).toContain(
+          `cargo test -p ${crate} --test ${suite} --release --locked`,
+        );
+      }
+    }
   });
 });
