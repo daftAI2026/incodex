@@ -500,7 +500,7 @@ pub(crate) fn monitor_profile_mask_health<F>(
 where
     F: FnMut(&str),
 {
-    monitor_profile_mask_health_with_guard(debug_port, process_alive, on_failure, &|_| Ok(()))
+    monitor_profile_mask_health_with_guard(debug_port, process_alive, on_failure, &|_| Ok(()), true)
 }
 
 #[cfg(any(target_os = "windows", test))]
@@ -519,6 +519,7 @@ where
             &process_alive,
             |_| cdp_failed.store(true, Ordering::Release),
             &connection_guard,
+            false,
         );
     })
 }
@@ -528,6 +529,7 @@ fn monitor_profile_mask_health_with_guard<F, G>(
     process_alive: &AtomicBool,
     mut on_failure: F,
     connection_guard: &G,
+    fail_on_probe_error: bool,
 ) -> Result<(), String>
 where
     F: FnMut(&str),
@@ -539,9 +541,15 @@ where
         if !process_alive.load(Ordering::Acquire) {
             return Ok(());
         }
-        match probe_profile_mask_health(debug_port, process_alive, connection_guard) {
-            Ok(()) => failures = 0,
-            Err(error) => {
+        let failure = match probe_profile_mask_health(debug_port, process_alive, connection_guard) {
+            Ok(true) => None,
+            Ok(false) => Some("Incodex profile mask could not be restored".to_string()),
+            Err(error) if fail_on_probe_error => Some(error),
+            Err(_) => None,
+        };
+        match failure {
+            None => failures = 0,
+            Some(error) => {
                 failures = failures.saturating_add(1);
                 if failures >= PROFILE_MASK_FAILURE_POLLS {
                     on_failure(&error);
@@ -557,7 +565,7 @@ fn probe_profile_mask_health<G>(
     debug_port: u16,
     process_alive: &AtomicBool,
     connection_guard: &G,
-) -> Result<(), String>
+) -> Result<bool, String>
 where
     G: Fn(&TcpStream) -> Result<(), String>,
 {
@@ -579,11 +587,7 @@ where
         .pointer("/result/result/value")
         .and_then(Value::as_bool)
         .ok_or("malformed profile mask health result")?;
-    if healthy {
-        Ok(())
-    } else {
-        Err("Incodex profile mask could not be restored".into())
-    }
+    Ok(healthy)
 }
 
 fn profile_mask_health_expression() -> &'static str {
