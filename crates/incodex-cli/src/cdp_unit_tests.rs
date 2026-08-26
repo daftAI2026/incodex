@@ -235,3 +235,9 @@ fn browser_close_uses_the_cdp_browser_command() {
         json!({ "id": 1, "method": "Browser.close", "params": {} })
     );
 }
+
+#[test]
+fn profile_mask_transport_grace_is_windows_only() {
+    assert_eq!(profile_mask_transport_failure_polls(false), 2);
+    assert_eq!(profile_mask_transport_failure_polls(true), 4);
+}
