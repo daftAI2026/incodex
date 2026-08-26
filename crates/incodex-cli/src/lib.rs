@@ -73,6 +73,8 @@ pub(crate) mod windows_profile;
 #[cfg(target_os = "windows")]
 pub mod windows_runtime;
 #[cfg(target_os = "windows")]
+pub mod windows_runtime_open;
+#[cfg(target_os = "windows")]
 pub mod windows_status;
 
 #[cfg(not(target_os = "windows"))]
@@ -163,6 +165,10 @@ where
     }
     #[cfg(target_os = "windows")]
     if let Some(result) = windows_activation::try_run_installed_package_debugger(&args) {
+        return result.map_err(CliFailure::from);
+    }
+    #[cfg(target_os = "windows")]
+    if let Some(result) = windows_runtime_open::try_run_windows_runtime_open(&args) {
         return result.map_err(CliFailure::from);
     }
     let parsed = parse_cli(&args)?;
