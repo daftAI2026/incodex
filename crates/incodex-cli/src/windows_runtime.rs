@@ -256,7 +256,11 @@ fn write_private_file(path: &Path, body: &[u8]) -> Result<(), String> {
     verify_private_acl(path)
 }
 
-fn replace_private_file(parent: &Path, target: &Path, body: &[u8]) -> Result<(), String> {
+pub(crate) fn replace_private_file(
+    parent: &Path,
+    target: &Path,
+    body: &[u8],
+) -> Result<(), String> {
     let temporary = parent.join(format!(
         ".current.json.tmp-{}-{}",
         std::process::id(),

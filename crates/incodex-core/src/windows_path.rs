@@ -65,7 +65,7 @@ pub fn require_local_disk_absolute(path: &Path, label: &str) -> Result<(), Strin
     }
 }
 
-pub(crate) fn reject_reparse_ancestors(path: &Path) -> Result<(), String> {
+pub fn reject_reparse_ancestors(path: &Path) -> Result<(), String> {
     let mut current = PathBuf::new();
     for component in path.components() {
         if component == Component::ParentDir {

@@ -35,7 +35,10 @@ fn persists_owned_install_transitions_with_epoch_cas_and_an_early_disable_kill_s
     assert_eq!(staged.package_full_name, package);
     assert_eq!(staged.runtime_release, runtime_release);
     assert_eq!(staged.registration_id.len(), 32);
-    assert!(staged.registration_id.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    assert!(staged
+        .registration_id
+        .bytes()
+        .all(|byte| byte.is_ascii_hexdigit()));
     verify_private_acl(&staged.state_path).expect("private install state ACL");
 
     let pending = transition_windows_install_state(
