@@ -160,13 +160,13 @@ mod tests {
             version: "0.2.0".into(),
             windows: "Microsoft Windows [Version 10.0.26100.0]".into(),
             architecture: "x86_64".into(),
-            install: "Unsupported".into(),
+            install: "Source".into(),
             shell: "cmd.exe".into(),
         });
         assert!(text.starts_with("Incodex version 0.2.0\n"));
         assert!(text.contains("Windows: Microsoft Windows"));
         assert!(text.contains("Architecture: x86_64"));
-        assert!(text.contains("Install: Unsupported"));
+        assert!(text.contains("Install: Source"));
         assert!(text.ends_with("\n\n"));
     }
 }

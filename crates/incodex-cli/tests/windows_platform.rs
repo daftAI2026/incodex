@@ -40,11 +40,20 @@ fn help_and_version_are_available_without_creating_state() {
     assert!(help_text.contains("Usage:\n  incodex"));
     assert!(help_text.contains("Windows"));
     assert!(help_text.contains("Microsoft Store"));
+    assert!(help_text.contains("Enable the hat-glasses control"));
+    assert!(help_text.contains("Remove the Windows Runtime integration"));
+    assert!(!help_text.contains("install      Not available"));
     assert!(!help_text.contains("Patch the Codex app"));
     assert!(!help_text.contains("inc is the same program"));
     assert!(help.stderr.is_empty());
 
-    for (command, forbidden) in [("status", "--app"), ("doctor", "--deep"), ("open", "--app")] {
+    for (command, forbidden) in [
+        ("status", "--app"),
+        ("doctor", "--deep"),
+        ("open", "--app"),
+        ("install", "Patch Codex"),
+        ("uninstall", "Restore Codex"),
+    ] {
         let command_help = run(&[command, "--help"], &profile);
         assert!(
             command_help.status.success(),
@@ -66,7 +75,7 @@ fn help_and_version_are_available_without_creating_state() {
     assert!(report.starts_with("Incodex version "));
     assert!(report.contains("Windows: "));
     assert!(!report.contains("macOS: "));
-    assert!(report.contains("Install: Unsupported"));
+    assert!(report.contains("Install: Source"));
     assert!(version.stderr.is_empty());
 
     assert!(!profile.exists(), "read-only commands created user state");
