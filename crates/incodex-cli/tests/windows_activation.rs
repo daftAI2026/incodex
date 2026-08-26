@@ -7,7 +7,8 @@ use std::path::Path;
 use incodex_cli::windows_activation::{
     activate_packaged_kill_on_drop, activate_packaged_with_installed_runtime,
     disable_installed_runtime, enable_installed_runtime, try_run_installed_package_debugger,
-    WindowsActivationFailure, WindowsActivationRequest, WindowsInstalledRuntimeRegistration,
+    try_run_package_debugger, WindowsActivationFailure, WindowsActivationRequest,
+    WindowsInstalledRuntimeRegistration,
 };
 use incodex_cli::windows_process::WindowsProcessTree;
 
@@ -67,6 +68,23 @@ fn installed_debugger_mode_refuses_to_resume_an_unowned_process() {
     ];
     let result = try_run_installed_package_debugger(&args).expect("recognize helper mode");
     assert!(result.is_err());
+}
+
+#[test]
+fn transient_debugger_requires_the_exact_package_identity() {
+    let args = vec![
+        "__incodex_windows_package_debugger".to_string(),
+        "--job".to_string(),
+        "Local\\Incodex-test-job".to_string(),
+        "-p".to_string(),
+        std::process::id().to_string(),
+        "-tid".to_string(),
+        u32::MAX.to_string(),
+    ];
+    let error = try_run_package_debugger(&args)
+        .expect("recognize helper mode")
+        .expect_err("reject package-less debugger callback");
+    assert!(error.contains("--package"));
 }
 
 #[test]
