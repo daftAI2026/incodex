@@ -157,4 +157,21 @@ describe("Rust workspace", () => {
       }
     }
   });
+
+  test("Windows terminal flows reuse the shared progress lifecycle", () => {
+    const lib = read("crates/incodex-cli/src/lib.rs");
+    const windowsOpen = read("crates/incodex-cli/src/windows_open.rs");
+    const windowsStatus = read("crates/incodex-cli/src/windows_status.rs");
+    const windowsDoctor = read("crates/incodex-cli/src/windows_doctor.rs");
+
+    expect(lib).toContain("pub mod spinner;");
+    expect(lib).not.toMatch(
+      /#\[cfg\(not\(target_os = "windows"\)\)\]\s*pub mod spinner;/,
+    );
+    expect(windowsOpen).toContain("Spinner::start(UI_READY_WAIT_MESSAGE)");
+    expect(windowsOpen).toContain("Spinner::start(WAITING_MESSAGE)");
+    expect(windowsOpen).toContain("Spinner::start(REMOVING_SESSION_MESSAGE)");
+    expect(windowsStatus).toContain("Spinner::start(STATUS_PROGRESS_MESSAGE)");
+    expect(windowsDoctor).toContain("Spinner::start(DOCTOR_PROGRESS_MESSAGE)");
+  });
 });
