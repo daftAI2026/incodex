@@ -4,7 +4,7 @@
   "files": {
     "incodex-inject.js": "6510c2d71ee90223df4d01b5d9a74491474e5dae311371bcbb30e6fe2f05149b",
     "incodex-loader.cjs": "04facb453da61bcdd08834058405e270aac59fc62908a13309e1fa18aa6fd504",
-    "incodex-main.cjs": "b0404a0c37345541692375cd60031051b31e1559b2374e28824b4c151d6bd4c1",
+    "incodex-main.cjs": "cba4e887df5eaf7e47f66535c46233964f3eef497e074994cc174eb75dcb3d4a",
     "incodex-preload.cjs": "7b325b1ddc3d444e625e459fcf3edc00397bf78b38b36e95e56b9b4c7a0686e6",
     "incodex-safe-home.cjs": "20760e4b7efbe00f2a943b8580c03e374a381a711277805e45f3eb1438ecc769",
     "incodex-ipc-guard.cjs": "b81c83a9a5bc916882556e58a4f5569ec4fc9db6ae12aa0b5a49e6529567b60e",

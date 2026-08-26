@@ -150,19 +150,22 @@ function cleanupExitedSession(session, childOwner, options = {}) {
 }
 function markSessionReady() {
     if (windowsPlatform) {
-        if (!windowsPlatform.markReady(process.env.INCODEX_WINDOWS_READY_PIPE || "")) {
+        const marked = windowsPlatform.markReady(process.env.INCODEX_WINDOWS_READY_PIPE || "");
+        if (!marked) {
             logLaunch("ready-refused", { reason: "guardian pipe unavailable" });
         }
-        return;
+        return marked;
     }
     const session = sessionFromEnv();
     if (!session?.root)
-        return;
+        return false;
     try {
         safeHome.writeReady(session.root);
+        return true;
     }
     catch {
         /* already written */
+        return false;
     }
 }
 async function writePid() {
@@ -579,6 +582,8 @@ async function launchIncognitoOnce() {
 }
 const allowedWindows = new Map();
 const trustedOrigins = new Set(["app://-", "https://chatgpt.com"]);
+const acceptedWindows = new WeakSet();
+const readyWindows = new WeakSet();
 let codexModeSelected = false;
 function rememberWindow(win) {
     if (!win || typeof win.id !== "number")
@@ -611,11 +616,21 @@ function hookPreload(session) {
 function reportInjectionError(error) {
     logLaunch("ui-injection-failed", { error: String(error) });
 }
+function markAcceptedWindowReady(win) {
+    if (!windowsPlatform || !isIncognito() || readyWindows.has(win))
+        return;
+    if (!acceptedWindows.has(win) || win.isDestroyed() || !win.isVisible())
+        return;
+    if (markSessionReady())
+        readyWindows.add(win);
+}
 function reportInjectionProbe(win) {
     return win.webContents.executeJavaScript("window.__incodexUiProbe", false).then((probe) => {
         logLaunch("ui-probe", probe);
-        if (windowsPlatform && isIncognito() && probe?.accepted === true)
-            markSessionReady();
+        if (windowsPlatform && isIncognito() && probe?.accepted === true) {
+            acceptedWindows.add(win);
+            markAcceptedWindowReady(win);
+        }
     });
 }
 function markSessionClosed() {
@@ -752,9 +767,12 @@ async function attachElectron() {
                 win.once("focus", () => selectOfficialCodexMode(win));
             if (!windowsPlatform)
                 markSessionReady();
+            else
+                markAcceptedWindowReady(win);
         });
         win.once("show", () => {
             bringForward();
+            markAcceptedWindowReady(win);
             setTimeout(bringForward, 50);
             setTimeout(bringForward, 300);
         });
