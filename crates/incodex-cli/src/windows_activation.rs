@@ -514,7 +514,45 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
-    use super::acquire_package_activation_lock;
+    use super::{
+        acquire_package_activation_lock, activation_manager_failure,
+        cleanup_proof_after_debugging,
+    };
+
+    #[test]
+    fn manager_creation_failure_preserves_debug_restoration_uncertainty() {
+        let failure = activation_manager_failure(
+            "cannot create activation manager".to_string(),
+            Err("cannot restore package debug settings".to_string()),
+        );
+        let (message, shutdown) = failure.into_parts();
+
+        assert!(message.contains("cannot create activation manager"), "{message}");
+        assert!(
+            message.contains("cannot restore package debug settings"),
+            "{message}"
+        );
+        assert!(shutdown.is_err(), "session cleanup must remain blocked");
+    }
+
+    #[test]
+    fn cleanup_requires_both_debug_restoration_and_process_shutdown_proof() {
+        assert!(cleanup_proof_after_debugging(&Ok(()), Ok(())).is_ok());
+        assert!(
+            cleanup_proof_after_debugging(
+                &Err("debug restoration failed".to_string()),
+                Ok(())
+            )
+            .is_err()
+        );
+        assert!(
+            cleanup_proof_after_debugging(
+                &Ok(()),
+                Err("process shutdown is unproven".to_string())
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn package_debug_settings_are_serialized_across_incodex_processes() {
