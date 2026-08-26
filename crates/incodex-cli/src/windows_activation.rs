@@ -414,3 +414,30 @@ fn quote_windows_argument(argument: &OsStr) -> Result<String, String> {
     String::from_utf16(&quoted)
         .map_err(|_| "Windows activation argument is not valid Unicode".to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    use super::acquire_package_activation_lock;
+
+    #[test]
+    fn package_debug_settings_are_serialized_across_incodex_processes() {
+        let first = acquire_package_activation_lock().expect("acquire first package lock");
+        let (sender, receiver) = mpsc::channel();
+        let contender = thread::spawn(move || {
+            let second = acquire_package_activation_lock().expect("acquire second package lock");
+            sender.send(()).expect("report second lock");
+            drop(second);
+        });
+
+        assert!(receiver.recv_timeout(Duration::from_millis(100)).is_err());
+        drop(first);
+        receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("second activation proceeds after release");
+        contender.join().expect("join lock contender");
+    }
+}
