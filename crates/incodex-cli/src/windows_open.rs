@@ -118,7 +118,7 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
         format_kv("Home", &plan.session.home.display().to_string(), None)
     );
     println!("{}", format_kv("Session", &plan.session.session_id, None));
-    let outcome = execute_windows_open_with(plan, inject_windows_ui);
+    let outcome = execute_windows_open_with(plan, launch_windows_open, inject_windows_ui);
     finish_windows_open(outcome)
 }
 
@@ -179,10 +179,31 @@ pub fn prepare_windows_open(
     }
 }
 
-fn execute_windows_open_with<F>(plan: WindowsOpenPlan, inject: F) -> WindowsOpenOutcome
+fn execute_windows_open_with<L, F>(
+    plan: WindowsOpenPlan,
+    launch: L,
+    inject: F,
+) -> WindowsOpenOutcome
 where
+    L: FnOnce(&WindowsOpenPlan) -> Result<crate::windows_process::WindowsProcessTree, String>,
     F: FnOnce(u16, InjectionOptions, Arc<AtomicBool>) -> Result<(), String> + Send + 'static,
 {
+    let process_tree = match launch(&plan) {
+        Ok(process_tree) => process_tree,
+        Err(error) => {
+            return WindowsOpenOutcome {
+                process: WindowsOpenProcessResult::SpawnFailed(error),
+                ui_ready: false,
+                cleanup: cleanup_windows_session(&plan.session),
+            }
+        }
+    };
+    run_windows_open_lifecycle(plan, process_tree, inject)
+}
+
+fn launch_windows_open(
+    plan: &WindowsOpenPlan,
+) -> Result<crate::windows_process::WindowsProcessTree, String> {
     let mut command = Command::new(&plan.bin);
     command.args(&plan.args);
     for (key, value) in &plan.env {
@@ -196,16 +217,17 @@ where
         .stdout(Stdio::null())
         .stderr(Stdio::null());
 
-    let mut process_tree = match spawn_kill_on_drop(&mut command) {
-        Ok(process_tree) => process_tree,
-        Err(error) => {
-            return WindowsOpenOutcome {
-                process: WindowsOpenProcessResult::SpawnFailed(error.to_string()),
-                ui_ready: false,
-                cleanup: cleanup_windows_session(&plan.session),
-            }
-        }
-    };
+    spawn_kill_on_drop(&mut command).map_err(|error| error.to_string())
+}
+
+fn run_windows_open_lifecycle<F>(
+    plan: WindowsOpenPlan,
+    mut process_tree: crate::windows_process::WindowsProcessTree,
+    inject: F,
+) -> WindowsOpenOutcome
+where
+    F: FnOnce(u16, InjectionOptions, Arc<AtomicBool>) -> Result<(), String> + Send + 'static,
+{
     if let Err(error) = wait_for_owned_listener(&mut process_tree, plan.debug_port) {
         let _ = process_tree.terminate();
         drop(process_tree);
@@ -478,7 +500,9 @@ mod tests {
         thread::sleep(Duration::from_millis(250));
     }
 
-    fn launch_fixture(plan: &WindowsOpenPlan) -> Result<crate::windows_process::WindowsProcessTree, String> {
+    fn launch_fixture(
+        plan: &WindowsOpenPlan,
+    ) -> Result<crate::windows_process::WindowsProcessTree, String> {
         let mut command = Command::new(&plan.bin);
         command.args(&plan.args);
         for (key, value) in &plan.env {
@@ -516,10 +540,11 @@ mod tests {
         let (root, plan) = plan();
         let session_root = plan.session.root.clone();
 
-        let outcome =
-            execute_windows_open_with(plan, launch_fixture, |_port, _options, _alive: Arc<AtomicBool>| {
-                Err("fixture injection refused".to_string())
-            });
+        let outcome = execute_windows_open_with(
+            plan,
+            launch_fixture,
+            |_port, _options, _alive: Arc<AtomicBool>| Err("fixture injection refused".to_string()),
+        );
 
         assert!(matches!(
             outcome.process,
@@ -540,10 +565,11 @@ mod tests {
         let injected = Arc::new(AtomicBool::new(false));
         let injection_probe = injected.clone();
 
-        let outcome = execute_windows_open_with(plan, launch_fixture, move |_port, _options, _alive| {
-            injection_probe.store(true, Ordering::Release);
-            Ok(())
-        });
+        let outcome =
+            execute_windows_open_with(plan, launch_fixture, move |_port, _options, _alive| {
+                injection_probe.store(true, Ordering::Release);
+                Ok(())
+            });
 
         assert!(matches!(
             outcome.process,
