@@ -5,7 +5,8 @@ use std::ffi::OsString;
 use std::path::Path;
 
 use incodex_cli::windows_activation::{
-    activate_packaged_kill_on_drop, WindowsActivationFailure, WindowsActivationRequest,
+    activate_packaged_kill_on_drop, disable_installed_runtime, enable_installed_runtime,
+    try_run_installed_package_debugger, WindowsActivationFailure, WindowsActivationRequest,
     WindowsInstalledRuntimeRegistration,
 };
 use incodex_cli::windows_process::WindowsProcessTree;
@@ -41,6 +42,26 @@ fn binds_the_persistent_debugger_to_a_stable_helper_state_and_package() {
         registration.environment()[registration.environment().len() - 2],
         0
     );
+    let _enable: fn(&WindowsInstalledRuntimeRegistration) -> Result<(), String> =
+        enable_installed_runtime;
+    let _disable: fn(&str) -> Result<(), String> = disable_installed_runtime;
+}
+
+#[test]
+fn installed_debugger_mode_refuses_to_resume_an_unowned_process() {
+    let args = vec![
+        "__incodex_windows_installed_debugger".to_string(),
+        "--package".to_string(),
+        "OpenAI.Codex_1.2.3.4_x64__publisher".to_string(),
+        "--state".to_string(),
+        r"C:\Users\test\.incodex\windows-install.json".to_string(),
+        "-p".to_string(),
+        std::process::id().to_string(),
+        "-tid".to_string(),
+        u32::MAX.to_string(),
+    ];
+    let result = try_run_installed_package_debugger(&args).expect("recognize helper mode");
+    assert!(result.is_err());
 }
 
 #[test]
