@@ -5,9 +5,20 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[test]
+fn visible_window_loss_closes_background_electron_after_a_grace_period() {
+    let grace = Duration::from_millis(250);
+    let started = Instant::now();
+    let mut lifecycle = VisibleWindowLifecycle::new(grace);
+
+    assert!(!lifecycle.should_close(true, started));
+    assert!(!lifecycle.should_close(false, started + grace - Duration::from_millis(1)));
+    assert!(lifecycle.should_close(false, started + grace));
+}
 
 fn plan() -> (PathBuf, WindowsOpenPlan) {
     let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
