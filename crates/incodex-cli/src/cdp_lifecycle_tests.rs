@@ -741,3 +741,35 @@ fn persistent_profile_mask_health_failure_is_reported_to_the_parent() {
         "the health monitor must leave termination and session cleanup to the parent"
     );
 }
+
+#[test]
+#[cfg(target_os = "windows")]
+fn missing_profile_target_is_left_to_the_primary_lifecycle_monitor() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        for _ in 0..2 {
+            let mut stream = accept_until(&listener, Instant::now() + Duration::from_secs(2))
+                .expect("profile monitor did not poll targets");
+            assert_eq!(read_request_path(&mut stream), "/json/list");
+            write_json(&mut stream, &json!([]));
+        }
+    });
+    let process_alive = Arc::new(AtomicBool::new(true));
+    let cdp_failed = Arc::new(AtomicBool::new(false));
+    let monitor =
+        start_profile_mask_signal_monitor(port, process_alive.clone(), cdp_failed.clone(), |_| {
+            Ok(())
+        });
+
+    server.join().unwrap();
+    thread::sleep(Duration::from_millis(250));
+    process_alive.store(false, Ordering::Release);
+    monitor.join().unwrap();
+
+    assert!(
+        !cdp_failed.load(Ordering::Acquire),
+        "target loss belongs to the primary lifecycle monitor, not mask health"
+    );
+}
