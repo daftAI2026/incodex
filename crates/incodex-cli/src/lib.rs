@@ -41,6 +41,8 @@ pub mod version;
 #[cfg(target_os = "windows")]
 pub mod windows_app;
 #[cfg(target_os = "windows")]
+pub mod windows_open;
+#[cfg(target_os = "windows")]
 pub mod windows_process;
 
 #[cfg(not(target_os = "windows"))]
