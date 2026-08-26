@@ -1,8 +1,3 @@
-//! [INPUT]: 依赖 Windows 文件身份、ACL 与进程创建时间，接收可信用户根目录和 Codex 设置源。
-//! [OUTPUT]: 提供私有 Windows 会话创建、安全设置复制、身份约束清理与孤儿会话回收。
-//! [POS]: incodex-core 的 Windows 会话信任边界，为 CLI open 生命周期提供持久所有权证据。
-//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
-
 use std::ffi::c_void;
 use std::fs::{self, OpenOptions};
 use std::io;

@@ -1,8 +1,3 @@
-//! [INPUT]: 依赖 Store 包发现、Windows 私有会话、Job Object、CDP 与共享 Runtime 注入。
-//! [OUTPUT]: 提供 Windows `incodex open` 的计划、激活、窗口生命周期与三态清理编排。
-//! [POS]: incodex-cli 的 Windows open 总控，只编排已验证的底层信任边界。
-//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
-
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io::Write;

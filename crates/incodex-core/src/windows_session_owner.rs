@@ -1,8 +1,3 @@
-//! [INPUT]: 依赖 Windows 进程句柄、FILETIME、私有 ACL 与会话目录文件身份。
-//! [OUTPUT]: 提供 owner manifest 持久化、严格解析和 PID 复用安全的存活探测。
-//! [POS]: windows_session 的所有权证据子模块，只回答“谁拥有会话、该 owner 是否仍是同一进程”。
-//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
-
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
