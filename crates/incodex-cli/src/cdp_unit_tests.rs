@@ -243,6 +243,16 @@ fn profile_mask_transport_grace_is_windows_only() {
 }
 
 #[test]
+fn macos_profile_mask_failures_keep_shared_consecutive_timing() {
+    let mut failures = ProfileMaskFailureCounters::default();
+    assert!(!failures.record(ProfileMaskFailureKind::Unhealthy, 2));
+    assert!(
+        failures.record(ProfileMaskFailureKind::Transport, 2),
+        "macOS must preserve the original two consecutive failures across failure kinds"
+    );
+}
+
+#[test]
 fn profile_mask_failure_kinds_do_not_borrow_each_others_threshold() {
     let mut failures = ProfileMaskFailureCounters::default();
     assert!(!failures.record(ProfileMaskFailureKind::Unhealthy, 2));
