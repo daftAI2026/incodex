@@ -3,7 +3,8 @@
 const { spawn } = require("node:child_process");
 const path = require("node:path");
 
-const READY_TIMEOUT_MS = 15_000;
+const READY_TIMEOUT_MS = 35_000;
+const CANCEL_EXIT_TIMEOUT_MS = 5_000;
 const BOUNDS_PATTERN = /^-?\d{1,10},-?\d{1,10},\d{1,10},\d{1,10}$/;
 
 function validAbsolutePath(value) {
@@ -25,15 +26,47 @@ function launchIncognito(options = {}) {
   }
 
   const spawnProcess = options.spawnProcess || spawn;
+  const readyTimeoutMs = options.readyTimeoutMs || READY_TIMEOUT_MS;
   return new Promise((resolve) => {
     let child;
     let settled = false;
+    let cancellationReason = "";
+    let timer;
+    let cancelTimer;
     let output = "";
     const done = (result) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(cancelTimer);
       resolve(result);
+    };
+    const forceCancel = () => {
+      try {
+        child?.kill?.();
+      } catch {
+        done({ ok: false, reason: "cleanup-unproven" });
+        return;
+      }
+      cancelTimer = setTimeout(
+        () => done({ ok: false, reason: "cleanup-unproven" }),
+        CANCEL_EXIT_TIMEOUT_MS,
+      );
+    };
+    const cancel = (reason) => {
+      if (settled || cancellationReason) return;
+      cancellationReason = reason;
+      clearTimeout(timer);
+      try {
+        if (child?.stdin?.end) {
+          child.stdin.end("cancel\n");
+          cancelTimer = setTimeout(forceCancel, CANCEL_EXIT_TIMEOUT_MS);
+        } else {
+          forceCancel();
+        }
+      } catch {
+        forceCancel();
+      }
     };
     try {
       child = spawnProcess(
@@ -48,24 +81,29 @@ function launchIncognito(options = {}) {
         {
           detached: true,
           windowsHide: true,
-          stdio: ["ignore", "pipe", "ignore"],
+          stdio: ["pipe", "pipe", "ignore"],
         },
       );
     } catch {
       resolve({ ok: false, reason: "spawn-failed" });
       return;
     }
-    const timer = setTimeout(() => done({ ok: false, reason: "ready-timeout" }), READY_TIMEOUT_MS);
+    timer = setTimeout(() => cancel("ready-timeout"), readyTimeoutMs);
     if (!child?.pid || !child.stdout) {
       done({ ok: false, reason: "spawn-failed" });
       return;
     }
-    child.once("error", () => done({ ok: false, reason: "spawn-failed" }));
-    child.once("exit", () => done({ ok: false, reason: "exited-early" }));
+    child.once("error", () =>
+      done({ ok: false, reason: cancellationReason || "spawn-failed" }),
+    );
+    child.once("exit", () =>
+      done({ ok: false, reason: cancellationReason || "exited-early" }),
+    );
     child.stdout.on("data", (chunk) => {
       if (settled) return;
       output = (output + String(chunk)).slice(-32);
       if (!/(^|\r?\n)ready\r?\n/.test(`\n${output}`)) return;
+      child.stdin?.destroy?.();
       child.unref();
       child.stdout.destroy();
       done({ ok: true });

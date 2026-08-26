@@ -42,7 +42,7 @@ describe("Windows Runtime lifecycle adapter", () => {
     ]);
     expect(calls[0]?.[2]).toMatchObject({
       windowsHide: true,
-      stdio: ["ignore", "pipe", "ignore"],
+      stdio: ["pipe", "pipe", "ignore"],
     });
   });
 

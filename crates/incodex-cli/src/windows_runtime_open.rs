@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;
-use std::io::Write;
+use std::io::{BufRead, Write};
 use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -28,7 +30,6 @@ use crate::windows_process::WindowsProcessTree;
 
 const RUNTIME_OPEN_MODE: &str = "__incodex_windows_runtime_open";
 const READY_TIMEOUT: Duration = Duration::from_secs(30);
-const VISIBLE_APPEAR_TIMEOUT: Duration = Duration::from_secs(15);
 const VISIBLE_CLOSE_GRACE: Duration = Duration::from_millis(250);
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
 const READY_FILE_LIMIT: u64 = 64;
@@ -203,8 +204,17 @@ fn run_guardian_lifecycle(
     session: WindowsSessionHome,
     mut process_tree: WindowsProcessTree,
 ) -> Result<(), String> {
+    let cancelled = listen_for_guardian_cancellation();
     let ready_deadline = Instant::now() + READY_TIMEOUT;
+    let mut runtime_accepted = false;
     loop {
+        if cancelled.load(Ordering::Acquire) {
+            return guardian_failure(
+                "Windows Runtime launch was cancelled before readiness".to_string(),
+                &session,
+                &mut process_tree,
+            );
+        }
         match process_tree.try_wait() {
             Ok(Some(status)) => {
                 return Err(with_shutdown_cleanup(
@@ -222,10 +232,24 @@ fn run_guardian_lifecycle(
                 )
             }
         }
-        match validate_windows_runtime_ready(&session) {
-            Ok(true) => break,
-            Ok(false) => {}
-            Err(error) => return guardian_failure(error, &session, &mut process_tree),
+        if !runtime_accepted {
+            match validate_windows_runtime_ready(&session) {
+                Ok(accepted) => runtime_accepted = accepted,
+                Err(error) => return guardian_failure(error, &session, &mut process_tree),
+            }
+        }
+        let visible = match process_tree.has_visible_window() {
+            Ok(visible) => visible,
+            Err(error) => {
+                return guardian_failure(
+                    format!("cannot inspect the installed Windows Runtime window: {error}"),
+                    &session,
+                    &mut process_tree,
+                )
+            }
+        };
+        if windows_runtime_ready_for_handshake(runtime_accepted, visible) {
+            break;
         }
         if Instant::now() >= ready_deadline {
             return guardian_failure(
@@ -246,10 +270,15 @@ fn run_guardian_lifecycle(
         );
     }
 
-    let visible_deadline = Instant::now() + VISIBLE_APPEAR_TIMEOUT;
-    let mut seen_visible = false;
     let mut missing_since = None;
     loop {
+        if cancelled.load(Ordering::Acquire) {
+            return guardian_failure(
+                "Windows Runtime lifecycle was cancelled".to_string(),
+                &session,
+                &mut process_tree,
+            );
+        }
         match process_tree.try_wait() {
             Ok(Some(_)) => return finish_guardian(&session, Ok(())),
             Ok(None) => {}
@@ -263,10 +292,9 @@ fn run_guardian_lifecycle(
         }
         match process_tree.has_visible_window() {
             Ok(true) => {
-                seen_visible = true;
                 missing_since = None;
             }
-            Ok(false) if seen_visible => {
+            Ok(false) => {
                 let missing = missing_since.get_or_insert_with(Instant::now);
                 if missing.elapsed() >= VISIBLE_CLOSE_GRACE {
                     let shutdown = process_tree.terminate_successfully().map(|_| ()).map_err(
@@ -279,15 +307,6 @@ fn run_guardian_lifecycle(
                     return finish_guardian(&session, shutdown);
                 }
             }
-            Ok(false) if Instant::now() >= visible_deadline => {
-                return guardian_failure(
-                    "shared Windows Runtime became ready without a visible Codex window"
-                        .to_string(),
-                    &session,
-                    &mut process_tree,
-                )
-            }
-            Ok(false) => {}
             Err(error) => {
                 return guardian_failure(
                     format!("cannot inspect the installed Windows Runtime window: {error}"),
@@ -298,6 +317,22 @@ fn run_guardian_lifecycle(
         }
         thread::sleep(POLL_INTERVAL);
     }
+}
+
+pub fn windows_runtime_ready_for_handshake(runtime_accepted: bool, visible: bool) -> bool {
+    runtime_accepted && visible
+}
+
+fn listen_for_guardian_cancellation() -> Arc<AtomicBool> {
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let signal = Arc::clone(&cancelled);
+    thread::spawn(move || {
+        let mut line = String::new();
+        if std::io::stdin().lock().read_line(&mut line).is_ok() && line.trim() == "cancel" {
+            signal.store(true, Ordering::Release);
+        }
+    });
+    cancelled
 }
 
 fn installed_state_from_environment() -> Result<WindowsInstallState, String> {
