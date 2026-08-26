@@ -17,12 +17,18 @@ pub struct WindowsPackageEvidence {
     pub name: String,
     pub package_full_name: String,
     pub package_family_name: String,
-    pub application_id: String,
-    pub application_executable: PathBuf,
+    pub applications: Vec<WindowsManifestApplication>,
     pub install_location: PathBuf,
     pub architecture: String,
     pub signature_kind: String,
     pub status: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowsManifestApplication {
+    pub application_id: String,
+    pub application_executable: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,14 +45,17 @@ pub fn discover_codex_package() -> Result<WindowsCodexApp, String> {
 $package = Get-AppxPackage -Name OpenAI.Codex | Sort-Object Version -Descending | Select-Object -First 1
 if ($null -eq $package) { exit 3 }
 $manifest = [xml](Get-Content -LiteralPath (Join-Path $package.InstallLocation 'AppxManifest.xml') -Raw)
-$application = @($manifest.Package.Applications.Application) | Select-Object -First 1
-if ($null -eq $application) { exit 4 }
+$applications = @($manifest.Package.Applications.Application | ForEach-Object {
+  [PSCustomObject]@{
+    applicationId = $_.Id
+    applicationExecutable = $_.Executable
+  }
+})
 [PSCustomObject]@{
   name = $package.Name
   packageFullName = $package.PackageFullName
   packageFamilyName = $package.PackageFamilyName
-  applicationId = $application.Id
-  applicationExecutable = $application.Executable
+  applications = $applications
   installLocation = $package.InstallLocation
   architecture = $package.Architecture.ToString()
   signatureKind = $package.SignatureKind.ToString()
@@ -126,7 +135,6 @@ pub fn inspect_codex_package(evidence: WindowsPackageEvidence) -> Result<Windows
         || !evidence.package_full_name.starts_with("OpenAI.Codex_")
         || !evidence.package_full_name.ends_with(PACKAGE_FAMILY_SUFFIX)
         || evidence.package_family_name != PACKAGE_FAMILY_NAME
-        || !valid_application_id(&evidence.application_id)
     {
         return Err("Windows package identity is not the official Codex package".to_string());
     }
@@ -136,9 +144,29 @@ pub fn inspect_codex_package(evidence: WindowsPackageEvidence) -> Result<Windows
     if evidence.architecture.is_empty() {
         return Err("Windows Codex package architecture is missing".to_string());
     }
-    if evidence.application_executable.as_os_str().is_empty()
-        || evidence.application_executable.is_absolute()
-        || !evidence
+
+    let mut applications = evidence.applications.into_iter().filter(|application| {
+        application
+            .application_executable
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.eq_ignore_ascii_case("ChatGPT.exe"))
+    });
+    let application = applications.next().ok_or_else(|| {
+        "Windows package manifest must contain exactly one Codex application executable".to_string()
+    })?;
+    if applications.next().is_some() {
+        return Err(
+            "Windows package manifest must contain exactly one Codex application executable"
+                .to_string(),
+        );
+    }
+    if !valid_application_id(&application.application_id) {
+        return Err("Windows package identity is not the official Codex package".to_string());
+    }
+    if application.application_executable.as_os_str().is_empty()
+        || application.application_executable.is_absolute()
+        || !application
             .application_executable
             .components()
             .all(|component| matches!(component, Component::Normal(_)))
@@ -159,14 +187,14 @@ pub fn inspect_codex_package(evidence: WindowsPackageEvidence) -> Result<Windows
         )
     })?;
     require_file(&install_location.join("AppxManifest.xml"), "AppX manifest")?;
-    let executable = install_location.join(&evidence.application_executable);
+    let executable = install_location.join(&application.application_executable);
     require_file(&executable, "Codex application executable")?;
 
     Ok(WindowsCodexApp {
         package_full_name: evidence.package_full_name,
         app_user_model_id: format!(
             "{}!{}",
-            evidence.package_family_name, evidence.application_id
+            evidence.package_family_name, application.application_id
         ),
         install_location,
         executable,
