@@ -70,4 +70,43 @@ describe("Windows Runtime lifecycle adapter", () => {
     ).toEqual({ ok: false, reason: "invalid-source-bounds" });
     expect(spawned).toBe(false);
   });
+
+  test("cancels the guardian and waits for its exit before reporting a ready timeout", async () => {
+    const stdout = new EventEmitter() as EventEmitter & { destroy: () => void };
+    stdout.destroy = () => {};
+    const writes: string[] = [];
+    let exited = false;
+    const child = new EventEmitter() as EventEmitter & {
+      pid: number;
+      stdout: EventEmitter & { destroy: () => void };
+      stdin: { end: (value: string) => void; destroy: () => void };
+      kill: () => boolean;
+      unref: () => void;
+    };
+    child.pid = 43;
+    child.stdout = stdout;
+    child.stdin = {
+      end(value) {
+        writes.push(value);
+        queueMicrotask(() => {
+          exited = true;
+          child.emit("exit", 0);
+        });
+      },
+      destroy() {},
+    };
+    child.kill = () => true;
+    child.unref = () => {};
+
+    const result = await windowsPlatform.launchIncognito({
+      helperPath: "C:\\Incodex\\incodex.exe",
+      sourceHome: "C:\\Users\\me\\.codex",
+      readyTimeoutMs: 1,
+      spawnProcess: () => child,
+    });
+
+    expect(result).toEqual({ ok: false, reason: "ready-timeout" });
+    expect(writes).toEqual(["cancel\n"]);
+    expect(exited).toBe(true);
+  });
 });
