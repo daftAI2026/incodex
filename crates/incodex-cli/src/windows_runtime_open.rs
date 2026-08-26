@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
 use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -15,12 +15,16 @@ use incodex_core::windows_session::{
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
 use crate::cdp::OFFICIAL_NEW_CODEX_URL;
+use crate::windows_activation::{
+    activate_packaged_with_installed_runtime, WindowsActivationRequest,
+    WindowsInstalledRuntimeRegistration,
+};
 use crate::windows_app::{discover_codex_package, WindowsCodexApp};
 use crate::windows_cleanup::cleanup_windows_session_after_shutdown;
 use crate::windows_install_state::{
     read_windows_install_state, WindowsInstallPhase, WindowsInstallState,
 };
-use crate::windows_process::{spawn_kill_on_drop, WindowsProcessTree};
+use crate::windows_process::WindowsProcessTree;
 
 const RUNTIME_OPEN_MODE: &str = "__incodex_windows_runtime_open";
 const READY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -41,8 +45,32 @@ pub struct WindowsRuntimeOpenPlan {
     pub args: Vec<String>,
     pub env: BTreeMap<String, PathBuf>,
     pub env_flags: BTreeMap<String, String>,
-    pub env_remove: Vec<String>,
     pub session: WindowsSessionHome,
+    package_full_name: String,
+    app_user_model_id: String,
+    base_environment: BTreeMap<String, OsString>,
+}
+
+impl WindowsRuntimeOpenPlan {
+    pub fn activation_request(&self) -> Result<WindowsActivationRequest, String> {
+        let mut environment = self.base_environment.clone();
+        environment.extend(
+            self.env
+                .iter()
+                .map(|(key, value)| (key.clone(), value.as_os_str().to_os_string())),
+        );
+        environment.extend(
+            self.env_flags
+                .iter()
+                .map(|(key, value)| (key.clone(), OsString::from(value))),
+        );
+        WindowsActivationRequest::new(
+            &self.package_full_name,
+            &self.app_user_model_id,
+            self.args.iter().map(OsString::from),
+            environment,
+        )
+    }
 }
 
 pub fn parse_windows_runtime_open(
@@ -115,8 +143,10 @@ pub fn prepare_windows_runtime_open(
             ],
             env,
             env_flags,
-            env_remove: vec!["INCODEX_WINDOWS_BOOTSTRAPPED".to_string()],
             session: session.clone(),
+            package_full_name: app.package_full_name.clone(),
+            app_user_model_id: app.app_user_model_id.clone(),
+            base_environment: BTreeMap::new(),
         })
     })();
     match prepared {
@@ -135,39 +165,35 @@ fn run_windows_runtime_open(request: WindowsRuntimeOpenRequest) -> Result<(), St
         .state_path
         .parent()
         .ok_or_else(|| "Windows install state has no parent directory".to_string())?;
-    let plan = prepare_windows_runtime_open(
+    let mut plan = prepare_windows_runtime_open(
         &app,
         user_root,
         &request.source_home,
         request.source_bounds.as_deref(),
     )?;
-    execute_windows_runtime_open(plan)
+    plan.base_environment =
+        WindowsInstalledRuntimeRegistration::environment_from_install_state(&state)?;
+    let registration = WindowsInstalledRuntimeRegistration::from_install_state(&state)?;
+    execute_windows_runtime_open(plan, &registration)
 }
 
-fn execute_windows_runtime_open(plan: WindowsRuntimeOpenPlan) -> Result<(), String> {
-    let mut command = Command::new(&plan.bin);
-    command.args(&plan.args);
-    for (key, value) in &plan.env {
-        command.env(key, value);
-    }
-    for (key, value) in &plan.env_flags {
-        command.env(key, value);
-    }
-    for key in &plan.env_remove {
-        command.env_remove(key);
-    }
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let process_tree = match spawn_kill_on_drop(&mut command) {
+fn execute_windows_runtime_open(
+    plan: WindowsRuntimeOpenPlan,
+    registration: &WindowsInstalledRuntimeRegistration,
+) -> Result<(), String> {
+    let activation = match plan.activation_request() {
+        Ok(activation) => activation,
+        Err(error) => return Err(with_shutdown_cleanup(error, &plan.session, Ok(()))),
+    };
+    let process_tree = match activate_packaged_with_installed_runtime(&activation, registration) {
         Ok(process_tree) => process_tree,
-        Err(error) => {
+        Err(failure) => {
+            let (error, shutdown) = failure.into_parts();
             return Err(with_shutdown_cleanup(
                 format!("cannot launch installed Windows Runtime: {error}"),
                 &plan.session,
-                Ok(()),
-            ))
+                shutdown,
+            ));
         }
     };
     run_guardian_lifecycle(plan.session, process_tree)

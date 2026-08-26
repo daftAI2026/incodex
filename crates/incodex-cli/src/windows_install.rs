@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-use std::ffi::OsString;
 use std::path::Path;
 
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
@@ -99,35 +97,7 @@ where
         staged.epoch,
         WindowsInstallPhase::EnablePending,
     )?;
-    let bootstrap = runtime.release_dir.join("incodex-windows-bootstrap.cjs");
-    let environment = BTreeMap::from([
-        (
-            "NODE_OPTIONS".to_string(),
-            OsString::from(format!("--require=\"{}\"", bootstrap.display())),
-        ),
-        (
-            "INCODEX_WINDOWS_REGISTRATION_ID".to_string(),
-            OsString::from(&pending.registration_id),
-        ),
-        (
-            "INCODEX_WINDOWS_PACKAGE_FULL_NAME".to_string(),
-            OsString::from(package_full_name),
-        ),
-        (
-            "INCODEX_WINDOWS_STATE_PATH".to_string(),
-            pending.state_path.as_os_str().to_os_string(),
-        ),
-        (
-            "INCODEX_WINDOWS_HELPER".to_string(),
-            helper.executable.as_os_str().to_os_string(),
-        ),
-    ]);
-    let registration = match WindowsInstalledRuntimeRegistration::new(
-        package_full_name,
-        &helper.executable,
-        &pending.state_path,
-        environment,
-    ) {
+    let registration = match WindowsInstalledRuntimeRegistration::from_install_state(&pending) {
         Ok(registration) => registration,
         Err(error) => {
             let recovery = transition_windows_install_state(

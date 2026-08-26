@@ -15,6 +15,7 @@ use windows_sys::Win32::System::Com::{
 };
 use windows_sys::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
 
+use crate::windows_install_state::WindowsInstallState;
 use crate::windows_process::{
     assign_debugged_process_to_job, resume_debugged_package_process, snapshot_process_ids,
     WindowsPendingJob, WindowsProcessTree,
@@ -48,6 +49,51 @@ pub struct WindowsInstalledRuntimeRegistration {
 }
 
 impl WindowsInstalledRuntimeRegistration {
+    pub fn environment_from_install_state(
+        state: &WindowsInstallState,
+    ) -> Result<BTreeMap<String, OsString>, String> {
+        let user_root = state
+            .state_path
+            .parent()
+            .ok_or_else(|| "Windows install state has no parent directory".to_string())?;
+        let bootstrap = user_root
+            .join("runtime")
+            .join("releases")
+            .join(&state.runtime_release)
+            .join("incodex-windows-bootstrap.cjs");
+        Ok(BTreeMap::from([
+            (
+                "NODE_OPTIONS".to_string(),
+                OsString::from(format!("--require=\"{}\"", bootstrap.display())),
+            ),
+            (
+                "INCODEX_WINDOWS_REGISTRATION_ID".to_string(),
+                OsString::from(&state.registration_id),
+            ),
+            (
+                "INCODEX_WINDOWS_PACKAGE_FULL_NAME".to_string(),
+                OsString::from(&state.package_full_name),
+            ),
+            (
+                "INCODEX_WINDOWS_STATE_PATH".to_string(),
+                state.state_path.as_os_str().to_os_string(),
+            ),
+            (
+                "INCODEX_WINDOWS_HELPER".to_string(),
+                state.helper_path.as_os_str().to_os_string(),
+            ),
+        ]))
+    }
+
+    pub fn from_install_state(state: &WindowsInstallState) -> Result<Self, String> {
+        Self::new(
+            &state.package_full_name,
+            &state.helper_path,
+            &state.state_path,
+            Self::environment_from_install_state(state)?,
+        )
+    }
+
     pub fn new(
         package_full_name: &str,
         helper_path: &Path,
@@ -168,6 +214,25 @@ impl From<String> for WindowsActivationFailure {
 pub fn activate_packaged_kill_on_drop(
     request: &WindowsActivationRequest,
 ) -> Result<WindowsProcessTree, WindowsActivationFailure> {
+    activate_packaged(request, None)
+}
+
+pub fn activate_packaged_with_installed_runtime(
+    request: &WindowsActivationRequest,
+    registration: &WindowsInstalledRuntimeRegistration,
+) -> Result<WindowsProcessTree, WindowsActivationFailure> {
+    if request.package_full_name() != registration.package_full_name() {
+        return Err(WindowsActivationFailure::before_start(
+            "Windows installed Runtime registration does not match the activation package",
+        ));
+    }
+    activate_packaged(request, Some(registration))
+}
+
+fn activate_packaged(
+    request: &WindowsActivationRequest,
+    restoration: Option<&WindowsInstalledRuntimeRegistration>,
+) -> Result<WindowsProcessTree, WindowsActivationFailure> {
     let _activation_lock = acquire_package_activation_lock()?;
     let _apartment = ComApartment::initialize()?;
     let existing_processes = snapshot_process_ids()
@@ -179,8 +244,12 @@ pub fn activate_packaged_kill_on_drop(
     let arguments = wide_nul(request.arguments());
     let debugger_command = debugger_command_line(pending_job.name())?;
     let debugger_command = wide_nul(&debugger_command);
-    let mut debugging =
-        PackageDebugGuard::enable(&package, &debugger_command, request.environment())?;
+    let mut debugging = PackageDebugGuard::enable(
+        &package,
+        &debugger_command,
+        request.environment(),
+        restoration,
+    )?;
     let manager = match ComPtr::create(
         &CLSID_APPLICATION_ACTIVATION_MANAGER,
         &IID_APPLICATION_ACTIVATION_MANAGER,
@@ -188,7 +257,7 @@ pub fn activate_packaged_kill_on_drop(
     ) {
         Ok(manager) => manager,
         Err(error) => {
-            let restoration = debugging.disable();
+            let restoration = debugging.restore();
             return Err(activation_manager_failure(error, restoration));
         }
     };
@@ -204,7 +273,7 @@ pub fn activate_packaged_kill_on_drop(
         )
     };
     if failed(result) {
-        let disable = debugging.disable();
+        let restoration = debugging.restore();
         let process_shutdown = if process_id != 0 && !existing_processes.contains(&process_id) {
             Err(format!(
                 "activation failed after reporting new Windows process {process_id}; process shutdown is unproven"
@@ -214,15 +283,15 @@ pub fn activate_packaged_kill_on_drop(
         };
         return Err(activation_failure_after_debugging(
             hresult_message("cannot activate the Windows Codex package", result),
-            disable,
+            restoration,
             process_shutdown,
         ));
     }
     if process_id == 0 || existing_processes.contains(&process_id) {
-        let disable = debugging.disable();
+        let restoration = debugging.restore();
         return Err(activation_failure_after_debugging(
             "Windows package activation did not create a new isolated Codex process".to_string(),
-            disable,
+            restoration,
             Ok(()),
         ));
     }
@@ -230,20 +299,20 @@ pub fn activate_packaged_kill_on_drop(
     let mut process_tree = match pending_job.attach(process_id, request.package_full_name()) {
         Ok(process_tree) => process_tree,
         Err(error) => {
-            let disable = debugging.disable();
+            let restoration = debugging.restore();
             let message = format!(
                 "cannot contain activated Windows Codex process {process_id} in a Job Object: {error}"
             );
             return Err(activation_failure_after_debugging(
                 message,
-                disable,
+                restoration,
                 Err(format!(
                     "cannot prove activated Windows Codex process {process_id} and its descendants exited after Job attachment failed"
                 )),
             ));
         }
     };
-    if let Err(error) = debugging.disable() {
+    if let Err(error) = debugging.restore() {
         let process_shutdown = process_tree.terminate().map(|_| ()).map_err(|shutdown_error| {
             format!(
                 "cannot prove the isolated Windows Job is empty after package debug restoration failed: {shutdown_error}"
@@ -504,7 +573,13 @@ impl Drop for ComApartment {
 struct PackageDebugGuard {
     interface: ComPtr,
     package: Vec<u16>,
+    restoration: Option<PackageDebugRegistration>,
     active: bool,
+}
+
+struct PackageDebugRegistration {
+    debugger_command: Vec<u16>,
+    environment: Vec<u16>,
 }
 
 impl PackageDebugGuard {
@@ -512,6 +587,7 @@ impl PackageDebugGuard {
         package: &[u16],
         debugger_command: &[u16],
         environment: &[u16],
+        restoration: Option<&WindowsInstalledRuntimeRegistration>,
     ) -> Result<Self, String> {
         let interface = ComPtr::create(
             &CLSID_PACKAGE_DEBUG_SETTINGS,
@@ -536,17 +612,32 @@ impl PackageDebugGuard {
         Ok(Self {
             interface,
             package: package.to_vec(),
+            restoration: restoration.map(|registration| PackageDebugRegistration {
+                debugger_command: wide_nul(registration.debugger_command_line()),
+                environment: registration.environment().to_vec(),
+            }),
             active: true,
         })
     }
 
-    fn disable(&mut self) -> Result<(), String> {
+    fn restore(&mut self) -> Result<(), String> {
         if !self.active {
             return Ok(());
         }
         let vtable = unsafe { *(self.interface.raw() as *mut *const PackageDebugSettingsVtable) };
-        let result =
-            unsafe { ((*vtable).disable_debugging)(self.interface.raw(), self.package.as_ptr()) };
+        let result = match &self.restoration {
+            Some(registration) => unsafe {
+                ((*vtable).enable_debugging)(
+                    self.interface.raw(),
+                    self.package.as_ptr(),
+                    registration.debugger_command.as_ptr(),
+                    registration.environment.as_ptr(),
+                )
+            },
+            None => unsafe {
+                ((*vtable).disable_debugging)(self.interface.raw(), self.package.as_ptr())
+            },
+        };
         if failed(result) {
             Err(hresult_message(
                 "cannot restore Windows Codex package debug settings",
@@ -561,7 +652,7 @@ impl PackageDebugGuard {
 
 impl Drop for PackageDebugGuard {
     fn drop(&mut self) {
-        let _ = self.disable();
+        let _ = self.restore();
     }
 }
 
