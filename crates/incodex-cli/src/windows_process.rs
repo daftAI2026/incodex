@@ -398,3 +398,21 @@ impl Drop for OwnedHandle {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+    use super::require_process_package_identity;
+
+    #[test]
+    fn an_unrelated_pid_cannot_be_cleaned_up_as_the_activated_codex_package() {
+        let error = require_process_package_identity(
+            unsafe { GetCurrentProcess() },
+            "OpenAI.Codex_26.820.7780.0_x64__2p2nqsd0c76g0",
+        )
+        .expect_err("test process is not the packaged Codex app");
+
+        assert!(error.to_string().contains("package identity"), "{error}");
+    }
+}
