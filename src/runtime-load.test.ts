@@ -76,6 +76,8 @@ describe("runtime load", () => {
     expect(main).toContain("hookWindow(win, source)");
     expect(main).toContain('win.webContents.on("dom-ready", () => run(false))');
     expect(main).toContain('win.webContents.on("did-finish-load", () => run(true))');
+    expect(main).toContain('probe?.accepted === true');
+    expect(main).toContain('if (!windowsPlatform) markSessionReady()');
   });
 
   test("an ordinary incognito click launches the official Codex route", () => {
