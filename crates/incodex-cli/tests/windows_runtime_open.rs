@@ -5,9 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_cli::windows_app::WindowsCodexApp;
-use incodex_cli::windows_runtime_open::{
-    parse_windows_runtime_open, prepare_windows_runtime_open,
-};
+use incodex_cli::windows_runtime_open::{parse_windows_runtime_open, prepare_windows_runtime_open};
 use incodex_core::windows_session::{burn_windows_session, WindowsCleanupResult};
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -68,8 +66,7 @@ fn installed_runtime_plan_reuses_native_session_without_cdp_or_duplicate_ui() {
     fs::create_dir_all(install.join("app")).expect("create package fixture");
     fs::create_dir_all(&source).expect("create source home");
     fs::write(source.join("auth.json"), b"fixture-auth").expect("write auth");
-    fs::write(source.join("config.toml"), b"localeOverride = 'zh-CN'\n")
-        .expect("write config");
+    fs::write(source.join("config.toml"), b"localeOverride = 'zh-CN'\n").expect("write config");
 
     let app = app_at(&install);
     let plan = prepare_windows_runtime_open(
@@ -89,17 +86,25 @@ fn installed_runtime_plan_reuses_native_session_without_cdp_or_duplicate_ui() {
         ]
     );
     assert!(!plan.args.iter().any(|arg| arg.contains("remote-debugging")));
+    assert_eq!(
+        plan.env_remove,
+        vec!["INCODEX_WINDOWS_BOOTSTRAPPED".to_string()]
+    );
     assert_eq!(plan.env.get("CODEX_HOME"), Some(&plan.session.home));
     assert_eq!(
         plan.env.get("CODEX_ELECTRON_USER_DATA_PATH"),
         Some(&plan.session.chromium)
     );
     assert_eq!(
-        plan.env_flags.get("INCODEX_CLEANUP_OWNER").map(String::as_str),
+        plan.env_flags
+            .get("INCODEX_CLEANUP_OWNER")
+            .map(String::as_str),
         Some("native")
     );
     assert_eq!(
-        plan.env_flags.get("INCODEX_SOURCE_BOUNDS").map(String::as_str),
+        plan.env_flags
+            .get("INCODEX_SOURCE_BOUNDS")
+            .map(String::as_str),
         Some("10,20,1200,800")
     );
     assert_eq!(
