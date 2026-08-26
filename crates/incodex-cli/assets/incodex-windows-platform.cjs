@@ -75,6 +75,7 @@ function launchIncognito(options = {}) {
 
   const spawnProcess = options.spawnProcess || spawn;
   const readyTimeoutMs = options.readyTimeoutMs || READY_TIMEOUT_MS;
+  const cancelExitTimeoutMs = options.cancelExitTimeoutMs || CANCEL_EXIT_TIMEOUT_MS;
   return new Promise((resolve) => {
     let child;
     let settled = false;
@@ -89,17 +90,14 @@ function launchIncognito(options = {}) {
       clearTimeout(cancelTimer);
       resolve(result);
     };
-    const forceCancel = () => {
+    const leaveCleanupRunning = () => {
       try {
-        child?.kill?.();
-      } catch {
-        done({ ok: false, reason: "cleanup-unproven" });
-        return;
+        child?.stdin?.destroy?.();
+        child?.stdout?.destroy?.();
+        child?.unref?.();
+      } finally {
+        done({ ok: false, reason: "cleanup-pending" });
       }
-      cancelTimer = setTimeout(
-        () => done({ ok: false, reason: "cleanup-unproven" }),
-        CANCEL_EXIT_TIMEOUT_MS,
-      );
     };
     const cancel = (reason) => {
       if (settled || cancellationReason) return;
@@ -108,12 +106,12 @@ function launchIncognito(options = {}) {
       try {
         if (child?.stdin?.end) {
           child.stdin.end("cancel\n");
-          cancelTimer = setTimeout(forceCancel, CANCEL_EXIT_TIMEOUT_MS);
+          cancelTimer = setTimeout(leaveCleanupRunning, cancelExitTimeoutMs);
         } else {
-          forceCancel();
+          leaveCleanupRunning();
         }
       } catch {
-        forceCancel();
+        leaveCleanupRunning();
       }
     };
     try {
