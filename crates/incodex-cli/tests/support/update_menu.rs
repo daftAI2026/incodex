@@ -1,5 +1,6 @@
 use std::fs;
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 use super::support;
 use super::{installed_cli, scratch, write_executable};
@@ -96,6 +97,41 @@ fn native_script_menu_refreshes_the_stable_update_notice_cache() {
     open_menu_long_enough_for_background_refresh(&home, &installed, &path, "q");
 
     let cache = home.join(".incodex/cache/update_message");
+    assert_eq!(
+        fs::read_to_string(cache).unwrap().trim(),
+        "Update 9.9.9 available, run inc update"
+    );
+}
+
+#[test]
+fn native_menu_refresh_survives_an_immediate_exit() {
+    let home = scratch("menu-detached-refresh");
+    let fake_bin = home.join("fake-bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let (_, installed) = installed_cli(&home);
+    write_executable(
+        &fake_bin.join("curl"),
+        "#!/bin/sh\nsleep 0.5\nprintf '%s\\n' '{\"tag_name\":\"v9.9.9\"}'\n",
+    );
+    let path = format!("{}:/usr/bin:/bin", fake_bin.display());
+
+    let result = support::tty::run_with_timeout_env(
+        installed.to_str().unwrap(),
+        &[],
+        &[],
+        &home,
+        "6. Quit",
+        "q",
+        Duration::from_secs(3),
+        &[("PATH", path.as_str())],
+    );
+    assert_eq!(result.status, 0, "{}", result.stderr);
+
+    let cache = home.join(".incodex/cache/update_message");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !cache.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
     assert_eq!(
         fs::read_to_string(cache).unwrap().trim(),
         "Update 9.9.9 available, run inc update"
