@@ -210,6 +210,43 @@ fn native_homebrew_menu_waits_for_the_formula_and_names_inc_update() {
 }
 
 #[test]
+fn native_homebrew_menu_requires_a_new_stable_release_before_formula_lookup() {
+    let home = scratch("menu-homebrew-release-gate");
+    let fake_bin = home.join("fake-bin");
+    let cellar_bin = home.join(format!("Cellar/incodex/{}/bin", env!("CARGO_PKG_VERSION")));
+    fs::create_dir_all(&fake_bin).unwrap();
+    fs::create_dir_all(&cellar_bin).unwrap();
+    let installed = cellar_bin.join("incodex");
+    fs::copy(env!("CARGO_BIN_EXE_incodex"), &installed).unwrap();
+    write_executable(
+        &fake_bin.join("curl"),
+        &format!(
+            "#!/bin/sh\nprintf '%s\\n' '{{\"tag_name\":\"v{}\"}}'\n",
+            env!("CARGO_PKG_VERSION")
+        ),
+    );
+    let brew_log = home.join("brew.log");
+    write_executable(
+        &fake_bin.join("brew"),
+        &format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\nprintf '%s\\n' 'incodex ({}) < 9.9.9'\n",
+            brew_log.display(),
+            env!("CARGO_PKG_VERSION")
+        ),
+    );
+    let path = format!("{}:/usr/bin:/bin", fake_bin.display());
+
+    open_menu_long_enough_for_background_refresh(&home, &installed, &path, "q");
+
+    let cache = home.join(".incodex/cache/update_message");
+    assert_eq!(fs::read_to_string(cache).unwrap(), "");
+    assert!(
+        !brew_log.exists(),
+        "formula lookup ran without a new release"
+    );
+}
+
+#[test]
 fn native_homebrew_menu_exposes_the_unified_update_shortcut() {
     let home = scratch("menu-homebrew-no-self-update");
     let fake_bin = home.join("fake-bin");
