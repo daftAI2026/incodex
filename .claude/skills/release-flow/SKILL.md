@@ -55,7 +55,7 @@ Must list both architecture binaries **and** `SHA256SUMS`. `install.sh` is fail-
 
 The `update-formula` job clones `daftAI2026/homebrew-tap`, runs `scripts/update-homebrew-tap-formula.sh`, and commits `incodex <version>` / `Automated release via GitHub Actions`. It needs repository secret `HOMEBREW_TAP_TOKEN` (contents write on the tap). Missing checksums or a missing token fail the job; the GitHub Release itself already exists. Do not bump Homebrew/homebrew-core.
 
-Script-install smoke after assets exist: install the previous binary when one exists (otherwise use a clean first-time `install.sh`), run `incodex --version`, then run `incodex update` and verify the new version.
+Script-install smoke after assets exist: install the previous binary when one exists (otherwise use a clean first-time `install.sh`), run `incodex --version`, then run `inc update` and verify the new version.
 
 Then load `.claude/skills/release-notes/SKILL.md` and draft notes. After `gh release edit`, run `bash .claude/skills/release-notes/scripts/post-reactions.sh v<version>`. Do not announce until notes and reactions are published.
 

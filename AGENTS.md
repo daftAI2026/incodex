@@ -23,6 +23,7 @@ Users launch the official Codex icon as usual. After `incodex install`, a hat-gl
 - Default `incodex install` / `uninstall` to `/Applications/ChatGPT.app`. `--clone` and `--app` are exceptions.
 - Keep `--help` and a TTY menu. Non-TTY with no args prints help. Destructive commands print a plan; TTY asks once; non-TTY requires `--yes`.
 - Update Incodex-only code with `incodex runtime` (writes `~/.incodex/runtime/`, no resign). After an official Codex upgrade, the user must run `incodex install` again on the **current** official package.
+- Keep `inc update` as the public stable-update entry point. Homebrew installs run a bounded `brew update` plus `brew upgrade incodex`; script installs re-run the stable installer; source checkouts receive source-update guidance.
 
 ### What Incodex Should Not Do
 
