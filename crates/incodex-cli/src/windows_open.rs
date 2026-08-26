@@ -1,26 +1,24 @@
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-#[cfg(test)]
 use std::process::{Command, Stdio};
-#[cfg(test)]
 use std::sync::atomic::{AtomicBool, Ordering};
-#[cfg(test)]
 use std::sync::{mpsc, Arc};
-#[cfg(test)]
 use std::thread;
-#[cfg(test)]
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use incodex_core::windows_session::{
     burn_windows_session, copy_windows_settings, create_windows_session, WindowsCleanupResult,
     WindowsSessionHome,
 };
-use incodex_core::{format_kv, format_step, format_warn};
+use incodex_core::{format_kv, format_ok, format_step, format_warn};
 
-use crate::cdp::{allocate_debug_port, debug_launch_args, InjectionOptions};
-use crate::profile_mask::ProfileMask;
+use crate::cdp::{
+    allocate_debug_port, debug_launch_args, inject_shared_ui_with_options_while_alive,
+    start_lifecycle_monitor, InjectionOptions,
+};
+use crate::profile_mask::{resolve_profile_mask, ProfileMask};
 use crate::windows_app::{discover_codex_package, WindowsCodexApp};
-#[cfg(test)]
 use crate::windows_process::spawn_kill_on_drop;
 use crate::{parse::ParsedCli, CliFailure};
 
@@ -40,6 +38,7 @@ pub enum WindowsOpenProcessResult {
     Exited(i32),
     SpawnFailed(String),
     ProcessStateUnknown(String),
+    ListenerOwnershipFailed(String),
     InjectionFailed(String),
 }
 
@@ -70,9 +69,31 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
         println!("{}", format_warn("Dry run. No window opened.", None));
         return Ok(());
     }
-    Err(CliFailure::new(
-        "open is not supported on Windows without --dry-run yet",
-    ))
+    let profile = windows_user_profile().map_err(CliFailure::from)?;
+    let source_home = std::env::var_os("CODEX_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| profile.join(".codex"));
+    let profile_mask = resolve_profile_mask(
+        parsed.mask,
+        parsed.name.as_deref(),
+        parsed.avatar.as_deref().map(Path::new),
+    )
+    .map_err(CliFailure::from)?;
+    let plan = prepare_windows_open(&app, &profile.join(".incodex"), &source_home, profile_mask)
+        .map_err(CliFailure::from)?;
+    println!("{}", format_step("Opening incognito Codex window", None));
+    println!(
+        "{}",
+        format_kv("Binary", &plan.bin.display().to_string(), None)
+    );
+    println!(
+        "{}",
+        format_kv("Home", &plan.session.home.display().to_string(), None)
+    );
+    println!("{}", format_kv("Session", &plan.session.session_id, None));
+    let outcome = execute_windows_open_with(plan, inject_windows_ui);
+    finish_windows_open(outcome)
 }
 
 pub fn prepare_windows_open(
@@ -130,7 +151,6 @@ pub fn prepare_windows_open(
     }
 }
 
-#[cfg(test)]
 fn execute_windows_open_with<F>(plan: WindowsOpenPlan, inject: F) -> WindowsOpenOutcome
 where
     F: FnOnce(u16, InjectionOptions, Arc<AtomicBool>) -> Result<(), String> + Send + 'static,
@@ -158,6 +178,15 @@ where
             }
         }
     };
+    if let Err(error) = wait_for_owned_listener(&mut process_tree, plan.debug_port) {
+        let _ = process_tree.terminate();
+        drop(process_tree);
+        return WindowsOpenOutcome {
+            process: WindowsOpenProcessResult::ListenerOwnershipFailed(error),
+            ui_ready: false,
+            cleanup: cleanup_windows_session(&plan.session),
+        };
+    }
     let alive = Arc::new(AtomicBool::new(true));
     let injection_alive = alive.clone();
     let debug_port = plan.debug_port;
@@ -206,7 +235,6 @@ where
     }
 }
 
-#[cfg(test)]
 fn cleanup_windows_session(session: &WindowsSessionHome) -> WindowsCleanupResult {
     let mut last = WindowsCleanupResult::Unknown {
         reason: "Windows session cleanup was not attempted".to_string(),
@@ -221,6 +249,122 @@ fn cleanup_windows_session(session: &WindowsSessionHome) -> WindowsCleanupResult
         }
     }
     last
+}
+
+fn wait_for_owned_listener(
+    process_tree: &mut crate::windows_process::WindowsProcessTree,
+    port: u16,
+) -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        match process_tree.listener_owner_is_in_job(port) {
+            Ok(true) => return Ok(()),
+            Ok(false) => {}
+            Err(error) => return Err(format!("cannot prove Windows CDP listener owner: {error}")),
+        }
+        match process_tree.try_wait() {
+            Ok(Some(status)) => {
+                return Err(format!(
+                    "Codex exited with {status} before its owned CDP listener was ready"
+                ))
+            }
+            Ok(None) => {}
+            Err(error) => {
+                return Err(format!(
+                    "cannot inspect Codex while proving CDP listener ownership: {error}"
+                ))
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "timed out proving that 127.0.0.1:{port} belongs to the Codex Job Object"
+            ));
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn inject_windows_ui(
+    port: u16,
+    options: InjectionOptions,
+    alive: Arc<AtomicBool>,
+) -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_secs(45);
+    let mut last_error = "Codex CDP page is not ready".to_string();
+    while alive.load(Ordering::Acquire) && Instant::now() < deadline {
+        let mut primary_target = None;
+        match inject_shared_ui_with_options_while_alive(port, &options, &alive, |target_id| {
+            primary_target = Some(target_id.to_string());
+        }) {
+            Ok(_) => {
+                if let Some(target_id) = primary_target {
+                    start_lifecycle_monitor(port, target_id, alive.clone());
+                }
+                println!(
+                    "{}",
+                    format_ok("Opened. Incognito Codex window is ready.", None)
+                );
+                let _ = std::io::stdout().flush();
+                return Ok(());
+            }
+            Err(error) => last_error = error,
+        }
+        thread::sleep(Duration::from_millis(400));
+    }
+    Err(format!("Windows UI injection failed: {last_error}"))
+}
+
+fn windows_user_profile() -> Result<PathBuf, String> {
+    let profile = std::env::var_os("USERPROFILE")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .ok_or("USERPROFILE is unavailable")?;
+    if profile.is_absolute() {
+        Ok(profile)
+    } else {
+        Err(format!(
+            "USERPROFILE is not absolute: {}",
+            profile.display()
+        ))
+    }
+}
+
+fn finish_windows_open(outcome: WindowsOpenOutcome) -> Result<(), CliFailure> {
+    match &outcome.cleanup {
+        WindowsCleanupResult::Removed => {
+            println!("{}", format_ok("Closed. Isolated session removed.", None));
+        }
+        WindowsCleanupResult::Retained { reason } => {
+            println!(
+                "{}",
+                format_warn(
+                    &format!("Closed. Isolated session retained: {reason}"),
+                    None
+                )
+            );
+            return Err(CliFailure::with_code(2, ""));
+        }
+        WindowsCleanupResult::Unknown { reason } => {
+            println!(
+                "{}",
+                format_warn(
+                    &format!("Closed. Isolated session cleanup is unknown: {reason}"),
+                    None,
+                )
+            );
+            return Err(CliFailure::with_code(2, ""));
+        }
+    }
+    match outcome.process {
+        WindowsOpenProcessResult::Exited(0) if outcome.ui_ready => Ok(()),
+        WindowsOpenProcessResult::Exited(code) => Err(CliFailure::new(format!(
+            "Incognito Codex process exited with status {code}"
+        ))),
+        WindowsOpenProcessResult::SpawnFailed(error)
+        | WindowsOpenProcessResult::ProcessStateUnknown(error) => Err(CliFailure::new(error)),
+        WindowsOpenProcessResult::ListenerOwnershipFailed(error)
+        | WindowsOpenProcessResult::InjectionFailed(error) => Err(CliFailure::with_code(3, error)),
+    }
 }
 
 fn read_locale_override(source_home: &Path) -> Option<String> {
@@ -285,6 +429,10 @@ mod tests {
         ];
         plan.env_flags
             .insert("INCODEX_WINDOWS_OPEN_FIXTURE".to_string(), "1".to_string());
+        plan.env_flags.insert(
+            "INCODEX_WINDOWS_OPEN_PORT".to_string(),
+            plan.debug_port.to_string(),
+        );
         (root, plan)
     }
 
@@ -293,6 +441,11 @@ mod tests {
         if std::env::var_os("INCODEX_WINDOWS_OPEN_FIXTURE").is_none() {
             return;
         }
+        let port = std::env::var("INCODEX_WINDOWS_OPEN_PORT")
+            .expect("fixture port")
+            .parse::<u16>()
+            .expect("valid fixture port");
+        let _listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port)).expect("bind fixture CDP");
         thread::sleep(Duration::from_millis(250));
     }
 
