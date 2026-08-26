@@ -45,7 +45,6 @@ Commands:
   self-uninstall  Not available on Windows yet
 
 Run incodex <command> --help for details.
-inc is the same program as incodex.
 ";
 
 #[cfg(target_os = "windows")]
