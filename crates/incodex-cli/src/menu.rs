@@ -1,4 +1,5 @@
-use crate::menu_view::{draw_menu_lines, render_menu_lines, CursorGuard, MenuItem};
+use crate::menu_controller::{run_menu as run_shared_menu, MenuKey};
+use crate::menu_view::MenuItem;
 use crate::parse::CliCommand;
 
 const ITEMS: &[MenuItem] = &[
@@ -35,54 +36,30 @@ const ITEMS: &[MenuItem] = &[
 ];
 
 pub fn run_menu() -> Result<Option<CliCommand>, String> {
-    let mut selected = 0_usize;
     crate::lifecycle::spawn_update_notice_refresh();
     let update_message = crate::lifecycle::read_update_notice();
     let self_update_available = update_message
         .as_deref()
         .is_some_and(|message| message.ends_with("run inc update"));
-    let _cursor = CursorGuard;
-    loop {
-        draw(selected, update_message.as_deref(), self_update_available)?;
-        let key = crate::terminal::read_key()?;
-        match key.as_slice() {
-            [3] => return Err("interrupted".into()),
-            [b'q'] | [b'Q'] | [0x1b] => return Ok(None),
-            [b'v'] | [b'V'] => return Ok(Some(CliCommand::Version)),
-            [b'u'] | [b'U'] if self_update_available => {
-                return Ok(Some(CliCommand::Update));
-            }
-            [b'\r'] | [b'\n'] => return Ok(ITEMS[selected].command),
-            [b'k'] | [b'K'] | [0x1b, b'[', b'A'] => {
-                selected = (selected + ITEMS.len() - 1) % ITEMS.len();
-            }
-            [b'j'] | [b'J'] | [0x1b, b'[', b'B'] => {
-                selected = (selected + 1) % ITEMS.len();
-            }
-            [digit @ b'1'..=b'9'] => {
-                let index = usize::from(*digit - b'1');
-                if let Some(item) = ITEMS.get(index) {
-                    return Ok(item.command);
-                }
-            }
-            _ => {}
-        }
-    }
+    run_shared_menu(
+        ITEMS,
+        update_message.as_deref(),
+        self_update_available,
+        read_menu_key,
+    )
 }
 
-fn draw(
-    selected: usize,
-    update_message: Option<&str>,
-    self_update_available: bool,
-) -> Result<(), String> {
-    let controls = if self_update_available {
-        format!(
-            "↑↓ | Enter | U Update | V Version | Q Quit | 1-{} Jump",
-            ITEMS.len()
-        )
-    } else {
-        format!("↑↓ | Enter | V Version | Q Quit | 1-{} Jump", ITEMS.len())
-    };
-    let lines = render_menu_lines(ITEMS, Some(selected), update_message, &controls);
-    draw_menu_lines(&lines)
+fn read_menu_key() -> Result<MenuKey, String> {
+    let key = crate::terminal::read_key()?;
+    Ok(match key.as_slice() {
+        [3] => MenuKey::Interrupt,
+        [b'q'] | [b'Q'] | [0x1b] => MenuKey::Quit,
+        [b'v'] | [b'V'] => MenuKey::Version,
+        [b'u'] | [b'U'] => MenuKey::Update,
+        [b'\r'] | [b'\n'] => MenuKey::Activate,
+        [b'k'] | [b'K'] | [0x1b, b'[', b'A'] => MenuKey::Up,
+        [b'j'] | [b'J'] | [0x1b, b'[', b'B'] => MenuKey::Down,
+        [digit @ b'1'..=b'9'] => MenuKey::Digit(usize::from(*digit - b'0')),
+        _ => MenuKey::Ignore,
+    })
 }

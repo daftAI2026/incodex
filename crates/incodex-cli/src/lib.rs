@@ -30,6 +30,7 @@ pub mod lifecycle;
 mod locale;
 #[cfg(not(target_os = "windows"))]
 pub mod menu;
+mod menu_controller;
 mod menu_view;
 #[cfg(not(target_os = "windows"))]
 pub mod open;

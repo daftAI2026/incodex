@@ -1,5 +1,7 @@
 use std::io::{self, IsTerminal};
 
+use crate::menu_controller::MenuKey;
+
 use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::Console::{
     GetConsoleMode, GetStdHandle, ReadConsoleInputW, SetConsoleMode, ENABLE_PROCESSED_INPUT,
@@ -7,18 +9,6 @@ use windows_sys::Win32::System::Console::{
     STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MenuKey {
-    Up,
-    Down,
-    Activate,
-    Quit,
-    Version,
-    Digit(usize),
-    Interrupt,
-    Ignore,
-}
 
 pub fn is_tty() -> bool {
     io::stdin().is_terminal() && io::stdout().is_terminal()
@@ -60,6 +50,7 @@ pub(crate) fn read_menu_key() -> Result<MenuKey, String> {
             Some('k' | 'K') => MenuKey::Up,
             Some('j' | 'J') => MenuKey::Down,
             Some('q' | 'Q') => MenuKey::Quit,
+            Some('u' | 'U') => MenuKey::Update,
             Some('v' | 'V') => MenuKey::Version,
             Some('\u{3}') => MenuKey::Interrupt,
             Some(character @ '1'..='9') => {
