@@ -58,6 +58,12 @@ fn prepares_open_from_the_discovered_users_package_without_hardcoded_install_pat
         plan.env.get("CODEX_ELECTRON_USER_DATA_PATH"),
         Some(&plan.session.chromium)
     );
+    let activation = plan
+        .activation_request()
+        .expect("build Store activation request");
+    assert_eq!(activation.package_full_name(), app.package_full_name);
+    assert_eq!(activation.app_user_model_id(), app.app_user_model_id);
+    assert!(activation.arguments().contains("--user-data-dir="));
     assert_eq!(
         fs::read(plan.session.home.join("auth.json")).expect("copied auth"),
         b"fixture-auth"
