@@ -54,6 +54,10 @@ pub mod windows_console;
 #[cfg(target_os = "windows")]
 pub mod windows_doctor;
 #[cfg(target_os = "windows")]
+mod windows_file;
+#[cfg(target_os = "windows")]
+pub mod windows_helper;
+#[cfg(target_os = "windows")]
 pub mod windows_install;
 #[cfg(target_os = "windows")]
 pub mod windows_install_state;

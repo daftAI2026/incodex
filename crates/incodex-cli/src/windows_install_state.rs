@@ -7,7 +7,6 @@ use std::ptr;
 use incodex_core::windows_path::{reject_reparse_ancestors, require_local_disk_absolute};
 use incodex_core::windows_session::{ensure_private_windows_dir, verify_private_acl};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use windows_sys::Win32::Foundation::{CloseHandle, WAIT_ABANDONED, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows_sys::Win32::Security::Cryptography::{
     BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG,
@@ -15,6 +14,7 @@ use windows_sys::Win32::Security::Cryptography::{
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 use windows_sys::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
 
+use crate::windows_file::{canonical_regular_file, sha256_file};
 use crate::windows_runtime::replace_private_file;
 
 const STATE_NAME: &str = "windows-install.json";
@@ -249,37 +249,7 @@ fn validate_runtime_release(runtime_release: &str) -> Result<(), String> {
 }
 
 fn validate_helper(helper_path: &Path) -> Result<PathBuf, String> {
-    if !helper_path.is_absolute() {
-        return Err("Windows install helper path is not absolute".to_string());
-    }
-    let metadata = fs::symlink_metadata(helper_path)
-        .map_err(|error| format!("cannot inspect Windows install helper: {error}"))?;
-    if !metadata.is_file() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-        return Err("Windows install helper is not a regular file".to_string());
-    }
-    fs::canonicalize(helper_path)
-        .map_err(|error| format!("cannot resolve Windows install helper: {error}"))
-}
-
-fn sha256_file(path: &Path) -> Result<String, String> {
-    let mut file = fs::File::open(path)
-        .map_err(|error| format!("cannot open {} for hashing: {error}", path.display()))?;
-    let mut hash = Sha256::new();
-    let mut buffer = [0u8; 64 * 1024];
-    loop {
-        let read = file
-            .read(&mut buffer)
-            .map_err(|error| format!("cannot hash {}: {error}", path.display()))?;
-        if read == 0 {
-            break;
-        }
-        hash.update(&buffer[..read]);
-    }
-    Ok(hash
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect())
+    canonical_regular_file(helper_path, "Windows install helper")
 }
 
 fn random_registration_id() -> Result<String, String> {
