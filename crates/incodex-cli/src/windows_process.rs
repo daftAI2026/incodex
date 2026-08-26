@@ -2,17 +2,19 @@ use std::collections::HashSet;
 use std::ffi::c_void;
 use std::io;
 use std::mem::size_of;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
 use std::os::windows::io::AsRawHandle;
 use std::os::windows::process::{CommandExt, ExitStatusExt};
 use std::process::{Child, Command, ExitStatus};
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, APPMODEL_ERROR_NO_PACKAGE, ERROR_INSUFFICIENT_BUFFER, ERROR_NO_MORE_FILES, HANDLE,
-    INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    CloseHandle, DuplicateHandle, APPMODEL_ERROR_NO_PACKAGE, DUPLICATE_SAME_ACCESS,
+    ERROR_INSUFFICIENT_BUFFER, ERROR_NO_MORE_FILES, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0,
+    WAIT_TIMEOUT,
 };
 use windows_sys::Win32::NetworkManagement::IpHelper::{
-    GetExtendedTcpTable, MIB_TCPROW_OWNER_PID, MIB_TCPTABLE_OWNER_PID, TCP_TABLE_OWNER_PID_LISTENER,
+    GetExtendedTcpTable, MIB_TCPROW_OWNER_PID, MIB_TCPTABLE_OWNER_PID, MIB_TCP_STATE_ESTAB,
+    TCP_TABLE_CLASS, TCP_TABLE_OWNER_PID_ALL, TCP_TABLE_OWNER_PID_LISTENER,
 };
 use windows_sys::Win32::Networking::WinSock::AF_INET;
 use windows_sys::Win32::Security::Cryptography::{
@@ -31,7 +33,7 @@ use windows_sys::Win32::System::JobObjects::{
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
 use windows_sys::Win32::System::Threading::{
-    GetExitCodeProcess, OpenProcess, OpenThread, ResumeThread, TerminateProcess,
+    GetCurrentProcess, GetExitCodeProcess, OpenProcess, OpenThread, ResumeThread, TerminateProcess,
     WaitForSingleObject, CREATE_SUSPENDED, INFINITE, PROCESS_QUERY_LIMITED_INFORMATION,
     PROCESS_SET_QUOTA, PROCESS_TERMINATE, THREAD_SUSPEND_RESUME,
 };
@@ -47,6 +49,12 @@ pub struct WindowsProcessTree {
 pub(crate) struct WindowsPendingJob {
     job: OwnedHandle,
     name: String,
+}
+
+#[derive(Debug)]
+pub struct WindowsCdpOwnershipGuard {
+    job: ThreadSafeOwnedHandle,
+    debug_port: u16,
 }
 
 #[derive(Debug)]
@@ -93,17 +101,17 @@ impl WindowsProcessTree {
         }
     }
 
-    pub fn listener_owner_is_in_job(&self, port: u16) -> io::Result<bool> {
+    pub fn cdp_ownership_guard(&self, port: u16) -> io::Result<Option<WindowsCdpOwnershipGuard>> {
         let Some(owner_pid) = ipv4_listener_owner(port)? else {
-            return Ok(false);
+            return Ok(None);
         };
-        let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, owner_pid) };
-        let process = OwnedHandle::from_nullable(process)?;
-        let mut contained = 0;
-        if unsafe { IsProcessInJob(process.raw(), self._job.raw(), &mut contained) } == 0 {
-            return Err(io::Error::last_os_error());
+        if !process_is_in_job(owner_pid, self._job.raw())? {
+            return Ok(None);
         }
-        Ok(contained != 0)
+        Ok(Some(WindowsCdpOwnershipGuard {
+            job: duplicate_thread_safe_handle(self._job.raw())?,
+            debug_port: port,
+        }))
     }
 
     fn job_has_active_processes(&self) -> io::Result<bool> {
@@ -124,7 +132,85 @@ impl WindowsProcessTree {
     }
 }
 
+impl WindowsCdpOwnershipGuard {
+    pub fn require_listener_owner(&self) -> Result<(), String> {
+        let owner_pid = ipv4_listener_owner(self.debug_port)
+            .map_err(|error| format!("cannot inspect Windows CDP listener owner: {error}"))?
+            .ok_or_else(|| {
+                format!(
+                    "Windows CDP listener 127.0.0.1:{} disappeared",
+                    self.debug_port
+                )
+            })?;
+        self.require_job_process(owner_pid, "listener")
+    }
+
+    pub fn require_connection_owner(&self, stream: &TcpStream) -> Result<(), String> {
+        let owner_pid = ipv4_connection_server_owner(stream)
+            .map_err(|error| format!("cannot inspect Windows CDP connection owner: {error}"))?
+            .ok_or_else(|| {
+                "cannot identify the established Windows CDP connection owner".to_string()
+            })?;
+        self.require_job_process(owner_pid, "connection")
+    }
+
+    fn require_job_process(&self, owner_pid: u32, surface: &str) -> Result<(), String> {
+        match process_is_in_job(owner_pid, self.job.raw()) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(format!(
+                "Windows CDP {surface} owner is outside the isolated Job Object"
+            )),
+            Err(error) => Err(format!(
+                "cannot prove Windows CDP {surface} owner belongs to the isolated Job Object: {error}"
+            )),
+        }
+    }
+}
+
 fn ipv4_listener_owner(port: u16) -> io::Result<Option<u32>> {
+    ipv4_tcp_owner(TCP_TABLE_OWNER_PID_LISTENER, |row| {
+        let local = row_local_addr(row);
+        *local.ip() == Ipv4Addr::LOCALHOST && local.port() == port
+    })
+}
+
+fn ipv4_connection_server_owner(stream: &TcpStream) -> io::Result<Option<u32>> {
+    let client = require_ipv4_addr(stream.local_addr()?)?;
+    let server = require_ipv4_addr(stream.peer_addr()?)?;
+    ipv4_tcp_owner(TCP_TABLE_OWNER_PID_ALL, |row| {
+        row.dwState == MIB_TCP_STATE_ESTAB as u32
+            && row_local_addr(row) == server
+            && row_remote_addr(row) == client
+    })
+}
+
+fn require_ipv4_addr(address: SocketAddr) -> io::Result<SocketAddrV4> {
+    match address {
+        SocketAddr::V4(address) => Ok(address),
+        SocketAddr::V6(_) => Err(io::Error::other(
+            "Windows CDP ownership proof requires an IPv4 connection",
+        )),
+    }
+}
+
+fn row_local_addr(row: &MIB_TCPROW_OWNER_PID) -> SocketAddrV4 {
+    SocketAddrV4::new(
+        Ipv4Addr::from(u32::from_be(row.dwLocalAddr)),
+        u16::from_be(row.dwLocalPort as u16),
+    )
+}
+
+fn row_remote_addr(row: &MIB_TCPROW_OWNER_PID) -> SocketAddrV4 {
+    SocketAddrV4::new(
+        Ipv4Addr::from(u32::from_be(row.dwRemoteAddr)),
+        u16::from_be(row.dwRemotePort as u16),
+    )
+}
+
+fn ipv4_tcp_owner<F>(table_class: TCP_TABLE_CLASS, matches: F) -> io::Result<Option<u32>>
+where
+    F: Fn(&MIB_TCPROW_OWNER_PID) -> bool,
+{
     let mut bytes = 0;
     let first = unsafe {
         GetExtendedTcpTable(
@@ -132,7 +218,7 @@ fn ipv4_listener_owner(port: u16) -> io::Result<Option<u32>> {
             &mut bytes,
             0,
             AF_INET as u32,
-            TCP_TABLE_OWNER_PID_LISTENER,
+            table_class,
             0,
         )
     };
@@ -146,7 +232,7 @@ fn ipv4_listener_owner(port: u16) -> io::Result<Option<u32>> {
             &mut bytes,
             0,
             AF_INET as u32,
-            TCP_TABLE_OWNER_PID_LISTENER,
+            table_class,
             0,
         )
     };
@@ -156,11 +242,39 @@ fn ipv4_listener_owner(port: u16) -> io::Result<Option<u32>> {
     let table = unsafe { &*storage.as_ptr().cast::<MIB_TCPTABLE_OWNER_PID>() };
     let rows =
         unsafe { std::slice::from_raw_parts(table.table.as_ptr(), table.dwNumEntries as usize) };
-    Ok(rows.iter().find_map(|row: &MIB_TCPROW_OWNER_PID| {
-        let local_address = Ipv4Addr::from(u32::from_be(row.dwLocalAddr));
-        let local_port = u16::from_be(row.dwLocalPort as u16);
-        (local_address == Ipv4Addr::LOCALHOST && local_port == port).then_some(row.dwOwningPid)
-    }))
+    Ok(rows
+        .iter()
+        .find_map(|row| matches(row).then_some(row.dwOwningPid)))
+}
+
+fn process_is_in_job(process_id: u32, job: HANDLE) -> io::Result<bool> {
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
+    let process = OwnedHandle::from_nullable(process)?;
+    let mut contained = 0;
+    if unsafe { IsProcessInJob(process.raw(), job, &mut contained) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(contained != 0)
+}
+
+fn duplicate_thread_safe_handle(handle: HANDLE) -> io::Result<ThreadSafeOwnedHandle> {
+    let process = unsafe { GetCurrentProcess() };
+    let mut duplicate = std::ptr::null_mut();
+    if unsafe {
+        DuplicateHandle(
+            process,
+            handle,
+            process,
+            &mut duplicate,
+            0,
+            0,
+            DUPLICATE_SAME_ACCESS,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(ThreadSafeOwnedHandle(duplicate as usize))
 }
 
 pub fn spawn_kill_on_drop(command: &mut Command) -> io::Result<WindowsProcessTree> {
@@ -451,6 +565,9 @@ fn find_process_thread(snapshot: HANDLE, process_id: u32) -> io::Result<u32> {
 #[derive(Debug)]
 struct OwnedHandle(HANDLE);
 
+#[derive(Debug)]
+struct ThreadSafeOwnedHandle(usize);
+
 impl OwnedHandle {
     fn from_nullable(handle: HANDLE) -> io::Result<Self> {
         if handle.is_null() {
@@ -481,11 +598,41 @@ impl Drop for OwnedHandle {
     }
 }
 
+impl ThreadSafeOwnedHandle {
+    fn raw(&self) -> HANDLE {
+        self.0 as HANDLE
+    }
+}
+
+impl Drop for ThreadSafeOwnedHandle {
+    fn drop(&mut self) {
+        unsafe {
+            CloseHandle(self.raw());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::net::{Ipv4Addr, TcpListener, TcpStream};
+
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
-    use super::require_process_package_identity;
+    use super::{ipv4_connection_server_owner, require_process_package_identity};
+
+    #[test]
+    fn established_connection_proof_identifies_the_server_process() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind fixture server");
+        let port = listener.local_addr().expect("fixture address").port();
+        let client = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).expect("connect fixture");
+        let (_server, _) = listener.accept().expect("accept fixture");
+
+        let owner = ipv4_connection_server_owner(&client)
+            .expect("query TCP owner")
+            .expect("established server owner");
+
+        assert_eq!(owner, std::process::id());
+    }
 
     #[test]
     fn an_unrelated_pid_cannot_be_cleaned_up_as_the_activated_codex_package() {

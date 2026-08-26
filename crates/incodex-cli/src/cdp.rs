@@ -52,6 +52,12 @@ struct LifecyclePolicy {
     cdp_timeout: Option<Duration>,
 }
 
+struct InjectionPayload<'a> {
+    source: &'a str,
+    health_expression: &'a str,
+    require_profile_mask: bool,
+}
+
 pub fn allocate_debug_port() -> Result<u16, String> {
     // Chromium 必须在 listener 释放后自行 bind；这是不可避免的短暂 TOCTOU。
     // 后续 HTTP/CDP 操作均有硬截止时间，抢占或 bind 失败只会得到有界的 UI 错误。
@@ -273,14 +279,39 @@ pub(crate) fn inject_shared_ui_with_options_while_alive<F>(
     debug_port: u16,
     options: &InjectionOptions,
     process_alive: &AtomicBool,
-    mut on_target: F,
+    on_target: F,
 ) -> Result<String, String>
 where
     F: FnMut(&str),
 {
+    inject_shared_ui_with_options_while_alive_and_guard(
+        debug_port,
+        options,
+        process_alive,
+        on_target,
+        &|_| Ok(()),
+    )
+}
+
+pub(crate) fn inject_shared_ui_with_options_while_alive_and_guard<F, G>(
+    debug_port: u16,
+    options: &InjectionOptions,
+    process_alive: &AtomicBool,
+    mut on_target: F,
+    connection_guard: &G,
+) -> Result<String, String>
+where
+    F: FnMut(&str),
+    G: Fn(&TcpStream) -> Result<(), String>,
+{
     let source = inject_source_for_options(options);
     let health_expression = ui_ready_expression_for_options(options);
     let require_profile_mask = options.profile_mask.is_some();
+    let payload = InjectionPayload {
+        source: &source,
+        health_expression: &health_expression,
+        require_profile_mask,
+    };
     let mut registered_script_targets = HashSet::new();
     let mut last = "cdp page not ready".to_string();
     let mut refused = 0u8;
@@ -288,12 +319,11 @@ where
         ensure_injection_active(process_alive)?;
         match try_inject(
             debug_port,
-            &source,
-            &health_expression,
-            require_profile_mask,
+            &payload,
             &mut registered_script_targets,
             process_alive,
             &mut on_target,
+            connection_guard,
         ) {
             Ok(target_id) => return Ok(target_id),
             Err(err) => {
@@ -315,17 +345,17 @@ where
     Err(last)
 }
 
-fn try_inject<F>(
+fn try_inject<F, G>(
     debug_port: u16,
-    source: &str,
-    health_expression: &str,
-    require_profile_mask: bool,
+    payload: &InjectionPayload<'_>,
     registered_script_targets: &mut HashSet<String>,
     process_alive: &AtomicBool,
     on_target: &mut F,
+    connection_guard: &G,
 ) -> Result<String, String>
 where
     F: FnMut(&str),
+    G: Fn(&TcpStream) -> Result<(), String>,
 {
     ensure_injection_active(process_alive)?;
     let targets = list_targets(debug_port)?;
@@ -334,33 +364,36 @@ where
     on_target(&page.id);
     let mut socket = connect_cdp_websocket(&page.ws, debug_port)?;
     ensure_injection_active(process_alive)?;
-    send_cdp(&mut socket, 1, "Page.enable", json!({}))?;
-    select_official_codex_mode(&mut socket)?;
+    send_guarded_cdp(&mut socket, 1, "Page.enable", json!({}), connection_guard)?;
+    select_official_codex_mode(&mut socket, connection_guard)?;
     ensure_injection_active(process_alive)?;
     if !registered_script_targets.contains(&page.id) {
-        send_cdp(
+        send_guarded_cdp(
             &mut socket,
             4,
             "Page.addScriptToEvaluateOnNewDocument",
-            json!({ "source": source }),
+            json!({ "source": payload.source }),
+            connection_guard,
         )?;
         registered_script_targets.insert(page.id.clone());
     }
     ensure_injection_active(process_alive)?;
-    send_cdp(
+    send_guarded_cdp(
         &mut socket,
         5,
         "Runtime.evaluate",
-        json!({ "expression": source, "returnByValue": true }),
+        json!({ "expression": payload.source, "returnByValue": true }),
+        connection_guard,
     )?;
     ensure_injection_active(process_alive)?;
-    let health = send_cdp(
+    let health = send_guarded_cdp(
         &mut socket,
         6,
         "Runtime.evaluate",
-        json!({ "expression": health_expression, "returnByValue": true }),
+        json!({ "expression": payload.health_expression, "returnByValue": true }),
+        connection_guard,
     )?;
-    validate_ui_probe_result_for_options(&health, require_profile_mask)?;
+    validate_ui_probe_result_for_options(&health, payload.require_profile_mask)?;
     let target_id = page.id.clone();
     let _ = socket.close(None);
     Ok(target_id)
@@ -374,7 +407,13 @@ fn ensure_injection_active(process_alive: &AtomicBool) -> Result<(), String> {
     }
 }
 
-fn select_official_codex_mode(socket: &mut WebSocket<TcpStream>) -> Result<(), String> {
+fn select_official_codex_mode<G>(
+    socket: &mut WebSocket<TcpStream>,
+    connection_guard: &G,
+) -> Result<(), String>
+where
+    G: Fn(&TcpStream) -> Result<(), String>,
+{
     let key = |r#type: &str| {
         json!({
             "type": r#type,
@@ -384,8 +423,20 @@ fn select_official_codex_mode(socket: &mut WebSocket<TcpStream>) -> Result<(), S
             "windowsVirtualKeyCode": 51
         })
     };
-    send_cdp(socket, 2, "Input.dispatchKeyEvent", key("rawKeyDown"))?;
-    send_cdp(socket, 3, "Input.dispatchKeyEvent", key("keyUp"))?;
+    send_guarded_cdp(
+        socket,
+        2,
+        "Input.dispatchKeyEvent",
+        key("rawKeyDown"),
+        connection_guard,
+    )?;
+    send_guarded_cdp(
+        socket,
+        3,
+        "Input.dispatchKeyEvent",
+        key("keyUp"),
+        connection_guard,
+    )?;
     Ok(())
 }
 
@@ -624,6 +675,20 @@ fn send_cdp(
         return Err(error.to_string());
     }
     result
+}
+
+fn send_guarded_cdp<G>(
+    socket: &mut WebSocket<TcpStream>,
+    id: u64,
+    method: &str,
+    params: Value,
+    connection_guard: &G,
+) -> Result<Value, String>
+where
+    G: Fn(&TcpStream) -> Result<(), String>,
+{
+    connection_guard(socket.get_ref())?;
+    send_cdp(socket, id, method, params)
 }
 
 fn send_cdp_with_deadline<S: Read + Write>(

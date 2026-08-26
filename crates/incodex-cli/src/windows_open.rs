@@ -14,7 +14,7 @@ use incodex_core::windows_session::{
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
 
 use crate::cdp::{
-    allocate_debug_port, debug_launch_args, inject_shared_ui_with_options_while_alive,
+    allocate_debug_port, debug_launch_args, inject_shared_ui_with_options_while_alive_and_guard,
     start_lifecycle_signal_monitor, InjectionOptions,
 };
 use crate::profile_mask::{resolve_profile_mask, ProfileMask};
@@ -22,6 +22,7 @@ use crate::windows_activation::{activate_packaged_kill_on_drop, WindowsActivatio
 use crate::windows_app::{discover_codex_package, WindowsCodexApp};
 #[cfg(test)]
 use crate::windows_process::spawn_kill_on_drop;
+use crate::windows_process::WindowsCdpOwnershipGuard;
 use crate::{parse::ParsedCli, CliFailure};
 
 #[derive(Debug)]
@@ -193,6 +194,7 @@ where
             Arc<AtomicBool>,
             Arc<AtomicBool>,
             Arc<AtomicBool>,
+            Arc<WindowsCdpOwnershipGuard>,
         ) -> Result<(), String>
         + Send
         + 'static,
@@ -229,19 +231,23 @@ where
             Arc<AtomicBool>,
             Arc<AtomicBool>,
             Arc<AtomicBool>,
+            Arc<WindowsCdpOwnershipGuard>,
         ) -> Result<(), String>
         + Send
         + 'static,
 {
-    if let Err(error) = wait_for_owned_listener(&mut process_tree, plan.debug_port) {
-        let _ = process_tree.terminate();
-        drop(process_tree);
-        return WindowsOpenOutcome {
-            process: WindowsOpenProcessResult::ListenerOwnershipFailed(error),
-            ui_ready: false,
-            cleanup: cleanup_windows_session(&plan.session),
-        };
-    }
+    let ownership_guard = match wait_for_owned_listener(&mut process_tree, plan.debug_port) {
+        Ok(guard) => Arc::new(guard),
+        Err(error) => {
+            let _ = process_tree.terminate();
+            drop(process_tree);
+            return WindowsOpenOutcome {
+                process: WindowsOpenProcessResult::ListenerOwnershipFailed(error),
+                ui_ready: false,
+                cleanup: cleanup_windows_session(&plan.session),
+            };
+        }
+    };
     let alive = Arc::new(AtomicBool::new(true));
     let injection_alive = alive.clone();
     let close_requested = Arc::new(AtomicBool::new(false));
@@ -250,6 +256,7 @@ where
     let injection_cdp_failed = cdp_failed.clone();
     let debug_port = plan.debug_port;
     let options = plan.injection.clone();
+    let injection_ownership_guard = ownership_guard.clone();
     let (injection_tx, injection_rx) = mpsc::channel();
     let worker = thread::spawn(move || {
         let _ = injection_tx.send(inject(
@@ -258,6 +265,7 @@ where
             injection_alive,
             injection_close_requested,
             injection_cdp_failed,
+            injection_ownership_guard,
         ));
     });
 
@@ -303,6 +311,10 @@ where
                 break WindowsOpenProcessResult::ProcessStateUnknown(error.to_string());
             }
         }
+        if let Err(error) = ownership_guard.require_listener_owner() {
+            let _ = process_tree.terminate();
+            break WindowsOpenProcessResult::ListenerOwnershipFailed(error);
+        }
         thread::sleep(Duration::from_millis(25));
     };
 
@@ -335,12 +347,12 @@ fn cleanup_windows_session(session: &WindowsSessionHome) -> WindowsCleanupResult
 fn wait_for_owned_listener(
     process_tree: &mut crate::windows_process::WindowsProcessTree,
     port: u16,
-) -> Result<(), String> {
+) -> Result<WindowsCdpOwnershipGuard, String> {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        match process_tree.listener_owner_is_in_job(port) {
-            Ok(true) => return Ok(()),
-            Ok(false) => {}
+        match process_tree.cdp_ownership_guard(port) {
+            Ok(Some(guard)) => return Ok(guard),
+            Ok(None) => {}
             Err(error) => return Err(format!("cannot prove Windows CDP listener owner: {error}")),
         }
         match process_tree.try_wait() {
@@ -371,14 +383,21 @@ fn inject_windows_ui(
     alive: Arc<AtomicBool>,
     close_requested: Arc<AtomicBool>,
     cdp_failed: Arc<AtomicBool>,
+    ownership_guard: Arc<WindowsCdpOwnershipGuard>,
 ) -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_secs(45);
     let mut last_error = "Codex CDP page is not ready".to_string();
     while alive.load(Ordering::Acquire) && Instant::now() < deadline {
         let mut primary_target = None;
-        match inject_shared_ui_with_options_while_alive(port, &options, &alive, |target_id| {
-            primary_target = Some(target_id.to_string());
-        }) {
+        match inject_shared_ui_with_options_while_alive_and_guard(
+            port,
+            &options,
+            &alive,
+            |target_id| {
+                primary_target = Some(target_id.to_string());
+            },
+            &|stream| ownership_guard.require_connection_owner(stream),
+        ) {
             Ok(_) => {
                 if let Some(target_id) = primary_target {
                     start_lifecycle_signal_monitor(
@@ -553,7 +572,7 @@ mod tests {
         let outcome = execute_windows_open_with(
             plan,
             launch_fixture,
-            |_port, _options, alive, _close_requested, _cdp_failed| {
+            |_port, _options, alive, _close_requested, _cdp_failed, _ownership_guard| {
                 assert!(alive.load(Ordering::Acquire));
                 Ok(())
             },
@@ -574,7 +593,7 @@ mod tests {
         let outcome = execute_windows_open_with(
             plan,
             launch_fixture,
-            |_port, _options, _alive, close_requested, _cdp_failed| {
+            |_port, _options, _alive, close_requested, _cdp_failed, _ownership_guard| {
                 close_requested.store(true, Ordering::Release);
                 Ok(())
             },
@@ -595,9 +614,12 @@ mod tests {
         let outcome = execute_windows_open_with(
             plan,
             launch_fixture,
-            |_port, _options, _alive: Arc<AtomicBool>, _close_requested, _cdp_failed| {
-                Err("fixture injection refused".to_string())
-            },
+            |_port,
+             _options,
+             _alive: Arc<AtomicBool>,
+             _close_requested,
+             _cdp_failed,
+             _ownership_guard| { Err("fixture injection refused".to_string()) },
         );
 
         assert!(matches!(
@@ -619,7 +641,7 @@ mod tests {
         let outcome = execute_windows_open_with(
             plan,
             launch_fixture,
-            |_port, _options, _alive, _close_requested, cdp_failed| {
+            |_port, _options, _alive, _close_requested, cdp_failed, _ownership_guard| {
                 cdp_failed.store(true, Ordering::Release);
                 Ok(())
             },
@@ -647,7 +669,7 @@ mod tests {
         let outcome = execute_windows_open_with(
             plan,
             launch_fixture,
-            move |_port, _options, _alive, _close_requested, _cdp_failed| {
+            move |_port, _options, _alive, _close_requested, _cdp_failed, _ownership_guard| {
                 injection_probe.store(true, Ordering::Release);
                 Ok(())
             },
@@ -676,7 +698,7 @@ mod tests {
         let outcome = execute_windows_open_with(
             plan,
             launch_fixture,
-            move |_port, _options, alive, _close_requested, _cdp_failed| {
+            move |_port, _options, alive, _close_requested, _cdp_failed, _ownership_guard| {
                 let deadline = Instant::now() + Duration::from_secs(2);
                 let listener = loop {
                     match TcpListener::bind((Ipv4Addr::LOCALHOST, port)) {
