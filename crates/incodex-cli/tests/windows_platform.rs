@@ -55,7 +55,6 @@ fn unsupported_product_commands_fail_closed_before_creating_state() {
     let cases: &[(&str, &[&str])] = &[
         ("install", &["install", "--dry-run"]),
         ("uninstall", &["uninstall", "--dry-run"]),
-        ("status", &["status"]),
         ("doctor", &["doctor"]),
         ("runtime", &["runtime"]),
         (
@@ -89,6 +88,28 @@ fn unsupported_product_commands_fail_closed_before_creating_state() {
             "{command} created state before its Windows implementation exists"
         );
     }
+}
+
+#[test]
+fn status_reports_current_user_package_without_creating_state() {
+    let profile = scratch_profile();
+
+    let status = run(&["status"], &profile);
+    assert!(status.status.success(), "{}", text(&status.stderr));
+    let report = text(&status.stdout);
+    assert!(report.contains("Windows Codex"), "{report}");
+    assert!(report.contains("Available"), "{report}");
+    assert!(status.stderr.is_empty(), "{}", text(&status.stderr));
+
+    let json = run(&["status", "--json"], &profile);
+    assert!(json.status.success(), "{}", text(&json.stderr));
+    let value: serde_json::Value =
+        serde_json::from_slice(&json.stdout).expect("status emits valid JSON");
+    assert_eq!(value["platform"], "windows");
+    assert!(value["available"].is_boolean());
+    assert!(json.stderr.is_empty(), "{}", text(&json.stderr));
+
+    assert!(!profile.exists(), "status created user state");
 }
 
 #[test]
