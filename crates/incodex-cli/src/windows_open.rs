@@ -23,7 +23,7 @@ use crate::windows_activation::{activate_packaged_kill_on_drop, WindowsActivatio
 use crate::windows_app::{discover_codex_package, WindowsCodexApp};
 #[cfg(test)]
 use crate::windows_process::spawn_kill_on_drop;
-use crate::windows_process::WindowsCdpOwnershipGuard;
+use crate::windows_process::{WindowsCdpListenerStatus, WindowsCdpOwnershipGuard};
 use crate::{parse::ParsedCli, CliFailure};
 
 #[derive(Debug)]
@@ -69,6 +69,8 @@ pub enum WindowsOpenProcessResult {
     ListenerOwnershipFailed(String),
     InjectionFailed(String),
 }
+
+const LISTENER_SHUTDOWN_GRACE: Duration = Duration::from_millis(200);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowsOpenOutcome {
@@ -271,6 +273,7 @@ where
     });
 
     let mut ui_ready = false;
+    let mut listener_missing_since = None;
     let process = loop {
         match injection_rx.try_recv() {
             Ok(Ok(())) => ui_ready = true,
@@ -312,20 +315,41 @@ where
                 break WindowsOpenProcessResult::ProcessStateUnknown(error.to_string());
             }
         }
-        if let Err(error) = ownership_guard.require_listener_owner() {
-            let _ = process_tree.terminate();
-            break WindowsOpenProcessResult::ListenerOwnershipFailed(error);
+        match ownership_guard.listener_status() {
+            Ok(WindowsCdpListenerStatus::Owned) => listener_missing_since = None,
+            Ok(WindowsCdpListenerStatus::Missing) => {
+                let missing_since = listener_missing_since.get_or_insert_with(Instant::now);
+                if missing_since.elapsed() >= LISTENER_SHUTDOWN_GRACE {
+                    let _ = process_tree.terminate();
+                    break WindowsOpenProcessResult::ListenerOwnershipFailed(format!(
+                        "Windows CDP listener 127.0.0.1:{} disappeared while Codex remained active",
+                        plan.debug_port
+                    ));
+                }
+            }
+            Ok(WindowsCdpListenerStatus::Foreign) => {
+                let _ = process_tree.terminate();
+                break WindowsOpenProcessResult::ListenerOwnershipFailed(
+                    "Windows CDP listener owner moved outside the isolated Job Object".to_string(),
+                );
+            }
+            Err(error) => {
+                let _ = process_tree.terminate();
+                break WindowsOpenProcessResult::ListenerOwnershipFailed(error);
+            }
         }
         thread::sleep(Duration::from_millis(25));
     };
 
     alive.store(false, Ordering::Release);
     let _ = worker.join();
+    drop(ownership_guard);
     drop(process_tree);
+    let cleanup = cleanup_windows_session(&plan.session);
     WindowsOpenOutcome {
         process,
         ui_ready,
-        cleanup: cleanup_windows_session(&plan.session),
+        cleanup,
     }
 }
 

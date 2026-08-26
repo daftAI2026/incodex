@@ -57,6 +57,13 @@ pub struct WindowsCdpOwnershipGuard {
     debug_port: u16,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowsCdpListenerStatus {
+    Owned,
+    Missing,
+    Foreign,
+}
+
 #[derive(Debug)]
 enum ProcessHandle {
     Child(Child),
@@ -133,16 +140,19 @@ impl WindowsProcessTree {
 }
 
 impl WindowsCdpOwnershipGuard {
-    pub fn require_listener_owner(&self) -> Result<(), String> {
-        let owner_pid = ipv4_listener_owner(self.debug_port)
+    pub fn listener_status(&self) -> Result<WindowsCdpListenerStatus, String> {
+        let Some(owner_pid) = ipv4_listener_owner(self.debug_port)
             .map_err(|error| format!("cannot inspect Windows CDP listener owner: {error}"))?
-            .ok_or_else(|| {
-                format!(
-                    "Windows CDP listener 127.0.0.1:{} disappeared",
-                    self.debug_port
-                )
-            })?;
-        self.require_job_process(owner_pid, "listener")
+        else {
+            return Ok(WindowsCdpListenerStatus::Missing);
+        };
+        match process_is_in_job(owner_pid, self.job.raw()) {
+            Ok(true) => Ok(WindowsCdpListenerStatus::Owned),
+            Ok(false) => Ok(WindowsCdpListenerStatus::Foreign),
+            Err(error) => Err(format!(
+                "cannot prove Windows CDP listener owner belongs to the isolated Job Object: {error}"
+            )),
+        }
     }
 
     pub fn require_connection_owner(&self, stream: &TcpStream) -> Result<(), String> {
