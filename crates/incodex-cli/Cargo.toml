@@ -17,6 +17,13 @@ incodex-core = { path = "../incodex-core" }
 [target.'cfg(target_os = "windows")'.dependencies]
 serde.workspace = true
 serde_json.workspace = true
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
 
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 incodex-asar = { path = "../incodex-asar" }
