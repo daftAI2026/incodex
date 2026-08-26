@@ -37,7 +37,7 @@
 
 **支持平台：** Apple Silicon（arm64）和 Intel（x86_64）Mac，以及安装了微软商店官方 Codex 包的 x86_64 Windows 10/11。当前不支持 Linux。
 
-Windows 当前支持 `open`、`open --dry-run`、`status`、`doctor`、`--help`、`--version` 和终端菜单。它按当前用户的 Store 包身份动态发现真实安装盘和路径，不会修改、复制或重签官方包。Windows 预编译安装器尚未发布，因此目前请使用下方源码安装；`install`、`uninstall`、`runtime`、`recover`、`update` 和 `self-uninstall` 在 Windows 上仍不可用。
+Windows 源码预览当前支持 `open`、`open --dry-run`、`status`、`doctor`、`--help`、`--version` 和终端菜单。它按当前用户的 Store 包身份动态发现真实安装盘和路径，不会修改、复制或重签官方包。Windows 预编译安装器尚未发布，因此目前请使用下方源码安装；`install`、`uninstall`、`runtime`、`recover`、`update` 和 `self-uninstall` 在 Windows 上仍不可用。
 
 **macOS 通过 Homebrew 安装**
 
@@ -66,6 +66,8 @@ Homebrew 和脚本安装直接使用预编译的 macOS Rust 二进制，不需�
 ## Security & Safety Design
 
 主路径 `incodex open` 不会修改 Codex。在 Windows 上，每次打开都有私有隔离的 `CODEX_HOME` 和 Chromium 目录；kill-on-close Job object 约束整棵进程树，清理前会验证 ACL、owner PID 创建时间和目录文件身份。会话只复制 `auth.json` 和 `config.toml`。
+
+Windows Store 激活目前会在一个很短的进程创建窗口内使用包级调试设置。不要在此时同时启动或重启官方 Codex，也不要强制终止正在激活的 Incodex：异常终止可能遗留这份包级状态，而 Incodex 尚未提供持久恢复机制。Chromium 的回环 CDP 端点也没有客户端认证；Incodex 会在发送 UI 代码前同时验证 listener 和已建立连接的进程归属，但这不等于对其他本机用户的操作系统级授权。这两项仍是发布阻塞，因此当前不发布 Windows 安装器。
 
 在 macOS 上，可选的 `incodex install` 路径为了加入应用内按钮，会修改本机安装的 Electron 应用包。`install`、`uninstall` 和 `self-uninstall` 在破坏性操作前都会打印计划：TTY 问一次，非 TTY 要 `--yes`，`--dry-run` 只打印。`recover` 是显式事务恢复例外：它必须带 `--transaction <id>`，不接受 `--dry-run`，并且只会续跑这一本已存在的 journal。
 

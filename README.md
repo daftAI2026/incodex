@@ -37,7 +37,7 @@ A normal close removes the isolated session managed by Incodex; this is not a cl
 
 **Supported platforms:** macOS on Apple Silicon (arm64) and Intel (x86_64), plus Windows 10/11 on x86_64 with the official Microsoft Store Codex package. Linux is not supported.
 
-Windows currently supports `open`, `open --dry-run`, `status`, `doctor`, `--help`, `--version`, and the terminal menu. It discovers the current user's Store package and real install volume dynamically; it does not patch, copy, or re-sign that package. A prebuilt Windows installer is not published yet, so use the source installation below. `install`, `uninstall`, `runtime`, `recover`, `update`, and `self-uninstall` remain unavailable on Windows.
+The Windows source preview currently supports `open`, `open --dry-run`, `status`, `doctor`, `--help`, `--version`, and the terminal menu. It discovers the current user's Store package and real install volume dynamically; it does not patch, copy, or re-sign that package. A prebuilt Windows installer is not published yet, so use the source installation below. `install`, `uninstall`, `runtime`, `recover`, `update`, and `self-uninstall` remain unavailable on Windows.
 
 **Install on macOS via Homebrew**
 
@@ -66,6 +66,8 @@ Homebrew and script installs use prebuilt macOS Rust binaries and do not require
 ## Security & Safety Design
 
 The primary `incodex open` path does not patch Codex. On Windows, each open receives private isolated `CODEX_HOME` and Chromium directories; a kill-on-close Job object contains the process tree, and cleanup verifies ACL, owner PID creation time, and directory identity before deletion. Only `auth.json` and `config.toml` are copied into the session.
+
+Windows Store activation currently requires package-scoped debug settings during a short process-creation window. Do not launch or restart the official Codex app concurrently, and do not force-kill Incodex during activation: abrupt termination can leave that package-wide state behind, and Incodex does not yet provide durable recovery for it. Chromium's loopback CDP endpoint also has no client authentication; Incodex verifies both listener and established-connection ownership before sending its UI code, but that is not OS-level authorization for other local users. These are release blockers and are why no Windows installer is published yet.
 
 On macOS, the optional `incodex install` path adds the in-app button by modifying the locally installed Electron app. `install`, `uninstall`, and `self-uninstall` print a plan before destructive work: TTY asks once, non-TTY needs `--yes`, and `--dry-run` only prints. `recover` is the explicit transaction-recovery exception: it requires `--transaction <id>`, does not accept `--dry-run`, and resumes only that existing journal.
 
