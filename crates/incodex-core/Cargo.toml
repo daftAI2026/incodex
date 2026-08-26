@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Paths, locks, JSON, and hashes for the Incodex native CLI"
 
 [target.'cfg(target_os = "windows")'.dependencies]
+serde_json.workspace = true
 windows-sys = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_Security",

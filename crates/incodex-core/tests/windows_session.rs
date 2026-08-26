@@ -6,8 +6,8 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_core::windows_session::{
-    burn_windows_session, copy_windows_settings, create_windows_session, verify_private_acl,
-    sweep_orphan_windows_sessions, WindowsCleanupResult,
+    burn_windows_session, copy_windows_settings, create_windows_session,
+    sweep_orphan_windows_sessions, verify_private_acl, WindowsCleanupResult,
 };
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -159,9 +159,6 @@ fn sweeps_only_sessions_owned_by_dead_processes() {
     assert!(!orphan.exists());
     assert!(active.root.is_dir());
 
-    assert_eq!(
-        burn_windows_session(&active),
-        WindowsCleanupResult::Removed
-    );
+    assert_eq!(burn_windows_session(&active), WindowsCleanupResult::Removed);
     fs::remove_dir_all(root).expect("remove fixture");
 }

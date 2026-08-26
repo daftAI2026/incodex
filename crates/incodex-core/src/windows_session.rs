@@ -1,3 +1,8 @@
+//! [INPUT]: 依赖 Windows 文件身份、ACL 与进程创建时间，接收可信用户根目录和 Codex 设置源。
+//! [OUTPUT]: 提供私有 Windows 会话创建、安全设置复制、身份约束清理与孤儿会话回收。
+//! [POS]: incodex-core 的 Windows 会话信任边界，为 CLI open 生命周期提供持久所有权证据。
+//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+
 use std::ffi::c_void;
 use std::fs::{self, OpenOptions};
 use std::io;
@@ -31,9 +36,17 @@ use crate::windows_path::{
 };
 
 const SETTINGS_FILES: &[&str] = &["auth.json", "config.toml"];
+const OWNER_NAME: &str = "owner.json";
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
 const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
 static SESSION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[path = "windows_session_owner.rs"]
+mod owner;
+use owner::{
+    current_process_creation_time, probe_process, read_owner_manifest, write_owner_manifest,
+    WindowsProcessProbe, WindowsSessionOwner,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowsSessionIdentity {
@@ -49,6 +62,8 @@ pub struct WindowsSessionHome {
     pub chromium: PathBuf,
     user_root: PathBuf,
     identity: WindowsSessionIdentity,
+    owner_pid: u32,
+    owner_creation_time: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,6 +96,17 @@ pub fn create_windows_session(user_root: &Path) -> Result<WindowsSessionHome, St
             .filter(|name| name.starts_with("s-") && name.len() > 2)
             .ok_or_else(|| format!("invalid Windows session name: {}", root.display()))?
             .to_string();
+        let owner_pid = std::process::id();
+        let owner_creation_time = current_process_creation_time()?;
+        write_owner_manifest(
+            &root.join(OWNER_NAME),
+            &WindowsSessionOwner {
+                session_id: session_id.clone(),
+                pid: owner_pid,
+                process_creation_time: owner_creation_time,
+                identity: identity.clone(),
+            },
+        )?;
         Ok(WindowsSessionHome {
             session_id,
             root,
@@ -88,12 +114,76 @@ pub fn create_windows_session(user_root: &Path) -> Result<WindowsSessionHome, St
             chromium,
             user_root: user_root.to_path_buf(),
             identity,
+            owner_pid,
+            owner_creation_time,
         })
     })();
     if result.is_err() {
         let _ = fs::remove_dir_all(&root);
     }
     result
+}
+
+pub fn sweep_orphan_windows_sessions(user_root: &Path) -> usize {
+    if require_absolute(user_root, "Windows Incodex root").is_err() {
+        return 0;
+    }
+    let sessions = user_root.join("sessions");
+    if reject_reparse_ancestors(&sessions).is_err() || verify_private_acl(&sessions).is_err() {
+        return 0;
+    }
+    let entries = match fs::read_dir(&sessions) {
+        Ok(entries) => entries,
+        Err(_) => return 0,
+    };
+    let mut swept = 0;
+    for entry in entries.flatten() {
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        if !name.starts_with("s-") || name.len() <= 2 {
+            continue;
+        }
+        let root = entry.path();
+        let validated = match validate_existing_session_dir(&sessions, &root) {
+            Ok(path) => path,
+            Err(_) => continue,
+        };
+        if verify_private_acl(&validated).is_err() {
+            continue;
+        }
+        let owner = match read_owner_manifest(&validated.join(OWNER_NAME)) {
+            Ok(owner) if owner.session_id == name => owner,
+            _ => continue,
+        };
+        if session_identity(&validated).ok().as_ref() != Some(&owner.identity) {
+            continue;
+        }
+        let stale = match probe_process(owner.pid) {
+            WindowsProcessProbe::Dead => true,
+            WindowsProcessProbe::Live(creation_time) => {
+                creation_time != owner.process_creation_time
+            }
+            WindowsProcessProbe::Unknown => false,
+        };
+        if !stale {
+            continue;
+        }
+        let session = WindowsSessionHome {
+            session_id: owner.session_id,
+            home: validated.join("codex-home"),
+            chromium: validated.join("chromium"),
+            root: validated,
+            user_root: user_root.to_path_buf(),
+            identity: owner.identity,
+            owner_pid: owner.pid,
+            owner_creation_time: owner.process_creation_time,
+        };
+        if burn_windows_session(&session) == WindowsCleanupResult::Removed {
+            swept += 1;
+        }
+    }
+    swept
 }
 
 pub fn copy_windows_settings(
@@ -141,6 +231,19 @@ pub fn burn_windows_session(session: &WindowsSessionHome) -> WindowsCleanupResul
         Ok(_) => {
             return WindowsCleanupResult::Retained {
                 reason: "Windows session file identity changed; refusing cleanup".to_string(),
+            }
+        }
+        Err(reason) => return classify_unsafe_cleanup(&session.root, reason),
+    }
+    match read_owner_manifest(&validated.join(OWNER_NAME)) {
+        Ok(owner)
+            if owner.session_id == session.session_id
+                && owner.pid == session.owner_pid
+                && owner.process_creation_time == session.owner_creation_time
+                && owner.identity == session.identity => {}
+        Ok(_) => {
+            return WindowsCleanupResult::Retained {
+                reason: "Windows session owner changed; refusing cleanup".to_string(),
             }
         }
         Err(reason) => return classify_unsafe_cleanup(&session.root, reason),
@@ -319,7 +422,16 @@ fn validate_session_identity(session: &WindowsSessionHome) -> Result<(), String>
     validate_existing_session_dir(&root, &session.chromium)?;
     verify_private_acl(&root)?;
     verify_private_acl(&session.home)?;
-    verify_private_acl(&session.chromium)
+    verify_private_acl(&session.chromium)?;
+    let owner = read_owner_manifest(&root.join(OWNER_NAME))?;
+    if owner.session_id != session.session_id
+        || owner.pid != session.owner_pid
+        || owner.process_creation_time != session.owner_creation_time
+        || owner.identity != session.identity
+    {
+        return Err("Windows session owner changed".to_string());
+    }
+    Ok(())
 }
 
 fn session_identity(path: &Path) -> Result<WindowsSessionIdentity, String> {
