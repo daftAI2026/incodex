@@ -2,9 +2,11 @@
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
+use std::path::Path;
 
 use incodex_cli::windows_activation::{
     activate_packaged_kill_on_drop, WindowsActivationFailure, WindowsActivationRequest,
+    WindowsInstalledRuntimeRegistration,
 };
 use incodex_cli::windows_process::WindowsProcessTree;
 
@@ -13,6 +15,36 @@ fn exposes_one_packaged_activation_backend_for_the_open_lifecycle() {
     let _backend: fn(
         &WindowsActivationRequest,
     ) -> Result<WindowsProcessTree, WindowsActivationFailure> = activate_packaged_kill_on_drop;
+}
+
+#[test]
+fn binds_the_persistent_debugger_to_a_stable_helper_state_and_package() {
+    let package = "OpenAI.Codex_26.820.7780.0_x64__2p2nqsd0c76g0";
+    let helper = Path::new(r"C:\Users\Linus Torvalds\.incodex\windows\helper.exe");
+    let state = Path::new(r"C:\Users\Linus Torvalds\.incodex\windows-install.json");
+    let mut environment = BTreeMap::new();
+    environment.insert(
+        "NODE_OPTIONS".to_string(),
+        OsString::from(r"--require=C:\Users\Linus Torvalds\.incodex\runtime\bootstrap.cjs"),
+    );
+    let registration = WindowsInstalledRuntimeRegistration::new(
+        package,
+        helper,
+        state,
+        environment,
+    )
+    .expect("valid installed Runtime registration");
+
+    assert_eq!(registration.package_full_name(), package);
+    assert_eq!(
+        registration.debugger_command_line(),
+        r#""C:\Users\Linus Torvalds\.incodex\windows\helper.exe" __incodex_windows_installed_debugger --package OpenAI.Codex_26.820.7780.0_x64__2p2nqsd0c76g0 --state "C:\Users\Linus Torvalds\.incodex\windows-install.json""#
+    );
+    assert_eq!(registration.environment().last(), Some(&0));
+    assert_eq!(
+        registration.environment()[registration.environment().len() - 2],
+        0
+    );
 }
 
 #[test]
