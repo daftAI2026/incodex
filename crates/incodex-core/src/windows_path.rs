@@ -40,7 +40,7 @@ pub fn validate_existing_session_dir(
     Ok(candidate_real)
 }
 
-fn require_absolute(path: &Path, label: &str) -> Result<(), String> {
+pub(crate) fn require_absolute(path: &Path, label: &str) -> Result<(), String> {
     if path.is_absolute() {
         Ok(())
     } else {
@@ -48,7 +48,7 @@ fn require_absolute(path: &Path, label: &str) -> Result<(), String> {
     }
 }
 
-fn reject_reparse_ancestors(path: &Path) -> Result<(), String> {
+pub(crate) fn reject_reparse_ancestors(path: &Path) -> Result<(), String> {
     let mut current = PathBuf::new();
     for component in path.components() {
         if component == Component::ParentDir {

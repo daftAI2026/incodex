@@ -39,6 +39,7 @@ fn creates_a_private_session_and_copies_only_safe_settings() {
     let root = scratch("copy");
     let user_root = root.join("用户 Profile").join(".incodex");
     let source = root.join("Codex source");
+    fs::create_dir_all(user_root.parent().expect("profile parent")).expect("create profile");
     fs::create_dir_all(&source).expect("create source");
     fs::write(source.join("auth.json"), br#"{"token":"fixture"}"#).expect("write auth");
     fs::write(source.join("config.toml"), b"model = 'fixture'\n").expect("write config");
@@ -54,7 +55,13 @@ fn creates_a_private_session_and_copies_only_safe_settings() {
     );
     assert!(session.home.join("config.toml").is_file());
     assert!(!session.home.join("sessions.jsonl").exists());
-    for path in [&session.root, &session.home, &session.chromium] {
+    for path in [
+        &session.root,
+        &session.home,
+        &session.chromium,
+        &session.home.join("auth.json"),
+        &session.home.join("config.toml"),
+    ] {
         verify_private_acl(path).expect("private directory ACL");
     }
 
@@ -72,6 +79,7 @@ fn rejects_a_reparse_source_without_copying_through_it() {
     let user_root = root.join("profile").join(".incodex");
     let real_source = root.join("real-source");
     let source_link = root.join("source-link");
+    fs::create_dir_all(user_root.parent().expect("profile parent")).expect("create profile");
     fs::create_dir_all(&real_source).expect("create real source");
     fs::write(real_source.join("auth.json"), b"secret").expect("write source");
     create_junction(&source_link, &real_source);
@@ -94,6 +102,7 @@ fn retains_an_identity_changed_session_instead_of_deleting_its_target() {
     let root = scratch("identity");
     let user_root = root.join("profile").join(".incodex");
     let outside = root.join("outside");
+    fs::create_dir_all(user_root.parent().expect("profile parent")).expect("create profile");
     fs::create_dir_all(&outside).expect("create outside");
     fs::write(outside.join("sentinel.txt"), b"keep").expect("write sentinel");
     let session = create_windows_session(&user_root).expect("create private session");
