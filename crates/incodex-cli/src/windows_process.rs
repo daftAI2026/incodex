@@ -121,6 +121,13 @@ impl WindowsProcessTree {
         }))
     }
 
+    pub fn listener_owner_is_in_job(&self, port: u16) -> io::Result<bool> {
+        let Some(owner_pid) = ipv4_listener_owner(port)? else {
+            return Ok(false);
+        };
+        process_is_in_job(owner_pid, self._job.raw())
+    }
+
     fn job_has_active_processes(&self) -> io::Result<bool> {
         let mut accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
         if unsafe {
