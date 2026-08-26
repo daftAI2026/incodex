@@ -83,7 +83,7 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
                     .into(),
             )
         }
-        InstallChannel::Homebrew => return run_homebrew_update(parsed, &exe),
+        InstallChannel::Homebrew => return run_homebrew_update(parsed),
         InstallChannel::Script => {}
     }
     let prefix = install_prefix(&exe);
@@ -171,7 +171,7 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
     Ok(())
 }
 
-fn run_homebrew_update(parsed: &ParsedCli, exe: &Path) -> Result<(), String> {
+fn run_homebrew_update(parsed: &ParsedCli) -> Result<(), String> {
     println!("update channel: homebrew");
     if parsed.dry_run {
         println!("would run brew update");
@@ -180,14 +180,16 @@ fn run_homebrew_update(parsed: &ParsedCli, exe: &Path) -> Result<(), String> {
         return Ok(());
     }
 
-    let _lock = incodex_transaction::acquire_target_lock(&user_root(), exe, "update", None)
-        .map_err(|err| {
-            if err.contains("another incodex command") {
-                "update failed: another update is already running".to_string()
-            } else {
-                format!("update failed: could not acquire update lock: {err}")
-            }
-        })?;
+    let lock_target = user_root().join("update-targets/homebrew-incodex");
+    let _lock =
+        incodex_transaction::acquire_target_lock(&user_root(), &lock_target, "update", None)
+            .map_err(|err| {
+                if err.contains("another incodex command") {
+                    "update failed: another update is already running".to_string()
+                } else {
+                    format!("update failed: could not acquire update lock: {err}")
+                }
+            })?;
 
     let mut progress = Progress::new();
     progress.stage("Updating Homebrew");
@@ -355,11 +357,29 @@ fn homebrew_installed_version() -> Option<String> {
         timeout_from_env("INCODEX_HOMEBREW_QUERY_TIMEOUT_MS", HOMEBREW_QUERY_TIMEOUT),
     ) {
         Ok(CommandOutcome::Completed(output)) if output.status.success() => output,
-        _ => return None,
+        _ => return public_cli_version(),
     };
     String::from_utf8_lossy(&output.stdout)
         .split_whitespace()
         .nth(1)
+        .map(str::to_string)
+        .or_else(public_cli_version)
+}
+
+fn public_cli_version() -> Option<String> {
+    let mut command = Command::new("inc");
+    command.arg("--version");
+    let output = match run_command_with_timeout(
+        &mut command,
+        timeout_from_env("INCODEX_HOMEBREW_QUERY_TIMEOUT_MS", HOMEBREW_QUERY_TIMEOUT),
+    ) {
+        Ok(CommandOutcome::Completed(output)) if output.status.success() => output,
+        _ => return None,
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| line.strip_prefix("Incodex version "))
+        .and_then(|version| version.split_whitespace().next())
         .map(str::to_string)
 }
 

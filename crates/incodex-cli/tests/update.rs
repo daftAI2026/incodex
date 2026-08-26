@@ -105,9 +105,7 @@ fn homebrew_update_falls_back_to_the_public_cli_version_probe() {
         .unwrap();
 
     assert!(output.status.success());
-    assert!(
-        String::from_utf8_lossy(&output.stdout).contains("Updated to latest version, 9.9.9")
-    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Updated to latest version, 9.9.9"));
 }
 
 #[test]
@@ -154,9 +152,7 @@ fn homebrew_update_lock_is_stable_across_cellar_generations() {
     let _ = first.wait();
 
     assert_eq!(second.status.code(), Some(1));
-    assert!(
-        String::from_utf8_lossy(&second.stderr).contains("another update is already running")
-    );
+    assert!(String::from_utf8_lossy(&second.stderr).contains("another update is already running"));
 }
 
 #[test]
