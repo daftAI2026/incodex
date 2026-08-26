@@ -5,10 +5,12 @@ use incodex_core::windows_session::{
     burn_windows_session, copy_windows_settings, create_windows_session, WindowsCleanupResult,
     WindowsSessionHome,
 };
+use incodex_core::{format_kv, format_step, format_warn};
 
 use crate::cdp::{allocate_debug_port, debug_launch_args, InjectionOptions};
 use crate::profile_mask::ProfileMask;
-use crate::windows_app::WindowsCodexApp;
+use crate::windows_app::{discover_codex_package, WindowsCodexApp};
+use crate::{parse::ParsedCli, CliFailure};
 
 #[derive(Debug)]
 pub struct WindowsOpenPlan {
@@ -19,6 +21,31 @@ pub struct WindowsOpenPlan {
     pub session: WindowsSessionHome,
     pub debug_port: u16,
     pub injection: InjectionOptions,
+}
+
+pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
+    if parsed.app.is_some() {
+        return Err(CliFailure::new(
+            "Windows open discovers the current user's official Microsoft Store package; --app is not supported",
+        ));
+    }
+    let app = discover_codex_package().map_err(CliFailure::from)?;
+    if parsed.dry_run {
+        println!(
+            "{}",
+            format_step("Open incognito without patching Codex", None)
+        );
+        println!("{}", format_kv("Package", &app.package_full_name, None));
+        println!(
+            "{}",
+            format_kv("Binary", &app.executable.display().to_string(), None)
+        );
+        println!("{}", format_warn("Dry run. No window opened.", None));
+        return Ok(());
+    }
+    Err(CliFailure::new(
+        "open is not supported on Windows without --dry-run yet",
+    ))
 }
 
 pub fn prepare_windows_open(

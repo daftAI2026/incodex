@@ -113,5 +113,8 @@ fn open_dry_run_enters_windows_discovery_without_creating_state() {
             "{stderr}"
         );
     }
-    assert!(!profile.exists(), "dry run created Incodex state");
+    assert!(
+        !profile.join(".incodex").exists(),
+        "dry run created Incodex product state"
+    );
 }

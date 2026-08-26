@@ -143,6 +143,9 @@ where
             println!("{ROOT_HELP}");
             return Ok(());
         }
+        if parsed.command == CliCommand::Open {
+            return crate::windows_open::run_open(&parsed);
+        }
         Err(CliFailure::new(format!(
             "{} is not supported on Windows yet",
             parsed.command.as_str()
