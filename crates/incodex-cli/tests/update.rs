@@ -161,6 +161,31 @@ fn homebrew_upgrade_timeout_is_bounded_and_reported() {
 }
 
 #[test]
+fn homebrew_upgrade_timeout_covers_descendants_holding_output_pipes() {
+    let home = scratch("homebrew-descendant-timeout");
+    let fake_bin = home.join("fake-bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let installed = homebrew_cli(&home);
+    write_executable(
+        &fake_bin.join("brew"),
+        "#!/bin/sh\ncase \"$*\" in\n  'update') exit 0 ;;\n  'upgrade incodex') sleep 5 & printf '%s\\n' 'Upgrading incodex'; exit 0 ;;\nesac\nexit 88\n",
+    );
+
+    let started = Instant::now();
+    let output = Command::new(installed)
+        .arg("update")
+        .env("HOME", &home)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .env("INCODEX_HOMEBREW_UPGRADE_TIMEOUT_MS", "100")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(started.elapsed() < Duration::from_secs(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Homebrew upgrade timed out"));
+}
+
+#[test]
 fn update_pty_harness_reaps_after_child_closes_before_exit() {
     let home = scratch("pty-close-before-exit");
     let fake_update = home.join("fake-update");
