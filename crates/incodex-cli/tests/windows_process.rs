@@ -16,6 +16,7 @@ use windows_sys::Win32::System::Threading::{
 const FIXTURE_ENV: &str = "INCODEX_WINDOWS_JOB_FIXTURE";
 const PID_FILE_ENV: &str = "INCODEX_WINDOWS_JOB_PID_FILE";
 const PORT_FILE_ENV: &str = "INCODEX_WINDOWS_JOB_PORT_FILE";
+const ROOT_EXIT_ENV: &str = "INCODEX_WINDOWS_JOB_ROOT_EXIT";
 const WAIT_LIMIT: Duration = Duration::from_secs(10);
 const WAIT_STEP: Duration = Duration::from_millis(25);
 
@@ -46,9 +47,48 @@ fn helper_process_tree_fixture() {
     fs::write(pid_file, descendant.id().to_string()).expect("publish descendant pid");
     drop(descendant);
 
+    if std::env::var_os(ROOT_EXIT_ENV).is_some() {
+        return;
+    }
+
     loop {
         thread::sleep(Duration::from_secs(60));
     }
+}
+
+#[test]
+fn root_exit_does_not_hide_a_live_job_descendant() {
+    let pid_file = scratch_pid_file().with_extension("bootstrap.pid");
+    let _ = fs::remove_file(&pid_file);
+    let mut command = Command::new(std::env::current_exe().expect("current test binary"));
+    command
+        .args(["helper_process_tree_fixture", "--exact", "--nocapture"])
+        .env(FIXTURE_ENV, "1")
+        .env(ROOT_EXIT_ENV, "1")
+        .env(PID_FILE_ENV, &pid_file);
+
+    let mut process_tree = spawn_kill_on_drop(&mut command).expect("spawn bootstrapper job");
+    let root_pid = process_tree.id();
+    let descendant_pid = wait_for_descendant_pid(&pid_file);
+    assert!(wait_until_stopped(root_pid), "bootstrapper did not exit");
+    assert!(
+        process_is_running(descendant_pid),
+        "descendant exited early"
+    );
+    assert!(
+        process_tree
+            .try_wait()
+            .expect("inspect whole job")
+            .is_none(),
+        "root exit was misreported while the Job still had a live descendant"
+    );
+
+    drop(process_tree);
+    assert!(
+        wait_until_stopped(descendant_pid),
+        "descendant survived job close"
+    );
+    fs::remove_file(pid_file).expect("remove bootstrap fixture");
 }
 
 #[test]

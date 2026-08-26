@@ -25,7 +25,7 @@ fn package_fixture(root: &Path) {
 fn evidence_json(install_location: &Path) -> String {
     let path = install_location.display().to_string().replace('\\', "\\\\");
     format!(
-        r#"{{"name":"OpenAI.Codex","packageFullName":"OpenAI.Codex_1.2.3.4_x64__2p2nqsd0c76g0","packageFamilyName":"OpenAI.Codex_2p2nqsd0c76g0","applicationId":"App","installLocation":"{path}","architecture":"X64","signatureKind":"Store","status":"Ok"}}"#
+        r#"{{"name":"OpenAI.Codex","packageFullName":"OpenAI.Codex_1.2.3.4_x64__2p2nqsd0c76g0","packageFamilyName":"OpenAI.Codex_2p2nqsd0c76g0","applicationId":"App","applicationExecutable":"app\\ChatGPT.exe","installLocation":"{path}","architecture":"X64","signatureKind":"Store","status":"Ok"}}"#
     )
 }
 
@@ -81,4 +81,17 @@ fn rejects_untrusted_package_identity_before_using_its_path() {
     let error = inspect_codex_package(evidence).unwrap_err();
     assert!(error.contains("Microsoft Store"), "{error}");
     assert!(!root.exists(), "inspection created package state");
+}
+
+#[test]
+fn rejects_an_aumid_whose_manifest_application_points_to_another_executable() {
+    let root = scratch();
+    package_fixture(&root);
+    let json = evidence_json(&root).replace("app\\\\ChatGPT.exe", "app\\\\Other.exe");
+    let evidence = parse_package_evidence(&json).expect("parse evidence");
+
+    let error = inspect_codex_package(evidence).unwrap_err();
+    assert!(error.contains("application executable"), "{error}");
+
+    fs::remove_dir_all(root).expect("remove fixture");
 }
