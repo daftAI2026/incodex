@@ -15,6 +15,16 @@ describe("Windows Runtime lifecycle adapter", () => {
     expect(windowsPlatform.markReady("C:\\Temp\\ready", () => {})).toBe(false);
   });
 
+  test("writes exact main-window closure only to the guardian close pipe", () => {
+    const writes: unknown[][] = [];
+    const pipe = "\\\\.\\pipe\\Incodex-Runtime-Closed-0123456789abcdef0123456789abcdef";
+    expect(
+      windowsPlatform.markClosed(pipe, (...args: unknown[]) => writes.push(args)),
+    ).toBe(true);
+    expect(writes).toEqual([[pipe, "closed\n"]]);
+    expect(windowsPlatform.markClosed("C:\\Temp\\closed", () => {})).toBe(false);
+  });
+
   test("delegates only native lifecycle data to the installed helper", async () => {
     const helperPath = "C:\\Users\\me\\.incodex\\windows\\helpers\\abc\\incodex-helper.exe";
     const sourceHome = "C:\\Users\\me\\.codex";

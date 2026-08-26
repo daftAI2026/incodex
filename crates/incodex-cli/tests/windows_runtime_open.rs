@@ -152,3 +152,10 @@ fn runtime_acceptance_comes_from_the_connecting_named_pipe_process() {
     assert_eq!(acceptance.process_id, std::process::id());
     assert_eq!(acceptance.message, "accepted");
 }
+
+#[test]
+fn close_signal_uses_a_distinct_unpredictable_named_pipe() {
+    let pipe = WindowsRuntimeReadyPipe::create_close().expect("create close pipe");
+    assert!(pipe.name().starts_with(r"\\.\pipe\Incodex-Runtime-Closed-"));
+    assert_eq!(pipe.name().len(), 32 + r"\\.\pipe\Incodex-Runtime-Closed-".len());
+}
