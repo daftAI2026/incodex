@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use incodex_cli::windows_app::WindowsCodexApp;
 use incodex_cli::windows_runtime_open::{
     parse_windows_runtime_open, prepare_windows_runtime_open, windows_runtime_ready_for_handshake,
-    WindowsRuntimeReadyPipe,
+    WindowsRuntimeOwnerClaim, WindowsRuntimeReadyPipe,
 };
 use incodex_core::windows_session::{burn_windows_session, WindowsCleanupResult};
 
@@ -161,4 +161,15 @@ fn close_signal_uses_a_distinct_unpredictable_named_pipe() {
         pipe.name().len(),
         32 + r"\\.\pipe\Incodex-Runtime-Closed-".len()
     );
+}
+
+#[test]
+fn one_native_owner_serializes_all_installed_runtime_clicks() {
+    let first = WindowsRuntimeOwnerClaim::acquire().expect("acquire first owner");
+    assert!(matches!(first, WindowsRuntimeOwnerClaim::Owned(_)));
+    let second = WindowsRuntimeOwnerClaim::acquire().expect("inspect existing owner");
+    assert!(matches!(second, WindowsRuntimeOwnerClaim::Existing));
+    drop(first);
+    let replacement = WindowsRuntimeOwnerClaim::acquire().expect("acquire replacement owner");
+    assert!(matches!(replacement, WindowsRuntimeOwnerClaim::Owned(_)));
 }

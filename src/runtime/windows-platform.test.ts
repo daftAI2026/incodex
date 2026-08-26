@@ -25,6 +25,37 @@ describe("Windows Runtime lifecycle adapter", () => {
     expect(windowsPlatform.markClosed("C:\\Temp\\closed", () => {})).toBe(false);
   });
 
+  test("raises the existing shared window through the native owner pipe", () => {
+    let connectionHandler: ((socket: EventEmitter & { end: (value: string) => void }) => void) | null =
+      null;
+    let listened = "";
+    let raised = 0;
+    const replies: string[] = [];
+    const server = {
+      listen(value: string) {
+        listened = value;
+      },
+    };
+    const pipe = "\\\\.\\pipe\\Incodex-Runtime-Raise";
+    const result = windowsPlatform.listenForRaise(
+      pipe,
+      () => raised++,
+      (handler: typeof connectionHandler) => {
+        connectionHandler = handler;
+        return server;
+      },
+    );
+    const socket = new EventEmitter() as EventEmitter & { end: (value: string) => void };
+    socket.end = (value) => replies.push(value);
+    connectionHandler?.(socket);
+    socket.emit("data", Buffer.from("raise\n"));
+
+    expect(result).toBe(server);
+    expect(listened).toBe(pipe);
+    expect(raised).toBe(1);
+    expect(replies).toEqual(["raised\n"]);
+  });
+
   test("delegates only native lifecycle data to the installed helper", async () => {
     const helperPath = "C:\\Users\\me\\.incodex\\windows\\helpers\\abc\\incodex-helper.exe";
     const sourceHome = "C:\\Users\\me\\.codex";
