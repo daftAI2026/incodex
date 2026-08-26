@@ -9,6 +9,7 @@ const safeHome = require("./incodex-safe-home.cjs");
 const ipcGuard = require("./incodex-ipc-guard.cjs");
 const instance = require("./incodex-instance.cjs");
 const windowKind = require("./incodex-window-kind.cjs");
+const windowsPlatform = process.platform === "win32" ? require("./incodex-windows-platform.cjs") : null;
 const USER_ROOT = path.join(os.homedir(), ".incodex");
 const DEFAULT_CODEX_HOME = path.join(os.homedir(), ".codex");
 const READY_TIMEOUT_MS = 15_000;
@@ -41,6 +42,8 @@ function isIncognito() {
     return safeHome.isManagedSessionHome(resolvedCodexHome(), USER_ROOT);
 }
 function captureChildOwnerSnapshot() {
+    if (windowsPlatform)
+        return null;
     if (!isIncognito() || typeof instance.processIdentity !== "function")
         return null;
     const live = instance.processIdentity(process.pid);
@@ -376,7 +379,14 @@ function applyChromeWindowTile(win) {
 }
 const launchHolder = { current: null };
 function launchIncognito() {
-    return instance.singleFlight(launchHolder, launchIncognitoOnce);
+    const launch = windowsPlatform
+        ? () => windowsPlatform.launchIncognito({
+            helperPath: process.env.INCODEX_WINDOWS_HELPER,
+            sourceHome: sourceHome(),
+            sourceBounds: captureSourceBounds(),
+        })
+        : launchIncognitoOnce;
+    return instance.singleFlight(launchHolder, launch);
 }
 function runtimeOwnedSessionEnv(session, sourceBounds) {
     return {
@@ -598,6 +608,8 @@ function reportInjectionError(error) {
 function reportInjectionProbe(win) {
     return win.webContents.executeJavaScript("window.__incodexUiProbe", false).then((probe) => {
         logLaunch("ui-probe", probe);
+        if (windowsPlatform && isIncognito() && probe?.accepted === true)
+            markSessionReady();
     });
 }
 function selectOfficialCodexMode(win) {
@@ -647,7 +659,7 @@ async function attachElectron() {
     if (packagedOrigin)
         trustedOrigins.add(packagedOrigin);
     captureSourceHome();
-    if (!isIncognito()) {
+    if (!isIncognito() && !windowsPlatform) {
         try {
             safeHome.sweepOrphanSessions(USER_ROOT, { targetId: targetId() });
         }
@@ -723,7 +735,8 @@ async function attachElectron() {
                 selectOfficialCodexMode(win);
             else
                 win.once("focus", () => selectOfficialCodexMode(win));
-            markSessionReady();
+            if (!windowsPlatform)
+                markSessionReady();
         });
         win.once("show", () => {
             bringForward();
@@ -738,7 +751,7 @@ async function attachElectron() {
             electron.app.exit(0);
         });
     });
-    if (isIncognito()) {
+    if (isIncognito() && !windowsPlatform) {
         ownerLease = await writePid();
         if (!ownerLease) {
             try {
@@ -773,6 +786,8 @@ async function attachElectron() {
             }
             throw startupBlocked(error instanceof Error ? error : new Error(String(error)));
         }
+    }
+    if (isIncognito()) {
         electron.app.on("window-all-closed", () => {
             burnIncognitoHome();
             void clearPid(ownerLease, raiseServer);

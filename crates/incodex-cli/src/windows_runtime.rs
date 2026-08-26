@@ -16,6 +16,7 @@ use windows_sys::Win32::Storage::FileSystem::{
 
 pub const WINDOWS_RUNTIME_FILES: &[&str] = &[
     "incodex-windows-bootstrap.cjs",
+    "incodex-windows-platform.cjs",
     "incodex-main.cjs",
     "incodex-preload.cjs",
     "incodex-inject.js",
@@ -28,8 +29,16 @@ pub const WINDOWS_RUNTIME_FILES: &[&str] = &[
     "incodex-runtime-load.cjs",
 ];
 
-const BOOTSTRAP_NAME: &str = "incodex-windows-bootstrap.cjs";
-const BOOTSTRAP: &str = include_str!("../assets/incodex-windows-bootstrap.cjs");
+const WINDOWS_ASSETS: &[(&str, &str)] = &[
+    (
+        "incodex-windows-bootstrap.cjs",
+        include_str!("../assets/incodex-windows-bootstrap.cjs"),
+    ),
+    (
+        "incodex-windows-platform.cjs",
+        include_str!("../assets/incodex-windows-platform.cjs"),
+    ),
+];
 
 const RUNTIME_FILES: &[(&str, &str)] = &[
     (
@@ -166,7 +175,9 @@ fn publish_release(
         for (name, body) in RUNTIME_FILES {
             write_private_file(&staging.join(name), body.as_bytes())?;
         }
-        write_private_file(&staging.join(BOOTSTRAP_NAME), BOOTSTRAP.as_bytes())?;
+        for (name, body) in WINDOWS_ASSETS {
+            write_private_file(&staging.join(name), body.as_bytes())?;
+        }
         write_private_file(&staging.join(MANIFEST_NAME), MANIFEST.as_bytes())?;
         verify_release(&staging, manifest)?;
         match fs::rename(&staging, release_dir) {
@@ -195,13 +206,17 @@ fn verify_release(path: &Path, manifest: &RuntimeManifest) -> Result<(), String>
             ));
         }
     }
-    let bootstrap = path.join(BOOTSTRAP_NAME);
-    ensure_regular_file(&bootstrap)?;
-    verify_private_acl(&bootstrap)?;
-    let actual = fs::read(&bootstrap)
-        .map_err(|error| format!("cannot read Windows Runtime bootstrap: {error}"))?;
-    if actual != BOOTSTRAP.as_bytes() {
-        return Err("Windows Runtime bootstrap does not match embedded release".to_string());
+    for (name, body) in WINDOWS_ASSETS {
+        let asset = path.join(name);
+        ensure_regular_file(&asset)?;
+        verify_private_acl(&asset)?;
+        let actual = fs::read(&asset)
+            .map_err(|error| format!("cannot read Windows Runtime asset {name}: {error}"))?;
+        if actual != body.as_bytes() {
+            return Err(format!(
+                "Windows Runtime asset does not match embedded release: {name}"
+            ));
+        }
     }
     let manifest_path = path.join(MANIFEST_NAME);
     ensure_regular_file(&manifest_path)?;
@@ -331,7 +346,12 @@ fn windows_release_hash() -> String {
     let mut hash = Sha256::new();
     hash.update(MANIFEST.as_bytes());
     hash.update([0]);
-    hash.update(BOOTSTRAP.as_bytes());
+    for (name, body) in WINDOWS_ASSETS {
+        hash.update(name.as_bytes());
+        hash.update([0]);
+        hash.update(body.as_bytes());
+        hash.update([0]);
+    }
     hash.finalize()
         .iter()
         .map(|byte| format!("{byte:02x}"))
