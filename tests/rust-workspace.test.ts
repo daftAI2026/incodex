@@ -144,6 +144,8 @@ describe("Rust workspace", () => {
 
   test("Windows CI runs every supported Windows contract suite", () => {
     const ci = read(".github/workflows/ci.yml");
+    expect(ci).toContain("bun test src/runtime/windows-platform.test.ts");
+    expect(ci).toContain("bun test src/runtime-load.test.ts tests/windows-bootstrap.test.ts");
     for (const crate of ["incodex-core", "incodex-cli"]) {
       const directory = join(root, "crates", crate, "tests");
       const suites = readdirSync(directory)
