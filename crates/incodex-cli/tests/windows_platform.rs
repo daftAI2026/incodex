@@ -75,8 +75,6 @@ fn help_and_version_are_available_without_creating_state() {
 #[test]
 fn unsupported_product_commands_fail_closed_before_creating_state() {
     let cases: &[(&str, &[&str])] = &[
-        ("install", &["install", "--dry-run"]),
-        ("uninstall", &["uninstall", "--dry-run"]),
         ("runtime", &["runtime"]),
         (
             "recover",
@@ -107,6 +105,30 @@ fn unsupported_product_commands_fail_closed_before_creating_state() {
         assert!(
             !profile.exists(),
             "{command} created state before its Windows implementation exists"
+        );
+    }
+}
+
+#[test]
+fn install_and_uninstall_dry_run_discover_the_store_package_without_writing_state() {
+    for (command, heading) in [("install", "Install"), ("uninstall", "Uninstall")] {
+        let profile = scratch_profile();
+        let output = run(&[command, "--dry-run"], &profile);
+        let stdout = text(&output.stdout);
+        let stderr = text(&output.stderr);
+
+        assert!(output.status.success(), "{command}: {stderr}");
+        assert!(stdout.contains(heading), "{command}: {stdout}");
+        assert!(stdout.contains("OpenAI.Codex"), "{command}: {stdout}");
+        assert!(stdout.contains("ChatGPT.exe"), "{command}: {stdout}");
+        assert!(
+            stdout.contains("Dry run. No files changed."),
+            "{command}: {stdout}"
+        );
+        assert!(stderr.is_empty(), "{command}: {stderr}");
+        assert!(
+            !profile.exists(),
+            "{command} dry run created product state"
         );
     }
 }
