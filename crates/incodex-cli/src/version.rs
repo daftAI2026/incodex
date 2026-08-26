@@ -81,6 +81,7 @@ fn install_channel() -> String {
         .unwrap_or_default();
     if exe.contains("/Cellar/incodex/")
         || exe.contains("/opt/homebrew/opt/incodex/")
+        || exe.contains("/usr/local/opt/incodex/")
         || exe.ends_with("/opt/homebrew/bin/incodex")
         || exe.ends_with("/opt/homebrew/bin/inc")
     {

@@ -43,7 +43,7 @@
 brew install daftAI2026/tap/incodex
 ```
 
-这里只把 `incodex` 和 `inc` 放到 PATH。可选的应用内按钮需要另行运行 `incodex install`。更新用 `brew upgrade incodex`。
+这里只把 `incodex` 和 `inc` 放到 PATH。可选的应用内按钮需要另行运行 `incodex install`。更新统一使用 `inc update`；Homebrew 安装仍会沿 Homebrew 路径升级。
 
 **或使用安装脚本**
 
@@ -75,7 +75,7 @@ Homebrew 和脚本安装直接使用预编译的原生 Rust 二进制，不需�
 - 官方升级会冲掉补丁。再跑一次 `incodex install`，打的是**当前这份**新官方包
 - 如果官方已经升成新版本，`incodex uninstall` 不会用旧备份盖回去
 - 当前原始包备份位于 `~/.incodex/transactions/<install-id>/original/ChatGPT.app`；卸载恢复并验证成功后会删除，新一代安装成功后也会清理同一应用已被取代的终态备份
-- Homebrew 装的用 `brew upgrade incodex`；脚本装的用 `incodex update`；源码更新用 `git pull && cargo install --locked --path crates/incodex-cli`；源码卸载用 `cargo uninstall incodex-cli`
+- Homebrew 和脚本安装都运行 `inc update`，Incodex 会自动选择对应的升级路径；源码更新用 `git pull && cargo install --locked --path crates/incodex-cli`；源码卸载用 `cargo uninstall incodex-cli`
 - 菜单支持方向键、Vim `j/k`、数字立刻执行、`V` 看版本、`q` 退出
 - 脚本安装若找不到命令，把 `~/.local/bin` 加进 PATH
 - 按钮和说明跟主窗口语言走
@@ -249,7 +249,7 @@ Install: Homebrew
 Shell: /bin/zsh
 ```
 
-`Install` 能识别 Homebrew 路径；其他原生二进制目前显示为 Script。Homebrew 装的不要跑 `incodex update`，用 `brew upgrade incodex`。
+`Install` 能识别 Homebrew 路径；其他原生二进制目前显示为 Script。`inc update` 会让 Homebrew 安装通过 Homebrew 刷新并升级，让脚本安装重新运行稳定版安装器。
 
 ### 命令速查
 
@@ -272,7 +272,7 @@ incodex open                # 不改官方包，直接开无痕窗
 incodex open --mask         # 临时侧栏名称和离线头像
 incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
 incodex recover --transaction <id>
-incodex update              # 更新这个 CLI（脚本安装）
+inc update                  # 按安装来源更新这个 CLI
 incodex self-uninstall      # 卸掉 CLI；还原 Codex 要加 --restore-app
 ```
 
@@ -282,7 +282,7 @@ incodex self-uninstall      # 卸掉 CLI；还原 Codex 要加 --restore-app
 incodex install --dry-run
 incodex uninstall --dry-run
 incodex open --dry-run
-incodex update --dry-run
+inc update --dry-run
 incodex self-uninstall --dry-run
 incodex status --json
 incodex doctor --json

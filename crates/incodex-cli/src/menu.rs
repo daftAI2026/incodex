@@ -56,7 +56,7 @@ pub fn run_menu() -> Result<Option<CliCommand>, String> {
     let update_message = crate::lifecycle::read_update_notice();
     let self_update_available = update_message
         .as_deref()
-        .is_some_and(|message| message.ends_with("run incodex update"));
+        .is_some_and(|message| message.ends_with("run inc update"));
     let _cursor = CursorGuard;
     loop {
         draw(selected, update_message.as_deref(), self_update_available)?;

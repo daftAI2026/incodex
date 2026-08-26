@@ -26,7 +26,7 @@ Incodex patches a locally installed Codex / ChatGPT desktop app, or opens an iso
 | "Take it out of Codex" | `incodex uninstall --dry-run`, then `incodex uninstall` |
 | "Open incognito without patching" | `incodex open --dry-run`, then `incodex open` |
 | "Update the button logic only" | `incodex runtime` |
-| "Update this CLI" | `incodex update --dry-run`, then `incodex update` |
+| "Update this CLI" | `inc update --dry-run`, then `inc update` |
 | "Remove the CLI" | `incodex self-uninstall --dry-run`, then `incodex self-uninstall` |
 
 ## Notes

@@ -1,10 +1,11 @@
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use incodex_core::paths::{user_root, DEFAULT_APP};
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
@@ -18,6 +19,10 @@ const MAIN_INSTALLER_URL: &str =
     "https://raw.githubusercontent.com/daftAI2026/incodex/main/install.sh";
 const DOWNLOAD_ATTEMPTS: usize = 3;
 const RETRY_DELAY: Duration = Duration::from_millis(200);
+const HOMEBREW_QUERY_TIMEOUT: Duration = Duration::from_secs(5);
+const HOMEBREW_UPDATE_TIMEOUT: Duration = Duration::from_secs(120);
+const HOMEBREW_UPGRADE_TIMEOUT: Duration = Duration::from_secs(120);
+const UPDATE_NOTICE_WORKER_ENV: &str = "INCODEX_INTERNAL_UPDATE_NOTICE_WORKER";
 static UPDATE_NOTICE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Deserialize)]
@@ -36,6 +41,17 @@ enum InstallChannel {
     Source,
     Script,
     Homebrew,
+}
+
+struct CapturedOutput {
+    status: ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
+
+enum CommandOutcome {
+    Completed(CapturedOutput),
+    TimedOut { stdout: Vec<u8>, stderr: Vec<u8> },
 }
 
 pub fn run_runtime(parsed: &ParsedCli) -> Result<(), String> {
@@ -68,9 +84,7 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
                     .into(),
             )
         }
-        InstallChannel::Homebrew => {
-            return Err("this copy was installed with Homebrew\n  brew upgrade incodex".into())
-        }
+        InstallChannel::Homebrew => return run_homebrew_update(parsed),
         InstallChannel::Script => {}
     }
     let prefix = install_prefix(&exe);
@@ -156,6 +170,230 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
     );
     clear_update_notice();
     Ok(())
+}
+
+fn run_homebrew_update(parsed: &ParsedCli) -> Result<(), String> {
+    println!("update channel: homebrew");
+    if parsed.dry_run {
+        println!("would run brew update");
+        println!("would run brew upgrade incodex");
+        println!("no changes made.");
+        return Ok(());
+    }
+
+    let lock_target = user_root().join("update-targets/homebrew-incodex");
+    let _lock =
+        incodex_transaction::acquire_target_lock(&user_root(), &lock_target, "update", None)
+            .map_err(|err| {
+                if err.contains("another incodex command") {
+                    "update failed: another update is already running".to_string()
+                } else {
+                    format!("update failed: could not acquire update lock: {err}")
+                }
+            })?;
+
+    let mut progress = Progress::new();
+    progress.stage("Updating Homebrew");
+    let _ = run_brew(
+        &["update"],
+        timeout_from_env(
+            "INCODEX_HOMEBREW_UPDATE_TIMEOUT_MS",
+            HOMEBREW_UPDATE_TIMEOUT,
+        ),
+    );
+
+    progress.stage("Upgrading Incodex");
+    let upgrade = run_brew(
+        &["upgrade", "incodex"],
+        timeout_from_env(
+            "INCODEX_HOMEBREW_UPGRADE_TIMEOUT_MS",
+            HOMEBREW_UPGRADE_TIMEOUT,
+        ),
+    );
+    progress.stop();
+
+    let output = match upgrade {
+        Ok(CommandOutcome::Completed(output)) if output.status.success() => output,
+        Ok(CommandOutcome::Completed(output)) => {
+            let detail = output_detail(&output);
+            return Err(if detail.is_empty() {
+                format!(
+                    "Homebrew upgrade failed: brew upgrade incodex exited with {}",
+                    output.status
+                )
+            } else {
+                format!("Homebrew upgrade failed\n{detail}")
+            });
+        }
+        Ok(CommandOutcome::TimedOut { stdout, stderr }) => {
+            let detail = output_detail_bytes(&stderr, &stdout);
+            return Err(if detail.is_empty() {
+                "Homebrew upgrade timed out".into()
+            } else {
+                format!("Homebrew upgrade timed out\n{detail}")
+            });
+        }
+        Err(err) => return Err(format!("Homebrew upgrade failed: {err}")),
+    };
+
+    let current = env!("CARGO_PKG_VERSION");
+    let installed = homebrew_installed_version().unwrap_or_else(|| current.to_string());
+    let combined = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    if combined.contains("already installed") {
+        println!("Already on latest version, {installed}");
+    } else {
+        println!("Updated to latest version, {installed}");
+    }
+    clear_update_notice();
+    Ok(())
+}
+
+fn run_brew(args: &[&str], timeout: Duration) -> Result<CommandOutcome, String> {
+    let mut command = Command::new("brew");
+    command
+        .args(args)
+        .env("HOMEBREW_NO_ENV_HINTS", "1")
+        .env("HOMEBREW_NO_AUTO_UPDATE", "1")
+        .env("NONINTERACTIVE", "1");
+    run_command_with_timeout(&mut command, timeout)
+}
+
+fn run_command_with_timeout(
+    command: &mut Command,
+    timeout: Duration,
+) -> Result<CommandOutcome, String> {
+    command
+        .process_group(0)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().map_err(|err| {
+        format!(
+            "could not start {}: {err}",
+            command.get_program().to_string_lossy()
+        )
+    })?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "could not capture command stdout".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "could not capture command stderr".to_string())?;
+    let stdout_reader = thread::spawn(move || read_stream(stdout));
+    let stderr_reader = thread::spawn(move || read_stream(stderr));
+    let deadline = Instant::now() + timeout;
+    let mut exit_status = None;
+
+    loop {
+        if exit_status.is_none() {
+            match child.try_wait() {
+                Ok(status) => exit_status = status,
+                Err(err) => {
+                    terminate_process_group(&mut child);
+                    let _ = join_reader(stdout_reader);
+                    let _ = join_reader(stderr_reader);
+                    return Err(format!("could not wait for command: {err}"));
+                }
+            }
+        }
+        if stdout_reader.is_finished() && stderr_reader.is_finished() {
+            if let Some(status) = exit_status.take() {
+                return Ok(CommandOutcome::Completed(CapturedOutput {
+                    status,
+                    stdout: join_reader(stdout_reader),
+                    stderr: join_reader(stderr_reader),
+                }));
+            }
+        }
+        if Instant::now() >= deadline {
+            terminate_process_group(&mut child);
+            return Ok(CommandOutcome::TimedOut {
+                stdout: join_reader(stdout_reader),
+                stderr: join_reader(stderr_reader),
+            });
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn terminate_process_group(child: &mut Child) {
+    let process_group = -(child.id() as i32);
+    unsafe {
+        libc::kill(process_group, libc::SIGKILL);
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+fn read_stream(mut stream: impl Read) -> Vec<u8> {
+    let mut output = Vec::new();
+    let _ = stream.read_to_end(&mut output);
+    output
+}
+
+fn join_reader(reader: thread::JoinHandle<Vec<u8>>) -> Vec<u8> {
+    reader.join().unwrap_or_default()
+}
+
+fn timeout_from_env(name: &str, default: Duration) -> Duration {
+    std::env::var(name)
+        .ok()
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .filter(|milliseconds| *milliseconds > 0)
+        .map(Duration::from_millis)
+        .unwrap_or(default)
+}
+
+fn output_detail(output: &CapturedOutput) -> String {
+    output_detail_bytes(&output.stderr, &output.stdout)
+}
+
+fn output_detail_bytes(stderr: &[u8], stdout: &[u8]) -> String {
+    [stderr, stdout]
+        .into_iter()
+        .map(|bytes| String::from_utf8_lossy(bytes))
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn homebrew_installed_version() -> Option<String> {
+    let output = match run_brew(
+        &["list", "--versions", "incodex"],
+        timeout_from_env("INCODEX_HOMEBREW_QUERY_TIMEOUT_MS", HOMEBREW_QUERY_TIMEOUT),
+    ) {
+        Ok(CommandOutcome::Completed(output)) if output.status.success() => output,
+        _ => return public_cli_version(),
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .nth(1)
+        .map(str::to_string)
+        .or_else(public_cli_version)
+}
+
+fn public_cli_version() -> Option<String> {
+    let mut command = Command::new("inc");
+    command.arg("--version");
+    let output = match run_command_with_timeout(
+        &mut command,
+        timeout_from_env("INCODEX_HOMEBREW_QUERY_TIMEOUT_MS", HOMEBREW_QUERY_TIMEOUT),
+    ) {
+        Ok(CommandOutcome::Completed(output)) if output.status.success() => output,
+        _ => return None,
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| line.strip_prefix("Incodex version "))
+        .and_then(|version| version.split_whitespace().next())
+        .map(str::to_string)
 }
 
 fn run_installer(
@@ -394,13 +632,42 @@ fn valid_update_notice(message: &str) -> bool {
         return false;
     };
     matches!(
-        (install_channel(&exe), action),
-        (InstallChannel::Script, "incodex update")
-            | (InstallChannel::Homebrew, "brew upgrade incodex")
-    )
+        install_channel(&exe),
+        InstallChannel::Script | InstallChannel::Homebrew
+    ) && action == "inc update"
 }
 
 pub(crate) fn spawn_update_notice_refresh() {
+    let Ok(exe) = current_exe() else {
+        return;
+    };
+    if install_channel(&exe) == InstallChannel::Source {
+        return;
+    }
+    let child = Command::new(exe)
+        .env(UPDATE_NOTICE_WORKER_ENV, "1")
+        .process_group(0)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+    let Ok(mut child) = child else {
+        return;
+    };
+    thread::spawn(move || {
+        let _ = child.wait();
+    });
+}
+
+pub(crate) fn run_update_notice_worker() -> bool {
+    if std::env::var(UPDATE_NOTICE_WORKER_ENV).as_deref() != Ok("1") {
+        return false;
+    }
+    refresh_update_notice();
+    true
+}
+
+fn refresh_update_notice() {
     let Ok(exe) = current_exe() else {
         return;
     };
@@ -408,46 +675,62 @@ pub(crate) fn spawn_update_notice_refresh() {
     if channel == InstallChannel::Source {
         return;
     }
-    thread::spawn(move || {
-        let Ok(latest) = latest_stable_release() else {
-            return;
-        };
-        let Some(current) = parse_stable_version(env!("CARGO_PKG_VERSION")) else {
-            return;
-        };
-        let message = match channel {
-            InstallChannel::Script if latest.version > current => format!(
-                "Update {} available, run incodex update\n",
+    let Ok(latest) = latest_stable_release() else {
+        clear_update_notice();
+        return;
+    };
+    let Some(current) = parse_stable_version(env!("CARGO_PKG_VERSION")) else {
+        return;
+    };
+    let message = if latest.version <= current {
+        String::new()
+    } else {
+        match channel {
+            InstallChannel::Script => format!(
+                "Update {} available, run inc update\n",
                 latest.tag.trim_start_matches('v')
             ),
-            InstallChannel::Homebrew => homebrew_update_notice(current, latest.version),
-            _ => String::new(),
-        };
-        write_update_notice(&message);
-    });
+            InstallChannel::Homebrew => homebrew_update_notice(current),
+            InstallChannel::Source => String::new(),
+        }
+    };
+    write_update_notice(&message);
 }
 
-fn homebrew_update_notice(current: [u64; 3], release: [u64; 3]) -> String {
+fn homebrew_update_notice(current: [u64; 3]) -> String {
     let Some((version_text, formula)) = homebrew_stable_version() else {
         return String::new();
     };
-    if formula > current && formula <= release {
-        format!("Update {version_text} available, run brew upgrade incodex\n")
+    if formula > current {
+        format!("Update {version_text} available, run inc update\n")
     } else {
         String::new()
     }
 }
 
 fn homebrew_stable_version() -> Option<(String, [u64; 3])> {
-    let output = Command::new("brew")
-        .args(["info", "--json=v2", "incodex"])
-        .env("HOMEBREW_NO_AUTO_UPDATE", "1")
-        .env("HOMEBREW_NO_ENV_HINTS", "1")
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
+    let timeout = timeout_from_env("INCODEX_HOMEBREW_QUERY_TIMEOUT_MS", HOMEBREW_QUERY_TIMEOUT);
+    if let Ok(CommandOutcome::Completed(output)) =
+        run_brew(&["outdated", "--formula", "--verbose", "incodex"], timeout)
+    {
+        if output.status.success() {
+            let text = String::from_utf8_lossy(&output.stdout);
+            if let Some(candidate) = text
+                .lines()
+                .find_map(|line| line.split_once("< ").map(|(_, value)| value))
+                .and_then(|value| value.split_whitespace().next())
+            {
+                if let Some(version) = parse_stable_version(candidate) {
+                    return Some((candidate.to_string(), version));
+                }
+            }
+        }
     }
+
+    let output = match run_brew(&["info", "--json=v2", "incodex"], timeout) {
+        Ok(CommandOutcome::Completed(output)) if output.status.success() => output,
+        _ => return None,
+    };
     let body: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
     let text = body
         .get("formulae")?
@@ -533,6 +816,7 @@ fn install_channel(exe: &Path) -> InstallChannel {
     let text = exe.to_string_lossy();
     if text.contains("/Cellar/incodex/")
         || text.contains("/opt/homebrew/opt/incodex/")
+        || text.contains("/usr/local/opt/incodex/")
         || text.ends_with("/opt/homebrew/bin/incodex")
         || text.ends_with("/opt/homebrew/bin/inc")
     {

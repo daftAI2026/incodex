@@ -90,6 +90,9 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
+    if lifecycle::run_update_notice_worker() {
+        return Ok(());
+    }
     let args: Vec<String> = args.into_iter().map(|s| s.as_ref().to_string()).collect();
     let mut parsed = parse_cli(&args)?;
     if parsed.command == CliCommand::Version {
