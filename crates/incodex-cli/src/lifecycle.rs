@@ -811,8 +811,11 @@ fn install_channel(exe: &Path) -> InstallChannel {
     let text = exe.to_string_lossy();
     if text.contains("/Cellar/incodex/")
         || text.contains("/opt/homebrew/opt/incodex/")
+        || text.contains("/usr/local/opt/incodex/")
         || text.ends_with("/opt/homebrew/bin/incodex")
         || text.ends_with("/opt/homebrew/bin/inc")
+        || text.ends_with("/usr/local/bin/incodex")
+        || text.ends_with("/usr/local/bin/inc")
     {
         return InstallChannel::Homebrew;
     }
