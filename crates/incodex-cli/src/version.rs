@@ -109,7 +109,15 @@ fn disk_free() -> String {
 
 #[cfg(target_os = "windows")]
 fn install_channel() -> String {
-    "Unsupported".to_string()
+    let executable = std::env::current_exe()
+        .ok()
+        .map(|path| path.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    if executable.contains("\\target\\debug\\") || executable.contains("\\target\\release\\") {
+        "Source".to_string()
+    } else {
+        "Script".to_string()
+    }
 }
 
 #[cfg(not(target_os = "windows"))]

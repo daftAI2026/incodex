@@ -37,8 +37,8 @@ Commands:
   open         Open an isolated incognito Codex window
   status       Show official Store package availability
   doctor       Diagnose package health and isolated sessions
-  install      Not available on Windows yet
-  uninstall    Not available on Windows yet
+  install      Enable the hat-glasses control in Store Codex
+  uninstall    Remove the Windows Runtime integration
   runtime      Not available on Windows yet
   recover      Not available on Windows yet
   update       Not available on Windows yet
@@ -81,9 +81,34 @@ Profile masking is only available with --mask. --avatar accepts a local PNG,
 JPEG, or WebP file.
 "
         }
-        CliCommand::Install
-        | CliCommand::Uninstall
-        | CliCommand::Runtime
+        CliCommand::Install => {
+            "\
+Usage:
+  incodex install [--yes] [--dry-run]
+
+Enable the Incodex hat-glasses control in the current user's official
+Microsoft Store Codex package. Codex must be fully closed. The Store package
+is not patched or copied; Incodex registers its separately owned Windows Runtime.
+
+Flags:
+  --yes            Skip the confirmation prompt (required when stdin is not a terminal)
+  --dry-run, -n    Print the plan and exit
+"
+        }
+        CliCommand::Uninstall => {
+            "\
+Usage:
+  incodex uninstall [--yes] [--dry-run]
+
+Disable and remove the Incodex-owned Windows Runtime integration. Codex must
+be fully closed before final removal. The official Store package is unchanged.
+
+Flags:
+  --yes            Skip the confirmation prompt (required when stdin is not a terminal)
+  --dry-run, -n    Print the plan and exit
+"
+        }
+        CliCommand::Runtime
         | CliCommand::Recover
         | CliCommand::Update
         | CliCommand::SelfUninstall => "This command is not available on Windows yet.\n",
