@@ -478,12 +478,28 @@ mod tests {
         thread::sleep(Duration::from_millis(250));
     }
 
+    fn launch_fixture(plan: &WindowsOpenPlan) -> Result<crate::windows_process::WindowsProcessTree, String> {
+        let mut command = Command::new(&plan.bin);
+        command.args(&plan.args);
+        for (key, value) in &plan.env {
+            command.env(key, value);
+        }
+        for (key, value) in &plan.env_flags {
+            command.env(key, value);
+        }
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        spawn_kill_on_drop(&mut command).map_err(|error| error.to_string())
+    }
+
     #[test]
     fn successful_contained_process_exit_removes_the_session() {
         let (root, plan) = plan();
         let session_root = plan.session.root.clone();
 
-        let outcome = execute_windows_open_with(plan, |_port, _options, alive| {
+        let outcome = execute_windows_open_with(plan, launch_fixture, |_port, _options, alive| {
             assert!(alive.load(Ordering::Acquire));
             Ok(())
         });
@@ -501,7 +517,7 @@ mod tests {
         let session_root = plan.session.root.clone();
 
         let outcome =
-            execute_windows_open_with(plan, |_port, _options, _alive: Arc<AtomicBool>| {
+            execute_windows_open_with(plan, launch_fixture, |_port, _options, _alive: Arc<AtomicBool>| {
                 Err("fixture injection refused".to_string())
             });
 
@@ -524,7 +540,7 @@ mod tests {
         let injected = Arc::new(AtomicBool::new(false));
         let injection_probe = injected.clone();
 
-        let outcome = execute_windows_open_with(plan, move |_port, _options, _alive| {
+        let outcome = execute_windows_open_with(plan, launch_fixture, move |_port, _options, _alive| {
             injection_probe.store(true, Ordering::Release);
             Ok(())
         });
