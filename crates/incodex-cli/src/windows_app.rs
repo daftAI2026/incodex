@@ -1,8 +1,11 @@
+use std::ffi::OsString;
 use std::fs;
+use std::os::windows::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::Deserialize;
+use windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW;
 
 const PACKAGE_NAME: &str = "OpenAI.Codex";
 const PACKAGE_FAMILY_SUFFIX: &str = "__2p2nqsd0c76g0";
@@ -49,18 +52,7 @@ if ($null -eq $application) { exit 4 }
   signatureKind = $package.SignatureKind.ToString()
   status = $package.Status.ToString()
 } | ConvertTo-Json -Compress"#;
-    let mut command = Command::new("powershell.exe");
-    command
-        .args([
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            script,
-        ])
-        .env_remove("HOME")
-        .env_remove("USERPROFILE")
-        .env_remove("LOCALAPPDATA");
+    let mut command = package_query_command(script)?;
     let output = command
         .output()
         .map_err(|error| format!("cannot query the Windows Codex package: {error}"))?;
@@ -76,6 +68,53 @@ if ($null -eq $application) { exit 4 }
     inspect_codex_package(parse_package_evidence(
         stdout.trim_start_matches('\u{feff}').trim(),
     )?)
+}
+
+fn package_query_command(script: &str) -> Result<Command, String> {
+    let mut command = Command::new(system_powershell_path()?);
+    command
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            script,
+        ])
+        .env_remove("HOME")
+        .env_remove("USERPROFILE")
+        .env_remove("LOCALAPPDATA");
+    Ok(command)
+}
+
+fn system_powershell_path() -> Result<PathBuf, String> {
+    let mut wide = vec![0u16; 260];
+    loop {
+        let length = unsafe { GetSystemDirectoryW(wide.as_mut_ptr(), wide.len() as u32) };
+        if length == 0 {
+            return Err(format!(
+                "cannot locate the Windows system directory: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        if length as usize >= wide.len() {
+            wide.resize(length as usize + 1, 0);
+            continue;
+        }
+        wide.truncate(length as usize);
+        break;
+    }
+    let executable = PathBuf::from(OsString::from_wide(&wide))
+        .join("WindowsPowerShell")
+        .join("v1.0")
+        .join("powershell.exe");
+    if executable.is_file() {
+        Ok(executable)
+    } else {
+        Err(format!(
+            "system Windows PowerShell is unavailable: {}",
+            executable.display()
+        ))
+    }
 }
 
 pub fn parse_package_evidence(raw: &str) -> Result<WindowsPackageEvidence, String> {
