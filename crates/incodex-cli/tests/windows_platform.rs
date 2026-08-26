@@ -158,9 +158,9 @@ fn doctor_reports_package_and_session_health_without_creating_state() {
         serde_json::from_slice(&json.stdout).expect("doctor emits valid JSON");
     assert_eq!(value["platform"], "windows");
     assert!(value["package"]["available"].is_boolean());
-    assert_eq!(value["sessions"]["active"], 0);
-    assert_eq!(value["sessions"]["orphaned"], 0);
-    assert_eq!(value["sessions"]["unknown"], 0);
+    assert!(value["sessions"]["active"].is_u64());
+    assert!(value["sessions"]["orphaned"].is_u64());
+    assert!(value["sessions"]["unknown"].is_u64());
     assert!(json.stderr.is_empty(), "{}", text(&json.stderr));
 
     assert!(!profile.exists(), "doctor created user state");
@@ -169,14 +169,20 @@ fn doctor_reports_package_and_session_health_without_creating_state() {
 #[test]
 fn doctor_uses_the_token_profile_instead_of_overridden_userprofile() {
     let profile = scratch_profile();
+    let baseline = run(&["doctor", "--json"], &profile);
+    assert!(baseline.status.success(), "{}", text(&baseline.stderr));
+    let baseline: serde_json::Value =
+        serde_json::from_slice(&baseline.stdout).expect("baseline doctor JSON");
     fs::create_dir_all(profile.join(".incodex/sessions"))
         .expect("create misleading environment profile");
+    fs::write(profile.join(".incodex/sessions/not-a-session"), b"fixture")
+        .expect("create misleading session entry");
 
     let doctor = run(&["doctor", "--json"], &profile);
     assert!(doctor.status.success(), "{}", text(&doctor.stderr));
     let value: serde_json::Value =
         serde_json::from_slice(&doctor.stdout).expect("doctor emits valid JSON");
-    assert_eq!(value["sessions"]["unknown"], 0);
+    assert_eq!(value["sessions"], baseline["sessions"]);
 
     fs::remove_dir_all(profile).expect("remove misleading environment profile");
 }
