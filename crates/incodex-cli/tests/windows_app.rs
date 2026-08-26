@@ -26,7 +26,7 @@ fn electron_fixture(root: &Path) {
 fn evidence_json(install_location: &Path) -> String {
     let path = install_location.display().to_string().replace('\\', "\\\\");
     format!(
-        r#"{{"name":"OpenAI.Codex","packageFullName":"OpenAI.Codex_1.2.3.4_x64__2p2nqsd0c76g0","installLocation":"{path}","architecture":"X64","signatureKind":"Store","status":"Ok"}}"#
+        r#"{{"name":"OpenAI.Codex","packageFullName":"OpenAI.Codex_1.2.3.4_x64__2p2nqsd0c76g0","packageFamilyName":"OpenAI.Codex_2p2nqsd0c76g0","applicationId":"App","installLocation":"{path}","architecture":"X64","signatureKind":"Store","status":"Ok"}}"#
     )
 }
 
@@ -46,8 +46,26 @@ fn accepts_healthy_store_evidence_with_the_real_electron_layout() {
         app.asar,
         app.install_location.join("app/resources/app.asar")
     );
+    assert_eq!(
+        app.app_user_model_id,
+        "OpenAI.Codex_2p2nqsd0c76g0!App"
+    );
 
     fs::remove_dir_all(root.parent().unwrap().parent().unwrap()).expect("remove fixture");
+}
+
+#[test]
+fn rejects_an_app_user_model_id_outside_the_official_package_family() {
+    let root = scratch();
+    let json = evidence_json(&root).replace(
+        "OpenAI.Codex_2p2nqsd0c76g0",
+        "Impostor.Codex_2p2nqsd0c76g0",
+    );
+    let evidence = parse_package_evidence(&json).expect("parse evidence");
+
+    let error = inspect_codex_package(evidence).unwrap_err();
+    assert!(error.contains("package identity"), "{error}");
+    assert!(!root.exists(), "inspection created package state");
 }
 
 #[test]
