@@ -42,7 +42,7 @@ use crate::windows_install_state::{
     acquire_windows_install_state, read_windows_install_state, WindowsInstallPhase,
     WindowsInstallState, WindowsInstallStateGuard,
 };
-use crate::windows_process::WindowsProcessTree;
+use crate::windows_process::{VisibleWindowLifecycle, WindowsProcessTree};
 
 const RUNTIME_OPEN_MODE: &str = "__incodex_windows_runtime_open";
 const READY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -553,7 +553,8 @@ fn run_guardian_lifecycle(
         );
     }
 
-    let mut missing_since = None;
+    let mut window_lifecycle = VisibleWindowLifecycle::new(VISIBLE_CLOSE_GRACE);
+    let _ = window_lifecycle.should_close(true, Instant::now());
     loop {
         if cancelled.load(Ordering::Acquire) {
             return guardian_failure(
@@ -600,12 +601,8 @@ fn run_guardian_lifecycle(
             }
         }
         match process_tree.has_visible_window() {
-            Ok(true) => {
-                missing_since = None;
-            }
-            Ok(false) => {
-                let missing = missing_since.get_or_insert_with(Instant::now);
-                if missing.elapsed() >= VISIBLE_CLOSE_GRACE {
+            Ok(visible) => {
+                if window_lifecycle.should_close(visible, Instant::now()) {
                     let shutdown = process_tree.terminate_successfully().map(|_| ()).map_err(
                         |error| {
                             format!(

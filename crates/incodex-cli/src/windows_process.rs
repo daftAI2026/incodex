@@ -79,6 +79,35 @@ enum ProcessHandle {
 const JOB_TERMINATION_TIMEOUT: Duration = Duration::from_secs(5);
 const JOB_TERMINATION_POLL: Duration = Duration::from_millis(10);
 
+pub(crate) struct VisibleWindowLifecycle {
+    grace: Duration,
+    seen_visible: bool,
+    missing_since: Option<Instant>,
+}
+
+impl VisibleWindowLifecycle {
+    pub(crate) fn new(grace: Duration) -> Self {
+        Self {
+            grace,
+            seen_visible: false,
+            missing_since: None,
+        }
+    }
+
+    pub(crate) fn should_close(&mut self, visible: bool, now: Instant) -> bool {
+        if visible {
+            self.seen_visible = true;
+            self.missing_since = None;
+            return false;
+        }
+        if !self.seen_visible {
+            return false;
+        }
+        let missing_since = self.missing_since.get_or_insert(now);
+        now.saturating_duration_since(*missing_since) >= self.grace
+    }
+}
+
 impl WindowsProcessTree {
     pub fn id(&self) -> u32 {
         self.process_id

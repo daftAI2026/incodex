@@ -30,7 +30,9 @@ use crate::windows_cleanup::cleanup_windows_session_after_shutdown;
 use crate::windows_locale::read_locale_override;
 #[cfg(test)]
 use crate::windows_process::spawn_kill_on_drop;
-use crate::windows_process::{WindowsCdpListenerStatus, WindowsCdpOwnershipGuard};
+use crate::windows_process::{
+    VisibleWindowLifecycle, WindowsCdpListenerStatus, WindowsCdpOwnershipGuard,
+};
 use crate::{parse::ParsedCli, CliFailure};
 
 #[derive(Debug)]
@@ -80,35 +82,6 @@ pub enum WindowsOpenProcessResult {
 const LISTENER_SHUTDOWN_GRACE: Duration = Duration::from_millis(200);
 const VISIBLE_WINDOW_CLOSE_GRACE: Duration = Duration::from_millis(250);
 type WindowsMonitorWorkers = Vec<thread::JoinHandle<()>>;
-
-struct VisibleWindowLifecycle {
-    grace: Duration,
-    seen_visible: bool,
-    missing_since: Option<Instant>,
-}
-
-impl VisibleWindowLifecycle {
-    fn new(grace: Duration) -> Self {
-        Self {
-            grace,
-            seen_visible: false,
-            missing_since: None,
-        }
-    }
-
-    fn should_close(&mut self, visible: bool, now: Instant) -> bool {
-        if visible {
-            self.seen_visible = true;
-            self.missing_since = None;
-            return false;
-        }
-        if !self.seen_visible {
-            return false;
-        }
-        let missing_since = self.missing_since.get_or_insert(now);
-        now.saturating_duration_since(*missing_since) >= self.grace
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowsOpenOutcome {
