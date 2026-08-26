@@ -52,6 +52,20 @@ fn accepts_healthy_store_evidence_with_the_real_electron_layout() {
 }
 
 #[test]
+fn accepts_a_launchable_store_package_without_unused_electron_internals() {
+    let root = scratch().join("OpenAI.Codex_1.2.3.4");
+    fs::create_dir_all(root.join("app")).expect("create package app directory");
+    fs::write(root.join("AppxManifest.xml"), "<Package />").expect("write manifest");
+    fs::write(root.join("app/ChatGPT.exe"), b"fixture").expect("write executable");
+
+    let evidence = parse_package_evidence(&evidence_json(&root)).expect("parse evidence");
+    let app = inspect_codex_package(evidence).expect("launchable package remains available");
+    assert_eq!(app.executable, app.install_location.join("app/ChatGPT.exe"));
+
+    fs::remove_dir_all(root.parent().unwrap()).expect("remove fixture");
+}
+
+#[test]
 fn rejects_an_app_user_model_id_outside_the_official_package_family() {
     let root = scratch();
     let json =
