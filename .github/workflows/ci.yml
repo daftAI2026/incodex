@@ -41,3 +41,19 @@ jobs:
           cargo fmt --all -- --check
           cargo clippy --workspace --all-targets --locked -- -D warnings
           cargo test --workspace --release --locked
+
+  windows-cargo:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          rustflags: ""
+      - name: Windows CLI boundary
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy -p incodex-core --lib --locked -- -D warnings
+          cargo clippy -p incodex-cli --lib --bin incodex --locked -- -D warnings
+          cargo test -p incodex-core --lib --release --locked
+          cargo test -p incodex-cli --lib --release --locked
+          cargo test -p incodex-cli --test windows_platform --release --locked
