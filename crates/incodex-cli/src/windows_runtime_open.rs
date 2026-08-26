@@ -63,6 +63,14 @@ unsafe impl Send for WindowsRuntimeReadyPipe {}
 
 impl WindowsRuntimeReadyPipe {
     pub fn create() -> Result<Self, String> {
+        Self::create_for("Ready")
+    }
+
+    pub fn create_close() -> Result<Self, String> {
+        Self::create_for("Closed")
+    }
+
+    fn create_for(kind: &str) -> Result<Self, String> {
         let mut random = [0u8; 16];
         let status = unsafe {
             BCryptGenRandom(
@@ -82,7 +90,7 @@ impl WindowsRuntimeReadyPipe {
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
-        let name = format!(r"\\.\pipe\Incodex-Runtime-Ready-{nonce}");
+        let name = format!(r"\\.\pipe\Incodex-Runtime-{kind}-{nonce}");
         let wide = name.encode_utf16().chain([0]).collect::<Vec<_>>();
         let handle = unsafe {
             CreateNamedPipeW(
@@ -312,9 +320,15 @@ fn execute_windows_runtime_open(
 ) -> Result<(), String> {
     let ready_pipe = WindowsRuntimeReadyPipe::create()
         .map_err(|error| with_shutdown_cleanup(error, &plan.session, Ok(())))?;
+    let close_pipe = WindowsRuntimeReadyPipe::create_close()
+        .map_err(|error| with_shutdown_cleanup(error, &plan.session, Ok(())))?;
     plan.env_flags.insert(
         "INCODEX_WINDOWS_READY_PIPE".to_string(),
         ready_pipe.name().to_string(),
+    );
+    plan.env_flags.insert(
+        "INCODEX_WINDOWS_CLOSE_PIPE".to_string(),
+        close_pipe.name().to_string(),
     );
     let activation = match plan.activation_request() {
         Ok(activation) => activation,
@@ -333,16 +347,21 @@ fn execute_windows_runtime_open(
     };
     drop(launch_gate);
     let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
+    let (close_sender, close_receiver) = mpsc::sync_channel(1);
     thread::spawn(move || {
         let _ = ready_sender.send(ready_pipe.accept());
     });
-    run_guardian_lifecycle(plan.session, process_tree, ready_receiver)
+    thread::spawn(move || {
+        let _ = close_sender.send(close_pipe.accept());
+    });
+    run_guardian_lifecycle(plan.session, process_tree, ready_receiver, close_receiver)
 }
 
 fn run_guardian_lifecycle(
     session: WindowsSessionHome,
     mut process_tree: WindowsProcessTree,
     ready_receiver: Receiver<Result<WindowsRuntimeAcceptance, String>>,
+    close_receiver: Receiver<Result<WindowsRuntimeAcceptance, String>>,
 ) -> Result<(), String> {
     let cancelled = listen_for_guardian_cancellation();
     let ready_deadline = Instant::now() + READY_TIMEOUT;
@@ -375,33 +394,15 @@ fn run_guardian_lifecycle(
         if !runtime_accepted {
             match ready_receiver.try_recv() {
                 Ok(Ok(acceptance)) => {
-                    if acceptance.message != "accepted" {
-                        return guardian_failure(
-                            "Windows Runtime readiness message is invalid".to_string(),
-                            &session,
-                            &mut process_tree,
-                        );
+                    if let Err(error) = authenticate_runtime_signal(
+                        &process_tree,
+                        &acceptance,
+                        "accepted",
+                        "readiness",
+                    ) {
+                        return guardian_failure(error, &session, &mut process_tree);
                     }
-                    match process_tree.contains_process(acceptance.process_id) {
-                        Ok(true) => runtime_accepted = true,
-                        Ok(false) => {
-                            return guardian_failure(
-                                "Windows Runtime readiness writer is outside the isolated Job"
-                                    .to_string(),
-                                &session,
-                                &mut process_tree,
-                            )
-                        }
-                        Err(error) => {
-                            return guardian_failure(
-                                format!(
-                                    "cannot authenticate Windows Runtime readiness writer: {error}"
-                                ),
-                                &session,
-                                &mut process_tree,
-                            )
-                        }
-                    }
+                    runtime_accepted = true;
                 }
                 Ok(Err(error)) => return guardian_failure(error, &session, &mut process_tree),
                 Err(TryRecvError::Empty) => {}
@@ -455,6 +456,32 @@ fn run_guardian_lifecycle(
                 &mut process_tree,
             );
         }
+        match close_receiver.try_recv() {
+            Ok(Ok(closure)) => {
+                if let Err(error) =
+                    authenticate_runtime_signal(&process_tree, &closure, "closed", "closure")
+                {
+                    return guardian_failure(error, &session, &mut process_tree);
+                }
+                let shutdown = process_tree.terminate_successfully().map(|_| ()).map_err(
+                    |error| {
+                        format!(
+                            "cannot prove Windows Runtime shutdown after its main window closed: {error}"
+                        )
+                    },
+                );
+                return finish_guardian(&session, shutdown);
+            }
+            Ok(Err(error)) => return guardian_failure(error, &session, &mut process_tree),
+            Err(TryRecvError::Empty) => {}
+            Err(TryRecvError::Disconnected) => {
+                return guardian_failure(
+                    "Windows Runtime close channel ended without evidence".to_string(),
+                    &session,
+                    &mut process_tree,
+                )
+            }
+        }
         match process_tree.try_wait() {
             Ok(Some(_)) => return finish_guardian(&session, Ok(())),
             Ok(None) => {}
@@ -492,6 +519,26 @@ fn run_guardian_lifecycle(
             }
         }
         thread::sleep(POLL_INTERVAL);
+    }
+}
+
+fn authenticate_runtime_signal(
+    process_tree: &WindowsProcessTree,
+    signal: &WindowsRuntimeAcceptance,
+    expected_message: &str,
+    label: &str,
+) -> Result<(), String> {
+    if signal.message != expected_message {
+        return Err(format!("Windows Runtime {label} message is invalid"));
+    }
+    match process_tree.contains_process(signal.process_id) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(format!(
+            "Windows Runtime {label} writer is outside the isolated Job"
+        )),
+        Err(error) => Err(format!(
+            "cannot authenticate Windows Runtime {label} writer: {error}"
+        )),
     }
 }
 

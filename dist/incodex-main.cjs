@@ -618,6 +618,13 @@ function reportInjectionProbe(win) {
             markSessionReady();
     });
 }
+function markSessionClosed() {
+    if (!windowsPlatform)
+        return;
+    if (!windowsPlatform.markClosed(process.env.INCODEX_WINDOWS_CLOSE_PIPE || "")) {
+        logLaunch("close-refused", { reason: "guardian pipe unavailable" });
+    }
+}
 function selectOfficialCodexMode(win) {
     if (!isIncognito())
         return;
@@ -752,6 +759,7 @@ async function attachElectron() {
         win.on("closed", () => {
             if (mainWindows(electron).some((open) => open !== win && !open.isDestroyed()))
                 return;
+            markSessionClosed();
             burnIncognitoHome();
             void clearPid(ownerLease, raiseServer);
             electron.app.exit(0);
