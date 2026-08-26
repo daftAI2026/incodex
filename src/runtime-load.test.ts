@@ -78,6 +78,8 @@ describe("runtime load", () => {
     expect(main).toContain('win.webContents.on("did-finish-load", () => run(true))');
     expect(main).toContain('probe?.accepted === true');
     expect(main).toContain('if (!windowsPlatform) markSessionReady()');
+    expect(main).toContain('if (!acceptedWindows.has(win) || win.isDestroyed() || !win.isVisible()) return');
+    expect(main).toContain('acceptedWindows.add(win)');
   });
 
   test("a normal Windows Runtime stays normal while only the macOS janitor is skipped", () => {
