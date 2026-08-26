@@ -154,3 +154,23 @@ fn require_dir(path: &Path, label: &str) -> Result<(), String> {
         Err(format!("{label} not found: {}", path.display()))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::package_query_command;
+
+    #[test]
+    fn package_query_uses_an_absolute_system_powershell() {
+        let command = package_query_command("exit 0").expect("build package query command");
+        let program = Path::new(command.get_program());
+
+        assert!(program.is_absolute(), "{}", program.display());
+        assert!(
+            program.ends_with("WindowsPowerShell/v1.0/powershell.exe"),
+            "{}",
+            program.display()
+        );
+    }
+}
