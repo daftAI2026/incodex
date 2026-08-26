@@ -1,6 +1,7 @@
 #![cfg(target_os = "windows")]
 
 use std::fs;
+use std::net::{Ipv4Addr, TcpListener};
 use std::path::PathBuf;
 use std::process::Command;
 use std::thread;
@@ -14,6 +15,7 @@ use windows_sys::Win32::System::Threading::{
 
 const FIXTURE_ENV: &str = "INCODEX_WINDOWS_JOB_FIXTURE";
 const PID_FILE_ENV: &str = "INCODEX_WINDOWS_JOB_PID_FILE";
+const PORT_FILE_ENV: &str = "INCODEX_WINDOWS_JOB_PORT_FILE";
 const WAIT_LIMIT: Duration = Duration::from_secs(10);
 const WAIT_STEP: Duration = Duration::from_millis(25);
 
@@ -43,6 +45,26 @@ fn helper_process_tree_fixture() {
     let pid_file = PathBuf::from(std::env::var_os(PID_FILE_ENV).expect("pid file"));
     fs::write(pid_file, descendant.id().to_string()).expect("publish descendant pid");
 
+    loop {
+        thread::sleep(Duration::from_secs(60));
+    }
+}
+
+#[test]
+fn owned_listener_fixture() {
+    let Some(port_file) = std::env::var_os(PORT_FILE_ENV) else {
+        return;
+    };
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind owned listener");
+    fs::write(
+        PathBuf::from(port_file),
+        listener
+            .local_addr()
+            .expect("listener address")
+            .port()
+            .to_string(),
+    )
+    .expect("publish listener port");
     loop {
         thread::sleep(Duration::from_secs(60));
     }
@@ -110,4 +132,35 @@ fn process_is_running(pid: u32) -> bool {
         CloseHandle(handle);
     }
     queried && exit_code == STILL_ACTIVE as u32
+}
+
+#[test]
+fn proves_that_a_debug_listener_belongs_to_the_contained_job() {
+    let port_file = scratch_pid_file().with_extension("port");
+    let _ = fs::remove_file(&port_file);
+    let mut command = Command::new(std::env::current_exe().expect("current test binary"));
+    command
+        .args(["owned_listener_fixture", "--exact", "--nocapture"])
+        .env(PORT_FILE_ENV, &port_file);
+    let process_tree = spawn_kill_on_drop(&mut command).expect("spawn listener job");
+    let owned_port = wait_for_descendant_pid(&port_file) as u16;
+    let unrelated = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind unrelated listener");
+    let unrelated_port = unrelated.local_addr().expect("unrelated address").port();
+
+    assert!(
+        process_tree
+            .listener_owner_is_in_job(owned_port)
+            .expect("inspect owned listener"),
+        "contained listener was not attributed to its job"
+    );
+    assert!(
+        !process_tree
+            .listener_owner_is_in_job(unrelated_port)
+            .expect("inspect unrelated listener"),
+        "unrelated listener was attributed to the job"
+    );
+
+    drop(process_tree);
+    drop(unrelated);
+    fs::remove_file(port_file).expect("remove port fixture");
 }
