@@ -10,16 +10,32 @@ describe("Windows Runtime bootstrap", () => {
         env: Record<string, string | undefined>;
         load: (path: string) => void;
         processType: string;
+        readState: (path: string) => unknown;
+        runtimeDir: string;
       }): boolean;
     };
+    const registrationId = "0123456789abcdef0123456789abcdef";
+    const packageFullName = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    const runtimeDir = "C:\\Users\\test\\.incodex\\runtime\\releases\\0.5.0-releasehash";
     const env: Record<string, string | undefined> = {
-      INCODEX_WINDOWS_REGISTRATION_ID: "0123456789abcdef0123456789abcdef",
+      INCODEX_WINDOWS_REGISTRATION_ID: registrationId,
+      INCODEX_WINDOWS_PACKAGE_FULL_NAME: packageFullName,
+      INCODEX_WINDOWS_STATE_PATH: "C:\\Users\\test\\.incodex\\windows-install.json",
     };
     const loaded: string[] = [];
     const options = {
       env,
       load: (path: string) => loaded.push(path),
       processType: "browser",
+      readState: () => ({
+        schemaVersion: 1,
+        desired: "enabled",
+        phase: "enabled-unobserved",
+        registrationId,
+        packageFullName,
+        runtimeRelease: "0.5.0-releasehash",
+      }),
+      runtimeDir,
     };
 
     expect(bootstrap.attachWindowsRuntime(options)).toBe(true);
@@ -28,12 +44,64 @@ describe("Windows Runtime bootstrap", () => {
     expect(loaded[0]).toEndWith("incodex-main.cjs");
   });
 
+  test("fails closed when durable install ownership is absent, disabled, or mismatched", () => {
+    const bootstrap = require(bootstrapPath) as {
+      attachWindowsRuntime(options: {
+        env: Record<string, string | undefined>;
+        load: (path: string) => void;
+        processType: string;
+        readState: (path: string) => unknown;
+        runtimeDir: string;
+      }): boolean;
+    };
+    const registrationId = "0123456789abcdef0123456789abcdef";
+    const packageFullName = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    const runtimeDir = "C:\\Users\\test\\.incodex\\runtime\\releases\\0.5.0-releasehash";
+    const env = {
+      INCODEX_WINDOWS_REGISTRATION_ID: registrationId,
+      INCODEX_WINDOWS_PACKAGE_FULL_NAME: packageFullName,
+      INCODEX_WINDOWS_STATE_PATH: "C:\\Users\\test\\.incodex\\windows-install.json",
+    };
+    const valid = {
+      schemaVersion: 1,
+      desired: "enabled",
+      phase: "enabled-observed",
+      registrationId,
+      packageFullName,
+      runtimeRelease: "0.5.0-releasehash",
+    };
+    const invalidStates = [
+      null,
+      { ...valid, desired: "disabled" },
+      { ...valid, phase: "disable-requested" },
+      { ...valid, registrationId: "fedcba9876543210fedcba9876543210" },
+      { ...valid, packageFullName: "Other.Package_1.2.3.4_x64__publisher" },
+      { ...valid, runtimeRelease: "0.5.0-otherhash" },
+    ];
+
+    for (const state of invalidStates) {
+      const loaded: string[] = [];
+      expect(
+        bootstrap.attachWindowsRuntime({
+          env: { ...env },
+          load: (path: string) => loaded.push(path),
+          processType: "browser",
+          readState: () => state,
+          runtimeDir,
+        }),
+      ).toBe(false);
+      expect(loaded).toEqual([]);
+    }
+  });
+
   test("does nothing outside an owned Owl browser process", () => {
     const bootstrap = require(bootstrapPath) as {
       attachWindowsRuntime(options: {
         env: Record<string, string | undefined>;
         load: (path: string) => void;
         processType: string;
+        readState?: (path: string) => unknown;
+        runtimeDir?: string;
       }): boolean;
     };
     for (const [processType, registrationId] of [
