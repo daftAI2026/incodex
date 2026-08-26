@@ -249,6 +249,7 @@ fn read_locale_override(source_home: &Path) -> Option<String> {
 mod tests {
     use super::*;
     use std::fs;
+    use std::net::{Ipv4Addr, TcpListener};
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::Arc;
     use std::thread;
@@ -330,6 +331,29 @@ mod tests {
         assert!(!outcome.ui_ready);
         assert_eq!(outcome.cleanup, WindowsCleanupResult::Removed);
         assert!(!session_root.exists());
+        fs::remove_dir_all(root).expect("remove lifecycle fixture");
+    }
+
+    #[test]
+    fn unrelated_debug_listener_is_rejected_before_injection() {
+        let (root, plan) = plan();
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, plan.debug_port))
+            .expect("occupy planned debug port");
+        let injected = Arc::new(AtomicBool::new(false));
+        let injection_probe = injected.clone();
+
+        let outcome = execute_windows_open_with(plan, move |_port, _options, _alive| {
+            injection_probe.store(true, Ordering::Release);
+            Ok(())
+        });
+
+        assert!(matches!(
+            outcome.process,
+            WindowsOpenProcessResult::ListenerOwnershipFailed(_)
+        ));
+        assert!(!injected.load(Ordering::Acquire));
+        assert_eq!(outcome.cleanup, WindowsCleanupResult::Removed);
+        drop(listener);
         fs::remove_dir_all(root).expect("remove lifecycle fixture");
     }
 }
