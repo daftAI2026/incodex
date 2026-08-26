@@ -676,18 +676,23 @@ fn refresh_update_notice() {
         return;
     }
     let Ok(latest) = latest_stable_release() else {
+        clear_update_notice();
         return;
     };
     let Some(current) = parse_stable_version(env!("CARGO_PKG_VERSION")) else {
         return;
     };
-    let message = match channel {
-        InstallChannel::Script if latest.version > current => format!(
-            "Update {} available, run inc update\n",
-            latest.tag.trim_start_matches('v')
-        ),
-        InstallChannel::Homebrew => homebrew_update_notice(current),
-        _ => String::new(),
+    let message = if latest.version <= current {
+        String::new()
+    } else {
+        match channel {
+            InstallChannel::Script => format!(
+                "Update {} available, run inc update\n",
+                latest.tag.trim_start_matches('v')
+            ),
+            InstallChannel::Homebrew => homebrew_update_notice(current),
+            InstallChannel::Source => String::new(),
+        }
     };
     write_update_notice(&message);
 }
