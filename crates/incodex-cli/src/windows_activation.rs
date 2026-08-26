@@ -80,9 +80,41 @@ impl WindowsActivationRequest {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowsActivationFailure {
+    message: String,
+    shutdown: Result<(), String>,
+}
+
+impl WindowsActivationFailure {
+    pub(crate) fn before_start(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            shutdown: Ok(()),
+        }
+    }
+
+    pub(crate) fn after_start(message: impl Into<String>, shutdown: Result<(), String>) -> Self {
+        Self {
+            message: message.into(),
+            shutdown,
+        }
+    }
+
+    pub(crate) fn into_parts(self) -> (String, Result<(), String>) {
+        (self.message, self.shutdown)
+    }
+}
+
+impl From<String> for WindowsActivationFailure {
+    fn from(message: String) -> Self {
+        Self::before_start(message)
+    }
+}
+
 pub fn activate_packaged_kill_on_drop(
     request: &WindowsActivationRequest,
-) -> Result<WindowsProcessTree, String> {
+) -> Result<WindowsProcessTree, WindowsActivationFailure> {
     let _activation_lock = acquire_package_activation_lock()?;
     let _apartment = ComApartment::initialize()?;
     let existing_processes = snapshot_process_ids()
@@ -114,17 +146,25 @@ pub fn activate_packaged_kill_on_drop(
     };
     if failed(result) {
         let disable = debugging.disable();
-        return Err(join_cleanup_error(
+        let message = join_cleanup_error(
             hresult_message("cannot activate the Windows Codex package", result),
             disable,
-        ));
+        );
+        let shutdown = if process_id != 0 && !existing_processes.contains(&process_id) {
+            Err(format!(
+                "activation failed after reporting new Windows process {process_id}; process shutdown is unproven"
+            ))
+        } else {
+            Ok(())
+        };
+        return Err(WindowsActivationFailure::after_start(message, shutdown));
     }
     if process_id == 0 || existing_processes.contains(&process_id) {
         let disable = debugging.disable();
-        return Err(join_cleanup_error(
+        return Err(WindowsActivationFailure::before_start(join_cleanup_error(
             "Windows package activation did not create a new isolated Codex process".to_string(),
             disable,
-        ));
+        )));
     }
 
     let mut process_tree = match pending_job.attach(process_id, request.package_full_name()) {
@@ -134,12 +174,21 @@ pub fn activate_packaged_kill_on_drop(
             let message = format!(
                 "cannot contain activated Windows Codex process {process_id} in a Job Object: {error}"
             );
-            return Err(join_cleanup_error(message, disable));
+            return Err(WindowsActivationFailure::after_start(
+                join_cleanup_error(message, disable),
+                Err(format!(
+                    "cannot prove activated Windows Codex process {process_id} and its descendants exited after Job attachment failed"
+                )),
+            ));
         }
     };
     if let Err(error) = debugging.disable() {
-        let _ = process_tree.terminate();
-        return Err(error);
+        let shutdown = process_tree.terminate().map(|_| ()).map_err(|shutdown_error| {
+            format!(
+                "cannot prove the isolated Windows Job is empty after package debug restoration failed: {shutdown_error}"
+            )
+        });
+        return Err(WindowsActivationFailure::after_start(error, shutdown));
     }
     Ok(process_tree)
 }

@@ -67,7 +67,7 @@ fn open_process_fixture() {
 
 fn launch_fixture(
     plan: &WindowsOpenPlan,
-) -> Result<crate::windows_process::WindowsProcessTree, String> {
+) -> Result<crate::windows_process::WindowsProcessTree, WindowsActivationFailure> {
     let mut command = Command::new(&plan.bin);
     command.args(&plan.args);
     for (key, value) in &plan.env {
@@ -80,7 +80,8 @@ fn launch_fixture(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    spawn_kill_on_drop(&mut command).map_err(|error| error.to_string())
+    spawn_kill_on_drop(&mut command)
+        .map_err(|error| WindowsActivationFailure::before_start(error.to_string()))
 }
 
 #[test]
@@ -132,7 +133,10 @@ fn launch_failure_after_activation_retains_the_session_when_shutdown_is_unproven
         WindowsCleanupResult::Unknown { ref reason }
             if reason.contains("shutdown is unproven")
     ));
-    assert!(session_root.exists(), "an active writer may still own the session");
+    assert!(
+        session_root.exists(),
+        "an active writer may still own the session"
+    );
     fs::remove_dir_all(root).expect("remove retained lifecycle fixture");
 }
 

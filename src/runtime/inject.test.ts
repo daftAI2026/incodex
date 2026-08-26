@@ -4,8 +4,11 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { blobatarUri } from "blobatar/uri";
 
-const inject = readFileSync(join(import.meta.dir, "inject.ts"), "utf8");
-const profileMask = readFileSync(join(import.meta.dir, "incognito-profile-mask.ts"), "utf8");
+const inject = readFileSync(join(import.meta.dir, "inject.ts"), "utf8").replaceAll("\r\n", "\n");
+const profileMask = readFileSync(
+  join(import.meta.dir, "incognito-profile-mask.ts"),
+  "utf8",
+).replaceAll("\r\n", "\n");
 const notice = readFileSync(join(import.meta.dir, "../../NOTICE"), "utf8");
 const packageJson = JSON.parse(readFileSync(join(import.meta.dir, "../../package.json"), "utf8")) as {
   dependencies?: Record<string, string>;

@@ -18,9 +18,11 @@ use crate::cdp::{
     start_lifecycle_signal_monitor, start_profile_mask_signal_monitor, InjectionOptions,
 };
 use crate::profile_mask::{resolve_profile_mask, ProfileMask};
-use crate::windows_activation::{activate_packaged_kill_on_drop, WindowsActivationRequest};
+use crate::windows_activation::{
+    activate_packaged_kill_on_drop, WindowsActivationFailure, WindowsActivationRequest,
+};
 use crate::windows_app::{discover_codex_package, WindowsCodexApp};
-use crate::windows_cleanup::{cleanup_windows_session, cleanup_windows_session_after_shutdown};
+use crate::windows_cleanup::cleanup_windows_session_after_shutdown;
 use crate::windows_locale::read_locale_override;
 #[cfg(test)]
 use crate::windows_process::spawn_kill_on_drop;
@@ -192,7 +194,9 @@ fn execute_windows_open_with<L, F>(
     inject: F,
 ) -> WindowsOpenOutcome
 where
-    L: FnOnce(&WindowsOpenPlan) -> Result<crate::windows_process::WindowsProcessTree, String>,
+    L: FnOnce(
+        &WindowsOpenPlan,
+    ) -> Result<crate::windows_process::WindowsProcessTree, WindowsActivationFailure>,
     F: FnOnce(
             u16,
             InjectionOptions,
@@ -207,11 +211,12 @@ where
     let process_tree = match launch(&plan) {
         Ok(process_tree) => process_tree,
         Err(error) => {
+            let (message, shutdown) = error.into_parts();
             return WindowsOpenOutcome {
-                process: WindowsOpenProcessResult::SpawnFailed(error),
+                process: WindowsOpenProcessResult::SpawnFailed(message),
                 ui_ready: false,
-                cleanup: cleanup_windows_session(&plan.session),
-            }
+                cleanup: cleanup_windows_session_after_shutdown(&plan.session, shutdown),
+            };
         }
     };
     run_windows_open_lifecycle(plan, process_tree, inject)
@@ -219,8 +224,10 @@ where
 
 fn launch_windows_open(
     plan: &WindowsOpenPlan,
-) -> Result<crate::windows_process::WindowsProcessTree, String> {
-    let request = plan.activation_request()?;
+) -> Result<crate::windows_process::WindowsProcessTree, WindowsActivationFailure> {
+    let request = plan
+        .activation_request()
+        .map_err(WindowsActivationFailure::before_start)?;
     activate_packaged_kill_on_drop(&request)
 }
 
@@ -529,7 +536,9 @@ fn finish_windows_open(outcome: WindowsOpenOutcome) -> Result<(), CliFailure> {
             println!(
                 "{}",
                 format_warn(
-                    &format!("Closed. Isolated session cleanup is unknown: {reason}"),
+                    &format!(
+                        "Window state unknown; isolated session retained for safety: {reason}"
+                    ),
                     None,
                 )
             );

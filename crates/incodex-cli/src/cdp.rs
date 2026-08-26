@@ -27,6 +27,7 @@ const PRIMARY_TARGET_MISSING_POLLS: u8 = 2;
 const WINDOWS_CDP_FAILURE_POLLS: u8 = 3;
 const WINDOWS_LIFECYCLE_CDP_TIMEOUT: Duration = Duration::from_millis(400);
 const PROFILE_MASK_FAILURE_POLLS: u8 = 2;
+const PROFILE_MASK_TRANSPORT_FAILURE_POLLS: u8 = 4;
 const BROWSER_CLOSE_ATTEMPTS: u8 = 3;
 pub const OFFICIAL_NEW_CODEX_URL: &str = "codex://new?mode=codex";
 
@@ -547,22 +548,29 @@ where
         if !process_alive.load(Ordering::Acquire) {
             return Ok(());
         }
-        match probe_profile_mask_health(debug_port, process_alive, connection_guard) {
-            Ok(true) => failures = 0,
-            Err(ProfileMaskProbeError::TargetMissing) if defer_missing_target => {}
-            result => {
-                let error = match result {
-                    Ok(false) => "Incodex profile mask could not be restored".to_string(),
-                    Err(ProfileMaskProbeError::TargetMissing) => "no Codex page target".to_string(),
-                    Err(ProfileMaskProbeError::ProbeFailed(error)) => error,
-                    Ok(true) => unreachable!("healthy profile result handled above"),
-                };
-                failures = failures.saturating_add(1);
-                if failures >= PROFILE_MASK_FAILURE_POLLS {
-                    on_failure(&error);
-                    return Err(error);
+        let (error, failure_limit) =
+            match probe_profile_mask_health(debug_port, process_alive, connection_guard) {
+                Ok(true) => {
+                    failures = 0;
+                    continue;
                 }
-            }
+                Ok(false) => (
+                    "Incodex profile mask could not be restored".to_string(),
+                    PROFILE_MASK_FAILURE_POLLS,
+                ),
+                Err(ProfileMaskProbeError::TargetMissing) if defer_missing_target => continue,
+                Err(ProfileMaskProbeError::TargetMissing) => (
+                    "no Codex page target".to_string(),
+                    PROFILE_MASK_FAILURE_POLLS,
+                ),
+                Err(ProfileMaskProbeError::ProbeFailed(error)) => {
+                    (error, PROFILE_MASK_TRANSPORT_FAILURE_POLLS)
+                }
+            };
+        failures = failures.saturating_add(1);
+        if failures >= failure_limit {
+            on_failure(&error);
+            return Err(error);
         }
     }
     Ok(())
