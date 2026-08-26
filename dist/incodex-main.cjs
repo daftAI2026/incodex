@@ -672,12 +672,14 @@ async function attachElectron() {
     if (packagedOrigin)
         trustedOrigins.add(packagedOrigin);
     captureSourceHome();
-    if (!isIncognito() && !windowsPlatform) {
-        try {
-            safeHome.sweepOrphanSessions(USER_ROOT, { targetId: targetId() });
-        }
-        catch (error) {
-            logLaunch("janitor-failed", { error: String(error) });
+    if (!isIncognito()) {
+        if (!windowsPlatform) {
+            try {
+                safeHome.sweepOrphanSessions(USER_ROOT, { targetId: targetId() });
+            }
+            catch (error) {
+                logLaunch("janitor-failed", { error: String(error) });
+            }
         }
     }
     else {
