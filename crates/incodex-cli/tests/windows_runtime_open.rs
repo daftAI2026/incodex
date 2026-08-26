@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use incodex_cli::windows_app::WindowsCodexApp;
 use incodex_cli::windows_runtime_open::{
     parse_windows_runtime_open, prepare_windows_runtime_open, windows_runtime_ready_for_handshake,
-    WindowsRuntimeOwnerClaim, WindowsRuntimeReadyPipe,
+    windows_runtime_shutdown_authorized, WindowsRuntimeOwnerClaim, WindowsRuntimeReadyPipe,
 };
 use incodex_core::windows_session::{burn_windows_session, WindowsCleanupResult};
 
@@ -131,6 +131,13 @@ fn guardian_reports_ready_only_after_runtime_acceptance_and_a_visible_window() {
     assert!(!windows_runtime_ready_for_handshake(true, false));
     assert!(!windows_runtime_ready_for_handshake(false, true));
     assert!(windows_runtime_ready_for_handshake(true, true));
+}
+
+#[test]
+fn guardian_destroys_a_ready_session_only_after_authenticated_close_or_job_exit() {
+    assert!(!windows_runtime_shutdown_authorized(false, false));
+    assert!(windows_runtime_shutdown_authorized(true, false));
+    assert!(windows_runtime_shutdown_authorized(false, true));
 }
 
 #[test]
