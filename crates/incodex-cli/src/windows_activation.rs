@@ -5,11 +5,14 @@ use std::os::windows::ffi::OsStrExt;
 use std::ptr;
 
 use windows_sys::core::{GUID, HRESULT};
-use windows_sys::Win32::Foundation::RPC_E_CHANGED_MODE;
+use windows_sys::Win32::Foundation::{
+    CloseHandle, HANDLE, RPC_E_CHANGED_MODE, WAIT_ABANDONED, WAIT_OBJECT_0, WAIT_TIMEOUT,
+};
 use windows_sys::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
     COINIT_APARTMENTTHREADED,
 };
+use windows_sys::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
 
 use crate::windows_process::{
     assign_debugged_process_to_job, snapshot_process_ids, terminate_process_id, WindowsPendingJob,
@@ -17,6 +20,8 @@ use crate::windows_process::{
 };
 
 const PACKAGE_DEBUGGER_MODE: &str = "__incodex_windows_package_debugger";
+const PACKAGE_ACTIVATION_LOCK_NAME: &str = "Local\\Incodex-OpenAI.Codex-Activation";
+const PACKAGE_ACTIVATION_LOCK_TIMEOUT_MS: u32 = 15_000;
 
 const CLSID_APPLICATION_ACTIVATION_MANAGER: GUID =
     GUID::from_u128(0x45ba127d_10a8_46ea_8ab7_56ea9078943c);
@@ -79,6 +84,7 @@ impl WindowsActivationRequest {
 pub fn activate_packaged_kill_on_drop(
     request: &WindowsActivationRequest,
 ) -> Result<WindowsProcessTree, String> {
+    let _activation_lock = acquire_package_activation_lock()?;
     let _apartment = ComApartment::initialize()?;
     let existing_processes = snapshot_process_ids()
         .map_err(|error| format!("cannot snapshot Windows processes before activation: {error}"))?;
@@ -141,6 +147,49 @@ pub fn activate_packaged_kill_on_drop(
         return Err(error);
     }
     Ok(process_tree)
+}
+
+fn acquire_package_activation_lock() -> Result<PackageActivationLock, String> {
+    let name: Vec<u16> = PACKAGE_ACTIVATION_LOCK_NAME
+        .encode_utf16()
+        .chain([0])
+        .collect();
+    let handle = unsafe { CreateMutexW(ptr::null(), 0, name.as_ptr()) };
+    if handle.is_null() {
+        return Err(format!(
+            "cannot create the Windows package activation lock: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    match unsafe { WaitForSingleObject(handle, PACKAGE_ACTIVATION_LOCK_TIMEOUT_MS) } {
+        WAIT_OBJECT_0 | WAIT_ABANDONED => Ok(PackageActivationLock(handle)),
+        WAIT_TIMEOUT => {
+            unsafe {
+                CloseHandle(handle);
+            }
+            Err("timed out waiting for another Incodex Windows activation".to_string())
+        }
+        _ => {
+            let error = std::io::Error::last_os_error();
+            unsafe {
+                CloseHandle(handle);
+            }
+            Err(format!(
+                "cannot acquire the Windows package activation lock: {error}"
+            ))
+        }
+    }
+}
+
+struct PackageActivationLock(HANDLE);
+
+impl Drop for PackageActivationLock {
+    fn drop(&mut self) {
+        unsafe {
+            ReleaseMutex(self.0);
+            CloseHandle(self.0);
+        }
+    }
 }
 
 pub(crate) fn try_run_package_debugger(arguments: &[String]) -> Option<Result<(), String>> {
