@@ -66,6 +66,18 @@ describe("runtime load", () => {
     expect(main).toContain("safeHome.handoffSessionOwner");
   });
 
+  test("Windows swaps only the native lifecycle while keeping the shared UI and macOS launcher", () => {
+    const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
+    expect(main).toContain('process.platform === "win32"');
+    expect(main).toContain('require("./incodex-windows-platform.cjs")');
+    expect(main).toContain("windowsPlatform.launchIncognito");
+    expect(main).toContain("child = spawn(bin, args");
+    expect(main).toContain("safeHome.handoffSessionOwner");
+    expect(main).toContain("hookWindow(win, source)");
+    expect(main).toContain('win.webContents.on("dom-ready", () => run(false))');
+    expect(main).toContain('win.webContents.on("did-finish-load", () => run(true))');
+  });
+
   test("an ordinary incognito click launches the official Codex route", () => {
     const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
     const launchStart = main.indexOf("async function launchIncognitoOnce()");
