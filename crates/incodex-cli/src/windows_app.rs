@@ -49,7 +49,8 @@ if ($null -eq $application) { exit 4 }
   signatureKind = $package.SignatureKind.ToString()
   status = $package.Status.ToString()
 } | ConvertTo-Json -Compress"#;
-    let output = Command::new("powershell.exe")
+    let mut command = Command::new("powershell.exe");
+    command
         .args([
             "-NoLogo",
             "-NoProfile",
@@ -57,6 +58,10 @@ if ($null -eq $application) { exit 4 }
             "-Command",
             script,
         ])
+        .env_remove("HOME")
+        .env_remove("USERPROFILE")
+        .env_remove("LOCALAPPDATA");
+    let output = command
         .output()
         .map_err(|error| format!("cannot query the Windows Codex package: {error}"))?;
     if !output.status.success() {

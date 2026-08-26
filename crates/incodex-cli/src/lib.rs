@@ -46,6 +46,8 @@ pub mod windows_app;
 pub mod windows_open;
 #[cfg(target_os = "windows")]
 pub mod windows_process;
+#[cfg(target_os = "windows")]
+pub mod windows_status;
 
 #[cfg(not(target_os = "windows"))]
 use std::path::PathBuf;
@@ -151,6 +153,9 @@ where
         }
         if parsed.command == CliCommand::Open {
             return crate::windows_open::run_open(&parsed);
+        }
+        if parsed.command == CliCommand::Status {
+            return crate::windows_status::run_status(&parsed);
         }
         Err(CliFailure::new(format!(
             "{} is not supported on Windows yet",
