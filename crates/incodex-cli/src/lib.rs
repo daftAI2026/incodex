@@ -27,11 +27,13 @@ pub mod legacy_proof;
 pub mod legacy_typescript;
 #[cfg(not(target_os = "windows"))]
 pub mod lifecycle;
+mod locale;
 #[cfg(not(target_os = "windows"))]
 pub mod menu;
 mod menu_view;
 #[cfg(not(target_os = "windows"))]
 pub mod open;
+mod open_presentation;
 pub mod parse;
 pub mod profile_mask;
 #[cfg(not(target_os = "windows"))]

@@ -17,6 +17,9 @@ use crate::cdp::{
     allocate_debug_port, debug_launch_args, inject_shared_ui_with_options_while_alive_and_guard,
     start_lifecycle_signal_monitor, start_profile_mask_signal_monitor, InjectionOptions,
 };
+use crate::open_presentation::{
+    CLOSED_REMOVED_MESSAGE, DRY_RUN_COMPLETE, DRY_RUN_HEADING, OPENED_MESSAGE, OPENING_MESSAGE,
+};
 use crate::profile_mask::{resolve_profile_mask, ProfileMask};
 use crate::windows_activation::{
     activate_packaged_kill_on_drop, WindowsActivationFailure, WindowsActivationRequest,
@@ -121,16 +124,13 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
     }
     let app = discover_codex_package().map_err(CliFailure::from)?;
     if parsed.dry_run {
-        println!(
-            "{}",
-            format_step("Open incognito without patching Codex", None)
-        );
+        println!("{}", format_step(DRY_RUN_HEADING, None));
         println!("{}", format_kv("Package", &app.package_full_name, None));
         println!(
             "{}",
             format_kv("Binary", &app.executable.display().to_string(), None)
         );
-        println!("{}", format_warn("Dry run. No window opened.", None));
+        println!("{}", format_warn(DRY_RUN_COMPLETE, None));
         return Ok(());
     }
     let profile = crate::windows_profile::windows_user_profile().map_err(CliFailure::from)?;
@@ -146,7 +146,7 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
     .map_err(CliFailure::from)?;
     let plan = prepare_windows_open(&app, &profile.join(".incodex"), &source_home, profile_mask)
         .map_err(CliFailure::from)?;
-    println!("{}", format_step("Opening incognito Codex window", None));
+    println!("{}", format_step(OPENING_MESSAGE, None));
     println!(
         "{}",
         format_kv("Binary", &plan.bin.display().to_string(), None)
@@ -567,10 +567,7 @@ fn inject_windows_ui(
                         cdp_failed,
                     ));
                 }
-                println!(
-                    "{}",
-                    format_ok("Opened. Incognito Codex window is ready.", None)
-                );
+                println!("{}", format_ok(OPENED_MESSAGE, None));
                 let _ = std::io::stdout().flush();
                 return Ok(monitor_workers);
             }
@@ -584,7 +581,7 @@ fn inject_windows_ui(
 fn finish_windows_open(outcome: WindowsOpenOutcome) -> Result<(), CliFailure> {
     match &outcome.cleanup {
         WindowsCleanupResult::Removed => {
-            println!("{}", format_ok("Closed. Isolated session removed.", None));
+            println!("{}", format_ok(CLOSED_REMOVED_MESSAGE, None));
         }
         WindowsCleanupResult::Retained { reason } => {
             println!(

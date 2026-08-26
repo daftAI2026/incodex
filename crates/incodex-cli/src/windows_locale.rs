@@ -2,6 +2,8 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
+use crate::locale::parse_locale_override;
+
 pub(crate) fn read_locale_override(source_home: &Path) -> Option<String> {
     let file = File::open(source_home.join("config.toml")).ok()?;
     let limit = incodex_core::windows_session::MAX_WINDOWS_CONFIG_BYTES;
@@ -13,24 +15,7 @@ pub(crate) fn read_locale_override(source_home: &Path) -> Option<String> {
     if bytes > limit {
         return None;
     }
-    content.lines().find_map(|line| {
-        let (name, value) = line.split_once('=')?;
-        if name.trim() != "localeOverride" {
-            return None;
-        }
-        let value = value.trim();
-        value
-            .strip_prefix('"')
-            .and_then(|value| value.strip_suffix('"'))
-            .or_else(|| {
-                value
-                    .strip_prefix('\'')
-                    .and_then(|value| value.strip_suffix('\''))
-            })
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-    })
+    parse_locale_override(&content, &['"', '\''])
 }
 
 #[cfg(test)]

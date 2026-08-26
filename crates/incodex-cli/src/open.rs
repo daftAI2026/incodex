@@ -23,6 +23,10 @@ use crate::cdp::{
     launch_arg_prefix, monitor_profile_mask_health, start_lifecycle_monitor,
     start_primary_lifecycle_monitor, InjectionOptions, OFFICIAL_NEW_CODEX_URL,
 };
+use crate::locale::parse_locale_override;
+use crate::open_presentation::{
+    CLOSED_REMOVED_MESSAGE, OPENED_MESSAGE, OPENING_MESSAGE, WAITING_MESSAGE,
+};
 use crate::profile_mask::ProfileMask;
 
 #[derive(Debug, Clone)]
@@ -121,10 +125,6 @@ enum InjectionStatus {
     Ready,
     Failed(String),
 }
-
-const OPENING_MESSAGE: &str = "Opening incognito Codex window";
-const OPENED_MESSAGE: &str = "Opened. Incognito Codex window is ready.";
-const WAITING_MESSAGE: &str = "Waiting for the window to close";
 
 #[derive(Debug)]
 enum CleanupDisposition {
@@ -308,24 +308,12 @@ fn plan_from_session(
 
 fn read_locale_override(source_home: &Path) -> Option<String> {
     let content = std::fs::read_to_string(source_home.join("config.toml")).ok()?;
-    content.lines().find_map(|line| {
-        let (name, value) = line.split_once('=')?;
-        if name.trim() != "localeOverride" {
-            return None;
-        }
-        value
-            .trim()
-            .strip_prefix('"')
-            .and_then(|value| value.strip_suffix('"'))
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-    })
+    parse_locale_override(&content, &['"'])
 }
 
 pub fn format_session_cleanup(cleanup: &CleanupResult) -> (bool, String) {
     match cleanup {
-        CleanupResult::Removed { .. } => (true, "Closed. Isolated session removed.".into()),
+        CleanupResult::Removed { .. } => (true, CLOSED_REMOVED_MESSAGE.into()),
         CleanupResult::Retained {
             retained_path,
             reason,
