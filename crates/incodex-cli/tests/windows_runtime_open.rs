@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use incodex_cli::windows_app::WindowsCodexApp;
 use incodex_cli::windows_runtime_open::{
     parse_windows_runtime_open, prepare_windows_runtime_open, validate_windows_runtime_ready,
+    windows_runtime_ready_for_handshake,
 };
 use incodex_core::windows_session::{
     burn_windows_session, verify_private_acl, WindowsCleanupResult,
@@ -148,4 +149,12 @@ fn guardian_protects_the_shared_runtime_ready_marker_before_trusting_it() {
         WindowsCleanupResult::Removed
     );
     fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
+fn guardian_reports_ready_only_after_runtime_acceptance_and_a_visible_window() {
+    assert!(!windows_runtime_ready_for_handshake(false, false));
+    assert!(!windows_runtime_ready_for_handshake(true, false));
+    assert!(!windows_runtime_ready_for_handshake(false, true));
+    assert!(windows_runtime_ready_for_handshake(true, true));
 }
