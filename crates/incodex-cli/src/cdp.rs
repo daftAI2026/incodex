@@ -27,7 +27,7 @@ const PRIMARY_TARGET_MISSING_POLLS: u8 = 2;
 const WINDOWS_CDP_FAILURE_POLLS: u8 = 3;
 const WINDOWS_LIFECYCLE_CDP_TIMEOUT: Duration = Duration::from_millis(400);
 const PROFILE_MASK_FAILURE_POLLS: u8 = 2;
-const PROFILE_MASK_TRANSPORT_FAILURE_POLLS: u8 = 4;
+const WINDOWS_PROFILE_MASK_TRANSPORT_FAILURE_POLLS: u8 = 4;
 const BROWSER_CLOSE_ATTEMPTS: u8 = 3;
 pub const OFFICIAL_NEW_CODEX_URL: &str = "codex://new?mode=codex";
 
@@ -563,9 +563,10 @@ where
                     "no Codex page target".to_string(),
                     PROFILE_MASK_FAILURE_POLLS,
                 ),
-                Err(ProfileMaskProbeError::ProbeFailed(error)) => {
-                    (error, PROFILE_MASK_TRANSPORT_FAILURE_POLLS)
-                }
+                Err(ProfileMaskProbeError::ProbeFailed(error)) => (
+                    error,
+                    profile_mask_transport_failure_polls(cfg!(target_os = "windows")),
+                ),
             };
         failures = failures.saturating_add(1);
         if failures >= failure_limit {
@@ -574,6 +575,14 @@ where
         }
     }
     Ok(())
+}
+
+fn profile_mask_transport_failure_polls(windows: bool) -> u8 {
+    if windows {
+        WINDOWS_PROFILE_MASK_TRANSPORT_FAILURE_POLLS
+    } else {
+        PROFILE_MASK_FAILURE_POLLS
+    }
 }
 
 enum ProfileMaskProbeError {
