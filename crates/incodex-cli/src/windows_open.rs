@@ -290,12 +290,6 @@ where
             }
             Err(mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected) => {}
         }
-        if ui_ready && cdp_failed.load(Ordering::Acquire) {
-            let _ = process_tree.terminate();
-            break WindowsOpenProcessResult::InjectionFailed(
-                "Windows CDP lifecycle became unavailable".to_string(),
-            );
-        }
         if ui_ready && close_requested.load(Ordering::Acquire) {
             match process_tree.terminate_successfully() {
                 Ok(status) => {
@@ -305,6 +299,12 @@ where
                     break WindowsOpenProcessResult::ProcessStateUnknown(error.to_string());
                 }
             }
+        }
+        if ui_ready && cdp_failed.load(Ordering::Acquire) {
+            let _ = process_tree.terminate();
+            break WindowsOpenProcessResult::InjectionFailed(
+                "Windows CDP lifecycle became unavailable".to_string(),
+            );
         }
         match process_tree.try_wait() {
             Ok(Some(status)) => {
