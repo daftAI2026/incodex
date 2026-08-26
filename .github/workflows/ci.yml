@@ -57,4 +57,5 @@ jobs:
           cargo test -p incodex-core --lib --release --locked
           cargo test -p incodex-core --test windows_paths --release --locked
           cargo test -p incodex-cli --lib --release --locked
+          cargo test -p incodex-cli --test windows_app --release --locked
           cargo test -p incodex-cli --test windows_platform --release --locked

@@ -41,6 +41,8 @@ pub mod spinner;
 #[cfg(not(target_os = "windows"))]
 pub mod terminal;
 pub mod version;
+#[cfg(target_os = "windows")]
+pub mod windows_app;
 
 #[cfg(not(target_os = "windows"))]
 use std::path::PathBuf;

@@ -1,0 +1,62 @@
+#![cfg(target_os = "windows")]
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use incodex_cli::windows_app::{inspect_codex_package, parse_package_evidence};
+
+static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+fn scratch() -> PathBuf {
+    let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "incodex-windows-app-{}-{sequence}",
+        std::process::id()
+    ))
+}
+
+fn electron_fixture(root: &Path) {
+    fs::create_dir_all(root.join("app/resources/app.asar.unpacked")).expect("create resources");
+    fs::write(root.join("AppxManifest.xml"), "<Package />").expect("write manifest");
+    fs::write(root.join("app/ChatGPT.exe"), b"fixture").expect("write executable");
+    fs::write(root.join("app/resources/app.asar"), b"fixture").expect("write asar");
+}
+
+fn evidence_json(install_location: &Path) -> String {
+    let path = install_location.display().to_string().replace('\\', "\\\\");
+    format!(
+        r#"{{"name":"OpenAI.Codex","packageFullName":"OpenAI.Codex_1.2.3.4_x64__2p2nqsd0c76g0","installLocation":"{path}","architecture":"X64","signatureKind":"Store","status":"Ok"}}"#
+    )
+}
+
+#[test]
+fn accepts_healthy_store_evidence_with_the_real_electron_layout() {
+    let root = scratch().join("程序 Files").join("OpenAI.Codex_1.2.3.4");
+    electron_fixture(&root);
+
+    let evidence = parse_package_evidence(&evidence_json(&root)).expect("parse evidence");
+    let app = inspect_codex_package(evidence).expect("inspect package");
+    assert_eq!(
+        app.install_location,
+        root.canonicalize().expect("canonical package")
+    );
+    assert_eq!(app.executable, app.install_location.join("app/ChatGPT.exe"));
+    assert_eq!(
+        app.asar,
+        app.install_location.join("app/resources/app.asar")
+    );
+
+    fs::remove_dir_all(root.parent().unwrap().parent().unwrap()).expect("remove fixture");
+}
+
+#[test]
+fn rejects_untrusted_package_identity_before_using_its_path() {
+    let root = scratch();
+    let json = evidence_json(&root).replace("\"Store\"", "\"Developer\"");
+    let evidence = parse_package_evidence(&json).expect("parse evidence");
+
+    let error = inspect_codex_package(evidence).unwrap_err();
+    assert!(error.contains("Microsoft Store"), "{error}");
+    assert!(!root.exists(), "inspection created package state");
+}
