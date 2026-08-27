@@ -531,18 +531,30 @@ fn print_plan(action: &str, app: &WindowsCodexApp) {
 }
 
 fn print_uninstall_plan(app: Option<&WindowsCodexApp>, approval: &WindowsUninstallApproval) {
-    println!("{}", format_step("Uninstall", None));
+    println!("{}", format_uninstall_plan(app, approval));
+}
+
+fn format_uninstall_plan(
+    app: Option<&WindowsCodexApp>,
+    approval: &WindowsUninstallApproval,
+) -> String {
     let package = uninstall_plan_package(app, approval);
+    let registration = approval
+        .registration_id
+        .as_deref()
+        .unwrap_or("Not recorded");
     let executable = app
         .filter(|app| app.package_full_name == package)
         .map(|app| app.executable.display().to_string())
         .unwrap_or_else(|| "Unavailable".to_string());
-    println!("{}", format_kv("Package", package, None));
-    println!("{}", format_kv("App", &executable, None));
-    println!(
-        "{}",
-        format_warn("The Microsoft Store package is not modified.", None)
-    );
+    [
+        format_step("Uninstall", None),
+        format_kv("Package", package, None),
+        format_kv("Registration", registration, None),
+        format_kv("App", &executable, None),
+        format_warn("The Microsoft Store package is not modified.", None),
+    ]
+    .join("\n")
 }
 
 fn uninstall_plan_package<'a>(
