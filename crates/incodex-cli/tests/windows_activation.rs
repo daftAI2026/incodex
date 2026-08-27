@@ -114,7 +114,7 @@ fn binds_the_persistent_debugger_to_a_stable_helper_state_and_package() {
     assert_eq!(registration.package_full_name(), package);
     assert_eq!(
         registration.debugger_command_line(),
-        r#""C:\Users\Linus Torvalds\.incodex\windows\helper.exe" __incodex_windows_installed_debugger"#
+        r#""C:\Users\Linus Torvalds\.incodex\windows\helper.exe" __incodex_windows_installed_debugger --package OpenAI.Codex_26.820.7780.0_x64__2p2nqsd0c76g0"#
     );
     assert!(registration.debugger_command_line().len() < 260);
     assert_eq!(registration.environment().last(), Some(&0));
