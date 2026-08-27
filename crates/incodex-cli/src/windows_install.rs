@@ -184,16 +184,27 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
     let profile = crate::windows_profile::windows_user_profile()?;
     let user_root = profile.join(".incodex");
     let durable_state = read_windows_install_state_for_uninstall(&user_root);
+    let registration_evidence = read_windows_debug_registration(&user_root);
     let discovered_app = discover_codex_package();
     print_uninstall_plan(
         discovered_app.as_ref().ok(),
         durable_state.as_ref().ok().and_then(Option::as_ref),
+        registration_evidence.as_ref().ok().and_then(Option::as_ref),
     );
     if let Err(error) = &durable_state {
         println!(
             "{}",
             format_warn(
                 &format!("Primary install state needs registration recovery: {error}"),
+                None
+            )
+        );
+    }
+    if let Err(error) = &registration_evidence {
+        println!(
+            "{}",
+            format_warn(
+                &format!("Debugger registration recovery evidence is unreadable: {error}"),
                 None
             )
         );
@@ -443,13 +454,15 @@ fn print_plan(action: &str, app: &WindowsCodexApp) {
     );
 }
 
-fn print_uninstall_plan(app: Option<&WindowsCodexApp>, state: Option<&WindowsInstallState>) {
+fn print_uninstall_plan(
+    app: Option<&WindowsCodexApp>,
+    state: Option<&WindowsInstallState>,
+    evidence: Option<&WindowsDebugRegistrationEvidence>,
+) {
     println!("{}", format_step("Uninstall", None));
-    let package = state
-        .map(|state| state.package_full_name.as_str())
-        .or_else(|| app.map(|app| app.package_full_name.as_str()))
-        .unwrap_or("Not discovered");
+    let package = uninstall_plan_package(app, state, evidence);
     let executable = app
+        .filter(|app| app.package_full_name == package)
         .map(|app| app.executable.display().to_string())
         .unwrap_or_else(|| "Unavailable".to_string());
     println!("{}", format_kv("Package", package, None));
@@ -458,6 +471,18 @@ fn print_uninstall_plan(app: Option<&WindowsCodexApp>, state: Option<&WindowsIns
         "{}",
         format_warn("The Microsoft Store package is not modified.", None)
     );
+}
+
+fn uninstall_plan_package<'a>(
+    app: Option<&'a WindowsCodexApp>,
+    state: Option<&'a WindowsInstallState>,
+    evidence: Option<&'a WindowsDebugRegistrationEvidence>,
+) -> &'a str {
+    state
+        .map(|state| state.package_full_name.as_str())
+        .or_else(|| evidence.map(|evidence| evidence.package_full_name.as_str()))
+        .or_else(|| app.map(|app| app.package_full_name.as_str()))
+        .unwrap_or("Not discovered")
 }
 
 fn reject_windows_target_selectors(parsed: &ParsedCli) -> Result<(), String> {

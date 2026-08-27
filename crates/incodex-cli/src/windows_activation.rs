@@ -37,6 +37,7 @@ use crate::windows_registration::{
 
 const PACKAGE_DEBUGGER_MODE: &str = "__incodex_windows_package_debugger";
 const INSTALLED_DEBUGGER_MODE: &str = "__incodex_windows_installed_debugger";
+const PACKAGE_DEBUGGER_COMMAND_LIMIT_UTF16: usize = 260;
 const PACKAGE_ACTIVATION_LOCK_NAME: &str = "Local\\Incodex-OpenAI.Codex-Activation";
 const PACKAGE_ACTIVATION_LOCK_TIMEOUT_MS: u32 = 15_000;
 const ACTIVATION_ENVIRONMENT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -867,7 +868,7 @@ pub fn transient_debugger_command_line(
     if !executable.is_absolute() {
         return Err("Windows transient debugger helper path must be absolute".to_string());
     }
-    [
+    let command = [
         executable.as_os_str().to_os_string(),
         OsString::from(PACKAGE_DEBUGGER_MODE),
         OsString::from("--job"),
@@ -878,7 +879,18 @@ pub fn transient_debugger_command_line(
     .iter()
     .map(|argument| quote_windows_argument(argument))
     .collect::<Result<Vec<_>, _>>()
-    .map(|arguments| arguments.join(" "))
+    .map(|arguments| arguments.join(" "))?;
+    validate_package_debugger_command(command)
+}
+
+fn validate_package_debugger_command(command: String) -> Result<String, String> {
+    let utf16_units = command.encode_utf16().count();
+    if utf16_units >= PACKAGE_DEBUGGER_COMMAND_LIMIT_UTF16 {
+        return Err(format!(
+            "Windows package debugger command uses {utf16_units} UTF-16 units; PackageDebugSettings requires fewer than {PACKAGE_DEBUGGER_COMMAND_LIMIT_UTF16} UTF-16 units"
+        ));
+    }
+    Ok(command)
 }
 
 fn join_cleanup_error(primary: String, cleanup: Result<(), String>) -> String {
