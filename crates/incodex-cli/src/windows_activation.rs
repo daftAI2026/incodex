@@ -130,6 +130,8 @@ impl WindowsInstalledRuntimeRegistration {
         let debugger_command_line = [
             helper_path.as_os_str().to_os_string(),
             OsString::from(INSTALLED_DEBUGGER_MODE),
+            OsString::from("--package"),
+            OsString::from(package_full_name),
         ]
         .iter()
         .map(|argument| quote_windows_argument(argument))
@@ -188,6 +190,7 @@ struct InstalledDebuggerRegistrationEvidence {
 }
 
 fn installed_debugger_registration_evidence(
+    registered_package: &str,
 ) -> Result<InstalledDebuggerRegistrationEvidence, String> {
     let helper = std::env::current_exe()
         .map_err(|error| format!("cannot locate the Windows installed debugger: {error}"))?;
@@ -225,12 +228,10 @@ fn installed_debugger_registration_evidence(
         .ok_or_else(|| "Windows installed debugger has no Incodex root".to_string())?;
     let helper = std::fs::canonicalize(&helper)
         .map_err(|error| format!("cannot resolve the Windows installed debugger: {error}"))?;
-    let package_full_name = std::env::var("INCODEX_WINDOWS_PACKAGE_FULL_NAME")
-        .map_err(|_| "Windows installed debugger package evidence is unavailable".to_string())?;
-    validate_codex_package_full_name(&package_full_name)?;
+    validate_codex_package_full_name(registered_package)?;
     Ok(InstalledDebuggerRegistrationEvidence {
         helper,
-        package_full_name,
+        package_full_name: registered_package.to_string(),
         user_root: user_root.to_path_buf(),
     })
 }
@@ -814,7 +815,8 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
         let thread_id = flag_value(arguments, "-tid")?
             .parse::<u32>()
             .map_err(|_| "Windows installed debugger received an invalid thread id".to_string())?;
-        let evidence = installed_debugger_registration_evidence()?;
+        let registered_package = flag_value(arguments, "--package")?;
+        let evidence = installed_debugger_registration_evidence(registered_package)?;
         let state = installed_state_for_current_helper(&evidence);
         let command_line = process_command_line(process_id).ok();
         let (package_full_name, route) = installed_debugger_route_from_state(
