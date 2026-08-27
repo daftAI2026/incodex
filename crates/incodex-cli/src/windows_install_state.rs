@@ -299,7 +299,7 @@ fn allowed_transition(current: WindowsInstallPhase, next: WindowsInstallPhase) -
     };
     matches!(
         (current, next),
-        (Staged, EnablePending)
+        (Staged, EnablePending | Disabled)
             | (EnablePending, EnabledUnobserved | RecoveryRequired)
             | (
                 EnabledUnobserved,

@@ -19,6 +19,7 @@ use crate::windows_process::running_package_process_ids;
 use crate::windows_runtime::publish_windows_runtime;
 
 pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
+    reject_windows_target_selectors(parsed)?;
     let app = discover_codex_package()?;
     print_plan("Install", &app);
     if parsed.dry_run {
@@ -156,17 +157,29 @@ fn join_recovery_error(error: String, recovery: Result<WindowsInstallState, Stri
 }
 
 pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
-    let app = discover_codex_package()?;
-    print_plan("Uninstall", &app);
+    reject_windows_target_selectors(parsed)?;
+    let profile = crate::windows_profile::windows_user_profile()?;
+    let user_root = profile.join(".incodex");
+    let durable_state = read_windows_install_state(&user_root)?;
+    let discovered_app = discover_codex_package();
+    print_uninstall_plan(discovered_app.as_ref().ok(), durable_state.as_ref());
+    if let Err(error) = &discovered_app {
+        println!(
+            "{}",
+            format_warn(
+                &format!("The Microsoft Store package is unavailable: {error}"),
+                None
+            )
+        );
+    }
     if parsed.dry_run {
         println!("{}", format_warn("Dry run. No files changed.", None));
         println!();
         return Ok(());
     }
     crate::confirm::require("uninstall", parsed.yes)?;
-    let profile = crate::windows_profile::windows_user_profile()?;
     match uninstall_windows_runtime_with(
-        &profile.join(".incodex"),
+        &user_root,
         running_package_process_ids,
         codex_package_full_name_is_installed,
         disable_installed_runtime,
@@ -218,6 +231,14 @@ where
         return Ok(WindowsUninstallOutcome::NotInstalled);
     };
     state = match state.phase {
+        WindowsInstallPhase::Staged => {
+            transition_windows_install_state(user_root, state.epoch, WindowsInstallPhase::Disabled)?
+        }
+        WindowsInstallPhase::EnablePending => transition_windows_install_state(
+            user_root,
+            state.epoch,
+            WindowsInstallPhase::RecoveryRequired,
+        )?,
         WindowsInstallPhase::EnabledUnobserved | WindowsInstallPhase::EnabledObserved => {
             transition_windows_install_state(
                 user_root,
@@ -226,13 +247,9 @@ where
             )?
         }
         WindowsInstallPhase::DisableRequested
+        | WindowsInstallPhase::DisablePending
         | WindowsInstallPhase::Disabled
         | WindowsInstallPhase::RecoveryRequired => state,
-        phase => {
-            return Err(format!(
-                "Windows install state {phase:?} requires recovery before uninstall can continue"
-            ))
-        }
     };
     if state.phase == WindowsInstallPhase::Disabled {
         retire_disabled_windows_install_state(user_root, state.epoch)?;
@@ -246,11 +263,15 @@ where
             process_ids: running,
         });
     }
-    let pending = transition_windows_install_state(
-        user_root,
-        state.epoch,
-        WindowsInstallPhase::DisablePending,
-    )?;
+    let pending = if state.phase == WindowsInstallPhase::DisablePending {
+        state
+    } else {
+        transition_windows_install_state(
+            user_root,
+            state.epoch,
+            WindowsInstallPhase::DisablePending,
+        )?
+    };
     let package_is_installed = match package_is_installed(&pending.package_full_name) {
         Ok(installed) => installed,
         Err(error) => {
@@ -307,4 +328,28 @@ fn print_plan(action: &str, app: &WindowsCodexApp) {
         "{}",
         format_warn("The Microsoft Store package is not modified.", None)
     );
+}
+
+fn print_uninstall_plan(app: Option<&WindowsCodexApp>, state: Option<&WindowsInstallState>) {
+    println!("{}", format_step("Uninstall", None));
+    let package = state
+        .map(|state| state.package_full_name.as_str())
+        .or_else(|| app.map(|app| app.package_full_name.as_str()))
+        .unwrap_or("Not discovered");
+    let executable = app
+        .map(|app| app.executable.display().to_string())
+        .unwrap_or_else(|| "Unavailable".to_string());
+    println!("{}", format_kv("Package", package, None));
+    println!("{}", format_kv("App", &executable, None));
+    println!(
+        "{}",
+        format_warn("The Microsoft Store package is not modified.", None)
+    );
+}
+
+fn reject_windows_target_selectors(parsed: &ParsedCli) -> Result<(), String> {
+    if parsed.clone || parsed.app.is_some() {
+        return Err("--clone and --app are not supported on Windows".to_string());
+    }
+    Ok(())
 }

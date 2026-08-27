@@ -203,10 +203,20 @@ fn installed_state_for_current_helper() -> Result<WindowsInstallState, String> {
         .ok_or_else(|| "Windows installed debugger state does not exist".to_string())?;
     let helper = std::fs::canonicalize(&helper)
         .map_err(|error| format!("cannot resolve the Windows installed debugger: {error}"))?;
-    if state.helper_path != helper || !state.desired_enabled() {
+    if state.helper_path != helper {
         return Err("Windows installed debugger state does not authorize this helper".to_string());
     }
     Ok(state)
+}
+
+pub fn windows_installed_debugger_route(
+    state: &WindowsInstallState,
+    command_line: &str,
+) -> Result<WindowsDebuggerRoute, String> {
+    if !state.desired_enabled() {
+        return Ok(WindowsDebuggerRoute::ResumeNormally);
+    }
+    windows_debugger_route(command_line)
 }
 
 impl WindowsActivationRequest {
@@ -743,7 +753,7 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
         let package_full_name = state.package_full_name.as_str();
         let route = process_command_line(process_id)
             .ok()
-            .map(|command_line| windows_debugger_route(&command_line))
+            .map(|command_line| windows_installed_debugger_route(&state, &command_line))
             .transpose()?
             .unwrap_or(WindowsDebuggerRoute::ResumeNormally);
         match route {

@@ -162,7 +162,9 @@ fn windows_install_commands_reject_macos_target_selectors_before_discovery() {
 #[test]
 fn uninstall_reads_durable_state_before_optional_store_discovery() {
     let source = include_str!("../src/windows_install.rs");
-    let start = source.find("pub fn run_uninstall").expect("uninstall entry");
+    let start = source
+        .find("pub fn run_uninstall")
+        .expect("uninstall entry");
     let end = source[start..]
         .find("pub enum WindowsUninstallOutcome")
         .map(|offset| start + offset)

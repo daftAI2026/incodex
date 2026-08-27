@@ -59,12 +59,9 @@ fn installed_debugger_resumes_normally_after_the_uninstall_kill_switch() {
         "0.5.0-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     )
     .expect("stage debugger state");
-    let enable_pending = transition_windows_install_state(
-        &root,
-        staged.epoch,
-        WindowsInstallPhase::EnablePending,
-    )
-    .expect("record enable pending");
+    let enable_pending =
+        transition_windows_install_state(&root, staged.epoch, WindowsInstallPhase::EnablePending)
+            .expect("record enable pending");
     let enabled = transition_windows_install_state(
         &root,
         enable_pending.epoch,
