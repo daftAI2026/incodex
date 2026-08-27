@@ -75,6 +75,18 @@ describe("incognito banner placement", () => {
   });
 });
 
+describe("launch warning placement", () => {
+  test("reuses the official banner mount on Windows without changing the macOS fallback", () => {
+    expect(inject).toMatch(
+      /function showLaunchError\(\): void \{[\s\S]*isWindowsRenderer\(\)[\s\S]*mountInOfficialBannerSlot\(card\)/,
+    );
+    expect(inject).toMatch(
+      /function ensureLanding\(\): void \{[\s\S]*mountInOfficialBannerSlot\(host\)/,
+    );
+    expect(inject).toContain("document.body.append(card)");
+  });
+});
+
 describe("incognito profile mask", () => {
   test("pins the official Blobatar core for offline generated avatars", () => {
     expect(packageJson.dependencies?.blobatar).toBe("2.4.0");
