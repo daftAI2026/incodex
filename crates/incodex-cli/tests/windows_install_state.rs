@@ -140,6 +140,38 @@ fn uninstall_publishes_the_kill_switch_before_waiting_then_disables_once() {
 }
 
 #[test]
+fn uninstall_disables_the_registered_package_when_the_helper_was_removed() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    let installed =
+        install_windows_runtime_with(&user_root, package, &helper, |_| Ok(Vec::new()), |_| Ok(()))
+            .expect("install fixture Runtime");
+    fs::remove_file(&installed.helper_path).expect("remove published helper fixture");
+
+    let mut disabled = false;
+    let outcome = uninstall_windows_runtime_with(
+        &user_root,
+        |_| Ok(Vec::new()),
+        |_| Ok(true),
+        |disabled_package| {
+            disabled = true;
+            assert_eq!(disabled_package, package);
+            Ok(())
+        },
+    )
+    .expect("uninstall without the published helper");
+
+    assert_eq!(outcome, WindowsUninstallOutcome::Removed);
+    assert!(disabled, "the durable debugger registration was not disabled");
+    assert!(
+        !user_root.join("windows-install.json").exists(),
+        "the disabled install generation was not retired"
+    );
+    fs::remove_dir_all(user_root).expect("remove missing-helper uninstall fixture");
+}
+
+#[test]
 fn uninstall_recovers_after_the_store_replaces_the_registered_package() {
     let user_root = scratch_root();
     let helper = std::env::current_exe().expect("test helper path");
