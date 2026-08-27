@@ -595,5 +595,10 @@ mod tests {
             uninstall_plan_package(Some(&discovered), &approval),
             "OpenAI.Codex_1.2.3.4_x64__publisher"
         );
+        let plan = format_uninstall_plan(Some(&discovered), &approval);
+        assert!(
+            plan.contains("Registration 0123456789abcdef0123456789abcdef"),
+            "{plan}"
+        );
     }
 }
