@@ -129,4 +129,23 @@ describe("tooltip lifecycle", () => {
     expect(harness.events).toEqual(["show", "hide"]);
     expect(providerEvents).toEqual(["activate", "deactivate"]);
   });
+
+  test("trigger dismissal stays closed until pointer and focus both exit", () => {
+    const harness = createHarness();
+
+    harness.lifecycle.pointerEnter();
+    harness.runScheduled();
+    harness.lifecycle.trigger();
+    harness.lifecycle.focus();
+    harness.runScheduled();
+
+    expect(harness.events).toEqual(["show", "hide"]);
+
+    harness.lifecycle.pointerLeave();
+    harness.lifecycle.blur();
+    harness.lifecycle.pointerEnter();
+    harness.runScheduled();
+
+    expect(harness.events).toEqual(["show", "hide", "hide", "hide", "show"]);
+  });
 });

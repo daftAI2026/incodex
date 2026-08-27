@@ -63,6 +63,7 @@ describe("incognito button exit affordance", () => {
     const clickHandler = inject.slice(clickStart, clickEnd);
     expect(clickHandler).toContain("event.preventDefault()");
     expect(clickHandler).toContain("event.stopImmediatePropagation()");
+    expect(clickHandler).toContain("tooltipLifecycle.trigger()");
     expect(clickHandler).toContain("void activate()");
   });
 });
@@ -248,6 +249,12 @@ describe("incodex tooltip lifecycle", () => {
 
   test("does not override the official fit-content width utility", () => {
     expect(inject).not.toContain("width: max-content");
+  });
+
+  test("inherits the live official window zoom through a positioning host", () => {
+    expect(inject).toContain("officialWindowZoom(document.documentElement)");
+    expect(inject).toContain('tip.style.zoom = zoom === 1 ? "" : String(zoom)');
+    expect(inject).toContain("TIP_HOST_ATTR");
   });
 
   test("clears an open tooltip without losing a connected button lifecycle", () => {
