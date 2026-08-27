@@ -353,6 +353,11 @@ fn transient_registration_survives_launcher_termination_and_recovers_from_a_stab
     )
     .expect("stable transient debugger command");
     assert!(command.contains(&helper.executable.display().to_string()));
+    assert!(
+        command.encode_utf16().count() < 260,
+        "PackageDebugSettings rejects an overlong debugger command: {} UTF-16 units",
+        command.encode_utf16().count()
+    );
     assert_eq!(evidence.helper_path, helper.executable);
 
     let mut disabled = false;
