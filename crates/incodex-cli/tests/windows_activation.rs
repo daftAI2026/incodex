@@ -10,23 +10,29 @@ use incodex_cli::windows_activation::{
     try_run_package_debugger, windows_debugger_route, WindowsActivationFailure,
     WindowsActivationRequest, WindowsDebuggerRoute, WindowsInstalledRuntimeRegistration,
 };
-use incodex_cli::windows_activation_capability::WindowsActivationCapability;
 use incodex_cli::windows_launch::WindowsLaunchMode;
 
 #[test]
-fn stable_debugger_routes_only_a_tokened_process_into_the_matching_job() {
+fn stable_debugger_routes_only_an_isolated_profile_into_the_matching_job() {
     assert_eq!(
         windows_debugger_route("ChatGPT.exe codex://new?mode=codex").expect("normal route"),
         WindowsDebuggerRoute::ResumeNormally
     );
+    let user_data_dir = r"C:\Users\Linus Torvalds\.incodex\sessions\one\chromium";
+    let request = WindowsActivationRequest::new(
+        "OpenAI.Codex_26.820.7780.0_x64__2p2nqsd0c76g0",
+        "OpenAI.Codex_2p2nqsd0c76g0!App",
+        [OsString::from(format!("--user-data-dir={user_data_dir}"))],
+        BTreeMap::new(),
+    )
+    .expect("isolated activation request");
+    let capability = request
+        .activation_capability()
+        .expect("derive activation capability from the isolated profile");
     assert_eq!(
-        windows_debugger_route(
-            "ChatGPT.exe --incodex-activation-token=0123456789abcdef0123456789abcdef"
-        )
-        .expect("isolated route"),
-        WindowsDebuggerRoute::AssignToJob(
-            "Local\\Incodex-0123456789abcdef0123456789abcdef".to_string()
-        )
+        windows_debugger_route(&format!("ChatGPT.exe {}", request.arguments()))
+            .expect("isolated route"),
+        WindowsDebuggerRoute::AssignToJob(capability.job_name().to_string())
     );
 }
 use incodex_cli::windows_process::WindowsProcessTree;
@@ -150,7 +156,6 @@ fn builds_a_store_activation_request_without_losing_windows_arguments_or_environ
 
 #[test]
 fn installed_activation_moves_isolation_into_one_authenticated_capability() {
-    let capability = WindowsActivationCapability::create().expect("create activation capability");
     let user_home = r"C:\Users\林 纳斯\.incodex\sessions\one\codex-home";
     let request = WindowsActivationRequest::new(
         "OpenAI.Codex_26.820.7780.0_x64__2p2nqsd0c76g0",
@@ -165,11 +170,18 @@ fn installed_activation_moves_isolation_into_one_authenticated_capability() {
     )
     .expect("valid installed activation request");
 
-    let arguments = request.arguments_with_capability(&capability);
+    let capability = request
+        .activation_capability()
+        .expect("derive capability from the isolated profile");
+    let arguments = request.arguments();
     assert!(arguments
-        .starts_with(r#""--user-data-dir=C:\Users\林 纳斯\.incodex\sessions\one\chromium\\" "#,));
-    assert!(arguments.ends_with(&capability.command_line_argument()));
-    assert_eq!(arguments.matches("--incodex-activation-token=").count(), 1);
+        .starts_with(r#""--user-data-dir=C:\Users\林 纳斯\.incodex\sessions\one\chromium\\""#,));
+    assert_eq!(arguments.matches("--incodex-activation-token=").count(), 0);
+    assert_eq!(
+        windows_debugger_route(&format!("ChatGPT.exe {arguments}"))
+            .expect("route isolated profile"),
+        WindowsDebuggerRoute::AssignToJob(capability.job_name().to_string())
+    );
 
     let claimed = request
         .activation_environment(WindowsLaunchMode::Runtime)
