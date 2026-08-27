@@ -179,6 +179,65 @@ fn uninstall_disables_the_registered_package_when_the_helper_was_removed() {
 }
 
 #[test]
+fn uninstall_uses_independent_registration_evidence_when_install_state_is_missing() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    install_windows_runtime_with(&user_root, package, &helper, |_| Ok(Vec::new()), |_| Ok(()))
+        .expect("install fixture Runtime");
+    assert!(
+        user_root.join("windows-registration.json").is_file(),
+        "install did not persist independent registration evidence"
+    );
+    fs::remove_file(user_root.join("windows-install.json")).expect("remove primary install state");
+
+    let mut disabled = false;
+    let outcome = uninstall_windows_runtime_with(
+        &user_root,
+        |_| Ok(Vec::new()),
+        |_| Ok(true),
+        |registered_package| {
+            disabled = true;
+            assert_eq!(registered_package, package);
+            Ok(())
+        },
+    )
+    .expect("recover uninstall from independent evidence");
+
+    assert_eq!(outcome, WindowsUninstallOutcome::Removed);
+    assert!(disabled);
+    assert!(!user_root.join("windows-registration.json").exists());
+    fs::remove_dir_all(user_root).expect("remove missing-state fixture");
+}
+
+#[test]
+fn uninstall_removes_malformed_install_state_after_disabling_proven_registration() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    install_windows_runtime_with(&user_root, package, &helper, |_| Ok(Vec::new()), |_| Ok(()))
+        .expect("install fixture Runtime");
+    fs::write(user_root.join("windows-install.json"), b"{").expect("corrupt primary install state");
+
+    let mut disabled = false;
+    let outcome = uninstall_windows_runtime_with(
+        &user_root,
+        |_| Ok(Vec::new()),
+        |_| Ok(true),
+        |_| {
+            disabled = true;
+            Ok(())
+        },
+    )
+    .expect("recover uninstall from malformed state");
+
+    assert_eq!(outcome, WindowsUninstallOutcome::Removed);
+    assert!(disabled);
+    assert!(!user_root.join("windows-install.json").exists());
+    fs::remove_dir_all(user_root).expect("remove malformed-state fixture");
+}
+
+#[test]
 fn uninstall_recovers_after_the_store_replaces_the_registered_package() {
     let user_root = scratch_root();
     let helper = std::env::current_exe().expect("test helper path");

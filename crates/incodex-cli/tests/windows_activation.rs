@@ -3,23 +3,35 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_cli::windows_activation::{
     activate_packaged_kill_on_drop, activate_packaged_with_installed_runtime,
-    disable_installed_runtime, enable_installed_runtime, try_run_installed_package_debugger,
-    try_run_package_debugger, windows_debugger_route, windows_installed_debugger_route,
-    windows_transient_debugger_route, WindowsActivationFailure, WindowsActivationRequest,
-    WindowsDebuggerRoute, WindowsInstalledRuntimeRegistration,
+    disable_installed_runtime, enable_installed_runtime, transient_debugger_command_line,
+    try_run_installed_package_debugger, try_run_package_debugger, windows_debugger_route,
+    windows_installed_debugger_route, windows_transient_debugger_route, WindowsActivationFailure,
+    WindowsActivationRequest, WindowsDebuggerRoute, WindowsInstalledRuntimeRegistration,
 };
+use incodex_cli::windows_helper::publish_windows_helper;
 use incodex_cli::windows_install_state::{
     stage_windows_install_state, transition_windows_install_state, WindowsInstallPhase,
 };
 use incodex_cli::windows_launch::WindowsLaunchMode;
 use incodex_cli::windows_open::installed_activation_for_open;
+use incodex_cli::windows_registration::{
+    recover_transient_windows_debug_registration_with, stage_transient_windows_debug_registration,
+};
 
 static STATE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+fn registration_scratch() -> PathBuf {
+    let sequence = STATE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "incodex-windows-registration-{}-{sequence}",
+        std::process::id()
+    ))
+}
 
 #[test]
 fn stable_debugger_routes_only_an_isolated_profile_into_the_matching_job() {
@@ -315,6 +327,44 @@ fn transient_package_registration_keeps_session_environment_behind_the_capabilit
         .expect("build capability response");
     assert!(claimed.environment.contains_key("CODEX_HOME"));
     assert!(claimed.environment.contains_key("INCODEX_SESSION_ROOT"));
+}
+
+#[test]
+fn transient_registration_survives_launcher_termination_and_recovers_from_a_stable_helper() {
+    let user_root = registration_scratch();
+    let package = "OpenAI.Codex_26.820.7780.0_x64__2p2nqsd0c76g0";
+    let helper = publish_windows_helper(
+        &user_root,
+        &std::env::current_exe().expect("test helper source"),
+    )
+    .expect("publish stable helper");
+    let evidence =
+        stage_transient_windows_debug_registration(&user_root, package, &helper.executable)
+            .expect("persist transient registration evidence");
+
+    let command = transient_debugger_command_line(
+        &helper.executable,
+        "Local\\Incodex-activation-fixture",
+        package,
+    )
+    .expect("stable transient debugger command");
+    assert!(command.contains(&helper.executable.display().to_string()));
+    assert_eq!(evidence.helper_path, helper.executable);
+
+    let mut disabled = false;
+    assert!(recover_transient_windows_debug_registration_with(
+        &user_root,
+        |_| Ok(true),
+        |registered_package| {
+            disabled = true;
+            assert_eq!(registered_package, package);
+            Ok(())
+        },
+    )
+    .expect("recover abandoned transient registration"));
+    assert!(disabled);
+    assert!(!user_root.join("windows-registration.json").exists());
+    fs::remove_dir_all(user_root).expect("remove transient registration fixture");
 }
 
 #[test]
