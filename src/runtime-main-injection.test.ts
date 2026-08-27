@@ -32,9 +32,15 @@ describe("Electron UI injection reporting", () => {
     expect(hook).toMatch(/\.catch\(\(error\) => reportInjectionError\(error\)\)/);
   });
 
-  test("arms the Windows hidden-close lifecycle for normal and incognito hosts", () => {
-    expect(main).toContain("windowsPlatform.exitAfterLastMainWindowCloses(");
-    expect(main).not.toContain("if (windowsPlatform && !isIncognito())");
-    expect(main).toContain("finishIncognito(0)");
+  test("leaves official Windows main-window closure to Codex", () => {
+    const created = main.indexOf('electron.app.on("browser-window-created"');
+    const officialReturn = main.indexOf("if (!isIncognito()) return;", created);
+    expect(created).toBeGreaterThanOrEqual(0);
+    expect(officialReturn).toBeGreaterThan(created);
+
+    const beforeOfficialReturn = main.slice(created, officialReturn);
+    expect(beforeOfficialReturn).toContain("if (windowsPlatform && isIncognito())");
+    expect(beforeOfficialReturn).toContain("windowsPlatform.exitAfterLastMainWindowCloses(");
+    expect(beforeOfficialReturn).toContain("finishIncognito,");
   });
 });
