@@ -1,5 +1,8 @@
 use std::process::Command;
 
+#[cfg(target_os = "windows")]
+use crate::windows_system::system_binary_path;
+
 #[cfg(not(target_os = "windows"))]
 pub struct VersionFacts {
     pub version: String,
@@ -59,7 +62,9 @@ pub fn collect_version_facts() -> VersionFacts {
 
 #[cfg(target_os = "windows")]
 pub fn collect_version_facts() -> VersionFacts {
-    let version = probe("cmd", &["/C", "ver"]);
+    let version = system_binary_path("cmd.exe")
+        .map(|cmd| probe(cmd, &["/C", "ver"]))
+        .unwrap_or_else(|_| "Unknown".to_string());
     VersionFacts {
         version: env!("CARGO_PKG_VERSION").to_string(),
         windows: version,
@@ -69,7 +74,7 @@ pub fn collect_version_facts() -> VersionFacts {
     }
 }
 
-fn probe(cmd: &str, args: &[&str]) -> String {
+fn probe(cmd: impl AsRef<std::ffi::OsStr>, args: &[&str]) -> String {
     let output = Command::new(cmd).args(args).output();
     match output {
         Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
