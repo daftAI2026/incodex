@@ -188,46 +188,67 @@ fn installed_debugger_registration_evidence(
 ) -> Result<InstalledDebuggerRegistrationEvidence, String> {
     let helper = std::env::current_exe()
         .map_err(|error| format!("cannot locate the Windows installed debugger: {error}"))?;
-    let hash_dir = helper
-        .parent()
-        .ok_or_else(|| "Windows installed debugger has no release directory".to_string())?;
-    if helper
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_none_or(|name| !name.eq_ignore_ascii_case("incodex-helper.exe"))
-        || hash_dir
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_none_or(|name| {
-                name.len() != 64
-                    || !name
-                        .bytes()
-                        .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-            })
-    {
-        return Err("Windows installed debugger is not a content-addressed helper".to_string());
-    }
-    let helpers_dir = hash_dir
-        .parent()
-        .filter(|path| path.file_name().and_then(|name| name.to_str()) == Some("helpers"))
-        .ok_or_else(|| "Windows installed debugger is outside the helpers directory".to_string())?;
-    let windows_dir = helpers_dir
-        .parent()
-        .filter(|path| path.file_name().and_then(|name| name.to_str()) == Some("windows"))
-        .ok_or_else(|| {
-            "Windows installed debugger is outside the Windows Runtime directory".to_string()
-        })?;
-    let user_root = windows_dir
-        .parent()
-        .ok_or_else(|| "Windows installed debugger has no Incodex root".to_string())?;
+    let user_root = installed_debugger_user_root(&helper)?;
     let helper = std::fs::canonicalize(&helper)
         .map_err(|error| format!("cannot resolve the Windows installed debugger: {error}"))?;
     validate_codex_package_full_name(registered_package)?;
     Ok(InstalledDebuggerRegistrationEvidence {
         helper,
         package_full_name: registered_package.to_string(),
-        user_root: user_root.to_path_buf(),
+        user_root,
     })
+}
+
+fn installed_debugger_user_root(helper: &Path) -> Result<std::path::PathBuf, String> {
+    let hash_dir = helper
+        .parent()
+        .ok_or_else(|| "Windows installed debugger has no release directory".to_string())?;
+    let helper_name = helper
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "Windows installed debugger name is not valid Unicode".to_string())?;
+    let hash = hash_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "Windows installed debugger release is not valid Unicode".to_string())?;
+    let collection = hash_dir
+        .parent()
+        .and_then(|path| path.file_name())
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "Windows installed debugger has no helper collection".to_string())?;
+    let lowercase_hex = |value: &str| {
+        value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    };
+    let short = helper_name.eq_ignore_ascii_case("i.exe")
+        && collection.eq_ignore_ascii_case("i")
+        && hash.len() == 16
+        && lowercase_hex(hash);
+    let legacy = helper_name.eq_ignore_ascii_case("incodex-helper.exe")
+        && collection.eq_ignore_ascii_case("helpers")
+        && hash.len() == 64
+        && lowercase_hex(hash);
+    if !short && !legacy {
+        return Err("Windows installed debugger is not a content-addressed helper".to_string());
+    }
+    let helpers_dir = hash_dir
+        .parent()
+        .ok_or_else(|| "Windows installed debugger is outside the helpers directory".to_string())?;
+    let windows_dir = helpers_dir
+        .parent()
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case("windows"))
+        })
+        .ok_or_else(|| {
+            "Windows installed debugger is outside the Windows Runtime directory".to_string()
+        })?;
+    windows_dir
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| "Windows installed debugger has no Incodex root".to_string())
 }
 
 fn installed_state_for_current_helper(
