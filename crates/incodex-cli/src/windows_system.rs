@@ -41,3 +41,29 @@ pub(crate) fn system_binary_path(relative: impl AsRef<Path>) -> Result<PathBuf, 
         ))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::windows_path_for_display;
+    use std::path::Path;
+
+    #[test]
+    fn user_facing_windows_paths_hide_only_verbatim_disk_and_unc_prefixes() {
+        assert_eq!(
+            windows_path_for_display(Path::new(r"\\?\C:\Users\Kid\.incodex")),
+            r"C:\Users\Kid\.incodex"
+        );
+        assert_eq!(
+            windows_path_for_display(Path::new(r"\\?\UNC\server\share\Codex")),
+            r"\\server\share\Codex"
+        );
+        assert_eq!(
+            windows_path_for_display(Path::new(r"C:\Users\Kid\.incodex")),
+            r"C:\Users\Kid\.incodex"
+        );
+        assert_eq!(
+            windows_path_for_display(Path::new(r"\\?\Volume{fixture}\Codex")),
+            r"\\?\Volume{fixture}\Codex"
+        );
+    }
+}
