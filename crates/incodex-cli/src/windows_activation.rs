@@ -21,6 +21,7 @@ use windows_sys::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForS
 use crate::windows_activation_capability::{
     activation_capability_from_command_line, WindowsActivationCapability,
 };
+use crate::windows_app::validate_codex_package_full_name;
 use crate::windows_install_state::{read_windows_install_state, WindowsInstallState};
 use crate::windows_launch::{
     WindowsActivationEnvironment, WindowsActivationEnvironmentPipe, WindowsLaunchMode,
@@ -180,12 +181,35 @@ fn node_require_option(path: &Path) -> Result<OsString, String> {
     Ok(OsString::from_wide(&option))
 }
 
-fn installed_state_for_current_helper() -> Result<WindowsInstallState, String> {
+struct InstalledDebuggerRegistrationEvidence {
+    helper: std::path::PathBuf,
+    package_full_name: String,
+    user_root: std::path::PathBuf,
+}
+
+fn installed_debugger_registration_evidence(
+) -> Result<InstalledDebuggerRegistrationEvidence, String> {
     let helper = std::env::current_exe()
         .map_err(|error| format!("cannot locate the Windows installed debugger: {error}"))?;
     let hash_dir = helper
         .parent()
         .ok_or_else(|| "Windows installed debugger has no release directory".to_string())?;
+    if helper
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_none_or(|name| !name.eq_ignore_ascii_case("incodex-helper.exe"))
+        || hash_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_none_or(|name| {
+                name.len() != 64
+                    || !name
+                        .bytes()
+                        .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+            })
+    {
+        return Err("Windows installed debugger is not a content-addressed helper".to_string());
+    }
     let helpers_dir = hash_dir
         .parent()
         .filter(|path| path.file_name().and_then(|name| name.to_str()) == Some("helpers"))
@@ -199,14 +223,55 @@ fn installed_state_for_current_helper() -> Result<WindowsInstallState, String> {
     let user_root = windows_dir
         .parent()
         .ok_or_else(|| "Windows installed debugger has no Incodex root".to_string())?;
-    let state = read_windows_install_state(user_root)?
-        .ok_or_else(|| "Windows installed debugger state does not exist".to_string())?;
     let helper = std::fs::canonicalize(&helper)
         .map_err(|error| format!("cannot resolve the Windows installed debugger: {error}"))?;
-    if state.helper_path != helper {
+    let package_full_name = std::env::var("INCODEX_WINDOWS_PACKAGE_FULL_NAME")
+        .map_err(|_| "Windows installed debugger package evidence is unavailable".to_string())?;
+    validate_codex_package_full_name(&package_full_name)?;
+    Ok(InstalledDebuggerRegistrationEvidence {
+        helper,
+        package_full_name,
+        user_root: user_root.to_path_buf(),
+    })
+}
+
+fn installed_state_for_current_helper(
+    evidence: &InstalledDebuggerRegistrationEvidence,
+) -> Result<WindowsInstallState, String> {
+    let state = read_windows_install_state(&evidence.user_root)?
+        .ok_or_else(|| "Windows installed debugger state does not exist".to_string())?;
+    if state.helper_path != evidence.helper {
         return Err("Windows installed debugger state does not authorize this helper".to_string());
     }
+    if state.package_full_name != evidence.package_full_name {
+        return Err("Windows installed debugger package evidence changed".to_string());
+    }
     Ok(state)
+}
+
+fn installed_debugger_route_from_state(
+    state: Result<WindowsInstallState, String>,
+    registered_package: &str,
+    command_line: Option<&str>,
+) -> Result<(String, WindowsDebuggerRoute), String> {
+    validate_codex_package_full_name(registered_package)?;
+    let Ok(state) = state else {
+        return Ok((
+            registered_package.to_string(),
+            WindowsDebuggerRoute::ResumeNormally,
+        ));
+    };
+    if state.package_full_name != registered_package {
+        return Ok((
+            registered_package.to_string(),
+            WindowsDebuggerRoute::ResumeNormally,
+        ));
+    }
+    let route = command_line
+        .map(|command_line| windows_installed_debugger_route(&state, command_line))
+        .transpose()?
+        .unwrap_or(WindowsDebuggerRoute::ResumeNormally);
+    Ok((state.package_full_name, route))
 }
 
 pub fn windows_installed_debugger_route(
@@ -749,19 +814,20 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
         let thread_id = flag_value(arguments, "-tid")?
             .parse::<u32>()
             .map_err(|_| "Windows installed debugger received an invalid thread id".to_string())?;
-        let state = installed_state_for_current_helper()?;
-        let package_full_name = state.package_full_name.as_str();
-        let route = process_command_line(process_id)
-            .ok()
-            .map(|command_line| windows_installed_debugger_route(&state, &command_line))
-            .transpose()?
-            .unwrap_or(WindowsDebuggerRoute::ResumeNormally);
+        let evidence = installed_debugger_registration_evidence()?;
+        let state = installed_state_for_current_helper(&evidence);
+        let command_line = process_command_line(process_id).ok();
+        let (package_full_name, route) = installed_debugger_route_from_state(
+            state,
+            &evidence.package_full_name,
+            command_line.as_deref(),
+        )?;
         match route {
             WindowsDebuggerRoute::ResumeNormally => {
-                resume_debugged_package_process(package_full_name, process_id, thread_id)
+                resume_debugged_package_process(&package_full_name, process_id, thread_id)
             }
             WindowsDebuggerRoute::AssignToJob(job_name) => {
-                assign_debugged_process_to_job(&job_name, package_full_name, process_id, thread_id)
+                assign_debugged_process_to_job(&job_name, &package_full_name, process_id, thread_id)
             }
         }
         .map_err(|error| format!("Windows installed debugger failed: {error}"))

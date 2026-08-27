@@ -82,12 +82,7 @@ $applications = @($manifest.Package.Applications.Application | ForEach-Object {
 }
 
 pub fn codex_package_full_name_is_installed(package_full_name: &str) -> Result<bool, String> {
-    if !package_full_name.starts_with("OpenAI.Codex_")
-        || !package_full_name.ends_with(PACKAGE_FAMILY_SUFFIX)
-        || package_full_name.contains('\0')
-    {
-        return Err("Windows package identity is not the official Codex package".to_string());
-    }
+    validate_codex_package_full_name(package_full_name)?;
     let script = r#"$package = Get-AppxPackage -Name OpenAI.Codex | Where-Object { $_.PackageFullName -ceq $env:INCODEX_PACKAGE_FULL_NAME } | Select-Object -First 1
 if ($null -eq $package) { exit 3 }
 exit 0"#;
@@ -100,6 +95,17 @@ exit 0"#;
         Some(0) => Ok(true),
         Some(3) => Ok(false),
         _ => Err("Windows package generation query failed".to_string()),
+    }
+}
+
+pub(crate) fn validate_codex_package_full_name(package_full_name: &str) -> Result<(), String> {
+    if package_full_name.starts_with("OpenAI.Codex_")
+        && package_full_name.ends_with(PACKAGE_FAMILY_SUFFIX)
+        && !package_full_name.contains(['\0', '\r', '\n'])
+    {
+        Ok(())
+    } else {
+        Err("Windows package identity is not the official Codex package".to_string())
     }
 }
 
@@ -133,13 +139,10 @@ pub fn parse_package_evidence(raw: &str) -> Result<WindowsPackageEvidence, Strin
 }
 
 pub fn inspect_codex_package(evidence: WindowsPackageEvidence) -> Result<WindowsCodexApp, String> {
-    if evidence.name != PACKAGE_NAME
-        || !evidence.package_full_name.starts_with("OpenAI.Codex_")
-        || !evidence.package_full_name.ends_with(PACKAGE_FAMILY_SUFFIX)
-        || evidence.package_family_name != PACKAGE_FAMILY_NAME
-    {
+    if evidence.name != PACKAGE_NAME || evidence.package_family_name != PACKAGE_FAMILY_NAME {
         return Err("Windows package identity is not the official Codex package".to_string());
     }
+    validate_codex_package_full_name(&evidence.package_full_name)?;
     if evidence.signature_kind != "Store" || evidence.status != "Ok" {
         return Err("official Codex Microsoft Store package is not healthy".to_string());
     }
