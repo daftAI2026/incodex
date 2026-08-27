@@ -211,7 +211,10 @@ fn closing_before_injection_finishes_still_removes_the_session() {
     );
 
     assert_eq!(outcome.process, WindowsOpenProcessResult::Exited(0));
-    assert!(!outcome.ui_ready, "injection finished before early close won");
+    assert!(
+        !outcome.ui_ready,
+        "injection finished before early close won"
+    );
     assert!(visibility_polls.load(Ordering::Relaxed) > 1);
     assert_eq!(outcome.cleanup, WindowsCleanupResult::Removed);
     assert!(!session_root.exists());
