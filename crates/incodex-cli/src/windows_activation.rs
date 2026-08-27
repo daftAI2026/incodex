@@ -1196,7 +1196,8 @@ mod tests {
 
     use super::{
         acquire_package_activation_lock, activation_manager_failure, cleanup_proof_after_debugging,
-        installed_debugger_route_from_state, node_require_option, WindowsDebuggerRoute,
+        installed_debugger_route_from_state, installed_debugger_user_root, node_require_option,
+        WindowsDebuggerRoute,
     };
 
     #[test]
@@ -1222,6 +1223,24 @@ mod tests {
             .expect("serialize Node preload"),
             OsString::from(r#"--require="C:/Users/Linus Torvalds/.incodex/runtime/bootstrap.cjs""#)
         );
+    }
+
+    #[test]
+    fn installed_debugger_finds_short_and_legacy_private_roots() {
+        let root = Path::new(r"C:\Users\test\.incodex");
+        assert_eq!(
+            installed_debugger_user_root(&root.join(r"windows\i\0123456789abcdef\i.exe"))
+                .expect("short installed helper"),
+            root
+        );
+        assert_eq!(
+            installed_debugger_user_root(&root.join(
+                r"windows\helpers\0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\incodex-helper.exe",
+            ))
+            .expect("legacy installed helper"),
+            root
+        );
+        assert!(installed_debugger_user_root(&root.join(r"windows\i\not-hex\i.exe")).is_err());
     }
 
     #[test]
