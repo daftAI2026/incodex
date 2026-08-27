@@ -7,8 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use incodex_cli::windows_app::WindowsCodexApp;
 use incodex_cli::windows_runtime_open::{
     parse_windows_runtime_open, prepare_windows_runtime_open, windows_runtime_ready_for_handshake,
-    windows_runtime_shutdown_authorized, windows_runtime_startup_action,
-    WindowsRuntimeOwnerClaim, WindowsRuntimeReadyPipe, WindowsRuntimeStartupAction,
+    windows_runtime_shutdown_authorized, windows_runtime_startup_action, WindowsRuntimeOwnerClaim,
+    WindowsRuntimeReadyPipe, WindowsRuntimeStartupAction,
 };
 use incodex_core::windows_session::{burn_windows_session, WindowsCleanupResult};
 

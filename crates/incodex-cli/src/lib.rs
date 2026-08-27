@@ -77,6 +77,8 @@ pub(crate) mod windows_profile;
 #[cfg(target_os = "windows")]
 pub mod windows_runtime;
 #[cfg(target_os = "windows")]
+mod windows_runtime_lifecycle;
+#[cfg(target_os = "windows")]
 pub mod windows_runtime_open;
 #[cfg(target_os = "windows")]
 pub mod windows_status;

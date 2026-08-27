@@ -44,6 +44,11 @@ use crate::windows_install_state::{
 };
 use crate::windows_process::WindowsProcessTree;
 
+pub use crate::windows_runtime_lifecycle::{
+    windows_runtime_ready_for_handshake, windows_runtime_shutdown_authorized,
+    windows_runtime_startup_action, WindowsRuntimeStartupAction,
+};
+
 const RUNTIME_OPEN_MODE: &str = "__incodex_windows_runtime_open";
 const READY_TIMEOUT: Duration = Duration::from_secs(30);
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
@@ -472,22 +477,13 @@ fn run_guardian_lifecycle(
     let ready_deadline = Instant::now() + READY_TIMEOUT;
     let mut runtime_accepted = false;
     loop {
-        if cancelled.load(Ordering::Acquire) {
-            return guardian_failure(
-                "Windows Runtime launch was cancelled before readiness".to_string(),
-                &session,
-                &mut process_tree,
-            );
-        }
-        match process_tree.try_wait() {
-            Ok(Some(status)) => {
-                return Err(with_shutdown_cleanup(
-                    format!("Codex exited with {status} before the shared Runtime was ready"),
-                    &session,
-                    Ok(()),
-                ))
-            }
-            Ok(None) => {}
+        let authenticated_close = match receive_authenticated_close(&close_receiver, &process_tree)
+        {
+            Ok(authenticated_close) => authenticated_close,
+            Err(error) => return guardian_failure(error, &session, &mut process_tree),
+        };
+        let process_status = match process_tree.try_wait() {
+            Ok(status) => status,
             Err(error) => {
                 return guardian_failure(
                     format!("cannot inspect installed Windows Runtime process: {error}"),
@@ -495,6 +491,33 @@ fn run_guardian_lifecycle(
                     &mut process_tree,
                 )
             }
+        };
+        match windows_runtime_startup_action(authenticated_close, process_status.is_some()) {
+            WindowsRuntimeStartupAction::Finish => {
+                return finish_authenticated_close(
+                    &session,
+                    &mut process_tree,
+                    process_status.is_some(),
+                )
+            }
+            WindowsRuntimeStartupAction::FailExited => {
+                return Err(with_shutdown_cleanup(
+                    format!(
+                        "Codex exited with {} before the shared Runtime was ready",
+                        process_status.expect("exited startup action requires process status")
+                    ),
+                    &session,
+                    Ok(()),
+                ))
+            }
+            WindowsRuntimeStartupAction::Continue => {}
+        }
+        if cancelled.load(Ordering::Acquire) {
+            return guardian_failure(
+                "Windows Runtime launch was cancelled before readiness".to_string(),
+                &session,
+                &mut process_tree,
+            );
         }
         if !runtime_accepted {
             match ready_receiver.try_recv() {
@@ -560,24 +583,10 @@ fn run_guardian_lifecycle(
                 &mut process_tree,
             );
         }
-        let authenticated_close = match close_receiver.try_recv() {
-            Ok(Ok(closure)) => {
-                if let Err(error) =
-                    authenticate_runtime_signal(&process_tree, &closure, "closed", "closure")
-                {
-                    return guardian_failure(error, &session, &mut process_tree);
-                }
-                true
-            }
-            Ok(Err(error)) => return guardian_failure(error, &session, &mut process_tree),
-            Err(TryRecvError::Empty) => false,
-            Err(TryRecvError::Disconnected) => {
-                return guardian_failure(
-                    "Windows Runtime close channel ended without evidence".to_string(),
-                    &session,
-                    &mut process_tree,
-                )
-            }
+        let authenticated_close = match receive_authenticated_close(&close_receiver, &process_tree)
+        {
+            Ok(authenticated_close) => authenticated_close,
+            Err(error) => return guardian_failure(error, &session, &mut process_tree),
         };
         let job_empty = match process_tree.try_wait() {
             Ok(Some(_)) => true,
@@ -591,21 +600,44 @@ fn run_guardian_lifecycle(
             }
         };
         if windows_runtime_shutdown_authorized(authenticated_close, job_empty) {
-            if job_empty {
-                return finish_guardian(&session, Ok(()));
-            }
-            let shutdown = process_tree
-                .terminate_successfully()
-                .map(|_| ())
-                .map_err(|error| {
-                    format!(
-                        "cannot prove Windows Runtime shutdown after its main window closed: {error}"
-                    )
-                });
-            return finish_guardian(&session, shutdown);
+            return finish_authenticated_close(&session, &mut process_tree, job_empty);
         }
         thread::sleep(POLL_INTERVAL);
     }
+}
+
+fn receive_authenticated_close(
+    close_receiver: &Receiver<Result<WindowsRuntimeAcceptance, String>>,
+    process_tree: &WindowsProcessTree,
+) -> Result<bool, String> {
+    match close_receiver.try_recv() {
+        Ok(Ok(closure)) => {
+            authenticate_runtime_signal(process_tree, &closure, "closed", "closure")?;
+            Ok(true)
+        }
+        Ok(Err(error)) => Err(error),
+        Err(TryRecvError::Empty) => Ok(false),
+        Err(TryRecvError::Disconnected) => {
+            Err("Windows Runtime close channel ended without evidence".to_string())
+        }
+    }
+}
+
+fn finish_authenticated_close(
+    session: &WindowsSessionHome,
+    process_tree: &mut WindowsProcessTree,
+    job_empty: bool,
+) -> Result<(), String> {
+    if job_empty {
+        return finish_guardian(session, Ok(()));
+    }
+    let shutdown = process_tree
+        .terminate_successfully()
+        .map(|_| ())
+        .map_err(|error| {
+            format!("cannot prove Windows Runtime shutdown after its main window closed: {error}")
+        });
+    finish_guardian(session, shutdown)
 }
 
 fn authenticate_runtime_signal(
@@ -626,14 +658,6 @@ fn authenticate_runtime_signal(
             "cannot authenticate Windows Runtime {label} writer: {error}"
         )),
     }
-}
-
-pub fn windows_runtime_ready_for_handshake(runtime_accepted: bool, visible: bool) -> bool {
-    runtime_accepted && visible
-}
-
-pub fn windows_runtime_shutdown_authorized(authenticated_close: bool, job_empty: bool) -> bool {
-    authenticated_close || job_empty
 }
 
 fn listen_for_guardian_cancellation() -> Arc<AtomicBool> {
