@@ -10,6 +10,7 @@ describe("Windows Runtime bootstrap", () => {
         argv: string[];
         env: Record<string, string | undefined>;
         load: (path: string) => void;
+        onElectronLoaded: (callback: () => void) => void;
         processType: string;
         readActivationEnvironment: (pipeName: string) => unknown;
         runtimeDir: string;
@@ -20,12 +21,16 @@ describe("Windows Runtime bootstrap", () => {
     const env: Record<string, string | undefined> = {};
     const loaded: string[] = [];
     const pipes: string[] = [];
+    let electronLoaded: (() => void) | undefined;
 
     expect(
       bootstrap.attachWindowsRuntime({
         argv: [`--incodex-activation-token=${token}`],
         env,
         load: (path: string) => loaded.push(path),
+        onElectronLoaded: (callback) => {
+          electronLoaded = callback;
+        },
         processType: "browser",
         readActivationEnvironment(pipeName: string) {
           pipes.push(pipeName);
@@ -45,6 +50,9 @@ describe("Windows Runtime bootstrap", () => {
     ]);
     expect(env.CODEX_HOME).toEndWith("sessions\\one\\codex-home");
     expect(env.INCODEX_INCOGNITO).toBe("1");
+    expect(loaded).toEqual([]);
+    expect(electronLoaded).toBeFunction();
+    electronLoaded?.();
     expect(loaded).toEqual([join(runtimeDir, "incodex-main.cjs")]);
   });
 
@@ -54,6 +62,7 @@ describe("Windows Runtime bootstrap", () => {
         argv: string[];
         env: Record<string, string | undefined>;
         load: (path: string) => void;
+        onElectronLoaded: (callback: () => void) => void;
         processType: string;
         readActivationEnvironment: () => unknown;
       }): boolean;
@@ -96,9 +105,13 @@ describe("Windows Runtime bootstrap", () => {
       INCODEX_WINDOWS_STATE_PATH: "C:\\Users\\test\\.incodex\\windows-install.json",
     };
     const loaded: string[] = [];
+    let electronLoaded: (() => void) | undefined;
     const options = {
       env,
       load: (path: string) => loaded.push(path),
+      onElectronLoaded: (callback) => {
+        electronLoaded = callback;
+      },
       processType: "browser",
       readState: () => ({
         schemaVersion: 1,
@@ -113,6 +126,9 @@ describe("Windows Runtime bootstrap", () => {
 
     expect(bootstrap.attachWindowsRuntime(options)).toBe(true);
     expect(bootstrap.attachWindowsRuntime(options)).toBe(false);
+    expect(loaded).toEqual([]);
+    expect(electronLoaded).toBeFunction();
+    electronLoaded?.();
     expect(loaded).toHaveLength(1);
     expect(loaded[0]).toEndWith("incodex-main.cjs");
   });
