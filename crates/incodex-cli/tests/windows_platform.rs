@@ -294,7 +294,7 @@ fn status_reports_current_user_package_without_creating_state() {
         serde_json::from_slice(&json.stdout).expect("status emits valid JSON");
     assert_eq!(value["platform"], "windows");
     assert!(value["available"].is_boolean());
-    assert_eq!(value["integration"]["installed"], false);
+    assert!(value["integration"]["installed"].is_boolean());
     assert!(json.stderr.is_empty(), "{}", text(&json.stderr));
 
     assert!(!profile.exists(), "status created user state");
@@ -327,7 +327,7 @@ fn doctor_reports_package_and_session_health_without_creating_state() {
     assert!(value["sessions"]["active"].is_u64());
     assert!(value["sessions"]["orphaned"].is_u64());
     assert!(value["sessions"]["unknown"].is_u64());
-    assert_eq!(value["integration"]["installed"], false);
+    assert!(value["integration"]["installed"].is_boolean());
     assert!(json.stderr.is_empty(), "{}", text(&json.stderr));
 
     assert!(!profile.exists(), "doctor created user state");

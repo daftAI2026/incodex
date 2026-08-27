@@ -59,8 +59,8 @@ jobs:
           bun run typecheck
           bun run lint
           bun run check:dist
-          bun test src/runtime/windows-platform.test.ts
-          bun test src/runtime-load.test.ts tests/windows-bootstrap.test.ts
+          bun run test:shared
+          bun run test:windows
       - name: Windows CLI boundary
         run: |
           cargo fmt --all -- --check

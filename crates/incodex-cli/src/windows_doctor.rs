@@ -137,6 +137,7 @@ mod tests {
                 desired_enabled: false,
                 package_full_name: None,
                 runtime_release: None,
+                health_issues: Vec::new(),
             },
             sessions: WindowsSessions {
                 active: 0,

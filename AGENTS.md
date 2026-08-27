@@ -112,12 +112,16 @@ Do not add ratatui, cursive, crossterm, or an AGPL asar crate. The native menu i
 ```bash
 bun install --frozen-lockfile
 bun run check
+bun run test:shared
+bun run test:macos
+bun run test:windows
 bun run build:runtime
 INCODEX_DEV_HOT=1 bun run deploy:runtime
 cargo test --workspace --release
 ```
 
 Public docs use the native `incodex` / `inc` binaries. Bun is retained for Electron Runtime build/checks, not as a CLI entry point.
+`bun run check` dispatches the shared suite plus the current host suite; CI keeps the macOS and Windows platform suites explicit.
 
 ## Critical Safety Rules
 

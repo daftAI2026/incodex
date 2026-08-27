@@ -377,6 +377,7 @@ fn clean_process_exit_before_ui_ready_is_a_ui_injection_failure() {
         process: WindowsOpenProcessResult::Exited(0),
         ui_ready: false,
         cleanup: WindowsCleanupResult::Removed,
+        session_root: PathBuf::from(r"C:\Users\fixture\.incodex\sessions\s-test"),
     };
 
     let failure = finish_windows_open(outcome).expect_err("UI readiness failure must fail");

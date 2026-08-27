@@ -158,6 +158,28 @@ pub fn publish_windows_activation_bootstrap(user_root: &Path) -> Result<PathBuf,
     Ok(runtime.release_dir.join(WINDOWS_BOOTSTRAP_NAME))
 }
 
+pub(crate) fn verify_installed_windows_runtime(
+    user_root: &Path,
+    runtime_release: &str,
+) -> Result<(), String> {
+    if runtime_release.is_empty()
+        || runtime_release == "."
+        || runtime_release == ".."
+        || runtime_release.contains(['/', '\\', '\0', '\r', '\n'])
+    {
+        return Err("Windows Runtime release name is invalid".to_string());
+    }
+    let manifest: RuntimeManifest = serde_json::from_str(MANIFEST)
+        .map_err(|error| format!("invalid Runtime manifest: {error}"))?;
+    let runtime_root = user_root.join("runtime");
+    let releases = runtime_root.join("releases");
+    for directory in [user_root, runtime_root.as_path(), releases.as_path()] {
+        ensure_regular_directory(directory)?;
+        verify_private_acl(directory)?;
+    }
+    verify_release(&releases.join(runtime_release), &manifest)
+}
+
 fn publish_release(
     releases: &Path,
     release_dir: &Path,

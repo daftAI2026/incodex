@@ -25,6 +25,7 @@ use crate::cdp::{
 };
 use crate::locale::parse_locale_override;
 use crate::open_presentation::{
+    classify_completed_open, completed_open_failure_message, CompletedOpenState,
     CLOSED_REMOVED_MESSAGE, OPENED_MESSAGE, OPENING_MESSAGE, REMOVING_SESSION_MESSAGE,
     UI_READY_WAIT_MESSAGE, WAITING_MESSAGE,
 };
@@ -90,15 +91,11 @@ impl OpenProcessResult {
         }
         match self {
             Self::SpawnFailed { .. } => OpenExitCode::ProcessFailure,
-            Self::Exited {
-                code: 0,
-                ui_ready: false,
-            } => OpenExitCode::UiInjectionFailure,
-            Self::Exited {
-                code: 0,
-                ui_ready: true,
-            } => OpenExitCode::Success,
-            Self::Exited { .. } => OpenExitCode::ProcessFailure,
+            Self::Exited { code, ui_ready } => match classify_completed_open(*code, *ui_ready) {
+                CompletedOpenState::Success => OpenExitCode::Success,
+                CompletedOpenState::ProcessFailure => OpenExitCode::ProcessFailure,
+                CompletedOpenState::UiInjectionFailure => OpenExitCode::UiInjectionFailure,
+            },
         }
     }
 
@@ -111,11 +108,11 @@ impl OpenProcessResult {
                     format!("Unable to start the incognito window: {error}")
                 }
                 Self::Exited { code, .. } => {
-                    format!("Incognito Codex process exited with status {code}")
+                    completed_open_failure_message(*code, CompletedOpenState::ProcessFailure)
                 }
             },
             OpenExitCode::UiInjectionFailure => {
-                "Incognito Codex UI injection was not accepted".to_string()
+                completed_open_failure_message(0, CompletedOpenState::UiInjectionFailure)
             }
             OpenExitCode::Success => String::new(),
         }

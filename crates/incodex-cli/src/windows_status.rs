@@ -7,6 +7,10 @@ use crate::parse::ParsedCli;
 use crate::spinner::Spinner;
 use crate::windows_app::{discover_codex_package, WindowsCodexApp};
 use crate::windows_install_state::{read_windows_install_state, WindowsInstallPhase};
+use crate::windows_registration::{
+    read_windows_debug_registration, registration_matches_install_state,
+};
+use crate::windows_runtime::verify_installed_windows_runtime;
 use crate::windows_system::windows_path_for_display;
 use crate::CliFailure;
 
@@ -27,6 +31,8 @@ pub(crate) struct WindowsIntegrationStatus {
     pub(crate) desired_enabled: bool,
     pub(crate) package_full_name: Option<String>,
     pub(crate) runtime_release: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) health_issues: Vec<String>,
 }
 
 impl WindowsIntegrationStatus {
@@ -41,18 +47,45 @@ impl WindowsIntegrationStatus {
                 desired_enabled: false,
                 package_full_name: None,
                 runtime_release: None,
+                health_issues: Vec::new(),
             });
         };
+        let enabled = matches!(
+            state.phase,
+            WindowsInstallPhase::EnabledUnobserved | WindowsInstallPhase::EnabledObserved
+        ) && state.desired_enabled();
+        let mut health_issues = Vec::new();
+        if enabled {
+            if current_package_full_name != Some(state.package_full_name.as_str()) {
+                health_issues.push(
+                    "Installed integration targets a different Store package generation."
+                        .to_string(),
+                );
+            }
+            match read_windows_debug_registration(user_root) {
+                Ok(Some(evidence)) if registration_matches_install_state(&evidence, &state) => {}
+                Ok(Some(_)) => health_issues.push(
+                    "Windows debugger registration does not match durable install state."
+                        .to_string(),
+                ),
+                Ok(None) => health_issues
+                    .push("Windows debugger registration evidence is missing.".to_string()),
+                Err(error) => health_issues.push(format!(
+                    "Windows debugger registration evidence is unhealthy: {error}"
+                )),
+            }
+            if let Err(error) = verify_installed_windows_runtime(user_root, &state.runtime_release)
+            {
+                health_issues.push(format!("Windows Runtime is unhealthy: {error}"));
+            }
+        }
         Ok(Self {
-            installed: matches!(
-                state.phase,
-                WindowsInstallPhase::EnabledUnobserved | WindowsInstallPhase::EnabledObserved
-            ) && state.desired_enabled()
-                && current_package_full_name == Some(state.package_full_name.as_str()),
+            installed: enabled && health_issues.is_empty(),
             phase: Some(state.phase),
             desired_enabled: state.desired_enabled(),
             package_full_name: Some(state.package_full_name),
             runtime_release: Some(state.runtime_release),
+            health_issues,
         })
     }
 }
@@ -166,6 +199,9 @@ pub(crate) fn format_integration_status(report: &WindowsIntegrationStatus) -> St
     if let Some(release) = &report.runtime_release {
         lines.push(incodex_core::format_kv("Runtime", release, None));
     }
+    for issue in &report.health_issues {
+        lines.push(incodex_core::format_warn(issue, None));
+    }
     lines.join("\n")
 }
 
@@ -247,6 +283,7 @@ mod tests {
             desired_enabled: false,
             package_full_name: None,
             runtime_release: None,
+            health_issues: Vec::new(),
         };
         let text = format_status(&report, &integration);
         assert!(text.starts_with("➤ Status"), "{text}");

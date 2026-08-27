@@ -100,8 +100,10 @@ describe("release CLI artifacts", () => {
       /case "\$\(uname -m\)" in[\s\S]*arm64\) ;;[\s\S]*\*\)[\s\S]*exit 1[\s\S]*;;[\s\S]*esac/,
     );
 
-    const workflow = releaseYml.replace(/\\\n\s*/g, " ").replace(/\s+/g, " ");
-    const normalizedBehaviorStep = behaviorStep.replace(/\\\n\s*/g, " ").replace(/\s+/g, " ");
+    const workflow = releaseYml.replace(/\\\r?\n\s*/g, " ").replace(/\s+/g, " ");
+    const normalizedBehaviorStep = behaviorStep
+      .replace(/\\\r?\n\s*/g, " ")
+      .replace(/\s+/g, " ");
     const command =
       "cargo test --locked --release --package incodex-cli --test release_asset_smoke -- --ignored --exact release_asset_behavior_smoke";
     const armInvocation =

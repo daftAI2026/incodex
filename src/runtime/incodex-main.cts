@@ -92,8 +92,13 @@ function readLocaleOverride() {
   const file = path.join(sourceHome(), "config.toml");
   if (!fs.existsSync(file)) return "";
   try {
-    const match = fs.readFileSync(file, "utf8").match(/^\s*localeOverride\s*=\s*"([^"]+)"/m);
-    return match?.[1]?.trim() ?? "";
+    const content = fs.readFileSync(file, "utf8");
+    const match = content.match(
+      process.platform === "win32"
+        ? /^\s*localeOverride\s*=\s*(?:"([^"]+)"|'([^']+)')/m
+        : /^\s*localeOverride\s*=\s*"([^"]+)"/m,
+    );
+    return (match?.[1] ?? match?.[2] ?? "").trim();
   } catch {
     return "";
   }

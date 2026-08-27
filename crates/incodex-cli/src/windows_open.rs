@@ -18,6 +18,7 @@ use crate::cdp::{
     start_lifecycle_signal_monitor, start_profile_mask_signal_monitor, InjectionOptions,
 };
 use crate::open_presentation::{
+    classify_completed_open, completed_open_failure_message, CompletedOpenState,
     CLOSED_REMOVED_MESSAGE, DRY_RUN_COMPLETE, DRY_RUN_HEADING, OPENED_MESSAGE, OPENING_MESSAGE,
     REMOVING_SESSION_MESSAGE, UI_READY_WAIT_MESSAGE, WAITING_MESSAGE,
 };
@@ -112,6 +113,7 @@ pub struct WindowsOpenOutcome {
     pub process: WindowsOpenProcessResult,
     pub ui_ready: bool,
     pub cleanup: WindowsCleanupResult,
+    pub session_root: PathBuf,
 }
 
 pub fn installed_activation_for_open(
@@ -149,6 +151,12 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
         ));
     }
     let app = discover_codex_package().map_err(CliFailure::from)?;
+    let profile_mask = resolve_profile_mask(
+        parsed.mask,
+        parsed.name.as_deref(),
+        parsed.avatar.as_deref().map(Path::new),
+    )
+    .map_err(CliFailure::from)?;
     if parsed.dry_run {
         println!("{}", format_step(DRY_RUN_HEADING, None));
         println!("{}", format_kv("Package", &app.package_full_name, None));
@@ -156,6 +164,9 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
             "{}",
             format_kv("Binary", &windows_path_for_display(&app.executable), None)
         );
+        if let Some(mask) = &profile_mask {
+            println!("{}", format_kv("Profile", &mask.name, None));
+        }
         println!("{}", format_warn(DRY_RUN_COMPLETE, None));
         return Ok(());
     }
@@ -164,12 +175,6 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| profile.join(".codex"));
-    let profile_mask = resolve_profile_mask(
-        parsed.mask,
-        parsed.name.as_deref(),
-        parsed.avatar.as_deref().map(Path::new),
-    )
-    .map_err(CliFailure::from)?;
     let user_root = profile.join(".incodex");
     let plan = prepare_windows_open(&app, &user_root, &source_home, profile_mask)
         .map_err(CliFailure::from)?;
@@ -308,6 +313,7 @@ where
                 process: WindowsOpenProcessResult::SpawnFailed(message),
                 ui_ready: false,
                 cleanup: cleanup_windows_session_with_progress(&plan.session, shutdown),
+                session_root: plan.session.root.clone(),
             };
         }
     };
@@ -375,6 +381,7 @@ where
                 process,
                 ui_ready: false,
                 cleanup: cleanup_windows_session_with_progress(&plan.session, shutdown),
+                session_root: plan.session.root.clone(),
             };
         }
     };
@@ -552,6 +559,7 @@ where
         process,
         ui_ready,
         cleanup,
+        session_root: plan.session.root,
     }
 }
 
@@ -676,14 +684,20 @@ fn finish_windows_open(outcome: WindowsOpenOutcome) -> Result<(), CliFailure> {
         }
         WindowsCleanupResult::Retained { reason } => {
             crate::terminal_presentation::print_terminal_result(&format_warn(
-                &format!("Closed. Isolated session retained: {reason}"),
+                &format!(
+                    "Closed. Isolated session retained at {}: {reason}",
+                    windows_path_for_display(&outcome.session_root)
+                ),
                 None,
             ));
             false
         }
         WindowsCleanupResult::Unknown { reason } => {
             crate::terminal_presentation::print_terminal_result(&format_warn(
-                &format!("Window state unknown; isolated session retained for safety: {reason}"),
+                &format!(
+                    "Window state unknown; isolated session retained for safety at {}: {reason}",
+                    windows_path_for_display(&outcome.session_root)
+                ),
                 None,
             ));
             false
@@ -694,10 +708,19 @@ fn finish_windows_open(outcome: WindowsOpenOutcome) -> Result<(), CliFailure> {
     }
     match outcome.process {
         WindowsOpenProcessResult::Closed => Ok(()),
-        WindowsOpenProcessResult::Exited(0) if outcome.ui_ready => Ok(()),
-        WindowsOpenProcessResult::Exited(code) => Err(CliFailure::new(format!(
-            "Incognito Codex process exited with status {code}"
-        ))),
+        WindowsOpenProcessResult::Exited(code) => {
+            let state = classify_completed_open(code, outcome.ui_ready);
+            match state {
+                CompletedOpenState::Success => Ok(()),
+                CompletedOpenState::ProcessFailure => {
+                    Err(CliFailure::new(completed_open_failure_message(code, state)))
+                }
+                CompletedOpenState::UiInjectionFailure => Err(CliFailure::with_code(
+                    3,
+                    completed_open_failure_message(code, state),
+                )),
+            }
+        }
         WindowsOpenProcessResult::SpawnFailed(error)
         | WindowsOpenProcessResult::ProcessStateUnknown(error) => Err(CliFailure::new(error)),
         WindowsOpenProcessResult::ListenerOwnershipFailed(error)

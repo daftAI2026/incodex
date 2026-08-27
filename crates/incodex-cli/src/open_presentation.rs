@@ -6,3 +6,30 @@ pub(crate) const UI_READY_WAIT_MESSAGE: &str = "Waiting for Codex UI to become r
 pub(crate) const WAITING_MESSAGE: &str = "Waiting for the window to close";
 pub(crate) const REMOVING_SESSION_MESSAGE: &str = "Removing isolated session";
 pub(crate) const CLOSED_REMOVED_MESSAGE: &str = "Closed. Isolated session removed.";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CompletedOpenState {
+    Success,
+    ProcessFailure,
+    UiInjectionFailure,
+}
+
+pub(crate) fn classify_completed_open(code: i32, ui_ready: bool) -> CompletedOpenState {
+    match (code, ui_ready) {
+        (0, true) => CompletedOpenState::Success,
+        (0, false) => CompletedOpenState::UiInjectionFailure,
+        _ => CompletedOpenState::ProcessFailure,
+    }
+}
+
+pub(crate) fn completed_open_failure_message(code: i32, state: CompletedOpenState) -> String {
+    match state {
+        CompletedOpenState::Success => String::new(),
+        CompletedOpenState::ProcessFailure => {
+            format!("Incognito Codex process exited with status {code}")
+        }
+        CompletedOpenState::UiInjectionFailure => {
+            "Incognito Codex UI injection was not accepted".to_string()
+        }
+    }
+}
