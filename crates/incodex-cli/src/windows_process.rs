@@ -927,8 +927,16 @@ mod tests {
     use crate::windows_activation_capability::WindowsActivationCapability;
 
     use super::{
-        ipv4_connection_server_owner, require_process_package_identity, WindowsPendingJob,
+        ipv4_connection_server_owner, is_primary_visible_window,
+        require_process_package_identity, WindowsPendingJob,
     };
+
+    #[test]
+    fn input_method_status_window_is_not_a_primary_codex_window() {
+        assert!(!is_primary_visible_window(true, 150, 150, 0x0808_0088));
+        assert!(is_primary_visible_window(true, 1280, 820, 0x0004_0100));
+        assert!(!is_primary_visible_window(false, 1280, 820, 0x0004_0100));
+    }
 
     #[test]
     fn pending_job_uses_the_exact_activation_capability_name() {
