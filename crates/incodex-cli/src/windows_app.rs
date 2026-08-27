@@ -1,14 +1,17 @@
 use std::fs;
+use std::os::windows::process::CommandExt;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use serde::Deserialize;
+use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use crate::windows_system::system_binary_path;
 
 const PACKAGE_NAME: &str = "OpenAI.Codex";
 const PACKAGE_FAMILY_SUFFIX: &str = "__2p2nqsd0c76g0";
 const PACKAGE_FAMILY_NAME: &str = "OpenAI.Codex_2p2nqsd0c76g0";
+const PACKAGE_QUERY_CREATION_FLAGS: u32 = CREATE_NO_WINDOW;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -112,7 +115,8 @@ fn package_query_command(script: &str) -> Result<Command, String> {
         ])
         .env_remove("HOME")
         .env_remove("USERPROFILE")
-        .env_remove("LOCALAPPDATA");
+        .env_remove("LOCALAPPDATA")
+        .creation_flags(PACKAGE_QUERY_CREATION_FLAGS);
     Ok(command)
 }
 
