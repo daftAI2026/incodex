@@ -89,6 +89,18 @@ describe("launch warning placement", () => {
     );
     expect(inject).not.toContain("data-incodex-banner-mounted");
   });
+
+  test("waits for the shared home-banner slot instead of falling back to a Windows overlay", () => {
+    expect(inject).toMatch(
+      /function showLaunchError\(\): void \{[\s\S]*if \(isWindowsRenderer\(\)\) \{[\s\S]*ensureLaunchError\(\);[\s\S]*return;/,
+    );
+    expect(inject).toMatch(
+      /function needsInject\(\): boolean \{[\s\S]*launchErrorNeedsInject\(\)/,
+    );
+    expect(inject).toMatch(
+      /function createMutationObserver\(\): MutationObserver \{[\s\S]*ensureLaunchError\(\)/,
+    );
+  });
 });
 
 describe("platform shortcut label", () => {
