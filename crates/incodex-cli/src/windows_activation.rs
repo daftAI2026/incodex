@@ -53,6 +53,7 @@ pub struct WindowsActivationRequest {
     activation_user_data_dir: Option<String>,
     environment: Vec<u16>,
     claimed_environment: BTreeMap<String, String>,
+    transient_debug_environment: Option<Vec<u16>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -322,7 +323,15 @@ impl WindowsActivationRequest {
             activation_user_data_dir,
             environment,
             claimed_environment,
+            transient_debug_environment: None,
         })
+    }
+
+    pub fn with_transient_bootstrap(mut self, bootstrap: &Path) -> Result<Self, String> {
+        let environment =
+            BTreeMap::from([("NODE_OPTIONS".to_string(), node_require_option(bootstrap)?)]);
+        self.transient_debug_environment = Some(environment_block(environment)?);
+        Ok(self)
     }
 
     pub fn package_full_name(&self) -> &str {
@@ -339,6 +348,10 @@ impl WindowsActivationRequest {
 
     pub fn environment(&self) -> &[u16] {
         &self.environment
+    }
+
+    pub fn transient_debug_environment(&self) -> &[u16] {
+        self.transient_debug_environment.as_deref().unwrap_or(&[])
     }
 
     pub fn activation_capability(&self) -> Result<WindowsActivationCapability, String> {
@@ -598,94 +611,43 @@ fn activate_packaged(
 ) -> Result<WindowsProcessTree, WindowsActivationFailure> {
     let _activation_lock = acquire_package_activation_lock()?;
     let _apartment = ComApartment::initialize()?;
-    let existing_processes = snapshot_process_ids()
-        .map_err(|error| format!("cannot snapshot Windows processes before activation: {error}"))?;
     let capability = request.activation_capability()?;
-    let pending_job = WindowsPendingJob::create_for_capability(&capability)
-        .map_err(|error| format!("cannot create Windows activation Job Object: {error}"))?;
+    if request.transient_debug_environment().is_empty() {
+        return Err(WindowsActivationFailure::before_start(
+            "Windows transient activation is missing its private Runtime bootstrap",
+        ));
+    }
     let package = wide_nul(request.package_full_name());
-    let app_user_model_id = wide_nul(request.app_user_model_id());
-    let arguments = wide_nul(request.arguments());
-    let debugger_command = debugger_command_line(pending_job.name(), request.package_full_name())?;
+    let debugger_command =
+        debugger_command_line(capability.job_name(), request.package_full_name())?;
     let debugger_command = wide_nul(&debugger_command);
     let mut debugging = PackageDebugGuard::enable(
         &package,
         &debugger_command,
-        request.environment(),
+        request.transient_debug_environment(),
         restoration,
     )?;
-    let manager = match ComPtr::create(
-        &CLSID_APPLICATION_ACTIVATION_MANAGER,
-        &IID_APPLICATION_ACTIVATION_MANAGER,
-        "Windows application activation manager",
-    ) {
-        Ok(manager) => manager,
-        Err(error) => {
-            let restoration = debugging.restore();
-            return Err(activation_manager_failure(error, restoration));
+    let activation = activate_packaged_with_capability(request, WindowsLaunchMode::Cdp);
+    let restored = debugging.restore();
+    match (activation, restored) {
+        (Ok(process_tree), Ok(())) => Ok(process_tree),
+        (Ok(mut process_tree), Err(error)) => {
+            let process_shutdown = process_tree.terminate().map(|_| ()).map_err(|shutdown_error| {
+                format!(
+                    "cannot prove the isolated Windows Job is empty after package debug restoration failed: {shutdown_error}"
+                )
+            });
+            let shutdown = cleanup_proof_after_debugging(&Err(error.clone()), process_shutdown);
+            Err(WindowsActivationFailure::after_start(error, shutdown))
         }
-    };
-    let mut process_id = 0;
-    let result = unsafe {
-        let vtable = *(manager.raw() as *mut *const ApplicationActivationManagerVtable);
-        ((*vtable).activate_application)(
-            manager.raw(),
-            app_user_model_id.as_ptr(),
-            arguments.as_ptr(),
-            0,
-            &mut process_id,
-        )
-    };
-    if failed(result) {
-        let restoration = debugging.restore();
-        let process_shutdown = if process_id != 0 && !existing_processes.contains(&process_id) {
-            Err(format!(
-                "activation failed after reporting new Windows process {process_id}; process shutdown is unproven"
+        (Err(failure), restoration) => {
+            let shutdown = cleanup_proof_after_debugging(&restoration, failure.shutdown);
+            Err(WindowsActivationFailure::after_start(
+                join_cleanup_error(failure.message, restoration),
+                shutdown,
             ))
-        } else {
-            Ok(())
-        };
-        return Err(activation_failure_after_debugging(
-            hresult_message("cannot activate the Windows Codex package", result),
-            restoration,
-            process_shutdown,
-        ));
-    }
-    if process_id == 0 || existing_processes.contains(&process_id) {
-        let restoration = debugging.restore();
-        return Err(activation_failure_after_debugging(
-            "Windows package activation did not create a new isolated Codex process".to_string(),
-            restoration,
-            Ok(()),
-        ));
-    }
-
-    let mut process_tree = match pending_job.attach(process_id, request.package_full_name()) {
-        Ok(process_tree) => process_tree,
-        Err(error) => {
-            let restoration = debugging.restore();
-            let message = format!(
-                "cannot contain activated Windows Codex process {process_id} in a Job Object: {error}"
-            );
-            return Err(activation_failure_after_debugging(
-                message,
-                restoration,
-                Err(format!(
-                    "cannot prove activated Windows Codex process {process_id} and its descendants exited after Job attachment failed"
-                )),
-            ));
         }
-    };
-    if let Err(error) = debugging.restore() {
-        let process_shutdown = process_tree.terminate().map(|_| ()).map_err(|shutdown_error| {
-            format!(
-                "cannot prove the isolated Windows Job is empty after package debug restoration failed: {shutdown_error}"
-            )
-        });
-        let shutdown = cleanup_proof_after_debugging(&Err(error.clone()), process_shutdown);
-        return Err(WindowsActivationFailure::after_start(error, shutdown));
     }
-    Ok(process_tree)
 }
 
 pub fn enable_installed_runtime(
@@ -880,6 +842,7 @@ fn join_cleanup_error(primary: String, cleanup: Result<(), String>) -> String {
     }
 }
 
+#[cfg(test)]
 fn activation_manager_failure(
     primary: String,
     restoration: Result<(), String>,
@@ -887,6 +850,7 @@ fn activation_manager_failure(
     activation_failure_after_debugging(primary, restoration, Ok(()))
 }
 
+#[cfg(test)]
 fn activation_failure_after_debugging(
     primary: String,
     restoration: Result<(), String>,

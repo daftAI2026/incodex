@@ -58,6 +58,7 @@ pub struct WindowsProcessTree {
 #[derive(Debug)]
 pub(crate) struct WindowsPendingJob {
     job: OwnedHandle,
+    #[cfg(test)]
     name: String,
 }
 
@@ -542,10 +543,12 @@ impl WindowsPendingJob {
         let wide: Vec<u16> = name.encode_utf16().chain([0]).collect();
         Ok(Self {
             job: create_kill_on_close_job(Some(&wide))?,
+            #[cfg(test)]
             name,
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn name(&self) -> &str {
         &self.name
     }

@@ -31,7 +31,8 @@ use crate::windows_app::{
 };
 use crate::windows_cleanup::cleanup_windows_session_after_shutdown;
 use crate::windows_install_state::{
-    read_windows_install_state, WindowsInstallPhase, WindowsInstallState,
+    acquire_windows_install_state, read_windows_install_state, WindowsInstallPhase,
+    WindowsInstallState,
 };
 use crate::windows_locale::read_locale_override;
 #[cfg(test)]
@@ -39,6 +40,7 @@ use crate::windows_process::spawn_kill_on_drop;
 use crate::windows_process::{
     VisibleWindowLifecycle, WindowsCdpListenerStatus, WindowsCdpOwnershipGuard,
 };
+use crate::windows_runtime::publish_windows_activation_bootstrap;
 use crate::{parse::ParsedCli, CliFailure};
 
 #[derive(Debug)]
@@ -52,6 +54,8 @@ pub struct WindowsOpenPlan {
     pub session: WindowsSessionHome,
     pub debug_port: u16,
     pub injection: InjectionOptions,
+    user_root: PathBuf,
+    transient_bootstrap: PathBuf,
 }
 
 impl WindowsOpenPlan {
@@ -73,6 +77,7 @@ impl WindowsOpenPlan {
             self.args.iter().map(OsString::from),
             environment,
         )
+        .and_then(|request| request.with_transient_bootstrap(&self.transient_bootstrap))
     }
 }
 
@@ -154,10 +159,6 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
     )
     .map_err(CliFailure::from)?;
     let user_root = profile.join(".incodex");
-    let installed_state = read_windows_install_state(&user_root).map_err(CliFailure::from)?;
-    let installed_activation =
-        installed_activation_for_open(installed_state.as_ref(), &app.package_full_name)
-            .map_err(CliFailure::from)?;
     let plan = prepare_windows_open(&app, &user_root, &source_home, profile_mask)
         .map_err(CliFailure::from)?;
     println!("{}", format_step(OPENING_MESSAGE, None));
@@ -170,11 +171,7 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
         format_kv("Home", &plan.session.home.display().to_string(), None)
     );
     println!("{}", format_kv("Session", &plan.session.session_id, None));
-    let outcome = execute_windows_open_with(
-        plan,
-        |plan| launch_windows_open(plan, installed_activation.as_ref()),
-        inject_windows_ui,
-    );
+    let outcome = execute_windows_open_with(plan, launch_windows_open, inject_windows_ui);
     finish_windows_open(outcome)
 }
 
@@ -188,6 +185,7 @@ pub fn prepare_windows_open(
     let session = create_windows_session(user_root)?;
     let prepared = (|| {
         copy_windows_settings(&session, source_home)?;
+        let transient_bootstrap = publish_windows_activation_bootstrap(&session.root)?;
         let debug_port = allocate_debug_port()?;
         let args = debug_launch_args(&session.chromium.display().to_string(), debug_port);
         let env = BTreeMap::from([
@@ -217,6 +215,8 @@ pub fn prepare_windows_open(
                 locale: read_locale_override(&session.home),
                 profile_mask,
             },
+            user_root: user_root.to_path_buf(),
+            transient_bootstrap,
         })
     })();
 
@@ -299,12 +299,18 @@ where
 
 fn launch_windows_open(
     plan: &WindowsOpenPlan,
-    installed_activation: Option<&WindowsInstalledRuntimeRegistration>,
 ) -> Result<crate::windows_process::WindowsProcessTree, WindowsActivationFailure> {
+    let _launch_gate =
+        acquire_windows_install_state().map_err(WindowsActivationFailure::before_start)?;
+    let installed_state = read_windows_install_state(&plan.user_root)
+        .map_err(WindowsActivationFailure::before_start)?;
+    let installed_activation =
+        installed_activation_for_open(installed_state.as_ref(), &plan.package_full_name)
+            .map_err(WindowsActivationFailure::before_start)?;
     let request = plan
         .activation_request()
         .map_err(WindowsActivationFailure::before_start)?;
-    match installed_activation {
+    match installed_activation.as_ref() {
         Some(registration) => activate_packaged_with_installed_cdp(&request, registration),
         None => activate_packaged_kill_on_drop(&request),
     }

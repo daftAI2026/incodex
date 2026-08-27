@@ -29,11 +29,10 @@ pub const WINDOWS_RUNTIME_FILES: &[&str] = &[
     "incodex-runtime-load.cjs",
 ];
 
+const WINDOWS_BOOTSTRAP_NAME: &str = "incodex-windows-bootstrap.cjs";
+const WINDOWS_BOOTSTRAP: &str = include_str!("../assets/incodex-windows-bootstrap.cjs");
 const WINDOWS_ASSETS: &[(&str, &str)] = &[
-    (
-        "incodex-windows-bootstrap.cjs",
-        include_str!("../assets/incodex-windows-bootstrap.cjs"),
-    ),
+    (WINDOWS_BOOTSTRAP_NAME, WINDOWS_BOOTSTRAP),
     (
         "incodex-windows-platform.cjs",
         include_str!("../assets/incodex-windows-platform.cjs"),
@@ -152,6 +151,14 @@ pub fn publish_windows_runtime(user_root: &Path) -> Result<PublishedWindowsRunti
         pointer: pointer_path,
         files,
     })
+}
+
+pub fn publish_windows_activation_bootstrap(session_root: &Path) -> Result<PathBuf, String> {
+    ensure_regular_directory(session_root)?;
+    verify_private_acl(session_root)?;
+    let bootstrap = session_root.join(WINDOWS_BOOTSTRAP_NAME);
+    write_private_file(&bootstrap, WINDOWS_BOOTSTRAP.as_bytes())?;
+    Ok(bootstrap)
 }
 
 fn publish_release(
