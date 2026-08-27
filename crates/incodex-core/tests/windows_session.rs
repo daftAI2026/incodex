@@ -239,6 +239,46 @@ fn sweeps_only_sessions_owned_by_dead_processes() {
 }
 
 #[test]
+fn orphan_sweep_observes_a_session_recreated_after_removal() {
+    let root = scratch("orphan-sweep-recreated");
+    let user_root = root.join("profile").join(".incodex");
+    let result_path = root.join("orphan-path.txt");
+    fs::create_dir_all(user_root.parent().expect("profile parent")).expect("create profile");
+
+    let output = Command::new(std::env::current_exe().expect("test executable"))
+        .args(["orphan_session_fixture", "--exact", "--nocapture"])
+        .env("INCODEX_WINDOWS_ORPHAN_USER_ROOT", &user_root)
+        .env("INCODEX_WINDOWS_ORPHAN_RESULT", &result_path)
+        .output()
+        .expect("run orphan fixture");
+    assert!(
+        output.status.success(),
+        "orphan fixture failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let orphan = PathBuf::from(fs::read_to_string(&result_path).expect("read orphan path"));
+    let recreated = orphan.clone();
+    let writer = std::thread::spawn(move || {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while recreated.exists() && std::time::Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        assert!(!recreated.exists(), "orphan sweep never removed the session");
+        fs::create_dir_all(recreated.join("late-writer"))
+            .expect("recreate orphan after initial removal");
+    });
+
+    assert_eq!(sweep_orphan_windows_sessions(&user_root), 0);
+    writer.join().expect("join late writer");
+    assert!(
+        orphan.join("late-writer").is_dir(),
+        "the sweep must retain late data without trustworthy owner evidence"
+    );
+
+    fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
 fn inspection_reports_unverifiable_sessions_without_deleting_them() {
     let root = scratch("inspect-unknown");
     let user_root = root.join("profile").join(".incodex");
