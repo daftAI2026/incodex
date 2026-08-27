@@ -11,7 +11,8 @@ use incodex_cli::windows_launch::{
 #[test]
 fn environment_pipe_refuses_a_client_outside_the_capability_job() {
     let capability = WindowsActivationCapability::create().expect("create capability");
-    let pipe = WindowsActivationEnvironmentPipe::create(&capability).expect("create environment pipe");
+    let pipe =
+        WindowsActivationEnvironmentPipe::create(&capability).expect("create environment pipe");
     let pipe_name = pipe.name().to_string();
     let job_name = capability.job_name().to_string();
     let server = std::thread::spawn(move || {

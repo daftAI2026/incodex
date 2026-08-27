@@ -632,10 +632,7 @@ pub fn windows_runtime_ready_for_handshake(runtime_accepted: bool, visible: bool
     runtime_accepted && visible
 }
 
-pub fn windows_runtime_shutdown_authorized(
-    authenticated_close: bool,
-    job_empty: bool,
-) -> bool {
+pub fn windows_runtime_shutdown_authorized(authenticated_close: bool, job_empty: bool) -> bool {
     authenticated_close || job_empty
 }
 

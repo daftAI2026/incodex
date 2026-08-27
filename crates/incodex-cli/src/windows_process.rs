@@ -9,14 +9,14 @@ use std::process::{Child, Command, ExitStatus};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use windows_sys::Wdk::System::Threading::{
+    NtQueryInformationProcess, ProcessCommandLineInformation,
+};
 use windows_sys::Win32::Foundation::{
     CloseHandle, DuplicateHandle, APPMODEL_ERROR_NO_PACKAGE, DUPLICATE_SAME_ACCESS,
     ERROR_ACCESS_DENIED, ERROR_INSUFFICIENT_BUFFER, ERROR_INVALID_PARAMETER, ERROR_MORE_DATA,
     ERROR_NO_MORE_FILES, HANDLE, HWND, INVALID_HANDLE_VALUE, LPARAM, UNICODE_STRING, WAIT_OBJECT_0,
     WAIT_TIMEOUT,
-};
-use windows_sys::Wdk::System::Threading::{
-    NtQueryInformationProcess, ProcessCommandLineInformation,
 };
 use windows_sys::Win32::NetworkManagement::IpHelper::{
     GetExtendedTcpTable, MIB_TCPROW_OWNER_PID, MIB_TCPTABLE_OWNER_PID, MIB_TCP_STATE_ESTAB,
@@ -119,13 +119,17 @@ pub fn process_command_line(process_id: u32) -> io::Result<String> {
         )));
     }
     let command = unsafe { &*buffer.as_ptr().cast::<UNICODE_STRING>() };
-    if command.Length % 2 != 0 || command.Length > command.MaximumLength || command.Buffer.is_null() {
+    if command.Length % 2 != 0 || command.Length > command.MaximumLength || command.Buffer.is_null()
+    {
         return Err(io::Error::other(
             "Windows process command line metadata is invalid",
         ));
     }
     let value = unsafe {
-        std::slice::from_raw_parts(command.Buffer, usize::from(command.Length) / size_of::<u16>())
+        std::slice::from_raw_parts(
+            command.Buffer,
+            usize::from(command.Length) / size_of::<u16>(),
+        )
     };
     String::from_utf16(value)
         .map_err(|_| io::Error::other("Windows process command line is not valid UTF-16"))
@@ -674,6 +678,29 @@ pub fn running_package_process_ids(expected_package_full_name: &str) -> io::Resu
     }
     matches.sort_unstable();
     Ok(matches)
+}
+
+pub fn authenticate_process_in_named_job(
+    job_name: &str,
+    expected_package_full_name: &str,
+    process_id: u32,
+) -> io::Result<()> {
+    let job_name = job_name.encode_utf16().chain([0]).collect::<Vec<_>>();
+    let job = unsafe { OpenJobObjectW(0x0004, 0, job_name.as_ptr()) };
+    let job = OwnedHandle::from_nullable(job)?;
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
+    let process = OwnedHandle::from_nullable(process)?;
+    require_process_package_identity(process.raw(), expected_package_full_name)?;
+    let mut contained = 0;
+    if unsafe { IsProcessInJob(process.raw(), job.raw(), &mut contained) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if contained == 0 {
+        return Err(io::Error::other(
+            "Windows activation process is outside the expected Job",
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn snapshot_process_ids() -> io::Result<HashSet<u32>> {

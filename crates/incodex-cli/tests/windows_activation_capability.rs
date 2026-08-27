@@ -20,9 +20,7 @@ fn random_capability_routes_only_an_explicit_activation_to_private_pipes() {
         None
     );
     assert!(activation_token_from_command_line(&format!("{command_line} {argument}")).is_err());
-    assert!(capability
-        .job_name()
-        .starts_with(r"Local\Incodex-"));
+    assert!(capability.job_name().starts_with(r"Local\Incodex-"));
     assert!(capability
         .environment_pipe_name()
         .starts_with(r"\\.\pipe\Incodex-Activation-Environment-"));

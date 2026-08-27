@@ -61,9 +61,8 @@ pub fn activation_token_from_command_line(command_line: &str) -> Result<Option<S
         while unsafe { *argument.add(length) } != 0 {
             length += 1;
         }
-        let argument = String::from_utf16_lossy(unsafe {
-            std::slice::from_raw_parts(argument, length)
-        });
+        let argument =
+            String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(argument, length) });
         if let Some(value) = argument.strip_prefix(TOKEN_PREFIX) {
             if !valid_token(value) {
                 unsafe { LocalFree(argv.cast()) };
