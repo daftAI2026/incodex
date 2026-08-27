@@ -38,3 +38,20 @@ fn windows_requester_uses_restart_manager_without_force_or_window_close() {
     assert!(!source.contains("TerminateProcess"));
     assert!(!source.contains("TerminateAllProcesses"));
 }
+
+#[test]
+fn installed_runtime_normal_exit_precedes_restart_manager_fallback() {
+    let requester = include_str!("../src/windows_quiescence.rs");
+    let uninstall = include_str!("../src/windows_install.rs");
+
+    assert!(requester.contains("CallNamedPipeW"));
+    assert!(requester.contains("Incodex-Runtime-Control-"));
+    let runtime_request = requester
+        .find("request_installed_runtime_normal_exit")
+        .expect("installed Runtime request");
+    let restart_manager = requester
+        .find("request_restart_manager_shutdown")
+        .expect("Restart Manager fallback");
+    assert!(runtime_request < restart_manager);
+    assert!(uninstall.contains("approval.registration_id.as_deref()"));
+}

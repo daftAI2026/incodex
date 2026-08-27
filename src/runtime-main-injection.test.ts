@@ -43,4 +43,14 @@ describe("Electron UI injection reporting", () => {
     expect(beforeOfficialReturn).toContain("windowsPlatform.exitAfterLastMainWindowCloses(");
     expect(beforeOfficialReturn).toContain("finishIncognito,");
   });
+
+  test("offers normal exit from the installed Windows main process without changing X", () => {
+    const attach = main.slice(main.indexOf("async function attachElectron()"));
+
+    expect(attach).toContain("windowsPlatform.listenForNormalExit(");
+    expect(attach).toContain("process.env.INCODEX_WINDOWS_REGISTRATION_ID");
+    expect(attach).toContain("electron.app.quit()");
+    expect(attach).toMatch(/if \(windowsPlatform && !isIncognito\(\)\)/);
+    expect(attach).not.toMatch(/if \(windowsPlatform && !isIncognito\(\)\)[\s\S]*win\.on\("close"/);
+  });
 });
