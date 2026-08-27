@@ -1,10 +1,56 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 
 const bootstrapPath = join(import.meta.dir, "../crates/incodex-cli/assets/incodex-windows-bootstrap.cjs");
 
 describe("Windows Runtime bootstrap", () => {
-  test("claims one tokened process environment before loading the shared Runtime", () => {
+  test("reads one bounded message without waiting for a named-pipe EOF", () => {
+    const bootstrap = require(bootstrapPath) as {
+      readActivationEnvironment(
+        pipeName: string,
+        io: {
+          openSync: (path: string, flags: string) => number;
+          writeSync: (descriptor: number, value: string) => number;
+          readSync: (
+            descriptor: number,
+            buffer: Buffer,
+            offset: number,
+            length: number,
+            position: null,
+          ) => number;
+          closeSync: (descriptor: number) => void;
+        },
+      ): unknown;
+    };
+    const response = Buffer.from(
+      JSON.stringify({ mode: "runtime", environment: { CODEX_HOME: "C:\\isolated" } }),
+    );
+    const writes: string[] = [];
+    const closes: number[] = [];
+    let reads = 0;
+
+    expect(
+      bootstrap.readActivationEnvironment("\\\\.\\pipe\\Incodex-test", {
+        openSync: () => 42,
+        writeSync: (_descriptor, value) => {
+          writes.push(value);
+          return Buffer.byteLength(value);
+        },
+        readSync: (_descriptor, buffer, offset, length) => {
+          reads++;
+          response.copy(buffer, offset, 0, Math.min(response.length, length));
+          return response.length;
+        },
+        closeSync: (descriptor) => closes.push(descriptor),
+      }),
+    ).toEqual({ mode: "runtime", environment: { CODEX_HOME: "C:\\isolated" } });
+    expect(writes).toEqual(["environment\n"]);
+    expect(reads).toBe(1);
+    expect(closes).toEqual([42]);
+  });
+
+  test("claims one isolated profile environment before loading the shared Runtime", () => {
     const bootstrap = require(bootstrapPath) as {
       attachWindowsRuntime(options: {
         argv: string[];
@@ -16,7 +62,8 @@ describe("Windows Runtime bootstrap", () => {
         runtimeDir: string;
       }): boolean;
     };
-    const token = "0123456789abcdef0123456789abcdef";
+    const userDataDir = "C:\\Users\\test\\.incodex\\sessions\\s-one\\chromium";
+    const token = createHash("sha256").update(userDataDir, "utf8").digest("hex").slice(0, 32);
     const runtimeDir = "C:\\Users\\test\\.incodex\\runtime\\releases\\0.5.0-releasehash";
     const env: Record<string, string | undefined> = {};
     const loaded: string[] = [];
@@ -25,7 +72,7 @@ describe("Windows Runtime bootstrap", () => {
 
     expect(
       bootstrap.attachWindowsRuntime({
-        argv: [`--incodex-activation-token=${token}`],
+        argv: [`--user-data-dir=${userDataDir}`],
         env,
         load: (path: string) => loaded.push(path),
         onElectronLoaded: (callback) => {
@@ -37,7 +84,7 @@ describe("Windows Runtime bootstrap", () => {
           return {
             mode: "runtime",
             environment: {
-              CODEX_HOME: "C:\\Users\\test\\.incodex\\sessions\\one\\codex-home",
+              CODEX_HOME: "C:\\Users\\test\\.incodex\\sessions\\s-one\\codex-home",
               INCODEX_INCOGNITO: "1",
             },
           };
@@ -48,7 +95,7 @@ describe("Windows Runtime bootstrap", () => {
     expect(pipes).toEqual([
       `\\\\.\\pipe\\Incodex-Activation-Environment-${token}`,
     ]);
-    expect(env.CODEX_HOME).toEndWith("sessions\\one\\codex-home");
+    expect(env.CODEX_HOME).toEndWith("sessions\\s-one\\codex-home");
     expect(env.INCODEX_INCOGNITO).toBe("1");
     expect(loaded).toEqual([]);
     expect(electronLoaded).toBeFunction();
@@ -56,7 +103,7 @@ describe("Windows Runtime bootstrap", () => {
     expect(loaded).toEqual([join(runtimeDir, "incodex-main.cjs")]);
   });
 
-  test("a tokened CDP process receives isolation without loading a second Runtime", () => {
+  test("an isolated CDP profile receives its environment without loading a second Runtime", () => {
     const bootstrap = require(bootstrapPath) as {
       attachWindowsRuntime(options: {
         argv: string[];
@@ -72,9 +119,10 @@ describe("Windows Runtime bootstrap", () => {
 
     expect(
       bootstrap.attachWindowsRuntime({
-        argv: ["--incodex-activation-token=0123456789abcdef0123456789abcdef"],
+        argv: ["--user-data-dir=C:\\Users\\test\\.incodex\\sessions\\s-cdp\\chromium"],
         env,
         load: (path: string) => loaded.push(path),
+        onElectronLoaded: (callback: () => void) => callback(),
         processType: "browser",
         readActivationEnvironment: () => ({
           mode: "cdp",
@@ -109,7 +157,7 @@ describe("Windows Runtime bootstrap", () => {
     const options = {
       env,
       load: (path: string) => loaded.push(path),
-      onElectronLoaded: (callback) => {
+      onElectronLoaded: (callback: () => void) => {
         electronLoaded = callback;
       },
       processType: "browser",
