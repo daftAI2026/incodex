@@ -12,7 +12,11 @@ use std::time::{Duration, Instant};
 use windows_sys::Win32::Foundation::{
     CloseHandle, DuplicateHandle, APPMODEL_ERROR_NO_PACKAGE, DUPLICATE_SAME_ACCESS,
     ERROR_ACCESS_DENIED, ERROR_INSUFFICIENT_BUFFER, ERROR_INVALID_PARAMETER, ERROR_MORE_DATA,
-    ERROR_NO_MORE_FILES, HANDLE, HWND, INVALID_HANDLE_VALUE, LPARAM, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    ERROR_NO_MORE_FILES, HANDLE, HWND, INVALID_HANDLE_VALUE, LPARAM, UNICODE_STRING, WAIT_OBJECT_0,
+    WAIT_TIMEOUT,
+};
+use windows_sys::Wdk::System::Threading::{
+    NtQueryInformationProcess, ProcessCommandLineInformation,
 };
 use windows_sys::Win32::NetworkManagement::IpHelper::{
     GetExtendedTcpTable, MIB_TCPROW_OWNER_PID, MIB_TCPTABLE_OWNER_PID, MIB_TCP_STATE_ESTAB,
@@ -78,6 +82,54 @@ enum ProcessHandle {
 
 const JOB_TERMINATION_TIMEOUT: Duration = Duration::from_secs(5);
 const JOB_TERMINATION_POLL: Duration = Duration::from_millis(10);
+const PROCESS_COMMAND_LINE_LIMIT: u32 = 64 * 1024;
+
+pub fn process_command_line(process_id: u32) -> io::Result<String> {
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
+    let process = OwnedHandle::from_nullable(process)?;
+    let mut required = 0;
+    let _ = unsafe {
+        NtQueryInformationProcess(
+            process.raw(),
+            ProcessCommandLineInformation,
+            std::ptr::null_mut(),
+            0,
+            &mut required,
+        )
+    };
+    if required < size_of::<UNICODE_STRING>() as u32 || required > PROCESS_COMMAND_LINE_LIMIT {
+        return Err(io::Error::other(
+            "Windows process command line length is invalid",
+        ));
+    }
+    let mut buffer = vec![0u8; required as usize];
+    let status = unsafe {
+        NtQueryInformationProcess(
+            process.raw(),
+            ProcessCommandLineInformation,
+            buffer.as_mut_ptr().cast(),
+            required,
+            &mut required,
+        )
+    };
+    if status < 0 {
+        return Err(io::Error::other(format!(
+            "NtQueryInformationProcess failed with NTSTATUS 0x{:08X}",
+            status as u32
+        )));
+    }
+    let command = unsafe { &*buffer.as_ptr().cast::<UNICODE_STRING>() };
+    if command.Length % 2 != 0 || command.Length > command.MaximumLength || command.Buffer.is_null() {
+        return Err(io::Error::other(
+            "Windows process command line metadata is invalid",
+        ));
+    }
+    let value = unsafe {
+        std::slice::from_raw_parts(command.Buffer, usize::from(command.Length) / size_of::<u16>())
+    };
+    String::from_utf16(value)
+        .map_err(|_| io::Error::other("Windows process command line is not valid UTF-16"))
+}
 
 pub(crate) struct VisibleWindowLifecycle {
     grace: Duration,
