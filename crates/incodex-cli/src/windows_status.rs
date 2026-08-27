@@ -29,7 +29,10 @@ pub(crate) struct WindowsIntegrationStatus {
 }
 
 impl WindowsIntegrationStatus {
-    pub(crate) fn inspect(user_root: &std::path::Path) -> Result<Self, String> {
+    pub(crate) fn inspect(
+        user_root: &std::path::Path,
+        current_package_full_name: Option<&str>,
+    ) -> Result<Self, String> {
         let Some(state) = read_windows_install_state(user_root)? else {
             return Ok(Self {
                 installed: false,
@@ -43,7 +46,8 @@ impl WindowsIntegrationStatus {
             installed: matches!(
                 state.phase,
                 WindowsInstallPhase::EnabledUnobserved | WindowsInstallPhase::EnabledObserved
-            ) && state.desired_enabled(),
+            ) && state.desired_enabled()
+                && current_package_full_name == Some(state.package_full_name.as_str()),
             phase: Some(state.phase),
             desired_enabled: state.desired_enabled(),
             package_full_name: Some(state.package_full_name),
@@ -107,8 +111,11 @@ pub fn run_status(parsed: &ParsedCli) -> Result<(), CliFailure> {
     let mut spinner = (!parsed.json).then(|| Spinner::start(STATUS_PROGRESS_MESSAGE));
     let profile = crate::windows_profile::windows_user_profile().map_err(CliFailure::from)?;
     let package = WindowsPackageStatus::inspect();
-    let integration =
-        WindowsIntegrationStatus::inspect(&profile.join(".incodex")).map_err(CliFailure::from)?;
+    let integration = WindowsIntegrationStatus::inspect(
+        &profile.join(".incodex"),
+        package.package_full_name.as_deref(),
+    )
+    .map_err(CliFailure::from)?;
     if let Some(spinner) = &mut spinner {
         spinner.stop();
     }

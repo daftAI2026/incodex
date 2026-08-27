@@ -341,7 +341,7 @@ fn validate_helper(helper_path: &Path) -> Result<PathBuf, String> {
     canonical_regular_file(helper_path, "Windows install helper")
 }
 
-fn random_registration_id() -> Result<String, String> {
+pub(crate) fn random_registration_id() -> Result<String, String> {
     let mut random = [0u8; 16];
     let status = unsafe {
         BCryptGenRandom(
@@ -358,6 +358,36 @@ fn random_registration_id() -> Result<String, String> {
         ));
     }
     Ok(random.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+pub(crate) fn retire_unreadable_windows_install_state(user_root: &Path) -> Result<(), String> {
+    require_local_disk_absolute(user_root, "Windows Incodex root")?;
+    reject_reparse_ancestors(user_root)?;
+    verify_private_acl(user_root)?;
+    let user_root = fs::canonicalize(user_root)
+        .map_err(|error| format!("cannot resolve Windows Incodex root: {error}"))?;
+    let state_path = user_root.join(STATE_NAME);
+    let metadata = match fs::symlink_metadata(&state_path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("cannot inspect Windows install state: {error}")),
+    };
+    if !metadata.is_file() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(format!(
+            "Windows install state is not a regular file: {}",
+            state_path.display()
+        ));
+    }
+    verify_private_acl(&state_path)?;
+    fs::remove_file(&state_path)
+        .map_err(|error| format!("cannot retire unreadable Windows install state: {error}"))?;
+    match fs::symlink_metadata(&state_path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Ok(_) => Err("unreadable Windows install state still exists after retirement".to_string()),
+        Err(error) => Err(format!(
+            "cannot verify unreadable Windows install state retirement: {error}"
+        )),
+    }
 }
 
 fn allowed_transition(current: WindowsInstallPhase, next: WindowsInstallPhase) -> bool {

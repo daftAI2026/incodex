@@ -52,11 +52,16 @@ pub fn run_doctor(parsed: &ParsedCli) -> Result<(), CliFailure> {
 
     let mut spinner = (!parsed.json).then(|| Spinner::start(DOCTOR_PROGRESS_MESSAGE));
     let profile = crate::windows_profile::windows_user_profile().map_err(CliFailure::from)?;
+    let package = WindowsPackageStatus::inspect();
+    let integration = WindowsIntegrationStatus::inspect(
+        &profile.join(".incodex"),
+        package.package_full_name.as_deref(),
+    )
+    .map_err(CliFailure::from)?;
     let report = WindowsDoctor {
         platform: "windows",
-        package: WindowsPackageStatus::inspect(),
-        integration: WindowsIntegrationStatus::inspect(&profile.join(".incodex"))
-            .map_err(CliFailure::from)?,
+        package,
+        integration,
         sessions: incodex_core::windows_session::inspect_windows_sessions(
             &profile.join(".incodex"),
         )

@@ -13,10 +13,17 @@ use crate::windows_helper::publish_windows_helper;
 use crate::windows_install_state::{
     acquire_windows_install_state, read_windows_install_state,
     read_windows_install_state_for_uninstall, retire_disabled_windows_install_state,
-    stage_windows_install_state, transition_windows_install_state,
-    transition_windows_uninstall_state, WindowsInstallPhase, WindowsInstallState,
+    retire_unreadable_windows_install_state, stage_windows_install_state,
+    transition_windows_install_state, transition_windows_uninstall_state, WindowsInstallPhase,
+    WindowsInstallState,
 };
 use crate::windows_process::running_package_process_ids;
+use crate::windows_registration::{
+    read_windows_debug_registration, recover_transient_windows_debug_registration_with,
+    registration_matches_install_state, retire_windows_debug_registration,
+    retire_windows_debug_registration_file, stage_installed_windows_debug_registration,
+    WindowsDebugRegistrationEvidence,
+};
 use crate::windows_runtime::publish_windows_runtime;
 
 pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
@@ -30,10 +37,17 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
     }
     crate::confirm::require("install", parsed.yes)?;
     let profile = crate::windows_profile::windows_user_profile()?;
+    let user_root = profile.join(".incodex");
+    let _registration_gate = acquire_windows_install_state()?;
+    recover_transient_windows_debug_registration_with(
+        &user_root,
+        codex_package_full_name_is_installed,
+        disable_installed_runtime,
+    )?;
     let helper = std::env::current_exe()
         .map_err(|error| format!("cannot locate the running Incodex executable: {error}"))?;
     let installed = install_windows_runtime_with(
-        &profile.join(".incodex"),
+        &user_root,
         &app.package_full_name,
         &helper,
         running_package_process_ids,
@@ -114,6 +128,14 @@ where
             return Err(join_recovery_error(error, recovery));
         }
     };
+    if let Err(error) = stage_installed_windows_debug_registration(user_root, &pending) {
+        let recovery = transition_windows_install_state(
+            user_root,
+            pending.epoch,
+            WindowsInstallPhase::RecoveryRequired,
+        );
+        return Err(join_recovery_error(error, recovery));
+    }
     if let Err(error) = enable(&registration) {
         let recovery = transition_windows_install_state(
             user_root,
@@ -161,9 +183,21 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
     reject_windows_target_selectors(parsed)?;
     let profile = crate::windows_profile::windows_user_profile()?;
     let user_root = profile.join(".incodex");
-    let durable_state = read_windows_install_state_for_uninstall(&user_root)?;
+    let durable_state = read_windows_install_state_for_uninstall(&user_root);
     let discovered_app = discover_codex_package();
-    print_uninstall_plan(discovered_app.as_ref().ok(), durable_state.as_ref());
+    print_uninstall_plan(
+        discovered_app.as_ref().ok(),
+        durable_state.as_ref().ok().and_then(Option::as_ref),
+    );
+    if let Err(error) = &durable_state {
+        println!(
+            "{}",
+            format_warn(
+                &format!("Primary install state needs registration recovery: {error}"),
+                None
+            )
+        );
+    }
     if let Err(error) = &discovered_app {
         println!(
             "{}",
@@ -228,8 +262,49 @@ where
     D: FnOnce(&str) -> Result<(), String>,
 {
     let _transaction = acquire_windows_install_state()?;
-    let Some(mut state) = read_windows_install_state_for_uninstall(user_root)? else {
-        return Ok(WindowsUninstallOutcome::NotInstalled);
+    let state_result = read_windows_install_state_for_uninstall(user_root);
+    let evidence_result = read_windows_debug_registration(user_root);
+    let mut state = match state_result {
+        Ok(Some(state)) => {
+            match &evidence_result {
+                Ok(Some(evidence)) if !registration_matches_install_state(evidence, &state) => {
+                    return Err(
+                        "Windows install state and debugger registration evidence disagree"
+                            .to_string(),
+                    )
+                }
+                Ok(_) | Err(_) => {}
+            }
+            state
+        }
+        Ok(None) => {
+            return uninstall_windows_registration_without_state(
+                user_root,
+                evidence_result?,
+                false,
+                running_package_processes,
+                package_is_installed,
+                disable,
+            )
+        }
+        Err(state_error) => {
+            let evidence = evidence_result.map_err(|evidence_error| {
+                format!(
+                    "{state_error}; Windows debugger registration evidence is also unreadable: {evidence_error}"
+                )
+            })?;
+            let Some(evidence) = evidence else {
+                return Err(state_error);
+            };
+            return uninstall_windows_registration_without_state(
+                user_root,
+                Some(evidence),
+                true,
+                running_package_processes,
+                package_is_installed,
+                disable,
+            );
+        }
     };
     state = match state.phase {
         WindowsInstallPhase::Staged => transition_windows_uninstall_state(
@@ -255,6 +330,7 @@ where
         | WindowsInstallPhase::RecoveryRequired => state,
     };
     if state.phase == WindowsInstallPhase::Disabled {
+        retire_windows_debug_registration_file(user_root)?;
         retire_disabled_windows_install_state(user_root, state.epoch)?;
         return Ok(WindowsUninstallOutcome::Removed);
     }
@@ -316,7 +392,41 @@ where
             ));
         }
     };
+    retire_windows_debug_registration_file(user_root)?;
     retire_disabled_windows_install_state(user_root, disabled.epoch)?;
+    Ok(WindowsUninstallOutcome::Removed)
+}
+
+fn uninstall_windows_registration_without_state<R, P, D>(
+    user_root: &Path,
+    evidence: Option<WindowsDebugRegistrationEvidence>,
+    retire_unreadable_state: bool,
+    running_package_processes: R,
+    package_is_installed: P,
+    disable: D,
+) -> Result<WindowsUninstallOutcome, String>
+where
+    R: FnOnce(&str) -> Result<Vec<u32>, std::io::Error>,
+    P: FnOnce(&str) -> Result<bool, String>,
+    D: FnOnce(&str) -> Result<(), String>,
+{
+    let Some(evidence) = evidence else {
+        return Ok(WindowsUninstallOutcome::NotInstalled);
+    };
+    let running = running_package_processes(&evidence.package_full_name)
+        .map_err(|error| format!("cannot inspect running Windows Codex processes: {error}"))?;
+    if !running.is_empty() {
+        return Ok(WindowsUninstallOutcome::CloseRequired {
+            process_ids: running,
+        });
+    }
+    if package_is_installed(&evidence.package_full_name)? {
+        disable(&evidence.package_full_name)?;
+    }
+    if retire_unreadable_state {
+        retire_unreadable_windows_install_state(user_root)?;
+    }
+    retire_windows_debug_registration(user_root, &evidence.registration_id)?;
     Ok(WindowsUninstallOutcome::Removed)
 }
 

@@ -23,13 +23,16 @@ use crate::open_presentation::{
 };
 use crate::profile_mask::{resolve_profile_mask, ProfileMask};
 use crate::windows_activation::{
-    activate_packaged_kill_on_drop, activate_packaged_with_installed_cdp, WindowsActivationFailure,
-    WindowsActivationRequest, WindowsInstalledRuntimeRegistration,
+    activate_packaged_kill_on_drop, activate_packaged_with_installed_cdp,
+    disable_installed_runtime, WindowsActivationFailure, WindowsActivationRequest,
+    WindowsInstalledRuntimeRegistration,
 };
 use crate::windows_app::{
-    discover_codex_package, validate_codex_package_full_name, WindowsCodexApp,
+    codex_package_full_name_is_installed, discover_codex_package, validate_codex_package_full_name,
+    WindowsCodexApp,
 };
 use crate::windows_cleanup::cleanup_windows_session_after_shutdown;
+use crate::windows_helper::publish_windows_helper;
 use crate::windows_install_state::{
     acquire_windows_install_state, read_windows_install_state, WindowsInstallPhase,
     WindowsInstallState,
@@ -40,6 +43,7 @@ use crate::windows_process::spawn_kill_on_drop;
 use crate::windows_process::{
     VisibleWindowLifecycle, WindowsCdpListenerStatus, WindowsCdpOwnershipGuard,
 };
+use crate::windows_registration::recover_transient_windows_debug_registration_with;
 use crate::windows_runtime::publish_windows_activation_bootstrap;
 use crate::{parse::ParsedCli, CliFailure};
 
@@ -56,6 +60,7 @@ pub struct WindowsOpenPlan {
     pub injection: InjectionOptions,
     user_root: PathBuf,
     transient_bootstrap: PathBuf,
+    transient_helper: PathBuf,
 }
 
 impl WindowsOpenPlan {
@@ -77,7 +82,13 @@ impl WindowsOpenPlan {
             self.args.iter().map(OsString::from),
             environment,
         )
-        .and_then(|request| request.with_transient_bootstrap(&self.transient_bootstrap))
+        .and_then(|request| {
+            request.with_transient_runtime(
+                &self.transient_bootstrap,
+                &self.transient_helper,
+                &self.user_root,
+            )
+        })
     }
 }
 
@@ -186,6 +197,9 @@ pub fn prepare_windows_open(
     let prepared = (|| {
         copy_windows_settings(&session, source_home)?;
         let transient_bootstrap = publish_windows_activation_bootstrap(user_root)?;
+        let helper_source = std::env::current_exe()
+            .map_err(|error| format!("cannot locate the running Incodex executable: {error}"))?;
+        let transient_helper = publish_windows_helper(user_root, &helper_source)?.executable;
         let debug_port = allocate_debug_port()?;
         let args = debug_launch_args(&session.chromium.display().to_string(), debug_port);
         let env = BTreeMap::from([
@@ -217,6 +231,7 @@ pub fn prepare_windows_open(
             },
             user_root: user_root.to_path_buf(),
             transient_bootstrap,
+            transient_helper,
         })
     })();
 
@@ -304,6 +319,14 @@ fn launch_windows_open(
         acquire_windows_install_state().map_err(WindowsActivationFailure::before_start)?;
     let installed_state = read_windows_install_state(&plan.user_root)
         .map_err(WindowsActivationFailure::before_start)?;
+    if installed_state.is_none() {
+        recover_transient_windows_debug_registration_with(
+            &plan.user_root,
+            codex_package_full_name_is_installed,
+            disable_installed_runtime,
+        )
+        .map_err(WindowsActivationFailure::before_start)?;
+    }
     let installed_activation =
         installed_activation_for_open(installed_state.as_ref(), &plan.package_full_name)
             .map_err(WindowsActivationFailure::before_start)?;

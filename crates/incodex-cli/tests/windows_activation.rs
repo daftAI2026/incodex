@@ -313,7 +313,11 @@ fn transient_package_registration_keeps_session_environment_behind_the_capabilit
         ]),
     )
     .expect("valid activation request")
-    .with_transient_bootstrap(bootstrap)
+    .with_transient_runtime(
+        bootstrap,
+        Path::new(r"C:\Users\Linus Torvalds\.incodex\windows\helpers\0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\incodex-helper.exe"),
+        Path::new(r"C:\Users\Linus Torvalds\.incodex"),
+    )
     .expect("private transient bootstrap");
 
     let registered = String::from_utf16_lossy(request.transient_debug_environment());

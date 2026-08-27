@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::ffi::c_void;
 use std::ffi::{OsStr, OsString};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread::{self, JoinHandle};
@@ -31,6 +31,9 @@ use crate::windows_process::{
     assign_debugged_process_to_job, process_command_line, resume_debugged_package_process,
     snapshot_process_ids, WindowsPendingJob, WindowsProcessTree,
 };
+use crate::windows_registration::{
+    retire_windows_debug_registration, stage_transient_windows_debug_registration,
+};
 
 const PACKAGE_DEBUGGER_MODE: &str = "__incodex_windows_package_debugger";
 const INSTALLED_DEBUGGER_MODE: &str = "__incodex_windows_installed_debugger";
@@ -54,6 +57,8 @@ pub struct WindowsActivationRequest {
     environment: Vec<u16>,
     claimed_environment: BTreeMap<String, String>,
     transient_debug_environment: Option<Vec<u16>>,
+    transient_debugger_executable: Option<PathBuf>,
+    transient_user_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -324,13 +329,22 @@ impl WindowsActivationRequest {
             environment,
             claimed_environment,
             transient_debug_environment: None,
+            transient_debugger_executable: None,
+            transient_user_root: None,
         })
     }
 
-    pub fn with_transient_bootstrap(mut self, bootstrap: &Path) -> Result<Self, String> {
+    pub fn with_transient_runtime(
+        mut self,
+        bootstrap: &Path,
+        debugger_executable: &Path,
+        user_root: &Path,
+    ) -> Result<Self, String> {
         let environment =
             BTreeMap::from([("NODE_OPTIONS".to_string(), node_require_option(bootstrap)?)]);
         self.transient_debug_environment = Some(environment_block(environment)?);
+        self.transient_debugger_executable = Some(debugger_executable.to_path_buf());
+        self.transient_user_root = Some(user_root.to_path_buf());
         Ok(self)
     }
 
@@ -352,6 +366,18 @@ impl WindowsActivationRequest {
 
     pub fn transient_debug_environment(&self) -> &[u16] {
         self.transient_debug_environment.as_deref().unwrap_or(&[])
+    }
+
+    fn transient_debugger_executable(&self) -> Result<&Path, String> {
+        self.transient_debugger_executable
+            .as_deref()
+            .ok_or_else(|| "Windows transient activation is missing its stable helper".to_string())
+    }
+
+    fn transient_user_root(&self) -> Result<&Path, String> {
+        self.transient_user_root
+            .as_deref()
+            .ok_or_else(|| "Windows transient activation is missing its private root".to_string())
     }
 
     pub fn activation_capability(&self) -> Result<WindowsActivationCapability, String> {
@@ -617,18 +643,33 @@ fn activate_packaged(
             "Windows transient activation is missing its private Runtime bootstrap",
         ));
     }
+    let debugger_executable = request.transient_debugger_executable()?;
+    let user_root = request.transient_user_root()?;
     let package = wide_nul(request.package_full_name());
-    let debugger_command =
-        debugger_command_line(capability.job_name(), request.package_full_name())?;
+    let debugger_command = transient_debugger_command_line(
+        debugger_executable,
+        capability.job_name(),
+        request.package_full_name(),
+    )?;
+    let evidence = stage_transient_windows_debug_registration(
+        user_root,
+        request.package_full_name(),
+        debugger_executable,
+    )?;
     let debugger_command = wide_nul(&debugger_command);
-    let mut debugging = PackageDebugGuard::enable(
+    let mut debugging = match PackageDebugGuard::enable(
         &package,
         &debugger_command,
         request.transient_debug_environment(),
         restoration,
-    )?;
+    ) {
+        Ok(debugging) => debugging,
+        Err(error) => return Err(WindowsActivationFailure::before_start(error)),
+    };
     let activation = activate_packaged_with_capability(request, WindowsLaunchMode::Cdp);
-    let restored = debugging.restore();
+    let restored = debugging
+        .restore()
+        .and_then(|()| retire_windows_debug_registration(user_root, &evidence.registration_id));
     match (activation, restored) {
         (Ok(process_tree), Ok(())) => Ok(process_tree),
         (Ok(mut process_tree), Err(error)) => {
@@ -818,11 +859,16 @@ fn flag_value<'a>(arguments: &'a [String], flag: &str) -> Result<&'a str, String
         .ok_or_else(|| format!("Windows package debugger is missing {flag}"))
 }
 
-fn debugger_command_line(job_name: &str, package_full_name: &str) -> Result<String, String> {
-    let executable = std::env::current_exe()
-        .map_err(|error| format!("cannot locate the Incodex package debugger: {error}"))?;
+pub fn transient_debugger_command_line(
+    executable: &Path,
+    job_name: &str,
+    package_full_name: &str,
+) -> Result<String, String> {
+    if !executable.is_absolute() {
+        return Err("Windows transient debugger helper path must be absolute".to_string());
+    }
     [
-        executable.into_os_string(),
+        executable.as_os_str().to_os_string(),
         OsString::from(PACKAGE_DEBUGGER_MODE),
         OsString::from("--job"),
         OsString::from(job_name),
