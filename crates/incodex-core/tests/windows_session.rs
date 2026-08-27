@@ -263,7 +263,10 @@ fn orphan_sweep_observes_a_session_recreated_after_removal() {
         while recreated.exists() && std::time::Instant::now() < deadline {
             std::thread::yield_now();
         }
-        assert!(!recreated.exists(), "orphan sweep never removed the session");
+        assert!(
+            !recreated.exists(),
+            "orphan sweep never removed the session"
+        );
         fs::create_dir_all(recreated.join("late-writer"))
             .expect("recreate orphan after initial removal");
     });

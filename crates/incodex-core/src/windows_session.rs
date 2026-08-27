@@ -6,7 +6,8 @@ use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use windows_sys::Win32::Foundation::{CloseHandle, LocalFree, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Security::Authorization::{
@@ -34,6 +35,9 @@ use crate::windows_path::{
 const OWNER_NAME: &str = OWNER_MANIFEST_FILE;
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
 const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
+const CLEANUP_ATTEMPTS: u32 = 5;
+const REMOVAL_OBSERVATION: Duration = Duration::from_millis(600);
+const REMOVAL_POLL: Duration = Duration::from_millis(100);
 static SESSION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[path = "windows_session_owner.rs"]
@@ -146,7 +150,7 @@ pub fn sweep_orphan_windows_sessions(user_root: &Path) -> usize {
     let mut swept = 0;
     for entry in entries {
         if let WindowsSessionEntry::Orphaned(session) = entry {
-            if burn_windows_session(&session) == WindowsCleanupResult::Removed {
+            if cleanup_windows_session(&session) == WindowsCleanupResult::Removed {
                 swept += 1;
             }
         }
@@ -313,6 +317,45 @@ pub fn burn_windows_session(session: &WindowsSessionHome) -> WindowsCleanupResul
         Err(error) => WindowsCleanupResult::Unknown {
             reason: format!("cannot verify Windows session cleanup: {error}"),
         },
+    }
+}
+
+pub fn cleanup_windows_session(session: &WindowsSessionHome) -> WindowsCleanupResult {
+    let mut last = WindowsCleanupResult::Unknown {
+        reason: "Windows session cleanup was not attempted".to_string(),
+    };
+    for attempt in 1..=CLEANUP_ATTEMPTS {
+        last = burn_windows_session(session);
+        if last == WindowsCleanupResult::Removed {
+            return observe_removed_session(session);
+        }
+        if attempt < CLEANUP_ATTEMPTS {
+            thread::sleep(Duration::from_millis(200 * u64::from(attempt)));
+        }
+    }
+    last
+}
+
+fn observe_removed_session(session: &WindowsSessionHome) -> WindowsCleanupResult {
+    let deadline = Instant::now() + REMOVAL_OBSERVATION;
+    loop {
+        thread::sleep(REMOVAL_POLL);
+        match fs::symlink_metadata(&session.root) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                if Instant::now() >= deadline {
+                    return WindowsCleanupResult::Removed;
+                }
+            }
+            Ok(_) => return burn_windows_session(session),
+            Err(error) => {
+                return WindowsCleanupResult::Unknown {
+                    reason: format!(
+                        "cannot observe removed Windows session {}: {error}",
+                        session.root.display()
+                    ),
+                }
+            }
+        }
     }
 }
 
