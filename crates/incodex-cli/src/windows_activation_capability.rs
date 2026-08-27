@@ -1,12 +1,14 @@
+use std::path::Path;
 use std::ptr;
 
+use sha2::{Digest, Sha256};
 use windows_sys::Win32::Foundation::LocalFree;
 use windows_sys::Win32::Security::Cryptography::{
     BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG,
 };
 use windows_sys::Win32::UI::Shell::CommandLineToArgvW;
 
-const TOKEN_PREFIX: &str = "--incodex-activation-token=";
+const USER_DATA_PREFIX: &str = "--user-data-dir=";
 const JOB_PREFIX: &str = r"Local\Incodex-";
 const ENVIRONMENT_PIPE_PREFIX: &str = r"\\.\pipe\Incodex-Activation-Environment-";
 
@@ -19,20 +21,28 @@ pub struct WindowsActivationCapability {
 
 impl WindowsActivationCapability {
     pub fn create() -> Result<Self, String> {
-        let token = random_token()?;
-        Ok(Self {
+        Ok(Self::from_token(random_token()?))
+    }
+
+    pub fn from_user_data_dir(user_data_dir: &str) -> Result<Self, String> {
+        validate_isolated_user_data_dir(user_data_dir)?;
+        let token = Sha256::digest(user_data_dir.as_bytes())[..16]
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        Ok(Self::from_token(token))
+    }
+
+    fn from_token(token: String) -> Self {
+        Self {
             job_name: format!("{JOB_PREFIX}{token}"),
             environment_pipe_name: format!("{ENVIRONMENT_PIPE_PREFIX}{token}"),
             token,
-        })
+        }
     }
 
     pub fn token(&self) -> &str {
         &self.token
-    }
-
-    pub fn command_line_argument(&self) -> String {
-        format!("{TOKEN_PREFIX}{}", self.token)
     }
 
     pub fn job_name(&self) -> &str {
@@ -42,44 +52,6 @@ impl WindowsActivationCapability {
     pub fn environment_pipe_name(&self) -> &str {
         &self.environment_pipe_name
     }
-}
-
-pub fn activation_token_from_command_line(command_line: &str) -> Result<Option<String>, String> {
-    if command_line.contains('\0') {
-        return Err("Windows activation command line contains NUL".to_string());
-    }
-    let wide = command_line.encode_utf16().chain([0]).collect::<Vec<_>>();
-    let mut count = 0;
-    let argv = unsafe { CommandLineToArgvW(wide.as_ptr(), &mut count) };
-    if argv.is_null() {
-        return Err("cannot parse Windows activation command line".to_string());
-    }
-    let mut token = None;
-    for index in 0..count {
-        let argument = unsafe { *argv.add(index as usize) };
-        let mut length = 0;
-        while unsafe { *argument.add(length) } != 0 {
-            length += 1;
-        }
-        let argument =
-            String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(argument, length) });
-        if let Some(value) = argument.strip_prefix(TOKEN_PREFIX) {
-            if !valid_token(value) {
-                unsafe { LocalFree(argv.cast()) };
-                return Err("Windows activation token is invalid".to_string());
-            }
-            if token.replace(value.to_string()).is_some() {
-                unsafe { LocalFree(argv.cast()) };
-                return Err("Windows activation command line repeats its token".to_string());
-            }
-        }
-    }
-    unsafe { LocalFree(argv.cast()) };
-    Ok(token)
-}
-
-fn valid_token(value: &str) -> bool {
-    value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn random_token() -> Result<String, String> {
@@ -99,4 +71,75 @@ fn random_token() -> Result<String, String> {
         ));
     }
     Ok(random.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+pub fn activation_capability_from_command_line(
+    command_line: &str,
+) -> Result<Option<WindowsActivationCapability>, String> {
+    if command_line.contains('\0') {
+        return Err("Windows activation command line contains NUL".to_string());
+    }
+    let wide = command_line.encode_utf16().chain([0]).collect::<Vec<_>>();
+    let mut count = 0;
+    let argv = unsafe { CommandLineToArgvW(wide.as_ptr(), &mut count) };
+    if argv.is_null() {
+        return Err("cannot parse Windows activation command line".to_string());
+    }
+    let mut capability = None;
+    for index in 0..count {
+        let argument = unsafe { *argv.add(index as usize) };
+        let mut length = 0;
+        while unsafe { *argument.add(length) } != 0 {
+            length += 1;
+        }
+        let argument =
+            String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(argument, length) });
+        if let Some(value) = argument.strip_prefix(USER_DATA_PREFIX) {
+            let Ok(parsed) = WindowsActivationCapability::from_user_data_dir(value) else {
+                continue;
+            };
+            if capability.replace(parsed).is_some() {
+                unsafe { LocalFree(argv.cast()) };
+                return Err(
+                    "Windows activation command line repeats its user data directory".to_string(),
+                );
+            }
+        }
+    }
+    unsafe { LocalFree(argv.cast()) };
+    Ok(capability)
+}
+
+fn validate_isolated_user_data_dir(value: &str) -> Result<(), String> {
+    if value.contains('\0') {
+        return Err("Windows activation user data directory contains NUL".to_string());
+    }
+    let path = Path::new(value);
+    let chromium = path.file_name().and_then(|name| name.to_str());
+    let session = path
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str());
+    let sessions = path
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str());
+    let incodex = path
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str());
+    if !path.is_absolute()
+        || !chromium.is_some_and(|name| name.eq_ignore_ascii_case("chromium"))
+        || !session.is_some_and(|name| name.starts_with("s-") && name.len() > 2)
+        || !sessions.is_some_and(|name| name.eq_ignore_ascii_case("sessions"))
+        || !incodex.is_some_and(|name| name.eq_ignore_ascii_case(".incodex"))
+    {
+        return Err(
+            "Windows activation user data directory is not an Incodex session profile".to_string(),
+        );
+    }
+    Ok(())
 }

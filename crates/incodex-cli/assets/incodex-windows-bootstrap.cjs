@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("node:fs");
+const { createHash } = require("node:crypto");
 const path = require("node:path");
 
 const REGISTRATION_NAME = "INCODEX_WINDOWS_REGISTRATION_ID";
@@ -9,35 +10,56 @@ const PACKAGE_NAME = "INCODEX_WINDOWS_PACKAGE_FULL_NAME";
 const STATE_PATH_NAME = "INCODEX_WINDOWS_STATE_PATH";
 const REGISTRATION_PATTERN = /^[a-f0-9]{32}$/;
 const ENABLED_PHASES = new Set(["enabled-unobserved", "enabled-observed"]);
-const ACTIVATION_TOKEN_PREFIX = "--incodex-activation-token=";
-const ACTIVATION_TOKEN_PATTERN = /^[a-f0-9]{32}$/;
+const USER_DATA_PREFIX = "--user-data-dir=";
 const ACTIVATION_PIPE_PREFIX = "\\\\.\\pipe\\Incodex-Activation-Environment-";
 const ACTIVATION_RESPONSE_LIMIT = 64 * 1024;
 
 function activationToken(argv) {
-  let token = "";
+  let userDataDir = "";
   for (const argument of argv) {
-    if (typeof argument !== "string" || !argument.startsWith(ACTIVATION_TOKEN_PREFIX)) continue;
-    const value = argument.slice(ACTIVATION_TOKEN_PREFIX.length);
-    if (!ACTIVATION_TOKEN_PATTERN.test(value) || token) {
-      throw new Error("invalid Windows activation token");
+    if (typeof argument !== "string" || !argument.startsWith(USER_DATA_PREFIX)) continue;
+    const value = argument.slice(USER_DATA_PREFIX.length);
+    if (userDataDir) {
+      throw new Error("repeated Windows activation user data directory");
     }
-    token = value;
+    const normalized = path.win32.normalize(value);
+    const session = path.win32.basename(path.win32.dirname(normalized));
+    const sessions = path.win32.basename(path.win32.dirname(path.win32.dirname(normalized)));
+    const incodex = path.win32.basename(
+      path.win32.dirname(path.win32.dirname(path.win32.dirname(normalized))),
+    );
+    if (
+      !path.win32.isAbsolute(value) ||
+      path.win32.basename(normalized).toLowerCase() !== "chromium" ||
+      !session.startsWith("s-") ||
+      session.length <= 2 ||
+      sessions.toLowerCase() !== "sessions" ||
+      incodex.toLowerCase() !== ".incodex"
+    ) {
+      continue;
+    }
+    userDataDir = value;
   }
-  return token;
+  return userDataDir
+    ? createHash("sha256").update(userDataDir, "utf8").digest("hex").slice(0, 32)
+    : "";
 }
 
-function readActivationEnvironment(pipeName) {
-  const descriptor = fs.openSync(pipeName, "r+");
+function readActivationEnvironment(pipeName, io = fs) {
+  const descriptor = io.openSync(pipeName, "r+");
   try {
-    fs.writeSync(descriptor, "environment\n");
-    const response = fs.readFileSync(descriptor, { encoding: "utf8" });
-    if (Buffer.byteLength(response) > ACTIVATION_RESPONSE_LIMIT) {
-      throw new Error("Windows activation environment is too large");
+    const request = "environment\n";
+    if (io.writeSync(descriptor, request) !== Buffer.byteLength(request)) {
+      throw new Error("Windows activation environment request was truncated");
     }
-    return JSON.parse(response);
+    const response = Buffer.alloc(ACTIVATION_RESPONSE_LIMIT);
+    const length = io.readSync(descriptor, response, 0, response.length, null);
+    if (length <= 0) {
+      throw new Error("Windows activation environment response is empty");
+    }
+    return JSON.parse(response.subarray(0, length).toString("utf8"));
   } finally {
-    fs.closeSync(descriptor);
+    io.closeSync(descriptor);
   }
 }
 
@@ -145,4 +167,4 @@ function attachWindowsRuntime(options = {}) {
 
 attachWindowsRuntime();
 
-module.exports = { attachWindowsRuntime };
+module.exports = { attachWindowsRuntime, readActivationEnvironment };

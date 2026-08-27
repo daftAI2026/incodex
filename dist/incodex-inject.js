@@ -1418,6 +1418,7 @@ var BTN_ATTR = "data-incodex-privacy-toggle";
 var TIP_ATTR = "data-incodex-tooltip";
 var LANDING_ATTR = "data-incodex-landing";
 var ERROR_ATTR = "data-incodex-launch-error";
+var ERROR_OVERLAY_ATTR = "data-incodex-launch-error-overlay";
 var SHORTCUT_LABEL = "⇧⌘N";
 var TOOLTIP_FALLBACK_DELAY_MS = 700;
 var TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
@@ -1437,6 +1438,8 @@ var STRIP_CLONE_ATTRS = [
   "tabindex"
 ];
 var activeTooltipLifecycle = null;
+var launchErrorPending = false;
+var windowsLaunchErrorHost = null;
 function dismissActiveTooltip() {
   activeTooltipLifecycle?.dismiss();
 }
@@ -1460,6 +1463,12 @@ function isIncognitoWindow() {
   if (typeof window.__incodexIncognito === "boolean")
     return window.__incodexIncognito;
   return false;
+}
+function isWindowsRenderer() {
+  return window.__incodexPlatform === "win32";
+}
+function shortcutLabel() {
+  return isWindowsRenderer() ? "Ctrl+Shift+N" : SHORTCUT_LABEL;
 }
 function currentLocale() {
   const locale = window.__incodexLocale || document.documentElement.lang || navigator.language || "en";
@@ -1568,7 +1577,7 @@ function ensureStyle() {
       box-sizing: border-box;
     }
     [${TIP_ATTR}][data-open="true"] { display: block; }
-    [${ERROR_ATTR}] {
+    [${ERROR_OVERLAY_ATTR}] {
       position: fixed;
       top: 16px;
       right: 16px;
@@ -1579,12 +1588,21 @@ function ensureStyle() {
 }
 var WARNING_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" class="icon-xs" aria-hidden="true"><path d="M8 9.8a.767.767 0 1 1 0 1.533A.767.767 0 0 1 8 9.8Zm0-5.134c.368 0 .667.299.667.667V8a.667.667 0 0 1-1.334 0V5.333c0-.368.299-.667.667-.667Z"/><path fill-rule="evenodd" d="M8 1.333a6.667 6.667 0 1 1 0 13.334A6.667 6.667 0 0 1 8 1.333Zm0 1.334a5.333 5.333 0 1 0 0 10.666A5.333 5.333 0 0 0 8 2.667Z" clip-rule="evenodd"/></svg>`;
 function hideLaunchError() {
+  launchErrorPending = false;
+  windowsLaunchErrorHost?.remove();
+  windowsLaunchErrorHost = null;
   document.querySelector(`[${ERROR_ATTR}]`)?.remove();
 }
 function showLaunchError() {
   hideLaunchError();
+  if (isWindowsRenderer()) {
+    launchErrorPending = true;
+    ensureLaunchError();
+    return;
+  }
   const card = document.createElement("div");
   card.setAttribute(ERROR_ATTR, "true");
+  card.setAttribute(ERROR_OVERLAY_ATTR, "true");
   card.setAttribute("role", "alert");
   card.className = "alert-root inline-flex flex-col gap-2 rounded-xl px-2 py-2 text-base leading-[1.4] pointer-events-auto box-shadow-lg border border-warning-outline bg-warning-surface text-warning";
   const row = document.createElement("div");
@@ -1648,7 +1666,7 @@ function landingStillMounted() {
   return Boolean(landing);
 }
 function needsInject() {
-  return !buttonStillBesideSearch() || !landingStillMounted() || profileMaskNeedsInject();
+  return !buttonStillBesideSearch() || !landingStillMounted() || launchErrorNeedsInject() || profileMaskNeedsInject();
 }
 function buildButton(search) {
   disposeActiveTooltip();
@@ -1711,7 +1729,7 @@ function tooltipEl() {
   label.setAttribute("data-incodex-tooltip-label", "true");
   const kbd = document.createElement("kbd");
   kbd.className = "inline-flex !rounded-md !border-0 !bg-current/10 !font-sans !text-xs !text-current !shadow-none !px-1.5 !py-0.5 !leading-none";
-  kbd.textContent = SHORTCUT_LABEL;
+  kbd.textContent = shortcutLabel();
   text.append(label, kbd);
   tip.append(text);
   document.body.append(tip);
@@ -1781,27 +1799,54 @@ function findOfficialBannerSlot() {
     return classNameOf(el).split(/\s+/).includes("home-banners");
   }) ?? null;
 }
-function buildLanding() {
+function mountInOfficialBannerSlot(element) {
+  const slot = findOfficialBannerSlot();
+  if (!slot)
+    return false;
+  if (slot.firstElementChild !== element)
+    slot.insertBefore(element, slot.firstChild);
+  return true;
+}
+function cloneOfficialPrimaryAction() {
+  const slot = findOfficialBannerSlot();
+  const source = [...slot?.querySelectorAll("button") ?? []].find((button) => button.textContent?.trim() && !button.closest(`[${BANNER_HOST_ATTR}]`) && !button.closest(`[${ERROR_ATTR}]`)) ?? document.querySelector("button.bg-primary-solid");
+  if (!source)
+    return null;
+  const clone = source.cloneNode(false);
+  for (const name of STRIP_CLONE_ATTRS)
+    clone.removeAttribute(name);
+  for (const name of [...clone.attributes].map((attribute) => attribute.name)) {
+    if (name.startsWith("data-"))
+      clone.removeAttribute(name);
+  }
+  clone.type = "button";
+  clone.disabled = false;
+  return clone;
+}
+function buildOfficialHomeBanner(options) {
   const host = document.createElement("div");
-  host.setAttribute(BANNER_HOST_ATTR, "true");
+  host.setAttribute(options.hostAttribute, "true");
   const card = document.createElement("aside");
-  card.setAttribute(LANDING_ATTR, "true");
-  card.setAttribute("aria-live", "polite");
-  card.className = "relative isolate flex w-full items-center gap-4 overflow-hidden rounded-2xl border border-primary-outline bg-surface py-2 ps-3 pe-2 text-sm text-default shadow-xs lg:mx-auto electron:border-0 electron:ring-[0.5px] electron:ring-border-strong";
+  if (options.cardAttribute)
+    card.setAttribute(options.cardAttribute, "true");
+  card.setAttribute("aria-live", options.warning ? "assertive" : "polite");
+  if (options.warning)
+    card.setAttribute("role", "alert");
+  card.className = `relative isolate flex w-full items-center gap-4 overflow-hidden rounded-2xl border bg-surface py-2 ps-3 pe-2 text-sm text-default shadow-xs lg:mx-auto electron:border-0 electron:ring-[0.5px] electron:ring-border-strong ${options.warning ? "border-text-warning/30" : "border-primary-outline"}`;
   const wash = document.createElement("div");
   wash.setAttribute("aria-hidden", "true");
-  wash.className = "absolute inset-0 -z-10 bg-primary-soft";
+  wash.className = `absolute inset-0 -z-10 ${options.warning ? "bg-background-warning-surface/30" : "bg-primary-soft"}`;
   const row = document.createElement("div");
   row.className = "flex h-full w-full min-w-0 items-center gap-2";
   const visual = document.createElement("div");
-  visual.className = "flex size-12 shrink-0 items-center justify-center self-center text-secondary";
-  visual.innerHTML = ICON_SVG.trim();
+  visual.className = `flex size-12 shrink-0 items-center justify-center self-center ${options.warning ? "text-warning" : "text-secondary"}`;
+  visual.innerHTML = options.icon.trim();
   const svg = visual.querySelector("svg");
   if (svg) {
     svg.setAttribute("class", "icon-sm");
     svg.setAttribute("aria-hidden", "true");
-    svg.setAttribute("width", "24");
-    svg.setAttribute("height", "24");
+    svg.setAttribute("width", String(options.iconSize));
+    svg.setAttribute("height", String(options.iconSize));
   }
   const copy = document.createElement("div");
   copy.className = "min-w-0 flex-1";
@@ -1810,30 +1855,89 @@ function buildLanding() {
   const title = document.createElement("div");
   title.className = "min-w-0 text-base font-medium text-default";
   title.setAttribute(BANNER_TITLE_ATTR, "true");
-  title.textContent = t("title");
+  title.textContent = options.title;
   titleWrap.append(title);
   const body = document.createElement("div");
   body.className = "text-sm leading-tight text-pretty text-secondary";
   body.setAttribute(BANNER_BODY_ATTR, "true");
-  body.textContent = t("body");
+  body.textContent = options.body;
   copy.append(titleWrap, body);
   const actions = document.createElement("div");
   actions.className = "flex items-center gap-2 self-center max-[400px]:w-full max-[400px]:justify-center max-[400px]:self-stretch";
+  if (options.primaryAction) {
+    const primary = cloneOfficialPrimaryAction() ?? document.createElement("button");
+    primary.type = "button";
+    if (!primary.className) {
+      primary.className = "shrink-0 rounded-full bg-primary-solid px-3 py-1 text-sm font-medium text-primary-solid";
+    }
+    primary.textContent = options.primaryAction.label;
+    primary.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      options.primaryAction?.onClick();
+    });
+    actions.append(primary);
+  }
   const close = document.createElement("button");
   close.type = "button";
-  close.setAttribute("aria-label", t("dismiss"));
+  close.setAttribute("aria-label", options.closeLabel);
   close.className = "flex size-8 shrink-0 items-center justify-center rounded-lg border-transparent text-codex-description hover:text-default";
   close.innerHTML = CLOSE_SVG;
   close.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    dismissBanner();
+    options.onClose();
   }, true);
   actions.append(close);
   row.append(visual, copy, actions);
   card.append(wash, row);
   host.append(card);
   return host;
+}
+function buildLanding() {
+  return buildOfficialHomeBanner({
+    body: t("body"),
+    cardAttribute: LANDING_ATTR,
+    closeLabel: t("dismiss"),
+    hostAttribute: BANNER_HOST_ATTR,
+    icon: ICON_SVG,
+    iconSize: 24,
+    onClose: dismissBanner,
+    title: t("title")
+  });
+}
+function buildWindowsLaunchErrorBanner() {
+  return buildOfficialHomeBanner({
+    body: t("errorBody"),
+    closeLabel: t("errorClose"),
+    hostAttribute: ERROR_ATTR,
+    icon: WARNING_ICON,
+    iconSize: 20,
+    onClose: hideLaunchError,
+    primaryAction: {
+      label: t("errorRetry"),
+      onClick: () => {
+        hideLaunchError();
+        activate();
+      }
+    },
+    title: t("errorTitle"),
+    warning: true
+  });
+}
+function launchErrorNeedsInject() {
+  if (!isWindowsRenderer() || !launchErrorPending)
+    return false;
+  const slot = findOfficialBannerSlot();
+  return !slot || !windowsLaunchErrorHost?.isConnected || windowsLaunchErrorHost.parentElement !== slot;
+}
+function ensureLaunchError() {
+  if (!isWindowsRenderer() || !launchErrorPending)
+    return;
+  if (!windowsLaunchErrorHost)
+    windowsLaunchErrorHost = buildWindowsLaunchErrorBanner();
+  windowsLaunchErrorHost.className = "";
+  mountInOfficialBannerSlot(windowsLaunchErrorHost);
 }
 function syncLandingCopy(host) {
   const title = host.querySelector(`[${BANNER_TITLE_ATTR}]`);
@@ -1855,16 +1959,12 @@ function ensureLanding() {
     removeLanding();
     return;
   }
-  const slot = findOfficialBannerSlot();
-  if (!slot)
-    return;
   let host = document.querySelector(`[${BANNER_HOST_ATTR}]`);
   if (!host)
     host = buildLanding();
   syncLandingCopy(host);
   host.className = "";
-  if (slot.firstElementChild !== host)
-    slot.insertBefore(host, slot.firstChild);
+  mountInOfficialBannerSlot(host);
 }
 function ensureButton() {
   let btn = document.querySelector(`[${BTN_ATTR}]`);
@@ -1930,6 +2030,7 @@ function createMutationObserver() {
         return;
       ensureButton();
       ensureLanding();
+      ensureLaunchError();
       ensureProfileMask();
       refreshUiProbe();
     });
@@ -1959,6 +2060,7 @@ function start() {
   ensureButton();
   apply();
   ensureLanding();
+  ensureLaunchError();
   ensureProfileMask();
   refreshUiProbe();
   window.addEventListener("keydown", onKeydown, true);

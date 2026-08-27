@@ -79,6 +79,28 @@ $applications = @($manifest.Package.Applications.Application | ForEach-Object {
     )?)
 }
 
+pub fn codex_package_full_name_is_installed(package_full_name: &str) -> Result<bool, String> {
+    if !package_full_name.starts_with("OpenAI.Codex_")
+        || !package_full_name.ends_with(PACKAGE_FAMILY_SUFFIX)
+        || package_full_name.contains('\0')
+    {
+        return Err("Windows package identity is not the official Codex package".to_string());
+    }
+    let script = r#"$package = Get-AppxPackage -Name OpenAI.Codex | Where-Object { $_.PackageFullName -ceq $env:INCODEX_PACKAGE_FULL_NAME } | Select-Object -First 1
+if ($null -eq $package) { exit 3 }
+exit 0"#;
+    let mut command = package_query_command(script)?;
+    command.env("INCODEX_PACKAGE_FULL_NAME", package_full_name);
+    let output = command
+        .output()
+        .map_err(|error| format!("cannot query the installed Windows Codex generation: {error}"))?;
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(3) => Ok(false),
+        _ => Err("Windows package generation query failed".to_string()),
+    }
+}
+
 fn package_query_command(script: &str) -> Result<Command, String> {
     let mut command = Command::new(system_powershell_path()?);
     command

@@ -42,7 +42,10 @@ fn publishes_a_windowless_private_content_addressed_helper_without_mutating_the_
     assert_eq!(first, second);
     assert_ne!(first.executable, source);
     assert_eq!(fs::read(&source).unwrap(), source_before);
-    assert_eq!(pe_subsystem(&fs::read(&first.executable).unwrap()), WINDOWS_GUI_SUBSYSTEM);
+    assert_eq!(
+        pe_subsystem(&fs::read(&first.executable).unwrap()),
+        WINDOWS_GUI_SUBSYSTEM
+    );
     assert_ne!(fs::read(&first.executable).unwrap(), source_before);
     assert_eq!(first.sha256.len(), 64);
     assert!(first.sha256.bytes().all(|byte| byte.is_ascii_hexdigit()));

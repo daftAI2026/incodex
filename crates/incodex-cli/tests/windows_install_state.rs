@@ -99,6 +99,7 @@ fn uninstall_publishes_the_kill_switch_before_waiting_then_disables_once() {
     let waiting = uninstall_windows_runtime_with(
         &user_root,
         |_| Ok(vec![42]),
+        |_| panic!("running package must block the generation query"),
         |_| panic!("running package must block disable"),
     )
     .expect("request uninstall");
@@ -118,6 +119,7 @@ fn uninstall_publishes_the_kill_switch_before_waiting_then_disables_once() {
     let removed = uninstall_windows_runtime_with(
         &user_root,
         |_| Ok(Vec::new()),
+        |_| Ok(true),
         |disabled_package| {
             disabled = true;
             assert_eq!(disabled_package, package);
@@ -172,11 +174,9 @@ fn uninstall_recovers_after_the_store_replaces_the_registered_package() {
 
     assert_eq!(removed, WindowsUninstallOutcome::Removed);
     assert!(package_checked);
-    assert!(
-        read_windows_install_state(&user_root)
-            .expect("read retired state")
-            .is_none()
-    );
+    assert!(read_windows_install_state(&user_root)
+        .expect("read retired state")
+        .is_none());
     fs::remove_dir_all(user_root).expect("remove Store upgrade fixture");
 }
 

@@ -4,6 +4,9 @@ use std::ffi::{OsStr, OsString};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::Path;
 use std::ptr;
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use windows_sys::core::{GUID, HRESULT};
 use windows_sys::Win32::Foundation::{
@@ -15,8 +18,13 @@ use windows_sys::Win32::System::Com::{
 };
 use windows_sys::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
 
-use crate::windows_activation_capability::activation_token_from_command_line;
+use crate::windows_activation_capability::{
+    activation_capability_from_command_line, WindowsActivationCapability,
+};
 use crate::windows_install_state::{read_windows_install_state, WindowsInstallState};
+use crate::windows_launch::{
+    WindowsActivationEnvironment, WindowsActivationEnvironmentPipe, WindowsLaunchMode,
+};
 use crate::windows_process::{
     assign_debugged_process_to_job, process_command_line, resume_debugged_package_process,
     snapshot_process_ids, WindowsPendingJob, WindowsProcessTree,
@@ -26,6 +34,7 @@ const PACKAGE_DEBUGGER_MODE: &str = "__incodex_windows_package_debugger";
 const INSTALLED_DEBUGGER_MODE: &str = "__incodex_windows_installed_debugger";
 const PACKAGE_ACTIVATION_LOCK_NAME: &str = "Local\\Incodex-OpenAI.Codex-Activation";
 const PACKAGE_ACTIVATION_LOCK_TIMEOUT_MS: u32 = 15_000;
+const ACTIVATION_ENVIRONMENT_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WindowsDebuggerRoute {
@@ -34,10 +43,10 @@ pub enum WindowsDebuggerRoute {
 }
 
 pub fn windows_debugger_route(command_line: &str) -> Result<WindowsDebuggerRoute, String> {
-    match activation_token_from_command_line(command_line)? {
-        Some(token) => Ok(WindowsDebuggerRoute::AssignToJob(format!(
-            "Local\\Incodex-{token}"
-        ))),
+    match activation_capability_from_command_line(command_line)? {
+        Some(capability) => Ok(WindowsDebuggerRoute::AssignToJob(
+            capability.job_name().to_string(),
+        )),
         None => Ok(WindowsDebuggerRoute::ResumeNormally),
     }
 }
@@ -54,7 +63,9 @@ pub struct WindowsActivationRequest {
     package_full_name: String,
     app_user_model_id: String,
     arguments: String,
+    activation_user_data_dir: Option<String>,
     environment: Vec<u16>,
+    claimed_environment: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,10 +105,6 @@ impl WindowsInstalledRuntimeRegistration {
             (
                 "INCODEX_WINDOWS_HELPER".to_string(),
                 state.helper_path.as_os_str().to_os_string(),
-            ),
-            (
-                "INCODEX_WINDOWS_SELF_SPAWN_PROBE".to_string(),
-                OsString::from("1"),
             ),
         ]))
     }
@@ -214,17 +221,45 @@ impl WindowsActivationRequest {
     {
         validate_text(package_full_name, "package full name")?;
         validate_text(app_user_model_id, "app user model id")?;
+        let mut activation_user_data_dir = None;
         let arguments = arguments
             .into_iter()
-            .map(|argument| quote_windows_argument(&argument))
-            .collect::<Result<Vec<_>, _>>()?
+            .map(|argument| {
+                if let Some(argument) = argument.to_str() {
+                    if let Some(value) = argument.strip_prefix("--user-data-dir=") {
+                        if activation_user_data_dir
+                            .replace(value.to_string())
+                            .is_some()
+                        {
+                            return Err(
+                                "Windows activation arguments repeat the user data directory"
+                                    .to_string(),
+                            );
+                        }
+                    }
+                }
+                let quoted = quote_windows_argument(&argument)?;
+                Ok(quoted)
+            })
+            .collect::<Result<Vec<_>, String>>()?
             .join(" ");
+        let claimed_environment = environment
+            .iter()
+            .map(|(name, value)| {
+                let value = value.to_str().ok_or_else(|| {
+                    format!("Windows activation environment value for {name} is not valid Unicode")
+                })?;
+                Ok((name.clone(), value.to_string()))
+            })
+            .collect::<Result<BTreeMap<_, _>, String>>()?;
         let environment = environment_block(environment)?;
         Ok(Self {
             package_full_name: package_full_name.to_string(),
             app_user_model_id: app_user_model_id.to_string(),
             arguments,
+            activation_user_data_dir,
             environment,
+            claimed_environment,
         })
     }
 
@@ -242,6 +277,23 @@ impl WindowsActivationRequest {
 
     pub fn environment(&self) -> &[u16] {
         &self.environment
+    }
+
+    pub fn activation_capability(&self) -> Result<WindowsActivationCapability, String> {
+        let user_data_dir = self.activation_user_data_dir.as_deref().ok_or_else(|| {
+            "Windows installed activation is missing its isolated user data directory".to_string()
+        })?;
+        WindowsActivationCapability::from_user_data_dir(user_data_dir)
+    }
+
+    pub fn activation_environment(
+        &self,
+        mode: WindowsLaunchMode,
+    ) -> Result<WindowsActivationEnvironment, String> {
+        Ok(WindowsActivationEnvironment {
+            mode,
+            environment: self.claimed_environment.clone(),
+        })
     }
 }
 
@@ -277,6 +329,78 @@ impl From<String> for WindowsActivationFailure {
     }
 }
 
+struct ActivationEnvironmentServer {
+    pipe_name: String,
+    result: Receiver<Result<u32, String>>,
+    worker: Option<JoinHandle<()>>,
+}
+
+impl ActivationEnvironmentServer {
+    fn start(
+        capability: &WindowsActivationCapability,
+        package_full_name: &str,
+        response: WindowsActivationEnvironment,
+    ) -> Result<Self, String> {
+        let pipe = WindowsActivationEnvironmentPipe::create(capability)?;
+        let pipe_name = pipe.name().to_string();
+        let job_name = capability.job_name().to_string();
+        let package_full_name = package_full_name.to_string();
+        let (sender, result) = mpsc::sync_channel(1);
+        let worker = thread::spawn(move || {
+            let response = pipe.respond_once(&job_name, &package_full_name, &response);
+            let _ = sender.send(response);
+        });
+        Ok(Self {
+            pipe_name,
+            result,
+            worker: Some(worker),
+        })
+    }
+
+    fn wait(&mut self, timeout: Duration) -> Result<u32, String> {
+        match self.result.recv_timeout(timeout) {
+            Ok(result) => {
+                self.join();
+                result
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                Err("timed out waiting for the Windows activation environment claim".to_string())
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                self.join();
+                Err("Windows activation environment server ended without a result".to_string())
+            }
+        }
+    }
+
+    fn cancel(&mut self) {
+        if self.worker.is_none() {
+            return;
+        }
+        let _ = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&self.pipe_name);
+        if self.result.recv_timeout(Duration::from_secs(1)).is_ok() {
+            self.join();
+        } else {
+            self.worker.take();
+        }
+    }
+
+    fn join(&mut self) {
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+impl Drop for ActivationEnvironmentServer {
+    fn drop(&mut self) {
+        self.cancel();
+    }
+}
+
 pub fn activate_packaged_kill_on_drop(
     request: &WindowsActivationRequest,
 ) -> Result<WindowsProcessTree, WindowsActivationFailure> {
@@ -292,7 +416,105 @@ pub fn activate_packaged_with_installed_runtime(
             "Windows installed Runtime registration does not match the activation package",
         ));
     }
-    activate_packaged(request, Some(registration))
+    activate_packaged_with_capability(request)
+}
+
+fn activate_packaged_with_capability(
+    request: &WindowsActivationRequest,
+) -> Result<WindowsProcessTree, WindowsActivationFailure> {
+    let _activation_lock = acquire_package_activation_lock()?;
+    let _apartment = ComApartment::initialize()?;
+    let existing_processes = snapshot_process_ids()
+        .map_err(|error| format!("cannot snapshot Windows processes before activation: {error}"))?;
+    let capability = request.activation_capability()?;
+    let pending_job = WindowsPendingJob::create_for_capability(&capability)
+        .map_err(|error| format!("cannot create Windows activation Job Object: {error}"))?;
+    let response = request.activation_environment(WindowsLaunchMode::Runtime)?;
+    let mut environment_server =
+        ActivationEnvironmentServer::start(&capability, request.package_full_name(), response)?;
+    let manager = match ComPtr::create(
+        &CLSID_APPLICATION_ACTIVATION_MANAGER,
+        &IID_APPLICATION_ACTIVATION_MANAGER,
+        "Windows application activation manager",
+    ) {
+        Ok(manager) => manager,
+        Err(error) => {
+            environment_server.cancel();
+            return Err(WindowsActivationFailure::before_start(error));
+        }
+    };
+    let app_user_model_id = wide_nul(request.app_user_model_id());
+    let arguments = wide_nul(request.arguments());
+    let mut process_id = 0;
+    let result = unsafe {
+        let vtable = *(manager.raw() as *mut *const ApplicationActivationManagerVtable);
+        ((*vtable).activate_application)(
+            manager.raw(),
+            app_user_model_id.as_ptr(),
+            arguments.as_ptr(),
+            0,
+            &mut process_id,
+        )
+    };
+    if failed(result) {
+        environment_server.cancel();
+        let shutdown = if process_id != 0 && !existing_processes.contains(&process_id) {
+            Err(format!(
+                "activation failed after reporting new Windows process {process_id}; process shutdown is unproven"
+            ))
+        } else {
+            Ok(())
+        };
+        return Err(WindowsActivationFailure::after_start(
+            hresult_message("cannot activate the Windows Codex package", result),
+            shutdown,
+        ));
+    }
+    if process_id == 0 || existing_processes.contains(&process_id) {
+        environment_server.cancel();
+        return Err(WindowsActivationFailure::after_start(
+            "Windows package activation did not create a new isolated Codex process",
+            Ok(()),
+        ));
+    }
+    let mut process_tree = match pending_job.attach(process_id, request.package_full_name()) {
+        Ok(process_tree) => process_tree,
+        Err(error) => {
+            environment_server.cancel();
+            return Err(WindowsActivationFailure::after_start(
+                format!(
+                    "cannot contain activated Windows Codex process {process_id} in its capability Job: {error}"
+                ),
+                Err(format!(
+                    "cannot prove activated Windows Codex process {process_id} and its descendants exited after Job attachment failed"
+                )),
+            ));
+        }
+    };
+    let environment_client = match environment_server.wait(ACTIVATION_ENVIRONMENT_TIMEOUT) {
+        Ok(process_id) => process_id,
+        Err(error) => {
+            let shutdown = process_tree.terminate().map(|_| ()).map_err(|shutdown_error| {
+                format!(
+                    "cannot prove the isolated Windows Job is empty after environment claim failed: {shutdown_error}"
+                )
+            });
+            environment_server.cancel();
+            return Err(WindowsActivationFailure::after_start(error, shutdown));
+        }
+    };
+    if environment_client != process_id {
+        let shutdown = process_tree.terminate().map(|_| ()).map_err(|shutdown_error| {
+            format!(
+                "cannot prove the isolated Windows Job is empty after a foreign environment claim: {shutdown_error}"
+            )
+        });
+        return Err(WindowsActivationFailure::after_start(
+            "Windows activation environment was claimed by the wrong Job process",
+            shutdown,
+        ));
+    }
+    Ok(process_tree)
 }
 
 fn activate_packaged(

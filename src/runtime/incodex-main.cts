@@ -627,13 +627,14 @@ function markAcceptedWindowReady(win) {
   if (markSessionReady()) readyWindows.add(win);
 }
 
-function reportInjectionProbe(win) {
+function reportInjectionProbe(win, reportMissing = true) {
   return win.webContents.executeJavaScript("window.__incodexUiProbe", false).then((probe) => {
-    logLaunch("ui-probe", probe);
+    if (reportMissing || probe?.accepted === true) logLaunch("ui-probe", probe);
     if (windowsPlatform && isIncognito() && probe?.accepted === true) {
       acceptedWindows.add(win);
       markAcceptedWindowReady(win);
     }
+    return probe;
   });
 }
 
@@ -664,7 +665,8 @@ function hookWindow(win, source) {
     if (!source || win.webContents.isDestroyed()) return;
     if (!ipcGuard.bindWindowIdentity(allowedWindows, win, trustedOrigins)) return;
     const locale = JSON.stringify(readLocaleOverride());
-    const prefix = `window.__incodexIncognito=${isIncognito() ? "true" : "false"};window.__incodexLocale=${locale};`;
+    const platform = JSON.stringify(process.platform);
+    const prefix = `window.__incodexIncognito=${isIncognito() ? "true" : "false"};window.__incodexLocale=${locale};window.__incodexPlatform=${platform};`;
     win.webContents
       .executeJavaScript(prefix + source, false)
       .then(() => (report ? reportInjectionProbe(win) : undefined))
@@ -673,6 +675,13 @@ function hookWindow(win, source) {
   win.webContents.on("dom-ready", () => run(false));
   win.webContents.on("did-finish-load", () => run(true));
   run(false);
+  if (windowsPlatform && isIncognito()) {
+    windowsPlatform.observeRuntimeUiReadiness(
+      win,
+      () => reportInjectionProbe(win, false).then((probe) => probe?.accepted === true),
+      () => markAcceptedWindowReady(win),
+    );
+  }
 }
 
 async function attachElectron() {
@@ -703,6 +712,15 @@ async function attachElectron() {
   const source = injectSource();
   let ownerLease = null;
   let raiseServer = null;
+  let incognitoExitStarted = false;
+  function finishIncognito(code) {
+    if (incognitoExitStarted) return;
+    incognitoExitStarted = true;
+    markSessionClosed();
+    burnIncognitoHome();
+    void clearPid(ownerLease, raiseServer);
+    electron.app.exit(code);
+  }
   electron.ipcMain.handle("incodex-action", async (event, payload) => {
     const requestId = typeof payload?.requestId === "string" ? payload.requestId : "";
     const gate = authorizeEvent(event);
@@ -751,6 +769,19 @@ async function attachElectron() {
       return;
     }
     hookWindow(win, source);
+    if (windowsPlatform) {
+      windowsPlatform.exitAfterLastMainWindowCloses(
+        win,
+        () =>
+          mainWindows(electron).some(
+            (open) => open !== win && !open.isDestroyed() && open.isVisible(),
+          ),
+        (code) => {
+          if (isIncognito()) finishIncognito(code);
+          else electron.app.exit(code);
+        },
+      );
+    }
     if (!isIncognito()) return;
     applyChromeWindowTile(win);
     function bringForward() {
@@ -772,10 +803,7 @@ async function attachElectron() {
     });
     win.on("closed", () => {
       if (mainWindows(electron).some((open) => open !== win && !open.isDestroyed())) return;
-      markSessionClosed();
-      burnIncognitoHome();
-      void clearPid(ownerLease, raiseServer);
-      electron.app.exit(0);
+      finishIncognito(0);
     });
   });
   if (isIncognito() && windowsPlatform) {
@@ -829,9 +857,7 @@ async function attachElectron() {
   }
   if (isIncognito()) {
     electron.app.on("window-all-closed", () => {
-      burnIncognitoHome();
-      void clearPid(ownerLease, raiseServer);
-      electron.app.exit(0);
+      finishIncognito(0);
     });
     electron.app.on("before-quit", () => {
       burnIncognitoHome();

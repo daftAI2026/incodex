@@ -6,7 +6,9 @@ use crate::parse::ParsedCli;
 use crate::windows_activation::{
     disable_installed_runtime, enable_installed_runtime, WindowsInstalledRuntimeRegistration,
 };
-use crate::windows_app::{discover_codex_package, WindowsCodexApp};
+use crate::windows_app::{
+    codex_package_full_name_is_installed, discover_codex_package, WindowsCodexApp,
+};
 use crate::windows_helper::publish_windows_helper;
 use crate::windows_install_state::{
     acquire_windows_install_state, read_windows_install_state,
@@ -166,6 +168,7 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
     match uninstall_windows_runtime_with(
         &profile.join(".incodex"),
         running_package_process_ids,
+        codex_package_full_name_is_installed,
         disable_installed_runtime,
     )? {
         WindowsUninstallOutcome::NotInstalled => {
@@ -199,13 +202,15 @@ pub enum WindowsUninstallOutcome {
     Removed,
 }
 
-pub fn uninstall_windows_runtime_with<R, D>(
+pub fn uninstall_windows_runtime_with<R, P, D>(
     user_root: &Path,
     running_package_processes: R,
+    package_is_installed: P,
     disable: D,
 ) -> Result<WindowsUninstallOutcome, String>
 where
     R: FnOnce(&str) -> Result<Vec<u32>, std::io::Error>,
+    P: FnOnce(&str) -> Result<bool, String>,
     D: FnOnce(&str) -> Result<(), String>,
 {
     let _transaction = acquire_windows_install_state()?;
@@ -220,7 +225,9 @@ where
                 WindowsInstallPhase::DisableRequested,
             )?
         }
-        WindowsInstallPhase::DisableRequested | WindowsInstallPhase::Disabled => state,
+        WindowsInstallPhase::DisableRequested
+        | WindowsInstallPhase::Disabled
+        | WindowsInstallPhase::RecoveryRequired => state,
         phase => {
             return Err(format!(
                 "Windows install state {phase:?} requires recovery before uninstall can continue"
@@ -244,13 +251,26 @@ where
         state.epoch,
         WindowsInstallPhase::DisablePending,
     )?;
-    if let Err(error) = disable(&pending.package_full_name) {
-        let recovery = transition_windows_install_state(
-            user_root,
-            pending.epoch,
-            WindowsInstallPhase::RecoveryRequired,
-        );
-        return Err(join_recovery_error(error, recovery));
+    let package_is_installed = match package_is_installed(&pending.package_full_name) {
+        Ok(installed) => installed,
+        Err(error) => {
+            let recovery = transition_windows_install_state(
+                user_root,
+                pending.epoch,
+                WindowsInstallPhase::RecoveryRequired,
+            );
+            return Err(join_recovery_error(error, recovery));
+        }
+    };
+    if package_is_installed {
+        if let Err(error) = disable(&pending.package_full_name) {
+            let recovery = transition_windows_install_state(
+                user_root,
+                pending.epoch,
+                WindowsInstallPhase::RecoveryRequired,
+            );
+            return Err(join_recovery_error(error, recovery));
+        }
     }
     let disabled = match transition_windows_install_state(
         user_root,

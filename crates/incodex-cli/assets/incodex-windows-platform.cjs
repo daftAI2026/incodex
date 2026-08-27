@@ -10,6 +10,9 @@ const CANCEL_EXIT_TIMEOUT_MS = 5_000;
 const BOUNDS_PATTERN = /^-?\d{1,10},-?\d{1,10},\d{1,10},\d{1,10}$/;
 const SIGNAL_PIPE_PATTERN = /^\\\\\.\\pipe\\Incodex-Runtime-(Ready|Closed)-[a-f0-9]{32}$/;
 const RAISE_PIPE = "\\\\.\\pipe\\Incodex-Runtime-Raise";
+const WINDOW_CLOSE_SETTLE_MS = 100;
+const UI_READINESS_RETRY_MS = 250;
+const observedRuntimeWindows = new WeakSet();
 
 function validAbsolutePath(value) {
   return typeof value === "string" && !value.includes("\0") && path.win32.isAbsolute(value);
@@ -31,6 +34,71 @@ function markReady(pipeName, write = writeFileSync) {
 
 function markClosed(pipeName, write = writeFileSync) {
   return markSignal(pipeName, "closed", write);
+}
+
+function exitAfterLastMainWindowCloses(
+  win,
+  hasAnotherMainWindow,
+  exit,
+  schedule = setTimeout,
+) {
+  if (
+    !win?.on ||
+    typeof hasAnotherMainWindow !== "function" ||
+    typeof exit !== "function" ||
+    typeof schedule !== "function"
+  ) {
+    throw new Error("invalid Windows host window lifecycle");
+  }
+  let exited = false;
+  const exitIfLast = (requireHidden) => {
+    if (exited || hasAnotherMainWindow()) return;
+    if (
+      requireHidden &&
+      win.isDestroyed?.() !== true &&
+      win.isVisible?.() !== false
+    ) {
+      return;
+    }
+    exited = true;
+    exit(0);
+  };
+  win.on("close", () => schedule(() => exitIfLast(true), WINDOW_CLOSE_SETTLE_MS));
+  win.on("closed", () => exitIfLast(false));
+}
+
+function observeRuntimeUiReadiness(
+  win,
+  inspect,
+  accept,
+  schedule = setTimeout,
+) {
+  if (
+    !win ||
+    typeof win.isDestroyed !== "function" ||
+    typeof inspect !== "function" ||
+    typeof accept !== "function" ||
+    typeof schedule !== "function"
+  ) {
+    throw new Error("invalid Windows Runtime UI readiness observer");
+  }
+  if (observedRuntimeWindows.has(win)) return;
+  observedRuntimeWindows.add(win);
+
+  const check = () => {
+    if (win.isDestroyed()) return;
+    Promise.resolve()
+      .then(inspect)
+      .then((accepted) => {
+        if (accepted) {
+          accept();
+          return;
+        }
+        schedule(check, UI_READINESS_RETRY_MS);
+      })
+      .catch(() => schedule(check, UI_READINESS_RETRY_MS));
+  };
+  check();
 }
 
 function listenForRaise(pipeName, onRaise, create = createServer) {
@@ -157,4 +225,11 @@ function launchIncognito(options = {}) {
   });
 }
 
-module.exports = { launchIncognito, listenForRaise, markClosed, markReady };
+module.exports = {
+  exitAfterLastMainWindowCloses,
+  launchIncognito,
+  listenForRaise,
+  markClosed,
+  markReady,
+  observeRuntimeUiReadiness,
+};

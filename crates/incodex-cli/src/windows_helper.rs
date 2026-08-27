@@ -4,10 +4,17 @@ use std::path::{Path, PathBuf};
 use incodex_core::windows_session::{
     apply_private_windows_acl, ensure_private_windows_dir, verify_private_acl,
 };
+use sha2::{Digest, Sha256};
 
 use crate::windows_file::{canonical_regular_file, ensure_regular_file, sha256_file};
 
 const HELPER_NAME: &str = "incodex-helper.exe";
+const DOS_PE_OFFSET: usize = 0x3c;
+const COFF_HEADER_SIZE: usize = 20;
+const OPTIONAL_HEADER_SUBSYSTEM_OFFSET: usize = 68;
+const PE32_MAGIC: u16 = 0x10b;
+const PE32_PLUS_MAGIC: u16 = 0x20b;
+const WINDOWS_GUI_SUBSYSTEM: u16 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublishedWindowsHelper {
@@ -20,7 +27,11 @@ pub fn publish_windows_helper(
     source: &Path,
 ) -> Result<PublishedWindowsHelper, String> {
     let source = canonical_regular_file(source, "Windows helper source")?;
-    let sha256 = sha256_file(&source)?;
+    let helper_bytes = windowless_helper_bytes(&source)?;
+    let sha256: String = Sha256::digest(&helper_bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
     let user_root = ensure_private_windows_dir(user_root)?;
     let windows_root = ensure_private_windows_dir(&user_root.join("windows"))?;
     let helpers_root = ensure_private_windows_dir(&windows_root.join("helpers"))?;
@@ -30,7 +41,7 @@ pub fn publish_windows_helper(
     match fs::symlink_metadata(&executable) {
         Ok(_) => verify_helper(&executable, &sha256)?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            publish_helper_file(&release, &source, &executable, &sha256)?;
+            publish_helper_file(&release, &helper_bytes, &executable, &sha256)?;
         }
         Err(error) => return Err(format!("cannot inspect Windows helper release: {error}")),
     }
@@ -39,13 +50,13 @@ pub fn publish_windows_helper(
 
 fn publish_helper_file(
     release: &Path,
-    source: &Path,
+    helper_bytes: &[u8],
     executable: &Path,
     expected_hash: &str,
 ) -> Result<(), String> {
     let temporary = release.join(format!(".{HELPER_NAME}.tmp-{}", std::process::id()));
     let result = (|| {
-        fs::copy(source, &temporary)
+        fs::write(&temporary, helper_bytes)
             .map_err(|error| format!("cannot stage Windows helper: {error}"))?;
         fs::OpenOptions::new()
             .write(true)
@@ -74,5 +85,60 @@ fn verify_helper(path: &Path, expected_hash: &str) -> Result<(), String> {
     if sha256_file(path)? != expected_hash {
         return Err("Windows helper does not match its content address".to_string());
     }
+    let bytes = fs::read(path).map_err(|error| format!("cannot read Windows helper: {error}"))?;
+    if pe_subsystem_offset(&bytes)
+        .and_then(|offset| read_u16(&bytes, offset, "Windows helper subsystem"))?
+        != WINDOWS_GUI_SUBSYSTEM
+    {
+        return Err("Windows helper is not a windowless GUI-subsystem executable".to_string());
+    }
     Ok(())
+}
+
+fn windowless_helper_bytes(source: &Path) -> Result<Vec<u8>, String> {
+    let mut bytes =
+        fs::read(source).map_err(|error| format!("cannot read Windows helper source: {error}"))?;
+    let subsystem = pe_subsystem_offset(&bytes)?;
+    bytes[subsystem..subsystem + 2].copy_from_slice(&WINDOWS_GUI_SUBSYSTEM.to_le_bytes());
+    Ok(bytes)
+}
+
+fn pe_subsystem_offset(bytes: &[u8]) -> Result<usize, String> {
+    if bytes.get(0..2) != Some(b"MZ") {
+        return Err("Windows helper source is not a PE executable".to_string());
+    }
+    let pe_offset = read_u32(bytes, DOS_PE_OFFSET, "Windows helper PE offset")? as usize;
+    if bytes.get(pe_offset..pe_offset.saturating_add(4)) != Some(b"PE\0\0") {
+        return Err("Windows helper source has an invalid PE signature".to_string());
+    }
+    let optional_header = pe_offset
+        .checked_add(4 + COFF_HEADER_SIZE)
+        .ok_or_else(|| "Windows helper PE header overflows".to_string())?;
+    let magic = read_u16(
+        bytes,
+        optional_header,
+        "Windows helper optional-header magic",
+    )?;
+    if !matches!(magic, PE32_MAGIC | PE32_PLUS_MAGIC) {
+        return Err("Windows helper source has an unsupported PE optional header".to_string());
+    }
+    let subsystem = optional_header
+        .checked_add(OPTIONAL_HEADER_SUBSYSTEM_OFFSET)
+        .ok_or_else(|| "Windows helper subsystem offset overflows".to_string())?;
+    let _ = read_u16(bytes, subsystem, "Windows helper subsystem")?;
+    Ok(subsystem)
+}
+
+fn read_u16(bytes: &[u8], offset: usize, label: &str) -> Result<u16, String> {
+    let value = bytes
+        .get(offset..offset.saturating_add(2))
+        .ok_or_else(|| format!("{label} is truncated"))?;
+    Ok(u16::from_le_bytes([value[0], value[1]]))
+}
+
+fn read_u32(bytes: &[u8], offset: usize, label: &str) -> Result<u32, String> {
+    let value = bytes
+        .get(offset..offset.saturating_add(4))
+        .ok_or_else(|| format!("{label} is truncated"))?;
+    Ok(u32::from_le_bytes([value[0], value[1], value[2], value[3]]))
 }

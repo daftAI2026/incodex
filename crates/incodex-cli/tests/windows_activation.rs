@@ -18,7 +18,7 @@ fn stable_debugger_routes_only_an_isolated_profile_into_the_matching_job() {
         windows_debugger_route("ChatGPT.exe codex://new?mode=codex").expect("normal route"),
         WindowsDebuggerRoute::ResumeNormally
     );
-    let user_data_dir = r"C:\Users\Linus Torvalds\.incodex\sessions\one\chromium";
+    let user_data_dir = r"C:\Users\Linus Torvalds\.incodex\sessions\s-one\chromium";
     let request = WindowsActivationRequest::new(
         "OpenAI.Codex_26.820.7780.0_x64__2p2nqsd0c76g0",
         "OpenAI.Codex_2p2nqsd0c76g0!App",
@@ -156,12 +156,12 @@ fn builds_a_store_activation_request_without_losing_windows_arguments_or_environ
 
 #[test]
 fn installed_activation_moves_isolation_into_one_authenticated_capability() {
-    let user_home = r"C:\Users\林 纳斯\.incodex\sessions\one\codex-home";
+    let user_home = r"C:\Users\林 纳斯\.incodex\sessions\s-one\codex-home";
     let request = WindowsActivationRequest::new(
         "OpenAI.Codex_26.820.7780.0_x64__2p2nqsd0c76g0",
         "OpenAI.Codex_2p2nqsd0c76g0!App",
         [OsString::from(
-            r"--user-data-dir=C:\Users\林 纳斯\.incodex\sessions\one\chromium\",
+            r"--user-data-dir=C:\Users\林 纳斯\.incodex\sessions\s-one\chromium\",
         )],
         BTreeMap::from([
             ("CODEX_HOME".to_string(), OsString::from(user_home)),
@@ -175,7 +175,7 @@ fn installed_activation_moves_isolation_into_one_authenticated_capability() {
         .expect("derive capability from the isolated profile");
     let arguments = request.arguments();
     assert!(arguments
-        .starts_with(r#""--user-data-dir=C:\Users\林 纳斯\.incodex\sessions\one\chromium\\""#,));
+        .starts_with(r#""--user-data-dir=C:\Users\林 纳斯\.incodex\sessions\s-one\chromium\\""#,));
     assert_eq!(arguments.matches("--incodex-activation-token=").count(), 0);
     assert_eq!(
         windows_debugger_route(&format!("ChatGPT.exe {arguments}"))

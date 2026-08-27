@@ -15,8 +15,8 @@ use windows_sys::Wdk::System::Threading::{
 use windows_sys::Win32::Foundation::{
     CloseHandle, DuplicateHandle, APPMODEL_ERROR_NO_PACKAGE, DUPLICATE_SAME_ACCESS,
     ERROR_ACCESS_DENIED, ERROR_INSUFFICIENT_BUFFER, ERROR_INVALID_PARAMETER, ERROR_MORE_DATA,
-    ERROR_NO_MORE_FILES, HANDLE, HWND, INVALID_HANDLE_VALUE, LPARAM, UNICODE_STRING, WAIT_OBJECT_0,
-    WAIT_TIMEOUT,
+    ERROR_NO_MORE_FILES, HANDLE, HWND, INVALID_HANDLE_VALUE, LPARAM, RECT, UNICODE_STRING,
+    WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::NetworkManagement::IpHelper::{
     GetExtendedTcpTable, MIB_TCPROW_OWNER_PID, MIB_TCPTABLE_OWNER_PID, MIB_TCP_STATE_ESTAB,
@@ -42,7 +42,8 @@ use windows_sys::Win32::System::Threading::{
     PROCESS_SET_QUOTA, PROCESS_TERMINATE, THREAD_SUSPEND_RESUME,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetWindowThreadProcessId, IsWindowVisible,
+    EnumWindows, GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible,
+    GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TOPMOST,
 };
 
 use crate::windows_activation_capability::WindowsActivationCapability;
@@ -327,17 +328,36 @@ fn has_visible_window_for_processes(process_ids: &HashSet<u32>) -> io::Result<bo
 }
 
 unsafe extern "system" fn find_visible_process_window(window: HWND, context: LPARAM) -> i32 {
-    if unsafe { IsWindowVisible(window) } == 0 {
-        return 1;
-    }
     let mut process_id = 0u32;
     unsafe { GetWindowThreadProcessId(window, &mut process_id) };
     let search = unsafe { &mut *(context as *mut VisibleWindowSearch<'_>) };
-    if search.process_ids.contains(&process_id) {
+    if !search.process_ids.contains(&process_id) {
+        return 1;
+    }
+    let mut bounds = RECT::default();
+    if unsafe { GetWindowRect(window, &mut bounds) } == 0 {
+        return 1;
+    }
+    let extended_style = unsafe { GetWindowLongPtrW(window, GWL_EXSTYLE) } as u32;
+    if is_primary_visible_window(
+        unsafe { IsWindowVisible(window) } != 0,
+        bounds.right.saturating_sub(bounds.left),
+        bounds.bottom.saturating_sub(bounds.top),
+        extended_style,
+    ) {
         search.found = true;
         return 0;
     }
     1
+}
+
+fn is_primary_visible_window(visible: bool, width: i32, height: i32, extended_style: u32) -> bool {
+    if !visible || width <= 0 || height <= 0 {
+        return false;
+    }
+    let topmost = extended_style & WS_EX_TOPMOST != 0;
+    let no_activate = extended_style & WS_EX_NOACTIVATE != 0;
+    !(topmost && no_activate)
 }
 
 impl WindowsCdpOwnershipGuard {
@@ -927,8 +947,8 @@ mod tests {
     use crate::windows_activation_capability::WindowsActivationCapability;
 
     use super::{
-        ipv4_connection_server_owner, is_primary_visible_window,
-        require_process_package_identity, WindowsPendingJob,
+        ipv4_connection_server_owner, is_primary_visible_window, require_process_package_identity,
+        WindowsPendingJob,
     };
 
     #[test]

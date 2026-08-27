@@ -308,6 +308,7 @@ fn allowed_transition(current: WindowsInstallPhase, next: WindowsInstallPhase) -
             | (EnabledObserved, DisableRequested | RecoveryRequired)
             | (DisableRequested, DisablePending | RecoveryRequired)
             | (DisablePending, Disabled | RecoveryRequired)
+            | (RecoveryRequired, DisablePending)
     )
 }
 
