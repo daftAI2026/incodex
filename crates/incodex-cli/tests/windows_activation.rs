@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use incodex_cli::windows_activation::{
     activate_packaged_kill_on_drop, activate_packaged_with_installed_runtime,
     disable_installed_runtime, enable_installed_runtime, try_run_installed_package_debugger,
-    transient_activation_restoration, try_run_package_debugger, windows_debugger_route,
+    installed_activation_for_open, try_run_package_debugger, windows_debugger_route,
     windows_installed_debugger_route, windows_transient_debugger_route, WindowsActivationFailure,
     WindowsActivationRequest, WindowsDebuggerRoute, WindowsInstalledRuntimeRegistration,
 };
@@ -85,7 +85,7 @@ fn transient_debugger_assigns_only_the_requested_isolated_capability() {
 }
 
 #[test]
-fn transient_activation_restores_an_enabled_installed_registration() {
+fn direct_open_reuses_an_enabled_installed_registration() {
     let sequence = STATE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let root = std::env::temp_dir().join(format!(
         "incodex-transient-restoration-{}-{sequence}",
@@ -113,14 +113,14 @@ fn transient_activation_restores_an_enabled_installed_registration() {
     )
     .expect("record enabled state");
 
-    let restoration = transient_activation_restoration(Some(&enabled), package)
-        .expect("build installed restoration")
-        .expect("enabled state needs restoration");
-    assert_eq!(restoration.package_full_name(), package);
-    assert!(restoration
+    let registration = installed_activation_for_open(Some(&enabled), package)
+        .expect("build installed activation")
+        .expect("enabled state needs installed activation");
+    assert_eq!(registration.package_full_name(), package);
+    assert!(registration
         .debugger_command_line()
         .contains("__incodex_windows_installed_debugger"));
-    assert!(transient_activation_restoration(None, package)
+    assert!(installed_activation_for_open(None, package)
         .expect("no installed state")
         .is_none());
 
