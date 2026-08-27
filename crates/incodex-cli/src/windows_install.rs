@@ -185,12 +185,9 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
     let user_root = profile.join(".incodex");
     let durable_state = read_windows_install_state_for_uninstall(&user_root);
     let registration_evidence = read_windows_debug_registration(&user_root);
+    let approval = WindowsUninstallApproval::from_snapshots(&durable_state, &registration_evidence);
     let discovered_app = discover_codex_package();
-    print_uninstall_plan(
-        discovered_app.as_ref().ok(),
-        durable_state.as_ref().ok().and_then(Option::as_ref),
-        registration_evidence.as_ref().ok().and_then(Option::as_ref),
-    );
+    print_uninstall_plan(discovered_app.as_ref().ok(), &approval);
     if let Err(error) = &durable_state {
         println!(
             "{}",
@@ -224,8 +221,9 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
         return Ok(());
     }
     crate::confirm::require("uninstall", parsed.yes)?;
-    match uninstall_windows_runtime_with(
+    match uninstall_windows_runtime_approved_with(
         &user_root,
+        &approval,
         running_package_process_ids,
         codex_package_full_name_is_installed,
         disable_installed_runtime,
@@ -259,6 +257,84 @@ pub enum WindowsUninstallOutcome {
     NotInstalled,
     CloseRequired { process_ids: Vec<u32> },
     Removed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowsUninstallApproval {
+    package_full_name: Option<String>,
+    registration_id: Option<String>,
+}
+
+impl WindowsUninstallApproval {
+    fn from_snapshots(
+        state: &Result<Option<WindowsInstallState>, String>,
+        evidence: &Result<Option<WindowsDebugRegistrationEvidence>, String>,
+    ) -> Self {
+        if let Ok(Some(state)) = state {
+            return Self {
+                package_full_name: Some(state.package_full_name.clone()),
+                registration_id: Some(state.registration_id.clone()),
+            };
+        }
+        if let Ok(Some(evidence)) = evidence {
+            return Self {
+                package_full_name: Some(evidence.package_full_name.clone()),
+                registration_id: Some(evidence.registration_id.clone()),
+            };
+        }
+        Self {
+            package_full_name: None,
+            registration_id: None,
+        }
+    }
+}
+
+pub fn capture_windows_uninstall_approval(
+    user_root: &Path,
+) -> Result<WindowsUninstallApproval, String> {
+    let state = read_windows_install_state_for_uninstall(user_root);
+    let evidence = read_windows_debug_registration(user_root);
+    let approval = WindowsUninstallApproval::from_snapshots(&state, &evidence);
+    if approval.package_full_name.is_some() || (state.is_ok() && evidence.is_ok()) {
+        return Ok(approval);
+    }
+    match (state, evidence) {
+        (Err(state_error), Err(evidence_error)) => Err(format!(
+            "{state_error}; Windows debugger registration evidence is also unreadable: {evidence_error}"
+        )),
+        (Err(error), _) | (_, Err(error)) => Err(error),
+        _ => Ok(approval),
+    }
+}
+
+pub fn uninstall_windows_runtime_approved_with<R, P, D>(
+    user_root: &Path,
+    approved: &WindowsUninstallApproval,
+    running_package_processes: R,
+    package_is_installed: P,
+    disable: D,
+) -> Result<WindowsUninstallOutcome, String>
+where
+    R: FnOnce(&str) -> Result<Vec<u32>, std::io::Error>,
+    P: FnOnce(&str) -> Result<bool, String>,
+    D: FnOnce(&str) -> Result<(), String>,
+{
+    let _transaction = acquire_windows_install_state()?;
+    let current_state = read_windows_install_state_for_uninstall(user_root);
+    let current_evidence = read_windows_debug_registration(user_root);
+    let current = WindowsUninstallApproval::from_snapshots(&current_state, &current_evidence);
+    if current != *approved {
+        return Err(
+            "Windows uninstall target changed since confirmation; review the plan and retry"
+                .to_string(),
+        );
+    }
+    uninstall_windows_runtime_with(
+        user_root,
+        running_package_processes,
+        package_is_installed,
+        disable,
+    )
 }
 
 pub fn uninstall_windows_runtime_with<R, P, D>(
@@ -454,13 +530,9 @@ fn print_plan(action: &str, app: &WindowsCodexApp) {
     );
 }
 
-fn print_uninstall_plan(
-    app: Option<&WindowsCodexApp>,
-    state: Option<&WindowsInstallState>,
-    evidence: Option<&WindowsDebugRegistrationEvidence>,
-) {
+fn print_uninstall_plan(app: Option<&WindowsCodexApp>, approval: &WindowsUninstallApproval) {
     println!("{}", format_step("Uninstall", None));
-    let package = uninstall_plan_package(app, state, evidence);
+    let package = uninstall_plan_package(app, approval);
     let executable = app
         .filter(|app| app.package_full_name == package)
         .map(|app| app.executable.display().to_string())
@@ -475,12 +547,11 @@ fn print_uninstall_plan(
 
 fn uninstall_plan_package<'a>(
     app: Option<&'a WindowsCodexApp>,
-    state: Option<&'a WindowsInstallState>,
-    evidence: Option<&'a WindowsDebugRegistrationEvidence>,
+    approval: &'a WindowsUninstallApproval,
 ) -> &'a str {
-    state
-        .map(|state| state.package_full_name.as_str())
-        .or_else(|| evidence.map(|evidence| evidence.package_full_name.as_str()))
+    approval
+        .package_full_name
+        .as_deref()
         .or_else(|| app.map(|app| app.package_full_name.as_str()))
         .unwrap_or("Not discovered")
 }
@@ -519,9 +590,10 @@ mod tests {
             architecture: "X64".to_string(),
         };
 
+        let approval = WindowsUninstallApproval::from_snapshots(&Ok(None), &Ok(Some(evidence)));
         assert_eq!(
-            uninstall_plan_package(Some(&discovered), None, Some(&evidence)),
-            evidence.package_full_name
+            uninstall_plan_package(Some(&discovered), &approval),
+            "OpenAI.Codex_1.2.3.4_x64__publisher"
         );
     }
 }
