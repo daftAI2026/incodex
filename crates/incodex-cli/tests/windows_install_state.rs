@@ -5,7 +5,9 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_cli::windows_install::{
-    install_windows_runtime_with, uninstall_windows_runtime_with, WindowsUninstallOutcome,
+    capture_windows_uninstall_approval, install_windows_runtime_with,
+    uninstall_windows_runtime_approved_with, uninstall_windows_runtime_with,
+    WindowsUninstallOutcome,
 };
 use incodex_cli::windows_install_state::{
     acquire_windows_install_state, read_windows_install_state, stage_windows_install_state,
@@ -208,6 +210,45 @@ fn uninstall_uses_independent_registration_evidence_when_install_state_is_missin
     assert!(disabled);
     assert!(!user_root.join("windows-registration.json").exists());
     fs::remove_dir_all(user_root).expect("remove missing-state fixture");
+}
+
+#[test]
+fn uninstall_refuses_a_registration_replaced_after_approval() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    let first =
+        install_windows_runtime_with(&user_root, package, &helper, |_| Ok(Vec::new()), |_| Ok(()))
+            .expect("install first registration");
+    let approved =
+        capture_windows_uninstall_approval(&user_root).expect("capture displayed target");
+    uninstall_windows_runtime_with(&user_root, |_| Ok(Vec::new()), |_| Ok(true), |_| Ok(()))
+        .expect("replace the approved registration");
+    let replacement =
+        install_windows_runtime_with(&user_root, package, &helper, |_| Ok(Vec::new()), |_| Ok(()))
+            .expect("install replacement registration");
+    assert_ne!(first.registration_id, replacement.registration_id);
+
+    let error = uninstall_windows_runtime_approved_with(
+        &user_root,
+        &approved,
+        |_| panic!("a replacement registration must not reach process inspection"),
+        |_| panic!("a replacement registration must not reach package inspection"),
+        |_| panic!("a replacement registration must not be disabled"),
+    )
+    .expect_err("confirmation must be bound to the displayed registration");
+    assert!(error.contains("changed since confirmation"), "{error}");
+    assert_eq!(
+        read_windows_install_state(&user_root)
+            .expect("read replacement state")
+            .expect("replacement state remains")
+            .registration_id,
+        replacement.registration_id
+    );
+
+    uninstall_windows_runtime_with(&user_root, |_| Ok(Vec::new()), |_| Ok(true), |_| Ok(()))
+        .expect("remove replacement registration");
+    fs::remove_dir_all(user_root).expect("remove approval fixture");
 }
 
 #[test]
