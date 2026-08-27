@@ -219,7 +219,17 @@ fn require_file(path: &Path, label: &str) -> Result<(), String> {
 mod tests {
     use std::path::Path;
 
-    use super::package_query_command;
+    use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
+
+    use super::{package_query_command, PACKAGE_QUERY_CREATION_FLAGS};
+
+    #[test]
+    fn package_query_never_creates_a_console_window() {
+        assert_eq!(
+            PACKAGE_QUERY_CREATION_FLAGS & CREATE_NO_WINDOW,
+            CREATE_NO_WINDOW
+        );
+    }
 
     #[test]
     fn package_query_uses_an_absolute_system_powershell() {
