@@ -163,6 +163,16 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "windows")]
+    fn windows_version_probe_does_not_search_path_for_cmd() {
+        let source = include_str!("version.rs");
+        let path_search = ["probe(", "\"cmd\""].concat();
+        let trusted_probe = ["system_binary_path(", "\"cmd.exe\""].concat();
+        assert!(!source.contains(&path_search));
+        assert!(source.contains(&trusted_probe));
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
     fn format_prints_version_machine_install_and_shell() {
         let text = format_version_report(&VersionFacts {
             version: "0.2.0".into(),
