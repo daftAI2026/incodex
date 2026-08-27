@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
 use crate::windows_file::{canonical_regular_file, sha256_file};
+use crate::windows_helper::installed_windows_helper_path_matches;
 use crate::windows_install_state::{random_registration_id, WindowsInstallState};
 use crate::windows_runtime::replace_private_file;
 
@@ -259,19 +260,22 @@ fn validate_evidence(evidence: &WindowsDebugRegistrationEvidence) -> Result<(), 
         .state_path
         .parent()
         .ok_or_else(|| "Windows debugger registration has no Incodex root".to_string())?;
-    let expected_helper = match evidence.kind {
-        WindowsDebugRegistrationKind::Transient => user_root
-            .join("windows")
-            .join("t")
-            .join(&evidence.helper_sha256[..16])
-            .join("i.exe"),
-        WindowsDebugRegistrationKind::Installed => user_root
-            .join("windows")
-            .join("helpers")
-            .join(&evidence.helper_sha256)
-            .join("incodex-helper.exe"),
+    let helper_matches = match evidence.kind {
+        WindowsDebugRegistrationKind::Transient => {
+            evidence.helper_path
+                == user_root
+                    .join("windows")
+                    .join("t")
+                    .join(&evidence.helper_sha256[..16])
+                    .join("i.exe")
+        }
+        WindowsDebugRegistrationKind::Installed => installed_windows_helper_path_matches(
+            user_root,
+            &evidence.helper_sha256,
+            &evidence.helper_path,
+        ),
     };
-    if evidence.helper_path != expected_helper {
+    if !helper_matches {
         return Err("Windows debugger registration helper path is invalid".to_string());
     }
     Ok(())

@@ -15,6 +15,7 @@ use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 use windows_sys::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
 
 use crate::windows_file::{canonical_regular_file, sha256_file};
+use crate::windows_helper::installed_windows_helper_path_matches;
 use crate::windows_runtime::replace_private_file;
 
 const STATE_NAME: &str = "windows-install.json";
@@ -297,13 +298,12 @@ fn validate_state(
         .state_path
         .parent()
         .ok_or_else(|| "Windows install state has no Incodex root".to_string())?;
-    let recorded_helper = user_root
-        .join("windows")
-        .join("helpers")
-        .join(&state.helper_sha256)
-        .join("incodex-helper.exe");
     if matches!(helper_validation, HelperValidation::Required)
-        || state.helper_path != recorded_helper
+        || !installed_windows_helper_path_matches(
+            user_root,
+            &state.helper_sha256,
+            &state.helper_path,
+        )
     {
         let helper = validate_helper(&state.helper_path)?;
         if sha256_file(&helper)? != state.helper_sha256 {

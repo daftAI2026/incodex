@@ -8,10 +8,11 @@ use sha2::{Digest, Sha256};
 
 use crate::windows_file::{canonical_regular_file, ensure_regular_file, sha256_file};
 
-const HELPER_NAME: &str = "incodex-helper.exe";
+const INSTALLED_HELPER_DIRECTORY: &str = "i";
+const HELPER_NAME: &str = "i.exe";
 const TRANSIENT_HELPER_DIRECTORY: &str = "t";
 const TRANSIENT_HELPER_NAME: &str = "i.exe";
-const TRANSIENT_CONTENT_ADDRESS_LEN: usize = 16;
+const SHORT_CONTENT_ADDRESS_LEN: usize = 16;
 const DOS_PE_OFFSET: usize = 0x3c;
 const COFF_HEADER_SIZE: usize = 20;
 const OPTIONAL_HEADER_SUBSYSTEM_OFFSET: usize = 68;
@@ -55,11 +56,15 @@ fn publish_windows_helper_with_layout(
     let (collection, release_name, helper_name) = if transient {
         (
             TRANSIENT_HELPER_DIRECTORY,
-            &sha256[..TRANSIENT_CONTENT_ADDRESS_LEN],
+            &sha256[..SHORT_CONTENT_ADDRESS_LEN],
             TRANSIENT_HELPER_NAME,
         )
     } else {
-        ("helpers", sha256.as_str(), HELPER_NAME)
+        (
+            INSTALLED_HELPER_DIRECTORY,
+            &sha256[..SHORT_CONTENT_ADDRESS_LEN],
+            HELPER_NAME,
+        )
     };
     let helpers_root = ensure_private_windows_dir(&windows_root.join(collection))?;
     let release = ensure_private_windows_dir(&helpers_root.join(release_name))?;
@@ -73,6 +78,27 @@ fn publish_windows_helper_with_layout(
         Err(error) => return Err(format!("cannot inspect Windows helper release: {error}")),
     }
     Ok(PublishedWindowsHelper { executable, sha256 })
+}
+
+pub(crate) fn installed_windows_helper_path_matches(
+    user_root: &Path,
+    sha256: &str,
+    helper_path: &Path,
+) -> bool {
+    if sha256.len() < SHORT_CONTENT_ADDRESS_LEN {
+        return false;
+    }
+    let current = user_root
+        .join("windows")
+        .join(INSTALLED_HELPER_DIRECTORY)
+        .join(&sha256[..SHORT_CONTENT_ADDRESS_LEN])
+        .join(HELPER_NAME);
+    let legacy = user_root
+        .join("windows")
+        .join("helpers")
+        .join(sha256)
+        .join("incodex-helper.exe");
+    helper_path == current || helper_path == legacy
 }
 
 fn publish_helper_file(

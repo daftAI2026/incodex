@@ -130,6 +130,7 @@ impl WindowsInstalledRuntimeRegistration {
         .map(|argument| quote_windows_argument(argument))
         .collect::<Result<Vec<_>, _>>()?
         .join(" ");
+        let debugger_command_line = validate_package_debugger_command(debugger_command_line)?;
         Ok(Self {
             package_full_name: package_full_name.to_string(),
             debugger_command_line,
