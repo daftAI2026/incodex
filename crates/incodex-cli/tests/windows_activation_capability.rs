@@ -20,11 +20,14 @@ fn random_capability_routes_only_an_explicit_activation_to_private_pipes() {
         None
     );
     assert!(activation_token_from_command_line(&format!("{command_line} {argument}")).is_err());
-    assert_ne!(capability.debugger_pipe_name(), capability.environment_pipe_name());
     assert!(capability
-        .debugger_pipe_name()
-        .starts_with(r"\\.\pipe\Incodex-Activation-Debugger-"));
+        .job_name()
+        .starts_with(r"Local\Incodex-"));
     assert!(capability
         .environment_pipe_name()
         .starts_with(r"\\.\pipe\Incodex-Activation-Environment-"));
+    assert!(capability.job_name().ends_with(capability.token()));
+    assert!(capability
+        .environment_pipe_name()
+        .ends_with(capability.token()));
 }
