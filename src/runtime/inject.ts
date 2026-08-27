@@ -9,10 +9,12 @@ import {
 import { createOfficialTooltipTimingBridge } from "./official-tooltip-provider.ts";
 import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement.ts";
 import { createTooltipLifecycle, type TooltipLifecycle } from "./tooltip-lifecycle.ts";
+import { officialWindowZoom } from "./tooltip-presentation.ts";
 
 const STYLE_ID = "incodex-privacy-style";
 const BTN_ATTR = "data-incodex-privacy-toggle";
 const TIP_ATTR = "data-incodex-tooltip";
+const TIP_HOST_ATTR = "data-incodex-tooltip-host";
 const LANDING_ATTR = "data-incodex-landing";
 const ERROR_ATTR = "data-incodex-launch-error";
 const ERROR_OVERLAY_ATTR = "data-incodex-launch-error-overlay";
@@ -179,16 +181,19 @@ function ensureStyle(): void {
     document.head.append(style);
   }
   style.textContent = `
-    [${TIP_ATTR}] {
+    [${TIP_HOST_ATTR}] {
       position: fixed;
       z-index: 50;
       display: none;
+      pointer-events: none !important;
+    }
+    [${TIP_HOST_ATTR}][data-open="true"] { display: block; }
+    [${TIP_ATTR}] {
       max-width: min(20rem, calc(100vw - 16px));
       pointer-events: none !important;
       user-select: none;
       box-sizing: border-box;
     }
-    [${TIP_ATTR}][data-open="true"] { display: block; }
     [${ERROR_OVERLAY_ATTR}] {
       position: fixed;
       top: 16px;
@@ -344,6 +349,8 @@ function buildButton(search: HTMLElement): HTMLElement {
     (event) => {
       event.preventDefault();
       event.stopImmediatePropagation();
+      setButtonHover(btn, false);
+      tooltipLifecycle.trigger();
       void activate();
     },
     true,
@@ -364,6 +371,8 @@ function buildButton(search: HTMLElement): HTMLElement {
 function tooltipEl(): HTMLElement {
   let tip = document.querySelector<HTMLElement>(`[${TIP_ATTR}]`);
   if (tip) return tip;
+  const host = document.createElement("div");
+  host.setAttribute(TIP_HOST_ATTR, "true");
   tip = document.createElement("div");
   tip.setAttribute(TIP_ATTR, "true");
   tip.setAttribute("role", "tooltip");
@@ -380,7 +389,8 @@ function tooltipEl(): HTMLElement {
   kbd.textContent = shortcutLabel();
   text.append(label, kbd);
   tip.append(text);
-  document.body.append(tip);
+  host.append(tip);
+  document.body.append(host);
   return tip;
 }
 
@@ -390,28 +400,33 @@ const TOOLTIP_SIDE_OFFSET = 2;
 
 function showTooltip(btn: HTMLElement): void {
   const tip = tooltipEl();
+  const host = tip.parentElement;
+  if (!host) return;
   const label = tip.querySelector<HTMLElement>("[data-incodex-tooltip-label]");
   if (label) label.textContent = labelFor(btn.getAttribute("aria-pressed") === "true");
-  tip.style.visibility = "hidden";
-  tip.setAttribute("data-open", "true");
+  const zoom = officialWindowZoom(document.documentElement);
+  tip.style.zoom = zoom === 1 ? "" : String(zoom);
+  host.style.visibility = "hidden";
+  host.setAttribute("data-open", "true");
   const rect = btn.getBoundingClientRect();
   const tipRect = tip.getBoundingClientRect();
   const left = Math.min(
     window.innerWidth - tipRect.width - 8,
     Math.max(8, rect.left + rect.width / 2 - tipRect.width / 2),
   );
-  tip.style.left = `${left}px`;
-  tip.style.top = "auto";
-  tip.style.bottom = `${Math.max(8, window.innerHeight - rect.top + TOOLTIP_SIDE_OFFSET)}px`;
-  tip.style.visibility = "";
+  host.style.left = `${left}px`;
+  host.style.top = "auto";
+  host.style.bottom = `${Math.max(8, window.innerHeight - rect.top + TOOLTIP_SIDE_OFFSET)}px`;
+  host.style.visibility = "";
 }
 
 function hideTooltip(): void {
-  const tip = document.querySelector<HTMLElement>(`[${TIP_ATTR}]`);
-  if (!tip) return;
-  tip.removeAttribute("data-open");
-  tip.style.bottom = "";
-  tip.style.top = "";
+  const host = document.querySelector<HTMLElement>(`[${TIP_HOST_ATTR}]`);
+  if (!host) return;
+  host.removeAttribute("data-open");
+  host.style.bottom = "";
+  host.style.left = "";
+  host.style.top = "";
 }
 
 const BANNER_DISMISS_KEY = "incodex-banner-dismissed";

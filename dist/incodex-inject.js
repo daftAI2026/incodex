@@ -1359,6 +1359,7 @@ function createTooltipLifecycle(deps) {
   let focused = false;
   let open = false;
   let pending = null;
+  let triggerBlocked = false;
   function cancelPending() {
     if (pending === null)
       return;
@@ -1375,9 +1376,11 @@ function createTooltipLifecycle(deps) {
   }
   function scheduleShow() {
     cancelPending();
+    if (triggerBlocked)
+      return;
     pending = deps.schedule(() => {
       pending = null;
-      if (!(hovering || focused) || !deps.canShow())
+      if (triggerBlocked || !(hovering || focused) || !deps.canShow())
         return;
       open = true;
       deps.onOpen?.(hide);
@@ -1394,6 +1397,8 @@ function createTooltipLifecycle(deps) {
     pointerLeave() {
       hovering = false;
       hide();
+      if (!focused)
+        triggerBlocked = false;
     },
     focus() {
       focused = true;
@@ -1402,20 +1407,38 @@ function createTooltipLifecycle(deps) {
     blur() {
       focused = false;
       hide();
+      if (!hovering)
+        triggerBlocked = false;
     },
     dismiss: hide,
+    trigger() {
+      triggerBlocked = true;
+      hide();
+    },
     dispose() {
       hovering = false;
       focused = false;
+      triggerBlocked = false;
       hide();
     }
   };
+}
+
+// src/runtime/tooltip-presentation.ts
+var OFFICIAL_WINDOW_ZOOM_PROPERTY = "--codex-window-zoom";
+function parseOfficialWindowZoom(value) {
+  const zoom = Number.parseFloat(value);
+  return Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+}
+function officialWindowZoom(root) {
+  return parseOfficialWindowZoom(window.getComputedStyle(root).getPropertyValue(OFFICIAL_WINDOW_ZOOM_PROPERTY));
 }
 
 // src/runtime/_inject.src.ts
 var STYLE_ID = "incodex-privacy-style";
 var BTN_ATTR = "data-incodex-privacy-toggle";
 var TIP_ATTR = "data-incodex-tooltip";
+var TIP_HOST_ATTR = "data-incodex-tooltip-host";
 var LANDING_ATTR = "data-incodex-landing";
 var ERROR_ATTR = "data-incodex-launch-error";
 var ERROR_OVERLAY_ATTR = "data-incodex-launch-error-overlay";
@@ -1567,16 +1590,19 @@ function ensureStyle() {
     document.head.append(style);
   }
   style.textContent = `
-    [${TIP_ATTR}] {
+    [${TIP_HOST_ATTR}] {
       position: fixed;
       z-index: 50;
       display: none;
+      pointer-events: none !important;
+    }
+    [${TIP_HOST_ATTR}][data-open="true"] { display: block; }
+    [${TIP_ATTR}] {
       max-width: min(20rem, calc(100vw - 16px));
       pointer-events: none !important;
       user-select: none;
       box-sizing: border-box;
     }
-    [${TIP_ATTR}][data-open="true"] { display: block; }
     [${ERROR_OVERLAY_ATTR}] {
       position: fixed;
       top: 16px;
@@ -1700,6 +1726,8 @@ function buildButton(search) {
   btn.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopImmediatePropagation();
+    setButtonHover(btn, false);
+    tooltipLifecycle.trigger();
     activate();
   }, true);
   btn.addEventListener("pointerenter", () => {
@@ -1718,6 +1746,8 @@ function tooltipEl() {
   let tip = document.querySelector(`[${TIP_ATTR}]`);
   if (tip)
     return tip;
+  const host = document.createElement("div");
+  host.setAttribute(TIP_HOST_ATTR, "true");
   tip = document.createElement("div");
   tip.setAttribute(TIP_ATTR, "true");
   tip.setAttribute("role", "tooltip");
@@ -1732,32 +1762,39 @@ function tooltipEl() {
   kbd.textContent = shortcutLabel();
   text.append(label, kbd);
   tip.append(text);
-  document.body.append(tip);
+  host.append(tip);
+  document.body.append(host);
   return tip;
 }
 var TOOLTIP_SIDE_OFFSET = 2;
 function showTooltip(btn) {
   const tip = tooltipEl();
+  const host = tip.parentElement;
+  if (!host)
+    return;
   const label = tip.querySelector("[data-incodex-tooltip-label]");
   if (label)
     label.textContent = labelFor(btn.getAttribute("aria-pressed") === "true");
-  tip.style.visibility = "hidden";
-  tip.setAttribute("data-open", "true");
+  const zoom = officialWindowZoom(document.documentElement);
+  tip.style.zoom = zoom === 1 ? "" : String(zoom);
+  host.style.visibility = "hidden";
+  host.setAttribute("data-open", "true");
   const rect = btn.getBoundingClientRect();
   const tipRect = tip.getBoundingClientRect();
   const left = Math.min(window.innerWidth - tipRect.width - 8, Math.max(8, rect.left + rect.width / 2 - tipRect.width / 2));
-  tip.style.left = `${left}px`;
-  tip.style.top = "auto";
-  tip.style.bottom = `${Math.max(8, window.innerHeight - rect.top + TOOLTIP_SIDE_OFFSET)}px`;
-  tip.style.visibility = "";
+  host.style.left = `${left}px`;
+  host.style.top = "auto";
+  host.style.bottom = `${Math.max(8, window.innerHeight - rect.top + TOOLTIP_SIDE_OFFSET)}px`;
+  host.style.visibility = "";
 }
 function hideTooltip() {
-  const tip = document.querySelector(`[${TIP_ATTR}]`);
-  if (!tip)
+  const host = document.querySelector(`[${TIP_HOST_ATTR}]`);
+  if (!host)
     return;
-  tip.removeAttribute("data-open");
-  tip.style.bottom = "";
-  tip.style.top = "";
+  host.removeAttribute("data-open");
+  host.style.bottom = "";
+  host.style.left = "";
+  host.style.top = "";
 }
 var BANNER_DISMISS_KEY = "incodex-banner-dismissed";
 var BANNER_HOST_ATTR = "data-incodex-banner-host";

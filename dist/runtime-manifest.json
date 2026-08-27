@@ -2,7 +2,7 @@
   "runtimeVersion": "0.5.0",
   "sourceCommit": "",
   "files": {
-    "incodex-inject.js": "585c65df19cb0cd155ab176a65f81a1ef0805cb6d1cfeee0d43099a22a82ae17",
+    "incodex-inject.js": "4ec03aebcd771bd61d946f5b96d030d54514c1bdac5f2217619cc10a0d19e9f4",
     "incodex-loader.cjs": "04facb453da61bcdd08834058405e270aac59fc62908a13309e1fa18aa6fd504",
     "incodex-main.cjs": "7635c3d8d55155c6e70f2e06ca84171eb35e78379c05f478502ec52e5f604f06",
     "incodex-preload.cjs": "7b325b1ddc3d444e625e459fcf3edc00397bf78b38b36e95e56b9b4c7a0686e6",

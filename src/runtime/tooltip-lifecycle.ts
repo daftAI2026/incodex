@@ -4,6 +4,7 @@ export type TooltipLifecycle = {
   focus: () => void;
   blur: () => void;
   dismiss: () => void;
+  trigger: () => void;
   dispose: () => void;
 };
 
@@ -24,6 +25,7 @@ export function createTooltipLifecycle(deps: TooltipLifecycleDeps): TooltipLifec
   let focused = false;
   let open = false;
   let pending: number | null = null;
+  let triggerBlocked = false;
 
   function cancelPending(): void {
     if (pending === null) return;
@@ -42,9 +44,10 @@ export function createTooltipLifecycle(deps: TooltipLifecycleDeps): TooltipLifec
 
   function scheduleShow(): void {
     cancelPending();
+    if (triggerBlocked) return;
     pending = deps.schedule(() => {
       pending = null;
-      if (!(hovering || focused) || !deps.canShow()) return;
+      if (triggerBlocked || !(hovering || focused) || !deps.canShow()) return;
       open = true;
       deps.onOpen?.(hide);
       if (!open) return;
@@ -60,6 +63,7 @@ export function createTooltipLifecycle(deps: TooltipLifecycleDeps): TooltipLifec
     pointerLeave() {
       hovering = false;
       hide();
+      if (!focused) triggerBlocked = false;
     },
     focus() {
       focused = true;
@@ -68,11 +72,17 @@ export function createTooltipLifecycle(deps: TooltipLifecycleDeps): TooltipLifec
     blur() {
       focused = false;
       hide();
+      if (!hovering) triggerBlocked = false;
     },
     dismiss: hide,
+    trigger() {
+      triggerBlocked = true;
+      hide();
+    },
     dispose() {
       hovering = false;
       focused = false;
+      triggerBlocked = false;
       hide();
     },
   };

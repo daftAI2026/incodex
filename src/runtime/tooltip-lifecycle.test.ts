@@ -42,7 +42,10 @@ function createHarness(
     delays,
     runScheduled() {
       for (const task of tasks.values()) {
-        if (!task.cancelled) task.callback();
+        if (!task.cancelled) {
+          task.cancelled = true;
+          task.callback();
+        }
       }
     },
   };
