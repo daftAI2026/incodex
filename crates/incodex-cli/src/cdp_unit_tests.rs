@@ -38,6 +38,22 @@ fn prefers_codex_app_page_and_skips_chrome_and_prewarm() {
 }
 
 #[test]
+#[cfg(target_os = "windows")]
+fn windows_cdp_injection_sets_the_shared_renderer_platform() {
+    let source = inject_source();
+    let platform = source
+        .find("window.__incodexPlatform=\"win32\";")
+        .expect("Windows CDP bootstrap platform");
+    let runtime = source
+        .find("window.__incodexStarted")
+        .expect("shared Runtime source");
+    assert!(
+        platform < runtime,
+        "platform must be set before shared injection"
+    );
+}
+
+#[test]
 fn isolated_launch_uses_the_official_new_codex_deep_link() {
     let args = debug_launch_args("/tmp/incodex-chromium", 43123);
     assert_eq!(
