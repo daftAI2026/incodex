@@ -9,9 +9,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use incodex_cli::windows_activation::{
     activate_packaged_kill_on_drop, activate_packaged_with_installed_runtime,
     disable_installed_runtime, enable_installed_runtime, try_run_installed_package_debugger,
-    try_run_package_debugger, windows_debugger_route, windows_installed_debugger_route,
-    WindowsActivationFailure, WindowsActivationRequest, WindowsDebuggerRoute,
-    WindowsInstalledRuntimeRegistration,
+    transient_activation_restoration, try_run_package_debugger, windows_debugger_route,
+    windows_installed_debugger_route, windows_transient_debugger_route, WindowsActivationFailure,
+    WindowsActivationRequest, WindowsDebuggerRoute, WindowsInstalledRuntimeRegistration,
 };
 use incodex_cli::windows_install_state::{
     stage_windows_install_state, transition_windows_install_state, WindowsInstallPhase,
@@ -42,6 +42,89 @@ fn stable_debugger_routes_only_an_isolated_profile_into_the_matching_job() {
             .expect("isolated route"),
         WindowsDebuggerRoute::AssignToJob(capability.job_name().to_string())
     );
+}
+
+#[test]
+fn transient_debugger_assigns_only_the_requested_isolated_capability() {
+    let requested = r"C:\Users\test\.incodex\sessions\s-requested\chromium";
+    let other = r"C:\Users\test\.incodex\sessions\s-other\chromium";
+    let request = WindowsActivationRequest::new(
+        "OpenAI.Codex_26.820.7780.0_x64__2p2nqsd0c76g0",
+        "OpenAI.Codex_2p2nqsd0c76g0!App",
+        [OsString::from(format!("--user-data-dir={requested}"))],
+        BTreeMap::new(),
+    )
+    .expect("requested activation");
+    let job = request
+        .activation_capability()
+        .expect("requested capability")
+        .job_name()
+        .to_string();
+
+    assert_eq!(
+        windows_transient_debugger_route(
+            &job,
+            &format!("ChatGPT.exe --user-data-dir={requested}")
+        )
+        .expect("route requested activation"),
+        WindowsDebuggerRoute::AssignToJob(job.clone())
+    );
+    assert_eq!(
+        windows_transient_debugger_route(&job, "ChatGPT.exe codex://new?mode=codex")
+            .expect("route official activation"),
+        WindowsDebuggerRoute::ResumeNormally
+    );
+    assert_eq!(
+        windows_transient_debugger_route(
+            &job,
+            &format!("ChatGPT.exe --user-data-dir={other}")
+        )
+        .expect("route unrelated isolated activation"),
+        WindowsDebuggerRoute::ResumeNormally
+    );
+}
+
+#[test]
+fn transient_activation_restores_an_enabled_installed_registration() {
+    let sequence = STATE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let root = std::env::temp_dir().join(format!(
+        "incodex-transient-restoration-{}-{sequence}",
+        std::process::id()
+    ));
+    let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    let helper = std::env::current_exe().expect("test helper");
+    let staged = stage_windows_install_state(
+        &root,
+        package,
+        &helper,
+        "0.5.0-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    )
+    .expect("stage installed state");
+    let pending = transition_windows_install_state(
+        &root,
+        staged.epoch,
+        WindowsInstallPhase::EnablePending,
+    )
+    .expect("record enable pending");
+    let enabled = transition_windows_install_state(
+        &root,
+        pending.epoch,
+        WindowsInstallPhase::EnabledUnobserved,
+    )
+    .expect("record enabled state");
+
+    let restoration = transient_activation_restoration(Some(&enabled), package)
+        .expect("build installed restoration")
+        .expect("enabled state needs restoration");
+    assert_eq!(restoration.package_full_name(), package);
+    assert!(restoration
+        .debugger_command_line()
+        .contains("__incodex_windows_installed_debugger"));
+    assert!(transient_activation_restoration(None, package)
+        .expect("no installed state")
+        .is_none());
+
+    fs::remove_dir_all(root).expect("remove restoration fixture");
 }
 
 #[test]
