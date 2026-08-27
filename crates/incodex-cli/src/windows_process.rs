@@ -535,11 +535,6 @@ pub fn spawn_kill_on_drop(command: &mut Command) -> io::Result<WindowsProcessTre
 }
 
 impl WindowsPendingJob {
-    pub(crate) fn create() -> io::Result<Self> {
-        let capability = WindowsActivationCapability::create().map_err(io::Error::other)?;
-        Self::create_for_capability(&capability)
-    }
-
     pub(crate) fn create_for_capability(
         capability: &WindowsActivationCapability,
     ) -> io::Result<Self> {

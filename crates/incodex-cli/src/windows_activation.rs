@@ -600,7 +600,8 @@ fn activate_packaged(
     let _apartment = ComApartment::initialize()?;
     let existing_processes = snapshot_process_ids()
         .map_err(|error| format!("cannot snapshot Windows processes before activation: {error}"))?;
-    let pending_job = WindowsPendingJob::create()
+    let capability = request.activation_capability()?;
+    let pending_job = WindowsPendingJob::create_for_capability(&capability)
         .map_err(|error| format!("cannot create Windows activation Job Object: {error}"))?;
     let package = wide_nul(request.package_full_name());
     let app_user_model_id = wide_nul(request.app_user_model_id());
