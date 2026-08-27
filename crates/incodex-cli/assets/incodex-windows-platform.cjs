@@ -67,8 +67,11 @@ function exitAfterLastMainWindowCloses(
   win.on("close", () => {
     const generation = ++closeProbeGeneration;
     const observeHidden = () => {
-      if (exited || generation !== closeProbeGeneration || hasAnotherMainWindow()) return;
-      if (win.isDestroyed?.() === true || win.isVisible?.() === false) {
+      if (exited || generation !== closeProbeGeneration) return;
+      if (
+        !hasAnotherMainWindow() &&
+        (win.isDestroyed?.() === true || win.isVisible?.() === false)
+      ) {
         exited = true;
         exit(0);
         return;
