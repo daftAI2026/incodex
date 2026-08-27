@@ -68,9 +68,24 @@ fn prepares_open_from_the_discovered_users_package_without_hardcoded_install_pat
     );
     assert!(!plan.session.home.join("sessions.jsonl").exists());
 
+    let runtime_releases = user_root.join("runtime").join("releases");
+    let bootstrap = fs::read_dir(&runtime_releases)
+        .expect("published Runtime releases")
+        .map(|entry| entry.expect("Runtime release entry").path())
+        .find_map(|release| {
+            let bootstrap = release.join("incodex-windows-bootstrap.cjs");
+            bootstrap.is_file().then_some(bootstrap)
+        })
+        .expect("stable activation bootstrap");
+    assert!(!bootstrap.starts_with(&plan.session.root));
+
     assert_eq!(
         burn_windows_session(&plan.session),
         WindowsCleanupResult::Removed
+    );
+    assert!(
+        bootstrap.is_file(),
+        "normal session cleanup removed the stable activation bootstrap"
     );
     fs::remove_dir_all(root).expect("remove fixture");
 }
