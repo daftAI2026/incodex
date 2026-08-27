@@ -13,14 +13,16 @@ function hookWindowSource(): string {
 }
 
 describe("Electron UI injection reporting", () => {
-  test("keeps recovery injection timing but only did-finish-load requests one report", () => {
+  test("keeps macOS recovery timing while Windows rechecks asynchronous UI readiness", () => {
     const hook = hookWindowSource();
 
     expect(hook).toContain('win.webContents.on("dom-ready", () => run(false))');
     expect(hook).toContain('win.webContents.on("did-finish-load", () => run(true))');
     expect(hook).toContain("run(false)");
     expect(hook.match(/run\(true\)/g)).toHaveLength(1);
-    expect(hook.match(/reportInjectionProbe/g)).toHaveLength(1);
+    expect(hook).toContain("if (windowsPlatform && isIncognito())");
+    expect(hook).toContain("windowsPlatform.observeRuntimeUiReadiness(");
+    expect(hook).toContain("reportInjectionProbe(win, false)");
   });
 
   test("does not silently swallow executeJavaScript rejection", () => {
@@ -28,5 +30,11 @@ describe("Electron UI injection reporting", () => {
 
     expect(hook).not.toContain(".catch(() => {})");
     expect(hook).toMatch(/\.catch\(\(error\) => reportInjectionError\(error\)\)/);
+  });
+
+  test("arms the Windows hidden-close lifecycle for normal and incognito hosts", () => {
+    expect(main).toContain("windowsPlatform.exitAfterLastMainWindowCloses(");
+    expect(main).not.toContain("if (windowsPlatform && !isIncognito())");
+    expect(main).toContain("finishIncognito(0)");
   });
 });
