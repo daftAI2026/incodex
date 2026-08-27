@@ -153,12 +153,9 @@ pub fn publish_windows_runtime(user_root: &Path) -> Result<PublishedWindowsRunti
     })
 }
 
-pub fn publish_windows_activation_bootstrap(session_root: &Path) -> Result<PathBuf, String> {
-    ensure_regular_directory(session_root)?;
-    verify_private_acl(session_root)?;
-    let bootstrap = session_root.join(WINDOWS_BOOTSTRAP_NAME);
-    write_private_file(&bootstrap, WINDOWS_BOOTSTRAP.as_bytes())?;
-    Ok(bootstrap)
+pub fn publish_windows_activation_bootstrap(user_root: &Path) -> Result<PathBuf, String> {
+    let runtime = publish_windows_runtime(user_root)?;
+    Ok(runtime.release_dir.join(WINDOWS_BOOTSTRAP_NAME))
 }
 
 fn publish_release(

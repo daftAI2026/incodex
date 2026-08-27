@@ -185,7 +185,7 @@ pub fn prepare_windows_open(
     let session = create_windows_session(user_root)?;
     let prepared = (|| {
         copy_windows_settings(&session, source_home)?;
-        let transient_bootstrap = publish_windows_activation_bootstrap(&session.root)?;
+        let transient_bootstrap = publish_windows_activation_bootstrap(user_root)?;
         let debug_port = allocate_debug_port()?;
         let args = debug_launch_args(&session.chromium.display().to_string(), debug_port);
         let env = BTreeMap::from([
