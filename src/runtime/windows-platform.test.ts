@@ -103,6 +103,38 @@ describe("Windows Runtime lifecycle adapter", () => {
     expect(exits).toEqual([0]);
   });
 
+  test("does not abandon a host that hides after the old polling deadline", () => {
+    let close: (() => void) | undefined;
+    let visible = true;
+    const scheduled: Array<() => void> = [];
+    const exits: number[] = [];
+    const win = {
+      isDestroyed: () => false,
+      isVisible: () => visible,
+      on(event: string, callback: () => void) {
+        if (event === "close") close = callback;
+      },
+    };
+
+    windowsPlatform.exitAfterLastMainWindowCloses(
+      win,
+      () => false,
+      (code: number) => exits.push(code),
+      (callback: () => void) => scheduled.push(callback),
+    );
+
+    close?.();
+    for (let attempt = 0; attempt < 50; attempt++) {
+      expect(scheduled).toHaveLength(1);
+      scheduled.shift()?.();
+    }
+    expect(exits).toEqual([]);
+    expect(scheduled).toHaveLength(1);
+    visible = false;
+    scheduled.shift()?.();
+    expect(exits).toEqual([0]);
+  });
+
   test("rechecks readiness after the shared UI mounts asynchronously", async () => {
     const scheduled: Array<() => void> = [];
     let inspections = 0;
