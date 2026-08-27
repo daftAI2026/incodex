@@ -10,6 +10,8 @@ use incodex_cli::windows_activation::{
     try_run_package_debugger, windows_debugger_route, WindowsActivationFailure,
     WindowsActivationRequest, WindowsDebuggerRoute, WindowsInstalledRuntimeRegistration,
 };
+use incodex_cli::windows_activation_capability::WindowsActivationCapability;
+use incodex_cli::windows_launch::WindowsLaunchMode;
 
 #[test]
 fn stable_debugger_routes_only_a_tokened_process_into_the_matching_job() {
@@ -143,6 +145,46 @@ fn builds_a_store_activation_request_without_losing_windows_arguments_or_environ
         request.environment()[request.environment().len() - 2],
         0,
         "environment block must end with a second NUL"
+    );
+}
+
+#[test]
+fn installed_activation_moves_isolation_into_one_authenticated_capability() {
+    let capability = WindowsActivationCapability::create().expect("create activation capability");
+    let user_home = r"C:\Users\林 纳斯\.incodex\sessions\one\codex-home";
+    let request = WindowsActivationRequest::new(
+        "OpenAI.Codex_26.820.7780.0_x64__2p2nqsd0c76g0",
+        "OpenAI.Codex_2p2nqsd0c76g0!App",
+        [OsString::from(
+            r"--user-data-dir=C:\Users\林 纳斯\.incodex\sessions\one\chromium\",
+        )],
+        BTreeMap::from([
+            ("CODEX_HOME".to_string(), OsString::from(user_home)),
+            ("INCODEX_INCOGNITO".to_string(), OsString::from("1")),
+        ]),
+    )
+    .expect("valid installed activation request");
+
+    let arguments = request.arguments_with_capability(&capability);
+    assert!(arguments
+        .starts_with(r#""--user-data-dir=C:\Users\林 纳斯\.incodex\sessions\one\chromium\\" "#,));
+    assert!(arguments.ends_with(&capability.command_line_argument()));
+    assert_eq!(arguments.matches("--incodex-activation-token=").count(), 1);
+
+    let claimed = request
+        .activation_environment(WindowsLaunchMode::Runtime)
+        .expect("build authenticated environment response");
+    assert_eq!(claimed.mode, WindowsLaunchMode::Runtime);
+    assert_eq!(
+        claimed.environment.get("CODEX_HOME").map(String::as_str),
+        Some(user_home)
+    );
+    assert_eq!(
+        claimed
+            .environment
+            .get("INCODEX_INCOGNITO")
+            .map(String::as_str),
+        Some("1")
     );
 }
 
