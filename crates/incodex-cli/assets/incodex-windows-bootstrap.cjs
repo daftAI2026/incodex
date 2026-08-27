@@ -101,6 +101,19 @@ function ownedInstallState(options, registrationId) {
   );
 }
 
+function loadRuntimeWhenElectronIsReady(options, runtimeDir) {
+  const load = options.load || require;
+  const onElectronLoaded =
+    options.onElectronLoaded || ((callback) => process.once("loaded", callback));
+  onElectronLoaded(() => {
+    try {
+      load(path.join(runtimeDir, "incodex-main.cjs"));
+    } catch {
+      console.error("[incodex] Windows Runtime attach failed");
+    }
+  });
+}
+
 function attachWindowsRuntime(options = {}) {
   const env = options.env || process.env;
   const argv = options.argv || process.argv;
@@ -110,8 +123,7 @@ function attachWindowsRuntime(options = {}) {
     const mode = claimActivationEnvironment(options, env, token);
     if (mode === "runtime") {
       const runtimeDir = options.runtimeDir || __dirname;
-      const load = options.load || require;
-      load(path.join(runtimeDir, "incodex-main.cjs"));
+      loadRuntimeWhenElectronIsReady(options, runtimeDir);
     }
     return true;
   }
@@ -127,14 +139,8 @@ function attachWindowsRuntime(options = {}) {
   }
 
   env[BOOTSTRAPPED_NAME] = registrationId;
-  const load = options.load || require;
-  try {
-    load(path.join(runtimeDir, "incodex-main.cjs"));
-    return true;
-  } catch {
-    console.error("[incodex] Windows Runtime attach failed");
-    return false;
-  }
+  loadRuntimeWhenElectronIsReady(options, runtimeDir);
+  return true;
 }
 
 attachWindowsRuntime();
