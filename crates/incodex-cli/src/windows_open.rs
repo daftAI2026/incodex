@@ -72,6 +72,7 @@ impl WindowsOpenPlan {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WindowsOpenProcessResult {
+    Closed,
     Exited(i32),
     SpawnFailed(String),
     ProcessStateUnknown(String),
@@ -356,12 +357,7 @@ where
         }
         if ui_ready && close_requested.load(Ordering::Acquire) {
             match process_tree.terminate_successfully() {
-                Ok(status) => {
-                    break (
-                        WindowsOpenProcessResult::Exited(status.code().unwrap_or(0)),
-                        Ok(()),
-                    );
-                }
+                Ok(_) => break (WindowsOpenProcessResult::Closed, Ok(())),
                 Err(error) => {
                     let reason = format!(
                         "cannot prove Windows Job shutdown after the primary window closed: {error}"
@@ -376,12 +372,7 @@ where
         match has_visible_window(&process_tree) {
             Ok(visible) if window_lifecycle.should_close(visible, Instant::now()) => {
                 match process_tree.terminate_successfully() {
-                    Ok(status) => {
-                        break (
-                            WindowsOpenProcessResult::Exited(status.code().unwrap_or(0)),
-                            Ok(()),
-                        );
-                    }
+                    Ok(_) => break (WindowsOpenProcessResult::Closed, Ok(())),
                     Err(error) => {
                         let reason = format!(
                             "cannot prove Windows Job shutdown after its visible window closed: {error}"
@@ -624,6 +615,7 @@ fn finish_windows_open(outcome: WindowsOpenOutcome) -> Result<(), CliFailure> {
         return Err(CliFailure::with_code(2, ""));
     }
     match outcome.process {
+        WindowsOpenProcessResult::Closed => Ok(()),
         WindowsOpenProcessResult::Exited(0) if outcome.ui_ready => Ok(()),
         WindowsOpenProcessResult::Exited(code) => Err(CliFailure::new(format!(
             "Incognito Codex process exited with status {code}"
