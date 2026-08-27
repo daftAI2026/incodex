@@ -69,21 +69,32 @@ describe("incognito button exit affordance", () => {
 
 describe("incognito banner placement", () => {
   test("uses the one official banner slot without a second mount model", () => {
+    expect(inject).toContain("mountInOfficialBannerSlot(host)");
     expect(inject).toContain("const slot = findOfficialBannerSlot()");
-    expect(inject).toContain("slot.insertBefore(host, slot.firstChild)");
     expect(inject).not.toContain("findLandingMount");
   });
 });
 
 describe("launch warning placement", () => {
-  test("reuses the official banner mount on Windows without changing the macOS fallback", () => {
+  test("reuses the macOS home-banner constructor and a live official action on Windows", () => {
     expect(inject).toMatch(
-      /function showLaunchError\(\): void \{[\s\S]*isWindowsRenderer\(\)[\s\S]*mountInOfficialBannerSlot\(card\)/,
+      /function buildLanding\(\): HTMLElement \{[\s\S]*buildOfficialHomeBanner/,
     );
     expect(inject).toMatch(
-      /function ensureLanding\(\): void \{[\s\S]*mountInOfficialBannerSlot\(host\)/,
+      /function buildWindowsLaunchErrorBanner\(\): HTMLElement \{[\s\S]*buildOfficialHomeBanner/,
     );
-    expect(inject).toContain("document.body.append(card)");
+    expect(inject).toContain("cloneOfficialPrimaryAction()");
+    expect(inject).toMatch(
+      /function showLaunchError\(\): void \{[\s\S]*buildWindowsLaunchErrorBanner\(\)[\s\S]*mountInOfficialBannerSlot/,
+    );
+    expect(inject).not.toContain("data-incodex-banner-mounted");
+  });
+});
+
+describe("platform shortcut label", () => {
+  test("keeps the macOS glyphs and labels the Windows control shortcut honestly", () => {
+    expect(inject).toContain('isWindowsRenderer() ? "Ctrl+Shift+N" : SHORTCUT_LABEL');
+    expect(inject).toContain("kbd.textContent = shortcutLabel()");
   });
 });
 
