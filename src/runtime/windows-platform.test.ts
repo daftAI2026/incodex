@@ -135,6 +135,37 @@ describe("Windows Runtime lifecycle adapter", () => {
     expect(exits).toEqual([0]);
   });
 
+  test("keeps observing while another primary Windows window is still visible", () => {
+    let close: (() => void) | undefined;
+    let visible = true;
+    let anotherPrimaryWindow = true;
+    const scheduled: Array<() => void> = [];
+    const exits: number[] = [];
+    const win = {
+      isDestroyed: () => false,
+      isVisible: () => visible,
+      on(event: string, callback: () => void) {
+        if (event === "close") close = callback;
+      },
+    };
+
+    windowsPlatform.exitAfterLastMainWindowCloses(
+      win,
+      () => anotherPrimaryWindow,
+      (code: number) => exits.push(code),
+      (callback: () => void) => scheduled.push(callback),
+    );
+
+    close?.();
+    scheduled.shift()?.();
+    expect(exits).toEqual([]);
+    expect(scheduled).toHaveLength(1);
+    anotherPrimaryWindow = false;
+    visible = false;
+    scheduled.shift()?.();
+    expect(exits).toEqual([0]);
+  });
+
   test("rechecks readiness after the shared UI mounts asynchronously", async () => {
     const scheduled: Array<() => void> = [];
     let inspections = 0;
