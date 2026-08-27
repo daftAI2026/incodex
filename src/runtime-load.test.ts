@@ -83,7 +83,10 @@ describe("runtime load", () => {
   });
 
   test("a normal Windows Runtime stays normal while only the macOS janitor is skipped", () => {
-    const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
+    const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8").replaceAll(
+      "\r\n",
+      "\n",
+    );
 
     expect(main).toContain(
       'if (!isIncognito()) {\n    if (!windowsPlatform) {\n      try {\n        safeHome.sweepOrphanSessions',

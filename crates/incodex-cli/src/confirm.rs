@@ -9,11 +9,11 @@ pub fn ask_to_continue() -> Result<bool, String> {
     {
         let key = crate::terminal::read_key()?;
         println!();
-        return match key.as_slice() {
+        match key.as_slice() {
             [3] => Err("interrupted".into()),
             [b'\r'] | [b'\n'] => Ok(true),
             _ => Ok(false),
-        };
+        }
     }
     #[cfg(target_os = "windows")]
     {

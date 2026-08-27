@@ -714,8 +714,8 @@ async function attachElectron() {
   let raiseServer = null;
   let incognitoExitStarted = false;
   function finishIncognito(code) {
-    if (incognitoExitStarted) return;
-    incognitoExitStarted = true;
+    if (windowsPlatform && incognitoExitStarted) return;
+    if (windowsPlatform) incognitoExitStarted = true;
     markSessionClosed();
     burnIncognitoHome();
     void clearPid(ownerLease, raiseServer);
