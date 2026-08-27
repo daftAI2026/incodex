@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::ffi::c_void;
 use std::ffi::{OsStr, OsString};
-use std::os::windows::ffi::OsStrExt;
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::Path;
 use std::ptr;
 
@@ -78,10 +78,7 @@ impl WindowsInstalledRuntimeRegistration {
             .join(&state.runtime_release)
             .join("incodex-windows-bootstrap.cjs");
         Ok(BTreeMap::from([
-            (
-                "NODE_OPTIONS".to_string(),
-                OsString::from(format!("--require=\"{}\"", bootstrap.display())),
-            ),
+            ("NODE_OPTIONS".to_string(), node_require_option(&bootstrap)?),
             (
                 "INCODEX_WINDOWS_REGISTRATION_ID".to_string(),
                 OsString::from(&state.registration_id),
@@ -148,6 +145,32 @@ impl WindowsInstalledRuntimeRegistration {
     pub fn environment(&self) -> &[u16] {
         &self.environment
     }
+}
+
+fn node_require_option(path: &Path) -> Result<OsString, String> {
+    let mut path = path.as_os_str().encode_wide().collect::<Vec<_>>();
+    if path.starts_with(&[b'\\' as u16, b'\\' as u16, b'?' as u16, b'\\' as u16]) {
+        path.drain(..4);
+    }
+    if path.len() < 3
+        || path[1] != b':' as u16
+        || !matches!(path[2], unit if unit == b'\\' as u16 || unit == b'/' as u16)
+        || path.contains(&0)
+        || path.contains(&(b'"' as u16))
+    {
+        return Err(
+            "Windows Runtime bootstrap path cannot be encoded for NODE_OPTIONS".to_string(),
+        );
+    }
+    for unit in &mut path {
+        if *unit == b'\\' as u16 {
+            *unit = b'/' as u16;
+        }
+    }
+    let mut option = OsStr::new("--require=\"").encode_wide().collect::<Vec<_>>();
+    option.extend(path);
+    option.push(b'"' as u16);
+    Ok(OsString::from_wide(&option))
 }
 
 fn installed_state_for_current_helper() -> Result<WindowsInstallState, String> {
@@ -848,9 +871,7 @@ mod tests {
                 r"C:\Users\Linus Torvalds\.incodex\runtime\bootstrap.cjs"
             ))
             .expect("serialize Node preload"),
-            OsString::from(
-                r#"--require="C:/Users/Linus Torvalds/.incodex/runtime/bootstrap.cjs""#
-            )
+            OsString::from(r#"--require="C:/Users/Linus Torvalds/.incodex/runtime/bootstrap.cjs""#)
         );
     }
 
