@@ -938,7 +938,20 @@ mod tests {
 
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
-    use super::{ipv4_connection_server_owner, require_process_package_identity};
+    use crate::windows_activation_capability::WindowsActivationCapability;
+
+    use super::{
+        ipv4_connection_server_owner, require_process_package_identity, WindowsPendingJob,
+    };
+
+    #[test]
+    fn pending_job_uses_the_exact_activation_capability_name() {
+        let capability = WindowsActivationCapability::create().expect("create capability");
+        let pending =
+            WindowsPendingJob::create_for_capability(&capability).expect("create capability Job");
+
+        assert_eq!(pending.name(), capability.job_name());
+    }
 
     #[test]
     fn established_connection_proof_identifies_the_server_process() {
