@@ -7,7 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use incodex_cli::windows_app::WindowsCodexApp;
 use incodex_cli::windows_runtime_open::{
     parse_windows_runtime_open, prepare_windows_runtime_open, windows_runtime_ready_for_handshake,
-    windows_runtime_shutdown_authorized, WindowsRuntimeOwnerClaim, WindowsRuntimeReadyPipe,
+    windows_runtime_shutdown_authorized, windows_runtime_startup_action,
+    WindowsRuntimeOwnerClaim, WindowsRuntimeReadyPipe, WindowsRuntimeStartupAction,
 };
 use incodex_core::windows_session::{burn_windows_session, WindowsCleanupResult};
 
@@ -138,6 +139,26 @@ fn guardian_destroys_a_ready_session_only_after_authenticated_close_or_job_exit(
     assert!(!windows_runtime_shutdown_authorized(false, false));
     assert!(windows_runtime_shutdown_authorized(true, false));
     assert!(windows_runtime_shutdown_authorized(false, true));
+}
+
+#[test]
+fn guardian_consumes_authenticated_close_before_runtime_readiness() {
+    assert_eq!(
+        windows_runtime_startup_action(true, false),
+        WindowsRuntimeStartupAction::Finish
+    );
+    assert_eq!(
+        windows_runtime_startup_action(true, true),
+        WindowsRuntimeStartupAction::Finish
+    );
+    assert_eq!(
+        windows_runtime_startup_action(false, true),
+        WindowsRuntimeStartupAction::FailExited
+    );
+    assert_eq!(
+        windows_runtime_startup_action(false, false),
+        WindowsRuntimeStartupAction::Continue
+    );
 }
 
 #[test]
