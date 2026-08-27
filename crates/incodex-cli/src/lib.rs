@@ -45,6 +45,8 @@ pub mod version;
 #[cfg(target_os = "windows")]
 pub mod windows_activation;
 #[cfg(target_os = "windows")]
+pub mod windows_activation_capability;
+#[cfg(target_os = "windows")]
 pub mod windows_app;
 #[cfg(target_os = "windows")]
 pub(crate) mod windows_cleanup;
