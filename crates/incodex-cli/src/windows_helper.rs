@@ -170,3 +170,33 @@ fn read_u32(bytes: &[u8], offset: usize, label: &str) -> Result<u32, String> {
         .ok_or_else(|| format!("{label} is truncated"))?;
     Ok(u32::from_le_bytes([value[0], value[1], value[2], value[3]]))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn installed_helper_identity_accepts_short_and_legacy_layouts_only() {
+        let root = Path::new(r"C:\Users\test\.incodex");
+        let hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        assert!(installed_windows_helper_path_matches(
+            root,
+            hash,
+            &root.join(r"windows\i\0123456789abcdef\i.exe")
+        ));
+        assert!(installed_windows_helper_path_matches(
+            root,
+            hash,
+            &root
+                .join("windows")
+                .join("helpers")
+                .join(hash)
+                .join("incodex-helper.exe")
+        ));
+        assert!(!installed_windows_helper_path_matches(
+            root,
+            hash,
+            &root.join(r"windows\i\fedcba9876543210\i.exe")
+        ));
+    }
+}

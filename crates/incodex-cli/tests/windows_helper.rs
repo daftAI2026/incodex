@@ -51,7 +51,19 @@ fn publishes_a_windowless_private_content_addressed_helper_without_mutating_the_
     assert!(first.sha256.bytes().all(|byte| byte.is_ascii_hexdigit()));
     assert_eq!(
         first.executable.parent().unwrap().file_name().unwrap(),
-        first.sha256.as_str()
+        &first.sha256[..16]
+    );
+    assert_eq!(first.executable.file_name().unwrap(), "i.exe");
+    assert_eq!(
+        first
+            .executable
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .file_name()
+            .unwrap(),
+        "i"
     );
     verify_private_acl(&first.executable).expect("private helper executable ACL");
     verify_private_acl(first.executable.parent().unwrap()).expect("private helper release ACL");

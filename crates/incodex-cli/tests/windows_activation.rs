@@ -390,6 +390,19 @@ fn transient_debugger_rejects_a_complete_command_at_the_windows_limit() {
 }
 
 #[test]
+fn installed_debugger_rejects_a_complete_command_at_the_windows_limit() {
+    let helper = PathBuf::from(format!(r"C:\{}\i.exe", "profile".repeat(40)));
+    let error = WindowsInstalledRuntimeRegistration::new(
+        "OpenAI.Codex_26.820.7780.0_x64__2p2nqsd0c76g0",
+        &helper,
+        BTreeMap::new(),
+    )
+    .expect_err("an overlong installed PackageDebugSettings command must fail before enable");
+
+    assert!(error.contains("260 UTF-16"), "{error}");
+}
+
+#[test]
 fn installed_activation_moves_isolation_into_one_authenticated_capability() {
     let user_home = r"C:\Users\林 纳斯\.incodex\sessions\s-one\codex-home";
     let request = WindowsActivationRequest::new(
