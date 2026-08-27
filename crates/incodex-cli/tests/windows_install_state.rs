@@ -148,6 +148,10 @@ fn uninstall_disables_the_registered_package_when_the_helper_was_removed() {
         install_windows_runtime_with(&user_root, package, &helper, |_| Ok(Vec::new()), |_| Ok(()))
             .expect("install fixture Runtime");
     fs::remove_file(&installed.helper_path).expect("remove published helper fixture");
+    assert!(
+        read_windows_install_state(&user_root).is_err(),
+        "normal activation must still reject a missing helper"
+    );
 
     let mut disabled = false;
     let outcome = uninstall_windows_runtime_with(
@@ -163,7 +167,10 @@ fn uninstall_disables_the_registered_package_when_the_helper_was_removed() {
     .expect("uninstall without the published helper");
 
     assert_eq!(outcome, WindowsUninstallOutcome::Removed);
-    assert!(disabled, "the durable debugger registration was not disabled");
+    assert!(
+        disabled,
+        "the durable debugger registration was not disabled"
+    );
     assert!(
         !user_root.join("windows-install.json").exists(),
         "the disabled install generation was not retired"

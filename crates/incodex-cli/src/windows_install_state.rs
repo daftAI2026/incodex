@@ -108,9 +108,36 @@ pub fn transition_windows_install_state(
     expected_epoch: u64,
     next_phase: WindowsInstallPhase,
 ) -> Result<WindowsInstallState, String> {
+    transition_windows_install_state_with(
+        user_root,
+        expected_epoch,
+        next_phase,
+        HelperValidation::Required,
+    )
+}
+
+pub fn transition_windows_uninstall_state(
+    user_root: &Path,
+    expected_epoch: u64,
+    next_phase: WindowsInstallPhase,
+) -> Result<WindowsInstallState, String> {
+    transition_windows_install_state_with(
+        user_root,
+        expected_epoch,
+        next_phase,
+        HelperValidation::RecordedIdentity,
+    )
+}
+
+fn transition_windows_install_state_with(
+    user_root: &Path,
+    expected_epoch: u64,
+    next_phase: WindowsInstallPhase,
+    helper_validation: HelperValidation,
+) -> Result<WindowsInstallState, String> {
     let _lock = InstallStateLock::acquire()?;
     let user_root = ensure_private_windows_dir(user_root)?;
-    let mut state = read_state_from_root(&user_root)?
+    let mut state = read_state_from_root(&user_root, helper_validation)?
         .ok_or_else(|| "Windows install state does not exist".to_string())?;
     if state.epoch != expected_epoch {
         return Err(format!(
@@ -130,12 +157,18 @@ pub fn transition_windows_install_state(
         .ok_or_else(|| "Windows install state epoch overflowed".to_string())?;
     state.phase = next_phase;
     state.desired = desired_for_phase(next_phase);
-    write_state(&user_root, &state)?;
+    write_state_with(&user_root, &state, helper_validation)?;
     Ok(state)
 }
 
 pub fn read_windows_install_state(user_root: &Path) -> Result<Option<WindowsInstallState>, String> {
-    read_state_from_root(user_root)
+    read_state_from_root(user_root, HelperValidation::Required)
+}
+
+pub fn read_windows_install_state_for_uninstall(
+    user_root: &Path,
+) -> Result<Option<WindowsInstallState>, String> {
+    read_state_from_root(user_root, HelperValidation::RecordedIdentity)
 }
 
 pub fn retire_disabled_windows_install_state(
@@ -143,7 +176,7 @@ pub fn retire_disabled_windows_install_state(
     expected_epoch: u64,
 ) -> Result<(), String> {
     let _lock = InstallStateLock::acquire()?;
-    let state = read_state_from_root(user_root)?
+    let state = read_state_from_root(user_root, HelperValidation::RecordedIdentity)?
         .ok_or_else(|| "Windows install state does not exist".to_string())?;
     if state.epoch != expected_epoch || state.phase != WindowsInstallPhase::Disabled {
         return Err("Windows install state is not the expected disabled generation".to_string());
@@ -159,7 +192,10 @@ pub fn retire_disabled_windows_install_state(
     }
 }
 
-fn read_state_from_root(user_root: &Path) -> Result<Option<WindowsInstallState>, String> {
+fn read_state_from_root(
+    user_root: &Path,
+    helper_validation: HelperValidation,
+) -> Result<Option<WindowsInstallState>, String> {
     require_local_disk_absolute(user_root, "Windows Incodex root")?;
     match fs::symlink_metadata(user_root) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -207,18 +243,35 @@ fn read_state_from_root(user_root: &Path) -> Result<Option<WindowsInstallState>,
     let mut state: WindowsInstallState = serde_json::from_str(&body)
         .map_err(|error| format!("invalid Windows install state: {error}"))?;
     state.state_path = state_path;
-    validate_state(&state)?;
+    validate_state(&state, helper_validation)?;
     Ok(Some(state))
 }
 
 fn write_state(user_root: &Path, state: &WindowsInstallState) -> Result<(), String> {
-    validate_state(state)?;
+    write_state_with(user_root, state, HelperValidation::Required)
+}
+
+fn write_state_with(
+    user_root: &Path,
+    state: &WindowsInstallState,
+    helper_validation: HelperValidation,
+) -> Result<(), String> {
+    validate_state(state, helper_validation)?;
     let body = serde_json::to_vec_pretty(state)
         .map_err(|error| format!("cannot serialize Windows install state: {error}"))?;
     replace_private_file(user_root, &state.state_path, &body)
 }
 
-fn validate_state(state: &WindowsInstallState) -> Result<(), String> {
+#[derive(Clone, Copy)]
+enum HelperValidation {
+    Required,
+    RecordedIdentity,
+}
+
+fn validate_state(
+    state: &WindowsInstallState,
+    helper_validation: HelperValidation,
+) -> Result<(), String> {
     if state.schema_version != STATE_SCHEMA || state.epoch == 0 {
         return Err("Windows install state schema or epoch is invalid".to_string());
     }
@@ -232,15 +285,30 @@ fn validate_state(state: &WindowsInstallState) -> Result<(), String> {
     }
     validate_package_name(&state.package_full_name)?;
     validate_runtime_release(&state.runtime_release)?;
-    let helper = validate_helper(&state.helper_path)?;
     if state.helper_sha256.len() != 64
         || !state
             .helper_sha256
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit())
-        || sha256_file(&helper)? != state.helper_sha256
     {
         return Err("Windows install helper identity is invalid".to_string());
+    }
+    let user_root = state
+        .state_path
+        .parent()
+        .ok_or_else(|| "Windows install state has no Incodex root".to_string())?;
+    let recorded_helper = user_root
+        .join("windows")
+        .join("helpers")
+        .join(&state.helper_sha256)
+        .join("incodex-helper.exe");
+    if matches!(helper_validation, HelperValidation::Required)
+        || state.helper_path != recorded_helper
+    {
+        let helper = validate_helper(&state.helper_path)?;
+        if sha256_file(&helper)? != state.helper_sha256 {
+            return Err("Windows install helper identity is invalid".to_string());
+        }
     }
     if state.desired != desired_for_phase(state.phase) {
         return Err("Windows install desired state does not match its phase".to_string());

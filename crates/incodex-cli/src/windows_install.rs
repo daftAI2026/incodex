@@ -12,8 +12,9 @@ use crate::windows_app::{
 use crate::windows_helper::publish_windows_helper;
 use crate::windows_install_state::{
     acquire_windows_install_state, read_windows_install_state,
-    retire_disabled_windows_install_state, stage_windows_install_state,
-    transition_windows_install_state, WindowsInstallPhase, WindowsInstallState,
+    read_windows_install_state_for_uninstall, retire_disabled_windows_install_state,
+    stage_windows_install_state, transition_windows_install_state,
+    transition_windows_uninstall_state, WindowsInstallPhase, WindowsInstallState,
 };
 use crate::windows_process::running_package_process_ids;
 use crate::windows_runtime::publish_windows_runtime;
@@ -160,7 +161,7 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
     reject_windows_target_selectors(parsed)?;
     let profile = crate::windows_profile::windows_user_profile()?;
     let user_root = profile.join(".incodex");
-    let durable_state = read_windows_install_state(&user_root)?;
+    let durable_state = read_windows_install_state_for_uninstall(&user_root)?;
     let discovered_app = discover_codex_package();
     print_uninstall_plan(discovered_app.as_ref().ok(), durable_state.as_ref());
     if let Err(error) = &discovered_app {
@@ -227,20 +228,22 @@ where
     D: FnOnce(&str) -> Result<(), String>,
 {
     let _transaction = acquire_windows_install_state()?;
-    let Some(mut state) = read_windows_install_state(user_root)? else {
+    let Some(mut state) = read_windows_install_state_for_uninstall(user_root)? else {
         return Ok(WindowsUninstallOutcome::NotInstalled);
     };
     state = match state.phase {
-        WindowsInstallPhase::Staged => {
-            transition_windows_install_state(user_root, state.epoch, WindowsInstallPhase::Disabled)?
-        }
-        WindowsInstallPhase::EnablePending => transition_windows_install_state(
+        WindowsInstallPhase::Staged => transition_windows_uninstall_state(
+            user_root,
+            state.epoch,
+            WindowsInstallPhase::Disabled,
+        )?,
+        WindowsInstallPhase::EnablePending => transition_windows_uninstall_state(
             user_root,
             state.epoch,
             WindowsInstallPhase::RecoveryRequired,
         )?,
         WindowsInstallPhase::EnabledUnobserved | WindowsInstallPhase::EnabledObserved => {
-            transition_windows_install_state(
+            transition_windows_uninstall_state(
                 user_root,
                 state.epoch,
                 WindowsInstallPhase::DisableRequested,
@@ -266,7 +269,7 @@ where
     let pending = if state.phase == WindowsInstallPhase::DisablePending {
         state
     } else {
-        transition_windows_install_state(
+        transition_windows_uninstall_state(
             user_root,
             state.epoch,
             WindowsInstallPhase::DisablePending,
@@ -275,7 +278,7 @@ where
     let package_is_installed = match package_is_installed(&pending.package_full_name) {
         Ok(installed) => installed,
         Err(error) => {
-            let recovery = transition_windows_install_state(
+            let recovery = transition_windows_uninstall_state(
                 user_root,
                 pending.epoch,
                 WindowsInstallPhase::RecoveryRequired,
@@ -285,7 +288,7 @@ where
     };
     if package_is_installed {
         if let Err(error) = disable(&pending.package_full_name) {
-            let recovery = transition_windows_install_state(
+            let recovery = transition_windows_uninstall_state(
                 user_root,
                 pending.epoch,
                 WindowsInstallPhase::RecoveryRequired,
@@ -293,14 +296,14 @@ where
             return Err(join_recovery_error(error, recovery));
         }
     }
-    let disabled = match transition_windows_install_state(
+    let disabled = match transition_windows_uninstall_state(
         user_root,
         pending.epoch,
         WindowsInstallPhase::Disabled,
     ) {
         Ok(disabled) => disabled,
         Err(error) => {
-            let recovery = transition_windows_install_state(
+            let recovery = transition_windows_uninstall_state(
                 user_root,
                 pending.epoch,
                 WindowsInstallPhase::RecoveryRequired,
