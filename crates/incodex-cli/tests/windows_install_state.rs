@@ -181,6 +181,78 @@ fn uninstall_recovers_after_the_store_replaces_the_registered_package() {
 }
 
 #[test]
+fn uninstall_recovers_every_interrupted_install_transition() {
+    let helper = std::env::current_exe().expect("test helper path");
+    let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    let runtime_release = "0.5.0-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    for (phase, expected_disable_calls) in [
+        (WindowsInstallPhase::Staged, 0),
+        (WindowsInstallPhase::EnablePending, 1),
+        (WindowsInstallPhase::DisablePending, 1),
+    ] {
+        let user_root = scratch_root();
+        let staged = stage_windows_install_state(&user_root, package, &helper, runtime_release)
+            .expect("stage interrupted install");
+        let state = match phase {
+            WindowsInstallPhase::Staged => staged,
+            WindowsInstallPhase::EnablePending => transition_windows_install_state(
+                &user_root,
+                staged.epoch,
+                WindowsInstallPhase::EnablePending,
+            )
+            .expect("record interrupted enable"),
+            WindowsInstallPhase::DisablePending => {
+                let enable_pending = transition_windows_install_state(
+                    &user_root,
+                    staged.epoch,
+                    WindowsInstallPhase::EnablePending,
+                )
+                .expect("record enable pending");
+                let enabled = transition_windows_install_state(
+                    &user_root,
+                    enable_pending.epoch,
+                    WindowsInstallPhase::EnabledUnobserved,
+                )
+                .expect("record enabled");
+                let disable_requested = transition_windows_install_state(
+                    &user_root,
+                    enabled.epoch,
+                    WindowsInstallPhase::DisableRequested,
+                )
+                .expect("record disable requested");
+                transition_windows_install_state(
+                    &user_root,
+                    disable_requested.epoch,
+                    WindowsInstallPhase::DisablePending,
+                )
+                .expect("record interrupted disable")
+            }
+            _ => unreachable!(),
+        };
+        assert_eq!(state.phase, phase);
+
+        let mut disable_calls = 0;
+        let outcome = uninstall_windows_runtime_with(
+            &user_root,
+            |_| Ok(Vec::new()),
+            |_| Ok(true),
+            |_| {
+                disable_calls += 1;
+                Ok(())
+            },
+        )
+        .expect("recover interrupted uninstall");
+        assert_eq!(outcome, WindowsUninstallOutcome::Removed);
+        assert_eq!(disable_calls, expected_disable_calls, "phase {phase:?}");
+        assert!(read_windows_install_state(&user_root)
+            .expect("read retired interrupted state")
+            .is_none());
+        fs::remove_dir_all(user_root).expect("remove interrupted install fixture");
+    }
+}
+
+#[test]
 fn persists_owned_install_transitions_with_epoch_cas_and_an_early_disable_kill_switch() {
     let user_root = scratch_root();
     let helper = std::env::current_exe().expect("test helper path");

@@ -140,6 +140,45 @@ fn install_and_uninstall_dry_run_discover_the_store_package_without_writing_stat
 }
 
 #[test]
+fn windows_install_commands_reject_macos_target_selectors_before_discovery() {
+    for args in [
+        &["install", "--clone", "--dry-run"][..],
+        &["install", "--app", r"C:\Fake\ChatGPT.app", "--dry-run"][..],
+        &["uninstall", "--clone", "--dry-run"][..],
+        &["uninstall", "--app", r"C:\Fake\ChatGPT.app", "--dry-run"][..],
+    ] {
+        let profile = scratch_profile();
+        let output = run(args, &profile);
+        assert_eq!(output.status.code(), Some(1), "{args:?}");
+        assert!(
+            text(&output.stderr).contains("not supported on Windows"),
+            "{args:?}: {}",
+            text(&output.stderr)
+        );
+        assert!(!profile.exists(), "{args:?} created state");
+    }
+}
+
+#[test]
+fn uninstall_reads_durable_state_before_optional_store_discovery() {
+    let source = include_str!("../src/windows_install.rs");
+    let start = source.find("pub fn run_uninstall").expect("uninstall entry");
+    let end = source[start..]
+        .find("pub enum WindowsUninstallOutcome")
+        .map(|offset| start + offset)
+        .expect("uninstall entry end");
+    let uninstall = &source[start..end];
+    let state_read = uninstall
+        .find("read_windows_install_state")
+        .expect("durable state read");
+    let discovery = uninstall
+        .find("discover_codex_package")
+        .expect("optional Store discovery");
+    assert!(state_read < discovery);
+    assert!(!uninstall.contains("discover_codex_package()?"));
+}
+
+#[test]
 fn mutating_install_requires_explicit_confirmation_without_a_tty() {
     let profile = scratch_profile();
     let output = run(&["install"], &profile);

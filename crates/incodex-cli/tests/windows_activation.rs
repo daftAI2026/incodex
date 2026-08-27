@@ -2,15 +2,23 @@
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
+use std::fs;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_cli::windows_activation::{
     activate_packaged_kill_on_drop, activate_packaged_with_installed_runtime,
     disable_installed_runtime, enable_installed_runtime, try_run_installed_package_debugger,
-    try_run_package_debugger, windows_debugger_route, WindowsActivationFailure,
-    WindowsActivationRequest, WindowsDebuggerRoute, WindowsInstalledRuntimeRegistration,
+    try_run_package_debugger, windows_debugger_route, windows_installed_debugger_route,
+    WindowsActivationFailure, WindowsActivationRequest, WindowsDebuggerRoute,
+    WindowsInstalledRuntimeRegistration,
+};
+use incodex_cli::windows_install_state::{
+    stage_windows_install_state, transition_windows_install_state, WindowsInstallPhase,
 };
 use incodex_cli::windows_launch::WindowsLaunchMode;
+
+static STATE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[test]
 fn stable_debugger_routes_only_an_isolated_profile_into_the_matching_job() {
@@ -34,6 +42,51 @@ fn stable_debugger_routes_only_an_isolated_profile_into_the_matching_job() {
             .expect("isolated route"),
         WindowsDebuggerRoute::AssignToJob(capability.job_name().to_string())
     );
+}
+
+#[test]
+fn installed_debugger_resumes_normally_after_the_uninstall_kill_switch() {
+    let sequence = STATE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let root = std::env::temp_dir().join(format!(
+        "incodex-installed-debugger-route-{}-{sequence}",
+        std::process::id()
+    ));
+    let helper = std::env::current_exe().expect("test helper");
+    let staged = stage_windows_install_state(
+        &root,
+        "OpenAI.Codex_1.2.3.4_x64__publisher",
+        &helper,
+        "0.5.0-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    )
+    .expect("stage debugger state");
+    let enable_pending = transition_windows_install_state(
+        &root,
+        staged.epoch,
+        WindowsInstallPhase::EnablePending,
+    )
+    .expect("record enable pending");
+    let enabled = transition_windows_install_state(
+        &root,
+        enable_pending.epoch,
+        WindowsInstallPhase::EnabledUnobserved,
+    )
+    .expect("record enabled state");
+    let disabled_requested = transition_windows_install_state(
+        &root,
+        enabled.epoch,
+        WindowsInstallPhase::DisableRequested,
+    )
+    .expect("publish uninstall kill switch");
+
+    assert_eq!(
+        windows_installed_debugger_route(
+            &disabled_requested,
+            r#"ChatGPT.exe --user-data-dir=C:\Users\test\.incodex\sessions\s-one\chromium"#,
+        )
+        .expect("route disabled generation"),
+        WindowsDebuggerRoute::ResumeNormally
+    );
+    fs::remove_dir_all(root).expect("remove debugger route fixture");
 }
 use incodex_cli::windows_process::WindowsProcessTree;
 
