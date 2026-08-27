@@ -48,6 +48,32 @@ describe("Windows Runtime lifecycle adapter", () => {
     expect(exits).toEqual([0]);
   });
 
+  test("exits when the official Windows host hides its last primary window", () => {
+    let close: (() => void) | undefined;
+    let visible = true;
+    const scheduled: Array<() => void> = [];
+    const exits: number[] = [];
+    const win = {
+      isDestroyed: () => false,
+      isVisible: () => visible,
+      on(event: string, callback: () => void) {
+        if (event === "close") close = callback;
+      },
+    };
+
+    windowsPlatform.exitAfterLastMainWindowCloses(
+      win,
+      () => false,
+      (code: number) => exits.push(code),
+      (callback: () => void) => scheduled.push(callback),
+    );
+
+    close?.();
+    visible = false;
+    scheduled.shift()?.();
+    expect(exits).toEqual([0]);
+  });
+
   test("rechecks readiness after the shared UI mounts asynchronously", async () => {
     const scheduled: Array<() => void> = [];
     let inspections = 0;
@@ -63,13 +89,13 @@ describe("Windows Runtime lifecycle adapter", () => {
       },
     );
 
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(inspections).toBe(1);
     expect(accepted).toBe(0);
     expect(scheduled).toHaveLength(1);
 
     scheduled.shift()?.();
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(inspections).toBe(2);
     expect(accepted).toBe(1);
     expect(scheduled).toHaveLength(0);
