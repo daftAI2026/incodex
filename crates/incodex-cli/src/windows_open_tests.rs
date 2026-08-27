@@ -66,7 +66,12 @@ fn open_process_fixture() {
         .parse::<u16>()
         .expect("valid fixture port");
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port)).expect("bind fixture CDP");
-    thread::sleep(Duration::from_millis(250));
+    let lifetime = std::env::var("INCODEX_WINDOWS_OPEN_FIXTURE_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(Duration::from_millis(250));
+    thread::sleep(lifetime);
     if std::env::var_os("INCODEX_WINDOWS_OPEN_DROP_LISTENER").is_some() {
         drop(listener);
         let delay = std::env::var("INCODEX_WINDOWS_OPEN_EXIT_AFTER_LISTENER_DROP_MS")
@@ -182,6 +187,35 @@ fn closing_the_primary_window_terminates_background_electron_as_success() {
     assert!(monitor_finished.load(Ordering::Acquire));
     assert!(!session_root.exists());
     fs::remove_dir_all(root).expect("remove lifecycle fixture");
+}
+
+#[test]
+fn closing_before_injection_finishes_still_removes_the_session() {
+    let (root, mut plan) = plan();
+    plan.env_flags.insert(
+        "INCODEX_WINDOWS_OPEN_FIXTURE_MS".to_string(),
+        "2000".to_string(),
+    );
+    let session_root = plan.session.root.clone();
+    let visibility_polls = Arc::new(AtomicU64::new(0));
+    let observed = Arc::clone(&visibility_polls);
+
+    let outcome = execute_windows_open_with_visibility(
+        plan,
+        launch_fixture,
+        |_port, _options, _alive, _close_requested, _cdp_failed, _ownership_guard| {
+            thread::sleep(Duration::from_millis(1000));
+            Ok(Vec::new())
+        },
+        move |_| Ok(observed.fetch_add(1, Ordering::Relaxed) == 0),
+    );
+
+    assert_eq!(outcome.process, WindowsOpenProcessResult::Exited(0));
+    assert!(!outcome.ui_ready, "injection finished before early close won");
+    assert!(visibility_polls.load(Ordering::Relaxed) > 1);
+    assert_eq!(outcome.cleanup, WindowsCleanupResult::Removed);
+    assert!(!session_root.exists());
+    fs::remove_dir_all(root).expect("remove early-close lifecycle fixture");
 }
 
 #[test]
