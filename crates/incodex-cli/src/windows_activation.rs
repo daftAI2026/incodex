@@ -16,7 +16,7 @@ use windows_sys::Win32::System::Com::{
 use windows_sys::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
 
 use crate::windows_activation_capability::activation_token_from_command_line;
-use crate::windows_install_state::WindowsInstallState;
+use crate::windows_install_state::{read_windows_install_state, WindowsInstallState};
 use crate::windows_process::{
     assign_debugged_process_to_job, process_command_line, resume_debugged_package_process,
     snapshot_process_ids, WindowsPendingJob, WindowsProcessTree,
@@ -98,6 +98,10 @@ impl WindowsInstalledRuntimeRegistration {
                 "INCODEX_WINDOWS_HELPER".to_string(),
                 state.helper_path.as_os_str().to_os_string(),
             ),
+            (
+                "INCODEX_WINDOWS_SELF_SPAWN_PROBE".to_string(),
+                OsString::from("1"),
+            ),
         ]))
     }
 
@@ -105,7 +109,6 @@ impl WindowsInstalledRuntimeRegistration {
         Self::new(
             &state.package_full_name,
             &state.helper_path,
-            &state.state_path,
             Self::environment_from_install_state(state)?,
         )
     }
@@ -113,20 +116,15 @@ impl WindowsInstalledRuntimeRegistration {
     pub fn new(
         package_full_name: &str,
         helper_path: &Path,
-        state_path: &Path,
         environment: BTreeMap<String, OsString>,
     ) -> Result<Self, String> {
         validate_text(package_full_name, "package full name")?;
-        if !helper_path.is_absolute() || !state_path.is_absolute() {
-            return Err("Windows installed Runtime paths must be absolute".to_string());
+        if !helper_path.is_absolute() {
+            return Err("Windows installed Runtime helper path must be absolute".to_string());
         }
         let debugger_command_line = [
             helper_path.as_os_str().to_os_string(),
             OsString::from(INSTALLED_DEBUGGER_MODE),
-            OsString::from("--package"),
-            OsString::from(package_full_name),
-            OsString::from("--state"),
-            state_path.as_os_str().to_os_string(),
         ]
         .iter()
         .map(|argument| quote_windows_argument(argument))
@@ -150,6 +148,35 @@ impl WindowsInstalledRuntimeRegistration {
     pub fn environment(&self) -> &[u16] {
         &self.environment
     }
+}
+
+fn installed_state_for_current_helper() -> Result<WindowsInstallState, String> {
+    let helper = std::env::current_exe()
+        .map_err(|error| format!("cannot locate the Windows installed debugger: {error}"))?;
+    let hash_dir = helper
+        .parent()
+        .ok_or_else(|| "Windows installed debugger has no release directory".to_string())?;
+    let helpers_dir = hash_dir
+        .parent()
+        .filter(|path| path.file_name().and_then(|name| name.to_str()) == Some("helpers"))
+        .ok_or_else(|| "Windows installed debugger is outside the helpers directory".to_string())?;
+    let windows_dir = helpers_dir
+        .parent()
+        .filter(|path| path.file_name().and_then(|name| name.to_str()) == Some("windows"))
+        .ok_or_else(|| {
+            "Windows installed debugger is outside the Windows Runtime directory".to_string()
+        })?;
+    let user_root = windows_dir
+        .parent()
+        .ok_or_else(|| "Windows installed debugger has no Incodex root".to_string())?;
+    let state = read_windows_install_state(user_root)?
+        .ok_or_else(|| "Windows installed debugger state does not exist".to_string())?;
+    let helper = std::fs::canonicalize(&helper)
+        .map_err(|error| format!("cannot resolve the Windows installed debugger: {error}"))?;
+    if state.helper_path != helper || !state.desired_enabled() {
+        return Err("Windows installed debugger state does not authorize this helper".to_string());
+    }
+    Ok(state)
 }
 
 impl WindowsActivationRequest {
@@ -461,20 +488,14 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
         return None;
     }
     let parsed = (|| {
-        let package_full_name = flag_value(arguments, "--package")?;
-        validate_text(package_full_name, "package full name")?;
-        let state_path = Path::new(flag_value(arguments, "--state")?);
-        if !state_path.is_absolute()
-            || state_path.file_name().and_then(|name| name.to_str()) != Some("windows-install.json")
-        {
-            return Err("Windows installed debugger received an invalid state path".to_string());
-        }
         let process_id = flag_value(arguments, "-p")?
             .parse::<u32>()
             .map_err(|_| "Windows installed debugger received an invalid process id".to_string())?;
         let thread_id = flag_value(arguments, "-tid")?
             .parse::<u32>()
             .map_err(|_| "Windows installed debugger received an invalid thread id".to_string())?;
+        let state = installed_state_for_current_helper()?;
+        let package_full_name = state.package_full_name.as_str();
         let route = process_command_line(process_id)
             .ok()
             .map(|command_line| windows_debugger_route(&command_line))

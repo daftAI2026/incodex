@@ -45,15 +45,13 @@ fn exposes_one_packaged_activation_backend_for_the_open_lifecycle() {
 fn binds_the_persistent_debugger_to_a_stable_helper_state_and_package() {
     let package = "OpenAI.Codex_26.820.7780.0_x64__2p2nqsd0c76g0";
     let helper = Path::new(r"C:\Users\Linus Torvalds\.incodex\windows\helper.exe");
-    let state = Path::new(r"C:\Users\Linus Torvalds\.incodex\windows-install.json");
     let mut environment = BTreeMap::new();
     environment.insert(
         "NODE_OPTIONS".to_string(),
         OsString::from(r"--require=C:\Users\Linus Torvalds\.incodex\runtime\bootstrap.cjs"),
     );
-    let registration =
-        WindowsInstalledRuntimeRegistration::new(package, helper, state, environment)
-            .expect("valid installed Runtime registration");
+    let registration = WindowsInstalledRuntimeRegistration::new(package, helper, environment)
+        .expect("valid installed Runtime registration");
 
     assert_eq!(registration.package_full_name(), package);
     assert_eq!(
