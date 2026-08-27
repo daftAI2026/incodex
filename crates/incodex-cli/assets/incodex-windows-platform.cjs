@@ -11,7 +11,6 @@ const BOUNDS_PATTERN = /^-?\d{1,10},-?\d{1,10},\d{1,10},\d{1,10}$/;
 const SIGNAL_PIPE_PATTERN = /^\\\\\.\\pipe\\Incodex-Runtime-(Ready|Closed)-[a-f0-9]{32}$/;
 const RAISE_PIPE = "\\\\.\\pipe\\Incodex-Runtime-Raise";
 const WINDOW_CLOSE_SETTLE_MS = 100;
-const WINDOW_CLOSE_RECHECK_LIMIT = 50;
 const UI_READINESS_RETRY_MS = 250;
 const observedRuntimeWindows = new WeakSet();
 
@@ -67,7 +66,6 @@ function exitAfterLastMainWindowCloses(
   };
   win.on("close", () => {
     const generation = ++closeProbeGeneration;
-    let attempts = 0;
     const observeHidden = () => {
       if (exited || generation !== closeProbeGeneration || hasAnotherMainWindow()) return;
       if (win.isDestroyed?.() === true || win.isVisible?.() === false) {
@@ -75,10 +73,7 @@ function exitAfterLastMainWindowCloses(
         exit(0);
         return;
       }
-      attempts += 1;
-      if (attempts < WINDOW_CLOSE_RECHECK_LIMIT) {
-        schedule(observeHidden, WINDOW_CLOSE_SETTLE_MS);
-      }
+      schedule(observeHidden, WINDOW_CLOSE_SETTLE_MS);
     };
     schedule(observeHidden, WINDOW_CLOSE_SETTLE_MS);
   });
