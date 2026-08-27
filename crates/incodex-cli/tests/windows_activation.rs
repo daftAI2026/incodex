@@ -377,6 +377,19 @@ fn transient_registration_survives_launcher_termination_and_recovers_from_a_stab
 }
 
 #[test]
+fn transient_debugger_rejects_a_complete_command_at_the_windows_limit() {
+    let executable = PathBuf::from(format!(r"C:\{}\i.exe", "profile".repeat(40)));
+    let error = transient_debugger_command_line(
+        &executable,
+        "Local\\Incodex-activation-fixture",
+        "OpenAI.Codex_26.820.7780.0_x64__2p2nqsd0c76g0",
+    )
+    .expect_err("an overlong PackageDebugSettings command must fail before registration");
+
+    assert!(error.contains("260 UTF-16"), "{error}");
+}
+
+#[test]
 fn installed_activation_moves_isolation_into_one_authenticated_capability() {
     let user_home = r"C:\Users\林 纳斯\.incodex\sessions\s-one\codex-home";
     let request = WindowsActivationRequest::new(

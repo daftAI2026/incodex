@@ -466,3 +466,37 @@ fn reject_windows_target_selectors(parsed: &ParsedCli) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::windows_registration::WindowsDebugRegistrationKind;
+    use std::path::PathBuf;
+
+    #[test]
+    fn uninstall_plan_prefers_independent_recovery_evidence() {
+        let evidence = WindowsDebugRegistrationEvidence {
+            schema_version: 1,
+            registration_id: "0123456789abcdef0123456789abcdef".to_string(),
+            kind: WindowsDebugRegistrationKind::Installed,
+            package_full_name: "OpenAI.Codex_1.2.3.4_x64__publisher".to_string(),
+            helper_path: PathBuf::from(
+                r"C:\Users\test\.incodex\windows\helpers\fixture\incodex-helper.exe",
+            ),
+            helper_sha256: "0".repeat(64),
+            state_path: PathBuf::from(r"C:\Users\test\.incodex\windows-registration.json"),
+        };
+        let discovered = WindowsCodexApp {
+            package_full_name: "OpenAI.Codex_1.2.3.5_x64__publisher".to_string(),
+            app_user_model_id: "OpenAI.Codex_publisher!App".to_string(),
+            install_location: PathBuf::from(r"C:\Program Files\WindowsApps\current"),
+            executable: PathBuf::from(r"C:\Program Files\WindowsApps\current\ChatGPT.exe"),
+            architecture: "X64".to_string(),
+        };
+
+        assert_eq!(
+            uninstall_plan_package(Some(&discovered), None, Some(&evidence)),
+            evidence.package_full_name
+        );
+    }
+}
