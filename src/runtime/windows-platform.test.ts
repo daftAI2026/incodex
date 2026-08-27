@@ -48,6 +48,33 @@ describe("Windows Runtime lifecycle adapter", () => {
     expect(exits).toEqual([0]);
   });
 
+  test("rechecks readiness after the shared UI mounts asynchronously", async () => {
+    const scheduled: Array<() => void> = [];
+    let inspections = 0;
+    let accepted = 0;
+
+    windowsPlatform.observeRuntimeUiReadiness(
+      { isDestroyed: () => false },
+      async () => ++inspections >= 2,
+      () => accepted++,
+      (callback: () => void, delay: number) => {
+        expect(delay).toBe(250);
+        scheduled.push(callback);
+      },
+    );
+
+    await Promise.resolve();
+    expect(inspections).toBe(1);
+    expect(accepted).toBe(0);
+    expect(scheduled).toHaveLength(1);
+
+    scheduled.shift()?.();
+    await Promise.resolve();
+    expect(inspections).toBe(2);
+    expect(accepted).toBe(1);
+    expect(scheduled).toHaveLength(0);
+  });
+
   test("raises the existing shared window through the native owner pipe", () => {
     type ConnectionHandler = (socket: EventEmitter & { end: (value: string) => void }) => void;
     const connection: { handler?: ConnectionHandler } = {};
