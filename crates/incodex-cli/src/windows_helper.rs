@@ -9,6 +9,9 @@ use sha2::{Digest, Sha256};
 use crate::windows_file::{canonical_regular_file, ensure_regular_file, sha256_file};
 
 const HELPER_NAME: &str = "incodex-helper.exe";
+const TRANSIENT_HELPER_DIRECTORY: &str = "t";
+const TRANSIENT_HELPER_NAME: &str = "i.exe";
+const TRANSIENT_CONTENT_ADDRESS_LEN: usize = 16;
 const DOS_PE_OFFSET: usize = 0x3c;
 const COFF_HEADER_SIZE: usize = 20;
 const OPTIONAL_HEADER_SUBSYSTEM_OFFSET: usize = 68;
@@ -26,6 +29,21 @@ pub fn publish_windows_helper(
     user_root: &Path,
     source: &Path,
 ) -> Result<PublishedWindowsHelper, String> {
+    publish_windows_helper_with_layout(user_root, source, false)
+}
+
+pub fn publish_windows_transient_helper(
+    user_root: &Path,
+    source: &Path,
+) -> Result<PublishedWindowsHelper, String> {
+    publish_windows_helper_with_layout(user_root, source, true)
+}
+
+fn publish_windows_helper_with_layout(
+    user_root: &Path,
+    source: &Path,
+    transient: bool,
+) -> Result<PublishedWindowsHelper, String> {
     let source = canonical_regular_file(source, "Windows helper source")?;
     let helper_bytes = windowless_helper_bytes(&source)?;
     let sha256: String = Sha256::digest(&helper_bytes)
@@ -34,14 +52,23 @@ pub fn publish_windows_helper(
         .collect();
     let user_root = ensure_private_windows_dir(user_root)?;
     let windows_root = ensure_private_windows_dir(&user_root.join("windows"))?;
-    let helpers_root = ensure_private_windows_dir(&windows_root.join("helpers"))?;
-    let release = ensure_private_windows_dir(&helpers_root.join(&sha256))?;
-    let executable = release.join(HELPER_NAME);
+    let (collection, release_name, helper_name) = if transient {
+        (
+            TRANSIENT_HELPER_DIRECTORY,
+            &sha256[..TRANSIENT_CONTENT_ADDRESS_LEN],
+            TRANSIENT_HELPER_NAME,
+        )
+    } else {
+        ("helpers", sha256.as_str(), HELPER_NAME)
+    };
+    let helpers_root = ensure_private_windows_dir(&windows_root.join(collection))?;
+    let release = ensure_private_windows_dir(&helpers_root.join(release_name))?;
+    let executable = release.join(helper_name);
 
     match fs::symlink_metadata(&executable) {
         Ok(_) => verify_helper(&executable, &sha256)?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            publish_helper_file(&release, &helper_bytes, &executable, &sha256)?;
+            publish_helper_file(&release, helper_name, &helper_bytes, &executable, &sha256)?;
         }
         Err(error) => return Err(format!("cannot inspect Windows helper release: {error}")),
     }
@@ -50,11 +77,12 @@ pub fn publish_windows_helper(
 
 fn publish_helper_file(
     release: &Path,
+    helper_name: &str,
     helper_bytes: &[u8],
     executable: &Path,
     expected_hash: &str,
 ) -> Result<(), String> {
-    let temporary = release.join(format!(".{HELPER_NAME}.tmp-{}", std::process::id()));
+    let temporary = release.join(format!(".{helper_name}.tmp-{}", std::process::id()));
     let result = (|| {
         fs::write(&temporary, helper_bytes)
             .map_err(|error| format!("cannot stage Windows helper: {error}"))?;

@@ -32,7 +32,7 @@ use crate::windows_app::{
     WindowsCodexApp,
 };
 use crate::windows_cleanup::cleanup_windows_session_after_shutdown;
-use crate::windows_helper::publish_windows_helper;
+use crate::windows_helper::publish_windows_transient_helper;
 use crate::windows_install_state::{
     acquire_windows_install_state, read_windows_install_state, WindowsInstallPhase,
     WindowsInstallState,
@@ -199,7 +199,8 @@ pub fn prepare_windows_open(
         let transient_bootstrap = publish_windows_activation_bootstrap(user_root)?;
         let helper_source = std::env::current_exe()
             .map_err(|error| format!("cannot locate the running Incodex executable: {error}"))?;
-        let transient_helper = publish_windows_helper(user_root, &helper_source)?.executable;
+        let transient_helper =
+            publish_windows_transient_helper(user_root, &helper_source)?.executable;
         let debug_port = allocate_debug_port()?;
         let args = debug_launch_args(&session.chromium.display().to_string(), debug_port);
         let env = BTreeMap::from([

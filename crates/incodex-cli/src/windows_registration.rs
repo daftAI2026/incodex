@@ -259,11 +259,18 @@ fn validate_evidence(evidence: &WindowsDebugRegistrationEvidence) -> Result<(), 
         .state_path
         .parent()
         .ok_or_else(|| "Windows debugger registration has no Incodex root".to_string())?;
-    let expected_helper = user_root
-        .join("windows")
-        .join("helpers")
-        .join(&evidence.helper_sha256)
-        .join("incodex-helper.exe");
+    let expected_helper = match evidence.kind {
+        WindowsDebugRegistrationKind::Transient => user_root
+            .join("windows")
+            .join("t")
+            .join(&evidence.helper_sha256[..16])
+            .join("i.exe"),
+        WindowsDebugRegistrationKind::Installed => user_root
+            .join("windows")
+            .join("helpers")
+            .join(&evidence.helper_sha256)
+            .join("incodex-helper.exe"),
+    };
     if evidence.helper_path != expected_helper {
         return Err("Windows debugger registration helper path is invalid".to_string());
     }

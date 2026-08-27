@@ -13,7 +13,7 @@ use incodex_cli::windows_activation::{
     windows_installed_debugger_route, windows_transient_debugger_route, WindowsActivationFailure,
     WindowsActivationRequest, WindowsDebuggerRoute, WindowsInstalledRuntimeRegistration,
 };
-use incodex_cli::windows_helper::publish_windows_helper;
+use incodex_cli::windows_helper::publish_windows_transient_helper;
 use incodex_cli::windows_install_state::{
     stage_windows_install_state, transition_windows_install_state, WindowsInstallPhase,
 };
@@ -337,7 +337,7 @@ fn transient_package_registration_keeps_session_environment_behind_the_capabilit
 fn transient_registration_survives_launcher_termination_and_recovers_from_a_stable_helper() {
     let user_root = registration_scratch();
     let package = "OpenAI.Codex_26.820.7780.0_x64__2p2nqsd0c76g0";
-    let helper = publish_windows_helper(
+    let helper = publish_windows_transient_helper(
         &user_root,
         &std::env::current_exe().expect("test helper source"),
     )
