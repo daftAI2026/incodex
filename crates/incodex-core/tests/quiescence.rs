@@ -2,8 +2,8 @@ use std::cell::{Cell, RefCell};
 use std::time::{Duration, Instant};
 
 use incodex_core::quiescence::{
-    request_normal_exit_and_wait_with, QuiescenceClock, QuiescenceError,
-    QUIESCENCE_POLL_INTERVAL, QUIESCENCE_TIMEOUT,
+    request_normal_exit_and_wait_with, QuiescenceClock, QuiescenceError, QUIESCENCE_POLL_INTERVAL,
+    QUIESCENCE_TIMEOUT,
 };
 
 struct FakeClock {
@@ -57,7 +57,12 @@ fn one_normal_request_is_followed_by_shared_bounded_polling() {
     let mut clock = FakeClock::new();
 
     request_normal_exit_and_wait_with(
-        || observations.borrow_mut().next().ok_or("unexpected poll".to_string()),
+        || {
+            observations
+                .borrow_mut()
+                .next()
+                .ok_or("unexpected poll".to_string())
+        },
         |pids| {
             requested.borrow_mut().push(pids.to_vec());
             Ok(())

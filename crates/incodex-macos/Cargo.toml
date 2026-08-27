@@ -8,5 +8,6 @@ repository.workspace = true
 description = "codesign, plist, Launch Services, and quit helpers"
 
 [dependencies]
+incodex-core = { path = "../incodex-core" }
 libc.workspace = true
 serde_json.workspace = true
