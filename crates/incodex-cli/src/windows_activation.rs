@@ -830,13 +830,29 @@ fn quote_windows_argument(argument: &OsStr) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
+    use std::path::Path;
     use std::sync::mpsc;
     use std::thread;
     use std::time::Duration;
 
     use super::{
         acquire_package_activation_lock, activation_manager_failure, cleanup_proof_after_debugging,
+        node_require_option,
     };
+
+    #[test]
+    fn node_require_option_survives_a_spaced_windows_profile_path() {
+        assert_eq!(
+            node_require_option(Path::new(
+                r"C:\Users\Linus Torvalds\.incodex\runtime\bootstrap.cjs"
+            ))
+            .expect("serialize Node preload"),
+            OsString::from(
+                r#"--require="C:/Users/Linus Torvalds/.incodex/runtime/bootstrap.cjs""#
+            )
+        );
+    }
 
     #[test]
     fn manager_creation_failure_preserves_debug_restoration_uncertainty() {
