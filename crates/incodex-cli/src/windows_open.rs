@@ -212,6 +212,33 @@ where
         + Send
         + 'static,
 {
+    execute_windows_open_with_visibility(plan, launch, inject, |process_tree| {
+        process_tree.has_visible_window()
+    })
+}
+
+fn execute_windows_open_with_visibility<L, F, V>(
+    plan: WindowsOpenPlan,
+    launch: L,
+    inject: F,
+    has_visible_window: V,
+) -> WindowsOpenOutcome
+where
+    L: FnOnce(
+        &WindowsOpenPlan,
+    ) -> Result<crate::windows_process::WindowsProcessTree, WindowsActivationFailure>,
+    F: FnOnce(
+            u16,
+            InjectionOptions,
+            Arc<AtomicBool>,
+            Arc<AtomicBool>,
+            Arc<AtomicBool>,
+            Arc<WindowsCdpOwnershipGuard>,
+        ) -> Result<WindowsMonitorWorkers, String>
+        + Send
+        + 'static,
+    V: FnMut(&crate::windows_process::WindowsProcessTree) -> std::io::Result<bool>,
+{
     let process_tree = match launch(&plan) {
         Ok(process_tree) => process_tree,
         Err(error) => {
@@ -223,7 +250,7 @@ where
             };
         }
     };
-    run_windows_open_lifecycle(plan, process_tree, inject)
+    run_windows_open_lifecycle(plan, process_tree, inject, has_visible_window)
 }
 
 fn launch_windows_open(
@@ -235,10 +262,11 @@ fn launch_windows_open(
     activate_packaged_kill_on_drop(&request)
 }
 
-fn run_windows_open_lifecycle<F>(
+fn run_windows_open_lifecycle<F, V>(
     plan: WindowsOpenPlan,
     mut process_tree: crate::windows_process::WindowsProcessTree,
     inject: F,
+    mut has_visible_window: V,
 ) -> WindowsOpenOutcome
 where
     F: FnOnce(
@@ -251,6 +279,7 @@ where
         ) -> Result<WindowsMonitorWorkers, String>
         + Send
         + 'static,
+    V: FnMut(&crate::windows_process::WindowsProcessTree) -> std::io::Result<bool>,
 {
     let mut spinner = crate::spinner::Spinner::start(UI_READY_WAIT_MESSAGE);
     let ownership_guard = match wait_for_owned_listener(&mut process_tree, plan.debug_port) {
@@ -344,37 +373,35 @@ where
                 }
             }
         }
-        if ui_ready {
-            match process_tree.has_visible_window() {
-                Ok(visible) if window_lifecycle.should_close(visible, Instant::now()) => {
-                    match process_tree.terminate_successfully() {
-                        Ok(status) => {
-                            break (
-                                WindowsOpenProcessResult::Exited(status.code().unwrap_or(0)),
-                                Ok(()),
-                            );
-                        }
-                        Err(error) => {
-                            let reason = format!(
-                                "cannot prove Windows Job shutdown after its visible window closed: {error}"
-                            );
-                            break (
-                                WindowsOpenProcessResult::ProcessStateUnknown(reason.clone()),
-                                Err(reason),
-                            );
-                        }
+        match has_visible_window(&process_tree) {
+            Ok(visible) if window_lifecycle.should_close(visible, Instant::now()) => {
+                match process_tree.terminate_successfully() {
+                    Ok(status) => {
+                        break (
+                            WindowsOpenProcessResult::Exited(status.code().unwrap_or(0)),
+                            Ok(()),
+                        );
+                    }
+                    Err(error) => {
+                        let reason = format!(
+                            "cannot prove Windows Job shutdown after its visible window closed: {error}"
+                        );
+                        break (
+                            WindowsOpenProcessResult::ProcessStateUnknown(reason.clone()),
+                            Err(reason),
+                        );
                     }
                 }
-                Ok(_) => {}
-                Err(error) => {
-                    break terminate_with_outcome(
-                        &mut process_tree,
-                        WindowsOpenProcessResult::ProcessStateUnknown(format!(
-                            "cannot inspect isolated Windows window state: {error}"
-                        )),
-                        "Windows visible-window state query failed",
-                    );
-                }
+            }
+            Ok(_) => {}
+            Err(error) => {
+                break terminate_with_outcome(
+                    &mut process_tree,
+                    WindowsOpenProcessResult::ProcessStateUnknown(format!(
+                        "cannot inspect isolated Windows window state: {error}"
+                    )),
+                    "Windows visible-window state query failed",
+                );
             }
         }
         if ui_ready && cdp_failed.load(Ordering::Acquire) {
