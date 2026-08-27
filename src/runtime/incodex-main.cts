@@ -769,17 +769,14 @@ async function attachElectron() {
       return;
     }
     hookWindow(win, source);
-    if (windowsPlatform) {
+    if (windowsPlatform && isIncognito()) {
       windowsPlatform.exitAfterLastMainWindowCloses(
         win,
         () =>
           mainWindows(electron).some(
             (open) => open !== win && !open.isDestroyed() && open.isVisible(),
           ),
-        (code) => {
-          if (isIncognito()) finishIncognito(code);
-          else electron.app.exit(code);
-        },
+        finishIncognito,
       );
     }
     if (!isIncognito()) return;
