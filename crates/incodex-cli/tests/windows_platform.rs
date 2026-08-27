@@ -186,6 +186,31 @@ fn uninstall_reads_durable_state_before_optional_store_discovery() {
 }
 
 #[test]
+fn windows_open_holds_the_install_state_gate_across_selection_and_activation() {
+    let source = include_str!("../src/windows_open.rs");
+    let launch = source
+        .split("fn launch_windows_open(")
+        .nth(1)
+        .expect("Windows open launch boundary");
+    let launch = launch
+        .split("fn run_windows_open_lifecycle")
+        .next()
+        .expect("bounded launch source");
+    let acquired = launch
+        .find("acquire_windows_install_state")
+        .expect("launch acquires the install-state gate");
+    let read = launch
+        .find("read_windows_install_state")
+        .expect("launch reads install state under the gate");
+    let activated = launch
+        .find("activate_packaged")
+        .expect("launch activates while the gate is held");
+
+    assert!(acquired < read);
+    assert!(read < activated);
+}
+
+#[test]
 fn mutating_install_requires_explicit_confirmation_without_a_tty() {
     let profile = scratch_profile();
     let output = run(&["install"], &profile);

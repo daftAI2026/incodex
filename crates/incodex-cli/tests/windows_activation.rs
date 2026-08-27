@@ -280,6 +280,45 @@ fn builds_a_store_activation_request_without_losing_windows_arguments_or_environ
 }
 
 #[test]
+fn transient_package_registration_keeps_session_environment_behind_the_capability_pipe() {
+    let bootstrap = Path::new(
+        r"C:\Users\Linus Torvalds\.incodex\sessions\s-one\incodex-windows-bootstrap.cjs",
+    );
+    let request = WindowsActivationRequest::new(
+        "OpenAI.Codex_26.820.7780.0_x64__2p2nqsd0c76g0",
+        "OpenAI.Codex_2p2nqsd0c76g0!App",
+        [OsString::from(
+            r"--user-data-dir=C:\Users\Linus Torvalds\.incodex\sessions\s-one\chromium",
+        )],
+        BTreeMap::from([
+            (
+                "CODEX_HOME".to_string(),
+                OsString::from(r"C:\Users\Linus Torvalds\.incodex\sessions\s-one\codex-home"),
+            ),
+            (
+                "INCODEX_SESSION_ROOT".to_string(),
+                OsString::from(r"C:\Users\Linus Torvalds\.incodex\sessions\s-one"),
+            ),
+        ]),
+    )
+    .expect("valid activation request")
+    .with_transient_bootstrap(bootstrap)
+    .expect("private transient bootstrap");
+
+    let registered = String::from_utf16_lossy(request.transient_debug_environment());
+    assert!(registered.contains("NODE_OPTIONS="));
+    assert!(registered.contains("incodex-windows-bootstrap.cjs"));
+    assert!(!registered.contains("CODEX_HOME="));
+    assert!(!registered.contains("INCODEX_SESSION_ROOT="));
+
+    let claimed = request
+        .activation_environment(WindowsLaunchMode::Cdp)
+        .expect("build capability response");
+    assert!(claimed.environment.contains_key("CODEX_HOME"));
+    assert!(claimed.environment.contains_key("INCODEX_SESSION_ROOT"));
+}
+
+#[test]
 fn installed_activation_moves_isolation_into_one_authenticated_capability() {
     let user_home = r"C:\Users\林 纳斯\.incodex\sessions\s-one\codex-home";
     let request = WindowsActivationRequest::new(
