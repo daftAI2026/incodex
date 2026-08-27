@@ -15,16 +15,32 @@ use windows_sys::Win32::System::Com::{
 };
 use windows_sys::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
 
+use crate::windows_activation_capability::activation_token_from_command_line;
 use crate::windows_install_state::WindowsInstallState;
 use crate::windows_process::{
-    assign_debugged_process_to_job, resume_debugged_package_process, snapshot_process_ids,
-    WindowsPendingJob, WindowsProcessTree,
+    assign_debugged_process_to_job, process_command_line, resume_debugged_package_process,
+    snapshot_process_ids, WindowsPendingJob, WindowsProcessTree,
 };
 
 const PACKAGE_DEBUGGER_MODE: &str = "__incodex_windows_package_debugger";
 const INSTALLED_DEBUGGER_MODE: &str = "__incodex_windows_installed_debugger";
 const PACKAGE_ACTIVATION_LOCK_NAME: &str = "Local\\Incodex-OpenAI.Codex-Activation";
 const PACKAGE_ACTIVATION_LOCK_TIMEOUT_MS: u32 = 15_000;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WindowsDebuggerRoute {
+    ResumeNormally,
+    AssignToJob(String),
+}
+
+pub fn windows_debugger_route(command_line: &str) -> Result<WindowsDebuggerRoute, String> {
+    match activation_token_from_command_line(command_line)? {
+        Some(token) => Ok(WindowsDebuggerRoute::AssignToJob(format!(
+            "Local\\Incodex-{token}"
+        ))),
+        None => Ok(WindowsDebuggerRoute::ResumeNormally),
+    }
+}
 
 const CLSID_APPLICATION_ACTIVATION_MANAGER: GUID =
     GUID::from_u128(0x45ba127d_10a8_46ea_8ab7_56ea9078943c);
@@ -459,8 +475,20 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
         let thread_id = flag_value(arguments, "-tid")?
             .parse::<u32>()
             .map_err(|_| "Windows installed debugger received an invalid thread id".to_string())?;
-        resume_debugged_package_process(package_full_name, process_id, thread_id)
-            .map_err(|error| format!("Windows installed debugger failed: {error}"))
+        let route = process_command_line(process_id)
+            .ok()
+            .map(|command_line| windows_debugger_route(&command_line))
+            .transpose()?
+            .unwrap_or(WindowsDebuggerRoute::ResumeNormally);
+        match route {
+            WindowsDebuggerRoute::ResumeNormally => {
+                resume_debugged_package_process(package_full_name, process_id, thread_id)
+            }
+            WindowsDebuggerRoute::AssignToJob(job_name) => {
+                assign_debugged_process_to_job(&job_name, package_full_name, process_id, thread_id)
+            }
+        }
+        .map_err(|error| format!("Windows installed debugger failed: {error}"))
     })();
     Some(parsed)
 }
