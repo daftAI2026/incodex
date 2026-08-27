@@ -181,7 +181,7 @@ fn closing_the_primary_window_terminates_background_electron_as_success() {
         },
     );
 
-    assert_eq!(outcome.process, WindowsOpenProcessResult::Exited(0));
+    assert_eq!(outcome.process, WindowsOpenProcessResult::Closed);
     assert!(outcome.ui_ready);
     assert_eq!(outcome.cleanup, WindowsCleanupResult::Removed);
     assert!(monitor_finished.load(Ordering::Acquire));
@@ -210,7 +210,7 @@ fn closing_before_injection_finishes_still_removes_the_session() {
         move |_| Ok(observed.fetch_add(1, Ordering::Relaxed) == 0),
     );
 
-    assert_eq!(outcome.process, WindowsOpenProcessResult::Exited(0));
+    assert_eq!(outcome.process, WindowsOpenProcessResult::Closed);
     assert!(
         !outcome.ui_ready,
         "injection finished before early close won"
@@ -218,6 +218,7 @@ fn closing_before_injection_finishes_still_removes_the_session() {
     assert!(visibility_polls.load(Ordering::Relaxed) > 1);
     assert_eq!(outcome.cleanup, WindowsCleanupResult::Removed);
     assert!(!session_root.exists());
+    assert!(finish_windows_open(outcome).is_ok());
     fs::remove_dir_all(root).expect("remove early-close lifecycle fixture");
 }
 
