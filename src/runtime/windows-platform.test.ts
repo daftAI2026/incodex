@@ -265,6 +265,33 @@ describe("Windows Runtime lifecycle adapter", () => {
     });
   });
 
+  test("accepts an authenticated fast close before Runtime readiness", async () => {
+    const stdout = new EventEmitter() as EventEmitter & { destroy: () => void };
+    stdout.destroy = () => {};
+    const child = new EventEmitter() as EventEmitter & {
+      pid: number;
+      stdout: EventEmitter & { destroy: () => void };
+      unref: () => void;
+    };
+    child.pid = 45;
+    child.stdout = stdout;
+    child.unref = () => {};
+
+    const result = await windowsPlatform.launchIncognito({
+      helperPath: "C:\\Incodex\\incodex.exe",
+      sourceHome: "C:\\Users\\me\\.codex",
+      spawnProcess: () => {
+        queueMicrotask(() => {
+          stdout.emit("data", Buffer.from("closed\n"));
+          child.emit("exit", 0);
+        });
+        return child;
+      },
+    });
+
+    expect(result).toEqual({ ok: true, reason: "closed-before-ready" });
+  });
+
   test("fails closed before spawning on relative or malformed lifecycle input", async () => {
     let spawned = false;
     const spawnProcess = () => {
