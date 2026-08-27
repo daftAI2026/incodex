@@ -38,7 +38,7 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
         return Ok(());
     }
     crate::confirm::require("install", parsed.yes)?;
-    request_official_package_exit_and_wait(&app.package_full_name)?;
+    request_official_package_exit_and_wait(&app.package_full_name, None)?;
     let profile = crate::windows_profile::windows_user_profile()?;
     let user_root = profile.join(".incodex");
     let _registration_gate = acquire_windows_install_state()?;
@@ -225,7 +225,10 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
     }
     crate::confirm::require("uninstall", parsed.yes)?;
     if let Some(package_full_name) = approval.package_full_name.as_deref() {
-        request_official_package_exit_and_wait(package_full_name)?;
+        request_official_package_exit_and_wait(
+            package_full_name,
+            approval.registration_id.as_deref(),
+        )?;
     }
     match uninstall_windows_runtime_approved_with(
         &user_root,
