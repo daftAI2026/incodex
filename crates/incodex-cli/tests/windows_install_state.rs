@@ -138,6 +138,49 @@ fn uninstall_publishes_the_kill_switch_before_waiting_then_disables_once() {
 }
 
 #[test]
+fn uninstall_recovers_after_the_store_replaces_the_registered_package() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let old_package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    let installed = install_windows_runtime_with(
+        &user_root,
+        old_package,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(()),
+    )
+    .expect("install old Store package fixture");
+    transition_windows_install_state(
+        &user_root,
+        installed.epoch,
+        WindowsInstallPhase::RecoveryRequired,
+    )
+    .expect("record the stale debugger recovery state");
+
+    let mut package_checked = false;
+    let removed = uninstall_windows_runtime_with(
+        &user_root,
+        |_| Ok(Vec::new()),
+        |package| {
+            package_checked = true;
+            assert_eq!(package, old_package);
+            Ok(false)
+        },
+        |_| panic!("a package proven absent has no debugger registration to disable"),
+    )
+    .expect("retire the registration for the replaced Store package");
+
+    assert_eq!(removed, WindowsUninstallOutcome::Removed);
+    assert!(package_checked);
+    assert!(
+        read_windows_install_state(&user_root)
+            .expect("read retired state")
+            .is_none()
+    );
+    fs::remove_dir_all(user_root).expect("remove Store upgrade fixture");
+}
+
+#[test]
 fn persists_owned_install_transitions_with_epoch_cas_and_an_early_disable_kill_switch() {
     let user_root = scratch_root();
     let helper = std::env::current_exe().expect("test helper path");
