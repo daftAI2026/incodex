@@ -4,6 +4,79 @@ import { join } from "node:path";
 const bootstrapPath = join(import.meta.dir, "../crates/incodex-cli/assets/incodex-windows-bootstrap.cjs");
 
 describe("Windows Runtime bootstrap", () => {
+  test("claims one tokened process environment before loading the shared Runtime", () => {
+    const bootstrap = require(bootstrapPath) as {
+      attachWindowsRuntime(options: {
+        argv: string[];
+        env: Record<string, string | undefined>;
+        load: (path: string) => void;
+        processType: string;
+        readActivationEnvironment: (pipeName: string) => unknown;
+        runtimeDir: string;
+      }): boolean;
+    };
+    const token = "0123456789abcdef0123456789abcdef";
+    const runtimeDir = "C:\\Users\\test\\.incodex\\runtime\\releases\\0.5.0-releasehash";
+    const env: Record<string, string | undefined> = {};
+    const loaded: string[] = [];
+    const pipes: string[] = [];
+
+    expect(
+      bootstrap.attachWindowsRuntime({
+        argv: [`--incodex-activation-token=${token}`],
+        env,
+        load: (path: string) => loaded.push(path),
+        processType: "browser",
+        readActivationEnvironment(pipeName: string) {
+          pipes.push(pipeName);
+          return {
+            mode: "runtime",
+            environment: {
+              CODEX_HOME: "C:\\Users\\test\\.incodex\\sessions\\one\\codex-home",
+              INCODEX_INCOGNITO: "1",
+            },
+          };
+        },
+        runtimeDir,
+      }),
+    ).toBe(true);
+    expect(pipes).toEqual([
+      `\\\\.\\pipe\\Incodex-Activation-Environment-${token}`,
+    ]);
+    expect(env.CODEX_HOME).toEndWith("sessions\\one\\codex-home");
+    expect(env.INCODEX_INCOGNITO).toBe("1");
+    expect(loaded).toEqual([join(runtimeDir, "incodex-main.cjs")]);
+  });
+
+  test("a tokened CDP process receives isolation without loading a second Runtime", () => {
+    const bootstrap = require(bootstrapPath) as {
+      attachWindowsRuntime(options: {
+        argv: string[];
+        env: Record<string, string | undefined>;
+        load: (path: string) => void;
+        processType: string;
+        readActivationEnvironment: () => unknown;
+      }): boolean;
+    };
+    const loaded: string[] = [];
+    const env: Record<string, string | undefined> = {};
+
+    expect(
+      bootstrap.attachWindowsRuntime({
+        argv: ["--incodex-activation-token=0123456789abcdef0123456789abcdef"],
+        env,
+        load: (path: string) => loaded.push(path),
+        processType: "browser",
+        readActivationEnvironment: () => ({
+          mode: "cdp",
+          environment: { CODEX_HOME: "C:\\isolated" },
+        }),
+      }),
+    ).toBe(true);
+    expect(env.CODEX_HOME).toBe("C:\\isolated");
+    expect(loaded).toEqual([]);
+  });
+
   test("attaches the shared main once in the Owl browser process", () => {
     const bootstrap = require(bootstrapPath) as {
       attachWindowsRuntime(options: {
