@@ -8,8 +8,15 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use incodex_cli::windows_process::{
-    resume_debugged_package_process, running_package_process_ids, spawn_kill_on_drop,
+    process_command_line, resume_debugged_package_process, running_package_process_ids,
+    spawn_kill_on_drop,
 };
+
+#[test]
+fn reads_the_exact_command_line_of_a_live_process() {
+    let command_line = process_command_line(std::process::id()).expect("read current command line");
+    assert!(command_line.contains("windows_process"), "{command_line}");
+}
 use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
 use windows_sys::Win32::System::Threading::{
     GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
