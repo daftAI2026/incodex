@@ -494,11 +494,11 @@ fn run_guardian_lifecycle(
         };
         match windows_runtime_startup_action(authenticated_close, process_status.is_some()) {
             WindowsRuntimeStartupAction::Finish => {
-                return finish_authenticated_close(
-                    &session,
-                    &mut process_tree,
-                    process_status.is_some(),
-                )
+                finish_authenticated_close(&session, &mut process_tree, process_status.is_some())?;
+                println!("closed");
+                return std::io::stdout().flush().map_err(|error| {
+                    format!("cannot report the closed Windows Runtime launch: {error}")
+                });
             }
             WindowsRuntimeStartupAction::FailExited => {
                 return Err(with_shutdown_cleanup(

@@ -283,7 +283,7 @@ describe("Windows Runtime lifecycle adapter", () => {
       spawnProcess: () => {
         queueMicrotask(() => {
           stdout.emit("data", Buffer.from("closed\n"));
-          child.emit("exit", 0);
+          child.emit("close", 0);
         });
         return child;
       },
@@ -336,7 +336,7 @@ describe("Windows Runtime lifecycle adapter", () => {
         writes.push(value);
         queueMicrotask(() => {
           exited = true;
-          child.emit("exit", 0);
+          child.emit("close", 0);
         });
       },
       destroy() {},

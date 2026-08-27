@@ -229,17 +229,19 @@ function launchIncognito(options = {}) {
     child.once("error", () =>
       done({ ok: false, reason: cancellationReason || "spawn-failed" }),
     );
-    child.once("exit", () =>
+    child.once("close", () =>
       done({ ok: false, reason: cancellationReason || "exited-early" }),
     );
     child.stdout.on("data", (chunk) => {
       if (settled) return;
       output = (output + String(chunk)).slice(-32);
-      if (!/(^|\r?\n)ready\r?\n/.test(`\n${output}`)) return;
+      const protocol = `\n${output}`;
+      const closedBeforeReady = /(^|\r?\n)closed\r?\n/.test(protocol);
+      if (!closedBeforeReady && !/(^|\r?\n)ready\r?\n/.test(protocol)) return;
       child.stdin?.destroy?.();
       child.unref();
       child.stdout.destroy();
-      done({ ok: true });
+      done(closedBeforeReady ? { ok: true, reason: "closed-before-ready" } : { ok: true });
     });
   });
 }
