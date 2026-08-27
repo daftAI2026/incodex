@@ -25,6 +25,29 @@ describe("Windows Runtime lifecycle adapter", () => {
     expect(windowsPlatform.markClosed("C:\\Temp\\closed", () => {})).toBe(false);
   });
 
+  test("exits only after the last primary Windows window closes", () => {
+    let closed: (() => void) | undefined;
+    let anotherPrimaryWindow = true;
+    const exits: number[] = [];
+    const win = {
+      on(event: string, callback: () => void) {
+        if (event === "closed") closed = callback;
+      },
+    };
+
+    windowsPlatform.exitAfterLastMainWindowCloses(
+      win,
+      () => anotherPrimaryWindow,
+      (code: number) => exits.push(code),
+    );
+
+    closed?.();
+    expect(exits).toEqual([]);
+    anotherPrimaryWindow = false;
+    closed?.();
+    expect(exits).toEqual([0]);
+  });
+
   test("raises the existing shared window through the native owner pipe", () => {
     type ConnectionHandler = (socket: EventEmitter & { end: (value: string) => void }) => void;
     const connection: { handler?: ConnectionHandler } = {};
