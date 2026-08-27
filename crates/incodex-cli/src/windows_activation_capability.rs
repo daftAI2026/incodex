@@ -7,13 +7,13 @@ use windows_sys::Win32::Security::Cryptography::{
 use windows_sys::Win32::UI::Shell::CommandLineToArgvW;
 
 const TOKEN_PREFIX: &str = "--incodex-activation-token=";
-const DEBUGGER_PIPE_PREFIX: &str = r"\\.\pipe\Incodex-Activation-Debugger-";
+const JOB_PREFIX: &str = r"Local\Incodex-";
 const ENVIRONMENT_PIPE_PREFIX: &str = r"\\.\pipe\Incodex-Activation-Environment-";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowsActivationCapability {
     token: String,
-    debugger_pipe_name: String,
+    job_name: String,
     environment_pipe_name: String,
 }
 
@@ -21,7 +21,7 @@ impl WindowsActivationCapability {
     pub fn create() -> Result<Self, String> {
         let token = random_token()?;
         Ok(Self {
-            debugger_pipe_name: format!("{DEBUGGER_PIPE_PREFIX}{token}"),
+            job_name: format!("{JOB_PREFIX}{token}"),
             environment_pipe_name: format!("{ENVIRONMENT_PIPE_PREFIX}{token}"),
             token,
         })
@@ -35,8 +35,8 @@ impl WindowsActivationCapability {
         format!("{TOKEN_PREFIX}{}", self.token)
     }
 
-    pub fn debugger_pipe_name(&self) -> &str {
-        &self.debugger_pipe_name
+    pub fn job_name(&self) -> &str {
+        &self.job_name
     }
 
     pub fn environment_pipe_name(&self) -> &str {
