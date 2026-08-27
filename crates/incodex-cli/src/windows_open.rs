@@ -23,10 +23,16 @@ use crate::open_presentation::{
 };
 use crate::profile_mask::{resolve_profile_mask, ProfileMask};
 use crate::windows_activation::{
-    activate_packaged_kill_on_drop, WindowsActivationFailure, WindowsActivationRequest,
+    activate_packaged_kill_on_drop, activate_packaged_with_installed_cdp, WindowsActivationFailure,
+    WindowsActivationRequest, WindowsInstalledRuntimeRegistration,
 };
-use crate::windows_app::{discover_codex_package, WindowsCodexApp};
+use crate::windows_app::{
+    discover_codex_package, validate_codex_package_full_name, WindowsCodexApp,
+};
 use crate::windows_cleanup::cleanup_windows_session_after_shutdown;
+use crate::windows_install_state::{
+    read_windows_install_state, WindowsInstallPhase, WindowsInstallState,
+};
 use crate::windows_locale::read_locale_override;
 #[cfg(test)]
 use crate::windows_process::spawn_kill_on_drop;
@@ -91,6 +97,34 @@ pub struct WindowsOpenOutcome {
     pub cleanup: WindowsCleanupResult,
 }
 
+pub fn installed_activation_for_open(
+    state: Option<&WindowsInstallState>,
+    expected_package_full_name: &str,
+) -> Result<Option<WindowsInstalledRuntimeRegistration>, String> {
+    validate_codex_package_full_name(expected_package_full_name)?;
+    let Some(state) = state else {
+        return Ok(None);
+    };
+    if state.package_full_name != expected_package_full_name {
+        return Err(
+            "Windows installed Runtime package does not match the current Store package"
+                .to_string(),
+        );
+    }
+    if !state.desired_enabled()
+        || !matches!(
+            state.phase,
+            WindowsInstallPhase::EnabledUnobserved | WindowsInstallPhase::EnabledObserved
+        )
+    {
+        return Err(format!(
+            "Windows installed Runtime is in {:?}; finish install or uninstall before `incodex open`",
+            state.phase
+        ));
+    }
+    WindowsInstalledRuntimeRegistration::from_install_state(state).map(Some)
+}
+
 pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
     if parsed.app.is_some() {
         return Err(CliFailure::new(
@@ -119,7 +153,12 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
         parsed.avatar.as_deref().map(Path::new),
     )
     .map_err(CliFailure::from)?;
-    let plan = prepare_windows_open(&app, &profile.join(".incodex"), &source_home, profile_mask)
+    let user_root = profile.join(".incodex");
+    let installed_state = read_windows_install_state(&user_root).map_err(CliFailure::from)?;
+    let installed_activation =
+        installed_activation_for_open(installed_state.as_ref(), &app.package_full_name)
+            .map_err(CliFailure::from)?;
+    let plan = prepare_windows_open(&app, &user_root, &source_home, profile_mask)
         .map_err(CliFailure::from)?;
     println!("{}", format_step(OPENING_MESSAGE, None));
     println!(
@@ -131,7 +170,11 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
         format_kv("Home", &plan.session.home.display().to_string(), None)
     );
     println!("{}", format_kv("Session", &plan.session.session_id, None));
-    let outcome = execute_windows_open_with(plan, launch_windows_open, inject_windows_ui);
+    let outcome = execute_windows_open_with(
+        plan,
+        |plan| launch_windows_open(plan, installed_activation.as_ref()),
+        inject_windows_ui,
+    );
     finish_windows_open(outcome)
 }
 
@@ -256,11 +299,15 @@ where
 
 fn launch_windows_open(
     plan: &WindowsOpenPlan,
+    installed_activation: Option<&WindowsInstalledRuntimeRegistration>,
 ) -> Result<crate::windows_process::WindowsProcessTree, WindowsActivationFailure> {
     let request = plan
         .activation_request()
         .map_err(WindowsActivationFailure::before_start)?;
-    activate_packaged_kill_on_drop(&request)
+    match installed_activation {
+        Some(registration) => activate_packaged_with_installed_cdp(&request, registration),
+        None => activate_packaged_kill_on_drop(&request),
+    }
 }
 
 fn run_windows_open_lifecycle<F, V>(

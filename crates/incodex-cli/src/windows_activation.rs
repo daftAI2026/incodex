@@ -18,8 +18,9 @@ use windows_sys::Win32::System::Com::{
 };
 use windows_sys::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
 
-use crate::windows_activation_capability::{
-    activation_capability_from_command_line, WindowsActivationCapability,
+use crate::windows_activation_capability::WindowsActivationCapability;
+pub use crate::windows_activation_capability::{
+    windows_debugger_route, windows_transient_debugger_route, WindowsDebuggerRoute,
 };
 use crate::windows_app::validate_codex_package_full_name;
 use crate::windows_install_state::{read_windows_install_state, WindowsInstallState};
@@ -36,21 +37,6 @@ const INSTALLED_DEBUGGER_MODE: &str = "__incodex_windows_installed_debugger";
 const PACKAGE_ACTIVATION_LOCK_NAME: &str = "Local\\Incodex-OpenAI.Codex-Activation";
 const PACKAGE_ACTIVATION_LOCK_TIMEOUT_MS: u32 = 15_000;
 const ACTIVATION_ENVIRONMENT_TIMEOUT: Duration = Duration::from_secs(15);
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WindowsDebuggerRoute {
-    ResumeNormally,
-    AssignToJob(String),
-}
-
-pub fn windows_debugger_route(command_line: &str) -> Result<WindowsDebuggerRoute, String> {
-    match activation_capability_from_command_line(command_line)? {
-        Some(capability) => Ok(WindowsDebuggerRoute::AssignToJob(
-            capability.job_name().to_string(),
-        )),
-        None => Ok(WindowsDebuggerRoute::ResumeNormally),
-    }
-}
 
 const CLSID_APPLICATION_ACTIVATION_MANAGER: GUID =
     GUID::from_u128(0x45ba127d_10a8_46ea_8ab7_56ea9078943c);
@@ -492,11 +478,24 @@ pub fn activate_packaged_with_installed_runtime(
             "Windows installed Runtime registration does not match the activation package",
         ));
     }
-    activate_packaged_with_capability(request)
+    activate_packaged_with_capability(request, WindowsLaunchMode::Runtime)
+}
+
+pub fn activate_packaged_with_installed_cdp(
+    request: &WindowsActivationRequest,
+    registration: &WindowsInstalledRuntimeRegistration,
+) -> Result<WindowsProcessTree, WindowsActivationFailure> {
+    if request.package_full_name() != registration.package_full_name() {
+        return Err(WindowsActivationFailure::before_start(
+            "Windows installed Runtime registration does not match the activation package",
+        ));
+    }
+    activate_packaged_with_capability(request, WindowsLaunchMode::Cdp)
 }
 
 fn activate_packaged_with_capability(
     request: &WindowsActivationRequest,
+    mode: WindowsLaunchMode,
 ) -> Result<WindowsProcessTree, WindowsActivationFailure> {
     let _activation_lock = acquire_package_activation_lock()?;
     let _apartment = ComApartment::initialize()?;
@@ -505,7 +504,7 @@ fn activate_packaged_with_capability(
     let capability = request.activation_capability()?;
     let pending_job = WindowsPendingJob::create_for_capability(&capability)
         .map_err(|error| format!("cannot create Windows activation Job Object: {error}"))?;
-    let response = request.activation_environment(WindowsLaunchMode::Runtime)?;
+    let response = request.activation_environment(mode)?;
     let mut environment_server =
         ActivationEnvironmentServer::start(&capability, request.package_full_name(), response)?;
     let manager = match ComPtr::create(
@@ -798,8 +797,20 @@ pub fn try_run_package_debugger(arguments: &[String]) -> Option<Result<(), Strin
         let thread_id = flag_value(arguments, "-tid")?
             .parse::<u32>()
             .map_err(|_| "Windows package debugger received an invalid thread id".to_string())?;
-        assign_debugged_process_to_job(job_name, package_full_name, process_id, thread_id)
-            .map_err(|error| format!("Windows package debugger failed: {error}"))
+        let route = process_command_line(process_id)
+            .ok()
+            .map(|command_line| windows_transient_debugger_route(job_name, &command_line))
+            .transpose()?
+            .unwrap_or(WindowsDebuggerRoute::ResumeNormally);
+        match route {
+            WindowsDebuggerRoute::ResumeNormally => {
+                resume_debugged_package_process(package_full_name, process_id, thread_id)
+            }
+            WindowsDebuggerRoute::AssignToJob(job_name) => {
+                assign_debugged_process_to_job(&job_name, package_full_name, process_id, thread_id)
+            }
+        }
+        .map_err(|error| format!("Windows package debugger failed: {error}"))
     })();
     Some(parsed)
 }

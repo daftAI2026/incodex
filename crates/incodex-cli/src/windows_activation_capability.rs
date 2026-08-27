@@ -13,6 +13,12 @@ const JOB_PREFIX: &str = r"Local\Incodex-";
 const ENVIRONMENT_PIPE_PREFIX: &str = r"\\.\pipe\Incodex-Activation-Environment-";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WindowsDebuggerRoute {
+    ResumeNormally,
+    AssignToJob(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowsActivationCapability {
     token: String,
     job_name: String,
@@ -108,6 +114,27 @@ pub fn activation_capability_from_command_line(
     }
     unsafe { LocalFree(argv.cast()) };
     Ok(capability)
+}
+
+pub fn windows_debugger_route(command_line: &str) -> Result<WindowsDebuggerRoute, String> {
+    match activation_capability_from_command_line(command_line)? {
+        Some(capability) => Ok(WindowsDebuggerRoute::AssignToJob(
+            capability.job_name().to_string(),
+        )),
+        None => Ok(WindowsDebuggerRoute::ResumeNormally),
+    }
+}
+
+pub fn windows_transient_debugger_route(
+    expected_job_name: &str,
+    command_line: &str,
+) -> Result<WindowsDebuggerRoute, String> {
+    match windows_debugger_route(command_line)? {
+        WindowsDebuggerRoute::AssignToJob(job_name) if job_name == expected_job_name => {
+            Ok(WindowsDebuggerRoute::AssignToJob(job_name))
+        }
+        _ => Ok(WindowsDebuggerRoute::ResumeNormally),
+    }
 }
 
 fn validate_isolated_user_data_dir(value: &str) -> Result<(), String> {

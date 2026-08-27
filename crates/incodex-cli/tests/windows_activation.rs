@@ -9,14 +9,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use incodex_cli::windows_activation::{
     activate_packaged_kill_on_drop, activate_packaged_with_installed_runtime,
     disable_installed_runtime, enable_installed_runtime, try_run_installed_package_debugger,
-    installed_activation_for_open, try_run_package_debugger, windows_debugger_route,
-    windows_installed_debugger_route, windows_transient_debugger_route, WindowsActivationFailure,
-    WindowsActivationRequest, WindowsDebuggerRoute, WindowsInstalledRuntimeRegistration,
+    try_run_package_debugger, windows_debugger_route, windows_installed_debugger_route,
+    windows_transient_debugger_route, WindowsActivationFailure, WindowsActivationRequest,
+    WindowsDebuggerRoute, WindowsInstalledRuntimeRegistration,
 };
 use incodex_cli::windows_install_state::{
     stage_windows_install_state, transition_windows_install_state, WindowsInstallPhase,
 };
 use incodex_cli::windows_launch::WindowsLaunchMode;
+use incodex_cli::windows_open::installed_activation_for_open;
 
 static STATE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -62,11 +63,8 @@ fn transient_debugger_assigns_only_the_requested_isolated_capability() {
         .to_string();
 
     assert_eq!(
-        windows_transient_debugger_route(
-            &job,
-            &format!("ChatGPT.exe --user-data-dir={requested}")
-        )
-        .expect("route requested activation"),
+        windows_transient_debugger_route(&job, &format!("ChatGPT.exe --user-data-dir={requested}"))
+            .expect("route requested activation"),
         WindowsDebuggerRoute::AssignToJob(job.clone())
     );
     assert_eq!(
@@ -75,11 +73,8 @@ fn transient_debugger_assigns_only_the_requested_isolated_capability() {
         WindowsDebuggerRoute::ResumeNormally
     );
     assert_eq!(
-        windows_transient_debugger_route(
-            &job,
-            &format!("ChatGPT.exe --user-data-dir={other}")
-        )
-        .expect("route unrelated isolated activation"),
+        windows_transient_debugger_route(&job, &format!("ChatGPT.exe --user-data-dir={other}"))
+            .expect("route unrelated isolated activation"),
         WindowsDebuggerRoute::ResumeNormally
     );
 }
@@ -91,7 +86,7 @@ fn direct_open_reuses_an_enabled_installed_registration() {
         "incodex-transient-restoration-{}-{sequence}",
         std::process::id()
     ));
-    let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    let package = "OpenAI.Codex_1.2.3.4_x64__2p2nqsd0c76g0";
     let helper = std::env::current_exe().expect("test helper");
     let staged = stage_windows_install_state(
         &root,
@@ -100,12 +95,9 @@ fn direct_open_reuses_an_enabled_installed_registration() {
         "0.5.0-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     )
     .expect("stage installed state");
-    let pending = transition_windows_install_state(
-        &root,
-        staged.epoch,
-        WindowsInstallPhase::EnablePending,
-    )
-    .expect("record enable pending");
+    let pending =
+        transition_windows_install_state(&root, staged.epoch, WindowsInstallPhase::EnablePending)
+            .expect("record enable pending");
     let enabled = transition_windows_install_state(
         &root,
         pending.epoch,
