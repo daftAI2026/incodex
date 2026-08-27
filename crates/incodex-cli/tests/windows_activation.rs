@@ -7,9 +7,26 @@ use std::path::Path;
 use incodex_cli::windows_activation::{
     activate_packaged_kill_on_drop, activate_packaged_with_installed_runtime,
     disable_installed_runtime, enable_installed_runtime, try_run_installed_package_debugger,
-    try_run_package_debugger, WindowsActivationFailure, WindowsActivationRequest,
-    WindowsInstalledRuntimeRegistration,
+    try_run_package_debugger, windows_debugger_route, WindowsActivationFailure,
+    WindowsActivationRequest, WindowsDebuggerRoute, WindowsInstalledRuntimeRegistration,
 };
+
+#[test]
+fn stable_debugger_routes_only_a_tokened_process_into_the_matching_job() {
+    assert_eq!(
+        windows_debugger_route("ChatGPT.exe codex://new?mode=codex").expect("normal route"),
+        WindowsDebuggerRoute::ResumeNormally
+    );
+    assert_eq!(
+        windows_debugger_route(
+            "ChatGPT.exe --incodex-activation-token=0123456789abcdef0123456789abcdef"
+        )
+        .expect("isolated route"),
+        WindowsDebuggerRoute::AssignToJob(
+            "Local\\Incodex-0123456789abcdef0123456789abcdef".to_string()
+        )
+    );
+}
 use incodex_cli::windows_process::WindowsProcessTree;
 
 #[test]
