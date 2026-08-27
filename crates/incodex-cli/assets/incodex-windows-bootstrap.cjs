@@ -9,6 +9,60 @@ const PACKAGE_NAME = "INCODEX_WINDOWS_PACKAGE_FULL_NAME";
 const STATE_PATH_NAME = "INCODEX_WINDOWS_STATE_PATH";
 const REGISTRATION_PATTERN = /^[a-f0-9]{32}$/;
 const ENABLED_PHASES = new Set(["enabled-unobserved", "enabled-observed"]);
+const ACTIVATION_TOKEN_PREFIX = "--incodex-activation-token=";
+const ACTIVATION_TOKEN_PATTERN = /^[a-f0-9]{32}$/;
+const ACTIVATION_PIPE_PREFIX = "\\\\.\\pipe\\Incodex-Activation-Environment-";
+const ACTIVATION_RESPONSE_LIMIT = 64 * 1024;
+
+function activationToken(argv) {
+  let token = "";
+  for (const argument of argv) {
+    if (typeof argument !== "string" || !argument.startsWith(ACTIVATION_TOKEN_PREFIX)) continue;
+    const value = argument.slice(ACTIVATION_TOKEN_PREFIX.length);
+    if (!ACTIVATION_TOKEN_PATTERN.test(value) || token) {
+      throw new Error("invalid Windows activation token");
+    }
+    token = value;
+  }
+  return token;
+}
+
+function readActivationEnvironment(pipeName) {
+  const descriptor = fs.openSync(pipeName, "r+");
+  try {
+    fs.writeSync(descriptor, "environment\n");
+    const response = fs.readFileSync(descriptor, { encoding: "utf8" });
+    if (Buffer.byteLength(response) > ACTIVATION_RESPONSE_LIMIT) {
+      throw new Error("Windows activation environment is too large");
+    }
+    return JSON.parse(response);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+function claimActivationEnvironment(options, env, token) {
+  const read = options.readActivationEnvironment || readActivationEnvironment;
+  const claimed = read(`${ACTIVATION_PIPE_PREFIX}${token}`);
+  if (
+    !claimed ||
+    typeof claimed !== "object" ||
+    !["runtime", "cdp"].includes(claimed.mode) ||
+    !claimed.environment ||
+    typeof claimed.environment !== "object" ||
+    Array.isArray(claimed.environment)
+  ) {
+    throw new Error("invalid Windows activation environment response");
+  }
+  for (const [name, value] of Object.entries(claimed.environment)) {
+    if (!/^[A-Z][A-Z0-9_]*$/.test(name) || typeof value !== "string" || value.includes("\0")) {
+      throw new Error("invalid Windows activation environment entry");
+    }
+    env[name] = value;
+  }
+  env[BOOTSTRAPPED_NAME] = token;
+  return claimed.mode;
+}
 
 function readInstallState(statePath) {
   return JSON.parse(fs.readFileSync(statePath, "utf8"));
@@ -49,7 +103,18 @@ function ownedInstallState(options, registrationId) {
 
 function attachWindowsRuntime(options = {}) {
   const env = options.env || process.env;
+  const argv = options.argv || process.argv;
   const processType = options.processType || process.type || "";
+  const token = activationToken(argv);
+  if (processType === "browser" && token && !env[BOOTSTRAPPED_NAME]) {
+    const mode = claimActivationEnvironment(options, env, token);
+    if (mode === "runtime") {
+      const runtimeDir = options.runtimeDir || __dirname;
+      const load = options.load || require;
+      load(path.join(runtimeDir, "incodex-main.cjs"));
+    }
+    return true;
+  }
   const registrationId = env[REGISTRATION_NAME] || "";
   const runtimeDir = options.runtimeDir || __dirname;
   if (
