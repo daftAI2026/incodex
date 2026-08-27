@@ -118,6 +118,11 @@ pub fn inject_source_for_locale(locale: Option<&str>) -> String {
 
 pub fn inject_source_for_options(options: &InjectionOptions) -> String {
     let locale = json_string(options.locale.as_deref().unwrap_or(""));
+    let platform = if cfg!(target_os = "windows") {
+        "window.__incodexPlatform=\"win32\";"
+    } else {
+        ""
+    };
     let profile_bootstrap = match &options.profile_mask {
         Some(profile_mask) => format!(
             "(window.top===window&&window.location.href==={})?{}:null",
@@ -127,7 +132,7 @@ pub fn inject_source_for_options(options: &InjectionOptions) -> String {
         None => "null".to_string(),
     };
     format!(
-        "{INJECT_PREFIX}window.__incodexLocale={locale};window.__incodexProfileMask={profile_bootstrap};\n{INJECT_JS}"
+        "{INJECT_PREFIX}window.__incodexLocale={locale};{platform}window.__incodexProfileMask={profile_bootstrap};\n{INJECT_JS}"
     )
 }
 
