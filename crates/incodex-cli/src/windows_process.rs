@@ -23,9 +23,6 @@ use windows_sys::Win32::NetworkManagement::IpHelper::{
     TCP_TABLE_CLASS, TCP_TABLE_OWNER_PID_ALL, TCP_TABLE_OWNER_PID_LISTENER,
 };
 use windows_sys::Win32::Networking::WinSock::AF_INET;
-use windows_sys::Win32::Security::Cryptography::{
-    BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG,
-};
 use windows_sys::Win32::Storage::Packaging::Appx::GetPackageFullName;
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, Thread32First, Thread32Next,
@@ -47,6 +44,8 @@ use windows_sys::Win32::System::Threading::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetWindowThreadProcessId, IsWindowVisible,
 };
+
+use crate::windows_activation_capability::WindowsActivationCapability;
 
 #[derive(Debug)]
 pub struct WindowsProcessTree {
@@ -517,27 +516,14 @@ pub fn spawn_kill_on_drop(command: &mut Command) -> io::Result<WindowsProcessTre
 
 impl WindowsPendingJob {
     pub(crate) fn create() -> io::Result<Self> {
-        let mut random = [0u8; 16];
-        let status = unsafe {
-            BCryptGenRandom(
-                std::ptr::null_mut(),
-                random.as_mut_ptr(),
-                random.len() as u32,
-                BCRYPT_USE_SYSTEM_PREFERRED_RNG,
-            )
-        };
-        if status != 0 {
-            return Err(io::Error::other(format!(
-                "BCryptGenRandom failed with NTSTATUS 0x{:08X}",
-                status as u32
-            )));
-        }
-        let name = format!(
-            "Local\\Incodex-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-            random[0], random[1], random[2], random[3], random[4], random[5], random[6],
-            random[7], random[8], random[9], random[10], random[11], random[12], random[13],
-            random[14], random[15]
-        );
+        let capability = WindowsActivationCapability::create().map_err(io::Error::other)?;
+        Self::create_for_capability(&capability)
+    }
+
+    pub(crate) fn create_for_capability(
+        capability: &WindowsActivationCapability,
+    ) -> io::Result<Self> {
+        let name = capability.job_name().to_string();
         let wide: Vec<u16> = name.encode_utf16().chain([0]).collect();
         Ok(Self {
             job: create_kill_on_close_job(Some(&wide))?,
