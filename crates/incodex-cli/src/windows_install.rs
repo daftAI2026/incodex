@@ -25,6 +25,7 @@ use crate::windows_registration::{
     WindowsDebugRegistrationEvidence,
 };
 use crate::windows_runtime::publish_windows_runtime;
+use crate::windows_system::windows_path_for_display;
 
 pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
     reject_windows_target_selectors(parsed)?;
@@ -171,7 +172,7 @@ fn join_recovery_error(error: String, recovery: Result<WindowsInstallState, Stri
         Ok(state) => format!(
             "{error}; Windows install entered {:?} at {}",
             state.phase,
-            state.state_path.display()
+            windows_path_for_display(&state.state_path)
         ),
         Err(recovery_error) => {
             format!("{error}; Windows install recovery state is unproven: {recovery_error}")
@@ -522,7 +523,7 @@ fn print_plan(action: &str, app: &WindowsCodexApp) {
     println!("{}", format_kv("Package", &app.package_full_name, None));
     println!(
         "{}",
-        format_kv("App", &app.executable.display().to_string(), None)
+        format_kv("App", &windows_path_for_display(&app.executable), None)
     );
     println!(
         "{}",
@@ -545,7 +546,7 @@ fn format_uninstall_plan(
         .unwrap_or("Not recorded");
     let executable = app
         .filter(|app| app.package_full_name == package)
-        .map(|app| app.executable.display().to_string())
+        .map(|app| windows_path_for_display(&app.executable))
         .unwrap_or_else(|| "Unavailable".to_string());
     [
         format_step("Uninstall", None),

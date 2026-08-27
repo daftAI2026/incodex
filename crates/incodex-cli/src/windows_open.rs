@@ -45,6 +45,7 @@ use crate::windows_process::{
 };
 use crate::windows_registration::recover_transient_windows_debug_registration_with;
 use crate::windows_runtime::publish_windows_activation_bootstrap;
+use crate::windows_system::windows_path_for_display;
 use crate::{parse::ParsedCli, CliFailure};
 
 #[derive(Debug)]
@@ -153,7 +154,7 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
         println!("{}", format_kv("Package", &app.package_full_name, None));
         println!(
             "{}",
-            format_kv("Binary", &app.executable.display().to_string(), None)
+            format_kv("Binary", &windows_path_for_display(&app.executable), None)
         );
         println!("{}", format_warn(DRY_RUN_COMPLETE, None));
         return Ok(());
@@ -175,11 +176,11 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
     println!("{}", format_step(OPENING_MESSAGE, None));
     println!(
         "{}",
-        format_kv("Binary", &plan.bin.display().to_string(), None)
+        format_kv("Binary", &windows_path_for_display(&plan.bin), None)
     );
     println!(
         "{}",
-        format_kv("Home", &plan.session.home.display().to_string(), None)
+        format_kv("Home", &windows_path_for_display(&plan.session.home), None,)
     );
     println!("{}", format_kv("Session", &plan.session.session_id, None));
     let outcome = execute_windows_open_with(plan, launch_windows_open, inject_windows_ui);
@@ -242,11 +243,11 @@ pub fn prepare_windows_open(
             WindowsCleanupResult::Removed => Err(error),
             WindowsCleanupResult::Retained { reason } => Err(format!(
                 "{error}; incomplete Windows session retained at {}: {reason}",
-                session.root.display()
+                windows_path_for_display(&session.root)
             )),
             WindowsCleanupResult::Unknown { reason } => Err(format!(
                 "{error}; Windows session cleanup state is unknown at {}: {reason}",
-                session.root.display()
+                windows_path_for_display(&session.root)
             )),
         },
     }

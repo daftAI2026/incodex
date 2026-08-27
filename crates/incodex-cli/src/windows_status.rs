@@ -7,6 +7,7 @@ use crate::parse::ParsedCli;
 use crate::spinner::Spinner;
 use crate::windows_app::{discover_codex_package, WindowsCodexApp};
 use crate::windows_install_state::{read_windows_install_state, WindowsInstallPhase};
+use crate::windows_system::windows_path_for_display;
 use crate::CliFailure;
 
 #[derive(Debug, Serialize)]
@@ -195,7 +196,7 @@ pub(crate) fn format_package_status(report: &WindowsPackageStatus, heading: &str
                 &report
                     .install_location
                     .as_deref()
-                    .map_or_else(|| "unknown".to_string(), |path| path.display().to_string()),
+                    .map_or_else(|| "unknown".to_string(), windows_path_for_display),
                 None,
             ),
             incodex_core::format_kv(
@@ -203,7 +204,7 @@ pub(crate) fn format_package_status(report: &WindowsPackageStatus, heading: &str
                 &report
                     .executable
                     .as_deref()
-                    .map_or_else(|| "unknown".to_string(), |path| path.display().to_string()),
+                    .map_or_else(|| "unknown".to_string(), windows_path_for_display),
                 None,
             ),
             incodex_core::format_kv(

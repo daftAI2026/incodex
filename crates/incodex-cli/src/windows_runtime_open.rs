@@ -43,6 +43,7 @@ use crate::windows_install_state::{
     WindowsInstallState, WindowsInstallStateGuard,
 };
 use crate::windows_process::WindowsProcessTree;
+use crate::windows_system::windows_path_for_display;
 
 pub use crate::windows_runtime_lifecycle::{
     windows_runtime_ready_for_handshake, windows_runtime_shutdown_authorized,
@@ -737,7 +738,7 @@ fn finish_guardian(
         WindowsCleanupResult::Retained { reason } | WindowsCleanupResult::Unknown { reason } => {
             Err(format!(
                 "Windows Runtime session retained at {}: {reason}",
-                session.root.display()
+                windows_path_for_display(&session.root)
             ))
         }
     }
@@ -753,7 +754,7 @@ fn with_shutdown_cleanup(
         WindowsCleanupResult::Retained { reason } | WindowsCleanupResult::Unknown { reason } => {
             format!(
                 "{message}; Windows Runtime session retained at {}: {reason}",
-                session.root.display()
+                windows_path_for_display(&session.root)
             )
         }
     }
@@ -765,7 +766,7 @@ fn with_prepare_cleanup(message: String, session: &WindowsSessionHome) -> String
         WindowsCleanupResult::Retained { reason } | WindowsCleanupResult::Unknown { reason } => {
             format!(
                 "{message}; Windows Runtime session retained at {}: {reason}",
-                session.root.display()
+                windows_path_for_display(&session.root)
             )
         }
     }

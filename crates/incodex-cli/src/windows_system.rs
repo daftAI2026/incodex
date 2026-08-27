@@ -4,6 +4,24 @@ use std::path::{Component, Path, PathBuf};
 
 use windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW;
 
+pub(crate) fn windows_path_for_display(path: &Path) -> String {
+    let value = path.to_string_lossy();
+    if let Some(rest) = value.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    if let Some(rest) = value.strip_prefix(r"\\?\") {
+        let bytes = rest.as_bytes();
+        if bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && matches!(bytes[2], b'\\' | b'/')
+        {
+            return rest.to_string();
+        }
+    }
+    value.into_owned()
+}
+
 pub(crate) fn system_binary_path(relative: impl AsRef<Path>) -> Result<PathBuf, String> {
     let relative = relative.as_ref();
     if relative.as_os_str().is_empty()
