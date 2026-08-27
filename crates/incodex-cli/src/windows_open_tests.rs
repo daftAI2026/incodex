@@ -370,3 +370,54 @@ fn listener_shutdown_immediately_before_process_exit_is_normal() {
     assert!(!session_root.exists());
     fs::remove_dir_all(root).expect("remove lifecycle fixture");
 }
+
+#[test]
+fn clean_process_exit_before_ui_ready_is_a_ui_injection_failure() {
+    let outcome = WindowsOpenOutcome {
+        process: WindowsOpenProcessResult::Exited(0),
+        ui_ready: false,
+        cleanup: WindowsCleanupResult::Removed,
+    };
+
+    let failure = finish_windows_open(outcome).expect_err("UI readiness failure must fail");
+    assert_eq!(failure.exit_code(), 3);
+    assert!(failure.message().contains("UI injection"));
+}
+
+#[test]
+fn retained_and_unknown_cleanup_output_include_the_session_root() {
+    let source = include_str!("windows_open.rs");
+    let outcome = source
+        .split("pub struct WindowsOpenOutcome")
+        .nth(1)
+        .expect("Windows open outcome declaration")
+        .split('}')
+        .next()
+        .expect("bounded Windows open outcome declaration");
+    assert!(
+        outcome.contains("session_root"),
+        "Windows open outcome must retain the session root for cleanup reporting"
+    );
+
+    let finish = source
+        .split("fn finish_windows_open")
+        .nth(1)
+        .expect("Windows open cleanup presenter");
+    let retained_start = finish
+        .find("WindowsCleanupResult::Retained")
+        .expect("retained cleanup branch");
+    let unknown_start = finish
+        .find("WindowsCleanupResult::Unknown")
+        .expect("unknown cleanup branch");
+    let process_start = finish
+        .find("match outcome.process")
+        .expect("process result branch");
+    assert!(
+        finish[retained_start..unknown_start].contains("session_root"),
+        "retained cleanup output must include the session root"
+    );
+    assert!(
+        finish[unknown_start..process_start].contains("session_root"),
+        "unknown cleanup output must include the session root"
+    );
+}

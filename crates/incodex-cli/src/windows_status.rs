@@ -224,9 +224,12 @@ pub(crate) fn format_package_status(report: &WindowsPackageStatus, heading: &str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::windows_helper::publish_windows_helper;
     use crate::windows_install_state::{
-        stage_windows_install_state, transition_windows_install_state,
+        stage_windows_install_state, transition_windows_install_state, WindowsInstallState,
     };
+    use crate::windows_registration::stage_installed_windows_debug_registration;
+    use crate::windows_runtime::publish_windows_runtime;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static STATUS_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -287,5 +290,82 @@ mod tests {
         assert!(!report.installed);
         assert_eq!(report.package_full_name.as_deref(), Some(old_package));
         std::fs::remove_dir_all(user_root).expect("remove stale status fixture");
+    }
+
+    fn enabled_install_fixture(
+        user_root: &std::path::Path,
+        with_registration: bool,
+    ) -> (WindowsInstallState, std::path::PathBuf) {
+        let runtime = publish_windows_runtime(user_root).expect("publish fixture Runtime");
+        let runtime_release = runtime
+            .release_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("fixture Runtime release name");
+        let helper_source = std::env::current_exe().expect("test helper source");
+        let helper =
+            publish_windows_helper(user_root, &helper_source).expect("publish fixture helper");
+        let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+        let staged =
+            stage_windows_install_state(user_root, package, &helper.executable, runtime_release)
+                .expect("stage fixture install state");
+        let pending = transition_windows_install_state(
+            user_root,
+            staged.epoch,
+            WindowsInstallPhase::EnablePending,
+        )
+        .expect("record fixture enable intent");
+        if with_registration {
+            stage_installed_windows_debug_registration(user_root, &pending)
+                .expect("stage fixture registration evidence");
+        }
+        let enabled = transition_windows_install_state(
+            user_root,
+            pending.epoch,
+            WindowsInstallPhase::EnabledUnobserved,
+        )
+        .expect("record fixture enabled state");
+        (enabled, runtime.release_dir)
+    }
+
+    #[test]
+    fn enabled_state_without_registration_is_not_reported_as_healthy() {
+        let sequence = STATUS_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let user_root = std::env::temp_dir().join(format!(
+            "incodex-windows-status-registration-{}-{sequence}",
+            std::process::id()
+        ));
+        let (state, _) = enabled_install_fixture(&user_root, false);
+
+        let report = WindowsIntegrationStatus::inspect(&user_root, Some(&state.package_full_name))
+            .expect("inspect missing registration");
+        let text = format_integration_status(&report);
+
+        assert!(
+            !report.installed,
+            "missing registration was reported installed"
+        );
+        assert!(text.to_ascii_lowercase().contains("registration"), "{text}");
+        std::fs::remove_dir_all(user_root).expect("remove registration fixture");
+    }
+
+    #[test]
+    fn tampered_runtime_is_not_reported_as_healthy() {
+        let sequence = STATUS_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let user_root = std::env::temp_dir().join(format!(
+            "incodex-windows-status-runtime-{}-{sequence}",
+            std::process::id()
+        ));
+        let (state, release_dir) = enabled_install_fixture(&user_root, true);
+        std::fs::write(release_dir.join("incodex-main.cjs"), b"tampered")
+            .expect("tamper fixture Runtime");
+
+        let report = WindowsIntegrationStatus::inspect(&user_root, Some(&state.package_full_name))
+            .expect("inspect tampered Runtime");
+        let text = format_integration_status(&report);
+
+        assert!(!report.installed, "tampered Runtime was reported installed");
+        assert!(text.to_ascii_lowercase().contains("runtime"), "{text}");
+        std::fs::remove_dir_all(user_root).expect("remove Runtime fixture");
     }
 }

@@ -211,6 +211,57 @@ fn windows_open_holds_the_install_state_gate_across_selection_and_activation() {
 }
 
 #[test]
+fn windows_open_dry_run_resolves_and_reports_profile_mask() {
+    let profile = scratch_profile();
+    let baseline = run(&["open", "--dry-run"], &profile);
+    if !baseline.status.success() {
+        let stderr = text(&baseline.stderr);
+        assert!(
+            stderr.contains("Microsoft Store package")
+                || stderr.contains("Windows package query failed"),
+            "unexpected package discovery failure: {stderr}"
+        );
+        return;
+    }
+
+    fs::create_dir_all(&profile).expect("create avatar fixture directory");
+    let avatar = profile.join("avatar.png");
+    fs::write(&avatar, b"\x89PNG\r\n\x1a\nfixture").expect("write avatar fixture");
+    let avatar = avatar.to_string_lossy().into_owned();
+    let missing_avatar = profile.join("missing-avatar.png");
+    let missing_avatar = missing_avatar.to_string_lossy().into_owned();
+
+    let invalid = run(
+        &["open", "--dry-run", "--mask", "--avatar", &missing_avatar],
+        &profile,
+    );
+    assert_eq!(invalid.status.code(), Some(1), "{}", text(&invalid.stdout));
+    assert!(
+        text(&invalid.stderr).contains("cannot open avatar file"),
+        "{}",
+        text(&invalid.stderr)
+    );
+
+    let valid = run(
+        &[
+            "open",
+            "--dry-run",
+            "--mask",
+            "--name",
+            "Temporary",
+            "--avatar",
+            &avatar,
+        ],
+        &profile,
+    );
+    assert!(valid.status.success(), "{}", text(&valid.stderr));
+    let stdout = text(&valid.stdout);
+    assert!(stdout.contains("Profile"), "{stdout}");
+    assert!(stdout.contains("Temporary"), "{stdout}");
+    assert!(!profile.join(".incodex").exists(), "dry-run created state");
+}
+
+#[test]
 fn mutating_install_requires_explicit_confirmation_without_a_tty() {
     let profile = scratch_profile();
     let output = run(&["install"], &profile);
