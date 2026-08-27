@@ -1093,8 +1093,22 @@ mod tests {
 
     use super::{
         acquire_package_activation_lock, activation_manager_failure, cleanup_proof_after_debugging,
-        node_require_option,
+        installed_debugger_route_from_state, node_require_option, WindowsDebuggerRoute,
     };
+
+    #[test]
+    fn unreadable_installed_state_resumes_the_registered_package() {
+        let package = "OpenAI.Codex_26.820.9563.0_x64__2p2nqsd0c76g0";
+        let (selected_package, route) = installed_debugger_route_from_state(
+            Err("fixture state is missing".to_string()),
+            package,
+            Some(r"ChatGPT.exe --user-data-dir=C:\Users\test\.incodex\sessions\s-one\chromium"),
+        )
+        .expect("fall back to the registered package evidence");
+
+        assert_eq!(selected_package, package);
+        assert_eq!(route, WindowsDebuggerRoute::ResumeNormally);
+    }
 
     #[test]
     fn node_require_option_survives_a_spaced_windows_profile_path() {

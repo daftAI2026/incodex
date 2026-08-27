@@ -40,6 +40,7 @@ fn help_and_version_are_available_without_creating_state() {
     assert!(help_text.contains("Usage:\n  incodex"));
     assert!(help_text.contains("Windows"));
     assert!(help_text.contains("Microsoft Store"));
+    assert!(help_text.contains("Unsupported source preview"));
     assert!(help_text.contains("Enable the hat-glasses control"));
     assert!(help_text.contains("Remove the Windows Runtime integration"));
     assert!(!help_text.contains("install      Not available"));
@@ -63,6 +64,10 @@ fn help_and_version_are_available_without_creating_state() {
         );
         let command_help_text = text(&command_help.stdout);
         assert!(command_help_text.contains("Windows"), "{command_help_text}");
+        assert!(
+            command_help_text.contains("Unsupported source preview"),
+            "{command_help_text}"
+        );
         assert!(
             !command_help_text.contains(forbidden),
             "{command_help_text}"
