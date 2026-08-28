@@ -41,6 +41,8 @@ fn stages_and_enables_the_installed_runtime_only_after_proving_codex_is_closed()
         package,
         &helper,
         |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
         |registration| {
             enabled = true;
             assert_eq!(registration.package_full_name(), package);
@@ -66,6 +68,8 @@ fn stages_and_enables_the_installed_runtime_only_after_proving_codex_is_closed()
         package,
         &helper,
         |_| Ok(vec![42]),
+        |_| Ok(false),
+        |_| Ok(()),
         |_| panic!("running package must block enable"),
     )
     .expect_err("running Codex must block install");
@@ -78,6 +82,8 @@ fn stages_and_enables_the_installed_runtime_only_after_proving_codex_is_closed()
         package,
         &helper,
         |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
         |_| Err("fixture enable uncertainty".to_string()),
     )
     .expect_err("uncertain enable must fail");
@@ -95,8 +101,16 @@ fn uninstall_publishes_the_kill_switch_before_waiting_then_disables_once() {
     let user_root = scratch_root();
     let helper = std::env::current_exe().expect("test helper path");
     let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
-    install_windows_runtime_with(&user_root, package, &helper, |_| Ok(Vec::new()), |_| Ok(()))
-        .expect("install fixture Runtime");
+    install_windows_runtime_with(
+        &user_root,
+        package,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .expect("install fixture Runtime");
 
     let waiting = uninstall_windows_runtime_with(
         &user_root,
@@ -146,9 +160,16 @@ fn uninstall_disables_the_registered_package_when_the_helper_was_removed() {
     let user_root = scratch_root();
     let helper = std::env::current_exe().expect("test helper path");
     let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
-    let installed =
-        install_windows_runtime_with(&user_root, package, &helper, |_| Ok(Vec::new()), |_| Ok(()))
-            .expect("install fixture Runtime");
+    let installed = install_windows_runtime_with(
+        &user_root,
+        package,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .expect("install fixture Runtime");
     fs::remove_file(&installed.helper_path).expect("remove published helper fixture");
     assert!(
         read_windows_install_state(&user_root).is_err(),
@@ -185,8 +206,16 @@ fn uninstall_uses_independent_registration_evidence_when_install_state_is_missin
     let user_root = scratch_root();
     let helper = std::env::current_exe().expect("test helper path");
     let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
-    install_windows_runtime_with(&user_root, package, &helper, |_| Ok(Vec::new()), |_| Ok(()))
-        .expect("install fixture Runtime");
+    install_windows_runtime_with(
+        &user_root,
+        package,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .expect("install fixture Runtime");
     assert!(
         user_root.join("windows-registration.json").is_file(),
         "install did not persist independent registration evidence"
@@ -217,16 +246,30 @@ fn uninstall_refuses_a_registration_replaced_after_approval() {
     let user_root = scratch_root();
     let helper = std::env::current_exe().expect("test helper path");
     let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
-    let first =
-        install_windows_runtime_with(&user_root, package, &helper, |_| Ok(Vec::new()), |_| Ok(()))
-            .expect("install first registration");
+    let first = install_windows_runtime_with(
+        &user_root,
+        package,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .expect("install first registration");
     let approved =
         capture_windows_uninstall_approval(&user_root).expect("capture displayed target");
     uninstall_windows_runtime_with(&user_root, |_| Ok(Vec::new()), |_| Ok(true), |_| Ok(()))
         .expect("replace the approved registration");
-    let replacement =
-        install_windows_runtime_with(&user_root, package, &helper, |_| Ok(Vec::new()), |_| Ok(()))
-            .expect("install replacement registration");
+    let replacement = install_windows_runtime_with(
+        &user_root,
+        package,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .expect("install replacement registration");
     assert_ne!(first.registration_id, replacement.registration_id);
 
     let error = uninstall_windows_runtime_approved_with(
@@ -256,8 +299,16 @@ fn uninstall_removes_malformed_install_state_after_disabling_proven_registration
     let user_root = scratch_root();
     let helper = std::env::current_exe().expect("test helper path");
     let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
-    install_windows_runtime_with(&user_root, package, &helper, |_| Ok(Vec::new()), |_| Ok(()))
-        .expect("install fixture Runtime");
+    install_windows_runtime_with(
+        &user_root,
+        package,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .expect("install fixture Runtime");
     fs::write(user_root.join("windows-install.json"), b"{").expect("corrupt primary install state");
 
     let mut disabled = false;
@@ -288,6 +339,8 @@ fn uninstall_recovers_after_the_store_replaces_the_registered_package() {
         old_package,
         &helper,
         |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
         |_| Ok(()),
     )
     .expect("install old Store package fixture");
@@ -330,6 +383,11 @@ fn install_replaces_a_stale_store_generation() {
         old_package,
         &helper,
         |_| Ok(Vec::new()),
+        |package| {
+            assert_eq!(package, old_package);
+            Ok(false)
+        },
+        |_| panic!("an absent stale package must not be disabled"),
         |_| Ok(()),
     )
     .expect("install old Store generation");
@@ -339,6 +397,8 @@ fn install_replaces_a_stale_store_generation() {
         new_package,
         &helper,
         |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
         |_| Ok(()),
     )
     .expect("replace stale Store generation");
@@ -346,6 +406,90 @@ fn install_replaces_a_stale_store_generation() {
     assert_eq!(replacement.package_full_name, new_package);
     assert_eq!(replacement.phase, WindowsInstallPhase::EnabledUnobserved);
     fs::remove_dir_all(user_root).expect("remove Store replacement fixture");
+}
+
+#[test]
+fn install_disables_a_stale_generation_that_is_still_registered() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let old_package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    let new_package = "OpenAI.Codex_1.2.3.5_x64__publisher";
+    install_windows_runtime_with(
+        &user_root,
+        old_package,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .expect("install old Store generation");
+
+    let mut disabled = 0;
+    let replacement = install_windows_runtime_with(
+        &user_root,
+        new_package,
+        &helper,
+        |_| Ok(Vec::new()),
+        |package| {
+            assert_eq!(package, old_package);
+            Ok(true)
+        },
+        |package| {
+            assert_eq!(package, old_package);
+            disabled += 1;
+            Ok(())
+        },
+        |registration| {
+            assert_eq!(registration.package_full_name(), new_package);
+            Ok(())
+        },
+    )
+    .expect("disable old registration and install new generation");
+
+    assert_eq!(disabled, 1);
+    assert_eq!(replacement.package_full_name, new_package);
+    fs::remove_dir_all(user_root).expect("remove registered Store replacement fixture");
+}
+
+#[test]
+fn install_keeps_a_running_stale_store_generation() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let old_package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    let new_package = "OpenAI.Codex_1.2.3.5_x64__publisher";
+    let old = install_windows_runtime_with(
+        &user_root,
+        old_package,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .expect("install old Store generation");
+
+    let error = install_windows_runtime_with(
+        &user_root,
+        new_package,
+        &helper,
+        |package| {
+            assert_eq!(package, old_package);
+            Ok(vec![42])
+        },
+        |_| panic!("running old package must block package inspection"),
+        |_| panic!("running old package must block disable"),
+        |_| panic!("running old package must block new enable"),
+    )
+    .expect_err("running old Store generation must block replacement");
+
+    assert!(error.contains("previous Codex Store generation"), "{error}");
+    let retained = read_windows_install_state(&user_root)
+        .expect("read retained old state")
+        .expect("old state remains");
+    assert_eq!(retained.registration_id, old.registration_id);
+    assert_eq!(retained.phase, WindowsInstallPhase::DisableRequested);
+    fs::remove_dir_all(user_root).expect("remove running Store replacement fixture");
 }
 
 #[test]

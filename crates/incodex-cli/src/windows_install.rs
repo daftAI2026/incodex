@@ -52,6 +52,8 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
         &app.package_full_name,
         &helper,
         running_package_process_ids,
+        codex_package_full_name_is_installed,
+        disable_installed_runtime,
         enable_installed_runtime,
     )?;
     println!(
@@ -69,23 +71,47 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
     Ok(())
 }
 
-pub fn install_windows_runtime_with<R, E>(
+pub fn install_windows_runtime_with<R, P, D, E>(
     user_root: &Path,
     package_full_name: &str,
     helper_source: &Path,
-    running_package_processes: R,
+    mut running_package_processes: R,
+    mut package_is_installed: P,
+    mut disable: D,
     enable: E,
 ) -> Result<WindowsInstallState, String>
 where
-    R: FnOnce(&str) -> Result<Vec<u32>, std::io::Error>,
+    R: FnMut(&str) -> Result<Vec<u32>, std::io::Error>,
+    P: FnMut(&str) -> Result<bool, String>,
+    D: FnMut(&str) -> Result<(), String>,
     E: FnOnce(&WindowsInstalledRuntimeRegistration) -> Result<(), String>,
 {
     let _transaction = acquire_windows_install_state()?;
     if let Some(existing) = read_windows_install_state(user_root)? {
-        return Err(format!(
-            "Windows Runtime already has durable state {:?} for {}; uninstall or recover it before installing again",
-            existing.phase, existing.package_full_name
-        ));
+        if existing.package_full_name == package_full_name {
+            return Err(format!(
+                "Windows Runtime already has durable state {:?} for {}; uninstall or recover it before installing again",
+                existing.phase, existing.package_full_name
+            ));
+        }
+        match uninstall_windows_runtime_locked_with(
+            user_root,
+            &mut running_package_processes,
+            &mut package_is_installed,
+            &mut disable,
+        )? {
+            WindowsUninstallOutcome::Removed | WindowsUninstallOutcome::NotInstalled => {}
+            WindowsUninstallOutcome::CloseRequired { process_ids } => {
+                return Err(format!(
+                    "close the previous Codex Store generation before replacing its Windows Runtime registration (running package PIDs: {})",
+                    process_ids
+                        .iter()
+                        .map(u32::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
+        }
     }
     let running = running_package_processes(package_full_name)
         .map_err(|error| format!("cannot inspect running Windows Codex processes: {error}"))?;
@@ -316,9 +342,9 @@ pub fn uninstall_windows_runtime_approved_with<R, P, D>(
     disable: D,
 ) -> Result<WindowsUninstallOutcome, String>
 where
-    R: FnOnce(&str) -> Result<Vec<u32>, std::io::Error>,
-    P: FnOnce(&str) -> Result<bool, String>,
-    D: FnOnce(&str) -> Result<(), String>,
+    R: FnMut(&str) -> Result<Vec<u32>, std::io::Error>,
+    P: FnMut(&str) -> Result<bool, String>,
+    D: FnMut(&str) -> Result<(), String>,
 {
     let _transaction = acquire_windows_install_state()?;
     let current_state = read_windows_install_state_for_uninstall(user_root);
@@ -330,11 +356,14 @@ where
                 .to_string(),
         );
     }
-    uninstall_windows_runtime_with(
+    let mut running_package_processes = running_package_processes;
+    let mut package_is_installed = package_is_installed;
+    let mut disable = disable;
+    uninstall_windows_runtime_locked_with(
         user_root,
-        running_package_processes,
-        package_is_installed,
-        disable,
+        &mut running_package_processes,
+        &mut package_is_installed,
+        &mut disable,
     )
 }
 
@@ -345,11 +374,33 @@ pub fn uninstall_windows_runtime_with<R, P, D>(
     disable: D,
 ) -> Result<WindowsUninstallOutcome, String>
 where
-    R: FnOnce(&str) -> Result<Vec<u32>, std::io::Error>,
-    P: FnOnce(&str) -> Result<bool, String>,
-    D: FnOnce(&str) -> Result<(), String>,
+    R: FnMut(&str) -> Result<Vec<u32>, std::io::Error>,
+    P: FnMut(&str) -> Result<bool, String>,
+    D: FnMut(&str) -> Result<(), String>,
 {
     let _transaction = acquire_windows_install_state()?;
+    let mut running_package_processes = running_package_processes;
+    let mut package_is_installed = package_is_installed;
+    let mut disable = disable;
+    uninstall_windows_runtime_locked_with(
+        user_root,
+        &mut running_package_processes,
+        &mut package_is_installed,
+        &mut disable,
+    )
+}
+
+fn uninstall_windows_runtime_locked_with<R, P, D>(
+    user_root: &Path,
+    running_package_processes: &mut R,
+    package_is_installed: &mut P,
+    disable: &mut D,
+) -> Result<WindowsUninstallOutcome, String>
+where
+    R: FnMut(&str) -> Result<Vec<u32>, std::io::Error>,
+    P: FnMut(&str) -> Result<bool, String>,
+    D: FnMut(&str) -> Result<(), String>,
+{
     let state_result = read_windows_install_state_for_uninstall(user_root);
     let evidence_result = read_windows_debug_registration(user_root);
     let mut state = match state_result {
@@ -489,14 +540,14 @@ fn uninstall_windows_registration_without_state<R, P, D>(
     user_root: &Path,
     evidence: Option<WindowsDebugRegistrationEvidence>,
     retire_unreadable_state: bool,
-    running_package_processes: R,
-    package_is_installed: P,
-    disable: D,
+    running_package_processes: &mut R,
+    package_is_installed: &mut P,
+    disable: &mut D,
 ) -> Result<WindowsUninstallOutcome, String>
 where
-    R: FnOnce(&str) -> Result<Vec<u32>, std::io::Error>,
-    P: FnOnce(&str) -> Result<bool, String>,
-    D: FnOnce(&str) -> Result<(), String>,
+    R: FnMut(&str) -> Result<Vec<u32>, std::io::Error>,
+    P: FnMut(&str) -> Result<bool, String>,
+    D: FnMut(&str) -> Result<(), String>,
 {
     let Some(evidence) = evidence else {
         return Ok(WindowsUninstallOutcome::NotInstalled);
