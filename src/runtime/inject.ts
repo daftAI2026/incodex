@@ -359,9 +359,8 @@ function buildButton(search: HTMLElement): HTMLElement {
       event.stopImmediatePropagation();
       setButtonHover(btn, false);
       tooltipLifecycle.trigger();
-      btn.blur();
       void activate().then((completed) => {
-        if (!completed && btn.isConnected) btn.focus();
+        if (completed && btn.isConnected) btn.blur();
       });
     },
     true,
