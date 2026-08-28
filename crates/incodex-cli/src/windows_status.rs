@@ -303,11 +303,13 @@ pub(crate) fn format_package_status(report: &WindowsPackageStatus, heading: &str
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::windows_helper::publish_windows_helper;
+    use crate::windows_helper::{publish_windows_helper, publish_windows_transient_helper};
     use crate::windows_install_state::{
         stage_windows_install_state, transition_windows_install_state, WindowsInstallState,
     };
-    use crate::windows_registration::stage_installed_windows_debug_registration;
+    use crate::windows_registration::{
+        stage_installed_windows_debug_registration, stage_transient_windows_debug_registration,
+    };
     use crate::windows_runtime::publish_windows_runtime;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -453,6 +455,34 @@ mod tests {
         );
         assert!(text.to_ascii_lowercase().contains("recovery"), "{text}");
         assert!(text.to_ascii_lowercase().contains("registration"), "{text}");
+    }
+
+    #[test]
+    fn transient_registration_without_primary_state_requires_recovery() {
+        let sequence = STATUS_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let user_root = std::env::temp_dir().join(format!(
+            "incodex-windows-status-recovery-transient-{}-{sequence}",
+            std::process::id()
+        ));
+        let helper_source = std::env::current_exe().expect("test helper source");
+        let helper = publish_windows_transient_helper(&user_root, &helper_source)
+            .expect("publish fixture transient helper");
+        let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+        stage_transient_windows_debug_registration(&user_root, package, &helper.executable)
+            .expect("stage transient registration evidence");
+
+        let inspection = WindowsIntegrationStatus::inspect(&user_root, Some(package));
+        std::fs::remove_dir_all(&user_root).expect("remove transient recovery fixture");
+        let report = inspection.expect("inspect transient registration evidence");
+        let text = format_integration_status(&report);
+
+        assert!(
+            !report.installed,
+            "transient recovery was reported installed"
+        );
+        assert_eq!(report.package_full_name.as_deref(), Some(package));
+        assert!(text.to_ascii_lowercase().contains("transient"), "{text}");
+        assert!(text.to_ascii_lowercase().contains("recovery"), "{text}");
     }
 
     #[test]
