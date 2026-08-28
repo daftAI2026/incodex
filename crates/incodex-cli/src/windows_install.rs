@@ -765,4 +765,51 @@ mod tests {
             "{plan}"
         );
     }
+
+    #[test]
+    fn install_retains_recovery_when_store_generation_changes_during_mutation() {
+        let user_root = std::env::temp_dir().join(format!(
+            "incodex-windows-install-generation-race-{}",
+            std::process::id()
+        ));
+        let helper = std::env::current_exe().expect("test helper source");
+        let expected_package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+        let current_package = "OpenAI.Codex_1.2.3.5_x64__publisher";
+        let mut probes = 0;
+        let mut disable_calls = 0;
+
+        let error = install_windows_runtime_with_package_probe(
+            &user_root,
+            expected_package,
+            &helper,
+            |_| Ok(Vec::new()),
+            |_| Ok(false),
+            |package| {
+                disable_calls += 1;
+                assert_eq!(package, expected_package);
+                Ok(())
+            },
+            |_| Ok(()),
+            || {
+                probes += 1;
+                Ok(if probes < 3 {
+                    expected_package.to_string()
+                } else {
+                    current_package.to_string()
+                })
+            },
+        )
+        .expect_err("Store generation changes must not commit obsolete integration");
+
+        assert!(error.contains("RecoveryRequired"), "{error}");
+        assert!(error.contains("changed during mutation"), "{error}");
+        assert_eq!(disable_calls, 1);
+        let retained = read_windows_install_state(&user_root)
+            .expect("read retained generation-race state")
+            .expect("generation-race state retained");
+        assert_eq!(retained.package_full_name, expected_package);
+        assert_eq!(retained.phase, WindowsInstallPhase::RecoveryRequired);
+        assert!(user_root.join("windows-registration.json").is_file());
+        std::fs::remove_dir_all(user_root).expect("remove generation-race fixture");
+    }
 }
