@@ -61,22 +61,30 @@ impl WindowsIntegrationStatus {
                         .to_string(),
                 );
             }
-            match registration {
-                Ok(Some(evidence)) if registration_matches_install_state(&evidence, &state) => {}
-                Ok(Some(_)) => health_issues.push(
-                    "Windows debugger registration does not match durable install state."
-                        .to_string(),
-                ),
-                Ok(None) => health_issues
-                    .push("Windows debugger registration evidence is missing.".to_string()),
-                Err(error) => health_issues.push(format!(
-                    "Windows debugger registration evidence is unhealthy: {error}"
-                )),
-            }
             if let Err(error) = verify_installed_windows_runtime(user_root, &state.runtime_release)
             {
                 health_issues.push(format!("Windows Runtime is unhealthy: {error}"));
             }
+        }
+        match registration {
+            Ok(Some(evidence)) if registration_matches_install_state(&evidence, &state) => {
+                if !enabled {
+                    health_issues.push(
+                        "Windows debugger registration remains recorded and requires recovery."
+                            .to_string(),
+                    );
+                }
+            }
+            Ok(Some(_)) => health_issues.push(
+                "Windows debugger registration does not match durable install state.".to_string(),
+            ),
+            Ok(None) if enabled => {
+                health_issues.push("Windows debugger registration evidence is missing.".to_string())
+            }
+            Ok(None) => {}
+            Err(error) => health_issues.push(format!(
+                "Windows debugger registration evidence is unhealthy: {error}"
+            )),
         }
         Ok(Self {
             installed: enabled && health_issues.is_empty(),
