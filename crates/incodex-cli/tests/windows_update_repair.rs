@@ -11,9 +11,9 @@ use incodex_cli::windows_install_state::{
     read_windows_install_state, read_windows_update_repair_intent,
 };
 use incodex_cli::windows_update_repair::{
-    classify_package_update, repair_windows_runtime_after_update_with,
-    resume_windows_update_repair_with, PackageUpdateObservation, PackageUpdateOutcome,
-    WindowsUpdateRepairAuthorization,
+    await_package_quiescence_with, classify_package_update,
+    repair_windows_runtime_after_update_with, resume_windows_update_repair_with,
+    PackageUpdateObservation, PackageUpdateOutcome, WindowsUpdateRepairAuthorization,
 };
 
 const FAMILY: &str = "OpenAI.Codex_2p2nqsd0c76g0";
@@ -339,7 +339,12 @@ fn automatic_retry_cannot_reverse_a_completed_uninstall() {
             helper_source: &installed.helper_path,
         },
         NEW_PACKAGE,
-        |package| Ok((package == NEW_PACKAGE).then_some(1234).into_iter().collect()),
+        |package| {
+            Ok((package == NEW_PACKAGE)
+                .then_some(1234)
+                .into_iter()
+                .collect())
+        },
         |_| Ok(false),
         |_| panic!("running target must stop repair before disable"),
         |_| panic!("running target must stop repair before enable"),
@@ -398,7 +403,12 @@ fn automatic_retry_checks_the_target_before_retiring_old_state() {
             helper_source: &installed.helper_path,
         },
         NEW_PACKAGE,
-        |package| Ok((package == NEW_PACKAGE).then_some(1234).into_iter().collect()),
+        |package| {
+            Ok((package == NEW_PACKAGE)
+                .then_some(1234)
+                .into_iter()
+                .collect())
+        },
         |_| Ok(false),
         |_| panic!("running target must stop repair before disable"),
         |_| panic!("running target must stop repair before enable"),
@@ -412,7 +422,12 @@ fn automatic_retry_checks_the_target_before_retiring_old_state() {
         &user_root,
         &intent,
         &installed.helper_path,
-        |package| Ok((package == NEW_PACKAGE).then_some(5678).into_iter().collect()),
+        |package| {
+            Ok((package == NEW_PACKAGE)
+                .then_some(5678)
+                .into_iter()
+                .collect())
+        },
         |_| Ok(false),
         |_| panic!("retry must not disable while target runs"),
         |_| panic!("retry must not enable while target runs"),
@@ -425,4 +440,30 @@ fn automatic_retry_checks_the_target_before_retiring_old_state() {
     assert_eq!(retained.registration_id, installed.registration_id);
 
     fs::remove_dir_all(user_root).expect("remove update repair fixture");
+}
+
+#[test]
+fn auto_relaunched_target_is_waited_by_handle_before_repair() {
+    let mut probes = 0;
+    let mut waited = Vec::new();
+    await_package_quiescence_with(
+        NEW_PACKAGE,
+        |package| {
+            assert_eq!(package, NEW_PACKAGE);
+            probes += 1;
+            Ok(if probes == 1 {
+                vec![42, 84]
+            } else {
+                Vec::new()
+            })
+        },
+        |process_ids| {
+            waited.push(process_ids.to_vec());
+            Ok(())
+        },
+    )
+    .expect("deferred target eventually becomes quiescent");
+
+    assert_eq!(probes, 2);
+    assert_eq!(waited, vec![vec![42, 84]]);
 }
