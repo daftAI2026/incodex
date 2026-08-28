@@ -174,6 +174,7 @@ where
     } = target;
     crate::windows_update_repair::prepare_interrupted_update_repair_with(
         user_root,
+        package_full_name,
         &mut running_package_processes,
         &mut package_is_installed,
         &mut disable,

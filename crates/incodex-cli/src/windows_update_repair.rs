@@ -32,12 +32,13 @@ use crate::windows_app::{
     CODEX_PACKAGE_FAMILY_NAME,
 };
 use crate::windows_install::{
-    install_windows_runtime_locked_with, install_windows_runtime_with,
-    uninstall_windows_runtime_locked_with, WindowsUninstallOutcome,
+    install_windows_runtime_locked_with, uninstall_windows_runtime_locked_with,
+    WindowsUninstallOutcome,
 };
 use crate::windows_install_state::{
     acquire_windows_install_state, read_windows_install_state, read_windows_update_repair_intent,
     retire_windows_update_repair_intent, stage_windows_update_repair_intent, WindowsInstallState,
+    WindowsUpdateRepairIntent,
 };
 use crate::windows_process::strict_running_codex_package_process_ids;
 use crate::windows_system::windows_path_for_display;
@@ -112,6 +113,7 @@ pub struct WindowsUpdateRepairAuthorization<'a> {
 
 pub(crate) fn prepare_interrupted_update_repair_with<R, P, D>(
     user_root: &Path,
+    target_package_full_name: &str,
     running_package_processes: &mut R,
     package_is_installed: &mut P,
     disable: &mut D,
@@ -124,6 +126,7 @@ where
     if read_windows_update_repair_intent(user_root)?.is_none() {
         return Ok(());
     }
+    require_target_quiescent(target_package_full_name, running_package_processes)?;
     match uninstall_windows_runtime_locked_with(
         user_root,
         running_package_processes,
@@ -140,6 +143,89 @@ where
                 .join(", ")
         )),
     }
+}
+
+pub fn resume_windows_update_repair_with<R, P, D, E>(
+    user_root: &Path,
+    expected_intent: &WindowsUpdateRepairIntent,
+    helper_source: &Path,
+    mut running_package_processes: R,
+    mut package_is_installed: P,
+    mut disable: D,
+    enable: E,
+) -> Result<WindowsInstallState, String>
+where
+    R: FnMut(&str) -> Result<Vec<u32>, std::io::Error>,
+    P: FnMut(&str) -> Result<bool, String>,
+    D: FnMut(&str) -> Result<(), String>,
+    E: FnOnce(&WindowsInstalledRuntimeRegistration) -> Result<(), String>,
+{
+    let _transaction = acquire_windows_install_state()?;
+    let current_intent = read_windows_update_repair_intent(user_root)?
+        .ok_or_else(|| "Windows update repair intent changed or was cancelled".to_string())?;
+    if current_intent != *expected_intent || current_intent.helper_path != helper_source {
+        return Err("Windows update repair intent changed or was cancelled".to_string());
+    }
+    require_target_quiescent(
+        &current_intent.target_package_full_name,
+        &mut running_package_processes,
+    )?;
+    match uninstall_windows_runtime_locked_with(
+        user_root,
+        &mut running_package_processes,
+        &mut package_is_installed,
+        &mut disable,
+    )? {
+        WindowsUninstallOutcome::Removed | WindowsUninstallOutcome::NotInstalled => {}
+        WindowsUninstallOutcome::CloseRequired { process_ids } => {
+            return Err(format!(
+                "close Codex before resuming the interrupted Windows update repair (running package PIDs: {})",
+                process_ids
+                    .iter()
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+    }
+    let retained_intent = read_windows_update_repair_intent(user_root)?
+        .ok_or_else(|| "Windows update repair intent changed or was cancelled".to_string())?;
+    if retained_intent != current_intent {
+        return Err("Windows update repair intent changed or was cancelled".to_string());
+    }
+    let installed = install_windows_runtime_locked_with(
+        user_root,
+        &current_intent.target_package_full_name,
+        helper_source,
+        running_package_processes,
+        package_is_installed,
+        disable,
+        enable,
+    )?;
+    retire_windows_update_repair_intent(user_root, Some(&current_intent.operation_id))?;
+    Ok(installed)
+}
+
+fn require_target_quiescent<R>(
+    target_package_full_name: &str,
+    running_package_processes: &mut R,
+) -> Result<(), String>
+where
+    R: FnMut(&str) -> Result<Vec<u32>, std::io::Error>,
+{
+    let running = running_package_processes(target_package_full_name)
+        .map_err(|error| format!("cannot inspect running Windows Codex processes: {error}"))?;
+    if running.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "close Codex before resuming the interrupted Windows update repair (running package PIDs: {})",
+        running
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))
 }
 
 pub fn repair_windows_runtime_after_update_with<R, P, D, E>(
@@ -281,17 +367,17 @@ pub(crate) fn run_update_repair_coordinator(
     let Err(first_error) = repair else {
         return Ok(());
     };
-    let retry_authorized = read_windows_update_repair_intent(&user_root)?.is_some_and(|intent| {
+    let retry_intent = read_windows_update_repair_intent(&user_root)?.filter(|intent| {
         intent.source_registration_id == current.registration_id
             && intent.source_package_full_name == current.package_full_name
             && intent.target_package_full_name == target_package
     });
-    if !retry_authorized {
+    let Some(retry_intent) = retry_intent else {
         return Err(first_error);
-    }
-    install_windows_runtime_with(
+    };
+    resume_windows_update_repair_with(
         &user_root,
-        &target_package,
+        &retry_intent,
         &helper,
         strict_running_codex_package_process_ids,
         codex_package_full_name_is_installed,
