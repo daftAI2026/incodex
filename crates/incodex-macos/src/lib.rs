@@ -6,8 +6,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use incodex_core::quiescence::{request_normal_exit_and_wait_with, QuiescenceError};
-
 mod app_termination;
 mod entitlements;
 mod live_window;
@@ -16,7 +14,6 @@ mod live_window_macos;
 mod session_process;
 mod signature_inspection;
 mod signing;
-pub use incodex_core::quiescence::{QuiescenceClock, QUIESCENCE_POLL_INTERVAL, QUIESCENCE_TIMEOUT};
 #[cfg(test)]
 use live_window::{is_isolated_launch_command, select_live_main_window_bounds, WindowCandidate};
 pub use live_window::{live_main_window_bounds, WindowBounds};
@@ -32,6 +29,11 @@ pub struct PlistInfo {
     pub executable: String,
 }
 
+/// 官方应用退出后的最大等待时间。安装事务不能在进程仍持有 app 文件时开始。
+pub const QUIESCENCE_TIMEOUT: Duration = Duration::from_secs(60);
+/// 退出轮询间隔；足够短以避免把正常退出误判成超时，又不会忙等。
+pub const QUIESCENCE_POLL_INTERVAL: Duration = Duration::from_millis(200);
+
 /// 进程探针只返回 PID 与完整 executable path，不接受 basename 猜测。
 pub trait ProcessProbe {
     fn process_paths(&self) -> Result<Vec<(i32, PathBuf)>, String>;
@@ -40,6 +42,12 @@ pub trait ProcessProbe {
 /// 发送官方 Codex 退出请求的最小接口，测试可替换而不触碰真实 osascript。
 pub trait QuitRequester {
     fn request_quit(&mut self, executable: &Path, pids: &[i32]) -> Result<(), String>;
+}
+
+/// 可注入的单调时钟，避免超时测试依赖真实 60 秒。
+pub trait QuiescenceClock {
+    fn now(&self) -> Instant;
+    fn sleep(&mut self, duration: Duration);
 }
 
 /// 一个 app 的严格 executable 身份与存活检测。
@@ -150,23 +158,29 @@ impl AppQuiescence {
         Q: QuitRequester,
         C: QuiescenceClock,
     {
-        request_normal_exit_and_wait_with(
-            || self.running_pids_with(probe),
-            |pids| {
-                requester
-                    .request_quit(&self.executable, pids)
-                    .map_err(|error| format!("failed to ask official Codex to quit: {error}"))
-            },
-            clock,
-        )
-        .map_err(|error| match error {
-            QuiescenceError::Probe(error) | QuiescenceError::Request(error) => error,
-            QuiescenceError::TimedOut => format!(
-                "timed out waiting for official Codex executable to exit after {} seconds: {}",
-                QUIESCENCE_TIMEOUT.as_secs(),
-                self.executable.display()
-            ),
-        })
+        // 先锁定每个精确 executable PID，没有存活实例就不发退出请求。
+        let pids = self.running_pids_with(probe)?;
+        if pids.is_empty() {
+            return Ok(());
+        }
+        requester
+            .request_quit(&self.executable, &pids)
+            .map_err(|error| format!("failed to ask official Codex to quit: {error}"))?;
+        let deadline = clock.now() + QUIESCENCE_TIMEOUT;
+        loop {
+            let pids = self.running_pids_with(probe)?;
+            if pids.is_empty() {
+                return Ok(());
+            }
+            if clock.now() >= deadline {
+                return Err(format!(
+                    "timed out waiting for official Codex executable to exit after {} seconds: {}",
+                    QUIESCENCE_TIMEOUT.as_secs(),
+                    self.executable.display()
+                ));
+            }
+            clock.sleep(QUIESCENCE_POLL_INTERVAL);
+        }
     }
 }
 

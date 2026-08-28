@@ -3,7 +3,6 @@ pub mod canonical;
 #[cfg(not(target_os = "windows"))]
 pub mod paths;
 pub mod print;
-pub mod quiescence;
 #[cfg(not(target_os = "windows"))]
 pub mod session;
 pub mod session_layout;

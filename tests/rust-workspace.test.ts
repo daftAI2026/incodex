@@ -146,9 +146,6 @@ describe("Rust workspace", () => {
     const ci = read(".github/workflows/ci.yml");
     expect(ci).toContain("bun run test:shared");
     expect(ci).toContain("bun run test:windows");
-    expect(ci).toContain(
-      "cargo test -p incodex-core --test quiescence --release --locked",
-    );
     for (const crate of ["incodex-core", "incodex-cli"]) {
       const directory = join(root, "crates", crate, "tests");
       const suites = readdirSync(directory)

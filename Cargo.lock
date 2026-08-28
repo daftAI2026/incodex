@@ -153,7 +153,6 @@ dependencies = [
 name = "incodex-macos"
 version = "0.5.0"
 dependencies = [
- "incodex-core",
  "libc",
  "serde_json",
 ]
