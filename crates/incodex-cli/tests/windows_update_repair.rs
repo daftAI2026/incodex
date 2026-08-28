@@ -11,8 +11,9 @@ use incodex_cli::windows_install_state::{
     read_windows_install_state, read_windows_update_repair_intent,
 };
 use incodex_cli::windows_update_repair::{
-    classify_package_update, repair_windows_runtime_after_update_with, PackageUpdateObservation,
-    PackageUpdateOutcome, WindowsUpdateRepairAuthorization,
+    classify_package_update, repair_windows_runtime_after_update_with,
+    resume_windows_update_repair_with, PackageUpdateObservation, PackageUpdateOutcome,
+    WindowsUpdateRepairAuthorization,
 };
 
 const FAMILY: &str = "OpenAI.Codex_2p2nqsd0c76g0";
@@ -311,6 +312,117 @@ fn successful_uninstall_cancels_an_interrupted_update_intent() {
             .is_none(),
         "successful uninstall retires update intent"
     );
+
+    fs::remove_dir_all(user_root).expect("remove update repair fixture");
+}
+
+#[test]
+fn automatic_retry_cannot_reverse_a_completed_uninstall() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let installed = install_windows_runtime_with(
+        &user_root,
+        OLD_PACKAGE,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .expect("install old Store generation");
+    repair_windows_runtime_after_update_with(
+        &user_root,
+        WindowsUpdateRepairAuthorization {
+            package_full_name: OLD_PACKAGE,
+            epoch: installed.epoch,
+            registration_id: &installed.registration_id,
+            helper_source: &installed.helper_path,
+        },
+        NEW_PACKAGE,
+        |package| Ok((package == NEW_PACKAGE).then_some(1234).into_iter().collect()),
+        |_| Ok(false),
+        |_| panic!("running target must stop repair before disable"),
+        |_| panic!("running target must stop repair before enable"),
+    )
+    .expect_err("running target leaves a resumable intent");
+    let intent = read_windows_update_repair_intent(&user_root)
+        .expect("read update intent")
+        .expect("update intent remains");
+
+    assert_eq!(
+        uninstall_windows_runtime_with(&user_root, |_| Ok(Vec::new()), |_| Ok(false), |_| Ok(()),)
+            .expect("user uninstall wins"),
+        WindowsUninstallOutcome::Removed,
+    );
+    let error = resume_windows_update_repair_with(
+        &user_root,
+        &intent,
+        &installed.helper_path,
+        |_| panic!("cancelled retry must not inspect processes"),
+        |_| panic!("cancelled retry must not inspect packages"),
+        |_| panic!("cancelled retry must not disable registration"),
+        |_| panic!("cancelled retry must not enable registration"),
+    )
+    .expect_err("cancelled intent must not reinstall");
+    assert!(error.contains("intent changed"), "{error}");
+    assert!(
+        read_windows_install_state(&user_root)
+            .expect("read cancelled install state")
+            .is_none(),
+        "cancelled retry leaves integration uninstalled"
+    );
+
+    fs::remove_dir_all(user_root).expect("remove update repair fixture");
+}
+
+#[test]
+fn automatic_retry_checks_the_target_before_retiring_old_state() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let installed = install_windows_runtime_with(
+        &user_root,
+        OLD_PACKAGE,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .expect("install old Store generation");
+    repair_windows_runtime_after_update_with(
+        &user_root,
+        WindowsUpdateRepairAuthorization {
+            package_full_name: OLD_PACKAGE,
+            epoch: installed.epoch,
+            registration_id: &installed.registration_id,
+            helper_source: &installed.helper_path,
+        },
+        NEW_PACKAGE,
+        |package| Ok((package == NEW_PACKAGE).then_some(1234).into_iter().collect()),
+        |_| Ok(false),
+        |_| panic!("running target must stop repair before disable"),
+        |_| panic!("running target must stop repair before enable"),
+    )
+    .expect_err("running target leaves old registration intact");
+    let intent = read_windows_update_repair_intent(&user_root)
+        .expect("read update intent")
+        .expect("update intent remains");
+
+    let error = resume_windows_update_repair_with(
+        &user_root,
+        &intent,
+        &installed.helper_path,
+        |package| Ok((package == NEW_PACKAGE).then_some(5678).into_iter().collect()),
+        |_| Ok(false),
+        |_| panic!("retry must not disable while target runs"),
+        |_| panic!("retry must not enable while target runs"),
+    )
+    .expect_err("running target blocks retry before mutation");
+    assert!(error.contains("close Codex"), "{error}");
+    let retained = read_windows_install_state(&user_root)
+        .expect("read retained old state")
+        .expect("old state remains");
+    assert_eq!(retained.registration_id, installed.registration_id);
 
     fs::remove_dir_all(user_root).expect("remove update repair fixture");
 }
