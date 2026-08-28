@@ -1,3 +1,4 @@
+use std::path::Path;
 /**
  * [INPUT]: 依赖 windows_app 的可信 Store 包发现、windows_install 的既有事务、
  *          windows_install_state 的 helper/epoch 授权，以及 Windows PackageCatalog 事件。
@@ -22,20 +23,24 @@ use windows_sys::Win32::System::Threading::{
     PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
 };
 
-use crate::windows_activation::installed_debugger_user_root;
-use crate::windows_activation::{disable_installed_runtime, enable_installed_runtime};
+use crate::windows_activation::{
+    disable_installed_runtime, enable_installed_runtime, installed_debugger_user_root,
+    WindowsInstalledRuntimeRegistration,
+};
 use crate::windows_app::{
     codex_package_full_name_is_installed, discover_codex_package, validate_codex_package_full_name,
     CODEX_PACKAGE_FAMILY_NAME,
 };
 use crate::windows_install::{
-    install_windows_runtime_with, repair_windows_runtime_after_update_with,
-    WindowsUpdateRepairAuthorization,
+    install_windows_runtime_locked_with, install_windows_runtime_with,
+    uninstall_windows_runtime_locked_with, WindowsUninstallOutcome,
 };
 use crate::windows_install_state::{
-    read_windows_install_state, read_windows_update_repair_intent, WindowsInstallState,
+    acquire_windows_install_state, read_windows_install_state, read_windows_update_repair_intent,
+    retire_windows_update_repair_intent, stage_windows_update_repair_intent, WindowsInstallState,
 };
 use crate::windows_process::strict_running_codex_package_process_ids;
+use crate::windows_system::windows_path_for_display;
 
 const UPDATE_START_GRACE: Duration = Duration::from_secs(10);
 const UPDATE_COMPLETION_TIMEOUT: Duration = Duration::from_secs(10 * 60);
@@ -95,6 +100,97 @@ pub fn is_primary_package_process(command_line: &str) -> bool {
     !command_line
         .split_ascii_whitespace()
         .any(|argument| argument == "--type" || argument.starts_with("--type="))
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct WindowsUpdateRepairAuthorization<'a> {
+    pub package_full_name: &'a str,
+    pub epoch: u64,
+    pub registration_id: &'a str,
+    pub helper_source: &'a Path,
+}
+
+pub(crate) fn prepare_interrupted_update_repair_with<R, P, D>(
+    user_root: &Path,
+    running_package_processes: &mut R,
+    package_is_installed: &mut P,
+    disable: &mut D,
+) -> Result<(), String>
+where
+    R: FnMut(&str) -> Result<Vec<u32>, std::io::Error>,
+    P: FnMut(&str) -> Result<bool, String>,
+    D: FnMut(&str) -> Result<(), String>,
+{
+    if read_windows_update_repair_intent(user_root)?.is_none() {
+        return Ok(());
+    }
+    match uninstall_windows_runtime_locked_with(
+        user_root,
+        running_package_processes,
+        package_is_installed,
+        disable,
+    )? {
+        WindowsUninstallOutcome::Removed | WindowsUninstallOutcome::NotInstalled => Ok(()),
+        WindowsUninstallOutcome::CloseRequired { process_ids } => Err(format!(
+            "close Codex before resuming the interrupted Windows update repair (running package PIDs: {})",
+            process_ids
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+    }
+}
+
+pub fn repair_windows_runtime_after_update_with<R, P, D, E>(
+    user_root: &Path,
+    authorization: WindowsUpdateRepairAuthorization<'_>,
+    target_package_full_name: &str,
+    running_package_processes: R,
+    package_is_installed: P,
+    disable: D,
+    enable: E,
+) -> Result<WindowsInstallState, String>
+where
+    R: FnMut(&str) -> Result<Vec<u32>, std::io::Error>,
+    P: FnMut(&str) -> Result<bool, String>,
+    D: FnMut(&str) -> Result<(), String>,
+    E: FnOnce(&WindowsInstalledRuntimeRegistration) -> Result<(), String>,
+{
+    let _transaction = acquire_windows_install_state()?;
+    let state = read_windows_install_state(user_root)?
+        .ok_or_else(|| "Windows update repair install state does not exist".to_string())?;
+    if !state.desired_enabled()
+        || state.epoch != authorization.epoch
+        || state.registration_id != authorization.registration_id
+        || state.package_full_name != authorization.package_full_name
+        || state.helper_path != authorization.helper_source
+    {
+        return Err("Windows update repair authorization changed".to_string());
+    }
+    if target_package_full_name == authorization.package_full_name {
+        return Err("Windows update repair target did not change generation".to_string());
+    }
+    let intent = stage_windows_update_repair_intent(user_root, &state, target_package_full_name)?;
+    let installed = install_windows_runtime_locked_with(
+        user_root,
+        target_package_full_name,
+        authorization.helper_source,
+        running_package_processes,
+        package_is_installed,
+        disable,
+        enable,
+    );
+    match installed {
+        Ok(installed) => {
+            retire_windows_update_repair_intent(user_root, Some(&intent.operation_id))?;
+            Ok(installed)
+        }
+        Err(error) => Err(format!(
+            "{error}; Windows update repair intent retained at {}",
+            windows_path_for_display(&intent.intent_path)
+        )),
+    }
 }
 
 pub(crate) fn run_update_repair_coordinator(

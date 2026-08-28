@@ -12,10 +12,9 @@ use crate::windows_app::{
 use crate::windows_helper::publish_windows_helper;
 use crate::windows_install_state::{
     acquire_windows_install_state, read_windows_install_state,
-    read_windows_install_state_for_uninstall, read_windows_update_repair_intent,
-    retire_disabled_windows_install_state, retire_unreadable_windows_install_state,
-    retire_windows_update_repair_intent, stage_windows_install_state,
-    stage_windows_update_repair_intent, transition_windows_install_state,
+    read_windows_install_state_for_uninstall, retire_disabled_windows_install_state,
+    retire_unreadable_windows_install_state, retire_windows_update_repair_intent,
+    stage_windows_install_state, transition_windows_install_state,
     transition_windows_uninstall_state, WindowsInstallPhase, WindowsInstallState,
 };
 use crate::windows_process::running_package_process_ids;
@@ -123,65 +122,6 @@ where
     )
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct WindowsUpdateRepairAuthorization<'a> {
-    pub package_full_name: &'a str,
-    pub epoch: u64,
-    pub registration_id: &'a str,
-    pub helper_source: &'a Path,
-}
-
-pub fn repair_windows_runtime_after_update_with<R, P, D, E>(
-    user_root: &Path,
-    authorization: WindowsUpdateRepairAuthorization<'_>,
-    target_package_full_name: &str,
-    running_package_processes: R,
-    package_is_installed: P,
-    disable: D,
-    enable: E,
-) -> Result<WindowsInstallState, String>
-where
-    R: FnMut(&str) -> Result<Vec<u32>, std::io::Error>,
-    P: FnMut(&str) -> Result<bool, String>,
-    D: FnMut(&str) -> Result<(), String>,
-    E: FnOnce(&WindowsInstalledRuntimeRegistration) -> Result<(), String>,
-{
-    let _transaction = acquire_windows_install_state()?;
-    let state = read_windows_install_state(user_root)?
-        .ok_or_else(|| "Windows update repair install state does not exist".to_string())?;
-    if !state.desired_enabled()
-        || state.epoch != authorization.epoch
-        || state.registration_id != authorization.registration_id
-        || state.package_full_name != authorization.package_full_name
-        || state.helper_path != authorization.helper_source
-    {
-        return Err("Windows update repair authorization changed".to_string());
-    }
-    if target_package_full_name == authorization.package_full_name {
-        return Err("Windows update repair target did not change generation".to_string());
-    }
-    let intent = stage_windows_update_repair_intent(user_root, &state, target_package_full_name)?;
-    let installed = install_windows_runtime_locked_with(
-        user_root,
-        target_package_full_name,
-        authorization.helper_source,
-        running_package_processes,
-        package_is_installed,
-        disable,
-        enable,
-    );
-    match installed {
-        Ok(installed) => {
-            retire_windows_update_repair_intent(user_root, Some(&intent.operation_id))?;
-            Ok(installed)
-        }
-        Err(error) => Err(format!(
-            "{error}; Windows update repair intent retained at {}",
-            windows_path_for_display(&intent.intent_path)
-        )),
-    }
-}
-
 pub(crate) fn install_windows_runtime_locked_with<R, P, D, E>(
     user_root: &Path,
     package_full_name: &str,
@@ -217,7 +157,7 @@ fn install_windows_runtime_with_package_probe<R, P, D, E, G>(
     mut package_is_installed: P,
     mut disable: D,
     enable: E,
-    mut package_probe: G,
+    package_probe: G,
 ) -> Result<WindowsInstallState, String>
 where
     R: FnMut(&str) -> Result<Vec<u32>, std::io::Error>,
@@ -232,26 +172,12 @@ where
         package_full_name,
         helper_source,
     } = target;
-    if read_windows_update_repair_intent(user_root)?.is_some() {
-        match uninstall_windows_runtime_locked_with(
-            user_root,
-            &mut running_package_processes,
-            &mut package_is_installed,
-            &mut disable,
-        )? {
-            WindowsUninstallOutcome::Removed | WindowsUninstallOutcome::NotInstalled => {}
-            WindowsUninstallOutcome::CloseRequired { process_ids } => {
-                return Err(format!(
-                    "close Codex before resuming the interrupted Windows update repair (running package PIDs: {})",
-                    process_ids
-                        .iter()
-                        .map(u32::to_string)
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ));
-            }
-        }
-    }
+    crate::windows_update_repair::prepare_interrupted_update_repair_with(
+        user_root,
+        &mut running_package_processes,
+        &mut package_is_installed,
+        &mut disable,
+    )?;
     let installed = install_windows_runtime_locked_with_package_probe(
         WindowsInstallTarget {
             user_root,
@@ -274,7 +200,7 @@ fn install_windows_runtime_locked_with_package_probe<R, P, D, E, G>(
     mut package_is_installed: P,
     mut disable: D,
     enable: E,
-    package_probe: G,
+    mut package_probe: G,
 ) -> Result<WindowsInstallState, String>
 where
     R: FnMut(&str) -> Result<Vec<u32>, std::io::Error>,
@@ -818,7 +744,7 @@ where
     Ok(outcome)
 }
 
-fn uninstall_windows_runtime_locked_with<R, P, D>(
+pub(crate) fn uninstall_windows_runtime_locked_with<R, P, D>(
     user_root: &Path,
     running_package_processes: &mut R,
     package_is_installed: &mut P,

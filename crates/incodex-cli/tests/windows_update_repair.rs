@@ -5,14 +5,14 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_cli::windows_install::{
-    install_windows_runtime_with, repair_windows_runtime_after_update_with,
-    uninstall_windows_runtime_with, WindowsUninstallOutcome, WindowsUpdateRepairAuthorization,
+    install_windows_runtime_with, uninstall_windows_runtime_with, WindowsUninstallOutcome,
 };
 use incodex_cli::windows_install_state::{
     read_windows_install_state, read_windows_update_repair_intent,
 };
 use incodex_cli::windows_update_repair::{
-    classify_package_update, PackageUpdateObservation, PackageUpdateOutcome,
+    classify_package_update, repair_windows_runtime_after_update_with, PackageUpdateObservation,
+    PackageUpdateOutcome, WindowsUpdateRepairAuthorization,
 };
 
 const FAMILY: &str = "OpenAI.Codex_2p2nqsd0c76g0";
