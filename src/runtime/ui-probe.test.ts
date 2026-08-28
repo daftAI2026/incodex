@@ -53,6 +53,32 @@ describe("minimal Runtime UI injection snapshot", () => {
     expect(inject).not.toMatch(/capabilit|appVersion|buildVersion/i);
   });
 
+  test("rejects a retained button when React removes the tooltip host", () => {
+    const probe = deriveUiProbe({
+      incognito: false,
+      buttonPresent: true,
+      bannerPresent: false,
+      bannerDismissed: false,
+      tooltipPresent: false,
+    } as Parameters<typeof deriveUiProbe>[0]);
+
+    expect({
+      probeAccepted: probe.accepted,
+      tracksMissingPortal: /function needsInject\(\): boolean \{[\s\S]*!tooltipMountStillPresent\(\)/.test(
+        inject,
+      ),
+      restoresPortal: /function ensureButton\(\): void \{[\s\S]*if \(!btn\) btn = buildButton\(search\);[\s\S]*ensureTooltipMount\(\);/.test(
+        inject,
+      ),
+      reportsPortal: inject.includes("tooltipPresent: tooltipMountStillPresent()"),
+    }).toEqual({
+      probeAccepted: false,
+      tracksMissingPortal: true,
+      restoresPortal: true,
+      reportsPortal: true,
+    });
+  });
+
   test("repairs stale mounts when did-finish-load reinjects the bundle", () => {
     expect(inject).toMatch(
       /if \(window\.__incodexStarted\) \{[\s\S]*ensureButton\(\);[\s\S]*ensureLanding\(\);[\s\S]*ensureLaunchError\(\);[\s\S]*ensureProfileMask\(\);[\s\S]*refreshUiProbe\(\);[\s\S]*ensureMutationObserver\(\);[\s\S]*return;/,
