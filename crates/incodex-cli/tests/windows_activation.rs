@@ -363,6 +363,7 @@ fn transient_registration_survives_launcher_termination_and_recovers_from_a_stab
     let mut disabled = false;
     assert!(recover_transient_windows_debug_registration_with(
         &user_root,
+        |_| Ok(Vec::new()),
         |_| Ok(true),
         |registered_package| {
             disabled = true;
@@ -373,6 +374,45 @@ fn transient_registration_survives_launcher_termination_and_recovers_from_a_stab
     .expect("recover abandoned transient registration"));
     assert!(disabled);
     assert!(!user_root.join("windows-registration.json").exists());
+    fs::remove_dir_all(user_root).expect("remove transient registration fixture");
+}
+
+#[test]
+fn transient_registration_recovery_retains_evidence_when_the_package_starts_during_disable() {
+    let user_root = registration_scratch();
+    let package = "OpenAI.Codex_26.820.7780.0_x64__2p2nqsd0c76g0";
+    let helper = publish_windows_transient_helper(
+        &user_root,
+        &std::env::current_exe().expect("test helper source"),
+    )
+    .expect("publish stable helper");
+    stage_transient_windows_debug_registration(&user_root, package, &helper.executable)
+        .expect("persist transient registration evidence");
+
+    let mut process_probe = 0;
+    let mut disabled = false;
+    let error = recover_transient_windows_debug_registration_with(
+        &user_root,
+        |_| {
+            process_probe += 1;
+            Ok(if process_probe == 1 {
+                Vec::new()
+            } else {
+                vec![42]
+            })
+        },
+        |_| Ok(true),
+        |registered_package| {
+            disabled = true;
+            assert_eq!(registered_package, package);
+            Ok(())
+        },
+    )
+    .expect_err("a package launch during recovery must retain durable evidence");
+
+    assert!(disabled);
+    assert!(error.contains("42"), "{error}");
+    assert!(user_root.join("windows-registration.json").exists());
     fs::remove_dir_all(user_root).expect("remove transient registration fixture");
 }
 

@@ -42,6 +42,7 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
     let _registration_gate = acquire_windows_install_state()?;
     recover_transient_windows_debug_registration_with(
         &user_root,
+        running_package_process_ids,
         codex_package_full_name_is_installed,
         disable_installed_runtime,
     )?;
@@ -171,26 +172,69 @@ where
         );
         return Err(join_recovery_error(error, recovery));
     }
-    match transition_windows_install_state(
+    let enabled = match transition_windows_install_state(
         user_root,
         pending.epoch,
         WindowsInstallPhase::EnabledUnobserved,
     ) {
-        Ok(enabled) => Ok(enabled),
+        Ok(enabled) => enabled,
         Err(error) => {
             let recovery = transition_windows_install_state(
                 user_root,
                 pending.epoch,
                 WindowsInstallPhase::RecoveryRequired,
             );
-            Err(join_recovery_error(
+            return Err(join_recovery_error(
                 format!(
                     "Windows Runtime was enabled but durable state could not be committed: {error}"
                 ),
                 recovery,
-            ))
+            ));
         }
+    };
+    let running_after_enable = match running_package_processes(package_full_name) {
+        Ok(running) => running,
+        Err(error) => {
+            let rollback = disable(package_full_name);
+            let recovery = transition_windows_install_state(
+                user_root,
+                enabled.epoch,
+                WindowsInstallPhase::RecoveryRequired,
+            );
+            return Err(join_recovery_error(
+                join_registration_rollback_error(
+                    format!(
+                        "cannot prove Codex remained closed while enabling the Windows Runtime: {error}"
+                    ),
+                    rollback,
+                ),
+                recovery,
+            ));
+        }
+    };
+    if !running_after_enable.is_empty() {
+        let rollback = disable(package_full_name);
+        let recovery = transition_windows_install_state(
+            user_root,
+            enabled.epoch,
+            WindowsInstallPhase::RecoveryRequired,
+        );
+        return Err(join_recovery_error(
+            join_registration_rollback_error(
+                format!(
+                    "Codex started while the Windows Runtime registration was being enabled (running package PIDs: {})",
+                    running_after_enable
+                        .iter()
+                        .map(u32::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                rollback,
+            ),
+            recovery,
+        ));
     }
+    Ok(enabled)
 }
 
 fn join_recovery_error(error: String, recovery: Result<WindowsInstallState, String>) -> String {
@@ -202,6 +246,15 @@ fn join_recovery_error(error: String, recovery: Result<WindowsInstallState, Stri
         ),
         Err(recovery_error) => {
             format!("{error}; Windows install recovery state is unproven: {recovery_error}")
+        }
+    }
+}
+
+fn join_registration_rollback_error(error: String, rollback: Result<(), String>) -> String {
+    match rollback {
+        Ok(()) => format!("{error}; debugger registration rollback completed"),
+        Err(rollback_error) => {
+            format!("{error}; debugger registration rollback failed: {rollback_error}")
         }
     }
 }
@@ -511,6 +564,32 @@ where
             return Err(join_recovery_error(error, recovery));
         }
     }
+    let running_after_disable = match running_package_processes(&pending.package_full_name) {
+        Ok(running) => running,
+        Err(error) => {
+            let recovery = transition_windows_uninstall_state(
+                user_root,
+                pending.epoch,
+                WindowsInstallPhase::RecoveryRequired,
+            );
+            return Err(join_recovery_error(
+                format!(
+                    "cannot prove Codex remained closed while disabling the Windows Runtime: {error}"
+                ),
+                recovery,
+            ));
+        }
+    };
+    if !running_after_disable.is_empty() {
+        transition_windows_uninstall_state(
+            user_root,
+            pending.epoch,
+            WindowsInstallPhase::RecoveryRequired,
+        )?;
+        return Ok(WindowsUninstallOutcome::CloseRequired {
+            process_ids: running_after_disable,
+        });
+    }
     let disabled = match transition_windows_uninstall_state(
         user_root,
         pending.epoch,
@@ -561,6 +640,17 @@ where
     }
     if package_is_installed(&evidence.package_full_name)? {
         disable(&evidence.package_full_name)?;
+    }
+    let running_after_disable =
+        running_package_processes(&evidence.package_full_name).map_err(|error| {
+            format!(
+                "cannot prove Codex remained closed while disabling the Windows Runtime: {error}"
+            )
+        })?;
+    if !running_after_disable.is_empty() {
+        return Ok(WindowsUninstallOutcome::CloseRequired {
+            process_ids: running_after_disable,
+        });
     }
     if retire_unreadable_state {
         retire_unreadable_windows_install_state(user_root)?;

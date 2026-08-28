@@ -42,7 +42,8 @@ use crate::windows_locale::read_locale_override;
 #[cfg(test)]
 use crate::windows_process::spawn_kill_on_drop;
 use crate::windows_process::{
-    VisibleWindowLifecycle, WindowsCdpListenerStatus, WindowsCdpOwnershipGuard,
+    running_package_process_ids, VisibleWindowLifecycle, WindowsCdpListenerStatus,
+    WindowsCdpOwnershipGuard,
 };
 use crate::windows_registration::recover_transient_windows_debug_registration_with;
 use crate::windows_runtime::publish_windows_activation_bootstrap;
@@ -330,6 +331,7 @@ fn launch_windows_open(
     if installed_state.is_none() {
         recover_transient_windows_debug_registration_with(
             &plan.user_root,
+            running_package_process_ids,
             codex_package_full_name_is_installed,
             disable_installed_runtime,
         )

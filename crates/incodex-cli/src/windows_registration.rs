@@ -167,14 +167,16 @@ pub(crate) fn retire_windows_debug_registration_file(user_root: &Path) -> Result
     }
 }
 
-pub fn recover_transient_windows_debug_registration_with<P, D>(
+pub fn recover_transient_windows_debug_registration_with<R, P, D>(
     user_root: &Path,
-    package_is_installed: P,
-    disable: D,
+    mut running_package_processes: R,
+    mut package_is_installed: P,
+    mut disable: D,
 ) -> Result<bool, String>
 where
-    P: FnOnce(&str) -> Result<bool, String>,
-    D: FnOnce(&str) -> Result<(), String>,
+    R: FnMut(&str) -> Result<Vec<u32>, std::io::Error>,
+    P: FnMut(&str) -> Result<bool, String>,
+    D: FnMut(&str) -> Result<(), String>,
 {
     let Some(evidence) = read_windows_debug_registration(user_root)? else {
         return Ok(false);
@@ -185,8 +187,36 @@ where
                 .to_string(),
         );
     }
+    let running = running_package_processes(&evidence.package_full_name)
+        .map_err(|error| format!("cannot inspect running Windows Codex processes: {error}"))?;
+    if !running.is_empty() {
+        return Err(format!(
+            "close Codex before recovering its transient Windows debugger registration (running package PIDs: {})",
+            running
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
     if package_is_installed(&evidence.package_full_name)? {
         disable(&evidence.package_full_name)?;
+    }
+    let running_after_disable = running_package_processes(&evidence.package_full_name)
+        .map_err(|error| {
+            format!(
+                "cannot prove Codex remained closed while recovering its transient Windows debugger registration: {error}"
+            )
+        })?;
+    if !running_after_disable.is_empty() {
+        return Err(format!(
+            "Codex started while its transient Windows debugger registration was being recovered (running package PIDs: {})",
+            running_after_disable
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
     }
     retire_windows_debug_registration(user_root, &evidence.registration_id)?;
     Ok(true)
