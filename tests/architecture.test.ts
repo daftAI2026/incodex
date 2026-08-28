@@ -93,6 +93,10 @@ describe("architecture boundaries", () => {
     expect(install).not.toMatch(/Command::new\(["']bun["']\)/);
     expect(runtime).toContain("src/runtime/inject.ts");
     expect(runtime).toContain("writeRuntimeManifest");
+    expect(runtime).toContain("process.execPath");
+    expect(runtime).not.toContain(
+      'spawnSync(join(root, "node_modules/typescript/bin/tsc")',
+    );
   });
 
   test("native open path does not patch asar or resign", () => {

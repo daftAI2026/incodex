@@ -13,26 +13,35 @@ describe("minimal Runtime UI injection snapshot", () => {
         buttonPresent: true,
         bannerPresent: false,
         bannerDismissed: false,
+        tooltipPresent: true,
       }),
-    ).toEqual({ button: "present", banner: "not-applicable", accepted: true });
+    ).toEqual({
+      button: "present",
+      banner: "not-applicable",
+      tooltip: "present",
+      accepted: true,
+    });
   });
 
   test("distinguishes an incognito banner that is present, missing, or dismissed", () => {
-    const base = { incognito: true, buttonPresent: true };
+    const base = { incognito: true, buttonPresent: true, tooltipPresent: true };
 
     expect(deriveUiProbe({ ...base, bannerPresent: true, bannerDismissed: false })).toEqual({
       button: "present",
       banner: "present",
+      tooltip: "present",
       accepted: true,
     });
     expect(deriveUiProbe({ ...base, bannerPresent: false, bannerDismissed: false })).toEqual({
       button: "present",
       banner: "missing",
+      tooltip: "present",
       accepted: false,
     });
     expect(deriveUiProbe({ ...base, bannerPresent: false, bannerDismissed: true })).toEqual({
       button: "present",
       banner: "dismissed",
+      tooltip: "present",
       accepted: true,
     });
   });
@@ -44,8 +53,14 @@ describe("minimal Runtime UI injection snapshot", () => {
         buttonPresent: false,
         bannerPresent: true,
         bannerDismissed: false,
+        tooltipPresent: true,
       }),
-    ).toEqual({ button: "missing", banner: "present", accepted: false });
+    ).toEqual({
+      button: "missing",
+      banner: "present",
+      tooltip: "present",
+      accepted: false,
+    });
   });
 
   test("the injector retains the latest minimal snapshot for its caller", () => {
@@ -53,9 +68,49 @@ describe("minimal Runtime UI injection snapshot", () => {
     expect(inject).not.toMatch(/capabilit|appVersion|buildVersion/i);
   });
 
-  test("refreshes a stale snapshot when did-finish-load reinjects the bundle", () => {
+  test("rejects a retained button when React removes the tooltip host", () => {
+    const probe = deriveUiProbe({
+      incognito: false,
+      buttonPresent: true,
+      bannerPresent: false,
+      bannerDismissed: false,
+      tooltipPresent: false,
+    });
+
+    expect({
+      probe: probe,
+      tracksMissingPortal: /function needsInject\(\): boolean \{[\s\S]*!tooltipMountStillPresent\(\)/.test(
+        inject,
+      ),
+      restoresPortal: /function ensureButton\(\): void \{[\s\S]*if \(!btn\) btn = buildButton\(search\);[\s\S]*ensureTooltipMount\(\);/.test(
+        inject,
+      ),
+      reportsPortal: inject.includes("tooltipPresent: tooltipMountStillPresent()"),
+    }).toEqual({
+      probe: {
+        button: "present",
+        banner: "not-applicable",
+        tooltip: "missing",
+        accepted: false,
+      },
+      tracksMissingPortal: true,
+      restoresPortal: true,
+      reportsPortal: true,
+    });
+  });
+
+  test("repairs stale mounts when did-finish-load reinjects the bundle", () => {
     expect(inject).toMatch(
-      /if \(window\.__incodexStarted\) \{\s*ensureMutationObserver\(\);\s*ensureProfileMask\(\);\s*refreshUiProbe\(\);\s*return;\s*\}/,
+      /if \(window\.__incodexStarted\) \{[\s\S]*ensureButton\(\);[\s\S]*ensureLanding\(\);[\s\S]*ensureLaunchError\(\);[\s\S]*ensureProfileMask\(\);[\s\S]*refreshUiProbe\(\);[\s\S]*ensureMutationObserver\(\);[\s\S]*return;/,
+    );
+  });
+
+  test("reobserves the document when a previous injector left an unobserved instance", () => {
+    expect(inject).not.toMatch(
+      /if \(observer && \(!profileRequired \|\| window\.__incodexProfileObservationEnabled\)\) return;/,
+    );
+    expect(inject).toMatch(
+      /if \(!observer\) \{[\s\S]*window\.__incodexMutationObserver = observer;[\s\S]*\}[\s\S]*observer\.observe\(document\.documentElement, observerOptions\(\)\);/,
     );
   });
 });

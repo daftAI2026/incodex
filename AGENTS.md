@@ -73,6 +73,16 @@ The native Rust contract tests are the product behavior source of truth. The rem
 3. The retired TypeScript product router and mutation implementation must not return. Keep legacy v1 compatibility only in the named Rust fixture/proof modules; do not create new TypeScript parity paths.
 4. Rust `install` / `uninstall` / `recover` / `open` / `status` / `doctor` are the product paths. Preserve their proven safety contracts without creating new TypeScript parity work.
 
+### Windows adaptation boundary
+
+- Windows support is under development and is not a public product claim until the corresponding behavior has passed real Windows app and lifecycle verification.
+- The Windows Rust boundary exposes parsing, help, version reporting, the native `open` path, and an explicitly confirmed `install` / `uninstall` pipeline. Every other mutating product command fails closed before creating Incodex state until that command lands behind its own failing Windows test.
+- Windows CI intentionally tests the supported `incodex-core` and `incodex-cli` library/binary surface. The ASAR mutation, transaction, Runtime publishing, and macOS integration crates remain outside that target until a real Windows responsibility exists; do not add placeholder Windows implementations merely to make `cargo test --workspace` compile there.
+- Windows `open` is one trust pipeline: discover the current user's `OpenAI.Codex` Store package without hardcoded install paths; create a current-user-only session that rejects reparse ancestry, copies only `auth.json` / `config.toml`, and persists directory plus owner-process identity; launch suspended into a kill-on-close Job Object; prove the IPv4 loopback CDP listener belongs to that Job; inject the committed shared Runtime; then burn normal sessions or sweep proven-dead owners while retaining every uncertain cleanup state.
+- Windows `install` publishes the same Electron Runtime plus a content-addressed native helper under the current user's private Incodex root, registers a durable package debugger bootstrap without modifying the Store package, and keeps every install transition behind an epoch-checked kill switch. Install and uninstall never request or force the official package to exit: the current official Windows app bypasses its task-confirmation prompt on quit, so mutation fails closed while any package process is running and tells the user to finish active work, then quit with `Ctrl+Q` or the tray command. The installed hat-glasses path reuses the shared preload, injector, menu, colors, and window hooks; only session creation, Job ownership, readiness, and cleanup cross the Windows lifecycle adapter.
+- Preserve the shared parser and command names. Add Windows behavior inside the Rust product CLI, one review-sized capability at a time; do not create a second CLI or Runtime.
+- Treat Store/AppX installation, Authenticode, reparse points, ACLs, process trees, and updater behavior as evidence-driven Windows boundaries. Any expansion of Windows package mutation or persistent debugger behavior requires separate repository-owner approval and a failing Windows test first.
+
 ### Runtime boundary
 
 - Electron Runtime stays TypeScript (`src/runtime/*.cts` → `dist/*.cjs`) and is still built by Bun; Rust embeds committed `dist/` artifacts.
@@ -102,12 +112,16 @@ Do not add ratatui, cursive, crossterm, or an AGPL asar crate. The native menu i
 ```bash
 bun install --frozen-lockfile
 bun run check
+bun run test:shared
+bun run test:macos
+bun run test:windows
 bun run build:runtime
 INCODEX_DEV_HOT=1 bun run deploy:runtime
 cargo test --workspace --release
 ```
 
 Public docs use the native `incodex` / `inc` binaries. Bun is retained for Electron Runtime build/checks, not as a CLI entry point.
+`bun run check` dispatches the shared suite plus the current host suite; CI keeps the macOS and Windows platform suites explicit.
 
 ## Critical Safety Rules
 

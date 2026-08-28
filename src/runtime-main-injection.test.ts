@@ -13,14 +13,16 @@ function hookWindowSource(): string {
 }
 
 describe("Electron UI injection reporting", () => {
-  test("keeps recovery injection timing but only did-finish-load requests one report", () => {
+  test("keeps macOS recovery timing while Windows rechecks asynchronous UI readiness", () => {
     const hook = hookWindowSource();
 
     expect(hook).toContain('win.webContents.on("dom-ready", () => run(false))');
     expect(hook).toContain('win.webContents.on("did-finish-load", () => run(true))');
     expect(hook).toContain("run(false)");
     expect(hook.match(/run\(true\)/g)).toHaveLength(1);
-    expect(hook.match(/reportInjectionProbe/g)).toHaveLength(1);
+    expect(hook).toContain("if (windowsPlatform && isIncognito())");
+    expect(hook).toContain("windowsPlatform.observeRuntimeUiReadiness(");
+    expect(hook).toContain("reportInjectionProbe(win, false)");
   });
 
   test("does not silently swallow executeJavaScript rejection", () => {
@@ -28,5 +30,27 @@ describe("Electron UI injection reporting", () => {
 
     expect(hook).not.toContain(".catch(() => {})");
     expect(hook).toMatch(/\.catch\(\(error\) => reportInjectionError\(error\)\)/);
+  });
+
+  test("leaves official Windows main-window closure to Codex", () => {
+    const created = main.indexOf('electron.app.on("browser-window-created"');
+    const officialReturn = main.indexOf("if (!isIncognito()) return;", created);
+    expect(created).toBeGreaterThanOrEqual(0);
+    expect(officialReturn).toBeGreaterThan(created);
+
+    const beforeOfficialReturn = main.slice(created, officialReturn);
+    expect(beforeOfficialReturn).toContain("if (windowsPlatform && isIncognito())");
+    expect(beforeOfficialReturn).toContain("windowsPlatform.exitAfterLastMainWindowCloses(");
+    expect(beforeOfficialReturn).toContain("finishIncognito,");
+  });
+
+  test("does not quit the installed Windows main process on the user's behalf", () => {
+    const attach = main.slice(main.indexOf("async function attachElectron()"));
+
+    expect(attach).not.toContain("windowsPlatform.listenForNormalExit(");
+    expect(attach).not.toContain("INCODEX_WINDOWS_REGISTRATION_ID");
+    expect(attach).not.toMatch(
+      /if \(windowsPlatform && !isIncognito\(\)\)[\s\S]*electron\.app\.quit\(\)/,
+    );
   });
 });

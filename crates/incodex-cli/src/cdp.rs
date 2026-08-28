@@ -24,7 +24,10 @@ const MAX_HTTP_RESPONSE_BYTES: usize = 1024 * 1024;
 const CDP_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const LIFECYCLE_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const PRIMARY_TARGET_MISSING_POLLS: u8 = 2;
+const WINDOWS_CDP_FAILURE_POLLS: u8 = 3;
+const WINDOWS_LIFECYCLE_CDP_TIMEOUT: Duration = Duration::from_millis(400);
 const PROFILE_MASK_FAILURE_POLLS: u8 = 2;
+const WINDOWS_PROFILE_MASK_TRANSPORT_FAILURE_POLLS: u8 = 4;
 const BROWSER_CLOSE_ATTEMPTS: u8 = 3;
 pub const OFFICIAL_NEW_CODEX_URL: &str = "codex://new?mode=codex";
 
@@ -42,6 +45,19 @@ pub struct InjectionOptions {
     pub profile_mask: Option<ProfileMask>,
 }
 
+#[derive(Clone, Copy)]
+struct LifecyclePolicy {
+    max_consecutive_errors: Option<u8>,
+    adopt_replacement: bool,
+    cdp_timeout: Option<Duration>,
+}
+
+struct InjectionPayload<'a> {
+    source: &'a str,
+    health_expression: &'a str,
+    require_profile_mask: bool,
+}
+
 pub fn allocate_debug_port() -> Result<u16, String> {
     // Chromium 必须在 listener 释放后自行 bind；这是不可避免的短暂 TOCTOU。
     // 后续 HTTP/CDP 操作均有硬截止时间，抢占或 bind 失败只会得到有界的 UI 错误。
@@ -52,7 +68,18 @@ pub fn allocate_debug_port() -> Result<u16, String> {
 }
 
 pub fn debug_launch_args(user_data_dir: &str, debug_port: u16) -> Vec<String> {
-    let mut args = launch_arg_prefix(user_data_dir);
+    debug_launch_args_for_platform(user_data_dir, debug_port, cfg!(target_os = "windows"))
+}
+
+fn debug_launch_args_for_platform(
+    user_data_dir: &str,
+    debug_port: u16,
+    windows: bool,
+) -> Vec<String> {
+    let mut args = launch_arg_prefix_for_platform(user_data_dir, windows);
+    if windows {
+        args.push("--remote-debugging-address=127.0.0.1".to_string());
+    }
     args.extend([
         format!("--remote-debugging-port={debug_port}"),
         format!("--remote-allow-origins=http://127.0.0.1:{debug_port}"),
@@ -61,12 +88,21 @@ pub fn debug_launch_args(user_data_dir: &str, debug_port: u16) -> Vec<String> {
     args
 }
 
+#[cfg(not(target_os = "windows"))]
 pub(crate) fn launch_arg_prefix(user_data_dir: &str) -> Vec<String> {
-    vec![
-        "-NSAutomaticWindowAnimationsEnabled".to_string(),
-        "false".to_string(),
-        format!("--user-data-dir={user_data_dir}"),
-    ]
+    launch_arg_prefix_for_platform(user_data_dir, cfg!(target_os = "windows"))
+}
+
+fn launch_arg_prefix_for_platform(user_data_dir: &str, windows: bool) -> Vec<String> {
+    if windows {
+        vec![format!("--user-data-dir={user_data_dir}")]
+    } else {
+        vec![
+            "-NSAutomaticWindowAnimationsEnabled".to_string(),
+            "false".to_string(),
+            format!("--user-data-dir={user_data_dir}"),
+        ]
+    }
 }
 
 pub fn inject_source() -> String {
@@ -82,6 +118,11 @@ pub fn inject_source_for_locale(locale: Option<&str>) -> String {
 
 pub fn inject_source_for_options(options: &InjectionOptions) -> String {
     let locale = json_string(options.locale.as_deref().unwrap_or(""));
+    let platform = if cfg!(target_os = "windows") {
+        "window.__incodexPlatform=\"win32\";"
+    } else {
+        ""
+    };
     let profile_bootstrap = match &options.profile_mask {
         Some(profile_mask) => format!(
             "(window.top===window&&window.location.href==={})?{}:null",
@@ -91,7 +132,7 @@ pub fn inject_source_for_options(options: &InjectionOptions) -> String {
         None => "null".to_string(),
     };
     format!(
-        "{INJECT_PREFIX}window.__incodexLocale={locale};window.__incodexProfileMask={profile_bootstrap};\n{INJECT_JS}"
+        "{INJECT_PREFIX}window.__incodexLocale={locale};{platform}window.__incodexProfileMask={profile_bootstrap};\n{INJECT_JS}"
     )
 }
 
@@ -243,14 +284,39 @@ pub(crate) fn inject_shared_ui_with_options_while_alive<F>(
     debug_port: u16,
     options: &InjectionOptions,
     process_alive: &AtomicBool,
-    mut on_target: F,
+    on_target: F,
 ) -> Result<String, String>
 where
     F: FnMut(&str),
 {
+    inject_shared_ui_with_options_while_alive_and_guard(
+        debug_port,
+        options,
+        process_alive,
+        on_target,
+        &|_| Ok(()),
+    )
+}
+
+pub(crate) fn inject_shared_ui_with_options_while_alive_and_guard<F, G>(
+    debug_port: u16,
+    options: &InjectionOptions,
+    process_alive: &AtomicBool,
+    mut on_target: F,
+    connection_guard: &G,
+) -> Result<String, String>
+where
+    F: FnMut(&str),
+    G: Fn(&TcpStream) -> Result<(), String>,
+{
     let source = inject_source_for_options(options);
     let health_expression = ui_ready_expression_for_options(options);
     let require_profile_mask = options.profile_mask.is_some();
+    let payload = InjectionPayload {
+        source: &source,
+        health_expression: &health_expression,
+        require_profile_mask,
+    };
     let mut registered_script_targets = HashSet::new();
     let mut last = "cdp page not ready".to_string();
     let mut refused = 0u8;
@@ -258,12 +324,11 @@ where
         ensure_injection_active(process_alive)?;
         match try_inject(
             debug_port,
-            &source,
-            &health_expression,
-            require_profile_mask,
+            &payload,
             &mut registered_script_targets,
             process_alive,
             &mut on_target,
+            connection_guard,
         ) {
             Ok(target_id) => return Ok(target_id),
             Err(err) => {
@@ -285,17 +350,17 @@ where
     Err(last)
 }
 
-fn try_inject<F>(
+fn try_inject<F, G>(
     debug_port: u16,
-    source: &str,
-    health_expression: &str,
-    require_profile_mask: bool,
+    payload: &InjectionPayload<'_>,
     registered_script_targets: &mut HashSet<String>,
     process_alive: &AtomicBool,
     on_target: &mut F,
+    connection_guard: &G,
 ) -> Result<String, String>
 where
     F: FnMut(&str),
+    G: Fn(&TcpStream) -> Result<(), String>,
 {
     ensure_injection_active(process_alive)?;
     let targets = list_targets(debug_port)?;
@@ -304,33 +369,36 @@ where
     on_target(&page.id);
     let mut socket = connect_cdp_websocket(&page.ws, debug_port)?;
     ensure_injection_active(process_alive)?;
-    send_cdp(&mut socket, 1, "Page.enable", json!({}))?;
-    select_official_codex_mode(&mut socket)?;
+    send_guarded_cdp(&mut socket, 1, "Page.enable", json!({}), connection_guard)?;
+    select_official_codex_mode(&mut socket, connection_guard)?;
     ensure_injection_active(process_alive)?;
     if !registered_script_targets.contains(&page.id) {
-        send_cdp(
+        send_guarded_cdp(
             &mut socket,
             4,
             "Page.addScriptToEvaluateOnNewDocument",
-            json!({ "source": source }),
+            json!({ "source": payload.source }),
+            connection_guard,
         )?;
         registered_script_targets.insert(page.id.clone());
     }
     ensure_injection_active(process_alive)?;
-    send_cdp(
+    send_guarded_cdp(
         &mut socket,
         5,
         "Runtime.evaluate",
-        json!({ "expression": source, "returnByValue": true }),
+        json!({ "expression": payload.source, "returnByValue": true }),
+        connection_guard,
     )?;
     ensure_injection_active(process_alive)?;
-    let health = send_cdp(
+    let health = send_guarded_cdp(
         &mut socket,
         6,
         "Runtime.evaluate",
-        json!({ "expression": health_expression, "returnByValue": true }),
+        json!({ "expression": payload.health_expression, "returnByValue": true }),
+        connection_guard,
     )?;
-    validate_ui_probe_result_for_options(&health, require_profile_mask)?;
+    validate_ui_probe_result_for_options(&health, payload.require_profile_mask)?;
     let target_id = page.id.clone();
     let _ = socket.close(None);
     Ok(target_id)
@@ -344,7 +412,13 @@ fn ensure_injection_active(process_alive: &AtomicBool) -> Result<(), String> {
     }
 }
 
-fn select_official_codex_mode(socket: &mut WebSocket<TcpStream>) -> Result<(), String> {
+fn select_official_codex_mode<G>(
+    socket: &mut WebSocket<TcpStream>,
+    connection_guard: &G,
+) -> Result<(), String>
+where
+    G: Fn(&TcpStream) -> Result<(), String>,
+{
     let key = |r#type: &str| {
         json!({
             "type": r#type,
@@ -354,8 +428,20 @@ fn select_official_codex_mode(socket: &mut WebSocket<TcpStream>) -> Result<(), S
             "windowsVirtualKeyCode": 51
         })
     };
-    send_cdp(socket, 2, "Input.dispatchKeyEvent", key("rawKeyDown"))?;
-    send_cdp(socket, 3, "Input.dispatchKeyEvent", key("keyUp"))?;
+    send_guarded_cdp(
+        socket,
+        2,
+        "Input.dispatchKeyEvent",
+        key("rawKeyDown"),
+        connection_guard,
+    )?;
+    send_guarded_cdp(
+        socket,
+        3,
+        "Input.dispatchKeyEvent",
+        key("keyUp"),
+        connection_guard,
+    )?;
     Ok(())
 }
 
@@ -377,86 +463,312 @@ pub fn start_lifecycle_monitor(
     primary_target_id: String,
     process_alive: Arc<AtomicBool>,
 ) {
-    thread::spawn(move || monitor_primary_target(debug_port, &primary_target_id, &process_alive));
+    thread::spawn(move || {
+        monitor_primary_target(debug_port, &primary_target_id, &process_alive, || {
+            let _ = close_browser_with_retries(debug_port);
+            false
+        })
+    });
 }
 
+pub fn start_lifecycle_signal_monitor(
+    debug_port: u16,
+    primary_target_id: String,
+    process_alive: Arc<AtomicBool>,
+    close_requested: Arc<AtomicBool>,
+    cdp_failed: Arc<AtomicBool>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        monitor_primary_target_with_failure_limit(
+            debug_port,
+            &primary_target_id,
+            &process_alive,
+            LifecyclePolicy {
+                max_consecutive_errors: Some(WINDOWS_CDP_FAILURE_POLLS),
+                adopt_replacement: false,
+                cdp_timeout: Some(WINDOWS_LIFECYCLE_CDP_TIMEOUT),
+            },
+            || {
+                close_requested.store(true, Ordering::Release);
+                true
+            },
+            || cdp_failed.store(true, Ordering::Release),
+        )
+    })
+}
+
+#[cfg(not(target_os = "windows"))]
 pub(crate) fn monitor_profile_mask_health<F>(
     debug_port: u16,
     process_alive: &AtomicBool,
-    mut on_failure: F,
+    on_failure: F,
 ) -> Result<(), String>
 where
     F: FnMut(&str),
 {
-    let mut failures = 0u8;
+    monitor_profile_mask_health_with_guard(
+        debug_port,
+        process_alive,
+        on_failure,
+        &|_| Ok(()),
+        false,
+    )
+}
+
+#[cfg(any(target_os = "windows", test))]
+pub(crate) fn start_profile_mask_signal_monitor<G>(
+    debug_port: u16,
+    process_alive: Arc<AtomicBool>,
+    cdp_failed: Arc<AtomicBool>,
+    connection_guard: G,
+) -> thread::JoinHandle<()>
+where
+    G: Fn(&TcpStream) -> Result<(), String> + Send + 'static,
+{
+    thread::spawn(move || {
+        let _ = monitor_profile_mask_health_with_guard(
+            debug_port,
+            &process_alive,
+            |_| cdp_failed.store(true, Ordering::Release),
+            &connection_guard,
+            true,
+        );
+    })
+}
+
+fn monitor_profile_mask_health_with_guard<F, G>(
+    debug_port: u16,
+    process_alive: &AtomicBool,
+    mut on_failure: F,
+    connection_guard: &G,
+    defer_missing_target: bool,
+) -> Result<(), String>
+where
+    F: FnMut(&str),
+    G: Fn(&TcpStream) -> Result<(), String>,
+{
+    let mut failures = ProfileMaskFailureCounters::for_platform(cfg!(target_os = "windows"));
     while process_alive.load(Ordering::Acquire) {
         thread::sleep(LIFECYCLE_POLL_INTERVAL);
         if !process_alive.load(Ordering::Acquire) {
             return Ok(());
         }
-        match probe_profile_mask_health(debug_port, process_alive) {
-            Ok(()) => failures = 0,
-            Err(error) => {
-                failures = failures.saturating_add(1);
-                if failures >= PROFILE_MASK_FAILURE_POLLS {
-                    on_failure(&error);
-                    return Err(error);
+        let (error, failure_kind, failure_limit) =
+            match probe_profile_mask_health(debug_port, process_alive, connection_guard) {
+                Ok(true) => {
+                    failures.clear();
+                    continue;
                 }
-            }
+                Ok(false) => (
+                    "Incodex profile mask could not be restored".to_string(),
+                    ProfileMaskFailureKind::Unhealthy,
+                    PROFILE_MASK_FAILURE_POLLS,
+                ),
+                Err(ProfileMaskProbeError::TargetMissing) if defer_missing_target => continue,
+                Err(ProfileMaskProbeError::TargetMissing) => (
+                    "no Codex page target".to_string(),
+                    ProfileMaskFailureKind::Unhealthy,
+                    PROFILE_MASK_FAILURE_POLLS,
+                ),
+                Err(ProfileMaskProbeError::ProbeFailed(error)) => (
+                    error,
+                    ProfileMaskFailureKind::Transport,
+                    profile_mask_transport_failure_polls(cfg!(target_os = "windows")),
+                ),
+            };
+        if failures.record(failure_kind, failure_limit) {
+            on_failure(&error);
+            return Err(error);
         }
     }
     Ok(())
 }
 
-fn probe_profile_mask_health(debug_port: u16, process_alive: &AtomicBool) -> Result<(), String> {
-    ensure_injection_active(process_alive)?;
-    let targets = list_targets(debug_port)?;
-    let page = pick_codex_page_target(&targets).ok_or("no Codex page target")?;
-    let mut socket = connect_cdp_websocket(&page.ws, debug_port)?;
-    let response = send_cdp(
+enum ProfileMaskFailureCounters {
+    Consecutive(u8),
+    Independent { unhealthy: u8, transport: u8 },
+}
+
+enum ProfileMaskFailureKind {
+    Unhealthy,
+    Transport,
+}
+
+impl ProfileMaskFailureCounters {
+    fn for_platform(windows: bool) -> Self {
+        if windows {
+            Self::Independent {
+                unhealthy: 0,
+                transport: 0,
+            }
+        } else {
+            Self::Consecutive(0)
+        }
+    }
+
+    fn clear(&mut self) {
+        match self {
+            Self::Consecutive(failures) => *failures = 0,
+            Self::Independent {
+                unhealthy,
+                transport,
+            } => {
+                *unhealthy = 0;
+                *transport = 0;
+            }
+        }
+    }
+
+    fn record(&mut self, kind: ProfileMaskFailureKind, limit: u8) -> bool {
+        let counter = match self {
+            Self::Consecutive(failures) => failures,
+            Self::Independent {
+                unhealthy,
+                transport,
+            } => match kind {
+                ProfileMaskFailureKind::Unhealthy => unhealthy,
+                ProfileMaskFailureKind::Transport => transport,
+            },
+        };
+        *counter = counter.saturating_add(1);
+        *counter >= limit
+    }
+}
+
+fn profile_mask_transport_failure_polls(windows: bool) -> u8 {
+    if windows {
+        WINDOWS_PROFILE_MASK_TRANSPORT_FAILURE_POLLS
+    } else {
+        PROFILE_MASK_FAILURE_POLLS
+    }
+}
+
+enum ProfileMaskProbeError {
+    TargetMissing,
+    ProbeFailed(String),
+}
+
+fn probe_profile_mask_health<G>(
+    debug_port: u16,
+    process_alive: &AtomicBool,
+    connection_guard: &G,
+) -> Result<bool, ProfileMaskProbeError>
+where
+    G: Fn(&TcpStream) -> Result<(), String>,
+{
+    ensure_injection_active(process_alive).map_err(ProfileMaskProbeError::ProbeFailed)?;
+    let targets = list_targets(debug_port).map_err(ProfileMaskProbeError::ProbeFailed)?;
+    let page = pick_codex_page_target(&targets).ok_or(ProfileMaskProbeError::TargetMissing)?;
+    let mut socket =
+        connect_cdp_websocket(&page.ws, debug_port).map_err(ProfileMaskProbeError::ProbeFailed)?;
+    let response = send_guarded_cdp(
         &mut socket,
         1,
         "Runtime.evaluate",
         json!({
-            "expression": "window.__incodexProfileMaskHealth === true",
+            "expression": profile_mask_health_expression(),
             "returnByValue": true
         }),
-    )?;
+        connection_guard,
+    )
+    .map_err(ProfileMaskProbeError::ProbeFailed)?;
     let healthy = response
         .pointer("/result/result/value")
         .and_then(Value::as_bool)
-        .ok_or("malformed profile mask health result")?;
-    if healthy {
-        Ok(())
-    } else {
-        Err("Incodex profile mask could not be restored".into())
+        .ok_or_else(|| {
+            ProfileMaskProbeError::ProbeFailed("malformed profile mask health result".to_string())
+        })?;
+    Ok(healthy)
+}
+
+fn profile_mask_health_expression() -> &'static str {
+    #[cfg(target_os = "windows")]
+    {
+        "window.__incodexRefreshProfileMaskHealth?.() === true"
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        "window.__incodexProfileMaskHealth === true"
     }
 }
 
-fn monitor_primary_target(debug_port: u16, primary_target_id: &str, process_alive: &AtomicBool) {
+fn monitor_primary_target<F>(
+    debug_port: u16,
+    primary_target_id: &str,
+    process_alive: &AtomicBool,
+    on_close: F,
+) where
+    F: FnMut() -> bool,
+{
+    monitor_primary_target_with_failure_limit(
+        debug_port,
+        primary_target_id,
+        process_alive,
+        LifecyclePolicy {
+            max_consecutive_errors: None,
+            adopt_replacement: true,
+            cdp_timeout: None,
+        },
+        on_close,
+        || {},
+    );
+}
+
+fn monitor_primary_target_with_failure_limit<F>(
+    debug_port: u16,
+    primary_target_id: &str,
+    process_alive: &AtomicBool,
+    policy: LifecyclePolicy,
+    mut on_close: F,
+    mut on_cdp_failure: impl FnMut(),
+) where
+    F: FnMut() -> bool,
+{
     let mut primary_target_id = primary_target_id.to_string();
     let mut missing_polls = 0u8;
+    let mut consecutive_errors = 0u8;
     while process_alive.load(Ordering::Acquire) {
         thread::sleep(LIFECYCLE_POLL_INTERVAL);
-        let targets = match list_targets(debug_port) {
-            Ok(targets) => targets,
-            Err(_) => continue,
+        let targets = match policy
+            .cdp_timeout
+            .map(|timeout| list_targets_with_timeout(debug_port, timeout))
+            .unwrap_or_else(|| list_targets(debug_port))
+        {
+            Ok(targets) => {
+                consecutive_errors = 0;
+                targets
+            }
+            Err(_) => {
+                consecutive_errors = consecutive_errors.saturating_add(1);
+                if policy
+                    .max_consecutive_errors
+                    .is_some_and(|limit| consecutive_errors >= limit)
+                {
+                    on_cdp_failure();
+                    return;
+                }
+                continue;
+            }
         };
         if targets.iter().any(|target| target.id == primary_target_id) {
             missing_polls = 0;
             continue;
         }
         if let Some(replacement) = pick_codex_page_target(&targets) {
-            primary_target_id.clone_from(&replacement.id);
-            missing_polls = 0;
-            continue;
+            if policy.adopt_replacement {
+                primary_target_id.clone_from(&replacement.id);
+                missing_polls = 0;
+                continue;
+            }
         }
 
         missing_polls = missing_polls.saturating_add(1);
         if missing_polls < PRIMARY_TARGET_MISSING_POLLS {
             continue;
         }
-        let _ = close_browser_with_retries(debug_port);
+        if on_close() {
+            return;
+        }
         missing_polls = 0;
     }
 }
@@ -508,6 +820,20 @@ fn send_cdp(
         return Err(error.to_string());
     }
     result
+}
+
+fn send_guarded_cdp<G>(
+    socket: &mut WebSocket<TcpStream>,
+    id: u64,
+    method: &str,
+    params: Value,
+    connection_guard: &G,
+) -> Result<Value, String>
+where
+    G: Fn(&TcpStream) -> Result<(), String>,
+{
+    connection_guard(socket.get_ref())?;
+    send_cdp(socket, id, method, params)
 }
 
 fn send_cdp_with_deadline<S: Read + Write>(
@@ -624,8 +950,12 @@ fn websocket_socket_addr(url: &str, expected_port: u16) -> Result<SocketAddr, St
 }
 
 fn list_targets(debug_port: u16) -> Result<Vec<CdpTarget>, String> {
-    let raw =
-        http_get_json(debug_port, "/json/list").or_else(|_| http_get_json(debug_port, "/json"))?;
+    list_targets_with_timeout(debug_port, CDP_IO_TIMEOUT)
+}
+
+fn list_targets_with_timeout(debug_port: u16, timeout: Duration) -> Result<Vec<CdpTarget>, String> {
+    let raw = http_get_json_with_timeout(debug_port, "/json/list", timeout)
+        .or_else(|_| http_get_json_with_timeout(debug_port, "/json", timeout))?;
     let list = raw.as_array().ok_or("cdp /json is not an array")?;
     list.iter()
         .map(|item| {
@@ -660,24 +990,50 @@ fn list_targets(debug_port: u16) -> Result<Vec<CdpTarget>, String> {
 }
 
 fn http_get_json(debug_port: u16, path: &str) -> Result<Value, String> {
+    http_get_json_with_timeout(debug_port, path, CDP_IO_TIMEOUT)
+}
+
+fn http_get_json_with_timeout(
+    debug_port: u16,
+    path: &str,
+    timeout: Duration,
+) -> Result<Value, String> {
     let mut errors = Vec::new();
-    for host in ["127.0.0.1", "[::1]"] {
-        match http_get_json_host(host, debug_port, path) {
+    for host in cdp_hosts_for_platform(cfg!(target_os = "windows")) {
+        match http_get_json_host_with_timeout(host, debug_port, path, timeout) {
             Ok(value) => return Ok(value),
-            Err(err) => errors.push(format!("{host}: {err}")),
+            Err(error) => errors.push(format!("{host}: {error}")),
         }
     }
     Err(format!("cdp http failed: {}", errors.join("; ")))
 }
 
+fn cdp_hosts_for_platform(windows: bool) -> &'static [&'static str] {
+    if windows {
+        &["127.0.0.1"]
+    } else {
+        &["127.0.0.1", "[::1]"]
+    }
+}
+
+#[cfg(test)]
 fn http_get_json_host(host: &str, debug_port: u16, path: &str) -> Result<Value, String> {
+    http_get_json_host_with_timeout(host, debug_port, path, CDP_IO_TIMEOUT)
+}
+
+fn http_get_json_host_with_timeout(
+    host: &str,
+    debug_port: u16,
+    path: &str,
+    timeout: Duration,
+) -> Result<Value, String> {
     let addr = format!("{host}:{debug_port}");
     let socket_addr: SocketAddr = addr
         .parse()
         .map_err(|error| format!("invalid CDP address {addr}: {error}"))?;
-    let deadline = Instant::now() + CDP_IO_TIMEOUT;
+    let deadline = Instant::now() + timeout;
     let mut stream =
-        TcpStream::connect_timeout(&socket_addr, CDP_IO_TIMEOUT).map_err(|err| err.to_string())?;
+        TcpStream::connect_timeout(&socket_addr, timeout).map_err(|err| err.to_string())?;
     let remaining = deadline
         .checked_duration_since(Instant::now())
         .ok_or("cdp http operation timed out")?;

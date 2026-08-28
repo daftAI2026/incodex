@@ -38,6 +38,22 @@ fn prefers_codex_app_page_and_skips_chrome_and_prewarm() {
 }
 
 #[test]
+#[cfg(target_os = "windows")]
+fn windows_cdp_injection_sets_the_shared_renderer_platform() {
+    let source = inject_source();
+    let platform = source
+        .find("window.__incodexPlatform=\"win32\";")
+        .expect("Windows CDP bootstrap platform");
+    let runtime = source
+        .find("window.__incodexStarted")
+        .expect("shared Runtime source");
+    assert!(
+        platform < runtime,
+        "platform must be set before shared injection"
+    );
+}
+
+#[test]
 fn isolated_launch_uses_the_official_new_codex_deep_link() {
     let args = debug_launch_args("/tmp/incodex-chromium", 43123);
     assert_eq!(
@@ -47,6 +63,22 @@ fn isolated_launch_uses_the_official_new_codex_deep_link() {
 }
 
 #[test]
+fn platform_cdp_networking_preserves_the_macos_contract() {
+    let mac = debug_launch_args_for_platform("/tmp/incodex-chromium", 43123, false);
+    assert!(!mac
+        .iter()
+        .any(|arg| arg.starts_with("--remote-debugging-address=")));
+    assert_eq!(cdp_hosts_for_platform(false), &["127.0.0.1", "[::1]"]);
+
+    let windows = debug_launch_args_for_platform("C:\\tmp\\incodex", 43123, true);
+    assert!(windows
+        .iter()
+        .any(|arg| arg == "--remote-debugging-address=127.0.0.1"));
+    assert_eq!(cdp_hosts_for_platform(true), &["127.0.0.1"]);
+}
+
+#[test]
+#[cfg(not(target_os = "windows"))]
 fn isolated_launch_disables_the_native_window_birth_animation() {
     let args = debug_launch_args("/tmp/incodex-chromium", 43123);
     assert_eq!(&args[..2], ["-NSAutomaticWindowAnimationsEnabled", "false"]);
@@ -218,4 +250,35 @@ fn browser_close_uses_the_cdp_browser_command() {
         browser_close_message(),
         json!({ "id": 1, "method": "Browser.close", "params": {} })
     );
+}
+
+#[test]
+fn profile_mask_transport_grace_is_windows_only() {
+    assert_eq!(profile_mask_transport_failure_polls(false), 2);
+    assert_eq!(profile_mask_transport_failure_polls(true), 4);
+}
+
+#[test]
+fn macos_profile_mask_failures_keep_shared_consecutive_timing() {
+    let mut failures = ProfileMaskFailureCounters::for_platform(false);
+    assert!(!failures.record(ProfileMaskFailureKind::Unhealthy, 2));
+    assert!(
+        failures.record(ProfileMaskFailureKind::Transport, 2),
+        "macOS must preserve the original two consecutive failures across failure kinds"
+    );
+}
+
+#[test]
+fn profile_mask_failure_kinds_do_not_borrow_each_others_threshold() {
+    let mut failures = ProfileMaskFailureCounters::for_platform(true);
+    assert!(!failures.record(ProfileMaskFailureKind::Unhealthy, 2));
+    for _ in 0..3 {
+        assert!(!failures.record(ProfileMaskFailureKind::Transport, 4));
+    }
+
+    let mut reverse = ProfileMaskFailureCounters::for_platform(true);
+    for _ in 0..3 {
+        assert!(!reverse.record(ProfileMaskFailureKind::Transport, 4));
+    }
+    assert!(!reverse.record(ProfileMaskFailureKind::Unhealthy, 2));
 }

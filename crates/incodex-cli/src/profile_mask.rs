@@ -1,7 +1,13 @@
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io::Read;
+#[cfg(not(target_os = "windows"))]
 use std::os::unix::fs::OpenOptionsExt;
+#[cfg(target_os = "windows")]
+use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
+
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
 
 use crate::friendly_name::random_friendly_name;
 
@@ -63,20 +69,17 @@ fn validate_profile_name(value: &str) -> Result<String, String> {
 }
 
 fn read_avatar_data_url(path: &Path) -> Result<String, String> {
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
-        .open(path)
-        .map_err(|error| {
-            if error.raw_os_error() == Some(libc::ELOOP) {
-                format!("avatar path must not be a symlink: {}", path.display())
-            } else {
-                format!("cannot open avatar file {}: {error}", path.display())
-            }
-        })?;
+    let file = open_avatar(path)?;
     let metadata = file
         .metadata()
         .map_err(|error| format!("cannot stat avatar file {}: {error}", path.display()))?;
+    #[cfg(target_os = "windows")]
+    if metadata.file_attributes() & 0x0000_0400 != 0 {
+        return Err(format!(
+            "avatar path must not be a reparse point: {}",
+            path.display()
+        ));
+    }
     if !metadata.file_type().is_file() {
         return Err(format!(
             "avatar path is not an ordinary file: {}",
@@ -98,6 +101,31 @@ fn read_avatar_data_url(path: &Path) -> Result<String, String> {
         "avatar must be a PNG, JPEG, or WebP file with a recognized signature".to_string()
     })?;
     Ok(format!("data:{mime};base64,{}", base64_encode(&bytes)))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn open_avatar(path: &Path) -> Result<File, String> {
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
+        .open(path)
+        .map_err(|error| {
+            if error.raw_os_error() == Some(libc::ELOOP) {
+                format!("avatar path must not be a symlink: {}", path.display())
+            } else {
+                format!("cannot open avatar file {}: {error}", path.display())
+            }
+        })?;
+    Ok(file)
+}
+
+#[cfg(target_os = "windows")]
+fn open_avatar(path: &Path) -> Result<File, String> {
+    OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+        .map_err(|error| format!("cannot open avatar file {}: {error}", path.display()))
 }
 
 fn avatar_too_large_error() -> String {
@@ -142,13 +170,18 @@ fn base64_encode(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_os = "windows"))]
     use std::ffi::CString;
     use std::fs;
+    #[cfg(not(target_os = "windows"))]
     use std::os::unix::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
+    #[cfg(not(target_os = "windows"))]
     use std::process::Command;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+    #[cfg(not(target_os = "windows"))]
+    use std::time::{Duration, Instant};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -245,6 +278,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "windows"))]
     fn avatar_validation_rejects_symlinks_with_a_clear_error() {
         let root = temp_root();
         let real = write_avatar(&root, "real.png", b"\x89PNG\r\n\x1a\nfixture");
@@ -256,6 +290,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "windows"))]
     fn avatar_fifo_helper() {
         let Some(path) = std::env::var_os("INCODEX_FIFO_AVATAR_TEST") else {
             return;
@@ -266,6 +301,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "windows"))]
     fn avatar_validation_rejects_a_fifo_without_blocking() {
         let root = temp_root();
         let fifo = root.join("avatar.png");

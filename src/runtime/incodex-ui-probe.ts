@@ -3,16 +3,19 @@ export type UiProbeInput = {
   buttonPresent: boolean;
   bannerPresent: boolean;
   bannerDismissed: boolean;
+  tooltipPresent: boolean;
 };
 
 export type UiProbeSnapshot = {
   button: "present" | "missing";
   banner: "not-applicable" | "present" | "missing" | "dismissed";
+  tooltip: "present" | "missing";
   accepted: boolean;
 };
 
 export function deriveUiProbe(input: UiProbeInput): UiProbeSnapshot {
   const button = input.buttonPresent ? "present" : "missing";
+  const tooltip = input.tooltipPresent ? "present" : "missing";
   let banner: UiProbeSnapshot["banner"];
 
   if (!input.incognito) {
@@ -28,6 +31,7 @@ export function deriveUiProbe(input: UiProbeInput): UiProbeSnapshot {
   return {
     button,
     banner,
-    accepted: button === "present" && banner !== "missing",
+    tooltip,
+    accepted: button === "present" && tooltip === "present" && banner !== "missing",
   };
 }

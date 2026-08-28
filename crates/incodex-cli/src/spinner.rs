@@ -11,6 +11,28 @@ const SPINNER_PREFIX_COLUMNS: usize = 4;
 const SPINNER_RESERVED_COLUMNS: usize = 8;
 const MIN_MESSAGE_COLUMNS: usize = 20;
 
+fn terminal_is_interactive() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        crate::windows_console::is_tty() && std::io::stderr().is_terminal()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        crate::terminal::is_tty() && std::io::stderr().is_terminal()
+    }
+}
+
+fn terminal_columns() -> usize {
+    #[cfg(target_os = "windows")]
+    {
+        crate::windows_console::stderr_columns()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        crate::terminal::stderr_columns()
+    }
+}
+
 fn format_spinner_message(message: &str, columns: usize) -> String {
     let sanitized = message.replace(['\r', '\n'], " ");
     let maximum = columns.saturating_sub(SPINNER_PREFIX_COLUMNS);
@@ -45,7 +67,7 @@ pub struct Progress {
 
 impl Progress {
     pub fn new() -> Self {
-        Self::new_for(crate::terminal::is_tty() && std::io::stderr().is_terminal())
+        Self::new_for(terminal_is_interactive())
     }
 
     fn new_for(interactive: bool) -> Self {
@@ -122,10 +144,7 @@ impl SpinnerState {
 
 impl Spinner {
     pub fn start(message: &str) -> Self {
-        Self::start_for(
-            message,
-            crate::terminal::is_tty() && std::io::stderr().is_terminal(),
-        )
+        Self::start_for(message, terminal_is_interactive())
     }
 
     fn start_for(message: &str, interactive: bool) -> Self {
@@ -133,7 +152,7 @@ impl Spinner {
     }
 
     fn start_for_interval(message: &str, interactive: bool, frame_interval: Duration) -> Self {
-        let initial_columns = crate::terminal::stderr_columns();
+        let initial_columns = terminal_columns();
         let state = Arc::new(Mutex::new(SpinnerState {
             message: message.to_string(),
             next_frame: 0,
@@ -160,7 +179,7 @@ impl Spinner {
                     break;
                 }
                 let mut state = worker_state.lock().unwrap();
-                let columns = crate::terminal::stderr_columns();
+                let columns = terminal_columns();
                 let clear = state.line_needs_clear(columns, false);
                 state.render(columns, clear);
             }
@@ -179,7 +198,7 @@ impl Spinner {
         }
         state.message = message.to_string();
         if self.worker.is_some() {
-            let columns = crate::terminal::stderr_columns();
+            let columns = terminal_columns();
             let clear = state.line_needs_clear(columns, true);
             state.render(columns, clear);
         }

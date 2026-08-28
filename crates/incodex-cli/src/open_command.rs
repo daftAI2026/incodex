@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
 use incodex_runtime_bundle::ensure_current;
 
+use crate::open_presentation::{DRY_RUN_COMPLETE, DRY_RUN_HEADING};
 use crate::parse::ParsedCli;
 use crate::profile_mask::resolve_profile_mask;
 use crate::CliFailure;
@@ -28,10 +29,7 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
 
     if parsed.dry_run {
         let (bin, _) = describe_incognito_open(&app_path).map_err(CliFailure::from)?;
-        println!(
-            "{}",
-            format_step("Open incognito without patching Codex", None)
-        );
+        println!("{}", format_step(DRY_RUN_HEADING, None));
         println!(
             "{}",
             format_kv("App", &app_path.display().to_string(), None)
@@ -40,7 +38,7 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
         if let Some(mask) = &profile_mask {
             println!("{}", format_kv("Profile", &mask.name, None));
         }
-        println!("{}", format_warn("Dry run. No window opened.", None));
+        println!("{}", format_warn(DRY_RUN_COMPLETE, None));
         return Ok(());
     }
 
@@ -68,12 +66,12 @@ pub fn run_open(parsed: &ParsedCli) -> Result<(), CliFailure> {
     println!("{}", format_kv("Session", &plan.session_id, None));
     let (process, cleanup) = wait_and_burn(&plan, &root, 250)?;
     let (ok, message) = format_session_cleanup(&cleanup);
-    if ok {
-        println!("{}", format_ok(&message, None));
+    let result = if ok {
+        format_ok(&message, None)
     } else {
-        println!("{}", format_warn(&message, None));
-    }
-    println!();
+        format_warn(&message, None)
+    };
+    crate::terminal_presentation::print_terminal_result(&result);
     let code = process.exit_code(&cleanup);
     if code == OpenExitCode::Success {
         Ok(())

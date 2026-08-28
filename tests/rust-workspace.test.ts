@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
@@ -140,5 +140,56 @@ describe("Rust workspace", () => {
       "cargo clippy --workspace --all-targets --locked -- -D warnings",
     );
     expect(ci).toContain("cargo test --workspace --release --locked");
+  });
+
+  test("Windows CI runs every supported Windows contract suite", () => {
+    const ci = read(".github/workflows/ci.yml");
+    expect(ci).toContain("bun run test:shared");
+    expect(ci).toContain("bun run test:windows");
+    for (const crate of ["incodex-core", "incodex-cli"]) {
+      const directory = join(root, "crates", crate, "tests");
+      const suites = readdirSync(directory)
+        .filter((name) => name.startsWith("windows_") && name.endsWith(".rs"))
+        .map((name) => name.slice(0, -3));
+      expect(suites.length).toBeGreaterThan(0);
+      for (const suite of suites) {
+        expect(ci).toContain(
+          `cargo test -p ${crate} --test ${suite} --release --locked`,
+        );
+      }
+    }
+  });
+
+  test("Windows terminal flows reuse the shared progress lifecycle", () => {
+    const lib = read("crates/incodex-cli/src/lib.rs");
+    const windowsOpen = read("crates/incodex-cli/src/windows_open.rs");
+    const windowsStatus = read("crates/incodex-cli/src/windows_status.rs");
+    const windowsDoctor = read("crates/incodex-cli/src/windows_doctor.rs");
+
+    expect(lib).toContain("pub mod spinner;");
+    expect(lib).not.toMatch(
+      /#\[cfg\(not\(target_os = "windows"\)\)\]\s*pub mod spinner;/,
+    );
+    expect(windowsOpen).toContain("Spinner::start(UI_READY_WAIT_MESSAGE)");
+    expect(windowsOpen).toContain("Spinner::start(WAITING_MESSAGE)");
+    expect(windowsOpen).toContain("Spinner::start(REMOVING_SESSION_MESSAGE)");
+    expect(windowsStatus).toContain("Spinner::start(STATUS_PROGRESS_MESSAGE)");
+    expect(windowsDoctor).toContain("Spinner::start(DOCTOR_PROGRESS_MESSAGE)");
+  });
+
+  test("terminal reports keep one shared formatter and main's final spacing", () => {
+    const version = read("crates/incodex-cli/src/version.rs");
+    const lib = read("crates/incodex-cli/src/lib.rs");
+    const openCommand = read("crates/incodex-cli/src/open_command.rs");
+    const windowsOpen = read("crates/incodex-cli/src/windows_open.rs");
+    const windowsStatus = read("crates/incodex-cli/src/windows_status.rs");
+    const windowsDoctor = read("crates/incodex-cli/src/windows_doctor.rs");
+
+    expect(version.match(/pub fn format_version_report/g) ?? []).toHaveLength(1);
+    expect(lib).toContain("print_terminal_report");
+    expect(windowsStatus).toContain("print_terminal_report");
+    expect(windowsDoctor).toContain("print_terminal_report");
+    expect(openCommand).toContain("print_terminal_result");
+    expect(windowsOpen).toContain("print_terminal_result");
   });
 });

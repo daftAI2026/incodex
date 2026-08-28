@@ -23,6 +23,12 @@ use crate::cdp::{
     launch_arg_prefix, monitor_profile_mask_health, start_lifecycle_monitor,
     start_primary_lifecycle_monitor, InjectionOptions, OFFICIAL_NEW_CODEX_URL,
 };
+use crate::locale::parse_locale_override;
+use crate::open_presentation::{
+    classify_completed_open, completed_open_failure_message, CompletedOpenState,
+    CLOSED_REMOVED_MESSAGE, OPENED_MESSAGE, OPENING_MESSAGE, REMOVING_SESSION_MESSAGE,
+    UI_READY_WAIT_MESSAGE, WAITING_MESSAGE,
+};
 use crate::profile_mask::ProfileMask;
 
 #[derive(Debug, Clone)]
@@ -85,15 +91,11 @@ impl OpenProcessResult {
         }
         match self {
             Self::SpawnFailed { .. } => OpenExitCode::ProcessFailure,
-            Self::Exited {
-                code: 0,
-                ui_ready: false,
-            } => OpenExitCode::UiInjectionFailure,
-            Self::Exited {
-                code: 0,
-                ui_ready: true,
-            } => OpenExitCode::Success,
-            Self::Exited { .. } => OpenExitCode::ProcessFailure,
+            Self::Exited { code, ui_ready } => match classify_completed_open(*code, *ui_ready) {
+                CompletedOpenState::Success => OpenExitCode::Success,
+                CompletedOpenState::ProcessFailure => OpenExitCode::ProcessFailure,
+                CompletedOpenState::UiInjectionFailure => OpenExitCode::UiInjectionFailure,
+            },
         }
     }
 
@@ -106,11 +108,11 @@ impl OpenProcessResult {
                     format!("Unable to start the incognito window: {error}")
                 }
                 Self::Exited { code, .. } => {
-                    format!("Incognito Codex process exited with status {code}")
+                    completed_open_failure_message(*code, CompletedOpenState::ProcessFailure)
                 }
             },
             OpenExitCode::UiInjectionFailure => {
-                "Incognito Codex UI injection was not accepted".to_string()
+                completed_open_failure_message(0, CompletedOpenState::UiInjectionFailure)
             }
             OpenExitCode::Success => String::new(),
         }
@@ -121,10 +123,6 @@ enum InjectionStatus {
     Ready,
     Failed(String),
 }
-
-const OPENING_MESSAGE: &str = "Opening incognito Codex window";
-const OPENED_MESSAGE: &str = "Opened. Incognito Codex window is ready.";
-const WAITING_MESSAGE: &str = "Waiting for the window to close";
 
 #[derive(Debug)]
 enum CleanupDisposition {
@@ -307,25 +305,16 @@ fn plan_from_session(
 }
 
 fn read_locale_override(source_home: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(source_home.join("config.toml")).ok()?;
-    content.lines().find_map(|line| {
-        let (name, value) = line.split_once('=')?;
-        if name.trim() != "localeOverride" {
-            return None;
-        }
-        value
-            .trim()
-            .strip_prefix('"')
-            .and_then(|value| value.strip_suffix('"'))
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-    })
+    let content = std::fs::read_to_string(
+        source_home.join(incodex_core::session_layout::CONFIG_SETTING_FILE),
+    )
+    .ok()?;
+    parse_locale_override(&content, &['"'])
 }
 
 pub fn format_session_cleanup(cleanup: &CleanupResult) -> (bool, String) {
     match cleanup {
-        CleanupResult::Removed { .. } => (true, "Closed. Isolated session removed.".into()),
+        CleanupResult::Removed { .. } => (true, CLOSED_REMOVED_MESSAGE.into()),
         CleanupResult::Retained {
             retained_path,
             reason,
@@ -428,7 +417,7 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
         None
     };
 
-    let mut spinner = crate::spinner::Spinner::start("Waiting for Codex UI to become ready");
+    let mut spinner = crate::spinner::Spinner::start(UI_READY_WAIT_MESSAGE);
     let mut reported = false;
     loop {
         match status_rx.try_recv() {
@@ -667,7 +656,7 @@ where
     };
     let cleanup = match outcome.cleanup {
         CleanupDisposition::Burn => {
-            let mut spinner = crate::spinner::Spinner::start("Removing isolated session");
+            let mut spinner = crate::spinner::Spinner::start(REMOVING_SESSION_MESSAGE);
             let cleanup = match quiesce(&plan.session_root) {
                 Ok(()) => burn_with_retries_with_owner(
                     &plan.session_root,

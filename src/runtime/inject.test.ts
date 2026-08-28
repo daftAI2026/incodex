@@ -4,8 +4,11 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { blobatarUri } from "blobatar/uri";
 
-const inject = readFileSync(join(import.meta.dir, "inject.ts"), "utf8");
-const profileMask = readFileSync(join(import.meta.dir, "incognito-profile-mask.ts"), "utf8");
+const inject = readFileSync(join(import.meta.dir, "inject.ts"), "utf8").replaceAll("\r\n", "\n");
+const profileMask = readFileSync(
+  join(import.meta.dir, "incognito-profile-mask.ts"),
+  "utf8",
+).replaceAll("\r\n", "\n");
 const notice = readFileSync(join(import.meta.dir, "../../NOTICE"), "utf8");
 const packageJson = JSON.parse(readFileSync(join(import.meta.dir, "../../package.json"), "utf8")) as {
   dependencies?: Record<string, string>;
@@ -60,15 +63,51 @@ describe("incognito button exit affordance", () => {
     const clickHandler = inject.slice(clickStart, clickEnd);
     expect(clickHandler).toContain("event.preventDefault()");
     expect(clickHandler).toContain("event.stopImmediatePropagation()");
+    expect(clickHandler).toContain("tooltipLifecycle.trigger()");
     expect(clickHandler).toContain("void activate()");
   });
 });
 
 describe("incognito banner placement", () => {
   test("uses the one official banner slot without a second mount model", () => {
+    expect(inject).toContain("mountInOfficialBannerSlot(host)");
     expect(inject).toContain("const slot = findOfficialBannerSlot()");
-    expect(inject).toContain("slot.insertBefore(host, slot.firstChild)");
     expect(inject).not.toContain("findLandingMount");
+  });
+});
+
+describe("launch warning placement", () => {
+  test("reuses the macOS home-banner constructor and a live official action on Windows", () => {
+    expect(inject).toMatch(
+      /function buildLanding\(\): HTMLElement \{[\s\S]*buildOfficialHomeBanner/,
+    );
+    expect(inject).toMatch(
+      /function buildWindowsLaunchErrorBanner\(\): HTMLElement \{[\s\S]*buildOfficialHomeBanner/,
+    );
+    expect(inject).toContain("cloneOfficialPrimaryAction()");
+    expect(inject).toMatch(
+      /function showLaunchError\(\): void \{[\s\S]*buildWindowsLaunchErrorBanner\(\)[\s\S]*mountInOfficialBannerSlot/,
+    );
+    expect(inject).not.toContain("data-incodex-banner-mounted");
+  });
+
+  test("waits for the shared home-banner slot instead of falling back to a Windows overlay", () => {
+    expect(inject).toMatch(
+      /function showLaunchError\(\): void \{[\s\S]*if \(isWindowsRenderer\(\)\) \{[\s\S]*ensureLaunchError\(\);[\s\S]*return;/,
+    );
+    expect(inject).toMatch(
+      /function needsInject\(\): boolean \{[\s\S]*launchErrorNeedsInject\(\)/,
+    );
+    expect(inject).toMatch(
+      /function createMutationObserver\(\): MutationObserver \{[\s\S]*ensureLaunchError\(\)/,
+    );
+  });
+});
+
+describe("platform shortcut label", () => {
+  test("keeps the macOS glyphs and labels the Windows control shortcut honestly", () => {
+    expect(inject).toContain('isWindowsRenderer() ? "Ctrl+Shift+N" : SHORTCUT_LABEL');
+    expect(inject).toContain("kbd.textContent = shortcutLabel()");
   });
 });
 
@@ -145,6 +184,9 @@ describe("incognito profile mask", () => {
     expect(profileMask).toContain("nameHost.textContent === mask.name");
     expect(profileMask).toContain("identityMaskHealth");
     expect(profileMask).toContain("profileMaskHealth");
+    expect(inject).toContain(
+      "window.__incodexRefreshProfileMaskHealth = profileMaskHealth",
+    );
   });
 
   test("distinguishes a generated kind from a validated explicit data URL", () => {
@@ -165,14 +207,25 @@ describe("incognito profile mask", () => {
     expect(inject).toContain("observer.observe(document.documentElement, observerOptions())");
   });
 
+  test("rechecks masking when a staged profile menu is linked to its footer", () => {
+    const observedAttributes = inject.match(
+      /const PROFILE_OBSERVED_ATTRIBUTES = \[([\s\S]*?)\];/,
+    )?.[1];
+
+    expect(observedAttributes).toContain('"aria-controls"');
+  });
+
   test("reobserves when CDP enables masking after Runtime startup", () => {
     expect(inject).toContain("__incodexMutationObserver");
     expect(inject).toContain("__incodexProfileObservationEnabled");
     expect(inject).toMatch(
-      /if \(window\.__incodexStarted\) \{[\s\S]*ensureMutationObserver\(\);[\s\S]*ensureProfileMask\(\);/,
+      /if \(window\.__incodexStarted\) \{[\s\S]*ensureProfileMask\(\);[\s\S]*ensureMutationObserver\(\);/,
     );
     expect(inject).toMatch(
-      /if \(observer && \(!profileRequired \|\| window\.__incodexProfileObservationEnabled\)\) return;[\s\S]*observer\.observe\(document\.documentElement, observerOptions\(\)\);/,
+      /if \(!observer\) \{[\s\S]*window\.__incodexMutationObserver = observer;[\s\S]*\}[\s\S]*observer\.observe\(document\.documentElement, observerOptions\(\)\);/,
+    );
+    expect(inject).not.toContain(
+      "if (observer && (!profileRequired || window.__incodexProfileObservationEnabled)) return;",
     );
     expect(inject).not.toContain("observer.disconnect()");
   });
@@ -199,6 +252,12 @@ describe("incodex tooltip lifecycle", () => {
 
   test("does not override the official fit-content width utility", () => {
     expect(inject).not.toContain("width: max-content");
+  });
+
+  test("inherits the live official window zoom through a positioning host", () => {
+    expect(inject).toContain("officialWindowZoom(document.documentElement)");
+    expect(inject).toContain('tip.style.zoom = zoom === 1 ? "" : String(zoom)');
+    expect(inject).toContain("TIP_HOST_ATTR");
   });
 
   test("clears an open tooltip without losing a connected button lifecycle", () => {
