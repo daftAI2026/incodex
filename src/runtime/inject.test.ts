@@ -219,10 +219,13 @@ describe("incognito profile mask", () => {
     expect(inject).toContain("__incodexMutationObserver");
     expect(inject).toContain("__incodexProfileObservationEnabled");
     expect(inject).toMatch(
-      /if \(window\.__incodexStarted\) \{[\s\S]*ensureMutationObserver\(\);[\s\S]*ensureProfileMask\(\);/,
+      /if \(window\.__incodexStarted\) \{[\s\S]*ensureProfileMask\(\);[\s\S]*ensureMutationObserver\(\);/,
     );
     expect(inject).toMatch(
-      /if \(observer && \(!profileRequired \|\| window\.__incodexProfileObservationEnabled\)\) return;[\s\S]*observer\.observe\(document\.documentElement, observerOptions\(\)\);/,
+      /if \(!observer\) \{[\s\S]*window\.__incodexMutationObserver = observer;[\s\S]*\}[\s\S]*observer\.observe\(document\.documentElement, observerOptions\(\)\);/,
+    );
+    expect(inject).not.toContain(
+      "if (observer && (!profileRequired || window.__incodexProfileObservationEnabled)) return;",
     );
     expect(inject).not.toContain("observer.disconnect()");
   });

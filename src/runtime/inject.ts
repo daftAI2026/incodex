@@ -761,7 +761,6 @@ function createMutationObserver(): MutationObserver {
 function ensureMutationObserver(): void {
   const profileRequired = profileObservationRequired();
   let observer = window.__incodexMutationObserver;
-  if (observer && (!profileRequired || window.__incodexProfileObservationEnabled)) return;
   if (!observer) {
     observer = createMutationObserver();
     window.__incodexMutationObserver = observer;
@@ -772,9 +771,13 @@ function ensureMutationObserver(): void {
 
 function start(): void {
   if (window.__incodexStarted) {
-    ensureMutationObserver();
+    ensureStyle();
+    ensureButton();
+    ensureLanding();
+    ensureLaunchError();
     ensureProfileMask();
     refreshUiProbe();
+    ensureMutationObserver();
     return;
   }
   window.__incodexStarted = true;
