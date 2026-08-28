@@ -358,6 +358,7 @@ function buildButton(search: HTMLElement): HTMLElement {
       event.stopImmediatePropagation();
       setButtonHover(btn, false);
       tooltipLifecycle.trigger();
+      btn.blur();
       void activate();
     },
     true,
@@ -812,7 +813,8 @@ function start(): void {
   ensureProfileMask();
   refreshUiProbe();
   window.addEventListener("keydown", onKeydown, true);
-  window.addEventListener("blur", dismissActiveTooltip);
+  window.addEventListener("blur", () => activeTooltipLifecycle?.windowBlur());
+  window.addEventListener("focus", () => activeTooltipLifecycle?.windowFocus());
   window.addEventListener(TOOLTIP_DISMISS_EVENT, () => activeTooltipLifecycle?.dismiss());
   ensureMutationObserver();
 }

@@ -1362,6 +1362,8 @@ function createTooltipLifecycle(deps) {
   let open = false;
   let pending = null;
   let triggerBlocked = false;
+  let windowFocused = true;
+  let restoredFocusBlocked = false;
   function cancelPending() {
     if (pending === null)
       return;
@@ -1394,6 +1396,7 @@ function createTooltipLifecycle(deps) {
   return {
     pointerEnter() {
       hovering = true;
+      restoredFocusBlocked = false;
       scheduleShow();
     },
     pointerLeave() {
@@ -1404,13 +1407,28 @@ function createTooltipLifecycle(deps) {
     },
     focus() {
       focused = true;
+      if (restoredFocusBlocked)
+        return;
       scheduleShow();
     },
     blur() {
       focused = false;
       hide();
-      if (!hovering)
-        triggerBlocked = false;
+      if (windowFocused) {
+        restoredFocusBlocked = false;
+        if (!hovering)
+          triggerBlocked = false;
+      }
+    },
+    windowBlur() {
+      if (windowFocused)
+        restoredFocusBlocked = focused;
+      windowFocused = false;
+      focused = false;
+      hide();
+    },
+    windowFocus() {
+      windowFocused = true;
     },
     dismiss: hide,
     trigger() {
@@ -1421,6 +1439,8 @@ function createTooltipLifecycle(deps) {
       hovering = false;
       focused = false;
       triggerBlocked = false;
+      windowFocused = true;
+      restoredFocusBlocked = false;
       hide();
     }
   };
@@ -1735,6 +1755,7 @@ function buildButton(search) {
     event.stopImmediatePropagation();
     setButtonHover(btn, false);
     tooltipLifecycle.trigger();
+    btn.blur();
     activate();
   }, true);
   btn.addEventListener("pointerenter", () => {
@@ -2123,7 +2144,8 @@ function start() {
   ensureProfileMask();
   refreshUiProbe();
   window.addEventListener("keydown", onKeydown, true);
-  window.addEventListener("blur", dismissActiveTooltip);
+  window.addEventListener("blur", () => activeTooltipLifecycle?.windowBlur());
+  window.addEventListener("focus", () => activeTooltipLifecycle?.windowFocus());
   window.addEventListener(TOOLTIP_DISMISS_EVENT, () => activeTooltipLifecycle?.dismiss());
   ensureMutationObserver();
 }
