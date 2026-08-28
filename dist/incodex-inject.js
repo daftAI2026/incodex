@@ -1755,6 +1755,7 @@ function buildButton(search) {
     event.stopImmediatePropagation();
     setButtonHover(btn, false);
     tooltipLifecycle.trigger();
+    btn.blur();
     activate();
   }, true);
   btn.addEventListener("pointerenter", () => {
