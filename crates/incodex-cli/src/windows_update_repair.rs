@@ -15,7 +15,8 @@ use std::time::{Duration, Instant};
 use windows::ApplicationModel::{PackageCatalog, PackageUpdatingEventArgs};
 use windows::Foundation::TypedEventHandler;
 use windows_sys::Win32::Foundation::{
-    CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, FILETIME, WAIT_OBJECT_0,
+    CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, ERROR_INVALID_PARAMETER, FILETIME,
+    WAIT_OBJECT_0,
 };
 use windows_sys::Win32::System::JobObjects::IsProcessInJob;
 use windows_sys::Win32::System::Threading::{
@@ -101,6 +102,25 @@ pub fn is_primary_package_process(command_line: &str) -> bool {
     !command_line
         .split_ascii_whitespace()
         .any(|argument| argument == "--type" || argument.starts_with("--type="))
+}
+
+pub fn await_package_quiescence_with<R, W>(
+    target_package_full_name: &str,
+    mut running_package_processes: R,
+    mut wait_for_processes: W,
+) -> Result<(), String>
+where
+    R: FnMut(&str) -> Result<Vec<u32>, std::io::Error>,
+    W: FnMut(&[u32]) -> Result<(), String>,
+{
+    loop {
+        let running = running_package_processes(target_package_full_name)
+            .map_err(|error| format!("cannot inspect running Windows Codex processes: {error}"))?;
+        if running.is_empty() {
+            return Ok(());
+        }
+        wait_for_processes(&running)?;
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -350,6 +370,17 @@ pub(crate) fn run_update_repair_coordinator(
             "Windows update repair target is not the current trusted Store generation".to_string(),
         );
     }
+    await_package_quiescence_with(
+        &target_package,
+        strict_running_codex_package_process_ids,
+        wait_for_process_ids,
+    )?;
+    let discovered = discover_codex_package()?;
+    if discovered.package_full_name != target_package {
+        return Err(
+            "Windows update repair target changed while awaiting package quiescence".to_string(),
+        );
+    }
     let repair = repair_windows_runtime_after_update_with(
         &user_root,
         WindowsUpdateRepairAuthorization {
@@ -388,6 +419,30 @@ pub(crate) fn run_update_repair_coordinator(
     .map_err(|retry_error| {
         format!("{first_error}; automatic Windows update repair retry also failed: {retry_error}")
     })
+}
+
+fn wait_for_process_ids(process_ids: &[u32]) -> Result<(), String> {
+    for process_id in process_ids {
+        let process = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, *process_id) };
+        if process.is_null() {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) {
+                continue;
+            }
+            return Err(format!(
+                "cannot observe updated Windows Codex process {process_id}: {error}"
+            ));
+        }
+        let result = unsafe { WaitForSingleObject(process, INFINITE) };
+        unsafe { CloseHandle(process) };
+        if result != WAIT_OBJECT_0 {
+            return Err(format!(
+                "cannot wait for updated Windows Codex process {process_id}: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn wait_for_update_target(
