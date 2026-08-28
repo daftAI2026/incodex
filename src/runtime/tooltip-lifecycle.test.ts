@@ -130,6 +130,17 @@ describe("tooltip lifecycle", () => {
     expect(harness.events).toEqual(["hide", "hide", "hide", "show"]);
   });
 
+  test("失焦前按钮未聚焦时不阻止新的键盘 focus", () => {
+    const harness = createHarness();
+
+    harness.lifecycle.windowBlur();
+    harness.lifecycle.windowFocus();
+    harness.lifecycle.focus();
+    harness.runScheduled();
+
+    expect(harness.events).toEqual(["hide", "show"]);
+  });
+
   test("延迟结束时重新确认按钮仍可显示", () => {
     const harness = createHarness(false);
 
