@@ -531,4 +531,59 @@ mod tests {
 
         verification.expect("recorded Runtime generation must remain verifiable");
     }
+
+    #[test]
+    fn installed_runtime_uses_the_recorded_generation_file_set() {
+        let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let user_root = std::env::temp_dir().join(format!(
+            "incodex-windows-runtime-layout-{}-{sequence}",
+            std::process::id()
+        ));
+        let published = publish_windows_runtime(&user_root).expect("publish current Runtime");
+
+        let retired_name = "incodex-owner-recovery.cjs";
+        fs::remove_file(published.release_dir.join(retired_name))
+            .expect("remove retired Runtime artifact");
+        let future_name = "incodex-future-owner.cjs";
+        write_private_file(
+            &published.release_dir.join(future_name),
+            b"future Runtime generation",
+        )
+        .expect("write future Runtime artifact");
+
+        let mut files = BTreeMap::new();
+        for name in WINDOWS_RUNTIME_FILES
+            .iter()
+            .copied()
+            .filter(|name| *name != retired_name)
+            .chain([future_name])
+        {
+            files.insert(
+                name.to_string(),
+                crate::windows_file::sha256_file(&published.release_dir.join(name))
+                    .expect("hash recorded Runtime artifact"),
+            );
+        }
+        let manifest = serde_json::json!({
+            "schemaVersion": 1,
+            "runtimeVersion": "0.5.0",
+            "sourceCommit": "",
+            "files": files,
+        });
+        let manifest_body = serde_json::to_vec_pretty(&manifest).expect("write recorded manifest");
+        fs::write(published.release_dir.join(MANIFEST_NAME), &manifest_body)
+            .expect("replace recorded Runtime manifest");
+        let future_release = format!("0.5.0-{}", sha256_hex(&manifest_body));
+        let future_dir = published
+            .release_dir
+            .parent()
+            .expect("Runtime releases parent")
+            .join(&future_release);
+        fs::rename(&published.release_dir, &future_dir).expect("record future generation");
+
+        let verification = verify_installed_windows_runtime(&user_root, &future_release);
+        fs::remove_dir_all(&user_root).expect("remove future Runtime fixture");
+
+        verification.expect("recorded Runtime file set must define its own generation");
+    }
 }
