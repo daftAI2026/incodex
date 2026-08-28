@@ -84,9 +84,10 @@ export function createTooltipLifecycle(deps: TooltipLifecycleDeps): TooltipLifec
       }
     },
     windowBlur() {
+      const focusWasActive = focused;
       windowFocused = false;
       focused = false;
-      restoredFocusBlocked = true;
+      restoredFocusBlocked = focusWasActive;
       hide();
     },
     windowFocus() {

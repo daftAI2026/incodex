@@ -1421,9 +1421,10 @@ function createTooltipLifecycle(deps) {
       }
     },
     windowBlur() {
+      const focusWasActive = focused;
       windowFocused = false;
       focused = false;
-      restoredFocusBlocked = true;
+      restoredFocusBlocked = focusWasActive;
       hide();
     },
     windowFocus() {
