@@ -75,6 +75,7 @@ jobs:
           cargo test -p incodex-cli --test windows_app --release --locked
           cargo test -p incodex-cli --test windows_cdp --release --locked
           cargo test -p incodex-cli --test windows_helper --release --locked
+          cargo test -p incodex-cli --test windows_install_confirmation --release --locked
           cargo test -p incodex-cli --test windows_install_state --release --locked
           cargo test -p incodex-cli --test windows_launch --release --locked
           cargo test -p incodex-cli --test windows_open --release --locked
