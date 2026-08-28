@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::os::windows::fs::MetadataExt;
@@ -84,6 +84,7 @@ const RUNTIME_FILES: &[(&str, &str)] = &[
 const MANIFEST: &str = include_str!("../../../dist/runtime-manifest.json");
 const MANIFEST_NAME: &str = "runtime-manifest.json";
 const MANIFEST_LIMIT: u64 = 64 * 1024;
+const RECORDED_MANIFEST_SCHEMA: u32 = 1;
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,6 +98,15 @@ pub struct PublishedWindowsRuntime {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RuntimeManifest {
+    runtime_version: String,
+    source_commit: String,
+    files: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecordedWindowsRuntimeManifest {
+    schema_version: u32,
     runtime_version: String,
     source_commit: String,
     files: BTreeMap<String, String>,
@@ -117,18 +127,20 @@ pub fn publish_windows_runtime(user_root: &Path) -> Result<PublishedWindowsRunti
     let manifest: RuntimeManifest = serde_json::from_str(MANIFEST)
         .map_err(|error| format!("invalid Runtime manifest: {error}"))?;
     validate_manifest(&manifest)?;
-    let manifest_hash = sha256_hex(MANIFEST.as_bytes());
-    let release_hash = windows_release_hash();
-    let release_name = format!("{}-{release_hash}", manifest.runtime_version);
+    let recorded_manifest = recorded_windows_manifest(&manifest)?;
+    let recorded_manifest_body = serde_json::to_vec_pretty(&recorded_manifest)
+        .map_err(|error| format!("cannot serialize Windows Runtime manifest: {error}"))?;
+    let manifest_hash = sha256_hex(&recorded_manifest_body);
+    let release_name = format!("{}-{manifest_hash}", manifest.runtime_version);
 
     let user_root = ensure_private_windows_dir(user_root)?;
     let runtime_root = ensure_private_windows_dir(&user_root.join("runtime"))?;
     let releases = ensure_private_windows_dir(&runtime_root.join("releases"))?;
     let release_dir = releases.join(&release_name);
-    publish_release(&releases, &release_dir, &manifest)?;
+    publish_release(&releases, &release_dir, &manifest, &recorded_manifest_body)?;
 
     let relative_release = format!("releases/{release_name}");
-    let files = runtime_hashes(&manifest)?;
+    let files = recorded_manifest.files;
     let pointer = RuntimePointer {
         schema_version: 1,
         version: &manifest.runtime_version,
@@ -183,9 +195,10 @@ fn publish_release(
     releases: &Path,
     release_dir: &Path,
     manifest: &RuntimeManifest,
+    recorded_manifest_body: &[u8],
 ) -> Result<(), String> {
     match fs::symlink_metadata(release_dir) {
-        Ok(_) => return verify_release(release_dir, manifest),
+        Ok(_) => return verify_release(release_dir, manifest, recorded_manifest_body),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(format!("cannot inspect Runtime release: {error}")),
     }
@@ -203,11 +216,13 @@ fn publish_release(
         for (name, body) in WINDOWS_ASSETS {
             write_private_file(&staging.join(name), body.as_bytes())?;
         }
-        write_private_file(&staging.join(MANIFEST_NAME), MANIFEST.as_bytes())?;
-        verify_release(&staging, manifest)?;
+        write_private_file(&staging.join(MANIFEST_NAME), recorded_manifest_body)?;
+        verify_release(&staging, manifest, recorded_manifest_body)?;
         match fs::rename(&staging, release_dir) {
             Ok(()) => Ok(()),
-            Err(_error) if release_dir.exists() => verify_release(release_dir, manifest),
+            Err(_error) if release_dir.exists() => {
+                verify_release(release_dir, manifest, recorded_manifest_body)
+            }
             Err(error) => Err(format!("cannot commit Runtime release: {error}")),
         }
     })();
@@ -217,7 +232,11 @@ fn publish_release(
     result
 }
 
-fn verify_release(path: &Path, manifest: &RuntimeManifest) -> Result<(), String> {
+fn verify_release(
+    path: &Path,
+    manifest: &RuntimeManifest,
+    recorded_manifest_body: &[u8],
+) -> Result<(), String> {
     ensure_regular_directory(path)?;
     verify_private_acl(path)?;
     for (name, body) in RUNTIME_FILES {
@@ -248,7 +267,7 @@ fn verify_release(path: &Path, manifest: &RuntimeManifest) -> Result<(), String>
     verify_private_acl(&manifest_path)?;
     let actual = fs::read(&manifest_path)
         .map_err(|error| format!("cannot read Runtime manifest: {error}"))?;
-    if actual != MANIFEST.as_bytes() {
+    if actual != recorded_manifest_body {
         return Err("Runtime manifest does not match embedded release".to_string());
     }
     validate_manifest(manifest)
@@ -268,7 +287,67 @@ fn verify_recorded_release(path: &Path, runtime_release: &str) -> Result<(), Str
     }
     let manifest_body = fs::read(&manifest_path)
         .map_err(|error| format!("cannot read Runtime manifest: {error}"))?;
-    let manifest: RuntimeManifest = serde_json::from_slice(&manifest_body)
+    let manifest_value: serde_json::Value = serde_json::from_slice(&manifest_body)
+        .map_err(|error| format!("invalid recorded Runtime manifest: {error}"))?;
+    if manifest_value.get("schemaVersion").is_some() {
+        let manifest: RecordedWindowsRuntimeManifest = serde_json::from_value(manifest_value)
+            .map_err(|error| format!("invalid recorded Windows Runtime manifest: {error}"))?;
+        verify_self_describing_release(path, runtime_release, &manifest_body, &manifest)
+    } else {
+        verify_legacy_recorded_release(path, runtime_release, &manifest_body)
+    }
+}
+
+fn verify_self_describing_release(
+    path: &Path,
+    runtime_release: &str,
+    manifest_body: &[u8],
+    manifest: &RecordedWindowsRuntimeManifest,
+) -> Result<(), String> {
+    if manifest.schema_version != RECORDED_MANIFEST_SCHEMA {
+        return Err("recorded Windows Runtime manifest schema is unsupported".to_string());
+    }
+    validate_runtime_metadata(&manifest.runtime_version, &manifest.source_commit)?;
+    if manifest.files.is_empty() || manifest.files.len() > 64 {
+        return Err("recorded Windows Runtime manifest file count is invalid".to_string());
+    }
+    if !manifest.files.contains_key(WINDOWS_BOOTSTRAP_NAME) {
+        return Err("recorded Windows Runtime manifest has no bootstrap".to_string());
+    }
+
+    let mut casefolded_names = BTreeSet::new();
+    for (name, expected) in &manifest.files {
+        validate_recorded_file_name(name)?;
+        if !casefolded_names.insert(name.to_ascii_lowercase()) {
+            return Err("recorded Windows Runtime manifest has colliding file names".to_string());
+        }
+        let file = path.join(name);
+        ensure_regular_file(&file)?;
+        verify_private_acl(&file)?;
+        validate_sha256(expected, &format!("recorded Runtime hash for {name}"))?;
+        let actual = crate::windows_file::sha256_file(&file)?;
+        if &actual != expected {
+            return Err(format!("recorded Runtime artifact hash mismatch: {name}"));
+        }
+    }
+
+    verify_recorded_directory_entries(path, manifest.files.keys())?;
+    let release_hash = sha256_hex(manifest_body);
+    let expected_release = format!("{}-{release_hash}", manifest.runtime_version);
+    if runtime_release != expected_release {
+        return Err(
+            "Windows Runtime release identity does not match its recorded contents".to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn verify_legacy_recorded_release(
+    path: &Path,
+    runtime_release: &str,
+    manifest_body: &[u8],
+) -> Result<(), String> {
+    let manifest: RuntimeManifest = serde_json::from_slice(manifest_body)
         .map_err(|error| format!("invalid recorded Runtime manifest: {error}"))?;
     validate_manifest_metadata(&manifest)?;
 
@@ -287,7 +366,7 @@ fn verify_recorded_release(path: &Path, runtime_release: &str) -> Result<(), Str
         }
     }
 
-    let release_hash = recorded_windows_release_hash(path, &manifest_body)?;
+    let release_hash = recorded_windows_release_hash(path, manifest_body)?;
     let expected_release = format!("{}-{release_hash}", manifest.runtime_version);
     if runtime_release != expected_release {
         return Err(
@@ -304,17 +383,73 @@ fn validate_manifest(manifest: &RuntimeManifest) -> Result<(), String> {
 }
 
 fn validate_manifest_metadata(manifest: &RuntimeManifest) -> Result<(), String> {
-    if manifest.runtime_version.is_empty() {
+    validate_runtime_metadata(&manifest.runtime_version, &manifest.source_commit)
+}
+
+fn validate_runtime_metadata(runtime_version: &str, source_commit: &str) -> Result<(), String> {
+    if runtime_version.is_empty() {
         return Err("Runtime manifest has no version".to_string());
     }
-    if !manifest.source_commit.is_empty()
-        && (manifest.source_commit.len() != 40
-            || !manifest
-                .source_commit
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit()))
+    if !source_commit.is_empty()
+        && (source_commit.len() != 40
+            || !source_commit.bytes().all(|byte| byte.is_ascii_hexdigit()))
     {
         return Err("Runtime manifest has an invalid source commit".to_string());
+    }
+    Ok(())
+}
+
+fn recorded_windows_manifest(
+    manifest: &RuntimeManifest,
+) -> Result<RecordedWindowsRuntimeManifest, String> {
+    let mut files = runtime_hashes(manifest)?;
+    for (name, body) in WINDOWS_ASSETS {
+        files.insert((*name).to_string(), sha256_hex(body.as_bytes()));
+    }
+    Ok(RecordedWindowsRuntimeManifest {
+        schema_version: RECORDED_MANIFEST_SCHEMA,
+        runtime_version: manifest.runtime_version.clone(),
+        source_commit: manifest.source_commit.clone(),
+        files,
+    })
+}
+
+fn validate_recorded_file_name(name: &str) -> Result<(), String> {
+    if name.is_empty()
+        || name == MANIFEST_NAME
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    {
+        return Err(format!(
+            "recorded Windows Runtime file name is invalid: {name}"
+        ));
+    }
+    Ok(())
+}
+
+fn verify_recorded_directory_entries<'a>(
+    path: &Path,
+    recorded_names: impl Iterator<Item = &'a String>,
+) -> Result<(), String> {
+    let mut expected = recorded_names
+        .map(|name| name.to_ascii_lowercase())
+        .collect::<BTreeSet<_>>();
+    expected.insert(MANIFEST_NAME.to_string());
+    let mut actual = BTreeSet::new();
+    for entry in fs::read_dir(path)
+        .map_err(|error| format!("cannot enumerate recorded Windows Runtime: {error}"))?
+    {
+        let entry =
+            entry.map_err(|error| format!("cannot enumerate recorded Windows Runtime: {error}"))?;
+        let name = entry
+            .file_name()
+            .into_string()
+            .map_err(|_| "recorded Windows Runtime has a non-Unicode file name".to_string())?;
+        actual.insert(name.to_ascii_lowercase());
+    }
+    if actual != expected {
+        return Err("recorded Windows Runtime directory does not match its manifest".to_string());
     }
     Ok(())
 }
@@ -423,22 +558,6 @@ fn sha256_hex(bytes: &[u8]) -> String {
         .collect()
 }
 
-fn windows_release_hash() -> String {
-    let mut hash = Sha256::new();
-    hash.update(MANIFEST.as_bytes());
-    hash.update([0]);
-    for (name, body) in WINDOWS_ASSETS {
-        hash.update(name.as_bytes());
-        hash.update([0]);
-        hash.update(body.as_bytes());
-        hash.update([0]);
-    }
-    hash.finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
-
 fn recorded_windows_release_hash(path: &Path, manifest_body: &[u8]) -> Result<String, String> {
     let mut hash = Sha256::new();
     hash.update(manifest_body);
@@ -494,6 +613,16 @@ mod tests {
             &fs::read(&manifest_path).expect("read current Runtime manifest"),
         )
         .expect("parse current Runtime manifest");
+        manifest
+            .as_object_mut()
+            .expect("Runtime manifest object")
+            .remove("schemaVersion");
+        let files = manifest["files"]
+            .as_object_mut()
+            .expect("Runtime manifest files");
+        for (name, _) in WINDOWS_ASSETS {
+            files.remove(*name);
+        }
         manifest["files"]["incodex-main.cjs"] =
             serde_json::Value::String(sha256_hex(previous_main));
         let manifest_body = serde_json::to_vec_pretty(&manifest).expect("write previous manifest");
