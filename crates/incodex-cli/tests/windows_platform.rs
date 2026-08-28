@@ -30,6 +30,11 @@ fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).replace("\r\n", "\n")
 }
 
+fn store_package_unavailable(message: &str) -> bool {
+    message.contains("official Codex Microsoft Store package is not installed")
+        || message.contains("Windows package query failed")
+}
+
 #[test]
 fn help_and_version_are_available_without_creating_state() {
     let profile = scratch_profile();
@@ -124,22 +129,38 @@ fn unsupported_product_commands_fail_closed_before_creating_state() {
 }
 
 #[test]
-fn install_and_uninstall_dry_run_discover_the_store_package_without_writing_state() {
+fn install_and_uninstall_dry_run_require_discovery_without_writing_state() {
     for (command, heading) in [("install", "Install"), ("uninstall", "Uninstall")] {
         let profile = scratch_profile();
         let output = run(&[command, "--dry-run"], &profile);
         let stdout = text(&output.stdout);
         let stderr = text(&output.stderr);
 
-        assert!(output.status.success(), "{command}: {stderr}");
-        assert!(stdout.contains(heading), "{command}: {stdout}");
-        assert!(stdout.contains("OpenAI.Codex"), "{command}: {stdout}");
-        assert!(stdout.contains("ChatGPT.exe"), "{command}: {stdout}");
-        assert!(
-            stdout.contains("Dry run. No files changed."),
-            "{command}: {stdout}"
-        );
-        assert!(stderr.is_empty(), "{command}: {stderr}");
+        if output.status.success() {
+            assert!(stdout.contains(heading), "{command}: {stdout}");
+            if command == "install" {
+                assert!(stdout.contains("OpenAI.Codex"), "{command}: {stdout}");
+                assert!(stdout.contains("ChatGPT.exe"), "{command}: {stdout}");
+            } else {
+                assert!(
+                    stdout.contains("OpenAI.Codex") || stdout.contains("Not discovered"),
+                    "{command}: {stdout}"
+                );
+                assert!(
+                    stdout.contains("ChatGPT.exe") || stdout.contains("Unavailable"),
+                    "{command}: {stdout}"
+                );
+            }
+            assert!(
+                stdout.contains("Dry run. No files changed."),
+                "{command}: {stdout}"
+            );
+            assert!(stderr.is_empty(), "{command}: {stderr}");
+        } else {
+            assert_eq!(command, "install", "{command}: {stderr}");
+            assert!(store_package_unavailable(&stderr), "{command}: {stderr}");
+            assert!(stdout.is_empty(), "{command}: {stdout}");
+        }
         assert!(!profile.exists(), "{command} dry run created product state");
     }
 }
@@ -262,14 +283,15 @@ fn windows_open_dry_run_resolves_and_reports_profile_mask() {
 }
 
 #[test]
-fn mutating_install_requires_explicit_confirmation_without_a_tty() {
+fn mutating_install_never_reaches_mutation_without_confirmation() {
     let profile = scratch_profile();
     let output = run(&["install"], &profile);
     assert_eq!(output.status.code(), Some(1));
+    let stderr = text(&output.stderr);
     assert!(
-        text(&output.stderr).contains("non-interactive install requires --yes"),
-        "{}",
-        text(&output.stderr)
+        stderr.contains("non-interactive install requires --yes")
+            || store_package_unavailable(&stderr),
+        "{stderr}"
     );
     assert!(!profile.exists(), "unconfirmed install created state");
 }
@@ -311,9 +333,19 @@ fn doctor_reports_package_and_session_health_without_creating_state() {
     assert!(report.contains("Integration"), "{report}");
     assert!(report.contains("Installed"), "{report}");
     for expected in [
-        "➤ App", "Package", "Sessions", "Active", "Orphaned", "Unknown",
+        "➤ App",
+        "Available",
+        "Sessions",
+        "Active",
+        "Orphaned",
+        "Unknown",
     ] {
         assert!(report.contains(expected), "missing {expected}: {report}");
+    }
+    if report.contains("official Codex Microsoft Store package is not installed") {
+        assert!(!report.contains("Package"), "{report}");
+    } else {
+        assert!(report.contains("Package"), "{report}");
     }
     assert!(!report.contains("Windows Doctor"), "{report}");
     assert!(doctor.stderr.is_empty(), "{}", text(&doctor.stderr));

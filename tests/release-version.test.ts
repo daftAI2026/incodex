@@ -16,7 +16,7 @@ const workspacePackages = [
 ];
 
 function read(rootDir: string, path: string): string {
-  return readFileSync(join(rootDir, path), "utf8");
+  return readFileSync(join(rootDir, path), "utf8").replaceAll("\r\n", "\n");
 }
 
 function fixture(): string {
