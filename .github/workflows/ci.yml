@@ -55,14 +55,20 @@ jobs:
       - name: Frozen install
         run: bun install --frozen-lockfile
       - name: Shared Windows Runtime boundary
+        shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           bun run typecheck
           bun run lint
           bun run check:dist
           bun run test:shared
           bun run test:windows
       - name: Windows CLI boundary
+        shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           cargo fmt --all -- --check
           cargo clippy -p incodex-core --lib --locked -- -D warnings
           cargo clippy -p incodex-cli --lib --bin incodex --locked -- -D warnings
