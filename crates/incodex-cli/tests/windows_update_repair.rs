@@ -167,13 +167,8 @@ fn stale_coordinator_cannot_cross_an_uninstall_and_same_generation_reinstall() {
     let old_epoch = first.epoch;
 
     assert_eq!(
-        uninstall_windows_runtime_with(
-            &user_root,
-            |_| Ok(Vec::new()),
-            |_| Ok(false),
-            |_| Ok(()),
-        )
-        .expect("uninstall first registration"),
+        uninstall_windows_runtime_with(&user_root, |_| Ok(Vec::new()), |_| Ok(false), |_| Ok(()),)
+            .expect("uninstall first registration"),
         WindowsUninstallOutcome::Removed,
     );
     let second = install_windows_runtime_with(
@@ -250,6 +245,27 @@ fn interrupted_repair_retains_a_durable_update_intent() {
     assert_eq!(intent.source_registration_id, installed.registration_id);
     assert_eq!(intent.source_package_full_name, OLD_PACKAGE);
     assert_eq!(intent.target_package_full_name, NEW_PACKAGE);
+
+    let resumed = install_windows_runtime_with(
+        &user_root,
+        NEW_PACKAGE,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(true),
+        |_| Ok(()),
+        |registration| {
+            assert_eq!(registration.package_full_name(), NEW_PACKAGE);
+            Ok(())
+        },
+    )
+    .expect("a later install process consumes the durable repair intent");
+    assert_eq!(resumed.package_full_name, NEW_PACKAGE);
+    assert!(
+        read_windows_update_repair_intent(&user_root)
+            .expect("read completed update intent")
+            .is_none(),
+        "successful recovery retires the update intent"
+    );
 
     fs::remove_dir_all(user_root).expect("remove update repair fixture");
 }
