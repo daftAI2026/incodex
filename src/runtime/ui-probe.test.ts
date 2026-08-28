@@ -53,9 +53,18 @@ describe("minimal Runtime UI injection snapshot", () => {
     expect(inject).not.toMatch(/capabilit|appVersion|buildVersion/i);
   });
 
-  test("refreshes a stale snapshot when did-finish-load reinjects the bundle", () => {
+  test("repairs stale mounts when did-finish-load reinjects the bundle", () => {
     expect(inject).toMatch(
-      /if \(window\.__incodexStarted\) \{\s*ensureMutationObserver\(\);\s*ensureProfileMask\(\);\s*refreshUiProbe\(\);\s*return;\s*\}/,
+      /if \(window\.__incodexStarted\) \{[\s\S]*ensureButton\(\);[\s\S]*ensureLanding\(\);[\s\S]*ensureLaunchError\(\);[\s\S]*ensureProfileMask\(\);[\s\S]*refreshUiProbe\(\);[\s\S]*ensureMutationObserver\(\);[\s\S]*return;/,
+    );
+  });
+
+  test("reobserves the document when a previous injector left an unobserved instance", () => {
+    expect(inject).not.toMatch(
+      /if \(observer && \(!profileRequired \|\| window\.__incodexProfileObservationEnabled\)\) return;/,
+    );
+    expect(inject).toMatch(
+      /if \(!observer\) \{[\s\S]*window\.__incodexMutationObserver = observer;[\s\S]*\}[\s\S]*observer\.observe\(document\.documentElement, observerOptions\(\)\);/,
     );
   });
 });
