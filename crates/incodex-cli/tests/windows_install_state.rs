@@ -13,6 +13,7 @@ use incodex_cli::windows_install_state::{
     acquire_windows_install_state, read_windows_install_state, stage_windows_install_state,
     transition_windows_install_state, WindowsInstallPhase, WindowsInstallStateGuard,
 };
+use incodex_cli::windows_registration::recover_transient_windows_debug_registration_with;
 use incodex_core::windows_session::verify_private_acl;
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -486,6 +487,14 @@ fn install_replaces_a_stale_store_generation() {
     )
     .expect("install old Store generation");
 
+    assert!(!recover_transient_windows_debug_registration_with(
+        &user_root,
+        |_| Ok(Vec::new()),
+        |_| panic!("an installed registration is not transient recovery"),
+        |_| panic!("an installed registration is not transient recovery"),
+    )
+    .expect("the public install gate must preserve matching installed evidence"));
+
     let replacement = install_windows_runtime_with(
         &user_root,
         new_package,
@@ -500,6 +509,49 @@ fn install_replaces_a_stale_store_generation() {
     assert_eq!(replacement.package_full_name, new_package);
     assert_eq!(replacement.phase, WindowsInstallPhase::EnabledUnobserved);
     fs::remove_dir_all(user_root).expect("remove Store replacement fixture");
+}
+
+#[test]
+fn install_keeps_the_old_generation_when_the_current_store_app_is_running() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let old_package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    let new_package = "OpenAI.Codex_1.2.3.5_x64__publisher";
+    let old = install_windows_runtime_with(
+        &user_root,
+        old_package,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .expect("install old Store generation");
+
+    let error = install_windows_runtime_with(
+        &user_root,
+        new_package,
+        &helper,
+        |package| {
+            Ok(if package == new_package {
+                vec![42]
+            } else {
+                Vec::new()
+            })
+        },
+        |_| Ok(false),
+        |_| panic!("a running current generation must preserve the old registration"),
+        |_| panic!("a running current generation must block new enable"),
+    )
+    .expect_err("the current Store app must block replacement before old-state cleanup");
+
+    assert!(error.contains("close Codex"), "{error}");
+    let retained = read_windows_install_state(&user_root)
+        .expect("read retained old state")
+        .expect("old state remains");
+    assert_eq!(retained.registration_id, old.registration_id);
+    assert_eq!(retained.phase, WindowsInstallPhase::EnabledUnobserved);
+    fs::remove_dir_all(user_root).expect("remove current-generation process fixture");
 }
 
 #[test]
