@@ -37,6 +37,9 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
         return Ok(());
     }
     crate::confirm::require("install", parsed.yes)?;
+    let profile = crate::windows_profile::windows_user_profile()?;
+    let user_root = profile.join(".incodex");
+    let _registration_gate = acquire_windows_install_state()?;
     let confirmed_app = discover_codex_package()?;
     if confirmed_app.package_full_name != app.package_full_name {
         return Err(
@@ -44,9 +47,6 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
                 .to_string(),
         );
     }
-    let profile = crate::windows_profile::windows_user_profile()?;
-    let user_root = profile.join(".incodex");
-    let _registration_gate = acquire_windows_install_state()?;
     recover_transient_windows_debug_registration_with(
         &user_root,
         running_package_process_ids,
@@ -55,7 +55,7 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
     )?;
     let helper = std::env::current_exe()
         .map_err(|error| format!("cannot locate the running Incodex executable: {error}"))?;
-    let installed = install_windows_runtime_with(
+    let installed = install_windows_runtime_with_package_probe(
         &user_root,
         &confirmed_app.package_full_name,
         &helper,
@@ -63,6 +63,7 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
         codex_package_full_name_is_installed,
         disable_installed_runtime,
         enable_installed_runtime,
+        || discover_codex_package().map(|app| app.package_full_name),
     )?;
     println!(
         "{}",
@@ -83,9 +84,9 @@ pub fn install_windows_runtime_with<R, P, D, E>(
     user_root: &Path,
     package_full_name: &str,
     helper_source: &Path,
-    mut running_package_processes: R,
-    mut package_is_installed: P,
-    mut disable: D,
+    running_package_processes: R,
+    package_is_installed: P,
+    disable: D,
     enable: E,
 ) -> Result<WindowsInstallState, String>
 where
@@ -94,7 +95,37 @@ where
     D: FnMut(&str) -> Result<(), String>,
     E: FnOnce(&WindowsInstalledRuntimeRegistration) -> Result<(), String>,
 {
+    install_windows_runtime_with_package_probe(
+        user_root,
+        package_full_name,
+        helper_source,
+        running_package_processes,
+        package_is_installed,
+        disable,
+        enable,
+        || Ok(package_full_name.to_string()),
+    )
+}
+
+fn install_windows_runtime_with_package_probe<R, P, D, E, G>(
+    user_root: &Path,
+    package_full_name: &str,
+    helper_source: &Path,
+    mut running_package_processes: R,
+    mut package_is_installed: P,
+    mut disable: D,
+    enable: E,
+    mut package_probe: G,
+) -> Result<WindowsInstallState, String>
+where
+    R: FnMut(&str) -> Result<Vec<u32>, std::io::Error>,
+    P: FnMut(&str) -> Result<bool, String>,
+    D: FnMut(&str) -> Result<(), String>,
+    E: FnOnce(&WindowsInstalledRuntimeRegistration) -> Result<(), String>,
+    G: FnMut() -> Result<String, String>,
+{
     let _transaction = acquire_windows_install_state()?;
+    revalidate_windows_install_generation(package_full_name, &mut package_probe)?;
     let existing = read_windows_install_state(user_root)?;
     if let Some(existing) = existing.as_ref() {
         if existing.package_full_name == package_full_name {
@@ -144,6 +175,7 @@ where
         .and_then(|name| name.to_str())
         .ok_or_else(|| "Windows Runtime release name is not valid Unicode".to_string())?;
     let helper = publish_windows_helper(user_root, helper_source)?;
+    revalidate_windows_install_generation(package_full_name, &mut package_probe)?;
     let staged = stage_windows_install_state(
         user_root,
         package_full_name,
@@ -182,6 +214,48 @@ where
         );
         return Err(join_recovery_error(error, recovery));
     }
+    let running_after_enable = match running_package_processes(package_full_name) {
+        Ok(running) => running,
+        Err(error) => {
+            return Err(recover_after_install_enable_failure(
+                user_root,
+                pending.epoch,
+                package_full_name,
+                &mut disable,
+                format!(
+                    "cannot prove Codex remained closed while enabling the Windows Runtime: {error}"
+                ),
+            ));
+        }
+    };
+    if !running_after_enable.is_empty() {
+        return Err(recover_after_install_enable_failure(
+            user_root,
+            pending.epoch,
+            package_full_name,
+            &mut disable,
+            format!(
+                "Codex started while the Windows Runtime registration was being enabled (running package PIDs: {})",
+                running_after_enable
+                    .iter()
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        ));
+    }
+
+    if let Err(error) = revalidate_windows_install_generation(package_full_name, &mut package_probe)
+    {
+        return Err(recover_after_install_enable_failure(
+            user_root,
+            pending.epoch,
+            package_full_name,
+            &mut disable,
+            format!("Windows Store generation changed while enabling the Runtime: {error}"),
+        ));
+    }
+
     let enabled = match transition_windows_install_state(
         user_root,
         pending.epoch,
@@ -202,49 +276,54 @@ where
             ));
         }
     };
-    let running_after_enable = match running_package_processes(package_full_name) {
-        Ok(running) => running,
-        Err(error) => {
-            let rollback = disable(package_full_name);
-            let recovery = transition_windows_install_state(
-                user_root,
-                enabled.epoch,
-                WindowsInstallPhase::RecoveryRequired,
-            );
-            return Err(join_recovery_error(
-                join_registration_rollback_error(
-                    format!(
-                        "cannot prove Codex remained closed while enabling the Windows Runtime: {error}"
-                    ),
-                    rollback,
-                ),
-                recovery,
-            ));
-        }
-    };
-    if !running_after_enable.is_empty() {
-        let rollback = disable(package_full_name);
-        let recovery = transition_windows_install_state(
+
+    if let Err(error) = revalidate_windows_install_generation(package_full_name, &mut package_probe)
+    {
+        return Err(recover_after_install_enable_failure(
             user_root,
             enabled.epoch,
-            WindowsInstallPhase::RecoveryRequired,
-        );
-        return Err(join_recovery_error(
-            join_registration_rollback_error(
-                format!(
-                    "Codex started while the Windows Runtime registration was being enabled (running package PIDs: {})",
-                    running_after_enable
-                        .iter()
-                        .map(u32::to_string)
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-                rollback,
-            ),
-            recovery,
+            package_full_name,
+            &mut disable,
+            format!("Windows Store generation changed after enabling the Runtime: {error}"),
         ));
     }
+
     Ok(enabled)
+}
+
+fn revalidate_windows_install_generation<G>(
+    expected_package_full_name: &str,
+    package_probe: &mut G,
+) -> Result<(), String>
+where
+    G: FnMut() -> Result<String, String>,
+{
+    let current_package_full_name = package_probe()?;
+    if current_package_full_name == expected_package_full_name {
+        return Ok(());
+    }
+    Err(format!(
+        "Windows install target changed during mutation: expected {expected_package_full_name}, found {current_package_full_name}"
+    ))
+}
+
+fn recover_after_install_enable_failure<D>(
+    user_root: &Path,
+    expected_epoch: u64,
+    package_full_name: &str,
+    disable: &mut D,
+    error: String,
+) -> String
+where
+    D: FnMut(&str) -> Result<(), String>,
+{
+    let rollback = disable(package_full_name);
+    let recovery = transition_windows_install_state(
+        user_root,
+        expected_epoch,
+        WindowsInstallPhase::RecoveryRequired,
+    );
+    join_recovery_error(join_registration_rollback_error(error, rollback), recovery)
 }
 
 fn join_recovery_error(error: String, recovery: Result<WindowsInstallState, String>) -> String {
