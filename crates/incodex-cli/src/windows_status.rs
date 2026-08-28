@@ -106,14 +106,19 @@ impl WindowsIntegrationStatus {
         }
 
         let package_full_name = match registration {
-            Ok(Some(evidence)) if evidence.kind == WindowsDebugRegistrationKind::Installed => {
-                health_issues.push(
-                    "Windows debugger registration requires recovery because primary install state is missing or unhealthy."
-                        .to_string(),
-                );
+            Ok(Some(evidence)) => {
+                let issue = match evidence.kind {
+                    WindowsDebugRegistrationKind::Installed => {
+                        "Windows debugger registration requires recovery because primary install state is missing or unhealthy."
+                    }
+                    WindowsDebugRegistrationKind::Transient => {
+                        "Transient Windows debugger registration requires recovery."
+                    }
+                };
+                health_issues.push(issue.to_string());
                 Some(evidence.package_full_name)
             }
-            Ok(_) => None,
+            Ok(None) => None,
             Err(error) => {
                 health_issues.push(format!(
                     "Windows debugger registration evidence is unhealthy: {error}"
