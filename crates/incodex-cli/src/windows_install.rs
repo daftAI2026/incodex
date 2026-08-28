@@ -88,13 +88,28 @@ where
     E: FnOnce(&WindowsInstalledRuntimeRegistration) -> Result<(), String>,
 {
     let _transaction = acquire_windows_install_state()?;
-    if let Some(existing) = read_windows_install_state(user_root)? {
+    let existing = read_windows_install_state(user_root)?;
+    if let Some(existing) = existing.as_ref() {
         if existing.package_full_name == package_full_name {
             return Err(format!(
                 "Windows Runtime already has durable state {:?} for {}; uninstall or recover it before installing again",
                 existing.phase, existing.package_full_name
             ));
         }
+    }
+    let running = running_package_processes(package_full_name)
+        .map_err(|error| format!("cannot inspect running Windows Codex processes: {error}"))?;
+    if !running.is_empty() {
+        return Err(format!(
+            "close Codex before installing the Windows Runtime; finish active work, then use Ctrl+Q or the tray Quit command (running package PIDs: {})",
+            running
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if existing.is_some() {
         match uninstall_windows_runtime_locked_with(
             user_root,
             &mut running_package_processes,
@@ -113,18 +128,6 @@ where
                 ));
             }
         }
-    }
-    let running = running_package_processes(package_full_name)
-        .map_err(|error| format!("cannot inspect running Windows Codex processes: {error}"))?;
-    if !running.is_empty() {
-        return Err(format!(
-            "close Codex before installing the Windows Runtime; finish active work, then use Ctrl+Q or the tray Quit command (running package PIDs: {})",
-            running
-                .iter()
-                .map(u32::to_string)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
     }
 
     let runtime = publish_windows_runtime(user_root)?;

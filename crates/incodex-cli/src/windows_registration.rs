@@ -10,7 +10,9 @@ use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
 use crate::windows_file::{canonical_regular_file, sha256_file};
 use crate::windows_helper::installed_windows_helper_path_matches;
-use crate::windows_install_state::{random_registration_id, WindowsInstallState};
+use crate::windows_install_state::{
+    random_registration_id, read_windows_install_state, WindowsInstallState,
+};
 use crate::windows_runtime::replace_private_file;
 
 const REGISTRATION_NAME: &str = "windows-registration.json";
@@ -181,7 +183,14 @@ where
     let Some(evidence) = read_windows_debug_registration(user_root)? else {
         return Ok(false);
     };
-    if evidence.kind != WindowsDebugRegistrationKind::Transient {
+    if evidence.kind == WindowsDebugRegistrationKind::Installed {
+        let state = read_windows_install_state(user_root)?;
+        if state
+            .as_ref()
+            .is_some_and(|state| registration_matches_install_state(&evidence, state))
+        {
+            return Ok(false);
+        }
         return Err(
             "Windows Runtime registration requires `incodex uninstall` before this command"
                 .to_string(),

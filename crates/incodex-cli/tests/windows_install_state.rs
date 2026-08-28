@@ -620,8 +620,12 @@ fn install_keeps_a_running_stale_store_generation() {
         new_package,
         &helper,
         |package| {
-            assert_eq!(package, old_package);
-            Ok(vec![42])
+            if package == new_package {
+                Ok(Vec::new())
+            } else {
+                assert_eq!(package, old_package);
+                Ok(vec![42])
+            }
         },
         |_| panic!("running old package must block package inspection"),
         |_| panic!("running old package must block disable"),
