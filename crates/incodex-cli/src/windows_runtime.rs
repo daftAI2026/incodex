@@ -30,6 +30,7 @@ pub const WINDOWS_RUNTIME_FILES: &[&str] = &[
 ];
 
 const WINDOWS_BOOTSTRAP_NAME: &str = "incodex-windows-bootstrap.cjs";
+const WINDOWS_MAIN_NAME: &str = "incodex-main.cjs";
 const WINDOWS_BOOTSTRAP: &str = include_str!("../assets/incodex-windows-bootstrap.cjs");
 const WINDOWS_ASSETS: &[(&str, &str)] = &[
     (WINDOWS_BOOTSTRAP_NAME, WINDOWS_BOOTSTRAP),
@@ -41,7 +42,7 @@ const WINDOWS_ASSETS: &[(&str, &str)] = &[
 
 const RUNTIME_FILES: &[(&str, &str)] = &[
     (
-        "incodex-main.cjs",
+        WINDOWS_MAIN_NAME,
         include_str!("../../../dist/incodex-main.cjs"),
     ),
     (
@@ -81,6 +82,20 @@ const RUNTIME_FILES: &[(&str, &str)] = &[
         include_str!("../../../dist/incodex-runtime-load.cjs"),
     ),
 ];
+const LEGACY_RUNTIME_FILE_NAMES: &[&str] = &[
+    WINDOWS_MAIN_NAME,
+    "incodex-preload.cjs",
+    "incodex-inject.js",
+    "incodex-safe-home.cjs",
+    "incodex-ipc-guard.cjs",
+    "incodex-owner-core.cjs",
+    "incodex-owner-recovery.cjs",
+    "incodex-instance.cjs",
+    "incodex-window-kind.cjs",
+    "incodex-runtime-load.cjs",
+];
+const LEGACY_WINDOWS_ASSET_NAMES: &[&str] =
+    &[WINDOWS_BOOTSTRAP_NAME, "incodex-windows-platform.cjs"];
 const MANIFEST: &str = include_str!("../../../dist/runtime-manifest.json");
 const MANIFEST_NAME: &str = "runtime-manifest.json";
 const MANIFEST_LIMIT: u64 = 64 * 1024;
@@ -159,7 +174,7 @@ pub fn publish_windows_runtime(user_root: &Path) -> Result<PublishedWindowsRunti
         .map(|name| release_dir.join(name))
         .collect::<Vec<_>>();
     Ok(PublishedWindowsRuntime {
-        main: release_dir.join("incodex-main.cjs"),
+        main: release_dir.join(WINDOWS_MAIN_NAME),
         release_dir,
         pointer: pointer_path,
         files,
@@ -314,6 +329,9 @@ fn verify_self_describing_release(
     if !manifest.files.contains_key(WINDOWS_BOOTSTRAP_NAME) {
         return Err("recorded Windows Runtime manifest has no bootstrap".to_string());
     }
+    if !manifest.files.contains_key(WINDOWS_MAIN_NAME) {
+        return Err("recorded Windows Runtime manifest has no main entrypoint".to_string());
+    }
 
     let mut casefolded_names = BTreeSet::new();
     for (name, expected) in &manifest.files {
@@ -351,7 +369,7 @@ fn verify_legacy_recorded_release(
         .map_err(|error| format!("invalid recorded Runtime manifest: {error}"))?;
     validate_manifest_metadata(&manifest)?;
 
-    for (name, _) in RUNTIME_FILES {
+    for name in LEGACY_RUNTIME_FILE_NAMES {
         let file = path.join(name);
         ensure_regular_file(&file)?;
         verify_private_acl(&file)?;
@@ -562,7 +580,7 @@ fn recorded_windows_release_hash(path: &Path, manifest_body: &[u8]) -> Result<St
     let mut hash = Sha256::new();
     hash.update(manifest_body);
     hash.update([0]);
-    for (name, _) in WINDOWS_ASSETS {
+    for name in LEGACY_WINDOWS_ASSET_NAMES {
         let asset = path.join(name);
         ensure_regular_file(&asset)?;
         verify_private_acl(&asset)?;
@@ -620,7 +638,7 @@ mod tests {
         let files = manifest["files"]
             .as_object_mut()
             .expect("Runtime manifest files");
-        for (name, _) in WINDOWS_ASSETS {
+        for name in LEGACY_WINDOWS_ASSET_NAMES {
             files.remove(*name);
         }
         manifest["files"]["incodex-main.cjs"] =
@@ -634,7 +652,7 @@ mod tests {
         let mut release_hash = Sha256::new();
         release_hash.update(&manifest_body);
         release_hash.update([0]);
-        for (name, _) in WINDOWS_ASSETS {
+        for name in LEGACY_WINDOWS_ASSET_NAMES {
             release_hash.update(name.as_bytes());
             release_hash.update([0]);
             release_hash.update(
