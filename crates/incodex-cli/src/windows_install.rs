@@ -56,9 +56,11 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
     let helper = std::env::current_exe()
         .map_err(|error| format!("cannot locate the running Incodex executable: {error}"))?;
     let installed = install_windows_runtime_with_package_probe(
-        &user_root,
-        &confirmed_app.package_full_name,
-        &helper,
+        WindowsInstallTarget {
+            user_root: &user_root,
+            package_full_name: &confirmed_app.package_full_name,
+            helper_source: &helper,
+        },
         running_package_process_ids,
         codex_package_full_name_is_installed,
         disable_installed_runtime,
@@ -80,6 +82,12 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
     Ok(())
 }
 
+struct WindowsInstallTarget<'a> {
+    user_root: &'a Path,
+    package_full_name: &'a str,
+    helper_source: &'a Path,
+}
+
 pub fn install_windows_runtime_with<R, P, D, E>(
     user_root: &Path,
     package_full_name: &str,
@@ -96,9 +104,11 @@ where
     E: FnOnce(&WindowsInstalledRuntimeRegistration) -> Result<(), String>,
 {
     install_windows_runtime_with_package_probe(
-        user_root,
-        package_full_name,
-        helper_source,
+        WindowsInstallTarget {
+            user_root,
+            package_full_name,
+            helper_source,
+        },
         running_package_processes,
         package_is_installed,
         disable,
@@ -108,9 +118,7 @@ where
 }
 
 fn install_windows_runtime_with_package_probe<R, P, D, E, G>(
-    user_root: &Path,
-    package_full_name: &str,
-    helper_source: &Path,
+    target: WindowsInstallTarget<'_>,
     mut running_package_processes: R,
     mut package_is_installed: P,
     mut disable: D,
@@ -124,6 +132,11 @@ where
     E: FnOnce(&WindowsInstalledRuntimeRegistration) -> Result<(), String>,
     G: FnMut() -> Result<String, String>,
 {
+    let WindowsInstallTarget {
+        user_root,
+        package_full_name,
+        helper_source,
+    } = target;
     let _transaction = acquire_windows_install_state()?;
     revalidate_windows_install_generation(package_full_name, &mut package_probe)?;
     let existing = read_windows_install_state(user_root)?;
@@ -858,9 +871,11 @@ mod tests {
         let mut disable_calls = 0;
 
         let error = install_windows_runtime_with_package_probe(
-            &user_root,
-            expected_package,
-            &helper,
+            WindowsInstallTarget {
+                user_root: &user_root,
+                package_full_name: expected_package,
+                helper_source: &helper,
+            },
             |_| Ok(Vec::new()),
             |_| Ok(false),
             |package| {
