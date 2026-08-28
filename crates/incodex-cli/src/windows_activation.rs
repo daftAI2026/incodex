@@ -198,7 +198,7 @@ fn installed_debugger_registration_evidence(
     })
 }
 
-fn installed_debugger_user_root(helper: &Path) -> Result<std::path::PathBuf, String> {
+pub(crate) fn installed_debugger_user_root(helper: &Path) -> Result<std::path::PathBuf, String> {
     let hash_dir = helper
         .parent()
         .ok_or_else(|| "Windows installed debugger has no release directory".to_string())?;
@@ -884,6 +884,7 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
         let registered_package = flag_value(arguments, "--package")?;
         let evidence = installed_debugger_registration_evidence(registered_package)?;
         let state = installed_state_for_current_helper(&evidence);
+        let repair_state = state.as_ref().ok().cloned();
         let runtime = state
             .as_ref()
             .ok()
@@ -894,6 +895,15 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
             &evidence.package_full_name,
             command_line.as_deref(),
         )?;
+        let update_repair_state = if matches!(&route, WindowsDebuggerRoute::ResumeNormally)
+            && command_line
+                .as_deref()
+                .is_some_and(crate::windows_update_repair::is_primary_package_process)
+        {
+            repair_state
+        } else {
+            None
+        };
         match route {
             WindowsDebuggerRoute::ResumeNormally => {
                 resume_debugged_package_process(&package_full_name, process_id, thread_id)
@@ -986,7 +996,11 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
                 terminate_debugged_package_process(&package_full_name, process_id, thread_id)
             }
         }
-        .map_err(|error| format!("Windows installed debugger failed: {error}"))
+        .map_err(|error| format!("Windows installed debugger failed: {error}"))?;
+        if let Some(state) = update_repair_state {
+            let _ = crate::windows_update_repair::run_update_repair_coordinator(&state, process_id);
+        }
+        Ok(())
     })();
     Some(parsed)
 }

@@ -783,6 +783,57 @@ fn normalized_windows_process_path(path: &Path) -> String {
         .to_lowercase()
 }
 
+pub fn strict_running_codex_package_process_ids(
+    expected_package_full_name: &str,
+) -> io::Result<Vec<u32>> {
+    let mut matches = Vec::new();
+    for (process_id, executable_name) in snapshot_process_entries()? {
+        let may_be_codex = executable_name.eq_ignore_ascii_case("ChatGPT.exe");
+        let raw = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
+        if raw.is_null() {
+            let error = io::Error::last_os_error();
+            if matches!(
+                error.raw_os_error(),
+                Some(code) if code == ERROR_ACCESS_DENIED as i32 || code == ERROR_INVALID_PARAMETER as i32
+            ) {
+                if may_be_codex {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        format!(
+                            "cannot prove whether ChatGPT.exe process {process_id} belongs to the Codex package"
+                        ),
+                    ));
+                }
+                continue;
+            }
+            return Err(error);
+        }
+        let process = OwnedHandle(raw);
+        match process_package_full_name(process.raw()) {
+            Ok(Some(package)) if package == expected_package_full_name => matches.push(process_id),
+            Ok(_) => {}
+            Err(error)
+                if matches!(
+                    error.raw_os_error(),
+                    Some(code) if code == ERROR_ACCESS_DENIED as i32 || code == ERROR_INVALID_PARAMETER as i32
+                ) =>
+            {
+                if may_be_codex {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        format!(
+                            "cannot prove the package identity of ChatGPT.exe process {process_id}"
+                        ),
+                    ));
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    matches.sort_unstable();
+    Ok(matches)
+}
+
 pub fn authenticate_process_in_named_job(
     job_name: &str,
     expected_package_full_name: &str,
@@ -807,6 +858,13 @@ pub fn authenticate_process_in_named_job(
 }
 
 pub(crate) fn snapshot_process_ids() -> io::Result<HashSet<u32>> {
+    Ok(snapshot_process_entries()?
+        .into_iter()
+        .map(|(process_id, _)| process_id)
+        .collect())
+}
+
+fn snapshot_process_entries() -> io::Result<Vec<(u32, String)>> {
     let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
     let snapshot = OwnedHandle::from_snapshot(snapshot)?;
     let mut entry = PROCESSENTRY32W {
@@ -816,13 +874,21 @@ pub(crate) fn snapshot_process_ids() -> io::Result<HashSet<u32>> {
     if unsafe { Process32FirstW(snapshot.raw(), &mut entry) } == 0 {
         return Err(io::Error::last_os_error());
     }
-    let mut process_ids = HashSet::new();
+    let mut processes = Vec::new();
     loop {
-        process_ids.insert(entry.th32ProcessID);
+        let name_length = entry
+            .szExeFile
+            .iter()
+            .position(|code_unit| *code_unit == 0)
+            .unwrap_or(entry.szExeFile.len());
+        processes.push((
+            entry.th32ProcessID,
+            String::from_utf16_lossy(&entry.szExeFile[..name_length]),
+        ));
         if unsafe { Process32NextW(snapshot.raw(), &mut entry) } == 0 {
             let error = io::Error::last_os_error();
             return if error.raw_os_error() == Some(ERROR_NO_MORE_FILES as i32) {
-                Ok(process_ids)
+                Ok(processes)
             } else {
                 Err(error)
             };

@@ -269,3 +269,48 @@ fn interrupted_repair_retains_a_durable_update_intent() {
 
     fs::remove_dir_all(user_root).expect("remove update repair fixture");
 }
+
+#[test]
+fn successful_uninstall_cancels_an_interrupted_update_intent() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let installed = install_windows_runtime_with(
+        &user_root,
+        OLD_PACKAGE,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .expect("install old Store generation");
+    repair_windows_runtime_after_update_with(
+        &user_root,
+        WindowsUpdateRepairAuthorization {
+            package_full_name: OLD_PACKAGE,
+            epoch: installed.epoch,
+            registration_id: &installed.registration_id,
+            helper_source: &installed.helper_path,
+        },
+        NEW_PACKAGE,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Err("injected registration failure".to_string()),
+    )
+    .expect_err("leave an interrupted update repair");
+
+    assert_eq!(
+        uninstall_windows_runtime_with(&user_root, |_| Ok(Vec::new()), |_| Ok(true), |_| Ok(()),)
+            .expect("uninstall interrupted repair"),
+        WindowsUninstallOutcome::Removed,
+    );
+    assert!(
+        read_windows_update_repair_intent(&user_root)
+            .expect("read cancelled update intent")
+            .is_none(),
+        "successful uninstall retires update intent"
+    );
+
+    fs::remove_dir_all(user_root).expect("remove update repair fixture");
+}

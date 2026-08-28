@@ -21,6 +21,8 @@ use crate::windows_runtime::replace_private_file;
 const STATE_NAME: &str = "windows-install.json";
 const STATE_SCHEMA: u32 = 1;
 const STATE_LIMIT: u64 = 64 * 1024;
+const UPDATE_REPAIR_INTENT_NAME: &str = "windows-update-repair.json";
+const UPDATE_REPAIR_INTENT_SCHEMA: u32 = 1;
 const INSTALL_MUTEX_NAME: &str = "Local\\Incodex-OpenAI.Codex-Install";
 const INSTALL_MUTEX_TIMEOUT_MS: u32 = 15_000;
 
@@ -60,10 +62,174 @@ pub struct WindowsInstallState {
     pub state_path: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowsUpdateRepairIntent {
+    pub schema_version: u32,
+    pub operation_id: String,
+    pub source_registration_id: String,
+    pub source_epoch: u64,
+    pub source_package_full_name: String,
+    pub target_package_full_name: String,
+    pub helper_path: PathBuf,
+    pub helper_sha256: String,
+    pub runtime_release: String,
+    #[serde(skip)]
+    pub intent_path: PathBuf,
+}
+
 impl WindowsInstallState {
     pub fn desired_enabled(&self) -> bool {
         self.desired == WindowsInstallDesired::Enabled
     }
+}
+
+pub(crate) fn stage_windows_update_repair_intent(
+    user_root: &Path,
+    source: &WindowsInstallState,
+    target_package_full_name: &str,
+) -> Result<WindowsUpdateRepairIntent, String> {
+    validate_state(source, HelperValidation::Required)?;
+    validate_package_name(target_package_full_name)?;
+    if source.package_full_name == target_package_full_name {
+        return Err("Windows update repair target did not change generation".to_string());
+    }
+    let user_root = ensure_private_windows_dir(user_root)?;
+    let intent = WindowsUpdateRepairIntent {
+        schema_version: UPDATE_REPAIR_INTENT_SCHEMA,
+        operation_id: random_registration_id()?,
+        source_registration_id: source.registration_id.clone(),
+        source_epoch: source.epoch,
+        source_package_full_name: source.package_full_name.clone(),
+        target_package_full_name: target_package_full_name.to_string(),
+        helper_path: source.helper_path.clone(),
+        helper_sha256: source.helper_sha256.clone(),
+        runtime_release: source.runtime_release.clone(),
+        intent_path: user_root.join(UPDATE_REPAIR_INTENT_NAME),
+    };
+    write_update_repair_intent(&user_root, &intent)?;
+    Ok(intent)
+}
+
+pub fn read_windows_update_repair_intent(
+    user_root: &Path,
+) -> Result<Option<WindowsUpdateRepairIntent>, String> {
+    require_local_disk_absolute(user_root, "Windows Incodex root")?;
+    match fs::symlink_metadata(user_root) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("cannot inspect Windows Incodex root: {error}")),
+        Ok(metadata)
+            if !metadata.is_dir()
+                || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 =>
+        {
+            return Err(format!(
+                "Windows Incodex root is not a regular directory: {}",
+                user_root.display()
+            ));
+        }
+        Ok(_) => {}
+    }
+    reject_reparse_ancestors(user_root)?;
+    verify_private_acl(user_root)?;
+    let user_root = fs::canonicalize(user_root)
+        .map_err(|error| format!("cannot resolve Windows Incodex root: {error}"))?;
+    let intent_path = user_root.join(UPDATE_REPAIR_INTENT_NAME);
+    let metadata = match fs::symlink_metadata(&intent_path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "cannot inspect Windows update repair intent: {error}"
+            ))
+        }
+    };
+    if !metadata.is_file() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(format!(
+            "Windows update repair intent is not a regular file: {}",
+            intent_path.display()
+        ));
+    }
+    if metadata.len() > STATE_LIMIT {
+        return Err("Windows update repair intent exceeds the size limit".to_string());
+    }
+    verify_private_acl(&intent_path)?;
+    let file = fs::File::open(&intent_path)
+        .map_err(|error| format!("cannot open Windows update repair intent: {error}"))?;
+    let mut body = String::new();
+    file.take(STATE_LIMIT + 1)
+        .read_to_string(&mut body)
+        .map_err(|error| format!("cannot read Windows update repair intent: {error}"))?;
+    if body.len() as u64 > STATE_LIMIT {
+        return Err("Windows update repair intent exceeds the size limit".to_string());
+    }
+    let mut intent: WindowsUpdateRepairIntent = serde_json::from_str(&body)
+        .map_err(|error| format!("invalid Windows update repair intent: {error}"))?;
+    intent.intent_path = intent_path;
+    validate_update_repair_intent(&intent)?;
+    Ok(Some(intent))
+}
+
+pub(crate) fn retire_windows_update_repair_intent(
+    user_root: &Path,
+    expected_operation_id: Option<&str>,
+) -> Result<(), String> {
+    let Some(intent) = read_windows_update_repair_intent(user_root)? else {
+        return Ok(());
+    };
+    if expected_operation_id.is_some_and(|expected| expected != intent.operation_id) {
+        return Err("Windows update repair intent changed".to_string());
+    }
+    fs::remove_file(&intent.intent_path)
+        .map_err(|error| format!("cannot retire Windows update repair intent: {error}"))?;
+    match fs::symlink_metadata(&intent.intent_path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Ok(_) => Err("Windows update repair intent still exists after retirement".to_string()),
+        Err(error) => Err(format!(
+            "cannot verify Windows update repair intent retirement: {error}"
+        )),
+    }
+}
+
+fn write_update_repair_intent(
+    user_root: &Path,
+    intent: &WindowsUpdateRepairIntent,
+) -> Result<(), String> {
+    validate_update_repair_intent(intent)?;
+    let body = serde_json::to_vec_pretty(intent)
+        .map_err(|error| format!("cannot serialize Windows update repair intent: {error}"))?;
+    replace_private_file(user_root, &intent.intent_path, &body)
+}
+
+fn validate_update_repair_intent(intent: &WindowsUpdateRepairIntent) -> Result<(), String> {
+    if intent.schema_version != UPDATE_REPAIR_INTENT_SCHEMA || intent.source_epoch == 0 {
+        return Err("Windows update repair intent schema or epoch is invalid".to_string());
+    }
+    for (label, value) in [
+        ("operation id", intent.operation_id.as_str()),
+        (
+            "source registration id",
+            intent.source_registration_id.as_str(),
+        ),
+    ] {
+        if value.len() != 32 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(format!("Windows update repair {label} is invalid"));
+        }
+    }
+    validate_package_name(&intent.source_package_full_name)?;
+    validate_package_name(&intent.target_package_full_name)?;
+    if intent.source_package_full_name == intent.target_package_full_name {
+        return Err("Windows update repair target did not change generation".to_string());
+    }
+    if intent.helper_sha256.len() != 64
+        || !intent
+            .helper_sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err("Windows update repair helper identity is invalid".to_string());
+    }
+    require_local_disk_absolute(&intent.helper_path, "Windows update repair helper")?;
+    validate_runtime_release(&intent.runtime_release)
 }
 
 pub fn stage_windows_install_state(

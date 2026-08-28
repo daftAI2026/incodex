@@ -98,6 +98,8 @@ pub(crate) mod windows_system;
 pub mod windows_update;
 #[cfg(target_os = "windows")]
 mod windows_update_flow;
+#[cfg(target_os = "windows")]
+pub mod windows_update_repair;
 
 #[cfg(not(target_os = "windows"))]
 use std::path::PathBuf;
