@@ -48,6 +48,7 @@ function isSearchLabel(label) {
 // src/runtime/incodex-ui-probe.ts
 function deriveUiProbe(input) {
   const button = input.buttonPresent ? "present" : "missing";
+  const tooltip = input.tooltipPresent ? "present" : "missing";
   let banner;
   if (!input.incognito) {
     banner = "not-applicable";
@@ -61,7 +62,8 @@ function deriveUiProbe(input) {
   return {
     button,
     banner,
-    accepted: button === "present" && banner !== "missing"
+    tooltip,
+    accepted: button === "present" && tooltip === "present" && banner !== "missing"
   };
 }
 
@@ -1691,8 +1693,13 @@ function landingStillMounted() {
     return !landing;
   return Boolean(landing);
 }
+function tooltipMountStillPresent() {
+  const host = document.querySelector(`[${TIP_HOST_ATTR}]`);
+  const tip = host?.querySelector(`[${TIP_ATTR}]`);
+  return Boolean(host?.isConnected && tip?.isConnected && tip.parentElement === host);
+}
 function needsInject() {
-  return !buttonStillBesideSearch() || !landingStillMounted() || launchErrorNeedsInject() || profileMaskNeedsInject();
+  return !buttonStillBesideSearch() || !tooltipMountStillPresent() || !landingStillMounted() || launchErrorNeedsInject() || profileMaskNeedsInject();
 }
 function buildButton(search) {
   disposeActiveTooltip();
@@ -1742,13 +1749,8 @@ function buildButton(search) {
   btn.addEventListener("blur", tooltipLifecycle.blur);
   return btn;
 }
-function tooltipEl() {
-  let tip = document.querySelector(`[${TIP_ATTR}]`);
-  if (tip)
-    return tip;
-  const host = document.createElement("div");
-  host.setAttribute(TIP_HOST_ATTR, "true");
-  tip = document.createElement("div");
+function createTooltipElement() {
+  const tip = document.createElement("div");
   tip.setAttribute(TIP_ATTR, "true");
   tip.setAttribute("role", "tooltip");
   tip.className = "z-50 w-fit select-none text-sm whitespace-normal break-words rounded-lg border border-text bg-primary-solid text-primary-solid px-2 py-1.5";
@@ -1762,9 +1764,25 @@ function tooltipEl() {
   kbd.textContent = shortcutLabel();
   text.append(label, kbd);
   tip.append(text);
-  host.append(tip);
-  document.body.append(host);
   return tip;
+}
+function ensureTooltipMount() {
+  let host = document.querySelector(`[${TIP_HOST_ATTR}]`);
+  if (!host) {
+    host = document.createElement("div");
+    host.setAttribute(TIP_HOST_ATTR, "true");
+    document.body.append(host);
+  }
+  let tip = host.querySelector(`[${TIP_ATTR}]`);
+  if (!tip) {
+    tip = document.querySelector(`[${TIP_ATTR}]`) ?? createTooltipElement();
+    if (tip.parentElement !== host)
+      host.append(tip);
+  }
+  return tip;
+}
+function tooltipEl() {
+  return ensureTooltipMount();
 }
 var TOOLTIP_SIDE_OFFSET = 2;
 function showTooltip(btn) {
@@ -1814,6 +1832,7 @@ function refreshUiProbe() {
   window.__incodexUiProbe = deriveUiProbe({
     incognito,
     buttonPresent: buttonStillBesideSearch(),
+    tooltipPresent: tooltipMountStillPresent(),
     bannerPresent: Boolean(document.querySelector(`[${BANNER_HOST_ATTR}]`)?.querySelector(`[${LANDING_ATTR}]`)),
     bannerDismissed: incognito && bannerDismissed()
   });
@@ -2020,6 +2039,7 @@ function ensureButton() {
     placement.parent.insertBefore(btn, placement.before);
   }
   apply();
+  ensureTooltipMount();
 }
 function onKeydown(event) {
   if (event.key === "Escape") {

@@ -309,9 +309,16 @@ function landingStillMounted(): boolean {
   return Boolean(landing);
 }
 
+function tooltipMountStillPresent(): boolean {
+  const host = document.querySelector<HTMLElement>(`[${TIP_HOST_ATTR}]`);
+  const tip = host?.querySelector<HTMLElement>(`[${TIP_ATTR}]`);
+  return Boolean(host?.isConnected && tip?.isConnected && tip.parentElement === host);
+}
+
 function needsInject(): boolean {
   return (
     !buttonStillBesideSearch() ||
+    !tooltipMountStillPresent() ||
     !landingStillMounted() ||
     launchErrorNeedsInject() ||
     profileMaskNeedsInject()
@@ -368,12 +375,8 @@ function buildButton(search: HTMLElement): HTMLElement {
   return btn;
 }
 
-function tooltipEl(): HTMLElement {
-  let tip = document.querySelector<HTMLElement>(`[${TIP_ATTR}]`);
-  if (tip) return tip;
-  const host = document.createElement("div");
-  host.setAttribute(TIP_HOST_ATTR, "true");
-  tip = document.createElement("div");
+function createTooltipElement(): HTMLElement {
+  const tip = document.createElement("div");
   tip.setAttribute(TIP_ATTR, "true");
   tip.setAttribute("role", "tooltip");
   tip.className =
@@ -389,9 +392,27 @@ function tooltipEl(): HTMLElement {
   kbd.textContent = shortcutLabel();
   text.append(label, kbd);
   tip.append(text);
-  host.append(tip);
-  document.body.append(host);
   return tip;
+}
+
+function ensureTooltipMount(): HTMLElement {
+  let host = document.querySelector<HTMLElement>(`[${TIP_HOST_ATTR}]`);
+  if (!host) {
+    host = document.createElement("div");
+    host.setAttribute(TIP_HOST_ATTR, "true");
+    document.body.append(host);
+  }
+
+  let tip = host.querySelector<HTMLElement>(`[${TIP_ATTR}]`);
+  if (!tip) {
+    tip = document.querySelector<HTMLElement>(`[${TIP_ATTR}]`) ?? createTooltipElement();
+    if (tip.parentElement !== host) host.append(tip);
+  }
+  return tip;
+}
+
+function tooltipEl(): HTMLElement {
+  return ensureTooltipMount();
 }
 
 // Official header tooltips use side=top, sideOffset=2. Pin our bottom edge
@@ -449,6 +470,7 @@ function refreshUiProbe(): void {
   window.__incodexUiProbe = deriveUiProbe({
     incognito,
     buttonPresent: buttonStillBesideSearch(),
+    tooltipPresent: tooltipMountStillPresent(),
     bannerPresent: Boolean(
       document.querySelector(`[${BANNER_HOST_ATTR}]`)?.querySelector(`[${LANDING_ATTR}]`),
     ),
@@ -699,6 +721,7 @@ function ensureButton(): void {
     placement.parent.insertBefore(btn, placement.before);
   }
   apply();
+  ensureTooltipMount();
 }
 
 function onKeydown(event: KeyboardEvent): void {

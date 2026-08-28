@@ -13,26 +13,35 @@ describe("minimal Runtime UI injection snapshot", () => {
         buttonPresent: true,
         bannerPresent: false,
         bannerDismissed: false,
+        tooltipPresent: true,
       }),
-    ).toEqual({ button: "present", banner: "not-applicable", accepted: true });
+    ).toEqual({
+      button: "present",
+      banner: "not-applicable",
+      tooltip: "present",
+      accepted: true,
+    });
   });
 
   test("distinguishes an incognito banner that is present, missing, or dismissed", () => {
-    const base = { incognito: true, buttonPresent: true };
+    const base = { incognito: true, buttonPresent: true, tooltipPresent: true };
 
     expect(deriveUiProbe({ ...base, bannerPresent: true, bannerDismissed: false })).toEqual({
       button: "present",
       banner: "present",
+      tooltip: "present",
       accepted: true,
     });
     expect(deriveUiProbe({ ...base, bannerPresent: false, bannerDismissed: false })).toEqual({
       button: "present",
       banner: "missing",
+      tooltip: "present",
       accepted: false,
     });
     expect(deriveUiProbe({ ...base, bannerPresent: false, bannerDismissed: true })).toEqual({
       button: "present",
       banner: "dismissed",
+      tooltip: "present",
       accepted: true,
     });
   });
@@ -44,8 +53,14 @@ describe("minimal Runtime UI injection snapshot", () => {
         buttonPresent: false,
         bannerPresent: true,
         bannerDismissed: false,
+        tooltipPresent: true,
       }),
-    ).toEqual({ button: "missing", banner: "present", accepted: false });
+    ).toEqual({
+      button: "missing",
+      banner: "present",
+      tooltip: "present",
+      accepted: false,
+    });
   });
 
   test("the injector retains the latest minimal snapshot for its caller", () => {
@@ -60,10 +75,10 @@ describe("minimal Runtime UI injection snapshot", () => {
       bannerPresent: false,
       bannerDismissed: false,
       tooltipPresent: false,
-    } as Parameters<typeof deriveUiProbe>[0]);
+    });
 
     expect({
-      probeAccepted: probe.accepted,
+      probe: probe,
       tracksMissingPortal: /function needsInject\(\): boolean \{[\s\S]*!tooltipMountStillPresent\(\)/.test(
         inject,
       ),
@@ -72,7 +87,12 @@ describe("minimal Runtime UI injection snapshot", () => {
       ),
       reportsPortal: inject.includes("tooltipPresent: tooltipMountStillPresent()"),
     }).toEqual({
-      probeAccepted: false,
+      probe: {
+        button: "present",
+        banner: "not-applicable",
+        tooltip: "missing",
+        accepted: false,
+      },
       tracksMissingPortal: true,
       restoresPortal: true,
       reportsPortal: true,
