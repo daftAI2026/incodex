@@ -4,72 +4,9 @@ import { join } from "node:path";
 
 const windowsPlatform = require("../../crates/incodex-cli/assets/incodex-windows-platform.cjs");
 
-class FakeSocket extends EventEmitter {
-  constructor(private readonly onEnd: (message: string, done?: () => void) => void) {
-    super();
-  }
-
-  setEncoding(_encoding: string): void {}
-
-  end(message: string, done?: () => void): void {
-    this.onEnd(message, done);
-  }
-}
-
 describe("Windows Runtime lifecycle adapter", () => {
-  test("accepts one authenticated normal-exit request before invoking Electron quit", () => {
-    let connection: ((socket: FakeSocket) => void) | undefined;
-    let listening = "";
-    const events: string[] = [];
-    const server = {
-      listen(name: string) {
-        listening = name;
-      },
-    };
-    const socket = new FakeSocket((message, done) => {
-      events.push(`response:${message}`);
-      done?.();
-    });
-
-    const result = windowsPlatform.listenForNormalExit(
-      "\\\\.\\pipe\\Incodex-Runtime-Control-0123456789abcdef0123456789abcdef",
-      () => events.push("quit"),
-      (handler: (client: FakeSocket) => void) => {
-        connection = handler;
-        return server;
-      },
-    );
-    connection?.(socket);
-    socket.emit("data", "quit\n");
-
-    expect(result).toBe(server);
-    expect(listening).toBe(
-      "\\\\.\\pipe\\Incodex-Runtime-Control-0123456789abcdef0123456789abcdef",
-    );
-    expect(events).toEqual(["response:accepted\n", "quit"]);
-  });
-
-  test("rejects malformed normal-exit capabilities and commands", () => {
-    expect(() =>
-      windowsPlatform.listenForNormalExit("\\\\.\\pipe\\Incodex-Runtime-Control-public", () => {}),
-    ).toThrow("invalid Windows Runtime control endpoint");
-
-    let connection: ((socket: FakeSocket) => void) | undefined;
-    const responses: string[] = [];
-    windowsPlatform.listenForNormalExit(
-      "\\\\.\\pipe\\Incodex-Runtime-Control-fedcba9876543210fedcba9876543210",
-      () => {
-        throw new Error("must not quit");
-      },
-      (handler: (client: FakeSocket) => void) => {
-        connection = handler;
-        return { listen() {} };
-      },
-    );
-    const socket = new FakeSocket((message) => responses.push(message));
-    connection?.(socket);
-    socket.emit("data", "close\n");
-    expect(responses).toEqual(["refused\n"]);
+  test("does not expose an automatic official-app exit capability", () => {
+    expect(windowsPlatform.listenForNormalExit).toBeUndefined();
   });
 
   test("writes Runtime acceptance only to the guardian pipe", () => {

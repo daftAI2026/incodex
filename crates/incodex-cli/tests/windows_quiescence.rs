@@ -1,57 +1,30 @@
 #![cfg(target_os = "windows")]
 
 #[test]
-fn install_and_uninstall_request_normal_package_exit_before_mutation() {
-    let source = include_str!("../src/windows_install.rs");
-    let install = source
-        .split("pub fn run_install")
-        .nth(1)
-        .expect("Windows install entry");
-    let install_request = install
-        .find("request_official_package_exit_and_wait")
-        .expect("normal install exit request");
-    let install_mutation = install
-        .find("install_windows_runtime_with")
-        .expect("install mutation");
-    assert!(install_request < install_mutation);
+fn windows_mutation_requires_the_user_to_quit_codex_without_requesting_exit() {
+    let install = include_str!("../src/windows_install.rs");
 
-    let uninstall = source
-        .split("pub fn run_uninstall")
-        .nth(1)
-        .expect("Windows uninstall entry");
-    let uninstall_request = uninstall
-        .find("request_official_package_exit_and_wait")
-        .expect("normal uninstall exit request");
-    let uninstall_mutation = uninstall
-        .find("uninstall_windows_runtime_approved_with")
-        .expect("uninstall mutation");
-    assert!(uninstall_request < uninstall_mutation);
+    assert!(!install.contains("request_official_package_exit_and_wait"));
+    assert!(install.contains("running_package_process_ids"));
+    assert!(install.contains("close Codex before installing the Windows Runtime"));
+    assert!(install.contains("close Codex to finish uninstalling the Windows Runtime"));
 }
 
 #[test]
-fn windows_requester_uses_restart_manager_without_force_or_window_close() {
-    let source = include_str!("../src/windows_quiescence.rs");
-    assert!(source.contains("RmShutdown"));
-    assert!(source.contains("request_normal_exit_and_wait_with"));
-    assert!(!source.contains("RmForceShutdown"));
-    assert!(!source.contains("WM_CLOSE"));
-    assert!(!source.contains("TerminateProcess"));
-    assert!(!source.contains("TerminateAllProcesses"));
-}
+fn windows_runtime_never_exposes_an_automatic_official_app_quit_path() {
+    let platform = include_str!("../assets/incodex-windows-platform.cjs");
+    let runtime = include_str!("../../../src/runtime/incodex-main.cts");
 
-#[test]
-fn installed_runtime_normal_exit_precedes_restart_manager_fallback() {
-    let requester = include_str!("../src/windows_quiescence.rs");
-    let uninstall = include_str!("../src/windows_install.rs");
-
-    assert!(requester.contains("CallNamedPipeW"));
-    assert!(requester.contains("Incodex-Runtime-Control-"));
-    let runtime_request = requester
-        .find("request_installed_runtime_normal_exit")
-        .expect("installed Runtime request");
-    let restart_manager = requester
-        .find("request_restart_manager_shutdown")
-        .expect("Restart Manager fallback");
-    assert!(runtime_request < restart_manager);
-    assert!(uninstall.contains("approval.registration_id.as_deref()"));
+    for forbidden in [
+        "listenForNormalExit",
+        "Incodex-Runtime-Control-",
+        "CallNamedPipeW",
+        "RmShutdown",
+        "WM_CLOSE",
+        "TerminateProcess",
+        "TerminateAllProcesses",
+    ] {
+        assert!(!platform.contains(forbidden), "platform contains {forbidden}");
+        assert!(!runtime.contains(forbidden), "Runtime contains {forbidden}");
+    }
 }
