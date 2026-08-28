@@ -97,6 +97,48 @@ fn stages_and_enables_the_installed_runtime_only_after_proving_codex_is_closed()
 }
 
 #[test]
+fn install_detects_a_package_started_during_registration() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    let mut probe_calls = 0;
+    let mut disable_calls = 0;
+
+    let error = install_windows_runtime_with(
+        &user_root,
+        package,
+        &helper,
+        |_| {
+            probe_calls += 1;
+            Ok(if probe_calls == 1 {
+                Vec::new()
+            } else {
+                vec![42]
+            })
+        },
+        |_| Ok(false),
+        |registered_package| {
+            disable_calls += 1;
+            assert_eq!(registered_package, package);
+            Ok(())
+        },
+        |_| Ok(()),
+    )
+    .expect_err("a package started during enable must prevent commit");
+
+    assert!(error.contains("RecoveryRequired"), "{error}");
+    assert!(error.contains("42"), "{error}");
+    assert_eq!(probe_calls, 2);
+    assert_eq!(disable_calls, 1);
+    let retained = read_windows_install_state(&user_root)
+        .expect("read raced install state")
+        .expect("raced install state retained");
+    assert_eq!(retained.phase, WindowsInstallPhase::RecoveryRequired);
+    assert!(user_root.join("windows-registration.json").is_file());
+    fs::remove_dir_all(user_root).expect("remove raced install fixture");
+}
+
+#[test]
 fn uninstall_publishes_the_kill_switch_before_waiting_then_disables_once() {
     let user_root = scratch_root();
     let helper = std::env::current_exe().expect("test helper path");
@@ -153,6 +195,58 @@ fn uninstall_publishes_the_kill_switch_before_waiting_then_disables_once() {
     );
 
     fs::remove_dir_all(user_root).expect("remove uninstall fixture");
+}
+
+#[test]
+fn uninstall_detects_a_package_started_during_registration_removal() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    install_windows_runtime_with(
+        &user_root,
+        package,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .expect("install fixture Runtime");
+    let mut probe_calls = 0;
+    let mut disable_calls = 0;
+
+    let outcome = uninstall_windows_runtime_with(
+        &user_root,
+        |_| {
+            probe_calls += 1;
+            Ok(if probe_calls == 1 {
+                Vec::new()
+            } else {
+                vec![42]
+            })
+        },
+        |_| Ok(true),
+        |_| {
+            disable_calls += 1;
+            Ok(())
+        },
+    )
+    .expect("detect package raced with debugger removal");
+
+    assert_eq!(
+        outcome,
+        WindowsUninstallOutcome::CloseRequired {
+            process_ids: vec![42]
+        }
+    );
+    assert_eq!(probe_calls, 2);
+    assert_eq!(disable_calls, 1);
+    let retained = read_windows_install_state(&user_root)
+        .expect("read raced uninstall state")
+        .expect("raced uninstall state retained");
+    assert_eq!(retained.phase, WindowsInstallPhase::RecoveryRequired);
+    assert!(user_root.join("windows-registration.json").is_file());
+    fs::remove_dir_all(user_root).expect("remove raced uninstall fixture");
 }
 
 #[test]
