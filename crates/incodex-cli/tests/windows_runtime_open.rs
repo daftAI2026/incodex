@@ -3,12 +3,13 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use incodex_cli::windows_app::WindowsCodexApp;
 use incodex_cli::windows_runtime_open::{
     parse_windows_runtime_open, prepare_windows_runtime_open, windows_runtime_ready_for_handshake,
     windows_runtime_shutdown_authorized, windows_runtime_startup_action, WindowsRuntimeOwnerClaim,
-    WindowsRuntimeReadyPipe, WindowsRuntimeStartupAction,
+    WindowsRuntimeReadinessDeadline, WindowsRuntimeReadyPipe, WindowsRuntimeStartupAction,
 };
 use incodex_core::windows_session::{burn_windows_session, WindowsCleanupResult};
 
@@ -132,6 +133,21 @@ fn guardian_reports_ready_only_after_runtime_acceptance_and_a_visible_window() {
     assert!(!windows_runtime_ready_for_handshake(true, false));
     assert!(!windows_runtime_ready_for_handshake(false, true));
     assert!(windows_runtime_ready_for_handshake(true, true));
+}
+
+#[test]
+fn visible_window_gets_its_own_runtime_acceptance_budget() {
+    let started = Instant::now();
+    let budget = Duration::from_secs(30);
+    let mut readiness = WindowsRuntimeReadinessDeadline::new(started, budget);
+
+    assert!(!readiness.timed_out(started + Duration::from_secs(29), false));
+    assert!(!readiness.timed_out(started + budget, true));
+    assert!(!readiness.timed_out(started + Duration::from_secs(59), true));
+    assert!(readiness.timed_out(started + Duration::from_secs(60), true));
+
+    let mut never_visible = WindowsRuntimeReadinessDeadline::new(started, budget);
+    assert!(never_visible.timed_out(started + budget, false));
 }
 
 #[test]
