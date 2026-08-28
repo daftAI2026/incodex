@@ -387,6 +387,62 @@ mod tests {
     }
 
     #[test]
+    fn registration_without_primary_state_requires_recovery() {
+        let sequence = STATUS_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let user_root = std::env::temp_dir().join(format!(
+            "incodex-windows-status-recovery-missing-{}-{sequence}",
+            std::process::id()
+        ));
+        let (state, _) = enabled_install_fixture(&user_root, true);
+        std::fs::remove_file(user_root.join("windows-install.json"))
+            .expect("remove primary install state");
+
+        let inspection = WindowsIntegrationStatus::inspect(
+            &user_root,
+            Some(state.package_full_name.as_str()),
+        );
+        std::fs::remove_dir_all(&user_root).expect("remove missing-state fixture");
+        let report = inspection.expect("inspect independent registration evidence");
+        let text = format_integration_status(&report);
+
+        assert!(!report.installed, "recovery state was reported installed");
+        assert_eq!(
+            report.package_full_name.as_deref(),
+            Some(state.package_full_name.as_str())
+        );
+        assert!(text.to_ascii_lowercase().contains("recovery"), "{text}");
+        assert!(text.to_ascii_lowercase().contains("registration"), "{text}");
+    }
+
+    #[test]
+    fn malformed_primary_state_is_reported_instead_of_aborting_status() {
+        let sequence = STATUS_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let user_root = std::env::temp_dir().join(format!(
+            "incodex-windows-status-recovery-malformed-{}-{sequence}",
+            std::process::id()
+        ));
+        let (state, _) = enabled_install_fixture(&user_root, true);
+        std::fs::write(user_root.join("windows-install.json"), b"{")
+            .expect("corrupt primary install state");
+
+        let inspection = WindowsIntegrationStatus::inspect(
+            &user_root,
+            Some(state.package_full_name.as_str()),
+        );
+        std::fs::remove_dir_all(&user_root).expect("remove malformed-state fixture");
+        let report = inspection.expect("status must retain recovery evidence");
+        let text = format_integration_status(&report);
+
+        assert!(!report.installed, "malformed state was reported installed");
+        assert_eq!(
+            report.package_full_name.as_deref(),
+            Some(state.package_full_name.as_str())
+        );
+        assert!(text.to_ascii_lowercase().contains("unhealthy"), "{text}");
+        assert!(text.to_ascii_lowercase().contains("registration"), "{text}");
+    }
+
+    #[test]
     fn tampered_runtime_is_not_reported_as_healthy() {
         let sequence = STATUS_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let user_root = std::env::temp_dir().join(format!(
