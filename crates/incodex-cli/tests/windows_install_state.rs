@@ -320,6 +320,35 @@ fn uninstall_recovers_after_the_store_replaces_the_registered_package() {
 }
 
 #[test]
+fn install_replaces_a_stale_store_generation() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let old_package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    let new_package = "OpenAI.Codex_1.2.3.5_x64__publisher";
+    install_windows_runtime_with(
+        &user_root,
+        old_package,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(()),
+    )
+    .expect("install old Store generation");
+
+    let replacement = install_windows_runtime_with(
+        &user_root,
+        new_package,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(()),
+    )
+    .expect("replace stale Store generation");
+
+    assert_eq!(replacement.package_full_name, new_package);
+    assert_eq!(replacement.phase, WindowsInstallPhase::EnabledUnobserved);
+    fs::remove_dir_all(user_root).expect("remove Store replacement fixture");
+}
+
+#[test]
 fn uninstall_recovers_every_interrupted_install_transition() {
     let helper = std::env::current_exe().expect("test helper path");
     let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
