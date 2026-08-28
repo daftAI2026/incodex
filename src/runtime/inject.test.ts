@@ -64,6 +64,8 @@ describe("incognito button exit affordance", () => {
     expect(clickHandler).toContain("event.preventDefault()");
     expect(clickHandler).toContain("event.stopImmediatePropagation()");
     expect(clickHandler).toContain("tooltipLifecycle.trigger()");
+    expect(clickHandler).toContain("btn.blur()");
+    expect(clickHandler.indexOf("btn.blur()")).toBeLessThan(clickHandler.indexOf("void activate()"));
     expect(clickHandler).toContain("void activate()");
   });
 });
