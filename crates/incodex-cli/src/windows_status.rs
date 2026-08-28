@@ -448,6 +448,35 @@ mod tests {
     }
 
     #[test]
+    fn recovery_phase_with_installed_registration_reports_recovery() {
+        let sequence = STATUS_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let user_root = std::env::temp_dir().join(format!(
+            "incodex-windows-status-recovery-registered-{}-{sequence}",
+            std::process::id()
+        ));
+        let (enabled, _) = enabled_install_fixture(&user_root, true);
+        let recovery = transition_windows_install_state(
+            &user_root,
+            enabled.epoch,
+            WindowsInstallPhase::RecoveryRequired,
+        )
+        .expect("record fixture recovery state");
+
+        let inspection = WindowsIntegrationStatus::inspect(
+            &user_root,
+            Some(recovery.package_full_name.as_str()),
+        );
+        std::fs::remove_dir_all(&user_root).expect("remove registered recovery fixture");
+        let report = inspection.expect("inspect registered recovery state");
+        let text = format_integration_status(&report);
+
+        assert!(!report.installed, "recovery state was reported installed");
+        assert_eq!(report.phase, Some(WindowsInstallPhase::RecoveryRequired));
+        assert!(text.to_ascii_lowercase().contains("recovery"), "{text}");
+        assert!(text.to_ascii_lowercase().contains("registration"), "{text}");
+    }
+
+    #[test]
     fn malformed_primary_state_is_reported_instead_of_aborting_status() {
         let sequence = STATUS_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let user_root = std::env::temp_dir().join(format!(
