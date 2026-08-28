@@ -9,6 +9,7 @@ use crate::windows_app::{discover_codex_package, WindowsCodexApp};
 use crate::windows_install_state::{read_windows_install_state, WindowsInstallPhase};
 use crate::windows_registration::{
     read_windows_debug_registration, registration_matches_install_state,
+    WindowsDebugRegistrationEvidence, WindowsDebugRegistrationKind,
 };
 use crate::windows_runtime::verify_installed_windows_runtime;
 use crate::windows_system::windows_path_for_display;
@@ -40,15 +41,13 @@ impl WindowsIntegrationStatus {
         user_root: &std::path::Path,
         current_package_full_name: Option<&str>,
     ) -> Result<Self, String> {
-        let Some(state) = read_windows_install_state(user_root)? else {
-            return Ok(Self {
-                installed: false,
-                phase: None,
-                desired_enabled: false,
-                package_full_name: None,
-                runtime_release: None,
-                health_issues: Vec::new(),
-            });
+        let registration = read_windows_debug_registration(user_root);
+        let state = match read_windows_install_state(user_root) {
+            Ok(Some(state)) => state,
+            Ok(None) => return Ok(Self::without_install_state(registration, None)),
+            Err(error) => {
+                return Ok(Self::without_install_state(registration, Some(error)));
+            }
         };
         let enabled = matches!(
             state.phase,
@@ -62,7 +61,7 @@ impl WindowsIntegrationStatus {
                         .to_string(),
                 );
             }
-            match read_windows_debug_registration(user_root) {
+            match registration {
                 Ok(Some(evidence)) if registration_matches_install_state(&evidence, &state) => {}
                 Ok(Some(_)) => health_issues.push(
                     "Windows debugger registration does not match durable install state."
@@ -87,6 +86,42 @@ impl WindowsIntegrationStatus {
             runtime_release: Some(state.runtime_release),
             health_issues,
         })
+    }
+
+    fn without_install_state(
+        registration: Result<Option<WindowsDebugRegistrationEvidence>, String>,
+        state_error: Option<String>,
+    ) -> Self {
+        let mut health_issues = Vec::new();
+        if let Some(error) = state_error {
+            health_issues.push(format!("Windows install state is unhealthy: {error}"));
+        }
+
+        let package_full_name = match registration {
+            Ok(Some(evidence)) if evidence.kind == WindowsDebugRegistrationKind::Installed => {
+                health_issues.push(
+                    "Windows debugger registration requires recovery because primary install state is missing or unhealthy."
+                        .to_string(),
+                );
+                Some(evidence.package_full_name)
+            }
+            Ok(_) => None,
+            Err(error) => {
+                health_issues.push(format!(
+                    "Windows debugger registration evidence is unhealthy: {error}"
+                ));
+                None
+            }
+        };
+
+        Self {
+            installed: false,
+            phase: None,
+            desired_enabled: false,
+            package_full_name,
+            runtime_release: None,
+            health_issues,
+        }
     }
 }
 
@@ -397,10 +432,8 @@ mod tests {
         std::fs::remove_file(user_root.join("windows-install.json"))
             .expect("remove primary install state");
 
-        let inspection = WindowsIntegrationStatus::inspect(
-            &user_root,
-            Some(state.package_full_name.as_str()),
-        );
+        let inspection =
+            WindowsIntegrationStatus::inspect(&user_root, Some(state.package_full_name.as_str()));
         std::fs::remove_dir_all(&user_root).expect("remove missing-state fixture");
         let report = inspection.expect("inspect independent registration evidence");
         let text = format_integration_status(&report);
@@ -425,10 +458,8 @@ mod tests {
         std::fs::write(user_root.join("windows-install.json"), b"{")
             .expect("corrupt primary install state");
 
-        let inspection = WindowsIntegrationStatus::inspect(
-            &user_root,
-            Some(state.package_full_name.as_str()),
-        );
+        let inspection =
+            WindowsIntegrationStatus::inspect(&user_root, Some(state.package_full_name.as_str()));
         std::fs::remove_dir_all(&user_root).expect("remove malformed-state fixture");
         let report = inspection.expect("status must retain recovery evidence");
         let text = format_integration_status(&report);
