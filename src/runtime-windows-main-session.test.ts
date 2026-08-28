@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -64,28 +71,34 @@ function loadInstalledRuntimeHookWindow(readLocaleOverride: () => string) {
 describe("installed Windows Runtime session preparation", () => {
   test("injects a literal TOML locale into the renderer", async () => {
     const root = mkdtempSync(join(tmpdir(), "incodex-runtime-windows-main-"));
-    const sourceHome = join(root, ".codex");
-    mkdirSync(sourceHome);
-    writeFileSync(join(sourceHome, "config.toml"), "localeOverride = 'zh-CN'\n");
+    try {
+      const sourceHome = join(root, ".codex");
+      mkdirSync(sourceHome);
+      writeFileSync(join(sourceHome, "config.toml"), "localeOverride = 'zh-CN'\n");
 
-    const scripts: string[] = [];
-    const hookWindow = loadInstalledRuntimeHookWindow(loadInstalledRuntimeLocaleReader(sourceHome));
-    hookWindow(
-      {
-        webContents: {
-          session: {},
-          isDestroyed: () => false,
-          on: () => {},
-          executeJavaScript: (script: string) => {
-            scripts.push(script);
-            return Promise.resolve(undefined);
+      const scripts: string[] = [];
+      const hookWindow = loadInstalledRuntimeHookWindow(
+        loadInstalledRuntimeLocaleReader(sourceHome),
+      );
+      hookWindow(
+        {
+          webContents: {
+            session: {},
+            isDestroyed: () => false,
+            on: () => {},
+            executeJavaScript: (script: string) => {
+              scripts.push(script);
+              return Promise.resolve(undefined);
+            },
           },
         },
-      },
-      "window.__incodexInjected = true;",
-    );
-    await Promise.resolve();
+        "window.__incodexInjected = true;",
+      );
+      await Promise.resolve();
 
-    expect(scripts[0]).toContain('window.__incodexLocale="zh-CN";');
+      expect(scripts[0]).toContain('window.__incodexLocale="zh-CN";');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
