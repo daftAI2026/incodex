@@ -58,6 +58,29 @@ const RUNTIME_OWNER_MUTEX: &str = "Local\\Incodex-OpenAI.Codex-Runtime-Owner";
 const RUNTIME_RAISE_PIPE: &str = r"\\.\pipe\Incodex-Runtime-Raise";
 const RAISE_TIMEOUT_MS: u32 = 3_000;
 
+pub struct WindowsRuntimeReadinessDeadline {
+    activation_deadline: Instant,
+    runtime_deadline: Option<Instant>,
+    stage_budget: Duration,
+}
+
+impl WindowsRuntimeReadinessDeadline {
+    pub fn new(started: Instant, stage_budget: Duration) -> Self {
+        Self {
+            activation_deadline: started + stage_budget,
+            runtime_deadline: None,
+            stage_budget,
+        }
+    }
+
+    pub fn timed_out(&mut self, now: Instant, visible: bool) -> bool {
+        if visible && self.runtime_deadline.is_none() {
+            self.runtime_deadline = Some(now + self.stage_budget);
+        }
+        now >= self.runtime_deadline.unwrap_or(self.activation_deadline)
+    }
+}
+
 pub enum WindowsRuntimeOwnerClaim {
     Owned(WindowsRuntimeOwner),
     Existing,
@@ -475,7 +498,7 @@ fn run_guardian_lifecycle(
     _owner: WindowsRuntimeOwner,
 ) -> Result<(), String> {
     let cancelled = listen_for_guardian_cancellation();
-    let ready_deadline = Instant::now() + READY_TIMEOUT;
+    let mut ready_deadline = WindowsRuntimeReadinessDeadline::new(Instant::now(), READY_TIMEOUT);
     let mut runtime_accepted = false;
     loop {
         let authenticated_close = match receive_authenticated_close(&close_receiver, &process_tree)
@@ -557,7 +580,7 @@ fn run_guardian_lifecycle(
         if windows_runtime_ready_for_handshake(runtime_accepted, visible) {
             break;
         }
-        if Instant::now() >= ready_deadline {
+        if ready_deadline.timed_out(Instant::now(), visible) {
             return guardian_failure(
                 "timed out waiting for the shared Windows Runtime UI".to_string(),
                 &session,
