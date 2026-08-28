@@ -141,6 +141,20 @@ describe("tooltip lifecycle", () => {
     expect(harness.events).toEqual(["hide", "show"]);
   });
 
+  test("同一失焦周期的重复 window blur 不得清除恢复焦点保护", () => {
+    const harness = createHarness();
+
+    harness.lifecycle.focus();
+    harness.lifecycle.windowBlur();
+    harness.lifecycle.blur();
+    harness.lifecycle.windowBlur();
+    harness.lifecycle.windowFocus();
+    harness.lifecycle.focus();
+    harness.runScheduled();
+
+    expect(harness.events).toEqual(["hide", "hide", "hide"]);
+  });
+
   test("延迟结束时重新确认按钮仍可显示", () => {
     const harness = createHarness(false);
 
