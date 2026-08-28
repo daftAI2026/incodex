@@ -158,19 +158,20 @@ async function requestAction(action: IncognitoAction): Promise<IncognitoActionRe
   }
 }
 
-async function activate(): Promise<void> {
+async function activate(): Promise<boolean> {
   dismissActiveTooltip();
   if (isIncognitoWindow()) {
     const result = await requestAction("quit");
     if (!result.ok) window.close();
-    return;
+    return true;
   }
   const result = await requestAction("open");
   if (result.ok) {
     hideLaunchError();
-    return;
+    return true;
   }
   showLaunchError();
+  return false;
 }
 
 function ensureStyle(): void {
@@ -359,7 +360,9 @@ function buildButton(search: HTMLElement): HTMLElement {
       setButtonHover(btn, false);
       tooltipLifecycle.trigger();
       btn.blur();
-      void activate();
+      void activate().then((completed) => {
+        if (!completed && btn.isConnected) btn.focus();
+      });
     },
     true,
   );

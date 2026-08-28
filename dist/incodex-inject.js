@@ -1595,14 +1595,15 @@ async function activate() {
     const result2 = await requestAction("quit");
     if (!result2.ok)
       window.close();
-    return;
+    return true;
   }
   const result = await requestAction("open");
   if (result.ok) {
     hideLaunchError();
-    return;
+    return true;
   }
   showLaunchError();
+  return false;
 }
 function ensureStyle() {
   let style = document.getElementById(STYLE_ID);
@@ -1756,7 +1757,10 @@ function buildButton(search) {
     setButtonHover(btn, false);
     tooltipLifecycle.trigger();
     btn.blur();
-    activate();
+    activate().then((completed) => {
+      if (!completed && btn.isConnected)
+        btn.focus();
+    });
   }, true);
   btn.addEventListener("pointerenter", () => {
     setButtonHover(btn, true);
