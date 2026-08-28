@@ -75,8 +75,6 @@ pub mod windows_process;
 #[cfg(target_os = "windows")]
 pub(crate) mod windows_profile;
 #[cfg(target_os = "windows")]
-pub(crate) mod windows_quiescence;
-#[cfg(target_os = "windows")]
 pub mod windows_registration;
 #[cfg(target_os = "windows")]
 pub mod windows_runtime;

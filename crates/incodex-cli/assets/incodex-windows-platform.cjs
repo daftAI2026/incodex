@@ -9,7 +9,6 @@ const READY_TIMEOUT_MS = 35_000;
 const CANCEL_EXIT_TIMEOUT_MS = 5_000;
 const BOUNDS_PATTERN = /^-?\d{1,10},-?\d{1,10},\d{1,10},\d{1,10}$/;
 const SIGNAL_PIPE_PATTERN = /^\\\\\.\\pipe\\Incodex-Runtime-(Ready|Closed)-[a-f0-9]{32}$/;
-const CONTROL_PIPE_PATTERN = /^\\\\\.\\pipe\\Incodex-Runtime-Control-[a-f0-9]{32}$/;
 const RAISE_PIPE = "\\\\.\\pipe\\Incodex-Runtime-Raise";
 const WINDOW_CLOSE_SETTLE_MS = 100;
 const UI_READINESS_RETRY_MS = 250;
@@ -35,33 +34,6 @@ function markReady(pipeName, write = writeFileSync) {
 
 function markClosed(pipeName, write = writeFileSync) {
   return markSignal(pipeName, "closed", write);
-}
-
-function listenForNormalExit(pipeName, onExit, create = createServer) {
-  if (!CONTROL_PIPE_PATTERN.test(pipeName) || typeof onExit !== "function") {
-    throw new Error("invalid Windows Runtime control endpoint");
-  }
-  let accepted = false;
-  const server = create((socket) => {
-    let input = "";
-    socket.setEncoding?.("utf8");
-    socket.on("data", (chunk) => {
-      if (accepted) {
-        socket.end("refused\n");
-        return;
-      }
-      input += String(chunk);
-      if (input.length > 16 || (input.includes("\n") && input !== "quit\n")) {
-        socket.end("refused\n");
-        return;
-      }
-      if (input !== "quit\n") return;
-      accepted = true;
-      socket.end("accepted\n", onExit);
-    });
-  });
-  server.listen(pipeName);
-  return server;
 }
 
 function exitAfterLastMainWindowCloses(
@@ -278,7 +250,6 @@ module.exports = {
   exitAfterLastMainWindowCloses,
   launchIncognito,
   listenForRaise,
-  listenForNormalExit,
   markClosed,
   markReady,
   observeRuntimeUiReadiness,

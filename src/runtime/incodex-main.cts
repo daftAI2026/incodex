@@ -717,7 +717,6 @@ async function attachElectron() {
   const source = injectSource();
   let ownerLease = null;
   let raiseServer = null;
-  let normalExitServer = null;
   let incognitoExitStarted = false;
   function finishIncognito(code) {
     if (windowsPlatform && incognitoExitStarted) return;
@@ -856,27 +855,6 @@ async function attachElectron() {
         /* ignore */
       }
       throw startupBlocked(error instanceof Error ? error : new Error(String(error)));
-    }
-  }
-  if (windowsPlatform && !isIncognito()) {
-    const registrationId = process.env.INCODEX_WINDOWS_REGISTRATION_ID || "";
-    try {
-      normalExitServer = windowsPlatform.listenForNormalExit(
-        `\\\\.\\pipe\\Incodex-Runtime-Control-${registrationId}`,
-        () => electron.app.quit(),
-      );
-      normalExitServer.once("error", (error) => {
-        logLaunch("normal-exit-pipe-failed", { error: String(error) });
-      });
-      electron.app.once("before-quit", () => {
-        try {
-          if (normalExitServer?.listening) normalExitServer.close();
-        } catch {
-          /* Normal app shutdown must not be blocked by control-pipe cleanup. */
-        }
-      });
-    } catch (error) {
-      logLaunch("normal-exit-pipe-failed", { error: String(error) });
     }
   }
   if (isIncognito()) {

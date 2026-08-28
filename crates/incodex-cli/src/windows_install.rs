@@ -18,7 +18,6 @@ use crate::windows_install_state::{
     WindowsInstallState,
 };
 use crate::windows_process::running_package_process_ids;
-use crate::windows_quiescence::request_official_package_exit_and_wait;
 use crate::windows_registration::{
     read_windows_debug_registration, recover_transient_windows_debug_registration_with,
     registration_matches_install_state, retire_windows_debug_registration,
@@ -38,7 +37,6 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
         return Ok(());
     }
     crate::confirm::require("install", parsed.yes)?;
-    request_official_package_exit_and_wait(&app.package_full_name, None)?;
     let profile = crate::windows_profile::windows_user_profile()?;
     let user_root = profile.join(".incodex");
     let _registration_gate = acquire_windows_install_state()?;
@@ -93,7 +91,7 @@ where
         .map_err(|error| format!("cannot inspect running Windows Codex processes: {error}"))?;
     if !running.is_empty() {
         return Err(format!(
-            "close Codex before installing the Windows Runtime (running package PIDs: {})",
+            "close Codex before installing the Windows Runtime; finish active work, then use Ctrl+Q or the tray Quit command (running package PIDs: {})",
             running
                 .iter()
                 .map(u32::to_string)
@@ -224,12 +222,6 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
         return Ok(());
     }
     crate::confirm::require("uninstall", parsed.yes)?;
-    if let Some(package_full_name) = approval.package_full_name.as_deref() {
-        request_official_package_exit_and_wait(
-            package_full_name,
-            approval.registration_id.as_deref(),
-        )?;
-    }
     match uninstall_windows_runtime_approved_with(
         &user_root,
         &approval,
@@ -248,7 +240,7 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
         }
         WindowsUninstallOutcome::CloseRequired { process_ids } => {
             return Err(format!(
-                "close Codex to finish uninstalling the Windows Runtime (running package PIDs: {})",
+                "close Codex to finish uninstalling the Windows Runtime; finish active work, then use Ctrl+Q or the tray Quit command (running package PIDs: {})",
                 process_ids
                     .iter()
                     .map(u32::to_string)

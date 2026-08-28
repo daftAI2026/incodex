@@ -24,7 +24,10 @@ fn windows_runtime_never_exposes_an_automatic_official_app_quit_path() {
         "TerminateProcess",
         "TerminateAllProcesses",
     ] {
-        assert!(!platform.contains(forbidden), "platform contains {forbidden}");
+        assert!(
+            !platform.contains(forbidden),
+            "platform contains {forbidden}"
+        );
         assert!(!runtime.contains(forbidden), "Runtime contains {forbidden}");
     }
 }
