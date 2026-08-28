@@ -94,6 +94,42 @@ describe("tooltip lifecycle", () => {
     expect(harness.events).toEqual(["show", "hide"]);
   });
 
+  test("窗口回焦不得重放失焦前的按钮 focus", () => {
+    const harness = createHarness();
+
+    harness.lifecycle.pointerEnter();
+    harness.lifecycle.focus();
+    harness.runScheduled();
+    harness.lifecycle.pointerLeave();
+    harness.lifecycle.windowBlur();
+
+    harness.lifecycle.windowFocus();
+    harness.lifecycle.focus();
+    harness.runScheduled();
+    expect(harness.events).toEqual(["show", "hide", "hide"]);
+
+    harness.lifecycle.pointerEnter();
+    harness.runScheduled();
+    expect(harness.events).toEqual(["show", "hide", "hide", "show"]);
+  });
+
+  test("窗口内产生新的键盘焦点后允许再次显示", () => {
+    const harness = createHarness();
+
+    harness.lifecycle.focus();
+    harness.lifecycle.windowBlur();
+    harness.lifecycle.blur();
+    harness.lifecycle.windowFocus();
+    harness.lifecycle.focus();
+    harness.runScheduled();
+    expect(harness.events).toEqual(["hide", "hide"]);
+
+    harness.lifecycle.blur();
+    harness.lifecycle.focus();
+    harness.runScheduled();
+    expect(harness.events).toEqual(["hide", "hide", "hide", "show"]);
+  });
+
   test("延迟结束时重新确认按钮仍可显示", () => {
     const harness = createHarness(false);
 

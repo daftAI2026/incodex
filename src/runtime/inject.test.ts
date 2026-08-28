@@ -267,7 +267,12 @@ describe("incodex tooltip lifecycle", () => {
   });
 
   test("cancels pending and open tooltips on window blur and Escape", () => {
-    expect(inject).toContain('window.addEventListener("blur", dismissActiveTooltip)');
+    expect(inject).toContain(
+      'window.addEventListener("blur", () => activeTooltipLifecycle?.windowBlur())',
+    );
+    expect(inject).toContain(
+      'window.addEventListener("focus", () => activeTooltipLifecycle?.windowFocus())',
+    );
     expect(inject).toMatch(
       /function onKeydown\(event: KeyboardEvent\): void \{[\s\S]*event\.key === "Escape"[\s\S]*dismissActiveTooltip\(\);/,
     );
