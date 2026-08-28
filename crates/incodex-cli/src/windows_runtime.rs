@@ -715,4 +715,44 @@ mod tests {
 
         verification.expect("recorded Runtime file set must define its own generation");
     }
+
+    #[test]
+    fn installed_runtime_requires_the_recorded_main_entrypoint() {
+        let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let user_root = std::env::temp_dir().join(format!(
+            "incodex-windows-runtime-entrypoint-{}-{sequence}",
+            std::process::id()
+        ));
+        let published = publish_windows_runtime(&user_root).expect("publish current Runtime");
+        fs::remove_file(published.release_dir.join("incodex-main.cjs"))
+            .expect("remove recorded main entrypoint");
+
+        let manifest_path = published.release_dir.join(MANIFEST_NAME);
+        let mut manifest: serde_json::Value = serde_json::from_slice(
+            &fs::read(&manifest_path).expect("read current Runtime manifest"),
+        )
+        .expect("parse current Runtime manifest");
+        manifest["files"]
+            .as_object_mut()
+            .expect("Runtime manifest files")
+            .remove("incodex-main.cjs");
+        let manifest_body = serde_json::to_vec_pretty(&manifest).expect("write recorded manifest");
+        fs::write(&manifest_path, &manifest_body).expect("replace recorded Runtime manifest");
+        let version = manifest["runtimeVersion"]
+            .as_str()
+            .expect("manifest Runtime version");
+        let incomplete_release = format!("{version}-{}", sha256_hex(&manifest_body));
+        let incomplete_dir = published
+            .release_dir
+            .parent()
+            .expect("Runtime releases parent")
+            .join(&incomplete_release);
+        fs::rename(&published.release_dir, &incomplete_dir).expect("record incomplete generation");
+
+        let verification = verify_installed_windows_runtime(&user_root, &incomplete_release);
+        fs::remove_dir_all(&user_root).expect("remove incomplete Runtime fixture");
+
+        let error = verification.expect_err("Runtime without main must be unhealthy");
+        assert!(error.to_ascii_lowercase().contains("main"), "{error}");
+    }
 }
