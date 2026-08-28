@@ -383,3 +383,66 @@ fn windows_release_hash() -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn installed_runtime_verifies_its_recorded_generation() {
+        let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let user_root = std::env::temp_dir().join(format!(
+            "incodex-windows-runtime-generation-{}-{sequence}",
+            std::process::id()
+        ));
+        let published = publish_windows_runtime(&user_root).expect("publish current Runtime");
+
+        let previous_main = b"previous Runtime generation";
+        fs::write(
+            published.release_dir.join("incodex-main.cjs"),
+            previous_main,
+        )
+        .expect("replace previous generation main");
+        let manifest_path = published.release_dir.join(MANIFEST_NAME);
+        let mut manifest: serde_json::Value = serde_json::from_slice(
+            &fs::read(&manifest_path).expect("read current Runtime manifest"),
+        )
+        .expect("parse current Runtime manifest");
+        manifest["files"]["incodex-main.cjs"] =
+            serde_json::Value::String(sha256_hex(previous_main));
+        let manifest_body = serde_json::to_vec_pretty(&manifest).expect("write previous manifest");
+        fs::write(&manifest_path, &manifest_body).expect("replace previous Runtime manifest");
+
+        let version = manifest["runtimeVersion"]
+            .as_str()
+            .expect("manifest Runtime version");
+        let mut release_hash = Sha256::new();
+        release_hash.update(&manifest_body);
+        release_hash.update([0]);
+        for (name, _) in WINDOWS_ASSETS {
+            release_hash.update(name.as_bytes());
+            release_hash.update([0]);
+            release_hash.update(
+                fs::read(published.release_dir.join(name)).expect("read Windows Runtime asset"),
+            );
+            release_hash.update([0]);
+        }
+        let release_hash = release_hash
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let previous_release = format!("{version}-{release_hash}");
+        let previous_dir = published
+            .release_dir
+            .parent()
+            .expect("Runtime releases parent")
+            .join(&previous_release);
+        fs::rename(&published.release_dir, &previous_dir).expect("record previous generation");
+
+        let verification = verify_installed_windows_runtime(&user_root, &previous_release);
+        fs::remove_dir_all(&user_root).expect("remove previous Runtime fixture");
+
+        verification.expect("recorded Runtime generation must remain verifiable");
+    }
+}
