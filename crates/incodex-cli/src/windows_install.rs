@@ -37,6 +37,13 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
         return Ok(());
     }
     crate::confirm::require("install", parsed.yes)?;
+    let confirmed_app = discover_codex_package()?;
+    if confirmed_app.package_full_name != app.package_full_name {
+        return Err(
+            "Windows install target changed since confirmation; review the plan and retry"
+                .to_string(),
+        );
+    }
     let profile = crate::windows_profile::windows_user_profile()?;
     let user_root = profile.join(".incodex");
     let _registration_gate = acquire_windows_install_state()?;
@@ -50,7 +57,7 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
         .map_err(|error| format!("cannot locate the running Incodex executable: {error}"))?;
     let installed = install_windows_runtime_with(
         &user_root,
-        &app.package_full_name,
+        &confirmed_app.package_full_name,
         &helper,
         running_package_process_ids,
         codex_package_full_name_is_installed,
