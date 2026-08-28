@@ -64,9 +64,19 @@ describe("incognito button exit affordance", () => {
     expect(clickHandler).toContain("event.preventDefault()");
     expect(clickHandler).toContain("event.stopImmediatePropagation()");
     expect(clickHandler).toContain("tooltipLifecycle.trigger()");
-    expect(clickHandler).toContain("btn.blur()");
-    expect(clickHandler.indexOf("btn.blur()")).toBeLessThan(clickHandler.indexOf("void activate()"));
-    expect(clickHandler).toContain("void activate()");
+    expect(clickHandler).toContain("void activate().then((completed) => {");
+    expect(clickHandler).toContain("if (completed && btn.isConnected) btn.blur()");
+    expect(clickHandler).not.toContain("btn.focus()");
+  });
+
+  test("reports whether the requested action completed", () => {
+    const activateStart = inject.indexOf("async function activate(): Promise<boolean>");
+    const activateEnd = inject.indexOf("\nfunction ensureStyle", activateStart);
+    const activate = inject.slice(activateStart, activateEnd);
+
+    expect(activateStart).toBeGreaterThan(-1);
+    expect(activate).toMatch(/if \(result\.ok\) \{[\s\S]*return true;/);
+    expect(activate).toMatch(/showLaunchError\(\);\s*return false;/);
   });
 });
 
