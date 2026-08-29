@@ -171,6 +171,9 @@ async function loadRuntime(cleanupOwner?: string): Promise<RuntimeHarness> {
     if (id === "./incodex-window-kind.cjs") {
       return { isAuxiliarySnapshot: () => false };
     }
+    if (id === "./incodex-codex-mode.cjs") {
+      return { createCodexModeReadiness: () => ({ observe: () => {} }) };
+    }
     if (id === "./incodex-runtime-load.cjs") {
       return { resolveRuntimeFile: () => "/path/that/does/not/exist" };
     }

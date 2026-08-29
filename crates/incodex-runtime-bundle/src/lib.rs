@@ -34,6 +34,7 @@ const OWNER_RECOVERY: &str = include_str!("../../../dist/incodex-owner-recovery.
 const INSTANCE: &str = include_str!("../../../dist/incodex-instance.cjs");
 const RUNTIME_LOAD: &str = include_str!("../../../dist/incodex-runtime-load.cjs");
 const WINDOW_KIND: &str = include_str!("../../../dist/incodex-window-kind.cjs");
+const CODEX_MODE: &str = include_str!("../../../dist/incodex-codex-mode.cjs");
 const MANIFEST: &str = include_str!("../../../dist/runtime-manifest.json");
 
 const EXTERNAL_FILES: &[(&str, &str)] = &[
@@ -48,6 +49,7 @@ const EXTERNAL_FILES: &[(&str, &str)] = &[
     ("incodex-instance.cjs", INSTANCE),
     ("incodex-window-kind.cjs", WINDOW_KIND),
     ("incodex-runtime-load.cjs", RUNTIME_LOAD),
+    ("incodex-codex-mode.cjs", CODEX_MODE),
 ];
 
 #[derive(Debug, Clone)]

@@ -93,6 +93,7 @@ fn compressed_binary_and_runtime_resources_stay_inside_release_gates() {
         "incodex-instance.cjs",
         "incodex-window-kind.cjs",
         "incodex-runtime-load.cjs",
+        "incodex-codex-mode.cjs",
     ];
     let runtime_size: u64 = names
         .iter()

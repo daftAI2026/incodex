@@ -13,6 +13,7 @@ export const RUNTIME_ARTIFACT_NAMES = [
   "incodex-instance.cjs",
   "incodex-runtime-load.cjs",
   "incodex-window-kind.cjs",
+  "incodex-codex-mode.cjs",
 ] as const;
 
 export type RuntimeManifest = {

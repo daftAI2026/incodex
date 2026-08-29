@@ -153,6 +153,11 @@ fn loader_is_embedded() {
 }
 
 #[test]
+fn codex_mode_readiness_is_a_required_runtime_file() {
+    assert!(required_runtime_files().any(|name| name == "incodex-codex-mode.cjs"));
+}
+
+#[test]
 fn runtime_identity_is_content_addressed_by_the_canonical_manifest() {
     let identity = runtime_identity().unwrap();
     assert_eq!(identity.version, runtime_version());

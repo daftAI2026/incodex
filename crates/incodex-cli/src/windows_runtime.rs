@@ -27,6 +27,7 @@ pub const WINDOWS_RUNTIME_FILES: &[&str] = &[
     "incodex-instance.cjs",
     "incodex-window-kind.cjs",
     "incodex-runtime-load.cjs",
+    "incodex-codex-mode.cjs",
 ];
 
 const WINDOWS_BOOTSTRAP_NAME: &str = "incodex-windows-bootstrap.cjs";
@@ -80,6 +81,10 @@ const RUNTIME_FILES: &[(&str, &str)] = &[
     (
         "incodex-runtime-load.cjs",
         include_str!("../../../dist/incodex-runtime-load.cjs"),
+    ),
+    (
+        "incodex-codex-mode.cjs",
+        include_str!("../../../dist/incodex-codex-mode.cjs"),
     ),
 ];
 const LEGACY_RUNTIME_FILE_NAMES: &[&str] = &[

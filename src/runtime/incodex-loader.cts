@@ -20,6 +20,7 @@ const RUNTIME_FILES = [
   "incodex-instance.cjs",
   "incodex-window-kind.cjs",
   "incodex-runtime-load.cjs",
+  "incodex-codex-mode.cjs",
 ];
 
 /** @returns {string} */

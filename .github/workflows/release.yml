@@ -121,6 +121,7 @@ jobs:
                 "incodex-owner-recovery.cjs",
                 "incodex-instance.cjs",
                 "incodex-window-kind.cjs",
+                "incodex-codex-mode.cjs",
                 "incodex-runtime-load.cjs",
                 "incodex-loader.cjs",
               ];
