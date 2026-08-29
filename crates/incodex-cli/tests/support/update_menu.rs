@@ -176,7 +176,10 @@ fn native_menu_preserves_a_runtime_synchronization_notice() {
 
     assert_eq!(result.status, 0, "{}", result.stderr);
     std::thread::sleep(Duration::from_millis(200));
-    assert!(!curl_called.exists(), "pending Runtime state was refreshed away");
+    assert!(
+        !curl_called.exists(),
+        "pending Runtime state was refreshed away"
+    );
     assert!(cache.join("runtime_update_pending").is_file());
 }
 
@@ -277,13 +280,17 @@ fn native_homebrew_menu_waits_for_the_formula_and_names_inc_update() {
     fs::create_dir_all(&cellar_bin).unwrap();
     let installed = cellar_bin.join("incodex");
     fs::copy(env!("CARGO_BIN_EXE_incodex"), &installed).unwrap();
+    let cellar_prefix = cellar_bin.parent().unwrap();
     write_executable(
         &fake_bin.join("curl"),
         "#!/bin/sh\nprintf '%s\\n' '{\"tag_name\":\"v9.9.9\"}'\n",
     );
     write_executable(
         &fake_bin.join("brew"),
-        "#!/bin/sh\nif [ \"$*\" = 'outdated --formula --verbose incodex' ]; then printf '%s\\n' 'incodex (0.3.1) < 9.9.9'; fi\n",
+        &format!(
+            "#!/bin/sh\ncase \"$*\" in\n  'outdated --formula --verbose incodex') printf '%s\\n' 'incodex (0.3.1) < 9.9.9' ;;\n  '--prefix incodex') printf '%s\\n' '{}' ;;\nesac\n",
+            cellar_prefix.display()
+        ),
     );
     let path = format!("{}:/usr/bin:/bin", fake_bin.display());
 
@@ -348,8 +355,10 @@ fn native_homebrew_menu_exposes_the_unified_update_shortcut() {
     write_executable(
         &fake_bin.join("brew"),
         &format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$*\" in\n  'update') exit 1 ;;\n  'upgrade incodex') printf '%s\\n' 'incodex 9.9.9 already installed'; exit 0 ;;\n  'list --versions incodex') printf '%s\\n' 'incodex 9.9.9'; exit 0 ;;\n  '--prefix incodex') printf '%s\\n' '{}'; exit 0 ;;\nesac\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$*\" in\n  'update') exit 1 ;;\n  'upgrade incodex') printf '%s\\n' 'incodex {} already installed'; exit 0 ;;\n  'list --versions incodex') printf '%s\\n' 'incodex {}'; exit 0 ;;\n  '--prefix incodex') printf '%s\\n' '{}'; exit 0 ;;\nesac\n",
             brew_log.display(),
+            env!("CARGO_PKG_VERSION"),
+            env!("CARGO_PKG_VERSION"),
             cellar_prefix.display()
         ),
     );

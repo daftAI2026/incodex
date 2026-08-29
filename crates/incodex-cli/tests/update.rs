@@ -28,6 +28,15 @@ fn write_executable(path: &std::path::Path, body: &str) {
     fs::set_permissions(path, permissions).unwrap();
 }
 
+fn write_runtime_cli(path: &std::path::Path, version: &str) {
+    write_executable(
+        path,
+        &format!(
+            "#!/bin/sh\ncase \"$1\" in\n  --version) printf '%s\\n' 'Incodex version {version}' ;;\n  runtime) exit 0 ;;\n  *) exit 88 ;;\nesac\n"
+        ),
+    );
+}
+
 fn installed_cli(home: &std::path::Path) -> (PathBuf, PathBuf) {
     let prefix = home.join("prefix");
     let bin = prefix.join("bin");
@@ -72,7 +81,9 @@ fn homebrew_update_refreshes_metadata_then_upgrades_through_brew() {
     let brew_log = home.join("brew.log");
     fs::create_dir_all(&fake_bin).unwrap();
     let installed = homebrew_cli(&home);
-    let homebrew_prefix = installed.parent().unwrap().parent().unwrap().to_path_buf();
+    let homebrew_prefix = home.join("Cellar/incodex/9.9.9");
+    fs::create_dir_all(homebrew_prefix.join("bin")).unwrap();
+    write_runtime_cli(&homebrew_prefix.join("bin/incodex"), "9.9.9");
     write_executable(
         &fake_bin.join("brew"),
         "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$BREW_LOG\"\ncase \"$*\" in\n  'update') printf '%s\\n' 'simulated metadata failure' >&2; exit 9 ;;\n  'upgrade incodex') printf '%s\\n' 'Upgrading incodex'; exit 0 ;;\n  'list --versions incodex') printf '%s\\n' 'incodex 9.9.9'; exit 0 ;;\n  '--prefix incodex') printf '%s\\n' \"$HOMEBREW_PREFIX\"; exit 0 ;;\n  *) exit 88 ;;\nesac\n",
@@ -106,7 +117,9 @@ fn homebrew_update_falls_back_to_the_public_cli_version_probe() {
     let fake_bin = home.join("fake-bin");
     fs::create_dir_all(&fake_bin).unwrap();
     let installed = homebrew_cli(&home);
-    let homebrew_prefix = installed.parent().unwrap().parent().unwrap().to_path_buf();
+    let homebrew_prefix = home.join("Cellar/incodex/9.9.9");
+    fs::create_dir_all(homebrew_prefix.join("bin")).unwrap();
+    write_runtime_cli(&homebrew_prefix.join("bin/incodex"), "9.9.9");
     write_executable(
         &fake_bin.join("brew"),
         "#!/bin/sh\ncase \"$*\" in\n  'update'|'upgrade incodex') exit 0 ;;\n  'list --versions incodex') exit 1 ;;\n  '--prefix incodex') printf '%s\\n' \"$HOMEBREW_PREFIX\"; exit 0 ;;\nesac\nexit 88\n",
@@ -402,11 +415,9 @@ esac
     assert!(stderr.contains("simulated Runtime failure"), "{stderr}");
     assert_eq!(
         fs::read_to_string(notice).unwrap(),
-        "Update 9.9.9 available, run inc update\n"
+        "Runtime synchronization incomplete, run inc update\n"
     );
-    assert!(home
-        .join(".incodex/cache/runtime_update_pending")
-        .is_file());
+    assert!(home.join(".incodex/cache/runtime_update_pending").is_file());
 }
 
 #[test]
@@ -421,7 +432,7 @@ fn homebrew_update_publishes_runtime_from_the_new_cellar_generation() {
     let installed = homebrew_cli(&home);
     write_executable(
         &new_prefix.join("bin/incodex"),
-        "#!/bin/sh\ncase \"$1\" in\n  runtime) printf '%s\\n' \"$*\" > \"$RUNTIME_LOG\" ;;\n  *) exit 88 ;;\nesac\n",
+        "#!/bin/sh\ncase \"$1\" in\n  --version) printf '%s\\n' 'Incodex version 9.9.9' ;;\n  runtime) printf '%s\\n' \"$*\" > \"$RUNTIME_LOG\" ;;\n  *) exit 88 ;;\nesac\n",
     );
     write_executable(
         &fake_bin.join("brew"),
@@ -480,9 +491,7 @@ fn homebrew_update_fails_closed_when_the_new_prefix_cannot_be_resolved() {
     assert!(stderr.contains("Runtime"), "{stderr}");
     assert!(stderr.contains("Homebrew prefix"), "{stderr}");
     assert!(!fallback_log.exists(), "update fell back to a PATH binary");
-    assert!(home
-        .join(".incodex/cache/runtime_update_pending")
-        .is_file());
+    assert!(home.join(".incodex/cache/runtime_update_pending").is_file());
 }
 
 #[test]
