@@ -37,6 +37,22 @@ fn write_runtime_cli(path: &std::path::Path, version: &str) {
     );
 }
 
+fn runtime_pending_marker(version: &str, manifest_sha256: &str) -> String {
+    format!(
+        "{}\n",
+        serde_json::json!({
+            "schemaVersion": 1,
+            "version": version,
+            "manifestSha256": manifest_sha256,
+        })
+    )
+}
+
+fn embedded_runtime_pending_marker() -> String {
+    let identity = incodex_runtime_bundle::runtime_identity().unwrap();
+    runtime_pending_marker(&identity.version, &identity.manifest_sha256)
+}
+
 fn installed_cli(home: &std::path::Path) -> (PathBuf, PathBuf) {
     let prefix = home.join("prefix");
     let bin = prefix.join("bin");
@@ -456,7 +472,7 @@ fn successful_runtime_publication_clears_pending_update_state() {
     let pending = cache.join("runtime_update_pending");
     let notice = cache.join("update_message");
     fs::create_dir_all(&cache).unwrap();
-    fs::write(&pending, "pending\n").unwrap();
+    fs::write(&pending, embedded_runtime_pending_marker()).unwrap();
     fs::write(
         &notice,
         "Runtime synchronization incomplete, run inc update\n",
@@ -477,6 +493,50 @@ fn successful_runtime_publication_clears_pending_update_state() {
     );
     assert!(!pending.exists(), "successful Runtime left pending state");
     assert_eq!(fs::read_to_string(notice).unwrap(), "");
+}
+
+#[test]
+fn runtime_publication_does_not_clear_a_different_expected_generation() {
+    let home = scratch("runtime-preserves-newer-pending-generation");
+    let cache = home.join(".incodex/cache");
+    let pending = cache.join("runtime_update_pending");
+    let notice = cache.join("update_message");
+    fs::create_dir_all(&cache).unwrap();
+    fs::write(
+        &pending,
+        runtime_pending_marker(
+            "9.9.9",
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        ),
+    )
+    .unwrap();
+    fs::write(
+        &notice,
+        "Runtime synchronization incomplete, run inc update\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_incodex"))
+        .arg("runtime")
+        .env("HOME", &home)
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("expected Runtime generation"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !home.join(".incodex/runtime/current.json").exists(),
+        "older Runtime was published over the expected generation"
+    );
+    assert!(pending.is_file(), "older Runtime cleared newer pending state");
+    assert_eq!(
+        fs::read_to_string(notice).unwrap(),
+        "Runtime synchronization incomplete, run inc update\n"
+    );
 }
 
 #[test]
