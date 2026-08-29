@@ -116,30 +116,26 @@ describe("runtime load", () => {
     expect(launch).toContain('return Promise.resolve({ ok: false, reason: "spawn-failed" });');
   });
 
-  test("the installed Runtime confirms Codex mode with Control+3", () => {
+  test("the installed Runtime verifies the primary route before using Control+3 as fallback", () => {
     const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
-    const selectorStart = main.indexOf("function selectOfficialCodexMode(win)");
+    const selectorStart = main.indexOf("function selectOfficialCodexModeFallback(win)");
     const selectorEnd = main.indexOf("\nfunction ", selectorStart + 1);
     const selector = main.slice(selectorStart, selectorEnd);
 
-    expect(main).toContain("let codexModeSelected = false");
+    expect(main).not.toContain("codexModeSelected");
+    expect(main).toContain('require("./incodex-codex-mode.cjs")');
     expect(selector).toContain("if (!isIncognito()) return");
-    expect(selector).toContain("if (codexModeSelected) return");
     expect(selector).toContain(
       'win.webContents.sendInputEvent({ type: "keyDown", keyCode: "3", modifiers: ["control"] })',
     );
     expect(selector).toContain(
       'win.webContents.sendInputEvent({ type: "keyUp", keyCode: "3", modifiers: ["control"] })',
     );
-    expect(selector).toContain("codexModeSelected = true");
     const readyStart = main.indexOf('win.once("ready-to-show", () => {');
     const readyEnd = main.indexOf("\n    });", readyStart);
     const ready = main.slice(readyStart, readyEnd);
-    expect(ready.indexOf("bringForward();")).toBeLessThan(
-      ready.indexOf("selectOfficialCodexMode(win)"),
-    );
-    expect(ready).toContain("if (win.isFocused()) selectOfficialCodexMode(win)");
-    expect(ready).toContain('else win.once("focus", () => selectOfficialCodexMode(win))');
+    expect(ready).not.toContain("selectOfficialCodexModeFallback");
+    expect(main).toContain("scheduleCodexModeCheck(win)");
   });
 
   test("an ordinary incognito click marks its session pending before child handoff", () => {
