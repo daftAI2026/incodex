@@ -117,6 +117,7 @@ describe("runtime load", () => {
   });
 
   test("the installed Runtime verifies the primary route before using Control+3 as fallback", () => {
+    const loader = readFileSync(join(import.meta.dir, "runtime/incodex-loader.cts"), "utf8");
     const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
     const selectorStart = main.indexOf("function selectOfficialCodexModeFallback(win)");
     const selectorEnd = main.indexOf("\nfunction ", selectorStart + 1);
@@ -124,6 +125,7 @@ describe("runtime load", () => {
 
     expect(main).not.toContain("codexModeSelected");
     expect(main).toContain('require("./incodex-codex-mode.cjs")');
+    expect(loader).toContain('"incodex-codex-mode.cjs"');
     expect(selector).toContain("if (!isIncognito()) return");
     expect(selector).toContain(
       'win.webContents.sendInputEvent({ type: "keyDown", keyCode: "3", modifiers: ["control"] })',
