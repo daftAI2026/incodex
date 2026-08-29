@@ -365,7 +365,7 @@ fn current_script_update_repairs_runtime_without_downloading_an_installer() {
 }
 
 #[test]
-fn pending_script_runtime_repair_does_not_require_release_metadata() {
+fn pending_script_runtime_repair_precedes_a_failed_release_lookup() {
     let home = scratch("pending-script-runtime-repair");
     let fake_bin = home.join("fake-bin");
     let curl_log = home.join("curl.log");
@@ -393,19 +393,19 @@ fn pending_script_runtime_repair_does_not_require_release_metadata() {
         .output()
         .unwrap();
 
-    assert!(
-        output.status.success(),
-        "stdout={}\nstderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(!curl_log.exists(), "pending repair queried the release API");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(curl_log.is_file(), "update stopped after repairing Runtime");
     assert!(home.join(".incodex/runtime/current.json").is_file());
     assert!(!pending.exists());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("latest release metadata"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
-fn pending_homebrew_runtime_repair_does_not_run_brew() {
+fn pending_homebrew_runtime_repair_precedes_a_failed_brew_upgrade() {
     let home = scratch("pending-homebrew-runtime-repair");
     let fake_bin = home.join("fake-bin");
     let brew_log = home.join("brew.log");
@@ -433,15 +433,20 @@ fn pending_homebrew_runtime_repair_does_not_run_brew() {
         .output()
         .unwrap();
 
+    assert_eq!(output.status.code(), Some(1));
+    let calls = fs::read_to_string(brew_log).unwrap();
+    assert!(calls.lines().any(|line| line == "update"), "{calls}");
     assert!(
-        output.status.success(),
-        "stdout={}\nstderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        calls.lines().any(|line| line == "upgrade incodex"),
+        "{calls}"
     );
-    assert!(!brew_log.exists(), "pending repair invoked Homebrew");
     assert!(home.join(".incodex/runtime/current.json").is_file());
     assert!(!pending.exists());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("Homebrew upgrade failed"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
