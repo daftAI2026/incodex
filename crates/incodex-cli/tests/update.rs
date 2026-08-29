@@ -365,6 +365,36 @@ fn current_script_update_repairs_runtime_without_downloading_an_installer() {
 }
 
 #[test]
+fn successful_runtime_publication_clears_pending_update_state() {
+    let home = scratch("runtime-clears-pending-update");
+    let cache = home.join(".incodex/cache");
+    let pending = cache.join("runtime_update_pending");
+    let notice = cache.join("update_message");
+    fs::create_dir_all(&cache).unwrap();
+    fs::write(&pending, "pending\n").unwrap();
+    fs::write(
+        &notice,
+        "Runtime synchronization incomplete, run inc update\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_incodex"))
+        .arg("runtime")
+        .env("HOME", &home)
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!pending.exists(), "successful Runtime left pending state");
+    assert_eq!(fs::read_to_string(notice).unwrap(), "");
+}
+
+#[test]
 fn runtime_failure_reports_partial_success_and_keeps_the_update_notice() {
     let home = scratch("runtime-partial-success");
     let fake_bin = home.join("fake-bin");
