@@ -1,20 +1,21 @@
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const RUNTIME_ARTIFACT_NAMES = [
-  "incodex-inject.js",
-  "incodex-loader.cjs",
-  "incodex-main.cjs",
-  "incodex-preload.cjs",
-  "incodex-safe-home.cjs",
-  "incodex-ipc-guard.cjs",
-  "incodex-owner-core.cjs",
-  "incodex-owner-recovery.cjs",
-  "incodex-instance.cjs",
-  "incodex-runtime-load.cjs",
-  "incodex-window-kind.cjs",
-  "incodex-codex-mode.cjs",
-] as const;
+type RuntimeArtifactCatalog = {
+  loader: string;
+  external: string[];
+};
+
+const catalog = JSON.parse(
+  readFileSync(new URL("../runtime-artifacts.json", import.meta.url), "utf8"),
+) as RuntimeArtifactCatalog;
+
+export const RUNTIME_LOADER_NAME = catalog.loader;
+export const RUNTIME_EXTERNAL_ARTIFACT_NAMES = Object.freeze([...catalog.external]);
+export const RUNTIME_ARTIFACT_NAMES = Object.freeze([
+  RUNTIME_LOADER_NAME,
+  ...RUNTIME_EXTERNAL_ARTIFACT_NAMES,
+]);
 
 export type RuntimeManifest = {
   runtimeVersion: string;

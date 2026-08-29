@@ -8,27 +8,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use incodex_core::windows_session::{
     apply_private_windows_acl, ensure_private_windows_dir, verify_private_acl,
 };
+use incodex_runtime_assets::external_files;
+use incodex_runtime_assets::{external_artifact_names, manifest_source};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use windows_sys::Win32::Storage::FileSystem::{
     MoveFileExW, FILE_ATTRIBUTE_REPARSE_POINT, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
 };
-
-pub const WINDOWS_RUNTIME_FILES: &[&str] = &[
-    "incodex-windows-bootstrap.cjs",
-    "incodex-windows-platform.cjs",
-    "incodex-main.cjs",
-    "incodex-preload.cjs",
-    "incodex-inject.js",
-    "incodex-safe-home.cjs",
-    "incodex-ipc-guard.cjs",
-    "incodex-owner-core.cjs",
-    "incodex-owner-recovery.cjs",
-    "incodex-instance.cjs",
-    "incodex-window-kind.cjs",
-    "incodex-runtime-load.cjs",
-    "incodex-codex-mode.cjs",
-];
 
 const WINDOWS_BOOTSTRAP_NAME: &str = "incodex-windows-bootstrap.cjs";
 const WINDOWS_MAIN_NAME: &str = "incodex-main.cjs";
@@ -41,52 +27,6 @@ const WINDOWS_ASSETS: &[(&str, &str)] = &[
     ),
 ];
 
-const RUNTIME_FILES: &[(&str, &str)] = &[
-    (
-        WINDOWS_MAIN_NAME,
-        include_str!("../../../dist/incodex-main.cjs"),
-    ),
-    (
-        "incodex-preload.cjs",
-        include_str!("../../../dist/incodex-preload.cjs"),
-    ),
-    (
-        "incodex-inject.js",
-        include_str!("../../../dist/incodex-inject.js"),
-    ),
-    (
-        "incodex-safe-home.cjs",
-        include_str!("../../../dist/incodex-safe-home.cjs"),
-    ),
-    (
-        "incodex-ipc-guard.cjs",
-        include_str!("../../../dist/incodex-ipc-guard.cjs"),
-    ),
-    (
-        "incodex-owner-core.cjs",
-        include_str!("../../../dist/incodex-owner-core.cjs"),
-    ),
-    (
-        "incodex-owner-recovery.cjs",
-        include_str!("../../../dist/incodex-owner-recovery.cjs"),
-    ),
-    (
-        "incodex-instance.cjs",
-        include_str!("../../../dist/incodex-instance.cjs"),
-    ),
-    (
-        "incodex-window-kind.cjs",
-        include_str!("../../../dist/incodex-window-kind.cjs"),
-    ),
-    (
-        "incodex-runtime-load.cjs",
-        include_str!("../../../dist/incodex-runtime-load.cjs"),
-    ),
-    (
-        "incodex-codex-mode.cjs",
-        include_str!("../../../dist/incodex-codex-mode.cjs"),
-    ),
-];
 const LEGACY_RUNTIME_FILE_NAMES: &[&str] = &[
     WINDOWS_MAIN_NAME,
     "incodex-preload.cjs",
@@ -101,11 +41,17 @@ const LEGACY_RUNTIME_FILE_NAMES: &[&str] = &[
 ];
 const LEGACY_WINDOWS_ASSET_NAMES: &[&str] =
     &[WINDOWS_BOOTSTRAP_NAME, "incodex-windows-platform.cjs"];
-const MANIFEST: &str = include_str!("../../../dist/runtime-manifest.json");
 const MANIFEST_NAME: &str = "runtime-manifest.json";
 const MANIFEST_LIMIT: u64 = 64 * 1024;
 const RECORDED_MANIFEST_SCHEMA: u32 = 1;
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+pub fn windows_runtime_files() -> impl Iterator<Item = &'static str> {
+    WINDOWS_ASSETS
+        .iter()
+        .map(|(name, _)| *name)
+        .chain(external_artifact_names().iter().copied())
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublishedWindowsRuntime {
@@ -144,7 +90,7 @@ struct RuntimePointer<'a> {
 }
 
 pub fn publish_windows_runtime(user_root: &Path) -> Result<PublishedWindowsRuntime, String> {
-    let manifest: RuntimeManifest = serde_json::from_str(MANIFEST)
+    let manifest: RuntimeManifest = serde_json::from_str(manifest_source())
         .map_err(|error| format!("invalid Runtime manifest: {error}"))?;
     validate_manifest(&manifest)?;
     let recorded_manifest = recorded_windows_manifest(&manifest)?;
@@ -174,8 +120,7 @@ pub fn publish_windows_runtime(user_root: &Path) -> Result<PublishedWindowsRunti
     let pointer_path = runtime_root.join("current.json");
     replace_private_file(&runtime_root, &pointer_path, &pointer_body)?;
 
-    let files = WINDOWS_RUNTIME_FILES
-        .iter()
+    let files = windows_runtime_files()
         .map(|name| release_dir.join(name))
         .collect::<Vec<_>>();
     Ok(PublishedWindowsRuntime {
@@ -230,7 +175,7 @@ fn publish_release(
     ));
     let staging = ensure_private_windows_dir(&staging)?;
     let result = (|| {
-        for (name, body) in RUNTIME_FILES {
+        for (name, body) in external_files() {
             write_private_file(&staging.join(name), body.as_bytes())?;
         }
         for (name, body) in WINDOWS_ASSETS {
@@ -259,7 +204,7 @@ fn verify_release(
 ) -> Result<(), String> {
     ensure_regular_directory(path)?;
     verify_private_acl(path)?;
-    for (name, body) in RUNTIME_FILES {
+    for (name, body) in external_files() {
         let file = path.join(name);
         ensure_regular_file(&file)?;
         verify_private_acl(&file)?;
@@ -487,7 +432,7 @@ fn validate_sha256(value: &str, label: &str) -> Result<(), String> {
 
 fn runtime_hashes(manifest: &RuntimeManifest) -> Result<BTreeMap<String, String>, String> {
     let mut hashes = BTreeMap::new();
-    for (name, body) in RUNTIME_FILES {
+    for (name, body) in external_files() {
         let actual = sha256_hex(body.as_bytes());
         if manifest.files.get(*name) != Some(&actual) {
             return Err(format!("Runtime manifest hash mismatch: {name}"));
@@ -704,9 +649,7 @@ mod tests {
         .expect("write future Runtime artifact");
 
         let mut files = BTreeMap::new();
-        for name in WINDOWS_RUNTIME_FILES
-            .iter()
-            .copied()
+        for name in windows_runtime_files()
             .filter(|name| *name != retired_name)
             .chain([future_name])
         {

@@ -9,19 +9,7 @@ const path = require("node:path");
 
 const MAIN_NAME = "incodex-main.cjs";
 const MANIFEST_NAME = "runtime-manifest.json";
-const RUNTIME_FILES = [
-  "incodex-main.cjs",
-  "incodex-preload.cjs",
-  "incodex-inject.js",
-  "incodex-safe-home.cjs",
-  "incodex-ipc-guard.cjs",
-  "incodex-owner-core.cjs",
-  "incodex-owner-recovery.cjs",
-  "incodex-instance.cjs",
-  "incodex-window-kind.cjs",
-  "incodex-runtime-load.cjs",
-  "incodex-codex-mode.cjs",
-];
+const RUNTIME_FILES = "__INCODEX_RUNTIME_FILES__";
 
 /** @returns {string} */
 function originalMain() {

@@ -11,6 +11,8 @@ use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
+use incodex_runtime_assets::external_files;
+use incodex_runtime_assets::{loader_source as embedded_loader, manifest_source, LOADER_NAME};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
@@ -19,38 +21,8 @@ const FILE_MODE: u32 = 0o600;
 // The pointer remains schema 1; manifest provenance is an optional extension.
 const CURRENT_SCHEMA: u64 = 1;
 const MANIFEST_NAME: &str = "runtime-manifest.json";
-const LOADER_NAME: &str = "incodex-loader.cjs";
 const MAX_METADATA_BYTES: u64 = 1024 * 1024;
 static PUBLISH_LOCK: Mutex<()> = Mutex::new(());
-
-const LOADER: &str = include_str!("../../../dist/incodex-loader.cjs");
-const INJECT: &str = include_str!("../../../dist/incodex-inject.js");
-const MAIN: &str = include_str!("../../../dist/incodex-main.cjs");
-const PRELOAD: &str = include_str!("../../../dist/incodex-preload.cjs");
-const SAFE_HOME: &str = include_str!("../../../dist/incodex-safe-home.cjs");
-const IPC_GUARD: &str = include_str!("../../../dist/incodex-ipc-guard.cjs");
-const OWNER_CORE: &str = include_str!("../../../dist/incodex-owner-core.cjs");
-const OWNER_RECOVERY: &str = include_str!("../../../dist/incodex-owner-recovery.cjs");
-const INSTANCE: &str = include_str!("../../../dist/incodex-instance.cjs");
-const RUNTIME_LOAD: &str = include_str!("../../../dist/incodex-runtime-load.cjs");
-const WINDOW_KIND: &str = include_str!("../../../dist/incodex-window-kind.cjs");
-const CODEX_MODE: &str = include_str!("../../../dist/incodex-codex-mode.cjs");
-const MANIFEST: &str = include_str!("../../../dist/runtime-manifest.json");
-
-const EXTERNAL_FILES: &[(&str, &str)] = &[
-    // Keep this list identical to RUNTIME_FILES in src/runtime/incodex-loader.cts.
-    ("incodex-main.cjs", MAIN),
-    ("incodex-preload.cjs", PRELOAD),
-    ("incodex-inject.js", INJECT),
-    ("incodex-safe-home.cjs", SAFE_HOME),
-    ("incodex-ipc-guard.cjs", IPC_GUARD),
-    ("incodex-owner-core.cjs", OWNER_CORE),
-    ("incodex-owner-recovery.cjs", OWNER_RECOVERY),
-    ("incodex-instance.cjs", INSTANCE),
-    ("incodex-window-kind.cjs", WINDOW_KIND),
-    ("incodex-runtime-load.cjs", RUNTIME_LOAD),
-    ("incodex-codex-mode.cjs", CODEX_MODE),
-];
 
 #[derive(Debug, Clone)]
 pub struct PublishedRuntime {
@@ -116,12 +88,12 @@ struct CurrentPointer {
 }
 
 pub fn loader_source() -> &'static str {
-    LOADER
+    embedded_loader()
 }
 
 /// Return the fixed set of artifacts that the external loader requires.
 pub fn required_runtime_files() -> impl Iterator<Item = &'static str> {
-    EXTERNAL_FILES.iter().map(|(name, _)| *name)
+    external_files().iter().map(|(name, _)| *name)
 }
 
 pub fn runtime_version() -> String {
@@ -283,10 +255,10 @@ where
                 unique_suffix()
             ));
             mkdir_mode(&staging)?;
-            for (name, body) in EXTERNAL_FILES {
+            for (name, body) in external_files() {
                 write_durable(&staging.join(name), body.as_bytes())?;
             }
-            write_durable(&staging.join(MANIFEST_NAME), MANIFEST.as_bytes())?;
+            write_durable(&staging.join(MANIFEST_NAME), manifest_source().as_bytes())?;
             hook("staging-write");
             sync_dir(&staging)?;
             hook("staging-dir-sync");
@@ -326,7 +298,7 @@ where
 }
 
 fn embedded_manifest() -> Result<EmbeddedManifest, String> {
-    let manifest: EmbeddedManifest = serde_json::from_str(MANIFEST)
+    let manifest: EmbeddedManifest = serde_json::from_str(manifest_source())
         .map_err(|error| format!("invalid embedded runtime manifest: {error}"))?;
     if manifest.runtime_version.is_empty() {
         return Err("embedded runtime manifest has no runtimeVersion".into());
@@ -338,7 +310,7 @@ fn embedded_manifest() -> Result<EmbeddedManifest, String> {
 fn embedded_snapshot() -> Result<(EmbeddedManifest, BTreeMap<String, String>, String), String> {
     let manifest = embedded_manifest()?;
     let files = runtime_file_hashes(&manifest)?;
-    let manifest_hash = sha256_hex(MANIFEST.as_bytes());
+    let manifest_hash = sha256_hex(manifest_source().as_bytes());
     Ok((manifest, files, manifest_hash))
 }
 
@@ -348,11 +320,11 @@ fn runtime_file_hashes(manifest: &EmbeddedManifest) -> Result<BTreeMap<String, S
         .files
         .get(LOADER_NAME)
         .ok_or("runtime manifest is missing incodex-loader.cjs")?;
-    if loader_hash != &sha256_hex(LOADER.as_bytes()) {
+    if loader_hash != &sha256_hex(embedded_loader().as_bytes()) {
         return Err("embedded runtime manifest hash mismatch: incodex-loader.cjs".into());
     }
     let mut files = BTreeMap::new();
-    for (name, body) in EXTERNAL_FILES {
+    for (name, body) in external_files() {
         let actual = sha256_hex(body.as_bytes());
         if declared.get(*name) != Some(&actual) {
             return Err(format!("embedded runtime manifest hash mismatch: {name}"));
@@ -365,7 +337,7 @@ fn runtime_file_hashes(manifest: &EmbeddedManifest) -> Result<BTreeMap<String, S
 fn declared_runtime_file_hashes(
     manifest: &EmbeddedManifest,
 ) -> Result<BTreeMap<String, String>, String> {
-    if manifest.files.len() != EXTERNAL_FILES.len() + 1
+    if manifest.files.len() != external_files().len() + 1
         || !manifest
             .files
             .get(LOADER_NAME)
@@ -373,7 +345,7 @@ fn declared_runtime_file_hashes(
     {
         return Err("runtime manifest files do not match required artifacts".into());
     }
-    EXTERNAL_FILES
+    external_files()
         .iter()
         .map(|(name, _)| {
             let hash = manifest
@@ -399,7 +371,7 @@ fn verify_release(
         return Err("release directory is not named by version and manifest hash".into());
     }
     let manifest_path = release.join(MANIFEST_NAME);
-    verify_file(&manifest_path, MANIFEST.as_bytes())?;
+    verify_file(&manifest_path, manifest_source().as_bytes())?;
     verify_release_files(release, files)?;
     Ok(())
 }

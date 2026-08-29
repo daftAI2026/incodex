@@ -116,6 +116,7 @@ dependencies = [
 name = "incodex-asar"
 version = "0.5.0"
 dependencies = [
+ "incodex-runtime-assets",
  "serde",
  "serde_json",
  "sha2",
@@ -128,6 +129,7 @@ dependencies = [
  "incodex-asar",
  "incodex-core",
  "incodex-macos",
+ "incodex-runtime-assets",
  "incodex-runtime-bundle",
  "incodex-transaction",
  "libc",
@@ -158,9 +160,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "incodex-runtime-assets"
+version = "0.5.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "incodex-runtime-bundle"
 version = "0.5.0"
 dependencies = [
+ "incodex-runtime-assets",
  "libc",
  "serde",
  "serde_json",

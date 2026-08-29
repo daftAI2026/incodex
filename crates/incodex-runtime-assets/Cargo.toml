@@ -1,0 +1,11 @@
+[package]
+name = "incodex-runtime-assets"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Cross-platform embedded Incodex Electron Runtime assets"
+
+[build-dependencies]
+serde_json.workspace = true

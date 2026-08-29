@@ -1,27 +1,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use incodex_runtime_assets::external_artifact_names;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
 use crate::pickle::{read_string_pickle, read_u32_pickle, write_string_pickle, write_u32_pickle};
 
-pub const LOADER_NAME: &str = "incodex-loader.cjs";
+pub use incodex_runtime_assets::LOADER_NAME;
 pub const MARKER_KEY: &str = "__incodex";
-
-const LEFTOVERS: &[&str] = &[
-    "incodex-inject.js",
-    "incodex-main.cjs",
-    "incodex-preload.cjs",
-    "incodex-safe-home.cjs",
-    "incodex-ipc-guard.cjs",
-    "incodex-owner-core.cjs",
-    "incodex-owner-recovery.cjs",
-    "incodex-instance.cjs",
-    "incodex-runtime-load.cjs",
-    "incodex-window-kind.cjs",
-    "incodex-codex-mode.cjs",
-];
 const ELECTRON_ASAR_BLOCK_SIZE: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
@@ -159,7 +146,7 @@ pub fn patch_asar(
     let mut blobs = Vec::new();
     copy_tree(&archive, archive.files(), "", &mut files, &mut blobs)?;
     files.remove("incodex-loader.cjs");
-    for leftover in LEFTOVERS {
+    for leftover in external_artifact_names() {
         files.remove(*leftover);
     }
     let mut pkg_bytes = serde_json::to_vec_pretty(&pkg).map_err(|err| err.to_string())?;

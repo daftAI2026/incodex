@@ -3,7 +3,12 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { RUNTIME_ARTIFACT_NAMES, writeRuntimeManifest } from "./runtime-manifest.ts";
+import {
+  RUNTIME_ARTIFACT_NAMES,
+  RUNTIME_EXTERNAL_ARTIFACT_NAMES,
+  RUNTIME_LOADER_NAME,
+  writeRuntimeManifest,
+} from "./runtime-manifest.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = join(root, "dist");
@@ -55,13 +60,16 @@ const emitDir = join(root, ".runtime-cjs");
 const cjsNames = RUNTIME_ARTIFACT_NAMES.filter((name) => name.endsWith(".cjs"));
 for (const name of cjsNames) {
   const outputPath = join(outDir, name);
-  const text = readFileSync(join(emitDir, name), "utf8")
+  let text = readFileSync(join(emitDir, name), "utf8")
     .replaceAll("\r\n", "\n")
     .replaceAll("\r", "\n")
     .replace(
       /require\("\.\/(incodex-[a-z-]+)\.cts"\)/g,
       'require("./$1.cjs")',
     );
+  if (name === RUNTIME_LOADER_NAME) {
+    text = embedRuntimeArtifactNames(text);
+  }
   writeFileSync(outputPath, text);
 }
 assertPortableCjs(cjsNames.map((name) => join(outDir, name)));
@@ -106,4 +114,12 @@ function assertPortableCjs(files: string[]): void {
       throw new Error(`${file} contains a machine-specific path; runtime CJS must use __dirname`);
     }
   }
+}
+
+function embedRuntimeArtifactNames(source: string): string {
+  const marker = '"__INCODEX_RUNTIME_FILES__"';
+  if (source.split(marker).length !== 2) {
+    throw new Error("Runtime loader must contain exactly one artifact catalog marker");
+  }
+  return source.replace(marker, JSON.stringify(RUNTIME_EXTERNAL_ARTIFACT_NAMES));
 }
