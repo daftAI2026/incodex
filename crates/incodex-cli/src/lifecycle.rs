@@ -113,7 +113,7 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
                 }
             })?;
     if runtime_update_pending() {
-        return repair_pending_runtime(&update_target);
+        repair_pending_runtime(&update_target)?;
     }
 
     let mut progress = Progress::new();
@@ -208,7 +208,7 @@ fn run_homebrew_update(parsed: &ParsedCli, current_cli: &Path) -> Result<(), Str
                 }
             })?;
     if runtime_update_pending() {
-        return repair_pending_runtime(current_cli);
+        repair_pending_runtime(current_cli)?;
     }
 
     let mut progress = Progress::new();
