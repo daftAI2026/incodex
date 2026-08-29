@@ -395,6 +395,31 @@ fn successful_runtime_publication_clears_pending_update_state() {
 }
 
 #[test]
+fn runtime_publication_preserves_an_unrelated_cli_update_notice() {
+    let home = scratch("runtime-preserves-cli-update");
+    let notice = home.join(".incodex/cache/update_message");
+    fs::create_dir_all(notice.parent().unwrap()).unwrap();
+    fs::write(&notice, "Update 9.9.9 available, run inc update\n").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_incodex"))
+        .arg("runtime")
+        .env("HOME", &home)
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(notice).unwrap(),
+        "Update 9.9.9 available, run inc update\n"
+    );
+}
+
+#[test]
 fn runtime_failure_reports_partial_success_and_keeps_the_update_notice() {
     let home = scratch("runtime-partial-success");
     let fake_bin = home.join("fake-bin");
