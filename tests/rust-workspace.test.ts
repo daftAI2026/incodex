@@ -9,6 +9,7 @@ const WORKSPACE_MEMBERS = [
   "crates/incodex-core",
   "crates/incodex-transaction",
   "crates/incodex-macos",
+  "crates/incodex-runtime-assets",
   "crates/incodex-runtime-bundle",
   "crates/incodex-asar",
 ];
