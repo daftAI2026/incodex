@@ -31,7 +31,7 @@ const TUI_CRATES = [
 const RUST_WORKFLOWS = [".github/workflows/ci.yml", ".github/workflows/release.yml"];
 
 function read(rel: string): string {
-  return readFileSync(join(root, rel), "utf8");
+  return readFileSync(join(root, rel), "utf8").replaceAll("\r\n", "\n");
 }
 
 function cargoFiles(): string[] {
