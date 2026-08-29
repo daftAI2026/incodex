@@ -22,6 +22,7 @@ const RETRY_DELAY: Duration = Duration::from_millis(200);
 const HOMEBREW_QUERY_TIMEOUT: Duration = Duration::from_secs(5);
 const HOMEBREW_UPDATE_TIMEOUT: Duration = Duration::from_secs(120);
 const HOMEBREW_UPGRADE_TIMEOUT: Duration = Duration::from_secs(120);
+const RUNTIME_UPDATE_TIMEOUT: Duration = Duration::from_secs(30);
 const UPDATE_NOTICE_WORKER_ENV: &str = "INCODEX_INTERNAL_UPDATE_NOTICE_WORKER";
 static UPDATE_NOTICE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -92,6 +93,7 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
     println!("  prefix: {}", prefix.display());
     if parsed.dry_run {
         println!("would re-run install.sh for this prefix");
+        println!("would publish Runtime with the installed CLI");
         println!("no changes made.");
         return Ok(());
     }
@@ -101,25 +103,6 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
     let latest = latest_stable_release()?;
     let current = parse_stable_version(env!("CARGO_PKG_VERSION"))
         .ok_or("update failed: current CLI version is not stable")?;
-    match latest.version.cmp(&current) {
-        std::cmp::Ordering::Less => {
-            progress.stop();
-            println!(
-                "Current version {} is newer than latest release {}.",
-                env!("CARGO_PKG_VERSION"),
-                latest.tag
-            );
-            return Ok(());
-        }
-        std::cmp::Ordering::Equal => {
-            progress.stop();
-            println!("Already on latest version, {}", env!("CARGO_PKG_VERSION"));
-            return Ok(());
-        }
-        std::cmp::Ordering::Greater => {}
-    }
-
-    progress.stage("Preparing update");
     let update_target = prefix.join("bin/incodex");
     let _lock =
         incodex_transaction::acquire_target_lock(&user_root(), &update_target, "update", None)
@@ -130,6 +113,29 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
                     format!("update failed: could not acquire update lock: {err}")
                 }
             })?;
+    match latest.version.cmp(&current) {
+        std::cmp::Ordering::Less => {
+            synchronize_runtime(&mut progress, &update_target, false)?;
+            progress.stop();
+            println!(
+                "Current version {} is newer than latest release {}.",
+                env!("CARGO_PKG_VERSION"),
+                latest.tag
+            );
+            clear_update_notice();
+            return Ok(());
+        }
+        std::cmp::Ordering::Equal => {
+            synchronize_runtime(&mut progress, &update_target, false)?;
+            progress.stop();
+            println!("Already on latest version, {}", env!("CARGO_PKG_VERSION"));
+            clear_update_notice();
+            return Ok(());
+        }
+        std::cmp::Ordering::Greater => {}
+    }
+
+    progress.stage("Preparing update");
     progress.stop();
     println!("updating {} -> {}", env!("CARGO_PKG_VERSION"), latest.tag);
     let install_script_url = format!(
@@ -163,6 +169,7 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
         verify_installed_version(&prefix, expected)?;
     }
 
+    synchronize_runtime(&mut progress, &update_target, true)?;
     progress.stop();
     println!(
         "{}",
@@ -177,6 +184,7 @@ fn run_homebrew_update(parsed: &ParsedCli) -> Result<(), String> {
     if parsed.dry_run {
         println!("would run brew update");
         println!("would run brew upgrade incodex");
+        println!("would publish Runtime with the installed CLI");
         println!("no changes made.");
         return Ok(());
     }
@@ -243,13 +251,112 @@ fn run_homebrew_update(parsed: &ParsedCli) -> Result<(), String> {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    if combined.contains("already installed") {
-        println!("Already on latest version, {installed}");
-    } else {
-        println!("Updated to latest version, {installed}");
-    }
+    let already_installed = combined.contains("already installed");
+    let installed_cli = homebrew_installed_cli()?;
+    synchronize_runtime(&mut progress, &installed_cli, true)?;
+    progress.stop();
+    println!(
+        "{}",
+        if already_installed {
+            format!("Already on latest version, {installed}")
+        } else {
+            format!("Updated to latest version, {installed}")
+        }
+    );
     clear_update_notice();
     Ok(())
+}
+
+fn synchronize_runtime(
+    progress: &mut Progress,
+    installed_cli: &Path,
+    cli_updated: bool,
+) -> Result<(), String> {
+    progress.stage("Publishing Runtime");
+    if let Err(detail) = run_runtime_command(installed_cli) {
+        progress.stop();
+        return Err(if cli_updated {
+            format!("CLI was updated, but Runtime synchronization failed: {detail}")
+        } else {
+            format!("Runtime synchronization failed: {detail}")
+        });
+    }
+    Ok(())
+}
+
+fn run_runtime_command(installed_cli: &Path) -> Result<(), String> {
+    let mut command = Command::new(installed_cli);
+    command.arg("runtime").env_remove(UPDATE_NOTICE_WORKER_ENV);
+    match run_command_with_timeout(
+        &mut command,
+        timeout_from_env("INCODEX_RUNTIME_UPDATE_TIMEOUT_MS", RUNTIME_UPDATE_TIMEOUT),
+    ) {
+        Ok(CommandOutcome::Completed(output)) if output.status.success() => Ok(()),
+        Ok(CommandOutcome::Completed(output)) => {
+            let detail = output_detail(&output);
+            if detail.is_empty() {
+                Err(format!(
+                    "{} runtime exited with {}",
+                    installed_cli.display(),
+                    output.status
+                ))
+            } else {
+                Err(detail)
+            }
+        }
+        Ok(CommandOutcome::TimedOut { stdout, stderr }) => {
+            let detail = output_detail_bytes(&stderr, &stdout);
+            if detail.is_empty() {
+                Err(format!("{} runtime timed out", installed_cli.display()))
+            } else {
+                Err(format!("Runtime timed out\n{detail}"))
+            }
+        }
+        Err(error) => Err(format!(
+            "could not run {} runtime: {error}",
+            installed_cli.display()
+        )),
+    }
+}
+
+fn homebrew_installed_cli() -> Result<PathBuf, String> {
+    let output = match run_brew(
+        &["--prefix", "incodex"],
+        timeout_from_env("INCODEX_HOMEBREW_QUERY_TIMEOUT_MS", HOMEBREW_QUERY_TIMEOUT),
+    ) {
+        Ok(CommandOutcome::Completed(output)) if output.status.success() => output,
+        Ok(CommandOutcome::Completed(output)) => {
+            let detail = output_detail(&output);
+            return Err(if detail.is_empty() {
+                format!("Homebrew prefix lookup failed: {}", output.status)
+            } else {
+                format!("Homebrew prefix lookup failed\n{detail}")
+            });
+        }
+        Ok(CommandOutcome::TimedOut { stdout, stderr }) => {
+            let detail = output_detail_bytes(&stderr, &stdout);
+            return Err(if detail.is_empty() {
+                "Homebrew prefix lookup timed out".to_string()
+            } else {
+                format!("Homebrew prefix lookup timed out\n{detail}")
+            });
+        }
+        Err(error) => return Err(format!("Homebrew prefix lookup failed: {error}")),
+    };
+    let prefix = String::from_utf8_lossy(&output.stdout);
+    let prefix = prefix.trim();
+    let prefix = PathBuf::from(prefix);
+    if prefix.as_os_str().is_empty() || !prefix.is_absolute() {
+        return Err("Homebrew prefix lookup returned an invalid path".to_string());
+    }
+    let installed_cli = prefix.join("bin/incodex");
+    if !installed_cli.is_file() {
+        return Err(format!(
+            "Homebrew prefix has no installed Incodex CLI: {}",
+            installed_cli.display()
+        ));
+    }
+    Ok(installed_cli)
 }
 
 fn run_brew(args: &[&str], timeout: Duration) -> Result<CommandOutcome, String> {

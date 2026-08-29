@@ -43,7 +43,7 @@ A normal close removes the isolated session managed by Incodex; this is not a cl
 brew install daftAI2026/tap/incodex
 ```
 
-This only puts `incodex` and `inc` on PATH. The optional in-app button is added separately with `incodex install`. Update with `inc update`; Incodex keeps Homebrew installs on the Homebrew upgrade path.
+This only puts `incodex` and `inc` on PATH. The optional in-app button is added separately with `incodex install`. Update with `inc update`; Incodex keeps Homebrew installs on the Homebrew upgrade path and publishes the bundled Runtime automatically.
 
 **Or via script**
 
@@ -75,7 +75,7 @@ The primary `incodex open` path does not patch Codex. The optional `incodex inst
 - An official upgrade wipes the patch. Run `incodex install` again on the **current** official package
 - If Codex has already been upgraded, `incodex uninstall` will not put an old backup back
 - The current original-bundle backup lives at `~/.incodex/transactions/<install-id>/original/ChatGPT.app`; verified uninstall removes it, and a later successful install prunes superseded terminal backups for the same app
-- Run `inc update` for Homebrew and script installs; Incodex automatically uses the matching update path. Source update: `git pull && cargo install --locked --path crates/incodex-cli`; source removal: `cargo uninstall incodex-cli`
+- Run `inc update` for Homebrew and script installs; Incodex automatically uses the matching update path and publishes the bundled Runtime without re-signing Codex. Source update: `git pull && cargo install --locked --path crates/incodex-cli`; source removal: `cargo uninstall incodex-cli`
 - The menu supports arrows, Vim `j/k`, digits that run immediately, `V` for version, `q` to quit
 - If a script install cannot find the command, add `~/.local/bin` to PATH
 - Button and copy follow the main window language
@@ -249,7 +249,7 @@ Install: Homebrew
 Shell: /bin/zsh
 ```
 
-`Install` reports Homebrew when the executable is recognized in its Homebrew location; other native binaries currently report Script. `inc update` refreshes and upgrades through Homebrew for Homebrew installs, and re-runs the stable installer for script installs.
+`Install` reports Homebrew when the executable is recognized in its Homebrew location; other native binaries currently report Script. `inc update` refreshes and upgrades through Homebrew for Homebrew installs, and re-runs the stable installer for script installs. Both paths then publish the Runtime bundled with the installed CLI; they do not patch or re-sign Codex.
 
 ### Command reference
 
@@ -272,7 +272,7 @@ incodex open                # Incognito window, no patch
 incodex open --mask         # Temporary sidebar name and offline avatar
 incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
 incodex recover --transaction <id>
-inc update                  # Update this CLI through its install channel
+inc update                  # Update Incodex through its install channel
 incodex self-uninstall      # Remove the CLI; add --restore-app to restore Codex
 ```
 
