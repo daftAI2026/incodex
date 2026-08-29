@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { windowsRustCommands } from "../scripts/test-windows-rust";
 
 const root = join(import.meta.dir, "..");
 
@@ -30,7 +31,7 @@ const TUI_CRATES = [
 const RUST_WORKFLOWS = [".github/workflows/ci.yml", ".github/workflows/release.yml"];
 
 function read(rel: string): string {
-  return readFileSync(join(root, rel), "utf8");
+  return readFileSync(join(root, rel), "utf8").replaceAll("\r\n", "\n");
 }
 
 function cargoFiles(): string[] {
@@ -143,10 +144,31 @@ describe("Rust workspace", () => {
     expect(ci).toContain("cargo test --workspace --release --locked");
   });
 
-  test("Windows CI runs every supported Windows contract suite", () => {
+  test("Windows Rust checks have one platform-scoped entry point", () => {
+    const pkg = JSON.parse(read("package.json")) as {
+      scripts: Record<string, string>;
+    };
     const ci = read(".github/workflows/ci.yml");
+    const windowsJob = ci.split("\n  windows-cargo:\n").at(1) ?? "";
+    const commands = windowsRustCommands(root).map((command) => command.join(" "));
+
+    expect(pkg.scripts["test:windows:rust"]).toBe(
+      "bun scripts/test-windows-rust.ts",
+    );
     expect(ci).toContain("bun run test:shared");
     expect(ci).toContain("bun run test:windows");
+    expect(windowsJob).toContain("bun run test:windows:rust");
+    expect(windowsJob).not.toContain("cargo test -p");
+    expect(commands).toContain("cargo fmt --all -- --check");
+    expect(commands).toContain(
+      "cargo clippy -p incodex-core --lib --locked -- -D warnings",
+    );
+    expect(commands).toContain(
+      "cargo clippy -p incodex-cli --lib --bin incodex --locked -- -D warnings",
+    );
+    expect(commands.some((command) => command.includes("--workspace"))).toBe(false);
+    expect(commands.some((command) => command.includes("--all-targets"))).toBe(false);
+
     for (const crate of ["incodex-core", "incodex-cli"]) {
       const directory = join(root, "crates", crate, "tests");
       const suites = readdirSync(directory)
@@ -154,7 +176,7 @@ describe("Rust workspace", () => {
         .map((name) => name.slice(0, -3));
       expect(suites.length).toBeGreaterThan(0);
       for (const suite of suites) {
-        expect(ci).toContain(
+        expect(commands).toContain(
           `cargo test -p ${crate} --test ${suite} --release --locked`,
         );
       }
