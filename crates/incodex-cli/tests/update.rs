@@ -532,7 +532,10 @@ fn runtime_publication_does_not_clear_a_different_expected_generation() {
         !home.join(".incodex/runtime/current.json").exists(),
         "older Runtime was published over the expected generation"
     );
-    assert!(pending.is_file(), "older Runtime cleared newer pending state");
+    assert!(
+        pending.is_file(),
+        "older Runtime cleared newer pending state"
+    );
     assert_eq!(
         fs::read_to_string(notice).unwrap(),
         "Runtime synchronization incomplete, run inc update\n"

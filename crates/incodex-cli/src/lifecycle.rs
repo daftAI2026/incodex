@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use incodex_core::paths::{user_root, DEFAULT_APP};
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::parse::ParsedCli;
 use crate::spinner::Progress;
@@ -24,6 +24,7 @@ const HOMEBREW_UPDATE_TIMEOUT: Duration = Duration::from_secs(120);
 const HOMEBREW_UPGRADE_TIMEOUT: Duration = Duration::from_secs(120);
 const RUNTIME_UPDATE_TIMEOUT: Duration = Duration::from_secs(30);
 const UPDATE_NOTICE_WORKER_ENV: &str = "INCODEX_INTERNAL_UPDATE_NOTICE_WORKER";
+const RUNTIME_SYNC_ENV: &str = "INCODEX_INTERNAL_RUNTIME_SYNC";
 const RUNTIME_UPDATE_PENDING_NOTICE: &str = "Runtime synchronization incomplete, run inc update";
 static UPDATE_NOTICE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -36,6 +37,30 @@ struct LatestRelease {
 struct StableRelease {
     tag: String,
     version: [u64; 3],
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PendingRuntimeIdentity {
+    schema_version: u8,
+    version: String,
+    manifest_sha256: String,
+}
+
+impl PendingRuntimeIdentity {
+    fn from_runtime(identity: &incodex_runtime_bundle::RuntimeIdentity) -> Self {
+        Self {
+            schema_version: 1,
+            version: identity.version.clone(),
+            manifest_sha256: identity.manifest_sha256.clone(),
+        }
+    }
+
+    fn matches(&self, identity: &incodex_runtime_bundle::RuntimeIdentity) -> bool {
+        self.schema_version == 1
+            && self.version == identity.version
+            && self.manifest_sha256 == identity.manifest_sha256
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,10 +86,12 @@ pub fn run_runtime(parsed: &ParsedCli) -> Result<(), String> {
         println!("would update ~/.incodex/runtime/ without modifying Codex");
         return Ok(());
     }
+    let identity = incodex_runtime_bundle::runtime_identity()?;
+    prepare_runtime_publication(&identity)?;
     let mut progress = Progress::new();
     progress.stage("Publishing Runtime");
     let published = incodex_runtime_bundle::publish(&user_root())?;
-    if runtime_update_pending() {
+    if pending_runtime_matches(&identity) {
         complete_update_notice();
     }
     progress.stop();
@@ -290,7 +317,12 @@ fn repair_pending_runtime(installed_cli: &Path) -> Result<(), String> {
     let mut progress = Progress::new();
     synchronize_runtime(&mut progress, installed_cli, false)?;
     progress.stop();
-    complete_update_notice();
+    if runtime_update_pending() {
+        return Err(
+            "Runtime synchronization failed: installed CLI did not confirm the expected Runtime generation"
+                .to_string(),
+        );
+    }
     println!("{}", format_ok("Runtime synchronization repaired", None));
     Ok(())
 }
@@ -309,7 +341,7 @@ fn synchronize_runtime(
 }
 
 fn runtime_sync_failure(detail: String, cli_updated: bool) -> String {
-    mark_runtime_update_pending();
+    ensure_runtime_update_pending();
     if cli_updated {
         format!("CLI was updated, but Runtime synchronization failed: {detail}")
     } else {
@@ -319,7 +351,10 @@ fn runtime_sync_failure(detail: String, cli_updated: bool) -> String {
 
 fn run_runtime_command(installed_cli: &Path) -> Result<(), String> {
     let mut command = Command::new(installed_cli);
-    command.arg("runtime").env_remove(UPDATE_NOTICE_WORKER_ENV);
+    command
+        .arg("runtime")
+        .env(RUNTIME_SYNC_ENV, "1")
+        .env_remove(UPDATE_NOTICE_WORKER_ENV);
     match run_command_with_timeout(
         &mut command,
         timeout_from_env("INCODEX_RUNTIME_UPDATE_TIMEOUT_MS", RUNTIME_UPDATE_TIMEOUT),
@@ -763,8 +798,60 @@ fn runtime_update_pending() -> bool {
     fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.file_type().is_file())
 }
 
-fn mark_runtime_update_pending() {
-    write_cache_file(&runtime_update_pending_path(), "pending\n");
+fn prepare_runtime_publication(
+    identity: &incodex_runtime_bundle::RuntimeIdentity,
+) -> Result<(), String> {
+    if runtime_update_pending() {
+        match read_pending_runtime_identity() {
+            Some(expected) if !expected.matches(identity) => {
+                return Err(format!(
+                    "expected Runtime generation {}-{}, but this CLI embeds {}-{}; run inc update from the active installation",
+                    expected.version,
+                    expected.manifest_sha256,
+                    identity.version,
+                    identity.manifest_sha256,
+                ));
+            }
+            None if !runtime_sync_requested() => {
+                return Err(
+                    "expected Runtime generation could not be verified; run inc update from the active installation"
+                        .to_string(),
+                );
+            }
+            _ => {}
+        }
+    }
+    if runtime_sync_requested() {
+        mark_runtime_update_pending_for(identity);
+    }
+    Ok(())
+}
+
+fn pending_runtime_matches(identity: &incodex_runtime_bundle::RuntimeIdentity) -> bool {
+    read_pending_runtime_identity().is_some_and(|expected| expected.matches(identity))
+}
+
+fn read_pending_runtime_identity() -> Option<PendingRuntimeIdentity> {
+    let body = fs::read_to_string(runtime_update_pending_path()).ok()?;
+    serde_json::from_str(&body).ok()
+}
+
+fn runtime_sync_requested() -> bool {
+    std::env::var(RUNTIME_SYNC_ENV).as_deref() == Ok("1")
+}
+
+fn mark_runtime_update_pending_for(identity: &incodex_runtime_bundle::RuntimeIdentity) {
+    let marker = PendingRuntimeIdentity::from_runtime(identity);
+    if let Ok(body) = serde_json::to_string(&marker) {
+        write_cache_file(&runtime_update_pending_path(), &format!("{body}\n"));
+    }
+    write_update_notice(&format!("{RUNTIME_UPDATE_PENDING_NOTICE}\n"));
+}
+
+fn ensure_runtime_update_pending() {
+    if !runtime_update_pending() {
+        write_cache_file(&runtime_update_pending_path(), "pending\n");
+    }
     write_update_notice(&format!("{RUNTIME_UPDATE_PENDING_NOTICE}\n"));
 }
 
