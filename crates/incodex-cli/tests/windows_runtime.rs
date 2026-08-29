@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use incodex_cli::windows_runtime::{publish_windows_runtime, WINDOWS_RUNTIME_FILES};
+use incodex_cli::windows_runtime::{publish_windows_runtime, windows_runtime_files};
 use incodex_core::windows_session::verify_private_acl;
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -25,7 +25,7 @@ fn publishes_the_shared_runtime_as_one_private_content_addressed_release() {
 
     assert_eq!(first, second, "identical Runtime must reuse one release");
     assert_eq!(first.main, first.release_dir.join("incodex-main.cjs"));
-    assert_eq!(first.files.len(), WINDOWS_RUNTIME_FILES.len());
+    assert_eq!(first.files.len(), windows_runtime_files().count());
     assert!(first.pointer.ends_with("runtime/current.json"));
     let release_name = first
         .release_dir
@@ -48,7 +48,7 @@ fn publishes_the_shared_runtime_as_one_private_content_addressed_release() {
     for directory in &directories {
         verify_private_acl(directory).expect("private Runtime directory ACL");
     }
-    for name in WINDOWS_RUNTIME_FILES {
+    for name in windows_runtime_files() {
         let path = first.release_dir.join(name);
         assert!(path.is_file(), "missing shared Runtime artifact {name}");
         verify_private_acl(&path).expect("private Runtime file ACL");

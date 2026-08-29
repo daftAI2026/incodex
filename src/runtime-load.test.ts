@@ -117,7 +117,7 @@ describe("runtime load", () => {
   });
 
   test("the installed Runtime verifies the primary route before using Control+3 as fallback", () => {
-    const loader = readFileSync(join(import.meta.dir, "runtime/incodex-loader.cts"), "utf8");
+    const loader = readFileSync(join(import.meta.dir, "../dist/incodex-loader.cjs"), "utf8");
     const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
     const selectorStart = main.indexOf("function selectOfficialCodexModeFallback(win)");
     const selectorEnd = main.indexOf("\nfunction ", selectorStart + 1);

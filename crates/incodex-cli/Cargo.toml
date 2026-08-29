@@ -13,6 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 incodex-core = { path = "../incodex-core" }
+incodex-runtime-assets = { path = "../incodex-runtime-assets" }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 serde.workspace = true

@@ -19,7 +19,7 @@ fn runtime_root(user_root: &Path) -> PathBuf {
 }
 
 fn manifest_hash() -> String {
-    sha256_hex(MANIFEST.as_bytes())
+    sha256_hex(manifest_source().as_bytes())
 }
 
 fn expected_new_release() -> String {
@@ -32,7 +32,7 @@ fn write_legacy_embedded_release(user_root: &Path, release: &str, version: &str)
     fs::create_dir_all(&release_dir).unwrap();
     set_runtime_dir_modes(&root, &release_dir);
     let mut files = serde_json::Map::new();
-    for (name, body) in EXTERNAL_FILES {
+    for (name, body) in external_files() {
         let path = release_dir.join(name);
         fs::write(&path, body.as_bytes()).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(FILE_MODE)).unwrap();
@@ -417,7 +417,7 @@ fn concurrent_publishers_share_one_complete_runtime() {
         .join(expected_new_release());
     assert_eq!(
         fs::read(final_release.join("runtime-manifest.json")).unwrap(),
-        MANIFEST.as_bytes()
+        manifest_source().as_bytes()
     );
     assert_eq!(
         fs::metadata(final_release.join("runtime-manifest.json"))

@@ -53,7 +53,7 @@ If the answer is no or unclear, decline or narrow.
 - `crates/incodex-cli` is the native CLI: `parse.rs` owns its command language, while `install.rs` and `open.rs` dispatch dangerous operations through the lower crates.
 - `crates/incodex-transaction` owns native mutation locks, durable journals, rollback, and recovery. `crates/incodex-asar` and `crates/incodex-macos` own ASAR and macOS signing/plist mechanics.
 - `crates/incodex-core/src/session.rs` owns native `open` session create/burn; it must stay behaviorally aligned with `src/runtime/incodex-safe-home.cts` without sharing language-specific code.
-- `src/build-runtime.ts` builds committed `dist/` artifacts. Native `incodex-runtime-bundle` publishes them; the installer must not rebuild Runtime by spawning Bun.
+- `runtime-artifacts.json` is the single current-generation Runtime asset catalog. `src/build-runtime.ts` builds committed `dist/` artifacts; cross-platform `incodex-runtime-assets` embeds that catalog for Rust, and native `incodex-runtime-bundle` publishes it on macOS. The installer must not rebuild Runtime by spawning Bun.
 - `src/runtime/*.cts` is Electron-side source. `bun run build:runtime` emits portable `dist/*.cjs` with `__dirname`, never a machine-absolute path.
 - `src/runtime/incodex-loader.cts` is the only file that belongs in official asar. Everything else loads from `~/.incodex/runtime/` after hash check and fail-opens to official main.
 - `install.sh` installs the CLI binary only. It must verify `SHA256SUMS` and must not run `incodex install`.

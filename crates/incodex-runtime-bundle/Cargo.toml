@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Embed and publish Incodex Electron runtime files"
 
 [dependencies]
+incodex-runtime-assets = { path = "../incodex-runtime-assets" }
 libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true

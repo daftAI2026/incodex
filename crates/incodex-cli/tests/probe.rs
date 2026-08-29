@@ -82,20 +82,7 @@ fn compressed_binary_and_runtime_resources_stay_inside_release_gates() {
     );
 
     let dist = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../dist");
-    let names = [
-        "incodex-main.cjs",
-        "incodex-preload.cjs",
-        "incodex-inject.js",
-        "incodex-safe-home.cjs",
-        "incodex-ipc-guard.cjs",
-        "incodex-owner-core.cjs",
-        "incodex-owner-recovery.cjs",
-        "incodex-instance.cjs",
-        "incodex-window-kind.cjs",
-        "incodex-runtime-load.cjs",
-        "incodex-codex-mode.cjs",
-    ];
-    let runtime_size: u64 = names
+    let runtime_size: u64 = incodex_runtime_assets::external_artifact_names()
         .iter()
         .map(|name| {
             std::fs::metadata(dist.join(name))
