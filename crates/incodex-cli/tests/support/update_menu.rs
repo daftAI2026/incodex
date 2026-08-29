@@ -255,13 +255,15 @@ fn native_homebrew_menu_exposes_the_unified_update_shortcut() {
     fs::create_dir_all(&cellar_bin).unwrap();
     let installed = cellar_bin.join("incodex");
     fs::copy(env!("CARGO_BIN_EXE_incodex"), &installed).unwrap();
+    let cellar_prefix = cellar_bin.parent().unwrap();
     let brew_log = home.join("brew.log");
     write_executable(&fake_bin.join("curl"), "#!/bin/sh\nexit 22\n");
     write_executable(
         &fake_bin.join("brew"),
         &format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$*\" in\n  'update') exit 1 ;;\n  'upgrade incodex') printf '%s\\n' 'incodex 9.9.9 already installed'; exit 0 ;;\n  'list --versions incodex') printf '%s\\n' 'incodex 9.9.9'; exit 0 ;;\nesac\n",
-            brew_log.display()
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$*\" in\n  'update') exit 1 ;;\n  'upgrade incodex') printf '%s\\n' 'incodex 9.9.9 already installed'; exit 0 ;;\n  'list --versions incodex') printf '%s\\n' 'incodex 9.9.9'; exit 0 ;;\n  '--prefix incodex') printf '%s\\n' '{}'; exit 0 ;;\nesac\n",
+            brew_log.display(),
+            cellar_prefix.display()
         ),
     );
     let cache = home.join(".incodex/cache/update_message");

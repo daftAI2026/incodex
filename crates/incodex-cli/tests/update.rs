@@ -72,9 +72,10 @@ fn homebrew_update_refreshes_metadata_then_upgrades_through_brew() {
     let brew_log = home.join("brew.log");
     fs::create_dir_all(&fake_bin).unwrap();
     let installed = homebrew_cli(&home);
+    let homebrew_prefix = installed.parent().unwrap().parent().unwrap().to_path_buf();
     write_executable(
         &fake_bin.join("brew"),
-        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$BREW_LOG\"\ncase \"$*\" in\n  'update') printf '%s\\n' 'simulated metadata failure' >&2; exit 9 ;;\n  'upgrade incodex') printf '%s\\n' 'Upgrading incodex'; exit 0 ;;\n  'list --versions incodex') printf '%s\\n' 'incodex 9.9.9'; exit 0 ;;\n  *) exit 88 ;;\nesac\n",
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$BREW_LOG\"\ncase \"$*\" in\n  'update') printf '%s\\n' 'simulated metadata failure' >&2; exit 9 ;;\n  'upgrade incodex') printf '%s\\n' 'Upgrading incodex'; exit 0 ;;\n  'list --versions incodex') printf '%s\\n' 'incodex 9.9.9'; exit 0 ;;\n  '--prefix incodex') printf '%s\\n' \"$HOMEBREW_PREFIX\"; exit 0 ;;\n  *) exit 88 ;;\nesac\n",
     );
 
     let output = Command::new(installed)
@@ -82,6 +83,7 @@ fn homebrew_update_refreshes_metadata_then_upgrades_through_brew() {
         .env("HOME", &home)
         .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
         .env("BREW_LOG", &brew_log)
+        .env("HOMEBREW_PREFIX", &homebrew_prefix)
         .output()
         .unwrap();
 
@@ -104,9 +106,10 @@ fn homebrew_update_falls_back_to_the_public_cli_version_probe() {
     let fake_bin = home.join("fake-bin");
     fs::create_dir_all(&fake_bin).unwrap();
     let installed = homebrew_cli(&home);
+    let homebrew_prefix = installed.parent().unwrap().parent().unwrap().to_path_buf();
     write_executable(
         &fake_bin.join("brew"),
-        "#!/bin/sh\ncase \"$*\" in\n  'update'|'upgrade incodex') exit 0 ;;\n  'list --versions incodex') exit 1 ;;\nesac\nexit 88\n",
+        "#!/bin/sh\ncase \"$*\" in\n  'update'|'upgrade incodex') exit 0 ;;\n  'list --versions incodex') exit 1 ;;\n  '--prefix incodex') printf '%s\\n' \"$HOMEBREW_PREFIX\"; exit 0 ;;\nesac\nexit 88\n",
     );
     write_executable(
         &fake_bin.join("inc"),
@@ -117,6 +120,7 @@ fn homebrew_update_falls_back_to_the_public_cli_version_probe() {
         .arg("update")
         .env("HOME", &home)
         .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .env("HOMEBREW_PREFIX", &homebrew_prefix)
         .output()
         .unwrap();
 
@@ -198,6 +202,10 @@ fn homebrew_update_dry_run_previews_both_brew_commands() {
         stdout.contains("would run brew upgrade incodex"),
         "{stdout}"
     );
+    assert!(
+        stdout.contains("would publish Runtime with the installed CLI"),
+        "{stdout}"
+    );
     assert!(!brew_log.exists(), "dry-run executed Homebrew");
 }
 
@@ -253,6 +261,10 @@ fn usr_local_script_prefix_keeps_the_script_update_path() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("update channel: script"), "{stdout}");
     assert!(stdout.contains("would re-run install.sh"), "{stdout}");
+    assert!(
+        stdout.contains("would publish Runtime with the installed CLI"),
+        "{stdout}"
+    );
 }
 
 #[test]
