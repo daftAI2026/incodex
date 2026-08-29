@@ -365,6 +365,86 @@ fn current_script_update_repairs_runtime_without_downloading_an_installer() {
 }
 
 #[test]
+fn pending_script_runtime_repair_does_not_require_release_metadata() {
+    let home = scratch("pending-script-runtime-repair");
+    let fake_bin = home.join("fake-bin");
+    let curl_log = home.join("curl.log");
+    let cache = home.join(".incodex/cache");
+    let pending = cache.join("runtime_update_pending");
+    fs::create_dir_all(&fake_bin).unwrap();
+    fs::create_dir_all(&cache).unwrap();
+    fs::write(&pending, "pending\n").unwrap();
+    fs::write(
+        cache.join("update_message"),
+        "Runtime synchronization incomplete, run inc update\n",
+    )
+    .unwrap();
+    let (_, installed) = installed_cli(&home);
+    write_executable(
+        &fake_bin.join("curl"),
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CURL_LOG\"\nexit 7\n",
+    );
+
+    let output = Command::new(&installed)
+        .arg("update")
+        .env("HOME", &home)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .env("CURL_LOG", &curl_log)
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!curl_log.exists(), "pending repair queried the release API");
+    assert!(home.join(".incodex/runtime/current.json").is_file());
+    assert!(!pending.exists());
+}
+
+#[test]
+fn pending_homebrew_runtime_repair_does_not_run_brew() {
+    let home = scratch("pending-homebrew-runtime-repair");
+    let fake_bin = home.join("fake-bin");
+    let brew_log = home.join("brew.log");
+    let cache = home.join(".incodex/cache");
+    let pending = cache.join("runtime_update_pending");
+    fs::create_dir_all(&fake_bin).unwrap();
+    fs::create_dir_all(&cache).unwrap();
+    fs::write(&pending, "pending\n").unwrap();
+    fs::write(
+        cache.join("update_message"),
+        "Runtime synchronization incomplete, run inc update\n",
+    )
+    .unwrap();
+    let installed = homebrew_cli(&home);
+    write_executable(
+        &fake_bin.join("brew"),
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$BREW_LOG\"\nexit 7\n",
+    );
+
+    let output = Command::new(&installed)
+        .arg("update")
+        .env("HOME", &home)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .env("BREW_LOG", &brew_log)
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!brew_log.exists(), "pending repair invoked Homebrew");
+    assert!(home.join(".incodex/runtime/current.json").is_file());
+    assert!(!pending.exists());
+}
+
+#[test]
 fn successful_runtime_publication_clears_pending_update_state() {
     let home = scratch("runtime-clears-pending-update");
     let cache = home.join(".incodex/cache");
