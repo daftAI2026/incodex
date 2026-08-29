@@ -136,9 +136,9 @@ Examples:
 Usage:
   inc update [--dry-run]
 
-Update the CLI through its installation channel. Homebrew installs run
-brew update and brew upgrade incodex. Script installs re-run install.sh.
-Source checkouts should git pull.
+Update Incodex through its installation channel, then publish the bundled
+Runtime. Homebrew installs run brew update and brew upgrade incodex. Script
+installs re-run install.sh. Source checkouts should git pull.
 
 Examples:
   inc update

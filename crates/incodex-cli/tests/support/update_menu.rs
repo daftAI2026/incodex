@@ -139,6 +139,96 @@ fn native_menu_refresh_survives_an_immediate_exit() {
 }
 
 #[test]
+fn native_menu_preserves_a_runtime_synchronization_notice() {
+    let home = scratch("menu-runtime-pending");
+    let fake_bin = home.join("fake-bin");
+    let curl_called = home.join("curl-called");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let (_, installed) = installed_cli(&home);
+    write_executable(
+        &fake_bin.join("curl"),
+        "#!/bin/sh\n: > \"$CURL_CALLED\"\nexit 22\n",
+    );
+    let cache = home.join(".incodex/cache");
+    fs::create_dir_all(&cache).unwrap();
+    fs::write(cache.join("runtime_update_pending"), "pending\n").unwrap();
+    fs::write(
+        cache.join("update_message"),
+        "Update 9.9.9 available, run inc update\n",
+    )
+    .unwrap();
+    let path = format!("{}:/usr/bin:/bin", fake_bin.display());
+    let curl_called_text = curl_called.to_string_lossy();
+
+    let result = support::tty::run_with_timeout_env(
+        installed.to_str().unwrap(),
+        &[],
+        &[],
+        &home,
+        "Runtime synchronization incomplete, run inc update",
+        "q",
+        Duration::from_secs(3),
+        &[
+            ("PATH", path.as_str()),
+            ("CURL_CALLED", curl_called_text.as_ref()),
+        ],
+    );
+
+    assert_eq!(result.status, 0, "{}", result.stderr);
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(
+        !curl_called.exists(),
+        "pending Runtime state was refreshed away"
+    );
+    assert!(cache.join("runtime_update_pending").is_file());
+}
+
+#[test]
+fn detached_old_cli_refresh_cannot_restore_a_notice_after_the_cli_changes() {
+    let home = scratch("menu-stale-worker");
+    let fake_bin = home.join("fake-bin");
+    let curl_called = home.join("curl-called");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let (_, installed) = installed_cli(&home);
+    write_executable(
+        &fake_bin.join("curl"),
+        "#!/bin/sh\n: > \"$CURL_CALLED\"\nsleep 0.5\nprintf '%s\\n' '{\"tag_name\":\"v9.9.9\"}'\n",
+    );
+    let path = format!("{}:/usr/bin:/bin", fake_bin.display());
+    let curl_called_text = curl_called.to_string_lossy();
+
+    let result = support::tty::run_with_timeout_env(
+        installed.to_str().unwrap(),
+        &[],
+        &[],
+        &home,
+        "6. Quit",
+        "q",
+        Duration::from_secs(3),
+        &[
+            ("PATH", path.as_str()),
+            ("CURL_CALLED", curl_called_text.as_ref()),
+        ],
+    );
+    assert_eq!(result.status, 0, "{}", result.stderr);
+
+    let replacement = installed.with_extension("next");
+    write_executable(
+        &replacement,
+        "#!/bin/sh\ncase \"$1\" in\n  --version) printf '%s\\n' 'Incodex version 9.9.9' ;;\n  *) exit 88 ;;\nesac\n",
+    );
+    fs::rename(replacement, &installed).unwrap();
+
+    let cache = home.join(".incodex/cache/update_message");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while (!curl_called.exists() || !cache.exists()) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(curl_called.exists(), "detached refresh did not run");
+    assert_eq!(fs::read_to_string(cache).unwrap(), "");
+}
+
+#[test]
 fn native_menu_clears_a_stale_notice_when_release_lookup_fails() {
     let home = scratch("menu-failed-refresh");
     let fake_bin = home.join("fake-bin");
@@ -190,13 +280,17 @@ fn native_homebrew_menu_waits_for_the_formula_and_names_inc_update() {
     fs::create_dir_all(&cellar_bin).unwrap();
     let installed = cellar_bin.join("incodex");
     fs::copy(env!("CARGO_BIN_EXE_incodex"), &installed).unwrap();
+    let cellar_prefix = cellar_bin.parent().unwrap();
     write_executable(
         &fake_bin.join("curl"),
         "#!/bin/sh\nprintf '%s\\n' '{\"tag_name\":\"v9.9.9\"}'\n",
     );
     write_executable(
         &fake_bin.join("brew"),
-        "#!/bin/sh\nif [ \"$*\" = 'outdated --formula --verbose incodex' ]; then printf '%s\\n' 'incodex (0.3.1) < 9.9.9'; fi\n",
+        &format!(
+            "#!/bin/sh\ncase \"$*\" in\n  'outdated --formula --verbose incodex') printf '%s\\n' 'incodex (0.3.1) < 9.9.9' ;;\n  '--prefix incodex') printf '%s\\n' '{}' ;;\nesac\n",
+            cellar_prefix.display()
+        ),
     );
     let path = format!("{}:/usr/bin:/bin", fake_bin.display());
 
@@ -255,13 +349,17 @@ fn native_homebrew_menu_exposes_the_unified_update_shortcut() {
     fs::create_dir_all(&cellar_bin).unwrap();
     let installed = cellar_bin.join("incodex");
     fs::copy(env!("CARGO_BIN_EXE_incodex"), &installed).unwrap();
+    let cellar_prefix = cellar_bin.parent().unwrap();
     let brew_log = home.join("brew.log");
     write_executable(&fake_bin.join("curl"), "#!/bin/sh\nexit 22\n");
     write_executable(
         &fake_bin.join("brew"),
         &format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$*\" in\n  'update') exit 1 ;;\n  'upgrade incodex') printf '%s\\n' 'incodex 9.9.9 already installed'; exit 0 ;;\n  'list --versions incodex') printf '%s\\n' 'incodex 9.9.9'; exit 0 ;;\nesac\n",
-            brew_log.display()
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$*\" in\n  'update') exit 1 ;;\n  'upgrade incodex') printf '%s\\n' 'incodex {} already installed'; exit 0 ;;\n  'list --versions incodex') printf '%s\\n' 'incodex {}'; exit 0 ;;\n  '--prefix incodex') printf '%s\\n' '{}'; exit 0 ;;\nesac\n",
+            brew_log.display(),
+            env!("CARGO_PKG_VERSION"),
+            env!("CARGO_PKG_VERSION"),
+            cellar_prefix.display()
         ),
     );
     let cache = home.join(".incodex/cache/update_message");

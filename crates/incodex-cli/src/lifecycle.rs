@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use incodex_core::paths::{user_root, DEFAULT_APP};
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::parse::ParsedCli;
 use crate::spinner::Progress;
@@ -22,7 +22,10 @@ const RETRY_DELAY: Duration = Duration::from_millis(200);
 const HOMEBREW_QUERY_TIMEOUT: Duration = Duration::from_secs(5);
 const HOMEBREW_UPDATE_TIMEOUT: Duration = Duration::from_secs(120);
 const HOMEBREW_UPGRADE_TIMEOUT: Duration = Duration::from_secs(120);
+const RUNTIME_UPDATE_TIMEOUT: Duration = Duration::from_secs(30);
 const UPDATE_NOTICE_WORKER_ENV: &str = "INCODEX_INTERNAL_UPDATE_NOTICE_WORKER";
+const RUNTIME_SYNC_ENV: &str = "INCODEX_INTERNAL_RUNTIME_SYNC";
+const RUNTIME_UPDATE_PENDING_NOTICE: &str = "Runtime synchronization incomplete, run inc update";
 static UPDATE_NOTICE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Deserialize)]
@@ -34,6 +37,30 @@ struct LatestRelease {
 struct StableRelease {
     tag: String,
     version: [u64; 3],
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PendingRuntimeIdentity {
+    schema_version: u8,
+    version: String,
+    manifest_sha256: String,
+}
+
+impl PendingRuntimeIdentity {
+    fn from_runtime(identity: &incodex_runtime_bundle::RuntimeIdentity) -> Self {
+        Self {
+            schema_version: 1,
+            version: identity.version.clone(),
+            manifest_sha256: identity.manifest_sha256.clone(),
+        }
+    }
+
+    fn matches(&self, identity: &incodex_runtime_bundle::RuntimeIdentity) -> bool {
+        self.schema_version == 1
+            && self.version == identity.version
+            && self.manifest_sha256 == identity.manifest_sha256
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,9 +86,14 @@ pub fn run_runtime(parsed: &ParsedCli) -> Result<(), String> {
         println!("would update ~/.incodex/runtime/ without modifying Codex");
         return Ok(());
     }
+    let identity = incodex_runtime_bundle::runtime_identity()?;
+    prepare_runtime_publication(&identity)?;
     let mut progress = Progress::new();
     progress.stage("Publishing Runtime");
     let published = incodex_runtime_bundle::publish(&user_root())?;
+    if pending_runtime_matches(&identity) {
+        complete_update_notice();
+    }
     progress.stop();
     println!("{}", format_step("Runtime", None));
     println!(
@@ -84,7 +116,7 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
                     .into(),
             )
         }
-        InstallChannel::Homebrew => return run_homebrew_update(parsed),
+        InstallChannel::Homebrew => return run_homebrew_update(parsed, &exe),
         InstallChannel::Script => {}
     }
     let prefix = install_prefix(&exe);
@@ -92,34 +124,11 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
     println!("  prefix: {}", prefix.display());
     if parsed.dry_run {
         println!("would re-run install.sh for this prefix");
+        println!("would publish Runtime with the installed CLI");
         println!("no changes made.");
         return Ok(());
     }
 
-    let mut progress = Progress::new();
-    progress.stage("Checking for updates");
-    let latest = latest_stable_release()?;
-    let current = parse_stable_version(env!("CARGO_PKG_VERSION"))
-        .ok_or("update failed: current CLI version is not stable")?;
-    match latest.version.cmp(&current) {
-        std::cmp::Ordering::Less => {
-            progress.stop();
-            println!(
-                "Current version {} is newer than latest release {}.",
-                env!("CARGO_PKG_VERSION"),
-                latest.tag
-            );
-            return Ok(());
-        }
-        std::cmp::Ordering::Equal => {
-            progress.stop();
-            println!("Already on latest version, {}", env!("CARGO_PKG_VERSION"));
-            return Ok(());
-        }
-        std::cmp::Ordering::Greater => {}
-    }
-
-    progress.stage("Preparing update");
     let update_target = prefix.join("bin/incodex");
     let _lock =
         incodex_transaction::acquire_target_lock(&user_root(), &update_target, "update", None)
@@ -130,6 +139,38 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
                     format!("update failed: could not acquire update lock: {err}")
                 }
             })?;
+    if runtime_update_pending() {
+        repair_pending_runtime(&update_target)?;
+    }
+
+    let mut progress = Progress::new();
+    progress.stage("Checking for updates");
+    let latest = latest_stable_release()?;
+    let current = parse_stable_version(env!("CARGO_PKG_VERSION"))
+        .ok_or("update failed: current CLI version is not stable")?;
+    match latest.version.cmp(&current) {
+        std::cmp::Ordering::Less => {
+            synchronize_runtime(&mut progress, &update_target, false)?;
+            progress.stop();
+            println!(
+                "Current version {} is newer than latest release {}.",
+                env!("CARGO_PKG_VERSION"),
+                latest.tag
+            );
+            complete_update_notice();
+            return Ok(());
+        }
+        std::cmp::Ordering::Equal => {
+            synchronize_runtime(&mut progress, &update_target, false)?;
+            progress.stop();
+            println!("Already on latest version, {}", env!("CARGO_PKG_VERSION"));
+            complete_update_notice();
+            return Ok(());
+        }
+        std::cmp::Ordering::Greater => {}
+    }
+
+    progress.stage("Preparing update");
     progress.stop();
     println!("updating {} -> {}", env!("CARGO_PKG_VERSION"), latest.tag);
     let install_script_url = format!(
@@ -163,20 +204,22 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
         verify_installed_version(&prefix, expected)?;
     }
 
+    synchronize_runtime(&mut progress, &update_target, true)?;
     progress.stop();
     println!(
         "{}",
         format_ok(&format!("Verified Incodex {expected}"), None)
     );
-    clear_update_notice();
+    complete_update_notice();
     Ok(())
 }
 
-fn run_homebrew_update(parsed: &ParsedCli) -> Result<(), String> {
+fn run_homebrew_update(parsed: &ParsedCli, current_cli: &Path) -> Result<(), String> {
     println!("update channel: homebrew");
     if parsed.dry_run {
         println!("would run brew update");
         println!("would run brew upgrade incodex");
+        println!("would publish Runtime with the installed CLI");
         println!("no changes made.");
         return Ok(());
     }
@@ -191,6 +234,9 @@ fn run_homebrew_update(parsed: &ParsedCli) -> Result<(), String> {
                     format!("update failed: could not acquire update lock: {err}")
                 }
             })?;
+    if runtime_update_pending() {
+        repair_pending_runtime(current_cli)?;
+    }
 
     let mut progress = Progress::new();
     progress.stage("Updating Homebrew");
@@ -236,20 +282,149 @@ fn run_homebrew_update(parsed: &ParsedCli) -> Result<(), String> {
         Err(err) => return Err(format!("Homebrew upgrade failed: {err}")),
     };
 
-    let current = env!("CARGO_PKG_VERSION");
-    let installed = homebrew_installed_version().unwrap_or_else(|| current.to_string());
     let combined = format!(
         "{}\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    if combined.contains("already installed") {
-        println!("Already on latest version, {installed}");
-    } else {
-        println!("Updated to latest version, {installed}");
-    }
-    clear_update_notice();
+    let already_installed = combined.contains("already installed");
+    let cli_updated = !already_installed;
+    let installed = homebrew_installed_version().ok_or_else(|| {
+        runtime_sync_failure(
+            "could not verify the installed Homebrew CLI version".to_string(),
+            cli_updated,
+        )
+    })?;
+    let installed_cli =
+        homebrew_installed_cli().map_err(|detail| runtime_sync_failure(detail, cli_updated))?;
+    verify_cli_version(&installed_cli, &installed)
+        .map_err(|detail| runtime_sync_failure(detail, cli_updated))?;
+    synchronize_runtime(&mut progress, &installed_cli, cli_updated)?;
+    progress.stop();
+    println!(
+        "{}",
+        if already_installed {
+            format!("Already on latest version, {installed}")
+        } else {
+            format!("Updated to latest version, {installed}")
+        }
+    );
+    complete_update_notice();
     Ok(())
+}
+
+fn repair_pending_runtime(installed_cli: &Path) -> Result<(), String> {
+    let mut progress = Progress::new();
+    synchronize_runtime(&mut progress, installed_cli, false)?;
+    progress.stop();
+    if runtime_update_pending() {
+        return Err(
+            "Runtime synchronization failed: installed CLI did not confirm the expected Runtime generation"
+                .to_string(),
+        );
+    }
+    println!("{}", format_ok("Runtime synchronization repaired", None));
+    Ok(())
+}
+
+fn synchronize_runtime(
+    progress: &mut Progress,
+    installed_cli: &Path,
+    cli_updated: bool,
+) -> Result<(), String> {
+    progress.stage("Publishing Runtime");
+    if let Err(detail) = run_runtime_command(installed_cli) {
+        progress.stop();
+        return Err(runtime_sync_failure(detail, cli_updated));
+    }
+    Ok(())
+}
+
+fn runtime_sync_failure(detail: String, cli_updated: bool) -> String {
+    ensure_runtime_update_pending();
+    if cli_updated {
+        format!("CLI was updated, but Runtime synchronization failed: {detail}")
+    } else {
+        format!("Runtime synchronization failed: {detail}")
+    }
+}
+
+fn run_runtime_command(installed_cli: &Path) -> Result<(), String> {
+    let mut command = Command::new(installed_cli);
+    command
+        .arg("runtime")
+        .env(RUNTIME_SYNC_ENV, "1")
+        .env_remove(UPDATE_NOTICE_WORKER_ENV);
+    match run_command_with_timeout(
+        &mut command,
+        timeout_from_env("INCODEX_RUNTIME_UPDATE_TIMEOUT_MS", RUNTIME_UPDATE_TIMEOUT),
+    ) {
+        Ok(CommandOutcome::Completed(output)) if output.status.success() => Ok(()),
+        Ok(CommandOutcome::Completed(output)) => {
+            let detail = output_detail(&output);
+            if detail.is_empty() {
+                Err(format!(
+                    "{} runtime exited with {}",
+                    installed_cli.display(),
+                    output.status
+                ))
+            } else {
+                Err(detail)
+            }
+        }
+        Ok(CommandOutcome::TimedOut { stdout, stderr }) => {
+            let detail = output_detail_bytes(&stderr, &stdout);
+            if detail.is_empty() {
+                Err(format!("{} runtime timed out", installed_cli.display()))
+            } else {
+                Err(format!("Runtime timed out\n{detail}"))
+            }
+        }
+        Err(error) => Err(format!(
+            "could not run {} runtime: {error}",
+            installed_cli.display()
+        )),
+    }
+}
+
+fn homebrew_installed_cli() -> Result<PathBuf, String> {
+    let output = match run_brew(
+        &["--prefix", "incodex"],
+        timeout_from_env("INCODEX_HOMEBREW_QUERY_TIMEOUT_MS", HOMEBREW_QUERY_TIMEOUT),
+    ) {
+        Ok(CommandOutcome::Completed(output)) if output.status.success() => output,
+        Ok(CommandOutcome::Completed(output)) => {
+            let detail = output_detail(&output);
+            return Err(if detail.is_empty() {
+                format!("Homebrew prefix lookup failed: {}", output.status)
+            } else {
+                format!("Homebrew prefix lookup failed\n{detail}")
+            });
+        }
+        Ok(CommandOutcome::TimedOut { stdout, stderr }) => {
+            let detail = output_detail_bytes(&stderr, &stdout);
+            return Err(if detail.is_empty() {
+                "Homebrew prefix lookup timed out".to_string()
+            } else {
+                format!("Homebrew prefix lookup timed out\n{detail}")
+            });
+        }
+        Err(error) => return Err(format!("Homebrew prefix lookup failed: {error}")),
+    };
+    let prefix = String::from_utf8_lossy(&output.stdout);
+    let prefix = prefix.trim();
+    let prefix = PathBuf::from(prefix);
+    if prefix.as_os_str().is_empty() || !prefix.is_absolute() {
+        return Err("Homebrew prefix lookup returned an invalid path".to_string());
+    }
+    let installed_cli = prefix.join("bin/incodex");
+    if !installed_cli.is_file() {
+        return Err(format!(
+            "Homebrew prefix has no installed Incodex CLI: {}",
+            installed_cli.display()
+        ));
+    }
+    Ok(installed_cli)
 }
 
 fn run_brew(args: &[&str], timeout: Duration) -> Result<CommandOutcome, String> {
@@ -569,27 +744,11 @@ fn parse_stable_version(raw: &str) -> Option<[u64; 3]> {
 
 fn verify_installed_version(prefix: &Path, expected: &str) -> Result<(), String> {
     let installed = prefix.join("bin/incodex");
-    let output = Command::new(&installed)
-        .arg("--version")
-        .output()
-        .map_err(|err| {
-            format!(
-                "update failed: could not run {}: {err}",
-                installed.display()
-            )
-        })?;
-    if !output.status.success() {
-        return Err(format!(
-            "update failed: installed CLI did not report {expected}"
-        ));
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let reported = stdout.lines().find_map(|line| {
-        line.trim()
-            .strip_prefix("Incodex version ")
-            .and_then(|rest| rest.split_whitespace().next())
-    });
-    if reported != Some(expected) {
+    verify_cli_version(&installed, expected)
+}
+
+fn verify_cli_version(installed: &Path, expected: &str) -> Result<(), String> {
+    if cli_reported_version(installed).as_deref() != Ok(expected) {
         return Err(format!(
             "update failed: installed CLI did not report {expected}"
         ));
@@ -597,11 +756,113 @@ fn verify_installed_version(prefix: &Path, expected: &str) -> Result<(), String>
     Ok(())
 }
 
+fn cli_reported_version(installed: &Path) -> Result<String, String> {
+    let mut command = Command::new(installed);
+    command
+        .arg("--version")
+        .env_remove(UPDATE_NOTICE_WORKER_ENV);
+    let output = match run_command_with_timeout(
+        &mut command,
+        timeout_from_env("INCODEX_CLI_QUERY_TIMEOUT_MS", HOMEBREW_QUERY_TIMEOUT),
+    )? {
+        CommandOutcome::Completed(output) if output.status.success() => output,
+        _ => return Err("installed CLI version probe failed".to_string()),
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .lines()
+        .find_map(|line| {
+            line.trim()
+                .strip_prefix("Incodex version ")
+                .and_then(|rest| rest.split_whitespace().next())
+        })
+        .map(str::to_string)
+        .ok_or_else(|| "installed CLI version probe failed".to_string())
+}
+
 fn clear_update_notice() {
     write_update_notice("");
 }
 
+fn complete_update_notice() {
+    clear_update_notice();
+    clear_runtime_update_pending();
+}
+
+fn runtime_update_pending_path() -> PathBuf {
+    user_root().join("cache/runtime_update_pending")
+}
+
+fn runtime_update_pending() -> bool {
+    let path = runtime_update_pending_path();
+    fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.file_type().is_file())
+}
+
+fn prepare_runtime_publication(
+    identity: &incodex_runtime_bundle::RuntimeIdentity,
+) -> Result<(), String> {
+    if runtime_update_pending() {
+        match read_pending_runtime_identity() {
+            Some(expected) if !expected.matches(identity) => {
+                return Err(format!(
+                    "expected Runtime generation {}-{}, but this CLI embeds {}-{}; run inc update from the active installation",
+                    expected.version,
+                    expected.manifest_sha256,
+                    identity.version,
+                    identity.manifest_sha256,
+                ));
+            }
+            None if !runtime_sync_requested() => {
+                return Err(
+                    "expected Runtime generation could not be verified; run inc update from the active installation"
+                        .to_string(),
+                );
+            }
+            _ => {}
+        }
+    }
+    if runtime_sync_requested() {
+        mark_runtime_update_pending_for(identity);
+    }
+    Ok(())
+}
+
+fn pending_runtime_matches(identity: &incodex_runtime_bundle::RuntimeIdentity) -> bool {
+    read_pending_runtime_identity().is_some_and(|expected| expected.matches(identity))
+}
+
+fn read_pending_runtime_identity() -> Option<PendingRuntimeIdentity> {
+    let body = fs::read_to_string(runtime_update_pending_path()).ok()?;
+    serde_json::from_str(&body).ok()
+}
+
+fn runtime_sync_requested() -> bool {
+    std::env::var(RUNTIME_SYNC_ENV).as_deref() == Ok("1")
+}
+
+fn mark_runtime_update_pending_for(identity: &incodex_runtime_bundle::RuntimeIdentity) {
+    let marker = PendingRuntimeIdentity::from_runtime(identity);
+    if let Ok(body) = serde_json::to_string(&marker) {
+        write_cache_file(&runtime_update_pending_path(), &format!("{body}\n"));
+    }
+    write_update_notice(&format!("{RUNTIME_UPDATE_PENDING_NOTICE}\n"));
+}
+
+fn ensure_runtime_update_pending() {
+    if !runtime_update_pending() {
+        write_cache_file(&runtime_update_pending_path(), "pending\n");
+    }
+    write_update_notice(&format!("{RUNTIME_UPDATE_PENDING_NOTICE}\n"));
+}
+
+fn clear_runtime_update_pending() {
+    let _ = fs::remove_file(runtime_update_pending_path());
+}
+
 pub(crate) fn read_update_notice() -> Option<String> {
+    if runtime_update_pending() {
+        return Some(RUNTIME_UPDATE_PENDING_NOTICE.to_string());
+    }
     let cache = user_root().join("cache/update_message");
     let message = fs::read_to_string(&cache).ok()?;
     let message = message.trim();
@@ -668,6 +929,9 @@ pub(crate) fn run_update_notice_worker() -> bool {
 }
 
 fn refresh_update_notice() {
+    if runtime_update_pending() {
+        return;
+    }
     let Ok(exe) = current_exe() else {
         return;
     };
@@ -676,15 +940,24 @@ fn refresh_update_notice() {
         return;
     }
     let Ok(latest) = latest_stable_release() else {
-        clear_update_notice();
+        write_refreshed_update_notice("");
         return;
     };
-    let Some(current) = parse_stable_version(env!("CARGO_PKG_VERSION")) else {
+    let Some(process_version) = parse_stable_version(env!("CARGO_PKG_VERSION")) else {
+        write_refreshed_update_notice("");
         return;
     };
-    let message = if latest.version <= current {
+    let message = if latest.version <= process_version {
         String::new()
     } else {
+        let Some(current) = active_installed_version(channel, &exe) else {
+            write_refreshed_update_notice("");
+            return;
+        };
+        if latest.version <= current {
+            write_refreshed_update_notice("");
+            return;
+        }
         match channel {
             InstallChannel::Script => format!(
                 "Update {} available, run inc update\n",
@@ -694,7 +967,24 @@ fn refresh_update_notice() {
             InstallChannel::Source => String::new(),
         }
     };
-    write_update_notice(&message);
+    write_refreshed_update_notice(&message);
+}
+
+fn active_installed_version(channel: InstallChannel, current_exe: &Path) -> Option<[u64; 3]> {
+    let installed_cli = match channel {
+        InstallChannel::Script => current_exe.to_path_buf(),
+        InstallChannel::Homebrew => homebrew_installed_cli().ok()?,
+        InstallChannel::Source => return None,
+    };
+    cli_reported_version(&installed_cli)
+        .ok()
+        .and_then(|version| parse_stable_version(&version))
+}
+
+fn write_refreshed_update_notice(message: &str) {
+    if !runtime_update_pending() {
+        write_update_notice(message);
+    }
 }
 
 fn homebrew_update_notice(current: [u64; 3]) -> String {
@@ -745,6 +1035,10 @@ fn homebrew_stable_version() -> Option<(String, [u64; 3])> {
 
 fn write_update_notice(message: &str) {
     let cache = user_root().join("cache/update_message");
+    write_cache_file(&cache, message);
+}
+
+fn write_cache_file(cache: &Path, message: &str) {
     let Some(parent) = cache.parent() else {
         return;
     };
@@ -752,10 +1046,11 @@ fn write_update_notice(message: &str) {
         return;
     }
     let sequence = UPDATE_NOTICE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let temporary = parent.join(format!(
-        ".update_message.{}.{sequence}.tmp",
-        std::process::id()
-    ));
+    let name = cache
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("cache");
+    let temporary = parent.join(format!(".{name}.{}.{sequence}.tmp", std::process::id(),));
     let written = OpenOptions::new()
         .write(true)
         .create_new(true)
