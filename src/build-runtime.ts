@@ -55,10 +55,13 @@ const emitDir = join(root, ".runtime-cjs");
 const cjsNames = RUNTIME_ARTIFACT_NAMES.filter((name) => name.endsWith(".cjs"));
 for (const name of cjsNames) {
   const outputPath = join(outDir, name);
-  const text = readFileSync(join(emitDir, name), "utf8").replace(
-    /require\("\.\/(incodex-[a-z-]+)\.cts"\)/g,
-    'require("./$1.cjs")',
-  );
+  const text = readFileSync(join(emitDir, name), "utf8")
+    .replaceAll("\r\n", "\n")
+    .replaceAll("\r", "\n")
+    .replace(
+      /require\("\.\/(incodex-[a-z-]+)\.cts"\)/g,
+      'require("./$1.cjs")',
+    );
   writeFileSync(outputPath, text);
 }
 assertPortableCjs(cjsNames.map((name) => join(outDir, name)));

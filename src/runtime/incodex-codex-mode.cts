@@ -4,27 +4,51 @@
 const CODEX_MODE_PROBE_EXPRESSION = `(() => {
   function visible(element) {
     if (!(element instanceof HTMLElement)) return false;
-    const style = getComputedStyle(element);
-    if (style.display === "none" || style.visibility === "hidden") return false;
-    const rect = element.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
+    if (element.matches(":disabled, [aria-disabled=\"true\"]")) return false;
+    if (element.closest('[aria-hidden="true"], [inert]')) return false;
+    for (let current = element; current instanceof HTMLElement; current = current.parentElement) {
+      const style = getComputedStyle(current);
+      if (
+        style.display === "none" ||
+        style.visibility === "hidden" ||
+        style.visibility === "collapse" ||
+        Number.parseFloat(style.opacity || "1") <= 0
+      ) return false;
+    }
+    return Array.from(element.getClientRects()).some((rect) =>
+      rect.width > 0 &&
+      rect.height > 0 &&
+      rect.bottom > 0 &&
+      rect.right > 0 &&
+      rect.top < window.innerHeight &&
+      rect.left < window.innerWidth
+    );
   }
 
-  const modeButtons = Array.from(document.querySelectorAll('button[aria-haspopup="menu"]'))
-    .filter(visible);
+  const modeButtons = Array.from(document.querySelectorAll(
+    'button[aria-haspopup="menu"], [role="button"][aria-haspopup="menu"]',
+  )).filter(visible);
   let modeLabel = "";
   for (const button of modeButtons) {
-    const label = Array.from(button.children)
-      .find((child) => child.tagName === "SPAN")
-      ?.textContent?.trim();
-    if (label === "Codex" || label === "ChatGPT") {
-      modeLabel = label;
+    const text = [button.textContent, button.getAttribute("aria-label")]
+      .filter((value) => typeof value === "string")
+      .join(" ")
+      .replace(/\\s+/g, " ")
+      .trim();
+    if (/\\bCodex\\b/i.test(text)) {
+      modeLabel = "Codex";
+      break;
+    }
+    if (/\\bChatGPT\\b/i.test(text)) {
+      modeLabel = "ChatGPT";
       break;
     }
   }
 
   const officialBlockerVisible = Array.from(
-    document.querySelectorAll('[role="dialog"], [aria-modal="true"]'),
+    document.querySelectorAll(
+      'dialog[open], [role="dialog"], [role="alertdialog"], [aria-modal="true"]',
+    ),
   ).some(visible);
   return {
     modeAvailable: modeLabel.length > 0,
@@ -41,10 +65,18 @@ function deriveCodexModePageState(snapshot) {
   return "other";
 }
 
-function decideCodexModeAction(pageState, fallbackSent, confirmationFailures) {
+function decideCodexModeAction(
+  pageState,
+  fallbackAttempted,
+  confirmationFailures,
+  primaryOtherChecks = 0,
+  primaryOtherChecksRequired = 3,
+) {
   if (pageState === "codex") return "confirmed";
   if (pageState === "pending") return "wait";
-  if (!fallbackSent) return "select-fallback";
+  if (!fallbackAttempted) {
+    return primaryOtherChecks >= primaryOtherChecksRequired ? "select-fallback" : "wait";
+  }
   if (confirmationFailures >= 2) return "unresolved";
   return "wait";
 }
@@ -52,6 +84,7 @@ function decideCodexModeAction(pageState, fallbackSent, confirmationFailures) {
 function createCodexModeReadiness(options) {
   const checks = new WeakMap();
   const primarySettleMs = options.primarySettleMs ?? 1_500;
+  const primaryOtherChecksRequired = options.primaryOtherChecksRequired ?? 3;
   const pollMs = options.pollMs ?? 750;
   const scheduleTimer = options.scheduleTimer ?? setTimeout;
   const cancelTimer = options.cancelTimer ?? clearTimeout;
@@ -62,7 +95,9 @@ function createCodexModeReadiness(options) {
     state = {
       complete: false,
       confirmationFailures: 0,
-      fallbackSent: false,
+      fallbackAttempted: false,
+      fallbackSucceeded: false,
+      primaryOtherChecks: 0,
       running: false,
       timer: null,
     };
@@ -92,27 +127,41 @@ function createCodexModeReadiness(options) {
         CODEX_MODE_PROBE_EXPRESSION,
         false,
       );
+      if (state.complete || win.isDestroyed() || win.webContents.isDestroyed()) return;
       const pageState = deriveCodexModePageState(snapshot);
-      if (state.fallbackSent && pageState === "other") state.confirmationFailures += 1;
+      if (!state.fallbackAttempted) {
+        state.primaryOtherChecks = pageState === "other" ? state.primaryOtherChecks + 1 : 0;
+      } else if (pageState === "other") {
+        state.confirmationFailures += 1;
+      }
       const action = decideCodexModeAction(
         pageState,
-        state.fallbackSent,
+        state.fallbackAttempted,
         state.confirmationFailures,
+        state.primaryOtherChecks,
+        primaryOtherChecksRequired,
       );
       if (action === "confirmed") {
         state.complete = true;
-        options.log("codex-mode-confirmed", { fallback: state.fallbackSent });
+        options.log("codex-mode-confirmed", { fallback: state.fallbackSucceeded });
         return;
       }
       if (action === "unresolved") {
         state.complete = true;
-        options.log("codex-mode-unresolved", { fallback: state.fallbackSent });
+        options.log("codex-mode-unresolved", { fallback: state.fallbackSucceeded });
         return;
       }
       if (action === "select-fallback" && win.isFocused()) {
-        state.fallbackSent = options.selectFallback(win);
+        if (state.complete || win.isDestroyed() || win.webContents.isDestroyed()) return;
+        state.fallbackAttempted = true;
         state.confirmationFailures = 0;
-        if (state.fallbackSent) options.log("codex-mode-fallback-sent");
+        state.fallbackSucceeded = options.selectFallback(win) === true;
+        if (state.fallbackSucceeded) {
+          options.log("codex-mode-fallback-sent");
+        } else {
+          state.complete = true;
+          options.log("codex-mode-unresolved", { fallback: false });
+        }
       }
     } catch (error) {
       options.log("codex-mode-probe-failed", { error: String(error) });

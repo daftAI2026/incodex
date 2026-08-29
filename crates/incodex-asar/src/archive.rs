@@ -20,6 +20,7 @@ const LEFTOVERS: &[&str] = &[
     "incodex-instance.cjs",
     "incodex-runtime-load.cjs",
     "incodex-window-kind.cjs",
+    "incodex-codex-mode.cjs",
 ];
 const ELECTRON_ASAR_BLOCK_SIZE: usize = 4 * 1024 * 1024;
 
