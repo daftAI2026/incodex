@@ -139,6 +139,93 @@ fn native_menu_refresh_survives_an_immediate_exit() {
 }
 
 #[test]
+fn native_menu_preserves_a_runtime_synchronization_notice() {
+    let home = scratch("menu-runtime-pending");
+    let fake_bin = home.join("fake-bin");
+    let curl_called = home.join("curl-called");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let (_, installed) = installed_cli(&home);
+    write_executable(
+        &fake_bin.join("curl"),
+        "#!/bin/sh\n: > \"$CURL_CALLED\"\nexit 22\n",
+    );
+    let cache = home.join(".incodex/cache");
+    fs::create_dir_all(&cache).unwrap();
+    fs::write(cache.join("runtime_update_pending"), "pending\n").unwrap();
+    fs::write(
+        cache.join("update_message"),
+        "Update 9.9.9 available, run inc update\n",
+    )
+    .unwrap();
+    let path = format!("{}:/usr/bin:/bin", fake_bin.display());
+    let curl_called_text = curl_called.to_string_lossy();
+
+    let result = support::tty::run_with_timeout_env(
+        installed.to_str().unwrap(),
+        &[],
+        &[],
+        &home,
+        "Runtime synchronization incomplete, run inc update",
+        "q",
+        Duration::from_secs(3),
+        &[
+            ("PATH", path.as_str()),
+            ("CURL_CALLED", curl_called_text.as_ref()),
+        ],
+    );
+
+    assert_eq!(result.status, 0, "{}", result.stderr);
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(!curl_called.exists(), "pending Runtime state was refreshed away");
+    assert!(cache.join("runtime_update_pending").is_file());
+}
+
+#[test]
+fn detached_old_cli_refresh_cannot_restore_a_notice_after_the_cli_changes() {
+    let home = scratch("menu-stale-worker");
+    let fake_bin = home.join("fake-bin");
+    let curl_called = home.join("curl-called");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let (_, installed) = installed_cli(&home);
+    write_executable(
+        &fake_bin.join("curl"),
+        "#!/bin/sh\n: > \"$CURL_CALLED\"\nsleep 0.5\nprintf '%s\\n' '{\"tag_name\":\"v9.9.9\"}'\n",
+    );
+    let path = format!("{}:/usr/bin:/bin", fake_bin.display());
+    let curl_called_text = curl_called.to_string_lossy();
+
+    let result = support::tty::run_with_timeout_env(
+        installed.to_str().unwrap(),
+        &[],
+        &[],
+        &home,
+        "6. Quit",
+        "q",
+        Duration::from_secs(3),
+        &[
+            ("PATH", path.as_str()),
+            ("CURL_CALLED", curl_called_text.as_ref()),
+        ],
+    );
+    assert_eq!(result.status, 0, "{}", result.stderr);
+
+    let replacement = installed.with_extension("next");
+    write_executable(
+        &replacement,
+        "#!/bin/sh\ncase \"$1\" in\n  --version) printf '%s\\n' 'Incodex version 9.9.9' ;;\n  *) exit 88 ;;\nesac\n",
+    );
+    fs::rename(replacement, &installed).unwrap();
+
+    let cache = home.join(".incodex/cache/update_message");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while (!curl_called.exists() || !cache.exists()) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(curl_called.exists(), "detached refresh did not run");
+    assert_eq!(fs::read_to_string(cache).unwrap(), "");
+}
+
+#[test]
 fn native_menu_clears_a_stale_notice_when_release_lookup_fails() {
     let home = scratch("menu-failed-refresh");
     let fake_bin = home.join("fake-bin");

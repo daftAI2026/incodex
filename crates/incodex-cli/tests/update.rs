@@ -404,6 +404,9 @@ esac
         fs::read_to_string(notice).unwrap(),
         "Update 9.9.9 available, run inc update\n"
     );
+    assert!(home
+        .join(".incodex/cache/runtime_update_pending")
+        .is_file());
 }
 
 #[test]
@@ -472,12 +475,48 @@ fn homebrew_update_fails_closed_when_the_new_prefix_cannot_be_resolved() {
         .unwrap();
 
     assert_eq!(output.status.code(), Some(1));
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("Homebrew prefix"),
-        "stderr={}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("CLI was updated"), "{stderr}");
+    assert!(stderr.contains("Runtime"), "{stderr}");
+    assert!(stderr.contains("Homebrew prefix"), "{stderr}");
     assert!(!fallback_log.exists(), "update fell back to a PATH binary");
+    assert!(home
+        .join(".incodex/cache/runtime_update_pending")
+        .is_file());
+}
+
+#[test]
+fn homebrew_update_rejects_a_prefix_cli_that_does_not_match_the_installed_version() {
+    let home = scratch("homebrew-prefix-version-mismatch");
+    let fake_bin = home.join("fake-bin");
+    let new_prefix = home.join("Cellar/incodex/9.9.9");
+    let runtime_log = home.join("runtime.log");
+    fs::create_dir_all(&fake_bin).unwrap();
+    fs::create_dir_all(new_prefix.join("bin")).unwrap();
+    let installed = homebrew_cli(&home);
+    write_executable(
+        &new_prefix.join("bin/incodex"),
+        "#!/bin/sh\ncase \"$1\" in\n  --version) printf '%s\\n' 'Incodex version 0.5.0' ;;\n  runtime) : > \"$RUNTIME_LOG\" ;;\n  *) exit 88 ;;\nesac\n",
+    );
+    write_executable(
+        &fake_bin.join("brew"),
+        "#!/bin/sh\ncase \"$*\" in\n  'update'|'upgrade incodex') exit 0 ;;\n  'list --versions incodex') printf '%s\\n' 'incodex 9.9.9' ;;\n  '--prefix incodex') printf '%s\\n' \"$NEW_PREFIX\" ;;\n  *) exit 88 ;;\nesac\n",
+    );
+
+    let output = Command::new(installed)
+        .arg("update")
+        .env("HOME", &home)
+        .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+        .env("NEW_PREFIX", &new_prefix)
+        .env("RUNTIME_LOG", &runtime_log)
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("CLI was updated"), "{stderr}");
+    assert!(stderr.contains("did not report 9.9.9"), "{stderr}");
+    assert!(!runtime_log.exists(), "mismatched CLI published Runtime");
 }
 
 #[test]
