@@ -89,7 +89,7 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
                     .into(),
             )
         }
-        InstallChannel::Homebrew => return run_homebrew_update(parsed),
+        InstallChannel::Homebrew => return run_homebrew_update(parsed, &exe),
         InstallChannel::Script => {}
     }
     let prefix = install_prefix(&exe);
@@ -102,11 +102,6 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
         return Ok(());
     }
 
-    let mut progress = Progress::new();
-    progress.stage("Checking for updates");
-    let latest = latest_stable_release()?;
-    let current = parse_stable_version(env!("CARGO_PKG_VERSION"))
-        .ok_or("update failed: current CLI version is not stable")?;
     let update_target = prefix.join("bin/incodex");
     let _lock =
         incodex_transaction::acquire_target_lock(&user_root(), &update_target, "update", None)
@@ -117,6 +112,15 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
                     format!("update failed: could not acquire update lock: {err}")
                 }
             })?;
+    if runtime_update_pending() {
+        return repair_pending_runtime(&update_target);
+    }
+
+    let mut progress = Progress::new();
+    progress.stage("Checking for updates");
+    let latest = latest_stable_release()?;
+    let current = parse_stable_version(env!("CARGO_PKG_VERSION"))
+        .ok_or("update failed: current CLI version is not stable")?;
     match latest.version.cmp(&current) {
         std::cmp::Ordering::Less => {
             synchronize_runtime(&mut progress, &update_target, false)?;
@@ -183,7 +187,7 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
     Ok(())
 }
 
-fn run_homebrew_update(parsed: &ParsedCli) -> Result<(), String> {
+fn run_homebrew_update(parsed: &ParsedCli, current_cli: &Path) -> Result<(), String> {
     println!("update channel: homebrew");
     if parsed.dry_run {
         println!("would run brew update");
@@ -203,6 +207,9 @@ fn run_homebrew_update(parsed: &ParsedCli) -> Result<(), String> {
                     format!("update failed: could not acquire update lock: {err}")
                 }
             })?;
+    if runtime_update_pending() {
+        return repair_pending_runtime(current_cli);
+    }
 
     let mut progress = Progress::new();
     progress.stage("Updating Homebrew");
@@ -276,6 +283,15 @@ fn run_homebrew_update(parsed: &ParsedCli) -> Result<(), String> {
         }
     );
     complete_update_notice();
+    Ok(())
+}
+
+fn repair_pending_runtime(installed_cli: &Path) -> Result<(), String> {
+    let mut progress = Progress::new();
+    synchronize_runtime(&mut progress, installed_cli, false)?;
+    progress.stop();
+    complete_update_notice();
+    println!("{}", format_ok("Runtime synchronization repaired", None));
     Ok(())
 }
 
