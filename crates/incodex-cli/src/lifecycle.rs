@@ -64,7 +64,9 @@ pub fn run_runtime(parsed: &ParsedCli) -> Result<(), String> {
     let mut progress = Progress::new();
     progress.stage("Publishing Runtime");
     let published = incodex_runtime_bundle::publish(&user_root())?;
-    complete_update_notice();
+    if runtime_update_pending() {
+        complete_update_notice();
+    }
     progress.stop();
     println!("{}", format_step("Runtime", None));
     println!(
