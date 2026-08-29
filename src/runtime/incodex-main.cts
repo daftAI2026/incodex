@@ -10,6 +10,7 @@ const safeHome = require("./incodex-safe-home.cjs");
 const ipcGuard = require("./incodex-ipc-guard.cjs");
 const instance = require("./incodex-instance.cjs");
 const windowKind = require("./incodex-window-kind.cjs");
+const codexMode = require("./incodex-codex-mode.cjs");
 const windowsPlatform =
   process.platform === "win32" ? require("./incodex-windows-platform.cjs") : null;
 
@@ -594,7 +595,6 @@ const allowedWindows = new Map();
 const trustedOrigins = new Set(["app://-", "https://chatgpt.com"]);
 const acceptedWindows = new WeakSet();
 const readyWindows = new WeakSet();
-let codexModeSelected = false;
 
 function rememberWindow(win) {
   if (!win || typeof win.id !== "number") return;
@@ -650,17 +650,23 @@ function markSessionClosed() {
   }
 }
 
-function selectOfficialCodexMode(win) {
+function selectOfficialCodexModeFallback(win) {
   if (!isIncognito()) return;
-  if (codexModeSelected) return;
   try {
     win.webContents.sendInputEvent({ type: "keyDown", keyCode: "3", modifiers: ["control"] });
     win.webContents.sendInputEvent({ type: "keyUp", keyCode: "3", modifiers: ["control"] });
-    codexModeSelected = true;
+    return true;
   } catch (error) {
     logLaunch("codex-mode-selection-failed", { error: String(error) });
+    return false;
   }
 }
+
+const codexModeReadiness = codexMode.createCodexModeReadiness({
+  isIncognito,
+  log: logLaunch,
+  selectFallback: selectOfficialCodexModeFallback,
+});
 
 function hookWindow(win, source) {
   if (!win?.webContents || isAuxiliaryWindow(win)) return;
@@ -674,7 +680,10 @@ function hookWindow(win, source) {
     const prefix = `window.__incodexIncognito=${isIncognito() ? "true" : "false"};window.__incodexLocale=${locale};window.__incodexPlatform=${platform};`;
     win.webContents
       .executeJavaScript(prefix + source, false)
-      .then(() => (report ? reportInjectionProbe(win) : undefined))
+      .then(() => {
+        codexModeReadiness.observe(win);
+        return report ? reportInjectionProbe(win) : undefined;
+      })
       .catch((error) => reportInjectionError(error));
   }
   win.webContents.on("dom-ready", () => run(false));
@@ -792,8 +801,6 @@ async function attachElectron() {
     }
     win.once("ready-to-show", () => {
       bringForward();
-      if (win.isFocused()) selectOfficialCodexMode(win);
-      else win.once("focus", () => selectOfficialCodexMode(win));
       if (!windowsPlatform) markSessionReady();
       else markAcceptedWindowReady(win);
     });

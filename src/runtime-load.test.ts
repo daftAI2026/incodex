@@ -135,7 +135,7 @@ describe("runtime load", () => {
     const readyEnd = main.indexOf("\n    });", readyStart);
     const ready = main.slice(readyStart, readyEnd);
     expect(ready).not.toContain("selectOfficialCodexModeFallback");
-    expect(main).toContain("scheduleCodexModeCheck(win)");
+    expect(main).toContain("codexModeReadiness.observe(win)");
   });
 
   test("an ordinary incognito click marks its session pending before child handoff", () => {
