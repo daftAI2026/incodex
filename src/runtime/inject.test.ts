@@ -123,12 +123,14 @@ describe("platform shortcut label", () => {
   });
 });
 
-describe("macOS Dock menu copy", () => {
-  test("sends the existing localized copy through the trusted action bridge", () => {
+describe("macOS native menu copy", () => {
+  test("sends the existing localized copy to both native menus", () => {
     expect(inject).toContain('action: "configure-dock-menu"');
+    expect(inject).toContain('action: "configure-status-menu"');
     expect(inject).toContain('t(isIncognitoWindow() ? "title" : "open")');
     expect(inject).toContain('window.__incodexPlatform !== "darwin"');
     expect(inject).toContain("configureDockMenu()");
+    expect(inject).toContain("configureStatusMenu()");
   });
 });
 
