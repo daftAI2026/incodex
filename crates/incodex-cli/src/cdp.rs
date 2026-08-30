@@ -34,6 +34,8 @@ const WINDOWS_LIFECYCLE_CDP_TIMEOUT: Duration = Duration::from_millis(400);
 const PROFILE_MASK_FAILURE_POLLS: u8 = 2;
 const WINDOWS_PROFILE_MASK_TRANSPORT_FAILURE_POLLS: u8 = 4;
 const BROWSER_CLOSE_ATTEMPTS: u8 = 3;
+const CODEX_MODE_UNAVAILABLE_ERROR: &str =
+    "Codex mode remained unavailable after keyboard fallback";
 pub const OFFICIAL_NEW_CODEX_URL: &str = "codex://new?mode=codex";
 
 #[derive(Debug, Clone)]
@@ -359,6 +361,7 @@ where
             connection_guard,
         ) {
             Ok(target_id) => return Ok(target_id),
+            Err(err) if is_terminal_codex_mode_error(&err) => return Err(err),
             Err(err) => {
                 let refused_now = err.contains("Connection refused")
                     || err.contains("Connection reset")
@@ -472,12 +475,16 @@ where
                 dispatch_codex_mode_fallback(socket, &mut next_id, connection_guard)?;
             }
             CodexModeAction::Unresolved => {
-                return Err("Codex mode remained unavailable after keyboard fallback".into());
+                return Err(CODEX_MODE_UNAVAILABLE_ERROR.into());
             }
         }
 
         thread::sleep(mode::POLL_INTERVAL);
     }
+}
+
+pub(crate) fn is_terminal_codex_mode_error(error: &str) -> bool {
+    error == CODEX_MODE_UNAVAILABLE_ERROR
 }
 
 fn codex_mode_page_state(response: &Value) -> Result<CodexModePageState, String> {

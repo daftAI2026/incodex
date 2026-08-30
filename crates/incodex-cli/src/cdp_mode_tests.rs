@@ -162,7 +162,8 @@ fn terminal_codex_mode_failure_stops_the_cdp_retry_layer() {
                 }
 
                 let mut request = [0_u8; 2048];
-                stream.read(&mut request).unwrap();
+                let read = stream.read(&mut request).unwrap();
+                assert!(read > 0, "CDP test server received an empty HTTP request");
                 write_json_response(
                     &mut stream,
                     &json!([{

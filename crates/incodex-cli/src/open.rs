@@ -20,9 +20,9 @@ use incodex_core::{format_ok, format_warn};
 use crate::app_bundle::resolve_executable;
 use crate::cdp::{
     allocate_debug_port, debug_launch_args,
-    inject_shared_ui_with_options_while_alive_with_readiness, launch_arg_prefix,
-    monitor_profile_mask_health, start_lifecycle_monitor, start_primary_lifecycle_monitor,
-    CodexModeReadiness, InjectionOptions, OFFICIAL_NEW_CODEX_URL,
+    inject_shared_ui_with_options_while_alive_with_readiness, is_terminal_codex_mode_error,
+    launch_arg_prefix, monitor_profile_mask_health, start_lifecycle_monitor,
+    start_primary_lifecycle_monitor, CodexModeReadiness, InjectionOptions, OFFICIAL_NEW_CODEX_URL,
 };
 use crate::locale::parse_locale_override;
 use crate::open_presentation::{
@@ -546,7 +546,11 @@ fn start_injection_worker(
                     if std::env::var_os("INCODEX_CDP_LOG").is_some() {
                         eprintln!("cdp inject attempt {attempt}: {error}");
                     }
+                    let terminal = is_terminal_codex_mode_error(&error);
                     last_injection_error = Some(error);
+                    if terminal {
+                        break;
+                    }
                     thread::sleep(Duration::from_millis(400));
                     continue;
                 }
