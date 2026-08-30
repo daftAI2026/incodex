@@ -14,8 +14,10 @@ use incodex_core::windows_session::{
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
 
 use crate::cdp::{
-    allocate_debug_port, debug_launch_args, inject_shared_ui_with_options_while_alive_and_guard,
-    start_lifecycle_signal_monitor, start_profile_mask_signal_monitor, InjectionOptions,
+    allocate_debug_port, debug_launch_args,
+    inject_shared_ui_with_options_while_alive_and_guard_with_readiness,
+    is_terminal_codex_mode_error, start_lifecycle_signal_monitor,
+    start_profile_mask_signal_monitor, CodexModeReadiness, InjectionOptions,
 };
 use crate::open_presentation::{
     classify_completed_open, completed_open_failure_message, CompletedOpenState,
@@ -635,15 +637,17 @@ fn inject_windows_ui(
 ) -> Result<WindowsMonitorWorkers, String> {
     let deadline = Instant::now() + Duration::from_secs(45);
     let mut last_error = "Codex CDP page is not ready".to_string();
+    let mut mode_readiness = CodexModeReadiness::default();
     while alive.load(Ordering::Acquire) && Instant::now() < deadline {
         let mut primary_target = None;
-        match inject_shared_ui_with_options_while_alive_and_guard(
+        match inject_shared_ui_with_options_while_alive_and_guard_with_readiness(
             port,
             &options,
             &alive,
             |target_id| {
                 primary_target = Some(target_id.to_string());
             },
+            &mut mode_readiness,
             &|stream| ownership_guard.require_connection_owner(stream),
         ) {
             Ok(_) => {
@@ -668,6 +672,7 @@ fn inject_windows_ui(
                 }
                 return Ok(monitor_workers);
             }
+            Err(error) if is_terminal_codex_mode_error(&error) => return Err(error),
             Err(error) => last_error = error,
         }
         thread::sleep(Duration::from_millis(400));
