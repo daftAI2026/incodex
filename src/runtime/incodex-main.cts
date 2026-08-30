@@ -812,8 +812,6 @@ async function attachElectron() {
           reason: "not-incognito",
         });
       }
-      burnIncognitoHome();
-      await clearPid(ownerLease, raiseServer);
       electron.app.quit();
       return ipcGuard.actionResponse(requestId, { ok: true, code: "OK" });
     }
@@ -903,10 +901,6 @@ async function attachElectron() {
   if (isIncognito()) {
     electron.app.on("window-all-closed", () => {
       finishIncognito(0);
-    });
-    electron.app.on("before-quit", () => {
-      burnIncognitoHome();
-      void clearPid(ownerLease, raiseServer);
     });
   }
 
