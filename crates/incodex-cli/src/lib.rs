@@ -27,9 +27,9 @@ pub mod legacy_proof;
 pub mod legacy_typescript;
 #[cfg(not(target_os = "windows"))]
 pub mod lifecycle;
+mod locale;
 #[cfg(target_os = "macos")]
 pub mod macos_update_restore;
-mod locale;
 #[cfg(not(target_os = "windows"))]
 pub mod menu;
 mod menu_controller;
