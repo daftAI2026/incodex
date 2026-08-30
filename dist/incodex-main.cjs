@@ -319,8 +319,9 @@ const CHROME_WINDOW_TILE_PIXELS = process.platform === "darwin" ? 22 : 10;
 const CHROME_MIN_VISIBLE = 30;
 function captureSourceBounds() {
     try {
-        const { BrowserWindow } = require("electron");
-        const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+        const electron = require("electron");
+        const focused = electron.BrowserWindow.getFocusedWindow();
+        const win = focused && !isAuxiliaryWindow(focused) ? focused : mainWindows(electron)[0];
         if (!win || win.isDestroyed())
             return "";
         const b = win.getBounds();
