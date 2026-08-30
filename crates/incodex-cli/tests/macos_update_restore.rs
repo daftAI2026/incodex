@@ -1,6 +1,10 @@
 #![cfg(target_os = "macos")]
 
-use incodex_cli::macos_update_restore::{next_action, CoordinatorAction, CoordinatorSnapshot};
+use std::collections::VecDeque;
+
+use incodex_cli::macos_update_restore::{
+    drive_coordinator, next_action, CoordinatorAction, CoordinatorOutcome, CoordinatorSnapshot,
+};
 
 fn snapshot(
     observed_build: Option<u64>,
@@ -75,4 +79,50 @@ fn parent_and_registration_liveness_bound_the_worker() {
         next_action(snapshot(Some(7377), false, false, false, false, true)),
         CoordinatorAction::ExitCancelled
     );
+}
+
+#[test]
+fn coordinator_waits_then_reinstalls_exactly_once() {
+    let mut observations = VecDeque::from([
+        snapshot(Some(7303), true, false, true, true, false),
+        snapshot(Some(7377), false, true, false, true, false),
+        snapshot(Some(7377), false, false, false, true, false),
+    ]);
+    let mut waits = 0;
+    let mut reinstalls = Vec::new();
+
+    let outcome = drive_coordinator(
+        || observations.pop_front().ok_or("fixture exhausted".into()),
+        |build| {
+            reinstalls.push(build);
+            Ok(())
+        },
+        || {
+            waits += 1;
+            Ok(())
+        },
+    )
+    .unwrap();
+
+    assert_eq!(outcome, CoordinatorOutcome::Reinstalled { build: 7377 });
+    assert_eq!(waits, 2);
+    assert_eq!(reinstalls, vec![7377]);
+}
+
+#[test]
+fn coordinator_exits_without_mutation_when_registration_is_cancelled() {
+    let mut reinstalled = false;
+
+    let outcome = drive_coordinator(
+        || Ok(snapshot(Some(7303), false, false, true, false, true)),
+        |_| {
+            reinstalled = true;
+            Ok(())
+        },
+        || Err("must not wait".into()),
+    )
+    .unwrap();
+
+    assert_eq!(outcome, CoordinatorOutcome::Cancelled);
+    assert!(!reinstalled);
 }
