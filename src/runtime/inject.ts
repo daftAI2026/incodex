@@ -23,7 +23,10 @@ const TOOLTIP_FALLBACK_DELAY_MS = 700;
 const TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
 
 type IncognitoAction = "open" | "quit";
-type IncognitoBridgeAction = IncognitoAction | "configure-dock-menu";
+type IncognitoBridgeAction =
+  | IncognitoAction
+  | "configure-dock-menu"
+  | "configure-status-menu";
 type IncognitoButtonIcon = "hat-glasses" | "circle-x";
 
 type IncognitoActionResponse = {
@@ -174,6 +177,24 @@ function configureDockMenu(): void {
     })
     .catch(() => {
       window.__incodexDockMenuConfigured = false;
+    });
+}
+
+function configureStatusMenu(): void {
+  if (window.__incodexPlatform !== "darwin" || window.__incodexStatusMenuConfigured) return;
+  const request = window.incodex?.requestIncognitoAction;
+  if (!request) return;
+  window.__incodexStatusMenuConfigured = true;
+  void request({
+    action: "configure-status-menu",
+    label: t(isIncognitoWindow() ? "title" : "open"),
+    requestId: newRequestId(),
+  })
+    .then((result) => {
+      if (!result?.ok) window.__incodexStatusMenuConfigured = false;
+    })
+    .catch(() => {
+      window.__incodexStatusMenuConfigured = false;
     });
 }
 
@@ -816,6 +837,7 @@ function ensureMutationObserver(): void {
 
 function start(): void {
   configureDockMenu();
+  configureStatusMenu();
   if (window.__incodexStarted) {
     ensureStyle();
     ensureButton();
@@ -846,6 +868,7 @@ declare global {
     __incodexStarted?: boolean;
     __incodexIncognito?: boolean;
     __incodexDockMenuConfigured?: boolean;
+    __incodexStatusMenuConfigured?: boolean;
     __incodexLocale?: string;
     __incodexPlatform?: string;
     __incodexMutationObserver?: MutationObserver;
