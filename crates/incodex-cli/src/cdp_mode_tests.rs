@@ -1,6 +1,8 @@
-use std::io::Write;
+use std::io::{Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
+use std::sync::Arc;
 use std::thread;
 
 use serde_json::{json, Value};
@@ -104,6 +106,91 @@ fn codex_readiness_keeps_unresolved_terminal_without_counter_overflow() {
             CodexModeAction::Unresolved
         );
     }
+}
+
+#[test]
+fn terminal_codex_mode_failure_stops_the_cdp_retry_layer() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let stop = Arc::new(AtomicBool::new(false));
+    let connections = Arc::new(AtomicUsize::new(0));
+    let server = {
+        let stop = stop.clone();
+        let connections = connections.clone();
+        thread::spawn(move || {
+            while !stop.load(Ordering::Acquire) {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(connection) => connection,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(std::time::Duration::from_millis(5));
+                        continue;
+                    }
+                    Err(error) => panic!("CDP test server failed: {error}"),
+                };
+                let mut peek = [0_u8; 2048];
+                let size = stream.peek(&mut peek).unwrap();
+                let request = String::from_utf8_lossy(&peek[..size]);
+                if request.starts_with("GET /devtools/") {
+                    connections.fetch_add(1, Ordering::AcqRel);
+                    stream.set_nonblocking(false).unwrap();
+                    let mut socket = tungstenite::accept(stream).unwrap();
+                    while let Ok(Message::Text(text)) = socket.read() {
+                        let command: Value = serde_json::from_str(&text).unwrap();
+                        let id = command.get("id").and_then(Value::as_u64).unwrap();
+                        let expression = command
+                            .pointer("/params/expression")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default();
+                        let response = if expression.contains("officialBlockerVisible") {
+                            json!({
+                                "id": id,
+                                "result": {"result": {"value": {
+                                    "modeAvailable": true,
+                                    "modeLabel": "ChatGPT",
+                                    "officialBlockerVisible": false
+                                }}}
+                            })
+                        } else {
+                            json!({"id": id, "result": {}})
+                        };
+                        socket
+                            .send(Message::Text(response.to_string().into()))
+                            .unwrap();
+                    }
+                    continue;
+                }
+
+                let mut request = [0_u8; 2048];
+                stream.read(&mut request).unwrap();
+                write_json_response(
+                    &mut stream,
+                    &json!([{
+                        "id": "main",
+                        "type": "page",
+                        "url": "app://-/index.html",
+                        "webSocketDebuggerUrl": format!(
+                            "ws://127.0.0.1:{port}/devtools/page/main"
+                        )
+                    }]),
+                );
+            }
+        })
+    };
+
+    let error = inject_shared_ui_with_options(port, &InjectionOptions::default()).unwrap_err();
+    stop.store(true, Ordering::Release);
+    server.join().unwrap();
+
+    assert!(
+        error.contains("Codex mode remained unavailable"),
+        "unexpected terminal error: {error}"
+    );
+    assert_eq!(
+        connections.load(Ordering::Acquire),
+        1,
+        "terminal mode failure must not reconnect through the inner retry layer"
+    );
 }
 
 #[test]
