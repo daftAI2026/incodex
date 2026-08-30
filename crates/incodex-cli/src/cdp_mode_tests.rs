@@ -87,6 +87,26 @@ fn codex_readiness_uses_one_bounded_fallback_for_stable_chatgpt() {
 }
 
 #[test]
+fn codex_readiness_keeps_unresolved_terminal_without_counter_overflow() {
+    let mut readiness = CodexModeReadiness::default();
+    for _ in 0..3 {
+        readiness.observe(CodexModePageState::Other);
+    }
+    readiness.observe(CodexModePageState::Other);
+    assert_eq!(
+        readiness.observe(CodexModePageState::Other),
+        CodexModeAction::Unresolved
+    );
+
+    for _ in 0..300 {
+        assert_eq!(
+            readiness.observe(CodexModePageState::Other),
+            CodexModeAction::Unresolved
+        );
+    }
+}
+
+#[test]
 fn open_does_not_send_the_keyboard_fallback_when_codex_is_already_selected() {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
