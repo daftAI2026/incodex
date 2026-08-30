@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import { exitAfterLastMainWindowCloses } from "./incodex-window-lifecycle.cts";
+import {
+  createIncognitoWindowLifecycle,
+  exitAfterLastMainWindowCloses,
+} from "./incodex-window-lifecycle.cts";
 
 interface TestWindow {
   isDestroyed(): boolean;
@@ -115,5 +118,30 @@ describe("shared incognito window lifecycle", () => {
 
     anotherMainWindow = false;
     expect(exits).toEqual([]);
+  });
+
+  test("a minimized sibling remains active until that sibling is explicitly closed", () => {
+    const first = createWindow();
+    const sibling = createWindow();
+    const scheduled: Array<() => void> = [];
+    const exits: number[] = [];
+    const lifecycle = createIncognitoWindowLifecycle(
+      (code: number) => exits.push(code),
+      (callback: () => void) => scheduled.push(callback),
+    );
+    lifecycle.observe(first.window);
+    lifecycle.observe(sibling.window);
+
+    sibling.hide();
+    first.emit("close");
+    first.hide();
+    scheduled.shift()?.();
+
+    expect(exits).toEqual([]);
+
+    sibling.emit("close");
+    scheduled.shift()?.();
+
+    expect(exits).toEqual([0]);
   });
 });

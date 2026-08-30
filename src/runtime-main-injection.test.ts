@@ -57,9 +57,11 @@ describe("Electron UI injection reporting", () => {
 
     const beforeOfficialReturn = main.slice(created, officialReturn);
     expect(main).toContain('require("./incodex-window-lifecycle.cjs")');
+    expect(main).toContain("windowLifecycle.createIncognitoWindowLifecycle(");
+    expect(main).toContain("finishIncognito,");
     expect(beforeOfficialReturn).toContain("if (isIncognito())");
-    expect(beforeOfficialReturn).toContain("windowLifecycle.exitAfterLastMainWindowCloses(");
-    expect(beforeOfficialReturn).toContain("finishIncognito,");
+    expect(beforeOfficialReturn).toContain("incognitoWindowLifecycle.observe(win)");
+    expect(beforeOfficialReturn).not.toContain("open.isVisible()");
   });
 
   test("keeps every incognito exit path idempotent on both platforms", () => {
