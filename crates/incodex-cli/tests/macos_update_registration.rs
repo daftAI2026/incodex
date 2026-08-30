@@ -5,7 +5,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use incodex_cli::macos_update_restore::{
-    publish_registration, read_registration, remove_registration,
+    publish_registration, read_registration, refresh_registered_helper, remove_registration,
 };
 
 fn scratch() -> PathBuf {
@@ -89,6 +89,29 @@ fn stale_worker_cannot_remove_a_new_registration() {
     assert_eq!(
         read_registration(&root).unwrap().unwrap().install_id,
         "install-epoch-b"
+    );
+}
+
+#[test]
+fn runtime_update_refreshes_the_helper_without_changing_the_install_epoch() {
+    let home = scratch();
+    let root = home.join(".incodex");
+    let old_source = home.join("incodex-old");
+    let new_source = home.join("incodex-new");
+    fs::write(&old_source, b"old helper fixture").unwrap();
+    fs::write(&new_source, b"new helper fixture").unwrap();
+    let app = Path::new("/Applications/ChatGPT.app");
+    let original = publish_registration(&root, &old_source, app, "install-epoch-a").unwrap();
+
+    assert!(refresh_registered_helper(&root, &new_source).unwrap());
+
+    let refreshed = read_registration(&root).unwrap().unwrap();
+    assert_eq!(refreshed.install_id, original.install_id);
+    assert_eq!(refreshed.app_path, original.app_path);
+    assert_ne!(refreshed.helper_sha256, original.helper_sha256);
+    assert_eq!(
+        fs::read(refreshed.helper_path).unwrap(),
+        b"new helper fixture"
     );
 }
 
