@@ -78,10 +78,14 @@ pub(crate) struct Readiness {
     fallback_attempted: bool,
     primary_other_checks: u8,
     fallback_confirmation_failures: u8,
+    unresolved: bool,
 }
 
 impl Readiness {
     pub(super) fn observe(&mut self, page_state: PageState) -> Action {
+        if self.unresolved {
+            return Action::Unresolved;
+        }
         if page_state == PageState::Codex {
             return Action::Confirmed;
         }
@@ -102,6 +106,7 @@ impl Readiness {
 
         self.fallback_confirmation_failures += 1;
         if self.fallback_confirmation_failures >= FALLBACK_CONFIRMATION_FAILURES {
+            self.unresolved = true;
             Action::Unresolved
         } else {
             Action::Wait
