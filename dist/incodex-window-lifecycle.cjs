@@ -26,19 +26,26 @@ function createIncognitoWindowLifecycle(exit, schedule = scheduleCloseProbe) {
             return;
         observedWindows.add(win);
         activeWindows.add(win);
-        let retired = false;
+        let active = true;
+        let destroyed = false;
         let closeProbeGeneration = 0;
-        function retire() {
-            if (retired)
+        function activate() {
+            if (active || destroyed || exited)
                 return;
-            retired = true;
+            active = true;
+            activeWindows.add(win);
+        }
+        function retire() {
+            if (!active)
+                return;
+            active = false;
             activeWindows.delete(win);
             exitIfEmpty();
         }
         win.on("close", (event) => {
             const generation = ++closeProbeGeneration;
             function observeHidden() {
-                if (retired || generation !== closeProbeGeneration)
+                if (!active || generation !== closeProbeGeneration)
                     return;
                 if (win.isDestroyed?.() === true || win.isVisible?.() === false) {
                     retire();
@@ -52,7 +59,12 @@ function createIncognitoWindowLifecycle(exit, schedule = scheduleCloseProbe) {
         });
         win.on("closed", () => {
             closeProbeGeneration += 1;
+            destroyed = true;
             retire();
+        });
+        win.on("show", () => {
+            closeProbeGeneration += 1;
+            activate();
         });
     }
     return { observe };
