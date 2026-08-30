@@ -226,6 +226,31 @@ describe("macOS status menu decoration", () => {
     controller.dispose();
     expect(fake.disposeCalled()).toBe(true);
   });
+
+  test("retries observer setup after a partial native registration failure", async () => {
+    const fake = createFakeBridge();
+    const observeMenuMutation = fake.bridge.observeMenuMutation;
+    let attempts = 0;
+    fake.bridge.observeMenuMutation = (handler: (menu: FakeMenu) => void): (() => void) => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("native observer unavailable");
+      return observeMenuMutation(handler);
+    };
+    const controller = createStatusMenuController({
+      loadBridge: async () => fake.bridge,
+      isIncognito: false,
+      onOpen: () => {},
+      log: () => {},
+    });
+
+    expect(await controller.configure("打开无痕窗口")).toBe(false);
+    expect(await controller.configure("打开无痕窗口")).toBe(true);
+    const menu = officialMenu("Quit ChatGPT");
+    fake.open(menu);
+
+    expect(menu.items[0]?.label).toBe("打开无痕窗口");
+    expect(attempts).toBe(2);
+  });
 });
 
 describe("status menu label validation", () => {
