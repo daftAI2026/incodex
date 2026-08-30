@@ -395,6 +395,33 @@ pub fn publish_registration(
         "macos-update-registration",
         Some(install_id),
     )?;
+    publish_registration_locked(root, helper_source, app_path, install_id)
+}
+
+pub fn refresh_registered_helper(root: &Path, helper_source: &Path) -> Result<bool, String> {
+    let Some(observed) = read_registration(root)? else {
+        return Ok(false);
+    };
+    let path = registration_path(root);
+    let _lock = acquire_target_lock(
+        root,
+        &path,
+        "macos-update-registration-refresh",
+        Some(&observed.install_id),
+    )?;
+    let Some(current) = read_registration(root)? else {
+        return Ok(false);
+    };
+    publish_registration_locked(root, helper_source, &current.app_path, &current.install_id)?;
+    Ok(true)
+}
+
+fn publish_registration_locked(
+    root: &Path,
+    helper_source: &Path,
+    app_path: &Path,
+    install_id: &str,
+) -> Result<UpdateRegistration, String> {
     let helper_bytes = read_regular_file(helper_source, "macOS update helper source")?;
     let helper_sha256 = sha256_hex(&helper_bytes);
     let helpers_dir = root.join("helpers");
@@ -417,7 +444,7 @@ pub fn publish_registration(
         "{}\n",
         serde_json::to_string(&registration).map_err(|error| error.to_string())?
     );
-    write_private_atomic(&registration_path, body.as_bytes())?;
+    write_private_atomic(&registration_path(root), body.as_bytes())?;
     Ok(registration)
 }
 

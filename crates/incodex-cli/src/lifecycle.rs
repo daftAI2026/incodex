@@ -91,6 +91,10 @@ pub fn run_runtime(parsed: &ParsedCli) -> Result<(), String> {
     let mut progress = Progress::new();
     progress.stage("Publishing Runtime");
     let published = incodex_runtime_bundle::publish(&user_root())?;
+    #[cfg(target_os = "macos")]
+    let helper_warning = current_exe().and_then(|helper| {
+        crate::macos_update_restore::refresh_registered_helper(&user_root(), &helper).map(|_| ())
+    });
     if pending_runtime_matches(&identity) {
         complete_update_notice();
     }
@@ -104,6 +108,16 @@ pub fn run_runtime(parsed: &ParsedCli) -> Result<(), String> {
         )
     );
     println!("{}", format_kv("Runtime", &published.version, None));
+    #[cfg(target_os = "macos")]
+    if let Err(error) = helper_warning {
+        println!(
+            "{}",
+            format_warn(
+                &format!("Automatic Codex update recovery was not refreshed: {error}"),
+                None,
+            )
+        );
+    }
     Ok(())
 }
 
