@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 
 import {
   createIncognitoWindowLifecycle,
-  exitAfterLastMainWindowCloses,
 } from "./incodex-window-lifecycle.cts";
 
 interface TestWindow {
@@ -40,17 +39,16 @@ function createWindow(): {
 }
 
 describe("shared incognito window lifecycle", () => {
-  test("exits after the last primary window is hidden instead of destroyed", () => {
+  test("exits after the last incognito content window is hidden instead of destroyed", () => {
     const fixture = createWindow();
     const scheduled: Array<() => void> = [];
     const exits: number[] = [];
 
-    exitAfterLastMainWindowCloses(
-      fixture.window,
-      () => false,
+    const lifecycle = createIncognitoWindowLifecycle(
       (code: number) => exits.push(code),
       (callback: () => void) => scheduled.push(callback),
     );
+    lifecycle.observe(fixture.window);
 
     fixture.emit("close");
     fixture.hide();
@@ -64,12 +62,11 @@ describe("shared incognito window lifecycle", () => {
     const scheduled: Array<() => void> = [];
     const exits: number[] = [];
 
-    exitAfterLastMainWindowCloses(
-      fixture.window,
-      () => false,
+    const lifecycle = createIncognitoWindowLifecycle(
       (code: number) => exits.push(code),
       (callback: () => void) => scheduled.push(callback),
     );
+    lifecycle.observe(fixture.window);
 
     fixture.hide();
 
@@ -82,12 +79,11 @@ describe("shared incognito window lifecycle", () => {
     const scheduled: Array<() => void> = [];
     const exits: number[] = [];
 
-    exitAfterLastMainWindowCloses(
-      fixture.window,
-      () => false,
+    const lifecycle = createIncognitoWindowLifecycle(
       (code: number) => exits.push(code),
       (callback: () => void) => scheduled.push(callback),
     );
+    lifecycle.observe(fixture.window);
 
     fixture.emit("close");
     fixture.emit("closed");
@@ -96,18 +92,18 @@ describe("shared incognito window lifecycle", () => {
     expect(exits).toEqual([0]);
   });
 
-  test("a hidden non-final window stops probing instead of exiting on a later app hide", () => {
+  test("a hidden non-final content window stops probing instead of exiting later", () => {
     const fixture = createWindow();
+    const sibling = createWindow();
     const scheduled: Array<() => void> = [];
     const exits: number[] = [];
-    let anotherMainWindow = true;
 
-    exitAfterLastMainWindowCloses(
-      fixture.window,
-      () => anotherMainWindow,
+    const lifecycle = createIncognitoWindowLifecycle(
       (code: number) => exits.push(code),
       (callback: () => void) => scheduled.push(callback),
     );
+    lifecycle.observe(fixture.window);
+    lifecycle.observe(sibling.window);
 
     fixture.emit("close");
     fixture.hide();
@@ -116,8 +112,29 @@ describe("shared incognito window lifecycle", () => {
     expect(exits).toEqual([]);
     expect(scheduled).toEqual([]);
 
-    anotherMainWindow = false;
+    sibling.hide();
     expect(exits).toEqual([]);
+  });
+
+  test("keeps probing a close until the host actually becomes hidden", () => {
+    const fixture = createWindow();
+    const scheduled: Array<() => void> = [];
+    const exits: number[] = [];
+    const lifecycle = createIncognitoWindowLifecycle(
+      (code: number) => exits.push(code),
+      (callback: () => void) => scheduled.push(callback),
+    );
+    lifecycle.observe(fixture.window);
+
+    fixture.emit("close");
+    for (let attempt = 0; attempt < 50; attempt++) scheduled.shift()?.();
+
+    expect(exits).toEqual([]);
+    expect(scheduled).toHaveLength(1);
+
+    fixture.hide();
+    scheduled.shift()?.();
+    expect(exits).toEqual([0]);
   });
 
   test("a minimized sibling remains active until that sibling is explicitly closed", () => {

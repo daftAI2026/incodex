@@ -49,7 +49,7 @@ describe("Electron UI injection reporting", () => {
     expect(hook).toMatch(/\.catch\(\(error\) => reportInjectionError\(error\)\)/);
   });
 
-  test("ends an incognito session when either host hides its last main window", () => {
+  test("observes only incognito content windows for session closure", () => {
     const created = main.indexOf('electron.app.on("browser-window-created"');
     const officialReturn = main.indexOf("if (!isIncognito()) return;", created);
     expect(created).toBeGreaterThanOrEqual(0);
@@ -57,10 +57,9 @@ describe("Electron UI injection reporting", () => {
 
     const beforeOfficialReturn = main.slice(created, officialReturn);
     expect(main).toContain('require("./incodex-window-lifecycle.cjs")');
-    expect(main).toContain("windowLifecycle.createIncognitoWindowLifecycle(");
-    expect(main).toContain("finishIncognito,");
-    expect(beforeOfficialReturn).toContain("if (isIncognito())");
-    expect(beforeOfficialReturn).toContain("incognitoWindowLifecycle.observe(win)");
+    expect(main).toContain("isIncognito()\n    ? windowLifecycle.createIncognitoWindowLifecycle(");
+    expect(main).toContain("createIncognitoWindowLifecycle(finishIncognito)");
+    expect(beforeOfficialReturn).toContain("incognitoWindowLifecycle?.observe(win)");
     expect(beforeOfficialReturn).not.toContain("open.isVisible()");
   });
 

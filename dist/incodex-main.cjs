@@ -758,6 +758,9 @@ async function attachElectron() {
         void clearPid(ownerLease, raiseServer);
         electron.app.exit(code);
     }
+    const incognitoWindowLifecycle = isIncognito()
+        ? windowLifecycle.createIncognitoWindowLifecycle(finishIncognito)
+        : null;
     electron.ipcMain.handle("incodex-action", async (event, payload) => {
         const requestId = typeof payload?.requestId === "string" ? payload.requestId : "";
         const gate = authorizeEvent(event);
@@ -821,9 +824,7 @@ async function attachElectron() {
             return;
         }
         hookWindow(win, source);
-        if (isIncognito()) {
-            windowLifecycle.exitAfterLastMainWindowCloses(win, () => mainWindows(electron).some((open) => open !== win && !open.isDestroyed() && open.isVisible()), finishIncognito);
-        }
+        incognitoWindowLifecycle?.observe(win);
         if (!isIncognito())
             return;
         applyChromeWindowTile(win);

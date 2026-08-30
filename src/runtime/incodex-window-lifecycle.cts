@@ -7,50 +7,59 @@ function scheduleCloseProbe(callback, delay) {
   setTimeout(callback, delay);
 }
 
-function exitAfterLastMainWindowCloses(
-  win,
-  hasAnotherMainWindow,
-  exit,
-  schedule = scheduleCloseProbe,
-) {
-  if (
-    !win?.on ||
-    typeof hasAnotherMainWindow !== "function" ||
-    typeof exit !== "function" ||
-    typeof schedule !== "function"
-  ) {
+function createIncognitoWindowLifecycle(exit, schedule = scheduleCloseProbe) {
+  if (typeof exit !== "function" || typeof schedule !== "function") {
     throw new Error("invalid host window lifecycle");
   }
 
+  const activeWindows = new Set();
+  const observedWindows = new WeakSet();
   let exited = false;
-  let closeProbeGeneration = 0;
 
-  function exitIfLast(requireHidden) {
-    if (exited || hasAnotherMainWindow()) return;
-    if (requireHidden && win.isDestroyed?.() !== true && win.isVisible?.() !== false) return;
+  function exitIfEmpty() {
+    if (exited || activeWindows.size !== 0) return;
     exited = true;
     exit(0);
   }
 
-  win.on("close", () => {
-    const generation = ++closeProbeGeneration;
+  function observe(win) {
+    if (!win?.on) throw new Error("invalid host window lifecycle");
+    if (observedWindows.has(win)) return;
+    observedWindows.add(win);
+    activeWindows.add(win);
 
-    function observeHidden() {
-      if (exited || generation !== closeProbeGeneration) return;
-      if (win.isDestroyed?.() === true || win.isVisible?.() === false) {
-        exitIfLast(false);
-        return;
-      }
-      schedule(observeHidden, WINDOW_CLOSE_SETTLE_MS);
+    let retired = false;
+    let closeProbeGeneration = 0;
+
+    function retire() {
+      if (retired) return;
+      retired = true;
+      activeWindows.delete(win);
+      exitIfEmpty();
     }
 
-    schedule(observeHidden, WINDOW_CLOSE_SETTLE_MS);
-  });
+    win.on("close", () => {
+      const generation = ++closeProbeGeneration;
 
-  win.on("closed", () => {
-    closeProbeGeneration += 1;
-    exitIfLast(false);
-  });
+      function observeHidden() {
+        if (retired || generation !== closeProbeGeneration) return;
+        if (win.isDestroyed?.() === true || win.isVisible?.() === false) {
+          retire();
+          return;
+        }
+        schedule(observeHidden, WINDOW_CLOSE_SETTLE_MS);
+      }
+
+      schedule(observeHidden, WINDOW_CLOSE_SETTLE_MS);
+    });
+
+    win.on("closed", () => {
+      closeProbeGeneration += 1;
+      retire();
+    });
+  }
+
+  return { observe };
 }
 
-export { exitAfterLastMainWindowCloses };
+export { createIncognitoWindowLifecycle };
