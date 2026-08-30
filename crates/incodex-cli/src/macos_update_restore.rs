@@ -665,3 +665,45 @@ fn sha256_hex(bytes: &[u8]) -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "incodex-macos-update-log-{name}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn coordinator_log_is_private_bounded_and_never_follows_symlinks() {
+        let root = scratch("contract");
+        append_coordinator_log(&root, "worker started").unwrap();
+        let path = root.join("macos-update/coordinator.log");
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            PRIVATE_FILE_MODE
+        );
+
+        fs::write(&path, vec![b'x'; COORDINATOR_LOG_MAX_BYTES + 1]).unwrap();
+        append_coordinator_log(&root, "worker bounded").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "worker bounded\n");
+
+        fs::remove_file(&path).unwrap();
+        let foreign = root.join("foreign.log");
+        fs::write(&foreign, b"foreign\n").unwrap();
+        std::os::unix::fs::symlink(&foreign, &path).unwrap();
+        assert!(append_coordinator_log(&root, "must fail")
+            .unwrap_err()
+            .contains("symlink"));
+        assert_eq!(fs::read(&foreign).unwrap(), b"foreign\n");
+    }
+}
