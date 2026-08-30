@@ -40,6 +40,14 @@ fn ordinary_exit_waits_for_the_replacement_grace_period() {
 }
 
 #[test]
+fn ordinary_relaunch_does_not_keep_the_worker_alive_after_the_grace_period() {
+    assert_eq!(
+        next_action(snapshot(Some(7303), false, true, true, true, true)),
+        CoordinatorAction::ExitNoUpdate
+    );
+}
+
+#[test]
 fn a_temporary_bundle_replacement_gap_never_looks_like_an_ordinary_exit() {
     assert_eq!(
         next_action(snapshot(None, false, false, false, true, true)),
