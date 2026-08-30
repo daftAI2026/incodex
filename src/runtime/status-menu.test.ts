@@ -19,7 +19,8 @@ type FakeMenu = {
 
 function createFakeBridge() {
   let menuOpened: ((menu: FakeMenu) => void) | null = null;
-  let disposed = false;
+  let menuChanged: ((menu: FakeMenu) => void) | null = null;
+  let disposeCount = 0;
 
   return {
     bridge: {
@@ -38,8 +39,15 @@ function createFakeBridge() {
       observeMenuOpen(handler: (menu: FakeMenu) => void): () => void {
         menuOpened = handler;
         return () => {
-          disposed = true;
+          disposeCount += 1;
           menuOpened = null;
+        };
+      },
+      observeMenuMutation(handler: (menu: FakeMenu) => void): () => void {
+        menuChanged = handler;
+        return () => {
+          disposeCount += 1;
+          menuChanged = null;
         };
       },
       updateItem(item: FakeItem, update: FakeItem): void {
@@ -47,10 +55,14 @@ function createFakeBridge() {
       },
     },
     disposeCalled(): boolean {
-      return disposed;
+      return disposeCount === 2;
     },
     open(menu: FakeMenu): void {
       menuOpened?.(menu);
+    },
+    replace(menu: FakeMenu, ...labels: string[]): void {
+      menu.items = labels.map((label) => ({ label, type: "normal" }));
+      menuChanged?.(menu);
     },
   };
 }
@@ -123,6 +135,28 @@ describe("macOS status menu decoration", () => {
     expect(menu.items.filter((item) => item.id === "incodex-open-incognito")).toHaveLength(1);
     expect(menu.items.filter((item) => item.id === "incodex-status-menu-separator")).toHaveLength(1);
     expect(menu.items[0]?.label).toBe("打开无痕窗口");
+  });
+
+  test("restores its action after the native addon rebuilds an open menu", async () => {
+    const fake = createFakeBridge();
+    const controller = createStatusMenuController({
+      loadBridge: async () => fake.bridge,
+      isIncognito: false,
+      onOpen: () => {},
+      log: () => {},
+    });
+    await controller.configure("打开无痕窗口");
+    const menu = officialMenu("Quit ChatGPT");
+
+    fake.open(menu);
+    fake.replace(menu, "Pinned", "Quit ChatGPT");
+
+    expect(menu.items.map((item) => item.label)).toEqual([
+      "打开无痕窗口",
+      undefined,
+      "Pinned",
+      "Quit ChatGPT",
+    ]);
   });
 
   test("shows a disabled identity in an incognito child", async () => {
