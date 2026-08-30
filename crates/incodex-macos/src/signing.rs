@@ -371,9 +371,7 @@ fn collect_vendor_helper_roots_for_outer(
         .iter()
         .filter(|component| {
             component.kind == SignatureKind::Vendor
-                && !component
-                    .path
-                    .starts_with(app.join(SPARKLE_FRAMEWORK))
+                && !component.path.starts_with(app.join(SPARKLE_FRAMEWORK))
         })
         .map(|component| component.path.clone())
         .collect::<Vec<_>>();
