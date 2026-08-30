@@ -11,6 +11,8 @@ const ipcGuard = require("./incodex-ipc-guard.cjs");
 const instance = require("./incodex-instance.cjs");
 const windowKind = require("./incodex-window-kind.cjs");
 const codexMode = require("./incodex-codex-mode.cjs");
+const dockMenu =
+  process.platform === "darwin" ? require("./incodex-dock-menu.cjs") : null;
 const windowsPlatform =
   process.platform === "win32" ? require("./incodex-windows-platform.cjs") : null;
 
@@ -705,6 +707,20 @@ async function attachElectron() {
   } catch {
     return;
   }
+  const dockMenuController = dockMenu?.createDockMenuController({
+    dock: electron.app.dock,
+    Menu: electron.Menu,
+    MenuItem: electron.MenuItem,
+    isIncognito: isIncognito(),
+    onOpen: () => {
+      void launchIncognito()
+        .then((result) => {
+          if (!result.ok) logLaunch("dock-menu-open-failed", { reason: result.reason });
+        })
+        .catch((error) => logLaunch("dock-menu-open-failed", { error: String(error) }));
+    },
+    log: logLaunch,
+  });
   const packagedOrigin = ipcGuard.navigationOrigin(
     require("node:url").pathToFileURL(electron.app.getAppPath()).href,
   );
@@ -740,6 +756,14 @@ async function attachElectron() {
     const gate = authorizeEvent(event);
     if (!gate.ok) return ipcGuard.actionResponse(requestId, gate);
     const action = payload?.action;
+    if (action === "configure-dock-menu") {
+      const configured =
+        dockMenuController && dockMenuController.configure(payload?.label) === true;
+      return ipcGuard.actionResponse(requestId, {
+        ok: configured,
+        code: configured ? "OK" : "UNAVAILABLE",
+      });
+    }
     if (action === "open") {
       if (isIncognito()) {
         return ipcGuard.actionResponse(requestId, {

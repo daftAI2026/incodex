@@ -23,6 +23,7 @@ const TOOLTIP_FALLBACK_DELAY_MS = 700;
 const TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
 
 type IncognitoAction = "open" | "quit";
+type IncognitoBridgeAction = IncognitoAction | "configure-dock-menu";
 type IncognitoButtonIcon = "hat-glasses" | "circle-x";
 
 type IncognitoActionResponse = {
@@ -156,6 +157,24 @@ async function requestAction(action: IncognitoAction): Promise<IncognitoActionRe
   } catch {
     return { ok: false, reason: "ipc-failed", code: "IPC_FAILED" };
   }
+}
+
+function configureDockMenu(): void {
+  if (window.__incodexPlatform !== "darwin" || window.__incodexDockMenuConfigured) return;
+  const request = window.incodex?.requestIncognitoAction;
+  if (!request) return;
+  window.__incodexDockMenuConfigured = true;
+  void request({
+    action: "configure-dock-menu",
+    label: t(isIncognitoWindow() ? "title" : "open"),
+    requestId: newRequestId(),
+  })
+    .then((result) => {
+      if (!result?.ok) window.__incodexDockMenuConfigured = false;
+    })
+    .catch(() => {
+      window.__incodexDockMenuConfigured = false;
+    });
 }
 
 async function activate(): Promise<boolean> {
@@ -796,6 +815,7 @@ function ensureMutationObserver(): void {
 }
 
 function start(): void {
+  configureDockMenu();
   if (window.__incodexStarted) {
     ensureStyle();
     ensureButton();
@@ -825,6 +845,7 @@ declare global {
   interface Window {
     __incodexStarted?: boolean;
     __incodexIncognito?: boolean;
+    __incodexDockMenuConfigured?: boolean;
     __incodexLocale?: string;
     __incodexPlatform?: string;
     __incodexMutationObserver?: MutationObserver;
@@ -834,7 +855,8 @@ declare global {
     __incodexUiProbe?: ReturnType<typeof deriveUiProbe>;
     incodex?: {
       requestIncognitoAction?: (payload: {
-        action: IncognitoAction;
+        action: IncognitoBridgeAction;
+        label?: string;
         requestId: string;
       }) => Promise<IncognitoActionResponse>;
     };

@@ -123,6 +123,15 @@ describe("platform shortcut label", () => {
   });
 });
 
+describe("macOS Dock menu copy", () => {
+  test("sends the existing localized copy through the trusted action bridge", () => {
+    expect(inject).toContain('action: "configure-dock-menu"');
+    expect(inject).toContain('t(isIncognitoWindow() ? "title" : "open")');
+    expect(inject).toContain('window.__incodexPlatform !== "darwin"');
+    expect(inject).toContain("configureDockMenu()");
+  });
+});
+
 describe("incognito profile mask", () => {
   test("pins one exact Blobatar release for offline generated avatars", () => {
     const blobatarVersion = packageJson.dependencies?.blobatar;
