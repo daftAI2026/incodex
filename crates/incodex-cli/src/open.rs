@@ -19,9 +19,10 @@ use incodex_core::{format_ok, format_warn};
 
 use crate::app_bundle::resolve_executable;
 use crate::cdp::{
-    allocate_debug_port, debug_launch_args, inject_shared_ui_with_options_while_alive,
-    launch_arg_prefix, monitor_profile_mask_health, start_lifecycle_monitor,
-    start_primary_lifecycle_monitor, InjectionOptions, OFFICIAL_NEW_CODEX_URL,
+    allocate_debug_port, debug_launch_args,
+    inject_shared_ui_with_options_while_alive_with_readiness, launch_arg_prefix,
+    monitor_profile_mask_health, start_lifecycle_monitor, start_primary_lifecycle_monitor,
+    CodexModeReadiness, InjectionOptions, OFFICIAL_NEW_CODEX_URL,
 };
 use crate::locale::parse_locale_override;
 use crate::open_presentation::{
@@ -513,6 +514,7 @@ fn start_injection_worker(
     thread::spawn(move || {
         let mut lifecycle_started = false;
         let mut last_injection_error = None;
+        let mut mode_readiness = CodexModeReadiness::default();
         for attempt in 1u8..=40 {
             if !process_alive.load(Ordering::Acquire) {
                 return;
@@ -522,7 +524,7 @@ fn start_injection_worker(
             {
                 lifecycle_started = true;
             }
-            let injection = inject_shared_ui_with_options_while_alive(
+            let injection = inject_shared_ui_with_options_while_alive_with_readiness(
                 port,
                 &options,
                 &process_alive,
@@ -532,6 +534,7 @@ fn start_injection_worker(
                         lifecycle_started = true;
                     }
                 },
+                &mut mode_readiness,
             );
             match injection {
                 Ok(_) => {

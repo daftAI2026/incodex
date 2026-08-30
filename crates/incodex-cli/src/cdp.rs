@@ -19,9 +19,8 @@ use crate::profile_mask::{ProfileAvatar, ProfileMask};
 
 #[path = "cdp_mode.rs"]
 mod mode;
-use mode::{
-    Action as CodexModeAction, PageState as CodexModePageState, Readiness as CodexModeReadiness,
-};
+pub(crate) use mode::Readiness as CodexModeReadiness;
+use mode::{Action as CodexModeAction, PageState as CodexModePageState};
 
 const INJECT_JS: &str = include_str!("../../../dist/incodex-inject.js");
 const INJECT_PREFIX: &str = "window.__incodexIncognito=true;";
@@ -295,20 +294,42 @@ pub(crate) fn inject_shared_ui_with_options_while_alive<F>(
 where
     F: FnMut(&str),
 {
-    inject_shared_ui_with_options_while_alive_and_guard(
+    let mut readiness = CodexModeReadiness::default();
+    inject_shared_ui_with_options_while_alive_with_readiness(
         debug_port,
         options,
         process_alive,
         on_target,
+        &mut readiness,
+    )
+}
+
+pub(crate) fn inject_shared_ui_with_options_while_alive_with_readiness<F>(
+    debug_port: u16,
+    options: &InjectionOptions,
+    process_alive: &AtomicBool,
+    on_target: F,
+    readiness: &mut CodexModeReadiness,
+) -> Result<String, String>
+where
+    F: FnMut(&str),
+{
+    inject_shared_ui_with_options_while_alive_and_guard_with_readiness(
+        debug_port,
+        options,
+        process_alive,
+        on_target,
+        readiness,
         &|_| Ok(()),
     )
 }
 
-pub(crate) fn inject_shared_ui_with_options_while_alive_and_guard<F, G>(
+pub(crate) fn inject_shared_ui_with_options_while_alive_and_guard_with_readiness<F, G>(
     debug_port: u16,
     options: &InjectionOptions,
     process_alive: &AtomicBool,
     mut on_target: F,
+    readiness: &mut CodexModeReadiness,
     connection_guard: &G,
 ) -> Result<String, String>
 where
@@ -334,6 +355,7 @@ where
             &mut registered_script_targets,
             process_alive,
             &mut on_target,
+            readiness,
             connection_guard,
         ) {
             Ok(target_id) => return Ok(target_id),
@@ -362,6 +384,7 @@ fn try_inject<F, G>(
     registered_script_targets: &mut HashSet<String>,
     process_alive: &AtomicBool,
     on_target: &mut F,
+    readiness: &mut CodexModeReadiness,
     connection_guard: &G,
 ) -> Result<String, String>
 where
@@ -376,7 +399,7 @@ where
     let mut socket = connect_cdp_websocket(&page.ws, debug_port)?;
     ensure_injection_active(process_alive)?;
     send_guarded_cdp(&mut socket, 1, "Page.enable", json!({}), connection_guard)?;
-    confirm_official_codex_mode(&mut socket, process_alive, connection_guard)?;
+    confirm_official_codex_mode(&mut socket, process_alive, readiness, connection_guard)?;
     ensure_injection_active(process_alive)?;
     if !registered_script_targets.contains(&page.id) {
         send_guarded_cdp(
@@ -421,14 +444,13 @@ fn ensure_injection_active(process_alive: &AtomicBool) -> Result<(), String> {
 fn confirm_official_codex_mode<G>(
     socket: &mut WebSocket<TcpStream>,
     process_alive: &AtomicBool,
+    readiness: &mut CodexModeReadiness,
     connection_guard: &G,
 ) -> Result<(), String>
 where
     G: Fn(&TcpStream) -> Result<(), String>,
 {
     let mut next_id = 10;
-    let mut readiness = CodexModeReadiness::default();
-
     loop {
         ensure_injection_active(process_alive)?;
         let response = send_guarded_cdp(

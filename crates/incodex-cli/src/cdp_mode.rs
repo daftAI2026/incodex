@@ -74,7 +74,7 @@ pub(super) enum Action {
 }
 
 #[derive(Default)]
-pub(super) struct Readiness {
+pub(crate) struct Readiness {
     fallback_attempted: bool,
     primary_other_checks: u8,
     fallback_confirmation_failures: u8,
