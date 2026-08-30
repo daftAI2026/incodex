@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use incodex_macos::sign_app;
+use incodex_macos::{collect_vendor_helper_roots, sign_app};
 
 static PATH_LOCK: Mutex<()> = Mutex::new(());
 
@@ -23,9 +23,11 @@ impl Drop for PathGuard {
 struct Fixture {
     root: PathBuf,
     app: PathBuf,
+    sidecar: PathBuf,
     fake_bin: PathBuf,
     entitlements: PathBuf,
     marker: PathBuf,
+    sparkle: PathBuf,
     sign_capture: PathBuf,
     deep_capture: PathBuf,
 }
@@ -50,9 +52,11 @@ impl Fixture {
         ));
         let app = root.join("ChatGPT.app");
         let sidecar = app.join("Contents/Frameworks/RenamedVendor.xpc");
+        let sparkle = app.join("Contents/Frameworks/Sparkle.framework");
         let fake_bin = root.join("fake-bin");
         fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
         fs::create_dir_all(sidecar.join("Contents/_CodeSignature")).unwrap();
+        fs::create_dir_all(sparkle.join("Versions/B")).unwrap();
         fs::create_dir_all(&fake_bin).unwrap();
         fs::write(app.join("Contents/MacOS/ChatGPT"), "binary\n").unwrap();
         fs::write(
@@ -103,6 +107,7 @@ fi
 if [ "$1" = "--display" ] && [ "$2" = "--verbose=4" ]; then
   case "$target" in
     *RenamedVendor.xpc) {nested_display} ;;
+    *Sparkle.framework) {nested_display} ;;
     *) {outer_display} ;;
   esac
   exit 0
@@ -133,9 +138,11 @@ exit 0
         Self {
             root,
             app,
+            sidecar,
             fake_bin,
             entitlements,
             marker,
+            sparkle,
             sign_capture,
             deep_capture,
         }
@@ -149,6 +156,25 @@ exit 0
         }
         path
     }
+}
+
+#[test]
+fn sparkle_update_framework_is_resigned_with_the_adhoc_host() {
+    let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let fixture = Fixture::new("2DC432GLL2");
+    let original_path = std::env::var_os("PATH");
+    let _path_guard = PathGuard(original_path);
+    std::env::set_var("PATH", fixture.install_path());
+
+    let preserved = collect_vendor_helper_roots(&fixture.app).unwrap();
+
+    assert!(preserved.iter().any(|path| path == &fixture.sidecar));
+    assert!(
+        !preserved
+            .iter()
+            .any(|path| path.starts_with(&fixture.sparkle)),
+        "Sparkle must share the ad-hoc host identity so its updater IPC accepts the patched app"
+    );
 }
 
 impl Drop for Fixture {
