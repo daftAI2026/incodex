@@ -44,6 +44,14 @@ describe("runtime load", () => {
     expect(loader).toContain("current.json");
   });
 
+  test("the status menu stays inside an artifact already gated by installed loaders", () => {
+    const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
+
+    expect(main).not.toContain('require("./incodex-status-menu.cjs")');
+    expect(main).toContain("dockMenu.createStatusMenuController");
+    expect(main).toContain("dockMenu.createNativeStatusMenuBridge");
+  });
+
   test("the loader gates official main on the incognito lease startup", () => {
     const loader = readFileSync(join(import.meta.dir, "runtime/incodex-loader.cts"), "utf8");
     const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");

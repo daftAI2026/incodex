@@ -319,8 +319,9 @@ const CHROME_WINDOW_TILE_PIXELS = process.platform === "darwin" ? 22 : 10;
 const CHROME_MIN_VISIBLE = 30;
 function captureSourceBounds() {
     try {
-        const { BrowserWindow } = require("electron");
-        const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+        const electron = require("electron");
+        const focused = electron.BrowserWindow.getFocusedWindow();
+        const win = focused && !isAuxiliaryWindow(focused) ? focused : mainWindows(electron)[0];
         if (!win || win.isDestroyed())
             return "";
         const b = win.getBounds();
@@ -700,21 +701,32 @@ async function attachElectron() {
     catch {
         return;
     }
+    function launchFromNativeMenu(source) {
+        void launchIncognito()
+            .then((result) => {
+            if (!result.ok)
+                logLaunch(`${source}-open-failed`, { reason: result.reason });
+        })
+            .catch((error) => logLaunch(`${source}-open-failed`, { error: String(error) }));
+    }
     const dockMenuController = dockMenu?.createDockMenuController({
         dock: electron.app.dock,
         Menu: electron.Menu,
         MenuItem: electron.MenuItem,
         isIncognito: isIncognito(),
-        onOpen: () => {
-            void launchIncognito()
-                .then((result) => {
-                if (!result.ok)
-                    logLaunch("dock-menu-open-failed", { reason: result.reason });
-            })
-                .catch((error) => logLaunch("dock-menu-open-failed", { error: String(error) }));
-        },
+        onOpen: () => launchFromNativeMenu("dock-menu"),
         log: logLaunch,
     });
+    const statusMenuController = dockMenu && dockMenu.createStatusMenuController({
+        loadBridge: () => dockMenu.createNativeStatusMenuBridge({
+            appPath: electron.app.getAppPath(),
+            onError: (error) => logLaunch("status-menu-action-failed", { error: String(error) }),
+        }),
+        isIncognito: isIncognito(),
+        onOpen: () => launchFromNativeMenu("status-menu"),
+        log: logLaunch,
+    });
+    electron.app.once("will-quit", () => statusMenuController?.dispose());
     const packagedOrigin = ipcGuard.navigationOrigin(require("node:url").pathToFileURL(electron.app.getAppPath()).href);
     if (packagedOrigin)
         trustedOrigins.add(packagedOrigin);
@@ -754,6 +766,13 @@ async function attachElectron() {
         const action = payload?.action;
         if (action === "configure-dock-menu") {
             const configured = dockMenuController && dockMenuController.configure(payload?.label) === true;
+            return ipcGuard.actionResponse(requestId, {
+                ok: configured,
+                code: configured ? "OK" : "UNAVAILABLE",
+            });
+        }
+        if (action === "configure-status-menu") {
+            const configured = statusMenuController && (await statusMenuController.configure(payload?.label)) === true;
             return ipcGuard.actionResponse(requestId, {
                 ok: configured,
                 code: configured ? "OK" : "UNAVAILABLE",

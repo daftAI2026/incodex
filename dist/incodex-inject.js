@@ -1607,6 +1607,24 @@ function configureDockMenu() {
     window.__incodexDockMenuConfigured = false;
   });
 }
+function configureStatusMenu() {
+  if (window.__incodexPlatform !== "darwin" || window.__incodexStatusMenuConfigured)
+    return;
+  const request = window.incodex?.requestIncognitoAction;
+  if (!request)
+    return;
+  window.__incodexStatusMenuConfigured = true;
+  request({
+    action: "configure-status-menu",
+    label: t(isIncognitoWindow() ? "title" : "open"),
+    requestId: newRequestId()
+  }).then((result) => {
+    if (!result?.ok)
+      window.__incodexStatusMenuConfigured = false;
+  }).catch(() => {
+    window.__incodexStatusMenuConfigured = false;
+  });
+}
 async function activate() {
   dismissActiveTooltip();
   if (isIncognitoWindow()) {
@@ -2147,6 +2165,7 @@ function ensureMutationObserver() {
 }
 function start() {
   configureDockMenu();
+  configureStatusMenu();
   if (window.__incodexStarted) {
     ensureStyle();
     ensureButton();

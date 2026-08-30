@@ -13,6 +13,17 @@ function hookWindowSource(): string {
 }
 
 describe("Electron UI injection reporting", () => {
+  test("native menu launches inherit geometry only from a real main window", () => {
+    const start = main.indexOf("function captureSourceBounds()");
+    const end = main.indexOf("\nfunction readSourceBounds()", start);
+    const capture = main.slice(start, end);
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    expect(capture).toContain("mainWindows(electron)[0]");
+    expect(capture).not.toContain("BrowserWindow.getAllWindows()[0]");
+  });
+
   test("lets an authorized renderer configure the macOS Dock decorator", () => {
     expect(main).toContain('require("./incodex-dock-menu.cjs")');
     expect(main).toContain('action === "configure-dock-menu"');
