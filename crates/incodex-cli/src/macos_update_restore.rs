@@ -44,6 +44,13 @@ pub enum CoordinatorAction {
     Reinstall { expected_build: u64 },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoordinatorOutcome {
+    NoUpdate,
+    Cancelled,
+    Reinstalled { build: u64 },
+}
+
 pub fn next_action(snapshot: CoordinatorSnapshot) -> CoordinatorAction {
     if !snapshot.registered {
         return CoordinatorAction::ExitCancelled;
@@ -67,6 +74,31 @@ pub fn next_action(snapshot: CoordinatorSnapshot) -> CoordinatorAction {
         CoordinatorAction::ExitNoUpdate
     } else {
         CoordinatorAction::Wait
+    }
+}
+
+pub fn drive_coordinator<O, R, W>(
+    mut observe: O,
+    mut reinstall: R,
+    mut wait: W,
+) -> Result<CoordinatorOutcome, String>
+where
+    O: FnMut() -> Result<CoordinatorSnapshot, String>,
+    R: FnMut(u64) -> Result<(), String>,
+    W: FnMut() -> Result<(), String>,
+{
+    loop {
+        match next_action(observe()?) {
+            CoordinatorAction::Wait => wait()?,
+            CoordinatorAction::ExitNoUpdate => return Ok(CoordinatorOutcome::NoUpdate),
+            CoordinatorAction::ExitCancelled => return Ok(CoordinatorOutcome::Cancelled),
+            CoordinatorAction::Reinstall { expected_build } => {
+                reinstall(expected_build)?;
+                return Ok(CoordinatorOutcome::Reinstalled {
+                    build: expected_build,
+                });
+            }
+        }
     }
 }
 
