@@ -92,8 +92,8 @@ The native Rust contract tests are the product behavior source of truth. The rem
 
 ### Release cutover
 
-1. `release.yml` cross-compiles Rust into the stable `incodex-darwin-arm64` / `incodex-darwin-x64` names, then publishes only those binaries and `SHA256SUMS`.
-2. `install.sh` and the own Homebrew tap continue selecting only the stable names; do not add a Rust/Bun selector or fallback.
+1. `release.yml` builds Rust into the stable `incodex-darwin-arm64`, `incodex-darwin-x64`, and `incodex-windows-x64.exe` names on native macOS/Windows runners, then publishes only those binaries and `SHA256SUMS`. The Windows asset is not a public support claim until its stable installer, updater, and real app lifecycle verification complete in the same first-release milestone.
+2. `install.sh` and the own Homebrew tap continue selecting only the stable Darwin names; do not add a Rust/Bun selector or fallback. Windows distribution remains behind the Windows first-release gate.
 3. New releases do not publish legacy Bun CLI assets. Never delete old Release assets that remain useful for rollback.
 4. Merging release-pipeline code is not permission to create a tag or GitHub Release. Obtain explicit repository-owner confirmation immediately before publishing. Do not open a Homebrew/homebrew-core PR.
 

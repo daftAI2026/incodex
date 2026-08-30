@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
 const releaseYml = readFileSync(join(root, ".github/workflows/release.yml"), "utf8");
+const ciYml = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
 const releaseFlow = readFileSync(join(root, ".claude/skills/release-flow/SKILL.md"), "utf8");
 const readmes = ["README.md", "README_CN.md"].map((path) =>
   readFileSync(join(root, path), "utf8"),
@@ -32,6 +33,33 @@ describe("release CLI artifacts", () => {
     expect(releaseYml).not.toContain("bun build src/cli.ts --compile");
     expect(packageJson.scripts?.["build:cli"]).toBeUndefined();
     expect(existsSync(join(root, "scripts/build-cli.ts"))).toBe(false);
+  });
+
+  test("builds and smokes the stable Windows x64 asset on a Windows runner", () => {
+    const builderPath = join(root, "scripts/build-windows-release.ts");
+    const builder = existsSync(builderPath) ? readFileSync(builderPath, "utf8") : "";
+
+    expect(releaseYml).toContain("windows-cli:");
+    expect(releaseYml).toContain("runs-on: windows-latest");
+    expect(releaseYml).toContain("bun run test:windows:rust");
+    expect(releaseYml).toContain("bun scripts/build-windows-release.ts");
+    expect(ciYml).toContain("bun scripts/build-windows-release.ts");
+    expect(existsSync(builderPath)).toBe(true);
+    expect(builder).toContain("cargo");
+    expect(builder).toContain("build");
+    expect(builder).toContain("--locked");
+    expect(builder).toContain("--release");
+    expect(builder).toContain("target/release/incodex.exe");
+    expect(builder).toContain("incodex-windows-x64.exe");
+    expect(builder).toContain("0x8664");
+    expect(builder).toContain("--version");
+    expect(builder).toContain("--help");
+    expect(releaseYml).toContain(
+      "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1",
+    );
+    expect(releaseYml).toContain(
+      "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
+    );
   });
 
   test("fails closed unless tag, package, workspace, runtime, architecture, and signature agree", () => {
@@ -190,10 +218,11 @@ describe("release CLI artifacts", () => {
     expect(releaseYml).not.toContain('path.join(release, "incodex-loader.cjs")');
   });
 
-  test("publishes only the two stable Rust assets and their checksums", () => {
+  test("publishes only the three stable native assets and their checksums", () => {
     expect(releaseYml).toContain("SHA256SUMS");
     expect(releaseYml).toMatch(/files:[\s\S]*incodex-darwin-arm64/);
     expect(releaseYml).toMatch(/files:[\s\S]*incodex-darwin-x64/);
+    expect(releaseYml).toMatch(/files:[\s\S]*incodex-windows-x64\.exe/);
     expect(releaseYml).toMatch(/files:[\s\S]*SHA256SUMS/);
     expect(releaseYml).not.toContain("checksums.txt");
     expect(releaseYml).not.toMatch(/files:[\s\S]*runtime-manifest\.json/);
