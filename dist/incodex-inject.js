@@ -1589,6 +1589,24 @@ async function requestAction(action) {
     return { ok: false, reason: "ipc-failed", code: "IPC_FAILED" };
   }
 }
+function configureDockMenu() {
+  if (window.__incodexPlatform !== "darwin" || window.__incodexDockMenuConfigured)
+    return;
+  const request = window.incodex?.requestIncognitoAction;
+  if (!request)
+    return;
+  window.__incodexDockMenuConfigured = true;
+  request({
+    action: "configure-dock-menu",
+    label: t(isIncognitoWindow() ? "title" : "open"),
+    requestId: newRequestId()
+  }).then((result) => {
+    if (!result?.ok)
+      window.__incodexDockMenuConfigured = false;
+  }).catch(() => {
+    window.__incodexDockMenuConfigured = false;
+  });
+}
 async function activate() {
   dismissActiveTooltip();
   if (isIncognitoWindow()) {
@@ -2128,6 +2146,7 @@ function ensureMutationObserver() {
   window.__incodexProfileObservationEnabled = profileRequired;
 }
 function start() {
+  configureDockMenu();
   if (window.__incodexStarted) {
     ensureStyle();
     ensureButton();

@@ -11,6 +11,7 @@
     "incodex-instance.cjs",
     "incodex-window-kind.cjs",
     "incodex-runtime-load.cjs",
-    "incodex-codex-mode.cjs"
+    "incodex-codex-mode.cjs",
+    "incodex-dock-menu.cjs"
   ]
 }
