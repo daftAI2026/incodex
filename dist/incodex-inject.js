@@ -835,252 +835,252 @@ function translate(locale, key) {
 }
 
 // node_modules/blobatar/dist/uri.js
-function L({ l: t, c: n, h: r }) {
-  let o = r * Math.PI / 180, a = n * Math.cos(o), e = n * Math.sin(o), s = t + 0.3963377774 * a + 0.2158037573 * e, c = t - 0.1055613458 * a - 0.0638541728 * e, i = t - 0.0894841775 * a - 1.291485548 * e, m = s * s * s, l = c * c * c, u = i * i * i;
-  return [4.0767416621 * m - 3.3077115913 * l + 0.2309699292 * u, -1.2684380046 * m + 2.6097574011 * l - 0.3413193965 * u, -0.0041960863 * m - 0.7034186147 * l + 1.707614701 * u];
+function v({ l: t, c: e, h: n }) {
+  let a = n * Math.PI / 180, o = e * Math.cos(a), r = e * Math.sin(a), s = t + 0.3963377774 * o + 0.2158037573 * r, c = t - 0.1055613458 * o - 0.0638541728 * r, i = t - 0.0894841775 * o - 1.291485548 * r, l = s * s * s, m = c * c * c, u = i * i * i;
+  return [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * u, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * u, -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * u];
 }
-var H = (t) => t.every((n) => n >= -0.0001 && n <= 1.0001);
-function Z(t) {
-  let n = L(t);
-  if (!H(n)) {
-    let r = 0, o = t.c;
-    for (let a = 0;a < 12; a++) {
-      let e = (r + o) / 2;
-      if (H(L({ ...t, c: e })))
-        r = e;
+var q = (t) => t.every((e) => e >= -0.0001 && e <= 1.0001);
+function V(t) {
+  let e = v(t);
+  if (!q(e)) {
+    let n = 0, a = t.c;
+    for (let o = 0;o < 12; o++) {
+      let r = (n + a) / 2;
+      if (q(v({ ...t, c: r })))
+        n = r;
       else
-        o = e;
+        a = r;
     }
-    n = L({ ...t, c: r });
+    e = v({ ...t, c: n });
   }
-  return n.map((r) => Math.min(1, Math.max(0, r)));
+  return e.map((n) => Math.min(1, Math.max(0, n)));
 }
-function _(t) {
-  let [n, r, o] = Z(t);
-  return 0.2126 * n + 0.7152 * r + 0.0722 * o;
+function U(t) {
+  let [e, n, a] = V(t);
+  return 0.2126 * e + 0.7152 * n + 0.0722 * a;
 }
-function O(t, n) {
-  let r = _(t), o = _(n);
-  return (Math.max(r, o) + 0.05) / (Math.min(r, o) + 0.05);
+function B(t, e) {
+  let n = U(t), a = U(e);
+  return (Math.max(n, a) + 0.05) / (Math.min(n, a) + 0.05);
 }
-function T(t, n, r) {
-  if (O(t, n) >= r)
+function w(t, e, n) {
+  if (B(t, e) >= n)
     return t;
-  let o = t.l >= n.l ? 1 : -1;
-  for (let s of [o, -o]) {
+  let a = t.l >= e.l ? 1 : -1;
+  for (let s of [a, -a]) {
     let c = { ...t };
     for (let i = 0;i < 60; i++) {
-      if (c.l = Math.min(1, Math.max(0, c.l + s * 0.02)), O(c, n) >= r)
+      if (c.l = Math.min(1, Math.max(0, c.l + s * 0.02)), B(c, e) >= n)
         return c;
       if (c.l === 0 || c.l === 1)
         break;
     }
   }
-  let a = { ...t, l: 0, c: 0 }, e = { ...t, l: 1, c: 0 };
-  return O(a, n) >= O(e, n) ? a : e;
+  let o = { ...t, l: 0, c: 0 }, r = { ...t, l: 1, c: 0 };
+  return B(o, e) >= B(r, e) ? o : r;
 }
-function P(t) {
-  return "#" + Z(t).map((n) => {
-    let r = n <= 0.0031308 ? 12.92 * n : 1.055 * Math.pow(n, 0.4166666666666667) - 0.055;
-    return Math.round(r * 255).toString(16).padStart(2, "0");
+function T(t) {
+  return "#" + V(t).map((e) => {
+    let n = e <= 0.0031308 ? 12.92 * e : 1.055 * Math.pow(e, 0.4166666666666667) - 0.055;
+    return Math.round(n * 255).toString(16).padStart(2, "0");
   }).join("");
 }
-var D = [[0.2, { l: 0.86, c: 0.085 }], [0.36, { l: 0.9, c: 0.028 }], [0.62, { l: 0.73, c: 0.135 }], [0.8, { l: 0.62, c: 0.165 }], [0.93, { l: 0.87, c: 0.16 }], [1, { l: 0.34, c: 0.035 }]];
-var Tt = (t) => D.find(([n]) => t < n)?.[1] ?? D[0][1];
-var N = { l: 0.145, c: 0, h: 0 };
-var V = 1.5;
-var St = (t, n) => {
-  let r = Tt(n), o = T({ l: r.l, c: r.c, h: t }, N, V);
-  return { bg: { l: 0.965, c: 0.01, h: t }, head: o, eye: o.l >= 0.5 ? { l: 0.17, c: 0.02, h: t } : { l: 0.97, c: 0.012, h: t } };
+var N = [[0.2, { l: 0.86, c: 0.085 }], [0.36, { l: 0.9, c: 0.028 }], [0.62, { l: 0.73, c: 0.135 }], [0.8, { l: 0.62, c: 0.165 }], [0.93, { l: 0.87, c: 0.16 }], [1, { l: 0.34, c: 0.035 }]];
+var wt = (t) => N.find(([e]) => t < e)?.[1] ?? N[0][1];
+var K = { l: 0.145, c: 0, h: 0 };
+var Q = 1.5;
+var Et = (t, e) => {
+  let n = wt(e), a = w({ l: n.l, c: n.c, h: t }, K, Q);
+  return { bg: { l: 0.965, c: 0.01, h: t }, head: a, eye: a.l >= 0.5 ? { l: 0.17, c: 0.02, h: t } : { l: 0.97, c: 0.012, h: t } };
 };
-var Et = [["head", "bg", 1.25], ["eye", "head", 4.5]];
-function Lt(t, n = true, r = 0) {
-  let o = St(t, r);
-  if (n)
-    for (let [a, e, s] of Et)
-      o[a] = T(o[a], o[e], s);
-  return o;
-}
-function K(t, n = true, r = 0) {
-  let o = Lt(t, n, r), a = {};
-  for (let e in o)
-    a[e] = P(o[e]);
+var vt = [["head", "bg", 1.25], ["eye", "head", 4.5]];
+function It(t, e = true, n = 0) {
+  let a = Et(t, n);
+  if (e)
+    for (let [o, r, s] of vt)
+      a[o] = w(a[o], a[r], s);
   return a;
 }
+function G(t, e = true, n = 0) {
+  let a = It(t, e, n), o = {};
+  for (let r in a)
+    o[r] = T(a[r]);
+  return o;
+}
 var y = (t) => {
-  let n = Math.round(t * 100) / 100;
-  return Object.is(n, -0) ? "0" : String(n);
+  let e = Math.round(t * 100) / 100;
+  return Object.is(e, -0) ? "0" : String(e);
 };
-function B({ cx: t, cy: n, rx: r, ry: o, n: a = 4, rot: e = 0 }) {
-  let s = Math.min(1, (8 * Math.pow(2, -1 / a) - 4) / 3), c = r, i = o, m = c * s, l = i * s, u = [[c, 0], [c, l], [m, i], [0, i], [-m, i], [-c, l], [-c, 0], [-c, -l], [-m, -i], [0, -i], [m, -i], [c, -l], [c, 0]], b = e * Math.PI / 180, p = Math.cos(b), d = Math.sin(b), h = (x) => {
-    let [g, M] = u[x];
-    return `${y(t + g * p - M * d)} ${y(n + g * d + M * p)}`;
+function P({ cx: t, cy: e, rx: n, ry: a, n: o = 4, rot: r = 0 }) {
+  let s = Math.min(1, (8 * Math.pow(2, -1 / o) - 4) / 3), c = n, i = a, l = c * s, m = i * s, u = [[c, 0], [c, m], [l, i], [0, i], [-l, i], [-c, m], [-c, 0], [-c, -m], [-l, -i], [0, -i], [l, -i], [c, -m], [c, 0]], b = r * Math.PI / 180, p = Math.cos(b), d = Math.sin(b), h = (x) => {
+    let [g, k] = u[x];
+    return `${y(t + g * p - k * d)} ${y(e + g * d + k * p)}`;
   }, f = `M${h(0)}`;
   for (let x = 1;x < 13; x += 3)
     f += `C${h(x)} ${h(x + 1)} ${h(x + 2)}`;
   return f + "Z";
 }
-function Q(t, n, r, o, a, e = 0) {
-  let s = a.length, c = e * Math.PI / 180, i = a.map((u, b) => {
+function J(t, e, n, a, o, r = 0) {
+  let s = o.length, c = r * Math.PI / 180, i = o.map((u, b) => {
     let p = c + 2 * Math.PI * b / s;
-    return [t + r * u * Math.cos(p), n + o * u * Math.sin(p)];
-  }), m = (u) => i[(u % s + s) % s], l = `M${y(m(0)[0])} ${y(m(0)[1])}`;
+    return [t + n * u * Math.cos(p), e + a * u * Math.sin(p)];
+  }), l = (u) => i[(u % s + s) % s], m = `M${y(l(0)[0])} ${y(l(0)[1])}`;
   for (let u = 0;u < s; u++) {
-    let [b, p] = m(u - 1), [d, h] = m(u), [f, x] = m(u + 1), [g, M] = m(u + 2);
-    l += `C${y(d + (f - b) / 6)} ${y(h + (x - p) / 6)} ${y(f - (g - d) / 6)} ${y(x - (M - h) / 6)} ${y(f)} ${y(x)}`;
+    let [b, p] = l(u - 1), [d, h] = l(u), [f, x] = l(u + 1), [g, k] = l(u + 2);
+    m += `C${y(d + (f - b) / 6)} ${y(h + (x - p) / 6)} ${y(f - (g - d) / 6)} ${y(x - (k - h) / 6)} ${y(f)} ${y(x)}`;
   }
-  return l + "Z";
+  return m + "Z";
 }
-function X({ cx: t, cy: n, rx: r, ry: o, sides: a, round: e = 0.3, rot: s = 0 }) {
-  let c = e > 0 ? e < 1 ? e / 2 : 0.5 : 0, i = s * Math.PI / 180 - Math.PI / 2, m = Array.from({ length: a }, (p, d) => {
-    let h = i + 2 * Math.PI * d / a;
-    return [t + r * Math.cos(h), n + o * Math.sin(h)];
-  }), l = (p) => m[(p % a + a) % a], u = (p, d) => {
-    let [h, f] = l(p), [x, g] = l(d);
+function W({ cx: t, cy: e, rx: n, ry: a, sides: o, round: r = 0.3, rot: s = 0 }) {
+  let c = r > 0 ? r < 1 ? r / 2 : 0.5 : 0, i = s * Math.PI / 180 - Math.PI / 2, l = Array.from({ length: o }, (p, d) => {
+    let h = i + 2 * Math.PI * d / o;
+    return [t + n * Math.cos(h), e + a * Math.sin(h)];
+  }), m = (p) => l[(p % o + o) % o], u = (p, d) => {
+    let [h, f] = m(p), [x, g] = m(d);
     return `${y(h + (x - h) * c)} ${y(f + (g - f) * c)}`;
   }, b = `M${u(0, -1)}`;
-  for (let p = 0;p < a; p++) {
-    let [d, h] = l(p);
+  for (let p = 0;p < o; p++) {
+    let [d, h] = m(p);
     if (b += `Q${y(d)} ${y(h)} ${u(p, p + 1)}`, c < 0.5)
       b += `L${u(p + 1, p)}`;
   }
   return b + "Z";
 }
-function Y(t, n, r, o) {
-  let a = y(t - r), e = y(t + r);
-  return `M${a} ${y(n - o)}H${e}V${y(n + o)}H${a}Z`;
+function tt(t, e, n, a) {
+  let o = y(t - n), r = y(t + n);
+  return `M${o} ${y(e - a)}H${r}V${y(e + a)}H${o}Z`;
 }
-function G(t, n, r, o, a) {
-  let e = Math.max(1.05, a), s = r * Math.sqrt(1 - 1 / (e * e)), c = n - o / e, i = n - e * o, m = s * 0.14, l = c + 0.86 * (i - c);
-  return `M${y(t - s)} ${y(c)}L${y(t - m)} ${y(l)}Q${y(t)} ${y(i)} ${y(t + m)} ${y(l)}L${y(t + s)} ${y(c)}Z`;
+function et(t, e, n, a, o) {
+  let r = Math.max(1.05, o), s = n * Math.sqrt(1 - 1 / (r * r)), c = e - a / r, i = e - r * a, l = s * 0.14, m = c + 0.86 * (i - c);
+  return `M${y(t - s)} ${y(c)}L${y(t - l)} ${y(m)}Q${y(t)} ${y(i)} ${y(t + l)} ${y(m)}L${y(t + s)} ${y(c)}Z`;
 }
-function w(t, n) {
-  for (let r = 0;r < n.length; r++)
-    t = Math.imul(t ^ n[r], 3432918353), t = t << 13 | t >>> 19;
+function I(t, e) {
+  for (let n = 0;n < e.length; n++)
+    t = Math.imul(t ^ e[n], 3432918353), t = t << 13 | t >>> 19;
   return t;
 }
-function wt(t) {
+function At(t) {
   return t = Math.imul(t ^ t >>> 16, 2246822507), t = Math.imul(t ^ t >>> 13, 3266489909), (t ^ t >>> 16) >>> 0;
 }
-var J = new TextEncoder;
-function vt(t) {
+var nt = new TextEncoder;
+function Rt(t) {
   return t.normalize("NFC").trim().toLowerCase();
 }
-function W(t, n = true) {
-  let r = n ? vt(t) : t;
-  return w(1779033703 ^ r.length, J.encode(r));
+function rt(t, e = true) {
+  let n = e ? Rt(t) : t;
+  return I(1779033703 ^ n.length, nt.encode(n));
 }
-function v(t, n) {
-  return wt(w(w(t, Uint8Array.of(255)), J.encode(n))) / 4294967296;
+function A(t, e) {
+  return At(I(I(t, Uint8Array.of(255)), nt.encode(e))) / 4294967296;
 }
-function tt(t, n = true, r) {
-  let o = W(t, n), a = (e) => {
-    let s = r?.[e], c = Array.isArray(s) ? s[Math.floor(v(o, e) * s.length)] : s;
-    return c === undefined ? v(o, e) : c > 0 ? c < 1 ? c : 0.999999 : 0;
+function ot(t, e = true, n) {
+  let a = rt(t, e), o = (r) => {
+    let s = n?.[r], c = Array.isArray(s) ? s[Math.floor(A(a, r) * s.length)] : s;
+    return c === undefined ? A(a, r) : c > 0 ? c < 1 ? c : 0.999999 : 0;
   };
-  return a.num = (e, s, c) => s + a(e) * (c - s), a.int = (e, s, c) => s + Math.floor(a(e) * (c - s + 1)), a.pick = (e, s) => s[Math.floor(a(e) * s.length)], a.bool = (e, s = 0.5) => a(e) < s, a.jitter = (e, s) => (a(e) * 2 - 1) * s, a;
+  return o.num = (r, s, c) => s + o(r) * (c - s), o.int = (r, s, c) => s + Math.floor(o(r) * (c - s + 1)), o.pick = (r, s) => s[Math.floor(o(r) * s.length)], o.bool = (r, s = 0.5) => o(r) < s, o.jitter = (r, s) => (o(r) * 2 - 1) * s, o;
 }
-function nt(t, n, r) {
-  let o = n.expression;
-  if (r || !o)
+function E(t, e, n) {
+  let a = e.expression;
+  if (n || !a)
     return { l: t, wrap: "" };
-  return o.bake(t, o.p);
+  return a.bake(t, a.p);
 }
-var At = (t, n) => n?.tint ? n.tint(t, n.p) : t;
-var rt = (t, n) => n ? `<g transform="${n}">${t}</g>` : t;
-var It = (t) => t.replace(/[&<>]/g, (n) => n === "&" ? "&amp;" : n === "<" ? "&lt;" : "&gt;");
-function S(t, n) {
-  let r = tt(t, n.normalize ?? true, n.traits);
-  return { t: r, palette: { ...K(n.hue ?? r.num("hue", 0, 360), n.contrast ?? true, n.tone ?? r("tone")), ...n.palette } };
+var R = (t, e) => e?.tint ? e.tint(t, e.p) : t;
+var at = (t, e) => e ? `<g transform="${e}">${t}</g>` : t;
+var Ft = (t) => t.replace(/[&<>]/g, (e) => e === "&" ? "&amp;" : e === "<" ? "&lt;" : "&gt;");
+function S(t, e) {
+  let n = ot(t, e.normalize ?? true, e.traits);
+  return { t: n, palette: { ...G(e.hue ?? n.num("hue", 0, 360), e.contrast ?? true, e.tone ?? n("tone")), ...e.palette } };
 }
-var Rt = (t) => t.title ? `<title>${It(t.title)}</title>` : "";
-function et(t, n, r) {
-  let o = n.background ?? t.background;
-  if (o === false)
+var jt = (t) => t.title ? `<title>${Ft(t.title)}</title>` : "";
+function L(t, e, n) {
+  let a = e.background ?? t.background;
+  if (a === false)
     return;
-  return { d: o === "square" ? "M0 0H100V100H0Z" : B({ cx: 50, cy: 50, rx: 50, ry: 50, n: o === "circle" ? 2 : 6 }), fill: r.bg };
+  return { d: a === "square" ? "M0 0H100V100H0Z" : P({ cx: 50, cy: 50, rx: 50, ry: 50, n: a === "circle" ? 2 : 6 }), fill: n.bg };
 }
-var Ft = (t) => t ? `<path d="${t.d}" fill="${t.fill}"/>` : "";
-function ot(t) {
-  return (n, r = {}) => {
-    let { t: o, palette: a } = S(n, r), e = At(a, r.expression), s = r.size ? ` width="${r.size}" height="${r.size}"` : "", c = nt(t.layout(o), r), i = Rt(r) + Ft(et(t, r, e)) + rt(t.render(c.l, e), c.wrap);
+var Ct = (t) => t ? `<path d="${t.d}" fill="${t.fill}"/>` : "";
+function st(t) {
+  return (e, n = {}) => {
+    let { t: a, palette: o } = S(e, n), r = R(o, n.expression), s = n.size ? ` width="${n.size}" height="${n.size}"` : "", c = E(t.layout(a), n), i = jt(n) + Ct(L(t, n, r)) + at(t.render(c.l, r), c.wrap);
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"${s}>${i}</svg>`;
   };
 }
-var st = (t, n, r) => {
-  let o = n.rx, a = t.num("eye.rx", 0.075, 0.105) * o, e = t.num("eye.ratio", 1.9, 3.2), s = t.num("eye.scale", 0.78, 1.24), c = t.num("eye.stretch", 0.85, 1.18), i = t.num("eye.gap", 0.1, 0.24) * o, m = a * Math.max(1, s), l = a * e * Math.max(1, s * c), u = m + o * 0.03 + i, b = t.jitter("gaze.x", 0.09) * r.rx, p = t.num("gaze.y", -0.2, 0.08) * r.ry, d = t.jitter("eye.dy", 0.04) * r.ry, h = Math.hypot(m, l), f = Math.hypot((Math.abs(b) + u + h) / r.rx, (Math.abs(p) + Math.abs(d) + h) / r.ry), x = f > 0.9 ? 0.9 / f : 1, g = a * x, M = g * e, I = u * x, kt = Math.max(0, Math.min(1, i / l)), Ot = Math.min(12, Math.asin(kt) * 180 / Math.PI), R = t.num("eye.lean", -1, 1) * Ot, Pt = Math.max(-12, Math.min(12, R + t.jitter("eye.lean2", 3.5))), F = r.cx + b * x, j = r.cy + p * x;
-  return [{ cx: F - I, cy: j, rx: g, ry: M, n: t.num("eye.n", 3.5, 6), rot: R }, { cx: F + I, cy: j + d * x, rx: g * s, ry: M * s * c, n: t.num("eye.n", 3.5, 6), rot: Pt }];
+var it = (t, e, n) => {
+  let a = e.rx, o = t.num("eye.rx", 0.075, 0.105) * a, r = t.num("eye.ratio", 1.9, 3.2), s = t.num("eye.scale", 0.78, 1.24), c = t.num("eye.stretch", 0.85, 1.18), i = t.num("eye.gap", 0.1, 0.24) * a, l = o * Math.max(1, s), m = o * r * Math.max(1, s * c), u = l + a * 0.03 + i, b = t.jitter("gaze.x", 0.09) * n.rx, p = t.num("gaze.y", -0.2, 0.08) * n.ry, d = t.jitter("eye.dy", 0.04) * n.ry, h = Math.hypot(l, m), f = Math.hypot((Math.abs(b) + u + h) / n.rx, (Math.abs(p) + Math.abs(d) + h) / n.ry), x = f > 0.9 ? 0.9 / f : 1, g = o * x, k = g * r, C = u * x, Ot = Math.max(0, Math.min(1, i / m)), St = Math.min(12, Math.asin(Ot) * 180 / Math.PI), _ = t.num("eye.lean", -1, 1) * St, Bt = Math.max(-12, Math.min(12, _ + t.jitter("eye.lean2", 3.5))), H = n.cx + b * x, z = n.cy + p * x;
+  return [{ cx: H - C, cy: z, rx: g, ry: k, n: t.num("eye.n", 3.5, 6), rot: _ }, { cx: H + C, cy: z + d * x, rx: g * s, ry: k * s * c, n: t.num("eye.n", 3.5, 6), rot: Bt }];
 };
-function ct(t, n) {
-  let r = (e) => (t.find(([, s]) => e < s) ?? t[t.length - 1])[0];
-  function o(e) {
-    let s = r(e("shape")), c = e.num("body.r", 31, 38) * s.core, i = { cx: 50 + e.jitter("body.x", 1.5), cy: 50 + e.jitter("body.y", 1.5), rx: c, ry: c * e.num("body.ratio", 0.92, 1.08), n: e.num("body.n", 1.9, 2.5), rot: 0, radii: Array.from({ length: e.int("body.pts", 6, 8) }, (u, b) => 1 + e.jitter(`body.r${b}`, 0.16)) };
-    s.body?.(e, i);
-    let m = s.face?.(i) ?? i, l = { petals: [], extra: [] };
-    return s.decorate?.(e, i, l), { shape: s.name, draw: s.path, body: i, face: m, petals: l.petals, extra: l.extra, eyes: n(e, i, m) };
+function ut(t, e) {
+  let n = (r) => (t.find(([, s]) => r < s) ?? t[t.length - 1])[0];
+  function a(r) {
+    let s = n(r("shape")), c = r.num("body.r", 31, 38) * s.core, i = { cx: 50 + r.jitter("body.x", 1.5), cy: 50 + r.jitter("body.y", 1.5), rx: c, ry: c * r.num("body.ratio", 0.92, 1.08), n: r.num("body.n", 1.9, 2.5), rot: 0, radii: Array.from({ length: r.int("body.pts", 6, 8) }, (u, b) => 1 + r.jitter(`body.r${b}`, 0.16)) };
+    s.body?.(r, i);
+    let l = s.face?.(i) ?? i, m = { petals: [], extra: [] };
+    return s.decorate?.(r, i, m), { shape: s.name, draw: s.path, body: i, face: l, petals: m.petals, extra: m.extra, eyes: e(r, i, l) };
   }
-  function a(e, s, c) {
-    let i = (u) => Math.round(u * 100) / 100, m = (u, b) => {
-      let p = `<path d="${B(u)}"/>`;
+  function o(r, s, c) {
+    let i = (u) => Math.round(u * 100) / 100, l = (u, b) => {
+      let p = `<path d="${P(u)}"/>`;
       return c ? `<g class="mo-eye" style="--mo-wrap:${b ? 1 : -1};--mo-lean:${i(u.rot)};transform-origin:${i(u.cx)}px ${i(u.cy)}px">${p}</g>` : p;
-    }, l = `<g fill="${s.head}">` + e.petals.map((u) => `<circle cx="${i(u.cx)}" cy="${i(u.cy)}" r="${i(u.r)}"/>`).join("") + e.extra.map((u) => `<path d="${u}"/>`).join("") + `<path d="${e.draw ? e.draw(e.body) : B(e.body)}"/></g><g fill="${s.eye}"${c ? ' class="mo-eyes"' : ""}>` + e.eyes.map(m).join("") + "</g>";
-    return c ? `<g class="mo-breathe"><g class="mo-bob">${l}</g></g>` : l;
+    }, m = `<g fill="${s.head}">` + r.petals.map((u) => `<circle cx="${i(u.cx)}" cy="${i(u.cy)}" r="${i(u.r)}"/>`).join("") + r.extra.map((u) => `<path d="${u}"/>`).join("") + `<path d="${r.draw ? r.draw(r.body) : P(r.body)}"/></g><g fill="${s.eye}"${c ? ' class="mo-eyes"' : ""}>` + r.eyes.map(l).join("") + "</g>";
+    return c ? `<g class="mo-breathe"><g class="mo-bob">${m}</g></g>` : m;
   }
-  return { layout: o, render: a, background: false };
+  return { layout: a, render: o, background: false };
 }
-var it = (t) => X(t);
-var ut = (t) => Q(t.cx, t.cy, t.rx, t.ry, t.radii, t.rot);
-var A = (t) => (n) => ({ cx: n.cx, cy: n.cy, rx: n.rx * t, ry: n.ry * t });
-var mt = (t) => A(Math.min(...t.radii) * 0.95)(t);
-var jt = (t) => A(0.84)(t);
-var lt = { name: "round", core: 1 };
-var pt = { name: "organic", core: 0.98, path: ut, face: mt };
-var yt = { name: "boxy", core: 0.86, body: (t, n) => {
-  n.n = t.num("body.n", 3.4, 6), n.rot = t.num("body.rot", -20, 20);
+var lt = (t) => W(t);
+var mt = (t) => J(t.cx, t.cy, t.rx, t.ry, t.radii, t.rot);
+var j = (t) => (e) => ({ cx: e.cx, cy: e.cy, rx: e.rx * t, ry: e.ry * t });
+var pt = (t) => j(Math.min(...t.radii) * 0.95)(t);
+var _t = (t) => j(0.84)(t);
+var yt = { name: "round", core: 1 };
+var bt = { name: "organic", core: 0.98, path: mt, face: pt };
+var xt = { name: "boxy", core: 0.86, body: (t, e) => {
+  e.n = t.num("body.n", 3.4, 6), e.rot = t.num("body.rot", -20, 20);
 } };
-var bt = { name: "capsule", core: 1.02, body: (t, n) => {
-  n.ry *= t.num("capsule.squat", 0.55, 0.68);
-}, face: A(0.94), decorate: (t, n, r) => {
-  for (let o of [-1, 1])
-    r.petals.push({ cx: n.cx + o * (n.rx - n.ry), cy: n.cy, r: n.ry });
-}, path: (t) => Y(t.cx, t.cy, t.rx - t.ry, t.ry) };
-var xt = { name: "nub", core: 0.88, decorate: (t, n, r) => {
-  let o = t.int("nub.n", 1, 2);
-  for (let a = 0;a < o; a++) {
-    let e = t.num(`nub.a${a}`, 0, 2 * Math.PI);
-    r.petals.push({ cx: n.cx + Math.cos(e) * n.rx * 0.88, cy: n.cy + Math.sin(e) * n.rx * 0.88, r: n.rx * t.num(`nub.r${a}`, 0.24, 0.4) });
+var ht = { name: "capsule", core: 1.02, body: (t, e) => {
+  e.ry *= t.num("capsule.squat", 0.55, 0.68);
+}, face: j(0.94), decorate: (t, e, n) => {
+  for (let a of [-1, 1])
+    n.petals.push({ cx: e.cx + a * (e.rx - e.ry), cy: e.cy, r: e.ry });
+}, path: (t) => tt(t.cx, t.cy, t.rx - t.ry, t.ry) };
+var dt = { name: "nub", core: 0.88, decorate: (t, e, n) => {
+  let a = t.int("nub.n", 1, 2);
+  for (let o = 0;o < a; o++) {
+    let r = t.num(`nub.a${o}`, 0, 2 * Math.PI);
+    n.petals.push({ cx: e.cx + Math.cos(r) * e.rx * 0.88, cy: e.cy + Math.sin(r) * e.rx * 0.88, r: e.rx * t.num(`nub.r${o}`, 0.24, 0.4) });
   }
 } };
-var ht = { name: "cloud", core: 0.78, face: mt, path: ut, decorate: (t, n, r) => {
-  let o = t.int("cloud.n", 4, 6);
-  for (let a = 0;a < o; a++) {
-    let e = Math.PI + Math.PI * (a + 0.5) / o;
-    r.petals.push({ cx: n.cx + Math.cos(e) * n.rx * 0.8, cy: n.cy + Math.sin(e) * n.rx * 0.5, r: n.rx * t.num(`cloud.r${a}`, 0.44, 0.62) });
+var ft = { name: "cloud", core: 0.78, face: pt, path: mt, decorate: (t, e, n) => {
+  let a = t.int("cloud.n", 4, 6);
+  for (let o = 0;o < a; o++) {
+    let r = Math.PI + Math.PI * (o + 0.5) / a;
+    n.petals.push({ cx: e.cx + Math.cos(r) * e.rx * 0.8, cy: e.cy + Math.sin(r) * e.rx * 0.5, r: e.rx * t.num(`cloud.r${o}`, 0.44, 0.62) });
   }
 } };
-var dt = { name: "droplet", core: 0.78, body: (t, n) => {
-  n.cy += 0.22 * n.ry, n.n = 2;
-}, face: (t) => ({ cx: t.cx, cy: t.cy + t.ry * 0.05, rx: t.rx * 0.88, ry: t.ry * 0.88 }), decorate: (t, n, r) => {
-  r.extra.push(G(n.cx, n.cy, n.rx, n.ry, t.num("droplet.tip", 1.4, 1.65)));
+var gt = { name: "droplet", core: 0.78, body: (t, e) => {
+  e.cy += 0.22 * e.ry, e.n = 2;
+}, face: (t) => ({ cx: t.cx, cy: t.cy + t.ry * 0.05, rx: t.rx * 0.88, ry: t.ry * 0.88 }), decorate: (t, e, n) => {
+  n.extra.push(et(e.cx, e.cy, e.rx, e.ry, t.num("droplet.tip", 1.4, 1.65)));
 } };
-var ft = { name: "hexagon", core: 1.05, path: it, face: jt, body: (t, n) => {
-  n.sides = 6, n.rot = t.num("body.rot", -12, 12), n.round = t.num("poly.round", 0.24, 0.5);
+var Mt = { name: "hexagon", core: 1.05, path: lt, face: _t, body: (t, e) => {
+  e.sides = 6, e.rot = t.num("body.rot", -12, 12), e.round = t.num("poly.round", 0.24, 0.5);
 } };
-var gt = { name: "sun", core: 0.7, decorate: (t, n, r) => {
-  let o = t.int("sun.n", 6, 9), a = n.rx * t.num("sun.dist", 1, 1.08), e = n.rx * t.num("sun.r", 0.2, 0.26), s = t.num("sun.rot", 0, 2 * Math.PI);
-  for (let c = 0;c < o; c++) {
-    let i = s + 2 * Math.PI * c / o;
-    r.petals.push({ cx: n.cx + Math.cos(i) * a, cy: n.cy + Math.sin(i) * a, r: e });
+var kt = { name: "sun", core: 0.7, decorate: (t, e, n) => {
+  let a = t.int("sun.n", 6, 9), o = e.rx * t.num("sun.dist", 1, 1.08), r = e.rx * t.num("sun.r", 0.2, 0.26), s = t.num("sun.rot", 0, 2 * Math.PI);
+  for (let c = 0;c < a; c++) {
+    let i = s + 2 * Math.PI * c / a;
+    n.petals.push({ cx: e.cx + Math.cos(i) * o, cy: e.cy + Math.sin(i) * o, r });
   }
 } };
-var Mt = { name: "triangle", core: 1.15, path: it, body: (t, n) => {
-  n.sides = 3, n.rot = t.num("body.rot", -5, 5), n.round = t.num("poly.round", 0.24, 0.5);
+var $t = { name: "triangle", core: 1.15, path: lt, body: (t, e) => {
+  e.sides = 3, e.rot = t.num("body.rot", -5, 5), e.round = t.num("poly.round", 0.24, 0.5);
 }, face: (t) => ({ cx: t.cx, cy: t.cy + t.ry * 0.1, rx: t.rx * 0.54, ry: t.ry * 0.36 }) };
-var Ct = [[lt, 0.22], [pt, 0.48], [yt, 0.6], [bt, 0.7], [xt, 0.79], [ht, 0.86], [dt, 0.915], [ft, 0.95], [gt, 0.98], [Mt, 1]];
-var E = ct(Ct, st);
-var $t = ot(E);
-function hn(t, n) {
-  return "data:image/svg+xml," + $t(t, n).replace(/"/g, "'").replace(/[%#<>{}|\\^[\]`]/g, (o) => "%" + o.charCodeAt(0).toString(16).toUpperCase()).replace(/\s+/g, " ");
+var Ht = [[yt, 0.22], [bt, 0.48], [xt, 0.6], [ht, 0.7], [dt, 0.79], [ft, 0.86], [gt, 0.915], [Mt, 0.95], [kt, 0.98], [$t, 1]];
+var M = ut(Ht, it);
+var Pt = st(M);
+function ke(t, e) {
+  return "data:image/svg+xml," + Pt(t, e).replace(/"/g, "'").replace(/[%#<>{}|\\^[\]`]/g, (a) => "%" + a.charCodeAt(0).toString(16).toUpperCase()).replace(/\s+/g, " ");
 }
 
 // src/runtime/incognito-profile-mask.ts
@@ -1115,7 +1115,7 @@ function readProfileMask() {
   if (avatar.kind === "generated") {
     if (avatar.dataUrl !== undefined)
       return null;
-    return { name, avatarDataUrl: hn(name, { background: "circle" }) };
+    return { name, avatarDataUrl: ke(name, { background: "circle" }) };
   }
   if (typeof avatar.dataUrl !== "string" || avatar.kind !== undefined)
     return null;
