@@ -96,7 +96,20 @@ function createStatusMenuController(options) {
                 if (disposed || !loaded)
                     return false;
                 bridge = loaded;
-                stopObserving = bridge.observeMenuOpen(decorate);
+                const releaseObservers = [];
+                try {
+                    releaseObservers.push(bridge.observeMenuOpen(decorate));
+                    releaseObservers.push(bridge.observeMenuMutation(decorate));
+                }
+                catch (error) {
+                    for (const release of releaseObservers)
+                        release();
+                    throw error;
+                }
+                stopObserving = () => {
+                    for (const release of releaseObservers)
+                        release();
+                };
                 return true;
             })
                 .catch((error) => {
@@ -234,12 +247,50 @@ async function createNativeStatusMenuBridge(options) {
         const observer = notificationCenter.addObserverForName$object$queue$usingBlock$(notificationName, null, null, callback);
         return () => notificationCenter.removeObserver$(observer);
     }
+    function observeMenuMutation(handler) {
+        let pendingMenu = null;
+        let scheduled = null;
+        const callbacks = [];
+        const observers = [];
+        function schedule(menu) {
+            if (!isCodexStatusMenu(menu))
+                return;
+            pendingMenu = menu;
+            if (scheduled)
+                return;
+            scheduled = setImmediate(() => {
+                scheduled = null;
+                const currentMenu = pendingMenu;
+                pendingMenu = null;
+                if (currentMenu)
+                    handler(currentMenu);
+            });
+        }
+        for (const name of ["NSMenuDidAddItemNotification", "NSMenuDidRemoveItemNotification"]) {
+            const notificationName = NSString.stringWithUTF8String$(name);
+            const callback = typedBlock({ returns: "v", args: ["@"] }, (notification) => {
+                schedule(notification.object());
+            });
+            callbacks.push(callback);
+            observers.push(notificationCenter.addObserverForName$object$queue$usingBlock$(notificationName, null, null, callback));
+        }
+        return () => {
+            if (scheduled)
+                clearImmediate(scheduled);
+            scheduled = null;
+            pendingMenu = null;
+            for (const observer of observers)
+                notificationCenter.removeObserver$(observer);
+            callbacks.length = 0;
+        };
+    }
     return {
         findItem,
         insertItem,
         isCodexStatusMenu,
         itemCount: (menu) => Number(menu?.numberOfItems?.() ?? 0),
         observeMenuOpen,
+        observeMenuMutation,
         updateItem,
     };
 }
