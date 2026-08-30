@@ -260,10 +260,8 @@ fn official_install_registers_update_restore_and_uninstall_cancels_it() {
     assert_eq!(registration.app_path, app);
 
     cancel_update_restore(&root, &app).unwrap();
-    assert!(
-        crate::macos_update_restore::read_registration(&root)
-            .unwrap()
-            .is_none()
-    );
+    assert!(crate::macos_update_restore::read_registration(&root)
+        .unwrap()
+        .is_none());
     fs::remove_dir_all(sandbox).unwrap();
 }

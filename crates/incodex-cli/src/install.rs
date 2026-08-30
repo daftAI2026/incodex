@@ -92,7 +92,18 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
     } else {
         guard.ensure()?;
     }
-    let result = install_app_with_quiescence(&app, &root, &mut progress, guard)?;
+    let mut result = install_app_with_quiescence(&app, &root, &mut progress, guard)?;
+    if official_default {
+        let registration = std::env::current_exe()
+            .map_err(|error| format!("cannot locate the active Incodex CLI: {error}"))
+            .and_then(|helper| register_update_restore(&root, &app, &helper, &result));
+        if let Err(error) = registration {
+            append_warning(
+                &mut result,
+                format!("Automatic recovery after a Codex update is unavailable: {error}"),
+            );
+        }
+    }
     progress.stop();
     print_command_result(&result);
     if parsed.live && parsed.app.is_none() {
@@ -134,6 +145,7 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
     let official_default = is_official_app(&app, None);
     let guard = AppGuard::for_app(&app)?;
     if official_default {
+        cancel_update_restore(&root, &app)?;
         progress.stage("Closing ChatGPT");
         guard.close_official()?;
     } else {
@@ -242,6 +254,37 @@ struct CommandResult {
     runtime_version: Option<String>,
     app: String,
     warning: Option<String>,
+}
+
+fn register_update_restore(
+    root: &Path,
+    app: &Path,
+    helper_source: &Path,
+    result: &CommandResult,
+) -> Result<(), String> {
+    let install_id = result
+        .install_id
+        .as_deref()
+        .ok_or("installed app has no install epoch for update recovery")?;
+    crate::macos_update_restore::publish_registration(root, helper_source, app, install_id)?;
+    Ok(())
+}
+
+fn cancel_update_restore(root: &Path, app: &Path) -> Result<(), String> {
+    let Some(registration) = crate::macos_update_restore::read_registration(root)? else {
+        return Ok(());
+    };
+    if registration.app_path != app {
+        return Ok(());
+    }
+    crate::macos_update_restore::remove_registration(root, &registration.install_id)
+}
+
+fn append_warning(result: &mut CommandResult, warning: String) {
+    result.warning = Some(match result.warning.take() {
+        Some(existing) => format!("{existing} {warning}"),
+        None => warning,
+    });
 }
 
 fn resolve_target(parsed: &ParsedCli, root: &Path) -> PathBuf {
