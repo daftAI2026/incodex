@@ -38,7 +38,7 @@ function createIncognitoWindowLifecycle(exit, schedule = scheduleCloseProbe) {
       exitIfEmpty();
     }
 
-    win.on("close", () => {
+    win.on("close", (event) => {
       const generation = ++closeProbeGeneration;
 
       function observeHidden() {
@@ -47,6 +47,7 @@ function createIncognitoWindowLifecycle(exit, schedule = scheduleCloseProbe) {
           retire();
           return;
         }
+        if (event?.defaultPrevented === true) return;
         schedule(observeHidden, WINDOW_CLOSE_SETTLE_MS);
       }
 
