@@ -8,15 +8,19 @@ interface TestWindow {
   isDestroyed(): boolean;
   isVisible(): boolean;
   on(
-    event: "close" | "closed",
+    event: "close" | "closed" | "show",
     callback: (event?: { defaultPrevented?: boolean }) => void,
   ): void;
 }
 
 function createWindow(): {
   window: TestWindow;
-  emit(event: "close" | "closed", value?: { defaultPrevented?: boolean }): void;
+  emit(
+    event: "close" | "closed" | "show",
+    value?: { defaultPrevented?: boolean },
+  ): void;
   hide(): void;
+  show(): void;
 } {
   const listeners = new Map<
     string,
@@ -40,6 +44,10 @@ function createWindow(): {
     },
     hide() {
       visible = false;
+    },
+    show() {
+      visible = true;
+      for (const callback of listeners.get("show") || []) callback();
     },
   };
 }
@@ -183,6 +191,34 @@ describe("shared incognito window lifecycle", () => {
     sibling.emit("close");
     scheduled.shift()?.();
 
+    expect(exits).toEqual([0]);
+  });
+
+  test("a red-closed content window becomes active again when the host shows it", () => {
+    const first = createWindow();
+    const sibling = createWindow();
+    const scheduled: Array<() => void> = [];
+    const exits: number[] = [];
+    const lifecycle = createIncognitoWindowLifecycle(
+      (code: number) => exits.push(code),
+      (callback: () => void) => scheduled.push(callback),
+    );
+    lifecycle.observe(first.window);
+    lifecycle.observe(sibling.window);
+
+    first.emit("close");
+    first.hide();
+    scheduled.shift()?.();
+    first.show();
+
+    sibling.emit("close");
+    sibling.hide();
+    scheduled.shift()?.();
+    expect(exits).toEqual([]);
+
+    first.emit("close");
+    first.hide();
+    scheduled.shift()?.();
     expect(exits).toEqual([0]);
   });
 });
