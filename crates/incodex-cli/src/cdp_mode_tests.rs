@@ -6,7 +6,10 @@ use std::thread;
 use serde_json::{json, Value};
 use tungstenite::Message;
 
-use super::{inject_shared_ui_with_options, ui_ready_expression, InjectionOptions};
+use super::{
+    codex_mode_page_state, inject_shared_ui_with_options, ui_ready_expression, CodexModeAction,
+    CodexModePageState, CodexModeReadiness, InjectionOptions,
+};
 
 fn write_json_response(stream: &mut TcpStream, value: &Value) {
     let body = value.to_string();
@@ -15,6 +18,72 @@ fn write_json_response(stream: &mut TcpStream, value: &Value) {
         body.len()
     );
     stream.write_all(response.as_bytes()).unwrap();
+}
+
+fn mode_probe_response(mode_available: bool, mode_label: &str, blocker_visible: bool) -> Value {
+    json!({
+        "result": {"result": {"value": {
+            "modeAvailable": mode_available,
+            "modeLabel": mode_label,
+            "officialBlockerVisible": blocker_visible
+        }}}
+    })
+}
+
+#[test]
+fn codex_mode_probe_treats_missing_ui_and_optional_dialogs_as_pending() {
+    assert_eq!(
+        codex_mode_page_state(&mode_probe_response(false, "", false)).unwrap(),
+        CodexModePageState::Pending
+    );
+    assert_eq!(
+        codex_mode_page_state(&mode_probe_response(true, "ChatGPT", true)).unwrap(),
+        CodexModePageState::Pending
+    );
+    assert_eq!(
+        codex_mode_page_state(&mode_probe_response(true, "Codex", false)).unwrap(),
+        CodexModePageState::Codex
+    );
+}
+
+#[test]
+fn codex_readiness_waits_for_optional_official_blockers() {
+    let mut readiness = CodexModeReadiness::default();
+
+    assert_eq!(
+        readiness.observe(CodexModePageState::Pending),
+        CodexModeAction::Wait
+    );
+    assert_eq!(
+        readiness.observe(CodexModePageState::Codex),
+        CodexModeAction::Confirmed
+    );
+}
+
+#[test]
+fn codex_readiness_uses_one_bounded_fallback_for_stable_chatgpt() {
+    let mut readiness = CodexModeReadiness::default();
+
+    assert_eq!(
+        readiness.observe(CodexModePageState::Other),
+        CodexModeAction::Wait
+    );
+    assert_eq!(
+        readiness.observe(CodexModePageState::Other),
+        CodexModeAction::Wait
+    );
+    assert_eq!(
+        readiness.observe(CodexModePageState::Other),
+        CodexModeAction::SelectFallback
+    );
+    assert_eq!(
+        readiness.observe(CodexModePageState::Other),
+        CodexModeAction::Wait
+    );
+    assert_eq!(
+        readiness.observe(CodexModePageState::Other),
+        CodexModeAction::Unresolved
+    );
 }
 
 #[test]

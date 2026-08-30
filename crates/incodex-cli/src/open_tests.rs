@@ -110,12 +110,24 @@ fn serve_early_close_cdp(
                                 .and_then(serde_json::Value::as_u64)
                                 .unwrap();
                             let method = command.get("method").and_then(serde_json::Value::as_str);
+                            let expression = command
+                                .pointer("/params/expression")
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or_default();
+                            let mode_probe = method == Some("Runtime.evaluate")
+                                && expression.contains("officialBlockerVisible");
                             let health = method == Some("Runtime.evaluate")
-                                && command
-                                    .pointer("/params/expression")
-                                    .and_then(serde_json::Value::as_str)
-                                    == Some(crate::cdp::ui_ready_expression());
-                            let response = if health {
+                                && expression == crate::cdp::ui_ready_expression();
+                            let response = if mode_probe {
+                                serde_json::json!({
+                                    "id": id,
+                                    "result": {"result": {"value": {
+                                        "modeAvailable": true,
+                                        "modeLabel": "Codex",
+                                        "officialBlockerVisible": false
+                                    }}}
+                                })
+                            } else if health {
                                 probed.store(true, Ordering::Release);
                                 serde_json::json!({
                                     "id": id,

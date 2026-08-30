@@ -17,6 +17,12 @@ use tungstenite::{Message, WebSocket};
 
 use crate::profile_mask::{ProfileAvatar, ProfileMask};
 
+#[path = "cdp_mode.rs"]
+mod mode;
+use mode::{
+    Action as CodexModeAction, PageState as CodexModePageState, Readiness as CodexModeReadiness,
+};
+
 const INJECT_JS: &str = include_str!("../../../dist/incodex-inject.js");
 const INJECT_PREFIX: &str = "window.__incodexIncognito=true;";
 const OFFICIAL_CODEX_PAGE_URL: &str = "app://-/index.html";
@@ -370,7 +376,7 @@ where
     let mut socket = connect_cdp_websocket(&page.ws, debug_port)?;
     ensure_injection_active(process_alive)?;
     send_guarded_cdp(&mut socket, 1, "Page.enable", json!({}), connection_guard)?;
-    select_official_codex_mode(&mut socket, connection_guard)?;
+    confirm_official_codex_mode(&mut socket, process_alive, connection_guard)?;
     ensure_injection_active(process_alive)?;
     if !registered_script_targets.contains(&page.id) {
         send_guarded_cdp(
@@ -412,8 +418,76 @@ fn ensure_injection_active(process_alive: &AtomicBool) -> Result<(), String> {
     }
 }
 
-fn select_official_codex_mode<G>(
+fn confirm_official_codex_mode<G>(
     socket: &mut WebSocket<TcpStream>,
+    process_alive: &AtomicBool,
+    connection_guard: &G,
+) -> Result<(), String>
+where
+    G: Fn(&TcpStream) -> Result<(), String>,
+{
+    let mut next_id = 10;
+    let mut readiness = CodexModeReadiness::default();
+
+    loop {
+        ensure_injection_active(process_alive)?;
+        let response = send_guarded_cdp(
+            socket,
+            next_id,
+            "Runtime.evaluate",
+            json!({
+                "expression": mode::PROBE_EXPRESSION,
+                "returnByValue": true
+            }),
+            connection_guard,
+        )?;
+        next_id += 1;
+
+        match readiness.observe(codex_mode_page_state(&response)?) {
+            CodexModeAction::Confirmed => return Ok(()),
+            CodexModeAction::Wait => {}
+            CodexModeAction::SelectFallback => {
+                dispatch_codex_mode_fallback(socket, &mut next_id, connection_guard)?;
+            }
+            CodexModeAction::Unresolved => {
+                return Err("Codex mode remained unavailable after keyboard fallback".into());
+            }
+        }
+
+        thread::sleep(mode::POLL_INTERVAL);
+    }
+}
+
+fn codex_mode_page_state(response: &Value) -> Result<CodexModePageState, String> {
+    let snapshot = response
+        .pointer("/result/result/value")
+        .and_then(Value::as_object)
+        .ok_or("malformed Codex mode probe result")?;
+    let mode_available = snapshot
+        .get("modeAvailable")
+        .and_then(Value::as_bool)
+        .ok_or("malformed Codex mode probe result")?;
+    let mode_label = snapshot
+        .get("modeLabel")
+        .and_then(Value::as_str)
+        .ok_or("malformed Codex mode probe result")?;
+    let blocker_visible = snapshot
+        .get("officialBlockerVisible")
+        .and_then(Value::as_bool)
+        .ok_or("malformed Codex mode probe result")?;
+
+    if mode_available && mode_label == "Codex" {
+        return Ok(CodexModePageState::Codex);
+    }
+    if blocker_visible || !mode_available {
+        return Ok(CodexModePageState::Pending);
+    }
+    Ok(CodexModePageState::Other)
+}
+
+fn dispatch_codex_mode_fallback<G>(
+    socket: &mut WebSocket<TcpStream>,
+    next_id: &mut u64,
     connection_guard: &G,
 ) -> Result<(), String>
 where
@@ -428,20 +502,16 @@ where
             "windowsVirtualKeyCode": 51
         })
     };
-    send_guarded_cdp(
-        socket,
-        2,
-        "Input.dispatchKeyEvent",
-        key("rawKeyDown"),
-        connection_guard,
-    )?;
-    send_guarded_cdp(
-        socket,
-        3,
-        "Input.dispatchKeyEvent",
-        key("keyUp"),
-        connection_guard,
-    )?;
+    for r#type in ["rawKeyDown", "keyUp"] {
+        send_guarded_cdp(
+            socket,
+            *next_id,
+            "Input.dispatchKeyEvent",
+            key(r#type),
+            connection_guard,
+        )?;
+        *next_id += 1;
+    }
     Ok(())
 }
 
