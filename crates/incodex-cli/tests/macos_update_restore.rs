@@ -1,179 +1,78 @@
 #![cfg(target_os = "macos")]
 
-use incodex_cli::macos_update_restore::{
-    choose_sparkle_update, next_action, CoordinatorAction, CoordinatorPhase,
-    CoordinatorSnapshot, SparkleDownload,
-};
+use incodex_cli::macos_update_restore::{next_action, CoordinatorAction, CoordinatorSnapshot};
 
 fn snapshot(
-    phase: CoordinatorPhase,
-    app_build: u64,
+    observed_build: Option<u64>,
+    parent_running: bool,
     app_running: bool,
     integration_installed: bool,
     registered: bool,
-    downloaded_target: Option<u64>,
+    grace_expired: bool,
 ) -> CoordinatorSnapshot {
     CoordinatorSnapshot {
-        phase,
-        app_build,
+        source_build: 7303,
+        observed_build,
+        parent_running,
         app_running,
         integration_installed,
         registered,
-        downloaded_target,
+        grace_expired,
     }
 }
 
 #[test]
-fn newest_complete_delta_for_the_running_build_is_selected() {
-    let downloads = [
-        SparkleDownload {
-            source_build: Some(7303),
-            target_build: 7345,
-            bytes: 12,
-            complete: true,
-        },
-        SparkleDownload {
-            source_build: Some(7303),
-            target_build: 7377,
-            bytes: 35_061_182,
-            complete: true,
-        },
-        SparkleDownload {
-            source_build: Some(6892),
-            target_build: 6962,
-            bytes: 9,
-            complete: true,
-        },
-        SparkleDownload {
-            source_build: Some(7303),
-            target_build: 7400,
-            bytes: 0,
-            complete: false,
-        },
-    ];
-
-    assert_eq!(choose_sparkle_update(7303, &downloads), Some(7377));
-}
-
-#[test]
-fn ordinary_exit_without_update_evidence_does_not_reinstall() {
-    let action = next_action(snapshot(
-        CoordinatorPhase::Watching,
-        7303,
-        false,
-        true,
-        true,
-        None,
-    ));
-
-    assert_eq!(action, CoordinatorAction::ExitNoUpdate);
-}
-
-#[test]
-fn downloaded_update_waits_for_a_normal_exit_before_restoring_vendor_app() {
-    let running = next_action(snapshot(
-        CoordinatorPhase::Watching,
-        7303,
-        true,
-        true,
-        true,
-        Some(7377),
-    ));
+fn ordinary_exit_waits_for_the_replacement_grace_period() {
     assert_eq!(
-        running,
-        CoordinatorAction::PersistIntent {
-            source_build: 7303,
-            target_build: 7377,
-        }
+        next_action(snapshot(Some(7303), false, false, true, true, false)),
+        CoordinatorAction::Wait
     );
-
-    let stopped = next_action(snapshot(
-        CoordinatorPhase::AwaitingPatchedExit {
-            source_build: 7303,
-            target_build: 7377,
-        },
-        7303,
-        false,
-        true,
-        true,
-        Some(7377),
-    ));
     assert_eq!(
-        stopped,
-        CoordinatorAction::RestoreVendorAndLaunch {
-            source_build: 7303,
-            target_build: 7377,
-        }
+        next_action(snapshot(Some(7303), false, false, true, true, true)),
+        CoordinatorAction::ExitNoUpdate
     );
 }
 
 #[test]
-fn new_official_generation_waits_for_its_process_before_reinstalling() {
-    let running = next_action(snapshot(
-        CoordinatorPhase::AwaitingOfficialUpdate {
-            source_build: 7303,
-            target_build: 7377,
-        },
-        7377,
-        true,
-        false,
-        true,
-        Some(7377),
-    ));
-    assert_eq!(running, CoordinatorAction::Wait);
-
-    let stopped = next_action(snapshot(
-        CoordinatorPhase::AwaitingOfficialUpdate {
-            source_build: 7303,
-            target_build: 7377,
-        },
-        7377,
-        false,
-        false,
-        true,
-        Some(7377),
-    ));
+fn a_temporary_bundle_replacement_gap_never_looks_like_an_ordinary_exit() {
     assert_eq!(
-        stopped,
+        next_action(snapshot(None, false, false, false, true, true)),
+        CoordinatorAction::Wait
+    );
+}
+
+#[test]
+fn a_new_official_generation_waits_until_its_process_exits() {
+    assert_eq!(
+        next_action(snapshot(Some(7377), false, true, false, true, true)),
+        CoordinatorAction::Wait
+    );
+    assert_eq!(
+        next_action(snapshot(Some(7377), false, false, false, true, true)),
         CoordinatorAction::Reinstall {
-            expected_build: 7377,
+            expected_build: 7377
         }
     );
 }
 
 #[test]
-fn registration_removal_cancels_every_pending_generation() {
-    let action = next_action(snapshot(
-        CoordinatorPhase::AwaitingOfficialUpdate {
-            source_build: 7303,
-            target_build: 7377,
-        },
-        7377,
-        false,
-        false,
-        false,
-        Some(7377),
-    ));
-
-    assert_eq!(action, CoordinatorAction::ExitCancelled);
+fn same_build_official_repair_is_restored_after_the_app_exits() {
+    assert_eq!(
+        next_action(snapshot(Some(7303), false, false, false, true, true)),
+        CoordinatorAction::Reinstall {
+            expected_build: 7303
+        }
+    );
 }
 
 #[test]
-fn stale_or_same_build_downloads_never_start_a_repair() {
-    let downloads = [
-        SparkleDownload {
-            source_build: Some(7303),
-            target_build: 7303,
-            bytes: 1,
-            complete: true,
-        },
-        SparkleDownload {
-            source_build: Some(6892),
-            target_build: 6962,
-            bytes: 1,
-            complete: true,
-        },
-    ];
-
-    assert_eq!(choose_sparkle_update(7303, &downloads), None);
+fn parent_and_registration_liveness_bound_the_worker() {
+    assert_eq!(
+        next_action(snapshot(Some(7377), true, false, false, true, true)),
+        CoordinatorAction::Wait
+    );
+    assert_eq!(
+        next_action(snapshot(Some(7377), false, false, false, false, true)),
+        CoordinatorAction::ExitCancelled
+    );
 }
