@@ -164,6 +164,10 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
+    #[cfg(target_os = "macos")]
+    if let Some(result) = macos_update_restore::try_run_worker() {
+        return result.map_err(CliFailure::from);
+    }
     #[cfg(not(target_os = "windows"))]
     if lifecycle::run_update_notice_worker() {
         return Ok(());

@@ -371,10 +371,24 @@ fn install_app_with_quiescence<G>(
 where
     G: QuiescenceGuard + Clone,
 {
+    install_app_for_expected_build(app, root, progress, quiescence, None)
+}
+
+fn install_app_for_expected_build<G>(
+    app: &Path,
+    root: &Path,
+    progress: &mut Progress,
+    quiescence: G,
+    expected_build: Option<u64>,
+) -> Result<CommandResult, String>
+where
+    G: QuiescenceGuard + Clone,
+{
     if !app.exists() {
         return Err(format!("Codex app not found: {}", app.display()));
     }
     quiescence.ensure_quiescent(app)?;
+    ensure_expected_build(app, expected_build)?;
     let asar = app.join(ASAR_REL);
     let existing = inspect_existing_install(app, root, &asar)?;
     if existing.is_none() {
@@ -409,6 +423,7 @@ where
         app,
         transaction_quiescence,
         |locked_app| {
+            ensure_expected_build(locked_app, expected_build)?;
             let locked_asar = locked_app.join(ASAR_REL);
             if inspect_existing_install(locked_app, root, &locked_asar)?.is_some() {
                 return Err(
@@ -504,6 +519,53 @@ where
         app: app.display().to_string(),
         warning,
     })
+}
+
+pub(crate) fn update_restore_install_id(app: &Path) -> Option<String> {
+    let archive = Archive::open(app.join(ASAR_REL)).ok()?;
+    if !archive.has_only_loader() {
+        return None;
+    }
+    let package = archive.read_package_main().ok()?;
+    package
+        .already_patched
+        .then_some(package.install_id)
+        .flatten()
+}
+
+pub(crate) fn reinstall_after_official_update(
+    root: &Path,
+    app: &Path,
+    helper_source: &Path,
+    expected_build: u64,
+) -> Result<String, String> {
+    let guard = AppGuard::for_app(app)?;
+    guard.ensure()?;
+    let mut progress = Progress::new();
+    let result =
+        install_app_for_expected_build(app, root, &mut progress, guard, Some(expected_build));
+    progress.stop();
+    let result = result?;
+    register_update_restore(root, app, helper_source, &result)?;
+    result
+        .install_id
+        .ok_or_else(|| "restored app has no install epoch".into())
+}
+
+fn ensure_expected_build(app: &Path, expected_build: Option<u64>) -> Result<(), String> {
+    let Some(expected_build) = expected_build else {
+        return Ok(());
+    };
+    let observed = read_plist_info(app)
+        .and_then(|info| info.app_build.parse::<u64>().ok())
+        .ok_or_else(|| format!("cannot read Codex build from {}", app.display()))?;
+    if observed == expected_build {
+        Ok(())
+    } else {
+        Err(format!(
+            "Codex build changed before update recovery: expected {expected_build}, found {observed}"
+        ))
+    }
 }
 
 fn rollback_install(tx: &mut Engine, scratch: Option<&Path>, error: String) -> String {

@@ -3,8 +3,10 @@ use std::io::{Read, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use incodex_core::canonical::is_official_app;
+use incodex_macos::{process_executable_path, read_plist_info, AppQuiescence};
 use incodex_transaction::acquire_target_lock;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -14,6 +16,10 @@ const PRIVATE_DIR_MODE: u32 = 0o700;
 const PRIVATE_FILE_MODE: u32 = 0o600;
 const HELPER_FILE_MODE: u32 = 0o700;
 const HELPER_FILE_NAME: &str = "incodex";
+const ORDINARY_EXIT_GRACE: Duration = Duration::from_secs(45);
+const REPLACEMENT_GAP_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const IDLE_RECHECK_INTERVAL: Duration = Duration::from_millis(250);
+const PROCESS_RECHECK_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -57,6 +63,17 @@ pub enum CoordinatorOutcome {
     Reinstalled { build: u64 },
 }
 
+struct SystemCoordinator {
+    root: PathBuf,
+    request: WorkerRequest,
+    registration: UpdateRegistration,
+    source_build: u64,
+    executable: PathBuf,
+    parent_exit_at: Option<Instant>,
+    missing_since: Option<Instant>,
+    watched_pids: Vec<i32>,
+}
+
 pub fn parse_worker_request(
     marker: Option<&str>,
     install_id: Option<&str>,
@@ -82,6 +99,19 @@ pub fn parse_worker_request(
         })
     })();
     Some(request)
+}
+
+pub fn try_run_worker() -> Option<Result<(), String>> {
+    let request = parse_worker_request(
+        std::env::var("INCODEX_MACOS_UPDATE_WORKER").ok().as_deref(),
+        std::env::var("INCODEX_MACOS_UPDATE_INSTALL_ID")
+            .ok()
+            .as_deref(),
+        std::env::var("INCODEX_MACOS_UPDATE_PARENT_PID")
+            .ok()
+            .as_deref(),
+    )?;
+    Some(request.and_then(run_system_worker))
 }
 
 pub fn next_action(snapshot: CoordinatorSnapshot) -> CoordinatorAction {
@@ -132,6 +162,215 @@ where
                 });
             }
         }
+    }
+}
+
+fn run_system_worker(request: WorkerRequest) -> Result<(), String> {
+    let root = incodex_core::paths::user_root();
+    let coordinator = std::cell::RefCell::new(SystemCoordinator::new(root, request)?);
+    drive_coordinator(
+        || coordinator.borrow_mut().observe(),
+        |expected_build| coordinator.borrow().reinstall(expected_build),
+        || coordinator.borrow_mut().wait(),
+    )?;
+    Ok(())
+}
+
+impl SystemCoordinator {
+    fn new(root: PathBuf, request: WorkerRequest) -> Result<Self, String> {
+        let registration = read_registration(&root)?
+            .ok_or("macOS update registration disappeared before worker startup")?;
+        if registration.install_id != request.install_id {
+            return Err("macOS update worker install epoch is stale".into());
+        }
+        if !is_official_app(&registration.app_path, None) {
+            return Err("macOS update worker is not bound to the official Codex app".into());
+        }
+        verify_running_helper(&registration)?;
+        let plist = read_plist_info(&registration.app_path)
+            .ok_or("macOS update worker cannot read the source Codex build")?;
+        let source_build = plist.app_build.parse::<u64>().map_err(|error| {
+            format!("macOS update worker found an invalid Codex build: {error}")
+        })?;
+        let executable = registration
+            .app_path
+            .join("Contents")
+            .join("MacOS")
+            .join(plist.executable);
+
+        Ok(Self {
+            root,
+            request,
+            registration,
+            source_build,
+            executable,
+            parent_exit_at: None,
+            missing_since: None,
+            watched_pids: Vec::new(),
+        })
+    }
+
+    fn observe(&mut self) -> Result<CoordinatorSnapshot, String> {
+        let registered = self.registration_is_current()?;
+        if !registered {
+            return Ok(CoordinatorSnapshot {
+                source_build: self.source_build,
+                observed_build: None,
+                parent_running: false,
+                app_running: false,
+                integration_installed: false,
+                registered: false,
+                grace_expired: false,
+            });
+        }
+
+        let parent_running = process_executable_path(self.request.parent_pid)
+            .is_some_and(|path| path == self.executable);
+        let app_processes =
+            AppQuiescence::from_executable(self.executable.clone())?.running_pids()?;
+        let app_running = !app_processes.is_empty();
+        self.watched_pids = app_processes;
+        if parent_running && !self.watched_pids.contains(&self.request.parent_pid) {
+            self.watched_pids.push(self.request.parent_pid);
+        }
+
+        let now = Instant::now();
+        if parent_running {
+            self.parent_exit_at = None;
+        } else {
+            self.parent_exit_at.get_or_insert(now);
+        }
+
+        let observed_build = current_build(&self.registration.app_path);
+        if observed_build.is_none() && !parent_running {
+            let missing_since = self.missing_since.get_or_insert(now);
+            if now.duration_since(*missing_since) >= REPLACEMENT_GAP_TIMEOUT {
+                return Err("timed out waiting for the official Codex replacement bundle".into());
+            }
+        } else {
+            self.missing_since = None;
+        }
+
+        let integration_installed =
+            crate::install::update_restore_install_id(&self.registration.app_path)
+                .is_some_and(|install_id| install_id == self.registration.install_id);
+        let grace_expired = self
+            .parent_exit_at
+            .is_some_and(|started| now.duration_since(started) >= ORDINARY_EXIT_GRACE);
+
+        Ok(CoordinatorSnapshot {
+            source_build: self.source_build,
+            observed_build,
+            parent_running,
+            app_running,
+            integration_installed,
+            registered,
+            grace_expired,
+        })
+    }
+
+    fn reinstall(&self, expected_build: u64) -> Result<(), String> {
+        if !self.registration_is_current()? {
+            return Err("macOS update registration changed before recovery".into());
+        }
+        crate::install::reinstall_after_official_update(
+            &self.root,
+            &self.registration.app_path,
+            &self.registration.helper_path,
+            expected_build,
+        )?;
+        Ok(())
+    }
+
+    fn wait(&mut self) -> Result<(), String> {
+        if self.watched_pids.is_empty() {
+            std::thread::sleep(IDLE_RECHECK_INTERVAL);
+            return Ok(());
+        }
+        wait_for_process_exit(&self.watched_pids, PROCESS_RECHECK_INTERVAL)
+    }
+
+    fn registration_is_current(&self) -> Result<bool, String> {
+        let Some(current) = read_registration(&self.root)? else {
+            return Ok(false);
+        };
+        Ok(current.install_id == self.request.install_id
+            && current.app_path == self.registration.app_path
+            && current.helper_path == self.registration.helper_path
+            && current.helper_sha256 == self.registration.helper_sha256)
+    }
+}
+
+fn current_build(app: &Path) -> Option<u64> {
+    read_plist_info(app)?.app_build.parse::<u64>().ok()
+}
+
+fn verify_running_helper(registration: &UpdateRegistration) -> Result<(), String> {
+    let current = std::env::current_exe()
+        .map_err(|error| format!("cannot locate the running macOS update helper: {error}"))?;
+    let current = fs::canonicalize(&current)
+        .map_err(|error| format!("cannot resolve the running macOS update helper: {error}"))?;
+    let expected = fs::canonicalize(&registration.helper_path)
+        .map_err(|error| format!("cannot resolve the registered macOS update helper: {error}"))?;
+    if current != expected {
+        return Err("macOS update worker executable does not match its registration".into());
+    }
+    let digest = sha256_hex(&read_regular_file(&current, "running macOS update helper")?);
+    if digest != registration.helper_sha256 {
+        return Err("running macOS update helper failed its content hash".into());
+    }
+    Ok(())
+}
+
+fn wait_for_process_exit(pids: &[i32], timeout: Duration) -> Result<(), String> {
+    let queue = unsafe { libc::kqueue() };
+    if queue < 0 {
+        std::thread::sleep(timeout);
+        return Ok(());
+    }
+
+    let changes = pids
+        .iter()
+        .copied()
+        .filter(|pid| *pid > 0)
+        .map(|pid| libc::kevent {
+            ident: pid as libc::uintptr_t,
+            filter: libc::EVFILT_PROC,
+            flags: libc::EV_ADD | libc::EV_ONESHOT,
+            fflags: libc::NOTE_EXIT,
+            data: 0,
+            udata: std::ptr::null_mut(),
+        })
+        .collect::<Vec<_>>();
+    if changes.is_empty() {
+        unsafe { libc::close(queue) };
+        std::thread::sleep(timeout);
+        return Ok(());
+    }
+
+    let mut event = std::mem::MaybeUninit::<libc::kevent>::uninit();
+    let timeout = libc::timespec {
+        tv_sec: timeout.as_secs() as libc::time_t,
+        tv_nsec: timeout.subsec_nanos() as libc::c_long,
+    };
+    let result = unsafe {
+        libc::kevent(
+            queue,
+            changes.as_ptr(),
+            changes.len() as i32,
+            event.as_mut_ptr(),
+            1,
+            &timeout,
+        )
+    };
+    let error = (result < 0).then(std::io::Error::last_os_error);
+    unsafe { libc::close(queue) };
+    match error {
+        Some(error) if error.raw_os_error() == Some(libc::ESRCH) => Ok(()),
+        Some(error) => Err(format!(
+            "cannot wait for the Codex process to exit: {error}"
+        )),
+        None => Ok(()),
     }
 }
 

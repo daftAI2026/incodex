@@ -120,6 +120,10 @@ impl AppQuiescence {
         self.ensure_quiescent_with(&SystemProcessProbe)
     }
 
+    pub fn running_pids(&self) -> Result<Vec<i32>, String> {
+        self.running_pids_with(&SystemProcessProbe)
+    }
+
     pub fn ensure_quiescent_with<P: ProcessProbe>(&self, probe: &P) -> Result<(), String> {
         let pids = self.running_pids_with(probe)?;
         if let Some(pid) = pids.first() {
@@ -237,7 +241,7 @@ impl QuiescenceClock for SystemQuiescenceClock {
 }
 
 #[cfg(target_os = "macos")]
-fn process_executable_path(pid: i32) -> Option<PathBuf> {
+pub fn process_executable_path(pid: i32) -> Option<PathBuf> {
     const MAX_PATH: usize = 4096;
     let mut buffer = vec![0u8; MAX_PATH];
     let size = unsafe { libc::proc_pidpath(pid, buffer.as_mut_ptr().cast(), buffer.len() as u32) };
@@ -252,7 +256,7 @@ fn process_executable_path(pid: i32) -> Option<PathBuf> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn process_executable_path(_pid: i32) -> Option<PathBuf> {
+pub fn process_executable_path(_pid: i32) -> Option<PathBuf> {
     None
 }
 
