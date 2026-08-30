@@ -45,8 +45,8 @@ describe("shared incognito window lifecycle", () => {
     exitAfterLastMainWindowCloses(
       fixture.window,
       () => false,
-      (code) => exits.push(code),
-      (callback) => scheduled.push(callback),
+      (code: number) => exits.push(code),
+      (callback: () => void) => scheduled.push(callback),
     );
 
     fixture.emit("close");
@@ -64,8 +64,8 @@ describe("shared incognito window lifecycle", () => {
     exitAfterLastMainWindowCloses(
       fixture.window,
       () => false,
-      (code) => exits.push(code),
-      (callback) => scheduled.push(callback),
+      (code: number) => exits.push(code),
+      (callback: () => void) => scheduled.push(callback),
     );
 
     fixture.hide();
@@ -82,8 +82,8 @@ describe("shared incognito window lifecycle", () => {
     exitAfterLastMainWindowCloses(
       fixture.window,
       () => false,
-      (code) => exits.push(code),
-      (callback) => scheduled.push(callback),
+      (code: number) => exits.push(code),
+      (callback: () => void) => scheduled.push(callback),
     );
 
     fixture.emit("close");

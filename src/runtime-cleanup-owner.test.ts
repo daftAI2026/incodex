@@ -171,6 +171,9 @@ async function loadRuntime(cleanupOwner?: string): Promise<RuntimeHarness> {
     if (id === "./incodex-window-kind.cjs") {
       return { isAuxiliarySnapshot: () => false };
     }
+    if (id === "./incodex-window-lifecycle.cjs") {
+      return nativeRequire("./runtime/incodex-window-lifecycle.cts");
+    }
     if (id === "./incodex-codex-mode.cjs") {
       return { createCodexModeReadiness: () => ({ observe: () => {} }) };
     }
@@ -228,12 +231,10 @@ describe("Electron session cleanup ownership", () => {
     const response = await exerciseRuntimeBurnPaths(runtime);
 
     expect(runtime.burnCount()).toBe(0);
-    expect(runtime.app.exitCalls).toBe(2);
+    expect(runtime.app.exitCalls).toBe(1);
     expect(runtime.app.quitCalls).toBe(1);
     expect(response).toEqual({ requestId: "quit", ok: true, code: "OK" });
     expect(runtime.events).toEqual([
-      "lease.release",
-      "app.exit:0",
       "lease.release",
       "app.exit:0",
       "lease.release",
@@ -266,7 +267,7 @@ describe("Electron session cleanup ownership", () => {
 
     await exerciseRuntimeBurnPaths(runtime);
 
-    expect(runtime.burnCount()).toBe(4);
+    expect(runtime.burnCount()).toBe(3);
   });
 
   test("unknown cleanup owner fails closed to existing Runtime cleanup", async () => {

@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { join } from "node:path";
 
+import { exitAfterLastMainWindowCloses } from "./incodex-window-lifecycle.cts";
+
 const windowsPlatform = require("../../crates/incodex-cli/assets/incodex-windows-platform.cjs");
 
 describe("Windows Runtime lifecycle adapter", () => {
@@ -39,7 +41,7 @@ describe("Windows Runtime lifecycle adapter", () => {
       },
     };
 
-    windowsPlatform.exitAfterLastMainWindowCloses(
+    exitAfterLastMainWindowCloses(
       win,
       () => anotherPrimaryWindow,
       (code: number) => exits.push(code),
@@ -65,7 +67,7 @@ describe("Windows Runtime lifecycle adapter", () => {
       },
     };
 
-    windowsPlatform.exitAfterLastMainWindowCloses(
+    exitAfterLastMainWindowCloses(
       win,
       () => false,
       (code: number) => exits.push(code),
@@ -91,7 +93,7 @@ describe("Windows Runtime lifecycle adapter", () => {
       },
     };
 
-    windowsPlatform.exitAfterLastMainWindowCloses(
+    exitAfterLastMainWindowCloses(
       win,
       () => false,
       (code: number) => exits.push(code),
@@ -120,7 +122,7 @@ describe("Windows Runtime lifecycle adapter", () => {
       },
     };
 
-    windowsPlatform.exitAfterLastMainWindowCloses(
+    exitAfterLastMainWindowCloses(
       win,
       () => false,
       (code: number) => exits.push(code),
@@ -153,7 +155,7 @@ describe("Windows Runtime lifecycle adapter", () => {
       },
     };
 
-    windowsPlatform.exitAfterLastMainWindowCloses(
+    exitAfterLastMainWindowCloses(
       win,
       () => anotherPrimaryWindow,
       (code: number) => exits.push(code),
