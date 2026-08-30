@@ -171,6 +171,9 @@ async function loadRuntime(cleanupOwner?: string): Promise<RuntimeHarness> {
     if (id === "./incodex-window-kind.cjs") {
       return { isAuxiliarySnapshot: () => false };
     }
+    if (id === "./incodex-window-lifecycle.cjs") {
+      return nativeRequire("./runtime/incodex-window-lifecycle.cts");
+    }
     if (id === "./incodex-codex-mode.cjs") {
       return { createCodexModeReadiness: () => ({ observe: () => {} }) };
     }
@@ -214,32 +217,29 @@ async function loadRuntime(cleanupOwner?: string): Promise<RuntimeHarness> {
   };
 }
 
-async function exerciseRuntimeBurnPaths(runtime: RuntimeHarness): Promise<unknown> {
-  runtime.openWindow().emit("closed");
-  runtime.app.emit("window-all-closed");
-  runtime.app.emit("before-quit");
-  return runtime.ipcAction({}, { requestId: "quit", action: "quit" });
-}
-
 describe("Electron session cleanup ownership", () => {
   test("Native-open marker leaves every session burn path to the Native parent", async () => {
     const runtime = await loadRuntime("native");
+    const win = runtime.openWindow();
 
-    const response = await exerciseRuntimeBurnPaths(runtime);
+    const response = await runtime.ipcAction({}, { requestId: "quit", action: "quit" });
 
     expect(runtime.burnCount()).toBe(0);
-    expect(runtime.app.exitCalls).toBe(2);
+    expect(runtime.app.exitCalls).toBe(0);
+
+    runtime.app.emit("before-quit");
+    win.emit("closed");
+    runtime.app.emit("window-all-closed");
+
+    expect(runtime.burnCount()).toBe(0);
+    expect(runtime.app.exitCalls).toBe(1);
     expect(runtime.app.quitCalls).toBe(1);
     expect(response).toEqual({ requestId: "quit", ok: true, code: "OK" });
     expect(runtime.events).toEqual([
-      "lease.release",
-      "app.exit:0",
-      "lease.release",
-      "app.exit:0",
-      "lease.release",
-      "lease.release",
       "app.quit",
       "ipc.response:OK",
+      "lease.release",
+      "app.exit:0",
     ]);
   });
 
@@ -263,17 +263,27 @@ describe("Electron session cleanup ownership", () => {
 
   test("missing cleanup owner preserves Runtime cleanup for in-app sessions", async () => {
     const runtime = await loadRuntime();
+    const win = runtime.openWindow();
 
-    await exerciseRuntimeBurnPaths(runtime);
+    await runtime.ipcAction({}, { requestId: "quit", action: "quit" });
+    runtime.app.emit("before-quit");
 
-    expect(runtime.burnCount()).toBe(4);
+    expect(runtime.burnCount()).toBe(0);
+
+    win.emit("closed");
+    runtime.app.emit("window-all-closed");
+
+    expect(runtime.burnCount()).toBe(1);
   });
 
   test("unknown cleanup owner fails closed to existing Runtime cleanup", async () => {
     const runtime = await loadRuntime("future-owner");
+    const win = runtime.openWindow();
 
     runtime.app.emit("before-quit");
+    expect(runtime.burnCount()).toBe(0);
 
+    win.emit("closed");
     expect(runtime.burnCount()).toBe(1);
   });
 });

@@ -10,6 +10,7 @@
     "incodex-owner-recovery.cjs",
     "incodex-instance.cjs",
     "incodex-window-kind.cjs",
+    "incodex-window-lifecycle.cjs",
     "incodex-runtime-load.cjs",
     "incodex-codex-mode.cjs",
     "incodex-dock-menu.cjs"
