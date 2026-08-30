@@ -92,4 +92,28 @@ describe("shared incognito window lifecycle", () => {
 
     expect(exits).toEqual([0]);
   });
+
+  test("a hidden non-final window stops probing instead of exiting on a later app hide", () => {
+    const fixture = createWindow();
+    const scheduled: Array<() => void> = [];
+    const exits: number[] = [];
+    let anotherMainWindow = true;
+
+    exitAfterLastMainWindowCloses(
+      fixture.window,
+      () => anotherMainWindow,
+      (code: number) => exits.push(code),
+      (callback: () => void) => scheduled.push(callback),
+    );
+
+    fixture.emit("close");
+    fixture.hide();
+    scheduled.shift()?.();
+
+    expect(exits).toEqual([]);
+    expect(scheduled).toEqual([]);
+
+    anotherMainWindow = false;
+    expect(exits).toEqual([]);
+  });
 });
