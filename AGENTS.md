@@ -30,7 +30,7 @@ Users launch the official Codex icon as usual. After `incodex install`, a hat-gl
 - Do not delete, archive, or rewrite `~/.codex` session DBs.
 - Do not change the bundle id or force a re-login.
 - Do not restore a valid OpenAI signature after asar changes. Appshot (智能快照) is a hard triangle; document it, do not fake Team ID `2DC432GLL2`.
-- Do not sign vendor CUA sidecars. Stash them, `--deep` the rest, restore, then outer `signOne`.
+- Do not sign vendor CUA sidecars. Stash them, ad-hoc `--deep` the host and Sparkle update framework so updater IPC shares the host identity, restore the CUA sidecars, then sign the outer app with its filtered entitlements.
 - Do not default live-patch from `install.sh` / `inc update`. `install.sh` manages only the CLI; `inc update` manages the CLI plus external Runtime and never patches or re-signs Codex.
 - Do not add Overlay, an independent Session Agent, LaunchAgent auto-repair, runtime pubkeys, or Homebrew core. Own tap is `daftAI2026/homebrew-tap`; bump it from `release.yml`. Do not open a Homebrew/homebrew-core PR.
 - Do not use CDP as the everyday Dock / `install` launch path. `incodex open` may start the official binary with `--remote-debugging-port` on `127.0.0.1` and inject `dist/incodex-inject.js`. Do not clone the official app for `open`. Do not copy AGPL injector scripts.

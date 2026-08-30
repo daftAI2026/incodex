@@ -26,6 +26,7 @@ const ADHOC_UNRETAINABLE_ENTITLEMENTS: &[&str] = &[
 ];
 
 const DISABLE_LIBRARY_VALIDATION: &str = "com.apple.security.cs.disable-library-validation";
+const SPARKLE_FRAMEWORK: &str = "Contents/Frameworks/Sparkle.framework";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EntitlementSnapshot {
@@ -368,7 +369,10 @@ fn collect_vendor_helper_roots_for_outer(
     }
     let mut vendors = components
         .iter()
-        .filter(|component| component.kind == SignatureKind::Vendor)
+        .filter(|component| {
+            component.kind == SignatureKind::Vendor
+                && !component.path.starts_with(app.join(SPARKLE_FRAMEWORK))
+        })
         .map(|component| component.path.clone())
         .collect::<Vec<_>>();
     vendors.sort_by_key(|path| path.components().count());
