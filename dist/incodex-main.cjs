@@ -11,7 +11,6 @@ const instance = require("./incodex-instance.cjs");
 const windowKind = require("./incodex-window-kind.cjs");
 const codexMode = require("./incodex-codex-mode.cjs");
 const dockMenu = process.platform === "darwin" ? require("./incodex-dock-menu.cjs") : null;
-const statusMenu = process.platform === "darwin" ? require("./incodex-status-menu.cjs") : null;
 const windowsPlatform = process.platform === "win32" ? require("./incodex-windows-platform.cjs") : null;
 const USER_ROOT = path.join(os.homedir(), ".incodex");
 const DEFAULT_CODEX_HOME = path.join(os.homedir(), ".codex");
@@ -717,8 +716,8 @@ async function attachElectron() {
         onOpen: () => launchFromNativeMenu("dock-menu"),
         log: logLaunch,
     });
-    const statusMenuController = statusMenu?.createStatusMenuController({
-        loadBridge: () => statusMenu.createNativeStatusMenuBridge({
+    const statusMenuController = dockMenu && dockMenu.createStatusMenuController({
+        loadBridge: () => dockMenu.createNativeStatusMenuBridge({
             appPath: electron.app.getAppPath(),
             onError: (error) => logLaunch("status-menu-action-failed", { error: String(error) }),
         }),

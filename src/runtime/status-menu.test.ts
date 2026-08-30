@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   createStatusMenuController,
   normalizeStatusMenuLabel,
-} from "./incodex-status-menu.cts";
+} from "./incodex-dock-menu.cts";
 
 type FakeItem = {
   enabled?: boolean;

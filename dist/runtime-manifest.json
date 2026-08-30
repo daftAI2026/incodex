@@ -2,8 +2,8 @@
   "runtimeVersion": "0.5.0",
   "sourceCommit": "",
   "files": {
-    "incodex-loader.cjs": "44928add263a2a5d32a2d1cc2b0f8b8ff725c6d41025647d245908078fa2f4fa",
-    "incodex-main.cjs": "39ffe9f383dd2e7dbac5eb47bd2b2587fe5a5bef3b53713d876f48d527a8a00f",
+    "incodex-loader.cjs": "0cb904b81ca28d7a827ce1409aa4fb8785406b9f17414f163a0884adeac1247e",
+    "incodex-main.cjs": "654a91e9fa5110590fa92d8b63b9c121d01eaa8a675a1263181e23797b06007e",
     "incodex-preload.cjs": "7b325b1ddc3d444e625e459fcf3edc00397bf78b38b36e95e56b9b4c7a0686e6",
     "incodex-inject.js": "18956b7198ee01d77faf761246320356076484480efa69236f77154a7f878137",
     "incodex-safe-home.cjs": "20760e4b7efbe00f2a943b8580c03e374a381a711277805e45f3eb1438ecc769",
@@ -14,7 +14,6 @@
     "incodex-window-kind.cjs": "8d5f752ef6a34bd0927cd39010d68b3e7b7545a77f947683d4ce4a48b98ce648",
     "incodex-runtime-load.cjs": "153ea5d8d2eb68551936da7f997fa46f67882f35c62357391c30da6547251d84",
     "incodex-codex-mode.cjs": "94e65a76454c6c3728d0139014f3c531ca5bfb80faba20ffc9a5937277bfec0c",
-    "incodex-dock-menu.cjs": "f065706406b10d61b6b39477d8ab71f7c73466cdd9579c0b99f4c82bf7f2fd44",
-    "incodex-status-menu.cjs": "549299ad636ed3419b1eac0f79896f3b8e8ee23653908e4681a01b3eb079ffd6"
+    "incodex-dock-menu.cjs": "6030ffba786c489555f739789ea35735eb4c393d133413a526497aef7c2537a5"
   }
 }

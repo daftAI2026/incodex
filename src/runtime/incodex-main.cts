@@ -13,8 +13,6 @@ const windowKind = require("./incodex-window-kind.cjs");
 const codexMode = require("./incodex-codex-mode.cjs");
 const dockMenu =
   process.platform === "darwin" ? require("./incodex-dock-menu.cjs") : null;
-const statusMenu =
-  process.platform === "darwin" ? require("./incodex-status-menu.cjs") : null;
 const windowsPlatform =
   process.platform === "win32" ? require("./incodex-windows-platform.cjs") : null;
 
@@ -724,9 +722,9 @@ async function attachElectron() {
     onOpen: () => launchFromNativeMenu("dock-menu"),
     log: logLaunch,
   });
-  const statusMenuController = statusMenu?.createStatusMenuController({
+  const statusMenuController = dockMenu && dockMenu.createStatusMenuController({
     loadBridge: () =>
-      statusMenu.createNativeStatusMenuBridge({
+      dockMenu.createNativeStatusMenuBridge({
         appPath: electron.app.getAppPath(),
         onError: (error) => logLaunch("status-menu-action-failed", { error: String(error) }),
       }),
