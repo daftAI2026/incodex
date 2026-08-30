@@ -78,6 +78,19 @@ describe("Electron UI injection reporting", () => {
     expect(finish).not.toContain("windowsPlatform && incognitoExitStarted");
   });
 
+  test("defers circle-x cleanup until the official close is accepted", () => {
+    const quitStart = main.indexOf('if (action === "quit")');
+    const quitEnd = main.indexOf('\n    return ipcGuard.actionResponse', quitStart);
+    const quit = main.slice(quitStart, quitEnd);
+
+    expect(quitStart).toBeGreaterThanOrEqual(0);
+    expect(quitEnd).toBeGreaterThan(quitStart);
+    expect(quit).toContain("electron.app.quit()");
+    expect(quit).not.toContain("burnIncognitoHome()");
+    expect(quit).not.toContain("clearPid(");
+    expect(main).not.toContain('electron.app.on("before-quit"');
+  });
+
   test("does not quit the installed Windows main process on the user's behalf", () => {
     const attach = main.slice(main.indexOf("async function attachElectron()"));
 
