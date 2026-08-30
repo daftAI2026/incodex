@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
+const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8").replaceAll(
+  "\r\n",
+  "\n",
+);
 
 function hookWindowSource(): string {
   const start = main.indexOf("function hookWindow(");
