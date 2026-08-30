@@ -10,6 +10,7 @@ const ipcGuard = require("./incodex-ipc-guard.cjs");
 const instance = require("./incodex-instance.cjs");
 const windowKind = require("./incodex-window-kind.cjs");
 const codexMode = require("./incodex-codex-mode.cjs");
+const macosUpdate = process.platform === "darwin" ? require("./incodex-macos-update.cjs") : null;
 const dockMenu = process.platform === "darwin" ? require("./incodex-dock-menu.cjs") : null;
 const windowsPlatform = process.platform === "win32" ? require("./incodex-windows-platform.cjs") : null;
 const USER_ROOT = path.join(os.homedir(), ".incodex");
@@ -731,6 +732,15 @@ async function attachElectron() {
     if (packagedOrigin)
         trustedOrigins.add(packagedOrigin);
     captureSourceHome();
+    if (macosUpdate && !isIncognito()) {
+        electron.app.once("before-quit", () => {
+            macosUpdate.spawnCoordinator({
+                userRoot: USER_ROOT,
+                execPath: process.execPath,
+                pid: process.pid,
+            });
+        });
+    }
     if (!isIncognito()) {
         if (!windowsPlatform) {
             try {
