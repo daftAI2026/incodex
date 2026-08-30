@@ -72,6 +72,7 @@ struct SystemCoordinator {
     parent_exit_at: Option<Instant>,
     missing_since: Option<Instant>,
     watched_pids: Vec<i32>,
+    last_observation: Option<String>,
 }
 
 pub fn parse_worker_request(
@@ -167,13 +168,31 @@ where
 
 fn run_system_worker(request: WorkerRequest) -> Result<(), String> {
     let root = incodex_core::paths::user_root();
-    let coordinator = std::cell::RefCell::new(SystemCoordinator::new(root, request)?);
-    drive_coordinator(
-        || coordinator.borrow_mut().observe(),
-        |expected_build| coordinator.borrow().reinstall(expected_build),
-        || coordinator.borrow_mut().wait(),
-    )?;
-    Ok(())
+    let result = (|| {
+        let coordinator = std::cell::RefCell::new(SystemCoordinator::new(root.clone(), request)?);
+        let source_build = coordinator.borrow().source_build;
+        crate::macos_update_log::log_coordinator_event(
+            &root,
+            &format!("worker started sourceBuild={source_build}"),
+        );
+        let outcome = drive_coordinator(
+            || coordinator.borrow_mut().observe(),
+            |expected_build| coordinator.borrow().reinstall(expected_build),
+            || coordinator.borrow_mut().wait(),
+        )?;
+        crate::macos_update_log::log_coordinator_event(
+            &root,
+            &format!("worker finished outcome={outcome:?}"),
+        );
+        Ok(())
+    })();
+    if let Err(error) = &result {
+        crate::macos_update_log::log_coordinator_event(
+            &root,
+            &format!("worker failed error={error}"),
+        );
+    }
+    result
 }
 
 impl SystemCoordinator {
@@ -207,6 +226,7 @@ impl SystemCoordinator {
             parent_exit_at: None,
             missing_since: None,
             watched_pids: Vec::new(),
+            last_observation: None,
         })
     }
 
@@ -258,7 +278,7 @@ impl SystemCoordinator {
             .parent_exit_at
             .is_some_and(|started| now.duration_since(started) >= ORDINARY_EXIT_GRACE);
 
-        Ok(CoordinatorSnapshot {
+        let snapshot = CoordinatorSnapshot {
             source_build: self.source_build,
             observed_build,
             parent_running,
@@ -266,7 +286,9 @@ impl SystemCoordinator {
             integration_installed,
             registered,
             grace_expired,
-        })
+        };
+        self.log_observation(snapshot);
+        Ok(snapshot)
     }
 
     fn reinstall(&self, expected_build: u64) -> Result<(), String> {
@@ -298,6 +320,23 @@ impl SystemCoordinator {
             && current.app_path == self.registration.app_path
             && current.helper_path == self.registration.helper_path
             && current.helper_sha256 == self.registration.helper_sha256)
+    }
+
+    fn log_observation(&mut self, snapshot: CoordinatorSnapshot) {
+        let observation = format!(
+            "state build={:?} parentRunning={} appRunning={} integrationInstalled={} registered={} graceExpired={}",
+            snapshot.observed_build,
+            snapshot.parent_running,
+            snapshot.app_running,
+            snapshot.integration_installed,
+            snapshot.registered,
+            snapshot.grace_expired,
+        );
+        if self.last_observation.as_deref() == Some(&observation) {
+            return;
+        }
+        crate::macos_update_log::log_coordinator_event(&self.root, &observation);
+        self.last_observation = Some(observation);
     }
 }
 
@@ -570,7 +609,7 @@ fn read_regular_file(path: &Path, label: &str) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-fn ensure_private_dir(path: &Path) -> Result<(), String> {
+pub(super) fn ensure_private_dir(path: &Path) -> Result<(), String> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
             return Err(format!(
@@ -628,7 +667,7 @@ fn write_private_atomic_with_mode(path: &Path, bytes: &[u8], mode: u32) -> Resul
     result
 }
 
-fn set_file_mode(file: &File, mode: u32) -> Result<(), String> {
+pub(super) fn set_file_mode(file: &File, mode: u32) -> Result<(), String> {
     let result = unsafe { libc::fchmod(file.as_raw_fd(), mode as libc::mode_t) };
     if result == 0 {
         Ok(())
@@ -664,46 +703,4 @@ fn sha256_hex(bytes: &[u8]) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn scratch(name: &str) -> PathBuf {
-        let root = std::env::temp_dir().join(format!(
-            "incodex-macos-update-log-{name}-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&root).unwrap();
-        root
-    }
-
-    #[test]
-    fn coordinator_log_is_private_bounded_and_never_follows_symlinks() {
-        let root = scratch("contract");
-        append_coordinator_log(&root, "worker started").unwrap();
-        let path = root.join("macos-update/coordinator.log");
-        assert_eq!(
-            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-            PRIVATE_FILE_MODE
-        );
-
-        fs::write(&path, vec![b'x'; COORDINATOR_LOG_MAX_BYTES + 1]).unwrap();
-        append_coordinator_log(&root, "worker bounded").unwrap();
-        assert_eq!(fs::read_to_string(&path).unwrap(), "worker bounded\n");
-
-        fs::remove_file(&path).unwrap();
-        let foreign = root.join("foreign.log");
-        fs::write(&foreign, b"foreign\n").unwrap();
-        std::os::unix::fs::symlink(&foreign, &path).unwrap();
-        assert!(append_coordinator_log(&root, "must fail")
-            .unwrap_err()
-            .contains("symlink"));
-        assert_eq!(fs::read(&foreign).unwrap(), b"foreign\n");
-    }
 }

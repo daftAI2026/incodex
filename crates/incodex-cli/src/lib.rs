@@ -29,6 +29,8 @@ pub mod legacy_typescript;
 pub mod lifecycle;
 mod locale;
 #[cfg(target_os = "macos")]
+mod macos_update_log;
+#[cfg(target_os = "macos")]
 pub mod macos_update_restore;
 #[cfg(not(target_os = "windows"))]
 pub mod menu;
