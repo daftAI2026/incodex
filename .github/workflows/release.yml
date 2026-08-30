@@ -187,6 +187,7 @@ jobs:
                 "incodex-window-kind.cjs",
                 "incodex-codex-mode.cjs",
                 "incodex-dock-menu.cjs",
+                "incodex-status-menu.cjs",
                 "incodex-runtime-load.cjs",
                 "incodex-loader.cjs",
               ];
