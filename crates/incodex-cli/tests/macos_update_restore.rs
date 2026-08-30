@@ -134,9 +134,11 @@ fn worker_mode_requires_an_explicit_marker_epoch_and_parent_pid() {
     assert!(parse_worker_request(Some("1"), None, Some("42"))
         .unwrap()
         .is_err());
-    assert!(parse_worker_request(Some("1"), Some("install-a"), Some("0"))
-        .unwrap()
-        .is_err());
+    assert!(
+        parse_worker_request(Some("1"), Some("install-a"), Some("0"))
+            .unwrap()
+            .is_err()
+    );
     assert_eq!(
         parse_worker_request(Some("1"), Some("install-a"), Some("42")),
         Some(Ok(WorkerRequest {

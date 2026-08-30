@@ -25,6 +25,12 @@ pub struct UpdateRegistration {
     pub helper_sha256: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkerRequest {
+    pub install_id: String,
+    pub parent_pid: i32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoordinatorSnapshot {
     pub source_build: u64,
@@ -49,6 +55,33 @@ pub enum CoordinatorOutcome {
     NoUpdate,
     Cancelled,
     Reinstalled { build: u64 },
+}
+
+pub fn parse_worker_request(
+    marker: Option<&str>,
+    install_id: Option<&str>,
+    parent_pid: Option<&str>,
+) -> Option<Result<WorkerRequest, String>> {
+    if marker != Some("1") {
+        return None;
+    }
+    let request = (|| {
+        let install_id = install_id
+            .filter(|value| !value.is_empty())
+            .ok_or("macOS update worker has no install epoch")?;
+        let parent_pid = parent_pid
+            .ok_or("macOS update worker has no parent PID")?
+            .parse::<i32>()
+            .map_err(|error| format!("macOS update worker has an invalid parent PID: {error}"))?;
+        if parent_pid <= 0 {
+            return Err("macOS update worker parent PID must be positive".into());
+        }
+        Ok(WorkerRequest {
+            install_id: install_id.to_string(),
+            parent_pid,
+        })
+    })();
+    Some(request)
 }
 
 pub fn next_action(snapshot: CoordinatorSnapshot) -> CoordinatorAction {
