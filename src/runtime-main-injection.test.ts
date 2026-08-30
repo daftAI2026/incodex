@@ -13,6 +13,12 @@ function hookWindowSource(): string {
 }
 
 describe("Electron UI injection reporting", () => {
+  test("lets an authorized renderer configure the macOS Dock decorator", () => {
+    expect(main).toContain('require("./incodex-dock-menu.cjs")');
+    expect(main).toContain('action === "configure-dock-menu"');
+    expect(main).toContain("dockMenuController.configure(payload?.label)");
+  });
+
   test("keeps macOS recovery timing while Windows rechecks asynchronous UI readiness", () => {
     const hook = hookWindowSource();
 
