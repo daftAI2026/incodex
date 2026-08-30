@@ -70,3 +70,4 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           bun run test:windows:rust
+          bun scripts/build-windows-release.ts

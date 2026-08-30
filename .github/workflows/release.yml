@@ -11,8 +11,72 @@ permissions:
   attestations: write
 
 jobs:
+  windows-cli:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          rustflags: ""
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - name: Frozen install
+        run: bun install --frozen-lockfile
+      - name: Build and check Windows CLI
+        shell: pwsh
+        env:
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+
+          if ($env:SOURCE_COMMIT -notmatch '^[0-9a-f]{40}$') {
+            throw 'GITHUB_SHA must be a 40-character hex SHA'
+          }
+          bun run build:runtime
+
+          $Tag = $env:GITHUB_REF -replace '^refs/tags/', ''
+          if ($Tag -notmatch '^v([0-9]+\.[0-9]+\.[0-9]+)$') {
+            throw "release tag must be vX.Y.Z: $Tag"
+          }
+          $Version = $Matches[1]
+          $PackageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $CargoMetadata = cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json
+          $CargoVersion = ($CargoMetadata.packages | Where-Object name -eq 'incodex-cli').version
+          $RuntimeManifest = Get-Content dist/runtime-manifest.json -Raw | ConvertFrom-Json
+          if ($PackageVersion -ne $Version) {
+            throw "package.json version $PackageVersion does not match $Tag"
+          }
+          if ($CargoVersion -ne $Version) {
+            throw "Cargo workspace version $CargoVersion does not match $Tag"
+          }
+          if ($RuntimeManifest.runtimeVersion -ne $Version) {
+            throw "Runtime version $($RuntimeManifest.runtimeVersion) does not match $Tag"
+          }
+          if ($RuntimeManifest.sourceCommit -ne $env:SOURCE_COMMIT) {
+            throw "Runtime sourceCommit $($RuntimeManifest.sourceCommit) does not match GITHUB_SHA $($env:SOURCE_COMMIT)"
+          }
+
+          bun run typecheck
+          bun run lint
+          bun run test:shared
+          bun run test:windows
+          bun run test:windows:rust
+          bun scripts/build-windows-release.ts
+      - name: Upload Windows CLI
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-cli
+          path: release-cli/incodex-windows-x64.exe
+          if-no-files-found: error
+          retention-days: 1
+
   release:
     runs-on: macos-latest
+    needs: windows-cli
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
@@ -159,13 +223,18 @@ jobs:
           }
           verify_runtime_pointer "$ARM_SMOKE_HOME"
           verify_runtime_pointer "$X64_SMOKE_HOME"
+      - name: Download Windows CLI
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-cli
+          path: release-cli
       - name: Checksums
         run: |
           set -euo pipefail
-          (cd release-cli && shasum -a 256 incodex-darwin-arm64 incodex-darwin-x64 > SHA256SUMS)
+          (cd release-cli && shasum -a 256 incodex-darwin-arm64 incodex-darwin-x64 incodex-windows-x64.exe > SHA256SUMS)
           cat release-cli/SHA256SUMS
           ACTUAL_ASSETS=$(find release-cli -type f -exec basename {} \; | LC_ALL=C sort)
-          EXPECTED_ASSETS=$(printf '%s\n' SHA256SUMS incodex-darwin-arm64 incodex-darwin-x64 | LC_ALL=C sort)
+          EXPECTED_ASSETS=$(printf '%s\n' SHA256SUMS incodex-darwin-arm64 incodex-darwin-x64 incodex-windows-x64.exe | LC_ALL=C sort)
           if [[ "$ACTUAL_ASSETS" != "$EXPECTED_ASSETS" ]]; then
             echo "unexpected release asset set" >&2
             printf 'expected:\n%s\nactual:\n%s\n' "$EXPECTED_ASSETS" "$ACTUAL_ASSETS" >&2
@@ -177,6 +246,7 @@ jobs:
           subject-path: |
             release-cli/incodex-darwin-arm64
             release-cli/incodex-darwin-x64
+            release-cli/incodex-windows-x64.exe
             release-cli/SHA256SUMS
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
@@ -186,6 +256,7 @@ jobs:
           files: |
             release-cli/incodex-darwin-arm64
             release-cli/incodex-darwin-x64
+            release-cli/incodex-windows-x64.exe
             release-cli/SHA256SUMS
 
   update-formula:
