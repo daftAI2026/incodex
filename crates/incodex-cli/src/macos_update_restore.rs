@@ -119,13 +119,22 @@ pub fn next_action(snapshot: CoordinatorSnapshot) -> CoordinatorAction {
     if !snapshot.registered {
         return CoordinatorAction::ExitCancelled;
     }
-    if snapshot.parent_running || snapshot.app_running {
+    if snapshot.parent_running {
         return CoordinatorAction::Wait;
     }
 
     let Some(observed_build) = snapshot.observed_build else {
         return CoordinatorAction::Wait;
     };
+    if snapshot.app_running {
+        if snapshot.integration_installed
+            && observed_build == snapshot.source_build
+            && snapshot.grace_expired
+        {
+            return CoordinatorAction::ExitNoUpdate;
+        }
+        return CoordinatorAction::Wait;
+    }
     if !snapshot.integration_installed {
         return CoordinatorAction::Reinstall {
             expected_build: observed_build,
