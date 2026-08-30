@@ -3,7 +3,8 @@
 use std::collections::VecDeque;
 
 use incodex_cli::macos_update_restore::{
-    drive_coordinator, next_action, CoordinatorAction, CoordinatorOutcome, CoordinatorSnapshot,
+    drive_coordinator, next_action, parse_worker_request, CoordinatorAction, CoordinatorOutcome,
+    CoordinatorSnapshot, WorkerRequest,
 };
 
 fn snapshot(
@@ -125,4 +126,22 @@ fn coordinator_exits_without_mutation_when_registration_is_cancelled() {
 
     assert_eq!(outcome, CoordinatorOutcome::Cancelled);
     assert!(!reinstalled);
+}
+
+#[test]
+fn worker_mode_requires_an_explicit_marker_epoch_and_parent_pid() {
+    assert_eq!(parse_worker_request(None, None, None), None);
+    assert!(parse_worker_request(Some("1"), None, Some("42"))
+        .unwrap()
+        .is_err());
+    assert!(parse_worker_request(Some("1"), Some("install-a"), Some("0"))
+        .unwrap()
+        .is_err());
+    assert_eq!(
+        parse_worker_request(Some("1"), Some("install-a"), Some("42")),
+        Some(Ok(WorkerRequest {
+            install_id: "install-a".into(),
+            parent_pid: 42,
+        }))
+    );
 }
