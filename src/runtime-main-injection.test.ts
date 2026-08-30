@@ -49,16 +49,29 @@ describe("Electron UI injection reporting", () => {
     expect(hook).toMatch(/\.catch\(\(error\) => reportInjectionError\(error\)\)/);
   });
 
-  test("leaves official Windows main-window closure to Codex", () => {
+  test("ends an incognito session when either host hides its last main window", () => {
     const created = main.indexOf('electron.app.on("browser-window-created"');
     const officialReturn = main.indexOf("if (!isIncognito()) return;", created);
     expect(created).toBeGreaterThanOrEqual(0);
     expect(officialReturn).toBeGreaterThan(created);
 
     const beforeOfficialReturn = main.slice(created, officialReturn);
-    expect(beforeOfficialReturn).toContain("if (windowsPlatform && isIncognito())");
-    expect(beforeOfficialReturn).toContain("windowsPlatform.exitAfterLastMainWindowCloses(");
+    expect(main).toContain('require("./incodex-window-lifecycle.cjs")');
+    expect(beforeOfficialReturn).toContain("if (isIncognito())");
+    expect(beforeOfficialReturn).toContain("windowLifecycle.exitAfterLastMainWindowCloses(");
     expect(beforeOfficialReturn).toContain("finishIncognito,");
+  });
+
+  test("keeps every incognito exit path idempotent on both platforms", () => {
+    const start = main.indexOf("function finishIncognito(code)");
+    const end = main.indexOf("\n  electron.ipcMain.handle", start);
+    const finish = main.slice(start, end);
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    expect(finish).toContain("if (incognitoExitStarted) return;");
+    expect(finish).toContain("incognitoExitStarted = true;");
+    expect(finish).not.toContain("windowsPlatform && incognitoExitStarted");
   });
 
   test("does not quit the installed Windows main process on the user's behalf", () => {
