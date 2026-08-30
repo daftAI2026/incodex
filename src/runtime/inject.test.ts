@@ -124,15 +124,16 @@ describe("platform shortcut label", () => {
 });
 
 describe("incognito profile mask", () => {
-  test("pins the official Blobatar core for offline generated avatars", () => {
-    expect(packageJson.dependencies?.blobatar).toBe("2.4.0");
+  test("pins one exact Blobatar release for offline generated avatars", () => {
+    const blobatarVersion = packageJson.dependencies?.blobatar;
+    expect(blobatarVersion).toMatch(/^\d+\.\d+\.\d+$/);
     expect(profileMask).toContain('from "blobatar/uri"');
     expect(profileMask).toContain("blobatarUri");
-    expect(notice).toContain("blobatar@2.4.0");
+    expect(notice).toContain(`blobatar@${blobatarVersion}`);
     expect(notice).toContain("Copyright (c) 2026 Alain");
   });
 
-  test("keeps the Blobatar 2.4.0 Temporary golden output stable", () => {
+  test("keeps the Blobatar Temporary golden output stable", () => {
     const digest = createHash("sha256").update(blobatarUri("Temporary")).digest("hex");
     expect(digest).toBe("05377318e542508086482ec3208f61e342e19a123cc1293e862959c19a493df0");
   });
