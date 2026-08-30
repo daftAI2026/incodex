@@ -103,8 +103,12 @@ pub fn parse_worker_request(
 }
 
 pub fn try_run_worker() -> Option<Result<(), String>> {
+    let marker = std::env::var("INCODEX_MACOS_UPDATE_WORKER").ok();
+    if marker.as_deref() != Some("1") {
+        return None;
+    }
     let request = parse_worker_request(
-        std::env::var("INCODEX_MACOS_UPDATE_WORKER").ok().as_deref(),
+        marker.as_deref(),
         std::env::var("INCODEX_MACOS_UPDATE_INSTALL_ID")
             .ok()
             .as_deref(),
