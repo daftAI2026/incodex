@@ -28,10 +28,8 @@ function exitAfterLastMainWindowCloses(win, hasAnotherMainWindow, exit, schedule
         function observeHidden() {
             if (exited || generation !== closeProbeGeneration)
                 return;
-            if (!hasAnotherMainWindow() &&
-                (win.isDestroyed?.() === true || win.isVisible?.() === false)) {
-                exited = true;
-                exit(0);
+            if (win.isDestroyed?.() === true || win.isVisible?.() === false) {
+                exitIfLast(false);
                 return;
             }
             schedule(observeHidden, WINDOW_CLOSE_SETTLE_MS);
