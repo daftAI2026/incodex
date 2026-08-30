@@ -18,7 +18,7 @@ fn write_json_response(stream: &mut TcpStream, value: &Value) {
 }
 
 #[test]
-fn open_selects_the_official_codex_mode_before_injecting_its_ui() {
+fn open_does_not_send_the_keyboard_fallback_when_codex_is_already_selected() {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
     let (commands_tx, commands_rx) = mpsc::channel();
@@ -41,13 +41,26 @@ fn open_selects_the_official_codex_mode_before_injecting_its_ui() {
             let command: Value = serde_json::from_str(&text).unwrap();
             commands_tx.send(command.clone()).unwrap();
             let id = command.get("id").and_then(Value::as_u64).unwrap();
+            let expression = command
+                .pointer("/params/expression")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let is_mode_probe = command.get("method").and_then(Value::as_str)
+                == Some("Runtime.evaluate")
+                && expression.contains("officialBlockerVisible");
             let is_health_probe = command.get("method").and_then(Value::as_str)
                 == Some("Runtime.evaluate")
-                && command
-                    .pointer("/params/expression")
-                    .and_then(Value::as_str)
-                    == Some(ui_ready_expression());
-            let response = if is_health_probe {
+                && expression == ui_ready_expression();
+            let response = if is_mode_probe {
+                json!({
+                    "id": id,
+                    "result": {"result": {"value": {
+                        "modeAvailable": true,
+                        "modeLabel": "Codex",
+                        "officialBlockerVisible": false
+                    }}}
+                })
+            } else if is_health_probe {
                 json!({
                     "id": id,
                     "result": {"result": {"value": {"button": true, "banner": true}}}
@@ -74,25 +87,30 @@ fn open_selects_the_official_codex_mode_before_injecting_its_ui() {
         })
         .collect();
 
-    assert_eq!(mode_keys.len(), 2, "Codex mode must receive Ctrl+3 down/up");
-    assert_eq!(
-        mode_keys[0].pointer("/params/type"),
-        Some(&json!("rawKeyDown"))
+    assert!(
+        mode_keys.is_empty(),
+        "an already-selected Codex page must not receive Ctrl+3"
     );
-    assert_eq!(mode_keys[0].pointer("/params/modifiers"), Some(&json!(2)));
-    assert_eq!(mode_keys[0].pointer("/params/code"), Some(&json!("Digit3")));
-    assert_eq!(mode_keys[1].pointer("/params/type"), Some(&json!("keyUp")));
-
-    let first_runtime = commands
+    let mode_probe = commands
         .iter()
-        .position(|command| command.get("method") == Some(&json!("Runtime.evaluate")))
+        .position(|command| {
+            command
+                .pointer("/params/expression")
+                .and_then(Value::as_str)
+                .is_some_and(|expression| expression.contains("officialBlockerVisible"))
+        })
         .unwrap();
-    let last_mode_key = commands
+    let first_injection = commands
         .iter()
-        .rposition(|command| command.get("method") == Some(&json!("Input.dispatchKeyEvent")))
+        .position(|command| {
+            command
+                .pointer("/params/expression")
+                .and_then(Value::as_str)
+                .is_some_and(|expression| expression.contains("window.__incodexIncognito=true"))
+        })
         .unwrap();
     assert!(
-        last_mode_key < first_runtime,
-        "official mode selection must run first"
+        mode_probe < first_injection,
+        "official mode confirmation must finish before UI injection"
     );
 }
