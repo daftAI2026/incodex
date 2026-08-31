@@ -11,6 +11,10 @@ function region(x: number, y: number, width: number, height: number): CaptureRec
   return { height, width, x, y };
 }
 
+function manualRegion(id: string, rect: CaptureRect) {
+  return { id, rect, source: "manual" as const };
+}
+
 describe("capture window editor state", () => {
   test("starts with the observed capture defaults", () => {
     const state = createCaptureWindowState(SOURCE);
@@ -29,10 +33,13 @@ describe("capture window editor state", () => {
     const initial = createCaptureWindowState(SOURCE);
     const next = applyCaptureCommand(initial, {
       kind: "add-region",
+      id: "manual-1",
       rect: region(180, 120, -80, -40),
     });
 
-    expect(next.regions).toEqual([region(100, 80, 80, 40)]);
+    expect(next.regions).toEqual([
+      manualRegion("manual-1", region(100, 80, 80, 40)),
+    ]);
     expect(next.history.past).toHaveLength(1);
     expect(next.history.future).toHaveLength(0);
   });
@@ -41,15 +48,19 @@ describe("capture window editor state", () => {
     const initial = createCaptureWindowState(SOURCE);
     const tiny = applyCaptureCommand(initial, {
       kind: "add-region",
+      id: "manual-tiny",
       rect: region(10, 10, 5, 12),
     });
     const clamped = applyCaptureCommand(tiny, {
       kind: "add-region",
+      id: "manual-edge",
       rect: region(1180, 790, 80, 40),
     });
 
     expect(tiny).toBe(initial);
-    expect(clamped.regions).toEqual([region(1180, 790, 20, 11)]);
+    expect(clamped.regions).toEqual([
+      manualRegion("manual-edge", region(1180, 790, 20, 11)),
+    ]);
   });
 
   test("undo, redo, and clear preserve non-region editor preferences", () => {
@@ -57,6 +68,7 @@ describe("capture window editor state", () => {
     const configured = applyCaptureCommand(initial, { kind: "set-padding", padding: 96 });
     const withRegion = applyCaptureCommand(configured, {
       kind: "add-region",
+      id: "manual-1",
       rect: region(20, 30, 80, 60),
     });
     const undone = applyCaptureCommand(withRegion, { kind: "undo" });
@@ -64,7 +76,9 @@ describe("capture window editor state", () => {
     const cleared = applyCaptureCommand(redone, { kind: "clear-regions" });
 
     expect(undone.regions).toEqual([]);
-    expect(redone.regions).toEqual([region(20, 30, 80, 60)]);
+    expect(redone.regions).toEqual([
+      manualRegion("manual-1", region(20, 30, 80, 60)),
+    ]);
     expect(cleared.regions).toEqual([]);
     expect(cleared.padding).toBe(96);
   });
@@ -73,6 +87,7 @@ describe("capture window editor state", () => {
     const initial = createCaptureWindowState(SOURCE);
     const withRegion = applyCaptureCommand(initial, {
       kind: "add-region",
+      id: "manual-1",
       rect: region(20, 30, 80, 60),
     });
     const retaken = applyCaptureCommand(withRegion, {
@@ -84,6 +99,26 @@ describe("capture window editor state", () => {
     expect(retaken.sourceRevision).toBe(withRegion.sourceRevision + 1);
     expect(retaken.regions).toEqual(withRegion.regions);
     expect(retaken.background).toEqual(withRegion.background);
+  });
+
+  test("keeps automatic candidates inert until selected and removes one confirmed mask by id", () => {
+    const initial = createCaptureWindowState(SOURCE);
+    const selected = applyCaptureCommand(initial, {
+      id: "project-1",
+      kind: "select-automatic-region",
+      rect: region(14, 145, 220, 28),
+    });
+    const removed = applyCaptureCommand(selected, {
+      id: "project-1",
+      kind: "remove-region",
+    });
+
+    expect(initial.regions).toEqual([]);
+    expect(selected.regions).toEqual([
+      { id: "project-1", rect: region(14, 145, 220, 28), source: "automatic" },
+    ]);
+    expect(removed.regions).toEqual([]);
+    expect(removed.history.past).toHaveLength(2);
   });
 
   test("updates the editing tool, privacy style, background, and shadow independently", () => {

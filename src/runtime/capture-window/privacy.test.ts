@@ -6,6 +6,7 @@ describe("Codex capture privacy candidates", () => {
     const regions = codexPreviewPrivacyRegions({ height: 801, width: 1200 });
 
     expect(regions).toHaveLength(5);
+    expect(new Set(regions.map((region) => region.id)).size).toBe(5);
     expect(regions.every((region) => region.x >= 0 && region.x + region.width <= 248)).toBe(true);
     expect(regions.map((region) => region.kind)).toEqual([
       "project",

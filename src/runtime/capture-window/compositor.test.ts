@@ -14,15 +14,23 @@ describe("capture window compositor plan", () => {
     });
   });
 
-  test("keeps background, window, automatic masks, and manual masks in stable order", () => {
+  test("exports only confirmed automatic and manual masks in stable order", () => {
     const state = createCaptureWindowState({ width: 1200, height: 801, scaleFactor: 2 });
-    const plan = createCaptureRenderPlan(
-      {
-        ...state,
-        regions: [{ x: 40, y: 50, width: 80, height: 60 }],
-      },
-      [{ x: 10, y: 20, width: 30, height: 24 }],
-    );
+    const plan = createCaptureRenderPlan({
+      ...state,
+      regions: [
+        {
+          id: "automatic-1",
+          rect: { x: 10, y: 20, width: 30, height: 24 },
+          source: "automatic",
+        },
+        {
+          id: "manual-1",
+          rect: { x: 40, y: 50, width: 80, height: 60 },
+          source: "manual",
+        },
+      ],
+    });
 
     expect(plan.map((operation) => operation.kind)).toEqual([
       "background",
