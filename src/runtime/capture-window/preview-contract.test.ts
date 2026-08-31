@@ -149,11 +149,15 @@ describe("capture window preview", () => {
 
   test("keeps the CDP experiment behind an explicit bootstrap without adding a public shortcut", () => {
     const inject = readFileSync(join(import.meta.dir, "../inject.ts"), "utf8");
+    const injectedCapture = readFileSync(join(import.meta.dir, "injected.ts"), "utf8");
 
     expect(inject).toContain('from "./capture-window/injected.ts"');
     expect(inject).toContain("window.__incodexCaptureDebug === true");
     expect(inject).toContain("openInjectedCaptureWindow");
     expect(inject).not.toContain('event.code === "KeyS"');
+    expect(injectedCapture).toContain("markCodexPrivacyPlaceholders(document)");
+    expect(injectedCapture).toContain("restorePrivacyPlaceholders()");
+    expect(injectedCapture).not.toContain("createCodexPrivacyPlaceholderSession");
   });
 
   test("uses the existing Lucide camera at the shared header position and captures only on click", () => {

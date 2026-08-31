@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   CAPTURE_CANDIDATE_SELECTOR,
   collectCaptureCandidates,
-  createCodexPrivacyPlaceholderSession,
   markCodexPrivacyPlaceholders,
 } from "./privacy.ts";
 
@@ -282,24 +281,4 @@ describe("Codex privacy placeholders", () => {
     expect(title.getAttribute("data-incodex-capture-redact")).toBe("existing");
   });
 
-  test("keeps the host masked while privacy is enabled and restores it on disable or close", () => {
-    const title = new FakePrivacyElement({ tagName: "SPAN", text: "Private thread" });
-    const thread = new FakePrivacyElement({
-      attributes: { "data-app-action-sidebar-thread-title": "Private thread" },
-      children: [title],
-    });
-    const session = createCodexPrivacyPlaceholderSession(privacyDocument({ threads: [thread] }));
-
-    session.sync(true);
-    expect(title.getAttribute("data-incodex-capture-redact")).toBe("text");
-    session.sync(true);
-    expect(title.getAttribute("data-incodex-capture-redact")).toBe("text");
-
-    session.sync(false);
-    expect(title.hasAttribute("data-incodex-capture-redact")).toBe(false);
-
-    session.sync(true);
-    session.clear();
-    expect(title.hasAttribute("data-incodex-capture-redact")).toBe(false);
-  });
 });
