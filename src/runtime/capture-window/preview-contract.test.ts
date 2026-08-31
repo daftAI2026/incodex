@@ -20,6 +20,8 @@ describe("capture window preview", () => {
       "bun scripts/capture-window-preview.ts",
     );
     expect(server).toContain("127.0.0.1");
+    expect(server).toContain('path.startsWith("/capture-backgrounds/")');
+    expect(server).toContain('"assets/capture-backgrounds"');
     expect(preview).toContain("mountCaptureWindowEditor");
     expect(preview).not.toContain("incodex-main.cts");
     expect(editor).toContain("onCopy?:");
