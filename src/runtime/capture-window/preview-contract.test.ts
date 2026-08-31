@@ -40,11 +40,9 @@ describe("capture window preview", () => {
   test("switches redaction appearance without rebuilding the modal shell", () => {
     const editor = readFileSync(join(import.meta.dir, "editor.ts"), "utf8");
 
-    expect(editor).toContain("updateRedactionStyle");
-    expect(editor).toContain("wireActions(root, dispatch, dispatchRegion, preview");
-    expect(editor).not.toMatch(
-      /const actions:[\s\S]*"style-mosaic"[\s\S]*"tool-move"/,
-    );
+    expect(editor).toContain('dispatch({ kind: "set-redaction-style", style })');
+    expect(editor).toContain("wireToolbarActions(root, dispatch, dispatchRegion, resetView)");
+    expect(editor).not.toContain("root.innerHTML = captureToolbarTemplate");
   });
 
   test("matches the observed dialog structure without invented controls", () => {
@@ -81,6 +79,11 @@ describe("capture window preview", () => {
     expect(editor).toContain("function refreshEditor");
     expect(editor).toContain("function refreshToolbar");
     expect(editor).toContain("readState: () => CaptureWindowState");
-    expect(editor).not.toMatch(/function dispatch\([\s\S]*?\n  }\n[\s\S]*?render\(\);/);
+    expect(editor).toContain(
+      "state = applyCaptureCommand(state, command);\n    refreshEditor(command);",
+    );
+    expect(editor).not.toContain(
+      "state = applyCaptureCommand(state, command);\n    render();",
+    );
   });
 });

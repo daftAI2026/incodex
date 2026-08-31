@@ -24,7 +24,7 @@ export function captureWindowTemplate(
       </header>
       <div class="incodex-capture-workspace">
         <section class="incodex-capture-preview-pane" aria-label="${copy.preview}">
-          ${toolbarTemplate(state, copy)}
+          ${captureToolbarTemplate(state, copy)}
           <div class="incodex-capture-stage" data-tool="${state.tool}">
             <div class="incodex-capture-canvas-frame">
               <div class="incodex-capture-region-layer" aria-hidden="true"></div>
@@ -38,7 +38,10 @@ export function captureWindowTemplate(
   `;
 }
 
-function toolbarTemplate(state: CaptureWindowState, copy: CaptureWindowCopy): string {
+export function captureToolbarTemplate(
+  state: CaptureWindowState,
+  copy: CaptureWindowCopy,
+): string {
   const hint = captureRegionHint(state, copy);
   return `
     <div class="incodex-capture-toolbar">
@@ -126,10 +129,12 @@ function backgroundGridTemplate(
   const presets = capturePresets.map((preset) => {
     const { id } = preset;
     const selected = state.background.kind === "preset" && state.background.id === id;
-    return `<button class="incodex-capture-background-option" data-background="${id}" type="button" aria-label="${id}" aria-pressed="${selected}" style="--capture-swatch:${capturePresetSwatch(preset)}">${selected ? captureIcon("check", 14) : ""}</button>`;
+    return `<button class="incodex-capture-background-option" data-background="${id}" type="button" aria-label="${id}" title="${id}" aria-pressed="${selected}" style="--capture-swatch:${capturePresetSwatch(preset)}"></button>`;
   }).join("");
   const transparent = state.background.kind === "transparent";
-  return `<div class="incodex-capture-background-grid">${presets}<label class="incodex-capture-background-option incodex-capture-color-label" aria-label="${copy.custom}" title="${copy.custom}" style="--capture-swatch:${backgroundColor(state.background)}">${captureIcon("pipette", 11)}<input class="incodex-capture-color-input" data-input="color" type="color" value="${backgroundColor(state.background)}"></label><button class="incodex-capture-background-option" data-background="transparent" type="button" aria-label="${copy.transparent}" title="${copy.transparent}" aria-pressed="${transparent}" style="--capture-swatch:conic-gradient(#d9d9d9 25%,#fff 0 50%,#d9d9d9 0 75%,#fff 0) 0/12px 12px">${transparent ? captureIcon("check", 14) : ""}</button><label class="incodex-capture-background-option incodex-capture-wallpaper-label" aria-label="${copy.wallpaper}" title="${copy.wallpaper}">${captureIcon("image-plus", 13)}<input class="incodex-capture-wallpaper-input" data-input="wallpaper" type="file" accept="image/png,image/jpeg,image/webp"></label></div>`;
+  const custom = state.background.kind === "color";
+  const wallpaper = state.background.kind === "wallpaper";
+  return `<div class="incodex-capture-background-grid">${presets}<label class="incodex-capture-background-option incodex-capture-color-label" data-background-custom data-selected="${custom}" aria-label="${copy.custom}" title="${copy.custom}" style="--capture-swatch:${backgroundColor(state.background)}">${captureIcon("pipette", 11)}<input class="incodex-capture-color-input" data-input="color" type="color" value="${backgroundColor(state.background)}"></label><button class="incodex-capture-background-option" data-background="transparent" type="button" aria-label="${copy.transparent}" title="${copy.transparent}" aria-pressed="${transparent}" style="--capture-swatch:conic-gradient(#d9d9d9 25%,#fff 0 50%,#d9d9d9 0 75%,#fff 0) 0/12px 12px"></button><label class="incodex-capture-background-option incodex-capture-wallpaper-label" data-background-wallpaper data-selected="${wallpaper}" aria-label="${copy.wallpaper}" title="${copy.wallpaper}">${captureIcon("image-plus", 13)}<input class="incodex-capture-wallpaper-input" data-input="wallpaper" type="file" accept="image/png,image/jpeg,image/webp"></label></div>`;
 }
 
 function footerTemplate(copy: CaptureWindowCopy): string {

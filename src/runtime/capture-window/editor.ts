@@ -3,19 +3,20 @@ import { capturePhysicalPadding, renderCaptureToCanvas } from "./compositor.ts";
 import { anchoredPanForZoom, viewportRectToSource } from "./geometry.ts";
 import {
   applyCaptureCommand,
+  CAPTURE_MAX_ZOOM,
+  CAPTURE_MIN_ZOOM,
   type CaptureCandidate,
   captureHistoryShortcut,
   capturePointerIntent,
   createCaptureWindowState,
   type CapturePresetId,
   type CaptureRect,
-  type CaptureRedactionStyle,
   scaleCaptureZoom,
   type CaptureWindowCommand,
   type CaptureWindowState,
   wheelCaptureZoom,
 } from "./model.ts";
-import { captureWindowTemplate } from "./view.ts";
+import { captureToolbarTemplate, captureWindowTemplate } from "./view.ts";
 
 const MAX_WALLPAPER_BYTES = 32 * 1024 * 1024;
 const WALLPAPER_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -86,12 +87,12 @@ export function mountCaptureWindowEditor(
 
   function dispatch(command: CaptureWindowCommand): void {
     state = applyCaptureCommand(state, command);
-    render();
+    refreshEditor(command);
   }
 
   function preview(command: CaptureWindowCommand): void {
     state = applyCaptureCommand(state, command);
-    renderCanvas();
+    refreshEditor(command);
   }
 
   function dispatchRegion(command: CaptureWindowCommand): void {
@@ -127,6 +128,40 @@ export function mountCaptureWindowEditor(
     }
   }
 
+  function resetView(): void {
+    panX = 0;
+    panY = 0;
+    dispatch({ kind: "set-zoom", zoom: 1 });
+  }
+
+  function refreshEditor(command: CaptureWindowCommand): void {
+    root.setAttribute("data-tool", state.tool);
+    const stage = root.querySelector<HTMLElement>(".incodex-capture-stage");
+    if (stage) stage.dataset.tool = state.tool;
+    if (
+      command.kind === "set-tool" ||
+      command.kind === "set-redaction-source" ||
+      command.kind === "set-redaction-style"
+    ) {
+      refreshToolbar();
+    }
+    syncEditorControls(root, state);
+    renderCanvas();
+    updateHistoryControls(root, state);
+  }
+
+  function refreshToolbar(): void {
+    const toolbar = root.querySelector<HTMLElement>(".incodex-capture-toolbar");
+    if (!toolbar) return;
+    const template = document.createElement("template");
+    template.innerHTML = captureToolbarTemplate(state, copy).trim();
+    const replacement = template.content.firstElementChild;
+    if (!(replacement instanceof HTMLElement)) return;
+    toolbar.replaceWith(replacement);
+    wireToolbarActions(root, dispatch, dispatchRegion, resetView);
+    wireSolidColorInput(replacement, dispatch, preview);
+  }
+
   function render(): void {
     if (destroyed) return;
     root.innerHTML = captureWindowTemplate(state, copy);
@@ -136,16 +171,13 @@ export function mountCaptureWindowEditor(
 
     const rendered = renderCanvas();
     const frame = root.querySelector<HTMLElement>(".incodex-capture-canvas-frame");
-    wireActions(root, dispatch, dispatchRegion, preview, () => {
-      panX = 0;
-      panY = 0;
-      dispatch({ kind: "set-zoom", zoom: 1 });
-    });
+    wireToolbarActions(root, dispatch, dispatchRegion, resetView);
+    wireBackgroundActions(root, dispatch);
     wireStage(
       root,
       rendered,
       frame,
-      state,
+      () => state,
       dispatchRegion,
       () => `manual-${++manualRegionSequence}`,
       () => ({ panX, panY }),
@@ -187,7 +219,7 @@ export function mountCaptureWindowEditor(
     mountRegionLayer(frame, canvas, state, automaticCandidates, copy, dispatchRegion);
     const paddingValue = root.querySelector<HTMLElement>("[data-value='padding']");
     if (paddingValue) paddingValue.textContent = `${state.padding}px`;
-    window.requestAnimationFrame(() => fitCanvas(root, rendered, frame, state.zoom, panX, panY));
+    window.requestAnimationFrame(() => fitCanvas(root, canvas, frame, state.zoom, panX, panY));
     return canvas;
   }
 
@@ -289,11 +321,10 @@ export function mountCaptureWindowEditor(
   };
 }
 
-function wireActions(
+function wireToolbarActions(
   root: HTMLElement,
   dispatch: (command: CaptureWindowCommand) => void,
   dispatchRegion: (command: CaptureWindowCommand) => void,
-  preview: (command: CaptureWindowCommand) => void,
   resetView: () => void,
 ): void {
   const actions: Record<string, CaptureWindowCommand> = {
@@ -318,7 +349,7 @@ function wireActions(
   }
   for (const style of ["mosaic", "blur", "solid"] as const) {
     root.querySelector<HTMLElement>(`[data-action='style-${style}']`)?.addEventListener("click", () => {
-      updateRedactionStyle(root, style, preview);
+      dispatch({ kind: "set-redaction-style", style });
     });
   }
   root.querySelector<HTMLElement>("[data-action='zoom-in']")?.addEventListener("click", () => {
@@ -330,6 +361,12 @@ function wireActions(
   root.querySelector<HTMLElement>("[data-action='zoom-reset']")?.addEventListener("click", () => {
     resetView();
   });
+}
+
+function wireBackgroundActions(
+  root: HTMLElement,
+  dispatch: (command: CaptureWindowCommand) => void,
+): void {
   for (const option of root.querySelectorAll<HTMLElement>("[data-background]")) {
     option.addEventListener("click", () => {
       const id = option.dataset.background;
@@ -343,19 +380,6 @@ function wireActions(
       });
     });
   }
-}
-
-function updateRedactionStyle(
-  root: HTMLElement,
-  style: CaptureRedactionStyle,
-  preview: (command: CaptureWindowCommand) => void,
-): void {
-  preview({ kind: "set-redaction-style", style });
-  for (const option of root.querySelectorAll<HTMLElement>("[data-redaction-style]")) {
-    option.setAttribute("aria-pressed", String(option.dataset.redactionStyle === style));
-  }
-  const solidColor = root.querySelector<HTMLElement>("[data-solid-color-row]");
-  if (solidColor) solidColor.hidden = style !== "solid";
 }
 
 function wireInputs(
@@ -397,6 +421,18 @@ function wireInputs(
       background: { color: (event.currentTarget as HTMLInputElement).value, kind: "color" },
     });
   });
+  wireSolidColorInput(root, dispatch, preview);
+  root.querySelector<HTMLInputElement>("[data-input='wallpaper']")?.addEventListener("change", (event) => {
+    const file = (event.currentTarget as HTMLInputElement).files?.[0];
+    if (file) void loadWallpaper(file);
+  });
+}
+
+function wireSolidColorInput(
+  root: ParentNode,
+  dispatch: (command: CaptureWindowCommand) => void,
+  preview: (command: CaptureWindowCommand) => void,
+): void {
   const solidColor = root.querySelector<HTMLInputElement>("[data-input='solid-color']");
   solidColor?.addEventListener("input", (event) => {
     preview({
@@ -410,17 +446,57 @@ function wireInputs(
       color: (event.currentTarget as HTMLInputElement).value,
     });
   });
-  root.querySelector<HTMLInputElement>("[data-input='wallpaper']")?.addEventListener("change", (event) => {
-    const file = (event.currentTarget as HTMLInputElement).files?.[0];
-    if (file) void loadWallpaper(file);
-  });
+}
+
+function syncEditorControls(root: HTMLElement, state: CaptureWindowState): void {
+  const zoom = root.querySelector<HTMLElement>(".incodex-capture-zoom-reset");
+  if (zoom) zoom.textContent = `${Math.round(state.zoom * 100)}%`;
+  const zoomOut = root.querySelector<HTMLButtonElement>("[data-action='zoom-out']");
+  const zoomIn = root.querySelector<HTMLButtonElement>("[data-action='zoom-in']");
+  if (zoomOut) zoomOut.disabled = state.zoom <= CAPTURE_MIN_ZOOM;
+  if (zoomIn) zoomIn.disabled = state.zoom >= CAPTURE_MAX_ZOOM;
+
+  for (const option of root.querySelectorAll<HTMLElement>("[data-background]")) {
+    const selected =
+      option.dataset.background === "transparent"
+        ? state.background.kind === "transparent"
+        : state.background.kind === "preset" && option.dataset.background === state.background.id;
+    option.setAttribute("aria-pressed", String(selected));
+  }
+
+  const custom = root.querySelector<HTMLElement>("[data-background-custom]");
+  const color = root.querySelector<HTMLInputElement>("[data-input='color']");
+  if (custom) {
+    custom.dataset.selected = String(state.background.kind === "color");
+    if (state.background.kind === "color") {
+      custom.style.setProperty("--capture-swatch", state.background.color);
+    }
+  }
+  if (color && state.background.kind === "color") color.value = state.background.color;
+  const wallpaper = root.querySelector<HTMLElement>("[data-background-wallpaper]");
+  if (wallpaper) wallpaper.dataset.selected = String(state.background.kind === "wallpaper");
+
+  const padding = root.querySelector<HTMLInputElement>("[data-input='padding']");
+  const paddingValue = root.querySelector<HTMLElement>("[data-value='padding']");
+  if (padding) padding.value = String(state.padding);
+  if (paddingValue) paddingValue.textContent = `${state.padding}px`;
+
+  const shadow = root.querySelector<HTMLInputElement>("[data-input='shadow']");
+  const privacy = root.querySelector<HTMLInputElement>("[data-input='privacy']");
+  if (shadow) shadow.checked = state.shadow;
+  if (privacy) privacy.checked = state.privacyEnabled;
+
+  const solidColor = root.querySelector<HTMLInputElement>("[data-input='solid-color']");
+  const solidSwatch = root.querySelector<HTMLElement>(".incodex-capture-solid-color > span");
+  if (solidColor) solidColor.value = state.solidColor;
+  solidSwatch?.style.setProperty("--capture-solid-color", state.solidColor);
 }
 
 function wireStage(
   root: HTMLElement,
   canvas: HTMLCanvasElement,
   frame: HTMLElement | null,
-  state: CaptureWindowState,
+  readState: () => CaptureWindowState,
   dispatch: (command: CaptureWindowCommand) => void,
   createManualRegionId: () => string,
   readPan: () => { panX: number; panY: number },
@@ -434,6 +510,7 @@ function wireStage(
 
   stage.addEventListener("wheel", (event) => {
     event.preventDefault();
+    const state = readState();
     const nextZoom = wheelCaptureZoom(state.zoom, event.deltaY);
     const stageRect = stage.getBoundingClientRect();
     const currentPan = readPan();
@@ -449,6 +526,7 @@ function wireStage(
   }, { passive: false });
 
   stage.addEventListener("pointerdown", (event) => {
+    const state = readState();
     const target = event.target instanceof Element ? event.target : null;
     const intent = capturePointerIntent(
       state.tool,
@@ -490,6 +568,7 @@ function wireStage(
     const x = gesture.startPanX + event.clientX - gesture.startClientX;
     const y = gesture.startPanY + event.clientY - gesture.startClientY;
     writePan(x, y);
+    const state = readState();
     frame.style.transform = `translate(${x}px, ${y}px) scale(${state.zoom})`;
   });
 
@@ -497,6 +576,7 @@ function wireStage(
     if (!gesture || gesture.pointerId !== event.pointerId) return;
     if (draft) {
       if (commit) {
+        const state = readState();
         const canvasRect = canvas.getBoundingClientRect();
         const scale = canvasRect.width / canvas.width;
         const rect = viewportRectToSource(

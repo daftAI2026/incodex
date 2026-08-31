@@ -504,7 +504,8 @@
   position: relative;
 }
 
-.incodex-capture-background-option[aria-pressed="true"] {
+.incodex-capture-background-option[aria-pressed="true"],
+.incodex-capture-background-option[data-selected="true"] {
   border-color: var(--incodex-capture-surface);
   box-shadow: 0 0 0 2px var(--incodex-capture-ring);
 }
