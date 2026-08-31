@@ -151,4 +151,14 @@ describe("capture window preview", () => {
     expect(inject).toContain("openInjectedCaptureWindow");
     expect(inject).not.toContain('event.code === "KeyS"');
   });
+
+  test("uses the existing Lucide camera at the shared header position and captures only on click", () => {
+    const inject = readFileSync(join(import.meta.dir, "../inject.ts"), "utf8");
+    const activate = inject.slice(inject.indexOf("async function activate"), inject.indexOf("function ensureStyle"));
+    const start = inject.slice(inject.indexOf("function start"), inject.indexOf("declare global"));
+
+    expect(inject).toContain('captureIcon("camera", 16)');
+    expect(activate).toContain("openInjectedCaptureWindow");
+    expect(start).not.toContain("openInjectedCaptureWindow");
+  });
 });
