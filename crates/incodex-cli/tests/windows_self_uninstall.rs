@@ -67,6 +67,8 @@ fn self_uninstall_handoff_waits_for_owner_and_preserves_unrelated_state() {
         .expect("create private package root");
     incodex_core::windows_session::ensure_private_windows_dir(&runtime.parent().unwrap())
         .expect("create private Runtime fixture");
+    incodex_core::windows_session::ensure_private_windows_dir(&user_root.join("sessions"))
+        .expect("create private sessions parent");
     incodex_core::windows_session::ensure_private_windows_dir(&session.parent().unwrap())
         .expect("create private session fixture");
 
