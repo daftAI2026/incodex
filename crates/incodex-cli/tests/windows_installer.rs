@@ -28,10 +28,19 @@ fn sha256(path: &Path) -> String {
 }
 
 fn run_installer(download_dir: &Path, user_root: &Path) -> std::process::Output {
+    run_installer_mode(download_dir, user_root, true)
+}
+
+fn run_installer_mode(
+    download_dir: &Path,
+    user_root: &Path,
+    test_mode: bool,
+) -> std::process::Output {
     let script = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join("install.ps1");
-    Command::new("powershell.exe")
+    let mut command = Command::new("powershell.exe");
+    command
         .args([
             "-NoLogo",
             "-NoProfile",
@@ -43,9 +52,11 @@ fn run_installer(download_dir: &Path, user_root: &Path) -> std::process::Output 
         .env("INCODEX_DOWNLOAD_DIR", download_dir)
         .env("INCODEX_USER_ROOT", user_root)
         .env("INCODEX_EXPECTED_VERSION", env!("CARGO_PKG_VERSION"))
-        .env("INCODEX_SKIP_PATH", "1")
-        .output()
-        .expect("run PowerShell installer")
+        .env("INCODEX_SKIP_PATH", "1");
+    if test_mode {
+        command.env("INCODEX_TEST_MODE", "1");
+    }
+    command.output().expect("run PowerShell installer")
 }
 
 fn release_fixture(root: &Path, digest: &str) -> PathBuf {
@@ -192,6 +203,26 @@ fn existing_release_junction_fails_closed() {
         .status()
         .expect("remove release junction");
     fs::remove_dir_all(root).expect("remove scratch directory");
+}
+
+#[test]
+fn production_installer_rejects_test_only_path_overrides() {
+    let root = scratch("production-overrides");
+    let user_root = root.join("user-root");
+    let source = Path::new(env!("CARGO_BIN_EXE_incodex"));
+    let release = release_fixture(&root, &sha256(source));
+
+    let output = run_installer_mode(&release, &user_root, false);
+    let launcher_was_published = user_root.join("bin/incodex.cmd").exists();
+    fs::remove_dir_all(&root).expect("remove scratch directory");
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("test-only"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!launcher_was_published);
 }
 
 #[test]
