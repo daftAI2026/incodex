@@ -221,6 +221,7 @@ fn injected_ui_carries_profile_mask_as_a_json_bootstrap_value() {
             name: "Temporary".into(),
             avatar: ProfileAvatar::Generated,
         }),
+        ..InjectionOptions::default()
     });
 
     assert!(source.contains(
@@ -257,10 +258,8 @@ fn capture_debug_protocol_accepts_only_typed_requests_and_png_results() {
     }))
     .is_none());
 
-    let expression = capture_debug_resolve_expression(
-        "capture-7",
-        Ok("data:image/png;base64,cG5n"),
-    );
+    let expression =
+        capture_debug_resolve_expression("capture-7", Ok("data:image/png;base64,cG5n"));
     assert!(expression.contains("__incodexResolveCaptureDebug"));
     assert!(expression.contains("data:image/png;base64,cG5n"));
 }
@@ -273,6 +272,7 @@ fn profile_payload_is_null_outside_the_exact_top_level_codex_page() {
             name: "Quiet Otter".into(),
             avatar: ProfileAvatar::Generated,
         }),
+        ..InjectionOptions::default()
     });
 
     assert!(source.contains("window.top===window"));

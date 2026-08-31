@@ -16,18 +16,38 @@ mkdirSync(outDir, { recursive: true });
 
 const hatGlassesSvg = readFileSync(join(root, "assets/hat-glasses.svg"), "utf8").trim();
 const circleXSvg = readFileSync(join(root, "assets/circle-x.svg"), "utf8").trim();
+const captureWindowCss = [
+  readFileSync(join(root, "src/runtime/capture-window/capture-window.css"), "utf8"),
+  readFileSync(join(root, "src/runtime/capture-window/color-popover.css"), "utf8"),
+].join("\n");
+const capturePresetNames = [
+  "sea",
+  "canyon",
+  "mist",
+  "highland",
+  "ocean",
+  "silver",
+  "azure",
+  "indigo",
+  "ember",
+  "graphite",
+];
+const capturePresetAssets = Object.fromEntries(
+  capturePresetNames.map((name) => [
+    name,
+    `data:image/jpeg;base64,${readFileSync(join(root, `assets/capture-backgrounds/${name}.jpg`)).toString("base64")}`,
+  ]),
+);
 
-function embedSvg(svg: string): string {
-  return svg.replace(/`/g, "\\`").replace(/\$\{/g, "\\${");
+function embedTemplateText(value: string): string {
+  return value.replace(/`/g, "\\`").replace(/\$\{/g, "\\${");
 }
 
-const injectSrc = readFileSync(join(root, "src/runtime/inject.ts"), "utf8").replace(
-  "{{HAT_GLASSES_SVG}}",
-  embedSvg(hatGlassesSvg),
-).replace(
-  "{{CIRCLE_X_SVG}}",
-  embedSvg(circleXSvg),
-);
+const injectSrc = readFileSync(join(root, "src/runtime/inject.ts"), "utf8")
+  .replace("{{HAT_GLASSES_SVG}}", embedTemplateText(hatGlassesSvg))
+  .replace("{{CIRCLE_X_SVG}}", embedTemplateText(circleXSvg))
+  .replace("{{CAPTURE_WINDOW_CSS}}", embedTemplateText(captureWindowCss))
+  .replace("{{CAPTURE_PRESET_ASSETS}}", JSON.stringify(capturePresetAssets));
 
 const injectTmp = join(root, "src/runtime/_inject.src.ts");
 writeFileSync(injectTmp, injectSrc);

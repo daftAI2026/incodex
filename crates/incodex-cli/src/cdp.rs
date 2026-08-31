@@ -27,6 +27,7 @@ const INJECT_PREFIX: &str = "window.__incodexIncognito=true;";
 const OFFICIAL_CODEX_PAGE_URL: &str = "app://-/index.html";
 const MAX_HTTP_RESPONSE_BYTES: usize = 1024 * 1024;
 const CDP_IO_TIMEOUT: Duration = Duration::from_secs(2);
+const CAPTURE_DEBUG_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const LIFECYCLE_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const PRIMARY_TARGET_MISSING_POLLS: u8 = 2;
 const WINDOWS_CDP_FAILURE_POLLS: u8 = 3;
@@ -48,8 +49,14 @@ pub struct CdpTarget {
 
 #[derive(Debug, Clone, Default)]
 pub struct InjectionOptions {
+    pub capture_debug: bool,
     pub locale: Option<String>,
     pub profile_mask: Option<ProfileMask>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CaptureDebugRequest {
+    id: String,
 }
 
 #[derive(Clone, Copy)]
@@ -120,6 +127,7 @@ pub fn inject_source_for_locale(locale: Option<&str>) -> String {
     inject_source_for_options(&InjectionOptions {
         locale: locale.map(str::to_string),
         profile_mask: None,
+        ..InjectionOptions::default()
     })
 }
 
@@ -138,8 +146,13 @@ pub fn inject_source_for_options(options: &InjectionOptions) -> String {
         ),
         None => "null".to_string(),
     };
+    let capture_debug = if options.capture_debug {
+        "window.__incodexCaptureDebug=true;"
+    } else {
+        ""
+    };
     format!(
-        "{INJECT_PREFIX}window.__incodexLocale={locale};{platform}window.__incodexProfileMask={profile_bootstrap};\n{INJECT_JS}"
+        "{INJECT_PREFIX}{capture_debug}window.__incodexLocale={locale};{platform}window.__incodexProfileMask={profile_bootstrap};\n{INJECT_JS}"
     )
 }
 
@@ -442,6 +455,106 @@ fn ensure_injection_active(process_alive: &AtomicBool) -> Result<(), String> {
     } else {
         Err("CDP injection cancelled after child exit".into())
     }
+}
+
+pub(crate) fn start_capture_debug_monitor(
+    debug_port: u16,
+    process_alive: Arc<AtomicBool>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || monitor_capture_debug(debug_port, &process_alive))
+}
+
+fn monitor_capture_debug(debug_port: u16, process_alive: &AtomicBool) {
+    while process_alive.load(Ordering::Acquire) {
+        if monitor_capture_debug_target(debug_port, process_alive).is_err() {
+            thread::sleep(LIFECYCLE_POLL_INTERVAL);
+        }
+    }
+}
+
+fn monitor_capture_debug_target(debug_port: u16, process_alive: &AtomicBool) -> Result<(), String> {
+    let targets = list_targets(debug_port)?;
+    let page = pick_codex_page_target(&targets).ok_or("no Codex page target")?;
+    let mut socket = connect_cdp_websocket(&page.ws, debug_port)?;
+    send_cdp(&mut socket, 1, "Page.enable", json!({}))?;
+    let mut next_id = 2;
+
+    while process_alive.load(Ordering::Acquire) {
+        let response = send_cdp(
+            &mut socket,
+            next_id,
+            "Runtime.evaluate",
+            json!({
+                "expression": "window.__incodexTakeCaptureDebugRequest?.() ?? null",
+                "returnByValue": true
+            }),
+        )?;
+        next_id += 1;
+
+        let Some(request) = parse_capture_debug_request(&response) else {
+            thread::sleep(CAPTURE_DEBUG_POLL_INTERVAL);
+            continue;
+        };
+        let capture = send_cdp(
+            &mut socket,
+            next_id,
+            "Page.captureScreenshot",
+            json!({
+                "captureBeyondViewport": false,
+                "format": "png",
+                "fromSurface": true
+            }),
+        );
+        next_id += 1;
+        let result = capture.and_then(capture_debug_data_url);
+        let expression = match result {
+            Ok(data_url) => capture_debug_resolve_expression(&request.id, Ok(&data_url)),
+            Err(error) => capture_debug_resolve_expression(&request.id, Err(&error)),
+        };
+        send_cdp(
+            &mut socket,
+            next_id,
+            "Runtime.evaluate",
+            json!({ "expression": expression, "returnByValue": true }),
+        )?;
+        next_id += 1;
+    }
+    Ok(())
+}
+
+pub(crate) fn parse_capture_debug_request(response: &Value) -> Option<CaptureDebugRequest> {
+    let value = response.pointer("/result/result/value")?.as_object()?;
+    if value.get("kind")?.as_str()? != "capture" {
+        return None;
+    }
+    let id = value.get("id")?.as_str()?;
+    if id.is_empty() || id.len() > 128 {
+        return None;
+    }
+    Some(CaptureDebugRequest { id: id.into() })
+}
+
+fn capture_debug_data_url(response: Value) -> Result<String, String> {
+    let data = response
+        .pointer("/result/data")
+        .and_then(Value::as_str)
+        .filter(|data| !data.is_empty())
+        .ok_or("CDP returned an empty PNG capture")?;
+    Ok(format!("data:image/png;base64,{data}"))
+}
+
+pub(crate) fn capture_debug_resolve_expression(id: &str, result: Result<&str, &str>) -> String {
+    let response = match result {
+        Ok(data_url) if data_url.starts_with("data:image/png;base64,") => {
+            json!({ "dataUrl": data_url, "id": id, "ok": true })
+        }
+        Ok(_) => json!({ "error": "invalid PNG capture payload", "id": id, "ok": false }),
+        Err(error) => json!({ "error": error, "id": id, "ok": false }),
+    };
+    format!(
+        "window.__incodexResolveCaptureDebug?.({response})",
+        response = response
+    )
 }
 
 fn confirm_official_codex_mode<G>(

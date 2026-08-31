@@ -1,4 +1,5 @@
 import { isSearchLabel } from "./compatibility/search-labels.ts";
+import { openInjectedCaptureWindow } from "./capture-window/injected.ts";
 import { deriveUiProbe } from "./incodex-ui-probe.ts";
 import { resolveLocale as matchLocale, translate, type CopyKey } from "./incognito-copy.ts";
 import {
@@ -21,6 +22,8 @@ const ERROR_OVERLAY_ATTR = "data-incodex-launch-error-overlay";
 const SHORTCUT_LABEL = "⇧⌘N";
 const TOOLTIP_FALLBACK_DELAY_MS = 700;
 const TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
+const CAPTURE_WINDOW_STYLE = `{{CAPTURE_WINDOW_CSS}}`;
+const CAPTURE_PRESET_ASSETS = JSON.parse(`{{CAPTURE_PRESET_ASSETS}}`) as Record<string, string>;
 
 type IncognitoAction = "open" | "quit";
 type IncognitoBridgeAction =
@@ -861,10 +864,18 @@ function start(): void {
   window.addEventListener("focus", () => activeTooltipLifecycle?.windowFocus());
   window.addEventListener(TOOLTIP_DISMISS_EVENT, () => activeTooltipLifecycle?.dismiss());
   ensureMutationObserver();
+  if (window.__incodexCaptureDebug === true) {
+    openInjectedCaptureWindow({
+      locale: window.__incodexLocale,
+      presetAssets: CAPTURE_PRESET_ASSETS,
+      styleText: CAPTURE_WINDOW_STYLE,
+    });
+  }
 }
 
 declare global {
   interface Window {
+    __incodexCaptureDebug?: boolean;
     __incodexStarted?: boolean;
     __incodexIncognito?: boolean;
     __incodexDockMenuConfigured?: boolean;

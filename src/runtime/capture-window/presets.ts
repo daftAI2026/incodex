@@ -18,6 +18,14 @@ export const capturePresets: readonly CapturePreset[] = [
   { colors: ["#57606f", "#2d3440", "#15191f"], id: "graphite" },
 ] as const;
 
+let embeddedCapturePresetAssets: Partial<Record<CapturePresetId, string>> = {};
+
+export function configureCapturePresetAssets(
+  assets: Partial<Record<CapturePresetId, string>>,
+): void {
+  embeddedCapturePresetAssets = { ...assets };
+}
+
 export function capturePresetColors(
   presetId: CapturePresetId,
 ): readonly [string, string, string] {
@@ -25,7 +33,7 @@ export function capturePresetColors(
 }
 
 export function capturePresetAssetUrl(presetId: CapturePresetId): string {
-  return `/capture-backgrounds/${presetId}.jpg`;
+  return embeddedCapturePresetAssets[presetId] ?? `/capture-backgrounds/${presetId}.jpg`;
 }
 
 export function capturePresetSwatch(preset: CapturePreset): string {

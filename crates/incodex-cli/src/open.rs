@@ -21,8 +21,9 @@ use crate::app_bundle::resolve_executable;
 use crate::cdp::{
     allocate_debug_port, debug_launch_args,
     inject_shared_ui_with_options_while_alive_with_readiness, is_terminal_codex_mode_error,
-    launch_arg_prefix, monitor_profile_mask_health, start_lifecycle_monitor,
-    start_primary_lifecycle_monitor, CodexModeReadiness, InjectionOptions, OFFICIAL_NEW_CODEX_URL,
+    launch_arg_prefix, monitor_profile_mask_health, start_capture_debug_monitor,
+    start_lifecycle_monitor, start_primary_lifecycle_monitor, CodexModeReadiness, InjectionOptions,
+    OFFICIAL_NEW_CODEX_URL,
 };
 use crate::locale::parse_locale_override;
 use crate::open_presentation::{
@@ -399,6 +400,7 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
         let injection_readiness = readiness.clone();
         let lifecycle_process_alive = process_alive.clone();
         let options = InjectionOptions {
+            capture_debug: std::env::var_os("INCODEX_CAPTURE_DEBUG").is_some(),
             locale: plan.locale.clone(),
             profile_mask: plan.profile_mask.clone(),
         };
@@ -556,6 +558,9 @@ fn start_injection_worker(
                 }
             }
             publish_injection_status(&status_tx, &readiness, InjectionStatus::Ready);
+            if options.capture_debug {
+                start_capture_debug_monitor(port, process_alive.clone());
+            }
             if options.profile_mask.is_some() {
                 let _ = monitor_profile_mask_health(port, &process_alive, |error| {
                     publish_injection_status(
