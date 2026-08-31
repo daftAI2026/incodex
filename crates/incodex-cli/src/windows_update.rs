@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use crate::parse::ParsedCli;
 use crate::windows_system::{system_binary_path, windows_path_for_display};
+use incodex_core::windows_path::reject_reparse_ancestors;
 use serde::{Deserialize, Serialize};
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
@@ -334,7 +335,9 @@ pub fn write_windows_runtime_pending(user_root: &Path, version: &str) -> Result<
 }
 
 pub fn read_windows_runtime_pending(user_root: &Path) -> Result<Option<String>, String> {
-    let path = user_root.join("cache").join(RUNTIME_PENDING_NAME);
+    let Some(path) = windows_runtime_pending_path(user_root)? else {
+        return Ok(None);
+    };
     let metadata = match fs::symlink_metadata(&path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -360,7 +363,9 @@ pub fn read_windows_runtime_pending(user_root: &Path) -> Result<Option<String>, 
 }
 
 pub fn clear_windows_runtime_pending(user_root: &Path) -> Result<(), String> {
-    let path = user_root.join("cache").join(RUNTIME_PENDING_NAME);
+    let Some(path) = windows_runtime_pending_path(user_root)? else {
+        return Ok(());
+    };
     match fs::symlink_metadata(&path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(format!("cannot inspect Runtime update state: {error}")),
@@ -374,6 +379,21 @@ pub fn clear_windows_runtime_pending(user_root: &Path) -> Result<(), String> {
         }
         Ok(_) => Err("Runtime update state is not a regular file".to_string()),
     }
+}
+
+fn windows_runtime_pending_path(user_root: &Path) -> Result<Option<PathBuf>, String> {
+    let cache = user_root.join("cache");
+    let metadata = match fs::symlink_metadata(&cache) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("cannot inspect Runtime update directory: {error}")),
+    };
+    reject_reparse_ancestors(&cache)?;
+    if !metadata.is_dir() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err("Runtime update directory is not a regular directory".to_string());
+    }
+    incodex_core::windows_session::verify_private_acl(&cache)?;
+    Ok(Some(cache.join(RUNTIME_PENDING_NAME)))
 }
 
 fn repair_pending_runtime(user_root: &Path, package_root: &Path) -> Result<(), String> {

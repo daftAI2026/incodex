@@ -146,7 +146,7 @@ function loadRuntimeWhenElectronIsReady(options, runtimeDir) {
     options.onElectronLoaded || ((callback) => process.once("loaded", callback));
   onElectronLoaded(() => {
     try {
-      load(path.join(runtimeDir, "incodex-main.cjs"));
+      load(path.win32.join(runtimeDir, "incodex-main.cjs"));
     } catch {
       console.error("[incodex] Windows Runtime attach failed");
     }
