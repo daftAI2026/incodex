@@ -68,7 +68,8 @@ describe("capture window preview", () => {
     expect(shadow).toBeLessThan(privacy);
 
     expect(css).toContain("backdrop-filter: blur(3px)");
-    expect(css).toContain("max-width: 896px");
+    expect(css).toContain("max-width: 56rem");
+    expect(css).not.toContain("padding-top: calc(var(--incodex-capture-space) * 13)");
     expect(css).toContain("grid-template-columns: minmax(0, 1fr) 224px");
     expect(css).toContain("height: 50vh");
   });
