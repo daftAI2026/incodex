@@ -71,6 +71,8 @@ describe("capture window preview", () => {
     expect(markup).toContain('data-action="retake"');
     expect(markup).toContain("incodex-capture-checker");
     expect(markup).toContain('data-action="zoom-reset" type="button" title="Reset zoom"');
+    expect(markup).toContain('data-action="zoom-fit"');
+    expect(markup).toContain('data-capture-icon="maximize"');
     expect(copy.shadow).toBe("Shadow");
     expect(markup).toContain('data-color-trigger="background"');
     expect(markup).toContain(
