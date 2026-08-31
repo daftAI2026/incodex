@@ -88,6 +88,16 @@ describe("capture redaction candidates", () => {
     ]);
   });
 
+  test("accepts any non-empty textarea value like the reference collector", () => {
+    const candidates = collectCaptureCandidates(fakeDocument([
+      new FakeElement({ rect: rect(20, 30, 120, 24), tagName: "TEXTAREA", value: "x" }),
+    ]), { height: 801, width: 1200 });
+
+    expect(candidates).toEqual([
+      { height: 24, id: "r:20:30:120:24", width: 120, x: 20, y: 30 },
+    ]);
+  });
+
   test("rejects hidden, empty, tiny, offscreen, invisible, and nested candidates", () => {
     const parent = new FakeElement({ rect: rect(10, 20, 180, 60), text: "Parent content" });
     const child = new FakeElement({ rect: rect(20, 30, 100, 20), text: "Child content" });
