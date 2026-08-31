@@ -55,6 +55,28 @@ fn run_installer_from_wow64(download_dir: &Path, user_root: &Path) -> std::proce
         .expect("run installer through a simulated WOW64 shell")
 }
 
+fn run_installer_without_file_hash_command(
+    download_dir: &Path,
+    user_root: &Path,
+) -> std::process::Output {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("install.ps1");
+    let escaped_script = script.to_string_lossy().replace('\'', "''");
+    Command::new("powershell.exe")
+        .args(["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"])
+        .arg(format!(
+            "function Invoke-BlockedFileHash {{ throw 'Get-FileHash is unavailable' }}; Set-Alias Get-FileHash Invoke-BlockedFileHash; . '{escaped_script}'"
+        ))
+        .env("INCODEX_DOWNLOAD_DIR", download_dir)
+        .env("INCODEX_USER_ROOT", user_root)
+        .env("INCODEX_EXPECTED_VERSION", env!("CARGO_PKG_VERSION"))
+        .env("INCODEX_SKIP_PATH", "1")
+        .env("INCODEX_TEST_MODE", "1")
+        .output()
+        .expect("run installer without Get-FileHash")
+}
+
 fn run_installer_mode(
     download_dir: &Path,
     user_root: &Path,
@@ -164,6 +186,26 @@ fn accepts_a_32_bit_powershell_on_64_bit_windows() {
     let output = run_installer_from_wow64(&release, &user_root);
     let launcher_was_published = user_root.join("bin/incodex.cmd").exists();
     fs::remove_dir_all(&root).expect("remove WOW64 fixture");
+
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(launcher_was_published);
+}
+
+#[test]
+fn installer_hashes_without_get_file_hash() {
+    let root = scratch("no-get-file-hash");
+    let user_root = root.join("user-root");
+    let source = Path::new(env!("CARGO_BIN_EXE_incodex"));
+    let release = release_fixture(&root, &sha256(source));
+
+    let output = run_installer_without_file_hash_command(&release, &user_root);
+    let launcher_was_published = user_root.join("bin/incodex.cmd").exists();
+    fs::remove_dir_all(&root).expect("remove Get-FileHash fixture");
 
     assert!(
         output.status.success(),
