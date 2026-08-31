@@ -4,6 +4,7 @@ import {
   CAPTURE_PRIVACY_CLASS,
   capturePreparedWindow,
   prepareCaptureWindow,
+  waitForCaptureFrame,
 } from "./capture-lifecycle.ts";
 
 class FakeClassList {
@@ -96,5 +97,23 @@ describe("capture preparation lifecycle", () => {
 
     expect(classList.contains(CAPTURE_ACTIVE_CLASS)).toBe(false);
     expect(classList.contains(CAPTURE_PRIVACY_CLASS)).toBe(false);
+  });
+
+  test("finishes a frame wait when an occluded window does not receive animation frames", async () => {
+    const originalWindow = globalThis.window;
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { requestAnimationFrame: () => 1 },
+    });
+    try {
+      const startedAt = performance.now();
+      await waitForCaptureFrame(5);
+      expect(performance.now() - startedAt).toBeGreaterThanOrEqual(4);
+    } finally {
+      Object.defineProperty(globalThis, "window", {
+        configurable: true,
+        value: originalWindow,
+      });
+    }
   });
 });
