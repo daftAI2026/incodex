@@ -20,9 +20,11 @@ export type CaptureCandidate = CaptureRect & {
 };
 
 export type CaptureRegion = {
+  color?: string;
   id: string;
   rect: CaptureRect;
   source: "automatic" | "manual";
+  style: CaptureRedactionStyle;
 };
 
 export type CaptureSize = {
@@ -166,7 +168,7 @@ function addRegion(
   }
   return commitRegions(state, [
     ...state.regions,
-    { id, rect: normalized, source: "manual" },
+    createRegion(state, id, normalized, "manual"),
   ]);
 }
 
@@ -179,8 +181,24 @@ function selectAutomaticRegion(
   const normalized = clampCaptureRect(rect, state.source);
   return commitRegions(state, [
     ...state.regions,
-    { id, rect: normalized, source: "automatic" },
+    createRegion(state, id, normalized, "automatic"),
   ]);
+}
+
+function createRegion(
+  state: CaptureWindowState,
+  id: string,
+  rect: CaptureRect,
+  source: CaptureRegion["source"],
+): CaptureRegion {
+  const region: CaptureRegion = {
+    id,
+    rect,
+    source,
+    style: state.redactionStyle,
+  };
+  if (state.redactionStyle === "solid") region.color = state.solidColor;
+  return region;
 }
 
 function removeRegion(state: CaptureWindowState, id: string): CaptureWindowState {

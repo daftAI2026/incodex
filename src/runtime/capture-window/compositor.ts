@@ -73,14 +73,14 @@ export function createCaptureRenderPlan(
   for (const region of regions) {
     const { rect } = region;
     operations.push({
-      color: state.solidColor,
+      color: region.color ?? state.solidColor,
       kind: "redaction",
       rect: {
         ...rect,
         x: rect.x + physicalPadding,
         y: rect.y + physicalPadding,
       },
-      style: state.redactionStyle,
+      style: region.style,
     });
   }
   return operations;
@@ -103,7 +103,7 @@ export function renderCaptureToCanvas(
 
   const regions = activeCaptureRegions(state);
   for (const region of regions) {
-    drawRedaction(context, source, region.rect, state);
+    drawRedaction(context, source, region, state);
   }
   return canvas;
 }
@@ -214,46 +214,47 @@ function drawWindow(
 function drawRedaction(
   context: CanvasRenderingContext2D,
   source: CanvasImageSource,
-  region: CaptureRect,
+  region: CaptureWindowState["regions"][number],
   state: CaptureWindowState,
 ): void {
+  const { rect } = region;
   const scaleFactor = Math.max(1, state.source.scaleFactor);
   const padding = capturePhysicalPadding(state.source, state.padding);
   const target = {
-    height: region.height,
-    width: region.width,
-    x: region.x + padding,
-    y: region.y + padding,
+    height: rect.height,
+    width: rect.width,
+    x: rect.x + padding,
+    y: rect.y + padding,
   };
   context.save();
   roundedRectPath(context, target.x, target.y, target.width, target.height, 5 * scaleFactor);
   context.clip();
 
-  if (state.redactionStyle === "solid") {
-    context.fillStyle = state.solidColor;
+  if (region.style === "solid") {
+    context.fillStyle = region.color ?? state.solidColor;
     context.fillRect(target.x, target.y, target.width, target.height);
     context.restore();
     return;
   }
 
-  const sampling = redactionSampling(state.redactionStyle, scaleFactor);
+  const sampling = redactionSampling(region.style, scaleFactor);
   if (!sampling) {
     context.restore();
     return;
   }
   const small = document.createElement("canvas");
-  small.width = Math.max(1, Math.ceil(region.width / sampling.blockSize));
-  small.height = Math.max(1, Math.ceil(region.height / sampling.blockSize));
+  small.width = Math.max(1, Math.ceil(rect.width / sampling.blockSize));
+  small.height = Math.max(1, Math.ceil(rect.height / sampling.blockSize));
   const smallContext = small.getContext("2d");
   if (smallContext) {
     smallContext.imageSmoothingEnabled = sampling.smoothing;
     if (sampling.smoothing) smallContext.imageSmoothingQuality = "high";
     smallContext.drawImage(
       source,
-      region.x,
-      region.y,
-      region.width,
-      region.height,
+      rect.x,
+      rect.y,
+      rect.width,
+      rect.height,
       0,
       0,
       small.width,
