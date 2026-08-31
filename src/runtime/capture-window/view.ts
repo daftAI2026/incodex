@@ -55,7 +55,7 @@ export function captureToolbarTemplate(
         ${iconButton("redo", "redo", copy.redo, state.history.future.length === 0)}
         ${toolbarDivider()}
         ${iconButton("zoom-out", "zoom-out", copy.zoomOut, state.zoom <= CAPTURE_MIN_ZOOM)}
-        <button class="incodex-capture-zoom-reset" data-action="zoom-reset" type="button" title="100%">${Math.round(state.zoom * 100)}%</button>
+        <button class="incodex-capture-zoom-reset" data-action="zoom-reset" type="button" title="${copy.zoomReset}">${Math.round(state.zoom * 100)}%</button>
         ${iconButton("zoom-in", "zoom-in", copy.zoomIn, state.zoom >= CAPTURE_MAX_ZOOM)}
       </div>
     </div>
@@ -167,5 +167,5 @@ function checked(value: boolean): string {
 }
 
 function backgroundColor(background: CaptureBackground): string {
-  return background.kind === "color" ? background.color : "#446f73";
+  return background.kind === "color" ? background.color : "#2B3440";
 }

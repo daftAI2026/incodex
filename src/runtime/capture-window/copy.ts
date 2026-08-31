@@ -39,6 +39,7 @@ export type CaptureWindowCopy = {
   wallpaperTooLarge: string;
   zoomIn: string;
   zoomOut: string;
+  zoomReset: string;
 };
 
 const ENGLISH: CaptureWindowCopy = {
@@ -82,6 +83,7 @@ const ENGLISH: CaptureWindowCopy = {
   wallpaperTooLarge: "Wallpaper must be PNG, JPEG, or WebP and no larger than 32 MiB.",
   zoomIn: "Zoom in",
   zoomOut: "Zoom out",
+  zoomReset: "Reset zoom",
 };
 
 const CHINESE: CaptureWindowCopy = {
@@ -125,6 +127,7 @@ const CHINESE: CaptureWindowCopy = {
   wallpaperTooLarge: "壁纸必须是 PNG、JPEG 或 WebP，且不超过 32 MiB。",
   zoomIn: "放大",
   zoomOut: "缩小",
+  zoomReset: "重置缩放",
 };
 
 export function captureWindowCopy(locale: string): CaptureWindowCopy {
