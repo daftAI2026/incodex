@@ -8,6 +8,7 @@ import {
   createCaptureWindowState,
   type CapturePresetId,
   type CaptureRect,
+  type CaptureRedactionStyle,
   type CaptureWindowCommand,
   type CaptureWindowState,
 } from "./model.ts";
@@ -64,8 +65,7 @@ export function mountCaptureWindowEditor(
   const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const locale = options.locale ?? document.documentElement.lang ?? navigator.language;
   const copy = captureWindowCopy(locale);
-  let automaticRegions =
-    options.automaticRegions ?? defaultAutomaticRegions(state.source.width, state.source.height);
+  let automaticRegions = options.automaticRegions ?? [];
 
   const root = document.createElement("div");
   root.className = "incodex-capture-root";
@@ -127,7 +127,7 @@ export function mountCaptureWindowEditor(
 
     const rendered = renderCanvas();
     const frame = root.querySelector<HTMLElement>(".incodex-capture-canvas-frame");
-    wireActions(root, dispatch);
+    wireActions(root, dispatch, preview);
     wireStage(root, rendered, frame, state, dispatch, () => ({ panX, panY }), (x, y) => {
       panX = x;
       panY = y;
@@ -154,13 +154,20 @@ export function mountCaptureWindowEditor(
     rendered.className = "incodex-capture-canvas";
     rendered.setAttribute("data-capture-output", "true");
     const frame = root.querySelector<HTMLElement>(".incodex-capture-canvas-frame");
-    frame?.querySelector<HTMLCanvasElement>(".incodex-capture-canvas")?.remove();
-    frame?.prepend(rendered);
-    mountRegionLayer(frame, rendered, state, automaticRegions, copy);
+    const current = frame?.querySelector<HTMLCanvasElement>(".incodex-capture-canvas");
+    const canvas = current ?? rendered;
+    if (current) {
+      current.width = rendered.width;
+      current.height = rendered.height;
+      current.getContext("2d")?.drawImage(rendered, 0, 0);
+    } else {
+      frame?.prepend(rendered);
+    }
+    mountRegionLayer(frame, canvas, state, automaticRegions, copy);
     const paddingValue = root.querySelector<HTMLElement>("[data-value='padding']");
     if (paddingValue) paddingValue.textContent = `${state.padding}px`;
     window.requestAnimationFrame(() => fitCanvas(root, rendered, frame, state.zoom, panX, panY));
-    return rendered;
+    return canvas;
   }
 
   async function retake(): Promise<void> {
@@ -192,7 +199,7 @@ export function mountCaptureWindowEditor(
 
   async function detectRegions(revision: number): Promise<CaptureRect[]> {
     if (!options.onDetectRegions) {
-      return defaultAutomaticRegions(source.width, source.height);
+      return automaticRegions;
     }
     return options.onDetectRegions(source, revision);
   }
@@ -266,13 +273,11 @@ export function mountCaptureWindowEditor(
 function wireActions(
   root: HTMLElement,
   dispatch: (command: CaptureWindowCommand) => void,
+  preview: (command: CaptureWindowCommand) => void,
 ): void {
   const actions: Record<string, CaptureWindowCommand> = {
     clear: { kind: "clear-regions" },
     redo: { kind: "redo" },
-    "style-blur": { kind: "set-redaction-style", style: "blur" },
-    "style-mosaic": { kind: "set-redaction-style", style: "mosaic" },
-    "style-solid": { kind: "set-redaction-style", style: "solid" },
     "tool-move": { kind: "set-tool", tool: "move" },
     "tool-redact": { kind: "set-tool", tool: "redact" },
     undo: { kind: "undo" },
@@ -280,6 +285,11 @@ function wireActions(
   for (const [action, command] of Object.entries(actions)) {
     root.querySelector<HTMLElement>(`[data-action='${action}']`)?.addEventListener("click", () => {
       dispatch(command);
+    });
+  }
+  for (const style of ["mosaic", "blur", "solid"] as const) {
+    root.querySelector<HTMLElement>(`[data-action='style-${style}']`)?.addEventListener("click", () => {
+      updateRedactionStyle(root, style, preview);
     });
   }
   root.querySelector<HTMLElement>("[data-action='zoom-in']")?.addEventListener("click", () => {
@@ -301,6 +311,19 @@ function wireActions(
       });
     });
   }
+}
+
+function updateRedactionStyle(
+  root: HTMLElement,
+  style: CaptureRedactionStyle,
+  preview: (command: CaptureWindowCommand) => void,
+): void {
+  preview({ kind: "set-redaction-style", style });
+  for (const option of root.querySelectorAll<HTMLElement>("[data-redaction-style]")) {
+    option.setAttribute("aria-pressed", String(option.dataset.redactionStyle === style));
+  }
+  const solidColor = root.querySelector<HTMLElement>("[data-solid-color-row]");
+  if (solidColor) solidColor.hidden = style !== "solid";
 }
 
 function wireInputs(
@@ -577,14 +600,6 @@ function fitCanvas(
   frame.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
   canvas.style.width = "100%";
   canvas.style.height = "100%";
-}
-
-function defaultAutomaticRegions(width: number, height: number): CaptureRect[] {
-  return [
-    { x: width * 0.05, y: height * 0.08, width: width * 0.15, height: height * 0.045 },
-    { x: width * 0.36, y: height * 0.16, width: width * 0.25, height: height * 0.05 },
-    { x: width * 0.58, y: height * 0.54, width: width * 0.24, height: height * 0.08 },
-  ];
 }
 
 function updateDraft(

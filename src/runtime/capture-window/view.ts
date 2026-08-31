@@ -84,9 +84,9 @@ function inspectorTemplate(state: CaptureWindowState, copy: CaptureWindowCopy): 
         </div>
         <p class="incodex-capture-section-description">${copy.privacyDescription}</p>
         <div class="incodex-capture-style-grid" role="group" aria-label="${copy.redactionStyle}">
-          ${segmentButton("style-mosaic", "scan", copy.mosaic, state.redactionStyle === "mosaic")}
-          ${segmentButton("style-blur", "image", copy.blur, state.redactionStyle === "blur")}
-          ${segmentButton("style-solid", "palette", copy.solid, state.redactionStyle === "solid")}
+          ${segmentButton("style-mosaic", "scan", copy.mosaic, state.redactionStyle === "mosaic", "mosaic")}
+          ${segmentButton("style-blur", "image", copy.blur, state.redactionStyle === "blur", "blur")}
+          ${segmentButton("style-solid", "palette", copy.solid, state.redactionStyle === "solid", "solid")}
         </div>
         ${solidColorTemplate(state, copy)}
       </section>
@@ -127,9 +127,8 @@ function inspectorTemplate(state: CaptureWindowState, copy: CaptureWindowCopy): 
 }
 
 function solidColorTemplate(state: CaptureWindowState, copy: CaptureWindowCopy): string {
-  if (state.redactionStyle !== "solid") return "";
   return `
-    <label class="incodex-capture-solid-color-row">
+    <label class="incodex-capture-solid-color-row" data-solid-color-row ${state.redactionStyle === "solid" ? "" : "hidden"}>
       <span class="incodex-capture-label">${copy.maskColor}</span>
       <input class="incodex-capture-color-input" data-input="solid-color" type="color" value="${state.solidColor}">
     </label>
@@ -165,8 +164,10 @@ function segmentButton(
   icon: Parameters<typeof captureIcon>[0],
   label: string,
   pressed: boolean,
+  redactionStyle?: string,
 ): string {
-  return `<button class="incodex-capture-segment" data-action="${action}" type="button" aria-pressed="${pressed}">${captureIcon(icon, 16)}<span class="incodex-capture-segment-label">${label}</span></button>`;
+  const styleAttribute = redactionStyle ? ` data-redaction-style="${redactionStyle}"` : "";
+  return `<button class="incodex-capture-segment" data-action="${action}"${styleAttribute} type="button" aria-pressed="${pressed}">${captureIcon(icon, 16)}<span class="incodex-capture-segment-label">${label}</span></button>`;
 }
 
 function iconButton(

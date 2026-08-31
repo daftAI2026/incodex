@@ -1,5 +1,6 @@
 import { mountCaptureWindowEditor, type CaptureWindowEditorController } from "./editor.ts";
 import type { CaptureWindowState } from "./model.ts";
+import { codexPreviewPrivacyRegions } from "./privacy.ts";
 
 type PreviewTheme = "dark" | "light";
 type PreviewLocale = "en" | "zh-CN";
@@ -64,6 +65,7 @@ function openEditor(initialState?: CaptureWindowState): void {
   if (!host) return;
   const source = createMockCodexCapture(revision, theme);
   controller = mountCaptureWindowEditor(host, {
+    automaticRegions: codexPreviewPrivacyRegions(source),
     initialState,
     locale,
     onClose: () => {
@@ -71,6 +73,7 @@ function openEditor(initialState?: CaptureWindowState): void {
       if (!preserveCloseCallback) showToast("Capture editor closed");
     },
     onNotify: showToast,
+    onDetectRegions: (nextSource) => codexPreviewPrivacyRegions(nextSource),
     onRetake: (nextRevision) => {
       revision = nextRevision;
       return createMockCodexCapture(revision, theme);
@@ -134,16 +137,23 @@ function createMockCodexCapture(sourceRevision: number, selectedTheme: PreviewTh
   context.font = "600 22px -apple-system, BlinkMacSystemFont, sans-serif";
   context.fillText("Codex", 34, 50);
   context.font = "14px -apple-system, BlinkMacSystemFont, sans-serif";
-  context.fillText("Kid", 62, 90);
+  context.fillText("＋  New thread", 28, 98);
+  context.fillStyle = colors.muted;
+  context.fillText("Projects", 28, 132);
+  context.fillStyle = colors.text;
+  context.fillText("Incodex", 28, 164);
+  context.fillText("Client work", 28, 196);
+  context.fillStyle = colors.muted;
+  context.fillText("Recent", 28, 250);
+  context.fillStyle = colors.text;
+  context.fillText("Private launch workflow", 28, 282);
+  context.fillText("Capture window research", 28, 314);
   context.fillStyle = "#6f8bff";
   context.beginPath();
-  context.arc(42, 85, 14, 0, Math.PI * 2);
+  context.arc(34, 759, 14, 0, Math.PI * 2);
   context.fill();
-  context.fillStyle = colors.muted;
-  context.fillText("Today", 28, 148);
   context.fillStyle = colors.text;
-  context.fillText("Private launch workflow", 28, 180);
-  context.fillText("Capture window research", 28, 214);
+  context.fillText("Kid", 58, 764);
 
   context.fillStyle = colors.text;
   context.font = "600 20px -apple-system, BlinkMacSystemFont, sans-serif";
