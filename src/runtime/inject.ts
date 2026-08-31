@@ -1,5 +1,7 @@
 import { isSearchLabel } from "./compatibility/search-labels.ts";
+import { captureIcon } from "./capture-window/icons.ts";
 import { openInjectedCaptureWindow } from "./capture-window/injected.ts";
+import { captureWindowCopy } from "./capture-window/copy.ts";
 import { deriveUiProbe } from "./incodex-ui-probe.ts";
 import { resolveLocale as matchLocale, translate, type CopyKey } from "./incognito-copy.ts";
 import {
@@ -22,6 +24,7 @@ const ERROR_OVERLAY_ATTR = "data-incodex-launch-error-overlay";
 const SHORTCUT_LABEL = "⇧⌘N";
 const TOOLTIP_FALLBACK_DELAY_MS = 700;
 const TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
+const CAPTURE_TRIGGER_ATTR = "data-incodex-capture-trigger";
 const CAPTURE_WINDOW_STYLE = `{{CAPTURE_WINDOW_CSS}}`;
 const CAPTURE_PRESET_ASSETS = JSON.parse(`{{CAPTURE_PRESET_ASSETS}}`) as Record<string, string>;
 
@@ -30,7 +33,7 @@ type IncognitoBridgeAction =
   | IncognitoAction
   | "configure-dock-menu"
   | "configure-status-menu";
-type IncognitoButtonIcon = "hat-glasses" | "circle-x";
+type IncognitoButtonIcon = "camera" | "hat-glasses" | "circle-x";
 
 type IncognitoActionResponse = {
   code?: string;
@@ -75,6 +78,10 @@ function isIncognitoWindow(): boolean {
   return false;
 }
 
+function isCaptureDebug(): boolean {
+  return window.__incodexCaptureDebug === true;
+}
+
 function isWindowsRenderer(): boolean {
   return window.__incodexPlatform === "win32";
 }
@@ -94,6 +101,7 @@ function t(key: CopyKey): string {
 }
 
 function labelFor(on: boolean): string {
+  if (isCaptureDebug()) return captureWindowCopy(currentLocale()).title;
   return on ? t("exit") : t("open");
 }
 
@@ -110,14 +118,22 @@ function createButtonIcon(source: string, name: IncognitoButtonIcon, sample: SVG
   return svg;
 }
 
+function buttonIconSource(name: IncognitoButtonIcon): string {
+  if (name === "camera") return captureIcon("camera", 16);
+  if (name === "circle-x") return EXIT_ICON_SVG;
+  return ICON_SVG;
+}
+
 function setButtonIcon(btn: HTMLElement): void {
-  const name: IncognitoButtonIcon =
-    isIncognitoWindow() && btn.getAttribute("data-incodex-hovered") === "true"
-      ? "circle-x"
-      : "hat-glasses";
+  let name: IncognitoButtonIcon = "hat-glasses";
+  if (isCaptureDebug()) {
+    name = "camera";
+  } else if (isIncognitoWindow() && btn.getAttribute("data-incodex-hovered") === "true") {
+    name = "circle-x";
+  }
   const current = btn.querySelector<SVGElement>("svg[data-incodex-icon]");
   if (current?.getAttribute("data-incodex-icon") === name) return;
-  const source = name === "circle-x" ? EXIT_ICON_SVG : ICON_SVG;
+  const source = buttonIconSource(name);
   const sample = current || btn.querySelector<SVGElement>("svg");
   const next = createButtonIcon(source, name, sample);
   if (!next) return;
@@ -203,6 +219,14 @@ function configureStatusMenu(): void {
 
 async function activate(): Promise<boolean> {
   dismissActiveTooltip();
+  if (isCaptureDebug()) {
+    openInjectedCaptureWindow({
+      locale: window.__incodexLocale,
+      presetAssets: CAPTURE_PRESET_ASSETS,
+      styleText: CAPTURE_WINDOW_STYLE,
+    });
+    return true;
+  }
   if (isIncognitoWindow()) {
     const result = await requestAction("quit");
     if (!result.ok) window.close();
@@ -378,9 +402,12 @@ function buildButton(search: HTMLElement): HTMLElement {
   }
   btn.setAttribute("type", "button");
   btn.setAttribute(BTN_ATTR, "true");
+  btn.toggleAttribute(CAPTURE_TRIGGER_ATTR, isCaptureDebug());
   btn.setAttribute("data-incodex-hovered", "false");
   btn.className = search.className;
-  const svg = createButtonIcon(ICON_SVG, "hat-glasses", search.querySelector("svg"));
+  const iconName: IncognitoButtonIcon = isCaptureDebug() ? "camera" : "hat-glasses";
+  const iconSource = isCaptureDebug() ? captureIcon("camera", 16) : ICON_SVG;
+  const svg = createButtonIcon(iconSource, iconName, search.querySelector("svg"));
   if (svg) btn.append(svg);
   const providerTiming = createOfficialTooltipTimingBridge(findSearchButton);
   const tooltipLifecycle: TooltipLifecycle = createTooltipLifecycle({
@@ -436,7 +463,8 @@ function createTooltipElement(): HTMLElement {
   kbd.className =
     "inline-flex !rounded-md !border-0 !bg-current/10 !font-sans !text-xs !text-current !shadow-none !px-1.5 !py-0.5 !leading-none";
   kbd.textContent = shortcutLabel();
-  text.append(label, kbd);
+  text.append(label);
+  if (!isCaptureDebug()) text.append(kbd);
   tip.append(text);
   return tip;
 }
@@ -775,6 +803,7 @@ function onKeydown(event: KeyboardEvent): void {
     dismissActiveTooltip();
     return;
   }
+  if (isCaptureDebug()) return;
   if (!(event.metaKey || event.ctrlKey) || !event.shiftKey) return;
   if (event.code !== "KeyN" && event.key.toLowerCase() !== "n") return;
   event.preventDefault();
@@ -841,6 +870,10 @@ function ensureMutationObserver(): void {
 function start(): void {
   configureDockMenu();
   configureStatusMenu();
+  if (isCaptureDebug()) {
+    const existing = document.querySelector<HTMLElement>(`[${BTN_ATTR}]`);
+    if (existing && !existing.hasAttribute(CAPTURE_TRIGGER_ATTR)) existing.remove();
+  }
   if (window.__incodexStarted) {
     ensureStyle();
     ensureButton();
@@ -864,13 +897,6 @@ function start(): void {
   window.addEventListener("focus", () => activeTooltipLifecycle?.windowFocus());
   window.addEventListener(TOOLTIP_DISMISS_EVENT, () => activeTooltipLifecycle?.dismiss());
   ensureMutationObserver();
-  if (window.__incodexCaptureDebug === true) {
-    openInjectedCaptureWindow({
-      locale: window.__incodexLocale,
-      presetAssets: CAPTURE_PRESET_ASSETS,
-      styleText: CAPTURE_WINDOW_STYLE,
-    });
-  }
 }
 
 declare global {
