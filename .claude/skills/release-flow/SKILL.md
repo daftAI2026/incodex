@@ -5,14 +5,15 @@ description: Incodex CLI release runbook. Tag vX.Y.Z, wait for release.yml to at
 
 # Incodex CLI release flow
 
-Tag-driven. `.github/workflows/release.yml` watches `'v*'` (lowercase). It cross-compiles the native Rust CLI as `incodex-darwin-arm64` and `incodex-darwin-x64`, writes `SHA256SUMS`, attests, and creates a GitHub Release **without notes**. Bun still builds/checks the embedded Electron Runtime; Rust owns the product and legacy fixture/proof tests and produces the release CLI assets.
+Tag-driven. `.github/workflows/release.yml` watches `'v*'` (lowercase). It builds the native Rust CLI as `incodex-darwin-arm64`, `incodex-darwin-x64`, and `incodex-windows-x64.exe` on native macOS/Windows runners, writes one `SHA256SUMS`, attests, and creates a GitHub Release **without notes**. Bun still builds/checks the embedded Electron Runtime; Rust owns the product and legacy fixture/proof tests and produces the release CLI assets.
 
 ## Channels
 
 | Channel | What ships | Trigger |
 |---|---|---|
-| GitHub stable | two native Rust macOS binaries + `SHA256SUMS` | Push `vX.Y.Z` |
+| GitHub stable | two native Rust macOS binaries + one Windows x64 binary + `SHA256SUMS` | Push `vX.Y.Z` |
 | `install.sh` | downloads `releases/latest` | Same release |
+| `install.ps1` | downloads the Windows x64 asset from `releases/latest` | Same release |
 | Source | `git pull` + `cargo install --locked --path crates/incodex-cli` | No tag |
 | Homebrew tap | `daftAI2026/homebrew-tap` formula urls/shas | Same release, `update-formula` job |
 
@@ -51,11 +52,11 @@ Wait for the `release` workflow. Then:
 gh release view v<version> --json assets --jq '.assets[].name'
 ```
 
-Must list both architecture binaries **and** `SHA256SUMS`. `install.sh` is fail-closed on a missing or mismatched checksum; that is a release blocker, not cosmetic.
+Must list both macOS architecture binaries, `incodex-windows-x64.exe`, **and** `SHA256SUMS`. Both platform installers fail closed on a missing or mismatched checksum; that is a release blocker, not cosmetic.
 
 The `update-formula` job clones `daftAI2026/homebrew-tap`, runs `scripts/update-homebrew-tap-formula.sh`, and commits `incodex <version>` / `Automated release via GitHub Actions`. It needs repository secret `HOMEBREW_TAP_TOKEN` (contents write on the tap). Missing checksums or a missing token fail the job; the GitHub Release itself already exists. Do not bump Homebrew/homebrew-core.
 
-Script-install smoke after assets exist: install the previous binary when one exists (otherwise use a clean first-time `install.sh`), run `incodex --version`, then run `inc update` and verify the new version.
+Install smoke after assets exist: on macOS, install the previous binary when one exists (otherwise use a clean first-time `install.sh`), run `incodex --version`, then run `inc update` and verify the new version. On Windows, run `install.ps1` in a clean user-scoped prefix, verify both launchers and the installed EXE, then exercise the managed `inc update` path and Runtime synchronization.
 
 Then load `.claude/skills/release-notes/SKILL.md` and draft notes. After `gh release edit`, run `bash .claude/skills/release-notes/scripts/post-reactions.sh v<version>`. Do not announce until notes and reactions are published.
 

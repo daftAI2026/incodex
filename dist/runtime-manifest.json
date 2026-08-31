@@ -1,5 +1,5 @@
 {
-  "runtimeVersion": "0.5.0",
+  "runtimeVersion": "1.0.0",
   "sourceCommit": "",
   "files": {
     "incodex-loader.cjs": "124657b0640600cdf3127f10482a53f31a4998ee4406b1e72b9429d227b06d25",
