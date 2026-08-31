@@ -133,7 +133,6 @@ export function mountCaptureWindowEditor(
     root.setAttribute("data-tool", state.tool);
     root.querySelector<HTMLElement>(".incodex-capture-backdrop")?.addEventListener("click", close);
     root.querySelector<HTMLElement>("[data-action='close']")?.addEventListener("click", close);
-    root.querySelector<HTMLElement>("[data-action='cancel']")?.addEventListener("click", close);
 
     const rendered = renderCanvas();
     const frame = root.querySelector<HTMLElement>(".incodex-capture-canvas-frame");
