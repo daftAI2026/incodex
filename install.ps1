@@ -283,17 +283,9 @@ try {
     $InstalledCli = Join-Path $ReleaseRoot 'incodex.exe'
     $BinRoot = Join-Path $UserRoot 'bin'
     Ensure-PrivateDirectory $UserRoot | Out-Null
-    Ensure-PrivateDirectory (Join-Path $UserRoot 'packages') | Out-Null
-    Ensure-PrivateDirectory $PackageRoot | Out-Null
-    Ensure-PrivateDirectory $ReleasesRoot | Out-Null
-    Ensure-PrivateDirectory $BinRoot | Out-Null
     $LockPath = Join-Path $UserRoot 'standalone-install.lock'
-    $LegacyLockPath = Join-Path $PackageRoot 'install.lock'
     if (Test-Path -LiteralPath $LockPath) {
         Assert-RegularFileNoReparse $LockPath 'installation lock'
-    }
-    if (Test-Path -LiteralPath $LegacyLockPath) {
-        Assert-RegularFileNoReparse $LegacyLockPath 'legacy installation lock'
     }
     try {
         $StableInstallLock = New-Object IO.FileStream(
@@ -302,6 +294,18 @@ try {
             [IO.FileAccess]::ReadWrite,
             [IO.FileShare]::None
         )
+    } catch {
+        Stop-Installer 'another Incodex install or update is already running'
+    }
+    Set-PrivateFileAcl $LockPath
+
+    Ensure-PrivateDirectory (Join-Path $UserRoot 'packages') | Out-Null
+    Ensure-PrivateDirectory $PackageRoot | Out-Null
+    $LegacyLockPath = Join-Path $PackageRoot 'install.lock'
+    if (Test-Path -LiteralPath $LegacyLockPath) {
+        Assert-RegularFileNoReparse $LegacyLockPath 'legacy installation lock'
+    }
+    try {
         $LegacyInstallLock = New-Object IO.FileStream(
             $LegacyLockPath,
             [IO.FileMode]::OpenOrCreate,
@@ -311,8 +315,9 @@ try {
     } catch {
         Stop-Installer 'another Incodex install or update is already running'
     }
-    Set-PrivateFileAcl $LockPath
     Set-PrivateFileAcl $LegacyLockPath
+    Ensure-PrivateDirectory $ReleasesRoot | Out-Null
+    Ensure-PrivateDirectory $BinRoot | Out-Null
 
     if (Test-Path -LiteralPath $ReleaseRoot) {
         Assert-NoReparseAncestry $ReleaseRoot
