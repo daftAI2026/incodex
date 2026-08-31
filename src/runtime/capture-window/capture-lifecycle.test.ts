@@ -3,6 +3,7 @@ import {
   CAPTURE_ACTIVE_CLASS,
   CAPTURE_PRIVACY_CLASS,
   capturePreparedWindow,
+  prepareCaptureWindow,
 } from "./capture-lifecycle.ts";
 
 class FakeClassList {
@@ -22,6 +23,26 @@ class FakeClassList {
 }
 
 describe("capture preparation lifecycle", () => {
+  test("loads persisted privacy before taking the initial capture", async () => {
+    const events: string[] = [];
+    const result = await prepareCaptureWindow({
+      capture: async (privacyEnabled) => {
+        events.push(`capture:${privacyEnabled}`);
+        return { candidates: [], source: "png" };
+      },
+      loadPreferences: () => {
+        events.push("preferences");
+        return { privacyEnabled: false };
+      },
+    });
+
+    expect(events).toEqual(["preferences", "capture:false"]);
+    expect(result).toEqual({
+      preferences: { privacyEnabled: false },
+      snapshot: { candidates: [], source: "png" },
+    });
+  });
+
   test("prepares the live document for two frames before collecting candidates and capturing", async () => {
     const classList = new FakeClassList();
     const events: string[] = [];
