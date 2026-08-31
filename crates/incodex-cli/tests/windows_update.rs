@@ -6,11 +6,12 @@ use std::process::Command;
 use std::{fs, path::Path};
 
 use incodex_cli::windows_update::{
-    acquire_windows_install_lock, clear_windows_runtime_pending, expected_release_sha256,
-    parse_windows_main_commit, parse_windows_stable_release, read_windows_runtime_pending,
-    validate_managed_install_identity, validate_windows_download_size, validate_windows_user_root,
-    windows_powershell_path, windows_release_asset, windows_release_ordering,
-    write_windows_runtime_pending, WindowsStandaloneLayout,
+    acquire_windows_install_lock, acquire_windows_update_lock, clear_windows_runtime_pending,
+    expected_release_sha256, parse_windows_main_commit, parse_windows_stable_release,
+    read_windows_runtime_pending, validate_managed_install_identity,
+    validate_windows_download_size, validate_windows_user_root, windows_powershell_path,
+    windows_release_asset, windows_release_ordering, write_windows_runtime_pending,
+    WindowsStandaloneLayout,
 };
 
 #[test]
@@ -264,6 +265,45 @@ fn post_install_verification_uses_the_installer_generation_lock() {
     acquire_windows_install_lock(&root).expect("lock is reusable after completion");
 
     fs::remove_dir_all(root).expect("remove lock fixture");
+}
+
+#[test]
+fn one_channel_lock_covers_update_selection_install_and_runtime_sync() {
+    let root = std::env::temp_dir().join(format!(
+        "incodex-windows-update-channel-lock-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos()
+    ));
+    let root = incodex_core::windows_session::ensure_private_windows_dir(&root)
+        .expect("create private update lock fixture");
+
+    let first = acquire_windows_update_lock(&root).expect("acquire first update lock");
+    assert!(acquire_windows_update_lock(&root)
+        .expect_err("a second update must not select another release generation")
+        .contains("another Incodex update"));
+    drop(first);
+    acquire_windows_update_lock(&root).expect("update lock is reusable after completion");
+
+    let source = include_str!("../src/windows_update.rs");
+    let run_update = source
+        .split_once("pub fn run_update")
+        .expect("Windows update entrypoint")
+        .1;
+    let lock = run_update
+        .find("acquire_windows_update_lock(&package_root)?")
+        .expect("channel-stable update lock");
+    let selection = run_update
+        .find("install_latest_stable_release")
+        .expect("stable release selection");
+    assert!(
+        lock < selection,
+        "release selection escaped the update lock"
+    );
+
+    fs::remove_dir_all(root).expect("remove update lock fixture");
 }
 
 #[test]
