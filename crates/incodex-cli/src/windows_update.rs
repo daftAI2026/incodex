@@ -550,6 +550,7 @@ fn download_with_powershell(
     limit: u64,
 ) -> Result<(), String> {
     let powershell = system_binary_path("WindowsPowerShell/v1.0/powershell.exe")?;
+    let destination = windows_powershell_path(destination)?;
     let mut last_error = String::new();
     for attempt in 1..=DOWNLOAD_ATTEMPTS {
         let output = Command::new(&powershell)
@@ -562,12 +563,12 @@ fn download_with_powershell(
                 "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 -Uri $env:INCODEX_UPDATE_URI -OutFile $env:INCODEX_UPDATE_OUT",
             ])
             .env("INCODEX_UPDATE_URI", url)
-            .env("INCODEX_UPDATE_OUT", destination)
+            .env("INCODEX_UPDATE_OUT", &destination)
             .stdin(Stdio::null())
             .output()
             .map_err(|error| format!("update failed: could not start PowerShell: {error}"))?;
         if output.status.success() {
-            let length = fs::metadata(destination)
+            let length = fs::metadata(&destination)
                 .map_err(|error| format!("update failed: cannot inspect {label}: {error}"))?
                 .len();
             validate_windows_download_size(label, length, limit)?;
@@ -579,7 +580,7 @@ fn download_with_powershell(
         } else {
             detail.trim().to_string()
         };
-        let _ = fs::remove_file(destination);
+        let _ = fs::remove_file(&destination);
         if attempt < DOWNLOAD_ATTEMPTS {
             thread::sleep(DOWNLOAD_RETRY_DELAY);
         }
@@ -587,6 +588,17 @@ fn download_with_powershell(
     Err(format!(
         "update failed: could not download {label}: {last_error}"
     ))
+}
+
+pub fn windows_powershell_path(path: &Path) -> Result<String, String> {
+    if !path.is_absolute() {
+        return Err("update failed: PowerShell download path is not absolute".to_string());
+    }
+    let path = windows_path_for_display(path);
+    if path.starts_with(r"\\?\") {
+        return Err("update failed: PowerShell cannot write this Windows path form".to_string());
+    }
+    Ok(path)
 }
 
 pub fn validate_windows_download_size(label: &str, length: u64, limit: u64) -> Result<(), String> {
