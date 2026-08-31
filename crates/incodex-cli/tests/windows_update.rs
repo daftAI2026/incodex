@@ -1,5 +1,6 @@
 #![cfg(target_os = "windows")]
 
+use std::cmp::Ordering;
 use std::path::PathBuf;
 use std::{fs, path::Path};
 
@@ -7,7 +8,8 @@ use incodex_cli::windows_update::{
     acquire_windows_install_lock, clear_windows_runtime_pending, expected_release_sha256,
     parse_windows_main_commit, parse_windows_stable_release, read_windows_runtime_pending,
     validate_managed_install_identity, validate_windows_download_size, validate_windows_user_root,
-    windows_release_asset, write_windows_runtime_pending, WindowsStandaloneLayout,
+    windows_release_asset, windows_release_ordering, write_windows_runtime_pending,
+    WindowsStandaloneLayout,
 };
 
 #[test]
@@ -117,11 +119,17 @@ fn managed_channel_must_point_at_the_running_versioned_binary() {
             .as_nanos()
     ));
     let package_root = root.join("packages/standalone");
-    let release = package_root.join("releases/9.9.9");
+    let release = package_root
+        .join("releases")
+        .join(env!("CARGO_PKG_VERSION"));
     fs::create_dir_all(&release).expect("create managed release");
     let managed = release.join("incodex.exe");
     fs::copy(env!("CARGO_BIN_EXE_incodex"), &managed).expect("copy managed CLI");
-    fs::write(package_root.join("current"), "9.9.9\n").expect("write generation marker");
+    fs::write(
+        package_root.join("current"),
+        format!("{}\n", env!("CARGO_PKG_VERSION")),
+    )
+    .expect("write generation marker");
 
     assert_eq!(
         validate_managed_install_identity(&package_root, &managed)
@@ -221,5 +229,22 @@ fn update_metadata_and_scripts_have_explicit_size_bounds() {
     assert!(validate_windows_download_size("release metadata", 0, 256 * 1024).is_err());
     assert!(
         validate_windows_download_size("stable installer", 1024 * 1024 + 1, 1024 * 1024).is_err()
+    );
+}
+
+#[test]
+fn release_ordering_distinguishes_update_current_and_newer_local() {
+    let latest = parse_windows_stable_release(br#"{"tag_name":"v0.5.0"}"#).expect("stable release");
+    assert_eq!(
+        windows_release_ordering("0.4.0", &latest).expect("older local version"),
+        Ordering::Greater
+    );
+    assert_eq!(
+        windows_release_ordering("0.5.0", &latest).expect("equal version"),
+        Ordering::Equal
+    );
+    assert_eq!(
+        windows_release_ordering("0.6.0", &latest).expect("newer local version"),
+        Ordering::Less
     );
 }
