@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   captureOutputSize,
   captureWindowCornerRadius,
+  captureWindowShadow,
   createCaptureRenderPlan,
   redactionSampling,
 } from "./compositor.ts";
@@ -18,6 +19,35 @@ describe("capture window compositor plan", () => {
   test("uses the observed platform window radius independently of padding", () => {
     expect(captureWindowCornerRadius(true, 2)).toBe(52);
     expect(captureWindowCornerRadius(false, 2)).toBe(24);
+  });
+
+  test("matches the reference window shadow falloff", () => {
+    expect(captureWindowShadow(64, 2)).toEqual({
+      blur: 90,
+      color: "rgba(15, 18, 26, 0.38)",
+      offsetY: 32,
+    });
+    expect(captureWindowShadow(0, 2)).toEqual({
+      blur: 0,
+      color: "rgba(15, 18, 26, 0.38)",
+      offsetY: 0,
+    });
+  });
+
+  test("places an opaque white window base between the background and translucent Codex pixels", () => {
+    const state = createCaptureWindowState({ width: 1200, height: 801, scaleFactor: 2 });
+
+    const plan = createCaptureRenderPlan(state);
+
+    expect(plan.slice(0, 3)).toEqual([
+      expect.objectContaining({ kind: "background" }),
+      {
+        color: "#ffffff",
+        kind: "window-underlay",
+        rect: { x: 128, y: 128, width: 1200, height: 801 },
+      },
+      expect.objectContaining({ kind: "window", shadow: true }),
+    ]);
   });
 
   test("exports only confirmed automatic and manual masks in stable order", () => {
@@ -42,6 +72,7 @@ describe("capture window compositor plan", () => {
 
     expect(plan.map((operation) => operation.kind)).toEqual([
       "background",
+      "window-underlay",
       "window",
       "redaction",
       "redaction",
@@ -51,7 +82,7 @@ describe("capture window compositor plan", () => {
       rect: { x: 168, y: 178, width: 80, height: 60 },
       style: "blur",
     });
-    expect(plan[1]).toMatchObject({
+    expect(plan[2]).toMatchObject({
       kind: "window",
       rect: { x: 128, y: 128, width: 1200, height: 801 },
     });
@@ -86,6 +117,7 @@ describe("capture window compositor plan", () => {
 
     expect(plan.map((operation) => operation.kind)).toEqual([
       "background",
+      "window-underlay",
       "window",
       "redaction",
     ]);

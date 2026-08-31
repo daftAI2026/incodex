@@ -71,6 +71,7 @@ describe("capture window preview", () => {
     expect(markup).toContain('data-action="retake"');
     expect(markup).toContain("incodex-capture-checker");
     expect(markup).toContain('data-action="zoom-reset" type="button" title="Reset zoom"');
+    expect(copy.shadow).toBe("Shadow");
     expect(markup).toContain('data-color-trigger="background"');
     expect(markup).toContain(
       `style="--capture-swatch:url('/capture-backgrounds/sea.jpg') center / cover no-repeat"`,
@@ -126,6 +127,9 @@ describe("capture window preview", () => {
     expect(css).toContain(".mac-traffic-light:first-of-type > div");
     expect(css).toMatch(
       /\.incodex-capture-background-option\[aria-pressed="true"\][\s\S]*?box-shadow: 0 0 0 2px var\(--incodex-capture-surface\), 0 0 0 4px var\(--incodex-capture-ring\)/,
+    );
+    expect(css).toMatch(
+      /\.incodex-capture-background-option\s*\{[\s\S]*?height: calc\(var\(--incodex-capture-space\) \* 7\);[\s\S]*?width: calc\(var\(--incodex-capture-space\) \* 7\);/,
     );
   });
 

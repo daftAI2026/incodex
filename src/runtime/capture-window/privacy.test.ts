@@ -189,6 +189,8 @@ class FakePrivacyElement {
 }
 
 function privacyDocument(options: {
+  composerProjects?: FakePrivacyElement[];
+  emptyStateProjects?: FakePrivacyElement[];
   profiles?: FakePrivacyElement[];
   projects?: FakePrivacyElement[];
   threads?: FakePrivacyElement[];
@@ -198,6 +200,8 @@ function privacyDocument(options: {
       if (selector.includes("sidebar-thread-row")) return options.threads ?? [];
       if (selector.includes("sidebar-project-row")) return options.projects ?? [];
       if (selector.includes("button.sidebar-item")) return options.profiles ?? [];
+      if (selector.includes("workspace-project")) return options.composerProjects ?? [];
+      if (selector.includes('data-feature="game-source"')) return options.emptyStateProjects ?? [];
       return [];
     },
   } as unknown as Document;
@@ -235,6 +239,30 @@ describe("Codex privacy placeholders", () => {
     expect(projectLabel.hasAttribute("data-incodex-capture-redact")).toBe(false);
     expect(profileName.hasAttribute("data-incodex-capture-redact")).toBe(false);
     expect(profile.hasAttribute("data-incodex-capture-redact-profile")).toBe(false);
+  });
+
+  test("masks project names repeated in the composer and empty-state heading", () => {
+    const composerLabel = new FakePrivacyElement({ tagName: "SPAN", text: "cavalrycn" });
+    const composerProject = new FakePrivacyElement({ children: [composerLabel], tagName: "BUTTON" });
+    const emptyStateLabel = new FakePrivacyElement({ tagName: "SPAN", text: "cavalrycn" });
+    const emptyStateProject = new FakePrivacyElement({
+      children: [emptyStateLabel],
+      tagName: "BUTTON",
+    });
+
+    const restore = markCodexPrivacyPlaceholders(
+      privacyDocument({
+        composerProjects: [composerProject],
+        emptyStateProjects: [emptyStateProject],
+      }),
+    );
+
+    expect(composerLabel.getAttribute("data-incodex-capture-redact")).toBe("text");
+    expect(emptyStateLabel.getAttribute("data-incodex-capture-redact")).toBe("text");
+
+    restore();
+    expect(composerLabel.hasAttribute("data-incodex-capture-redact")).toBe(false);
+    expect(emptyStateLabel.hasAttribute("data-incodex-capture-redact")).toBe(false);
   });
 
   test("restores pre-existing marker values instead of deleting host state", () => {
