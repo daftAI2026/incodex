@@ -230,6 +230,42 @@ fn injected_ui_carries_profile_mask_as_a_json_bootstrap_value() {
 }
 
 #[test]
+fn capture_debug_bootstrap_is_explicit_and_disabled_by_default() {
+    assert!(!inject_source().contains("window.__incodexCaptureDebug=true"));
+
+    let source = inject_source_for_options(&InjectionOptions {
+        locale: Some("zh-CN".into()),
+        profile_mask: None,
+        capture_debug: true,
+    });
+    assert!(source.contains("window.__incodexCaptureDebug=true"));
+}
+
+#[test]
+fn capture_debug_protocol_accepts_only_typed_requests_and_png_results() {
+    let request = json!({
+        "result": { "result": { "value": { "id": "capture-7", "kind": "capture" } } }
+    });
+    assert_eq!(
+        parse_capture_debug_request(&request),
+        Some(CaptureDebugRequest {
+            id: "capture-7".into(),
+        })
+    );
+    assert!(parse_capture_debug_request(&json!({
+        "result": { "result": { "value": { "id": "capture-7", "kind": "read-file" } } }
+    }))
+    .is_none());
+
+    let expression = capture_debug_resolve_expression(
+        "capture-7",
+        Ok("data:image/png;base64,cG5n"),
+    );
+    assert!(expression.contains("__incodexResolveCaptureDebug"));
+    assert!(expression.contains("data:image/png;base64,cG5n"));
+}
+
+#[test]
 fn profile_payload_is_null_outside_the_exact_top_level_codex_page() {
     let source = inject_source_for_options(&InjectionOptions {
         locale: None,

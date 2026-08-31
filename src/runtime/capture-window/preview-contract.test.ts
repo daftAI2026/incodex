@@ -142,4 +142,13 @@ describe("capture window preview", () => {
       "state = applyCaptureCommand(state, command);\n    render();",
     );
   });
+
+  test("keeps the CDP experiment behind an explicit bootstrap without adding a public shortcut", () => {
+    const inject = readFileSync(join(import.meta.dir, "../inject.ts"), "utf8");
+
+    expect(inject).toContain('from "./capture-window/injected.ts"');
+    expect(inject).toContain("window.__incodexCaptureDebug === true");
+    expect(inject).toContain("openInjectedCaptureWindow");
+    expect(inject).not.toContain('event.code === "KeyS"');
+  });
 });
