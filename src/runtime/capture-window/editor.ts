@@ -6,6 +6,7 @@ import {
   CAPTURE_MAX_ZOOM,
   CAPTURE_MIN_ZOOM,
   type CaptureCandidate,
+  capturePointerIntent,
   createCaptureWindowState,
   type CapturePresetId,
   type CaptureRect,
@@ -446,7 +447,13 @@ function wireStage(
   }, { passive: false });
 
   stage.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0 && event.button !== 1) return;
+    const target = event.target instanceof Element ? event.target : null;
+    const intent = capturePointerIntent(
+      state.tool,
+      event.button,
+      Boolean(target?.closest("[data-region]")),
+    );
+    if (intent === "ignore" || intent === "region") return;
     const pan = readPan();
     gesture = {
       pointerId: event.pointerId,
@@ -456,11 +463,7 @@ function wireStage(
       startPanY: pan.panY,
     };
     stage.setPointerCapture(event.pointerId);
-    if (
-      state.tool === "redact" &&
-      state.redactionSource === "draw" &&
-      event.button === 0
-    ) {
+    if (intent === "draw") {
       draft = document.createElement("div");
       draft.className = "incodex-capture-draft-region";
       root.append(draft);
@@ -616,6 +619,7 @@ function regionElement(
   const padding = capturePhysicalPadding(state.source, state.padding);
   const element = document.createElement("div");
   element.className = "incodex-capture-region incodex-capture-region-confirmed";
+  element.dataset.region = "";
   element.dataset.source = source;
   element.dataset.interactive = String(state.redactionSource === "auto");
   element.setAttribute("role", "button");
@@ -645,6 +649,7 @@ function candidateElement(
   const padding = capturePhysicalPadding(state.source, state.padding);
   const element = document.createElement("div");
   element.className = "incodex-capture-region incodex-capture-region-candidate";
+  element.dataset.region = "";
   element.dataset.interactive = String(state.redactionSource === "auto");
   element.setAttribute("role", "button");
   element.title = copy.regionSuggestion;

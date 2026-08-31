@@ -38,6 +38,7 @@ export type CaptureSource = CaptureSize & {
 
 export type CaptureTool = "move" | "redact";
 export type CaptureRedactionSource = "auto" | "draw";
+export type CapturePointerIntent = "draw" | "ignore" | "pan" | "region";
 export type CaptureRedactionStyle = "mosaic" | "blur" | "solid";
 export type CapturePresetId =
   | "sea"
@@ -112,6 +113,17 @@ export function createCaptureWindowState(source: CaptureSource): CaptureWindowSt
     tool: "move",
     zoom: 1,
   };
+}
+
+export function capturePointerIntent(
+  tool: CaptureTool,
+  button: number,
+  overRegion: boolean,
+): CapturePointerIntent {
+  if (button === 1) return "pan";
+  if (button !== 0) return "ignore";
+  if (tool === "move") return "pan";
+  return overRegion ? "region" : "draw";
 }
 
 export function applyCaptureCommand(
