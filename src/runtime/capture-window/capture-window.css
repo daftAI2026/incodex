@@ -42,19 +42,22 @@
 }
 
 html.incodex-capturing [data-incodex-capture-hide],
-html.incodex-capturing [data-incodex-capture-hide] * {
+html.incodex-capturing [data-incodex-capture-hide] *,
+html.incodex-capturing [data-sonner-toaster],
+html.incodex-capturing [data-sonner-toaster] * {
   transition: none !important;
   visibility: hidden !important;
 }
 
 html.incodex-capture-redact [data-incodex-capture-redact] {
-  color: inherit;
   position: relative;
+  transition: none !important;
   visibility: hidden !important;
 }
 
 html.incodex-capture-redact [data-incodex-capture-redact] * {
-  visibility: hidden !important;
+  transition: none !important;
+  visibility: inherit !important;
 }
 
 html.incodex-capture-redact [data-incodex-capture-redact]::after {
@@ -63,21 +66,58 @@ html.incodex-capture-redact [data-incodex-capture-redact]::after {
   content: "";
   height: .55em;
   inset: 50% auto auto 0;
-  opacity: .18;
   position: absolute;
   transform: translateY(-50%);
   visibility: visible;
   width: 62%;
 }
 
+@supports (color: color-mix(in lab, red, red)) {
+  html.incodex-capture-redact [data-incodex-capture-redact]::after {
+    background: color-mix(in srgb, currentColor 22%, transparent);
+  }
+}
+
 html.incodex-capture-redact [data-incodex-capture-redact="blank"]::after {
-  content: none;
+  display: none;
 }
 
 html.incodex-capture-redact [data-incodex-capture-redact="center"]::after {
   left: 50%;
   transform: translate(-50%, -50%);
   width: 40%;
+}
+
+html.incodex-capture-redact [data-index]:nth-child(4n+1) [data-incodex-capture-redact]::after {
+  width: 46%;
+}
+
+html.incodex-capture-redact [data-index]:nth-child(4n+2) [data-incodex-capture-redact]::after {
+  width: 74%;
+}
+
+html.incodex-capture-redact [data-index]:nth-child(4n+3) [data-incodex-capture-redact]::after {
+  width: 55%;
+}
+
+html.incodex-capturing .mac-traffic-light > div {
+  transition: none !important;
+}
+
+html.incodex-capturing .mac-traffic-light:first-of-type > div {
+  background-color: #ef4444 !important;
+}
+
+html.incodex-capturing .mac-traffic-light:nth-of-type(2) > div {
+  background-color: #eab308 !important;
+}
+
+html.incodex-capturing .mac-traffic-light:nth-of-type(3) > div {
+  background-color: #22c55e !important;
+}
+
+html.incodex-capturing .mac-traffic-light > div > svg {
+  opacity: 0 !important;
 }
 
 .incodex-capture-root {

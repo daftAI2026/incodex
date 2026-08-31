@@ -21,6 +21,14 @@ import {
   type CaptureWindowState,
   wheelCaptureZoom,
 } from "./model.ts";
+import {
+  applyCapturePreferences,
+  type CapturePreferenceStorage,
+  isCapturePreferenceCommand,
+  loadCapturePreferences,
+  saveCapturePreferences,
+} from "./preferences.ts";
+import { resolveSelectedCaptureRegions } from "./redactions.ts";
 import { mountCaptureRegionLayer } from "./regions.ts";
 import { captureToolbarTemplate, captureWindowTemplate } from "./view.ts";
 import {
@@ -41,9 +49,9 @@ export type CaptureWindowEditorOptions = {
     privacyEnabled: boolean,
   ) => CaptureWindowRetake | Promise<CaptureWindowRetake>;
   onSave?: (png: Blob, suggestedName: string) => Promise<"cancelled" | "saved">;
+  preferenceStorage?: CapturePreferenceStorage | null;
   source: HTMLCanvasElement;
 };
-
 export type CaptureWindowRetake = {
   automaticRegions: CaptureCandidate[];
   source: HTMLCanvasElement;
@@ -67,13 +75,19 @@ export function mountCaptureWindowEditor(
   options: CaptureWindowEditorOptions,
 ): CaptureWindowEditorController {
   let source = options.source;
-  let state =
-    options.initialState ??
-    createCaptureWindowState({
-      height: source.height,
-      scaleFactor: window.devicePixelRatio || 1,
-      width: source.width,
-    });
+  const preferenceStorage = options.preferenceStorage === undefined
+    ? window.localStorage
+    : options.preferenceStorage;
+  const defaultState = createCaptureWindowState({
+    height: source.height,
+    scaleFactor: window.devicePixelRatio || 1,
+    width: source.width,
+  });
+  let state = options.initialState ?? (
+    preferenceStorage
+      ? applyCapturePreferences(defaultState, loadCapturePreferences(preferenceStorage))
+      : defaultState
+  );
   const backgroundImages = createCaptureBackgroundImageStore();
   let lastWallpaperDataUrl = state.background.kind === "wallpaper" ? state.background.dataUrl : null;
   let lastBackgroundColor = state.background.kind === "color" ? state.background.color : "#2B3440";
@@ -116,6 +130,9 @@ export function mountCaptureWindowEditor(
 
   function dispatch(command: CaptureWindowCommand): void {
     state = applyCaptureCommand(state, command);
+    if (preferenceStorage && isCapturePreferenceCommand(command)) {
+      saveCapturePreferences(preferenceStorage, state);
+    }
     refreshEditor(command);
     if (command.kind === "set-background") hydrateBackground(command.background);
   }
@@ -248,10 +265,7 @@ export function mountCaptureWindowEditor(
   }
 
   function renderCanvas(): HTMLCanvasElement {
-    const rendered = renderCaptureToCanvas(source, state, {
-      backgroundImage: backgroundImages.read(state.background),
-      isMacOS,
-    });
+    const rendered = renderCurrentCapture(backgroundImages.read(state.background));
     rendered.className = "incodex-capture-canvas";
     rendered.setAttribute("data-capture-output", "true");
     const frame = root.querySelector<HTMLElement>(".incodex-capture-canvas-frame");
@@ -264,7 +278,7 @@ export function mountCaptureWindowEditor(
     } else {
       frame?.prepend(rendered);
     }
-    mountCaptureRegionLayer(frame, canvas, state, automaticCandidates, copy, dispatchRegion);
+    mountCaptureRegionLayer(frame, canvas, currentRenderState(), automaticCandidates, copy, dispatchRegion);
     const paddingValue = root.querySelector<HTMLElement>("[data-value='padding']");
     if (paddingValue) paddingValue.textContent = `${state.padding}px`;
     window.requestAnimationFrame(() => fitCanvas(root, canvas, frame, state.zoom, panX, panY));
@@ -319,10 +333,7 @@ export function mountCaptureWindowEditor(
   async function exportCopy(): Promise<void> {
     setPhase("composing");
     try {
-      const canvas = renderCaptureToCanvas(source, state, {
-        backgroundImage: await backgroundImages.resolve(state.background),
-        isMacOS,
-      });
+      const canvas = renderCurrentCapture(await backgroundImages.resolve(state.background));
       const blob = await canvasBlob(canvas);
       if (options.onCopy) await options.onCopy(blob);
       else await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
@@ -337,10 +348,7 @@ export function mountCaptureWindowEditor(
   async function exportSave(): Promise<void> {
     setPhase("composing");
     try {
-      const canvas = renderCaptureToCanvas(source, state, {
-        backgroundImage: await backgroundImages.resolve(state.background),
-        isMacOS,
-      });
+      const canvas = renderCurrentCapture(await backgroundImages.resolve(state.background));
       const blob = await canvasBlob(canvas);
       const suggestedName = `Incodex ${timestampForFileName(new Date())}.png`;
       if (options.onSave) {
@@ -366,6 +374,17 @@ export function mountCaptureWindowEditor(
     }, () => {
       if (background.kind === "wallpaper") notify(copy.wallpaperUnreadable);
     });
+  }
+
+  function currentRenderState(): CaptureWindowState {
+    return {
+      ...state,
+      regions: resolveSelectedCaptureRegions(state.regions, automaticCandidates),
+    };
+  }
+
+  function renderCurrentCapture(backgroundImage: CanvasImageSource | null): HTMLCanvasElement {
+    return renderCaptureToCanvas(source, currentRenderState(), { backgroundImage, isMacOS });
   }
 
   render();
