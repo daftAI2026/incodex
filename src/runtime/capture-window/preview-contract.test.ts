@@ -50,6 +50,7 @@ describe("capture window preview", () => {
     const copy = captureWindowCopy("en");
     const markup = captureWindowTemplate(state, copy);
     const css = readFileSync(join(import.meta.dir, "capture-window.css"), "utf8");
+    const previewHtml = readFileSync(join(import.meta.dir, "preview.html"), "utf8");
 
     expect(markup).toContain('data-capture-icon="camera"');
     expect(markup).not.toContain("incodex-capture-subtitle");
@@ -70,7 +71,11 @@ describe("capture window preview", () => {
     expect(css).toContain("backdrop-filter: blur(3px)");
     expect(css).toContain("max-width: 56rem");
     expect(css).not.toContain("padding-top: calc(var(--incodex-capture-space) * 13)");
-    expect(css).toContain("grid-template-columns: minmax(0, 1fr) 224px");
+    expect(previewHtml).toContain("--spacing: .25rem");
+    expect(css).toContain(
+      "grid-template-columns: minmax(0, 1fr) calc(var(--incodex-capture-space) * 56)",
+    );
+    expect(css).toContain("height: calc(var(--incodex-capture-space) * 7)");
     expect(css).toContain("height: 50vh");
   });
 
