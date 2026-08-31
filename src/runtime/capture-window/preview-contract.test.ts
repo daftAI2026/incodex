@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { captureWindowCopy } from "./copy.ts";
-import { createCaptureWindowState } from "./model.ts";
+import { applyCaptureCommand, createCaptureWindowState } from "./model.ts";
 import { captureWindowTemplate } from "./view.ts";
 
 const root = join(import.meta.dir, "../../..");
@@ -60,7 +60,18 @@ describe("capture window preview", () => {
     expect(markup).toContain('data-action="retake"');
     expect(markup).toContain("incodex-capture-checker");
     expect(markup).toContain('data-action="zoom-reset" type="button" title="Reset zoom"');
-    expect(markup).toContain('data-input="color" type="color" value="#2B3440"');
+    expect(markup).toContain('data-color-trigger="background"');
+    expect(markup).toContain('aria-haspopup="dialog"');
+    expect(markup).not.toContain('data-input="color" type="color"');
+
+    const solidMarkup = captureWindowTemplate(
+      applyCaptureCommand(
+        applyCaptureCommand(state, { kind: "set-tool", tool: "redact" }),
+        { kind: "set-redaction-style", style: "solid" },
+      ),
+      copy,
+    );
+    expect(solidMarkup).toContain('data-color-trigger="solid"');
 
     const background = markup.indexOf(copy.background);
     const padding = markup.indexOf(copy.padding);
