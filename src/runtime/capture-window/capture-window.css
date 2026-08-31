@@ -480,6 +480,21 @@
   border-style: dashed;
 }
 
+.incodex-capture-wallpaper-label[data-selected="true"] {
+  border-style: solid;
+}
+
+.incodex-capture-wallpaper-label img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.incodex-capture-wallpaper-label [data-wallpaper-placeholder] {
+  inset: 0;
+  position: absolute;
+}
+
 .incodex-capture-color-label:focus-visible,
 .incodex-capture-wallpaper-label:focus-within,
 .incodex-capture-solid-color:focus-visible {
@@ -488,12 +503,24 @@
 }
 
 .incodex-capture-wallpaper-input {
+  display: none;
+}
+
+.incodex-capture-change-wallpaper {
+  background: transparent;
+  border: 0;
+  color: var(--incodex-capture-text-secondary);
   cursor: var(--cursor-interaction, pointer);
-  height: 100%;
-  inset: 0;
-  opacity: 0;
-  position: absolute;
-  width: 100%;
+  font: inherit;
+  font-size: 11px;
+  margin-top: calc(var(--incodex-capture-space) * 2);
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.incodex-capture-change-wallpaper:hover {
+  color: var(--incodex-capture-text);
 }
 
 .incodex-capture-solid-color {

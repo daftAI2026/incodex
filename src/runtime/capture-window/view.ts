@@ -7,11 +7,20 @@ import {
 } from "./model.ts";
 import { capturePresets, capturePresetSwatch } from "./presets.ts";
 
+export type CaptureWindowViewOptions = {
+  lastBackgroundColor?: string;
+  wallpaperDataUrl?: string | null;
+};
+
 export function captureWindowTemplate(
   state: CaptureWindowState,
   copy: CaptureWindowCopy,
-  lastBackgroundColor = "#2B3440",
+  options: CaptureWindowViewOptions = {},
 ): string {
+  const lastBackgroundColor = options.lastBackgroundColor ?? "#2B3440";
+  const wallpaperDataUrl = options.wallpaperDataUrl ?? (
+    state.background.kind === "wallpaper" ? state.background.dataUrl : null
+  );
   return `
     <div class="incodex-capture-backdrop" aria-hidden="true"></div>
     <section class="incodex-capture-dialog" role="dialog" aria-modal="true" aria-labelledby="incodex-capture-title">
@@ -31,7 +40,7 @@ export function captureWindowTemplate(
             </div>
           </div>
         </section>
-        ${inspectorTemplate(state, copy, lastBackgroundColor)}
+        ${inspectorTemplate(state, copy, lastBackgroundColor, wallpaperDataUrl)}
       </div>
       ${footerTemplate(copy)}
     </section>
@@ -88,12 +97,13 @@ function inspectorTemplate(
   state: CaptureWindowState,
   copy: CaptureWindowCopy,
   lastBackgroundColor: string,
+  wallpaperDataUrl: string | null,
 ): string {
   return `
     <aside class="incodex-capture-inspector">
       <section class="incodex-capture-section">
         <h2 class="incodex-capture-section-title">${copy.background}</h2>
-        ${backgroundGridTemplate(state, copy, lastBackgroundColor)}
+        ${backgroundGridTemplate(state, copy, lastBackgroundColor, wallpaperDataUrl)}
       </section>
       <section class="incodex-capture-section">
         <div class="incodex-capture-row incodex-capture-padding-heading">
@@ -129,6 +139,7 @@ function backgroundGridTemplate(
   state: CaptureWindowState,
   copy: CaptureWindowCopy,
   lastBackgroundColor: string,
+  wallpaperDataUrl: string | null,
 ): string {
   const presets = capturePresets.map((preset) => {
     const { id } = preset;
@@ -139,7 +150,9 @@ function backgroundGridTemplate(
   const custom = state.background.kind === "color";
   const wallpaper = state.background.kind === "wallpaper";
   const customIcon = custom ? "" : captureIcon("pipette", 11);
-  return `<div class="incodex-capture-background-grid">${presets}<button class="incodex-capture-background-option incodex-capture-color-label" data-background-custom data-color-trigger="background" data-selected="${custom}" type="button" aria-label="${copy.custom}" title="${copy.custom}" aria-haspopup="dialog" aria-expanded="false" data-state="closed" style="--capture-swatch:${lastBackgroundColor}">${customIcon}</button><button class="incodex-capture-background-option incodex-capture-checker" data-background="transparent" type="button" aria-label="${copy.transparent}" title="${copy.transparent}" aria-pressed="${transparent}"></button><label class="incodex-capture-background-option incodex-capture-wallpaper-label" data-background-wallpaper data-selected="${wallpaper}" aria-label="${copy.wallpaper}" title="${copy.wallpaper}">${captureIcon("image-plus", 13)}<input class="incodex-capture-wallpaper-input" data-input="wallpaper" type="file" accept="image/png,image/jpeg,image/webp"></label></div>`;
+  const wallpaperImage = wallpaperDataUrl ?? "";
+  const changeImageHidden = wallpaper && wallpaperDataUrl ? "" : " hidden";
+  return `<div class="incodex-capture-background-grid">${presets}<button class="incodex-capture-background-option incodex-capture-color-label" data-background-custom data-color-trigger="background" data-selected="${custom}" type="button" aria-label="${copy.custom}" title="${copy.custom}" aria-haspopup="dialog" aria-expanded="false" data-state="closed" style="--capture-swatch:${lastBackgroundColor}">${customIcon}</button><button class="incodex-capture-background-option incodex-capture-checker" data-background="transparent" type="button" aria-label="${copy.transparent}" title="${copy.transparent}" aria-pressed="${transparent}"></button><button class="incodex-capture-background-option incodex-capture-wallpaper-label" data-background-wallpaper type="button" data-selected="${wallpaper}" aria-label="${copy.wallpaper}" title="${copy.wallpaper}"><img data-wallpaper-preview src="${wallpaperImage}" alt="" ${wallpaperDataUrl ? "" : "hidden"}><span data-wallpaper-placeholder ${wallpaperDataUrl ? "hidden" : ""}>${captureIcon("image-plus", 13)}</span></button></div><input class="incodex-capture-wallpaper-input" data-input="wallpaper" type="file" accept="image/png,image/jpeg,image/webp"><button class="incodex-capture-change-wallpaper" data-action="change-wallpaper" type="button"${changeImageHidden}>${copy.changeImage}</button>`;
 }
 
 function footerTemplate(copy: CaptureWindowCopy): string {

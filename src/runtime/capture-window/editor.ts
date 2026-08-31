@@ -22,9 +22,11 @@ import {
 } from "./model.ts";
 import { mountCaptureRegionLayer } from "./regions.ts";
 import { captureToolbarTemplate, captureWindowTemplate } from "./view.ts";
-
-const MAX_WALLPAPER_BYTES = 32 * 1024 * 1024;
-const WALLPAPER_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+import {
+  isCaptureWallpaperFile,
+  loadCaptureImage,
+  readCaptureWallpaperFile,
+} from "./wallpaper.ts";
 
 export type CaptureWindowEditorOptions = {
   automaticRegions?: CaptureCandidate[];
@@ -68,6 +70,8 @@ export function mountCaptureWindowEditor(
       width: source.width,
     });
   let wallpaperImage: HTMLImageElement | null = null;
+  let wallpaperLoad: Promise<HTMLImageElement> | null = null;
+  let lastWallpaperDataUrl = state.background.kind === "wallpaper" ? state.background.dataUrl : null;
   let lastBackgroundColor = state.background.kind === "color" ? state.background.color : "#2B3440";
   let panX = 0;
   let panY = 0;
@@ -175,7 +179,7 @@ export function mountCaptureWindowEditor(
     ) {
       refreshToolbar();
     }
-    syncEditorControls(root, state, lastBackgroundColor);
+    syncEditorControls(root, state, lastBackgroundColor, lastWallpaperDataUrl);
     renderCanvas();
     updateHistoryControls(root, state);
   }
@@ -193,7 +197,10 @@ export function mountCaptureWindowEditor(
 
   function render(): void {
     if (destroyed) return;
-    root.innerHTML = captureWindowTemplate(state, copy, lastBackgroundColor);
+    root.innerHTML = captureWindowTemplate(state, copy, {
+      lastBackgroundColor,
+      wallpaperDataUrl: lastWallpaperDataUrl,
+    });
     root.setAttribute("data-tool", state.tool);
     root.querySelector<HTMLElement>(".incodex-capture-backdrop")?.addEventListener("click", close);
     root.querySelector<HTMLElement>("[data-action='close']")?.addEventListener("click", close);
@@ -201,7 +208,12 @@ export function mountCaptureWindowEditor(
     const rendered = renderCanvas();
     const frame = root.querySelector<HTMLElement>(".incodex-capture-canvas-frame");
     wireToolbarActions(root, dispatch, dispatchRegion, resetView);
-    wireBackgroundActions(root, dispatch);
+    wireBackgroundActions(
+      root,
+      dispatch,
+      () => lastWallpaperDataUrl,
+      () => root.querySelector<HTMLInputElement>("[data-input='wallpaper']")?.click(),
+    );
     wireStage(
       root,
       rendered,
@@ -288,13 +300,14 @@ export function mountCaptureWindowEditor(
   }
 
   async function loadWallpaper(file: File): Promise<void> {
-    if (!WALLPAPER_TYPES.has(file.type) || file.size > MAX_WALLPAPER_BYTES) {
+    if (!isCaptureWallpaperFile(file)) {
       notify(copy.wallpaperTooLarge);
       return;
     }
     try {
-      const dataUrl = await readFileAsDataUrl(file);
-      wallpaperImage = await loadImage(dataUrl);
+      const dataUrl = await readCaptureWallpaperFile(file);
+      wallpaperImage = await loadCaptureImage(dataUrl);
+      lastWallpaperDataUrl = dataUrl;
       dispatch({ kind: "set-background", background: { dataUrl, kind: "wallpaper" } });
     } catch {
       notify(copy.wallpaperUnreadable);
@@ -303,11 +316,11 @@ export function mountCaptureWindowEditor(
 
   async function exportCopy(): Promise<void> {
     setPhase("composing");
-    const canvas = renderCaptureToCanvas(source, state, {
-      backgroundImage: wallpaperImage,
-      isMacOS,
-    });
     try {
+      const canvas = renderCaptureToCanvas(source, state, {
+        backgroundImage: await resolveWallpaperImage(),
+        isMacOS,
+      });
       const blob = await canvasBlob(canvas);
       if (options.onCopy) await options.onCopy(blob);
       else await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
@@ -321,11 +334,11 @@ export function mountCaptureWindowEditor(
 
   async function exportSave(): Promise<void> {
     setPhase("composing");
-    const canvas = renderCaptureToCanvas(source, state, {
-      backgroundImage: wallpaperImage,
-      isMacOS,
-    });
     try {
+      const canvas = renderCaptureToCanvas(source, state, {
+        backgroundImage: await resolveWallpaperImage(),
+        isMacOS,
+      });
       const blob = await canvasBlob(canvas);
       const suggestedName = `Incodex ${timestampForFileName(new Date())}.png`;
       if (options.onSave) {
@@ -345,7 +358,27 @@ export function mountCaptureWindowEditor(
     }
   }
 
+  async function resolveWallpaperImage(): Promise<HTMLImageElement | null> {
+    if (state.background.kind !== "wallpaper") return null;
+    if (wallpaperImage) return wallpaperImage;
+    if (!wallpaperLoad) wallpaperLoad = loadCaptureImage(state.background.dataUrl);
+    wallpaperImage = await wallpaperLoad;
+    wallpaperLoad = null;
+    return wallpaperImage;
+  }
+
   render();
+  if (lastWallpaperDataUrl) {
+    wallpaperLoad = loadCaptureImage(lastWallpaperDataUrl);
+    void wallpaperLoad.then((image) => {
+      wallpaperImage = image;
+      wallpaperLoad = null;
+      if (!destroyed) renderCanvas();
+    }).catch(() => {
+      wallpaperLoad = null;
+      notify(copy.wallpaperUnreadable);
+    });
+  }
 
   return {
     destroy: close,
@@ -398,6 +431,8 @@ function wireToolbarActions(
 function wireBackgroundActions(
   root: HTMLElement,
   dispatch: (command: CaptureWindowCommand) => void,
+  readWallpaperDataUrl: () => string | null,
+  pickWallpaper: () => void,
 ): void {
   for (const option of root.querySelectorAll<HTMLElement>("[data-background]")) {
     option.addEventListener("click", () => {
@@ -412,6 +447,20 @@ function wireBackgroundActions(
       });
     });
   }
+  const wallpaper = root.querySelector<HTMLButtonElement>("[data-background-wallpaper]");
+  wallpaper?.addEventListener("click", () => {
+    const dataUrl = readWallpaperDataUrl();
+    if (!dataUrl) {
+      pickWallpaper();
+      return;
+    }
+    dispatch({ background: { dataUrl, kind: "wallpaper" }, kind: "set-background" });
+  });
+  wallpaper?.addEventListener("dblclick", () => pickWallpaper());
+  root.querySelector<HTMLButtonElement>("[data-action='change-wallpaper']")?.addEventListener(
+    "click",
+    pickWallpaper,
+  );
 }
 
 function wireInputs(
@@ -450,6 +499,7 @@ function syncEditorControls(
   root: HTMLElement,
   state: CaptureWindowState,
   lastBackgroundColor: string,
+  wallpaperDataUrl: string | null,
 ): void {
   const zoom = root.querySelector<HTMLElement>(".incodex-capture-zoom-reset");
   if (zoom) zoom.textContent = `${Math.round(state.zoom * 100)}%`;
@@ -473,6 +523,17 @@ function syncEditorControls(
   syncCaptureColorPopover(root, "background", lastBackgroundColor);
   const wallpaper = root.querySelector<HTMLElement>("[data-background-wallpaper]");
   if (wallpaper) wallpaper.dataset.selected = String(state.background.kind === "wallpaper");
+  const wallpaperPreview = root.querySelector<HTMLImageElement>("[data-wallpaper-preview]");
+  const wallpaperPlaceholder = root.querySelector<HTMLElement>("[data-wallpaper-placeholder]");
+  const changeWallpaper = root.querySelector<HTMLButtonElement>("[data-action='change-wallpaper']");
+  if (wallpaperPreview) {
+    wallpaperPreview.src = wallpaperDataUrl ?? "";
+    wallpaperPreview.hidden = !wallpaperDataUrl;
+  }
+  if (wallpaperPlaceholder) wallpaperPlaceholder.hidden = Boolean(wallpaperDataUrl);
+  if (changeWallpaper) {
+    changeWallpaper.hidden = !(wallpaperDataUrl && state.background.kind === "wallpaper");
+  }
 
   const padding = root.querySelector<HTMLInputElement>("[data-input='padding']");
   const paddingValue = root.querySelector<HTMLElement>("[data-value='padding']");
@@ -703,24 +764,6 @@ function updateDraft(
 function currentZoom(root: HTMLElement): number {
   const value = root.querySelector<HTMLElement>(".incodex-capture-zoom-reset")?.textContent;
   return Number.parseInt(value ?? "100", 10) / 100;
-}
-
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.addEventListener("load", () => resolve(String(reader.result)));
-    reader.addEventListener("error", () => reject(reader.error));
-    reader.readAsDataURL(file);
-  });
-}
-
-function loadImage(source: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.addEventListener("load", () => resolve(image));
-    image.addEventListener("error", () => reject(new Error("Unable to load image")));
-    image.src = source;
-  });
 }
 
 function canvasBlob(canvas: HTMLCanvasElement): Promise<Blob> {
