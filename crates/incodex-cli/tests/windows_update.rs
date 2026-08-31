@@ -4,9 +4,10 @@ use std::path::PathBuf;
 use std::{fs, path::Path};
 
 use incodex_cli::windows_update::{
-    clear_windows_runtime_pending, expected_release_sha256, parse_windows_main_commit,
-    parse_windows_stable_release, read_windows_runtime_pending, validate_managed_install_identity,
-    windows_release_asset, write_windows_runtime_pending, WindowsStandaloneLayout,
+    acquire_windows_install_lock, clear_windows_runtime_pending, expected_release_sha256,
+    parse_windows_main_commit, parse_windows_stable_release, read_windows_runtime_pending,
+    validate_managed_install_identity, windows_release_asset, write_windows_runtime_pending,
+    WindowsStandaloneLayout,
 };
 
 #[test]
@@ -178,4 +179,28 @@ fn runtime_handoff_is_durable_until_the_expected_cli_completes_it() {
     assert!(write_windows_runtime_pending(&root, "v9.9.9").is_err());
 
     fs::remove_dir_all(root).expect("remove pending fixture");
+}
+
+#[test]
+fn post_install_verification_uses_the_installer_generation_lock() {
+    let root = std::env::temp_dir().join(format!(
+        "incodex-windows-update-lock-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).expect("create lock fixture");
+
+    let first = acquire_windows_install_lock(&root).expect("acquire first lock");
+    assert!(
+        acquire_windows_install_lock(&root)
+            .expect_err("second update must not cross the active generation")
+            .contains("another Incodex install or update")
+    );
+    drop(first);
+    acquire_windows_install_lock(&root).expect("lock is reusable after completion");
+
+    fs::remove_dir_all(root).expect("remove lock fixture");
 }
