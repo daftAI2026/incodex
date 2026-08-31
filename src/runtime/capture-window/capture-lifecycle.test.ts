@@ -139,6 +139,7 @@ describe("capture preparation lifecycle", () => {
       waitForFrame: async () => {},
     })).rejects.toThrow("already in progress");
 
+    while (!finishCapture) await Promise.resolve();
     finishCapture?.("first");
     expect((await firstCapture).source).toBe("first");
 

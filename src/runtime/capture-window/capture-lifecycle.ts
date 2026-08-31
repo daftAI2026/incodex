@@ -23,8 +23,12 @@ export type CapturePreparedWindowOptions<T> = {
   collectCandidates: () => CaptureCandidate[];
   privacyEnabled: boolean;
   root: CaptureRoot;
+  timeoutMs?: number;
   waitForFrame: () => Promise<void>;
 };
+
+const CAPTURE_TIMEOUT_MS = 10_000;
+let captureInFlight = false;
 
 export type PrepareCaptureWindowOptions<T, P extends { privacyEnabled: boolean }> = {
   capture: (privacyEnabled: boolean) => Promise<T>;
@@ -42,21 +46,33 @@ export async function prepareCaptureWindow<T, P extends { privacyEnabled: boolea
 export async function capturePreparedWindow<T>(
   options: CapturePreparedWindowOptions<T>,
 ): Promise<PreparedCapture<T>> {
-  await options.begin?.();
-  options.root.classList.add(CAPTURE_ACTIVE_CLASS);
-  if (options.privacyEnabled) {
-    options.root.classList.add(CAPTURE_PRIVACY_CLASS);
-  }
-
+  if (captureInFlight) throw new Error("A window capture is already in progress");
+  captureInFlight = true;
   try {
+    try {
+      await options.begin?.();
+    } catch {
+    }
+    options.root.classList.add(CAPTURE_ACTIVE_CLASS);
+    if (options.privacyEnabled) {
+      options.root.classList.add(CAPTURE_PRIVACY_CLASS);
+    }
     await options.waitForFrame();
     await options.waitForFrame();
-    const candidates = options.collectCandidates();
-    const source = await options.capture();
+    let candidates: CaptureCandidate[] = [];
+    try {
+      candidates = options.collectCandidates();
+    } catch {
+    }
+    const source = await withCaptureTimeout(
+      Promise.resolve(options.capture()),
+      options.timeoutMs ?? CAPTURE_TIMEOUT_MS,
+    );
     return { candidates, source };
   } finally {
     options.root.classList.remove(CAPTURE_ACTIVE_CLASS);
     options.root.classList.remove(CAPTURE_PRIVACY_CLASS);
+    captureInFlight = false;
   }
 }
 
@@ -72,5 +88,21 @@ export function waitForCaptureFrame(timeoutMs = 120): Promise<void> {
     };
     timeout = setTimeout(finish, timeoutMs);
     window.requestAnimationFrame(finish);
+  });
+}
+
+function withCaptureTimeout<T>(capture: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("Window capture timed out")), timeoutMs);
+    capture.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    );
   });
 }
