@@ -140,6 +140,14 @@ function ownedInstallState(options, registrationId) {
   return owned ? state : null;
 }
 
+function installedRuntimeDir(options, env) {
+  const registrationId = env[REGISTRATION_NAME] || "";
+  if (!REGISTRATION_PATTERN.test(registrationId)) return "";
+  const runtimeRoot = options.runtimeDir || __dirname;
+  const state = ownedInstallState(options, registrationId);
+  return state ? path.win32.join(runtimeRoot, "releases", state.runtimeRelease) : "";
+}
+
 function loadRuntimeWhenElectronIsReady(options, runtimeDir) {
   const load = options.load || require;
   const onElectronLoaded =
@@ -161,25 +169,23 @@ function attachWindowsRuntime(options = {}) {
   if (processType === "browser" && token && !env[BOOTSTRAPPED_NAME]) {
     const mode = claimActivationEnvironment(options, env, token);
     if (mode === "runtime") {
-      const runtimeDir = options.runtimeDir || __dirname;
+      const runtimeDir = installedRuntimeDir(options, env);
+      if (!runtimeDir) return false;
       loadRuntimeWhenElectronIsReady(options, runtimeDir);
     }
     return true;
   }
   const registrationId = env[REGISTRATION_NAME] || "";
-  const runtimeRoot = options.runtimeDir || __dirname;
-  const state = ownedInstallState(options, registrationId);
+  const runtimeDir = installedRuntimeDir(options, env);
   if (
     processType !== "browser" ||
-    !REGISTRATION_PATTERN.test(registrationId) ||
     env[BOOTSTRAPPED_NAME] ||
-    !state
+    !runtimeDir
   ) {
     return false;
   }
 
   env[BOOTSTRAPPED_NAME] = registrationId;
-  const runtimeDir = path.win32.join(runtimeRoot, "releases", state.runtimeRelease);
   loadRuntimeWhenElectronIsReady(options, runtimeDir);
   return true;
 }
