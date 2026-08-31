@@ -1,18 +1,58 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread;
+use std::time::Duration;
 
 use crate::parse::ParsedCli;
 use crate::windows_system::{system_binary_path, windows_path_for_display};
+use serde::Deserialize;
 
-const WINDOWS_INSTALLER_URL: &str =
+const WINDOWS_LATEST_RELEASE_URL: &str =
+    "https://api.github.com/repos/daftAI2026/incodex/releases/latest";
+const WINDOWS_MAIN_INSTALLER_URL: &str =
     "https://raw.githubusercontent.com/daftAI2026/incodex/main/install.ps1";
 const MANAGED_BY_STANDALONE_ENV: &str = "INCODEX_MANAGED_BY_STANDALONE";
 const MANAGED_PACKAGE_ROOT_ENV: &str = "INCODEX_MANAGED_PACKAGE_ROOT";
 const INSTALLER_PATH_ENV: &str = "INCODEX_WINDOWS_INSTALLER_PATH";
 const CURRENT_GENERATION_LIMIT: u64 = 64;
+const DOWNLOAD_ATTEMPTS: usize = 3;
+const DOWNLOAD_RETRY_DELAY: Duration = Duration::from_millis(200);
+static UPDATE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub const WINDOWS_X64_RELEASE_ASSET: &str = "incodex-windows-x64.exe";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowsStableRelease {
+    tag: String,
+    version: String,
+    installer_url: String,
+    download_base: String,
+}
+
+impl WindowsStableRelease {
+    pub fn tag(&self) -> &str {
+        &self.tag
+    }
+
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
+    pub fn installer_url(&self) -> &str {
+        &self.installer_url
+    }
+
+    pub fn download_base(&self) -> &str {
+        &self.download_base
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct LatestRelease {
+    tag_name: String,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowsStandaloneLayout {
@@ -81,6 +121,42 @@ pub fn expected_release_sha256(manifest: &str, asset: &str) -> Result<String, St
     Ok(digest.to_ascii_lowercase())
 }
 
+pub fn parse_windows_stable_release(metadata: &[u8]) -> Result<WindowsStableRelease, String> {
+    let latest: LatestRelease = serde_json::from_slice(metadata)
+        .map_err(|_| "update failed: invalid latest release metadata".to_string())?;
+    let version = latest.tag_name.strip_prefix('v').ok_or_else(|| {
+        format!(
+            "update failed: invalid latest release tag: {}",
+            latest.tag_name
+        )
+    })?;
+    validate_stable_version(version).map_err(|_| {
+        format!(
+            "update failed: invalid latest release tag: {}",
+            latest.tag_name
+        )
+    })?;
+    if latest.tag_name != format!("v{version}") {
+        return Err(format!(
+            "update failed: invalid latest release tag: {}",
+            latest.tag_name
+        ));
+    }
+    let version = version.to_string();
+    Ok(WindowsStableRelease {
+        installer_url: format!(
+            "https://raw.githubusercontent.com/daftAI2026/incodex/{}/install.ps1",
+            latest.tag_name
+        ),
+        download_base: format!(
+            "https://github.com/daftAI2026/incodex/releases/download/{}",
+            latest.tag_name
+        ),
+        tag: latest.tag_name,
+        version,
+    })
+}
+
 pub fn run_runtime(parsed: &ParsedCli) -> Result<(), String> {
     if parsed.dry_run {
         println!("would publish the embedded Runtime without modifying Codex");
@@ -102,12 +178,12 @@ pub fn run_runtime(parsed: &ParsedCli) -> Result<(), String> {
 pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
     if std::env::var(MANAGED_BY_STANDALONE_ENV).as_deref() != Ok("1") {
         return Err(format!(
-            "this copy is not a managed Windows installation\n  powershell -ExecutionPolicy Bypass -c \"irm {WINDOWS_INSTALLER_URL} | iex\""
+            "this copy is not a managed Windows installation\n  powershell -ExecutionPolicy Bypass -c \"irm {WINDOWS_MAIN_INSTALLER_URL} | iex\""
         ));
     }
     let package_root = managed_package_root()?;
     let display_command = format!(
-        "powershell -ExecutionPolicy Bypass -c \"$env:INCODEX_NON_INTERACTIVE='1'; irm {WINDOWS_INSTALLER_URL} | iex\""
+        "powershell -ExecutionPolicy Bypass -c \"$env:INCODEX_NON_INTERACTIVE='1'; irm {WINDOWS_MAIN_INSTALLER_URL} | iex\""
     );
     println!("Updating Incodex via `{display_command}`...\n");
     if parsed.dry_run {
@@ -117,7 +193,11 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
         return Ok(());
     }
 
-    run_windows_installer()?;
+    if let Some(installer) = std::env::var_os(INSTALLER_PATH_ENV) {
+        run_windows_installer(Path::new(&installer), None)?;
+    } else {
+        install_latest_stable_release(&package_root)?;
+    }
     let (installed, expected_version) = current_release_executable(&package_root)?;
     verify_cli_version(&installed, &expected_version)?;
     publish_runtime_with(&installed)?;
@@ -136,17 +216,62 @@ fn managed_package_root() -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn run_windows_installer() -> Result<(), String> {
+fn install_latest_stable_release(package_root: &Path) -> Result<(), String> {
+    let work = UpdateWorkDirectory::create(package_root)?;
+    let metadata_path = work.path.join("latest.json");
+    download_with_powershell(
+        WINDOWS_LATEST_RELEASE_URL,
+        &metadata_path,
+        "release metadata",
+    )?;
+    let metadata = fs::read(&metadata_path)
+        .map_err(|error| format!("update failed: cannot read release metadata: {error}"))?;
+    let release = parse_windows_stable_release(&metadata)?;
+
+    let tagged_installer = work.path.join("install.stable.ps1");
+    download_with_powershell(
+        release.installer_url(),
+        &tagged_installer,
+        "stable installer",
+    )?;
+    let first = run_windows_installer(&tagged_installer, Some(&release));
+    if first.is_ok() {
+        return Ok(());
+    }
+
+    eprintln!(
+        "Stable installer did not complete: {}",
+        first.expect_err("failed installer result")
+    );
+    let compatibility_installer = work.path.join("install.compatibility.ps1");
+    download_with_powershell(
+        WINDOWS_MAIN_INSTALLER_URL,
+        &compatibility_installer,
+        "compatibility installer",
+    )?;
+    run_windows_installer(&compatibility_installer, Some(&release))
+}
+
+fn run_windows_installer(
+    installer: &Path,
+    release: Option<&WindowsStableRelease>,
+) -> Result<(), String> {
     let powershell = system_binary_path("WindowsPowerShell/v1.0/powershell.exe")?;
     let mut command = Command::new(powershell);
-    command.args(["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass"]);
-    if let Some(installer) = std::env::var_os(INSTALLER_PATH_ENV) {
-        command.arg("-File").arg(installer);
-    } else {
-        command.args([
-            "-Command",
-            &format!("$env:INCODEX_NON_INTERACTIVE='1'; irm '{WINDOWS_INSTALLER_URL}' | iex"),
-        ]);
+    command
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+        ])
+        .arg(installer)
+        .env("INCODEX_NON_INTERACTIVE", "1");
+    if let Some(release) = release {
+        command
+            .env("INCODEX_DOWNLOAD_BASE", release.download_base())
+            .env("INCODEX_EXPECTED_VERSION", release.version());
     }
     let status = command
         .stdin(Stdio::inherit())
@@ -158,6 +283,65 @@ fn run_windows_installer() -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("Windows installer failed with {status}"))
+    }
+}
+
+fn download_with_powershell(url: &str, destination: &Path, label: &str) -> Result<(), String> {
+    let powershell = system_binary_path("WindowsPowerShell/v1.0/powershell.exe")?;
+    let mut last_error = String::new();
+    for attempt in 1..=DOWNLOAD_ATTEMPTS {
+        let output = Command::new(&powershell)
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -UseBasicParsing -Uri $env:INCODEX_UPDATE_URI -OutFile $env:INCODEX_UPDATE_OUT",
+            ])
+            .env("INCODEX_UPDATE_URI", url)
+            .env("INCODEX_UPDATE_OUT", destination)
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|error| format!("update failed: could not start PowerShell: {error}"))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let detail = String::from_utf8_lossy(&output.stderr);
+        last_error = if detail.trim().is_empty() {
+            output.status.to_string()
+        } else {
+            detail.trim().to_string()
+        };
+        let _ = fs::remove_file(destination);
+        if attempt < DOWNLOAD_ATTEMPTS {
+            thread::sleep(DOWNLOAD_RETRY_DELAY);
+        }
+    }
+    Err(format!(
+        "update failed: could not download {label}: {last_error}"
+    ))
+}
+
+struct UpdateWorkDirectory {
+    path: PathBuf,
+}
+
+impl UpdateWorkDirectory {
+    fn create(package_root: &Path) -> Result<Self, String> {
+        let path = package_root.join(format!(
+            ".update-{}-{}",
+            std::process::id(),
+            UPDATE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let path = incodex_core::windows_session::ensure_private_windows_dir(&path)?;
+        Ok(Self { path })
+    }
+}
+
+impl Drop for UpdateWorkDirectory {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
     }
 }
 
@@ -230,9 +414,11 @@ fn publish_runtime_with(installed: &Path) -> Result<(), String> {
 fn validate_stable_version(version: &str) -> Result<(), String> {
     let parts = version.split('.').collect::<Vec<_>>();
     if parts.len() != 3
-        || parts
-            .iter()
-            .any(|part| part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()))
+        || parts.iter().any(|part| {
+            part.is_empty()
+                || (part.len() > 1 && part.starts_with('0'))
+                || !part.bytes().all(|byte| byte.is_ascii_digit())
+        })
     {
         return Err(format!("invalid stable Incodex version: {version}"));
     }

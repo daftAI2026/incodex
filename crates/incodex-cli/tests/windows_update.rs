@@ -77,8 +77,8 @@ fn standalone_layout_keeps_running_binaries_in_versioned_releases() {
 
 #[test]
 fn update_plan_pins_the_installer_and_assets_to_one_stable_release() {
-    let release = parse_windows_stable_release(br#"{"tag_name":"v9.9.9"}"#)
-        .expect("stable GitHub release");
+    let release =
+        parse_windows_stable_release(br#"{"tag_name":"v9.9.9"}"#).expect("stable GitHub release");
 
     assert_eq!(release.tag(), "v9.9.9");
     assert_eq!(release.version(), "9.9.9");
@@ -94,13 +94,7 @@ fn update_plan_pins_the_installer_and_assets_to_one_stable_release() {
 
 #[test]
 fn update_plan_rejects_noncanonical_or_prerelease_tags() {
-    for tag in [
-        "9.9.9",
-        "v09.9.9",
-        "v9.9.9-beta.1",
-        "v9.9",
-        "v9.9.9/evil",
-    ] {
+    for tag in ["9.9.9", "v09.9.9", "v9.9.9-beta.1", "v9.9", "v9.9.9/evil"] {
         let metadata = format!(r#"{{"tag_name":"{tag}"}}"#);
         assert!(
             parse_windows_stable_release(metadata.as_bytes()).is_err(),
