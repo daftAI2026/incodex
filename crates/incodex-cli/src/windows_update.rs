@@ -17,7 +17,7 @@ const WINDOWS_LATEST_RELEASE_URL: &str =
     "https://api.github.com/repos/daftAI2026/incodex/releases/latest";
 const WINDOWS_MAIN_COMMIT_URL: &str =
     "https://api.github.com/repos/daftAI2026/incodex/commits/main";
-const WINDOWS_MAIN_INSTALLER_URL: &str =
+pub(crate) const WINDOWS_MAIN_INSTALLER_URL: &str =
     "https://raw.githubusercontent.com/daftAI2026/incodex/main/install.ps1";
 const MANAGED_BY_STANDALONE_ENV: &str = "INCODEX_MANAGED_BY_STANDALONE";
 const MANAGED_PACKAGE_ROOT_ENV: &str = "INCODEX_MANAGED_PACKAGE_ROOT";
@@ -488,7 +488,7 @@ pub fn validate_windows_user_root(user_root: &Path, profile: &Path) -> Result<()
     }
 }
 
-fn managed_package_root() -> Result<PathBuf, String> {
+pub(crate) fn managed_package_root() -> Result<PathBuf, String> {
     let value = std::env::var_os(MANAGED_PACKAGE_ROOT_ENV).ok_or_else(|| {
         "managed Windows installation did not provide its package root".to_string()
     })?;

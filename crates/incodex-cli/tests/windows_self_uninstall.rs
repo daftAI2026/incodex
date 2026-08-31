@@ -96,8 +96,14 @@ fn self_uninstall_handoff_waits_for_owner_and_preserves_unrelated_state() {
         wait_until_removed(&[&primary, &alias, &package_root]),
         "external cleanup did not remove the owned CLI tree"
     );
-    assert!(runtime.exists(), "default self-uninstall removed Runtime state");
-    assert!(session.exists(), "default self-uninstall removed session state");
+    assert!(
+        runtime.exists(),
+        "default self-uninstall removed Runtime state"
+    );
+    assert!(
+        session.exists(),
+        "default self-uninstall removed session state"
+    );
 
     fs::remove_dir_all(root).expect("remove private self-uninstall fixture");
 }

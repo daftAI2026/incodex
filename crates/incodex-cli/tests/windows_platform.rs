@@ -94,16 +94,14 @@ fn help_and_version_are_available_without_creating_state() {
 
 #[test]
 fn unsupported_product_commands_fail_closed_before_creating_state() {
-    let cases: &[(&str, &[&str])] = &[
-        (
+    let cases: &[(&str, &[&str])] = &[(
+        "recover",
+        &[
             "recover",
-            &[
-                "recover",
-                "--transaction",
-                "11111111-1111-4111-8111-111111111111",
-            ],
-        ),
-    ];
+            "--transaction",
+            "11111111-1111-4111-8111-111111111111",
+        ],
+    )];
 
     for (command, args) in cases {
         let profile = scratch_profile();
