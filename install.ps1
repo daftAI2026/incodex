@@ -91,14 +91,25 @@ function Copy-ReleaseFile([string]$Name, [string]$Destination) {
 function Read-ExpectedChecksum([string]$ManifestPath, [string]$Name) {
     $Entries = @()
     foreach ($Line in [IO.File]::ReadAllLines($ManifestPath)) {
-        if ($Line -match '^([0-9A-Fa-f]{64})\s+(.+)$' -and $Matches[2] -eq $Name) {
-            $Entries += $Matches[1].ToLowerInvariant()
+        $Fields = @($Line -split '\s+' | Where-Object { $_ -ne '' })
+        if ($Fields.Count -ge 1 -and $Fields[$Fields.Count - 1] -eq $Name) {
+            if ($Fields.Count -ne 2 -or $Fields[0] -notmatch '^[0-9A-Fa-f]{64}$') {
+                Stop-Installer "SHA256SUMS contains a malformed entry for $Name"
+            }
+            $Entries += $Fields[0].ToLowerInvariant()
         }
     }
     if ($Entries.Count -ne 1) {
         Stop-Installer "SHA256SUMS must contain exactly one entry for $Name"
     }
     return $Entries[0]
+}
+
+function Assert-RegularFileNoReparse([string]$Path, [string]$Label) {
+    $Item = Get-Item -LiteralPath $Path -Force
+    if ($Item.PSIsContainer -or (($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        Stop-Installer "$Label is not a regular file: $Path"
+    }
 }
 
 function Read-CliVersion([string]$Executable) {
@@ -152,6 +163,10 @@ function Ensure-PrivateDirectory([string]$Path) {
 
 function Write-AtomicText([string]$Path, [string]$Body) {
     $Parent = Split-Path -Parent $Path
+    Assert-NoReparseAncestry $Parent
+    if (Test-Path -LiteralPath $Path) {
+        Assert-RegularFileNoReparse $Path 'installation pointer'
+    }
     $Temporary = Join-Path $Parent ('.' + [IO.Path]::GetFileName($Path) + '.' + [guid]::NewGuid().ToString('N') + '.tmp')
     try {
         [IO.File]::WriteAllText($Temporary, $Body, $Utf8NoBom)
@@ -209,9 +224,13 @@ try {
     Ensure-PrivateDirectory $PackageRoot | Out-Null
     Ensure-PrivateDirectory $ReleasesRoot | Out-Null
     Ensure-PrivateDirectory $BinRoot | Out-Null
+    $LockPath = Join-Path $PackageRoot 'install.lock'
+    if (Test-Path -LiteralPath $LockPath) {
+        Assert-RegularFileNoReparse $LockPath 'installation lock'
+    }
     try {
         $InstallLock = New-Object IO.FileStream(
-            (Join-Path $PackageRoot 'install.lock'),
+            $LockPath,
             [IO.FileMode]::OpenOrCreate,
             [IO.FileAccess]::ReadWrite,
             [IO.FileShare]::None
@@ -221,9 +240,11 @@ try {
     }
 
     if (Test-Path -LiteralPath $ReleaseRoot) {
+        Assert-NoReparseAncestry $ReleaseRoot
         if (-not (Test-Path -LiteralPath $InstalledCli -PathType Leaf)) {
             Stop-Installer "existing release is incomplete: $ReleaseRoot"
         }
+        Assert-RegularFileNoReparse $InstalledCli 'installed CLI'
         $InstalledHash = (Get-FileHash -LiteralPath $InstalledCli -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($InstalledHash -ne $ExpectedHash) {
             Stop-Installer "existing release does not match $AssetName"
@@ -245,6 +266,8 @@ try {
                 Stop-Installer "staged release failed its version proof"
             }
             Move-Item -LiteralPath $Staging -Destination $ReleaseRoot
+            Assert-NoReparseAncestry $ReleaseRoot
+            Assert-RegularFileNoReparse $InstalledCli 'installed CLI'
         } finally {
             Remove-Item -LiteralPath $Staging -Recurse -Force -ErrorAction SilentlyContinue
         }
