@@ -43,6 +43,11 @@ describe("release CLI artifacts", () => {
     expect(releaseYml).toContain("runs-on: windows-latest");
     expect(releaseYml).toContain("bun run test:windows:rust");
     expect(releaseYml).toContain("bun scripts/build-windows-release.ts");
+    expect(releaseYml).toContain("Get-FileHash -LiteralPath $AssetPath -Algorithm SHA256");
+    expect(releaseYml).toContain("INCODEX_DOWNLOAD_DIR");
+    expect(releaseYml).toContain("INCODEX_USER_ROOT");
+    expect(releaseYml).toContain("& ./install.ps1");
+    expect(releaseYml).toContain("bin\\incodex.cmd");
     expect(ciYml).toContain("bun scripts/build-windows-release.ts");
     expect(existsSync(builderPath)).toBe(true);
     expect(builder).toContain("cargo");
