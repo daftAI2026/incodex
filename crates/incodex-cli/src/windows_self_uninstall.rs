@@ -5,6 +5,8 @@ use std::os::windows::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use incodex_core::windows_path::reject_reparse_ancestors;
 use incodex_core::{format_kv, format_ok, format_step, format_warn};
@@ -18,18 +20,37 @@ use crate::windows_install::{
 };
 use crate::windows_update::{
     acquire_windows_update_lock, managed_package_root, validate_managed_install_identity,
-    validate_windows_user_root, WindowsStandaloneLayout, WINDOWS_MAIN_INSTALLER_URL,
+    validate_windows_user_root, windows_install_lock_path, WindowsStandaloneLayout,
+    WINDOWS_MAIN_INSTALLER_URL,
 };
 
 const MANAGED_BY_STANDALONE_ENV: &str = "INCODEX_MANAGED_BY_STANDALONE";
+const HANDOFF_READY_TIMEOUT: Duration = Duration::from_secs(5);
+const HANDOFF_READY_POLL: Duration = Duration::from_millis(20);
 const CLEANUP_SCRIPT: &str = r#"
 $ErrorActionPreference = 'Stop'
-$Owner = Get-Process -Id ([int]$env:INCODEX_SELF_UNINSTALL_PID) -ErrorAction SilentlyContinue
-if ($null -ne $Owner) {
-    $Owner.WaitForExit()
-}
+$InstallLock = $null
 
 try {
+    $InstallLock = New-Object IO.FileStream(
+        $env:INCODEX_SELF_UNINSTALL_LOCK,
+        [IO.FileMode]::OpenOrCreate,
+        [IO.FileAccess]::ReadWrite,
+        [IO.FileShare]::None
+    )
+    [IO.File]::WriteAllText(
+        $env:INCODEX_SELF_UNINSTALL_READY,
+        'ready',
+        (New-Object Text.UTF8Encoding($false))
+    )
+
+    foreach ($OwnerIdText in $env:INCODEX_SELF_UNINSTALL_PIDS.Split(',')) {
+        $Owner = Get-Process -Id ([int]$OwnerIdText) -ErrorAction SilentlyContinue
+        if ($null -ne $Owner) {
+            $Owner.WaitForExit()
+        }
+    }
+
     if (Test-Path -LiteralPath $env:INCODEX_SELF_UNINSTALL_PACKAGE) {
         Remove-Item -LiteralPath $env:INCODEX_SELF_UNINSTALL_PACKAGE -Recurse -Force -ErrorAction Stop
     }
@@ -58,6 +79,10 @@ try {
         (New-Object Text.UTF8Encoding($false))
     )
 } finally {
+    if ($null -ne $InstallLock) {
+        $InstallLock.Dispose()
+    }
+    Remove-Item -LiteralPath $env:INCODEX_SELF_UNINSTALL_READY -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $env:INCODEX_SELF_UNINSTALL_SCRIPT -Force -ErrorAction SilentlyContinue
 }
 "#;
@@ -115,7 +140,9 @@ pub fn run_self_uninstall(parsed: &ParsedCli) -> Result<(), String> {
         }
     }
 
-    start_windows_self_uninstall_handoff(&user_root, &package_root, std::process::id(), true)?;
+    let managed_process_ids = crate::windows_process::running_process_ids_under_root(&package_root)
+        .map_err(|error| format!("cannot inspect running managed Windows CLIs: {error}"))?;
+    start_windows_self_uninstall_handoff(&user_root, &package_root, &managed_process_ids, true)?;
     println!(
         "{}",
         format_ok(
@@ -167,16 +194,26 @@ fn print_plan(layout: &WindowsStandaloneLayout, restore_runtime: bool) {
 pub fn start_windows_self_uninstall_handoff(
     user_root: &Path,
     package_root: &Path,
-    wait_pid: u32,
+    wait_pids: &[u32],
     remove_user_path: bool,
 ) -> Result<(), String> {
     validate_cleanup_layout(user_root, package_root)?;
+    if wait_pids.is_empty() {
+        return Err("Windows self-uninstall has no managed process to wait for".to_string());
+    }
     let layout = WindowsStandaloneLayout::new(user_root);
     let cache =
         incodex_core::windows_session::ensure_private_windows_dir(&user_root.join("cache"))?;
     let sequence = SCRIPT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let script = cache.join(format!("self-uninstall-{wait_pid}-{sequence}.ps1"));
-    let error_log = cache.join("self-uninstall-error.log");
+    let script = cache.join(format!(
+        "self-uninstall-{}-{sequence}.ps1",
+        std::process::id()
+    ));
+    let ready = cache.join(format!(
+        "self-uninstall-{}-{sequence}.ready",
+        std::process::id()
+    ));
+    let error_log_path = cache.join("self-uninstall-error.log");
     let powershell =
         crate::windows_system::system_binary_path("WindowsPowerShell/v1.0/powershell.exe")?;
     let primary = powershell_path(&layout.primary_launcher())?;
@@ -185,7 +222,20 @@ pub fn start_windows_self_uninstall_handoff(
     let packages = powershell_path(&user_root.join("packages"))?;
     let bin = powershell_path(&layout.bin_dir())?;
     let script_path = powershell_path(&script)?;
-    let error_log = powershell_path(&error_log)?;
+    let ready_path = powershell_path(&ready)?;
+    let error_log = powershell_path(&error_log_path)?;
+    let install_lock = windows_install_lock_path(package_root)?;
+    drop(crate::windows_update::acquire_windows_install_lock(
+        package_root,
+    )?);
+    let install_lock = powershell_path(&install_lock)?;
+    let wait_pids = wait_pids
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let _ = fs::remove_file(&ready);
+    let _ = fs::remove_file(&error_log_path);
     write_private_script(&script)?;
 
     let mut command = Command::new(powershell);
@@ -199,7 +249,9 @@ pub fn start_windows_self_uninstall_handoff(
             "-File",
         ])
         .arg(&script)
-        .env("INCODEX_SELF_UNINSTALL_PID", wait_pid.to_string())
+        .env("INCODEX_SELF_UNINSTALL_PIDS", wait_pids)
+        .env("INCODEX_SELF_UNINSTALL_LOCK", install_lock)
+        .env("INCODEX_SELF_UNINSTALL_READY", ready_path)
         .env("INCODEX_SELF_UNINSTALL_PRIMARY", primary)
         .env("INCODEX_SELF_UNINSTALL_ALIAS", alias)
         .env("INCODEX_SELF_UNINSTALL_PACKAGE", package)
@@ -215,13 +267,47 @@ pub fn start_windows_self_uninstall_handoff(
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .creation_flags(CREATE_NO_WINDOW);
-    if let Err(error) = command.spawn() {
-        let _ = fs::remove_file(&script);
-        return Err(format!(
-            "could not start the Windows self-uninstall cleanup: {error}"
-        ));
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            let _ = fs::remove_file(&script);
+            return Err(format!(
+                "could not start the Windows self-uninstall cleanup: {error}"
+            ));
+        }
+    };
+    wait_for_handoff_ready(&mut child, &ready, &error_log_path)
+}
+
+fn wait_for_handoff_ready(
+    child: &mut std::process::Child,
+    ready: &Path,
+    error_log: &Path,
+) -> Result<(), String> {
+    let deadline = Instant::now() + HANDOFF_READY_TIMEOUT;
+    while Instant::now() < deadline {
+        if ready.is_file() {
+            return Ok(());
+        }
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| format!("cannot inspect Windows self-uninstall cleanup: {error}"))?
+        {
+            let detail = fs::read_to_string(error_log).unwrap_or_default();
+            return Err(if detail.trim().is_empty() {
+                format!("Windows self-uninstall cleanup exited before handoff with {status}")
+            } else {
+                format!(
+                    "Windows self-uninstall cleanup could not start\n{}",
+                    detail.trim()
+                )
+            });
+        }
+        thread::sleep(HANDOFF_READY_POLL);
     }
-    Ok(())
+    let _ = child.kill();
+    let _ = child.wait();
+    Err("timed out acquiring the Windows installer lock for self-uninstall".to_string())
 }
 
 fn validate_cleanup_layout(user_root: &Path, package_root: &Path) -> Result<(), String> {

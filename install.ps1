@@ -286,7 +286,7 @@ try {
     Ensure-PrivateDirectory $PackageRoot | Out-Null
     Ensure-PrivateDirectory $ReleasesRoot | Out-Null
     Ensure-PrivateDirectory $BinRoot | Out-Null
-    $LockPath = Join-Path $PackageRoot 'install.lock'
+    $LockPath = Join-Path $UserRoot 'standalone-install.lock'
     if (Test-Path -LiteralPath $LockPath) {
         Assert-RegularFileNoReparse $LockPath 'installation lock'
     }

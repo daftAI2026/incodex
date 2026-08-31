@@ -256,14 +256,12 @@ fn post_install_verification_uses_the_installer_generation_lock() {
     ));
     let root = incodex_core::windows_session::ensure_private_windows_dir(&root)
         .expect("create private lock fixture");
-    let packages = incodex_core::windows_session::ensure_private_windows_dir(
-        &root.join("packages"),
-    )
-    .expect("create package parent");
-    let package_root = incodex_core::windows_session::ensure_private_windows_dir(
-        &packages.join("standalone"),
-    )
-    .expect("create package root");
+    let packages =
+        incodex_core::windows_session::ensure_private_windows_dir(&root.join("packages"))
+            .expect("create package parent");
+    let package_root =
+        incodex_core::windows_session::ensure_private_windows_dir(&packages.join("standalone"))
+            .expect("create package root");
 
     let first = acquire_windows_install_lock(&package_root).expect("acquire first lock");
     assert!(acquire_windows_install_lock(&package_root)

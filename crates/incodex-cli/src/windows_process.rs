@@ -1,10 +1,12 @@
 use std::collections::HashSet;
-use std::ffi::c_void;
+use std::ffi::{c_void, OsString};
 use std::io;
 use std::mem::size_of;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
+use std::os::windows::ffi::OsStringExt;
 use std::os::windows::io::AsRawHandle;
 use std::os::windows::process::{CommandExt, ExitStatusExt};
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -37,9 +39,9 @@ use windows_sys::Win32::System::JobObjects::{
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
 use windows_sys::Win32::System::Threading::{
-    GetCurrentProcess, GetExitCodeProcess, OpenProcess, OpenThread, ResumeThread, TerminateProcess,
-    WaitForSingleObject, CREATE_SUSPENDED, INFINITE, PROCESS_QUERY_LIMITED_INFORMATION,
-    PROCESS_SET_QUOTA, PROCESS_TERMINATE, THREAD_SUSPEND_RESUME,
+    GetCurrentProcess, GetExitCodeProcess, OpenProcess, OpenThread, QueryFullProcessImageNameW,
+    ResumeThread, TerminateProcess, WaitForSingleObject, CREATE_SUSPENDED, INFINITE,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_QUOTA, PROCESS_TERMINATE, THREAD_SUSPEND_RESUME,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible,
@@ -682,6 +684,63 @@ pub fn running_package_process_ids(expected_package_full_name: &str) -> io::Resu
     }
     matches.sort_unstable();
     Ok(matches)
+}
+
+pub fn running_process_ids_under_root(root: &Path) -> io::Result<Vec<u32>> {
+    let root = normalized_windows_process_path(root);
+    let prefix = format!("{root}\\");
+    running_process_ids_matching(|path| {
+        let path = normalized_windows_process_path(path);
+        path == root || path.starts_with(&prefix)
+    })
+}
+
+fn running_process_ids_matching(
+    mut matches_path: impl FnMut(&Path) -> bool,
+) -> io::Result<Vec<u32>> {
+    let mut matches = Vec::new();
+    for process_id in snapshot_process_ids()? {
+        match process_image_path(process_id) {
+            Ok(path) if matches_path(&path) => matches.push(process_id),
+            Ok(_) => {}
+            Err(error)
+                if matches!(
+                    error.raw_os_error(),
+                    Some(code) if code == ERROR_ACCESS_DENIED as i32 || code == ERROR_INVALID_PARAMETER as i32
+                ) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    matches.sort_unstable();
+    Ok(matches)
+}
+
+fn process_image_path(process_id: u32) -> io::Result<PathBuf> {
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
+    let process = OwnedHandle::from_nullable(process)?;
+    let mut wide = vec![0u16; 260];
+    loop {
+        let mut length = wide.len() as u32;
+        if unsafe { QueryFullProcessImageNameW(process.raw(), 0, wide.as_mut_ptr(), &mut length) }
+            != 0
+        {
+            wide.truncate(length as usize);
+            return Ok(PathBuf::from(OsString::from_wide(&wide)));
+        }
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() == Some(ERROR_INSUFFICIENT_BUFFER as i32) && wide.len() < 32_768 {
+            wide.resize((wide.len() * 2).min(32_768), 0);
+            continue;
+        }
+        return Err(error);
+    }
+}
+
+fn normalized_windows_process_path(path: &Path) -> String {
+    crate::windows_system::windows_path_for_display(path)
+        .trim_end_matches(['\\', '/'])
+        .replace('/', "\\")
+        .to_lowercase()
 }
 
 pub fn authenticate_process_in_named_job(

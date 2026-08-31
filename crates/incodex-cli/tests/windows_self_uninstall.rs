@@ -88,7 +88,7 @@ fn self_uninstall_handoff_waits_for_owner_and_preserves_unrelated_state() {
         &[first_owner.id(), second_owner.id()],
         false,
     )
-        .expect("schedule external self-uninstall cleanup");
+    .expect("schedule external self-uninstall cleanup");
 
     assert!(
         incodex_cli::windows_update::acquire_windows_install_lock(&package_root).is_err(),

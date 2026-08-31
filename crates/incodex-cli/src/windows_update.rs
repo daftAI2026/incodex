@@ -298,12 +298,35 @@ pub struct WindowsInstallLock {
 }
 
 pub fn acquire_windows_install_lock(package_root: &Path) -> Result<WindowsInstallLock, String> {
+    let lock = windows_install_lock_path(package_root)?;
     acquire_windows_channel_lock(
-        package_root,
-        "install.lock",
+        lock.parent()
+            .ok_or_else(|| "Windows installation lock has no parent".to_string())?,
+        lock.file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "Windows installation lock name is invalid".to_string())?,
         "Windows installation lock",
         "another Incodex install or update is already running",
     )
+}
+
+pub fn windows_install_lock_path(package_root: &Path) -> Result<PathBuf, String> {
+    let packages = package_root
+        .parent()
+        .filter(|path| path.file_name().is_some_and(|name| name == "packages"))
+        .ok_or_else(|| "managed Windows package root has an invalid layout".to_string())?;
+    if package_root
+        .file_name()
+        .is_none_or(|name| name != "standalone")
+    {
+        return Err("managed Windows package root has an invalid layout".to_string());
+    }
+    let user_root = packages
+        .parent()
+        .ok_or_else(|| "managed Windows package root has no user root".to_string())?;
+    ensure_regular_non_reparse(user_root, "managed Windows user root")?;
+    incodex_core::windows_session::verify_private_acl(user_root)?;
+    Ok(user_root.join("standalone-install.lock"))
 }
 
 pub fn acquire_windows_update_lock(package_root: &Path) -> Result<WindowsInstallLock, String> {
