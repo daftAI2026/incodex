@@ -698,21 +698,29 @@ pub fn running_process_ids_under_root(root: &Path) -> io::Result<Vec<u32>> {
 fn running_process_ids_matching(
     mut matches_path: impl FnMut(&Path) -> bool,
 ) -> io::Result<Vec<u32>> {
+    let process_ids = snapshot_process_ids()?;
+    Ok(collect_running_process_ids_matching(
+        process_ids,
+        process_image_path,
+        &mut matches_path,
+    ))
+}
+
+fn collect_running_process_ids_matching(
+    process_ids: impl IntoIterator<Item = u32>,
+    mut image_path: impl FnMut(u32) -> io::Result<PathBuf>,
+    mut matches_path: impl FnMut(&Path) -> bool,
+) -> Vec<u32> {
     let mut matches = Vec::new();
-    for process_id in snapshot_process_ids()? {
-        match process_image_path(process_id) {
+    for process_id in process_ids {
+        match image_path(process_id) {
             Ok(path) if matches_path(&path) => matches.push(process_id),
             Ok(_) => {}
-            Err(error)
-                if matches!(
-                    error.raw_os_error(),
-                    Some(code) if code == ERROR_ACCESS_DENIED as i32 || code == ERROR_INVALID_PARAMETER as i32
-                ) => {}
-            Err(error) => return Err(error),
+            Err(_) => {}
         }
     }
     matches.sort_unstable();
-    Ok(matches)
+    matches
 }
 
 fn process_image_path(process_id: u32) -> io::Result<PathBuf> {
@@ -1004,19 +1012,24 @@ mod tests {
     use crate::windows_activation_capability::WindowsActivationCapability;
 
     use super::{
-        ipv4_connection_server_owner, is_primary_visible_window, process_image_path_is_unreadable,
-        require_process_package_identity, WindowsPendingJob,
+        collect_running_process_ids_matching, ipv4_connection_server_owner,
+        is_primary_visible_window, require_process_package_identity, WindowsPendingJob,
     };
 
     #[test]
     fn per_process_image_failures_do_not_abort_the_managed_root_snapshot() {
-        for error in [
-            std::io::Error::from_raw_os_error(5),
-            std::io::Error::from_raw_os_error(31),
-            std::io::Error::from_raw_os_error(87),
-        ] {
-            assert!(process_image_path_is_unreadable(&error), "{error}");
-        }
+        let process_ids = collect_running_process_ids_matching(
+            [11, 12, 13],
+            |process_id| match process_id {
+                11 => Err(std::io::Error::from_raw_os_error(31)),
+                12 => Ok(std::path::PathBuf::from(r"C:\managed\incodex.exe")),
+                13 => Ok(std::path::PathBuf::from(r"C:\Windows\system.exe")),
+                _ => unreachable!(),
+            },
+            |path| path.starts_with(r"C:\managed"),
+        );
+
+        assert_eq!(process_ids, vec![12]);
     }
 
     #[test]
