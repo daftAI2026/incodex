@@ -3,10 +3,10 @@ import { captureOutputSize, createCaptureRenderPlan } from "./compositor.ts";
 import { createCaptureWindowState } from "./model.ts";
 
 describe("capture window compositor plan", () => {
-  test("adds logical padding on every side", () => {
-    expect(captureOutputSize({ width: 1200, height: 801 }, 64)).toEqual({
-      width: 1328,
-      height: 929,
+  test("converts logical padding to physical output pixels", () => {
+    expect(captureOutputSize({ width: 1200, height: 801, scaleFactor: 2 }, 64)).toEqual({
+      width: 1456,
+      height: 1057,
     });
   });
 
@@ -28,8 +28,12 @@ describe("capture window compositor plan", () => {
     ]);
     expect(plan.at(-1)).toMatchObject({
       kind: "redaction",
-      rect: { x: 104, y: 114, width: 80, height: 60 },
+      rect: { x: 168, y: 178, width: 80, height: 60 },
       style: "mosaic",
+    });
+    expect(plan[1]).toMatchObject({
+      kind: "window",
+      rect: { x: 128, y: 128, width: 1200, height: 801 },
     });
   });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  anchoredPanForZoom,
   clampCaptureRect,
   normalizeCaptureRect,
   viewportRectToSource,
@@ -32,5 +33,17 @@ describe("capture window geometry", () => {
         { width: 1200, height: 800 },
       ),
     ).toEqual({ x: 400, y: 240, width: 240, height: 120 });
+  });
+
+  test("keeps the source point under the pointer while zooming", () => {
+    expect(
+      anchoredPanForZoom(
+        { x: 10, y: -20 },
+        { x: 300, y: 180 },
+        { x: 200, y: 150 },
+        1,
+        2,
+      ),
+    ).toEqual({ x: -80, y: -10 });
   });
 });

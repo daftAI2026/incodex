@@ -13,6 +13,8 @@ describe("capture window visual tokens", () => {
     expect(css).toContain("--incodex-capture-text: var(--color-text");
     expect(css).toContain("--incodex-capture-border: var(--color-border");
     expect(css).toContain("--incodex-capture-radius-dialog: var(--radius-3xl");
+    expect(css).toContain("--color-background-primary-soft-active");
+    expect(css).toContain("backdrop-filter: blur(12px)");
     expect(css).toContain("font-family: var(--vscode-font-family");
   });
 

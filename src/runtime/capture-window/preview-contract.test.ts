@@ -10,6 +10,7 @@ describe("capture window preview", () => {
       scripts?: Record<string, string>;
     };
     const server = readFileSync(join(root, "scripts/capture-window-preview.ts"), "utf8");
+    const editor = readFileSync(join(import.meta.dir, "editor.ts"), "utf8");
     const preview = readFileSync(join(import.meta.dir, "preview.ts"), "utf8");
 
     expect(packageJson.scripts?.["preview:capture-window"]).toBe(
@@ -18,6 +19,9 @@ describe("capture window preview", () => {
     expect(server).toContain("127.0.0.1");
     expect(preview).toContain("mountCaptureWindowEditor");
     expect(preview).not.toContain("incodex-main.cts");
+    expect(editor).toContain("onCopy?:");
+    expect(editor).toContain("onSave?:");
+    expect(editor).toContain("onDetectRegions?:");
     expect(`${server}\n${preview}`).not.toMatch(/https?:\/\//);
   });
 
