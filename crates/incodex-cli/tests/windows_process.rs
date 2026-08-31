@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use incodex_cli::windows_process::{
     process_command_line, resume_debugged_package_process, running_package_process_ids,
-    running_process_ids_for_executable, spawn_kill_on_drop,
+    running_process_ids_for_executable, running_process_ids_under_root, spawn_kill_on_drop,
 };
 
 #[test]
@@ -23,6 +23,11 @@ fn finds_every_live_process_using_the_exact_executable() {
     let executable = std::env::current_exe().expect("current test executable");
     let process_ids =
         running_process_ids_for_executable(&executable).expect("enumerate exact executable");
+    assert!(process_ids.contains(&std::process::id()), "{process_ids:?}");
+    let process_ids = running_process_ids_under_root(
+        executable.parent().expect("test executable directory"),
+    )
+    .expect("enumerate executable root");
     assert!(process_ids.contains(&std::process::id()), "{process_ids:?}");
 }
 use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
