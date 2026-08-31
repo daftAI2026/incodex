@@ -31,6 +31,30 @@ fn run_installer(download_dir: &Path, user_root: &Path) -> std::process::Output 
     run_installer_mode(download_dir, user_root, true)
 }
 
+fn run_installer_from_wow64(download_dir: &Path, user_root: &Path) -> std::process::Output {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("install.ps1");
+    Command::new("powershell.exe")
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+        ])
+        .arg(script)
+        .env("INCODEX_DOWNLOAD_DIR", download_dir)
+        .env("INCODEX_USER_ROOT", user_root)
+        .env("INCODEX_EXPECTED_VERSION", env!("CARGO_PKG_VERSION"))
+        .env("INCODEX_SKIP_PATH", "1")
+        .env("INCODEX_TEST_MODE", "1")
+        .env("INCODEX_ARCH", "x86")
+        .env("PROCESSOR_ARCHITEW6432", "AMD64")
+        .output()
+        .expect("run installer through a simulated WOW64 shell")
+}
+
 fn run_installer_mode(
     download_dir: &Path,
     user_root: &Path,
@@ -128,6 +152,26 @@ fn installs_a_verified_versioned_release_and_two_launchers() {
         .contains(&format!("Incodex version {}", env!("CARGO_PKG_VERSION"))));
 
     fs::remove_dir_all(root).expect("remove scratch directory");
+}
+
+#[test]
+fn accepts_a_32_bit_powershell_on_64_bit_windows() {
+    let root = scratch("wow64");
+    let user_root = root.join("user-root");
+    let source = Path::new(env!("CARGO_BIN_EXE_incodex"));
+    let release = release_fixture(&root, &sha256(source));
+
+    let output = run_installer_from_wow64(&release, &user_root);
+    let launcher_was_published = user_root.join("bin/incodex.cmd").exists();
+    fs::remove_dir_all(&root).expect("remove WOW64 fixture");
+
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(launcher_was_published);
 }
 
 #[test]
