@@ -196,6 +196,19 @@ function Ensure-PrivateDirectory([string]$Path) {
     return $Directory.FullName
 }
 
+function Set-PrivateFileAcl([string]$Path) {
+    Assert-RegularFileNoReparse $Path 'private file'
+    $Identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $Security = New-Object Security.AccessControl.FileSecurity
+    $Security.SetAccessRuleProtection($true, $false)
+    $Allow = [Security.AccessControl.AccessControlType]::Allow
+    $FullControl = [Security.AccessControl.FileSystemRights]::FullControl
+    $Security.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
+        $Identity.User, $FullControl, $Allow
+    )))
+    [IO.File]::SetAccessControl($Path, $Security)
+}
+
 function Write-AtomicText([string]$Path, [string]$Body) {
     $Parent = Split-Path -Parent $Path
     Assert-NoReparseAncestry $Parent
@@ -273,6 +286,7 @@ try {
     } catch {
         Stop-Installer 'another Incodex install or update is already running'
     }
+    Set-PrivateFileAcl $LockPath
 
     if (Test-Path -LiteralPath $ReleaseRoot) {
         Assert-NoReparseAncestry $ReleaseRoot
