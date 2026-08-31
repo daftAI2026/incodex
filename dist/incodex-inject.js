@@ -2002,24 +2002,6 @@ var CODEX_EMPTY_STATE_PROJECT_SELECTOR = '[data-feature="game-source"] [data-slo
 var MAX_CAPTURE_CANDIDATES = 150;
 var MIN_CANDIDATE_WIDTH = 24;
 var MIN_CANDIDATE_HEIGHT = 12;
-function createCodexPrivacyPlaceholderSession(documentRoot) {
-  let restore = null;
-  const clear = () => {
-    restore?.();
-    restore = null;
-  };
-  return {
-    clear,
-    sync(enabled) {
-      if (!enabled) {
-        clear();
-        return;
-      }
-      if (!restore)
-        restore = markCodexPrivacyPlaceholders(documentRoot);
-    }
-  };
-}
 function markCodexPrivacyPlaceholders(documentRoot) {
   const snapshots = [];
   markRows(documentRoot.querySelectorAll(CODEX_THREAD_SELECTOR), "data-app-action-sidebar-thread-title", snapshots);
@@ -2141,7 +2123,6 @@ function clipToViewport(rect, viewport) {
 var STYLE_ID = "incodex-capture-window-style";
 var HOST_ATTRIBUTE = "data-incodex-capture-host";
 var bridge = createCaptureCdpBridge();
-var privacyPlaceholders = createCodexPrivacyPlaceholderSession(document);
 var controller = null;
 var opening = false;
 function openInjectedCaptureWindow(options) {
@@ -2159,10 +2140,8 @@ async function prepareInitialCapture(options) {
     capture: captureSnapshot,
     loadPreferences: () => loadCapturePreferences(window.localStorage)
   });
-  if (!prepared) {
-    clearPrivacyPlaceholders();
+  if (!prepared)
     return;
-  }
   const host = captureHost();
   const snapshot = prepared.snapshot;
   const state = applyCapturePreferences(createCaptureWindowState({
@@ -2175,7 +2154,6 @@ async function prepareInitialCapture(options) {
     initialState: state,
     locale: options.locale,
     onClose: () => {
-      clearPrivacyPlaceholders();
       controller = null;
       host.remove();
     },
@@ -2184,7 +2162,7 @@ async function prepareInitialCapture(options) {
   });
 }
 async function captureSnapshot(privacyEnabled) {
-  privacyPlaceholders.sync(privacyEnabled);
+  const restorePrivacyPlaceholders = privacyEnabled ? markCodexPrivacyPlaceholders(document) : () => {};
   try {
     const snapshot = await capturePreparedWindow({
       capture: async () => imageDataUrlToCanvas(await bridge.capture()),
@@ -2198,12 +2176,8 @@ async function captureSnapshot(privacyEnabled) {
       source: snapshot.source
     };
   } finally {
-    document.documentElement.classList.toggle(CAPTURE_PRIVACY_CLASS, privacyEnabled);
+    restorePrivacyPlaceholders();
   }
-}
-function clearPrivacyPlaceholders() {
-  privacyPlaceholders.clear();
-  document.documentElement.classList.remove(CAPTURE_PRIVACY_CLASS);
 }
 function exposeCaptureBridge() {
   window.__incodexTakeCaptureDebugRequest = bridge.takeRequest;

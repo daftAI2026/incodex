@@ -34,31 +34,6 @@ type AttributeSnapshot = {
   value: string | null;
 };
 
-export type CodexPrivacyPlaceholderSession = {
-  clear: () => void;
-  sync: (enabled: boolean) => void;
-};
-
-export function createCodexPrivacyPlaceholderSession(
-  documentRoot: Document,
-): CodexPrivacyPlaceholderSession {
-  let restore: (() => void) | null = null;
-  const clear = (): void => {
-    restore?.();
-    restore = null;
-  };
-  return {
-    clear,
-    sync(enabled: boolean): void {
-      if (!enabled) {
-        clear();
-        return;
-      }
-      if (!restore) restore = markCodexPrivacyPlaceholders(documentRoot);
-    },
-  };
-}
-
 export function markCodexPrivacyPlaceholders(documentRoot: Document): () => void {
   const snapshots: AttributeSnapshot[] = [];
   markRows(
