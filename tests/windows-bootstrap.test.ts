@@ -51,7 +51,7 @@ describe("Windows Runtime bootstrap", () => {
     expect(closes).toEqual([42]);
   });
 
-  test("claims one isolated profile environment before loading the shared Runtime", () => {
+  test("claims one isolated profile environment before loading its selected Runtime release", () => {
     const bootstrap = require(bootstrapPath) as {
       attachWindowsRuntime(options: {
         argv: string[];
@@ -60,12 +60,16 @@ describe("Windows Runtime bootstrap", () => {
         onElectronLoaded: (callback: () => void) => void;
         processType: string;
         readActivationEnvironment: (pipeName: string) => unknown;
+        readState: (path: string) => unknown;
         runtimeDir: string;
       }): boolean;
     };
     const userDataDir = "C:\\Users\\test\\.incodex\\sessions\\s-one\\chromium";
     const token = createHash("sha256").update(userDataDir, "utf8").digest("hex").slice(0, 32);
-    const runtimeDir = "C:\\Users\\test\\.incodex\\runtime\\releases\\0.5.0-releasehash";
+    const registrationId = "0123456789abcdef0123456789abcdef";
+    const packageFullName = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    const statePath = "C:\\Users\\test\\.incodex\\windows-install.json";
+    const runtimeDir = "C:\\Users\\test\\.incodex\\runtime";
     const env: Record<string, string | undefined> = {};
     const loaded: string[] = [];
     const pipes: string[] = [];
@@ -87,9 +91,20 @@ describe("Windows Runtime bootstrap", () => {
             environment: {
               CODEX_HOME: "C:\\Users\\test\\.incodex\\sessions\\s-one\\codex-home",
               INCODEX_INCOGNITO: "1",
+              INCODEX_WINDOWS_REGISTRATION_ID: registrationId,
+              INCODEX_WINDOWS_PACKAGE_FULL_NAME: packageFullName,
+              INCODEX_WINDOWS_STATE_PATH: statePath,
             },
           };
         },
+        readState: () => ({
+          schemaVersion: 1,
+          desired: "enabled",
+          phase: "enabled-observed",
+          registrationId,
+          packageFullName,
+          runtimeRelease: "0.5.0-releasehash",
+        }),
         runtimeDir,
       }),
     ).toBe(true);
@@ -101,7 +116,9 @@ describe("Windows Runtime bootstrap", () => {
     expect(loaded).toEqual([]);
     expect(electronLoaded).toBeFunction();
     electronLoaded?.();
-    expect(loaded).toEqual([win32.join(runtimeDir, "incodex-main.cjs")]);
+    expect(loaded).toEqual([
+      win32.join(runtimeDir, "releases", "0.5.0-releasehash", "incodex-main.cjs"),
+    ]);
   });
 
   test("an isolated CDP profile receives its environment without loading a second Runtime", () => {
