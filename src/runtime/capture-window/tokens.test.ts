@@ -14,7 +14,8 @@ describe("capture window visual tokens", () => {
     expect(css).toContain("--incodex-capture-border: var(--color-border");
     expect(css).toContain("--incodex-capture-radius-dialog: var(--radius-xl");
     expect(css).toContain("--incodex-capture-font-xs: var(--text-xs, 12px)");
-    expect(css).toContain("--incodex-capture-icon-xs: calc(var(--incodex-capture-space) * 4)");
+    expect(css).toContain("--incodex-capture-icon-base: calc(var(--incodex-capture-space) * 4)");
+    expect(css).toContain("--incodex-capture-icon-sm: calc(var(--incodex-capture-space) * 3.5)");
     expect(css).toContain("--incodex-capture-skeleton: var(--color-background-button-tertiary-active");
     expect(css).toContain("--color-background-primary-soft-active");
     expect(css).toContain("backdrop-filter: blur(3px)");
@@ -29,12 +30,22 @@ describe("capture window visual tokens", () => {
     expect(css).toContain("calc(var(--incodex-capture-space) * 4)");
   });
 
-  test("keeps the selected background ring inside its grid and sizes thumbnail icons from tokens", () => {
+  test("packs circular background options without stretching the inspector", () => {
     const css = readFileSync(cssPath, "utf8");
 
     expect(css).toMatch(/\.incodex-capture-background-grid[\s\S]*?padding: var\(--incodex-capture-space\)/);
-    expect(css).toMatch(/\.incodex-capture-background-option svg[\s\S]*?height: var\(--incodex-capture-icon-compact\)/);
-    expect(css).toMatch(/\.incodex-capture-background-option svg[\s\S]*?width: var\(--incodex-capture-icon-compact\)/);
+    expect(css).toMatch(/\.incodex-capture-background-grid[\s\S]*?width: max-content/);
+    expect(css).toMatch(/\.incodex-capture-background-option\s*\{[\s\S]*?border-radius: var\(--radius-full/);
+    expect(css).not.toMatch(/@supports \(corner-shape:[\s\S]*?\.incodex-capture-background-option/);
+  });
+
+  test("sizes editor icon roles from Codex spacing tokens", () => {
+    const css = readFileSync(cssPath, "utf8");
+
+    expect(css).toMatch(/\.incodex-capture-heading > svg[\s\S]*?height: var\(--incodex-capture-icon-base\)/);
+    expect(css).toMatch(/\.incodex-capture-icon-button > svg[\s\S]*?height: var\(--incodex-capture-icon-sm\)/);
+    expect(css).toMatch(/\.incodex-capture-button > svg[\s\S]*?height: var\(--incodex-capture-icon-sm\)/);
+    expect(css).toMatch(/\.incodex-capture-background-option svg[\s\S]*?height: var\(--incodex-capture-icon-sm\)/);
     expect(css).not.toContain("font-size: 11px");
     expect(css).not.toContain("font-size: 10px");
   });

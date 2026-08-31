@@ -243,11 +243,7 @@ describe("Codex privacy placeholders", () => {
   test("masks project names repeated in the composer and empty-state heading", () => {
     const composerLabel = new FakePrivacyElement({ tagName: "SPAN", text: "cavalrycn" });
     const composerProject = new FakePrivacyElement({ children: [composerLabel], tagName: "BUTTON" });
-    const emptyStateLabel = new FakePrivacyElement({ tagName: "SPAN", text: "cavalrycn" });
-    const emptyStateProject = new FakePrivacyElement({
-      children: [emptyStateLabel],
-      tagName: "BUTTON",
-    });
+    const emptyStateProject = new FakePrivacyElement({ tagName: "BUTTON", text: "cavalrycn" });
 
     const restore = markCodexPrivacyPlaceholders(
       privacyDocument({
@@ -257,11 +253,11 @@ describe("Codex privacy placeholders", () => {
     );
 
     expect(composerLabel.getAttribute("data-incodex-capture-redact")).toBe("text");
-    expect(emptyStateLabel.getAttribute("data-incodex-capture-redact")).toBe("text");
+    expect(emptyStateProject.getAttribute("data-incodex-capture-redact")).toBe("text");
 
     restore();
     expect(composerLabel.hasAttribute("data-incodex-capture-redact")).toBe(false);
-    expect(emptyStateLabel.hasAttribute("data-incodex-capture-redact")).toBe(false);
+    expect(emptyStateProject.hasAttribute("data-incodex-capture-redact")).toBe(false);
   });
 
   test("restores pre-existing marker values instead of deleting host state", () => {
