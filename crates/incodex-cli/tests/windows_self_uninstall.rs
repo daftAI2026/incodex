@@ -80,9 +80,20 @@ fn self_uninstall_handoff_waits_for_owner_and_preserves_unrelated_state() {
     fs::write(&runtime, b"runtime fixture\n").expect("write Runtime fixture");
     fs::write(&session, b"session fixture\n").expect("write session fixture");
 
-    let mut owner = blocking_owner();
-    start_windows_self_uninstall_handoff(&user_root, &package_root, owner.id(), false)
+    let mut first_owner = blocking_owner();
+    let mut second_owner = blocking_owner();
+    start_windows_self_uninstall_handoff(
+        &user_root,
+        &package_root,
+        &[first_owner.id(), second_owner.id()],
+        false,
+    )
         .expect("schedule external self-uninstall cleanup");
+
+    assert!(
+        incodex_cli::windows_update::acquire_windows_install_lock(&package_root).is_err(),
+        "external cleanup did not retain the installer generation lock"
+    );
 
     thread::sleep(Duration::from_millis(250));
     assert!(primary.exists(), "cleanup raced the owner process");
@@ -91,7 +102,16 @@ fn self_uninstall_handoff_waits_for_owner_and_preserves_unrelated_state() {
     assert!(runtime.exists(), "Runtime fixture was touched too early");
     assert!(session.exists(), "session fixture was touched too early");
 
-    owner.wait().expect("wait for owner process");
+    first_owner.kill().expect("stop first owner");
+    first_owner.wait().expect("wait for first owner process");
+    thread::sleep(Duration::from_millis(250));
+    assert!(
+        package_root.exists(),
+        "cleanup ignored another managed CLI process"
+    );
+
+    second_owner.kill().expect("stop second owner");
+    second_owner.wait().expect("wait for second owner process");
     assert!(
         wait_until_removed(&[&primary, &alias, &package_root]),
         "external cleanup did not remove the owned CLI tree"
