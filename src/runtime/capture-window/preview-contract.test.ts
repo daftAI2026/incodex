@@ -73,6 +73,18 @@ describe("capture window preview", () => {
     );
     expect(solidMarkup).toContain('data-color-trigger="solid"');
 
+    const wallpaperMarkup = captureWindowTemplate(
+      applyCaptureCommand(state, {
+        background: { dataUrl: "data:image/png;base64,wallpaper", kind: "wallpaper" },
+        kind: "set-background",
+      }),
+      copy,
+    );
+    expect(wallpaperMarkup).toContain('data-background-wallpaper type="button"');
+    expect(wallpaperMarkup).toContain('src="data:image/png;base64,wallpaper"');
+    expect(wallpaperMarkup).toContain('data-action="change-wallpaper"');
+    expect(wallpaperMarkup).toContain(copy.changeImage);
+
     const background = markup.indexOf(copy.background);
     const padding = markup.indexOf(copy.padding);
     const shadow = markup.indexOf(copy.shadow);
