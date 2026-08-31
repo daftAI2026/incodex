@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { captureOutputSize, createCaptureRenderPlan } from "./compositor.ts";
+import {
+  captureOutputSize,
+  createCaptureRenderPlan,
+  redactionSampling,
+} from "./compositor.ts";
 import { createCaptureWindowState } from "./model.ts";
 
 describe("capture window compositor plan", () => {
@@ -35,5 +39,17 @@ describe("capture window compositor plan", () => {
       kind: "window",
       rect: { x: 128, y: 128, width: 1200, height: 801 },
     });
+  });
+
+  test("matches the observed mosaic and blur-like sampling behavior", () => {
+    expect(redactionSampling("mosaic", 2)).toEqual({
+      blockSize: 18,
+      smoothing: false,
+    });
+    expect(redactionSampling("blur", 2)).toEqual({
+      blockSize: 18,
+      smoothing: true,
+    });
+    expect(redactionSampling("solid", 2)).toBeNull();
   });
 });
