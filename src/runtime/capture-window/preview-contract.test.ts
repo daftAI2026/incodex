@@ -49,11 +49,16 @@ describe("capture window preview", () => {
 
   test("retakes one atomic source-and-candidate snapshot with the current privacy choice", () => {
     const editor = readFileSync(join(import.meta.dir, "editor.ts"), "utf8");
+    const retake = editor.slice(
+      editor.indexOf("async function retake"),
+      editor.indexOf("async function setPrivacy"),
+    );
 
     expect(editor).toContain("onRetake?: (");
     expect(editor).toContain("privacyEnabled: boolean");
     expect(editor).toContain("automaticRegions: CaptureCandidate[]");
     expect(editor).not.toContain("onDetectRegions");
+    expect(retake).toContain("resetView();");
   });
 
   test("matches the observed dialog structure without invented controls", () => {
@@ -70,10 +75,11 @@ describe("capture window preview", () => {
     expect(markup).not.toContain('data-action="cancel"');
     expect(markup).toContain('data-action="retake"');
     expect(markup).toContain("incodex-capture-checker");
-    expect(markup).toContain('data-action="zoom-reset" type="button" title="Reset zoom"');
+    expect(markup).toContain('data-action="zoom-reset" type="button" title="Reset view"');
     expect(markup).toContain('data-action="zoom-fit"');
     expect(markup).toContain('data-capture-icon="maximize"');
     expect(copy.shadow).toBe("Shadow");
+    expect(captureWindowCopy("zh-CN").zoomReset).toBe("复位视图");
     expect(markup).toContain('data-color-trigger="background"');
     expect(markup).toContain(
       `style="--capture-swatch:url('/capture-backgrounds/sea.jpg') center / cover no-repeat"`,
