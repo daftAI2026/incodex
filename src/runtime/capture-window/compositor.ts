@@ -117,8 +117,7 @@ export function renderCaptureToCanvas(
 }
 
 function activeCaptureRegions(state: CaptureWindowState): CaptureWindowState["regions"] {
-  if (state.privacyEnabled) return state.regions;
-  return state.regions.filter((region) => region.source === "manual");
+  return state.regions;
 }
 
 function drawBackground(

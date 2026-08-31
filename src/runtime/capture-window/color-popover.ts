@@ -63,7 +63,7 @@ export function captureColorPopoverTemplate(
   const hsv = captureHsvFromHex(color);
   const safeLabel = escapeAttribute(label);
   return `
-    <div class="incodex-capture-color-popover" data-color-popover="${target}" data-capture-hide role="dialog" data-side="bottom" data-align="end">
+    <div class="incodex-capture-color-popover" data-color-popover="${target}" data-capture-hide data-incodex-capture-hide role="dialog" data-side="bottom" data-align="end">
       <div class="incodex-capture-color-picker react-colorful">
         <div class="react-colorful__saturation" data-color-saturation="${target}" style="--capture-picker-hue:hsl(${hsv.hue} 100% 50%)">
           <div class="react-colorful__interactive" role="slider" tabindex="0" aria-label="Color">

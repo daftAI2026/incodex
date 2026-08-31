@@ -35,13 +35,17 @@ export type CaptureWindowEditorOptions = {
   locale?: string;
   onClose?: () => void;
   onCopy?: (png: Blob) => Promise<void>;
-  onDetectRegions?: (
-    source: HTMLCanvasElement,
-    revision: number,
-  ) => CaptureCandidate[] | Promise<CaptureCandidate[]>;
   onNotify?: (message: string) => void;
-  onRetake?: (revision: number) => HTMLCanvasElement | Promise<HTMLCanvasElement>;
+  onRetake?: (
+    revision: number,
+    privacyEnabled: boolean,
+  ) => CaptureWindowRetake | Promise<CaptureWindowRetake>;
   onSave?: (png: Blob, suggestedName: string) => Promise<"cancelled" | "saved">;
+  source: HTMLCanvasElement;
+};
+
+export type CaptureWindowRetake = {
+  automaticRegions: CaptureCandidate[];
   source: HTMLCanvasElement;
 };
 
@@ -86,6 +90,7 @@ export function mountCaptureWindowEditor(
   const root = document.createElement("div");
   root.className = "incodex-capture-root";
   root.setAttribute("data-incodex-capture", "true");
+  root.setAttribute("data-incodex-capture-hide", "");
   root.setAttribute("data-state", "editing");
   host.append(root);
   const resizeObserver = new ResizeObserver(() => {
@@ -270,9 +275,11 @@ export function mountCaptureWindowEditor(
     setPhase("recapturing");
     const revision = state.sourceRevision + 1;
     try {
-      const nextSource = await options.onRetake?.(revision);
-      if (nextSource) source = nextSource;
-      automaticCandidates = await detectRegions(revision);
+      const snapshot = await options.onRetake?.(revision, state.privacyEnabled);
+      if (snapshot) {
+        source = snapshot.source;
+        automaticCandidates = snapshot.automaticRegions;
+      }
       state = applyCaptureCommand(state, {
         kind: "retake",
         source: {
@@ -291,13 +298,6 @@ export function mountCaptureWindowEditor(
   async function setPrivacy(enabled: boolean): Promise<void> {
     dispatch({ enabled, kind: "set-privacy" });
     await retake();
-  }
-
-  async function detectRegions(revision: number): Promise<CaptureCandidate[]> {
-    if (!options.onDetectRegions) {
-      return automaticCandidates;
-    }
-    return options.onDetectRegions(source, revision);
   }
 
   async function loadWallpaper(file: File): Promise<void> {

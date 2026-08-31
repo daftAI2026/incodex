@@ -41,6 +41,45 @@
   box-sizing: border-box;
 }
 
+html.incodex-capturing [data-incodex-capture-hide],
+html.incodex-capturing [data-incodex-capture-hide] * {
+  transition: none !important;
+  visibility: hidden !important;
+}
+
+html.incodex-capture-redact [data-incodex-capture-redact] {
+  color: inherit;
+  position: relative;
+  visibility: hidden !important;
+}
+
+html.incodex-capture-redact [data-incodex-capture-redact] * {
+  visibility: hidden !important;
+}
+
+html.incodex-capture-redact [data-incodex-capture-redact]::after {
+  background: currentColor;
+  border-radius: 999px;
+  content: "";
+  height: .55em;
+  inset: 50% auto auto 0;
+  opacity: .18;
+  position: absolute;
+  transform: translateY(-50%);
+  visibility: visible;
+  width: 62%;
+}
+
+html.incodex-capture-redact [data-incodex-capture-redact="blank"]::after {
+  content: none;
+}
+
+html.incodex-capture-redact [data-incodex-capture-redact="center"]::after {
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 40%;
+}
+
 .incodex-capture-root {
   align-items: center;
   display: flex;

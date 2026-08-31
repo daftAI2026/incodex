@@ -1,31 +1,72 @@
 import type { CaptureCandidate, CaptureSize } from "./model.ts";
 
-export type CodexPrivacyCandidateKind = "conversation" | "identity" | "project";
+export const CAPTURE_CANDIDATE_SELECTOR =
+  'p, li, pre, blockquote, h1, h2, h3, h4, h5, h6, td, img, textarea, [contenteditable="true"]';
 
-export type CodexPrivacyCandidate = CaptureCandidate & {
-  kind: CodexPrivacyCandidateKind;
+const CAPTURE_HIDE_SELECTOR = "[data-incodex-capture-hide]";
+const MAX_CAPTURE_CANDIDATES = 150;
+const MIN_CANDIDATE_WIDTH = 24;
+const MIN_CANDIDATE_HEIGHT = 12;
+
+type CandidateElement = HTMLElement & {
+  checkVisibility?: () => boolean;
+  value?: string;
 };
 
-const PREVIEW_WIDTH = 1200;
-const PREVIEW_HEIGHT = 801;
+type AcceptedCandidate = {
+  candidate: CaptureCandidate;
+  element: CandidateElement;
+};
 
-const CODEX_PREVIEW_CANDIDATES: readonly CodexPrivacyCandidate[] = [
-  { height: 28, id: "project-incodex", kind: "project", width: 220, x: 14, y: 145 },
-  { height: 28, id: "project-client-work", kind: "project", width: 220, x: 14, y: 177 },
-  { height: 28, id: "conversation-launch", kind: "conversation", width: 220, x: 14, y: 263 },
-  { height: 28, id: "conversation-capture", kind: "conversation", width: 220, x: 14, y: 295 },
-  { height: 36, id: "identity-account", kind: "identity", width: 220, x: 14, y: 741 },
-] as const;
+export function collectCaptureCandidates(
+  documentRoot: Document,
+  viewport: CaptureSize,
+): CaptureCandidate[] {
+  const accepted: AcceptedCandidate[] = [];
+  const elements = documentRoot.querySelectorAll<CandidateElement>(CAPTURE_CANDIDATE_SELECTOR);
 
-export function codexPreviewPrivacyRegions(size: CaptureSize): CodexPrivacyCandidate[] {
-  const scaleX = size.width / PREVIEW_WIDTH;
-  const scaleY = size.height / PREVIEW_HEIGHT;
-  return CODEX_PREVIEW_CANDIDATES.map((candidate) => ({
-    height: candidate.height * scaleY,
-    id: candidate.id,
-    kind: candidate.kind,
-    width: candidate.width * scaleX,
-    x: candidate.x * scaleX,
-    y: candidate.y * scaleY,
-  }));
+  for (const element of elements) {
+    if (accepted.length >= MAX_CAPTURE_CANDIDATES) break;
+    if (!isCandidateVisible(element) || element.closest(CAPTURE_HIDE_SELECTOR)) continue;
+    if (accepted.some((entry) => entry.element.contains(element))) continue;
+    if (!hasCandidateContent(element)) continue;
+
+    const rect = clipToViewport(element.getBoundingClientRect(), viewport);
+    if (!rect || rect.width < MIN_CANDIDATE_WIDTH || rect.height < MIN_CANDIDATE_HEIGHT) {
+      continue;
+    }
+
+    const candidate = {
+      ...rect,
+      id: `r:${Math.round(rect.x)}:${Math.round(rect.y)}:${Math.round(rect.width)}:${Math.round(rect.height)}`,
+    };
+    accepted.push({ candidate, element });
+  }
+
+  return accepted.map((entry) => entry.candidate);
+}
+
+function isCandidateVisible(element: CandidateElement): boolean {
+  return element.checkVisibility?.() ?? true;
+}
+
+function hasCandidateContent(element: CandidateElement): boolean {
+  const tagName = element.tagName.toUpperCase();
+  if (tagName === "IMG") return true;
+  if (tagName === "TEXTAREA") return (element.value ?? "").trim().length >= 3;
+  return element.textContent.trim().length >= 3;
+}
+
+function clipToViewport(rect: DOMRect, viewport: CaptureSize): Omit<CaptureCandidate, "id"> | null {
+  const x = Math.max(0, rect.left);
+  const y = Math.max(0, rect.top);
+  const right = Math.min(viewport.width, rect.right);
+  const bottom = Math.min(viewport.height, rect.bottom);
+  if (right <= x || bottom <= y) return null;
+  return {
+    height: bottom - y,
+    width: right - x,
+    x,
+    y,
+  };
 }

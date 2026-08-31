@@ -25,14 +25,11 @@ export function mountCaptureRegionLayer(
       .filter((region) => region.source === "automatic")
       .map((region) => region.id),
   );
-  if (state.privacyEnabled) {
-    for (const candidate of automaticCandidates) {
-      if (selectedAutomaticIds.has(candidate.id)) continue;
-      layer.append(candidateElement(candidate, canvas, state, copy, dispatch));
-    }
+  for (const candidate of automaticCandidates) {
+    if (selectedAutomaticIds.has(candidate.id)) continue;
+    layer.append(candidateElement(candidate, canvas, state, copy, dispatch));
   }
   for (const region of state.regions) {
-    if (!state.privacyEnabled && region.source === "automatic") continue;
     layer.append(
       regionElement(region.id, region.rect, canvas, state, region.source, copy, dispatch),
     );
