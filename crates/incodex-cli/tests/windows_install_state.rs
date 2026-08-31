@@ -4,6 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use incodex_cli::windows_activation::WindowsInstalledRuntimeRegistration;
 use incodex_cli::windows_install::{
     capture_windows_uninstall_approval, install_windows_runtime_with,
     uninstall_windows_runtime_approved_with, uninstall_windows_runtime_with,
@@ -11,7 +12,8 @@ use incodex_cli::windows_install::{
 };
 use incodex_cli::windows_install_state::{
     acquire_windows_install_state, read_windows_install_state, stage_windows_install_state,
-    transition_windows_install_state, WindowsInstallPhase, WindowsInstallStateGuard,
+    synchronize_windows_install_runtime_release, transition_windows_install_state,
+    WindowsInstallPhase, WindowsInstallStateGuard,
 };
 use incodex_cli::windows_registration::recover_transient_windows_debug_registration_with;
 use incodex_core::windows_session::verify_private_acl;
@@ -769,4 +771,51 @@ fn persists_owned_install_transitions_with_epoch_cas_and_an_early_disable_kill_s
     assert_eq!(reread, disabled_requested);
 
     fs::remove_dir_all(user_root).expect("remove install state fixture");
+}
+
+#[test]
+fn runtime_sync_moves_durable_integration_without_rewriting_registration() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    let old_release = "0.5.0-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    let new_release = "0.6.0-fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
+    let staged = stage_windows_install_state(&user_root, package, &helper, old_release)
+        .expect("stage old Runtime integration");
+    let pending = transition_windows_install_state(
+        &user_root,
+        staged.epoch,
+        WindowsInstallPhase::EnablePending,
+    )
+    .expect("record enable pending");
+    let enabled = transition_windows_install_state(
+        &user_root,
+        pending.epoch,
+        WindowsInstallPhase::EnabledObserved,
+    )
+    .expect("record enabled integration");
+    let registration_id = enabled.registration_id.clone();
+
+    let synchronized = synchronize_windows_install_runtime_release(&user_root, new_release)
+        .expect("synchronize installed Runtime")
+        .expect("installed integration state");
+    assert_eq!(synchronized.runtime_release, new_release);
+    assert_eq!(synchronized.registration_id, registration_id);
+    assert_eq!(synchronized.phase, WindowsInstallPhase::EnabledObserved);
+    assert!(synchronized.epoch > enabled.epoch);
+
+    let environment =
+        WindowsInstalledRuntimeRegistration::environment_from_install_state(&synchronized)
+            .expect("build stable debugger environment");
+    let node_options = environment
+        .get("NODE_OPTIONS")
+        .expect("stable bootstrap option")
+        .to_string_lossy();
+    assert!(
+        node_options.contains("/.incodex/runtime/incodex-windows-bootstrap.cjs"),
+        "{node_options}"
+    );
+    assert!(!node_options.contains("/releases/"), "{node_options}");
+
+    fs::remove_dir_all(user_root).expect("remove Runtime synchronization fixture");
 }

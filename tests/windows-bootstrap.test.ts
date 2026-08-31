@@ -146,7 +146,7 @@ describe("Windows Runtime bootstrap", () => {
     };
     const registrationId = "0123456789abcdef0123456789abcdef";
     const packageFullName = "OpenAI.Codex_1.2.3.4_x64__publisher";
-    const runtimeDir = "C:\\Users\\test\\.incodex\\runtime\\releases\\0.5.0-releasehash";
+    const runtimeRoot = "C:\\Users\\test\\.incodex\\runtime";
     const env: Record<string, string | undefined> = {
       INCODEX_WINDOWS_REGISTRATION_ID: registrationId,
       INCODEX_WINDOWS_PACKAGE_FULL_NAME: packageFullName,
@@ -167,9 +167,9 @@ describe("Windows Runtime bootstrap", () => {
         phase: "enabled-unobserved",
         registrationId,
         packageFullName,
-        runtimeRelease: "0.5.0-releasehash",
+        runtimeRelease: "0.6.0-newreleasehash",
       }),
-      runtimeDir,
+      runtimeDir: runtimeRoot,
     };
 
     expect(bootstrap.attachWindowsRuntime(options)).toBe(true);
@@ -178,7 +178,9 @@ describe("Windows Runtime bootstrap", () => {
     expect(electronLoaded).toBeFunction();
     electronLoaded?.();
     expect(loaded).toHaveLength(1);
-    expect(loaded[0]).toEndWith("incodex-main.cjs");
+    expect(loaded).toEqual([
+      join(runtimeRoot, "releases", "0.6.0-newreleasehash", "incodex-main.cjs"),
+    ]);
   });
 
   test("fails closed when durable install ownership is absent, disabled, or mismatched", () => {
@@ -213,7 +215,8 @@ describe("Windows Runtime bootstrap", () => {
       { ...valid, phase: "disable-requested" },
       { ...valid, registrationId: "fedcba9876543210fedcba9876543210" },
       { ...valid, packageFullName: "Other.Package_1.2.3.4_x64__publisher" },
-      { ...valid, runtimeRelease: "0.5.0-otherhash" },
+      { ...valid, runtimeRelease: ".." },
+      { ...valid, runtimeRelease: "0.5.0\\otherhash" },
     ];
 
     for (const state of invalidStates) {
