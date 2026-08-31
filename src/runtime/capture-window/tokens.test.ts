@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const cssPath = join(import.meta.dir, "capture-window.css");
+const viewPath = join(import.meta.dir, "view.ts");
 
 describe("capture window visual tokens", () => {
   test("maps Incodex semantics to live Codex tokens with stable fallbacks", () => {
@@ -41,6 +42,7 @@ describe("capture window visual tokens", () => {
 
   test("sizes editor icon roles from Codex spacing tokens", () => {
     const css = readFileSync(cssPath, "utf8");
+    const view = readFileSync(viewPath, "utf8");
 
     expect(css).toMatch(/\.incodex-capture-heading > svg[\s\S]*?height: var\(--incodex-capture-icon-base\)/);
     expect(css).toMatch(/\.incodex-capture-icon-button > svg[\s\S]*?height: var\(--incodex-capture-icon-sm\)/);
@@ -48,5 +50,6 @@ describe("capture window visual tokens", () => {
     expect(css).toMatch(/\.incodex-capture-background-option svg[\s\S]*?height: var\(--incodex-capture-icon-sm\)/);
     expect(css).not.toContain("font-size: 11px");
     expect(css).not.toContain("font-size: 10px");
+    expect(view).not.toMatch(/captureIcon\([^\n]+,\s*\d+\)/);
   });
 });
