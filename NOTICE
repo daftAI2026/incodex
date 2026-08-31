@@ -2,6 +2,10 @@ assets/hat-glasses.svg and assets/circle-x.svg are from Lucide.
 https://lucide.dev/icons/hat-glasses
 https://lucide.dev/icons/circle-x
 
+The Capture Window preview uses locally embedded Lucide paths for Check,
+ChevronDown, Copy, Download, Image, Move, Palette, Redo2, RotateCcw,
+ScanLine, ShieldCheck, Trash2, Undo2, Wallpaper, X, ZoomIn, and ZoomOut.
+
 ISC License
 
 Copyright (c) 2026 Lucide Icons and Contributors
