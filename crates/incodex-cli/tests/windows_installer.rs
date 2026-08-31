@@ -242,6 +242,44 @@ fn installer_tightens_an_existing_stable_lock_acl() {
 }
 
 #[test]
+fn installer_does_not_recreate_managed_directories_before_the_stable_lock() {
+    let root = scratch("stable-lock-before-directories");
+    let user_root = root.join("user-root");
+    fs::create_dir_all(&user_root).expect("create user root");
+    let lock_path = user_root.join("standalone-install.lock");
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .share_mode(0)
+        .open(&lock_path)
+        .expect("hold stable installer lock");
+    let source = Path::new(env!("CARGO_BIN_EXE_incodex"));
+    let release = release_fixture(&root, &sha256(source));
+
+    let output = run_installer(&release, &user_root);
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("another Incodex install or update is already running"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !user_root.join("packages").exists(),
+        "the installer must not recreate managed packages before owning the stable lock"
+    );
+    assert!(
+        !user_root.join("bin").exists(),
+        "the installer must not recreate launchers before owning the stable lock"
+    );
+
+    drop(lock);
+    fs::remove_dir_all(root).expect("remove scratch directory");
+}
+
+#[test]
 fn installer_waits_for_a_pre_migration_generation_lock() {
     let root = scratch("legacy-generation-lock");
     let user_root = root.join("user-root");
