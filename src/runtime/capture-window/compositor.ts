@@ -21,6 +21,7 @@ export type CaptureRenderOperation =
 
 export type CaptureRenderOptions = {
   backgroundImage?: CanvasImageSource | null;
+  isMacOS: boolean;
 };
 
 export type RedactionSampling = {
@@ -49,6 +50,13 @@ export function captureOutputSize(source: CaptureSource, padding: number): Captu
     height: source.height + physicalPadding * 2,
     width: source.width + physicalPadding * 2,
   };
+}
+
+export function captureWindowCornerRadius(
+  isMacOS: boolean,
+  scaleFactor: number,
+): number {
+  return (isMacOS ? 26 : 12) * Math.max(1, scaleFactor);
 }
 
 export function createCaptureRenderPlan(
@@ -89,7 +97,7 @@ export function createCaptureRenderPlan(
 export function renderCaptureToCanvas(
   source: CanvasImageSource,
   state: CaptureWindowState,
-  options: CaptureRenderOptions = {},
+  options: CaptureRenderOptions,
 ): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   const size = captureOutputSize(state.source, state.padding);
@@ -99,7 +107,7 @@ export function renderCaptureToCanvas(
   if (!context) throw new Error("Canvas 2D is unavailable");
 
   drawBackground(context, state.background, size, options.backgroundImage ?? null);
-  drawWindow(context, source, state);
+  drawWindow(context, source, state, options.isMacOS);
 
   const regions = activeCaptureRegions(state);
   for (const region of regions) {
@@ -177,9 +185,11 @@ function drawWindow(
   context: CanvasRenderingContext2D,
   source: CanvasImageSource,
   state: CaptureWindowState,
+  isMacOS: boolean,
 ): void {
   const padding = capturePhysicalPadding(state.source, state.padding);
   const scaleFactor = Math.max(1, state.source.scaleFactor);
+  const cornerRadius = captureWindowCornerRadius(isMacOS, scaleFactor);
   if (state.shadow && padding > 0) {
     context.save();
     context.shadowColor = "rgba(15,18,26,.34)";
@@ -192,7 +202,7 @@ function drawWindow(
       padding,
       state.source.width,
       state.source.height,
-      Math.min(18, state.padding) * scaleFactor,
+      cornerRadius,
     );
     context.fill();
     context.restore();
@@ -204,7 +214,7 @@ function drawWindow(
     padding,
     state.source.width,
     state.source.height,
-    Math.min(18, state.padding) * scaleFactor,
+    cornerRadius,
   );
   context.clip();
   context.drawImage(source, padding, padding, state.source.width, state.source.height);

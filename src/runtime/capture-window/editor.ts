@@ -67,6 +67,7 @@ export function mountCaptureWindowEditor(
   let panY = 0;
   let manualRegionSequence = 0;
   let destroyed = false;
+  const isMacOS = navigator.platform.startsWith("Mac");
   const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const locale = options.locale ?? document.documentElement.lang ?? navigator.language;
   const copy = captureWindowCopy(locale);
@@ -203,6 +204,7 @@ export function mountCaptureWindowEditor(
   function renderCanvas(): HTMLCanvasElement {
     const rendered = renderCaptureToCanvas(source, state, {
       backgroundImage: wallpaperImage,
+      isMacOS,
     });
     rendered.className = "incodex-capture-canvas";
     rendered.setAttribute("data-capture-output", "true");
@@ -275,6 +277,7 @@ export function mountCaptureWindowEditor(
     setPhase("composing");
     const canvas = renderCaptureToCanvas(source, state, {
       backgroundImage: wallpaperImage,
+      isMacOS,
     });
     try {
       const blob = await canvasBlob(canvas);
@@ -292,6 +295,7 @@ export function mountCaptureWindowEditor(
     setPhase("composing");
     const canvas = renderCaptureToCanvas(source, state, {
       backgroundImage: wallpaperImage,
+      isMacOS,
     });
     try {
       const blob = await canvasBlob(canvas);
