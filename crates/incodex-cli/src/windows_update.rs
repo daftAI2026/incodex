@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use crate::parse::ParsedCli;
 use crate::windows_system::{system_binary_path, windows_path_for_display};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
 const WINDOWS_LATEST_RELEASE_URL: &str =
@@ -23,6 +23,8 @@ const INSTALLER_PATH_ENV: &str = "INCODEX_WINDOWS_INSTALLER_PATH";
 const CURRENT_GENERATION_LIMIT: u64 = 64;
 const DOWNLOAD_ATTEMPTS: usize = 3;
 const DOWNLOAD_RETRY_DELAY: Duration = Duration::from_millis(200);
+const RUNTIME_PENDING_NAME: &str = "windows_runtime_update_pending.json";
+const RUNTIME_PENDING_LIMIT: u64 = 1024;
 static UPDATE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub const WINDOWS_X64_RELEASE_ASSET: &str = "incodex-windows-x64.exe";
@@ -77,6 +79,13 @@ impl WindowsMainSnapshot {
 #[derive(Debug, Deserialize)]
 struct MainCommit {
     sha: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PendingWindowsRuntime {
+    schema_version: u8,
+    cli_version: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -205,7 +214,15 @@ pub fn run_runtime(parsed: &ParsedCli) -> Result<(), String> {
     }
 
     let user_root = crate::windows_profile::windows_user_profile()?.join(".incodex");
+    if let Some(expected) = read_windows_runtime_pending(&user_root)? {
+        if expected != env!("CARGO_PKG_VERSION") {
+            return Err(format!(
+                "Runtime synchronization expects Incodex {expected}; run inc update from the active installation"
+            ));
+        }
+    }
     let published = crate::windows_runtime::publish_windows_runtime(&user_root)?;
+    clear_windows_runtime_pending(&user_root)?;
     println!("Runtime updated. Codex was not modified.");
     println!(
         "  Runtime  {}",
@@ -236,6 +253,7 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
     let running_exe = std::env::current_exe()
         .map_err(|error| format!("cannot locate the running Windows CLI: {error}"))?;
     let user_root = validate_managed_install_identity(&package_root, &running_exe)?;
+    repair_pending_runtime(&user_root, &package_root)?;
     if let Some(installer) = std::env::var_os(INSTALLER_PATH_ENV) {
         run_windows_installer(Path::new(&installer), None, &user_root)?;
     } else {
@@ -243,8 +261,86 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
     }
     let (installed, expected_version) = current_release_executable(&package_root)?;
     verify_cli_version(&installed, &expected_version)?;
+    write_windows_runtime_pending(&user_root, &expected_version)?;
     publish_runtime_with(&installed)?;
+    if read_windows_runtime_pending(&user_root)?.is_some() {
+        return Err("CLI was updated, but Runtime synchronization remains pending".to_string());
+    }
     println!("\n🎉 Update ran successfully! Please quit and reopen Codex.");
+    Ok(())
+}
+
+pub fn write_windows_runtime_pending(user_root: &Path, version: &str) -> Result<(), String> {
+    validate_stable_version(version)?;
+    let user_root = incodex_core::windows_session::ensure_private_windows_dir(user_root)?;
+    let cache =
+        incodex_core::windows_session::ensure_private_windows_dir(&user_root.join("cache"))?;
+    let body = serde_json::to_vec_pretty(&PendingWindowsRuntime {
+        schema_version: 1,
+        cli_version: version.to_string(),
+    })
+    .map_err(|error| format!("cannot serialize Runtime update state: {error}"))?;
+    crate::windows_runtime::replace_private_file(&cache, &cache.join(RUNTIME_PENDING_NAME), &body)
+}
+
+pub fn read_windows_runtime_pending(user_root: &Path) -> Result<Option<String>, String> {
+    let path = user_root.join("cache").join(RUNTIME_PENDING_NAME);
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("cannot inspect Runtime update state: {error}")),
+    };
+    if !metadata.is_file()
+        || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        || metadata.len() > RUNTIME_PENDING_LIMIT
+    {
+        return Err("Runtime update state is invalid".to_string());
+    }
+    incodex_core::windows_session::verify_private_acl(&path)?;
+    let body =
+        fs::read(&path).map_err(|error| format!("cannot read Runtime update state: {error}"))?;
+    let pending: PendingWindowsRuntime =
+        serde_json::from_slice(&body).map_err(|_| "Runtime update state is invalid".to_string())?;
+    if pending.schema_version != 1 {
+        return Err("Runtime update state schema is unsupported".to_string());
+    }
+    validate_stable_version(&pending.cli_version)
+        .map_err(|_| "Runtime update state has an invalid CLI version".to_string())?;
+    Ok(Some(pending.cli_version))
+}
+
+pub fn clear_windows_runtime_pending(user_root: &Path) -> Result<(), String> {
+    let path = user_root.join("cache").join(RUNTIME_PENDING_NAME);
+    match fs::symlink_metadata(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("cannot inspect Runtime update state: {error}")),
+        Ok(metadata)
+            if metadata.is_file()
+                && metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0 =>
+        {
+            incodex_core::windows_session::verify_private_acl(&path)?;
+            fs::remove_file(&path)
+                .map_err(|error| format!("cannot clear Runtime update state: {error}"))
+        }
+        Ok(_) => Err("Runtime update state is not a regular file".to_string()),
+    }
+}
+
+fn repair_pending_runtime(user_root: &Path, package_root: &Path) -> Result<(), String> {
+    let Some(expected) = read_windows_runtime_pending(user_root)? else {
+        return Ok(());
+    };
+    let (installed, current) = current_release_executable(package_root)?;
+    if current != expected {
+        return Err(format!(
+            "Runtime synchronization expects Incodex {expected}, but the active generation is {current}"
+        ));
+    }
+    verify_cli_version(&installed, &expected)?;
+    publish_runtime_with(&installed)?;
+    if read_windows_runtime_pending(user_root)?.is_some() {
+        return Err("Runtime synchronization remains pending".to_string());
+    }
     Ok(())
 }
 
