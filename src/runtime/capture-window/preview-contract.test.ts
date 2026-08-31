@@ -33,4 +33,14 @@ describe("capture window preview", () => {
     expect(icons).not.toContain('src="http');
     expect(icons).not.toContain("fetch(");
   });
+
+  test("switches redaction appearance without rebuilding the modal shell", () => {
+    const editor = readFileSync(join(import.meta.dir, "editor.ts"), "utf8");
+
+    expect(editor).toContain("updateRedactionStyle");
+    expect(editor).toContain("wireActions(root, dispatch, preview");
+    expect(editor).not.toMatch(
+      /const actions:[\s\S]*"style-mosaic"[\s\S]*"tool-move"/,
+    );
+  });
 });
