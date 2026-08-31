@@ -104,7 +104,7 @@
 .incodex-capture-workspace {
   display: grid;
   gap: calc(var(--incodex-capture-space) * 5);
-  grid-template-columns: minmax(0, 1fr) 224px;
+  grid-template-columns: minmax(0, 1fr) calc(var(--incodex-capture-space) * 56);
   min-height: 0;
   padding: 0 calc(var(--incodex-capture-space) * 5) calc(var(--incodex-capture-space) * 4);
 }
@@ -112,7 +112,7 @@
 .incodex-capture-preview-pane {
   display: grid;
   gap: calc(var(--incodex-capture-space) * 2);
-  grid-template-rows: 28px 50vh;
+  grid-template-rows: calc(var(--incodex-capture-space) * 7) 50vh;
   min-width: 0;
   overflow: hidden;
 }
@@ -121,7 +121,7 @@
   align-items: center;
   display: flex;
   gap: calc(var(--incodex-capture-space) * 2);
-  height: 28px;
+  height: calc(var(--incodex-capture-space) * 7);
 }
 
 .incodex-capture-region-hint {
@@ -157,7 +157,7 @@
   font: inherit;
   font-size: 10px;
   font-variant-numeric: tabular-nums;
-  height: 24px;
+  height: calc(var(--incodex-capture-space) * 6);
   min-width: 40px;
   padding-inline: 4px;
 }
@@ -195,7 +195,12 @@
   height: 24px;
   justify-content: center;
   padding: 0;
-  width: 24px;
+  width: calc(var(--incodex-capture-space) * 6);
+}
+
+.incodex-capture-icon-button[data-action="close"] {
+  height: calc(var(--incodex-capture-space) * 7);
+  width: calc(var(--incodex-capture-space) * 7);
 }
 
 .incodex-capture-icon-button[aria-pressed="true"] {
@@ -422,7 +427,7 @@
 .incodex-capture-background-grid {
   display: grid;
   gap: calc(var(--incodex-capture-space) * 2);
-  grid-template-columns: repeat(5, 28px);
+  grid-template-columns: repeat(5, calc(var(--incodex-capture-space) * 7));
   margin-top: calc(var(--incodex-capture-space) * 2);
 }
 
@@ -430,8 +435,8 @@
   background: var(--capture-swatch);
   border: 1px solid rgb(0 0 0 / 10%);
   border-radius: 999px;
-  height: 28px;
-  min-width: 28px;
+  height: calc(var(--incodex-capture-space) * 7);
+  min-width: calc(var(--incodex-capture-space) * 7);
   padding: 0;
   position: relative;
 }
@@ -539,7 +544,7 @@
   font-size: var(--text-sm, 13px);
   font-weight: var(--font-weight-medium, 500);
   gap: calc(var(--incodex-capture-space) * 2);
-  height: calc(var(--incodex-capture-space) * 8);
+  height: calc(var(--incodex-capture-space) * 9);
   justify-content: center;
   padding-inline: calc(var(--incodex-capture-space) * 3);
 }
