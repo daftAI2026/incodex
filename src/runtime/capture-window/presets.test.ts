@@ -32,7 +32,7 @@ describe("capture background presets", () => {
 
       expect(jpegSize(bytes)).toEqual({ height: 1600, width: 2560 });
       expect(capturePresetSwatch(preset)).toBe(
-        `url("/${assetUrl.replace(/^\//, "")}") center / cover no-repeat`,
+        `url('/${assetUrl.replace(/^\//, "")}') center / cover no-repeat`,
       );
     }
   });

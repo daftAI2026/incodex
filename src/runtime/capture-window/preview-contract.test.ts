@@ -63,6 +63,9 @@ describe("capture window preview", () => {
     expect(markup).toContain("incodex-capture-checker");
     expect(markup).toContain('data-action="zoom-reset" type="button" title="Reset zoom"');
     expect(markup).toContain('data-color-trigger="background"');
+    expect(markup).toContain(
+      `style="--capture-swatch:url('/capture-backgrounds/sea.jpg') center / cover no-repeat"`,
+    );
     expect(markup).toContain('aria-haspopup="dialog"');
     expect(markup).not.toContain('data-input="color" type="color"');
 
