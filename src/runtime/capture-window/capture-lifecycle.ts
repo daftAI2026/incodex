@@ -26,6 +26,19 @@ export type CapturePreparedWindowOptions<T> = {
   waitForFrame: () => Promise<void>;
 };
 
+export type PrepareCaptureWindowOptions<T, P extends { privacyEnabled: boolean }> = {
+  capture: (privacyEnabled: boolean) => Promise<T>;
+  loadPreferences: () => P;
+};
+
+export async function prepareCaptureWindow<T, P extends { privacyEnabled: boolean }>(
+  options: PrepareCaptureWindowOptions<T, P>,
+): Promise<{ preferences: P; snapshot: T }> {
+  const preferences = options.loadPreferences();
+  const snapshot = await options.capture(preferences.privacyEnabled);
+  return { preferences, snapshot };
+}
+
 export async function capturePreparedWindow<T>(
   options: CapturePreparedWindowOptions<T>,
 ): Promise<PreparedCapture<T>> {

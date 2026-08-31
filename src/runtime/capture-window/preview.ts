@@ -1,5 +1,6 @@
 import {
   capturePreparedWindow,
+  prepareCaptureWindow,
   waitForCaptureFrame,
 } from "./capture-lifecycle.ts";
 import {
@@ -7,7 +8,12 @@ import {
   type CaptureWindowEditorController,
   type CaptureWindowRetake,
 } from "./editor.ts";
-import type { CaptureCandidate, CaptureWindowState } from "./model.ts";
+import {
+  type CaptureCandidate,
+  createCaptureWindowState,
+  type CaptureWindowState,
+} from "./model.ts";
+import { applyCapturePreferences, loadCapturePreferences } from "./preferences.ts";
 
 type PreviewTheme = "dark" | "light";
 type PreviewLocale = "en" | "zh-CN";
@@ -72,11 +78,27 @@ async function openEditor(initialState?: CaptureWindowState): Promise<void> {
   if (!host) return;
   capturePending = true;
   try {
-    const privacyEnabled = initialState?.privacyEnabled ?? true;
-    const snapshot = await capturePreviewSnapshot(revision, privacyEnabled);
+    const prepared = initialState
+      ? {
+          preferences: null,
+          snapshot: await capturePreviewSnapshot(revision, initialState.privacyEnabled),
+        }
+      : await prepareCaptureWindow({
+          capture: (privacyEnabled) => capturePreviewSnapshot(revision, privacyEnabled),
+          loadPreferences: () => loadCapturePreferences(window.localStorage),
+        });
+    const { snapshot } = prepared;
+    const editorState = initialState ?? applyCapturePreferences(
+      createCaptureWindowState({
+        height: snapshot.source.height,
+        scaleFactor: window.devicePixelRatio || 1,
+        width: snapshot.source.width,
+      }),
+      prepared.preferences!,
+    );
     controller = mountCaptureWindowEditor(host, {
       automaticRegions: snapshot.automaticRegions,
-      initialState,
+      initialState: editorState,
       locale,
       onClose: () => {
         controller = null;
