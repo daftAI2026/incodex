@@ -64,7 +64,7 @@ fn release_fixture(root: &Path, digest: &str) -> PathBuf {
 #[test]
 fn installs_a_verified_versioned_release_and_two_launchers() {
     let root = scratch("success");
-    let user_root = root.join("user-root");
+    let user_root = root.join("用户 root with spaces");
     let source = Path::new(env!("CARGO_BIN_EXE_incodex"));
     let release = release_fixture(&root, &sha256(source));
 
@@ -116,6 +116,83 @@ fn installs_a_verified_versioned_release_and_two_launchers() {
     assert!(String::from_utf8_lossy(&launched.stdout)
         .contains(&format!("Incodex version {}", env!("CARGO_PKG_VERSION"))));
 
+    fs::remove_dir_all(root).expect("remove scratch directory");
+}
+
+#[test]
+fn malformed_duplicate_checksum_fails_closed() {
+    let root = scratch("malformed-checksum");
+    let user_root = root.join("user-root");
+    let source = Path::new(env!("CARGO_BIN_EXE_incodex"));
+    let release = release_fixture(&root, &sha256(source));
+    fs::OpenOptions::new()
+        .append(true)
+        .open(release.join("SHA256SUMS"))
+        .and_then(|mut file| {
+            use std::io::Write;
+            writeln!(file, "not-a-digest  incodex-windows-x64.exe")
+        })
+        .expect("append malformed checksum entry");
+
+    let output = run_installer(&release, &user_root);
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("SHA256SUMS"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!user_root.join("bin/incodex.cmd").exists());
+
+    fs::remove_dir_all(root).expect("remove scratch directory");
+}
+
+#[test]
+fn existing_release_junction_fails_closed() {
+    let root = scratch("release-junction");
+    let user_root = root.join("user-root");
+    let release_fixture_root = release_fixture(
+        &root,
+        &sha256(Path::new(env!("CARGO_BIN_EXE_incodex"))),
+    );
+    let external = root.join("external-release");
+    fs::create_dir_all(&external).expect("create external release");
+    fs::copy(
+        env!("CARGO_BIN_EXE_incodex"),
+        external.join("incodex.exe"),
+    )
+    .expect("copy external CLI");
+    let releases = user_root.join("packages").join("standalone").join("releases");
+    fs::create_dir_all(&releases).expect("create releases parent");
+    let junction = fs::canonicalize(&releases)
+        .expect("resolve releases parent")
+        .join(env!("CARGO_PKG_VERSION"));
+    let external = fs::canonicalize(&external).expect("resolve external release");
+    let linked = Command::new("cmd.exe")
+        .args(["/d", "/c", "mklink", "/J"])
+        .arg(&junction)
+        .arg(&external)
+        .output()
+        .expect("create release junction");
+    assert!(
+        linked.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&linked.stdout),
+        String::from_utf8_lossy(&linked.stderr)
+    );
+
+    let output = run_installer(&release_fixture_root, &user_root);
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("reparse point"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    Command::new("cmd.exe")
+        .args(["/d", "/c", "rmdir"])
+        .arg(&junction)
+        .status()
+        .expect("remove release junction");
     fs::remove_dir_all(root).expect("remove scratch directory");
 }
 
