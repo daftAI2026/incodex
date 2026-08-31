@@ -23,11 +23,13 @@ describe("capture window compositor plan", () => {
           id: "automatic-1",
           rect: { x: 10, y: 20, width: 30, height: 24 },
           source: "automatic",
+          style: "mosaic",
         },
         {
           id: "manual-1",
           rect: { x: 40, y: 50, width: 80, height: 60 },
           source: "manual",
+          style: "blur",
         },
       ],
     });
@@ -41,7 +43,7 @@ describe("capture window compositor plan", () => {
     expect(plan.at(-1)).toMatchObject({
       kind: "redaction",
       rect: { x: 168, y: 178, width: 80, height: 60 },
-      style: "mosaic",
+      style: "blur",
     });
     expect(plan[1]).toMatchObject({
       kind: "window",

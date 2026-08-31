@@ -12,7 +12,7 @@ function region(x: number, y: number, width: number, height: number): CaptureRec
 }
 
 function manualRegion(id: string, rect: CaptureRect) {
-  return { id, rect, source: "manual" as const };
+  return { id, rect, source: "manual" as const, style: "mosaic" as const };
 }
 
 describe("capture window editor state", () => {
@@ -116,10 +116,48 @@ describe("capture window editor state", () => {
 
     expect(initial.regions).toEqual([]);
     expect(selected.regions).toEqual([
-      { id: "project-1", rect: region(14, 145, 220, 28), source: "automatic" },
+      {
+        id: "project-1",
+        rect: region(14, 145, 220, 28),
+        source: "automatic",
+        style: "mosaic",
+      },
     ]);
     expect(removed.regions).toEqual([]);
     expect(removed.history.past).toHaveLength(2);
+  });
+
+  test("freezes the active style and solid color into each new region", () => {
+    const initial = createCaptureWindowState(SOURCE);
+    const automatic = applyCaptureCommand(initial, {
+      id: "project-1",
+      kind: "select-automatic-region",
+      rect: region(14, 145, 220, 28),
+    });
+    const blurred = applyCaptureCommand(automatic, {
+      kind: "set-redaction-style",
+      style: "blur",
+    });
+    const manual = applyCaptureCommand(blurred, {
+      id: "manual-1",
+      kind: "add-region",
+      rect: region(300, 200, 90, 50),
+    });
+    const solid = applyCaptureCommand(
+      applyCaptureCommand(manual, { color: "#445566", kind: "set-solid-color" }),
+      { kind: "set-redaction-style", style: "solid" },
+    );
+    const secondManual = applyCaptureCommand(solid, {
+      id: "manual-2",
+      kind: "add-region",
+      rect: region(500, 300, 100, 60),
+    });
+
+    expect(secondManual.regions.map(({ color, style }) => ({ color, style }))).toEqual([
+      { color: undefined, style: "mosaic" },
+      { color: undefined, style: "blur" },
+      { color: "#445566", style: "solid" },
+    ]);
   });
 
   test("updates the editing tool, privacy style, background, and shadow independently", () => {
