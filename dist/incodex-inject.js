@@ -230,7 +230,7 @@ var ENGLISH = {
   wallpaperTooLarge: "Wallpaper must be PNG, JPEG, or WebP and no larger than 32 MiB.",
   zoomIn: "Zoom in",
   zoomOut: "Zoom out",
-  zoomReset: "Reset zoom"
+  zoomReset: "Reset view"
 };
 var CHINESE = {
   background: "背景",
@@ -275,7 +275,7 @@ var CHINESE = {
   wallpaperTooLarge: "壁纸必须是 PNG、JPEG 或 WebP，且不超过 32 MiB。",
   zoomIn: "放大",
   zoomOut: "缩小",
-  zoomReset: "重置缩放"
+  zoomReset: "复位视图"
 };
 function captureWindowCopy(locale) {
   return locale.toLowerCase().startsWith("zh") ? CHINESE : ENGLISH;
@@ -1583,6 +1583,7 @@ function mountCaptureWindowEditor(host, options) {
           width: source.width
         }
       });
+      resetView();
     } catch {
       notify(copy.retakeFailed);
     } finally {

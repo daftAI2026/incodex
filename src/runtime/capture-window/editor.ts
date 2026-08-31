@@ -302,6 +302,7 @@ export function mountCaptureWindowEditor(
           width: source.width,
         },
       });
+      resetView();
     } catch {
       notify(copy.retakeFailed);
     } finally {
