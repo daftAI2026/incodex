@@ -81,6 +81,11 @@ fn installs_a_verified_versioned_release_and_two_launchers() {
         .join(env!("CARGO_PKG_VERSION"))
         .join("incodex.exe");
     assert_eq!(sha256(&installed), sha256(source));
+    assert_eq!(
+        fs::read_to_string(user_root.join("packages/standalone/current"))
+            .expect("read current generation"),
+        format!("{}\n", env!("CARGO_PKG_VERSION"))
+    );
     let primary = user_root.join("bin/incodex.cmd");
     let alias = user_root.join("bin/inc.cmd");
     let primary_body = fs::read_to_string(&primary).expect("read primary launcher");
