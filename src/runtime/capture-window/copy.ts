@@ -1,15 +1,11 @@
 export type CaptureWindowCopy = {
   background: string;
   blur: string;
-  cancel: string;
-  clear: string;
   close: string;
   clipboardUnavailable: string;
   copied: string;
   copy: string;
   custom: string;
-  layout: string;
-  manualReview: string;
   maskColor: string;
   mosaic: string;
   move: string;
@@ -22,7 +18,6 @@ export type CaptureWindowCopy = {
   regionHintDraw: string;
   regionRemove: string;
   regionSuggestion: string;
-  redactionStyle: string;
   redo: string;
   retake: string;
   retakeFailed: string;
@@ -35,7 +30,6 @@ export type CaptureWindowCopy = {
   sourceAutoHint: string;
   sourceDraw: string;
   sourceDrawHint: string;
-  subtitle: string;
   title: string;
   tools: string;
   transparent: string;
@@ -50,15 +44,11 @@ export type CaptureWindowCopy = {
 const ENGLISH: CaptureWindowCopy = {
   background: "Background",
   blur: "Blur",
-  cancel: "Cancel",
-  clear: "Clear",
   close: "Close capture window",
   clipboardUnavailable: "Clipboard access is unavailable in this browser.",
   copied: "Copied to clipboard",
   copy: "Copy",
   custom: "Color",
-  layout: "Layout",
-  manualReview: "Review every mask before sharing.",
   maskColor: "Mask color",
   mosaic: "Mosaic",
   move: "Move",
@@ -71,7 +61,6 @@ const ENGLISH: CaptureWindowCopy = {
   regionHintDraw: "Drag over any area to redact it",
   regionRemove: "Remove redaction",
   regionSuggestion: "Detected area",
-  redactionStyle: "Redaction style",
   redo: "Redo",
   retake: "Retake",
   retakeFailed: "Unable to capture the window again.",
@@ -84,7 +73,6 @@ const ENGLISH: CaptureWindowCopy = {
   sourceAutoHint: "Select detected areas",
   sourceDraw: "Draw areas",
   sourceDrawHint: "Draw custom areas",
-  subtitle: "Mask sensitive details, then copy or save a share-ready PNG.",
   title: "Capture window",
   tools: "Tools",
   transparent: "Transparent",
@@ -99,15 +87,11 @@ const ENGLISH: CaptureWindowCopy = {
 const CHINESE: CaptureWindowCopy = {
   background: "背景",
   blur: "模糊",
-  cancel: "取消",
-  clear: "清空",
   close: "关闭截取窗口",
   clipboardUnavailable: "当前浏览器无法写入剪贴板。",
   copied: "已复制到剪贴板",
   copy: "复制",
   custom: "颜色",
-  layout: "布局",
-  manualReview: "分享前请检查每一个遮罩区域。",
   maskColor: "遮罩颜色",
   mosaic: "马赛克",
   move: "移动",
@@ -120,7 +104,6 @@ const CHINESE: CaptureWindowCopy = {
   regionHintDraw: "拖动画出要打码的区域",
   regionRemove: "移除打码",
   regionSuggestion: "检测到的区域",
-  redactionStyle: "遮罩样式",
   redo: "重做",
   retake: "重拍",
   retakeFailed: "无法重新截取窗口。",
@@ -133,7 +116,6 @@ const CHINESE: CaptureWindowCopy = {
   sourceAutoHint: "选择检测到的区域",
   sourceDraw: "手动画框",
   sourceDrawHint: "手动画出区域",
-  subtitle: "遮住敏感信息，再复制或保存为适合分享的 PNG。",
   title: "截取窗口",
   tools: "工具",
   transparent: "透明",
