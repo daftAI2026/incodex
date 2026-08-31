@@ -20,6 +20,7 @@ describe("capture window editor state", () => {
     const state = createCaptureWindowState(SOURCE);
 
     expect(state.tool).toBe("move");
+    expect(state.redactionSource).toBe("auto");
     expect(state.redactionStyle).toBe("mosaic");
     expect(state.privacyEnabled).toBe(true);
     expect(state.background).toEqual({ kind: "preset", id: "sea" });
@@ -124,7 +125,11 @@ describe("capture window editor state", () => {
   test("updates the editing tool, privacy style, background, and shadow independently", () => {
     const initial = createCaptureWindowState(SOURCE);
     const redact = applyCaptureCommand(initial, { kind: "set-tool", tool: "redact" });
-    const blurred = applyCaptureCommand(redact, {
+    const draw = applyCaptureCommand(redact, {
+      kind: "set-redaction-source",
+      source: "draw",
+    });
+    const blurred = applyCaptureCommand(draw, {
       kind: "set-redaction-style",
       style: "blur",
     });
@@ -139,6 +144,7 @@ describe("capture window editor state", () => {
     });
 
     expect(noPrivacy.tool).toBe("redact");
+    expect(noPrivacy.redactionSource).toBe("draw");
     expect(noPrivacy.redactionStyle).toBe("blur");
     expect(noPrivacy.background).toEqual({ kind: "transparent" });
     expect(noPrivacy.shadow).toBe(false);

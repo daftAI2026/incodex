@@ -11,7 +11,6 @@ import { capturePresets, capturePresetSwatch } from "./presets.ts";
 export function captureWindowTemplate(
   state: CaptureWindowState,
   copy: CaptureWindowCopy,
-  automaticCount: number,
 ): string {
   return `
     <div class="incodex-capture-backdrop" aria-hidden="true"></div>
@@ -31,7 +30,6 @@ export function captureWindowTemplate(
               <div class="incodex-capture-region-layer" aria-hidden="true"></div>
             </div>
           </div>
-          ${stageFooterTemplate(state, copy, automaticCount)}
         </section>
         ${inspectorTemplate(state, copy)}
       </div>
@@ -41,37 +39,45 @@ export function captureWindowTemplate(
 }
 
 function toolbarTemplate(state: CaptureWindowState, copy: CaptureWindowCopy): string {
+  const hint = captureRegionHint(state, copy);
   return `
     <div class="incodex-capture-toolbar">
-      <div class="incodex-capture-segmented" role="group" aria-label="${copy.tools}">
-        ${segmentButton("tool-move", "move", copy.move, state.tool === "move")}
-        ${segmentButton("tool-redact", "scan", copy.redact, state.tool === "redact")}
-      </div>
-      <div class="incodex-capture-toolbar-spacer"></div>
-      ${iconButton("undo", "undo", copy.undo, state.history.past.length === 0)}
-      ${iconButton("redo", "redo", copy.redo, state.history.future.length === 0)}
-      ${iconButton("clear", "trash", copy.clear, state.regions.length === 0)}
-      ${iconButton("retake", "retake", copy.retake)}
-    </div>
-  `;
-}
-
-function stageFooterTemplate(
-  state: CaptureWindowState,
-  copy: CaptureWindowCopy,
-  automaticCount: number,
-): string {
-  const count = state.privacyEnabled ? automaticCount : 0;
-  return `
-    <div class="incodex-capture-stage-footer">
-      <span>${count} ${copy.automatic}</span>
-      <div class="incodex-capture-zoom">
+      <span class="incodex-capture-region-hint">${hint}</span>
+      <div class="incodex-capture-toolbar-controls" role="group" aria-label="${copy.tools}">
+        ${iconButton("tool-move", "move", copy.move, false, state.tool === "move")}
+        ${iconButton("tool-redact", "scan", copy.redact, false, state.tool === "redact")}
+        ${state.tool === "redact" ? redactControlsTemplate(state, copy) : ""}
+        ${toolbarDivider()}
+        ${iconButton("undo", "undo", copy.undo, state.history.past.length === 0)}
+        ${iconButton("redo", "redo", copy.redo, state.history.future.length === 0)}
+        ${toolbarDivider()}
         ${iconButton("zoom-out", "zoom-out", copy.zoomOut, state.zoom <= CAPTURE_MIN_ZOOM)}
-        <span class="incodex-capture-zoom-value">${Math.round(state.zoom * 100)}%</span>
+        <button class="incodex-capture-zoom-reset" data-action="zoom-reset" type="button" title="100%">${Math.round(state.zoom * 100)}%</button>
         ${iconButton("zoom-in", "zoom-in", copy.zoomIn, state.zoom >= CAPTURE_MAX_ZOOM)}
       </div>
     </div>
   `;
+}
+
+function captureRegionHint(state: CaptureWindowState, copy: CaptureWindowCopy): string {
+  if (state.tool !== "redact") return "";
+  return state.redactionSource === "auto" ? copy.regionHint : copy.regionHintDraw;
+}
+
+function redactControlsTemplate(state: CaptureWindowState, copy: CaptureWindowCopy): string {
+  return `
+    ${toolbarDivider()}
+    ${iconButton("source-auto", "scan-search", copy.sourceAutoHint, false, state.redactionSource === "auto")}
+    ${iconButton("source-draw", "pen-line", copy.sourceDrawHint, false, state.redactionSource === "draw")}
+    ${toolbarDivider()}
+    ${iconButton("style-mosaic", "scan", copy.mosaic, false, state.redactionStyle === "mosaic", "mosaic")}
+    ${iconButton("style-blur", "image", copy.blur, false, state.redactionStyle === "blur", "blur")}
+    ${iconButton("style-solid", "palette", copy.solid, false, state.redactionStyle === "solid", "solid")}
+  `;
+}
+
+function toolbarDivider(): string {
+  return '<span class="incodex-capture-toolbar-divider" aria-hidden="true"></span>';
 }
 
 function inspectorTemplate(state: CaptureWindowState, copy: CaptureWindowCopy): string {
@@ -175,8 +181,12 @@ function iconButton(
   icon: Parameters<typeof captureIcon>[0],
   label: string,
   disabled = false,
+  pressed?: boolean,
+  redactionStyle?: string,
 ): string {
-  return `<button class="incodex-capture-icon-button" data-action="${action}" type="button" aria-label="${label}" title="${label}" ${disabled ? "disabled" : ""}>${captureIcon(icon, 16)}</button>`;
+  const pressedAttribute = pressed === undefined ? "" : ` aria-pressed="${pressed}"`;
+  const styleAttribute = redactionStyle ? ` data-redaction-style="${redactionStyle}"` : "";
+  return `<button class="incodex-capture-icon-button" data-action="${action}"${styleAttribute} type="button" aria-label="${label}" title="${label}"${pressedAttribute} ${disabled ? "disabled" : ""}>${captureIcon(icon, 12)}</button>`;
 }
 
 function checked(value: boolean): string {

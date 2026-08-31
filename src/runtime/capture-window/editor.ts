@@ -5,6 +5,7 @@ import {
   applyCaptureCommand,
   CAPTURE_MAX_ZOOM,
   CAPTURE_MIN_ZOOM,
+  type CaptureCandidate,
   createCaptureWindowState,
   type CapturePresetId,
   type CaptureRect,
@@ -18,7 +19,7 @@ const MAX_WALLPAPER_BYTES = 32 * 1024 * 1024;
 const WALLPAPER_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 export type CaptureWindowEditorOptions = {
-  automaticRegions?: CaptureRect[];
+  automaticRegions?: CaptureCandidate[];
   initialState?: CaptureWindowState;
   locale?: string;
   onClose?: () => void;
@@ -26,7 +27,7 @@ export type CaptureWindowEditorOptions = {
   onDetectRegions?: (
     source: HTMLCanvasElement,
     revision: number,
-  ) => CaptureRect[] | Promise<CaptureRect[]>;
+  ) => CaptureCandidate[] | Promise<CaptureCandidate[]>;
   onNotify?: (message: string) => void;
   onRetake?: (revision: number) => HTMLCanvasElement | Promise<HTMLCanvasElement>;
   onSave?: (png: Blob, suggestedName: string) => Promise<"cancelled" | "saved">;
@@ -61,11 +62,12 @@ export function mountCaptureWindowEditor(
   let wallpaperImage: HTMLImageElement | null = null;
   let panX = 0;
   let panY = 0;
+  let manualRegionSequence = 0;
   let destroyed = false;
   const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const locale = options.locale ?? document.documentElement.lang ?? navigator.language;
   const copy = captureWindowCopy(locale);
-  let automaticRegions = options.automaticRegions ?? [];
+  let automaticCandidates = options.automaticRegions ?? [];
 
   const root = document.createElement("div");
   root.className = "incodex-capture-root";
@@ -88,6 +90,12 @@ export function mountCaptureWindowEditor(
   function preview(command: CaptureWindowCommand): void {
     state = applyCaptureCommand(state, command);
     renderCanvas();
+  }
+
+  function dispatchRegion(command: CaptureWindowCommand): void {
+    state = applyCaptureCommand(state, command);
+    renderCanvas();
+    updateHistoryControls(root, state);
   }
 
   function close(): void {
@@ -119,7 +127,7 @@ export function mountCaptureWindowEditor(
 
   function render(): void {
     if (destroyed) return;
-    root.innerHTML = captureWindowTemplate(state, copy, automaticRegions.length);
+    root.innerHTML = captureWindowTemplate(state, copy);
     root.setAttribute("data-tool", state.tool);
     root.querySelector<HTMLElement>(".incodex-capture-backdrop")?.addEventListener("click", close);
     root.querySelector<HTMLElement>("[data-action='close']")?.addEventListener("click", close);
@@ -127,13 +135,22 @@ export function mountCaptureWindowEditor(
 
     const rendered = renderCanvas();
     const frame = root.querySelector<HTMLElement>(".incodex-capture-canvas-frame");
-    wireActions(root, dispatch, preview);
-    wireStage(root, rendered, frame, state, dispatch, () => ({ panX, panY }), (x, y) => {
-      panX = x;
-      panY = y;
-    });
+    wireActions(root, dispatch, dispatchRegion, preview);
+    wireStage(
+      root,
+      rendered,
+      frame,
+      state,
+      dispatchRegion,
+      () => `manual-${++manualRegionSequence}`,
+      () => ({ panX, panY }),
+      (x, y) => {
+        panX = x;
+        panY = y;
+      },
+    );
     wireInputs(root, dispatch, preview, loadWallpaper, setPrivacy);
-    wireKeyboard(root, state, dispatch, close, exportCopy);
+    wireKeyboard(root, state, dispatchRegion, close, exportCopy);
     root.querySelector<HTMLElement>("[data-action='retake']")?.addEventListener("click", () => {
       void retake();
     });
@@ -148,7 +165,6 @@ export function mountCaptureWindowEditor(
 
   function renderCanvas(): HTMLCanvasElement {
     const rendered = renderCaptureToCanvas(source, state, {
-      automaticRegions,
       backgroundImage: wallpaperImage,
     });
     rendered.className = "incodex-capture-canvas";
@@ -163,7 +179,7 @@ export function mountCaptureWindowEditor(
     } else {
       frame?.prepend(rendered);
     }
-    mountRegionLayer(frame, canvas, state, automaticRegions, copy);
+    mountRegionLayer(frame, canvas, state, automaticCandidates, copy, dispatchRegion);
     const paddingValue = root.querySelector<HTMLElement>("[data-value='padding']");
     if (paddingValue) paddingValue.textContent = `${state.padding}px`;
     window.requestAnimationFrame(() => fitCanvas(root, rendered, frame, state.zoom, panX, panY));
@@ -176,7 +192,7 @@ export function mountCaptureWindowEditor(
     try {
       const nextSource = await options.onRetake?.(revision);
       if (nextSource) source = nextSource;
-      automaticRegions = await detectRegions(revision);
+      automaticCandidates = await detectRegions(revision);
       state = applyCaptureCommand(state, {
         kind: "retake",
         source: {
@@ -197,9 +213,9 @@ export function mountCaptureWindowEditor(
     await retake();
   }
 
-  async function detectRegions(revision: number): Promise<CaptureRect[]> {
+  async function detectRegions(revision: number): Promise<CaptureCandidate[]> {
     if (!options.onDetectRegions) {
-      return automaticRegions;
+      return automaticCandidates;
     }
     return options.onDetectRegions(source, revision);
   }
@@ -221,7 +237,6 @@ export function mountCaptureWindowEditor(
   async function exportCopy(): Promise<void> {
     setPhase("composing");
     const canvas = renderCaptureToCanvas(source, state, {
-      automaticRegions,
       backgroundImage: wallpaperImage,
     });
     try {
@@ -239,7 +254,6 @@ export function mountCaptureWindowEditor(
   async function exportSave(): Promise<void> {
     setPhase("composing");
     const canvas = renderCaptureToCanvas(source, state, {
-      automaticRegions,
       backgroundImage: wallpaperImage,
     });
     try {
@@ -273,18 +287,27 @@ export function mountCaptureWindowEditor(
 function wireActions(
   root: HTMLElement,
   dispatch: (command: CaptureWindowCommand) => void,
+  dispatchRegion: (command: CaptureWindowCommand) => void,
   preview: (command: CaptureWindowCommand) => void,
 ): void {
   const actions: Record<string, CaptureWindowCommand> = {
-    clear: { kind: "clear-regions" },
-    redo: { kind: "redo" },
+    "source-auto": { kind: "set-redaction-source", source: "auto" },
+    "source-draw": { kind: "set-redaction-source", source: "draw" },
     "tool-move": { kind: "set-tool", tool: "move" },
     "tool-redact": { kind: "set-tool", tool: "redact" },
-    undo: { kind: "undo" },
   };
   for (const [action, command] of Object.entries(actions)) {
     root.querySelector<HTMLElement>(`[data-action='${action}']`)?.addEventListener("click", () => {
       dispatch(command);
+    });
+  }
+  const regionActions: Record<string, CaptureWindowCommand> = {
+    redo: { kind: "redo" },
+    undo: { kind: "undo" },
+  };
+  for (const [action, command] of Object.entries(regionActions)) {
+    root.querySelector<HTMLElement>(`[data-action='${action}']`)?.addEventListener("click", () => {
+      dispatchRegion(command);
     });
   }
   for (const style of ["mosaic", "blur", "solid"] as const) {
@@ -297,6 +320,9 @@ function wireActions(
   });
   root.querySelector<HTMLElement>("[data-action='zoom-out']")?.addEventListener("click", () => {
     dispatch({ kind: "set-zoom", zoom: currentZoom(root) - 0.1 });
+  });
+  root.querySelector<HTMLElement>("[data-action='zoom-reset']")?.addEventListener("click", () => {
+    dispatch({ kind: "set-zoom", zoom: 1 });
   });
   for (const option of root.querySelectorAll<HTMLElement>("[data-background]")) {
     option.addEventListener("click", () => {
@@ -390,6 +416,7 @@ function wireStage(
   frame: HTMLElement | null,
   state: CaptureWindowState,
   dispatch: (command: CaptureWindowCommand) => void,
+  createManualRegionId: () => string,
   readPan: () => { panX: number; panY: number },
   writePan: (x: number, y: number) => void,
 ): void {
@@ -429,7 +456,11 @@ function wireStage(
       startPanY: pan.panY,
     };
     stage.setPointerCapture(event.pointerId);
-    if (state.tool === "redact" && event.button === 0) {
+    if (
+      state.tool === "redact" &&
+      state.redactionSource === "draw" &&
+      event.button === 0
+    ) {
       draft = document.createElement("div");
       draft.className = "incodex-capture-draft-region";
       root.append(draft);
@@ -481,7 +512,7 @@ function wireStage(
           },
           state.source,
         );
-        dispatch({ kind: "add-region", rect });
+        dispatch({ id: createManualRegionId(), kind: "add-region", rect });
       }
       draft.remove();
       draft = null;
@@ -548,38 +579,104 @@ function mountRegionLayer(
   frame: HTMLElement | null,
   canvas: HTMLCanvasElement,
   state: CaptureWindowState,
-  automaticRegions: CaptureRect[],
+  automaticCandidates: CaptureCandidate[],
   copy: CaptureWindowCopy,
+  dispatch: (command: CaptureWindowCommand) => void,
 ): void {
   const layer = frame?.querySelector<HTMLElement>(".incodex-capture-region-layer");
   if (!layer) return;
   layer.replaceChildren();
-  const regions = state.privacyEnabled ? automaticRegions : [];
-  for (const region of regions) {
-    layer.append(regionElement(region, canvas, state, true, copy.automaticBadge));
+  if (state.tool !== "redact") return;
+  const selectedAutomaticIds = new Set(
+    state.regions
+      .filter((region) => region.source === "automatic")
+      .map((region) => region.id),
+  );
+  if (state.privacyEnabled) {
+    for (const candidate of automaticCandidates) {
+      if (selectedAutomaticIds.has(candidate.id)) continue;
+      layer.append(candidateElement(candidate, canvas, state, copy, dispatch));
+    }
   }
   for (const region of state.regions) {
-    layer.append(regionElement(region, canvas, state, false, copy.automaticBadge));
+    if (!state.privacyEnabled && region.source === "automatic") continue;
+    layer.append(regionElement(region.id, region.rect, canvas, state, region.source, copy, dispatch));
   }
 }
 
 function regionElement(
+  id: string,
   region: CaptureRect,
   canvas: HTMLCanvasElement,
   state: CaptureWindowState,
-  automatic: boolean,
-  automaticLabel: string,
+  source: "automatic" | "manual",
+  copy: CaptureWindowCopy,
+  dispatch: (command: CaptureWindowCommand) => void,
 ): HTMLElement {
   const padding = capturePhysicalPadding(state.source, state.padding);
   const element = document.createElement("div");
-  element.className = "incodex-capture-region";
-  element.dataset.automatic = String(automatic);
-  if (automatic) element.dataset.label = automaticLabel;
+  element.className = "incodex-capture-region incodex-capture-region-confirmed";
+  element.dataset.source = source;
+  element.dataset.interactive = String(state.redactionSource === "auto");
+  element.setAttribute("role", "button");
+  element.title = copy.regionRemove;
+  positionRegionElement(element, region, canvas, padding);
+  const remove = document.createElement("span");
+  remove.className = "incodex-capture-region-remove";
+  remove.textContent = "×";
+  element.append(remove);
+  if (state.redactionSource === "auto") {
+    element.addEventListener("pointerdown", (event) => event.stopPropagation());
+    element.addEventListener("click", (event) => {
+      event.stopPropagation();
+      dispatch({ id, kind: "remove-region" });
+    });
+  }
+  return element;
+}
+
+function candidateElement(
+  candidate: CaptureCandidate,
+  canvas: HTMLCanvasElement,
+  state: CaptureWindowState,
+  copy: CaptureWindowCopy,
+  dispatch: (command: CaptureWindowCommand) => void,
+): HTMLElement {
+  const padding = capturePhysicalPadding(state.source, state.padding);
+  const element = document.createElement("div");
+  element.className = "incodex-capture-region incodex-capture-region-candidate";
+  element.dataset.interactive = String(state.redactionSource === "auto");
+  element.setAttribute("role", "button");
+  element.title = copy.regionSuggestion;
+  positionRegionElement(element, candidate, canvas, padding);
+  if (state.redactionSource === "auto") {
+    element.addEventListener("pointerdown", (event) => event.stopPropagation());
+    element.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const { id, ...rect } = candidate;
+      dispatch({ id, kind: "select-automatic-region", rect });
+    });
+  }
+  return element;
+}
+
+function updateHistoryControls(root: HTMLElement, state: CaptureWindowState): void {
+  const undo = root.querySelector<HTMLButtonElement>("[data-action='undo']");
+  const redo = root.querySelector<HTMLButtonElement>("[data-action='redo']");
+  if (undo) undo.disabled = state.history.past.length === 0;
+  if (redo) redo.disabled = state.history.future.length === 0;
+}
+
+function positionRegionElement(
+  element: HTMLElement,
+  region: CaptureRect,
+  canvas: HTMLCanvasElement,
+  padding: number,
+): void {
   element.style.left = `${((region.x + padding) / canvas.width) * 100}%`;
   element.style.top = `${((region.y + padding) / canvas.height) * 100}%`;
   element.style.width = `${(region.width / canvas.width) * 100}%`;
   element.style.height = `${(region.height / canvas.height) * 100}%`;
-  return element;
 }
 
 function fitCanvas(
@@ -616,7 +713,7 @@ function updateDraft(
 }
 
 function currentZoom(root: HTMLElement): number {
-  const value = root.querySelector<HTMLElement>(".incodex-capture-zoom-value")?.textContent;
+  const value = root.querySelector<HTMLElement>(".incodex-capture-zoom-reset")?.textContent;
   return Number.parseInt(value ?? "100", 10) / 100;
 }
 

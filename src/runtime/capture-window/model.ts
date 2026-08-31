@@ -15,6 +15,16 @@ export type CaptureRect = {
   y: number;
 };
 
+export type CaptureCandidate = CaptureRect & {
+  id: string;
+};
+
+export type CaptureRegion = {
+  id: string;
+  rect: CaptureRect;
+  source: "automatic" | "manual";
+};
+
 export type CaptureSize = {
   height: number;
   width: number;
@@ -25,6 +35,7 @@ export type CaptureSource = CaptureSize & {
 };
 
 export type CaptureTool = "move" | "redact";
+export type CaptureRedactionSource = "auto" | "draw";
 export type CaptureRedactionStyle = "mosaic" | "blur" | "solid";
 export type CapturePresetId =
   | "sea"
@@ -45,8 +56,8 @@ export type CaptureBackground =
   | { dataUrl: string; kind: "wallpaper" };
 
 export type CaptureRegionHistory = {
-  future: CaptureRect[][];
-  past: CaptureRect[][];
+  future: CaptureRegion[][];
+  past: CaptureRegion[][];
 };
 
 export type CaptureWindowState = {
@@ -54,8 +65,9 @@ export type CaptureWindowState = {
   history: CaptureRegionHistory;
   padding: number;
   privacyEnabled: boolean;
+  redactionSource: CaptureRedactionSource;
   redactionStyle: CaptureRedactionStyle;
-  regions: CaptureRect[];
+  regions: CaptureRegion[];
   shadow: boolean;
   solidColor: string;
   source: CaptureSource;
@@ -65,11 +77,14 @@ export type CaptureWindowState = {
 };
 
 export type CaptureWindowCommand =
-  | { kind: "add-region"; rect: CaptureRect }
+  | { id: string; kind: "add-region"; rect: CaptureRect }
   | { kind: "clear-regions" }
+  | { id: string; kind: "remove-region" }
+  | { id: string; kind: "select-automatic-region"; rect: CaptureRect }
   | { background: CaptureBackground; kind: "set-background" }
   | { enabled: boolean; kind: "set-privacy" }
   | { kind: "set-padding"; padding: number }
+  | { kind: "set-redaction-source"; source: CaptureRedactionSource }
   | { kind: "set-redaction-style"; style: CaptureRedactionStyle }
   | { kind: "set-shadow"; shadow: boolean }
   | { color: string; kind: "set-solid-color" }
@@ -85,6 +100,7 @@ export function createCaptureWindowState(source: CaptureSource): CaptureWindowSt
     history: { future: [], past: [] },
     padding: 64,
     privacyEnabled: true,
+    redactionSource: "auto",
     redactionStyle: "mosaic",
     regions: [],
     shadow: true,
@@ -102,9 +118,11 @@ export function applyCaptureCommand(
 ): CaptureWindowState {
   switch (command.kind) {
     case "add-region":
-      return addRegion(state, command.rect);
+      return addRegion(state, command.id, command.rect);
     case "clear-regions":
       return state.regions.length === 0 ? state : commitRegions(state, []);
+    case "remove-region":
+      return removeRegion(state, command.id);
     case "redo":
       return redoRegions(state);
     case "retake":
@@ -115,6 +133,10 @@ export function applyCaptureCommand(
       return { ...state, padding: normalizePadding(command.padding) };
     case "set-privacy":
       return { ...state, privacyEnabled: command.enabled };
+    case "set-redaction-source":
+      return { ...state, redactionSource: command.source };
+    case "select-automatic-region":
+      return selectAutomaticRegion(state, command.id, command.rect);
     case "set-redaction-style":
       return { ...state, redactionStyle: command.style };
     case "set-shadow":
@@ -130,7 +152,11 @@ export function applyCaptureCommand(
   }
 }
 
-function addRegion(state: CaptureWindowState, rect: CaptureRect): CaptureWindowState {
+function addRegion(
+  state: CaptureWindowState,
+  id: string,
+  rect: CaptureRect,
+): CaptureWindowState {
   const normalized = clampCaptureRect(rect, state.source);
   if (
     normalized.width < CAPTURE_MIN_REGION_EDGE ||
@@ -138,10 +164,31 @@ function addRegion(state: CaptureWindowState, rect: CaptureRect): CaptureWindowS
   ) {
     return state;
   }
-  return commitRegions(state, [...state.regions, normalized]);
+  return commitRegions(state, [
+    ...state.regions,
+    { id, rect: normalized, source: "manual" },
+  ]);
 }
 
-function commitRegions(state: CaptureWindowState, regions: CaptureRect[]): CaptureWindowState {
+function selectAutomaticRegion(
+  state: CaptureWindowState,
+  id: string,
+  rect: CaptureRect,
+): CaptureWindowState {
+  if (state.regions.some((region) => region.id === id)) return state;
+  const normalized = clampCaptureRect(rect, state.source);
+  return commitRegions(state, [
+    ...state.regions,
+    { id, rect: normalized, source: "automatic" },
+  ]);
+}
+
+function removeRegion(state: CaptureWindowState, id: string): CaptureWindowState {
+  const regions = state.regions.filter((region) => region.id !== id);
+  return regions.length === state.regions.length ? state : commitRegions(state, regions);
+}
+
+function commitRegions(state: CaptureWindowState, regions: CaptureRegion[]): CaptureWindowState {
   const past = [...state.history.past, state.regions].slice(-CAPTURE_HISTORY_LIMIT);
   return {
     ...state,

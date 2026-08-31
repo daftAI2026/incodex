@@ -20,7 +20,6 @@ export type CaptureRenderOperation =
     };
 
 export type CaptureRenderOptions = {
-  automaticRegions?: CaptureRect[];
   backgroundImage?: CanvasImageSource | null;
 };
 
@@ -54,7 +53,6 @@ export function captureOutputSize(source: CaptureSource, padding: number): Captu
 
 export function createCaptureRenderPlan(
   state: CaptureWindowState,
-  automaticRegions: CaptureRect[] = [],
 ): CaptureRenderOperation[] {
   const size = captureOutputSize(state.source, state.padding);
   const physicalPadding = capturePhysicalPadding(state.source, state.padding);
@@ -71,8 +69,9 @@ export function createCaptureRenderPlan(
       shadow: state.shadow,
     },
   ];
-  const regions = state.privacyEnabled ? [...automaticRegions, ...state.regions] : state.regions;
-  for (const rect of regions) {
+  const regions = activeCaptureRegions(state);
+  for (const region of regions) {
+    const { rect } = region;
     operations.push({
       color: state.solidColor,
       kind: "redaction",
@@ -102,14 +101,16 @@ export function renderCaptureToCanvas(
   drawBackground(context, state.background, size, options.backgroundImage ?? null);
   drawWindow(context, source, state);
 
-  const automaticRegions = options.automaticRegions ?? [];
-  const regions = state.privacyEnabled
-    ? [...automaticRegions, ...state.regions]
-    : state.regions;
+  const regions = activeCaptureRegions(state);
   for (const region of regions) {
-    drawRedaction(context, source, region, state);
+    drawRedaction(context, source, region.rect, state);
   }
   return canvas;
+}
+
+function activeCaptureRegions(state: CaptureWindowState): CaptureWindowState["regions"] {
+  if (state.privacyEnabled) return state.regions;
+  return state.regions.filter((region) => region.source === "manual");
 }
 
 function drawBackground(

@@ -1,6 +1,4 @@
 export type CaptureWindowCopy = {
-  automatic: string;
-  automaticBadge: string;
   background: string;
   blur: string;
   cancel: string;
@@ -20,6 +18,10 @@ export type CaptureWindowCopy = {
   privacyDescription: string;
   preview: string;
   redact: string;
+  regionHint: string;
+  regionHintDraw: string;
+  regionRemove: string;
+  regionSuggestion: string;
   redactionStyle: string;
   redo: string;
   retake: string;
@@ -29,6 +31,10 @@ export type CaptureWindowCopy = {
   saved: string;
   shadow: string;
   solid: string;
+  sourceAuto: string;
+  sourceAutoHint: string;
+  sourceDraw: string;
+  sourceDrawHint: string;
   subtitle: string;
   title: string;
   tools: string;
@@ -42,8 +48,6 @@ export type CaptureWindowCopy = {
 };
 
 const ENGLISH: CaptureWindowCopy = {
-  automatic: "automatic areas",
-  automaticBadge: "Auto",
   background: "Background",
   blur: "Blur",
   cancel: "Cancel",
@@ -63,6 +67,10 @@ const ENGLISH: CaptureWindowCopy = {
   privacyDescription: "Find common sensitive areas. Add or remove masks before export.",
   preview: "Preview",
   redact: "Redact",
+  regionHint: "Click detected areas to redact them",
+  regionHintDraw: "Drag over any area to redact it",
+  regionRemove: "Remove redaction",
+  regionSuggestion: "Detected area",
   redactionStyle: "Redaction style",
   redo: "Redo",
   retake: "Retake",
@@ -72,6 +80,10 @@ const ENGLISH: CaptureWindowCopy = {
   saved: "PNG downloaded",
   shadow: "Window shadow",
   solid: "Solid",
+  sourceAuto: "Detected areas",
+  sourceAutoHint: "Select detected areas",
+  sourceDraw: "Draw areas",
+  sourceDrawHint: "Draw custom areas",
   subtitle: "Mask sensitive details, then copy or save a share-ready PNG.",
   title: "Capture window",
   tools: "Tools",
@@ -85,8 +97,6 @@ const ENGLISH: CaptureWindowCopy = {
 };
 
 const CHINESE: CaptureWindowCopy = {
-  automatic: "个自动区域",
-  automaticBadge: "自动",
   background: "背景",
   blur: "模糊",
   cancel: "取消",
@@ -106,6 +116,10 @@ const CHINESE: CaptureWindowCopy = {
   privacyDescription: "发现常见敏感区域；导出前仍可手工补充或清理遮罩。",
   preview: "预览",
   redact: "区域打码",
+  regionHint: "点击检测到的区域进行打码",
+  regionHintDraw: "拖动画出要打码的区域",
+  regionRemove: "移除打码",
+  regionSuggestion: "检测到的区域",
   redactionStyle: "遮罩样式",
   redo: "重做",
   retake: "重拍",
@@ -115,6 +129,10 @@ const CHINESE: CaptureWindowCopy = {
   saved: "PNG 已下载",
   shadow: "窗口阴影",
   solid: "纯色",
+  sourceAuto: "检测区域",
+  sourceAutoHint: "选择检测到的区域",
+  sourceDraw: "手动画框",
+  sourceDrawHint: "手动画出区域",
   subtitle: "遮住敏感信息，再复制或保存为适合分享的 PNG。",
   title: "截取窗口",
   tools: "工具",

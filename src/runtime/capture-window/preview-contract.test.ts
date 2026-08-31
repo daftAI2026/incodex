@@ -38,7 +38,7 @@ describe("capture window preview", () => {
     const editor = readFileSync(join(import.meta.dir, "editor.ts"), "utf8");
 
     expect(editor).toContain("updateRedactionStyle");
-    expect(editor).toContain("wireActions(root, dispatch, preview");
+    expect(editor).toContain("wireActions(root, dispatch, dispatchRegion, preview");
     expect(editor).not.toMatch(
       /const actions:[\s\S]*"style-mosaic"[\s\S]*"tool-move"/,
     );
