@@ -24,6 +24,22 @@ export type CaptureRenderOptions = {
   backgroundImage?: CanvasImageSource | null;
 };
 
+export type RedactionSampling = {
+  blockSize: number;
+  smoothing: boolean;
+};
+
+export function redactionSampling(
+  style: CaptureRedactionStyle,
+  scaleFactor: number,
+): RedactionSampling | null {
+  if (style === "solid") return null;
+  return {
+    blockSize: 9 * Math.max(1, scaleFactor),
+    smoothing: style === "blur",
+  };
+}
+
 export function capturePhysicalPadding(source: CaptureSource, padding: number): number {
   return padding * Math.max(1, source.scaleFactor);
 }
@@ -219,31 +235,18 @@ function drawRedaction(
     return;
   }
 
-  if (state.redactionStyle === "blur") {
-    const bleed = 8 * scaleFactor;
-    context.filter = `blur(${10 * scaleFactor}px)`;
-    context.drawImage(
-      source,
-      region.x,
-      region.y,
-      region.width,
-      region.height,
-      target.x - bleed,
-      target.y - bleed,
-      target.width + bleed * 2,
-      target.height + bleed * 2,
-    );
+  const sampling = redactionSampling(state.redactionStyle, scaleFactor);
+  if (!sampling) {
     context.restore();
     return;
   }
-
-  const blockSize = 9 * scaleFactor;
   const small = document.createElement("canvas");
-  small.width = Math.max(1, Math.ceil(region.width / blockSize));
-  small.height = Math.max(1, Math.ceil(region.height / blockSize));
+  small.width = Math.max(1, Math.ceil(region.width / sampling.blockSize));
+  small.height = Math.max(1, Math.ceil(region.height / sampling.blockSize));
   const smallContext = small.getContext("2d");
   if (smallContext) {
-    smallContext.imageSmoothingEnabled = false;
+    smallContext.imageSmoothingEnabled = sampling.smoothing;
+    if (sampling.smoothing) smallContext.imageSmoothingQuality = "high";
     smallContext.drawImage(
       source,
       region.x,
@@ -255,7 +258,8 @@ function drawRedaction(
       small.width,
       small.height,
     );
-    context.imageSmoothingEnabled = false;
+    context.imageSmoothingEnabled = sampling.smoothing;
+    if (sampling.smoothing) context.imageSmoothingQuality = "high";
     context.drawImage(small, target.x, target.y, target.width, target.height);
   }
   context.restore();
