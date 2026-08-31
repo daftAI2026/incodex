@@ -150,18 +150,16 @@ fn malformed_duplicate_checksum_fails_closed() {
 fn existing_release_junction_fails_closed() {
     let root = scratch("release-junction");
     let user_root = root.join("user-root");
-    let release_fixture_root = release_fixture(
-        &root,
-        &sha256(Path::new(env!("CARGO_BIN_EXE_incodex"))),
-    );
+    let release_fixture_root =
+        release_fixture(&root, &sha256(Path::new(env!("CARGO_BIN_EXE_incodex"))));
     let external = root.join("external-release");
     fs::create_dir_all(&external).expect("create external release");
-    fs::copy(
-        env!("CARGO_BIN_EXE_incodex"),
-        external.join("incodex.exe"),
-    )
-    .expect("copy external CLI");
-    let releases = user_root.join("packages").join("standalone").join("releases");
+    fs::copy(env!("CARGO_BIN_EXE_incodex"), external.join("incodex.exe"))
+        .expect("copy external CLI");
+    let releases = user_root
+        .join("packages")
+        .join("standalone")
+        .join("releases");
     fs::create_dir_all(&releases).expect("create releases parent");
     let junction = fs::canonicalize(&releases)
         .expect("resolve releases parent")

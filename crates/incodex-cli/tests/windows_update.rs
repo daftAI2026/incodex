@@ -191,14 +191,13 @@ fn post_install_verification_uses_the_installer_generation_lock() {
             .expect("system time")
             .as_nanos()
     ));
-    fs::create_dir_all(&root).expect("create lock fixture");
+    let root = incodex_core::windows_session::ensure_private_windows_dir(&root)
+        .expect("create private lock fixture");
 
     let first = acquire_windows_install_lock(&root).expect("acquire first lock");
-    assert!(
-        acquire_windows_install_lock(&root)
-            .expect_err("second update must not cross the active generation")
-            .contains("another Incodex install or update")
-    );
+    assert!(acquire_windows_install_lock(&root)
+        .expect_err("second update must not cross the active generation")
+        .contains("another Incodex install or update"));
     drop(first);
     acquire_windows_install_lock(&root).expect("lock is reusable after completion");
 

@@ -1,5 +1,5 @@
-use std::fs;
-use std::os::windows::fs::MetadataExt;
+use std::fs::{self, OpenOptions};
+use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -253,12 +253,16 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
     let running_exe = std::env::current_exe()
         .map_err(|error| format!("cannot locate the running Windows CLI: {error}"))?;
     let user_root = validate_managed_install_identity(&package_root, &running_exe)?;
-    repair_pending_runtime(&user_root, &package_root)?;
+    if read_windows_runtime_pending(&user_root)?.is_some() {
+        let _lock = acquire_windows_install_lock(&package_root)?;
+        repair_pending_runtime(&user_root, &package_root)?;
+    }
     if let Some(installer) = std::env::var_os(INSTALLER_PATH_ENV) {
         run_windows_installer(Path::new(&installer), None, &user_root)?;
     } else {
         install_latest_stable_release(&package_root, &user_root)?;
     }
+    let _lock = acquire_windows_install_lock(&package_root)?;
     let (installed, expected_version) = current_release_executable(&package_root)?;
     verify_cli_version(&installed, &expected_version)?;
     write_windows_runtime_pending(&user_root, &expected_version)?;
@@ -268,6 +272,36 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
     }
     println!("\n🎉 Update ran successfully! Please quit and reopen Codex.");
     Ok(())
+}
+
+#[derive(Debug)]
+pub struct WindowsInstallLock {
+    _file: fs::File,
+}
+
+pub fn acquire_windows_install_lock(package_root: &Path) -> Result<WindowsInstallLock, String> {
+    ensure_regular_non_reparse(package_root, "managed Windows package root")?;
+    incodex_core::windows_session::verify_private_acl(package_root)?;
+    let lock_path = package_root.join("install.lock");
+    match fs::symlink_metadata(&lock_path) {
+        Ok(_) => {
+            ensure_regular_non_reparse(&lock_path, "Windows installation lock")?;
+            incodex_core::windows_session::verify_private_acl(&lock_path)?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("cannot inspect Windows installation lock: {error}")),
+    }
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .share_mode(0)
+        .open(&lock_path)
+        .map_err(|_| "another Incodex install or update is already running".to_string())?;
+    incodex_core::windows_session::apply_private_windows_acl(&lock_path)?;
+    incodex_core::windows_session::verify_private_acl(&lock_path)?;
+    Ok(WindowsInstallLock { _file: file })
 }
 
 pub fn write_windows_runtime_pending(user_root: &Path, version: &str) -> Result<(), String> {
