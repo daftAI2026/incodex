@@ -1,10 +1,11 @@
 #![cfg(target_os = "windows")]
 
 use std::path::PathBuf;
+use std::{fs, path::Path};
 
 use incodex_cli::windows_update::{
-    expected_release_sha256, parse_windows_stable_release, windows_release_asset,
-    WindowsStandaloneLayout,
+    expected_release_sha256, parse_windows_stable_release, validate_managed_install_identity,
+    windows_release_asset, WindowsStandaloneLayout,
 };
 
 #[test]
@@ -101,4 +102,36 @@ fn update_plan_rejects_noncanonical_or_prerelease_tags() {
             "accepted {tag}"
         );
     }
+}
+
+#[test]
+fn managed_channel_must_point_at_the_running_versioned_binary() {
+    let root = std::env::temp_dir().join(format!(
+        "incodex-windows-update-identity-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos()
+    ));
+    let package_root = root.join("packages/standalone");
+    let release = package_root.join("releases/9.9.9");
+    fs::create_dir_all(&release).expect("create managed release");
+    let managed = release.join("incodex.exe");
+    fs::copy(env!("CARGO_BIN_EXE_incodex"), &managed).expect("copy managed CLI");
+    fs::write(package_root.join("current"), "9.9.9\n").expect("write generation marker");
+
+    assert_eq!(
+        validate_managed_install_identity(&package_root, &managed)
+            .expect("matching managed identity"),
+        root
+    );
+
+    let external = root.join("outside.exe");
+    fs::copy(Path::new(env!("CARGO_BIN_EXE_incodex")), &external).expect("copy external CLI");
+    assert!(validate_managed_install_identity(&package_root, &external)
+        .expect_err("spoofed package root must fail closed")
+        .contains("running Windows CLI"));
+
+    fs::remove_dir_all(root).expect("remove identity fixture");
 }
