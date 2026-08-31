@@ -101,7 +101,7 @@ describe("Windows Runtime bootstrap", () => {
     expect(loaded).toEqual([]);
     expect(electronLoaded).toBeFunction();
     electronLoaded?.();
-    expect(loaded).toEqual([join(runtimeDir, "incodex-main.cjs")]);
+    expect(loaded).toEqual([win32.join(runtimeDir, "incodex-main.cjs")]);
   });
 
   test("an isolated CDP profile receives its environment without loading a second Runtime", () => {
