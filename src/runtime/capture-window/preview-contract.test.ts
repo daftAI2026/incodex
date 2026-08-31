@@ -26,7 +26,7 @@ describe("capture window preview", () => {
     expect(preview).not.toContain("incodex-main.cts");
     expect(editor).toContain("onCopy?:");
     expect(editor).toContain("onSave?:");
-    expect(editor).toContain("onDetectRegions?:");
+    expect(editor).not.toContain("onDetectRegions");
     expect(`${server}\n${preview}`).not.toMatch(/https?:\/\//);
   });
 
@@ -45,6 +45,15 @@ describe("capture window preview", () => {
     expect(editor).toContain('dispatch({ kind: "set-redaction-style", style })');
     expect(editor).toContain("wireToolbarActions(root, dispatch, dispatchRegion, resetView)");
     expect(editor).not.toContain("root.innerHTML = captureToolbarTemplate");
+  });
+
+  test("retakes one atomic source-and-candidate snapshot with the current privacy choice", () => {
+    const editor = readFileSync(join(import.meta.dir, "editor.ts"), "utf8");
+
+    expect(editor).toContain("onRetake?: (");
+    expect(editor).toContain("privacyEnabled: boolean");
+    expect(editor).toContain("automaticRegions: CaptureCandidate[]");
+    expect(editor).not.toContain("onDetectRegions");
   });
 
   test("matches the observed dialog structure without invented controls", () => {

@@ -68,4 +68,26 @@ describe("capture window compositor plan", () => {
     });
     expect(redactionSampling("solid", 2)).toBeNull();
   });
+
+  test("keeps editor redactions independent from the pre-capture privacy switch", () => {
+    const state = createCaptureWindowState({ width: 1200, height: 801, scaleFactor: 2 });
+    const plan = createCaptureRenderPlan({
+      ...state,
+      privacyEnabled: false,
+      regions: [
+        {
+          id: "automatic-1",
+          rect: { x: 10, y: 20, width: 30, height: 24 },
+          source: "automatic",
+          style: "mosaic",
+        },
+      ],
+    });
+
+    expect(plan.map((operation) => operation.kind)).toEqual([
+      "background",
+      "window",
+      "redaction",
+    ]);
+  });
 });
