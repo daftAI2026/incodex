@@ -59,6 +59,8 @@ describe("capture window preview", () => {
     expect(markup).not.toContain('data-action="cancel"');
     expect(markup).toContain('data-action="retake"');
     expect(markup).toContain("incodex-capture-checker");
+    expect(markup).toContain('data-action="zoom-reset" type="button" title="Reset zoom"');
+    expect(markup).toContain('data-input="color" type="color" value="#2B3440"');
 
     const background = markup.indexOf(copy.background);
     const padding = markup.indexOf(copy.padding);
