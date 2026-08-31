@@ -8,6 +8,7 @@ import {
   type CaptureWindowEditorController,
   type CaptureWindowRetake,
 } from "./editor.ts";
+import { captureWindowCopy } from "./copy.ts";
 import {
   type CaptureCandidate,
   createCaptureWindowState,
@@ -78,24 +79,27 @@ async function openEditor(initialState?: CaptureWindowState): Promise<void> {
   if (!host) return;
   capturePending = true;
   try {
-    const prepared = initialState
-      ? {
-          preferences: null,
-          snapshot: await capturePreviewSnapshot(revision, initialState.privacyEnabled),
-        }
-      : await prepareCaptureWindow({
-          capture: (privacyEnabled) => capturePreviewSnapshot(revision, privacyEnabled),
-          loadPreferences: () => loadCapturePreferences(window.localStorage),
-        });
-    const { snapshot } = prepared;
-    const editorState = initialState ?? applyCapturePreferences(
-      createCaptureWindowState({
-        height: snapshot.source.height,
-        scaleFactor: window.devicePixelRatio || 1,
-        width: snapshot.source.width,
-      }),
-      prepared.preferences!,
-    );
+    let snapshot: CaptureWindowRetake;
+    let editorState = initialState;
+    if (initialState) {
+      snapshot = await capturePreviewSnapshot(revision, initialState.privacyEnabled);
+    } else {
+      const prepared = await prepareCaptureWindow({
+        capture: (privacyEnabled) => capturePreviewSnapshot(revision, privacyEnabled),
+        loadPreferences: () => loadCapturePreferences(window.localStorage),
+        onCaptureError: () => showToast(captureWindowCopy(locale).captureFailed),
+      });
+      if (!prepared) return;
+      snapshot = prepared.snapshot;
+      editorState = applyCapturePreferences(
+        createCaptureWindowState({
+          height: snapshot.source.height,
+          scaleFactor: window.devicePixelRatio || 1,
+          width: snapshot.source.width,
+        }),
+        prepared.preferences,
+      );
+    }
     controller = mountCaptureWindowEditor(host, {
       automaticRegions: snapshot.automaticRegions,
       initialState: editorState,

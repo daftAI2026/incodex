@@ -3,6 +3,7 @@ export type CaptureWindowCopy = {
   blur: string;
   changeImage: string;
   close: string;
+  captureFailed: string;
   clipboardUnavailable: string;
   copied: string;
   copy: string;
@@ -48,6 +49,7 @@ const ENGLISH: CaptureWindowCopy = {
   blur: "Blur",
   changeImage: "Change image",
   close: "Close capture window",
+  captureFailed: "Unable to capture the window.",
   clipboardUnavailable: "Clipboard access is unavailable in this browser.",
   copied: "Copied to clipboard",
   copy: "Copy",
@@ -93,6 +95,7 @@ const CHINESE: CaptureWindowCopy = {
   blur: "模糊",
   changeImage: "更换图片",
   close: "关闭截取窗口",
+  captureFailed: "无法截取窗口。",
   clipboardUnavailable: "当前浏览器无法写入剪贴板。",
   copied: "已复制到剪贴板",
   copy: "复制",

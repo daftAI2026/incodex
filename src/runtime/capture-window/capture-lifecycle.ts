@@ -33,14 +33,20 @@ let captureInFlight = false;
 export type PrepareCaptureWindowOptions<T, P extends { privacyEnabled: boolean }> = {
   capture: (privacyEnabled: boolean) => Promise<T>;
   loadPreferences: () => P;
+  onCaptureError?: (error: unknown) => void;
 };
 
 export async function prepareCaptureWindow<T, P extends { privacyEnabled: boolean }>(
   options: PrepareCaptureWindowOptions<T, P>,
-): Promise<{ preferences: P; snapshot: T }> {
+): Promise<{ preferences: P; snapshot: T } | null> {
   const preferences = options.loadPreferences();
-  const snapshot = await options.capture(preferences.privacyEnabled);
-  return { preferences, snapshot };
+  try {
+    const snapshot = await options.capture(preferences.privacyEnabled);
+    return { preferences, snapshot };
+  } catch (error) {
+    options.onCaptureError?.(error);
+    return null;
+  }
 }
 
 export async function capturePreparedWindow<T>(
