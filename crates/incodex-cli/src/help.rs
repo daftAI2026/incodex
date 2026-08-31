@@ -1,15 +1,5 @@
 use crate::parse::CliCommand;
 
-#[cfg(target_os = "windows")]
-macro_rules! windows_preview_help {
-    ($help:literal) => {
-        concat!(
-            "Unsupported source preview: Windows lifecycle support is still under development.\n\n",
-            $help
-        )
-    };
-}
-
 pub const ROOT_HELP: &str = "\
 incodex — Incognito toggle for Codex desktop
 
@@ -33,8 +23,7 @@ inc is the same program as incodex.
 ";
 
 #[cfg(target_os = "windows")]
-pub const WINDOWS_ROOT_HELP: &str = windows_preview_help!(
-    "\
+pub const WINDOWS_ROOT_HELP: &str = "\
 incodex — Incognito toggle for Codex desktop
 
 Windows support uses the current user's official Microsoft Store Codex package.
@@ -56,37 +45,31 @@ Commands:
   self-uninstall  Not available on Windows yet
 
 Run incodex <command> --help for details.
-"
-);
+";
 
 #[cfg(target_os = "windows")]
 pub fn windows_command_help(command: CliCommand) -> &'static str {
     match command {
         CliCommand::Status => {
-            windows_preview_help!(
-                "\
+            "\
 Usage:
   incodex status [--json]
 
 Inspect the current user's official Microsoft Store Codex package on Windows.
 This command is read-only and discovers the installed location automatically.
 "
-            )
         }
         CliCommand::Doctor => {
-            windows_preview_help!(
-                "\
+            "\
 Usage:
   incodex doctor [--json]
 
 Verify the official Microsoft Store Codex package on Windows and inspect
 Incodex-owned sessions without changing either one.
 "
-            )
         }
         CliCommand::Open => {
-            windows_preview_help!(
-                "\
+            "\
 Usage:
   incodex open [--dry-run] [--mask] [--name <text>] [--avatar <local-file>]
 
@@ -97,11 +80,9 @@ Chromium user-data directory exist only for the isolated session.
 Profile masking is only available with --mask. --avatar accepts a local PNG,
 JPEG, or WebP file.
 "
-            )
         }
         CliCommand::Install => {
-            windows_preview_help!(
-                "\
+            "\
 Usage:
   incodex install [--yes] [--dry-run]
 
@@ -113,11 +94,9 @@ Flags:
   --yes            Skip the confirmation prompt (required when stdin is not a terminal)
   --dry-run, -n    Print the plan and exit
 "
-            )
         }
         CliCommand::Uninstall => {
-            windows_preview_help!(
-                "\
+            "\
 Usage:
   incodex uninstall [--yes] [--dry-run]
 
@@ -128,32 +107,27 @@ Flags:
   --yes            Skip the confirmation prompt (required when stdin is not a terminal)
   --dry-run, -n    Print the plan and exit
 "
-            )
         }
         CliCommand::Runtime => {
-            windows_preview_help!(
-                "\
+            "\
 Usage:
   incodex runtime [--dry-run]
 
 Publish the Runtime embedded in this CLI without modifying the official
 Microsoft Store Codex package. Fully quit and reopen Codex to load it.
 "
-            )
         }
         CliCommand::Update => {
-            windows_preview_help!(
-                "\
+            "\
 Usage:
   incodex update [--dry-run]
 
 Update a PowerShell-installer-managed Incodex CLI, verify the installed
 generation, and publish the Runtime embedded in that new CLI.
 "
-            )
         }
         CliCommand::Recover | CliCommand::SelfUninstall => {
-            windows_preview_help!("This command is not available on Windows yet.\n")
+            "This command is not available on Windows yet.\n"
         }
         CliCommand::Menu | CliCommand::Help | CliCommand::Version => WINDOWS_ROOT_HELP,
     }
