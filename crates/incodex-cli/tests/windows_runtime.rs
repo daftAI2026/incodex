@@ -57,6 +57,8 @@ fn publishes_the_shared_runtime_as_one_private_content_addressed_release() {
         verify_private_acl(&path).expect("private Runtime file ACL");
     }
     verify_private_acl(&first.pointer).expect("private Runtime pointer ACL");
+    verify_private_acl(&user_root.join("runtime/incodex-windows-bootstrap.cjs"))
+        .expect("private stable bootstrap ACL");
 
     fs::remove_dir_all(user_root).expect("remove Runtime fixture");
 }

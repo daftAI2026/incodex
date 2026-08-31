@@ -194,6 +194,7 @@ pub fn run_runtime(parsed: &ParsedCli) -> Result<(), String> {
         return Ok(());
     }
 
+    let _transaction = crate::windows_install_state::acquire_windows_install_state()?;
     let user_root = crate::windows_profile::windows_user_profile()?.join(".incodex");
     if let Some(expected) = read_windows_runtime_pending(&user_root)? {
         if expected != env!("CARGO_PKG_VERSION") {
@@ -203,13 +204,32 @@ pub fn run_runtime(parsed: &ParsedCli) -> Result<(), String> {
         }
     }
     let published = crate::windows_runtime::publish_windows_runtime(&user_root)?;
-    clear_windows_runtime_pending(&user_root)?;
+    let runtime_release = published
+        .release_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "published Windows Runtime release name is invalid".to_string())?;
+    crate::windows_install_state::synchronize_windows_install_runtime_release(
+        &user_root,
+        runtime_release,
+    )?;
+    clear_windows_runtime_pending_if_matches(&user_root, env!("CARGO_PKG_VERSION"))?;
     println!("Runtime updated. Codex was not modified.");
     println!(
         "  Runtime  {}",
         windows_path_for_display(&published.release_dir)
     );
     println!("Fully quit and reopen Codex to load the new Runtime.");
+    Ok(())
+}
+
+fn clear_windows_runtime_pending_if_matches(
+    user_root: &Path,
+    expected: &str,
+) -> Result<(), String> {
+    if read_windows_runtime_pending(user_root)?.as_deref() == Some(expected) {
+        clear_windows_runtime_pending(user_root)?;
+    }
     Ok(())
 }
 

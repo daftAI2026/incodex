@@ -16,6 +16,7 @@ use incodex_cli::windows_install_state::{
     WindowsInstallPhase, WindowsInstallStateGuard,
 };
 use incodex_cli::windows_registration::recover_transient_windows_debug_registration_with;
+use incodex_cli::windows_runtime::publish_windows_runtime;
 use incodex_core::windows_session::verify_private_acl;
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -778,8 +779,13 @@ fn runtime_sync_moves_durable_integration_without_rewriting_registration() {
     let user_root = scratch_root();
     let helper = std::env::current_exe().expect("test helper path");
     let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
-    let old_release = "0.5.0-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-    let new_release = "0.6.0-fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
+    let old_release = "0.4.0-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    let published = publish_windows_runtime(&user_root).expect("publish replacement Runtime");
+    let new_release = published
+        .release_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("replacement Runtime release name");
     let staged = stage_windows_install_state(&user_root, package, &helper, old_release)
         .expect("stage old Runtime integration");
     let pending = transition_windows_install_state(
@@ -788,12 +794,18 @@ fn runtime_sync_moves_durable_integration_without_rewriting_registration() {
         WindowsInstallPhase::EnablePending,
     )
     .expect("record enable pending");
-    let enabled = transition_windows_install_state(
+    let enabled_unobserved = transition_windows_install_state(
         &user_root,
         pending.epoch,
-        WindowsInstallPhase::EnabledObserved,
+        WindowsInstallPhase::EnabledUnobserved,
     )
     .expect("record enabled integration");
+    let enabled = transition_windows_install_state(
+        &user_root,
+        enabled_unobserved.epoch,
+        WindowsInstallPhase::EnabledObserved,
+    )
+    .expect("record observed integration");
     let registration_id = enabled.registration_id.clone();
 
     let synchronized = synchronize_windows_install_runtime_release(&user_root, new_release)
@@ -812,7 +824,7 @@ fn runtime_sync_moves_durable_integration_without_rewriting_registration() {
         .expect("stable bootstrap option")
         .to_string_lossy();
     assert!(
-        node_options.contains("/.incodex/runtime/incodex-windows-bootstrap.cjs"),
+        node_options.contains("/runtime/incodex-windows-bootstrap.cjs"),
         "{node_options}"
     );
     assert!(!node_options.contains("/releases/"), "{node_options}");
