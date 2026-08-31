@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   applyCaptureCommand,
+  capturePointerIntent,
   createCaptureWindowState,
   type CaptureRect,
 } from "./model.ts";
@@ -16,6 +17,14 @@ function manualRegion(id: string, rect: CaptureRect) {
 }
 
 describe("capture window editor state", () => {
+  test("matches Move, Redact, candidate, and middle-button pointer semantics", () => {
+    expect(capturePointerIntent("move", 0, false)).toBe("pan");
+    expect(capturePointerIntent("redact", 0, false)).toBe("draw");
+    expect(capturePointerIntent("redact", 0, true)).toBe("region");
+    expect(capturePointerIntent("redact", 1, false)).toBe("pan");
+    expect(capturePointerIntent("move", 2, false)).toBe("ignore");
+  });
+
   test("starts with the observed capture defaults", () => {
     const state = createCaptureWindowState(SOURCE);
 
