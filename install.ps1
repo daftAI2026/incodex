@@ -80,6 +80,9 @@ function Confirm-Architecture {
     } else {
         $env:PROCESSOR_ARCHITECTURE
     }
+    if ($Architecture -ieq 'x86' -and [Environment]::Is64BitOperatingSystem) {
+        $Architecture = 'AMD64'
+    }
     switch ($Architecture.ToLowerInvariant()) {
         'amd64' { return }
         'x64' { return }
