@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   applyCaptureCommand,
+  captureHistoryShortcut,
   capturePointerIntent,
   createCaptureWindowState,
   scaleCaptureZoom,
@@ -33,6 +34,21 @@ describe("capture window editor state", () => {
     expect(scaleCaptureZoom(5.5, 1.25)).toBe(6);
     expect(wheelCaptureZoom(1, -100)).toBeCloseTo(Math.exp(0.16));
     expect(wheelCaptureZoom(1, 100)).toBeCloseTo(Math.exp(-0.16));
+  });
+
+  test("maps the observed undo and redo shortcuts without stealing unrelated keys", () => {
+    expect(
+      captureHistoryShortcut("z", { control: false, modifier: true, shift: false }),
+    ).toBe("undo");
+    expect(
+      captureHistoryShortcut("z", { control: false, modifier: true, shift: true }),
+    ).toBe("redo");
+    expect(
+      captureHistoryShortcut("y", { control: true, modifier: true, shift: false }),
+    ).toBe("redo");
+    expect(
+      captureHistoryShortcut("y", { control: false, modifier: true, shift: false }),
+    ).toBeNull();
   });
 
   test("starts with the observed capture defaults", () => {
