@@ -38,6 +38,7 @@ mod open_presentation;
 pub mod parse;
 pub mod profile_mask;
 pub mod spinner;
+mod stable_release;
 #[cfg(not(target_os = "windows"))]
 pub mod terminal;
 mod terminal_presentation;

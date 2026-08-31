@@ -54,11 +54,6 @@ impl WindowsStableRelease {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct LatestRelease {
-    tag_name: String,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowsMainSnapshot {
     commit: String,
@@ -155,37 +150,21 @@ pub fn expected_release_sha256(manifest: &str, asset: &str) -> Result<String, St
 }
 
 pub fn parse_windows_stable_release(metadata: &[u8]) -> Result<WindowsStableRelease, String> {
-    let latest: LatestRelease = serde_json::from_slice(metadata)
-        .map_err(|_| "update failed: invalid latest release metadata".to_string())?;
-    let version = latest.tag_name.strip_prefix('v').ok_or_else(|| {
-        format!(
-            "update failed: invalid latest release tag: {}",
-            latest.tag_name
-        )
-    })?;
-    validate_stable_version(version).map_err(|_| {
-        format!(
-            "update failed: invalid latest release tag: {}",
-            latest.tag_name
-        )
-    })?;
-    if latest.tag_name != format!("v{version}") {
-        return Err(format!(
-            "update failed: invalid latest release tag: {}",
-            latest.tag_name
-        ));
-    }
-    let version = version.to_string();
+    let latest = crate::stable_release::parse_latest_stable_release(metadata)?;
+    let version = format!(
+        "{}.{}.{}",
+        latest.version[0], latest.version[1], latest.version[2]
+    );
     Ok(WindowsStableRelease {
         installer_url: format!(
             "https://raw.githubusercontent.com/daftAI2026/incodex/{}/install.ps1",
-            latest.tag_name
+            latest.tag
         ),
         download_base: format!(
             "https://github.com/daftAI2026/incodex/releases/download/{}",
-            latest.tag_name
+            latest.tag
         ),
-        tag: latest.tag_name,
+        tag: latest.tag,
         version,
     })
 }
@@ -646,14 +625,7 @@ fn publish_runtime_with(installed: &Path) -> Result<(), String> {
 }
 
 fn validate_stable_version(version: &str) -> Result<(), String> {
-    let parts = version.split('.').collect::<Vec<_>>();
-    if parts.len() != 3
-        || parts.iter().any(|part| {
-            part.is_empty()
-                || (part.len() > 1 && part.starts_with('0'))
-                || !part.bytes().all(|byte| byte.is_ascii_digit())
-        })
-    {
+    if crate::stable_release::parse_stable_version(version).is_none() {
         return Err(format!("invalid stable Incodex version: {version}"));
     }
     Ok(())
