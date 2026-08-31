@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   captureOutputSize,
+  captureWindowCornerRadius,
   createCaptureRenderPlan,
   redactionSampling,
 } from "./compositor.ts";
@@ -12,6 +13,11 @@ describe("capture window compositor plan", () => {
       width: 1456,
       height: 1057,
     });
+  });
+
+  test("uses the observed platform window radius independently of padding", () => {
+    expect(captureWindowCornerRadius(true, 2)).toBe(52);
+    expect(captureWindowCornerRadius(false, 2)).toBe(24);
   });
 
   test("exports only confirmed automatic and manual masks in stable order", () => {
