@@ -14,6 +14,25 @@ $DownloadBase = if ($env:INCODEX_DOWNLOAD_BASE) {
 $AssetName = 'incodex-windows-x64.exe'
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
+Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+
+public static class IncodexInstallerNative {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool MoveFileEx(string existingPath, string newPath, int flags);
+
+    public static void ReplaceFile(string existingPath, string newPath) {
+        const int MOVEFILE_REPLACE_EXISTING = 0x1;
+        const int MOVEFILE_WRITE_THROUGH = 0x8;
+        if (!MoveFileEx(existingPath, newPath, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+    }
+}
+'@
+
 function Stop-Installer([string]$Message) {
     [Console]::Error.WriteLine("incodex installer: $Message")
     exit 1
@@ -136,7 +155,7 @@ function Write-AtomicText([string]$Path, [string]$Body) {
     $Temporary = Join-Path $Parent ('.' + [IO.Path]::GetFileName($Path) + '.' + [guid]::NewGuid().ToString('N') + '.tmp')
     try {
         [IO.File]::WriteAllText($Temporary, $Body, $Utf8NoBom)
-        Move-Item -LiteralPath $Temporary -Destination $Path -Force
+        [IncodexInstallerNative]::ReplaceFile($Temporary, $Path)
     } finally {
         Remove-Item -LiteralPath $Temporary -Force -ErrorAction SilentlyContinue
     }
@@ -233,10 +252,15 @@ try {
 
     $PrimaryBody = @"
 @echo off
-setlocal
+setlocal DisableDelayedExpansion
 set "INCODEX_MANAGED_BY_STANDALONE=1"
 for %%I in ("%~dp0..\packages\standalone") do set "INCODEX_MANAGED_PACKAGE_ROOT=%%~fI"
-"%~dp0..\packages\standalone\releases\$Version\incodex.exe" %*
+set /p "INCODEX_VERSION="<"%~dp0..\packages\standalone\current"
+if not defined INCODEX_VERSION (
+  1>&2 echo Incodex installation has no current generation.
+  exit /b 1
+)
+"%~dp0..\packages\standalone\releases\%INCODEX_VERSION%\incodex.exe" %*
 exit /b %ERRORLEVEL%
 "@
     $AliasBody = @"
@@ -245,10 +269,10 @@ exit /b %ERRORLEVEL%
 "@
     Write-AtomicText (Join-Path $BinRoot 'incodex.cmd') $PrimaryBody
     Write-AtomicText (Join-Path $BinRoot 'inc.cmd') $AliasBody
+    Write-AtomicText (Join-Path $PackageRoot 'current') "$Version`n"
     if ((Read-CliVersion (Join-Path $BinRoot 'incodex.cmd')) -ne $Version) {
         Stop-Installer 'installed launcher failed its version proof'
     }
-    Write-AtomicText (Join-Path $PackageRoot 'current') "$Version`n"
     $PathAdded = Add-UserPath $BinRoot
 
     [Console]::OutputEncoding = [Text.Encoding]::UTF8
