@@ -1,4 +1,5 @@
 use std::fs;
+use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -8,6 +9,7 @@ use std::time::Duration;
 use crate::parse::ParsedCli;
 use crate::windows_system::{system_binary_path, windows_path_for_display};
 use serde::Deserialize;
+use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
 const WINDOWS_LATEST_RELEASE_URL: &str =
     "https://api.github.com/repos/daftAI2026/incodex/releases/latest";
@@ -193,16 +195,50 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
         return Ok(());
     }
 
+    let running_exe = std::env::current_exe()
+        .map_err(|error| format!("cannot locate the running Windows CLI: {error}"))?;
+    let user_root = validate_managed_install_identity(&package_root, &running_exe)?;
     if let Some(installer) = std::env::var_os(INSTALLER_PATH_ENV) {
-        run_windows_installer(Path::new(&installer), None)?;
+        run_windows_installer(Path::new(&installer), None, &user_root)?;
     } else {
-        install_latest_stable_release(&package_root)?;
+        install_latest_stable_release(&package_root, &user_root)?;
     }
     let (installed, expected_version) = current_release_executable(&package_root)?;
     verify_cli_version(&installed, &expected_version)?;
     publish_runtime_with(&installed)?;
     println!("\n🎉 Update ran successfully! Please quit and reopen Codex.");
     Ok(())
+}
+
+pub fn validate_managed_install_identity(
+    package_root: &Path,
+    running_exe: &Path,
+) -> Result<PathBuf, String> {
+    let packages = package_root
+        .parent()
+        .filter(|path| path.file_name().is_some_and(|name| name == "packages"))
+        .ok_or_else(|| "managed Windows package root has an invalid layout".to_string())?;
+    if package_root
+        .file_name()
+        .is_none_or(|name| name != "standalone")
+    {
+        return Err("managed Windows package root has an invalid layout".to_string());
+    }
+    let user_root = packages
+        .parent()
+        .ok_or_else(|| "managed Windows package root has no user root".to_string())?;
+    let (expected_exe, _) = current_release_executable(package_root)?;
+    ensure_regular_non_reparse(package_root, "managed Windows package root")?;
+    ensure_regular_non_reparse(&expected_exe, "managed Windows CLI")?;
+    ensure_regular_non_reparse(running_exe, "running Windows CLI")?;
+    let expected = fs::canonicalize(&expected_exe)
+        .map_err(|error| format!("cannot resolve the managed Windows CLI: {error}"))?;
+    let running = fs::canonicalize(running_exe)
+        .map_err(|error| format!("cannot resolve the running Windows CLI: {error}"))?;
+    if expected != running {
+        return Err("running Windows CLI does not match the managed generation".to_string());
+    }
+    Ok(user_root.to_path_buf())
 }
 
 fn managed_package_root() -> Result<PathBuf, String> {
@@ -216,7 +252,7 @@ fn managed_package_root() -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn install_latest_stable_release(package_root: &Path) -> Result<(), String> {
+fn install_latest_stable_release(package_root: &Path, user_root: &Path) -> Result<(), String> {
     let work = UpdateWorkDirectory::create(package_root)?;
     let metadata_path = work.path.join("latest.json");
     download_with_powershell(
@@ -234,7 +270,7 @@ fn install_latest_stable_release(package_root: &Path) -> Result<(), String> {
         &tagged_installer,
         "stable installer",
     )?;
-    let first = run_windows_installer(&tagged_installer, Some(&release));
+    let first = run_windows_installer(&tagged_installer, Some(&release), user_root);
     if first.is_ok() {
         return Ok(());
     }
@@ -249,12 +285,13 @@ fn install_latest_stable_release(package_root: &Path) -> Result<(), String> {
         &compatibility_installer,
         "compatibility installer",
     )?;
-    run_windows_installer(&compatibility_installer, Some(&release))
+    run_windows_installer(&compatibility_installer, Some(&release), user_root)
 }
 
 fn run_windows_installer(
     installer: &Path,
     release: Option<&WindowsStableRelease>,
+    user_root: &Path,
 ) -> Result<(), String> {
     let powershell = system_binary_path("WindowsPowerShell/v1.0/powershell.exe")?;
     let mut command = Command::new(powershell);
@@ -267,7 +304,8 @@ fn run_windows_installer(
             "-File",
         ])
         .arg(installer)
-        .env("INCODEX_NON_INTERACTIVE", "1");
+        .env("INCODEX_NON_INTERACTIVE", "1")
+        .env("INCODEX_USER_ROOT", user_root);
     if let Some(release) = release {
         command
             .env("INCODEX_DOWNLOAD_BASE", release.download_base())
@@ -284,6 +322,17 @@ fn run_windows_installer(
     } else {
         Err(format!("Windows installer failed with {status}"))
     }
+}
+
+fn ensure_regular_non_reparse(path: &Path, label: &str) -> Result<(), String> {
+    let metadata =
+        fs::symlink_metadata(path).map_err(|error| format!("cannot inspect {label}: {error}"))?;
+    if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        || (!metadata.is_dir() && !metadata.is_file())
+    {
+        return Err(format!("{label} is not a regular filesystem object"));
+    }
+    Ok(())
 }
 
 fn download_with_powershell(url: &str, destination: &Path, label: &str) -> Result<(), String> {
