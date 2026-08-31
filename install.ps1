@@ -99,6 +99,17 @@ function Assert-DownloadSize([string]$Name, [string]$Path) {
     }
 }
 
+function Get-Sha256Hex([string]$Path) {
+    $Stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    $Hasher = [Security.Cryptography.SHA256]::Create()
+    try {
+        return ([BitConverter]::ToString($Hasher.ComputeHash($Stream))).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $Hasher.Dispose()
+        $Stream.Dispose()
+    }
+}
+
 function Copy-ReleaseFile([string]$Name, [string]$Destination) {
     if ($env:INCODEX_DOWNLOAD_DIR) {
         $Source = Join-Path $env:INCODEX_DOWNLOAD_DIR $Name
@@ -253,7 +264,7 @@ try {
     Copy-ReleaseFile $AssetName $AssetPath
 
     $ExpectedHash = Read-ExpectedChecksum $SumsPath $AssetName
-    $ActualHash = (Get-FileHash -LiteralPath $AssetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $ActualHash = Get-Sha256Hex $AssetPath
     if ($ActualHash -ne $ExpectedHash) {
         Stop-Installer "checksum mismatch for $AssetName"
     }
@@ -297,7 +308,7 @@ try {
             Stop-Installer "existing release is incomplete: $ReleaseRoot"
         }
         Assert-RegularFileNoReparse $InstalledCli 'installed CLI'
-        $InstalledHash = (Get-FileHash -LiteralPath $InstalledCli -Algorithm SHA256).Hash.ToLowerInvariant()
+        $InstalledHash = Get-Sha256Hex $InstalledCli
         if ($InstalledHash -ne $ExpectedHash) {
             Stop-Installer "existing release does not match $AssetName"
         }
@@ -311,7 +322,7 @@ try {
             $StagedCli = Join-Path $Staging 'incodex.exe'
             Copy-Item -LiteralPath $AssetPath -Destination $StagedCli
             Unblock-File -LiteralPath $StagedCli -ErrorAction SilentlyContinue
-            if ((Get-FileHash -LiteralPath $StagedCli -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ExpectedHash) {
+            if ((Get-Sha256Hex $StagedCli) -ne $ExpectedHash) {
                 Stop-Installer "staged checksum mismatch for $AssetName"
             }
             if ((Read-CliVersion $StagedCli) -ne $Version) {
