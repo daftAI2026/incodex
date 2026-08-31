@@ -131,6 +131,30 @@ fn installs_a_verified_versioned_release_and_two_launchers() {
 }
 
 #[test]
+fn installer_tightens_an_existing_generation_lock_acl() {
+    let root = scratch("existing-lock-acl");
+    let user_root = root.join("user-root");
+    let package_root = user_root.join("packages/standalone");
+    fs::create_dir_all(&package_root).expect("create legacy package root");
+    let lock = package_root.join("install.lock");
+    fs::write(&lock, b"").expect("create legacy generation lock");
+    let source = Path::new(env!("CARGO_BIN_EXE_incodex"));
+    let release = release_fixture(&root, &sha256(source));
+
+    let output = run_installer(&release, &user_root);
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    incodex_core::windows_session::verify_private_acl(&lock)
+        .expect("installer must migrate the lock to a protected current-user DACL");
+
+    fs::remove_dir_all(root).expect("remove scratch directory");
+}
+
+#[test]
 fn malformed_duplicate_checksum_fails_closed() {
     let root = scratch("malformed-checksum");
     let user_root = root.join("user-root");
