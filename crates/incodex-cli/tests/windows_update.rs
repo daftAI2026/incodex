@@ -340,6 +340,10 @@ fn managed_update_reuses_the_shared_progress_without_streaming_through_it() {
         !installer.contains("Stdio::inherit()"),
         "installer output would corrupt the shared spinner line"
     );
+    assert!(
+        run_update.contains("println!(\"🎉 Update ran successfully!"),
+        "successful update must replace the spinner without a blank line"
+    );
 }
 
 #[test]

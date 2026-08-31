@@ -241,10 +241,7 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
         ));
     }
     let package_root = managed_package_root()?;
-    let display_command = format!(
-        "powershell -ExecutionPolicy Bypass -c \"$env:INCODEX_NON_INTERACTIVE='1'; irm {WINDOWS_MAIN_INSTALLER_URL} | iex\""
-    );
-    println!("Updating Incodex via `{display_command}`...\n");
+    println!("update channel: windows standalone");
     if parsed.dry_run {
         println!("would install the latest verified Windows release");
         println!("would publish Runtime with the installed CLI");
@@ -262,19 +259,23 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
         let _lock = acquire_windows_install_lock(&package_root)?;
         repair_pending_runtime(&user_root, &package_root)?;
     }
+    let mut progress = crate::spinner::Progress::new();
+    progress.stage("Upgrading Incodex");
     let (release_ordering, latest_tag) =
         install_latest_stable_release(&package_root, env!("CARGO_PKG_VERSION"))?;
     let _lock = acquire_windows_install_lock(&package_root)?;
     let (installed, expected_version) = current_release_executable(&package_root)?;
     verify_cli_version(&installed, &expected_version)?;
     write_windows_runtime_pending(&user_root, &expected_version)?;
+    progress.stage("Publishing Runtime");
     publish_runtime_with(&installed)?;
     if read_windows_runtime_pending(&user_root)?.is_some() {
         return Err("CLI was updated, but Runtime synchronization remains pending".to_string());
     }
+    progress.stop();
     match release_ordering {
         VersionOrdering::Greater => {
-            println!("\n🎉 Update ran successfully! Please quit and reopen Codex.");
+            println!("🎉 Update ran successfully! Please quit and reopen Codex.");
         }
         VersionOrdering::Equal => {
             println!("Already on latest version, {}", env!("CARGO_PKG_VERSION"));
@@ -583,16 +584,14 @@ fn run_windows_installer(installer: &Path, release: &WindowsStableRelease) -> Re
         .env("INCODEX_INTERNAL_UPDATE", "1")
         .env("INCODEX_DOWNLOAD_BASE", release.download_base())
         .env("INCODEX_EXPECTED_VERSION", release.version());
-    let status = command
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()
+    let output = command
+        .stdin(Stdio::null())
+        .output()
         .map_err(|error| format!("could not start the Windows installer: {error}"))?;
-    if status.success() {
+    if output.status.success() {
         Ok(())
     } else {
-        Err(format!("Windows installer failed with {status}"))
+        Err(command_failure("Windows installer", &output))
     }
 }
 
@@ -747,17 +746,33 @@ fn verify_cli_version(installed: &Path, expected: &str) -> Result<(), String> {
 }
 
 fn publish_runtime_with(installed: &Path) -> Result<(), String> {
-    let status = Command::new(installed)
+    let output = Command::new(installed)
         .arg("runtime")
         .stdin(Stdio::null())
-        .status()
+        .output()
         .map_err(|error| format!("could not publish Runtime with the installed CLI: {error}"))?;
-    if status.success() {
+    if output.status.success() {
         Ok(())
     } else {
         Err(format!(
-            "CLI was updated, but Runtime synchronization failed with {status}"
+            "CLI was updated, but Runtime synchronization failed\n{}",
+            command_failure("Runtime command", &output)
         ))
+    }
+}
+
+fn command_failure(label: &str, output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let detail = [stderr.trim(), stdout.trim()]
+        .into_iter()
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if detail.is_empty() {
+        format!("{label} failed with {}", output.status)
+    } else {
+        format!("{label} failed with {}\n{detail}", output.status)
     }
 }
 
