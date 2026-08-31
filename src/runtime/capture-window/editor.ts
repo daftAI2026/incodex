@@ -436,6 +436,9 @@ function wireToolbarActions(
   root.querySelector<HTMLElement>("[data-action='zoom-reset']")?.addEventListener("click", () => {
     resetView();
   });
+  root.querySelector<HTMLElement>("[data-action='zoom-fit']")?.addEventListener("click", () => {
+    resetView();
+  });
 }
 
 function wireBackgroundActions(

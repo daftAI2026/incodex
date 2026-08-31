@@ -66,6 +66,7 @@ export function captureToolbarTemplate(
         ${iconButton("zoom-out", "zoom-out", copy.zoomOut, state.zoom <= CAPTURE_MIN_ZOOM)}
         <button class="incodex-capture-zoom-reset" data-action="zoom-reset" type="button" title="${copy.zoomReset}">${Math.round(state.zoom * 100)}%</button>
         ${iconButton("zoom-in", "zoom-in", copy.zoomIn, state.zoom >= CAPTURE_MAX_ZOOM)}
+        ${iconButton("zoom-fit", "maximize", copy.zoomReset)}
       </div>
     </div>
   `;

@@ -57,6 +57,7 @@ var ICON_BODY = {
   hand: '<path d="M18 11V6a2 2 0 0 0-4 0v5" /><path d="M14 10V4a2 2 0 0 0-4 0v7" /><path d="M10 10.5V6a2 2 0 0 0-4 0v8" /><path d="M6 14a2 2 0 1 0-4 0v2c0 4.4 3.6 8 8 8h2a8 8 0 0 0 8-8v-5a2 2 0 0 0-4 0v1" />',
   image: '<rect width="18" height="18" x="3" y="3" rx="2" ry="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />',
   "image-plus": '<path d="M16 5h6" /><path d="M19 2v6" /><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21" />',
+  maximize: '<path d="M8 3H5a2 2 0 0 0-2 2v3" /><path d="M16 3h3a2 2 0 0 1 2 2v3" /><path d="M8 21H5a2 2 0 0 1-2-2v-3" /><path d="M16 21h3a2 2 0 0 0 2-2v-3" />',
   move: '<path d="M12 2v20" /><path d="m15 19-3 3-3-3" /><path d="m19 9 3 3-3 3" /><path d="M2 12h20" /><path d="m5 9-3 3 3 3" /><path d="m9 5 3-3 3 3" />',
   palette: '<path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z" /><circle cx="13.5" cy="6.5" r=".5" fill="currentColor" /><circle cx="17.5" cy="10.5" r=".5" fill="currentColor" /><circle cx="6.5" cy="12.5" r=".5" fill="currentColor" /><circle cx="8.5" cy="7.5" r=".5" fill="currentColor" />',
   "pen-line": '<path d="M13 21h8" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" /><path d="m15 5 3 3" />',
@@ -1291,6 +1292,7 @@ function captureToolbarTemplate(state, copy) {
         ${iconButton("zoom-out", "zoom-out", copy.zoomOut, state.zoom <= CAPTURE_MIN_ZOOM)}
         <button class="incodex-capture-zoom-reset" data-action="zoom-reset" type="button" title="${copy.zoomReset}">${Math.round(state.zoom * 100)}%</button>
         ${iconButton("zoom-in", "zoom-in", copy.zoomIn, state.zoom >= CAPTURE_MAX_ZOOM)}
+        ${iconButton("zoom-fit", "maximize", copy.zoomReset)}
       </div>
     </div>
   `;
@@ -1702,6 +1704,9 @@ function wireToolbarActions(root, dispatch, dispatchRegion, resetView) {
     dispatch({ kind: "set-zoom", zoom: scaleCaptureZoom(currentZoom(root), 1 / 1.25) });
   });
   root.querySelector("[data-action='zoom-reset']")?.addEventListener("click", () => {
+    resetView();
+  });
+  root.querySelector("[data-action='zoom-fit']")?.addEventListener("click", () => {
     resetView();
   });
 }
