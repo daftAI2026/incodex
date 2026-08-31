@@ -74,4 +74,13 @@ describe("capture window preview", () => {
     expect(css).toContain("grid-template-columns: minmax(0, 1fr) 224px");
     expect(css).toContain("height: 50vh");
   });
+
+  test("keeps the dialog and canvas nodes stable while editor controls change", () => {
+    const editor = readFileSync(join(import.meta.dir, "editor.ts"), "utf8");
+
+    expect(editor).toContain("function refreshEditor");
+    expect(editor).toContain("function refreshToolbar");
+    expect(editor).toContain("readState: () => CaptureWindowState");
+    expect(editor).not.toMatch(/function dispatch\([\s\S]*?\n  }\n[\s\S]*?render\(\);/);
+  });
 });
