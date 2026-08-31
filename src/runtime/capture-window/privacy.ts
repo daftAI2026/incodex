@@ -27,11 +27,22 @@ export function collectCaptureCandidates(
 
   for (const element of elements) {
     if (accepted.length >= MAX_CAPTURE_CANDIDATES) break;
-    if (!isCandidateVisible(element) || element.closest(CAPTURE_HIDE_SELECTOR)) continue;
-    if (accepted.some((entry) => entry.element.contains(element))) continue;
+    const bounds = element.getBoundingClientRect();
+    if (bounds.width < MIN_CANDIDATE_WIDTH || bounds.height < MIN_CANDIDATE_HEIGHT) continue;
+    if (
+      bounds.bottom <= 0 ||
+      bounds.right <= 0 ||
+      bounds.top >= viewport.height ||
+      bounds.left >= viewport.width
+    ) {
+      continue;
+    }
+    if (element.closest(CAPTURE_HIDE_SELECTOR)) continue;
     if (!hasCandidateContent(element)) continue;
+    if (!isCandidateVisible(element)) continue;
+    if (accepted.some((entry) => entry.element.contains(element))) continue;
 
-    const rect = clipToViewport(element.getBoundingClientRect(), viewport);
+    const rect = clipToViewport(bounds, viewport);
     if (!rect || rect.width < MIN_CANDIDATE_WIDTH || rect.height < MIN_CANDIDATE_HEIGHT) {
       continue;
     }
@@ -53,7 +64,7 @@ function isCandidateVisible(element: CandidateElement): boolean {
 function hasCandidateContent(element: CandidateElement): boolean {
   const tagName = element.tagName.toUpperCase();
   if (tagName === "IMG") return true;
-  if (tagName === "TEXTAREA") return (element.value ?? "").trim().length >= 3;
+  if (tagName === "TEXTAREA") return (element.value ?? "").trim().length > 0;
   return element.textContent.trim().length >= 3;
 }
 
