@@ -1,3 +1,4 @@
+use std::cmp::Ordering as VersionOrdering;
 use std::fs::{self, OpenOptions};
 use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
@@ -239,7 +240,8 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
         let _lock = acquire_windows_install_lock(&package_root)?;
         repair_pending_runtime(&user_root, &package_root)?;
     }
-    install_latest_stable_release(&package_root)?;
+    let (release_ordering, latest_tag) =
+        install_latest_stable_release(&package_root, env!("CARGO_PKG_VERSION"))?;
     let _lock = acquire_windows_install_lock(&package_root)?;
     let (installed, expected_version) = current_release_executable(&package_root)?;
     verify_cli_version(&installed, &expected_version)?;
@@ -248,7 +250,23 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
     if read_windows_runtime_pending(&user_root)?.is_some() {
         return Err("CLI was updated, but Runtime synchronization remains pending".to_string());
     }
-    println!("\n🎉 Update ran successfully! Please quit and reopen Codex.");
+    match release_ordering {
+        VersionOrdering::Greater => {
+            println!("\n🎉 Update ran successfully! Please quit and reopen Codex.");
+        }
+        VersionOrdering::Equal => {
+            println!("Already on latest version, {}", env!("CARGO_PKG_VERSION"));
+            println!("Runtime is synchronized. Fully quit and reopen Codex to reload it.");
+        }
+        VersionOrdering::Less => {
+            println!(
+                "Current version {} is newer than latest release {}.",
+                env!("CARGO_PKG_VERSION"),
+                latest_tag
+            );
+            println!("Runtime is synchronized. Fully quit and reopen Codex to reload it.");
+        }
+    }
     Ok(())
 }
 
@@ -373,7 +391,7 @@ pub fn validate_managed_install_identity(
     let user_root = packages
         .parent()
         .ok_or_else(|| "managed Windows package root has no user root".to_string())?;
-    let (expected_exe, _) = current_release_executable(package_root)?;
+    let (expected_exe, expected_version) = current_release_executable(package_root)?;
     ensure_regular_non_reparse(package_root, "managed Windows package root")?;
     ensure_regular_non_reparse(&expected_exe, "managed Windows CLI")?;
     ensure_regular_non_reparse(running_exe, "running Windows CLI")?;
@@ -384,6 +402,7 @@ pub fn validate_managed_install_identity(
     if expected != running {
         return Err("running Windows CLI does not match the managed generation".to_string());
     }
+    verify_cli_version(&running, &expected_version)?;
     Ok(user_root.to_path_buf())
 }
 
@@ -416,7 +435,21 @@ fn managed_package_root() -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn install_latest_stable_release(package_root: &Path) -> Result<(), String> {
+pub fn windows_release_ordering(
+    current: &str,
+    latest: &WindowsStableRelease,
+) -> Result<VersionOrdering, String> {
+    let current = crate::stable_release::parse_stable_version(current)
+        .ok_or_else(|| format!("invalid stable Incodex version: {current}"))?;
+    let latest = crate::stable_release::parse_stable_version(latest.version())
+        .ok_or_else(|| format!("invalid stable Incodex version: {}", latest.version()))?;
+    Ok(latest.cmp(&current))
+}
+
+fn install_latest_stable_release(
+    package_root: &Path,
+    current: &str,
+) -> Result<(VersionOrdering, String), String> {
     let work = UpdateWorkDirectory::create(package_root)?;
     let metadata_path = work.path.join("latest.json");
     download_with_powershell(
@@ -428,6 +461,10 @@ fn install_latest_stable_release(package_root: &Path) -> Result<(), String> {
     let metadata = fs::read(&metadata_path)
         .map_err(|error| format!("update failed: cannot read release metadata: {error}"))?;
     let release = parse_windows_stable_release(&metadata)?;
+    let ordering = windows_release_ordering(current, &release)?;
+    if ordering != VersionOrdering::Greater {
+        return Ok((ordering, release.tag().to_string()));
+    }
 
     let tagged_installer = work.path.join("install.stable.ps1");
     download_with_powershell(
@@ -438,7 +475,7 @@ fn install_latest_stable_release(package_root: &Path) -> Result<(), String> {
     )?;
     let first = run_windows_installer(&tagged_installer, &release);
     if first.is_ok() {
-        return Ok(());
+        return Ok((VersionOrdering::Greater, release.tag().to_string()));
     }
 
     eprintln!(
@@ -462,7 +499,8 @@ fn install_latest_stable_release(package_root: &Path) -> Result<(), String> {
         "compatibility installer",
         INSTALLER_SCRIPT_LIMIT,
     )?;
-    run_windows_installer(&compatibility_installer, &release)
+    run_windows_installer(&compatibility_installer, &release)?;
+    Ok((VersionOrdering::Greater, release.tag().to_string()))
 }
 
 fn run_windows_installer(installer: &Path, release: &WindowsStableRelease) -> Result<(), String> {
