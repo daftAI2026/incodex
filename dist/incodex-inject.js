@@ -1256,7 +1256,7 @@ function captureWindowTemplate(state, copy, options = {}) {
     <section class="incodex-capture-dialog" role="dialog" aria-modal="true" aria-labelledby="incodex-capture-title">
       <header class="incodex-capture-header">
         <div class="incodex-capture-heading">
-          ${captureIcon("camera", 15)}
+          ${captureIcon("camera")}
           <h1 class="incodex-capture-title" id="incodex-capture-title">${copy.title}</h1>
         </div>
         ${iconButton("close", "x", copy.close)}
@@ -1361,25 +1361,25 @@ function backgroundGridTemplate(state, copy, lastBackgroundColor, wallpaperDataU
   const transparent = state.background.kind === "transparent";
   const custom = state.background.kind === "color";
   const wallpaper = state.background.kind === "wallpaper";
-  const customIcon = custom ? "" : captureIcon("pipette", 11);
+  const customIcon = custom ? "" : captureIcon("pipette");
   const wallpaperImage = wallpaperDataUrl ?? "";
   const changeImageHidden = wallpaper && wallpaperDataUrl ? "" : " hidden";
-  return `<div class="incodex-capture-background-grid">${presets}<button class="incodex-capture-background-option incodex-capture-color-label" data-background-custom data-color-trigger="background" data-selected="${custom}" type="button" aria-label="${copy.custom}" title="${copy.custom}" aria-haspopup="dialog" aria-expanded="false" data-state="closed" style="--capture-swatch:${lastBackgroundColor}">${customIcon}</button><button class="incodex-capture-background-option incodex-capture-checker" data-background="transparent" type="button" aria-label="${copy.transparent}" title="${copy.transparent}" aria-pressed="${transparent}"></button><button class="incodex-capture-background-option incodex-capture-wallpaper-label" data-background-wallpaper type="button" data-selected="${wallpaper}" aria-label="${copy.wallpaper}" title="${copy.wallpaper}"><img data-wallpaper-preview src="${wallpaperImage}" alt="" ${wallpaperDataUrl ? "" : "hidden"}><span data-wallpaper-placeholder ${wallpaperDataUrl ? "hidden" : ""}>${captureIcon("image-plus", 13)}</span></button></div><input class="incodex-capture-wallpaper-input" data-input="wallpaper" type="file" accept="image/png,image/jpeg,image/webp"><button class="incodex-capture-change-wallpaper" data-action="change-wallpaper" type="button"${changeImageHidden}>${copy.changeImage}</button>`;
+  return `<div class="incodex-capture-background-grid">${presets}<button class="incodex-capture-background-option incodex-capture-color-label" data-background-custom data-color-trigger="background" data-selected="${custom}" type="button" aria-label="${copy.custom}" title="${copy.custom}" aria-haspopup="dialog" aria-expanded="false" data-state="closed" style="--capture-swatch:${lastBackgroundColor}">${customIcon}</button><button class="incodex-capture-background-option incodex-capture-checker" data-background="transparent" type="button" aria-label="${copy.transparent}" title="${copy.transparent}" aria-pressed="${transparent}"></button><button class="incodex-capture-background-option incodex-capture-wallpaper-label" data-background-wallpaper type="button" data-selected="${wallpaper}" aria-label="${copy.wallpaper}" title="${copy.wallpaper}"><img data-wallpaper-preview src="${wallpaperImage}" alt="" ${wallpaperDataUrl ? "" : "hidden"}><span data-wallpaper-placeholder ${wallpaperDataUrl ? "hidden" : ""}>${captureIcon("image-plus")}</span></button></div><input class="incodex-capture-wallpaper-input" data-input="wallpaper" type="file" accept="image/png,image/jpeg,image/webp"><button class="incodex-capture-change-wallpaper" data-action="change-wallpaper" type="button"${changeImageHidden}>${copy.changeImage}</button>`;
 }
 function footerTemplate(copy) {
   return `
     <footer class="incodex-capture-footer">
-      <button class="incodex-capture-button" data-action="retake" type="button">${captureIcon("retake", 13)}<span>${copy.retake}</span></button>
+      <button class="incodex-capture-button" data-action="retake" type="button">${captureIcon("retake")}<span>${copy.retake}</span></button>
       <span class="incodex-capture-footer-spacer"></span>
-      <button class="incodex-capture-button incodex-capture-button-secondary" data-action="save" type="button">${captureIcon("save", 13)}<span>${copy.save}</span></button>
-      <button class="incodex-capture-button incodex-capture-button-primary" data-action="copy" type="button">${captureIcon("copy", 13)}<span>${copy.copy}</span></button>
+      <button class="incodex-capture-button incodex-capture-button-secondary" data-action="save" type="button">${captureIcon("save")}<span>${copy.save}</span></button>
+      <button class="incodex-capture-button incodex-capture-button-primary" data-action="copy" type="button">${captureIcon("copy")}<span>${copy.copy}</span></button>
     </footer>
   `;
 }
 function iconButton(action, icon, label, disabled = false, pressed, redactionStyle, title = label) {
   const pressedAttribute = pressed === undefined ? "" : ` aria-pressed="${pressed}"`;
   const styleAttribute = redactionStyle ? ` data-redaction-style="${redactionStyle}"` : "";
-  return `<button class="incodex-capture-icon-button" data-action="${action}"${styleAttribute} type="button" aria-label="${label}" title="${title}"${pressedAttribute} ${disabled ? "disabled" : ""}>${captureIcon(icon, 12)}</button>`;
+  return `<button class="incodex-capture-icon-button" data-action="${action}"${styleAttribute} type="button" aria-label="${label}" title="${title}"${pressedAttribute} ${disabled ? "disabled" : ""}>${captureIcon(icon)}</button>`;
 }
 function checked(value) {
   return value ? "checked" : "";
