@@ -217,12 +217,11 @@ fn installer_hashes_without_get_file_hash() {
 }
 
 #[test]
-fn installer_tightens_an_existing_generation_lock_acl() {
+fn installer_tightens_an_existing_stable_lock_acl() {
     let root = scratch("existing-lock-acl");
     let user_root = root.join("user-root");
-    let package_root = user_root.join("packages/standalone");
-    fs::create_dir_all(&package_root).expect("create legacy package root");
-    let lock = package_root.join("install.lock");
+    fs::create_dir_all(&user_root).expect("create user root");
+    let lock = user_root.join("standalone-install.lock");
     fs::write(&lock, b"").expect("create legacy generation lock");
     let source = Path::new(env!("CARGO_BIN_EXE_incodex"));
     let release = release_fixture(&root, &sha256(source));

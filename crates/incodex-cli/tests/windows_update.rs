@@ -256,13 +256,26 @@ fn post_install_verification_uses_the_installer_generation_lock() {
     ));
     let root = incodex_core::windows_session::ensure_private_windows_dir(&root)
         .expect("create private lock fixture");
+    let packages = incodex_core::windows_session::ensure_private_windows_dir(
+        &root.join("packages"),
+    )
+    .expect("create package parent");
+    let package_root = incodex_core::windows_session::ensure_private_windows_dir(
+        &packages.join("standalone"),
+    )
+    .expect("create package root");
 
-    let first = acquire_windows_install_lock(&root).expect("acquire first lock");
-    assert!(acquire_windows_install_lock(&root)
+    let first = acquire_windows_install_lock(&package_root).expect("acquire first lock");
+    assert!(acquire_windows_install_lock(&package_root)
         .expect_err("second update must not cross the active generation")
         .contains("another Incodex install or update"));
+    assert!(
+        root.join("standalone-install.lock").is_file(),
+        "installer lock must outlive deletion of packages/standalone"
+    );
+    assert!(!package_root.join("install.lock").exists());
     drop(first);
-    acquire_windows_install_lock(&root).expect("lock is reusable after completion");
+    acquire_windows_install_lock(&package_root).expect("lock is reusable after completion");
 
     fs::remove_dir_all(root).expect("remove lock fixture");
 }
