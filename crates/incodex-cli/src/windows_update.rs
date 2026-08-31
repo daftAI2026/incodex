@@ -257,6 +257,7 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
     let user_root = validate_managed_install_identity(&package_root, &running_exe)?;
     let profile = crate::windows_profile::windows_user_profile()?;
     validate_windows_user_root(&user_root, &profile)?;
+    let _update = acquire_windows_update_lock(&package_root)?;
     if read_windows_runtime_pending(&user_root)?.is_some() {
         let _lock = acquire_windows_install_lock(&package_root)?;
         repair_pending_runtime(&user_root, &package_root)?;
@@ -297,16 +298,39 @@ pub struct WindowsInstallLock {
 }
 
 pub fn acquire_windows_install_lock(package_root: &Path) -> Result<WindowsInstallLock, String> {
+    acquire_windows_channel_lock(
+        package_root,
+        "install.lock",
+        "Windows installation lock",
+        "another Incodex install or update is already running",
+    )
+}
+
+pub fn acquire_windows_update_lock(package_root: &Path) -> Result<WindowsInstallLock, String> {
+    acquire_windows_channel_lock(
+        package_root,
+        "update.lock",
+        "Windows update lock",
+        "another Incodex update is already running",
+    )
+}
+
+fn acquire_windows_channel_lock(
+    package_root: &Path,
+    name: &str,
+    description: &str,
+    busy: &str,
+) -> Result<WindowsInstallLock, String> {
     ensure_regular_non_reparse(package_root, "managed Windows package root")?;
     incodex_core::windows_session::verify_private_acl(package_root)?;
-    let lock_path = package_root.join("install.lock");
+    let lock_path = package_root.join(name);
     match fs::symlink_metadata(&lock_path) {
         Ok(_) => {
-            ensure_regular_non_reparse(&lock_path, "Windows installation lock")?;
+            ensure_regular_non_reparse(&lock_path, description)?;
             incodex_core::windows_session::verify_private_acl(&lock_path)?;
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(format!("cannot inspect Windows installation lock: {error}")),
+        Err(error) => return Err(format!("cannot inspect {description}: {error}")),
     }
     let file = OpenOptions::new()
         .read(true)
@@ -315,7 +339,7 @@ pub fn acquire_windows_install_lock(package_root: &Path) -> Result<WindowsInstal
         .truncate(false)
         .share_mode(0)
         .open(&lock_path)
-        .map_err(|_| "another Incodex install or update is already running".to_string())?;
+        .map_err(|_| busy.to_string())?;
     incodex_core::windows_session::apply_private_windows_acl(&lock_path)?;
     incodex_core::windows_session::verify_private_acl(&lock_path)?;
     Ok(WindowsInstallLock { _file: file })
