@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 
 use crate::diagnosis_presentation::STATUS_PROGRESS_MESSAGE;
 use crate::parse::ParsedCli;
@@ -144,10 +144,25 @@ pub(crate) struct WindowsPackageStatus {
     pub(crate) available: bool,
     pub(crate) package_full_name: Option<String>,
     pub(crate) app_user_model_id: Option<String>,
+    #[serde(serialize_with = "serialize_optional_display_path")]
     pub(crate) install_location: Option<PathBuf>,
+    #[serde(serialize_with = "serialize_optional_display_path")]
     pub(crate) executable: Option<PathBuf>,
     pub(crate) architecture: Option<String>,
     pub(crate) reason: Option<String>,
+}
+
+fn serialize_optional_display_path<S>(
+    path: &Option<PathBuf>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match path.as_deref() {
+        Some(path) => serializer.serialize_some(&windows_path_for_display(path)),
+        None => serializer.serialize_none(),
+    }
 }
 
 impl WindowsPackageStatus {
