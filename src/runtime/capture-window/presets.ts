@@ -24,7 +24,10 @@ export function capturePresetColors(
   return capturePresets.find((preset) => preset.id === presetId)?.colors ?? capturePresets[9].colors;
 }
 
+export function capturePresetAssetUrl(presetId: CapturePresetId): string {
+  return `/capture-backgrounds/${presetId}.jpg`;
+}
+
 export function capturePresetSwatch(preset: CapturePreset): string {
-  const [start, middle, end] = preset.colors;
-  return `linear-gradient(135deg,${start},${middle} 52%,${end})`;
+  return `url('${capturePresetAssetUrl(preset.id)}') center / cover no-repeat`;
 }

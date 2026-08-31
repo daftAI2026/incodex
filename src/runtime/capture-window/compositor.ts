@@ -129,7 +129,7 @@ function drawBackground(
 ): void {
   context.clearRect(0, 0, size.width, size.height);
   if (background.kind === "transparent") return;
-  if (background.kind === "wallpaper" && backgroundImage) {
+  if ((background.kind === "preset" || background.kind === "wallpaper") && backgroundImage) {
     drawCoverImage(context, backgroundImage, size);
     return;
   }

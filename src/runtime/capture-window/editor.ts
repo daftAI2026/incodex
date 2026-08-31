@@ -1,5 +1,6 @@
 import { captureWindowCopy } from "./copy.ts";
 import { capturePhysicalPadding, renderCaptureToCanvas } from "./compositor.ts";
+import { createCaptureBackgroundImageStore } from "./backgrounds.ts";
 import {
   syncCaptureColorPopover,
   type CaptureColorTarget,
@@ -69,8 +70,7 @@ export function mountCaptureWindowEditor(
       scaleFactor: window.devicePixelRatio || 1,
       width: source.width,
     });
-  let wallpaperImage: HTMLImageElement | null = null;
-  let wallpaperLoad: Promise<HTMLImageElement> | null = null;
+  const backgroundImages = createCaptureBackgroundImageStore();
   let lastWallpaperDataUrl = state.background.kind === "wallpaper" ? state.background.dataUrl : null;
   let lastBackgroundColor = state.background.kind === "color" ? state.background.color : "#2B3440";
   let panX = 0;
@@ -112,6 +112,7 @@ export function mountCaptureWindowEditor(
   function dispatch(command: CaptureWindowCommand): void {
     state = applyCaptureCommand(state, command);
     refreshEditor(command);
+    if (command.kind === "set-background") hydrateBackground(command.background);
   }
 
   function preview(command: CaptureWindowCommand): void {
@@ -243,7 +244,7 @@ export function mountCaptureWindowEditor(
 
   function renderCanvas(): HTMLCanvasElement {
     const rendered = renderCaptureToCanvas(source, state, {
-      backgroundImage: wallpaperImage,
+      backgroundImage: backgroundImages.read(state.background),
       isMacOS,
     });
     rendered.className = "incodex-capture-canvas";
@@ -306,7 +307,8 @@ export function mountCaptureWindowEditor(
     }
     try {
       const dataUrl = await readCaptureWallpaperFile(file);
-      wallpaperImage = await loadCaptureImage(dataUrl);
+      const wallpaperImage = await loadCaptureImage(dataUrl);
+      backgroundImages.remember(dataUrl, wallpaperImage);
       lastWallpaperDataUrl = dataUrl;
       dispatch({ kind: "set-background", background: { dataUrl, kind: "wallpaper" } });
     } catch {
@@ -318,7 +320,7 @@ export function mountCaptureWindowEditor(
     setPhase("composing");
     try {
       const canvas = renderCaptureToCanvas(source, state, {
-        backgroundImage: await resolveWallpaperImage(),
+        backgroundImage: await backgroundImages.resolve(state.background),
         isMacOS,
       });
       const blob = await canvasBlob(canvas);
@@ -336,7 +338,7 @@ export function mountCaptureWindowEditor(
     setPhase("composing");
     try {
       const canvas = renderCaptureToCanvas(source, state, {
-        backgroundImage: await resolveWallpaperImage(),
+        backgroundImage: await backgroundImages.resolve(state.background),
         isMacOS,
       });
       const blob = await canvasBlob(canvas);
@@ -358,27 +360,16 @@ export function mountCaptureWindowEditor(
     }
   }
 
-  async function resolveWallpaperImage(): Promise<HTMLImageElement | null> {
-    if (state.background.kind !== "wallpaper") return null;
-    if (wallpaperImage) return wallpaperImage;
-    if (!wallpaperLoad) wallpaperLoad = loadCaptureImage(state.background.dataUrl);
-    wallpaperImage = await wallpaperLoad;
-    wallpaperLoad = null;
-    return wallpaperImage;
+  function hydrateBackground(background: CaptureWindowState["background"]): void {
+    backgroundImages.hydrate(background, () => {
+      if (!destroyed) renderCanvas();
+    }, () => {
+      if (background.kind === "wallpaper") notify(copy.wallpaperUnreadable);
+    });
   }
 
   render();
-  if (lastWallpaperDataUrl) {
-    wallpaperLoad = loadCaptureImage(lastWallpaperDataUrl);
-    void wallpaperLoad.then((image) => {
-      wallpaperImage = image;
-      wallpaperLoad = null;
-      if (!destroyed) renderCanvas();
-    }).catch(() => {
-      wallpaperLoad = null;
-      notify(copy.wallpaperUnreadable);
-    });
-  }
+  hydrateBackground(state.background);
 
   return {
     destroy: close,

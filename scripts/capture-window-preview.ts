@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
 const sourceDir = join(root, "src/runtime/capture-window");
+const backgroundAssetDirectory = join(root, "assets/capture-backgrounds");
 const build = await Bun.build({
   entrypoints: [join(sourceDir, "preview.ts")],
   minify: false,
@@ -33,6 +34,13 @@ const server = Bun.serve({
     if (path === "/color-popover.css") {
       return new Response(colorPopoverCss, {
         headers: { "content-type": "text/css; charset=utf-8" },
+      });
+    }
+    if (path.startsWith("/capture-backgrounds/")) {
+      const assetName = path.slice("/capture-backgrounds/".length);
+      if (!/^[a-z-]+\.jpg$/.test(assetName)) return new Response("Not found", { status: 404 });
+      return new Response(readFileSync(join(backgroundAssetDirectory, assetName)), {
+        headers: { "content-type": "image/jpeg" },
       });
     }
     return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
