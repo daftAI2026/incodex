@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   CAPTURE_CANDIDATE_SELECTOR,
   collectCaptureCandidates,
+  markCodexPrivacyPlaceholders,
 } from "./privacy.ts";
 
 type FakeRect = {
@@ -142,5 +143,113 @@ describe("capture redaction candidates", () => {
       x: 0,
       y: 0,
     });
+  });
+});
+
+class FakePrivacyElement {
+  readonly attributes = new Map<string, string>();
+  readonly children: FakePrivacyElement[];
+  readonly tagName: string;
+  readonly textContent: string;
+
+  constructor(options: {
+    attributes?: Record<string, string>;
+    children?: FakePrivacyElement[];
+    tagName?: string;
+    text?: string;
+  } = {}) {
+    this.children = options.children ?? [];
+    this.tagName = (options.tagName ?? "DIV").toUpperCase();
+    this.textContent = options.text ?? this.children.map((child) => child.textContent).join("");
+    for (const [name, value] of Object.entries(options.attributes ?? {})) {
+      this.attributes.set(name, value);
+    }
+  }
+
+  getAttribute(name: string): string | null {
+    return this.attributes.get(name) ?? null;
+  }
+
+  hasAttribute(name: string): boolean {
+    return this.attributes.has(name);
+  }
+
+  querySelectorAll(): FakePrivacyElement[] {
+    return this.children.flatMap((child) => [child, ...child.querySelectorAll()]);
+  }
+
+  removeAttribute(name: string): void {
+    this.attributes.delete(name);
+  }
+
+  setAttribute(name: string, value: string): void {
+    this.attributes.set(name, value);
+  }
+}
+
+function privacyDocument(options: {
+  profiles?: FakePrivacyElement[];
+  projects?: FakePrivacyElement[];
+  threads?: FakePrivacyElement[];
+}): Document {
+  return {
+    querySelectorAll(selector: string): FakePrivacyElement[] {
+      if (selector.includes("sidebar-thread-row")) return options.threads ?? [];
+      if (selector.includes("sidebar-project-row")) return options.projects ?? [];
+      if (selector.includes("button.sidebar-item")) return options.profiles ?? [];
+      return [];
+    },
+  } as unknown as Document;
+}
+
+describe("Codex privacy placeholders", () => {
+  test("marks thread, project, profile name, and avatar while leaving navigation copy intact", () => {
+    const threadTitle = new FakePrivacyElement({ tagName: "SPAN", text: "Private thread" });
+    const thread = new FakePrivacyElement({
+      attributes: { "data-app-action-sidebar-thread-title": "Private thread" },
+      children: [threadTitle],
+    });
+    const projectLabel = new FakePrivacyElement({ tagName: "SPAN", text: "secret-project" });
+    const project = new FakePrivacyElement({
+      attributes: { "data-app-action-sidebar-project-label": "secret-project" },
+      children: [projectLabel],
+    });
+    const avatar = new FakePrivacyElement({ tagName: "IMG" });
+    const profileName = new FakePrivacyElement({ tagName: "SPAN", text: "Kid" });
+    const profile = new FakePrivacyElement({ children: [avatar, profileName], tagName: "BUTTON" });
+    const navigation = new FakePrivacyElement({ tagName: "SPAN", text: "New chat" });
+
+    const restore = markCodexPrivacyPlaceholders(
+      privacyDocument({ profiles: [profile], projects: [project], threads: [thread] }),
+    );
+
+    expect(threadTitle.getAttribute("data-incodex-capture-redact")).toBe("text");
+    expect(projectLabel.getAttribute("data-incodex-capture-redact")).toBe("text");
+    expect(profileName.getAttribute("data-incodex-capture-redact")).toBe("text");
+    expect(profile.getAttribute("data-incodex-capture-redact-profile")).toBe("");
+    expect(navigation.hasAttribute("data-incodex-capture-redact")).toBe(false);
+
+    restore();
+    expect(threadTitle.hasAttribute("data-incodex-capture-redact")).toBe(false);
+    expect(projectLabel.hasAttribute("data-incodex-capture-redact")).toBe(false);
+    expect(profileName.hasAttribute("data-incodex-capture-redact")).toBe(false);
+    expect(profile.hasAttribute("data-incodex-capture-redact-profile")).toBe(false);
+  });
+
+  test("restores pre-existing marker values instead of deleting host state", () => {
+    const title = new FakePrivacyElement({
+      attributes: { "data-incodex-capture-redact": "existing" },
+      tagName: "SPAN",
+      text: "Private thread",
+    });
+    const thread = new FakePrivacyElement({
+      attributes: { "data-app-action-sidebar-thread-title": "Private thread" },
+      children: [title],
+    });
+
+    const restore = markCodexPrivacyPlaceholders(privacyDocument({ threads: [thread] }));
+    expect(title.getAttribute("data-incodex-capture-redact")).toBe("text");
+    restore();
+    expect(title.getAttribute("data-incodex-capture-redact")).toBe("existing");
   });
 });
