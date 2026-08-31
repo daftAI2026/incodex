@@ -20,7 +20,7 @@ const WINDOWS_LATEST_RELEASE_URL: &str =
     "https://api.github.com/repos/daftAI2026/incodex/releases/latest";
 const WINDOWS_MAIN_COMMIT_URL: &str =
     "https://api.github.com/repos/daftAI2026/incodex/commits/main";
-const WINDOWS_MAIN_INSTALLER_URL: &str =
+pub(crate) const WINDOWS_MAIN_INSTALLER_URL: &str =
     "https://raw.githubusercontent.com/daftAI2026/incodex/main/install.ps1";
 const MANAGED_BY_STANDALONE_ENV: &str = "INCODEX_MANAGED_BY_STANDALONE";
 const MANAGED_PACKAGE_ROOT_ENV: &str = "INCODEX_MANAGED_PACKAGE_ROOT";
@@ -288,33 +288,66 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
 
 #[derive(Debug)]
 pub struct WindowsInstallLock {
-    _file: fs::File,
+    _files: Vec<fs::File>,
 }
 
 pub fn acquire_windows_install_lock(package_root: &Path) -> Result<WindowsInstallLock, String> {
-    acquire_windows_channel_lock(
-        package_root,
-        "install.lock",
+    let lock = windows_install_lock_path(package_root)?;
+    let stable = acquire_windows_channel_lock_file(
+        lock.parent()
+            .ok_or_else(|| "Windows installation lock has no parent".to_string())?,
+        lock.file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "Windows installation lock name is invalid".to_string())?,
         "Windows installation lock",
         "another Incodex install or update is already running",
-    )
+    )?;
+    let legacy = acquire_windows_channel_lock_file(
+        package_root,
+        "install.lock",
+        "legacy Windows installation lock",
+        "another Incodex install or update is already running",
+    )?;
+    Ok(WindowsInstallLock {
+        _files: vec![stable, legacy],
+    })
+}
+
+pub fn windows_install_lock_path(package_root: &Path) -> Result<PathBuf, String> {
+    let packages = package_root
+        .parent()
+        .filter(|path| path.file_name().is_some_and(|name| name == "packages"))
+        .ok_or_else(|| "managed Windows package root has an invalid layout".to_string())?;
+    if package_root
+        .file_name()
+        .is_none_or(|name| name != "standalone")
+    {
+        return Err("managed Windows package root has an invalid layout".to_string());
+    }
+    let user_root = packages
+        .parent()
+        .ok_or_else(|| "managed Windows package root has no user root".to_string())?;
+    ensure_regular_non_reparse(user_root, "managed Windows user root")?;
+    incodex_core::windows_session::verify_private_acl(user_root)?;
+    Ok(user_root.join("standalone-install.lock"))
 }
 
 pub fn acquire_windows_update_lock(package_root: &Path) -> Result<WindowsInstallLock, String> {
-    acquire_windows_channel_lock(
+    let file = acquire_windows_channel_lock_file(
         package_root,
         "update.lock",
         "Windows update lock",
         "another Incodex update is already running",
-    )
+    )?;
+    Ok(WindowsInstallLock { _files: vec![file] })
 }
 
-fn acquire_windows_channel_lock(
+fn acquire_windows_channel_lock_file(
     package_root: &Path,
     name: &str,
     description: &str,
     busy: &str,
-) -> Result<WindowsInstallLock, String> {
+) -> Result<fs::File, String> {
     ensure_regular_non_reparse(package_root, "managed Windows package root")?;
     incodex_core::windows_session::verify_private_acl(package_root)?;
     let lock_path = package_root.join(name);
@@ -336,7 +369,7 @@ fn acquire_windows_channel_lock(
         .map_err(|_| busy.to_string())?;
     incodex_core::windows_session::apply_private_windows_acl(&lock_path)?;
     incodex_core::windows_session::verify_private_acl(&lock_path)?;
-    Ok(WindowsInstallLock { _file: file })
+    Ok(file)
 }
 
 pub fn write_windows_runtime_pending(user_root: &Path, version: &str) -> Result<(), String> {
@@ -482,7 +515,7 @@ pub fn validate_windows_user_root(user_root: &Path, profile: &Path) -> Result<()
     }
 }
 
-fn managed_package_root() -> Result<PathBuf, String> {
+pub(crate) fn managed_package_root() -> Result<PathBuf, String> {
     let value = std::env::var_os(MANAGED_PACKAGE_ROOT_ENV).ok_or_else(|| {
         "managed Windows installation did not provide its package root".to_string()
     })?;

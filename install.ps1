@@ -255,7 +255,8 @@ function Add-UserPath([string]$BinDirectory) {
 Confirm-Architecture
 $WorkRoot = Join-Path ([IO.Path]::GetTempPath()) ('incodex-setup-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $WorkRoot | Out-Null
-$InstallLock = $null
+$StableInstallLock = $null
+$LegacyInstallLock = $null
 
 try {
     $SumsPath = Join-Path $WorkRoot 'SHA256SUMS'
@@ -282,16 +283,12 @@ try {
     $InstalledCli = Join-Path $ReleaseRoot 'incodex.exe'
     $BinRoot = Join-Path $UserRoot 'bin'
     Ensure-PrivateDirectory $UserRoot | Out-Null
-    Ensure-PrivateDirectory (Join-Path $UserRoot 'packages') | Out-Null
-    Ensure-PrivateDirectory $PackageRoot | Out-Null
-    Ensure-PrivateDirectory $ReleasesRoot | Out-Null
-    Ensure-PrivateDirectory $BinRoot | Out-Null
-    $LockPath = Join-Path $PackageRoot 'install.lock'
+    $LockPath = Join-Path $UserRoot 'standalone-install.lock'
     if (Test-Path -LiteralPath $LockPath) {
         Assert-RegularFileNoReparse $LockPath 'installation lock'
     }
     try {
-        $InstallLock = New-Object IO.FileStream(
+        $StableInstallLock = New-Object IO.FileStream(
             $LockPath,
             [IO.FileMode]::OpenOrCreate,
             [IO.FileAccess]::ReadWrite,
@@ -301,6 +298,26 @@ try {
         Stop-Installer 'another Incodex install or update is already running'
     }
     Set-PrivateFileAcl $LockPath
+
+    Ensure-PrivateDirectory (Join-Path $UserRoot 'packages') | Out-Null
+    Ensure-PrivateDirectory $PackageRoot | Out-Null
+    $LegacyLockPath = Join-Path $PackageRoot 'install.lock'
+    if (Test-Path -LiteralPath $LegacyLockPath) {
+        Assert-RegularFileNoReparse $LegacyLockPath 'legacy installation lock'
+    }
+    try {
+        $LegacyInstallLock = New-Object IO.FileStream(
+            $LegacyLockPath,
+            [IO.FileMode]::OpenOrCreate,
+            [IO.FileAccess]::ReadWrite,
+            [IO.FileShare]::None
+        )
+    } catch {
+        Stop-Installer 'another Incodex install or update is already running'
+    }
+    Set-PrivateFileAcl $LegacyLockPath
+    Ensure-PrivateDirectory $ReleasesRoot | Out-Null
+    Ensure-PrivateDirectory $BinRoot | Out-Null
 
     if (Test-Path -LiteralPath $ReleaseRoot) {
         Assert-NoReparseAncestry $ReleaseRoot
@@ -369,8 +386,11 @@ exit /b %ERRORLEVEL%
         [Console]::WriteLine('Run: incodex --help')
     }
 } finally {
-    if ($null -ne $InstallLock) {
-        $InstallLock.Dispose()
+    if ($null -ne $LegacyInstallLock) {
+        $LegacyInstallLock.Dispose()
+    }
+    if ($null -ne $StableInstallLock) {
+        $StableInstallLock.Dispose()
     }
     Remove-Item -LiteralPath $WorkRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

@@ -84,6 +84,8 @@ mod windows_runtime_lifecycle;
 #[cfg(target_os = "windows")]
 pub mod windows_runtime_open;
 #[cfg(target_os = "windows")]
+pub mod windows_self_uninstall;
+#[cfg(target_os = "windows")]
 pub mod windows_status;
 #[cfg(target_os = "windows")]
 pub(crate) mod windows_system;
@@ -238,6 +240,10 @@ where
         }
         if parsed.command == CliCommand::Update {
             return crate::windows_update::run_update(&parsed).map_err(CliFailure::from);
+        }
+        if parsed.command == CliCommand::SelfUninstall {
+            return crate::windows_self_uninstall::run_self_uninstall(&parsed)
+                .map_err(CliFailure::from);
         }
         Err(CliFailure::new(format!(
             "{} is not supported on Windows yet",

@@ -71,7 +71,7 @@ cargo install --locked --path crates/incodex-cli
 
 ## Security & Safety Design
 
-主路径 `incodex open` 不会修改 Codex。macOS 的可选 `incodex install` 会修改并重新签名本机应用包；Windows 不修改也不复制 Microsoft Store 包，而是注册一套 Incodex 自己拥有的当前用户 Runtime 集成。`install` 和 `uninstall` 在破坏性操作前都会打印计划：TTY 问一次，非 TTY 要 `--yes`，`--dry-run` 只打印。macOS 的 `self-uninstall` 遵循同一规则。在 macOS 上，`recover` 是显式事务恢复例外：必须带 `--transaction <id>`，不接受 `--dry-run`，并且只续跑这一本已存在的 journal。
+主路径 `incodex open` 不会修改 Codex。macOS 的可选 `incodex install` 会修改并重新签名本机应用包；Windows 不修改也不复制 Microsoft Store 包，而是注册一套 Incodex 自己拥有的当前用户 Runtime 集成。`install`、`uninstall` 和受支持安装渠道的 `self-uninstall` 在破坏性操作前都会打印计划：TTY 问一次，非 TTY 要 `--yes`，`--dry-run` 只打印。Windows 默认自卸载只移除托管 CLI 及其精确的用户 PATH 项；加 `--restore-app` 才会先移除 Runtime 集成，Runtime 文件和会话状态仍保留。在 macOS 上，`recover` 是显式事务恢复例外：必须带 `--transaction <id>`，不接受 `--dry-run`，并且只续跑这一本已存在的 journal。
 
 - 官方插件加不了这个按钮；macOS 修改应用包，Windows 则保持 Store 包不变，走系统集成边界
 - 默认安装到官方应用后，改包没法继续保留有效的 OpenAI 签名。下次启动时，macOS 可能要求这个已修改的应用访问钥匙串中的 **Codex Storage Key**。只有对话框里的应用和钥匙串项目都符合预期时，才输入 **Mac 登录密码**（不是 ChatGPT 账号密码）并选择 **始终允许**。**允许** / **允许一次**只授权本次访问，之后还可能再次询问；信息不符合预期时选择 **拒绝**。CLI 不会对 `--clone` 或 `--app` 目标给出永久授权建议
@@ -281,7 +281,7 @@ incodex open --mask         # 临时侧栏名称和离线头像
 incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
 incodex recover --transaction <id>
 inc update                  # 按安装来源更新 Incodex
-incodex self-uninstall      # 卸掉 CLI；还原 Codex 要加 --restore-app
+incodex self-uninstall      # 卸掉 CLI；移除应用集成要加 --restore-app
 ```
 
 **安全预览**

@@ -42,7 +42,7 @@ Commands:
   runtime      Publish the Runtime embedded in this CLI
   recover      Not available on Windows yet
   update       Update Incodex through its Windows installer
-  self-uninstall  Not available on Windows yet
+  self-uninstall  Remove this CLI (not Runtime, unless --restore-app)
 
 Run incodex <command> --help for details.
 ";
@@ -126,8 +126,21 @@ Update a PowerShell-installer-managed Incodex CLI, verify the installed
 generation, and publish the Runtime embedded in that new CLI.
 "
         }
-        CliCommand::Recover | CliCommand::SelfUninstall => {
-            "This command is not available on Windows yet.\n"
+        CliCommand::Recover => "This command is not available on Windows yet.\n",
+        CliCommand::SelfUninstall => {
+            "\
+Usage:
+  incodex self-uninstall [--restore-app] [--yes] [--dry-run]
+
+Remove the PowerShell-installer-managed Windows CLI and its PATH entry.
+Runtime, sessions, and the official Store package remain untouched unless
+--restore-app is supplied; that flag first removes the Runtime integration.
+
+Flags:
+  --restore-app     Remove the Windows Runtime integration before the CLI
+  --yes             Skip the confirmation prompt (required when stdin is not a terminal)
+  --dry-run, -n     Print the plan and exit
+"
         }
         CliCommand::Menu | CliCommand::Help | CliCommand::Version => WINDOWS_ROOT_HELP,
     }
