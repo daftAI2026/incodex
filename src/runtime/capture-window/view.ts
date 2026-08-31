@@ -3,7 +3,6 @@ import { captureIcon } from "./icons.ts";
 import {
   CAPTURE_MAX_ZOOM,
   CAPTURE_MIN_ZOOM,
-  type CaptureBackground,
   type CaptureWindowState,
 } from "./model.ts";
 import { capturePresets, capturePresetSwatch } from "./presets.ts";
@@ -11,6 +10,7 @@ import { capturePresets, capturePresetSwatch } from "./presets.ts";
 export function captureWindowTemplate(
   state: CaptureWindowState,
   copy: CaptureWindowCopy,
+  lastBackgroundColor = "#2B3440",
 ): string {
   return `
     <div class="incodex-capture-backdrop" aria-hidden="true"></div>
@@ -31,7 +31,7 @@ export function captureWindowTemplate(
             </div>
           </div>
         </section>
-        ${inspectorTemplate(state, copy)}
+        ${inspectorTemplate(state, copy, lastBackgroundColor)}
       </div>
       ${footerTemplate(copy)}
     </section>
@@ -84,12 +84,16 @@ function toolbarDivider(): string {
   return '<span class="incodex-capture-toolbar-divider" aria-hidden="true"></span>';
 }
 
-function inspectorTemplate(state: CaptureWindowState, copy: CaptureWindowCopy): string {
+function inspectorTemplate(
+  state: CaptureWindowState,
+  copy: CaptureWindowCopy,
+  lastBackgroundColor: string,
+): string {
   return `
     <aside class="incodex-capture-inspector">
       <section class="incodex-capture-section">
         <h2 class="incodex-capture-section-title">${copy.background}</h2>
-        ${backgroundGridTemplate(state, copy)}
+        ${backgroundGridTemplate(state, copy, lastBackgroundColor)}
       </section>
       <section class="incodex-capture-section">
         <div class="incodex-capture-row incodex-capture-padding-heading">
@@ -115,16 +119,16 @@ function inspectorTemplate(state: CaptureWindowState, copy: CaptureWindowCopy): 
 
 function solidColorTemplate(state: CaptureWindowState, copy: CaptureWindowCopy): string {
   return `
-    <label class="incodex-capture-solid-color" data-solid-color-row title="${copy.maskColor}" ${state.redactionStyle === "solid" ? "" : "hidden"}>
+    <button class="incodex-capture-solid-color" data-color-trigger="solid" type="button" aria-label="${copy.maskColor}" title="${copy.maskColor}" aria-haspopup="dialog" aria-expanded="false" data-state="closed" ${state.redactionStyle === "solid" ? "" : "hidden"}>
       <span style="--capture-solid-color:${state.solidColor}"></span>
-      <input class="incodex-capture-color-input" data-input="solid-color" type="color" value="${state.solidColor}">
-    </label>
+    </button>
   `;
 }
 
 function backgroundGridTemplate(
   state: CaptureWindowState,
   copy: CaptureWindowCopy,
+  lastBackgroundColor: string,
 ): string {
   const presets = capturePresets.map((preset) => {
     const { id } = preset;
@@ -134,7 +138,8 @@ function backgroundGridTemplate(
   const transparent = state.background.kind === "transparent";
   const custom = state.background.kind === "color";
   const wallpaper = state.background.kind === "wallpaper";
-  return `<div class="incodex-capture-background-grid">${presets}<label class="incodex-capture-background-option incodex-capture-color-label" data-background-custom data-selected="${custom}" aria-label="${copy.custom}" title="${copy.custom}" style="--capture-swatch:${backgroundColor(state.background)}">${captureIcon("pipette", 11)}<input class="incodex-capture-color-input" data-input="color" type="color" value="${backgroundColor(state.background)}"></label><button class="incodex-capture-background-option incodex-capture-checker" data-background="transparent" type="button" aria-label="${copy.transparent}" title="${copy.transparent}" aria-pressed="${transparent}"></button><label class="incodex-capture-background-option incodex-capture-wallpaper-label" data-background-wallpaper data-selected="${wallpaper}" aria-label="${copy.wallpaper}" title="${copy.wallpaper}">${captureIcon("image-plus", 13)}<input class="incodex-capture-wallpaper-input" data-input="wallpaper" type="file" accept="image/png,image/jpeg,image/webp"></label></div>`;
+  const customIcon = custom ? "" : captureIcon("pipette", 11);
+  return `<div class="incodex-capture-background-grid">${presets}<button class="incodex-capture-background-option incodex-capture-color-label" data-background-custom data-color-trigger="background" data-selected="${custom}" type="button" aria-label="${copy.custom}" title="${copy.custom}" aria-haspopup="dialog" aria-expanded="false" data-state="closed" style="--capture-swatch:${lastBackgroundColor}">${customIcon}</button><button class="incodex-capture-background-option incodex-capture-checker" data-background="transparent" type="button" aria-label="${copy.transparent}" title="${copy.transparent}" aria-pressed="${transparent}"></button><label class="incodex-capture-background-option incodex-capture-wallpaper-label" data-background-wallpaper data-selected="${wallpaper}" aria-label="${copy.wallpaper}" title="${copy.wallpaper}">${captureIcon("image-plus", 13)}<input class="incodex-capture-wallpaper-input" data-input="wallpaper" type="file" accept="image/png,image/jpeg,image/webp"></label></div>`;
 }
 
 function footerTemplate(copy: CaptureWindowCopy): string {
@@ -164,8 +169,4 @@ function iconButton(
 
 function checked(value: boolean): string {
   return value ? "checked" : "";
-}
-
-function backgroundColor(background: CaptureBackground): string {
-  return background.kind === "color" ? background.color : "#2B3440";
 }

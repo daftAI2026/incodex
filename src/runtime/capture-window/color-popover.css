@@ -1,0 +1,103 @@
+.incodex-capture-color-popover {
+  background: var(--incodex-capture-surface);
+  border: 1px solid var(--incodex-capture-border);
+  border-radius: var(--incodex-capture-radius-md);
+  box-shadow: var(--shadow-md, 0 8px 24px rgb(0 0 0 / 18%));
+  box-sizing: border-box;
+  color: var(--incodex-capture-text);
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--incodex-capture-space) * 3);
+  padding: calc(var(--incodex-capture-space) * 3);
+  position: fixed;
+  width: auto;
+  z-index: 50;
+}
+
+.react-colorful {
+  cursor: default;
+  display: flex;
+  flex-direction: column;
+  height: 200px;
+  position: relative;
+  user-select: none;
+  width: 200px;
+}
+
+.react-colorful__saturation {
+  background-color: var(--capture-picker-hue);
+  background-image: linear-gradient(0deg, #000, transparent), linear-gradient(90deg, #fff, rgb(255 255 255 / 0%));
+  border-bottom: 12px solid #000;
+  border-radius: 8px 8px 0 0;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 5%);
+  flex-grow: 1;
+  position: relative;
+}
+
+.react-colorful__hue {
+  background: linear-gradient(90deg, red 0, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, red);
+  height: 24px;
+  position: relative;
+}
+
+.react-colorful__last-control {
+  border-radius: 0 0 8px 8px;
+}
+
+.react-colorful__interactive {
+  border-radius: inherit;
+  inset: 0;
+  outline: none;
+  position: absolute;
+  touch-action: none;
+}
+
+.react-colorful__pointer {
+  background: #fff;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgb(0 0 0 / 20%);
+  box-sizing: border-box;
+  height: 28px;
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 28px;
+  z-index: 1;
+}
+
+.react-colorful__interactive:focus .react-colorful__pointer {
+  transform: translate(-50%, -50%) scale(1.1);
+}
+
+.react-colorful__pointer-fill {
+  border-radius: inherit;
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+}
+
+.react-colorful__saturation-pointer {
+  z-index: 3;
+}
+
+.react-colorful__hue-pointer {
+  z-index: 2;
+}
+
+.incodex-capture-color-hex {
+  background: var(--incodex-capture-surface);
+  border: 1px solid var(--incodex-capture-border);
+  border-radius: var(--incodex-capture-radius-md);
+  box-sizing: border-box;
+  color: var(--incodex-capture-text);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-sm, 13px);
+  height: calc(var(--incodex-capture-space) * 8);
+  outline: none;
+  padding: calc(var(--incodex-capture-space) * 1) calc(var(--incodex-capture-space) * 3);
+  width: 100%;
+}
+
+.incodex-capture-color-hex:focus-visible {
+  box-shadow: 0 0 0 2px var(--incodex-capture-ring);
+}

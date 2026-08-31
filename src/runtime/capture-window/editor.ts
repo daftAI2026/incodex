@@ -1,5 +1,10 @@
 import { captureWindowCopy } from "./copy.ts";
 import { capturePhysicalPadding, renderCaptureToCanvas } from "./compositor.ts";
+import {
+  syncCaptureColorPopover,
+  type CaptureColorTarget,
+  wireCaptureColorPopovers,
+} from "./color-popover.ts";
 import { anchoredPanForZoom, viewportRectToSource } from "./geometry.ts";
 import {
   applyCaptureCommand,
@@ -63,6 +68,7 @@ export function mountCaptureWindowEditor(
       width: source.width,
     });
   let wallpaperImage: HTMLImageElement | null = null;
+  let lastBackgroundColor = state.background.kind === "color" ? state.background.color : "#2B3440";
   let panX = 0;
   let panY = 0;
   let manualRegionSequence = 0;
@@ -85,6 +91,19 @@ export function mountCaptureWindowEditor(
     window.requestAnimationFrame(() => fitCanvas(root, canvas, frame, state.zoom, panX, panY));
   });
   resizeObserver.observe(root);
+  const unwireColorPopovers = wireCaptureColorPopovers(root, {
+    label: (target) => target === "background" ? copy.custom : copy.maskColor,
+    onChange: changeColor,
+    onOpen: (target) => {
+      if (target === "background") {
+        dispatch({
+          background: { color: lastBackgroundColor, kind: "color" },
+          kind: "set-background",
+        });
+      }
+    },
+    readColor: (target) => target === "background" ? lastBackgroundColor : state.solidColor,
+  });
 
   function dispatch(command: CaptureWindowCommand): void {
     state = applyCaptureCommand(state, command);
@@ -106,6 +125,7 @@ export function mountCaptureWindowEditor(
     if (destroyed) return;
     destroyed = true;
     resizeObserver.disconnect();
+    unwireColorPopovers();
     root.remove();
     if (previousFocus?.isConnected) previousFocus.focus();
     options.onClose?.();
@@ -113,6 +133,15 @@ export function mountCaptureWindowEditor(
 
   function notify(message: string): void {
     options.onNotify?.(message);
+  }
+
+  function changeColor(target: CaptureColorTarget, color: string): void {
+    if (target === "background") {
+      lastBackgroundColor = color;
+      dispatch({ background: { color, kind: "color" }, kind: "set-background" });
+      return;
+    }
+    dispatch({ color, kind: "set-solid-color" });
   }
 
   function setPhase(phase: "composing" | "editing" | "recapturing"): void {
@@ -146,7 +175,7 @@ export function mountCaptureWindowEditor(
     ) {
       refreshToolbar();
     }
-    syncEditorControls(root, state);
+    syncEditorControls(root, state, lastBackgroundColor);
     renderCanvas();
     updateHistoryControls(root, state);
   }
@@ -160,12 +189,11 @@ export function mountCaptureWindowEditor(
     if (!(replacement instanceof HTMLElement)) return;
     toolbar.replaceWith(replacement);
     wireToolbarActions(root, dispatch, dispatchRegion, resetView);
-    wireSolidColorInput(replacement, dispatch, preview);
   }
 
   function render(): void {
     if (destroyed) return;
-    root.innerHTML = captureWindowTemplate(state, copy);
+    root.innerHTML = captureWindowTemplate(state, copy, lastBackgroundColor);
     root.setAttribute("data-tool", state.tool);
     root.querySelector<HTMLElement>(".incodex-capture-backdrop")?.addEventListener("click", close);
     root.querySelector<HTMLElement>("[data-action='close']")?.addEventListener("click", close);
@@ -412,47 +440,17 @@ function wireInputs(
       padding: Number.parseInt((event.currentTarget as HTMLInputElement).value, 10),
     });
   });
-  const color = root.querySelector<HTMLInputElement>("[data-input='color']");
-  color?.addEventListener("input", (event) => {
-    preview({
-      kind: "set-background",
-      background: { color: (event.currentTarget as HTMLInputElement).value, kind: "color" },
-    });
-  });
-  color?.addEventListener("change", (event) => {
-    dispatch({
-      kind: "set-background",
-      background: { color: (event.currentTarget as HTMLInputElement).value, kind: "color" },
-    });
-  });
-  wireSolidColorInput(root, dispatch, preview);
   root.querySelector<HTMLInputElement>("[data-input='wallpaper']")?.addEventListener("change", (event) => {
     const file = (event.currentTarget as HTMLInputElement).files?.[0];
     if (file) void loadWallpaper(file);
   });
 }
 
-function wireSolidColorInput(
-  root: ParentNode,
-  dispatch: (command: CaptureWindowCommand) => void,
-  preview: (command: CaptureWindowCommand) => void,
+function syncEditorControls(
+  root: HTMLElement,
+  state: CaptureWindowState,
+  lastBackgroundColor: string,
 ): void {
-  const solidColor = root.querySelector<HTMLInputElement>("[data-input='solid-color']");
-  solidColor?.addEventListener("input", (event) => {
-    preview({
-      kind: "set-solid-color",
-      color: (event.currentTarget as HTMLInputElement).value,
-    });
-  });
-  solidColor?.addEventListener("change", (event) => {
-    dispatch({
-      kind: "set-solid-color",
-      color: (event.currentTarget as HTMLInputElement).value,
-    });
-  });
-}
-
-function syncEditorControls(root: HTMLElement, state: CaptureWindowState): void {
   const zoom = root.querySelector<HTMLElement>(".incodex-capture-zoom-reset");
   if (zoom) zoom.textContent = `${Math.round(state.zoom * 100)}%`;
   const zoomOut = root.querySelector<HTMLButtonElement>("[data-action='zoom-out']");
@@ -469,14 +467,10 @@ function syncEditorControls(root: HTMLElement, state: CaptureWindowState): void 
   }
 
   const custom = root.querySelector<HTMLElement>("[data-background-custom]");
-  const color = root.querySelector<HTMLInputElement>("[data-input='color']");
   if (custom) {
     custom.dataset.selected = String(state.background.kind === "color");
-    if (state.background.kind === "color") {
-      custom.style.setProperty("--capture-swatch", state.background.color);
-    }
   }
-  if (color && state.background.kind === "color") color.value = state.background.color;
+  syncCaptureColorPopover(root, "background", lastBackgroundColor);
   const wallpaper = root.querySelector<HTMLElement>("[data-background-wallpaper]");
   if (wallpaper) wallpaper.dataset.selected = String(state.background.kind === "wallpaper");
 
@@ -490,10 +484,7 @@ function syncEditorControls(root: HTMLElement, state: CaptureWindowState): void 
   if (shadow) shadow.checked = state.shadow;
   if (privacy) privacy.checked = state.privacyEnabled;
 
-  const solidColor = root.querySelector<HTMLInputElement>("[data-input='solid-color']");
-  const solidSwatch = root.querySelector<HTMLElement>(".incodex-capture-solid-color > span");
-  if (solidColor) solidColor.value = state.solidColor;
-  solidSwatch?.style.setProperty("--capture-solid-color", state.solidColor);
+  syncCaptureColorPopover(root, "solid", state.solidColor);
 }
 
 function wireStage(
