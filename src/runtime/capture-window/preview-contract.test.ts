@@ -58,6 +58,7 @@ describe("capture window preview", () => {
     expect(markup).not.toContain("incodex-capture-footer-note");
     expect(markup).not.toContain('data-action="cancel"');
     expect(markup).toContain('data-action="retake"');
+    expect(markup).toContain("incodex-capture-checker");
 
     const background = markup.indexOf(copy.background);
     const padding = markup.indexOf(copy.padding);
@@ -77,6 +78,10 @@ describe("capture window preview", () => {
     );
     expect(css).toContain("height: calc(var(--incodex-capture-space) * 7)");
     expect(css).toContain("height: 50vh");
+    expect(css).toContain("background-size: 16px 16px");
+    expect(css).toMatch(
+      /\.incodex-capture-background-option\[aria-pressed="true"\][\s\S]*?box-shadow: 0 0 0 2px var\(--incodex-capture-surface\), 0 0 0 4px var\(--incodex-capture-ring\)/,
+    );
   });
 
   test("keeps the dialog and canvas nodes stable while editor controls change", () => {
