@@ -22,6 +22,8 @@ const MANAGED_PACKAGE_ROOT_ENV: &str = "INCODEX_MANAGED_PACKAGE_ROOT";
 const CURRENT_GENERATION_LIMIT: u64 = 64;
 const DOWNLOAD_ATTEMPTS: usize = 3;
 const DOWNLOAD_RETRY_DELAY: Duration = Duration::from_millis(200);
+const RELEASE_METADATA_LIMIT: u64 = 256 * 1024;
+const INSTALLER_SCRIPT_LIMIT: u64 = 1024 * 1024;
 const RUNTIME_PENDING_NAME: &str = "windows_runtime_update_pending.json";
 const RUNTIME_PENDING_LIMIT: u64 = 1024;
 static UPDATE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -421,6 +423,7 @@ fn install_latest_stable_release(package_root: &Path) -> Result<(), String> {
         WINDOWS_LATEST_RELEASE_URL,
         &metadata_path,
         "release metadata",
+        RELEASE_METADATA_LIMIT,
     )?;
     let metadata = fs::read(&metadata_path)
         .map_err(|error| format!("update failed: cannot read release metadata: {error}"))?;
@@ -431,6 +434,7 @@ fn install_latest_stable_release(package_root: &Path) -> Result<(), String> {
         release.installer_url(),
         &tagged_installer,
         "stable installer",
+        INSTALLER_SCRIPT_LIMIT,
     )?;
     let first = run_windows_installer(&tagged_installer, &release);
     if first.is_ok() {
@@ -446,6 +450,7 @@ fn install_latest_stable_release(package_root: &Path) -> Result<(), String> {
         WINDOWS_MAIN_COMMIT_URL,
         &main_metadata_path,
         "main commit metadata",
+        RELEASE_METADATA_LIMIT,
     )?;
     let main_metadata = fs::read(&main_metadata_path)
         .map_err(|error| format!("update failed: cannot read main commit metadata: {error}"))?;
@@ -455,6 +460,7 @@ fn install_latest_stable_release(package_root: &Path) -> Result<(), String> {
         snapshot.installer_url(),
         &compatibility_installer,
         "compatibility installer",
+        INSTALLER_SCRIPT_LIMIT,
     )?;
     run_windows_installer(&compatibility_installer, &release)
 }
@@ -499,7 +505,12 @@ fn ensure_regular_non_reparse(path: &Path, label: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn download_with_powershell(url: &str, destination: &Path, label: &str) -> Result<(), String> {
+fn download_with_powershell(
+    url: &str,
+    destination: &Path,
+    label: &str,
+    limit: u64,
+) -> Result<(), String> {
     let powershell = system_binary_path("WindowsPowerShell/v1.0/powershell.exe")?;
     let mut last_error = String::new();
     for attempt in 1..=DOWNLOAD_ATTEMPTS {
@@ -510,7 +521,7 @@ fn download_with_powershell(url: &str, destination: &Path, label: &str) -> Resul
                 "-ExecutionPolicy",
                 "Bypass",
                 "-Command",
-                "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -UseBasicParsing -Uri $env:INCODEX_UPDATE_URI -OutFile $env:INCODEX_UPDATE_OUT",
+                "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 -Uri $env:INCODEX_UPDATE_URI -OutFile $env:INCODEX_UPDATE_OUT",
             ])
             .env("INCODEX_UPDATE_URI", url)
             .env("INCODEX_UPDATE_OUT", destination)
@@ -518,6 +529,10 @@ fn download_with_powershell(url: &str, destination: &Path, label: &str) -> Resul
             .output()
             .map_err(|error| format!("update failed: could not start PowerShell: {error}"))?;
         if output.status.success() {
+            let length = fs::metadata(destination)
+                .map_err(|error| format!("update failed: cannot inspect {label}: {error}"))?
+                .len();
+            validate_windows_download_size(label, length, limit)?;
             return Ok(());
         }
         let detail = String::from_utf8_lossy(&output.stderr);
@@ -534,6 +549,14 @@ fn download_with_powershell(url: &str, destination: &Path, label: &str) -> Resul
     Err(format!(
         "update failed: could not download {label}: {last_error}"
     ))
+}
+
+pub fn validate_windows_download_size(label: &str, length: u64, limit: u64) -> Result<(), String> {
+    if length == 0 || length > limit {
+        Err(format!("update failed: {label} is empty or too large"))
+    } else {
+        Ok(())
+    }
 }
 
 struct UpdateWorkDirectory {
