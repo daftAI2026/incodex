@@ -8,8 +8,8 @@ use incodex_cli::windows_update::{
     acquire_windows_install_lock, clear_windows_runtime_pending, expected_release_sha256,
     parse_windows_main_commit, parse_windows_stable_release, read_windows_runtime_pending,
     validate_managed_install_identity, validate_windows_download_size, validate_windows_user_root,
-    windows_release_asset, windows_release_ordering, write_windows_runtime_pending,
-    WindowsStandaloneLayout,
+    windows_powershell_path, windows_release_asset, windows_release_ordering,
+    write_windows_runtime_pending, WindowsStandaloneLayout,
 };
 
 #[test]
@@ -230,6 +230,21 @@ fn update_metadata_and_scripts_have_explicit_size_bounds() {
     assert!(
         validate_windows_download_size("stable installer", 1024 * 1024 + 1, 1024 * 1024).is_err()
     );
+}
+
+#[test]
+fn powershell_downloads_receive_normal_absolute_paths() {
+    assert_eq!(
+        windows_powershell_path(Path::new(r"\\?\C:\Users\Kid\.incodex\latest.json"))
+            .expect("verbatim disk path"),
+        r"C:\Users\Kid\.incodex\latest.json"
+    );
+    assert_eq!(
+        windows_powershell_path(Path::new(r"\\?\UNC\server\share\latest.json"))
+            .expect("verbatim UNC path"),
+        r"\\server\share\latest.json"
+    );
+    assert!(windows_powershell_path(Path::new("latest.json")).is_err());
 }
 
 #[test]
