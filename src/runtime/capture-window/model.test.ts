@@ -3,6 +3,8 @@ import {
   applyCaptureCommand,
   capturePointerIntent,
   createCaptureWindowState,
+  scaleCaptureZoom,
+  wheelCaptureZoom,
   type CaptureRect,
 } from "./model.ts";
 
@@ -23,6 +25,14 @@ describe("capture window editor state", () => {
     expect(capturePointerIntent("redact", 0, true)).toBe("region");
     expect(capturePointerIntent("redact", 1, false)).toBe("pan");
     expect(capturePointerIntent("move", 2, false)).toBe("ignore");
+  });
+
+  test("matches the observed multiplicative button and continuous wheel zoom", () => {
+    expect(scaleCaptureZoom(1, 1.25)).toBe(1.25);
+    expect(scaleCaptureZoom(1, 1 / 1.25)).toBe(0.8);
+    expect(scaleCaptureZoom(5.5, 1.25)).toBe(6);
+    expect(wheelCaptureZoom(1, -100)).toBeCloseTo(Math.exp(0.16));
+    expect(wheelCaptureZoom(1, 100)).toBeCloseTo(Math.exp(-0.16));
   });
 
   test("starts with the observed capture defaults", () => {
