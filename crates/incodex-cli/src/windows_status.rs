@@ -343,6 +343,31 @@ mod tests {
     }
 
     #[test]
+    fn json_status_uses_the_same_user_facing_paths_as_terminal_status() {
+        let report = WindowsPackageStatus {
+            available: true,
+            package_full_name: Some("OpenAI.Codex_fixture".to_string()),
+            app_user_model_id: Some("OpenAI.Codex_fixture!Codex".to_string()),
+            install_location: Some(PathBuf::from(r"\\?\D:\WindowsApps\OpenAI.Codex")),
+            executable: Some(PathBuf::from(
+                r"\\?\D:\WindowsApps\OpenAI.Codex\app\ChatGPT.exe",
+            )),
+            architecture: Some("x64".to_string()),
+            reason: None,
+        };
+
+        let json = serde_json::to_value(&report).expect("serialize Windows package status");
+        assert_eq!(
+            json["installLocation"],
+            serde_json::json!(r"D:\WindowsApps\OpenAI.Codex")
+        );
+        assert_eq!(
+            json["executable"],
+            serde_json::json!(r"D:\WindowsApps\OpenAI.Codex\app\ChatGPT.exe")
+        );
+    }
+
+    #[test]
     fn stale_store_package_generation_is_not_reported_as_installed() {
         let sequence = STATUS_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let user_root = std::env::temp_dir().join(format!(
