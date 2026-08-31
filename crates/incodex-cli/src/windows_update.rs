@@ -13,6 +13,8 @@ use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
 const WINDOWS_LATEST_RELEASE_URL: &str =
     "https://api.github.com/repos/daftAI2026/incodex/releases/latest";
+const WINDOWS_MAIN_COMMIT_URL: &str =
+    "https://api.github.com/repos/daftAI2026/incodex/commits/main";
 const WINDOWS_MAIN_INSTALLER_URL: &str =
     "https://raw.githubusercontent.com/daftAI2026/incodex/main/install.ps1";
 const MANAGED_BY_STANDALONE_ENV: &str = "INCODEX_MANAGED_BY_STANDALONE";
@@ -54,6 +56,27 @@ impl WindowsStableRelease {
 #[derive(Debug, Deserialize)]
 struct LatestRelease {
     tag_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowsMainSnapshot {
+    commit: String,
+    installer_url: String,
+}
+
+impl WindowsMainSnapshot {
+    pub fn commit(&self) -> &str {
+        &self.commit
+    }
+
+    pub fn installer_url(&self) -> &str {
+        &self.installer_url
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct MainCommit {
+    sha: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -156,6 +179,21 @@ pub fn parse_windows_stable_release(metadata: &[u8]) -> Result<WindowsStableRele
         ),
         tag: latest.tag_name,
         version,
+    })
+}
+
+pub fn parse_windows_main_commit(metadata: &[u8]) -> Result<WindowsMainSnapshot, String> {
+    let main: MainCommit = serde_json::from_slice(metadata)
+        .map_err(|_| "update failed: invalid main commit metadata".to_string())?;
+    if main.sha.len() != 40 || !main.sha.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("update failed: invalid main commit identity".to_string());
+    }
+    Ok(WindowsMainSnapshot {
+        installer_url: format!(
+            "https://raw.githubusercontent.com/daftAI2026/incodex/{}/install.ps1",
+            main.sha
+        ),
+        commit: main.sha,
     })
 }
 
@@ -279,9 +317,18 @@ fn install_latest_stable_release(package_root: &Path, user_root: &Path) -> Resul
         "Stable installer did not complete: {}",
         first.expect_err("failed installer result")
     );
+    let main_metadata_path = work.path.join("main.json");
+    download_with_powershell(
+        WINDOWS_MAIN_COMMIT_URL,
+        &main_metadata_path,
+        "main commit metadata",
+    )?;
+    let main_metadata = fs::read(&main_metadata_path)
+        .map_err(|error| format!("update failed: cannot read main commit metadata: {error}"))?;
+    let snapshot = parse_windows_main_commit(&main_metadata)?;
     let compatibility_installer = work.path.join("install.compatibility.ps1");
     download_with_powershell(
-        WINDOWS_MAIN_INSTALLER_URL,
+        snapshot.installer_url(),
         &compatibility_installer,
         "compatibility installer",
     )?;
