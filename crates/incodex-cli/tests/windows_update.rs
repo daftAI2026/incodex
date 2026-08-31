@@ -4,8 +4,9 @@ use std::path::PathBuf;
 use std::{fs, path::Path};
 
 use incodex_cli::windows_update::{
-    expected_release_sha256, parse_windows_main_commit, parse_windows_stable_release,
-    validate_managed_install_identity, windows_release_asset, WindowsStandaloneLayout,
+    clear_windows_runtime_pending, expected_release_sha256, parse_windows_main_commit,
+    parse_windows_stable_release, read_windows_runtime_pending, validate_managed_install_identity,
+    windows_release_asset, write_windows_runtime_pending, WindowsStandaloneLayout,
 };
 
 #[test]
@@ -151,4 +152,30 @@ fn compatibility_installer_is_pinned_to_an_immutable_main_commit() {
         let metadata = format!(r#"{{"sha":"{invalid}"}}"#);
         assert!(parse_windows_main_commit(metadata.as_bytes()).is_err());
     }
+}
+
+#[test]
+fn runtime_handoff_is_durable_until_the_expected_cli_completes_it() {
+    let root = std::env::temp_dir().join(format!(
+        "incodex-windows-runtime-pending-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos()
+    ));
+
+    write_windows_runtime_pending(&root, "9.9.9").expect("write pending handoff");
+    assert_eq!(
+        read_windows_runtime_pending(&root).expect("read pending handoff"),
+        Some("9.9.9".to_string())
+    );
+    clear_windows_runtime_pending(&root).expect("clear pending handoff");
+    assert_eq!(
+        read_windows_runtime_pending(&root).expect("read cleared handoff"),
+        None
+    );
+    assert!(write_windows_runtime_pending(&root, "v9.9.9").is_err());
+
+    fs::remove_dir_all(root).expect("remove pending fixture");
 }
