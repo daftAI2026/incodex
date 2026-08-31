@@ -19,7 +19,6 @@ const WINDOWS_MAIN_INSTALLER_URL: &str =
     "https://raw.githubusercontent.com/daftAI2026/incodex/main/install.ps1";
 const MANAGED_BY_STANDALONE_ENV: &str = "INCODEX_MANAGED_BY_STANDALONE";
 const MANAGED_PACKAGE_ROOT_ENV: &str = "INCODEX_MANAGED_PACKAGE_ROOT";
-const INSTALLER_PATH_ENV: &str = "INCODEX_WINDOWS_INSTALLER_PATH";
 const CURRENT_GENERATION_LIMIT: u64 = 64;
 const DOWNLOAD_ATTEMPTS: usize = 3;
 const DOWNLOAD_RETRY_DELAY: Duration = Duration::from_millis(200);
@@ -253,15 +252,13 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
     let running_exe = std::env::current_exe()
         .map_err(|error| format!("cannot locate the running Windows CLI: {error}"))?;
     let user_root = validate_managed_install_identity(&package_root, &running_exe)?;
+    let profile = crate::windows_profile::windows_user_profile()?;
+    validate_windows_user_root(&user_root, &profile)?;
     if read_windows_runtime_pending(&user_root)?.is_some() {
         let _lock = acquire_windows_install_lock(&package_root)?;
         repair_pending_runtime(&user_root, &package_root)?;
     }
-    if let Some(installer) = std::env::var_os(INSTALLER_PATH_ENV) {
-        run_windows_installer(Path::new(&installer), None, &user_root)?;
-    } else {
-        install_latest_stable_release(&package_root, &user_root)?;
-    }
+    install_latest_stable_release(&package_root)?;
     let _lock = acquire_windows_install_lock(&package_root)?;
     let (installed, expected_version) = current_release_executable(&package_root)?;
     verify_cli_version(&installed, &expected_version)?;
@@ -409,6 +406,24 @@ pub fn validate_managed_install_identity(
     Ok(user_root.to_path_buf())
 }
 
+pub fn validate_windows_user_root(user_root: &Path, profile: &Path) -> Result<(), String> {
+    if !user_root.is_absolute() || !profile.is_absolute() {
+        return Err("managed Windows installation path is not absolute".to_string());
+    }
+    let expected = profile.join(".incodex");
+    let same_text = user_root
+        .to_string_lossy()
+        .eq_ignore_ascii_case(&expected.to_string_lossy());
+    let same_canonical = fs::canonicalize(user_root)
+        .and_then(|actual| fs::canonicalize(&expected).map(|expected| actual == expected))
+        .unwrap_or(false);
+    if same_text || same_canonical {
+        Ok(())
+    } else {
+        Err("managed Windows installation is outside the current token profile".to_string())
+    }
+}
+
 fn managed_package_root() -> Result<PathBuf, String> {
     let value = std::env::var_os(MANAGED_PACKAGE_ROOT_ENV).ok_or_else(|| {
         "managed Windows installation did not provide its package root".to_string()
@@ -420,7 +435,7 @@ fn managed_package_root() -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn install_latest_stable_release(package_root: &Path, user_root: &Path) -> Result<(), String> {
+fn install_latest_stable_release(package_root: &Path) -> Result<(), String> {
     let work = UpdateWorkDirectory::create(package_root)?;
     let metadata_path = work.path.join("latest.json");
     download_with_powershell(
@@ -438,7 +453,7 @@ fn install_latest_stable_release(package_root: &Path, user_root: &Path) -> Resul
         &tagged_installer,
         "stable installer",
     )?;
-    let first = run_windows_installer(&tagged_installer, Some(&release), user_root);
+    let first = run_windows_installer(&tagged_installer, &release);
     if first.is_ok() {
         return Ok(());
     }
@@ -462,14 +477,10 @@ fn install_latest_stable_release(package_root: &Path, user_root: &Path) -> Resul
         &compatibility_installer,
         "compatibility installer",
     )?;
-    run_windows_installer(&compatibility_installer, Some(&release), user_root)
+    run_windows_installer(&compatibility_installer, &release)
 }
 
-fn run_windows_installer(
-    installer: &Path,
-    release: Option<&WindowsStableRelease>,
-    user_root: &Path,
-) -> Result<(), String> {
+fn run_windows_installer(installer: &Path, release: &WindowsStableRelease) -> Result<(), String> {
     let powershell = system_binary_path("WindowsPowerShell/v1.0/powershell.exe")?;
     let mut command = Command::new(powershell);
     command
@@ -482,12 +493,9 @@ fn run_windows_installer(
         ])
         .arg(installer)
         .env("INCODEX_NON_INTERACTIVE", "1")
-        .env("INCODEX_USER_ROOT", user_root);
-    if let Some(release) = release {
-        command
-            .env("INCODEX_DOWNLOAD_BASE", release.download_base())
-            .env("INCODEX_EXPECTED_VERSION", release.version());
-    }
+        .env("INCODEX_INTERNAL_UPDATE", "1")
+        .env("INCODEX_DOWNLOAD_BASE", release.download_base())
+        .env("INCODEX_EXPECTED_VERSION", release.version());
     let status = command
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
