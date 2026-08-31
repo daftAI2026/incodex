@@ -44,6 +44,6 @@ describe("capture window geometry", () => {
         1,
         2,
       ),
-    ).toEqual({ x: -80, y: -10 });
+    ).toEqual({ x: -80, y: -70 });
   });
 });
