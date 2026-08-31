@@ -9,6 +9,9 @@ use std::time::Duration;
 
 use crate::parse::ParsedCli;
 use crate::windows_system::{system_binary_path, windows_path_for_display};
+use crate::windows_update_flow::{
+    run_windows_installer_fallback, run_windows_update_pipeline, WindowsUpdateProgress,
+};
 use incodex_core::windows_path::reject_reparse_ancestors;
 use serde::{Deserialize, Serialize};
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
@@ -260,37 +263,27 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
         repair_pending_runtime(&user_root, &package_root)?;
     }
     let mut progress = crate::spinner::Progress::new();
-    progress.stage("Upgrading Incodex");
-    let (release_ordering, latest_tag) =
-        install_latest_stable_release(&package_root, env!("CARGO_PKG_VERSION"))?;
-    let _lock = acquire_windows_install_lock(&package_root)?;
-    let (installed, expected_version) = current_release_executable(&package_root)?;
-    verify_cli_version(&installed, &expected_version)?;
-    write_windows_runtime_pending(&user_root, &expected_version)?;
-    progress.stage("Publishing Runtime");
-    publish_runtime_with(&installed)?;
-    if read_windows_runtime_pending(&user_root)?.is_some() {
-        return Err("CLI was updated, but Runtime synchronization remains pending".to_string());
-    }
-    progress.stop();
-    match release_ordering {
-        VersionOrdering::Greater => {
-            println!("🎉 Update ran successfully! Please quit and reopen Codex.");
-        }
-        VersionOrdering::Equal => {
-            println!("Already on latest version, {}", env!("CARGO_PKG_VERSION"));
-            println!("Runtime is synchronized. Fully quit and reopen Codex to reload it.");
-        }
-        VersionOrdering::Less => {
-            println!(
-                "Current version {} is newer than latest release {}.",
-                env!("CARGO_PKG_VERSION"),
-                latest_tag
-            );
-            println!("Runtime is synchronized. Fully quit and reopen Codex to reload it.");
-        }
-    }
-    Ok(())
+    let mut stdout = std::io::stdout();
+    run_windows_update_pipeline(
+        &mut progress,
+        &mut stdout,
+        |progress| {
+            install_latest_stable_release(&package_root, env!("CARGO_PKG_VERSION"), progress)
+        },
+        || {
+            let _lock = acquire_windows_install_lock(&package_root)?;
+            let (installed, expected_version) = current_release_executable(&package_root)?;
+            verify_cli_version(&installed, &expected_version)?;
+            write_windows_runtime_pending(&user_root, &expected_version)?;
+            publish_runtime_with(&installed)?;
+            if read_windows_runtime_pending(&user_root)?.is_some() {
+                return Err(
+                    "CLI was updated, but Runtime synchronization remains pending".to_string(),
+                );
+            }
+            Ok(())
+        },
+    )
 }
 
 #[derive(Debug)]
@@ -514,6 +507,7 @@ pub fn windows_release_ordering(
 fn install_latest_stable_release(
     package_root: &Path,
     current: &str,
+    progress: &mut impl WindowsUpdateProgress,
 ) -> Result<(VersionOrdering, String), String> {
     let work = UpdateWorkDirectory::create(package_root)?;
     let metadata_path = work.path.join("latest.json");
@@ -538,33 +532,33 @@ fn install_latest_stable_release(
         "stable installer",
         INSTALLER_SCRIPT_LIMIT,
     )?;
-    let first = run_windows_installer(&tagged_installer, &release);
-    if first.is_ok() {
-        return Ok((VersionOrdering::Greater, release.tag().to_string()));
-    }
-
-    eprintln!(
-        "Stable installer did not complete: {}",
-        first.expect_err("failed installer result")
-    );
-    let main_metadata_path = work.path.join("main.json");
-    download_with_powershell(
-        WINDOWS_MAIN_COMMIT_URL,
-        &main_metadata_path,
-        "main commit metadata",
-        RELEASE_METADATA_LIMIT,
+    let mut stderr = std::io::stderr();
+    run_windows_installer_fallback(
+        progress,
+        &mut stderr,
+        || run_windows_installer(&tagged_installer, &release),
+        || {
+            let main_metadata_path = work.path.join("main.json");
+            download_with_powershell(
+                WINDOWS_MAIN_COMMIT_URL,
+                &main_metadata_path,
+                "main commit metadata",
+                RELEASE_METADATA_LIMIT,
+            )?;
+            let main_metadata = fs::read(&main_metadata_path).map_err(|error| {
+                format!("update failed: cannot read main commit metadata: {error}")
+            })?;
+            let snapshot = parse_windows_main_commit(&main_metadata)?;
+            let compatibility_installer = work.path.join("install.compatibility.ps1");
+            download_with_powershell(
+                snapshot.installer_url(),
+                &compatibility_installer,
+                "compatibility installer",
+                INSTALLER_SCRIPT_LIMIT,
+            )?;
+            run_windows_installer(&compatibility_installer, &release)
+        },
     )?;
-    let main_metadata = fs::read(&main_metadata_path)
-        .map_err(|error| format!("update failed: cannot read main commit metadata: {error}"))?;
-    let snapshot = parse_windows_main_commit(&main_metadata)?;
-    let compatibility_installer = work.path.join("install.compatibility.ps1");
-    download_with_powershell(
-        snapshot.installer_url(),
-        &compatibility_installer,
-        "compatibility installer",
-        INSTALLER_SCRIPT_LIMIT,
-    )?;
-    run_windows_installer(&compatibility_installer, &release)?;
     Ok((VersionOrdering::Greater, release.tag().to_string()))
 }
 
@@ -781,73 +775,4 @@ fn validate_stable_version(version: &str) -> Result<(), String> {
         return Err(format!("invalid stable Incodex version: {version}"));
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use std::cmp::Ordering;
-
-    use super::{
-        run_windows_installer_fallback, run_windows_update_pipeline, WindowsUpdateProgress,
-    };
-
-    #[derive(Default)]
-    struct RecordingProgress(Vec<String>);
-
-    impl WindowsUpdateProgress for RecordingProgress {
-        fn stage(&mut self, message: &str) {
-            self.0.push(format!("stage:{message}"));
-        }
-
-        fn stop(&mut self) {
-            self.0.push("stop".to_string());
-        }
-    }
-
-    #[test]
-    fn managed_update_reports_shared_stages_and_success_on_observable_output() {
-        let mut progress = RecordingProgress::default();
-        let mut stdout = Vec::new();
-
-        run_windows_update_pipeline(
-            &mut progress,
-            &mut stdout,
-            |_| Ok((Ordering::Greater, "v9.9.9".to_string())),
-            || Ok(()),
-        )
-        .expect("complete controlled update");
-
-        assert_eq!(
-            progress.0,
-            [
-                "stage:Upgrading Incodex",
-                "stage:Publishing Runtime",
-                "stop",
-            ]
-        );
-        assert_eq!(
-            String::from_utf8(stdout).expect("UTF-8 output"),
-            "🎉 Update ran successfully! Please quit and reopen Codex.\n"
-        );
-    }
-
-    #[test]
-    fn compatibility_warning_is_printed_only_while_progress_is_stopped() {
-        let mut progress = RecordingProgress::default();
-        let mut warning = Vec::new();
-
-        run_windows_installer_fallback(
-            &mut progress,
-            &mut warning,
-            || Err("tagged installer failed".to_string()),
-            || Ok(()),
-        )
-        .expect("compatibility installer succeeds");
-
-        assert_eq!(progress.0, ["stop", "stage:Upgrading Incodex"]);
-        assert_eq!(
-            String::from_utf8(warning).expect("UTF-8 warning"),
-            "Stable installer did not complete: tagged installer failed\n"
-        );
-    }
 }

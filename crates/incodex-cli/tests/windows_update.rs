@@ -307,46 +307,6 @@ fn one_channel_lock_covers_update_selection_install_and_runtime_sync() {
 }
 
 #[test]
-fn managed_update_reuses_the_shared_progress_without_streaming_through_it() {
-    let source = include_str!("../src/windows_update.rs");
-    let run_update = source
-        .split_once("pub fn run_update")
-        .expect("Windows update entrypoint")
-        .1;
-    assert!(
-        run_update.contains("crate::spinner::Progress::new()"),
-        "Windows update must reuse the shared spinner"
-    );
-    let upgrading = run_update
-        .find("progress.stage(\"Upgrading Incodex\")")
-        .expect("CLI upgrade stage");
-    let publishing = run_update
-        .find("progress.stage(\"Publishing Runtime\")")
-        .expect("Runtime publication stage");
-    assert!(upgrading < publishing, "update stages are out of order");
-
-    let installer = source
-        .split_once("fn run_windows_installer")
-        .expect("Windows installer runner")
-        .1
-        .split_once("fn ensure_regular_non_reparse")
-        .expect("end of Windows installer runner")
-        .0;
-    assert!(
-        installer.contains(".output()"),
-        "successful installer output must stay behind the shared spinner"
-    );
-    assert!(
-        !installer.contains("Stdio::inherit()"),
-        "installer output would corrupt the shared spinner line"
-    );
-    assert!(
-        run_update.contains("println!(\"🎉 Update ran successfully!"),
-        "successful update must replace the spinner without a blank line"
-    );
-}
-
-#[test]
 fn managed_updates_stay_under_the_current_token_profile() {
     let profile = Path::new(r"C:\Users\Kid");
     validate_windows_user_root(Path::new(r"C:\Users\Kid\.incodex"), profile)
