@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use incodex_cli::windows_self_uninstall::start_windows_self_uninstall_handoff;
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+const LATE_MANAGED_FIXTURE: &str = "INCODEX_LATE_MANAGED_FIXTURE";
 
 fn scratch() -> PathBuf {
     let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
@@ -49,6 +50,16 @@ fn wait_until_removed(paths: &[&PathBuf]) -> bool {
 }
 
 #[test]
+fn late_managed_process_fixture() {
+    if std::env::var_os(LATE_MANAGED_FIXTURE).is_none() {
+        return;
+    }
+    loop {
+        thread::sleep(Duration::from_secs(60));
+    }
+}
+
+#[test]
 fn self_uninstall_handoff_waits_for_owner_and_preserves_unrelated_state() {
     let root = scratch();
     let user_root = root.join("user-root");
@@ -74,6 +85,17 @@ fn self_uninstall_handoff_waits_for_owner_and_preserves_unrelated_state() {
 
     let primary = bin.join("incodex.cmd");
     let alias = bin.join("inc.cmd");
+    let release = package_root.join("releases/1.0.0");
+    incodex_core::windows_session::ensure_private_windows_dir(&package_root.join("releases"))
+        .expect("create releases fixture");
+    incodex_core::windows_session::ensure_private_windows_dir(&release)
+        .expect("create release fixture");
+    let late_executable = release.join("late-managed.exe");
+    fs::copy(
+        std::env::current_exe().expect("current test executable"),
+        &late_executable,
+    )
+    .expect("copy late managed process fixture");
     fs::write(&primary, b"primary launcher\n").expect("write primary launcher fixture");
     fs::write(&alias, b"alias launcher\n").expect("write alias launcher fixture");
     fs::write(package_root.join("current"), b"1.0.0\n").expect("write generation fixture");
@@ -95,12 +117,23 @@ fn self_uninstall_handoff_waits_for_owner_and_preserves_unrelated_state() {
         "external cleanup did not retain the installer generation lock"
     );
 
-    thread::sleep(Duration::from_millis(250));
-    assert!(primary.exists(), "cleanup raced the owner process");
-    assert!(alias.exists(), "cleanup raced the owner process");
+    assert!(
+        !primary.exists(),
+        "primary launcher remained open for new work"
+    );
+    assert!(!alias.exists(), "alias launcher remained open for new work");
     assert!(package_root.exists(), "cleanup raced the owner process");
     assert!(runtime.exists(), "Runtime fixture was touched too early");
     assert!(session.exists(), "session fixture was touched too early");
+
+    let mut late_managed = Command::new(&late_executable)
+        .args(["late_managed_process_fixture", "--exact", "--nocapture"])
+        .env(LATE_MANAGED_FIXTURE, "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start late managed process");
 
     first_owner.kill().expect("stop first owner");
     first_owner.wait().expect("wait for first owner process");
@@ -112,6 +145,14 @@ fn self_uninstall_handoff_waits_for_owner_and_preserves_unrelated_state() {
 
     second_owner.kill().expect("stop second owner");
     second_owner.wait().expect("wait for second owner process");
+    thread::sleep(Duration::from_millis(250));
+    assert!(
+        package_root.exists(),
+        "cleanup ignored a managed process started after the first snapshot"
+    );
+
+    late_managed.kill().expect("stop late managed process");
+    late_managed.wait().expect("wait for late managed process");
     assert!(
         wait_until_removed(&[&primary, &alias, &package_root]),
         "external cleanup did not remove the owned CLI tree"
@@ -126,4 +167,20 @@ fn self_uninstall_handoff_waits_for_owner_and_preserves_unrelated_state() {
     );
 
     fs::remove_dir_all(root).expect("remove private self-uninstall fixture");
+}
+
+#[test]
+fn self_uninstall_path_cleanup_preserves_every_unrelated_entry_verbatim() {
+    let source = include_str!("../src/windows_self_uninstall.rs");
+    let cleanup = source
+        .split_once("const CLEANUP_SCRIPT")
+        .expect("cleanup script")
+        .1
+        .split_once("static SCRIPT_SEQUENCE")
+        .expect("end of cleanup script")
+        .0;
+
+    assert!(!cleanup.contains("IsNullOrWhiteSpace"));
+    assert!(cleanup.contains("$PathEntryRemoved = $false"));
+    assert!(cleanup.contains("if ($PathEntryRemoved)"));
 }

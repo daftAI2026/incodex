@@ -1,6 +1,8 @@
 #![cfg(target_os = "windows")]
 
 use std::cmp::Ordering;
+use std::fs::OpenOptions;
+use std::os::windows::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::process::Command;
 use std::{fs, path::Path};
@@ -275,6 +277,44 @@ fn post_install_verification_uses_the_installer_generation_lock() {
     drop(first);
     acquire_windows_install_lock(&package_root).expect("lock is reusable after completion");
 
+    fs::remove_dir_all(root).expect("remove lock fixture");
+}
+
+#[test]
+fn installer_generation_lock_waits_for_a_pre_migration_installer() {
+    let root = std::env::temp_dir().join(format!(
+        "incodex-windows-update-legacy-lock-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos()
+    ));
+    let root = incodex_core::windows_session::ensure_private_windows_dir(&root)
+        .expect("create private lock fixture");
+    let packages =
+        incodex_core::windows_session::ensure_private_windows_dir(&root.join("packages"))
+            .expect("create package parent");
+    let package_root =
+        incodex_core::windows_session::ensure_private_windows_dir(&packages.join("standalone"))
+            .expect("create package root");
+    let legacy_path = package_root.join("install.lock");
+    let legacy = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .share_mode(0)
+        .open(&legacy_path)
+        .expect("hold pre-migration installer lock");
+    incodex_core::windows_session::apply_private_windows_acl(&legacy_path)
+        .expect("protect legacy lock");
+
+    assert!(acquire_windows_install_lock(&package_root)
+        .expect_err("new lock must serialize with an older installer")
+        .contains("another Incodex install or update"));
+
+    drop(legacy);
     fs::remove_dir_all(root).expect("remove lock fixture");
 }
 

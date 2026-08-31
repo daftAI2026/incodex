@@ -1,6 +1,8 @@
 #![cfg(target_os = "windows")]
 
 use std::fs;
+use std::fs::OpenOptions;
+use std::os::windows::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -236,6 +238,37 @@ fn installer_tightens_an_existing_stable_lock_acl() {
     incodex_core::windows_session::verify_private_acl(&lock)
         .expect("installer must migrate the lock to a protected current-user DACL");
 
+    fs::remove_dir_all(root).expect("remove scratch directory");
+}
+
+#[test]
+fn installer_waits_for_a_pre_migration_generation_lock() {
+    let root = scratch("legacy-generation-lock");
+    let user_root = root.join("user-root");
+    let package_root = user_root.join("packages/standalone");
+    fs::create_dir_all(&package_root).expect("create legacy package root");
+    let legacy_path = package_root.join("install.lock");
+    let legacy = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .share_mode(0)
+        .open(&legacy_path)
+        .expect("hold pre-migration installer lock");
+    let source = Path::new(env!("CARGO_BIN_EXE_incodex"));
+    let release = release_fixture(&root, &sha256(source));
+
+    let output = run_installer(&release, &user_root);
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("another Incodex install or update is already running"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    drop(legacy);
     fs::remove_dir_all(root).expect("remove scratch directory");
 }
 
