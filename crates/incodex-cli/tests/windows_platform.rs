@@ -159,8 +159,14 @@ fn runtime_and_managed_update_have_windows_dry_run_contracts() {
         .expect("run managed update dry-run");
     assert!(update.status.success(), "{}", text(&update.stderr));
     let stdout = text(&update.stdout);
-    assert!(stdout.contains("Updating Incodex via `"), "{stdout}");
-    assert!(stdout.contains("install.ps1"), "{stdout}");
+    assert!(
+        stdout.contains("update channel: windows standalone"),
+        "{stdout}"
+    );
+    assert!(
+        !stdout.contains("powershell") && !stdout.contains("install.ps1"),
+        "dry-run output exposed installer plumbing: {stdout}"
+    );
     assert!(
         stdout.contains("would publish Runtime with the installed CLI"),
         "{stdout}"

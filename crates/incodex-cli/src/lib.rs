@@ -91,6 +91,8 @@ pub mod windows_status;
 pub(crate) mod windows_system;
 #[cfg(target_os = "windows")]
 pub mod windows_update;
+#[cfg(target_os = "windows")]
+mod windows_update_flow;
 
 #[cfg(not(target_os = "windows"))]
 use std::path::PathBuf;
