@@ -61,8 +61,8 @@ html.incodex-capture-redact [data-incodex-capture-redact] * {
 }
 
 html.incodex-capture-redact [data-incodex-capture-redact]::after {
-  background: currentColor;
-  border-radius: 999px;
+  background: var(--color-background-secondary-soft, rgb(128 128 128 / 18%));
+  border-radius: var(--radius-full, 9999px);
   content: "";
   height: .55em;
   inset: 50% auto auto 0;
@@ -72,10 +72,10 @@ html.incodex-capture-redact [data-incodex-capture-redact]::after {
   width: 62%;
 }
 
-@supports (color: color-mix(in lab, red, red)) {
-  html.incodex-capture-redact [data-incodex-capture-redact]::after {
-    background: color-mix(in srgb, currentColor 22%, transparent);
-  }
+html.incodex-capture-redact [data-incodex-capture-redact-profile] > img {
+  background: var(--color-background-secondary-soft, rgb(128 128 128 / 18%));
+  content: "";
+  visibility: visible !important;
 }
 
 html.incodex-capture-redact [data-incodex-capture-redact="blank"]::after {

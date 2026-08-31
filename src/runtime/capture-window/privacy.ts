@@ -4,6 +4,13 @@ export const CAPTURE_CANDIDATE_SELECTOR =
   'p, li, pre, blockquote, h1, h2, h3, h4, h5, h6, td, img, textarea, [contenteditable="true"]';
 
 const CAPTURE_HIDE_SELECTOR = "[data-incodex-capture-hide]";
+const CAPTURE_REDACT_ATTRIBUTE = "data-incodex-capture-redact";
+const CAPTURE_PROFILE_ATTRIBUTE = "data-incodex-capture-redact-profile";
+const CODEX_THREAD_SELECTOR =
+  "[data-app-action-sidebar-thread-row][data-app-action-sidebar-thread-title]";
+const CODEX_PROJECT_SELECTOR =
+  "[data-app-action-sidebar-project-row][data-app-action-sidebar-project-label]";
+const CODEX_PROFILE_SELECTOR = 'button.sidebar-item[aria-haspopup="menu"]';
 const MAX_CAPTURE_CANDIDATES = 150;
 const MIN_CANDIDATE_WIDTH = 24;
 const MIN_CANDIDATE_HEIGHT = 12;
@@ -17,6 +24,29 @@ type AcceptedCandidate = {
   candidate: CaptureCandidate;
   element: CandidateElement;
 };
+
+type AttributeSnapshot = {
+  element: Element;
+  name: string;
+  value: string | null;
+};
+
+export function markCodexPrivacyPlaceholders(documentRoot: Document): () => void {
+  const snapshots: AttributeSnapshot[] = [];
+  markRows(
+    documentRoot.querySelectorAll<HTMLElement>(CODEX_THREAD_SELECTOR),
+    "data-app-action-sidebar-thread-title",
+    snapshots,
+  );
+  markRows(
+    documentRoot.querySelectorAll<HTMLElement>(CODEX_PROJECT_SELECTOR),
+    "data-app-action-sidebar-project-label",
+    snapshots,
+  );
+  markProfile(documentRoot, snapshots);
+
+  return () => restoreAttributes(snapshots);
+}
 
 export function collectCaptureCandidates(
   documentRoot: Document,
@@ -59,6 +89,57 @@ export function collectCaptureCandidates(
 
 function isCandidateVisible(element: CandidateElement): boolean {
   return element.checkVisibility?.() ?? true;
+}
+
+function markRows(
+  rows: NodeListOf<HTMLElement>,
+  labelAttribute: string,
+  snapshots: AttributeSnapshot[],
+): void {
+  for (const row of rows) {
+    const label = row.getAttribute(labelAttribute)?.trim();
+    if (!label) continue;
+    const textElement = findExactTextLeaf(row, label);
+    if (textElement) setTemporaryAttribute(textElement, CAPTURE_REDACT_ATTRIBUTE, "text", snapshots);
+  }
+}
+
+function markProfile(documentRoot: Document, snapshots: AttributeSnapshot[]): void {
+  const buttons = documentRoot.querySelectorAll<HTMLButtonElement>(CODEX_PROFILE_SELECTOR);
+  for (const button of buttons) {
+    const directChildren = Array.from(button.children);
+    const avatar = directChildren.find((element) => element.tagName === "IMG");
+    const name = directChildren.find(
+      (element) => element.tagName === "SPAN" && element.textContent.trim().length > 0,
+    );
+    if (!avatar || !name) continue;
+    setTemporaryAttribute(button, CAPTURE_PROFILE_ATTRIBUTE, "", snapshots);
+    setTemporaryAttribute(name, CAPTURE_REDACT_ATTRIBUTE, "text", snapshots);
+  }
+}
+
+function findExactTextLeaf(root: Element, text: string): Element | null {
+  for (const element of root.querySelectorAll("*")) {
+    if (element.children.length === 0 && element.textContent.trim() === text) return element;
+  }
+  return null;
+}
+
+function setTemporaryAttribute(
+  element: Element,
+  name: string,
+  value: string,
+  snapshots: AttributeSnapshot[],
+): void {
+  snapshots.push({ element, name, value: element.getAttribute(name) });
+  element.setAttribute(name, value);
+}
+
+function restoreAttributes(snapshots: AttributeSnapshot[]): void {
+  for (const snapshot of snapshots.reverse()) {
+    if (snapshot.value === null) snapshot.element.removeAttribute(snapshot.name);
+    else snapshot.element.setAttribute(snapshot.name, snapshot.value);
+  }
 }
 
 function hasCandidateContent(element: CandidateElement): boolean {

@@ -1983,9 +1983,21 @@ function timestampForFileName(date) {
 // src/runtime/capture-window/privacy.ts
 var CAPTURE_CANDIDATE_SELECTOR = 'p, li, pre, blockquote, h1, h2, h3, h4, h5, h6, td, img, textarea, [contenteditable="true"]';
 var CAPTURE_HIDE_SELECTOR = "[data-incodex-capture-hide]";
+var CAPTURE_REDACT_ATTRIBUTE = "data-incodex-capture-redact";
+var CAPTURE_PROFILE_ATTRIBUTE = "data-incodex-capture-redact-profile";
+var CODEX_THREAD_SELECTOR = "[data-app-action-sidebar-thread-row][data-app-action-sidebar-thread-title]";
+var CODEX_PROJECT_SELECTOR = "[data-app-action-sidebar-project-row][data-app-action-sidebar-project-label]";
+var CODEX_PROFILE_SELECTOR = 'button.sidebar-item[aria-haspopup="menu"]';
 var MAX_CAPTURE_CANDIDATES = 150;
 var MIN_CANDIDATE_WIDTH = 24;
 var MIN_CANDIDATE_HEIGHT = 12;
+function markCodexPrivacyPlaceholders(documentRoot) {
+  const snapshots = [];
+  markRows(documentRoot.querySelectorAll(CODEX_THREAD_SELECTOR), "data-app-action-sidebar-thread-title", snapshots);
+  markRows(documentRoot.querySelectorAll(CODEX_PROJECT_SELECTOR), "data-app-action-sidebar-project-label", snapshots);
+  markProfile(documentRoot, snapshots);
+  return () => restoreAttributes(snapshots);
+}
 function collectCaptureCandidates(documentRoot, viewport) {
   const accepted = [];
   const elements = documentRoot.querySelectorAll(CAPTURE_CANDIDATE_SELECTOR);
@@ -2020,6 +2032,47 @@ function collectCaptureCandidates(documentRoot, viewport) {
 }
 function isCandidateVisible(element) {
   return element.checkVisibility?.() ?? true;
+}
+function markRows(rows, labelAttribute, snapshots) {
+  for (const row of rows) {
+    const label = row.getAttribute(labelAttribute)?.trim();
+    if (!label)
+      continue;
+    const textElement = findExactTextLeaf(row, label);
+    if (textElement)
+      setTemporaryAttribute(textElement, CAPTURE_REDACT_ATTRIBUTE, "text", snapshots);
+  }
+}
+function markProfile(documentRoot, snapshots) {
+  const buttons = documentRoot.querySelectorAll(CODEX_PROFILE_SELECTOR);
+  for (const button of buttons) {
+    const directChildren = Array.from(button.children);
+    const avatar = directChildren.find((element) => element.tagName === "IMG");
+    const name = directChildren.find((element) => element.tagName === "SPAN" && element.textContent.trim().length > 0);
+    if (!avatar || !name)
+      continue;
+    setTemporaryAttribute(button, CAPTURE_PROFILE_ATTRIBUTE, "", snapshots);
+    setTemporaryAttribute(name, CAPTURE_REDACT_ATTRIBUTE, "text", snapshots);
+  }
+}
+function findExactTextLeaf(root, text) {
+  for (const element of root.querySelectorAll("*")) {
+    if (element.children.length === 0 && element.textContent.trim() === text)
+      return element;
+  }
+  return null;
+}
+function setTemporaryAttribute(element, name, value, snapshots) {
+  snapshots.push({ element, name, value: element.getAttribute(name) });
+  element.setAttribute(name, value);
+}
+function restoreAttributes(snapshots) {
+  for (const snapshot of snapshots.reverse()) {
+    if (snapshot.value === null)
+      snapshot.element.removeAttribute(snapshot.name);
+    else
+      snapshot.element.setAttribute(snapshot.name, snapshot.value);
+  }
 }
 function hasCandidateContent(element) {
   const tagName = element.tagName.toUpperCase();
@@ -2087,17 +2140,22 @@ async function prepareInitialCapture(options) {
   });
 }
 async function captureSnapshot(privacyEnabled) {
-  const snapshot = await capturePreparedWindow({
-    capture: async () => imageDataUrlToCanvas(await bridge.capture()),
-    collectCandidates: () => collectCaptureCandidates(document, viewportSize()),
-    privacyEnabled,
-    root: document.documentElement,
-    waitForFrame: waitForCaptureFrame
-  });
-  return {
-    automaticRegions: snapshot.candidates,
-    source: snapshot.source
-  };
+  const restorePrivacyPlaceholders = privacyEnabled ? markCodexPrivacyPlaceholders(document) : () => {};
+  try {
+    const snapshot = await capturePreparedWindow({
+      capture: async () => imageDataUrlToCanvas(await bridge.capture()),
+      collectCandidates: () => collectCaptureCandidates(document, viewportSize()),
+      privacyEnabled,
+      root: document.documentElement,
+      waitForFrame: waitForCaptureFrame
+    });
+    return {
+      automaticRegions: snapshot.candidates,
+      source: snapshot.source
+    };
+  } finally {
+    restorePrivacyPlaceholders();
+  }
 }
 function exposeCaptureBridge() {
   window.__incodexTakeCaptureDebugRequest = bridge.takeRequest;
@@ -3634,8 +3692,8 @@ html.incodex-capture-redact [data-incodex-capture-redact] * {
 }
 
 html.incodex-capture-redact [data-incodex-capture-redact]::after {
-  background: currentColor;
-  border-radius: 999px;
+  background: var(--color-background-secondary-soft, rgb(128 128 128 / 18%));
+  border-radius: var(--radius-full, 9999px);
   content: "";
   height: .55em;
   inset: 50% auto auto 0;
@@ -3645,10 +3703,10 @@ html.incodex-capture-redact [data-incodex-capture-redact]::after {
   width: 62%;
 }
 
-@supports (color: color-mix(in lab, red, red)) {
-  html.incodex-capture-redact [data-incodex-capture-redact]::after {
-    background: color-mix(in srgb, currentColor 22%, transparent);
-  }
+html.incodex-capture-redact [data-incodex-capture-redact-profile] > img {
+  background: var(--color-background-secondary-soft, rgb(128 128 128 / 18%));
+  content: "";
+  visibility: visible !important;
 }
 
 html.incodex-capture-redact [data-incodex-capture-redact="blank"]::after {

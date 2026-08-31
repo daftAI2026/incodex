@@ -11,7 +11,7 @@ import {
 } from "./editor.ts";
 import { createCaptureWindowState } from "./model.ts";
 import { applyCapturePreferences, loadCapturePreferences } from "./preferences.ts";
-import { collectCaptureCandidates } from "./privacy.ts";
+import { collectCaptureCandidates, markCodexPrivacyPlaceholders } from "./privacy.ts";
 import { configureCapturePresetAssets } from "./presets.ts";
 
 export type InjectedCaptureWindowOptions = {
@@ -67,17 +67,24 @@ async function prepareInitialCapture(options: InjectedCaptureWindowOptions): Pro
 }
 
 async function captureSnapshot(privacyEnabled: boolean): Promise<CaptureWindowRetake> {
-  const snapshot = await capturePreparedWindow({
-    capture: async () => imageDataUrlToCanvas(await bridge.capture()),
-    collectCandidates: () => collectCaptureCandidates(document, viewportSize()),
-    privacyEnabled,
-    root: document.documentElement,
-    waitForFrame: waitForCaptureFrame,
-  });
-  return {
-    automaticRegions: snapshot.candidates,
-    source: snapshot.source,
-  };
+  const restorePrivacyPlaceholders = privacyEnabled
+    ? markCodexPrivacyPlaceholders(document)
+    : () => {};
+  try {
+    const snapshot = await capturePreparedWindow({
+      capture: async () => imageDataUrlToCanvas(await bridge.capture()),
+      collectCandidates: () => collectCaptureCandidates(document, viewportSize()),
+      privacyEnabled,
+      root: document.documentElement,
+      waitForFrame: waitForCaptureFrame,
+    });
+    return {
+      automaticRegions: snapshot.candidates,
+      source: snapshot.source,
+    };
+  } finally {
+    restorePrivacyPlaceholders();
+  }
 }
 
 function exposeCaptureBridge(): void {
