@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use std::{fs, path::Path};
 
 use incodex_cli::windows_update::{
-    expected_release_sha256, parse_windows_stable_release, validate_managed_install_identity,
-    windows_release_asset, WindowsStandaloneLayout,
+    expected_release_sha256, parse_windows_main_commit, parse_windows_stable_release,
+    validate_managed_install_identity, windows_release_asset, WindowsStandaloneLayout,
 };
 
 #[test]
@@ -134,4 +134,21 @@ fn managed_channel_must_point_at_the_running_versioned_binary() {
         .contains("running Windows CLI"));
 
     fs::remove_dir_all(root).expect("remove identity fixture");
+}
+
+#[test]
+fn compatibility_installer_is_pinned_to_an_immutable_main_commit() {
+    let sha = "0123456789abcdef0123456789abcdef01234567";
+    let snapshot = parse_windows_main_commit(format!(r#"{{"sha":"{sha}"}}"#).as_bytes())
+        .expect("canonical main commit");
+    assert_eq!(snapshot.commit(), sha);
+    assert_eq!(
+        snapshot.installer_url(),
+        format!("https://raw.githubusercontent.com/daftAI2026/incodex/{sha}/install.ps1")
+    );
+
+    for invalid in ["main", "abc", "g123456789abcdef0123456789abcdef01234567"] {
+        let metadata = format!(r#"{{"sha":"{invalid}"}}"#);
+        assert!(parse_windows_main_commit(metadata.as_bytes()).is_err());
+    }
 }
