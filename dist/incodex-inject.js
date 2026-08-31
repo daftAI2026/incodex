@@ -2013,6 +2013,10 @@ function markCodexPrivacyPlaceholders(documentRoot) {
 }
 function markTextLeaves(elements, snapshots) {
   for (const element of elements) {
+    if (element.children.length === 0 && element.textContent.trim().length > 0) {
+      setTemporaryAttribute(element, CAPTURE_REDACT_ATTRIBUTE, "text", snapshots);
+      continue;
+    }
     for (const leaf of element.querySelectorAll("*")) {
       if (leaf.children.length > 0 || leaf.textContent.trim().length === 0)
         continue;
@@ -3677,8 +3681,8 @@ var CAPTURE_WINDOW_STYLE = `:root {
   --incodex-capture-font-base: var(--text-base, 14px);
   --incodex-capture-font-sm: var(--text-sm, 13px);
   --incodex-capture-font-xs: var(--text-xs, 12px);
-  --incodex-capture-icon-compact: calc(var(--incodex-capture-space) * 3.5);
-  --incodex-capture-icon-xs: calc(var(--incodex-capture-space) * 4);
+  --incodex-capture-icon-sm: calc(var(--incodex-capture-space) * 3.5);
+  --incodex-capture-icon-base: calc(var(--incodex-capture-space) * 4);
   --incodex-capture-radius-sm: var(--radius-sm, 6px);
   --incodex-capture-radius-md: var(--radius-md, 8px);
   --incodex-capture-radius-lg: var(--radius-lg, 10px);
@@ -3834,6 +3838,11 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   min-width: 0;
 }
 
+.incodex-capture-heading > svg {
+  height: var(--incodex-capture-icon-base);
+  width: var(--incodex-capture-icon-base);
+}
+
 .incodex-capture-title {
   font-size: var(--incodex-capture-font-base);
   font-weight: var(--font-weight-medium, 500);
@@ -3883,7 +3892,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 
 .incodex-capture-toolbar-divider {
   background: var(--incodex-capture-border);
-  height: var(--incodex-capture-icon-xs);
+  height: var(--incodex-capture-icon-base);
   margin-inline: calc(var(--incodex-capture-space) * .5);
   width: 1px;
 }
@@ -3936,6 +3945,11 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   justify-content: center;
   padding: 0;
   width: calc(var(--incodex-capture-space) * 6);
+}
+
+.incodex-capture-icon-button > svg {
+  height: var(--incodex-capture-icon-sm);
+  width: var(--incodex-capture-icon-sm);
 }
 
 .incodex-capture-icon-button[data-action="close"] {
@@ -4066,13 +4080,13 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   font-family: inherit;
   font-size: var(--incodex-capture-font-xs);
   font-weight: var(--font-weight-semibold, 600);
-  height: var(--incodex-capture-icon-xs);
+  height: var(--incodex-capture-icon-base);
   justify-content: center;
   padding: 0;
   position: absolute;
   right: -8px;
   top: -8px;
-  width: var(--incodex-capture-icon-xs);
+  width: var(--incodex-capture-icon-base);
 }
 
 .incodex-capture-region-confirmed[data-interactive="true"]:hover .incodex-capture-region-remove {
@@ -4176,6 +4190,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   grid-template-columns: repeat(5, calc(var(--incodex-capture-space) * 7));
   margin-top: calc(var(--incodex-capture-space) * 2);
   padding: var(--incodex-capture-space);
+  width: max-content;
 }
 
 .incodex-capture-background-option {
@@ -4202,11 +4217,11 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 .incodex-capture-background-option svg {
   color: var(--incodex-capture-primary-text);
   filter: drop-shadow(0 1px 2px color-mix(in srgb, var(--incodex-capture-primary) 40%, transparent));
-  height: var(--incodex-capture-icon-compact);
+  height: var(--incodex-capture-icon-sm);
   inset: 50% auto auto 50%;
   position: absolute;
   transform: translate(-50%, -50%);
-  width: var(--incodex-capture-icon-compact);
+  width: var(--incodex-capture-icon-sm);
 }
 
 .incodex-capture-color-label,
@@ -4285,9 +4300,9 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   background: var(--capture-solid-color);
   border: 1px solid rgb(0 0 0 / 20%);
   border-radius: var(--radius-full, 9999px);
-  height: var(--incodex-capture-icon-compact);
+  height: var(--incodex-capture-icon-sm);
   pointer-events: none;
-  width: var(--incodex-capture-icon-compact);
+  width: var(--incodex-capture-icon-sm);
 }
 
 .incodex-capture-range {
@@ -4324,6 +4339,11 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   height: calc(var(--incodex-capture-space) * 9);
   justify-content: center;
   padding-inline: calc(var(--incodex-capture-space) * 3);
+}
+
+.incodex-capture-button > svg {
+  height: var(--incodex-capture-icon-sm);
+  width: var(--incodex-capture-icon-sm);
 }
 
 .incodex-capture-button-secondary {
@@ -4442,8 +4462,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 @supports (corner-shape: superellipse(1.5)) {
   .incodex-capture-dialog,
   .incodex-capture-button,
-  .incodex-capture-icon-button,
-  .incodex-capture-background-option {
+  .incodex-capture-icon-button {
     corner-shape: var(--codex-corner-shape, superellipse(1.5));
   }
 }

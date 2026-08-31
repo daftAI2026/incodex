@@ -61,6 +61,10 @@ export function markCodexPrivacyPlaceholders(documentRoot: Document): () => void
 
 function markTextLeaves(elements: NodeListOf<HTMLElement>, snapshots: AttributeSnapshot[]): void {
   for (const element of elements) {
+    if (element.children.length === 0 && element.textContent.trim().length > 0) {
+      setTemporaryAttribute(element, CAPTURE_REDACT_ATTRIBUTE, "text", snapshots);
+      continue;
+    }
     for (const leaf of element.querySelectorAll("*")) {
       if (leaf.children.length > 0 || leaf.textContent.trim().length === 0) continue;
       setTemporaryAttribute(leaf, CAPTURE_REDACT_ATTRIBUTE, "text", snapshots);
