@@ -255,7 +255,8 @@ function Add-UserPath([string]$BinDirectory) {
 Confirm-Architecture
 $WorkRoot = Join-Path ([IO.Path]::GetTempPath()) ('incodex-setup-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $WorkRoot | Out-Null
-$InstallLock = $null
+$StableInstallLock = $null
+$LegacyInstallLock = $null
 
 try {
     $SumsPath = Join-Path $WorkRoot 'SHA256SUMS'
@@ -287,12 +288,22 @@ try {
     Ensure-PrivateDirectory $ReleasesRoot | Out-Null
     Ensure-PrivateDirectory $BinRoot | Out-Null
     $LockPath = Join-Path $UserRoot 'standalone-install.lock'
+    $LegacyLockPath = Join-Path $PackageRoot 'install.lock'
     if (Test-Path -LiteralPath $LockPath) {
         Assert-RegularFileNoReparse $LockPath 'installation lock'
     }
+    if (Test-Path -LiteralPath $LegacyLockPath) {
+        Assert-RegularFileNoReparse $LegacyLockPath 'legacy installation lock'
+    }
     try {
-        $InstallLock = New-Object IO.FileStream(
+        $StableInstallLock = New-Object IO.FileStream(
             $LockPath,
+            [IO.FileMode]::OpenOrCreate,
+            [IO.FileAccess]::ReadWrite,
+            [IO.FileShare]::None
+        )
+        $LegacyInstallLock = New-Object IO.FileStream(
+            $LegacyLockPath,
             [IO.FileMode]::OpenOrCreate,
             [IO.FileAccess]::ReadWrite,
             [IO.FileShare]::None
@@ -301,6 +312,7 @@ try {
         Stop-Installer 'another Incodex install or update is already running'
     }
     Set-PrivateFileAcl $LockPath
+    Set-PrivateFileAcl $LegacyLockPath
 
     if (Test-Path -LiteralPath $ReleaseRoot) {
         Assert-NoReparseAncestry $ReleaseRoot
@@ -369,8 +381,11 @@ exit /b %ERRORLEVEL%
         [Console]::WriteLine('Run: incodex --help')
     }
 } finally {
-    if ($null -ne $InstallLock) {
-        $InstallLock.Dispose()
+    if ($null -ne $LegacyInstallLock) {
+        $LegacyInstallLock.Dispose()
+    }
+    if ($null -ne $StableInstallLock) {
+        $StableInstallLock.Dispose()
     }
     Remove-Item -LiteralPath $WorkRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

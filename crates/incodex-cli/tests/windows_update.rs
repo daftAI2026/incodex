@@ -273,7 +273,10 @@ fn post_install_verification_uses_the_installer_generation_lock() {
         root.join("standalone-install.lock").is_file(),
         "installer lock must outlive deletion of packages/standalone"
     );
-    assert!(!package_root.join("install.lock").exists());
+    assert!(
+        package_root.join("install.lock").is_file(),
+        "migration lock must serialize with pre-stable installers"
+    );
     drop(first);
     acquire_windows_install_lock(&package_root).expect("lock is reusable after completion");
 

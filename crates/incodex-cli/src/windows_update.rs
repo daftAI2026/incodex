@@ -294,12 +294,12 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
 
 #[derive(Debug)]
 pub struct WindowsInstallLock {
-    _file: fs::File,
+    _files: Vec<fs::File>,
 }
 
 pub fn acquire_windows_install_lock(package_root: &Path) -> Result<WindowsInstallLock, String> {
     let lock = windows_install_lock_path(package_root)?;
-    acquire_windows_channel_lock(
+    let stable = acquire_windows_channel_lock_file(
         lock.parent()
             .ok_or_else(|| "Windows installation lock has no parent".to_string())?,
         lock.file_name()
@@ -307,7 +307,16 @@ pub fn acquire_windows_install_lock(package_root: &Path) -> Result<WindowsInstal
             .ok_or_else(|| "Windows installation lock name is invalid".to_string())?,
         "Windows installation lock",
         "another Incodex install or update is already running",
-    )
+    )?;
+    let legacy = acquire_windows_channel_lock_file(
+        package_root,
+        "install.lock",
+        "legacy Windows installation lock",
+        "another Incodex install or update is already running",
+    )?;
+    Ok(WindowsInstallLock {
+        _files: vec![stable, legacy],
+    })
 }
 
 pub fn windows_install_lock_path(package_root: &Path) -> Result<PathBuf, String> {
@@ -330,20 +339,21 @@ pub fn windows_install_lock_path(package_root: &Path) -> Result<PathBuf, String>
 }
 
 pub fn acquire_windows_update_lock(package_root: &Path) -> Result<WindowsInstallLock, String> {
-    acquire_windows_channel_lock(
+    let file = acquire_windows_channel_lock_file(
         package_root,
         "update.lock",
         "Windows update lock",
         "another Incodex update is already running",
-    )
+    )?;
+    Ok(WindowsInstallLock { _files: vec![file] })
 }
 
-fn acquire_windows_channel_lock(
+fn acquire_windows_channel_lock_file(
     package_root: &Path,
     name: &str,
     description: &str,
     busy: &str,
-) -> Result<WindowsInstallLock, String> {
+) -> Result<fs::File, String> {
     ensure_regular_non_reparse(package_root, "managed Windows package root")?;
     incodex_core::windows_session::verify_private_acl(package_root)?;
     let lock_path = package_root.join(name);
@@ -365,7 +375,7 @@ fn acquire_windows_channel_lock(
         .map_err(|_| busy.to_string())?;
     incodex_core::windows_session::apply_private_windows_acl(&lock_path)?;
     incodex_core::windows_session::verify_private_acl(&lock_path)?;
-    Ok(WindowsInstallLock { _file: file })
+    Ok(file)
 }
 
 pub fn write_windows_runtime_pending(user_root: &Path, version: &str) -> Result<(), String> {

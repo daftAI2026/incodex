@@ -29,15 +29,29 @@ const HANDOFF_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const HANDOFF_READY_POLL: Duration = Duration::from_millis(20);
 const CLEANUP_SCRIPT: &str = r#"
 $ErrorActionPreference = 'Stop'
-$InstallLock = $null
+$StableInstallLock = $null
+$LegacyInstallLock = $null
 
 try {
-    $InstallLock = New-Object IO.FileStream(
-        $env:INCODEX_SELF_UNINSTALL_LOCK,
+    $StableInstallLock = New-Object IO.FileStream(
+        $env:INCODEX_SELF_UNINSTALL_STABLE_LOCK,
         [IO.FileMode]::OpenOrCreate,
         [IO.FileAccess]::ReadWrite,
         [IO.FileShare]::None
     )
+    $LegacyInstallLock = New-Object IO.FileStream(
+        $env:INCODEX_SELF_UNINSTALL_LEGACY_LOCK,
+        [IO.FileMode]::OpenOrCreate,
+        [IO.FileAccess]::ReadWrite,
+        [IO.FileShare]::None
+    )
+
+    if (Test-Path -LiteralPath $env:INCODEX_SELF_UNINSTALL_PRIMARY) {
+        Remove-Item -LiteralPath $env:INCODEX_SELF_UNINSTALL_PRIMARY -Force -ErrorAction Stop
+    }
+    if (Test-Path -LiteralPath $env:INCODEX_SELF_UNINSTALL_ALIAS) {
+        Remove-Item -LiteralPath $env:INCODEX_SELF_UNINSTALL_ALIAS -Force -ErrorAction Stop
+    }
     [IO.File]::WriteAllText(
         $env:INCODEX_SELF_UNINSTALL_READY,
         'ready',
@@ -51,23 +65,63 @@ try {
         }
     }
 
+    $Package = $env:INCODEX_SELF_UNINSTALL_PACKAGE.TrimEnd('\')
+    $PackagePrefix = $Package + '\'
+    while ($true) {
+        $Managed = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+            try {
+                $ImagePath = $_.Path
+                $null -ne $ImagePath -and (
+                    $ImagePath -ieq $Package -or
+                    $ImagePath.StartsWith($PackagePrefix, [StringComparison]::OrdinalIgnoreCase)
+                )
+            } catch {
+                $false
+            }
+        })
+        if ($Managed.Count -eq 0) {
+            break
+        }
+        foreach ($Owner in $Managed) {
+            $Owner.WaitForExit()
+        }
+    }
+
     if (Test-Path -LiteralPath $env:INCODEX_SELF_UNINSTALL_PACKAGE) {
-        Remove-Item -LiteralPath $env:INCODEX_SELF_UNINSTALL_PACKAGE -Recurse -Force -ErrorAction Stop
+        Get-ChildItem -LiteralPath $env:INCODEX_SELF_UNINSTALL_PACKAGE -Force | Where-Object {
+            $_.FullName -ine $env:INCODEX_SELF_UNINSTALL_LEGACY_LOCK
+        } | ForEach-Object {
+            Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop
+        }
     }
-    if (Test-Path -LiteralPath $env:INCODEX_SELF_UNINSTALL_PRIMARY) {
-        Remove-Item -LiteralPath $env:INCODEX_SELF_UNINSTALL_PRIMARY -Force -ErrorAction Stop
+    if ($null -ne $LegacyInstallLock) {
+        $LegacyInstallLock.Dispose()
+        $LegacyInstallLock = $null
     }
-    if (Test-Path -LiteralPath $env:INCODEX_SELF_UNINSTALL_ALIAS) {
-        Remove-Item -LiteralPath $env:INCODEX_SELF_UNINSTALL_ALIAS -Force -ErrorAction Stop
+    if (Test-Path -LiteralPath $env:INCODEX_SELF_UNINSTALL_LEGACY_LOCK) {
+        Remove-Item -LiteralPath $env:INCODEX_SELF_UNINSTALL_LEGACY_LOCK -Force -ErrorAction Stop
+    }
+    if (Test-Path -LiteralPath $env:INCODEX_SELF_UNINSTALL_PACKAGE) {
+        Remove-Item -LiteralPath $env:INCODEX_SELF_UNINSTALL_PACKAGE -Force -ErrorAction Stop
     }
 
     if ($env:INCODEX_SELF_UNINSTALL_REMOVE_PATH -eq '1') {
         $Bin = $env:INCODEX_SELF_UNINSTALL_BIN.TrimEnd('\')
         $Current = [Environment]::GetEnvironmentVariable('Path', 'User')
-        $Entries = @($Current -split ';' | Where-Object {
-            -not [string]::IsNullOrWhiteSpace($_) -and $_.TrimEnd('\') -ine $Bin
-        })
-        [Environment]::SetEnvironmentVariable('Path', ($Entries -join ';'), 'User')
+        if ($null -ne $Current) {
+            $RetainedEntries = @()
+            $PathEntryRemoved = $false
+            foreach ($Entry in @($Current -split ';')) {
+                if ($Entry.TrimEnd('\') -ieq $Bin) {
+                    $PathEntryRemoved = $true
+                } else {
+                    $RetainedEntries += $Entry
+                }
+            }
+            if ($PathEntryRemoved) {
+                [Environment]::SetEnvironmentVariable('Path', ($RetainedEntries -join ';'), 'User')
+            }
+        }
     }
 
     Remove-Item -LiteralPath $env:INCODEX_SELF_UNINSTALL_BIN -Force -ErrorAction SilentlyContinue
@@ -79,8 +133,11 @@ try {
         (New-Object Text.UTF8Encoding($false))
     )
 } finally {
-    if ($null -ne $InstallLock) {
-        $InstallLock.Dispose()
+    if ($null -ne $LegacyInstallLock) {
+        $LegacyInstallLock.Dispose()
+    }
+    if ($null -ne $StableInstallLock) {
+        $StableInstallLock.Dispose()
     }
     Remove-Item -LiteralPath $env:INCODEX_SELF_UNINSTALL_READY -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $env:INCODEX_SELF_UNINSTALL_SCRIPT -Force -ErrorAction SilentlyContinue
@@ -224,11 +281,13 @@ pub fn start_windows_self_uninstall_handoff(
     let script_path = powershell_path(&script)?;
     let ready_path = powershell_path(&ready)?;
     let error_log = powershell_path(&error_log_path)?;
-    let install_lock = windows_install_lock_path(package_root)?;
+    let stable_install_lock = windows_install_lock_path(package_root)?;
+    let legacy_install_lock = package_root.join("install.lock");
     drop(crate::windows_update::acquire_windows_install_lock(
         package_root,
     )?);
-    let install_lock = powershell_path(&install_lock)?;
+    let stable_install_lock = powershell_path(&stable_install_lock)?;
+    let legacy_install_lock = powershell_path(&legacy_install_lock)?;
     let wait_pids = wait_pids
         .iter()
         .map(u32::to_string)
@@ -250,7 +309,8 @@ pub fn start_windows_self_uninstall_handoff(
         ])
         .arg(&script)
         .env("INCODEX_SELF_UNINSTALL_PIDS", wait_pids)
-        .env("INCODEX_SELF_UNINSTALL_LOCK", install_lock)
+        .env("INCODEX_SELF_UNINSTALL_STABLE_LOCK", stable_install_lock)
+        .env("INCODEX_SELF_UNINSTALL_LEGACY_LOCK", legacy_install_lock)
         .env("INCODEX_SELF_UNINSTALL_READY", ready_path)
         .env("INCODEX_SELF_UNINSTALL_PRIMARY", primary)
         .env("INCODEX_SELF_UNINSTALL_ALIAS", alias)
