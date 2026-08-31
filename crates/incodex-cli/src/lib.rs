@@ -86,6 +86,8 @@ pub mod windows_runtime_open;
 pub mod windows_status;
 #[cfg(target_os = "windows")]
 pub(crate) mod windows_system;
+#[cfg(target_os = "windows")]
+pub mod windows_update;
 
 #[cfg(not(target_os = "windows"))]
 use std::path::PathBuf;
