@@ -60,8 +60,17 @@ export async function capturePreparedWindow<T>(
   }
 }
 
-export function waitForCaptureFrame(): Promise<void> {
+export function waitForCaptureFrame(timeoutMs = 120): Promise<void> {
   return new Promise((resolve) => {
-    window.requestAnimationFrame(() => resolve());
+    let completed = false;
+    let timeout: ReturnType<typeof setTimeout>;
+    const finish = (): void => {
+      if (completed) return;
+      completed = true;
+      clearTimeout(timeout);
+      resolve();
+    };
+    timeout = setTimeout(finish, timeoutMs);
+    window.requestAnimationFrame(finish);
   });
 }
