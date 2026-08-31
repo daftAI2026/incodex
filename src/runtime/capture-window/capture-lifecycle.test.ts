@@ -99,6 +99,60 @@ describe("capture preparation lifecycle", () => {
     expect(classList.contains(CAPTURE_PRIVACY_CLASS)).toBe(false);
   });
 
+  test("treats begin and candidate discovery as best-effort preparation", async () => {
+    const classList = new FakeClassList();
+    const result = await capturePreparedWindow({
+      begin: async () => {
+        throw new Error("begin unavailable");
+      },
+      capture: async () => "png",
+      collectCandidates: () => {
+        throw new Error("scan failed");
+      },
+      privacyEnabled: true,
+      root: { classList },
+      waitForFrame: async () => {},
+    });
+
+    expect(result).toEqual({ candidates: [], source: "png" });
+  });
+
+  test("times out a stalled capture and rejects overlapping capture attempts", async () => {
+    const classList = new FakeClassList();
+    let finishCapture: ((value: string) => void) | undefined;
+    const firstCapture = capturePreparedWindow({
+      capture: () => new Promise<string>((resolve) => {
+        finishCapture = resolve;
+      }),
+      collectCandidates: () => [],
+      privacyEnabled: false,
+      root: { classList },
+      timeoutMs: 50,
+      waitForFrame: async () => {},
+    });
+
+    await expect(capturePreparedWindow({
+      capture: async () => "second",
+      collectCandidates: () => [],
+      privacyEnabled: false,
+      root: { classList: new FakeClassList() },
+      waitForFrame: async () => {},
+    })).rejects.toThrow("already in progress");
+
+    finishCapture?.("first");
+    expect((await firstCapture).source).toBe("first");
+
+    await expect(capturePreparedWindow({
+      capture: () => new Promise<string>(() => {}),
+      collectCandidates: () => [],
+      privacyEnabled: false,
+      root: { classList },
+      timeoutMs: 5,
+      waitForFrame: async () => {},
+    })).rejects.toThrow("timed out");
+    expect(classList.contains(CAPTURE_ACTIVE_CLASS)).toBe(false);
+  });
+
   test("finishes a frame wait when an occluded window does not receive animation frames", async () => {
     const originalWindow = globalThis.window;
     Object.defineProperty(globalThis, "window", {
