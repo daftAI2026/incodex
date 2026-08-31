@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
+import { readFileSync } from "node:fs";
 
 const bootstrapPath = join(import.meta.dir, "../crates/incodex-cli/assets/incodex-windows-bootstrap.cjs");
 
@@ -179,8 +180,11 @@ describe("Windows Runtime bootstrap", () => {
     electronLoaded?.();
     expect(loaded).toHaveLength(1);
     expect(loaded).toEqual([
-      join(runtimeRoot, "releases", "0.6.0-newreleasehash", "incodex-main.cjs"),
+      win32.join(runtimeRoot, "releases", "0.6.0-newreleasehash", "incodex-main.cjs"),
     ]);
+    expect(readFileSync(bootstrapPath, "utf8")).toContain(
+      'load(path.win32.join(runtimeDir, "incodex-main.cjs"));',
+    );
   });
 
   test("fails closed when durable install ownership is absent, disabled, or mismatched", () => {

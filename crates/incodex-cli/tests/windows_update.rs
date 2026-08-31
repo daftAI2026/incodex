@@ -2,6 +2,7 @@
 
 use std::cmp::Ordering;
 use std::path::PathBuf;
+use std::process::Command;
 use std::{fs, path::Path};
 
 use incodex_cli::windows_update::{
@@ -187,6 +188,59 @@ fn runtime_handoff_is_durable_until_the_expected_cli_completes_it() {
     assert!(write_windows_runtime_pending(&root, "v9.9.9").is_err());
 
     fs::remove_dir_all(root).expect("remove pending fixture");
+}
+
+#[test]
+fn runtime_handoff_rejects_a_reparse_cache_ancestor() {
+    let root = std::env::temp_dir().join(format!(
+        "incodex-windows-runtime-pending-reparse-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos()
+    ));
+    let user_root = root.join("user-root");
+    let external_root = root.join("external-root");
+    fs::create_dir_all(&root).expect("create reparse fixture root");
+    incodex_core::windows_session::ensure_private_windows_dir(&user_root)
+        .expect("create private user root");
+    write_windows_runtime_pending(&external_root, "9.9.9").expect("write external pending handoff");
+    let cache = user_root.join("cache");
+    let external_cache = external_root.join("cache");
+    let linked = Command::new("cmd.exe")
+        .args(["/d", "/c", "mklink", "/J"])
+        .arg(&cache)
+        .arg(&external_cache)
+        .output()
+        .expect("create cache junction");
+    assert!(
+        linked.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&linked.stdout),
+        String::from_utf8_lossy(&linked.stderr)
+    );
+
+    let read = read_windows_runtime_pending(&user_root);
+    let clear = clear_windows_runtime_pending(&user_root);
+    let external_pending_remains = external_cache
+        .join("windows_runtime_update_pending.json")
+        .exists();
+
+    Command::new("cmd.exe")
+        .args(["/d", "/c", "rmdir"])
+        .arg(&cache)
+        .status()
+        .expect("remove cache junction");
+    fs::remove_dir_all(&root).expect("remove reparse fixture");
+
+    assert!(read
+        .expect_err("read through a cache junction must fail closed")
+        .contains("reparse point"));
+    assert!(clear
+        .expect_err("clear through a cache junction must fail closed")
+        .contains("reparse point"));
+    assert!(external_pending_remains);
 }
 
 #[test]
