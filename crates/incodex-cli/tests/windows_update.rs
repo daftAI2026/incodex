@@ -6,8 +6,8 @@ use std::{fs, path::Path};
 use incodex_cli::windows_update::{
     acquire_windows_install_lock, clear_windows_runtime_pending, expected_release_sha256,
     parse_windows_main_commit, parse_windows_stable_release, read_windows_runtime_pending,
-    validate_managed_install_identity, windows_release_asset, write_windows_runtime_pending,
-    WindowsStandaloneLayout,
+    validate_managed_install_identity, validate_windows_user_root, windows_release_asset,
+    write_windows_runtime_pending, WindowsStandaloneLayout,
 };
 
 #[test]
@@ -202,4 +202,15 @@ fn post_install_verification_uses_the_installer_generation_lock() {
     acquire_windows_install_lock(&root).expect("lock is reusable after completion");
 
     fs::remove_dir_all(root).expect("remove lock fixture");
+}
+
+#[test]
+fn managed_updates_stay_under_the_current_token_profile() {
+    let profile = Path::new(r"C:\Users\Kid");
+    validate_windows_user_root(Path::new(r"C:\Users\Kid\.incodex"), profile)
+        .expect("default per-user installation");
+    assert!(validate_windows_user_root(Path::new(r"D:\shared\incodex"), profile).is_err());
+    assert!(
+        validate_windows_user_root(Path::new(r"C:\Users\Kid\.incodex\nested"), profile).is_err()
+    );
 }
