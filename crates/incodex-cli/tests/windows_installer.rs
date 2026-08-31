@@ -92,10 +92,13 @@ fn installs_a_verified_versioned_release_and_two_launchers() {
     let alias_body = fs::read_to_string(&alias).expect("read alias launcher");
     assert!(primary_body.contains("INCODEX_MANAGED_BY_STANDALONE=1"));
     assert!(primary_body.contains("INCODEX_MANAGED_PACKAGE_ROOT="));
-    assert!(primary_body.contains(&format!(
-        r"packages\standalone\releases\{}\incodex.exe",
-        env!("CARGO_PKG_VERSION")
-    )));
+    assert!(primary_body.contains("INCODEX_VERSION"));
+    assert!(primary_body.contains(r"packages\standalone\current"));
+    assert!(primary_body.contains("DisableDelayedExpansion"));
+    assert!(
+        !primary_body.contains(&format!(r"releases\{}", env!("CARGO_PKG_VERSION"))),
+        "launcher must not be rewritten for each release"
+    );
     assert!(alias_body.contains("incodex.cmd"));
 
     let launched = Command::new("cmd.exe")
