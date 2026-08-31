@@ -6,8 +6,8 @@ use std::{fs, path::Path};
 use incodex_cli::windows_update::{
     acquire_windows_install_lock, clear_windows_runtime_pending, expected_release_sha256,
     parse_windows_main_commit, parse_windows_stable_release, read_windows_runtime_pending,
-    validate_managed_install_identity, validate_windows_user_root, windows_release_asset,
-    write_windows_runtime_pending, WindowsStandaloneLayout,
+    validate_managed_install_identity, validate_windows_download_size, validate_windows_user_root,
+    windows_release_asset, write_windows_runtime_pending, WindowsStandaloneLayout,
 };
 
 #[test]
@@ -212,5 +212,14 @@ fn managed_updates_stay_under_the_current_token_profile() {
     assert!(validate_windows_user_root(Path::new(r"D:\shared\incodex"), profile).is_err());
     assert!(
         validate_windows_user_root(Path::new(r"C:\Users\Kid\.incodex\nested"), profile).is_err()
+    );
+}
+
+#[test]
+fn update_metadata_and_scripts_have_explicit_size_bounds() {
+    validate_windows_download_size("release metadata", 1, 256 * 1024).expect("bounded metadata");
+    assert!(validate_windows_download_size("release metadata", 0, 256 * 1024).is_err());
+    assert!(
+        validate_windows_download_size("stable installer", 1024 * 1024 + 1, 1024 * 1024).is_err()
     );
 }
