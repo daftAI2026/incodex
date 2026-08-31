@@ -48,9 +48,16 @@ describe("incognito button exit affordance", () => {
   });
 
   test("shows circle-x only while an incognito button is hovered", () => {
-    expect(inject).toMatch(
-      /isIncognitoWindow\(\)\s*&&\s*btn\.getAttribute\("data-incodex-hovered"\) === "true"\s*\? "circle-x"\s*:\s*"hat-glasses"/,
+    const iconSelection = inject.slice(
+      inject.indexOf("function setButtonIcon"),
+      inject.indexOf("function setButtonHover"),
     );
+    expect(iconSelection).toContain('if (isCaptureDebug())');
+    expect(iconSelection).toContain('name = "camera"');
+    expect(iconSelection).toContain(
+      'else if (isIncognitoWindow() && btn.getAttribute("data-incodex-hovered") === "true")',
+    );
+    expect(iconSelection).toContain('name = "circle-x"');
   });
 
   test("routes pointer enter and leave through icon switching without changing click semantics", () => {
