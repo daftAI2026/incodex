@@ -118,6 +118,12 @@ describe("capture window preview", () => {
     expect(css).toContain("height: calc(var(--incodex-capture-space) * 7)");
     expect(css).toContain("height: 50vh");
     expect(css).toContain("background-size: 16px 16px");
+    expect(css).toContain("html.incodex-capturing [data-incodex-capture-hide]");
+    expect(css).toContain("color-mix(in srgb, currentColor 22%, transparent)");
+    expect(css).toContain('[data-incodex-capture-redact="blank"]::after');
+    expect(css).toContain('[data-incodex-capture-redact="center"]::after');
+    expect(css).toContain(":nth-child(4n+1) [data-incodex-capture-redact]::after");
+    expect(css).toContain(".mac-traffic-light:first-of-type > div");
     expect(css).toMatch(
       /\.incodex-capture-background-option\[aria-pressed="true"\][\s\S]*?box-shadow: 0 0 0 2px var\(--incodex-capture-surface\), 0 0 0 4px var\(--incodex-capture-ring\)/,
     );
