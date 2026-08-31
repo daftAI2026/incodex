@@ -5,6 +5,29 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+$TestMode = $env:INCODEX_TEST_MODE -eq '1'
+$InternalUpdate = $env:INCODEX_INTERNAL_UPDATE -eq '1'
+$TestOnlyOverrides = @(
+    'INCODEX_ARCH',
+    'INCODEX_DOWNLOAD_DIR',
+    'INCODEX_REPO',
+    'INCODEX_SKIP_PATH',
+    'INCODEX_USER_ROOT'
+)
+if (-not $TestMode) {
+    foreach ($Name in $TestOnlyOverrides) {
+        if ([Environment]::GetEnvironmentVariable($Name)) {
+            [Console]::Error.WriteLine("incodex installer: $Name is a test-only override")
+            exit 1
+        }
+    }
+}
+if (-not $TestMode -and -not $InternalUpdate -and
+    ($env:INCODEX_DOWNLOAD_BASE -or $env:INCODEX_EXPECTED_VERSION)) {
+    [Console]::Error.WriteLine('incodex installer: pinned release overrides require inc update')
+    exit 1
+}
+
 $Repository = if ($env:INCODEX_REPO) { $env:INCODEX_REPO } else { 'daftAI2026/incodex' }
 $DownloadBase = if ($env:INCODEX_DOWNLOAD_BASE) {
     $env:INCODEX_DOWNLOAD_BASE.TrimEnd('/')
