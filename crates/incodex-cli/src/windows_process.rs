@@ -1,10 +1,12 @@
 use std::collections::HashSet;
-use std::ffi::c_void;
+use std::ffi::{c_void, OsString};
 use std::io;
 use std::mem::size_of;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
+use std::os::windows::ffi::OsStringExt;
 use std::os::windows::io::AsRawHandle;
 use std::os::windows::process::{CommandExt, ExitStatusExt};
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -37,9 +39,9 @@ use windows_sys::Win32::System::JobObjects::{
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
 use windows_sys::Win32::System::Threading::{
-    GetCurrentProcess, GetExitCodeProcess, OpenProcess, OpenThread, ResumeThread, TerminateProcess,
-    WaitForSingleObject, CREATE_SUSPENDED, INFINITE, PROCESS_QUERY_LIMITED_INFORMATION,
-    PROCESS_SET_QUOTA, PROCESS_TERMINATE, THREAD_SUSPEND_RESUME,
+    GetCurrentProcess, GetExitCodeProcess, OpenProcess, OpenThread, QueryFullProcessImageNameW,
+    ResumeThread, TerminateProcess, WaitForSingleObject, CREATE_SUSPENDED, INFINITE,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_QUOTA, PROCESS_TERMINATE, THREAD_SUSPEND_RESUME,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible,
@@ -684,6 +686,71 @@ pub fn running_package_process_ids(expected_package_full_name: &str) -> io::Resu
     Ok(matches)
 }
 
+pub fn running_process_ids_under_root(root: &Path) -> io::Result<Vec<u32>> {
+    let root = normalized_windows_process_path(root);
+    let prefix = format!("{root}\\");
+    running_process_ids_matching(|path| {
+        let path = normalized_windows_process_path(path);
+        path == root || path.starts_with(&prefix)
+    })
+}
+
+fn running_process_ids_matching(
+    mut matches_path: impl FnMut(&Path) -> bool,
+) -> io::Result<Vec<u32>> {
+    let process_ids = snapshot_process_ids()?;
+    Ok(collect_running_process_ids_matching(
+        process_ids,
+        process_image_path,
+        &mut matches_path,
+    ))
+}
+
+fn collect_running_process_ids_matching(
+    process_ids: impl IntoIterator<Item = u32>,
+    mut image_path: impl FnMut(u32) -> io::Result<PathBuf>,
+    mut matches_path: impl FnMut(&Path) -> bool,
+) -> Vec<u32> {
+    let mut matches = Vec::new();
+    for process_id in process_ids {
+        match image_path(process_id) {
+            Ok(path) if matches_path(&path) => matches.push(process_id),
+            Ok(_) => {}
+            Err(_) => {}
+        }
+    }
+    matches.sort_unstable();
+    matches
+}
+
+fn process_image_path(process_id: u32) -> io::Result<PathBuf> {
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
+    let process = OwnedHandle::from_nullable(process)?;
+    let mut wide = vec![0u16; 260];
+    loop {
+        let mut length = wide.len() as u32;
+        if unsafe { QueryFullProcessImageNameW(process.raw(), 0, wide.as_mut_ptr(), &mut length) }
+            != 0
+        {
+            wide.truncate(length as usize);
+            return Ok(PathBuf::from(OsString::from_wide(&wide)));
+        }
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() == Some(ERROR_INSUFFICIENT_BUFFER as i32) && wide.len() < 32_768 {
+            wide.resize((wide.len() * 2).min(32_768), 0);
+            continue;
+        }
+        return Err(error);
+    }
+}
+
+fn normalized_windows_process_path(path: &Path) -> String {
+    crate::windows_system::windows_path_for_display(path)
+        .trim_end_matches(['\\', '/'])
+        .replace('/', "\\")
+        .to_lowercase()
+}
+
 pub fn authenticate_process_in_named_job(
     job_name: &str,
     expected_package_full_name: &str,
@@ -945,9 +1012,25 @@ mod tests {
     use crate::windows_activation_capability::WindowsActivationCapability;
 
     use super::{
-        ipv4_connection_server_owner, is_primary_visible_window, require_process_package_identity,
-        WindowsPendingJob,
+        collect_running_process_ids_matching, ipv4_connection_server_owner,
+        is_primary_visible_window, require_process_package_identity, WindowsPendingJob,
     };
+
+    #[test]
+    fn per_process_image_failures_do_not_abort_the_managed_root_snapshot() {
+        let process_ids = collect_running_process_ids_matching(
+            [11, 12, 13],
+            |process_id| match process_id {
+                11 => Err(std::io::Error::from_raw_os_error(31)),
+                12 => Ok(std::path::PathBuf::from(r"C:\managed\incodex.exe")),
+                13 => Ok(std::path::PathBuf::from(r"C:\Windows\system.exe")),
+                _ => unreachable!(),
+            },
+            |path| path.starts_with(r"C:\managed"),
+        );
+
+        assert_eq!(process_ids, vec![12]);
+    }
 
     #[test]
     fn input_method_status_window_is_not_a_primary_codex_window() {

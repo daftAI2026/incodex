@@ -9,6 +9,9 @@ use std::time::Duration;
 
 use crate::parse::ParsedCli;
 use crate::windows_system::{system_binary_path, windows_path_for_display};
+use crate::windows_update_flow::{
+    run_windows_installer_fallback, run_windows_update_pipeline, WindowsUpdateProgress,
+};
 use incodex_core::windows_path::reject_reparse_ancestors;
 use serde::{Deserialize, Serialize};
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
@@ -17,7 +20,7 @@ const WINDOWS_LATEST_RELEASE_URL: &str =
     "https://api.github.com/repos/daftAI2026/incodex/releases/latest";
 const WINDOWS_MAIN_COMMIT_URL: &str =
     "https://api.github.com/repos/daftAI2026/incodex/commits/main";
-const WINDOWS_MAIN_INSTALLER_URL: &str =
+pub(crate) const WINDOWS_MAIN_INSTALLER_URL: &str =
     "https://raw.githubusercontent.com/daftAI2026/incodex/main/install.ps1";
 const MANAGED_BY_STANDALONE_ENV: &str = "INCODEX_MANAGED_BY_STANDALONE";
 const MANAGED_PACKAGE_ROOT_ENV: &str = "INCODEX_MANAGED_PACKAGE_ROOT";
@@ -241,10 +244,7 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
         ));
     }
     let package_root = managed_package_root()?;
-    let display_command = format!(
-        "powershell -ExecutionPolicy Bypass -c \"$env:INCODEX_NON_INTERACTIVE='1'; irm {WINDOWS_MAIN_INSTALLER_URL} | iex\""
-    );
-    println!("Updating Incodex via `{display_command}`...\n");
+    println!("update channel: windows standalone");
     if parsed.dry_run {
         println!("would install the latest verified Windows release");
         println!("would publish Runtime with the installed CLI");
@@ -262,65 +262,92 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
         let _lock = acquire_windows_install_lock(&package_root)?;
         repair_pending_runtime(&user_root, &package_root)?;
     }
-    let (release_ordering, latest_tag) =
-        install_latest_stable_release(&package_root, env!("CARGO_PKG_VERSION"))?;
-    let _lock = acquire_windows_install_lock(&package_root)?;
-    let (installed, expected_version) = current_release_executable(&package_root)?;
-    verify_cli_version(&installed, &expected_version)?;
-    write_windows_runtime_pending(&user_root, &expected_version)?;
-    publish_runtime_with(&installed)?;
-    if read_windows_runtime_pending(&user_root)?.is_some() {
-        return Err("CLI was updated, but Runtime synchronization remains pending".to_string());
-    }
-    match release_ordering {
-        VersionOrdering::Greater => {
-            println!("\n🎉 Update ran successfully! Please quit and reopen Codex.");
-        }
-        VersionOrdering::Equal => {
-            println!("Already on latest version, {}", env!("CARGO_PKG_VERSION"));
-            println!("Runtime is synchronized. Fully quit and reopen Codex to reload it.");
-        }
-        VersionOrdering::Less => {
-            println!(
-                "Current version {} is newer than latest release {}.",
-                env!("CARGO_PKG_VERSION"),
-                latest_tag
-            );
-            println!("Runtime is synchronized. Fully quit and reopen Codex to reload it.");
-        }
-    }
-    Ok(())
+    let mut progress = crate::spinner::Progress::new();
+    let mut stdout = std::io::stdout();
+    run_windows_update_pipeline(
+        &mut progress,
+        &mut stdout,
+        |progress| {
+            install_latest_stable_release(&package_root, env!("CARGO_PKG_VERSION"), progress)
+        },
+        || {
+            let _lock = acquire_windows_install_lock(&package_root)?;
+            let (installed, expected_version) = current_release_executable(&package_root)?;
+            verify_cli_version(&installed, &expected_version)?;
+            write_windows_runtime_pending(&user_root, &expected_version)?;
+            publish_runtime_with(&installed)?;
+            if read_windows_runtime_pending(&user_root)?.is_some() {
+                return Err(
+                    "CLI was updated, but Runtime synchronization remains pending".to_string(),
+                );
+            }
+            Ok(())
+        },
+    )
 }
 
 #[derive(Debug)]
 pub struct WindowsInstallLock {
-    _file: fs::File,
+    _files: Vec<fs::File>,
 }
 
 pub fn acquire_windows_install_lock(package_root: &Path) -> Result<WindowsInstallLock, String> {
-    acquire_windows_channel_lock(
-        package_root,
-        "install.lock",
+    let lock = windows_install_lock_path(package_root)?;
+    let stable = acquire_windows_channel_lock_file(
+        lock.parent()
+            .ok_or_else(|| "Windows installation lock has no parent".to_string())?,
+        lock.file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "Windows installation lock name is invalid".to_string())?,
         "Windows installation lock",
         "another Incodex install or update is already running",
-    )
+    )?;
+    let legacy = acquire_windows_channel_lock_file(
+        package_root,
+        "install.lock",
+        "legacy Windows installation lock",
+        "another Incodex install or update is already running",
+    )?;
+    Ok(WindowsInstallLock {
+        _files: vec![stable, legacy],
+    })
+}
+
+pub fn windows_install_lock_path(package_root: &Path) -> Result<PathBuf, String> {
+    let packages = package_root
+        .parent()
+        .filter(|path| path.file_name().is_some_and(|name| name == "packages"))
+        .ok_or_else(|| "managed Windows package root has an invalid layout".to_string())?;
+    if package_root
+        .file_name()
+        .is_none_or(|name| name != "standalone")
+    {
+        return Err("managed Windows package root has an invalid layout".to_string());
+    }
+    let user_root = packages
+        .parent()
+        .ok_or_else(|| "managed Windows package root has no user root".to_string())?;
+    ensure_regular_non_reparse(user_root, "managed Windows user root")?;
+    incodex_core::windows_session::verify_private_acl(user_root)?;
+    Ok(user_root.join("standalone-install.lock"))
 }
 
 pub fn acquire_windows_update_lock(package_root: &Path) -> Result<WindowsInstallLock, String> {
-    acquire_windows_channel_lock(
+    let file = acquire_windows_channel_lock_file(
         package_root,
         "update.lock",
         "Windows update lock",
         "another Incodex update is already running",
-    )
+    )?;
+    Ok(WindowsInstallLock { _files: vec![file] })
 }
 
-fn acquire_windows_channel_lock(
+fn acquire_windows_channel_lock_file(
     package_root: &Path,
     name: &str,
     description: &str,
     busy: &str,
-) -> Result<WindowsInstallLock, String> {
+) -> Result<fs::File, String> {
     ensure_regular_non_reparse(package_root, "managed Windows package root")?;
     incodex_core::windows_session::verify_private_acl(package_root)?;
     let lock_path = package_root.join(name);
@@ -342,7 +369,7 @@ fn acquire_windows_channel_lock(
         .map_err(|_| busy.to_string())?;
     incodex_core::windows_session::apply_private_windows_acl(&lock_path)?;
     incodex_core::windows_session::verify_private_acl(&lock_path)?;
-    Ok(WindowsInstallLock { _file: file })
+    Ok(file)
 }
 
 pub fn write_windows_runtime_pending(user_root: &Path, version: &str) -> Result<(), String> {
@@ -488,7 +515,7 @@ pub fn validate_windows_user_root(user_root: &Path, profile: &Path) -> Result<()
     }
 }
 
-fn managed_package_root() -> Result<PathBuf, String> {
+pub(crate) fn managed_package_root() -> Result<PathBuf, String> {
     let value = std::env::var_os(MANAGED_PACKAGE_ROOT_ENV).ok_or_else(|| {
         "managed Windows installation did not provide its package root".to_string()
     })?;
@@ -513,6 +540,7 @@ pub fn windows_release_ordering(
 fn install_latest_stable_release(
     package_root: &Path,
     current: &str,
+    progress: &mut impl WindowsUpdateProgress,
 ) -> Result<(VersionOrdering, String), String> {
     let work = UpdateWorkDirectory::create(package_root)?;
     let metadata_path = work.path.join("latest.json");
@@ -537,33 +565,33 @@ fn install_latest_stable_release(
         "stable installer",
         INSTALLER_SCRIPT_LIMIT,
     )?;
-    let first = run_windows_installer(&tagged_installer, &release);
-    if first.is_ok() {
-        return Ok((VersionOrdering::Greater, release.tag().to_string()));
-    }
-
-    eprintln!(
-        "Stable installer did not complete: {}",
-        first.expect_err("failed installer result")
-    );
-    let main_metadata_path = work.path.join("main.json");
-    download_with_powershell(
-        WINDOWS_MAIN_COMMIT_URL,
-        &main_metadata_path,
-        "main commit metadata",
-        RELEASE_METADATA_LIMIT,
+    let mut stderr = std::io::stderr();
+    run_windows_installer_fallback(
+        progress,
+        &mut stderr,
+        || run_windows_installer(&tagged_installer, &release),
+        || {
+            let main_metadata_path = work.path.join("main.json");
+            download_with_powershell(
+                WINDOWS_MAIN_COMMIT_URL,
+                &main_metadata_path,
+                "main commit metadata",
+                RELEASE_METADATA_LIMIT,
+            )?;
+            let main_metadata = fs::read(&main_metadata_path).map_err(|error| {
+                format!("update failed: cannot read main commit metadata: {error}")
+            })?;
+            let snapshot = parse_windows_main_commit(&main_metadata)?;
+            let compatibility_installer = work.path.join("install.compatibility.ps1");
+            download_with_powershell(
+                snapshot.installer_url(),
+                &compatibility_installer,
+                "compatibility installer",
+                INSTALLER_SCRIPT_LIMIT,
+            )?;
+            run_windows_installer(&compatibility_installer, &release)
+        },
     )?;
-    let main_metadata = fs::read(&main_metadata_path)
-        .map_err(|error| format!("update failed: cannot read main commit metadata: {error}"))?;
-    let snapshot = parse_windows_main_commit(&main_metadata)?;
-    let compatibility_installer = work.path.join("install.compatibility.ps1");
-    download_with_powershell(
-        snapshot.installer_url(),
-        &compatibility_installer,
-        "compatibility installer",
-        INSTALLER_SCRIPT_LIMIT,
-    )?;
-    run_windows_installer(&compatibility_installer, &release)?;
     Ok((VersionOrdering::Greater, release.tag().to_string()))
 }
 
@@ -583,16 +611,14 @@ fn run_windows_installer(installer: &Path, release: &WindowsStableRelease) -> Re
         .env("INCODEX_INTERNAL_UPDATE", "1")
         .env("INCODEX_DOWNLOAD_BASE", release.download_base())
         .env("INCODEX_EXPECTED_VERSION", release.version());
-    let status = command
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()
+    let output = command
+        .stdin(Stdio::null())
+        .output()
         .map_err(|error| format!("could not start the Windows installer: {error}"))?;
-    if status.success() {
+    if output.status.success() {
         Ok(())
     } else {
-        Err(format!("Windows installer failed with {status}"))
+        Err(command_failure("Windows installer", &output))
     }
 }
 
@@ -747,17 +773,33 @@ fn verify_cli_version(installed: &Path, expected: &str) -> Result<(), String> {
 }
 
 fn publish_runtime_with(installed: &Path) -> Result<(), String> {
-    let status = Command::new(installed)
+    let output = Command::new(installed)
         .arg("runtime")
         .stdin(Stdio::null())
-        .status()
+        .output()
         .map_err(|error| format!("could not publish Runtime with the installed CLI: {error}"))?;
-    if status.success() {
+    if output.status.success() {
         Ok(())
     } else {
         Err(format!(
-            "CLI was updated, but Runtime synchronization failed with {status}"
+            "CLI was updated, but Runtime synchronization failed\n{}",
+            command_failure("Runtime command", &output)
         ))
+    }
+}
+
+fn command_failure(label: &str, output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let detail = [stderr.trim(), stdout.trim()]
+        .into_iter()
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if detail.is_empty() {
+        format!("{label} failed with {}", output.status)
+    } else {
+        format!("{label} failed with {}\n{detail}", output.status)
     }
 }
 

@@ -83,7 +83,7 @@ Platform installers use prebuilt native Rust binaries and do not require Bun. A 
 
 ## Security & Safety Design
 
-The primary `incodex open` path does not patch Codex. On macOS, the optional `incodex install` path adds the in-app button by modifying and re-signing the local app bundle. On Windows, it never patches or copies the Microsoft Store package; it registers a separately owned, per-user Runtime integration. `install` and `uninstall` print a plan before destructive work: TTY asks once, non-TTY needs `--yes`, and `--dry-run` only prints. macOS `self-uninstall` follows the same rule. On macOS, `recover` is the explicit transaction-recovery exception: it requires `--transaction <id>`, does not accept `--dry-run`, and resumes only that existing journal.
+The primary `incodex open` path does not patch Codex. On macOS, the optional `incodex install` path adds the in-app button by modifying and re-signing the local app bundle. On Windows, it never patches or copies the Microsoft Store package; it registers a separately owned, per-user Runtime integration. `install`, `uninstall`, and supported `self-uninstall` channels print a plan before destructive work: TTY asks once, non-TTY needs `--yes`, and `--dry-run` only prints. On Windows, `self-uninstall` removes only the managed CLI and its exact user PATH entry by default; `--restore-app` first removes the Runtime integration, while Runtime files and session state remain. On macOS, `recover` is the explicit transaction-recovery exception: it requires `--transaction <id>`, does not accept `--dry-run`, and resumes only that existing journal.
 
 - Official plugins cannot add this button. macOS changes the app bundle; Windows keeps the Store package intact and uses its platform integration boundary
 - After the default official-app install, a valid OpenAI signature cannot be kept. On the next launch, macOS may ask the patched app to access **Codex Storage Key**. Only if the dialog names the expected app and Keychain item should you enter your **Mac login password** (not your ChatGPT password) and choose **Always Allow**. **Allow** / **Allow Once** grants only that access and may prompt again later; if the details do not match, choose **Deny**. The CLI does not give permanent-authorization advice for `--clone` or `--app` targets
@@ -295,7 +295,7 @@ incodex open --mask         # Temporary sidebar name and offline avatar
 incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
 incodex recover --transaction <id>  # macOS only
 inc update                  # Update Incodex through its install channel
-incodex self-uninstall      # macOS only: remove the CLI
+incodex self-uninstall      # Remove the CLI; add --restore-app to remove app integration
 ```
 
 **Preview safely**
@@ -305,7 +305,7 @@ incodex install --dry-run
 incodex uninstall --dry-run
 incodex open --dry-run
 inc update --dry-run
-incodex self-uninstall --dry-run  # macOS only
+incodex self-uninstall --dry-run
 incodex status --json
 incodex doctor --json
 incodex doctor --deep --json      # macOS only
