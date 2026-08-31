@@ -3,16 +3,16 @@ import { capturePhysicalPadding, renderCaptureToCanvas } from "./compositor.ts";
 import { anchoredPanForZoom, viewportRectToSource } from "./geometry.ts";
 import {
   applyCaptureCommand,
-  CAPTURE_MAX_ZOOM,
-  CAPTURE_MIN_ZOOM,
   type CaptureCandidate,
   capturePointerIntent,
   createCaptureWindowState,
   type CapturePresetId,
   type CaptureRect,
   type CaptureRedactionStyle,
+  scaleCaptureZoom,
   type CaptureWindowCommand,
   type CaptureWindowState,
+  wheelCaptureZoom,
 } from "./model.ts";
 import { captureWindowTemplate } from "./view.ts";
 
@@ -136,7 +136,11 @@ export function mountCaptureWindowEditor(
 
     const rendered = renderCanvas();
     const frame = root.querySelector<HTMLElement>(".incodex-capture-canvas-frame");
-    wireActions(root, dispatch, dispatchRegion, preview);
+    wireActions(root, dispatch, dispatchRegion, preview, () => {
+      panX = 0;
+      panY = 0;
+      dispatch({ kind: "set-zoom", zoom: 1 });
+    });
     wireStage(
       root,
       rendered,
@@ -290,6 +294,7 @@ function wireActions(
   dispatch: (command: CaptureWindowCommand) => void,
   dispatchRegion: (command: CaptureWindowCommand) => void,
   preview: (command: CaptureWindowCommand) => void,
+  resetView: () => void,
 ): void {
   const actions: Record<string, CaptureWindowCommand> = {
     "source-auto": { kind: "set-redaction-source", source: "auto" },
@@ -317,13 +322,13 @@ function wireActions(
     });
   }
   root.querySelector<HTMLElement>("[data-action='zoom-in']")?.addEventListener("click", () => {
-    dispatch({ kind: "set-zoom", zoom: currentZoom(root) + 0.1 });
+    dispatch({ kind: "set-zoom", zoom: scaleCaptureZoom(currentZoom(root), 1.25) });
   });
   root.querySelector<HTMLElement>("[data-action='zoom-out']")?.addEventListener("click", () => {
-    dispatch({ kind: "set-zoom", zoom: currentZoom(root) - 0.1 });
+    dispatch({ kind: "set-zoom", zoom: scaleCaptureZoom(currentZoom(root), 1 / 1.25) });
   });
   root.querySelector<HTMLElement>("[data-action='zoom-reset']")?.addEventListener("click", () => {
-    dispatch({ kind: "set-zoom", zoom: 1 });
+    resetView();
   });
   for (const option of root.querySelectorAll<HTMLElement>("[data-background]")) {
     option.addEventListener("click", () => {
@@ -429,10 +434,7 @@ function wireStage(
 
   stage.addEventListener("wheel", (event) => {
     event.preventDefault();
-    const nextZoom = Math.min(
-      CAPTURE_MAX_ZOOM,
-      Math.max(CAPTURE_MIN_ZOOM, state.zoom + (event.deltaY < 0 ? 0.1 : -0.1)),
-    );
+    const nextZoom = wheelCaptureZoom(state.zoom, event.deltaY);
     const stageRect = stage.getBoundingClientRect();
     const currentPan = readPan();
     const pan = anchoredPanForZoom(

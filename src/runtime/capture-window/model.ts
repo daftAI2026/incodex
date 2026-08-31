@@ -126,6 +126,14 @@ export function capturePointerIntent(
   return overRegion ? "region" : "draw";
 }
 
+export function scaleCaptureZoom(zoom: number, factor: number): number {
+  return clamp(zoom * factor, CAPTURE_MIN_ZOOM, CAPTURE_MAX_ZOOM);
+}
+
+export function wheelCaptureZoom(zoom: number, deltaY: number): number {
+  return scaleCaptureZoom(zoom, Math.exp(-deltaY * 0.0016));
+}
+
 export function applyCaptureCommand(
   state: CaptureWindowState,
   command: CaptureWindowCommand,
