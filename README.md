@@ -28,16 +28,24 @@
 - **Temporary profile mask**: `incodex open --mask [--name <text>] [--avatar <local-file>]` gives the window a temporary two-word name and deterministic offline avatar. The optional avatar must be a local PNG, JPEG, or WebP; this changes the current window's profile footer and open account menu, not account data
 - **Follows the main window**: The incognito window opens using the main window’s size and placement
 - **Burns on close**: A normal close clears this temp session (including the isolated Chromium profile); login and settings stay
-- **Optional sidebar button**: After `incodex install`, a hat-glasses control sits left of Search; `Shift+Command+N` also works
+- **Optional sidebar button**: After `incodex install`, a hat-glasses control sits left of Search; use `Shift+Command+N` on macOS or `Ctrl+Shift+N` on Windows
 - **Local CLI**: Terminal menu, Homebrew or script install, `status` / `doctor` / `runtime`. Not an official plugin
 
 A normal close removes the isolated session managed by Incodex; this is not a claim of forensic erasure from the device or remote services.
 
 ## Quick Start
 
-**Supported platform:** macOS on Apple Silicon (arm64) and Intel (x86_64). Windows and Linux are not supported because Incodex integrates with the macOS Codex app bundle, code signing, Keychain, and Launch Services.
+**Supported platforms:** macOS on Apple Silicon (arm64) and Intel (x86_64), plus Windows 10/11 on x86_64 with the official Microsoft Store Codex app. Linux is not supported.
 
-**Install via Homebrew**
+**Windows (PowerShell)**
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/daftAI2026/incodex/main/install.ps1 | iex"
+```
+
+This installs the native `incodex` / `inc` launchers under the current user's private `%USERPROFILE%\.incodex` directory and adds its `bin` directory to the user PATH. Open a new terminal after the first install. The script installs only the CLI; run `incodex install` separately to enable the in-app hat-glasses control. Incodex discovers the current user's Store package instead of assuming its install location. Update with `inc update`.
+
+**macOS via Homebrew**
 
 ```bash
 brew install daftAI2026/tap/incodex
@@ -45,7 +53,7 @@ brew install daftAI2026/tap/incodex
 
 This only puts `incodex` and `inc` on PATH. The optional in-app button is added separately with `incodex install`. Update with `inc update`; Incodex keeps Homebrew installs on the Homebrew upgrade path and publishes the bundled Runtime automatically.
 
-**Or via script**
+**macOS via script**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/daftAI2026/incodex/main/install.sh | bash
@@ -59,25 +67,25 @@ cd incodex
 cargo install --locked --path crates/incodex-cli
 ```
 
-Homebrew and script installs use prebuilt native Rust binaries and do not require Bun. A source install requires [rustup](https://rustup.rs/); the repository's `rust-toolchain.toml` selects the supported Rust compiler. An installed Codex / ChatGPT desktop app is needed only for app integration work. Contributors rebuilding the Electron Runtime also need [Bun](https://bun.sh) 1.3.14 (see `.bun-version`).
+Platform installers use prebuilt native Rust binaries and do not require Bun. A source install requires [rustup](https://rustup.rs/); the repository's `rust-toolchain.toml` selects the supported Rust compiler. An installed Codex / ChatGPT desktop app is needed only for app integration work. Contributors rebuilding the Electron Runtime also need [Bun](https://bun.sh) 1.3.14 (see `.bun-version`).
 
 ## Security & Safety Design
 
-The primary `incodex open` path does not patch Codex. The optional `incodex install` path adds the in-app button by modifying the locally installed Electron app. `install`, `uninstall`, and `self-uninstall` print a plan before destructive work: TTY asks once, non-TTY needs `--yes`, and `--dry-run` only prints. `recover` is the explicit transaction-recovery exception: it requires `--transaction <id>`, does not accept `--dry-run`, and resumes only that existing journal.
+The primary `incodex open` path does not patch Codex. On macOS, the optional `incodex install` path adds the in-app button by modifying and re-signing the local app bundle. On Windows, it never patches or copies the Microsoft Store package; it registers a separately owned, per-user Runtime integration. `install` and `uninstall` print a plan before destructive work: TTY asks once, non-TTY needs `--yes`, and `--dry-run` only prints. macOS `self-uninstall` follows the same rule. On macOS, `recover` is the explicit transaction-recovery exception: it requires `--transaction <id>`, does not accept `--dry-run`, and resumes only that existing journal.
 
-- Official plugins cannot add this button. The app bundle has to change
+- Official plugins cannot add this button. macOS changes the app bundle; Windows keeps the Store package intact and uses its platform integration boundary
 - After the default official-app install, a valid OpenAI signature cannot be kept. On the next launch, macOS may ask the patched app to access **Codex Storage Key**. Only if the dialog names the expected app and Keychain item should you enter your **Mac login password** (not your ChatGPT password) and choose **Always Allow**. **Allow** / **Allow Once** grants only that access and may prompt again later; if the details do not match, choose **Deny**. The CLI does not give permanent-authorization advice for `--clone` or `--app` targets
 - Official **Appshot** (smart snapshot: photo / screenshot attachments) then stops working. This is not a missing camera permission. Computer Use usually still works. `incodex uninstall` restores Appshot
 - Report vulnerabilities via [SECURITY.md](SECURITY.md). Do not open a public issue
 
 ## Tips
 
-- An official upgrade wipes the patch. Run `incodex install` again on the **current** official package
+- After an official Codex upgrade, run `incodex install` again against the **current** app or Store package generation
 - If Codex has already been upgraded, `incodex uninstall` will not put an old backup back
 - The current original-bundle backup lives at `~/.incodex/transactions/<install-id>/original/ChatGPT.app`; verified uninstall removes it, and a later successful install prunes superseded terminal backups for the same app
-- Run `inc update` for Homebrew and script installs; Incodex automatically uses the matching update path and publishes the bundled Runtime without re-signing Codex. Source update: `git pull && cargo install --locked --path crates/incodex-cli`; source removal: `cargo uninstall incodex-cli`
+- Run `inc update` for Homebrew, macOS script, and Windows PowerShell installs; Incodex automatically uses the matching update path and publishes the bundled Runtime. Source update: `git pull && cargo install --locked --path crates/incodex-cli`; source removal: `cargo uninstall incodex-cli`
 - The menu supports arrows, Vim `j/k`, digits that run immediately, `V` for version, `q` to quit
-- If a script install cannot find the command, add `~/.local/bin` to PATH
+- If a macOS script install cannot find the command, add `~/.local/bin` to PATH. On Windows, open a new terminal so the updated user PATH is loaded
 - Button and copy follow the main window language
 
 ## Features in Detail

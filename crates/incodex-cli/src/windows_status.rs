@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 
 use crate::diagnosis_presentation::STATUS_PROGRESS_MESSAGE;
 use crate::parse::ParsedCli;
@@ -144,10 +144,25 @@ pub(crate) struct WindowsPackageStatus {
     pub(crate) available: bool,
     pub(crate) package_full_name: Option<String>,
     pub(crate) app_user_model_id: Option<String>,
+    #[serde(serialize_with = "serialize_optional_display_path")]
     pub(crate) install_location: Option<PathBuf>,
+    #[serde(serialize_with = "serialize_optional_display_path")]
     pub(crate) executable: Option<PathBuf>,
     pub(crate) architecture: Option<String>,
     pub(crate) reason: Option<String>,
+}
+
+fn serialize_optional_display_path<S>(
+    path: &Option<PathBuf>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match path.as_deref() {
+        Some(path) => serializer.serialize_some(&windows_path_for_display(path)),
+        None => serializer.serialize_none(),
+    }
 }
 
 impl WindowsPackageStatus {
@@ -340,6 +355,31 @@ mod tests {
         assert!(!text.contains("Windows Codex"), "{text}");
         assert!(text.contains("Available    no"), "{text}");
         assert!(text.contains("not installed"), "{text}");
+    }
+
+    #[test]
+    fn json_status_uses_the_same_user_facing_paths_as_terminal_status() {
+        let report = WindowsPackageStatus {
+            available: true,
+            package_full_name: Some("OpenAI.Codex_fixture".to_string()),
+            app_user_model_id: Some("OpenAI.Codex_fixture!Codex".to_string()),
+            install_location: Some(PathBuf::from(r"\\?\D:\WindowsApps\OpenAI.Codex")),
+            executable: Some(PathBuf::from(
+                r"\\?\D:\WindowsApps\OpenAI.Codex\app\ChatGPT.exe",
+            )),
+            architecture: Some("x64".to_string()),
+            reason: None,
+        };
+
+        let json = serde_json::to_value(&report).expect("serialize Windows package status");
+        assert_eq!(
+            json["installLocation"],
+            serde_json::json!(r"D:\WindowsApps\OpenAI.Codex")
+        );
+        assert_eq!(
+            json["executable"],
+            serde_json::json!(r"D:\WindowsApps\OpenAI.Codex\app\ChatGPT.exe")
+        );
     }
 
     #[test]

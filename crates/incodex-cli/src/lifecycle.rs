@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::parse::ParsedCli;
 use crate::spinner::Progress;
+use crate::stable_release::{parse_latest_stable_release, parse_stable_version, StableRelease};
 
 const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/daftAI2026/incodex/releases/latest";
 const MAIN_INSTALLER_URL: &str =
@@ -27,17 +28,6 @@ const UPDATE_NOTICE_WORKER_ENV: &str = "INCODEX_INTERNAL_UPDATE_NOTICE_WORKER";
 const RUNTIME_SYNC_ENV: &str = "INCODEX_INTERNAL_RUNTIME_SYNC";
 const RUNTIME_UPDATE_PENDING_NOTICE: &str = "Runtime synchronization incomplete, run inc update";
 static UPDATE_NOTICE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-
-#[derive(Debug, Deserialize)]
-struct LatestRelease {
-    tag_name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct StableRelease {
-    tag: String,
-    version: [u64; 3],
-}
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -699,47 +689,7 @@ fn split_curl_body_and_status(mut output: Vec<u8>) -> (Vec<u8>, Option<u16>) {
 
 fn latest_stable_release() -> Result<StableRelease, String> {
     let body = curl_download(LATEST_RELEASE_URL, "latest release metadata")?;
-    let release: LatestRelease = serde_json::from_slice(&body)
-        .map_err(|_| "update failed: invalid latest release metadata".to_string())?;
-    let raw = release.tag_name.strip_prefix('v').ok_or_else(|| {
-        format!(
-            "update failed: invalid latest release tag: {}",
-            release.tag_name
-        )
-    })?;
-    let version = parse_stable_version(raw).ok_or_else(|| {
-        format!(
-            "update failed: invalid latest release tag: {}",
-            release.tag_name
-        )
-    })?;
-    let canonical = format!("v{}.{}.{}", version[0], version[1], version[2]);
-    if release.tag_name != canonical {
-        return Err(format!(
-            "update failed: invalid latest release tag: {}",
-            release.tag_name
-        ));
-    }
-    Ok(StableRelease {
-        tag: release.tag_name,
-        version,
-    })
-}
-
-fn parse_stable_version(raw: &str) -> Option<[u64; 3]> {
-    let mut values = [0_u64; 3];
-    let mut parts = raw.split('.');
-    for value in &mut values {
-        let part = parts.next()?;
-        if part.is_empty()
-            || (part.len() > 1 && part.starts_with('0'))
-            || !part.bytes().all(|byte| byte.is_ascii_digit())
-        {
-            return None;
-        }
-        *value = part.parse().ok()?;
-    }
-    parts.next().is_none().then_some(values)
+    parse_latest_stable_release(&body)
 }
 
 fn verify_installed_version(prefix: &Path, expected: &str) -> Result<(), String> {
