@@ -35,6 +35,8 @@ $DownloadBase = if ($env:INCODEX_DOWNLOAD_BASE) {
     "https://github.com/$Repository/releases/latest/download"
 }
 $AssetName = 'incodex-windows-x64.exe'
+$ChecksumLimit = 256 * 1024
+$AssetLimit = 10 * 1024 * 1024
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 Add-Type -TypeDefinition @'
@@ -86,6 +88,14 @@ function Confirm-Architecture {
     }
 }
 
+function Assert-DownloadSize([string]$Name, [string]$Path) {
+    $Limit = if ($Name -eq 'SHA256SUMS') { $ChecksumLimit } else { $AssetLimit }
+    $Length = (Get-Item -LiteralPath $Path -Force).Length
+    if ($Length -le 0 -or $Length -gt $Limit) {
+        Stop-Installer "$Name is empty or too large"
+    }
+}
+
 function Copy-ReleaseFile([string]$Name, [string]$Destination) {
     if ($env:INCODEX_DOWNLOAD_DIR) {
         $Source = Join-Path $env:INCODEX_DOWNLOAD_DIR $Name
@@ -93,13 +103,15 @@ function Copy-ReleaseFile([string]$Name, [string]$Destination) {
             Stop-Installer "missing $Name in $($env:INCODEX_DOWNLOAD_DIR)"
         }
         Copy-Item -LiteralPath $Source -Destination $Destination
+        Assert-DownloadSize $Name $Destination
         return
     }
 
     $Uri = "$DownloadBase/$Name"
     for ($Attempt = 1; $Attempt -le 3; $Attempt++) {
         try {
-            Invoke-WebRequest -UseBasicParsing -Uri $Uri -OutFile $Destination
+            Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 -Uri $Uri -OutFile $Destination
+            Assert-DownloadSize $Name $Destination
             return
         } catch {
             Remove-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue
