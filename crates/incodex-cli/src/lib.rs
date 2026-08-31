@@ -230,6 +230,12 @@ where
         if parsed.command == CliCommand::Uninstall {
             return crate::windows_install::run_uninstall(&parsed).map_err(CliFailure::from);
         }
+        if parsed.command == CliCommand::Runtime {
+            return crate::windows_update::run_runtime(&parsed).map_err(CliFailure::from);
+        }
+        if parsed.command == CliCommand::Update {
+            return crate::windows_update::run_update(&parsed).map_err(CliFailure::from);
+        }
         Err(CliFailure::new(format!(
             "{} is not supported on Windows yet",
             parsed.command.as_str()

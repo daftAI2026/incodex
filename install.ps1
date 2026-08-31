@@ -95,12 +95,27 @@ function Read-CliVersion([string]$Executable) {
     Stop-Installer "downloaded $AssetName did not report a stable Incodex version"
 }
 
-function Ensure-PrivateDirectory([string]$Path) {
-    $Created = -not (Test-Path -LiteralPath $Path)
-    $Directory = New-Item -ItemType Directory -Path $Path -Force
-    if (-not $Created) {
-        return $Directory.FullName
+function Assert-NoReparseAncestry([string]$Path) {
+    $Current = [IO.Path]::GetFullPath($Path)
+    while ($Current) {
+        if (Test-Path -LiteralPath $Current) {
+            $Item = Get-Item -LiteralPath $Current -Force
+            if (($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                Stop-Installer "installation path contains a reparse point: $Current"
+            }
+        }
+        $Parent = [IO.Directory]::GetParent($Current)
+        if ($null -eq $Parent) {
+            break
+        }
+        $Current = $Parent.FullName
     }
+}
+
+function Ensure-PrivateDirectory([string]$Path) {
+    Assert-NoReparseAncestry $Path
+    $Directory = New-Item -ItemType Directory -Path $Path -Force
+    Assert-NoReparseAncestry $Directory.FullName
 
     $Identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $Security = New-Object Security.AccessControl.DirectorySecurity
@@ -111,10 +126,6 @@ function Ensure-PrivateDirectory([string]$Path) {
     $FullControl = [Security.AccessControl.FileSystemRights]::FullControl
     $Security.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
         $Identity.User, $FullControl, $Inheritance, $Propagation, $Allow
-    )))
-    $System = New-Object Security.Principal.SecurityIdentifier('S-1-5-18')
-    $Security.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
-        $System, $FullControl, $Inheritance, $Propagation, $Allow
     )))
     [IO.Directory]::SetAccessControl($Directory.FullName, $Security)
     return $Directory.FullName
@@ -148,6 +159,7 @@ function Add-UserPath([string]$BinDirectory) {
 Confirm-Architecture
 $WorkRoot = Join-Path ([IO.Path]::GetTempPath()) ('incodex-setup-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $WorkRoot | Out-Null
+$InstallLock = $null
 
 try {
     $SumsPath = Join-Path $WorkRoot 'SHA256SUMS'
@@ -178,6 +190,16 @@ try {
     Ensure-PrivateDirectory $PackageRoot | Out-Null
     Ensure-PrivateDirectory $ReleasesRoot | Out-Null
     Ensure-PrivateDirectory $BinRoot | Out-Null
+    try {
+        $InstallLock = New-Object IO.FileStream(
+            (Join-Path $PackageRoot 'install.lock'),
+            [IO.FileMode]::OpenOrCreate,
+            [IO.FileAccess]::ReadWrite,
+            [IO.FileShare]::None
+        )
+    } catch {
+        Stop-Installer 'another Incodex install or update is already running'
+    }
 
     if (Test-Path -LiteralPath $ReleaseRoot) {
         if (-not (Test-Path -LiteralPath $InstalledCli -PathType Leaf)) {
@@ -223,6 +245,10 @@ exit /b %ERRORLEVEL%
 "@
     Write-AtomicText (Join-Path $BinRoot 'incodex.cmd') $PrimaryBody
     Write-AtomicText (Join-Path $BinRoot 'inc.cmd') $AliasBody
+    if ((Read-CliVersion (Join-Path $BinRoot 'incodex.cmd')) -ne $Version) {
+        Stop-Installer 'installed launcher failed its version proof'
+    }
+    Write-AtomicText (Join-Path $PackageRoot 'current') "$Version`n"
     $PathAdded = Add-UserPath $BinRoot
 
     [Console]::OutputEncoding = [Text.Encoding]::UTF8
@@ -233,5 +259,8 @@ exit /b %ERRORLEVEL%
         [Console]::WriteLine('Run: incodex --help')
     }
 } finally {
+    if ($null -ne $InstallLock) {
+        $InstallLock.Dispose()
+    }
     Remove-Item -LiteralPath $WorkRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

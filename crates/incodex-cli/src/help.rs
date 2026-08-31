@@ -50,9 +50,9 @@ Commands:
   doctor       Diagnose package health and isolated sessions
   install      Enable the hat-glasses control in Store Codex
   uninstall    Remove the Windows Runtime integration
-  runtime      Not available on Windows yet
+  runtime      Publish the Runtime embedded in this CLI
   recover      Not available on Windows yet
-  update       Not available on Windows yet
+  update       Update Incodex through its Windows installer
   self-uninstall  Not available on Windows yet
 
 Run incodex <command> --help for details.
@@ -130,10 +130,29 @@ Flags:
 "
             )
         }
-        CliCommand::Runtime
-        | CliCommand::Recover
-        | CliCommand::Update
-        | CliCommand::SelfUninstall => {
+        CliCommand::Runtime => {
+            windows_preview_help!(
+                "\
+Usage:
+  incodex runtime [--dry-run]
+
+Publish the Runtime embedded in this CLI without modifying the official
+Microsoft Store Codex package. Fully quit and reopen Codex to load it.
+"
+            )
+        }
+        CliCommand::Update => {
+            windows_preview_help!(
+                "\
+Usage:
+  incodex update [--dry-run]
+
+Update a PowerShell-installer-managed Incodex CLI, verify the installed
+generation, and publish the Runtime embedded in that new CLI.
+"
+            )
+        }
+        CliCommand::Recover | CliCommand::SelfUninstall => {
             windows_preview_help!("This command is not available on Windows yet.\n")
         }
         CliCommand::Menu | CliCommand::Help | CliCommand::Version => WINDOWS_ROOT_HELP,
