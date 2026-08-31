@@ -214,7 +214,7 @@ var ENGLISH = {
   save: "Save",
   saveFailed: "Unable to encode the PNG.",
   saved: "PNG downloaded",
-  shadow: "Window shadow",
+  shadow: "Shadow",
   solid: "Solid",
   sourceAuto: "Detected areas",
   sourceAutoHint: "Select detected areas",
@@ -259,7 +259,7 @@ var CHINESE = {
   save: "保存",
   saveFailed: "无法生成 PNG。",
   saved: "PNG 已下载",
-  shadow: "窗口阴影",
+  shadow: "阴影",
   solid: "纯色",
   sourceAuto: "检测区域",
   sourceAutoHint: "选择检测到的区域",
@@ -329,6 +329,14 @@ function captureOutputSize(source, padding) {
 function captureWindowCornerRadius(isMacOS, scaleFactor) {
   return (isMacOS ? 26 : 12) * Math.max(1, scaleFactor);
 }
+function captureWindowShadow(padding, scaleFactor) {
+  const scale = Math.max(1, scaleFactor);
+  return {
+    blur: Math.round(Math.min(56, padding * 0.7) * scale),
+    color: "rgba(15, 18, 26, 0.38)",
+    offsetY: Math.round(Math.min(20, padding * 0.25) * scale)
+  };
+}
 function renderCaptureToCanvas(source, state, options) {
   const canvas = document.createElement("canvas");
   const size = captureOutputSize(state.source, state.padding);
@@ -389,18 +397,19 @@ function drawWindow(context, source, state, isMacOS) {
   const padding = capturePhysicalPadding(state.source, state.padding);
   const scaleFactor = Math.max(1, state.source.scaleFactor);
   const cornerRadius = captureWindowCornerRadius(isMacOS, scaleFactor);
-  if (state.shadow && padding > 0) {
-    context.save();
-    context.shadowColor = "rgba(15,18,26,.34)";
-    context.shadowBlur = Math.min(56, state.padding * 0.7) * scaleFactor;
-    context.shadowOffsetY = Math.min(20, state.padding * 0.25) * scaleFactor;
-    context.fillStyle = "rgba(15,18,26,.18)";
-    roundedRectPath(context, padding, padding, state.source.width, state.source.height, cornerRadius);
-    context.fill();
-    context.restore();
-  }
   context.save();
   roundedRectPath(context, padding, padding, state.source.width, state.source.height, cornerRadius);
+  if (state.shadow) {
+    const shadow = captureWindowShadow(state.padding, scaleFactor);
+    context.shadowColor = shadow.color;
+    context.shadowBlur = shadow.blur;
+    context.shadowOffsetY = shadow.offsetY;
+  }
+  context.fillStyle = "#ffffff";
+  context.fill();
+  context.shadowColor = "transparent";
+  context.shadowBlur = 0;
+  context.shadowOffsetY = 0;
   context.clip();
   context.drawImage(source, padding, padding, state.source.width, state.source.height);
   context.restore();
@@ -1988,6 +1997,8 @@ var CAPTURE_PROFILE_ATTRIBUTE = "data-incodex-capture-redact-profile";
 var CODEX_THREAD_SELECTOR = "[data-app-action-sidebar-thread-row][data-app-action-sidebar-thread-title]";
 var CODEX_PROJECT_SELECTOR = "[data-app-action-sidebar-project-row][data-app-action-sidebar-project-label]";
 var CODEX_PROFILE_SELECTOR = 'button.sidebar-item[aria-haspopup="menu"]';
+var CODEX_COMPOSER_PROJECT_SELECTOR = '[data-composer-navigation-target="workspace-project"]';
+var CODEX_EMPTY_STATE_PROJECT_SELECTOR = '[data-feature="game-source"] [data-slot="popover-trigger"]';
 var MAX_CAPTURE_CANDIDATES = 150;
 var MIN_CANDIDATE_WIDTH = 24;
 var MIN_CANDIDATE_HEIGHT = 12;
@@ -2014,7 +2025,18 @@ function markCodexPrivacyPlaceholders(documentRoot) {
   markRows(documentRoot.querySelectorAll(CODEX_THREAD_SELECTOR), "data-app-action-sidebar-thread-title", snapshots);
   markRows(documentRoot.querySelectorAll(CODEX_PROJECT_SELECTOR), "data-app-action-sidebar-project-label", snapshots);
   markProfile(documentRoot, snapshots);
+  markTextLeaves(documentRoot.querySelectorAll(CODEX_COMPOSER_PROJECT_SELECTOR), snapshots);
+  markTextLeaves(documentRoot.querySelectorAll(CODEX_EMPTY_STATE_PROJECT_SELECTOR), snapshots);
   return () => restoreAttributes(snapshots);
+}
+function markTextLeaves(elements, snapshots) {
+  for (const element of elements) {
+    for (const leaf of element.querySelectorAll("*")) {
+      if (leaf.children.length > 0 || leaf.textContent.trim().length === 0)
+        continue;
+      setTemporaryAttribute(leaf, CAPTURE_REDACT_ATTRIBUTE, "text", snapshots);
+    }
+  }
 }
 function collectCaptureCandidates(documentRoot, viewport) {
   const accepted = [];
@@ -4190,6 +4212,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   min-width: calc(var(--incodex-capture-space) * 7);
   padding: 0;
   position: relative;
+  width: calc(var(--incodex-capture-space) * 7);
 }
 
 .incodex-capture-background-option[aria-pressed="true"],

@@ -11,6 +11,7 @@ import { capturePresetColors } from "./presets.ts";
 
 export type CaptureRenderOperation =
   | { background: CaptureBackground; kind: "background"; size: CaptureSize }
+  | { color: "#ffffff"; kind: "window-underlay"; rect: CaptureRect }
   | { kind: "window"; rect: CaptureRect; shadow: boolean }
   | {
       color: string;
@@ -27,6 +28,12 @@ export type CaptureRenderOptions = {
 export type RedactionSampling = {
   blockSize: number;
   smoothing: boolean;
+};
+
+export type CaptureWindowShadow = {
+  blur: number;
+  color: "rgba(15, 18, 26, 0.38)";
+  offsetY: number;
 };
 
 export function redactionSampling(
@@ -59,21 +66,32 @@ export function captureWindowCornerRadius(
   return (isMacOS ? 26 : 12) * Math.max(1, scaleFactor);
 }
 
+export function captureWindowShadow(padding: number, scaleFactor: number): CaptureWindowShadow {
+  const scale = Math.max(1, scaleFactor);
+  return {
+    blur: Math.round(Math.min(56, padding * 0.7) * scale),
+    color: "rgba(15, 18, 26, 0.38)",
+    offsetY: Math.round(Math.min(20, padding * 0.25) * scale),
+  };
+}
+
 export function createCaptureRenderPlan(
   state: CaptureWindowState,
 ): CaptureRenderOperation[] {
   const size = captureOutputSize(state.source, state.padding);
   const physicalPadding = capturePhysicalPadding(state.source, state.padding);
+  const windowRect = {
+    height: state.source.height,
+    width: state.source.width,
+    x: physicalPadding,
+    y: physicalPadding,
+  };
   const operations: CaptureRenderOperation[] = [
     { background: state.background, kind: "background", size },
+    { color: "#ffffff", kind: "window-underlay", rect: windowRect },
     {
       kind: "window",
-      rect: {
-        height: state.source.height,
-        width: state.source.width,
-        x: physicalPadding,
-        y: physicalPadding,
-      },
+      rect: windowRect,
       shadow: state.shadow,
     },
   ];
@@ -189,23 +207,6 @@ function drawWindow(
   const padding = capturePhysicalPadding(state.source, state.padding);
   const scaleFactor = Math.max(1, state.source.scaleFactor);
   const cornerRadius = captureWindowCornerRadius(isMacOS, scaleFactor);
-  if (state.shadow && padding > 0) {
-    context.save();
-    context.shadowColor = "rgba(15,18,26,.34)";
-    context.shadowBlur = Math.min(56, state.padding * 0.7) * scaleFactor;
-    context.shadowOffsetY = Math.min(20, state.padding * 0.25) * scaleFactor;
-    context.fillStyle = "rgba(15,18,26,.18)";
-    roundedRectPath(
-      context,
-      padding,
-      padding,
-      state.source.width,
-      state.source.height,
-      cornerRadius,
-    );
-    context.fill();
-    context.restore();
-  }
   context.save();
   roundedRectPath(
     context,
@@ -215,6 +216,17 @@ function drawWindow(
     state.source.height,
     cornerRadius,
   );
+  if (state.shadow) {
+    const shadow = captureWindowShadow(state.padding, scaleFactor);
+    context.shadowColor = shadow.color;
+    context.shadowBlur = shadow.blur;
+    context.shadowOffsetY = shadow.offsetY;
+  }
+  context.fillStyle = "#ffffff";
+  context.fill();
+  context.shadowColor = "transparent";
+  context.shadowBlur = 0;
+  context.shadowOffsetY = 0;
   context.clip();
   context.drawImage(source, padding, padding, state.source.width, state.source.height);
   context.restore();

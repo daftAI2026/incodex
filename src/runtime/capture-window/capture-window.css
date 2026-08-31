@@ -533,6 +533,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   min-width: calc(var(--incodex-capture-space) * 7);
   padding: 0;
   position: relative;
+  width: calc(var(--incodex-capture-space) * 7);
 }
 
 .incodex-capture-background-option[aria-pressed="true"],

@@ -120,7 +120,7 @@ describe("capture window preview", () => {
     expect(css).toContain("height: 50vh");
     expect(css).toContain("background-size: 16px 16px");
     expect(css).toContain("html.incodex-capturing [data-incodex-capture-hide]");
-    expect(css).toContain("color-mix(in srgb, currentColor 22%, transparent)");
+    expect(css).toContain("background: var(--incodex-capture-skeleton)");
     expect(css).toContain('[data-incodex-capture-redact="blank"]::after');
     expect(css).toContain('[data-incodex-capture-redact="center"]::after');
     expect(css).toContain(":nth-child(4n+1) [data-incodex-capture-redact]::after");

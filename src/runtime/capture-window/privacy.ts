@@ -11,6 +11,9 @@ const CODEX_THREAD_SELECTOR =
 const CODEX_PROJECT_SELECTOR =
   "[data-app-action-sidebar-project-row][data-app-action-sidebar-project-label]";
 const CODEX_PROFILE_SELECTOR = 'button.sidebar-item[aria-haspopup="menu"]';
+const CODEX_COMPOSER_PROJECT_SELECTOR = '[data-composer-navigation-target="workspace-project"]';
+const CODEX_EMPTY_STATE_PROJECT_SELECTOR =
+  '[data-feature="game-source"] [data-slot="popover-trigger"]';
 const MAX_CAPTURE_CANDIDATES = 150;
 const MIN_CANDIDATE_WIDTH = 24;
 const MIN_CANDIDATE_HEIGHT = 12;
@@ -69,8 +72,25 @@ export function markCodexPrivacyPlaceholders(documentRoot: Document): () => void
     snapshots,
   );
   markProfile(documentRoot, snapshots);
+  markTextLeaves(
+    documentRoot.querySelectorAll<HTMLElement>(CODEX_COMPOSER_PROJECT_SELECTOR),
+    snapshots,
+  );
+  markTextLeaves(
+    documentRoot.querySelectorAll<HTMLElement>(CODEX_EMPTY_STATE_PROJECT_SELECTOR),
+    snapshots,
+  );
 
   return () => restoreAttributes(snapshots);
+}
+
+function markTextLeaves(elements: NodeListOf<HTMLElement>, snapshots: AttributeSnapshot[]): void {
+  for (const element of elements) {
+    for (const leaf of element.querySelectorAll("*")) {
+      if (leaf.children.length > 0 || leaf.textContent.trim().length === 0) continue;
+      setTemporaryAttribute(leaf, CAPTURE_REDACT_ATTRIBUTE, "text", snapshots);
+    }
+  }
 }
 
 export function collectCaptureCandidates(
