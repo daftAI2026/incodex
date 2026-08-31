@@ -1991,6 +1991,24 @@ var CODEX_PROFILE_SELECTOR = 'button.sidebar-item[aria-haspopup="menu"]';
 var MAX_CAPTURE_CANDIDATES = 150;
 var MIN_CANDIDATE_WIDTH = 24;
 var MIN_CANDIDATE_HEIGHT = 12;
+function createCodexPrivacyPlaceholderSession(documentRoot) {
+  let restore = null;
+  const clear = () => {
+    restore?.();
+    restore = null;
+  };
+  return {
+    clear,
+    sync(enabled) {
+      if (!enabled) {
+        clear();
+        return;
+      }
+      if (!restore)
+        restore = markCodexPrivacyPlaceholders(documentRoot);
+    }
+  };
+}
 function markCodexPrivacyPlaceholders(documentRoot) {
   const snapshots = [];
   markRows(documentRoot.querySelectorAll(CODEX_THREAD_SELECTOR), "data-app-action-sidebar-thread-title", snapshots);
@@ -2101,6 +2119,7 @@ function clipToViewport(rect, viewport) {
 var STYLE_ID = "incodex-capture-window-style";
 var HOST_ATTRIBUTE = "data-incodex-capture-host";
 var bridge = createCaptureCdpBridge();
+var privacyPlaceholders = createCodexPrivacyPlaceholderSession(document);
 var controller = null;
 var opening = false;
 function openInjectedCaptureWindow(options) {
@@ -2118,8 +2137,10 @@ async function prepareInitialCapture(options) {
     capture: captureSnapshot,
     loadPreferences: () => loadCapturePreferences(window.localStorage)
   });
-  if (!prepared)
+  if (!prepared) {
+    clearPrivacyPlaceholders();
     return;
+  }
   const host = captureHost();
   const snapshot = prepared.snapshot;
   const state = applyCapturePreferences(createCaptureWindowState({
@@ -2132,6 +2153,7 @@ async function prepareInitialCapture(options) {
     initialState: state,
     locale: options.locale,
     onClose: () => {
+      clearPrivacyPlaceholders();
       controller = null;
       host.remove();
     },
@@ -2140,7 +2162,7 @@ async function prepareInitialCapture(options) {
   });
 }
 async function captureSnapshot(privacyEnabled) {
-  const restorePrivacyPlaceholders = privacyEnabled ? markCodexPrivacyPlaceholders(document) : () => {};
+  privacyPlaceholders.sync(privacyEnabled);
   try {
     const snapshot = await capturePreparedWindow({
       capture: async () => imageDataUrlToCanvas(await bridge.capture()),
@@ -2154,8 +2176,12 @@ async function captureSnapshot(privacyEnabled) {
       source: snapshot.source
     };
   } finally {
-    restorePrivacyPlaceholders();
+    document.documentElement.classList.toggle(CAPTURE_PRIVACY_CLASS, privacyEnabled);
   }
+}
+function clearPrivacyPlaceholders() {
+  privacyPlaceholders.clear();
+  document.documentElement.classList.remove(CAPTURE_PRIVACY_CLASS);
 }
 function exposeCaptureBridge() {
   window.__incodexTakeCaptureDebugRequest = bridge.takeRequest;
@@ -3629,7 +3655,11 @@ var SHORTCUT_LABEL = "⇧⌘N";
 var TOOLTIP_FALLBACK_DELAY_MS = 700;
 var TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
 var CAPTURE_TRIGGER_ATTR = "data-incodex-capture-trigger";
-var CAPTURE_WINDOW_STYLE = `[data-incodex-capture],
+var CAPTURE_WINDOW_STYLE = `:root {
+  --incodex-capture-skeleton: var(--color-background-button-tertiary-active, rgb(32 33 35 / 22%));
+}
+
+[data-incodex-capture],
 [data-incodex-capture-preview] {
   --incodex-capture-space: var(--spacing, 4px);
   --incodex-capture-surface: var(--color-surface-elevated-secondary, var(--color-surface, #ffffff));
@@ -3648,6 +3678,11 @@ var CAPTURE_WINDOW_STYLE = `[data-incodex-capture],
   --incodex-capture-primary-text: var(--color-text-primary-solid, #ffffff);
   --incodex-capture-ring: var(--color-ring, #0285ff);
   --incodex-capture-danger: var(--color-text-danger, #d14343);
+  --incodex-capture-font-base: var(--text-base, 14px);
+  --incodex-capture-font-sm: var(--text-sm, 13px);
+  --incodex-capture-font-xs: var(--text-xs, 12px);
+  --incodex-capture-icon-compact: calc(var(--incodex-capture-space) * 3.5);
+  --incodex-capture-icon-xs: calc(var(--incodex-capture-space) * 4);
   --incodex-capture-radius-sm: var(--radius-sm, 6px);
   --incodex-capture-radius-md: var(--radius-md, 8px);
   --incodex-capture-radius-lg: var(--radius-lg, 10px);
@@ -3692,7 +3727,7 @@ html.incodex-capture-redact [data-incodex-capture-redact] * {
 }
 
 html.incodex-capture-redact [data-incodex-capture-redact]::after {
-  background: var(--color-background-secondary-soft, rgb(128 128 128 / 18%));
+  background: var(--incodex-capture-skeleton);
   border-radius: var(--radius-full, 9999px);
   content: "";
   height: .55em;
@@ -3704,9 +3739,8 @@ html.incodex-capture-redact [data-incodex-capture-redact]::after {
 }
 
 html.incodex-capture-redact [data-incodex-capture-redact-profile] > img {
-  background: var(--color-background-secondary-soft, rgb(128 128 128 / 18%));
-  content: "";
-  visibility: visible !important;
+  filter: grayscale(1) contrast(0);
+  opacity: .32;
 }
 
 html.incodex-capture-redact [data-incodex-capture-redact="blank"]::after {
@@ -3805,7 +3839,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 }
 
 .incodex-capture-title {
-  font-size: var(--text-base, 16px);
+  font-size: var(--incodex-capture-font-base);
   font-weight: var(--font-weight-medium, 500);
   line-height: 1.35;
   margin: 0;
@@ -3837,7 +3871,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 .incodex-capture-region-hint {
   color: var(--incodex-capture-text-tertiary);
   flex: 1;
-  font-size: 11px;
+  font-size: var(--incodex-capture-font-xs);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3848,13 +3882,13 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   align-items: center;
   display: flex;
   flex: none;
-  gap: 2px;
+  gap: calc(var(--incodex-capture-space) * .5);
 }
 
 .incodex-capture-toolbar-divider {
   background: var(--incodex-capture-border);
-  height: 16px;
-  margin-inline: 2px;
+  height: var(--incodex-capture-icon-xs);
+  margin-inline: calc(var(--incodex-capture-space) * .5);
   width: 1px;
 }
 
@@ -3865,11 +3899,11 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   color: var(--incodex-capture-text-tertiary);
   cursor: pointer;
   font: inherit;
-  font-size: 10px;
+  font-size: var(--incodex-capture-font-xs);
   font-variant-numeric: tabular-nums;
   height: calc(var(--incodex-capture-space) * 6);
-  min-width: 40px;
-  padding-inline: 4px;
+  min-width: calc(var(--incodex-capture-space) * 10);
+  padding-inline: var(--incodex-capture-space);
 }
 
 .incodex-capture-button,
@@ -3900,9 +3934,9 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 .incodex-capture-icon-button {
   align-items: center;
   background: transparent;
-  border-radius: 999px;
+  border-radius: var(--radius-full, 9999px);
   display: inline-flex;
-  height: 24px;
+  height: calc(var(--incodex-capture-space) * 6);
   justify-content: center;
   padding: 0;
   width: calc(var(--incodex-capture-space) * 6);
@@ -3994,7 +4028,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 
 .incodex-capture-region {
   border: 1px solid transparent;
-  border-radius: 3px;
+  border-radius: var(--radius-2xs, 3px);
   position: absolute;
 }
 
@@ -4030,17 +4064,19 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   align-items: center;
   background: var(--incodex-capture-primary-text);
   border: 1px solid color-mix(in srgb, var(--incodex-capture-primary) 70%, transparent);
-  border-radius: 999px;
+  border-radius: var(--radius-full, 9999px);
   color: var(--incodex-capture-primary);
   display: none;
-  font: 600 11px/1 system-ui, sans-serif;
-  height: 16px;
+  font-family: inherit;
+  font-size: var(--incodex-capture-font-xs);
+  font-weight: var(--font-weight-semibold, 600);
+  height: var(--incodex-capture-icon-xs);
   justify-content: center;
   padding: 0;
   position: absolute;
   right: -8px;
   top: -8px;
-  width: 16px;
+  width: var(--incodex-capture-icon-xs);
 }
 
 .incodex-capture-region-confirmed[data-interactive="true"]:hover .incodex-capture-region-remove {
@@ -4081,14 +4117,14 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 
 .incodex-capture-section-title {
   color: var(--incodex-capture-text-secondary);
-  font-size: var(--text-xs, 12px);
+  font-size: var(--incodex-capture-font-xs);
   font-weight: var(--font-weight-medium, 500);
   margin: 0;
 }
 
 .incodex-capture-section-description {
   color: var(--incodex-capture-text-tertiary);
-  font-size: 11px;
+  font-size: var(--incodex-capture-font-xs);
   line-height: 1.3;
   margin: 2px 0 0;
 }
@@ -4106,12 +4142,12 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   appearance: none;
   background: var(--incodex-capture-surface-tertiary);
   border: 1px solid var(--incodex-capture-border-strong);
-  border-radius: 9999px;
+  border-radius: var(--radius-full, 9999px);
   cursor: var(--cursor-interaction, pointer);
   flex: none;
   height: calc(var(--incodex-capture-space) * 5);
   margin: 0;
-  padding: 2px;
+  padding: calc(var(--incodex-capture-space) * .5);
   position: relative;
   transition: background-color var(--incodex-capture-duration) var(--incodex-capture-ease);
   width: calc(var(--incodex-capture-space) * 9);
@@ -4143,12 +4179,13 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   gap: calc(var(--incodex-capture-space) * 2);
   grid-template-columns: repeat(5, calc(var(--incodex-capture-space) * 7));
   margin-top: calc(var(--incodex-capture-space) * 2);
+  padding: var(--incodex-capture-space);
 }
 
 .incodex-capture-background-option {
   background: var(--capture-swatch);
   border: 1px solid rgb(0 0 0 / 10%);
-  border-radius: 999px;
+  border-radius: var(--radius-full, 9999px);
   height: calc(var(--incodex-capture-space) * 7);
   min-width: calc(var(--incodex-capture-space) * 7);
   padding: 0;
@@ -4168,9 +4205,11 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 .incodex-capture-background-option svg {
   color: var(--incodex-capture-primary-text);
   filter: drop-shadow(0 1px 2px color-mix(in srgb, var(--incodex-capture-primary) 40%, transparent));
+  height: var(--incodex-capture-icon-compact);
   inset: 50% auto auto 50%;
   position: absolute;
   transform: translate(-50%, -50%);
+  width: var(--incodex-capture-icon-compact);
 }
 
 .incodex-capture-color-label,
@@ -4222,7 +4261,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   color: var(--incodex-capture-text-secondary);
   cursor: var(--cursor-interaction, pointer);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--incodex-capture-font-xs);
   margin-top: calc(var(--incodex-capture-space) * 2);
   padding: 0;
   text-decoration: underline;
@@ -4238,20 +4277,20 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   background: transparent;
   border: 0;
   display: flex;
-  height: 24px;
+  height: calc(var(--incodex-capture-space) * 6);
   justify-content: center;
   padding: 0;
   position: relative;
-  width: 24px;
+  width: calc(var(--incodex-capture-space) * 6);
 }
 
 .incodex-capture-solid-color > span {
   background: var(--capture-solid-color);
   border: 1px solid rgb(0 0 0 / 20%);
-  border-radius: 999px;
-  height: 14px;
+  border-radius: var(--radius-full, 9999px);
+  height: var(--incodex-capture-icon-compact);
   pointer-events: none;
-  width: 14px;
+  width: var(--incodex-capture-icon-compact);
 }
 
 .incodex-capture-range {
@@ -4262,7 +4301,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 
 .incodex-capture-value {
   color: var(--incodex-capture-text-secondary);
-  font-size: var(--text-xs, 12px);
+  font-size: var(--incodex-capture-font-xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -4282,7 +4321,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   border: 1px solid transparent;
   border-radius: var(--incodex-capture-radius-md);
   display: inline-flex;
-  font-size: var(--text-sm, 13px);
+  font-size: var(--incodex-capture-font-sm);
   font-weight: var(--font-weight-medium, 500);
   gap: calc(var(--incodex-capture-space) * 2);
   height: calc(var(--incodex-capture-space) * 9);
@@ -4311,7 +4350,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   box-shadow: var(--incodex-capture-shadow);
   color: var(--incodex-capture-primary-text);
   display: flex;
-  font-size: var(--text-sm, 13px);
+  font-size: var(--incodex-capture-font-sm);
   gap: calc(var(--incodex-capture-space) * 2);
   left: 50%;
   max-width: min(360px, calc(100vw - var(--incodex-capture-space) * 8));

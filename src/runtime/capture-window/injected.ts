@@ -1,4 +1,5 @@
 import {
+  CAPTURE_PRIVACY_CLASS,
   capturePreparedWindow,
   prepareCaptureWindow,
   waitForCaptureFrame,
@@ -11,7 +12,10 @@ import {
 } from "./editor.ts";
 import { createCaptureWindowState } from "./model.ts";
 import { applyCapturePreferences, loadCapturePreferences } from "./preferences.ts";
-import { collectCaptureCandidates, markCodexPrivacyPlaceholders } from "./privacy.ts";
+import {
+  collectCaptureCandidates,
+  createCodexPrivacyPlaceholderSession,
+} from "./privacy.ts";
 import { configureCapturePresetAssets } from "./presets.ts";
 
 export type InjectedCaptureWindowOptions = {
@@ -23,6 +27,7 @@ export type InjectedCaptureWindowOptions = {
 const STYLE_ID = "incodex-capture-window-style";
 const HOST_ATTRIBUTE = "data-incodex-capture-host";
 const bridge = createCaptureCdpBridge();
+const privacyPlaceholders = createCodexPrivacyPlaceholderSession(document);
 let controller: CaptureWindowEditorController | null = null;
 let opening = false;
 
@@ -41,7 +46,10 @@ async function prepareInitialCapture(options: InjectedCaptureWindowOptions): Pro
     capture: captureSnapshot,
     loadPreferences: () => loadCapturePreferences(window.localStorage),
   });
-  if (!prepared) return;
+  if (!prepared) {
+    clearPrivacyPlaceholders();
+    return;
+  }
 
   const host = captureHost();
   const snapshot = prepared.snapshot;
@@ -58,6 +66,7 @@ async function prepareInitialCapture(options: InjectedCaptureWindowOptions): Pro
     initialState: state,
     locale: options.locale,
     onClose: () => {
+      clearPrivacyPlaceholders();
       controller = null;
       host.remove();
     },
@@ -67,9 +76,7 @@ async function prepareInitialCapture(options: InjectedCaptureWindowOptions): Pro
 }
 
 async function captureSnapshot(privacyEnabled: boolean): Promise<CaptureWindowRetake> {
-  const restorePrivacyPlaceholders = privacyEnabled
-    ? markCodexPrivacyPlaceholders(document)
-    : () => {};
+  privacyPlaceholders.sync(privacyEnabled);
   try {
     const snapshot = await capturePreparedWindow({
       capture: async () => imageDataUrlToCanvas(await bridge.capture()),
@@ -83,8 +90,13 @@ async function captureSnapshot(privacyEnabled: boolean): Promise<CaptureWindowRe
       source: snapshot.source,
     };
   } finally {
-    restorePrivacyPlaceholders();
+    document.documentElement.classList.toggle(CAPTURE_PRIVACY_CLASS, privacyEnabled);
   }
+}
+
+function clearPrivacyPlaceholders(): void {
+  privacyPlaceholders.clear();
+  document.documentElement.classList.remove(CAPTURE_PRIVACY_CLASS);
 }
 
 function exposeCaptureBridge(): void {
