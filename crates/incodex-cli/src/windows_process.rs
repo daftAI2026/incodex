@@ -1004,9 +1004,20 @@ mod tests {
     use crate::windows_activation_capability::WindowsActivationCapability;
 
     use super::{
-        ipv4_connection_server_owner, is_primary_visible_window, require_process_package_identity,
-        WindowsPendingJob,
+        ipv4_connection_server_owner, is_primary_visible_window, process_image_path_is_unreadable,
+        require_process_package_identity, WindowsPendingJob,
     };
+
+    #[test]
+    fn per_process_image_failures_do_not_abort_the_managed_root_snapshot() {
+        for error in [
+            std::io::Error::from_raw_os_error(5),
+            std::io::Error::from_raw_os_error(31),
+            std::io::Error::from_raw_os_error(87),
+        ] {
+            assert!(process_image_path_is_unreadable(&error), "{error}");
+        }
+    }
 
     #[test]
     fn input_method_status_window_is_not_a_primary_codex_window() {
