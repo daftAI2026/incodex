@@ -4,6 +4,7 @@ import { anchoredPanForZoom, viewportRectToSource } from "./geometry.ts";
 import {
   applyCaptureCommand,
   type CaptureCandidate,
+  captureHistoryShortcut,
   capturePointerIntent,
   createCaptureWindowState,
   type CapturePresetId,
@@ -560,9 +561,14 @@ function wireKeyboard(
       void copy();
       return;
     }
-    if (!modifier || event.key.toLowerCase() !== "z") return;
+    const historyCommand = captureHistoryShortcut(event.key, {
+      control: event.ctrlKey,
+      modifier,
+      shift: event.shiftKey,
+    });
+    if (!historyCommand) return;
     event.preventDefault();
-    dispatch({ kind: event.shiftKey ? "redo" : "undo" });
+    dispatch({ kind: historyCommand });
   };
   root.setAttribute("tabindex", "-1");
   root.querySelector<HTMLElement>("button:not(:disabled), input:not(:disabled)")?.focus();

@@ -40,6 +40,11 @@ export type CaptureTool = "move" | "redact";
 export type CaptureRedactionSource = "auto" | "draw";
 export type CapturePointerIntent = "draw" | "ignore" | "pan" | "region";
 export type CaptureRedactionStyle = "mosaic" | "blur" | "solid";
+export type CaptureHistoryShortcutModifiers = {
+  control: boolean;
+  modifier: boolean;
+  shift: boolean;
+};
 export type CapturePresetId =
   | "sea"
   | "canyon"
@@ -132,6 +137,18 @@ export function scaleCaptureZoom(zoom: number, factor: number): number {
 
 export function wheelCaptureZoom(zoom: number, deltaY: number): number {
   return scaleCaptureZoom(zoom, Math.exp(-deltaY * 0.0016));
+}
+
+export function captureHistoryShortcut(
+  key: string,
+  modifiers: CaptureHistoryShortcutModifiers,
+): "redo" | "undo" | null {
+  const normalizedKey = key.toLowerCase();
+  if (modifiers.modifier && normalizedKey === "z") {
+    return modifiers.shift ? "redo" : "undo";
+  }
+  if (modifiers.control && normalizedKey === "y") return "redo";
+  return null;
 }
 
 export function applyCaptureCommand(
