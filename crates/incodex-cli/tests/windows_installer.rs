@@ -226,6 +226,34 @@ fn production_installer_rejects_test_only_path_overrides() {
 }
 
 #[test]
+fn oversized_checksum_manifest_fails_closed() {
+    let root = scratch("oversized-checksum");
+    let user_root = root.join("user-root");
+    let source = Path::new(env!("CARGO_BIN_EXE_incodex"));
+    let release = release_fixture(&root, &sha256(source));
+    fs::OpenOptions::new()
+        .append(true)
+        .open(release.join("SHA256SUMS"))
+        .and_then(|mut file| {
+            use std::io::Write;
+            file.write_all(&vec![b'#'; 300 * 1024])
+        })
+        .expect("inflate checksum manifest");
+
+    let output = run_installer(&release, &user_root);
+    let launcher_was_published = user_root.join("bin/incodex.cmd").exists();
+    fs::remove_dir_all(&root).expect("remove scratch directory");
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("too large"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!launcher_was_published);
+}
+
+#[test]
 fn checksum_failure_does_not_publish_a_launcher_or_release() {
     let root = scratch("checksum");
     let user_root = root.join("user-root");
