@@ -44,6 +44,22 @@ describe("capture preparation lifecycle", () => {
     });
   });
 
+  test("keeps the editor closed when the initial capture fails", async () => {
+    let capturedError: unknown;
+    const result = await prepareCaptureWindow({
+      capture: async () => {
+        throw new Error("capture failed");
+      },
+      loadPreferences: () => ({ privacyEnabled: true }),
+      onCaptureError: (error) => {
+        capturedError = error;
+      },
+    });
+
+    expect(result).toBeNull();
+    expect(capturedError).toBeInstanceOf(Error);
+  });
+
   test("prepares the live document for two frames before collecting candidates and capturing", async () => {
     const classList = new FakeClassList();
     const events: string[] = [];
