@@ -124,7 +124,10 @@ describe("capture window preview", () => {
     expect(readFileSync(join(import.meta.dir, "view.ts"), "utf8")).not.toContain(
       "capturePresetSections[",
     );
-    expect(readFileSync(join(import.meta.dir, "editor.ts"), "utf8")).toContain(
+    const editor = readFileSync(join(import.meta.dir, "editor.ts"), "utf8");
+    expect(editor.split("\n").length).toBeLessThanOrEqual(800);
+    expect(editor).toContain('from "./background-controls.ts"');
+    expect(readFileSync(join(import.meta.dir, "background-controls.ts"), "utf8")).toContain(
       'querySelectorAll<HTMLElement>("[data-background-color]")',
     );
 
