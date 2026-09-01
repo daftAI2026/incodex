@@ -1,8 +1,16 @@
+/**
+ * [INPUT]: 依赖 capture-window 的共享样式、背景选择器样式与编辑器模板源码
+ * [OUTPUT]: 为视觉令牌、布局密度、样式职责边界和图标尺寸提供回归合同
+ * [POS]: capture-window 的视觉结构测试，防止产品语义演进重新引入魔法值或臃肿样式单体
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+const root = join(import.meta.dir, "../../..");
 const cssPath = join(import.meta.dir, "capture-window.css");
+const backgroundPickerCssPath = join(import.meta.dir, "background-picker.css");
 const viewPath = join(import.meta.dir, "view.ts");
 
 describe("capture window visual tokens", () => {
@@ -32,7 +40,7 @@ describe("capture window visual tokens", () => {
   });
 
   test("packs circular background options without stretching the inspector", () => {
-    const css = readFileSync(cssPath, "utf8");
+    const css = readFileSync(backgroundPickerCssPath, "utf8");
 
     expect(css).not.toMatch(/\.incodex-capture-background-grid\s*\{[^}]*padding:/);
     expect(css).toMatch(
@@ -50,6 +58,17 @@ describe("capture window visual tokens", () => {
     expect(selectedRule).toBeDefined();
     expect(selectedRule).not.toContain("border-color:");
     expect(css).not.toMatch(/@supports \(corner-shape:[\s\S]*?\.incodex-capture-background-option/);
+  });
+
+  test("keeps background picker styling isolated from the editor shell", () => {
+    const shellCss = readFileSync(cssPath, "utf8");
+    const pickerCss = readFileSync(backgroundPickerCssPath, "utf8");
+    const buildRuntime = readFileSync(join(root, "src/build-runtime.ts"), "utf8");
+
+    expect(shellCss.split("\n").length).toBeLessThanOrEqual(800);
+    expect(shellCss).not.toContain(".incodex-capture-background-sections");
+    expect(pickerCss).toContain(".incodex-capture-background-sections");
+    expect(buildRuntime).toContain('capture-window/background-picker.css');
   });
 
   test("sizes editor icon roles from Codex spacing tokens", () => {
