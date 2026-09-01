@@ -49,4 +49,8 @@ fn coordinator_forwards_sparkle_quit_to_the_running_host() {
         !termination_handler.contains("SIGKILL") && !termination_handler.contains("SIGTERM"),
         "the update handoff must preserve the official app's normal task-confirmation exit path"
     );
+    assert!(
+        !termination_handler.contains("if (self.terminationPending) return"),
+        "Sparkle may retry its quit event after the host delays or cancels termination, so the Coordinator must forward every retry"
+    );
 }
