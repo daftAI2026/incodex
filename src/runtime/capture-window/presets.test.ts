@@ -8,6 +8,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  captureBackgroundSection,
   capturePresetAssetUrl,
   capturePresetSections,
   capturePresets,
@@ -48,6 +49,18 @@ describe("capture background presets", () => {
         presets: ["sea", "canyon", "mist", "highland", "ocean"],
       },
     ]);
+  });
+
+  test("derives section semantics from the existing CaptureBackground state", () => {
+    expect(captureBackgroundSection({ kind: "transparent" })).toBe("none");
+    expect(captureBackgroundSection({ color: "#101114", kind: "color" })).toBe(
+      "plain-color",
+    );
+    expect(
+      captureBackgroundSection({ dataUrl: "data:image/png;base64,wallpaper", kind: "wallpaper" }),
+    ).toBe("wallpapers");
+    expect(captureBackgroundSection({ id: "sea", kind: "preset" })).toBe("wallpapers");
+    expect(captureBackgroundSection({ id: "silver", kind: "preset" })).toBe("gradients");
   });
 
   test("uses local 2560 by 1600 raster assets instead of synthetic gradients", () => {
