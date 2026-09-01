@@ -1,3 +1,7 @@
+import {
+  syncCaptureBackgroundControls,
+  wireCaptureBackgroundActions,
+} from "./background-controls.ts";
 import { captureWindowCopy } from "./copy.ts";
 import { capturePhysicalPadding, renderCaptureToCanvas } from "./compositor.ts";
 import { createCaptureBackgroundImageStore } from "./backgrounds.ts";
@@ -15,7 +19,6 @@ import {
   captureHistoryShortcut,
   capturePointerIntent,
   createCaptureWindowState,
-  type CapturePresetId,
   scaleCaptureZoom,
   type CaptureWindowCommand,
   type CaptureWindowState,
@@ -28,7 +31,6 @@ import {
   loadCapturePreferences,
   saveCapturePreferences,
 } from "./preferences.ts";
-import { captureBackgroundSection, isCapturePlainColor } from "./presets.ts";
 import { resolveSelectedCaptureRegions } from "./redactions.ts";
 import { mountCaptureRegionLayer } from "./regions.ts";
 import { captureToolbarTemplate, captureWindowTemplate } from "./view.ts";
@@ -232,16 +234,15 @@ export function mountCaptureWindowEditor(
     const rendered = renderCanvas();
     const frame = root.querySelector<HTMLElement>(".incodex-capture-canvas-frame");
     wireToolbarActions(root, dispatch, dispatchRegion, resetView);
-    wireBackgroundActions(
-      root,
+    wireCaptureBackgroundActions(root, {
       dispatch,
-      (color) => {
+      pickWallpaper: () => root.querySelector<HTMLInputElement>("[data-input='wallpaper']")?.click(),
+      readWallpaperDataUrl: () => lastWallpaperDataUrl,
+      setBackgroundColor: (color) => {
         lastBackgroundColor = color;
         dispatch({ background: { color, kind: "color" }, kind: "set-background" });
       },
-      () => lastWallpaperDataUrl,
-      () => root.querySelector<HTMLInputElement>("[data-input='wallpaper']")?.click(),
-    );
+    });
     wireStage(
       root,
       rendered,
@@ -447,48 +448,6 @@ function wireToolbarActions(
   });
 }
 
-function wireBackgroundActions(
-  root: HTMLElement,
-  dispatch: (command: CaptureWindowCommand) => void,
-  setBackgroundColor: (color: string) => void,
-  readWallpaperDataUrl: () => string | null,
-  pickWallpaper: () => void,
-): void {
-  for (const option of root.querySelectorAll<HTMLElement>("[data-background]")) {
-    option.addEventListener("click", () => {
-      const id = option.dataset.background;
-      if (id === "transparent") {
-        dispatch({ kind: "set-background", background: { kind: "transparent" } });
-        return;
-      }
-      dispatch({
-        kind: "set-background",
-        background: { id: id as CapturePresetId, kind: "preset" },
-      });
-    });
-  }
-  for (const option of root.querySelectorAll<HTMLElement>("[data-background-color]")) {
-    option.addEventListener("click", () => {
-      const color = option.dataset.backgroundColor;
-      if (color) setBackgroundColor(color);
-    });
-  }
-  const wallpaper = root.querySelector<HTMLButtonElement>("[data-background-wallpaper]");
-  wallpaper?.addEventListener("click", () => {
-    const dataUrl = readWallpaperDataUrl();
-    if (!dataUrl) {
-      pickWallpaper();
-      return;
-    }
-    dispatch({ background: { dataUrl, kind: "wallpaper" }, kind: "set-background" });
-  });
-  wallpaper?.addEventListener("dblclick", () => pickWallpaper());
-  root.querySelector<HTMLButtonElement>("[data-action='change-wallpaper']")?.addEventListener(
-    "click",
-    pickWallpaper,
-  );
-}
-
 function wireInputs(
   root: HTMLElement,
   dispatch: (command: CaptureWindowCommand) => void,
@@ -533,51 +492,7 @@ function syncEditorControls(
   const zoomIn = root.querySelector<HTMLButtonElement>("[data-action='zoom-in']");
   if (zoomOut) zoomOut.disabled = state.zoom <= CAPTURE_MIN_ZOOM;
   if (zoomIn) zoomIn.disabled = state.zoom >= CAPTURE_MAX_ZOOM;
-
-  for (const option of root.querySelectorAll<HTMLElement>("[data-background]")) {
-    const selected =
-      option.dataset.background === "transparent"
-        ? state.background.kind === "transparent"
-        : state.background.kind === "preset" && option.dataset.background === state.background.id;
-    option.setAttribute("aria-pressed", String(selected));
-  }
-
-  for (const option of root.querySelectorAll<HTMLElement>("[data-background-color]")) {
-    const selected = state.background.kind === "color" &&
-      option.dataset.backgroundColor?.toLowerCase() === state.background.color.toLowerCase();
-    option.setAttribute("aria-pressed", String(selected));
-  }
-
-  const custom = root.querySelector<HTMLElement>("[data-background-custom]");
-  if (custom) {
-    const selected = state.background.kind === "color" && !isCapturePlainColor(state.background.color);
-    custom.dataset.selected = String(selected);
-    custom.querySelector<HTMLElement>("[data-background-custom-icon]")?.toggleAttribute(
-      "hidden",
-      selected,
-    );
-  }
-  const activeSection = captureBackgroundSection(state.background);
-  for (const section of root.querySelectorAll<HTMLElement>("[data-background-section]")) {
-    section.dataset.active = String(
-      section.dataset.backgroundSection === activeSection ||
-        (activeSection === "none" && section.dataset.backgroundSection === "plain-color"),
-    );
-  }
-  syncCaptureColorPopover(root, "background", lastBackgroundColor);
-  const wallpaper = root.querySelector<HTMLElement>("[data-background-wallpaper]");
-  if (wallpaper) wallpaper.dataset.selected = String(state.background.kind === "wallpaper");
-  const wallpaperPreview = root.querySelector<HTMLImageElement>("[data-wallpaper-preview]");
-  const wallpaperPlaceholder = root.querySelector<HTMLElement>("[data-wallpaper-placeholder]");
-  const changeWallpaper = root.querySelector<HTMLButtonElement>("[data-action='change-wallpaper']");
-  if (wallpaperPreview) {
-    wallpaperPreview.src = wallpaperDataUrl ?? "";
-    wallpaperPreview.hidden = !wallpaperDataUrl;
-  }
-  if (wallpaperPlaceholder) wallpaperPlaceholder.hidden = Boolean(wallpaperDataUrl);
-  if (changeWallpaper) {
-    changeWallpaper.hidden = !(wallpaperDataUrl && state.background.kind === "wallpaper");
-  }
+  syncCaptureBackgroundControls(root, state, lastBackgroundColor, wallpaperDataUrl);
 
   const padding = root.querySelector<HTMLInputElement>("[data-input='padding']");
   const paddingValue = root.querySelector<HTMLElement>("[data-value='padding']");

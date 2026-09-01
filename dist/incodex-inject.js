@@ -186,410 +186,6 @@ function defaultCaptureId() {
   return `capture-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-// src/runtime/capture-window/copy.ts
-var ENGLISH = {
-  background: "Background",
-  backgroundGradients: "Gradients",
-  backgroundNone: "None",
-  backgroundPlainColor: "Plain color",
-  backgroundWallpapers: "Wallpapers",
-  blur: "Blur",
-  changeImage: "Change image",
-  close: "Close capture window",
-  captureFailed: "Unable to capture the window.",
-  clipboardUnavailable: "Clipboard access is unavailable in this browser.",
-  copied: "Copied to clipboard",
-  copy: "Copy",
-  custom: "Color",
-  maskColor: "Mask color",
-  mosaic: "Mosaic",
-  move: "Move",
-  padding: "Padding",
-  privacy: "Privacy masks",
-  privacyDescription: "Replace marked sensitive details before taking the screenshot.",
-  preview: "Preview",
-  redact: "Redact",
-  regionHint: "Click detected areas to redact them",
-  regionHintDraw: "Drag over any area to redact it",
-  regionRemove: "Remove redaction",
-  regionSuggestion: "Detected area",
-  redo: "Redo",
-  retake: "Retake",
-  retakeFailed: "Unable to capture the window again.",
-  save: "Save",
-  saveFailed: "Unable to encode the PNG.",
-  saved: "PNG downloaded",
-  shadow: "Shadow",
-  solid: "Solid",
-  sourceAuto: "Detected areas",
-  sourceAutoHint: "Select detected areas",
-  sourceDraw: "Draw areas",
-  sourceDrawHint: "Draw custom areas",
-  title: "Capture window",
-  tools: "Tools",
-  transparent: "Transparent",
-  undo: "Undo",
-  wallpaper: "Wallpaper",
-  wallpaperUnreadable: "Unable to read this wallpaper.",
-  wallpaperTooLarge: "Wallpaper must be PNG, JPEG, or WebP and no larger than 32 MiB.",
-  zoomIn: "Zoom in",
-  zoomOut: "Zoom out",
-  zoomReset: "Reset view"
-};
-var CHINESE = {
-  background: "背景",
-  backgroundGradients: "渐变",
-  backgroundNone: "无",
-  backgroundPlainColor: "纯色",
-  backgroundWallpapers: "壁纸",
-  blur: "模糊",
-  changeImage: "更换图片",
-  close: "关闭截取窗口",
-  captureFailed: "无法截取窗口。",
-  clipboardUnavailable: "当前浏览器无法写入剪贴板。",
-  copied: "已复制到剪贴板",
-  copy: "复制",
-  custom: "颜色",
-  maskColor: "遮罩颜色",
-  mosaic: "马赛克",
-  move: "移动",
-  padding: "边距",
-  privacy: "隐私遮罩",
-  privacyDescription: "截图前将已标记的敏感信息替换为占位符。",
-  preview: "预览",
-  redact: "区域打码",
-  regionHint: "点击检测到的区域进行打码",
-  regionHintDraw: "拖动画出要打码的区域",
-  regionRemove: "移除打码",
-  regionSuggestion: "检测到的区域",
-  redo: "重做",
-  retake: "重拍",
-  retakeFailed: "无法重新截取窗口。",
-  save: "保存",
-  saveFailed: "无法生成 PNG。",
-  saved: "PNG 已下载",
-  shadow: "阴影",
-  solid: "纯色",
-  sourceAuto: "检测区域",
-  sourceAutoHint: "选择检测到的区域",
-  sourceDraw: "手动画框",
-  sourceDrawHint: "手动画出区域",
-  title: "截取窗口",
-  tools: "工具",
-  transparent: "透明",
-  undo: "撤销",
-  wallpaper: "壁纸",
-  wallpaperUnreadable: "无法读取这张壁纸。",
-  wallpaperTooLarge: "壁纸必须是 PNG、JPEG 或 WebP，且不超过 32 MiB。",
-  zoomIn: "放大",
-  zoomOut: "缩小",
-  zoomReset: "复位视图"
-};
-function captureWindowCopy(locale) {
-  return locale.toLowerCase().startsWith("zh") ? CHINESE : ENGLISH;
-}
-
-// src/runtime/capture-window/presets.ts
-var capturePresets = [
-  { colors: ["#d7eee8", "#71b6ae", "#2f6870"], id: "sea", section: "wallpapers" },
-  { colors: ["#f4cfaa", "#c67b5c", "#65443e"], id: "canyon", section: "wallpapers" },
-  { colors: ["#eef2f1", "#aab9b6", "#74817e"], id: "mist", section: "wallpapers" },
-  { colors: ["#d8d7b6", "#779175", "#3f5c59"], id: "highland", section: "wallpapers" },
-  { colors: ["#b8e8e8", "#4d9bb1", "#24526f"], id: "ocean", section: "wallpapers" },
-  { colors: ["#f0f1f3", "#c6c9ce", "#90959d"], id: "silver", section: "gradients" },
-  { colors: ["#d6ecff", "#8ab8f7", "#3268a8"], id: "azure", section: "gradients" },
-  { colors: ["#d8dcff", "#7a78cf", "#38346e"], id: "indigo", section: "gradients" },
-  { colors: ["#ffcf98", "#ea785b", "#722f45"], id: "ember", section: "gradients" },
-  { colors: ["#57606f", "#2d3440", "#15191f"], id: "graphite", section: "gradients" }
-];
-var capturePlainColors = ["#121212", "#ffffff", "#d1444b"];
-var captureRasterPresetIds = capturePresets.filter((preset) => preset.section === "wallpapers").map((preset) => preset.id);
-var capturePresetSections = [
-  {
-    id: "gradients",
-    presets: capturePresets.filter((preset) => preset.section === "gradients")
-  },
-  {
-    id: "wallpapers",
-    presets: capturePresets.filter((preset) => preset.section === "wallpapers")
-  }
-];
-function capturePresetSection(id) {
-  const section = capturePresetSections.find((candidate) => candidate.id === id);
-  if (!section)
-    throw new Error(`Unknown capture preset section: ${id}`);
-  return section;
-}
-function captureBackgroundSection(background) {
-  if (background.kind === "transparent")
-    return "none";
-  if (background.kind === "color")
-    return "plain-color";
-  if (background.kind === "wallpaper")
-    return "wallpapers";
-  const preset = capturePresets.find((candidate) => candidate.id === background.id);
-  if (!preset)
-    throw new Error(`Unknown capture background preset: ${background.id}`);
-  return preset.section;
-}
-var embeddedCapturePresetAssets = {};
-function configureCapturePresetAssets(assets) {
-  embeddedCapturePresetAssets = { ...assets };
-}
-function capturePresetColors(presetId) {
-  return capturePresets.find((preset) => preset.id === presetId)?.colors ?? capturePresets[9].colors;
-}
-function capturePresetAssetUrl(presetId) {
-  const preset = capturePresets.find((candidate) => candidate.id === presetId);
-  if (preset?.section !== "wallpapers")
-    return null;
-  return embeddedCapturePresetAssets[presetId] ?? `/capture-backgrounds/${presetId}.jpg`;
-}
-function capturePresetSwatch(preset) {
-  if (preset.section === "gradients") {
-    const [start, middle, end] = preset.colors;
-    return `linear-gradient(135deg, ${start} 0%, ${middle} 52%, ${end} 100%)`;
-  }
-  return `url('${capturePresetAssetUrl(preset.id)}') center / cover no-repeat`;
-}
-function isCapturePlainColor(color) {
-  return capturePlainColors.some((candidate) => candidate.toLowerCase() === color.toLowerCase());
-}
-
-// src/runtime/capture-window/compositor.ts
-var CAPTURE_WINDOW_UNDERLAY_COLOR = "#f4f4f4";
-function redactionSampling(style, scaleFactor) {
-  if (style === "solid")
-    return null;
-  return {
-    blockSize: 9 * Math.max(1, scaleFactor),
-    smoothing: style === "blur"
-  };
-}
-function capturePhysicalPadding(source, padding) {
-  return padding * Math.max(1, source.scaleFactor);
-}
-function captureOutputSize(source, padding) {
-  const physicalPadding = capturePhysicalPadding(source, padding);
-  return {
-    height: source.height + physicalPadding * 2,
-    width: source.width + physicalPadding * 2
-  };
-}
-function captureWindowCornerRadius(isMacOS, scaleFactor) {
-  return (isMacOS ? 26 : 12) * Math.max(1, scaleFactor);
-}
-function captureWindowShadow(padding, scaleFactor) {
-  const scale = Math.max(1, scaleFactor);
-  return {
-    blur: Math.round(Math.min(56, padding * 0.7) * scale),
-    color: "rgba(15, 18, 26, 0.38)",
-    offsetY: Math.round(Math.min(20, padding * 0.25) * scale)
-  };
-}
-function renderCaptureToCanvas(source, state, options) {
-  const canvas = document.createElement("canvas");
-  const size = captureOutputSize(state.source, state.padding);
-  canvas.width = Math.round(size.width);
-  canvas.height = Math.round(size.height);
-  const context = canvas.getContext("2d");
-  if (!context)
-    throw new Error("Canvas 2D is unavailable");
-  drawBackground(context, state.background, size, options.backgroundImage ?? null);
-  drawWindow(context, source, state, options.isMacOS);
-  const regions = activeCaptureRegions(state);
-  for (const region of regions) {
-    drawRedaction(context, source, region, state);
-  }
-  return canvas;
-}
-function activeCaptureRegions(state) {
-  return state.regions;
-}
-function drawBackground(context, background, size, backgroundImage) {
-  context.clearRect(0, 0, size.width, size.height);
-  if (background.kind === "transparent")
-    return;
-  if ((background.kind === "preset" || background.kind === "wallpaper") && backgroundImage) {
-    drawCoverImage(context, backgroundImage, size);
-    return;
-  }
-  if (background.kind === "color") {
-    context.fillStyle = background.color;
-    context.fillRect(0, 0, size.width, size.height);
-    return;
-  }
-  const presetId = background.kind === "preset" ? background.id : "graphite";
-  drawPreset(context, presetId, size);
-}
-function drawPreset(context, presetId, size) {
-  const colors = capturePresetColors(presetId);
-  const gradient = context.createLinearGradient(0, 0, size.width, size.height);
-  gradient.addColorStop(0, colors[0]);
-  gradient.addColorStop(0.52, colors[1]);
-  gradient.addColorStop(1, colors[2]);
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, size.width, size.height);
-  const glow = context.createRadialGradient(size.width * 0.72, size.height * 0.18, 0, size.width * 0.72, size.height * 0.18, Math.max(size.width, size.height) * 0.62);
-  glow.addColorStop(0, "rgba(255,255,255,.22)");
-  glow.addColorStop(1, "rgba(255,255,255,0)");
-  context.fillStyle = glow;
-  context.fillRect(0, 0, size.width, size.height);
-}
-function drawCoverImage(context, image, size) {
-  const dimensions = sourceDimensions(image);
-  const scale = Math.max(size.width / dimensions.width, size.height / dimensions.height);
-  const width = dimensions.width * scale;
-  const height = dimensions.height * scale;
-  context.drawImage(image, (size.width - width) / 2, (size.height - height) / 2, width, height);
-}
-function drawWindow(context, source, state, isMacOS) {
-  const padding = capturePhysicalPadding(state.source, state.padding);
-  const scaleFactor = Math.max(1, state.source.scaleFactor);
-  const cornerRadius = captureWindowCornerRadius(isMacOS, scaleFactor);
-  context.save();
-  roundedRectPath(context, padding, padding, state.source.width, state.source.height, cornerRadius);
-  if (state.shadow) {
-    const shadow = captureWindowShadow(state.padding, scaleFactor);
-    context.shadowColor = shadow.color;
-    context.shadowBlur = shadow.blur;
-    context.shadowOffsetY = shadow.offsetY;
-  }
-  context.fillStyle = CAPTURE_WINDOW_UNDERLAY_COLOR;
-  context.fill();
-  context.shadowColor = "transparent";
-  context.shadowBlur = 0;
-  context.shadowOffsetY = 0;
-  context.clip();
-  context.drawImage(source, padding, padding, state.source.width, state.source.height);
-  context.restore();
-}
-function drawRedaction(context, source, region, state) {
-  const { rect } = region;
-  const scaleFactor = Math.max(1, state.source.scaleFactor);
-  const padding = capturePhysicalPadding(state.source, state.padding);
-  const target = {
-    height: rect.height,
-    width: rect.width,
-    x: rect.x + padding,
-    y: rect.y + padding
-  };
-  context.save();
-  roundedRectPath(context, target.x, target.y, target.width, target.height, 5 * scaleFactor);
-  context.clip();
-  if (region.style === "solid") {
-    context.fillStyle = region.color ?? state.solidColor;
-    context.fillRect(target.x, target.y, target.width, target.height);
-    context.restore();
-    return;
-  }
-  const sampling = redactionSampling(region.style, scaleFactor);
-  if (!sampling) {
-    context.restore();
-    return;
-  }
-  const small = document.createElement("canvas");
-  small.width = Math.max(1, Math.ceil(rect.width / sampling.blockSize));
-  small.height = Math.max(1, Math.ceil(rect.height / sampling.blockSize));
-  const smallContext = small.getContext("2d");
-  if (smallContext) {
-    smallContext.imageSmoothingEnabled = sampling.smoothing;
-    if (sampling.smoothing)
-      smallContext.imageSmoothingQuality = "high";
-    smallContext.drawImage(source, rect.x, rect.y, rect.width, rect.height, 0, 0, small.width, small.height);
-    context.imageSmoothingEnabled = sampling.smoothing;
-    if (sampling.smoothing)
-      context.imageSmoothingQuality = "high";
-    context.drawImage(small, target.x, target.y, target.width, target.height);
-  }
-  context.restore();
-}
-function sourceDimensions(source) {
-  if (source instanceof HTMLCanvasElement || source instanceof HTMLImageElement) {
-    return { height: source.height, width: source.width };
-  }
-  if (source instanceof ImageBitmap) {
-    return { height: source.height, width: source.width };
-  }
-  return { height: 1, width: 1 };
-}
-function roundedRectPath(context, x, y, width, height, radius) {
-  context.beginPath();
-  context.roundRect(x, y, width, height, Math.max(0, radius));
-}
-
-// src/runtime/capture-window/wallpaper.ts
-var MAX_WALLPAPER_BYTES = 32 * 1024 * 1024;
-var WALLPAPER_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
-function isCaptureWallpaperFile(file) {
-  return WALLPAPER_TYPES.has(file.type) && file.size <= MAX_WALLPAPER_BYTES;
-}
-function readCaptureWallpaperFile(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader;
-    reader.addEventListener("load", () => resolve(String(reader.result)));
-    reader.addEventListener("error", () => reject(reader.error));
-    reader.readAsDataURL(file);
-  });
-}
-function loadCaptureImage(source) {
-  return new Promise((resolve, reject) => {
-    const image = new Image;
-    image.addEventListener("load", () => resolve(image));
-    image.addEventListener("error", () => reject(new Error("Unable to load image")));
-    image.src = source;
-  });
-}
-
-// src/runtime/capture-window/backgrounds.ts
-function captureBackgroundImageUrl(background) {
-  if (background.kind === "preset")
-    return capturePresetAssetUrl(background.id);
-  if (background.kind === "wallpaper")
-    return background.dataUrl;
-  return null;
-}
-function createCaptureBackgroundImageStore(loadImage = loadCaptureImage) {
-  const images = new Map;
-  const loads = new Map;
-  function read(background) {
-    const url = captureBackgroundImageUrl(background);
-    return url ? images.get(url) ?? null : null;
-  }
-  async function resolve(background) {
-    const url = captureBackgroundImageUrl(background);
-    if (!url)
-      return null;
-    const cached = images.get(url);
-    if (cached)
-      return cached;
-    let pending = loads.get(url);
-    if (!pending) {
-      pending = loadImage(url).then((image) => {
-        images.set(url, image);
-        loads.delete(url);
-        return image;
-      }, (error) => {
-        loads.delete(url);
-        throw error;
-      });
-      loads.set(url, pending);
-    }
-    return pending;
-  }
-  function hydrate(background, onLoad, onError) {
-    if (!captureBackgroundImageUrl(background) || read(background))
-      return;
-    resolve(background).then(onLoad, onError);
-  }
-  return {
-    hydrate,
-    read,
-    remember: (url, image) => images.set(url, image),
-    resolve
-  };
-}
-
 // src/runtime/capture-window/color-popover.ts
 function sanitizeCaptureHex(value) {
   return value.replace(/([^0-9A-F]+)/gi, "").substring(0, 6);
@@ -894,6 +490,485 @@ function clamp(value, minimum, maximum) {
 }
 function escapeAttribute(value) {
   return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
+}
+
+// src/runtime/capture-window/presets.ts
+var capturePresets = [
+  { colors: ["#d7eee8", "#71b6ae", "#2f6870"], id: "sea", section: "wallpapers" },
+  { colors: ["#f4cfaa", "#c67b5c", "#65443e"], id: "canyon", section: "wallpapers" },
+  { colors: ["#eef2f1", "#aab9b6", "#74817e"], id: "mist", section: "wallpapers" },
+  { colors: ["#d8d7b6", "#779175", "#3f5c59"], id: "highland", section: "wallpapers" },
+  { colors: ["#b8e8e8", "#4d9bb1", "#24526f"], id: "ocean", section: "wallpapers" },
+  { colors: ["#f0f1f3", "#c6c9ce", "#90959d"], id: "silver", section: "gradients" },
+  { colors: ["#d6ecff", "#8ab8f7", "#3268a8"], id: "azure", section: "gradients" },
+  { colors: ["#d8dcff", "#7a78cf", "#38346e"], id: "indigo", section: "gradients" },
+  { colors: ["#ffcf98", "#ea785b", "#722f45"], id: "ember", section: "gradients" },
+  { colors: ["#57606f", "#2d3440", "#15191f"], id: "graphite", section: "gradients" }
+];
+var capturePlainColors = ["#121212", "#ffffff", "#d1444b"];
+var captureRasterPresetIds = capturePresets.filter((preset) => preset.section === "wallpapers").map((preset) => preset.id);
+var capturePresetSections = [
+  {
+    id: "gradients",
+    presets: capturePresets.filter((preset) => preset.section === "gradients")
+  },
+  {
+    id: "wallpapers",
+    presets: capturePresets.filter((preset) => preset.section === "wallpapers")
+  }
+];
+function capturePresetSection(id) {
+  const section = capturePresetSections.find((candidate) => candidate.id === id);
+  if (!section)
+    throw new Error(`Unknown capture preset section: ${id}`);
+  return section;
+}
+function captureBackgroundSection(background) {
+  if (background.kind === "transparent")
+    return "none";
+  if (background.kind === "color")
+    return "plain-color";
+  if (background.kind === "wallpaper")
+    return "wallpapers";
+  const preset = capturePresets.find((candidate) => candidate.id === background.id);
+  if (!preset)
+    throw new Error(`Unknown capture background preset: ${background.id}`);
+  return preset.section;
+}
+var embeddedCapturePresetAssets = {};
+function configureCapturePresetAssets(assets) {
+  embeddedCapturePresetAssets = { ...assets };
+}
+function capturePresetColors(presetId) {
+  return capturePresets.find((preset) => preset.id === presetId)?.colors ?? capturePresets[9].colors;
+}
+function capturePresetAssetUrl(presetId) {
+  const preset = capturePresets.find((candidate) => candidate.id === presetId);
+  if (preset?.section !== "wallpapers")
+    return null;
+  return embeddedCapturePresetAssets[presetId] ?? `/capture-backgrounds/${presetId}.jpg`;
+}
+function capturePresetSwatch(preset) {
+  if (preset.section === "gradients") {
+    const [start, middle, end] = preset.colors;
+    return `linear-gradient(135deg, ${start} 0%, ${middle} 52%, ${end} 100%)`;
+  }
+  return `url('${capturePresetAssetUrl(preset.id)}') center / cover no-repeat`;
+}
+function isCapturePlainColor(color) {
+  return capturePlainColors.some((candidate) => candidate.toLowerCase() === color.toLowerCase());
+}
+
+// src/runtime/capture-window/background-controls.ts
+function wireCaptureBackgroundActions(root, actions) {
+  for (const option of root.querySelectorAll("[data-background]")) {
+    option.addEventListener("click", () => {
+      const id = option.dataset.background;
+      if (id === "transparent") {
+        actions.dispatch({ kind: "set-background", background: { kind: "transparent" } });
+        return;
+      }
+      actions.dispatch({
+        kind: "set-background",
+        background: { id, kind: "preset" }
+      });
+    });
+  }
+  for (const option of root.querySelectorAll("[data-background-color]")) {
+    option.addEventListener("click", () => {
+      const color = option.dataset.backgroundColor;
+      if (color)
+        actions.setBackgroundColor(color);
+    });
+  }
+  const wallpaper = root.querySelector("[data-background-wallpaper]");
+  wallpaper?.addEventListener("click", () => {
+    const dataUrl = actions.readWallpaperDataUrl();
+    if (!dataUrl) {
+      actions.pickWallpaper();
+      return;
+    }
+    actions.dispatch({ background: { dataUrl, kind: "wallpaper" }, kind: "set-background" });
+  });
+  wallpaper?.addEventListener("dblclick", actions.pickWallpaper);
+  root.querySelector("[data-action='change-wallpaper']")?.addEventListener("click", actions.pickWallpaper);
+}
+function syncCaptureBackgroundControls(root, state, lastBackgroundColor, wallpaperDataUrl) {
+  for (const option of root.querySelectorAll("[data-background]")) {
+    const selected = option.dataset.background === "transparent" ? state.background.kind === "transparent" : state.background.kind === "preset" && option.dataset.background === state.background.id;
+    option.setAttribute("aria-pressed", String(selected));
+  }
+  for (const option of root.querySelectorAll("[data-background-color]")) {
+    const selected = state.background.kind === "color" && option.dataset.backgroundColor?.toLowerCase() === state.background.color.toLowerCase();
+    option.setAttribute("aria-pressed", String(selected));
+  }
+  const custom = root.querySelector("[data-background-custom]");
+  if (custom) {
+    const selected = state.background.kind === "color" && !isCapturePlainColor(state.background.color);
+    custom.dataset.selected = String(selected);
+    custom.querySelector("[data-background-custom-icon]")?.toggleAttribute("hidden", selected);
+  }
+  syncActiveSection(root, captureBackgroundSection(state.background));
+  syncCaptureColorPopover(root, "background", lastBackgroundColor);
+  syncWallpaperControls(root, state, wallpaperDataUrl);
+}
+function syncActiveSection(root, activeSection) {
+  for (const section of root.querySelectorAll("[data-background-section]")) {
+    section.dataset.active = String(section.dataset.backgroundSection === activeSection || activeSection === "none" && section.dataset.backgroundSection === "plain-color");
+  }
+}
+function syncWallpaperControls(root, state, wallpaperDataUrl) {
+  const wallpaper = root.querySelector("[data-background-wallpaper]");
+  if (wallpaper)
+    wallpaper.dataset.selected = String(state.background.kind === "wallpaper");
+  const preview = root.querySelector("[data-wallpaper-preview]");
+  const placeholder = root.querySelector("[data-wallpaper-placeholder]");
+  const change = root.querySelector("[data-action='change-wallpaper']");
+  if (preview) {
+    preview.src = wallpaperDataUrl ?? "";
+    preview.hidden = !wallpaperDataUrl;
+  }
+  if (placeholder)
+    placeholder.hidden = Boolean(wallpaperDataUrl);
+  if (change)
+    change.hidden = !(wallpaperDataUrl && state.background.kind === "wallpaper");
+}
+
+// src/runtime/capture-window/copy.ts
+var ENGLISH = {
+  background: "Background",
+  backgroundGradients: "Gradients",
+  backgroundNone: "None",
+  backgroundPlainColor: "Plain color",
+  backgroundWallpapers: "Wallpapers",
+  blur: "Blur",
+  changeImage: "Change image",
+  close: "Close capture window",
+  captureFailed: "Unable to capture the window.",
+  clipboardUnavailable: "Clipboard access is unavailable in this browser.",
+  copied: "Copied to clipboard",
+  copy: "Copy",
+  custom: "Color",
+  maskColor: "Mask color",
+  mosaic: "Mosaic",
+  move: "Move",
+  padding: "Padding",
+  privacy: "Privacy masks",
+  privacyDescription: "Replace marked sensitive details before taking the screenshot.",
+  preview: "Preview",
+  redact: "Redact",
+  regionHint: "Click detected areas to redact them",
+  regionHintDraw: "Drag over any area to redact it",
+  regionRemove: "Remove redaction",
+  regionSuggestion: "Detected area",
+  redo: "Redo",
+  retake: "Retake",
+  retakeFailed: "Unable to capture the window again.",
+  save: "Save",
+  saveFailed: "Unable to encode the PNG.",
+  saved: "PNG downloaded",
+  shadow: "Shadow",
+  solid: "Solid",
+  sourceAuto: "Detected areas",
+  sourceAutoHint: "Select detected areas",
+  sourceDraw: "Draw areas",
+  sourceDrawHint: "Draw custom areas",
+  title: "Capture window",
+  tools: "Tools",
+  transparent: "Transparent",
+  undo: "Undo",
+  wallpaper: "Wallpaper",
+  wallpaperUnreadable: "Unable to read this wallpaper.",
+  wallpaperTooLarge: "Wallpaper must be PNG, JPEG, or WebP and no larger than 32 MiB.",
+  zoomIn: "Zoom in",
+  zoomOut: "Zoom out",
+  zoomReset: "Reset view"
+};
+var CHINESE = {
+  background: "背景",
+  backgroundGradients: "渐变",
+  backgroundNone: "无",
+  backgroundPlainColor: "纯色",
+  backgroundWallpapers: "壁纸",
+  blur: "模糊",
+  changeImage: "更换图片",
+  close: "关闭截取窗口",
+  captureFailed: "无法截取窗口。",
+  clipboardUnavailable: "当前浏览器无法写入剪贴板。",
+  copied: "已复制到剪贴板",
+  copy: "复制",
+  custom: "颜色",
+  maskColor: "遮罩颜色",
+  mosaic: "马赛克",
+  move: "移动",
+  padding: "边距",
+  privacy: "隐私遮罩",
+  privacyDescription: "截图前将已标记的敏感信息替换为占位符。",
+  preview: "预览",
+  redact: "区域打码",
+  regionHint: "点击检测到的区域进行打码",
+  regionHintDraw: "拖动画出要打码的区域",
+  regionRemove: "移除打码",
+  regionSuggestion: "检测到的区域",
+  redo: "重做",
+  retake: "重拍",
+  retakeFailed: "无法重新截取窗口。",
+  save: "保存",
+  saveFailed: "无法生成 PNG。",
+  saved: "PNG 已下载",
+  shadow: "阴影",
+  solid: "纯色",
+  sourceAuto: "检测区域",
+  sourceAutoHint: "选择检测到的区域",
+  sourceDraw: "手动画框",
+  sourceDrawHint: "手动画出区域",
+  title: "截取窗口",
+  tools: "工具",
+  transparent: "透明",
+  undo: "撤销",
+  wallpaper: "壁纸",
+  wallpaperUnreadable: "无法读取这张壁纸。",
+  wallpaperTooLarge: "壁纸必须是 PNG、JPEG 或 WebP，且不超过 32 MiB。",
+  zoomIn: "放大",
+  zoomOut: "缩小",
+  zoomReset: "复位视图"
+};
+function captureWindowCopy(locale) {
+  return locale.toLowerCase().startsWith("zh") ? CHINESE : ENGLISH;
+}
+
+// src/runtime/capture-window/compositor.ts
+var CAPTURE_WINDOW_UNDERLAY_COLOR = "#f4f4f4";
+function redactionSampling(style, scaleFactor) {
+  if (style === "solid")
+    return null;
+  return {
+    blockSize: 9 * Math.max(1, scaleFactor),
+    smoothing: style === "blur"
+  };
+}
+function capturePhysicalPadding(source, padding) {
+  return padding * Math.max(1, source.scaleFactor);
+}
+function captureOutputSize(source, padding) {
+  const physicalPadding = capturePhysicalPadding(source, padding);
+  return {
+    height: source.height + physicalPadding * 2,
+    width: source.width + physicalPadding * 2
+  };
+}
+function captureWindowCornerRadius(isMacOS, scaleFactor) {
+  return (isMacOS ? 26 : 12) * Math.max(1, scaleFactor);
+}
+function captureWindowShadow(padding, scaleFactor) {
+  const scale = Math.max(1, scaleFactor);
+  return {
+    blur: Math.round(Math.min(56, padding * 0.7) * scale),
+    color: "rgba(15, 18, 26, 0.38)",
+    offsetY: Math.round(Math.min(20, padding * 0.25) * scale)
+  };
+}
+function renderCaptureToCanvas(source, state, options) {
+  const canvas = document.createElement("canvas");
+  const size = captureOutputSize(state.source, state.padding);
+  canvas.width = Math.round(size.width);
+  canvas.height = Math.round(size.height);
+  const context = canvas.getContext("2d");
+  if (!context)
+    throw new Error("Canvas 2D is unavailable");
+  drawBackground(context, state.background, size, options.backgroundImage ?? null);
+  drawWindow(context, source, state, options.isMacOS);
+  const regions = activeCaptureRegions(state);
+  for (const region of regions) {
+    drawRedaction(context, source, region, state);
+  }
+  return canvas;
+}
+function activeCaptureRegions(state) {
+  return state.regions;
+}
+function drawBackground(context, background, size, backgroundImage) {
+  context.clearRect(0, 0, size.width, size.height);
+  if (background.kind === "transparent")
+    return;
+  if ((background.kind === "preset" || background.kind === "wallpaper") && backgroundImage) {
+    drawCoverImage(context, backgroundImage, size);
+    return;
+  }
+  if (background.kind === "color") {
+    context.fillStyle = background.color;
+    context.fillRect(0, 0, size.width, size.height);
+    return;
+  }
+  const presetId = background.kind === "preset" ? background.id : "graphite";
+  drawPreset(context, presetId, size);
+}
+function drawPreset(context, presetId, size) {
+  const colors = capturePresetColors(presetId);
+  const gradient = context.createLinearGradient(0, 0, size.width, size.height);
+  gradient.addColorStop(0, colors[0]);
+  gradient.addColorStop(0.52, colors[1]);
+  gradient.addColorStop(1, colors[2]);
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, size.width, size.height);
+  const glow = context.createRadialGradient(size.width * 0.72, size.height * 0.18, 0, size.width * 0.72, size.height * 0.18, Math.max(size.width, size.height) * 0.62);
+  glow.addColorStop(0, "rgba(255,255,255,.22)");
+  glow.addColorStop(1, "rgba(255,255,255,0)");
+  context.fillStyle = glow;
+  context.fillRect(0, 0, size.width, size.height);
+}
+function drawCoverImage(context, image, size) {
+  const dimensions = sourceDimensions(image);
+  const scale = Math.max(size.width / dimensions.width, size.height / dimensions.height);
+  const width = dimensions.width * scale;
+  const height = dimensions.height * scale;
+  context.drawImage(image, (size.width - width) / 2, (size.height - height) / 2, width, height);
+}
+function drawWindow(context, source, state, isMacOS) {
+  const padding = capturePhysicalPadding(state.source, state.padding);
+  const scaleFactor = Math.max(1, state.source.scaleFactor);
+  const cornerRadius = captureWindowCornerRadius(isMacOS, scaleFactor);
+  context.save();
+  roundedRectPath(context, padding, padding, state.source.width, state.source.height, cornerRadius);
+  if (state.shadow) {
+    const shadow = captureWindowShadow(state.padding, scaleFactor);
+    context.shadowColor = shadow.color;
+    context.shadowBlur = shadow.blur;
+    context.shadowOffsetY = shadow.offsetY;
+  }
+  context.fillStyle = CAPTURE_WINDOW_UNDERLAY_COLOR;
+  context.fill();
+  context.shadowColor = "transparent";
+  context.shadowBlur = 0;
+  context.shadowOffsetY = 0;
+  context.clip();
+  context.drawImage(source, padding, padding, state.source.width, state.source.height);
+  context.restore();
+}
+function drawRedaction(context, source, region, state) {
+  const { rect } = region;
+  const scaleFactor = Math.max(1, state.source.scaleFactor);
+  const padding = capturePhysicalPadding(state.source, state.padding);
+  const target = {
+    height: rect.height,
+    width: rect.width,
+    x: rect.x + padding,
+    y: rect.y + padding
+  };
+  context.save();
+  roundedRectPath(context, target.x, target.y, target.width, target.height, 5 * scaleFactor);
+  context.clip();
+  if (region.style === "solid") {
+    context.fillStyle = region.color ?? state.solidColor;
+    context.fillRect(target.x, target.y, target.width, target.height);
+    context.restore();
+    return;
+  }
+  const sampling = redactionSampling(region.style, scaleFactor);
+  if (!sampling) {
+    context.restore();
+    return;
+  }
+  const small = document.createElement("canvas");
+  small.width = Math.max(1, Math.ceil(rect.width / sampling.blockSize));
+  small.height = Math.max(1, Math.ceil(rect.height / sampling.blockSize));
+  const smallContext = small.getContext("2d");
+  if (smallContext) {
+    smallContext.imageSmoothingEnabled = sampling.smoothing;
+    if (sampling.smoothing)
+      smallContext.imageSmoothingQuality = "high";
+    smallContext.drawImage(source, rect.x, rect.y, rect.width, rect.height, 0, 0, small.width, small.height);
+    context.imageSmoothingEnabled = sampling.smoothing;
+    if (sampling.smoothing)
+      context.imageSmoothingQuality = "high";
+    context.drawImage(small, target.x, target.y, target.width, target.height);
+  }
+  context.restore();
+}
+function sourceDimensions(source) {
+  if (source instanceof HTMLCanvasElement || source instanceof HTMLImageElement) {
+    return { height: source.height, width: source.width };
+  }
+  if (source instanceof ImageBitmap) {
+    return { height: source.height, width: source.width };
+  }
+  return { height: 1, width: 1 };
+}
+function roundedRectPath(context, x, y, width, height, radius) {
+  context.beginPath();
+  context.roundRect(x, y, width, height, Math.max(0, radius));
+}
+
+// src/runtime/capture-window/wallpaper.ts
+var MAX_WALLPAPER_BYTES = 32 * 1024 * 1024;
+var WALLPAPER_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+function isCaptureWallpaperFile(file) {
+  return WALLPAPER_TYPES.has(file.type) && file.size <= MAX_WALLPAPER_BYTES;
+}
+function readCaptureWallpaperFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader;
+    reader.addEventListener("load", () => resolve(String(reader.result)));
+    reader.addEventListener("error", () => reject(reader.error));
+    reader.readAsDataURL(file);
+  });
+}
+function loadCaptureImage(source) {
+  return new Promise((resolve, reject) => {
+    const image = new Image;
+    image.addEventListener("load", () => resolve(image));
+    image.addEventListener("error", () => reject(new Error("Unable to load image")));
+    image.src = source;
+  });
+}
+
+// src/runtime/capture-window/backgrounds.ts
+function captureBackgroundImageUrl(background) {
+  if (background.kind === "preset")
+    return capturePresetAssetUrl(background.id);
+  if (background.kind === "wallpaper")
+    return background.dataUrl;
+  return null;
+}
+function createCaptureBackgroundImageStore(loadImage = loadCaptureImage) {
+  const images = new Map;
+  const loads = new Map;
+  function read(background) {
+    const url = captureBackgroundImageUrl(background);
+    return url ? images.get(url) ?? null : null;
+  }
+  async function resolve(background) {
+    const url = captureBackgroundImageUrl(background);
+    if (!url)
+      return null;
+    const cached = images.get(url);
+    if (cached)
+      return cached;
+    let pending = loads.get(url);
+    if (!pending) {
+      pending = loadImage(url).then((image) => {
+        images.set(url, image);
+        loads.delete(url);
+        return image;
+      }, (error) => {
+        loads.delete(url);
+        throw error;
+      });
+      loads.set(url, pending);
+    }
+    return pending;
+  }
+  function hydrate(background, onLoad, onError) {
+    if (!captureBackgroundImageUrl(background) || read(background))
+      return;
+    resolve(background).then(onLoad, onError);
+  }
+  return {
+    hydrate,
+    read,
+    remember: (url, image) => images.set(url, image),
+    resolve
+  };
 }
 
 // src/runtime/capture-window/geometry.ts
@@ -1616,10 +1691,15 @@ function mountCaptureWindowEditor(host, options) {
     const rendered = renderCanvas();
     const frame = root.querySelector(".incodex-capture-canvas-frame");
     wireToolbarActions(root, dispatch, dispatchRegion, resetView);
-    wireBackgroundActions(root, dispatch, (color) => {
-      lastBackgroundColor = color;
-      dispatch({ background: { color, kind: "color" }, kind: "set-background" });
-    }, () => lastWallpaperDataUrl, () => root.querySelector("[data-input='wallpaper']")?.click());
+    wireCaptureBackgroundActions(root, {
+      dispatch,
+      pickWallpaper: () => root.querySelector("[data-input='wallpaper']")?.click(),
+      readWallpaperDataUrl: () => lastWallpaperDataUrl,
+      setBackgroundColor: (color) => {
+        lastBackgroundColor = color;
+        dispatch({ background: { color, kind: "color" }, kind: "set-background" });
+      }
+    });
     wireStage(root, rendered, frame, () => state, dispatchRegion, () => `manual-${++manualRegionSequence}`, () => ({ panX, panY }), (x, y) => {
       panX = x;
       panY = y;
@@ -1803,39 +1883,6 @@ function wireToolbarActions(root, dispatch, dispatchRegion, resetView) {
     resetView();
   });
 }
-function wireBackgroundActions(root, dispatch, setBackgroundColor, readWallpaperDataUrl, pickWallpaper) {
-  for (const option of root.querySelectorAll("[data-background]")) {
-    option.addEventListener("click", () => {
-      const id = option.dataset.background;
-      if (id === "transparent") {
-        dispatch({ kind: "set-background", background: { kind: "transparent" } });
-        return;
-      }
-      dispatch({
-        kind: "set-background",
-        background: { id, kind: "preset" }
-      });
-    });
-  }
-  for (const option of root.querySelectorAll("[data-background-color]")) {
-    option.addEventListener("click", () => {
-      const color = option.dataset.backgroundColor;
-      if (color)
-        setBackgroundColor(color);
-    });
-  }
-  const wallpaper = root.querySelector("[data-background-wallpaper]");
-  wallpaper?.addEventListener("click", () => {
-    const dataUrl = readWallpaperDataUrl();
-    if (!dataUrl) {
-      pickWallpaper();
-      return;
-    }
-    dispatch({ background: { dataUrl, kind: "wallpaper" }, kind: "set-background" });
-  });
-  wallpaper?.addEventListener("dblclick", () => pickWallpaper());
-  root.querySelector("[data-action='change-wallpaper']")?.addEventListener("click", pickWallpaper);
-}
 function wireInputs(root, dispatch, preview, loadWallpaper, setPrivacy) {
   root.querySelector("[data-input='privacy']")?.addEventListener("change", (event) => {
     setPrivacy(event.currentTarget.checked);
@@ -1872,40 +1919,7 @@ function syncEditorControls(root, state, lastBackgroundColor, wallpaperDataUrl) 
     zoomOut.disabled = state.zoom <= CAPTURE_MIN_ZOOM;
   if (zoomIn)
     zoomIn.disabled = state.zoom >= CAPTURE_MAX_ZOOM;
-  for (const option of root.querySelectorAll("[data-background]")) {
-    const selected = option.dataset.background === "transparent" ? state.background.kind === "transparent" : state.background.kind === "preset" && option.dataset.background === state.background.id;
-    option.setAttribute("aria-pressed", String(selected));
-  }
-  for (const option of root.querySelectorAll("[data-background-color]")) {
-    const selected = state.background.kind === "color" && option.dataset.backgroundColor?.toLowerCase() === state.background.color.toLowerCase();
-    option.setAttribute("aria-pressed", String(selected));
-  }
-  const custom = root.querySelector("[data-background-custom]");
-  if (custom) {
-    const selected = state.background.kind === "color" && !isCapturePlainColor(state.background.color);
-    custom.dataset.selected = String(selected);
-    custom.querySelector("[data-background-custom-icon]")?.toggleAttribute("hidden", selected);
-  }
-  const activeSection = captureBackgroundSection(state.background);
-  for (const section of root.querySelectorAll("[data-background-section]")) {
-    section.dataset.active = String(section.dataset.backgroundSection === activeSection || activeSection === "none" && section.dataset.backgroundSection === "plain-color");
-  }
-  syncCaptureColorPopover(root, "background", lastBackgroundColor);
-  const wallpaper = root.querySelector("[data-background-wallpaper]");
-  if (wallpaper)
-    wallpaper.dataset.selected = String(state.background.kind === "wallpaper");
-  const wallpaperPreview = root.querySelector("[data-wallpaper-preview]");
-  const wallpaperPlaceholder = root.querySelector("[data-wallpaper-placeholder]");
-  const changeWallpaper = root.querySelector("[data-action='change-wallpaper']");
-  if (wallpaperPreview) {
-    wallpaperPreview.src = wallpaperDataUrl ?? "";
-    wallpaperPreview.hidden = !wallpaperDataUrl;
-  }
-  if (wallpaperPlaceholder)
-    wallpaperPlaceholder.hidden = Boolean(wallpaperDataUrl);
-  if (changeWallpaper) {
-    changeWallpaper.hidden = !(wallpaperDataUrl && state.background.kind === "wallpaper");
-  }
+  syncCaptureBackgroundControls(root, state, lastBackgroundColor, wallpaperDataUrl);
   const padding = root.querySelector("[data-input='padding']");
   const paddingValue = root.querySelector("[data-value='padding']");
   if (padding)
