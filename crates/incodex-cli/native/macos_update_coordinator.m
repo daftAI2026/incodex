@@ -75,13 +75,21 @@
     dispatch_resume(self.hostExitSource);
 }
 
+- (BOOL)requestHostTermination {
+    NSRunningApplication *host =
+        [NSRunningApplication runningApplicationWithProcessIdentifier:self.hostPID];
+    return host != nil && [host terminate];
+}
+
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender {
     if (!self.initialLaunch || self.allowTermination) {
         return NSTerminateNow;
     }
-    if (self.terminationPending) return NSTerminateLater;
     if (![self processIsRunning:self.hostPID]) {
         return NSTerminateNow;
+    }
+    if (![self requestHostTermination]) {
+        return [self processIsRunning:self.hostPID] ? NSTerminateCancel : NSTerminateNow;
     }
     self.terminationPending = YES;
     return NSTerminateLater;
