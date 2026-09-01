@@ -34,9 +34,10 @@ describe("capture window visual tokens", () => {
   test("packs circular background options without stretching the inspector", () => {
     const css = readFileSync(cssPath, "utf8");
 
-    expect(css).toMatch(/\.incodex-capture-background-grid[\s\S]*?padding: var\(--incodex-capture-space\)/);
+    expect(css).not.toMatch(/\.incodex-capture-background-grid\s*\{[^}]*padding:/);
     expect(css).toMatch(/\.incodex-capture-background-grid[\s\S]*?width: max-content/);
     expect(css).toMatch(/\.incodex-capture-background-option\s*\{[\s\S]*?border-radius: var\(--radius-full/);
+    expect(css).toMatch(/\.incodex-capture-background-option\s*\{[\s\S]*?overflow: hidden/);
     expect(css).not.toMatch(/@supports \(corner-shape:[\s\S]*?\.incodex-capture-background-option/);
   });
 

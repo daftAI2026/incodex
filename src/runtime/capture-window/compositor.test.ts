@@ -34,7 +34,7 @@ describe("capture window compositor plan", () => {
     });
   });
 
-  test("places an opaque white window base between the background and translucent Codex pixels", () => {
+  test("places a solid light-gray window base beneath translucent Codex pixels", () => {
     const state = createCaptureWindowState({ width: 1200, height: 801, scaleFactor: 2 });
 
     const plan = createCaptureRenderPlan(state);
@@ -42,7 +42,7 @@ describe("capture window compositor plan", () => {
     expect(plan.slice(0, 3)).toEqual([
       expect.objectContaining({ kind: "background" }),
       {
-        color: "#ffffff",
+        color: "#f4f4f4",
         kind: "window-underlay",
         rect: { x: 128, y: 128, width: 1200, height: 801 },
       },

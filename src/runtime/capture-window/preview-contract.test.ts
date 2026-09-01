@@ -131,6 +131,7 @@ describe("capture window preview", () => {
     expect(css).toContain("background: var(--incodex-capture-skeleton)");
     expect(css).toContain('[data-incodex-capture-redact="blank"]::after');
     expect(css).toContain('[data-incodex-capture-redact="center"]::after');
+    expect(css).toContain('[data-incodex-capture-redact="project"]::after');
     expect(css).toContain(":nth-child(4n+1) [data-incodex-capture-redact]::after");
     expect(css).toContain(".mac-traffic-light:first-of-type > div");
     expect(css).toMatch(

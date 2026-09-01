@@ -252,8 +252,8 @@ describe("Codex privacy placeholders", () => {
       }),
     );
 
-    expect(composerLabel.getAttribute("data-incodex-capture-redact")).toBe("text");
-    expect(emptyStateProject.getAttribute("data-incodex-capture-redact")).toBe("text");
+    expect(composerLabel.getAttribute("data-incodex-capture-redact")).toBe("project");
+    expect(emptyStateProject.getAttribute("data-incodex-capture-redact")).toBe("project");
 
     restore();
     expect(composerLabel.hasAttribute("data-incodex-capture-redact")).toBe(false);
