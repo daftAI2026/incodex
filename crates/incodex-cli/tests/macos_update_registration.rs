@@ -165,3 +165,46 @@ fn registration_reader_rejects_a_symlinked_control_file() {
     let error = read_registration(&root).unwrap_err();
     assert!(error.contains("symlink"), "{error}");
 }
+
+#[test]
+fn runtime_refresh_migrates_a_legacy_registration_without_repatching_the_app() {
+    let home = scratch();
+    let root = home.join(".incodex");
+    let state = root.join("macos-update");
+    let old_release = root.join("helpers/macos-update/legacy");
+    fs::create_dir_all(&state).unwrap();
+    fs::create_dir_all(&old_release).unwrap();
+    let old_helper = old_release.join("incodex");
+    fs::write(&old_helper, b"legacy helper").unwrap();
+    let old_hash = sha256_hex(b"legacy helper");
+    fs::write(
+        state.join("registration.json"),
+        format!(
+            "{{\"schemaVersion\":1,\"installId\":\"install-epoch-a\",\"appPath\":\"/Applications/ChatGPT.app\",\"helperPath\":{},\"helperSha256\":\"{}\"}}\n",
+            serde_json::to_string(&old_helper).unwrap(),
+            old_hash,
+        ),
+    )
+    .unwrap();
+    let new_source = home.join("incodex-new");
+    fs::write(&new_source, b"new helper fixture").unwrap();
+
+    assert!(refresh_registered_helper(&root, &new_source).unwrap());
+
+    let migrated = read_registration(&root).unwrap().unwrap();
+    assert_eq!(migrated.schema_version, 2);
+    assert_eq!(migrated.install_id, "install-epoch-a");
+    assert_eq!(migrated.app_path, Path::new("/Applications/ChatGPT.app"));
+    assert_eq!(fs::read(migrated.helper_path).unwrap(), b"new helper fixture");
+    assert!(migrated.coordinator_path.is_file());
+    assert!(migrated.interposer_path.is_file());
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
