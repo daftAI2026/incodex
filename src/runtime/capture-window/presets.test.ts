@@ -5,11 +5,13 @@
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   captureBackgroundSection,
+  capturePlainColors,
   capturePresetAssetUrl,
+  captureRasterPresetIds,
   capturePresetSections,
   capturePresets,
   capturePresetSwatch,
@@ -63,16 +65,35 @@ describe("capture background presets", () => {
     expect(captureBackgroundSection({ id: "silver", kind: "preset" })).toBe("gradients");
   });
 
-  test("uses local 2560 by 1600 raster assets instead of synthetic gradients", () => {
-    for (const preset of capturePresets) {
-      const assetUrl = capturePresetAssetUrl(preset.id);
-      const bytes = readFileSync(join(root, "assets", assetUrl.replace(/^\//, "")));
+  test("uses the three observed CleanShot colors before custom and transparent controls", () => {
+    expect(capturePlainColors).toEqual(["#121212", "#ffffff", "#d1444b"]);
+  });
+
+  test("generates gradients while keeping only wallpapers as raster assets", () => {
+    expect(captureRasterPresetIds).toEqual(["sea", "canyon", "mist", "highland", "ocean"]);
+    expect(capturePresetAssetUrl("silver")).toBeNull();
+    expect(capturePresetSwatch(capturePresets.find(({ id }) => id === "silver")!)).toBe(
+      "linear-gradient(135deg, #f0f1f3 0%, #c6c9ce 52%, #90959d 100%)",
+    );
+
+    const assetDirectory = join(root, "assets/capture-backgrounds");
+    expect(readdirSync(assetDirectory).sort()).toEqual(
+      captureRasterPresetIds.map((id) => `${id}.jpg`).sort(),
+    );
+    for (const presetId of captureRasterPresetIds) {
+      const assetUrl = capturePresetAssetUrl(presetId);
+      expect(assetUrl).not.toBeNull();
+      const bytes = readFileSync(join(root, "assets", assetUrl!.replace(/^\//, "")));
 
       expect(jpegSize(bytes)).toEqual({ height: 1600, width: 2560 });
-      expect(capturePresetSwatch(preset)).toBe(
-        `url('/${assetUrl.replace(/^\//, "")}') center / cover no-repeat`,
+      expect(capturePresetSwatch(capturePresets.find(({ id }) => id === presetId)!)).toBe(
+        `url('/${assetUrl!.replace(/^\//, "")}') center / cover no-repeat`,
       );
     }
+
+    const buildRuntime = readFileSync(join(root, "src/build-runtime.ts"), "utf8");
+    expect(buildRuntime).toContain('import { captureRasterPresetIds }');
+    expect(buildRuntime).not.toContain('"silver",');
   });
 });
 

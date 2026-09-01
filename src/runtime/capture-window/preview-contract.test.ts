@@ -99,14 +99,21 @@ describe("capture window preview", () => {
     expect(markup).toContain('aria-haspopup="dialog"');
     expect(markup).not.toContain('data-input="color" type="color"');
 
-    const noneSection = markup.indexOf('data-background-section="none"');
     const gradientsSection = markup.indexOf('data-background-section="gradients"');
     const wallpapersSection = markup.indexOf('data-background-section="wallpapers"');
     const plainColorSection = markup.indexOf('data-background-section="plain-color"');
-    expect(noneSection).toBeGreaterThan(-1);
-    expect(noneSection).toBeLessThan(gradientsSection);
+    expect(markup).not.toContain('data-background-section="none"');
+    expect(gradientsSection).toBeGreaterThan(-1);
     expect(gradientsSection).toBeLessThan(wallpapersSection);
     expect(wallpapersSection).toBeLessThan(plainColorSection);
+    expect(markup.match(/data-background-color=/g)).toHaveLength(3);
+    const plainColorMarkup = markup.slice(plainColorSection);
+    expect(plainColorMarkup.indexOf('data-background="transparent"')).toBeLessThan(
+      plainColorMarkup.indexOf('data-background-color="#121212"'),
+    );
+    expect(plainColorMarkup.indexOf('data-background-color="#d1444b"')).toBeLessThan(
+      plainColorMarkup.indexOf("data-background-custom"),
+    );
     expect(copy.backgroundNone).toBe("None");
     expect(copy.backgroundGradients).toBe("Gradients");
     expect(copy.backgroundWallpapers).toBe("Wallpapers");
@@ -116,6 +123,9 @@ describe("capture window preview", () => {
     expect(captureWindowCopy("zh-CN").backgroundPlainColor).toBe("纯色");
     expect(readFileSync(join(import.meta.dir, "view.ts"), "utf8")).not.toContain(
       "capturePresetSections[",
+    );
+    expect(readFileSync(join(import.meta.dir, "editor.ts"), "utf8")).toContain(
+      'querySelectorAll<HTMLElement>("[data-background-color]")',
     );
 
     const solidMarkup = captureWindowTemplate(

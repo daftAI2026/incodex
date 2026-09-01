@@ -11,5 +11,6 @@ describe("capture background image resolution", () => {
     ).toBe("data:image/png;base64,wallpaper");
     expect(captureBackgroundImageUrl({ color: "#2B3440", kind: "color" })).toBeNull();
     expect(captureBackgroundImageUrl({ kind: "transparent" })).toBeNull();
+    expect(captureBackgroundImageUrl({ id: "silver", kind: "preset" })).toBeNull();
   });
 });
