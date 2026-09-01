@@ -30,36 +30,79 @@ function fixture() {
   const appPath = join(home, "Applications", "ChatGPT.app");
   const execPath = join(appPath, "Contents", "MacOS", "ChatGPT");
   const helperPath = join(userRoot, "helpers", "macos-update", "abc", "incodex");
+  const coordinatorAppPath = join(
+    userRoot,
+    "helpers",
+    "macos-update",
+    "abc",
+    "Incodex Update Coordinator.app",
+  );
+  const coordinatorPath = join(
+    coordinatorAppPath,
+    "Contents",
+    "MacOS",
+    "incodex-update-coordinator",
+  );
+  const interposerPath = join(
+    userRoot,
+    "helpers",
+    "macos-update",
+    "abc",
+    "libincodex-sparkle-interpose.dylib",
+  );
   const registrationPath = join(userRoot, "macos-update", "registration.json");
   mkdirSync(join(appPath, "Contents", "MacOS"), { recursive: true });
   mkdirSync(join(userRoot, "helpers", "macos-update", "abc"), { recursive: true });
+  mkdirSync(join(coordinatorAppPath, "Contents", "MacOS"), { recursive: true });
   mkdirSync(join(userRoot, "macos-update"), { recursive: true });
   writeFileSync(execPath, "app");
   writeFileSync(helperPath, "helper");
+  writeFileSync(coordinatorPath, "coordinator");
+  writeFileSync(interposerPath, "interposer");
   chmodSync(helperPath, 0o700);
+  chmodSync(coordinatorPath, 0o700);
+  chmodSync(interposerPath, 0o600);
   const helperSha256 = createHash("sha256").update("helper").digest("hex");
+  const coordinatorSha256 = createHash("sha256").update("coordinator").digest("hex");
+  const interposerSha256 = createHash("sha256").update("interposer").digest("hex");
   writeFileSync(
     registrationPath,
     `${JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       installId: "install-epoch-a",
       appPath,
       helperPath,
       helperSha256,
+      coordinatorAppPath,
+      coordinatorPath,
+      coordinatorSha256,
+      interposerPath,
+      interposerSha256,
     })}\n`,
     { mode: 0o600 },
   );
-  return { appPath, execPath, helperPath, home, registrationPath, userRoot };
+  return {
+    appPath,
+    coordinatorAppPath,
+    coordinatorPath,
+    execPath,
+    helperPath,
+    home,
+    interposerPath,
+    registrationPath,
+    userRoot,
+  };
 }
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-describe("macOS update coordinator launch", () => {
-  test("starts the verified helper with one install epoch and parent identity", () => {
+describe("macOS seamless update handoff", () => {
+  test("arms the interposer only after the verified coordinator is ready", async () => {
     const f = fixture();
     const calls: any[] = [];
+    const order: string[] = [];
     const child = {
       unrefCalled: false,
       unref() {
@@ -67,34 +110,49 @@ describe("macOS update coordinator launch", () => {
       },
     };
 
-    const launched = update.spawnCoordinator({
+    const armed = await update.prepareUpdateHandoff({
       platform: "darwin",
       userRoot: f.userRoot,
       execPath: f.execPath,
       pid: 42,
       spawnProcess(command: string, args: string[], options: unknown) {
+        order.push("spawn");
         calls.push({ command, args, options });
         return child;
       },
+      async waitForCoordinator() {
+        order.push("ready");
+        return true;
+      },
+      requireSparkle(file: string) {
+        order.push("sparkle");
+        expect(file).toEndWith("/Contents/Resources/native/sparkle.node");
+      },
+      async loadInterposer(file: string) {
+        order.push("interposer");
+        expect(file).toBe(f.interposerPath);
+      },
     });
 
-    expect(launched).toBe(true);
+    expect(armed).toBe(true);
+    expect(order).toEqual(["spawn", "ready", "sparkle", "interposer"]);
     expect(calls).toHaveLength(1);
-    expect(calls[0].command).toBe(f.helperPath);
+    expect(calls[0].command).toBe(f.coordinatorPath);
     expect(calls[0].args).toEqual([]);
-    expect(calls[0].options.env.INCODEX_MACOS_UPDATE_WORKER).toBe("1");
+    expect(calls[0].options.env.INCODEX_MACOS_UPDATE_COORDINATOR).toBe("1");
     expect(calls[0].options.env.INCODEX_MACOS_UPDATE_INSTALL_ID).toBe("install-epoch-a");
-    expect(calls[0].options.env.INCODEX_MACOS_UPDATE_PARENT_PID).toBe("42");
-    expect(calls[0].options.detached).toBe(true);
+    expect(calls[0].options.env.INCODEX_MACOS_UPDATE_HOST_PID).toBe("42");
+    expect(calls[0].options.env.INCODEX_MACOS_UPDATE_HELPER_PATH).toBe(f.helperPath);
+    expect(calls[0].options.detached).toBe(false);
     expect(calls[0].options.stdio).toBe("ignore");
-    expect(child.unrefCalled).toBe(true);
+    expect(child.unrefCalled).toBe(false);
   });
 
-  test("rejects helper hash mismatch, symlinks, and a foreign app path", () => {
+  test("rejects helper hash mismatch, symlinks, and a foreign app path", async () => {
     const badHash = fixture();
     writeFileSync(badHash.helperPath, "changed");
-    expect(
-      update.spawnCoordinator({
+    await expect(
+      update.prepareUpdateHandoff({
         platform: "darwin",
         userRoot: badHash.userRoot,
         execPath: badHash.execPath,
@@ -103,15 +161,15 @@ describe("macOS update coordinator launch", () => {
           throw new Error("must not spawn");
         },
       }),
-    ).toBe(false);
+    ).resolves.toBe(false);
 
     const linked = fixture();
     const real = `${linked.helperPath}.real`;
     writeFileSync(real, "helper");
     rmSync(linked.helperPath);
     symlinkSync(real, linked.helperPath);
-    expect(
-      update.spawnCoordinator({
+    await expect(
+      update.prepareUpdateHandoff({
         platform: "darwin",
         userRoot: linked.userRoot,
         execPath: linked.execPath,
@@ -120,14 +178,14 @@ describe("macOS update coordinator launch", () => {
           throw new Error("must not spawn");
         },
       }),
-    ).toBe(false);
+    ).resolves.toBe(false);
 
     const foreign = fixture();
     const body = JSON.parse(readFileSync(foreign.registrationPath, "utf8"));
     body.appPath = join(foreign.home, "Other.app");
     writeFileSync(foreign.registrationPath, `${JSON.stringify(body)}\n`);
-    expect(
-      update.spawnCoordinator({
+    await expect(
+      update.prepareUpdateHandoff({
         platform: "darwin",
         userRoot: foreign.userRoot,
         execPath: foreign.execPath,
@@ -136,13 +194,13 @@ describe("macOS update coordinator launch", () => {
           throw new Error("must not spawn");
         },
       }),
-    ).toBe(false);
+    ).resolves.toBe(false);
   });
 
-  test("is inert outside macOS", () => {
+  test("is inert outside macOS", async () => {
     const f = fixture();
-    expect(
-      update.spawnCoordinator({
+    await expect(
+      update.prepareUpdateHandoff({
         platform: "win32",
         userRoot: f.userRoot,
         execPath: f.execPath,
@@ -151,6 +209,6 @@ describe("macOS update coordinator launch", () => {
           throw new Error("must not spawn");
         },
       }),
-    ).toBe(false);
+    ).resolves.toBe(false);
   });
 });

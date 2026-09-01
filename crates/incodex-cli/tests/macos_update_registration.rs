@@ -32,13 +32,15 @@ fn helper_is_content_addressed_private_and_bound_to_install_epoch() {
 
     let registration = publish_registration(&root, &source, app, "install-epoch-a").unwrap();
 
-    assert_eq!(registration.schema_version, 1);
+    assert_eq!(registration.schema_version, 2);
     assert_eq!(registration.app_path, app);
     assert_eq!(registration.install_id, "install-epoch-a");
     assert!(registration
         .helper_path
         .starts_with(root.join("helpers/macos-update")));
     assert_eq!(registration.helper_sha256.len(), 64);
+    assert_eq!(registration.coordinator_sha256.len(), 64);
+    assert_eq!(registration.interposer_sha256.len(), 64);
     assert_eq!(
         fs::read(&registration.helper_path).unwrap(),
         b"native helper fixture"
@@ -58,6 +60,36 @@ fn helper_is_content_addressed_private_and_bound_to_install_epoch() {
             .mode()
             & 0o777,
         0o700
+    );
+    assert_eq!(
+        fs::metadata(&registration.coordinator_path)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+    assert_eq!(
+        fs::metadata(&registration.interposer_path)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+    assert_eq!(
+        registration.coordinator_path,
+        registration
+            .coordinator_app_path
+            .join("Contents/MacOS/incodex-update-coordinator")
+    );
+    assert!(registration
+        .coordinator_app_path
+        .join("Contents/Info.plist")
+        .is_file());
+    assert_eq!(
+        registration.interposer_path.file_name().unwrap(),
+        "libincodex-sparkle-interpose.dylib"
     );
 
     let persisted = read_registration(&root).unwrap().unwrap();
@@ -109,6 +141,8 @@ fn runtime_update_refreshes_the_helper_without_changing_the_install_epoch() {
     assert_eq!(refreshed.install_id, original.install_id);
     assert_eq!(refreshed.app_path, original.app_path);
     assert_ne!(refreshed.helper_sha256, original.helper_sha256);
+    assert_eq!(refreshed.coordinator_sha256, original.coordinator_sha256);
+    assert_eq!(refreshed.interposer_sha256, original.interposer_sha256);
     assert_eq!(
         fs::read(refreshed.helper_path).unwrap(),
         b"new helper fixture"

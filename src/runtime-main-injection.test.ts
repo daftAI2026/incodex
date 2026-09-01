@@ -71,16 +71,15 @@ describe("Electron UI injection reporting", () => {
     );
   });
 
-  test("starts update recovery only when the installed macOS main process quits", () => {
+  test("prepares seamless update handoff before the official main starts", () => {
     expect(main).toContain(
       'process.platform === "darwin" ? require("./incodex-macos-update.cjs") : null',
     );
-    const attach = main.slice(main.indexOf("async function attachElectron()"));
-    expect(attach).toContain("if (macosUpdate && !isIncognito())");
-    expect(attach).toContain('electron.app.once("before-quit", () => {');
-    expect(attach).toContain("macosUpdate.spawnCoordinator({");
-    expect(attach).toContain("userRoot: USER_ROOT");
-    expect(attach).toContain("execPath: process.execPath");
-    expect(attach).toContain("pid: process.pid");
+    expect(main).toContain("await macosUpdate.prepareUpdateHandoff({");
+    expect(main).toContain("userRoot: USER_ROOT");
+    expect(main).toContain("execPath: process.execPath");
+    expect(main).toContain("pid: process.pid");
+    expect(main).not.toContain('electron.app.once("before-quit", () => {');
+    expect(main).not.toContain("macosUpdate.spawnCoordinator({");
   });
 });
