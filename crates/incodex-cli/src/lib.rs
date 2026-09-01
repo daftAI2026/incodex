@@ -29,6 +29,8 @@ pub mod legacy_typescript;
 pub mod lifecycle;
 mod locale;
 #[cfg(target_os = "macos")]
+mod macos_update_assets;
+#[cfg(target_os = "macos")]
 mod macos_update_log;
 #[cfg(target_os = "macos")]
 pub mod macos_update_restore;
@@ -167,7 +169,7 @@ where
     S: AsRef<str>,
 {
     #[cfg(target_os = "macos")]
-    if let Some(result) = macos_update_restore::try_run_worker() {
+    if let Some(result) = macos_update_restore::try_run_relaunch() {
         return result.map_err(CliFailure::from);
     }
     #[cfg(not(target_os = "windows"))]

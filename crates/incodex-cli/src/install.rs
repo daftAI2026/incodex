@@ -521,18 +521,6 @@ where
     })
 }
 
-pub(crate) fn update_restore_install_id(app: &Path) -> Option<String> {
-    let archive = Archive::open(app.join(ASAR_REL)).ok()?;
-    if !archive.has_only_loader() {
-        return None;
-    }
-    let package = archive.read_package_main().ok()?;
-    package
-        .already_patched
-        .then_some(package.install_id)
-        .flatten()
-}
-
 pub(crate) fn reinstall_after_official_update(
     root: &Path,
     app: &Path,

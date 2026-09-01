@@ -171,12 +171,12 @@ fn runtime_refresh_migrates_a_legacy_registration_without_repatching_the_app() {
     let home = scratch();
     let root = home.join(".incodex");
     let state = root.join("macos-update");
-    let old_release = root.join("helpers/macos-update/legacy");
+    let old_hash = sha256_hex(b"legacy helper");
+    let old_release = root.join("helpers/macos-update").join(&old_hash);
     fs::create_dir_all(&state).unwrap();
     fs::create_dir_all(&old_release).unwrap();
     let old_helper = old_release.join("incodex");
     fs::write(&old_helper, b"legacy helper").unwrap();
-    let old_hash = sha256_hex(b"legacy helper");
     fs::write(
         state.join("registration.json"),
         format!(
@@ -195,7 +195,10 @@ fn runtime_refresh_migrates_a_legacy_registration_without_repatching_the_app() {
     assert_eq!(migrated.schema_version, 2);
     assert_eq!(migrated.install_id, "install-epoch-a");
     assert_eq!(migrated.app_path, Path::new("/Applications/ChatGPT.app"));
-    assert_eq!(fs::read(migrated.helper_path).unwrap(), b"new helper fixture");
+    assert_eq!(
+        fs::read(migrated.helper_path).unwrap(),
+        b"new helper fixture"
+    );
     assert!(migrated.coordinator_path.is_file());
     assert!(migrated.interposer_path.is_file());
 }

@@ -52,14 +52,17 @@ describe("runtime load", () => {
     expect(main).toContain("dockMenu.createNativeStatusMenuBridge");
   });
 
-  test("the loader gates official main on the incognito lease startup", () => {
+  test("the loader gates official main on Runtime startup", () => {
     const loader = readFileSync(join(import.meta.dir, "runtime/incodex-loader.cts"), "utf8");
     const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
     expect(loader).toContain("const runtime = require(file);");
     expect(loader).toContain("await runtime.startupGate");
     expect(loader).toContain('error?.code === "INCODEX_STARTUP_BLOCKED"');
     expect(loader.indexOf("require(originalMain())")).toBeGreaterThan(loader.indexOf("await loadMain()"));
-    expect(main).toContain("const startupGate = attachElectron();");
+    expect(main).toContain("const startupGate = startRuntime();");
+    expect(main.indexOf("await attachElectron();")).toBeGreaterThan(
+      main.indexOf("await macosUpdate.prepareUpdateHandoff({"),
+    );
     expect(main).toContain('error.code = "INCODEX_STARTUP_BLOCKED"');
   });
 

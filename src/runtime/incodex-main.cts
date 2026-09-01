@@ -741,16 +741,6 @@ async function attachElectron() {
   );
   if (packagedOrigin) trustedOrigins.add(packagedOrigin);
   captureSourceHome();
-  if (macosUpdate && !isIncognito()) {
-    electron.app.once("before-quit", () => {
-      macosUpdate.spawnCoordinator({
-        userRoot: USER_ROOT,
-        execPath: process.execPath,
-        pid: process.pid,
-      });
-    });
-  }
-
   if (!isIncognito()) {
     if (!windowsPlatform) {
       try {
@@ -939,7 +929,18 @@ async function attachElectron() {
   else void electron.app.whenReady().then(ready);
 }
 
-const startupGate = attachElectron();
+async function startRuntime() {
+  if (macosUpdate && !isIncognito()) {
+    await macosUpdate.prepareUpdateHandoff({
+      userRoot: USER_ROOT,
+      execPath: process.execPath,
+      pid: process.pid,
+    });
+  }
+  await attachElectron();
+}
+
+const startupGate = startRuntime();
 if (typeof module !== "undefined") {
   module.exports = {
     startupGate,

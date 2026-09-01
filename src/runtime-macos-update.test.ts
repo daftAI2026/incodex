@@ -58,6 +58,7 @@ function fixture() {
   writeFileSync(execPath, "app");
   writeFileSync(helperPath, "helper");
   writeFileSync(coordinatorPath, "coordinator");
+  writeFileSync(join(coordinatorAppPath, "Contents", "Info.plist"), "plist");
   writeFileSync(interposerPath, "interposer");
   chmodSync(helperPath, 0o700);
   chmodSync(coordinatorPath, 0o700);
@@ -143,9 +144,12 @@ describe("macOS seamless update handoff", () => {
     expect(calls[0].options.env.INCODEX_MACOS_UPDATE_INSTALL_ID).toBe("install-epoch-a");
     expect(calls[0].options.env.INCODEX_MACOS_UPDATE_HOST_PID).toBe("42");
     expect(calls[0].options.env.INCODEX_MACOS_UPDATE_HELPER_PATH).toBe(f.helperPath);
-    expect(calls[0].options.detached).toBe(false);
+    expect(calls[0].options.env.INCODEX_MACOS_UPDATE_PENDING_PATH).toBe(
+      join(f.userRoot, "macos-update", "pending.json"),
+    );
+    expect(calls[0].options.detached).toBe(true);
     expect(calls[0].options.stdio).toBe("ignore");
-    expect(child.unrefCalled).toBe(false);
+    expect(child.unrefCalled).toBe(true);
   });
 
   test("rejects helper hash mismatch, symlinks, and a foreign app path", async () => {
