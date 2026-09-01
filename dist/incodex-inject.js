@@ -4198,9 +4198,9 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 .incodex-capture-background-grid {
   display: grid;
   gap: calc(var(--incodex-capture-space) * 2);
-  grid-template-columns: repeat(5, calc(var(--incodex-capture-space) * 7));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   margin-top: calc(var(--incodex-capture-space) * 2);
-  width: max-content;
+  width: 100%;
 }
 
 .incodex-capture-background-option {
