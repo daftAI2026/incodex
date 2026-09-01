@@ -189,6 +189,10 @@ function defaultCaptureId() {
 // src/runtime/capture-window/copy.ts
 var ENGLISH = {
   background: "Background",
+  backgroundGradients: "Gradients",
+  backgroundNone: "None",
+  backgroundPlainColor: "Plain color",
+  backgroundWallpapers: "Wallpapers",
   blur: "Blur",
   changeImage: "Change image",
   close: "Close capture window",
@@ -234,6 +238,10 @@ var ENGLISH = {
 };
 var CHINESE = {
   background: "背景",
+  backgroundGradients: "渐变",
+  backgroundNone: "无",
+  backgroundPlainColor: "纯色",
+  backgroundWallpapers: "壁纸",
   blur: "模糊",
   changeImage: "更换图片",
   close: "关闭截取窗口",
@@ -283,17 +291,45 @@ function captureWindowCopy(locale) {
 
 // src/runtime/capture-window/presets.ts
 var capturePresets = [
-  { colors: ["#d7eee8", "#71b6ae", "#2f6870"], id: "sea" },
-  { colors: ["#f4cfaa", "#c67b5c", "#65443e"], id: "canyon" },
-  { colors: ["#eef2f1", "#aab9b6", "#74817e"], id: "mist" },
-  { colors: ["#d8d7b6", "#779175", "#3f5c59"], id: "highland" },
-  { colors: ["#b8e8e8", "#4d9bb1", "#24526f"], id: "ocean" },
-  { colors: ["#f0f1f3", "#c6c9ce", "#90959d"], id: "silver" },
-  { colors: ["#d6ecff", "#8ab8f7", "#3268a8"], id: "azure" },
-  { colors: ["#d8dcff", "#7a78cf", "#38346e"], id: "indigo" },
-  { colors: ["#ffcf98", "#ea785b", "#722f45"], id: "ember" },
-  { colors: ["#57606f", "#2d3440", "#15191f"], id: "graphite" }
+  { colors: ["#d7eee8", "#71b6ae", "#2f6870"], id: "sea", section: "wallpapers" },
+  { colors: ["#f4cfaa", "#c67b5c", "#65443e"], id: "canyon", section: "wallpapers" },
+  { colors: ["#eef2f1", "#aab9b6", "#74817e"], id: "mist", section: "wallpapers" },
+  { colors: ["#d8d7b6", "#779175", "#3f5c59"], id: "highland", section: "wallpapers" },
+  { colors: ["#b8e8e8", "#4d9bb1", "#24526f"], id: "ocean", section: "wallpapers" },
+  { colors: ["#f0f1f3", "#c6c9ce", "#90959d"], id: "silver", section: "gradients" },
+  { colors: ["#d6ecff", "#8ab8f7", "#3268a8"], id: "azure", section: "gradients" },
+  { colors: ["#d8dcff", "#7a78cf", "#38346e"], id: "indigo", section: "gradients" },
+  { colors: ["#ffcf98", "#ea785b", "#722f45"], id: "ember", section: "gradients" },
+  { colors: ["#57606f", "#2d3440", "#15191f"], id: "graphite", section: "gradients" }
 ];
+var capturePresetSections = [
+  {
+    id: "gradients",
+    presets: capturePresets.filter((preset) => preset.section === "gradients")
+  },
+  {
+    id: "wallpapers",
+    presets: capturePresets.filter((preset) => preset.section === "wallpapers")
+  }
+];
+function capturePresetSection(id) {
+  const section = capturePresetSections.find((candidate) => candidate.id === id);
+  if (!section)
+    throw new Error(`Unknown capture preset section: ${id}`);
+  return section;
+}
+function captureBackgroundSection(background) {
+  if (background.kind === "transparent")
+    return "none";
+  if (background.kind === "color")
+    return "plain-color";
+  if (background.kind === "wallpaper")
+    return "wallpapers";
+  const preset = capturePresets.find((candidate) => candidate.id === background.id);
+  if (!preset)
+    throw new Error(`Unknown capture background preset: ${background.id}`);
+  return preset.section;
+}
 var embeddedCapturePresetAssets = {};
 function configureCapturePresetAssets(assets) {
   embeddedCapturePresetAssets = { ...assets };
@@ -1354,18 +1390,53 @@ function solidColorTemplate(state, copy) {
   `;
 }
 function backgroundGridTemplate(state, copy, lastBackgroundColor, wallpaperDataUrl) {
-  const presets = capturePresets.map((preset) => {
-    const { id } = preset;
-    const selected = state.background.kind === "preset" && state.background.id === id;
-    return `<button class="incodex-capture-background-option" data-background="${id}" type="button" aria-label="${id}" title="${id}" aria-pressed="${selected}" style="--capture-swatch:${capturePresetSwatch(preset)}"></button>`;
-  }).join("");
   const transparent = state.background.kind === "transparent";
   const custom = state.background.kind === "color";
   const wallpaper = state.background.kind === "wallpaper";
   const customIcon = custom ? "" : captureIcon("pipette");
   const wallpaperImage = wallpaperDataUrl ?? "";
   const changeImageHidden = wallpaper && wallpaperDataUrl ? "" : " hidden";
-  return `<div class="incodex-capture-background-grid">${presets}<button class="incodex-capture-background-option incodex-capture-color-label" data-background-custom data-color-trigger="background" data-selected="${custom}" type="button" aria-label="${copy.custom}" title="${copy.custom}" aria-haspopup="dialog" aria-expanded="false" data-state="closed" style="--capture-swatch:${lastBackgroundColor}">${customIcon}</button><button class="incodex-capture-background-option incodex-capture-checker" data-background="transparent" type="button" aria-label="${copy.transparent}" title="${copy.transparent}" aria-pressed="${transparent}"></button><button class="incodex-capture-background-option incodex-capture-wallpaper-label" data-background-wallpaper type="button" data-selected="${wallpaper}" aria-label="${copy.wallpaper}" title="${copy.wallpaper}"><img data-wallpaper-preview src="${wallpaperImage}" alt="" ${wallpaperDataUrl ? "" : "hidden"}><span data-wallpaper-placeholder ${wallpaperDataUrl ? "hidden" : ""}>${captureIcon("image-plus")}</span></button></div><input class="incodex-capture-wallpaper-input" data-input="wallpaper" type="file" accept="image/png,image/jpeg,image/webp"><button class="incodex-capture-change-wallpaper" data-action="change-wallpaper" type="button"${changeImageHidden}>${copy.changeImage}</button>`;
+  const gradients = capturePresetSection("gradients");
+  const wallpapers = capturePresetSection("wallpapers");
+  const activeSection = captureBackgroundSection(state.background);
+  return `
+    <div class="incodex-capture-background-sections">
+      <section class="incodex-capture-background-section" data-background-section="none" data-active="${activeSection === "none"}" aria-label="${copy.backgroundNone}">
+        <button class="incodex-capture-background-none incodex-capture-checker" data-background="transparent" type="button" aria-label="${copy.backgroundNone}" title="${copy.backgroundNone}" aria-pressed="${transparent}">${copy.backgroundNone}</button>
+      </section>
+      ${presetSectionTemplate(gradients, copy.backgroundGradients, state, activeSection)}
+      <section class="incodex-capture-background-section" data-background-section="wallpapers" data-active="${activeSection === "wallpapers"}" aria-label="${copy.backgroundWallpapers}">
+        <h3 class="incodex-capture-background-section-title">${copy.backgroundWallpapers}</h3>
+        <div class="incodex-capture-background-grid">
+          ${presetButtonsTemplate(wallpapers, state)}
+          <button class="incodex-capture-background-option incodex-capture-wallpaper-label" data-background-wallpaper type="button" data-selected="${wallpaper}" aria-label="${copy.wallpaper}" title="${copy.wallpaper}"><img data-wallpaper-preview src="${wallpaperImage}" alt="" ${wallpaperDataUrl ? "" : "hidden"}><span data-wallpaper-placeholder ${wallpaperDataUrl ? "hidden" : ""}>${captureIcon("image-plus")}</span></button>
+        </div>
+        <input class="incodex-capture-wallpaper-input" data-input="wallpaper" type="file" accept="image/png,image/jpeg,image/webp">
+        <button class="incodex-capture-change-wallpaper" data-action="change-wallpaper" type="button"${changeImageHidden}>${copy.changeImage}</button>
+      </section>
+      <section class="incodex-capture-background-section" data-background-section="plain-color" data-active="${activeSection === "plain-color"}" aria-label="${copy.backgroundPlainColor}">
+        <h3 class="incodex-capture-background-section-title">${copy.backgroundPlainColor}</h3>
+        <div class="incodex-capture-background-grid">
+          <button class="incodex-capture-background-option incodex-capture-color-label" data-background-custom data-color-trigger="background" data-selected="${custom}" type="button" aria-label="${copy.custom}" title="${copy.custom}" aria-haspopup="dialog" aria-expanded="false" data-state="closed" style="--capture-swatch:${lastBackgroundColor}">${customIcon}</button>
+        </div>
+      </section>
+    </div>
+  `;
+}
+function presetSectionTemplate(section, label, state, activeSection) {
+  return `
+    <section class="incodex-capture-background-section" data-background-section="${section.id}" data-active="${activeSection === section.id}" aria-label="${label}">
+      <h3 class="incodex-capture-background-section-title">${label}</h3>
+      <div class="incodex-capture-background-grid">${presetButtonsTemplate(section, state)}</div>
+    </section>
+  `;
+}
+function presetButtonsTemplate(section, state) {
+  return section.presets.map((preset) => {
+    const { id } = preset;
+    const selected = state.background.kind === "preset" && state.background.id === id;
+    return `<button class="incodex-capture-background-option" data-background="${id}" type="button" aria-label="${id}" title="${id}" aria-pressed="${selected}" style="--capture-swatch:${capturePresetSwatch(preset)}"></button>`;
+  }).join("");
 }
 function footerTemplate(copy) {
   return `
@@ -3662,7 +3733,13 @@ var SHORTCUT_LABEL = "⇧⌘N";
 var TOOLTIP_FALLBACK_DELAY_MS = 700;
 var TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
 var CAPTURE_TRIGGER_ATTR = "data-incodex-capture-trigger";
-var CAPTURE_WINDOW_STYLE = `:root {
+var CAPTURE_WINDOW_STYLE = `/**
+ * [INPUT]: 依赖 view.ts 输出的 capture-window DOM、Codex 主题 token 与四像素间距基线
+ * [OUTPUT]: 对外提供截图模态框、背景语义分层、工具栏、画布、检查器与隐私捕获态样式
+ * [POS]: capture-window 的视觉契约，和 color-popover.css 分工维护主编辑器与浮层样式
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+:root {
   --incodex-capture-skeleton: var(--color-background-button-tertiary-active, rgb(32 33 35 / 22%));
 }
 
@@ -3924,6 +4001,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 
 .incodex-capture-button,
 .incodex-capture-icon-button,
+.incodex-capture-background-none,
 .incodex-capture-background-option {
   -webkit-appearance: none;
   appearance: none;
@@ -3941,6 +4019,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 
 .incodex-capture-button:focus-visible,
 .incodex-capture-icon-button:focus-visible,
+.incodex-capture-background-none:focus-visible,
 .incodex-capture-background-option:focus-visible,
 .incodex-capture-switch:focus-visible,
 .incodex-capture-range:focus-visible {
@@ -4195,106 +4274,9 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   transform: translateX(calc(var(--incodex-capture-space) * 4));
 }
 
-.incodex-capture-background-grid {
-  display: grid;
-  gap: calc(var(--incodex-capture-space) * 2);
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  justify-items: center;
-  margin-top: calc(var(--incodex-capture-space) * 2);
-  width: 100%;
-}
-
-.incodex-capture-background-option {
-  background: var(--capture-swatch);
-  background-clip: border-box;
-  background-origin: border-box;
-  border: 1px solid rgb(0 0 0 / 10%);
-  border-radius: var(--radius-full, 9999px);
-  height: calc(var(--incodex-capture-space) * 7);
-  min-width: calc(var(--incodex-capture-space) * 7);
-  overflow: hidden;
-  padding: 0;
-  position: relative;
-  width: calc(var(--incodex-capture-space) * 7);
-}
-
-.incodex-capture-background-option[aria-pressed="true"],
-.incodex-capture-background-option[data-selected="true"] {
-  box-shadow: 0 0 0 2px var(--incodex-capture-surface), 0 0 0 4px var(--incodex-capture-ring);
-}
-
-.electron-dark .incodex-capture-background-option {
-  border-color: rgb(255 255 255 / 15%);
-}
-
-.incodex-capture-background-option svg {
-  color: var(--incodex-capture-primary-text);
-  filter: drop-shadow(0 1px 2px color-mix(in srgb, var(--incodex-capture-primary) 40%, transparent));
-  height: var(--incodex-capture-icon-sm);
-  inset: 50% auto auto 50%;
-  position: absolute;
-  transform: translate(-50%, -50%);
-  width: var(--incodex-capture-icon-sm);
-}
-
-.incodex-capture-color-label,
-.incodex-capture-wallpaper-label {
-  align-items: center;
-  color: var(--incodex-capture-text-tertiary);
-  cursor: var(--cursor-interaction, pointer);
-  display: flex;
-  justify-content: center;
-  overflow: hidden;
-  padding: 0;
-  position: relative;
-}
-
-.incodex-capture-wallpaper-label {
-  background: transparent;
-  border-style: dashed;
-}
-
-.incodex-capture-wallpaper-label[data-selected="true"] {
-  border-style: solid;
-}
-
-.incodex-capture-wallpaper-label img {
-  height: 100%;
-  object-fit: cover;
-  width: 100%;
-}
-
-.incodex-capture-wallpaper-label [data-wallpaper-placeholder] {
-  inset: 0;
-  position: absolute;
-}
-
-.incodex-capture-color-label:focus-visible,
-.incodex-capture-wallpaper-label:focus-within,
 .incodex-capture-solid-color:focus-visible {
   outline: 2px solid var(--incodex-capture-ring);
   outline-offset: 2px;
-}
-
-.incodex-capture-wallpaper-input {
-  display: none;
-}
-
-.incodex-capture-change-wallpaper {
-  background: transparent;
-  border: 0;
-  color: var(--incodex-capture-text-secondary);
-  cursor: var(--cursor-interaction, pointer);
-  font: inherit;
-  font-size: var(--incodex-capture-font-xs);
-  margin-top: calc(var(--incodex-capture-space) * 2);
-  padding: 0;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.incodex-capture-change-wallpaper:hover {
-  color: var(--incodex-capture-text);
 }
 
 .incodex-capture-solid-color {
@@ -4487,6 +4469,150 @@ html.incodex-capturing .mac-traffic-light > div > svg {
     scroll-behavior: auto !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+/**
+ * [INPUT]: 依赖 capture-window.css 定义的 Codex 语义令牌与检查器底纹
+ * [OUTPUT]: 为 None、Gradients、Wallpapers 与 Plain color 提供背景选择器布局和交互态
+ * [POS]: capture-window 的背景选择器样式边界，与编辑器壳层及颜色弹层样式按职责分离
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+.incodex-capture-background-sections {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--incodex-capture-space) * 3);
+  margin-top: calc(var(--incodex-capture-space) * 2);
+}
+
+.incodex-capture-background-section {
+  min-width: 0;
+}
+
+.incodex-capture-background-section-title {
+  color: var(--incodex-capture-text-secondary);
+  font-size: var(--incodex-capture-font-xs);
+  font-weight: var(--font-weight-medium, 500);
+  line-height: calc(var(--incodex-capture-space) * 4);
+  margin: 0 0 calc(var(--incodex-capture-space) * 2);
+}
+
+.incodex-capture-background-grid {
+  display: grid;
+  gap: calc(var(--incodex-capture-space) * 2);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  justify-items: center;
+  width: 100%;
+}
+
+.incodex-capture-background-none {
+  align-items: center;
+  border: 1px solid var(--incodex-capture-border);
+  border-radius: var(--incodex-capture-radius-sm);
+  color: var(--incodex-capture-text-secondary);
+  display: flex;
+  font: inherit;
+  font-size: var(--incodex-capture-font-xs);
+  height: calc(var(--incodex-capture-space) * 8);
+  justify-content: center;
+  width: 100%;
+}
+
+.incodex-capture-background-none[aria-pressed="true"] {
+  border-color: var(--incodex-capture-ring);
+  box-shadow: inset 0 0 0 1px var(--incodex-capture-ring);
+  color: var(--incodex-capture-text);
+}
+
+.incodex-capture-background-option {
+  background: var(--capture-swatch);
+  background-clip: border-box;
+  background-origin: border-box;
+  border: 1px solid rgb(0 0 0 / 10%);
+  border-radius: var(--radius-full, 9999px);
+  height: calc(var(--incodex-capture-space) * 7);
+  min-width: calc(var(--incodex-capture-space) * 7);
+  overflow: hidden;
+  padding: 0;
+  position: relative;
+  width: calc(var(--incodex-capture-space) * 7);
+}
+
+.incodex-capture-background-option[aria-pressed="true"],
+.incodex-capture-background-option[data-selected="true"] {
+  box-shadow: 0 0 0 2px var(--incodex-capture-surface), 0 0 0 4px var(--incodex-capture-ring);
+}
+
+.electron-dark .incodex-capture-background-option {
+  border-color: rgb(255 255 255 / 15%);
+}
+
+.incodex-capture-background-option svg {
+  color: var(--incodex-capture-primary-text);
+  filter: drop-shadow(0 1px 2px color-mix(in srgb, var(--incodex-capture-primary) 40%, transparent));
+  height: var(--incodex-capture-icon-sm);
+  inset: 50% auto auto 50%;
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: var(--incodex-capture-icon-sm);
+}
+
+.incodex-capture-color-label,
+.incodex-capture-wallpaper-label {
+  align-items: center;
+  color: var(--incodex-capture-text-tertiary);
+  cursor: var(--cursor-interaction, pointer);
+  display: flex;
+  justify-content: center;
+  overflow: hidden;
+  padding: 0;
+  position: relative;
+}
+
+.incodex-capture-wallpaper-label {
+  background: transparent;
+  border-style: dashed;
+}
+
+.incodex-capture-wallpaper-label[data-selected="true"] {
+  border-style: solid;
+}
+
+.incodex-capture-wallpaper-label img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.incodex-capture-wallpaper-label [data-wallpaper-placeholder] {
+  inset: 0;
+  position: absolute;
+}
+
+.incodex-capture-color-label:focus-visible,
+.incodex-capture-wallpaper-label:focus-within {
+  outline: 2px solid var(--incodex-capture-ring);
+  outline-offset: 2px;
+}
+
+.incodex-capture-wallpaper-input {
+  display: none;
+}
+
+.incodex-capture-change-wallpaper {
+  background: transparent;
+  border: 0;
+  color: var(--incodex-capture-text-secondary);
+  cursor: var(--cursor-interaction, pointer);
+  font: inherit;
+  font-size: var(--incodex-capture-font-xs);
+  margin-top: calc(var(--incodex-capture-space) * 2);
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.incodex-capture-change-wallpaper:hover {
+  color: var(--incodex-capture-text);
 }
 
 .incodex-capture-color-popover {

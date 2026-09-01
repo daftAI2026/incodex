@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 model.ts 的编辑状态、copy.ts 的本地化文案、presets.ts 的背景分层与 icons.ts 的图标
+ * [OUTPUT]: 对外提供 captureWindowTemplate 与 captureToolbarTemplate 的稳定 DOM 模板
+ * [POS]: capture-window 的声明式视图边界，只表达产品语义和可访问结构，不持有交互状态
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import type { CaptureWindowCopy } from "./copy.ts";
 import { captureIcon } from "./icons.ts";
 import {
@@ -5,7 +11,12 @@ import {
   CAPTURE_MIN_ZOOM,
   type CaptureWindowState,
 } from "./model.ts";
-import { capturePresets, capturePresetSwatch } from "./presets.ts";
+import {
+  type CapturePresetSection,
+  captureBackgroundSection,
+  capturePresetSection,
+  capturePresetSwatch,
+} from "./presets.ts";
 
 export type CaptureWindowViewOptions = {
   lastBackgroundColor?: string;
@@ -142,18 +153,63 @@ function backgroundGridTemplate(
   lastBackgroundColor: string,
   wallpaperDataUrl: string | null,
 ): string {
-  const presets = capturePresets.map((preset) => {
-    const { id } = preset;
-    const selected = state.background.kind === "preset" && state.background.id === id;
-    return `<button class="incodex-capture-background-option" data-background="${id}" type="button" aria-label="${id}" title="${id}" aria-pressed="${selected}" style="--capture-swatch:${capturePresetSwatch(preset)}"></button>`;
-  }).join("");
   const transparent = state.background.kind === "transparent";
   const custom = state.background.kind === "color";
   const wallpaper = state.background.kind === "wallpaper";
   const customIcon = custom ? "" : captureIcon("pipette");
   const wallpaperImage = wallpaperDataUrl ?? "";
   const changeImageHidden = wallpaper && wallpaperDataUrl ? "" : " hidden";
-  return `<div class="incodex-capture-background-grid">${presets}<button class="incodex-capture-background-option incodex-capture-color-label" data-background-custom data-color-trigger="background" data-selected="${custom}" type="button" aria-label="${copy.custom}" title="${copy.custom}" aria-haspopup="dialog" aria-expanded="false" data-state="closed" style="--capture-swatch:${lastBackgroundColor}">${customIcon}</button><button class="incodex-capture-background-option incodex-capture-checker" data-background="transparent" type="button" aria-label="${copy.transparent}" title="${copy.transparent}" aria-pressed="${transparent}"></button><button class="incodex-capture-background-option incodex-capture-wallpaper-label" data-background-wallpaper type="button" data-selected="${wallpaper}" aria-label="${copy.wallpaper}" title="${copy.wallpaper}"><img data-wallpaper-preview src="${wallpaperImage}" alt="" ${wallpaperDataUrl ? "" : "hidden"}><span data-wallpaper-placeholder ${wallpaperDataUrl ? "hidden" : ""}>${captureIcon("image-plus")}</span></button></div><input class="incodex-capture-wallpaper-input" data-input="wallpaper" type="file" accept="image/png,image/jpeg,image/webp"><button class="incodex-capture-change-wallpaper" data-action="change-wallpaper" type="button"${changeImageHidden}>${copy.changeImage}</button>`;
+  const gradients = capturePresetSection("gradients");
+  const wallpapers = capturePresetSection("wallpapers");
+  const activeSection = captureBackgroundSection(state.background);
+  return `
+    <div class="incodex-capture-background-sections">
+      <section class="incodex-capture-background-section" data-background-section="none" data-active="${activeSection === "none"}" aria-label="${copy.backgroundNone}">
+        <button class="incodex-capture-background-none incodex-capture-checker" data-background="transparent" type="button" aria-label="${copy.backgroundNone}" title="${copy.backgroundNone}" aria-pressed="${transparent}">${copy.backgroundNone}</button>
+      </section>
+      ${presetSectionTemplate(gradients, copy.backgroundGradients, state, activeSection)}
+      <section class="incodex-capture-background-section" data-background-section="wallpapers" data-active="${activeSection === "wallpapers"}" aria-label="${copy.backgroundWallpapers}">
+        <h3 class="incodex-capture-background-section-title">${copy.backgroundWallpapers}</h3>
+        <div class="incodex-capture-background-grid">
+          ${presetButtonsTemplate(wallpapers, state)}
+          <button class="incodex-capture-background-option incodex-capture-wallpaper-label" data-background-wallpaper type="button" data-selected="${wallpaper}" aria-label="${copy.wallpaper}" title="${copy.wallpaper}"><img data-wallpaper-preview src="${wallpaperImage}" alt="" ${wallpaperDataUrl ? "" : "hidden"}><span data-wallpaper-placeholder ${wallpaperDataUrl ? "hidden" : ""}>${captureIcon("image-plus")}</span></button>
+        </div>
+        <input class="incodex-capture-wallpaper-input" data-input="wallpaper" type="file" accept="image/png,image/jpeg,image/webp">
+        <button class="incodex-capture-change-wallpaper" data-action="change-wallpaper" type="button"${changeImageHidden}>${copy.changeImage}</button>
+      </section>
+      <section class="incodex-capture-background-section" data-background-section="plain-color" data-active="${activeSection === "plain-color"}" aria-label="${copy.backgroundPlainColor}">
+        <h3 class="incodex-capture-background-section-title">${copy.backgroundPlainColor}</h3>
+        <div class="incodex-capture-background-grid">
+          <button class="incodex-capture-background-option incodex-capture-color-label" data-background-custom data-color-trigger="background" data-selected="${custom}" type="button" aria-label="${copy.custom}" title="${copy.custom}" aria-haspopup="dialog" aria-expanded="false" data-state="closed" style="--capture-swatch:${lastBackgroundColor}">${customIcon}</button>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function presetSectionTemplate(
+  section: CapturePresetSection,
+  label: string,
+  state: CaptureWindowState,
+  activeSection: ReturnType<typeof captureBackgroundSection>,
+): string {
+  return `
+    <section class="incodex-capture-background-section" data-background-section="${section.id}" data-active="${activeSection === section.id}" aria-label="${label}">
+      <h3 class="incodex-capture-background-section-title">${label}</h3>
+      <div class="incodex-capture-background-grid">${presetButtonsTemplate(section, state)}</div>
+    </section>
+  `;
+}
+
+function presetButtonsTemplate(
+  section: CapturePresetSection,
+  state: CaptureWindowState,
+): string {
+  return section.presets.map((preset) => {
+    const { id } = preset;
+    const selected = state.background.kind === "preset" && state.background.id === id;
+    return `<button class="incodex-capture-background-option" data-background="${id}" type="button" aria-label="${id}" title="${id}" aria-pressed="${selected}" style="--capture-swatch:${capturePresetSwatch(preset)}"></button>`;
+  }).join("");
 }
 
 function footerTemplate(copy: CaptureWindowCopy): string {

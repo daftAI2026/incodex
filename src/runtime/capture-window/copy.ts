@@ -1,5 +1,15 @@
+/**
+ * [INPUT]: 依赖调用方传入的 locale，并遵循截图编辑器已经确认的产品术语
+ * [OUTPUT]: 对外提供 CaptureWindowCopy 双语文案与 captureWindowCopy 本地化选择器
+ * [POS]: capture-window 的唯一文案边界，让背景层级与编辑动作在所有 host adapter 中保持同义
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 export type CaptureWindowCopy = {
   background: string;
+  backgroundGradients: string;
+  backgroundNone: string;
+  backgroundPlainColor: string;
+  backgroundWallpapers: string;
   blur: string;
   changeImage: string;
   close: string;
@@ -46,6 +56,10 @@ export type CaptureWindowCopy = {
 
 const ENGLISH: CaptureWindowCopy = {
   background: "Background",
+  backgroundGradients: "Gradients",
+  backgroundNone: "None",
+  backgroundPlainColor: "Plain color",
+  backgroundWallpapers: "Wallpapers",
   blur: "Blur",
   changeImage: "Change image",
   close: "Close capture window",
@@ -92,6 +106,10 @@ const ENGLISH: CaptureWindowCopy = {
 
 const CHINESE: CaptureWindowCopy = {
   background: "背景",
+  backgroundGradients: "渐变",
+  backgroundNone: "无",
+  backgroundPlainColor: "纯色",
+  backgroundWallpapers: "壁纸",
   blur: "模糊",
   changeImage: "更换图片",
   close: "关闭截取窗口",

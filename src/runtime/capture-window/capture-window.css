@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 view.ts 输出的 capture-window DOM、Codex 主题 token 与四像素间距基线
+ * [OUTPUT]: 对外提供截图模态框、背景语义分层、工具栏、画布、检查器与隐私捕获态样式
+ * [POS]: capture-window 的视觉契约，和 color-popover.css 分工维护主编辑器与浮层样式
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 :root {
   --incodex-capture-skeleton: var(--color-background-button-tertiary-active, rgb(32 33 35 / 22%));
 }
@@ -260,6 +266,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 
 .incodex-capture-button,
 .incodex-capture-icon-button,
+.incodex-capture-background-none,
 .incodex-capture-background-option {
   -webkit-appearance: none;
   appearance: none;
@@ -277,6 +284,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 
 .incodex-capture-button:focus-visible,
 .incodex-capture-icon-button:focus-visible,
+.incodex-capture-background-none:focus-visible,
 .incodex-capture-background-option:focus-visible,
 .incodex-capture-switch:focus-visible,
 .incodex-capture-range:focus-visible {
@@ -531,106 +539,9 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   transform: translateX(calc(var(--incodex-capture-space) * 4));
 }
 
-.incodex-capture-background-grid {
-  display: grid;
-  gap: calc(var(--incodex-capture-space) * 2);
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  justify-items: center;
-  margin-top: calc(var(--incodex-capture-space) * 2);
-  width: 100%;
-}
-
-.incodex-capture-background-option {
-  background: var(--capture-swatch);
-  background-clip: border-box;
-  background-origin: border-box;
-  border: 1px solid rgb(0 0 0 / 10%);
-  border-radius: var(--radius-full, 9999px);
-  height: calc(var(--incodex-capture-space) * 7);
-  min-width: calc(var(--incodex-capture-space) * 7);
-  overflow: hidden;
-  padding: 0;
-  position: relative;
-  width: calc(var(--incodex-capture-space) * 7);
-}
-
-.incodex-capture-background-option[aria-pressed="true"],
-.incodex-capture-background-option[data-selected="true"] {
-  box-shadow: 0 0 0 2px var(--incodex-capture-surface), 0 0 0 4px var(--incodex-capture-ring);
-}
-
-.electron-dark .incodex-capture-background-option {
-  border-color: rgb(255 255 255 / 15%);
-}
-
-.incodex-capture-background-option svg {
-  color: var(--incodex-capture-primary-text);
-  filter: drop-shadow(0 1px 2px color-mix(in srgb, var(--incodex-capture-primary) 40%, transparent));
-  height: var(--incodex-capture-icon-sm);
-  inset: 50% auto auto 50%;
-  position: absolute;
-  transform: translate(-50%, -50%);
-  width: var(--incodex-capture-icon-sm);
-}
-
-.incodex-capture-color-label,
-.incodex-capture-wallpaper-label {
-  align-items: center;
-  color: var(--incodex-capture-text-tertiary);
-  cursor: var(--cursor-interaction, pointer);
-  display: flex;
-  justify-content: center;
-  overflow: hidden;
-  padding: 0;
-  position: relative;
-}
-
-.incodex-capture-wallpaper-label {
-  background: transparent;
-  border-style: dashed;
-}
-
-.incodex-capture-wallpaper-label[data-selected="true"] {
-  border-style: solid;
-}
-
-.incodex-capture-wallpaper-label img {
-  height: 100%;
-  object-fit: cover;
-  width: 100%;
-}
-
-.incodex-capture-wallpaper-label [data-wallpaper-placeholder] {
-  inset: 0;
-  position: absolute;
-}
-
-.incodex-capture-color-label:focus-visible,
-.incodex-capture-wallpaper-label:focus-within,
 .incodex-capture-solid-color:focus-visible {
   outline: 2px solid var(--incodex-capture-ring);
   outline-offset: 2px;
-}
-
-.incodex-capture-wallpaper-input {
-  display: none;
-}
-
-.incodex-capture-change-wallpaper {
-  background: transparent;
-  border: 0;
-  color: var(--incodex-capture-text-secondary);
-  cursor: var(--cursor-interaction, pointer);
-  font: inherit;
-  font-size: var(--incodex-capture-font-xs);
-  margin-top: calc(var(--incodex-capture-space) * 2);
-  padding: 0;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.incodex-capture-change-wallpaper:hover {
-  color: var(--incodex-capture-text);
 }
 
 .incodex-capture-solid-color {

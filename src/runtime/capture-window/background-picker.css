@@ -1,0 +1,143 @@
+/**
+ * [INPUT]: 依赖 capture-window.css 定义的 Codex 语义令牌与检查器底纹
+ * [OUTPUT]: 为 None、Gradients、Wallpapers 与 Plain color 提供背景选择器布局和交互态
+ * [POS]: capture-window 的背景选择器样式边界，与编辑器壳层及颜色弹层样式按职责分离
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+.incodex-capture-background-sections {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--incodex-capture-space) * 3);
+  margin-top: calc(var(--incodex-capture-space) * 2);
+}
+
+.incodex-capture-background-section {
+  min-width: 0;
+}
+
+.incodex-capture-background-section-title {
+  color: var(--incodex-capture-text-secondary);
+  font-size: var(--incodex-capture-font-xs);
+  font-weight: var(--font-weight-medium, 500);
+  line-height: calc(var(--incodex-capture-space) * 4);
+  margin: 0 0 calc(var(--incodex-capture-space) * 2);
+}
+
+.incodex-capture-background-grid {
+  display: grid;
+  gap: calc(var(--incodex-capture-space) * 2);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  justify-items: center;
+  width: 100%;
+}
+
+.incodex-capture-background-none {
+  align-items: center;
+  border: 1px solid var(--incodex-capture-border);
+  border-radius: var(--incodex-capture-radius-sm);
+  color: var(--incodex-capture-text-secondary);
+  display: flex;
+  font: inherit;
+  font-size: var(--incodex-capture-font-xs);
+  height: calc(var(--incodex-capture-space) * 8);
+  justify-content: center;
+  width: 100%;
+}
+
+.incodex-capture-background-none[aria-pressed="true"] {
+  border-color: var(--incodex-capture-ring);
+  box-shadow: inset 0 0 0 1px var(--incodex-capture-ring);
+  color: var(--incodex-capture-text);
+}
+
+.incodex-capture-background-option {
+  background: var(--capture-swatch);
+  background-clip: border-box;
+  background-origin: border-box;
+  border: 1px solid rgb(0 0 0 / 10%);
+  border-radius: var(--radius-full, 9999px);
+  height: calc(var(--incodex-capture-space) * 7);
+  min-width: calc(var(--incodex-capture-space) * 7);
+  overflow: hidden;
+  padding: 0;
+  position: relative;
+  width: calc(var(--incodex-capture-space) * 7);
+}
+
+.incodex-capture-background-option[aria-pressed="true"],
+.incodex-capture-background-option[data-selected="true"] {
+  box-shadow: 0 0 0 2px var(--incodex-capture-surface), 0 0 0 4px var(--incodex-capture-ring);
+}
+
+.electron-dark .incodex-capture-background-option {
+  border-color: rgb(255 255 255 / 15%);
+}
+
+.incodex-capture-background-option svg {
+  color: var(--incodex-capture-primary-text);
+  filter: drop-shadow(0 1px 2px color-mix(in srgb, var(--incodex-capture-primary) 40%, transparent));
+  height: var(--incodex-capture-icon-sm);
+  inset: 50% auto auto 50%;
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: var(--incodex-capture-icon-sm);
+}
+
+.incodex-capture-color-label,
+.incodex-capture-wallpaper-label {
+  align-items: center;
+  color: var(--incodex-capture-text-tertiary);
+  cursor: var(--cursor-interaction, pointer);
+  display: flex;
+  justify-content: center;
+  overflow: hidden;
+  padding: 0;
+  position: relative;
+}
+
+.incodex-capture-wallpaper-label {
+  background: transparent;
+  border-style: dashed;
+}
+
+.incodex-capture-wallpaper-label[data-selected="true"] {
+  border-style: solid;
+}
+
+.incodex-capture-wallpaper-label img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.incodex-capture-wallpaper-label [data-wallpaper-placeholder] {
+  inset: 0;
+  position: absolute;
+}
+
+.incodex-capture-color-label:focus-visible,
+.incodex-capture-wallpaper-label:focus-within {
+  outline: 2px solid var(--incodex-capture-ring);
+  outline-offset: 2px;
+}
+
+.incodex-capture-wallpaper-input {
+  display: none;
+}
+
+.incodex-capture-change-wallpaper {
+  background: transparent;
+  border: 0;
+  color: var(--incodex-capture-text-secondary);
+  cursor: var(--cursor-interaction, pointer);
+  font: inherit;
+  font-size: var(--incodex-capture-font-xs);
+  margin-top: calc(var(--incodex-capture-space) * 2);
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.incodex-capture-change-wallpaper:hover {
+  color: var(--incodex-capture-text);
+}

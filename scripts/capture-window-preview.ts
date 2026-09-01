@@ -19,6 +19,7 @@ if (!build.success) {
 const javaScript = await build.outputs[0].text();
 const html = readFileSync(join(sourceDir, "preview.html"), "utf8");
 const css = readFileSync(join(sourceDir, "capture-window.css"), "utf8");
+const backgroundPickerCss = readFileSync(join(sourceDir, "background-picker.css"), "utf8");
 const colorPopoverCss = readFileSync(join(sourceDir, "color-popover.css"), "utf8");
 const port = Number.parseInt(process.env.INCODEX_CAPTURE_PREVIEW_PORT ?? "4173", 10);
 
@@ -30,6 +31,11 @@ const server = Bun.serve({
     }
     if (path === "/capture-window.css") {
       return new Response(css, { headers: { "content-type": "text/css; charset=utf-8" } });
+    }
+    if (path === "/background-picker.css") {
+      return new Response(backgroundPickerCss, {
+        headers: { "content-type": "text/css; charset=utf-8" },
+      });
     }
     if (path === "/color-popover.css") {
       return new Response(colorPopoverCss, {

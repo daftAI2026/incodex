@@ -18,6 +18,7 @@ const hatGlassesSvg = readFileSync(join(root, "assets/hat-glasses.svg"), "utf8")
 const circleXSvg = readFileSync(join(root, "assets/circle-x.svg"), "utf8").trim();
 const captureWindowCss = [
   readFileSync(join(root, "src/runtime/capture-window/capture-window.css"), "utf8"),
+  readFileSync(join(root, "src/runtime/capture-window/background-picker.css"), "utf8"),
   readFileSync(join(root, "src/runtime/capture-window/color-popover.css"), "utf8"),
 ].join("\n");
 const capturePresetNames = [
