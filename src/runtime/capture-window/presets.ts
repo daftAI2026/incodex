@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖 model.ts 的 CapturePresetId，依赖构建期注入或 preview 静态路由提供背景图片
- * [OUTPUT]: 对外提供按 Gradients 与 Wallpapers 分层的预设目录、颜色采样与资源解析
- * [POS]: capture-window 的背景预设真相源，把展示分组与具体资源绑定隔离在编辑状态之外
+ * [INPUT]: 依赖 model.ts 的 CapturePresetId，依赖构建期注入或 preview 静态路由提供壁纸图片
+ * [OUTPUT]: 对外提供按 Gradients 与 Wallpapers 分层的预设目录、纯色目录、颜色采样与资源解析
+ * [POS]: capture-window 的背景预设真相源，函数生成渐变，只让壁纸进入栅格资源管线
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import type { CaptureBackground, CapturePresetId } from "./model.ts";
@@ -30,6 +30,12 @@ export const capturePresets: readonly CapturePreset[] = [
   { colors: ["#ffcf98", "#ea785b", "#722f45"], id: "ember", section: "gradients" },
   { colors: ["#57606f", "#2d3440", "#15191f"], id: "graphite", section: "gradients" },
 ] as const;
+
+export const capturePlainColors = ["#121212", "#ffffff", "#d1444b"] as const;
+
+export const captureRasterPresetIds: readonly CapturePresetId[] = capturePresets
+  .filter((preset) => preset.section === "wallpapers")
+  .map((preset) => preset.id);
 
 export type CapturePresetSection = {
   id: "gradients" | "wallpapers";
@@ -80,10 +86,20 @@ export function capturePresetColors(
   return capturePresets.find((preset) => preset.id === presetId)?.colors ?? capturePresets[9].colors;
 }
 
-export function capturePresetAssetUrl(presetId: CapturePresetId): string {
+export function capturePresetAssetUrl(presetId: CapturePresetId): string | null {
+  const preset = capturePresets.find((candidate) => candidate.id === presetId);
+  if (preset?.section !== "wallpapers") return null;
   return embeddedCapturePresetAssets[presetId] ?? `/capture-backgrounds/${presetId}.jpg`;
 }
 
 export function capturePresetSwatch(preset: CapturePreset): string {
+  if (preset.section === "gradients") {
+    const [start, middle, end] = preset.colors;
+    return `linear-gradient(135deg, ${start} 0%, ${middle} 52%, ${end} 100%)`;
+  }
   return `url('${capturePresetAssetUrl(preset.id)}') center / cover no-repeat`;
+}
+
+export function isCapturePlainColor(color: string): boolean {
+  return capturePlainColors.some((candidate) => candidate.toLowerCase() === color.toLowerCase());
 }

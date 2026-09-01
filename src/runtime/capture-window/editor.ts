@@ -28,6 +28,7 @@ import {
   loadCapturePreferences,
   saveCapturePreferences,
 } from "./preferences.ts";
+import { captureBackgroundSection, isCapturePlainColor } from "./presets.ts";
 import { resolveSelectedCaptureRegions } from "./redactions.ts";
 import { mountCaptureRegionLayer } from "./regions.ts";
 import { captureToolbarTemplate, captureWindowTemplate } from "./view.ts";
@@ -234,6 +235,10 @@ export function mountCaptureWindowEditor(
     wireBackgroundActions(
       root,
       dispatch,
+      (color) => {
+        lastBackgroundColor = color;
+        dispatch({ background: { color, kind: "color" }, kind: "set-background" });
+      },
       () => lastWallpaperDataUrl,
       () => root.querySelector<HTMLInputElement>("[data-input='wallpaper']")?.click(),
     );
@@ -445,6 +450,7 @@ function wireToolbarActions(
 function wireBackgroundActions(
   root: HTMLElement,
   dispatch: (command: CaptureWindowCommand) => void,
+  setBackgroundColor: (color: string) => void,
   readWallpaperDataUrl: () => string | null,
   pickWallpaper: () => void,
 ): void {
@@ -459,6 +465,12 @@ function wireBackgroundActions(
         kind: "set-background",
         background: { id: id as CapturePresetId, kind: "preset" },
       });
+    });
+  }
+  for (const option of root.querySelectorAll<HTMLElement>("[data-background-color]")) {
+    option.addEventListener("click", () => {
+      const color = option.dataset.backgroundColor;
+      if (color) setBackgroundColor(color);
     });
   }
   const wallpaper = root.querySelector<HTMLButtonElement>("[data-background-wallpaper]");
@@ -530,9 +542,27 @@ function syncEditorControls(
     option.setAttribute("aria-pressed", String(selected));
   }
 
+  for (const option of root.querySelectorAll<HTMLElement>("[data-background-color]")) {
+    const selected = state.background.kind === "color" &&
+      option.dataset.backgroundColor?.toLowerCase() === state.background.color.toLowerCase();
+    option.setAttribute("aria-pressed", String(selected));
+  }
+
   const custom = root.querySelector<HTMLElement>("[data-background-custom]");
   if (custom) {
-    custom.dataset.selected = String(state.background.kind === "color");
+    const selected = state.background.kind === "color" && !isCapturePlainColor(state.background.color);
+    custom.dataset.selected = String(selected);
+    custom.querySelector<HTMLElement>("[data-background-custom-icon]")?.toggleAttribute(
+      "hidden",
+      selected,
+    );
+  }
+  const activeSection = captureBackgroundSection(state.background);
+  for (const section of root.querySelectorAll<HTMLElement>("[data-background-section]")) {
+    section.dataset.active = String(
+      section.dataset.backgroundSection === activeSection ||
+        (activeSection === "none" && section.dataset.backgroundSection === "plain-color"),
+    );
   }
   syncCaptureColorPopover(root, "background", lastBackgroundColor);
   const wallpaper = root.querySelector<HTMLElement>("[data-background-wallpaper]");

@@ -9,6 +9,7 @@ import {
   RUNTIME_LOADER_NAME,
   writeRuntimeManifest,
 } from "./runtime-manifest.ts";
+import { captureRasterPresetIds } from "./runtime/capture-window/presets.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = join(root, "dist");
@@ -21,20 +22,8 @@ const captureWindowCss = [
   readFileSync(join(root, "src/runtime/capture-window/background-picker.css"), "utf8"),
   readFileSync(join(root, "src/runtime/capture-window/color-popover.css"), "utf8"),
 ].join("\n");
-const capturePresetNames = [
-  "sea",
-  "canyon",
-  "mist",
-  "highland",
-  "ocean",
-  "silver",
-  "azure",
-  "indigo",
-  "ember",
-  "graphite",
-];
 const capturePresetAssets = Object.fromEntries(
-  capturePresetNames.map((name) => [
+  captureRasterPresetIds.map((name) => [
     name,
     `data:image/jpeg;base64,${readFileSync(join(root, `assets/capture-backgrounds/${name}.jpg`)).toString("base64")}`,
   ]),

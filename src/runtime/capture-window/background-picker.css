@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 capture-window.css 定义的 Codex 语义令牌与检查器底纹
- * [OUTPUT]: 为 None、Gradients、Wallpapers 与 Plain color 提供背景选择器布局和交互态
+ * [OUTPUT]: 为 Gradients、Wallpapers 与含透明入口的 Plain color 提供背景选择器布局和交互态
  * [POS]: capture-window 的背景选择器样式边界，与编辑器壳层及颜色弹层样式按职责分离
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -29,25 +29,6 @@
   grid-template-columns: repeat(5, minmax(0, 1fr));
   justify-items: center;
   width: 100%;
-}
-
-.incodex-capture-background-none {
-  align-items: center;
-  border: 1px solid var(--incodex-capture-border);
-  border-radius: var(--incodex-capture-radius-sm);
-  color: var(--incodex-capture-text-secondary);
-  display: flex;
-  font: inherit;
-  font-size: var(--incodex-capture-font-xs);
-  height: calc(var(--incodex-capture-space) * 8);
-  justify-content: center;
-  width: 100%;
-}
-
-.incodex-capture-background-none[aria-pressed="true"] {
-  border-color: var(--incodex-capture-ring);
-  box-shadow: inset 0 0 0 1px var(--incodex-capture-ring);
-  color: var(--incodex-capture-text);
 }
 
 .incodex-capture-background-option {

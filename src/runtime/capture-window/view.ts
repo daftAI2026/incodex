@@ -14,8 +14,10 @@ import {
 import {
   type CapturePresetSection,
   captureBackgroundSection,
+  capturePlainColors,
   capturePresetSection,
   capturePresetSwatch,
+  isCapturePlainColor,
 } from "./presets.ts";
 
 export type CaptureWindowViewOptions = {
@@ -154,9 +156,9 @@ function backgroundGridTemplate(
   wallpaperDataUrl: string | null,
 ): string {
   const transparent = state.background.kind === "transparent";
-  const custom = state.background.kind === "color";
+  const custom = state.background.kind === "color" && !isCapturePlainColor(state.background.color);
   const wallpaper = state.background.kind === "wallpaper";
-  const customIcon = custom ? "" : captureIcon("pipette");
+  const customIcon = `<span data-background-custom-icon ${custom ? "hidden" : ""}>${captureIcon("pipette")}</span>`;
   const wallpaperImage = wallpaperDataUrl ?? "";
   const changeImageHidden = wallpaper && wallpaperDataUrl ? "" : " hidden";
   const gradients = capturePresetSection("gradients");
@@ -164,9 +166,6 @@ function backgroundGridTemplate(
   const activeSection = captureBackgroundSection(state.background);
   return `
     <div class="incodex-capture-background-sections">
-      <section class="incodex-capture-background-section" data-background-section="none" data-active="${activeSection === "none"}" aria-label="${copy.backgroundNone}">
-        <button class="incodex-capture-background-none incodex-capture-checker" data-background="transparent" type="button" aria-label="${copy.backgroundNone}" title="${copy.backgroundNone}" aria-pressed="${transparent}">${copy.backgroundNone}</button>
-      </section>
       ${presetSectionTemplate(gradients, copy.backgroundGradients, state, activeSection)}
       <section class="incodex-capture-background-section" data-background-section="wallpapers" data-active="${activeSection === "wallpapers"}" aria-label="${copy.backgroundWallpapers}">
         <h3 class="incodex-capture-background-section-title">${copy.backgroundWallpapers}</h3>
@@ -177,14 +176,24 @@ function backgroundGridTemplate(
         <input class="incodex-capture-wallpaper-input" data-input="wallpaper" type="file" accept="image/png,image/jpeg,image/webp">
         <button class="incodex-capture-change-wallpaper" data-action="change-wallpaper" type="button"${changeImageHidden}>${copy.changeImage}</button>
       </section>
-      <section class="incodex-capture-background-section" data-background-section="plain-color" data-active="${activeSection === "plain-color"}" aria-label="${copy.backgroundPlainColor}">
+      <section class="incodex-capture-background-section" data-background-section="plain-color" data-active="${activeSection === "plain-color" || activeSection === "none"}" aria-label="${copy.backgroundPlainColor}">
         <h3 class="incodex-capture-background-section-title">${copy.backgroundPlainColor}</h3>
         <div class="incodex-capture-background-grid">
+          <button class="incodex-capture-background-option incodex-capture-checker" data-background="transparent" type="button" aria-label="${copy.backgroundNone}" title="${copy.backgroundNone}" aria-pressed="${transparent}"></button>
+          ${plainColorButtonsTemplate(state)}
           <button class="incodex-capture-background-option incodex-capture-color-label" data-background-custom data-color-trigger="background" data-selected="${custom}" type="button" aria-label="${copy.custom}" title="${copy.custom}" aria-haspopup="dialog" aria-expanded="false" data-state="closed" style="--capture-swatch:${lastBackgroundColor}">${customIcon}</button>
         </div>
       </section>
     </div>
   `;
+}
+
+function plainColorButtonsTemplate(state: CaptureWindowState): string {
+  return capturePlainColors.map((color) => {
+    const selected = state.background.kind === "color" &&
+      state.background.color.toLowerCase() === color.toLowerCase();
+    return `<button class="incodex-capture-background-option" data-background-color="${color}" type="button" aria-label="${color}" title="${color}" aria-pressed="${selected}" style="--capture-swatch:${color}"></button>`;
+  }).join("");
 }
 
 function presetSectionTemplate(

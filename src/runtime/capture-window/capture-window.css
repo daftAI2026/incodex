@@ -266,7 +266,6 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 
 .incodex-capture-button,
 .incodex-capture-icon-button,
-.incodex-capture-background-none,
 .incodex-capture-background-option {
   -webkit-appearance: none;
   appearance: none;
@@ -284,7 +283,6 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 
 .incodex-capture-button:focus-visible,
 .incodex-capture-icon-button:focus-visible,
-.incodex-capture-background-none:focus-visible,
 .incodex-capture-background-option:focus-visible,
 .incodex-capture-switch:focus-visible,
 .incodex-capture-range:focus-visible {
