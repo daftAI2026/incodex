@@ -35,7 +35,10 @@ describe("capture window visual tokens", () => {
     const css = readFileSync(cssPath, "utf8");
 
     expect(css).not.toMatch(/\.incodex-capture-background-grid\s*\{[^}]*padding:/);
-    expect(css).toMatch(/\.incodex-capture-background-grid[\s\S]*?width: max-content/);
+    expect(css).toMatch(
+      /\.incodex-capture-background-grid\s*\{[^}]*grid-template-columns: repeat\(5, minmax\(0, 1fr\)\)/,
+    );
+    expect(css).toMatch(/\.incodex-capture-background-grid\s*\{[^}]*width: 100%/);
     expect(css).toMatch(/\.incodex-capture-background-option\s*\{[\s\S]*?border-radius: var\(--radius-full/);
     expect(css).toMatch(/\.incodex-capture-background-option\s*\{[\s\S]*?overflow: hidden/);
     expect(css).not.toMatch(/@supports \(corner-shape:[\s\S]*?\.incodex-capture-background-option/);
