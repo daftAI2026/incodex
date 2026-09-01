@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖共享编辑器模板、状态模型、双语文案与 preview harness
+ * [OUTPUT]: 为浏览器预览、背景语义层级、交互结构和 Runtime 调试入口提供静态合同
+ * [POS]: capture-window 的集成合同测试，在真实 Electron adapter 之前固定共享 UI 的产品边界
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -86,6 +92,22 @@ describe("capture window preview", () => {
     );
     expect(markup).toContain('aria-haspopup="dialog"');
     expect(markup).not.toContain('data-input="color" type="color"');
+
+    const noneSection = markup.indexOf('data-background-section="none"');
+    const gradientsSection = markup.indexOf('data-background-section="gradients"');
+    const wallpapersSection = markup.indexOf('data-background-section="wallpapers"');
+    const plainColorSection = markup.indexOf('data-background-section="plain-color"');
+    expect(noneSection).toBeGreaterThan(-1);
+    expect(noneSection).toBeLessThan(gradientsSection);
+    expect(gradientsSection).toBeLessThan(wallpapersSection);
+    expect(wallpapersSection).toBeLessThan(plainColorSection);
+    expect(copy.backgroundNone).toBe("None");
+    expect(copy.backgroundGradients).toBe("Gradients");
+    expect(copy.backgroundWallpapers).toBe("Wallpapers");
+    expect(copy.backgroundPlainColor).toBe("Plain color");
+    expect(captureWindowCopy("zh-CN").backgroundGradients).toBe("渐变");
+    expect(captureWindowCopy("zh-CN").backgroundWallpapers).toBe("壁纸");
+    expect(captureWindowCopy("zh-CN").backgroundPlainColor).toBe("纯色");
 
     const solidMarkup = captureWindowTemplate(
       applyCaptureCommand(

@@ -1,8 +1,15 @@
+/**
+ * [INPUT]: 依赖 presets.ts 暴露的背景预设、分组与资源解析契约
+ * [OUTPUT]: 为背景顺序、CleanShot 语义分层与本地图片资产提供回归证明
+ * [POS]: capture-window 的背景模型合同测试，阻止展示层把渐变与壁纸重新压平成同类选项
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   capturePresetAssetUrl,
+  capturePresetSections,
   capturePresets,
   capturePresetSwatch,
 } from "./presets.ts";
@@ -22,6 +29,24 @@ describe("capture background presets", () => {
       "indigo",
       "ember",
       "graphite",
+    ]);
+  });
+
+  test("exposes gradients and wallpapers as separate CleanShot-style sections", () => {
+    expect(
+      capturePresetSections.map((section) => ({
+        id: section.id,
+        presets: section.presets.map((preset) => preset.id),
+      })),
+    ).toEqual([
+      {
+        id: "gradients",
+        presets: ["silver", "azure", "indigo", "ember", "graphite"],
+      },
+      {
+        id: "wallpapers",
+        presets: ["sea", "canyon", "mist", "highland", "ocean"],
+      },
     ]);
   });
 
