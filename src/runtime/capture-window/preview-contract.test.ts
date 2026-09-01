@@ -108,6 +108,9 @@ describe("capture window preview", () => {
     expect(captureWindowCopy("zh-CN").backgroundGradients).toBe("渐变");
     expect(captureWindowCopy("zh-CN").backgroundWallpapers).toBe("壁纸");
     expect(captureWindowCopy("zh-CN").backgroundPlainColor).toBe("纯色");
+    expect(readFileSync(join(import.meta.dir, "view.ts"), "utf8")).not.toContain(
+      "capturePresetSections[",
+    );
 
     const solidMarkup = captureWindowTemplate(
       applyCaptureCommand(
