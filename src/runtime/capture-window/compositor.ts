@@ -9,9 +9,11 @@ import type {
 } from "./model.ts";
 import { capturePresetColors } from "./presets.ts";
 
+const CAPTURE_WINDOW_UNDERLAY_COLOR = "#f4f4f4";
+
 export type CaptureRenderOperation =
   | { background: CaptureBackground; kind: "background"; size: CaptureSize }
-  | { color: "#ffffff"; kind: "window-underlay"; rect: CaptureRect }
+  | { color: typeof CAPTURE_WINDOW_UNDERLAY_COLOR; kind: "window-underlay"; rect: CaptureRect }
   | { kind: "window"; rect: CaptureRect; shadow: boolean }
   | {
       color: string;
@@ -88,7 +90,7 @@ export function createCaptureRenderPlan(
   };
   const operations: CaptureRenderOperation[] = [
     { background: state.background, kind: "background", size },
-    { color: "#ffffff", kind: "window-underlay", rect: windowRect },
+    { color: CAPTURE_WINDOW_UNDERLAY_COLOR, kind: "window-underlay", rect: windowRect },
     {
       kind: "window",
       rect: windowRect,
@@ -222,7 +224,7 @@ function drawWindow(
     context.shadowBlur = shadow.blur;
     context.shadowOffsetY = shadow.offsetY;
   }
-  context.fillStyle = "#ffffff";
+  context.fillStyle = CAPTURE_WINDOW_UNDERLAY_COLOR;
   context.fill();
   context.shadowColor = "transparent";
   context.shadowBlur = 0;

@@ -132,7 +132,9 @@ describe("capture window preview", () => {
     expect(css).toContain('[data-incodex-capture-redact="blank"]::after');
     expect(css).toContain('[data-incodex-capture-redact="center"]::after');
     expect(css).toContain('[data-incodex-capture-redact="project"]::after');
-    expect(css).toContain(":nth-child(4n+1) [data-incodex-capture-redact]::after");
+    expect(css).toContain(
+      ':nth-child(4n+1) [data-incodex-capture-redact]:not([data-incodex-capture-redact="project"])::after',
+    );
     expect(css).toContain(".mac-traffic-light:first-of-type > div");
     expect(css).toMatch(
       /\.incodex-capture-background-option\[aria-pressed="true"\][\s\S]*?box-shadow: 0 0 0 2px var\(--incodex-capture-surface\), 0 0 0 4px var\(--incodex-capture-ring\)/,

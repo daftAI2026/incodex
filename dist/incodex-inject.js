@@ -309,6 +309,7 @@ function capturePresetSwatch(preset) {
 }
 
 // src/runtime/capture-window/compositor.ts
+var CAPTURE_WINDOW_UNDERLAY_COLOR = "#f4f4f4";
 function redactionSampling(style, scaleFactor) {
   if (style === "solid")
     return null;
@@ -406,7 +407,7 @@ function drawWindow(context, source, state, isMacOS) {
     context.shadowBlur = shadow.blur;
     context.shadowOffsetY = shadow.offsetY;
   }
-  context.fillStyle = "#ffffff";
+  context.fillStyle = CAPTURE_WINDOW_UNDERLAY_COLOR;
   context.fill();
   context.shadowColor = "transparent";
   context.shadowBlur = 0;
@@ -2013,20 +2014,20 @@ function markCodexPrivacyPlaceholders(documentRoot) {
   markRows(documentRoot.querySelectorAll(CODEX_THREAD_SELECTOR), "data-app-action-sidebar-thread-title", snapshots);
   markRows(documentRoot.querySelectorAll(CODEX_PROJECT_SELECTOR), "data-app-action-sidebar-project-label", snapshots);
   markProfile(documentRoot, snapshots);
-  markTextLeaves(documentRoot.querySelectorAll(CODEX_COMPOSER_PROJECT_SELECTOR), snapshots);
-  markTextLeaves(documentRoot.querySelectorAll(CODEX_EMPTY_STATE_PROJECT_SELECTOR), snapshots);
+  markProjectTextLeaves(documentRoot.querySelectorAll(CODEX_COMPOSER_PROJECT_SELECTOR), snapshots);
+  markProjectTextLeaves(documentRoot.querySelectorAll(CODEX_EMPTY_STATE_PROJECT_SELECTOR), snapshots);
   return () => restoreAttributes(snapshots);
 }
-function markTextLeaves(elements, snapshots) {
+function markProjectTextLeaves(elements, snapshots) {
   for (const element of elements) {
     if (element.children.length === 0 && element.textContent.trim().length > 0) {
-      setTemporaryAttribute(element, CAPTURE_REDACT_ATTRIBUTE, "text", snapshots);
+      setTemporaryAttribute(element, CAPTURE_REDACT_ATTRIBUTE, "project", snapshots);
       continue;
     }
     for (const leaf of element.querySelectorAll("*")) {
       if (leaf.children.length > 0 || leaf.textContent.trim().length === 0)
         continue;
-      setTemporaryAttribute(leaf, CAPTURE_REDACT_ATTRIBUTE, "text", snapshots);
+      setTemporaryAttribute(leaf, CAPTURE_REDACT_ATTRIBUTE, "project", snapshots);
     }
   }
 }
@@ -3759,15 +3760,19 @@ html.incodex-capture-redact [data-incodex-capture-redact="center"]::after {
   width: 40%;
 }
 
-html.incodex-capture-redact [data-index]:nth-child(4n+1) [data-incodex-capture-redact]::after {
+html.incodex-capture-redact [data-incodex-capture-redact="project"]::after {
+  width: 100%;
+}
+
+html.incodex-capture-redact [data-index]:nth-child(4n+1) [data-incodex-capture-redact]:not([data-incodex-capture-redact="project"])::after {
   width: 46%;
 }
 
-html.incodex-capture-redact [data-index]:nth-child(4n+2) [data-incodex-capture-redact]::after {
+html.incodex-capture-redact [data-index]:nth-child(4n+2) [data-incodex-capture-redact]:not([data-incodex-capture-redact="project"])::after {
   width: 74%;
 }
 
-html.incodex-capture-redact [data-index]:nth-child(4n+3) [data-incodex-capture-redact]::after {
+html.incodex-capture-redact [data-index]:nth-child(4n+3) [data-incodex-capture-redact]:not([data-incodex-capture-redact="project"])::after {
   width: 55%;
 }
 
@@ -4195,7 +4200,6 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   gap: calc(var(--incodex-capture-space) * 2);
   grid-template-columns: repeat(5, calc(var(--incodex-capture-space) * 7));
   margin-top: calc(var(--incodex-capture-space) * 2);
-  padding: var(--incodex-capture-space);
   width: max-content;
 }
 
@@ -4205,6 +4209,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   border-radius: var(--radius-full, 9999px);
   height: calc(var(--incodex-capture-space) * 7);
   min-width: calc(var(--incodex-capture-space) * 7);
+  overflow: hidden;
   padding: 0;
   position: relative;
   width: calc(var(--incodex-capture-space) * 7);

@@ -96,15 +96,19 @@ html.incodex-capture-redact [data-incodex-capture-redact="center"]::after {
   width: 40%;
 }
 
-html.incodex-capture-redact [data-index]:nth-child(4n+1) [data-incodex-capture-redact]::after {
+html.incodex-capture-redact [data-incodex-capture-redact="project"]::after {
+  width: 100%;
+}
+
+html.incodex-capture-redact [data-index]:nth-child(4n+1) [data-incodex-capture-redact]:not([data-incodex-capture-redact="project"])::after {
   width: 46%;
 }
 
-html.incodex-capture-redact [data-index]:nth-child(4n+2) [data-incodex-capture-redact]::after {
+html.incodex-capture-redact [data-index]:nth-child(4n+2) [data-incodex-capture-redact]:not([data-incodex-capture-redact="project"])::after {
   width: 74%;
 }
 
-html.incodex-capture-redact [data-index]:nth-child(4n+3) [data-incodex-capture-redact]::after {
+html.incodex-capture-redact [data-index]:nth-child(4n+3) [data-incodex-capture-redact]:not([data-incodex-capture-redact="project"])::after {
   width: 55%;
 }
 
@@ -532,7 +536,6 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   gap: calc(var(--incodex-capture-space) * 2);
   grid-template-columns: repeat(5, calc(var(--incodex-capture-space) * 7));
   margin-top: calc(var(--incodex-capture-space) * 2);
-  padding: var(--incodex-capture-space);
   width: max-content;
 }
 
@@ -542,6 +545,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   border-radius: var(--radius-full, 9999px);
   height: calc(var(--incodex-capture-space) * 7);
   min-width: calc(var(--incodex-capture-space) * 7);
+  overflow: hidden;
   padding: 0;
   position: relative;
   width: calc(var(--incodex-capture-space) * 7);

@@ -47,11 +47,11 @@ export function markCodexPrivacyPlaceholders(documentRoot: Document): () => void
     snapshots,
   );
   markProfile(documentRoot, snapshots);
-  markTextLeaves(
+  markProjectTextLeaves(
     documentRoot.querySelectorAll<HTMLElement>(CODEX_COMPOSER_PROJECT_SELECTOR),
     snapshots,
   );
-  markTextLeaves(
+  markProjectTextLeaves(
     documentRoot.querySelectorAll<HTMLElement>(CODEX_EMPTY_STATE_PROJECT_SELECTOR),
     snapshots,
   );
@@ -59,15 +59,18 @@ export function markCodexPrivacyPlaceholders(documentRoot: Document): () => void
   return () => restoreAttributes(snapshots);
 }
 
-function markTextLeaves(elements: NodeListOf<HTMLElement>, snapshots: AttributeSnapshot[]): void {
+function markProjectTextLeaves(
+  elements: NodeListOf<HTMLElement>,
+  snapshots: AttributeSnapshot[],
+): void {
   for (const element of elements) {
     if (element.children.length === 0 && element.textContent.trim().length > 0) {
-      setTemporaryAttribute(element, CAPTURE_REDACT_ATTRIBUTE, "text", snapshots);
+      setTemporaryAttribute(element, CAPTURE_REDACT_ATTRIBUTE, "project", snapshots);
       continue;
     }
     for (const leaf of element.querySelectorAll("*")) {
       if (leaf.children.length > 0 || leaf.textContent.trim().length === 0) continue;
-      setTemporaryAttribute(leaf, CAPTURE_REDACT_ATTRIBUTE, "text", snapshots);
+      setTemporaryAttribute(leaf, CAPTURE_REDACT_ATTRIBUTE, "project", snapshots);
     }
   }
 }
