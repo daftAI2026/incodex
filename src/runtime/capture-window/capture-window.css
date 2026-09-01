@@ -535,12 +535,15 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   display: grid;
   gap: calc(var(--incodex-capture-space) * 2);
   grid-template-columns: repeat(5, minmax(0, 1fr));
+  justify-items: center;
   margin-top: calc(var(--incodex-capture-space) * 2);
   width: 100%;
 }
 
 .incodex-capture-background-option {
   background: var(--capture-swatch);
+  background-clip: border-box;
+  background-origin: border-box;
   border: 1px solid rgb(0 0 0 / 10%);
   border-radius: var(--radius-full, 9999px);
   height: calc(var(--incodex-capture-space) * 7);
@@ -553,7 +556,6 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 
 .incodex-capture-background-option[aria-pressed="true"],
 .incodex-capture-background-option[data-selected="true"] {
-  border-color: var(--incodex-capture-surface);
   box-shadow: 0 0 0 2px var(--incodex-capture-surface), 0 0 0 4px var(--incodex-capture-ring);
 }
 
