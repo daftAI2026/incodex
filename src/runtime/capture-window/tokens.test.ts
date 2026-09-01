@@ -72,7 +72,9 @@ describe("capture window visual tokens", () => {
   });
 
   test("sizes editor icon roles from Codex spacing tokens", () => {
-    const css = readFileSync(cssPath, "utf8");
+    const css = [cssPath, backgroundPickerCssPath]
+      .map((path) => readFileSync(path, "utf8"))
+      .join("\n");
     const view = readFileSync(viewPath, "utf8");
 
     expect(css).toMatch(/\.incodex-capture-heading > svg[\s\S]*?height: var\(--incodex-capture-icon-base\)/);

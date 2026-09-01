@@ -26,8 +26,12 @@ describe("capture window preview", () => {
       "bun scripts/capture-window-preview.ts",
     );
     expect(server).toContain("127.0.0.1");
+    expect(server).toContain('path === "/background-picker.css"');
     expect(server).toContain('path.startsWith("/capture-backgrounds/")');
     expect(server).toContain('"assets/capture-backgrounds"');
+    expect(readFileSync(join(import.meta.dir, "preview.html"), "utf8")).toContain(
+      'href="/background-picker.css"',
+    );
     expect(preview).toContain("mountCaptureWindowEditor");
     expect(preview).not.toContain("incodex-main.cts");
     expect(editor).toContain("onCopy?:");
@@ -71,7 +75,9 @@ describe("capture window preview", () => {
     const state = createCaptureWindowState({ height: 720, scaleFactor: 1, width: 1280 });
     const copy = captureWindowCopy("en");
     const markup = captureWindowTemplate(state, copy);
-    const css = readFileSync(join(import.meta.dir, "capture-window.css"), "utf8");
+    const css = ["capture-window.css", "background-picker.css"]
+      .map((file) => readFileSync(join(import.meta.dir, file), "utf8"))
+      .join("\n");
     const previewHtml = readFileSync(join(import.meta.dir, "preview.html"), "utf8");
 
     expect(markup).toContain('data-capture-icon="camera"');
