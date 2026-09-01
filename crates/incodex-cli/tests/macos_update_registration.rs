@@ -103,8 +103,11 @@ fn helper_is_content_addressed_private_and_bound_to_install_epoch() {
         0o600
     );
 
+    let pending = root.join("macos-update/pending.json");
+    fs::write(&pending, b"fixture").unwrap();
     remove_registration(&root, "install-epoch-a").unwrap();
     assert!(read_registration(&root).unwrap().is_none());
+    assert!(!pending.exists());
 }
 
 #[test]
