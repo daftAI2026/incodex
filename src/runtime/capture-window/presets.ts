@@ -59,13 +59,6 @@ export const capturePlainColors = [
   "#0c8ce8",
   "#8536ec",
   "#383838",
-  "#ebebeb",
-  "#fabdb5",
-  "#ffc570",
-  "#fade8f",
-  "#a0e8bb",
-  "#a9d6f9",
-  "#cfaff0",
 ] as const;
 
 export const captureRasterPresetIds: readonly CapturePresetId[] = capturePresets

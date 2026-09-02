@@ -59,7 +59,7 @@ export type CaptureWindowCopy = {
 const ENGLISH: CaptureWindowCopy = {
   background: "Background",
   backgroundGradients: "Gradients",
-  backgroundNone: "None",
+  backgroundNone: "No background",
   backgroundPlainColor: "Plain color",
   backgroundShowLess: "Show less",
   backgroundShowMore: "Show more",
@@ -111,7 +111,7 @@ const ENGLISH: CaptureWindowCopy = {
 const CHINESE: CaptureWindowCopy = {
   background: "背景",
   backgroundGradients: "渐变",
-  backgroundNone: "无",
+  backgroundNone: "无背景",
   backgroundPlainColor: "纯色",
   backgroundShowLess: "收起",
   backgroundShowMore: "显示更多",

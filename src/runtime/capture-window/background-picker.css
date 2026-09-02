@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 capture-window.css 定义的 Codex 语义令牌与检查器底纹
- * [OUTPUT]: 为 Gradients、Wallpapers 与含透明入口的 Plain color 提供背景选择器布局和交互态
+ * [OUTPUT]: 为 Gradients、Wallpapers 与 Plain color 提供背景选择器布局和交互态
  * [POS]: capture-window 的背景选择器样式边界，与编辑器壳层及颜色弹层样式按职责分离
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -52,12 +52,13 @@
   gap: calc(var(--incodex-capture-space) * 2);
   grid-template-columns: repeat(5, minmax(0, 1fr));
   justify-items: center;
+  padding: var(--incodex-capture-space);
   width: 100%;
 }
 
 .incodex-capture-background-grid-plain {
   gap: var(--incodex-capture-space);
-  grid-template-columns: repeat(9, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .incodex-capture-background-grid-plain .incodex-capture-background-option {
@@ -114,6 +115,11 @@
 .incodex-capture-wallpaper-label {
   background: transparent;
   border-style: dashed;
+  color: var(--incodex-capture-text-secondary);
+}
+
+.incodex-capture-wallpaper-label:hover {
+  color: var(--incodex-capture-text);
 }
 
 .incodex-capture-wallpaper-label[data-selected="true"] {
@@ -129,6 +135,10 @@
 .incodex-capture-wallpaper-label [data-wallpaper-placeholder] {
   inset: 0;
   position: absolute;
+}
+
+.incodex-capture-wallpaper-label [data-wallpaper-placeholder] > svg {
+  color: inherit;
 }
 
 .incodex-capture-color-label:focus-visible,

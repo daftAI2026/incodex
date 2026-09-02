@@ -56,12 +56,12 @@ var ICON_BODY = {
   "grid-3x3": '<rect width="18" height="18" x="3" y="3" rx="2" /><path d="M3 9h18" /><path d="M3 15h18" /><path d="M9 3v18" /><path d="M15 3v18" />',
   hand: '<path d="M18 11V6a2 2 0 0 0-4 0v5" /><path d="M14 10V4a2 2 0 0 0-4 0v7" /><path d="M10 10.5V6a2 2 0 0 0-4 0v8" /><path d="M6 14a2 2 0 1 0-4 0v2c0 4.4 3.6 8 8 8h2a8 8 0 0 0 8-8v-5a2 2 0 0 0-4 0v1" />',
   image: '<rect width="18" height="18" x="3" y="3" rx="2" ry="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />',
-  "image-plus": '<path d="M16 5h6" /><path d="M19 2v6" /><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21" />',
   maximize: '<path d="M8 3H5a2 2 0 0 0-2 2v3" /><path d="M16 3h3a2 2 0 0 1 2 2v3" /><path d="M8 21H5a2 2 0 0 1-2-2v-3" /><path d="M16 21h3a2 2 0 0 0 2-2v-3" />',
   move: '<path d="M12 2v20" /><path d="m15 19-3 3-3-3" /><path d="m19 9 3 3-3 3" /><path d="M2 12h20" /><path d="m5 9-3 3 3 3" /><path d="m9 5 3-3 3 3" />',
   palette: '<path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z" /><circle cx="13.5" cy="6.5" r=".5" fill="currentColor" /><circle cx="17.5" cy="10.5" r=".5" fill="currentColor" /><circle cx="6.5" cy="12.5" r=".5" fill="currentColor" /><circle cx="8.5" cy="7.5" r=".5" fill="currentColor" />',
   "pen-line": '<path d="M13 21h8" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" /><path d="m15 5 3 3" />',
   pipette: '<path d="m2 22 1-1h3l9-9" /><path d="M3 21v-3l9-9" /><path d="m15 6 3.4-3.4a2.1 2.1 0 0 1 3 3L18 9" /><path d="m11 8 5 5" />',
+  plus: '<path d="M5 12h14" /><path d="M12 5v14" />',
   redo: '<path d="m15 14 5-5-5-5" /><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5 5.5 5.5 0 0 0 9.5 20H13" />',
   retake: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" />',
   scan: '<path d="M3 7V5a2 2 0 0 1 2-2h2" /><path d="M17 3h2a2 2 0 0 1 2 2v2" /><path d="M21 17v2a2 2 0 0 1-2 2h-2" /><path d="M7 21H5a2 2 0 0 1-2-2v-2" /><path d="M7 12h10" />',
@@ -529,14 +529,7 @@ var capturePlainColors = [
   "#188f51",
   "#0c8ce8",
   "#8536ec",
-  "#383838",
-  "#ebebeb",
-  "#fabdb5",
-  "#ffc570",
-  "#fade8f",
-  "#a0e8bb",
-  "#a9d6f9",
-  "#cfaff0"
+  "#383838"
 ];
 var captureRasterPresetIds = capturePresets.filter((preset) => preset.section === "wallpapers").map((preset) => preset.id);
 var capturePresetSections = [
@@ -600,10 +593,6 @@ function wireCaptureBackgroundActions(root, actions) {
   for (const option of root.querySelectorAll("[data-background]")) {
     option.addEventListener("click", () => {
       const id = option.dataset.background;
-      if (id === "transparent") {
-        actions.dispatch({ kind: "set-background", background: { kind: "transparent" } });
-        return;
-      }
       actions.dispatch({
         kind: "set-background",
         background: { id, kind: "preset" }
@@ -632,7 +621,7 @@ function wireCaptureBackgroundActions(root, actions) {
 }
 function syncCaptureBackgroundControls(root, state, lastBackgroundColor, wallpaperDataUrl, gradientToggleLabels) {
   for (const option of root.querySelectorAll("[data-background]")) {
-    const selected = option.dataset.background === "transparent" ? state.background.kind === "transparent" : state.background.kind === "preset" && option.dataset.background === state.background.id;
+    const selected = state.background.kind === "preset" && option.dataset.background === state.background.id;
     option.setAttribute("aria-pressed", String(selected));
   }
   for (const option of root.querySelectorAll("[data-background-color]")) {
@@ -665,7 +654,7 @@ function syncGradientCatalog(root, state, labels) {
 }
 function syncActiveSection(root, activeSection) {
   for (const section of root.querySelectorAll("[data-background-section]")) {
-    section.dataset.active = String(section.dataset.backgroundSection === activeSection || activeSection === "none" && section.dataset.backgroundSection === "plain-color");
+    section.dataset.active = String(section.dataset.backgroundSection === activeSection);
   }
 }
 function syncWallpaperControls(root, state, wallpaperDataUrl) {
@@ -689,7 +678,7 @@ function syncWallpaperControls(root, state, wallpaperDataUrl) {
 var ENGLISH = {
   background: "Background",
   backgroundGradients: "Gradients",
-  backgroundNone: "None",
+  backgroundNone: "No background",
   backgroundPlainColor: "Plain color",
   backgroundShowLess: "Show less",
   backgroundShowMore: "Show more",
@@ -740,7 +729,7 @@ var ENGLISH = {
 var CHINESE = {
   background: "背景",
   backgroundGradients: "渐变",
-  backgroundNone: "无",
+  backgroundNone: "无背景",
   backgroundPlainColor: "纯色",
   backgroundShowLess: "收起",
   backgroundShowMore: "显示更多",
@@ -1098,6 +1087,7 @@ function createCaptureWindowState(source) {
     background: { id: "sea", kind: "preset" },
     gradientsExpanded: false,
     history: { future: [], past: [] },
+    lastOpaqueBackground: { id: "sea", kind: "preset" },
     padding: 64,
     privacyEnabled: true,
     redactionSource: "auto",
@@ -1148,7 +1138,7 @@ function applyCaptureCommand(state, command) {
     case "retake":
       return { ...state, source: command.source, sourceRevision: state.sourceRevision + 1 };
     case "set-background":
-      return { ...state, background: command.background };
+      return setCaptureBackground(state, command.background);
     case "set-padding":
       return { ...state, padding: normalizePadding(command.padding) };
     case "set-privacy":
@@ -1165,6 +1155,11 @@ function applyCaptureCommand(state, command) {
       return { ...state, solidColor: command.color };
     case "set-tool":
       return { ...state, tool: command.tool };
+    case "set-transparent-background":
+      if (command.enabled) {
+        return setCaptureBackground(state, { kind: "transparent" });
+      }
+      return state.background.kind === "transparent" ? setCaptureBackground(state, state.lastOpaqueBackground) : state;
     case "set-zoom":
       return { ...state, zoom: clamp3(command.zoom, CAPTURE_MIN_ZOOM, CAPTURE_MAX_ZOOM) };
     case "toggle-gradients":
@@ -1172,6 +1167,12 @@ function applyCaptureCommand(state, command) {
     case "undo":
       return undoRegions(state);
   }
+}
+function setCaptureBackground(state, background) {
+  if (background.kind === "transparent") {
+    return state.background.kind === "transparent" ? state : { ...state, background };
+  }
+  return { ...state, background, lastOpaqueBackground: background };
 }
 function addRegion(state, id, rect) {
   const normalized = clampCaptureRect(rect, state.source);
@@ -1299,15 +1300,14 @@ function applyCapturePreferences(state, preferences, wallpaperDataUrl) {
     background = preferences.background;
   }
   return {
-    ...state,
-    background,
+    ...applyCaptureCommand(state, { background, kind: "set-background" }),
     padding: preferences.padding,
     privacyEnabled: preferences.privacyEnabled,
     shadow: preferences.shadow
   };
 }
 function isCapturePreferenceCommand(command) {
-  return command.kind === "set-background" || command.kind === "set-padding" || command.kind === "set-privacy" || command.kind === "set-shadow";
+  return command.kind === "set-background" || command.kind === "set-transparent-background" || command.kind === "set-padding" || command.kind === "set-privacy" || command.kind === "set-shadow";
 }
 function normalizeCapturePreferences(input) {
   const normalized = defaultCapturePreferences();
@@ -1526,6 +1526,10 @@ function inspectorTemplate(state, copy, lastBackgroundColor, wallpaperDataUrl) {
         <input class="incodex-capture-range" data-input="padding" type="range" min="0" max="160" step="4" value="${state.padding}">
       </section>
       <section class="incodex-capture-section incodex-capture-row">
+        <h2 class="incodex-capture-section-title">${copy.backgroundNone}</h2>
+        <input class="incodex-capture-switch" data-input="none" type="checkbox" aria-label="${copy.backgroundNone}" ${checked(state.background.kind === "transparent")}>
+      </section>
+      <section class="incodex-capture-section incodex-capture-row">
         <h2 class="incodex-capture-section-title">${copy.shadow}</h2>
         <input class="incodex-capture-switch" data-input="shadow" type="checkbox" aria-label="${copy.shadow}" ${checked(state.shadow)}>
       </section>
@@ -1547,7 +1551,6 @@ function solidColorTemplate(state, copy) {
   `;
 }
 function backgroundGridTemplate(state, copy, lastBackgroundColor, wallpaperDataUrl) {
-  const transparent = state.background.kind === "transparent";
   const custom = state.background.kind === "color" && !isCapturePlainColor(state.background.color);
   const wallpaper = state.background.kind === "wallpaper";
   const customIcon = `<span data-background-custom-icon ${custom ? "hidden" : ""}>${captureIcon("pipette")}</span>`;
@@ -1563,17 +1566,15 @@ function backgroundGridTemplate(state, copy, lastBackgroundColor, wallpaperDataU
         <h3 class="incodex-capture-background-section-title">${copy.backgroundWallpapers}</h3>
         <div class="incodex-capture-background-grid">
           ${presetButtonsTemplate(wallpapers, state)}
-          <button class="incodex-capture-background-option incodex-capture-wallpaper-label" data-background-wallpaper type="button" data-selected="${wallpaper}" aria-label="${copy.wallpaper}" title="${copy.wallpaper}"><img data-wallpaper-preview src="${wallpaperImage}" alt="" ${wallpaperDataUrl ? "" : "hidden"}><span data-wallpaper-placeholder ${wallpaperDataUrl ? "hidden" : ""}>${captureIcon("image-plus")}</span></button>
+          <button class="incodex-capture-background-option incodex-capture-wallpaper-label" data-background-wallpaper type="button" data-selected="${wallpaper}" aria-label="${copy.wallpaper}" title="${copy.wallpaper}"><img data-wallpaper-preview src="${wallpaperImage}" alt="" ${wallpaperDataUrl ? "" : "hidden"}><span data-wallpaper-placeholder ${wallpaperDataUrl ? "hidden" : ""}>${captureIcon("plus")}</span></button>
         </div>
         <input class="incodex-capture-wallpaper-input" data-input="wallpaper" type="file" accept="image/png,image/jpeg,image/webp">
         <button class="incodex-capture-change-wallpaper" data-action="change-wallpaper" type="button"${changeImageHidden}>${copy.changeImage}</button>
       </section>
-      <section class="incodex-capture-background-section" data-background-section="plain-color" data-active="${activeSection === "plain-color" || activeSection === "none"}" aria-label="${copy.backgroundPlainColor}">
+      <section class="incodex-capture-background-section" data-background-section="plain-color" data-active="${activeSection === "plain-color"}" aria-label="${copy.backgroundPlainColor}">
         <h3 class="incodex-capture-background-section-title">${copy.backgroundPlainColor}</h3>
         <div class="incodex-capture-background-grid incodex-capture-background-grid-plain">
-          ${plainColorButtonsTemplate(state, capturePlainColors.slice(0, 8))}
-          <button class="incodex-capture-background-option incodex-capture-checker" data-background="transparent" type="button" aria-label="${copy.backgroundNone}" title="${copy.backgroundNone}" aria-pressed="${transparent}"></button>
-          ${plainColorButtonsTemplate(state, capturePlainColors.slice(8))}
+          ${plainColorButtonsTemplate(state, capturePlainColors)}
           <button class="incodex-capture-background-option incodex-capture-color-label" data-background-custom data-color-trigger="background" data-selected="${custom}" type="button" aria-label="${copy.custom}" title="${copy.custom}" aria-haspopup="dialog" aria-expanded="false" data-state="closed" style="--capture-swatch:${lastBackgroundColor}">${customIcon}</button>
         </div>
       </section>
@@ -1681,8 +1682,9 @@ function mountCaptureWindowEditor(host, options) {
       saveCapturePreferences(preferenceStorage, state);
     }
     refreshEditor(command);
-    if (command.kind === "set-background")
-      hydrateBackground(command.background);
+    if (command.kind === "set-background" || command.kind === "set-transparent-background") {
+      hydrateBackground(state.background);
+    }
   }
   function preview(command) {
     state = applyCaptureCommand(state, command);
@@ -1967,6 +1969,12 @@ function wireInputs(root, dispatch, preview, loadWallpaper, setPrivacy) {
   root.querySelector("[data-input='shadow']")?.addEventListener("change", (event) => {
     dispatch({ kind: "set-shadow", shadow: event.currentTarget.checked });
   });
+  root.querySelector("[data-input='none']")?.addEventListener("change", (event) => {
+    dispatch({
+      enabled: event.currentTarget.checked,
+      kind: "set-transparent-background"
+    });
+  });
   const padding = root.querySelector("[data-input='padding']");
   padding?.addEventListener("input", (event) => {
     preview({
@@ -2007,9 +2015,12 @@ function syncEditorControls(root, state, copy, lastBackgroundColor, wallpaperDat
   if (paddingValue)
     paddingValue.textContent = `${state.padding}px`;
   const shadow = root.querySelector("[data-input='shadow']");
+  const none = root.querySelector("[data-input='none']");
   const privacy = root.querySelector("[data-input='privacy']");
   if (shadow)
     shadow.checked = state.shadow;
+  if (none)
+    none.checked = state.background.kind === "transparent";
   if (privacy)
     privacy.checked = state.privacyEnabled;
   syncCaptureColorPopover(root, "solid", state.solidColor);
@@ -4602,7 +4613,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 
 /**
  * [INPUT]: 依赖 capture-window.css 定义的 Codex 语义令牌与检查器底纹
- * [OUTPUT]: 为 Gradients、Wallpapers 与含透明入口的 Plain color 提供背景选择器布局和交互态
+ * [OUTPUT]: 为 Gradients、Wallpapers 与 Plain color 提供背景选择器布局和交互态
  * [POS]: capture-window 的背景选择器样式边界，与编辑器壳层及颜色弹层样式按职责分离
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -4654,12 +4665,13 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   gap: calc(var(--incodex-capture-space) * 2);
   grid-template-columns: repeat(5, minmax(0, 1fr));
   justify-items: center;
+  padding: var(--incodex-capture-space);
   width: 100%;
 }
 
 .incodex-capture-background-grid-plain {
   gap: var(--incodex-capture-space);
-  grid-template-columns: repeat(9, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .incodex-capture-background-grid-plain .incodex-capture-background-option {
@@ -4716,6 +4728,11 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 .incodex-capture-wallpaper-label {
   background: transparent;
   border-style: dashed;
+  color: var(--incodex-capture-text-secondary);
+}
+
+.incodex-capture-wallpaper-label:hover {
+  color: var(--incodex-capture-text);
 }
 
 .incodex-capture-wallpaper-label[data-selected="true"] {
@@ -4731,6 +4748,10 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 .incodex-capture-wallpaper-label [data-wallpaper-placeholder] {
   inset: 0;
   position: absolute;
+}
+
+.incodex-capture-wallpaper-label [data-wallpaper-placeholder] > svg {
+  color: inherit;
 }
 
 .incodex-capture-color-label:focus-visible,

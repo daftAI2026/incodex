@@ -78,6 +78,8 @@ export type CaptureBackground =
   | { kind: "transparent" }
   | { dataUrl: string; kind: "wallpaper" };
 
+export type CaptureOpaqueBackground = Exclude<CaptureBackground, { kind: "transparent" }>;
+
 export type CaptureRegionHistory = {
   future: CaptureRegion[][];
   past: CaptureRegion[][];
@@ -87,6 +89,7 @@ export type CaptureWindowState = {
   background: CaptureBackground;
   gradientsExpanded: boolean;
   history: CaptureRegionHistory;
+  lastOpaqueBackground: CaptureOpaqueBackground;
   padding: number;
   privacyEnabled: boolean;
   redactionSource: CaptureRedactionSource;
@@ -112,6 +115,7 @@ export type CaptureWindowCommand =
   | { kind: "set-redaction-style"; style: CaptureRedactionStyle }
   | { kind: "set-shadow"; shadow: boolean }
   | { color: string; kind: "set-solid-color" }
+  | { enabled: boolean; kind: "set-transparent-background" }
   | { kind: "set-tool"; tool: CaptureTool }
   | { kind: "set-zoom"; zoom: number }
   | { kind: "retake"; source: CaptureSource }
@@ -124,6 +128,7 @@ export function createCaptureWindowState(source: CaptureSource): CaptureWindowSt
     background: { id: "sea", kind: "preset" },
     gradientsExpanded: false,
     history: { future: [], past: [] },
+    lastOpaqueBackground: { id: "sea", kind: "preset" },
     padding: 64,
     privacyEnabled: true,
     redactionSource: "auto",
@@ -185,7 +190,7 @@ export function applyCaptureCommand(
     case "retake":
       return { ...state, source: command.source, sourceRevision: state.sourceRevision + 1 };
     case "set-background":
-      return { ...state, background: command.background };
+      return setCaptureBackground(state, command.background);
     case "set-padding":
       return { ...state, padding: normalizePadding(command.padding) };
     case "set-privacy":
@@ -202,6 +207,13 @@ export function applyCaptureCommand(
       return { ...state, solidColor: command.color };
     case "set-tool":
       return { ...state, tool: command.tool };
+    case "set-transparent-background":
+      if (command.enabled) {
+        return setCaptureBackground(state, { kind: "transparent" });
+      }
+      return state.background.kind === "transparent"
+        ? setCaptureBackground(state, state.lastOpaqueBackground)
+        : state;
     case "set-zoom":
       return { ...state, zoom: clamp(command.zoom, CAPTURE_MIN_ZOOM, CAPTURE_MAX_ZOOM) };
     case "toggle-gradients":
@@ -209,6 +221,16 @@ export function applyCaptureCommand(
     case "undo":
       return undoRegions(state);
   }
+}
+
+function setCaptureBackground(
+  state: CaptureWindowState,
+  background: CaptureBackground,
+): CaptureWindowState {
+  if (background.kind === "transparent") {
+    return state.background.kind === "transparent" ? state : { ...state, background };
+  }
+  return { ...state, background, lastOpaqueBackground: background };
 }
 
 function addRegion(

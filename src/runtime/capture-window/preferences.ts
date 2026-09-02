@@ -1,4 +1,5 @@
 import {
+  applyCaptureCommand,
   CAPTURE_MAX_PADDING,
   CAPTURE_MIN_PADDING,
   type CaptureBackground,
@@ -90,8 +91,7 @@ export function applyCapturePreferences(
     background = preferences.background;
   }
   return {
-    ...state,
-    background,
+    ...applyCaptureCommand(state, { background, kind: "set-background" }),
     padding: preferences.padding,
     privacyEnabled: preferences.privacyEnabled,
     shadow: preferences.shadow,
@@ -100,6 +100,7 @@ export function applyCapturePreferences(
 
 export function isCapturePreferenceCommand(command: CaptureWindowCommand): boolean {
   return command.kind === "set-background" ||
+    command.kind === "set-transparent-background" ||
     command.kind === "set-padding" ||
     command.kind === "set-privacy" ||
     command.kind === "set-shadow";

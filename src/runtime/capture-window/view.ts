@@ -127,6 +127,10 @@ function inspectorTemplate(
         <input class="incodex-capture-range" data-input="padding" type="range" min="0" max="160" step="4" value="${state.padding}">
       </section>
       <section class="incodex-capture-section incodex-capture-row">
+        <h2 class="incodex-capture-section-title">${copy.backgroundNone}</h2>
+        <input class="incodex-capture-switch" data-input="none" type="checkbox" aria-label="${copy.backgroundNone}" ${checked(state.background.kind === "transparent")}>
+      </section>
+      <section class="incodex-capture-section incodex-capture-row">
         <h2 class="incodex-capture-section-title">${copy.shadow}</h2>
         <input class="incodex-capture-switch" data-input="shadow" type="checkbox" aria-label="${copy.shadow}" ${checked(state.shadow)}>
       </section>
@@ -155,7 +159,6 @@ function backgroundGridTemplate(
   lastBackgroundColor: string,
   wallpaperDataUrl: string | null,
 ): string {
-  const transparent = state.background.kind === "transparent";
   const custom = state.background.kind === "color" && !isCapturePlainColor(state.background.color);
   const wallpaper = state.background.kind === "wallpaper";
   const customIcon = `<span data-background-custom-icon ${custom ? "hidden" : ""}>${captureIcon("pipette")}</span>`;
@@ -171,17 +174,15 @@ function backgroundGridTemplate(
         <h3 class="incodex-capture-background-section-title">${copy.backgroundWallpapers}</h3>
         <div class="incodex-capture-background-grid">
           ${presetButtonsTemplate(wallpapers, state)}
-          <button class="incodex-capture-background-option incodex-capture-wallpaper-label" data-background-wallpaper type="button" data-selected="${wallpaper}" aria-label="${copy.wallpaper}" title="${copy.wallpaper}"><img data-wallpaper-preview src="${wallpaperImage}" alt="" ${wallpaperDataUrl ? "" : "hidden"}><span data-wallpaper-placeholder ${wallpaperDataUrl ? "hidden" : ""}>${captureIcon("image-plus")}</span></button>
+          <button class="incodex-capture-background-option incodex-capture-wallpaper-label" data-background-wallpaper type="button" data-selected="${wallpaper}" aria-label="${copy.wallpaper}" title="${copy.wallpaper}"><img data-wallpaper-preview src="${wallpaperImage}" alt="" ${wallpaperDataUrl ? "" : "hidden"}><span data-wallpaper-placeholder ${wallpaperDataUrl ? "hidden" : ""}>${captureIcon("plus")}</span></button>
         </div>
         <input class="incodex-capture-wallpaper-input" data-input="wallpaper" type="file" accept="image/png,image/jpeg,image/webp">
         <button class="incodex-capture-change-wallpaper" data-action="change-wallpaper" type="button"${changeImageHidden}>${copy.changeImage}</button>
       </section>
-      <section class="incodex-capture-background-section" data-background-section="plain-color" data-active="${activeSection === "plain-color" || activeSection === "none"}" aria-label="${copy.backgroundPlainColor}">
+      <section class="incodex-capture-background-section" data-background-section="plain-color" data-active="${activeSection === "plain-color"}" aria-label="${copy.backgroundPlainColor}">
         <h3 class="incodex-capture-background-section-title">${copy.backgroundPlainColor}</h3>
         <div class="incodex-capture-background-grid incodex-capture-background-grid-plain">
-          ${plainColorButtonsTemplate(state, capturePlainColors.slice(0, 8))}
-          <button class="incodex-capture-background-option incodex-capture-checker" data-background="transparent" type="button" aria-label="${copy.backgroundNone}" title="${copy.backgroundNone}" aria-pressed="${transparent}"></button>
-          ${plainColorButtonsTemplate(state, capturePlainColors.slice(8))}
+          ${plainColorButtonsTemplate(state, capturePlainColors)}
           <button class="incodex-capture-background-option incodex-capture-color-label" data-background-custom data-color-trigger="background" data-selected="${custom}" type="button" aria-label="${copy.custom}" title="${copy.custom}" aria-haspopup="dialog" aria-expanded="false" data-state="closed" style="--capture-swatch:${lastBackgroundColor}">${customIcon}</button>
         </div>
       </section>

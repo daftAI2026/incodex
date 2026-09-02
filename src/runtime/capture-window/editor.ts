@@ -137,7 +137,9 @@ export function mountCaptureWindowEditor(
       saveCapturePreferences(preferenceStorage, state);
     }
     refreshEditor(command);
-    if (command.kind === "set-background") hydrateBackground(command.background);
+    if (command.kind === "set-background" || command.kind === "set-transparent-background") {
+      hydrateBackground(state.background);
+    }
   }
 
   function preview(command: CaptureWindowCommand): void {
@@ -461,6 +463,12 @@ function wireInputs(
   root.querySelector<HTMLInputElement>("[data-input='shadow']")?.addEventListener("change", (event) => {
     dispatch({ kind: "set-shadow", shadow: (event.currentTarget as HTMLInputElement).checked });
   });
+  root.querySelector<HTMLInputElement>("[data-input='none']")?.addEventListener("change", (event) => {
+    dispatch({
+      enabled: (event.currentTarget as HTMLInputElement).checked,
+      kind: "set-transparent-background",
+    });
+  });
   const padding = root.querySelector<HTMLInputElement>("[data-input='padding']");
   padding?.addEventListener("input", (event) => {
     preview({
@@ -504,8 +512,10 @@ function syncEditorControls(
   if (paddingValue) paddingValue.textContent = `${state.padding}px`;
 
   const shadow = root.querySelector<HTMLInputElement>("[data-input='shadow']");
+  const none = root.querySelector<HTMLInputElement>("[data-input='none']");
   const privacy = root.querySelector<HTMLInputElement>("[data-input='privacy']");
   if (shadow) shadow.checked = state.shadow;
+  if (none) none.checked = state.background.kind === "transparent";
   if (privacy) privacy.checked = state.privacyEnabled;
 
   syncCaptureColorPopover(root, "solid", state.solidColor);

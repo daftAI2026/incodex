@@ -8,12 +8,12 @@ export type CaptureIconName =
   | "grid-3x3"
   | "hand"
   | "image"
-  | "image-plus"
   | "maximize"
   | "move"
   | "palette"
   | "pen-line"
   | "pipette"
+  | "plus"
   | "redo"
   | "retake"
   | "scan"
@@ -45,8 +45,6 @@ const ICON_BODY: Record<CaptureIconName, string> = {
     '<path d="M18 11V6a2 2 0 0 0-4 0v5" /><path d="M14 10V4a2 2 0 0 0-4 0v7" /><path d="M10 10.5V6a2 2 0 0 0-4 0v8" /><path d="M6 14a2 2 0 1 0-4 0v2c0 4.4 3.6 8 8 8h2a8 8 0 0 0 8-8v-5a2 2 0 0 0-4 0v1" />',
   image:
     '<rect width="18" height="18" x="3" y="3" rx="2" ry="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />',
-  "image-plus":
-    '<path d="M16 5h6" /><path d="M19 2v6" /><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21" />',
   maximize:
     '<path d="M8 3H5a2 2 0 0 0-2 2v3" /><path d="M16 3h3a2 2 0 0 1 2 2v3" /><path d="M8 21H5a2 2 0 0 1-2-2v-3" /><path d="M16 21h3a2 2 0 0 0 2-2v-3" />',
   move:
@@ -57,6 +55,7 @@ const ICON_BODY: Record<CaptureIconName, string> = {
     '<path d="M13 21h8" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" /><path d="m15 5 3 3" />',
   pipette:
     '<path d="m2 22 1-1h3l9-9" /><path d="M3 21v-3l9-9" /><path d="m15 6 3.4-3.4a2.1 2.1 0 0 1 3 3L18 9" /><path d="m11 8 5 5" />',
+  plus: '<path d="M5 12h14" /><path d="M12 5v14" />',
   redo:
     '<path d="m15 14 5-5-5-5" /><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5 5.5 5.5 0 0 0 9.5 20H13" />',
   retake:

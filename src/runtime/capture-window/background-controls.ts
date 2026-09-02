@@ -26,10 +26,6 @@ export function wireCaptureBackgroundActions(
   for (const option of root.querySelectorAll<HTMLElement>("[data-background]")) {
     option.addEventListener("click", () => {
       const id = option.dataset.background;
-      if (id === "transparent") {
-        actions.dispatch({ kind: "set-background", background: { kind: "transparent" } });
-        return;
-      }
       actions.dispatch({
         kind: "set-background",
         background: { id: id as CapturePresetId, kind: "preset" },
@@ -70,9 +66,8 @@ export function syncCaptureBackgroundControls(
   gradientToggleLabels: { showLess: string; showMore: string },
 ): void {
   for (const option of root.querySelectorAll<HTMLElement>("[data-background]")) {
-    const selected = option.dataset.background === "transparent"
-      ? state.background.kind === "transparent"
-      : state.background.kind === "preset" && option.dataset.background === state.background.id;
+    const selected = state.background.kind === "preset" &&
+      option.dataset.background === state.background.id;
     option.setAttribute("aria-pressed", String(selected));
   }
   for (const option of root.querySelectorAll<HTMLElement>("[data-background-color]")) {
@@ -117,10 +112,7 @@ function syncActiveSection(
   activeSection: ReturnType<typeof captureBackgroundSection>,
 ): void {
   for (const section of root.querySelectorAll<HTMLElement>("[data-background-section]")) {
-    section.dataset.active = String(
-      section.dataset.backgroundSection === activeSection ||
-        (activeSection === "none" && section.dataset.backgroundSection === "plain-color"),
-    );
+    section.dataset.active = String(section.dataset.backgroundSection === activeSection);
   }
 }
 
