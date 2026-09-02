@@ -1028,6 +1028,13 @@ function createCaptureBackgroundImageStore(loadImage = loadCaptureImage) {
 }
 
 // src/runtime/capture-window/geometry.ts
+function captureContainScale(content, bounds) {
+  const contentWidth = Math.max(1, content.width);
+  const contentHeight = Math.max(1, content.height);
+  const boundsWidth = Math.max(1, bounds.width);
+  const boundsHeight = Math.max(1, bounds.height);
+  return Math.min(boundsWidth / contentWidth, boundsHeight / contentHeight);
+}
 function anchoredPanForZoom(pan, pointer, origin, previousZoom, nextZoom) {
   const safePreviousZoom = previousZoom > 0 ? previousZoom : 1;
   const sourceX = (pointer.x - origin.x - pan.x) / safePreviousZoom;
@@ -1140,7 +1147,7 @@ function applyCaptureCommand(state, command) {
     case "set-background":
       return setCaptureBackground(state, command.background);
     case "set-padding":
-      return { ...state, padding: normalizePadding(command.padding) };
+      return { ...state, padding: normalizePadding(command.padding), zoom: 1 };
     case "set-privacy":
       return { ...state, privacyEnabled: command.enabled };
     case "set-redaction-source":
@@ -1660,6 +1667,10 @@ function mountCaptureWindowEditor(host, options) {
     const frame = root.querySelector(".incodex-capture-canvas-frame");
     if (!canvas)
       return;
+    if (state.zoom !== 1 || panX !== 0 || panY !== 0) {
+      resetView();
+      return;
+    }
     window.requestAnimationFrame(() => fitCanvas(root, canvas, frame, state.zoom, panX, panY));
   });
   resizeObserver.observe(root);
@@ -1676,8 +1687,15 @@ function mountCaptureWindowEditor(host, options) {
     },
     readColor: (target) => target === "background" ? lastBackgroundColor : state.solidColor
   });
-  function dispatch(command) {
+  function applyEditorCommand(command) {
+    if (command.kind === "set-padding") {
+      panX = 0;
+      panY = 0;
+    }
     state = applyCaptureCommand(state, command);
+  }
+  function dispatch(command) {
+    applyEditorCommand(command);
     if (preferenceStorage && isCapturePreferenceCommand(command)) {
       saveCapturePreferences(preferenceStorage, state);
     }
@@ -1687,7 +1705,7 @@ function mountCaptureWindowEditor(host, options) {
     }
   }
   function preview(command) {
-    state = applyCaptureCommand(state, command);
+    applyEditorCommand(command);
     refreshEditor(command);
   }
   function dispatchRegion(command) {
@@ -2167,9 +2185,10 @@ function fitCanvas(root, canvas, frame, zoom, panX, panY) {
   const stage = root.querySelector(".incodex-capture-stage");
   if (!stage || !frame)
     return;
-  const availableWidth = Math.max(1, stage.clientWidth - 40);
-  const availableHeight = Math.max(1, stage.clientHeight - 40);
-  const fit = Math.min(availableWidth / canvas.width, availableHeight / canvas.height, 1);
+  const style = window.getComputedStyle(stage);
+  const availableWidth = Math.max(1, stage.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight));
+  const availableHeight = Math.max(1, stage.clientHeight - Number.parseFloat(style.paddingTop) - Number.parseFloat(style.paddingBottom));
+  const fit = captureContainScale({ height: canvas.height, width: canvas.width }, { height: availableHeight, width: availableWidth });
   frame.style.width = `${Math.round(canvas.width * fit)}px`;
   frame.style.height = `${Math.round(canvas.height * fit)}px`;
   frame.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;

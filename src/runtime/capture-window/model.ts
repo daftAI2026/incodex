@@ -192,7 +192,7 @@ export function applyCaptureCommand(
     case "set-background":
       return setCaptureBackground(state, command.background);
     case "set-padding":
-      return { ...state, padding: normalizePadding(command.padding) };
+      return { ...state, padding: normalizePadding(command.padding), zoom: 1 };
     case "set-privacy":
       return { ...state, privacyEnabled: command.enabled };
     case "set-redaction-source":

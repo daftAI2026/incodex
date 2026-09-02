@@ -11,6 +11,14 @@ export type CapturePoint = {
   y: number;
 };
 
+export function captureContainScale(content: CaptureSize, bounds: CaptureSize): number {
+  const contentWidth = Math.max(1, content.width);
+  const contentHeight = Math.max(1, content.height);
+  const boundsWidth = Math.max(1, bounds.width);
+  const boundsHeight = Math.max(1, bounds.height);
+  return Math.min(boundsWidth / contentWidth, boundsHeight / contentHeight);
+}
+
 export function anchoredPanForZoom(
   pan: CapturePoint,
   pointer: CapturePoint,

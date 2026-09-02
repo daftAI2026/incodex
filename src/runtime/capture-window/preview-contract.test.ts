@@ -223,7 +223,7 @@ describe("capture window preview", () => {
     expect(editor).toContain("function refreshToolbar");
     expect(editor).toContain("readState: () => CaptureWindowState");
     expect(editor).toContain(
-      "state = applyCaptureCommand(state, command);\n    refreshEditor(command);",
+      "applyEditorCommand(command);\n    refreshEditor(command);",
     );
     expect(editor).not.toContain(
       "state = applyCaptureCommand(state, command);\n    render();",

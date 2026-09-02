@@ -10,7 +10,11 @@ import {
   type CaptureColorTarget,
   wireCaptureColorPopovers,
 } from "./color-popover.ts";
-import { anchoredPanForZoom, viewportRectToSource } from "./geometry.ts";
+import {
+  anchoredPanForZoom,
+  captureContainScale,
+  viewportRectToSource,
+} from "./geometry.ts";
 import {
   applyCaptureCommand,
   CAPTURE_MAX_ZOOM,
@@ -114,6 +118,10 @@ export function mountCaptureWindowEditor(
     const canvas = root.querySelector<HTMLCanvasElement>(".incodex-capture-canvas");
     const frame = root.querySelector<HTMLElement>(".incodex-capture-canvas-frame");
     if (!canvas) return;
+    if (state.zoom !== 1 || panX !== 0 || panY !== 0) {
+      resetView();
+      return;
+    }
     window.requestAnimationFrame(() => fitCanvas(root, canvas, frame, state.zoom, panX, panY));
   });
   resizeObserver.observe(root);
@@ -131,8 +139,16 @@ export function mountCaptureWindowEditor(
     readColor: (target) => target === "background" ? lastBackgroundColor : state.solidColor,
   });
 
-  function dispatch(command: CaptureWindowCommand): void {
+  function applyEditorCommand(command: CaptureWindowCommand): void {
+    if (command.kind === "set-padding") {
+      panX = 0;
+      panY = 0;
+    }
     state = applyCaptureCommand(state, command);
+  }
+
+  function dispatch(command: CaptureWindowCommand): void {
+    applyEditorCommand(command);
     if (preferenceStorage && isCapturePreferenceCommand(command)) {
       saveCapturePreferences(preferenceStorage, state);
     }
@@ -143,7 +159,7 @@ export function mountCaptureWindowEditor(
   }
 
   function preview(command: CaptureWindowCommand): void {
-    state = applyCaptureCommand(state, command);
+    applyEditorCommand(command);
     refreshEditor(command);
   }
 
@@ -711,9 +727,19 @@ function fitCanvas(
 ): void {
   const stage = root.querySelector<HTMLElement>(".incodex-capture-stage");
   if (!stage || !frame) return;
-  const availableWidth = Math.max(1, stage.clientWidth - 40);
-  const availableHeight = Math.max(1, stage.clientHeight - 40);
-  const fit = Math.min(availableWidth / canvas.width, availableHeight / canvas.height, 1);
+  const style = window.getComputedStyle(stage);
+  const availableWidth = Math.max(
+    1,
+    stage.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight),
+  );
+  const availableHeight = Math.max(
+    1,
+    stage.clientHeight - Number.parseFloat(style.paddingTop) - Number.parseFloat(style.paddingBottom),
+  );
+  const fit = captureContainScale(
+    { height: canvas.height, width: canvas.width },
+    { height: availableHeight, width: availableWidth },
+  );
   frame.style.width = `${Math.round(canvas.width * fit)}px`;
   frame.style.height = `${Math.round(canvas.height * fit)}px`;
   frame.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
