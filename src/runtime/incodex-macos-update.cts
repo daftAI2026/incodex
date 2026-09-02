@@ -16,7 +16,7 @@ const REGISTRATION_SCHEMA_VERSION = 2;
 const HELPER_FILE_NAME = "incodex";
 const COORDINATOR_FILE_NAME = "incodex-update-coordinator";
 const INTERPOSER_FILE_NAME = "libincodex-sparkle-interpose.dylib";
-const READY_TIMEOUT_MS = 250;
+const READY_TIMEOUT_MS = 1_000;
 const READY_POLL_MS = 10;
 const WAIT_CELL = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
 
