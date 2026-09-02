@@ -275,7 +275,7 @@ describe("Electron session cleanup ownership", () => {
     expect(win.showCalls).toBe(0);
 
     resolveLease({ sessionId: "test-session", token: "owner-token" });
-    await runtime.startupGate;
+    await Bun.sleep(0);
 
     expect(win.showCalls).toBe(1);
     expect(win.isVisible()).toBe(true);

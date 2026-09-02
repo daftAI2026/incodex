@@ -948,7 +948,9 @@ async function attachElectron() {
         ready();
     else
         void electron.app.whenReady().then(ready);
-    await ownerStartup;
+    void ownerStartup.catch((error) => {
+        logLaunch("owner-startup-failed", { error: String(error) });
+    });
 }
 function startRuntime() {
     if (macosUpdate && !isIncognito()) {

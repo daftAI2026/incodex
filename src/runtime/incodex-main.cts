@@ -945,7 +945,9 @@ async function attachElectron() {
   }
   if (electron.app.isReady()) ready();
   else void electron.app.whenReady().then(ready);
-  await ownerStartup;
+  void ownerStartup.catch((error) => {
+    logLaunch("owner-startup-failed", { error: String(error) });
+  });
 }
 
 function startRuntime() {
