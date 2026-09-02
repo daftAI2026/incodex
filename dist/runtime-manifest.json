@@ -1,6 +1,6 @@
 {
   "runtimeVersion": "0.5.0",
-  "sourceCommit": "57ee0c3fba1392cbfbf583370a0ddb3eb4d7b963",
+  "sourceCommit": "",
   "files": {
     "incodex-loader.cjs": "7090d747b8cf21062d4267a18eff6d924588d7b11035baf9d7420f440619b34b",
     "incodex-main.cjs": "4ed0c6ad8d6330f1b95991b2d40718cf45ca030cc40bffdd5eadcbd7d824f8a0",
@@ -14,7 +14,7 @@
     "incodex-window-kind.cjs": "8d5f752ef6a34bd0927cd39010d68b3e7b7545a77f947683d4ce4a48b98ce648",
     "incodex-window-lifecycle.cjs": "f84462170c00a7087025a498690b8d2efe1e55a24d2163c8a230442a55bb5a36",
     "incodex-runtime-load.cjs": "153ea5d8d2eb68551936da7f997fa46f67882f35c62357391c30da6547251d84",
-    "incodex-codex-mode.cjs": "94e65a76454c6c3728d0139014f3c531ca5bfb80faba20ffc9a5937277bfec0c",
+    "incodex-codex-mode.cjs": "ba91f3126ad56c463e1c10ab0e0c7b9eccf2653527f2bdc39747d53808e64ead",
     "incodex-macos-update.cjs": "e7ca7caf06fe1780bbc5b7b987d6ce4a35acee366d539103325aede2f7c2cfce",
     "incodex-dock-menu.cjs": "6030ffba786c489555f739789ea35735eb4c393d133413a526497aef7c2537a5"
   }
