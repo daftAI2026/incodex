@@ -499,11 +499,26 @@ var capturePresets = [
   { colors: ["#eef2f1", "#aab9b6", "#74817e"], id: "mist", section: "wallpapers" },
   { colors: ["#d8d7b6", "#779175", "#3f5c59"], id: "highland", section: "wallpapers" },
   { colors: ["#b8e8e8", "#4d9bb1", "#24526f"], id: "ocean", section: "wallpapers" },
-  { colors: ["#f0f1f3", "#c6c9ce", "#90959d"], id: "silver", section: "gradients" },
-  { colors: ["#d6ecff", "#8ab8f7", "#3268a8"], id: "azure", section: "gradients" },
-  { colors: ["#d8dcff", "#7a78cf", "#38346e"], id: "indigo", section: "gradients" },
-  { colors: ["#ffcf98", "#ea785b", "#722f45"], id: "ember", section: "gradients" },
-  { colors: ["#57606f", "#2d3440", "#15191f"], id: "graphite", section: "gradients" }
+  { colors: ["#ff8db8", "#d64ac7", "#6540c8"], direction: "bottom-right", id: "rose", section: "gradients" },
+  { colors: ["#243f96", "#784fd2", "#ef85c0"], direction: "bottom-right", id: "ultraviolet", section: "gradients" },
+  { colors: ["#08275f", "#087fc4", "#26d7df"], direction: "bottom-right", id: "lagoon", section: "gradients" },
+  { colors: ["#54bda9", "#b9e6c3", "#fff0c2"], direction: "bottom-right", id: "mint", section: "gradients" },
+  { colors: ["#ffca72", "#f56f73", "#bd3c7d"], direction: "bottom-right", id: "sunset", section: "gradients" },
+  { colors: ["#35c6dc", "#a276e8", "#cb45dd"], direction: "top-right", id: "silver", section: "gradients" },
+  { colors: ["#c8d0d5", "#f2c7cf", "#b8c6c3"], direction: "bottom", id: "azure", section: "gradients" },
+  { colors: ["#8ebdb8", "#e9c4a4", "#c98574"], direction: "bottom-right", id: "indigo", section: "gradients" },
+  { colors: ["#7256d8", "#a77ce8", "#5cc8e2"], direction: "top-right", id: "ember", section: "gradients" },
+  { colors: ["#29113f", "#43145d", "#120a26"], direction: "bottom-right", id: "graphite", section: "gradients" },
+  { colors: ["#17436b", "#4e83a5", "#dfa85d"], direction: "bottom", id: "prism", section: "gradients" },
+  { colors: ["#5e91cc", "#a68bc2", "#e9a3ad"], direction: "bottom-right", id: "blossom", section: "gradients" },
+  { colors: ["#5537c2", "#d176d6", "#47b9d0"], direction: "top-right", id: "coral", section: "gradients" },
+  { colors: ["#5b1223", "#a82439", "#d5464a"], direction: "right", id: "aurora", section: "gradients" },
+  { colors: ["#244b9b", "#501a54", "#b51e36"], direction: "bottom-right", id: "dusk", section: "gradients" },
+  { colors: ["#b9a1ee", "#957cbd", "#e6a1c0"], direction: "bottom-right", id: "horizon", section: "gradients" },
+  { colors: ["#ff7c25", "#e73a43", "#ffe08b"], direction: "bottom-right", id: "twilight", section: "gradients" },
+  { colors: ["#6c39bb", "#f05f7a", "#ffbc55"], direction: "bottom-right", id: "flare", section: "gradients" },
+  { colors: ["#f04a2f", "#f56d62", "#5d1b6e"], direction: "bottom-right", id: "spectrum", section: "gradients" },
+  { colors: ["#3156a4", "#6a3592", "#c74783"], direction: "bottom-right", id: "nocturne", section: "gradients" }
 ];
 var capturePlainColors = [
   "#121212",
@@ -557,7 +572,10 @@ function configureCapturePresetAssets(assets) {
   embeddedCapturePresetAssets = { ...assets };
 }
 function capturePresetColors(presetId) {
-  return capturePresets.find((preset) => preset.id === presetId)?.colors ?? capturePresets[9].colors;
+  return capturePresets.find((preset) => preset.id === presetId)?.colors ?? capturePresets.find((preset) => preset.id === "graphite").colors;
+}
+function capturePresetDirection(presetId) {
+  return capturePresets.find((preset) => preset.id === presetId)?.direction ?? "bottom-right";
 }
 function capturePresetAssetUrl(presetId) {
   const preset = capturePresets.find((candidate) => candidate.id === presetId);
@@ -568,7 +586,8 @@ function capturePresetAssetUrl(presetId) {
 function capturePresetSwatch(preset) {
   if (preset.section === "gradients") {
     const [start, middle, end] = preset.colors;
-    return `linear-gradient(135deg, ${start} 0%, ${middle} 52%, ${end} 100%)`;
+    const direction = preset.direction?.replace("-", " ") ?? "bottom right";
+    return `linear-gradient(to ${direction}, ${start} 0%, ${middle} 52%, ${end} 100%)`;
   }
   return `url('${capturePresetAssetUrl(preset.id)}') center / cover no-repeat`;
 }
@@ -609,8 +628,9 @@ function wireCaptureBackgroundActions(root, actions) {
   });
   wallpaper?.addEventListener("dblclick", actions.pickWallpaper);
   root.querySelector("[data-action='change-wallpaper']")?.addEventListener("click", actions.pickWallpaper);
+  root.querySelector("[data-action='toggle-gradients']")?.addEventListener("click", () => actions.dispatch({ kind: "toggle-gradients" }));
 }
-function syncCaptureBackgroundControls(root, state, lastBackgroundColor, wallpaperDataUrl) {
+function syncCaptureBackgroundControls(root, state, lastBackgroundColor, wallpaperDataUrl, gradientToggleLabels) {
   for (const option of root.querySelectorAll("[data-background]")) {
     const selected = option.dataset.background === "transparent" ? state.background.kind === "transparent" : state.background.kind === "preset" && option.dataset.background === state.background.id;
     option.setAttribute("aria-pressed", String(selected));
@@ -628,6 +648,20 @@ function syncCaptureBackgroundControls(root, state, lastBackgroundColor, wallpap
   syncActiveSection(root, captureBackgroundSection(state.background));
   syncCaptureColorPopover(root, "background", lastBackgroundColor);
   syncWallpaperControls(root, state, wallpaperDataUrl);
+  syncGradientCatalog(root, state, gradientToggleLabels);
+}
+function syncGradientCatalog(root, state, labels) {
+  const section = root.querySelector("[data-background-section='gradients']");
+  if (section)
+    section.dataset.expanded = String(state.gradientsExpanded);
+  for (const option of root.querySelectorAll("[data-gradient-overflow]")) {
+    option.hidden = !state.gradientsExpanded;
+  }
+  const toggle = root.querySelector("[data-action='toggle-gradients']");
+  if (!toggle)
+    return;
+  toggle.setAttribute("aria-expanded", String(state.gradientsExpanded));
+  toggle.textContent = state.gradientsExpanded ? labels.showLess : labels.showMore;
 }
 function syncActiveSection(root, activeSection) {
   for (const section of root.querySelectorAll("[data-background-section]")) {
@@ -657,6 +691,8 @@ var ENGLISH = {
   backgroundGradients: "Gradients",
   backgroundNone: "None",
   backgroundPlainColor: "Plain color",
+  backgroundShowLess: "Show less",
+  backgroundShowMore: "Show more",
   backgroundWallpapers: "Wallpapers",
   blur: "Blur",
   changeImage: "Change image",
@@ -706,6 +742,8 @@ var CHINESE = {
   backgroundGradients: "渐变",
   backgroundNone: "无",
   backgroundPlainColor: "纯色",
+  backgroundShowLess: "收起",
+  backgroundShowMore: "显示更多",
   backgroundWallpapers: "壁纸",
   blur: "模糊",
   changeImage: "更换图片",
@@ -822,7 +860,7 @@ function drawBackground(context, background, size, backgroundImage) {
 }
 function drawPreset(context, presetId, size) {
   const colors = capturePresetColors(presetId);
-  const gradient = context.createLinearGradient(0, 0, size.width, size.height);
+  const gradient = context.createLinearGradient(...captureGradientVector(capturePresetDirection(presetId), size));
   gradient.addColorStop(0, colors[0]);
   gradient.addColorStop(0.52, colors[1]);
   gradient.addColorStop(1, colors[2]);
@@ -833,6 +871,18 @@ function drawPreset(context, presetId, size) {
   glow.addColorStop(1, "rgba(255,255,255,0)");
   context.fillStyle = glow;
   context.fillRect(0, 0, size.width, size.height);
+}
+function captureGradientVector(direction, size) {
+  switch (direction) {
+    case "bottom":
+      return [size.width / 2, 0, size.width / 2, size.height];
+    case "right":
+      return [0, size.height / 2, size.width, size.height / 2];
+    case "top-right":
+      return [0, size.height, size.width, 0];
+    case "bottom-right":
+      return [0, 0, size.width, size.height];
+  }
 }
 function drawCoverImage(context, image, size) {
   const dimensions = sourceDimensions(image);
@@ -1046,6 +1096,7 @@ var CAPTURE_PADDING_STEP = 4;
 function createCaptureWindowState(source) {
   return {
     background: { id: "sea", kind: "preset" },
+    gradientsExpanded: false,
     history: { future: [], past: [] },
     padding: 64,
     privacyEnabled: true,
@@ -1116,6 +1167,8 @@ function applyCaptureCommand(state, command) {
       return { ...state, tool: command.tool };
     case "set-zoom":
       return { ...state, zoom: clamp3(command.zoom, CAPTURE_MIN_ZOOM, CAPTURE_MAX_ZOOM) };
+    case "toggle-gradients":
+      return { ...state, gradientsExpanded: !state.gradientsExpanded };
     case "undo":
       return undoRegions(state);
   }
@@ -1505,7 +1558,7 @@ function backgroundGridTemplate(state, copy, lastBackgroundColor, wallpaperDataU
   const activeSection = captureBackgroundSection(state.background);
   return `
     <div class="incodex-capture-background-sections">
-      ${presetSectionTemplate(gradients, copy.backgroundGradients, state, activeSection)}
+      ${presetSectionTemplate(gradients, copy.backgroundGradients, state, activeSection, copy)}
       <section class="incodex-capture-background-section" data-background-section="wallpapers" data-active="${activeSection === "wallpapers"}" aria-label="${copy.backgroundWallpapers}">
         <h3 class="incodex-capture-background-section-title">${copy.backgroundWallpapers}</h3>
         <div class="incodex-capture-background-grid">
@@ -1533,19 +1586,25 @@ function plainColorButtonsTemplate(state, colors) {
     return `<button class="incodex-capture-background-option" data-background-color="${color}" type="button" aria-label="${color}" title="${color}" aria-pressed="${selected}" style="--capture-swatch:${color}"></button>`;
   }).join("");
 }
-function presetSectionTemplate(section, label, state, activeSection) {
+function presetSectionTemplate(section, label, state, activeSection, copy) {
+  const collapsible = section.id === "gradients" && copy;
+  const heading = collapsible ? `<div class="incodex-capture-background-section-heading">
+        <h3 class="incodex-capture-background-section-title">${label}</h3>
+        <button class="incodex-capture-background-expand" data-action="toggle-gradients" type="button" aria-expanded="${state.gradientsExpanded}">${state.gradientsExpanded ? copy.backgroundShowLess : copy.backgroundShowMore}</button>
+      </div>` : `<h3 class="incodex-capture-background-section-title">${label}</h3>`;
   return `
-    <section class="incodex-capture-background-section" data-background-section="${section.id}" data-active="${activeSection === section.id}" aria-label="${label}">
-      <h3 class="incodex-capture-background-section-title">${label}</h3>
+    <section class="incodex-capture-background-section" data-background-section="${section.id}" data-active="${activeSection === section.id}" data-expanded="${section.id === "gradients" && state.gradientsExpanded}" aria-label="${label}">
+      ${heading}
       <div class="incodex-capture-background-grid">${presetButtonsTemplate(section, state)}</div>
     </section>
   `;
 }
 function presetButtonsTemplate(section, state) {
-  return section.presets.map((preset) => {
+  return section.presets.map((preset, index) => {
     const { id } = preset;
     const selected = state.background.kind === "preset" && state.background.id === id;
-    return `<button class="incodex-capture-background-option" data-background="${id}" type="button" aria-label="${id}" title="${id}" aria-pressed="${selected}" style="--capture-swatch:${capturePresetSwatch(preset)}"></button>`;
+    const overflow = section.id === "gradients" && index >= 5;
+    return `<button class="incodex-capture-background-option" data-background="${id}"${overflow ? " data-gradient-overflow" : ""} type="button" aria-label="${id}" title="${id}" aria-pressed="${selected}" style="--capture-swatch:${capturePresetSwatch(preset)}"${overflow && !state.gradientsExpanded ? " hidden" : ""}></button>`;
   }).join("");
 }
 function footerTemplate(copy) {
@@ -1680,7 +1739,7 @@ function mountCaptureWindowEditor(host, options) {
     if (command.kind === "set-tool" || command.kind === "set-redaction-source" || command.kind === "set-redaction-style") {
       refreshToolbar();
     }
-    syncEditorControls(root, state, lastBackgroundColor, lastWallpaperDataUrl);
+    syncEditorControls(root, state, copy, lastBackgroundColor, lastWallpaperDataUrl);
     renderCanvas();
     updateHistoryControls(root, state);
   }
@@ -1927,7 +1986,7 @@ function wireInputs(root, dispatch, preview, loadWallpaper, setPrivacy) {
       loadWallpaper(file);
   });
 }
-function syncEditorControls(root, state, lastBackgroundColor, wallpaperDataUrl) {
+function syncEditorControls(root, state, copy, lastBackgroundColor, wallpaperDataUrl) {
   const zoom = root.querySelector(".incodex-capture-zoom-reset");
   if (zoom)
     zoom.textContent = `${Math.round(state.zoom * 100)}%`;
@@ -1937,7 +1996,10 @@ function syncEditorControls(root, state, lastBackgroundColor, wallpaperDataUrl) 
     zoomOut.disabled = state.zoom <= CAPTURE_MIN_ZOOM;
   if (zoomIn)
     zoomIn.disabled = state.zoom >= CAPTURE_MAX_ZOOM;
-  syncCaptureBackgroundControls(root, state, lastBackgroundColor, wallpaperDataUrl);
+  syncCaptureBackgroundControls(root, state, lastBackgroundColor, wallpaperDataUrl, {
+    showLess: copy.backgroundShowLess,
+    showMore: copy.backgroundShowMore
+  });
   const padding = root.querySelector("[data-input='padding']");
   const paddingValue = root.querySelector("[data-value='padding']");
   if (padding)
@@ -4561,6 +4623,30 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   font-weight: var(--font-weight-medium, 500);
   line-height: calc(var(--incodex-capture-space) * 4);
   margin: 0 0 calc(var(--incodex-capture-space) * 2);
+}
+
+.incodex-capture-background-section-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: calc(var(--incodex-capture-space) * 2);
+}
+
+.incodex-capture-background-section-heading .incodex-capture-background-section-title {
+  margin-bottom: 0;
+}
+
+.incodex-capture-background-expand {
+  background: none;
+  border: 0;
+  color: var(--incodex-capture-text-secondary);
+  font: inherit;
+  font-size: var(--incodex-capture-font-xs);
+  padding: 0;
+}
+
+.incodex-capture-background-expand:hover {
+  color: var(--incodex-capture-primary-text);
 }
 
 .incodex-capture-background-grid {

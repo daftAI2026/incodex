@@ -55,7 +55,22 @@ export type CapturePresetId =
   | "azure"
   | "indigo"
   | "ember"
-  | "graphite";
+  | "graphite"
+  | "rose"
+  | "ultraviolet"
+  | "lagoon"
+  | "mint"
+  | "sunset"
+  | "prism"
+  | "blossom"
+  | "coral"
+  | "aurora"
+  | "dusk"
+  | "horizon"
+  | "twilight"
+  | "flare"
+  | "spectrum"
+  | "nocturne";
 
 export type CaptureBackground =
   | { id: CapturePresetId; kind: "preset" }
@@ -70,6 +85,7 @@ export type CaptureRegionHistory = {
 
 export type CaptureWindowState = {
   background: CaptureBackground;
+  gradientsExpanded: boolean;
   history: CaptureRegionHistory;
   padding: number;
   privacyEnabled: boolean;
@@ -100,11 +116,13 @@ export type CaptureWindowCommand =
   | { kind: "set-zoom"; zoom: number }
   | { kind: "retake"; source: CaptureSource }
   | { kind: "redo" }
+  | { kind: "toggle-gradients" }
   | { kind: "undo" };
 
 export function createCaptureWindowState(source: CaptureSource): CaptureWindowState {
   return {
     background: { id: "sea", kind: "preset" },
+    gradientsExpanded: false,
     history: { future: [], past: [] },
     padding: 64,
     privacyEnabled: true,
@@ -186,6 +204,8 @@ export function applyCaptureCommand(
       return { ...state, tool: command.tool };
     case "set-zoom":
       return { ...state, zoom: clamp(command.zoom, CAPTURE_MIN_ZOOM, CAPTURE_MAX_ZOOM) };
+    case "toggle-gradients":
+      return { ...state, gradientsExpanded: !state.gradientsExpanded };
     case "undo":
       return undoRegions(state);
   }

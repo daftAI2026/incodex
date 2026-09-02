@@ -134,8 +134,8 @@ describe("capture background presets", () => {
   test("generates gradients while keeping only wallpapers as raster assets", () => {
     expect(captureRasterPresetIds).toEqual(["sea", "canyon", "mist", "highland", "ocean"]);
     expect(capturePresetAssetUrl("silver")).toBeNull();
-    expect(capturePresetSwatch(capturePresets.find(({ id }) => id === "silver")!)).toBe(
-      "linear-gradient(to bottom right, #f0f1f3 0%, #c6c9ce 52%, #90959d 100%)",
+    expect(capturePresetSwatch(capturePresets.find(({ id }) => id === "rose")!)).toBe(
+      "linear-gradient(to bottom right, #ff8db8 0%, #d64ac7 52%, #6540c8 100%)",
     );
     expect(capturePresetSwatch(capturePresets.find(({ id }) => id === "prism")!)).toStartWith(
       "linear-gradient(to bottom,",

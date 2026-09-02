@@ -23,6 +23,30 @@
   margin: 0 0 calc(var(--incodex-capture-space) * 2);
 }
 
+.incodex-capture-background-section-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: calc(var(--incodex-capture-space) * 2);
+}
+
+.incodex-capture-background-section-heading .incodex-capture-background-section-title {
+  margin-bottom: 0;
+}
+
+.incodex-capture-background-expand {
+  background: none;
+  border: 0;
+  color: var(--incodex-capture-text-secondary);
+  font: inherit;
+  font-size: var(--incodex-capture-font-xs);
+  padding: 0;
+}
+
+.incodex-capture-background-expand:hover {
+  color: var(--incodex-capture-primary-text);
+}
+
 .incodex-capture-background-grid {
   display: grid;
   gap: calc(var(--incodex-capture-space) * 2);

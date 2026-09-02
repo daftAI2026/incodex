@@ -9,6 +9,8 @@ export type CaptureWindowCopy = {
   backgroundGradients: string;
   backgroundNone: string;
   backgroundPlainColor: string;
+  backgroundShowLess: string;
+  backgroundShowMore: string;
   backgroundWallpapers: string;
   blur: string;
   changeImage: string;
@@ -59,6 +61,8 @@ const ENGLISH: CaptureWindowCopy = {
   backgroundGradients: "Gradients",
   backgroundNone: "None",
   backgroundPlainColor: "Plain color",
+  backgroundShowLess: "Show less",
+  backgroundShowMore: "Show more",
   backgroundWallpapers: "Wallpapers",
   blur: "Blur",
   changeImage: "Change image",
@@ -109,6 +113,8 @@ const CHINESE: CaptureWindowCopy = {
   backgroundGradients: "渐变",
   backgroundNone: "无",
   backgroundPlainColor: "纯色",
+  backgroundShowLess: "收起",
+  backgroundShowMore: "显示更多",
   backgroundWallpapers: "壁纸",
   blur: "模糊",
   changeImage: "更换图片",

@@ -7,7 +7,11 @@ import type {
   CaptureSource,
   CaptureWindowState,
 } from "./model.ts";
-import { capturePresetColors } from "./presets.ts";
+import {
+  type CaptureGradientDirection,
+  capturePresetColors,
+  capturePresetDirection,
+} from "./presets.ts";
 
 const CAPTURE_WINDOW_UNDERLAY_COLOR = "#f4f4f4";
 
@@ -167,7 +171,9 @@ function drawPreset(
   size: CaptureSize,
 ): void {
   const colors = capturePresetColors(presetId);
-  const gradient = context.createLinearGradient(0, 0, size.width, size.height);
+  const gradient = context.createLinearGradient(
+    ...captureGradientVector(capturePresetDirection(presetId), size),
+  );
   gradient.addColorStop(0, colors[0]);
   gradient.addColorStop(0.52, colors[1]);
   gradient.addColorStop(1, colors[2]);
@@ -186,6 +192,22 @@ function drawPreset(
   glow.addColorStop(1, "rgba(255,255,255,0)");
   context.fillStyle = glow;
   context.fillRect(0, 0, size.width, size.height);
+}
+
+export function captureGradientVector(
+  direction: CaptureGradientDirection,
+  size: CaptureSize,
+): [number, number, number, number] {
+  switch (direction) {
+    case "bottom":
+      return [size.width / 2, 0, size.width / 2, size.height];
+    case "right":
+      return [0, size.height / 2, size.width, size.height / 2];
+    case "top-right":
+      return [0, size.height, size.width, 0];
+    case "bottom-right":
+      return [0, 0, size.width, size.height];
+  }
 }
 
 function drawCoverImage(

@@ -2,7 +2,7 @@ import {
   syncCaptureBackgroundControls,
   wireCaptureBackgroundActions,
 } from "./background-controls.ts";
-import { captureWindowCopy } from "./copy.ts";
+import { captureWindowCopy, type CaptureWindowCopy } from "./copy.ts";
 import { capturePhysicalPadding, renderCaptureToCanvas } from "./compositor.ts";
 import { createCaptureBackgroundImageStore } from "./backgrounds.ts";
 import {
@@ -205,7 +205,7 @@ export function mountCaptureWindowEditor(
     ) {
       refreshToolbar();
     }
-    syncEditorControls(root, state, lastBackgroundColor, lastWallpaperDataUrl);
+    syncEditorControls(root, state, copy, lastBackgroundColor, lastWallpaperDataUrl);
     renderCanvas();
     updateHistoryControls(root, state);
   }
@@ -483,6 +483,7 @@ function wireInputs(
 function syncEditorControls(
   root: HTMLElement,
   state: CaptureWindowState,
+  copy: CaptureWindowCopy,
   lastBackgroundColor: string,
   wallpaperDataUrl: string | null,
 ): void {
@@ -492,7 +493,10 @@ function syncEditorControls(
   const zoomIn = root.querySelector<HTMLButtonElement>("[data-action='zoom-in']");
   if (zoomOut) zoomOut.disabled = state.zoom <= CAPTURE_MIN_ZOOM;
   if (zoomIn) zoomIn.disabled = state.zoom >= CAPTURE_MAX_ZOOM;
-  syncCaptureBackgroundControls(root, state, lastBackgroundColor, wallpaperDataUrl);
+  syncCaptureBackgroundControls(root, state, lastBackgroundColor, wallpaperDataUrl, {
+    showLess: copy.backgroundShowLess,
+    showMore: copy.backgroundShowMore,
+  });
 
   const padding = root.querySelector<HTMLInputElement>("[data-input='padding']");
   const paddingValue = root.querySelector<HTMLElement>("[data-value='padding']");

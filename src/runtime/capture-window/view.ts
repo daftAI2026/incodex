@@ -166,7 +166,7 @@ function backgroundGridTemplate(
   const activeSection = captureBackgroundSection(state.background);
   return `
     <div class="incodex-capture-background-sections">
-      ${presetSectionTemplate(gradients, copy.backgroundGradients, state, activeSection)}
+      ${presetSectionTemplate(gradients, copy.backgroundGradients, state, activeSection, copy)}
       <section class="incodex-capture-background-section" data-background-section="wallpapers" data-active="${activeSection === "wallpapers"}" aria-label="${copy.backgroundWallpapers}">
         <h3 class="incodex-capture-background-section-title">${copy.backgroundWallpapers}</h3>
         <div class="incodex-capture-background-grid">
@@ -205,10 +205,18 @@ function presetSectionTemplate(
   label: string,
   state: CaptureWindowState,
   activeSection: ReturnType<typeof captureBackgroundSection>,
+  copy?: Pick<CaptureWindowCopy, "backgroundShowLess" | "backgroundShowMore">,
 ): string {
+  const collapsible = section.id === "gradients" && copy;
+  const heading = collapsible
+    ? `<div class="incodex-capture-background-section-heading">
+        <h3 class="incodex-capture-background-section-title">${label}</h3>
+        <button class="incodex-capture-background-expand" data-action="toggle-gradients" type="button" aria-expanded="${state.gradientsExpanded}">${state.gradientsExpanded ? copy.backgroundShowLess : copy.backgroundShowMore}</button>
+      </div>`
+    : `<h3 class="incodex-capture-background-section-title">${label}</h3>`;
   return `
-    <section class="incodex-capture-background-section" data-background-section="${section.id}" data-active="${activeSection === section.id}" aria-label="${label}">
-      <h3 class="incodex-capture-background-section-title">${label}</h3>
+    <section class="incodex-capture-background-section" data-background-section="${section.id}" data-active="${activeSection === section.id}" data-expanded="${section.id === "gradients" && state.gradientsExpanded}" aria-label="${label}">
+      ${heading}
       <div class="incodex-capture-background-grid">${presetButtonsTemplate(section, state)}</div>
     </section>
   `;
@@ -218,10 +226,11 @@ function presetButtonsTemplate(
   section: CapturePresetSection,
   state: CaptureWindowState,
 ): string {
-  return section.presets.map((preset) => {
+  return section.presets.map((preset, index) => {
     const { id } = preset;
     const selected = state.background.kind === "preset" && state.background.id === id;
-    return `<button class="incodex-capture-background-option" data-background="${id}" type="button" aria-label="${id}" title="${id}" aria-pressed="${selected}" style="--capture-swatch:${capturePresetSwatch(preset)}"></button>`;
+    const overflow = section.id === "gradients" && index >= 5;
+    return `<button class="incodex-capture-background-option" data-background="${id}"${overflow ? " data-gradient-overflow" : ""} type="button" aria-label="${id}" title="${id}" aria-pressed="${selected}" style="--capture-swatch:${capturePresetSwatch(preset)}"${overflow && !state.gradientsExpanded ? " hidden" : ""}></button>`;
   }).join("");
 }
 

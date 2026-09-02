@@ -56,6 +56,10 @@ export function wireCaptureBackgroundActions(
     "click",
     actions.pickWallpaper,
   );
+  root.querySelector<HTMLButtonElement>("[data-action='toggle-gradients']")?.addEventListener(
+    "click",
+    () => actions.dispatch({ kind: "toggle-gradients" }),
+  );
 }
 
 export function syncCaptureBackgroundControls(
@@ -63,6 +67,7 @@ export function syncCaptureBackgroundControls(
   state: CaptureWindowState,
   lastBackgroundColor: string,
   wallpaperDataUrl: string | null,
+  gradientToggleLabels: { showLess: string; showMore: string },
 ): void {
   for (const option of root.querySelectorAll<HTMLElement>("[data-background]")) {
     const selected = option.dataset.background === "transparent"
@@ -88,6 +93,23 @@ export function syncCaptureBackgroundControls(
   syncActiveSection(root, captureBackgroundSection(state.background));
   syncCaptureColorPopover(root, "background", lastBackgroundColor);
   syncWallpaperControls(root, state, wallpaperDataUrl);
+  syncGradientCatalog(root, state, gradientToggleLabels);
+}
+
+function syncGradientCatalog(
+  root: HTMLElement,
+  state: CaptureWindowState,
+  labels: { showLess: string; showMore: string },
+): void {
+  const section = root.querySelector<HTMLElement>("[data-background-section='gradients']");
+  if (section) section.dataset.expanded = String(state.gradientsExpanded);
+  for (const option of root.querySelectorAll<HTMLElement>("[data-gradient-overflow]")) {
+    option.hidden = !state.gradientsExpanded;
+  }
+  const toggle = root.querySelector<HTMLButtonElement>("[data-action='toggle-gradients']");
+  if (!toggle) return;
+  toggle.setAttribute("aria-expanded", String(state.gradientsExpanded));
+  toggle.textContent = state.gradientsExpanded ? labels.showLess : labels.showMore;
 }
 
 function syncActiveSection(
