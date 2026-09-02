@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 AppKit 进程生命周期、受控 pending 状态与固定 Incodex Helper
+ * [OUTPUT]: 提供 Sparkle application bundle 替身，覆盖交互式重启与后台更新后的静默恢复
+ * [POS]: macOS 更新链的原生 Coordinator；只编排退出和恢复，不实现 ASAR 修改或签名策略
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 #import <AppKit/AppKit.h>
 #import <Foundation/Foundation.h>
 #import <dispatch/dispatch.h>
@@ -12,6 +18,7 @@
 @property(nonatomic, copy) NSString *helperPath;
 @property(nonatomic, copy) NSString *readyPath;
 @property(nonatomic, copy) NSString *pendingPath;
+@property(nonatomic, copy) NSString *sourceBuild;
 @property(nonatomic) BOOL terminationPending;
 @property(nonatomic) BOOL allowTermination;
 @property(nonatomic) dispatch_source_t hostExitSource;
@@ -53,6 +60,21 @@
     return [self writeJSON:pending toPath:self.pendingPath];
 }
 
+- (NSString *)currentHostBuild {
+    NSString *infoPath = [self.appPath stringByAppendingPathComponent:@"Contents/Info.plist"];
+    NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPath];
+    id build = info[@"CFBundleVersion"];
+    if ([build isKindOfClass:NSString.class]) return build;
+    if ([build isKindOfClass:NSNumber.class]) return [build stringValue];
+    return nil;
+}
+
+- (BOOL)hostBundleChanged {
+    NSString *currentBuild = [self currentHostBuild];
+    return self.sourceBuild.length > 0 && currentBuild.length > 0 &&
+           ![currentBuild isEqualToString:self.sourceBuild];
+}
+
 - (void)armHostExitObservation {
     if (![self processIsRunning:self.hostPID]) return;
     self.hostExitSource = dispatch_source_create(
@@ -69,6 +91,16 @@
             [NSApp replyToApplicationShouldTerminate:YES];
             return;
         }
+        if ([self hostBundleChanged]) {
+            NSDictionary *pending = @{
+                @"installId": self.installID,
+                @"appPath": self.appPath,
+                @"helperPath": self.helperPath,
+            };
+            [self recoverAfterUpdate:pending relaunchHost:NO];
+            return;
+        }
+        [NSFileManager.defaultManager removeItemAtPath:self.pendingPath error:nil];
         self.allowTermination = YES;
         [NSApp terminate:nil];
     });
@@ -105,7 +137,7 @@
     }];
 }
 
-- (void)recoverAfterUpdate:(NSDictionary *)pending {
+- (void)recoverAfterUpdate:(NSDictionary *)pending relaunchHost:(BOOL)relaunchHost {
     NSString *helper = pending[@"helperPath"];
     NSString *installID = pending[@"installId"];
     NSString *app = pending[@"appPath"];
@@ -130,13 +162,23 @@
             typeof(self) self = weakSelf;
             if (self == nil) return;
             [NSFileManager.defaultManager removeItemAtPath:self.pendingPath error:nil];
-            [self launchHostAndExit];
+            if (relaunchHost) {
+                [self launchHostAndExit];
+            } else {
+                self.allowTermination = YES;
+                [NSApp terminate:nil];
+            }
         });
     };
     NSError *error = nil;
     if (![task launchAndReturnError:&error]) {
         [NSFileManager.defaultManager removeItemAtPath:self.pendingPath error:nil];
-        [self launchHostAndExit];
+        if (relaunchHost) {
+            [self launchHostAndExit];
+        } else {
+            self.allowTermination = YES;
+            [NSApp terminate:nil];
+        }
     }
 }
 
@@ -152,6 +194,11 @@
         self.pendingPath = environment[@"INCODEX_MACOS_UPDATE_PENDING_PATH"];
         if (self.hostPID <= 0 || self.installID.length == 0 || self.appPath.length == 0 ||
             self.helperPath.length == 0 || self.readyPath.length == 0 || self.pendingPath.length == 0) {
+            [NSApp terminate:nil];
+            return;
+        }
+        self.sourceBuild = [self currentHostBuild];
+        if (self.sourceBuild.length == 0) {
             [NSApp terminate:nil];
             return;
         }
@@ -175,7 +222,7 @@
         [NSApp terminate:nil];
         return;
     }
-    [self recoverAfterUpdate:pending];
+    [self recoverAfterUpdate:pending relaunchHost:YES];
 }
 
 @end
