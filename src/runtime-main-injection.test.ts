@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 读取 Electron Runtime 主入口源码，验证注入、窗口生命周期与官方启动边界
+ * [OUTPUT]: 提供主入口结构回归测试，阻止 Incodex 在官方初始化前跨越异步事件循环
+ * [POS]: src 测试层的启动契约，约束 runtime/incodex-main.cts 不破坏官方应用首屏语义
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -101,14 +107,25 @@ describe("Electron UI injection reporting", () => {
     );
   });
 
-  test("prepares seamless update handoff before the official main starts", () => {
+  test("arms seamless update handoff without yielding official main startup", () => {
+    const start = main.indexOf("function startRuntime()");
+    const end = main.indexOf("\nconst startupGate", start);
+    const startup = main.slice(start, end);
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
     expect(main).toContain(
       'process.platform === "darwin" ? require("./incodex-macos-update.cjs") : null',
     );
-    expect(main).toContain("await macosUpdate.prepareUpdateHandoff({");
-    expect(main).toContain("userRoot: USER_ROOT");
-    expect(main).toContain("execPath: process.execPath");
-    expect(main).toContain("pid: process.pid");
+    expect(startup).toContain("macosUpdate.prepareUpdateHandoff({");
+    expect(startup).not.toContain("await macosUpdate.prepareUpdateHandoff(");
+    expect(startup).not.toContain("async function startRuntime");
+    expect(startup).toContain("userRoot: USER_ROOT");
+    expect(startup).toContain("execPath: process.execPath");
+    expect(startup).toContain("pid: process.pid");
+    expect(startup.indexOf("macosUpdate.prepareUpdateHandoff({")).toBeLessThan(
+      startup.indexOf("return attachElectron()"),
+    );
     expect(main).not.toContain('electron.app.once("before-quit", () => {');
     expect(main).not.toContain("macosUpdate.spawnCoordinator({");
   });

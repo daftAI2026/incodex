@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 macOS 更新交接模块及临时文件系统夹具，模拟 Coordinator 与原生加载边界
+ * [OUTPUT]: 提供交接顺序、资产校验和同步启动契约的回归测试
+ * [POS]: src 测试层的 Sparkle 安全网，确保更新恢复钩子先布防且不让官方 main 让出事件循环
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import {
@@ -100,7 +106,7 @@ afterEach(() => {
 });
 
 describe("macOS seamless update handoff", () => {
-  test("arms the interposer only after the verified coordinator is ready", async () => {
+  test("arms the interposer synchronously after the verified coordinator is ready", () => {
     const f = fixture();
     const calls: any[] = [];
     const order: string[] = [];
@@ -111,7 +117,7 @@ describe("macOS seamless update handoff", () => {
       },
     };
 
-    const armed = await update.prepareUpdateHandoff({
+    const armed = update.prepareUpdateHandoff({
       platform: "darwin",
       userRoot: f.userRoot,
       execPath: f.execPath,
@@ -121,7 +127,7 @@ describe("macOS seamless update handoff", () => {
         calls.push({ command, args, options });
         return child;
       },
-      async waitForCoordinator() {
+      waitForCoordinator() {
         order.push("ready");
         return true;
       },
@@ -129,7 +135,7 @@ describe("macOS seamless update handoff", () => {
         order.push("sparkle");
         expect(file).toEndWith("/Contents/Resources/native/sparkle.node");
       },
-      async loadInterposer(file: string) {
+      loadInterposer(file: string) {
         order.push("interposer");
         expect(file).toBe(f.interposerPath);
       },
