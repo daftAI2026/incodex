@@ -5,6 +5,7 @@
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { afterEach, describe, expect, test } from "bun:test";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
@@ -158,6 +159,35 @@ describe("macOS seamless update handoff", () => {
     expect(calls[0].options.detached).toBe(true);
     expect(calls[0].options.stdio).toBe("ignore");
     expect(child.unrefCalled).toBe(true);
+  });
+
+  test("accepts the first cold Coordinator generation without dropping update protection", () => {
+    const f = fixture();
+    const started = Date.now();
+
+    const armed = update.prepareUpdateHandoff({
+      platform: "darwin",
+      userRoot: f.userRoot,
+      execPath: f.execPath,
+      pid: 42,
+      spawnProcess(_command: string, _args: string[], options: any) {
+        return spawn(
+          "/bin/sh",
+          [
+            "-c",
+            'sleep 0.35; printf \'{"schemaVersion":1,"pid":42}\\n\' > "$1"',
+            "_",
+            options.env.INCODEX_MACOS_UPDATE_READY_PATH,
+          ],
+          { detached: true, stdio: "ignore" },
+        );
+      },
+      requireSparkle() {},
+      loadInterposer() {},
+    });
+
+    expect(armed).toBe(true);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(300);
   });
 
   test("rejects helper hash mismatch, symlinks, and a foreign app path", () => {
