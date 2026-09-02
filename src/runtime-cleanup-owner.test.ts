@@ -70,6 +70,9 @@ class AppStub extends EventTargetStub {
 
 class WindowStub extends EventTargetStub {
   readonly id = 1;
+  hideCalls = 0;
+  showCalls = 0;
+  private visible = true;
   readonly webContents = {
     session: {},
     isDestroyed: () => false,
@@ -82,6 +85,28 @@ class WindowStub extends EventTargetStub {
   isDestroyed(): boolean {
     return false;
   }
+
+  isVisible(): boolean {
+    return this.visible;
+  }
+
+  isMinimized(): boolean {
+    return false;
+  }
+
+  hide(): void {
+    this.hideCalls += 1;
+    this.visible = false;
+  }
+
+  show(): void {
+    this.showCalls += 1;
+    this.visible = true;
+  }
+
+  focus(): void {}
+
+  moveTop(): void {}
 
   isAlwaysOnTop(): boolean {
     return false;
@@ -106,10 +131,14 @@ interface RuntimeHarness {
   events: string[];
   ipcAction: Handler;
   openWindow: () => WindowStub;
+  startupGate: Promise<void>;
   runtimeOwnedSessionEnv: (session: Record<string, unknown>, sourceBounds: string) => NodeJS.ProcessEnv;
 }
 
-async function loadRuntime(cleanupOwner?: string): Promise<RuntimeHarness> {
+async function loadRuntime(
+  cleanupOwner?: string,
+  options: { acquireOwnerLease?: () => Promise<Record<string, string>>; awaitStartup?: boolean } = {},
+): Promise<RuntimeHarness> {
   const source = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
   const events: string[] = [];
   const app = new AppStub(events);
@@ -144,7 +173,9 @@ async function loadRuntime(cleanupOwner?: string): Promise<RuntimeHarness> {
     targetStateDir: () => "/tmp/incodex-runtime-cleanup-owner",
     processIdentity: () => ({ processStartIdentity: "runtime-process" }),
     currentOwner: (sessionId: string) => ({ sessionId, token: "owner-token" }),
-    acquireOwnerLease: async () => ({ sessionId: "test-session", token: "owner-token" }),
+    acquireOwnerLease:
+      options.acquireOwnerLease ??
+      (async () => ({ sessionId: "test-session", token: "owner-token" })),
     releaseOwnerLease: async () => {
       events.push("lease.release");
       return true;
@@ -200,12 +231,14 @@ async function loadRuntime(cleanupOwner?: string): Promise<RuntimeHarness> {
   const runtimeModule = { exports: {} as Record<string, unknown> };
   const evaluate = new Function("require", "module", "exports", "process", "__dirname", source);
   evaluate(runtimeRequire, runtimeModule, runtimeModule.exports, runtimeProcess, import.meta.dir);
-  await (runtimeModule.exports.startupGate as Promise<void>);
+  const startupGate = runtimeModule.exports.startupGate as Promise<void>;
+  if (options.awaitStartup !== false) await startupGate;
 
   return {
     app,
     burnCount: () => burns,
     events,
+    startupGate,
     ipcAction: ipcHandlers.get("incodex-action") as Handler,
     runtimeOwnedSessionEnv: runtimeModule.exports.runtimeOwnedSessionEnv as RuntimeHarness["runtimeOwnedSessionEnv"],
     openWindow: () => {
@@ -218,6 +251,27 @@ async function loadRuntime(cleanupOwner?: string): Promise<RuntimeHarness> {
 }
 
 describe("Electron session cleanup ownership", () => {
+  test("an incognito window stays hidden until the kernel owner lease is held", async () => {
+    let resolveLease!: (owner: Record<string, string>) => void;
+    const lease = new Promise<Record<string, string>>((resolve) => {
+      resolveLease = resolve;
+    });
+    const runtime = await loadRuntime(undefined, {
+      acquireOwnerLease: () => lease,
+      awaitStartup: false,
+    });
+
+    const win = runtime.openWindow();
+    expect(win.hideCalls).toBe(1);
+    expect(win.showCalls).toBe(0);
+
+    resolveLease({ sessionId: "test-session", token: "owner-token" });
+    await runtime.startupGate;
+
+    expect(win.showCalls).toBe(1);
+    expect(win.isVisible()).toBe(true);
+  });
+
   test("Native-open marker leaves every session burn path to the Native parent", async () => {
     const runtime = await loadRuntime("native");
     const win = runtime.openWindow();
