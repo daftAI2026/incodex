@@ -158,7 +158,46 @@ fn recovery_helper_identity_is_stable_across_registration_refresh() {
     );
     assert!(
         restore.contains("INCODEX_MACOS_UPDATE_HELPER_SHA256")
-            && restore.contains("expected_helper_sha256"),
-        "the running Helper must verify its immutable content address instead of racing mutable registration"
+            && restore.contains("expected_helper_sha256")
+            && restore.contains("registration.helper_sha256 != expected_helper_sha256"),
+        "the running Helper and the mutable registration must agree on one generation before mutation"
+    );
+}
+
+#[test]
+fn pending_handoff_ownership_is_atomic_and_adopted_by_the_recovery_coordinator() {
+    let coordinator = include_str!("../native/macos_update_coordinator.m");
+    let assets = include_str!("../src/macos_update_assets.rs");
+
+    assert!(
+        coordinator.contains("flock") && coordinator.contains("withPendingLock"),
+        "pending read-check-write/delete must share one OS lock across Coordinator processes"
+    );
+    assert!(
+        coordinator.contains("coordinatorPid")
+            && coordinator.contains("loadAndAdoptPending")
+            && coordinator.contains("pendingIsOwned"),
+        "the post-update Coordinator must atomically adopt the handoff before it launches a Helper"
+    );
+    assert!(
+        assets.contains("pending_control_lock") && assets.contains(".pending.lock"),
+        "Rust removal must participate in the same pending lock as native Coordinator writers"
+    );
+}
+
+#[test]
+fn invalid_registration_cannot_relaunch_an_untrusted_or_missing_app_path() {
+    let source = include_str!("../native/macos_update_coordinator.m");
+    let finish = source
+        .split("- (void)finishRecovery:")
+        .nth(1)
+        .expect("Coordinator has one recovery completion path")
+        .split("- (void)launchRecovery:")
+        .next()
+        .expect("completion ends before Helper launch");
+
+    assert!(
+        finish.contains("relaunchHost && self.appPath.length > 0"),
+        "relaunch is allowed only after registration has established a trusted application path"
     );
 }
