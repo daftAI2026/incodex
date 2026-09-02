@@ -81,8 +81,8 @@ fn coordinator_repairs_a_background_update_when_the_host_later_exits() {
         "background-update recovery must reuse the registered helper without reopening an app the user chose to close"
     );
     assert!(
-        host_exit_handler.contains("removeItemAtPath:self.pendingPath"),
-        "an ordinary close with no replacement must clear its launch-scoped pending marker"
+        host_exit_handler.contains("removePendingIfOwned"),
+        "an ordinary close with no replacement must clear only its own launch-scoped pending marker"
     );
 }
 
@@ -90,12 +90,12 @@ fn coordinator_repairs_a_background_update_when_the_host_later_exits() {
 fn coordinator_resolves_the_current_helper_generation_before_recovery() {
     let source = include_str!("../native/macos_update_coordinator.m");
     let recovery = source
-        .split("- (void)recoverAfterUpdate:")
+        .split("- (void)launchRecovery:")
         .nth(1)
         .expect("coordinator has a recovery path")
-        .split("- (void)applicationDidFinishLaunching:")
+        .split("- (void)recoverAfterUpdate:")
         .next()
-        .expect("recovery path ends before launch dispatch");
+        .expect("generation-aware launch ends before the recovery entry point");
 
     assert!(
         recovery.contains("currentRegistrationForPending"),
@@ -129,12 +129,12 @@ fn coordinator_executes_only_a_verified_content_addressed_helper() {
 fn coordinator_never_clears_another_handoff_or_reports_a_failed_helper_as_success() {
     let source = include_str!("../native/macos_update_coordinator.m");
     let recovery = source
-        .split("- (void)recoverAfterUpdate:")
+        .split("- (void)launchRecovery:")
         .nth(1)
         .expect("coordinator has a recovery path")
-        .split("- (void)applicationDidFinishLaunching:")
+        .split("- (void)recoverAfterUpdate:")
         .next()
-        .expect("recovery path ends before launch dispatch");
+        .expect("generation-aware launch ends before the recovery entry point");
 
     assert!(
         source.contains("handoffId") && source.contains("removePendingIfOwned"),
@@ -143,5 +143,22 @@ fn coordinator_never_clears_another_handoff_or_reports_a_failed_helper_as_succes
     assert!(
         recovery.contains("terminationStatus") && recovery.contains("retry"),
         "a Helper generation race must be retried and a nonzero exit must not masquerade as recovery success"
+    );
+}
+
+#[test]
+fn recovery_helper_identity_is_stable_across_registration_refresh() {
+    let coordinator = include_str!("../native/macos_update_coordinator.m");
+    let restore = include_str!("../src/macos_update_restore.rs");
+
+    assert!(
+        coordinator.contains("INCODEX_MACOS_UPDATE_HELPER_SHA256")
+            && coordinator.contains("registration[@\"helperSha256\"]"),
+        "the verified Helper generation must cross the Coordinator-to-Helper process boundary"
+    );
+    assert!(
+        restore.contains("INCODEX_MACOS_UPDATE_HELPER_SHA256")
+            && restore.contains("expected_helper_sha256"),
+        "the running Helper must verify its immutable content address instead of racing mutable registration"
     );
 }
