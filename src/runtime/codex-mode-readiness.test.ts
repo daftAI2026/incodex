@@ -17,6 +17,10 @@ async function runNext(tasks: ScheduledTask[]): Promise<void> {
 }
 
 describe("Codex mode readiness", () => {
+  test("emits a syntactically valid renderer probe", () => {
+    expect(() => new Function(`return ${CODEX_MODE_PROBE_EXPRESSION}`)).not.toThrow();
+  });
+
   test("confirms the primary codex route without invoking its keyboard fallback", () => {
     const page = deriveCodexModePageState({
       modeAvailable: true,
