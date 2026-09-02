@@ -48,6 +48,12 @@ describe("capture window visual tokens", () => {
     );
     expect(css).toMatch(/\.incodex-capture-background-grid\s*\{[^}]*justify-items: center/);
     expect(css).toMatch(/\.incodex-capture-background-grid\s*\{[^}]*width: 100%/);
+    expect(css).toMatch(
+      /\.incodex-capture-background-grid-plain\s*\{[^}]*grid-template-columns: repeat\(9, minmax\(0, 1fr\)\)/,
+    );
+    expect(css).toMatch(
+      /\.incodex-capture-background-grid-plain \.incodex-capture-background-option\s*\{[^}]*height: calc\(var\(--incodex-capture-space\) \* 5\)/,
+    );
     expect(css).toMatch(/\.incodex-capture-background-option\s*\{[\s\S]*?border-radius: var\(--radius-full/);
     expect(css).toMatch(/\.incodex-capture-background-option\s*\{[\s\S]*?background-origin: border-box/);
     expect(css).toMatch(/\.incodex-capture-background-option\s*\{[\s\S]*?background-clip: border-box/);

@@ -65,8 +65,25 @@ describe("capture background presets", () => {
     expect(captureBackgroundSection({ id: "silver", kind: "preset" })).toBe("gradients");
   });
 
-  test("uses the three observed CleanShot colors before custom and transparent controls", () => {
-    expect(capturePlainColors).toEqual(["#121212", "#ffffff", "#d1444b"]);
+  test("uses the sixteen observed CleanShot plain colors", () => {
+    expect(capturePlainColors).toEqual([
+      "#121212",
+      "#ffffff",
+      "#d1444b",
+      "#e88b3d",
+      "#e7ab41",
+      "#438d57",
+      "#3f8ae1",
+      "#7a3ae1",
+      "#383838",
+      "#ebebeb",
+      "#f1bfb7",
+      "#f6c77d",
+      "#f5df99",
+      "#b0e6be",
+      "#b2d5f6",
+      "#c8aeea",
+    ]);
   });
 
   test("generates gradients while keeping only wallpapers as raster assets", () => {
