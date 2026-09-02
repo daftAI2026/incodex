@@ -89,6 +89,11 @@ struct RuntimePointer<'a> {
     files: BTreeMap<String, String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct ExistingRuntimePointer {
+    version: String,
+}
+
 pub fn publish_windows_runtime(user_root: &Path) -> Result<PublishedWindowsRuntime, String> {
     let manifest: RuntimeManifest = serde_json::from_str(manifest_source())
         .map_err(|error| format!("invalid Runtime manifest: {error}"))?;
@@ -101,6 +106,7 @@ pub fn publish_windows_runtime(user_root: &Path) -> Result<PublishedWindowsRunti
 
     let user_root = ensure_private_windows_dir(user_root)?;
     let runtime_root = ensure_private_windows_dir(&user_root.join("runtime"))?;
+    reject_runtime_downgrade(&runtime_root, &manifest.runtime_version)?;
     let releases = ensure_private_windows_dir(&runtime_root.join("releases"))?;
     let release_dir = releases.join(&release_name);
     publish_release(&releases, &release_dir, &manifest, &recorded_manifest_body)?;
@@ -117,6 +123,12 @@ pub fn publish_windows_runtime(user_root: &Path) -> Result<PublishedWindowsRunti
     };
     let pointer_body = serde_json::to_vec_pretty(&pointer)
         .map_err(|error| format!("cannot serialize Runtime pointer: {error}"))?;
+    let stable_bootstrap = runtime_root.join(WINDOWS_BOOTSTRAP_NAME);
+    replace_private_file(
+        &runtime_root,
+        &stable_bootstrap,
+        WINDOWS_BOOTSTRAP.as_bytes(),
+    )?;
     let pointer_path = runtime_root.join("current.json");
     replace_private_file(&runtime_root, &pointer_path, &pointer_body)?;
 
@@ -129,6 +141,37 @@ pub fn publish_windows_runtime(user_root: &Path) -> Result<PublishedWindowsRunti
         pointer: pointer_path,
         files,
     })
+}
+
+fn reject_runtime_downgrade(runtime_root: &Path, candidate: &str) -> Result<(), String> {
+    let pointer = runtime_root.join("current.json");
+    let metadata = match fs::symlink_metadata(&pointer) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("cannot inspect Runtime pointer: {error}")),
+    };
+    if !metadata.is_file() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err("Windows Runtime pointer is not a regular file".to_string());
+    }
+    verify_private_acl(&pointer)?;
+    if metadata.len() > MANIFEST_LIMIT {
+        return Err("Windows Runtime pointer exceeds the size limit".to_string());
+    }
+    let body =
+        fs::read(&pointer).map_err(|error| format!("cannot read Runtime pointer: {error}"))?;
+    let Ok(existing) = serde_json::from_slice::<ExistingRuntimePointer>(&body) else {
+        return Ok(());
+    };
+    let Some(existing) = crate::stable_release::parse_stable_version(&existing.version) else {
+        return Ok(());
+    };
+    let Some(candidate) = crate::stable_release::parse_stable_version(candidate) else {
+        return Err(format!("invalid embedded Runtime version: {candidate}"));
+    };
+    if existing > candidate {
+        return Err("a newer Runtime generation is already published".to_string());
+    }
+    Ok(())
 }
 
 pub fn publish_windows_activation_bootstrap(user_root: &Path) -> Result<PathBuf, String> {
@@ -152,6 +195,14 @@ pub(crate) fn verify_installed_windows_runtime(
     for directory in [user_root, runtime_root.as_path(), releases.as_path()] {
         ensure_regular_directory(directory)?;
         verify_private_acl(directory)?;
+    }
+    let stable_bootstrap = runtime_root.join(WINDOWS_BOOTSTRAP_NAME);
+    ensure_regular_file(&stable_bootstrap)?;
+    verify_private_acl(&stable_bootstrap)?;
+    let bootstrap = fs::read(&stable_bootstrap)
+        .map_err(|error| format!("cannot read stable Windows Runtime bootstrap: {error}"))?;
+    if bootstrap != WINDOWS_BOOTSTRAP.as_bytes() {
+        return Err("stable Windows Runtime bootstrap does not match the current CLI".to_string());
     }
     verify_recorded_release(&releases.join(runtime_release), runtime_release)
 }

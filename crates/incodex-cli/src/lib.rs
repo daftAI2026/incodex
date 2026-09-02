@@ -44,6 +44,7 @@ mod open_presentation;
 pub mod parse;
 pub mod profile_mask;
 pub mod spinner;
+mod stable_release;
 #[cfg(not(target_os = "windows"))]
 pub mod terminal;
 mod terminal_presentation;
@@ -89,9 +90,15 @@ mod windows_runtime_lifecycle;
 #[cfg(target_os = "windows")]
 pub mod windows_runtime_open;
 #[cfg(target_os = "windows")]
+pub mod windows_self_uninstall;
+#[cfg(target_os = "windows")]
 pub mod windows_status;
 #[cfg(target_os = "windows")]
 pub(crate) mod windows_system;
+#[cfg(target_os = "windows")]
+pub mod windows_update;
+#[cfg(target_os = "windows")]
+mod windows_update_flow;
 
 #[cfg(not(target_os = "windows"))]
 use std::path::PathBuf;
@@ -237,6 +244,16 @@ where
         }
         if parsed.command == CliCommand::Uninstall {
             return crate::windows_install::run_uninstall(&parsed).map_err(CliFailure::from);
+        }
+        if parsed.command == CliCommand::Runtime {
+            return crate::windows_update::run_runtime(&parsed).map_err(CliFailure::from);
+        }
+        if parsed.command == CliCommand::Update {
+            return crate::windows_update::run_update(&parsed).map_err(CliFailure::from);
+        }
+        if parsed.command == CliCommand::SelfUninstall {
+            return crate::windows_self_uninstall::run_self_uninstall(&parsed)
+                .map_err(CliFailure::from);
         }
         Err(CliFailure::new(format!(
             "{} is not supported on Windows yet",

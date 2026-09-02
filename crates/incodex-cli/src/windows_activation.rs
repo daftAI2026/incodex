@@ -79,8 +79,6 @@ impl WindowsInstalledRuntimeRegistration {
             .ok_or_else(|| "Windows install state has no parent directory".to_string())?;
         let bootstrap = user_root
             .join("runtime")
-            .join("releases")
-            .join(&state.runtime_release)
             .join("incodex-windows-bootstrap.cjs");
         Ok(BTreeMap::from([
             ("NODE_OPTIONS".to_string(), node_require_option(&bootstrap)?),

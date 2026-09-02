@@ -10,7 +10,6 @@ const CANCEL_EXIT_TIMEOUT_MS = 5_000;
 const BOUNDS_PATTERN = /^-?\d{1,10},-?\d{1,10},\d{1,10},\d{1,10}$/;
 const SIGNAL_PIPE_PATTERN = /^\\\\\.\\pipe\\Incodex-Runtime-(Ready|Closed)-[a-f0-9]{32}$/;
 const RAISE_PIPE = "\\\\.\\pipe\\Incodex-Runtime-Raise";
-const WINDOW_CLOSE_SETTLE_MS = 100;
 const UI_READINESS_RETRY_MS = 250;
 const observedRuntimeWindows = new WeakSet();
 
@@ -34,56 +33,6 @@ function markReady(pipeName, write = writeFileSync) {
 
 function markClosed(pipeName, write = writeFileSync) {
   return markSignal(pipeName, "closed", write);
-}
-
-function exitAfterLastMainWindowCloses(
-  win,
-  hasAnotherMainWindow,
-  exit,
-  schedule = setTimeout,
-) {
-  if (
-    !win?.on ||
-    typeof hasAnotherMainWindow !== "function" ||
-    typeof exit !== "function" ||
-    typeof schedule !== "function"
-  ) {
-    throw new Error("invalid Windows host window lifecycle");
-  }
-  let exited = false;
-  let closeProbeGeneration = 0;
-  const exitIfLast = (requireHidden) => {
-    if (exited || hasAnotherMainWindow()) return;
-    if (
-      requireHidden &&
-      win.isDestroyed?.() !== true &&
-      win.isVisible?.() !== false
-    ) {
-      return;
-    }
-    exited = true;
-    exit(0);
-  };
-  win.on("close", () => {
-    const generation = ++closeProbeGeneration;
-    const observeHidden = () => {
-      if (exited || generation !== closeProbeGeneration) return;
-      if (
-        !hasAnotherMainWindow() &&
-        (win.isDestroyed?.() === true || win.isVisible?.() === false)
-      ) {
-        exited = true;
-        exit(0);
-        return;
-      }
-      schedule(observeHidden, WINDOW_CLOSE_SETTLE_MS);
-    };
-    schedule(observeHidden, WINDOW_CLOSE_SETTLE_MS);
-  });
-  win.on("closed", () => {
-    closeProbeGeneration += 1;
-    exitIfLast(false);
-  });
 }
 
 function observeRuntimeUiReadiness(
@@ -247,7 +196,6 @@ function launchIncognito(options = {}) {
 }
 
 module.exports = {
-  exitAfterLastMainWindowCloses,
   launchIncognito,
   listenForRaise,
   markClosed,

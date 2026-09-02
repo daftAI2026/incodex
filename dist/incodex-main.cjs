@@ -9,6 +9,7 @@ const safeHome = require("./incodex-safe-home.cjs");
 const ipcGuard = require("./incodex-ipc-guard.cjs");
 const instance = require("./incodex-instance.cjs");
 const windowKind = require("./incodex-window-kind.cjs");
+const windowLifecycle = require("./incodex-window-lifecycle.cjs");
 const codexMode = require("./incodex-codex-mode.cjs");
 const macosUpdate = process.platform === "darwin" ? require("./incodex-macos-update.cjs") : null;
 const dockMenu = process.platform === "darwin" ? require("./incodex-dock-menu.cjs") : null;
@@ -750,15 +751,17 @@ async function attachElectron() {
     let raiseServer = null;
     let incognitoExitStarted = false;
     function finishIncognito(code) {
-        if (windowsPlatform && incognitoExitStarted)
+        if (incognitoExitStarted)
             return;
-        if (windowsPlatform)
-            incognitoExitStarted = true;
+        incognitoExitStarted = true;
         markSessionClosed();
         burnIncognitoHome();
         void clearPid(ownerLease, raiseServer);
         electron.app.exit(code);
     }
+    const incognitoWindowLifecycle = isIncognito()
+        ? windowLifecycle.createIncognitoWindowLifecycle(finishIncognito)
+        : null;
     electron.ipcMain.handle("incodex-action", async (event, payload) => {
         const requestId = typeof payload?.requestId === "string" ? payload.requestId : "";
         const gate = authorizeEvent(event);
@@ -802,8 +805,6 @@ async function attachElectron() {
                     reason: "not-incognito",
                 });
             }
-            burnIncognitoHome();
-            await clearPid(ownerLease, raiseServer);
             electron.app.quit();
             return ipcGuard.actionResponse(requestId, { ok: true, code: "OK" });
         }
@@ -822,9 +823,7 @@ async function attachElectron() {
             return;
         }
         hookWindow(win, source);
-        if (windowsPlatform && isIncognito()) {
-            windowsPlatform.exitAfterLastMainWindowCloses(win, () => mainWindows(electron).some((open) => open !== win && !open.isDestroyed() && open.isVisible()), finishIncognito);
-        }
+        incognitoWindowLifecycle?.observe(win);
         if (!isIncognito())
             return;
         applyChromeWindowTile(win);
@@ -844,11 +843,6 @@ async function attachElectron() {
             markAcceptedWindowReady(win);
             setTimeout(bringForward, 50);
             setTimeout(bringForward, 300);
-        });
-        win.on("closed", () => {
-            if (mainWindows(electron).some((open) => open !== win && !open.isDestroyed()))
-                return;
-            finishIncognito(0);
         });
     });
     if (isIncognito() && windowsPlatform) {
@@ -905,10 +899,6 @@ async function attachElectron() {
     if (isIncognito()) {
         electron.app.on("window-all-closed", () => {
             finishIncognito(0);
-        });
-        electron.app.on("before-quit", () => {
-            burnIncognitoHome();
-            void clearPid(ownerLease, raiseServer);
         });
     }
     function ready() {
