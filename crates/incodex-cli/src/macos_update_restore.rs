@@ -79,6 +79,7 @@ fn run_relaunch_recovery(
         &registration.app_path,
         &registration.helper_path,
         build,
+        &registration.install_id,
         expected_helper_sha256.unwrap_or(&registration.helper_sha256),
     )?;
     crate::macos_update_log::log_coordinator_event(

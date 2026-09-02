@@ -280,6 +280,7 @@ fn register_update_restore_if_generation(
     app: &Path,
     helper_source: &Path,
     result: &CommandResult,
+    expected_install_id: &str,
     expected_helper_sha256: &str,
 ) -> Result<(), String> {
     let install_id = result
@@ -291,6 +292,7 @@ fn register_update_restore_if_generation(
         helper_source,
         app,
         install_id,
+        expected_install_id,
         expected_helper_sha256,
     )?;
     Ok(())
@@ -552,6 +554,7 @@ pub(crate) fn reinstall_after_official_update(
     app: &Path,
     helper_source: &Path,
     expected_build: u64,
+    expected_install_id: &str,
     expected_helper_sha256: &str,
 ) -> Result<String, String> {
     let guard = AppGuard::for_app(app)?;
@@ -566,6 +569,7 @@ pub(crate) fn reinstall_after_official_update(
         app,
         helper_source,
         &result,
+        expected_install_id,
         expected_helper_sha256,
     )?;
     result

@@ -319,7 +319,7 @@
         [NSApp terminate:nil];
         return;
     }
-    if (relaunchHost && self.appPath.length > 0) {
+    if (relaunchHost && success && self.appPath.length > 0) {
         [self launchHostAndExit];
     } else {
         self.allowTermination = YES;

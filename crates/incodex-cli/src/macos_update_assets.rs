@@ -97,6 +97,7 @@ pub fn publish_registration_if_generation(
     helper_source: &Path,
     app_path: &Path,
     install_id: &str,
+    expected_install_id: &str,
     expected_helper_sha256: &str,
 ) -> Result<UpdateRegistration, String> {
     ensure_private_dir(root)?;
@@ -109,7 +110,10 @@ pub fn publish_registration_if_generation(
     )?;
     let current = read_registration(root)?
         .ok_or("macOS update registration disappeared before recovery commit")?;
-    if current.app_path != app_path || current.helper_sha256 != expected_helper_sha256 {
+    if current.install_id != expected_install_id
+        || current.app_path != app_path
+        || current.helper_sha256 != expected_helper_sha256
+    {
         return Err("macOS update registration generation changed before recovery commit".into());
     }
     publish_registration_locked(root, helper_source, app_path, install_id)
