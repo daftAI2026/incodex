@@ -361,8 +361,12 @@ impl WindowsActivationRequest {
         debugger_executable: &Path,
         user_root: &Path,
     ) -> Result<Self, String> {
-        let environment =
-            BTreeMap::from([("NODE_OPTIONS".to_string(), node_require_option(bootstrap)?)]);
+        let mut environment = self
+            .claimed_environment
+            .iter()
+            .map(|(name, value)| (name.clone(), OsString::from(value)))
+            .collect::<BTreeMap<_, _>>();
+        environment.insert("NODE_OPTIONS".to_string(), node_require_option(bootstrap)?);
         self.transient_debug_environment = Some(environment_block(environment)?);
         self.transient_debugger_executable = Some(debugger_executable.to_path_buf());
         self.transient_user_root = Some(user_root.to_path_buf());
@@ -550,7 +554,11 @@ pub fn activate_packaged_with_installed_cdp(
             "Windows installed Runtime registration does not match the activation package",
         ));
     }
-    activate_packaged_with_capability(request, WindowsLaunchMode::Cdp)
+    activate_packaged(request, Some(registration))
+}
+
+pub fn activation_requires_runtime_environment_claim(mode: WindowsLaunchMode) -> bool {
+    matches!(mode, WindowsLaunchMode::Runtime)
 }
 
 fn activate_packaged_with_capability(
@@ -564,9 +572,15 @@ fn activate_packaged_with_capability(
     let capability = request.activation_capability()?;
     let pending_job = WindowsPendingJob::create_for_capability(&capability)
         .map_err(|error| format!("cannot create Windows activation Job Object: {error}"))?;
-    let response = request.activation_environment(mode)?;
-    let mut environment_server =
-        ActivationEnvironmentServer::start(&capability, request.package_full_name(), response)?;
+    let mut environment_server = if activation_requires_runtime_environment_claim(mode) {
+        Some(ActivationEnvironmentServer::start(
+            &capability,
+            request.package_full_name(),
+            request.activation_environment(mode)?,
+        )?)
+    } else {
+        None
+    };
     let manager = match ComPtr::create(
         &CLSID_APPLICATION_ACTIVATION_MANAGER,
         &IID_APPLICATION_ACTIVATION_MANAGER,
@@ -574,7 +588,9 @@ fn activate_packaged_with_capability(
     ) {
         Ok(manager) => manager,
         Err(error) => {
-            environment_server.cancel();
+            if let Some(server) = &mut environment_server {
+                server.cancel();
+            }
             return Err(WindowsActivationFailure::before_start(error));
         }
     };
@@ -592,7 +608,9 @@ fn activate_packaged_with_capability(
         )
     };
     if failed(result) {
-        environment_server.cancel();
+        if let Some(server) = &mut environment_server {
+            server.cancel();
+        }
         let shutdown = if process_id != 0 && !existing_processes.contains(&process_id) {
             Err(format!(
                 "activation failed after reporting new Windows process {process_id}; process shutdown is unproven"
@@ -606,7 +624,9 @@ fn activate_packaged_with_capability(
         ));
     }
     if process_id == 0 || existing_processes.contains(&process_id) {
-        environment_server.cancel();
+        if let Some(server) = &mut environment_server {
+            server.cancel();
+        }
         return Err(WindowsActivationFailure::after_start(
             "Windows package activation did not create a new isolated Codex process",
             Ok(()),
@@ -615,7 +635,9 @@ fn activate_packaged_with_capability(
     let mut process_tree = match pending_job.attach(process_id, request.package_full_name()) {
         Ok(process_tree) => process_tree,
         Err(error) => {
-            environment_server.cancel();
+            if let Some(server) = &mut environment_server {
+                server.cancel();
+            }
             return Err(WindowsActivationFailure::after_start(
                 format!(
                     "cannot contain activated Windows Codex process {process_id} in its capability Job: {error}"
@@ -625,6 +647,9 @@ fn activate_packaged_with_capability(
                 )),
             ));
         }
+    };
+    let Some(environment_server) = &mut environment_server else {
+        return Ok(process_tree);
     };
     let environment_client = match environment_server.wait(ACTIVATION_ENVIRONMENT_TIMEOUT) {
         Ok(process_id) => process_id,

@@ -8,11 +8,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_cli::windows_activation::{
     activate_packaged_kill_on_drop, activate_packaged_with_installed_runtime,
-    activation_requires_runtime_environment_claim,
-    disable_installed_runtime, enable_installed_runtime, transient_debugger_command_line,
-    try_run_installed_package_debugger, try_run_package_debugger, windows_debugger_route,
-    windows_installed_debugger_route, windows_transient_debugger_route, WindowsActivationFailure,
-    WindowsActivationRequest, WindowsDebuggerRoute, WindowsInstalledRuntimeRegistration,
+    activation_requires_runtime_environment_claim, disable_installed_runtime,
+    enable_installed_runtime, transient_debugger_command_line, try_run_installed_package_debugger,
+    try_run_package_debugger, windows_debugger_route, windows_installed_debugger_route,
+    windows_transient_debugger_route, WindowsActivationFailure, WindowsActivationRequest,
+    WindowsDebuggerRoute, WindowsInstalledRuntimeRegistration,
 };
 use incodex_cli::windows_helper::publish_windows_transient_helper;
 use incodex_cli::windows_install_state::{
