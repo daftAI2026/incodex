@@ -201,3 +201,27 @@ fn invalid_registration_cannot_relaunch_an_untrusted_or_missing_app_path() {
         "relaunch is allowed only after registration has established a trusted application path"
     );
 }
+
+#[test]
+fn helper_launch_and_registration_publish_are_atomic_with_their_generations() {
+    let coordinator = include_str!("../native/macos_update_coordinator.m");
+    let assets = include_str!("../src/macos_update_assets.rs");
+    let install = include_str!("../src/install.rs");
+
+    let launch = coordinator
+        .split("- (BOOL)launchTaskIfPendingOwned:")
+        .nth(1)
+        .expect("Coordinator has an ownership-locked Helper launch")
+        .split("- (void)launchRecovery:")
+        .next()
+        .expect("locked launch ends before recovery orchestration");
+    assert!(
+        launch.contains("withPendingLock") && launch.contains("launchAndReturnError"),
+        "ownership must stay locked across the final check and Helper process creation"
+    );
+    assert!(
+        assets.contains("publish_registration_if_generation")
+            && install.contains("register_update_restore_if_generation"),
+        "recovery must compare-and-swap the registration generation at its final publish boundary"
+    );
+}
