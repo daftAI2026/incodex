@@ -262,7 +262,8 @@ describe("Electron session cleanup ownership", () => {
     });
 
     const win = runtime.openWindow();
-    expect(win.hideCalls).toBe(1);
+    win.emit("ready-to-show");
+    expect(win.hideCalls).toBeGreaterThanOrEqual(1);
     expect(win.showCalls).toBe(0);
 
     resolveLease({ sessionId: "test-session", token: "owner-token" });

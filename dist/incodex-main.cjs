@@ -755,7 +755,10 @@ async function attachElectron() {
     const source = injectSource();
     let ownerLease = null;
     let raiseServer = null;
+    let ownerStartup = Promise.resolve();
+    let macOwnerReady = !isIncognito() || Boolean(windowsPlatform);
     let incognitoExitStarted = false;
+    const displayReadyWindows = new WeakSet();
     function finishIncognito(code) {
         if (incognitoExitStarted)
             return;
@@ -832,8 +835,26 @@ async function attachElectron() {
         incognitoWindowLifecycle?.observe(win);
         if (!isIncognito())
             return;
+        if (!macOwnerReady) {
+            try {
+                win.hide();
+            }
+            catch {
+                /* 争抢失败的进程不能闪出重复窗口。 */
+            }
+        }
         applyChromeWindowTile(win);
         function bringForward() {
+            displayReadyWindows.add(win);
+            if (!macOwnerReady) {
+                try {
+                    win.hide();
+                }
+                catch {
+                    /* 所有权未确定前持续隐藏官方窗口。 */
+                }
+                return;
+            }
             applyChromeWindowTile(win);
             raiseOurWindows();
         }
@@ -867,19 +888,35 @@ async function attachElectron() {
         }
     }
     if (isIncognito() && !windowsPlatform) {
-        ownerLease = await writePid();
-        if (!ownerLease) {
+        ownerStartup = (async () => {
+            ownerLease = await writePid();
+            if (!ownerLease) {
+                try {
+                    electron.app.exit(1);
+                }
+                catch {
+                    /* Electron 可能尚未 ready；窗口已隐藏，不会闪出。 */
+                }
+                throw startupBlocked(new Error("[incodex] owner lease refused"));
+            }
+            if (incognitoExitStarted) {
+                await clearPid(ownerLease, raiseServer);
+                return;
+            }
             try {
-                electron.app.exit(1);
+                raiseServer = instance.listenForRaise(stateRoot(), () => raiseOurWindows(), ownerLease);
+                raiseServer.once("error", (error) => {
+                    logLaunch("raise-socket-failed", { error: String(error) });
+                    void clearPid(ownerLease, raiseServer);
+                    try {
+                        electron.app.exit(1);
+                    }
+                    catch {
+                        /* ignore */
+                    }
+                });
             }
-            catch {
-                /* Electron may not be ready yet; returning still prevents a second owner. */
-            }
-            throw startupBlocked(new Error("[incodex] owner lease refused"));
-        }
-        try {
-            raiseServer = instance.listenForRaise(stateRoot(), () => raiseOurWindows(), ownerLease);
-            raiseServer.once("error", (error) => {
+            catch (error) {
                 logLaunch("raise-socket-failed", { error: String(error) });
                 void clearPid(ownerLease, raiseServer);
                 try {
@@ -888,19 +925,12 @@ async function attachElectron() {
                 catch {
                     /* ignore */
                 }
-            });
-        }
-        catch (error) {
-            logLaunch("raise-socket-failed", { error: String(error) });
-            void clearPid(ownerLease, raiseServer);
-            try {
-                electron.app.exit(1);
+                throw startupBlocked(error instanceof Error ? error : new Error(String(error)));
             }
-            catch {
-                /* ignore */
-            }
-            throw startupBlocked(error instanceof Error ? error : new Error(String(error)));
-        }
+            macOwnerReady = true;
+            if (mainWindows(electron).some((win) => displayReadyWindows.has(win)))
+                raiseOurWindows();
+        })();
     }
     if (isIncognito()) {
         electron.app.on("window-all-closed", () => {
@@ -918,6 +948,7 @@ async function attachElectron() {
         ready();
     else
         void electron.app.whenReady().then(ready);
+    await ownerStartup;
 }
 function startRuntime() {
     if (macosUpdate && !isIncognito()) {
