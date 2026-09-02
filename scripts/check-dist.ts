@@ -1,14 +1,27 @@
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const runtimeManifestPath = join(root, "dist/runtime-manifest.json");
+
+function committedSourceCommit(): string {
+  const manifest = JSON.parse(readFileSync(runtimeManifestPath, "utf8")) as {
+    sourceCommit?: unknown;
+  };
+  return typeof manifest.sourceCommit === "string" ? manifest.sourceCommit : "";
+}
 
 function main(): void {
   const built = spawnSync("bun", ["src/build-runtime.ts"], {
     cwd: root,
     encoding: "utf8",
     stdio: "inherit",
+    env: {
+      ...process.env,
+      SOURCE_COMMIT: process.env.SOURCE_COMMIT || committedSourceCommit(),
+    },
   });
   if (built.status !== 0) {
     process.exit(built.status ?? 1);
