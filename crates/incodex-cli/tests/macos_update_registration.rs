@@ -3,20 +3,25 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_cli::macos_update_restore::{
     publish_registration, publish_registration_if_generation, read_registration,
     refresh_registered_helper, remove_registration,
 };
 
+static SCRATCH_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
 fn scratch() -> PathBuf {
+    let sequence = SCRATCH_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let root = std::env::temp_dir().join(format!(
-        "incodex-macos-update-registration-{}-{}",
+        "incodex-macos-update-registration-{}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_nanos()
+            .as_nanos(),
+        sequence,
     ));
     fs::create_dir_all(&root).unwrap();
     root
