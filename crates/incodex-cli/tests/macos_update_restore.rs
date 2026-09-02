@@ -197,8 +197,8 @@ fn invalid_registration_cannot_relaunch_an_untrusted_or_missing_app_path() {
         .expect("completion ends before Helper launch");
 
     assert!(
-        finish.contains("relaunchHost && self.appPath.length > 0"),
-        "relaunch is allowed only after registration has established a trusted application path"
+        finish.contains("relaunchHost && success && self.appPath.length > 0"),
+        "a failed Helper must preserve pending and must never relaunch an untrusted application path"
     );
 }
 
