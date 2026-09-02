@@ -2185,10 +2185,7 @@ function fitCanvas(root, canvas, frame, zoom, panX, panY) {
   const stage = root.querySelector(".incodex-capture-stage");
   if (!stage || !frame)
     return;
-  const style = window.getComputedStyle(stage);
-  const availableWidth = Math.max(1, stage.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight));
-  const availableHeight = Math.max(1, stage.clientHeight - Number.parseFloat(style.paddingTop) - Number.parseFloat(style.paddingBottom));
-  const fit = captureContainScale({ height: canvas.height, width: canvas.width }, { height: availableHeight, width: availableWidth });
+  const fit = captureContainScale({ height: canvas.height, width: canvas.width }, { height: stage.clientHeight, width: stage.clientWidth });
   frame.style.width = `${Math.round(canvas.width * fit)}px`;
   frame.style.height = `${Math.round(canvas.height * fit)}px`;
   frame.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
@@ -4238,7 +4235,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   justify-content: center;
   height: 50vh;
   overflow: hidden;
-  padding: calc(var(--incodex-capture-space) * 5);
+  padding: 0;
   position: relative;
   touch-action: none;
 }

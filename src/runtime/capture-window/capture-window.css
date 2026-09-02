@@ -342,7 +342,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   justify-content: center;
   height: 50vh;
   overflow: hidden;
-  padding: calc(var(--incodex-capture-space) * 5);
+  padding: 0;
   position: relative;
   touch-action: none;
 }

@@ -727,18 +727,9 @@ function fitCanvas(
 ): void {
   const stage = root.querySelector<HTMLElement>(".incodex-capture-stage");
   if (!stage || !frame) return;
-  const style = window.getComputedStyle(stage);
-  const availableWidth = Math.max(
-    1,
-    stage.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight),
-  );
-  const availableHeight = Math.max(
-    1,
-    stage.clientHeight - Number.parseFloat(style.paddingTop) - Number.parseFloat(style.paddingBottom),
-  );
   const fit = captureContainScale(
     { height: canvas.height, width: canvas.width },
-    { height: availableHeight, width: availableWidth },
+    { height: stage.clientHeight, width: stage.clientWidth },
   );
   frame.style.width = `${Math.round(canvas.width * fit)}px`;
   frame.style.height = `${Math.round(canvas.height * fit)}px`;
