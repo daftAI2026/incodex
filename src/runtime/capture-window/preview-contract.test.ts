@@ -183,7 +183,10 @@ describe("capture window preview", () => {
     expect(shadow).toBeLessThan(privacy);
 
     expect(css).toContain("backdrop-filter: blur(3px)");
-    expect(css).toContain("max-width: 56rem");
+    expect(css).toContain("width: clamp(56rem, 60vw, 64rem)");
+    expect(css).toContain(
+      "max-width: calc(100vw - var(--incodex-capture-space) * 8)",
+    );
     expect(css).not.toContain("padding-top: calc(var(--incodex-capture-space) * 13)");
     expect(previewHtml).toContain("--spacing: .25rem");
     expect(css).toContain(
