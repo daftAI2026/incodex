@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖已校验的 macOS 更新资产、Coordinator ready 文件与官方 Sparkle/objc-js 原生能力
+ * [OUTPUT]: 对外提供同步 prepareUpdateHandoff，在官方 main 初始化前完成有界的更新恢复布防
+ * [POS]: runtime 的 Sparkle 交接边界；失败时放弃自动恢复，但绝不跨事件循环破坏官方启动时序
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 // @ts-nocheck
 "use strict";
 
@@ -5,16 +11,16 @@ const { spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
-const { pathToFileURL } = require("node:url");
 
 const REGISTRATION_SCHEMA_VERSION = 2;
 const HELPER_FILE_NAME = "incodex";
 const COORDINATOR_FILE_NAME = "incodex-update-coordinator";
 const INTERPOSER_FILE_NAME = "libincodex-sparkle-interpose.dylib";
-const READY_TIMEOUT_MS = 2_000;
-const READY_POLL_MS = 20;
+const READY_TIMEOUT_MS = 250;
+const READY_POLL_MS = 10;
+const WAIT_CELL = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
 
-async function prepareUpdateHandoff(options = {}) {
+function prepareUpdateHandoff(options = {}) {
   if ((options.platform || process.platform) !== "darwin") return false;
 
   let child = null;
@@ -50,7 +56,7 @@ async function prepareUpdateHandoff(options = {}) {
       },
     });
     const waitForCoordinator = options.waitForCoordinator || waitForReadyFile;
-    if (!(await waitForCoordinator(readyPath, child))) {
+    if (!waitForCoordinator(readyPath, child)) {
       stopChild(child);
       return false;
     }
@@ -68,7 +74,7 @@ async function prepareUpdateHandoff(options = {}) {
     process.env.INCODEX_MACOS_UPDATE_HOST_APP = registration.appPath;
     process.env.INCODEX_MACOS_UPDATE_COORDINATOR_APP = registration.coordinatorAppPath;
     const loadInterposer = options.loadInterposer || defaultLoadInterposer;
-    await loadInterposer(registration.interposerPath, registration.appPath);
+    loadInterposer(registration.interposerPath, registration.appPath);
     delete process.env.INCODEX_MACOS_UPDATE_HOST_APP;
     delete process.env.INCODEX_MACOS_UPDATE_COORDINATOR_APP;
     removeReadyFile(readyPath);
@@ -82,7 +88,7 @@ async function prepareUpdateHandoff(options = {}) {
   }
 }
 
-async function defaultLoadInterposer(interposerPath, appPath) {
+function defaultLoadInterposer(interposerPath, appPath) {
   const modulePath = path.join(
     appPath,
     "Contents",
@@ -93,7 +99,7 @@ async function defaultLoadInterposer(interposerPath, appPath) {
     "dist",
     "index.js",
   );
-  const { NobjcLibrary } = await import(pathToFileURL(modulePath).href);
+  const { NobjcLibrary } = require(modulePath);
   const library = new NobjcLibrary(interposerPath);
   void library.NSObject;
 }
@@ -107,21 +113,14 @@ function stopChild(child) {
 }
 
 function waitForReadyFile(readyPath, child) {
-  return new Promise((resolve) => {
-    const started = Date.now();
-    const timer = setInterval(() => {
-      if (readReadyFile(readyPath)) {
-        clearInterval(timer);
-        resolve(true);
-        return;
-      }
-      if (child?.exitCode !== null || Date.now() - started >= READY_TIMEOUT_MS) {
-        clearInterval(timer);
-        removeReadyFile(readyPath);
-        resolve(false);
-      }
-    }, READY_POLL_MS);
-  });
+  const started = Date.now();
+  while (Date.now() - started < READY_TIMEOUT_MS) {
+    if (readReadyFile(readyPath)) return true;
+    if (typeof child?.exitCode === "number") break;
+    Atomics.wait(WAIT_CELL, 0, 0, READY_POLL_MS);
+  }
+  removeReadyFile(readyPath);
+  return false;
 }
 
 function readReadyFile(readyPath) {

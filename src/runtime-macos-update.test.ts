@@ -158,10 +158,10 @@ describe("macOS seamless update handoff", () => {
     expect(child.unrefCalled).toBe(true);
   });
 
-  test("rejects helper hash mismatch, symlinks, and a foreign app path", async () => {
+  test("rejects helper hash mismatch, symlinks, and a foreign app path", () => {
     const badHash = fixture();
     writeFileSync(badHash.helperPath, "changed");
-    await expect(
+    expect(
       update.prepareUpdateHandoff({
         platform: "darwin",
         userRoot: badHash.userRoot,
@@ -171,14 +171,14 @@ describe("macOS seamless update handoff", () => {
           throw new Error("must not spawn");
         },
       }),
-    ).resolves.toBe(false);
+    ).toBe(false);
 
     const linked = fixture();
     const real = `${linked.helperPath}.real`;
     writeFileSync(real, "helper");
     rmSync(linked.helperPath);
     symlinkSync(real, linked.helperPath);
-    await expect(
+    expect(
       update.prepareUpdateHandoff({
         platform: "darwin",
         userRoot: linked.userRoot,
@@ -188,13 +188,13 @@ describe("macOS seamless update handoff", () => {
           throw new Error("must not spawn");
         },
       }),
-    ).resolves.toBe(false);
+    ).toBe(false);
 
     const foreign = fixture();
     const body = JSON.parse(readFileSync(foreign.registrationPath, "utf8"));
     body.appPath = join(foreign.home, "Other.app");
     writeFileSync(foreign.registrationPath, `${JSON.stringify(body)}\n`);
-    await expect(
+    expect(
       update.prepareUpdateHandoff({
         platform: "darwin",
         userRoot: foreign.userRoot,
@@ -204,12 +204,12 @@ describe("macOS seamless update handoff", () => {
           throw new Error("must not spawn");
         },
       }),
-    ).resolves.toBe(false);
+    ).toBe(false);
   });
 
-  test("is inert outside macOS", async () => {
+  test("is inert outside macOS", () => {
     const f = fixture();
-    await expect(
+    expect(
       update.prepareUpdateHandoff({
         platform: "win32",
         userRoot: f.userRoot,
@@ -219,6 +219,6 @@ describe("macOS seamless update handoff", () => {
           throw new Error("must not spawn");
         },
       }),
-    ).resolves.toBe(false);
+    ).toBe(false);
   });
 });
