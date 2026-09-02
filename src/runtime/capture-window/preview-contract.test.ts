@@ -137,9 +137,6 @@ describe("capture window preview", () => {
     expect(captureWindowCopy("zh-CN").backgroundWallpapers).toBe("壁纸");
     expect(captureWindowCopy("zh-CN").backgroundPlainColor).toBe("纯色");
     expect(captureWindowCopy("zh-CN").backgroundNone).toBe("无背景");
-    const noBackground = markup.indexOf('data-input="none"');
-    expect(noBackground).toBeGreaterThan(padding);
-    expect(noBackground).toBeLessThan(shadow);
     expect(markup).toContain('data-capture-icon="plus"');
     expect(markup).not.toContain('data-capture-icon="image-plus"');
     const transparentMarkup = captureWindowTemplate(
@@ -180,11 +177,13 @@ describe("capture window preview", () => {
 
     const background = markup.indexOf(copy.background);
     const padding = markup.indexOf(copy.padding);
+    const noBackground = markup.indexOf('data-input="none"');
     const shadow = markup.indexOf(copy.shadow);
     const privacy = markup.indexOf(copy.privacy);
     expect(background).toBeGreaterThan(-1);
     expect(background).toBeLessThan(padding);
-    expect(padding).toBeLessThan(shadow);
+    expect(padding).toBeLessThan(noBackground);
+    expect(noBackground).toBeLessThan(shadow);
     expect(shadow).toBeLessThan(privacy);
 
     expect(css).toContain("backdrop-filter: blur(3px)");
