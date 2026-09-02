@@ -292,7 +292,7 @@ fn builds_a_store_activation_request_without_losing_windows_arguments_or_environ
 }
 
 #[test]
-fn transient_package_registration_keeps_session_environment_behind_the_capability_pipe() {
+fn transient_package_registration_delivers_session_environment_before_runtime_bootstrap() {
     let bootstrap =
         Path::new(r"C:\Users\Linus Torvalds\.incodex\sessions\s-one\incodex-windows-bootstrap.cjs");
     let request = WindowsActivationRequest::new(
@@ -323,8 +323,8 @@ fn transient_package_registration_keeps_session_environment_behind_the_capabilit
     let registered = String::from_utf16_lossy(request.transient_debug_environment());
     assert!(registered.contains("NODE_OPTIONS="));
     assert!(registered.contains("incodex-windows-bootstrap.cjs"));
-    assert!(!registered.contains("CODEX_HOME="));
-    assert!(!registered.contains("INCODEX_SESSION_ROOT="));
+    assert!(registered.contains("CODEX_HOME="));
+    assert!(registered.contains("INCODEX_SESSION_ROOT="));
 
     let claimed = request
         .activation_environment(WindowsLaunchMode::Cdp)
