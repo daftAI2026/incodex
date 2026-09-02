@@ -41,6 +41,7 @@ function prepareUpdateHandoff(options = {}) {
     );
     const spawnProcess = options.spawnProcess || spawn;
     const pendingPath = path.join(userRoot, "macos-update", "pending.json");
+    const handoffId = crypto.randomBytes(16).toString("hex");
     child = spawnProcess(registration.coordinatorPath, [], {
       detached: true,
       stdio: "ignore",
@@ -51,6 +52,8 @@ function prepareUpdateHandoff(options = {}) {
         INCODEX_MACOS_UPDATE_INSTALL_ID: registration.installId,
         INCODEX_MACOS_UPDATE_HOST_APP: registration.appPath,
         INCODEX_MACOS_UPDATE_HELPER_PATH: registration.helperPath,
+        INCODEX_MACOS_UPDATE_HELPER_SHA256: registration.helperSha256,
+        INCODEX_MACOS_UPDATE_HANDOFF_ID: handoffId,
         INCODEX_MACOS_UPDATE_READY_PATH: readyPath,
         INCODEX_MACOS_UPDATE_PENDING_PATH: pendingPath,
       },

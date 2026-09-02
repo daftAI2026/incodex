@@ -1,14 +1,18 @@
 /**
- * [INPUT]: 依赖 AppKit 进程生命周期、受控 pending 状态与固定 Incodex Helper
+ * [INPUT]: 依赖 AppKit 进程生命周期、受控 pending/registration 状态与内容寻址 Incodex Helper
  * [OUTPUT]: 提供 Sparkle application bundle 替身，覆盖交互式重启与后台更新后的静默恢复
  * [POS]: macOS 更新链的原生 Coordinator；只编排退出和恢复，不实现 ASAR 修改或签名策略
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 #import <AppKit/AppKit.h>
+#import <CommonCrypto/CommonDigest.h>
 #import <Foundation/Foundation.h>
 #import <dispatch/dispatch.h>
+#import <fcntl.h>
 #import <signal.h>
+#import <sys/file.h>
 #import <sys/stat.h>
+#import <unistd.h>
 
 @interface IncodexUpdateDelegate : NSObject <NSApplicationDelegate>
 @property(nonatomic) BOOL initialLaunch;
@@ -16,6 +20,8 @@
 @property(nonatomic, copy) NSString *installID;
 @property(nonatomic, copy) NSString *appPath;
 @property(nonatomic, copy) NSString *helperPath;
+@property(nonatomic, copy) NSString *helperSha256;
+@property(nonatomic, copy) NSString *handoffId;
 @property(nonatomic, copy) NSString *readyPath;
 @property(nonatomic, copy) NSString *pendingPath;
 @property(nonatomic, copy) NSString *sourceBuild;
@@ -51,13 +57,30 @@
 }
 
 - (BOOL)persistPending {
-    NSDictionary *pending = @{
-        @"schemaVersion": @1,
+    __block BOOL persisted = NO;
+    [self withPendingLock:^BOOL{
+        NSDictionary *current = [self readPrivateJSONAtPath:self.pendingPath maxBytes:64 * 1024];
+        NSNumber *owner = current[@"coordinatorPid"];
+        NSString *handoffId = current[@"handoffId"];
+        if ([handoffId isKindOfClass:NSString.class] &&
+            ![handoffId isEqual:self.handoffId] && [owner isKindOfClass:NSNumber.class] &&
+            [self processIsRunning:owner.intValue]) return NO;
+        persisted = [self writeJSON:[self pendingSnapshot] toPath:self.pendingPath];
+        return persisted;
+    }];
+    return persisted;
+}
+
+- (NSDictionary *)pendingSnapshot {
+    return @{
+        @"schemaVersion": @2,
         @"installId": self.installID,
         @"appPath": self.appPath,
         @"helperPath": self.helperPath,
+        @"helperSha256": self.helperSha256,
+        @"handoffId": self.handoffId,
+        @"coordinatorPid": @(NSProcessInfo.processInfo.processIdentifier),
     };
-    return [self writeJSON:pending toPath:self.pendingPath];
 }
 
 - (NSString *)currentHostBuild {
@@ -92,15 +115,10 @@
             return;
         }
         if ([self hostBundleChanged]) {
-            NSDictionary *pending = @{
-                @"installId": self.installID,
-                @"appPath": self.appPath,
-                @"helperPath": self.helperPath,
-            };
-            [self recoverAfterUpdate:pending relaunchHost:NO];
+            [self recoverAfterUpdate:[self pendingSnapshot] relaunchHost:NO];
             return;
         }
-        [NSFileManager.defaultManager removeItemAtPath:self.pendingPath error:nil];
+        [self removePendingIfOwned:[self pendingSnapshot]];
         self.allowTermination = YES;
         [NSApp terminate:nil];
     });
@@ -137,49 +155,236 @@
     }];
 }
 
-- (void)recoverAfterUpdate:(NSDictionary *)pending relaunchHost:(BOOL)relaunchHost {
-    NSString *helper = pending[@"helperPath"];
-    NSString *installID = pending[@"installId"];
-    NSString *app = pending[@"appPath"];
-    if (![helper isKindOfClass:NSString.class] || ![installID isKindOfClass:NSString.class] ||
-        ![app isKindOfClass:NSString.class]) {
-        [NSFileManager.defaultManager removeItemAtPath:self.pendingPath error:nil];
+- (NSDictionary *)readPrivateJSONAtPath:(NSString *)path maxBytes:(off_t)maxBytes {
+    int descriptor = open(path.fileSystemRepresentation, O_RDONLY | O_NOFOLLOW);
+    if (descriptor < 0) return nil;
+
+    struct stat metadata;
+    if (fstat(descriptor, &metadata) != 0 || !S_ISREG(metadata.st_mode) ||
+        metadata.st_uid != geteuid() || (metadata.st_mode & 0077) != 0 ||
+        metadata.st_size <= 0 || metadata.st_size > maxBytes) {
+        close(descriptor);
+        return nil;
+    }
+
+    NSFileHandle *handle = [[NSFileHandle alloc] initWithFileDescriptor:descriptor closeOnDealloc:YES];
+    NSData *data = [handle readDataToEndOfFile];
+    id body = data == nil ? nil : [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    return [body isKindOfClass:NSDictionary.class] ? body : nil;
+}
+
+- (BOOL)withPendingLock:(BOOL (^)(void))body {
+    NSString *directory = self.pendingPath.stringByDeletingLastPathComponent;
+    NSString *lockPath = [directory stringByAppendingPathComponent:@".pending.lock"];
+    int descriptor = open(lockPath.fileSystemRepresentation, O_CREAT | O_RDWR | O_NOFOLLOW, 0600);
+    if (descriptor < 0) return NO;
+    struct stat metadata;
+    BOOL valid = fstat(descriptor, &metadata) == 0 && S_ISREG(metadata.st_mode) &&
+                 metadata.st_uid == geteuid() && (metadata.st_mode & 0777) == 0600;
+    if (!valid || flock(descriptor, LOCK_EX) != 0) {
+        close(descriptor);
+        return NO;
+    }
+    BOOL result = body();
+    flock(descriptor, LOCK_UN);
+    close(descriptor);
+    return result;
+}
+
+- (BOOL)isSHA256:(NSString *)value {
+    if (![value isKindOfClass:NSString.class] || value.length != 64) return NO;
+    NSCharacterSet *hex = [NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdef"];
+    return [value rangeOfCharacterFromSet:hex.invertedSet].location == NSNotFound;
+}
+
+- (NSString *)sha256ForDescriptor:(int)descriptor size:(off_t)size {
+    if (size <= 0 || size > 16 * 1024 * 1024 || lseek(descriptor, 0, SEEK_SET) < 0) return nil;
+    CC_SHA256_CTX context;
+    CC_SHA256_Init(&context);
+    unsigned char buffer[64 * 1024];
+    off_t remaining = size;
+    while (remaining > 0) {
+        ssize_t count = read(descriptor, buffer, MIN((off_t)sizeof(buffer), remaining));
+        if (count <= 0) return nil;
+        CC_SHA256_Update(&context, buffer, (CC_LONG)count);
+        remaining -= count;
+    }
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256_Final(digest, &context);
+    NSMutableString *hex = [NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
+    for (NSUInteger index = 0; index < CC_SHA256_DIGEST_LENGTH; index += 1) {
+        [hex appendFormat:@"%02x", digest[index]];
+    }
+    return hex;
+}
+
+- (BOOL)verifyHelperAtPath:(NSString *)helper sha256:(NSString *)sha256 {
+    if (![self isSHA256:sha256] || !helper.isAbsolutePath) return NO;
+    NSString *root = self.pendingPath.stringByDeletingLastPathComponent.stringByDeletingLastPathComponent;
+    NSString *expected = [[[[root stringByAppendingPathComponent:@"helpers/macos-update"]
+        stringByAppendingPathComponent:sha256] stringByAppendingPathComponent:@"incodex"]
+        stringByStandardizingPath];
+    if (![[helper stringByStandardizingPath] isEqualToString:expected]) return NO;
+
+    int descriptor = open(helper.fileSystemRepresentation, O_RDONLY | O_NOFOLLOW);
+    if (descriptor < 0) return NO;
+    struct stat metadata;
+    BOOL valid = fstat(descriptor, &metadata) == 0 && S_ISREG(metadata.st_mode) &&
+                 metadata.st_uid == geteuid() && (metadata.st_mode & 0777) == 0700;
+    NSString *actual = valid ? [self sha256ForDescriptor:descriptor size:metadata.st_size] : nil;
+    close(descriptor);
+    return actual != nil && [actual isEqualToString:sha256];
+}
+
+- (NSDictionary *)currentRegistrationForPending:(NSDictionary *)pending {
+    NSString *directory = self.pendingPath.stringByDeletingLastPathComponent;
+    NSString *registrationPath = [directory stringByAppendingPathComponent:@"registration.json"];
+    NSDictionary *registration = [self readPrivateJSONAtPath:registrationPath maxBytes:64 * 1024];
+    if (![registration isKindOfClass:NSDictionary.class] ||
+        ![registration[@"schemaVersion"] isEqual:@2] ||
+        ![registration[@"installId"] isEqual:pending[@"installId"]] ||
+        ![registration[@"appPath"] isEqual:pending[@"appPath"]]) {
+        return nil;
+    }
+    NSString *helper = registration[@"helperPath"];
+    NSString *sha256 = registration[@"helperSha256"];
+    if (![helper isKindOfClass:NSString.class] || ![sha256 isKindOfClass:NSString.class] ||
+        ![self verifyHelperAtPath:helper sha256:sha256]) return nil;
+    return registration;
+}
+
+- (BOOL)removePendingIfOwned:(NSDictionary *)expected {
+    __block BOOL removed = NO;
+    [self withPendingLock:^BOOL{
+        NSDictionary *current = [self readPrivateJSONAtPath:self.pendingPath maxBytes:64 * 1024];
+        if (![self pending:current isOwnedBy:expected]) return NO;
+        removed = [NSFileManager.defaultManager removeItemAtPath:self.pendingPath error:nil];
+        return removed;
+    }];
+    return removed;
+}
+
+- (BOOL)pending:(NSDictionary *)current isOwnedBy:(NSDictionary *)expected {
+    if (current == nil || ![current[@"installId"] isEqual:expected[@"installId"]] ||
+        ![current[@"appPath"] isEqual:expected[@"appPath"]]) return NO;
+    NSString *handoffId = expected[@"handoffId"];
+    if (![handoffId isKindOfClass:NSString.class] || handoffId.length == 0 ||
+        ![current[@"handoffId"] isEqual:handoffId]) return NO;
+    NSNumber *owner = current[@"coordinatorPid"];
+    return [owner isKindOfClass:NSNumber.class] &&
+           owner.intValue == NSProcessInfo.processInfo.processIdentifier;
+}
+
+- (BOOL)pendingIsOwned:(NSDictionary *)expected {
+    __block BOOL owned = NO;
+    [self withPendingLock:^BOOL{
+        NSDictionary *current = [self readPrivateJSONAtPath:self.pendingPath maxBytes:64 * 1024];
+        owned = [self pending:current isOwnedBy:expected];
+        return YES;
+    }];
+    return owned;
+}
+
+- (NSDictionary *)loadAndAdoptPending {
+    __block NSDictionary *adopted = nil;
+    [self withPendingLock:^BOOL{
+        NSDictionary *current = [self readPrivateJSONAtPath:self.pendingPath maxBytes:64 * 1024];
+        if (current == nil || ![current[@"installId"] isKindOfClass:NSString.class] ||
+            ![current[@"appPath"] isKindOfClass:NSString.class]) return NO;
+        NSNumber *owner = current[@"coordinatorPid"];
+        if ([owner isKindOfClass:NSNumber.class] &&
+            owner.intValue != NSProcessInfo.processInfo.processIdentifier &&
+            [self processIsRunning:owner.intValue]) return NO;
+        NSMutableDictionary *next = current.mutableCopy;
+        NSString *handoffId = next[@"handoffId"];
+        if (![handoffId isKindOfClass:NSString.class] || handoffId.length == 0) {
+            next[@"handoffId"] = NSUUID.UUID.UUIDString.lowercaseString;
+        }
+        next[@"schemaVersion"] = @2;
+        next[@"coordinatorPid"] = @(NSProcessInfo.processInfo.processIdentifier);
+        if (![self writeJSON:next toPath:self.pendingPath]) return NO;
+        adopted = next.copy;
+        return YES;
+    }];
+    return adopted;
+}
+
+- (void)finishRecovery:(NSDictionary *)pending relaunchHost:(BOOL)relaunchHost success:(BOOL)success {
+    if (success) {
+        if (![self removePendingIfOwned:pending]) {
+            [NSApp terminate:nil];
+            return;
+        }
+    } else if (![self pendingIsOwned:pending]) {
         [NSApp terminate:nil];
         return;
     }
-    self.appPath = app;
+    if (relaunchHost && self.appPath.length > 0) {
+        [self launchHostAndExit];
+    } else {
+        self.allowTermination = YES;
+        [NSApp terminate:nil];
+    }
+}
+
+- (void)launchRecovery:(NSDictionary *)pending relaunchHost:(BOOL)relaunchHost retry:(NSUInteger)retry {
+    if (![self pendingIsOwned:pending]) {
+        [NSApp terminate:nil];
+        return;
+    }
+    NSString *installID = pending[@"installId"];
+    NSString *app = pending[@"appPath"];
+    NSDictionary *registration = [self currentRegistrationForPending:pending];
+    NSString *helper = registration[@"helperPath"];
+    if (![installID isKindOfClass:NSString.class] || ![app isKindOfClass:NSString.class] ||
+        ![helper isKindOfClass:NSString.class]) {
+        [self finishRecovery:pending relaunchHost:relaunchHost success:NO];
+        return;
+    }
+    self.appPath = registration[@"appPath"];
     NSTask *task = [[NSTask alloc] init];
     task.executableURL = [NSURL fileURLWithPath:helper];
     NSMutableDictionary *environment = NSProcessInfo.processInfo.environment.mutableCopy;
     environment[@"INCODEX_MACOS_UPDATE_RELAUNCH"] = @"1";
     environment[@"INCODEX_MACOS_UPDATE_INSTALL_ID"] = installID;
+    environment[@"INCODEX_MACOS_UPDATE_HELPER_SHA256"] = registration[@"helperSha256"];
     task.environment = environment;
     task.standardOutput = [NSFileHandle fileHandleWithNullDevice];
     task.standardError = [NSFileHandle fileHandleWithNullDevice];
     __weak typeof(self) weakSelf = self;
-    task.terminationHandler = ^(__unused NSTask *finished) {
+    task.terminationHandler = ^(NSTask *finished) {
         dispatch_async(dispatch_get_main_queue(), ^{
             typeof(self) self = weakSelf;
             if (self == nil) return;
-            [NSFileManager.defaultManager removeItemAtPath:self.pendingPath error:nil];
-            if (relaunchHost) {
-                [self launchHostAndExit];
-            } else {
-                self.allowTermination = YES;
-                [NSApp terminate:nil];
+            if (finished.terminationStatus == 0) {
+                [self finishRecovery:pending relaunchHost:relaunchHost success:YES];
+                return;
             }
+            NSDictionary *latest = [self currentRegistrationForPending:pending];
+            NSString *latestHelper = latest[@"helperPath"];
+            if (retry == 0 && [latestHelper isKindOfClass:NSString.class] &&
+                ![latestHelper isEqualToString:helper]) {
+                [self launchRecovery:pending relaunchHost:relaunchHost retry:retry + 1];
+                return;
+            }
+            [self finishRecovery:pending relaunchHost:relaunchHost success:NO];
         });
     };
     NSError *error = nil;
     if (![task launchAndReturnError:&error]) {
-        [NSFileManager.defaultManager removeItemAtPath:self.pendingPath error:nil];
-        if (relaunchHost) {
-            [self launchHostAndExit];
-        } else {
-            self.allowTermination = YES;
-            [NSApp terminate:nil];
+        NSDictionary *latest = [self currentRegistrationForPending:pending];
+        NSString *latestHelper = latest[@"helperPath"];
+        if (retry == 0 && [latestHelper isKindOfClass:NSString.class] &&
+            ![latestHelper isEqualToString:helper]) {
+            [self launchRecovery:pending relaunchHost:relaunchHost retry:retry + 1];
+            return;
         }
+        [self finishRecovery:pending relaunchHost:relaunchHost success:NO];
     }
+}
+
+- (void)recoverAfterUpdate:(NSDictionary *)pending relaunchHost:(BOOL)relaunchHost {
+    [self launchRecovery:pending relaunchHost:relaunchHost retry:0];
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
@@ -190,10 +395,13 @@
         self.installID = environment[@"INCODEX_MACOS_UPDATE_INSTALL_ID"];
         self.appPath = environment[@"INCODEX_MACOS_UPDATE_HOST_APP"];
         self.helperPath = environment[@"INCODEX_MACOS_UPDATE_HELPER_PATH"];
+        self.helperSha256 = environment[@"INCODEX_MACOS_UPDATE_HELPER_SHA256"];
+        self.handoffId = environment[@"INCODEX_MACOS_UPDATE_HANDOFF_ID"];
         self.readyPath = environment[@"INCODEX_MACOS_UPDATE_READY_PATH"];
         self.pendingPath = environment[@"INCODEX_MACOS_UPDATE_PENDING_PATH"];
         if (self.hostPID <= 0 || self.installID.length == 0 || self.appPath.length == 0 ||
-            self.helperPath.length == 0 || self.readyPath.length == 0 || self.pendingPath.length == 0) {
+            self.helperPath.length == 0 || self.helperSha256.length == 0 || self.handoffId.length == 0 ||
+            self.readyPath.length == 0 || self.pendingPath.length == 0) {
             [NSApp terminate:nil];
             return;
         }
@@ -216,9 +424,8 @@
         root = root.stringByDeletingLastPathComponent;
     }
     self.pendingPath = [root stringByAppendingPathComponent:@"macos-update/pending.json"];
-    NSData *data = [NSData dataWithContentsOfFile:self.pendingPath];
-    NSDictionary *pending = data == nil ? nil : [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-    if (![pending isKindOfClass:NSDictionary.class]) {
+    NSDictionary *pending = [self loadAndAdoptPending];
+    if (pending == nil) {
         [NSApp terminate:nil];
         return;
     }

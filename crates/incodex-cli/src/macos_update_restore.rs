@@ -36,20 +36,38 @@ pub fn try_run_relaunch() -> Option<Result<(), String>> {
             .ok()
             .as_deref(),
     )?;
-    Some(request.and_then(run_relaunch_recovery))
+    let expected_helper_sha256 = std::env::var("INCODEX_MACOS_UPDATE_HELPER_SHA256").ok();
+    let result = request.and_then(|install_id| {
+        run_relaunch_recovery(install_id, expected_helper_sha256.as_deref())
+    });
+    if let Err(error) = &result {
+        crate::macos_update_log::log_coordinator_event(
+            &incodex_core::paths::user_root(),
+            &format!("relaunch recovery failed: {error}"),
+        );
+    }
+    Some(result)
 }
 
-fn run_relaunch_recovery(install_id: String) -> Result<(), String> {
+fn run_relaunch_recovery(
+    install_id: String,
+    expected_helper_sha256: Option<&str>,
+) -> Result<(), String> {
     let root = incodex_core::paths::user_root();
     let registration = read_registration(&root)?
         .ok_or("macOS update registration disappeared before relaunch recovery")?;
     if registration.install_id != install_id {
         return Err("macOS update relaunch install epoch is stale".into());
     }
+    if let Some(expected_helper_sha256) = expected_helper_sha256 {
+        if registration.helper_sha256 != expected_helper_sha256 {
+            return Err("macOS update helper generation changed before recovery".into());
+        }
+    }
     if !is_official_app(&registration.app_path, None) {
         return Err("macOS update relaunch is not bound to the official Codex app".into());
     }
-    verify_running_helper(&registration)?;
+    verify_running_helper(&root, &registration, expected_helper_sha256)?;
     let build = current_build(&registration.app_path)
         .ok_or("macOS update relaunch cannot read the replacement Codex build")?;
     crate::macos_update_log::log_coordinator_event(
@@ -73,18 +91,35 @@ fn current_build(app: &std::path::Path) -> Option<u64> {
     read_plist_info(app)?.app_build.parse::<u64>().ok()
 }
 
-fn verify_running_helper(registration: &UpdateRegistration) -> Result<(), String> {
+fn verify_running_helper(
+    root: &std::path::Path,
+    registration: &UpdateRegistration,
+    expected_helper_sha256: Option<&str>,
+) -> Result<(), String> {
+    let expected_helper_sha256 = expected_helper_sha256.unwrap_or(&registration.helper_sha256);
+    if expected_helper_sha256.len() != 64
+        || !expected_helper_sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err("macOS update helper received an invalid content hash".into());
+    }
     let current = std::env::current_exe()
         .map_err(|error| format!("cannot locate the running macOS update helper: {error}"))?;
     let current = fs::canonicalize(&current)
         .map_err(|error| format!("cannot resolve the running macOS update helper: {error}"))?;
-    let expected = fs::canonicalize(&registration.helper_path)
+    let expected = root
+        .join("helpers")
+        .join("macos-update")
+        .join(expected_helper_sha256)
+        .join("incodex");
+    let expected = fs::canonicalize(&expected)
         .map_err(|error| format!("cannot resolve the registered macOS update helper: {error}"))?;
     if current != expected {
         return Err("macOS update helper executable does not match its registration".into());
     }
     let digest = sha256_hex(&read_regular_file(&current, "running macOS update helper")?);
-    if digest != registration.helper_sha256 {
+    if digest != expected_helper_sha256 {
         return Err("running macOS update helper failed its content hash".into());
     }
     Ok(())

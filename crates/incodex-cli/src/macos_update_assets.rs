@@ -1,6 +1,6 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -282,12 +282,55 @@ pub fn remove_registration(root: &Path, install_id: &str) -> Result<(), String> 
     if registration.install_id != install_id {
         return Ok(());
     }
+    let _pending_lock = pending_control_lock(root)?;
     remove_private_file_if_exists(&root.join("macos-update").join("pending.json"))?;
     match fs::remove_file(&path) {
         Ok(()) => sync_parent(&path),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(format!("cannot remove macOS update registration: {error}")),
     }
+}
+
+struct PendingControlLock(File);
+
+impl Drop for PendingControlLock {
+    fn drop(&mut self) {
+        unsafe {
+            libc::flock(self.0.as_raw_fd(), libc::LOCK_UN);
+        }
+    }
+}
+
+fn pending_control_lock(root: &Path) -> Result<PendingControlLock, String> {
+    let directory = root.join("macos-update");
+    ensure_private_dir(&directory)?;
+    let path = directory.join(".pending.lock");
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .write(true)
+        .create(true)
+        .mode(PRIVATE_FILE_MODE)
+        .custom_flags(libc::O_NOFOLLOW);
+    let file = options
+        .open(&path)
+        .map_err(|error| format!("cannot open macOS update pending lock: {error}"))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("cannot inspect macOS update pending lock: {error}"))?;
+    if !metadata.is_file()
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.mode() & 0o777 != PRIVATE_FILE_MODE
+    {
+        return Err("macOS update pending lock is not a private current-user file".into());
+    }
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
+        return Err(format!(
+            "cannot lock macOS update pending state: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(PendingControlLock(file))
 }
 
 fn remove_private_file_if_exists(path: &Path) -> Result<(), String> {
