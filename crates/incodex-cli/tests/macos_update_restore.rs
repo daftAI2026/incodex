@@ -1,3 +1,8 @@
+//! [INPUT]: 依赖 macOS 更新恢复解析器与原生 Coordinator 源码契约
+//! [OUTPUT]: 验证重启恢复入口、Sparkle 退出转发及后台更新后的静默恢复行为
+//! [POS]: incodex-cli 的 macOS 更新状态机回归边界，约束原生桥接不丢失任何更新模式
+//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+
 #![cfg(target_os = "macos")]
 
 use std::process::Command;
@@ -52,5 +57,31 @@ fn coordinator_forwards_sparkle_quit_to_the_running_host() {
     assert!(
         !termination_handler.contains("if (self.terminationPending) return"),
         "Sparkle may retry its quit event after the host delays or cancels termination, so the Coordinator must forward every retry"
+    );
+}
+
+#[test]
+fn coordinator_repairs_a_background_update_when_the_host_later_exits() {
+    let source = include_str!("../native/macos_update_coordinator.m");
+    let host_exit_handler = source
+        .split("- (void)armHostExitObservation")
+        .nth(1)
+        .expect("coordinator observes the host process")
+        .split("- (BOOL)requestHostTermination")
+        .next()
+        .expect("host exit observation ends before quit forwarding");
+
+    assert!(
+        host_exit_handler.contains("hostBundleChanged"),
+        "a background Sparkle install replaces the app before the user later quits, so host exit must distinguish an updated bundle from an ordinary close"
+    );
+    assert!(
+        host_exit_handler.contains("recoverAfterUpdate")
+            && host_exit_handler.contains("relaunchHost:NO"),
+        "background-update recovery must reuse the registered helper without reopening an app the user chose to close"
+    );
+    assert!(
+        host_exit_handler.contains("removeItemAtPath:self.pendingPath"),
+        "an ordinary close with no replacement must clear its launch-scoped pending marker"
     );
 }
