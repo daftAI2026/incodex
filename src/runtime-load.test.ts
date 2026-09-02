@@ -42,7 +42,7 @@ describe("runtime load", () => {
 
   test("the asar loader starts official main before awaiting Runtime attachment", () => {
     const loader = readFileSync(join(import.meta.dir, "runtime/incodex-loader.cts"), "utf8");
-    expect(loader).toContain("const runtimeStartup = loadMain();");
+    expect(loader).toContain("runtimeStartup = loadMain();");
     expect(loader).toContain("require(originalMain())");
     expect(loader).toContain("await runtimeStartup");
     expect(loader).toContain('error?.code === "INCODEX_STARTUP_BLOCKED"');

@@ -161,25 +161,38 @@ function externalMain(env) {
     verifyRuntimeFiles(releaseDir, files);
     return path.join(releaseDir, MAIN_NAME);
 }
-async function loadMain() {
+function loadMain() {
     const hot = hotMain(process.env, process.execPath);
     const file = hot || externalMain(process.env);
     if (!fs.existsSync(file))
         throw new Error("[incodex] missing incodex-main.cjs");
     const runtime = require(file);
     if (runtime && typeof runtime.startupGate?.then === "function")
-        await runtime.startupGate;
+        return runtime.startupGate;
+    return null;
+}
+function reportAttachError(error) {
+    const text = error && error.message ? String(error.message) : String(error);
+    console.error("[incodex] attach failed", text.slice(0, 300));
+    return error?.code === "INCODEX_STARTUP_BLOCKED";
 }
 async function bootstrap() {
+    let runtimeStartup = null;
     try {
-        await loadMain();
+        runtimeStartup = loadMain();
     }
     catch (error) {
-        const text = error && error.message ? String(error.message) : String(error);
-        console.error("[incodex] attach failed", text.slice(0, 300));
-        if (error?.code === "INCODEX_STARTUP_BLOCKED")
+        if (reportAttachError(error))
             return;
     }
     require(originalMain());
+    if (!runtimeStartup)
+        return;
+    try {
+        await runtimeStartup;
+    }
+    catch (error) {
+        reportAttachError(error);
+    }
 }
 void bootstrap();
