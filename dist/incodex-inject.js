@@ -505,7 +505,24 @@ var capturePresets = [
   { colors: ["#ffcf98", "#ea785b", "#722f45"], id: "ember", section: "gradients" },
   { colors: ["#57606f", "#2d3440", "#15191f"], id: "graphite", section: "gradients" }
 ];
-var capturePlainColors = ["#121212", "#ffffff", "#d1444b"];
+var capturePlainColors = [
+  "#121212",
+  "#ffffff",
+  "#e33345",
+  "#f78521",
+  "#f2a81a",
+  "#188f51",
+  "#0c8ce8",
+  "#8536ec",
+  "#383838",
+  "#ebebeb",
+  "#fabdb5",
+  "#ffc570",
+  "#fade8f",
+  "#a0e8bb",
+  "#a9d6f9",
+  "#cfaff0"
+];
 var captureRasterPresetIds = capturePresets.filter((preset) => preset.section === "wallpapers").map((preset) => preset.id);
 var capturePresetSections = [
   {
@@ -1500,17 +1517,18 @@ function backgroundGridTemplate(state, copy, lastBackgroundColor, wallpaperDataU
       </section>
       <section class="incodex-capture-background-section" data-background-section="plain-color" data-active="${activeSection === "plain-color" || activeSection === "none"}" aria-label="${copy.backgroundPlainColor}">
         <h3 class="incodex-capture-background-section-title">${copy.backgroundPlainColor}</h3>
-        <div class="incodex-capture-background-grid">
+        <div class="incodex-capture-background-grid incodex-capture-background-grid-plain">
+          ${plainColorButtonsTemplate(state, capturePlainColors.slice(0, 8))}
           <button class="incodex-capture-background-option incodex-capture-checker" data-background="transparent" type="button" aria-label="${copy.backgroundNone}" title="${copy.backgroundNone}" aria-pressed="${transparent}"></button>
-          ${plainColorButtonsTemplate(state)}
+          ${plainColorButtonsTemplate(state, capturePlainColors.slice(8))}
           <button class="incodex-capture-background-option incodex-capture-color-label" data-background-custom data-color-trigger="background" data-selected="${custom}" type="button" aria-label="${copy.custom}" title="${copy.custom}" aria-haspopup="dialog" aria-expanded="false" data-state="closed" style="--capture-swatch:${lastBackgroundColor}">${customIcon}</button>
         </div>
       </section>
     </div>
   `;
 }
-function plainColorButtonsTemplate(state) {
-  return capturePlainColors.map((color) => {
+function plainColorButtonsTemplate(state, colors) {
+  return colors.map((color) => {
     const selected = state.background.kind === "color" && state.background.color.toLowerCase() === color.toLowerCase();
     return `<button class="incodex-capture-background-option" data-background-color="${color}" type="button" aria-label="${color}" title="${color}" aria-pressed="${selected}" style="--capture-swatch:${color}"></button>`;
   }).join("");
@@ -4551,6 +4569,17 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   grid-template-columns: repeat(5, minmax(0, 1fr));
   justify-items: center;
   width: 100%;
+}
+
+.incodex-capture-background-grid-plain {
+  gap: var(--incodex-capture-space);
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+}
+
+.incodex-capture-background-grid-plain .incodex-capture-background-option {
+  height: calc(var(--incodex-capture-space) * 5);
+  min-width: calc(var(--incodex-capture-space) * 5);
+  width: calc(var(--incodex-capture-space) * 5);
 }
 
 .incodex-capture-background-option {

@@ -108,13 +108,13 @@ describe("capture window preview", () => {
     expect(wallpapersSection).toBeLessThan(plainColorSection);
     expect(markup.match(/data-background-color=/g)).toHaveLength(16);
     const plainColorMarkup = markup.slice(plainColorSection);
-    expect(plainColorMarkup.indexOf('data-background-color="#7a3ae1"')).toBeLessThan(
+    expect(plainColorMarkup.indexOf('data-background-color="#8536ec"')).toBeLessThan(
       plainColorMarkup.indexOf('data-background="transparent"'),
     );
     expect(plainColorMarkup.indexOf('data-background="transparent"')).toBeLessThan(
       plainColorMarkup.indexOf('data-background-color="#383838"'),
     );
-    expect(plainColorMarkup.indexOf('data-background-color="#c8aeea"')).toBeLessThan(
+    expect(plainColorMarkup.indexOf('data-background-color="#cfaff0"')).toBeLessThan(
       plainColorMarkup.indexOf("data-background-custom"),
     );
     expect(copy.backgroundNone).toBe("None");

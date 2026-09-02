@@ -31,7 +31,24 @@ export const capturePresets: readonly CapturePreset[] = [
   { colors: ["#57606f", "#2d3440", "#15191f"], id: "graphite", section: "gradients" },
 ] as const;
 
-export const capturePlainColors = ["#121212", "#ffffff", "#d1444b"] as const;
+export const capturePlainColors = [
+  "#121212",
+  "#ffffff",
+  "#e33345",
+  "#f78521",
+  "#f2a81a",
+  "#188f51",
+  "#0c8ce8",
+  "#8536ec",
+  "#383838",
+  "#ebebeb",
+  "#fabdb5",
+  "#ffc570",
+  "#fade8f",
+  "#a0e8bb",
+  "#a9d6f9",
+  "#cfaff0",
+] as const;
 
 export const captureRasterPresetIds: readonly CapturePresetId[] = capturePresets
   .filter((preset) => preset.section === "wallpapers")

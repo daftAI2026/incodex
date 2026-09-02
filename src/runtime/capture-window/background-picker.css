@@ -31,6 +31,17 @@
   width: 100%;
 }
 
+.incodex-capture-background-grid-plain {
+  gap: var(--incodex-capture-space);
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+}
+
+.incodex-capture-background-grid-plain .incodex-capture-background-option {
+  height: calc(var(--incodex-capture-space) * 5);
+  min-width: calc(var(--incodex-capture-space) * 5);
+  width: calc(var(--incodex-capture-space) * 5);
+}
+
 .incodex-capture-background-option {
   background: var(--capture-swatch);
   background-clip: border-box;

@@ -178,9 +178,10 @@ function backgroundGridTemplate(
       </section>
       <section class="incodex-capture-background-section" data-background-section="plain-color" data-active="${activeSection === "plain-color" || activeSection === "none"}" aria-label="${copy.backgroundPlainColor}">
         <h3 class="incodex-capture-background-section-title">${copy.backgroundPlainColor}</h3>
-        <div class="incodex-capture-background-grid">
+        <div class="incodex-capture-background-grid incodex-capture-background-grid-plain">
+          ${plainColorButtonsTemplate(state, capturePlainColors.slice(0, 8))}
           <button class="incodex-capture-background-option incodex-capture-checker" data-background="transparent" type="button" aria-label="${copy.backgroundNone}" title="${copy.backgroundNone}" aria-pressed="${transparent}"></button>
-          ${plainColorButtonsTemplate(state)}
+          ${plainColorButtonsTemplate(state, capturePlainColors.slice(8))}
           <button class="incodex-capture-background-option incodex-capture-color-label" data-background-custom data-color-trigger="background" data-selected="${custom}" type="button" aria-label="${copy.custom}" title="${copy.custom}" aria-haspopup="dialog" aria-expanded="false" data-state="closed" style="--capture-swatch:${lastBackgroundColor}">${customIcon}</button>
         </div>
       </section>
@@ -188,8 +189,11 @@ function backgroundGridTemplate(
   `;
 }
 
-function plainColorButtonsTemplate(state: CaptureWindowState): string {
-  return capturePlainColors.map((color) => {
+function plainColorButtonsTemplate(
+  state: CaptureWindowState,
+  colors: readonly string[],
+): string {
+  return colors.map((color) => {
     const selected = state.background.kind === "color" &&
       state.background.color.toLowerCase() === color.toLowerCase();
     return `<button class="incodex-capture-background-option" data-background-color="${color}" type="button" aria-label="${color}" title="${color}" aria-pressed="${selected}" style="--capture-swatch:${color}"></button>`;
