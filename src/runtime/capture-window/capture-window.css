@@ -164,10 +164,10 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   grid-template-rows: auto auto auto;
   isolation: isolate;
   max-height: calc(100dvh - var(--incodex-capture-space) * 8);
-  max-width: 56rem;
+  max-width: calc(100vw - var(--incodex-capture-space) * 8);
   overflow: hidden;
   position: relative;
-  width: min(56rem, calc(100vw - var(--incodex-capture-space) * 8));
+  width: clamp(56rem, 60vw, 64rem);
   container-type: inline-size;
 }
 
