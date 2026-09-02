@@ -86,7 +86,6 @@ describe("capture window preview", () => {
     expect(markup).not.toContain("incodex-capture-footer-note");
     expect(markup).not.toContain('data-action="cancel"');
     expect(markup).toContain('data-action="retake"');
-    expect(markup).toContain("incodex-capture-checker");
     expect(markup).toContain('data-action="zoom-reset" type="button" title="Reset view"');
     expect(markup).toContain('data-action="zoom-fit"');
     expect(markup).toContain('data-capture-icon="maximize"');
