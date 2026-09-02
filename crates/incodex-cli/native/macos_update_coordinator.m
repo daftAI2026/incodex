@@ -327,6 +327,17 @@
     }
 }
 
+- (BOOL)launchTaskIfPendingOwned:(NSDictionary *)pending task:(NSTask *)task error:(NSError **)error {
+    __block BOOL launched = NO;
+    [self withPendingLock:^BOOL{
+        NSDictionary *current = [self readPrivateJSONAtPath:self.pendingPath maxBytes:64 * 1024];
+        if (![self pending:current isOwnedBy:pending]) return NO;
+        launched = [task launchAndReturnError:error];
+        return launched;
+    }];
+    return launched;
+}
+
 - (void)launchRecovery:(NSDictionary *)pending relaunchHost:(BOOL)relaunchHost retry:(NSUInteger)retry {
     if (![self pendingIsOwned:pending]) {
         [NSApp terminate:nil];
@@ -371,7 +382,7 @@
         });
     };
     NSError *error = nil;
-    if (![task launchAndReturnError:&error]) {
+    if (![self launchTaskIfPendingOwned:pending task:task error:&error]) {
         NSDictionary *latest = [self currentRegistrationForPending:pending];
         NSString *latestHelper = latest[@"helperPath"];
         if (retry == 0 && [latestHelper isKindOfClass:NSString.class] &&

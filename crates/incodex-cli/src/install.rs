@@ -275,6 +275,27 @@ fn register_update_restore(
     Ok(())
 }
 
+fn register_update_restore_if_generation(
+    root: &Path,
+    app: &Path,
+    helper_source: &Path,
+    result: &CommandResult,
+    expected_helper_sha256: &str,
+) -> Result<(), String> {
+    let install_id = result
+        .install_id
+        .as_deref()
+        .ok_or("restored app has no install epoch for generation commit")?;
+    crate::macos_update_restore::publish_registration_if_generation(
+        root,
+        helper_source,
+        app,
+        install_id,
+        expected_helper_sha256,
+    )?;
+    Ok(())
+}
+
 fn cancel_update_restore(root: &Path, app: &Path) -> Result<(), String> {
     let Some(registration) = crate::macos_update_restore::read_registration(root)? else {
         return Ok(());
@@ -531,6 +552,7 @@ pub(crate) fn reinstall_after_official_update(
     app: &Path,
     helper_source: &Path,
     expected_build: u64,
+    expected_helper_sha256: &str,
 ) -> Result<String, String> {
     let guard = AppGuard::for_app(app)?;
     guard.ensure()?;
@@ -539,7 +561,13 @@ pub(crate) fn reinstall_after_official_update(
         install_app_for_expected_build(app, root, &mut progress, guard, Some(expected_build));
     progress.stop();
     let result = result?;
-    register_update_restore(root, app, helper_source, &result)?;
+    register_update_restore_if_generation(
+        root,
+        app,
+        helper_source,
+        &result,
+        expected_helper_sha256,
+    )?;
     result
         .install_id
         .ok_or_else(|| "restored app has no install epoch".into())

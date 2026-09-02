@@ -5,8 +5,8 @@ use incodex_macos::read_plist_info;
 
 pub(crate) use crate::macos_update_assets::{ensure_private_dir, set_file_mode};
 pub use crate::macos_update_assets::{
-    publish_registration, read_registration, refresh_registered_helper, remove_registration,
-    UpdateRegistration,
+    publish_registration, publish_registration_if_generation, read_registration,
+    refresh_registered_helper, remove_registration, UpdateRegistration,
 };
 use crate::macos_update_assets::{read_regular_file, sha256_hex};
 
@@ -79,6 +79,7 @@ fn run_relaunch_recovery(
         &registration.app_path,
         &registration.helper_path,
         build,
+        expected_helper_sha256.unwrap_or(&registration.helper_sha256),
     )?;
     crate::macos_update_log::log_coordinator_event(
         &root,
