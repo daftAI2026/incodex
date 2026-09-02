@@ -85,3 +85,28 @@ fn coordinator_repairs_a_background_update_when_the_host_later_exits() {
         "an ordinary close with no replacement must clear its launch-scoped pending marker"
     );
 }
+
+#[test]
+fn coordinator_resolves_the_current_helper_generation_before_recovery() {
+    let source = include_str!("../native/macos_update_coordinator.m");
+    let recovery = source
+        .split("- (void)recoverAfterUpdate:")
+        .nth(1)
+        .expect("coordinator has a recovery path")
+        .split("- (void)applicationDidFinishLaunching:")
+        .next()
+        .expect("recovery path ends before launch dispatch");
+
+    assert!(
+        recovery.contains("currentRegistrationForPending"),
+        "recovery must resolve the current content-addressed Helper generation instead of trusting the launch-time pending path"
+    );
+    assert!(
+        recovery.contains("registration[@\"helperPath\"]"),
+        "the Helper executable must come from the current verified registration"
+    );
+    assert!(
+        !recovery.contains("pending[@\"helperPath\"]"),
+        "a stale pending file must not launch its obsolete Helper after Runtime refreshes registration"
+    );
+}
