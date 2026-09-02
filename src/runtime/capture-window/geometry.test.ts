@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   anchoredPanForZoom,
+  captureContainScale,
   clampCaptureRect,
   normalizeCaptureRect,
   viewportRectToSource,
@@ -45,5 +46,29 @@ describe("capture window geometry", () => {
         2,
       ),
     ).toEqual({ x: -80, y: -70 });
+  });
+
+  test("fits the composed canvas against whichever preview edge is tighter", () => {
+    expect(
+      captureContainScale(
+        { height: 900, width: 1600 },
+        { height: 700, width: 800 },
+      ),
+    ).toBe(0.5);
+    expect(
+      captureContainScale(
+        { height: 1200, width: 600 },
+        { height: 600, width: 800 },
+      ),
+    ).toBe(0.5);
+  });
+
+  test("lets a small composed canvas grow to its fitted preview baseline", () => {
+    expect(
+      captureContainScale(
+        { height: 100, width: 200 },
+        { height: 600, width: 800 },
+      ),
+    ).toBe(4);
   });
 });

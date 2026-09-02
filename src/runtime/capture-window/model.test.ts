@@ -295,4 +295,19 @@ describe("capture window editor state", () => {
     expect(negativePadding.padding).toBe(0);
     expect(largePadding.padding).toBe(160);
   });
+
+  test("returns to the fitted zoom when padding changes without coupling pixel-only controls", () => {
+    const initial = createCaptureWindowState(SOURCE);
+    const zoomed = applyCaptureCommand(initial, { kind: "set-zoom", zoom: 2 });
+    const padded = applyCaptureCommand(zoomed, { kind: "set-padding", padding: 96 });
+    const background = applyCaptureCommand(zoomed, {
+      background: { color: "#121212", kind: "color" },
+      kind: "set-background",
+    });
+    const shadow = applyCaptureCommand(zoomed, { kind: "set-shadow", shadow: false });
+
+    expect(padded.zoom).toBe(1);
+    expect(background.zoom).toBe(2);
+    expect(shadow.zoom).toBe(2);
+  });
 });
