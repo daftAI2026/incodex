@@ -106,6 +106,24 @@ describe("capture window preview", () => {
     expect(gradientsSection).toBeGreaterThan(-1);
     expect(gradientsSection).toBeLessThan(wallpapersSection);
     expect(wallpapersSection).toBeLessThan(plainColorSection);
+    const gradientMarkup = markup.slice(gradientsSection, wallpapersSection);
+    expect(gradientMarkup.match(/data-background=/g)).toHaveLength(20);
+    expect(gradientMarkup.match(/data-gradient-overflow/g)).toHaveLength(15);
+    expect(gradientMarkup).toContain('data-action="toggle-gradients"');
+    expect(gradientMarkup).toContain('aria-expanded="false"');
+    expect(copy).toHaveProperty("backgroundShowMore", "Show more");
+
+    const expandedState = applyCaptureCommand(
+      state,
+      { kind: "toggle-gradients" } as unknown as Parameters<typeof applyCaptureCommand>[1],
+    );
+    const expandedMarkup = captureWindowTemplate(expandedState, copy);
+    const expandedGradients = expandedMarkup.slice(
+      expandedMarkup.indexOf('data-background-section="gradients"'),
+      expandedMarkup.indexOf('data-background-section="wallpapers"'),
+    );
+    expect(expandedGradients).toContain('aria-expanded="true"');
+    expect(expandedGradients).toContain("Show less");
     expect(markup.match(/data-background-color=/g)).toHaveLength(16);
     const plainColorMarkup = markup.slice(plainColorSection);
     expect(plainColorMarkup.indexOf('data-background-color="#8536ec"')).toBeLessThan(

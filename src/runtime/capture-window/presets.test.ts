@@ -44,13 +44,22 @@ describe("capture background presets", () => {
     ).toEqual([
       {
         id: "gradients",
-        presets: ["silver", "azure", "indigo", "ember", "graphite"],
+        presets: expect.arrayContaining(["silver", "azure", "indigo", "ember", "graphite"]),
       },
       {
         id: "wallpapers",
         presets: ["sea", "canyon", "mist", "highland", "ocean"],
       },
     ]);
+    expect(capturePresetSections[0]?.presets).toHaveLength(20);
+    expect(capturePresetSections[0]?.presets.slice(0, 5).map(({ id }) => id)).toEqual([
+      "silver",
+      "azure",
+      "indigo",
+      "ember",
+      "graphite",
+    ]);
+    expect(new Set(capturePresetSections[0]?.presets.map(({ id }) => id)).size).toBe(20);
   });
 
   test("derives section semantics from the existing CaptureBackground state", () => {

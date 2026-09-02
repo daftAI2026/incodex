@@ -63,6 +63,22 @@ describe("capture window editor state", () => {
     expect(state.shadow).toBe(true);
     expect(state.zoom).toBe(1);
     expect(state.regions).toEqual([]);
+    expect(state).toHaveProperty("gradientsExpanded", false);
+  });
+
+  test("expands and collapses the gradient catalog through editor state", () => {
+    const initial = createCaptureWindowState(SOURCE);
+    const expanded = applyCaptureCommand(
+      initial,
+      { kind: "toggle-gradients" } as unknown as Parameters<typeof applyCaptureCommand>[1],
+    );
+    const collapsed = applyCaptureCommand(
+      expanded,
+      { kind: "toggle-gradients" } as unknown as Parameters<typeof applyCaptureCommand>[1],
+    );
+
+    expect(expanded).toHaveProperty("gradientsExpanded", true);
+    expect(collapsed).toHaveProperty("gradientsExpanded", false);
   });
 
   test("commits one normalized source-space region per completed gesture", () => {
