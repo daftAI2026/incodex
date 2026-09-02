@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_cli::windows_activation::{
     activate_packaged_kill_on_drop, activate_packaged_with_installed_runtime,
+    activation_requires_runtime_environment_claim,
     disable_installed_runtime, enable_installed_runtime, transient_debugger_command_line,
     try_run_installed_package_debugger, try_run_package_debugger, windows_debugger_route,
     windows_installed_debugger_route, windows_transient_debugger_route, WindowsActivationFailure,
@@ -331,6 +332,16 @@ fn transient_package_registration_delivers_session_environment_before_runtime_bo
         .expect("build capability response");
     assert!(claimed.environment.contains_key("CODEX_HOME"));
     assert!(claimed.environment.contains_key("INCODEX_SESSION_ROOT"));
+}
+
+#[test]
+fn cdp_open_does_not_wait_for_the_disabled_runtime_bootstrap() {
+    assert!(!activation_requires_runtime_environment_claim(
+        WindowsLaunchMode::Cdp
+    ));
+    assert!(activation_requires_runtime_environment_claim(
+        WindowsLaunchMode::Runtime
+    ));
 }
 
 #[test]
