@@ -1,5 +1,5 @@
 //! [INPUT]: 依赖 macOS 更新恢复解析器与原生 Coordinator 源码契约
-//! [OUTPUT]: 验证重启恢复入口、Sparkle 退出转发及后台更新后的静默恢复行为
+//! [OUTPUT]: 验证重启恢复入口、Sparkle 退出转发、handoff 所有权及后台更新后的静默恢复行为
 //! [POS]: incodex-cli 的 macOS 更新状态机回归边界，约束原生桥接不丢失任何更新模式
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
@@ -108,5 +108,40 @@ fn coordinator_resolves_the_current_helper_generation_before_recovery() {
     assert!(
         !recovery.contains("pending[@\"helperPath\"]"),
         "a stale pending file must not launch its obsolete Helper after Runtime refreshes registration"
+    );
+}
+
+#[test]
+fn coordinator_executes_only_a_verified_content_addressed_helper() {
+    let source = include_str!("../native/macos_update_coordinator.m");
+
+    assert!(
+        source.contains("helperSha256") && source.contains("CC_SHA256"),
+        "the Coordinator must hash the Helper itself before NSTask crosses the execution boundary"
+    );
+    assert!(
+        source.contains("helpers/macos-update") && source.contains("O_NOFOLLOW"),
+        "the Helper must remain a no-follow file under the private content-addressed root"
+    );
+}
+
+#[test]
+fn coordinator_never_clears_another_handoff_or_reports_a_failed_helper_as_success() {
+    let source = include_str!("../native/macos_update_coordinator.m");
+    let recovery = source
+        .split("- (void)recoverAfterUpdate:")
+        .nth(1)
+        .expect("coordinator has a recovery path")
+        .split("- (void)applicationDidFinishLaunching:")
+        .next()
+        .expect("recovery path ends before launch dispatch");
+
+    assert!(
+        source.contains("handoffId") && source.contains("removePendingIfOwned"),
+        "pending cleanup must be conditional on the Coordinator's unique handoff owner"
+    );
+    assert!(
+        recovery.contains("terminationStatus") && recovery.contains("retry"),
+        "a Helper generation race must be retried and a nonzero exit must not masquerade as recovery success"
     );
 }
