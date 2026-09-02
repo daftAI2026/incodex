@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   captureOutputSize,
+  captureGradientVector,
   captureWindowCornerRadius,
   captureWindowShadow,
   createCaptureRenderPlan,
@@ -9,6 +10,13 @@ import {
 import { createCaptureWindowState } from "./model.ts";
 
 describe("capture window compositor plan", () => {
+  test("uses the same named gradient directions as the CSS swatches", () => {
+    const size = { height: 300, width: 500 };
+    expect(captureGradientVector("bottom-right", size)).toEqual([0, 0, 500, 300]);
+    expect(captureGradientVector("top-right", size)).toEqual([0, 300, 500, 0]);
+    expect(captureGradientVector("right", size)).toEqual([0, 150, 500, 150]);
+    expect(captureGradientVector("bottom", size)).toEqual([250, 0, 250, 300]);
+  });
   test("converts logical padding to physical output pixels", () => {
     expect(captureOutputSize({ width: 1200, height: 801, scaleFactor: 2 }, 64)).toEqual({
       width: 1456,

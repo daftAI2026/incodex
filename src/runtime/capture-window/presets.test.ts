@@ -27,11 +27,26 @@ describe("capture background presets", () => {
       "mist",
       "highland",
       "ocean",
+      "rose",
+      "ultraviolet",
+      "lagoon",
+      "mint",
+      "sunset",
       "silver",
       "azure",
       "indigo",
       "ember",
       "graphite",
+      "prism",
+      "blossom",
+      "coral",
+      "aurora",
+      "dusk",
+      "horizon",
+      "twilight",
+      "flare",
+      "spectrum",
+      "nocturne",
     ]);
   });
 
@@ -44,7 +59,28 @@ describe("capture background presets", () => {
     ).toEqual([
       {
         id: "gradients",
-        presets: expect.arrayContaining(["silver", "azure", "indigo", "ember", "graphite"]),
+        presets: [
+          "rose",
+          "ultraviolet",
+          "lagoon",
+          "mint",
+          "sunset",
+          "silver",
+          "azure",
+          "indigo",
+          "ember",
+          "graphite",
+          "prism",
+          "blossom",
+          "coral",
+          "aurora",
+          "dusk",
+          "horizon",
+          "twilight",
+          "flare",
+          "spectrum",
+          "nocturne",
+        ],
       },
       {
         id: "wallpapers",
@@ -53,11 +89,11 @@ describe("capture background presets", () => {
     ]);
     expect(capturePresetSections[0]?.presets).toHaveLength(20);
     expect(capturePresetSections[0]?.presets.slice(0, 5).map(({ id }) => id)).toEqual([
-      "silver",
-      "azure",
-      "indigo",
-      "ember",
-      "graphite",
+      "rose",
+      "ultraviolet",
+      "lagoon",
+      "mint",
+      "sunset",
     ]);
     expect(new Set(capturePresetSections[0]?.presets.map(({ id }) => id)).size).toBe(20);
   });
@@ -99,7 +135,16 @@ describe("capture background presets", () => {
     expect(captureRasterPresetIds).toEqual(["sea", "canyon", "mist", "highland", "ocean"]);
     expect(capturePresetAssetUrl("silver")).toBeNull();
     expect(capturePresetSwatch(capturePresets.find(({ id }) => id === "silver")!)).toBe(
-      "linear-gradient(135deg, #f0f1f3 0%, #c6c9ce 52%, #90959d 100%)",
+      "linear-gradient(to bottom right, #f0f1f3 0%, #c6c9ce 52%, #90959d 100%)",
+    );
+    expect(capturePresetSwatch(capturePresets.find(({ id }) => id === "prism")!)).toStartWith(
+      "linear-gradient(to bottom,",
+    );
+    expect(capturePresetSwatch(capturePresets.find(({ id }) => id === "coral")!)).toStartWith(
+      "linear-gradient(to top right,",
+    );
+    expect(capturePresetSwatch(capturePresets.find(({ id }) => id === "aurora")!)).toStartWith(
+      "linear-gradient(to right,",
     );
 
     const assetDirectory = join(root, "assets/capture-backgrounds");
