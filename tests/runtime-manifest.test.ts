@@ -51,6 +51,12 @@ describe("runtime manifest", () => {
     expect(buildRuntime).toContain('.replaceAll("\\r", "\\n")');
   });
 
+  test("dist verification preserves committed Runtime provenance", () => {
+    const checkDist = readFileSync(join(import.meta.dir, "../scripts/check-dist.ts"), "utf8");
+    expect(checkDist).toContain("runtime-manifest.json");
+    expect(checkDist).toContain("SOURCE_COMMIT");
+  });
+
   test("platform boundaries consume the catalog instead of copying it", () => {
     const loader = readFileSync(
       join(import.meta.dir, "../src/runtime/incodex-loader.cts"),
