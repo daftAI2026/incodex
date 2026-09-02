@@ -261,6 +261,14 @@ describe("Electron session cleanup ownership", () => {
       awaitStartup: false,
     });
 
+    let startupSettled = false;
+    void runtime.startupGate.then(() => {
+      startupSettled = true;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(startupSettled).toBe(true);
+
     const win = runtime.openWindow();
     win.emit("ready-to-show");
     expect(win.hideCalls).toBeGreaterThanOrEqual(1);
