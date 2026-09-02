@@ -39,6 +39,12 @@ describe("capture window visual tokens", () => {
     expect(css).toContain("calc(var(--incodex-capture-space) * 4)");
   });
 
+  test("lets the fitted canvas reach the limiting preview edge without an inner gutter", () => {
+    const css = readFileSync(cssPath, "utf8");
+
+    expect(css).toMatch(/\.incodex-capture-stage\s*\{[^}]*padding: 0/);
+  });
+
   test("packs circular background options without stretching the inspector", () => {
     const css = readFileSync(backgroundPickerCssPath, "utf8");
 
