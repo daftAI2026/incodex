@@ -124,24 +124,30 @@ describe("capture window preview", () => {
     );
     expect(expandedGradients).toContain('aria-expanded="true"');
     expect(expandedGradients).toContain("Show less");
-    expect(markup.match(/data-background-color=/g)).toHaveLength(16);
+    expect(markup.match(/data-background-color=/g)).toHaveLength(9);
     const plainColorMarkup = markup.slice(plainColorSection);
-    expect(plainColorMarkup.indexOf('data-background-color="#8536ec"')).toBeLessThan(
-      plainColorMarkup.indexOf('data-background="transparent"'),
-    );
-    expect(plainColorMarkup.indexOf('data-background="transparent"')).toBeLessThan(
-      plainColorMarkup.indexOf('data-background-color="#383838"'),
-    );
-    expect(plainColorMarkup.indexOf('data-background-color="#cfaff0"')).toBeLessThan(
+    expect(plainColorMarkup).not.toContain('data-background="transparent"');
+    expect(plainColorMarkup.indexOf('data-background-color="#383838"')).toBeLessThan(
       plainColorMarkup.indexOf("data-background-custom"),
     );
-    expect(copy.backgroundNone).toBe("None");
+    expect(copy.backgroundNone).toBe("No background");
     expect(copy.backgroundGradients).toBe("Gradients");
     expect(copy.backgroundWallpapers).toBe("Wallpapers");
     expect(copy.backgroundPlainColor).toBe("Plain color");
     expect(captureWindowCopy("zh-CN").backgroundGradients).toBe("渐变");
     expect(captureWindowCopy("zh-CN").backgroundWallpapers).toBe("壁纸");
     expect(captureWindowCopy("zh-CN").backgroundPlainColor).toBe("纯色");
+    expect(captureWindowCopy("zh-CN").backgroundNone).toBe("无背景");
+    const noBackground = markup.indexOf('data-input="none"');
+    expect(noBackground).toBeGreaterThan(padding);
+    expect(noBackground).toBeLessThan(shadow);
+    expect(markup).toContain('data-capture-icon="plus"');
+    expect(markup).not.toContain('data-capture-icon="image-plus"');
+    const transparentMarkup = captureWindowTemplate(
+      applyCaptureCommand(state, { background: { kind: "transparent" }, kind: "set-background" }),
+      copy,
+    );
+    expect(transparentMarkup).toMatch(/data-input="none"[^>]*checked/);
     expect(readFileSync(join(import.meta.dir, "view.ts"), "utf8")).not.toContain(
       "capturePresetSections[",
     );

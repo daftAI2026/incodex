@@ -81,6 +81,43 @@ describe("capture window editor state", () => {
     expect(collapsed).toHaveProperty("gradientsExpanded", false);
   });
 
+  test("toggles no background through editor state and restores the last concrete choice", () => {
+    const initial = createCaptureWindowState(SOURCE);
+    const colored = applyCaptureCommand(initial, {
+      background: { color: "#e33345", kind: "color" },
+      kind: "set-background",
+    });
+    const transparent = applyCaptureCommand(
+      colored,
+      { enabled: true, kind: "set-transparent-background" } as unknown as Parameters<
+        typeof applyCaptureCommand
+      >[1],
+    );
+    const restored = applyCaptureCommand(
+      transparent,
+      { enabled: false, kind: "set-transparent-background" } as unknown as Parameters<
+        typeof applyCaptureCommand
+      >[1],
+    );
+    const defaultTransparent = applyCaptureCommand(
+      initial,
+      { enabled: true, kind: "set-transparent-background" } as unknown as Parameters<
+        typeof applyCaptureCommand
+      >[1],
+    );
+    const defaultRestored = applyCaptureCommand(
+      defaultTransparent,
+      { enabled: false, kind: "set-transparent-background" } as unknown as Parameters<
+        typeof applyCaptureCommand
+      >[1],
+    );
+
+    expect(transparent.background).toEqual({ kind: "transparent" });
+    expect(transparent.shadow).toBe(true);
+    expect(restored.background).toEqual({ color: "#e33345", kind: "color" });
+    expect(defaultRestored.background).toEqual({ id: "sea", kind: "preset" });
+  });
+
   test("commits one normalized source-space region per completed gesture", () => {
     const initial = createCaptureWindowState(SOURCE);
     const next = applyCaptureCommand(initial, {

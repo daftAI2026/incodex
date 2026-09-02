@@ -42,14 +42,16 @@ describe("capture window visual tokens", () => {
   test("packs circular background options without stretching the inspector", () => {
     const css = readFileSync(backgroundPickerCssPath, "utf8");
 
-    expect(css).not.toMatch(/\.incodex-capture-background-grid\s*\{[^}]*padding:/);
+    expect(css).toMatch(
+      /\.incodex-capture-background-grid\s*\{[^}]*padding: var\(--incodex-capture-space\)/,
+    );
     expect(css).toMatch(
       /\.incodex-capture-background-grid\s*\{[^}]*grid-template-columns: repeat\(5, minmax\(0, 1fr\)\)/,
     );
     expect(css).toMatch(/\.incodex-capture-background-grid\s*\{[^}]*justify-items: center/);
     expect(css).toMatch(/\.incodex-capture-background-grid\s*\{[^}]*width: 100%/);
     expect(css).toMatch(
-      /\.incodex-capture-background-grid-plain\s*\{[^}]*grid-template-columns: repeat\(9, minmax\(0, 1fr\)\)/,
+      /\.incodex-capture-background-grid-plain\s*\{[^}]*grid-template-columns: repeat\(5, minmax\(0, 1fr\)\)/,
     );
     expect(css).toMatch(
       /\.incodex-capture-background-grid-plain \.incodex-capture-background-option\s*\{[^}]*height: calc\(var\(--incodex-capture-space\) \* 5\)/,
@@ -64,6 +66,12 @@ describe("capture window visual tokens", () => {
     expect(selectedRule).toBeDefined();
     expect(selectedRule).not.toContain("border-color:");
     expect(css).not.toMatch(/@supports \(corner-shape:[\s\S]*?\.incodex-capture-background-option/);
+    expect(css).toMatch(
+      /\.incodex-capture-wallpaper-label\s*\{[^}]*color: var\(--incodex-capture-text-secondary\)/,
+    );
+    expect(css).toMatch(
+      /\.incodex-capture-wallpaper-label:hover\s*\{[^}]*color: var\(--incodex-capture-text\)/,
+    );
   });
 
   test("keeps background picker styling isolated from the editor shell", () => {

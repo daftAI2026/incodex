@@ -110,7 +110,7 @@ describe("capture background presets", () => {
     expect(captureBackgroundSection({ id: "silver", kind: "preset" })).toBe("gradients");
   });
 
-  test("uses the sixteen observed CleanShot plain colors", () => {
+  test("keeps the first nine observed CleanShot colors in the compact plain palette", () => {
     expect(capturePlainColors).toEqual([
       "#121212",
       "#ffffff",
@@ -121,13 +121,6 @@ describe("capture background presets", () => {
       "#0c8ce8",
       "#8536ec",
       "#383838",
-      "#ebebeb",
-      "#fabdb5",
-      "#ffc570",
-      "#fade8f",
-      "#a0e8bb",
-      "#a9d6f9",
-      "#cfaff0",
     ]);
   });
 
