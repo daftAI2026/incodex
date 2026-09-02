@@ -40,12 +40,15 @@ describe("runtime load", () => {
     ).toBe(join(dest, "incodex-main.cjs"));
   });
 
-  test("the asar loader fail-opens non-blocking attach errors", () => {
+  test("the asar loader starts official main before awaiting Runtime attachment", () => {
     const loader = readFileSync(join(import.meta.dir, "runtime/incodex-loader.cts"), "utf8");
-    expect(loader).toContain("await loadMain();");
+    expect(loader).toContain("const runtimeStartup = loadMain();");
     expect(loader).toContain("require(originalMain())");
+    expect(loader).toContain("await runtimeStartup");
     expect(loader).toContain('error?.code === "INCODEX_STARTUP_BLOCKED"');
-    expect(loader.indexOf("require(originalMain())")).toBeGreaterThan(loader.indexOf("await loadMain()"));
+    expect(loader.indexOf("require(originalMain())")).toBeLessThan(
+      loader.indexOf("await runtimeStartup"),
+    );
     expect(loader).not.toContain('require("./incodex-main.cjs")');
     expect(loader).toContain("current.json");
   });
@@ -58,13 +61,15 @@ describe("runtime load", () => {
     expect(main).toContain("dockMenu.createNativeStatusMenuBridge");
   });
 
-  test("the loader gates official main on Runtime startup", () => {
+  test("the loader preserves Runtime startup reporting without delaying official protocol setup", () => {
     const loader = readFileSync(join(import.meta.dir, "runtime/incodex-loader.cts"), "utf8");
     const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
     expect(loader).toContain("const runtime = require(file);");
-    expect(loader).toContain("await runtime.startupGate");
+    expect(loader).toContain("return runtime.startupGate");
     expect(loader).toContain('error?.code === "INCODEX_STARTUP_BLOCKED"');
-    expect(loader.indexOf("require(originalMain())")).toBeGreaterThan(loader.indexOf("await loadMain()"));
+    expect(loader.indexOf("require(originalMain())")).toBeLessThan(
+      loader.indexOf("await runtimeStartup"),
+    );
     expect(main).toContain("const startupGate = startRuntime();");
     expect(main.indexOf("return attachElectron();")).toBeGreaterThan(
       main.indexOf("macosUpdate.prepareUpdateHandoff({"),
