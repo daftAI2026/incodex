@@ -293,9 +293,7 @@ fn builds_a_store_activation_request_without_losing_windows_arguments_or_environ
 }
 
 #[test]
-fn transient_package_registration_delivers_session_environment_before_runtime_bootstrap() {
-    let bootstrap =
-        Path::new(r"C:\Users\Linus Torvalds\.incodex\sessions\s-one\incodex-windows-bootstrap.cjs");
+fn transient_cdp_registration_delivers_session_environment_without_node_bootstrap() {
     let request = WindowsActivationRequest::new(
         "OpenAI.Codex_26.820.7780.0_x64__2p2nqsd0c76g0",
         "OpenAI.Codex_2p2nqsd0c76g0!App",
@@ -314,16 +312,15 @@ fn transient_package_registration_delivers_session_environment_before_runtime_bo
         ]),
     )
     .expect("valid activation request")
-    .with_transient_runtime(
-        bootstrap,
+    .with_transient_cdp(
         Path::new(r"C:\Users\Linus Torvalds\.incodex\windows\helpers\0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\incodex-helper.exe"),
         Path::new(r"C:\Users\Linus Torvalds\.incodex"),
     )
-    .expect("private transient bootstrap");
+    .expect("private transient CDP debugger");
 
     let registered = String::from_utf16_lossy(request.transient_debug_environment());
-    assert!(registered.contains("NODE_OPTIONS="));
-    assert!(registered.contains("incodex-windows-bootstrap.cjs"));
+    assert!(!registered.contains("NODE_OPTIONS="));
+    assert!(!registered.contains("incodex-windows-bootstrap.cjs"));
     assert!(registered.contains("CODEX_HOME="));
     assert!(registered.contains("INCODEX_SESSION_ROOT="));
 
