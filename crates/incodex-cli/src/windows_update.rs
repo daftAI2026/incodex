@@ -210,6 +210,25 @@ pub fn run_runtime(parsed: &ParsedCli) -> Result<(), String> {
             ));
         }
     }
+    let installed_state = crate::windows_install_state::read_windows_install_state(&user_root)?;
+    require_runtime_native_open_generation(installed_state.is_some(), || {
+        let state = installed_state.as_ref().ok_or_else(|| {
+            "Windows install state disappeared during Runtime validation".to_string()
+        })?;
+        let helper_version = installed_cli_version(&state.helper_path)?;
+        select_native_open_executable(
+            &state.helper_path,
+            &helper_version,
+            env!("CARGO_PKG_VERSION"),
+            || {
+                let package_root = user_root.join("packages").join("standalone");
+                let (executable, version) = current_release_executable(&package_root)?;
+                verify_cli_version(&executable, &version)?;
+                Ok((executable, version))
+            },
+        )
+        .map(|_| ())
+    })?;
     let published = crate::windows_runtime::publish_windows_runtime(&user_root)?;
     let runtime_release = published
         .release_dir
@@ -792,7 +811,21 @@ where
     Ok(executable)
 }
 
-fn verify_cli_version(installed: &Path, expected: &str) -> Result<(), String> {
+fn require_runtime_native_open_generation<F>(
+    has_installed_integration: bool,
+    verify: F,
+) -> Result<(), String>
+where
+    F: FnOnce() -> Result<(), String>,
+{
+    if has_installed_integration {
+        verify()
+    } else {
+        Ok(())
+    }
+}
+
+fn installed_cli_version(installed: &Path) -> Result<String, String> {
     let output = Command::new(installed)
         .arg("--version")
         .creation_flags(CLI_VERSION_PROBE_CREATION_FLAGS)
@@ -812,6 +845,11 @@ fn verify_cli_version(installed: &Path, expected: &str) -> Result<(), String> {
         .find_map(|line| line.strip_prefix(prefix))
         .ok_or_else(|| "installed Windows CLI did not report its version".to_string())?;
     validate_stable_version(version)?;
+    Ok(version.to_string())
+}
+
+fn verify_cli_version(installed: &Path, expected: &str) -> Result<(), String> {
+    let version = installed_cli_version(installed)?;
     if version == expected {
         Ok(())
     } else {
@@ -852,6 +890,13 @@ fn command_failure(label: &str, output: &std::process::Output) -> String {
     }
 }
 
+fn validate_stable_version(version: &str) -> Result<(), String> {
+    if crate::stable_release::parse_stable_version(version).is_none() {
+        return Err(format!("invalid stable Incodex version: {version}"));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -872,11 +917,17 @@ mod tests {
     #[test]
     fn runtime_update_stops_before_state_change_without_a_matching_native_cli() {
         let error = require_runtime_native_open_generation(true, || {
-            Err("installed Windows Runtime 1.0.0 has no matching managed CLI generation".to_string())
+            Err(
+                "installed Windows Runtime 1.0.0 has no matching managed CLI generation"
+                    .to_string(),
+            )
         })
         .expect_err("an installed Runtime must retain a launchable native generation");
 
-        assert!(error.contains("no matching managed CLI generation"), "{error}");
+        assert!(
+            error.contains("no matching managed CLI generation"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -904,11 +955,4 @@ mod tests {
 
         assert_eq!(selected, helper);
     }
-}
-
-fn validate_stable_version(version: &str) -> Result<(), String> {
-    if crate::stable_release::parse_stable_version(version).is_none() {
-        return Err(format!("invalid stable Incodex version: {version}"));
-    }
-    Ok(())
 }
