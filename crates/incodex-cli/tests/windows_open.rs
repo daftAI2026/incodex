@@ -62,6 +62,11 @@ fn prepares_open_from_the_discovered_users_package_without_hardcoded_install_pat
     assert_eq!(activation.package_full_name(), app.package_full_name);
     assert_eq!(activation.app_user_model_id(), app.app_user_model_id);
     assert!(activation.arguments().contains("--user-data-dir="));
+    let installed_activation = plan
+        .installed_activation_request()
+        .expect("build installed Store activation request");
+    assert!(installed_activation.transient_debug_environment().is_empty());
+    assert_eq!(installed_activation.arguments(), activation.arguments());
     assert_eq!(
         fs::read(plan.session.home.join("auth.json")).expect("copied auth"),
         b"fixture-auth"
