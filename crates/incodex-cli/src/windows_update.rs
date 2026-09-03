@@ -1,6 +1,7 @@
 use std::cmp::Ordering as VersionOrdering;
 use std::fs::{self, OpenOptions};
 use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -15,6 +16,7 @@ use crate::windows_update_flow::{
 use incodex_core::windows_path::reject_reparse_ancestors;
 use serde::{Deserialize, Serialize};
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 const WINDOWS_LATEST_RELEASE_URL: &str =
     "https://api.github.com/repos/daftAI2026/incodex/releases/latest";
@@ -31,6 +33,7 @@ const RELEASE_METADATA_LIMIT: u64 = 256 * 1024;
 const INSTALLER_SCRIPT_LIMIT: u64 = 1024 * 1024;
 const RUNTIME_PENDING_NAME: &str = "windows_runtime_update_pending.json";
 const RUNTIME_PENDING_LIMIT: u64 = 1024;
+const CLI_VERSION_PROBE_CREATION_FLAGS: u32 = CREATE_NO_WINDOW;
 static UPDATE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub const WINDOWS_X64_RELEASE_ASSET: &str = "incodex-windows-x64.exe";
@@ -792,6 +795,7 @@ where
 fn verify_cli_version(installed: &Path, expected: &str) -> Result<(), String> {
     let output = Command::new(installed)
         .arg("--version")
+        .creation_flags(CLI_VERSION_PROBE_CREATION_FLAGS)
         .stdin(Stdio::null())
         .output()
         .map_err(|error| format!("could not verify the installed Windows CLI: {error}"))?;
