@@ -321,7 +321,13 @@ pub fn sign_app(app: &Path) -> Result<(), String> {
         sign_adhoc_component(framework)?;
     }
     let outer = inspect_component(app)?;
-    let preserve = collect_vendor_helper_roots_for_outer(app, &outer)?;
+    let mut preserve = collect_vendor_helper_roots_for_outer(app, &outer)?;
+    if let Some(framework) = &modified_codex_framework {
+        // Framework 内还包含没有 bundle 后缀的官方 Mach-O helpers；逐个枚举必然漏项。
+        // 整体暂存这个唯一被改写的容器，既保留所有内部身份，也让 deep sign 只处理宿主与 Sparkle。
+        preserve.retain(|path| !path.starts_with(framework));
+        preserve.push(framework.clone());
+    }
     let stash_root = if preserve.is_empty() {
         None
     } else {
