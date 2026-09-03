@@ -82,6 +82,27 @@ fn provider_intercepts_only_the_exact_codex_storage_data_query() {
     fs::remove_dir_all(home).unwrap();
 }
 
+#[test]
+fn loaded_provider_rebinds_the_process_security_symbol_without_real_keychain_access() {
+    let home = scratch();
+    let provider = compile_test_provider(&home);
+    let probe = compile_hook_probe(&home);
+    let helper = write_executable(&home, "hook-success", "#!/bin/sh\nprintf 'hook-key'\n");
+
+    let output = Command::new(probe)
+        .args([provider.as_os_str(), helper.as_os_str()])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    fs::remove_dir_all(home).unwrap();
+}
+
 fn compile_probe(home: &Path) -> PathBuf {
     let provider = compile_test_provider(home);
     let clang = command_stdout("xcrun", &["--find", "clang"]);
@@ -262,6 +283,105 @@ int main(int argc, char **argv) {
         .status()
         .unwrap();
     assert!(status.success(), "query probe did not compile");
+    probe
+}
+
+fn compile_hook_probe(home: &Path) -> PathBuf {
+    let clang = command_stdout("xcrun", &["--find", "clang"]);
+    let sdk = command_stdout("xcrun", &["--sdk", "macosx", "--show-sdk-path"]);
+    let fake_source = home.join("fake_security.c");
+    fs::write(
+        &fake_source,
+        r#"
+#include <CoreFoundation/CoreFoundation.h>
+#include <Security/Security.h>
+
+static int calls = 0;
+OSStatus SecItemCopyMatching(CFDictionaryRef query, CFTypeRef *result) {
+    (void)query;
+    (void)result;
+    calls += 1;
+    return -7777;
+}
+int incodex_fake_security_calls(void) { return calls; }
+"#,
+    )
+    .unwrap();
+    let fake = home.join("libFakeSecurity.dylib");
+    let status = Command::new(&clang)
+        .args(["-isysroot", &sdk, "-Wall", "-Wextra", "-Werror"])
+        .args(["-dynamiclib", "-framework", "CoreFoundation"])
+        .arg(&fake_source)
+        .args(["-Wl,-install_name,@rpath/libFakeSecurity.dylib", "-o"])
+        .arg(&fake)
+        .status()
+        .unwrap();
+    assert!(status.success(), "fake Security library did not compile");
+
+    let source = home.join("hook_probe.c");
+    fs::write(
+        &source,
+        r#"
+#include <CoreFoundation/CoreFoundation.h>
+#include <Security/Security.h>
+#include <dlfcn.h>
+#include <stdlib.h>
+#include <string.h>
+
+extern int incodex_fake_security_calls(void);
+
+static CFMutableDictionaryRef query(CFStringRef account) {
+    CFMutableDictionaryRef value = CFDictionaryCreateMutable(
+        kCFAllocatorDefault, 6, &kCFTypeDictionaryKeyCallBacks,
+        &kCFTypeDictionaryValueCallBacks);
+    if (!value) return NULL;
+    CFDictionarySetValue(value, kSecClass, kSecClassGenericPassword);
+    CFDictionarySetValue(value, kSecAttrService, CFSTR("Codex Storage Key"));
+    CFDictionarySetValue(value, kSecAttrAccount, account);
+    CFDictionarySetValue(value, kSecReturnData, kCFBooleanTrue);
+    CFDictionarySetValue(value, kSecMatchLimit, kSecMatchLimitOne);
+    return value;
+}
+
+int main(int argc, char **argv) {
+    if (argc != 3) return 64;
+    if (setenv("INCODEX_KEYCHAIN_TEST_HELPER", argv[2], 1) != 0) return 65;
+    if (!dlopen(argv[1], RTLD_NOW | RTLD_LOCAL)) return 66;
+
+    CFMutableDictionaryRef exact = query(CFSTR("Codex"));
+    CFTypeRef result = NULL;
+    OSStatus status = SecItemCopyMatching(exact, &result);
+    CFRelease(exact);
+    if (status != errSecSuccess || !result ||
+        CFGetTypeID(result) != CFDataGetTypeID()) return 1;
+    CFDataRef data = (CFDataRef)result;
+    if (CFDataGetLength(data) != 8 ||
+        memcmp(CFDataGetBytePtr(data), "hook-key", 8) != 0) return 2;
+    CFRelease(result);
+    if (incodex_fake_security_calls() != 0) return 3;
+
+    CFMutableDictionaryRef other = query(CFSTR("Other"));
+    result = NULL;
+    status = SecItemCopyMatching(other, &result);
+    CFRelease(other);
+    if (result) CFRelease(result);
+    if (status != -7777 || incodex_fake_security_calls() != 1) return 4;
+    return 0;
+}
+"#,
+    )
+    .unwrap();
+    let probe = home.join("hook-probe");
+    let status = Command::new(&clang)
+        .args(["-isysroot", &sdk, "-Wall", "-Wextra", "-Werror"])
+        .arg(&source)
+        .arg(&fake)
+        .args(["-framework", "CoreFoundation", "-framework", "Security"])
+        .args(["-Wl,-rpath,@executable_path", "-o"])
+        .arg(&probe)
+        .status()
+        .unwrap();
+    assert!(status.success(), "hook probe did not compile");
     probe
 }
 
