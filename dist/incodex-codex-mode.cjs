@@ -89,7 +89,7 @@ function deriveCodexModePageState(snapshot) {
         return "missing";
     return "other";
 }
-function decideCodexModeAction(pageState, fallbackAttempted, confirmationFailures, primaryOtherChecks = 0, primaryOtherChecksRequired = 3, confirmationFailuresRequired = 8) {
+function decideCodexModeAction(pageState, fallbackAttempted, confirmationFailures, primaryOtherChecks = 0, primaryOtherChecksRequired = 3, confirmationFailuresRequired = 20) {
     if (pageState === "codex")
         return "confirmed";
     if (pageState === "pending")
@@ -105,7 +105,7 @@ function createCodexModeReadiness(options) {
     const checks = new WeakMap();
     const primarySettleMs = options.primarySettleMs ?? 1_500;
     const primaryOtherChecksRequired = options.primaryOtherChecksRequired ?? 3;
-    const confirmationFailuresRequired = options.confirmationFailuresRequired ?? 8;
+    const confirmationFailuresRequired = options.confirmationFailuresRequired ?? 20;
     const probeFailuresRequired = options.probeFailuresRequired ?? 20;
     const pollMs = options.pollMs ?? 750;
     const scheduleTimer = options.scheduleTimer ?? setTimeout;
