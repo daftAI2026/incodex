@@ -12,6 +12,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "fishhook.h"
+
 static const size_t kMaximumHelperOutput = 4096;
 static const int64_t kHelperTimeoutMilliseconds = 2000;
 typedef OSStatus (*CopyMatching)(CFDictionaryRef, CFTypeRef *);
@@ -233,15 +235,25 @@ copy_matching_with_helper(CFDictionaryRef query, CFTypeRef *result,
     return errSecSuccess;
 }
 
-// 该入口先把 provider 固定为普通 Security.framework 客户端；后续 hook 红测会替换
-// 这条直通实现。dylib 尚未接入安装事务，因此当前代码不会进入真实 ChatGPT 进程。
-__attribute__((visibility("default")))
-OSStatus incodex_key_provider_passthrough(CFDictionaryRef query,
-                                          CFTypeRef *result) {
-    return SecItemCopyMatching(query, result);
+#ifdef INCODEX_TESTING
+static CopyMatching original_copy_matching = NULL;
+
+static OSStatus replacement_copy_matching(CFDictionaryRef query,
+                                           CFTypeRef *result) {
+    const char *helper = getenv("INCODEX_KEYCHAIN_TEST_HELPER");
+    return copy_matching_with_helper(query, result, helper,
+                                     original_copy_matching);
 }
 
-#ifdef INCODEX_TESTING
+__attribute__((constructor)) static void install_test_rebinding(void) {
+    struct rebinding binding = {
+        .name = "SecItemCopyMatching",
+        .replacement = (void *)replacement_copy_matching,
+        .replaced = (void **)&original_copy_matching,
+    };
+    (void)rebind_symbols(&binding, 1);
+}
+
 __attribute__((visibility("default")))
 int incodex_key_provider_test_run_helper(const char *path,
                                          unsigned char *output,

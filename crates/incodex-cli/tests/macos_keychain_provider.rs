@@ -149,11 +149,13 @@ fn compile_test_provider(home: &Path) -> PathBuf {
     let sdk = command_stdout("xcrun", &["--sdk", "macosx", "--show-sdk-path"]);
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let provider_source = manifest.join("native/macos_keychain_provider.c");
+    let fishhook_source = manifest.join("native/fishhook.c");
     let provider = home.join("IncodexKeyProviderTest.dylib");
     let status = Command::new(&clang)
         .args(["-isysroot", &sdk])
         .args(["-Wall", "-Wextra", "-Werror", "-DINCODEX_TESTING"])
         .args(["-dynamiclib", "-framework", "CoreFoundation"])
+        .arg(&fishhook_source)
         .args(["-framework", "Security"])
         .arg(&provider_source)
         .arg("-o")

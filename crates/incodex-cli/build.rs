@@ -29,6 +29,8 @@ fn main() {
     println!("cargo:rerun-if-changed=native/macos_sparkle_interpose.m");
     println!("cargo:rerun-if-changed=native/macos_keychain_helper.c");
     println!("cargo:rerun-if-changed=native/macos_keychain_provider.c");
+    println!("cargo:rerun-if-changed=native/fishhook.c");
+    println!("cargo:rerun-if-changed=native/fishhook.h");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
         return;
     }
@@ -111,6 +113,7 @@ fn main() {
             "-Wextra",
             "-Werror",
             "-dynamiclib",
+            "native/fishhook.c",
             "-framework",
             "CoreFoundation",
             "-framework",
