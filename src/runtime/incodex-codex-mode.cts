@@ -59,9 +59,8 @@ const CODEX_MODE_PROBE_EXPRESSION = `(() => {
 
 function deriveCodexModePageState(snapshot) {
   if (snapshot?.modeAvailable === true && snapshot.modeLabel === "Codex") return "codex";
-  if (snapshot?.officialBlockerVisible === true || snapshot?.modeAvailable !== true) {
-    return "pending";
-  }
+  if (snapshot?.officialBlockerVisible === true) return "pending";
+  if (snapshot?.modeAvailable !== true) return "missing";
   return "other";
 }
 
@@ -132,9 +131,10 @@ function createCodexModeReadiness(options) {
       if (state.complete || win.isDestroyed() || win.webContents.isDestroyed()) return;
       state.probeFailures = 0;
       const pageState = deriveCodexModePageState(snapshot);
+      const nonCodexPage = pageState === "other" || pageState === "missing";
       if (!state.fallbackAttempted) {
-        state.primaryOtherChecks = pageState === "other" ? state.primaryOtherChecks + 1 : 0;
-      } else if (pageState === "other") {
+        state.primaryOtherChecks = nonCodexPage ? state.primaryOtherChecks + 1 : 0;
+      } else if (nonCodexPage) {
         state.confirmationFailures += 1;
       }
       const action = decideCodexModeAction(
