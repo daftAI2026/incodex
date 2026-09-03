@@ -1,5 +1,5 @@
 //! [INPUT]: 依赖系统 codesign、bundle plist 与签名身份检查，接收 install/uninstall 产生的 staged app。
-//! [OUTPUT]: 提供官方签名验收、ad-hoc 重签、entitlement 裁剪与 vendor sidecar 保留策略。
+//! [OUTPUT]: 提供官方签名验收、宿主同代 ad-hoc 重签、entitlement 裁剪与 CUA/vendor sidecar 保留策略。
 //! [POS]: incodex-macos 的唯一签名边界，在 mutation 提交前把改写组件与官方嵌套组件收敛为可验证拓扑。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 //!
@@ -323,10 +323,9 @@ pub fn sign_app(app: &Path) -> Result<(), String> {
     let outer = inspect_component(app)?;
     let mut preserve = collect_vendor_helper_roots_for_outer(app, &outer)?;
     if let Some(framework) = &modified_codex_framework {
-        // Framework 内还包含没有 bundle 后缀的官方 Mach-O helpers；逐个枚举必然漏项。
-        // 整体暂存这个唯一被改写的容器，既保留所有内部身份，也让 deep sign 只处理宿主与 Sparkle。
+        // Renderer/GPU 等 Electron helper 会映射这个已改写的 Framework；它们必须与宿主
+        // 加入同一 ad-hoc 身份代。这里只保护 Framework 外的 CUA/vendor sidecar。
         preserve.retain(|path| !path.starts_with(framework));
-        preserve.push(framework.clone());
     }
     let stash_root = if preserve.is_empty() {
         None
@@ -361,11 +360,6 @@ pub fn sign_app(app: &Path) -> Result<(), String> {
         });
     }
     deep?;
-    if let Some(framework) = &modified_codex_framework {
-        // 恢复官方 helper 会改变 framework 的嵌套内容，必须重新封装容器 seal；
-        // shallow sign 只更新 framework 自身，不会改写已经恢复的 vendor helper 身份。
-        sign_adhoc_component(framework)?;
-    }
     sign_outer_with_entitlements(app, &plan.xml)?;
     verify_patched_adhoc_bundle_deep_strict(app, None)
         .map(|_| ())
