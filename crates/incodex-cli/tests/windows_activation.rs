@@ -388,6 +388,40 @@ fn transient_registration_survives_launcher_termination_and_recovers_from_a_stab
 }
 
 #[test]
+fn legacy_transient_registration_in_the_durable_filename_still_recovers() {
+    let user_root = registration_scratch();
+    let package = "OpenAI.Codex_26.820.7780.0_x64__2p2nqsd0c76g0";
+    let helper = publish_windows_transient_helper(
+        &user_root,
+        &std::env::current_exe().expect("test helper source"),
+    )
+    .expect("publish stable helper");
+    stage_transient_windows_debug_registration(&user_root, package, &helper.executable)
+        .expect("stage current transient evidence");
+    fs::rename(
+        user_root.join("windows-transient-registration.json"),
+        user_root.join("windows-registration.json"),
+    )
+    .expect("model the legacy transient evidence filename");
+
+    let mut disabled = false;
+    assert!(recover_transient_windows_debug_registration_with(
+        &user_root,
+        |_| Ok(Vec::new()),
+        |_| Ok(true),
+        |_| {
+            disabled = true;
+            Ok(())
+        },
+    )
+    .expect("recover legacy transient evidence"));
+
+    assert!(disabled);
+    assert!(!user_root.join("windows-registration.json").exists());
+    fs::remove_dir_all(user_root).expect("remove legacy registration fixture");
+}
+
+#[test]
 fn transient_registration_recovery_retains_evidence_when_the_package_starts_during_disable() {
     let user_root = registration_scratch();
     let package = "OpenAI.Codex_26.820.7780.0_x64__2p2nqsd0c76g0";
