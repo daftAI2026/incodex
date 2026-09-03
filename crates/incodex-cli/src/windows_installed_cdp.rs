@@ -36,12 +36,14 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) struct InstalledBridgeRequest {
     pub request_id: String,
+    pub execution_context_id: u64,
 }
 
 /// 仅提供安装态正常窗口所需的 native action，UI 本身始终来自共享 Runtime。
 pub(crate) fn installed_bridge_source() -> String {
     format!(
         r#"(() => {{
+  if (window !== window.top || window.location.href !== "app://-/index.html") return;
   const pending = new Map();
   window.__incodexResolveNativeAction = (response) => {{
     const resolve = pending.get(response?.requestId);
@@ -63,9 +65,7 @@ pub(crate) fn installed_bridge_source() -> String {
     )
 }
 
-pub(crate) fn parse_installed_bridge_request(
-    payload: &str,
-) -> Result<InstalledBridgeRequest, String> {
+pub(crate) fn parse_installed_bridge_request(payload: &str) -> Result<String, String> {
     let value: Value = serde_json::from_str(payload)
         .map_err(|_| "installed CDP bridge request is not valid JSON".to_string())?;
     if value.get("action").and_then(Value::as_str) != Some("open") {
@@ -82,9 +82,7 @@ pub(crate) fn parse_installed_bridge_request(
                     .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
         })
         .ok_or_else(|| "installed CDP bridge request id is invalid".to_string())?;
-    Ok(InstalledBridgeRequest {
-        request_id: request_id.to_string(),
-    })
+    Ok(request_id.to_string())
 }
 
 pub(crate) fn installed_bridge_request_from_event(
@@ -95,10 +93,17 @@ pub(crate) fn installed_bridge_request_from_event(
     {
         return None;
     }
-    message
+    let request_id = message
         .pointer("/params/payload")
         .and_then(Value::as_str)
-        .and_then(|payload| parse_installed_bridge_request(payload).ok())
+        .and_then(|payload| parse_installed_bridge_request(payload).ok())?;
+    let execution_context_id = message
+        .pointer("/params/executionContextId")
+        .and_then(Value::as_u64)?;
+    Some(InstalledBridgeRequest {
+        request_id,
+        execution_context_id,
+    })
 }
 
 pub(crate) fn inject_installed_shared_ui(
@@ -134,6 +139,8 @@ pub(crate) fn inject_installed_shared_ui(
                     package_full_name,
                     main_process_id,
                     &options,
+                    &alive,
+                    &mut readiness,
                 );
             }
             Err(error) => last = error,
@@ -148,11 +155,33 @@ fn run_bridge_until_exit(
     package_full_name: &str,
     main_process_id: u32,
     options: &InjectionOptions,
+    alive: &AtomicBool,
+    readiness: &mut CodexModeReadiness,
 ) -> Result<(), String> {
+    let mut reinject = false;
     while package_process_is_alive(package_full_name, main_process_id)? {
+        if reinject {
+            let guard =
+                |stream: &TcpStream| require_package_connection_owner(stream, package_full_name);
+            match inject_shared_ui_with_options_while_alive_and_guard_with_readiness(
+                debug_port,
+                options,
+                alive,
+                |_| {},
+                readiness,
+                &guard,
+            ) {
+                Ok(_) => {}
+                Err(error) if is_transient_websocket_error(&error) => {
+                    thread::sleep(PROCESS_POLL_INTERVAL);
+                    continue;
+                }
+                Err(error) => return Err(error),
+            }
+        }
         match run_bridge_session(debug_port, package_full_name, options) {
-            Ok(()) => {}
-            Err(error) if is_transient_websocket_error(&error) => {}
+            Ok(()) => reinject = true,
+            Err(error) if is_transient_websocket_error(&error) => reinject = true,
             Err(error) => return Err(error),
         }
         thread::sleep(PROCESS_POLL_INTERVAL);
@@ -218,6 +247,25 @@ fn run_bridge_session(
                 let Some(request) = installed_bridge_request_from_event(&message) else {
                     continue;
                 };
+                command_id += 1;
+                let context = send_guarded_cdp(
+                    &mut socket,
+                    command_id,
+                    "Runtime.evaluate",
+                    json!({
+                        "expression": "window === window.top && window.location.href === \"app://-/index.html\"",
+                        "contextId": request.execution_context_id,
+                        "returnByValue": true
+                    }),
+                    &guard,
+                )?;
+                if context
+                    .pointer("/result/result/value")
+                    .and_then(Value::as_bool)
+                    != Some(true)
+                {
+                    continue;
+                }
                 let result = launch_native_open();
                 command_id += 1;
                 let response = match result {
@@ -238,7 +286,11 @@ fn run_bridge_session(
                     &mut socket,
                     command_id,
                     "Runtime.evaluate",
-                    json!({ "expression": expression, "returnByValue": true }),
+                    json!({
+                        "expression": expression,
+                        "contextId": request.execution_context_id,
+                        "returnByValue": true
+                    }),
                     &guard,
                 )?;
             }
@@ -357,13 +409,15 @@ fn is_transient_websocket_error(error: &str) -> bool {
         || error.contains("Connection reset")
         || error.contains("timed out")
         || error.contains("no installed Codex page target")
+        || error.contains("no Codex page target")
+        || error.contains("Incodex button is not mounted yet")
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        installed_bridge_request_from_event, installed_bridge_source,
-        is_transient_websocket_error, parse_installed_bridge_request, InstalledBridgeRequest,
+        installed_bridge_request_from_event, installed_bridge_source, is_transient_websocket_error,
+        parse_installed_bridge_request, InstalledBridgeRequest,
     };
     use serde_json::json;
 
