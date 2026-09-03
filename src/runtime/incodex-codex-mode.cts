@@ -57,6 +57,25 @@ const CODEX_MODE_PROBE_EXPRESSION = `(() => {
   };
 })()`;
 
+const CODEX_MODE_FALLBACK_EXPRESSION = `(() => {
+  const target = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : document.body;
+  if (!target) return false;
+  const input = {
+    key: "3",
+    code: "Digit3",
+    keyCode: 51,
+    which: 51,
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  };
+  target.dispatchEvent(new KeyboardEvent("keydown", input));
+  target.dispatchEvent(new KeyboardEvent("keyup", input));
+  return true;
+})()`;
+
 function deriveCodexModePageState(snapshot) {
   if (snapshot?.modeAvailable === true && snapshot.modeLabel === "Codex") return "codex";
   if (snapshot?.officialBlockerVisible === true) return "pending";
@@ -158,7 +177,7 @@ function createCodexModeReadiness(options) {
         if (state.complete || win.isDestroyed() || win.webContents.isDestroyed()) return;
         state.fallbackAttempted = true;
         state.confirmationFailures = 0;
-        state.fallbackSucceeded = options.selectFallback(win) === true;
+        state.fallbackSucceeded = (await options.selectFallback(win)) === true;
         if (state.fallbackSucceeded) {
           options.log("codex-mode-fallback-sent");
         } else {
@@ -186,6 +205,7 @@ function createCodexModeReadiness(options) {
 }
 
 export {
+  CODEX_MODE_FALLBACK_EXPRESSION,
   CODEX_MODE_PROBE_EXPRESSION,
   createCodexModeReadiness,
   decideCodexModeAction,

@@ -662,12 +662,10 @@ function markSessionClosed() {
   }
 }
 
-function selectOfficialCodexModeFallback(win) {
+async function selectOfficialCodexModeFallback(win) {
   if (!isIncognito()) return;
   try {
-    win.webContents.sendInputEvent({ type: "keyDown", keyCode: "3", modifiers: ["control"] });
-    win.webContents.sendInputEvent({ type: "keyUp", keyCode: "3", modifiers: ["control"] });
-    return true;
+    return await win.webContents.executeJavaScript(codexMode.CODEX_MODE_FALLBACK_EXPRESSION, false);
   } catch (error) {
     logLaunch("codex-mode-selection-failed", { error: String(error) });
     return false;
