@@ -7,8 +7,9 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_cli::macos_keychain_assets::{
-    bundled_helper_bytes, bundled_provider_bytes, ensure_bundled_registration,
-    install_keychain_provider,
+    authorize_registration, bundled_helper_bytes, bundled_provider_bytes,
+    ensure_bundled_registration, ensure_registration, install_keychain_provider,
+    KeychainAuthorization,
 };
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
@@ -106,6 +107,44 @@ fn bundled_keychain_provider_is_a_normal_loader_relative_dylib() {
 }
 
 #[test]
+fn helper_authorization_is_explicit_silent_and_distinguishes_a_missing_key() {
+    let home = scratch();
+    let root = home.join(".incodex");
+    let app = home.join("Applications/ChatGPT.app");
+    fs::create_dir_all(&app).unwrap();
+    let marker = home.join("authorized");
+    let helper = home.join("authorization-helper");
+    fs::write(
+        &helper,
+        format!(
+            "#!/bin/sh\n[ \"$1\" = --authorize ] || exit 64\nprintf authorized > '{}'\n",
+            marker.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
+    let registration = ensure_registration(&root, &app, &helper).unwrap();
+
+    assert_eq!(
+        authorize_registration(&registration).unwrap(),
+        KeychainAuthorization::Authorized
+    );
+    assert_eq!(fs::read(&marker).unwrap(), b"authorized");
+
+    let missing_root = home.join("missing-root");
+    let missing = home.join("missing-helper");
+    fs::write(&missing, "#!/bin/sh\nexit 44\n").unwrap();
+    fs::set_permissions(&missing, fs::Permissions::from_mode(0o700)).unwrap();
+    let registration = ensure_registration(&missing_root, &app, &missing).unwrap();
+    assert_eq!(
+        authorize_registration(&registration).unwrap(),
+        KeychainAuthorization::ItemMissing
+    );
+
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
 fn install_transaction_owns_provider_placement_and_failure_rollback() {
     let install = include_str!("../src/install.rs");
     let assets = include_str!("../src/macos_keychain_assets.rs");
@@ -118,6 +157,12 @@ fn install_transaction_owns_provider_placement_and_failure_rollback() {
         .split("let commit = match tx.commit()")
         .next()
         .expect("provider mutation must happen before transaction commit");
+    let authorization = install
+        .find("authorize_registration")
+        .expect("explicit install must authorize the stable helper before mutation");
+    let begin = install
+        .find("let mut tx = begin_verified_transaction_with_quiescence")
+        .unwrap();
     let provider = transaction
         .find("install_keychain_provider")
         .expect("install transaction must stage the fixed provider before swapping the app");
@@ -128,6 +173,10 @@ fn install_transaction_owns_provider_placement_and_failure_rollback() {
     assert!(
         provider < swap,
         "provider mutation must precede the live swap"
+    );
+    assert!(
+        authorization < begin && install.contains("expected_build.is_none()"),
+        "only an explicit foreground install may authorize before the transaction; background update recovery must never open a password prompt"
     );
     assert!(
         transaction[provider..].contains("rollback_install"),
