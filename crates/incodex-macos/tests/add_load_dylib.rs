@@ -127,6 +127,45 @@ fn refuses_a_corrupt_load_command_without_mutating_bytes() {
     assert_eq!(bytes, before);
 }
 
+#[test]
+fn refuses_a_segment_range_that_overflows_without_mutating_bytes() {
+    let mut bytes = synthetic_macho(NORMAL_HEADER_PADDING);
+    write_u64(&mut bytes, DATA_SEGMENT_COMMAND_OFFSET + 48, u64::MAX);
+    let before = bytes.clone();
+
+    assert!(add_load_dylib(&mut bytes).is_err());
+    assert_eq!(bytes, before);
+}
+
+#[test]
+fn refuses_segment_section_count_that_exceeds_its_command_without_mutating_bytes() {
+    let mut bytes = synthetic_macho(NORMAL_HEADER_PADDING);
+    write_u32(&mut bytes, DATA_SEGMENT_COMMAND_OFFSET + 64, 1);
+    let before = bytes.clone();
+
+    assert!(add_load_dylib(&mut bytes).is_err());
+    assert_eq!(bytes, before);
+}
+
+#[test]
+fn existing_provider_does_not_hide_a_later_corrupt_command() {
+    let mut bytes = synthetic_macho(NORMAL_HEADER_PADDING + 8);
+    add_load_dylib(&mut bytes).unwrap();
+    let corrupt_offset = OLD_LOAD_COMMANDS_END + LOAD_DYLIB_COMMAND_SIZE;
+    write_u32(&mut bytes, 16, 5);
+    write_u32(
+        &mut bytes,
+        20,
+        (OLD_LOAD_COMMANDS_SIZE + LOAD_DYLIB_COMMAND_SIZE + 8) as u32,
+    );
+    write_u32(&mut bytes, corrupt_offset, LC_UUID);
+    write_u32(&mut bytes, corrupt_offset + 4, 0);
+    let before = bytes.clone();
+
+    assert!(add_load_dylib(&mut bytes).is_err());
+    assert_eq!(bytes, before);
+}
+
 fn synthetic_macho(header_padding: usize) -> Vec<u8> {
     let data_file_offset = OLD_LOAD_COMMANDS_END + header_padding;
     let mut bytes = vec![0; data_file_offset + FILE_CONTENT.len()];
