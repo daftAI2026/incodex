@@ -49,6 +49,17 @@ fn codex_mode_probe_distinguishes_settled_missing_ui_from_official_dialogs() {
 }
 
 #[test]
+fn copied_user_state_without_an_onboarding_blocker_can_reach_the_bounded_fallback() {
+    let page = codex_mode_page_state(&mode_probe_response(false, "", false)).unwrap();
+    assert_eq!(page, CodexModePageState::Other);
+
+    let mut readiness = CodexModeReadiness::default();
+    assert_eq!(readiness.observe(page), CodexModeAction::Wait);
+    assert_eq!(readiness.observe(page), CodexModeAction::Wait);
+    assert_eq!(readiness.observe(page), CodexModeAction::SelectFallback);
+}
+
+#[test]
 fn codex_readiness_waits_for_optional_official_blockers() {
     let mut readiness = CodexModeReadiness::default();
 

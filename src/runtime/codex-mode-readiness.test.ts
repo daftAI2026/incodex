@@ -195,6 +195,46 @@ describe("Codex mode readiness", () => {
     ]);
   });
 
+  test("applies one wall-clock budget while a copied user state stays blocked", async () => {
+    const logs: Array<[string, unknown]> = [];
+    let closeWindow = () => {};
+    const win = {
+      isDestroyed: () => false,
+      isFocused: () => true,
+      once: (_event: string, callback: () => void) => {
+        closeWindow = callback;
+      },
+      webContents: {
+        executeJavaScript: async () => ({
+          modeAvailable: false,
+          modeLabel: "",
+          officialBlockerVisible: true,
+        }),
+        isDestroyed: () => false,
+      },
+    };
+    const readiness = createCodexModeReadiness({
+      isIncognito: () => true,
+      log: (event: string, detail: unknown) => logs.push([event, detail]),
+      selectFallback: () => true,
+      primarySettleMs: 0,
+      pollMs: 1,
+      totalTimeoutMs: 20,
+      totalChecksRequired: 1_000,
+    });
+
+    readiness.observe(win);
+    try {
+      await Bun.sleep(80);
+      expect(logs.at(-1)).toEqual([
+        "codex-mode-unresolved",
+        { fallback: false, reason: "readiness-deadline" },
+      ]);
+    } finally {
+      closeWindow();
+    }
+  });
+
   test("bounds a renderer probe that never settles", async () => {
     const tasks: ScheduledTask[] = [];
     const logs: Array<[string, unknown]> = [];
@@ -235,6 +275,45 @@ describe("Codex mode readiness", () => {
       "codex-mode-unresolved",
       { fallback: false, reason: "probe-failed" },
     ]);
+  });
+
+  test("applies the same wall-clock budget when executeJavaScript never settles", async () => {
+    const logs: Array<[string, unknown]> = [];
+    let closeWindow = () => {};
+    const never = new Promise(() => {});
+    const win = {
+      isDestroyed: () => false,
+      isFocused: () => true,
+      once: (_event: string, callback: () => void) => {
+        closeWindow = callback;
+      },
+      webContents: {
+        executeJavaScript: async () => never,
+        isDestroyed: () => false,
+      },
+    };
+    const readiness = createCodexModeReadiness({
+      isIncognito: () => true,
+      log: (event: string, detail: unknown) => logs.push([event, detail]),
+      selectFallback: () => true,
+      primarySettleMs: 0,
+      pollMs: 1,
+      probeTimeoutMs: 5,
+      totalTimeoutMs: 20,
+      probeFailuresRequired: 1_000,
+      totalChecksRequired: 1_000,
+    });
+
+    readiness.observe(win);
+    try {
+      await Bun.sleep(80);
+      expect(logs.at(-1)).toEqual([
+        "codex-mode-unresolved",
+        { fallback: false, reason: "readiness-deadline" },
+      ]);
+    } finally {
+      closeWindow();
+    }
   });
 
   test("attempts its keyboard fallback at most once even when selection fails", async () => {
