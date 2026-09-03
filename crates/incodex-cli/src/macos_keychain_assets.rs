@@ -400,3 +400,53 @@ fn write_bundle_file_atomic(path: &Path, bytes: &[u8], mode: u32) -> Result<(), 
     let _ = fs::remove_file(temporary);
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{Duration, Instant};
+
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn foreground_authorization_has_a_deadline_and_kills_its_process_group() {
+        let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let home = std::env::temp_dir().join(format!(
+            "incodex-keychain-authorization-timeout-{}-{sequence}",
+            std::process::id()
+        ));
+        let root = home.join(".incodex");
+        let app = home.join("Applications/ChatGPT.app");
+        let marker = home.join("orphan-finished");
+        let helper = home.join("blocking-helper");
+        fs::create_dir_all(&app).unwrap();
+        fs::write(
+            &helper,
+            format!(
+                "#!/bin/sh\n/bin/sh -c '/bin/sleep 1; printf orphan > {}' &\nwait\n",
+                marker.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
+        let registration = ensure_registration(&root, &app, &helper).unwrap();
+
+        let started = Instant::now();
+        let error = authorize_registration_with_timeout(
+            &root,
+            &registration,
+            Duration::from_millis(150),
+        )
+        .unwrap_err();
+        assert!(error.contains("timed out"), "{error}");
+        assert!(started.elapsed() < Duration::from_secs(1));
+        std::thread::sleep(Duration::from_millis(1_100));
+        assert!(
+            !marker.exists(),
+            "authorization timeout left a descendant running"
+        );
+
+        fs::remove_dir_all(home).unwrap();
+    }
+}
