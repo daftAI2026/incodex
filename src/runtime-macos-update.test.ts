@@ -10,6 +10,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   readFileSync,
   rmSync,
@@ -301,6 +302,7 @@ describe("macOS Keychain readiness recovery", () => {
     child.kill = () => true;
     child.unref = () => {};
     let spawnCall: any = null;
+    const outcomes: Array<[string, unknown]> = [];
 
     expect(
       update.probeKeychainAuthorizationReadiness({
@@ -308,6 +310,7 @@ describe("macOS Keychain readiness recovery", () => {
         userRoot: f.userRoot,
         execPath: f.execPath,
         incognito: false,
+        log: (event: string, detail: unknown) => outcomes.push([event, detail]),
         spawnProcess(command: string, args: string[], options: unknown) {
           spawnCall = { command, args, options };
           queueMicrotask(() => child.emit("close", 0, null));
@@ -330,6 +333,42 @@ describe("macOS Keychain readiness recovery", () => {
       helperPath: f.helperPath,
       helperSha256: f.helperSha256,
     });
+    expect(outcomes).toEqual([
+      ["keychain-readiness-probe", { status: "authorized" }],
+    ]);
+  });
+
+  test("reports a non-secret reason when the fixed helper still needs authorization", async () => {
+    const f = keychainFixture();
+    const child = new EventEmitter() as EventEmitter & {
+      kill: (signal?: string) => boolean;
+      unref: () => void;
+    };
+    child.kill = () => true;
+    child.unref = () => {};
+    const outcomes: Array<[string, unknown]> = [];
+
+    expect(
+      update.probeKeychainAuthorizationReadiness({
+        platform: "darwin",
+        userRoot: f.userRoot,
+        execPath: f.execPath,
+        incognito: false,
+        log: (event: string, detail: unknown) => outcomes.push([event, detail]),
+        spawnProcess() {
+          queueMicrotask(() => child.emit("close", 68, null));
+          return child;
+        },
+      }),
+    ).toBe(true);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(
+      existsSync(join(f.userRoot, "macos-keychain", "authorization-proof.json")),
+    ).toBe(false);
+    expect(outcomes).toEqual([
+      ["keychain-readiness-probe", { status: "authorization-required" }],
+    ]);
   });
 
   test("never probes from incognito or after readiness is durable", () => {
