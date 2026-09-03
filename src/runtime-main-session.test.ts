@@ -13,11 +13,13 @@ describe("Electron session preparation", () => {
   test("installed launches carry the copied locale into the official child process", () => {
     const incognitoLaunchArgs = (runtimeMain as any).incognitoLaunchArgs;
     expect(typeof incognitoLaunchArgs).toBe("function");
-    expect(incognitoLaunchArgs("/tmp/incodex chromium", "zh-CN")).toEqual([
-      "--user-data-dir=/tmp/incodex chromium",
-      "--lang=zh-CN",
-      "codex://new?mode=codex",
-    ]);
+    for (const locale of ["zh-CN", "en-US", "ja-JP"]) {
+      expect(incognitoLaunchArgs("/tmp/incodex chromium", locale)).toEqual([
+        "--user-data-dir=/tmp/incodex chromium",
+        `--lang=${locale}`,
+        "codex://new?mode=codex",
+      ]);
+    }
     expect(incognitoLaunchArgs("/tmp/incodex chromium", "")).toEqual([
       "--user-data-dir=/tmp/incodex chromium",
       "codex://new?mode=codex",
