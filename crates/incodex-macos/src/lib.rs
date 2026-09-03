@@ -11,12 +11,14 @@ mod entitlements;
 mod live_window;
 #[cfg(target_os = "macos")]
 mod live_window_macos;
+mod macho;
 mod session_process;
 mod signature_inspection;
 mod signing;
 #[cfg(test)]
 use live_window::{is_isolated_launch_command, select_live_main_window_bounds, WindowCandidate};
 pub use live_window::{live_main_window_bounds, WindowBounds};
+pub use macho::add_load_dylib;
 pub use session_process::{quiesce_session_processes, session_process_ids_from_ps};
 pub use signature_inspection::inspect_outer_signing;
 pub use signing::*;

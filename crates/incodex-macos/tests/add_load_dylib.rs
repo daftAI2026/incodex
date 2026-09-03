@@ -170,6 +170,7 @@ fn synthetic_macho(header_padding: usize) -> Vec<u8> {
     bytes
 }
 
+#[allow(clippy::too_many_arguments)] // 测试构造器按 Mach-O 字段顺序展开，调用点更易核对。
 fn write_segment_64(
     command: &mut [u8],
     name: &[u8],
@@ -211,7 +212,7 @@ fn find_command(bytes: &[u8], kind: u32) -> Option<&[u8]> {
             return None;
         }
         let command_size = read_u32(bytes, offset + 4) as usize;
-        if command_size < 8 || command_size % 4 != 0 || offset + command_size > end {
+        if command_size < 8 || !command_size.is_multiple_of(4) || offset + command_size > end {
             return None;
         }
         if read_u32(bytes, offset) == kind {
