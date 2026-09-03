@@ -64,9 +64,10 @@ exports.CODEX_MODE_PROBE_EXPRESSION = CODEX_MODE_PROBE_EXPRESSION;
 function deriveCodexModePageState(snapshot) {
     if (snapshot?.modeAvailable === true && snapshot.modeLabel === "Codex")
         return "codex";
-    if (snapshot?.officialBlockerVisible === true || snapshot?.modeAvailable !== true) {
+    if (snapshot?.officialBlockerVisible === true)
         return "pending";
-    }
+    if (snapshot?.modeAvailable !== true)
+        return "missing";
     return "other";
 }
 function decideCodexModeAction(pageState, fallbackAttempted, confirmationFailures, primaryOtherChecks = 0, primaryOtherChecksRequired = 3) {
@@ -132,10 +133,11 @@ function createCodexModeReadiness(options) {
                 return;
             state.probeFailures = 0;
             const pageState = deriveCodexModePageState(snapshot);
+            const nonCodexPage = pageState === "other" || pageState === "missing";
             if (!state.fallbackAttempted) {
-                state.primaryOtherChecks = pageState === "other" ? state.primaryOtherChecks + 1 : 0;
+                state.primaryOtherChecks = nonCodexPage ? state.primaryOtherChecks + 1 : 0;
             }
-            else if (pageState === "other") {
+            else if (nonCodexPage) {
                 state.confirmationFailures += 1;
             }
             const action = decideCodexModeAction(pageState, state.fallbackAttempted, state.confirmationFailures, state.primaryOtherChecks, primaryOtherChecksRequired);
