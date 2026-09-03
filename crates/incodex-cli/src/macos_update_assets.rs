@@ -431,7 +431,7 @@ fn validate_registration(root: &Path, registration: &UpdateRegistration) -> Resu
     Ok(())
 }
 
-fn is_sha256(value: &str) -> bool {
+pub(crate) fn is_sha256(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
@@ -445,7 +445,7 @@ fn publish_helper(path: &Path, bytes: &[u8], expected_sha256: &str) -> Result<()
     )
 }
 
-fn publish_content_addressed_file(
+pub(crate) fn publish_content_addressed_file(
     path: &Path,
     bytes: &[u8],
     expected_sha256: &str,
@@ -507,7 +507,7 @@ pub(crate) fn ensure_private_dir(path: &Path) -> Result<(), String> {
     set_mode(path, PRIVATE_DIR_MODE)
 }
 
-fn write_private_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn write_private_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     write_private_atomic_with_mode(path, bytes, PRIVATE_FILE_MODE)
 }
 
