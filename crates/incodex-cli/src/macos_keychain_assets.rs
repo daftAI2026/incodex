@@ -94,6 +94,9 @@ fn authorize_registration_with_timeout(
     let current = read_registration(root)?
         .ok_or("macOS Keychain registration disappeared before authorization")?;
     ensure_same_registration_identity(&current, registration)?;
+    if current.authorization_ready {
+        return Ok(KeychainAuthorization::Authorized);
+    }
     let mut command = Command::new(&registration.helper_path);
     command
         .arg("--authorize")
