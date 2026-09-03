@@ -173,6 +173,39 @@ fn installed_debugger_resumes_normally_after_the_uninstall_kill_switch() {
     );
     fs::remove_dir_all(root).expect("remove debugger route fixture");
 }
+
+#[test]
+fn installed_debugger_prepares_cdp_for_an_enabled_official_window() {
+    let sequence = STATE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let root = std::env::temp_dir().join(format!(
+        "incodex-installed-cdp-route-{}-{sequence}",
+        std::process::id()
+    ));
+    let helper = std::env::current_exe().expect("test helper");
+    let staged = stage_windows_install_state(
+        &root,
+        "OpenAI.Codex_1.2.3.4_x64__publisher",
+        &helper,
+        "0.5.0-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    )
+    .expect("stage debugger state");
+    let pending =
+        transition_windows_install_state(&root, staged.epoch, WindowsInstallPhase::EnablePending)
+            .expect("record enable pending");
+    let enabled = transition_windows_install_state(
+        &root,
+        pending.epoch,
+        WindowsInstallPhase::EnabledUnobserved,
+    )
+    .expect("record enabled state");
+
+    assert!(!matches!(
+        windows_installed_debugger_route(&enabled, "ChatGPT.exe")
+            .expect("route official launch"),
+        WindowsDebuggerRoute::ResumeNormally
+    ));
+    fs::remove_dir_all(root).expect("remove debugger route fixture");
+}
 use incodex_cli::windows_process::WindowsProcessTree;
 
 #[test]
