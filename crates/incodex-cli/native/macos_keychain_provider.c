@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 Security.framework 的 SecItemCopyMatching、内容寻址固定 helper 与 fishhook 符号重绑定
+ * [OUTPUT]: 对 Codex Storage Key 精确查询提供有界 helper 读取，并在 helper 不可用时回退官方 Security 路径
+ * [POS]: incodex-cli/native 的 Keychain 适配层，只接管单一查询且不得让可选增强破坏官方存储功能
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 #include <CoreFoundation/CoreFoundation.h>
 #include <CommonCrypto/CommonDigest.h>
 #include <Security/Security.h>
@@ -243,13 +249,12 @@ copy_matching_with_helper(CFDictionaryRef query, CFTypeRef *result,
     int helper_status = run_helper(helper_path, helper_output,
                                    sizeof(helper_output),
                                    &helper_output_length);
-    if (helper_status == 44) {
-        memset(helper_output, 0, sizeof(helper_output));
-        return errSecItemNotFound;
-    }
     if (helper_status != 0) {
         memset(helper_output, 0, sizeof(helper_output));
-        return errSecAuthFailed;
+        // helper 是增强路径，不是官方存储的单点故障。身份校验、缺项、
+        // 超时或执行失败时都回到原始 Security 实现，保留 Codex 的原生
+        // 解锁、创建与错误语义；代价至多是系统再次显示官方授权提示。
+        return original ? original(query, result) : errSecParam;
     }
 
     CFDataRef data = CFDataCreate(kCFAllocatorDefault, helper_output,
