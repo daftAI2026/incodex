@@ -93,7 +93,7 @@ impl WindowsOpenPlan {
     }
 
     pub fn installed_activation_request(&self) -> Result<WindowsActivationRequest, String> {
-        self.base_activation_request()
+        self.activation_request()
     }
 }
 
