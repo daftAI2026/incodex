@@ -253,24 +253,27 @@ where
     D: FnMut(&str) -> Result<(), String>,
     E: FnMut(&WindowsInstallState) -> Result<(), String>,
 {
-    let Some(evidence) = read_transient_windows_debug_registration(user_root)? else {
-        let Some(evidence) = read_windows_debug_registration(user_root)? else {
-            return Ok(false);
-        };
-        if evidence.kind == WindowsDebugRegistrationKind::Installed {
-            let state = read_windows_install_state(user_root)?;
-            if state
-                .as_ref()
-                .is_some_and(|state| registration_matches_install_state(&evidence, state))
-            {
+    let evidence = match read_transient_windows_debug_registration(user_root)? {
+        Some(evidence) => evidence,
+        None => {
+            let Some(evidence) = read_windows_debug_registration(user_root)? else {
                 return Ok(false);
+            };
+            if evidence.kind == WindowsDebugRegistrationKind::Installed {
+                let state = read_windows_install_state(user_root)?;
+                if state
+                    .as_ref()
+                    .is_some_and(|state| registration_matches_install_state(&evidence, state))
+                {
+                    return Ok(false);
+                }
+                return Err(
+                    "Windows Runtime registration requires `incodex uninstall` before this command"
+                        .to_string(),
+                );
             }
-            return Err(
-                "Windows Runtime registration requires `incodex uninstall` before this command"
-                    .to_string(),
-            );
+            evidence
         }
-        return Ok(false);
     };
     let running = running_package_processes(&evidence.package_full_name)
         .map_err(|error| format!("cannot inspect running Windows Codex processes: {error}"))?;
@@ -391,16 +394,20 @@ fn validate_evidence(evidence: &WindowsDebugRegistrationEvidence) -> Result<(), 
         .state_path
         .parent()
         .ok_or_else(|| "Windows debugger registration has no Incodex root".to_string())?;
-    let expected_name = match evidence.kind {
-        WindowsDebugRegistrationKind::Transient => TRANSIENT_REGISTRATION_NAME,
-        WindowsDebugRegistrationKind::Installed => REGISTRATION_NAME,
-    };
-    if evidence
+    let state_name = evidence
         .state_path
         .file_name()
-        .and_then(|name| name.to_str())
-        != Some(expected_name)
-    {
+        .and_then(|name| name.to_str());
+    let path_matches_kind = match evidence.kind {
+        WindowsDebugRegistrationKind::Transient => {
+            matches!(
+                state_name,
+                Some(TRANSIENT_REGISTRATION_NAME | REGISTRATION_NAME)
+            )
+        }
+        WindowsDebugRegistrationKind::Installed => state_name == Some(REGISTRATION_NAME),
+    };
+    if !path_matches_kind {
         return Err(
             "Windows debugger registration evidence path does not match its kind".to_string(),
         );
