@@ -214,11 +214,7 @@ fn persist_authorization_readiness(
         return Ok(());
     }
     current.authorization_ready = authorization_ready;
-    let body = format!(
-        "{}\n",
-        serde_json::to_string(&current).map_err(|error| error.to_string())?
-    );
-    write_private_atomic(&path, body.as_bytes())
+    write_registration(&path, &current)
 }
 
 fn ensure_same_registration_identity(
@@ -342,15 +338,23 @@ where
         None,
     )?;
 
-    if let Some(current) = read_registration(root)? {
+    let current = read_registration(root)?;
+    if let Some(current) = current.as_ref() {
         if current.app_path != app_path {
             return Err("macOS Keychain app path change requires an explicit migration".into());
         }
-        return Ok(current);
+        if current.authorization_ready {
+            return Ok(current.clone());
+        }
     }
 
     let helper_bytes = load_helper()?;
     let helper_sha256 = sha256_hex(&helper_bytes);
+    if let Some(current) = current {
+        if current.helper_sha256 == helper_sha256 {
+            return Ok(current);
+        }
+    }
 
     let helpers_root = root.join("helpers").join("macos-keychain");
     ensure_private_dir(&helpers_root)?;
@@ -372,12 +376,16 @@ where
         helper_sha256,
         authorization_ready: false,
     };
+    write_registration(&registration_path, &registration)?;
+    Ok(registration)
+}
+
+fn write_registration(path: &Path, registration: &KeychainRegistration) -> Result<(), String> {
     let body = format!(
         "{}\n",
-        serde_json::to_string(&registration).map_err(|error| error.to_string())?
+        serde_json::to_string(registration).map_err(|error| error.to_string())?
     );
-    write_private_atomic(&registration_path, body.as_bytes())?;
-    Ok(registration)
+    write_private_atomic(path, body.as_bytes())
 }
 
 pub fn read_registration(root: &Path) -> Result<Option<KeychainRegistration>, String> {

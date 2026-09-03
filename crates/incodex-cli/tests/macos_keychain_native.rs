@@ -172,10 +172,7 @@ fn successful_helper_authorization_is_reused_without_invoking_it_again() {
     let helper = home.join("authorization-helper");
     fs::write(
         &helper,
-        format!(
-            "#!/bin/sh\nprintf x >> '{}'\n",
-            calls.display()
-        ),
+        format!("#!/bin/sh\nprintf x >> '{}'\n", calls.display()),
     )
     .unwrap();
     fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
