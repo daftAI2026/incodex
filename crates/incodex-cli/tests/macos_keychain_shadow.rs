@@ -7,7 +7,10 @@
 
 use std::path::PathBuf;
 
-use incodex_cli::macos_keychain_assets::{should_install_keychain_provider, KeychainRegistration};
+use incodex_cli::macos_keychain_assets::{
+    ensure_registration, promote_authorization_from_proof, read_registration,
+    should_install_keychain_provider, KeychainRegistration,
+};
 use incodex_cli::macos_keychain_protocol::{
     is_allowed_query, shadow_bridge_status_from_exit_code, ShadowBridgeStatus, KEYCHAIN_ACCOUNT,
     KEYCHAIN_SERVICE, SHADOW_KEYCHAIN_ACCOUNT, SHADOW_KEYCHAIN_SERVICE,
@@ -94,4 +97,45 @@ fn background_recovery_never_enters_the_interactive_authorization_path() {
         provider_block.contains("authorization_ready"),
         "an unready registration must skip provider installation"
     );
+}
+
+#[test]
+fn matching_noninteractive_runtime_proof_promotes_the_same_helper_generation() {
+    let home = std::env::temp_dir().join(format!(
+        "incodex-keychain-proof-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&home);
+    let root = home.join(".incodex");
+    let app = home.join("Applications/ChatGPT.app");
+    let source = home.join("helper");
+    std::fs::create_dir_all(&app).unwrap();
+    std::fs::write(&source, b"fixed-helper").unwrap();
+    let registration = ensure_registration(&root, &app, &source).unwrap();
+    assert!(!registration.authorization_ready);
+
+    let proof_path = root.join("macos-keychain/authorization-proof.json");
+    std::fs::write(
+        &proof_path,
+        format!(
+            "{}\n",
+            serde_json::json!({
+                "schemaVersion": 1,
+                "appPath": registration.app_path,
+                "helperPath": registration.helper_path,
+                "helperSha256": registration.helper_sha256,
+            })
+        ),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&proof_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+    assert!(promote_authorization_from_proof(&root).unwrap());
+    assert!(read_registration(&root)
+        .unwrap()
+        .unwrap()
+        .authorization_ready);
+    assert!(!proof_path.exists());
+    std::fs::remove_dir_all(home).unwrap();
 }
