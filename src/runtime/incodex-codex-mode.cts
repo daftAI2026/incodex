@@ -85,6 +85,7 @@ function createCodexModeReadiness(options) {
   const checks = new WeakMap();
   const primarySettleMs = options.primarySettleMs ?? 1_500;
   const primaryOtherChecksRequired = options.primaryOtherChecksRequired ?? 3;
+  const probeFailuresRequired = options.probeFailuresRequired ?? 20;
   const pollMs = options.pollMs ?? 750;
   const scheduleTimer = options.scheduleTimer ?? setTimeout;
   const cancelTimer = options.cancelTimer ?? clearTimeout;
@@ -98,6 +99,7 @@ function createCodexModeReadiness(options) {
       fallbackAttempted: false,
       fallbackSucceeded: false,
       primaryOtherChecks: 0,
+      probeFailures: 0,
       running: false,
       timer: null,
     };
@@ -128,6 +130,7 @@ function createCodexModeReadiness(options) {
         false,
       );
       if (state.complete || win.isDestroyed() || win.webContents.isDestroyed()) return;
+      state.probeFailures = 0;
       const pageState = deriveCodexModePageState(snapshot);
       if (!state.fallbackAttempted) {
         state.primaryOtherChecks = pageState === "other" ? state.primaryOtherChecks + 1 : 0;
@@ -164,7 +167,15 @@ function createCodexModeReadiness(options) {
         }
       }
     } catch (error) {
+      state.probeFailures += 1;
       options.log("codex-mode-probe-failed", { error: String(error) });
+      if (state.probeFailures >= probeFailuresRequired) {
+        state.complete = true;
+        options.log("codex-mode-unresolved", {
+          fallback: state.fallbackSucceeded,
+          reason: "probe-failed",
+        });
+      }
     } finally {
       state.running = false;
       if (!state.complete) observe(win, pollMs);
