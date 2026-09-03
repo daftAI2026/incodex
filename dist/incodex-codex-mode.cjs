@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CODEX_MODE_PROBE_EXPRESSION = void 0;
+exports.CODEX_MODE_PROBE_EXPRESSION = exports.CODEX_MODE_FALLBACK_EXPRESSION = void 0;
 exports.createCodexModeReadiness = createCodexModeReadiness;
 exports.decideCodexModeAction = decideCodexModeAction;
 exports.deriveCodexModePageState = deriveCodexModePageState;
@@ -61,6 +61,25 @@ const CODEX_MODE_PROBE_EXPRESSION = `(() => {
   };
 })()`;
 exports.CODEX_MODE_PROBE_EXPRESSION = CODEX_MODE_PROBE_EXPRESSION;
+const CODEX_MODE_FALLBACK_EXPRESSION = `(() => {
+  const target = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : document.body;
+  if (!target) return false;
+  const input = {
+    key: "3",
+    code: "Digit3",
+    keyCode: 51,
+    which: 51,
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  };
+  target.dispatchEvent(new KeyboardEvent("keydown", input));
+  target.dispatchEvent(new KeyboardEvent("keyup", input));
+  return true;
+})()`;
+exports.CODEX_MODE_FALLBACK_EXPRESSION = CODEX_MODE_FALLBACK_EXPRESSION;
 function deriveCodexModePageState(snapshot) {
     if (snapshot?.modeAvailable === true && snapshot.modeLabel === "Codex")
         return "codex";
@@ -156,7 +175,7 @@ function createCodexModeReadiness(options) {
                     return;
                 state.fallbackAttempted = true;
                 state.confirmationFailures = 0;
-                state.fallbackSucceeded = options.selectFallback(win) === true;
+                state.fallbackSucceeded = (await options.selectFallback(win)) === true;
                 if (state.fallbackSucceeded) {
                     options.log("codex-mode-fallback-sent");
                 }
