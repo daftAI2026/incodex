@@ -16,6 +16,8 @@ const HELPER_FILE_MODE: u32 = 0o700;
 const HELPER_FILE_NAME: &str = "incodex-keychain-helper";
 const BUNDLED_HELPER_BYTES: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/incodex-keychain-helper"));
+const BUNDLED_PROVIDER_BYTES: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/IncodexKeyProvider.dylib"));
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -45,6 +47,10 @@ pub fn ensure_bundled_registration(
 
 pub fn bundled_helper_bytes() -> &'static [u8] {
     BUNDLED_HELPER_BYTES
+}
+
+pub fn bundled_provider_bytes() -> &'static [u8] {
+    BUNDLED_PROVIDER_BYTES
 }
 
 fn ensure_registration_with<F>(

@@ -28,6 +28,7 @@ fn main() {
     println!("cargo:rerun-if-changed=native/macos_update_coordinator.m");
     println!("cargo:rerun-if-changed=native/macos_sparkle_interpose.m");
     println!("cargo:rerun-if-changed=native/macos_keychain_helper.c");
+    println!("cargo:rerun-if-changed=native/macos_keychain_provider.c");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
         return;
     }
@@ -100,4 +101,21 @@ fn main() {
         ],
     );
     sign_adhoc(&keychain_helper, "com.daftai.incodex.keychain-helper");
+    compile(
+        &clang,
+        &sdk,
+        "native/macos_keychain_provider.c",
+        &out.join("IncodexKeyProvider.dylib"),
+        &[
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-dynamiclib",
+            "-framework",
+            "CoreFoundation",
+            "-framework",
+            "Security",
+            "-Wl,-install_name,@loader_path/IncodexKeyProvider.dylib",
+        ],
+    );
 }

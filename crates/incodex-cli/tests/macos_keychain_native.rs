@@ -64,7 +64,7 @@ fn bundled_keychain_provider_is_a_normal_loader_relative_dylib() {
     assert_eq!(&bytes[..4], &[0xcf, 0xfa, 0xed, 0xfe]);
 
     let id = Command::new("/usr/bin/otool")
-        .args(["-D", "--"])
+        .arg("-D")
         .arg(&provider)
         .output()
         .unwrap();
@@ -82,7 +82,7 @@ fn bundled_keychain_provider_is_a_normal_loader_relative_dylib() {
     );
 
     let dependencies = Command::new("/usr/bin/otool")
-        .args(["-L", "--"])
+        .arg("-L")
         .arg(&provider)
         .output()
         .unwrap();
