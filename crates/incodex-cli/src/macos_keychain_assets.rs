@@ -22,7 +22,7 @@ const HELPER_FILE_MODE: u32 = 0o700;
 const HELPER_FILE_NAME: &str = "incodex-keychain-helper";
 const PROVIDER_FILE_MODE: u32 = 0o644;
 const PROVIDER_FILE_NAME: &str = "IncodexKeyProvider.dylib";
-const AUTHORIZATION_TIMEOUT: Duration = Duration::from_secs(120);
+const AUTHORIZATION_TIMEOUT: Duration = Duration::from_secs(300);
 const AUTHORIZATION_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const PROVIDER_HELPER_HASH_MARKER: &[u8; 64] =
     b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
