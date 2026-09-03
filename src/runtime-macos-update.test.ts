@@ -1,16 +1,14 @@
 /**
  * [INPUT]: 依赖 macOS 更新交接模块及临时文件系统夹具，模拟 Coordinator 与原生加载边界
- * [OUTPUT]: 提供交接顺序、资产校验和同步启动契约的回归测试
- * [POS]: src 测试层的 Sparkle 安全网，确保更新恢复钩子先布防且不让官方 main 让出事件循环
+ * [OUTPUT]: 提供交接顺序、资产校验、同步启动及后台禁用 Keychain 探针的回归测试
+ * [POS]: src 测试层的 Sparkle 安全网，确保更新恢复钩子先布防且不让官方 main 触发系统授权交互
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { EventEmitter } from "node:events";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
-  existsSync,
   mkdirSync,
   readFileSync,
   rmSync,
@@ -257,139 +255,11 @@ describe("macOS seamless update handoff", () => {
   });
 });
 
-describe("macOS Keychain readiness recovery", () => {
-  function keychainFixture() {
-    const home = scratch();
-    const userRoot = join(home, ".incodex");
-    const appPath = join(home, "Applications", "ChatGPT.app");
-    const execPath = join(appPath, "Contents", "MacOS", "ChatGPT");
-    const helperBytes = "fixed-helper";
-    const helperSha256 = createHash("sha256").update(helperBytes).digest("hex");
-    const helperPath = join(
-      userRoot,
-      "helpers",
-      "macos-keychain",
-      helperSha256,
-      "incodex-keychain-helper",
-    );
-    mkdirSync(join(appPath, "Contents", "MacOS"), { recursive: true });
-    mkdirSync(join(userRoot, "macos-keychain"), { recursive: true });
-    mkdirSync(join(userRoot, "helpers", "macos-keychain", helperSha256), {
-      recursive: true,
-    });
-    writeFileSync(execPath, "app");
-    writeFileSync(helperPath, helperBytes, { mode: 0o700 });
-    writeFileSync(
-      join(userRoot, "macos-keychain", "registration.json"),
-      `${JSON.stringify({
-        schemaVersion: 1,
-        appPath,
-        helperPath,
-        helperSha256,
-        authorizationReady: false,
-      })}\n`,
-      { mode: 0o600 },
-    );
-    return { appPath, execPath, helperPath, helperSha256, userRoot };
-  }
+describe("macOS background Keychain boundary", () => {
+  test("never starts a Keychain authorization probe during Runtime startup", () => {
+    const mainSource = readFileSync(join(import.meta.dir, "runtime", "incodex-main.cts"), "utf8");
 
-  test("proves an already-authorized fixed helper without capturing key bytes", async () => {
-    const f = keychainFixture();
-    const child = new EventEmitter() as EventEmitter & {
-      kill: (signal?: string) => boolean;
-      unref: () => void;
-    };
-    child.kill = () => true;
-    child.unref = () => {};
-    let spawnCall: any = null;
-    const outcomes: Array<[string, unknown]> = [];
-
-    expect(
-      update.probeKeychainAuthorizationReadiness({
-        platform: "darwin",
-        userRoot: f.userRoot,
-        execPath: f.execPath,
-        incognito: false,
-        log: (event: string, detail: unknown) => outcomes.push([event, detail]),
-        spawnProcess(command: string, args: string[], options: unknown) {
-          spawnCall = { command, args, options };
-          queueMicrotask(() => child.emit("close", 0, null));
-          return child;
-        },
-      }),
-    ).toBe(true);
-
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(spawnCall.command).toBe(f.helperPath);
-    expect(spawnCall.args).toEqual([]);
-    expect(spawnCall.options.stdio).toBe("ignore");
-    expect(spawnCall.options.detached).toBe(true);
-    const proof = JSON.parse(
-      readFileSync(join(f.userRoot, "macos-keychain", "authorization-proof.json"), "utf8"),
-    );
-    expect(proof).toEqual({
-      schemaVersion: 1,
-      appPath: f.appPath,
-      helperPath: f.helperPath,
-      helperSha256: f.helperSha256,
-    });
-    expect(outcomes).toEqual([
-      ["keychain-readiness-probe", { status: "authorized" }],
-    ]);
-  });
-
-  test("reports a non-secret reason when the fixed helper still needs authorization", async () => {
-    const f = keychainFixture();
-    const child = new EventEmitter() as EventEmitter & {
-      kill: (signal?: string) => boolean;
-      unref: () => void;
-    };
-    child.kill = () => true;
-    child.unref = () => {};
-    const outcomes: Array<[string, unknown]> = [];
-
-    expect(
-      update.probeKeychainAuthorizationReadiness({
-        platform: "darwin",
-        userRoot: f.userRoot,
-        execPath: f.execPath,
-        incognito: false,
-        log: (event: string, detail: unknown) => outcomes.push([event, detail]),
-        spawnProcess() {
-          queueMicrotask(() => child.emit("close", 68, null));
-          return child;
-        },
-      }),
-    ).toBe(true);
-
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(
-      existsSync(join(f.userRoot, "macos-keychain", "authorization-proof.json")),
-    ).toBe(false);
-    expect(outcomes).toEqual([
-      ["keychain-readiness-probe", { status: "authorization-required" }],
-    ]);
-  });
-
-  test("never probes from incognito or after readiness is durable", () => {
-    const f = keychainFixture();
-    const registrationPath = join(f.userRoot, "macos-keychain", "registration.json");
-    const registration = JSON.parse(readFileSync(registrationPath, "utf8"));
-    registration.authorizationReady = true;
-    writeFileSync(registrationPath, `${JSON.stringify(registration)}\n`, { mode: 0o600 });
-
-    for (const incognito of [false, true]) {
-      expect(
-        update.probeKeychainAuthorizationReadiness({
-          platform: "darwin",
-          userRoot: f.userRoot,
-          execPath: f.execPath,
-          incognito,
-          spawnProcess() {
-            throw new Error("must not spawn");
-          },
-        }),
-      ).toBe(false);
-    }
+    expect(update.probeKeychainAuthorizationReadiness).toBeUndefined();
+    expect(mainSource).not.toContain("probeKeychainAuthorizationReadiness");
   });
 });
