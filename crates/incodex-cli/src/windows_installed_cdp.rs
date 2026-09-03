@@ -479,6 +479,9 @@ mod tests {
         assert!(is_transient_websocket_error(
             "Incodex button is not mounted yet"
         ));
+        assert!(is_transient_websocket_error(
+            "cdp Runtime.evaluate failed: Cannot find context with specified id"
+        ));
     }
 
     #[test]
