@@ -69,9 +69,14 @@ fn provider_intercepts_only_the_exact_codex_storage_data_query() {
     let probe = compile_query_probe(&home, &provider);
     let success = write_executable(&home, "query-success", "#!/bin/sh\nprintf 'fixed-key'\n");
     let failure = write_executable(&home, "query-failure", "#!/bin/sh\nexit 7\n");
+    let missing = write_executable(&home, "query-missing", "#!/bin/sh\nexit 44\n");
 
     let output = Command::new(probe)
-        .args([success.as_os_str(), failure.as_os_str()])
+        .args([
+            success.as_os_str(),
+            failure.as_os_str(),
+            missing.as_os_str(),
+        ])
         .output()
         .unwrap();
     assert!(
@@ -134,6 +139,31 @@ fn production_provider_resolves_only_its_verified_content_addressed_helper() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+
+    let slow_body = b"#!/bin/sh\n/bin/sleep 3\nprintf 'production-key'\n";
+    let slow_sha256 = Sha256::digest(slow_body)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let slow_helper = home
+        .join(".incodex/helpers/macos-keychain")
+        .join(&slow_sha256)
+        .join("incodex-keychain-helper");
+    fs::create_dir_all(slow_helper.parent().unwrap()).unwrap();
+    fs::write(&slow_helper, slow_body).unwrap();
+    fs::set_permissions(&slow_helper, fs::Permissions::from_mode(0o700)).unwrap();
+    let slow_provider = compile_production_test_provider(&home, &slow_sha256);
+    let started = Instant::now();
+    let output = Command::new(&probe)
+        .args([slow_provider.as_os_str(), "success".as_ref()])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "production authorization window was shorter than a normal user prompt: status={:?}",
+        output.status.code()
+    );
+    assert!(started.elapsed() >= Duration::from_secs(3));
 
     fs::write(&helper, b"#!/bin/sh\nprintf 'tampered-key'\n").unwrap();
     let output = Command::new(&probe)
@@ -290,7 +320,7 @@ static int expect_passthrough(CFMutableDictionaryRef value,
 }
 
 int main(int argc, char **argv) {
-    if (argc != 3) return 64;
+    if (argc != 4) return 64;
 
     CFMutableDictionaryRef exact = query();
     CFTypeRef result = NULL;
@@ -344,6 +374,15 @@ int main(int argc, char **argv) {
     CFRelease(exact);
     if (result) CFRelease(result);
     if (status == errSecSuccess || original_calls != before) return 9;
+
+    exact = query();
+    result = NULL;
+    before = original_calls;
+    status = incodex_key_provider_test_copy_matching(
+        exact, &result, argv[3], fake_original);
+    CFRelease(exact);
+    if (result) CFRelease(result);
+    if (status != errSecItemNotFound || original_calls != before) return 10;
     return 0;
 }
 "#,
