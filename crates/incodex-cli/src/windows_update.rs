@@ -854,7 +854,10 @@ fn command_failure(label: &str, output: &std::process::Output) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{select_native_open_executable, CLI_VERSION_PROBE_CREATION_FLAGS};
+    use super::{
+        require_runtime_native_open_generation, select_native_open_executable,
+        CLI_VERSION_PROBE_CREATION_FLAGS,
+    };
     use std::path::{Path, PathBuf};
     use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
@@ -864,6 +867,16 @@ mod tests {
             CLI_VERSION_PROBE_CREATION_FLAGS & CREATE_NO_WINDOW,
             CREATE_NO_WINDOW
         );
+    }
+
+    #[test]
+    fn runtime_update_stops_before_state_change_without_a_matching_native_cli() {
+        let error = require_runtime_native_open_generation(true, || {
+            Err("installed Windows Runtime 1.0.0 has no matching managed CLI generation".to_string())
+        })
+        .expect_err("an installed Runtime must retain a launchable native generation");
+
+        assert!(error.contains("no matching managed CLI generation"), "{error}");
     }
 
     #[test]
