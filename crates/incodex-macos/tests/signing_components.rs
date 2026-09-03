@@ -1,5 +1,5 @@
 //! [INPUT]: 依赖 incodex-macos 的签名清单与重签入口，以可控的 codesign 替身模拟组件身份和签名失效。
-//! [OUTPUT]: 验证 vendor sidecar 保留、Sparkle 同代重签，以及 Keychain Provider 改写框架后的签名拓扑。
+//! [OUTPUT]: 验证 CUA/vendor sidecar 保留、Sparkle 同代重签，以及 Provider 所在 Framework 与 Electron helpers 同代重签。
 //! [POS]: incodex-macos 的组件级签名回归套件，约束 install 在修改官方 bundle 后仍能生成 deep/strict 可验收产物。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
@@ -331,7 +331,7 @@ fn self_issued_vendor_lookalike_is_rejected_before_outer_signing() {
 }
 
 #[test]
-fn modified_codex_framework_is_resigned_without_mutating_vendor_helpers() {
+fn modified_codex_framework_joins_electron_helpers_to_host_identity() {
     let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let fixture = Fixture::new("2DC432GLL2");
     fixture.install_keychain_provider_fixture();
@@ -344,13 +344,18 @@ fn modified_codex_framework_is_resigned_without_mutating_vendor_helpers() {
     );
     assert_eq!(
         fs::read_to_string(&fixture.codex_helper_marker).unwrap(),
-        "official-helper\n",
-        "deep signing must preserve the official Electron helper nested inside the modified framework"
+        "mutated-by-deep-sign\n",
+        "the Renderer maps Codex Framework and must join its ad-hoc identity generation"
     );
     assert_eq!(
         fs::read_to_string(&fixture.codex_bare_helper_marker).unwrap(),
-        "official-bare-helper\n",
-        "deep signing must preserve official bare Mach-O helpers that are not bundle directories"
+        "mutated-by-deep-sign\n",
+        "framework helper executables must not retain a mismatched vendor Team ID"
+    );
+    assert_eq!(
+        fs::read_to_string(&fixture.marker).unwrap(),
+        "original-vendor-component\n",
+        "external CUA/vendor sidecars must still retain their official identity"
     );
     let signed = fs::read_to_string(&fixture.sign_capture).unwrap();
     assert!(
@@ -362,7 +367,7 @@ fn modified_codex_framework_is_resigned_without_mutating_vendor_helpers() {
             .lines()
             .filter(|line| *line == fixture.codex_framework.to_string_lossy())
             .count(),
-        2,
-        "the modified framework must be signed before inventory and resealed after vendor helpers are restored"
+        1,
+        "the modified framework only needs the prerequisite seal before the deep host signing pass"
     );
 }
