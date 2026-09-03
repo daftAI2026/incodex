@@ -485,6 +485,14 @@ mod tests {
     static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
     #[test]
+    fn foreground_authorization_allows_human_interaction() {
+        assert!(
+            AUTHORIZATION_TIMEOUT >= Duration::from_secs(300),
+            "a visible system password prompt must remain available long enough for the user to notice and complete it"
+        );
+    }
+
+    #[test]
     fn foreground_authorization_has_a_deadline_and_kills_its_process_group() {
         let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let home = std::env::temp_dir().join(format!(
