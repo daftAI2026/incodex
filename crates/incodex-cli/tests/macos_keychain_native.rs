@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_cli::macos_keychain_assets::{
     authorize_registration, bundled_helper_bytes, bundled_provider_bytes,
-    ensure_bundled_registration, ensure_registration, install_keychain_provider,
-    read_registration, KeychainAuthorization,
+    ensure_bundled_registration, ensure_registration, install_keychain_provider, read_registration,
+    KeychainAuthorization,
 };
 
 static SEQ: AtomicU64 = AtomicU64::new(0);

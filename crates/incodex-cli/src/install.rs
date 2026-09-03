@@ -427,17 +427,20 @@ where
     let official_app = is_official_app(app, None);
     let mut keychain_warning = None;
     let keychain_registration = if official_app {
-        let registration = crate::macos_keychain_assets::ensure_bundled_registration(root, app)?;
+        let mut registration =
+            crate::macos_keychain_assets::ensure_bundled_registration(root, app)?;
         if expected_build.is_none() {
             progress.stage("Authorizing Keychain continuity");
-            if crate::macos_keychain_assets::authorize_registration(&registration)?
+            if crate::macos_keychain_assets::authorize_registration(root, &registration)?
                 == crate::macos_keychain_assets::KeychainAuthorization::ItemMissing
             {
                 keychain_warning = Some(
-                    "Codex has not created its Storage Key yet; Keychain continuity will request its one-time authorization after the key exists."
+                    "Codex has not created its Storage Key yet; sign in to Codex, then run `incodex install` once more to enable update-safe Keychain continuity."
                         .to_string(),
                 );
             }
+            registration = crate::macos_keychain_assets::read_registration(root)?
+                .ok_or("macOS Keychain registration disappeared after authorization")?;
         }
         Some(registration)
     } else {
@@ -516,11 +519,11 @@ where
     if let Err(error) = write_asar_integrity(&staged, &hash) {
         return Err(rollback_install(&mut tx, Some(&staged), error));
     }
-    if official_app {
-        let helper_sha256 = &keychain_registration
-            .as_ref()
-            .expect("official app must have Keychain registration")
-            .helper_sha256;
+    if let Some(registration) = keychain_registration
+        .as_ref()
+        .filter(|registration| registration.authorization_ready)
+    {
+        let helper_sha256 = &registration.helper_sha256;
         if let Err(error) =
             crate::macos_keychain_assets::install_keychain_provider(&staged, helper_sha256)
         {

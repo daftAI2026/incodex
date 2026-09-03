@@ -37,6 +37,8 @@ pub struct KeychainRegistration {
     pub app_path: PathBuf,
     pub helper_path: PathBuf,
     pub helper_sha256: String,
+    #[serde(default)]
+    pub authorization_ready: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,8 +77,12 @@ pub fn bundled_provider_bytes() -> &'static [u8] {
 /// exit 44 表示 Codex 尚未创建 storage key；调用方可以继续安装，但必须保留
 /// 这条边界。其他失败（包括用户取消）均在修改应用前中止。
 pub fn authorize_registration(
+    root: &Path,
     registration: &KeychainRegistration,
 ) -> Result<KeychainAuthorization, String> {
+    let current = read_registration(root)?
+        .ok_or("macOS Keychain registration disappeared before authorization")?;
+    ensure_same_registration_identity(&current, registration)?;
     let output = Command::new(&registration.helper_path)
         .arg("--authorize")
         .stdin(Stdio::null())
@@ -87,15 +93,58 @@ pub fn authorize_registration(
     if !output.stdout.is_empty() || !output.stderr.is_empty() {
         return Err("macOS Keychain authorization helper emitted unexpected output".into());
     }
-    match output.status.code() {
-        Some(0) => Ok(KeychainAuthorization::Authorized),
-        Some(44) => Ok(KeychainAuthorization::ItemMissing),
-        Some(68) => Err("macOS Keychain authorization was not granted".into()),
-        Some(code) => Err(format!(
-            "macOS Keychain authorization helper failed with exit code {code}"
-        )),
-        None => Err("macOS Keychain authorization helper ended by signal".into()),
+    let authorization = match output.status.code() {
+        Some(0) => KeychainAuthorization::Authorized,
+        Some(44) => KeychainAuthorization::ItemMissing,
+        Some(68) => return Err("macOS Keychain authorization was not granted".into()),
+        Some(code) => {
+            return Err(format!(
+                "macOS Keychain authorization helper failed with exit code {code}"
+            ))
+        }
+        None => return Err("macOS Keychain authorization helper ended by signal".into()),
+    };
+    persist_authorization_readiness(
+        root,
+        registration,
+        authorization == KeychainAuthorization::Authorized,
+    )?;
+    Ok(authorization)
+}
+
+fn persist_authorization_readiness(
+    root: &Path,
+    expected: &KeychainRegistration,
+    authorization_ready: bool,
+) -> Result<(), String> {
+    let path = registration_path(root);
+    let _lock = acquire_target_lock(root, &path, "macos-keychain-registration", None)?;
+    let mut current = read_registration(root)?
+        .ok_or("macOS Keychain registration disappeared during authorization")?;
+    ensure_same_registration_identity(&current, expected)?;
+    if current.authorization_ready == authorization_ready {
+        return Ok(());
     }
+    current.authorization_ready = authorization_ready;
+    let body = format!(
+        "{}\n",
+        serde_json::to_string(&current).map_err(|error| error.to_string())?
+    );
+    write_private_atomic(&path, body.as_bytes())
+}
+
+fn ensure_same_registration_identity(
+    current: &KeychainRegistration,
+    expected: &KeychainRegistration,
+) -> Result<(), String> {
+    if current.schema_version != expected.schema_version
+        || current.app_path != expected.app_path
+        || current.helper_path != expected.helper_path
+        || current.helper_sha256 != expected.helper_sha256
+    {
+        return Err("macOS Keychain registration changed during authorization".into());
+    }
+    Ok(())
 }
 
 /// 把固定 provider 放进 staged app，并只在 Framework 的现有 padding 中增加普通依赖。
@@ -230,6 +279,7 @@ where
         app_path: app_path.to_path_buf(),
         helper_path,
         helper_sha256,
+        authorization_ready: false,
     };
     let body = format!(
         "{}\n",
