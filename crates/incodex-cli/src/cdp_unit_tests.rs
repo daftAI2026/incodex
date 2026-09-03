@@ -214,6 +214,20 @@ fn injected_ui_carries_locale_and_requires_button_and_banner_health() {
 }
 
 #[test]
+fn installed_injection_uses_the_selected_published_runtime_body() {
+    let source = inject_source_for_options_with_runtime(
+        &InjectionOptions {
+            window_kind: CdpWindowKind::Normal,
+            ..InjectionOptions::default()
+        },
+        "window.__publishedRuntimeGeneration = true;",
+    );
+
+    assert!(source.contains("window.__incodexIncognito=false"));
+    assert!(source.contains("window.__publishedRuntimeGeneration = true;"));
+}
+
+#[test]
 fn injected_ui_carries_profile_mask_as_a_json_bootstrap_value() {
     let source = inject_source_for_options(&InjectionOptions {
         locale: Some("en-US".into()),

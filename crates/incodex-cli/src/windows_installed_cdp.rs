@@ -441,6 +441,15 @@ mod tests {
     }
 
     #[test]
+    fn installed_hat_keeps_one_native_open_owner_until_it_exits() {
+        let source = include_str!("windows_installed_cdp.rs");
+        assert!(source.contains("let mut native_open = None"));
+        assert!(source.contains("Ok(None) => return Ok(())"));
+        assert!(source.contains("*native_open = Some(launch_native_open()?)"));
+        assert!(source.contains(".arg(\"open\")"));
+    }
+
+    #[test]
     fn bridge_rejects_untrusted_request_ids() {
         assert!(parse_installed_bridge_request(r#"{"action":"open","requestId":"bad"}"#).is_err());
         assert!(parse_installed_bridge_request(

@@ -622,11 +622,17 @@ mod tests {
         let published = publish_windows_runtime(&user_root).expect("publish current Runtime");
 
         let previous_main = b"previous Runtime generation";
+        let previous_inject = b"window.__publishedRuntimeGeneration = true;";
         fs::write(
             published.release_dir.join("incodex-main.cjs"),
             previous_main,
         )
         .expect("replace previous generation main");
+        fs::write(
+            published.release_dir.join("incodex-inject.js"),
+            previous_inject,
+        )
+        .expect("replace previous generation injector");
         let manifest_path = published.release_dir.join(MANIFEST_NAME);
         let mut manifest: serde_json::Value = serde_json::from_slice(
             &fs::read(&manifest_path).expect("read current Runtime manifest"),
@@ -644,6 +650,8 @@ mod tests {
         }
         manifest["files"]["incodex-main.cjs"] =
             serde_json::Value::String(sha256_hex(previous_main));
+        manifest["files"]["incodex-inject.js"] =
+            serde_json::Value::String(sha256_hex(previous_inject));
         let manifest_body = serde_json::to_vec_pretty(&manifest).expect("write previous manifest");
         fs::write(&manifest_path, &manifest_body).expect("replace previous Runtime manifest");
 
@@ -675,9 +683,15 @@ mod tests {
         fs::rename(&published.release_dir, &previous_dir).expect("record previous generation");
 
         let verification = verify_installed_windows_runtime(&user_root, &previous_release);
+        let selected_inject =
+            read_verified_windows_runtime_artifact(&user_root, &previous_release, "incodex-inject.js");
         fs::remove_dir_all(&user_root).expect("remove previous Runtime fixture");
 
         verification.expect("recorded Runtime generation must remain verifiable");
+        assert_eq!(
+            selected_inject.expect("read selected Runtime injector"),
+            previous_inject
+        );
     }
 
     #[test]
