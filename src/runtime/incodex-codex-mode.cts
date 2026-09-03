@@ -89,13 +89,14 @@ function decideCodexModeAction(
   confirmationFailures,
   primaryOtherChecks = 0,
   primaryOtherChecksRequired = 3,
+  confirmationFailuresRequired = 8,
 ) {
   if (pageState === "codex") return "confirmed";
   if (pageState === "pending") return "wait";
   if (!fallbackAttempted) {
     return primaryOtherChecks >= primaryOtherChecksRequired ? "select-fallback" : "wait";
   }
-  if (confirmationFailures >= 2) return "unresolved";
+  if (confirmationFailures >= confirmationFailuresRequired) return "unresolved";
   return "wait";
 }
 
@@ -103,6 +104,7 @@ function createCodexModeReadiness(options) {
   const checks = new WeakMap();
   const primarySettleMs = options.primarySettleMs ?? 1_500;
   const primaryOtherChecksRequired = options.primaryOtherChecksRequired ?? 3;
+  const confirmationFailuresRequired = options.confirmationFailuresRequired ?? 8;
   const probeFailuresRequired = options.probeFailuresRequired ?? 20;
   const pollMs = options.pollMs ?? 750;
   const scheduleTimer = options.scheduleTimer ?? setTimeout;
@@ -162,6 +164,7 @@ function createCodexModeReadiness(options) {
         state.confirmationFailures,
         state.primaryOtherChecks,
         primaryOtherChecksRequired,
+        confirmationFailuresRequired,
       );
       if (action === "confirmed") {
         state.complete = true;
