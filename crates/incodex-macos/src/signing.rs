@@ -1,4 +1,7 @@
-//! 签名验收、vendor sidecar 策略与 entitlement 处理。
+//! [INPUT]: 依赖系统 codesign、bundle plist 与签名身份检查，接收 install/uninstall 产生的 staged app。
+//! [OUTPUT]: 提供官方签名验收、ad-hoc 重签、entitlement 裁剪与 vendor sidecar 保留策略。
+//! [POS]: incodex-macos 的唯一签名边界，在 mutation 提交前把改写组件与官方嵌套组件收敛为可验证拓扑。
+//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 //!
 //! 这里是 install、uninstall 和 Doctor 共用的唯一签名判断入口：
 //! - mutation 路径 fail closed；
@@ -27,6 +30,9 @@ const ADHOC_UNRETAINABLE_ENTITLEMENTS: &[&str] = &[
 
 const DISABLE_LIBRARY_VALIDATION: &str = "com.apple.security.cs.disable-library-validation";
 const SPARKLE_FRAMEWORK: &str = "Contents/Frameworks/Sparkle.framework";
+const CODEX_FRAMEWORK: &str = "Contents/Frameworks/Codex Framework.framework";
+const KEYCHAIN_PROVIDER: &str =
+    "Contents/Frameworks/Codex Framework.framework/Versions/Current/IncodexKeyProvider.dylib";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EntitlementSnapshot {
@@ -306,6 +312,14 @@ pub fn has_hardened_runtime(app: &Path) -> bool {
 pub fn sign_app(app: &Path) -> Result<(), String> {
     let before = read_entitlements(app)?;
     let plan = plan_adhoc_entitlements(&before)?;
+    let provider = app.join(KEYCHAIN_PROVIDER);
+    let modified_codex_framework = provider.is_file().then(|| app.join(CODEX_FRAMEWORK));
+    if let Some(framework) = &modified_codex_framework {
+        // Provider 的 hash marker 与 LC_LOAD_DYLIB 都是在官方签名之后改写的。
+        // 先给二者建立同代 ad-hoc 身份，签名清单才能继续验证真正需要保留的 vendor helpers。
+        sign_adhoc_component(&provider)?;
+        sign_adhoc_component(framework)?;
+    }
     let outer = inspect_component(app)?;
     let preserve = collect_vendor_helper_roots_for_outer(app, &outer)?;
     let stash_root = if preserve.is_empty() {
@@ -341,12 +355,27 @@ pub fn sign_app(app: &Path) -> Result<(), String> {
         });
     }
     deep?;
+    if let Some(framework) = &modified_codex_framework {
+        // 恢复官方 helper 会改变 framework 的嵌套内容，必须重新封装容器 seal；
+        // shallow sign 只更新 framework 自身，不会改写已经恢复的 vendor helper 身份。
+        sign_adhoc_component(framework)?;
+    }
     sign_outer_with_entitlements(app, &plan.xml)?;
     verify_patched_adhoc_bundle_deep_strict(app, None)
         .map(|_| ())
         .map_err(|error| {
             format!("codesign --verify --deep --strict failed after adhoc resign: {error}")
         })
+}
+
+fn sign_adhoc_component(path: &Path) -> Result<(), String> {
+    Command::new("codesign")
+        .args(["--force", "--sign", "-", "--"])
+        .arg(path)
+        .output()
+        .map_err(|error| format!("cannot ad-hoc sign {}: {error}", path.display()))
+        .and_then(command_success)
+        .map_err(|error| format!("ad-hoc signing failed for {}: {error}", path.display()))
 }
 
 /// 返回当前 app 中需要保持 vendor identity 的顶层 sidecar。
