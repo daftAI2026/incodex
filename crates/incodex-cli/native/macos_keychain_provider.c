@@ -14,6 +14,7 @@
 
 static const size_t kMaximumHelperOutput = 4096;
 static const int64_t kHelperTimeoutMilliseconds = 2000;
+typedef OSStatus (*CopyMatching)(CFDictionaryRef, CFTypeRef *);
 
 static int64_t monotonic_milliseconds(void) {
     struct timespec now = {0};
@@ -175,6 +176,63 @@ run_helper(const char *path, unsigned char *output, size_t capacity,
     return 0;
 }
 
+static bool dictionary_boolean_is(CFDictionaryRef query, CFTypeRef key,
+                                  bool expected, bool absent_is_false) {
+    CFTypeRef value = CFDictionaryGetValue(query, key);
+    if (!value) return absent_is_false && !expected;
+    if (CFGetTypeID(value) != CFBooleanGetTypeID()) return false;
+    return CFBooleanGetValue((CFBooleanRef)value) == expected;
+}
+
+static bool __attribute__((unused))
+is_exact_storage_data_query(CFDictionaryRef query, CFTypeRef *result) {
+    if (!query || !result || CFGetTypeID(query) != CFDictionaryGetTypeID()) {
+        return false;
+    }
+    CFTypeRef item_class = CFDictionaryGetValue(query, kSecClass);
+    CFTypeRef service = CFDictionaryGetValue(query, kSecAttrService);
+    CFTypeRef account = CFDictionaryGetValue(query, kSecAttrAccount);
+    CFTypeRef match_limit = CFDictionaryGetValue(query, kSecMatchLimit);
+    if (!item_class || !CFEqual(item_class, kSecClassGenericPassword) ||
+        !service || CFGetTypeID(service) != CFStringGetTypeID() ||
+        !CFEqual(service, CFSTR("Codex Storage Key")) || !account ||
+        CFGetTypeID(account) != CFStringGetTypeID() ||
+        !CFEqual(account, CFSTR("Codex")) || !match_limit ||
+        !CFEqual(match_limit, kSecMatchLimitOne)) {
+        return false;
+    }
+    return dictionary_boolean_is(query, kSecReturnData, true, false) &&
+           dictionary_boolean_is(query, kSecReturnAttributes, false, true) &&
+           dictionary_boolean_is(query, kSecReturnRef, false, true) &&
+           dictionary_boolean_is(query, kSecReturnPersistentRef, false, true);
+}
+
+static OSStatus __attribute__((unused))
+copy_matching_with_helper(CFDictionaryRef query, CFTypeRef *result,
+                          const char *helper_path, CopyMatching original) {
+    if (!is_exact_storage_data_query(query, result)) {
+        return original ? original(query, result) : errSecParam;
+    }
+
+    *result = NULL;
+    unsigned char helper_output[4096] = {0};
+    size_t helper_output_length = 0;
+    int helper_status = run_helper(helper_path, helper_output,
+                                   sizeof(helper_output),
+                                   &helper_output_length);
+    if (helper_status != 0) {
+        memset(helper_output, 0, sizeof(helper_output));
+        return errSecAuthFailed;
+    }
+
+    CFDataRef data = CFDataCreate(kCFAllocatorDefault, helper_output,
+                                  (CFIndex)helper_output_length);
+    memset(helper_output, 0, sizeof(helper_output));
+    if (!data) return errSecAllocate;
+    *result = data;
+    return errSecSuccess;
+}
+
 // 该入口先把 provider 固定为普通 Security.framework 客户端；后续 hook 红测会替换
 // 这条直通实现。dylib 尚未接入安装事务，因此当前代码不会进入真实 ChatGPT 进程。
 __attribute__((visibility("default")))
@@ -189,5 +247,12 @@ int incodex_key_provider_test_run_helper(const char *path,
                                          unsigned char *output,
                                          size_t capacity, size_t *length) {
     return run_helper(path, output, capacity, length);
+}
+
+__attribute__((visibility("default")))
+OSStatus incodex_key_provider_test_copy_matching(
+    CFDictionaryRef query, CFTypeRef *result, const char *helper,
+    CopyMatching original) {
+    return copy_matching_with_helper(query, result, helper, original);
 }
 #endif
