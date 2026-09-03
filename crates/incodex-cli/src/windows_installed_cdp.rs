@@ -421,6 +421,7 @@ fn is_transient_websocket_error(error: &str) -> bool {
         || error.contains("no installed Codex page target")
         || error.contains("no Codex page target")
         || error.contains("Incodex button is not mounted yet")
+        || error.contains("Cannot find context with specified id")
 }
 
 #[cfg(test)]
