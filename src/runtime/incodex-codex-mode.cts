@@ -100,15 +100,36 @@ function decideCodexModeAction(
   return "wait";
 }
 
+async function withProbeTimeout(promise, timeoutMs, scheduleTimeout, cancelTimeout) {
+  let timeout = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timeout = scheduleTimeout(
+          () => reject(new Error(`Codex mode renderer probe timed out after ${timeoutMs}ms`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout !== null) cancelTimeout(timeout);
+  }
+}
+
 function createCodexModeReadiness(options) {
   const checks = new WeakMap();
   const primarySettleMs = options.primarySettleMs ?? 1_500;
   const primaryOtherChecksRequired = options.primaryOtherChecksRequired ?? 3;
   const confirmationFailuresRequired = options.confirmationFailuresRequired ?? 20;
   const probeFailuresRequired = options.probeFailuresRequired ?? 20;
+  const probeTimeoutMs = options.probeTimeoutMs ?? 2_000;
   const pollMs = options.pollMs ?? 750;
+  const totalChecksRequired = options.totalChecksRequired ?? 120;
   const scheduleTimer = options.scheduleTimer ?? setTimeout;
   const cancelTimer = options.cancelTimer ?? clearTimeout;
+  const scheduleProbeTimeout = options.scheduleProbeTimeout ?? setTimeout;
+  const cancelProbeTimeout = options.cancelProbeTimeout ?? clearTimeout;
 
   function stateFor(win) {
     let state = checks.get(win);
@@ -122,6 +143,7 @@ function createCodexModeReadiness(options) {
       probeFailures: 0,
       running: false,
       timer: null,
+      totalChecks: 0,
     };
     checks.set(win, state);
     win.once("closed", () => {
@@ -144,10 +166,13 @@ function createCodexModeReadiness(options) {
   async function reconcile(win, state) {
     if (state.complete || win.isDestroyed() || win.webContents.isDestroyed()) return;
     state.running = true;
+    state.totalChecks += 1;
     try {
-      const snapshot = await win.webContents.executeJavaScript(
-        CODEX_MODE_PROBE_EXPRESSION,
-        false,
+      const snapshot = await withProbeTimeout(
+        win.webContents.executeJavaScript(CODEX_MODE_PROBE_EXPRESSION, false),
+        probeTimeoutMs,
+        scheduleProbeTimeout,
+        cancelProbeTimeout,
       );
       if (state.complete || win.isDestroyed() || win.webContents.isDestroyed()) return;
       state.probeFailures = 0;
@@ -169,6 +194,14 @@ function createCodexModeReadiness(options) {
       if (action === "confirmed") {
         state.complete = true;
         options.log("codex-mode-confirmed", { fallback: state.fallbackSucceeded });
+        return;
+      }
+      if (state.totalChecks >= totalChecksRequired) {
+        state.complete = true;
+        options.log("codex-mode-unresolved", {
+          fallback: state.fallbackSucceeded,
+          reason: "readiness-deadline",
+        });
         return;
       }
       if (action === "unresolved") {

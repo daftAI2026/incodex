@@ -12,8 +12,8 @@ async function runNext(tasks: ScheduledTask[]): Promise<void> {
   const task = tasks.shift();
   expect(task).toBeDefined();
   task?.callback();
-  await Promise.resolve();
-  await Promise.resolve();
+  // Promise.race + async fallback 会跨越多层微任务；等到本轮状态机完成再检查下一任务。
+  for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
 }
 
 describe("Codex mode readiness", () => {
@@ -228,7 +228,9 @@ describe("Codex mode readiness", () => {
 
     expect(tasks).toHaveLength(0);
     expect(logs).toHaveLength(2);
-    expect(String(logs[0]?.[1])).toContain("timed out");
+    expect(logs[0]?.[1]).toEqual({
+      error: expect.stringContaining("timed out"),
+    });
     expect(logs.at(-1)).toEqual([
       "codex-mode-unresolved",
       { fallback: false, reason: "probe-failed" },

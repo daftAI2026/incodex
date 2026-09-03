@@ -508,7 +508,7 @@ fn codex_mode_page_state(response: &Value) -> Result<CodexModePageState, String>
     if mode_available && mode_label == "Codex" {
         return Ok(CodexModePageState::Codex);
     }
-    if blocker_visible || !mode_available {
+    if blocker_visible {
         return Ok(CodexModePageState::Pending);
     }
     Ok(CodexModePageState::Other)
