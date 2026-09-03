@@ -466,9 +466,19 @@ mod tests {
     use super::{
         installed_bridge_request_from_event, installed_bridge_source,
         installed_page_requires_reinjection, is_transient_websocket_error,
-        parse_installed_bridge_request, InstalledBridgeRequest,
+        native_open_wait_disposition, parse_installed_bridge_request, InstalledBridgeRequest,
+        NativeOpenWaitDisposition,
     };
     use serde_json::json;
+    use std::sync::mpsc::RecvTimeoutError;
+
+    #[test]
+    fn timed_out_native_open_keeps_its_session_owner_alive() {
+        assert_eq!(
+            native_open_wait_disposition(Err(RecvTimeoutError::Timeout)),
+            NativeOpenWaitDisposition::Retain
+        );
+    }
 
     #[test]
     fn bridge_source_only_accepts_open_actions() {
