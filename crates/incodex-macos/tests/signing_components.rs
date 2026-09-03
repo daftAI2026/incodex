@@ -1,3 +1,8 @@
+//! [INPUT]: 依赖 incodex-macos 的签名清单与重签入口，以可控的 codesign 替身模拟组件身份和签名失效。
+//! [OUTPUT]: 验证 vendor sidecar 保留、Sparkle 同代重签，以及 Keychain Provider 改写框架后的签名拓扑。
+//! [POS]: incodex-macos 的组件级签名回归套件，约束 install 在修改官方 bundle 后仍能生成 deep/strict 可验收产物。
+//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -28,6 +33,10 @@ struct Fixture {
     entitlements: PathBuf,
     marker: PathBuf,
     sparkle: PathBuf,
+    codex_framework: PathBuf,
+    keychain_provider: PathBuf,
+    codex_helper_marker: PathBuf,
+    framework_sign_state: PathBuf,
     sign_capture: PathBuf,
     deep_capture: PathBuf,
 }
@@ -53,6 +62,10 @@ impl Fixture {
         let app = root.join("ChatGPT.app");
         let sidecar = app.join("Contents/Frameworks/RenamedVendor.xpc");
         let sparkle = app.join("Contents/Frameworks/Sparkle.framework");
+        let codex_framework = app.join("Contents/Frameworks/Codex Framework.framework");
+        let keychain_provider = codex_framework.join("Versions/Current/IncodexKeyProvider.dylib");
+        let codex_helper_marker = codex_framework
+            .join("Versions/Current/Helpers/Codex (Renderer).app/Contents/vendor-marker");
         let fake_bin = root.join("fake-bin");
         fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
         fs::create_dir_all(sidecar.join("Contents/_CodeSignature")).unwrap();
@@ -82,6 +95,7 @@ impl Fixture {
         .unwrap();
         let sign_capture = root.join("outer-sign-count");
         let deep_capture = root.join("deep-sign-count");
+        let framework_sign_state = root.join("codex-framework-signed");
         let nested_display = if custom_outer {
             format!(
                 "if [ -f \"$INCODEX_DEEP_SIGN_CAPTURE\" ]; then printf '%s\\n' 'Identifier=com.example.fixture' 'Signature=adhoc'; else printf '%s\\n' 'Identifier=com.example.renamed-vendor' 'TeamIdentifier={identity}' 'Authority=Developer ID Application: fixture'; fi"
@@ -106,6 +120,14 @@ if [ "$1" = "--display" ] && [ "$2" = "--entitlements" ]; then
 fi
 if [ "$1" = "--display" ] && [ "$2" = "--verbose=4" ]; then
   case "$target" in
+    *"Codex (Renderer).app") printf '%s\n' 'Identifier=com.openai.codex.renderer' 'TeamIdentifier=2DC432GLL2' 'Authority=Developer ID Application: OpenAI' ;;
+    *"Codex Framework.framework")
+      if [ -f "$INCODEX_FRAMEWORK_SIGN_STATE" ]; then
+        printf '%s\n' 'Identifier=com.openai.codex.framework' 'Signature=adhoc'
+      else
+        printf '%s\n' 'Identifier=com.openai.codex.framework' 'TeamIdentifier=2DC432GLL2' 'Authority=Developer ID Application: OpenAI'
+      fi
+      ;;
     *RenamedVendor.xpc) {nested_display} ;;
     *Sparkle.framework) {nested_display} ;;
     *) {outer_display} ;;
@@ -116,17 +138,27 @@ if [ "$1" = "--force" ] && [ "$2" = "--deep" ]; then
   printf '%s\n' signed > "$INCODEX_DEEP_SIGN_CAPTURE"
   marker="$target/Contents/Frameworks/RenamedVendor.xpc/Contents/vendor-marker"
   if [ -f "$marker" ]; then printf '%s\n' mutated-by-deep-sign > "$marker"; fi
+  helper="$target/Contents/Frameworks/Codex Framework.framework/Versions/Current/Helpers/Codex (Renderer).app/Contents/vendor-marker"
+  if [ -f "$helper" ]; then printf '%s\n' mutated-by-deep-sign > "$helper"; fi
   exit 0
 fi
 if [ "$1" = "--force" ] && [ "$2" = "--sign" ]; then
-  printf '%s\n' signed >> "$INCODEX_SIGN_CAPTURE"
+  printf '%s\n' "$target" >> "$INCODEX_SIGN_CAPTURE"
+  case "$target" in
+    *"Codex Framework.framework") printf '%s\n' signed > "$INCODEX_FRAMEWORK_SIGN_STATE" ;;
+  esac
   exit 0
 fi
 if [ "$1" = "--verify" ] && [ "$2" = "--test-requirement" ]; then
   if [ "$INCODEX_CODESIGN_VENDOR_TRUST_FAILURE" = "1" ]; then exit 1; fi
   exit 0
 fi
-if [ "$1" = "--verify" ]; then exit 0; fi
+if [ "$1" = "--verify" ]; then
+  case "$target" in
+    *"Codex Framework.framework") [ -f "$INCODEX_FRAMEWORK_SIGN_STATE" ] ; exit $? ;;
+  esac
+  exit 0
+fi
 exit 0
 "#
         );
@@ -143,9 +175,20 @@ exit 0
             entitlements,
             marker,
             sparkle,
+            codex_framework,
+            keychain_provider,
+            codex_helper_marker,
+            framework_sign_state,
             sign_capture,
             deep_capture,
         }
+    }
+
+    fn install_keychain_provider_fixture(&self) {
+        fs::create_dir_all(self.keychain_provider.parent().unwrap()).unwrap();
+        fs::write(&self.keychain_provider, "patched-provider\n").unwrap();
+        fs::create_dir_all(self.codex_helper_marker.parent().unwrap()).unwrap();
+        fs::write(&self.codex_helper_marker, "official-helper\n").unwrap();
     }
 
     fn install_path(&self) -> OsString {
@@ -190,10 +233,15 @@ fn run_sign(fixture: &Fixture) -> Result<(), String> {
     std::env::set_var("INCODEX_CODESIGN_ENTITLEMENTS", &fixture.entitlements);
     std::env::set_var("INCODEX_SIGN_CAPTURE", &fixture.sign_capture);
     std::env::set_var("INCODEX_DEEP_SIGN_CAPTURE", &fixture.deep_capture);
+    std::env::set_var(
+        "INCODEX_FRAMEWORK_SIGN_STATE",
+        &fixture.framework_sign_state,
+    );
     let result = sign_app(&fixture.app);
     std::env::remove_var("INCODEX_CODESIGN_ENTITLEMENTS");
     std::env::remove_var("INCODEX_SIGN_CAPTURE");
     std::env::remove_var("INCODEX_DEEP_SIGN_CAPTURE");
+    std::env::remove_var("INCODEX_FRAMEWORK_SIGN_STATE");
     result
 }
 
@@ -272,5 +320,37 @@ fn self_issued_vendor_lookalike_is_rejected_before_outer_signing() {
     assert_eq!(
         fs::read_to_string(&fixture.marker).unwrap(),
         "original-vendor-component\n"
+    );
+}
+
+#[test]
+fn modified_codex_framework_is_resigned_without_mutating_vendor_helpers() {
+    let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let fixture = Fixture::new("2DC432GLL2");
+    fixture.install_keychain_provider_fixture();
+
+    let result = run_sign(&fixture);
+
+    assert!(
+        result.is_ok(),
+        "the provider-bearing Codex framework must be brought into the host ad-hoc signature generation: {result:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(&fixture.codex_helper_marker).unwrap(),
+        "official-helper\n",
+        "deep signing must preserve the official Electron helper nested inside the modified framework"
+    );
+    let signed = fs::read_to_string(&fixture.sign_capture).unwrap();
+    assert!(
+        signed.contains(fixture.keychain_provider.to_string_lossy().as_ref()),
+        "the patched provider dylib must receive a fresh linker signature"
+    );
+    assert_eq!(
+        signed
+            .lines()
+            .filter(|line| *line == fixture.codex_framework.to_string_lossy())
+            .count(),
+        2,
+        "the modified framework must be signed before inventory and resealed after vendor helpers are restored"
     );
 }
