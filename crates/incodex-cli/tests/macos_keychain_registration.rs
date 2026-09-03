@@ -5,7 +5,10 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use incodex_cli::macos_keychain_assets::{ensure_registration, read_registration};
+use incodex_cli::macos_keychain_assets::{
+    bundled_helper_bytes, ensure_registration, read_registration,
+    refresh_bundled_registration_if_present,
+};
 use incodex_cli::macos_update_restore::{
     publish_registration as publish_update_registration, refresh_registered_helper,
 };
@@ -202,6 +205,27 @@ fn unready_keychain_helper_migrates_before_its_first_successful_authorization() 
     );
     assert!(!migrated.authorization_ready);
     assert_eq!(read_registration(&fixture.root).unwrap().unwrap(), migrated);
+}
+
+#[test]
+fn runtime_refreshes_only_an_existing_unready_keychain_helper() {
+    let fixture = Fixture::new();
+    assert!(!refresh_bundled_registration_if_present(&fixture.root).unwrap());
+    assert!(read_registration(&fixture.root).unwrap().is_none());
+
+    let original =
+        ensure_registration(&fixture.root, &fixture.app, &fixture.keychain_helper_v1).unwrap();
+    assert!(!original.authorization_ready);
+
+    assert!(refresh_bundled_registration_if_present(&fixture.root).unwrap());
+    let refreshed = read_registration(&fixture.root).unwrap().unwrap();
+    assert_eq!(refreshed.app_path, fixture.app);
+    assert_eq!(
+        refreshed.helper_sha256,
+        sha256_hex(bundled_helper_bytes())
+    );
+    assert_eq!(fs::read(refreshed.helper_path).unwrap(), bundled_helper_bytes());
+    assert!(!refreshed.authorization_ready);
 }
 
 #[test]
