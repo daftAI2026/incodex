@@ -505,13 +505,15 @@ mod tests {
         let root = home.join(".incodex");
         let app = home.join("Applications/ChatGPT.app");
         let marker = home.join("orphan-finished");
+        let terminated = home.join("terminated-cleanly");
         let helper = home.join("blocking-helper");
         fs::create_dir_all(&app).unwrap();
         fs::write(
             &helper,
             format!(
-                "#!/bin/sh\n/bin/sh -c '/bin/sleep 1; printf orphan > {}' &\nwait\n",
-                marker.display()
+                "#!/bin/sh\ntrap 'printf cancelled > {}; exit 143' TERM\n/bin/sh -c '/bin/sleep 1; printf orphan > {}' &\nwait\n",
+                terminated.display(),
+                marker.display(),
             ),
         )
         .unwrap();
@@ -524,6 +526,11 @@ mod tests {
                 .unwrap_err();
         assert!(error.contains("timed out"), "{error}");
         assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(
+            fs::read(&terminated).unwrap(),
+            b"cancelled",
+            "authorization timeout must first give the helper a chance to dismiss native UI"
+        );
         std::thread::sleep(Duration::from_millis(1_100));
         assert!(
             !marker.exists(),

@@ -39,7 +39,11 @@ fn explicit_authorize_mode_reads_once_but_never_emits_the_storage_key() {
     );
     assert!(output.stdout.is_empty(), "authorize mode leaked key bytes");
     assert!(output.stderr.is_empty());
-    assert_eq!(fs::read(&marker).unwrap(), b"queried");
+    assert_eq!(
+        fs::read(&marker).unwrap(),
+        b"queried-with-context",
+        "the authorization query must carry a cancellable LAContext"
+    );
 
     let output = Command::new(&helper)
         .args(["--authorize", "unexpected"])
@@ -62,15 +66,19 @@ fn compile_helper_with_fake_security(home: &Path) -> PathBuf {
 #include <Security/Security.h>
 #include <fcntl.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 OSStatus SecItemCopyMatching(CFDictionaryRef query, CFTypeRef *result) {
-    (void)query;
     const char *marker = getenv("INCODEX_FAKE_SECURITY_MARKER");
     if (marker) {
         int fd = open(marker, O_WRONLY | O_CREAT | O_TRUNC, 0600);
         if (fd >= 0) {
-            (void)write(fd, "queried", 7);
+            const char *message = CFDictionaryGetValue(
+                query, kSecUseAuthenticationContext)
+                ? "queried-with-context"
+                : "queried-without-context";
+            (void)write(fd, message, strlen(message));
             close(fd);
         }
     }
@@ -84,7 +92,13 @@ OSStatus SecItemCopyMatching(CFDictionaryRef query, CFTypeRef *result) {
     let fake = home.join("libAuthorizeFakeSecurity.dylib");
     let status = Command::new(&clang)
         .args(["-isysroot", &sdk, "-Wall", "-Wextra", "-Werror"])
-        .args(["-dynamiclib", "-framework", "CoreFoundation"])
+        .args([
+            "-dynamiclib",
+            "-framework",
+            "CoreFoundation",
+            "-framework",
+            "Security",
+        ])
         .arg(&fake_source)
         .args([
             "-Wl,-install_name,@rpath/libAuthorizeFakeSecurity.dylib",
