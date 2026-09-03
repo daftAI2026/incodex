@@ -31,5 +31,8 @@ fn rewrites_cdp_switches_inside_the_existing_process_parameter_buffer() {
         after.ends_with(" --remote-debugging-address=127.0.0.1 --remote-debugging-port=43192"),
         "{after}"
     );
-    assert!(!after.contains(&executable.display().to_string()), "{after}");
+    assert!(
+        !after.contains(&executable.display().to_string()),
+        "{after}"
+    );
 }

@@ -200,8 +200,7 @@ fn installed_debugger_prepares_cdp_for_an_enabled_official_window() {
     .expect("record enabled state");
 
     assert!(!matches!(
-        windows_installed_debugger_route(&enabled, "ChatGPT.exe")
-            .expect("route official launch"),
+        windows_installed_debugger_route(&enabled, "ChatGPT.exe").expect("route official launch"),
         WindowsDebuggerRoute::ResumeNormally
     ));
     fs::remove_dir_all(root).expect("remove debugger route fixture");

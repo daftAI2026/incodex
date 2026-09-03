@@ -221,6 +221,7 @@ fn injected_ui_carries_profile_mask_as_a_json_bootstrap_value() {
             name: "Temporary".into(),
             avatar: ProfileAvatar::Generated,
         }),
+        ..InjectionOptions::default()
     });
 
     assert!(source.contains(
@@ -237,6 +238,7 @@ fn profile_payload_is_null_outside_the_exact_top_level_codex_page() {
             name: "Quiet Otter".into(),
             avatar: ProfileAvatar::Generated,
         }),
+        ..InjectionOptions::default()
     });
 
     assert!(source.contains("window.top===window"));

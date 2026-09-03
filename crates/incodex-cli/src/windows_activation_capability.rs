@@ -15,6 +15,7 @@ const ENVIRONMENT_PIPE_PREFIX: &str = r"\\.\pipe\Incodex-Activation-Environment-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WindowsDebuggerRoute {
     ResumeNormally,
+    PrepareInstalledCdp,
     AssignToJob(String),
     Reject,
 }

@@ -237,6 +237,7 @@ pub fn prepare_windows_open(
             injection: InjectionOptions {
                 locale: read_locale_override(&session.home),
                 profile_mask,
+                ..InjectionOptions::default()
             },
             user_root: user_root.to_path_buf(),
             transient_helper,

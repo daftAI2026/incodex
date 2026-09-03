@@ -41,7 +41,8 @@ use windows_sys::Win32::System::JobObjects::{
 use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, GetExitCodeProcess, OpenProcess, OpenThread, QueryFullProcessImageNameW,
     ResumeThread, TerminateProcess, WaitForSingleObject, CREATE_SUSPENDED, INFINITE,
-    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_QUOTA, PROCESS_TERMINATE, THREAD_SUSPEND_RESUME,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_QUOTA, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
+    THREAD_SUSPEND_RESUME,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible,
@@ -401,14 +402,14 @@ impl WindowsCdpOwnershipGuard {
     }
 }
 
-fn ipv4_listener_owner(port: u16) -> io::Result<Option<u32>> {
+pub(crate) fn ipv4_listener_owner(port: u16) -> io::Result<Option<u32>> {
     ipv4_tcp_owner(TCP_TABLE_OWNER_PID_LISTENER, |row| {
         let local = row_local_addr(row);
         *local.ip() == Ipv4Addr::LOCALHOST && local.port() == port
     })
 }
 
-fn ipv4_connection_server_owner(stream: &TcpStream) -> io::Result<Option<u32>> {
+pub(crate) fn ipv4_connection_server_owner(stream: &TcpStream) -> io::Result<Option<u32>> {
     let client = require_ipv4_addr(stream.local_addr()?)?;
     let server = require_ipv4_addr(stream.peer_addr()?)?;
     ipv4_tcp_owner(TCP_TABLE_OWNER_PID_ALL, |row| {
@@ -656,14 +657,26 @@ pub fn resume_debugged_package_process(
     Ok(())
 }
 
+pub(crate) fn validate_debugged_package_process(
+    expected_package_full_name: &str,
+    process_id: u32,
+    thread_id: u32,
+) -> io::Result<()> {
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
+    let process = OwnedHandle::from_nullable(process)?;
+    require_process_package_identity(process.raw(), expected_package_full_name)?;
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    let snapshot = OwnedHandle::from_snapshot(snapshot)?;
+    require_thread_owner(snapshot.raw(), thread_id, process_id)
+}
+
 pub(crate) fn terminate_debugged_package_process(
     expected_package_full_name: &str,
     process_id: u32,
     thread_id: u32,
 ) -> io::Result<()> {
-    const REQUIRED_ACCESS: u32 =
-        PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | 0x0010_0000;
-    let process = unsafe { OpenProcess(REQUIRED_ACCESS, 0, process_id) };
+    let access = PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | PROCESS_SYNCHRONIZE;
+    let process = unsafe { OpenProcess(access, 0, process_id) };
     let process = OwnedHandle::from_nullable(process)?;
     require_process_package_identity(process.raw(), expected_package_full_name)?;
     let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };

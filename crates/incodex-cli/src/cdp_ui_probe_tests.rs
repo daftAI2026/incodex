@@ -87,6 +87,7 @@ fn cdp_ui_probe_requires_a_unique_profile_mask_surface_when_requested() {
             name: "Temporary".into(),
             avatar: ProfileAvatar::Generated,
         }),
+        ..InjectionOptions::default()
     };
     let expression = ui_ready_expression_for_options(&options);
     assert!(expression.contains("profileMask"));
