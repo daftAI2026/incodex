@@ -248,6 +248,25 @@ fn provider_placement_mutates_only_a_staged_framework_and_rolls_back_local_failu
         window == b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     }));
 
+    let provider_path = version.join("IncodexKeyProvider.dylib");
+    let framework_before_recheck = fs::read(&framework).unwrap();
+    fs::set_permissions(&provider_path, fs::Permissions::from_mode(0o666)).unwrap();
+    assert!(
+        install_keychain_provider(&app, registered_helper_sha256).is_err(),
+        "an existing writable provider must not be trusted only because its bytes match"
+    );
+    assert_eq!(fs::read(&framework).unwrap(), framework_before_recheck);
+    fs::set_permissions(&provider_path, fs::Permissions::from_mode(0o644)).unwrap();
+
+    let provider_hardlink = version.join("IncodexKeyProvider.alias");
+    fs::hard_link(&provider_path, &provider_hardlink).unwrap();
+    assert!(
+        install_keychain_provider(&app, registered_helper_sha256).is_err(),
+        "a multiply-linked provider must not pass staged bundle validation"
+    );
+    assert_eq!(fs::read(&framework).unwrap(), framework_before_recheck);
+    fs::remove_file(provider_hardlink).unwrap();
+
     let broken_app = home.join("Broken.app");
     let broken_dir = broken_app.join("Contents/Frameworks/Codex Framework.framework");
     fs::create_dir_all(&broken_dir).unwrap();
