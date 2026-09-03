@@ -191,6 +191,45 @@ describe("Codex mode readiness", () => {
     expect(tasks).toHaveLength(0);
   });
 
+  test("stops polling after repeated renderer probe failures", async () => {
+    const tasks: ScheduledTask[] = [];
+    const logs: Array<[string, unknown]> = [];
+    const win = {
+      isDestroyed: () => false,
+      isFocused: () => true,
+      once: () => {},
+      webContents: {
+        executeJavaScript: async () => {
+          throw new Error("execution context disappeared");
+        },
+        isDestroyed: () => false,
+      },
+    };
+    const readiness = createCodexModeReadiness({
+      isIncognito: () => true,
+      log: (event: string, detail: unknown) => logs.push([event, detail]),
+      probeFailuresRequired: 3,
+      selectFallback: () => true,
+      scheduleTimer: (callback: () => void, delay: number) => {
+        const task = { callback, delay };
+        tasks.push(task);
+        return task;
+      },
+    });
+
+    readiness.observe(win);
+    await runNext(tasks);
+    await runNext(tasks);
+    await runNext(tasks);
+
+    expect(tasks).toHaveLength(0);
+    expect(logs.filter(([event]) => event === "codex-mode-probe-failed")).toHaveLength(3);
+    expect(logs.at(-1)).toEqual([
+      "codex-mode-unresolved",
+      { fallback: false, reason: "probe-failed" },
+    ]);
+  });
+
   test("probes nested accessible labels and blocks every official dialog shape", () => {
     expect(CODEX_MODE_PROBE_EXPRESSION).toContain("textContent");
     expect(CODEX_MODE_PROBE_EXPRESSION).toContain('getAttribute("aria-label")');
