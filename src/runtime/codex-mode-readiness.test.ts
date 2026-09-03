@@ -68,9 +68,50 @@ describe("Codex mode readiness", () => {
     expect(decideCodexModeAction(page, false, 0, 3)).toBe("select-fallback");
   });
 
-  test("never repeats the fallback after bounded confirmation fails", () => {
+  test("gives the official renderer enough time to complete an accepted fallback", () => {
     expect(decideCodexModeAction("other", true, 0)).toBe("wait");
-    expect(decideCodexModeAction("other", true, 2)).toBe("unresolved");
+    expect(decideCodexModeAction("other", true, 2)).toBe("wait");
+    expect(decideCodexModeAction("other", true, 8)).toBe("unresolved");
+  });
+
+  test("confirms a renderer fallback whose official route settles after several polls", async () => {
+    const tasks: ScheduledTask[] = [];
+    const logs: Array<[string, unknown]> = [];
+    const snapshots = [
+      { modeAvailable: true, modeLabel: "ChatGPT", officialBlockerVisible: false },
+      { modeAvailable: true, modeLabel: "ChatGPT", officialBlockerVisible: false },
+      { modeAvailable: true, modeLabel: "ChatGPT", officialBlockerVisible: false },
+      { modeAvailable: true, modeLabel: "Codex", officialBlockerVisible: false },
+    ];
+    const win = {
+      isDestroyed: () => false,
+      isFocused: () => true,
+      once: () => {},
+      webContents: {
+        executeJavaScript: async () => snapshots.shift(),
+        isDestroyed: () => false,
+      },
+    };
+    const readiness = createCodexModeReadiness({
+      isIncognito: () => true,
+      log: (event: string, detail: unknown) => logs.push([event, detail]),
+      primaryOtherChecksRequired: 1,
+      selectFallback: async () => true,
+      scheduleTimer: (callback: () => void, delay: number) => {
+        const task = { callback, delay };
+        tasks.push(task);
+        return task;
+      },
+    });
+
+    readiness.observe(win);
+    await runNext(tasks);
+    await runNext(tasks);
+    await runNext(tasks);
+    await runNext(tasks);
+
+    expect(tasks).toHaveLength(0);
+    expect(logs).toContainEqual(["codex-mode-confirmed", { fallback: true }]);
   });
 
   test("keeps observing onboarding and accepts the primary route without a fallback", async () => {
