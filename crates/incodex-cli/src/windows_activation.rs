@@ -1313,6 +1313,7 @@ fn quote_windows_argument(argument: &OsStr) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::ffi::OsString;
     use std::path::Path;
     use std::sync::mpsc;
@@ -1322,8 +1323,26 @@ mod tests {
     use super::{
         acquire_package_activation_lock, activation_manager_failure, cleanup_proof_after_debugging,
         installed_debugger_route_from_state, installed_debugger_user_root, node_require_option,
-        WindowsDebuggerRoute,
+        prepare_installed_cdp_or_terminate, WindowsDebuggerRoute,
     };
+
+    #[test]
+    fn installed_cdp_preparation_failure_terminates_the_suspended_process() {
+        let terminated = Cell::new(false);
+        let result: Result<u16, String> = prepare_installed_cdp_or_terminate(
+            || Err("Runtime injector is unreadable".to_string()),
+            || {
+                terminated.set(true);
+                Ok(())
+            },
+        );
+
+        assert!(terminated.get(), "a supplied suspended process must not be orphaned");
+        assert_eq!(
+            result.expect_err("preparation must fail closed"),
+            "Runtime injector is unreadable"
+        );
+    }
 
     #[test]
     fn unreadable_installed_state_resumes_the_registered_package() {

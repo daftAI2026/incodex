@@ -803,6 +803,43 @@ fn command_failure(label: &str, output: &std::process::Output) -> String {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::select_native_open_executable;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn installed_bridge_uses_the_cli_generation_that_published_runtime() {
+        let helper = Path::new(r"C:\Users\Kid\.incodex\windows\i\old\i.exe");
+        let active = PathBuf::from(
+            r"C:\Users\Kid\.incodex\packages\standalone\releases\1.0.0\incodex.exe",
+        );
+        let selected = select_native_open_executable(
+            helper,
+            "0.9.0",
+            "1.0.0-0123456789abcdef",
+            || Ok((active.clone(), "1.0.0".to_string())),
+        )
+        .expect("runtime generation selects its managed CLI");
+
+        assert_eq!(selected, active);
+    }
+
+    #[test]
+    fn installed_bridge_keeps_its_helper_for_the_same_runtime_version() {
+        let helper = Path::new(r"C:\Users\Kid\.incodex\windows\i\current\i.exe");
+        let selected = select_native_open_executable(
+            helper,
+            "1.0.0",
+            "1.0.0-fedcba9876543210",
+            || panic!("same-version runtime must not require a standalone install"),
+        )
+        .expect("same-version helper remains self-contained");
+
+        assert_eq!(selected, helper);
+    }
+}
+
 fn validate_stable_version(version: &str) -> Result<(), String> {
     if crate::stable_release::parse_stable_version(version).is_none() {
         return Err(format!("invalid stable Incodex version: {version}"));

@@ -465,8 +465,9 @@ mod tests {
         let source = include_str!("windows_installed_cdp.rs");
         assert!(source.contains("let mut native_open = None"));
         assert!(source.contains("Ok(None) => return Ok(())"));
-        assert!(source.contains("*native_open = Some(launch_native_open()?)"));
+        assert!(source.contains("*native_open = Some(launch_native_open(executable)?)"));
         assert!(source.contains(".arg(\"open\")"));
+        assert!(!source.contains("std::env::current_exe()"));
     }
 
     #[test]
