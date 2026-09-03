@@ -120,7 +120,7 @@ pub fn read_windows_debug_registration(
     read_windows_debug_registration_file(user_root, REGISTRATION_NAME)
 }
 
-fn read_transient_windows_debug_registration(
+pub(crate) fn read_transient_windows_debug_registration(
     user_root: &Path,
 ) -> Result<Option<WindowsDebugRegistrationEvidence>, String> {
     read_windows_debug_registration_file(user_root, TRANSIENT_REGISTRATION_NAME)

@@ -8,8 +8,9 @@ use crate::spinner::Spinner;
 use crate::windows_app::{discover_codex_package, WindowsCodexApp};
 use crate::windows_install_state::{read_windows_install_state, WindowsInstallPhase};
 use crate::windows_registration::{
-    read_windows_debug_registration, registration_matches_install_state,
-    WindowsDebugRegistrationEvidence, WindowsDebugRegistrationKind,
+    read_transient_windows_debug_registration, read_windows_debug_registration,
+    registration_matches_install_state, WindowsDebugRegistrationEvidence,
+    WindowsDebugRegistrationKind,
 };
 use crate::windows_runtime::verify_installed_windows_runtime;
 use crate::windows_system::windows_path_for_display;
@@ -42,11 +43,22 @@ impl WindowsIntegrationStatus {
         current_package_full_name: Option<&str>,
     ) -> Result<Self, String> {
         let registration = read_windows_debug_registration(user_root);
+        let transient_registration = read_transient_windows_debug_registration(user_root);
         let state = match read_windows_install_state(user_root) {
             Ok(Some(state)) => state,
-            Ok(None) => return Ok(Self::without_install_state(registration, None)),
+            Ok(None) => {
+                return Ok(Self::without_install_state(
+                    registration,
+                    transient_registration,
+                    None,
+                ));
+            }
             Err(error) => {
-                return Ok(Self::without_install_state(registration, Some(error)));
+                return Ok(Self::without_install_state(
+                    registration,
+                    transient_registration,
+                    Some(error),
+                ));
             }
         };
         let enabled = matches!(
@@ -86,6 +98,14 @@ impl WindowsIntegrationStatus {
                 "Windows debugger registration evidence is unhealthy: {error}"
             )),
         }
+        match transient_registration {
+            Ok(Some(_)) => health_issues
+                .push("Transient Windows debugger registration requires recovery.".to_string()),
+            Ok(None) => {}
+            Err(error) => health_issues.push(format!(
+                "Transient Windows debugger registration evidence is unhealthy: {error}"
+            )),
+        }
         Ok(Self {
             installed: enabled && health_issues.is_empty(),
             phase: Some(state.phase),
@@ -98,6 +118,7 @@ impl WindowsIntegrationStatus {
 
     fn without_install_state(
         registration: Result<Option<WindowsDebugRegistrationEvidence>, String>,
+        transient_registration: Result<Option<WindowsDebugRegistrationEvidence>, String>,
         state_error: Option<String>,
     ) -> Self {
         let mut health_issues = Vec::new();
@@ -105,7 +126,22 @@ impl WindowsIntegrationStatus {
             health_issues.push(format!("Windows install state is unhealthy: {error}"));
         }
 
-        let package_full_name = match registration {
+        let mut package_full_name = match transient_registration {
+            Ok(Some(evidence)) => {
+                health_issues
+                    .push("Transient Windows debugger registration requires recovery.".to_string());
+                Some(evidence.package_full_name)
+            }
+            Ok(None) => None,
+            Err(error) => {
+                health_issues.push(format!(
+                    "Transient Windows debugger registration evidence is unhealthy: {error}"
+                ));
+                None
+            }
+        };
+
+        match registration {
             Ok(Some(evidence)) => {
                 let issue = match evidence.kind {
                     WindowsDebugRegistrationKind::Installed => {
@@ -116,16 +152,17 @@ impl WindowsIntegrationStatus {
                     }
                 };
                 health_issues.push(issue.to_string());
-                Some(evidence.package_full_name)
+                if package_full_name.is_none() {
+                    package_full_name = Some(evidence.package_full_name);
+                }
             }
-            Ok(None) => None,
+            Ok(None) => {}
             Err(error) => {
                 health_issues.push(format!(
                     "Windows debugger registration evidence is unhealthy: {error}"
                 ));
-                None
             }
-        };
+        }
 
         Self {
             installed: false,
