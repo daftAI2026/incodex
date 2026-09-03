@@ -959,6 +959,7 @@ function startRuntime() {
       userRoot: USER_ROOT,
       execPath: process.execPath,
       incognito: false,
+      log: logLaunch,
     });
   }
   return attachElectron();

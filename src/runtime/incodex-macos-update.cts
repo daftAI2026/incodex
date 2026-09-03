@@ -113,10 +113,13 @@ function probeKeychainAuthorizationReadiness(options = {}) {
       stdio: "ignore",
     });
     let finished = false;
+    let timedOut = false;
     let killTimer = null;
     const timeoutMs = options.timeoutMs || KEYCHAIN_PROBE_TIMEOUT_MS;
     const timeout = setTimeout(() => {
       if (finished) return;
+      timedOut = true;
+      reportKeychainProbeOutcome(options, "timeout");
       try {
         child.kill("SIGTERM");
       } catch {
@@ -138,19 +141,40 @@ function probeKeychainAuthorizationReadiness(options = {}) {
       finished = true;
       clearTimeout(timeout);
       if (killTimer) clearTimeout(killTimer);
+      if (!timedOut) reportKeychainProbeOutcome(options, "spawn-error");
     });
     child.once("close", (code, signal) => {
       finished = true;
       clearTimeout(timeout);
       if (killTimer) clearTimeout(killTimer);
-      if (code === 0 && signal == null) {
+      if (timedOut) return;
+      const status = keychainProbeStatus(code, signal);
+      if (status === "authorized") {
         writeAuthorizationProof(userRoot, registration);
       }
+      reportKeychainProbeOutcome(options, status);
     });
     child.unref?.();
     return true;
   } catch {
     return false;
+  }
+}
+
+function keychainProbeStatus(code, signal) {
+  if (signal != null) return "signaled";
+  if (code === 0) return "authorized";
+  if (code === 44) return "item-missing";
+  if (code === 68) return "authorization-required";
+  if (code === 69) return "parent-rejected";
+  return "failed";
+}
+
+function reportKeychainProbeOutcome(options, status) {
+  try {
+    options.log?.("keychain-readiness-probe", { status });
+  } catch {
+    // Diagnostics must never make official startup depend on logging.
   }
 }
 
