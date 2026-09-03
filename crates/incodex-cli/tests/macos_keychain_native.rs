@@ -1,3 +1,7 @@
+//! [INPUT]: 依赖 incodex-cli 的 macOS Keychain 资产 API，以及合成 helper/应用目录提供的系统边界替身
+//! [OUTPUT]: 提供 helper 发布、显式授权复核、provider 注入与本地回滚的 macOS 集成回归
+//! [POS]: incodex-cli/tests 的 Keychain 原生契约守门人，阻止缓存状态替代真实授权事实
+//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 #![cfg(target_os = "macos")]
 
 use std::fs;
@@ -163,16 +167,21 @@ fn helper_authorization_is_explicit_silent_and_distinguishes_a_missing_key() {
 }
 
 #[test]
-fn successful_helper_authorization_is_reused_without_invoking_it_again() {
+fn cached_helper_authorization_is_revalidated_and_revocation_is_persisted() {
     let home = scratch();
     let root = home.join(".incodex");
     let app = home.join("Applications/ChatGPT.app");
     fs::create_dir_all(&app).unwrap();
     let calls = home.join("authorization-calls");
+    let revoked = home.join("authorization-revoked");
     let helper = home.join("authorization-helper");
     fs::write(
         &helper,
-        format!("#!/bin/sh\nprintf x >> '{}'\n", calls.display()),
+        format!(
+            "#!/bin/sh\n[ \"$1\" = --authorize ] || exit 64\nprintf x >> '{}'\n[ ! -e '{}' ] || exit 68\n",
+            calls.display(),
+            revoked.display(),
+        ),
     )
     .unwrap();
     fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
@@ -184,14 +193,23 @@ fn successful_helper_authorization_is_reused_without_invoking_it_again() {
     );
     let authorized = read_registration(&root).unwrap().unwrap();
     assert!(authorized.authorization_ready);
-    assert_eq!(
-        authorize_registration(&root, &authorized).unwrap(),
-        KeychainAuthorization::Authorized
+    fs::write(&revoked, b"revoked").unwrap();
+    let error = authorize_registration(&root, &authorized).unwrap_err();
+    assert!(
+        error.contains("was not granted"),
+        "a revoked cached authorization must be observed during explicit install: {error}"
     );
     assert_eq!(
         fs::read(&calls).unwrap(),
-        b"x",
-        "a durable authorization for the same fixed helper must not trigger another system prompt"
+        b"xx",
+        "explicit install must revalidate the stable helper instead of trusting a stale boolean"
+    );
+    assert!(
+        !read_registration(&root)
+            .unwrap()
+            .unwrap()
+            .authorization_ready,
+        "a failed revalidation must disable provider installation"
     );
 
     fs::remove_dir_all(home).unwrap();
