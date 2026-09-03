@@ -7,9 +7,6 @@ license.workspace = true
 repository.workspace = true
 description = "Incodex native CLI"
 
-[build-dependencies]
-sha2.workspace = true
-
 [[bin]]
 name = "incodex"
 path = "src/main.rs"

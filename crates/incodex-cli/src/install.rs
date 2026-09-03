@@ -424,11 +424,31 @@ where
     }
     progress.stage("Publishing Runtime");
     let published = ensure_current(root)?;
-    if is_official_app(app, None) {
-        crate::macos_keychain_assets::ensure_bundled_registration(root, app)?;
-    }
+    let official_app = is_official_app(app, None);
+    let mut keychain_warning = None;
+    let keychain_registration = if official_app {
+        let registration = crate::macos_keychain_assets::ensure_bundled_registration(root, app)?;
+        if expected_build.is_none() {
+            progress.stage("Authorizing Keychain continuity");
+            if crate::macos_keychain_assets::authorize_registration(&registration)?
+                == crate::macos_keychain_assets::KeychainAuthorization::ItemMissing
+            {
+                keychain_warning = Some(
+                    "Codex has not created its Storage Key yet; Keychain continuity will request its one-time authorization after the key exists."
+                        .to_string(),
+                );
+            }
+        }
+        Some(registration)
+    } else {
+        None
+    };
     if let Some(install_id) = inspect_existing_install(app, root, &asar)? {
-        let warning = prune_warning(root, app, &install_id);
+        let mut warnings = keychain_warning.into_iter().collect::<Vec<_>>();
+        if let Some(warning) = prune_warning(root, app, &install_id) {
+            warnings.push(warning);
+        }
+        let warning = (!warnings.is_empty()).then(|| warnings.join(" "));
         return Ok(CommandResult {
             skipped: true,
             install_id: Some(install_id),
@@ -496,8 +516,14 @@ where
     if let Err(error) = write_asar_integrity(&staged, &hash) {
         return Err(rollback_install(&mut tx, Some(&staged), error));
     }
-    if is_official_app(app, None) {
-        if let Err(error) = crate::macos_keychain_assets::install_keychain_provider(&staged) {
+    if official_app {
+        let helper_sha256 = &keychain_registration
+            .as_ref()
+            .expect("official app must have Keychain registration")
+            .helper_sha256;
+        if let Err(error) =
+            crate::macos_keychain_assets::install_keychain_provider(&staged, helper_sha256)
+        {
             return Err(rollback_install(&mut tx, Some(&staged), error));
         }
     }
@@ -543,6 +569,7 @@ where
         })
         .into_iter()
         .collect::<Vec<_>>();
+    warnings.extend(keychain_warning);
     if let Some(warning) = prune_warning(root, app, &install_id) {
         warnings.push(warning);
     }

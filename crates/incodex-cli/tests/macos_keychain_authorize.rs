@@ -95,8 +95,7 @@ OSStatus SecItemCopyMatching(CFDictionaryRef query, CFTypeRef *result) {
         .unwrap();
     assert!(status.success(), "fake Security library did not compile");
 
-    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("native/macos_keychain_helper.c");
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("native/macos_keychain_helper.c");
     let helper = home.join("incodex-keychain-helper-test");
     let status = Command::new(&clang)
         .args(["-isysroot", &sdk, "-Wall", "-Wextra", "-Werror"])

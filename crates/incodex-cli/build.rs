@@ -2,8 +2,6 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use sha2::{Digest, Sha256};
-
 fn compile(clang: &Path, sdk: &Path, source: &str, output: &Path, arguments: &[&str]) {
     let status = Command::new(clang)
         .arg("-isysroot")
@@ -105,16 +103,11 @@ fn main() {
         ],
     );
     sign_adhoc(&keychain_helper, "com.daftai.incodex.keychain-helper");
-    let helper_sha256 = std::fs::read(&keychain_helper)
-        .map(Sha256::digest)
-        .map(|digest| {
-            digest
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<String>()
-        })
-        .unwrap_or_else(|error| panic!("cannot hash {}: {error}", keychain_helper.display()));
-    let helper_hash_define = format!("-DINCODEX_KEYCHAIN_HELPER_SHA256=\"{helper_sha256}\"");
+    let helper_hash_define = concat!(
+        "-DINCODEX_KEYCHAIN_HELPER_SHA256=\"",
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "\""
+    );
     compile(
         &clang,
         &sdk,
@@ -126,7 +119,7 @@ fn main() {
             "-Werror",
             "-dynamiclib",
             "native/fishhook.c",
-            helper_hash_define.as_str(),
+            helper_hash_define,
             "-framework",
             "CoreFoundation",
             "-framework",

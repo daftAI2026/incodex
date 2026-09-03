@@ -3,6 +3,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use incodex_macos::add_load_dylib;
@@ -20,6 +21,8 @@ const HELPER_FILE_MODE: u32 = 0o700;
 const HELPER_FILE_NAME: &str = "incodex-keychain-helper";
 const PROVIDER_FILE_MODE: u32 = 0o644;
 const PROVIDER_FILE_NAME: &str = "IncodexKeyProvider.dylib";
+const PROVIDER_HELPER_HASH_MARKER: &[u8; 64] =
+    b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const FRAMEWORK_RELATIVE_PATH: &str =
     "Contents/Frameworks/Codex Framework.framework/Codex Framework";
 const BUNDLED_HELPER_BYTES: &[u8] =
@@ -34,6 +37,12 @@ pub struct KeychainRegistration {
     pub app_path: PathBuf,
     pub helper_path: PathBuf,
     pub helper_sha256: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeychainAuthorization {
+    Authorized,
+    ItemMissing,
 }
 
 pub fn ensure_registration(
@@ -61,11 +70,47 @@ pub fn bundled_provider_bytes() -> &'static [u8] {
     BUNDLED_PROVIDER_BYTES
 }
 
+/// 在显式前台安装中触发一次系统授权，但不把 Keychain 数据交给 CLI。
+///
+/// exit 44 表示 Codex 尚未创建 storage key；调用方可以继续安装，但必须保留
+/// 这条边界。其他失败（包括用户取消）均在修改应用前中止。
+pub fn authorize_registration(
+    registration: &KeychainRegistration,
+) -> Result<KeychainAuthorization, String> {
+    let output = Command::new(&registration.helper_path)
+        .arg("--authorize")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|error| format!("cannot start macOS Keychain authorization: {error}"))?;
+    if !output.stdout.is_empty() || !output.stderr.is_empty() {
+        return Err("macOS Keychain authorization helper emitted unexpected output".into());
+    }
+    match output.status.code() {
+        Some(0) => Ok(KeychainAuthorization::Authorized),
+        Some(44) => Ok(KeychainAuthorization::ItemMissing),
+        Some(68) => Err("macOS Keychain authorization was not granted".into()),
+        Some(code) => Err(format!(
+            "macOS Keychain authorization helper failed with exit code {code}"
+        )),
+        None => Err("macOS Keychain authorization helper ended by signal".into()),
+    }
+}
+
 /// 把固定 provider 放进 staged app，并只在 Framework 的现有 padding 中增加普通依赖。
 ///
 /// 调用方必须把整个 staged app 纳入外层安装事务；本函数仍保证解析或本地写入失败时
 /// 不留下半写 Framework，且只移除由本次调用新建的 provider。
-pub fn install_keychain_provider(staged_app: &Path) -> Result<(), String> {
+pub fn install_keychain_provider(staged_app: &Path, helper_sha256: &str) -> Result<(), String> {
+    if helper_sha256.len() != 64
+        || !helper_sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err("Keychain provider helper hash is invalid".into());
+    }
+    let provider_bytes = provider_for_helper(helper_sha256)?;
     let app_root = fs::canonicalize(staged_app)
         .map_err(|error| format!("cannot resolve staged app for Keychain provider: {error}"))?;
     let framework_link = app_root.join(FRAMEWORK_RELATIVE_PATH);
@@ -93,15 +138,14 @@ pub fn install_keychain_provider(staged_app: &Path) -> Result<(), String> {
         Ok(provider_metadata) => {
             if provider_metadata.file_type().is_symlink()
                 || !provider_metadata.file_type().is_file()
-                || read_regular_file(&provider, "staged Keychain provider")?
-                    != BUNDLED_PROVIDER_BYTES
+                || read_regular_file(&provider, "staged Keychain provider")? != provider_bytes
             {
                 return Err("staged Keychain provider conflicts with bundled bytes".into());
             }
             false
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            write_bundle_file_atomic(&provider, BUNDLED_PROVIDER_BYTES, PROVIDER_FILE_MODE)?;
+            write_bundle_file_atomic(&provider, &provider_bytes, PROVIDER_FILE_MODE)?;
             true
         }
         Err(error) => return Err(format!("cannot inspect staged Keychain provider: {error}")),
@@ -114,6 +158,27 @@ pub fn install_keychain_provider(staged_app: &Path) -> Result<(), String> {
         return Err(error);
     }
     Ok(())
+}
+
+fn provider_for_helper(helper_sha256: &str) -> Result<Vec<u8>, String> {
+    let mut provider = BUNDLED_PROVIDER_BYTES.to_vec();
+    if provider.len() < PROVIDER_HELPER_HASH_MARKER.len() {
+        return Err("bundled Keychain provider is truncated".into());
+    }
+    let mut replacements = 0;
+    for offset in 0..=provider.len() - PROVIDER_HELPER_HASH_MARKER.len() {
+        if &provider[offset..offset + PROVIDER_HELPER_HASH_MARKER.len()]
+            == PROVIDER_HELPER_HASH_MARKER
+        {
+            provider[offset..offset + PROVIDER_HELPER_HASH_MARKER.len()]
+                .copy_from_slice(helper_sha256.as_bytes());
+            replacements += 1;
+        }
+    }
+    if replacements == 0 {
+        return Err("bundled Keychain provider has no helper hash marker".into());
+    }
+    Ok(provider)
 }
 
 fn ensure_registration_with<F>(

@@ -209,7 +209,8 @@ fn provider_placement_mutates_only_a_staged_framework_and_rolls_back_local_failu
     )
     .unwrap();
 
-    let registered_helper_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let registered_helper_sha256 =
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     install_keychain_provider(&app, registered_helper_sha256).unwrap();
 
     let installed = fs::read(&framework).unwrap();
