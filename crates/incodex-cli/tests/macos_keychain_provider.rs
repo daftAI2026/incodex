@@ -155,15 +155,19 @@ fn production_provider_resolves_only_its_verified_content_addressed_helper() {
     let slow_provider = compile_production_test_provider(&home, &slow_sha256);
     let started = Instant::now();
     let output = Command::new(&probe)
-        .args([slow_provider.as_os_str(), "success".as_ref()])
+        .args([slow_provider.as_os_str(), "failure".as_ref()])
         .output()
         .unwrap();
     assert!(
         output.status.success(),
-        "production authorization window was shorter than a normal user prompt: status={:?}",
+        "production provider must fail closed before a helper can freeze Codex: status={:?}",
         output.status.code()
     );
-    assert!(started.elapsed() >= Duration::from_secs(3));
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed >= Duration::from_secs(2) && elapsed < Duration::from_secs(4),
+        "production provider timeout took {elapsed:?}"
+    );
 
     fs::write(&helper, b"#!/bin/sh\nprintf 'tampered-key'\n").unwrap();
     let output = Command::new(&probe)
