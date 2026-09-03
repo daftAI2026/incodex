@@ -46,9 +46,7 @@ fn native_cli_routes_relaunch_recovery_before_public_parsing() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(
-        !home
-            .join(".incodex/macos-update/coordinator.log")
-            .exists(),
+        !home.join(".incodex/macos-update/coordinator.log").exists(),
         "a malformed external invocation is not a Coordinator recovery event"
     );
     fs::remove_dir_all(home).unwrap();

@@ -36,10 +36,12 @@ pub fn try_run_relaunch() -> Option<Result<(), String>> {
             .ok()
             .as_deref(),
     )?;
+    let install_id = match request {
+        Ok(install_id) => install_id,
+        Err(error) => return Some(Err(error)),
+    };
     let expected_helper_sha256 = std::env::var("INCODEX_MACOS_UPDATE_HELPER_SHA256").ok();
-    let result = request.and_then(|install_id| {
-        run_relaunch_recovery(install_id, expected_helper_sha256.as_deref())
-    });
+    let result = run_relaunch_recovery(install_id, expected_helper_sha256.as_deref());
     if let Err(error) = &result {
         crate::macos_update_log::log_coordinator_event(
             &incodex_core::paths::user_root(),
