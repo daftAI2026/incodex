@@ -24,6 +24,7 @@ const PROVIDER_FILE_MODE: u32 = 0o644;
 const PROVIDER_FILE_NAME: &str = "IncodexKeyProvider.dylib";
 const AUTHORIZATION_TIMEOUT: Duration = Duration::from_secs(300);
 const AUTHORIZATION_POLL_INTERVAL: Duration = Duration::from_millis(25);
+const AUTHORIZATION_CANCEL_GRACE: Duration = Duration::from_millis(500);
 const PROVIDER_HELPER_HASH_MARKER: &[u8; 64] =
     b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const FRAMEWORK_RELATIVE_PATH: &str =
@@ -180,6 +181,18 @@ fn terminate_authorization_child(child: &mut Child) {
     let pid = child.id() as i32;
     if pid > 0 {
         unsafe {
+            libc::kill(pid, libc::SIGTERM);
+        }
+        let started = Instant::now();
+        while started.elapsed() < AUTHORIZATION_CANCEL_GRACE {
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) => std::thread::sleep(AUTHORIZATION_POLL_INTERVAL),
+                Err(_) => break,
+            }
+        }
+        unsafe {
+            // 主 helper 即使已退出，也要清理同一进程组里的异常后代。
             libc::kill(-pid, libc::SIGKILL);
         }
     }
@@ -511,7 +524,7 @@ mod tests {
         fs::write(
             &helper,
             format!(
-                "#!/bin/sh\ntrap 'printf cancelled > {}; exit 143' TERM\n/bin/sh -c '/bin/sleep 1; printf orphan > {}' &\nwait\n",
+                "#!/bin/sh\ntrap 'printf cancelled > {}; exit 143' TERM\n/bin/sh -c 'trap \"\" TERM; /bin/sleep 2; printf orphan > {}' &\nwhile :; do :; done\n",
                 terminated.display(),
                 marker.display(),
             ),
@@ -522,16 +535,16 @@ mod tests {
 
         let started = Instant::now();
         let error =
-            authorize_registration_with_timeout(&root, &registration, Duration::from_millis(150))
+            authorize_registration_with_timeout(&root, &registration, Duration::from_secs(1))
                 .unwrap_err();
         assert!(error.contains("timed out"), "{error}");
-        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(started.elapsed() < Duration::from_secs(2));
         assert_eq!(
             fs::read(&terminated).unwrap(),
             b"cancelled",
             "authorization timeout must first give the helper a chance to dismiss native UI"
         );
-        std::thread::sleep(Duration::from_millis(1_100));
+        std::thread::sleep(Duration::from_millis(2_100));
         assert!(
             !marker.exists(),
             "authorization timeout left a descendant running"

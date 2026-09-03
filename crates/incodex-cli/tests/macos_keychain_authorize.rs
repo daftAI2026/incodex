@@ -10,7 +10,7 @@ static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[test]
 fn runtime_helper_forbids_authentication_ui() {
-    let source = include_str!("../native/macos_keychain_helper.c");
+    let source = include_str!("../native/macos_keychain_helper.m");
     assert!(
         source.contains("authentication_context.interactionNotAllowed = !authorize_only"),
         "only explicit install may show Keychain UI; provider reads must fail closed without prompting"
@@ -118,13 +118,29 @@ OSStatus SecItemCopyMatching(CFDictionaryRef query, CFTypeRef *result) {
         .unwrap();
     assert!(status.success(), "fake Security library did not compile");
 
-    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("native/macos_keychain_helper.c");
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("native/macos_keychain_helper.m");
     let helper = home.join("incodex-keychain-helper-test");
     let status = Command::new(&clang)
-        .args(["-isysroot", &sdk, "-Wall", "-Wextra", "-Werror"])
+        .args([
+            "-isysroot",
+            &sdk,
+            "-fobjc-arc",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+        ])
         .arg(&source)
         .arg(&fake)
-        .args(["-framework", "CoreFoundation", "-framework", "Security"])
+        .args([
+            "-framework",
+            "CoreFoundation",
+            "-framework",
+            "Foundation",
+            "-framework",
+            "LocalAuthentication",
+            "-framework",
+            "Security",
+        ])
         .args(["-Wl,-rpath,@executable_path", "-o"])
         .arg(&helper)
         .status()

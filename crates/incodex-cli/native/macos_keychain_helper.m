@@ -1,8 +1,13 @@
 #include <CoreFoundation/CoreFoundation.h>
+#include <LocalAuthentication/LocalAuthentication.h>
 #include <Security/Security.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <libproc.h>
 #include <limits.h>
+#include <poll.h>
+#include <pthread.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +20,126 @@ static const char kExpectedIdentifier[] = "com.openai.codex";
 static const char kService[] = "Codex Storage Key";
 static const char kAccount[] = "Codex";
 static const size_t kMaximumOutputBytes = 4096;
+static volatile sig_atomic_t gCancellationWriteFd = -1;
+
+typedef struct {
+    CFDictionaryRef query;
+    CFTypeRef result;
+    OSStatus status;
+    int completion_write_fd;
+} MatchingWorker;
+
+static void request_cancellation(int signal_number) {
+    (void)signal_number;
+    int saved_errno = errno;
+    int fd = (int)gCancellationWriteFd;
+    if (fd >= 0) {
+        const unsigned char byte = 1;
+        (void)write(fd, &byte, sizeof(byte));
+    }
+    errno = saved_errno;
+}
+
+static void close_pipe(int pipe_fds[2]) {
+    if (pipe_fds[0] >= 0) close(pipe_fds[0]);
+    if (pipe_fds[1] >= 0) close(pipe_fds[1]);
+    pipe_fds[0] = -1;
+    pipe_fds[1] = -1;
+}
+
+static void *copy_matching_worker(void *raw_worker) {
+    @autoreleasepool {
+        MatchingWorker *worker = raw_worker;
+        worker->status = SecItemCopyMatching(worker->query, &worker->result);
+        const unsigned char byte = 1;
+        while (write(worker->completion_write_fd, &byte, sizeof(byte)) < 0 &&
+               errno == EINTR) {
+        }
+    }
+    return NULL;
+}
+
+static OSStatus copy_matching_cancellable(CFDictionaryRef query,
+                                          LAContext *context,
+                                          CFTypeRef *result) {
+    int cancellation_pipe[2] = {-1, -1};
+    int completion_pipe[2] = {-1, -1};
+    if (pipe(cancellation_pipe) != 0 || pipe(completion_pipe) != 0) {
+        close_pipe(cancellation_pipe);
+        close_pipe(completion_pipe);
+        return errSecAllocate;
+    }
+    int cancellation_flags = fcntl(cancellation_pipe[1], F_GETFL, 0);
+    if (cancellation_flags < 0 ||
+        fcntl(cancellation_pipe[1], F_SETFL,
+              cancellation_flags | O_NONBLOCK) != 0) {
+        close_pipe(cancellation_pipe);
+        close_pipe(completion_pipe);
+        return errSecInternalComponent;
+    }
+
+    struct sigaction action = {0};
+    struct sigaction previous_action = {0};
+    action.sa_handler = request_cancellation;
+    sigemptyset(&action.sa_mask);
+    gCancellationWriteFd = cancellation_pipe[1];
+    if (sigaction(SIGTERM, &action, &previous_action) != 0) {
+        gCancellationWriteFd = -1;
+        close_pipe(cancellation_pipe);
+        close_pipe(completion_pipe);
+        return errSecInternalComponent;
+    }
+
+    MatchingWorker worker = {
+        .query = query,
+        .result = NULL,
+        .status = errSecInternalComponent,
+        .completion_write_fd = completion_pipe[1],
+    };
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, copy_matching_worker, &worker) != 0) {
+        gCancellationWriteFd = -1;
+        (void)sigaction(SIGTERM, &previous_action, NULL);
+        close_pipe(cancellation_pipe);
+        close_pipe(completion_pipe);
+        return errSecInternalComponent;
+    }
+
+    bool cancelled = false;
+    for (;;) {
+        struct pollfd descriptors[] = {
+            {.fd = completion_pipe[0], .events = POLLIN | POLLHUP, .revents = 0},
+            {.fd = cancellation_pipe[0], .events = POLLIN | POLLHUP, .revents = 0},
+        };
+        int poll_status = poll(descriptors, 2, -1);
+        if (poll_status < 0 && errno == EINTR) continue;
+        if (poll_status < 0) {
+            cancelled = true;
+            [context invalidate];
+            break;
+        }
+        if (descriptors[1].revents & (POLLIN | POLLHUP)) {
+            cancelled = true;
+            [context invalidate];
+            break;
+        }
+        if (descriptors[0].revents & (POLLIN | POLLHUP)) break;
+    }
+
+    (void)pthread_join(thread, NULL);
+    gCancellationWriteFd = -1;
+    (void)sigaction(SIGTERM, &previous_action, NULL);
+    close_pipe(cancellation_pipe);
+    close_pipe(completion_pipe);
+
+    if (cancelled) {
+        if (worker.result) CFRelease(worker.result);
+        *result = NULL;
+        return errSecUserCanceled;
+    }
+    *result = worker.result;
+    return worker.status;
+}
 
 static bool parent_has_expected_identity(pid_t parent_pid) {
     if (getuid() != geteuid() || getgid() != getegid()) return false;
@@ -90,7 +215,7 @@ static void secure_zero(unsigned char *bytes, size_t length) {
     while (length-- > 0) *cursor++ = 0;
 }
 
-int main(int argc, char **argv) {
+static int run(int argc, char **argv) {
     bool authorize_only = argc == 2 && strcmp(argv[1], "--authorize") == 0;
     if (!authorize_only) {
         if (argc != 1) return 64;
@@ -122,11 +247,16 @@ int main(int argc, char **argv) {
     CFDictionarySetValue(query, kSecAttrAccount, account);
     CFDictionarySetValue(query, kSecReturnData, kCFBooleanTrue);
     CFDictionarySetValue(query, kSecMatchLimit, kSecMatchLimitOne);
+    LAContext *authentication_context = [[LAContext alloc] init];
+    authentication_context.interactionNotAllowed = !authorize_only;
+    CFDictionarySetValue(query, kSecUseAuthenticationContext,
+                         (__bridge const void *)authentication_context);
     CFRelease(service);
     CFRelease(account);
 
     CFTypeRef result = NULL;
-    OSStatus status = SecItemCopyMatching(query, &result);
+    OSStatus status = copy_matching_cancellable(
+        query, authentication_context, &result);
     CFRelease(query);
     if (status != errSecSuccess || !result ||
         CFGetTypeID(result) != CFDataGetTypeID()) {
@@ -150,4 +280,10 @@ int main(int argc, char **argv) {
     int write_result = write_all(bytes, (size_t)length);
     secure_zero(bytes, sizeof(bytes));
     return write_result;
+}
+
+int main(int argc, char **argv) {
+    @autoreleasepool {
+        return run(argc, argv);
+    }
 }

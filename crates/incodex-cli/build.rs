@@ -27,7 +27,7 @@ fn sign_adhoc(path: &Path, identifier: &str) {
 fn main() {
     println!("cargo:rerun-if-changed=native/macos_update_coordinator.m");
     println!("cargo:rerun-if-changed=native/macos_sparkle_interpose.m");
-    println!("cargo:rerun-if-changed=native/macos_keychain_helper.c");
+    println!("cargo:rerun-if-changed=native/macos_keychain_helper.m");
     println!("cargo:rerun-if-changed=native/macos_keychain_provider.c");
     println!("cargo:rerun-if-changed=native/fishhook.c");
     println!("cargo:rerun-if-changed=native/fishhook.h");
@@ -90,14 +90,19 @@ fn main() {
     compile(
         &clang,
         &sdk,
-        "native/macos_keychain_helper.c",
+        "native/macos_keychain_helper.m",
         &keychain_helper,
         &[
+            "-fobjc-arc",
             "-Wall",
             "-Wextra",
             "-Werror",
             "-framework",
             "CoreFoundation",
+            "-framework",
+            "Foundation",
+            "-framework",
+            "LocalAuthentication",
             "-framework",
             "Security",
         ],
