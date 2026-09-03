@@ -31,6 +31,7 @@ use crate::windows_process::{
 
 const BINDING_NAME: &str = "__incodexNativeAction";
 const BRIDGE_READY_TIMEOUT: Duration = Duration::from_secs(45);
+const NATIVE_OPEN_READY_TIMEOUT: Duration = Duration::from_secs(70);
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -45,6 +46,13 @@ struct InstalledCdpContext<'a> {
     main_process_id: u32,
     runtime_source: &'a str,
     native_open_executable: &'a Path,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum NativeOpenWaitDisposition {
+    Ready,
+    Exited,
+    Retain,
 }
 
 /// 仅提供安装态正常窗口所需的 native action，UI 本身始终来自共享 Runtime。
@@ -359,11 +367,16 @@ fn ensure_native_open(native_open: &mut Option<Child>, executable: &Path) -> Res
             }
         }
     }
-    *native_open = Some(launch_native_open(executable)?);
-    Ok(())
+    let (child, ready) = launch_native_open(executable)?;
+    *native_open = Some(child);
+    if ready {
+        Ok(())
+    } else {
+        Err("native Incodex open is still completing its bounded startup".to_string())
+    }
 }
 
-fn launch_native_open(executable: &Path) -> Result<Child, String> {
+fn launch_native_open(executable: &Path) -> Result<(Child, bool), String> {
     let mut child = Command::new(executable)
         .arg("open")
         .creation_flags(CREATE_NO_WINDOW)
@@ -402,18 +415,23 @@ fn launch_native_open(executable: &Path) -> Result<Child, String> {
             }
         }
     });
-    match receiver.recv_timeout(BRIDGE_READY_TIMEOUT) {
-        Ok(true) => Ok(child),
-        Ok(false) => {
-            let _ = child.kill();
+    match native_open_wait_disposition(receiver.recv_timeout(NATIVE_OPEN_READY_TIMEOUT)) {
+        NativeOpenWaitDisposition::Ready => Ok((child, true)),
+        NativeOpenWaitDisposition::Exited => {
             let _ = child.wait();
             Err("native Incodex open exited before the incognito window was ready".to_string())
         }
-        Err(_) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            Err("native Incodex open timed out".to_string())
-        }
+        NativeOpenWaitDisposition::Retain => Ok((child, false)),
+    }
+}
+
+fn native_open_wait_disposition(
+    result: Result<bool, mpsc::RecvTimeoutError>,
+) -> NativeOpenWaitDisposition {
+    match result {
+        Ok(true) => NativeOpenWaitDisposition::Ready,
+        Ok(false) | Err(mpsc::RecvTimeoutError::Disconnected) => NativeOpenWaitDisposition::Exited,
+        Err(mpsc::RecvTimeoutError::Timeout) => NativeOpenWaitDisposition::Retain,
     }
 }
 
