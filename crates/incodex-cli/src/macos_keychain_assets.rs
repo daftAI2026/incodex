@@ -33,8 +33,6 @@ pub fn ensure_registration(
         return Err("macOS Keychain registration needs an absolute app path".into());
     }
 
-    let helper_bytes = read_regular_file(helper_source, "macOS Keychain helper source")?;
-    let helper_sha256 = sha256_hex(&helper_bytes);
     ensure_private_dir(root)?;
     let registration_path = registration_path(root);
     let _lock = acquire_target_lock(
@@ -45,13 +43,14 @@ pub fn ensure_registration(
     )?;
 
     if let Some(current) = read_registration(root)? {
-        if current.app_path != app_path || current.helper_sha256 != helper_sha256 {
-            return Err(
-                "macOS Keychain helper identity change requires an explicit migration".into(),
-            );
+        if current.app_path != app_path {
+            return Err("macOS Keychain app path change requires an explicit migration".into());
         }
         return Ok(current);
     }
+
+    let helper_bytes = read_regular_file(helper_source, "macOS Keychain helper source")?;
+    let helper_sha256 = sha256_hex(&helper_bytes);
 
     let helpers_root = root.join("helpers").join("macos-keychain");
     ensure_private_dir(&helpers_root)?;
