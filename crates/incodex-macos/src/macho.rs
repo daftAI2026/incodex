@@ -30,6 +30,7 @@ pub fn add_load_dylib(bytes: &mut [u8]) -> Result<(), String> {
 
     let mut offset = MACH_HEADER_64_SIZE;
     let mut first_file_content = None;
+    let mut provider_is_loaded = false;
     for _ in 0..command_count {
         let header_end = offset
             .checked_add(LOAD_COMMAND_HEADER_SIZE)
@@ -51,15 +52,31 @@ pub fn add_load_dylib(bytes: &mut [u8]) -> Result<(), String> {
         }
 
         if command == LC_LOAD_DYLIB && dylib_name(&bytes[offset..command_end])? == DYLIB_PATH {
-            return Ok(());
+            provider_is_loaded = true;
         }
 
         if command == LC_SEGMENT_64 {
             if command_size < SEGMENT_64_COMMAND_SIZE {
                 return Err("Mach-O contains a truncated LC_SEGMENT_64".to_owned());
             }
+            let section_count = read_u32(bytes, offset + 64)? as usize;
+            let expected_size = section_count
+                .checked_mul(80)
+                .and_then(|sections| SEGMENT_64_COMMAND_SIZE.checked_add(sections))
+                .ok_or_else(|| "Mach-O segment section table overflows".to_owned())?;
+            if command_size != expected_size {
+                return Err("Mach-O segment section count disagrees with cmdsize".to_owned());
+            }
             let file_offset = read_u64(bytes, offset + 40)?;
             let file_size = read_u64(bytes, offset + 48)?;
+            let file_end = file_offset
+                .checked_add(file_size)
+                .ok_or_else(|| "Mach-O segment file range overflows".to_owned())?;
+            let file_length = u64::try_from(bytes.len())
+                .map_err(|_| "Mach-O file length does not fit u64".to_owned())?;
+            if file_size > 0 && file_end > file_length {
+                return Err("Mach-O segment file range exceeds the file".to_owned());
+            }
             if file_offset > 0 && file_size > 0 {
                 let file_offset = usize::try_from(file_offset)
                     .map_err(|_| "Mach-O segment file offset does not fit this host".to_owned())?;
@@ -74,6 +91,9 @@ pub fn add_load_dylib(bytes: &mut [u8]) -> Result<(), String> {
     }
     if offset != commands_end {
         return Err("Mach-O ncmds and sizeofcmds disagree".to_owned());
+    }
+    if provider_is_loaded {
+        return Ok(());
     }
 
     let command_size = align_up(DYLIB_COMMAND_NAME_OFFSET + DYLIB_PATH.len() + 1, 8)?;
