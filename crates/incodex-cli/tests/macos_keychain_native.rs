@@ -163,6 +163,44 @@ fn helper_authorization_is_explicit_silent_and_distinguishes_a_missing_key() {
 }
 
 #[test]
+fn successful_helper_authorization_is_reused_without_invoking_it_again() {
+    let home = scratch();
+    let root = home.join(".incodex");
+    let app = home.join("Applications/ChatGPT.app");
+    fs::create_dir_all(&app).unwrap();
+    let calls = home.join("authorization-calls");
+    let helper = home.join("authorization-helper");
+    fs::write(
+        &helper,
+        format!(
+            "#!/bin/sh\nprintf x >> '{}'\n",
+            calls.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
+    let registration = ensure_registration(&root, &app, &helper).unwrap();
+
+    assert_eq!(
+        authorize_registration(&root, &registration).unwrap(),
+        KeychainAuthorization::Authorized
+    );
+    let authorized = read_registration(&root).unwrap().unwrap();
+    assert!(authorized.authorization_ready);
+    assert_eq!(
+        authorize_registration(&root, &authorized).unwrap(),
+        KeychainAuthorization::Authorized
+    );
+    assert_eq!(
+        fs::read(&calls).unwrap(),
+        b"x",
+        "a durable authorization for the same fixed helper must not trigger another system prompt"
+    );
+
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
 fn install_transaction_owns_provider_placement_and_failure_rollback() {
     let install = include_str!("../src/install.rs");
     let assets = include_str!("../src/macos_keychain_assets.rs");
