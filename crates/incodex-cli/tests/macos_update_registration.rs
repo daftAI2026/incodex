@@ -3,7 +3,10 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use incodex_cli::macos_update_restore::{
     publish_registration, publish_registration_if_generation, read_registration,
@@ -234,6 +237,91 @@ fn runtime_refresh_migrates_a_legacy_registration_without_repatching_the_app() {
     );
     assert!(migrated.coordinator_path.is_file());
     assert!(migrated.interposer_path.is_file());
+}
+
+#[test]
+fn coordinator_reclaims_a_stale_pending_file_when_its_pid_belongs_to_another_process() {
+    let home = scratch();
+    let root = home.join(".incodex");
+    let source = home.join("incodex-source");
+    fs::write(&source, b"native helper fixture").unwrap();
+
+    let app = home.join("Applications/ChatGPT.app");
+    fs::create_dir_all(app.join("Contents")).unwrap();
+    fs::write(
+        app.join("Contents/Info.plist"),
+        br#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>CFBundleVersion</key><string>7746</string>
+</dict></plist>
+"#,
+    )
+    .unwrap();
+
+    let registration = publish_registration(&root, &source, &app, "install-epoch-a").unwrap();
+    let pending = root.join("macos-update/pending.json");
+    fs::write(
+        &pending,
+        format!(
+            "{{\"schemaVersion\":2,\"coordinatorPid\":{},\"installId\":\"{}\",\"helperPath\":{},\"appPath\":{},\"helperSha256\":\"{}\",\"handoffId\":\"stale-handoff\"}}\n",
+            std::process::id(),
+            registration.install_id,
+            serde_json::to_string(&registration.helper_path).unwrap(),
+            serde_json::to_string(&registration.app_path).unwrap(),
+            registration.helper_sha256,
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&pending, fs::Permissions::from_mode(0o600)).unwrap();
+
+    let ready = root.join("macos-update/ready-reused-pid.json");
+    let mut coordinator = Command::new(&registration.coordinator_path)
+        .env("INCODEX_MACOS_UPDATE_COORDINATOR", "1")
+        .env(
+            "INCODEX_MACOS_UPDATE_HOST_PID",
+            std::process::id().to_string(),
+        )
+        .env(
+            "INCODEX_MACOS_UPDATE_INSTALL_ID",
+            &registration.install_id,
+        )
+        .env("INCODEX_MACOS_UPDATE_HOST_APP", &registration.app_path)
+        .env(
+            "INCODEX_MACOS_UPDATE_HELPER_PATH",
+            &registration.helper_path,
+        )
+        .env(
+            "INCODEX_MACOS_UPDATE_HELPER_SHA256",
+            &registration.helper_sha256,
+        )
+        .env("INCODEX_MACOS_UPDATE_HANDOFF_ID", "fresh-handoff")
+        .env("INCODEX_MACOS_UPDATE_READY_PATH", &ready)
+        .env("INCODEX_MACOS_UPDATE_PENDING_PATH", &pending)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !ready.is_file() && Instant::now() < deadline {
+        if coordinator.try_wait().unwrap().is_some() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+
+    assert!(
+        ready.is_file(),
+        "a recycled PID owned by the test process must not block a fresh Coordinator handoff"
+    );
+    let body: serde_json::Value =
+        serde_json::from_slice(&fs::read(&pending).unwrap()).unwrap();
+    assert_eq!(body["handoffId"], "fresh-handoff");
+    assert_ne!(body["coordinatorPid"], std::process::id());
+
+    let _ = coordinator.kill();
+    let _ = coordinator.wait();
+    fs::remove_dir_all(home).unwrap();
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
