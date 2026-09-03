@@ -51,6 +51,10 @@ pub enum KeychainAuthorization {
     ItemMissing,
 }
 
+pub fn should_install_keychain_provider(registration: Option<&KeychainRegistration>) -> bool {
+    registration.is_some_and(|registration| registration.authorization_ready)
+}
+
 pub fn ensure_registration(
     root: &Path,
     app_path: &Path,

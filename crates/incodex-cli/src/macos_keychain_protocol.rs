@@ -4,8 +4,33 @@ use std::time::Duration;
 
 pub const KEYCHAIN_SERVICE: &str = "Codex Storage Key";
 pub const KEYCHAIN_ACCOUNT: &str = "Codex";
+pub const SHADOW_KEYCHAIN_SERVICE: &str = "com.daftai.incodex.storage-key";
+pub const SHADOW_KEYCHAIN_ACCOUNT: &str = "codex-shadow-v1";
 pub const MAX_HELPER_OUTPUT_BYTES: usize = 4096;
 pub const HELPER_TIMEOUT: Duration = Duration::from_secs(2);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShadowBridgeStatus {
+    Ready,
+    ItemMissing,
+    NotAuthorized,
+    Unavailable,
+}
+
+pub fn shadow_bridge_status_from_exit_code(
+    exit_code: Option<i32>,
+) -> Result<ShadowBridgeStatus, String> {
+    match exit_code {
+        Some(0) => Ok(ShadowBridgeStatus::Ready),
+        Some(44) => Ok(ShadowBridgeStatus::ItemMissing),
+        Some(68) => Ok(ShadowBridgeStatus::NotAuthorized),
+        Some(70) => Ok(ShadowBridgeStatus::Unavailable),
+        Some(code) => Err(format!(
+            "macOS Keychain shadow bridge returned unsupported status {code}"
+        )),
+        None => Err("macOS Keychain shadow bridge ended without an exit status".into()),
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CallerIdentity {

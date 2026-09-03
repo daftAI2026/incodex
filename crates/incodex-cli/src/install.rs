@@ -519,10 +519,13 @@ where
     if let Err(error) = write_asar_integrity(&staged, &hash) {
         return Err(rollback_install(&mut tx, Some(&staged), error));
     }
-    if let Some(registration) = keychain_registration
-        .as_ref()
-        .filter(|registration| registration.authorization_ready)
-    {
+    let authorization_ready = crate::macos_keychain_assets::should_install_keychain_provider(
+        keychain_registration.as_ref(),
+    );
+    if authorization_ready {
+        let registration = keychain_registration
+            .as_ref()
+            .expect("provider readiness requires a registration");
         let helper_sha256 = &registration.helper_sha256;
         if let Err(error) =
             crate::macos_keychain_assets::install_keychain_provider(&staged, helper_sha256)
