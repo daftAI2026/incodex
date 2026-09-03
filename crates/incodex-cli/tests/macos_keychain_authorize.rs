@@ -12,8 +12,13 @@ static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 fn runtime_helper_forbids_authentication_ui() {
     let source = include_str!("../native/macos_keychain_helper.m");
     assert!(
-        source.contains("authentication_context.interactionNotAllowed = !authorize_only"),
-        "only explicit install may show Keychain UI; provider reads must fail closed without prompting"
+        source.contains("kSecUseAuthenticationUIFail"),
+        "runtime reads must ask Security.framework to fail immediately instead of waiting for authentication UI"
+    );
+    assert!(
+        source.contains("if (authorize_only)")
+            && source.contains("kSecUseAuthenticationContext"),
+        "only explicit install may attach a cancellable LAContext that can show Keychain UI"
     );
 }
 
