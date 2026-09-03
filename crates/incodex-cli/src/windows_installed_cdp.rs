@@ -106,6 +106,13 @@ pub(crate) fn installed_bridge_request_from_event(
     })
 }
 
+fn installed_page_requires_reinjection(message: &Value) -> bool {
+    message.get("method").and_then(Value::as_str) == Some("Page.frameNavigated")
+        && message.pointer("/params/frame/parentId").is_none()
+        && message.pointer("/params/frame/url").and_then(Value::as_str)
+            == Some("app://-/index.html")
+}
+
 pub(crate) fn inject_installed_shared_ui(
     debug_port: u16,
     package_full_name: &str,
@@ -244,6 +251,9 @@ fn run_bridge_session(
             Ok(Message::Text(text)) => {
                 let message: Value = serde_json::from_str(&text)
                     .map_err(|_| "installed CDP bridge received malformed JSON".to_string())?;
+                if installed_page_requires_reinjection(&message) {
+                    return Ok(());
+                }
                 let Some(request) = installed_bridge_request_from_event(&message) else {
                     continue;
                 };
