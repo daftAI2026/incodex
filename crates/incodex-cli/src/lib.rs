@@ -31,6 +31,8 @@ mod locale;
 #[cfg(target_os = "macos")]
 pub mod macos_keychain_assets;
 #[cfg(target_os = "macos")]
+pub mod macos_keychain_protocol;
+#[cfg(target_os = "macos")]
 mod macos_update_assets;
 #[cfg(target_os = "macos")]
 mod macos_update_log;
