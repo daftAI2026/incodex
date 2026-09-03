@@ -225,9 +225,7 @@ fn compile_production_test_provider(home: &Path, helper_sha256: &str) -> PathBuf
         "-DINCODEX_KEYCHAIN_TEST_HOME=\"{}\"",
         home.to_string_lossy()
     );
-    let expected_hash = format!(
-        "-DINCODEX_KEYCHAIN_HELPER_SHA256=\"{helper_sha256}\""
-    );
+    let expected_hash = format!("-DINCODEX_KEYCHAIN_HELPER_SHA256=\"{helper_sha256}\"");
     let status = Command::new(&clang)
         .args(["-isysroot", &sdk])
         .args(["-Wall", "-Wextra", "-Werror", "-dynamiclib"])

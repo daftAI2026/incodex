@@ -1,13 +1,18 @@
 #include <CoreFoundation/CoreFoundation.h>
+#include <CommonCrypto/CommonDigest.h>
 #include <Security/Security.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <poll.h>
+#include <pwd.h>
 #include <signal.h>
 #include <spawn.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -17,6 +22,16 @@
 static const size_t kMaximumHelperOutput = 4096;
 static const int64_t kHelperTimeoutMilliseconds = 2000;
 typedef OSStatus (*CopyMatching)(CFDictionaryRef, CFTypeRef *);
+
+#ifndef INCODEX_KEYCHAIN_HELPER_SHA256
+#define INCODEX_KEYCHAIN_HELPER_SHA256 ""
+#endif
+
+static void __attribute__((unused))
+secure_zero(unsigned char *bytes, size_t length) {
+    volatile unsigned char *cursor = bytes;
+    while (length-- > 0) *cursor++ = 0;
+}
 
 static int64_t monotonic_milliseconds(void) {
     struct timespec now = {0};
@@ -266,5 +281,93 @@ OSStatus incodex_key_provider_test_copy_matching(
     CFDictionaryRef query, CFTypeRef *result, const char *helper,
     CopyMatching original) {
     return copy_matching_with_helper(query, result, helper, original);
+}
+#else
+static CopyMatching original_copy_matching = NULL;
+
+static bool helper_hash_matches(int descriptor) {
+    unsigned char observed[CC_SHA256_DIGEST_LENGTH] = {0};
+    CC_SHA256_CTX context;
+    if (CC_SHA256_Init(&context) != 1) return false;
+
+    unsigned char buffer[8192] = {0};
+    for (;;) {
+        ssize_t count = read(descriptor, buffer, sizeof(buffer));
+        if (count > 0) {
+            if (CC_SHA256_Update(&context, buffer, (CC_LONG)count) != 1) {
+                secure_zero(buffer, sizeof(buffer));
+                return false;
+            }
+            continue;
+        }
+        if (count < 0 && errno == EINTR) continue;
+        if (count < 0) {
+            secure_zero(buffer, sizeof(buffer));
+            return false;
+        }
+        break;
+    }
+    secure_zero(buffer, sizeof(buffer));
+    if (CC_SHA256_Final(observed, &context) != 1) return false;
+
+    static const char hex[] = "0123456789abcdef";
+    char encoded[CC_SHA256_DIGEST_LENGTH * 2 + 1] = {0};
+    for (size_t index = 0; index < sizeof(observed); ++index) {
+        encoded[index * 2] = hex[observed[index] >> 4];
+        encoded[index * 2 + 1] = hex[observed[index] & 0x0f];
+    }
+    secure_zero(observed, sizeof(observed));
+    bool matches = strcmp(encoded, INCODEX_KEYCHAIN_HELPER_SHA256) == 0;
+    secure_zero((unsigned char *)encoded, sizeof(encoded));
+    return matches;
+}
+
+static bool resolve_verified_helper(char *path, size_t capacity) {
+#ifdef INCODEX_KEYCHAIN_TEST_HOME
+    const char *home = INCODEX_KEYCHAIN_TEST_HOME;
+#else
+    struct passwd password = {0};
+    struct passwd *found = NULL;
+    char password_buffer[4096] = {0};
+    if (getpwuid_r(getuid(), &password, password_buffer,
+                   sizeof(password_buffer), &found) != 0 ||
+        !found || !found->pw_dir) {
+        return false;
+    }
+    const char *home = found->pw_dir;
+#endif
+    int written = snprintf(
+        path, capacity,
+        "%s/.incodex/helpers/macos-keychain/%s/incodex-keychain-helper",
+        home, INCODEX_KEYCHAIN_HELPER_SHA256);
+    if (written <= 0 || (size_t)written >= capacity) return false;
+
+    int descriptor = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (descriptor < 0) return false;
+    struct stat metadata = {0};
+    bool valid = fstat(descriptor, &metadata) == 0 &&
+                 S_ISREG(metadata.st_mode) && metadata.st_uid == geteuid() &&
+                 (metadata.st_mode & 0777) == 0700 && metadata.st_nlink == 1 &&
+                 helper_hash_matches(descriptor);
+    close(descriptor);
+    if (!valid) path[0] = '\0';
+    return valid;
+}
+
+static OSStatus replacement_copy_matching(CFDictionaryRef query,
+                                           CFTypeRef *result) {
+    char helper[PATH_MAX] = {0};
+    (void)resolve_verified_helper(helper, sizeof(helper));
+    return copy_matching_with_helper(query, result, helper,
+                                     original_copy_matching);
+}
+
+__attribute__((constructor)) static void install_production_rebinding(void) {
+    struct rebinding binding = {
+        .name = "SecItemCopyMatching",
+        .replacement = (void *)replacement_copy_matching,
+        .replaced = (void **)&original_copy_matching,
+    };
+    (void)rebind_symbols(&binding, 1);
 }
 #endif
