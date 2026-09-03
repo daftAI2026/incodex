@@ -91,10 +91,14 @@ static void secure_zero(unsigned char *bytes, size_t length) {
 }
 
 int main(int argc, char **argv) {
-    (void)argv;
-    if (argc != 1) return 64;
-    pid_t parent_pid = getppid();
-    if (parent_pid <= 1 || !parent_has_expected_identity(parent_pid)) return 69;
+    bool authorize_only = argc == 2 && strcmp(argv[1], "--authorize") == 0;
+    if (!authorize_only) {
+        if (argc != 1) return 64;
+        pid_t parent_pid = getppid();
+        if (parent_pid <= 1 || !parent_has_expected_identity(parent_pid)) {
+            return 69;
+        }
+    }
 
     CFStringRef service = CFStringCreateWithCString(
         kCFAllocatorDefault, kService, kCFStringEncodingUTF8);
@@ -135,6 +139,10 @@ int main(int argc, char **argv) {
     if (length <= 0 || (size_t)length > kMaximumOutputBytes) {
         CFRelease(data);
         return 68;
+    }
+    if (authorize_only) {
+        CFRelease(data);
+        return 0;
     }
     unsigned char bytes[4096] = {0};
     CFDataGetBytes(data, CFRangeMake(0, length), bytes);
