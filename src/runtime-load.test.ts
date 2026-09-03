@@ -151,11 +151,9 @@ describe("runtime load", () => {
     expect(loader).toContain('"incodex-codex-mode.cjs"');
     expect(selector).toContain("if (!isIncognito()) return");
     expect(selector).toContain(
-      'win.webContents.sendInputEvent({ type: "keyDown", keyCode: "3", modifiers: ["control"] })',
+      "win.webContents.executeJavaScript(codexMode.CODEX_MODE_FALLBACK_EXPRESSION, false)",
     );
-    expect(selector).toContain(
-      'win.webContents.sendInputEvent({ type: "keyUp", keyCode: "3", modifiers: ["control"] })',
-    );
+    expect(selector).not.toContain("sendInputEvent");
     const readyStart = main.indexOf('win.once("ready-to-show", () => {');
     const readyEnd = main.indexOf("\n    });", readyStart);
     const ready = main.slice(readyStart, readyEnd);

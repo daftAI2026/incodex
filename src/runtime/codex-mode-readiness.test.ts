@@ -151,6 +151,41 @@ describe("Codex mode readiness", () => {
     expect(tasks).toHaveLength(0);
   });
 
+  test("waits for an asynchronous renderer fallback before confirming it was sent", async () => {
+    const tasks: ScheduledTask[] = [];
+    const logs: string[] = [];
+    const win = {
+      isDestroyed: () => false,
+      isFocused: () => true,
+      once: () => {},
+      webContents: {
+        executeJavaScript: async () => ({
+          modeAvailable: true,
+          modeLabel: "ChatGPT",
+          officialBlockerVisible: false,
+        }),
+        isDestroyed: () => false,
+      },
+    };
+    const readiness = createCodexModeReadiness({
+      isIncognito: () => true,
+      log: (event: string) => logs.push(event),
+      primaryOtherChecksRequired: 1,
+      selectFallback: async () => true,
+      scheduleTimer: (callback: () => void, delay: number) => {
+        const task = { callback, delay };
+        tasks.push(task);
+        return task;
+      },
+    });
+
+    readiness.observe(win);
+    await runNext(tasks);
+
+    expect(logs).toContain("codex-mode-fallback-sent");
+    expect(tasks).toHaveLength(1);
+  });
+
   test("does not poll forever when a settled page never exposes its mode control", async () => {
     const tasks: ScheduledTask[] = [];
     const fallbacks: unknown[] = [];
