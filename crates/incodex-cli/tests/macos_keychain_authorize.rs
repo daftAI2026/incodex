@@ -8,6 +8,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+#[test]
+fn runtime_helper_forbids_authentication_ui() {
+    let source = include_str!("../native/macos_keychain_helper.c");
+    assert!(
+        source.contains("authentication_context.interactionNotAllowed = !authorize_only"),
+        "only explicit install may show Keychain UI; provider reads must fail closed without prompting"
+    );
+}
+
 fn scratch() -> PathBuf {
     let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let path = std::env::temp_dir().join(format!(
