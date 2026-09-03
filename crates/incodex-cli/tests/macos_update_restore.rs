@@ -5,9 +5,13 @@
 
 #![cfg(target_os = "macos")]
 
+use std::fs;
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_cli::macos_update_restore::parse_relaunch_request;
+
+static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[test]
 fn relaunch_mode_requires_an_explicit_marker_and_install_epoch() {
@@ -21,9 +25,17 @@ fn relaunch_mode_requires_an_explicit_marker_and_install_epoch() {
 
 #[test]
 fn native_cli_routes_relaunch_recovery_before_public_parsing() {
+    let home = std::env::temp_dir().join(format!(
+        "incodex-invalid-relaunch-{}-{}",
+        std::process::id(),
+        SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = fs::remove_dir_all(&home);
+    fs::create_dir_all(&home).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_incodex"))
         .env("INCODEX_MACOS_UPDATE_RELAUNCH", "1")
         .env_remove("INCODEX_MACOS_UPDATE_INSTALL_ID")
+        .env("HOME", &home)
         .output()
         .unwrap();
 
@@ -33,6 +45,13 @@ fn native_cli_routes_relaunch_recovery_before_public_parsing() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    assert!(
+        !home
+            .join(".incodex/macos-update/coordinator.log")
+            .exists(),
+        "a malformed external invocation is not a Coordinator recovery event"
+    );
+    fs::remove_dir_all(home).unwrap();
 }
 
 #[test]
