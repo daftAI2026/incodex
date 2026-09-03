@@ -424,6 +424,9 @@ where
     }
     progress.stage("Publishing Runtime");
     let published = ensure_current(root)?;
+    if is_official_app(app, None) {
+        crate::macos_keychain_assets::ensure_bundled_registration(root, app)?;
+    }
     if let Some(install_id) = inspect_existing_install(app, root, &asar)? {
         let warning = prune_warning(root, app, &install_id);
         return Ok(CommandResult {
@@ -492,6 +495,11 @@ where
     };
     if let Err(error) = write_asar_integrity(&staged, &hash) {
         return Err(rollback_install(&mut tx, Some(&staged), error));
+    }
+    if is_official_app(app, None) {
+        if let Err(error) = crate::macos_keychain_assets::install_keychain_provider(&staged) {
+            return Err(rollback_install(&mut tx, Some(&staged), error));
+        }
     }
     if let Err(error) = quiescence.ensure_quiescent(app) {
         return Err(rollback_install(&mut tx, Some(&staged), error));

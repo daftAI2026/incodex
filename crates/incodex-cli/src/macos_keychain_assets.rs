@@ -1,7 +1,11 @@
 use std::fs;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
+use incodex_macos::add_load_dylib;
 use incodex_transaction::acquire_target_lock;
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +18,10 @@ const REGISTRATION_SCHEMA_VERSION: u32 = 1;
 const PRIVATE_FILE_MODE: u32 = 0o600;
 const HELPER_FILE_MODE: u32 = 0o700;
 const HELPER_FILE_NAME: &str = "incodex-keychain-helper";
+const PROVIDER_FILE_MODE: u32 = 0o644;
+const PROVIDER_FILE_NAME: &str = "IncodexKeyProvider.dylib";
+const FRAMEWORK_RELATIVE_PATH: &str =
+    "Contents/Frameworks/Codex Framework.framework/Codex Framework";
 const BUNDLED_HELPER_BYTES: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/incodex-keychain-helper"));
 const BUNDLED_PROVIDER_BYTES: &[u8] =
@@ -51,6 +59,61 @@ pub fn bundled_helper_bytes() -> &'static [u8] {
 
 pub fn bundled_provider_bytes() -> &'static [u8] {
     BUNDLED_PROVIDER_BYTES
+}
+
+/// 把固定 provider 放进 staged app，并只在 Framework 的现有 padding 中增加普通依赖。
+///
+/// 调用方必须把整个 staged app 纳入外层安装事务；本函数仍保证解析或本地写入失败时
+/// 不留下半写 Framework，且只移除由本次调用新建的 provider。
+pub fn install_keychain_provider(staged_app: &Path) -> Result<(), String> {
+    let app_root = fs::canonicalize(staged_app)
+        .map_err(|error| format!("cannot resolve staged app for Keychain provider: {error}"))?;
+    let framework_link = app_root.join(FRAMEWORK_RELATIVE_PATH);
+    let framework = fs::canonicalize(&framework_link).map_err(|error| {
+        format!("cannot resolve staged Codex Framework for Keychain provider: {error}")
+    })?;
+    if !framework.starts_with(&app_root) {
+        return Err("staged Codex Framework escaped the staged app".into());
+    }
+    let metadata = fs::symlink_metadata(&framework)
+        .map_err(|error| format!("cannot inspect staged Codex Framework: {error}"))?;
+    if !metadata.file_type().is_file() {
+        return Err("staged Codex Framework is not a regular file".into());
+    }
+    let original_mode = metadata.permissions().mode() & 0o777;
+    let mut framework_bytes = read_regular_file(&framework, "staged Codex Framework")?;
+    add_load_dylib(&mut framework_bytes)
+        .map_err(|error| format!("cannot add Keychain provider dependency: {error}"))?;
+
+    let provider = framework
+        .parent()
+        .ok_or("staged Codex Framework has no containing directory")?
+        .join(PROVIDER_FILE_NAME);
+    let provider_created = match fs::symlink_metadata(&provider) {
+        Ok(provider_metadata) => {
+            if provider_metadata.file_type().is_symlink()
+                || !provider_metadata.file_type().is_file()
+                || read_regular_file(&provider, "staged Keychain provider")?
+                    != BUNDLED_PROVIDER_BYTES
+            {
+                return Err("staged Keychain provider conflicts with bundled bytes".into());
+            }
+            false
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            write_bundle_file_atomic(&provider, BUNDLED_PROVIDER_BYTES, PROVIDER_FILE_MODE)?;
+            true
+        }
+        Err(error) => return Err(format!("cannot inspect staged Keychain provider: {error}")),
+    };
+
+    if let Err(error) = write_bundle_file_atomic(&framework, &framework_bytes, original_mode) {
+        if provider_created {
+            let _ = fs::remove_file(&provider);
+        }
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn ensure_registration_with<F>(
@@ -178,4 +241,47 @@ fn validate_registration(root: &Path, registration: &KeychainRegistration) -> Re
 
 fn registration_path(root: &Path) -> PathBuf {
     root.join("macos-keychain").join("registration.json")
+}
+
+fn write_bundle_file_atomic(path: &Path, bytes: &[u8], mode: u32) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("bundle file has no parent: {}", path.display()))?;
+    let parent_metadata = fs::symlink_metadata(parent)
+        .map_err(|error| format!("cannot inspect bundle file parent: {error}"))?;
+    if parent_metadata.file_type().is_symlink() || !parent_metadata.file_type().is_dir() {
+        return Err(format!(
+            "bundle file parent is not a real directory: {}",
+            parent.display()
+        ));
+    }
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    let temporary = parent.join(format!(".incodex-keychain-{}-{nonce}", std::process::id()));
+    let result = (|| {
+        let mut options = OpenOptions::new();
+        options
+            .write(true)
+            .create_new(true)
+            .mode(mode)
+            .custom_flags(libc::O_NOFOLLOW);
+        let mut file = options
+            .open(&temporary)
+            .map_err(|error| format!("cannot stage bundle file: {error}"))?;
+        file.write_all(bytes)
+            .map_err(|error| format!("cannot write staged bundle file: {error}"))?;
+        file.sync_all()
+            .map_err(|error| format!("cannot flush staged bundle file: {error}"))?;
+        file.set_permissions(fs::Permissions::from_mode(mode))
+            .map_err(|error| format!("cannot set staged bundle file mode: {error}"))?;
+        drop(file);
+        fs::rename(&temporary, path)
+            .map_err(|error| format!("cannot publish staged bundle file: {error}"))?;
+        fs::File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|error| format!("cannot flush staged bundle directory: {error}"))
+    })();
+    let _ = fs::remove_file(temporary);
+    result
 }
