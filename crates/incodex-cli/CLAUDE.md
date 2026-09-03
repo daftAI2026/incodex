@@ -8,5 +8,7 @@
 `native/`: macOS 更新桥接模块，隔离 Objective-C/AppKit/Sparkle 边界。
 `src/`: Rust 产品 CLI，实现解析、安装、诊断、更新和平台生命周期。
 `tests/`: 跨进程产品契约与平台回归套件，验证公开行为和危险边界。
+`src/macos_keychain_assets.rs`: Keychain 连续性编排边界，发布内容寻址 helper/provider，并在每次显式安装时以真实系统查询复核缓存授权后才允许注入。
+`tests/macos_keychain_native.rs`: Keychain 原生集成回归，覆盖资产完整性、授权撤销降级、provider 注入与事务前置条件。
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
