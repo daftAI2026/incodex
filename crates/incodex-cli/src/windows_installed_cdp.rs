@@ -7,7 +7,7 @@
 use std::io::{BufRead, BufReader};
 use std::net::TcpStream;
 use std::os::windows::process::CommandExt;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use std::thread;
@@ -18,12 +18,12 @@ use tungstenite::Error as WebSocketError;
 use tungstenite::Message;
 
 use crate::cdp::{
-    connect_cdp_websocket, inject_shared_ui_with_options_while_alive_and_guard_with_readiness,
+    connect_cdp_websocket,
+    inject_shared_ui_with_options_while_alive_and_guard_with_readiness_and_runtime,
     is_primary_codex_page, list_targets, pick_codex_page_target, send_guarded_cdp,
     ui_ready_expression_for_options, validate_ui_probe_result_for_options, CdpWindowKind,
     CodexModeReadiness, InjectionOptions,
 };
-use crate::open_presentation::OPENED_MESSAGE;
 use crate::windows_process::{
     ipv4_connection_server_owner, ipv4_listener_owner, running_package_process_ids,
 };
@@ -117,6 +117,7 @@ pub(crate) fn inject_installed_shared_ui(
     debug_port: u16,
     package_full_name: &str,
     main_process_id: u32,
+    runtime_source: &str,
 ) -> Result<(), String> {
     let options = InjectionOptions {
         window_kind: CdpWindowKind::Normal,
@@ -132,13 +133,14 @@ pub(crate) fn inject_installed_shared_ui(
             thread::sleep(PROCESS_POLL_INTERVAL);
             continue;
         }
-        match inject_shared_ui_with_options_while_alive_and_guard_with_readiness(
+        match inject_shared_ui_with_options_while_alive_and_guard_with_readiness_and_runtime(
             debug_port,
             &options,
             &alive,
             |_| {},
             &mut readiness,
             &|stream| require_package_connection_owner(stream, package_full_name),
+            runtime_source,
         ) {
             Ok(_) => {
                 return run_bridge_until_exit(
@@ -148,6 +150,7 @@ pub(crate) fn inject_installed_shared_ui(
                     &options,
                     &alive,
                     &mut readiness,
+                    runtime_source,
                 );
             }
             Err(error) => last = error,
@@ -164,19 +167,22 @@ fn run_bridge_until_exit(
     options: &InjectionOptions,
     alive: &AtomicBool,
     readiness: &mut CodexModeReadiness,
+    runtime_source: &str,
 ) -> Result<(), String> {
     let mut reinject = false;
+    let mut native_open = None;
     while package_process_is_alive(package_full_name, main_process_id)? {
         if reinject {
             let guard =
                 |stream: &TcpStream| require_package_connection_owner(stream, package_full_name);
-            match inject_shared_ui_with_options_while_alive_and_guard_with_readiness(
+            match inject_shared_ui_with_options_while_alive_and_guard_with_readiness_and_runtime(
                 debug_port,
                 options,
                 alive,
                 |_| {},
                 readiness,
                 &guard,
+                runtime_source,
             ) {
                 Ok(_) => {}
                 Err(error) if is_transient_websocket_error(&error) => {
@@ -186,7 +192,7 @@ fn run_bridge_until_exit(
                 Err(error) => return Err(error),
             }
         }
-        match run_bridge_session(debug_port, package_full_name, options) {
+        match run_bridge_session(debug_port, package_full_name, options, &mut native_open) {
             Ok(()) => reinject = true,
             Err(error) if is_transient_websocket_error(&error) => reinject = true,
             Err(error) => return Err(error),
@@ -200,6 +206,7 @@ fn run_bridge_session(
     debug_port: u16,
     package_full_name: &str,
     options: &InjectionOptions,
+    native_open: &mut Option<Child>,
 ) -> Result<(), String> {
     if !listener_belongs_to_package(debug_port, package_full_name)? {
         return Err("installed CDP listener is not owned by the official package".to_string());
@@ -276,7 +283,7 @@ fn run_bridge_session(
                 {
                     continue;
                 }
-                let result = launch_native_open();
+                let result = ensure_native_open(native_open);
                 command_id += 1;
                 let response = match result {
                     Ok(()) => json!({
@@ -319,7 +326,25 @@ fn run_bridge_session(
     }
 }
 
-fn launch_native_open() -> Result<(), String> {
+fn ensure_native_open(native_open: &mut Option<Child>) -> Result<(), String> {
+    if let Some(child) = native_open.as_mut() {
+        match child.try_wait() {
+            Ok(None) => return Ok(()),
+            Ok(Some(_)) => {
+                native_open.take();
+            }
+            Err(error) => {
+                return Err(format!(
+                    "cannot inspect the existing native Incodex open: {error}"
+                ))
+            }
+        }
+    }
+    *native_open = Some(launch_native_open()?);
+    Ok(())
+}
+
+fn launch_native_open() -> Result<Child, String> {
     let executable = std::env::current_exe()
         .map_err(|error| format!("cannot locate the installed Incodex helper: {error}"))?;
     let mut child = Command::new(executable)
@@ -345,7 +370,7 @@ fn launch_native_open() -> Result<(), String> {
                     let _ = sender.send(false);
                     break;
                 }
-                Ok(_) if line.contains(OPENED_MESSAGE) => {
+                Ok(_) if line.contains(crate::open_presentation::OPENED_MESSAGE) => {
                     let _ = sender.send(true);
                     while reader.read_line(&mut line).unwrap_or(0) != 0 {
                         line.clear();
@@ -361,12 +386,7 @@ fn launch_native_open() -> Result<(), String> {
         }
     });
     match receiver.recv_timeout(BRIDGE_READY_TIMEOUT) {
-        Ok(true) => {
-            thread::spawn(move || {
-                let _ = child.wait();
-            });
-            Ok(())
-        }
+        Ok(true) => Ok(child),
         Ok(false) => {
             let _ = child.kill();
             let _ = child.wait();

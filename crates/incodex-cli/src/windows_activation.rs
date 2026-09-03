@@ -884,6 +884,10 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
         let registered_package = flag_value(arguments, "--package")?;
         let evidence = installed_debugger_registration_evidence(registered_package)?;
         let state = installed_state_for_current_helper(&evidence);
+        let runtime = state
+            .as_ref()
+            .ok()
+            .map(|state| (evidence.user_root.clone(), state.runtime_release.clone()));
         let command_line = process_command_line(process_id).ok();
         let (package_full_name, route) = installed_debugger_route_from_state(
             state,
@@ -895,6 +899,18 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
                 resume_debugged_package_process(&package_full_name, process_id, thread_id)
             }
             WindowsDebuggerRoute::PrepareInstalledCdp => {
+                let (user_root, runtime_release) = runtime.ok_or_else(|| {
+                    "Windows installed debugger Runtime state is unavailable".to_string()
+                })?;
+                let runtime_source =
+                    crate::windows_runtime::read_verified_windows_runtime_artifact(
+                        &user_root,
+                        &runtime_release,
+                        "incodex-inject.js",
+                    )?;
+                let runtime_source = String::from_utf8(runtime_source).map_err(|_| {
+                    "installed Windows Runtime injector is not valid UTF-8".to_string()
+                })?;
                 let debug_port = crate::cdp::allocate_debug_port()?;
                 let preparation =
                     validate_debugged_package_process(&package_full_name, process_id, thread_id)
@@ -925,6 +941,7 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
                     debug_port,
                     &package_full_name,
                     process_id,
+                    &runtime_source,
                 ) {
                     Ok(()) => Ok(()),
                     Err(error) => terminate_failed_installed_cdp_process(

@@ -133,6 +133,13 @@ pub fn inject_source_for_locale(locale: Option<&str>) -> String {
 }
 
 pub fn inject_source_for_options(options: &InjectionOptions) -> String {
+    inject_source_for_options_with_runtime(options, INJECT_JS)
+}
+
+pub(crate) fn inject_source_for_options_with_runtime(
+    options: &InjectionOptions,
+    runtime_source: &str,
+) -> String {
     let incognito = match options.window_kind {
         CdpWindowKind::Incognito => "true",
         CdpWindowKind::Normal => "false",
@@ -152,7 +159,7 @@ pub fn inject_source_for_options(options: &InjectionOptions) -> String {
         None => "null".to_string(),
     };
     format!(
-        "window.__incodexIncognito={incognito};window.__incodexLocale={locale};{platform}window.__incodexProfileMask={profile_bootstrap};\n{INJECT_JS}"
+        "window.__incodexIncognito={incognito};window.__incodexLocale={locale};{platform}window.__incodexProfileMask={profile_bootstrap};\n{runtime_source}"
     )
 }
 
@@ -348,7 +355,7 @@ pub(crate) fn inject_shared_ui_with_options_while_alive_and_guard_with_readiness
     debug_port: u16,
     options: &InjectionOptions,
     process_alive: &AtomicBool,
-    mut on_target: F,
+    on_target: F,
     readiness: &mut CodexModeReadiness,
     connection_guard: &G,
 ) -> Result<String, String>
@@ -356,7 +363,31 @@ where
     F: FnMut(&str),
     G: Fn(&TcpStream) -> Result<(), String>,
 {
-    let source = inject_source_for_options(options);
+    inject_shared_ui_with_options_while_alive_and_guard_with_readiness_and_runtime(
+        debug_port,
+        options,
+        process_alive,
+        on_target,
+        readiness,
+        connection_guard,
+        INJECT_JS,
+    )
+}
+
+pub(crate) fn inject_shared_ui_with_options_while_alive_and_guard_with_readiness_and_runtime<F, G>(
+    debug_port: u16,
+    options: &InjectionOptions,
+    process_alive: &AtomicBool,
+    mut on_target: F,
+    readiness: &mut CodexModeReadiness,
+    connection_guard: &G,
+    runtime_source: &str,
+) -> Result<String, String>
+where
+    F: FnMut(&str),
+    G: Fn(&TcpStream) -> Result<(), String>,
+{
+    let source = inject_source_for_options_with_runtime(options, runtime_source);
     let health_expression = ui_ready_expression_for_options(options);
     let require_profile_mask = options.profile_mask.is_some();
     let payload = InjectionPayload {
