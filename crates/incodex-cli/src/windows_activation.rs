@@ -899,34 +899,59 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
                 resume_debugged_package_process(&package_full_name, process_id, thread_id)
             }
             WindowsDebuggerRoute::PrepareInstalledCdp => {
-                let (user_root, runtime_release) = runtime.ok_or_else(|| {
-                    "Windows installed debugger Runtime state is unavailable".to_string()
-                })?;
-                let runtime_source =
-                    crate::windows_runtime::read_verified_windows_runtime_artifact(
-                        &user_root,
-                        &runtime_release,
-                        "incodex-inject.js",
-                    )?;
-                let runtime_source = String::from_utf8(runtime_source).map_err(|_| {
-                    "installed Windows Runtime injector is not valid UTF-8".to_string()
-                })?;
-                let debug_port = crate::cdp::allocate_debug_port()?;
-                let preparation =
-                    validate_debugged_package_process(&package_full_name, process_id, thread_id)
+                let preparation = prepare_installed_cdp_or_terminate(
+                    || {
+                        let (user_root, runtime_release) = runtime.ok_or_else(|| {
+                            "Windows installed debugger Runtime state is unavailable".to_string()
+                        })?;
+                        let runtime_source =
+                            crate::windows_runtime::read_verified_windows_runtime_artifact(
+                                &user_root,
+                                &runtime_release,
+                                "incodex-inject.js",
+                            )?;
+                        let runtime_source = String::from_utf8(runtime_source).map_err(|_| {
+                            "installed Windows Runtime injector is not valid UTF-8".to_string()
+                        })?;
+                        let helper = std::env::current_exe().map_err(|error| {
+                            format!("cannot locate the installed Incodex helper: {error}")
+                        })?;
+                        let native_open_executable =
+                            crate::windows_update::native_open_executable_for_runtime(
+                                &user_root,
+                                &helper,
+                                &runtime_release,
+                            )?;
+                        let debug_port = crate::cdp::allocate_debug_port()?;
+                        validate_debugged_package_process(
+                            &package_full_name,
+                            process_id,
+                            thread_id,
+                        )
                         .and_then(|_| {
                             crate::windows_process_parameters::rewrite_suspended_process_for_cdp(
                                 process_id, debug_port,
                             )
-                        });
-                if let Err(error) = preparation {
-                    return terminate_failed_installed_cdp_process(
-                        &package_full_name,
-                        process_id,
-                        thread_id,
-                        format!("cannot prepare suspended Windows Codex process for CDP: {error}"),
-                    );
-                }
+                        })
+                        .map_err(|error| {
+                            format!(
+                                "cannot prepare suspended Windows Codex process for CDP: {error}"
+                            )
+                        })?;
+                        Ok((debug_port, runtime_source, native_open_executable))
+                    },
+                    || {
+                        terminate_debugged_package_process(
+                            &package_full_name,
+                            process_id,
+                            thread_id,
+                        )
+                    },
+                );
+                let (debug_port, runtime_source, native_open_executable) = match preparation {
+                    Ok(preparation) => preparation,
+                    Err(error) => return Err(error),
+                };
                 if let Err(error) =
                     resume_debugged_package_process(&package_full_name, process_id, thread_id)
                 {
@@ -942,6 +967,7 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
                     &package_full_name,
                     process_id,
                     &runtime_source,
+                    &native_open_executable,
                 ) {
                     Ok(()) => Ok(()),
                     Err(error) => terminate_failed_installed_cdp_process(
@@ -963,6 +989,23 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
         .map_err(|error| format!("Windows installed debugger failed: {error}"))
     })();
     Some(parsed)
+}
+
+fn prepare_installed_cdp_or_terminate<T, P, C, E>(prepare: P, terminate: C) -> Result<T, String>
+where
+    P: FnOnce() -> Result<T, String>,
+    C: FnOnce() -> Result<(), E>,
+    E: std::fmt::Display,
+{
+    match prepare() {
+        Ok(preparation) => Ok(preparation),
+        Err(primary) => match terminate() {
+            Ok(()) => Err(primary),
+            Err(cleanup) => Err(format!(
+                "{primary}; cannot terminate that exact process: {cleanup}"
+            )),
+        },
+    }
 }
 
 fn terminate_failed_installed_cdp_process(
@@ -1333,11 +1376,14 @@ mod tests {
             || Err("Runtime injector is unreadable".to_string()),
             || {
                 terminated.set(true);
-                Ok(())
+                Ok::<(), String>(())
             },
         );
 
-        assert!(terminated.get(), "a supplied suspended process must not be orphaned");
+        assert!(
+            terminated.get(),
+            "a supplied suspended process must not be orphaned"
+        );
         assert_eq!(
             result.expect_err("preparation must fail closed"),
             "Runtime injector is unreadable"

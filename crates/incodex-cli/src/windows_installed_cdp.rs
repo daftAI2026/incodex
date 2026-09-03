@@ -7,6 +7,7 @@
 use std::io::{BufRead, BufReader};
 use std::net::TcpStream;
 use std::os::windows::process::CommandExt;
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
@@ -37,6 +38,13 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 pub(crate) struct InstalledBridgeRequest {
     pub request_id: String,
     pub execution_context_id: u64,
+}
+
+struct InstalledCdpContext<'a> {
+    package_full_name: &'a str,
+    main_process_id: u32,
+    runtime_source: &'a str,
+    native_open_executable: &'a Path,
 }
 
 /// 仅提供安装态正常窗口所需的 native action，UI 本身始终来自共享 Runtime。
@@ -118,7 +126,14 @@ pub(crate) fn inject_installed_shared_ui(
     package_full_name: &str,
     main_process_id: u32,
     runtime_source: &str,
+    native_open_executable: &Path,
 ) -> Result<(), String> {
+    let context = InstalledCdpContext {
+        package_full_name,
+        main_process_id,
+        runtime_source,
+        native_open_executable,
+    };
     let options = InjectionOptions {
         window_kind: CdpWindowKind::Normal,
         ..InjectionOptions::default()
@@ -145,12 +160,10 @@ pub(crate) fn inject_installed_shared_ui(
             Ok(_) => {
                 return run_bridge_until_exit(
                     debug_port,
-                    package_full_name,
-                    main_process_id,
+                    &context,
                     &options,
                     &alive,
                     &mut readiness,
-                    runtime_source,
                 );
             }
             Err(error) => last = error,
@@ -162,19 +175,18 @@ pub(crate) fn inject_installed_shared_ui(
 
 fn run_bridge_until_exit(
     debug_port: u16,
-    package_full_name: &str,
-    main_process_id: u32,
+    context: &InstalledCdpContext<'_>,
     options: &InjectionOptions,
     alive: &AtomicBool,
     readiness: &mut CodexModeReadiness,
-    runtime_source: &str,
 ) -> Result<(), String> {
     let mut reinject = false;
     let mut native_open = None;
-    while package_process_is_alive(package_full_name, main_process_id)? {
+    while package_process_is_alive(context.package_full_name, context.main_process_id)? {
         if reinject {
-            let guard =
-                |stream: &TcpStream| require_package_connection_owner(stream, package_full_name);
+            let guard = |stream: &TcpStream| {
+                require_package_connection_owner(stream, context.package_full_name)
+            };
             match inject_shared_ui_with_options_while_alive_and_guard_with_readiness_and_runtime(
                 debug_port,
                 options,
@@ -182,7 +194,7 @@ fn run_bridge_until_exit(
                 |_| {},
                 readiness,
                 &guard,
-                runtime_source,
+                context.runtime_source,
             ) {
                 Ok(_) => {}
                 Err(error) if is_transient_websocket_error(&error) => {
@@ -192,7 +204,13 @@ fn run_bridge_until_exit(
                 Err(error) => return Err(error),
             }
         }
-        match run_bridge_session(debug_port, package_full_name, options, &mut native_open) {
+        match run_bridge_session(
+            debug_port,
+            context.package_full_name,
+            options,
+            &mut native_open,
+            context.native_open_executable,
+        ) {
             Ok(()) => reinject = true,
             Err(error) if is_transient_websocket_error(&error) => reinject = true,
             Err(error) => return Err(error),
@@ -207,6 +225,7 @@ fn run_bridge_session(
     package_full_name: &str,
     options: &InjectionOptions,
     native_open: &mut Option<Child>,
+    native_open_executable: &Path,
 ) -> Result<(), String> {
     if !listener_belongs_to_package(debug_port, package_full_name)? {
         return Err("installed CDP listener is not owned by the official package".to_string());
@@ -283,7 +302,7 @@ fn run_bridge_session(
                 {
                     continue;
                 }
-                let result = ensure_native_open(native_open);
+                let result = ensure_native_open(native_open, native_open_executable);
                 command_id += 1;
                 let response = match result {
                     Ok(()) => json!({
@@ -326,7 +345,7 @@ fn run_bridge_session(
     }
 }
 
-fn ensure_native_open(native_open: &mut Option<Child>) -> Result<(), String> {
+fn ensure_native_open(native_open: &mut Option<Child>, executable: &Path) -> Result<(), String> {
     if let Some(child) = native_open.as_mut() {
         match child.try_wait() {
             Ok(None) => return Ok(()),
@@ -340,13 +359,11 @@ fn ensure_native_open(native_open: &mut Option<Child>) -> Result<(), String> {
             }
         }
     }
-    *native_open = Some(launch_native_open()?);
+    *native_open = Some(launch_native_open(executable)?);
     Ok(())
 }
 
-fn launch_native_open() -> Result<Child, String> {
-    let executable = std::env::current_exe()
-        .map_err(|error| format!("cannot locate the installed Incodex helper: {error}"))?;
+fn launch_native_open(executable: &Path) -> Result<Child, String> {
     let mut child = Command::new(executable)
         .arg("open")
         .creation_flags(CREATE_NO_WINDOW)
@@ -467,7 +484,14 @@ mod tests {
         assert!(source.contains("Ok(None) => return Ok(())"));
         assert!(source.contains("*native_open = Some(launch_native_open(executable)?)"));
         assert!(source.contains(".arg(\"open\")"));
-        assert!(!source.contains("std::env::current_exe()"));
+        let launcher = source
+            .split_once("fn launch_native_open")
+            .expect("native open launcher")
+            .1
+            .split_once("fn listener_belongs_to_package")
+            .expect("launcher boundary")
+            .0;
+        assert!(!launcher.contains("std::env::current_exe()"));
     }
 
     #[test]

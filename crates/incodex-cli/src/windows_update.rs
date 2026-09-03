@@ -744,6 +744,51 @@ fn current_release_executable(package_root: &Path) -> Result<(PathBuf, String), 
     Ok((executable, version.to_string()))
 }
 
+pub(crate) fn native_open_executable_for_runtime(
+    user_root: &Path,
+    helper_executable: &Path,
+    runtime_release: &str,
+) -> Result<PathBuf, String> {
+    select_native_open_executable(
+        helper_executable,
+        env!("CARGO_PKG_VERSION"),
+        runtime_release,
+        || {
+            let package_root = user_root.join("packages").join("standalone");
+            let (executable, version) = current_release_executable(&package_root)?;
+            verify_cli_version(&executable, &version)?;
+            Ok((executable, version))
+        },
+    )
+}
+
+fn select_native_open_executable<F>(
+    helper_executable: &Path,
+    helper_version: &str,
+    runtime_release: &str,
+    current_managed_release: F,
+) -> Result<PathBuf, String>
+where
+    F: FnOnce() -> Result<(PathBuf, String), String>,
+{
+    let runtime_version = runtime_release
+        .split_once('-')
+        .map_or(runtime_release, |(version, _)| version);
+    validate_stable_version(runtime_version)?;
+    validate_stable_version(helper_version)?;
+    if runtime_version == helper_version {
+        return Ok(helper_executable.to_path_buf());
+    }
+
+    let (executable, managed_version) = current_managed_release()?;
+    if managed_version != runtime_version {
+        return Err(format!(
+            "installed Windows Runtime {runtime_version} has no matching managed CLI generation"
+        ));
+    }
+    Ok(executable)
+}
+
 fn verify_cli_version(installed: &Path, expected: &str) -> Result<(), String> {
     let output = Command::new(installed)
         .arg("--version")
@@ -811,16 +856,13 @@ mod tests {
     #[test]
     fn installed_bridge_uses_the_cli_generation_that_published_runtime() {
         let helper = Path::new(r"C:\Users\Kid\.incodex\windows\i\old\i.exe");
-        let active = PathBuf::from(
-            r"C:\Users\Kid\.incodex\packages\standalone\releases\1.0.0\incodex.exe",
-        );
-        let selected = select_native_open_executable(
-            helper,
-            "0.9.0",
-            "1.0.0-0123456789abcdef",
-            || Ok((active.clone(), "1.0.0".to_string())),
-        )
-        .expect("runtime generation selects its managed CLI");
+        let active =
+            PathBuf::from(r"C:\Users\Kid\.incodex\packages\standalone\releases\1.0.0\incodex.exe");
+        let selected =
+            select_native_open_executable(helper, "0.9.0", "1.0.0-0123456789abcdef", || {
+                Ok((active.clone(), "1.0.0".to_string()))
+            })
+            .expect("runtime generation selects its managed CLI");
 
         assert_eq!(selected, active);
     }
@@ -828,13 +870,11 @@ mod tests {
     #[test]
     fn installed_bridge_keeps_its_helper_for_the_same_runtime_version() {
         let helper = Path::new(r"C:\Users\Kid\.incodex\windows\i\current\i.exe");
-        let selected = select_native_open_executable(
-            helper,
-            "1.0.0",
-            "1.0.0-fedcba9876543210",
-            || panic!("same-version runtime must not require a standalone install"),
-        )
-        .expect("same-version helper remains self-contained");
+        let selected =
+            select_native_open_executable(helper, "1.0.0", "1.0.0-fedcba9876543210", || {
+                panic!("same-version runtime must not require a standalone install")
+            })
+            .expect("same-version helper remains self-contained");
 
         assert_eq!(selected, helper);
     }
