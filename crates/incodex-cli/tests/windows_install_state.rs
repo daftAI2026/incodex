@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_cli::windows_activation::WindowsInstalledRuntimeRegistration;
+use incodex_cli::windows_helper::publish_windows_transient_helper;
 use incodex_cli::windows_install::{
     capture_windows_uninstall_approval, install_windows_runtime_with,
     uninstall_windows_runtime_approved_with, uninstall_windows_runtime_with,
@@ -15,7 +16,10 @@ use incodex_cli::windows_install_state::{
     synchronize_windows_install_runtime_release, transition_windows_install_state,
     WindowsInstallPhase, WindowsInstallStateGuard,
 };
-use incodex_cli::windows_registration::recover_transient_windows_debug_registration_with;
+use incodex_cli::windows_registration::{
+    recover_transient_windows_debug_registration_with,
+    stage_transient_windows_debug_registration,
+};
 use incodex_cli::windows_runtime::publish_windows_runtime;
 use incodex_core::windows_session::verify_private_acl;
 
@@ -98,6 +102,34 @@ fn stages_and_enables_the_installed_runtime_only_after_proving_codex_is_closed()
     assert_eq!(retained.phase, WindowsInstallPhase::RecoveryRequired);
     assert!(!retained.desired_enabled());
     fs::remove_dir_all(uncertain_root).expect("remove uncertain install fixture");
+}
+
+#[test]
+fn installed_registration_keeps_separate_transient_open_recovery_evidence() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    install_windows_runtime_with(
+        &user_root,
+        package,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .expect("install fixture Runtime");
+    let transient = publish_windows_transient_helper(&user_root, &helper)
+        .expect("publish transient open helper");
+
+    stage_transient_windows_debug_registration(&user_root, package, &transient.executable)
+        .expect("stage transient open beside installed registration");
+
+    assert!(user_root.join("windows-registration.json").is_file());
+    assert!(user_root
+        .join("windows-transient-registration.json")
+        .is_file());
+    fs::remove_dir_all(user_root).expect("remove concurrent registration fixture");
 }
 
 #[test]
