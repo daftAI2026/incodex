@@ -262,17 +262,13 @@ fn plan_from_session(
     profile_mask: Option<ProfileMask>,
 ) -> OpenPlan {
     let debug_port = allocate_debug_port().unwrap_or(0);
-    let locale = read_locale_override(source_home);
-    let mut args = if debug_port == 0 {
+    let args = if debug_port == 0 {
         let mut args = launch_arg_prefix(&session.chromium.display().to_string());
         args.push(OFFICIAL_NEW_CODEX_URL.to_string());
         args
     } else {
         debug_launch_args(&session.chromium.display().to_string(), debug_port)
     };
-    if let Some(locale) = locale.as_deref() {
-        args.insert(args.len().saturating_sub(1), format!("--lang={locale}"));
-    }
     OpenPlan {
         args,
         env: vec![
@@ -304,7 +300,7 @@ fn plan_from_session(
         session_dev: session.dev,
         bin,
         debug_port,
-        locale,
+        locale: read_locale_override(source_home),
         profile_mask,
     }
 }

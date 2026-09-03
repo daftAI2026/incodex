@@ -200,10 +200,6 @@ fn locale_override_is_carried_into_the_cdp_injection_plan() {
     .unwrap();
     let plan = prepare_incognito_open(&app, &user, &source, 1).unwrap();
     assert_eq!(plan.locale.as_deref(), Some("zh-CN"));
-    assert!(
-        plan.args.iter().any(|argument| argument == "--lang=zh-CN"),
-        "the official child must receive the copied locale before its first frame"
-    );
 }
 
 #[test]

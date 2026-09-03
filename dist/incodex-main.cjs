@@ -106,13 +106,6 @@ function readLocaleOverride() {
         return "";
     }
 }
-function incognitoLaunchArgs(chromium, locale) {
-    const args = [`--user-data-dir=${chromium}`];
-    if (locale)
-        args.push(`--lang=${locale}`);
-    args.push("codex://new?mode=codex");
-    return args;
-}
 function sessionBurnExpectation(session, userRoot = USER_ROOT) {
     return {
         userRoot,
@@ -506,7 +499,7 @@ async function launchIncognitoOnce() {
         }
         return Promise.resolve({ ok: false, reason: "spawn-failed" });
     }
-    const args = incognitoLaunchArgs(session.chromium, readLocaleOverride());
+    const args = [`--user-data-dir=${session.chromium}`, "codex://new?mode=codex"];
     const sourceBounds = captureSourceBounds();
     logLaunch("launch", {
         bin,
@@ -971,7 +964,6 @@ const startupGate = startRuntime();
 if (typeof module !== "undefined") {
     module.exports = {
         startupGate,
-        incognitoLaunchArgs,
         prepareIncognitoSession,
         runtimeOwnedSessionEnv,
         burnIncognitoSession,

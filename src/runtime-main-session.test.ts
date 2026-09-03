@@ -10,22 +10,6 @@ function tempRoot(): string {
 }
 
 describe("Electron session preparation", () => {
-  test("installed launches carry the copied locale into the official child process", () => {
-    const incognitoLaunchArgs = (runtimeMain as any).incognitoLaunchArgs;
-    expect(typeof incognitoLaunchArgs).toBe("function");
-    for (const locale of ["zh-CN", "en-US", "ja-JP"]) {
-      expect(incognitoLaunchArgs("/tmp/incodex chromium", locale)).toEqual([
-        "--user-data-dir=/tmp/incodex chromium",
-        `--lang=${locale}`,
-        "codex://new?mode=codex",
-      ]);
-    }
-    expect(incognitoLaunchArgs("/tmp/incodex chromium", "")).toEqual([
-      "--user-data-dir=/tmp/incodex chromium",
-      "codex://new?mode=codex",
-    ]);
-  });
-
   test("partial settings copy burns the identity-bound session root", () => {
     const prepareIncognitoSession = (runtimeMain as any).prepareIncognitoSession;
     expect(typeof prepareIncognitoSession).toBe("function");
