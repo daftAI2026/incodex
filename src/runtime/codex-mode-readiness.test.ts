@@ -71,7 +71,8 @@ describe("Codex mode readiness", () => {
   test("gives the official renderer enough time to complete an accepted fallback", () => {
     expect(decideCodexModeAction("other", true, 0)).toBe("wait");
     expect(decideCodexModeAction("other", true, 2)).toBe("wait");
-    expect(decideCodexModeAction("other", true, 8)).toBe("unresolved");
+    expect(decideCodexModeAction("other", true, 8)).toBe("wait");
+    expect(decideCodexModeAction("other", true, 20)).toBe("unresolved");
   });
 
   test("confirms a renderer fallback whose official route settles after several polls", async () => {
