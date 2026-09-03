@@ -554,7 +554,7 @@ pub fn activate_packaged_with_installed_cdp(
             "Windows installed Runtime registration does not match the activation package",
         ));
     }
-    activate_packaged(request, Some(registration))
+    activate_packaged_with_capability(request, WindowsLaunchMode::Cdp)
 }
 
 pub fn activation_requires_runtime_environment_claim(mode: WindowsLaunchMode) -> bool {

@@ -69,7 +69,7 @@ pub struct WindowsOpenPlan {
 }
 
 impl WindowsOpenPlan {
-    pub fn activation_request(&self) -> Result<WindowsActivationRequest, String> {
+    fn base_activation_request(&self) -> Result<WindowsActivationRequest, String> {
         let mut environment = BTreeMap::new();
         environment.extend(
             self.env
@@ -87,13 +87,20 @@ impl WindowsOpenPlan {
             self.args.iter().map(OsString::from),
             environment,
         )
-        .and_then(|request| {
+    }
+
+    pub fn activation_request(&self) -> Result<WindowsActivationRequest, String> {
+        self.base_activation_request().and_then(|request| {
             request.with_transient_runtime(
                 &self.transient_bootstrap,
                 &self.transient_helper,
                 &self.user_root,
             )
         })
+    }
+
+    pub fn installed_activation_request(&self) -> Result<WindowsActivationRequest, String> {
+        self.base_activation_request()
     }
 }
 
@@ -342,9 +349,12 @@ fn launch_windows_open(
     let installed_activation =
         installed_activation_for_open(installed_state.as_ref(), &plan.package_full_name)
             .map_err(WindowsActivationFailure::before_start)?;
-    let request = plan
-        .activation_request()
-        .map_err(WindowsActivationFailure::before_start)?;
+    let request = if installed_activation.is_some() {
+        plan.installed_activation_request()
+    } else {
+        plan.activation_request()
+    }
+    .map_err(WindowsActivationFailure::before_start)?;
     match installed_activation.as_ref() {
         Some(registration) => activate_packaged_with_installed_cdp(&request, registration),
         None => activate_packaged_kill_on_drop(&request),
