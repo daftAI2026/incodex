@@ -16,9 +16,13 @@ fn runtime_helper_forbids_authentication_ui() {
         "runtime reads must ask Security.framework to fail immediately instead of waiting for authentication UI"
     );
     assert!(
-        source.contains("if (authorize_only)")
-            && source.contains("kSecUseAuthenticationContext"),
+        source.contains("if (authorize_only)") && source.contains("kSecUseAuthenticationContext"),
         "only explicit install may attach a cancellable LAContext that can show Keychain UI"
+    );
+    assert!(
+        source.contains("authorize_only\n        ? copy_matching_cancellable")
+            && source.contains(": SecItemCopyMatching(query, &result)"),
+        "a noninteractive probe must call Security.framework directly instead of depending on a worker-thread UI run loop"
     );
 }
 
