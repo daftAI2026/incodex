@@ -363,7 +363,7 @@ fn is_transient_websocket_error(error: &str) -> bool {
 mod tests {
     use super::{
         installed_bridge_request_from_event, installed_bridge_source,
-        parse_installed_bridge_request,
+        is_transient_websocket_error, parse_installed_bridge_request, InstalledBridgeRequest,
     };
     use serde_json::json;
 
@@ -389,14 +389,30 @@ mod tests {
             "method": "Runtime.bindingCalled",
             "params": {
                 "name": "__incodexNativeAction",
-                "payload": "{\"action\":\"open\",\"requestId\":\"incodex-12345678\"}"
+                "payload": "{\"action\":\"open\",\"requestId\":\"incodex-12345678\"}",
+                "executionContextId": 17
             }
         });
         assert_eq!(
-            installed_bridge_request_from_event(&event)
-                .expect("valid binding event")
-                .request_id,
-            "incodex-12345678"
+            installed_bridge_request_from_event(&event).expect("valid binding event"),
+            InstalledBridgeRequest {
+                request_id: "incodex-12345678".to_string(),
+                execution_context_id: 17,
+            }
         );
+
+        let mut missing_context = event;
+        missing_context["params"]
+            .as_object_mut()
+            .expect("binding params")
+            .remove("executionContextId");
+        assert!(installed_bridge_request_from_event(&missing_context).is_none());
+    }
+
+    #[test]
+    fn bridge_retries_after_a_replacement_target_loses_the_shared_ui() {
+        assert!(is_transient_websocket_error(
+            "Incodex button is not mounted yet"
+        ));
     }
 }
