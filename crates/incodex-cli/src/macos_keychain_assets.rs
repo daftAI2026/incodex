@@ -259,6 +259,9 @@ pub fn install_keychain_provider(staged_app: &Path, helper_sha256: &str) -> Resu
         Ok(provider_metadata) => {
             if provider_metadata.file_type().is_symlink()
                 || !provider_metadata.file_type().is_file()
+                || provider_metadata.uid() != unsafe { libc::geteuid() }
+                || provider_metadata.permissions().mode() & 0o777 != PROVIDER_FILE_MODE
+                || provider_metadata.nlink() != 1
                 || read_regular_file(&provider, "staged Keychain provider")? != provider_bytes
             {
                 return Err("staged Keychain provider conflicts with bundled bytes".into());
