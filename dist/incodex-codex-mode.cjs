@@ -125,8 +125,12 @@ function createCodexModeReadiness(options) {
     const probeTimeoutMs = options.probeTimeoutMs ?? 2_000;
     const pollMs = options.pollMs ?? 750;
     const totalChecksRequired = options.totalChecksRequired ?? 120;
+    const totalTimeoutMs = options.totalTimeoutMs ?? 90_000;
+    const now = options.now ?? Date.now;
     const scheduleTimer = options.scheduleTimer ?? setTimeout;
     const cancelTimer = options.cancelTimer ?? clearTimeout;
+    const scheduleDeadlineTimer = options.scheduleDeadlineTimer ?? setTimeout;
+    const cancelDeadlineTimer = options.cancelDeadlineTimer ?? clearTimeout;
     const scheduleProbeTimeout = options.scheduleProbeTimeout ?? setTimeout;
     const cancelProbeTimeout = options.cancelProbeTimeout ?? clearTimeout;
     function stateFor(win) {
@@ -136,6 +140,8 @@ function createCodexModeReadiness(options) {
         state = {
             complete: false,
             confirmationFailures: 0,
+            deadlineAt: now() + totalTimeoutMs,
+            deadlineTimer: null,
             fallbackAttempted: false,
             fallbackSucceeded: false,
             primaryOtherChecks: 0,
@@ -145,12 +151,47 @@ function createCodexModeReadiness(options) {
             totalChecks: 0,
         };
         checks.set(win, state);
+        state.deadlineTimer = scheduleDeadlineTimer(() => {
+            finishUnresolved(state, "readiness-deadline");
+        }, totalTimeoutMs);
         win.once("closed", () => {
             state.complete = true;
             if (state.timer)
                 cancelTimer(state.timer);
+            if (state.deadlineTimer)
+                cancelDeadlineTimer(state.deadlineTimer);
         });
         return state;
+    }
+    function finishUnresolved(state, reason = null) {
+        if (state.complete)
+            return;
+        state.complete = true;
+        if (state.timer) {
+            cancelTimer(state.timer);
+            state.timer = null;
+        }
+        if (state.deadlineTimer) {
+            cancelDeadlineTimer(state.deadlineTimer);
+            state.deadlineTimer = null;
+        }
+        options.log("codex-mode-unresolved", {
+            fallback: state.fallbackSucceeded,
+            ...(reason ? { reason } : {}),
+        });
+    }
+    function finishConfirmed(state) {
+        if (state.complete)
+            return;
+        state.complete = true;
+        if (state.deadlineTimer) {
+            cancelDeadlineTimer(state.deadlineTimer);
+            state.deadlineTimer = null;
+        }
+        options.log("codex-mode-confirmed", { fallback: state.fallbackSucceeded });
+    }
+    function deadlineReached(state) {
+        return now() >= state.deadlineAt;
     }
     function observe(win, delay = primarySettleMs) {
         if (!options.isIncognito() || !win || win.isDestroyed())
@@ -166,12 +207,20 @@ function createCodexModeReadiness(options) {
     async function reconcile(win, state) {
         if (state.complete || win.isDestroyed() || win.webContents.isDestroyed())
             return;
+        if (deadlineReached(state)) {
+            finishUnresolved(state, "readiness-deadline");
+            return;
+        }
         state.running = true;
         state.totalChecks += 1;
         try {
             const snapshot = await withProbeTimeout(win.webContents.executeJavaScript(CODEX_MODE_PROBE_EXPRESSION, false), probeTimeoutMs, scheduleProbeTimeout, cancelProbeTimeout);
             if (state.complete || win.isDestroyed() || win.webContents.isDestroyed())
                 return;
+            if (deadlineReached(state)) {
+                finishUnresolved(state, "readiness-deadline");
+                return;
+            }
             state.probeFailures = 0;
             const pageState = deriveCodexModePageState(snapshot);
             const nonCodexPage = pageState === "other" || pageState === "missing";
@@ -183,21 +232,15 @@ function createCodexModeReadiness(options) {
             }
             const action = decideCodexModeAction(pageState, state.fallbackAttempted, state.confirmationFailures, state.primaryOtherChecks, primaryOtherChecksRequired, confirmationFailuresRequired);
             if (action === "confirmed") {
-                state.complete = true;
-                options.log("codex-mode-confirmed", { fallback: state.fallbackSucceeded });
+                finishConfirmed(state);
                 return;
             }
             if (state.totalChecks >= totalChecksRequired) {
-                state.complete = true;
-                options.log("codex-mode-unresolved", {
-                    fallback: state.fallbackSucceeded,
-                    reason: "readiness-deadline",
-                });
+                finishUnresolved(state, "readiness-deadline");
                 return;
             }
             if (action === "unresolved") {
-                state.complete = true;
-                options.log("codex-mode-unresolved", { fallback: state.fallbackSucceeded });
+                finishUnresolved(state);
                 return;
             }
             if (action === "select-fallback" && win.isFocused()) {
@@ -210,20 +253,20 @@ function createCodexModeReadiness(options) {
                     options.log("codex-mode-fallback-sent");
                 }
                 else {
-                    state.complete = true;
-                    options.log("codex-mode-unresolved", { fallback: false });
+                    finishUnresolved(state);
                 }
             }
         }
         catch (error) {
+            if (state.complete || win.isDestroyed() || win.webContents.isDestroyed())
+                return;
             state.probeFailures += 1;
             options.log("codex-mode-probe-failed", { error: String(error) });
-            if (state.probeFailures >= probeFailuresRequired) {
-                state.complete = true;
-                options.log("codex-mode-unresolved", {
-                    fallback: state.fallbackSucceeded,
-                    reason: "probe-failed",
-                });
+            if (deadlineReached(state)) {
+                finishUnresolved(state, "readiness-deadline");
+            }
+            else if (state.probeFailures >= probeFailuresRequired) {
+                finishUnresolved(state, "probe-failed");
             }
         }
         finally {

@@ -1,9 +1,9 @@
 {
   "runtimeVersion": "0.5.0",
-  "sourceCommit": "f92642bb20b1f2f2f49cb48d99d95a28ee986f1a",
+  "sourceCommit": "7384c14df443182a210218cf642f834652d3134b",
   "files": {
     "incodex-loader.cjs": "acb259d9481c1dbd2480d4bc2ac27fe093245ecaf87535f243ed6c5d4f3a3b6b",
-    "incodex-main.cjs": "3d19807112dad385bea63f2fdbd3904b265ed6bc6bb76849d95162188a80e707",
+    "incodex-main.cjs": "e80c05cfa800e5c620736319eccb8214f2ff74d36a8ab6578d64f99a699d02db",
     "incodex-preload.cjs": "7b325b1ddc3d444e625e459fcf3edc00397bf78b38b36e95e56b9b4c7a0686e6",
     "incodex-inject.js": "18956b7198ee01d77faf761246320356076484480efa69236f77154a7f878137",
     "incodex-safe-home.cjs": "20760e4b7efbe00f2a943b8580c03e374a381a711277805e45f3eb1438ecc769",
@@ -14,8 +14,8 @@
     "incodex-window-kind.cjs": "8d5f752ef6a34bd0927cd39010d68b3e7b7545a77f947683d4ce4a48b98ce648",
     "incodex-window-lifecycle.cjs": "f84462170c00a7087025a498690b8d2efe1e55a24d2163c8a230442a55bb5a36",
     "incodex-runtime-load.cjs": "153ea5d8d2eb68551936da7f997fa46f67882f35c62357391c30da6547251d84",
-    "incodex-codex-mode.cjs": "d8624645ac85c45ad8c09867d8d4fc978c8a5eb83c3acadafae0dd8a4672f2f4",
-    "incodex-macos-update.cjs": "15ae08c88de9a1e378385b680fa0bedf4ac5f8f1f23a313d29429937549c3a62",
+    "incodex-codex-mode.cjs": "a5cda5ae4a73f2d0bbc9a9ba68732c83d5c4e8797328da0182416012f89a5c01",
+    "incodex-macos-update.cjs": "6f2f74611c54882e1d9516fd7f33de09808525bd957c32ec2f9072aac5f2facf",
     "incodex-dock-menu.cjs": "6030ffba786c489555f739789ea35735eb4c393d133413a526497aef7c2537a5"
   }
 }

@@ -957,6 +957,11 @@ function startRuntime() {
             execPath: process.execPath,
             pid: process.pid,
         });
+        macosUpdate.probeKeychainAuthorizationReadiness({
+            userRoot: USER_ROOT,
+            execPath: process.execPath,
+            incognito: false,
+        });
     }
     return attachElectron();
 }
