@@ -126,6 +126,16 @@ fn read_transient_windows_debug_registration(
     read_windows_debug_registration_file(user_root, TRANSIENT_REGISTRATION_NAME)
 }
 
+pub(crate) fn transient_windows_debug_registration_exists(
+    user_root: &Path,
+) -> Result<bool, String> {
+    if read_transient_windows_debug_registration(user_root)?.is_some() {
+        return Ok(true);
+    }
+    Ok(read_windows_debug_registration(user_root)?
+        .is_some_and(|evidence| evidence.kind == WindowsDebugRegistrationKind::Transient))
+}
+
 fn read_windows_debug_registration_file(
     user_root: &Path,
     name: &str,

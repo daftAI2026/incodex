@@ -22,7 +22,7 @@ use crate::windows_registration::{
     read_windows_debug_registration, recover_transient_windows_debug_registration_with_restore,
     registration_matches_install_state, retire_windows_debug_registration,
     retire_windows_debug_registration_file, stage_installed_windows_debug_registration,
-    WindowsDebugRegistrationEvidence,
+    transient_windows_debug_registration_exists, WindowsDebugRegistrationEvidence,
 };
 use crate::windows_runtime::publish_windows_runtime;
 use crate::windows_system::windows_path_for_display;
@@ -407,12 +407,16 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
         return Ok(());
     }
     crate::confirm::require("uninstall", parsed.yes)?;
-    match uninstall_windows_runtime_approved_with(
+    match uninstall_windows_runtime_approved_with_restore(
         &user_root,
         &approval,
         running_package_process_ids,
         codex_package_full_name_is_installed,
         disable_installed_runtime,
+        |state| {
+            WindowsInstalledRuntimeRegistration::from_install_state(state)
+                .and_then(|registration| enable_installed_runtime(&registration))
+        },
     )? {
         WindowsUninstallOutcome::NotInstalled => {
             println!("{}", format_ok("Incodex is not installed.", None));
@@ -505,6 +509,35 @@ where
     P: FnMut(&str) -> Result<bool, String>,
     D: FnMut(&str) -> Result<(), String>,
 {
+    uninstall_windows_runtime_approved_with_restore(
+        user_root,
+        approved,
+        running_package_processes,
+        package_is_installed,
+        disable,
+        |_| {
+            Err(
+                "an installed Windows registration cannot be restored through this uninstall path"
+                    .to_string(),
+            )
+        },
+    )
+}
+
+pub fn uninstall_windows_runtime_approved_with_restore<R, P, D, E>(
+    user_root: &Path,
+    approved: &WindowsUninstallApproval,
+    running_package_processes: R,
+    package_is_installed: P,
+    disable: D,
+    enable_installed: E,
+) -> Result<WindowsUninstallOutcome, String>
+where
+    R: FnMut(&str) -> Result<Vec<u32>, std::io::Error>,
+    P: FnMut(&str) -> Result<bool, String>,
+    D: FnMut(&str) -> Result<(), String>,
+    E: FnMut(&WindowsInstallState) -> Result<(), String>,
+{
     let _transaction = acquire_windows_install_state()?;
     let current_state = read_windows_install_state_for_uninstall(user_root);
     let current_evidence = read_windows_debug_registration(user_root);
@@ -518,6 +551,15 @@ where
     let mut running_package_processes = running_package_processes;
     let mut package_is_installed = package_is_installed;
     let mut disable = disable;
+    if transient_windows_debug_registration_exists(user_root)? {
+        recover_transient_windows_debug_registration_with_restore(
+            user_root,
+            &mut running_package_processes,
+            &mut package_is_installed,
+            &mut disable,
+            enable_installed,
+        )?;
+    }
     uninstall_windows_runtime_locked_with(
         user_root,
         &mut running_package_processes,
@@ -537,10 +579,46 @@ where
     P: FnMut(&str) -> Result<bool, String>,
     D: FnMut(&str) -> Result<(), String>,
 {
+    uninstall_windows_runtime_with_restore(
+        user_root,
+        running_package_processes,
+        package_is_installed,
+        disable,
+        |_| {
+            Err(
+                "an installed Windows registration cannot be restored through this uninstall path"
+                    .to_string(),
+            )
+        },
+    )
+}
+
+pub fn uninstall_windows_runtime_with_restore<R, P, D, E>(
+    user_root: &Path,
+    running_package_processes: R,
+    package_is_installed: P,
+    disable: D,
+    enable_installed: E,
+) -> Result<WindowsUninstallOutcome, String>
+where
+    R: FnMut(&str) -> Result<Vec<u32>, std::io::Error>,
+    P: FnMut(&str) -> Result<bool, String>,
+    D: FnMut(&str) -> Result<(), String>,
+    E: FnMut(&WindowsInstallState) -> Result<(), String>,
+{
     let _transaction = acquire_windows_install_state()?;
     let mut running_package_processes = running_package_processes;
     let mut package_is_installed = package_is_installed;
     let mut disable = disable;
+    if transient_windows_debug_registration_exists(user_root)? {
+        recover_transient_windows_debug_registration_with_restore(
+            user_root,
+            &mut running_package_processes,
+            &mut package_is_installed,
+            &mut disable,
+            enable_installed,
+        )?;
+    }
     uninstall_windows_runtime_locked_with(
         user_root,
         &mut running_package_processes,
