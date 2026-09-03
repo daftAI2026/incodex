@@ -36,6 +36,7 @@ struct Fixture {
     codex_framework: PathBuf,
     keychain_provider: PathBuf,
     codex_helper_marker: PathBuf,
+    codex_bare_helper_marker: PathBuf,
     framework_sign_state: PathBuf,
     sign_capture: PathBuf,
     deep_capture: PathBuf,
@@ -66,6 +67,8 @@ impl Fixture {
         let keychain_provider = codex_framework.join("Versions/Current/IncodexKeyProvider.dylib");
         let codex_helper_marker = codex_framework
             .join("Versions/Current/Helpers/Codex (Renderer).app/Contents/vendor-marker");
+        let codex_bare_helper_marker =
+            codex_framework.join("Versions/Current/Helpers/browser_crashpad_handler");
         let fake_bin = root.join("fake-bin");
         fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
         fs::create_dir_all(sidecar.join("Contents/_CodeSignature")).unwrap();
@@ -140,6 +143,8 @@ if [ "$1" = "--force" ] && [ "$2" = "--deep" ]; then
   if [ -f "$marker" ]; then printf '%s\n' mutated-by-deep-sign > "$marker"; fi
   helper="$target/Contents/Frameworks/Codex Framework.framework/Versions/Current/Helpers/Codex (Renderer).app/Contents/vendor-marker"
   if [ -f "$helper" ]; then printf '%s\n' mutated-by-deep-sign > "$helper"; fi
+  bare_helper="$target/Contents/Frameworks/Codex Framework.framework/Versions/Current/Helpers/browser_crashpad_handler"
+  if [ -f "$bare_helper" ]; then printf '%s\n' mutated-by-deep-sign > "$bare_helper"; fi
   exit 0
 fi
 if [ "$1" = "--force" ] && [ "$2" = "--sign" ]; then
@@ -178,6 +183,7 @@ exit 0
             codex_framework,
             keychain_provider,
             codex_helper_marker,
+            codex_bare_helper_marker,
             framework_sign_state,
             sign_capture,
             deep_capture,
@@ -189,6 +195,7 @@ exit 0
         fs::write(&self.keychain_provider, "patched-provider\n").unwrap();
         fs::create_dir_all(self.codex_helper_marker.parent().unwrap()).unwrap();
         fs::write(&self.codex_helper_marker, "official-helper\n").unwrap();
+        fs::write(&self.codex_bare_helper_marker, "official-bare-helper\n").unwrap();
     }
 
     fn install_path(&self) -> OsString {
@@ -339,6 +346,11 @@ fn modified_codex_framework_is_resigned_without_mutating_vendor_helpers() {
         fs::read_to_string(&fixture.codex_helper_marker).unwrap(),
         "official-helper\n",
         "deep signing must preserve the official Electron helper nested inside the modified framework"
+    );
+    assert_eq!(
+        fs::read_to_string(&fixture.codex_bare_helper_marker).unwrap(),
+        "official-bare-helper\n",
+        "deep signing must preserve official bare Mach-O helpers that are not bundle directories"
     );
     let signed = fs::read_to_string(&fixture.sign_capture).unwrap();
     assert!(
