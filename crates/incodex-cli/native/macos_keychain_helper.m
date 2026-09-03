@@ -247,10 +247,21 @@ static int run(int argc, char **argv) {
     CFDictionarySetValue(query, kSecAttrAccount, account);
     CFDictionarySetValue(query, kSecReturnData, kCFBooleanTrue);
     CFDictionarySetValue(query, kSecMatchLimit, kSecMatchLimitOne);
-    LAContext *authentication_context = [[LAContext alloc] init];
-    authentication_context.interactionNotAllowed = !authorize_only;
-    CFDictionarySetValue(query, kSecUseAuthenticationContext,
-                         (__bridge const void *)authentication_context);
+    LAContext *authentication_context = nil;
+    if (authorize_only) {
+        authentication_context = [[LAContext alloc] init];
+        CFDictionarySetValue(query, kSecUseAuthenticationContext,
+                             (__bridge const void *)authentication_context);
+    } else {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        // LAContext.interactionNotAllowed can still block inside securityd on
+        // current macOS. The legacy fail value preserves the required
+        // immediate, noninteractive runtime contract.
+        CFDictionarySetValue(query, kSecUseAuthenticationUI,
+                             kSecUseAuthenticationUIFail);
+#pragma clang diagnostic pop
+    }
     CFRelease(service);
     CFRelease(account);
 
