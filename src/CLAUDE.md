@@ -17,7 +17,7 @@ runtime/: Electron 注入与跨平台窗口生命周期实现；局部地图见 
 runtime-cleanup-owner.test.ts: Runtime 所有者退出与遗留会话清理测试。
 runtime-late-recreation.test.ts: 会话关闭后迟到资源重建的回归测试。
 runtime-load.test.ts: 外置 Runtime manifest、哈希与 fail-open 加载测试。
-runtime-macos-update.test.ts: macOS Sparkle 自动恢复交接的同步启动与资产验证测试。
+runtime-macos-update.test.ts: macOS Sparkle 自动恢复交接的同步启动、资产验证与后台禁止 Keychain 授权交互测试。
 runtime-main-injection.test.ts: Electron 主入口结构契约，保护官方启动、注入与窗口生命周期边界。
 runtime-main-session.test.ts: macOS 主进程会话行为测试。
 runtime-manifest.ts: Runtime 资产目录与 manifest 写入规则的单一来源。
