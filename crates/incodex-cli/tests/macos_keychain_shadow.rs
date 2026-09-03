@@ -101,10 +101,7 @@ fn background_recovery_never_enters_the_interactive_authorization_path() {
 
 #[test]
 fn matching_noninteractive_runtime_proof_promotes_the_same_helper_generation() {
-    let home = std::env::temp_dir().join(format!(
-        "incodex-keychain-proof-{}",
-        std::process::id()
-    ));
+    let home = std::env::temp_dir().join(format!("incodex-keychain-proof-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&home);
     let root = home.join(".incodex");
     let app = home.join("Applications/ChatGPT.app");
@@ -132,10 +129,12 @@ fn matching_noninteractive_runtime_proof_promotes_the_same_helper_generation() {
     std::fs::set_permissions(&proof_path, std::fs::Permissions::from_mode(0o600)).unwrap();
 
     assert!(promote_authorization_from_proof(&root).unwrap());
-    assert!(read_registration(&root)
-        .unwrap()
-        .unwrap()
-        .authorization_ready);
+    assert!(
+        read_registration(&root)
+            .unwrap()
+            .unwrap()
+            .authorization_ready
+    );
     assert!(!proof_path.exists());
     std::fs::remove_dir_all(home).unwrap();
 }

@@ -22,6 +22,7 @@ const HELPER_FILE_MODE: u32 = 0o700;
 const HELPER_FILE_NAME: &str = "incodex-keychain-helper";
 const PROVIDER_FILE_MODE: u32 = 0o644;
 const PROVIDER_FILE_NAME: &str = "IncodexKeyProvider.dylib";
+const AUTHORIZATION_PROOF_FILE_NAME: &str = "authorization-proof.json";
 const AUTHORIZATION_TIMEOUT: Duration = Duration::from_secs(300);
 const AUTHORIZATION_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const AUTHORIZATION_CANCEL_GRACE: Duration = Duration::from_millis(500);
@@ -51,8 +52,27 @@ pub enum KeychainAuthorization {
     ItemMissing,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct KeychainAuthorizationProof {
+    schema_version: u32,
+    app_path: PathBuf,
+    helper_path: PathBuf,
+    helper_sha256: String,
+}
+
 pub fn should_install_keychain_provider(registration: Option<&KeychainRegistration>) -> bool {
     registration.is_some_and(|registration| registration.authorization_ready)
+}
+
+pub fn promote_authorization_from_proof(root: &Path) -> Result<bool, String> {
+    let path = registration_path(root);
+    let _lock = acquire_target_lock(root, &path, "macos-keychain-registration", None)?;
+    let Some(current) = read_registration(root)? else {
+        discard_authorization_proof(root);
+        return Ok(false);
+    };
+    promote_authorization_from_proof_locked(root, current)
 }
 
 pub fn ensure_registration(
@@ -342,7 +362,19 @@ where
         None,
     )?;
 
-    let current = read_registration(root)?;
+    let current = match read_registration(root)? {
+        Some(current) => Some(if current.authorization_ready {
+            discard_authorization_proof(root);
+            current
+        } else {
+            let _ = promote_authorization_from_proof_locked(root, current.clone())?;
+            read_registration(root)?.unwrap_or(current)
+        }),
+        None => {
+            discard_authorization_proof(root);
+            None
+        }
+    };
     if let Some(current) = current.as_ref() {
         if current.app_path != app_path {
             return Err("macOS Keychain app path change requires an explicit migration".into());
@@ -390,6 +422,65 @@ fn write_registration(path: &Path, registration: &KeychainRegistration) -> Resul
         serde_json::to_string(registration).map_err(|error| error.to_string())?
     );
     write_private_atomic(path, body.as_bytes())
+}
+
+fn promote_authorization_from_proof_locked(
+    root: &Path,
+    mut current: KeychainRegistration,
+) -> Result<bool, String> {
+    if current.authorization_ready {
+        discard_authorization_proof(root);
+        return Ok(false);
+    }
+    let Some(proof) = read_authorization_proof(root)? else {
+        return Ok(false);
+    };
+    let matches = proof.schema_version == REGISTRATION_SCHEMA_VERSION
+        && proof.app_path == current.app_path
+        && proof.helper_path == current.helper_path
+        && proof.helper_sha256 == current.helper_sha256;
+    if !matches {
+        discard_authorization_proof(root);
+        return Ok(false);
+    }
+    current.authorization_ready = true;
+    write_registration(&registration_path(root), &current)?;
+    discard_authorization_proof(root);
+    Ok(true)
+}
+
+fn read_authorization_proof(root: &Path) -> Result<Option<KeychainAuthorizationProof>, String> {
+    let path = authorization_proof_path(root);
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "cannot inspect macOS Keychain authorization proof: {error}"
+            ))
+        }
+    };
+    if metadata.file_type().is_symlink()
+        || !metadata.file_type().is_file()
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.permissions().mode() & 0o777 != PRIVATE_FILE_MODE
+        || metadata.nlink() != 1
+    {
+        discard_authorization_proof(root);
+        return Ok(None);
+    }
+    let body = read_regular_file(&path, "macOS Keychain authorization proof")?;
+    match serde_json::from_slice(&body) {
+        Ok(proof) => Ok(Some(proof)),
+        Err(_) => {
+            discard_authorization_proof(root);
+            Ok(None)
+        }
+    }
+}
+
+fn discard_authorization_proof(root: &Path) {
+    let _ = fs::remove_file(authorization_proof_path(root));
 }
 
 pub fn read_registration(root: &Path) -> Result<Option<KeychainRegistration>, String> {
@@ -459,6 +550,11 @@ fn validate_registration(root: &Path, registration: &KeychainRegistration) -> Re
 
 fn registration_path(root: &Path) -> PathBuf {
     root.join("macos-keychain").join("registration.json")
+}
+
+fn authorization_proof_path(root: &Path) -> PathBuf {
+    root.join("macos-keychain")
+        .join(AUTHORIZATION_PROOF_FILE_NAME)
 }
 
 fn write_bundle_file_atomic(path: &Path, bytes: &[u8], mode: u32) -> Result<(), String> {
