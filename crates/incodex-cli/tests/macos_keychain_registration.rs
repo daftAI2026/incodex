@@ -157,8 +157,16 @@ fn keychain_helper_identity_survives_host_reinstall_runtime_refresh_and_update_r
 #[test]
 fn keychain_helper_source_change_never_silently_replaces_the_authorized_identity() {
     let fixture = Fixture::new();
-    let original =
+    let mut original =
         ensure_registration(&fixture.root, &fixture.app, &fixture.keychain_helper_v1).unwrap();
+    original.authorization_ready = true;
+    let registration_path = fixture.root.join("macos-keychain/registration.json");
+    fs::write(
+        &registration_path,
+        format!("{}\n", serde_json::to_string(&original).unwrap()),
+    )
+    .unwrap();
+    fs::set_permissions(&registration_path, fs::Permissions::from_mode(0o600)).unwrap();
 
     // A future Helper binary may be offered for an explicit migration, but an ordinary
     // Runtime/host refresh must not silently replace the identity already authorized by macOS.
@@ -171,6 +179,29 @@ fn keychain_helper_source_change_never_silently_replaces_the_authorized_identity
     );
 
     assert_eq!(read_registration(&fixture.root).unwrap().unwrap(), original);
+}
+
+#[test]
+fn unready_keychain_helper_migrates_before_its_first_successful_authorization() {
+    let fixture = Fixture::new();
+    let original =
+        ensure_registration(&fixture.root, &fixture.app, &fixture.keychain_helper_v1).unwrap();
+    assert!(!original.authorization_ready);
+
+    let migrated =
+        ensure_registration(&fixture.root, &fixture.app, &fixture.keychain_helper_v2).unwrap();
+
+    assert_ne!(migrated.helper_sha256, original.helper_sha256);
+    assert_eq!(
+        migrated.helper_sha256,
+        sha256_hex(b"replacement keychain helper\n")
+    );
+    assert_eq!(
+        fs::read(&migrated.helper_path).unwrap(),
+        b"replacement keychain helper\n"
+    );
+    assert!(!migrated.authorization_ready);
+    assert_eq!(read_registration(&fixture.root).unwrap().unwrap(), migrated);
 }
 
 #[test]
