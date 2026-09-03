@@ -416,7 +416,8 @@ fn is_transient_websocket_error(error: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        installed_bridge_request_from_event, installed_bridge_source, is_transient_websocket_error,
+        installed_bridge_request_from_event, installed_bridge_source,
+        installed_page_requires_reinjection, is_transient_websocket_error,
         parse_installed_bridge_request, InstalledBridgeRequest,
     };
     use serde_json::json;
@@ -468,5 +469,27 @@ mod tests {
         assert!(is_transient_websocket_error(
             "Incodex button is not mounted yet"
         ));
+    }
+
+    #[test]
+    fn bridge_reinjects_only_after_a_top_level_codex_navigation() {
+        let primary = json!({
+            "method": "Page.frameNavigated",
+            "params": {
+                "frame": {
+                    "id": "main",
+                    "url": "app://-/index.html"
+                }
+            }
+        });
+        assert!(installed_page_requires_reinjection(&primary));
+
+        let mut child = primary.clone();
+        child["params"]["frame"]["parentId"] = json!("main");
+        assert!(!installed_page_requires_reinjection(&child));
+
+        let mut foreign = primary;
+        foreign["params"]["frame"]["url"] = json!("https://example.com/");
+        assert!(!installed_page_requires_reinjection(&foreign));
     }
 }
