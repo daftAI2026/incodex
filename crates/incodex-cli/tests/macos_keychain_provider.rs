@@ -1,5 +1,10 @@
 #![cfg(target_os = "macos")]
 
+//! [INPUT]: 依赖 native/macos_keychain_provider.c 的测试导出、合成 helper 与 fake Security.framework
+//! [OUTPUT]: 验证 Keychain provider 的精确拦截、身份校验、有界 IPC，以及失败时回退官方查询
+//! [POS]: incodex-cli/tests 的原生 provider 黑盒契约，不接触用户真实 Keychain
+//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -380,7 +385,7 @@ int main(int argc, char **argv) {
         exact, &result, argv[2], fake_original);
     CFRelease(exact);
     if (result) CFRelease(result);
-    if (status == errSecSuccess || original_calls != before) return 9;
+    if (status != -7777 || original_calls != before + 1) return 9;
 
     exact = query();
     result = NULL;
@@ -389,7 +394,7 @@ int main(int argc, char **argv) {
         exact, &result, argv[3], fake_original);
     CFRelease(exact);
     if (result) CFRelease(result);
-    if (status != errSecItemNotFound || original_calls != before) return 10;
+    if (status != -7777 || original_calls != before + 1) return 10;
     return 0;
 }
 "#,
@@ -580,8 +585,8 @@ int main(int argc, char **argv) {
     CFRelease(exact);
     if (strcmp(argv[2], "failure") == 0) {
         if (result) CFRelease(result);
-        return status == errSecAuthFailed &&
-                       incodex_fake_security_calls() == 0
+        return status == -7777 &&
+                       incodex_fake_security_calls() == 1
                    ? 0
                    : 7;
     }
