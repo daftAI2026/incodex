@@ -850,8 +850,17 @@ fn command_failure(label: &str, output: &std::process::Output) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::select_native_open_executable;
+    use super::{select_native_open_executable, CLI_VERSION_PROBE_CREATION_FLAGS};
     use std::path::{Path, PathBuf};
+    use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
+
+    #[test]
+    fn installed_runtime_cli_probe_never_flashes_a_console_window() {
+        assert_eq!(
+            CLI_VERSION_PROBE_CREATION_FLAGS & CREATE_NO_WINDOW,
+            CREATE_NO_WINDOW
+        );
+    }
 
     #[test]
     fn installed_bridge_uses_the_cli_generation_that_published_runtime() {
