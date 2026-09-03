@@ -48,7 +48,6 @@ use crate::windows_process::{
     WindowsCdpOwnershipGuard,
 };
 use crate::windows_registration::recover_transient_windows_debug_registration_with;
-use crate::windows_runtime::publish_windows_activation_bootstrap;
 use crate::windows_system::windows_path_for_display;
 use crate::{parse::ParsedCli, CliFailure};
 
@@ -64,7 +63,6 @@ pub struct WindowsOpenPlan {
     pub debug_port: u16,
     pub injection: InjectionOptions,
     user_root: PathBuf,
-    transient_bootstrap: PathBuf,
     transient_helper: PathBuf,
 }
 
@@ -90,13 +88,8 @@ impl WindowsOpenPlan {
     }
 
     pub fn activation_request(&self) -> Result<WindowsActivationRequest, String> {
-        self.base_activation_request().and_then(|request| {
-            request.with_transient_runtime(
-                &self.transient_bootstrap,
-                &self.transient_helper,
-                &self.user_root,
-            )
-        })
+        self.base_activation_request()
+            .and_then(|request| request.with_transient_cdp(&self.transient_helper, &self.user_root))
     }
 
     pub fn installed_activation_request(&self) -> Result<WindowsActivationRequest, String> {
@@ -212,7 +205,6 @@ pub fn prepare_windows_open(
     let session = create_windows_session(user_root)?;
     let prepared = (|| {
         copy_windows_settings(&session, source_home)?;
-        let transient_bootstrap = publish_windows_activation_bootstrap(user_root)?;
         let helper_source = std::env::current_exe()
             .map_err(|error| format!("cannot locate the running Incodex executable: {error}"))?;
         let transient_helper =
@@ -247,7 +239,6 @@ pub fn prepare_windows_open(
                 profile_mask,
             },
             user_root: user_root.to_path_buf(),
-            transient_bootstrap,
             transient_helper,
         })
     })();

@@ -355,18 +355,16 @@ impl WindowsActivationRequest {
         })
     }
 
-    pub fn with_transient_runtime(
+    pub fn with_transient_cdp(
         mut self,
-        bootstrap: &Path,
         debugger_executable: &Path,
         user_root: &Path,
     ) -> Result<Self, String> {
-        let mut environment = self
+        let environment = self
             .claimed_environment
             .iter()
             .map(|(name, value)| (name.clone(), OsString::from(value)))
             .collect::<BTreeMap<_, _>>();
-        environment.insert("NODE_OPTIONS".to_string(), node_require_option(bootstrap)?);
         self.transient_debug_environment = Some(environment_block(environment)?);
         self.transient_debugger_executable = Some(debugger_executable.to_path_buf());
         self.transient_user_root = Some(user_root.to_path_buf());
