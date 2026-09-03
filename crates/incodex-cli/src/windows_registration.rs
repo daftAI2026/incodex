@@ -288,8 +288,8 @@ where
         ));
     }
     let package_is_current = package_is_installed(&evidence.package_full_name)?;
-    let installed_state = read_windows_install_state(user_root)?;
-    let installed_evidence = read_windows_debug_registration(user_root)?;
+    let installed_state = read_windows_install_state(user_root).ok().flatten();
+    let installed_evidence = read_windows_debug_registration(user_root).ok().flatten();
     let installed_state_to_restore = installed_state.as_ref().filter(|state| {
         package_is_current
             && state.desired_enabled()

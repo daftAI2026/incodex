@@ -19,10 +19,11 @@ use crate::windows_install_state::{
 };
 use crate::windows_process::running_package_process_ids;
 use crate::windows_registration::{
-    read_windows_debug_registration, recover_transient_windows_debug_registration_with_restore,
-    registration_matches_install_state, retire_windows_debug_registration,
-    retire_windows_debug_registration_file, stage_installed_windows_debug_registration,
-    transient_windows_debug_registration_exists, WindowsDebugRegistrationEvidence,
+    read_transient_windows_debug_registration, read_windows_debug_registration,
+    recover_transient_windows_debug_registration_with_restore, registration_matches_install_state,
+    retire_windows_debug_registration, retire_windows_debug_registration_file,
+    stage_installed_windows_debug_registration, transient_windows_debug_registration_exists,
+    WindowsDebugRegistrationEvidence,
 };
 use crate::windows_runtime::publish_windows_runtime;
 use crate::windows_system::windows_path_for_display;
@@ -371,7 +372,12 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
     let user_root = profile.join(".incodex");
     let durable_state = read_windows_install_state_for_uninstall(&user_root);
     let registration_evidence = read_windows_debug_registration(&user_root);
-    let approval = WindowsUninstallApproval::from_snapshots(&durable_state, &registration_evidence);
+    let transient_registration_evidence = read_transient_windows_debug_registration(&user_root);
+    let approval = WindowsUninstallApproval::from_snapshots(
+        &durable_state,
+        &registration_evidence,
+        &transient_registration_evidence,
+    );
     let discovered_app = discover_codex_package();
     print_uninstall_plan(discovered_app.as_ref().ok(), &approval);
     if let Err(error) = &durable_state {
@@ -388,6 +394,17 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
             "{}",
             format_warn(
                 &format!("Debugger registration recovery evidence is unreadable: {error}"),
+                None
+            )
+        );
+    }
+    if let Err(error) = &transient_registration_evidence {
+        println!(
+            "{}",
+            format_warn(
+                &format!(
+                    "Transient debugger registration recovery evidence is unreadable: {error}"
+                ),
                 None
             )
         );
@@ -453,28 +470,34 @@ pub enum WindowsUninstallOutcome {
 pub struct WindowsUninstallApproval {
     package_full_name: Option<String>,
     registration_id: Option<String>,
+    transient_package_full_name: Option<String>,
+    transient_registration_id: Option<String>,
 }
 
 impl WindowsUninstallApproval {
     fn from_snapshots(
         state: &Result<Option<WindowsInstallState>, String>,
         evidence: &Result<Option<WindowsDebugRegistrationEvidence>, String>,
+        transient_evidence: &Result<Option<WindowsDebugRegistrationEvidence>, String>,
     ) -> Self {
-        if let Ok(Some(state)) = state {
-            return Self {
-                package_full_name: Some(state.package_full_name.clone()),
-                registration_id: Some(state.registration_id.clone()),
-            };
-        }
-        if let Ok(Some(evidence)) = evidence {
-            return Self {
-                package_full_name: Some(evidence.package_full_name.clone()),
-                registration_id: Some(evidence.registration_id.clone()),
-            };
-        }
+        let primary = match (state, evidence) {
+            (Ok(Some(state)), _) => Some((&state.package_full_name, &state.registration_id)),
+            (_, Ok(Some(evidence))) => {
+                Some((&evidence.package_full_name, &evidence.registration_id))
+            }
+            _ => None,
+        };
+        let transient = transient_evidence
+            .as_ref()
+            .ok()
+            .and_then(Option::as_ref)
+            .map(|evidence| (&evidence.package_full_name, &evidence.registration_id));
+        let displayed = primary.or(transient);
         Self {
-            package_full_name: None,
-            registration_id: None,
+            package_full_name: displayed.map(|(package, _)| package.clone()),
+            registration_id: displayed.map(|(_, registration)| registration.clone()),
+            transient_package_full_name: transient.map(|(package, _)| package.clone()),
+            transient_registration_id: transient.map(|(_, registration)| registration.clone()),
         }
     }
 }
@@ -484,17 +507,21 @@ pub fn capture_windows_uninstall_approval(
 ) -> Result<WindowsUninstallApproval, String> {
     let state = read_windows_install_state_for_uninstall(user_root);
     let evidence = read_windows_debug_registration(user_root);
-    let approval = WindowsUninstallApproval::from_snapshots(&state, &evidence);
-    if approval.package_full_name.is_some() || (state.is_ok() && evidence.is_ok()) {
+    let transient_evidence = read_transient_windows_debug_registration(user_root);
+    let approval = WindowsUninstallApproval::from_snapshots(&state, &evidence, &transient_evidence);
+    if approval.package_full_name.is_some()
+        || (state.is_ok() && evidence.is_ok() && transient_evidence.is_ok())
+    {
         return Ok(approval);
     }
-    match (state, evidence) {
-        (Err(state_error), Err(evidence_error)) => Err(format!(
-            "{state_error}; Windows debugger registration evidence is also unreadable: {evidence_error}"
-        )),
-        (Err(error), _) | (_, Err(error)) => Err(error),
-        _ => Ok(approval),
-    }
+    let mut errors = [state.err(), evidence.err(), transient_evidence.err()]
+        .into_iter()
+        .flatten();
+    let Some(first) = errors.next() else {
+        return Ok(approval);
+    };
+    let detail = errors.fold(first, |detail, error| format!("{detail}; {error}"));
+    Err(detail)
 }
 
 pub fn uninstall_windows_runtime_approved_with<R, P, D>(
@@ -541,7 +568,12 @@ where
     let _transaction = acquire_windows_install_state()?;
     let current_state = read_windows_install_state_for_uninstall(user_root);
     let current_evidence = read_windows_debug_registration(user_root);
-    let current = WindowsUninstallApproval::from_snapshots(&current_state, &current_evidence);
+    let current_transient_evidence = read_transient_windows_debug_registration(user_root);
+    let current = WindowsUninstallApproval::from_snapshots(
+        &current_state,
+        &current_evidence,
+        &current_transient_evidence,
+    );
     if current != *approved {
         return Err(
             "Windows uninstall target changed since confirmation; review the plan and retry"
@@ -873,14 +905,29 @@ fn format_uninstall_plan(
         .filter(|app| app.package_full_name == package)
         .map(|app| windows_path_for_display(&app.executable))
         .unwrap_or_else(|| "Unavailable".to_string());
-    [
+    let mut lines = vec![
         format_step("Uninstall", None),
         format_kv("Package", package, None),
         format_kv("Registration", registration, None),
-        format_kv("App", &executable, None),
-        format_warn("The Microsoft Store package is not modified.", None),
-    ]
-    .join("\n")
+    ];
+    if let (Some(transient_package), Some(transient_registration)) = (
+        approval.transient_package_full_name.as_deref(),
+        approval.transient_registration_id.as_deref(),
+    ) {
+        if transient_package != package || transient_registration != registration {
+            lines.push(format_kv(
+                "Transient",
+                &format!("{transient_package} / {transient_registration}"),
+                None,
+            ));
+        }
+    }
+    lines.push(format_kv("App", &executable, None));
+    lines.push(format_warn(
+        "The Microsoft Store package is not modified.",
+        None,
+    ));
+    lines.join("\n")
 }
 
 fn uninstall_plan_package<'a>(
@@ -928,7 +975,8 @@ mod tests {
             architecture: "X64".to_string(),
         };
 
-        let approval = WindowsUninstallApproval::from_snapshots(&Ok(None), &Ok(Some(evidence)));
+        let approval =
+            WindowsUninstallApproval::from_snapshots(&Ok(None), &Ok(Some(evidence)), &Ok(None));
         assert_eq!(
             uninstall_plan_package(Some(&discovered), &approval),
             "OpenAI.Codex_1.2.3.4_x64__publisher"
