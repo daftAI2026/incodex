@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use incodex_cli::macos_keychain_assets::{
     authorize_registration, bundled_helper_bytes, bundled_provider_bytes,
     ensure_bundled_registration, ensure_registration, install_keychain_provider,
-    KeychainAuthorization,
+    read_registration, KeychainAuthorization,
 };
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
@@ -127,12 +127,20 @@ fn helper_authorization_is_explicit_silent_and_distinguishes_a_missing_key() {
     .unwrap();
     fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
     let registration = ensure_registration(&root, &app, &helper).unwrap();
+    assert!(!registration.authorization_ready);
 
     assert_eq!(
-        authorize_registration(&registration).unwrap(),
+        authorize_registration(&root, &registration).unwrap(),
         KeychainAuthorization::Authorized
     );
     assert_eq!(fs::read(&marker).unwrap(), b"authorized");
+    assert!(
+        read_registration(&root)
+            .unwrap()
+            .unwrap()
+            .authorization_ready,
+        "successful foreground authorization must durably enable the provider for later background recovery"
+    );
 
     let missing_root = home.join("missing-root");
     let missing = home.join("missing-helper");
@@ -140,8 +148,15 @@ fn helper_authorization_is_explicit_silent_and_distinguishes_a_missing_key() {
     fs::set_permissions(&missing, fs::Permissions::from_mode(0o700)).unwrap();
     let registration = ensure_registration(&missing_root, &app, &missing).unwrap();
     assert_eq!(
-        authorize_registration(&registration).unwrap(),
+        authorize_registration(&missing_root, &registration).unwrap(),
         KeychainAuthorization::ItemMissing
+    );
+    assert!(
+        !read_registration(&missing_root)
+            .unwrap()
+            .unwrap()
+            .authorization_ready,
+        "a missing storage key must not enable a provider that cannot yet serve the official query"
     );
 
     fs::remove_dir_all(home).unwrap();
@@ -184,6 +199,10 @@ fn install_transaction_owns_provider_placement_and_failure_rollback() {
     assert!(
         transaction[provider..].contains("rollback_install"),
         "provider failure must enter the same durable rollback path as ASAR/signing failures"
+    );
+    assert!(
+        transaction[..provider].contains("authorization_ready"),
+        "the staged host must load the provider only after the stable helper has been durably authorized"
     );
     assert!(
         implementation.contains("Contents/Frameworks/Codex Framework.framework")
