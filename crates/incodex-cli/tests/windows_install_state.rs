@@ -9,7 +9,7 @@ use incodex_cli::windows_helper::publish_windows_transient_helper;
 use incodex_cli::windows_install::{
     capture_windows_uninstall_approval, install_windows_runtime_with,
     uninstall_windows_runtime_approved_with, uninstall_windows_runtime_with,
-    WindowsUninstallOutcome,
+    uninstall_windows_runtime_with_restore, WindowsUninstallOutcome,
 };
 use incodex_cli::windows_install_state::{
     acquire_windows_install_state, read_windows_install_state, stage_windows_install_state,
@@ -173,6 +173,53 @@ fn abandoned_transient_open_restores_the_installed_registration() {
         .join("windows-transient-registration.json")
         .exists());
     fs::remove_dir_all(user_root).expect("remove abandoned override fixture");
+}
+
+#[test]
+fn uninstall_restores_an_abandoned_open_before_removing_the_installation() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    install_windows_runtime_with(
+        &user_root,
+        package,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .expect("install fixture Runtime");
+    let transient = publish_windows_transient_helper(&user_root, &helper)
+        .expect("publish transient open helper");
+    stage_transient_windows_debug_registration(&user_root, package, &transient.executable)
+        .expect("stage abandoned transient open");
+
+    let mut restore_calls = 0;
+    let mut disable_calls = 0;
+    let outcome = uninstall_windows_runtime_with_restore(
+        &user_root,
+        |_| Ok(Vec::new()),
+        |_| Ok(true),
+        |_| {
+            disable_calls += 1;
+            Ok(())
+        },
+        |_| {
+            restore_calls += 1;
+            Ok(())
+        },
+    )
+    .expect("recover abandoned open, then uninstall");
+
+    assert_eq!(outcome, WindowsUninstallOutcome::Removed);
+    assert_eq!(restore_calls, 1);
+    assert_eq!(disable_calls, 1);
+    assert!(!user_root.join("windows-registration.json").exists());
+    assert!(!user_root
+        .join("windows-transient-registration.json")
+        .exists());
+    fs::remove_dir_all(user_root).expect("remove recovered uninstall fixture");
 }
 
 #[test]
