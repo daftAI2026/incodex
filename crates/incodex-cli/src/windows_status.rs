@@ -531,6 +531,34 @@ mod tests {
     }
 
     #[test]
+    fn transient_registration_beside_an_install_requires_recovery() {
+        let sequence = STATUS_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let user_root = std::env::temp_dir().join(format!(
+            "incodex-windows-status-recovery-overlay-{}-{sequence}",
+            std::process::id()
+        ));
+        let (state, _) = enabled_install_fixture(&user_root, true);
+        let helper_source = std::env::current_exe().expect("test helper source");
+        let helper = publish_windows_transient_helper(&user_root, &helper_source)
+            .expect("publish fixture transient helper");
+        stage_transient_windows_debug_registration(
+            &user_root,
+            &state.package_full_name,
+            &helper.executable,
+        )
+        .expect("stage transient registration beside installed state");
+
+        let report = WindowsIntegrationStatus::inspect(&user_root, Some(&state.package_full_name))
+            .expect("inspect transient overlay");
+        let text = format_integration_status(&report);
+
+        assert!(!report.installed, "transient overlay was reported healthy");
+        assert!(text.to_ascii_lowercase().contains("transient"), "{text}");
+        assert!(text.to_ascii_lowercase().contains("recovery"), "{text}");
+        std::fs::remove_dir_all(user_root).expect("remove transient overlay fixture");
+    }
+
+    #[test]
     fn recovery_phase_with_installed_registration_reports_recovery() {
         let sequence = STATUS_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let user_root = std::env::temp_dir().join(format!(
