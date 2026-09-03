@@ -92,6 +92,22 @@ pub fn ensure_bundled_registration(
     ensure_registration_with(root, app_path, || Ok(BUNDLED_HELPER_BYTES.to_vec()))
 }
 
+pub fn refresh_bundled_registration_if_present(root: &Path) -> Result<bool, String> {
+    if read_registration(root)?.is_none() {
+        return Ok(false);
+    }
+    let path = registration_path(root);
+    let _lock = acquire_target_lock(root, &path, "macos-keychain-registration", None)?;
+    let Some(current) = read_registration(root)? else {
+        return Ok(false);
+    };
+    let previous_hash = current.helper_sha256.clone();
+    let app_path = current.app_path.clone();
+    let refreshed =
+        ensure_registration_locked(root, &app_path, || Ok(BUNDLED_HELPER_BYTES.to_vec()))?;
+    Ok(refreshed.helper_sha256 != previous_hash)
+}
+
 pub fn bundled_helper_bytes() -> &'static [u8] {
     BUNDLED_HELPER_BYTES
 }
@@ -361,6 +377,19 @@ where
         "macos-keychain-registration",
         None,
     )?;
+
+    ensure_registration_locked(root, app_path, load_helper)
+}
+
+fn ensure_registration_locked<F>(
+    root: &Path,
+    app_path: &Path,
+    load_helper: F,
+) -> Result<KeychainRegistration, String>
+where
+    F: FnOnce() -> Result<Vec<u8>, String>,
+{
+    let registration_path = registration_path(root);
 
     let current = match read_registration(root)? {
         Some(current) => Some(if current.authorization_ready {

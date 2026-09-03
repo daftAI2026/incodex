@@ -85,6 +85,10 @@ pub fn run_runtime(parsed: &ParsedCli) -> Result<(), String> {
     let helper_warning = current_exe().and_then(|helper| {
         crate::macos_update_restore::refresh_registered_helper(&user_root(), &helper).map(|_| ())
     });
+    #[cfg(target_os = "macos")]
+    let keychain_warning =
+        crate::macos_keychain_assets::refresh_bundled_registration_if_present(&user_root())
+            .map(|_| ());
     if pending_runtime_matches(&identity) {
         complete_update_notice();
     }
@@ -104,6 +108,16 @@ pub fn run_runtime(parsed: &ParsedCli) -> Result<(), String> {
             "{}",
             format_warn(
                 &format!("Automatic Codex update recovery was not refreshed: {error}"),
+                None,
+            )
+        );
+    }
+    #[cfg(target_os = "macos")]
+    if let Err(error) = keychain_warning {
+        println!(
+            "{}",
+            format_warn(
+                &format!("Keychain continuity helper was not refreshed: {error}"),
                 None,
             )
         );
