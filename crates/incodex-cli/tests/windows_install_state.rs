@@ -223,6 +223,87 @@ fn uninstall_restores_an_abandoned_open_before_removing_the_installation() {
 }
 
 #[test]
+fn uninstall_disables_an_abandoned_open_when_the_installed_helper_is_missing() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    let installed = install_windows_runtime_with(
+        &user_root,
+        package,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .expect("install fixture Runtime");
+    let transient = publish_windows_transient_helper(&user_root, &helper)
+        .expect("publish transient open helper");
+    stage_transient_windows_debug_registration(&user_root, package, &transient.executable)
+        .expect("stage abandoned transient open");
+    fs::remove_file(&installed.helper_path).expect("remove installed helper");
+
+    let mut disable_calls = 0;
+    let outcome = uninstall_windows_runtime_with_restore(
+        &user_root,
+        |_| Ok(Vec::new()),
+        |_| Ok(true),
+        |_| {
+            disable_calls += 1;
+            Ok(())
+        },
+        |_| panic!("a missing installed helper cannot be restored"),
+    )
+    .expect("disable transient registration and recover uninstall");
+
+    assert_eq!(outcome, WindowsUninstallOutcome::Removed);
+    assert_eq!(disable_calls, 2);
+    assert!(!user_root
+        .join("windows-transient-registration.json")
+        .exists());
+    assert!(!user_root.join("windows-install.json").exists());
+    fs::remove_dir_all(user_root).expect("remove missing-helper fixture");
+}
+
+#[test]
+fn uninstall_refuses_a_transient_registration_replaced_after_approval() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    let transient = publish_windows_transient_helper(&user_root, &helper)
+        .expect("publish transient open helper");
+    stage_transient_windows_debug_registration(&user_root, package, &transient.executable)
+        .expect("stage first transient registration");
+    let approved =
+        capture_windows_uninstall_approval(&user_root).expect("capture displayed transient target");
+    recover_transient_windows_debug_registration_with_restore(
+        &user_root,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| panic!("an absent package has no debugger registration to disable"),
+        |_| panic!("a transient-only registration has no installed state to restore"),
+    )
+    .expect("retire first transient registration");
+    stage_transient_windows_debug_registration(&user_root, package, &transient.executable)
+        .expect("stage replacement transient registration");
+
+    let error = uninstall_windows_runtime_approved_with(
+        &user_root,
+        &approved,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+    )
+    .expect_err("confirmation must be bound to the transient registration identity");
+
+    assert!(error.contains("changed since confirmation"), "{error}");
+    assert!(user_root
+        .join("windows-transient-registration.json")
+        .is_file());
+    fs::remove_dir_all(user_root).expect("remove transient approval fixture");
+}
+
+#[test]
 fn install_detects_a_package_started_during_registration() {
     let user_root = scratch_root();
     let helper = std::env::current_exe().expect("test helper path");
