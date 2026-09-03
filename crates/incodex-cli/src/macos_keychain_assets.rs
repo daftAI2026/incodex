@@ -1,10 +1,11 @@
 use std::fs;
 use std::fs::OpenOptions;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use incodex_macos::add_load_dylib;
 use incodex_transaction::acquire_target_lock;
@@ -21,6 +22,8 @@ const HELPER_FILE_MODE: u32 = 0o700;
 const HELPER_FILE_NAME: &str = "incodex-keychain-helper";
 const PROVIDER_FILE_MODE: u32 = 0o644;
 const PROVIDER_FILE_NAME: &str = "IncodexKeyProvider.dylib";
+const AUTHORIZATION_TIMEOUT: Duration = Duration::from_secs(120);
+const AUTHORIZATION_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const PROVIDER_HELPER_HASH_MARKER: &[u8; 64] =
     b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const FRAMEWORK_RELATIVE_PATH: &str =
@@ -80,29 +83,87 @@ pub fn authorize_registration(
     root: &Path,
     registration: &KeychainRegistration,
 ) -> Result<KeychainAuthorization, String> {
+    authorize_registration_with_timeout(root, registration, AUTHORIZATION_TIMEOUT)
+}
+
+fn authorize_registration_with_timeout(
+    root: &Path,
+    registration: &KeychainRegistration,
+    timeout: Duration,
+) -> Result<KeychainAuthorization, String> {
     let current = read_registration(root)?
         .ok_or("macOS Keychain registration disappeared before authorization")?;
     ensure_same_registration_identity(&current, registration)?;
-    let output = Command::new(&registration.helper_path)
+    let mut command = Command::new(&registration.helper_path);
+    command
         .arg("--authorize")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .output()
-        .map_err(|error| format!("cannot start macOS Keychain authorization: {error}"))?;
-    if !output.stdout.is_empty() || !output.stderr.is_empty() {
+        .process_group(0);
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            persist_authorization_readiness(root, registration, false)?;
+            return Err(format!(
+                "cannot start macOS Keychain authorization: {error}"
+            ));
+        }
+    };
+    let started = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if started.elapsed() < timeout => {
+                std::thread::sleep(
+                    AUTHORIZATION_POLL_INTERVAL.min(timeout.saturating_sub(started.elapsed())),
+                );
+            }
+            Ok(None) => {
+                terminate_authorization_child(&mut child);
+                persist_authorization_readiness(root, registration, false)?;
+                return Err("macOS Keychain authorization timed out".into());
+            }
+            Err(error) => {
+                terminate_authorization_child(&mut child);
+                persist_authorization_readiness(root, registration, false)?;
+                return Err(format!(
+                    "cannot wait for macOS Keychain authorization: {error}"
+                ));
+            }
+        }
+    };
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    if let Some(mut pipe) = child.stdout.take() {
+        pipe.read_to_end(&mut stdout)
+            .map_err(|error| format!("cannot read macOS Keychain authorization output: {error}"))?;
+    }
+    if let Some(mut pipe) = child.stderr.take() {
+        pipe.read_to_end(&mut stderr)
+            .map_err(|error| format!("cannot read macOS Keychain authorization errors: {error}"))?;
+    }
+    if !stdout.is_empty() || !stderr.is_empty() {
+        persist_authorization_readiness(root, registration, false)?;
         return Err("macOS Keychain authorization helper emitted unexpected output".into());
     }
-    let authorization = match output.status.code() {
+    let authorization = match status.code() {
         Some(0) => KeychainAuthorization::Authorized,
         Some(44) => KeychainAuthorization::ItemMissing,
-        Some(68) => return Err("macOS Keychain authorization was not granted".into()),
+        Some(68) => {
+            persist_authorization_readiness(root, registration, false)?;
+            return Err("macOS Keychain authorization was not granted".into());
+        }
         Some(code) => {
+            persist_authorization_readiness(root, registration, false)?;
             return Err(format!(
                 "macOS Keychain authorization helper failed with exit code {code}"
-            ))
+            ));
         }
-        None => return Err("macOS Keychain authorization helper ended by signal".into()),
+        None => {
+            persist_authorization_readiness(root, registration, false)?;
+            return Err("macOS Keychain authorization helper ended by signal".into());
+        }
     };
     persist_authorization_readiness(
         root,
@@ -110,6 +171,17 @@ pub fn authorize_registration(
         authorization == KeychainAuthorization::Authorized,
     )?;
     Ok(authorization)
+}
+
+fn terminate_authorization_child(child: &mut Child) {
+    let pid = child.id() as i32;
+    if pid > 0 {
+        unsafe {
+            libc::kill(-pid, libc::SIGKILL);
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn persist_authorization_readiness(
@@ -433,12 +505,9 @@ mod tests {
         let registration = ensure_registration(&root, &app, &helper).unwrap();
 
         let started = Instant::now();
-        let error = authorize_registration_with_timeout(
-            &root,
-            &registration,
-            Duration::from_millis(150),
-        )
-        .unwrap_err();
+        let error =
+            authorize_registration_with_timeout(&root, &registration, Duration::from_millis(150))
+                .unwrap_err();
         assert!(error.contains("timed out"), "{error}");
         assert!(started.elapsed() < Duration::from_secs(1));
         std::thread::sleep(Duration::from_millis(1_100));
