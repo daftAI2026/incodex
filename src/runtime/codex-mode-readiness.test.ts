@@ -43,6 +43,18 @@ describe("Codex mode readiness", () => {
     expect(decideCodexModeAction(page, false, 0)).toBe("wait");
   });
 
+  test("bounds a settled page whose mode control is temporarily absent", () => {
+    const page = deriveCodexModePageState({
+      modeAvailable: false,
+      modeLabel: "",
+      officialBlockerVisible: false,
+    });
+
+    expect(page).toBe("missing");
+    expect(decideCodexModeAction(page, false, 0, 1)).toBe("wait");
+    expect(decideCodexModeAction(page, false, 0, 3)).toBe("select-fallback");
+  });
+
   test("uses Control+3 only after repeated stable evidence that the primary route missed Codex", () => {
     const page = deriveCodexModePageState({
       modeAvailable: true,
@@ -133,6 +145,46 @@ describe("Codex mode readiness", () => {
     });
 
     readiness.observe(win);
+    await runNext(tasks);
+
+    expect(fallbacks).toHaveLength(1);
+    expect(tasks).toHaveLength(0);
+  });
+
+  test("does not poll forever when a settled page never exposes its mode control", async () => {
+    const tasks: ScheduledTask[] = [];
+    const fallbacks: unknown[] = [];
+    const win = {
+      isDestroyed: () => false,
+      isFocused: () => true,
+      once: () => {},
+      webContents: {
+        executeJavaScript: async () => ({
+          modeAvailable: false,
+          modeLabel: "",
+          officialBlockerVisible: false,
+        }),
+        isDestroyed: () => false,
+      },
+    };
+    const readiness = createCodexModeReadiness({
+      isIncognito: () => true,
+      log: () => {},
+      primaryOtherChecksRequired: 3,
+      selectFallback: (selectedWindow: unknown) => {
+        fallbacks.push(selectedWindow);
+        return false;
+      },
+      scheduleTimer: (callback: () => void, delay: number) => {
+        const task = { callback, delay };
+        tasks.push(task);
+        return task;
+      },
+    });
+
+    readiness.observe(win);
+    await runNext(tasks);
+    await runNext(tasks);
     await runNext(tasks);
 
     expect(fallbacks).toHaveLength(1);
