@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖 AppKit 进程生命周期、受控 pending/registration 状态与内容寻址 Incodex Helper
+ * [INPUT]: 依赖 AppKit 进程生命周期、libproc 可执行文件身份、受控 pending/registration 状态与内容寻址 Incodex Helper
  * [OUTPUT]: 提供 Sparkle application bundle 替身，覆盖交互式重启与后台更新后的静默恢复
  * [POS]: macOS 更新链的原生 Coordinator；只编排退出和恢复，不实现 ASAR 修改或签名策略
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -9,6 +9,7 @@
 #import <Foundation/Foundation.h>
 #import <dispatch/dispatch.h>
 #import <fcntl.h>
+#import <libproc.h>
 #import <signal.h>
 #import <sys/file.h>
 #import <sys/stat.h>
@@ -34,6 +35,19 @@
 
 - (BOOL)processIsRunning:(pid_t)pid {
     return pid > 0 && (kill(pid, 0) == 0 || errno == EPERM);
+}
+
+- (BOOL)coordinatorProcessOwnsPending:(pid_t)pid {
+    if (![self processIsRunning:pid]) return NO;
+
+    char executable[PROC_PIDPATHINFO_MAXSIZE] = {0};
+    if (proc_pidpath(pid, executable, sizeof(executable)) <= 0) return NO;
+    NSString *ownerPath = [NSString stringWithUTF8String:executable];
+    NSString *coordinatorPath = NSBundle.mainBundle.executablePath;
+    if (ownerPath.length == 0 || coordinatorPath.length == 0) return NO;
+    ownerPath = ownerPath.stringByStandardizingPath.stringByResolvingSymlinksInPath;
+    coordinatorPath = coordinatorPath.stringByStandardizingPath.stringByResolvingSymlinksInPath;
+    return [ownerPath isEqualToString:coordinatorPath];
 }
 
 - (BOOL)writeJSON:(NSDictionary *)body toPath:(NSString *)path {
@@ -64,7 +78,7 @@
         NSString *handoffId = current[@"handoffId"];
         if ([handoffId isKindOfClass:NSString.class] &&
             ![handoffId isEqual:self.handoffId] && [owner isKindOfClass:NSNumber.class] &&
-            [self processIsRunning:owner.intValue]) return NO;
+            [self coordinatorProcessOwnsPending:owner.intValue]) return NO;
         persisted = [self writeJSON:[self pendingSnapshot] toPath:self.pendingPath];
         return persisted;
     }];
@@ -294,7 +308,7 @@
         NSNumber *owner = current[@"coordinatorPid"];
         if ([owner isKindOfClass:NSNumber.class] &&
             owner.intValue != NSProcessInfo.processInfo.processIdentifier &&
-            [self processIsRunning:owner.intValue]) return NO;
+            [self coordinatorProcessOwnsPending:owner.intValue]) return NO;
         NSMutableDictionary *next = current.mutableCopy;
         NSString *handoffId = next[@"handoffId"];
         if (![handoffId isKindOfClass:NSString.class] || handoffId.length == 0) {
