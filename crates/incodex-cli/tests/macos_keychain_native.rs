@@ -64,6 +64,9 @@ fn bundled_keychain_provider_is_a_normal_loader_relative_dylib() {
 
     let bytes = fs::read(&provider).unwrap();
     assert_eq!(&bytes[..4], &[0xcf, 0xfa, 0xed, 0xfe]);
+    assert!(bytes.windows(64).any(|window| {
+        window == b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    }));
 
     let id = Command::new("/usr/bin/otool")
         .arg("-D")
@@ -206,17 +209,24 @@ fn provider_placement_mutates_only_a_staged_framework_and_rolls_back_local_failu
     )
     .unwrap();
 
-    install_keychain_provider(&app).unwrap();
+    let registered_helper_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    install_keychain_provider(&app, registered_helper_sha256).unwrap();
 
     let installed = fs::read(&framework).unwrap();
     assert_eq!(installed.len(), original.len());
     assert_eq!(&installed[0x200..], &original[0x200..]);
     assert_eq!(read_u32(&installed, 16), 4);
     assert!(contains_provider_command(&installed));
-    assert_eq!(
-        fs::read(version.join("IncodexKeyProvider.dylib")).unwrap(),
-        bundled_provider_bytes()
+    let installed_provider = fs::read(version.join("IncodexKeyProvider.dylib")).unwrap();
+    assert!(
+        installed_provider
+            .windows(64)
+            .any(|window| window == registered_helper_sha256.as_bytes()),
+        "installed provider must bind to the already-registered stable helper generation"
     );
+    assert!(!installed_provider.windows(64).any(|window| {
+        window == b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    }));
 
     let broken_app = home.join("Broken.app");
     let broken_dir = broken_app.join("Contents/Frameworks/Codex Framework.framework");
@@ -225,9 +235,18 @@ fn provider_placement_mutates_only_a_staged_framework_and_rolls_back_local_failu
     fs::write(&broken_framework, b"not a Mach-O").unwrap();
     let before = fs::read(&broken_framework).unwrap();
 
-    assert!(install_keychain_provider(&broken_app).is_err());
+    assert!(install_keychain_provider(&broken_app, registered_helper_sha256).is_err());
     assert_eq!(fs::read(&broken_framework).unwrap(), before);
     assert!(!broken_dir.join("IncodexKeyProvider.dylib").exists());
+
+    let invalid_app = home.join("InvalidHash.app");
+    let invalid_dir = invalid_app.join("Contents/Frameworks/Codex Framework.framework");
+    fs::create_dir_all(&invalid_dir).unwrap();
+    let invalid_framework = invalid_dir.join("Codex Framework");
+    fs::write(&invalid_framework, &original).unwrap();
+    assert!(install_keychain_provider(&invalid_app, "not-a-sha256").is_err());
+    assert_eq!(fs::read(&invalid_framework).unwrap(), original);
+    assert!(!invalid_dir.join("IncodexKeyProvider.dylib").exists());
 
     fs::remove_dir_all(home).unwrap();
 }
