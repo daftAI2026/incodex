@@ -250,7 +250,10 @@ fn compile_production_test_provider(home: &Path, helper_sha256: &str) -> PathBuf
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let provider_source = manifest.join("native/macos_keychain_provider.c");
     let fishhook_source = manifest.join("native/fishhook.c");
-    let provider = home.join("IncodexKeyProviderProductionTest.dylib");
+    let provider = home.join(format!(
+        "IncodexKeyProviderProductionTest-{}.dylib",
+        &helper_sha256[..12]
+    ));
     let test_home = format!(
         "-DINCODEX_KEYCHAIN_TEST_HOME=\"{}\"",
         home.to_string_lossy()

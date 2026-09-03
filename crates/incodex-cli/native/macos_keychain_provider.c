@@ -20,7 +20,13 @@
 #include "fishhook.h"
 
 static const size_t kMaximumHelperOutput = 4096;
+#ifdef INCODEX_TESTING
 static const int64_t kHelperTimeoutMilliseconds = 2000;
+#else
+// 首次授权与系统原生 SecItemCopyMatching 一样允许用户完成密码提示；正常路径
+// 已由显式 install 预授权，通常不会消耗这段窗口。
+static const int64_t kHelperTimeoutMilliseconds = 120000;
+#endif
 typedef OSStatus (*CopyMatching)(CFDictionaryRef, CFTypeRef *);
 
 #ifndef INCODEX_KEYCHAIN_HELPER_SHA256
@@ -184,10 +190,14 @@ run_helper(const char *path, unsigned char *output, size_t capacity,
     }
     close(pipe_fds[0]);
 
-    if (!WIFEXITED(child_status) || WEXITSTATUS(child_status) != 0 ||
-        used == 0) {
+    if (!WIFEXITED(child_status)) {
         memset(output, 0, capacity);
         return 70;
+    }
+    int exit_status = WEXITSTATUS(child_status);
+    if (exit_status != 0 || used == 0) {
+        memset(output, 0, capacity);
+        return exit_status == 44 ? 44 : 70;
     }
     *length = used;
     return 0;
@@ -237,6 +247,10 @@ copy_matching_with_helper(CFDictionaryRef query, CFTypeRef *result,
     int helper_status = run_helper(helper_path, helper_output,
                                    sizeof(helper_output),
                                    &helper_output_length);
+    if (helper_status == 44) {
+        memset(helper_output, 0, sizeof(helper_output));
+        return errSecItemNotFound;
+    }
     if (helper_status != 0) {
         memset(helper_output, 0, sizeof(helper_output));
         return errSecAuthFailed;
