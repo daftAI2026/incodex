@@ -29,7 +29,8 @@ use crate::windows_launch::{
 };
 use crate::windows_process::{
     assign_debugged_process_to_job, process_command_line, resume_debugged_package_process,
-    snapshot_process_ids, WindowsPendingJob, WindowsProcessTree,
+    snapshot_process_ids, terminate_debugged_package_process, WindowsPendingJob,
+    WindowsProcessTree,
 };
 use crate::windows_registration::{
     retire_windows_debug_registration, stage_transient_windows_debug_registration,
@@ -849,13 +850,16 @@ pub fn try_run_package_debugger(arguments: &[String]) -> Option<Result<(), Strin
             .ok()
             .map(|command_line| windows_transient_debugger_route(job_name, &command_line))
             .transpose()?
-            .unwrap_or(WindowsDebuggerRoute::ResumeNormally);
+            .unwrap_or(WindowsDebuggerRoute::Reject);
         match route {
             WindowsDebuggerRoute::ResumeNormally => {
                 resume_debugged_package_process(package_full_name, process_id, thread_id)
             }
             WindowsDebuggerRoute::AssignToJob(job_name) => {
                 assign_debugged_process_to_job(&job_name, package_full_name, process_id, thread_id)
+            }
+            WindowsDebuggerRoute::Reject => {
+                terminate_debugged_package_process(package_full_name, process_id, thread_id)
             }
         }
         .map_err(|error| format!("Windows package debugger failed: {error}"))
@@ -889,6 +893,9 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
             }
             WindowsDebuggerRoute::AssignToJob(job_name) => {
                 assign_debugged_process_to_job(&job_name, &package_full_name, process_id, thread_id)
+            }
+            WindowsDebuggerRoute::Reject => {
+                terminate_debugged_package_process(&package_full_name, process_id, thread_id)
             }
         }
         .map_err(|error| format!("Windows installed debugger failed: {error}"))

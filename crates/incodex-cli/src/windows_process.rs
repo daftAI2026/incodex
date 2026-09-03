@@ -656,6 +656,25 @@ pub fn resume_debugged_package_process(
     Ok(())
 }
 
+pub(crate) fn terminate_debugged_package_process(
+    expected_package_full_name: &str,
+    process_id: u32,
+    thread_id: u32,
+) -> io::Result<()> {
+    const REQUIRED_ACCESS: u32 =
+        PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | 0x0010_0000;
+    let process = unsafe { OpenProcess(REQUIRED_ACCESS, 0, process_id) };
+    let process = OwnedHandle::from_nullable(process)?;
+    require_process_package_identity(process.raw(), expected_package_full_name)?;
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    let snapshot = OwnedHandle::from_snapshot(snapshot)?;
+    require_thread_owner(snapshot.raw(), thread_id, process_id)?;
+    if unsafe { TerminateProcess(process.raw(), 1) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    wait_handle(process.raw()).map(|_| ())
+}
+
 pub fn running_package_process_ids(expected_package_full_name: &str) -> io::Result<Vec<u32>> {
     let mut matches = Vec::new();
     for process_id in snapshot_process_ids()? {
