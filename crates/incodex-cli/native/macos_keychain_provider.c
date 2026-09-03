@@ -20,13 +20,9 @@
 #include "fishhook.h"
 
 static const size_t kMaximumHelperOutput = 4096;
-#ifdef INCODEX_TESTING
+// provider 位于 Codex 同步 Keychain 调用中，绝不能把用户交互等待塞进主线程。
+// 需要密码的授权只允许由显式 `incodex install` 在进程外预先完成。
 static const int64_t kHelperTimeoutMilliseconds = 2000;
-#else
-// 首次授权与系统原生 SecItemCopyMatching 一样允许用户完成密码提示；正常路径
-// 已由显式 install 预授权，通常不会消耗这段窗口。
-static const int64_t kHelperTimeoutMilliseconds = 120000;
-#endif
 typedef OSStatus (*CopyMatching)(CFDictionaryRef, CFTypeRef *);
 
 #ifndef INCODEX_KEYCHAIN_HELPER_SHA256
