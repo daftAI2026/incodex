@@ -83,12 +83,12 @@ fn transient_debugger_assigns_only_the_requested_isolated_capability() {
     assert_eq!(
         windows_transient_debugger_route(&job, "ChatGPT.exe codex://new?mode=codex")
             .expect("route official activation"),
-        WindowsDebuggerRoute::ResumeNormally
+        WindowsDebuggerRoute::Reject
     );
     assert_eq!(
         windows_transient_debugger_route(&job, &format!("ChatGPT.exe --user-data-dir={other}"))
             .expect("route unrelated isolated activation"),
-        WindowsDebuggerRoute::ResumeNormally
+        WindowsDebuggerRoute::Reject
     );
 }
 
