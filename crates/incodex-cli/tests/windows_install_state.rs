@@ -18,6 +18,7 @@ use incodex_cli::windows_install_state::{
 };
 use incodex_cli::windows_registration::{
     recover_transient_windows_debug_registration_with,
+    recover_transient_windows_debug_registration_with_restore,
     stage_transient_windows_debug_registration,
 };
 use incodex_cli::windows_runtime::publish_windows_runtime;
@@ -130,6 +131,48 @@ fn installed_registration_keeps_separate_transient_open_recovery_evidence() {
         .join("windows-transient-registration.json")
         .is_file());
     fs::remove_dir_all(user_root).expect("remove concurrent registration fixture");
+}
+
+#[test]
+fn abandoned_transient_open_restores_the_installed_registration() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    install_windows_runtime_with(
+        &user_root,
+        package,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .expect("install fixture Runtime");
+    let transient = publish_windows_transient_helper(&user_root, &helper)
+        .expect("publish transient open helper");
+    stage_transient_windows_debug_registration(&user_root, package, &transient.executable)
+        .expect("stage abandoned transient open");
+
+    let mut restored = false;
+    assert!(recover_transient_windows_debug_registration_with_restore(
+        &user_root,
+        |_| Ok(Vec::new()),
+        |_| Ok(true),
+        |_| panic!("an installed registration must be restored, not disabled"),
+        |registration| {
+            restored = true;
+            assert_eq!(registration.package_full_name(), package);
+            Ok(())
+        },
+    )
+    .expect("restore installed registration after abandoned open"));
+
+    assert!(restored);
+    assert!(user_root.join("windows-registration.json").is_file());
+    assert!(!user_root
+        .join("windows-transient-registration.json")
+        .exists());
+    fs::remove_dir_all(user_root).expect("remove abandoned override fixture");
 }
 
 #[test]
