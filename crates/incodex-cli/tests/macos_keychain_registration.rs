@@ -162,9 +162,13 @@ fn keychain_helper_source_change_never_silently_replaces_the_authorized_identity
 
     // A future Helper binary may be offered for an explicit migration, but an ordinary
     // Runtime/host refresh must not silently replace the identity already authorized by macOS.
-    let error =
-        ensure_registration(&fixture.root, &fixture.app, &fixture.keychain_helper_v2).unwrap_err();
-    assert!(error.contains("identity"), "{error}");
+    let observed =
+        ensure_registration(&fixture.root, &fixture.app, &fixture.keychain_helper_v2).unwrap();
+    assert_eq!(observed, original);
+    assert_eq!(
+        fs::read(&observed.helper_path).unwrap(),
+        b"stable keychain helper\n"
+    );
 
     assert_eq!(read_registration(&fixture.root).unwrap().unwrap(), original);
 }
