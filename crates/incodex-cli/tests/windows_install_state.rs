@@ -159,9 +159,9 @@ fn abandoned_transient_open_restores_the_installed_registration() {
         |_| Ok(Vec::new()),
         |_| Ok(true),
         |_| panic!("an installed registration must be restored, not disabled"),
-        |registration| {
+        |state| {
             restored = true;
-            assert_eq!(registration.package_full_name(), package);
+            assert_eq!(state.package_full_name, package);
             Ok(())
         },
     )

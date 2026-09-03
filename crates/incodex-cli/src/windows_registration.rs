@@ -16,6 +16,7 @@ use crate::windows_install_state::{
 use crate::windows_runtime::replace_private_file;
 
 const REGISTRATION_NAME: &str = "windows-registration.json";
+const TRANSIENT_REGISTRATION_NAME: &str = "windows-transient-registration.json";
 const REGISTRATION_SCHEMA: u32 = 1;
 const REGISTRATION_LIMIT: u64 = 32 * 1024;
 
@@ -79,7 +80,10 @@ fn stage_windows_debug_registration(
     verify_private_acl(&helper_path)?;
     let helper_sha256 = sha256_file(&helper_path)?;
     let user_root = ensure_private_windows_dir(user_root)?;
-    let state_path = user_root.join(REGISTRATION_NAME);
+    let state_path = user_root.join(match kind {
+        WindowsDebugRegistrationKind::Transient => TRANSIENT_REGISTRATION_NAME,
+        WindowsDebugRegistrationKind::Installed => REGISTRATION_NAME,
+    });
     match fs::symlink_metadata(&state_path) {
         Ok(_) => {
             return Err(format!(
@@ -113,7 +117,20 @@ fn stage_windows_debug_registration(
 pub fn read_windows_debug_registration(
     user_root: &Path,
 ) -> Result<Option<WindowsDebugRegistrationEvidence>, String> {
-    let Some((user_root, state_path, metadata)) = registration_file(user_root)? else {
+    read_windows_debug_registration_file(user_root, REGISTRATION_NAME)
+}
+
+fn read_transient_windows_debug_registration(
+    user_root: &Path,
+) -> Result<Option<WindowsDebugRegistrationEvidence>, String> {
+    read_windows_debug_registration_file(user_root, TRANSIENT_REGISTRATION_NAME)
+}
+
+fn read_windows_debug_registration_file(
+    user_root: &Path,
+    name: &str,
+) -> Result<Option<WindowsDebugRegistrationEvidence>, String> {
+    let Some((user_root, state_path, metadata)) = registration_file(user_root, name)? else {
         return Ok(None);
     };
     if metadata.len() > REGISTRATION_LIMIT {
@@ -143,16 +160,35 @@ pub(crate) fn retire_windows_debug_registration(
     user_root: &Path,
     expected_registration_id: &str,
 ) -> Result<(), String> {
-    let evidence = read_windows_debug_registration(user_root)?
-        .ok_or_else(|| "Windows debugger registration evidence does not exist".to_string())?;
-    if evidence.registration_id != expected_registration_id {
-        return Err("Windows debugger registration evidence changed".to_string());
+    for (name, evidence) in [
+        (
+            TRANSIENT_REGISTRATION_NAME,
+            read_transient_windows_debug_registration(user_root)?,
+        ),
+        (
+            REGISTRATION_NAME,
+            read_windows_debug_registration(user_root)?,
+        ),
+    ] {
+        if evidence
+            .as_ref()
+            .is_some_and(|evidence| evidence.registration_id == expected_registration_id)
+        {
+            return retire_windows_debug_registration_named_file(user_root, name);
+        }
     }
-    retire_windows_debug_registration_file(user_root)
+    Err("Windows debugger registration evidence changed or does not exist".to_string())
 }
 
 pub(crate) fn retire_windows_debug_registration_file(user_root: &Path) -> Result<(), String> {
-    let Some((_, state_path, _)) = registration_file(user_root)? else {
+    retire_windows_debug_registration_named_file(user_root, REGISTRATION_NAME)
+}
+
+fn retire_windows_debug_registration_named_file(
+    user_root: &Path,
+    name: &str,
+) -> Result<(), String> {
+    let Some((_, state_path, _)) = registration_file(user_root, name)? else {
         return Ok(());
     };
     fs::remove_file(&state_path).map_err(|error| {
@@ -171,31 +207,61 @@ pub(crate) fn retire_windows_debug_registration_file(user_root: &Path) -> Result
 
 pub fn recover_transient_windows_debug_registration_with<R, P, D>(
     user_root: &Path,
-    mut running_package_processes: R,
-    mut package_is_installed: P,
-    mut disable: D,
+    running_package_processes: R,
+    package_is_installed: P,
+    disable: D,
 ) -> Result<bool, String>
 where
     R: FnMut(&str) -> Result<Vec<u32>, std::io::Error>,
     P: FnMut(&str) -> Result<bool, String>,
     D: FnMut(&str) -> Result<(), String>,
 {
-    let Some(evidence) = read_windows_debug_registration(user_root)? else {
+    recover_transient_windows_debug_registration_with_restore(
+        user_root,
+        running_package_processes,
+        package_is_installed,
+        disable,
+        |_| {
+            Err(
+                "an installed Windows registration cannot be restored through this recovery path"
+                    .to_string(),
+            )
+        },
+    )
+}
+
+pub fn recover_transient_windows_debug_registration_with_restore<R, P, D, E>(
+    user_root: &Path,
+    mut running_package_processes: R,
+    mut package_is_installed: P,
+    mut disable: D,
+    mut enable_installed: E,
+) -> Result<bool, String>
+where
+    R: FnMut(&str) -> Result<Vec<u32>, std::io::Error>,
+    P: FnMut(&str) -> Result<bool, String>,
+    D: FnMut(&str) -> Result<(), String>,
+    E: FnMut(&WindowsInstallState) -> Result<(), String>,
+{
+    let Some(evidence) = read_transient_windows_debug_registration(user_root)? else {
+        let Some(evidence) = read_windows_debug_registration(user_root)? else {
+            return Ok(false);
+        };
+        if evidence.kind == WindowsDebugRegistrationKind::Installed {
+            let state = read_windows_install_state(user_root)?;
+            if state
+                .as_ref()
+                .is_some_and(|state| registration_matches_install_state(&evidence, state))
+            {
+                return Ok(false);
+            }
+            return Err(
+                "Windows Runtime registration requires `incodex uninstall` before this command"
+                    .to_string(),
+            );
+        }
         return Ok(false);
     };
-    if evidence.kind == WindowsDebugRegistrationKind::Installed {
-        let state = read_windows_install_state(user_root)?;
-        if state
-            .as_ref()
-            .is_some_and(|state| registration_matches_install_state(&evidence, state))
-        {
-            return Ok(false);
-        }
-        return Err(
-            "Windows Runtime registration requires `incodex uninstall` before this command"
-                .to_string(),
-        );
-    }
     let running = running_package_processes(&evidence.package_full_name)
         .map_err(|error| format!("cannot inspect running Windows Codex processes: {error}"))?;
     if !running.is_empty() {
@@ -208,7 +274,20 @@ where
                 .join(", ")
         ));
     }
-    if package_is_installed(&evidence.package_full_name)? {
+    let package_is_current = package_is_installed(&evidence.package_full_name)?;
+    let installed_state = read_windows_install_state(user_root)?;
+    let installed_evidence = read_windows_debug_registration(user_root)?;
+    let installed_state_to_restore = installed_state.as_ref().filter(|state| {
+        package_is_current
+            && state.desired_enabled()
+            && state.package_full_name == evidence.package_full_name
+            && installed_evidence
+                .as_ref()
+                .is_some_and(|installed| registration_matches_install_state(installed, state))
+    });
+    if let Some(state) = installed_state_to_restore {
+        enable_installed(state)?;
+    } else if package_is_current {
         disable(&evidence.package_full_name)?;
     }
     let running_after_disable = running_package_processes(&evidence.package_full_name)
@@ -242,7 +321,10 @@ pub(crate) fn registration_matches_install_state(
         && evidence.helper_sha256 == state.helper_sha256
 }
 
-fn registration_file(user_root: &Path) -> Result<Option<(PathBuf, PathBuf, fs::Metadata)>, String> {
+fn registration_file(
+    user_root: &Path,
+    name: &str,
+) -> Result<Option<(PathBuf, PathBuf, fs::Metadata)>, String> {
     require_local_disk_absolute(user_root, "Windows Incodex root")?;
     match fs::symlink_metadata(user_root) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -262,7 +344,7 @@ fn registration_file(user_root: &Path) -> Result<Option<(PathBuf, PathBuf, fs::M
     verify_private_acl(user_root)?;
     let user_root = fs::canonicalize(user_root)
         .map_err(|error| format!("cannot resolve Windows Incodex root: {error}"))?;
-    let state_path = user_root.join(REGISTRATION_NAME);
+    let state_path = user_root.join(name);
     let metadata = match fs::symlink_metadata(&state_path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -299,6 +381,20 @@ fn validate_evidence(evidence: &WindowsDebugRegistrationEvidence) -> Result<(), 
         .state_path
         .parent()
         .ok_or_else(|| "Windows debugger registration has no Incodex root".to_string())?;
+    let expected_name = match evidence.kind {
+        WindowsDebugRegistrationKind::Transient => TRANSIENT_REGISTRATION_NAME,
+        WindowsDebugRegistrationKind::Installed => REGISTRATION_NAME,
+    };
+    if evidence
+        .state_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        != Some(expected_name)
+    {
+        return Err(
+            "Windows debugger registration evidence path does not match its kind".to_string(),
+        );
+    }
     let helper_matches = match evidence.kind {
         WindowsDebugRegistrationKind::Transient => {
             evidence.helper_path

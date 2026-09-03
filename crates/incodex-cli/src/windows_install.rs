@@ -19,7 +19,7 @@ use crate::windows_install_state::{
 };
 use crate::windows_process::running_package_process_ids;
 use crate::windows_registration::{
-    read_windows_debug_registration, recover_transient_windows_debug_registration_with,
+    read_windows_debug_registration, recover_transient_windows_debug_registration_with_restore,
     registration_matches_install_state, retire_windows_debug_registration,
     retire_windows_debug_registration_file, stage_installed_windows_debug_registration,
     WindowsDebugRegistrationEvidence,
@@ -47,11 +47,15 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
                 .to_string(),
         );
     }
-    recover_transient_windows_debug_registration_with(
+    recover_transient_windows_debug_registration_with_restore(
         &user_root,
         running_package_process_ids,
         codex_package_full_name_is_installed,
         disable_installed_runtime,
+        |state| {
+            WindowsInstalledRuntimeRegistration::from_install_state(state)
+                .and_then(|registration| enable_installed_runtime(&registration))
+        },
     )?;
     let helper = std::env::current_exe()
         .map_err(|error| format!("cannot locate the running Incodex executable: {error}"))?;

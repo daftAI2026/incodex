@@ -381,7 +381,9 @@ fn transient_registration_survives_launcher_termination_and_recovers_from_a_stab
     )
     .expect("recover abandoned transient registration"));
     assert!(disabled);
-    assert!(!user_root.join("windows-registration.json").exists());
+    assert!(!user_root
+        .join("windows-transient-registration.json")
+        .exists());
     fs::remove_dir_all(user_root).expect("remove transient registration fixture");
 }
 
@@ -420,7 +422,9 @@ fn transient_registration_recovery_retains_evidence_when_the_package_starts_duri
 
     assert!(disabled);
     assert!(error.contains("42"), "{error}");
-    assert!(user_root.join("windows-registration.json").exists());
+    assert!(user_root
+        .join("windows-transient-registration.json")
+        .exists());
     fs::remove_dir_all(user_root).expect("remove transient registration fixture");
 }
 

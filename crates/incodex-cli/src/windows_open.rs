@@ -27,8 +27,8 @@ use crate::open_presentation::{
 use crate::profile_mask::{resolve_profile_mask, ProfileMask};
 use crate::windows_activation::{
     activate_packaged_kill_on_drop, activate_packaged_with_installed_cdp,
-    disable_installed_runtime, WindowsActivationFailure, WindowsActivationRequest,
-    WindowsInstalledRuntimeRegistration,
+    disable_installed_runtime, enable_installed_runtime, WindowsActivationFailure,
+    WindowsActivationRequest, WindowsInstalledRuntimeRegistration,
 };
 use crate::windows_app::{
     codex_package_full_name_is_installed, discover_codex_package, validate_codex_package_full_name,
@@ -47,7 +47,7 @@ use crate::windows_process::{
     running_package_process_ids, VisibleWindowLifecycle, WindowsCdpListenerStatus,
     WindowsCdpOwnershipGuard,
 };
-use crate::windows_registration::recover_transient_windows_debug_registration_with;
+use crate::windows_registration::recover_transient_windows_debug_registration_with_restore;
 use crate::windows_system::windows_path_for_display;
 use crate::{parse::ParsedCli, CliFailure};
 
@@ -326,17 +326,19 @@ fn launch_windows_open(
 ) -> Result<crate::windows_process::WindowsProcessTree, WindowsActivationFailure> {
     let _launch_gate =
         acquire_windows_install_state().map_err(WindowsActivationFailure::before_start)?;
+    recover_transient_windows_debug_registration_with_restore(
+        &plan.user_root,
+        running_package_process_ids,
+        codex_package_full_name_is_installed,
+        disable_installed_runtime,
+        |state| {
+            WindowsInstalledRuntimeRegistration::from_install_state(state)
+                .and_then(|registration| enable_installed_runtime(&registration))
+        },
+    )
+    .map_err(WindowsActivationFailure::before_start)?;
     let installed_state = read_windows_install_state(&plan.user_root)
         .map_err(WindowsActivationFailure::before_start)?;
-    if installed_state.is_none() {
-        recover_transient_windows_debug_registration_with(
-            &plan.user_root,
-            running_package_process_ids,
-            codex_package_full_name_is_installed,
-            disable_installed_runtime,
-        )
-        .map_err(WindowsActivationFailure::before_start)?;
-    }
     let installed_activation =
         installed_activation_for_open(installed_state.as_ref(), &plan.package_full_name)
             .map_err(WindowsActivationFailure::before_start)?;
