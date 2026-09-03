@@ -1,0 +1,145 @@
+#include <CoreFoundation/CoreFoundation.h>
+#include <Security/Security.h>
+#include <errno.h>
+#include <libproc.h>
+#include <limits.h>
+#include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/proc_info.h>
+#include <unistd.h>
+
+static const char kExpectedParent[] =
+    "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT";
+static const char kExpectedIdentifier[] = "com.openai.codex";
+static const char kService[] = "Codex Storage Key";
+static const char kAccount[] = "Codex";
+static const size_t kMaximumOutputBytes = 4096;
+
+static bool parent_has_expected_identity(pid_t parent_pid) {
+    if (getuid() != geteuid() || getgid() != getegid()) return false;
+
+    struct proc_bsdinfo info = {0};
+    if (proc_pidinfo(parent_pid, PROC_PIDTBSDINFO, 0, &info, sizeof(info)) !=
+        sizeof(info)) {
+        return false;
+    }
+    if (info.pbi_ruid != getuid() || info.pbi_uid != geteuid()) return false;
+
+    char observed_path[PROC_PIDPATHINFO_MAXSIZE] = {0};
+    if (proc_pidpath(parent_pid, observed_path, sizeof(observed_path)) <= 0) {
+        return false;
+    }
+    char expected_path[PATH_MAX] = {0};
+    char canonical_observed[PATH_MAX] = {0};
+    if (!realpath(kExpectedParent, expected_path) ||
+        !realpath(observed_path, canonical_observed) ||
+        strcmp(expected_path, canonical_observed) != 0) {
+        return false;
+    }
+
+    int parent = parent_pid;
+    CFNumberRef pid_number = CFNumberCreate(
+        kCFAllocatorDefault, kCFNumberIntType, &parent);
+    if (!pid_number) return false;
+    const void *keys[] = {kSecGuestAttributePid};
+    const void *values[] = {pid_number};
+    CFDictionaryRef attributes = CFDictionaryCreate(
+        kCFAllocatorDefault, keys, values, 1, &kCFTypeDictionaryKeyCallBacks,
+        &kCFTypeDictionaryValueCallBacks);
+    CFRelease(pid_number);
+    if (!attributes) return false;
+
+    SecCodeRef code = NULL;
+    OSStatus status = SecCodeCopyGuestWithAttributes(
+        NULL, attributes, kSecCSDefaultFlags, &code);
+    CFRelease(attributes);
+    if (status != errSecSuccess || !code) return false;
+
+    CFDictionaryRef signing = NULL;
+    status = SecCodeCopySigningInformation(
+        code, kSecCSSigningInformation, &signing);
+    CFRelease(code);
+    if (status != errSecSuccess || !signing) return false;
+
+    CFTypeRef identifier = CFDictionaryGetValue(signing, kSecCodeInfoIdentifier);
+    CFStringRef expected_identifier = CFStringCreateWithCString(
+        kCFAllocatorDefault, kExpectedIdentifier, kCFStringEncodingUTF8);
+    bool matches = expected_identifier && identifier &&
+        CFGetTypeID(identifier) == CFStringGetTypeID() &&
+        CFStringCompare((CFStringRef)identifier, expected_identifier, 0) ==
+            kCFCompareEqualTo;
+    if (expected_identifier) CFRelease(expected_identifier);
+    CFRelease(signing);
+    return matches;
+}
+
+static int write_all(const unsigned char *bytes, size_t length) {
+    size_t offset = 0;
+    while (offset < length) {
+        ssize_t written = write(STDOUT_FILENO, bytes + offset, length - offset);
+        if (written < 0 && errno == EINTR) continue;
+        if (written <= 0) return 74;
+        offset += (size_t)written;
+    }
+    return 0;
+}
+
+static void secure_zero(unsigned char *bytes, size_t length) {
+    volatile unsigned char *cursor = bytes;
+    while (length-- > 0) *cursor++ = 0;
+}
+
+int main(int argc, char **argv) {
+    (void)argv;
+    if (argc != 1) return 64;
+    pid_t parent_pid = getppid();
+    if (parent_pid <= 1 || !parent_has_expected_identity(parent_pid)) return 69;
+
+    CFStringRef service = CFStringCreateWithCString(
+        kCFAllocatorDefault, kService, kCFStringEncodingUTF8);
+    CFStringRef account = CFStringCreateWithCString(
+        kCFAllocatorDefault, kAccount, kCFStringEncodingUTF8);
+    if (!service || !account) {
+        if (service) CFRelease(service);
+        if (account) CFRelease(account);
+        return 65;
+    }
+    CFMutableDictionaryRef query = CFDictionaryCreateMutable(
+        kCFAllocatorDefault, 5, &kCFTypeDictionaryKeyCallBacks,
+        &kCFTypeDictionaryValueCallBacks);
+    if (!query) {
+        CFRelease(service);
+        CFRelease(account);
+        return 65;
+    }
+    CFDictionarySetValue(query, kSecClass, kSecClassGenericPassword);
+    CFDictionarySetValue(query, kSecAttrService, service);
+    CFDictionarySetValue(query, kSecAttrAccount, account);
+    CFDictionarySetValue(query, kSecReturnData, kCFBooleanTrue);
+    CFDictionarySetValue(query, kSecMatchLimit, kSecMatchLimitOne);
+    CFRelease(service);
+    CFRelease(account);
+
+    CFTypeRef result = NULL;
+    OSStatus status = SecItemCopyMatching(query, &result);
+    CFRelease(query);
+    if (status != errSecSuccess || !result ||
+        CFGetTypeID(result) != CFDataGetTypeID()) {
+        if (result) CFRelease(result);
+        return status == errSecItemNotFound ? 44 : 68;
+    }
+
+    CFDataRef data = (CFDataRef)result;
+    CFIndex length = CFDataGetLength(data);
+    if (length <= 0 || (size_t)length > kMaximumOutputBytes) {
+        CFRelease(data);
+        return 68;
+    }
+    unsigned char bytes[4096] = {0};
+    CFDataGetBytes(data, CFRangeMake(0, length), bytes);
+    CFRelease(data);
+    int write_result = write_all(bytes, (size_t)length);
+    secure_zero(bytes, sizeof(bytes));
+    return write_result;
+}

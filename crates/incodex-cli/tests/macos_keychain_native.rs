@@ -6,9 +6,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use incodex_cli::macos_keychain_assets::{
-    bundled_helper_bytes, ensure_bundled_registration,
-};
+use incodex_cli::macos_keychain_assets::{bundled_helper_bytes, ensure_bundled_registration};
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 

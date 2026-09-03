@@ -14,6 +14,8 @@ const REGISTRATION_SCHEMA_VERSION: u32 = 1;
 const PRIVATE_FILE_MODE: u32 = 0o600;
 const HELPER_FILE_MODE: u32 = 0o700;
 const HELPER_FILE_NAME: &str = "incodex-keychain-helper";
+const BUNDLED_HELPER_BYTES: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/incodex-keychain-helper"));
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -29,6 +31,30 @@ pub fn ensure_registration(
     app_path: &Path,
     helper_source: &Path,
 ) -> Result<KeychainRegistration, String> {
+    ensure_registration_with(root, app_path, || {
+        read_regular_file(helper_source, "macOS Keychain helper source")
+    })
+}
+
+pub fn ensure_bundled_registration(
+    root: &Path,
+    app_path: &Path,
+) -> Result<KeychainRegistration, String> {
+    ensure_registration_with(root, app_path, || Ok(BUNDLED_HELPER_BYTES.to_vec()))
+}
+
+pub fn bundled_helper_bytes() -> &'static [u8] {
+    BUNDLED_HELPER_BYTES
+}
+
+fn ensure_registration_with<F>(
+    root: &Path,
+    app_path: &Path,
+    load_helper: F,
+) -> Result<KeychainRegistration, String>
+where
+    F: FnOnce() -> Result<Vec<u8>, String>,
+{
     if !app_path.is_absolute() {
         return Err("macOS Keychain registration needs an absolute app path".into());
     }
@@ -49,7 +75,7 @@ pub fn ensure_registration(
         return Ok(current);
     }
 
-    let helper_bytes = read_regular_file(helper_source, "macOS Keychain helper source")?;
+    let helper_bytes = load_helper()?;
     let helper_sha256 = sha256_hex(&helper_bytes);
 
     let helpers_root = root.join("helpers").join("macos-keychain");

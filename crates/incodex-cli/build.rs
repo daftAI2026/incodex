@@ -15,9 +15,19 @@ fn compile(clang: &Path, sdk: &Path, source: &str, output: &Path, arguments: &[&
     assert!(status.success(), "clang failed for {source}");
 }
 
+fn sign_adhoc(path: &Path, identifier: &str) {
+    let status = Command::new("codesign")
+        .args(["--force", "--sign", "-", "--identifier", identifier, "--"])
+        .arg(path)
+        .status()
+        .unwrap_or_else(|error| panic!("cannot start codesign for {}: {error}", path.display()));
+    assert!(status.success(), "codesign failed for {}", path.display());
+}
+
 fn main() {
     println!("cargo:rerun-if-changed=native/macos_update_coordinator.m");
     println!("cargo:rerun-if-changed=native/macos_sparkle_interpose.m");
+    println!("cargo:rerun-if-changed=native/macos_keychain_helper.c");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
         return;
     }
@@ -73,4 +83,21 @@ fn main() {
             "-Wl,-install_name,@rpath/libincodex-sparkle-interpose.dylib",
         ],
     );
+    let keychain_helper = out.join("incodex-keychain-helper");
+    compile(
+        &clang,
+        &sdk,
+        "native/macos_keychain_helper.c",
+        &keychain_helper,
+        &[
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-framework",
+            "CoreFoundation",
+            "-framework",
+            "Security",
+        ],
+    );
+    sign_adhoc(&keychain_helper, "com.daftai.incodex.keychain-helper");
 }
