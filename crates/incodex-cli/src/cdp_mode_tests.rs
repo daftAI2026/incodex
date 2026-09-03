@@ -33,10 +33,10 @@ fn mode_probe_response(mode_available: bool, mode_label: &str, blocker_visible: 
 }
 
 #[test]
-fn codex_mode_probe_treats_missing_ui_and_optional_dialogs_as_pending() {
+fn codex_mode_probe_distinguishes_settled_missing_ui_from_official_dialogs() {
     assert_eq!(
         codex_mode_page_state(&mode_probe_response(false, "", false)).unwrap(),
-        CodexModePageState::Pending
+        CodexModePageState::Other
     );
     assert_eq!(
         codex_mode_page_state(&mode_probe_response(true, "ChatGPT", true)).unwrap(),
@@ -78,14 +78,29 @@ fn codex_readiness_uses_one_bounded_fallback_for_stable_chatgpt() {
         readiness.observe(CodexModePageState::Other),
         CodexModeAction::SelectFallback
     );
-    assert_eq!(
-        readiness.observe(CodexModePageState::Other),
-        CodexModeAction::Wait
-    );
+    for _ in 0..19 {
+        assert_eq!(
+            readiness.observe(CodexModePageState::Other),
+            CodexModeAction::Wait
+        );
+    }
     assert_eq!(
         readiness.observe(CodexModePageState::Other),
         CodexModeAction::Unresolved
     );
+}
+
+#[test]
+fn codex_readiness_stops_polling_a_permanent_official_blocker() {
+    let mut readiness = CodexModeReadiness::default();
+
+    for _ in 0..255 {
+        if readiness.observe(CodexModePageState::Pending) == CodexModeAction::Unresolved {
+            return;
+        }
+    }
+
+    panic!("a permanent official blocker left the native CDP readiness loop unbounded");
 }
 
 #[test]
@@ -94,7 +109,9 @@ fn codex_readiness_keeps_unresolved_terminal_without_counter_overflow() {
     for _ in 0..3 {
         readiness.observe(CodexModePageState::Other);
     }
-    readiness.observe(CodexModePageState::Other);
+    for _ in 0..20 {
+        readiness.observe(CodexModePageState::Other);
+    }
     assert_eq!(
         readiness.observe(CodexModePageState::Other),
         CodexModeAction::Unresolved

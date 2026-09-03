@@ -155,6 +155,86 @@ describe("Codex mode readiness", () => {
     expect(tasks).toHaveLength(0);
   });
 
+  test("stops polling when an official blocker never leaves", async () => {
+    const tasks: ScheduledTask[] = [];
+    const logs: Array<[string, unknown]> = [];
+    const win = {
+      isDestroyed: () => false,
+      isFocused: () => true,
+      once: () => {},
+      webContents: {
+        executeJavaScript: async () => ({
+          modeAvailable: false,
+          modeLabel: "",
+          officialBlockerVisible: true,
+        }),
+        isDestroyed: () => false,
+      },
+    };
+    const readiness = createCodexModeReadiness({
+      isIncognito: () => true,
+      log: (event: string, detail: unknown) => logs.push([event, detail]),
+      selectFallback: () => true,
+      totalChecksRequired: 3,
+      scheduleTimer: (callback: () => void, delay: number) => {
+        const task = { callback, delay };
+        tasks.push(task);
+        return task;
+      },
+    });
+
+    readiness.observe(win);
+    await runNext(tasks);
+    await runNext(tasks);
+    await runNext(tasks);
+
+    expect(tasks).toHaveLength(0);
+    expect(logs.at(-1)).toEqual([
+      "codex-mode-unresolved",
+      { fallback: false, reason: "readiness-deadline" },
+    ]);
+  });
+
+  test("bounds a renderer probe that never settles", async () => {
+    const tasks: ScheduledTask[] = [];
+    const logs: Array<[string, unknown]> = [];
+    const never = new Promise(() => {});
+    const win = {
+      isDestroyed: () => false,
+      isFocused: () => true,
+      once: () => {},
+      webContents: {
+        executeJavaScript: async () => never,
+        isDestroyed: () => false,
+      },
+    };
+    const readiness = createCodexModeReadiness({
+      isIncognito: () => true,
+      log: (event: string, detail: unknown) => logs.push([event, detail]),
+      probeFailuresRequired: 1,
+      probeTimeoutMs: 5,
+      selectFallback: () => true,
+      scheduleTimer: (callback: () => void, delay: number) => {
+        const task = { callback, delay };
+        tasks.push(task);
+        return task;
+      },
+    });
+
+    readiness.observe(win);
+    const task = tasks.shift();
+    task?.callback();
+    await Bun.sleep(20);
+
+    expect(tasks).toHaveLength(0);
+    expect(logs).toHaveLength(2);
+    expect(String(logs[0]?.[1])).toContain("timed out");
+    expect(logs.at(-1)).toEqual([
+      "codex-mode-unresolved",
+      { fallback: false, reason: "probe-failed" },
+    ]);
+  });
+
   test("attempts its keyboard fallback at most once even when selection fails", async () => {
     const tasks: ScheduledTask[] = [];
     const fallbacks: unknown[] = [];
