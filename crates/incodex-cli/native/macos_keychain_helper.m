@@ -266,8 +266,9 @@ static int run(int argc, char **argv) {
     CFRelease(account);
 
     CFTypeRef result = NULL;
-    OSStatus status = copy_matching_cancellable(
-        query, authentication_context, &result);
+    OSStatus status = authorize_only
+        ? copy_matching_cancellable(query, authentication_context, &result)
+        : SecItemCopyMatching(query, &result);
     CFRelease(query);
     if (status != errSecSuccess || !result ||
         CFGetTypeID(result) != CFDataGetTypeID()) {
