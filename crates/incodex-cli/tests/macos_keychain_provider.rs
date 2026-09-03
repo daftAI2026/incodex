@@ -7,6 +7,8 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use sha2::{Digest, Sha256};
+
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn scratch() -> PathBuf {
@@ -103,6 +105,52 @@ fn loaded_provider_rebinds_the_process_security_symbol_without_real_keychain_acc
     fs::remove_dir_all(home).unwrap();
 }
 
+#[test]
+fn production_provider_resolves_only_its_verified_content_addressed_helper() {
+    let home = scratch();
+    let helper_body = b"#!/bin/sh\nprintf 'production-key'\n";
+    let helper_sha256 = Sha256::digest(helper_body)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let helper = home
+        .join(".incodex/helpers/macos-keychain")
+        .join(&helper_sha256)
+        .join("incodex-keychain-helper");
+    fs::create_dir_all(helper.parent().unwrap()).unwrap();
+    fs::write(&helper, helper_body).unwrap();
+    fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
+
+    let provider = compile_production_test_provider(&home, &helper_sha256);
+    let probe = compile_production_hook_probe(&home);
+    let output = Command::new(&probe)
+        .args([provider.as_os_str(), "success".as_ref()])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "status={:?} stdout={} stderr={}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    fs::write(&helper, b"#!/bin/sh\nprintf 'tampered-key'\n").unwrap();
+    let output = Command::new(&probe)
+        .args([provider.as_os_str(), "failure".as_ref()])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "tampered helper was not rejected: status={:?} stdout={} stderr={}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    fs::remove_dir_all(home).unwrap();
+}
+
 fn compile_probe(home: &Path) -> PathBuf {
     let provider = compile_test_provider(home);
     let clang = command_stdout("xcrun", &["--find", "clang"]);
@@ -163,6 +211,35 @@ fn compile_test_provider(home: &Path) -> PathBuf {
         .status()
         .unwrap();
     assert!(status.success(), "test provider did not compile");
+    provider
+}
+
+fn compile_production_test_provider(home: &Path, helper_sha256: &str) -> PathBuf {
+    let clang = command_stdout("xcrun", &["--find", "clang"]);
+    let sdk = command_stdout("xcrun", &["--sdk", "macosx", "--show-sdk-path"]);
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let provider_source = manifest.join("native/macos_keychain_provider.c");
+    let fishhook_source = manifest.join("native/fishhook.c");
+    let provider = home.join("IncodexKeyProviderProductionTest.dylib");
+    let test_home = format!(
+        "-DINCODEX_KEYCHAIN_TEST_HOME=\"{}\"",
+        home.to_string_lossy()
+    );
+    let expected_hash = format!(
+        "-DINCODEX_KEYCHAIN_HELPER_SHA256=\"{helper_sha256}\""
+    );
+    let status = Command::new(&clang)
+        .args(["-isysroot", &sdk])
+        .args(["-Wall", "-Wextra", "-Werror", "-dynamiclib"])
+        .args([test_home.as_str(), expected_hash.as_str()])
+        .arg(&fishhook_source)
+        .args(["-framework", "CoreFoundation", "-framework", "Security"])
+        .arg(&provider_source)
+        .arg("-o")
+        .arg(&provider)
+        .status()
+        .unwrap();
+    assert!(status.success(), "production test provider did not compile");
     provider
 }
 
@@ -384,6 +461,109 @@ int main(int argc, char **argv) {
         .status()
         .unwrap();
     assert!(status.success(), "hook probe did not compile");
+    probe
+}
+
+fn compile_production_hook_probe(home: &Path) -> PathBuf {
+    let clang = command_stdout("xcrun", &["--find", "clang"]);
+    let sdk = command_stdout("xcrun", &["--sdk", "macosx", "--show-sdk-path"]);
+    let fake_source = home.join("production_fake_security.c");
+    fs::write(
+        &fake_source,
+        r#"
+#include <CoreFoundation/CoreFoundation.h>
+#include <Security/Security.h>
+
+static int calls = 0;
+OSStatus SecItemCopyMatching(CFDictionaryRef query, CFTypeRef *result) {
+    (void)query;
+    (void)result;
+    calls += 1;
+    return -7777;
+}
+int incodex_fake_security_calls(void) { return calls; }
+"#,
+    )
+    .unwrap();
+    let fake = home.join("libProductionFakeSecurity.dylib");
+    let status = Command::new(&clang)
+        .args(["-isysroot", &sdk, "-Wall", "-Wextra", "-Werror"])
+        .args(["-dynamiclib", "-framework", "CoreFoundation"])
+        .arg(&fake_source)
+        .args([
+            "-Wl,-install_name,@rpath/libProductionFakeSecurity.dylib",
+            "-o",
+        ])
+        .arg(&fake)
+        .status()
+        .unwrap();
+    assert!(
+        status.success(),
+        "production fake Security library did not compile"
+    );
+
+    let source = home.join("production_hook_probe.c");
+    fs::write(
+        &source,
+        r#"
+#include <CoreFoundation/CoreFoundation.h>
+#include <Security/Security.h>
+#include <dlfcn.h>
+#include <string.h>
+
+extern int incodex_fake_security_calls(void);
+
+static CFMutableDictionaryRef query(void) {
+    CFMutableDictionaryRef value = CFDictionaryCreateMutable(
+        kCFAllocatorDefault, 6, &kCFTypeDictionaryKeyCallBacks,
+        &kCFTypeDictionaryValueCallBacks);
+    if (!value) return NULL;
+    CFDictionarySetValue(value, kSecClass, kSecClassGenericPassword);
+    CFDictionarySetValue(value, kSecAttrService, CFSTR("Codex Storage Key"));
+    CFDictionarySetValue(value, kSecAttrAccount, CFSTR("Codex"));
+    CFDictionarySetValue(value, kSecReturnData, kCFBooleanTrue);
+    CFDictionarySetValue(value, kSecMatchLimit, kSecMatchLimitOne);
+    return value;
+}
+
+int main(int argc, char **argv) {
+    if (argc != 3) return 64;
+    if (!dlopen(argv[1], RTLD_NOW | RTLD_LOCAL)) return 66;
+
+    CFMutableDictionaryRef exact = query();
+    CFTypeRef result = NULL;
+    OSStatus status = SecItemCopyMatching(exact, &result);
+    CFRelease(exact);
+    if (strcmp(argv[2], "failure") == 0) {
+        if (result) CFRelease(result);
+        return status == errSecAuthFailed &&
+                       incodex_fake_security_calls() == 0
+                   ? 0
+                   : 7;
+    }
+    if (strcmp(argv[2], "success") != 0) return 65;
+    if (status != errSecSuccess || !result ||
+        CFGetTypeID(result) != CFDataGetTypeID()) return 1;
+    CFDataRef data = (CFDataRef)result;
+    if (CFDataGetLength(data) != 14 ||
+        memcmp(CFDataGetBytePtr(data), "production-key", 14) != 0) return 2;
+    CFRelease(result);
+    return incodex_fake_security_calls() == 0 ? 0 : 3;
+}
+"#,
+    )
+    .unwrap();
+    let probe = home.join("production-hook-probe");
+    let status = Command::new(&clang)
+        .args(["-isysroot", &sdk, "-Wall", "-Wextra", "-Werror"])
+        .arg(&source)
+        .arg(&fake)
+        .args(["-framework", "CoreFoundation", "-framework", "Security"])
+        .args(["-Wl,-rpath,@executable_path", "-o"])
+        .arg(&probe)
+        .status()
+        .unwrap();
+    assert!(status.success(), "production hook probe did not compile");
     probe
 }
 
