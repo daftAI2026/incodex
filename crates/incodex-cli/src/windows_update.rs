@@ -1,6 +1,7 @@
 use std::cmp::Ordering as VersionOrdering;
 use std::fs::{self, OpenOptions};
 use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -15,6 +16,7 @@ use crate::windows_update_flow::{
 use incodex_core::windows_path::reject_reparse_ancestors;
 use serde::{Deserialize, Serialize};
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 const WINDOWS_LATEST_RELEASE_URL: &str =
     "https://api.github.com/repos/daftAI2026/incodex/releases/latest";
@@ -31,6 +33,7 @@ const RELEASE_METADATA_LIMIT: u64 = 256 * 1024;
 const INSTALLER_SCRIPT_LIMIT: u64 = 1024 * 1024;
 const RUNTIME_PENDING_NAME: &str = "windows_runtime_update_pending.json";
 const RUNTIME_PENDING_LIMIT: u64 = 1024;
+const CLI_VERSION_PROBE_CREATION_FLAGS: u32 = CREATE_NO_WINDOW;
 static UPDATE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub const WINDOWS_X64_RELEASE_ASSET: &str = "incodex-windows-x64.exe";
@@ -207,6 +210,25 @@ pub fn run_runtime(parsed: &ParsedCli) -> Result<(), String> {
             ));
         }
     }
+    let installed_state = crate::windows_install_state::read_windows_install_state(&user_root)?;
+    require_runtime_native_open_generation(installed_state.is_some(), || {
+        let state = installed_state.as_ref().ok_or_else(|| {
+            "Windows install state disappeared during Runtime validation".to_string()
+        })?;
+        let helper_version = installed_cli_version(&state.helper_path)?;
+        select_native_open_executable(
+            &state.helper_path,
+            &helper_version,
+            env!("CARGO_PKG_VERSION"),
+            || {
+                let package_root = user_root.join("packages").join("standalone");
+                let (executable, version) = current_release_executable(&package_root)?;
+                verify_cli_version(&executable, &version)?;
+                Ok((executable, version))
+            },
+        )
+        .map(|_| ())
+    })?;
     let published = crate::windows_runtime::publish_windows_runtime(&user_root)?;
     let runtime_release = published
         .release_dir
@@ -744,9 +766,69 @@ fn current_release_executable(package_root: &Path) -> Result<(PathBuf, String), 
     Ok((executable, version.to_string()))
 }
 
-fn verify_cli_version(installed: &Path, expected: &str) -> Result<(), String> {
+pub(crate) fn native_open_executable_for_runtime(
+    user_root: &Path,
+    helper_executable: &Path,
+    runtime_release: &str,
+) -> Result<PathBuf, String> {
+    select_native_open_executable(
+        helper_executable,
+        env!("CARGO_PKG_VERSION"),
+        runtime_release,
+        || {
+            let package_root = user_root.join("packages").join("standalone");
+            let (executable, version) = current_release_executable(&package_root)?;
+            verify_cli_version(&executable, &version)?;
+            Ok((executable, version))
+        },
+    )
+}
+
+fn select_native_open_executable<F>(
+    helper_executable: &Path,
+    helper_version: &str,
+    runtime_release: &str,
+    current_managed_release: F,
+) -> Result<PathBuf, String>
+where
+    F: FnOnce() -> Result<(PathBuf, String), String>,
+{
+    let runtime_version = runtime_release
+        .split_once('-')
+        .map_or(runtime_release, |(version, _)| version);
+    validate_stable_version(runtime_version)?;
+    validate_stable_version(helper_version)?;
+    if runtime_version == helper_version {
+        return Ok(helper_executable.to_path_buf());
+    }
+
+    let (executable, managed_version) = current_managed_release()?;
+    if managed_version != runtime_version {
+        return Err(format!(
+            "installed Windows Runtime {runtime_version} has no matching managed CLI generation"
+        ));
+    }
+    Ok(executable)
+}
+
+fn require_runtime_native_open_generation<F>(
+    has_installed_integration: bool,
+    verify: F,
+) -> Result<(), String>
+where
+    F: FnOnce() -> Result<(), String>,
+{
+    if has_installed_integration {
+        verify()
+    } else {
+        Ok(())
+    }
+}
+
+fn installed_cli_version(installed: &Path) -> Result<String, String> {
     let output = Command::new(installed)
         .arg("--version")
+        .creation_flags(CLI_VERSION_PROBE_CREATION_FLAGS)
         .stdin(Stdio::null())
         .output()
         .map_err(|error| format!("could not verify the installed Windows CLI: {error}"))?;
@@ -763,6 +845,11 @@ fn verify_cli_version(installed: &Path, expected: &str) -> Result<(), String> {
         .find_map(|line| line.strip_prefix(prefix))
         .ok_or_else(|| "installed Windows CLI did not report its version".to_string())?;
     validate_stable_version(version)?;
+    Ok(version.to_string())
+}
+
+fn verify_cli_version(installed: &Path, expected: &str) -> Result<(), String> {
+    let version = installed_cli_version(installed)?;
     if version == expected {
         Ok(())
     } else {
@@ -808,4 +895,64 @@ fn validate_stable_version(version: &str) -> Result<(), String> {
         return Err(format!("invalid stable Incodex version: {version}"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        require_runtime_native_open_generation, select_native_open_executable,
+        CLI_VERSION_PROBE_CREATION_FLAGS,
+    };
+    use std::path::{Path, PathBuf};
+    use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
+
+    #[test]
+    fn installed_runtime_cli_probe_never_flashes_a_console_window() {
+        assert_eq!(
+            CLI_VERSION_PROBE_CREATION_FLAGS & CREATE_NO_WINDOW,
+            CREATE_NO_WINDOW
+        );
+    }
+
+    #[test]
+    fn runtime_update_stops_before_state_change_without_a_matching_native_cli() {
+        let error = require_runtime_native_open_generation(true, || {
+            Err(
+                "installed Windows Runtime 1.0.0 has no matching managed CLI generation"
+                    .to_string(),
+            )
+        })
+        .expect_err("an installed Runtime must retain a launchable native generation");
+
+        assert!(
+            error.contains("no matching managed CLI generation"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn installed_bridge_uses_the_cli_generation_that_published_runtime() {
+        let helper = Path::new(r"C:\Users\Kid\.incodex\windows\i\old\i.exe");
+        let active =
+            PathBuf::from(r"C:\Users\Kid\.incodex\packages\standalone\releases\1.0.0\incodex.exe");
+        let selected =
+            select_native_open_executable(helper, "0.9.0", "1.0.0-0123456789abcdef", || {
+                Ok((active.clone(), "1.0.0".to_string()))
+            })
+            .expect("runtime generation selects its managed CLI");
+
+        assert_eq!(selected, active);
+    }
+
+    #[test]
+    fn installed_bridge_keeps_its_helper_for_the_same_runtime_version() {
+        let helper = Path::new(r"C:\Users\Kid\.incodex\windows\i\current\i.exe");
+        let selected =
+            select_native_open_executable(helper, "1.0.0", "1.0.0-fedcba9876543210", || {
+                panic!("same-version runtime must not require a standalone install")
+            })
+            .expect("same-version helper remains self-contained");
+
+        assert_eq!(selected, helper);
+    }
 }
