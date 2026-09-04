@@ -1,6 +1,7 @@
 pub(super) const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(750);
 const PRIMARY_CHECKS_REQUIRED: u8 = 3;
 const FALLBACK_CONFIRMATION_FAILURES: u8 = 2;
+const TOTAL_CHECKS_ALLOWED: u8 = 20;
 
 pub(super) const PROBE_EXPRESSION: &str = r#"(() => {
   function visible(element) {
@@ -78,6 +79,7 @@ pub(crate) struct Readiness {
     fallback_attempted: bool,
     primary_other_checks: u8,
     fallback_confirmation_failures: u8,
+    total_checks: u8,
     unresolved: bool,
 }
 
@@ -86,8 +88,13 @@ impl Readiness {
         if self.unresolved {
             return Action::Unresolved;
         }
+        self.total_checks = self.total_checks.saturating_add(1);
         if page_state == PageState::Codex {
             return Action::Confirmed;
+        }
+        if self.total_checks >= TOTAL_CHECKS_ALLOWED {
+            self.unresolved = true;
+            return Action::Unresolved;
         }
         if page_state == PageState::Pending {
             if !self.fallback_attempted {

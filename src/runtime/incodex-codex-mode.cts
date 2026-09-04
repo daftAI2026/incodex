@@ -83,11 +83,23 @@ function decideCodexModeAction(
 
 function createCodexModeReadiness(options) {
   const checks = new WeakMap();
+  const maxChecks = options.maxChecks ?? 20;
   const primarySettleMs = options.primarySettleMs ?? 1_500;
   const primaryOtherChecksRequired = options.primaryOtherChecksRequired ?? 3;
+  const probeTimeoutMs = options.probeTimeoutMs ?? 2_000;
   const pollMs = options.pollMs ?? 750;
   const scheduleTimer = options.scheduleTimer ?? setTimeout;
   const cancelTimer = options.cancelTimer ?? clearTimeout;
+
+  function finishUnresolved(state) {
+    if (state.complete) return;
+    state.complete = true;
+    if (state.timer !== null) cancelTimer(state.timer);
+    state.timer = null;
+    if (state.probeTimer !== null) cancelTimer(state.probeTimer);
+    state.probeTimer = null;
+    options.log("codex-mode-unresolved", { fallback: state.fallbackSucceeded });
+  }
 
   function stateFor(win) {
     let state = checks.get(win);
@@ -98,13 +110,18 @@ function createCodexModeReadiness(options) {
       fallbackAttempted: false,
       fallbackSucceeded: false,
       primaryOtherChecks: 0,
+      probeTimer: null,
       running: false,
       timer: null,
+      totalChecks: 0,
     };
     checks.set(win, state);
     win.once("closed", () => {
       state.complete = true;
-      if (state.timer) cancelTimer(state.timer);
+      if (state.timer !== null) cancelTimer(state.timer);
+      state.timer = null;
+      if (state.probeTimer !== null) cancelTimer(state.probeTimer);
+      state.probeTimer = null;
     });
     return state;
   }
@@ -122,11 +139,20 @@ function createCodexModeReadiness(options) {
   async function reconcile(win, state) {
     if (state.complete || win.isDestroyed() || win.webContents.isDestroyed()) return;
     state.running = true;
+    state.totalChecks += 1;
     try {
-      const snapshot = await win.webContents.executeJavaScript(
-        CODEX_MODE_PROBE_EXPRESSION,
-        false,
-      );
+      const snapshot = await Promise.race([
+        win.webContents.executeJavaScript(CODEX_MODE_PROBE_EXPRESSION, false),
+        new Promise((_, reject) => {
+          state.probeTimer = scheduleTimer(() => {
+            state.probeTimer = null;
+            reject(new Error(`Codex mode probe timed out after ${probeTimeoutMs}ms`));
+          }, probeTimeoutMs);
+        }),
+      ]).finally(() => {
+        if (state.probeTimer !== null) cancelTimer(state.probeTimer);
+        state.probeTimer = null;
+      });
       if (state.complete || win.isDestroyed() || win.webContents.isDestroyed()) return;
       const pageState = deriveCodexModePageState(snapshot);
       if (!state.fallbackAttempted) {
@@ -147,8 +173,11 @@ function createCodexModeReadiness(options) {
         return;
       }
       if (action === "unresolved") {
-        state.complete = true;
-        options.log("codex-mode-unresolved", { fallback: state.fallbackSucceeded });
+        finishUnresolved(state);
+        return;
+      }
+      if (state.totalChecks >= maxChecks) {
+        finishUnresolved(state);
         return;
       }
       if (action === "select-fallback" && win.isFocused()) {
@@ -159,12 +188,14 @@ function createCodexModeReadiness(options) {
         if (state.fallbackSucceeded) {
           options.log("codex-mode-fallback-sent");
         } else {
-          state.complete = true;
-          options.log("codex-mode-unresolved", { fallback: false });
+          finishUnresolved(state);
         }
       }
     } catch (error) {
-      options.log("codex-mode-probe-failed", { error: String(error) });
+      if (!state.complete) {
+        options.log("codex-mode-probe-failed", { error: String(error) });
+        if (state.totalChecks >= maxChecks) finishUnresolved(state);
+      }
     } finally {
       state.running = false;
       if (!state.complete) observe(win, pollMs);

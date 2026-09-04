@@ -63,6 +63,38 @@ fn codex_readiness_waits_for_optional_official_blockers() {
 }
 
 #[test]
+fn codex_readiness_bounds_permanent_pending_with_one_total_budget() {
+    let mut readiness = CodexModeReadiness::default();
+
+    for _ in 0..19 {
+        assert_eq!(
+            readiness.observe(CodexModePageState::Pending),
+            CodexModeAction::Wait
+        );
+    }
+    assert_eq!(
+        readiness.observe(CodexModePageState::Pending),
+        CodexModeAction::Unresolved
+    );
+}
+
+#[test]
+fn codex_readiness_accepts_codex_on_the_final_allowed_check() {
+    let mut readiness = CodexModeReadiness::default();
+
+    for _ in 0..19 {
+        assert_eq!(
+            readiness.observe(CodexModePageState::Pending),
+            CodexModeAction::Wait
+        );
+    }
+    assert_eq!(
+        readiness.observe(CodexModePageState::Codex),
+        CodexModeAction::Confirmed
+    );
+}
+
+#[test]
 fn codex_readiness_uses_one_bounded_fallback_for_stable_chatgpt() {
     let mut readiness = CodexModeReadiness::default();
 
