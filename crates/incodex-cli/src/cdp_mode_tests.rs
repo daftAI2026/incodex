@@ -84,10 +84,7 @@ fn codex_readiness_accepts_codex_after_nineteen_probe_failures() {
     let mut readiness = CodexModeReadiness::default();
 
     for _ in 0..19 {
-        assert_eq!(
-            readiness.observe_probe_failure(),
-            CodexModeAction::Wait
-        );
+        assert_eq!(readiness.observe_probe_failure(), CodexModeAction::Wait);
     }
     assert_eq!(
         readiness.observe(CodexModePageState::Codex),
@@ -115,11 +112,11 @@ fn native_transport_and_malformed_mode_probes_share_the_terminal_failure_budget(
                     }
                     Err(error) => panic!("CDP test server failed: {error}"),
                 };
+                stream.set_nonblocking(false).unwrap();
                 let mut peek = [0_u8; 2048];
                 let size = stream.peek(&mut peek).unwrap();
                 let request = String::from_utf8_lossy(&peek[..size]);
                 if request.starts_with("GET /devtools/") {
-                    stream.set_nonblocking(false).unwrap();
                     let mut socket = tungstenite::accept(stream).unwrap();
                     while let Ok(Message::Text(text)) = socket.read() {
                         let command: Value = serde_json::from_str(&text).unwrap();
@@ -192,7 +189,10 @@ fn native_transport_and_malformed_mode_probes_share_the_terminal_failure_budget(
     server.join().unwrap();
 
     assert_eq!(probes.load(Ordering::Acquire), 20);
-    assert!(terminal_error.is_some(), "twenty probe failures must be terminal");
+    assert!(
+        terminal_error.is_some(),
+        "twenty probe failures must be terminal"
+    );
 }
 
 #[test]

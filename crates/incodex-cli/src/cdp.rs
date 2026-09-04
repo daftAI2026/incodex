@@ -517,10 +517,13 @@ where
                 "returnByValue": true
             }),
             connection_guard,
-        )?;
+        )
+        .map_err(|error| record_codex_mode_probe_failure(readiness, error))?;
         next_id += 1;
 
-        match readiness.observe(codex_mode_page_state(&response)?) {
+        let page_state = codex_mode_page_state(&response)
+            .map_err(|error| record_codex_mode_probe_failure(readiness, error))?;
+        match readiness.observe(page_state) {
             CodexModeAction::Confirmed => return Ok(()),
             CodexModeAction::Wait => {}
             CodexModeAction::SelectFallback => {
@@ -532,6 +535,14 @@ where
         }
 
         thread::sleep(mode::POLL_INTERVAL);
+    }
+}
+
+fn record_codex_mode_probe_failure(readiness: &mut CodexModeReadiness, error: String) -> String {
+    if readiness.observe_probe_failure() == CodexModeAction::Unresolved {
+        CODEX_MODE_UNAVAILABLE_ERROR.into()
+    } else {
+        error
     }
 }
 

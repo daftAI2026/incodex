@@ -83,7 +83,7 @@ function decideCodexModeAction(
 
 function createCodexModeReadiness(options) {
   const checks = new WeakMap();
-  const maxChecks = options.maxChecks ?? 20;
+  const maxProbeFailures = options.maxProbeFailures ?? 20;
   const primarySettleMs = options.primarySettleMs ?? 1_500;
   const primaryOtherChecksRequired = options.primaryOtherChecksRequired ?? 3;
   const probeTimeoutMs = options.probeTimeoutMs ?? 2_000;
@@ -110,10 +110,10 @@ function createCodexModeReadiness(options) {
       fallbackAttempted: false,
       fallbackSucceeded: false,
       primaryOtherChecks: 0,
+      probeFailures: 0,
       probeTimer: null,
       running: false,
       timer: null,
-      totalChecks: 0,
     };
     checks.set(win, state);
     win.once("closed", () => {
@@ -139,7 +139,6 @@ function createCodexModeReadiness(options) {
   async function reconcile(win, state) {
     if (state.complete || win.isDestroyed() || win.webContents.isDestroyed()) return;
     state.running = true;
-    state.totalChecks += 1;
     try {
       const snapshot = await Promise.race([
         win.webContents.executeJavaScript(CODEX_MODE_PROBE_EXPRESSION, false),
@@ -176,10 +175,6 @@ function createCodexModeReadiness(options) {
         finishUnresolved(state);
         return;
       }
-      if (state.totalChecks >= maxChecks) {
-        finishUnresolved(state);
-        return;
-      }
       if (action === "select-fallback" && win.isFocused()) {
         if (state.complete || win.isDestroyed() || win.webContents.isDestroyed()) return;
         state.fallbackAttempted = true;
@@ -193,8 +188,9 @@ function createCodexModeReadiness(options) {
       }
     } catch (error) {
       if (!state.complete) {
+        state.probeFailures += 1;
         options.log("codex-mode-probe-failed", { error: String(error) });
-        if (state.totalChecks >= maxChecks) finishUnresolved(state);
+        if (state.probeFailures >= maxProbeFailures) finishUnresolved(state);
       }
     } finally {
       state.running = false;

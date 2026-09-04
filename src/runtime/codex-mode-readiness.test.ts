@@ -221,7 +221,7 @@ describe("Codex mode readiness", () => {
     expect(tasks).toHaveLength(0);
   });
 
-  test("shares one total budget across rejected probes and logs unresolved once", async () => {
+  test("shares one failure budget across rejected probes and logs unresolved once", async () => {
     const scheduler = controlledScheduler();
     const events: string[] = [];
     const win = {
