@@ -36,7 +36,12 @@ This synchronizes `package.json`, the Cargo workspace and lockfile, the committe
 5. `cargo test --locked --workspace --release` exits 0.
 6. `release.yml` still has `generate_release_notes: false` and contains no Bun CLI compile step or legacy Bun asset.
 7. Before pushing the tag, audit `README.md` and `README_CN.md` against the behavior being released, including feature wording, command examples, output examples, and version references.
-8. Before pushing the tag, draft the bilingual title and notes with `.claude/skills/release-notes/SKILL.md`. Publication still waits until the workflow has created the Release.
+8. Before the first public Windows tag, bind the Windows evidence to the exact candidate commit:
+   - Require that commit's `check`, `cargo`, and `windows-cargo` jobs to pass. The Windows job must run `bun run test:windows:rust`, build `incodex-windows-x64.exe`, and exercise `install.ps1` against that local candidate in a clean user-scoped test root.
+   - On a real Windows machine, verify the candidate binary's version/help/status and replace a previous managed generation when one exists through the same pinned installer handoff; verify both launchers, the atomic `current` pointer, and the candidate's matching Runtime generation.
+   - On a real Microsoft Store Codex installation, complete `install` → official AUMID launch → normal-window hat → isolated window → duplicate-click single owner/session → close and session burn → official `Ctrl+Q` → `uninstall`, without touching unrelated Codex CLI processes. Record the exact candidate commit and Store package generation with the evidence.
+   - Only the public `releases/latest` download smoke waits until after the assets exist; it confirms the network distribution path and does not replace these pre-tag gates.
+9. Before pushing the tag, draft the bilingual title and notes with `.claude/skills/release-notes/SKILL.md`. Publication still waits until the workflow has created the Release.
 
 ## Tag and publish
 
