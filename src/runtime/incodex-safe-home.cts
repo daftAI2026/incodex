@@ -242,7 +242,27 @@ function burnSessionHomeWithOwner(target, expected, ownerSnapshot) {
   return burnSessionHomeInner(target, expected, ownerSnapshot);
 }
 
-function burnSessionHomeInner(target, expected, ownerSnapshot) {
+function burnExitedSessionHomeWithOwner(target, expected, ownerSnapshot) {
+  const home = sessionRootFromHome(target);
+  if (!validSessionId(expected?.sessionId) || path.basename(home) !== expected.sessionId) {
+    throw new Error("[incodex] invalid exited session identity; refusing to burn");
+  }
+  if (!Number.isSafeInteger(expected.ino) || !Number.isSafeInteger(expected.dev)) {
+    throw new Error("[incodex] missing exited session inode/device; refusing to burn");
+  }
+  if (
+    !ownerSnapshot ||
+    !Number.isInteger(ownerSnapshot.pid) ||
+    ownerSnapshot.pid <= 0 ||
+    typeof ownerSnapshot.processStartIdentity !== "string" ||
+    !ownerSnapshot.processStartIdentity
+  ) {
+    throw new Error("[incodex] missing exited session owner snapshot; refusing to burn");
+  }
+  return burnSessionHomeInner(target, expected, ownerSnapshot, true);
+}
+
+function burnSessionHomeInner(target, expected, ownerSnapshot, allowMissingOwner = false) {
   const home = sessionRootFromHome(target);
   const stats = assertNotSymlink(home, "session root");
   if (!stats) return false;
@@ -259,7 +279,10 @@ function burnSessionHomeInner(target, expected, ownerSnapshot) {
   const sessions = realExisting(path.join(expected.userRoot, SESSIONS_NAME));
   assertInsideParent(realHome, sessions);
   assertBurnIdentity(home, expected);
-  if (ownerSnapshot) assertBurnOwner(home, ownerSnapshot);
+  if (ownerSnapshot) {
+    if (allowMissingOwner) assertExitedBurnOwner(home, ownerSnapshot);
+    else assertBurnOwner(home, ownerSnapshot);
+  }
   fs.rmSync(home, { recursive: true, force: false });
   return true;
 }
@@ -269,6 +292,21 @@ function assertBurnOwner(home, expected) {
   const start = owner.processStartIdentity || owner.startedAt;
   if (owner.pid !== expected.pid || start !== expected.processStartIdentity) {
     throw new Error("[incodex] session owner changed; refusing to burn");
+  }
+}
+
+function assertExitedBurnOwner(home, expected) {
+  const ownerPath = path.join(home, OWNER_NAME);
+  if (!assertNotSymlink(ownerPath, "owner manifest")) return;
+  assertBurnOwner(home, expected);
+}
+
+function assertOwnerPresentForUnsnapshottedBurn(home) {
+  const rootStats = assertNotSymlink(home, "session root");
+  if (!rootStats) return;
+  const ownerPath = path.join(home, OWNER_NAME);
+  if (!assertNotSymlink(ownerPath, "owner manifest")) {
+    throw new Error(`[incodex] missing parent owner snapshot: ${ownerPath}`);
   }
 }
 
@@ -357,7 +395,10 @@ async function cleanupExitedSession(session, childOwner, options = {}) {
   const quiesce = options.quiesceSessionHelpers;
   const readProof = options.readBurnProof ?? readBurnProof;
   const burn = options.burnSessionHome ?? burnSessionHome;
-  const burnWithOwner = options.burnSessionHomeWithOwner ?? burnSessionHomeWithOwner;
+  const burnExitedWithOwner = options.burnExitedSessionHomeWithOwner
+    ?? burnExitedSessionHomeWithOwner;
+  const assertUnsnapshottedOwner = options.assertOwnerPresentForUnsnapshottedBurn
+    ?? assertOwnerPresentForUnsnapshottedBurn;
   const cleanupExpected = options.cleanupExpectedForAttempt ?? cleanupExpectedForAttempt;
   const exists = options.exists ?? fs.existsSync;
   const clearProof = options.clearBurnProof ?? clearBurnProof;
@@ -387,8 +428,11 @@ async function cleanupExitedSession(session, childOwner, options = {}) {
     const attemptExpected = cleanupExpected(expected, originalRemoved);
     try {
       const removed = childOwner && !originalRemoved
-        ? burnWithOwner(session.root, attemptExpected, childOwner)
-        : burn(session.root, attemptExpected);
+        ? burnExitedWithOwner(session.root, attemptExpected, childOwner)
+        : (() => {
+          if (!originalRemoved) assertUnsnapshottedOwner(session.root);
+          return burn(session.root, attemptExpected);
+        })();
       if (removed) originalRemoved = true;
     } catch (error) {
       if (attempt < 5) {

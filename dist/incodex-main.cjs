@@ -547,6 +547,8 @@ async function launchIncognitoOnce() {
         });
         child.on("exit", (code) => {
             logLaunch("child-exit", { code, sessionId: session.sessionId });
+            // This exact child exit observation is the only caller allowed to finish
+            // a partial child burn after helper quiescence.
             void cleanupExitedSession(session, childOwner);
             if (!settled)
                 done({ ok: false, reason: "exited-early" });
