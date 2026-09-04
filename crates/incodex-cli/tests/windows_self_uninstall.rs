@@ -184,3 +184,19 @@ fn self_uninstall_path_cleanup_preserves_every_unrelated_entry_verbatim() {
     assert!(cleanup.contains("$PathEntryRemoved = $false"));
     assert!(cleanup.contains("if ($PathEntryRemoved)"));
 }
+
+#[test]
+fn restore_app_reinstates_an_abandoned_transient_registration_before_uninstalling() {
+    let source = include_str!("../src/windows_self_uninstall.rs");
+    let restore_app_path = source
+        .split_once("if let Some(approval) = approval.as_ref()")
+        .expect("restore-app uninstall path")
+        .1
+        .split_once("let managed_process_ids")
+        .expect("end of restore-app uninstall path")
+        .0;
+
+    assert!(restore_app_path.contains("uninstall_windows_runtime_approved_with_restore"));
+    assert!(restore_app_path.contains("WindowsInstalledRuntimeRegistration::from_install_state"));
+    assert!(restore_app_path.contains("enable_installed_runtime"));
+}

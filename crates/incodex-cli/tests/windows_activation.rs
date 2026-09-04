@@ -8,10 +8,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_cli::windows_activation::{
     activate_packaged_kill_on_drop, activate_packaged_with_installed_runtime,
-    disable_installed_runtime, enable_installed_runtime, transient_debugger_command_line,
-    try_run_installed_package_debugger, try_run_package_debugger, windows_debugger_route,
-    windows_installed_debugger_route, windows_transient_debugger_route, WindowsActivationFailure,
-    WindowsActivationRequest, WindowsDebuggerRoute, WindowsInstalledRuntimeRegistration,
+    activation_requires_runtime_environment_claim, disable_installed_runtime,
+    enable_installed_runtime, transient_debugger_command_line, try_run_installed_package_debugger,
+    try_run_package_debugger, windows_debugger_route, windows_installed_debugger_route,
+    windows_transient_debugger_route, WindowsActivationFailure, WindowsActivationRequest,
+    WindowsDebuggerRoute, WindowsInstalledRuntimeRegistration,
 };
 use incodex_cli::windows_helper::publish_windows_transient_helper;
 use incodex_cli::windows_install_state::{
@@ -82,12 +83,12 @@ fn transient_debugger_assigns_only_the_requested_isolated_capability() {
     assert_eq!(
         windows_transient_debugger_route(&job, "ChatGPT.exe codex://new?mode=codex")
             .expect("route official activation"),
-        WindowsDebuggerRoute::ResumeNormally
+        WindowsDebuggerRoute::Reject
     );
     assert_eq!(
         windows_transient_debugger_route(&job, &format!("ChatGPT.exe --user-data-dir={other}"))
             .expect("route unrelated isolated activation"),
-        WindowsDebuggerRoute::ResumeNormally
+        WindowsDebuggerRoute::Reject
     );
 }
 
@@ -292,9 +293,7 @@ fn builds_a_store_activation_request_without_losing_windows_arguments_or_environ
 }
 
 #[test]
-fn transient_package_registration_keeps_session_environment_behind_the_capability_pipe() {
-    let bootstrap =
-        Path::new(r"C:\Users\Linus Torvalds\.incodex\sessions\s-one\incodex-windows-bootstrap.cjs");
+fn transient_cdp_registration_delivers_session_environment_without_node_bootstrap() {
     let request = WindowsActivationRequest::new(
         "OpenAI.Codex_26.820.7780.0_x64__2p2nqsd0c76g0",
         "OpenAI.Codex_2p2nqsd0c76g0!App",
@@ -313,24 +312,33 @@ fn transient_package_registration_keeps_session_environment_behind_the_capabilit
         ]),
     )
     .expect("valid activation request")
-    .with_transient_runtime(
-        bootstrap,
+    .with_transient_cdp(
         Path::new(r"C:\Users\Linus Torvalds\.incodex\windows\helpers\0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\incodex-helper.exe"),
         Path::new(r"C:\Users\Linus Torvalds\.incodex"),
     )
-    .expect("private transient bootstrap");
+    .expect("private transient CDP debugger");
 
     let registered = String::from_utf16_lossy(request.transient_debug_environment());
-    assert!(registered.contains("NODE_OPTIONS="));
-    assert!(registered.contains("incodex-windows-bootstrap.cjs"));
-    assert!(!registered.contains("CODEX_HOME="));
-    assert!(!registered.contains("INCODEX_SESSION_ROOT="));
+    assert!(!registered.contains("NODE_OPTIONS="));
+    assert!(!registered.contains("incodex-windows-bootstrap.cjs"));
+    assert!(registered.contains("CODEX_HOME="));
+    assert!(registered.contains("INCODEX_SESSION_ROOT="));
 
     let claimed = request
         .activation_environment(WindowsLaunchMode::Cdp)
         .expect("build capability response");
     assert!(claimed.environment.contains_key("CODEX_HOME"));
     assert!(claimed.environment.contains_key("INCODEX_SESSION_ROOT"));
+}
+
+#[test]
+fn cdp_open_does_not_wait_for_the_disabled_runtime_bootstrap() {
+    assert!(!activation_requires_runtime_environment_claim(
+        WindowsLaunchMode::Cdp
+    ));
+    assert!(activation_requires_runtime_environment_claim(
+        WindowsLaunchMode::Runtime
+    ));
 }
 
 #[test]
@@ -373,8 +381,44 @@ fn transient_registration_survives_launcher_termination_and_recovers_from_a_stab
     )
     .expect("recover abandoned transient registration"));
     assert!(disabled);
-    assert!(!user_root.join("windows-registration.json").exists());
+    assert!(!user_root
+        .join("windows-transient-registration.json")
+        .exists());
     fs::remove_dir_all(user_root).expect("remove transient registration fixture");
+}
+
+#[test]
+fn legacy_transient_registration_in_the_durable_filename_still_recovers() {
+    let user_root = registration_scratch();
+    let package = "OpenAI.Codex_26.820.7780.0_x64__2p2nqsd0c76g0";
+    let helper = publish_windows_transient_helper(
+        &user_root,
+        &std::env::current_exe().expect("test helper source"),
+    )
+    .expect("publish stable helper");
+    stage_transient_windows_debug_registration(&user_root, package, &helper.executable)
+        .expect("stage current transient evidence");
+    fs::rename(
+        user_root.join("windows-transient-registration.json"),
+        user_root.join("windows-registration.json"),
+    )
+    .expect("model the legacy transient evidence filename");
+
+    let mut disabled = false;
+    assert!(recover_transient_windows_debug_registration_with(
+        &user_root,
+        |_| Ok(Vec::new()),
+        |_| Ok(true),
+        |_| {
+            disabled = true;
+            Ok(())
+        },
+    )
+    .expect("recover legacy transient evidence"));
+
+    assert!(disabled);
+    assert!(!user_root.join("windows-registration.json").exists());
+    fs::remove_dir_all(user_root).expect("remove legacy registration fixture");
 }
 
 #[test]
@@ -412,7 +456,9 @@ fn transient_registration_recovery_retains_evidence_when_the_package_starts_duri
 
     assert!(disabled);
     assert!(error.contains("42"), "{error}");
-    assert!(user_root.join("windows-registration.json").exists());
+    assert!(user_root
+        .join("windows-transient-registration.json")
+        .exists());
     fs::remove_dir_all(user_root).expect("remove transient registration fixture");
 }
 
