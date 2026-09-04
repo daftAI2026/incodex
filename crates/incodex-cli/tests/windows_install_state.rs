@@ -5,17 +5,22 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use incodex_cli::windows_activation::WindowsInstalledRuntimeRegistration;
+use incodex_cli::windows_helper::publish_windows_transient_helper;
 use incodex_cli::windows_install::{
     capture_windows_uninstall_approval, install_windows_runtime_with,
     uninstall_windows_runtime_approved_with, uninstall_windows_runtime_with,
-    WindowsUninstallOutcome,
+    uninstall_windows_runtime_with_restore, WindowsUninstallOutcome,
 };
 use incodex_cli::windows_install_state::{
     acquire_windows_install_state, read_windows_install_state, stage_windows_install_state,
     synchronize_windows_install_runtime_release, transition_windows_install_state,
     WindowsInstallPhase, WindowsInstallStateGuard,
 };
-use incodex_cli::windows_registration::recover_transient_windows_debug_registration_with;
+use incodex_cli::windows_registration::{
+    recover_transient_windows_debug_registration_with,
+    recover_transient_windows_debug_registration_with_restore,
+    stage_transient_windows_debug_registration,
+};
 use incodex_cli::windows_runtime::publish_windows_runtime;
 use incodex_core::windows_session::verify_private_acl;
 
@@ -98,6 +103,204 @@ fn stages_and_enables_the_installed_runtime_only_after_proving_codex_is_closed()
     assert_eq!(retained.phase, WindowsInstallPhase::RecoveryRequired);
     assert!(!retained.desired_enabled());
     fs::remove_dir_all(uncertain_root).expect("remove uncertain install fixture");
+}
+
+#[test]
+fn installed_registration_keeps_separate_transient_open_recovery_evidence() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    install_windows_runtime_with(
+        &user_root,
+        package,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .expect("install fixture Runtime");
+    let transient = publish_windows_transient_helper(&user_root, &helper)
+        .expect("publish transient open helper");
+
+    stage_transient_windows_debug_registration(&user_root, package, &transient.executable)
+        .expect("stage transient open beside installed registration");
+
+    assert!(user_root.join("windows-registration.json").is_file());
+    assert!(user_root
+        .join("windows-transient-registration.json")
+        .is_file());
+    fs::remove_dir_all(user_root).expect("remove concurrent registration fixture");
+}
+
+#[test]
+fn abandoned_transient_open_restores_the_installed_registration() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    install_windows_runtime_with(
+        &user_root,
+        package,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .expect("install fixture Runtime");
+    let transient = publish_windows_transient_helper(&user_root, &helper)
+        .expect("publish transient open helper");
+    stage_transient_windows_debug_registration(&user_root, package, &transient.executable)
+        .expect("stage abandoned transient open");
+
+    let mut restored = false;
+    assert!(recover_transient_windows_debug_registration_with_restore(
+        &user_root,
+        |_| Ok(Vec::new()),
+        |_| Ok(true),
+        |_| panic!("an installed registration must be restored, not disabled"),
+        |state| {
+            restored = true;
+            assert_eq!(state.package_full_name, package);
+            Ok(())
+        },
+    )
+    .expect("restore installed registration after abandoned open"));
+
+    assert!(restored);
+    assert!(user_root.join("windows-registration.json").is_file());
+    assert!(!user_root
+        .join("windows-transient-registration.json")
+        .exists());
+    fs::remove_dir_all(user_root).expect("remove abandoned override fixture");
+}
+
+#[test]
+fn uninstall_restores_an_abandoned_open_before_removing_the_installation() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    install_windows_runtime_with(
+        &user_root,
+        package,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .expect("install fixture Runtime");
+    let transient = publish_windows_transient_helper(&user_root, &helper)
+        .expect("publish transient open helper");
+    stage_transient_windows_debug_registration(&user_root, package, &transient.executable)
+        .expect("stage abandoned transient open");
+
+    let mut restore_calls = 0;
+    let mut disable_calls = 0;
+    let outcome = uninstall_windows_runtime_with_restore(
+        &user_root,
+        |_| Ok(Vec::new()),
+        |_| Ok(true),
+        |_| {
+            disable_calls += 1;
+            Ok(())
+        },
+        |_| {
+            restore_calls += 1;
+            Ok(())
+        },
+    )
+    .expect("recover abandoned open, then uninstall");
+
+    assert_eq!(outcome, WindowsUninstallOutcome::Removed);
+    assert_eq!(restore_calls, 1);
+    assert_eq!(disable_calls, 1);
+    assert!(!user_root.join("windows-registration.json").exists());
+    assert!(!user_root
+        .join("windows-transient-registration.json")
+        .exists());
+    fs::remove_dir_all(user_root).expect("remove recovered uninstall fixture");
+}
+
+#[test]
+fn uninstall_disables_an_abandoned_open_when_the_installed_helper_is_missing() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    let installed = install_windows_runtime_with(
+        &user_root,
+        package,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .expect("install fixture Runtime");
+    let transient = publish_windows_transient_helper(&user_root, &helper)
+        .expect("publish transient open helper");
+    stage_transient_windows_debug_registration(&user_root, package, &transient.executable)
+        .expect("stage abandoned transient open");
+    fs::remove_file(&installed.helper_path).expect("remove installed helper");
+
+    let mut disable_calls = 0;
+    let outcome = uninstall_windows_runtime_with_restore(
+        &user_root,
+        |_| Ok(Vec::new()),
+        |_| Ok(true),
+        |_| {
+            disable_calls += 1;
+            Ok(())
+        },
+        |_| panic!("a missing installed helper cannot be restored"),
+    )
+    .expect("disable transient registration and recover uninstall");
+
+    assert_eq!(outcome, WindowsUninstallOutcome::Removed);
+    assert_eq!(disable_calls, 2);
+    assert!(!user_root
+        .join("windows-transient-registration.json")
+        .exists());
+    assert!(!user_root.join("windows-install.json").exists());
+    fs::remove_dir_all(user_root).expect("remove missing-helper fixture");
+}
+
+#[test]
+fn uninstall_refuses_a_transient_registration_replaced_after_approval() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let package = "OpenAI.Codex_1.2.3.4_x64__publisher";
+    let transient = publish_windows_transient_helper(&user_root, &helper)
+        .expect("publish transient open helper");
+    stage_transient_windows_debug_registration(&user_root, package, &transient.executable)
+        .expect("stage first transient registration");
+    let approved =
+        capture_windows_uninstall_approval(&user_root).expect("capture displayed transient target");
+    recover_transient_windows_debug_registration_with_restore(
+        &user_root,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| panic!("an absent package has no debugger registration to disable"),
+        |_| panic!("a transient-only registration has no installed state to restore"),
+    )
+    .expect("retire first transient registration");
+    stage_transient_windows_debug_registration(&user_root, package, &transient.executable)
+        .expect("stage replacement transient registration");
+
+    let error = uninstall_windows_runtime_approved_with(
+        &user_root,
+        &approved,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+    )
+    .expect_err("confirmation must be bound to the transient registration identity");
+
+    assert!(error.contains("changed since confirmation"), "{error}");
+    assert!(user_root
+        .join("windows-transient-registration.json")
+        .is_file());
+    fs::remove_dir_all(user_root).expect("remove transient approval fixture");
 }
 
 #[test]

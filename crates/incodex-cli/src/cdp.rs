@@ -23,7 +23,6 @@ pub(crate) use mode::Readiness as CodexModeReadiness;
 use mode::{Action as CodexModeAction, PageState as CodexModePageState};
 
 const INJECT_JS: &str = include_str!("../../../dist/incodex-inject.js");
-const INJECT_PREFIX: &str = "window.__incodexIncognito=true;";
 const OFFICIAL_CODEX_PAGE_URL: &str = "app://-/index.html";
 const MAX_HTTP_RESPONSE_BYTES: usize = 1024 * 1024;
 const CDP_IO_TIMEOUT: Duration = Duration::from_secs(2);
@@ -46,8 +45,16 @@ pub struct CdpTarget {
     pub ws: String,
 }
 
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+pub enum CdpWindowKind {
+    #[default]
+    Incognito,
+    Normal,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct InjectionOptions {
+    pub window_kind: CdpWindowKind,
     pub locale: Option<String>,
     pub profile_mask: Option<ProfileMask>,
 }
@@ -63,6 +70,7 @@ struct InjectionPayload<'a> {
     source: &'a str,
     health_expression: &'a str,
     require_profile_mask: bool,
+    require_codex_mode: bool,
 }
 
 pub fn allocate_debug_port() -> Result<u16, String> {
@@ -120,10 +128,22 @@ pub fn inject_source_for_locale(locale: Option<&str>) -> String {
     inject_source_for_options(&InjectionOptions {
         locale: locale.map(str::to_string),
         profile_mask: None,
+        ..InjectionOptions::default()
     })
 }
 
 pub fn inject_source_for_options(options: &InjectionOptions) -> String {
+    inject_source_for_options_with_runtime(options, INJECT_JS)
+}
+
+pub(crate) fn inject_source_for_options_with_runtime(
+    options: &InjectionOptions,
+    runtime_source: &str,
+) -> String {
+    let incognito = match options.window_kind {
+        CdpWindowKind::Incognito => "true",
+        CdpWindowKind::Normal => "false",
+    };
     let locale = json_string(options.locale.as_deref().unwrap_or(""));
     let platform = if cfg!(target_os = "windows") {
         "window.__incodexPlatform=\"win32\";"
@@ -139,7 +159,7 @@ pub fn inject_source_for_options(options: &InjectionOptions) -> String {
         None => "null".to_string(),
     };
     format!(
-        "{INJECT_PREFIX}window.__incodexLocale={locale};{platform}window.__incodexProfileMask={profile_bootstrap};\n{INJECT_JS}"
+        "window.__incodexIncognito={incognito};window.__incodexLocale={locale};{platform}window.__incodexProfileMask={profile_bootstrap};\n{runtime_source}"
     )
 }
 
@@ -164,12 +184,17 @@ pub fn ui_ready_expression() -> &'static str {
 }
 
 pub fn ui_ready_expression_for_options(options: &InjectionOptions) -> String {
+    let base = match options.window_kind {
+        CdpWindowKind::Incognito => ui_ready_expression().to_string(),
+        CdpWindowKind::Normal => {
+            "(() => ({button: Boolean(document.querySelector('[data-incodex-privacy-toggle]')), banner: true}))()".to_string()
+        }
+    };
     if options.profile_mask.is_none() {
-        return ui_ready_expression().to_string();
+        return base;
     }
     format!(
         "(() => {{ const base = {base}; base.profileMask = window.__incodexProfileMaskHealth === true; return base; }})()",
-        base = ui_ready_expression()
     )
 }
 
@@ -330,7 +355,7 @@ pub(crate) fn inject_shared_ui_with_options_while_alive_and_guard_with_readiness
     debug_port: u16,
     options: &InjectionOptions,
     process_alive: &AtomicBool,
-    mut on_target: F,
+    on_target: F,
     readiness: &mut CodexModeReadiness,
     connection_guard: &G,
 ) -> Result<String, String>
@@ -338,13 +363,38 @@ where
     F: FnMut(&str),
     G: Fn(&TcpStream) -> Result<(), String>,
 {
-    let source = inject_source_for_options(options);
+    inject_shared_ui_with_options_while_alive_and_guard_with_readiness_and_runtime(
+        debug_port,
+        options,
+        process_alive,
+        on_target,
+        readiness,
+        connection_guard,
+        INJECT_JS,
+    )
+}
+
+pub(crate) fn inject_shared_ui_with_options_while_alive_and_guard_with_readiness_and_runtime<F, G>(
+    debug_port: u16,
+    options: &InjectionOptions,
+    process_alive: &AtomicBool,
+    mut on_target: F,
+    readiness: &mut CodexModeReadiness,
+    connection_guard: &G,
+    runtime_source: &str,
+) -> Result<String, String>
+where
+    F: FnMut(&str),
+    G: Fn(&TcpStream) -> Result<(), String>,
+{
+    let source = inject_source_for_options_with_runtime(options, runtime_source);
     let health_expression = ui_ready_expression_for_options(options);
     let require_profile_mask = options.profile_mask.is_some();
     let payload = InjectionPayload {
         source: &source,
         health_expression: &health_expression,
         require_profile_mask,
+        require_codex_mode: options.window_kind == CdpWindowKind::Incognito,
     };
     let mut registered_script_targets = HashSet::new();
     let mut last = "cdp page not ready".to_string();
@@ -402,7 +452,9 @@ where
     let mut socket = connect_cdp_websocket(&page.ws, debug_port)?;
     ensure_injection_active(process_alive)?;
     send_guarded_cdp(&mut socket, 1, "Page.enable", json!({}), connection_guard)?;
-    confirm_official_codex_mode(&mut socket, process_alive, readiness, connection_guard)?;
+    if payload.require_codex_mode {
+        confirm_official_codex_mode(&mut socket, process_alive, readiness, connection_guard)?;
+    }
     ensure_injection_active(process_alive)?;
     if !registered_script_targets.contains(&page.id) {
         send_guarded_cdp(
@@ -921,7 +973,7 @@ fn send_cdp(
     result
 }
 
-fn send_guarded_cdp<G>(
+pub(crate) fn send_guarded_cdp<G>(
     socket: &mut WebSocket<TcpStream>,
     id: u64,
     method: &str,
@@ -998,7 +1050,10 @@ fn send_cdp_with_deadline<S: Read + Write>(
     }
 }
 
-fn connect_cdp_websocket(url: &str, expected_port: u16) -> Result<WebSocket<TcpStream>, String> {
+pub(crate) fn connect_cdp_websocket(
+    url: &str,
+    expected_port: u16,
+) -> Result<WebSocket<TcpStream>, String> {
     let addr = websocket_socket_addr(url, expected_port)?;
     let stream = TcpStream::connect_timeout(&addr, CDP_IO_TIMEOUT)
         .map_err(|error| format!("CDP WebSocket connect timed out or failed: {error}"))?;
@@ -1048,7 +1103,7 @@ fn websocket_socket_addr(url: &str, expected_port: u16) -> Result<SocketAddr, St
     websocket_socket_addr_from_uri(&uri, expected_port)
 }
 
-fn list_targets(debug_port: u16) -> Result<Vec<CdpTarget>, String> {
+pub(crate) fn list_targets(debug_port: u16) -> Result<Vec<CdpTarget>, String> {
     list_targets_with_timeout(debug_port, CDP_IO_TIMEOUT)
 }
 

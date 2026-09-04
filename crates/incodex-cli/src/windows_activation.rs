@@ -29,7 +29,8 @@ use crate::windows_launch::{
 };
 use crate::windows_process::{
     assign_debugged_process_to_job, process_command_line, resume_debugged_package_process,
-    snapshot_process_ids, WindowsPendingJob, WindowsProcessTree,
+    snapshot_process_ids, terminate_debugged_package_process, validate_debugged_package_process,
+    WindowsPendingJob, WindowsProcessTree,
 };
 use crate::windows_registration::{
     retire_windows_debug_registration, stage_transient_windows_debug_registration,
@@ -295,7 +296,10 @@ pub fn windows_installed_debugger_route(
     if !state.desired_enabled() {
         return Ok(WindowsDebuggerRoute::ResumeNormally);
     }
-    windows_debugger_route(command_line)
+    match windows_debugger_route(command_line)? {
+        WindowsDebuggerRoute::ResumeNormally => Ok(WindowsDebuggerRoute::PrepareInstalledCdp),
+        route => Ok(route),
+    }
 }
 
 impl WindowsActivationRequest {
@@ -355,14 +359,16 @@ impl WindowsActivationRequest {
         })
     }
 
-    pub fn with_transient_runtime(
+    pub fn with_transient_cdp(
         mut self,
-        bootstrap: &Path,
         debugger_executable: &Path,
         user_root: &Path,
     ) -> Result<Self, String> {
-        let environment =
-            BTreeMap::from([("NODE_OPTIONS".to_string(), node_require_option(bootstrap)?)]);
+        let environment = self
+            .claimed_environment
+            .iter()
+            .map(|(name, value)| (name.clone(), OsString::from(value)))
+            .collect::<BTreeMap<_, _>>();
         self.transient_debug_environment = Some(environment_block(environment)?);
         self.transient_debugger_executable = Some(debugger_executable.to_path_buf());
         self.transient_user_root = Some(user_root.to_path_buf());
@@ -550,7 +556,11 @@ pub fn activate_packaged_with_installed_cdp(
             "Windows installed Runtime registration does not match the activation package",
         ));
     }
-    activate_packaged_with_capability(request, WindowsLaunchMode::Cdp)
+    activate_packaged(request, Some(registration))
+}
+
+pub fn activation_requires_runtime_environment_claim(mode: WindowsLaunchMode) -> bool {
+    matches!(mode, WindowsLaunchMode::Runtime)
 }
 
 fn activate_packaged_with_capability(
@@ -564,9 +574,15 @@ fn activate_packaged_with_capability(
     let capability = request.activation_capability()?;
     let pending_job = WindowsPendingJob::create_for_capability(&capability)
         .map_err(|error| format!("cannot create Windows activation Job Object: {error}"))?;
-    let response = request.activation_environment(mode)?;
-    let mut environment_server =
-        ActivationEnvironmentServer::start(&capability, request.package_full_name(), response)?;
+    let mut environment_server = if activation_requires_runtime_environment_claim(mode) {
+        Some(ActivationEnvironmentServer::start(
+            &capability,
+            request.package_full_name(),
+            request.activation_environment(mode)?,
+        )?)
+    } else {
+        None
+    };
     let manager = match ComPtr::create(
         &CLSID_APPLICATION_ACTIVATION_MANAGER,
         &IID_APPLICATION_ACTIVATION_MANAGER,
@@ -574,7 +590,9 @@ fn activate_packaged_with_capability(
     ) {
         Ok(manager) => manager,
         Err(error) => {
-            environment_server.cancel();
+            if let Some(server) = &mut environment_server {
+                server.cancel();
+            }
             return Err(WindowsActivationFailure::before_start(error));
         }
     };
@@ -592,7 +610,9 @@ fn activate_packaged_with_capability(
         )
     };
     if failed(result) {
-        environment_server.cancel();
+        if let Some(server) = &mut environment_server {
+            server.cancel();
+        }
         let shutdown = if process_id != 0 && !existing_processes.contains(&process_id) {
             Err(format!(
                 "activation failed after reporting new Windows process {process_id}; process shutdown is unproven"
@@ -606,7 +626,9 @@ fn activate_packaged_with_capability(
         ));
     }
     if process_id == 0 || existing_processes.contains(&process_id) {
-        environment_server.cancel();
+        if let Some(server) = &mut environment_server {
+            server.cancel();
+        }
         return Err(WindowsActivationFailure::after_start(
             "Windows package activation did not create a new isolated Codex process",
             Ok(()),
@@ -615,7 +637,9 @@ fn activate_packaged_with_capability(
     let mut process_tree = match pending_job.attach(process_id, request.package_full_name()) {
         Ok(process_tree) => process_tree,
         Err(error) => {
-            environment_server.cancel();
+            if let Some(server) = &mut environment_server {
+                server.cancel();
+            }
             return Err(WindowsActivationFailure::after_start(
                 format!(
                     "cannot contain activated Windows Codex process {process_id} in its capability Job: {error}"
@@ -625,6 +649,9 @@ fn activate_packaged_with_capability(
                 )),
             ));
         }
+    };
+    let Some(environment_server) = &mut environment_server else {
+        return Ok(process_tree);
     };
     let environment_client = match environment_server.wait(ACTIVATION_ENVIRONMENT_TIMEOUT) {
         Ok(process_id) => process_id,
@@ -661,7 +688,7 @@ fn activate_packaged(
     let capability = request.activation_capability()?;
     if request.transient_debug_environment().is_empty() {
         return Err(WindowsActivationFailure::before_start(
-            "Windows transient activation is missing its private Runtime bootstrap",
+            "Windows transient activation is missing its private environment",
         ));
     }
     let debugger_executable = request.transient_debugger_executable()?;
@@ -826,13 +853,16 @@ pub fn try_run_package_debugger(arguments: &[String]) -> Option<Result<(), Strin
             .ok()
             .map(|command_line| windows_transient_debugger_route(job_name, &command_line))
             .transpose()?
-            .unwrap_or(WindowsDebuggerRoute::ResumeNormally);
+            .unwrap_or(WindowsDebuggerRoute::Reject);
         match route {
-            WindowsDebuggerRoute::ResumeNormally => {
+            WindowsDebuggerRoute::ResumeNormally | WindowsDebuggerRoute::PrepareInstalledCdp => {
                 resume_debugged_package_process(package_full_name, process_id, thread_id)
             }
             WindowsDebuggerRoute::AssignToJob(job_name) => {
                 assign_debugged_process_to_job(&job_name, package_full_name, process_id, thread_id)
+            }
+            WindowsDebuggerRoute::Reject => {
+                terminate_debugged_package_process(package_full_name, process_id, thread_id)
             }
         }
         .map_err(|error| format!("Windows package debugger failed: {error}"))
@@ -854,6 +884,10 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
         let registered_package = flag_value(arguments, "--package")?;
         let evidence = installed_debugger_registration_evidence(registered_package)?;
         let state = installed_state_for_current_helper(&evidence);
+        let runtime = state
+            .as_ref()
+            .ok()
+            .map(|state| (evidence.user_root.clone(), state.runtime_release.clone()));
         let command_line = process_command_line(process_id).ok();
         let (package_full_name, route) = installed_debugger_route_from_state(
             state,
@@ -864,13 +898,128 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
             WindowsDebuggerRoute::ResumeNormally => {
                 resume_debugged_package_process(&package_full_name, process_id, thread_id)
             }
+            WindowsDebuggerRoute::PrepareInstalledCdp => {
+                let preparation = prepare_installed_cdp_or_terminate(
+                    || {
+                        let (user_root, runtime_release) = runtime.ok_or_else(|| {
+                            "Windows installed debugger Runtime state is unavailable".to_string()
+                        })?;
+                        let runtime_source =
+                            crate::windows_runtime::read_verified_windows_runtime_artifact(
+                                &user_root,
+                                &runtime_release,
+                                "incodex-inject.js",
+                            )?;
+                        let runtime_source = String::from_utf8(runtime_source).map_err(|_| {
+                            "installed Windows Runtime injector is not valid UTF-8".to_string()
+                        })?;
+                        let helper = std::env::current_exe().map_err(|error| {
+                            format!("cannot locate the installed Incodex helper: {error}")
+                        })?;
+                        let native_open_executable =
+                            crate::windows_update::native_open_executable_for_runtime(
+                                &user_root,
+                                &helper,
+                                &runtime_release,
+                            )?;
+                        let debug_port = crate::cdp::allocate_debug_port()?;
+                        validate_debugged_package_process(
+                            &package_full_name,
+                            process_id,
+                            thread_id,
+                        )
+                        .and_then(|_| {
+                            crate::windows_process_parameters::rewrite_suspended_process_for_cdp(
+                                process_id, debug_port,
+                            )
+                        })
+                        .map_err(|error| {
+                            format!(
+                                "cannot prepare suspended Windows Codex process for CDP: {error}"
+                            )
+                        })?;
+                        Ok((debug_port, runtime_source, native_open_executable))
+                    },
+                    || {
+                        terminate_debugged_package_process(
+                            &package_full_name,
+                            process_id,
+                            thread_id,
+                        )
+                    },
+                );
+                let (debug_port, runtime_source, native_open_executable) = match preparation {
+                    Ok(preparation) => preparation,
+                    Err(error) => return Err(error),
+                };
+                if let Err(error) =
+                    resume_debugged_package_process(&package_full_name, process_id, thread_id)
+                {
+                    return terminate_failed_installed_cdp_process(
+                        &package_full_name,
+                        process_id,
+                        thread_id,
+                        format!("cannot resume prepared Windows Codex process: {error}"),
+                    );
+                }
+                match crate::windows_installed_cdp::inject_installed_shared_ui(
+                    debug_port,
+                    &package_full_name,
+                    process_id,
+                    &runtime_source,
+                    &native_open_executable,
+                ) {
+                    Ok(()) => Ok(()),
+                    Err(error) => terminate_failed_installed_cdp_process(
+                        &package_full_name,
+                        process_id,
+                        thread_id,
+                        format!("installed Windows CDP bridge failed: {error}"),
+                    )
+                    .map_err(std::io::Error::other),
+                }
+            }
             WindowsDebuggerRoute::AssignToJob(job_name) => {
                 assign_debugged_process_to_job(&job_name, &package_full_name, process_id, thread_id)
+            }
+            WindowsDebuggerRoute::Reject => {
+                terminate_debugged_package_process(&package_full_name, process_id, thread_id)
             }
         }
         .map_err(|error| format!("Windows installed debugger failed: {error}"))
     })();
     Some(parsed)
+}
+
+fn prepare_installed_cdp_or_terminate<T, P, C, E>(prepare: P, terminate: C) -> Result<T, String>
+where
+    P: FnOnce() -> Result<T, String>,
+    C: FnOnce() -> Result<(), E>,
+    E: std::fmt::Display,
+{
+    match prepare() {
+        Ok(preparation) => Ok(preparation),
+        Err(primary) => match terminate() {
+            Ok(()) => Err(primary),
+            Err(cleanup) => Err(format!(
+                "{primary}; cannot terminate that exact process: {cleanup}"
+            )),
+        },
+    }
+}
+
+fn terminate_failed_installed_cdp_process(
+    package_full_name: &str,
+    process_id: u32,
+    thread_id: u32,
+    primary: String,
+) -> Result<(), String> {
+    match terminate_debugged_package_process(package_full_name, process_id, thread_id) {
+        Ok(()) => Err(primary),
+        Err(cleanup) => Err(format!(
+            "{primary}; cannot terminate that exact process: {cleanup}"
+        )),
+    }
 }
 
 fn flag_value<'a>(arguments: &'a [String], flag: &str) -> Result<&'a str, String> {
@@ -1207,6 +1356,7 @@ fn quote_windows_argument(argument: &OsStr) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::ffi::OsString;
     use std::path::Path;
     use std::sync::mpsc;
@@ -1216,8 +1366,29 @@ mod tests {
     use super::{
         acquire_package_activation_lock, activation_manager_failure, cleanup_proof_after_debugging,
         installed_debugger_route_from_state, installed_debugger_user_root, node_require_option,
-        WindowsDebuggerRoute,
+        prepare_installed_cdp_or_terminate, WindowsDebuggerRoute,
     };
+
+    #[test]
+    fn installed_cdp_preparation_failure_terminates_the_suspended_process() {
+        let terminated = Cell::new(false);
+        let result: Result<u16, String> = prepare_installed_cdp_or_terminate(
+            || Err("Runtime injector is unreadable".to_string()),
+            || {
+                terminated.set(true);
+                Ok::<(), String>(())
+            },
+        );
+
+        assert!(
+            terminated.get(),
+            "a supplied suspended process must not be orphaned"
+        );
+        assert_eq!(
+            result.expect_err("preparation must fail closed"),
+            "Runtime injector is unreadable"
+        );
+    }
 
     #[test]
     fn unreadable_installed_state_resumes_the_registered_package() {

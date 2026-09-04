@@ -64,6 +64,8 @@ pub mod windows_install;
 #[cfg(target_os = "windows")]
 pub mod windows_install_state;
 #[cfg(target_os = "windows")]
+pub(crate) mod windows_installed_cdp;
+#[cfg(target_os = "windows")]
 pub mod windows_launch;
 #[cfg(target_os = "windows")]
 pub(crate) mod windows_locale;
@@ -73,6 +75,9 @@ pub mod windows_menu;
 pub mod windows_open;
 #[cfg(target_os = "windows")]
 pub mod windows_process;
+#[cfg(target_os = "windows")]
+#[doc(hidden)]
+pub mod windows_process_parameters;
 #[cfg(target_os = "windows")]
 pub(crate) mod windows_profile;
 #[cfg(target_os = "windows")]

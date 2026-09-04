@@ -401,6 +401,7 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
         let options = InjectionOptions {
             locale: plan.locale.clone(),
             profile_mask: plan.profile_mask.clone(),
+            ..InjectionOptions::default()
         };
         Some(start_injection_worker(
             port,
