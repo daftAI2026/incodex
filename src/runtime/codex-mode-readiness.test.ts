@@ -36,8 +36,7 @@ async function runNext(tasks: ScheduledTask[]): Promise<void> {
   const task = tasks.shift();
   expect(task).toBeDefined();
   task?.callback();
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
 }
 
 describe("Codex mode readiness", () => {
@@ -109,6 +108,10 @@ describe("Codex mode readiness", () => {
         tasks.push(task);
         return task;
       },
+      cancelTimer: (task: ScheduledTask) => {
+        const index = tasks.indexOf(task);
+        if (index >= 0) tasks.splice(index, 1);
+      },
     });
 
     readiness.observe(win);
@@ -149,6 +152,10 @@ describe("Codex mode readiness", () => {
         const task = { callback, delay };
         tasks.push(task);
         return task;
+      },
+      cancelTimer: (task: ScheduledTask) => {
+        const index = tasks.indexOf(task);
+        if (index >= 0) tasks.splice(index, 1);
       },
     });
 
@@ -191,6 +198,10 @@ describe("Codex mode readiness", () => {
         tasks.push(task);
         return task;
       },
+      cancelTimer: (task: ScheduledTask) => {
+        const index = tasks.indexOf(task);
+        if (index >= 0) tasks.splice(index, 1);
+      },
     });
 
     readiness.observe(win);
@@ -204,8 +215,7 @@ describe("Codex mode readiness", () => {
       modeLabel: "ChatGPT",
       officialBlockerVisible: false,
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
 
     expect(fallbacks).toHaveLength(0);
     expect(tasks).toHaveLength(0);
@@ -266,14 +276,11 @@ describe("Codex mode readiness", () => {
       ...scheduler,
       isIncognito: () => true,
       log: (event: string) => events.push(event),
-      maxChecks: 3,
       selectFallback: () => true,
     });
 
     readiness.observe(win);
-    await scheduler.runNext();
-    await scheduler.runNext();
-    await scheduler.runNext();
+    for (let check = 0; check < 20; check += 1) await scheduler.runNext();
 
     expect(events).toEqual(["codex-mode-unresolved"]);
     expect(scheduler.activeTasks()).toHaveLength(0);
