@@ -88,6 +88,7 @@ impl Readiness {
         if self.unresolved {
             return Action::Unresolved;
         }
+        self.probe_failures = 0;
         if page_state == PageState::Codex {
             return Action::Confirmed;
         }

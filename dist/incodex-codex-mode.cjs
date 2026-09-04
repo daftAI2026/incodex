@@ -161,6 +161,7 @@ function createCodexModeReadiness(options) {
             if (state.complete || win.isDestroyed() || win.webContents.isDestroyed())
                 return;
             const pageState = deriveCodexModePageState(snapshot);
+            state.probeFailures = 0;
             if (!state.fallbackAttempted) {
                 state.primaryOtherChecks = pageState === "other" ? state.primaryOtherChecks + 1 : 0;
             }
