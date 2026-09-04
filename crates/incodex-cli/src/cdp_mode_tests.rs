@@ -93,6 +93,52 @@ fn codex_readiness_accepts_codex_after_nineteen_probe_failures() {
 }
 
 #[test]
+fn codex_readiness_resets_probe_failures_after_a_successful_observation() {
+    let mut readiness = CodexModeReadiness::default();
+
+    for _ in 0..19 {
+        assert_eq!(readiness.observe_probe_failure(), CodexModeAction::Wait);
+    }
+    assert_eq!(
+        readiness.observe(CodexModePageState::Pending),
+        CodexModeAction::Wait
+    );
+    for _ in 0..19 {
+        assert_eq!(readiness.observe_probe_failure(), CodexModeAction::Wait);
+    }
+    assert_eq!(
+        readiness.observe(CodexModePageState::Codex),
+        CodexModeAction::Confirmed
+    );
+}
+
+#[test]
+fn codex_readiness_requires_twenty_new_failures_after_a_successful_observation() {
+    let mut readiness = CodexModeReadiness::default();
+
+    for _ in 0..19 {
+        assert_eq!(readiness.observe_probe_failure(), CodexModeAction::Wait);
+    }
+    assert_eq!(
+        readiness.observe(CodexModePageState::Pending),
+        CodexModeAction::Wait
+    );
+    assert_eq!(readiness.observe_probe_failure(), CodexModeAction::Wait);
+    for _ in 0..18 {
+        assert_eq!(readiness.observe_probe_failure(), CodexModeAction::Wait);
+    }
+    assert_eq!(
+        readiness.observe_probe_failure(),
+        CodexModeAction::Unresolved
+    );
+    assert_eq!(
+        readiness.observe(CodexModePageState::Codex),
+        CodexModeAction::Unresolved,
+        "an unresolved readiness must not be revived"
+    );
+}
+
+#[test]
 fn native_transport_and_malformed_mode_probes_share_the_terminal_failure_budget() {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
     listener.set_nonblocking(true).unwrap();

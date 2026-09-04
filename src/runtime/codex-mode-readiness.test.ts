@@ -417,6 +417,100 @@ describe("Codex mode readiness", () => {
     expect(scheduler.activeTasks()).toHaveLength(0);
   });
 
+  test("resets the probe failure streak after a successful pending snapshot", async () => {
+    const scheduler = controlledScheduler();
+    const events: string[] = [];
+    let attempt = 0;
+    const win = {
+      isDestroyed: () => false,
+      isFocused: () => true,
+      once: () => {},
+      webContents: {
+        executeJavaScript: async () => {
+          attempt += 1;
+          if (attempt <= 19 || (attempt >= 21 && attempt <= 39)) {
+            throw new Error("renderer unavailable");
+          }
+          if (attempt === 20) {
+            return {
+              modeAvailable: false,
+              modeLabel: "",
+              officialBlockerVisible: true,
+            };
+          }
+          return {
+            modeAvailable: true,
+            modeLabel: "Codex",
+            officialBlockerVisible: false,
+          };
+        },
+        isDestroyed: () => false,
+      },
+    };
+    const readiness = createCodexModeReadiness({
+      ...scheduler,
+      isIncognito: () => true,
+      log: (event: string) => events.push(event),
+      maxProbeFailures: 20,
+      selectFallback: () => true,
+    });
+
+    readiness.observe(win);
+    for (let check = 0; check < 40; check += 1) await scheduler.runNext();
+
+    expect(events).toEqual([
+      ...Array.from({ length: 38 }, () => "codex-mode-probe-failed"),
+      "codex-mode-confirmed",
+    ]);
+    expect(scheduler.activeTasks()).toHaveLength(0);
+  });
+
+  test("requires twenty new consecutive failures after a successful pending snapshot", async () => {
+    const scheduler = controlledScheduler();
+    const events: string[] = [];
+    let attempt = 0;
+    const win = {
+      isDestroyed: () => false,
+      isFocused: () => true,
+      once: () => {},
+      webContents: {
+        executeJavaScript: async () => {
+          attempt += 1;
+          if (attempt === 20) {
+            return {
+              modeAvailable: false,
+              modeLabel: "",
+              officialBlockerVisible: true,
+            };
+          }
+          throw new Error("renderer unavailable");
+        },
+        isDestroyed: () => false,
+      },
+    };
+    const readiness = createCodexModeReadiness({
+      ...scheduler,
+      isIncognito: () => true,
+      log: (event: string) => events.push(event),
+      maxProbeFailures: 20,
+      selectFallback: () => true,
+    });
+
+    readiness.observe(win);
+    for (let check = 0; check < 20; check += 1) await scheduler.runNext();
+    await scheduler.runNext();
+    expect(events.at(-1)).toBe("codex-mode-probe-failed");
+    expect(scheduler.activeTasks()).toHaveLength(1);
+
+    for (let check = 0; check < 18; check += 1) await scheduler.runNext();
+    expect(events).not.toContain("codex-mode-unresolved");
+    expect(scheduler.activeTasks()).toHaveLength(1);
+
+    await scheduler.runNext();
+    expect(events.at(-1)).toBe("codex-mode-unresolved");
+    expect(scheduler.activeTasks()).toHaveLength(0);
+  });
+
   test("probes nested accessible labels and blocks every official dialog shape", () => {
     expect(CODEX_MODE_PROBE_EXPRESSION).toContain("textContent");
     expect(CODEX_MODE_PROBE_EXPRESSION).toContain('getAttribute("aria-label")');
