@@ -302,6 +302,14 @@ pub fn windows_installed_debugger_route(
     }
 }
 
+fn should_coordinate_installed_update(route: &WindowsDebuggerRoute, is_primary: bool) -> bool {
+    is_primary
+        && matches!(
+            route,
+            WindowsDebuggerRoute::ResumeNormally | WindowsDebuggerRoute::PrepareInstalledCdp
+        )
+}
+
 impl WindowsActivationRequest {
     pub fn new<I>(
         package_full_name: &str,
@@ -895,11 +903,10 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
             &evidence.package_full_name,
             command_line.as_deref(),
         )?;
-        let update_repair_state = if matches!(&route, WindowsDebuggerRoute::ResumeNormally)
-            && command_line
-                .as_deref()
-                .is_some_and(crate::windows_update_repair::is_primary_package_process)
-        {
+        let is_primary = command_line
+            .as_deref()
+            .is_some_and(crate::windows_update_repair::is_primary_package_process);
+        let update_repair_state = if should_coordinate_installed_update(&route, is_primary) {
             repair_state
         } else {
             None
