@@ -288,12 +288,12 @@ incodex install --clone     # macOS development only: patch a copy
 incodex uninstall           # Remove integration; macOS restores the official app
 incodex status
 incodex doctor
-incodex doctor --deep       # macOS only: nested signing / entitlement / Gatekeeper evidence
+incodex doctor --deep       # macOS: nested signing / entitlement / Gatekeeper evidence
 incodex runtime             # Publish the bundled Runtime without modifying the official app
 incodex open                # Incognito window, no patch
 incodex open --mask         # Temporary sidebar name and offline avatar
 incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
-incodex recover --transaction <id>  # macOS only
+incodex recover --transaction <id>  # available on macOS
 inc update                  # Update Incodex through its install channel
 incodex self-uninstall      # Remove the CLI; add --restore-app to remove app integration
 ```
@@ -308,7 +308,7 @@ inc update --dry-run
 incodex self-uninstall --dry-run
 incodex status --json
 incodex doctor --json
-incodex doctor --deep --json      # macOS only
+incodex doctor --deep --json      # available on macOS
 ```
 
 `brew install`, `curl … | bash`, and `cargo install` only put the command on PATH. On macOS, the command that changes `/Applications/ChatGPT.app` is `incodex install`. The Windows PowerShell installer likewise installs only the CLI; the later `incodex install` command registers Incodex's per-user Runtime without changing the Store package.
@@ -316,7 +316,7 @@ incodex doctor --deep --json      # macOS only
 ## Quick Launchers
 
 <details>
-<summary><strong>Raycast and Alfred setup (macOS only)</strong></summary>
+<summary><strong>Raycast and Alfred setup (available on macOS)</strong></summary>
 
 Install three launchers for Open, Status, and Doctor:
 
