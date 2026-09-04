@@ -239,7 +239,7 @@ describe("Codex mode readiness", () => {
       ...scheduler,
       isIncognito: () => true,
       log: (event: string) => events.push(event),
-      maxChecks: 2,
+      maxProbeFailures: 2,
       selectFallback: () => true,
     });
 
@@ -256,19 +256,20 @@ describe("Codex mode readiness", () => {
     expect(scheduler.activeTasks()).toHaveLength(0);
   });
 
-  test("bounds permanent pending pages without leaving a scheduled timer", async () => {
+  test("keeps waiting through official blockers until Codex becomes available", async () => {
     const scheduler = controlledScheduler();
     const events: string[] = [];
+    let snapshot = {
+      modeAvailable: false,
+      modeLabel: "",
+      officialBlockerVisible: true,
+    };
     const win = {
       isDestroyed: () => false,
       isFocused: () => true,
       once: () => {},
       webContents: {
-        executeJavaScript: async () => ({
-          modeAvailable: false,
-          modeLabel: "",
-          officialBlockerVisible: true,
-        }),
+        executeJavaScript: async () => snapshot,
         isDestroyed: () => false,
       },
     };
@@ -280,27 +281,37 @@ describe("Codex mode readiness", () => {
     });
 
     readiness.observe(win);
-    for (let check = 0; check < 20; check += 1) await scheduler.runNext();
+    for (let check = 0; check < 25; check += 1) await scheduler.runNext();
+    expect(events).toEqual([]);
+    expect(scheduler.activeTasks()).toHaveLength(1);
 
-    expect(events).toEqual(["codex-mode-unresolved"]);
+    snapshot = {
+      modeAvailable: true,
+      modeLabel: "Codex",
+      officialBlockerVisible: false,
+    };
+    await scheduler.runNext();
+
+    expect(events).toEqual(["codex-mode-confirmed"]);
     expect(scheduler.activeTasks()).toHaveLength(0);
   });
 
-  test("shares the budget across blocked and unfocused fallback checks", async () => {
+  test("keeps an unfocused fallback pending without consuming failure budget", async () => {
     const scheduler = controlledScheduler();
     const events: string[] = [];
     const fallbacks: unknown[] = [];
-    const snapshots = [
-      { modeAvailable: false, modeLabel: "", officialBlockerVisible: true },
-      { modeAvailable: true, modeLabel: "ChatGPT", officialBlockerVisible: false },
-      { modeAvailable: false, modeLabel: "", officialBlockerVisible: true },
-    ];
+    let focused = false;
+    let snapshot = {
+      modeAvailable: true,
+      modeLabel: "ChatGPT",
+      officialBlockerVisible: false,
+    };
     const win = {
       isDestroyed: () => false,
-      isFocused: () => false,
+      isFocused: () => focused,
       once: () => {},
       webContents: {
-        executeJavaScript: async () => snapshots.shift(),
+        executeJavaScript: async () => snapshot,
         isDestroyed: () => false,
       },
     };
@@ -308,7 +319,7 @@ describe("Codex mode readiness", () => {
       ...scheduler,
       isIncognito: () => true,
       log: (event: string) => events.push(event),
-      maxChecks: 3,
+      maxProbeFailures: 1,
       primaryOtherChecksRequired: 1,
       selectFallback: (selectedWindow: unknown) => {
         fallbacks.push(selectedWindow);
@@ -317,12 +328,21 @@ describe("Codex mode readiness", () => {
     });
 
     readiness.observe(win);
+    for (let check = 0; check < 25; check += 1) await scheduler.runNext();
+    expect(fallbacks).toHaveLength(0);
+    expect(events).toEqual([]);
+
+    focused = true;
     await scheduler.runNext();
-    await scheduler.runNext();
+    snapshot = {
+      modeAvailable: true,
+      modeLabel: "Codex",
+      officialBlockerVisible: false,
+    };
     await scheduler.runNext();
 
-    expect(fallbacks).toHaveLength(0);
-    expect(events).toEqual(["codex-mode-unresolved"]);
+    expect(fallbacks).toHaveLength(1);
+    expect(events).toEqual(["codex-mode-fallback-sent", "codex-mode-confirmed"]);
     expect(scheduler.activeTasks()).toHaveLength(0);
   });
 
@@ -343,7 +363,7 @@ describe("Codex mode readiness", () => {
       ...scheduler,
       isIncognito: () => true,
       log: (event: string) => events.push(event),
-      maxChecks: 1,
+      maxProbeFailures: 1,
       selectFallback: () => true,
     });
 
@@ -356,19 +376,26 @@ describe("Codex mode readiness", () => {
     expect(scheduler.activeTasks()).toHaveLength(0);
   });
 
-  test("accepts Codex on the final allowed check before applying the limit", async () => {
+  test("accepts Codex after nineteen probe failures", async () => {
     const scheduler = controlledScheduler();
     const events: string[] = [];
-    const snapshots = [
-      { modeAvailable: false, modeLabel: "", officialBlockerVisible: true },
-      { modeAvailable: true, modeLabel: "Codex", officialBlockerVisible: false },
-    ];
+    let failuresRemaining = 19;
     const win = {
       isDestroyed: () => false,
       isFocused: () => true,
       once: () => {},
       webContents: {
-        executeJavaScript: async () => snapshots.shift(),
+        executeJavaScript: async () => {
+          if (failuresRemaining > 0) {
+            failuresRemaining -= 1;
+            throw new Error("renderer unavailable");
+          }
+          return {
+            modeAvailable: true,
+            modeLabel: "Codex",
+            officialBlockerVisible: false,
+          };
+        },
         isDestroyed: () => false,
       },
     };
@@ -376,15 +403,17 @@ describe("Codex mode readiness", () => {
       ...scheduler,
       isIncognito: () => true,
       log: (event: string) => events.push(event),
-      maxChecks: 2,
+      maxProbeFailures: 20,
       selectFallback: () => true,
     });
 
     readiness.observe(win);
-    await scheduler.runNext();
-    await scheduler.runNext();
+    for (let check = 0; check < 20; check += 1) await scheduler.runNext();
 
-    expect(events).toEqual(["codex-mode-confirmed"]);
+    expect(events).toEqual([
+      ...Array.from({ length: 19 }, () => "codex-mode-probe-failed"),
+      "codex-mode-confirmed",
+    ]);
     expect(scheduler.activeTasks()).toHaveLength(0);
   });
 

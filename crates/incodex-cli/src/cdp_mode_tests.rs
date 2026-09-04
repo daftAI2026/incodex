@@ -9,8 +9,9 @@ use serde_json::{json, Value};
 use tungstenite::Message;
 
 use super::{
-    codex_mode_page_state, inject_shared_ui_with_options, ui_ready_expression, CodexModeAction,
-    CodexModePageState, CodexModeReadiness, InjectionOptions,
+    codex_mode_page_state, inject_shared_ui_with_options,
+    inject_shared_ui_with_options_while_alive_with_readiness, is_terminal_codex_mode_error,
+    ui_ready_expression, CodexModeAction, CodexModePageState, CodexModeReadiness, InjectionOptions,
 };
 
 fn write_json_response(stream: &mut TcpStream, value: &Value) {
@@ -63,26 +64,10 @@ fn codex_readiness_waits_for_optional_official_blockers() {
 }
 
 #[test]
-fn codex_readiness_bounds_permanent_pending_with_one_total_budget() {
+fn codex_readiness_preserves_long_official_pending_before_success() {
     let mut readiness = CodexModeReadiness::default();
 
-    for _ in 0..19 {
-        assert_eq!(
-            readiness.observe(CodexModePageState::Pending),
-            CodexModeAction::Wait
-        );
-    }
-    assert_eq!(
-        readiness.observe(CodexModePageState::Pending),
-        CodexModeAction::Unresolved
-    );
-}
-
-#[test]
-fn codex_readiness_accepts_codex_on_the_final_allowed_check() {
-    let mut readiness = CodexModeReadiness::default();
-
-    for _ in 0..19 {
+    for _ in 0..25 {
         assert_eq!(
             readiness.observe(CodexModePageState::Pending),
             CodexModeAction::Wait
@@ -92,6 +77,122 @@ fn codex_readiness_accepts_codex_on_the_final_allowed_check() {
         readiness.observe(CodexModePageState::Codex),
         CodexModeAction::Confirmed
     );
+}
+
+#[test]
+fn codex_readiness_accepts_codex_after_nineteen_probe_failures() {
+    let mut readiness = CodexModeReadiness::default();
+
+    for _ in 0..19 {
+        assert_eq!(
+            readiness.observe_probe_failure(),
+            CodexModeAction::Wait
+        );
+    }
+    assert_eq!(
+        readiness.observe(CodexModePageState::Codex),
+        CodexModeAction::Confirmed
+    );
+}
+
+#[test]
+fn native_transport_and_malformed_mode_probes_share_the_terminal_failure_budget() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let stop = Arc::new(AtomicBool::new(false));
+    let probes = Arc::new(AtomicUsize::new(0));
+    let server = {
+        let stop = stop.clone();
+        let probes = probes.clone();
+        thread::spawn(move || {
+            while !stop.load(Ordering::Acquire) {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(connection) => connection,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(std::time::Duration::from_millis(5));
+                        continue;
+                    }
+                    Err(error) => panic!("CDP test server failed: {error}"),
+                };
+                let mut peek = [0_u8; 2048];
+                let size = stream.peek(&mut peek).unwrap();
+                let request = String::from_utf8_lossy(&peek[..size]);
+                if request.starts_with("GET /devtools/") {
+                    stream.set_nonblocking(false).unwrap();
+                    let mut socket = tungstenite::accept(stream).unwrap();
+                    while let Ok(Message::Text(text)) = socket.read() {
+                        let command: Value = serde_json::from_str(&text).unwrap();
+                        let id = command.get("id").and_then(Value::as_u64).unwrap();
+                        let expression = command
+                            .pointer("/params/expression")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default();
+                        if expression.contains("officialBlockerVisible") {
+                            let probe = probes.fetch_add(1, Ordering::AcqRel) + 1;
+                            if probe % 2 == 0 {
+                                break;
+                            }
+                            socket
+                                .send(Message::Text(
+                                    json!({"id": id, "result": {"result": {"value": null}}})
+                                        .to_string()
+                                        .into(),
+                                ))
+                                .unwrap();
+                            break;
+                        }
+                        socket
+                            .send(Message::Text(
+                                json!({"id": id, "result": {}}).to_string().into(),
+                            ))
+                            .unwrap();
+                    }
+                    continue;
+                }
+
+                let mut request = [0_u8; 2048];
+                let read = stream.read(&mut request).unwrap();
+                assert!(read > 0, "CDP test server received an empty HTTP request");
+                write_json_response(
+                    &mut stream,
+                    &json!([{
+                        "id": "main",
+                        "type": "page",
+                        "url": "app://-/index.html",
+                        "webSocketDebuggerUrl": format!(
+                            "ws://127.0.0.1:{port}/devtools/page/main"
+                        )
+                    }]),
+                );
+            }
+        })
+    };
+
+    let process_alive = AtomicBool::new(true);
+    let mut readiness = CodexModeReadiness::default();
+    let mut terminal_error = None;
+    for _ in 0..3 {
+        match inject_shared_ui_with_options_while_alive_with_readiness(
+            port,
+            &InjectionOptions::default(),
+            &process_alive,
+            |_| {},
+            &mut readiness,
+        ) {
+            Err(error) if is_terminal_codex_mode_error(&error) => {
+                terminal_error = Some(error);
+                break;
+            }
+            Err(_) => {}
+            Ok(target) => panic!("broken mode probes unexpectedly injected into {target}"),
+        }
+    }
+    stop.store(true, Ordering::Release);
+    server.join().unwrap();
+
+    assert_eq!(probes.load(Ordering::Acquire), 20);
+    assert!(terminal_error.is_some(), "twenty probe failures must be terminal");
 }
 
 #[test]
