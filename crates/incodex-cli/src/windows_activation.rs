@@ -1380,8 +1380,29 @@ mod tests {
     use super::{
         acquire_package_activation_lock, activation_manager_failure, cleanup_proof_after_debugging,
         installed_debugger_route_from_state, installed_debugger_user_root, node_require_option,
-        prepare_installed_cdp_or_terminate, WindowsDebuggerRoute,
+        prepare_installed_cdp_or_terminate, should_coordinate_installed_update,
+        WindowsDebuggerRoute,
     };
+
+    #[test]
+    fn installed_cdp_primary_remains_the_update_coordinator() {
+        assert!(should_coordinate_installed_update(
+            &WindowsDebuggerRoute::PrepareInstalledCdp,
+            true,
+        ));
+        assert!(should_coordinate_installed_update(
+            &WindowsDebuggerRoute::ResumeNormally,
+            true,
+        ));
+        assert!(!should_coordinate_installed_update(
+            &WindowsDebuggerRoute::PrepareInstalledCdp,
+            false,
+        ));
+        assert!(!should_coordinate_installed_update(
+            &WindowsDebuggerRoute::Reject,
+            true,
+        ));
+    }
 
     #[test]
     fn installed_cdp_preparation_failure_terminates_the_suspended_process() {
