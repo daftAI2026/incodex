@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use tungstenite::Message;
@@ -37,11 +38,11 @@ fn mode_probe_response(mode_available: bool, mode_label: &str, blocker_visible: 
 fn codex_mode_probe_treats_missing_ui_and_optional_dialogs_as_pending() {
     assert_eq!(
         codex_mode_page_state(&mode_probe_response(false, "", false)).unwrap(),
-        CodexModePageState::Pending
+        CodexModePageState::NotReady
     );
     assert_eq!(
         codex_mode_page_state(&mode_probe_response(true, "ChatGPT", true)).unwrap(),
-        CodexModePageState::Pending
+        CodexModePageState::BlockedByOfficialUi
     );
     assert_eq!(
         codex_mode_page_state(&mode_probe_response(true, "Codex", false)).unwrap(),
@@ -54,8 +55,8 @@ fn codex_readiness_waits_for_optional_official_blockers() {
     let mut readiness = CodexModeReadiness::default();
 
     assert_eq!(
-        readiness.observe(CodexModePageState::Pending),
-        CodexModeAction::Wait
+        readiness.observe(CodexModePageState::BlockedByOfficialUi),
+        CodexModeAction::BlockedByOfficialUi
     );
     assert_eq!(
         readiness.observe(CodexModePageState::Codex),
@@ -65,17 +66,109 @@ fn codex_readiness_waits_for_optional_official_blockers() {
 
 #[test]
 fn codex_readiness_preserves_long_official_pending_before_success() {
+    let start = Instant::now();
+    let mut readiness = CodexModeReadiness::new(start, Duration::from_secs(90));
+
+    assert_eq!(
+        readiness.observe_at(CodexModePageState::BlockedByOfficialUi, start),
+        CodexModeAction::BlockedByOfficialUi
+    );
+    assert_eq!(
+        readiness.observe_at(
+            CodexModePageState::BlockedByOfficialUi,
+            start + Duration::from_secs(10 * 60),
+        ),
+        CodexModeAction::BlockedByOfficialUi
+    );
+    assert_eq!(
+        readiness.observe_at(
+            CodexModePageState::Codex,
+            start + Duration::from_secs(10 * 60),
+        ),
+        CodexModeAction::Confirmed
+    );
+}
+
+#[test]
+fn codex_readiness_bounds_non_blocked_active_time_and_prioritizes_codex() {
+    let start = Instant::now();
+    let mut readiness = CodexModeReadiness::new(start, Duration::from_secs(90));
+
+    assert_eq!(
+        readiness.observe_at(
+            CodexModePageState::NotReady,
+            start + Duration::from_secs(89),
+        ),
+        CodexModeAction::Wait
+    );
+    assert_eq!(
+        readiness.observe_at(CodexModePageState::Codex, start + Duration::from_secs(90),),
+        CodexModeAction::Confirmed
+    );
+
+    let mut terminal = CodexModeReadiness::new(start, Duration::from_secs(90));
+    assert_eq!(
+        terminal.observe_at(
+            CodexModePageState::NotReady,
+            start + Duration::from_secs(90),
+        ),
+        CodexModeAction::Unresolved
+    );
+}
+
+#[test]
+fn codex_readiness_requires_consecutive_other_after_fallback() {
     let mut readiness = CodexModeReadiness::default();
 
-    for _ in 0..25 {
-        assert_eq!(
-            readiness.observe(CodexModePageState::Pending),
-            CodexModeAction::Wait
-        );
+    for expected in [
+        CodexModeAction::Wait,
+        CodexModeAction::Wait,
+        CodexModeAction::SelectFallback,
+        CodexModeAction::Wait,
+    ] {
+        assert_eq!(readiness.observe(CodexModePageState::Other), expected);
     }
     assert_eq!(
-        readiness.observe(CodexModePageState::Codex),
-        CodexModeAction::Confirmed
+        readiness.observe(CodexModePageState::NotReady),
+        CodexModeAction::Wait
+    );
+    assert_eq!(
+        readiness.observe(CodexModePageState::Other),
+        CodexModeAction::Wait
+    );
+    assert_eq!(
+        readiness.observe(CodexModePageState::Other),
+        CodexModeAction::Unresolved
+    );
+}
+
+#[test]
+fn codex_readiness_blocker_resets_the_pre_fallback_other_streak() {
+    let mut readiness = CodexModeReadiness::default();
+
+    assert_eq!(
+        readiness.observe(CodexModePageState::Other),
+        CodexModeAction::Wait
+    );
+    assert_eq!(
+        readiness.observe(CodexModePageState::Other),
+        CodexModeAction::Wait
+    );
+    assert_eq!(
+        readiness.observe(CodexModePageState::BlockedByOfficialUi),
+        CodexModeAction::BlockedByOfficialUi
+    );
+    assert_eq!(
+        readiness.observe(CodexModePageState::Other),
+        CodexModeAction::Wait
+    );
+    assert_eq!(
+        readiness.observe(CodexModePageState::Other),
+        CodexModeAction::Wait
+    );
+    assert_eq!(
+        readiness.observe(CodexModePageState::Other),
+        CodexModeAction::SelectFallback
     );
 }
 
@@ -100,7 +193,7 @@ fn codex_readiness_resets_probe_failures_after_a_successful_observation() {
         assert_eq!(readiness.observe_probe_failure(), CodexModeAction::Wait);
     }
     assert_eq!(
-        readiness.observe(CodexModePageState::Pending),
+        readiness.observe(CodexModePageState::NotReady),
         CodexModeAction::Wait
     );
     for _ in 0..19 {
@@ -120,7 +213,7 @@ fn codex_readiness_requires_twenty_new_failures_after_a_successful_observation()
         assert_eq!(readiness.observe_probe_failure(), CodexModeAction::Wait);
     }
     assert_eq!(
-        readiness.observe(CodexModePageState::Pending),
+        readiness.observe(CodexModePageState::NotReady),
         CodexModeAction::Wait
     );
     assert_eq!(readiness.observe_probe_failure(), CodexModeAction::Wait);

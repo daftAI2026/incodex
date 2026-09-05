@@ -262,7 +262,35 @@ fn open_preparation_seeds_live_bounds_instead_of_stale_disk_bounds() {
 fn open_progress_distinguishes_launch_ready_and_waiting() {
     assert_eq!(OPENING_MESSAGE, "Opening incognito Codex window");
     assert_eq!(OPENED_MESSAGE, "Opened. Incognito Codex window is ready.");
+    assert_eq!(
+        OFFICIAL_BLOCKER_WAIT_MESSAGE,
+        "Window opened. Finish the official Codex dialog to continue."
+    );
     assert_eq!(WAITING_MESSAGE, "Waiting for the window to close");
+}
+
+#[test]
+fn official_blockers_and_mode_unresolved_do_not_become_profile_mask_failures() {
+    let (status_tx, status_rx) = mpsc::channel();
+    let readiness = AtomicBool::new(false);
+
+    publish_injection_status(&status_tx, &readiness, InjectionStatus::BlockedByOfficialUi);
+    assert!(!readiness.load(Ordering::Acquire));
+    assert!(matches!(
+        status_rx.try_recv().unwrap(),
+        InjectionStatus::BlockedByOfficialUi
+    ));
+
+    publish_injection_status(
+        &status_tx,
+        &readiness,
+        InjectionStatus::ModeUnresolved("active readiness deadline reached".into()),
+    );
+    assert!(!readiness.load(Ordering::Acquire));
+    assert!(matches!(
+        status_rx.try_recv().unwrap(),
+        InjectionStatus::ModeUnresolved(_)
+    ));
 }
 
 #[test]
