@@ -778,6 +778,7 @@ describe("Codex mode readiness", () => {
   });
 
   test("probes nested accessible labels and blocks every official dialog shape", () => {
+    expect(() => new Function(`return ${CODEX_MODE_PROBE_EXPRESSION}`)).not.toThrow();
     expect(CODEX_MODE_PROBE_EXPRESSION).toContain("textContent");
     expect(CODEX_MODE_PROBE_EXPRESSION).toContain('getAttribute("aria-label")');
     expect(CODEX_MODE_PROBE_EXPRESSION).toContain('[role="button"]');
