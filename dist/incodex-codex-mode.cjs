@@ -8,7 +8,7 @@ exports.deriveCodexModePageState = deriveCodexModePageState;
 const CODEX_MODE_PROBE_EXPRESSION = `(() => {
   function visible(element) {
     if (!(element instanceof HTMLElement)) return false;
-    if (element.matches(":disabled, [aria-disabled=\"true\"]")) return false;
+    if (element.matches(':disabled, [aria-disabled="true"]')) return false;
     if (element.closest('[aria-hidden="true"], [inert]')) return false;
     for (let current = element; current instanceof HTMLElement; current = current.parentElement) {
       const style = getComputedStyle(current);
