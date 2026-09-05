@@ -293,7 +293,7 @@ describe("Codex mode readiness", () => {
 
     readiness.observe(win);
     for (let check = 0; check < 25; check += 1) await scheduler.runNext();
-    expect(events).toEqual([]);
+    expect(events).toEqual(["codex-mode-blocked"]);
     expect(scheduler.activeTasks()).toHaveLength(1);
 
     snapshot = {
@@ -303,7 +303,7 @@ describe("Codex mode readiness", () => {
     };
     await scheduler.runNext();
 
-    expect(events).toEqual(["codex-mode-confirmed"]);
+    expect(events).toEqual(["codex-mode-blocked", "codex-mode-confirmed"]);
     expect(scheduler.activeTasks()).toHaveLength(0);
   });
 
@@ -701,7 +701,7 @@ describe("Codex mode readiness", () => {
             return {
               modeAvailable: false,
               modeLabel: "",
-              officialBlockerVisible: true,
+              officialBlockerVisible: false,
             };
           }
           return {
@@ -746,7 +746,7 @@ describe("Codex mode readiness", () => {
             return {
               modeAvailable: false,
               modeLabel: "",
-              officialBlockerVisible: true,
+              officialBlockerVisible: false,
             };
           }
           throw new Error("renderer unavailable");

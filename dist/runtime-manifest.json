@@ -14,7 +14,7 @@
     "incodex-window-kind.cjs": "8d5f752ef6a34bd0927cd39010d68b3e7b7545a77f947683d4ce4a48b98ce648",
     "incodex-window-lifecycle.cjs": "f84462170c00a7087025a498690b8d2efe1e55a24d2163c8a230442a55bb5a36",
     "incodex-runtime-load.cjs": "153ea5d8d2eb68551936da7f997fa46f67882f35c62357391c30da6547251d84",
-    "incodex-codex-mode.cjs": "f178cadf23ce579ba3aa2439ba1b0ac83f65159072c41490addd823cc925fe5f",
+    "incodex-codex-mode.cjs": "254f7f886951bb7df81d731a893a5493f6fc63e651afabdab6d6bc91ee99929d",
     "incodex-dock-menu.cjs": "6030ffba786c489555f739789ea35735eb4c393d133413a526497aef7c2537a5"
   }
 }

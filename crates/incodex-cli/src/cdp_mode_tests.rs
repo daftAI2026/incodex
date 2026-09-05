@@ -381,7 +381,7 @@ fn codex_readiness_keeps_unresolved_terminal_without_counter_overflow() {
 }
 
 #[test]
-fn terminal_codex_mode_failure_stops_the_cdp_retry_layer() {
+fn terminal_codex_mode_failure_stops_after_the_shared_readiness_becomes_terminal() {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
     listener.set_nonblocking(true).unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -451,18 +451,37 @@ fn terminal_codex_mode_failure_stops_the_cdp_retry_layer() {
         })
     };
 
-    let error = inject_shared_ui_with_options(port, &InjectionOptions::default()).unwrap_err();
+    let process_alive = AtomicBool::new(true);
+    let mut readiness = CodexModeReadiness::default();
+    let mut terminal_error = None;
+    for _ in 0..8 {
+        match inject_shared_ui_with_options_while_alive_with_readiness(
+            port,
+            &InjectionOptions::default(),
+            &process_alive,
+            |_| {},
+            &mut readiness,
+        ) {
+            Err(error) if is_terminal_codex_mode_error(&error) => {
+                terminal_error = Some(error);
+                break;
+            }
+            Err(_) => {}
+            Ok(target) => panic!("non-Codex mode unexpectedly injected into {target}"),
+        }
+    }
     stop.store(true, Ordering::Release);
     server.join().unwrap();
 
+    let error = terminal_error.expect("shared readiness did not become terminal");
     assert!(
         error.contains("Codex mode remained unavailable"),
         "unexpected terminal error: {error}"
     );
     assert_eq!(
         connections.load(Ordering::Acquire),
-        1,
-        "terminal mode failure must not reconnect through the inner retry layer"
+        5,
+        "each non-terminal mode result should return to the outer scheduler exactly once"
     );
 }
 

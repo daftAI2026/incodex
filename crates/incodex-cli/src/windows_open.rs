@@ -16,8 +16,9 @@ use incodex_core::{format_kv, format_ok, format_step, format_warn};
 use crate::cdp::{
     allocate_debug_port, debug_launch_args,
     inject_shared_ui_with_options_while_alive_and_guard_with_readiness,
-    is_terminal_codex_mode_error, start_lifecycle_signal_monitor,
-    start_profile_mask_signal_monitor, CodexModeReadiness, InjectionOptions,
+    is_codex_mode_blocked_error, is_codex_mode_waiting_error, is_terminal_codex_mode_error,
+    start_lifecycle_signal_monitor, start_profile_mask_signal_monitor, CodexModeReadiness,
+    InjectionOptions, CODEX_MODE_POLL_INTERVAL,
 };
 use crate::open_presentation::{
     classify_completed_open, completed_open_failure_message, CompletedOpenState,
@@ -639,10 +640,9 @@ fn inject_windows_ui(
     cdp_failed: Arc<AtomicBool>,
     ownership_guard: Arc<WindowsCdpOwnershipGuard>,
 ) -> Result<WindowsMonitorWorkers, String> {
-    let deadline = Instant::now() + Duration::from_secs(45);
     let mut last_error = "Codex CDP page is not ready".to_string();
     let mut mode_readiness = CodexModeReadiness::default();
-    while alive.load(Ordering::Acquire) && Instant::now() < deadline {
+    while alive.load(Ordering::Acquire) {
         let mut primary_target = None;
         match inject_shared_ui_with_options_while_alive_and_guard_with_readiness(
             port,
@@ -675,6 +675,14 @@ fn inject_windows_ui(
                     ));
                 }
                 return Ok(monitor_workers);
+            }
+            Err(error) if is_codex_mode_blocked_error(&error) => {
+                thread::sleep(CODEX_MODE_POLL_INTERVAL);
+                continue;
+            }
+            Err(error) if is_codex_mode_waiting_error(&error) => {
+                thread::sleep(CODEX_MODE_POLL_INTERVAL);
+                continue;
             }
             Err(error) if is_terminal_codex_mode_error(&error) => return Err(error),
             Err(error) => last_error = error,
