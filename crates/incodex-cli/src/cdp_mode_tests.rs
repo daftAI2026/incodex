@@ -232,6 +232,159 @@ fn codex_readiness_requires_twenty_new_failures_after_a_successful_observation()
 }
 
 #[test]
+fn valid_codex_snapshots_reset_failures_without_a_second_native_open_counter() {
+    let start = Instant::now();
+    let mut readiness = CodexModeReadiness::new(start, Duration::from_secs(90));
+
+    for _ in 0..50 {
+        assert_eq!(
+            readiness.observe_at(CodexModePageState::Codex, start),
+            CodexModeAction::Confirmed
+        );
+        assert_eq!(
+            readiness.observe_probe_failure_at(start),
+            CodexModeAction::Wait
+        );
+    }
+
+    let native_open = include_str!("open.rs");
+    assert!(
+        !native_open.contains("failed_attempts"),
+        "native open must not accumulate a second failure counter outside shared readiness"
+    );
+}
+
+#[test]
+fn post_mode_failures_resume_the_active_clock_after_an_official_blocker() {
+    let start = Instant::now();
+    let mut readiness = CodexModeReadiness::new(start, Duration::from_secs(90));
+
+    assert_eq!(
+        readiness.observe_at(CodexModePageState::BlockedByOfficialUi, start),
+        CodexModeAction::BlockedByOfficialUi
+    );
+    assert_eq!(
+        readiness.observe_at(
+            CodexModePageState::Codex,
+            start + Duration::from_secs(10 * 60),
+        ),
+        CodexModeAction::Confirmed
+    );
+    assert_eq!(
+        readiness.observe_probe_failure_at(start + Duration::from_secs(10 * 60 + 89)),
+        CodexModeAction::Wait
+    );
+    assert_eq!(
+        readiness.observe_probe_failure_at(start + Duration::from_secs(10 * 60 + 90)),
+        CodexModeAction::Unresolved
+    );
+}
+
+#[test]
+fn windows_post_mode_runtime_failures_use_the_shared_active_deadline() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let stop = Arc::new(AtomicBool::new(false));
+    let connections = Arc::new(AtomicUsize::new(0));
+    let server = {
+        let stop = stop.clone();
+        let connections = connections.clone();
+        thread::spawn(move || {
+            while !stop.load(Ordering::Acquire) {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(connection) => connection,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(5));
+                        continue;
+                    }
+                    Err(error) => panic!("CDP test server failed: {error}"),
+                };
+                stream.set_nonblocking(false).unwrap();
+                let mut peek = [0_u8; 2048];
+                let size = stream.peek(&mut peek).unwrap();
+                let request = String::from_utf8_lossy(&peek[..size]);
+                if request.starts_with("GET /devtools/") {
+                    connections.fetch_add(1, Ordering::AcqRel);
+                    let mut socket = tungstenite::accept(stream).unwrap();
+                    while let Ok(Message::Text(text)) = socket.read() {
+                        let command: Value = serde_json::from_str(&text).unwrap();
+                        let id = command.get("id").and_then(Value::as_u64).unwrap();
+                        let method = command.get("method").and_then(Value::as_str);
+                        let expression = command
+                            .pointer("/params/expression")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default();
+                        let response = if method == Some("Runtime.evaluate")
+                            && expression.contains("officialBlockerVisible")
+                        {
+                            json!({
+                                "id": id,
+                                "result": {"result": {"value": {
+                                    "modeAvailable": true,
+                                    "modeLabel": "Codex",
+                                    "officialBlockerVisible": false
+                                }}}
+                            })
+                        } else if method == Some("Page.addScriptToEvaluateOnNewDocument") {
+                            json!({"id": id, "error": {"message": "fixture Runtime rejected"}})
+                        } else {
+                            json!({"id": id, "result": {}})
+                        };
+                        socket
+                            .send(Message::Text(response.to_string().into()))
+                            .unwrap();
+                        if method == Some("Page.addScriptToEvaluateOnNewDocument") {
+                            break;
+                        }
+                    }
+                    continue;
+                }
+
+                let mut request = [0_u8; 2048];
+                let read = stream.read(&mut request).unwrap();
+                assert!(read > 0, "CDP test server received an empty HTTP request");
+                write_json_response(
+                    &mut stream,
+                    &json!([{
+                        "id": "main",
+                        "type": "page",
+                        "url": "app://-/index.html",
+                        "webSocketDebuggerUrl": format!(
+                            "ws://127.0.0.1:{port}/devtools/page/main"
+                        )
+                    }]),
+                );
+            }
+        })
+    };
+
+    let process_alive = AtomicBool::new(true);
+    let now = Instant::now();
+    let mut readiness = CodexModeReadiness::new(now, Duration::ZERO);
+    let error = inject_shared_ui_with_options_while_alive_with_readiness(
+        port,
+        &InjectionOptions::default(),
+        &process_alive,
+        |_| {},
+        &mut readiness,
+    )
+    .unwrap_err();
+    stop.store(true, Ordering::Release);
+    server.join().unwrap();
+
+    assert!(
+        is_terminal_codex_mode_error(&error),
+        "post-mode Runtime failures must terminate through shared readiness: {error}"
+    );
+    assert_eq!(
+        connections.load(Ordering::Acquire),
+        1,
+        "a terminal post-mode failure must not enter the outer Windows retry loop"
+    );
+}
+
+#[test]
 fn native_transport_and_malformed_mode_probes_share_the_terminal_failure_budget() {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
     listener.set_nonblocking(true).unwrap();

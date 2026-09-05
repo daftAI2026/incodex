@@ -10,6 +10,14 @@ use std::time::{Duration, Instant};
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[test]
+fn official_blocker_progress_uses_the_dedicated_user_prompt() {
+    assert_eq!(
+        windows_injection_progress_message(WindowsInjectionProgress::BlockedByOfficialUi),
+        OFFICIAL_BLOCKER_WAIT_MESSAGE
+    );
+}
+
+#[test]
 fn visible_window_loss_closes_background_electron_after_a_grace_period() {
     let grace = Duration::from_millis(250);
     let started = Instant::now();

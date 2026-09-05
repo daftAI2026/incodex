@@ -580,6 +580,54 @@ describe("Codex mode readiness", () => {
     expect(events).toEqual(["codex-mode-blocked", "codex-mode-fallback-sent"]);
   });
 
+  test("an official blocker breaks the post-fallback non-target streak without rearming fallback", async () => {
+    const scheduler = controlledScheduler();
+    const events: string[] = [];
+    const fallbacks: unknown[] = [];
+    const snapshots = [
+      { modeAvailable: true, modeLabel: "ChatGPT", officialBlockerVisible: false },
+      { modeAvailable: true, modeLabel: "ChatGPT", officialBlockerVisible: false },
+      { modeAvailable: false, modeLabel: "", officialBlockerVisible: true },
+      { modeAvailable: true, modeLabel: "ChatGPT", officialBlockerVisible: false },
+      { modeAvailable: true, modeLabel: "ChatGPT", officialBlockerVisible: false },
+    ];
+    const win = {
+      isDestroyed: () => false,
+      isFocused: () => true,
+      once: () => {},
+      webContents: {
+        executeJavaScript: async () => snapshots.shift(),
+        isDestroyed: () => false,
+      },
+    };
+    const readiness = createCodexModeReadiness({
+      ...scheduler,
+      isIncognito: () => true,
+      log: (event: string) => events.push(event),
+      primaryOtherChecksRequired: 1,
+      selectFallback: (selectedWindow: unknown) => {
+        fallbacks.push(selectedWindow);
+        return true;
+      },
+    });
+
+    readiness.observe(win);
+    for (let check = 0; check < 4; check += 1) await scheduler.runNext();
+
+    expect(fallbacks).toHaveLength(1);
+    expect(events).toEqual(["codex-mode-fallback-sent", "codex-mode-blocked"]);
+    expect(scheduler.activeTasks()).toHaveLength(1);
+
+    await scheduler.runNext();
+    expect(fallbacks).toHaveLength(1);
+    expect(events).toEqual([
+      "codex-mode-fallback-sent",
+      "codex-mode-blocked",
+      "codex-mode-unresolved",
+    ]);
+    expect(scheduler.activeTasks()).toHaveLength(0);
+  });
+
   test("counts malformed resolved snapshots as technical failures", async () => {
     const scheduler = controlledScheduler();
     const events: string[] = [];
