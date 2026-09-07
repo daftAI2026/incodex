@@ -194,7 +194,7 @@ describe("capture window preview", () => {
     expect(css).not.toContain("padding-top: calc(var(--incodex-capture-space) * 13)");
     expect(previewHtml).toContain("--spacing: .25rem");
     expect(css).toContain(
-      "grid-template-columns: minmax(0, 1fr) calc(var(--incodex-capture-space) * 56)",
+      "grid-template-columns: minmax(0, 1fr) calc(var(--incodex-capture-space) * 60)",
     );
     expect(css).toContain("height: calc(var(--incodex-capture-space) * 7)");
     expect(css).toContain("height: var(--incodex-capture-stage-height)");
