@@ -12,6 +12,12 @@ use super::{
     build_thumbnail, ImageFormat, SystemWallpaperLibrary, WallpaperCandidate, MAX_SOURCE_BYTES,
 };
 
+#[cfg(target_os = "macos")]
+use crate::macos_image_io::{encode_wallpaper_jpeg, image_dimensions};
+
+#[cfg(target_os = "macos")]
+const CURRENT_DESKTOP_FIXTURE: &str = "/System/Library/CoreServices/DefaultDesktop.heic";
+
 static NEXT_TEMP_DIR: AtomicU64 = AtomicU64::new(0);
 
 struct TempDir {
@@ -177,4 +183,85 @@ fn recursive_scan_has_a_bounded_depth() {
     let entries = library.list().expect("fixture scan");
 
     assert!(entries.iter().all(|entry| entry.name != "too-deep"));
+}
+
+#[cfg(unix)]
+#[test]
+fn current_wallpaper_is_canonicalized_and_listed_first_without_scanning_its_parent() {
+    let fixture = TempDir::new();
+    let current_parent = TempDir::new();
+    let current_target = current_parent.path().join("current.png");
+    let parent_neighbour = current_parent.path().join("must-not-be-scanned.png");
+    let current_link = fixture.path().join("current-link.png");
+    write_png(&current_target);
+    write_png(&parent_neighbour);
+    write_png(&fixture.path().join("catalog.png"));
+    std::os::unix::fs::symlink(&current_target, &current_link)
+        .expect("create current wallpaper symlink");
+
+    let mut library = SystemWallpaperLibrary::from_roots_with_current(
+        vec![fixture.path().to_path_buf()],
+        Some(current_link),
+    );
+    let entries = library.list().expect("fixture scan");
+
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].id, "system-wallpaper-current");
+    assert_eq!(entries[0].name, "Current Desktop");
+    assert_eq!(entries[1].name, "catalog");
+    assert!(library.load("system-wallpaper-current").is_ok());
+    assert!(entries
+        .iter()
+        .all(|entry| entry.name != "must-not-be-scanned"));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn image_io_reencodes_the_installed_current_desktop_fixture_as_a_bounded_jpeg() {
+    let path = Path::new(CURRENT_DESKTOP_FIXTURE);
+    let Ok(input) = fs::read(path) else {
+        eprintln!(
+            "skipping ImageIO fixture: {} is not installed",
+            path.display()
+        );
+        return;
+    };
+
+    let output = encode_wallpaper_jpeg(&input, 8 * 1024 * 1024)
+        .expect("ImageIO should decode the installed current desktop fixture");
+    assert!(output.starts_with(b"\xff\xd8\xff"));
+    assert!(output.len() <= 8 * 1024 * 1024);
+    let (width, height) = image_dimensions(&output).expect("encoded JPEG dimensions");
+    assert!(width <= 2600 && height <= 2600);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn image_io_rejects_invalid_input_and_enforces_output_bound() {
+    assert!(encode_wallpaper_jpeg(b"not an image", 8 * 1024 * 1024).is_err());
+    assert!(image_dimensions(b"not an image").is_err());
+
+    let path = Path::new(CURRENT_DESKTOP_FIXTURE);
+    let Ok(input) = fs::read(path) else {
+        eprintln!(
+            "skipping ImageIO fixture: {} is not installed",
+            path.display()
+        );
+        return;
+    };
+    assert!(encode_wallpaper_jpeg(&input, 1024).is_err());
+}
+
+#[test]
+fn production_library_uses_only_current_desktop_without_catalog_roots() {
+    let fixture = TempDir::new();
+    let current = fixture.path().join("Current.png");
+    write_png(&current);
+    write_png(&fixture.path().join("Sonoma.png"));
+    let mut library = SystemWallpaperLibrary::new(Some(current));
+    assert!(library.roots.is_empty(), "production must never scan a version catalog");
+    let entries = library.list().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].id, "system-wallpaper-current");
+    assert!(SystemWallpaperLibrary::new(None).list().unwrap().is_empty());
 }
