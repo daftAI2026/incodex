@@ -48,6 +48,8 @@ If the answer is no or unclear, decline or narrow.
 
 ## Repository Map
 
+- `src/runtime/CLAUDE.md` maps the shared renderer and `capture-window/` experimental Shot editor. Live tooltip and dialog sampling remain separate visual roles; this branch does not authorize a release.
+
 - `AGENTS.md` is the contract. `CLAUDE.md` must stay a symlink to it.
 - The TypeScript product router, parser, mutation implementation, and old Runtime publishers have been retired. Rust owns the product CLI and native mutation path; legacy TypeScript v1 disk compatibility is limited to the Rust `legacy_typescript.rs` reader and `legacy_proof.rs` safety fixtures.
 - `crates/incodex-cli` is the native CLI: `parse.rs` owns its command language, while `install.rs` and `open.rs` dispatch dangerous operations through the lower crates.

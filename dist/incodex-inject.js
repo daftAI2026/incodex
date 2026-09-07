@@ -45,6 +45,91 @@ function isSearchLabel(label) {
   return lower === "search" || lower.startsWith("search ");
 }
 
+// src/runtime/capture-window/live-tokens.ts
+var DIALOG_PROPERTIES = {
+  "background-color": "surface",
+  color: "text",
+  "--tw-ring-color": "border",
+  "border-color": "border",
+  "border-radius": "radius-dialog",
+  "box-shadow": "shadow"
+};
+var STYLE_ID = "incodex-capture-live-tokens";
+var OWN_UI = "[data-incodex-capture], [data-incodex-capture-preview], [data-incodex-capture-host]";
+function resolveClassToken(classes, property, rules) {
+  const selectors = new Set(classes.filter((name) => /^[a-zA-Z_][\w/-]*$/.test(name)).map((name) => `.${name.replaceAll("/", "\\/")}`));
+  const selected = new Map;
+  for (const rule of rules) {
+    if (rule.property !== property)
+      continue;
+    for (const selector of rule.selector.split(",").map((item) => item.trim())) {
+      if (selectors.has(selector))
+        selected.set(selector, rule.value);
+    }
+  }
+  const values = new Set(selected.values());
+  if (values.size !== 1)
+    return null;
+  const value = [...values][0];
+  return /var\(--[\w-]+/.test(value) && !value.includes("--tw-") ? value : null;
+}
+function tokenRules(document2) {
+  const result = [];
+  function visit(rules) {
+    for (const rule of Array.from(rules)) {
+      if (rule instanceof CSSStyleRule) {
+        for (const property of Object.keys(DIALOG_PROPERTIES)) {
+          const value = rule.style.getPropertyValue(property).trim();
+          if (value)
+            result.push({ selector: rule.selectorText, property, value });
+        }
+      } else if (rule instanceof CSSLayerBlockRule) {
+        visit(rule.cssRules);
+      } else if (rule instanceof CSSSupportsRule && CSS.supports(rule.conditionText)) {
+        visit(rule.cssRules);
+      }
+    }
+  }
+  for (const sheet of Array.from(document2.styleSheets)) {
+    if (sheet.ownerNode instanceof Element && sheet.ownerNode.id === STYLE_ID)
+      continue;
+    try {
+      visit(sheet.cssRules);
+    } catch {}
+  }
+  return result;
+}
+var states = new WeakMap;
+function syncOfficialCaptureTokens(document2) {
+  const dialogs = Array.from(document2.querySelectorAll('[role="dialog"].codex-dialog, [role="dialog"][aria-modal="true"]')).filter((element2) => !element2.closest(OWN_UI));
+  if (dialogs.length === 0)
+    return;
+  if (dialogs.length !== 1)
+    return;
+  const element = dialogs[0];
+  const classes = element.getAttribute("class") ?? "";
+  const previous = states.get(document2);
+  if (previous?.element === element && previous.classes === classes && previous.sheetCount === document2.styleSheets.length)
+    return;
+  const rules = tokenRules(document2);
+  const declarations = Object.entries(DIALOG_PROPERTIES).flatMap(([property, alias]) => {
+    const value = resolveClassToken(classes.split(/\s+/), property, rules);
+    return value ? [`--incodex-capture-${alias}:${value};`] : [];
+  });
+  let style = document2.getElementById(STYLE_ID);
+  if (!style && declarations.length) {
+    style = document2.createElement("style");
+    style.id = STYLE_ID;
+    document2.head.append(style);
+  }
+  if (style) {
+    const text = `[data-incodex-capture][data-incodex-capture], [data-incodex-capture-preview][data-incodex-capture-preview]{${declarations.join("")}}`;
+    if (style.textContent !== text)
+      style.textContent = text;
+  }
+  states.set(document2, { element, classes, sheetCount: document2.styleSheets.length });
+}
+
 // src/runtime/capture-window/icons.ts
 var ICON_BODY = {
   camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z" /><circle cx="12" cy="13" r="3" />',
@@ -2360,7 +2445,7 @@ function clipToViewport(rect, viewport) {
 }
 
 // src/runtime/capture-window/injected.ts
-var STYLE_ID = "incodex-capture-window-style";
+var STYLE_ID2 = "incodex-capture-window-style";
 var HOST_ATTRIBUTE = "data-incodex-capture-host";
 var bridge = createCaptureCdpBridge();
 var controller = null;
@@ -2425,10 +2510,10 @@ function exposeCaptureBridge() {
 }
 function installCaptureAssets(options) {
   configureCapturePresetAssets(options.presetAssets);
-  if (document.getElementById(STYLE_ID))
+  if (document.getElementById(STYLE_ID2))
     return;
   const style = document.createElement("style");
-  style.id = STYLE_ID;
+  style.id = STYLE_ID2;
   style.textContent = options.styleText;
   document.head.append(style);
 }
@@ -3878,9 +3963,48 @@ function parseOfficialWindowZoom(value) {
 function officialWindowZoom(root) {
   return parseOfficialWindowZoom(window.getComputedStyle(root).getPropertyValue(OFFICIAL_WINDOW_ZOOM_PROPERTY));
 }
+function createOfficialTooltipPresentation() {
+  let sampledTrigger = null;
+  let sample = null;
+  return {
+    read(trigger) {
+      if (!trigger?.isConnected) {
+        sampledTrigger = null;
+        sample = null;
+        return null;
+      }
+      if (trigger !== sampledTrigger) {
+        sampledTrigger = trigger;
+        sample = null;
+      }
+      const tip = findOfficialTooltipElement(trigger);
+      if (tip) {
+        sample = {
+          className: tip.className,
+          shortcutClassName: tip.querySelector("kbd")?.className ?? ""
+        };
+      }
+      return sample;
+    }
+  };
+}
+function findOfficialTooltipElement(trigger) {
+  if (!trigger?.isConnected)
+    return null;
+  const ids = [trigger, trigger.parentElement].flatMap((element) => element?.getAttribute("aria-describedby")?.split(/\s+/) ?? []).filter(Boolean);
+  for (const id of ids) {
+    const tip = trigger.ownerDocument.getElementById(id);
+    if (tip?.isConnected && tip.getAttribute("role") === "tooltip" && !tip.hasAttribute("data-incodex-tooltip") && tip.className.trim())
+      return tip;
+  }
+  return null;
+}
+function nativeTooltipTitle(label, shortcut) {
+  return shortcut ? `${label} (${shortcut})` : label;
+}
 
 // src/runtime/_inject.src.ts
-var STYLE_ID2 = "incodex-privacy-style";
+var STYLE_ID3 = "incodex-privacy-style";
 var BTN_ATTR = "data-incodex-privacy-toggle";
 var TIP_ATTR = "data-incodex-tooltip";
 var TIP_HOST_ATTR = "data-incodex-tooltip-host";
@@ -4918,6 +5042,7 @@ var STRIP_CLONE_ATTRS = [
   "tabindex"
 ];
 var activeTooltipLifecycle = null;
+var officialTooltipPresentation = createOfficialTooltipPresentation();
 var launchErrorPending = false;
 var windowsLaunchErrorHost = null;
 function dismissActiveTooltip() {
@@ -5019,6 +5144,7 @@ function apply() {
     btn.setAttribute("aria-pressed", incognito ? "true" : "false");
     btn.setAttribute("aria-label", labelFor(incognito));
     setButtonIcon(btn);
+    syncTooltipPresentation();
   }
   const label = document.querySelector("[data-incodex-tooltip-label]");
   if (label)
@@ -5102,10 +5228,10 @@ async function activate() {
   return false;
 }
 function ensureStyle() {
-  let style = document.getElementById(STYLE_ID2);
+  let style = document.getElementById(STYLE_ID3);
   if (!style) {
     style = document.createElement("style");
-    style.id = STYLE_ID2;
+    style.id = STYLE_ID3;
     document.head.append(style);
   }
   style.textContent = `
@@ -5202,7 +5328,7 @@ function buttonStillBesideSearch() {
 }
 function injectedTooltipCanShow(btn) {
   const search = findSearchButton();
-  return btn.isConnected && (btn.getAttribute("data-incodex-hovered") === "true" || document.activeElement === btn) && !(search && searchTooltipOpen(search));
+  return btn.isConnected && syncTooltipPresentation() && (btn.getAttribute("data-incodex-hovered") === "true" || document.activeElement === btn) && !(search && searchTooltipOpen(search));
 }
 function landingStillMounted() {
   const landing = document.querySelector(`[${LANDING_ATTR}]`);
@@ -5276,14 +5402,12 @@ function createTooltipElement() {
   const tip = document.createElement("div");
   tip.setAttribute(TIP_ATTR, "true");
   tip.setAttribute("role", "tooltip");
-  tip.className = "z-50 w-fit select-none text-sm whitespace-normal break-words rounded-lg border border-text bg-primary-solid text-primary-solid px-2 py-1.5";
   const text = document.createElement("div");
   text.className = "flex items-center gap-2";
   const label = document.createElement("div");
   label.className = "min-w-0";
   label.setAttribute("data-incodex-tooltip-label", "true");
   const kbd = document.createElement("kbd");
-  kbd.className = "inline-flex !rounded-md !border-0 !bg-current/10 !font-sans !text-xs !text-current !shadow-none !px-1.5 !py-0.5 !leading-none";
   kbd.textContent = shortcutLabel();
   text.append(label);
   if (!isCaptureDebug())
@@ -5306,12 +5430,62 @@ function ensureTooltipMount() {
   }
   return tip;
 }
+var tooltipObservedSearch = null;
+var tooltipObservedElement = null;
+function observeOfficialTooltip(search) {
+  const element = findOfficialTooltipElement(search);
+  if (search === tooltipObservedSearch && element === tooltipObservedElement)
+    return;
+  tooltipObservedSearch = search;
+  tooltipObservedElement = element;
+  window.__incodexTooltipPresentationObserver?.disconnect();
+  const observer = new MutationObserver(() => syncTooltipPresentation());
+  window.__incodexTooltipPresentationObserver = observer;
+  if (search) {
+    observer.observe(search, { attributes: true, attributeFilter: ["aria-describedby"] });
+    if (search.parentElement) {
+      observer.observe(search.parentElement, { attributes: true, attributeFilter: ["aria-describedby"] });
+    }
+  }
+  if (element)
+    observer.observe(element, { attributes: true, subtree: true, attributeFilter: ["class"] });
+}
+function syncTooltipPresentation() {
+  if (isCaptureDebug())
+    syncOfficialCaptureTokens(document);
+  const search = findSearchButton();
+  observeOfficialTooltip(search);
+  const sample = officialTooltipPresentation.read(search);
+  const btn = document.querySelector(`[${BTN_ATTR}]`);
+  if (btn) {
+    if (sample)
+      btn.removeAttribute("title");
+    else {
+      const title = nativeTooltipTitle(labelFor(isIncognitoWindow()), isCaptureDebug() ? "" : shortcutLabel());
+      if (btn.getAttribute("title") !== title)
+        btn.setAttribute("title", title);
+    }
+  }
+  const tip = document.querySelector(`[${TIP_ATTR}]`);
+  if (!sample) {
+    hideTooltip();
+    return false;
+  }
+  if (tip && tip.className !== sample.className)
+    tip.className = sample.className;
+  const kbd = tip?.querySelector("kbd");
+  if (kbd && kbd.className !== sample.shortcutClassName)
+    kbd.className = sample.shortcutClassName;
+  return true;
+}
 function tooltipEl() {
   return ensureTooltipMount();
 }
 var TOOLTIP_SIDE_OFFSET = 2;
 function showTooltip(btn) {
   const tip = tooltipEl();
+  if (!syncTooltipPresentation())
+    return;
   const host = tip.parentElement;
   if (!host)
     return;
@@ -5565,6 +5739,7 @@ function ensureButton() {
   }
   apply();
   ensureTooltipMount();
+  syncTooltipPresentation();
 }
 function onKeydown(event) {
   if (event.key === "Escape") {
@@ -5592,7 +5767,7 @@ var PROFILE_OBSERVED_ATTRIBUTES = [
 ];
 function observerOptions() {
   const options = { childList: true, subtree: true };
-  if (profileObservationRequired()) {
+  if (profileObservationRequired() || isCaptureDebug()) {
     options.attributes = true;
     options.characterData = true;
     options.attributeFilter = PROFILE_OBSERVED_ATTRIBUTES;
@@ -5605,11 +5780,12 @@ function profileObservationRequired() {
 function createMutationObserver() {
   let scheduled = false;
   return new MutationObserver(function handleMutation() {
-    if (!needsInject() || scheduled)
+    if (scheduled)
       return;
     scheduled = true;
     requestAnimationFrame(function injectOnAnimationFrame() {
       scheduled = false;
+      syncTooltipPresentation();
       if (!needsInject())
         return;
       ensureButton();
