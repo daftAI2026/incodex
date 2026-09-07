@@ -281,6 +281,18 @@ fn post_mode_failures_resume_the_active_clock_after_an_official_blocker() {
 }
 
 #[test]
+fn normal_window_reinjection_does_not_inherit_incognito_deadlines() {
+    let mut readiness = CodexModeReadiness::new(Instant::now(), Duration::ZERO);
+    for _ in 0..25 {
+        assert_eq!(
+            super::record_post_mode_injection_failure(false, &mut readiness, "transient".into()),
+            "transient"
+        );
+    }
+    assert_eq!(readiness.observe_probe_failure(), CodexModeAction::Unresolved);
+}
+
+#[test]
 fn windows_post_mode_runtime_failures_use_the_shared_active_deadline() {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
     listener.set_nonblocking(true).unwrap();
