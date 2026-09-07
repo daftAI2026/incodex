@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖截图状态、合成或偏好模块的公开契约。
+ * [OUTPUT]: 验证短边百分比及旧逻辑像素偏好的兼容边界。
+ * [POS]: capture-window 百分比迁移回归，保护预览与导出的一致性。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import {
   applyCaptureCommand,
@@ -59,7 +65,7 @@ describe("capture window editor state", () => {
     expect(state.redactionStyle).toBe("mosaic");
     expect(state.privacyEnabled).toBe(true);
     expect(state.background).toEqual({ kind: "preset", id: "sea" });
-    expect(state.padding).toBe(64);
+    expect(state.padding).toBe(8);
     expect(state.shadow).toBe(true);
     expect(state.zoom).toBe(1);
     expect(state.regions).toEqual([]);
@@ -154,7 +160,7 @@ describe("capture window editor state", () => {
 
   test("undo, redo, and clear preserve non-region editor preferences", () => {
     const initial = createCaptureWindowState(SOURCE);
-    const configured = applyCaptureCommand(initial, { kind: "set-padding", padding: 96 });
+    const configured = applyCaptureCommand(initial, { kind: "set-padding", padding: 24 });
     const withRegion = applyCaptureCommand(configured, {
       kind: "add-region",
       id: "manual-1",
@@ -169,7 +175,7 @@ describe("capture window editor state", () => {
       manualRegion("manual-1", region(20, 30, 80, 60)),
     ]);
     expect(cleared.regions).toEqual([]);
-    expect(cleared.padding).toBe(96);
+    expect(cleared.padding).toBe(24);
   });
 
   test("retake changes the source revision without discarding user intent", () => {
@@ -293,13 +299,13 @@ describe("capture window editor state", () => {
     expect(zoomedOut.zoom).toBe(0.4);
     expect(zoomedIn.zoom).toBe(6);
     expect(negativePadding.padding).toBe(0);
-    expect(largePadding.padding).toBe(160);
+    expect(largePadding.padding).toBe(45);
   });
 
   test("returns to the fitted zoom when padding changes without coupling pixel-only controls", () => {
     const initial = createCaptureWindowState(SOURCE);
     const zoomed = applyCaptureCommand(initial, { kind: "set-zoom", zoom: 2 });
-    const padded = applyCaptureCommand(zoomed, { kind: "set-padding", padding: 96 });
+    const padded = applyCaptureCommand(zoomed, { kind: "set-padding", padding: 24 });
     const background = applyCaptureCommand(zoomed, {
       background: { color: "#121212", kind: "color" },
       kind: "set-background",
@@ -310,4 +316,11 @@ describe("capture window editor state", () => {
     expect(background.zoom).toBe(2);
     expect(shadow.zoom).toBe(2);
   });
+});
+
+test("padding uses integral percent steps and rejects non-finite input", () => {
+  const state = createCaptureWindowState({ width: 1200, height: 800, scaleFactor: 2 });
+  expect(applyCaptureCommand(state, { kind: "set-padding", padding: 10 }).padding).toBe(10);
+  expect(applyCaptureCommand(state, { kind: "set-padding", padding: 10.6 }).padding).toBe(11);
+  expect(applyCaptureCommand(state, { kind: "set-padding", padding: NaN }).padding).toBe(0);
 });

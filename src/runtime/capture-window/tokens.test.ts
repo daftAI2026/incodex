@@ -175,8 +175,16 @@ describe("capture window visual tokens", () => {
   expect(view).toContain('class="incodex-capture-range-ticks" aria-hidden="true"');
   expect(view).toContain('Array.from({ length: 9 }');
   expect(view).toContain('(index + 1) * 10');
-  expect(view).toContain('type="range" min="0" max="160" step="4"');
+  expect(view).toContain('type="range" min="${CAPTURE_MIN_PADDING}" max="${CAPTURE_MAX_PADDING}" step="${CAPTURE_PADDING_STEP}"');
   expect(css).toMatch(/\.incodex-capture-range-ticks\s*\{[^}]*pointer-events: none/);
   expect(css).toMatch(/\.incodex-capture-range-ticks\s*\{[^}]*color: var\(--incodex-capture-text-tertiary\)/);
   expect(css).toContain("left: var(--capture-tick-position)");
+});
+
+test("padding heading and live updates display percent, not pixels", () => {
+  const view = readFileSync(viewPath, "utf8");
+  const editor = readFileSync(join(import.meta.dir, "editor.ts"), "utf8");
+  expect(view).toContain("${state.padding}%");
+  expect(editor).not.toContain("${state.padding}px");
+  expect(editor.match(/\$\{state.padding\}%/g)?.length).toBe(2);
 });

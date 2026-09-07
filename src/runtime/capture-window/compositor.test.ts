@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖截图状态、合成或偏好模块的公开契约。
+ * [OUTPUT]: 验证短边百分比及旧逻辑像素偏好的兼容边界。
+ * [POS]: capture-window 百分比迁移回归，保护预览与导出的一致性。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import {
   captureOutputSize,
@@ -17,10 +23,10 @@ describe("capture window compositor plan", () => {
     expect(captureGradientVector("right", size)).toEqual([0, 150, 500, 150]);
     expect(captureGradientVector("bottom", size)).toEqual([250, 0, 250, 300]);
   });
-  test("converts logical padding to physical output pixels", () => {
-    expect(captureOutputSize({ width: 1200, height: 801, scaleFactor: 2 }, 64)).toEqual({
-      width: 1456,
-      height: 1057,
+  test("uses short-side percent without multiplying physical source pixels by DPR again", () => {
+    expect(captureOutputSize({ width: 1200, height: 801, scaleFactor: 2 }, 10)).toEqual({
+      width: 1360,
+      height: 961,
     });
   });
 
@@ -52,7 +58,7 @@ describe("capture window compositor plan", () => {
       {
         color: "#f4f4f4",
         kind: "window-underlay",
-        rect: { x: 128, y: 128, width: 1200, height: 801 },
+        rect: { x: 64, y: 64, width: 1200, height: 801 },
       },
       expect.objectContaining({ kind: "window", shadow: true }),
     ]);
@@ -87,12 +93,12 @@ describe("capture window compositor plan", () => {
     ]);
     expect(plan.at(-1)).toMatchObject({
       kind: "redaction",
-      rect: { x: 168, y: 178, width: 80, height: 60 },
+      rect: { x: 104, y: 114, width: 80, height: 60 },
       style: "blur",
     });
     expect(plan[2]).toMatchObject({
       kind: "window",
-      rect: { x: 128, y: 128, width: 1200, height: 801 },
+      rect: { x: 64, y: 64, width: 1200, height: 801 },
     });
   });
 
@@ -130,4 +136,10 @@ describe("capture window compositor plan", () => {
       "redaction",
     ]);
   });
+});
+
+test("percent padding is orientation symmetric and scales with the image", () => {
+  expect(captureOutputSize({ width: 800, height: 1200, scaleFactor: 1 }, 10)).toEqual({ width: 960, height: 1360 });
+  expect(captureOutputSize({ width: 2400, height: 1600, scaleFactor: 2 }, 10)).toEqual({ width: 2720, height: 1920 });
+  expect(captureOutputSize({ width: 1200, height: 800, scaleFactor: 2 }, 0)).toEqual({ width: 1200, height: 800 });
 });

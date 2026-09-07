@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖截图状态、合成或偏好模块的公开契约。
+ * [OUTPUT]: 验证短边百分比及旧逻辑像素偏好的兼容边界。
+ * [POS]: capture-window 百分比迁移回归，保护预览与导出的一致性。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { describe, expect, test } from "bun:test";
 import { createCaptureWindowState } from "./model.ts";
 import {
@@ -40,6 +46,7 @@ describe("capture window preferences", () => {
     expect(loadCapturePreferences(storage)).toEqual({
       background: { color: "#123456", kind: "color" },
       padding: 160,
+      paddingUnit: "logical-px",
       privacyEnabled: false,
       shadow: false,
     });
@@ -47,7 +54,8 @@ describe("capture window preferences", () => {
     storage.values.set("incodex-window-capture-prefs", "not json");
     expect(loadCapturePreferences(storage)).toEqual({
       background: { id: "sea", kind: "preset" },
-      padding: 64,
+      padding: 8,
+      paddingUnit: "percent",
       privacyEnabled: true,
       shadow: true,
     });
@@ -58,6 +66,7 @@ describe("capture window preferences", () => {
     const restored = applyCapturePreferences(state, {
       background: { kind: "transparent" },
       padding: 28,
+      paddingUnit: "percent",
       privacyEnabled: false,
       shadow: false,
     });
@@ -82,7 +91,7 @@ describe("capture window preferences", () => {
 
     saveCapturePreferences(storage, state);
     expect(storage.values.get("incodex-window-capture-prefs")).toBe(
-      '{"background":{"kind":"wallpaper"},"padding":32,"privacyEnabled":false,"shadow":true}',
+      '{"background":{"kind":"wallpaper"},"padding":32,"paddingUnit":"percent","privacyEnabled":false,"shadow":true}',
     );
 
     storage.failReads = true;
@@ -103,4 +112,16 @@ test("restoration preserves an explicit different background and remembers only 
   saveCapturePreferences(storage, { ...state, background: { kind: "wallpaper", systemId: "system-wallpaper-current", dataUrl: "data:image/jpeg;base64,private" } });
   expect(shouldRestoreCurrentWallpaper(storage)).toBe(true);
   expect(storage.values.get("incodex-window-capture-prefs")).not.toContain("private");
+});
+
+test("migrates legacy logical padding only with source dimensions, then saves percent", () => {
+  const storage = new MemoryStorage();
+  storage.values.set("incodex-window-capture-prefs", JSON.stringify({ padding: 64, shadow: false }));
+  const source = { width: 1200, height: 800, scaleFactor: 2 };
+  const restored = applyCapturePreferences(createCaptureWindowState(source), loadCapturePreferences(storage));
+  expect(restored.padding).toBe(16);
+  expect(restored.shadow).toBe(false);
+  saveCapturePreferences(storage, restored);
+  const larger = applyCapturePreferences(createCaptureWindowState({ width: 2400, height: 1600, scaleFactor: 2 }), loadCapturePreferences(storage));
+  expect(larger.padding).toBe(16);
 });
