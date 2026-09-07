@@ -94,3 +94,7 @@ Padding 滑块参考 Sticker StudioParameterTicks 的十等分位置：十等分
 
 
 Slider 交互参考 shadcn Base 版本，真实行为来自 @base-ui/react 的 SliderRoot/SliderControl/SliderThumb：本地只适配单个水平 range 的 live/commit 分离、值不变不重复提交、方向键1步、Shift+方向键/PageUp/PageDown大步10、Home/End端点和RTL方向。保留浏览器指针/触摸能力，不搬React、多thumb碰撞或表单上下文；blur/pointercancel提交最后可见值作为本地中断收尾。点为装饰，不参与步长或点击；尺寸颜色仍取Codex token。
+
+## 主线同步与正式入口边界
+
+Shot 调试开关与 CDP 窗口类型是独立维度；同步主线必须保留普通窗口/无痕窗口判定、官方模式就绪等待与资料遮罩监督。当前调试入口临时复用帽子位置，不定义正式产品布局。正式接入时截图与无痕应为相邻的独立按钮；左右顺序尚未确定，本次同步不实现该布局，也不扩大安装态或 Windows 的截图支持范围。

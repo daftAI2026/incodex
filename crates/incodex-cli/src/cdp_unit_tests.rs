@@ -1,3 +1,7 @@
+//! [INPUT]: 依赖父模块 CDP 注入、目标筛选与协议解析能力。
+//! [OUTPUT]: 约束默认窗口类型、显式 Shot 调试开关与受控请求边界。
+//! [POS]: 原生 CDP 的单元回归，与生命周期和实连接测试分离。
+//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 use super::*;
 use crate::profile_mask::{ProfileAvatar, ProfileMask};
 use std::net::Ipv4Addr;
@@ -214,6 +218,20 @@ fn injected_ui_carries_locale_and_requires_button_and_banner_health() {
 }
 
 #[test]
+fn installed_injection_uses_the_selected_published_runtime_body() {
+    let source = inject_source_for_options_with_runtime(
+        &InjectionOptions {
+            window_kind: CdpWindowKind::Normal,
+            ..InjectionOptions::default()
+        },
+        "window.__publishedRuntimeGeneration = true;",
+    );
+
+    assert!(source.contains("window.__incodexIncognito=false"));
+    assert!(source.contains("window.__publishedRuntimeGeneration = true;"));
+}
+
+#[test]
 fn injected_ui_carries_profile_mask_as_a_json_bootstrap_value() {
     let source = inject_source_for_options(&InjectionOptions {
         locale: Some("en-US".into()),
@@ -238,6 +256,7 @@ fn capture_debug_bootstrap_is_explicit_and_disabled_by_default() {
         locale: Some("zh-CN".into()),
         profile_mask: None,
         capture_debug: true,
+        ..InjectionOptions::default()
     });
     assert!(source.contains("window.__incodexCaptureDebug=true"));
 }

@@ -66,6 +66,53 @@ jobs:
           bun run test:windows
           bun run test:windows:rust
           bun scripts/build-windows-release.ts
+      - name: Smoke final Windows installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+
+          $Tag = $env:GITHUB_REF -replace '^refs/tags/', ''
+          if ($Tag -notmatch '^v([0-9]+\.[0-9]+\.[0-9]+)$') {
+            throw "release tag must be vX.Y.Z: $Tag"
+          }
+          $Version = $Matches[1]
+          $ReleaseDirectory = (Resolve-Path -LiteralPath 'release-cli').Path
+          $AssetPath = Join-Path $ReleaseDirectory 'incodex-windows-x64.exe'
+          $AssetHash = (Get-FileHash -LiteralPath $AssetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText(
+            (Join-Path $ReleaseDirectory 'SHA256SUMS'),
+            "$AssetHash  incodex-windows-x64.exe`n",
+            (New-Object Text.UTF8Encoding($false))
+          )
+          $SmokeRoot = Join-Path $env:RUNNER_TEMP 'incodex-release-installer-smoke'
+          if (Test-Path -LiteralPath $SmokeRoot) {
+            Remove-Item -LiteralPath $SmokeRoot -Recurse -Force
+          }
+          try {
+            $env:INCODEX_TEST_MODE = '1'
+            $env:INCODEX_DOWNLOAD_DIR = $ReleaseDirectory
+            $env:INCODEX_USER_ROOT = $SmokeRoot
+            $env:INCODEX_EXPECTED_VERSION = $Version
+            $env:INCODEX_SKIP_PATH = '1'
+            & ./install.ps1
+            if ($LASTEXITCODE -ne 0) {
+              throw "Windows installer smoke failed with exit code $LASTEXITCODE"
+            }
+
+            $Launcher = Join-Path $SmokeRoot 'bin\incodex.cmd'
+            $VersionReport = & $Launcher --version
+            if ($LASTEXITCODE -ne 0 -or $VersionReport -notcontains "Incodex version $Version") {
+              throw 'installed Windows launcher failed its version smoke'
+            }
+            $Installed = Join-Path $SmokeRoot "packages\standalone\releases\$Version\incodex.exe"
+            $InstalledHash = (Get-FileHash -LiteralPath $Installed -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($InstalledHash -ne $AssetHash) {
+              throw 'installed Windows CLI does not match the final release asset'
+            }
+          } finally {
+            Remove-Item -LiteralPath $SmokeRoot -Recurse -Force -ErrorAction SilentlyContinue
+          }
       - name: Upload Windows CLI
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

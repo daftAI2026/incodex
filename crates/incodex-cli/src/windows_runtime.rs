@@ -89,6 +89,11 @@ struct RuntimePointer<'a> {
     files: BTreeMap<String, String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct ExistingRuntimePointer {
+    version: String,
+}
+
 pub fn publish_windows_runtime(user_root: &Path) -> Result<PublishedWindowsRuntime, String> {
     let manifest: RuntimeManifest = serde_json::from_str(manifest_source())
         .map_err(|error| format!("invalid Runtime manifest: {error}"))?;
@@ -101,6 +106,7 @@ pub fn publish_windows_runtime(user_root: &Path) -> Result<PublishedWindowsRunti
 
     let user_root = ensure_private_windows_dir(user_root)?;
     let runtime_root = ensure_private_windows_dir(&user_root.join("runtime"))?;
+    reject_runtime_downgrade(&runtime_root, &manifest.runtime_version)?;
     let releases = ensure_private_windows_dir(&runtime_root.join("releases"))?;
     let release_dir = releases.join(&release_name);
     publish_release(&releases, &release_dir, &manifest, &recorded_manifest_body)?;
@@ -117,6 +123,12 @@ pub fn publish_windows_runtime(user_root: &Path) -> Result<PublishedWindowsRunti
     };
     let pointer_body = serde_json::to_vec_pretty(&pointer)
         .map_err(|error| format!("cannot serialize Runtime pointer: {error}"))?;
+    let stable_bootstrap = runtime_root.join(WINDOWS_BOOTSTRAP_NAME);
+    replace_private_file(
+        &runtime_root,
+        &stable_bootstrap,
+        WINDOWS_BOOTSTRAP.as_bytes(),
+    )?;
     let pointer_path = runtime_root.join("current.json");
     replace_private_file(&runtime_root, &pointer_path, &pointer_body)?;
 
@@ -131,6 +143,37 @@ pub fn publish_windows_runtime(user_root: &Path) -> Result<PublishedWindowsRunti
     })
 }
 
+fn reject_runtime_downgrade(runtime_root: &Path, candidate: &str) -> Result<(), String> {
+    let pointer = runtime_root.join("current.json");
+    let metadata = match fs::symlink_metadata(&pointer) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("cannot inspect Runtime pointer: {error}")),
+    };
+    if !metadata.is_file() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err("Windows Runtime pointer is not a regular file".to_string());
+    }
+    verify_private_acl(&pointer)?;
+    if metadata.len() > MANIFEST_LIMIT {
+        return Err("Windows Runtime pointer exceeds the size limit".to_string());
+    }
+    let body =
+        fs::read(&pointer).map_err(|error| format!("cannot read Runtime pointer: {error}"))?;
+    let Ok(existing) = serde_json::from_slice::<ExistingRuntimePointer>(&body) else {
+        return Ok(());
+    };
+    let Some(existing) = crate::stable_release::parse_stable_version(&existing.version) else {
+        return Ok(());
+    };
+    let Some(candidate) = crate::stable_release::parse_stable_version(candidate) else {
+        return Err(format!("invalid embedded Runtime version: {candidate}"));
+    };
+    if existing > candidate {
+        return Err("a newer Runtime generation is already published".to_string());
+    }
+    Ok(())
+}
+
 pub fn publish_windows_activation_bootstrap(user_root: &Path) -> Result<PathBuf, String> {
     let runtime = publish_windows_runtime(user_root)?;
     Ok(runtime.release_dir.join(WINDOWS_BOOTSTRAP_NAME))
@@ -140,6 +183,39 @@ pub(crate) fn verify_installed_windows_runtime(
     user_root: &Path,
     runtime_release: &str,
 ) -> Result<(), String> {
+    let release = verified_recorded_windows_runtime_release(user_root, runtime_release)?;
+    let runtime_root = release
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| "Windows Runtime release has no Runtime root".to_string())?;
+    let stable_bootstrap = runtime_root.join(WINDOWS_BOOTSTRAP_NAME);
+    ensure_regular_file(&stable_bootstrap)?;
+    verify_private_acl(&stable_bootstrap)?;
+    let bootstrap = fs::read(&stable_bootstrap)
+        .map_err(|error| format!("cannot read stable Windows Runtime bootstrap: {error}"))?;
+    if bootstrap != WINDOWS_BOOTSTRAP.as_bytes() {
+        return Err("stable Windows Runtime bootstrap does not match the current CLI".to_string());
+    }
+    Ok(())
+}
+
+pub(crate) fn read_verified_windows_runtime_artifact(
+    user_root: &Path,
+    runtime_release: &str,
+    name: &str,
+) -> Result<Vec<u8>, String> {
+    if name != "incodex-inject.js" {
+        return Err("unsupported installed Windows Runtime artifact".to_string());
+    }
+    let release = verified_recorded_windows_runtime_release(user_root, runtime_release)?;
+    fs::read(release.join(name))
+        .map_err(|error| format!("cannot read installed Windows Runtime artifact {name}: {error}"))
+}
+
+fn verified_recorded_windows_runtime_release(
+    user_root: &Path,
+    runtime_release: &str,
+) -> Result<PathBuf, String> {
     if runtime_release.is_empty()
         || runtime_release == "."
         || runtime_release == ".."
@@ -153,7 +229,9 @@ pub(crate) fn verify_installed_windows_runtime(
         ensure_regular_directory(directory)?;
         verify_private_acl(directory)?;
     }
-    verify_recorded_release(&releases.join(runtime_release), runtime_release)
+    let release = releases.join(runtime_release);
+    verify_recorded_release(&release, runtime_release)?;
+    Ok(release)
 }
 
 fn publish_release(
@@ -571,11 +649,17 @@ mod tests {
         let published = publish_windows_runtime(&user_root).expect("publish current Runtime");
 
         let previous_main = b"previous Runtime generation";
+        let previous_inject = b"window.__publishedRuntimeGeneration = true;";
         fs::write(
             published.release_dir.join("incodex-main.cjs"),
             previous_main,
         )
         .expect("replace previous generation main");
+        fs::write(
+            published.release_dir.join("incodex-inject.js"),
+            previous_inject,
+        )
+        .expect("replace previous generation injector");
         let manifest_path = published.release_dir.join(MANIFEST_NAME);
         let mut manifest: serde_json::Value = serde_json::from_slice(
             &fs::read(&manifest_path).expect("read current Runtime manifest"),
@@ -593,6 +677,8 @@ mod tests {
         }
         manifest["files"]["incodex-main.cjs"] =
             serde_json::Value::String(sha256_hex(previous_main));
+        manifest["files"]["incodex-inject.js"] =
+            serde_json::Value::String(sha256_hex(previous_inject));
         let manifest_body = serde_json::to_vec_pretty(&manifest).expect("write previous manifest");
         fs::write(&manifest_path, &manifest_body).expect("replace previous Runtime manifest");
 
@@ -624,9 +710,18 @@ mod tests {
         fs::rename(&published.release_dir, &previous_dir).expect("record previous generation");
 
         let verification = verify_installed_windows_runtime(&user_root, &previous_release);
+        let selected_inject = read_verified_windows_runtime_artifact(
+            &user_root,
+            &previous_release,
+            "incodex-inject.js",
+        );
         fs::remove_dir_all(&user_root).expect("remove previous Runtime fixture");
 
         verification.expect("recorded Runtime generation must remain verifiable");
+        assert_eq!(
+            selected_inject.expect("read selected Runtime injector"),
+            previous_inject
+        );
     }
 
     #[test]

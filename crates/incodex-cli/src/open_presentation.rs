@@ -2,6 +2,8 @@ pub(crate) const DRY_RUN_HEADING: &str = "Open incognito without patching Codex"
 pub(crate) const DRY_RUN_COMPLETE: &str = "Dry run. No window opened.";
 pub(crate) const OPENING_MESSAGE: &str = "Opening incognito Codex window";
 pub(crate) const OPENED_MESSAGE: &str = "Opened. Incognito Codex window is ready.";
+pub(crate) const OFFICIAL_BLOCKER_WAIT_MESSAGE: &str =
+    "Window opened. Finish the official Codex dialog to continue.";
 pub(crate) const UI_READY_WAIT_MESSAGE: &str = "Waiting for Codex UI to become ready";
 pub(crate) const WAITING_MESSAGE: &str = "Waiting for the window to close";
 pub(crate) const REMOVING_SESSION_MESSAGE: &str = "Removing isolated session";

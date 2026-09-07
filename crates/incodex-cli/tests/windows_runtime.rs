@@ -27,6 +27,9 @@ fn publishes_the_shared_runtime_as_one_private_content_addressed_release() {
     assert_eq!(first.main, first.release_dir.join("incodex-main.cjs"));
     assert_eq!(first.files.len(), windows_runtime_files().count());
     assert!(first.pointer.ends_with("runtime/current.json"));
+    assert!(user_root
+        .join("runtime/incodex-windows-bootstrap.cjs")
+        .is_file());
     let release_name = first
         .release_dir
         .file_name()
@@ -54,6 +57,28 @@ fn publishes_the_shared_runtime_as_one_private_content_addressed_release() {
         verify_private_acl(&path).expect("private Runtime file ACL");
     }
     verify_private_acl(&first.pointer).expect("private Runtime pointer ACL");
+    verify_private_acl(&user_root.join("runtime/incodex-windows-bootstrap.cjs"))
+        .expect("private stable bootstrap ACL");
 
     fs::remove_dir_all(user_root).expect("remove Runtime fixture");
+}
+
+#[test]
+fn an_older_runtime_cannot_replace_a_newer_generation_pointer() {
+    let user_root = scratch_root();
+    let first = publish_windows_runtime(&user_root).expect("publish shared Runtime");
+    let future = br#"{"schemaVersion":1,"version":"999.0.0"}"#;
+    fs::write(&first.pointer, future).expect("write future Runtime pointer fixture");
+    incodex_core::windows_session::apply_private_windows_acl(&first.pointer)
+        .expect("protect future Runtime pointer fixture");
+
+    let error = publish_windows_runtime(&user_root)
+        .expect_err("an older CLI must not roll the Runtime pointer backward");
+    assert!(error.contains("newer Runtime"), "{error}");
+    assert_eq!(
+        fs::read(&first.pointer).expect("read retained Runtime pointer"),
+        future
+    );
+
+    fs::remove_dir_all(user_root).expect("remove Runtime downgrade fixture");
 }

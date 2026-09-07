@@ -1,6 +1,10 @@
-pub(super) const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(750);
+use std::time::{Duration, Instant};
+
+pub(crate) const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(750);
+pub(super) const ACTIVE_TIMEOUT: Duration = Duration::from_secs(90);
 const PRIMARY_CHECKS_REQUIRED: u8 = 3;
 const FALLBACK_CONFIRMATION_FAILURES: u8 = 2;
+const PROBE_FAILURES_ALLOWED: u8 = 20;
 
 pub(super) const PROBE_EXPRESSION: &str = r#"(() => {
   function visible(element) {
@@ -61,38 +65,84 @@ pub(super) const PROBE_EXPRESSION: &str = r#"(() => {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum PageState {
     Codex,
-    Pending,
+    BlockedByOfficialUi,
+    NotReady,
     Other,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Action {
     Confirmed,
+    BlockedByOfficialUi,
     Wait,
     SelectFallback,
     Unresolved,
 }
 
-#[derive(Default)]
 pub(crate) struct Readiness {
+    active_timeout: Duration,
+    blocked_at: Option<Instant>,
     fallback_attempted: bool,
+    paused: Duration,
     primary_other_checks: u8,
     fallback_confirmation_failures: u8,
+    probe_failures: u8,
+    started_at: Instant,
     unresolved: bool,
 }
 
+impl Default for Readiness {
+    fn default() -> Self {
+        Self::new(Instant::now(), ACTIVE_TIMEOUT)
+    }
+}
+
 impl Readiness {
+    pub(super) fn new(started_at: Instant, active_timeout: Duration) -> Self {
+        Self {
+            active_timeout,
+            blocked_at: None,
+            fallback_attempted: false,
+            paused: Duration::ZERO,
+            primary_other_checks: 0,
+            fallback_confirmation_failures: 0,
+            probe_failures: 0,
+            started_at,
+            unresolved: false,
+        }
+    }
+
     pub(super) fn observe(&mut self, page_state: PageState) -> Action {
+        self.observe_at(page_state, Instant::now())
+    }
+
+    pub(super) fn observe_at(&mut self, page_state: PageState, now: Instant) -> Action {
         if self.unresolved {
             return Action::Unresolved;
         }
+        self.probe_failures = 0;
         if page_state == PageState::Codex {
+            self.resume_active_clock(now);
             return Action::Confirmed;
         }
-        if page_state == PageState::Pending {
+        if page_state == PageState::BlockedByOfficialUi {
             if !self.fallback_attempted {
                 self.primary_other_checks = 0;
             }
+            self.fallback_confirmation_failures = 0;
+            self.blocked_at.get_or_insert(now);
+            return Action::BlockedByOfficialUi;
+        }
+        self.resume_active_clock(now);
+        if self.active_elapsed_at(now) >= self.active_timeout {
+            self.unresolved = true;
+            return Action::Unresolved;
+        }
+        if page_state == PageState::NotReady {
+            if !self.fallback_attempted {
+                self.primary_other_checks = 0;
+            }
+            self.fallback_confirmation_failures = 0;
             return Action::Wait;
         }
         if !self.fallback_attempted {
@@ -110,6 +160,42 @@ impl Readiness {
             Action::Unresolved
         } else {
             Action::Wait
+        }
+    }
+
+    pub(super) fn observe_probe_failure(&mut self) -> Action {
+        self.observe_probe_failure_at(Instant::now())
+    }
+
+    pub(super) fn observe_probe_failure_at(&mut self, now: Instant) -> Action {
+        if self.unresolved {
+            return Action::Unresolved;
+        }
+        self.probe_failures = self.probe_failures.saturating_add(1);
+        if self.probe_failures >= PROBE_FAILURES_ALLOWED
+            || self.active_elapsed_at(now) >= self.active_timeout
+        {
+            self.unresolved = true;
+            Action::Unresolved
+        } else {
+            Action::Wait
+        }
+    }
+
+    fn active_elapsed_at(&self, now: Instant) -> Duration {
+        let total = now.saturating_duration_since(self.started_at);
+        let current_pause = self
+            .blocked_at
+            .map(|blocked_at| now.saturating_duration_since(blocked_at))
+            .unwrap_or_default();
+        total.saturating_sub(self.paused.saturating_add(current_pause))
+    }
+
+    fn resume_active_clock(&mut self, now: Instant) {
+        if let Some(blocked_at) = self.blocked_at.take() {
+            self.paused = self
+                .paused
+                .saturating_add(now.saturating_duration_since(blocked_at));
         }
     }
 }

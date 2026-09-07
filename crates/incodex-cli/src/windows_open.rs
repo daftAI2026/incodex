@@ -16,19 +16,21 @@ use incodex_core::{format_kv, format_ok, format_step, format_warn};
 use crate::cdp::{
     allocate_debug_port, debug_launch_args,
     inject_shared_ui_with_options_while_alive_and_guard_with_readiness,
-    is_terminal_codex_mode_error, start_lifecycle_signal_monitor,
-    start_profile_mask_signal_monitor, CodexModeReadiness, InjectionOptions,
+    is_codex_mode_blocked_error, is_codex_mode_waiting_error, is_terminal_codex_mode_error,
+    start_lifecycle_signal_monitor, start_profile_mask_signal_monitor, CodexModeReadiness,
+    InjectionOptions, CODEX_MODE_POLL_INTERVAL,
 };
 use crate::open_presentation::{
     classify_completed_open, completed_open_failure_message, CompletedOpenState,
-    CLOSED_REMOVED_MESSAGE, DRY_RUN_COMPLETE, DRY_RUN_HEADING, OPENED_MESSAGE, OPENING_MESSAGE,
-    REMOVING_SESSION_MESSAGE, UI_READY_WAIT_MESSAGE, WAITING_MESSAGE,
+    CLOSED_REMOVED_MESSAGE, DRY_RUN_COMPLETE, DRY_RUN_HEADING, OFFICIAL_BLOCKER_WAIT_MESSAGE,
+    OPENED_MESSAGE, OPENING_MESSAGE, REMOVING_SESSION_MESSAGE, UI_READY_WAIT_MESSAGE,
+    WAITING_MESSAGE,
 };
 use crate::profile_mask::{resolve_profile_mask, ProfileMask};
 use crate::windows_activation::{
     activate_packaged_kill_on_drop, activate_packaged_with_installed_cdp,
-    disable_installed_runtime, WindowsActivationFailure, WindowsActivationRequest,
-    WindowsInstalledRuntimeRegistration,
+    disable_installed_runtime, enable_installed_runtime, WindowsActivationFailure,
+    WindowsActivationRequest, WindowsInstalledRuntimeRegistration,
 };
 use crate::windows_app::{
     codex_package_full_name_is_installed, discover_codex_package, validate_codex_package_full_name,
@@ -47,8 +49,7 @@ use crate::windows_process::{
     running_package_process_ids, VisibleWindowLifecycle, WindowsCdpListenerStatus,
     WindowsCdpOwnershipGuard,
 };
-use crate::windows_registration::recover_transient_windows_debug_registration_with;
-use crate::windows_runtime::publish_windows_activation_bootstrap;
+use crate::windows_registration::recover_transient_windows_debug_registration_with_restore;
 use crate::windows_system::windows_path_for_display;
 use crate::{parse::ParsedCli, CliFailure};
 
@@ -64,12 +65,11 @@ pub struct WindowsOpenPlan {
     pub debug_port: u16,
     pub injection: InjectionOptions,
     user_root: PathBuf,
-    transient_bootstrap: PathBuf,
     transient_helper: PathBuf,
 }
 
 impl WindowsOpenPlan {
-    pub fn activation_request(&self) -> Result<WindowsActivationRequest, String> {
+    fn base_activation_request(&self) -> Result<WindowsActivationRequest, String> {
         let mut environment = BTreeMap::new();
         environment.extend(
             self.env
@@ -87,13 +87,15 @@ impl WindowsOpenPlan {
             self.args.iter().map(OsString::from),
             environment,
         )
-        .and_then(|request| {
-            request.with_transient_runtime(
-                &self.transient_bootstrap,
-                &self.transient_helper,
-                &self.user_root,
-            )
-        })
+    }
+
+    pub fn activation_request(&self) -> Result<WindowsActivationRequest, String> {
+        self.base_activation_request()
+            .and_then(|request| request.with_transient_cdp(&self.transient_helper, &self.user_root))
+    }
+
+    pub fn installed_activation_request(&self) -> Result<WindowsActivationRequest, String> {
+        self.activation_request()
     }
 }
 
@@ -110,6 +112,17 @@ pub enum WindowsOpenProcessResult {
 const LISTENER_SHUTDOWN_GRACE: Duration = Duration::from_millis(200);
 const VISIBLE_WINDOW_CLOSE_GRACE: Duration = Duration::from_millis(250);
 type WindowsMonitorWorkers = Vec<thread::JoinHandle<()>>;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WindowsInjectionProgress {
+    BlockedByOfficialUi,
+}
+
+fn windows_injection_progress_message(progress: WindowsInjectionProgress) -> &'static str {
+    match progress {
+        WindowsInjectionProgress::BlockedByOfficialUi => OFFICIAL_BLOCKER_WAIT_MESSAGE,
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowsOpenOutcome {
@@ -205,7 +218,6 @@ pub fn prepare_windows_open(
     let session = create_windows_session(user_root)?;
     let prepared = (|| {
         copy_windows_settings(&session, source_home)?;
-        let transient_bootstrap = publish_windows_activation_bootstrap(user_root)?;
         let helper_source = std::env::current_exe()
             .map_err(|error| format!("cannot locate the running Incodex executable: {error}"))?;
         let transient_helper =
@@ -241,7 +253,6 @@ pub fn prepare_windows_open(
                 ..InjectionOptions::default()
             },
             user_root: user_root.to_path_buf(),
-            transient_bootstrap,
             transient_helper,
         })
     })();
@@ -278,6 +289,7 @@ where
             Arc<AtomicBool>,
             Arc<AtomicBool>,
             Arc<WindowsCdpOwnershipGuard>,
+            mpsc::Sender<WindowsInjectionProgress>,
         ) -> Result<WindowsMonitorWorkers, String>
         + Send
         + 'static,
@@ -304,6 +316,7 @@ where
             Arc<AtomicBool>,
             Arc<AtomicBool>,
             Arc<WindowsCdpOwnershipGuard>,
+            mpsc::Sender<WindowsInjectionProgress>,
         ) -> Result<WindowsMonitorWorkers, String>
         + Send
         + 'static,
@@ -329,23 +342,28 @@ fn launch_windows_open(
 ) -> Result<crate::windows_process::WindowsProcessTree, WindowsActivationFailure> {
     let _launch_gate =
         acquire_windows_install_state().map_err(WindowsActivationFailure::before_start)?;
+    recover_transient_windows_debug_registration_with_restore(
+        &plan.user_root,
+        running_package_process_ids,
+        codex_package_full_name_is_installed,
+        disable_installed_runtime,
+        |state| {
+            WindowsInstalledRuntimeRegistration::from_install_state(state)
+                .and_then(|registration| enable_installed_runtime(&registration))
+        },
+    )
+    .map_err(WindowsActivationFailure::before_start)?;
     let installed_state = read_windows_install_state(&plan.user_root)
         .map_err(WindowsActivationFailure::before_start)?;
-    if installed_state.is_none() {
-        recover_transient_windows_debug_registration_with(
-            &plan.user_root,
-            running_package_process_ids,
-            codex_package_full_name_is_installed,
-            disable_installed_runtime,
-        )
-        .map_err(WindowsActivationFailure::before_start)?;
-    }
     let installed_activation =
         installed_activation_for_open(installed_state.as_ref(), &plan.package_full_name)
             .map_err(WindowsActivationFailure::before_start)?;
-    let request = plan
-        .activation_request()
-        .map_err(WindowsActivationFailure::before_start)?;
+    let request = if installed_activation.is_some() {
+        plan.installed_activation_request()
+    } else {
+        plan.activation_request()
+    }
+    .map_err(WindowsActivationFailure::before_start)?;
     match installed_activation.as_ref() {
         Some(registration) => activate_packaged_with_installed_cdp(&request, registration),
         None => activate_packaged_kill_on_drop(&request),
@@ -366,6 +384,7 @@ where
             Arc<AtomicBool>,
             Arc<AtomicBool>,
             Arc<WindowsCdpOwnershipGuard>,
+            mpsc::Sender<WindowsInjectionProgress>,
         ) -> Result<WindowsMonitorWorkers, String>
         + Send
         + 'static,
@@ -400,6 +419,7 @@ where
     let options = plan.injection.clone();
     let injection_ownership_guard = ownership_guard.clone();
     let (injection_tx, injection_rx) = mpsc::channel();
+    let (progress_tx, progress_rx) = mpsc::channel();
     let worker = thread::spawn(move || {
         let _ = injection_tx.send(inject(
             debug_port,
@@ -408,14 +428,26 @@ where
             injection_close_requested,
             injection_cdp_failed,
             injection_ownership_guard,
+            progress_tx,
         ));
     });
 
     let mut ui_ready = false;
+    let mut blocker_reported = false;
     let mut monitor_workers = Vec::new();
     let mut listener_missing_since = None;
     let mut window_lifecycle = VisibleWindowLifecycle::new(VISIBLE_WINDOW_CLOSE_GRACE);
     let (process, shutdown) = loop {
+        if let Ok(progress) = progress_rx.try_recv() {
+            if !blocker_reported {
+                let message = windows_injection_progress_message(progress);
+                spinner.stop();
+                println!("{}", format_warn(message, None));
+                let _ = std::io::stdout().flush();
+                spinner = crate::spinner::Spinner::start(message);
+                blocker_reported = true;
+            }
+        }
         match injection_rx.try_recv() {
             Ok(Ok(workers)) => {
                 monitor_workers = workers;
@@ -635,11 +667,12 @@ fn inject_windows_ui(
     close_requested: Arc<AtomicBool>,
     cdp_failed: Arc<AtomicBool>,
     ownership_guard: Arc<WindowsCdpOwnershipGuard>,
+    progress_tx: mpsc::Sender<WindowsInjectionProgress>,
 ) -> Result<WindowsMonitorWorkers, String> {
-    let deadline = Instant::now() + Duration::from_secs(45);
     let mut last_error = "Codex CDP page is not ready".to_string();
     let mut mode_readiness = CodexModeReadiness::default();
-    while alive.load(Ordering::Acquire) && Instant::now() < deadline {
+    let mut blocker_reported = false;
+    while alive.load(Ordering::Acquire) {
         let mut primary_target = None;
         match inject_shared_ui_with_options_while_alive_and_guard_with_readiness(
             port,
@@ -672,6 +705,18 @@ fn inject_windows_ui(
                     ));
                 }
                 return Ok(monitor_workers);
+            }
+            Err(error) if is_codex_mode_blocked_error(&error) => {
+                if !blocker_reported {
+                    let _ = progress_tx.send(WindowsInjectionProgress::BlockedByOfficialUi);
+                    blocker_reported = true;
+                }
+                thread::sleep(CODEX_MODE_POLL_INTERVAL);
+                continue;
+            }
+            Err(error) if is_codex_mode_waiting_error(&error) => {
+                thread::sleep(CODEX_MODE_POLL_INTERVAL);
+                continue;
             }
             Err(error) if is_terminal_codex_mode_error(&error) => return Err(error),
             Err(error) => last_error = error,

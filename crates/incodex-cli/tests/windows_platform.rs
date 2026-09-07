@@ -45,10 +45,14 @@ fn help_and_version_are_available_without_creating_state() {
     assert!(help_text.contains("Usage:\n  incodex"));
     assert!(help_text.contains("Windows"));
     assert!(help_text.contains("Microsoft Store"));
-    assert!(help_text.contains("Unsupported source preview"));
+    assert!(!help_text.contains("Unsupported source preview"));
     assert!(help_text.contains("Enable the hat-glasses control"));
     assert!(help_text.contains("Remove the Windows Runtime integration"));
+    assert!(help_text.contains("self-uninstall"));
+    assert!(!help_text.contains("self-uninstall  Not available on Windows yet"));
     assert!(!help_text.contains("install      Not available"));
+    assert!(!help_text.contains("runtime      Not available"));
+    assert!(!help_text.contains("update       Not available"));
     assert!(!help_text.contains("Patch the Codex app"));
     assert!(!help_text.contains("inc is the same program"));
     assert!(help.stderr.is_empty());
@@ -69,10 +73,7 @@ fn help_and_version_are_available_without_creating_state() {
         );
         let command_help_text = text(&command_help.stdout);
         assert!(command_help_text.contains("Windows"), "{command_help_text}");
-        assert!(
-            command_help_text.contains("Unsupported source preview"),
-            "{command_help_text}"
-        );
+        assert!(!command_help_text.contains("Unsupported source preview"));
         assert!(
             !command_help_text.contains(forbidden),
             "{command_help_text}"
@@ -93,19 +94,14 @@ fn help_and_version_are_available_without_creating_state() {
 
 #[test]
 fn unsupported_product_commands_fail_closed_before_creating_state() {
-    let cases: &[(&str, &[&str])] = &[
-        ("runtime", &["runtime"]),
-        (
+    let cases: &[(&str, &[&str])] = &[(
+        "recover",
+        &[
             "recover",
-            &[
-                "recover",
-                "--transaction",
-                "11111111-1111-4111-8111-111111111111",
-            ],
-        ),
-        ("update", &["update", "--dry-run"]),
-        ("self-uninstall", &["self-uninstall", "--dry-run"]),
-    ];
+            "--transaction",
+            "11111111-1111-4111-8111-111111111111",
+        ],
+    )];
 
     for (command, args) in cases {
         let profile = scratch_profile();
@@ -126,6 +122,71 @@ fn unsupported_product_commands_fail_closed_before_creating_state() {
             "{command} created state before its Windows implementation exists"
         );
     }
+}
+
+#[test]
+fn self_uninstall_from_an_unmanaged_windows_binary_fails_with_install_guidance() {
+    let profile = scratch_profile();
+    let output = run(&["self-uninstall", "--dry-run"], &profile);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = text(&output.stderr);
+    assert!(
+        stderr.contains("not a managed Windows installation"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("install.ps1"), "{stderr}");
+    assert!(!profile.exists(), "unmanaged self-uninstall created state");
+}
+
+#[test]
+fn runtime_and_managed_update_have_windows_dry_run_contracts() {
+    let profile = scratch_profile();
+    let runtime = run(&["runtime", "--dry-run"], &profile);
+    assert!(runtime.status.success(), "{}", text(&runtime.stderr));
+    assert!(
+        text(&runtime.stdout).contains("would publish the embedded Runtime"),
+        "{}",
+        text(&runtime.stdout)
+    );
+
+    let package_root = profile.join("managed/packages/standalone");
+    let update = Command::new(env!("CARGO_BIN_EXE_incodex"))
+        .args(["update", "--dry-run"])
+        .env("INCODEX_MANAGED_BY_STANDALONE", "1")
+        .env("INCODEX_MANAGED_PACKAGE_ROOT", &package_root)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run managed update dry-run");
+    assert!(update.status.success(), "{}", text(&update.stderr));
+    let stdout = text(&update.stdout);
+    assert!(
+        stdout.contains("update channel: windows standalone"),
+        "{stdout}"
+    );
+    assert!(
+        !stdout.contains("powershell") && !stdout.contains("install.ps1"),
+        "dry-run output exposed installer plumbing: {stdout}"
+    );
+    assert!(
+        stdout.contains("would publish Runtime with the installed CLI"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("no changes made."), "{stdout}");
+    assert!(!profile.exists(), "dry-run created product state");
+}
+
+#[test]
+fn update_from_an_unmanaged_windows_binary_fails_with_install_guidance() {
+    let profile = scratch_profile();
+    let output = run(&["update", "--dry-run"], &profile);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = text(&output.stderr);
+    assert!(
+        stderr.contains("not a managed Windows installation"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("install.ps1"), "{stderr}");
+    assert!(!profile.exists(), "unmanaged update created user state");
 }
 
 #[test]

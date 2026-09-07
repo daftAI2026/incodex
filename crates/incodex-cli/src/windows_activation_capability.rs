@@ -15,7 +15,9 @@ const ENVIRONMENT_PIPE_PREFIX: &str = r"\\.\pipe\Incodex-Activation-Environment-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WindowsDebuggerRoute {
     ResumeNormally,
+    PrepareInstalledCdp,
     AssignToJob(String),
+    Reject,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,7 +135,7 @@ pub fn windows_transient_debugger_route(
         WindowsDebuggerRoute::AssignToJob(job_name) if job_name == expected_job_name => {
             Ok(WindowsDebuggerRoute::AssignToJob(job_name))
         }
-        _ => Ok(WindowsDebuggerRoute::ResumeNormally),
+        _ => Ok(WindowsDebuggerRoute::Reject),
     }
 }
 

@@ -15,6 +15,7 @@ import {
   ensureProfileMask,
   profileMaskHealth,
   profileMaskNeedsInject,
+  refreshProfileMaskHealth,
 } from "./incognito-profile-mask.ts";
 import { createOfficialTooltipTimingBridge } from "./official-tooltip-provider.ts";
 import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement.ts";
@@ -983,7 +984,7 @@ declare global {
   }
 }
 
-window.__incodexRefreshProfileMaskHealth = profileMaskHealth;
+window.__incodexRefreshProfileMaskHealth = refreshProfileMaskHealth;
 
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", start, { once: true });

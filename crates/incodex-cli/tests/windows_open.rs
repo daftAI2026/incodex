@@ -62,30 +62,28 @@ fn prepares_open_from_the_discovered_users_package_without_hardcoded_install_pat
     assert_eq!(activation.package_full_name(), app.package_full_name);
     assert_eq!(activation.app_user_model_id(), app.app_user_model_id);
     assert!(activation.arguments().contains("--user-data-dir="));
+    let installed_activation = plan
+        .installed_activation_request()
+        .expect("build installed Store activation request");
+    let installed_environment =
+        String::from_utf16_lossy(installed_activation.transient_debug_environment());
+    assert!(installed_environment.contains("CODEX_HOME="));
+    assert!(installed_environment.contains("INCODEX_SESSION_ROOT="));
+    assert!(!installed_environment.contains("NODE_OPTIONS="));
+    assert_eq!(installed_activation.arguments(), activation.arguments());
     assert_eq!(
         fs::read(plan.session.home.join("auth.json")).expect("copied auth"),
         b"fixture-auth"
     );
     assert!(!plan.session.home.join("sessions.jsonl").exists());
 
-    let runtime_releases = user_root.join("runtime").join("releases");
-    let bootstrap = fs::read_dir(&runtime_releases)
-        .expect("published Runtime releases")
-        .map(|entry| entry.expect("Runtime release entry").path())
-        .find_map(|release| {
-            let bootstrap = release.join("incodex-windows-bootstrap.cjs");
-            bootstrap.is_file().then_some(bootstrap)
-        })
-        .expect("stable activation bootstrap");
-    assert!(!bootstrap.starts_with(&plan.session.root));
-
     assert_eq!(
         burn_windows_session(&plan.session),
         WindowsCleanupResult::Removed
     );
     assert!(
-        bootstrap.is_file(),
-        "normal session cleanup removed the stable activation bootstrap"
+        !user_root.join("runtime").exists(),
+        "CDP open must not publish the retired Node bootstrap"
     );
     fs::remove_dir_all(root).expect("remove fixture");
 }

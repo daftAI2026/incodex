@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 
 use crate::diagnosis_presentation::STATUS_PROGRESS_MESSAGE;
 use crate::parse::ParsedCli;
@@ -8,8 +8,9 @@ use crate::spinner::Spinner;
 use crate::windows_app::{discover_codex_package, WindowsCodexApp};
 use crate::windows_install_state::{read_windows_install_state, WindowsInstallPhase};
 use crate::windows_registration::{
-    read_windows_debug_registration, registration_matches_install_state,
-    WindowsDebugRegistrationEvidence, WindowsDebugRegistrationKind,
+    read_transient_windows_debug_registration, read_windows_debug_registration,
+    registration_matches_install_state, WindowsDebugRegistrationEvidence,
+    WindowsDebugRegistrationKind,
 };
 use crate::windows_runtime::verify_installed_windows_runtime;
 use crate::windows_system::windows_path_for_display;
@@ -42,11 +43,22 @@ impl WindowsIntegrationStatus {
         current_package_full_name: Option<&str>,
     ) -> Result<Self, String> {
         let registration = read_windows_debug_registration(user_root);
+        let transient_registration = read_transient_windows_debug_registration(user_root);
         let state = match read_windows_install_state(user_root) {
             Ok(Some(state)) => state,
-            Ok(None) => return Ok(Self::without_install_state(registration, None)),
+            Ok(None) => {
+                return Ok(Self::without_install_state(
+                    registration,
+                    transient_registration,
+                    None,
+                ));
+            }
             Err(error) => {
-                return Ok(Self::without_install_state(registration, Some(error)));
+                return Ok(Self::without_install_state(
+                    registration,
+                    transient_registration,
+                    Some(error),
+                ));
             }
         };
         let enabled = matches!(
@@ -86,6 +98,14 @@ impl WindowsIntegrationStatus {
                 "Windows debugger registration evidence is unhealthy: {error}"
             )),
         }
+        match transient_registration {
+            Ok(Some(_)) => health_issues
+                .push("Transient Windows debugger registration requires recovery.".to_string()),
+            Ok(None) => {}
+            Err(error) => health_issues.push(format!(
+                "Transient Windows debugger registration evidence is unhealthy: {error}"
+            )),
+        }
         Ok(Self {
             installed: enabled && health_issues.is_empty(),
             phase: Some(state.phase),
@@ -98,6 +118,7 @@ impl WindowsIntegrationStatus {
 
     fn without_install_state(
         registration: Result<Option<WindowsDebugRegistrationEvidence>, String>,
+        transient_registration: Result<Option<WindowsDebugRegistrationEvidence>, String>,
         state_error: Option<String>,
     ) -> Self {
         let mut health_issues = Vec::new();
@@ -105,7 +126,22 @@ impl WindowsIntegrationStatus {
             health_issues.push(format!("Windows install state is unhealthy: {error}"));
         }
 
-        let package_full_name = match registration {
+        let mut package_full_name = match transient_registration {
+            Ok(Some(evidence)) => {
+                health_issues
+                    .push("Transient Windows debugger registration requires recovery.".to_string());
+                Some(evidence.package_full_name)
+            }
+            Ok(None) => None,
+            Err(error) => {
+                health_issues.push(format!(
+                    "Transient Windows debugger registration evidence is unhealthy: {error}"
+                ));
+                None
+            }
+        };
+
+        match registration {
             Ok(Some(evidence)) => {
                 let issue = match evidence.kind {
                     WindowsDebugRegistrationKind::Installed => {
@@ -116,16 +152,17 @@ impl WindowsIntegrationStatus {
                     }
                 };
                 health_issues.push(issue.to_string());
-                Some(evidence.package_full_name)
+                if package_full_name.is_none() {
+                    package_full_name = Some(evidence.package_full_name);
+                }
             }
-            Ok(None) => None,
+            Ok(None) => {}
             Err(error) => {
                 health_issues.push(format!(
                     "Windows debugger registration evidence is unhealthy: {error}"
                 ));
-                None
             }
-        };
+        }
 
         Self {
             installed: false,
@@ -144,10 +181,25 @@ pub(crate) struct WindowsPackageStatus {
     pub(crate) available: bool,
     pub(crate) package_full_name: Option<String>,
     pub(crate) app_user_model_id: Option<String>,
+    #[serde(serialize_with = "serialize_optional_display_path")]
     pub(crate) install_location: Option<PathBuf>,
+    #[serde(serialize_with = "serialize_optional_display_path")]
     pub(crate) executable: Option<PathBuf>,
     pub(crate) architecture: Option<String>,
     pub(crate) reason: Option<String>,
+}
+
+fn serialize_optional_display_path<S>(
+    path: &Option<PathBuf>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match path.as_deref() {
+        Some(path) => serializer.serialize_some(&windows_path_for_display(path)),
+        None => serializer.serialize_none(),
+    }
 }
 
 impl WindowsPackageStatus {
@@ -343,6 +395,31 @@ mod tests {
     }
 
     #[test]
+    fn json_status_uses_the_same_user_facing_paths_as_terminal_status() {
+        let report = WindowsPackageStatus {
+            available: true,
+            package_full_name: Some("OpenAI.Codex_fixture".to_string()),
+            app_user_model_id: Some("OpenAI.Codex_fixture!Codex".to_string()),
+            install_location: Some(PathBuf::from(r"\\?\D:\WindowsApps\OpenAI.Codex")),
+            executable: Some(PathBuf::from(
+                r"\\?\D:\WindowsApps\OpenAI.Codex\app\ChatGPT.exe",
+            )),
+            architecture: Some("x64".to_string()),
+            reason: None,
+        };
+
+        let json = serde_json::to_value(&report).expect("serialize Windows package status");
+        assert_eq!(
+            json["installLocation"],
+            serde_json::json!(r"D:\WindowsApps\OpenAI.Codex")
+        );
+        assert_eq!(
+            json["executable"],
+            serde_json::json!(r"D:\WindowsApps\OpenAI.Codex\app\ChatGPT.exe")
+        );
+    }
+
+    #[test]
     fn stale_store_package_generation_is_not_reported_as_installed() {
         let sequence = STATUS_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let user_root = std::env::temp_dir().join(format!(
@@ -488,6 +565,34 @@ mod tests {
         assert_eq!(report.package_full_name.as_deref(), Some(package));
         assert!(text.to_ascii_lowercase().contains("transient"), "{text}");
         assert!(text.to_ascii_lowercase().contains("recovery"), "{text}");
+    }
+
+    #[test]
+    fn transient_registration_beside_an_install_requires_recovery() {
+        let sequence = STATUS_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let user_root = std::env::temp_dir().join(format!(
+            "incodex-windows-status-recovery-overlay-{}-{sequence}",
+            std::process::id()
+        ));
+        let (state, _) = enabled_install_fixture(&user_root, true);
+        let helper_source = std::env::current_exe().expect("test helper source");
+        let helper = publish_windows_transient_helper(&user_root, &helper_source)
+            .expect("publish fixture transient helper");
+        stage_transient_windows_debug_registration(
+            &user_root,
+            &state.package_full_name,
+            &helper.executable,
+        )
+        .expect("stage transient registration beside installed state");
+
+        let report = WindowsIntegrationStatus::inspect(&user_root, Some(&state.package_full_name))
+            .expect("inspect transient overlay");
+        let text = format_integration_status(&report);
+
+        assert!(!report.installed, "transient overlay was reported healthy");
+        assert!(text.to_ascii_lowercase().contains("transient"), "{text}");
+        assert!(text.to_ascii_lowercase().contains("recovery"), "{text}");
+        std::fs::remove_dir_all(user_root).expect("remove transient overlay fixture");
     }
 
     #[test]

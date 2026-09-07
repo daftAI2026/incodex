@@ -43,6 +43,11 @@ describe("release CLI artifacts", () => {
     expect(releaseYml).toContain("runs-on: windows-latest");
     expect(releaseYml).toContain("bun run test:windows:rust");
     expect(releaseYml).toContain("bun scripts/build-windows-release.ts");
+    expect(releaseYml).toContain("Get-FileHash -LiteralPath $AssetPath -Algorithm SHA256");
+    expect(releaseYml).toContain("INCODEX_DOWNLOAD_DIR");
+    expect(releaseYml).toContain("INCODEX_USER_ROOT");
+    expect(releaseYml).toContain("& ./install.ps1");
+    expect(releaseYml).toContain("bin\\incodex.cmd");
     expect(ciYml).toContain("bun scripts/build-windows-release.ts");
     expect(existsSync(builderPath)).toBe(true);
     expect(builder).toContain("cargo");
@@ -238,6 +243,21 @@ describe("release CLI artifacts", () => {
     expect(releaseFlow).toContain("README.md");
     expect(releaseFlow).toContain("README_CN.md");
     expect(releaseFlow).toMatch(/before pushing the tag/i);
+  });
+
+  test("requires first Windows release evidence before the public tag", () => {
+    const preflight = releaseFlow.indexOf("## Pre-flight");
+    const tagAndPublish = releaseFlow.indexOf("## Tag and publish");
+    const windowsGate = releaseFlow.indexOf("Before the first public Windows tag");
+
+    expect(preflight).toBeGreaterThanOrEqual(0);
+    expect(windowsGate).toBeGreaterThan(preflight);
+    expect(windowsGate).toBeLessThan(tagAndPublish);
+    expect(releaseFlow).toContain("real Microsoft Store Codex");
+    expect(releaseFlow).toContain("exact candidate commit");
+    expect(releaseFlow).toContain(
+      "Only the public `releases/latest` download smoke waits until after the assets exist",
+    );
   });
 });
 

@@ -2,6 +2,8 @@
 
 This file is the shared source of truth for any AI agent working on this repo (Claude Code, Codex, Grok, etc.). `CLAUDE.md` is a symlink to this file. Put machine-specific or personal overrides in `AGENTS.local.md` / `CLAUDE.local.md`; both are gitignored.
 
+This project does not use GEB documentation. Do not add INPUT/OUTPUT/POS/PROTOCOL headers or hierarchical CLAUDE.md maps; keep ordinary comments and this shared guide focused on actual behavior and safety contracts.
+
 ## Project
 
 Incodex adds a Chrome-style incognito window to a locally installed OpenAI Codex desktop app (`ChatGPT.app`, `com.openai.codex`). It is an unofficial add-on. The installer patches the official bundle. `incodex open` is a second launch path: it does not patch or resign the official app, but that isolated window still gets the hat-glasses control and banner by injecting the same `inject.js` over a localhost debug port.
@@ -12,7 +14,7 @@ Safety rules matter more than speed. Treat installer, signing, session cleanup, 
 
 Users launch the official Codex icon as usual. After `incodex install`, a hat-glasses control sits left of Search. Click or `Shift+Command+N` opens a second isolated Codex window: same login, language, and base settings; no old chats; close burns that temp home.
 
-`incodex open` is the other launch path: spawn the official binary with an isolated home, do not copy/patch/resign the official app, then inject the **same** `inject.js` (hat-glasses + banner) through Chrome DevTools Protocol. CDP is not the Dock / `install` entry.
+`incodex open` is the other launch path: spawn the official binary with an isolated home, do not copy/patch/resign the official app, then inject the **same** `inject.js` (hat-glasses + banner) through Chrome DevTools Protocol. CDP is not the macOS Dock / `install` entry; the validated Windows Store exception is defined below.
 
 ### What Incodex Should Do
 
@@ -33,7 +35,7 @@ Users launch the official Codex icon as usual. After `incodex install`, a hat-gl
 - Do not sign vendor CUA sidecars. Stash them, ad-hoc `--deep` the host and Sparkle update framework so updater IPC shares the host identity, restore the CUA sidecars, then sign the outer app with its filtered entitlements.
 - Do not default live-patch from `install.sh` / `inc update`. `install.sh` manages only the CLI; `inc update` manages the CLI plus external Runtime and never patches or re-signs Codex.
 - Do not add Overlay, an independent Session Agent, LaunchAgent auto-repair, runtime pubkeys, or Homebrew core. Own tap is `daftAI2026/homebrew-tap`; bump it from `release.yml`. Do not open a Homebrew/homebrew-core PR.
-- Do not use CDP as the everyday Dock / `install` launch path. `incodex open` may start the official binary with `--remote-debugging-port` on `127.0.0.1` and inject `dist/incodex-inject.js`. Do not clone the official app for `open`. Do not copy AGPL injector scripts.
+- Do not use CDP as the everyday Dock / `install` launch path on macOS. `incodex open` may start the official binary with `--remote-debugging-port` on `127.0.0.1` and inject `dist/incodex-inject.js`; the Windows Store installed path may use only the package-bound suspended-launch adapter described below. Do not clone the official app for `open`. Do not copy AGPL injector scripts.
 - Do not add hidden confirmation aliases beyond the native parser's tested compatibility surface.
 - Do not write tests after the implementation to match it. Write a failing repro first.
 
@@ -52,6 +54,7 @@ If the answer is no or unclear, decline or narrow.
 
 - `AGENTS.md` is the contract. `CLAUDE.md` must stay a symlink to it.
 - The TypeScript product router, parser, mutation implementation, and old Runtime publishers have been retired. Rust owns the product CLI and native mutation path; legacy TypeScript v1 disk compatibility is limited to the Rust `legacy_typescript.rs` reader and `legacy_proof.rs` safety fixtures.
+- `crates/incodex-cli/src/CLAUDE.md` maps native command orchestration, platform adapters, and the experimental Shot CDP boundary.
 - `crates/incodex-cli` is the native CLI: `parse.rs` owns its command language, while `install.rs` and `open.rs` dispatch dangerous operations through the lower crates.
 - `crates/incodex-transaction` owns native mutation locks, durable journals, rollback, and recovery. `crates/incodex-asar` and `crates/incodex-macos` own ASAR and macOS signing/plist mechanics.
 - `crates/incodex-core/src/session.rs` owns native `open` session create/burn; it must stay behaviorally aligned with `src/runtime/incodex-safe-home.cts` without sharing language-specific code.
@@ -78,16 +81,21 @@ The native Rust contract tests are the product behavior source of truth. The rem
 ### Windows adaptation boundary
 
 - Windows support is under development and is not a public product claim until the corresponding behavior has passed real Windows app and lifecycle verification.
-- The Windows Rust boundary exposes parsing, help, version reporting, the native `open` path, and an explicitly confirmed `install` / `uninstall` pipeline. Every other mutating product command fails closed before creating Incodex state until that command lands behind its own failing Windows test.
+- The Windows Rust boundary exposes parsing, help, version reporting, native `open`, `install` / `uninstall`, `runtime`, managed `update`, and managed `self-uninstall`. Every other mutating product command fails closed before creating Incodex state until that command lands behind its own failing Windows test.
 - Windows CI intentionally tests the supported `incodex-core` and `incodex-cli` library/binary surface through `bun run test:windows:rust`. The ASAR mutation, transaction, Runtime publishing, and macOS integration crates remain outside that target until a real Windows responsibility exists; on Windows, do not run `cargo test --workspace` or add placeholder implementations merely to make it compile there.
 - Windows `open` is one trust pipeline: discover the current user's `OpenAI.Codex` Store package without hardcoded install paths; create a current-user-only session that rejects reparse ancestry, copies only `auth.json` / `config.toml`, and persists directory plus owner-process identity; launch suspended into a kill-on-close Job Object; prove the IPv4 loopback CDP listener belongs to that Job; inject the committed shared Runtime; then burn normal sessions or sweep proven-dead owners while retaining every uncertain cleanup state.
-- Windows `install` publishes the same Electron Runtime plus a content-addressed native helper under the current user's private Incodex root, registers a durable package debugger bootstrap without modifying the Store package, and keeps every install transition behind an epoch-checked kill switch. Install and uninstall never request or force the official package to exit: the current official Windows app bypasses its task-confirmation prompt on quit, so mutation fails closed while any package process is running and tells the user to finish active work, then quit with `Ctrl+Q` or the tray command. The installed hat-glasses path reuses the shared preload, injector, menu, colors, and window hooks; only session creation, Job ownership, readiness, and cleanup cross the Windows lifecycle adapter.
+- Windows `install` publishes the same Electron Runtime plus a content-addressed native helper under the current user's private Incodex root, registers a durable package debugger bootstrap without modifying the Store package, and keeps every install transition behind an epoch-checked kill switch. The debugger validates the exact Store package PID and suspended primary thread, appends random IPv4-loopback CDP switches inside the existing x64 process-parameter buffer, resumes the process, proves the listener still belongs to that package, and injects the shared Runtime into the exact primary page; the main-window bridge exposes only the managed `open` action. Install and uninstall never request or force the official package to exit: the current official Windows app bypasses its task-confirmation prompt on quit, so mutation fails closed while any package process is running and tells the user to finish active work, then quit with `Ctrl+Q` or the tray command. The installed hat-glasses path reuses the shared injector, menu, colors, and window hooks; only suspended launch preparation, bridge transport, session creation, Job ownership, readiness, and cleanup cross Windows adapters.
+- Windows `self-uninstall` accepts only the PowerShell installer's proven current generation. It reuses the managed identity checks, the stable installer lock outside the deleted package tree, and the legacy generation lock during migration; the hidden system PowerShell handoff seals both launchers before acknowledging readiness, then rescans until every managed CLI has exited. Default removal is limited to the two launchers, `packages/standalone`, and the exact CLI bin entry in the current user's PATH; Runtime and session state remain. `--restore-app` first reuses the approved Windows Runtime uninstall and still refuses while Codex is running.
 - Preserve the shared parser and command names. Add Windows behavior inside the Rust product CLI, one review-sized capability at a time; do not create a second CLI or Runtime.
 - Treat Store/AppX installation, Authenticode, reparse points, ACLs, process trees, and updater behavior as evidence-driven Windows boundaries. Any expansion of Windows package mutation or persistent debugger behavior requires separate repository-owner approval and a failing Windows test first.
 
 ### Runtime boundary
 
 - Electron Runtime stays TypeScript (`src/runtime/*.cts` → `dist/*.cjs`) and is still built by Bun; Rust embeds committed `dist/` artifacts.
+- Profile masking recognizes only the unique identity in the sidebar's `aria-controls`-linked account menu. Preserve both the legacy direct name/avatar layout and the observed nested layout (name in a flex column, avatar in an extra span); use the same selectors for discovery, masking, and health checks. Do not mask the plan subtitle or unrelated menu actions, or disable fail-closed health checks to accommodate official UI changes. Regression coverage lives in `src/runtime/inject.test.ts`.
+- Native profile-health polling must synchronously repair the current identity before validating it; background Electron windows may suspend `requestAnimationFrame`, so the renderer's scheduled repaint is not a prerequisite for a healthy native poll. Failed repair still fails closed.
+- Profile masking is scoped to the main sidebar identity and its first-level account menu, not the full settings pages. Only a positively recognized full-settings navigation surface or its empty busy loading skeleton may omit the identity without a mask failure; unknown/changed sidebar markup must still fail closed. Re-discover and repair it when it remounts; multiple matching identities or a present identity that cannot be masked still fail validation. Do not inspect or rewrite account details inside settings.
+- Settings-loading recognition follows sidebar ownership, not a fixed DOM depth: the official Windows shell wraps its busy navigation in layout containers. Preserve the empty-placeholder and identity checks; selector regressions must exercise actual HTML matching, not only mocked query results.
 - Incognito-window hover (hat-glasses → circle-x) is Runtime, not Rust UI code.
 - `open` uses the official binary plus an isolated Chromium/CODEX_HOME pair and localhost CDP injection. It must not patch ASAR, clone, or re-sign the app.
 - Do not add ratatui, cursive, crossterm, or an AGPL ASAR crate. The native menu is the existing numbered/arrow UI implemented directly with termios.

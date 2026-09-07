@@ -90,11 +90,22 @@ function readInstallState(statePath) {
   return JSON.parse(fs.readFileSync(statePath, "utf8"));
 }
 
+function comparableWindowsPath(value) {
+  const normalized = path.win32.normalize(value);
+  if (normalized.toLowerCase().startsWith("\\\\?\\unc\\")) {
+    return `\\\\${normalized.slice(8)}`.toLowerCase();
+  }
+  if (normalized.startsWith("\\\\?\\")) {
+    return normalized.slice(4).toLowerCase();
+  }
+  return normalized.toLowerCase();
+}
+
 function ownedInstallState(options, registrationId) {
   const env = options.env || process.env;
   const packageFullName = env[PACKAGE_NAME] || "";
   const statePath = env[STATE_PATH_NAME] || "";
-  const runtimeDir = options.runtimeDir || __dirname;
+  const runtimeRoot = options.runtimeDir || __dirname;
   if (
     !packageFullName ||
     packageFullName.includes("\0") ||
@@ -110,7 +121,7 @@ function ownedInstallState(options, registrationId) {
   } catch {
     return false;
   }
-  return Boolean(
+  const owned = Boolean(
     state &&
       typeof state === "object" &&
       !Array.isArray(state) &&
@@ -119,8 +130,22 @@ function ownedInstallState(options, registrationId) {
       ENABLED_PHASES.has(state.phase) &&
       state.registrationId === registrationId &&
       state.packageFullName === packageFullName &&
-      state.runtimeRelease === path.win32.basename(runtimeDir),
+      typeof state.runtimeRelease === "string" &&
+      /^[A-Za-z0-9.-]+$/.test(state.runtimeRelease) &&
+      state.runtimeRelease !== "." &&
+      state.runtimeRelease !== ".." &&
+      comparableWindowsPath(runtimeRoot) ===
+        comparableWindowsPath(path.win32.join(path.win32.dirname(statePath), "runtime")),
   );
+  return owned ? state : null;
+}
+
+function installedRuntimeDir(options, env) {
+  const registrationId = env[REGISTRATION_NAME] || "";
+  if (!REGISTRATION_PATTERN.test(registrationId)) return "";
+  const runtimeRoot = options.runtimeDir || __dirname;
+  const state = ownedInstallState(options, registrationId);
+  return state ? path.win32.join(runtimeRoot, "releases", state.runtimeRelease) : "";
 }
 
 function loadRuntimeWhenElectronIsReady(options, runtimeDir) {
@@ -129,7 +154,7 @@ function loadRuntimeWhenElectronIsReady(options, runtimeDir) {
     options.onElectronLoaded || ((callback) => process.once("loaded", callback));
   onElectronLoaded(() => {
     try {
-      load(path.join(runtimeDir, "incodex-main.cjs"));
+      load(path.win32.join(runtimeDir, "incodex-main.cjs"));
     } catch {
       console.error("[incodex] Windows Runtime attach failed");
     }
@@ -144,18 +169,18 @@ function attachWindowsRuntime(options = {}) {
   if (processType === "browser" && token && !env[BOOTSTRAPPED_NAME]) {
     const mode = claimActivationEnvironment(options, env, token);
     if (mode === "runtime") {
-      const runtimeDir = options.runtimeDir || __dirname;
+      const runtimeDir = installedRuntimeDir(options, env);
+      if (!runtimeDir) return false;
       loadRuntimeWhenElectronIsReady(options, runtimeDir);
     }
     return true;
   }
   const registrationId = env[REGISTRATION_NAME] || "";
-  const runtimeDir = options.runtimeDir || __dirname;
+  const runtimeDir = installedRuntimeDir(options, env);
   if (
     processType !== "browser" ||
-    !REGISTRATION_PATTERN.test(registrationId) ||
     env[BOOTSTRAPPED_NAME] ||
-    !ownedInstallState(options, registrationId)
+    !runtimeDir
   ) {
     return false;
   }
