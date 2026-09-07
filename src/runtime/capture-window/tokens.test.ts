@@ -74,7 +74,7 @@ describe("capture window visual tokens", () => {
     expect(css).toMatch(/\.incodex-capture-stage\s*\{[^}]*padding: 0/);
   });
 
-  test("packs circular background options without stretching the inspector", () => {
+  test("fills five columns with square background options and a safe selection gutter", () => {
     const css = readFileSync(backgroundPickerCssPath, "utf8");
 
     expect(css).toMatch(
@@ -83,15 +83,18 @@ describe("capture window visual tokens", () => {
     expect(css).toMatch(
       /\.incodex-capture-background-grid\s*\{[^}]*grid-template-columns: repeat\(5, minmax\(0, 1fr\)\)/,
     );
-    expect(css).toMatch(/\.incodex-capture-background-grid\s*\{[^}]*justify-items: center/);
+    expect(css).toMatch(/\.incodex-capture-background-grid\s*\{[^}]*justify-items: stretch/);
     expect(css).toMatch(/\.incodex-capture-background-grid\s*\{[^}]*width: 100%/);
     expect(css).toMatch(
       /\.incodex-capture-background-grid-plain\s*\{[^}]*grid-template-columns: repeat\(5, minmax\(0, 1fr\)\)/,
     );
-    expect(css).toMatch(
-      /\.incodex-capture-background-grid-plain \.incodex-capture-background-option\s*\{[^}]*height: calc\(var\(--incodex-capture-space\) \* 5\)/,
-    );
-    expect(css).toMatch(/\.incodex-capture-background-option\s*\{[\s\S]*?border-radius: var\(--radius-full/);
+    const option = css.match(/\.incodex-capture-background-option\s*\{([^}]*)\}/)?.[1];
+    expect(option).toContain("aspect-ratio: 1");
+    expect(option).toContain("width: 100%");
+    expect(option).toContain("height: auto");
+    expect(option).toContain("min-width: 0");
+    expect(css).not.toContain(".incodex-capture-background-grid-plain .incodex-capture-background-option");
+    expect(css).toMatch(/\.incodex-capture-background-option\s*\{[\s\S]*?border-radius: var\(--incodex-capture-radius-sm/);
     expect(css).toMatch(/\.incodex-capture-background-option\s*\{[\s\S]*?background-origin: border-box/);
     expect(css).toMatch(/\.incodex-capture-background-option\s*\{[\s\S]*?background-clip: border-box/);
     expect(css).toMatch(/\.incodex-capture-background-option\s*\{[\s\S]*?overflow: hidden/);
