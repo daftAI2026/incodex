@@ -1,12 +1,5 @@
+// 包更新事件与授权重验由本模块负责；生命周期调度由同一 helper 的适配层负责。
 use std::path::Path;
-/**
- * [INPUT]: 依赖 windows_app 的可信 Store 包发现、windows_install 的既有事务、
- *          windows_install_state 的 helper/epoch 授权，以及 Windows PackageCatalog 事件。
- * [OUTPUT]: 对外提供包更新事件分类、主进程识别，以及 debugger helper 内的同进程协调器。
- * [POS]: Windows install 的更新后恢复适配层；在包外 debugger 生命周期内协调新旧 generation，
- *        不复制安装器、不修改 Store 包、不改变共享 Runtime 或 macOS 生命周期。
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
- */
 use std::ptr;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
@@ -321,15 +314,6 @@ pub(crate) fn run_update_repair_coordinator(
         );
     }
     let owner_creation_time = process_creation_time(owner_process_id)?;
-    let Some(_coordinator_lock) = UpdateRepairLock::acquire(
-        &state.registration_id,
-        owner_process_id,
-        owner_creation_time,
-    )?
-    else {
-        return Ok(());
-    };
-
     let helper = std::env::current_exe()
         .map_err(|error| format!("cannot locate the Windows installed debugger: {error}"))?;
     let user_root = installed_debugger_user_root(&helper)?;
@@ -354,7 +338,19 @@ pub(crate) fn run_update_repair_coordinator(
         CODEX_PACKAGE_FAMILY_NAME,
         &current.package_full_name,
     )?;
-    let _ = ready.send(sender.clone());
+    // 锁的存在现在证明订阅已建立，而不只是 helper 曾进入初始化。
+    let Some(_coordinator_lock) = UpdateRepairLock::acquire(
+        &state.registration_id,
+        owner_process_id,
+        owner_creation_time,
+    )?
+    else {
+        return Ok(());
+    };
+    ready
+        .send(sender.clone())
+        .map_err(|_| "Windows update repair launch was cancelled".to_string())?;
+    drop(ready);
     wait_for_owner(owner_process_id, sender);
     let target = wait_for_update_target(
         &receiver,
@@ -506,6 +502,7 @@ fn wait_for_update_target(
             }
         }?;
         match event {
+            CoordinatorEvent::Cancelled => return Ok(None),
             CoordinatorEvent::OwnerExited => {
                 owner_exited = true;
                 owner_exit_deadline = Some(Instant::now() + UPDATE_START_GRACE);
@@ -530,6 +527,7 @@ fn wait_for_update_target(
 }
 
 pub(crate) enum CoordinatorEvent {
+    Cancelled,
     OwnerExited,
     OwnerUnavailable(String),
     Package(PackageUpdateObservation),

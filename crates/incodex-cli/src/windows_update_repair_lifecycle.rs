@@ -8,10 +8,44 @@ where
     R: FnOnce() -> Result<(), String>,
     C: FnOnce(Sender<Sender<CoordinatorEvent>>) -> Result<(), String> + Send,
 {
-    let (ready, _receiver) = mpsc::channel();
-    route()?;
-    let _ = coordinator(ready);
-    Ok(())
+    std::thread::scope(|scope| {
+        let (ready, receiver) = mpsc::channel();
+        // 协调器的 WinRT 初始化、订阅、等待和析构始终属于同一线程。
+        let worker = match std::thread::Builder::new()
+            .name("incodex-update-repair".to_string())
+            .spawn_scoped(scope, move || coordinator(ready))
+        {
+            Ok(worker) => worker,
+            Err(error) => {
+                eprintln!("Windows update repair unavailable: {error}");
+                return route();
+            }
+        };
+        // 订阅完成后才恢复官方进程；提前失败只禁用自动恢复，不阻止官方入口。
+        let mut cancellation = CancelCoordinator(receiver.recv().ok());
+        let result = route();
+        if result.is_ok() {
+            cancellation.0 = None;
+        }
+        drop(cancellation);
+        match worker.join() {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => eprintln!("Windows update repair stopped: {error}"),
+            Err(_) => eprintln!("Windows update repair coordinator panicked"),
+        }
+        result
+    })
+}
+
+// 启动失败或路由展开时取消订阅；正常退出保留同一 helper 等待更新重绑。
+struct CancelCoordinator(Option<Sender<CoordinatorEvent>>);
+
+impl Drop for CancelCoordinator {
+    fn drop(&mut self) {
+        if let Some(sender) = self.0.take() {
+            let _ = sender.send(CoordinatorEvent::Cancelled);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -89,18 +123,19 @@ mod tests {
     #[test]
     fn normal_bridge_exit_waits_for_update_work_instead_of_cancelling_it() {
         let finished = AtomicBool::new(false);
+        let worker_finished = &finished;
         let (closed, owner_exit) = mpsc::channel();
         let result = run_installed_route_with(
             || {
                 closed.send(()).unwrap();
                 Ok(())
             },
-            |ready| {
+            move |ready| {
                 let (sender, receiver) = mpsc::channel();
                 let _ = ready.send(sender);
                 owner_exit.recv_timeout(Duration::from_secs(2)).unwrap();
                 assert!(receiver.try_recv().is_err());
-                finished.store(true, Ordering::SeqCst);
+                worker_finished.store(true, Ordering::SeqCst);
                 Ok(())
             },
         );
