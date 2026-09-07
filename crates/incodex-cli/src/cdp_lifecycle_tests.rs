@@ -873,3 +873,75 @@ fn missing_profile_target_does_not_erase_a_confirmed_mask_failure() {
         "deferred target loss must not reset an already confirmed unhealthy mask poll"
     );
 }
+
+#[test]
+#[cfg(not(target_os = "windows"))]
+fn macos_ready_page_disappears_before_process_exit_without_mask_failure() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let alive = Arc::new(AtomicBool::new(true));
+    let server_alive = alive.clone();
+    let server = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_millis(1100);
+        while let Some(mut stream) = accept_until(&listener, deadline) {
+            write_json(&mut stream, &json!([]));
+        }
+        server_alive.store(false, Ordering::Release);
+    });
+    let mut failure = None;
+    let result = super::monitor_profile_mask_health(port, &alive, |error| {
+        failure = Some(error.to_string());
+    });
+    server.join().unwrap();
+    assert!(result.is_ok(), "normal close was misclassified: {failure:?}");
+    assert!(failure.is_none());
+}
+
+#[cfg(not(target_os = "windows"))]
+fn macos_mask_probe_sequence(values: Vec<Value>) -> Option<String> {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let alive = Arc::new(AtomicBool::new(true));
+    let server_alive = alive.clone();
+    let server = thread::spawn(move || {
+        for value in values {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            let Some(mut stream) = accept_until(&listener, deadline) else { break };
+            write_json(&mut stream, &json!([page(port, "main", "app://-/index.html")]));
+            let Some(stream) = accept_until(&listener, deadline) else { break };
+            let mut socket = tungstenite::accept(stream).unwrap();
+            let Message::Text(command) = socket.read().unwrap() else { panic!("expected probe") };
+            let command: Value = serde_json::from_str(&command).unwrap();
+            let response = if value.is_boolean() {
+                json!({"id": command["id"], "result": {"result": {"value": value}}})
+            } else {
+                json!({"id": command["id"], "error": {"message": "Target crashed"}})
+            };
+            socket.send(Message::Text(response.to_string().into())).unwrap();
+        }
+        thread::sleep(Duration::from_millis(100));
+        server_alive.store(false, Ordering::Release);
+    });
+    let mut failure = None;
+    let _ = super::monitor_profile_mask_health(port, &alive, |error| failure = Some(error.to_string()));
+    server.join().unwrap();
+    failure
+}
+
+#[test]
+#[cfg(not(target_os = "windows"))]
+fn macos_cancelled_close_keeps_monitoring_the_live_mask() {
+    assert!(macos_mask_probe_sequence(vec![json!(true), json!(false), json!(true), json!(true)]).is_none());
+    let failure = macos_mask_probe_sequence(vec![json!(true), json!(true), json!(false), json!(false)]).unwrap();
+    assert!(failure.contains("profile mask failed during runtime"), "{failure}");
+}
+
+#[test]
+#[cfg(not(target_os = "windows"))]
+fn macos_crashed_page_is_a_lifecycle_failure_not_a_mask_failure() {
+    let failure = macos_mask_probe_sequence(vec![Value::Null; 4]).unwrap();
+    assert!(failure.contains("page connection failed during runtime"), "{failure}");
+    assert!(!failure.contains("profile mask"));
+}
