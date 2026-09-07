@@ -911,36 +911,40 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
         } else {
             None
         };
-        match route {
-            WindowsDebuggerRoute::ResumeNormally => {
-                resume_debugged_package_process(&package_full_name, process_id, thread_id)
-            }
-            WindowsDebuggerRoute::PrepareInstalledCdp => {
-                let preparation = prepare_installed_cdp_or_terminate(
-                    || {
-                        let (user_root, runtime_release) = runtime.ok_or_else(|| {
-                            "Windows installed debugger Runtime state is unavailable".to_string()
-                        })?;
-                        let runtime_source =
-                            crate::windows_runtime::read_verified_windows_runtime_artifact(
-                                &user_root,
-                                &runtime_release,
-                                "incodex-inject.js",
-                            )?;
-                        let runtime_source = String::from_utf8(runtime_source).map_err(|_| {
-                            "installed Windows Runtime injector is not valid UTF-8".to_string()
-                        })?;
-                        let helper = std::env::current_exe().map_err(|error| {
-                            format!("cannot locate the installed Incodex helper: {error}")
-                        })?;
-                        let native_open_executable =
-                            crate::windows_update::native_open_executable_for_runtime(
-                                &user_root,
-                                &helper,
-                                &runtime_release,
-                            )?;
-                        let debug_port = crate::cdp::allocate_debug_port()?;
-                        validate_debugged_package_process(
+        let run_route = || {
+            match route {
+                WindowsDebuggerRoute::ResumeNormally => {
+                    resume_debugged_package_process(&package_full_name, process_id, thread_id)
+                }
+                WindowsDebuggerRoute::PrepareInstalledCdp => {
+                    let preparation = prepare_installed_cdp_or_terminate(
+                        || {
+                            let (user_root, runtime_release) = runtime.ok_or_else(|| {
+                                "Windows installed debugger Runtime state is unavailable"
+                                    .to_string()
+                            })?;
+                            let runtime_source =
+                                crate::windows_runtime::read_verified_windows_runtime_artifact(
+                                    &user_root,
+                                    &runtime_release,
+                                    "incodex-inject.js",
+                                )?;
+                            let runtime_source =
+                                String::from_utf8(runtime_source).map_err(|_| {
+                                    "installed Windows Runtime injector is not valid UTF-8"
+                                        .to_string()
+                                })?;
+                            let helper = std::env::current_exe().map_err(|error| {
+                                format!("cannot locate the installed Incodex helper: {error}")
+                            })?;
+                            let native_open_executable =
+                                crate::windows_update::native_open_executable_for_runtime(
+                                    &user_root,
+                                    &helper,
+                                    &runtime_release,
+                                )?;
+                            let debug_port = crate::cdp::allocate_debug_port()?;
+                            validate_debugged_package_process(
                             &package_full_name,
                             process_id,
                             thread_id,
@@ -955,59 +959,70 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
                                 "cannot prepare suspended Windows Codex process for CDP: {error}"
                             )
                         })?;
-                        Ok((debug_port, runtime_source, native_open_executable))
-                    },
-                    || {
-                        terminate_debugged_package_process(
+                            Ok((debug_port, runtime_source, native_open_executable))
+                        },
+                        || {
+                            terminate_debugged_package_process(
+                                &package_full_name,
+                                process_id,
+                                thread_id,
+                            )
+                        },
+                    );
+                    let (debug_port, runtime_source, native_open_executable) = match preparation {
+                        Ok(preparation) => preparation,
+                        Err(error) => return Err(error),
+                    };
+                    if let Err(error) =
+                        resume_debugged_package_process(&package_full_name, process_id, thread_id)
+                    {
+                        return terminate_failed_installed_cdp_process(
                             &package_full_name,
                             process_id,
                             thread_id,
-                        )
-                    },
-                );
-                let (debug_port, runtime_source, native_open_executable) = match preparation {
-                    Ok(preparation) => preparation,
-                    Err(error) => return Err(error),
-                };
-                if let Err(error) =
-                    resume_debugged_package_process(&package_full_name, process_id, thread_id)
-                {
-                    return terminate_failed_installed_cdp_process(
+                            format!("cannot resume prepared Windows Codex process: {error}"),
+                        );
+                    }
+                    match crate::windows_installed_cdp::inject_installed_shared_ui(
+                        debug_port,
                         &package_full_name,
                         process_id,
-                        thread_id,
-                        format!("cannot resume prepared Windows Codex process: {error}"),
-                    );
+                        &runtime_source,
+                        &native_open_executable,
+                    ) {
+                        Ok(()) => Ok(()),
+                        Err(error) => terminate_failed_installed_cdp_process(
+                            &package_full_name,
+                            process_id,
+                            thread_id,
+                            format!("installed Windows CDP bridge failed: {error}"),
+                        )
+                        .map_err(std::io::Error::other),
+                    }
                 }
-                match crate::windows_installed_cdp::inject_installed_shared_ui(
-                    debug_port,
+                WindowsDebuggerRoute::AssignToJob(job_name) => assign_debugged_process_to_job(
+                    &job_name,
                     &package_full_name,
                     process_id,
-                    &runtime_source,
-                    &native_open_executable,
-                ) {
-                    Ok(()) => Ok(()),
-                    Err(error) => terminate_failed_installed_cdp_process(
-                        &package_full_name,
-                        process_id,
-                        thread_id,
-                        format!("installed Windows CDP bridge failed: {error}"),
-                    )
-                    .map_err(std::io::Error::other),
+                    thread_id,
+                ),
+                WindowsDebuggerRoute::Reject => {
+                    terminate_debugged_package_process(&package_full_name, process_id, thread_id)
                 }
             }
-            WindowsDebuggerRoute::AssignToJob(job_name) => {
-                assign_debugged_process_to_job(&job_name, &package_full_name, process_id, thread_id)
-            }
-            WindowsDebuggerRoute::Reject => {
-                terminate_debugged_package_process(&package_full_name, process_id, thread_id)
-            }
+            .map_err(|error| format!("Windows installed debugger failed: {error}"))
+        };
+        match update_repair_state {
+            Some(state) => crate::windows_update_repair_lifecycle::run_installed_route_with(
+                run_route,
+                |ready| {
+                    crate::windows_update_repair::run_update_repair_coordinator(
+                        &state, process_id, ready,
+                    )
+                },
+            ),
+            None => run_route(),
         }
-        .map_err(|error| format!("Windows installed debugger failed: {error}"))?;
-        if let Some(state) = update_repair_state {
-            let _ = crate::windows_update_repair::run_update_repair_coordinator(&state, process_id);
-        }
-        Ok(())
     })();
     Some(parsed)
 }

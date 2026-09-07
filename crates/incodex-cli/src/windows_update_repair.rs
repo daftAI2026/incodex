@@ -302,6 +302,7 @@ where
 pub(crate) fn run_update_repair_coordinator(
     state: &WindowsInstallState,
     owner_process_id: u32,
+    ready: Sender<Sender<CoordinatorEvent>>,
 ) -> Result<(), String> {
     if owner_process_id == 0 || !state.desired_enabled() {
         return Err("Windows update repair owner is invalid".to_string());
@@ -353,6 +354,7 @@ pub(crate) fn run_update_repair_coordinator(
         CODEX_PACKAGE_FAMILY_NAME,
         &current.package_full_name,
     )?;
+    let _ = ready.send(sender.clone());
     wait_for_owner(owner_process_id, sender);
     let target = wait_for_update_target(
         &receiver,
@@ -527,7 +529,7 @@ fn wait_for_update_target(
     }
 }
 
-enum CoordinatorEvent {
+pub(crate) enum CoordinatorEvent {
     OwnerExited,
     OwnerUnavailable(String),
     Package(PackageUpdateObservation),
