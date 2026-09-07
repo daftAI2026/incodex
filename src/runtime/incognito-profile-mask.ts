@@ -93,12 +93,17 @@ function settingsSurfaceWithoutProfile(): boolean {
   // Full settings has a navigation search box and a return-to-app link.
   // These observed structural roles do not depend on translated labels.
   const navigations = [...document.querySelectorAll<HTMLElement>("nav.sidebar-navigation")];
-  if (navigations.length !== 1) return false;
-  const navigation = navigations[0];
-  if (
-    !navigation.querySelector('input[role="searchbox"]') ||
-    !navigation.querySelector('button.sidebar-item[role="link"]')
-  ) return false;
+  const ready = navigations.length === 1 &&
+    navigations[0].querySelector('input[role="searchbox"]') &&
+    navigations[0].querySelector('button.sidebar-item[role="link"]');
+  // The official lazy-loaded settings route first mounts an empty busy nav.
+  // Require its observed invisible placeholder, not merely a missing footer.
+  const loading = [...document.querySelectorAll<HTMLElement>(
+    '.app-shell-left-panel > nav[aria-busy="true"]',
+  )];
+  const emptySkeleton = loading.length === 1 &&
+    loading[0].querySelector(":scope > .invisible") && !loading[0].textContent?.trim();
+  if (!ready && !emptySkeleton) return false;
   // A surviving account-menu trigger may have drifted name/avatar markup.
   // Do not let that failed recognition masquerade as an absent identity.
   return ![...document.querySelectorAll<HTMLElement>(PROFILE_FOOTER_SELECTOR)].some(

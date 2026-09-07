@@ -1129,10 +1129,10 @@ function profileFooterCandidates() {
 }
 function settingsSurfaceWithoutProfile() {
   const navigations = [...document.querySelectorAll("nav.sidebar-navigation")];
-  if (navigations.length !== 1)
-    return false;
-  const navigation = navigations[0];
-  if (!navigation.querySelector('input[role="searchbox"]') || !navigation.querySelector('button.sidebar-item[role="link"]'))
+  const ready = navigations.length === 1 && navigations[0].querySelector('input[role="searchbox"]') && navigations[0].querySelector('button.sidebar-item[role="link"]');
+  const loading = [...document.querySelectorAll('.app-shell-left-panel > nav[aria-busy="true"]')];
+  const emptySkeleton = loading.length === 1 && loading[0].querySelector(":scope > .invisible") && !loading[0].textContent?.trim();
+  if (!ready && !emptySkeleton)
     return false;
   return ![...document.querySelectorAll(PROFILE_FOOTER_SELECTOR)].some((element) => element.getAttribute("aria-haspopup") === "menu" || element.getAttribute(PROFILE_MASK_ATTR) === "true");
 }
