@@ -71,3 +71,7 @@ wallpaper.ts: 用户壁纸输入与图像处理边界。
 主机实现位于 crates/incodex-cli/src/system_wallpapers.rs，CDP 白名单路由位于 cdp_system_wallpapers.rs；system_wallpaper_catalog.rs 仅保留当前图片的现成缩略图候选，不再排序历史系统版本。macos_desktop_wallpaper.rs 在实验 open 主线程调用 NSWorkspace（主屏、首屏回退），把本地路径快照交给后台资源库；主机验证该文件后以 system-wallpaper-current 提供，不扫描历史版本或任意父目录。此 open 启动后修改系统桌面不会自动刷新快照。
 
 ScreenKite 截图宿主取证确认的是当前桌面入口：后台 ImageIO 以长边 2600px 解码并编码 JPEG 0.85，再提供可选 ID。Shot 的 HEIC 适配采用该有界编辑图片语义，不声称保留原始 HEIC 像素。完整证据与历史目录缺口保存在私人文档 .internal-docs/shot/current-desktop-cross-platform-20260908.md；不要为凑五版本将 214×130 预览冒充完整原图。
+
+透明标题动作（渐变展开/收起、获取当前壁纸）默认使用 text-secondary，hover 使用普通 text。primary-text 是实心主按钮背景的反色前景，不可用于透明动作，否则浅色主题白字落在白底上。
+
+背景选择器图标继承控件文字色；未选中的自定义选色入口使用 surface-tertiary/text 成对语义，不把上次任意颜色与主按钮反色文字混配。选中自定义颜色时仍展示原色，既有隐藏图标语义不变。实心复制按钮与 toast 保留 primary/primary-text 成对语义。

@@ -5142,7 +5142,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 }
 
 .incodex-capture-background-expand:hover {
-  color: var(--incodex-capture-primary-text);
+  color: var(--incodex-capture-text);
 }
 
 .incodex-capture-background-grid {
@@ -5189,8 +5189,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 }
 
 .incodex-capture-background-option svg {
-  color: var(--incodex-capture-primary-text);
-  filter: drop-shadow(0 1px 2px color-mix(in srgb, var(--incodex-capture-primary) 40%, transparent));
+  color: inherit;
   height: var(--incodex-capture-icon-sm);
   inset: 50% auto auto 50%;
   position: absolute;
@@ -5199,6 +5198,11 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 }
 
 .incodex-capture-color-label,
+.incodex-capture-color-label[data-selected="false"] {
+  background: var(--incodex-capture-surface-tertiary);
+  color: var(--incodex-capture-text);
+}
+
 .incodex-capture-wallpaper-label {
   align-items: center;
   color: var(--incodex-capture-text-tertiary);
@@ -5272,6 +5276,12 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   opacity: 0.5;
 }
 
+/**
+ * [INPUT]: 依赖共享表面/文字 token 与颜色模型提供的色相；色谱中的黑白是颜色空间端点，不是主题文字。
+ * [OUTPUT]: 提供颜色浮层、色谱和输入控件样式。
+ * [POS]: capture-window 的选色视觉边界，与背景选择器共用表面语义。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 .incodex-capture-color-popover {
   background: var(--incodex-capture-surface);
   border: 1px solid var(--incodex-capture-border);

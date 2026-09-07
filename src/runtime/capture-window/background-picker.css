@@ -44,7 +44,7 @@
 }
 
 .incodex-capture-background-expand:hover {
-  color: var(--incodex-capture-primary-text);
+  color: var(--incodex-capture-text);
 }
 
 .incodex-capture-background-grid {
@@ -91,8 +91,7 @@
 }
 
 .incodex-capture-background-option svg {
-  color: var(--incodex-capture-primary-text);
-  filter: drop-shadow(0 1px 2px color-mix(in srgb, var(--incodex-capture-primary) 40%, transparent));
+  color: inherit;
   height: var(--incodex-capture-icon-sm);
   inset: 50% auto auto 50%;
   position: absolute;
@@ -101,6 +100,11 @@
 }
 
 .incodex-capture-color-label,
+.incodex-capture-color-label[data-selected="false"] {
+  background: var(--incodex-capture-surface-tertiary);
+  color: var(--incodex-capture-text);
+}
+
 .incodex-capture-wallpaper-label {
   align-items: center;
   color: var(--incodex-capture-text-tertiary);

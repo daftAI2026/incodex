@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖共享表面/文字 token 与颜色模型提供的色相；色谱中的黑白是颜色空间端点，不是主题文字。
+ * [OUTPUT]: 提供颜色浮层、色谱和输入控件样式。
+ * [POS]: capture-window 的选色视觉边界，与背景选择器共用表面语义。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 .incodex-capture-color-popover {
   background: var(--incodex-capture-surface);
   border: 1px solid var(--incodex-capture-border);
