@@ -1455,6 +1455,42 @@ function parseOfficialWindowZoom(value) {
 function officialWindowZoom(root) {
   return parseOfficialWindowZoom(window.getComputedStyle(root).getPropertyValue(OFFICIAL_WINDOW_ZOOM_PROPERTY));
 }
+function createOfficialTooltipPresentation() {
+  let sampledTrigger = null;
+  let sample = null;
+  return {
+    read(trigger) {
+      if (!trigger?.isConnected) {
+        sampledTrigger = null;
+        sample = null;
+        return null;
+      }
+      if (trigger !== sampledTrigger) {
+        sampledTrigger = trigger;
+        sample = null;
+      }
+      const tip = findOfficialTooltipElement(trigger);
+      if (tip) {
+        sample = {
+          className: tip.className,
+          shortcutClassName: tip.querySelector("kbd")?.className ?? ""
+        };
+      }
+      return sample;
+    }
+  };
+}
+function findOfficialTooltipElement(trigger) {
+  if (!trigger?.isConnected)
+    return null;
+  const ids = [trigger, trigger.parentElement].flatMap((element) => element?.getAttribute("aria-describedby")?.split(/\s+/) ?? []).filter(Boolean);
+  for (const id of ids) {
+    const tip = trigger.ownerDocument.getElementById(id);
+    if (tip?.isConnected && tip.getAttribute("role") === "tooltip" && !tip.hasAttribute("data-incodex-tooltip") && tip.className.trim())
+      return tip;
+  }
+  return null;
+}
 
 // src/runtime/_inject.src.ts
 var STYLE_ID = "incodex-privacy-style";
@@ -1483,6 +1519,7 @@ var STRIP_CLONE_ATTRS = [
   "tabindex"
 ];
 var activeTooltipLifecycle = null;
+var officialTooltipPresentation = createOfficialTooltipPresentation();
 var launchErrorPending = false;
 var windowsLaunchErrorHost = null;
 function dismissActiveTooltip() {
@@ -1567,6 +1604,7 @@ function apply() {
     btn.setAttribute("aria-pressed", incognito ? "true" : "false");
     btn.setAttribute("aria-label", labelFor(incognito));
     setButtonIcon(btn);
+    syncTooltipPresentation();
   }
   const label = document.querySelector("[data-incodex-tooltip-label]");
   if (label)
@@ -1742,7 +1780,7 @@ function buttonStillBesideSearch() {
 }
 function injectedTooltipCanShow(btn) {
   const search = findSearchButton();
-  return btn.isConnected && (btn.getAttribute("data-incodex-hovered") === "true" || document.activeElement === btn) && !(search && searchTooltipOpen(search));
+  return btn.isConnected && syncTooltipPresentation() && (btn.getAttribute("data-incodex-hovered") === "true" || document.activeElement === btn) && !(search && searchTooltipOpen(search));
 }
 function landingStillMounted() {
   const landing = document.querySelector(`[${LANDING_ATTR}]`);
@@ -1813,14 +1851,12 @@ function createTooltipElement() {
   const tip = document.createElement("div");
   tip.setAttribute(TIP_ATTR, "true");
   tip.setAttribute("role", "tooltip");
-  tip.className = "z-50 w-fit select-none text-sm whitespace-normal break-words rounded-lg border border-text bg-primary-solid text-primary-solid px-2 py-1.5";
   const text = document.createElement("div");
   text.className = "flex items-center gap-2";
   const label = document.createElement("div");
   label.className = "min-w-0";
   label.setAttribute("data-incodex-tooltip-label", "true");
   const kbd = document.createElement("kbd");
-  kbd.className = "inline-flex !rounded-md !border-0 !bg-current/10 !font-sans !text-xs !text-current !shadow-none !px-1.5 !py-0.5 !leading-none";
   kbd.textContent = shortcutLabel();
   text.append(label, kbd);
   tip.append(text);
@@ -1841,12 +1877,60 @@ function ensureTooltipMount() {
   }
   return tip;
 }
+var tooltipObservedSearch = null;
+var tooltipObservedElement = null;
+function observeOfficialTooltip(search) {
+  const element = findOfficialTooltipElement(search);
+  if (search === tooltipObservedSearch && element === tooltipObservedElement)
+    return;
+  tooltipObservedSearch = search;
+  tooltipObservedElement = element;
+  window.__incodexTooltipPresentationObserver?.disconnect();
+  const observer = new MutationObserver(() => syncTooltipPresentation());
+  window.__incodexTooltipPresentationObserver = observer;
+  if (search) {
+    observer.observe(search, { attributes: true, attributeFilter: ["aria-describedby"] });
+    if (search.parentElement) {
+      observer.observe(search.parentElement, { attributes: true, attributeFilter: ["aria-describedby"] });
+    }
+  }
+  if (element)
+    observer.observe(element, { attributes: true, subtree: true, attributeFilter: ["class"] });
+}
+function syncTooltipPresentation() {
+  const search = findSearchButton();
+  observeOfficialTooltip(search);
+  const sample = officialTooltipPresentation.read(search);
+  const btn = document.querySelector(`[${BTN_ATTR}]`);
+  if (btn) {
+    if (sample)
+      btn.removeAttribute("title");
+    else {
+      const title = `${labelFor(isIncognitoWindow())} (${shortcutLabel()})`;
+      if (btn.getAttribute("title") !== title)
+        btn.setAttribute("title", title);
+    }
+  }
+  const tip = document.querySelector(`[${TIP_ATTR}]`);
+  if (!sample) {
+    hideTooltip();
+    return false;
+  }
+  if (tip && tip.className !== sample.className)
+    tip.className = sample.className;
+  const kbd = tip?.querySelector("kbd");
+  if (kbd && kbd.className !== sample.shortcutClassName)
+    kbd.className = sample.shortcutClassName;
+  return true;
+}
 function tooltipEl() {
   return ensureTooltipMount();
 }
 var TOOLTIP_SIDE_OFFSET = 2;
 function showTooltip(btn) {
   const tip = tooltipEl();
+  if (!syncTooltipPresentation())
+    return;
   const host = tip.parentElement;
   if (!host)
     return;
@@ -2100,6 +2184,7 @@ function ensureButton() {
   }
   apply();
   ensureTooltipMount();
+  syncTooltipPresentation();
 }
 function onKeydown(event) {
   if (event.key === "Escape") {
@@ -2138,11 +2223,12 @@ function profileObservationRequired() {
 function createMutationObserver() {
   let scheduled = false;
   return new MutationObserver(function handleMutation() {
-    if (!needsInject() || scheduled)
+    if (scheduled)
       return;
     scheduled = true;
     requestAnimationFrame(function injectOnAnimationFrame() {
       scheduled = false;
+      syncTooltipPresentation();
       if (!needsInject())
         return;
       ensureButton();

@@ -9,7 +9,11 @@ import {
 import { createOfficialTooltipTimingBridge } from "./official-tooltip-provider.ts";
 import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement.ts";
 import { createTooltipLifecycle, type TooltipLifecycle } from "./tooltip-lifecycle.ts";
-import { officialWindowZoom } from "./tooltip-presentation.ts";
+import {
+  createOfficialTooltipPresentation,
+  findOfficialTooltipElement,
+  officialWindowZoom,
+} from "./tooltip-presentation.ts";
 
 const STYLE_ID = "incodex-privacy-style";
 const BTN_ATTR = "data-incodex-privacy-toggle";
@@ -53,6 +57,7 @@ const STRIP_CLONE_ATTRS = [
 ];
 
 let activeTooltipLifecycle: TooltipLifecycle | null = null;
+const officialTooltipPresentation = createOfficialTooltipPresentation();
 let launchErrorPending = false;
 let windowsLaunchErrorHost: HTMLElement | null = null;
 
@@ -136,6 +141,7 @@ function apply(): void {
     btn.setAttribute("aria-pressed", incognito ? "true" : "false");
     btn.setAttribute("aria-label", labelFor(incognito));
     setButtonIcon(btn);
+    syncTooltipPresentation();
   }
   const label = document.querySelector<HTMLElement>("[data-incodex-tooltip-label]");
   if (label) label.textContent = labelFor(incognito);
@@ -339,6 +345,7 @@ function injectedTooltipCanShow(btn: HTMLElement): boolean {
   const search = findSearchButton();
   return (
     btn.isConnected &&
+    syncTooltipPresentation() &&
     (btn.getAttribute("data-incodex-hovered") === "true" || document.activeElement === btn) &&
     !(search && searchTooltipOpen(search))
   );
@@ -422,16 +429,14 @@ function createTooltipElement(): HTMLElement {
   const tip = document.createElement("div");
   tip.setAttribute(TIP_ATTR, "true");
   tip.setAttribute("role", "tooltip");
-  tip.className =
-    "z-50 w-fit select-none text-sm whitespace-normal break-words rounded-lg border border-text bg-primary-solid text-primary-solid px-2 py-1.5";
+  // Presentation is supplied by the linked official Search tooltip. Until
+  // sampled, the button uses a native title instead of an invented palette.
   const text = document.createElement("div");
   text.className = "flex items-center gap-2";
   const label = document.createElement("div");
   label.className = "min-w-0";
   label.setAttribute("data-incodex-tooltip-label", "true");
   const kbd = document.createElement("kbd");
-  kbd.className =
-    "inline-flex !rounded-md !border-0 !bg-current/10 !font-sans !text-xs !text-current !shadow-none !px-1.5 !py-0.5 !leading-none";
   kbd.textContent = shortcutLabel();
   text.append(label, kbd);
   tip.append(text);
@@ -454,6 +459,49 @@ function ensureTooltipMount(): HTMLElement {
   return tip;
 }
 
+let tooltipObservedSearch: HTMLElement | null = null;
+let tooltipObservedElement: HTMLElement | null = null;
+
+function observeOfficialTooltip(search: HTMLElement | null): void {
+  const element = findOfficialTooltipElement(search);
+  if (search === tooltipObservedSearch && element === tooltipObservedElement) return;
+  tooltipObservedSearch = search;
+  tooltipObservedElement = element;
+  window.__incodexTooltipPresentationObserver?.disconnect();
+  const observer = new MutationObserver(() => syncTooltipPresentation());
+  window.__incodexTooltipPresentationObserver = observer;
+  if (search) {
+    observer.observe(search, { attributes: true, attributeFilter: ["aria-describedby"] });
+    if (search.parentElement) {
+      observer.observe(search.parentElement, { attributes: true, attributeFilter: ["aria-describedby"] });
+    }
+  }
+  if (element) observer.observe(element, { attributes: true, subtree: true, attributeFilter: ["class"] });
+}
+
+function syncTooltipPresentation(): boolean {
+  const search = findSearchButton();
+  observeOfficialTooltip(search);
+  const sample = officialTooltipPresentation.read(search);
+  const btn = document.querySelector<HTMLElement>(`[${BTN_ATTR}]`);
+  if (btn) {
+    if (sample) btn.removeAttribute("title");
+    else {
+      const title = `${labelFor(isIncognitoWindow())} (${shortcutLabel()})`;
+      if (btn.getAttribute("title") !== title) btn.setAttribute("title", title);
+    }
+  }
+  const tip = document.querySelector<HTMLElement>(`[${TIP_ATTR}]`);
+  if (!sample) {
+    hideTooltip();
+    return false;
+  }
+  if (tip && tip.className !== sample.className) tip.className = sample.className;
+  const kbd = tip?.querySelector("kbd");
+  if (kbd && kbd.className !== sample.shortcutClassName) kbd.className = sample.shortcutClassName;
+  return true;
+}
+
 function tooltipEl(): HTMLElement {
   return ensureTooltipMount();
 }
@@ -464,6 +512,7 @@ const TOOLTIP_SIDE_OFFSET = 2;
 
 function showTooltip(btn: HTMLElement): void {
   const tip = tooltipEl();
+  if (!syncTooltipPresentation()) return;
   const host = tip.parentElement;
   if (!host) return;
   const label = tip.querySelector<HTMLElement>("[data-incodex-tooltip-label]");
@@ -765,6 +814,7 @@ function ensureButton(): void {
   }
   apply();
   ensureTooltipMount();
+  syncTooltipPresentation();
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -810,10 +860,11 @@ function profileObservationRequired(): boolean {
 function createMutationObserver(): MutationObserver {
   let scheduled = false;
   return new MutationObserver(function handleMutation(): void {
-    if (!needsInject() || scheduled) return;
+    if (scheduled) return;
     scheduled = true;
     requestAnimationFrame(function injectOnAnimationFrame(): void {
       scheduled = false;
+      syncTooltipPresentation();
       if (!needsInject()) return;
       ensureButton();
       ensureLanding();
@@ -872,6 +923,7 @@ declare global {
     __incodexLocale?: string;
     __incodexPlatform?: string;
     __incodexMutationObserver?: MutationObserver;
+    __incodexTooltipPresentationObserver?: MutationObserver;
     __incodexProfileObservationEnabled?: boolean;
     __incodexProfileMaskHealth?: boolean;
     __incodexRefreshProfileMaskHealth?: () => boolean;
