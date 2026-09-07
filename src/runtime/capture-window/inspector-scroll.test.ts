@@ -32,3 +32,10 @@ test("keeps the background title outside the keyboard-scrollable viewport", () =
   expect(css).toContain('data-at-end="true"');
   expect(css).toContain("mask-image: linear-gradient");
 });
+
+
+test("includes the scroll viewport in the editor keyboard focus loop", () => {
+  const editor = readFileSync(new URL("./editor.ts", import.meta.url), "utf8");
+  const trap = editor.slice(editor.indexOf("function trapTabFocus"), editor.indexOf("function updateHistoryControls"));
+  expect(trap).toContain("[tabindex='0']");
+});
