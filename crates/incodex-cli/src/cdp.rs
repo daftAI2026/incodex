@@ -955,14 +955,7 @@ where
 }
 
 fn profile_mask_health_expression() -> &'static str {
-    #[cfg(target_os = "windows")]
-    {
-        "window.__incodexRefreshProfileMaskHealth?.() === true"
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        "window.__incodexProfileMaskHealth === true"
-    }
+    "window.__incodexRefreshProfileMaskHealth?.() === true"
 }
 
 fn monitor_primary_target<F>(
