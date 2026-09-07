@@ -1019,3 +1019,17 @@ fn macos_recovered_healthy_page_outlives_the_old_exit_deadline() {
     probes.extend(vec![json!(true); 28]);
     assert!(macos_mask_probe_sequence(probes).is_none());
 }
+
+#[test]
+#[cfg(not(target_os = "windows"))]
+fn macos_target_handoff_breaks_the_unhealthy_mask_streak() {
+    let probes = vec![
+        json!(false),
+        json!("missing"),
+        json!("missing"),
+        json!(false),
+        json!(true),
+        json!(true),
+    ];
+    assert!(macos_mask_probe_sequence(probes).is_none());
+}
