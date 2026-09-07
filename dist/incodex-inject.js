@@ -4017,7 +4017,7 @@ var TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
 var CAPTURE_TRIGGER_ATTR = "data-incodex-capture-trigger";
 var CAPTURE_WINDOW_STYLE = `/**
  * [INPUT]: 依赖 view.ts 输出的 capture-window DOM、Codex 主题 token 与四像素间距基线
- * [OUTPUT]: 对外提供截图模态框、背景语义分层、工具栏、画布、检查器与隐私捕获态样式；外壳底色只绘制一次，整体几何共用布局倍率
+ * [OUTPUT]: 对外提供截图模态框、背景语义分层、工具栏、画布、检查器与隐私捕获态样式；外壳底色只绘制一次，仅窗口尺寸放大，控件密度不变
  * [POS]: capture-window 的视觉契约，和 color-popover.css 分工维护主编辑器与浮层样式
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -4027,9 +4027,12 @@ var CAPTURE_WINDOW_STYLE = `/**
 
 [data-incodex-capture],
 [data-incodex-capture-preview] {
-  --incodex-capture-editor-scale: 1.2;
-  --incodex-capture-stage-height: calc(50vh * var(--incodex-capture-editor-scale));
-  --incodex-capture-space: calc(var(--spacing, 4px) * var(--incodex-capture-editor-scale));
+  --incodex-capture-window-scale: 1.2;
+  /* 原布局非画布高度：header 14 格 + footer 14 格 + 工具栏及留白 13 格。
+     控件不缩放，窗口新增的高度全部让给画布。 */
+  --incodex-capture-chrome-height: calc(var(--incodex-capture-space) * (14 + 14 + 13));
+  --incodex-capture-stage-height: calc((50vh + var(--incodex-capture-chrome-height)) * var(--incodex-capture-window-scale) - var(--incodex-capture-chrome-height));
+  --incodex-capture-space: var(--spacing, 4px);
   --incodex-capture-surface: var(--color-surface-elevated-secondary, var(--color-surface, #ffffff));
   --incodex-capture-surface-secondary: var(--color-surface-secondary, #f6f6f6);
   --incodex-capture-surface-tertiary: var(--color-surface-tertiary, #ededed);
@@ -4046,9 +4049,9 @@ var CAPTURE_WINDOW_STYLE = `/**
   --incodex-capture-primary-text: var(--color-text-primary-solid, #ffffff);
   --incodex-capture-ring: var(--color-ring, #0285ff);
   --incodex-capture-danger: var(--color-text-danger, #d14343);
-  --incodex-capture-font-base: calc(var(--text-base, 14px) * var(--incodex-capture-editor-scale));
-  --incodex-capture-font-sm: calc(var(--text-sm, 13px) * var(--incodex-capture-editor-scale));
-  --incodex-capture-font-xs: calc(var(--text-xs, 12px) * var(--incodex-capture-editor-scale));
+  --incodex-capture-font-base: var(--text-base, 14px);
+  --incodex-capture-font-sm: var(--text-sm, 13px);
+  --incodex-capture-font-xs: var(--text-xs, 12px);
   --incodex-capture-icon-sm: calc(var(--incodex-capture-space) * 3.5);
   --incodex-capture-icon-base: calc(var(--incodex-capture-space) * 4);
   --incodex-capture-radius-sm: var(--radius-sm, 6px);
@@ -4186,7 +4189,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   max-width: calc(100vw - var(--incodex-capture-space) * 8);
   overflow: hidden;
   position: relative;
-  width: calc(clamp(56rem, 60vw, 64rem) * var(--incodex-capture-editor-scale));
+  width: calc(clamp(56rem, 60vw, 64rem) * var(--incodex-capture-window-scale));
   container-type: inline-size;
 }
 
