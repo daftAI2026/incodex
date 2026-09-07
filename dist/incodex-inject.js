@@ -4017,7 +4017,7 @@ var TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
 var CAPTURE_TRIGGER_ATTR = "data-incodex-capture-trigger";
 var CAPTURE_WINDOW_STYLE = `/**
  * [INPUT]: 依赖 view.ts 输出的 capture-window DOM、Codex 主题 token 与四像素间距基线
- * [OUTPUT]: 对外提供截图模态框、背景语义分层、工具栏、画布、检查器与隐私捕获态样式；外壳底色只绘制一次
+ * [OUTPUT]: 对外提供截图模态框、背景语义分层、工具栏、画布、检查器与隐私捕获态样式；外壳底色只绘制一次，整体几何共用布局倍率
  * [POS]: capture-window 的视觉契约，和 color-popover.css 分工维护主编辑器与浮层样式
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -4027,7 +4027,9 @@ var CAPTURE_WINDOW_STYLE = `/**
 
 [data-incodex-capture],
 [data-incodex-capture-preview] {
-  --incodex-capture-space: var(--spacing, 4px);
+  --incodex-capture-editor-scale: 1.08;
+  --incodex-capture-stage-height: calc(50vh * var(--incodex-capture-editor-scale));
+  --incodex-capture-space: calc(var(--spacing, 4px) * var(--incodex-capture-editor-scale));
   --incodex-capture-surface: var(--color-surface-elevated-secondary, var(--color-surface, #ffffff));
   --incodex-capture-surface-secondary: var(--color-surface-secondary, #f6f6f6);
   --incodex-capture-surface-tertiary: var(--color-surface-tertiary, #ededed);
@@ -4044,9 +4046,9 @@ var CAPTURE_WINDOW_STYLE = `/**
   --incodex-capture-primary-text: var(--color-text-primary-solid, #ffffff);
   --incodex-capture-ring: var(--color-ring, #0285ff);
   --incodex-capture-danger: var(--color-text-danger, #d14343);
-  --incodex-capture-font-base: var(--text-base, 14px);
-  --incodex-capture-font-sm: var(--text-sm, 13px);
-  --incodex-capture-font-xs: var(--text-xs, 12px);
+  --incodex-capture-font-base: calc(var(--text-base, 14px) * var(--incodex-capture-editor-scale));
+  --incodex-capture-font-sm: calc(var(--text-sm, 13px) * var(--incodex-capture-editor-scale));
+  --incodex-capture-font-xs: calc(var(--text-xs, 12px) * var(--incodex-capture-editor-scale));
   --incodex-capture-icon-sm: calc(var(--incodex-capture-space) * 3.5);
   --incodex-capture-icon-base: calc(var(--incodex-capture-space) * 4);
   --incodex-capture-radius-sm: var(--radius-sm, 6px);
@@ -4184,7 +4186,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   max-width: calc(100vw - var(--incodex-capture-space) * 8);
   overflow: hidden;
   position: relative;
-  width: clamp(56rem, 60vw, 64rem);
+  width: calc(clamp(56rem, 60vw, 64rem) * var(--incodex-capture-editor-scale));
   container-type: inline-size;
 }
 
@@ -4231,7 +4233,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 .incodex-capture-preview-pane {
   display: grid;
   gap: calc(var(--incodex-capture-space) * 2);
-  grid-template-rows: calc(var(--incodex-capture-space) * 7) 50vh;
+  grid-template-rows: calc(var(--incodex-capture-space) * 7) var(--incodex-capture-stage-height);
   min-width: 0;
   overflow: hidden;
 }
@@ -4357,7 +4359,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   cursor: grab;
   display: flex;
   justify-content: center;
-  height: 50vh;
+  height: var(--incodex-capture-stage-height);
   overflow: hidden;
   padding: 0;
   position: relative;
