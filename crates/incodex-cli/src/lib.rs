@@ -1,8 +1,13 @@
+//! [INPUT]: 各 native CLI 产品模块及平台 adapter。
+//! [OUTPUT]: 导出 CLI 产品入口并注册私有实现模块。
+//! [POS]: incodex-cli 的模块边界；Shot 系统资源仅通过 cdp adapter 访问。
+//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 #[cfg(not(target_os = "windows"))]
 pub mod app_bundle;
 #[cfg(not(target_os = "windows"))]
 pub(crate) mod app_quiescence;
 pub mod cdp;
+pub(crate) mod system_wallpapers;
 pub mod confirm;
 #[cfg(not(target_os = "windows"))]
 pub mod diagnose;
