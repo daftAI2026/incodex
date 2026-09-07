@@ -8,6 +8,7 @@ pub mod app_bundle;
 pub(crate) mod app_quiescence;
 pub mod cdp;
 pub(crate) mod system_wallpapers;
+pub(crate) mod system_wallpaper_catalog;
 pub mod confirm;
 #[cfg(not(target_os = "windows"))]
 pub mod diagnose;
