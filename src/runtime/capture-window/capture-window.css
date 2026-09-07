@@ -493,8 +493,8 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 
 /* 只借用 alpha 遮罩算法；currentColor 仅提供不透明度，不在内容上绘制颜色。 */
 .incodex-capture-inspector-scroll[data-overflowing="true"] {
-  --capture-fade-top: calc(var(--incodex-capture-space) * 2);
-  --capture-fade-bottom: calc(var(--incodex-capture-space) * 2);
+  --capture-fade-top: calc(var(--incodex-capture-space) * 3);
+  --capture-fade-bottom: calc(var(--incodex-capture-space) * 3);
   mask-image: linear-gradient(to bottom, transparent, currentColor var(--capture-fade-top), currentColor calc(100% - var(--capture-fade-bottom)), transparent);
   mask-mode: alpha;
   mask-repeat: no-repeat;
