@@ -1130,7 +1130,7 @@ function profileFooterCandidates() {
 function settingsSurfaceWithoutProfile() {
   const navigations = [...document.querySelectorAll("nav.sidebar-navigation")];
   const ready = navigations.length === 1 && navigations[0].querySelector('input[role="searchbox"]') && navigations[0].querySelector('button.sidebar-item[role="link"]');
-  const loading = [...document.querySelectorAll('.app-shell-left-panel > nav[aria-busy="true"]')];
+  const loading = [...document.querySelectorAll('.app-shell-left-panel nav[aria-busy="true"]')];
   const emptySkeleton = loading.length === 1 && loading[0].childNodes.length === 1 && loading[0].firstElementChild?.classList.contains("invisible");
   if (!(ready && loading.length === 0) && !(emptySkeleton && navigations.length === 0)) {
     return false;
