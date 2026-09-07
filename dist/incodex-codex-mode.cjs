@@ -205,6 +205,7 @@ function createCodexModeReadiness(options) {
             if (pageState === "blocked") {
                 if (!state.fallbackAttempted)
                     state.primaryOtherChecks = 0;
+                state.confirmationFailures = 0;
                 pauseForOfficialBlocker(state, currentTime);
                 return;
             }

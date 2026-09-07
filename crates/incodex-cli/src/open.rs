@@ -536,7 +536,6 @@ fn start_injection_worker(
         let mut lifecycle_started = false;
         let mut mode_readiness = CodexModeReadiness::default();
         let mut blocker_status_sent = false;
-        let mut failed_attempts = 0u8;
         loop {
             if !process_alive.load(Ordering::Acquire) {
                 return;
@@ -590,15 +589,6 @@ fn start_injection_worker(
                             &status_tx,
                             &readiness,
                             InjectionStatus::ModeUnresolved(error),
-                        );
-                        return;
-                    }
-                    failed_attempts = failed_attempts.saturating_add(1);
-                    if failed_attempts >= 40 {
-                        publish_injection_status(
-                            &status_tx,
-                            &readiness,
-                            InjectionStatus::Failed(format!("UI injection failed: {error}")),
                         );
                         return;
                     }

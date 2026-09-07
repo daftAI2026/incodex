@@ -480,7 +480,8 @@ where
             "Page.addScriptToEvaluateOnNewDocument",
             json!({ "source": payload.source }),
             connection_guard,
-        )?;
+        )
+        .map_err(|error| record_injection_probe_failure_if_needed(payload, readiness, error))?;
         registered_script_targets.insert(page.id.clone());
     }
     ensure_injection_active(process_alive)?;
@@ -490,7 +491,8 @@ where
         "Runtime.evaluate",
         json!({ "expression": payload.source, "returnByValue": true }),
         connection_guard,
-    )?;
+    )
+    .map_err(|error| record_injection_probe_failure_if_needed(payload, readiness, error))?;
     ensure_injection_active(process_alive)?;
     let health = send_guarded_cdp(
         &mut socket,
@@ -498,8 +500,10 @@ where
         "Runtime.evaluate",
         json!({ "expression": payload.health_expression, "returnByValue": true }),
         connection_guard,
-    )?;
-    validate_ui_probe_result_for_options(&health, payload.require_profile_mask)?;
+    )
+    .map_err(|error| record_injection_probe_failure_if_needed(payload, readiness, error))?;
+    validate_ui_probe_result_for_options(&health, payload.require_profile_mask)
+        .map_err(|error| record_injection_probe_failure_if_needed(payload, readiness, error))?;
     let target_id = page.id.clone();
     let _ = socket.close(None);
     Ok(target_id)

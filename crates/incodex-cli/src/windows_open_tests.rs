@@ -118,7 +118,7 @@ fn successful_contained_process_exit_removes_the_session() {
     let outcome = execute_windows_open_with(
         plan,
         launch_fixture,
-        |_port, _options, alive, _close_requested, _cdp_failed, _ownership_guard| {
+        |_port, _options, alive, _close_requested, _cdp_failed, _ownership_guard, _progress| {
             assert!(alive.load(Ordering::Acquire));
             Ok(Vec::new())
         },
@@ -144,7 +144,7 @@ fn launch_failure_after_activation_retains_the_session_when_shutdown_is_unproven
                 Err("fixture process shutdown is unproven".to_string()),
             ))
         },
-        |_port, _options, _alive, _close_requested, _cdp_failed, _ownership_guard| {
+        |_port, _options, _alive, _close_requested, _cdp_failed, _ownership_guard, _progress| {
             panic!("injection must not run after launch failure")
         },
     );
@@ -176,7 +176,7 @@ fn closing_the_primary_window_terminates_background_electron_as_success() {
     let outcome = execute_windows_open_with(
         plan,
         launch_fixture,
-        move |_port, _options, alive, close_requested, cdp_failed, _ownership_guard| {
+        move |_port, _options, alive, close_requested, cdp_failed, _ownership_guard, _progress| {
             close_requested.store(true, Ordering::Release);
             cdp_failed.store(true, Ordering::Release);
             Ok(vec![thread::spawn(move || {
@@ -211,7 +211,7 @@ fn closing_before_injection_finishes_still_removes_the_session() {
     let outcome = execute_windows_open_with_visibility(
         plan,
         launch_fixture,
-        |_port, _options, _alive, _close_requested, _cdp_failed, _ownership_guard| {
+        |_port, _options, _alive, _close_requested, _cdp_failed, _ownership_guard, _progress| {
             thread::sleep(Duration::from_millis(1000));
             Ok(Vec::new())
         },
@@ -243,7 +243,8 @@ fn injection_failure_terminates_the_job_before_removing_the_session() {
          _alive: Arc<AtomicBool>,
          _close_requested,
          _cdp_failed,
-         _ownership_guard| { Err("fixture injection refused".to_string()) },
+         _ownership_guard,
+         _progress| { Err("fixture injection refused".to_string()) },
     );
 
     assert!(matches!(
@@ -265,7 +266,7 @@ fn persistent_cdp_loss_is_not_reported_as_a_normal_close() {
     let outcome = execute_windows_open_with(
         plan,
         launch_fixture,
-        |_port, _options, _alive, _close_requested, cdp_failed, _ownership_guard| {
+        |_port, _options, _alive, _close_requested, cdp_failed, _ownership_guard, _progress| {
             cdp_failed.store(true, Ordering::Release);
             Ok(Vec::new())
         },
@@ -293,7 +294,13 @@ fn unrelated_debug_listener_is_rejected_before_injection() {
     let outcome = execute_windows_open_with(
         plan,
         launch_fixture,
-        move |_port, _options, _alive, _close_requested, _cdp_failed, _ownership_guard| {
+        move |_port,
+              _options,
+              _alive,
+              _close_requested,
+              _cdp_failed,
+              _ownership_guard,
+              _progress| {
             injection_probe.store(true, Ordering::Release);
             Ok(Vec::new())
         },
@@ -322,7 +329,13 @@ fn listener_replacement_after_initial_proof_is_rejected() {
     let outcome = execute_windows_open_with(
         plan,
         launch_fixture,
-        move |_port, _options, alive, _close_requested, _cdp_failed, _ownership_guard| {
+        move |_port,
+              _options,
+              alive,
+              _close_requested,
+              _cdp_failed,
+              _ownership_guard,
+              _progress| {
             let deadline = Instant::now() + Duration::from_secs(2);
             let listener = loop {
                 match TcpListener::bind((Ipv4Addr::LOCALHOST, port)) {
@@ -369,7 +382,9 @@ fn listener_shutdown_immediately_before_process_exit_is_normal() {
     let outcome = execute_windows_open_with(
         plan,
         launch_fixture,
-        |_port, _options, _alive, _close_requested, _cdp_failed, _ownership_guard| Ok(Vec::new()),
+        |_port, _options, _alive, _close_requested, _cdp_failed, _ownership_guard, _progress| {
+            Ok(Vec::new())
+        },
     );
 
     assert_eq!(outcome.process, WindowsOpenProcessResult::Exited(0));

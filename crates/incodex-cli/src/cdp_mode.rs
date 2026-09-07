@@ -122,6 +122,7 @@ impl Readiness {
         }
         self.probe_failures = 0;
         if page_state == PageState::Codex {
+            self.resume_active_clock(now);
             return Action::Confirmed;
         }
         if page_state == PageState::BlockedByOfficialUi {
