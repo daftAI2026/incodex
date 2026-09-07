@@ -141,8 +141,8 @@ struct SpawnOutcome {
     cleanup: CleanupDisposition,
 }
 
-fn terminal_injection_status(error: String) -> InjectionStatus {
-    if crate::cdp::is_terminal_ui_injection_error(&error) {
+fn terminal_injection_status(error: String, require_profile_mask: bool) -> InjectionStatus {
+    if require_profile_mask || crate::cdp::is_terminal_ui_injection_error(&error) {
         InjectionStatus::Failed(error)
     } else {
         InjectionStatus::ModeUnresolved(error)
@@ -596,7 +596,7 @@ fn start_injection_worker(
                         publish_injection_status(
                             &status_tx,
                             &readiness,
-                            terminal_injection_status(error),
+                            terminal_injection_status(error, options.profile_mask.is_some()),
                         );
                         return;
                     }

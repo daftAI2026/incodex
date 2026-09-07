@@ -453,8 +453,9 @@ where
     G: Fn(&TcpStream) -> Result<(), String>,
 {
     ensure_injection_active(process_alive)?;
-    let targets = list_targets(debug_port)
-        .map_err(|error| record_injection_probe_failure_if_needed(payload, readiness, error))?;
+    let targets = list_targets(debug_port).map_err(|error| {
+        record_target_discovery_failure(payload.require_codex_mode, readiness, error)
+    })?;
     ensure_injection_active(process_alive)?;
     let page = match pick_codex_page_target(&targets) {
         Some(page) => page,
@@ -564,6 +565,24 @@ where
         }
         CodexModeAction::Unresolved => Err(CODEX_MODE_UNAVAILABLE_ERROR.into()),
     }
+}
+
+fn record_target_discovery_failure(
+    require_codex_mode: bool,
+    readiness: &mut CodexModeReadiness,
+    error: String,
+) -> String {
+    if !require_codex_mode {
+        return error;
+    }
+    if error.contains("Connection refused")
+        || error.contains("os error 61")
+        || error.contains("os error 111")
+        || error.contains("os error 10061")
+    {
+        return codex_mode_action_error(readiness.observe(CodexModePageState::NotReady));
+    }
+    record_codex_mode_probe_failure(readiness, error)
 }
 
 fn record_injection_probe_failure_if_needed(
