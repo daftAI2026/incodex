@@ -4,12 +4,13 @@
  * [POS]: system_wallpapers 的独立契约测试；不触碰真实系统壁纸目录，也不写系统路径
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::{SystemWallpaperLibrary, MAX_SOURCE_BYTES};
+use super::{
+    build_thumbnail, ImageFormat, SystemWallpaperLibrary, WallpaperCandidate, MAX_SOURCE_BYTES,
+};
 
 static NEXT_TEMP_DIR: AtomicU64 = AtomicU64::new(0);
 
@@ -41,10 +42,9 @@ impl Drop for TempDir {
 
 fn tiny_png() -> &'static [u8] {
     &[
-        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0,
-        0, 1, 8, 6, 0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 156,
-        99, 248, 207, 192, 240, 31, 0, 5, 0, 1, 255, 137, 153, 61, 29, 0, 0, 0, 0, 73,
-        69, 78, 68, 174, 66, 96, 130,
+        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6,
+        0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 248, 207, 192, 240,
+        31, 0, 5, 0, 1, 255, 137, 153, 61, 29, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
     ]
 }
 
@@ -69,7 +69,10 @@ fn recursive_scan_excludes_thumbnails_and_madesktop_descriptors() {
 
     assert_eq!(entries.len(), 2);
     assert_eq!(
-        entries.iter().map(|entry| entry.name.as_str()).collect::<Vec<_>>(),
+        entries
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect::<Vec<_>>(),
         ["Forest", "Sunrise"]
     );
     assert!(entries.iter().all(|entry| {
@@ -101,8 +104,11 @@ fn scanner_rejects_symlinked_files_outside_the_allowed_root() {
     let outside = TempDir::new();
     write_png(&fixture.path().join("inside.png"));
     write_png(&outside.path().join("outside.png"));
-    std::os::unix::fs::symlink(outside.path().join("outside.png"), fixture.path().join("escape.png"))
-        .expect("create symlink fixture");
+    std::os::unix::fs::symlink(
+        outside.path().join("outside.png"),
+        fixture.path().join("escape.png"),
+    )
+    .expect("create symlink fixture");
 
     let mut library = SystemWallpaperLibrary::from_roots(vec![fixture.path().to_path_buf()]);
     let entries = library.list().expect("fixture scan");
@@ -125,4 +131,50 @@ fn oversized_files_are_skipped_before_thumbnail_or_original_reads() {
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].name, "small");
     assert!(library.load("system-wallpaper-1").is_err());
+}
+
+#[test]
+fn thumbnail_builder_rechecks_the_canonical_path_before_reading() {
+    let fixture = TempDir::new();
+    let outside = TempDir::new();
+    let link = fixture.path().join("wallpaper.png");
+    let outside_image = outside.path().join("outside.png");
+    write_png(&outside_image);
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&outside_image, &link).expect("create replaced path fixture");
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file(&outside_image, &link)
+        .expect("create replaced path fixture");
+
+    let root = fs::canonicalize(fixture.path()).unwrap();
+    let candidate = WallpaperCandidate {
+        path: link,
+        root,
+        format: ImageFormat::Png,
+        size: fs::metadata(&outside_image).unwrap().len(),
+    };
+    let mut temporary = None;
+    let result = build_thumbnail(
+        &candidate,
+        &mut temporary,
+        std::time::Instant::now() + std::time::Duration::from_secs(1),
+    );
+
+    assert!(matches!(result, Ok(None) | Err(_)));
+}
+
+#[test]
+fn recursive_scan_has_a_bounded_depth() {
+    let fixture = TempDir::new();
+    let mut deep = fixture.path().to_path_buf();
+    for depth in 0..20 {
+        deep = deep.join(format!("level-{depth}"));
+        fs::create_dir_all(&deep).unwrap();
+    }
+    write_png(&deep.join("too-deep.png"));
+
+    let mut library = SystemWallpaperLibrary::from_roots(vec![fixture.path().to_path_buf()]);
+    let entries = library.list().expect("fixture scan");
+
+    assert!(entries.iter().all(|entry| entry.name != "too-deep"));
 }
