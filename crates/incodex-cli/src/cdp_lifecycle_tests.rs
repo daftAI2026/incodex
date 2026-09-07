@@ -894,7 +894,10 @@ fn macos_ready_page_disappears_before_process_exit_without_mask_failure() {
         failure = Some(error.to_string());
     });
     server.join().unwrap();
-    assert!(result.is_ok(), "normal close was misclassified: {failure:?}");
+    assert!(
+        result.is_ok(),
+        "normal close was misclassified: {failure:?}"
+    );
     assert!(failure.is_none());
 }
 
@@ -908,24 +911,36 @@ fn macos_mask_probe_sequence(values: Vec<Value>) -> Option<String> {
     let server = thread::spawn(move || {
         for value in values {
             let deadline = Instant::now() + Duration::from_secs(3);
-            let Some(mut stream) = accept_until(&listener, deadline) else { break };
-            write_json(&mut stream, &json!([page(port, "main", "app://-/index.html")]));
-            let Some(stream) = accept_until(&listener, deadline) else { break };
+            let Some(mut stream) = accept_until(&listener, deadline) else {
+                break;
+            };
+            write_json(
+                &mut stream,
+                &json!([page(port, "main", "app://-/index.html")]),
+            );
+            let Some(stream) = accept_until(&listener, deadline) else {
+                break;
+            };
             let mut socket = tungstenite::accept(stream).unwrap();
-            let Message::Text(command) = socket.read().unwrap() else { panic!("expected probe") };
+            let Message::Text(command) = socket.read().unwrap() else {
+                panic!("expected probe")
+            };
             let command: Value = serde_json::from_str(&command).unwrap();
             let response = if value.is_boolean() {
                 json!({"id": command["id"], "result": {"result": {"value": value}}})
             } else {
                 json!({"id": command["id"], "error": {"message": "Target crashed"}})
             };
-            socket.send(Message::Text(response.to_string().into())).unwrap();
+            socket
+                .send(Message::Text(response.to_string().into()))
+                .unwrap();
         }
         thread::sleep(Duration::from_millis(100));
         server_alive.store(false, Ordering::Release);
     });
     let mut failure = None;
-    let _ = super::monitor_profile_mask_health(port, &alive, |error| failure = Some(error.to_string()));
+    let _ =
+        super::monitor_profile_mask_health(port, &alive, |error| failure = Some(error.to_string()));
     server.join().unwrap();
     failure
 }
@@ -933,15 +948,33 @@ fn macos_mask_probe_sequence(values: Vec<Value>) -> Option<String> {
 #[test]
 #[cfg(not(target_os = "windows"))]
 fn macos_cancelled_close_keeps_monitoring_the_live_mask() {
-    assert!(macos_mask_probe_sequence(vec![json!(true), json!(false), json!(true), json!(true)]).is_none());
-    let failure = macos_mask_probe_sequence(vec![json!(true), json!(true), json!(false), json!(false)]).unwrap();
-    assert!(failure.contains("profile mask failed during runtime"), "{failure}");
+    assert!(
+        macos_mask_probe_sequence(vec![json!(true), json!(false), json!(true), json!(true)])
+            .is_none()
+    );
+    let failure =
+        macos_mask_probe_sequence(vec![json!(true), json!(true), json!(false), json!(false)])
+            .unwrap();
+    assert!(
+        failure.contains("profile mask failed during runtime"),
+        "{failure}"
+    );
 }
 
 #[test]
 #[cfg(not(target_os = "windows"))]
 fn macos_crashed_page_is_a_lifecycle_failure_not_a_mask_failure() {
-    let failure = macos_mask_probe_sequence(vec![Value::Null; 4]).unwrap();
-    assert!(failure.contains("page connection failed during runtime"), "{failure}");
+    let failure = macos_mask_probe_sequence(vec![Value::Null; 20]).unwrap();
+    assert!(
+        failure.contains("page connection failed during runtime"),
+        "{failure}"
+    );
     assert!(!failure.contains("profile mask"));
+}
+
+#[test]
+#[cfg(not(target_os = "windows"))]
+fn macos_explicit_page_crash_is_preserved_when_the_process_exits_soon_after() {
+    let failure = macos_mask_probe_sequence(vec![Value::Null]);
+    assert!(failure.is_some(), "an explicit renderer crash must not become a normal close");
 }
