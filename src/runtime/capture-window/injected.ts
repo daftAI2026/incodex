@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖截图生命周期、共享编辑器及截图/系统壁纸 CDP adapter
+ * [OUTPUT]: 提供受控 Shot 挂载入口与主机请求桥接
+ * [POS]: capture-window 的注入编排，不在 renderer 访问系统文件
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import {
   capturePreparedWindow,
   prepareCaptureWindow,
@@ -9,6 +15,7 @@ import {
   type CaptureWindowEditorController,
   type CaptureWindowRetake,
 } from "./editor.ts";
+import { createSystemWallpaperBridge } from "./system-wallpaper-bridge.ts";
 import { createCaptureWindowState } from "./model.ts";
 import { applyCapturePreferences, loadCapturePreferences } from "./preferences.ts";
 import {
@@ -26,6 +33,7 @@ export type InjectedCaptureWindowOptions = {
 const STYLE_ID = "incodex-capture-window-style";
 const HOST_ATTRIBUTE = "data-incodex-capture-host";
 const bridge = createCaptureCdpBridge();
+const systemWallpapers = createSystemWallpaperBridge();
 let controller: CaptureWindowEditorController | null = null;
 let opening = false;
 
@@ -66,6 +74,7 @@ async function prepareInitialCapture(options: InjectedCaptureWindowOptions): Pro
     },
     onRetake: (_revision, privacyEnabled) => captureSnapshot(privacyEnabled),
     source: snapshot.source,
+    systemWallpapers,
   });
 }
 
@@ -91,6 +100,8 @@ async function captureSnapshot(privacyEnabled: boolean): Promise<CaptureWindowRe
 }
 
 function exposeCaptureBridge(): void {
+  window.__incodexTakeSystemWallpaperRequest = systemWallpapers.takeRequest;
+  window.__incodexResolveSystemWallpaper = systemWallpapers.resolve;
   window.__incodexTakeCaptureDebugRequest = bridge.takeRequest;
   window.__incodexResolveCaptureDebug = bridge.resolve;
 }
@@ -143,6 +154,8 @@ function imageDataUrlToCanvas(dataUrl: string): Promise<HTMLCanvasElement> {
 
 declare global {
   interface Window {
+    __incodexTakeSystemWallpaperRequest?: typeof systemWallpapers.takeRequest;
+    __incodexResolveSystemWallpaper?: typeof systemWallpapers.resolve;
     __incodexResolveCaptureDebug?: (response: CaptureDebugResponse) => boolean;
     __incodexTakeCaptureDebugRequest?: () => { id: string; kind: "capture" } | null;
   }

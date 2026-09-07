@@ -467,19 +467,29 @@ fn ensure_injection_active(process_alive: &AtomicBool) -> Result<(), String> {
 pub(crate) fn start_capture_debug_monitor(
     debug_port: u16,
     process_alive: Arc<AtomicBool>,
+    current_wallpaper: Option<std::path::PathBuf>,
 ) -> thread::JoinHandle<()> {
-    thread::spawn(move || monitor_capture_debug(debug_port, &process_alive))
+    thread::spawn(move || monitor_capture_debug(debug_port, &process_alive, current_wallpaper))
 }
 
-fn monitor_capture_debug(debug_port: u16, process_alive: &AtomicBool) {
+fn monitor_capture_debug(
+    debug_port: u16,
+    process_alive: &AtomicBool,
+    current: Option<std::path::PathBuf>,
+) {
+    let mut wallpapers = crate::system_wallpapers::SystemWallpaperLibrary::new(current);
     while process_alive.load(Ordering::Acquire) {
-        if monitor_capture_debug_target(debug_port, process_alive).is_err() {
+        if monitor_capture_debug_target(debug_port, process_alive, &mut wallpapers).is_err() {
             thread::sleep(LIFECYCLE_POLL_INTERVAL);
         }
     }
 }
 
-fn monitor_capture_debug_target(debug_port: u16, process_alive: &AtomicBool) -> Result<(), String> {
+fn monitor_capture_debug_target(
+    debug_port: u16,
+    process_alive: &AtomicBool,
+    wallpapers: &mut crate::system_wallpapers::SystemWallpaperLibrary,
+) -> Result<(), String> {
     let targets = list_targets(debug_port)?;
     let page = pick_codex_page_target(&targets).ok_or("no Codex page target")?;
     let mut socket = connect_cdp_websocket(&page.ws, debug_port)?;
@@ -487,6 +497,7 @@ fn monitor_capture_debug_target(debug_port: u16, process_alive: &AtomicBool) -> 
     let mut next_id = 2;
 
     while process_alive.load(Ordering::Acquire) {
+        system_wallpapers::poll(&mut socket, &mut next_id, wallpapers)?;
         let response = send_cdp(
             &mut socket,
             next_id,

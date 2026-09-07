@@ -1,3 +1,7 @@
+//! [INPUT]: 受限头像文件读取、友好名称生成及原生文件安全检查。
+//! [OUTPUT]: 提供 profile mask 数据与共享字节编码函数，供受控图像传输复用。
+//! [POS]: CLI 的资料遮罩边界；壁纸装载仅复用无副作用的编码函数。
+//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 use std::fs::{File, OpenOptions};
 use std::io::Read;
 #[cfg(not(target_os = "windows"))]
@@ -144,7 +148,7 @@ fn avatar_mime(bytes: &[u8]) -> Option<&'static str> {
     }
 }
 
-fn base64_encode(bytes: &[u8]) -> String {
+pub(crate) fn base64_encode(bytes: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {

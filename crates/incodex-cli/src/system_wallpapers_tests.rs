@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 system_wallpapers 的测试构造器与系统壁纸会话 API
  * [OUTPUT]: 证明本机扫描、会话索引、目录边界和资源上限的失败回归用例
- * [POS]: system_wallpapers 的独立契约测试；不触碰真实系统壁纸目录，也不写系统路径
+ * [POS]: system_wallpapers 的独立契约测试；临时文件验证安全边界，macOS 解码用例只读可用系统图片，不写系统路径
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use std::fs;

@@ -40,6 +40,10 @@ redactions.ts: 隐私区域遮罩采样与渲染。
 regions.ts: 编辑器区域覆盖层与命中几何。
 tokens.test.ts: 回归验证：视觉角色、布局密度与 token 复用回归。
 view.ts: 从状态生成编辑器 DOM，不持有第二份业务状态。
+system-wallpaper-bridge.ts: 系统壁纸 CDP 请求关联与超时，拒绝远程资源和任意路径。
+system-wallpaper-bridge.test.ts: 目录与编辑图片传输的有界白名单回归。
+system-wallpapers.ts: 本机壁纸目录装载、选择竞态与 UI 生命周期；背景选择仍交给编辑状态机。
+system-wallpapers.test.ts: 装载状态、空目录、失败及过期异步结果的回归。
 wallpaper.ts: 用户壁纸输入与图像处理边界。
 
 ## 动态样式边界
@@ -61,3 +65,9 @@ wallpaper.ts: 用户壁纸输入与图像处理边界。
 预览尺寸唯一来源是 `fitCanvas()` 计算的 canvas-frame；canvas 完整填满该框，禁止再设置 760px 或视口减常数的位图上限，否则成品在大预览区会缩窄且比例失真。
 
 右侧背景设置栏宽度为 60 个 spacing 单位（默认 240px），比原先 224px 多 16px；窗口外框及控件密度不变，剩余横向空间由预览区占用。
+
+当前桌面是本机资源来源，不是历史版本素材库或下载器：按钮位于既有“壁纸”标题右侧，点击后获取并应用当前桌面，复用原有 background 状态与图片 store，不新增独立系统壁纸组。不把系统素材嵌入 Runtime、不改变系统桌面设置。实验 adapter 仅通过现有 capture-debug open 连接，不代表安装态或 Windows 实机验收。
+
+主机实现位于 crates/incodex-cli/src/system_wallpapers.rs，CDP 白名单路由位于 cdp_system_wallpapers.rs；system_wallpaper_catalog.rs 仅保留当前图片的现成缩略图候选，不再排序历史系统版本。macos_desktop_wallpaper.rs 在实验 open 主线程调用 NSWorkspace（主屏、首屏回退），把本地路径快照交给后台资源库；主机验证该文件后以 system-wallpaper-current 提供，不扫描历史版本或任意父目录。此 open 启动后修改系统桌面不会自动刷新快照。
+
+ScreenKite 截图宿主取证确认的是当前桌面入口：后台 ImageIO 以长边 2600px 解码并编码 JPEG 0.85，再提供可选 ID。Shot 的 HEIC 适配采用该有界编辑图片语义，不声称保留原始 HEIC 像素。完整证据与历史目录缺口保存在私人文档 .internal-docs/shot/current-desktop-cross-platform-20260908.md；不要为凑五版本将 214×130 预览冒充完整原图。

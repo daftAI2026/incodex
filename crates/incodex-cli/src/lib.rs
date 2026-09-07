@@ -7,6 +7,10 @@ pub mod app_bundle;
 #[cfg(not(target_os = "windows"))]
 pub(crate) mod app_quiescence;
 pub mod cdp;
+#[cfg(target_os = "macos")]
+pub(crate) mod macos_image_io;
+#[cfg(target_os = "macos")]
+mod macos_desktop_wallpaper;
 pub(crate) mod system_wallpapers;
 pub(crate) mod system_wallpaper_catalog;
 pub mod confirm;

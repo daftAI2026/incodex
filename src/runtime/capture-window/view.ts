@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 model.ts 的编辑状态、copy.ts 的本地化文案、presets.ts 的背景分层与 icons.ts 的图标
- * [OUTPUT]: 对外提供 captureWindowTemplate 与 captureToolbarTemplate 的稳定 DOM 模板
+ * [OUTPUT]: 对外提供稳定 DOM 模板，以及重建时保留检查器滚动和焦点的视图记忆工具
  * [POS]: capture-window 的声明式视图边界，只表达产品语义和可访问结构，不持有交互状态
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -12,6 +12,10 @@ import {
   type CaptureWindowState,
 } from "./model.ts";
 import {
+  SYSTEM_WALLPAPER_CURRENT_ID,
+  type SystemWallpaperState,
+} from "./system-wallpapers.ts";
+import {
   type CapturePresetSection,
   captureBackgroundSection,
   capturePlainColors,
@@ -22,8 +26,42 @@ import {
 
 export type CaptureWindowViewOptions = {
   lastBackgroundColor?: string;
+  systemWallpapers?: SystemWallpaperState;
   wallpaperDataUrl?: string | null;
 };
+
+export type CaptureWindowRenderMemory = {
+  action?: string;
+  inspectorScrollTop: number;
+  wallpaper?: string;
+};
+
+export function rememberCaptureWindowRender(root: HTMLElement): CaptureWindowRenderMemory {
+  const inspector = root.querySelector<HTMLElement>(".incodex-capture-inspector");
+  const active = document.activeElement instanceof HTMLElement && root.contains(document.activeElement)
+    ? document.activeElement
+    : null;
+  return {
+    action: active?.dataset.action,
+    inspectorScrollTop: inspector?.scrollTop ?? 0,
+    wallpaper: active?.dataset.systemWallpaper,
+  };
+}
+
+export function restoreCaptureWindowRender(
+  root: HTMLElement,
+  memory: CaptureWindowRenderMemory,
+): void {
+  const inspector = root.querySelector<HTMLElement>(".incodex-capture-inspector");
+  if (inspector) inspector.scrollTop = memory.inspectorScrollTop;
+  if (memory.wallpaper) {
+    [...root.querySelectorAll<HTMLElement>("[data-system-wallpaper]")]
+      .find((option) => option.dataset.systemWallpaper === memory.wallpaper)
+      ?.focus();
+  } else if (memory.action) {
+    root.querySelector<HTMLElement>(`[data-action='${memory.action}']`)?.focus();
+  }
+}
 
 export function captureWindowTemplate(
   state: CaptureWindowState,
@@ -32,8 +70,11 @@ export function captureWindowTemplate(
 ): string {
   const lastBackgroundColor = options.lastBackgroundColor ?? "#2B3440";
   const wallpaperDataUrl = options.wallpaperDataUrl ?? (
-    state.background.kind === "wallpaper" ? state.background.dataUrl : null
+    state.background.kind === "wallpaper" && !state.background.systemId
+      ? state.background.dataUrl
+      : null
   );
+  const systemWallpapers = options.systemWallpapers ?? { entries: [], status: "unavailable" as const };
   return `
     <div class="incodex-capture-backdrop" aria-hidden="true"></div>
     <section class="incodex-capture-dialog" role="dialog" aria-modal="true" aria-labelledby="incodex-capture-title">
@@ -53,7 +94,7 @@ export function captureWindowTemplate(
             </div>
           </div>
         </section>
-        ${inspectorTemplate(state, copy, lastBackgroundColor, wallpaperDataUrl)}
+        ${inspectorTemplate(state, copy, lastBackgroundColor, wallpaperDataUrl, systemWallpapers)}
       </div>
       ${footerTemplate(copy)}
     </section>
@@ -112,12 +153,13 @@ function inspectorTemplate(
   copy: CaptureWindowCopy,
   lastBackgroundColor: string,
   wallpaperDataUrl: string | null,
+  systemWallpapers: SystemWallpaperState,
 ): string {
   return `
     <aside class="incodex-capture-inspector">
       <section class="incodex-capture-section">
         <h2 class="incodex-capture-section-title">${copy.background}</h2>
-        ${backgroundGridTemplate(state, copy, lastBackgroundColor, wallpaperDataUrl)}
+        ${backgroundGridTemplate(state, copy, lastBackgroundColor, wallpaperDataUrl, systemWallpapers)}
       </section>
       <section class="incodex-capture-section">
         <div class="incodex-capture-row incodex-capture-padding-heading">
@@ -158,26 +200,36 @@ function backgroundGridTemplate(
   copy: CaptureWindowCopy,
   lastBackgroundColor: string,
   wallpaperDataUrl: string | null,
+  systemWallpapers: SystemWallpaperState,
 ): string {
   const custom = state.background.kind === "color" && !isCapturePlainColor(state.background.color);
-  const wallpaper = state.background.kind === "wallpaper";
+  const wallpaper = state.background.kind === "wallpaper" && !state.background.systemId;
   const customIcon = `<span data-background-custom-icon ${custom ? "hidden" : ""}>${captureIcon("pipette")}</span>`;
   const wallpaperImage = wallpaperDataUrl ?? "";
   const changeImageHidden = wallpaper && wallpaperDataUrl ? "" : " hidden";
   const gradients = capturePresetSection("gradients");
   const wallpapers = capturePresetSection("wallpapers");
   const activeSection = captureBackgroundSection(state.background);
+  const wallpapersActive = activeSection === "wallpapers" || activeSection === "system-wallpapers";
+  const currentWallpaperLoading = systemWallpapers.status === "loading";
+  const currentWallpaperDisabled = currentWallpaperLoading || systemWallpapers.status === "unavailable";
+  const currentWallpaperSelected = state.background.kind === "wallpaper" &&
+    state.background.systemId === SYSTEM_WALLPAPER_CURRENT_ID;
   return `
     <div class="incodex-capture-background-sections">
       ${presetSectionTemplate(gradients, copy.backgroundGradients, state, activeSection, copy)}
-      <section class="incodex-capture-background-section" data-background-section="wallpapers" data-active="${activeSection === "wallpapers"}" aria-label="${copy.backgroundWallpapers}">
-        <h3 class="incodex-capture-background-section-title">${copy.backgroundWallpapers}</h3>
+      <section class="incodex-capture-background-section" data-background-section="wallpapers" data-active="${wallpapersActive}" aria-label="${copy.backgroundWallpapers}">
+        <div class="incodex-capture-background-section-heading">
+          <h3 class="incodex-capture-background-section-title">${copy.backgroundWallpapers}</h3>
+          <button class="incodex-capture-background-expand" data-action="load-current-wallpaper" data-selected="${currentWallpaperSelected}" type="button" aria-busy="${currentWallpaperLoading}" aria-pressed="${currentWallpaperSelected}"${currentWallpaperDisabled ? " disabled" : ""}>${copy.getCurrentWallpaper}</button>
+        </div>
         <div class="incodex-capture-background-grid">
           ${presetButtonsTemplate(wallpapers, state)}
           <button class="incodex-capture-background-option incodex-capture-wallpaper-label" data-background-wallpaper type="button" data-selected="${wallpaper}" aria-label="${copy.wallpaper}" title="${copy.wallpaper}"><img data-wallpaper-preview src="${wallpaperImage}" alt="" ${wallpaperDataUrl ? "" : "hidden"}><span data-wallpaper-placeholder ${wallpaperDataUrl ? "hidden" : ""}>${captureIcon("plus")}</span></button>
         </div>
         <input class="incodex-capture-wallpaper-input" data-input="wallpaper" type="file" accept="image/png,image/jpeg,image/webp">
         <button class="incodex-capture-change-wallpaper" data-action="change-wallpaper" type="button"${changeImageHidden}>${copy.changeImage}</button>
+        ${currentWallpaperStatusTemplate(systemWallpapers.status, copy)}
       </section>
       <section class="incodex-capture-background-section" data-background-section="plain-color" data-active="${activeSection === "plain-color"}" aria-label="${copy.backgroundPlainColor}">
         <h3 class="incodex-capture-background-section-title">${copy.backgroundPlainColor}</h3>
@@ -188,6 +240,22 @@ function backgroundGridTemplate(
       </section>
     </div>
   `;
+}
+
+function currentWallpaperStatusTemplate(
+  status: SystemWallpaperState["status"],
+  copy: CaptureWindowCopy,
+): string {
+  if (status === "loading") {
+    return `<p class="incodex-capture-section-description" data-current-wallpaper-status aria-live="polite">${copy.currentWallpaperLoading}</p>`;
+  }
+  if (status === "error") {
+    return `<p class="incodex-capture-section-description" data-current-wallpaper-status role="alert">${copy.currentWallpaperError}</p>`;
+  }
+  if (status === "unavailable") {
+    return `<p class="incodex-capture-section-description" data-current-wallpaper-status>${copy.currentWallpaperUnavailable}</p>`;
+  }
+  return "";
 }
 
 function plainColorButtonsTemplate(

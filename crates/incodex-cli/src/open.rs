@@ -1,3 +1,7 @@
+//! [INPUT]: 原生会话、官方进程与共享 CDP 注入能力。
+//! [OUTPUT]: 隔离窗口启动、就绪和退出清理流程。
+//! [POS]: 产品 open 编排边界；主线程采集实验 Shot 桌面路径供后台使用。
+//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 //! Native `incodex open` session, process, CDP, and cleanup orchestration.
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -513,6 +517,13 @@ fn start_injection_worker(
     readiness: Arc<AtomicBool>,
     process_alive: Arc<AtomicBool>,
 ) -> thread::JoinHandle<()> {
+    #[cfg(target_os = "macos")]
+    let current_wallpaper = options
+        .capture_debug
+        .then(crate::macos_desktop_wallpaper::current_desktop)
+        .flatten();
+    #[cfg(not(target_os = "macos"))]
+    let current_wallpaper = None;
     thread::spawn(move || {
         let mut lifecycle_started = false;
         let mut last_injection_error = None;
@@ -559,7 +570,7 @@ fn start_injection_worker(
             }
             publish_injection_status(&status_tx, &readiness, InjectionStatus::Ready);
             if options.capture_debug {
-                start_capture_debug_monitor(port, process_alive.clone());
+                start_capture_debug_monitor(port, process_alive.clone(), current_wallpaper);
             }
             if options.profile_mask.is_some() {
                 let _ = monitor_profile_mask_health(port, &process_alive, |error| {

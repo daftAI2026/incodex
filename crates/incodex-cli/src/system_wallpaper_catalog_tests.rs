@@ -1,34 +1,9 @@
-//! [INPUT]: 本机系统版本主题筛选与缩略图候选解析。
-//! [OUTPUT]: 证明非主题资源排除、近期版本优先与系统现成预览复用。
+//! [INPUT]: 当前桌面的现成缩略图候选解析。
+//! [OUTPUT]: 证明系统现成预览复用及查找顺序。
 //! [POS]: 系统壁纸装载性能边界测试。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 use super::*;
 
-#[test]
-fn recent_themes_exclude_colors_hardware_and_extra_variants() {
-    let names = [
-        "Mac Blue.heic",
-        "iMac Pink.heic",
-        "Solid Colors/Gold.png",
-        "Sonoma.heic",
-        "Sonoma Horizon.heic",
-        "Ventura Graphic.heic",
-        "Monterey Graphic.heic",
-        "Big Sur.heic",
-    ];
-    let paths: Vec<_> = names.iter().map(PathBuf::from).collect();
-    let selected = recent_theme_paths(&paths);
-    assert_eq!(
-        selected,
-        [
-            "Sonoma.heic",
-            "Ventura Graphic.heic",
-            "Monterey Graphic.heic",
-            "Big Sur.heic"
-        ]
-        .map(PathBuf::from)
-    );
-}
 #[test]
 fn system_thumbnail_candidates_use_siblings_before_root_previews() {
     let root = Path::new("/System/Library/Desktop Pictures");
@@ -42,16 +17,11 @@ fn system_thumbnail_candidates_use_siblings_before_root_previews() {
 }
 
 #[test]
-fn five_release_defaults_exclude_extra_theme_variants() {
-    let names = ["Sonoma Horizon.heic", "Sonoma.heic", "Ventura Graphic.heic", "Monterey Graphic.heic", "Big Sur.heic", "Catalina.heic", "Mojave.heic"];
-    let paths: Vec<_> = names.iter().map(PathBuf::from).collect();
-    assert_eq!(recent_theme_paths(&paths), ["Sonoma.heic", "Ventura Graphic.heic", "Monterey Graphic.heic", "Big Sur.heic", "Catalina.heic"].map(PathBuf::from));
-}
-
-#[test]
-fn tahoe_light_is_one_release_default_not_a_second_dark_variant() {
-    let paths = ["TahoeDark.heic", "TahoeLight.heic", "Sonoma.heic"].map(PathBuf::from);
-    assert_eq!(recent_theme_paths(&paths), ["TahoeLight.heic", "Sonoma.heic"].map(PathBuf::from));
-    let root = Path::new("/System/Library/ExtensionKit/Extensions/NeptuneOneWallpaper.appex/Contents/Resources");
-    assert!(thumbnail_paths(&root.join("TahoeLight.heic"), root).contains(&root.join("thumbnail.heic")));
+fn current_tahoe_can_reuse_its_adjacent_preview() {
+    let root = Path::new(
+        "/System/Library/ExtensionKit/Extensions/NeptuneOneWallpaper.appex/Contents/Resources",
+    );
+    assert!(
+        thumbnail_paths(&root.join("TahoeLight.heic"), root).contains(&root.join("thumbnail.heic"))
+    );
 }

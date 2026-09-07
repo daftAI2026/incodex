@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 model.ts 的背景模型、presets.ts 的资源 URL 及 wallpaper.ts 的图像装载能力
+ * [OUTPUT]: 提供背景 URL 解析与按 URL 去重的图像存储、hydrate、read、remember、resolve 接口
+ * [POS]: capture-window 的共享图像管线，统一自定义、预设与系统壁纸的解码结果
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import type { CaptureBackground } from "./model.ts";
 import { capturePresetAssetUrl } from "./presets.ts";
 import { loadCaptureImage } from "./wallpaper.ts";

@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 model.ts 的状态机、背景资源管线、DOM 模板与可选本机壁纸 adapter
+ * [OUTPUT]: 提供截图编辑器挂载、生命周期控制及唯一状态向渲染与导出边界的编排
+ * [POS]: capture-window 的交互总协调器，系统壁纸异步细节下沉至 system-wallpapers.ts
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import {
   syncCaptureBackgroundControls,
   wireCaptureBackgroundActions,
@@ -37,7 +43,17 @@ import {
 } from "./preferences.ts";
 import { resolveSelectedCaptureRegions } from "./redactions.ts";
 import { mountCaptureRegionLayer } from "./regions.ts";
-import { captureToolbarTemplate, captureWindowTemplate } from "./view.ts";
+import {
+  createSystemWallpaperController,
+  createSystemWallpaperEditorActions,
+  type SystemWallpaperAdapter,
+} from "./system-wallpapers.ts";
+import {
+  captureToolbarTemplate,
+  captureWindowTemplate,
+  rememberCaptureWindowRender,
+  restoreCaptureWindowRender,
+} from "./view.ts";
 import {
   isCaptureWallpaperFile,
   loadCaptureImage,
@@ -58,12 +74,12 @@ export type CaptureWindowEditorOptions = {
   onSave?: (png: Blob, suggestedName: string) => Promise<"cancelled" | "saved">;
   preferenceStorage?: CapturePreferenceStorage | null;
   source: HTMLCanvasElement;
+  systemWallpapers?: SystemWallpaperAdapter;
 };
 export type CaptureWindowRetake = {
   automaticRegions: CaptureCandidate[];
   source: HTMLCanvasElement;
 };
-
 export type CaptureWindowEditorController = {
   destroy: () => void;
   getState: () => CaptureWindowState;
@@ -96,7 +112,9 @@ export function mountCaptureWindowEditor(
       : defaultState
   );
   const backgroundImages = createCaptureBackgroundImageStore();
-  let lastWallpaperDataUrl = state.background.kind === "wallpaper" ? state.background.dataUrl : null;
+  let lastWallpaperDataUrl = state.background.kind === "wallpaper" && !state.background.systemId
+    ? state.background.dataUrl
+    : null;
   let lastBackgroundColor = state.background.kind === "color" ? state.background.color : "#2B3440";
   let panX = 0;
   let panY = 0;
@@ -107,13 +125,15 @@ export function mountCaptureWindowEditor(
   const locale = options.locale ?? document.documentElement.lang ?? navigator.language;
   const copy = captureWindowCopy(locale);
   let automaticCandidates = options.automaticRegions ?? [];
-
   const root = document.createElement("div");
   root.className = "incodex-capture-root";
   root.setAttribute("data-incodex-capture", "true");
   root.setAttribute("data-incodex-capture-hide", "");
   root.setAttribute("data-state", "editing");
   host.append(root);
+  const systemWallpaperController = createSystemWallpaperController(options.systemWallpapers, () => {
+    if (!destroyed && root.dataset.state === "editing") render();
+  });
   const resizeObserver = new ResizeObserver(() => {
     const canvas = root.querySelector<HTMLCanvasElement>(".incodex-capture-canvas");
     const frame = root.querySelector<HTMLElement>(".incodex-capture-canvas-frame");
@@ -138,7 +158,6 @@ export function mountCaptureWindowEditor(
     },
     readColor: (target) => target === "background" ? lastBackgroundColor : state.solidColor,
   });
-
   function applyEditorCommand(command: CaptureWindowCommand): void {
     if (command.kind === "set-padding") {
       panX = 0;
@@ -146,8 +165,10 @@ export function mountCaptureWindowEditor(
     }
     state = applyCaptureCommand(state, command);
   }
-
   function dispatch(command: CaptureWindowCommand): void {
+    if (command.kind === "set-background" || command.kind === "set-transparent-background") {
+      systemWallpaperController.invalidateSelection();
+    }
     applyEditorCommand(command);
     if (preferenceStorage && isCapturePreferenceCommand(command)) {
       saveCapturePreferences(preferenceStorage, state);
@@ -157,32 +178,28 @@ export function mountCaptureWindowEditor(
       hydrateBackground(state.background);
     }
   }
-
   function preview(command: CaptureWindowCommand): void {
     applyEditorCommand(command);
     refreshEditor(command);
   }
-
   function dispatchRegion(command: CaptureWindowCommand): void {
     state = applyCaptureCommand(state, command);
     renderCanvas();
     updateHistoryControls(root, state);
   }
-
   function close(): void {
     if (destroyed) return;
     destroyed = true;
+    systemWallpaperController.destroy();
     resizeObserver.disconnect();
     unwireColorPopovers();
     root.remove();
     if (previousFocus?.isConnected) previousFocus.focus();
     options.onClose?.();
   }
-
   function notify(message: string): void {
     options.onNotify?.(message);
   }
-
   function changeColor(target: CaptureColorTarget, color: string): void {
     if (target === "background") {
       lastBackgroundColor = color;
@@ -191,7 +208,6 @@ export function mountCaptureWindowEditor(
     }
     dispatch({ color, kind: "set-solid-color" });
   }
-
   function setPhase(phase: "composing" | "editing" | "recapturing"): void {
     root.setAttribute("data-state", phase);
     root.toggleAttribute("aria-busy", phase !== "editing");
@@ -205,13 +221,11 @@ export function mountCaptureWindowEditor(
       control.disabled = true;
     }
   }
-
   function resetView(): void {
     panX = 0;
     panY = 0;
     dispatch({ kind: "set-zoom", zoom: 1 });
   }
-
   function refreshEditor(command: CaptureWindowCommand): void {
     root.setAttribute("data-tool", state.tool);
     const stage = root.querySelector<HTMLElement>(".incodex-capture-stage");
@@ -227,7 +241,6 @@ export function mountCaptureWindowEditor(
     renderCanvas();
     updateHistoryControls(root, state);
   }
-
   function refreshToolbar(): void {
     const toolbar = root.querySelector<HTMLElement>(".incodex-capture-toolbar");
     if (!toolbar) return;
@@ -238,17 +251,17 @@ export function mountCaptureWindowEditor(
     toolbar.replaceWith(replacement);
     wireToolbarActions(root, dispatch, dispatchRegion, resetView);
   }
-
   function render(): void {
     if (destroyed) return;
+    const renderMemory = rememberCaptureWindowRender(root);
     root.innerHTML = captureWindowTemplate(state, copy, {
       lastBackgroundColor,
+      systemWallpapers: systemWallpaperController.getState(),
       wallpaperDataUrl: lastWallpaperDataUrl,
     });
     root.setAttribute("data-tool", state.tool);
     root.querySelector<HTMLElement>(".incodex-capture-backdrop")?.addEventListener("click", close);
     root.querySelector<HTMLElement>("[data-action='close']")?.addEventListener("click", close);
-
     const rendered = renderCanvas();
     const frame = root.querySelector<HTMLElement>(".incodex-capture-canvas-frame");
     wireToolbarActions(root, dispatch, dispatchRegion, resetView);
@@ -260,6 +273,20 @@ export function mountCaptureWindowEditor(
         lastBackgroundColor = color;
         dispatch({ background: { color, kind: "color" }, kind: "set-background" });
       },
+      systemWallpapers: createSystemWallpaperEditorActions(systemWallpaperController, {
+        apply: ({ dataUrl, id }) => dispatch({
+          background: { dataUrl, kind: "wallpaper", systemId: id },
+          kind: "set-background",
+        }),
+        isAlive: () => !destroyed,
+        onError: () => notify(copy.currentWallpaperError),
+        onUnavailable: () => notify(copy.currentWallpaperUnavailable),
+        resolve: ({ dataUrl, id }) => backgroundImages.resolve({
+          dataUrl,
+          kind: "wallpaper",
+          systemId: id,
+        }),
+      }),
     });
     wireStage(
       root,
@@ -285,9 +312,9 @@ export function mountCaptureWindowEditor(
     root.querySelector<HTMLElement>("[data-action='save']")?.addEventListener("click", () => {
       void exportSave();
     });
+    restoreCaptureWindowRender(root, renderMemory);
     window.requestAnimationFrame(() => fitCanvas(root, rendered, frame, state.zoom, panX, panY));
   }
-
   function renderCanvas(): HTMLCanvasElement {
     const rendered = renderCurrentCapture(backgroundImages.read(state.background));
     rendered.className = "incodex-capture-canvas";
@@ -308,7 +335,6 @@ export function mountCaptureWindowEditor(
     window.requestAnimationFrame(() => fitCanvas(root, canvas, frame, state.zoom, panX, panY));
     return canvas;
   }
-
   async function retake(): Promise<void> {
     setPhase("recapturing");
     const revision = state.sourceRevision + 1;
@@ -333,12 +359,10 @@ export function mountCaptureWindowEditor(
       setPhase("editing");
     }
   }
-
   async function setPrivacy(enabled: boolean): Promise<void> {
     dispatch({ enabled, kind: "set-privacy" });
     await retake();
   }
-
   async function loadWallpaper(file: File): Promise<void> {
     if (!isCaptureWallpaperFile(file)) {
       notify(copy.wallpaperTooLarge);
@@ -354,7 +378,6 @@ export function mountCaptureWindowEditor(
       notify(copy.wallpaperUnreadable);
     }
   }
-
   async function exportCopy(): Promise<void> {
     setPhase("composing");
     try {
@@ -369,7 +392,6 @@ export function mountCaptureWindowEditor(
       notify(copy.clipboardUnavailable);
     }
   }
-
   async function exportSave(): Promise<void> {
     setPhase("composing");
     try {
@@ -392,7 +414,6 @@ export function mountCaptureWindowEditor(
       notify(copy.saveFailed);
     }
   }
-
   function hydrateBackground(background: CaptureWindowState["background"]): void {
     backgroundImages.hydrate(background, () => {
       if (!destroyed) renderCanvas();
@@ -400,14 +421,12 @@ export function mountCaptureWindowEditor(
       if (background.kind === "wallpaper") notify(copy.wallpaperUnreadable);
     });
   }
-
   function currentRenderState(): CaptureWindowState {
     return {
       ...state,
       regions: resolveSelectedCaptureRegions(state.regions, automaticCandidates),
     };
   }
-
   function renderCurrentCapture(backgroundImage: CanvasImageSource | null): HTMLCanvasElement {
     return renderCaptureToCanvas(source, currentRenderState(), { backgroundImage, isMacOS });
   }

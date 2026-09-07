@@ -11,11 +11,17 @@ import type {
   CaptureWindowState,
 } from "./model.ts";
 import { captureBackgroundSection, isCapturePlainColor } from "./presets.ts";
+import {
+  syncSystemWallpaperControls,
+  wireSystemWallpaperActions,
+  type SystemWallpaperEditorActions,
+} from "./system-wallpapers.ts";
 
 export type CaptureBackgroundActions = {
   dispatch: (command: CaptureWindowCommand) => void;
   pickWallpaper: () => void;
   readWallpaperDataUrl: () => string | null;
+  systemWallpapers?: SystemWallpaperEditorActions;
   setBackgroundColor: (color: string) => void;
 };
 
@@ -56,6 +62,7 @@ export function wireCaptureBackgroundActions(
     "click",
     () => actions.dispatch({ kind: "toggle-gradients" }),
   );
+  if (actions.systemWallpapers) wireSystemWallpaperActions(root, actions.systemWallpapers);
 }
 
 export function syncCaptureBackgroundControls(
@@ -88,6 +95,7 @@ export function syncCaptureBackgroundControls(
   syncActiveSection(root, captureBackgroundSection(state.background));
   syncCaptureColorPopover(root, "background", lastBackgroundColor);
   syncWallpaperControls(root, state, wallpaperDataUrl);
+  syncSystemWallpaperControls(root, state);
   syncGradientCatalog(root, state, gradientToggleLabels);
 }
 
@@ -122,7 +130,11 @@ function syncWallpaperControls(
   wallpaperDataUrl: string | null,
 ): void {
   const wallpaper = root.querySelector<HTMLElement>("[data-background-wallpaper]");
-  if (wallpaper) wallpaper.dataset.selected = String(state.background.kind === "wallpaper");
+  if (wallpaper) {
+    wallpaper.dataset.selected = String(
+      state.background.kind === "wallpaper" && !state.background.systemId,
+    );
+  }
   const preview = root.querySelector<HTMLImageElement>("[data-wallpaper-preview]");
   const placeholder = root.querySelector<HTMLElement>("[data-wallpaper-placeholder]");
   const change = root.querySelector<HTMLButtonElement>("[data-action='change-wallpaper']");

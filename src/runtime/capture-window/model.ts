@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 geometry.ts 的区域归一化能力，接收编辑器命令与背景选择
+ * [OUTPUT]: 对外提供截图状态、背景模型、命令类型与纯函数状态转移
+ * [POS]: capture-window 的唯一业务状态源，系统壁纸只通过 wallpaper.systemId 进入这里
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import { clampCaptureRect } from "./geometry.ts";
 
 export const CAPTURE_MIN_REGION_EDGE = 6;
@@ -76,7 +82,7 @@ export type CaptureBackground =
   | { id: CapturePresetId; kind: "preset" }
   | { color: string; kind: "color" }
   | { kind: "transparent" }
-  | { dataUrl: string; kind: "wallpaper" };
+  | { dataUrl: string; kind: "wallpaper"; systemId?: string };
 
 export type CaptureOpaqueBackground = Exclude<CaptureBackground, { kind: "transparent" }>;
 

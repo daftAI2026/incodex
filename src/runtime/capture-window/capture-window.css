@@ -462,6 +462,8 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 }
 
 .incodex-capture-inspector {
+  /* 素材目录仅在预览高度内滚动，不以列表内容撑大外壳。 */
+  max-height: calc(var(--incodex-capture-stage-height) + var(--incodex-capture-space) * 9);
   /* 布局容器不重复涂外壳材质，否则半透明背景会叠成不透明色块。 */
   background: transparent;
   display: flex;

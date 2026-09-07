@@ -9,6 +9,7 @@ import type { CaptureBackground, CapturePresetId } from "./model.ts";
 export type CaptureBackgroundSectionId =
   | "none"
   | "gradients"
+  | "system-wallpapers"
   | "wallpapers"
   | "plain-color";
 
@@ -94,7 +95,9 @@ export function captureBackgroundSection(
 ): CaptureBackgroundSectionId {
   if (background.kind === "transparent") return "none";
   if (background.kind === "color") return "plain-color";
-  if (background.kind === "wallpaper") return "wallpapers";
+  if (background.kind === "wallpaper") {
+    return background.systemId ? "system-wallpapers" : "wallpapers";
+  }
   const preset = capturePresets.find((candidate) => candidate.id === background.id);
   if (!preset) throw new Error(`Unknown capture background preset: ${background.id}`);
   return preset.section;

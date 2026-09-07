@@ -145,3 +145,7 @@ Public docs use the native `incodex` / `inc` binaries. Bun is retained for Elect
 - Keep Chinese and English user-facing copy in `incognito-copy.ts` together.
 - One review-sized change per PR. Open the PR and merge when CI is green unless the user says otherwise. Rust CLI PRs target `main`.
 - Do not add AI attribution trailers to commits.
+
+### Shot 实验原生资源边界
+
+`feature/capture-generated-gradients` 的 capture-debug open 使用 `crates/incodex-cli/src/macos_desktop_wallpaper.rs` 在主线程查询当前桌面路径快照，`system_wallpapers.rs` 验证本机文件并经 `cdp_system_wallpapers.rs` 提供不透明 ID；`macos_image_io.rs` 将 HEIC 解码为长边 2600px、质量 0.85 的 JPEG 编辑资源。该链路不是 install 功能，也不是 Windows 支持声明；UI 地图在 `src/runtime/capture-window/CLAUDE.md`。
