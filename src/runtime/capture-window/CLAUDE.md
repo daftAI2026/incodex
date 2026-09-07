@@ -53,3 +53,5 @@ wallpaper.ts: 用户壁纸输入与图像处理边界。
 - 当前官方 `.codex-dialog[role=dialog]` 没有 `aria-modal`；背景 utility 含 `/90`，有效声明为 `color-mix(...)`。适配器按实际 class 与有效 supports 声明提取，不将固定 token 名当样本。
 - 已验证官方 class 换组、CSS 变量即时变化、portal 关闭后保留语义引用；临时 DOM 改动均恢复。
 - 当前实窗命中背景、文字、边框和圆角。`--tw-shadow` 属于原元素局部机制，拒绝直接复制；按钮、次级文字等其他角色仍保留现有映射，不能称为全量动态取样。
+
+外壳材质仅由 `.incodex-capture-dialog` 绘制；inspector 是透明布局容器，不重复叠加相同 alpha。独立颜色浮层仍需自己的表面，不能一并透明化。

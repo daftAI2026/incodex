@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 view.ts 输出的 capture-window DOM、Codex 主题 token 与四像素间距基线
- * [OUTPUT]: 对外提供截图模态框、背景语义分层、工具栏、画布、检查器与隐私捕获态样式
+ * [OUTPUT]: 对外提供截图模态框、背景语义分层、工具栏、画布、检查器与隐私捕获态样式；外壳底色只绘制一次
  * [POS]: capture-window 的视觉契约，和 color-popover.css 分工维护主编辑器与浮层样式
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -456,7 +456,8 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 }
 
 .incodex-capture-inspector {
-  background: var(--incodex-capture-surface);
+  /* 布局容器不重复涂外壳材质，否则半透明背景会叠成不透明色块。 */
+  background: transparent;
   display: flex;
   flex-direction: column;
   gap: calc(var(--incodex-capture-space) * 5);
