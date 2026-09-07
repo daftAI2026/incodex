@@ -31,6 +31,7 @@ const LIFECYCLE_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const PRIMARY_TARGET_MISSING_POLLS: u8 = 2;
 const WINDOWS_CDP_FAILURE_POLLS: u8 = 3;
 const WINDOWS_LIFECYCLE_CDP_TIMEOUT: Duration = Duration::from_millis(400);
+#[cfg(any(target_os = "windows", test))]
 const PROFILE_MASK_FAILURE_POLLS: u8 = 2;
 #[cfg(any(target_os = "windows", test))]
 const WINDOWS_PROFILE_MASK_TRANSPORT_FAILURE_POLLS: u8 = 4;
@@ -907,11 +908,24 @@ enum ProfileMaskProbeError {
     ProbeFailed(String),
 }
 
+#[cfg(any(target_os = "windows", test))]
 fn probe_profile_mask_health<G>(
     debug_port: u16,
     process_alive: &AtomicBool,
     connection_guard: &G,
 ) -> Result<bool, ProfileMaskProbeError>
+where
+    G: Fn(&TcpStream) -> Result<(), String>,
+{
+    probe_profile_mask_snapshot(debug_port, process_alive, connection_guard)
+        .map(|(_, healthy)| healthy)
+}
+
+fn probe_profile_mask_snapshot<G>(
+    debug_port: u16,
+    process_alive: &AtomicBool,
+    connection_guard: &G,
+) -> Result<(String, bool), ProfileMaskProbeError>
 where
     G: Fn(&TcpStream) -> Result<(), String>,
 {
@@ -937,7 +951,7 @@ where
         .ok_or_else(|| {
             ProfileMaskProbeError::ProbeFailed("malformed profile mask health result".to_string())
         })?;
-    Ok(healthy)
+    Ok((page.id.clone(), healthy))
 }
 
 fn profile_mask_health_expression() -> &'static str {

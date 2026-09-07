@@ -9,7 +9,9 @@ pub(super) fn monitor(
     alive: &AtomicBool,
     mut on_failure: impl FnMut(&str),
 ) -> Result<(), String> {
-    let mut unhealthy = 0u8;
+    // One suspect observation, scoped to its page. A second uninterrupted
+    // observation must confirm it before protective shutdown.
+    let mut unhealthy_target: Option<String> = None;
     let mut missing = 0u8;
     let mut disconnected_since = None;
     let mut exit_deadline = None;
@@ -18,7 +20,7 @@ pub(super) fn monitor(
         if !alive.load(Ordering::Acquire) {
             break;
         }
-        let probe = probe_profile_mask_health(port, alive, &|_| Ok(()));
+        let probe = probe_profile_mask_snapshot(port, alive, &|_| Ok(()));
         if matches!(&probe, Err(ProfileMaskProbeError::ProbeFailed(detail)) if detail == TARGET_CRASHED_ERROR)
         {
             let error = "page crashed during runtime".to_string();
@@ -29,24 +31,22 @@ pub(super) fn monitor(
             break;
         }
         let error = match probe {
-            Ok(true) => {
-                unhealthy = 0;
+            Ok((target_id, healthy)) => {
                 missing = 0;
                 exit_deadline = None;
                 disconnected_since = None;
-                continue;
-            }
-            Ok(false) => {
-                missing = 0;
-                exit_deadline = None;
-                disconnected_since = None;
-                unhealthy = unhealthy.saturating_add(1);
-                if unhealthy < PROFILE_MASK_FAILURE_POLLS {
+                if healthy {
+                    unhealthy_target = None;
+                    continue;
+                }
+                if unhealthy_target.as_deref() != Some(target_id.as_str()) {
+                    unhealthy_target = Some(target_id);
                     continue;
                 }
                 "profile mask failed during runtime: mask could not be restored".to_string()
             }
             Err(ProfileMaskProbeError::TargetMissing) => {
+                unhealthy_target = None;
                 disconnected_since = None;
                 missing = missing.saturating_add(1);
                 if missing < PRIMARY_TARGET_MISSING_POLLS {
@@ -63,6 +63,7 @@ pub(super) fn monitor(
                 "window disappeared but the process did not exit within 5 seconds".to_string()
             }
             Err(ProfileMaskProbeError::ProbeFailed(detail)) => {
+                unhealthy_target = None;
                 missing = 0;
                 // A disconnect or crashed renderer does not prove a broken mask.
                 // Allow normal process exit or transport recovery, then report the
