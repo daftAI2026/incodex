@@ -236,6 +236,7 @@ describe("system wallpaper adapter lifecycle", () => {
     expect(await firstFailure).toBe(failure);
     expect(await duplicateFailure).toBe(failure);
 
+    await controller.ensureLoaded();
     await expect(controller.select(ENTRY.id)).resolves.toEqual({
       dataUrl: "data:image/png;base64,retry",
       id: ENTRY.id,
@@ -440,4 +441,32 @@ test("restores the remembered entry without selecting a background", async () =>
   expect(controller.getState().entries).toEqual([CURRENT_ENTRY]);
   expect(loads).toBe(0);
   expect(controller.isSelectionCurrent(CURRENT_ENTRY.id)).toBe(false);
+});
+
+
+test("fetching current wallpaper immediately applies it, not just its thumbnail", async () => {
+  const applied: string[] = [];
+  const controller = createSystemWallpaperController({ list: async () => [CURRENT_ENTRY], load: async () => "data:image/jpeg;base64,current" });
+  const actions = createSystemWallpaperEditorActions(controller, {
+    apply: ({ id }) => applied.push(id), resolve: async () => ({} as HTMLImageElement), isAlive: () => true,
+    onError: () => { throw new Error("unexpected error"); },
+  });
+  await actions.loadCurrent();
+  expect(applied).toEqual([CURRENT_ENTRY.id]);
+});
+
+test("restored current wallpaper is applied unless a newer user selection wins", async () => {
+  const applied: string[] = [];
+  const pending = deferred<SystemWallpaperEntry[]>();
+  const controller = createSystemWallpaperController({ list: async () => [], restore: () => pending.promise, load: async () => "data:image/jpeg;base64,current" });
+  const actions = createSystemWallpaperEditorActions(controller, {
+    apply: ({ id }) => applied.push(id), resolve: async () => ({} as HTMLImageElement), isAlive: () => true, onError: () => {},
+  });
+  const restoring = actions.restoreCurrent();
+  controller.invalidateSelection();
+  pending.resolve([CURRENT_ENTRY]);
+  await restoring;
+  expect(applied).toEqual([]);
+  await actions.restoreCurrent();
+  expect(applied).toEqual([CURRENT_ENTRY.id]);
 });
