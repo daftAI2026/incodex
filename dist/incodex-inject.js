@@ -1092,8 +1092,8 @@ var PROFILE_NAME_SELECTOR = ":scope > span.min-w-0.flex-1.truncate";
 var PROFILE_AVATAR_SELECTOR = ":scope > img.rounded-full, :scope > span.rounded-full";
 var PROFILE_MENU_SELECTOR = '[role="menu"]';
 var PROFILE_MENU_ITEM_SELECTOR = '[role="menuitem"]';
-var PROFILE_MENU_NAME_SELECTOR = ":scope > div > span.flex-1.min-w-0.truncate";
-var PROFILE_MENU_AVATAR_SELECTOR = ":scope > div > span > img.icon-sm.rounded-full, :scope > div > span > span.rounded-full";
+var PROFILE_MENU_NAME_SELECTOR = ":scope > div > span.flex-1.min-w-0.truncate, " + ":scope > div > div.flex-1.min-w-0 > span.min-w-0.truncate";
+var PROFILE_MENU_AVATAR_SELECTOR = ":scope > div > span > img.icon-sm.rounded-full, :scope > div > span > span.rounded-full, " + ":scope > div > span > span > img.icon-sm.rounded-full, " + ":scope > div > span > span > span.rounded-full";
 var PROFILE_NAME_MARKER_SELECTOR = ":scope > [data-incodex-profile-mask-name]";
 var PROFILE_AVATAR_MARKER_SELECTOR = ":scope > [data-incodex-profile-mask-avatar]";
 var PROFILE_NAME_MAX_CHARS = 64;
@@ -1124,8 +1124,21 @@ function readProfileMask() {
   }
   return { name, avatarDataUrl: avatar.dataUrl };
 }
+function profileFooterCandidates() {
+  return [...document.querySelectorAll(PROFILE_FOOTER_SELECTOR)].filter((element) => element.querySelector(PROFILE_NAME_SELECTOR) && element.querySelector(PROFILE_AVATAR_SELECTOR));
+}
+function settingsSurfaceWithoutProfile() {
+  const navigations = [...document.querySelectorAll("nav.sidebar-navigation")];
+  const ready = navigations.length === 1 && navigations[0].querySelector('input[role="searchbox"]') && navigations[0].querySelector('button.sidebar-item[role="link"]');
+  const loading = [...document.querySelectorAll('.app-shell-left-panel > nav[aria-busy="true"]')];
+  const emptySkeleton = loading.length === 1 && loading[0].childNodes.length === 1 && loading[0].firstElementChild?.classList.contains("invisible");
+  if (!(ready && loading.length === 0) && !(emptySkeleton && navigations.length === 0)) {
+    return false;
+  }
+  return ![...document.querySelectorAll(PROFILE_FOOTER_SELECTOR)].some((element) => element.getAttribute("aria-haspopup") === "menu" || Boolean(element.getAttribute("aria-controls")) || element.getAttribute(PROFILE_MASK_ATTR) === "true");
+}
 function findProfileFooter() {
-  const candidates = [...document.querySelectorAll(PROFILE_FOOTER_SELECTOR)].filter((element) => element.querySelector(PROFILE_NAME_SELECTOR) && element.querySelector(PROFILE_AVATAR_SELECTOR));
+  const candidates = profileFooterCandidates();
   return candidates.length === 1 ? candidates[0] : null;
 }
 function findControlledProfileMenu(profileFooter) {
@@ -1235,9 +1248,14 @@ function profileMaskHealth() {
   if (!profileMaskConfigured())
     return true;
   const mask = readProfileMask();
-  const profileFooter = mask ? findProfileFooter() : null;
-  if (!mask || !profileAvatarDecoded(mask.avatarDataUrl) || !profileFooter)
+  if (!mask)
     return false;
+  const candidates = profileFooterCandidates();
+  if (candidates.length === 0)
+    return settingsSurfaceWithoutProfile();
+  if (candidates.length !== 1 || !profileAvatarDecoded(mask.avatarDataUrl))
+    return false;
+  const profileFooter = candidates[0];
   if (!identityMaskHealth(profileFooter, PROFILE_NAME_SELECTOR, PROFILE_AVATAR_SELECTOR, mask)) {
     return false;
   }
@@ -1253,6 +1271,10 @@ function profileMaskNeedsInject() {
   if (!profileMaskConfigured())
     return false;
   return !profileMaskHealth();
+}
+function refreshProfileMaskHealth() {
+  ensureProfileMask();
+  return profileMaskHealth();
 }
 
 // src/runtime/official-tooltip-provider.ts
@@ -2276,7 +2298,7 @@ function start() {
   window.addEventListener(TOOLTIP_DISMISS_EVENT, () => activeTooltipLifecycle?.dismiss());
   ensureMutationObserver();
 }
-window.__incodexRefreshProfileMaskHealth = profileMaskHealth;
+window.__incodexRefreshProfileMaskHealth = refreshProfileMaskHealth;
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", start, { once: true });
 } else {
