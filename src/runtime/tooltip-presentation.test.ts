@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseOfficialWindowZoom } from "./tooltip-presentation.ts";
+import { createOfficialTooltipPresentation, parseOfficialWindowZoom } from "./tooltip-presentation.ts";
 
 describe("official tooltip presentation", () => {
   test("uses the live Codex window zoom with a safe default", () => {
@@ -13,7 +13,6 @@ describe("official tooltip presentation", () => {
 
 // Official selectors are discovered from the live trigger relationship, not
 // from a hardcoded palette or an unrelated tooltip elsewhere in the page.
-import { createOfficialTooltipPresentation } from "./tooltip-presentation.ts";
 
 function fixture() {
   const elements = new Map<string, unknown>();
