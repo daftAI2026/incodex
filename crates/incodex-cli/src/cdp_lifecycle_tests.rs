@@ -923,9 +923,13 @@ fn macos_mask_probe_sequence(values: Vec<Value>) -> Option<String> {
                 write_json(&mut stream, &json!([]));
                 continue;
             }
+            let target = value
+                .get("target")
+                .and_then(Value::as_str)
+                .unwrap_or("replacement");
             write_json(
                 &mut stream,
-                &json!([page(port, "replacement", "app://-/index.html")]),
+                &json!([page(port, target, "app://-/index.html")]),
             );
             let Some(stream) = accept_until(&listener, deadline) else {
                 break;
@@ -935,8 +939,11 @@ fn macos_mask_probe_sequence(values: Vec<Value>) -> Option<String> {
                 panic!("expected probe")
             };
             let command: Value = serde_json::from_str(&command).unwrap();
-            let response = if value.is_boolean() {
-                json!({"id": command["id"], "result": {"result": {"value": value}}})
+            let health = value.get("healthy").unwrap_or(&value);
+            let response = if health.is_boolean() {
+                json!({"id": command["id"], "result": {"result": {"value": health}}})
+            } else if value == json!("unavailable") {
+                json!({"id": command["id"], "error": {"message": "Session closed"}})
             } else {
                 json!({"id": command["id"], "error": {"message": "Target crashed"}})
             };
@@ -1032,4 +1039,27 @@ fn macos_target_handoff_breaks_the_unhealthy_mask_streak() {
         json!(true),
     ];
     assert!(macos_mask_probe_sequence(probes).is_none());
+}
+
+#[test]
+#[cfg(not(target_os = "windows"))]
+fn macos_direct_target_replacement_starts_a_new_health_streak() {
+    assert!(macos_mask_probe_sequence(vec![
+        json!({"target": "old", "healthy": false}),
+        json!({"target": "new", "healthy": false}),
+        json!({"target": "new", "healthy": true}),
+    ])
+    .is_none());
+}
+
+#[test]
+#[cfg(not(target_os = "windows"))]
+fn macos_probe_interruption_breaks_the_unhealthy_streak() {
+    assert!(macos_mask_probe_sequence(vec![
+        json!(false),
+        json!("unavailable"),
+        json!(false),
+        json!(true),
+    ])
+    .is_none());
 }
