@@ -6,7 +6,7 @@ import { blobatarUri } from "blobatar/uri";
 import { findProfileMenuIdentity, profileMaskHealth, refreshProfileMaskHealth } from "./incognito-profile-mask.ts";
 
 function withProfileNavigation(
-  run: (navigate: (count: number, settings?: boolean, recognized?: boolean) => void) => void,
+  run: (navigate: (count: number, settings?: boolean | "loading" | "loading-text", recognized?: boolean) => void) => void,
 ) {
   const globals = ["window", "document", "HTMLImageElement"];
   const previous = globals.map((key) => Object.getOwnPropertyDescriptor(globalThis, key));
@@ -42,10 +42,14 @@ function withProfileNavigation(
     };
   };
   let footers = [footer()];
-  let inSettings = false;
+  let inSettings: boolean | "loading" | "loading-text" = false;
   const settingsNavigation = {
     querySelector: (selector: string) =>
       ['input[role="searchbox"]', 'button.sidebar-item[role="link"]'].includes(selector) ? {} : null,
+  };
+  const loadingNavigation = {
+    get textContent() { return inSettings === "loading-text" ? "Unexpected identity" : ""; },
+    querySelector: (selector: string) => selector === ":scope > .invisible" ? {} : null,
   };
   const replacements = [
     {
@@ -57,7 +61,9 @@ function withProfileNavigation(
     },
     {
       querySelectorAll: (selector: string) => selector === "nav.sidebar-navigation"
-        ? (inSettings ? [settingsNavigation] : []) : footers,
+        ? (inSettings === true ? [settingsNavigation] : [])
+        : selector === '.app-shell-left-panel > nav[aria-busy="true"]'
+          ? (typeof inSettings === "string" ? [loadingNavigation] : []) : footers,
       getElementById: () => null,
     },
     Avatar,
@@ -91,6 +97,27 @@ describe("profile mask navigation scope", () => {
       navigate(1);
       expect(profileMaskHealth()).toBe(false);
       expect(refreshProfileMaskHealth()).toBe(true);
+    });
+  });
+
+  test("accepts the empty busy settings skeleton before navigation mounts", () => {
+    withProfileNavigation((navigate) => {
+      expect(refreshProfileMaskHealth()).toBe(true);
+      navigate(0, "loading");
+      expect(refreshProfileMaskHealth()).toBe(true);
+      navigate(0, true);
+      expect(refreshProfileMaskHealth()).toBe(true);
+      navigate(1);
+      expect(refreshProfileMaskHealth()).toBe(true);
+    });
+  });
+
+  test("rejects busy navigation with unexpected text or a surviving account trigger", () => {
+    withProfileNavigation((navigate) => {
+      navigate(0, "loading-text");
+      expect(refreshProfileMaskHealth()).toBe(false);
+      navigate(1, "loading", false);
+      expect(refreshProfileMaskHealth()).toBe(false);
     });
   });
 
