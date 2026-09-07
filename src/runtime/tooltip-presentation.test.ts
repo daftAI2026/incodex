@@ -5,7 +5,7 @@
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { describe, expect, test } from "bun:test";
-import { parseOfficialWindowZoom } from "./tooltip-presentation.ts";
+import { nativeTooltipTitle, parseOfficialWindowZoom } from "./tooltip-presentation.ts";
 
 describe("official tooltip presentation", () => {
   test("uses the live Codex window zoom with a safe default", () => {
