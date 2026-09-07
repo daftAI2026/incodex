@@ -296,6 +296,19 @@ fn normal_window_reinjection_does_not_inherit_incognito_deadlines() {
 }
 
 #[test]
+fn cold_start_connection_refusal_waits_for_the_active_deadline() {
+    let mut readiness = CodexModeReadiness::default();
+    for _ in 0..100 {
+        let error = super::record_target_discovery_failure(true, &mut readiness, "Connection refused (os error 61)".into());
+        assert!(!is_terminal_codex_mode_error(&error));
+    }
+    let mut expired = CodexModeReadiness::new(Instant::now(), Duration::ZERO);
+    assert!(is_terminal_codex_mode_error(&super::record_target_discovery_failure(
+        true, &mut expired, "Connection refused (os error 61)".into()
+    )));
+}
+
+#[test]
 fn windows_post_mode_runtime_failures_use_the_shared_active_deadline() {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
     listener.set_nonblocking(true).unwrap();

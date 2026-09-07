@@ -296,12 +296,16 @@ fn official_blockers_and_mode_unresolved_do_not_become_profile_mask_failures() {
 #[test]
 fn post_mode_terminal_errors_preserve_profile_mask_failure_handling() {
     assert!(matches!(
-        terminal_injection_status(crate::cdp::UI_INJECTION_UNAVAILABLE_ERROR.into()),
+        terminal_injection_status(crate::cdp::UI_INJECTION_UNAVAILABLE_ERROR.into(), true),
         InjectionStatus::Failed(_)
     ));
     assert!(matches!(
-        terminal_injection_status("mode unavailable".into()),
+        terminal_injection_status("mode unavailable".into(), false),
         InjectionStatus::ModeUnresolved(_)
+    ));
+    assert!(matches!(
+        terminal_injection_status("mode unavailable".into(), true),
+        InjectionStatus::Failed(_)
     ));
 }
 
