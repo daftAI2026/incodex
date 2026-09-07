@@ -156,6 +156,64 @@ describe("system wallpaper adapter lifecycle", () => {
     expect(listCalls).toBe(0);
   });
 
+  test("deduplicates same-id originals and evicts the oldest entry after two cached ids", async () => {
+    const entries = [
+      ENTRY,
+      { id: "system:ventura-1", name: "Ventura", thumbnail: "ventura-thumb" },
+      { id: "system:sequoia-1", name: "Sequoia", thumbnail: "sequoia-thumb" },
+    ];
+    const loads: string[] = [];
+    const controller = createSystemWallpaperController(adapterWith({
+      list: async () => entries,
+      load: async (id) => {
+        loads.push(id);
+        return `data:image/png;base64,${id}`;
+      },
+    }));
+    await controller.ensureLoaded();
+
+    await controller.select(ENTRY.id);
+    await controller.select("system:ventura-1");
+    await controller.select(ENTRY.id);
+    await controller.select("system:sequoia-1");
+    await controller.select("system:ventura-1");
+
+    expect(loads).toEqual([
+      ENTRY.id,
+      "system:ventura-1",
+      "system:sequoia-1",
+      "system:ventura-1",
+    ]);
+  });
+
+  test("shares an in-flight original request and removes a failed promise before retry", async () => {
+    const failure = new Error("conversion failed");
+    const pending = deferred<string>();
+    let loadCalls = 0;
+    const controller = createSystemWallpaperController(adapterWith({
+      load: () => {
+        loadCalls += 1;
+        return loadCalls === 1 ? pending.promise : Promise.resolve("data:image/png;base64,retry");
+      },
+    }));
+    await controller.ensureLoaded();
+
+    const first = controller.select(ENTRY.id);
+    const duplicate = controller.select(ENTRY.id);
+    expect(loadCalls).toBe(1);
+    const firstFailure = first.catch((error) => error);
+    const duplicateFailure = duplicate.catch((error) => error);
+    pending.reject(failure);
+    expect(await firstFailure).toBe(failure);
+    expect(await duplicateFailure).toBe(failure);
+
+    await expect(controller.select(ENTRY.id)).resolves.toEqual({
+      dataUrl: "data:image/png;base64,retry",
+      id: ENTRY.id,
+    });
+    expect(loadCalls).toBe(2);
+  });
+
   test("does not apply an older A after the user selects B and A again", async () => {
     const firstA = deferred<HTMLImageElement>();
     const latestA = deferred<HTMLImageElement>();
