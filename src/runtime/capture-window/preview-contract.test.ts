@@ -187,7 +187,7 @@ describe("capture window preview", () => {
     expect(shadow).toBeLessThan(privacy);
 
     expect(css).toContain("backdrop-filter: blur(3px)");
-    expect(css).toContain("width: calc(clamp(56rem, 60vw, 64rem) * var(--incodex-capture-editor-scale))");
+    expect(css).toContain("width: calc(clamp(56rem, 60vw, 64rem) * var(--incodex-capture-window-scale))");
     expect(css).toContain(
       "max-width: calc(100vw - var(--incodex-capture-space) * 8)",
     );
