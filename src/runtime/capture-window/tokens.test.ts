@@ -146,4 +146,12 @@ describe("capture window visual tokens", () => {
     expect(css).toContain('.incodex-capture-background-option[aria-busy="true"]');
   });
 
+  test("transparent heading actions hover with surface text, not solid-button inverse text", () => {
+    const css = readFileSync(backgroundPickerCssPath, "utf8");
+    const hover = css.match(/\.incodex-capture-background-expand:hover\s*\{([^}]*)\}/)?.[1];
+    expect(hover).toBeDefined();
+    expect(hover).toContain("color: var(--incodex-capture-text)");
+    expect(hover).not.toContain("--incodex-capture-primary-text");
+  });
+
 });
