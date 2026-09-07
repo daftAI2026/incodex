@@ -1106,7 +1106,7 @@ function redactionSampling(style, scaleFactor) {
   };
 }
 function capturePhysicalPadding(source, padding) {
-  return padding * Math.max(1, source.scaleFactor);
+  return Math.round(Math.max(1, Math.min(source.width, source.height)) * padding / 100);
 }
 function captureOutputSize(source, padding) {
   const physicalPadding = capturePhysicalPadding(source, padding);
@@ -1201,7 +1201,7 @@ function drawWindow(context, source, state, isMacOS) {
   context.save();
   roundedRectPath(context, padding, padding, state.source.width, state.source.height, cornerRadius);
   if (state.shadow) {
-    const shadow = captureWindowShadow(state.padding, scaleFactor);
+    const shadow = captureWindowShadow(padding / scaleFactor, scaleFactor);
     context.shadowColor = shadow.color;
     context.shadowBlur = shadow.blur;
     context.shadowOffsetY = shadow.offsetY;
@@ -1448,16 +1448,17 @@ var CAPTURE_MIN_REGION_EDGE = 6;
 var CAPTURE_HISTORY_LIMIT = 100;
 var CAPTURE_MIN_ZOOM = 0.4;
 var CAPTURE_MAX_ZOOM = 6;
+var CAPTURE_DEFAULT_PADDING = 8;
 var CAPTURE_MIN_PADDING = 0;
-var CAPTURE_MAX_PADDING = 160;
-var CAPTURE_PADDING_STEP = 4;
+var CAPTURE_MAX_PADDING = 45;
+var CAPTURE_PADDING_STEP = 1;
 function createCaptureWindowState(source) {
   return {
     background: { id: "sea", kind: "preset" },
     gradientsExpanded: false,
     history: { future: [], past: [] },
     lastOpaqueBackground: { id: "sea", kind: "preset" },
-    padding: 64,
+    padding: CAPTURE_DEFAULT_PADDING,
     privacyEnabled: true,
     redactionSource: "auto",
     redactionStyle: "mosaic",
@@ -1612,7 +1613,7 @@ function redoRegions(state) {
   };
 }
 function normalizePadding(padding) {
-  const clamped = clamp3(padding, CAPTURE_MIN_PADDING, CAPTURE_MAX_PADDING);
+  const clamped = clamp3(Number.isFinite(padding) ? padding : 0, CAPTURE_MIN_PADDING, CAPTURE_MAX_PADDING);
   return Math.round(clamped / CAPTURE_PADDING_STEP) * CAPTURE_PADDING_STEP;
 }
 function clamp3(value, minimum, maximum) {
@@ -1620,6 +1621,7 @@ function clamp3(value, minimum, maximum) {
 }
 
 // src/runtime/capture-window/preferences.ts
+var LEGACY_MAX_PADDING = 160;
 var CAPTURE_PREFERENCES_KEY = "incodex-window-capture-prefs";
 var CAPTURE_PRESET_IDS = [
   "sea",
@@ -1635,7 +1637,8 @@ var CAPTURE_PRESET_IDS = [
 ];
 var DEFAULT_CAPTURE_PREFERENCES = {
   background: { id: "sea", kind: "preset" },
-  padding: 64,
+  padding: CAPTURE_DEFAULT_PADDING,
+  paddingUnit: "percent",
   privacyEnabled: true,
   shadow: true
 };
@@ -1654,6 +1657,7 @@ function saveCapturePreferences(storage, state) {
   const preferences = {
     background,
     padding: state.padding,
+    paddingUnit: "percent",
     privacyEnabled: state.privacyEnabled,
     shadow: state.shadow
   };
@@ -1670,7 +1674,10 @@ function applyCapturePreferences(state, preferences, wallpaperDataUrl) {
   }
   return {
     ...applyCaptureCommand(state, { background, kind: "set-background" }),
-    padding: preferences.padding,
+    padding: applyCaptureCommand(state, {
+      kind: "set-padding",
+      padding: preferences.paddingUnit === "logical-px" ? preferences.padding * Math.max(1, state.source.scaleFactor) * 100 / Math.max(1, Math.min(state.source.width, state.source.height)) : preferences.padding
+    }).padding,
     privacyEnabled: preferences.privacyEnabled,
     shadow: preferences.shadow
   };
@@ -1689,7 +1696,8 @@ function normalizeCapturePreferences(input) {
   if (typeof record.shadow === "boolean")
     normalized.shadow = record.shadow;
   if (typeof record.padding === "number" && Number.isFinite(record.padding)) {
-    normalized.padding = Math.min(CAPTURE_MAX_PADDING, Math.max(CAPTURE_MIN_PADDING, Math.round(record.padding)));
+    normalized.paddingUnit = record.paddingUnit === "percent" ? "percent" : "logical-px";
+    normalized.padding = Math.min(normalized.paddingUnit === "percent" ? CAPTURE_MAX_PADDING : LEGACY_MAX_PADDING, Math.max(CAPTURE_MIN_PADDING, Math.round(record.padding)));
   }
   const background = normalizeBackground(record.background);
   if (background)
@@ -1925,10 +1933,10 @@ function inspectorTemplate(state, copy, lastBackgroundColor, wallpaperDataUrl, s
       <section class="incodex-capture-section">
         <div class="incodex-capture-row incodex-capture-padding-heading">
           <h2 class="incodex-capture-section-title">${copy.padding}</h2>
-          <span class="incodex-capture-value" data-value="padding">${state.padding}px</span>
+          <span class="incodex-capture-value" data-value="padding">${state.padding}%</span>
         </div>
         <div class="incodex-capture-range-field">
-          <input class="incodex-capture-range" data-input="padding" aria-label="${copy.padding}" type="range" min="0" max="160" step="4" value="${state.padding}">
+          <input class="incodex-capture-range" data-input="padding" aria-label="${copy.padding}" type="range" min="${CAPTURE_MIN_PADDING}" max="${CAPTURE_MAX_PADDING}" step="${CAPTURE_PADDING_STEP}" value="${state.padding}">
           <div class="incodex-capture-range-ticks" aria-hidden="true">
             ${Array.from({ length: 9 }, (_, index) => `<i style="--capture-tick-position: ${(index + 1) * 10}%"></i>`).join("")}
           </div>
@@ -2286,7 +2294,7 @@ function mountCaptureWindowEditor(host, options) {
     mountCaptureRegionLayer(frame, canvas, currentRenderState(), automaticCandidates, copy, dispatchRegion);
     const paddingValue = root.querySelector("[data-value='padding']");
     if (paddingValue)
-      paddingValue.textContent = `${state.padding}px`;
+      paddingValue.textContent = `${state.padding}%`;
     window.requestAnimationFrame(() => fitCanvas(root, canvas, frame, state.zoom, panX, panY));
     return canvas;
   }
@@ -2487,7 +2495,7 @@ function syncEditorControls(root, state, copy, lastBackgroundColor, wallpaperDat
   if (padding)
     padding.value = String(state.padding);
   if (paddingValue)
-    paddingValue.textContent = `${state.padding}px`;
+    paddingValue.textContent = `${state.padding}%`;
   const shadow = root.querySelector("[data-input='shadow']");
   const none = root.querySelector("[data-input='none']");
   const privacy = root.querySelector("[data-input='privacy']");

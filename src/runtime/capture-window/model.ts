@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 geometry.ts 的区域归一化能力，接收编辑器命令与背景选择
  * [OUTPUT]: 对外提供截图状态、背景模型、命令类型与纯函数状态转移
- * [POS]: capture-window 的唯一业务状态源，系统壁纸只通过 wallpaper.systemId 进入这里
+ * [POS]: capture-window 的唯一业务状态源，padding 表示内容短边的单边整数百分比；系统壁纸只通过 wallpaper.systemId 进入这里
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import { clampCaptureRect } from "./geometry.ts";
@@ -10,9 +10,10 @@ export const CAPTURE_MIN_REGION_EDGE = 6;
 export const CAPTURE_HISTORY_LIMIT = 100;
 export const CAPTURE_MIN_ZOOM = 0.4;
 export const CAPTURE_MAX_ZOOM = 6;
+export const CAPTURE_DEFAULT_PADDING = 8;
 export const CAPTURE_MIN_PADDING = 0;
-export const CAPTURE_MAX_PADDING = 160;
-export const CAPTURE_PADDING_STEP = 4;
+export const CAPTURE_MAX_PADDING = 45;
+export const CAPTURE_PADDING_STEP = 1;
 
 export type CaptureRect = {
   height: number;
@@ -135,7 +136,7 @@ export function createCaptureWindowState(source: CaptureSource): CaptureWindowSt
     gradientsExpanded: false,
     history: { future: [], past: [] },
     lastOpaqueBackground: { id: "sea", kind: "preset" },
-    padding: 64,
+    padding: CAPTURE_DEFAULT_PADDING,
     privacyEnabled: true,
     redactionSource: "auto",
     redactionStyle: "mosaic",
@@ -327,7 +328,7 @@ function redoRegions(state: CaptureWindowState): CaptureWindowState {
 }
 
 function normalizePadding(padding: number): number {
-  const clamped = clamp(padding, CAPTURE_MIN_PADDING, CAPTURE_MAX_PADDING);
+  const clamped = clamp(Number.isFinite(padding) ? padding : 0, CAPTURE_MIN_PADDING, CAPTURE_MAX_PADDING);
   return Math.round(clamped / CAPTURE_PADDING_STEP) * CAPTURE_PADDING_STEP;
 }
 

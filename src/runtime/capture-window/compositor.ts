@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 model 的短边百分比状态、presets 的背景以及 Canvas 绘制能力。
+ * [OUTPUT]: 提供合成尺寸、绘制计划与预览/导出共享渲染；统一将百分比转为物理像素。
+ * [POS]: capture-window 的像素几何真源，regions 与 editor 复用同一 padding 换算。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import type {
   CaptureBackground,
   CapturePresetId,
@@ -54,7 +60,7 @@ export function redactionSampling(
 }
 
 export function capturePhysicalPadding(source: CaptureSource, padding: number): number {
-  return padding * Math.max(1, source.scaleFactor);
+  return Math.round(Math.max(1, Math.min(source.width, source.height)) * padding / 100);
 }
 
 export function captureOutputSize(source: CaptureSource, padding: number): CaptureSize {
@@ -241,7 +247,7 @@ function drawWindow(
     cornerRadius,
   );
   if (state.shadow) {
-    const shadow = captureWindowShadow(state.padding, scaleFactor);
+    const shadow = captureWindowShadow(padding / scaleFactor, scaleFactor);
     context.shadowColor = shadow.color;
     context.shadowBlur = shadow.blur;
     context.shadowOffsetY = shadow.offsetY;

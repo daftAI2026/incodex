@@ -8,6 +8,9 @@ import type { CaptureWindowCopy } from "./copy.ts";
 import { escapeAttribute } from "./color-popover.ts";
 import { captureIcon } from "./icons.ts";
 import {
+  CAPTURE_MAX_PADDING,
+  CAPTURE_MIN_PADDING,
+  CAPTURE_PADDING_STEP,
   CAPTURE_MAX_ZOOM,
   CAPTURE_MIN_ZOOM,
   type CaptureWindowState,
@@ -167,10 +170,10 @@ function inspectorTemplate(
       <section class="incodex-capture-section">
         <div class="incodex-capture-row incodex-capture-padding-heading">
           <h2 class="incodex-capture-section-title">${copy.padding}</h2>
-          <span class="incodex-capture-value" data-value="padding">${state.padding}px</span>
+          <span class="incodex-capture-value" data-value="padding">${state.padding}%</span>
         </div>
         <div class="incodex-capture-range-field">
-          <input class="incodex-capture-range" data-input="padding" aria-label="${copy.padding}" type="range" min="0" max="160" step="4" value="${state.padding}">
+          <input class="incodex-capture-range" data-input="padding" aria-label="${copy.padding}" type="range" min="${CAPTURE_MIN_PADDING}" max="${CAPTURE_MAX_PADDING}" step="${CAPTURE_PADDING_STEP}" value="${state.padding}">
           <div class="incodex-capture-range-ticks" aria-hidden="true">
             ${Array.from({ length: 9 }, (_, index) => `<i style="--capture-tick-position: ${(index + 1) * 10}%"></i>`).join("")}
           </div>

@@ -1,11 +1,12 @@
 /**
  * [INPUT]: 依赖编辑器状态机与既有浏览器偏好存储。
- * [OUTPUT]: 保存非敏感编辑偏好及当前桌面的来源 ID，不保存图片或本地路径。
+ * [OUTPUT]: 保存非敏感编辑偏好及当前桌面的来源 ID，不保存图片或本地路径；旧像素记录在取得源尺寸后迁移为百分比。
  * [POS]: capture-window 的偏好边界；来源可用性由主机恢复，背景选择由此处语义恢复。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import {
   applyCaptureCommand,
+  CAPTURE_DEFAULT_PADDING,
   CAPTURE_MAX_PADDING,
   CAPTURE_MIN_PADDING,
   type CaptureBackground,
@@ -13,6 +14,8 @@ import {
   type CaptureWindowCommand,
   type CaptureWindowState,
 } from "./model.ts";
+
+const LEGACY_MAX_PADDING = 160;
 
 export const CAPTURE_PREFERENCES_KEY = "incodex-window-capture-prefs";
 
@@ -41,13 +44,15 @@ export type CapturePreferenceBackground =
 export type CaptureWindowPreferences = {
   background: CapturePreferenceBackground;
   padding: number;
+  paddingUnit: "percent" | "logical-px";
   privacyEnabled: boolean;
   shadow: boolean;
 };
 
 const DEFAULT_CAPTURE_PREFERENCES: CaptureWindowPreferences = {
   background: { id: "sea", kind: "preset" },
-  padding: 64,
+  padding: CAPTURE_DEFAULT_PADDING,
+  paddingUnit: "percent",
   privacyEnabled: true,
   shadow: true,
 };
@@ -74,6 +79,7 @@ export function saveCapturePreferences(
   const preferences: CaptureWindowPreferences = {
     background,
     padding: state.padding,
+    paddingUnit: "percent",
     privacyEnabled: state.privacyEnabled,
     shadow: state.shadow,
   };
@@ -98,7 +104,12 @@ export function applyCapturePreferences(
   }
   return {
     ...applyCaptureCommand(state, { background, kind: "set-background" }),
-    padding: preferences.padding,
+    padding: applyCaptureCommand(state, {
+      kind: "set-padding",
+      padding: preferences.paddingUnit === "logical-px"
+        ? preferences.padding * Math.max(1, state.source.scaleFactor) * 100 / Math.max(1, Math.min(state.source.width, state.source.height))
+        : preferences.padding,
+    }).padding,
     privacyEnabled: preferences.privacyEnabled,
     shadow: preferences.shadow,
   };
@@ -121,8 +132,10 @@ function normalizeCapturePreferences(input: unknown): CaptureWindowPreferences {
   }
   if (typeof record.shadow === "boolean") normalized.shadow = record.shadow;
   if (typeof record.padding === "number" && Number.isFinite(record.padding)) {
+    // 旧记录没有单位；等源图尺寸可用后再换算，不能把旧像素当百分比。
+    normalized.paddingUnit = record.paddingUnit === "percent" ? "percent" : "logical-px";
     normalized.padding = Math.min(
-      CAPTURE_MAX_PADDING,
+      normalized.paddingUnit === "percent" ? CAPTURE_MAX_PADDING : LEGACY_MAX_PADDING,
       Math.max(CAPTURE_MIN_PADDING, Math.round(record.padding)),
     );
   }

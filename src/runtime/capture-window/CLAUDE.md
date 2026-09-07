@@ -88,4 +88,4 @@ ScreenKite 截图宿主取证确认的是当前桌面入口：后台 ImageIO 以
 
 检查器参考 Cavalry-i18n 私人 scroll-fade 取证，只复用边界判断及 alpha mask 算法。“背景”标题位于滚动视窗之外；滚动条隐藏但保留原生滚动与键盘焦点。渐隐深度为 Codex spacing 的三倍（默认 12px），不复制竞品色值；起点清除顶端、终点清除底端、未溢出无 mask。滚动位置记忆绑定内部 viewport，重绘与尺寸变化重新测量。
 
-Padding 滑块参考 Sticker StudioParameterTicks 的十等分位置：10%…90% 共九个装饰点，点色/尺寸取 Codex text-tertiary/spacing，不复制 SwiftUI 外壳或改变原生步长。当前 padding 仍为 0…160、步长 4 的逻辑像素，合成时乘 source.scaleFactor；CleanShot 新截图的百分比计算分母尚未取证，不能直接替换单位。
+Padding 滑块参考 Sticker StudioParameterTicks 的十等分位置：10%…90% 共九个装饰点，点色/尺寸取 Codex text-tertiary/spacing，不复制 SwiftUI 外壳或改变原生步长。Padding 现采用已取证 ScreenKite 普通模式的短边百分比：0…45%、step 1%、默认 8%；四边共用 round(min(source.width, source.height) × p / 100) 物理像素。预览、导出、隐私坐标共享 compositor 换算，不再重复乘 scaleFactor。旧无单位偏好保留逻辑像素到挂载时按源尺寸转换，保存时标记 percent，避免把旧 64px 当 64%。阴影继续消费换算后的物理距离，不把百分比错当阴影像素。此裁决不宣称验证了 CleanShot 5.0 公式。

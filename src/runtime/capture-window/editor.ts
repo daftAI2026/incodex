@@ -335,7 +335,7 @@ export function mountCaptureWindowEditor(
     }
     mountCaptureRegionLayer(frame, canvas, currentRenderState(), automaticCandidates, copy, dispatchRegion);
     const paddingValue = root.querySelector<HTMLElement>("[data-value='padding']");
-    if (paddingValue) paddingValue.textContent = `${state.padding}px`;
+    if (paddingValue) paddingValue.textContent = `${state.padding}%`;
     window.requestAnimationFrame(() => fitCanvas(root, canvas, frame, state.zoom, panX, panY));
     return canvas;
   }
@@ -544,7 +544,7 @@ function syncEditorControls(
   const padding = root.querySelector<HTMLInputElement>("[data-input='padding']");
   const paddingValue = root.querySelector<HTMLElement>("[data-value='padding']");
   if (padding) padding.value = String(state.padding);
-  if (paddingValue) paddingValue.textContent = `${state.padding}px`;
+  if (paddingValue) paddingValue.textContent = `${state.padding}%`;
 
   const shadow = root.querySelector<HTMLInputElement>("[data-input='shadow']");
   const none = root.querySelector<HTMLInputElement>("[data-input='none']");
