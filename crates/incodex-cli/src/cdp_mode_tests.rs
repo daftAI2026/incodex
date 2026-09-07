@@ -289,7 +289,10 @@ fn normal_window_reinjection_does_not_inherit_incognito_deadlines() {
             "transient"
         );
     }
-    assert_eq!(readiness.observe_probe_failure(), CodexModeAction::Unresolved);
+    assert_eq!(
+        readiness.observe_probe_failure(),
+        CodexModeAction::Unresolved
+    );
 }
 
 #[test]
@@ -566,6 +569,7 @@ fn terminal_codex_mode_failure_stops_after_the_shared_readiness_becomes_terminal
                     }
                     Err(error) => panic!("CDP test server failed: {error}"),
                 };
+                stream.set_nonblocking(false).unwrap();
                 let mut peek = [0_u8; 2048];
                 let size = stream.peek(&mut peek).unwrap();
                 let request = String::from_utf8_lossy(&peek[..size]);

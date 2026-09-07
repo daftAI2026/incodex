@@ -483,7 +483,9 @@ where
             json!({ "source": payload.source }),
             connection_guard,
         )
-        .map_err(|error| record_post_mode_injection_failure(readiness, error))?;
+        .map_err(|error| {
+            record_post_mode_injection_failure(payload.require_codex_mode, readiness, error)
+        })?;
         registered_script_targets.insert(page.id.clone());
     }
     ensure_injection_active(process_alive)?;
@@ -494,7 +496,9 @@ where
         json!({ "expression": payload.source, "returnByValue": true }),
         connection_guard,
     )
-    .map_err(|error| record_post_mode_injection_failure(readiness, error))?;
+    .map_err(|error| {
+        record_post_mode_injection_failure(payload.require_codex_mode, readiness, error)
+    })?;
     ensure_injection_active(process_alive)?;
     let health = send_guarded_cdp(
         &mut socket,
@@ -503,9 +507,12 @@ where
         json!({ "expression": payload.health_expression, "returnByValue": true }),
         connection_guard,
     )
-    .map_err(|error| record_post_mode_injection_failure(readiness, error))?;
-    validate_ui_probe_result_for_options(&health, payload.require_profile_mask)
-        .map_err(|error| record_post_mode_injection_failure(readiness, error))?;
+    .map_err(|error| {
+        record_post_mode_injection_failure(payload.require_codex_mode, readiness, error)
+    })?;
+    validate_ui_probe_result_for_options(&health, payload.require_profile_mask).map_err(
+        |error| record_post_mode_injection_failure(payload.require_codex_mode, readiness, error),
+    )?;
     let target_id = page.id.clone();
     let _ = socket.close(None);
     Ok(target_id)
@@ -589,8 +596,12 @@ fn record_codex_mode_probe_failure(readiness: &mut CodexModeReadiness, error: St
     }
 }
 
-fn record_post_mode_injection_failure(readiness: &mut CodexModeReadiness, error: String) -> String {
-    if readiness.observe_probe_failure() == CodexModeAction::Unresolved {
+fn record_post_mode_injection_failure(
+    require_codex_mode: bool,
+    readiness: &mut CodexModeReadiness,
+    error: String,
+) -> String {
+    if require_codex_mode && readiness.observe_probe_failure() == CodexModeAction::Unresolved {
         UI_INJECTION_UNAVAILABLE_ERROR.into()
     } else {
         error
