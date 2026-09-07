@@ -14,6 +14,15 @@ const backgroundPickerCssPath = join(import.meta.dir, "background-picker.css");
 const viewPath = join(import.meta.dir, "view.ts");
 
 describe("capture window visual tokens", () => {
+  test("paints the translucent shell once instead of stacking an inspector surface", () => {
+    const css = readFileSync(cssPath, "utf8");
+    const inspector = css.match(/\.incodex-capture-inspector\s*\{([^}]*)\}/)?.[1];
+    expect(inspector).toBeDefined();
+    expect(inspector).toContain("background: transparent");
+    expect(inspector).not.toContain("var(--incodex-capture-surface)");
+    expect(css).toMatch(/\.incodex-capture-dialog\s*\{[^}]*background: var\(--incodex-capture-surface\)/);
+  });
+
   test("maps Incodex semantics to live Codex tokens with stable fallbacks", () => {
     const css = readFileSync(cssPath, "utf8");
 
