@@ -33,3 +33,17 @@ describe("official dialog token discovery", () => {
     ])).toBeNull();
   });
 });
+
+describe("Codex live dialog CSS shapes", () => {
+  test("preserves opacity expressions and the last active declaration", () => {
+    expect(resolveClassToken(["surface/90"], "background-color", [
+      { selector: ".surface\\/90", property: "background-color", value: "var(--surface)" },
+      { selector: ".surface\\/90", property: "background-color", value: "color-mix(in oklab, var(--surface) 90%, transparent)" },
+    ])).toBe("color-mix(in oklab, var(--surface) 90%, transparent)");
+  });
+  test("rejects element-local Tailwind shadow machinery as a root token", () => {
+    expect(resolveClassToken(["shadow-lg"], "box-shadow", [
+      { selector: ".shadow-lg", property: "box-shadow", value: "var(--tw-shadow)" },
+    ])).toBeNull();
+  });
+});
