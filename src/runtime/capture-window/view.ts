@@ -5,6 +5,7 @@
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import type { CaptureWindowCopy } from "./copy.ts";
+import { escapeAttribute } from "./color-popover.ts";
 import { captureIcon } from "./icons.ts";
 import {
   CAPTURE_MAX_ZOOM,
@@ -211,6 +212,7 @@ function backgroundGridTemplate(
   const wallpapers = capturePresetSection("wallpapers");
   const activeSection = captureBackgroundSection(state.background);
   const wallpapersActive = activeSection === "wallpapers" || activeSection === "system-wallpapers";
+  const currentWallpaper = systemWallpapers.entries.find((entry) => entry.id === SYSTEM_WALLPAPER_CURRENT_ID);
   const currentWallpaperLoading = systemWallpapers.status === "loading";
   const currentWallpaperDisabled = currentWallpaperLoading || systemWallpapers.status === "unavailable";
   const currentWallpaperSelected = state.background.kind === "wallpaper" &&
@@ -221,10 +223,11 @@ function backgroundGridTemplate(
       <section class="incodex-capture-background-section" data-background-section="wallpapers" data-active="${wallpapersActive}" aria-label="${copy.backgroundWallpapers}">
         <div class="incodex-capture-background-section-heading">
           <h3 class="incodex-capture-background-section-title">${copy.backgroundWallpapers}</h3>
-          <button class="incodex-capture-background-expand" data-action="load-current-wallpaper" data-selected="${currentWallpaperSelected}" type="button" aria-busy="${currentWallpaperLoading}" aria-pressed="${currentWallpaperSelected}"${currentWallpaperDisabled ? " disabled" : ""}>${copy.getCurrentWallpaper}</button>
+          ${currentWallpaper ? "" : `<button class="incodex-capture-background-expand" data-action="load-current-wallpaper" data-selected="${currentWallpaperSelected}" type="button" aria-busy="${currentWallpaperLoading}" aria-pressed="${currentWallpaperSelected}"${currentWallpaperDisabled ? " disabled" : ""}>${copy.getCurrentWallpaper}</button>`}
         </div>
         <div class="incodex-capture-background-grid">
           ${presetButtonsTemplate(wallpapers, state)}
+          ${currentWallpaper ? `<button class="incodex-capture-background-option incodex-capture-wallpaper-label" data-system-wallpaper="${SYSTEM_WALLPAPER_CURRENT_ID}" type="button" data-selected="${currentWallpaperSelected}" aria-pressed="${currentWallpaperSelected}" aria-label="${copy.currentDesktop}" title="${copy.currentDesktop}"><img src="${escapeAttribute(currentWallpaper.thumbnail)}" alt=""></button>` : ""}
           <button class="incodex-capture-background-option incodex-capture-wallpaper-label" data-background-wallpaper type="button" data-selected="${wallpaper}" aria-label="${copy.wallpaper}" title="${copy.wallpaper}"><img data-wallpaper-preview src="${wallpaperImage}" alt="" ${wallpaperDataUrl ? "" : "hidden"}><span data-wallpaper-placeholder ${wallpaperDataUrl ? "hidden" : ""}>${captureIcon("plus")}</span></button>
         </div>
         <input class="incodex-capture-wallpaper-input" data-input="wallpaper" type="file" accept="image/png,image/jpeg,image/webp">

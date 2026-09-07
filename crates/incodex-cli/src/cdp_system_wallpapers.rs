@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 #[derive(Debug, PartialEq, Eq)]
 enum Request {
     List { id: String },
+    Restore { id: String },
     Load { id: String, wallpaper_id: String },
 }
 fn opaque_id(value: &Value) -> Option<String> {
@@ -25,6 +26,7 @@ fn parse_request(value: &Value) -> Option<Request> {
     let id = opaque_id(object.get("id")?)?;
     match object.get("kind")?.as_str()? {
         "list" if object.len() == 2 => Some(Request::List { id }),
+        "restore" if object.len() == 2 => Some(Request::Restore { id }),
         "load" if object.len() == 3 => Some(Request::Load {
             id,
             wallpaper_id: opaque_id(object.get("wallpaperId")?)?,
@@ -54,14 +56,26 @@ pub(super) fn poll(
     else {
         return Ok(());
     };
+    let root = incodex_core::paths::user_root();
     let result = match request {
+        Request::Restore { id } => {
+            let entries = if crate::shot_wallpaper_preference::enabled(&root) {
+                library.list().unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            json!({ "id": id, "ok": true, "entries": entries })
+        }
         Request::List { id } => match library.list() {
             Ok(entries) => json!({ "id": id, "ok": true, "entries": entries }),
             Err(_) => {
                 json!({ "id": id, "ok": false, "error": "system wallpaper catalog unavailable" })
             }
         },
-        Request::Load { id, wallpaper_id } => match library.load(&wallpaper_id) {
+        Request::Load { id, wallpaper_id } => match library.load(&wallpaper_id).and_then(|data| {
+            crate::shot_wallpaper_preference::remember(&root)?;
+            Ok(data)
+        }) {
             Ok(data_url) => json!({ "id": id, "ok": true, "dataUrl": data_url }),
             Err(_) => {
                 json!({ "id": id, "ok": false, "error": "system wallpaper image unavailable" })

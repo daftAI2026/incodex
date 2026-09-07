@@ -123,7 +123,7 @@ describe("capture window preview", () => {
     );
     expect(expandedGradients).toContain('aria-expanded="true"');
     expect(expandedGradients).toContain("Show less");
-    expect(markup.match(/data-background-color=/g)).toHaveLength(9);
+    expect(markup.match(/data-background-color=/g)).toHaveLength(15);
     const plainColorMarkup = markup.slice(plainColorSection);
     expect(plainColorMarkup).not.toContain('data-background="transparent"');
     expect(plainColorMarkup.indexOf('data-background-color="#383838"')).toBeLessThan(

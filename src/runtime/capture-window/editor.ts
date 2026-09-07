@@ -40,6 +40,7 @@ import {
   isCapturePreferenceCommand,
   loadCapturePreferences,
   saveCapturePreferences,
+  shouldRestoreCurrentWallpaper,
 } from "./preferences.ts";
 import { resolveSelectedCaptureRegions } from "./redactions.ts";
 import { mountCaptureRegionLayer } from "./regions.ts";
@@ -84,7 +85,6 @@ export type CaptureWindowEditorController = {
   destroy: () => void;
   getState: () => CaptureWindowState;
 };
-
 type PointerGesture = {
   pointerId: number;
   startClientX: number;
@@ -92,7 +92,6 @@ type PointerGesture = {
   startPanX: number;
   startPanY: number;
 };
-
 export function mountCaptureWindowEditor(
   host: HTMLElement,
   options: CaptureWindowEditorOptions,
@@ -133,6 +132,20 @@ export function mountCaptureWindowEditor(
   host.append(root);
   const systemWallpaperController = createSystemWallpaperController(options.systemWallpapers, () => {
     if (!destroyed && root.dataset.state === "editing") render();
+  });
+  const systemWallpaperActions = createSystemWallpaperEditorActions(systemWallpaperController, {
+    apply: ({ dataUrl, id }) => dispatch({
+      background: { dataUrl, kind: "wallpaper", systemId: id },
+      kind: "set-background",
+    }),
+    isAlive: () => !destroyed,
+    onError: () => notify(copy.currentWallpaperError),
+    onUnavailable: () => notify(copy.currentWallpaperUnavailable),
+    resolve: ({ dataUrl, id }) => backgroundImages.resolve({
+      dataUrl,
+      kind: "wallpaper",
+      systemId: id,
+    }),
   });
   const resizeObserver = new ResizeObserver(() => {
     const canvas = root.querySelector<HTMLCanvasElement>(".incodex-capture-canvas");
@@ -273,20 +286,7 @@ export function mountCaptureWindowEditor(
         lastBackgroundColor = color;
         dispatch({ background: { color, kind: "color" }, kind: "set-background" });
       },
-      systemWallpapers: createSystemWallpaperEditorActions(systemWallpaperController, {
-        apply: ({ dataUrl, id }) => dispatch({
-          background: { dataUrl, kind: "wallpaper", systemId: id },
-          kind: "set-background",
-        }),
-        isAlive: () => !destroyed,
-        onError: () => notify(copy.currentWallpaperError),
-        onUnavailable: () => notify(copy.currentWallpaperUnavailable),
-        resolve: ({ dataUrl, id }) => backgroundImages.resolve({
-          dataUrl,
-          kind: "wallpaper",
-          systemId: id,
-        }),
-      }),
+      systemWallpapers: systemWallpaperActions,
     });
     wireStage(
       root,
@@ -430,8 +430,8 @@ export function mountCaptureWindowEditor(
   function renderCurrentCapture(backgroundImage: CanvasImageSource | null): HTMLCanvasElement {
     return renderCaptureToCanvas(source, currentRenderState(), { backgroundImage, isMacOS });
   }
-
   render();
+  void systemWallpaperActions.restoreCurrent(shouldRestoreCurrentWallpaper(preferenceStorage));
   hydrateBackground(state.background);
 
   return {

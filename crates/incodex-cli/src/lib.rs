@@ -12,6 +12,7 @@ pub(crate) mod macos_image_io;
 #[cfg(target_os = "macos")]
 mod macos_desktop_wallpaper;
 pub(crate) mod system_wallpapers;
+mod shot_wallpaper_preference;
 pub(crate) mod system_wallpaper_catalog;
 pub mod confirm;
 #[cfg(not(target_os = "windows"))]

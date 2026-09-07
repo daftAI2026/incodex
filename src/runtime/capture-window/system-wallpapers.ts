@@ -16,6 +16,7 @@ export const SYSTEM_WALLPAPER_CURRENT_ID = "system-wallpaper-current";
 
 export type SystemWallpaperAdapter = {
   list: () => Promise<SystemWallpaperEntry[]>;
+  restore?: () => Promise<SystemWallpaperEntry[]>;
   load: (id: string) => Promise<string>;
 };
 
@@ -33,6 +34,7 @@ export type SystemWallpaperSelection = {
 
 export type SystemWallpaperController = {
   destroy: () => void;
+  restore: () => Promise<void>;
   ensureLoaded: () => Promise<readonly SystemWallpaperEntry[]>;
   getState: () => SystemWallpaperState;
   getSelectionRevision: () => number;
@@ -111,6 +113,7 @@ export function createSystemWallpaperController(
       (dataUrl) => dataUrl,
       (error: unknown) => {
         if (originalLoads.get(id) === pending) originalLoads.delete(id);
+        publish({ entries: [], status: "error" });
         throw error;
       },
     );
@@ -135,6 +138,16 @@ export function createSystemWallpaperController(
       originalLoads.clear();
       listPromise = null;
     },
+    restore: async () => {
+      if (!adapter?.restore || destroyed || state.status !== "idle") return;
+      publish({ entries: [], status: "loading" });
+      try {
+        const entries = await adapter.restore();
+        if (!destroyed) publish({ entries, status: entries.length ? "ready" : "idle" });
+      } catch {
+        if (!destroyed) publish({ entries: [], status: "error" });
+      }
+    },
     ensureLoaded,
     getState: () => state,
     getSelectionRevision: () => selectionRevision,
@@ -157,6 +170,7 @@ export function createSystemWallpaperController(
 
 export type SystemWallpaperEditorActions = {
   loadCurrent: () => Promise<void>;
+  restoreCurrent: (apply?: boolean) => Promise<void>;
   select: (id: string) => Promise<void>;
 };
 
@@ -194,6 +208,14 @@ export function createSystemWallpaperEditorActions(
   }
 
   return {
+    restoreCurrent: async (apply = true) => {
+      const revision = controller.getSelectionRevision();
+      await controller.restore();
+      if (!apply || !pipeline.isAlive() || revision !== controller.getSelectionRevision()) return;
+      if (controller.getState().entries.some((entry) => entry.id === SYSTEM_WALLPAPER_CURRENT_ID)) {
+        await select(SYSTEM_WALLPAPER_CURRENT_ID);
+      }
+    },
     loadCurrent: async () => {
       controller.invalidateSelection();
       const revision = controller.getSelectionRevision();
@@ -220,6 +242,9 @@ export function wireSystemWallpaperActions(
   root: HTMLElement,
   actions: SystemWallpaperEditorActions,
 ): void {
+  root.querySelector<HTMLElement>("[data-system-wallpaper]")?.addEventListener("click", () => {
+    void actions.select(SYSTEM_WALLPAPER_CURRENT_ID);
+  });
   const current = root.querySelector<HTMLButtonElement>("[data-action='load-current-wallpaper']");
   current?.addEventListener("click", () => {
     current.setAttribute("aria-busy", "true");
@@ -233,7 +258,7 @@ export function syncSystemWallpaperControls(
   root: HTMLElement,
   state: CaptureWindowState,
 ): void {
-  const current = root.querySelector<HTMLElement>("[data-action='load-current-wallpaper']");
+  const current = root.querySelector<HTMLElement>("[data-system-wallpaper], [data-action='load-current-wallpaper']");
   if (!current) return;
   const selected = state.background.kind === "wallpaper" &&
     state.background.systemId === SYSTEM_WALLPAPER_CURRENT_ID;

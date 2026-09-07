@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖编辑器状态机与既有浏览器偏好存储。
+ * [OUTPUT]: 保存非敏感编辑偏好及当前桌面的来源 ID，不保存图片或本地路径。
+ * [POS]: capture-window 的偏好边界；来源可用性由主机恢复，背景选择由此处语义恢复。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import {
   applyCaptureCommand,
   CAPTURE_MAX_PADDING,
@@ -30,7 +36,7 @@ export type CapturePreferenceStorage = {
 
 export type CapturePreferenceBackground =
   | Exclude<CaptureBackground, { kind: "wallpaper" }>
-  | { kind: "wallpaper" };
+  | { kind: "wallpaper"; systemId?: "system-wallpaper-current" };
 
 export type CaptureWindowPreferences = {
   background: CapturePreferenceBackground;
@@ -63,7 +69,7 @@ export function saveCapturePreferences(
   state: CaptureWindowState,
 ): void {
   const background = state.background.kind === "wallpaper"
-    ? { kind: "wallpaper" as const }
+    ? { kind: "wallpaper" as const, ...(state.background.systemId === "system-wallpaper-current" ? { systemId: "system-wallpaper-current" as const } : {}) }
     : state.background;
   const preferences: CaptureWindowPreferences = {
     background,
@@ -128,6 +134,9 @@ function normalizeCapturePreferences(input: unknown): CaptureWindowPreferences {
 function normalizeBackground(value: unknown): CapturePreferenceBackground | null {
   if (!value || typeof value !== "object") return null;
   const background = value as Record<string, unknown>;
+  if (background.kind === "wallpaper" && background.systemId === "system-wallpaper-current") {
+    return { kind: "wallpaper", systemId: "system-wallpaper-current" };
+  }
   if (background.kind === "transparent" || background.kind === "wallpaper") {
     return { kind: background.kind };
   }
@@ -149,4 +158,15 @@ function defaultCapturePreferences(): CaptureWindowPreferences {
     ...DEFAULT_CAPTURE_PREFERENCES,
     background: { ...DEFAULT_CAPTURE_PREFERENCES.background },
   };
+}
+
+
+export function shouldRestoreCurrentWallpaper(storage: CapturePreferenceStorage | null): boolean {
+  try {
+    if (!storage?.getItem(CAPTURE_PREFERENCES_KEY)) return true;
+    const { background } = loadCapturePreferences(storage);
+    return background.kind === "wallpaper" && background.systemId === "system-wallpaper-current";
+  } catch {
+    return false;
+  }
 }

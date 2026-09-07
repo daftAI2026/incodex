@@ -28,3 +28,9 @@ fn system_wallpaper_requests_allow_only_catalog_and_opaque_id() {
         assert!(parse_request(&value).is_none());
     }
 }
+
+#[test]
+fn restore_accepts_no_user_supplied_preference_path() {
+    assert_eq!(parse_request(&json!({"id":"restore-1","kind":"restore"})), Some(Request::Restore { id: "restore-1".into() }));
+    assert!(parse_request(&json!({"id":"restore-1","kind":"restore","path":"/tmp/other"})).is_none());
+}

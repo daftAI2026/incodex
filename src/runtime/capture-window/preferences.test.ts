@@ -4,6 +4,7 @@ import {
   applyCapturePreferences,
   loadCapturePreferences,
   saveCapturePreferences,
+  shouldRestoreCurrentWallpaper,
 } from "./preferences.ts";
 
 class MemoryStorage {
@@ -90,4 +91,16 @@ describe("capture window preferences", () => {
     storage.failWrites = true;
     expect(() => saveCapturePreferences(storage, state)).not.toThrow();
   });
+});
+
+
+test("restoration preserves an explicit different background and remembers only current source ID", () => {
+  const storage = new MemoryStorage();
+  expect(shouldRestoreCurrentWallpaper(storage)).toBe(true);
+  const state = createCaptureWindowState(SOURCE);
+  saveCapturePreferences(storage, state);
+  expect(shouldRestoreCurrentWallpaper(storage)).toBe(false);
+  saveCapturePreferences(storage, { ...state, background: { kind: "wallpaper", systemId: "system-wallpaper-current", dataUrl: "data:image/jpeg;base64,private" } });
+  expect(shouldRestoreCurrentWallpaper(storage)).toBe(true);
+  expect(storage.values.get("incodex-window-capture-prefs")).not.toContain("private");
 });

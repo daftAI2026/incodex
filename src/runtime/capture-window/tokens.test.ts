@@ -88,7 +88,7 @@ describe("capture window visual tokens", () => {
     expect(css).toMatch(
       /\.incodex-capture-background-grid-plain\s*\{[^}]*grid-template-columns: repeat\(8, minmax\(0, 1fr\)\)/,
     );
-    const option = css.match(/\.incodex-capture-background-option\s*\{([^}]*)\}/)?.[1];
+    const option = css.match(/(?:^|\n)\.incodex-capture-background-option\s*\{([^}]*)\}/)?.[1];
     expect(option).toContain("aspect-ratio: 1");
     expect(option).toContain("width: 100%");
     expect(option).toContain("height: auto");

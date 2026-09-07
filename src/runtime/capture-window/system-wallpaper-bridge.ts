@@ -7,10 +7,10 @@
 import type { SystemWallpaperAdapter, SystemWallpaperEntry } from "./system-wallpapers.ts";
 
 export type SystemWallpaperRequest =
-  | { id: string; kind: "list" }
+  | { id: string; kind: "list" | "restore" }
   | { id: string; kind: "load"; wallpaperId: string };
 type Pending = {
-  kind: "list" | "load";
+  kind: "list" | "restore" | "load";
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -27,7 +27,7 @@ export function createSystemWallpaperBridge(
 } {
   const pending = new Map<string, Pending>();
   const queue: SystemWallpaperRequest[] = [];
-  function request(kind: "list" | "load", wallpaperId?: string): Promise<unknown> {
+  function request(kind: "list" | "restore" | "load", wallpaperId?: string): Promise<unknown> {
     if (pending.size >= 4) return Promise.reject(new Error("system wallpaper request busy"));
     const id = createId();
     return new Promise((resolve, reject) => {
@@ -36,11 +36,12 @@ export function createSystemWallpaperBridge(
         reject(new Error("system wallpaper request timed out"));
       }, timeoutMs);
       pending.set(id, { kind, resolve, reject, timer });
-      queue.push(kind === "list" ? { id, kind } : { id, kind, wallpaperId: wallpaperId ?? "" });
+      queue.push(kind !== "load" ? { id, kind } : { id, kind, wallpaperId: wallpaperId ?? "" });
     });
   }
   return {
     list: () => request("list") as Promise<SystemWallpaperEntry[]>,
+    restore: () => request("restore") as Promise<SystemWallpaperEntry[]>,
     load: (id) => /^[a-zA-Z0-9-]{1,128}$/.test(id)
       ? request("load", id) as Promise<string>
       : Promise.reject(new Error("invalid system wallpaper id")),
@@ -59,7 +60,7 @@ export function createSystemWallpaperBridge(
       clearTimeout(entry.timer);
       if (response.ok !== true) {
         entry.reject(new Error("system wallpaper host failed"));
-      } else if (entry.kind === "list" && validEntries(response.entries)) {
+      } else if (entry.kind !== "load" && validEntries(response.entries)) {
         entry.resolve(response.entries);
       } else if (entry.kind === "load" && validOriginal(response.dataUrl)) {
         entry.resolve(response.dataUrl);

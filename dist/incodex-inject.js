@@ -614,7 +614,13 @@ var capturePlainColors = [
   "#188f51",
   "#0c8ce8",
   "#8536ec",
-  "#383838"
+  "#383838",
+  "#ebebeb",
+  "#fabdb5",
+  "#ffc570",
+  "#fade8f",
+  "#a0e8bb",
+  "#a9d6f9"
 ];
 var captureRasterPresetIds = capturePresets.filter((preset) => preset.section === "wallpapers").map((preset) => preset.id);
 var capturePresetSections = [
@@ -746,6 +752,7 @@ function createSystemWallpaperController(adapter, onChange) {
     const pending = source.then((dataUrl) => dataUrl, (error) => {
       if (originalLoads.get(id) === pending)
         originalLoads.delete(id);
+      publish({ entries: [], status: "error" });
       throw error;
     });
     originalLoads.set(id, pending);
@@ -767,6 +774,19 @@ function createSystemWallpaperController(adapter, onChange) {
       pendingSelectionId = null;
       originalLoads.clear();
       listPromise = null;
+    },
+    restore: async () => {
+      if (!adapter?.restore || destroyed || state.status !== "idle")
+        return;
+      publish({ entries: [], status: "loading" });
+      try {
+        const entries = await adapter.restore();
+        if (!destroyed)
+          publish({ entries, status: entries.length ? "ready" : "idle" });
+      } catch {
+        if (!destroyed)
+          publish({ entries: [], status: "error" });
+      }
     },
     ensureLoaded,
     getState: () => state,
@@ -813,6 +833,15 @@ function createSystemWallpaperEditorActions(controller, pipeline) {
     });
   }
   return {
+    restoreCurrent: async (apply = true) => {
+      const revision = controller.getSelectionRevision();
+      await controller.restore();
+      if (!apply || !pipeline.isAlive() || revision !== controller.getSelectionRevision())
+        return;
+      if (controller.getState().entries.some((entry) => entry.id === SYSTEM_WALLPAPER_CURRENT_ID)) {
+        await select(SYSTEM_WALLPAPER_CURRENT_ID);
+      }
+    },
     loadCurrent: async () => {
       controller.invalidateSelection();
       const revision = controller.getSelectionRevision();
@@ -837,6 +866,9 @@ function createSystemWallpaperEditorActions(controller, pipeline) {
   };
 }
 function wireSystemWallpaperActions(root, actions) {
+  root.querySelector("[data-system-wallpaper]")?.addEventListener("click", () => {
+    actions.select(SYSTEM_WALLPAPER_CURRENT_ID);
+  });
   const current = root.querySelector("[data-action='load-current-wallpaper']");
   current?.addEventListener("click", () => {
     current.setAttribute("aria-busy", "true");
@@ -848,7 +880,7 @@ function wireSystemWallpaperActions(root, actions) {
   });
 }
 function syncSystemWallpaperControls(root, state) {
-  const current = root.querySelector("[data-action='load-current-wallpaper']");
+  const current = root.querySelector("[data-system-wallpaper], [data-action='load-current-wallpaper']");
   if (!current)
     return;
   const selected = state.background.kind === "wallpaper" && state.background.systemId === SYSTEM_WALLPAPER_CURRENT_ID;
@@ -967,6 +999,7 @@ var ENGLISH = {
   currentWallpaperLoading: "Loading current wallpaper",
   currentWallpaperUnavailable: "The current wallpaper is unavailable",
   getCurrentWallpaper: "Use current wallpaper",
+  currentDesktop: "Current desktop",
   maskColor: "Mask color",
   mosaic: "Mosaic",
   move: "Move",
@@ -1022,6 +1055,7 @@ var CHINESE = {
   currentWallpaperLoading: "正在获取当前壁纸",
   currentWallpaperUnavailable: "当前桌面壁纸不可用",
   getCurrentWallpaper: "获取当前壁纸",
+  currentDesktop: "当前桌面",
   maskColor: "遮罩颜色",
   mosaic: "马赛克",
   move: "移动",
@@ -1568,7 +1602,7 @@ function loadCapturePreferences(storage) {
   }
 }
 function saveCapturePreferences(storage, state) {
-  const background = state.background.kind === "wallpaper" ? { kind: "wallpaper" } : state.background;
+  const background = state.background.kind === "wallpaper" ? { kind: "wallpaper", ...state.background.systemId === "system-wallpaper-current" ? { systemId: "system-wallpaper-current" } : {} } : state.background;
   const preferences = {
     background,
     padding: state.padding,
@@ -1618,6 +1652,9 @@ function normalizeBackground(value) {
   if (!value || typeof value !== "object")
     return null;
   const background = value;
+  if (background.kind === "wallpaper" && background.systemId === "system-wallpaper-current") {
+    return { kind: "wallpaper", systemId: "system-wallpaper-current" };
+  }
   if (background.kind === "transparent" || background.kind === "wallpaper") {
     return { kind: background.kind };
   }
@@ -1634,6 +1671,16 @@ function defaultCapturePreferences() {
     ...DEFAULT_CAPTURE_PREFERENCES,
     background: { ...DEFAULT_CAPTURE_PREFERENCES.background }
   };
+}
+function shouldRestoreCurrentWallpaper(storage) {
+  try {
+    if (!storage?.getItem(CAPTURE_PREFERENCES_KEY))
+      return true;
+    const { background } = loadCapturePreferences(storage);
+    return background.kind === "wallpaper" && background.systemId === "system-wallpaper-current";
+  } catch {
+    return false;
+  }
 }
 
 // src/runtime/capture-window/redactions.ts
@@ -1867,6 +1914,7 @@ function backgroundGridTemplate(state, copy, lastBackgroundColor, wallpaperDataU
   const wallpapers = capturePresetSection("wallpapers");
   const activeSection = captureBackgroundSection(state.background);
   const wallpapersActive = activeSection === "wallpapers" || activeSection === "system-wallpapers";
+  const currentWallpaper = systemWallpapers.entries.find((entry) => entry.id === SYSTEM_WALLPAPER_CURRENT_ID);
   const currentWallpaperLoading = systemWallpapers.status === "loading";
   const currentWallpaperDisabled = currentWallpaperLoading || systemWallpapers.status === "unavailable";
   const currentWallpaperSelected = state.background.kind === "wallpaper" && state.background.systemId === SYSTEM_WALLPAPER_CURRENT_ID;
@@ -1876,10 +1924,11 @@ function backgroundGridTemplate(state, copy, lastBackgroundColor, wallpaperDataU
       <section class="incodex-capture-background-section" data-background-section="wallpapers" data-active="${wallpapersActive}" aria-label="${copy.backgroundWallpapers}">
         <div class="incodex-capture-background-section-heading">
           <h3 class="incodex-capture-background-section-title">${copy.backgroundWallpapers}</h3>
-          <button class="incodex-capture-background-expand" data-action="load-current-wallpaper" data-selected="${currentWallpaperSelected}" type="button" aria-busy="${currentWallpaperLoading}" aria-pressed="${currentWallpaperSelected}"${currentWallpaperDisabled ? " disabled" : ""}>${copy.getCurrentWallpaper}</button>
+          ${currentWallpaper ? "" : `<button class="incodex-capture-background-expand" data-action="load-current-wallpaper" data-selected="${currentWallpaperSelected}" type="button" aria-busy="${currentWallpaperLoading}" aria-pressed="${currentWallpaperSelected}"${currentWallpaperDisabled ? " disabled" : ""}>${copy.getCurrentWallpaper}</button>`}
         </div>
         <div class="incodex-capture-background-grid">
           ${presetButtonsTemplate(wallpapers, state)}
+          ${currentWallpaper ? `<button class="incodex-capture-background-option incodex-capture-wallpaper-label" data-system-wallpaper="${SYSTEM_WALLPAPER_CURRENT_ID}" type="button" data-selected="${currentWallpaperSelected}" aria-pressed="${currentWallpaperSelected}" aria-label="${copy.currentDesktop}" title="${copy.currentDesktop}"><img src="${escapeAttribute(currentWallpaper.thumbnail)}" alt=""></button>` : ""}
           <button class="incodex-capture-background-option incodex-capture-wallpaper-label" data-background-wallpaper type="button" data-selected="${wallpaper}" aria-label="${copy.wallpaper}" title="${copy.wallpaper}"><img data-wallpaper-preview src="${wallpaperImage}" alt="" ${wallpaperDataUrl ? "" : "hidden"}><span data-wallpaper-placeholder ${wallpaperDataUrl ? "hidden" : ""}>${captureIcon("plus")}</span></button>
         </div>
         <input class="incodex-capture-wallpaper-input" data-input="wallpaper" type="file" accept="image/png,image/jpeg,image/webp">
@@ -1985,6 +2034,20 @@ function mountCaptureWindowEditor(host, options) {
   const systemWallpaperController = createSystemWallpaperController(options.systemWallpapers, () => {
     if (!destroyed && root.dataset.state === "editing")
       render();
+  });
+  const systemWallpaperActions = createSystemWallpaperEditorActions(systemWallpaperController, {
+    apply: ({ dataUrl, id }) => dispatch({
+      background: { dataUrl, kind: "wallpaper", systemId: id },
+      kind: "set-background"
+    }),
+    isAlive: () => !destroyed,
+    onError: () => notify(copy.currentWallpaperError),
+    onUnavailable: () => notify(copy.currentWallpaperUnavailable),
+    resolve: ({ dataUrl, id }) => backgroundImages.resolve({
+      dataUrl,
+      kind: "wallpaper",
+      systemId: id
+    })
   });
   const resizeObserver = new ResizeObserver(() => {
     const canvas = root.querySelector(".incodex-capture-canvas");
@@ -2126,20 +2189,7 @@ function mountCaptureWindowEditor(host, options) {
         lastBackgroundColor = color;
         dispatch({ background: { color, kind: "color" }, kind: "set-background" });
       },
-      systemWallpapers: createSystemWallpaperEditorActions(systemWallpaperController, {
-        apply: ({ dataUrl, id }) => dispatch({
-          background: { dataUrl, kind: "wallpaper", systemId: id },
-          kind: "set-background"
-        }),
-        isAlive: () => !destroyed,
-        onError: () => notify(copy.currentWallpaperError),
-        onUnavailable: () => notify(copy.currentWallpaperUnavailable),
-        resolve: ({ dataUrl, id }) => backgroundImages.resolve({
-          dataUrl,
-          kind: "wallpaper",
-          systemId: id
-        })
-      })
+      systemWallpapers: systemWallpaperActions
     });
     wireStage(root, rendered, frame, () => state, dispatchRegion, () => `manual-${++manualRegionSequence}`, () => ({ panX, panY }), (x, y) => {
       panX = x;
@@ -2280,6 +2330,7 @@ function mountCaptureWindowEditor(host, options) {
     return renderCaptureToCanvas(source, currentRenderState(), { backgroundImage, isMacOS });
   }
   render();
+  systemWallpaperActions.restoreCurrent(shouldRestoreCurrentWallpaper(preferenceStorage));
   hydrateBackground(state.background);
   return {
     destroy: close,
@@ -2586,11 +2637,12 @@ function createSystemWallpaperBridge(createId = () => `wallpaper-${crypto.random
         reject(new Error("system wallpaper request timed out"));
       }, timeoutMs);
       pending.set(id, { kind, resolve, reject, timer });
-      queue.push(kind === "list" ? { id, kind } : { id, kind, wallpaperId: wallpaperId ?? "" });
+      queue.push(kind !== "load" ? { id, kind } : { id, kind, wallpaperId: wallpaperId ?? "" });
     });
   }
   return {
     list: () => request("list"),
+    restore: () => request("restore"),
     load: (id) => /^[a-zA-Z0-9-]{1,128}$/.test(id) ? request("load", id) : Promise.reject(new Error("invalid system wallpaper id")),
     takeRequest: () => {
       while (queue.length) {
@@ -2610,7 +2662,7 @@ function createSystemWallpaperBridge(createId = () => `wallpaper-${crypto.random
       clearTimeout(entry.timer);
       if (response.ok !== true) {
         entry.reject(new Error("system wallpaper host failed"));
-      } else if (entry.kind === "list" && validEntries(response.entries)) {
+      } else if (entry.kind !== "load" && validEntries(response.entries)) {
         entry.resolve(response.entries);
       } else if (entry.kind === "load" && validOriginal(response.dataUrl)) {
         entry.resolve(response.dataUrl);
@@ -5155,8 +5207,12 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 }
 
 .incodex-capture-background-grid-plain {
-  gap: var(--incodex-capture-space);
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: calc(var(--incodex-capture-space) * 2);
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+}
+
+.incodex-capture-background-grid-plain .incodex-capture-background-option {
+  border-radius: var(--radius-full, 9999px);
 }
 
 

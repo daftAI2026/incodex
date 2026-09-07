@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖编辑器颜色状态、浏览器 DOM 与浮层定位。
+ * [OUTPUT]: 提供选色浮层生命周期及共享 HTML 属性转义。
+ * [POS]: capture-window 的选色交互边界；view 复用属性转义保护本机缩略图属性。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 export type CaptureColorTarget = "background" | "solid";
 
 export type CaptureHsv = {
@@ -346,6 +352,6 @@ function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
-function escapeAttribute(value: string): string {
+export function escapeAttribute(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
 }

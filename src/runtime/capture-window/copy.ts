@@ -24,6 +24,7 @@ export type CaptureWindowCopy = {
   currentWallpaperLoading: string;
   currentWallpaperUnavailable: string;
   getCurrentWallpaper: string;
+  currentDesktop: string;
   maskColor: string;
   mosaic: string;
   move: string;
@@ -80,6 +81,7 @@ const ENGLISH: CaptureWindowCopy = {
   currentWallpaperLoading: "Loading current wallpaper",
   currentWallpaperUnavailable: "The current wallpaper is unavailable",
   getCurrentWallpaper: "Use current wallpaper",
+  currentDesktop: "Current desktop",
   maskColor: "Mask color",
   mosaic: "Mosaic",
   move: "Move",
@@ -136,6 +138,7 @@ const CHINESE: CaptureWindowCopy = {
   currentWallpaperLoading: "正在获取当前壁纸",
   currentWallpaperUnavailable: "当前桌面壁纸不可用",
   getCurrentWallpaper: "获取当前壁纸",
+  currentDesktop: "当前桌面",
   maskColor: "遮罩颜色",
   mosaic: "马赛克",
   move: "移动",
