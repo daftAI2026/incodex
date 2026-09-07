@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { blobatarUri } from "blobatar/uri";
 import { findProfileMenuIdentity, profileMaskHealth, refreshProfileMaskHealth } from "./incognito-profile-mask.ts";
 
-function withProfileNavigation(run: (navigate: (count: number) => void) => void) {
+function withProfileNavigation(
+  run: (navigate: (count: number, settings?: boolean, recognized?: boolean) => void) => void,
+) {
   const globals = ["window", "document", "HTMLImageElement"];
   const previous = globals.map((key) => Object.getOwnPropertyDescriptor(globalThis, key));
   class Avatar {
@@ -19,8 +21,8 @@ function withProfileNavigation(run: (navigate: (count: number) => void) => void)
     setAttribute(key: string, value: string) { this.attrs.set(key, value); }
     getAttribute(key: string) { return key === "src" ? this.src : this.attrs.get(key) ?? null; }
   }
-  const footer = () => {
-    const attrs = new Map<string, string>();
+  const footer = (recognized = true) => {
+    const attrs = new Map<string, string>([["aria-haspopup", "menu"]]);
     const name = {
       textContent: "Official Name",
       attrs: new Map<string, string>(),
@@ -32,6 +34,7 @@ function withProfileNavigation(run: (navigate: (count: number) => void) => void)
       setAttribute: (key: string, value: string) => attrs.set(key, value),
       getAttribute: (key: string) => attrs.get(key) ?? null,
       querySelector: (selector: string) => {
+        if (!recognized) return null;
         if (selector.includes("span.min-w-0.flex-1.truncate")) return name;
         if (selector.includes("img.rounded-full")) return avatar;
         return null;
@@ -39,6 +42,11 @@ function withProfileNavigation(run: (navigate: (count: number) => void) => void)
     };
   };
   let footers = [footer()];
+  let inSettings = false;
+  const settingsNavigation = {
+    querySelector: (selector: string) =>
+      ['input[role="searchbox"]', 'button.sidebar-item[role="link"]'].includes(selector) ? {} : null,
+  };
   const replacements = [
     {
       __incodexIncognito: true,
@@ -47,7 +55,11 @@ function withProfileNavigation(run: (navigate: (count: number) => void) => void)
         dataUrl: blobatarUri("Temporary", { background: "circle" }), status: "ready", probe: null,
       },
     },
-    { querySelectorAll: () => footers, getElementById: () => null },
+    {
+      querySelectorAll: (selector: string) => selector === "nav.sidebar-navigation"
+        ? (inSettings ? [settingsNavigation] : []) : footers,
+      getElementById: () => null,
+    },
     Avatar,
   ];
   try {
@@ -56,7 +68,10 @@ function withProfileNavigation(run: (navigate: (count: number) => void) => void)
         configurable: true, writable: true, value: replacements[index],
       });
     });
-    run((count) => { footers = Array.from({ length: count }, footer); });
+    run((count, settings = false, recognized = true) => {
+      inSettings = settings;
+      footers = Array.from({ length: count }, () => footer(recognized));
+    });
   } finally {
     globals.forEach((key, index) => {
       if (previous[index]) Object.defineProperty(globalThis, key, previous[index]!);
@@ -70,12 +85,28 @@ describe("profile mask navigation scope", () => {
     withProfileNavigation((navigate) => {
       expect(profileMaskHealth()).toBe(false);
       expect(refreshProfileMaskHealth()).toBe(true);
-      navigate(0);
+      navigate(0, true);
       expect(profileMaskHealth()).toBe(true);
       expect(refreshProfileMaskHealth()).toBe(true);
       navigate(1);
       expect(profileMaskHealth()).toBe(false);
       expect(refreshProfileMaskHealth()).toBe(true);
+    });
+  });
+
+  test("does not accept an absent identity without a verified settings surface", () => {
+    withProfileNavigation((navigate) => {
+      navigate(0);
+      expect(profileMaskHealth()).toBe(false);
+      expect(refreshProfileMaskHealth()).toBe(false);
+    });
+  });
+
+  test.each([false, true])("rejects an unrecognized account trigger even with settings=%s", (settings) => {
+    withProfileNavigation((navigate) => {
+      navigate(1, settings, false);
+      expect(profileMaskHealth()).toBe(false);
+      expect(refreshProfileMaskHealth()).toBe(false);
     });
   });
 
