@@ -419,3 +419,25 @@ test("current wallpaper discovery cannot override a newer background choice", as
   expect(loads).toBe(0);
   expect(applied).toEqual([]);
 });
+
+
+test("available current wallpaper precedes upload and hides the fetch action", () => {
+  const markup = captureWindowTemplate(createCaptureWindowState(SOURCE), captureWindowCopy("en-US"), {
+    systemWallpapers: { entries: [CURRENT_ENTRY], status: "ready" },
+  });
+  expect(markup).toContain('data-system-wallpaper="system-wallpaper-current"');
+  expect(markup.indexOf('data-system-wallpaper="')).toBeLessThan(markup.indexOf("data-background-wallpaper"));
+  expect(markup).not.toContain('data-action="load-current-wallpaper"');
+});
+
+test("restores the remembered entry without selecting a background", async () => {
+  let loads = 0;
+  const controller = createSystemWallpaperController({
+    list: async () => [], load: async () => { loads += 1; return ""; },
+    restore: async () => [CURRENT_ENTRY],
+  });
+  await controller.restore();
+  expect(controller.getState().entries).toEqual([CURRENT_ENTRY]);
+  expect(loads).toBe(0);
+  expect(controller.isSelectionCurrent(CURRENT_ENTRY.id)).toBe(false);
+});

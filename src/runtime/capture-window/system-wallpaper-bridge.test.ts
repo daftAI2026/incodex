@@ -54,3 +54,12 @@ test("system wallpaper originals accept JPEG without forcing photo assets into h
   bridge.resolve({ id: "jpeg", ok: true, dataUrl: "data:image/jpeg;base64,/9j/" });
   expect(await pending).toBe("data:image/jpeg;base64,/9j/");
 });
+
+
+test("restoration is a separate closed host request", async () => {
+  const bridge = createSystemWallpaperBridge(() => "restore-1");
+  const pending = bridge.restore!();
+  expect(bridge.takeRequest()).toEqual({ id: "restore-1", kind: "restore" });
+  bridge.resolve({ id: "restore-1", ok: true, entries: [] });
+  expect(await pending).toEqual([]);
+});
