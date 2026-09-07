@@ -6,7 +6,7 @@ import { blobatarUri } from "blobatar/uri";
 import { findProfileMenuIdentity, profileMaskHealth, refreshProfileMaskHealth } from "./incognito-profile-mask.ts";
 
 function withProfileNavigation(
-  run: (navigate: (count: number, settings?: boolean | "loading" | "loading-text", recognized?: boolean) => void) => void,
+  run: (navigate: (count: number, settings?: boolean | "loading" | "loading-text" | "competing-loading", recognized?: boolean, trigger?: "menu" | "controls") => void) => void,
 ) {
   const globals = ["window", "document", "HTMLImageElement"];
   const previous = globals.map((key) => Object.getOwnPropertyDescriptor(globalThis, key));
@@ -21,8 +21,8 @@ function withProfileNavigation(
     setAttribute(key: string, value: string) { this.attrs.set(key, value); }
     getAttribute(key: string) { return key === "src" ? this.src : this.attrs.get(key) ?? null; }
   }
-  const footer = (recognized = true) => {
-    const attrs = new Map<string, string>([["aria-haspopup", "menu"]]);
+  const footer = (recognized = true, trigger: "menu" | "controls" = "menu") => {
+    const attrs = new Map<string, string>([trigger === "menu" ? ["aria-haspopup", "menu"] : ["aria-controls", "account-menu"]]);
     const name = {
       textContent: "Official Name",
       attrs: new Map<string, string>(),
@@ -42,7 +42,7 @@ function withProfileNavigation(
     };
   };
   let footers = [footer()];
-  let inSettings: boolean | "loading" | "loading-text" = false;
+  let inSettings: boolean | "loading" | "loading-text" | "competing-loading" = false;
   const settingsNavigation = {
     querySelector: (selector: string) =>
       ['input[role="searchbox"]', 'button.sidebar-item[role="link"]'].includes(selector) ? {} : null,
@@ -63,7 +63,7 @@ function withProfileNavigation(
     },
     {
       querySelectorAll: (selector: string) => selector === "nav.sidebar-navigation"
-        ? (inSettings === true ? [settingsNavigation] : [])
+        ? (inSettings === true || inSettings === "competing-loading" ? [settingsNavigation] : [])
         : selector === '.app-shell-left-panel > nav[aria-busy="true"]'
           ? (typeof inSettings === "string" ? [loadingNavigation] : []) : footers,
       getElementById: () => null,
@@ -76,9 +76,9 @@ function withProfileNavigation(
         configurable: true, writable: true, value: replacements[index],
       });
     });
-    run((count, settings = false, recognized = true) => {
+    run((count, settings = false, recognized = true, trigger = "menu") => {
       inSettings = settings;
-      footers = Array.from({ length: count }, () => footer(recognized));
+      footers = Array.from({ length: count }, () => footer(recognized, trigger));
     });
   } finally {
     globals.forEach((key, index) => {
@@ -119,6 +119,22 @@ describe("profile mask navigation scope", () => {
       navigate(0, "loading-text");
       expect(refreshProfileMaskHealth()).toBe(false);
       navigate(1, "loading", false);
+      expect(refreshProfileMaskHealth()).toBe(false);
+    });
+  });
+
+  test("rejects a settings surface with a surviving aria-controls identity", () => {
+    withProfileNavigation((navigate) => {
+      navigate(1, true, false, "controls");
+      expect(refreshProfileMaskHealth()).toBe(false);
+      navigate(1, "loading", false, "controls");
+      expect(refreshProfileMaskHealth()).toBe(false);
+    });
+  });
+
+  test("rejects competing ready and loading navigation surfaces", () => {
+    withProfileNavigation((navigate) => {
+      navigate(0, "competing-loading");
       expect(refreshProfileMaskHealth()).toBe(false);
     });
   });
