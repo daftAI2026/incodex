@@ -134,4 +134,9 @@ describe("capture window visual tokens", () => {
     expect(css).not.toContain("font-size: 10px");
     expect(view).not.toMatch(/captureIcon\([^\n]+,\s*\d+\)/);
   });
+  test("system wallpaper catalogs scroll without increasing the preview-owned window height", () => {
+    const css = readFileSync(cssPath, "utf8");
+    expect(css).toMatch(/\.incodex-capture-inspector\s*\{[^}]*max-height: calc\(var\(--incodex-capture-stage-height\) \+ var\(--incodex-capture-space\) \* 9\)/);
+  });
+
 });
