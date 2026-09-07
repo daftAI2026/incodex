@@ -453,7 +453,7 @@ fn ready_published_between_status_poll_and_child_exit_is_not_lost() {
 }
 
 #[test]
-fn profile_mask_failure_after_ready_revokes_ui_acceptance() {
+fn profile_mask_failure_after_ready_preserves_ui_acceptance() {
     let (status_tx, _status_rx) = mpsc::channel();
     let readiness = AtomicBool::new(false);
 
@@ -466,8 +466,8 @@ fn profile_mask_failure_after_ready_revokes_ui_acceptance() {
     );
 
     assert!(
-        !readiness.load(Ordering::Acquire),
-        "a post-start mask failure must revoke the accepted UI state"
+        readiness.load(Ordering::Acquire),
+        "runtime failure cannot erase successful initial injection"
     );
 }
 

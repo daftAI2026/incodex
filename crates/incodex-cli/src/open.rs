@@ -64,7 +64,7 @@ pub enum CleanupResult {
 /// `open` 生命周期向 shell 暴露的稳定退出码。
 ///
 /// 0 表示 session 已删除；1 表示启动或子进程失败；2 表示 session
-/// 仍被保留；3 表示 UI/CDP 未通过验收。
+/// 仍被保留；3 表示 UI/CDP 验收或运行期间监控失败。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
 pub enum OpenExitCode {
@@ -84,6 +84,7 @@ impl OpenExitCode {
 pub enum OpenProcessResult {
     SpawnFailed { error: String },
     Exited { code: i32, ui_ready: bool },
+    RuntimeFailed { detail: String },
 }
 
 impl OpenProcessResult {
@@ -93,6 +94,7 @@ impl OpenProcessResult {
         }
         match self {
             Self::SpawnFailed { .. } => OpenExitCode::ProcessFailure,
+            Self::RuntimeFailed { .. } => OpenExitCode::UiInjectionFailure,
             Self::Exited { code, ui_ready } => match classify_completed_open(*code, *ui_ready) {
                 CompletedOpenState::Success => OpenExitCode::Success,
                 CompletedOpenState::ProcessFailure => OpenExitCode::ProcessFailure,
@@ -102,6 +104,11 @@ impl OpenProcessResult {
     }
 
     fn failure_message(&self, code: OpenExitCode) -> String {
+        if code != OpenExitCode::CleanupRetained {
+            if let Self::RuntimeFailed { detail } = self {
+                return format!("Incognito Codex closed: {detail}");
+            }
+        }
         match code {
             // 保留路径已在 stdout 告警；退出码负责机器可读分类，stderr 不重复。
             OpenExitCode::CleanupRetained => String::new(),
@@ -109,6 +116,7 @@ impl OpenProcessResult {
                 Self::SpawnFailed { error } => {
                     format!("Unable to start the incognito window: {error}")
                 }
+                Self::RuntimeFailed { detail } => detail.clone(),
                 Self::Exited { code, .. } => {
                     completed_open_failure_message(*code, CompletedOpenState::ProcessFailure)
                 }
@@ -126,6 +134,7 @@ enum InjectionStatus {
     ModeUnresolved(String),
     Ready,
     Failed(String),
+    RuntimeFailed(String),
 }
 
 #[derive(Debug)]
@@ -154,7 +163,9 @@ fn publish_injection_status(
     readiness: &AtomicBool,
     status: InjectionStatus,
 ) {
-    readiness.store(matches!(status, InjectionStatus::Ready), Ordering::Release);
+    if matches!(status, InjectionStatus::Ready) {
+        readiness.store(true, Ordering::Release);
+    }
     let _ = status_tx.send(status);
 }
 
@@ -460,27 +471,31 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                 let _ = std::io::stdout().flush();
                 spinner = crate::spinner::Spinner::start(WAITING_MESSAGE);
             }
-            Ok(InjectionStatus::Failed(detail)) => {
+            Ok(InjectionStatus::Failed(detail) | InjectionStatus::RuntimeFailed(detail)) => {
                 spinner.stop();
                 if plan.profile_mask.is_some() {
                     println!(
                         "{}",
-                        format_warn(&format!("Window closed: {detail}."), None)
+                        format_warn(&format!("Closing window: {detail}."), None)
                     );
                     let _ = std::io::stdout().flush();
                     stop_injection_worker(&process_alive, &mut injection_worker);
                     return Ok(match kill_and_reap(&mut child) {
                         Ok(_) => SpawnOutcome {
-                            process: OpenProcessResult::Exited {
-                                code: 0,
-                                ui_ready: false,
+                            process: if readiness.load(Ordering::Acquire) {
+                                OpenProcessResult::RuntimeFailed { detail }
+                            } else {
+                                OpenProcessResult::Exited {
+                                    code: 0,
+                                    ui_ready: false,
+                                }
                             },
                             owner: Some(owner),
                             cleanup: CleanupDisposition::Burn,
                         },
                         Err(error) => {
                             let reason = format!(
-                                "UI injection failed and child exit could not be proven: {error}"
+                                "window supervision failed and child exit could not be proven: {error}"
                             );
                             SpawnOutcome {
                                 process: OpenProcessResult::SpawnFailed {
@@ -507,10 +522,11 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                 stop_injection_worker(&process_alive, &mut injection_worker);
                 spinner.stop();
                 return Ok(SpawnOutcome {
-                    process: OpenProcessResult::Exited {
-                        code: status.code().unwrap_or(1),
-                        ui_ready: readiness.load(Ordering::Acquire),
-                    },
+                    process: completed_process_result(
+                        status.code().unwrap_or(1),
+                        &readiness,
+                        &status_rx,
+                    ),
                     owner: Some(owner),
                     cleanup: CleanupDisposition::Burn,
                 });
@@ -530,6 +546,24 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
             }
         }
         thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn completed_process_result(
+    code: i32,
+    readiness: &AtomicBool,
+    statuses: &mpsc::Receiver<InjectionStatus>,
+) -> OpenProcessResult {
+    // Called after joining the worker: a failure published between the last
+    // channel poll and child exit must survive, just like initial acceptance.
+    for status in statuses.try_iter() {
+        if let InjectionStatus::RuntimeFailed(detail) = status {
+            return OpenProcessResult::RuntimeFailed { detail };
+        }
+    }
+    OpenProcessResult::Exited {
+        code,
+        ui_ready: readiness.load(Ordering::Acquire),
     }
 }
 
@@ -610,7 +644,7 @@ fn start_injection_worker(
                     publish_injection_status(
                         &status_tx,
                         &readiness,
-                        InjectionStatus::Failed(format!("profile mask health failed: {error}")),
+                        InjectionStatus::RuntimeFailed(error.to_string()),
                     );
                 });
             }

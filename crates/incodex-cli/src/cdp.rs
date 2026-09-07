@@ -31,7 +31,9 @@ const LIFECYCLE_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const PRIMARY_TARGET_MISSING_POLLS: u8 = 2;
 const WINDOWS_CDP_FAILURE_POLLS: u8 = 3;
 const WINDOWS_LIFECYCLE_CDP_TIMEOUT: Duration = Duration::from_millis(400);
+#[cfg(any(target_os = "windows", test))]
 const PROFILE_MASK_FAILURE_POLLS: u8 = 2;
+#[cfg(any(target_os = "windows", test))]
 const WINDOWS_PROFILE_MASK_TRANSPORT_FAILURE_POLLS: u8 = 4;
 const BROWSER_CLOSE_ATTEMPTS: u8 = 3;
 const CODEX_MODE_BLOCKED_ERROR: &str = "Codex mode is blocked by official UI";
@@ -40,6 +42,7 @@ const CODEX_MODE_UNAVAILABLE_ERROR: &str =
     "Codex mode remained unavailable within its readiness deadline";
 pub(crate) const UI_INJECTION_UNAVAILABLE_ERROR: &str =
     "UI injection remained unavailable within its readiness deadline";
+const TARGET_CRASHED_ERROR: &str = "CDP target crashed";
 pub const OFFICIAL_NEW_CODEX_URL: &str = "codex://new?mode=codex";
 
 #[derive(Debug, Clone)]
@@ -764,13 +767,7 @@ pub(crate) fn monitor_profile_mask_health<F>(
 where
     F: FnMut(&str),
 {
-    monitor_profile_mask_health_with_guard(
-        debug_port,
-        process_alive,
-        on_failure,
-        &|_| Ok(()),
-        false,
-    )
+    masked_lifecycle::monitor(debug_port, process_alive, on_failure)
 }
 
 #[cfg(any(target_os = "windows", test))]
@@ -794,6 +791,7 @@ where
     })
 }
 
+#[cfg(any(target_os = "windows", test))]
 fn monitor_profile_mask_health_with_guard<F, G>(
     debug_port: u16,
     process_alive: &AtomicBool,
@@ -842,16 +840,19 @@ where
     Ok(())
 }
 
+#[cfg(any(target_os = "windows", test))]
 enum ProfileMaskFailureCounters {
     Consecutive(u8),
     Independent { unhealthy: u8, transport: u8 },
 }
 
+#[cfg(any(target_os = "windows", test))]
 enum ProfileMaskFailureKind {
     Unhealthy,
     Transport,
 }
 
+#[cfg(any(target_os = "windows", test))]
 impl ProfileMaskFailureCounters {
     fn for_platform(windows: bool) -> Self {
         if windows {
@@ -893,6 +894,7 @@ impl ProfileMaskFailureCounters {
     }
 }
 
+#[cfg(any(target_os = "windows", test))]
 fn profile_mask_transport_failure_polls(windows: bool) -> u8 {
     if windows {
         WINDOWS_PROFILE_MASK_TRANSPORT_FAILURE_POLLS
@@ -906,11 +908,24 @@ enum ProfileMaskProbeError {
     ProbeFailed(String),
 }
 
+#[cfg(any(target_os = "windows", test))]
 fn probe_profile_mask_health<G>(
     debug_port: u16,
     process_alive: &AtomicBool,
     connection_guard: &G,
 ) -> Result<bool, ProfileMaskProbeError>
+where
+    G: Fn(&TcpStream) -> Result<(), String>,
+{
+    probe_profile_mask_snapshot(debug_port, process_alive, connection_guard)
+        .map(|(_, healthy)| healthy)
+}
+
+fn probe_profile_mask_snapshot<G>(
+    debug_port: u16,
+    process_alive: &AtomicBool,
+    connection_guard: &G,
+) -> Result<(String, bool), ProfileMaskProbeError>
 where
     G: Fn(&TcpStream) -> Result<(), String>,
 {
@@ -936,7 +951,7 @@ where
         .ok_or_else(|| {
             ProfileMaskProbeError::ProbeFailed("malformed profile mask health result".to_string())
         })?;
-    Ok(healthy)
+    Ok((page.id.clone(), healthy))
 }
 
 fn profile_mask_health_expression() -> &'static str {
@@ -1138,7 +1153,15 @@ fn send_cdp_with_deadline<S: Read + Write>(
         match socket.read() {
             Ok(Message::Text(text)) => {
                 let parsed: Value = serde_json::from_str(&text).map_err(|err| err.to_string())?;
+                if parsed.get("method").and_then(Value::as_str) == Some("Inspector.targetCrashed") {
+                    return Err(TARGET_CRASHED_ERROR.into());
+                }
                 if parsed.get("id").and_then(Value::as_u64) == Some(id) {
+                    if parsed.pointer("/error/message").and_then(Value::as_str)
+                        == Some("Target crashed")
+                    {
+                        return Err(TARGET_CRASHED_ERROR.into());
+                    }
                     if parsed.get("error").is_some() {
                         return Err(format!("cdp {method} failed: {text}"));
                     }
@@ -1378,3 +1401,7 @@ mod mode_tests;
 #[cfg(test)]
 #[path = "cdp_lifecycle_tests.rs"]
 mod lifecycle_tests;
+
+#[cfg(not(target_os = "windows"))]
+#[path = "cdp_masked_lifecycle.rs"]
+mod masked_lifecycle;
