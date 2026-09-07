@@ -5,17 +5,45 @@
 use super::*;
 
 #[test]
-fn recent_themes_exclude_colors_hardware_and_keep_only_three_release_families() {
-    let names = ["Mac Blue.heic", "iMac Pink.heic", "Solid Colors/Gold.png", "Sonoma.heic", "Sonoma Horizon.heic", "Ventura Graphic.heic", "Monterey Graphic.heic", "Big Sur.heic"];
+fn recent_themes_exclude_colors_hardware_and_extra_variants() {
+    let names = [
+        "Mac Blue.heic",
+        "iMac Pink.heic",
+        "Solid Colors/Gold.png",
+        "Sonoma.heic",
+        "Sonoma Horizon.heic",
+        "Ventura Graphic.heic",
+        "Monterey Graphic.heic",
+        "Big Sur.heic",
+    ];
     let paths: Vec<_> = names.iter().map(PathBuf::from).collect();
     let selected = recent_theme_paths(&paths);
-    assert_eq!(selected, ["Sonoma.heic", "Sonoma Horizon.heic", "Ventura Graphic.heic", "Monterey Graphic.heic"].map(PathBuf::from));
+    assert_eq!(
+        selected,
+        [
+            "Sonoma.heic",
+            "Ventura Graphic.heic",
+            "Monterey Graphic.heic",
+            "Big Sur.heic"
+        ]
+        .map(PathBuf::from)
+    );
 }
 #[test]
 fn system_thumbnail_candidates_use_siblings_before_root_previews() {
     let root = Path::new("/System/Library/Desktop Pictures");
     let full = root.join(".wallpapers/Sonoma Horizon/Sonoma Horizon.heic");
     let candidates = thumbnail_paths(&full, root);
-    assert_eq!(candidates[0], full.parent().unwrap().join("Sonoma Horizon Thumbnail.png"));
+    assert_eq!(
+        candidates[0],
+        full.parent().unwrap().join("Sonoma Horizon Thumbnail.png")
+    );
     assert!(candidates.contains(&root.join(".thumbnails/Sonoma Horizon.heic")));
+}
+
+#[test]
+fn five_release_defaults_exclude_extra_theme_variants() {
+    let names = ["Sonoma Horizon.heic", "Sonoma.heic", "Ventura Graphic.heic", "Monterey Graphic.heic", "Big Sur.heic", "Catalina.heic", "Mojave.heic"];
+    let paths: Vec<_> = names.iter().map(PathBuf::from).collect();
+    assert_eq!(recent_theme_paths(&paths), ["Sonoma.heic", "Ventura Graphic.heic", "Monterey Graphic.heic", "Big Sur.heic", "Catalina.heic"].map(PathBuf::from));
 }
