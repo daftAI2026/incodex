@@ -39,3 +39,10 @@ test("includes the scroll viewport in the editor keyboard focus loop", () => {
   const trap = editor.slice(editor.indexOf("function trapTabFocus"), editor.indexOf("function updateHistoryControls"));
   expect(trap).toContain("[tabindex='0']");
 });
+
+test("uses three Codex spacing units for the wider fade region", () => {
+  const css = readFileSync(new URL("./capture-window.css", import.meta.url), "utf8");
+  for (const edge of ["top", "bottom"]) {
+    expect(css).toContain(`--capture-fade-${edge}: calc(var(--incodex-capture-space) * 3);`);
+  }
+});
