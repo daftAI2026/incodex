@@ -173,8 +173,8 @@ describe("capture window visual tokens", () => {
   const view = readFileSync(viewPath, "utf8");
   const css = readFileSync(cssPath, "utf8");
   expect(view).toContain('class="incodex-capture-range-ticks" aria-hidden="true"');
-  expect(view).toContain('Array.from({ length: 9 }');
-  expect(view).toContain('(index + 1) * 10');
+  expect(view).toContain('Array.from({ length: 11 }');
+  expect(view).toContain('index * 10');
   expect(view).toContain('type="range" min="${CAPTURE_MIN_PADDING}" max="${CAPTURE_MAX_PADDING}" step="${CAPTURE_PADDING_STEP}"');
   expect(css).toMatch(/\.incodex-capture-range-ticks\s*\{[^}]*pointer-events: none/);
   expect(css).toMatch(/\.incodex-capture-range-ticks\s*\{[^}]*color: var\(--incodex-capture-text-tertiary\)/);

@@ -2,6 +2,8 @@
 > L2 | 父级: ../CLAUDE.md
 
 ## 成员清单
+padding-slider.ts: 原生 range 的单滑块交互适配，区分实时预览与最终提交，键盘沿用 Base UI 语义。
+padding-slider.test.ts: 可派发输入事件的交互回归，覆盖提交边界、端点及键盘。
 inspector-scroll.ts: 根据实际滚动几何投影上下边缘渐隐，观察视窗与内容尺寸变化，随编辑器销毁解绑。
 inspector-scroll.test.ts: 首尾/中段/未溢出边界、固定标题和隐藏滚动条契约。
 background-controls.ts: 背景选择事件与选中态同步，命令交给编辑器。
