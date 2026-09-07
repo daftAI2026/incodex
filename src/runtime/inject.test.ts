@@ -48,7 +48,9 @@ function withProfileNavigation(
       ['input[role="searchbox"]', 'button.sidebar-item[role="link"]'].includes(selector) ? {} : null,
   };
   const loadingNavigation = {
-    get textContent() { return inSettings === "loading-text" ? "Unexpected identity" : ""; },
+    get textContent() { return inSettings === "loading-text" ? "Unexpected identity" : "加载中"; },
+    get childNodes() { return inSettings === "loading-text" ? [{}, {}] : [{}]; },
+    firstElementChild: { classList: { contains: (name: string) => name === "invisible" } },
     querySelector: (selector: string) => selector === ":scope > .invisible" ? {} : null,
   };
   const replacements = [
