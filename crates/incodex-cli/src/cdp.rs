@@ -38,6 +38,8 @@ const CODEX_MODE_BLOCKED_ERROR: &str = "Codex mode is blocked by official UI";
 const CODEX_MODE_WAITING_ERROR: &str = "Codex mode is not ready yet";
 const CODEX_MODE_UNAVAILABLE_ERROR: &str =
     "Codex mode remained unavailable within its readiness deadline";
+pub(crate) const UI_INJECTION_UNAVAILABLE_ERROR: &str =
+    "UI injection remained unavailable within its readiness deadline";
 pub const OFFICIAL_NEW_CODEX_URL: &str = "codex://new?mode=codex";
 
 #[derive(Debug, Clone)]
@@ -481,7 +483,7 @@ where
             json!({ "source": payload.source }),
             connection_guard,
         )
-        .map_err(|error| record_injection_probe_failure_if_needed(payload, readiness, error))?;
+        .map_err(|error| record_post_mode_injection_failure(readiness, error))?;
         registered_script_targets.insert(page.id.clone());
     }
     ensure_injection_active(process_alive)?;
@@ -492,7 +494,7 @@ where
         json!({ "expression": payload.source, "returnByValue": true }),
         connection_guard,
     )
-    .map_err(|error| record_injection_probe_failure_if_needed(payload, readiness, error))?;
+    .map_err(|error| record_post_mode_injection_failure(readiness, error))?;
     ensure_injection_active(process_alive)?;
     let health = send_guarded_cdp(
         &mut socket,
@@ -501,9 +503,9 @@ where
         json!({ "expression": payload.health_expression, "returnByValue": true }),
         connection_guard,
     )
-    .map_err(|error| record_injection_probe_failure_if_needed(payload, readiness, error))?;
+    .map_err(|error| record_post_mode_injection_failure(readiness, error))?;
     validate_ui_probe_result_for_options(&health, payload.require_profile_mask)
-        .map_err(|error| record_injection_probe_failure_if_needed(payload, readiness, error))?;
+        .map_err(|error| record_post_mode_injection_failure(readiness, error))?;
     let target_id = page.id.clone();
     let _ = socket.close(None);
     Ok(target_id)
@@ -587,8 +589,20 @@ fn record_codex_mode_probe_failure(readiness: &mut CodexModeReadiness, error: St
     }
 }
 
+fn record_post_mode_injection_failure(readiness: &mut CodexModeReadiness, error: String) -> String {
+    if readiness.observe_probe_failure() == CodexModeAction::Unresolved {
+        UI_INJECTION_UNAVAILABLE_ERROR.into()
+    } else {
+        error
+    }
+}
+
+pub(crate) fn is_terminal_ui_injection_error(error: &str) -> bool {
+    error == UI_INJECTION_UNAVAILABLE_ERROR
+}
+
 pub(crate) fn is_terminal_codex_mode_error(error: &str) -> bool {
-    error == CODEX_MODE_UNAVAILABLE_ERROR
+    error == CODEX_MODE_UNAVAILABLE_ERROR || is_terminal_ui_injection_error(error)
 }
 
 pub(crate) fn is_codex_mode_blocked_error(error: &str) -> bool {

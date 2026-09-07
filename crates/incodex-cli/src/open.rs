@@ -141,6 +141,14 @@ struct SpawnOutcome {
     cleanup: CleanupDisposition,
 }
 
+fn terminal_injection_status(error: String) -> InjectionStatus {
+    if crate::cdp::is_terminal_ui_injection_error(&error) {
+        InjectionStatus::Failed(error)
+    } else {
+        InjectionStatus::ModeUnresolved(error)
+    }
+}
+
 fn publish_injection_status(
     status_tx: &mpsc::Sender<InjectionStatus>,
     readiness: &AtomicBool,
@@ -588,7 +596,7 @@ fn start_injection_worker(
                         publish_injection_status(
                             &status_tx,
                             &readiness,
-                            InjectionStatus::ModeUnresolved(error),
+                            terminal_injection_status(error),
                         );
                         return;
                     }
