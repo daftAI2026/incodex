@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 view.ts 输出的 capture-window DOM、Codex 主题 token 与四像素间距基线
- * [OUTPUT]: 对外提供截图模态框、背景语义分层、工具栏、画布、检查器与隐私捕获态样式；外壳底色只绘制一次，仅窗口尺寸放大，控件密度不变，位图尺寸服从 fitted frame
+ * [OUTPUT]: 对外提供截图模态框、背景语义分层、工具栏、画布、检查器与隐私捕获态样式；外壳底色只绘制一次，仅窗口尺寸放大，控件密度不变，位图尺寸服从 fitted frame，滑块装饰刻度复用主题前景与间距
  * [POS]: capture-window 的视觉契约，和 color-popover.css 分工维护主编辑器与浮层样式
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -603,6 +603,25 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   accent-color: var(--incodex-capture-primary);
   cursor: var(--cursor-interaction, pointer);
   width: 100%;
+}
+
+/* 十等分视觉参照不参与命中或量化，数值输入继续交给原生 range。 */
+.incodex-capture-range-field .incodex-capture-range { margin: 0; }
+.incodex-capture-range-ticks {
+  color: var(--incodex-capture-text-tertiary);
+  height: var(--incodex-capture-space);
+  margin-inline: calc(var(--incodex-capture-space) * 2);
+  pointer-events: none;
+  position: relative;
+}
+.incodex-capture-range-ticks > i {
+  background: currentColor;
+  border-radius: var(--radius-full, 9999px);
+  height: calc(var(--incodex-capture-space) * .5);
+  left: var(--capture-tick-position);
+  position: absolute;
+  transform: translateX(-50%);
+  width: calc(var(--incodex-capture-space) * .5);
 }
 
 .incodex-capture-value {

@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 model.ts 的编辑状态、copy.ts 的本地化文案、presets.ts 的背景分层与 icons.ts 的图标
- * [OUTPUT]: 对外提供稳定 DOM 模板，以及重建时保留检查器滚动和焦点的视图记忆工具
+ * [OUTPUT]: 对外提供稳定 DOM 模板，以及重建时保留检查器滚动和焦点的视图记忆工具；padding 刻度仅作装饰
  * [POS]: capture-window 的声明式视图边界，只表达产品语义和可访问结构，不持有交互状态
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -169,7 +169,12 @@ function inspectorTemplate(
           <h2 class="incodex-capture-section-title">${copy.padding}</h2>
           <span class="incodex-capture-value" data-value="padding">${state.padding}px</span>
         </div>
-        <input class="incodex-capture-range" data-input="padding" type="range" min="0" max="160" step="4" value="${state.padding}">
+        <div class="incodex-capture-range-field">
+          <input class="incodex-capture-range" data-input="padding" aria-label="${copy.padding}" type="range" min="0" max="160" step="4" value="${state.padding}">
+          <div class="incodex-capture-range-ticks" aria-hidden="true">
+            ${Array.from({ length: 9 }, (_, index) => `<i style="--capture-tick-position: ${(index + 1) * 10}%"></i>`).join("")}
+          </div>
+        </div>
       </section>
       <section class="incodex-capture-section incodex-capture-row">
         <h2 class="incodex-capture-section-title">${copy.backgroundNone}</h2>

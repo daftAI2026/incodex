@@ -87,3 +87,5 @@ ScreenKite 截图宿主取证确认的是当前桌面入口：后台 ImageIO 以
 手动获取严格走“解析来源 → 加载原图 → 共享 store 解码 → 既有 set-background 命令”再完成；仅缩略图到达不代表应用成功。restore 复用同一 select 管线与 revision 守卫，来源可用性不是第二份选中态。
 
 检查器参考 Cavalry-i18n 私人 scroll-fade 取证，只复用边界判断及 alpha mask 算法。“背景”标题位于滚动视窗之外；滚动条隐藏但保留原生滚动与键盘焦点。渐隐深度为 Codex spacing 的三倍（默认 12px），不复制竞品色值；起点清除顶端、终点清除底端、未溢出无 mask。滚动位置记忆绑定内部 viewport，重绘与尺寸变化重新测量。
+
+Padding 滑块参考 Sticker StudioParameterTicks 的十等分位置：10%…90% 共九个装饰点，点色/尺寸取 Codex text-tertiary/spacing，不复制 SwiftUI 外壳或改变原生步长。当前 padding 仍为 0…160、步长 4 的逻辑像素，合成时乘 source.scaleFactor；CleanShot 新截图的百分比计算分母尚未取证，不能直接替换单位。
