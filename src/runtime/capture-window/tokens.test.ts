@@ -16,7 +16,7 @@ const viewPath = join(import.meta.dir, "view.ts");
 describe("capture window visual tokens", () => {
   test("enlarges editor geometry through one shared layout scale", () => {
     const css = readFileSync(cssPath, "utf8");
-    expect(css).toContain("--incodex-capture-editor-scale: 1.08");
+    expect(css).toContain("--incodex-capture-editor-scale: 1.2");
     expect(css).toContain("width: calc(clamp(56rem, 60vw, 64rem) * var(--incodex-capture-editor-scale))");
     expect(css).toContain("--incodex-capture-stage-height: calc(50vh * var(--incodex-capture-editor-scale))");
     expect(css).toContain("grid-template-rows: calc(var(--incodex-capture-space) * 7) var(--incodex-capture-stage-height)");
