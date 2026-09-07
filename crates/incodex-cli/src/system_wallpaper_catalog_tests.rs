@@ -47,3 +47,11 @@ fn five_release_defaults_exclude_extra_theme_variants() {
     let paths: Vec<_> = names.iter().map(PathBuf::from).collect();
     assert_eq!(recent_theme_paths(&paths), ["Sonoma.heic", "Ventura Graphic.heic", "Monterey Graphic.heic", "Big Sur.heic", "Catalina.heic"].map(PathBuf::from));
 }
+
+#[test]
+fn tahoe_light_is_one_release_default_not_a_second_dark_variant() {
+    let paths = ["TahoeDark.heic", "TahoeLight.heic", "Sonoma.heic"].map(PathBuf::from);
+    assert_eq!(recent_theme_paths(&paths), ["TahoeLight.heic", "Sonoma.heic"].map(PathBuf::from));
+    let root = Path::new("/System/Library/ExtensionKit/Extensions/NeptuneOneWallpaper.appex/Contents/Resources");
+    assert!(thumbnail_paths(&root.join("TahoeLight.heic"), root).contains(&root.join("thumbnail.heic")));
+}
