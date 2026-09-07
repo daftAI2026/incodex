@@ -462,18 +462,45 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 }
 
 .incodex-capture-inspector {
-  /* 素材目录仅在预览高度内滚动，不以列表内容撑大外壳。 */
   max-height: calc(var(--incodex-capture-stage-height) + var(--incodex-capture-space) * 9);
-  /* 布局容器不重复涂外壳材质，否则半透明背景会叠成不透明色块。 */
   background: transparent;
   display: flex;
   flex-direction: column;
-  gap: calc(var(--incodex-capture-space) * 5);
+  gap: calc(var(--incodex-capture-space) * 2);
+  min-height: 0;
+  overflow: hidden;
+  padding-block: var(--incodex-capture-space);
+}
+
+.incodex-capture-inspector > .incodex-capture-section-title { flex-shrink: 0; }
+
+.incodex-capture-inspector-scroll {
   min-height: 0;
   overflow-y: auto;
-  padding-block: var(--incodex-capture-space);
-  scrollbar-width: thin;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
 }
+
+.incodex-capture-inspector-scroll::-webkit-scrollbar { display: none; }
+
+.incodex-capture-inspector-content {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--incodex-capture-space) * 5);
+  padding-block: var(--incodex-capture-space);
+}
+
+/* 只借用 alpha 遮罩算法；currentColor 仅提供不透明度，不在内容上绘制颜色。 */
+.incodex-capture-inspector-scroll[data-overflowing="true"] {
+  --capture-fade-top: calc(var(--incodex-capture-space) * 2);
+  --capture-fade-bottom: calc(var(--incodex-capture-space) * 2);
+  mask-image: linear-gradient(to bottom, transparent, currentColor var(--capture-fade-top), currentColor calc(100% - var(--capture-fade-bottom)), transparent);
+  mask-mode: alpha;
+  mask-repeat: no-repeat;
+}
+.incodex-capture-inspector-scroll[data-at-start="true"] { --capture-fade-top: 0px; }
+.incodex-capture-inspector-scroll[data-at-end="true"] { --capture-fade-bottom: 0px; }
 
 .incodex-capture-section + .incodex-capture-section {
   margin: 0;

@@ -38,7 +38,7 @@ export type CaptureWindowRenderMemory = {
 };
 
 export function rememberCaptureWindowRender(root: HTMLElement): CaptureWindowRenderMemory {
-  const inspector = root.querySelector<HTMLElement>(".incodex-capture-inspector");
+  const inspector = root.querySelector<HTMLElement>(".incodex-capture-inspector-scroll");
   const active = document.activeElement instanceof HTMLElement && root.contains(document.activeElement)
     ? document.activeElement
     : null;
@@ -53,7 +53,7 @@ export function restoreCaptureWindowRender(
   root: HTMLElement,
   memory: CaptureWindowRenderMemory,
 ): void {
-  const inspector = root.querySelector<HTMLElement>(".incodex-capture-inspector");
+  const inspector = root.querySelector<HTMLElement>(".incodex-capture-inspector-scroll");
   if (inspector) inspector.scrollTop = memory.inspectorScrollTop;
   if (memory.wallpaper) {
     [...root.querySelectorAll<HTMLElement>("[data-system-wallpaper]")]
@@ -158,8 +158,10 @@ function inspectorTemplate(
 ): string {
   return `
     <aside class="incodex-capture-inspector">
+      <h2 class="incodex-capture-section-title" id="incodex-capture-background-title">${copy.background}</h2>
+      <div class="incodex-capture-inspector-scroll" tabindex="0" role="region" aria-labelledby="incodex-capture-background-title">
+      <div class="incodex-capture-inspector-content">
       <section class="incodex-capture-section">
-        <h2 class="incodex-capture-section-title">${copy.background}</h2>
         ${backgroundGridTemplate(state, copy, lastBackgroundColor, wallpaperDataUrl, systemWallpapers)}
       </section>
       <section class="incodex-capture-section">
@@ -184,6 +186,8 @@ function inspectorTemplate(
         </div>
         <input class="incodex-capture-switch" data-input="privacy" type="checkbox" aria-label="${copy.privacy}" ${checked(state.privacyEnabled)}>
       </section>
+      </div>
+      </div>
     </aside>
   `;
 }

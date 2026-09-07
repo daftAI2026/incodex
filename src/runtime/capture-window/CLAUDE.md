@@ -2,6 +2,8 @@
 > L2 | 父级: ../CLAUDE.md
 
 ## 成员清单
+inspector-scroll.ts: 根据实际滚动几何投影上下边缘渐隐，观察视窗与内容尺寸变化，随编辑器销毁解绑。
+inspector-scroll.test.ts: 首尾/中段/未溢出边界、固定标题和隐藏滚动条契约。
 background-controls.ts: 背景选择事件与选中态同步，命令交给编辑器。
 background-picker.css: 背景分组与色板几何，消费共享视觉 token。
 backgrounds.test.ts: 回归验证：图片背景加载与缓存，供 compositor 使用。
@@ -83,3 +85,5 @@ ScreenKite 截图宿主取证确认的是当前桌面入口：后台 ImageIO 以
 原生 shot_wallpaper_preference.rs 在用户成功获取原图后，把一个启用标志持久化到 Incodex 私有根目录（非临时会话）；不存图片或绝对路径。下次隔离 open 重新通过系统 API 解析当前桌面、验证本地文件后恢复入口，不下载、不恢复聊天数据。
 
 手动获取严格走“解析来源 → 加载原图 → 共享 store 解码 → 既有 set-background 命令”再完成；仅缩略图到达不代表应用成功。restore 复用同一 select 管线与 revision 守卫，来源可用性不是第二份选中态。
+
+检查器参考 Cavalry-i18n 私人 scroll-fade 取证，只复用边界判断及 alpha mask 算法。“背景”标题位于滚动视窗之外；滚动条隐藏但保留原生滚动与键盘焦点。渐隐深度为 Codex spacing 的两倍，不复制竞品色值；起点清除顶端、终点清除底端、未溢出无 mask。滚动位置记忆绑定内部 viewport，重绘与尺寸变化重新测量。

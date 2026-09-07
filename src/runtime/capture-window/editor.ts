@@ -16,6 +16,7 @@ import {
   type CaptureColorTarget,
   wireCaptureColorPopovers,
 } from "./color-popover.ts";
+import { createInspectorScroll } from "./inspector-scroll.ts";
 import {
   anchoredPanForZoom,
   captureContainScale,
@@ -130,6 +131,7 @@ export function mountCaptureWindowEditor(
   root.setAttribute("data-incodex-capture-hide", "");
   root.setAttribute("data-state", "editing");
   host.append(root);
+  const inspectorScroll = createInspectorScroll(root);
   const systemWallpaperController = createSystemWallpaperController(options.systemWallpapers, () => {
     if (!destroyed && root.dataset.state === "editing") render();
   });
@@ -205,6 +207,7 @@ export function mountCaptureWindowEditor(
     destroyed = true;
     systemWallpaperController.destroy();
     resizeObserver.disconnect();
+    inspectorScroll.destroy();
     unwireColorPopovers();
     root.remove();
     if (previousFocus?.isConnected) previousFocus.focus();
@@ -313,6 +316,7 @@ export function mountCaptureWindowEditor(
       void exportSave();
     });
     restoreCaptureWindowRender(root, renderMemory);
+    inspectorScroll.refresh();
     window.requestAnimationFrame(() => fitCanvas(root, rendered, frame, state.zoom, panX, panY));
   }
   function renderCanvas(): HTMLCanvasElement {
@@ -433,13 +437,11 @@ export function mountCaptureWindowEditor(
   render();
   void systemWallpaperActions.restoreCurrent(shouldRestoreCurrentWallpaper(preferenceStorage));
   hydrateBackground(state.background);
-
   return {
     destroy: close,
     getState: () => state,
   };
 }
-
 function wireToolbarActions(
   root: HTMLElement,
   dispatch: (command: CaptureWindowCommand) => void,
@@ -484,7 +486,6 @@ function wireToolbarActions(
     resetView();
   });
 }
-
 function wireInputs(
   root: HTMLElement,
   dispatch: (command: CaptureWindowCommand) => void,
@@ -522,7 +523,6 @@ function wireInputs(
     if (file) void loadWallpaper(file);
   });
 }
-
 function syncEditorControls(
   root: HTMLElement,
   state: CaptureWindowState,
@@ -719,7 +719,7 @@ function wireKeyboard(
 }
 
 function trapTabFocus(root: HTMLElement, event: KeyboardEvent): void {
-  const controls = [...root.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled)")];
+  const controls = [...root.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), [tabindex='0']")];
   if (controls.length === 0) return;
   const current = controls.indexOf(document.activeElement as HTMLElement);
   const next = event.shiftKey

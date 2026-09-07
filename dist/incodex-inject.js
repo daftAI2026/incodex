@@ -1341,6 +1341,54 @@ function createCaptureBackgroundImageStore(loadImage = loadCaptureImage) {
   };
 }
 
+// src/runtime/capture-window/inspector-scroll.ts
+var EDGE_TOLERANCE = 1;
+function inspectorScrollEdges(scrollTop, clientHeight, scrollHeight) {
+  const maxScroll = Math.max(0, scrollHeight - clientHeight);
+  const overflowing = maxScroll > EDGE_TOLERANCE;
+  return {
+    overflowing,
+    atStart: !overflowing || scrollTop <= EDGE_TOLERANCE,
+    atEnd: !overflowing || scrollTop >= maxScroll - EDGE_TOLERANCE
+  };
+}
+function createInspectorScroll(root) {
+  let viewport = null;
+  const sync = () => {
+    if (!viewport)
+      return;
+    const edges = inspectorScrollEdges(viewport.scrollTop, viewport.clientHeight, viewport.scrollHeight);
+    for (const [key, value] of Object.entries(edges)) {
+      const next = String(value);
+      if (viewport.dataset[key] !== next)
+        viewport.dataset[key] = next;
+    }
+  };
+  const observer = new ResizeObserver(sync);
+  const onScroll = (event) => {
+    if (event.target === viewport)
+      sync();
+  };
+  root.addEventListener("scroll", onScroll, true);
+  return {
+    refresh: () => {
+      observer.disconnect();
+      viewport = root.querySelector(".incodex-capture-inspector-scroll");
+      if (viewport) {
+        observer.observe(viewport);
+        if (viewport.firstElementChild)
+          observer.observe(viewport.firstElementChild);
+      }
+      sync();
+    },
+    destroy: () => {
+      observer.disconnect();
+      root.removeEventListener("scroll", onScroll, true);
+      viewport = null;
+    }
+  };
+}
+
 // src/runtime/capture-window/geometry.ts
 function captureContainScale(content, bounds) {
   const contentWidth = Math.max(1, content.width);
@@ -1777,7 +1825,7 @@ function positionRegionElement(element, region, canvas, padding) {
 
 // src/runtime/capture-window/view.ts
 function rememberCaptureWindowRender(root) {
-  const inspector = root.querySelector(".incodex-capture-inspector");
+  const inspector = root.querySelector(".incodex-capture-inspector-scroll");
   const active = document.activeElement instanceof HTMLElement && root.contains(document.activeElement) ? document.activeElement : null;
   return {
     action: active?.dataset.action,
@@ -1786,7 +1834,7 @@ function rememberCaptureWindowRender(root) {
   };
 }
 function restoreCaptureWindowRender(root, memory) {
-  const inspector = root.querySelector(".incodex-capture-inspector");
+  const inspector = root.querySelector(".incodex-capture-inspector-scroll");
   if (inspector)
     inspector.scrollTop = memory.inspectorScrollTop;
   if (memory.wallpaper) {
@@ -1868,8 +1916,10 @@ function toolbarDivider() {
 function inspectorTemplate(state, copy, lastBackgroundColor, wallpaperDataUrl, systemWallpapers) {
   return `
     <aside class="incodex-capture-inspector">
+      <h2 class="incodex-capture-section-title" id="incodex-capture-background-title">${copy.background}</h2>
+      <div class="incodex-capture-inspector-scroll" tabindex="0" role="region" aria-labelledby="incodex-capture-background-title">
+      <div class="incodex-capture-inspector-content">
       <section class="incodex-capture-section">
-        <h2 class="incodex-capture-section-title">${copy.background}</h2>
         ${backgroundGridTemplate(state, copy, lastBackgroundColor, wallpaperDataUrl, systemWallpapers)}
       </section>
       <section class="incodex-capture-section">
@@ -1894,6 +1944,8 @@ function inspectorTemplate(state, copy, lastBackgroundColor, wallpaperDataUrl, s
         </div>
         <input class="incodex-capture-switch" data-input="privacy" type="checkbox" aria-label="${copy.privacy}" ${checked(state.privacyEnabled)}>
       </section>
+      </div>
+      </div>
     </aside>
   `;
 }
@@ -2031,6 +2083,7 @@ function mountCaptureWindowEditor(host, options) {
   root.setAttribute("data-incodex-capture-hide", "");
   root.setAttribute("data-state", "editing");
   host.append(root);
+  const inspectorScroll = createInspectorScroll(root);
   const systemWallpaperController = createSystemWallpaperController(options.systemWallpapers, () => {
     if (!destroyed && root.dataset.state === "editing")
       render();
@@ -2109,6 +2162,7 @@ function mountCaptureWindowEditor(host, options) {
     destroyed = true;
     systemWallpaperController.destroy();
     resizeObserver.disconnect();
+    inspectorScroll.destroy();
     unwireColorPopovers();
     root.remove();
     if (previousFocus?.isConnected)
@@ -2207,6 +2261,7 @@ function mountCaptureWindowEditor(host, options) {
       exportSave();
     });
     restoreCaptureWindowRender(root, renderMemory);
+    inspectorScroll.refresh();
     window.requestAnimationFrame(() => fitCanvas(root, rendered, frame, state.zoom, panX, panY));
   }
   function renderCanvas() {
@@ -2561,7 +2616,7 @@ function wireKeyboard(root, state, dispatch, close, copy) {
   root.setAttribute("data-tool", state.tool);
 }
 function trapTabFocus(root, event) {
-  const controls = [...root.querySelectorAll("button:not(:disabled), input:not(:disabled)")];
+  const controls = [...root.querySelectorAll("button:not(:disabled), input:not(:disabled), [tabindex='0']")];
   if (controls.length === 0)
     return;
   const current = controls.indexOf(document.activeElement);
@@ -4867,18 +4922,45 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 }
 
 .incodex-capture-inspector {
-  /* 素材目录仅在预览高度内滚动，不以列表内容撑大外壳。 */
   max-height: calc(var(--incodex-capture-stage-height) + var(--incodex-capture-space) * 9);
-  /* 布局容器不重复涂外壳材质，否则半透明背景会叠成不透明色块。 */
   background: transparent;
   display: flex;
   flex-direction: column;
-  gap: calc(var(--incodex-capture-space) * 5);
+  gap: calc(var(--incodex-capture-space) * 2);
+  min-height: 0;
+  overflow: hidden;
+  padding-block: var(--incodex-capture-space);
+}
+
+.incodex-capture-inspector > .incodex-capture-section-title { flex-shrink: 0; }
+
+.incodex-capture-inspector-scroll {
   min-height: 0;
   overflow-y: auto;
-  padding-block: var(--incodex-capture-space);
-  scrollbar-width: thin;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
 }
+
+.incodex-capture-inspector-scroll::-webkit-scrollbar { display: none; }
+
+.incodex-capture-inspector-content {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--incodex-capture-space) * 5);
+  padding-block: var(--incodex-capture-space);
+}
+
+/* 只借用 alpha 遮罩算法；currentColor 仅提供不透明度，不在内容上绘制颜色。 */
+.incodex-capture-inspector-scroll[data-overflowing="true"] {
+  --capture-fade-top: calc(var(--incodex-capture-space) * 2);
+  --capture-fade-bottom: calc(var(--incodex-capture-space) * 2);
+  mask-image: linear-gradient(to bottom, transparent, currentColor var(--capture-fade-top), currentColor calc(100% - var(--capture-fade-bottom)), transparent);
+  mask-mode: alpha;
+  mask-repeat: no-repeat;
+}
+.incodex-capture-inspector-scroll[data-at-start="true"] { --capture-fade-top: 0px; }
+.incodex-capture-inspector-scroll[data-at-end="true"] { --capture-fade-bottom: 0px; }
 
 .incodex-capture-section + .incodex-capture-section {
   margin: 0;
