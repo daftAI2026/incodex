@@ -64,12 +64,20 @@ function withProfileNavigation(
       },
     },
     {
-      querySelectorAll: (selector: string) => selector === "nav.sidebar-navigation"
-        ? (inSettings === true || inSettings === "competing-loading" ? [settingsNavigation] : [])
-        : selector === '.app-shell-left-panel > nav[aria-busy="true"]'
-          ? (typeof inSettings === "string" && inSettings !== "wrapped-loading" ? [loadingNavigation] : [])
-          : selector === '.app-shell-left-panel nav[aria-busy="true"]'
-            ? (typeof inSettings === "string" ? [loadingNavigation] : []) : footers,
+      querySelectorAll: (selector: string) => {
+        if (selector === "nav.sidebar-navigation") {
+          return inSettings === true || inSettings === "competing-loading" ? [settingsNavigation] : [];
+        }
+        if (selector === 'button.sidebar-item[type="button"]') return footers;
+        if (typeof inSettings !== "string") return [];
+        const skeleton = '<nav aria-busy="true"><div class="invisible">加载中</div></nav>';
+        const content = inSettings === "wrapped-loading" ? `<div><div>${skeleton}</div></div>` : skeleton;
+        const matches: typeof loadingNavigation[] = [];
+        // 使用真实 CSS selector 解析器，避免 mock 把错误的父子关系也判成命中。
+        new HTMLRewriter().on(selector, { element() { matches.push(loadingNavigation); } })
+          .transform(`<aside class="app-shell-left-panel">${content}</aside>`);
+        return matches;
+      },
       getElementById: () => null,
     },
     Avatar,
@@ -129,7 +137,7 @@ describe("profile mask navigation scope", () => {
 
   test("accepts the Windows settings skeleton inside sidebar layout wrappers", () => {
     // Windows Store 26.901.6511.0: aside.app-shell-left-panel > div > div > nav.
-    // 查询边界模拟容器层级差异；实际 selector 另在 Store App 中验证。
+    // HTMLRewriter 解析真实 selector；完整 UI 生命周期另在 Store App 中验证。
     withProfileNavigation((navigate) => {
       expect(refreshProfileMaskHealth()).toBe(true);
       navigate(0, "wrapped-loading");
