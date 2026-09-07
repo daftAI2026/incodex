@@ -5,8 +5,10 @@ import { join } from "node:path";
 import { blobatarUri } from "blobatar/uri";
 import { findProfileMenuIdentity, profileMaskHealth, refreshProfileMaskHealth } from "./incognito-profile-mask.ts";
 
+type ProfileNavigationSurface = boolean | "loading" | "wrapped-loading" | "loading-text" | "competing-loading";
+
 function withProfileNavigation(
-  run: (navigate: (count: number, settings?: boolean | "loading" | "loading-text" | "competing-loading", recognized?: boolean, trigger?: "menu" | "controls") => void) => void,
+  run: (navigate: (count: number, settings?: ProfileNavigationSurface, recognized?: boolean, trigger?: "menu" | "controls") => void) => void,
 ) {
   const globals = ["window", "document", "HTMLImageElement"];
   const previous = globals.map((key) => Object.getOwnPropertyDescriptor(globalThis, key));
@@ -42,7 +44,7 @@ function withProfileNavigation(
     };
   };
   let footers = [footer()];
-  let inSettings: boolean | "loading" | "loading-text" | "competing-loading" = false;
+  let inSettings: ProfileNavigationSurface = false;
   const settingsNavigation = {
     querySelector: (selector: string) =>
       ['input[role="searchbox"]', 'button.sidebar-item[role="link"]'].includes(selector) ? {} : null,
@@ -65,7 +67,9 @@ function withProfileNavigation(
       querySelectorAll: (selector: string) => selector === "nav.sidebar-navigation"
         ? (inSettings === true || inSettings === "competing-loading" ? [settingsNavigation] : [])
         : selector === '.app-shell-left-panel > nav[aria-busy="true"]'
-          ? (typeof inSettings === "string" ? [loadingNavigation] : []) : footers,
+          ? (typeof inSettings === "string" && inSettings !== "wrapped-loading" ? [loadingNavigation] : [])
+          : selector === '.app-shell-left-panel nav[aria-busy="true"]'
+            ? (typeof inSettings === "string" ? [loadingNavigation] : []) : footers,
       getElementById: () => null,
     },
     Avatar,
@@ -120,6 +124,21 @@ describe("profile mask navigation scope", () => {
       expect(refreshProfileMaskHealth()).toBe(false);
       navigate(1, "loading", false);
       expect(refreshProfileMaskHealth()).toBe(false);
+    });
+  });
+
+  test("accepts the Windows settings skeleton inside sidebar layout wrappers", () => {
+    // Windows Store 26.901.6511.0: aside.app-shell-left-panel > div > div > nav.
+    // 查询边界模拟容器层级差异；实际 selector 另在 Store App 中验证。
+    withProfileNavigation((navigate) => {
+      expect(refreshProfileMaskHealth()).toBe(true);
+      navigate(0, "wrapped-loading");
+      expect(refreshProfileMaskHealth()).toBe(true);
+      navigate(0, true);
+      expect(refreshProfileMaskHealth()).toBe(true);
+      navigate(1);
+      expect(profileMaskHealth()).toBe(false);
+      expect(refreshProfileMaskHealth()).toBe(true);
     });
   });
 
