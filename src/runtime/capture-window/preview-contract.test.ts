@@ -187,7 +187,7 @@ describe("capture window preview", () => {
     expect(shadow).toBeLessThan(privacy);
 
     expect(css).toContain("backdrop-filter: blur(3px)");
-    expect(css).toContain("width: clamp(56rem, 60vw, 64rem)");
+    expect(css).toContain("width: calc(clamp(56rem, 60vw, 64rem) * var(--incodex-capture-editor-scale))");
     expect(css).toContain(
       "max-width: calc(100vw - var(--incodex-capture-space) * 8)",
     );
@@ -197,7 +197,7 @@ describe("capture window preview", () => {
       "grid-template-columns: minmax(0, 1fr) calc(var(--incodex-capture-space) * 56)",
     );
     expect(css).toContain("height: calc(var(--incodex-capture-space) * 7)");
-    expect(css).toContain("height: 50vh");
+    expect(css).toContain("height: var(--incodex-capture-stage-height)");
     expect(css).toContain("background-size: 16px 16px");
     expect(css).toContain("html.incodex-capturing [data-incodex-capture-hide]");
     expect(css).toContain("background: var(--incodex-capture-skeleton)");

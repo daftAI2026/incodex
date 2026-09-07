@@ -14,6 +14,14 @@ const backgroundPickerCssPath = join(import.meta.dir, "background-picker.css");
 const viewPath = join(import.meta.dir, "view.ts");
 
 describe("capture window visual tokens", () => {
+  test("enlarges editor geometry through one shared layout scale", () => {
+    const css = readFileSync(cssPath, "utf8");
+    expect(css).toContain("--incodex-capture-editor-scale: 1.08");
+    expect(css).toContain("width: calc(clamp(56rem, 60vw, 64rem) * var(--incodex-capture-editor-scale))");
+    expect(css).toContain("--incodex-capture-stage-height: calc(50vh * var(--incodex-capture-editor-scale))");
+    expect(css).toContain("grid-template-rows: calc(var(--incodex-capture-space) * 7) var(--incodex-capture-stage-height)");
+    expect(css).toContain("height: var(--incodex-capture-stage-height)");
+  });
   test("paints the translucent shell once instead of stacking an inspector surface", () => {
     const css = readFileSync(cssPath, "utf8");
     const inspector = css.match(/\.incodex-capture-inspector\s*\{([^}]*)\}/)?.[1];
@@ -26,12 +34,12 @@ describe("capture window visual tokens", () => {
   test("maps Incodex semantics to live Codex tokens with stable fallbacks", () => {
     const css = readFileSync(cssPath, "utf8");
 
-    expect(css).toContain("--incodex-capture-space: var(--spacing, 4px)");
+    expect(css).toContain("--incodex-capture-space: calc(var(--spacing, 4px) * var(--incodex-capture-editor-scale))");
     expect(css).toContain("--incodex-capture-surface: var(--color-surface-elevated-secondary");
     expect(css).toContain("--incodex-capture-text: var(--color-text");
     expect(css).toContain("--incodex-capture-border: var(--color-border");
     expect(css).toContain("--incodex-capture-radius-dialog: var(--radius-xl");
-    expect(css).toContain("--incodex-capture-font-xs: var(--text-xs, 12px)");
+    expect(css).toContain("--incodex-capture-font-xs: calc(var(--text-xs, 12px) * var(--incodex-capture-editor-scale))");
     expect(css).toContain("--incodex-capture-icon-base: calc(var(--incodex-capture-space) * 4)");
     expect(css).toContain("--incodex-capture-icon-sm: calc(var(--incodex-capture-space) * 3.5)");
     expect(css).toContain("--incodex-capture-skeleton: var(--color-background-button-tertiary-active");
