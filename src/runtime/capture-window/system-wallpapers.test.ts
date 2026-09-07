@@ -7,6 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   createSystemWallpaperController,
+  createSystemWallpaperEditorActions,
   type SystemWallpaperAdapter,
   type SystemWallpaperEntry,
 } from "./system-wallpapers.ts";
@@ -119,12 +120,85 @@ describe("system wallpaper adapter lifecycle", () => {
     }), () => { changes += 1; });
 
     const loading = controller.ensureLoaded();
+    changes = 0;
     controller.destroy();
     pending.resolve([ENTRY]);
 
     await expect(loading).resolves.toEqual([ENTRY]);
     expect(controller.getState()).toEqual({ entries: [], status: "loading" });
     expect(changes).toBe(0);
+  });
+
+  test("does not start a directory request after destruction", async () => {
+    let listCalls = 0;
+    const controller = createSystemWallpaperController(adapterWith({
+      list: async () => {
+        listCalls += 1;
+        return [ENTRY];
+      },
+    }));
+
+    controller.destroy();
+    await expect(controller.ensureLoaded()).resolves.toEqual([]);
+    expect(listCalls).toBe(0);
+  });
+
+  test("does not list implicitly when a selection arrives before the catalog action", async () => {
+    let listCalls = 0;
+    const controller = createSystemWallpaperController(adapterWith({
+      list: async () => {
+        listCalls += 1;
+        return [ENTRY];
+      },
+    }));
+
+    await expect(controller.select(ENTRY.id)).resolves.toBeNull();
+    expect(listCalls).toBe(0);
+  });
+
+  test("does not apply an older A after the user selects B and A again", async () => {
+    const firstA = deferred<HTMLImageElement>();
+    const latestA = deferred<HTMLImageElement>();
+    const firstDecodeStarted = deferred<void>();
+    let aDecodes = 0;
+    const applied: string[] = [];
+    const controller = createSystemWallpaperController(adapterWith({
+      list: async () => [
+        ENTRY,
+        { id: "system:ventura-1", name: "Ventura", thumbnail: "ventura-thumb" },
+      ],
+      load: async (id) => `data:image/png;base64,${id}`,
+    }));
+    await controller.ensureLoaded();
+    const actions = createSystemWallpaperEditorActions(controller, {
+      apply: ({ id }) => applied.push(id),
+      decode: async (dataUrl) => {
+        if (dataUrl.includes(ENTRY.id)) {
+          aDecodes += 1;
+          if (aDecodes === 1) {
+            firstDecodeStarted.resolve();
+            return firstA.promise;
+          }
+          return latestA.promise;
+        }
+        return {} as HTMLImageElement;
+      },
+      isAlive: () => true,
+      onError: () => { throw new Error("unexpected decode failure"); },
+      remember: () => undefined,
+    });
+
+    const oldA = actions.select(ENTRY.id);
+    await firstDecodeStarted.promise;
+    const b = actions.select("system:ventura-1");
+    const currentA = actions.select(ENTRY.id);
+    firstA.resolve({} as HTMLImageElement);
+    await oldA;
+    await b;
+    expect(applied).toEqual([]);
+    latestA.resolve({} as HTMLImageElement);
+    await currentA;
+    expect(applied).toEqual([ENTRY.id]);
   });
 });
 
@@ -177,5 +251,21 @@ describe("system wallpaper capture UI", () => {
     expect(selected).toContain(ENTRY.thumbnail);
     expect(selected).toContain(`data-system-wallpaper="${ENTRY.id}"`);
     expect(selected).toContain('aria-pressed="true"');
+  });
+
+  test("escapes native names and thumbnails before placing them in markup", () => {
+    const entry = {
+      id: "system-safe",
+      name: "<Sonoma & friends>",
+      thumbnail: "data:image/png;base64,a&b\"c",
+    };
+    const markup = captureWindowTemplate(createCaptureWindowState(SOURCE), captureWindowCopy("en-US"), {
+      systemWallpapers: { entries: [entry], status: "ready" },
+    });
+
+    expect(markup).toContain("&lt;Sonoma &amp; friends&gt;");
+    expect(markup).toContain("data:image/png;base64,a&amp;b&quot;c");
+    expect(markup).not.toContain(entry.name);
+    expect(markup).not.toContain(entry.thumbnail);
   });
 });
