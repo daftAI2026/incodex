@@ -294,6 +294,18 @@ fn official_blockers_and_mode_unresolved_do_not_become_profile_mask_failures() {
 }
 
 #[test]
+fn post_mode_terminal_errors_preserve_profile_mask_failure_handling() {
+    assert!(matches!(
+        terminal_injection_status(crate::cdp::UI_INJECTION_UNAVAILABLE_ERROR.into()),
+        InjectionStatus::Failed(_)
+    ));
+    assert!(matches!(
+        terminal_injection_status("mode unavailable".into()),
+        InjectionStatus::ModeUnresolved(_)
+    ));
+}
+
+#[test]
 fn closing_the_primary_window_before_ui_ready_still_stops_the_isolated_process() {
     let root = temp_root();
     let app = fake_app(&root);

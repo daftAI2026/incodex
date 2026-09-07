@@ -377,6 +377,7 @@ fn windows_post_mode_runtime_failures_use_the_shared_active_deadline() {
         is_terminal_codex_mode_error(&error),
         "post-mode Runtime failures must terminate through shared readiness: {error}"
     );
+    assert!(super::is_terminal_ui_injection_error(&error));
     assert_eq!(
         connections.load(Ordering::Acquire),
         1,
