@@ -1092,8 +1092,8 @@ var PROFILE_NAME_SELECTOR = ":scope > span.min-w-0.flex-1.truncate";
 var PROFILE_AVATAR_SELECTOR = ":scope > img.rounded-full, :scope > span.rounded-full";
 var PROFILE_MENU_SELECTOR = '[role="menu"]';
 var PROFILE_MENU_ITEM_SELECTOR = '[role="menuitem"]';
-var PROFILE_MENU_NAME_SELECTOR = ":scope > div > span.flex-1.min-w-0.truncate";
-var PROFILE_MENU_AVATAR_SELECTOR = ":scope > div > span > img.icon-sm.rounded-full, :scope > div > span > span.rounded-full";
+var PROFILE_MENU_NAME_SELECTOR = ":scope > div > span.flex-1.min-w-0.truncate, " + ":scope > div > div.flex-1.min-w-0 > span.min-w-0.truncate";
+var PROFILE_MENU_AVATAR_SELECTOR = ":scope > div > span > img.icon-sm.rounded-full, :scope > div > span > span.rounded-full, " + ":scope > div > span > span > img.icon-sm.rounded-full, " + ":scope > div > span > span > span.rounded-full";
 var PROFILE_NAME_MARKER_SELECTOR = ":scope > [data-incodex-profile-mask-name]";
 var PROFILE_AVATAR_MARKER_SELECTOR = ":scope > [data-incodex-profile-mask-avatar]";
 var PROFILE_NAME_MAX_CHARS = 64;
@@ -1124,8 +1124,21 @@ function readProfileMask() {
   }
   return { name, avatarDataUrl: avatar.dataUrl };
 }
+function profileFooterCandidates() {
+  return [...document.querySelectorAll(PROFILE_FOOTER_SELECTOR)].filter((element) => element.querySelector(PROFILE_NAME_SELECTOR) && element.querySelector(PROFILE_AVATAR_SELECTOR));
+}
+function settingsSurfaceWithoutProfile() {
+  const navigations = [...document.querySelectorAll("nav.sidebar-navigation")];
+  const ready = navigations.length === 1 && navigations[0].querySelector('input[role="searchbox"]') && navigations[0].querySelector('button.sidebar-item[role="link"]');
+  const loading = [...document.querySelectorAll('.app-shell-left-panel nav[aria-busy="true"]')];
+  const emptySkeleton = loading.length === 1 && loading[0].childNodes.length === 1 && loading[0].firstElementChild?.classList.contains("invisible");
+  if (!(ready && loading.length === 0) && !(emptySkeleton && navigations.length === 0)) {
+    return false;
+  }
+  return ![...document.querySelectorAll(PROFILE_FOOTER_SELECTOR)].some((element) => element.getAttribute("aria-haspopup") === "menu" || Boolean(element.getAttribute("aria-controls")) || element.getAttribute(PROFILE_MASK_ATTR) === "true");
+}
 function findProfileFooter() {
-  const candidates = [...document.querySelectorAll(PROFILE_FOOTER_SELECTOR)].filter((element) => element.querySelector(PROFILE_NAME_SELECTOR) && element.querySelector(PROFILE_AVATAR_SELECTOR));
+  const candidates = profileFooterCandidates();
   return candidates.length === 1 ? candidates[0] : null;
 }
 function findControlledProfileMenu(profileFooter) {
@@ -1235,9 +1248,14 @@ function profileMaskHealth() {
   if (!profileMaskConfigured())
     return true;
   const mask = readProfileMask();
-  const profileFooter = mask ? findProfileFooter() : null;
-  if (!mask || !profileAvatarDecoded(mask.avatarDataUrl) || !profileFooter)
+  if (!mask)
     return false;
+  const candidates = profileFooterCandidates();
+  if (candidates.length === 0)
+    return settingsSurfaceWithoutProfile();
+  if (candidates.length !== 1 || !profileAvatarDecoded(mask.avatarDataUrl))
+    return false;
+  const profileFooter = candidates[0];
   if (!identityMaskHealth(profileFooter, PROFILE_NAME_SELECTOR, PROFILE_AVATAR_SELECTOR, mask)) {
     return false;
   }
@@ -1253,6 +1271,10 @@ function profileMaskNeedsInject() {
   if (!profileMaskConfigured())
     return false;
   return !profileMaskHealth();
+}
+function refreshProfileMaskHealth() {
+  ensureProfileMask();
+  return profileMaskHealth();
 }
 
 // src/runtime/official-tooltip-provider.ts
@@ -1455,6 +1477,42 @@ function parseOfficialWindowZoom(value) {
 function officialWindowZoom(root) {
   return parseOfficialWindowZoom(window.getComputedStyle(root).getPropertyValue(OFFICIAL_WINDOW_ZOOM_PROPERTY));
 }
+function createOfficialTooltipPresentation() {
+  let sampledTrigger = null;
+  let sample = null;
+  return {
+    read(trigger) {
+      if (!trigger?.isConnected) {
+        sampledTrigger = null;
+        sample = null;
+        return null;
+      }
+      if (trigger !== sampledTrigger) {
+        sampledTrigger = trigger;
+        sample = null;
+      }
+      const tip = findOfficialTooltipElement(trigger);
+      if (tip) {
+        sample = {
+          className: tip.className,
+          shortcutClassName: tip.querySelector("kbd")?.className ?? ""
+        };
+      }
+      return sample;
+    }
+  };
+}
+function findOfficialTooltipElement(trigger) {
+  if (!trigger?.isConnected)
+    return null;
+  const ids = [trigger, trigger.parentElement].flatMap((element) => element?.getAttribute("aria-describedby")?.split(/\s+/) ?? []).filter(Boolean);
+  for (const id of ids) {
+    const tip = trigger.ownerDocument.getElementById(id);
+    if (tip?.isConnected && tip.getAttribute("role") === "tooltip" && !tip.hasAttribute("data-incodex-tooltip") && tip.className.trim())
+      return tip;
+  }
+  return null;
+}
 
 // src/runtime/_inject.src.ts
 var STYLE_ID = "incodex-privacy-style";
@@ -1483,6 +1541,7 @@ var STRIP_CLONE_ATTRS = [
   "tabindex"
 ];
 var activeTooltipLifecycle = null;
+var officialTooltipPresentation = createOfficialTooltipPresentation();
 var launchErrorPending = false;
 var windowsLaunchErrorHost = null;
 function dismissActiveTooltip() {
@@ -1567,6 +1626,7 @@ function apply() {
     btn.setAttribute("aria-pressed", incognito ? "true" : "false");
     btn.setAttribute("aria-label", labelFor(incognito));
     setButtonIcon(btn);
+    syncTooltipPresentation();
   }
   const label = document.querySelector("[data-incodex-tooltip-label]");
   if (label)
@@ -1742,7 +1802,7 @@ function buttonStillBesideSearch() {
 }
 function injectedTooltipCanShow(btn) {
   const search = findSearchButton();
-  return btn.isConnected && (btn.getAttribute("data-incodex-hovered") === "true" || document.activeElement === btn) && !(search && searchTooltipOpen(search));
+  return btn.isConnected && syncTooltipPresentation() && (btn.getAttribute("data-incodex-hovered") === "true" || document.activeElement === btn) && !(search && searchTooltipOpen(search));
 }
 function landingStillMounted() {
   const landing = document.querySelector(`[${LANDING_ATTR}]`);
@@ -1813,14 +1873,12 @@ function createTooltipElement() {
   const tip = document.createElement("div");
   tip.setAttribute(TIP_ATTR, "true");
   tip.setAttribute("role", "tooltip");
-  tip.className = "z-50 w-fit select-none text-sm whitespace-normal break-words rounded-lg border border-text bg-primary-solid text-primary-solid px-2 py-1.5";
   const text = document.createElement("div");
   text.className = "flex items-center gap-2";
   const label = document.createElement("div");
   label.className = "min-w-0";
   label.setAttribute("data-incodex-tooltip-label", "true");
   const kbd = document.createElement("kbd");
-  kbd.className = "inline-flex !rounded-md !border-0 !bg-current/10 !font-sans !text-xs !text-current !shadow-none !px-1.5 !py-0.5 !leading-none";
   kbd.textContent = shortcutLabel();
   text.append(label, kbd);
   tip.append(text);
@@ -1841,12 +1899,60 @@ function ensureTooltipMount() {
   }
   return tip;
 }
+var tooltipObservedSearch = null;
+var tooltipObservedElement = null;
+function observeOfficialTooltip(search) {
+  const element = findOfficialTooltipElement(search);
+  if (search === tooltipObservedSearch && element === tooltipObservedElement)
+    return;
+  tooltipObservedSearch = search;
+  tooltipObservedElement = element;
+  window.__incodexTooltipPresentationObserver?.disconnect();
+  const observer = new MutationObserver(() => syncTooltipPresentation());
+  window.__incodexTooltipPresentationObserver = observer;
+  if (search) {
+    observer.observe(search, { attributes: true, attributeFilter: ["aria-describedby"] });
+    if (search.parentElement) {
+      observer.observe(search.parentElement, { attributes: true, attributeFilter: ["aria-describedby"] });
+    }
+  }
+  if (element)
+    observer.observe(element, { attributes: true, subtree: true, attributeFilter: ["class"] });
+}
+function syncTooltipPresentation() {
+  const search = findSearchButton();
+  observeOfficialTooltip(search);
+  const sample = officialTooltipPresentation.read(search);
+  const btn = document.querySelector(`[${BTN_ATTR}]`);
+  if (btn) {
+    if (sample)
+      btn.removeAttribute("title");
+    else {
+      const title = `${labelFor(isIncognitoWindow())} (${shortcutLabel()})`;
+      if (btn.getAttribute("title") !== title)
+        btn.setAttribute("title", title);
+    }
+  }
+  const tip = document.querySelector(`[${TIP_ATTR}]`);
+  if (!sample) {
+    hideTooltip();
+    return false;
+  }
+  if (tip && tip.className !== sample.className)
+    tip.className = sample.className;
+  const kbd = tip?.querySelector("kbd");
+  if (kbd && kbd.className !== sample.shortcutClassName)
+    kbd.className = sample.shortcutClassName;
+  return true;
+}
 function tooltipEl() {
   return ensureTooltipMount();
 }
 var TOOLTIP_SIDE_OFFSET = 2;
 function showTooltip(btn) {
   const tip = tooltipEl();
+  if (!syncTooltipPresentation())
+    return;
   const host = tip.parentElement;
   if (!host)
     return;
@@ -2100,6 +2206,7 @@ function ensureButton() {
   }
   apply();
   ensureTooltipMount();
+  syncTooltipPresentation();
 }
 function onKeydown(event) {
   if (event.key === "Escape") {
@@ -2138,11 +2245,12 @@ function profileObservationRequired() {
 function createMutationObserver() {
   let scheduled = false;
   return new MutationObserver(function handleMutation() {
-    if (!needsInject() || scheduled)
+    if (scheduled)
       return;
     scheduled = true;
     requestAnimationFrame(function injectOnAnimationFrame() {
       scheduled = false;
+      syncTooltipPresentation();
       if (!needsInject())
         return;
       ensureButton();
@@ -2190,7 +2298,7 @@ function start() {
   window.addEventListener(TOOLTIP_DISMISS_EVENT, () => activeTooltipLifecycle?.dismiss());
   ensureMutationObserver();
 }
-window.__incodexRefreshProfileMaskHealth = profileMaskHealth;
+window.__incodexRefreshProfileMaskHealth = refreshProfileMaskHealth;
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", start, { once: true });
 } else {

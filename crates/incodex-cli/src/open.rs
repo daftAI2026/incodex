@@ -20,15 +20,16 @@ use incodex_core::{format_ok, format_warn};
 use crate::app_bundle::resolve_executable;
 use crate::cdp::{
     allocate_debug_port, debug_launch_args,
-    inject_shared_ui_with_options_while_alive_with_readiness, is_terminal_codex_mode_error,
-    launch_arg_prefix, monitor_profile_mask_health, start_lifecycle_monitor,
-    start_primary_lifecycle_monitor, CodexModeReadiness, InjectionOptions, OFFICIAL_NEW_CODEX_URL,
+    inject_shared_ui_with_options_while_alive_with_readiness, is_codex_mode_blocked_error,
+    is_codex_mode_waiting_error, is_terminal_codex_mode_error, launch_arg_prefix,
+    monitor_profile_mask_health, start_lifecycle_monitor, start_primary_lifecycle_monitor,
+    CodexModeReadiness, InjectionOptions, CODEX_MODE_POLL_INTERVAL, OFFICIAL_NEW_CODEX_URL,
 };
 use crate::locale::parse_locale_override;
 use crate::open_presentation::{
     classify_completed_open, completed_open_failure_message, CompletedOpenState,
-    CLOSED_REMOVED_MESSAGE, OPENED_MESSAGE, OPENING_MESSAGE, REMOVING_SESSION_MESSAGE,
-    UI_READY_WAIT_MESSAGE, WAITING_MESSAGE,
+    CLOSED_REMOVED_MESSAGE, OFFICIAL_BLOCKER_WAIT_MESSAGE, OPENED_MESSAGE, OPENING_MESSAGE,
+    REMOVING_SESSION_MESSAGE, UI_READY_WAIT_MESSAGE, WAITING_MESSAGE,
 };
 use crate::profile_mask::ProfileMask;
 
@@ -63,7 +64,7 @@ pub enum CleanupResult {
 /// `open` 生命周期向 shell 暴露的稳定退出码。
 ///
 /// 0 表示 session 已删除；1 表示启动或子进程失败；2 表示 session
-/// 仍被保留；3 表示 UI/CDP 未通过验收。
+/// 仍被保留；3 表示 UI/CDP 验收或运行期间监控失败。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
 pub enum OpenExitCode {
@@ -83,6 +84,7 @@ impl OpenExitCode {
 pub enum OpenProcessResult {
     SpawnFailed { error: String },
     Exited { code: i32, ui_ready: bool },
+    RuntimeFailed { detail: String },
 }
 
 impl OpenProcessResult {
@@ -92,6 +94,7 @@ impl OpenProcessResult {
         }
         match self {
             Self::SpawnFailed { .. } => OpenExitCode::ProcessFailure,
+            Self::RuntimeFailed { .. } => OpenExitCode::UiInjectionFailure,
             Self::Exited { code, ui_ready } => match classify_completed_open(*code, *ui_ready) {
                 CompletedOpenState::Success => OpenExitCode::Success,
                 CompletedOpenState::ProcessFailure => OpenExitCode::ProcessFailure,
@@ -101,6 +104,11 @@ impl OpenProcessResult {
     }
 
     fn failure_message(&self, code: OpenExitCode) -> String {
+        if code != OpenExitCode::CleanupRetained {
+            if let Self::RuntimeFailed { detail } = self {
+                return format!("Incognito Codex closed: {detail}");
+            }
+        }
         match code {
             // 保留路径已在 stdout 告警；退出码负责机器可读分类，stderr 不重复。
             OpenExitCode::CleanupRetained => String::new(),
@@ -108,6 +116,7 @@ impl OpenProcessResult {
                 Self::SpawnFailed { error } => {
                     format!("Unable to start the incognito window: {error}")
                 }
+                Self::RuntimeFailed { detail } => detail.clone(),
                 Self::Exited { code, .. } => {
                     completed_open_failure_message(*code, CompletedOpenState::ProcessFailure)
                 }
@@ -121,8 +130,11 @@ impl OpenProcessResult {
 }
 
 enum InjectionStatus {
+    BlockedByOfficialUi,
+    ModeUnresolved(String),
     Ready,
     Failed(String),
+    RuntimeFailed(String),
 }
 
 #[derive(Debug)]
@@ -138,12 +150,22 @@ struct SpawnOutcome {
     cleanup: CleanupDisposition,
 }
 
+fn terminal_injection_status(error: String, require_profile_mask: bool) -> InjectionStatus {
+    if require_profile_mask || crate::cdp::is_terminal_ui_injection_error(&error) {
+        InjectionStatus::Failed(error)
+    } else {
+        InjectionStatus::ModeUnresolved(error)
+    }
+}
+
 fn publish_injection_status(
     status_tx: &mpsc::Sender<InjectionStatus>,
     readiness: &AtomicBool,
     status: InjectionStatus,
 ) {
-    readiness.store(matches!(status, InjectionStatus::Ready), Ordering::Release);
+    if matches!(status, InjectionStatus::Ready) {
+        readiness.store(true, Ordering::Release);
+    }
     let _ = status_tx.send(status);
 }
 
@@ -420,38 +442,60 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
     };
 
     let mut spinner = crate::spinner::Spinner::start(UI_READY_WAIT_MESSAGE);
-    let mut reported = false;
+    let mut blocker_reported = false;
+    let mut ready_reported = false;
     loop {
         match status_rx.try_recv() {
-            Ok(InjectionStatus::Ready) if !reported => {
+            Ok(InjectionStatus::Ready) if !ready_reported => {
                 spinner.stop();
                 println!("{}", format_ok(OPENED_MESSAGE, None));
                 let _ = std::io::stdout().flush();
                 spinner = crate::spinner::Spinner::start(WAITING_MESSAGE);
-                reported = true;
+                ready_reported = true;
             }
             Ok(InjectionStatus::Ready) => {}
-            Ok(InjectionStatus::Failed(detail)) => {
+            Ok(InjectionStatus::BlockedByOfficialUi) if !blocker_reported => {
+                spinner.stop();
+                println!("{}", format_warn(OFFICIAL_BLOCKER_WAIT_MESSAGE, None));
+                let _ = std::io::stdout().flush();
+                spinner = crate::spinner::Spinner::start(OFFICIAL_BLOCKER_WAIT_MESSAGE);
+                blocker_reported = true;
+            }
+            Ok(InjectionStatus::BlockedByOfficialUi) => {}
+            Ok(InjectionStatus::ModeUnresolved(detail)) => {
+                spinner.stop();
+                println!(
+                    "{}",
+                    format_warn(&format!("Window opened, but {detail}."), None)
+                );
+                let _ = std::io::stdout().flush();
+                spinner = crate::spinner::Spinner::start(WAITING_MESSAGE);
+            }
+            Ok(InjectionStatus::Failed(detail) | InjectionStatus::RuntimeFailed(detail)) => {
                 spinner.stop();
                 if plan.profile_mask.is_some() {
                     println!(
                         "{}",
-                        format_warn(&format!("Window closed: {detail}."), None)
+                        format_warn(&format!("Closing window: {detail}."), None)
                     );
                     let _ = std::io::stdout().flush();
                     stop_injection_worker(&process_alive, &mut injection_worker);
                     return Ok(match kill_and_reap(&mut child) {
                         Ok(_) => SpawnOutcome {
-                            process: OpenProcessResult::Exited {
-                                code: 0,
-                                ui_ready: false,
+                            process: if readiness.load(Ordering::Acquire) {
+                                OpenProcessResult::RuntimeFailed { detail }
+                            } else {
+                                OpenProcessResult::Exited {
+                                    code: 0,
+                                    ui_ready: false,
+                                }
                             },
                             owner: Some(owner),
                             cleanup: CleanupDisposition::Burn,
                         },
                         Err(error) => {
                             let reason = format!(
-                                "UI injection failed and child exit could not be proven: {error}"
+                                "window supervision failed and child exit could not be proven: {error}"
                             );
                             SpawnOutcome {
                                 process: OpenProcessResult::SpawnFailed {
@@ -469,20 +513,20 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                 );
                 let _ = std::io::stdout().flush();
                 spinner = crate::spinner::Spinner::start(WAITING_MESSAGE);
-                reported = true;
             }
             Err(mpsc::TryRecvError::Empty) => {}
-            Err(mpsc::TryRecvError::Disconnected) => reported = true,
+            Err(mpsc::TryRecvError::Disconnected) => {}
         }
         match child.try_wait() {
             Ok(Some(status)) => {
                 stop_injection_worker(&process_alive, &mut injection_worker);
                 spinner.stop();
                 return Ok(SpawnOutcome {
-                    process: OpenProcessResult::Exited {
-                        code: status.code().unwrap_or(1),
-                        ui_ready: readiness.load(Ordering::Acquire),
-                    },
+                    process: completed_process_result(
+                        status.code().unwrap_or(1),
+                        &readiness,
+                        &status_rx,
+                    ),
                     owner: Some(owner),
                     cleanup: CleanupDisposition::Burn,
                 });
@@ -505,6 +549,24 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
     }
 }
 
+fn completed_process_result(
+    code: i32,
+    readiness: &AtomicBool,
+    statuses: &mpsc::Receiver<InjectionStatus>,
+) -> OpenProcessResult {
+    // Called after joining the worker: a failure published between the last
+    // channel poll and child exit must survive, just like initial acceptance.
+    for status in statuses.try_iter() {
+        if let InjectionStatus::RuntimeFailed(detail) = status {
+            return OpenProcessResult::RuntimeFailed { detail };
+        }
+    }
+    OpenProcessResult::Exited {
+        code,
+        ui_ready: readiness.load(Ordering::Acquire),
+    }
+}
+
 fn start_injection_worker(
     port: u16,
     options: InjectionOptions,
@@ -514,9 +576,9 @@ fn start_injection_worker(
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let mut lifecycle_started = false;
-        let mut last_injection_error = None;
         let mut mode_readiness = CodexModeReadiness::default();
-        for attempt in 1u8..=40 {
+        let mut blocker_status_sent = false;
+        loop {
             if !process_alive.load(Ordering::Acquire) {
                 return;
             }
@@ -540,17 +602,37 @@ fn start_injection_worker(
             match injection {
                 Ok(_) => {
                     if std::env::var_os("INCODEX_CDP_LOG").is_some() {
-                        eprintln!("cdp inject ok on attempt {attempt} port {port}");
+                        eprintln!("cdp inject ok on port {port}");
                     }
+                }
+                Err(error) if is_codex_mode_blocked_error(&error) => {
+                    if !blocker_status_sent {
+                        publish_injection_status(
+                            &status_tx,
+                            &readiness,
+                            InjectionStatus::BlockedByOfficialUi,
+                        );
+                        blocker_status_sent = true;
+                    }
+                    thread::sleep(CODEX_MODE_POLL_INTERVAL);
+                    continue;
+                }
+                Err(error) if is_codex_mode_waiting_error(&error) => {
+                    thread::sleep(CODEX_MODE_POLL_INTERVAL);
+                    continue;
                 }
                 Err(error) => {
                     if std::env::var_os("INCODEX_CDP_LOG").is_some() {
-                        eprintln!("cdp inject attempt {attempt}: {error}");
+                        eprintln!("cdp inject failed: {error}");
                     }
                     let terminal = is_terminal_codex_mode_error(&error);
-                    last_injection_error = Some(error);
                     if terminal {
-                        break;
+                        publish_injection_status(
+                            &status_tx,
+                            &readiness,
+                            terminal_injection_status(error, options.profile_mask.is_some()),
+                        );
+                        return;
                     }
                     thread::sleep(Duration::from_millis(400));
                     continue;
@@ -562,19 +644,12 @@ fn start_injection_worker(
                     publish_injection_status(
                         &status_tx,
                         &readiness,
-                        InjectionStatus::Failed(format!("profile mask health failed: {error}")),
+                        InjectionStatus::RuntimeFailed(error.to_string()),
                     );
                 });
             }
             return;
         }
-        let detail = format!(
-            "UI injection failed: {}",
-            last_injection_error
-                .as_deref()
-                .unwrap_or("unknown CDP error")
-        );
-        publish_injection_status(&status_tx, &readiness, InjectionStatus::Failed(detail));
     })
 }
 

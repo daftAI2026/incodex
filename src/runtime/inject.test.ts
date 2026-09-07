@@ -3,6 +3,237 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { blobatarUri } from "blobatar/uri";
+import { findProfileMenuIdentity, profileMaskHealth, refreshProfileMaskHealth } from "./incognito-profile-mask.ts";
+
+type ProfileNavigationSurface = boolean | "loading" | "wrapped-loading" | "loading-text" | "competing-loading";
+
+function withProfileNavigation(
+  run: (navigate: (count: number, settings?: ProfileNavigationSurface, recognized?: boolean, trigger?: "menu" | "controls") => void) => void,
+) {
+  const globals = ["window", "document", "HTMLImageElement"];
+  const previous = globals.map((key) => Object.getOwnPropertyDescriptor(globalThis, key));
+  class Avatar {
+    src = "official-avatar";
+    attrs = new Map<string, string>();
+    style = {
+      objectFit: "",
+      get objectPosition() { return "center center"; },
+      set objectPosition(_value: string) {},
+    };
+    setAttribute(key: string, value: string) { this.attrs.set(key, value); }
+    getAttribute(key: string) { return key === "src" ? this.src : this.attrs.get(key) ?? null; }
+  }
+  const footer = (recognized = true, trigger: "menu" | "controls" = "menu") => {
+    const attrs = new Map<string, string>([trigger === "menu" ? ["aria-haspopup", "menu"] : ["aria-controls", "account-menu"]]);
+    const name = {
+      textContent: "Official Name",
+      attrs: new Map<string, string>(),
+      setAttribute(key: string, value: string) { this.attrs.set(key, value); },
+      getAttribute(key: string) { return this.attrs.get(key) ?? null; },
+    };
+    const avatar = new Avatar();
+    return {
+      setAttribute: (key: string, value: string) => attrs.set(key, value),
+      getAttribute: (key: string) => attrs.get(key) ?? null,
+      querySelector: (selector: string) => {
+        if (!recognized) return null;
+        if (selector.includes("span.min-w-0.flex-1.truncate")) return name;
+        if (selector.includes("img.rounded-full")) return avatar;
+        return null;
+      },
+    };
+  };
+  let footers = [footer()];
+  let inSettings: ProfileNavigationSurface = false;
+  const settingsNavigation = {
+    querySelector: (selector: string) =>
+      ['input[role="searchbox"]', 'button.sidebar-item[role="link"]'].includes(selector) ? {} : null,
+  };
+  const loadingNavigation = {
+    get textContent() { return inSettings === "loading-text" ? "Unexpected identity" : "加载中"; },
+    get childNodes() { return inSettings === "loading-text" ? [{}, {}] : [{}]; },
+    firstElementChild: { classList: { contains: (name: string) => name === "invisible" } },
+    querySelector: (selector: string) => selector === ":scope > .invisible" ? {} : null,
+  };
+  const replacements = [
+    {
+      __incodexIncognito: true,
+      __incodexProfileMask: { name: "Temporary", avatar: { kind: "generated" } },
+      __incodexProfileAvatarDecodeState: {
+        dataUrl: blobatarUri("Temporary", { background: "circle" }), status: "ready", probe: null,
+      },
+    },
+    {
+      querySelectorAll: (selector: string) => {
+        if (selector === "nav.sidebar-navigation") {
+          return inSettings === true || inSettings === "competing-loading" ? [settingsNavigation] : [];
+        }
+        if (selector === 'button.sidebar-item[type="button"]') return footers;
+        if (typeof inSettings !== "string") return [];
+        const skeleton = '<nav aria-busy="true"><div class="invisible">加载中</div></nav>';
+        const content = inSettings === "wrapped-loading" ? `<div><div>${skeleton}</div></div>` : skeleton;
+        const matches: typeof loadingNavigation[] = [];
+        // 使用真实 CSS selector 解析器，避免 mock 把错误的父子关系也判成命中。
+        new HTMLRewriter().on(selector, { element() { matches.push(loadingNavigation); } })
+          .transform(`<aside class="app-shell-left-panel">${content}</aside>`);
+        return matches;
+      },
+      getElementById: () => null,
+    },
+    Avatar,
+  ];
+  try {
+    globals.forEach((key, index) => {
+      Object.defineProperty(globalThis, key, {
+        configurable: true, writable: true, value: replacements[index],
+      });
+    });
+    run((count, settings = false, recognized = true, trigger = "menu") => {
+      inSettings = settings;
+      footers = Array.from({ length: count }, () => footer(recognized, trigger));
+    });
+  } finally {
+    globals.forEach((key, index) => {
+      if (previous[index]) Object.defineProperty(globalThis, key, previous[index]!);
+      else Reflect.deleteProperty(globalThis, key);
+    });
+  }
+}
+
+describe("profile mask navigation scope", () => {
+  test("allows settings without a footer and repairs a newly mounted footer on return", () => {
+    withProfileNavigation((navigate) => {
+      expect(profileMaskHealth()).toBe(false);
+      expect(refreshProfileMaskHealth()).toBe(true);
+      navigate(0, true);
+      expect(profileMaskHealth()).toBe(true);
+      expect(refreshProfileMaskHealth()).toBe(true);
+      navigate(1);
+      expect(profileMaskHealth()).toBe(false);
+      expect(refreshProfileMaskHealth()).toBe(true);
+    });
+  });
+
+  test("accepts the empty busy settings skeleton before navigation mounts", () => {
+    withProfileNavigation((navigate) => {
+      expect(refreshProfileMaskHealth()).toBe(true);
+      navigate(0, "loading");
+      expect(refreshProfileMaskHealth()).toBe(true);
+      navigate(0, true);
+      expect(refreshProfileMaskHealth()).toBe(true);
+      navigate(1);
+      expect(refreshProfileMaskHealth()).toBe(true);
+    });
+  });
+
+  test("rejects busy navigation with unexpected text or a surviving account trigger", () => {
+    withProfileNavigation((navigate) => {
+      navigate(0, "loading-text");
+      expect(refreshProfileMaskHealth()).toBe(false);
+      navigate(1, "loading", false);
+      expect(refreshProfileMaskHealth()).toBe(false);
+    });
+  });
+
+  test("accepts the Windows settings skeleton inside sidebar layout wrappers", () => {
+    // Windows Store 26.901.6511.0: aside.app-shell-left-panel > div > div > nav.
+    // HTMLRewriter 解析真实 selector；完整 UI 生命周期另在 Store App 中验证。
+    withProfileNavigation((navigate) => {
+      expect(refreshProfileMaskHealth()).toBe(true);
+      navigate(0, "wrapped-loading");
+      expect(refreshProfileMaskHealth()).toBe(true);
+      navigate(0, true);
+      expect(refreshProfileMaskHealth()).toBe(true);
+      navigate(1);
+      expect(profileMaskHealth()).toBe(false);
+      expect(refreshProfileMaskHealth()).toBe(true);
+    });
+  });
+
+  test("rejects a settings surface with a surviving aria-controls identity", () => {
+    withProfileNavigation((navigate) => {
+      navigate(1, true, false, "controls");
+      expect(refreshProfileMaskHealth()).toBe(false);
+      navigate(1, "loading", false, "controls");
+      expect(refreshProfileMaskHealth()).toBe(false);
+    });
+  });
+
+  test("rejects competing ready and loading navigation surfaces", () => {
+    withProfileNavigation((navigate) => {
+      navigate(0, "competing-loading");
+      expect(refreshProfileMaskHealth()).toBe(false);
+    });
+  });
+
+  test("does not accept an absent identity without a verified settings surface", () => {
+    withProfileNavigation((navigate) => {
+      navigate(0);
+      expect(profileMaskHealth()).toBe(false);
+      expect(refreshProfileMaskHealth()).toBe(false);
+    });
+  });
+
+  test.each([false, true])("rejects an unrecognized account trigger even with settings=%s", (settings) => {
+    withProfileNavigation((navigate) => {
+      navigate(1, settings, false);
+      expect(profileMaskHealth()).toBe(false);
+      expect(refreshProfileMaskHealth()).toBe(false);
+    });
+  });
+
+  test("does not confuse an ambiguous visible identity with an absent surface", () => {
+    withProfileNavigation((navigate) => {
+      navigate(2);
+      expect(profileMaskHealth()).toBe(false);
+      expect(refreshProfileMaskHealth()).toBe(false);
+    });
+  });
+});
+
+// Windows 26.901.6511.0 实测：姓名增加 div，头像增加 span。
+// 只模拟 DOM 查询边界；选择器含义另由真实 Store App 回归验证。
+function profileMenuFixture(layout: "legacy" | "nested", avatar = true) {
+  const namePath = layout === "legacy"
+    ? ":scope > div > span.flex-1.min-w-0.truncate"
+    : ":scope > div > div.flex-1.min-w-0 > span.min-w-0.truncate";
+  const avatarPath = layout === "legacy"
+    ? ":scope > div > span > img.icon-sm.rounded-full"
+    : ":scope > div > span > span > img.icon-sm.rounded-full";
+  const name = {};
+  const image = {};
+  return {
+    querySelector(selector: string) {
+      const paths = selector.split(",").map((path) => path.trim());
+      if (paths.includes(namePath)) return name;
+      if (avatar && paths.includes(avatarPath)) return image;
+      return null;
+    },
+  } as unknown as HTMLElement;
+}
+
+function profileMenuWith(items: HTMLElement[]): HTMLElement {
+  return {
+    querySelectorAll: (selector: string) => selector === '[role="menuitem"]' ? items : [],
+  } as unknown as HTMLElement;
+}
+
+describe("live profile menu structure regression", () => {
+  test.each(["legacy", "nested"] as const)("recognizes the unique %s profile identity", (layout) => {
+    const identity = profileMenuFixture(layout);
+    expect(findProfileMenuIdentity(profileMenuWith([identity]))).toBe(identity);
+  });
+
+  test("does not treat a name-only menu action as an identity", () => {
+    expect(findProfileMenuIdentity(profileMenuWith([profileMenuFixture("nested", false)]))).toBeNull();
+  });
+
+  test("rejects simultaneous old and new identity candidates", () => {
+    expect(findProfileMenuIdentity(profileMenuWith([
+      profileMenuFixture("legacy"), profileMenuFixture("nested"),
+    ]))).toBeNull();
+  });
+});
 
 const inject = readFileSync(join(import.meta.dir, "inject.ts"), "utf8").replaceAll("\r\n", "\n");
 const profileMask = readFileSync(
@@ -209,7 +440,13 @@ describe("incognito profile mask", () => {
     expect(profileMask).toContain("identityMaskHealth");
     expect(profileMask).toContain("profileMaskHealth");
     expect(inject).toContain(
-      "window.__incodexRefreshProfileMaskHealth = profileMaskHealth",
+      "window.__incodexRefreshProfileMaskHealth = refreshProfileMaskHealth",
+    );
+  });
+
+  test("repairs the profile synchronously before native health polling without waiting for a frame", () => {
+    expect(profileMask).toMatch(
+      /export function refreshProfileMaskHealth\(\): boolean \{\s*ensureProfileMask\(\);\s*return profileMaskHealth\(\);\s*\}/,
     );
   });
 

@@ -31,4 +31,12 @@ describe("Windows CI integrity", () => {
       expect(body).toContain("$PSNativeCommandUseErrorActionPreference = $true");
     }
   });
+
+  test("surfaces official blocker progress across the Windows injection worker boundary", () => {
+    const windowsOpen = read("crates/incodex-cli/src/windows_open.rs");
+
+    expect(windowsOpen).toContain("WindowsInjectionProgress::BlockedByOfficialUi");
+    expect(windowsOpen).toContain("OFFICIAL_BLOCKER_WAIT_MESSAGE");
+    expect(windowsOpen).toContain("progress_tx.send");
+  });
 });

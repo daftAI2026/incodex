@@ -244,6 +244,21 @@ describe("release CLI artifacts", () => {
     expect(releaseFlow).toContain("README_CN.md");
     expect(releaseFlow).toMatch(/before pushing the tag/i);
   });
+
+  test("requires first Windows release evidence before the public tag", () => {
+    const preflight = releaseFlow.indexOf("## Pre-flight");
+    const tagAndPublish = releaseFlow.indexOf("## Tag and publish");
+    const windowsGate = releaseFlow.indexOf("Before the first public Windows tag");
+
+    expect(preflight).toBeGreaterThanOrEqual(0);
+    expect(windowsGate).toBeGreaterThan(preflight);
+    expect(windowsGate).toBeLessThan(tagAndPublish);
+    expect(releaseFlow).toContain("real Microsoft Store Codex");
+    expect(releaseFlow).toContain("exact candidate commit");
+    expect(releaseFlow).toContain(
+      "Only the public `releases/latest` download smoke waits until after the assets exist",
+    );
+  });
 });
 
 describe("release documentation truth", () => {
