@@ -1131,7 +1131,7 @@ function settingsSurfaceWithoutProfile() {
   const navigations = [...document.querySelectorAll("nav.sidebar-navigation")];
   const ready = navigations.length === 1 && navigations[0].querySelector('input[role="searchbox"]') && navigations[0].querySelector('button.sidebar-item[role="link"]');
   const loading = [...document.querySelectorAll('.app-shell-left-panel > nav[aria-busy="true"]')];
-  const emptySkeleton = loading.length === 1 && loading[0].querySelector(":scope > .invisible") && !loading[0].textContent?.trim();
+  const emptySkeleton = loading.length === 1 && loading[0].childNodes.length === 1 && loading[0].firstElementChild?.classList.contains("invisible");
   if (!ready && !emptySkeleton)
     return false;
   return ![...document.querySelectorAll(PROFILE_FOOTER_SELECTOR)].some((element) => element.getAttribute("aria-haspopup") === "menu" || element.getAttribute(PROFILE_MASK_ATTR) === "true");

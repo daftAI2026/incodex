@@ -102,7 +102,8 @@ function settingsSurfaceWithoutProfile(): boolean {
     '.app-shell-left-panel > nav[aria-busy="true"]',
   )];
   const emptySkeleton = loading.length === 1 &&
-    loading[0].querySelector(":scope > .invisible") && !loading[0].textContent?.trim();
+    loading[0].childNodes.length === 1 &&
+    loading[0].firstElementChild?.classList.contains("invisible");
   if (!ready && !emptySkeleton) return false;
   // A surviving account-menu trigger may have drifted name/avatar markup.
   // Do not let that failed recognition masquerade as an absent identity.
