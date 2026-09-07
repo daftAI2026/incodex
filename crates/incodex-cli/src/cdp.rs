@@ -1,3 +1,7 @@
+//! [INPUT]: 官方页面白名单、共享 Runtime 与本地主机 adapter。
+//! [OUTPUT]: 提供有界 CDP 注入、生命周期与实验 Shot 资源传输。
+//! [POS]: native CLI 的 localhost 传输边界，不改变安装路径。
+//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 //! Localhost Chrome DevTools Protocol client for `incodex open`.
 //!
 //! It injects the shared Runtime only into the top-level Codex page and keeps
@@ -16,6 +20,9 @@ use tungstenite::handshake::{client::ClientHandshake, HandshakeError};
 use tungstenite::{Message, WebSocket};
 
 use crate::profile_mask::{ProfileAvatar, ProfileMask};
+
+#[path = "cdp_system_wallpapers.rs"]
+mod system_wallpapers;
 
 #[path = "cdp_mode.rs"]
 mod mode;
