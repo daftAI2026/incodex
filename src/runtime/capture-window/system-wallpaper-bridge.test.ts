@@ -46,3 +46,11 @@ test("system wallpaper bridge refuses paths before they enter the host queue", a
   await expect(bridge.load("/Users/private/image.png")).rejects.toThrow("invalid system wallpaper id");
   expect(bridge.takeRequest()).toBeNull();
 });
+
+test("system wallpaper originals accept JPEG without forcing photo assets into huge PNGs", async () => {
+  const bridge = createSystemWallpaperBridge(() => "jpeg");
+  const pending = bridge.load("system-0");
+  bridge.takeRequest();
+  bridge.resolve({ id: "jpeg", ok: true, dataUrl: "data:image/jpeg;base64,/9j/" });
+  expect(await pending).toBe("data:image/jpeg;base64,/9j/");
+});
