@@ -1127,6 +1127,15 @@ function readProfileMask() {
 function profileFooterCandidates() {
   return [...document.querySelectorAll(PROFILE_FOOTER_SELECTOR)].filter((element) => element.querySelector(PROFILE_NAME_SELECTOR) && element.querySelector(PROFILE_AVATAR_SELECTOR));
 }
+function settingsSurfaceWithoutProfile() {
+  const navigations = [...document.querySelectorAll("nav.sidebar-navigation")];
+  if (navigations.length !== 1)
+    return false;
+  const navigation = navigations[0];
+  if (!navigation.querySelector('input[role="searchbox"]') || !navigation.querySelector('button.sidebar-item[role="link"]'))
+    return false;
+  return ![...document.querySelectorAll(PROFILE_FOOTER_SELECTOR)].some((element) => element.getAttribute("aria-haspopup") === "menu" || element.getAttribute(PROFILE_MASK_ATTR) === "true");
+}
 function findProfileFooter() {
   const candidates = profileFooterCandidates();
   return candidates.length === 1 ? candidates[0] : null;
@@ -1242,7 +1251,7 @@ function profileMaskHealth() {
     return false;
   const candidates = profileFooterCandidates();
   if (candidates.length === 0)
-    return true;
+    return settingsSurfaceWithoutProfile();
   if (candidates.length !== 1 || !profileAvatarDecoded(mask.avatarDataUrl))
     return false;
   const profileFooter = candidates[0];

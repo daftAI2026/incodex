@@ -89,6 +89,24 @@ function profileFooterCandidates(): HTMLElement[] {
   );
 }
 
+function settingsSurfaceWithoutProfile(): boolean {
+  // Full settings has a navigation search box and a return-to-app link.
+  // These observed structural roles do not depend on translated labels.
+  const navigations = [...document.querySelectorAll<HTMLElement>("nav.sidebar-navigation")];
+  if (navigations.length !== 1) return false;
+  const navigation = navigations[0];
+  if (
+    !navigation.querySelector('input[role="searchbox"]') ||
+    !navigation.querySelector('button.sidebar-item[role="link"]')
+  ) return false;
+  // A surviving account-menu trigger may have drifted name/avatar markup.
+  // Do not let that failed recognition masquerade as an absent identity.
+  return ![...document.querySelectorAll<HTMLElement>(PROFILE_FOOTER_SELECTOR)].some(
+    (element) => element.getAttribute("aria-haspopup") === "menu" ||
+      element.getAttribute(PROFILE_MASK_ATTR) === "true",
+  );
+}
+
 export function findProfileFooter(): HTMLElement | null {
   const candidates = profileFooterCandidates();
   return candidates.length === 1 ? candidates[0] : null;
@@ -250,8 +268,8 @@ export function profileMaskHealth(): boolean {
   const mask = readProfileMask();
   if (!mask) return false;
   const candidates = profileFooterCandidates();
-  // 只保护主界面资料入口及其一级菜单；设置等页面没有这个入口并不是失败。
-  if (candidates.length === 0) return true;
+  // Only a positively recognized settings surface permits an absent identity.
+  if (candidates.length === 0) return settingsSurfaceWithoutProfile();
   if (candidates.length !== 1 || !profileAvatarDecoded(mask.avatarDataUrl)) return false;
   const profileFooter = candidates[0];
   if (!identityMaskHealth(profileFooter, PROFILE_NAME_SELECTOR, PROFILE_AVATAR_SELECTOR, mask)) {
