@@ -40,3 +40,9 @@ test("system wallpaper requests time out and late replies cannot revive them", a
   expect(bridge.takeRequest()).toBeNull();
   expect(bridge.resolve({ id: "timeout", ok: true, entries: [] })).toBe(false);
 });
+
+test("system wallpaper bridge refuses paths before they enter the host queue", async () => {
+  const bridge = createSystemWallpaperBridge(() => "path", 5);
+  await expect(bridge.load("/Users/private/image.png")).rejects.toThrow("invalid system wallpaper id");
+  expect(bridge.takeRequest()).toBeNull();
+});
