@@ -2,6 +2,8 @@
 
 This file is the shared source of truth for any AI agent working on this repo (Claude Code, Codex, Grok, etc.). `CLAUDE.md` is a symlink to this file. Put machine-specific or personal overrides in `AGENTS.local.md` / `CLAUDE.local.md`; both are gitignored.
 
+This project does not use GEB documentation. Do not add INPUT/OUTPUT/POS/PROTOCOL headers or hierarchical CLAUDE.md maps; keep ordinary comments and this shared guide focused on actual behavior and safety contracts.
+
 ## Project
 
 Incodex adds a Chrome-style incognito window to a locally installed OpenAI Codex desktop app (`ChatGPT.app`, `com.openai.codex`). It is an unofficial add-on. The installer patches the official bundle. `incodex open` is a second launch path: it does not patch or resign the official app, but that isolated window still gets the hat-glasses control and banner by injecting the same `inject.js` over a localhost debug port.
@@ -87,6 +89,9 @@ The native Rust contract tests are the product behavior source of truth. The rem
 ### Runtime boundary
 
 - Electron Runtime stays TypeScript (`src/runtime/*.cts` → `dist/*.cjs`) and is still built by Bun; Rust embeds committed `dist/` artifacts.
+- Profile masking recognizes only the unique identity in the sidebar's `aria-controls`-linked account menu. Preserve both the legacy direct name/avatar layout and the observed nested layout (name in a flex column, avatar in an extra span); use the same selectors for discovery, masking, and health checks. Do not mask the plan subtitle or unrelated menu actions, or disable fail-closed health checks to accommodate official UI changes. Regression coverage lives in `src/runtime/inject.test.ts`.
+- Native profile-health polling must synchronously repair the current identity before validating it; background Electron windows may suspend `requestAnimationFrame`, so the renderer's scheduled repaint is not a prerequisite for a healthy native poll. Failed repair still fails closed.
+- Profile masking is scoped to the main sidebar identity and its first-level account menu, not the full settings pages. Only a positively recognized full-settings navigation surface or its empty busy loading skeleton may omit the identity without a mask failure; unknown/changed sidebar markup must still fail closed. Re-discover and repair it when it remounts; multiple matching identities or a present identity that cannot be masked still fail validation. Do not inspect or rewrite account details inside settings.
 - Incognito-window hover (hat-glasses → circle-x) is Runtime, not Rust UI code.
 - `open` uses the official binary plus an isolated Chromium/CODEX_HOME pair and localhost CDP injection. It must not patch ASAR, clone, or re-sign the app.
 - Do not add ratatui, cursive, crossterm, or an AGPL ASAR crate. The native menu is the existing numbered/arrow UI implemented directly with termios.

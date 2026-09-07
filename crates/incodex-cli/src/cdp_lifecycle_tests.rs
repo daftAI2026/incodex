@@ -693,11 +693,8 @@ fn persistent_profile_mask_health_failure_is_reported_to_the_parent() {
                 command
                     .pointer("/params/expression")
                     .and_then(Value::as_str),
-                Some(if cfg!(target_os = "windows") {
-                    "window.__incodexRefreshProfileMaskHealth?.() === true"
-                } else {
-                    "window.__incodexProfileMaskHealth === true"
-                })
+                Some("window.__incodexRefreshProfileMaskHealth?.() === true"),
+                "every native poll must repair and validate the current DOM, even when background rAF is paused"
             );
             let id = command.get("id").and_then(Value::as_u64).unwrap();
             socket
