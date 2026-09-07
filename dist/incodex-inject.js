@@ -5098,7 +5098,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 
 /**
  * [INPUT]: 依赖 capture-window.css 定义的 Codex 语义令牌与检查器底纹
- * [OUTPUT]: 为 Gradients、Wallpapers 与 Plain color 提供背景选择器布局和交互态
+ * [OUTPUT]: 为 Gradients、Wallpapers 与 Plain color 提供五列等宽正方形色板、选中环安全边距和交互态
  * [POS]: capture-window 的背景选择器样式边界，与编辑器壳层及颜色弹层样式按职责分离
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -5149,7 +5149,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   display: grid;
   gap: calc(var(--incodex-capture-space) * 2);
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  justify-items: center;
+  justify-items: stretch;
   padding: var(--incodex-capture-space);
   width: 100%;
 }
@@ -5159,24 +5159,20 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
-.incodex-capture-background-grid-plain .incodex-capture-background-option {
-  height: calc(var(--incodex-capture-space) * 5);
-  min-width: calc(var(--incodex-capture-space) * 5);
-  width: calc(var(--incodex-capture-space) * 5);
-}
 
 .incodex-capture-background-option {
+  aspect-ratio: 1;
   background: var(--capture-swatch);
   background-clip: border-box;
   background-origin: border-box;
   border: 1px solid rgb(0 0 0 / 10%);
-  border-radius: var(--radius-full, 9999px);
-  height: calc(var(--incodex-capture-space) * 7);
-  min-width: calc(var(--incodex-capture-space) * 7);
+  border-radius: var(--incodex-capture-radius-sm);
+  height: auto;
+  min-width: 0;
   overflow: hidden;
   padding: 0;
   position: relative;
-  width: calc(var(--incodex-capture-space) * 7);
+  width: 100%;
 }
 
 .incodex-capture-background-option[aria-pressed="true"],
@@ -5197,12 +5193,12 @@ html.incodex-capturing .mac-traffic-light > div > svg {
   width: var(--incodex-capture-icon-sm);
 }
 
-.incodex-capture-color-label,
 .incodex-capture-color-label[data-selected="false"] {
   background: var(--incodex-capture-surface-tertiary);
   color: var(--incodex-capture-text);
 }
 
+.incodex-capture-color-label,
 .incodex-capture-wallpaper-label {
   align-items: center;
   color: var(--incodex-capture-text-tertiary);

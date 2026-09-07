@@ -75,3 +75,5 @@ ScreenKite 截图宿主取证确认的是当前桌面入口：后台 ImageIO 以
 透明标题动作（渐变展开/收起、获取当前壁纸）默认使用 text-secondary，hover 使用普通 text。primary-text 是实心主按钮背景的反色前景，不可用于透明动作，否则浅色主题白字落在白底上。
 
 背景选择器图标继承控件文字色；未选中的自定义选色入口使用 surface-tertiary/text 成对语义，不把上次任意颜色与主按钮反色文字混配。选中自定义颜色时仍展示原色，既有隐藏图标语义不变。实心复制按钮与 toast 保留 primary/primary-text 成对语义。
+
+背景选项统一为五列等宽正方形（aspect-ratio: 1），填满网格列并复用 radius-sm；纯色不再单独固定小尺寸。网格保留一个 spacing 的安全边距供选中环绘制，避免侧边裁切。
