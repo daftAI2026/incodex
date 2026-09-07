@@ -12,6 +12,7 @@ pub(super) fn monitor(
     let mut unhealthy = 0u8;
     let mut missing = 0u8;
     let mut disconnected_since = None;
+    let mut exit_deadline = None;
     while alive.load(Ordering::Acquire) {
         thread::sleep(LIFECYCLE_POLL_INTERVAL);
         if !alive.load(Ordering::Acquire) {
@@ -31,11 +32,13 @@ pub(super) fn monitor(
             Ok(true) => {
                 unhealthy = 0;
                 missing = 0;
+                exit_deadline = None;
                 disconnected_since = None;
                 continue;
             }
             Ok(false) => {
                 missing = 0;
+                exit_deadline = None;
                 disconnected_since = None;
                 unhealthy = unhealthy.saturating_add(1);
                 if unhealthy < PROFILE_MASK_FAILURE_POLLS {
@@ -49,14 +52,13 @@ pub(super) fn monitor(
                 if missing < PRIMARY_TARGET_MISSING_POLLS {
                     continue;
                 }
-                // The primary lifecycle monitor requests Browser.close. Stop health
-                // probes now, but never burn or claim exit until the parent reaps.
-                let deadline = Instant::now() + EXIT_GRACE;
-                while alive.load(Ordering::Acquire) && Instant::now() < deadline {
-                    thread::sleep(LIFECYCLE_POLL_INTERVAL);
-                }
-                if !alive.load(Ordering::Acquire) {
-                    break;
+                // The primary lifecycle monitor requests Browser.close. While no
+                // page exists, the next pass only lists targets (no mask eval).
+                // A replacement or cancelled close resumes live supervision and
+                // clears this deadline; PID liveness alone cannot prove shutdown.
+                let deadline = exit_deadline.get_or_insert_with(|| Instant::now() + EXIT_GRACE);
+                if Instant::now() < *deadline {
+                    continue;
                 }
                 "window disappeared but the process did not exit within 5 seconds".to_string()
             }
