@@ -8,9 +8,13 @@ const PROFILE_NAME_SELECTOR = ":scope > span.min-w-0.flex-1.truncate";
 const PROFILE_AVATAR_SELECTOR = ":scope > img.rounded-full, :scope > span.rounded-full";
 const PROFILE_MENU_SELECTOR = '[role="menu"]';
 const PROFILE_MENU_ITEM_SELECTOR = '[role="menuitem"]';
-const PROFILE_MENU_NAME_SELECTOR = ":scope > div > span.flex-1.min-w-0.truncate";
+const PROFILE_MENU_NAME_SELECTOR =
+  ":scope > div > span.flex-1.min-w-0.truncate, " +
+  ":scope > div > div.flex-1.min-w-0 > span.min-w-0.truncate";
 const PROFILE_MENU_AVATAR_SELECTOR =
-  ":scope > div > span > img.icon-sm.rounded-full, :scope > div > span > span.rounded-full";
+  ":scope > div > span > img.icon-sm.rounded-full, :scope > div > span > span.rounded-full, " +
+  ":scope > div > span > span > img.icon-sm.rounded-full, " +
+  ":scope > div > span > span > span.rounded-full";
 const PROFILE_NAME_MARKER_SELECTOR = ":scope > [data-incodex-profile-mask-name]";
 const PROFILE_AVATAR_MARKER_SELECTOR = ":scope > [data-incodex-profile-mask-avatar]";
 const PROFILE_NAME_MAX_CHARS = 64;
@@ -78,11 +82,15 @@ function readProfileMask(): ResolvedProfileMask | null {
   return { name, avatarDataUrl: avatar.dataUrl };
 }
 
-export function findProfileFooter(): HTMLElement | null {
-  const candidates = [...document.querySelectorAll<HTMLElement>(PROFILE_FOOTER_SELECTOR)].filter(
+function profileFooterCandidates(): HTMLElement[] {
+  return [...document.querySelectorAll<HTMLElement>(PROFILE_FOOTER_SELECTOR)].filter(
     (element) =>
       element.querySelector(PROFILE_NAME_SELECTOR) && element.querySelector(PROFILE_AVATAR_SELECTOR),
   );
+}
+
+export function findProfileFooter(): HTMLElement | null {
+  const candidates = profileFooterCandidates();
   return candidates.length === 1 ? candidates[0] : null;
 }
 
@@ -240,8 +248,12 @@ function identityMaskHealth(
 export function profileMaskHealth(): boolean {
   if (!profileMaskConfigured()) return true;
   const mask = readProfileMask();
-  const profileFooter = mask ? findProfileFooter() : null;
-  if (!mask || !profileAvatarDecoded(mask.avatarDataUrl) || !profileFooter) return false;
+  if (!mask) return false;
+  const candidates = profileFooterCandidates();
+  // 只保护主界面资料入口及其一级菜单；设置等页面没有这个入口并不是失败。
+  if (candidates.length === 0) return true;
+  if (candidates.length !== 1 || !profileAvatarDecoded(mask.avatarDataUrl)) return false;
+  const profileFooter = candidates[0];
   if (!identityMaskHealth(profileFooter, PROFILE_NAME_SELECTOR, PROFILE_AVATAR_SELECTOR, mask)) {
     return false;
   }
@@ -260,4 +272,10 @@ export function profileMaskHealth(): boolean {
 export function profileMaskNeedsInject(): boolean {
   if (!profileMaskConfigured()) return false;
   return !profileMaskHealth();
+}
+
+// 原生监视器不能等待后台窗口暂停的动画帧；修复后仍使用同一严格检查。
+export function refreshProfileMaskHealth(): boolean {
+  ensureProfileMask();
+  return profileMaskHealth();
 }
