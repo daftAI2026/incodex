@@ -59,3 +59,5 @@ wallpaper.ts: 用户壁纸输入与图像处理边界。
 编辑器以 `--incodex-capture-window-scale: 1.2` 仅扩展窗口宽高。字号、图标、按钮和间距直接复用原始 token，不参与倍率；非画布区域按 header/footer/toolbar 的既有间距预算，扩大的可用高度全部进入画布。实际布局参与 ResizeObserver/fit，不使用视觉 transform，保留视口 max-width/max-height 保护。
 
 预览尺寸唯一来源是 `fitCanvas()` 计算的 canvas-frame；canvas 完整填满该框，禁止再设置 760px 或视口减常数的位图上限，否则成品在大预览区会缩窄且比例失真。
+
+右侧背景设置栏宽度为 60 个 spacing 单位（默认 240px），比原先 224px 多 16px；窗口外框及控件密度不变，剩余横向空间由预览区占用。

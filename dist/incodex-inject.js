@@ -4228,7 +4228,7 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 .incodex-capture-workspace {
   display: grid;
   gap: calc(var(--incodex-capture-space) * 5);
-  grid-template-columns: minmax(0, 1fr) calc(var(--incodex-capture-space) * 56);
+  grid-template-columns: minmax(0, 1fr) calc(var(--incodex-capture-space) * 60);
   min-height: 0;
   padding: 0 calc(var(--incodex-capture-space) * 5) calc(var(--incodex-capture-space) * 4);
 }
