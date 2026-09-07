@@ -139,4 +139,11 @@ describe("capture window visual tokens", () => {
     expect(css).toMatch(/\.incodex-capture-inspector\s*\{[^}]*max-height: calc\(var\(--incodex-capture-stage-height\) \+ var\(--incodex-capture-space\) \* 9\)/);
   });
 
+  test("mouse focus on an unselected wallpaper must not look like a second selection", () => {
+    const css = readFileSync(backgroundPickerCssPath, "utf8");
+    expect(css).not.toContain(".incodex-capture-wallpaper-label:focus-within");
+    expect(css).toContain(".incodex-capture-wallpaper-label:focus-visible");
+    expect(css).toContain('.incodex-capture-background-option[aria-busy="true"]');
+  });
+
 });
