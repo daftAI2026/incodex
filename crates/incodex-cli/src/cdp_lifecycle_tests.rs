@@ -885,6 +885,7 @@ fn macos_ready_page_disappears_before_process_exit_without_mask_failure() {
     let server = thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_millis(1100);
         while let Some(mut stream) = accept_until(&listener, deadline) {
+            assert_eq!(read_request_path(&mut stream), "/json/list");
             write_json(&mut stream, &json!([]));
         }
         server_alive.store(false, Ordering::Release);
@@ -908,15 +909,23 @@ fn macos_mask_probe_sequence(values: Vec<Value>) -> Option<String> {
     let port = listener.local_addr().unwrap().port();
     let alive = Arc::new(AtomicBool::new(true));
     let server_alive = alive.clone();
+    let expected_probes = values.len();
     let server = thread::spawn(move || {
+        let mut served = 0;
         for value in values {
             let deadline = Instant::now() + Duration::from_secs(3);
             let Some(mut stream) = accept_until(&listener, deadline) else {
                 break;
             };
+            assert_eq!(read_request_path(&mut stream), "/json/list");
+            served += 1;
+            if value == json!("missing") {
+                write_json(&mut stream, &json!([]));
+                continue;
+            }
             write_json(
                 &mut stream,
-                &json!([page(port, "main", "app://-/index.html")]),
+                &json!([page(port, "replacement", "app://-/index.html")]),
             );
             let Some(stream) = accept_until(&listener, deadline) else {
                 break;
@@ -937,11 +946,16 @@ fn macos_mask_probe_sequence(values: Vec<Value>) -> Option<String> {
         }
         thread::sleep(Duration::from_millis(100));
         server_alive.store(false, Ordering::Release);
+        served
     });
     let mut failure = None;
     let _ =
         super::monitor_profile_mask_health(port, &alive, |error| failure = Some(error.to_string()));
-    server.join().unwrap();
+    assert_eq!(
+        server.join().unwrap(),
+        expected_probes,
+        "monitor must resume after page recovery"
+    );
     failure
 }
 
@@ -977,4 +991,31 @@ fn macos_explicit_page_crash_is_preserved_when_the_process_exits_soon_after() {
         failure.is_some(),
         "an explicit renderer crash must not become a normal close"
     );
+}
+
+#[test]
+#[cfg(not(target_os = "windows"))]
+fn macos_page_recovery_during_exit_grace_resumes_mask_supervision() {
+    let failure = macos_mask_probe_sequence(vec![
+        json!(true),
+        json!("missing"),
+        json!("missing"),
+        json!(true),
+        json!(true),
+        json!(false),
+        json!(false),
+    ])
+    .unwrap();
+    assert!(
+        failure.contains("profile mask failed during runtime"),
+        "{failure}"
+    );
+}
+
+#[test]
+#[cfg(not(target_os = "windows"))]
+fn macos_recovered_healthy_page_outlives_the_old_exit_deadline() {
+    let mut probes = vec![json!(true), json!("missing"), json!("missing")];
+    probes.extend(vec![json!(true); 28]);
+    assert!(macos_mask_probe_sequence(probes).is_none());
 }
