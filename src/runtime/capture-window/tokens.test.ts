@@ -154,4 +154,14 @@ describe("capture window visual tokens", () => {
     expect(hover).not.toContain("--incodex-capture-primary-text");
   });
 
+  test("picker icons inherit their paired control surface instead of inverse primary text", () => {
+    const css = readFileSync(backgroundPickerCssPath, "utf8");
+    const icon = css.match(/\.incodex-capture-background-option svg\s*\{([^}]*)\}/)?.[1];
+    expect(icon).toContain("color: inherit");
+    const picker = css.match(/\.incodex-capture-color-label\[data-selected="false"\]\s*\{([^}]*)\}/)?.[1];
+    expect(picker).toContain("background: var(--incodex-capture-surface-tertiary)");
+    expect(picker).toContain("color: var(--incodex-capture-text)");
+    expect(css).not.toContain("--incodex-capture-primary-text");
+  });
+
 });
