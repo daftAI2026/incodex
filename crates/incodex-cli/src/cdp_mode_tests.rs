@@ -420,7 +420,7 @@ fn native_transport_and_malformed_mode_probes_share_the_terminal_failure_budget(
                             .unwrap_or_default();
                         if expression.contains("officialBlockerVisible") {
                             let probe = probes.fetch_add(1, Ordering::AcqRel) + 1;
-                            if probe % 2 == 0 {
+                            if probe.is_multiple_of(2) {
                                 break;
                             }
                             socket
