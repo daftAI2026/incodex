@@ -9,6 +9,7 @@ import {
   wireCaptureBackgroundActions,
 } from "./background-controls.ts";
 import { captureWindowCopy, type CaptureWindowCopy } from "./copy.ts";
+import { wirePaddingSlider } from "./padding-slider.ts";
 import { capturePhysicalPadding, renderCaptureToCanvas } from "./compositor.ts";
 import { createCaptureBackgroundImageStore } from "./backgrounds.ts";
 import {
@@ -506,18 +507,10 @@ function wireInputs(
     });
   });
   const padding = root.querySelector<HTMLInputElement>("[data-input='padding']");
-  padding?.addEventListener("input", (event) => {
-    preview({
-      kind: "set-padding",
-      padding: Number.parseInt((event.currentTarget as HTMLInputElement).value, 10),
-    });
-  });
-  padding?.addEventListener("change", (event) => {
-    dispatch({
-      kind: "set-padding",
-      padding: Number.parseInt((event.currentTarget as HTMLInputElement).value, 10),
-    });
-  });
+  if (padding) wirePaddingSlider(padding,
+    value => preview({ kind: "set-padding", padding: value }),
+    value => dispatch({ kind: "set-padding", padding: value }),
+  );
   root.querySelector<HTMLInputElement>("[data-input='wallpaper']")?.addEventListener("change", (event) => {
     const file = (event.currentTarget as HTMLInputElement).files?.[0];
     if (file) void loadWallpaper(file);

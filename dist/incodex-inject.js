@@ -1095,6 +1095,81 @@ function captureWindowCopy(locale) {
   return locale.toLowerCase().startsWith("zh") ? CHINESE : ENGLISH;
 }
 
+// src/runtime/capture-window/padding-slider.ts
+var LARGE_STEP = 10;
+function wirePaddingSlider(input, preview, commit) {
+  let lastValue = Number(input.value);
+  let pending = false;
+  const describe = () => input.setAttribute("aria-valuetext", `${input.value}%`);
+  const update = () => {
+    if (input.disabled)
+      return;
+    const value = Number(input.value);
+    describe();
+    if (!Number.isFinite(value) || value === lastValue)
+      return;
+    lastValue = value;
+    pending = true;
+    preview(value);
+  };
+  const finish = () => {
+    if (!pending)
+      return;
+    pending = false;
+    commit(lastValue);
+  };
+  describe();
+  input.addEventListener("input", update);
+  input.addEventListener("change", () => {
+    update();
+    finish();
+  });
+  input.addEventListener("blur", finish);
+  input.addEventListener("pointercancel", finish);
+  input.addEventListener("keydown", (event) => {
+    if (input.disabled || event.defaultPrevented)
+      return;
+    const current = Number(input.value);
+    const min = Number(input.min), max = Number(input.max), step = Number(input.step);
+    const increment = event.shiftKey ? LARGE_STEP : step;
+    const rtl = input.ownerDocument.defaultView?.getComputedStyle(input).direction === "rtl";
+    let next;
+    switch (event.key) {
+      case "ArrowRight":
+        next = current + (rtl ? -increment : increment);
+        break;
+      case "ArrowLeft":
+        next = current + (rtl ? increment : -increment);
+        break;
+      case "ArrowUp":
+        next = current + increment;
+        break;
+      case "ArrowDown":
+        next = current - increment;
+        break;
+      case "PageUp":
+        next = current + LARGE_STEP;
+        break;
+      case "PageDown":
+        next = current - LARGE_STEP;
+        break;
+      case "Home":
+        next = min;
+        break;
+      case "End":
+        next = max;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    input.value = String(Math.min(max, Math.max(min, min + Math.round((next - min) / step) * step)));
+    update();
+    finish();
+  });
+}
+
 // src/runtime/capture-window/compositor.ts
 var CAPTURE_WINDOW_UNDERLAY_COLOR = "#f4f4f4";
 function redactionSampling(style, scaleFactor) {
@@ -1938,7 +2013,7 @@ function inspectorTemplate(state, copy, lastBackgroundColor, wallpaperDataUrl, s
         <div class="incodex-capture-range-field">
           <input class="incodex-capture-range" data-input="padding" aria-label="${copy.padding}" type="range" min="${CAPTURE_MIN_PADDING}" max="${CAPTURE_MAX_PADDING}" step="${CAPTURE_PADDING_STEP}" value="${state.padding}">
           <div class="incodex-capture-range-ticks" aria-hidden="true">
-            ${Array.from({ length: 9 }, (_, index) => `<i style="--capture-tick-position: ${(index + 1) * 10}%"></i>`).join("")}
+            ${Array.from({ length: 11 }, (_, index) => `<i style="--capture-tick-position: ${index * 10}%"></i>`).join("")}
           </div>
         </div>
       </section>
@@ -2458,18 +2533,8 @@ function wireInputs(root, dispatch, preview, loadWallpaper, setPrivacy) {
     });
   });
   const padding = root.querySelector("[data-input='padding']");
-  padding?.addEventListener("input", (event) => {
-    preview({
-      kind: "set-padding",
-      padding: Number.parseInt(event.currentTarget.value, 10)
-    });
-  });
-  padding?.addEventListener("change", (event) => {
-    dispatch({
-      kind: "set-padding",
-      padding: Number.parseInt(event.currentTarget.value, 10)
-    });
-  });
+  if (padding)
+    wirePaddingSlider(padding, (value) => preview({ kind: "set-padding", padding: value }), (value) => dispatch({ kind: "set-padding", padding: value }));
   root.querySelector("[data-input='wallpaper']")?.addEventListener("change", (event) => {
     const file = event.currentTarget.files?.[0];
     if (file)

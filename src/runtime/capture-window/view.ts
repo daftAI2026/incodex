@@ -175,7 +175,7 @@ function inspectorTemplate(
         <div class="incodex-capture-range-field">
           <input class="incodex-capture-range" data-input="padding" aria-label="${copy.padding}" type="range" min="${CAPTURE_MIN_PADDING}" max="${CAPTURE_MAX_PADDING}" step="${CAPTURE_PADDING_STEP}" value="${state.padding}">
           <div class="incodex-capture-range-ticks" aria-hidden="true">
-            ${Array.from({ length: 9 }, (_, index) => `<i style="--capture-tick-position: ${(index + 1) * 10}%"></i>`).join("")}
+            ${Array.from({ length: 11 }, (_, index) => `<i style="--capture-tick-position: ${index * 10}%"></i>`).join("")}
           </div>
         </div>
       </section>
