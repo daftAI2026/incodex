@@ -14,6 +14,15 @@ const backgroundPickerCssPath = join(import.meta.dir, "background-picker.css");
 const viewPath = join(import.meta.dir, "view.ts");
 
 describe("capture window visual tokens", () => {
+  test("lets the bitmap fill its fitted frame without a second pixel cap", () => {
+    const css = readFileSync(cssPath, "utf8");
+    const canvas = css.match(/\.incodex-capture-canvas\s*\{([^}]*)\}/)?.[1];
+    expect(canvas).toBeDefined();
+    expect(canvas).toContain("max-width: none");
+    expect(canvas).toContain("max-height: none");
+    expect(canvas).not.toContain("760px");
+    expect(canvas).not.toContain("280px");
+  });
   test("enlarges only the window and preserves control density", () => {
     const css = readFileSync(cssPath, "utf8");
     expect(css).toContain("--incodex-capture-window-scale: 1.2");
