@@ -20,6 +20,7 @@ use crate::profile_mask::{ProfileAvatar, ProfileMask};
 #[path = "cdp_mode.rs"]
 mod mode;
 pub(crate) use mode::Readiness as CodexModeReadiness;
+pub(crate) use mode::POLL_INTERVAL as CODEX_MODE_POLL_INTERVAL;
 use mode::{Action as CodexModeAction, PageState as CodexModePageState};
 
 const INJECT_JS: &str = include_str!("../../../dist/incodex-inject.js");
@@ -33,8 +34,12 @@ const WINDOWS_LIFECYCLE_CDP_TIMEOUT: Duration = Duration::from_millis(400);
 const PROFILE_MASK_FAILURE_POLLS: u8 = 2;
 const WINDOWS_PROFILE_MASK_TRANSPORT_FAILURE_POLLS: u8 = 4;
 const BROWSER_CLOSE_ATTEMPTS: u8 = 3;
+const CODEX_MODE_BLOCKED_ERROR: &str = "Codex mode is blocked by official UI";
+const CODEX_MODE_WAITING_ERROR: &str = "Codex mode is not ready yet";
 const CODEX_MODE_UNAVAILABLE_ERROR: &str =
-    "Codex mode remained unavailable after keyboard fallback";
+    "Codex mode remained unavailable within its readiness deadline";
+pub(crate) const UI_INJECTION_UNAVAILABLE_ERROR: &str =
+    "UI injection remained unavailable within its readiness deadline";
 pub const OFFICIAL_NEW_CODEX_URL: &str = "codex://new?mode=codex";
 
 #[derive(Debug, Clone)]
@@ -411,6 +416,9 @@ where
             connection_guard,
         ) {
             Ok(target_id) => return Ok(target_id),
+            Err(err) if is_codex_mode_blocked_error(&err) || is_codex_mode_waiting_error(&err) => {
+                return Err(err);
+            }
             Err(err) if is_terminal_codex_mode_error(&err) => return Err(err),
             Err(err) => {
                 let refused_now = err.contains("Connection refused")
@@ -445,13 +453,25 @@ where
     G: Fn(&TcpStream) -> Result<(), String>,
 {
     ensure_injection_active(process_alive)?;
-    let targets = list_targets(debug_port)?;
+    let targets = list_targets(debug_port).map_err(|error| {
+        record_target_discovery_failure(payload.require_codex_mode, readiness, error)
+    })?;
     ensure_injection_active(process_alive)?;
-    let page = pick_codex_page_target(&targets).ok_or("no Codex page target")?;
+    let page = match pick_codex_page_target(&targets) {
+        Some(page) => page,
+        None if payload.require_codex_mode => {
+            return Err(codex_mode_action_error(
+                readiness.observe(CodexModePageState::NotReady),
+            ));
+        }
+        None => return Err("no Codex page target".into()),
+    };
     on_target(&page.id);
-    let mut socket = connect_cdp_websocket(&page.ws, debug_port)?;
+    let mut socket = connect_cdp_websocket(&page.ws, debug_port)
+        .map_err(|error| record_injection_probe_failure_if_needed(payload, readiness, error))?;
     ensure_injection_active(process_alive)?;
-    send_guarded_cdp(&mut socket, 1, "Page.enable", json!({}), connection_guard)?;
+    send_guarded_cdp(&mut socket, 1, "Page.enable", json!({}), connection_guard)
+        .map_err(|error| record_injection_probe_failure_if_needed(payload, readiness, error))?;
     if payload.require_codex_mode {
         confirm_official_codex_mode(&mut socket, process_alive, readiness, connection_guard)?;
     }
@@ -463,7 +483,10 @@ where
             "Page.addScriptToEvaluateOnNewDocument",
             json!({ "source": payload.source }),
             connection_guard,
-        )?;
+        )
+        .map_err(|error| {
+            record_post_mode_injection_failure(payload.require_codex_mode, readiness, error)
+        })?;
         registered_script_targets.insert(page.id.clone());
     }
     ensure_injection_active(process_alive)?;
@@ -473,7 +496,10 @@ where
         "Runtime.evaluate",
         json!({ "expression": payload.source, "returnByValue": true }),
         connection_guard,
-    )?;
+    )
+    .map_err(|error| {
+        record_post_mode_injection_failure(payload.require_codex_mode, readiness, error)
+    })?;
     ensure_injection_active(process_alive)?;
     let health = send_guarded_cdp(
         &mut socket,
@@ -481,8 +507,13 @@ where
         "Runtime.evaluate",
         json!({ "expression": payload.health_expression, "returnByValue": true }),
         connection_guard,
+    )
+    .map_err(|error| {
+        record_post_mode_injection_failure(payload.require_codex_mode, readiness, error)
+    })?;
+    validate_ui_probe_result_for_options(&health, payload.require_profile_mask).map_err(
+        |error| record_post_mode_injection_failure(payload.require_codex_mode, readiness, error),
     )?;
-    validate_ui_probe_result_for_options(&health, payload.require_profile_mask)?;
     let target_id = page.id.clone();
     let _ = socket.close(None);
     Ok(target_id)
@@ -505,38 +536,111 @@ fn confirm_official_codex_mode<G>(
 where
     G: Fn(&TcpStream) -> Result<(), String>,
 {
-    let mut next_id = 10;
-    loop {
-        ensure_injection_active(process_alive)?;
-        let response = send_guarded_cdp(
-            socket,
-            next_id,
-            "Runtime.evaluate",
-            json!({
-                "expression": mode::PROBE_EXPRESSION,
-                "returnByValue": true
-            }),
-            connection_guard,
-        )?;
-        next_id += 1;
+    ensure_injection_active(process_alive)?;
+    let response = send_guarded_cdp(
+        socket,
+        10,
+        "Runtime.evaluate",
+        json!({
+            "expression": mode::PROBE_EXPRESSION,
+            "returnByValue": true
+        }),
+        connection_guard,
+    )
+    .map_err(|error| record_codex_mode_probe_failure(readiness, error))?;
 
-        match readiness.observe(codex_mode_page_state(&response)?) {
-            CodexModeAction::Confirmed => return Ok(()),
-            CodexModeAction::Wait => {}
-            CodexModeAction::SelectFallback => {
-                dispatch_codex_mode_fallback(socket, &mut next_id, connection_guard)?;
-            }
-            CodexModeAction::Unresolved => {
-                return Err(CODEX_MODE_UNAVAILABLE_ERROR.into());
-            }
+    let page_state = codex_mode_page_state(&response)
+        .map_err(|error| record_codex_mode_probe_failure(readiness, error))?;
+    let action = readiness.observe(page_state);
+    if action == CodexModeAction::SelectFallback {
+        let mut next_id = 11;
+        dispatch_codex_mode_fallback(socket, &mut next_id, connection_guard)
+            .map_err(|error| record_codex_mode_probe_failure(readiness, error))?;
+    }
+    match action {
+        CodexModeAction::Confirmed => Ok(()),
+        CodexModeAction::BlockedByOfficialUi => Err(CODEX_MODE_BLOCKED_ERROR.into()),
+        CodexModeAction::Wait | CodexModeAction::SelectFallback => {
+            Err(CODEX_MODE_WAITING_ERROR.into())
         }
-
-        thread::sleep(mode::POLL_INTERVAL);
+        CodexModeAction::Unresolved => Err(CODEX_MODE_UNAVAILABLE_ERROR.into()),
     }
 }
 
+fn record_target_discovery_failure(
+    require_codex_mode: bool,
+    readiness: &mut CodexModeReadiness,
+    error: String,
+) -> String {
+    if !require_codex_mode {
+        return error;
+    }
+    if error.contains("Connection refused")
+        || error.contains("os error 61")
+        || error.contains("os error 111")
+        || error.contains("os error 10061")
+    {
+        return codex_mode_action_error(readiness.observe(CodexModePageState::NotReady));
+    }
+    record_codex_mode_probe_failure(readiness, error)
+}
+
+fn record_injection_probe_failure_if_needed(
+    payload: &InjectionPayload<'_>,
+    readiness: &mut CodexModeReadiness,
+    error: String,
+) -> String {
+    if payload.require_codex_mode {
+        record_codex_mode_probe_failure(readiness, error)
+    } else {
+        error
+    }
+}
+
+fn codex_mode_action_error(action: CodexModeAction) -> String {
+    match action {
+        CodexModeAction::BlockedByOfficialUi => CODEX_MODE_BLOCKED_ERROR.into(),
+        CodexModeAction::Unresolved => CODEX_MODE_UNAVAILABLE_ERROR.into(),
+        CodexModeAction::Confirmed | CodexModeAction::Wait | CodexModeAction::SelectFallback => {
+            CODEX_MODE_WAITING_ERROR.into()
+        }
+    }
+}
+
+fn record_codex_mode_probe_failure(readiness: &mut CodexModeReadiness, error: String) -> String {
+    if readiness.observe_probe_failure() == CodexModeAction::Unresolved {
+        CODEX_MODE_UNAVAILABLE_ERROR.into()
+    } else {
+        error
+    }
+}
+
+fn record_post_mode_injection_failure(
+    require_codex_mode: bool,
+    readiness: &mut CodexModeReadiness,
+    error: String,
+) -> String {
+    if require_codex_mode && readiness.observe_probe_failure() == CodexModeAction::Unresolved {
+        UI_INJECTION_UNAVAILABLE_ERROR.into()
+    } else {
+        error
+    }
+}
+
+pub(crate) fn is_terminal_ui_injection_error(error: &str) -> bool {
+    error == UI_INJECTION_UNAVAILABLE_ERROR
+}
+
 pub(crate) fn is_terminal_codex_mode_error(error: &str) -> bool {
-    error == CODEX_MODE_UNAVAILABLE_ERROR
+    error == CODEX_MODE_UNAVAILABLE_ERROR || is_terminal_ui_injection_error(error)
+}
+
+pub(crate) fn is_codex_mode_blocked_error(error: &str) -> bool {
+    error == CODEX_MODE_BLOCKED_ERROR
+}
+
+pub(crate) fn is_codex_mode_waiting_error(error: &str) -> bool {
+    error == CODEX_MODE_WAITING_ERROR
 }
 
 fn codex_mode_page_state(response: &Value) -> Result<CodexModePageState, String> {
@@ -560,8 +664,11 @@ fn codex_mode_page_state(response: &Value) -> Result<CodexModePageState, String>
     if mode_available && mode_label == "Codex" {
         return Ok(CodexModePageState::Codex);
     }
-    if blocker_visible || !mode_available {
-        return Ok(CodexModePageState::Pending);
+    if blocker_visible {
+        return Ok(CodexModePageState::BlockedByOfficialUi);
+    }
+    if !mode_available {
+        return Ok(CodexModePageState::NotReady);
     }
     Ok(CodexModePageState::Other)
 }
