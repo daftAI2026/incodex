@@ -16,13 +16,15 @@ use incodex_core::{format_kv, format_ok, format_step, format_warn};
 use crate::cdp::{
     allocate_debug_port, debug_launch_args,
     inject_shared_ui_with_options_while_alive_and_guard_with_readiness,
-    is_terminal_codex_mode_error, start_lifecycle_signal_monitor,
-    start_profile_mask_signal_monitor, CodexModeReadiness, InjectionOptions,
+    is_codex_mode_blocked_error, is_codex_mode_waiting_error, is_terminal_codex_mode_error,
+    start_lifecycle_signal_monitor, start_profile_mask_signal_monitor, CodexModeReadiness,
+    InjectionOptions, CODEX_MODE_POLL_INTERVAL,
 };
 use crate::open_presentation::{
     classify_completed_open, completed_open_failure_message, CompletedOpenState,
-    CLOSED_REMOVED_MESSAGE, DRY_RUN_COMPLETE, DRY_RUN_HEADING, OPENED_MESSAGE, OPENING_MESSAGE,
-    REMOVING_SESSION_MESSAGE, UI_READY_WAIT_MESSAGE, WAITING_MESSAGE,
+    CLOSED_REMOVED_MESSAGE, DRY_RUN_COMPLETE, DRY_RUN_HEADING, OFFICIAL_BLOCKER_WAIT_MESSAGE,
+    OPENED_MESSAGE, OPENING_MESSAGE, REMOVING_SESSION_MESSAGE, UI_READY_WAIT_MESSAGE,
+    WAITING_MESSAGE,
 };
 use crate::profile_mask::{resolve_profile_mask, ProfileMask};
 use crate::windows_activation::{
@@ -110,6 +112,17 @@ pub enum WindowsOpenProcessResult {
 const LISTENER_SHUTDOWN_GRACE: Duration = Duration::from_millis(200);
 const VISIBLE_WINDOW_CLOSE_GRACE: Duration = Duration::from_millis(250);
 type WindowsMonitorWorkers = Vec<thread::JoinHandle<()>>;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WindowsInjectionProgress {
+    BlockedByOfficialUi,
+}
+
+fn windows_injection_progress_message(progress: WindowsInjectionProgress) -> &'static str {
+    match progress {
+        WindowsInjectionProgress::BlockedByOfficialUi => OFFICIAL_BLOCKER_WAIT_MESSAGE,
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowsOpenOutcome {
@@ -276,6 +289,7 @@ where
             Arc<AtomicBool>,
             Arc<AtomicBool>,
             Arc<WindowsCdpOwnershipGuard>,
+            mpsc::Sender<WindowsInjectionProgress>,
         ) -> Result<WindowsMonitorWorkers, String>
         + Send
         + 'static,
@@ -302,6 +316,7 @@ where
             Arc<AtomicBool>,
             Arc<AtomicBool>,
             Arc<WindowsCdpOwnershipGuard>,
+            mpsc::Sender<WindowsInjectionProgress>,
         ) -> Result<WindowsMonitorWorkers, String>
         + Send
         + 'static,
@@ -369,6 +384,7 @@ where
             Arc<AtomicBool>,
             Arc<AtomicBool>,
             Arc<WindowsCdpOwnershipGuard>,
+            mpsc::Sender<WindowsInjectionProgress>,
         ) -> Result<WindowsMonitorWorkers, String>
         + Send
         + 'static,
@@ -403,6 +419,7 @@ where
     let options = plan.injection.clone();
     let injection_ownership_guard = ownership_guard.clone();
     let (injection_tx, injection_rx) = mpsc::channel();
+    let (progress_tx, progress_rx) = mpsc::channel();
     let worker = thread::spawn(move || {
         let _ = injection_tx.send(inject(
             debug_port,
@@ -411,14 +428,26 @@ where
             injection_close_requested,
             injection_cdp_failed,
             injection_ownership_guard,
+            progress_tx,
         ));
     });
 
     let mut ui_ready = false;
+    let mut blocker_reported = false;
     let mut monitor_workers = Vec::new();
     let mut listener_missing_since = None;
     let mut window_lifecycle = VisibleWindowLifecycle::new(VISIBLE_WINDOW_CLOSE_GRACE);
     let (process, shutdown) = loop {
+        if let Ok(progress) = progress_rx.try_recv() {
+            if !blocker_reported {
+                let message = windows_injection_progress_message(progress);
+                spinner.stop();
+                println!("{}", format_warn(message, None));
+                let _ = std::io::stdout().flush();
+                spinner = crate::spinner::Spinner::start(message);
+                blocker_reported = true;
+            }
+        }
         match injection_rx.try_recv() {
             Ok(Ok(workers)) => {
                 monitor_workers = workers;
@@ -638,11 +667,12 @@ fn inject_windows_ui(
     close_requested: Arc<AtomicBool>,
     cdp_failed: Arc<AtomicBool>,
     ownership_guard: Arc<WindowsCdpOwnershipGuard>,
+    progress_tx: mpsc::Sender<WindowsInjectionProgress>,
 ) -> Result<WindowsMonitorWorkers, String> {
-    let deadline = Instant::now() + Duration::from_secs(45);
     let mut last_error = "Codex CDP page is not ready".to_string();
     let mut mode_readiness = CodexModeReadiness::default();
-    while alive.load(Ordering::Acquire) && Instant::now() < deadline {
+    let mut blocker_reported = false;
+    while alive.load(Ordering::Acquire) {
         let mut primary_target = None;
         match inject_shared_ui_with_options_while_alive_and_guard_with_readiness(
             port,
@@ -675,6 +705,18 @@ fn inject_windows_ui(
                     ));
                 }
                 return Ok(monitor_workers);
+            }
+            Err(error) if is_codex_mode_blocked_error(&error) => {
+                if !blocker_reported {
+                    let _ = progress_tx.send(WindowsInjectionProgress::BlockedByOfficialUi);
+                    blocker_reported = true;
+                }
+                thread::sleep(CODEX_MODE_POLL_INTERVAL);
+                continue;
+            }
+            Err(error) if is_codex_mode_waiting_error(&error) => {
+                thread::sleep(CODEX_MODE_POLL_INTERVAL);
+                continue;
             }
             Err(error) if is_terminal_codex_mode_error(&error) => return Err(error),
             Err(error) => last_error = error,
