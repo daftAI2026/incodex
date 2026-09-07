@@ -98,8 +98,9 @@ function settingsSurfaceWithoutProfile(): boolean {
     navigations[0].querySelector('button.sidebar-item[role="link"]');
   // The official lazy-loaded settings route first mounts an empty busy nav.
   // Require its observed invisible placeholder, not merely a missing footer.
+  // 归属官方侧栏即可；Windows 在侧栏和 nav 之间还有布局容器。
   const loading = [...document.querySelectorAll<HTMLElement>(
-    '.app-shell-left-panel > nav[aria-busy="true"]',
+    '.app-shell-left-panel nav[aria-busy="true"]',
   )];
   const emptySkeleton = loading.length === 1 &&
     loading[0].childNodes.length === 1 &&
