@@ -57,3 +57,5 @@ wallpaper.ts: 用户壁纸输入与图像处理边界。
 外壳材质仅由 `.incodex-capture-dialog` 绘制；inspector 是透明布局容器，不重复叠加相同 alpha。独立颜色浮层仍需自己的表面，不能一并透明化。
 
 编辑器以 `--incodex-capture-window-scale: 1.2` 仅扩展窗口宽高。字号、图标、按钮和间距直接复用原始 token，不参与倍率；非画布区域按 header/footer/toolbar 的既有间距预算，扩大的可用高度全部进入画布。实际布局参与 ResizeObserver/fit，不使用视觉 transform，保留视口 max-width/max-height 保护。
+
+预览尺寸唯一来源是 `fitCanvas()` 计算的 canvas-frame；canvas 完整填满该框，禁止再设置 760px 或视口减常数的位图上限，否则成品在大预览区会缩窄且比例失真。

@@ -4017,7 +4017,7 @@ var TOOLTIP_DISMISS_EVENT = "codex:dismiss-tooltips";
 var CAPTURE_TRIGGER_ATTR = "data-incodex-capture-trigger";
 var CAPTURE_WINDOW_STYLE = `/**
  * [INPUT]: 依赖 view.ts 输出的 capture-window DOM、Codex 主题 token 与四像素间距基线
- * [OUTPUT]: 对外提供截图模态框、背景语义分层、工具栏、画布、检查器与隐私捕获态样式；外壳底色只绘制一次，仅窗口尺寸放大，控件密度不变
+ * [OUTPUT]: 对外提供截图模态框、背景语义分层、工具栏、画布、检查器与隐私捕获态样式；外壳底色只绘制一次，仅窗口尺寸放大，控件密度不变，位图尺寸服从 fitted frame
  * [POS]: capture-window 的视觉契约，和 color-popover.css 分工维护主编辑器与浮层样式
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -4399,8 +4399,9 @@ html.incodex-capturing .mac-traffic-light > div > svg {
 .incodex-capture-canvas {
   display: block;
   height: auto;
-  max-height: calc(100dvh - 280px);
-  max-width: min(100%, 760px);
+  /* fitCanvas 独占尺寸计算；位图不能再被旧像素上限二次压缩。 */
+  max-height: none;
+  max-width: none;
   pointer-events: none;
   width: auto;
 }
