@@ -10,7 +10,7 @@
 
 [data-incodex-capture],
 [data-incodex-capture-preview] {
-  --incodex-capture-editor-scale: 1.08;
+  --incodex-capture-editor-scale: 1.2;
   --incodex-capture-stage-height: calc(50vh * var(--incodex-capture-editor-scale));
   --incodex-capture-space: calc(var(--spacing, 4px) * var(--incodex-capture-editor-scale));
   --incodex-capture-surface: var(--color-surface-elevated-secondary, var(--color-surface, #ffffff));
