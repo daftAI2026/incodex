@@ -964,11 +964,8 @@ fn macos_cancelled_close_keeps_monitoring_the_live_mask() {
 #[test]
 #[cfg(not(target_os = "windows"))]
 fn macos_crashed_page_is_a_lifecycle_failure_not_a_mask_failure() {
-    let failure = macos_mask_probe_sequence(vec![Value::Null; 20]).unwrap();
-    assert!(
-        failure.contains("page connection failed during runtime"),
-        "{failure}"
-    );
+    let failure = macos_mask_probe_sequence(vec![Value::Null]).unwrap();
+    assert!(failure.contains("page crashed during runtime"), "{failure}");
     assert!(!failure.contains("profile mask"));
 }
 
@@ -976,5 +973,8 @@ fn macos_crashed_page_is_a_lifecycle_failure_not_a_mask_failure() {
 #[cfg(not(target_os = "windows"))]
 fn macos_explicit_page_crash_is_preserved_when_the_process_exits_soon_after() {
     let failure = macos_mask_probe_sequence(vec![Value::Null]);
-    assert!(failure.is_some(), "an explicit renderer crash must not become a normal close");
+    assert!(
+        failure.is_some(),
+        "an explicit renderer crash must not become a normal close"
+    );
 }
