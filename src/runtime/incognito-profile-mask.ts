@@ -104,11 +104,14 @@ function settingsSurfaceWithoutProfile(): boolean {
   const emptySkeleton = loading.length === 1 &&
     loading[0].childNodes.length === 1 &&
     loading[0].firstElementChild?.classList.contains("invisible");
-  if (!ready && !emptySkeleton) return false;
+  if (!(ready && loading.length === 0) && !(emptySkeleton && navigations.length === 0)) {
+    return false;
+  }
   // A surviving account-menu trigger may have drifted name/avatar markup.
   // Do not let that failed recognition masquerade as an absent identity.
   return ![...document.querySelectorAll<HTMLElement>(PROFILE_FOOTER_SELECTOR)].some(
     (element) => element.getAttribute("aria-haspopup") === "menu" ||
+      Boolean(element.getAttribute("aria-controls")) ||
       element.getAttribute(PROFILE_MASK_ATTR) === "true",
   );
 }

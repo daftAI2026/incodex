@@ -1132,9 +1132,10 @@ function settingsSurfaceWithoutProfile() {
   const ready = navigations.length === 1 && navigations[0].querySelector('input[role="searchbox"]') && navigations[0].querySelector('button.sidebar-item[role="link"]');
   const loading = [...document.querySelectorAll('.app-shell-left-panel > nav[aria-busy="true"]')];
   const emptySkeleton = loading.length === 1 && loading[0].childNodes.length === 1 && loading[0].firstElementChild?.classList.contains("invisible");
-  if (!ready && !emptySkeleton)
+  if (!(ready && loading.length === 0) && !(emptySkeleton && navigations.length === 0)) {
     return false;
-  return ![...document.querySelectorAll(PROFILE_FOOTER_SELECTOR)].some((element) => element.getAttribute("aria-haspopup") === "menu" || element.getAttribute(PROFILE_MASK_ATTR) === "true");
+  }
+  return ![...document.querySelectorAll(PROFILE_FOOTER_SELECTOR)].some((element) => element.getAttribute("aria-haspopup") === "menu" || Boolean(element.getAttribute("aria-controls")) || element.getAttribute(PROFILE_MASK_ATTR) === "true");
 }
 function findProfileFooter() {
   const candidates = profileFooterCandidates();
