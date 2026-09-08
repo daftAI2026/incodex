@@ -264,8 +264,8 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
         ));
     }
     let package_root = managed_package_root()?;
-    println!("update channel: windows standalone");
     if parsed.dry_run {
+        println!("update channel: windows standalone");
         println!("would install the latest verified Windows release");
         println!("would publish Runtime with the installed CLI");
         println!("no changes made.");
