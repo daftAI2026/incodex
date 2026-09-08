@@ -8,7 +8,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use incodex_core::paths::{user_root, DEFAULT_APP};
-use incodex_core::{format_kv, format_ok, format_step, format_warn};
+use incodex_core::{format_kv, format_ok, format_step};
 use serde::{Deserialize, Serialize};
 
 use crate::parse::ParsedCli;

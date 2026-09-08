@@ -1027,7 +1027,8 @@ printf '%s' 'INCODEX_HTTP_STATUS:200'
     let (status, output) = run_tty(&installed, &home, &path, Duration::from_secs(12));
     assert_eq!(status, 0, "{output:?}");
     let visible_output = visible(&output);
-    for stage in ["Upgrading Incodex"] {
+    {
+        let stage = "Upgrading Incodex";
         assert!(
             ["|", "/", "-", "\\"]
                 .iter()
