@@ -34,3 +34,19 @@ fn restore_accepts_no_user_supplied_preference_path() {
     assert_eq!(parse_request(&json!({"id":"restore-1","kind":"restore"})), Some(Request::Restore { id: "restore-1".into() }));
     assert!(parse_request(&json!({"id":"restore-1","kind":"restore","path":"/tmp/other"})).is_none());
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn dropping_pair_host_waits_for_cancelled_workers() {
+    use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+    let mut host = super::PairHost::new();
+    let alive = host.alive.clone();
+    let finished = Arc::new(AtomicBool::new(false));
+    let worker_finished = finished.clone();
+    host.workers.insert("system-wallpaper-theme".into(), std::thread::spawn(move || {
+        while alive.load(Ordering::Acquire) { std::thread::yield_now(); }
+        worker_finished.store(true, Ordering::Release);
+    }));
+    drop(host);
+    assert!(finished.load(Ordering::Acquire));
+}

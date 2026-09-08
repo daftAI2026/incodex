@@ -177,3 +177,19 @@
   cursor: progress;
   opacity: 0.5;
 }
+
+/* -------------------- 系统资源加载占位 -------------------- */
+.incodex-capture-skeleton {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--incodex-capture-surface-tertiary);
+  animation: incodex-capture-loading 1.6s ease-in-out infinite;
+}
+@keyframes incodex-capture-loading {
+  50% { opacity: 0.45; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .incodex-capture-skeleton { animation: none; }
+}

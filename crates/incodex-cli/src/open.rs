@@ -1,6 +1,6 @@
 //! [INPUT]: 原生会话、官方进程与共享 CDP 注入能力。
 //! [OUTPUT]: 隔离窗口启动、就绪和退出清理流程。
-//! [POS]: 产品 open 编排边界；主线程采集实验 Shot 桌面路径供后台使用。
+//! [POS]: 产品 open 编排边界；持有注入与 Shot worker 至清理完成，遮罩失效时先关闭窗口再等待非关键任务。
 //! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 //! Native `incodex open` session, process, CDP, and cleanup orchestration.
 use std::io::Write;
@@ -485,8 +485,11 @@ fn spawn_plan_with_owner(plan: &OpenPlan) -> Result<SpawnOutcome, String> {
                         format_warn(&format!("Closing window: {detail}."), None)
                     );
                     let _ = std::io::stdout().flush();
+                    // 先关闭失效遮罩窗口，再等待非关键壁纸任务清理。
+                    process_alive.store(false, Ordering::Release);
+                    let terminated = kill_and_reap(&mut child);
                     stop_injection_worker(&process_alive, &mut injection_worker);
-                    return Ok(match kill_and_reap(&mut child) {
+                    return Ok(match terminated {
                         Ok(_) => SpawnOutcome {
                             process: if readiness.load(Ordering::Acquire) {
                                 OpenProcessResult::RuntimeFailed { detail }
@@ -652,9 +655,9 @@ fn start_injection_worker(
                 }
             }
             publish_injection_status(&status_tx, &readiness, InjectionStatus::Ready);
-            if options.capture_debug {
-                start_capture_debug_monitor(port, process_alive.clone(), current_wallpaper);
-            }
+            let capture_worker = options.capture_debug.then(|| {
+                start_capture_debug_monitor(port, process_alive.clone(), current_wallpaper)
+            });
             if options.profile_mask.is_some() {
                 let _ = monitor_profile_mask_health(port, &process_alive, |error| {
                     publish_injection_status(
@@ -663,6 +666,9 @@ fn start_injection_worker(
                         InjectionStatus::RuntimeFailed(error.to_string()),
                     );
                 });
+            }
+            if let Some(worker) = capture_worker {
+                let _ = worker.join();
             }
             return;
         }

@@ -159,3 +159,7 @@ Public docs use the native `incodex` / `inc` binaries. Bun is retained for Elect
 `feature/capture-generated-gradients` 的 capture-debug open 使用 `crates/incodex-cli/src/macos_desktop_wallpaper.rs` 在主线程查询当前桌面路径快照，`system_wallpapers.rs` 验证本机文件并经 `cdp_system_wallpapers.rs` 提供不透明 ID；`macos_image_io.rs` 将 HEIC 解码为长边 2600px、质量 0.85 的 JPEG 编辑资源。该链路不是 install 功能，也不是 Windows 支持声明；UI 地图在 `src/runtime/capture-window/CLAUDE.md`。
 
 Shot 当前桌面入口偏好由 `shot_wallpaper_preference.rs` 保存到私有 Incodex 根的固定单字节标志文件；跨隔离会话只恢复素材入口授权，不保存素材路径/内容或聊天数据。原生文件访问经目录 fd、no-follow、owner/权限校验。
+
+### Shot 系统双壁纸获取边界
+
+截图实验的“获取系统壁纸”是用户明确触发的资源获取：macOS 26/27 按已验证的系统版本角色映射读取主题与风景，缺失时仅下载绑定的 Apple HTTPS 视频源；更早或未知版本不猜测。renderer 只能发送不透明 ID，不能指定 URL 或路径。原生下载与解码由 macos_system_wallpapers.rs / macos_wallpaper_video.rs 承担，临时视频不进入 Runtime 资产或长期缓存。关闭隔离窗口必须沿 open → capture monitor → resource worker 的所有权链取消、等待并清理；不得用 detached worker 逃逸关闭流程。该路径不修改系统桌面、不扩大 Windows 安装态支持，也不构成发布授权。当前接口和状态机以 src/runtime/capture-window/CLAUDE.md 的“系统双壁纸获取”章节为准，单张当前桌面相关段落仅为旧链路取证。

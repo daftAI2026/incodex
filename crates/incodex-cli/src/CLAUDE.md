@@ -12,7 +12,7 @@ cdp_masked_lifecycle.rs: macOS 资料遮罩持续监督，将页面关闭、连�
 cdp_mode.rs: Codex 模式 DOM 探测及就绪状态机，官方阻塞 UI 暂停计时，限定回退与失败预算。
 cdp_mode_tests.rs: Codex 模式回归，以受控时序和 CDP 响应验证等待、阻塞、回退及终止条件。
 cdp_partial_flush_tests.rs: WebSocket 部分写入回归，模拟 WouldBlock，验证有界发送不会重复写帧或丢失守卫检查。
-cdp_system_wallpapers.rs: Shot 壁纸 CDP adapter，只路由目录、恢复与不透明资源 ID 请求，不接收 renderer 文件路径。
+cdp_system_wallpapers.rs: Shot 壁纸 CDP adapter，只路由目录、恢复与不透明资源 ID 请求；双资源任务独立执行，持有并回收 worker，不接收 renderer 文件路径或 URL。
 cdp_system_wallpapers_tests.rs: 壁纸协议回归，验证动作白名单、不透明 ID 和额外字段拒绝。
 cdp_ui_probe_tests.rs: Runtime 就绪验收回归，分别约束按钮、横幅和资料遮罩结果，拒绝畸形探测值。
 cdp_unit_tests.rs: CDP 基础契约回归，覆盖页面筛选、loopback 限制、窗口类型及显式 Shot 开关。
@@ -37,7 +37,9 @@ lib.rs: CLI 库入口与平台模块注册，统一解析、命令分发及失�
 lifecycle.rs: macOS CLI 更新、自卸载及更新通知编排，按安装渠道更新并通过新 CLI 发布 Runtime。
 locale.rs: localeOverride 共享解析，允许调用方明确规定引号策略，不接管平台文件读取。
 macos_desktop_wallpaper.rs: AppKit 主线程查询当前桌面路径快照，后续验证和解码交给后台壁纸资源库。
-macos_image_io.rs: ImageIO 字节解码边界，把已受限读取的图片转换为有界静态 JPEG，不接受路径或网络来源。
+macos_system_wallpapers.rs: 已取证的 macOS 26/27 双壁纸来源，优先本地，按需下载固定 Apple HTTPS 视频并转换；临时源文件随任务清理。
+macos_wallpaper_video.rs: AVFoundation 首帧解码，禁止所有外部媒体引用，限制最长边并复用 ImageIO JPEG 编码。
+macos_image_io.rs: ImageIO 字节解码与共享 JPEG 编码边界，接收受限静态图像或视频 adapter 的 CGImage，不接受路径或网络来源。
 main.rs: 进程入口，将参数交给 CLI 库并按统一错误格式和退出码结束。
 menu.rs: 非 Windows 菜单 adapter，提供命令项、终端按键和后台刷新后的更新提示。
 menu_controller.rs: 共享菜单状态机，将平台按键映射为选中项或命令，不执行产品变更。
@@ -53,8 +55,9 @@ shot_wallpaper_preference.rs: macOS 私有根目录中的 Shot 启用标志，�
 spinner.rs: 平台共用进度动画，按终端能力和宽度呈现并在结束时回收后台线程。
 stable_release.rs: 稳定发布元数据和规范三段版本解析，供更新逻辑比较版本，拒绝非规范标签。
 system_wallpaper_catalog.rs: 当前桌面既有缩略图候选策略，只计算邻接资源路径，不扫描历史系统版本。
-system_wallpaper_catalog_tests.rs: 缩略图候选回归，固定邻接预览优先级与 Tahoe 特例。
-system_wallpapers.rs: Shot 当前桌面资源库，以验证后的主机路径建立不透明 ID，限定读取、缩略图与原图传输。
+system_wallpaper_catalog_tests.rs: 缩略图候选与双资源来源回归，固定邻接预览、版本身份和 Apple URL 白名单。
+system_wallpaper_files.rs: 跨平台 no-follow 有界读取和私有临时目录，静态图片与下载视频共用文件安全实现。
+system_wallpapers.rs: 非 macOS 当前桌面资源库及 macOS 旧合同测试入口，以验证后的主机路径建立不透明 ID，限定读取、缩略图与原图传输。
 system_wallpapers_tests.rs: 壁纸资源回归，以临时文件验证路径边界、会话索引和资源上限，macOS 解码仅只读系统素材。
 terminal.rs: termios 终端输入 adapter，有界读取转义序列并恢复原模式，为菜单和确认提供按键。
 terminal_presentation.rs: 终端报告与结果的共享输出间距规范，不承担诊断或命令语义。

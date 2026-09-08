@@ -44,9 +44,9 @@ redactions.ts: 隐私区域遮罩采样与渲染。
 regions.ts: 编辑器区域覆盖层与命中几何。
 tokens.test.ts: 回归验证：视觉角色、布局密度与 token 复用回归。
 view.ts: 从状态生成编辑器 DOM，不持有第二份业务状态。
-system-wallpaper-bridge.ts: 系统壁纸 CDP 请求关联与超时，拒绝远程资源和任意路径。
+system-wallpaper-bridge.ts: 系统壁纸 CDP 请求关联与超时，只接受不透明 ID 和图片结果；远程 URL 永不交给 renderer。
 system-wallpaper-bridge.test.ts: 目录与编辑图片传输的有界白名单回归。
-system-wallpapers.ts: 本机壁纸目录装载、选择竞态与 UI 生命周期；背景选择仍交给编辑状态机。
+system-wallpapers.ts: 双资源独立装载、失败重试和去重缓存；prepare 不改变选择，select 经 revision 守卫交给编辑状态机。
 system-wallpapers.test.ts: 装载状态、空目录、失败及过期异步结果的回归。
 wallpaper.ts: 用户壁纸输入与图像处理边界。
 
@@ -70,23 +70,17 @@ wallpaper.ts: 用户壁纸输入与图像处理边界。
 
 右侧背景设置栏宽度为 60 个 spacing 单位（默认 240px），比原先 224px 多 16px；窗口外框及控件密度不变，剩余横向空间由预览区占用。
 
-当前桌面是本机资源来源，不是历史版本素材库或下载器：按钮位于既有“壁纸”标题右侧，点击后获取并应用当前桌面，复用原有 background 状态与图片 store，不新增独立系统壁纸组。不把系统素材嵌入 Runtime、不改变系统桌面设置。实验 adapter 仅通过现有 capture-debug open 连接，不代表安装态或 Windows 实机验收。
+系统壁纸的当前合同见下方“双壁纸获取”；早期单张当前桌面实现仅作为非 macOS adapter 与回归测试保留。ImageIO 沿用有界 2600px、JPEG 0.85 的编辑图片语义，不将画廊小缩略图冒充原图。实验 adapter 仅通过 capture-debug open 连接，不代表安装态或 Windows 实机验收。
 
-主机实现位于 crates/incodex-cli/src/system_wallpapers.rs，CDP 白名单路由位于 cdp_system_wallpapers.rs；system_wallpaper_catalog.rs 仅保留当前图片的现成缩略图候选，不再排序历史系统版本。macos_desktop_wallpaper.rs 在实验 open 主线程调用 NSWorkspace（主屏、首屏回退），把本地路径快照交给后台资源库；主机验证该文件后以 system-wallpaper-current 提供，不扫描历史版本或任意父目录。此 open 启动后修改系统桌面不会自动刷新快照。
-
-ScreenKite 截图宿主取证确认的是当前桌面入口：后台 ImageIO 以长边 2600px 解码并编码 JPEG 0.85，再提供可选 ID。Shot 的 HEIC 适配采用该有界编辑图片语义，不声称保留原始 HEIC 像素。完整证据与历史目录缺口保存在私人文档 .internal-docs/shot/current-desktop-cross-platform-20260908.md；不要为凑五版本将 214×130 预览冒充完整原图。
-
-透明标题动作（渐变展开/收起、获取当前壁纸）默认使用 text-secondary，hover 使用普通 text。primary-text 是实心主按钮背景的反色前景，不可用于透明动作，否则浅色主题白字落在白底上。
+透明标题动作（渐变展开/收起、获取系统壁纸）默认使用 text-secondary，hover 使用普通 text。primary-text 是实心主按钮背景的反色前景，不可用于透明动作，否则浅色主题白字落在白底上。
 
 背景选择器图标继承控件文字色；未选中的自定义选色入口使用 surface-tertiary/text 成对语义，不把上次任意颜色与主按钮反色文字混配。选中自定义颜色时仍展示原色，既有隐藏图标语义不变。实心复制按钮与 toast 保留 primary/primary-text 成对语义。
 
 背景选项统一为五列等宽正方形（aspect-ratio: 1），填满网格列并复用 radius-sm；纯色不再单独固定小尺寸。网格保留一个 spacing 的安全边距供选中环绘制，避免侧边裁切。
 
-纯色覆盖为两排八列圆形，前十五个沿用已取证 CleanShot 色板，末位自选；四周一个 spacing、行列两 spacing，预留选中环。渐变和壁纸仍为五列正方形。当前桌面可用时加入五张预设之后、上传按钮之前；获取入口隐藏，失效重新显示。挂载通过 restore 恢复可用入口；首次跨隔离会话或上次选择当前桌面时恢复选中，已保存的其他背景和加载期间的新选择优先。
+纯色覆盖为两排八列圆形，前十五个沿用已取证 CleanShot 色板，末位自选；四周一个 spacing、行列两 spacing，预留选中环。渐变和壁纸仍为五列正方形。系统壁纸入口加入五张预设之后、上传按钮之前；资源加载状态与背景选中态独立。
 
-原生 shot_wallpaper_preference.rs 在用户成功获取原图后，把一个启用标志持久化到 Incodex 私有根目录（非临时会话）；不存图片或绝对路径。下次隔离 open 重新通过系统 API 解析当前桌面、验证本地文件后恢复入口，不下载、不恢复聊天数据。
-
-手动获取严格走“解析来源 → 加载原图 → 共享 store 解码 → 既有 set-background 命令”再完成；仅缩略图到达不代表应用成功。restore 复用同一 select 管线与 revision 守卫，来源可用性不是第二份选中态。
+原生 shot_wallpaper_preference.rs 只持久化用户成功获取素材后的启用标志；跨隔离会话恢复入口，不恢复图片或自动联网。实际应用复用共享 store 解码、set-background 与 revision 守卫，迟到结果不得覆盖用户的新选择。
 
 检查器参考 Cavalry-i18n 私人 scroll-fade 取证，只复用边界判断及 alpha mask 算法。“背景”标题位于滚动视窗之外；滚动条隐藏但保留原生滚动与键盘焦点。渐隐深度为 Codex spacing 的三倍（默认 12px），不复制竞品色值；起点清除顶端、终点清除底端、未溢出无 mask。滚动位置记忆绑定内部 viewport，重绘与尺寸变化重新测量。
 
@@ -98,3 +92,13 @@ Slider 交互参考 shadcn Base 版本，真实行为来自 @base-ui/react 的 S
 ## 主线同步与正式入口边界
 
 Shot 调试开关与 CDP 窗口类型是独立维度；同步主线必须保留普通窗口/无痕窗口判定、官方模式就绪等待与资料遮罩监督。当前调试入口临时复用帽子位置，不定义正式产品布局。正式接入时截图与无痕应为相邻的独立按钮；左右顺序尚未确定，本次同步不实现该布局，也不扩大安装态或 Windows 的截图支持范围。
+
+## 系统双壁纸获取（取代单张当前桌面入口）
+
+点击“获取系统壁纸”获取当前系统对应的主题与风景两个角色。已取证 macOS 27 的 Golden Gate / Golden Gate Sunset、26 的 Tahoe / Tahoe Day；其他版本明确不可用，不按画廊顺序或当前桌面猜测。原生来源位于 macos_system_wallpapers.rs，不把上文单张当前桌面历史取证当作新入口契约。
+
+目录只给 ID、名称和 idle 状态，点击后两个格子各自 loading → ready/error，失败格子可重试，另一格不被清空。Skeleton 固定在已有正方形格子中，使用 Codex surface-tertiary 与 reduced-motion；仅借鉴 shadcn Skeleton 的占位表现，不引入 React 或第二套状态管理。获取完成只准备素材，不自动改变背景；用户点击某张后才经原选择管线应用，迟到请求不能抢回选中态。
+
+主机优先读取已验证系统静态图片或 Apple 已下载的指定 ID 视频；缺失且存在已验证远端映射时，才从编译期绑定的 Apple HTTPS 地址获取（Tahoe 主题目前仅支持系统本地文件），不接受 renderer URL、不跟随重定向、不使用画廊缩略图做编辑源。官方视频截首帧，最长边 2600px、JPEG 0.85；下载最多 256 MiB、150 秒，源文件位于 0700 临时目录的 0600 文件，完成或取消后清理。最终 JPEG 仅在该隔离进程和编辑器内缓存，不跨会话持久保存图片。
+
+两个 worker 不阻塞 CDP 截图轮询。关闭编辑器允许后台完成供同一隔离窗口复用；关闭隔离窗口时 open 等待 capture monitor，monitor 取消并 join 下载 worker，再结束。AVFoundation 同步首帧解码没有硬截止，不能声称整个解码过程具备严格超时。恢复偏好只恢复两个入口，不自动联网，不保存路径、视频或聊天数据。

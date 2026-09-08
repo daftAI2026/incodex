@@ -354,7 +354,7 @@ describe("system wallpaper capture UI", () => {
     expect(markup).toContain('data-background-section="wallpapers"');
     expect(markup).toContain('data-action="load-current-wallpaper"');
     expect(markup).toContain('disabled');
-    expect(markup).toContain("The current wallpaper is unavailable");
+    expect(markup).toContain("System wallpapers are unavailable on this macOS version");
   });
 
   test("renders current-wallpaper loading and errors without a catalog", () => {
@@ -363,14 +363,14 @@ describe("system wallpaper capture UI", () => {
       captureWindowCopy("en-US"),
       { systemWallpapers: { entries: [], status: "loading" } },
     );
-    expect(loading).toContain("Loading current wallpaper");
+    expect(loading).toContain("Loading system wallpapers");
 
     const error = captureWindowTemplate(
       createCaptureWindowState(SOURCE),
       captureWindowCopy("en-US"),
       { systemWallpapers: { entries: [], status: "error" } },
     );
-    expect(error).toContain("Unable to load the current wallpaper");
+    expect(error).toContain("Unable to load the system wallpaper");
 
     const selected = captureWindowTemplate({
       ...createCaptureWindowState(SOURCE),
@@ -526,5 +526,7 @@ test("pair tiles preserve square geometry and expose loading and retry separatel
   expect(html).toContain('data-load-status="loading"');
   expect(html).toContain('aria-busy="true"');
   expect(html).toContain('data-load-status="error"');
-  expect(html).not.toContain('src=""');
+  const tiles = html.match(/<button[^>]*data-system-wallpaper=[\s\S]*?<\/button>/g) ?? [];
+  expect(tiles).toHaveLength(2);
+  expect(tiles.join("")).not.toContain('src=""');
 });

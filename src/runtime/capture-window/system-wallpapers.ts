@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖主机注入的 SystemWallpaperAdapter，本机目录只提供缩略图与 id，原图按需读取
- * [OUTPUT]: 提供系统壁纸类型、目录控制器、有界原图 Promise 缓存、异步选择编排与背景控件 DOM 同步
+ * [INPUT]: 依赖主机注入的 SystemWallpaperAdapter，目录提供不透明 ID 与资源状态，原图按需获取
+ * [OUTPUT]: 提供系统壁纸类型、目录控制器、有界原图 Promise 缓存、独立资源加载状态与异步选择编排与背景控件 DOM 同步
  * [POS]: capture-window 的系统资源边界，隔离 CDP/文件桥接与编辑器唯一状态源
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -10,6 +10,7 @@ export type SystemWallpaperEntry = {
   id: string;
   name: string;
   thumbnail: string;
+  loadStatus?: "idle" | "loading" | "ready" | "error";
 };
 
 export const SYSTEM_WALLPAPER_CURRENT_ID = "system-wallpaper-current";
@@ -41,6 +42,7 @@ export type SystemWallpaperController = {
   invalidateSelection: () => void;
   isSelectionCurrent: (selection: SystemWallpaperSelection | string, revision?: number) => boolean;
   select: (id: string) => Promise<SystemWallpaperSelection | null>;
+  prepare: (id: string) => Promise<string>;
 };
 
 const SYSTEM_WALLPAPER_IMAGE_CACHE_LIMIT = 2;
@@ -96,6 +98,11 @@ export function createSystemWallpaperController(
     return selection;
   }
 
+  function updateEntry(id: string, loadStatus: SystemWallpaperEntry["loadStatus"], thumbnail?: string): void {
+    publish({ ...state, entries: state.entries.map((entry) => entry.id === id
+      ? { ...entry, loadStatus, ...(thumbnail ? { thumbnail } : {}) } : entry) });
+  }
+
   function loadOriginal(id: string): Promise<string> {
     const cached = originalLoads.get(id);
     if (cached) {
@@ -103,6 +110,11 @@ export function createSystemWallpaperController(
       originalLoads.set(id, cached);
       return cached;
     }
+    if (!adapter || destroyed || !state.entries.some((entry) => entry.id === id)) {
+      return Promise.reject(new Error("unknown system wallpaper"));
+    }
+    const paired = state.entries.some((entry) => entry.id === id && entry.loadStatus !== undefined);
+    if (paired) updateEntry(id, "loading");
     let source: Promise<string>;
     try {
       source = Promise.resolve(adapter!.load(id));
@@ -110,10 +122,14 @@ export function createSystemWallpaperController(
       source = Promise.reject(error);
     }
     const pending = source.then(
-      (dataUrl) => dataUrl,
+      (dataUrl) => {
+        if (paired) updateEntry(id, "ready", dataUrl);
+        return dataUrl;
+      },
       (error: unknown) => {
         if (originalLoads.get(id) === pending) originalLoads.delete(id);
-        publish({ entries: [], status: "error" });
+        if (paired) updateEntry(id, "error");
+        else publish({ entries: [], status: "error" });
         throw error;
       },
     );
@@ -165,6 +181,7 @@ export function createSystemWallpaperController(
         pendingSelectionId === selection.id;
     },
     select,
+    prepare: loadOriginal,
   };
 }
 
@@ -227,6 +244,11 @@ export function createSystemWallpaperEditorActions(
         return;
       }
       if (!pipeline.isAlive() || controller.getSelectionRevision() !== revision) return;
+      const pair = entries.filter((entry) => entry.loadStatus !== undefined);
+      if (pair.length) {
+        await Promise.allSettled(pair.map((entry) => controller.prepare(entry.id)));
+        return;
+      }
       const current = entries.find((entry) => entry.id === SYSTEM_WALLPAPER_CURRENT_ID);
       if (!current) {
         pipeline.onUnavailable?.();
@@ -242,8 +264,11 @@ export function wireSystemWallpaperActions(
   root: HTMLElement,
   actions: SystemWallpaperEditorActions,
 ): void {
-  root.querySelector<HTMLElement>("[data-system-wallpaper]")?.addEventListener("click", () => {
-    void actions.select(SYSTEM_WALLPAPER_CURRENT_ID);
+  root.querySelectorAll<HTMLElement>("[data-system-wallpaper]").forEach((tile) => {
+    tile.addEventListener("click", () => {
+      const id = tile.dataset.systemWallpaper;
+      if (id && tile.dataset.loadStatus !== "loading") void actions.select(id);
+    });
   });
   const current = root.querySelector<HTMLButtonElement>("[data-action='load-current-wallpaper']");
   current?.addEventListener("click", () => {
@@ -258,10 +283,10 @@ export function syncSystemWallpaperControls(
   root: HTMLElement,
   state: CaptureWindowState,
 ): void {
-  const current = root.querySelector<HTMLElement>("[data-system-wallpaper], [data-action='load-current-wallpaper']");
-  if (!current) return;
-  const selected = state.background.kind === "wallpaper" &&
-    state.background.systemId === SYSTEM_WALLPAPER_CURRENT_ID;
-  current.dataset.selected = String(selected);
-  current.setAttribute("aria-pressed", String(selected));
+  root.querySelectorAll<HTMLElement>("[data-system-wallpaper]").forEach((tile) => {
+    const selected = state.background.kind === "wallpaper" &&
+      state.background.systemId === tile.dataset.systemWallpaper;
+    tile.dataset.selected = String(selected);
+    tile.setAttribute("aria-pressed", String(selected));
+  });
 }

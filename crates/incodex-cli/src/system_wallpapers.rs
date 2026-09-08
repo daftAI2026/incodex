@@ -1,26 +1,21 @@
 /**
  * [INPUT]: 依赖主线程提供的当前桌面路径、受限文件读取、ImageIO 与缩略图 sips 适配
  * [OUTPUT]: 对外提供 SystemWallpaperLibrary、SystemWallpaperEntry 及 list/load 壁纸接口
- * [POS]: capture-window 的当前桌面素材边界；生产只暴露系统返回的单个文件，绝不把 renderer 输入当作路径
+ * [POS]: 非 macOS 的当前桌面素材边界及 macOS 旧合同测试入口；绝不把 renderer 输入当作路径，macOS 生产改由双壁纸 adapter 负责
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use std::collections::HashSet;
-use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
-
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
-#[cfg(windows)]
-use std::os::windows::fs::OpenOptionsExt;
 
 use serde::Serialize;
 
 use crate::profile_mask::base64_encode;
+use crate::system_wallpaper_files::{is_reparse_point, read_file_limited, PrivateTempDir};
 
 /// 单个系统壁纸允许读取的源文件上限，先由 metadata 拒绝超限文件。
 pub(crate) const MAX_SOURCE_BYTES: u64 = 64 * 1024 * 1024;
@@ -33,7 +28,6 @@ const SIPS_TIMEOUT: Duration = Duration::from_secs(5);
 const LIST_DEADLINE: Duration = Duration::from_secs(90);
 const PNG_DATA_URL_PREFIX: &str = "data:image/png;base64,";
 const SIPS_PATH: &str = "/usr/bin/sips";
-static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct SystemWallpaperEntry {
@@ -646,45 +640,6 @@ fn is_png(bytes: &[u8]) -> bool {
     bytes.starts_with(b"\x89PNG\r\n\x1a\n")
 }
 
-fn read_file_limited(path: &Path, max_bytes: u64) -> Result<Vec<u8>, String> {
-    let path_metadata = fs::symlink_metadata(path)
-        .map_err(|_| "system wallpaper file cannot be read".to_string())?;
-    if is_reparse_point(&path_metadata) || !path_metadata.is_file() {
-        return Err("system wallpaper file exceeds the safe read limit".to_string());
-    }
-    let file = open_wallpaper_file(path)?;
-    let metadata = file
-        .metadata()
-        .map_err(|_| "system wallpaper file cannot be read".to_string())?;
-    if is_reparse_point(&metadata)
-        || !metadata.is_file()
-        || metadata.len() > max_bytes
-        || metadata.len() > usize::MAX as u64
-    {
-        return Err("system wallpaper file exceeds the safe read limit".to_string());
-    }
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    file.take(max_bytes.saturating_add(1))
-        .read_to_end(&mut bytes)
-        .map_err(|_| "system wallpaper file cannot be read".to_string())?;
-    if bytes.len() as u64 > max_bytes {
-        return Err("system wallpaper file changed beyond the safe read limit".to_string());
-    }
-    Ok(bytes)
-}
-
-fn open_wallpaper_file(path: &Path) -> Result<File, String> {
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    options.custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
-    #[cfg(windows)]
-    options.custom_flags(0x0020_0000);
-    options
-        .open(path)
-        .map_err(|_| "system wallpaper file cannot be read".to_string())
-}
-
 fn thumbnail_raw_limit() -> usize {
     ((MAX_THUMBNAIL_DATA_URL_BYTES - PNG_DATA_URL_PREFIX.len()) / 4) * 3
 }
@@ -695,20 +650,6 @@ fn load_raw_limit() -> usize {
 
 fn is_within(root: &Path, path: &Path) -> bool {
     path == root || path.strip_prefix(root).is_ok()
-}
-
-#[cfg(windows)]
-fn is_reparse_point(metadata: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-
-    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
-    metadata.file_type().is_symlink()
-        || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-}
-
-#[cfg(not(windows))]
-fn is_reparse_point(metadata: &fs::Metadata) -> bool {
-    metadata.file_type().is_symlink()
 }
 
 fn check_deadline(deadline: Instant) -> Result<(), String> {
@@ -730,51 +671,6 @@ fn conversion_unavailable_message() -> String {
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     "system wallpaper preview conversion is unavailable on this platform".to_string()
-}
-
-struct PrivateTempDir {
-    path: PathBuf,
-    next_file: u64,
-}
-
-impl PrivateTempDir {
-    fn new() -> Result<Self, String> {
-        for _ in 0..32 {
-            let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-            let path = std::env::temp_dir().join(format!(
-                "incodex-wallpaper-convert-{}-{sequence}",
-                std::process::id()
-            ));
-            let mut builder = fs::DirBuilder::new();
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::DirBuilderExt;
-                builder.mode(0o700);
-            }
-            match builder.create(&path) {
-                Ok(()) => {
-                    return Ok(Self { path, next_file: 0 });
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(_) => {
-                    return Err("cannot create private wallpaper conversion directory".to_string())
-                }
-            }
-        }
-        Err("cannot create private wallpaper conversion directory".to_string())
-    }
-
-    fn next_file(&mut self, prefix: &str, extension: &str) -> PathBuf {
-        let sequence = self.next_file;
-        self.next_file = self.next_file.saturating_add(1);
-        self.path.join(format!("{prefix}-{sequence}.{extension}"))
-    }
-}
-
-impl Drop for PrivateTempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
 }
 
 #[cfg(test)]

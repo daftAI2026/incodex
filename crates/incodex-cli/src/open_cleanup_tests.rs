@@ -1,3 +1,7 @@
+//! [INPUT]: open 会话清理流程与进程/owner 测试替身。
+//! [OUTPUT]: 约束停止写入者、安全终止优先级和身份绑定销毁。
+//! [POS]: open 的清理回归，防止壁纸资源任务阻挡失效遮罩窗口终止。
+//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 // Cleanup-focused `open` tests. Split from open_tests.rs to keep each source
 // file below the repository's size budget.
 use super::open_tests::{fake_app, temp_root};
@@ -225,4 +229,13 @@ fn profile_mask_is_carried_from_open_preparation_to_the_plan() {
     .unwrap();
 
     assert_eq!(plan.profile_mask, Some(profile_mask));
+}
+
+#[test]
+fn mask_failure_terminates_the_child_before_waiting_for_wallpaper_workers() {
+    let source = include_str!("open.rs");
+    let failure = source.split("Ok(InjectionStatus::Failed(detail) | InjectionStatus::RuntimeFailed(detail))").nth(1).unwrap();
+    let stop = failure.find("stop_injection_worker(").unwrap();
+    let kill = failure.find("kill_and_reap(").unwrap();
+    assert!(kill < stop, "unsafe window must close before optional resource cleanup can wait");
 }

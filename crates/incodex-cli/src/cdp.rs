@@ -562,7 +562,7 @@ fn monitor_capture_debug(
     process_alive: &AtomicBool,
     current: Option<std::path::PathBuf>,
 ) {
-    let mut wallpapers = crate::system_wallpapers::SystemWallpaperLibrary::new(current);
+    let mut wallpapers = system_wallpapers::Host::new(current);
     while process_alive.load(Ordering::Acquire) {
         if monitor_capture_debug_target(debug_port, process_alive, &mut wallpapers).is_err() {
             thread::sleep(LIFECYCLE_POLL_INTERVAL);
@@ -573,7 +573,7 @@ fn monitor_capture_debug(
 fn monitor_capture_debug_target(
     debug_port: u16,
     process_alive: &AtomicBool,
-    wallpapers: &mut crate::system_wallpapers::SystemWallpaperLibrary,
+    wallpapers: &mut system_wallpapers::Host,
 ) -> Result<(), String> {
     let targets = list_targets(debug_port)?;
     let page = pick_codex_page_target(&targets).ok_or("no Codex page target")?;

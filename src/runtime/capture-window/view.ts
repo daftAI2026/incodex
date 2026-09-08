@@ -224,7 +224,9 @@ function backgroundGridTemplate(
   const wallpapers = capturePresetSection("wallpapers");
   const activeSection = captureBackgroundSection(state.background);
   const wallpapersActive = activeSection === "wallpapers" || activeSection === "system-wallpapers";
-  const currentWallpaper = systemWallpapers.entries.find((entry) => entry.id === SYSTEM_WALLPAPER_CURRENT_ID);
+  const visibleWallpapers = systemWallpapers.entries.filter((entry) => entry.id === SYSTEM_WALLPAPER_CURRENT_ID || entry.loadStatus !== undefined);
+  const currentWallpaper = visibleWallpapers.length > 0 && visibleWallpapers.every((entry) =>
+    entry.loadStatus === undefined || entry.loadStatus === "ready" || entry.loadStatus === "loading");
   const currentWallpaperLoading = systemWallpapers.status === "loading";
   const currentWallpaperDisabled = currentWallpaperLoading || systemWallpapers.status === "unavailable";
   const currentWallpaperSelected = state.background.kind === "wallpaper" &&
@@ -235,11 +237,17 @@ function backgroundGridTemplate(
       <section class="incodex-capture-background-section" data-background-section="wallpapers" data-active="${wallpapersActive}" aria-label="${copy.backgroundWallpapers}">
         <div class="incodex-capture-background-section-heading">
           <h3 class="incodex-capture-background-section-title">${copy.backgroundWallpapers}</h3>
-          ${currentWallpaper ? "" : `<button class="incodex-capture-background-expand" data-action="load-current-wallpaper" data-selected="${currentWallpaperSelected}" type="button" aria-busy="${currentWallpaperLoading}" aria-pressed="${currentWallpaperSelected}"${currentWallpaperDisabled ? " disabled" : ""}>${copy.getCurrentWallpaper}</button>`}
+          ${currentWallpaper ? "" : `<button class="incodex-capture-background-expand" data-action="load-current-wallpaper" title="${escapeAttribute(copy.wallpaperDownloadHint)}" data-selected="${currentWallpaperSelected}" type="button" aria-busy="${currentWallpaperLoading}" aria-pressed="${currentWallpaperSelected}"${currentWallpaperDisabled ? " disabled" : ""}>${copy.getCurrentWallpaper}</button>`}
         </div>
         <div class="incodex-capture-background-grid">
           ${presetButtonsTemplate(wallpapers, state)}
-          ${currentWallpaper ? `<button class="incodex-capture-background-option incodex-capture-wallpaper-label" data-system-wallpaper="${SYSTEM_WALLPAPER_CURRENT_ID}" type="button" data-selected="${currentWallpaperSelected}" aria-pressed="${currentWallpaperSelected}" aria-label="${copy.currentDesktop}" title="${copy.currentDesktop}"><img src="${escapeAttribute(currentWallpaper.thumbnail)}" alt=""></button>` : ""}
+          ${visibleWallpapers.map((entry) => {
+            const loading = entry.loadStatus === "loading";
+            const label = entry.id === SYSTEM_WALLPAPER_CURRENT_ID ? copy.currentDesktop : entry.name;
+            const hint = entry.loadStatus === "error" ? `${label} · ${copy.retryWallpaper}` : label;
+            const selected = state.background.kind === "wallpaper" && state.background.systemId === entry.id;
+            return `<button class="incodex-capture-background-option incodex-capture-wallpaper-label" data-system-wallpaper="${escapeAttribute(entry.id)}" data-load-status="${entry.loadStatus ?? "ready"}" type="button" data-selected="${selected}" aria-pressed="${selected}" aria-busy="${loading}" aria-label="${escapeAttribute(hint)}" title="${escapeAttribute(hint)}"${loading ? " disabled" : ""}>${loading ? '<span class="incodex-capture-skeleton" aria-hidden="true"></span>' : entry.loadStatus === "error" ? captureIcon("retake") : entry.thumbnail ? `<img src="${escapeAttribute(entry.thumbnail)}" alt="">` : captureIcon("download")}</button>`;
+          }).join("")}
           <button class="incodex-capture-background-option incodex-capture-wallpaper-label" data-background-wallpaper type="button" data-selected="${wallpaper}" aria-label="${copy.wallpaper}" title="${copy.wallpaper}"><img data-wallpaper-preview src="${wallpaperImage}" alt="" ${wallpaperDataUrl ? "" : "hidden"}><span data-wallpaper-placeholder ${wallpaperDataUrl ? "hidden" : ""}>${captureIcon("plus")}</span></button>
         </div>
         <input class="incodex-capture-wallpaper-input" data-input="wallpaper" type="file" accept="image/png,image/jpeg,image/webp">

@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 无外部依赖，使用本地 SVG 路径与调用方指定的图标语义
+ * [OUTPUT]: 提供 CaptureIconName 与 captureIcon，尺寸由消费方的 Codex token 控制
+ * [POS]: Shot 图标资源边界，为视图和背景动作提供统一 SVG
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 export type CaptureIconName =
   | "camera"
   | "check"

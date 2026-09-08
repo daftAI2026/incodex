@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖 macOS ImageIO/CoreFoundation 动态 framework 与已受限读取的图像字节
- * [OUTPUT]: 对外提供有界 2600px、JPEG 0.85 的静态图像编辑转换
- * [POS]: system_wallpapers 的 macOS 解码边界；只接收 CreateWithData 输入，不接受路径或网络来源
+ * [INPUT]: 依赖 macOS ImageIO/CoreFoundation 动态 framework、受限图像字节与已解码 CGImage
+ * [OUTPUT]: 对外提供有界 2600px 静态图像转换，以及与视频首帧共享的 JPEG 0.85 编码
+ * [POS]: 系统壁纸的 macOS 图像编码边界；静态源使用 CreateWithData，视频适配器传入 CGImage，不接受路径或网络来源
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 use std::ffi::{c_char, c_void, CStr, CString};
@@ -140,6 +140,26 @@ pub(crate) fn encode_wallpaper_jpeg(
     let image = unsafe { (api.create_thumbnail)(source, 0, source_options) };
     let _image = CfGuard::new(image, api.release, "thumbnail image")?;
 
+    encode_cg_image(&api, image, max_output_bytes)
+}
+
+/// 调用方须保证 image 是存活的、已限制为最长边 2600px 的 CGImage。
+pub(crate) unsafe fn encode_wallpaper_frame(
+    image: *const c_void,
+    max_output_bytes: usize,
+) -> Result<Vec<u8>, String> {
+    if image.is_null() {
+        return Err("empty wallpaper frame".into());
+    }
+    let api = ImageIoApi::load()?;
+    encode_cg_image(&api, image, max_output_bytes)
+}
+
+fn encode_cg_image(
+    api: &ImageIoApi,
+    image: CfRef,
+    max_output_bytes: usize,
+) -> Result<Vec<u8>, String> {
     let output_data = unsafe { (api.create_mutable_data)(std::ptr::null(), 0) };
     let _output_data = CfGuard::new(output_data.cast_const(), api.release, "output data")?;
 

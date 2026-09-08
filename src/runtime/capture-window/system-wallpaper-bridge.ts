@@ -20,7 +20,7 @@ const MAX_IMAGE_LENGTH = 48 * 1024 * 1024;
 
 export function createSystemWallpaperBridge(
   createId = () => `wallpaper-${crypto.randomUUID()}`,
-  timeoutMs = 120_000,
+  timeoutMs = 240_000,
 ): SystemWallpaperAdapter & {
   takeRequest: () => SystemWallpaperRequest | null;
   resolve: (response: unknown) => boolean;
@@ -91,7 +91,7 @@ function validEntries(value: unknown): value is SystemWallpaperEntry[] {
     if (!isRecord(entry) || typeof entry.id !== "string" ||
       !/^[a-zA-Z0-9-]{1,128}$/.test(entry.id) || ids.has(entry.id) ||
       typeof entry.name !== "string" || entry.name.length > 256 ||
-      !validPng(entry.thumbnail) || entry.thumbnail.length > 256 * 1024) return false;
+      !(validPng(entry.thumbnail) || (entry.thumbnail === "" && entry.loadStatus === "idle" && /^system-wallpaper-(theme|landscape)$/.test(entry.id))) || entry.thumbnail.length > 256 * 1024) return false;
     ids.add(entry.id);
     return true;
   });

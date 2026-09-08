@@ -11,8 +11,15 @@ pub mod cdp;
 pub(crate) mod macos_image_io;
 #[cfg(target_os = "macos")]
 mod macos_desktop_wallpaper;
+#[cfg(target_os = "macos")]
+mod macos_system_wallpapers;
+#[cfg(target_os = "macos")]
+mod macos_wallpaper_video;
+#[cfg(any(test, not(target_os = "macos")))]
 pub(crate) mod system_wallpapers;
+mod system_wallpaper_files;
 mod shot_wallpaper_preference;
+#[cfg(any(test, not(target_os = "macos")))]
 pub(crate) mod system_wallpaper_catalog;
 pub mod confirm;
 #[cfg(not(target_os = "windows"))]
