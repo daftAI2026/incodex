@@ -8,12 +8,13 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use incodex_core::paths::{user_root, DEFAULT_APP};
-use incodex_core::{format_kv, format_ok, format_step, format_warn};
+use incodex_core::{format_kv, format_ok, format_step};
 use serde::{Deserialize, Serialize};
 
 use crate::parse::ParsedCli;
 use crate::spinner::Progress;
 use crate::stable_release::{parse_latest_stable_release, parse_stable_version, StableRelease};
+use crate::update_flow::{run_installer_fallback, run_update_pipeline};
 
 const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/daftAI2026/incodex/releases/latest";
 const MAIN_INSTALLER_URL: &str =
@@ -110,9 +111,9 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
         InstallChannel::Script => {}
     }
     let prefix = install_prefix(&exe);
-    println!("update channel: script");
-    println!("  prefix: {}", prefix.display());
     if parsed.dry_run {
+        println!("update channel: script");
+        println!("  prefix: {}", prefix.display());
         println!("would re-run install.sh for this prefix");
         println!("would publish Runtime with the installed CLI");
         println!("no changes made.");
@@ -134,79 +135,80 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
     }
 
     let mut progress = Progress::new();
-    progress.stage("Checking for updates");
-    let latest = latest_stable_release()?;
-    let current = parse_stable_version(env!("CARGO_PKG_VERSION"))
-        .ok_or("update failed: current CLI version is not stable")?;
-    match latest.version.cmp(&current) {
-        std::cmp::Ordering::Less => {
-            synchronize_runtime(&mut progress, &update_target, false)?;
-            progress.stop();
-            println!(
-                "Current version {} is newer than latest release {}.",
-                env!("CARGO_PKG_VERSION"),
-                latest.tag
-            );
-            complete_update_notice();
-            return Ok(());
-        }
-        std::cmp::Ordering::Equal => {
-            synchronize_runtime(&mut progress, &update_target, false)?;
-            progress.stop();
-            println!("Already on latest version, {}", env!("CARGO_PKG_VERSION"));
-            complete_update_notice();
-            return Ok(());
-        }
-        std::cmp::Ordering::Greater => {}
-    }
-
-    progress.stage("Preparing update");
-    progress.stop();
-    println!("updating {} -> {}", env!("CARGO_PKG_VERSION"), latest.tag);
-    let install_script_url = format!(
-        "https://raw.githubusercontent.com/daftAI2026/incodex/{}/install.sh",
-        latest.tag
-    );
-    let download_base = format!(
-        "https://github.com/daftAI2026/incodex/releases/download/{}",
-        latest.tag
-    );
-    let expected = latest.tag.trim_start_matches('v');
-
-    progress.stage("Downloading stable installer");
-    let tagged_installer = curl_download(&install_script_url, "stable installer")?;
-    progress.stage(&format!("Installing {}", latest.tag));
-    let first_attempt = run_installer(&tagged_installer, &prefix, &download_base, expected)
-        .and_then(|_| verify_installed_version(&prefix, expected));
-    if let Err(first_error) = first_attempt {
-        progress.stop();
-        println!(
-            "{}",
-            format_warn(
-                &format!("Stable installer did not complete: {first_error}"),
-                None,
-            )
-        );
-        progress.stage("Downloading compatibility installer");
-        let compatibility = curl_download(MAIN_INSTALLER_URL, "compatibility installer")?;
-        progress.stage(&format!("Repairing {}", latest.tag));
-        run_installer(&compatibility, &prefix, &download_base, expected)?;
-        verify_installed_version(&prefix, expected)?;
-    }
-
-    synchronize_runtime(&mut progress, &update_target, true)?;
-    progress.stop();
-    println!(
-        "{}",
-        format_ok(&format!("Verified Incodex {expected}"), None)
-    );
+    run_update_pipeline(
+        &mut progress,
+        &mut std::io::stdout(),
+        |progress| prepare_script_update(progress, &prefix, &update_target),
+        publish_updated_runtime,
+    )?;
     complete_update_notice();
     Ok(())
 }
 
+struct RuntimeUpdateTarget {
+    cli: PathBuf,
+    cli_updated: bool,
+    version: String,
+}
+
+fn publish_updated_runtime(target: RuntimeUpdateTarget) -> Result<String, String> {
+    run_runtime_command(&target.cli)
+        .map_err(|detail| runtime_sync_failure(detail, target.cli_updated))?;
+    Ok(target.version)
+}
+
+fn prepare_script_update(
+    progress: &mut Progress,
+    prefix: &Path,
+    update_target: &Path,
+) -> Result<(std::cmp::Ordering, String, RuntimeUpdateTarget), String> {
+    let latest = latest_stable_release()?;
+    let current = parse_stable_version(env!("CARGO_PKG_VERSION"))
+        .ok_or("update failed: current CLI version is not stable")?;
+    let ordering = latest.version.cmp(&current);
+    let cli_updated = ordering == std::cmp::Ordering::Greater;
+    let version = if cli_updated {
+        let install_script_url = format!(
+            "https://raw.githubusercontent.com/daftAI2026/incodex/{}/install.sh",
+            latest.tag
+        );
+        let download_base = format!(
+            "https://github.com/daftAI2026/incodex/releases/download/{}",
+            latest.tag
+        );
+        let expected = latest.tag.trim_start_matches('v');
+        let tagged_installer = curl_download(&install_script_url, "stable installer")?;
+        run_installer_fallback(
+            progress,
+            &mut std::io::stdout(),
+            || {
+                run_installer(&tagged_installer, prefix, &download_base, expected)?;
+                verify_installed_version(prefix, expected)
+            },
+            || {
+                let compatibility = curl_download(MAIN_INSTALLER_URL, "compatibility installer")?;
+                run_installer(&compatibility, prefix, &download_base, expected)?;
+                verify_installed_version(prefix, expected)
+            },
+        )?;
+        expected.to_string()
+    } else {
+        env!("CARGO_PKG_VERSION").to_string()
+    };
+    Ok((
+        ordering,
+        latest.tag,
+        RuntimeUpdateTarget {
+            cli: update_target.to_path_buf(),
+            cli_updated,
+            version,
+        },
+    ))
+}
+
 fn run_homebrew_update(parsed: &ParsedCli, current_cli: &Path) -> Result<(), String> {
-    println!("update channel: homebrew");
     if parsed.dry_run {
+        println!("update channel: homebrew");
         println!("would run brew update");
         println!("would run brew upgrade incodex");
         println!("would publish Runtime with the installed CLI");
@@ -229,7 +231,17 @@ fn run_homebrew_update(parsed: &ParsedCli, current_cli: &Path) -> Result<(), Str
     }
 
     let mut progress = Progress::new();
-    progress.stage("Updating Homebrew");
+    run_update_pipeline(
+        &mut progress,
+        &mut std::io::stdout(),
+        |_| prepare_homebrew_update(),
+        publish_updated_runtime,
+    )?;
+    complete_update_notice();
+    Ok(())
+}
+
+fn prepare_homebrew_update() -> Result<(std::cmp::Ordering, String, RuntimeUpdateTarget), String> {
     let _ = run_brew(
         &["update"],
         timeout_from_env(
@@ -238,7 +250,6 @@ fn run_homebrew_update(parsed: &ParsedCli, current_cli: &Path) -> Result<(), Str
         ),
     );
 
-    progress.stage("Upgrading Incodex");
     let upgrade = run_brew(
         &["upgrade", "incodex"],
         timeout_from_env(
@@ -246,7 +257,6 @@ fn run_homebrew_update(parsed: &ParsedCli, current_cli: &Path) -> Result<(), Str
             HOMEBREW_UPGRADE_TIMEOUT,
         ),
     );
-    progress.stop();
 
     let output = match upgrade {
         Ok(CommandOutcome::Completed(output)) if output.status.success() => output,
@@ -289,18 +299,19 @@ fn run_homebrew_update(parsed: &ParsedCli, current_cli: &Path) -> Result<(), Str
         homebrew_installed_cli().map_err(|detail| runtime_sync_failure(detail, cli_updated))?;
     verify_cli_version(&installed_cli, &installed)
         .map_err(|detail| runtime_sync_failure(detail, cli_updated))?;
-    synchronize_runtime(&mut progress, &installed_cli, cli_updated)?;
-    progress.stop();
-    println!(
-        "{}",
+    Ok((
         if already_installed {
-            format!("Already on latest version, {installed}")
+            std::cmp::Ordering::Equal
         } else {
-            format!("Updated to latest version, {installed}")
-        }
-    );
-    complete_update_notice();
-    Ok(())
+            std::cmp::Ordering::Greater
+        },
+        installed.clone(),
+        RuntimeUpdateTarget {
+            cli: installed_cli,
+            cli_updated,
+            version: installed,
+        },
+    ))
 }
 
 fn repair_pending_runtime(installed_cli: &Path) -> Result<(), String> {

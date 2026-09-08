@@ -42,6 +42,7 @@ mod stable_release;
 #[cfg(not(target_os = "windows"))]
 pub mod terminal;
 mod terminal_presentation;
+mod update_flow;
 pub mod version;
 #[cfg(target_os = "windows")]
 pub mod windows_activation;
@@ -96,8 +97,6 @@ pub mod windows_status;
 pub(crate) mod windows_system;
 #[cfg(target_os = "windows")]
 pub mod windows_update;
-#[cfg(target_os = "windows")]
-mod windows_update_flow;
 
 #[cfg(not(target_os = "windows"))]
 use std::path::PathBuf;

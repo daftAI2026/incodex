@@ -124,7 +124,8 @@ fn homebrew_update_refreshes_metadata_then_upgrades_through_brew() {
     let calls = calls.lines().collect::<Vec<_>>();
     assert_eq!(&calls[..2], &["update", "upgrade incodex"]);
     assert!(calls.contains(&"list --versions incodex"), "{calls:?}");
-    assert!(String::from_utf8_lossy(&output.stdout).contains("Updated to latest version, 9.9.9"));
+    assert!(String::from_utf8_lossy(&output.stdout)
+        .contains("🎉 Update ran successfully! Please quit and reopen Codex."));
 }
 
 #[test]
@@ -154,7 +155,8 @@ fn homebrew_update_falls_back_to_the_public_cli_version_probe() {
         .unwrap();
 
     assert!(output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout).contains("Updated to latest version, 9.9.9"));
+    assert!(String::from_utf8_lossy(&output.stdout)
+        .contains("🎉 Update ran successfully! Please quit and reopen Codex."));
 }
 
 #[test]
@@ -346,6 +348,22 @@ esac
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(fs::read_to_string(runtime_log).unwrap().trim(), "runtime");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for internal in [
+        "update channel:",
+        "prefix:",
+        "updating ",
+        "Verified Incodex",
+    ] {
+        assert!(
+            !stdout.contains(internal),
+            "internal detail in normal output: {stdout}"
+        );
+    }
+    assert_eq!(
+        stdout.trim(),
+        "➤ Upgrading Incodex\n➤ Publishing Runtime\n🎉 Update ran successfully! Please quit and reopen Codex."
+    );
 }
 
 #[test]
@@ -946,11 +964,7 @@ printf '%s' 'INCODEX_HTTP_STATUS:200'
     let (status, output) = run_tty(&installed, &home, &path, Duration::from_secs(12));
     assert_eq!(status, 0, "{output:?}");
     let visible_output = visible(&output);
-    for stage in [
-        "Checking for updates",
-        "Downloading stable installer",
-        "Installing v9.9.9",
-    ] {
+    for stage in ["Upgrading Incodex", "Publishing Runtime"] {
         assert!(
             ["|", "/", "-", "\\"]
                 .iter()
@@ -962,7 +976,10 @@ printf '%s' 'INCODEX_HTTP_STATUS:200'
         output.contains("\r\u{1b}[2K"),
         "update progress did not clear: {output:?}"
     );
-    assert!(output.contains("Verified Incodex 9.9.9"), "{output:?}");
+    assert!(
+        output.contains("🎉 Update ran successfully! Please quit and reopen Codex."),
+        "{output:?}"
+    );
     assert!(!output.contains("STABLE-INSTALLER-OUT"), "{output:?}");
     assert!(!output.contains("STABLE-INSTALLER-ERR"), "{output:?}");
     assert_eq!(prefix.join("bin/incodex"), installed);
@@ -1010,7 +1027,8 @@ printf '%s' 'INCODEX_HTTP_STATUS:200'
     let (status, output) = run_tty(&installed, &home, &path, Duration::from_secs(12));
     assert_eq!(status, 0, "{output:?}");
     let visible_output = visible(&output);
-    for stage in ["Installing v9.9.9", "Repairing v9.9.9"] {
+    {
+        let stage = "Upgrading Incodex";
         assert!(
             ["|", "/", "-", "\\"]
                 .iter()
@@ -1031,7 +1049,10 @@ printf '%s' 'INCODEX_HTTP_STATUS:200'
     );
     assert!(!output.contains("COMPAT-INSTALLER-OUT"), "{output:?}");
     assert!(!output.contains("COMPAT-INSTALLER-ERR"), "{output:?}");
-    assert!(output.contains("Verified Incodex 9.9.9"), "{output:?}");
+    assert!(
+        output.contains("🎉 Update ran successfully! Please quit and reopen Codex."),
+        "{output:?}"
+    );
 }
 
 #[test]
@@ -1218,10 +1239,9 @@ esac
     assert_eq!(fs::read_to_string(installer_attempts).unwrap().trim(), "3");
     let stdout = String::from_utf8_lossy(&output.stdout);
     for stage in [
-        "Checking for updates",
-        "Downloading stable installer",
-        "Installing v9.9.9",
-        "Verified Incodex 9.9.9",
+        "Upgrading Incodex",
+        "Publishing Runtime",
+        "🎉 Update ran successfully! Please quit and reopen Codex.",
     ] {
         assert!(stdout.contains(stage), "missing stage {stage:?}: {stdout}");
     }

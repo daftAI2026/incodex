@@ -1,12 +1,12 @@
 use std::cmp::Ordering;
 use std::io::Write;
 
-pub(crate) trait WindowsUpdateProgress {
+pub(crate) trait UpdateProgress {
     fn stage(&mut self, message: &str);
     fn stop(&mut self);
 }
 
-impl WindowsUpdateProgress for crate::spinner::Progress {
+impl UpdateProgress for crate::spinner::Progress {
     fn stage(&mut self, message: &str) {
         crate::spinner::Progress::stage(self, message);
     }
@@ -16,23 +16,27 @@ impl WindowsUpdateProgress for crate::spinner::Progress {
     }
 }
 
-pub(crate) fn run_windows_update_pipeline<P, W, I, R>(
+pub(crate) fn run_update_pipeline<P, W, I, R, T>(
     progress: &mut P,
     stdout: &mut W,
     install: I,
     publish_runtime: R,
 ) -> Result<(), String>
 where
-    P: WindowsUpdateProgress,
+    P: UpdateProgress,
     W: Write,
-    I: FnOnce(&mut P) -> Result<(Ordering, String), String>,
-    R: FnOnce() -> Result<(), String>,
+    I: FnOnce(&mut P) -> Result<(Ordering, String, T), String>,
+    R: FnOnce(T) -> Result<String, String>,
 {
     progress.stage("Upgrading Incodex");
-    let (release_ordering, latest_tag) = install(progress)?;
-    progress.stage("Publishing Runtime");
-    publish_runtime()?;
+    let result = (|| {
+        let (release_ordering, latest_tag, installed) = install(progress)?;
+        progress.stage("Publishing Runtime");
+        let installed_version = publish_runtime(installed)?;
+        Ok::<_, String>((release_ordering, latest_tag, installed_version))
+    })();
     progress.stop();
+    let (release_ordering, latest_tag, installed_version) = result?;
 
     match release_ordering {
         Ordering::Greater => writeln!(
@@ -42,26 +46,26 @@ where
         Ordering::Equal => writeln!(
             stdout,
             "Already on latest version, {}\nRuntime is synchronized. Fully quit and reopen Codex to reload it.",
-            env!("CARGO_PKG_VERSION")
+            installed_version
         ),
         Ordering::Less => writeln!(
             stdout,
             "Current version {} is newer than latest release {}.\nRuntime is synchronized. Fully quit and reopen Codex to reload it.",
-            env!("CARGO_PKG_VERSION"),
+            installed_version,
             latest_tag
         ),
     }
-    .map_err(|error| format!("cannot write Windows update result: {error}"))
+    .map_err(|error| format!("cannot write update result: {error}"))
 }
 
-pub(crate) fn run_windows_installer_fallback<P, W, F, C>(
+pub(crate) fn run_installer_fallback<P, W, F, C>(
     progress: &mut P,
     warning: &mut W,
     stable_installer: F,
     compatibility_installer: C,
 ) -> Result<(), String>
 where
-    P: WindowsUpdateProgress,
+    P: UpdateProgress,
     W: Write,
     F: FnOnce() -> Result<(), String>,
     C: FnOnce() -> Result<(), String>,
@@ -71,9 +75,7 @@ where
         Err(error) => {
             progress.stop();
             writeln!(warning, "Stable installer did not complete: {error}").map_err(
-                |write_error| {
-                    format!("cannot report the stable Windows installer failure: {write_error}")
-                },
+                |write_error| format!("cannot report the stable installer failure: {write_error}"),
             )?;
             progress.stage("Upgrading Incodex");
             compatibility_installer()
@@ -88,7 +90,7 @@ mod tests {
     #[derive(Default)]
     struct RecordingProgress(Vec<String>);
 
-    impl WindowsUpdateProgress for RecordingProgress {
+    impl UpdateProgress for RecordingProgress {
         fn stage(&mut self, message: &str) {
             self.0.push(format!("stage:{message}"));
         }
@@ -103,11 +105,11 @@ mod tests {
         let mut progress = RecordingProgress::default();
         let mut stdout = Vec::new();
 
-        run_windows_update_pipeline(
+        run_update_pipeline(
             &mut progress,
             &mut stdout,
-            |_| Ok((Ordering::Greater, "v9.9.9".to_string())),
-            || Ok(()),
+            |_| Ok((Ordering::Greater, "v9.9.9".to_string(), ())),
+            |_| Ok("9.9.9".to_string()),
         )
         .expect("complete controlled update");
 
@@ -130,7 +132,7 @@ mod tests {
         let mut progress = RecordingProgress::default();
         let mut warning = Vec::new();
 
-        run_windows_installer_fallback(
+        run_installer_fallback(
             &mut progress,
             &mut warning,
             || Err("tagged installer failed".to_string()),
