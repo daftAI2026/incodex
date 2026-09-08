@@ -25,3 +25,24 @@ fn current_tahoe_can_reuse_its_adjacent_preview() {
         thumbnail_paths(&root.join("TahoeLight.heic"), root).contains(&root.join("thumbnail.heic"))
     );
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn system_pair_uses_version_identity_not_current_desktop_or_gallery_order() {
+    use crate::macos_system_wallpapers::{source_for_version, WallpaperSource};
+    assert!(matches!(source_for_version(27, "system-wallpaper-theme"), Ok(WallpaperSource::RemoteVideo(_))));
+    assert!(matches!(source_for_version(27, "system-wallpaper-landscape"), Ok(WallpaperSource::Image(_))));
+    assert!(matches!(source_for_version(26, "system-wallpaper-theme"), Ok(WallpaperSource::Image(_))));
+    assert!(source_for_version(99, "system-wallpaper-theme").is_err());
+    assert!(source_for_version(27, "/tmp/picture.mov").is_err());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn wallpaper_download_rejects_non_apple_urls_and_redirect_like_inputs() {
+    use crate::macos_system_wallpapers::valid_asset_url;
+    assert!(valid_asset_url("https://sylvan.apple.com/itunes-assets/Aerials116/v4/sample.mov"));
+    for url in ["http://sylvan.apple.com/itunes-assets/a.mov", "https://sylvan.apple.com.evil/itunes-assets/a.mov", "https://sylvan.apple.com@evil/itunes-assets/a.mov", "https://127.0.0.1/a.mov", "file:///tmp/a.mov", "https://sylvan.apple.com/itunes-assets/../a.mov", "https://sylvan.apple.com/itunes-assets/a.mov?url=evil"] {
+        assert!(!valid_asset_url(url), "{url}");
+    }
+}

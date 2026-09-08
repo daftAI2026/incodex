@@ -470,3 +470,61 @@ test("restored current wallpaper is applied unless a newer user selection wins",
   await actions.restoreCurrent();
   expect(applied).toEqual([CURRENT_ENTRY.id]);
 });
+
+// -------------------- 双资源获取 --------------------
+const PAIR = [
+  { id: "system-wallpaper-theme", name: "Golden Gate", thumbnail: "", loadStatus: "idle" as const },
+  { id: "system-wallpaper-landscape", name: "Golden Gate Sunset", thumbnail: "", loadStatus: "idle" as const },
+];
+test("acquiring a pair loads independently without changing the chosen background", async () => {
+  const theme = deferred<string>();
+  const loads: string[] = [];
+  const applied: string[] = [];
+  const controller = createSystemWallpaperController(adapterWith({
+    list: async () => PAIR,
+    load: (id) => { loads.push(id); return id === PAIR[0]!.id ? theme.promise : Promise.resolve("data:image/jpeg;base64,landscape"); },
+  }));
+  const actions = createSystemWallpaperEditorActions(controller, {
+    apply: ({ id }) => applied.push(id), resolve: async () => ({} as HTMLImageElement),
+    isAlive: () => true, onError: () => {},
+  });
+  const acquiring = actions.loadCurrent();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(loads).toEqual(PAIR.map(({ id }) => id));
+  expect(controller.getState().entries.map((entry) => entry.loadStatus)).toEqual(["loading", "ready"]);
+  await actions.select(PAIR[1]!.id);
+  theme.reject(new Error("offline"));
+  await acquiring;
+  expect(controller.getState().entries.map((entry) => entry.loadStatus)).toEqual(["error", "ready"]);
+  expect(applied).toEqual([PAIR[1]!.id]);
+});
+test("duplicate acquisition shares downloads and failed tiles can retry", async () => {
+  let attempts = 0;
+  const first = deferred<string>();
+  const controller = createSystemWallpaperController(adapterWith({
+    list: async () => PAIR.slice(0, 1),
+    load: () => { attempts++; return attempts === 1 ? first.promise : Promise.resolve("data:image/jpeg;base64,theme"); },
+  }));
+  const actions = createSystemWallpaperEditorActions(controller, { apply: () => {}, resolve: async () => ({} as HTMLImageElement), isAlive: () => true, onError: () => {} });
+  const a = actions.loadCurrent();
+  const b = actions.loadCurrent();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(attempts).toBe(1);
+  first.reject(new Error("offline"));
+  await Promise.all([a, b]);
+  expect(controller.getState().entries[0]?.loadStatus).toBe("error");
+  await actions.select(PAIR[0]!.id);
+  expect(attempts).toBe(2);
+  expect(controller.getState().entries[0]?.loadStatus).toBe("ready");
+});
+test("pair tiles preserve square geometry and expose loading and retry separately", () => {
+  const html = captureWindowTemplate(createCaptureWindowState(SOURCE), captureWindowCopy("en"), {
+    systemWallpapers: { status: "ready", entries: [{ ...PAIR[0]!, loadStatus: "loading" }, { ...PAIR[1]!, loadStatus: "error" }] },
+  });
+  expect(html).toContain('data-system-wallpaper="system-wallpaper-theme"');
+  expect(html).toContain('data-system-wallpaper="system-wallpaper-landscape"');
+  expect(html).toContain('data-load-status="loading"');
+  expect(html).toContain('aria-busy="true"');
+  expect(html).toContain('data-load-status="error"');
+  expect(html).not.toContain('src=""');
+});
