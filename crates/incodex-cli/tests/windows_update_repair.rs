@@ -150,6 +150,61 @@ fn repair_reuses_the_install_transaction_only_for_the_authorized_epoch() {
 }
 
 #[test]
+fn repair_rejects_a_corrupted_selected_runtime_before_retiring_old_state() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().expect("test helper path");
+    let installed = install_windows_runtime_with(
+        &user_root,
+        OLD_PACKAGE,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .expect("install old Store generation");
+    let selected_runtime_file = user_root
+        .join("runtime")
+        .join("releases")
+        .join(&installed.runtime_release)
+        .join("incodex-inject.js");
+    assert!(
+        selected_runtime_file.is_file(),
+        "published Runtime includes the selected injection artifact"
+    );
+    fs::write(selected_runtime_file, b"corrupted selected Runtime").expect("corrupt selected Runtime");
+
+    let mut disable_calls = 0;
+    let error = repair_windows_runtime_after_update_with(
+        &user_root,
+        WindowsUpdateRepairAuthorization {
+            package_full_name: OLD_PACKAGE,
+            epoch: installed.epoch,
+            registration_id: &installed.registration_id,
+            helper_source: &installed.helper_path,
+        },
+        NEW_PACKAGE,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| {
+            disable_calls += 1;
+            Ok(())
+        },
+        |_| Ok(()),
+    )
+    .expect_err("repair must reject a corrupted selected Runtime");
+
+    let retained = read_windows_install_state(&user_root)
+        .expect("read install state after rejected repair")
+        .expect("old install state must remain after rejected repair");
+    assert_eq!(retained.package_full_name, OLD_PACKAGE, "repair error: {error}");
+    assert_eq!(retained.epoch, installed.epoch, "repair error: {error}");
+    assert_eq!(disable_calls, 0, "repair error: {error}");
+
+    fs::remove_dir_all(user_root).expect("remove update repair fixture");
+}
+
+#[test]
 fn stale_coordinator_cannot_cross_an_uninstall_and_same_generation_reinstall() {
     let user_root = scratch_root();
     let helper = std::env::current_exe().expect("test helper path");
