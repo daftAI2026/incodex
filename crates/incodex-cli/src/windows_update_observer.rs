@@ -20,6 +20,7 @@ use crate::windows_install_state::{
     WindowsInstallPhase, WindowsInstallState,
 };
 use crate::windows_process::strict_running_codex_package_process_ids;
+use crate::windows_update_observer_log::status;
 use crate::windows_update_repair::{
     repair_windows_runtime_after_update_with, resume_windows_update_repair_with,
     WindowsRuntimeApartment, WindowsUpdateRepairAuthorization,
@@ -197,19 +198,6 @@ fn wait(stop: &OwnedHandle, wake: &OwnedHandle) -> Result<bool, String> {
             "cannot wait for Windows update observer events",
         )),
     }
-}
-
-fn status(root: &Path, phase: &str, detail: &str) -> Result<(), String> {
-    let parent = incodex_core::windows_session::ensure_private_windows_dir(&root.join("windows"))?;
-    let body = serde_json::to_vec_pretty(&serde_json::json!({
-        "pid": std::process::id(), "phase": phase, "detail": detail,
-        "unixSeconds": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs(),
-    })).map_err(|error| error.to_string())?;
-    crate::windows_runtime::replace_private_file(
-        &parent,
-        &parent.join("update-observer.json"),
-        &body,
-    )
 }
 
 fn reconcile(root: &Path, helper: &Path, stop: &OwnedHandle) -> Result<bool, String> {
@@ -431,7 +419,17 @@ pub(crate) fn try_run(args: &[String]) -> Option<Result<(), String>> {
                 Ok(subscription)
             },
             || reconcile(&root, &helper, &stop),
-            || wait(&stop, &wake),
+            || {
+                let updated = wait(&stop, &wake)?;
+                if updated {
+                    status(
+                        &root,
+                        "package-update-event",
+                        "successful Codex family update; rediscovery pending",
+                    )?;
+                }
+                Ok(updated)
+            },
         );
         let detail = result
             .as_ref()
@@ -475,19 +473,30 @@ mod tests {
         status(&root, "watching", "package-A").unwrap();
         status(&root, "watching", "package-A").unwrap();
         let path = root.join("windows/update-observer.json");
-        let value: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        let events = value["events"].as_array().expect("history must survive status replacement");
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let events = value["events"]
+            .as_array()
+            .expect("history must survive status replacement");
         assert_eq!(events.len(), 2);
         assert_eq!(events[0]["phase"], "subscribed");
         for index in 0..160 {
-            status(&root, "repairing", &format!("{index}:{}", "测试\n".repeat(2000))).unwrap();
+            status(
+                &root,
+                "repairing",
+                &format!("{index}:{}", "测试\n".repeat(2000)),
+            )
+            .unwrap();
         }
         let bytes = std::fs::read(path).unwrap();
         assert!(bytes.len() <= 65536);
         let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         let events = value["events"].as_array().unwrap();
         assert!(events.len() <= 128);
-        assert!(events.last().unwrap()["detail"].as_str().unwrap().starts_with("159:"));
+        assert!(events.last().unwrap()["detail"]
+            .as_str()
+            .unwrap()
+            .starts_with("159:"));
     }
 
     fn fixture_root(name: &str) -> std::path::PathBuf {

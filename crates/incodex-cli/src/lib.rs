@@ -99,6 +99,8 @@ pub(crate) mod windows_system;
 pub mod windows_update;
 #[cfg(windows)]
 mod windows_update_observer;
+#[cfg(windows)]
+mod windows_update_observer_log;
 #[cfg(target_os = "windows")]
 pub mod windows_update_repair;
 #[cfg(windows)]
