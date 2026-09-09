@@ -193,10 +193,15 @@ pub(crate) fn register(state: &WindowsInstallState) -> Result<(), String> {
 pub(crate) fn remove() -> Result<(), String> {
     let _gate = crate::windows_install_state::acquire_windows_install_state()?;
     if let Some(existing) = read_value(RUN_VALUE_NAME)? {
-        prove_owned_command(&existing)?;
+        let root = crate::windows_profile::windows_user_profile()?.join(".incodex");
+        prove_removable_command(&existing, &root)?;
         delete_value(RUN_VALUE_NAME)?;
     }
     Ok(())
+}
+
+fn prove_removable_command(command: &str, _root: &Path) -> Result<(), String> {
+    prove_owned_command(command)
 }
 
 pub(crate) fn is_registered(helper: &Path) -> Result<bool, String> {
@@ -235,6 +240,29 @@ fn classify_run_value(existing: Option<&str>, owned_command: &str) -> ExistingRu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recorded_login_entry_can_be_removed_after_its_helper_disappears() {
+        let root = std::env::temp_dir().join(format!(
+            "incodex-startup-missing-helper-{}",
+            std::process::id()
+        ));
+        let state = crate::windows_install::install_windows_runtime_with(
+            &root,
+            "OpenAI.Codex_1.2.3.4_x64__2p2nqsd0c76g0",
+            &std::env::current_exe().unwrap(),
+            |_| Ok(vec![]),
+            |_| Ok(false),
+            |_| Ok(()),
+            |_| Ok(()),
+        )
+        .unwrap();
+        let command = build_run_command(&state.helper_path).unwrap();
+        std::fs::remove_file(&state.helper_path).unwrap();
+        prove_removable_command(&command, &root)
+            .expect("recorded ownership survives a missing helper");
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn registry_round_trip_uses_only_a_unique_disposable_value() {
