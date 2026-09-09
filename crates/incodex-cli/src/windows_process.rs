@@ -896,7 +896,7 @@ fn snapshot_process_entries() -> io::Result<Vec<(u32, String)>> {
     }
 }
 
-fn require_process_package_identity(
+pub(crate) fn require_process_package_identity(
     process: HANDLE,
     expected_package_full_name: &str,
 ) -> io::Result<()> {

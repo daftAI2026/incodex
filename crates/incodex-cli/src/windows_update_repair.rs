@@ -179,6 +179,8 @@ where
     if current_intent != *expected_intent || current_intent.helper_path != helper_source {
         return Err("Windows update repair intent changed or was cancelled".to_string());
     }
+    incodex_core::windows_path::reject_reparse_ancestors(helper_source)?;
+    crate::windows_helper::verify_helper(helper_source, &current_intent.helper_sha256)?;
     if let Some(state) = read_windows_install_state(user_root)? {
         if state.runtime_release != current_intent.runtime_release {
             return Err("Windows Runtime selection changed after the repair intent".to_string());
@@ -679,12 +681,12 @@ fn package_update_observation(
     })
 }
 
-struct WindowsRuntimeApartment {
+pub(crate) struct WindowsRuntimeApartment {
     uninitialize: bool,
 }
 
 impl WindowsRuntimeApartment {
-    fn initialize() -> Result<Self, String> {
+    pub(crate) fn initialize() -> Result<Self, String> {
         let result = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
         if result < 0 {
             return Err(format!(

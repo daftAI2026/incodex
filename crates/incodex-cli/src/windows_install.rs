@@ -73,6 +73,13 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
         enable_installed_runtime,
         || discover_codex_package().map(|app| app.package_full_name),
     )?;
+    drop(_registration_gate);
+    crate::windows_update_startup::register(&installed).map_err(|error| {
+        format!("Runtime installed, but update observer login registration failed: {error}")
+    })?;
+    crate::windows_update_observer::start(&installed).map_err(|error| {
+        format!("Runtime and login entry installed, but update observer startup failed: {error}")
+    })?;
     println!(
         "{}",
         format_ok(
@@ -515,6 +522,8 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
         return Ok(());
     }
     crate::confirm::require("uninstall", parsed.yes)?;
+    crate::windows_update_startup::remove()?;
+    crate::windows_update_observer::stop(&user_root)?;
     match uninstall_windows_runtime_approved_with_restore(
         &user_root,
         &approval,
@@ -982,6 +991,7 @@ where
 
 fn print_plan(action: &str, app: &WindowsCodexApp) {
     println!("{}", format_step(action, None));
+    println!("{}", format_warn("Experimental: registers a current-user login observer for Store updates (no service or scheduled task).", None));
     println!("{}", format_kv("Package", &app.package_full_name, None));
     println!(
         "{}",
@@ -1030,6 +1040,10 @@ fn format_uninstall_plan(
     lines.push(format_kv("App", &executable, None));
     lines.push(format_warn(
         "The Microsoft Store package is not modified.",
+        None,
+    ));
+    lines.push(format_warn(
+        "Removes the experimental update observer login entry and stops its helper.",
         None,
     ));
     lines.join("\n")
