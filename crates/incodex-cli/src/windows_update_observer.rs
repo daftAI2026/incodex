@@ -170,7 +170,8 @@ impl Drop for Subscription {
     }
 }
 fn subscribe(wake: Arc<OwnedHandle>) -> Result<Subscription, String> {
-    let catalog = PackageCatalog::OpenForCurrentUser().map_err(|error| error.to_string())?;
+    let catalog = crate::windows_update_repair::open_current_user_package_catalog()
+        .map_err(|error| error.to_string())?;
     let handler =
         TypedEventHandler::<PackageCatalog, PackageUpdatingEventArgs>::new(move |_, args| {
             if let Some(args) = args.as_ref() {

@@ -577,7 +577,7 @@ impl PackageUpdateSubscription {
         expected_family: &str,
         expected_source_package: &str,
     ) -> Result<Self, String> {
-        let catalog = PackageCatalog::OpenForCurrentUser()
+        let catalog = open_current_user_package_catalog()
             .map_err(|error| format!("cannot open the current-user package catalog: {error}"))?;
         let expected_family = expected_family.to_string();
         let expected_source_package = expected_source_package.to_string();
@@ -685,6 +685,18 @@ pub(crate) struct WindowsRuntimeApartment {
     uninitialize: bool,
 }
 
+pub(crate) fn open_current_user_package_catalog() -> windows::core::Result<PackageCatalog> {
+    use windows::core::{factory, Interface, Type};
+    use windows::ApplicationModel::IPackageCatalogStatics;
+    // 工厂与当前 apartment 同寿命，不能跨 RoUninitialize 留下静态缓存指针。
+    let factory = factory::<PackageCatalog, IPackageCatalogStatics>()?;
+    unsafe {
+        let mut result = std::ptr::null_mut();
+        (factory.vtable().OpenForCurrentUser)(factory.as_raw(), &mut result)
+            .and_then(|| PackageCatalog::from_abi(result))
+    }
+}
+
 impl WindowsRuntimeApartment {
     pub(crate) fn initialize() -> Result<Self, String> {
         let result = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
@@ -730,15 +742,15 @@ mod tests {
     #[test]
     fn current_user_package_catalog_supports_event_subscription() {
         for _ in 0..3 {
-        let _runtime = WindowsRuntimeApartment::initialize().expect("initialize WinRT");
-        let (sender, _receiver) = mpsc::channel();
-        let subscription = PackageUpdateSubscription::subscribe(
-            sender,
-            super::CODEX_PACKAGE_FAMILY_NAME,
-            "OpenAI.Codex_1.0.0.0_x64__2p2nqsd0c76g0",
-        )
-        .expect("subscribe to current-user package updates");
-        drop(subscription);
+            let _runtime = WindowsRuntimeApartment::initialize().expect("initialize WinRT");
+            let (sender, _receiver) = mpsc::channel();
+            let subscription = PackageUpdateSubscription::subscribe(
+                sender,
+                super::CODEX_PACKAGE_FAMILY_NAME,
+                "OpenAI.Codex_1.0.0.0_x64__2p2nqsd0c76g0",
+            )
+            .expect("subscribe to current-user package updates");
+            drop(subscription);
         }
     }
 }
