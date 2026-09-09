@@ -467,6 +467,29 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
 
+    #[test]
+    fn observer_status_retains_bounded_history_without_duplicate_idle_events() {
+        let root = fixture_root("history");
+        incodex_core::windows_session::ensure_private_windows_dir(&root).unwrap();
+        status(&root, "subscribed", "startup").unwrap();
+        status(&root, "watching", "package-A").unwrap();
+        status(&root, "watching", "package-A").unwrap();
+        let path = root.join("windows/update-observer.json");
+        let value: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let events = value["events"].as_array().expect("history must survive status replacement");
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0]["phase"], "subscribed");
+        for index in 0..160 {
+            status(&root, "repairing", &format!("{index}:{}", "测试\n".repeat(2000))).unwrap();
+        }
+        let bytes = std::fs::read(path).unwrap();
+        assert!(bytes.len() <= 65536);
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let events = value["events"].as_array().unwrap();
+        assert!(events.len() <= 128);
+        assert!(events.last().unwrap()["detail"].as_str().unwrap().starts_with("159:"));
+    }
+
     fn fixture_root(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
             "incodex-observer-{name}-{}-{}",
