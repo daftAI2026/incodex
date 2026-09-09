@@ -29,6 +29,7 @@
 - **Follows the main window**: The incognito window opens using the main window’s size and placement
 - **Burns on close**: A normal close clears this temp session (including the isolated Chromium profile); login and settings stay
 - **Optional sidebar button**: After `incodex install`, a hat-glasses control sits left of Search; use `Shift+Command+N` on macOS or `Ctrl+Shift+N` on Windows
+- **macOS native menus**: After `incodex install`, open an incognito window from the official Dock menu or existing menu-bar status menu
 - **Local CLI**: Terminal menu, Homebrew or script install, `status` / `doctor` / `runtime`. Not an official plugin
 
 A normal close removes the isolated session managed by Incodex; this is not a claim of forensic erasure from the device or remote services.
@@ -86,8 +87,8 @@ Platform installers use prebuilt native Rust binaries and do not require Bun. A 
 The primary `incodex open` path does not patch Codex. On macOS, the optional `incodex install` path adds the in-app button by modifying and re-signing the local app bundle. On Windows, it never patches or copies the Microsoft Store package; it registers a separately owned, per-user Runtime integration. `install`, `uninstall`, and supported `self-uninstall` channels print a plan before destructive work: TTY asks once, non-TTY needs `--yes`, and `--dry-run` only prints. On Windows, `self-uninstall` removes only the managed CLI and its exact user PATH entry by default; `--restore-app` first removes the Runtime integration, while Runtime files and session state remain. On macOS, `recover` is the explicit transaction-recovery exception: it requires `--transaction <id>`, does not accept `--dry-run`, and resumes only that existing journal.
 
 - Official plugins cannot add this button. macOS changes the app bundle; Windows keeps the Store package intact and uses its platform integration boundary
-- After the default official-app install, a valid OpenAI signature cannot be kept. On the next launch, macOS may ask the patched app to access **Codex Storage Key**. Only if the dialog names the expected app and Keychain item should you enter your **Mac login password** (not your ChatGPT password) and choose **Always Allow**. **Allow** / **Allow Once** grants only that access and may prompt again later; if the details do not match, choose **Deny**. The CLI does not give permanent-authorization advice for `--clone` or `--app` targets
-- Official **Appshot** (smart snapshot: photo / screenshot attachments) then stops working. This is not a missing camera permission. Computer Use usually still works. `incodex uninstall` restores Appshot
+- On macOS, after the default official-app install, a valid OpenAI signature cannot be kept. On the next launch, macOS may ask the patched app to access **Codex Storage Key**. Only if the dialog names the expected app and Keychain item should you enter your **Mac login password** (not your ChatGPT password) and choose **Always Allow**. **Allow** / **Allow Once** grants only that access and may prompt again later; if the details do not match, choose **Deny**. The CLI does not give permanent-authorization advice for `--clone` or `--app` targets
+- On macOS, official **Appshot** (smart snapshot: photo / screenshot attachments) then stops working. This is not a missing camera permission. Computer Use usually still works. `incodex uninstall` restores Appshot
 - Report vulnerabilities via [SECURITY.md](SECURITY.md). Do not open a public issue
 
 ## Tips
@@ -166,8 +167,8 @@ $ incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
 
 Without `--name`, each launch gets a friendly random two-word name. Without `--avatar`, Incodex generates an offline avatar from the final name, so the same name produces the same avatar. A custom avatar must be a regular local PNG, JPEG, or WebP no larger than 5 MiB; the original file is left unchanged and centered into Codex's circular avatar slot. `--name` and `--avatar` require `--mask`, and names containing spaces need shell quotes.
 
-The mask changes only the current incognito window's profile footer and account-menu identity row. It does not change the real account, authentication, or stored profile.
-If the mask cannot mount or later recover after a renderer remount, Incodex closes that window rather than expose the real identity.
+The mask changes only the current incognito window's sidebar profile footer and first-level account-menu identity row. The full Settings page keeps the official account details; the mask does not change the real account, authentication, or stored profile. Returning from Settings restores the sidebar and menu mask, including after minimizing and restoring the window.
+If the mask cannot mount or a running window's mask fails to recover, Incodex closes that window and reports the failure. Normal closing is reported as a normal close.
 
 ### Install
 
