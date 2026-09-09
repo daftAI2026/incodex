@@ -729,6 +729,7 @@ mod tests {
 
     #[test]
     fn current_user_package_catalog_supports_event_subscription() {
+        for _ in 0..3 {
         let _runtime = WindowsRuntimeApartment::initialize().expect("initialize WinRT");
         let (sender, _receiver) = mpsc::channel();
         let subscription = PackageUpdateSubscription::subscribe(
@@ -738,5 +739,6 @@ mod tests {
         )
         .expect("subscribe to current-user package updates");
         drop(subscription);
+        }
     }
 }
