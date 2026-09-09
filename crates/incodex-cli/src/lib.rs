@@ -102,6 +102,8 @@ mod windows_update_flow;
 pub mod windows_update_repair;
 #[cfg(windows)]
 mod windows_update_repair_lifecycle;
+#[cfg(windows)]
+mod windows_update_observer;
 
 #[cfg(not(target_os = "windows"))]
 use std::path::PathBuf;
