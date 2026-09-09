@@ -179,6 +179,11 @@ where
     if current_intent != *expected_intent || current_intent.helper_path != helper_source {
         return Err("Windows update repair intent changed or was cancelled".to_string());
     }
+    if let Some(state) = read_windows_install_state(user_root)? {
+        if state.runtime_release != current_intent.runtime_release {
+            return Err("Windows Runtime selection changed after the repair intent".to_string());
+        }
+    }
     crate::windows_runtime::verify_installed_windows_runtime(
         user_root,
         &current_intent.runtime_release,
