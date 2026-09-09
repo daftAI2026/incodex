@@ -25,7 +25,7 @@ use crate::windows_registration::{
     stage_installed_windows_debug_registration, transient_windows_debug_registration_exists,
     WindowsDebugRegistrationEvidence,
 };
-use crate::windows_runtime::publish_windows_runtime;
+use crate::windows_runtime::{publish_windows_runtime, verify_installed_windows_runtime};
 use crate::windows_system::windows_path_for_display;
 
 pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
@@ -65,6 +65,7 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
             user_root: &user_root,
             package_full_name: &confirmed_app.package_full_name,
             helper_source: &helper,
+            retained_runtime_release: None,
         },
         running_package_process_ids,
         codex_package_full_name_is_installed,
@@ -91,6 +92,7 @@ struct WindowsInstallTarget<'a> {
     user_root: &'a Path,
     package_full_name: &'a str,
     helper_source: &'a Path,
+    retained_runtime_release: Option<&'a str>,
 }
 
 pub fn install_windows_runtime_with<R, P, D, E>(
@@ -113,6 +115,7 @@ where
             user_root,
             package_full_name,
             helper_source,
+            retained_runtime_release: None,
         },
         running_package_processes,
         package_is_installed,
@@ -137,11 +140,18 @@ where
     D: FnMut(&str) -> Result<(), String>,
     E: FnOnce(&WindowsInstalledRuntimeRegistration) -> Result<(), String>,
 {
+    // 自动恢复沿用已授权的 Runtime；显式 install 才发布当前 CLI 内嵌版本。
+    let intent = crate::windows_install_state::read_windows_update_repair_intent(user_root)?
+        .ok_or_else(|| "Windows automatic rebind requires a retained repair intent".to_string())?;
+    if intent.target_package_full_name != package_full_name || intent.helper_path != helper_source {
+        return Err("Windows automatic rebind intent does not match its target".to_string());
+    }
     install_windows_runtime_locked_with_package_probe(
         WindowsInstallTarget {
             user_root,
             package_full_name,
             helper_source,
+            retained_runtime_release: Some(&intent.runtime_release),
         },
         running_package_processes,
         package_is_installed,
@@ -171,6 +181,7 @@ where
         user_root,
         package_full_name,
         helper_source,
+        retained_runtime_release,
     } = target;
     crate::windows_update_repair::prepare_interrupted_update_repair_with(
         user_root,
@@ -184,6 +195,7 @@ where
             user_root,
             package_full_name,
             helper_source,
+            retained_runtime_release,
         },
         running_package_processes,
         package_is_installed,
@@ -214,7 +226,11 @@ where
         user_root,
         package_full_name,
         helper_source,
+        retained_runtime_release,
     } = target;
+    if let Some(release) = retained_runtime_release {
+        verify_installed_windows_runtime(user_root, release)?;
+    }
     revalidate_windows_install_generation(package_full_name, &mut package_probe)?;
     let existing = read_windows_install_state(user_root)?;
     if let Some(existing) = existing.as_ref() {
@@ -258,19 +274,22 @@ where
         }
     }
 
-    let runtime = publish_windows_runtime(user_root)?;
-    let runtime_release = runtime
-        .release_dir
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| "Windows Runtime release name is not valid Unicode".to_string())?;
+    let runtime_release = match retained_runtime_release {
+        Some(release) => release.to_string(),
+        None => publish_windows_runtime(user_root)?
+            .release_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "Windows Runtime release name is not valid Unicode".to_string())?
+            .to_string(),
+    };
     let helper = publish_windows_helper(user_root, helper_source)?;
     revalidate_windows_install_generation(package_full_name, &mut package_probe)?;
     let staged = stage_windows_install_state(
         user_root,
         package_full_name,
         &helper.executable,
-        runtime_release,
+        &runtime_release,
     )?;
     let pending = transition_windows_install_state(
         user_root,
@@ -1091,6 +1110,7 @@ mod tests {
                 user_root: &user_root,
                 package_full_name: expected_package,
                 helper_source: &helper,
+                retained_runtime_release: None,
             },
             |_| Ok(Vec::new()),
             |_| Ok(false),

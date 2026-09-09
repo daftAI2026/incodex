@@ -179,6 +179,10 @@ where
     if current_intent != *expected_intent || current_intent.helper_path != helper_source {
         return Err("Windows update repair intent changed or was cancelled".to_string());
     }
+    crate::windows_runtime::verify_installed_windows_runtime(
+        user_root,
+        &current_intent.runtime_release,
+    )?;
     require_target_quiescent(
         &current_intent.target_package_full_name,
         &mut running_package_processes,
