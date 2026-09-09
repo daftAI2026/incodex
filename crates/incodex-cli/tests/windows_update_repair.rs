@@ -45,6 +45,64 @@ fn observation(
 }
 
 #[test]
+fn retry_rejects_changed_helper_when_only_the_intent_remains() {
+    let root = scratch_root();
+    let installed = install_windows_runtime_with(
+        &root,
+        OLD_PACKAGE,
+        &std::env::current_exe().unwrap(),
+        |_| Ok(vec![]),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .unwrap();
+    repair_windows_runtime_after_update_with(
+        &root,
+        WindowsUpdateRepairAuthorization {
+            package_full_name: OLD_PACKAGE,
+            epoch: installed.epoch,
+            registration_id: &installed.registration_id,
+            helper_source: &installed.helper_path,
+        },
+        NEW_PACKAGE,
+        |_| Ok(vec![1234]),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .unwrap_err();
+    let intent = read_windows_update_repair_intent(&root).unwrap().unwrap();
+    fs::remove_file(root.join("windows-install.json")).unwrap();
+    let mut bytes = fs::read(&intent.helper_path).unwrap();
+    bytes.extend_from_slice(b"changed-after-intent");
+    fs::write(&intent.helper_path, bytes).unwrap();
+    let mut disabled = 0;
+    let result = resume_windows_update_repair_with(
+        &root,
+        &intent,
+        &intent.helper_path,
+        |_| Ok(vec![]),
+        |_| Ok(false),
+        |_| {
+            disabled += 1;
+            Ok(())
+        },
+        |_| Ok(()),
+    );
+    assert!(
+        result.is_err(),
+        "changed helper must not be adopted by retry"
+    );
+    assert_eq!(disabled, 0);
+    assert_eq!(
+        read_windows_update_repair_intent(&root).unwrap(),
+        Some(intent)
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn only_a_successful_new_codex_generation_authorizes_repair() {
     assert_eq!(
         classify_package_update(
