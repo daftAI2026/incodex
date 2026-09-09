@@ -200,7 +200,24 @@ pub(crate) fn remove() -> Result<(), String> {
     Ok(())
 }
 
-fn prove_removable_command(command: &str, _root: &Path) -> Result<(), String> {
+fn prove_removable_command(command: &str, root: &Path) -> Result<(), String> {
+    // 卸载沿用现有持久身份证据，不要求已丢失的 helper 重新出现。
+    let state = crate::windows_install_state::read_windows_install_state_for_uninstall(root)
+        .ok()
+        .flatten();
+    let registration = crate::windows_registration::read_windows_debug_registration(root)
+        .ok()
+        .flatten();
+    for helper in state
+        .as_ref()
+        .map(|state| &state.helper_path)
+        .into_iter()
+        .chain(registration.as_ref().map(|entry| &entry.helper_path))
+    {
+        if build_run_command(helper).is_ok_and(|owned| owned == command) {
+            return Ok(());
+        }
+    }
     prove_owned_command(command)
 }
 
