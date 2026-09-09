@@ -238,6 +238,70 @@ fn repair_preserves_a_newer_selected_runtime() {
 }
 
 #[test]
+fn retry_rejects_a_runtime_selection_changed_after_the_intent() {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().unwrap();
+    let initial = install_windows_runtime_with(
+        &user_root,
+        OLD_PACKAGE,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .unwrap();
+    repair_windows_runtime_after_update_with(
+        &user_root,
+        WindowsUpdateRepairAuthorization {
+            package_full_name: OLD_PACKAGE,
+            epoch: initial.epoch,
+            registration_id: &initial.registration_id,
+            helper_source: &initial.helper_path,
+        },
+        NEW_PACKAGE,
+        |package| {
+            Ok(if package == NEW_PACKAGE {
+                vec![1234]
+            } else {
+                vec![]
+            })
+        },
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .expect_err("running target leaves a retained intent");
+    let intent = read_windows_update_repair_intent(&user_root)
+        .unwrap()
+        .unwrap();
+    let selected = selected_runtime_variant(&user_root, &initial.runtime_release, "9.9.9");
+    let updated = incodex_cli::windows_install_state::synchronize_windows_install_runtime_release(
+        &user_root, &selected,
+    )
+    .unwrap()
+    .unwrap();
+    let retry = resume_windows_update_repair_with(
+        &user_root,
+        &intent,
+        &initial.helper_path,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    );
+    assert!(
+        retry.is_err(),
+        "stale intent must not replace the later selected Runtime"
+    );
+    assert_eq!(
+        read_windows_install_state(&user_root).unwrap(),
+        Some(updated)
+    );
+    fs::remove_dir_all(user_root).unwrap();
+}
+
+#[test]
 fn repair_preserves_a_same_version_runtime_with_a_different_hash() {
     assert_repair_preserves_selected_runtime(env!("CARGO_PKG_VERSION"));
 }
