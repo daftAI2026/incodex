@@ -149,6 +149,99 @@ fn repair_reuses_the_install_transaction_only_for_the_authorized_epoch() {
     fs::remove_dir_all(user_root).expect("remove update repair fixture");
 }
 
+fn selected_runtime_variant(root: &std::path::Path, original: &str, version: &str) -> String {
+    use incodex_core::windows_session::{apply_private_windows_acl, ensure_private_windows_dir};
+    use sha2::{Digest, Sha256};
+    let releases = root.join("runtime/releases");
+    let source = releases.join(original);
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(source.join("runtime-manifest.json")).unwrap()).unwrap();
+    let mut inject = fs::read(source.join("incodex-inject.js")).unwrap();
+    inject.extend_from_slice(b"\n// controlled Runtime B fixture\n");
+    manifest["runtimeVersion"] = version.into();
+    let digest = |bytes: &[u8]| {
+        Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    };
+    manifest["files"]["incodex-inject.js"] = digest(&inject).into();
+    let body = serde_json::to_vec_pretty(&manifest).unwrap();
+    let name = format!("{}-{}", version, digest(&body));
+    let destination = ensure_private_windows_dir(&releases.join(&name)).unwrap();
+    for entry in fs::read_dir(&source).unwrap() {
+        let entry = entry.unwrap();
+        let path = destination.join(entry.file_name());
+        fs::copy(entry.path(), &path).unwrap();
+        apply_private_windows_acl(&path).unwrap();
+    }
+    fs::write(destination.join("incodex-inject.js"), inject).unwrap();
+    fs::write(destination.join("runtime-manifest.json"), body).unwrap();
+    let pointer_path = root.join("runtime/current.json");
+    let mut pointer: serde_json::Value =
+        serde_json::from_slice(&fs::read(&pointer_path).unwrap()).unwrap();
+    pointer["version"] = version.into();
+    pointer["release"] = format!("releases/{name}").into();
+    pointer["manifestSha256"] = name.strip_prefix(&format!("{version}-")).unwrap().into();
+    pointer["files"] = manifest["files"].clone();
+    fs::write(pointer_path, serde_json::to_vec_pretty(&pointer).unwrap()).unwrap();
+    name
+}
+
+fn assert_repair_preserves_selected_runtime(version: &str) {
+    let user_root = scratch_root();
+    let helper = std::env::current_exe().unwrap();
+    let initial = install_windows_runtime_with(
+        &user_root,
+        OLD_PACKAGE,
+        &helper,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .unwrap();
+    let selected = selected_runtime_variant(&user_root, &initial.runtime_release, version);
+    let installed =
+        incodex_cli::windows_install_state::synchronize_windows_install_runtime_release(
+            &user_root, &selected,
+        )
+        .expect("B is a valid recorded Runtime")
+        .unwrap();
+    let pointer_before = fs::read(user_root.join("runtime/current.json")).unwrap();
+    let result = repair_windows_runtime_after_update_with(
+        &user_root,
+        WindowsUpdateRepairAuthorization {
+            package_full_name: OLD_PACKAGE,
+            epoch: installed.epoch,
+            registration_id: &installed.registration_id,
+            helper_source: &installed.helper_path,
+        },
+        NEW_PACKAGE,
+        |_| Ok(Vec::new()),
+        |_| Ok(false),
+        |_| Ok(()),
+        |_| Ok(()),
+    )
+    .expect("rebind must not republish embedded Runtime A");
+    assert_eq!(result.runtime_release, selected);
+    assert_eq!(
+        fs::read(user_root.join("runtime/current.json")).unwrap(),
+        pointer_before
+    );
+    fs::remove_dir_all(user_root).unwrap();
+}
+
+#[test]
+fn repair_preserves_a_newer_selected_runtime() {
+    assert_repair_preserves_selected_runtime("9.9.9");
+}
+
+#[test]
+fn repair_preserves_a_same_version_runtime_with_a_different_hash() {
+    assert_repair_preserves_selected_runtime(env!("CARGO_PKG_VERSION"));
+}
+
 #[test]
 fn repair_rejects_a_corrupted_selected_runtime_before_retiring_old_state() {
     let user_root = scratch_root();
@@ -172,7 +265,8 @@ fn repair_rejects_a_corrupted_selected_runtime_before_retiring_old_state() {
         selected_runtime_file.is_file(),
         "published Runtime includes the selected injection artifact"
     );
-    fs::write(selected_runtime_file, b"corrupted selected Runtime").expect("corrupt selected Runtime");
+    fs::write(selected_runtime_file, b"corrupted selected Runtime")
+        .expect("corrupt selected Runtime");
 
     let mut disable_calls = 0;
     let error = repair_windows_runtime_after_update_with(
@@ -185,7 +279,10 @@ fn repair_rejects_a_corrupted_selected_runtime_before_retiring_old_state() {
         },
         NEW_PACKAGE,
         |_| Ok(Vec::new()),
-        |_| Ok(false),
+        |package| {
+            assert_eq!(package, OLD_PACKAGE);
+            Ok(true)
+        },
         |_| {
             disable_calls += 1;
             Ok(())
@@ -194,12 +291,18 @@ fn repair_rejects_a_corrupted_selected_runtime_before_retiring_old_state() {
     )
     .expect_err("repair must reject a corrupted selected Runtime");
 
-    let retained = read_windows_install_state(&user_root)
-        .expect("read install state after rejected repair")
-        .expect("old install state must remain after rejected repair");
-    assert_eq!(retained.package_full_name, OLD_PACKAGE, "repair error: {error}");
-    assert_eq!(retained.epoch, installed.epoch, "repair error: {error}");
-    assert_eq!(disable_calls, 0, "repair error: {error}");
+    let retained =
+        read_windows_install_state(&user_root).expect("read install state after rejected repair");
+    assert_eq!(
+        (
+            retained
+                .as_ref()
+                .map(|state| state.registration_id.as_str()),
+            disable_calls,
+        ),
+        (Some(installed.registration_id.as_str()), 0),
+        "repair error: {error}"
+    );
 
     fs::remove_dir_all(user_root).expect("remove update repair fixture");
 }
