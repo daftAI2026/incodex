@@ -367,6 +367,15 @@ fn reconcile(root: &Path, helper: &Path, stop: &OwnedHandle) -> Result<bool, Str
     }
 }
 
+fn rearm_current_registration_with(
+    _root: &Path,
+    _state: &WindowsInstallState,
+    _inspect: impl FnOnce(&str) -> Result<Vec<u32>, String>,
+    _enable: impl FnOnce(&crate::windows_activation::WindowsInstalledRuntimeRegistration) -> Result<(), String>,
+) -> Result<(), String> {
+    Ok(())
+}
+
 pub(crate) fn try_run(args: &[String]) -> Option<Result<(), String>> {
     if args.first().map(String::as_str) != Some(MODE) {
         return None;
@@ -465,6 +474,23 @@ where
 mod tests {
     use super::*;
     use std::cell::RefCell;
+
+    #[test]
+    fn same_generation_startup_reapplies_registration_without_republishing_runtime() {
+        let root = fixture_root("rearm");
+        let state = crate::windows_install::install_windows_runtime_with(
+            &root, "OpenAI.Codex_1.2.3.4_x64__2p2nqsd0c76g0",
+            &std::env::current_exe().unwrap(), |_| Ok(vec![]), |_| Ok(false), |_| Ok(()), |_| Ok(()),
+        ).unwrap();
+        let before = std::fs::read(root.join("runtime/current.json")).unwrap();
+        let mut calls = 0;
+        rearm_current_registration_with(&root, &state, |_| Ok(vec![]), |_| { calls += 1; Ok(()) }).unwrap();
+        assert_eq!(calls, 1, "same package on disk does not prove the OS activation hook survived login");
+        assert_eq!(std::fs::read(root.join("runtime/current.json")).unwrap(), before);
+        assert_eq!(read_windows_install_state(&root).unwrap(), Some(state.clone()));
+        assert!(rearm_current_registration_with(&root, &state, |_| Ok(vec![42]), |_| panic!("must wait for normal exit")).is_err());
+        assert!(rearm_current_registration_with(&root, &state, |_| Ok(vec![]), |_| Err("registration failed".into())).is_err());
+    }
 
     #[test]
     fn observer_status_retains_bounded_history_without_duplicate_idle_events() {
