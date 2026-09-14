@@ -52,6 +52,7 @@ mod stable_release;
 #[cfg(not(target_os = "windows"))]
 pub mod terminal;
 mod terminal_presentation;
+mod update_flow;
 pub mod version;
 #[cfg(target_os = "windows")]
 pub mod windows_activation;
@@ -74,6 +75,8 @@ pub mod windows_install;
 #[cfg(target_os = "windows")]
 pub mod windows_install_state;
 #[cfg(target_os = "windows")]
+pub(crate) mod windows_installed_cdp;
+#[cfg(target_os = "windows")]
 pub mod windows_launch;
 #[cfg(target_os = "windows")]
 pub(crate) mod windows_locale;
@@ -83,6 +86,9 @@ pub mod windows_menu;
 pub mod windows_open;
 #[cfg(target_os = "windows")]
 pub mod windows_process;
+#[cfg(target_os = "windows")]
+#[doc(hidden)]
+pub mod windows_process_parameters;
 #[cfg(target_os = "windows")]
 pub(crate) mod windows_profile;
 #[cfg(target_os = "windows")]
@@ -94,6 +100,8 @@ mod windows_runtime_lifecycle;
 #[cfg(target_os = "windows")]
 pub mod windows_runtime_open;
 #[cfg(target_os = "windows")]
+mod windows_runtime_raise;
+#[cfg(target_os = "windows")]
 pub mod windows_self_uninstall;
 #[cfg(target_os = "windows")]
 pub mod windows_status;
@@ -101,8 +109,6 @@ pub mod windows_status;
 pub(crate) mod windows_system;
 #[cfg(target_os = "windows")]
 pub mod windows_update;
-#[cfg(target_os = "windows")]
-mod windows_update_flow;
 
 #[cfg(not(target_os = "windows"))]
 use std::path::PathBuf;

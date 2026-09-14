@@ -77,9 +77,18 @@ const CODEX_MODE_FALLBACK_EXPRESSION = `(() => {
 })()`;
 
 function deriveCodexModePageState(snapshot) {
-  if (snapshot?.modeAvailable === true && snapshot.modeLabel === "Codex") return "codex";
-  if (snapshot?.officialBlockerVisible === true) return "pending";
-  if (snapshot?.modeAvailable !== true) return "missing";
+  if (
+    snapshot === null ||
+    typeof snapshot !== "object" ||
+    typeof snapshot.modeAvailable !== "boolean" ||
+    typeof snapshot.modeLabel !== "string" ||
+    typeof snapshot.officialBlockerVisible !== "boolean"
+  ) {
+    throw new Error("malformed Codex mode snapshot");
+  }
+  if (snapshot.modeAvailable && snapshot.modeLabel === "Codex") return "codex";
+  if (snapshot.officialBlockerVisible) return "blocked";
+  if (!snapshot.modeAvailable) return "pending";
   return "other";
 }
 
@@ -89,9 +98,10 @@ function decideCodexModeAction(
   confirmationFailures,
   primaryOtherChecks = 0,
   primaryOtherChecksRequired = 3,
-  confirmationFailuresRequired = 20,
+  confirmationFailuresRequired = 2,
 ) {
   if (pageState === "codex") return "confirmed";
+  if (pageState === "blocked") return "blocked";
   if (pageState === "pending") return "wait";
   if (!fallbackAttempted) {
     return primaryOtherChecks >= primaryOtherChecksRequired ? "select-fallback" : "wait";
@@ -100,98 +110,76 @@ function decideCodexModeAction(
   return "wait";
 }
 
-async function withProbeTimeout(promise, timeoutMs, scheduleTimeout, cancelTimeout) {
-  let timeout = null;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise((_, reject) => {
-        timeout = scheduleTimeout(
-          () => reject(new Error(`Codex mode renderer probe timed out after ${timeoutMs}ms`)),
-          timeoutMs,
-        );
-      }),
-    ]);
-  } finally {
-    if (timeout !== null) cancelTimeout(timeout);
-  }
-}
-
 function createCodexModeReadiness(options) {
   const checks = new WeakMap();
+  const activeTimeoutMs = options.activeTimeoutMs ?? 90_000;
+  const maxProbeFailures = options.maxProbeFailures ?? 20;
+  const confirmationFailuresRequired = options.confirmationFailuresRequired ?? 2;
   const primarySettleMs = options.primarySettleMs ?? 1_500;
   const primaryOtherChecksRequired = options.primaryOtherChecksRequired ?? 3;
-  const confirmationFailuresRequired = options.confirmationFailuresRequired ?? 20;
-  const probeFailuresRequired = options.probeFailuresRequired ?? 20;
   const probeTimeoutMs = options.probeTimeoutMs ?? 2_000;
   const pollMs = options.pollMs ?? 750;
-  const totalChecksRequired = options.totalChecksRequired ?? 120;
-  const totalTimeoutMs = options.totalTimeoutMs ?? 90_000;
   const now = options.now ?? Date.now;
   const scheduleTimer = options.scheduleTimer ?? setTimeout;
   const cancelTimer = options.cancelTimer ?? clearTimeout;
-  const scheduleDeadlineTimer = options.scheduleDeadlineTimer ?? setTimeout;
-  const cancelDeadlineTimer = options.cancelDeadlineTimer ?? clearTimeout;
-  const scheduleProbeTimeout = options.scheduleProbeTimeout ?? setTimeout;
-  const cancelProbeTimeout = options.cancelProbeTimeout ?? clearTimeout;
+
+  function finishUnresolved(state) {
+    if (state.complete) return;
+    state.complete = true;
+    if (state.timer !== null) cancelTimer(state.timer);
+    state.timer = null;
+    if (state.probeTimer !== null) cancelTimer(state.probeTimer);
+    state.probeTimer = null;
+    options.log("codex-mode-unresolved", { fallback: state.fallbackSucceeded });
+  }
+
+  function activeElapsedMs(state, currentTime) {
+    const currentPause =
+      state.blockedAt === null ? 0 : Math.max(0, currentTime - state.blockedAt);
+    return Math.max(0, currentTime - state.startedAt - state.pausedMs - currentPause);
+  }
+
+  function pauseForOfficialBlocker(state, currentTime) {
+    if (state.blockedAt === null) state.blockedAt = currentTime;
+    if (!state.blockedLogged) {
+      state.blockedLogged = true;
+      options.log("codex-mode-blocked");
+    }
+  }
+
+  function resumeActiveClock(state, currentTime) {
+    if (state.blockedAt === null) return;
+    state.pausedMs += Math.max(0, currentTime - state.blockedAt);
+    state.blockedAt = null;
+  }
 
   function stateFor(win) {
     let state = checks.get(win);
     if (state) return state;
     state = {
+      blockedAt: null,
+      blockedLogged: false,
       complete: false,
       confirmationFailures: 0,
-      deadlineAt: now() + totalTimeoutMs,
-      deadlineTimer: null,
       fallbackAttempted: false,
       fallbackSucceeded: false,
       primaryOtherChecks: 0,
+      pausedMs: 0,
       probeFailures: 0,
+      probeTimer: null,
       running: false,
+      startedAt: now(),
       timer: null,
-      totalChecks: 0,
     };
     checks.set(win, state);
-    state.deadlineTimer = scheduleDeadlineTimer(() => {
-      finishUnresolved(state, "readiness-deadline");
-    }, totalTimeoutMs);
     win.once("closed", () => {
       state.complete = true;
-      if (state.timer) cancelTimer(state.timer);
-      if (state.deadlineTimer) cancelDeadlineTimer(state.deadlineTimer);
+      if (state.timer !== null) cancelTimer(state.timer);
+      state.timer = null;
+      if (state.probeTimer !== null) cancelTimer(state.probeTimer);
+      state.probeTimer = null;
     });
     return state;
-  }
-
-  function finishUnresolved(state, reason = null) {
-    if (state.complete) return;
-    state.complete = true;
-    if (state.timer) {
-      cancelTimer(state.timer);
-      state.timer = null;
-    }
-    if (state.deadlineTimer) {
-      cancelDeadlineTimer(state.deadlineTimer);
-      state.deadlineTimer = null;
-    }
-    options.log("codex-mode-unresolved", {
-      fallback: state.fallbackSucceeded,
-      ...(reason ? { reason } : {}),
-    });
-  }
-
-  function finishConfirmed(state) {
-    if (state.complete) return;
-    state.complete = true;
-    if (state.deadlineTimer) {
-      cancelDeadlineTimer(state.deadlineTimer);
-      state.deadlineTimer = null;
-    }
-    options.log("codex-mode-confirmed", { fallback: state.fallbackSucceeded });
-  }
-
-  function deadlineReached(state) {
-    return now() >= state.deadlineAt;
   }
 
   function observe(win, delay = primarySettleMs) {
@@ -204,33 +192,52 @@ function createCodexModeReadiness(options) {
     }, delay);
   }
 
+  async function withRendererDeadline(state, operation) {
+    return Promise.race([
+      operation(),
+      new Promise((_, reject) => {
+        state.probeTimer = scheduleTimer(() => {
+          state.probeTimer = null;
+          reject(new Error(`Codex mode probe timed out after ${probeTimeoutMs}ms`));
+        }, probeTimeoutMs);
+      }),
+    ]).finally(() => {
+      if (state.probeTimer !== null) cancelTimer(state.probeTimer);
+      state.probeTimer = null;
+    });
+  }
+
   async function reconcile(win, state) {
     if (state.complete || win.isDestroyed() || win.webContents.isDestroyed()) return;
-    if (deadlineReached(state)) {
-      finishUnresolved(state, "readiness-deadline");
-      return;
-    }
     state.running = true;
-    state.totalChecks += 1;
     try {
-      const snapshot = await withProbeTimeout(
+      const snapshot = await withRendererDeadline(state, () =>
         win.webContents.executeJavaScript(CODEX_MODE_PROBE_EXPRESSION, false),
-        probeTimeoutMs,
-        scheduleProbeTimeout,
-        cancelProbeTimeout,
       );
       if (state.complete || win.isDestroyed() || win.webContents.isDestroyed()) return;
-      if (deadlineReached(state)) {
-        finishUnresolved(state, "readiness-deadline");
+      const pageState = deriveCodexModePageState(snapshot);
+      state.probeFailures = 0;
+      const currentTime = now();
+      if (pageState === "codex") {
+        state.complete = true;
+        options.log("codex-mode-confirmed", { fallback: state.fallbackSucceeded });
         return;
       }
-      state.probeFailures = 0;
-      const pageState = deriveCodexModePageState(snapshot);
-      const nonCodexPage = pageState === "other" || pageState === "missing";
+      if (pageState === "blocked") {
+        if (!state.fallbackAttempted) state.primaryOtherChecks = 0;
+        state.confirmationFailures = 0;
+        pauseForOfficialBlocker(state, currentTime);
+        return;
+      }
+      resumeActiveClock(state, currentTime);
+      if (activeElapsedMs(state, currentTime) >= activeTimeoutMs) {
+        finishUnresolved(state);
+        return;
+      }
       if (!state.fallbackAttempted) {
-        state.primaryOtherChecks = nonCodexPage ? state.primaryOtherChecks + 1 : 0;
-      } else if (nonCodexPage) {
-        state.confirmationFailures += 1;
+        state.primaryOtherChecks = pageState === "other" ? state.primaryOtherChecks + 1 : 0;
+      } else {
+        state.confirmationFailures = pageState === "other" ? state.confirmationFailures + 1 : 0;
       }
       const action = decideCodexModeAction(
         pageState,
@@ -240,14 +247,6 @@ function createCodexModeReadiness(options) {
         primaryOtherChecksRequired,
         confirmationFailuresRequired,
       );
-      if (action === "confirmed") {
-        finishConfirmed(state);
-        return;
-      }
-      if (state.totalChecks >= totalChecksRequired) {
-        finishUnresolved(state, "readiness-deadline");
-        return;
-      }
       if (action === "unresolved") {
         finishUnresolved(state);
         return;
@@ -256,7 +255,16 @@ function createCodexModeReadiness(options) {
         if (state.complete || win.isDestroyed() || win.webContents.isDestroyed()) return;
         state.fallbackAttempted = true;
         state.confirmationFailures = 0;
-        state.fallbackSucceeded = (await options.selectFallback(win)) === true;
+        try {
+          state.fallbackSucceeded = (await withRendererDeadline(state, () => options.selectFallback(win))) === true;
+        } catch (error) {
+          if (!state.complete) {
+            options.log("codex-mode-fallback-failed", { error: String(error) });
+            finishUnresolved(state);
+          }
+          return;
+        }
+        if (state.complete || win.isDestroyed() || win.webContents.isDestroyed()) return;
         if (state.fallbackSucceeded) {
           options.log("codex-mode-fallback-sent");
         } else {
@@ -264,13 +272,15 @@ function createCodexModeReadiness(options) {
         }
       }
     } catch (error) {
-      if (state.complete || win.isDestroyed() || win.webContents.isDestroyed()) return;
-      state.probeFailures += 1;
-      options.log("codex-mode-probe-failed", { error: String(error) });
-      if (deadlineReached(state)) {
-        finishUnresolved(state, "readiness-deadline");
-      } else if (state.probeFailures >= probeFailuresRequired) {
-        finishUnresolved(state, "probe-failed");
+      if (!state.complete) {
+        state.probeFailures += 1;
+        options.log("codex-mode-probe-failed", { error: String(error) });
+        if (
+          state.probeFailures >= maxProbeFailures ||
+          activeElapsedMs(state, now()) >= activeTimeoutMs
+        ) {
+          finishUnresolved(state);
+        }
       }
     } finally {
       state.running = false;
@@ -282,8 +292,8 @@ function createCodexModeReadiness(options) {
 }
 
 export {
-  CODEX_MODE_FALLBACK_EXPRESSION,
   CODEX_MODE_PROBE_EXPRESSION,
+  CODEX_MODE_FALLBACK_EXPRESSION,
   createCodexModeReadiness,
   decideCodexModeAction,
   deriveCodexModePageState,

@@ -29,6 +29,7 @@
 - **跟随主窗口**：无痕窗口参照主窗口的大小和位置打开
 - **关窗即焚**：正常关掉后清掉这次的临时会话（含独立 Chromium 档案）；登录和设置会留着
 - **可选侧栏按钮**：运行 `incodex install` 后，搜索左边会出现帽子墨镜；macOS 用 `Shift+Command+N`，Windows 用 `Ctrl+Shift+N`
+- **macOS 原生菜单**：`incodex install` 后，也可从官方 Dock 菜单或现有菜单栏状态菜单打开无痕窗口
 - **本机 CLI**：终端菜单、Homebrew / 脚本安装、`status` / `doctor` / `runtime`，不经过官方插件
 
 正常关窗会清理 Incodex 管理的隔离会话；这不等于对本机存储或远端服务作取证级零痕迹承诺。
@@ -43,7 +44,19 @@
 powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/daftAI2026/incodex/main/install.ps1 | iex"
 ```
 
-这会把原生 `incodex` / `inc` 启动器装进当前用户私有的 `%USERPROFILE%\.incodex` 目录，并把它的 `bin` 加入用户 PATH。首次安装后请新开一个终端。脚本只安装 CLI；要启用应用内帽子墨镜按钮，仍需另行运行 `incodex install`。Incodex 会发现当前用户的 Store 包，不假定固定安装位置。以后统一运行 `inc update` 更新。
+这会把原生 `incodex` / `inc` 启动器装进当前用户私有的 `%USERPROFILE%\.incodex` 目录，并把它的 `bin` 加入用户 PATH。首次安装后请新开一个 PowerShell 窗口，然后验证 CLI：
+
+```powershell
+incodex --version
+```
+
+脚本只安装 CLI。此时可以直接运行 `incodex open` 打开隔离窗口，不需要先启用应用集成。要加入应用内帽子墨镜按钮，先用 `Ctrl+Q` 或托盘里的 **Quit** 完全退出 Codex，再运行：
+
+```powershell
+incodex install
+```
+
+安装完成后重新打开官方 Codex。Incodex 会发现当前用户的 Store 包，不假定固定安装位置。运行 `inc update` 更新 Incodex 自身；官方 Store Codex 更新后，需要完全退出 Codex，并对当前包 generation 再运行一次 `incodex install`。
 
 **macOS 通过 Homebrew 安装**
 
@@ -74,21 +87,23 @@ cargo install --locked --path crates/incodex-cli
 主路径 `incodex open` 不会修改 Codex。macOS 的可选 `incodex install` 会修改并重新签名本机应用包；Windows 不修改也不复制 Microsoft Store 包，而是注册一套 Incodex 自己拥有的当前用户 Runtime 集成。`install`、`uninstall` 和受支持安装渠道的 `self-uninstall` 在破坏性操作前都会打印计划：TTY 问一次，非 TTY 要 `--yes`，`--dry-run` 只打印。Windows 默认自卸载只移除托管 CLI 及其精确的用户 PATH 项；加 `--restore-app` 才会先移除 Runtime 集成，Runtime 文件和会话状态仍保留。在 macOS 上，`recover` 是显式事务恢复例外：必须带 `--transaction <id>`，不接受 `--dry-run`，并且只续跑这一本已存在的 journal。
 
 - 官方插件加不了这个按钮；macOS 修改应用包，Windows 则保持 Store 包不变，走系统集成边界
-- 默认安装到官方应用后，改包没法继续保留有效的 OpenAI 签名。下次启动时，macOS 可能要求这个已修改的应用访问钥匙串中的 **Codex Storage Key**。只有对话框里的应用和钥匙串项目都符合预期时，才输入 **Mac 登录密码**（不是 ChatGPT 账号密码）并选择 **始终允许**。**允许** / **允许一次**只授权本次访问，之后还可能再次询问；信息不符合预期时选择 **拒绝**。CLI 不会对 `--clone` 或 `--app` 目标给出永久授权建议
-- 官方 **智能快照**（拍照 / 截屏附件，英文 Appshot）会不可用。这不是相机权限没开。Computer Use 一般还能用。`incodex uninstall` 后快照会恢复
+- 在 macOS 上，默认安装到官方应用后，改包没法继续保留有效的 OpenAI 签名。下次启动时，macOS 可能要求这个已修改的应用访问钥匙串中的 **Codex Storage Key**。只有对话框里的应用和钥匙串项目都符合预期时，才输入 **Mac 登录密码**（不是 ChatGPT 账号密码）并选择 **始终允许**。**允许** / **允许一次**只授权本次访问，之后还可能再次询问；信息不符合预期时选择 **拒绝**。CLI 不会对 `--clone` 或 `--app` 目标给出永久授权建议
+- 在 macOS 上，官方 **智能快照**（拍照 / 截屏附件，英文 Appshot）会不可用。这不是相机权限没开。Computer Use 一般还能用。`incodex uninstall` 后快照会恢复
 - 漏洞请走 [SECURITY.md](SECURITY.md)，不要开公开 issue
 
 ## Tips
 
 - 官方 Codex 升级后，再跑一次 `incodex install`，目标是**当前这份**应用或 Store 包版本
 - 如果官方已经升成新版本，`incodex uninstall` 不会用旧备份盖回去
-- 当前原始包备份位于 `~/.incodex/transactions/<install-id>/original/ChatGPT.app`；卸载恢复并验证成功后会删除，新一代安装成功后也会清理同一应用已被取代的终态备份
+- 在 macOS 上，当前原始包备份位于 `~/.incodex/transactions/<install-id>/original/ChatGPT.app`；卸载恢复并验证成功后会删除，新一代安装成功后也会清理同一应用已被取代的终态备份
 - Homebrew、macOS 脚本和 Windows PowerShell 安装都运行 `inc update`；Incodex 会自动选择对应升级路径，并发布新 CLI 内置的 Runtime。源码更新用 `git pull && cargo install --locked --path crates/incodex-cli`；源码卸载用 `cargo uninstall incodex-cli`
 - 菜单支持方向键、Vim `j/k`、数字立刻执行、`V` 看版本、`q` 退出
 - macOS 脚本安装若找不到命令，把 `~/.local/bin` 加进 PATH；Windows 首次安装后请新开终端，让更新后的用户 PATH 生效
 - 按钮和说明跟主窗口语言走
 
 ## Features in Detail
+
+下面的终端截图式输出来自 macOS。Windows 沿用同一组公开命令和共享无痕窗口 UI，但会显示 Store 包与 Windows Runtime 集成证据，而不是 macOS 应用包和签名信息。平台独有的命令与参数已在命令速查中标明。
 
 ### Interactive menu
 
@@ -152,8 +167,8 @@ $ incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
 
 没有 `--name` 时，每次启动会获得一个友好的随机两词名字；没有 `--avatar` 时，Incodex 会根据最终名字离线生成头像，因此同一个名字会得到同一个头像。自定义头像必须是普通本地 PNG、JPEG 或 WebP 文件，且不超过 5 MiB；原文件不会被修改，显示时会居中放进 Codex 的圆形头像槽。`--name` 和 `--avatar` 都必须与 `--mask` 一起使用，含空格的名字需要 shell 引号。
 
-遮罩只改当前无痕窗口的 profile footer 与账号菜单身份行，不改真实账号、认证或已存资料。
-如果遮罩无法挂载，或在 renderer 重挂载后无法恢复，Incodex 会关闭该窗口，而不是暴露真实身份。
+遮罩只改当前无痕窗口的侧栏 profile footer 与第一层账号菜单身份行。完整设置页仍显示官方账号资料；遮罩不改真实账号、认证或已存资料。从设置返回后，侧栏与菜单遮罩会恢复，包括窗口最小化再恢复的情况。
+如果遮罩无法挂载，或运行中的遮罩失效后无法恢复，Incodex 会关闭该窗口并报告故障。正常关窗会按正常关闭报告。
 
 ### Install
 
@@ -168,7 +183,7 @@ $ incodex install
   ! Official Appshot (smart snapshot) stops until uninstall.
   Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app
   Install id   0778f0fa-…
-  Runtime      0.5.0
+  Runtime      1.0.1
   App          /Applications/ChatGPT.app
   ✓ Done. Open ChatGPT.app when you want Incognito.
   ! Keychain: On next launch, macOS may ask this patched Codex app to access Codex Storage Key.
@@ -178,7 +193,7 @@ $ incodex install
   ! If the details do not match, choose Deny; Incodex and Terminal never need that password.
 ```
 
-装进去之后，搜索左边会出现帽子墨镜。点它或 `Shift+Command+N` 开无痕窗。
+装进去之后，搜索左边会出现帽子墨镜。可以点击它，macOS 按 `Shift+Command+N`，Windows 按 `Ctrl+Shift+N` 打开无痕窗口。上面的输出是 macOS 改包路径；Windows 不改 Store 包，而是注册当前用户自己的 Runtime 集成。
 
 ### Status
 
@@ -190,8 +205,8 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      0.5.0 releases/0.5.0-<manifestSha256>
-  CLI Runtime  0.5.0
+  Runtime      1.0.1 releases/1.0.1-<manifestSha256>
+  CLI Runtime  1.0.1
   Runtime state current
   Version      26.814.41957 6744
   Install id   0778f0fa-…
@@ -214,10 +229,10 @@ $ incodex doctor
   Arch         arm64
 
 ➤ Runtime
-  Version      0.5.0
-  External     0.5.0 releases/0.5.0-<manifestSha256>
+  Version      1.0.1
+  External     1.0.1 releases/1.0.1-<manifestSha256>
   External check checked
-  CLI Runtime  0.5.0
+  CLI Runtime  1.0.1
   CLI manifest <manifestSha256>
   Deployed manifest <manifestSha256>
   Runtime state current
@@ -240,14 +255,14 @@ $ incodex doctor
   Journals     0 (checked)
 ```
 
-默认 Doctor 会检查 Incodex 自己的 Runtime、备份、journal、session 和 marker 状态，以及目标应用最小的 outer identity 证据；不会递归 nested 签名，也不会调用 Gatekeeper。要看完整的 nested 签名、entitlement 和 Gatekeeper 报告，请运行 `incodex doctor --deep`。Gatekeeper 结果只是诊断，不是安装失败；改包之后官方签名本来就不会过 Gatekeeper。
+默认 Doctor 会检查 Incodex 自己的 Runtime、备份、journal、session 和 marker 状态，以及目标应用最小的 outer identity 证据。在 macOS 上，它不会递归 nested 签名，也不会调用 Gatekeeper；要看完整的 nested 签名、entitlement 和 Gatekeeper 报告，请运行 `incodex doctor --deep`。Gatekeeper 结果只是诊断，不是安装失败；改包之后官方签名本来就不会过 Gatekeeper。Windows 的平台相关检查都由默认的 `incodex doctor` 提供。
 
 ### Version
 
 ```bash
 $ incodex --version
 
-Incodex version 0.5.0
+Incodex version 1.0.1
 macOS: 26.6
 Architecture: arm64
 Kernel: 25.6.0
@@ -257,7 +272,7 @@ Install: Homebrew
 Shell: /bin/zsh
 ```
 
-`Install` 能识别 Homebrew 路径；其他原生二进制目前显示为 Script。`inc update` 会让 Homebrew 安装通过 Homebrew 刷新并升级，让脚本安装重新运行稳定版安装器。两条路径随后都会发布已安装 CLI 内置的 Runtime，不改包，也不重新签名 Codex。
+`Install` 能识别 Homebrew 路径；其他已安装的原生二进制目前显示为 Script。`inc update` 会让 Homebrew 安装通过 Homebrew 刷新并升级，让 macOS 脚本安装重新运行 `install.sh`，让受管理的 Windows 安装使用经过校验的 PowerShell 安装器。每条成功路径随后都会发布已安装 CLI 内置的 Runtime，不改包，也不重新签名 Codex。
 
 ### 命令速查
 
@@ -266,20 +281,20 @@ inc                         # 交互菜单（终端里）
 incodex --help
 incodex --version
 
-incodex install             # 打进正在用的官方 Codex
+incodex install             # 启用应用内帽子墨镜入口
 incodex install --dry-run   # 只看计划
 incodex install --yes       # 没有终端时必须加
-incodex install --clone     # 开发：打到副本
+incodex install --clone     # 仅 macOS 开发：打到副本
 
-incodex uninstall           # 还原官方包
+incodex uninstall           # 移除集成；macOS 会还原官方包
 incodex status
 incodex doctor
-incodex doctor --deep       # 完整 nested 签名 / entitlement / Gatekeeper 证据
-incodex runtime             # 只更新按钮逻辑，不重签 Codex
+incodex doctor --deep       # 仅 macOS：nested 签名 / entitlement / Gatekeeper 证据
+incodex runtime             # 发布内置 Runtime，不修改官方应用
 incodex open                # 不改官方包，直接开无痕窗
 incodex open --mask         # 临时侧栏名称和离线头像
 incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
-incodex recover --transaction <id>
+incodex recover --transaction <id>  # 仅 macOS
 inc update                  # 按安装来源更新 Incodex
 incodex self-uninstall      # 卸掉 CLI；移除应用集成要加 --restore-app
 ```
@@ -294,15 +309,15 @@ inc update --dry-run
 incodex self-uninstall --dry-run
 incodex status --json
 incodex doctor --json
-incodex doctor --deep --json
+incodex doctor --deep --json      # 仅 macOS
 ```
 
-`brew install`、`curl … | bash`、`cargo install` 都只把命令装到 PATH。改 `/Applications/ChatGPT.app` 的是随后那条 `incodex install`。
+`brew install`、`curl … | bash`、`cargo install` 都只把命令装到 PATH。在 macOS 上，改 `/Applications/ChatGPT.app` 的是随后那条 `incodex install`。Windows PowerShell 安装器同样只安装 CLI；后续的 `incodex install` 只注册 Incodex 当前用户 Runtime，不修改 Store 包。
 
 ## Quick Launchers
 
 <details>
-<summary><strong>Raycast 和 Alfred 设置</strong></summary>
+<summary><strong>Raycast 和 Alfred 设置（仅 macOS）</strong></summary>
 
 安装 Open、Status、Doctor 三个快捷入口：
 

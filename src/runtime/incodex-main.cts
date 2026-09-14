@@ -23,6 +23,7 @@ const USER_ROOT = path.join(os.homedir(), ".incodex");
 const DEFAULT_CODEX_HOME = path.join(os.homedir(), ".codex");
 const READY_TIMEOUT_MS = 15_000;
 let capturedSourceHome = null;
+const shownWindows = new WeakSet();
 
 function targetId() {
   return instance.targetIdFromExec(process.execPath);
@@ -295,6 +296,10 @@ function raiseOurWindows() {
   }
   for (const win of mainWindows(electron)) {
     try {
+      // The host owns initial visibility. A ready hidden window may be a
+      // prewarmed surface, not a user request to open another chat window.
+      if (win.isVisible() || win.isMinimized()) shownWindows.add(win);
+      if (!shownWindows.has(win)) continue;
       if (win.isMinimized()) win.restore();
       win.show();
       win.focus();
@@ -560,6 +565,8 @@ async function launchIncognitoOnce() {
     });
     child.on("exit", (code) => {
       logLaunch("child-exit", { code, sessionId: session.sessionId });
+      // This exact child exit observation is the only caller allowed to finish
+      // a partial child burn after helper quiescence.
       void cleanupExitedSession(session, childOwner);
       if (!settled) done({ ok: false, reason: "exited-early" });
     });
@@ -670,6 +677,8 @@ const codexModeReadiness = codexMode.createCodexModeReadiness({
   isIncognito,
   log: logLaunch,
   selectFallback: selectOfficialCodexModeFallback,
+  // 实验 renderer 异步路由已实测需要较长确认窗口；复用同一状态机。
+  confirmationFailuresRequired: 20,
 });
 
 function hookWindow(win, source) {
@@ -834,34 +843,33 @@ async function attachElectron() {
     hookWindow(win, source);
     incognitoWindowLifecycle?.observe(win);
     if (!isIncognito()) return;
-    if (!macOwnerReady) {
-      try {
-        win.hide();
-      } catch {
-        /* 争抢失败的进程不能闪出重复窗口。 */
-      }
+    if (win.isVisible() || win.isMinimized()) {
+      shownWindows.add(win);
+      displayReadyWindows.add(win);
     }
-    applyChromeWindowTile(win);
+    if (!macOwnerReady) {
+      try { win.hide(); } catch { /* 所有权确定前不展示窗口。 */ }
+    }
     function bringForward() {
+      if (win.isDestroyed() || (!win.isVisible() && !win.isMinimized())) return false;
       displayReadyWindows.add(win);
       if (!macOwnerReady) {
-        try {
-          win.hide();
-        } catch {
-          /* 所有权未确定前持续隐藏官方窗口。 */
-        }
-        return;
+        try { win.hide(); } catch { /* 争抢失败不能闪出重复窗口。 */ }
+        return false;
       }
       applyChromeWindowTile(win);
       raiseOurWindows();
+      return true;
     }
     win.once("ready-to-show", () => {
-      bringForward();
+      if (!bringForward()) return;
       if (!windowsPlatform) markSessionReady();
       else markAcceptedWindowReady(win);
     });
     win.once("show", () => {
-      bringForward();
+      shownWindows.add(win);
+      if (!bringForward()) return;
+      if (!windowsPlatform) markSessionReady();
       markAcceptedWindowReady(win);
       setTimeout(bringForward, 50);
       setTimeout(bringForward, 300);
@@ -921,7 +929,10 @@ async function attachElectron() {
         throw startupBlocked(error instanceof Error ? error : new Error(String(error)));
       }
       macOwnerReady = true;
-      if (mainWindows(electron).some((win) => displayReadyWindows.has(win))) raiseOurWindows();
+      if (mainWindows(electron).some((win) => displayReadyWindows.has(win))) {
+        raiseOurWindows();
+        markSessionReady();
+      }
     })();
   }
   if (isIncognito()) {
@@ -933,7 +944,7 @@ async function attachElectron() {
   function ready() {
     hookPreload(electron.session.defaultSession);
     for (const win of electron.BrowserWindow.getAllWindows()) hookWindow(win, source);
-    if (isIncognito()) raiseOurWindows();
+    if (isIncognito() && macOwnerReady) raiseOurWindows();
   }
   if (electron.app.isReady()) ready();
   else void electron.app.whenReady().then(ready);

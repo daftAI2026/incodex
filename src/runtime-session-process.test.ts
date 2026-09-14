@@ -1,8 +1,24 @@
 import { describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import * as runtimeMain from "../dist/incodex-main.cjs";
 import * as runtimeInstance from "../dist/incodex-instance.cjs";
+import * as runtimeSafeHome from "./runtime/incodex-safe-home.cts";
+
+function tempRoot(): string {
+  return mkdtempSync(join(tmpdir(), "incodex-runtime-process-"));
+}
 
 describe("Runtime isolated helper cleanup", () => {
   test("matches only the exact inherited session root marker", () => {
@@ -29,6 +45,7 @@ describe("Runtime isolated helper cleanup", () => {
       userRoot: "/tmp/session-home",
       quiesceSessionHelpers: async () => events.push("quiesce"),
       readBurnProof: () => null,
+      assertOwnerPresentForUnsnapshottedBurn: () => {},
       burnSessionHome: () => {
         events.push("burn");
         return true;
@@ -74,6 +91,103 @@ describe("Runtime isolated helper cleanup", () => {
 
     expect(removed).toBe(false);
     expect(burned).toBe(false);
+  });
+
+  test("an exact child exit can finish a partial burn after owner removal", async () => {
+    const cleanupExitedSession = (runtimeMain as any).cleanupExitedSession;
+    expect(typeof cleanupExitedSession).toBe("function");
+    const userRoot = join(tempRoot(), ".incodex");
+    const session = runtimeSafeHome.createSessionHome(userRoot, { pid: process.pid });
+    const owner = JSON.parse(readFileSync(join(session.root, "owner.json"), "utf8"));
+    const ownerSnapshot = {
+      pid: owner.pid,
+      processStartIdentity: owner.processStartIdentity,
+    };
+    rmSync(join(session.root, "owner.json"));
+    writeFileSync(join(session.root, "late-plugin-cache"), "late\n");
+    const events: string[] = [];
+
+    const removed = await cleanupExitedSession(session, ownerSnapshot, {
+      userRoot,
+      quiesceSessionHelpers: async () => events.push("quiesce"),
+      wait: async () => {},
+      log: () => {},
+    });
+
+    expect(events).toEqual(["quiesce"]);
+    expect(removed).toBe(true);
+    expect(existsSync(session.root)).toBe(false);
+  });
+
+  test("a missing owner without the parent snapshot stays retained", async () => {
+    const cleanupExitedSession = (runtimeMain as any).cleanupExitedSession;
+    expect(typeof cleanupExitedSession).toBe("function");
+    const userRoot = join(tempRoot(), ".incodex");
+    const session = runtimeSafeHome.createSessionHome(userRoot, { pid: process.pid });
+    rmSync(join(session.root, "owner.json"));
+    writeFileSync(join(session.root, "late-plugin-cache"), "late\n");
+
+    const removed = await cleanupExitedSession(session, null, {
+      userRoot,
+      quiesceSessionHelpers: async () => {},
+      wait: async () => {},
+      log: () => {},
+    });
+
+    expect(removed).toBe(false);
+    expect(existsSync(join(session.root, "late-plugin-cache"))).toBe(true);
+  });
+
+  test("partial-burn recovery refuses a replaced session inode", async () => {
+    const cleanupExitedSession = (runtimeMain as any).cleanupExitedSession;
+    expect(typeof cleanupExitedSession).toBe("function");
+    const userRoot = join(tempRoot(), ".incodex");
+    const session = runtimeSafeHome.createSessionHome(userRoot, { pid: process.pid });
+    const owner = JSON.parse(readFileSync(join(session.root, "owner.json"), "utf8"));
+    const ownerSnapshot = {
+      pid: owner.pid,
+      processStartIdentity: owner.processStartIdentity,
+    };
+    const replacement = `${session.root}-replacement`;
+    mkdirSync(replacement);
+    writeFileSync(join(replacement, "keep"), "keep\n");
+    rmSync(session.root, { recursive: true });
+    renameSync(replacement, session.root);
+
+    const removed = await cleanupExitedSession(session, ownerSnapshot, {
+      userRoot,
+      quiesceSessionHelpers: async () => {},
+      wait: async () => {},
+      log: () => {},
+    });
+
+    expect(removed).toBe(false);
+    expect(readFileSync(join(session.root, "keep"), "utf8")).toBe("keep\n");
+  });
+
+  test("partial-burn recovery still rejects a present owner mismatch", async () => {
+    const cleanupExitedSession = (runtimeMain as any).cleanupExitedSession;
+    expect(typeof cleanupExitedSession).toBe("function");
+    const userRoot = join(tempRoot(), ".incodex");
+    const session = runtimeSafeHome.createSessionHome(userRoot, { pid: process.pid });
+    const ownerPath = join(session.root, "owner.json");
+    const owner = JSON.parse(readFileSync(ownerPath, "utf8"));
+    const ownerSnapshot = {
+      pid: owner.pid,
+      processStartIdentity: owner.processStartIdentity,
+    };
+    owner.processStartIdentity = "tampered-after-exit";
+    writeFileSync(ownerPath, `${JSON.stringify(owner)}\n`);
+
+    const removed = await cleanupExitedSession(session, ownerSnapshot, {
+      userRoot,
+      quiesceSessionHelpers: async () => {},
+      wait: async () => {},
+      log: () => {},
+    });
+
+    expect(removed).toBe(false);
+    expect(existsSync(ownerPath)).toBe(true);
   });
 
   test.skipIf(process.platform !== "darwin")(

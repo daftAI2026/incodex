@@ -262,7 +262,51 @@ fn open_preparation_seeds_live_bounds_instead_of_stale_disk_bounds() {
 fn open_progress_distinguishes_launch_ready_and_waiting() {
     assert_eq!(OPENING_MESSAGE, "Opening incognito Codex window");
     assert_eq!(OPENED_MESSAGE, "Opened. Incognito Codex window is ready.");
+    assert_eq!(
+        OFFICIAL_BLOCKER_WAIT_MESSAGE,
+        "Window opened. Finish the official Codex dialog to continue."
+    );
     assert_eq!(WAITING_MESSAGE, "Waiting for the window to close");
+}
+
+#[test]
+fn official_blockers_and_mode_unresolved_do_not_become_profile_mask_failures() {
+    let (status_tx, status_rx) = mpsc::channel();
+    let readiness = AtomicBool::new(false);
+
+    publish_injection_status(&status_tx, &readiness, InjectionStatus::BlockedByOfficialUi);
+    assert!(!readiness.load(Ordering::Acquire));
+    assert!(matches!(
+        status_rx.try_recv().unwrap(),
+        InjectionStatus::BlockedByOfficialUi
+    ));
+
+    publish_injection_status(
+        &status_tx,
+        &readiness,
+        InjectionStatus::ModeUnresolved("active readiness deadline reached".into()),
+    );
+    assert!(!readiness.load(Ordering::Acquire));
+    assert!(matches!(
+        status_rx.try_recv().unwrap(),
+        InjectionStatus::ModeUnresolved(_)
+    ));
+}
+
+#[test]
+fn post_mode_terminal_errors_preserve_profile_mask_failure_handling() {
+    assert!(matches!(
+        terminal_injection_status(crate::cdp::UI_INJECTION_UNAVAILABLE_ERROR.into(), true),
+        InjectionStatus::Failed(_)
+    ));
+    assert!(matches!(
+        terminal_injection_status("mode unavailable".into(), false),
+        InjectionStatus::ModeUnresolved(_)
+    ));
+    assert!(matches!(
+        terminal_injection_status("mode unavailable".into(), true),
+        InjectionStatus::Failed(_)
+    ));
 }
 
 #[test]
@@ -409,7 +453,7 @@ fn ready_published_between_status_poll_and_child_exit_is_not_lost() {
 }
 
 #[test]
-fn profile_mask_failure_after_ready_revokes_ui_acceptance() {
+fn profile_mask_failure_after_ready_preserves_ui_acceptance() {
     let (status_tx, _status_rx) = mpsc::channel();
     let readiness = AtomicBool::new(false);
 
@@ -422,8 +466,8 @@ fn profile_mask_failure_after_ready_revokes_ui_acceptance() {
     );
 
     assert!(
-        !readiness.load(Ordering::Acquire),
-        "a post-start mask failure must revoke the accepted UI state"
+        readiness.load(Ordering::Acquire),
+        "runtime failure cannot erase successful initial injection"
     );
 }
 

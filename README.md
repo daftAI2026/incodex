@@ -29,6 +29,7 @@
 - **Follows the main window**: The incognito window opens using the main window’s size and placement
 - **Burns on close**: A normal close clears this temp session (including the isolated Chromium profile); login and settings stay
 - **Optional sidebar button**: After `incodex install`, a hat-glasses control sits left of Search; use `Shift+Command+N` on macOS or `Ctrl+Shift+N` on Windows
+- **macOS native menus**: After `incodex install`, open an incognito window from the official Dock menu or existing menu-bar status menu
 - **Local CLI**: Terminal menu, Homebrew or script install, `status` / `doctor` / `runtime`. Not an official plugin
 
 A normal close removes the isolated session managed by Incodex; this is not a claim of forensic erasure from the device or remote services.
@@ -43,7 +44,19 @@ A normal close removes the isolated session managed by Incodex; this is not a cl
 powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/daftAI2026/incodex/main/install.ps1 | iex"
 ```
 
-This installs the native `incodex` / `inc` launchers under the current user's private `%USERPROFILE%\.incodex` directory and adds its `bin` directory to the user PATH. Open a new terminal after the first install. The script installs only the CLI; run `incodex install` separately to enable the in-app hat-glasses control. Incodex discovers the current user's Store package instead of assuming its install location. Update with `inc update`.
+This installs the native `incodex` / `inc` launchers under the current user's private `%USERPROFILE%\.incodex` directory and adds its `bin` directory to the user PATH. Open a new PowerShell window after the first install, then verify the CLI:
+
+```powershell
+incodex --version
+```
+
+The script installs only the CLI. `incodex open` can open an isolated window immediately without enabling app integration. To add the in-app hat-glasses control, fully quit Codex with `Ctrl+Q` or the tray **Quit** command, then run:
+
+```powershell
+incodex install
+```
+
+Reopen the official Codex app when installation finishes. Incodex discovers the current user's Store package instead of assuming its install location. Run `inc update` to update Incodex itself. After an official Store Codex update, fully quit Codex and run `incodex install` again for the current package generation.
 
 **macOS via Homebrew**
 
@@ -74,21 +87,23 @@ Platform installers use prebuilt native Rust binaries and do not require Bun. A 
 The primary `incodex open` path does not patch Codex. On macOS, the optional `incodex install` path adds the in-app button by modifying and re-signing the local app bundle. On Windows, it never patches or copies the Microsoft Store package; it registers a separately owned, per-user Runtime integration. `install`, `uninstall`, and supported `self-uninstall` channels print a plan before destructive work: TTY asks once, non-TTY needs `--yes`, and `--dry-run` only prints. On Windows, `self-uninstall` removes only the managed CLI and its exact user PATH entry by default; `--restore-app` first removes the Runtime integration, while Runtime files and session state remain. On macOS, `recover` is the explicit transaction-recovery exception: it requires `--transaction <id>`, does not accept `--dry-run`, and resumes only that existing journal.
 
 - Official plugins cannot add this button. macOS changes the app bundle; Windows keeps the Store package intact and uses its platform integration boundary
-- After the default official-app install, a valid OpenAI signature cannot be kept. On the next launch, macOS may ask the patched app to access **Codex Storage Key**. Only if the dialog names the expected app and Keychain item should you enter your **Mac login password** (not your ChatGPT password) and choose **Always Allow**. **Allow** / **Allow Once** grants only that access and may prompt again later; if the details do not match, choose **Deny**. The CLI does not give permanent-authorization advice for `--clone` or `--app` targets
-- Official **Appshot** (smart snapshot: photo / screenshot attachments) then stops working. This is not a missing camera permission. Computer Use usually still works. `incodex uninstall` restores Appshot
+- On macOS, after the default official-app install, a valid OpenAI signature cannot be kept. On the next launch, macOS may ask the patched app to access **Codex Storage Key**. Only if the dialog names the expected app and Keychain item should you enter your **Mac login password** (not your ChatGPT password) and choose **Always Allow**. **Allow** / **Allow Once** grants only that access and may prompt again later; if the details do not match, choose **Deny**. The CLI does not give permanent-authorization advice for `--clone` or `--app` targets
+- On macOS, official **Appshot** (smart snapshot: photo / screenshot attachments) then stops working. This is not a missing camera permission. Computer Use usually still works. `incodex uninstall` restores Appshot
 - Report vulnerabilities via [SECURITY.md](SECURITY.md). Do not open a public issue
 
 ## Tips
 
 - After an official Codex upgrade, run `incodex install` again against the **current** app or Store package generation
 - If Codex has already been upgraded, `incodex uninstall` will not put an old backup back
-- The current original-bundle backup lives at `~/.incodex/transactions/<install-id>/original/ChatGPT.app`; verified uninstall removes it, and a later successful install prunes superseded terminal backups for the same app
+- On macOS, the current original-bundle backup lives at `~/.incodex/transactions/<install-id>/original/ChatGPT.app`; verified uninstall removes it, and a later successful install prunes superseded terminal backups for the same app
 - Run `inc update` for Homebrew, macOS script, and Windows PowerShell installs; Incodex automatically uses the matching update path and publishes the bundled Runtime. Source update: `git pull && cargo install --locked --path crates/incodex-cli`; source removal: `cargo uninstall incodex-cli`
 - The menu supports arrows, Vim `j/k`, digits that run immediately, `V` for version, `q` to quit
 - If a macOS script install cannot find the command, add `~/.local/bin` to PATH. On Windows, open a new terminal so the updated user PATH is loaded
 - Button and copy follow the main window language
 
 ## Features in Detail
+
+The terminal snapshots below show macOS output. Windows keeps the same public command names and shared incognito-window UI, but prints Store package and Windows Runtime integration evidence instead of macOS app-bundle and signing details. Platform-only commands and flags are marked in the command reference.
 
 ### Interactive menu
 
@@ -152,8 +167,8 @@ $ incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
 
 Without `--name`, each launch gets a friendly random two-word name. Without `--avatar`, Incodex generates an offline avatar from the final name, so the same name produces the same avatar. A custom avatar must be a regular local PNG, JPEG, or WebP no larger than 5 MiB; the original file is left unchanged and centered into Codex's circular avatar slot. `--name` and `--avatar` require `--mask`, and names containing spaces need shell quotes.
 
-The mask changes only the current incognito window's profile footer and account-menu identity row. It does not change the real account, authentication, or stored profile.
-If the mask cannot mount or later recover after a renderer remount, Incodex closes that window rather than expose the real identity.
+The mask changes only the current incognito window's sidebar profile footer and first-level account-menu identity row. The full Settings page keeps the official account details; the mask does not change the real account, authentication, or stored profile. Returning from Settings restores the sidebar and menu mask, including after minimizing and restoring the window.
+If the mask cannot mount or a running window's mask fails to recover, Incodex closes that window and reports the failure. Normal closing is reported as a normal close.
 
 ### Install
 
@@ -168,7 +183,7 @@ $ incodex install
   ! Official Appshot (smart snapshot) stops until uninstall.
   Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app
   Install id   0778f0fa-…
-  Runtime      0.5.0
+  Runtime      1.0.1
   App          /Applications/ChatGPT.app
   ✓ Done. Open ChatGPT.app when you want Incognito.
   ! Keychain: On next launch, macOS may ask this patched Codex app to access Codex Storage Key.
@@ -178,7 +193,7 @@ $ incodex install
   ! If the details do not match, choose Deny; Incodex and Terminal never need that password.
 ```
 
-After install, the hat-glasses control appears left of Search. Click it or press `Shift+Command+N` for an incognito window.
+After install, the hat-glasses control appears left of Search. Click it, press `Shift+Command+N` on macOS, or press `Ctrl+Shift+N` on Windows for an incognito window. The output above is the macOS bundle-patching path; Windows leaves the Store package untouched and registers a per-user Runtime integration.
 
 ### Status
 
@@ -190,8 +205,8 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      0.5.0 releases/0.5.0-<manifestSha256>
-  CLI Runtime  0.5.0
+  Runtime      1.0.1 releases/1.0.1-<manifestSha256>
+  CLI Runtime  1.0.1
   Runtime state current
   Version      26.814.41957 6744
   Install id   0778f0fa-…
@@ -214,10 +229,10 @@ $ incodex doctor
   Arch         arm64
 
 ➤ Runtime
-  Version      0.5.0
-  External     0.5.0 releases/0.5.0-<manifestSha256>
+  Version      1.0.1
+  External     1.0.1 releases/1.0.1-<manifestSha256>
   External check checked
-  CLI Runtime  0.5.0
+  CLI Runtime  1.0.1
   CLI manifest <manifestSha256>
   Deployed manifest <manifestSha256>
   Runtime state current
@@ -240,14 +255,14 @@ $ incodex doctor
   Journals     0 (checked)
 ```
 
-The default Doctor checks Incodex-owned Runtime, backup, journal, session, and marker state plus minimal outer app identity. It does not recurse into nested signing or invoke Gatekeeper. Run `incodex doctor --deep` for the full nested signing, entitlement, and Gatekeeper report. The Gatekeeper result is diagnostic, not an install failure; after the bundle changes, the official signature will not pass Gatekeeper.
+The default Doctor checks Incodex-owned Runtime, backup, journal, session, and marker state plus minimal outer app identity. On macOS, it does not recurse into nested signing or invoke Gatekeeper; run `incodex doctor --deep` for the full nested signing, entitlement, and Gatekeeper report. The Gatekeeper result is diagnostic, not an install failure; after the bundle changes, the official signature will not pass Gatekeeper. Windows exposes its platform-relevant checks through the default `incodex doctor` command.
 
 ### Version
 
 ```bash
 $ incodex --version
 
-Incodex version 0.5.0
+Incodex version 1.0.1
 macOS: 26.6
 Architecture: arm64
 Kernel: 25.6.0
@@ -257,7 +272,7 @@ Install: Homebrew
 Shell: /bin/zsh
 ```
 
-`Install` reports Homebrew when the executable is recognized in its Homebrew location; other native binaries currently report Script. `inc update` refreshes and upgrades through Homebrew for Homebrew installs, and re-runs the stable installer for script installs. Both paths then publish the Runtime bundled with the installed CLI; they do not patch or re-sign Codex.
+`Install` reports Homebrew when the executable is recognized in its Homebrew location; other installed native binaries currently report Script. `inc update` refreshes and upgrades through Homebrew for Homebrew installs, re-runs `install.sh` for macOS script installs, and uses the verified PowerShell installer for managed Windows installs. Every successful path then publishes the Runtime bundled with the installed CLI; it does not patch or re-sign Codex.
 
 ### Command reference
 
@@ -266,20 +281,20 @@ inc                         # Interactive menu (terminal only)
 incodex --help
 incodex --version
 
-incodex install             # Patch the official Codex you are using
+incodex install             # Enable the in-app hat-glasses control
 incodex install --dry-run   # Print the plan
 incodex install --yes       # Required when stdin is not a terminal
-incodex install --clone     # Dev: patch a copy
+incodex install --clone     # macOS development only: patch a copy
 
-incodex uninstall           # Restore the official app
+incodex uninstall           # Remove integration; macOS restores the official app
 incodex status
 incodex doctor
-incodex doctor --deep       # Full nested signing / entitlement / Gatekeeper evidence
-incodex runtime             # Update the button logic without re-signing Codex
+incodex doctor --deep       # macOS: nested signing / entitlement / Gatekeeper evidence
+incodex runtime             # Publish the bundled Runtime without modifying the official app
 incodex open                # Incognito window, no patch
 incodex open --mask         # Temporary sidebar name and offline avatar
 incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
-incodex recover --transaction <id>
+incodex recover --transaction <id>  # available on macOS
 inc update                  # Update Incodex through its install channel
 incodex self-uninstall      # Remove the CLI; add --restore-app to remove app integration
 ```
@@ -294,15 +309,15 @@ inc update --dry-run
 incodex self-uninstall --dry-run
 incodex status --json
 incodex doctor --json
-incodex doctor --deep --json
+incodex doctor --deep --json      # available on macOS
 ```
 
-`brew install`, `curl … | bash`, and `cargo install` only put the command on PATH. The command that changes `/Applications/ChatGPT.app` is `incodex install`.
+`brew install`, `curl … | bash`, and `cargo install` only put the command on PATH. On macOS, the command that changes `/Applications/ChatGPT.app` is `incodex install`. The Windows PowerShell installer likewise installs only the CLI; the later `incodex install` command registers Incodex's per-user Runtime without changing the Store package.
 
 ## Quick Launchers
 
 <details>
-<summary><strong>Raycast and Alfred setup</strong></summary>
+<summary><strong>Raycast and Alfred setup (available on macOS)</strong></summary>
 
 Install three launchers for Open, Status, and Doctor:
 

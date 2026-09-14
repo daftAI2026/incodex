@@ -206,7 +206,11 @@ function Ensure-PrivateDirectory([string]$Path) {
     $Security.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
         $Identity.User, $FullControl, $Inheritance, $Propagation, $Allow
     )))
-    [IO.Directory]::SetAccessControl($Directory.FullName, $Security)
+    if ($PSVersionTable.PSEdition -eq 'Core') {
+        Set-Acl -LiteralPath $Directory.FullName -AclObject $Security -ErrorAction Stop
+    } else {
+        [IO.Directory]::SetAccessControl($Directory.FullName, $Security)
+    }
     return $Directory.FullName
 }
 
@@ -220,7 +224,11 @@ function Set-PrivateFileAcl([string]$Path) {
     $Security.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
         $Identity.User, $FullControl, $Allow
     )))
-    [IO.File]::SetAccessControl($Path, $Security)
+    if ($PSVersionTable.PSEdition -eq 'Core') {
+        Set-Acl -LiteralPath $Path -AclObject $Security -ErrorAction Stop
+    } else {
+        [IO.File]::SetAccessControl($Path, $Security)
+    }
 }
 
 function Write-AtomicText([string]$Path, [string]$Body) {

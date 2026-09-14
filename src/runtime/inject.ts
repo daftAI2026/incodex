@@ -6,11 +6,17 @@ import {
   ensureProfileMask,
   profileMaskHealth,
   profileMaskNeedsInject,
+  refreshProfileMaskHealth,
 } from "./incognito-profile-mask.ts";
 import { createOfficialTooltipTimingBridge } from "./official-tooltip-provider.ts";
+import { createOfficialTooltipRenderer, sharedTooltipState } from "./official-tooltip-renderer.ts";
 import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement.ts";
 import { createTooltipLifecycle, type TooltipLifecycle } from "./tooltip-lifecycle.ts";
-import { officialWindowZoom } from "./tooltip-presentation.ts";
+import {
+  createOfficialTooltipPresentation,
+  findOfficialTooltipElement,
+  officialWindowZoom,
+} from "./tooltip-presentation.ts";
 
 const STYLE_ID = "incodex-privacy-style";
 const BTN_ATTR = "data-incodex-privacy-toggle";
@@ -53,17 +59,20 @@ const STRIP_CLONE_ATTRS = [
   "tabindex",
 ];
 
-let activeTooltipLifecycle: TooltipLifecycle | null = null;
+const tooltipState = sharedTooltipState(window);
+const officialTooltipPresentation = createOfficialTooltipPresentation();
 let launchErrorPending = false;
 let windowsLaunchErrorHost: HTMLElement | null = null;
 
 function dismissActiveTooltip(): void {
-  activeTooltipLifecycle?.dismiss();
+  tooltipState.lifecycle?.dismiss();
 }
 
 function disposeActiveTooltip(): void {
-  activeTooltipLifecycle?.dispose();
-  activeTooltipLifecycle = null;
+  tooltipState.lifecycle?.dispose();
+  tooltipState.lifecycle = null;
+  tooltipState.renderer?.dispose();
+  tooltipState.renderer = null;
 }
 
 const ICON_SVG = `{{HAT_GLASSES_SVG}}`;
@@ -139,6 +148,7 @@ function apply(): void {
     btn.setAttribute("aria-pressed", incognito ? "true" : "false");
     btn.setAttribute("aria-label", labelFor(incognito));
     setButtonIcon(btn);
+    syncTooltipPresentation();
   }
   const label = document.querySelector<HTMLElement>("[data-incodex-tooltip-label]");
   if (label) label.textContent = labelFor(incognito);
@@ -342,6 +352,7 @@ function injectedTooltipCanShow(btn: HTMLElement): boolean {
   const search = findSearchButton();
   return (
     btn.isConnected &&
+    syncTooltipPresentation() &&
     (btn.getAttribute("data-incodex-hovered") === "true" || document.activeElement === btn) &&
     !(search && searchTooltipOpen(search))
   );
@@ -361,6 +372,7 @@ function tooltipMountStillPresent(): boolean {
 
 function needsInject(): boolean {
   return (
+    tooltipState.renderer?.needsRemount() ||
     !buttonStillBesideSearch() ||
     !tooltipMountStillPresent() ||
     !landingStillMounted() ||
@@ -395,7 +407,7 @@ function buildButton(search: HTMLElement): HTMLElement {
     show: () => showTooltip(btn),
     hide: hideTooltip,
   });
-  activeTooltipLifecycle = tooltipLifecycle;
+  tooltipState.lifecycle = tooltipLifecycle;
   btn.addEventListener(
     "click",
     (event) => {
@@ -426,16 +438,14 @@ function createTooltipElement(): HTMLElement {
   const tip = document.createElement("div");
   tip.setAttribute(TIP_ATTR, "true");
   tip.setAttribute("role", "tooltip");
-  tip.className =
-    "z-50 w-fit select-none text-sm whitespace-normal break-words rounded-lg border border-text bg-primary-solid text-primary-solid px-2 py-1.5";
+  // Presentation is supplied by the linked official Search tooltip. Until
+  // sampled, keep the accessible label without a separate native tooltip.
   const text = document.createElement("div");
   text.className = "flex items-center gap-2";
   const label = document.createElement("div");
   label.className = "min-w-0";
   label.setAttribute("data-incodex-tooltip-label", "true");
   const kbd = document.createElement("kbd");
-  kbd.className =
-    "inline-flex !rounded-md !border-0 !bg-current/10 !font-sans !text-xs !text-current !shadow-none !px-1.5 !py-0.5 !leading-none";
   kbd.textContent = shortcutLabel();
   text.append(label, kbd);
   tip.append(text);
@@ -458,6 +468,48 @@ function ensureTooltipMount(): HTMLElement {
   return tip;
 }
 
+let tooltipObservedSearch: HTMLElement | null = null;
+let tooltipObservedElement: HTMLElement | null = null;
+
+function observeOfficialTooltip(search: HTMLElement | null): void {
+  const element = findOfficialTooltipElement(search);
+  if (search === tooltipObservedSearch && element === tooltipObservedElement) return;
+  tooltipObservedSearch = search;
+  tooltipObservedElement = element;
+  window.__incodexTooltipPresentationObserver?.disconnect();
+  const observer = new MutationObserver(() => syncTooltipPresentation());
+  window.__incodexTooltipPresentationObserver = observer;
+  if (search) {
+    observer.observe(search, { attributes: true, attributeFilter: ["aria-describedby"] });
+    if (search.parentElement) {
+      observer.observe(search.parentElement, { attributes: true, attributeFilter: ["aria-describedby"] });
+    }
+  }
+  if (element) observer.observe(element, { attributes: true, subtree: true, attributeFilter: ["class"] });
+}
+
+function syncTooltipPresentation(): boolean {
+  if (tooltipState.renderer?.ready()) {
+    document.querySelector<HTMLElement>(`[${BTN_ATTR}]`)?.removeAttribute("title");
+    return true;
+  }
+  const search = findSearchButton();
+  observeOfficialTooltip(search);
+  const sample = officialTooltipPresentation.read(search);
+  const btn = document.querySelector<HTMLElement>(`[${BTN_ATTR}]`);
+  // Also remove a fallback left by an older injector on an existing button.
+  btn?.removeAttribute("title");
+  const tip = document.querySelector<HTMLElement>(`[${TIP_ATTR}]`);
+  if (!sample) {
+    hideTooltip();
+    return false;
+  }
+  if (tip && tip.className !== sample.className) tip.className = sample.className;
+  const kbd = tip?.querySelector("kbd");
+  if (kbd && kbd.className !== sample.shortcutClassName) kbd.className = sample.shortcutClassName;
+  return true;
+}
+
 function tooltipEl(): HTMLElement {
   return ensureTooltipMount();
 }
@@ -467,7 +519,12 @@ function tooltipEl(): HTMLElement {
 const TOOLTIP_SIDE_OFFSET = 2;
 
 function showTooltip(btn: HTMLElement): void {
+  if (tooltipState.renderer?.ready()) {
+    tooltipState.renderer.show(btn, labelFor(isIncognitoWindow()), shortcutLabel());
+    return;
+  }
   const tip = tooltipEl();
+  if (!syncTooltipPresentation()) return;
   const host = tip.parentElement;
   if (!host) return;
   const label = tip.querySelector<HTMLElement>("[data-incodex-tooltip-label]");
@@ -489,6 +546,7 @@ function showTooltip(btn: HTMLElement): void {
 }
 
 function hideTooltip(): void {
+  tooltipState.renderer?.hide();
   const host = document.querySelector<HTMLElement>(`[${TIP_HOST_ATTR}]`);
   if (!host) return;
   host.removeAttribute("data-open");
@@ -769,6 +827,20 @@ function ensureButton(): void {
   }
   apply();
   ensureTooltipMount();
+  syncTooltipPresentation();
+  if (tooltipState.renderer?.needsRemount()) {
+    tooltipState.renderer.dispose();
+    tooltipState.renderer = null;
+  }
+  if (!tooltipState.renderer) {
+    const renderer = createOfficialTooltipRenderer(document);
+    tooltipState.renderer = renderer;
+    void renderer.prepare().then(() => {
+      if (tooltipState.renderer !== renderer || !btn?.isConnected) return;
+      // Async readiness must not reconstruct canceled input from stale DOM state.
+      tooltipState.lifecycle?.presentationReady();
+    }).catch((error) => console.warn("[incodex] official tooltip renderer unavailable", String(error)));
+  }
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -814,10 +886,11 @@ function profileObservationRequired(): boolean {
 function createMutationObserver(): MutationObserver {
   let scheduled = false;
   return new MutationObserver(function handleMutation(): void {
-    if (!needsInject() || scheduled) return;
+    if (scheduled) return;
     scheduled = true;
     requestAnimationFrame(function injectOnAnimationFrame(): void {
       scheduled = false;
+      syncTooltipPresentation();
       if (!needsInject()) return;
       ensureButton();
       ensureLanding();
@@ -861,14 +934,15 @@ function start(): void {
   ensureProfileMask();
   refreshUiProbe();
   window.addEventListener("keydown", onKeydown, true);
-  window.addEventListener("blur", () => activeTooltipLifecycle?.windowBlur());
-  window.addEventListener("focus", () => activeTooltipLifecycle?.windowFocus());
-  window.addEventListener(TOOLTIP_DISMISS_EVENT, () => activeTooltipLifecycle?.dismiss());
+  window.addEventListener("blur", () => tooltipState.lifecycle?.windowBlur());
+  window.addEventListener("focus", () => tooltipState.lifecycle?.windowFocus());
+  window.addEventListener(TOOLTIP_DISMISS_EVENT, () => tooltipState.lifecycle?.dismiss());
   ensureMutationObserver();
 }
 
 declare global {
   interface Window {
+    __incodexTooltipState?: ReturnType<typeof sharedTooltipState>;
     __incodexStarted?: boolean;
     __incodexIncognito?: boolean;
     __incodexDockMenuConfigured?: boolean;
@@ -876,6 +950,7 @@ declare global {
     __incodexLocale?: string;
     __incodexPlatform?: string;
     __incodexMutationObserver?: MutationObserver;
+    __incodexTooltipPresentationObserver?: MutationObserver;
     __incodexProfileObservationEnabled?: boolean;
     __incodexProfileMaskHealth?: boolean;
     __incodexRefreshProfileMaskHealth?: () => boolean;
@@ -890,7 +965,7 @@ declare global {
   }
 }
 
-window.__incodexRefreshProfileMaskHealth = profileMaskHealth;
+window.__incodexRefreshProfileMaskHealth = refreshProfileMaskHealth;
 
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", start, { once: true });

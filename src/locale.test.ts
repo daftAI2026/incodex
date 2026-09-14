@@ -16,6 +16,14 @@ describe("locale fallback", () => {
     expect(translate("zh-TW", "body")).toContain("平時的列表");
   });
 
+  test("Chinese window labels use 私密 across regional variants", () => {
+    for (const locale of ["zh-CN", "zh-HK", "zh-TW"]) {
+      for (const key of ["open", "exit", "title", "dismiss", "errorTitle"] as const) {
+        expect(translate(locale, key)).toContain("私密");
+      }
+    }
+  });
+
   test("language-only tags pick a regional default when needed", () => {
     expect(resolveLocale("de")).toBe("de-DE");
     expect(resolveLocale("es")).toBe("es-419");

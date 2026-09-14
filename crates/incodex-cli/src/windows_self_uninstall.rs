@@ -14,8 +14,9 @@ use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use crate::parse::ParsedCli;
+use crate::windows_activation::{enable_installed_runtime, WindowsInstalledRuntimeRegistration};
 use crate::windows_install::{
-    capture_windows_uninstall_approval, uninstall_windows_runtime_approved_with,
+    capture_windows_uninstall_approval, uninstall_windows_runtime_approved_with_restore,
     WindowsUninstallOutcome,
 };
 use crate::windows_update::{
@@ -176,12 +177,16 @@ pub fn run_self_uninstall(parsed: &ParsedCli) -> Result<(), String> {
     let _channel = acquire_windows_update_lock(&package_root)?;
     validate_managed_install_identity(&package_root, &running_exe)?;
     if let Some(approval) = approval.as_ref() {
-        match uninstall_windows_runtime_approved_with(
+        match uninstall_windows_runtime_approved_with_restore(
             &user_root,
             approval,
             crate::windows_process::running_package_process_ids,
             crate::windows_app::codex_package_full_name_is_installed,
             crate::windows_activation::disable_installed_runtime,
+            |state| {
+                WindowsInstalledRuntimeRegistration::from_install_state(state)
+                    .and_then(|registration| enable_installed_runtime(&registration))
+            },
         )? {
             WindowsUninstallOutcome::NotInstalled | WindowsUninstallOutcome::Removed => {}
             WindowsUninstallOutcome::CloseRequired { process_ids } => {

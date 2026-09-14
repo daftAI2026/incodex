@@ -52,6 +52,36 @@ function createHarness(
 }
 
 describe("tooltip lifecycle", () => {
+  test("late presentation readiness retries only an uncanceled interaction", () => {
+    const active = createHarness(false);
+    active.lifecycle.pointerEnter();
+    active.runScheduled();
+    active.lifecycle.presentationReady();
+    expect(active.delays).toEqual([700, 700]);
+
+    for (const cancel of ["dismiss", "windowBlur", "pointerLeave", "blur", "trigger", "dispose"] as const) {
+      const harness = createHarness(false);
+      harness.lifecycle.pointerEnter();
+      harness.lifecycle.focus();
+      harness.runScheduled();
+      harness.lifecycle[cancel]();
+      const count = harness.delays.length;
+      harness.lifecycle.presentationReady();
+      expect(harness.delays.length).toBe(count);
+      harness.runScheduled();
+      expect(harness.events).not.toContain("show");
+    }
+  });
+
+  test("presentation readiness does not restart an existing hover timer", () => {
+    const harness = createHarness();
+    harness.lifecycle.pointerEnter();
+    harness.lifecycle.presentationReady();
+    expect(harness.delays).toEqual([700]);
+    harness.runScheduled();
+    expect(harness.events).toEqual(["show"]);
+  });
+
   test("等待官方延迟后才显示", () => {
     const harness = createHarness();
 

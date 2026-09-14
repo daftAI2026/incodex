@@ -772,34 +772,34 @@ var CORE_COPY = {
     errorClose: "Close"
   },
   "zh-CN": {
-    open: "打开无痕窗口",
-    exit: "退出无痕窗口",
-    title: "无痕窗口",
+    open: "打开私密窗口",
+    exit: "退出私密窗口",
+    title: "私密窗口",
     body: "账号和设置跟平时一样，看不到以前的对话，这次的聊天也不会进平时的列表。正常关掉后，这次的临时数据会清掉。",
-    dismiss: "关闭无痕窗口横幅",
-    errorTitle: "无法打开无痕窗口",
+    dismiss: "关闭私密窗口横幅",
+    errorTitle: "无法打开私密窗口",
     errorBody: "再试一次。如果还是不行，先退出 Codex 再打开。",
     errorRetry: "再试一次",
     errorClose: "关闭"
   },
   "zh-HK": {
-    open: "開啟無痕視窗",
-    exit: "離開無痕視窗",
-    title: "無痕視窗",
+    open: "開啟私密視窗",
+    exit: "離開私密視窗",
+    title: "私密視窗",
     body: "帳戶和設定跟平時一樣，看不到以前的對話，這次的聊天也不會進平時的列表。正常關掉後，這次的臨時資料會清掉。",
-    dismiss: "關閉無痕視窗橫額",
-    errorTitle: "無法開啟無痕視窗",
+    dismiss: "關閉私密視窗橫額",
+    errorTitle: "無法開啟私密視窗",
     errorBody: "再試一次。如果仍然不行，先退出 Codex 再開。",
     errorRetry: "再試一次",
     errorClose: "關閉"
   },
   "zh-TW": {
-    open: "開啟無痕視窗",
-    exit: "離開無痕視窗",
-    title: "無痕視窗",
+    open: "開啟私密視窗",
+    exit: "離開私密視窗",
+    title: "私密視窗",
     body: "帳號和設定跟平時一樣，看不到以前的對話，這次的聊天也不會進平時的列表。正常關掉後，這次的臨時資料會清掉。",
-    dismiss: "關閉無痕視窗橫幅",
-    errorTitle: "無法開啟無痕視窗",
+    dismiss: "關閉私密視窗橫幅",
+    errorTitle: "無法開啟私密視窗",
     errorBody: "再試一次。如果還是不行，先退出 Codex 再開啟。",
     errorRetry: "再試一次",
     errorClose: "關閉"
@@ -1108,8 +1108,8 @@ var PROFILE_NAME_SELECTOR = ":scope > span.min-w-0.flex-1.truncate";
 var PROFILE_AVATAR_SELECTOR = ":scope > img.rounded-full, :scope > span.rounded-full";
 var PROFILE_MENU_SELECTOR = '[role="menu"]';
 var PROFILE_MENU_ITEM_SELECTOR = '[role="menuitem"]';
-var PROFILE_MENU_NAME_SELECTOR = ":scope > div > span.flex-1.min-w-0.truncate";
-var PROFILE_MENU_AVATAR_SELECTOR = ":scope > div > span > img.icon-sm.rounded-full, :scope > div > span > span.rounded-full";
+var PROFILE_MENU_NAME_SELECTOR = ":scope > div > span.flex-1.min-w-0.truncate, " + ":scope > div > div.flex-1.min-w-0 > span.min-w-0.truncate";
+var PROFILE_MENU_AVATAR_SELECTOR = ":scope > div > span > img.icon-sm.rounded-full, :scope > div > span > span.rounded-full, " + ":scope > div > span > span > img.icon-sm.rounded-full, " + ":scope > div > span > span > span.rounded-full";
 var PROFILE_NAME_MARKER_SELECTOR = ":scope > [data-incodex-profile-mask-name]";
 var PROFILE_AVATAR_MARKER_SELECTOR = ":scope > [data-incodex-profile-mask-avatar]";
 var PROFILE_NAME_MAX_CHARS = 64;
@@ -1140,8 +1140,21 @@ function readProfileMask() {
   }
   return { name, avatarDataUrl: avatar.dataUrl };
 }
+function profileFooterCandidates() {
+  return [...document.querySelectorAll(PROFILE_FOOTER_SELECTOR)].filter((element) => element.querySelector(PROFILE_NAME_SELECTOR) && element.querySelector(PROFILE_AVATAR_SELECTOR));
+}
+function settingsSurfaceWithoutProfile() {
+  const navigations = [...document.querySelectorAll("nav.sidebar-navigation")];
+  const ready = navigations.length === 1 && navigations[0].querySelector('input[role="searchbox"]') && navigations[0].querySelector('button.sidebar-item[role="link"]');
+  const loading = [...document.querySelectorAll('.app-shell-left-panel nav[aria-busy="true"]')];
+  const emptySkeleton = loading.length === 1 && loading[0].childNodes.length === 1 && loading[0].firstElementChild?.classList.contains("invisible");
+  if (!(ready && loading.length === 0) && !(emptySkeleton && navigations.length === 0)) {
+    return false;
+  }
+  return ![...document.querySelectorAll(PROFILE_FOOTER_SELECTOR)].some((element) => element.getAttribute("aria-haspopup") === "menu" || Boolean(element.getAttribute("aria-controls")) || element.getAttribute(PROFILE_MASK_ATTR) === "true");
+}
 function findProfileFooter() {
-  const candidates = [...document.querySelectorAll(PROFILE_FOOTER_SELECTOR)].filter((element) => element.querySelector(PROFILE_NAME_SELECTOR) && element.querySelector(PROFILE_AVATAR_SELECTOR));
+  const candidates = profileFooterCandidates();
   return candidates.length === 1 ? candidates[0] : null;
 }
 function findControlledProfileMenu(profileFooter) {
@@ -1251,9 +1264,14 @@ function profileMaskHealth() {
   if (!profileMaskConfigured())
     return true;
   const mask = readProfileMask();
-  const profileFooter = mask ? findProfileFooter() : null;
-  if (!mask || !profileAvatarDecoded(mask.avatarDataUrl) || !profileFooter)
+  if (!mask)
     return false;
+  const candidates = profileFooterCandidates();
+  if (candidates.length === 0)
+    return settingsSurfaceWithoutProfile();
+  if (candidates.length !== 1 || !profileAvatarDecoded(mask.avatarDataUrl))
+    return false;
+  const profileFooter = candidates[0];
   if (!identityMaskHealth(profileFooter, PROFILE_NAME_SELECTOR, PROFILE_AVATAR_SELECTOR, mask)) {
     return false;
   }
@@ -1269,6 +1287,10 @@ function profileMaskNeedsInject() {
   if (!profileMaskConfigured())
     return false;
   return !profileMaskHealth();
+}
+function refreshProfileMaskHealth() {
+  ensureProfileMask();
+  return profileMaskHealth();
 }
 
 // src/runtime/official-tooltip-provider.ts
@@ -1349,6 +1371,121 @@ function findOfficialTooltipProvider(trigger) {
   return null;
 }
 
+// src/runtime/official-tooltip-renderer.ts
+function sharedTooltipState(scope) {
+  return scope.__incodexTooltipState ??= { lifecycle: null, renderer: null };
+}
+function discoverOfficialTooltipModules(entry, source) {
+  const result = {};
+  for (const name of ["react", "client", "tooltip"]) {
+    const pattern = new RegExp(`["'\`](\\./${name}-[A-Za-z0-9_]+\\.js)["'\`]`, "g");
+    const paths = [...new Set([...source.matchAll(pattern)].map((match) => new URL(match[1], entry).href))];
+    if (paths.length !== 1)
+      throw new Error(`Official ${name} module is unavailable or ambiguous`);
+    result[name] = paths[0];
+  }
+  return result;
+}
+async function loadOfficialTooltipModules(doc) {
+  const page = new URL(doc.URL);
+  if (!["app:", "file:"].includes(page.protocol))
+    throw new Error("Not a packaged renderer");
+  const entries = [...doc.querySelectorAll('script[type="module"][src]')].map((script) => new URL(script.src, doc.URL)).filter((url) => url.protocol === page.protocol && url.host === page.host && url.pathname.startsWith(new URL("./assets/", doc.URL).pathname) && /\/index-[A-Za-z0-9_-]+\.js$/.test(url.pathname));
+  if (entries.length !== 1)
+    throw new Error("Official renderer entry is unavailable or ambiguous");
+  const entry = entries[0].href;
+  const response = await fetch(entry, { signal: AbortSignal.timeout(5000), redirect: "error" });
+  if (!response.ok)
+    throw new Error("Cannot read official renderer entry");
+  const source = await response.text();
+  if (source.length > 2000000)
+    throw new Error("Unexpected official entry size");
+  const paths = discoverOfficialTooltipModules(entry, source);
+  const [reactModule, clientModule, tooltipModule] = await Promise.all([
+    import(paths.react),
+    import(paths.client),
+    import(paths.tooltip)
+  ]);
+  if (typeof reactModule.t !== "function" || typeof clientModule.t !== "function" || typeof tooltipModule.r !== "function" || typeof tooltipModule.t !== "function") {
+    throw new Error("Unsupported official Tooltip exports");
+  }
+  const react = reactModule.t();
+  const client = clientModule.t();
+  if (typeof react?.createElement !== "function" || typeof client?.createRoot !== "function") {
+    throw new Error("Unsupported official React renderer");
+  }
+  tooltipModule.r();
+  return { createElement: react.createElement, createRoot: client.createRoot, Tooltip: tooltipModule.t };
+}
+var TOOLTIP_ID = "incodex-official-tooltip";
+function createOfficialTooltipRenderer(doc, load = () => loadOfficialTooltipModules(doc)) {
+  let modules = null;
+  let root = null;
+  let host = null;
+  let pending = null;
+  let disposed = false;
+  let button = null;
+  function hide() {
+    if (button) {
+      const ids = (button.getAttribute("aria-describedby") ?? "").split(/\s+/).filter((id) => id && id !== TOOLTIP_ID);
+      if (ids.length)
+        button.setAttribute("aria-describedby", ids.join(" "));
+      else
+        button.removeAttribute("aria-describedby");
+      button = null;
+      root?.render(null);
+    }
+  }
+  return {
+    ready: () => !disposed && root !== null && host?.isConnected !== false,
+    needsRemount: () => root !== null && host?.isConnected === false,
+    prepare() {
+      if (pending)
+        return pending;
+      pending = load().then((loaded) => {
+        if (disposed)
+          return;
+        modules = loaded;
+        host = doc.createElement("div");
+        host.setAttribute("data-incodex-official-tooltip-root", "true");
+        doc.body.append(host);
+        root = modules.createRoot(host);
+      });
+      return pending;
+    },
+    show(target, label, shortcut) {
+      if (disposed || !root || !modules || !target.isConnected)
+        return;
+      hide();
+      button = target;
+      target.removeAttribute("title");
+      const ids = new Set((target.getAttribute("aria-describedby") ?? "").split(/\s+/).filter(Boolean));
+      ids.add(TOOLTIP_ID);
+      target.setAttribute("aria-describedby", [...ids].join(" "));
+      root.render(modules.createElement(modules.Tooltip, {
+        open: true,
+        disableHoverOpen: true,
+        tooltipId: TOOLTIP_ID,
+        tooltipContent: label,
+        shortcut,
+        positioningElement: target,
+        children: modules.createElement("span", { "aria-hidden": true })
+      }));
+    },
+    hide,
+    dispose() {
+      if (disposed)
+        return;
+      hide();
+      disposed = true;
+      root?.unmount();
+      host?.remove();
+      root = null;
+      host = null;
+    }
+  };
+}
+
 // src/runtime/search-button-placement.ts
 var TOOLTIP_TRIGGER_STATES = new Set(["closed", "delayed-open", "instant-open"]);
 function isSearchTooltipTrigger(element) {
@@ -1380,6 +1517,7 @@ function createTooltipLifecycle(deps) {
   let triggerBlocked = false;
   let windowFocused = true;
   let restoredFocusBlocked = false;
+  let awaitingPresentation = false;
   function cancelPending() {
     if (pending === null)
       return;
@@ -1387,6 +1525,7 @@ function createTooltipLifecycle(deps) {
     pending = null;
   }
   function hide() {
+    awaitingPresentation = false;
     cancelPending();
     if (open) {
       open = false;
@@ -1395,13 +1534,18 @@ function createTooltipLifecycle(deps) {
     deps.hide();
   }
   function scheduleShow() {
+    awaitingPresentation = false;
     cancelPending();
     if (triggerBlocked)
       return;
     pending = deps.schedule(() => {
       pending = null;
-      if (triggerBlocked || !(hovering || focused) || !deps.canShow())
+      if (triggerBlocked || !windowFocused || !(hovering || focused))
         return;
+      if (!deps.canShow()) {
+        awaitingPresentation = true;
+        return;
+      }
       open = true;
       deps.onOpen?.(hide);
       if (!open)
@@ -1410,6 +1554,10 @@ function createTooltipLifecycle(deps) {
     }, deps.resolveDelay?.(deps.delayMs) ?? deps.delayMs);
   }
   return {
+    presentationReady() {
+      if (awaitingPresentation && windowFocused)
+        scheduleShow();
+    },
     pointerEnter() {
       hovering = true;
       restoredFocusBlocked = false;
@@ -1471,6 +1619,42 @@ function parseOfficialWindowZoom(value) {
 function officialWindowZoom(root) {
   return parseOfficialWindowZoom(window.getComputedStyle(root).getPropertyValue(OFFICIAL_WINDOW_ZOOM_PROPERTY));
 }
+function createOfficialTooltipPresentation() {
+  let sampledTrigger = null;
+  let sample = null;
+  return {
+    read(trigger) {
+      if (!trigger?.isConnected) {
+        sampledTrigger = null;
+        sample = null;
+        return null;
+      }
+      if (trigger !== sampledTrigger) {
+        sampledTrigger = trigger;
+        sample = null;
+      }
+      const tip = findOfficialTooltipElement(trigger);
+      if (tip) {
+        sample = {
+          className: tip.className,
+          shortcutClassName: tip.querySelector("kbd")?.className ?? ""
+        };
+      }
+      return sample;
+    }
+  };
+}
+function findOfficialTooltipElement(trigger) {
+  if (!trigger?.isConnected)
+    return null;
+  const ids = [trigger, trigger.parentElement].flatMap((element) => element?.getAttribute("aria-describedby")?.split(/\s+/) ?? []).filter(Boolean);
+  for (const id of ids) {
+    const tip = trigger.ownerDocument.getElementById(id);
+    if (tip?.isConnected && tip.getAttribute("role") === "tooltip" && !tip.hasAttribute("data-incodex-tooltip") && tip.className.trim())
+      return tip;
+  }
+  return null;
+}
 
 // src/runtime/_inject.src.ts
 var STYLE_ID = "incodex-privacy-style";
@@ -1498,15 +1682,18 @@ var STRIP_CLONE_ATTRS = [
   "title",
   "tabindex"
 ];
-var activeTooltipLifecycle = null;
+var tooltipState = sharedTooltipState(window);
+var officialTooltipPresentation = createOfficialTooltipPresentation();
 var launchErrorPending = false;
 var windowsLaunchErrorHost = null;
 function dismissActiveTooltip() {
-  activeTooltipLifecycle?.dismiss();
+  tooltipState.lifecycle?.dismiss();
 }
 function disposeActiveTooltip() {
-  activeTooltipLifecycle?.dispose();
-  activeTooltipLifecycle = null;
+  tooltipState.lifecycle?.dispose();
+  tooltipState.lifecycle = null;
+  tooltipState.renderer?.dispose();
+  tooltipState.renderer = null;
 }
 var ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
   <path d="M14 18a2 2 0 0 0-4 0"/>
@@ -1586,6 +1773,7 @@ function apply() {
     btn.setAttribute("aria-pressed", incognito ? "true" : "false");
     btn.setAttribute("aria-label", labelFor(incognito));
     setButtonIcon(btn);
+    syncTooltipPresentation();
   }
   const label = document.querySelector("[data-incodex-tooltip-label]");
   if (label)
@@ -1761,7 +1949,7 @@ function buttonStillBesideSearch() {
 }
 function injectedTooltipCanShow(btn) {
   const search = findSearchButton();
-  return btn.isConnected && (btn.getAttribute("data-incodex-hovered") === "true" || document.activeElement === btn) && !(search && searchTooltipOpen(search));
+  return btn.isConnected && syncTooltipPresentation() && (btn.getAttribute("data-incodex-hovered") === "true" || document.activeElement === btn) && !(search && searchTooltipOpen(search));
 }
 function landingStillMounted() {
   const landing = document.querySelector(`[${LANDING_ATTR}]`);
@@ -1775,7 +1963,7 @@ function tooltipMountStillPresent() {
   return Boolean(host?.isConnected && tip?.isConnected && tip.parentElement === host);
 }
 function needsInject() {
-  return !buttonStillBesideSearch() || !tooltipMountStillPresent() || !landingStillMounted() || launchErrorNeedsInject() || profileMaskNeedsInject();
+  return tooltipState.renderer?.needsRemount() || !buttonStillBesideSearch() || !tooltipMountStillPresent() || !landingStillMounted() || launchErrorNeedsInject() || profileMaskNeedsInject();
 }
 function buildButton(search) {
   disposeActiveTooltip();
@@ -1806,7 +1994,7 @@ function buildButton(search) {
     show: () => showTooltip(btn),
     hide: hideTooltip
   });
-  activeTooltipLifecycle = tooltipLifecycle;
+  tooltipState.lifecycle = tooltipLifecycle;
   btn.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -1833,14 +2021,12 @@ function createTooltipElement() {
   const tip = document.createElement("div");
   tip.setAttribute(TIP_ATTR, "true");
   tip.setAttribute("role", "tooltip");
-  tip.className = "z-50 w-fit select-none text-sm whitespace-normal break-words rounded-lg border border-text bg-primary-solid text-primary-solid px-2 py-1.5";
   const text = document.createElement("div");
   text.className = "flex items-center gap-2";
   const label = document.createElement("div");
   label.className = "min-w-0";
   label.setAttribute("data-incodex-tooltip-label", "true");
   const kbd = document.createElement("kbd");
-  kbd.className = "inline-flex !rounded-md !border-0 !bg-current/10 !font-sans !text-xs !text-current !shadow-none !px-1.5 !py-0.5 !leading-none";
   kbd.textContent = shortcutLabel();
   text.append(label, kbd);
   tip.append(text);
@@ -1861,12 +2047,60 @@ function ensureTooltipMount() {
   }
   return tip;
 }
+var tooltipObservedSearch = null;
+var tooltipObservedElement = null;
+function observeOfficialTooltip(search) {
+  const element = findOfficialTooltipElement(search);
+  if (search === tooltipObservedSearch && element === tooltipObservedElement)
+    return;
+  tooltipObservedSearch = search;
+  tooltipObservedElement = element;
+  window.__incodexTooltipPresentationObserver?.disconnect();
+  const observer = new MutationObserver(() => syncTooltipPresentation());
+  window.__incodexTooltipPresentationObserver = observer;
+  if (search) {
+    observer.observe(search, { attributes: true, attributeFilter: ["aria-describedby"] });
+    if (search.parentElement) {
+      observer.observe(search.parentElement, { attributes: true, attributeFilter: ["aria-describedby"] });
+    }
+  }
+  if (element)
+    observer.observe(element, { attributes: true, subtree: true, attributeFilter: ["class"] });
+}
+function syncTooltipPresentation() {
+  if (tooltipState.renderer?.ready()) {
+    document.querySelector(`[${BTN_ATTR}]`)?.removeAttribute("title");
+    return true;
+  }
+  const search = findSearchButton();
+  observeOfficialTooltip(search);
+  const sample = officialTooltipPresentation.read(search);
+  const btn = document.querySelector(`[${BTN_ATTR}]`);
+  btn?.removeAttribute("title");
+  const tip = document.querySelector(`[${TIP_ATTR}]`);
+  if (!sample) {
+    hideTooltip();
+    return false;
+  }
+  if (tip && tip.className !== sample.className)
+    tip.className = sample.className;
+  const kbd = tip?.querySelector("kbd");
+  if (kbd && kbd.className !== sample.shortcutClassName)
+    kbd.className = sample.shortcutClassName;
+  return true;
+}
 function tooltipEl() {
   return ensureTooltipMount();
 }
 var TOOLTIP_SIDE_OFFSET = 2;
 function showTooltip(btn) {
+  if (tooltipState.renderer?.ready()) {
+    tooltipState.renderer.show(btn, labelFor(isIncognitoWindow()), shortcutLabel());
+    return;
+  }
   const tip = tooltipEl();
+  if (!syncTooltipPresentation())
+    return;
   const host = tip.parentElement;
   if (!host)
     return;
@@ -1886,6 +2120,7 @@ function showTooltip(btn) {
   host.style.visibility = "";
 }
 function hideTooltip() {
+  tooltipState.renderer?.hide();
   const host = document.querySelector(`[${TIP_HOST_ATTR}]`);
   if (!host)
     return;
@@ -2120,6 +2355,20 @@ function ensureButton() {
   }
   apply();
   ensureTooltipMount();
+  syncTooltipPresentation();
+  if (tooltipState.renderer?.needsRemount()) {
+    tooltipState.renderer.dispose();
+    tooltipState.renderer = null;
+  }
+  if (!tooltipState.renderer) {
+    const renderer = createOfficialTooltipRenderer(document);
+    tooltipState.renderer = renderer;
+    renderer.prepare().then(() => {
+      if (tooltipState.renderer !== renderer || !btn?.isConnected)
+        return;
+      tooltipState.lifecycle?.presentationReady();
+    }).catch((error) => console.warn("[incodex] official tooltip renderer unavailable", String(error)));
+  }
 }
 function onKeydown(event) {
   if (event.key === "Escape") {
@@ -2158,11 +2407,12 @@ function profileObservationRequired() {
 function createMutationObserver() {
   let scheduled = false;
   return new MutationObserver(function handleMutation() {
-    if (!needsInject() || scheduled)
+    if (scheduled)
       return;
     scheduled = true;
     requestAnimationFrame(function injectOnAnimationFrame() {
       scheduled = false;
+      syncTooltipPresentation();
       if (!needsInject())
         return;
       ensureButton();
@@ -2205,12 +2455,12 @@ function start() {
   ensureProfileMask();
   refreshUiProbe();
   window.addEventListener("keydown", onKeydown, true);
-  window.addEventListener("blur", () => activeTooltipLifecycle?.windowBlur());
-  window.addEventListener("focus", () => activeTooltipLifecycle?.windowFocus());
-  window.addEventListener(TOOLTIP_DISMISS_EVENT, () => activeTooltipLifecycle?.dismiss());
+  window.addEventListener("blur", () => tooltipState.lifecycle?.windowBlur());
+  window.addEventListener("focus", () => tooltipState.lifecycle?.windowFocus());
+  window.addEventListener(TOOLTIP_DISMISS_EVENT, () => tooltipState.lifecycle?.dismiss());
   ensureMutationObserver();
 }
-window.__incodexRefreshProfileMaskHealth = profileMaskHealth;
+window.__incodexRefreshProfileMaskHealth = refreshProfileMaskHealth;
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", start, { once: true });
 } else {

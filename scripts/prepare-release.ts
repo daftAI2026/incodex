@@ -8,6 +8,7 @@ const workspacePackages = [
   "incodex-cli",
   "incodex-core",
   "incodex-macos",
+  "incodex-runtime-assets",
   "incodex-runtime-bundle",
   "incodex-transaction",
 ];
