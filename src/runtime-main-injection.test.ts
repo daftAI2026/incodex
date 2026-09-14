@@ -33,8 +33,32 @@ describe("Electron UI injection reporting", () => {
     runInNewContext(main.slice(start, end) + "\nraiseOurWindows()", {
       require: () => ({}), process: { platform: "test", pid: 1 },
       mainWindows: () => windows, hideAuxiliaryWindows: () => {}, raisePid: () => {},
+      shownWindows: new WeakSet(),
     });
     expect(calls).toEqual(["primary:show", "minimized:restore", "minimized:show"]);
+  });
+
+  test("an existing session can raise a previously shown window after the host hides it", () => {
+    let visible = true;
+    let shows = 0;
+    const primary = {
+      isVisible: () => visible, isMinimized: () => false,
+      show: () => { visible = true; shows++; }, focus: () => {},
+    };
+    const start = main.indexOf("function raiseOurWindows()");
+    const end = main.indexOf("\nasync function raiseExistingIncognito()", start);
+    const context = {
+      require: () => ({}), process: { platform: "test", pid: 1 },
+      mainWindows: () => [primary], hideAuxiliaryWindows: () => {}, raisePid: () => {},
+      shownWindows: new WeakSet(),
+    };
+    const source = main.slice(start, end) + "\nraiseOurWindows()";
+    runInNewContext(source, context);
+    visible = false;
+    runInNewContext(source, context);
+    expect(visible).toBe(true);
+    expect(shows).toBe(2);
+    expect(main).toContain('shownWindows.add(win)');
   });
 
   test("native menu launches inherit geometry only from a real main window", () => {
