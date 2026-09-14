@@ -40,4 +40,23 @@ describe("official tooltip renderer", () => {
     expect(unmounted).toBe(1);
     expect(removed).toBe(1);
   });
+  test("does not attach a late module result after disposal", async () => {
+    let resolve!: (value: never) => void;
+    let hosts = 0;
+    const doc = { createElement: () => { hosts++; } } as unknown as Document;
+    const renderer = createOfficialTooltipRenderer(doc, () => new Promise((done) => { resolve = done; }));
+    const ready = renderer.prepare();
+    renderer.dispose();
+    resolve({} as never);
+    await ready;
+    expect(hosts).toBe(0);
+    expect(renderer.ready()).toBe(false);
+  });
+  test("reports initialization failure without adding any fallback DOM", async () => {
+    const renderer = createOfficialTooltipRenderer({} as Document, async () => { throw new Error("unsupported build"); });
+    await expect(renderer.prepare()).rejects.toThrow("unsupported build");
+    expect(renderer.ready()).toBe(false);
+    renderer.hide();
+    renderer.dispose();
+  });
 });

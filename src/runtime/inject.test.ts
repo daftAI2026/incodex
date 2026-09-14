@@ -513,6 +513,7 @@ describe("incodex tooltip lifecycle", () => {
         officialTooltipPresentation: { read: () => sample },
         document: { querySelector: (selector: string) => selector === "[button]" ? button : tip },
         BTN_ATTR: "button", TIP_ATTR: "tip", hideTooltip: () => { hidden = true; },
+        officialTooltipRenderer: null,
         labelFor: () => "Incognito", isIncognitoWindow: () => incognito, shortcutLabel: () => "Shift+Cmd+N",
       });
       const sync = new vm.Script(`${js}; syncTooltipPresentation`).runInContext(context) as () => boolean;

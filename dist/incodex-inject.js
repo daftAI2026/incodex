@@ -1371,6 +1371,118 @@ function findOfficialTooltipProvider(trigger) {
   return null;
 }
 
+// src/runtime/official-tooltip-renderer.ts
+function discoverOfficialTooltipModules(entry, source) {
+  const result = {};
+  for (const name of ["react", "client", "tooltip"]) {
+    const pattern = new RegExp(`["'\`](\\./${name}-[A-Za-z0-9_]+\\.js)["'\`]`, "g");
+    const paths = [...new Set([...source.matchAll(pattern)].map((match) => new URL(match[1], entry).href))];
+    if (paths.length !== 1)
+      throw new Error(`Official ${name} module is unavailable or ambiguous`);
+    result[name] = paths[0];
+  }
+  return result;
+}
+async function loadOfficialTooltipModules(doc) {
+  const page = new URL(doc.URL);
+  if (!["app:", "file:"].includes(page.protocol))
+    throw new Error("Not a packaged renderer");
+  const entries = [...doc.querySelectorAll('script[type="module"][src]')].map((script) => new URL(script.src, doc.URL)).filter((url) => url.protocol === page.protocol && url.host === page.host && url.pathname.startsWith(new URL("./assets/", doc.URL).pathname) && /\/index-[A-Za-z0-9_-]+\.js$/.test(url.pathname));
+  if (entries.length !== 1)
+    throw new Error("Official renderer entry is unavailable or ambiguous");
+  const entry = entries[0].href;
+  const response = await fetch(entry, { signal: AbortSignal.timeout(5000), redirect: "error" });
+  if (!response.ok)
+    throw new Error("Cannot read official renderer entry");
+  const source = await response.text();
+  if (source.length > 2000000)
+    throw new Error("Unexpected official entry size");
+  const paths = discoverOfficialTooltipModules(entry, source);
+  const [reactModule, clientModule, tooltipModule] = await Promise.all([
+    import(paths.react),
+    import(paths.client),
+    import(paths.tooltip)
+  ]);
+  if (typeof reactModule.t !== "function" || typeof clientModule.t !== "function" || typeof tooltipModule.r !== "function" || typeof tooltipModule.t !== "function") {
+    throw new Error("Unsupported official Tooltip exports");
+  }
+  const react = reactModule.t();
+  const client = clientModule.t();
+  if (typeof react?.createElement !== "function" || typeof client?.createRoot !== "function") {
+    throw new Error("Unsupported official React renderer");
+  }
+  tooltipModule.r();
+  return { createElement: react.createElement, createRoot: client.createRoot, Tooltip: tooltipModule.t };
+}
+var TOOLTIP_ID = "incodex-official-tooltip";
+function createOfficialTooltipRenderer(doc, load = () => loadOfficialTooltipModules(doc)) {
+  let modules = null;
+  let root = null;
+  let host = null;
+  let pending = null;
+  let disposed = false;
+  let button = null;
+  function hide() {
+    if (button) {
+      const ids = (button.getAttribute("aria-describedby") ?? "").split(/\s+/).filter((id) => id && id !== TOOLTIP_ID);
+      if (ids.length)
+        button.setAttribute("aria-describedby", ids.join(" "));
+      else
+        button.removeAttribute("aria-describedby");
+      button = null;
+      root?.render(null);
+    }
+  }
+  return {
+    ready: () => !disposed && root !== null && host?.isConnected !== false,
+    needsRemount: () => root !== null && host?.isConnected === false,
+    prepare() {
+      if (pending)
+        return pending;
+      pending = load().then((loaded) => {
+        if (disposed)
+          return;
+        modules = loaded;
+        host = doc.createElement("div");
+        host.setAttribute("data-incodex-official-tooltip-root", "true");
+        doc.body.append(host);
+        root = modules.createRoot(host);
+      });
+      return pending;
+    },
+    show(target, label, shortcut) {
+      if (disposed || !root || !modules || !target.isConnected)
+        return;
+      hide();
+      button = target;
+      target.removeAttribute("title");
+      const ids = new Set((target.getAttribute("aria-describedby") ?? "").split(/\s+/).filter(Boolean));
+      ids.add(TOOLTIP_ID);
+      target.setAttribute("aria-describedby", [...ids].join(" "));
+      root.render(modules.createElement(modules.Tooltip, {
+        open: true,
+        disableHoverOpen: true,
+        tooltipId: TOOLTIP_ID,
+        tooltipContent: label,
+        shortcut,
+        positioningElement: target,
+        children: modules.createElement("span", { "aria-hidden": true })
+      }));
+    },
+    hide,
+    dispose() {
+      if (disposed)
+        return;
+      hide();
+      disposed = true;
+      root?.unmount();
+      host?.remove();
+      root = null;
+      host = null;
+    }
+  };
+}
+
 // src/runtime/search-button-placement.ts
 var TOOLTIP_TRIGGER_STATES = new Set(["closed", "delayed-open", "instant-open"]);
 function isSearchTooltipTrigger(element) {
@@ -1557,6 +1669,7 @@ var STRIP_CLONE_ATTRS = [
   "tabindex"
 ];
 var activeTooltipLifecycle = null;
+var officialTooltipRenderer = null;
 var officialTooltipPresentation = createOfficialTooltipPresentation();
 var launchErrorPending = false;
 var windowsLaunchErrorHost = null;
@@ -1566,6 +1679,8 @@ function dismissActiveTooltip() {
 function disposeActiveTooltip() {
   activeTooltipLifecycle?.dispose();
   activeTooltipLifecycle = null;
+  officialTooltipRenderer?.dispose();
+  officialTooltipRenderer = null;
 }
 var ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
   <path d="M14 18a2 2 0 0 0-4 0"/>
@@ -1835,7 +1950,7 @@ function tooltipMountStillPresent() {
   return Boolean(host?.isConnected && tip?.isConnected && tip.parentElement === host);
 }
 function needsInject() {
-  return !buttonStillBesideSearch() || !tooltipMountStillPresent() || !landingStillMounted() || launchErrorNeedsInject() || profileMaskNeedsInject();
+  return officialTooltipRenderer?.needsRemount() || !buttonStillBesideSearch() || !tooltipMountStillPresent() || !landingStillMounted() || launchErrorNeedsInject() || profileMaskNeedsInject();
 }
 function buildButton(search) {
   disposeActiveTooltip();
@@ -1940,6 +2055,10 @@ function observeOfficialTooltip(search) {
     observer.observe(element, { attributes: true, subtree: true, attributeFilter: ["class"] });
 }
 function syncTooltipPresentation() {
+  if (officialTooltipRenderer?.ready()) {
+    document.querySelector(`[${BTN_ATTR}]`)?.removeAttribute("title");
+    return true;
+  }
   const search = findSearchButton();
   observeOfficialTooltip(search);
   const sample = officialTooltipPresentation.read(search);
@@ -1962,6 +2081,10 @@ function tooltipEl() {
 }
 var TOOLTIP_SIDE_OFFSET = 2;
 function showTooltip(btn) {
+  if (officialTooltipRenderer?.ready()) {
+    officialTooltipRenderer.show(btn, labelFor(isIncognitoWindow()), shortcutLabel());
+    return;
+  }
   const tip = tooltipEl();
   if (!syncTooltipPresentation())
     return;
@@ -1984,6 +2107,7 @@ function showTooltip(btn) {
   host.style.visibility = "";
 }
 function hideTooltip() {
+  officialTooltipRenderer?.hide();
   const host = document.querySelector(`[${TIP_HOST_ATTR}]`);
   if (!host)
     return;
@@ -2219,6 +2343,22 @@ function ensureButton() {
   apply();
   ensureTooltipMount();
   syncTooltipPresentation();
+  if (officialTooltipRenderer?.needsRemount()) {
+    officialTooltipRenderer.dispose();
+    officialTooltipRenderer = null;
+  }
+  if (!officialTooltipRenderer) {
+    const renderer = createOfficialTooltipRenderer(document);
+    officialTooltipRenderer = renderer;
+    renderer.prepare().then(() => {
+      if (officialTooltipRenderer !== renderer || !btn?.isConnected)
+        return;
+      if (btn.getAttribute("data-incodex-hovered") === "true")
+        activeTooltipLifecycle?.pointerEnter();
+      else if (document.activeElement === btn)
+        activeTooltipLifecycle?.focus();
+    }).catch((error) => console.warn("[incodex] official tooltip renderer unavailable", String(error)));
+  }
 }
 function onKeydown(event) {
   if (event.key === "Escape") {

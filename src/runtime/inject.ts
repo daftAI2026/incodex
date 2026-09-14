@@ -9,6 +9,7 @@ import {
   refreshProfileMaskHealth,
 } from "./incognito-profile-mask.ts";
 import { createOfficialTooltipTimingBridge } from "./official-tooltip-provider.ts";
+import { createOfficialTooltipRenderer } from "./official-tooltip-renderer.ts";
 import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement.ts";
 import { createTooltipLifecycle, type TooltipLifecycle } from "./tooltip-lifecycle.ts";
 import {
@@ -59,6 +60,7 @@ const STRIP_CLONE_ATTRS = [
 ];
 
 let activeTooltipLifecycle: TooltipLifecycle | null = null;
+let officialTooltipRenderer: ReturnType<typeof createOfficialTooltipRenderer> | null = null;
 const officialTooltipPresentation = createOfficialTooltipPresentation();
 let launchErrorPending = false;
 let windowsLaunchErrorHost: HTMLElement | null = null;
@@ -70,6 +72,8 @@ function dismissActiveTooltip(): void {
 function disposeActiveTooltip(): void {
   activeTooltipLifecycle?.dispose();
   activeTooltipLifecycle = null;
+  officialTooltipRenderer?.dispose();
+  officialTooltipRenderer = null;
 }
 
 const ICON_SVG = `{{HAT_GLASSES_SVG}}`;
@@ -369,6 +373,7 @@ function tooltipMountStillPresent(): boolean {
 
 function needsInject(): boolean {
   return (
+    officialTooltipRenderer?.needsRemount() ||
     !buttonStillBesideSearch() ||
     !tooltipMountStillPresent() ||
     !landingStillMounted() ||
@@ -485,6 +490,10 @@ function observeOfficialTooltip(search: HTMLElement | null): void {
 }
 
 function syncTooltipPresentation(): boolean {
+  if (officialTooltipRenderer?.ready()) {
+    document.querySelector<HTMLElement>(`[${BTN_ATTR}]`)?.removeAttribute("title");
+    return true;
+  }
   const search = findSearchButton();
   observeOfficialTooltip(search);
   const sample = officialTooltipPresentation.read(search);
@@ -511,6 +520,10 @@ function tooltipEl(): HTMLElement {
 const TOOLTIP_SIDE_OFFSET = 2;
 
 function showTooltip(btn: HTMLElement): void {
+  if (officialTooltipRenderer?.ready()) {
+    officialTooltipRenderer.show(btn, labelFor(isIncognitoWindow()), shortcutLabel());
+    return;
+  }
   const tip = tooltipEl();
   if (!syncTooltipPresentation()) return;
   const host = tip.parentElement;
@@ -534,6 +547,7 @@ function showTooltip(btn: HTMLElement): void {
 }
 
 function hideTooltip(): void {
+  officialTooltipRenderer?.hide();
   const host = document.querySelector<HTMLElement>(`[${TIP_HOST_ATTR}]`);
   if (!host) return;
   host.removeAttribute("data-open");
@@ -815,6 +829,21 @@ function ensureButton(): void {
   apply();
   ensureTooltipMount();
   syncTooltipPresentation();
+  if (officialTooltipRenderer?.needsRemount()) {
+    officialTooltipRenderer.dispose();
+    officialTooltipRenderer = null;
+  }
+  if (!officialTooltipRenderer) {
+    const renderer = createOfficialTooltipRenderer(document);
+    officialTooltipRenderer = renderer;
+    void renderer.prepare().then(() => {
+      if (officialTooltipRenderer !== renderer || !btn?.isConnected) return;
+      // If initialization overlapped the very first hover, schedule the normal
+      // provider delay now instead of requiring a leave/re-enter or Search hover.
+      if (btn.getAttribute("data-incodex-hovered") === "true") activeTooltipLifecycle?.pointerEnter();
+      else if (document.activeElement === btn) activeTooltipLifecycle?.focus();
+    }).catch((error) => console.warn("[incodex] official tooltip renderer unavailable", String(error)));
+  }
 }
 
 function onKeydown(event: KeyboardEvent): void {
