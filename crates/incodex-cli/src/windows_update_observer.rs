@@ -311,7 +311,12 @@ fn reconcile(root: &Path, helper: &Path, stop: &OwnedHandle) -> Result<bool, Str
                 root,
                 state,
                 |package| inspect(package).map_err(|error| error.to_string()),
-                crate::windows_activation::enable_installed_runtime,
+                |registration| {
+                    if unsafe { WaitForSingleObject(stop.0, 0) } != WAIT_TIMEOUT {
+                        return Err("Windows registration rearm cancelled".into());
+                    }
+                    crate::windows_activation::enable_installed_runtime(registration)
+                },
             )
             .map(|()| state.clone())
         } else if let Some(state) = state
@@ -352,6 +357,9 @@ fn reconcile(root: &Path, helper: &Path, stop: &OwnedHandle) -> Result<bool, Str
         let installed = match repaired {
             Ok(installed) => installed,
             Err(error) => {
+                if unsafe { WaitForSingleObject(stop.0, 0) } != WAIT_TIMEOUT {
+                    return Ok(false);
+                }
                 // 用户可能恰在预检后启动官方 App；保留 intent，转为句柄等待。
                 let running = strict_running_codex_package_process_ids(&target)
                     .map_err(|probe| format!("{error}; cannot inspect target: {probe}"))?;
@@ -371,7 +379,7 @@ fn reconcile(root: &Path, helper: &Path, stop: &OwnedHandle) -> Result<bool, Str
 fn rearm_current_registration_with(
     root: &Path,
     state: &WindowsInstallState,
-    inspect: impl FnOnce(&str) -> Result<Vec<u32>, String>,
+    mut inspect: impl FnMut(&str) -> Result<Vec<u32>, String>,
     enable: impl FnOnce(
         &crate::windows_activation::WindowsInstalledRuntimeRegistration,
     ) -> Result<(), String>,
@@ -397,7 +405,12 @@ fn rearm_current_registration_with(
     }
     enable(
         &crate::windows_activation::WindowsInstalledRuntimeRegistration::from_install_state(state)?,
-    )
+    )?;
+    // 注册与官方启动不能原子提交；发生交错时重新等待退出，不撤销仍获授权的注册。
+    if !inspect(&state.package_full_name)?.is_empty() {
+        return Err("Codex started during Windows registration rearm".into());
+    }
+    Ok(())
 }
 
 pub(crate) fn try_run(args: &[String]) -> Option<Result<(), String>> {
@@ -560,7 +573,10 @@ mod tests {
             },
             |_| Ok(()),
         );
-        assert!(raced.is_err(), "launch during rearm must return to process waiting");
+        assert!(
+            raced.is_err(),
+            "launch during rearm must return to process waiting"
+        );
     }
 
     #[test]
