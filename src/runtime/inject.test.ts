@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import vm from "node:vm";
 import { blobatarUri } from "blobatar/uri";
 import { findProfileMenuIdentity, profileMaskHealth, refreshProfileMaskHealth } from "./incognito-profile-mask.ts";
 
@@ -493,6 +494,47 @@ describe("incognito profile mask", () => {
 });
 
 describe("incodex tooltip lifecycle", () => {
+  for (const incognito of [false, true]) {
+    test(`never uses native title before sampling or after remount (incognito=${incognito})`, () => {
+      const attrs = new Map<string, string>([["aria-label", incognito ? "Exit incognito" : "Open incognito"]]);
+      const button = {
+        getAttribute: (key: string) => attrs.get(key) ?? null,
+        setAttribute: (key: string, value: string) => attrs.set(key, value),
+        removeAttribute: (key: string) => attrs.delete(key),
+      };
+      const kbd = { className: "" };
+      const tip = { className: "", querySelector: () => kbd };
+      let sample: { className: string; shortcutClassName: string } | null = null;
+      let hidden = false;
+      const source = inject.slice(inject.indexOf("function syncTooltipPresentation():"), inject.indexOf("function tooltipEl():"));
+      const js = new Bun.Transpiler({ loader: "ts" }).transformSync(source);
+      const context = vm.createContext({
+        findSearchButton: () => ({}), observeOfficialTooltip: () => {},
+        officialTooltipPresentation: { read: () => sample },
+        document: { querySelector: (selector: string) => selector === "[button]" ? button : tip },
+        BTN_ATTR: "button", TIP_ATTR: "tip", hideTooltip: () => { hidden = true; },
+        labelFor: () => "Incognito", isIncognitoWindow: () => incognito, shortcutLabel: () => "Shift+Cmd+N",
+      });
+      const sync = new vm.Script(`${js}; syncTooltipPresentation`).runInContext(context) as () => boolean;
+      expect(sync()).toBe(false);
+      expect(hidden).toBe(true);
+      expect(attrs.has("title")).toBe(false);
+      expect(attrs.get("aria-label")).toBe(incognito ? "Exit incognito" : "Open incognito");
+
+      sample = { className: "official-tooltip", shortcutClassName: "official-shortcut" };
+      expect(sync()).toBe(true);
+      expect(tip.className).toBe("official-tooltip");
+      expect(kbd.className).toBe("official-shortcut");
+      expect(attrs.has("title")).toBe(false);
+
+      // A remounted Search loses its cached sample; also clear titles from an older injector.
+      sample = null;
+      attrs.set("title", "stale native fallback");
+      expect(sync()).toBe(false);
+      expect(attrs.has("title")).toBe(false);
+    });
+  }
+
   test("keeps a stable delay when the official provider cannot be discovered", () => {
     expect(inject).toContain("const TOOLTIP_FALLBACK_DELAY_MS = 700");
   });
