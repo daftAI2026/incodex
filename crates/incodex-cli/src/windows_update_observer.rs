@@ -550,6 +550,17 @@ mod tests {
             |_| Err("registration failed".into())
         )
         .is_err());
+        let mut probes = 0;
+        let raced = rearm_current_registration_with(
+            &root,
+            &state,
+            |_| {
+                probes += 1;
+                Ok(if probes == 1 { vec![] } else { vec![42] })
+            },
+            |_| Ok(()),
+        );
+        assert!(raced.is_err(), "launch during rearm must return to process waiting");
     }
 
     #[test]
