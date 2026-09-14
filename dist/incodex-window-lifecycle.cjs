@@ -25,8 +25,10 @@ function createIncognitoWindowLifecycle(exit, schedule = scheduleCloseProbe) {
         if (observedWindows.has(win))
             return;
         observedWindows.add(win);
-        activeWindows.add(win);
-        let active = true;
+        // Hidden prewarm surfaces are not session owners until the host shows them.
+        let active = win.isVisible?.() !== false || win.isMinimized?.() === true;
+        if (active)
+            activeWindows.add(win);
         let destroyed = false;
         let closeProbeGeneration = 0;
         function activate() {
