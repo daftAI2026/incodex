@@ -1,10 +1,3 @@
-/**
- * [INPUT]: 依赖官方 Search 按钮内 SVG 的布局祖先，以及待挂载的独立图案。
- * [OUTPUT]: 提供 cloneButtonIconLayout，保留官方 class、CSS 变量引用与定位作用域。
- * [POS]: 注入器的图标布局适配层；只复制布局壳，不复制 Search 的身份、文字或交互。
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
- */
-
 export function cloneButtonIconLayout(
   icon: SVGElement,
   sample: SVGElement | null,

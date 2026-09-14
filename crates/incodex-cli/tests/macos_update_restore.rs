@@ -1,8 +1,3 @@
-//! [INPUT]: 依赖 macOS 更新恢复解析器与原生 Coordinator 源码契约
-//! [OUTPUT]: 验证重启恢复入口、Sparkle 退出转发、handoff 所有权及后台更新后的静默恢复行为
-//! [POS]: incodex-cli 的 macOS 更新状态机回归边界，约束原生桥接不丢失任何更新模式
-//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
-
 #![cfg(target_os = "macos")]
 
 use std::fs;

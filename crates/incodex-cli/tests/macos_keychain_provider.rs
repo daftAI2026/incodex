@@ -1,10 +1,5 @@
 #![cfg(target_os = "macos")]
 
-//! [INPUT]: 依赖 native/macos_keychain_provider.c 的测试导出、合成 helper 与 fake Security.framework
-//! [OUTPUT]: 验证 Keychain provider 的精确拦截、身份校验、有界 IPC，以及失败时回退官方查询
-//! [POS]: incodex-cli/tests 的原生 provider 黑盒契约，不接触用户真实 Keychain
-//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
-
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};

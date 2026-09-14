@@ -1,7 +1,3 @@
-//! [INPUT]: 依赖 incodex-cli 的 macOS Keychain 资产 API，以及合成 helper/应用目录提供的系统边界替身
-//! [OUTPUT]: 提供 helper 发布、显式授权复核、provider 注入与本地回滚的 macOS 集成回归
-//! [POS]: incodex-cli/tests 的 Keychain 原生契约守门人，阻止缓存状态替代真实授权事实
-//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 #![cfg(target_os = "macos")]
 
 use std::fs;

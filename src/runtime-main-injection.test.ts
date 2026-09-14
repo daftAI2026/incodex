@@ -1,9 +1,3 @@
-/**
- * [INPUT]: 读取 Electron Runtime 主入口源码，验证注入、窗口生命周期与官方启动边界
- * [OUTPUT]: 提供主入口结构回归测试，阻止 Incodex 在官方初始化前跨越异步事件循环
- * [POS]: src 测试层的启动契约，约束 runtime/incodex-main.cts 不破坏官方应用首屏语义
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
- */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

@@ -1,7 +1,4 @@
-//! [INPUT]: 依赖系统 codesign、bundle plist 与签名身份检查，接收 install/uninstall 产生的 staged app。
-//! [OUTPUT]: 提供官方签名验收、宿主同代 ad-hoc 重签、entitlement 裁剪与 CUA/vendor sidecar 保留策略。
-//! [POS]: incodex-macos 的唯一签名边界，在 mutation 提交前把改写组件与官方嵌套组件收敛为可验证拓扑。
-//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+//! 签名验收、vendor sidecar 策略与 entitlement 处理。
 //!
 //! 这里是 install、uninstall 和 Doctor 共用的唯一签名判断入口：
 //! - mutation 路径 fail closed；

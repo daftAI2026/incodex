@@ -1,9 +1,3 @@
-/**
- * [INPUT]: 读取 loader、Runtime 主入口及平台适配源码，验证外置资产加载与官方 main 交接顺序
- * [OUTPUT]: 提供 Runtime 完整性、fail-open、会话启动和同步启动门的结构回归测试
- * [POS]: src 测试层的加载边界，确保扩展初始化不越过官方应用的首个事件循环
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
- */
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

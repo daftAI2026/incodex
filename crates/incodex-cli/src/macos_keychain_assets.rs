@@ -1,9 +1,3 @@
-/**
- * [INPUT]: 依赖 macOS 原生 Keychain helper/provider 构建产物、私有 Runtime 根目录与事务目标锁
- * [OUTPUT]: 提供内容寻址资产发布、显式授权复核、注册状态持久化及 staged Framework provider 注入
- * [POS]: incodex-cli 的 Keychain 连续性边界，以系统授权事实约束 provider 安装而非信任历史布尔缓存
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
- */
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::{Read, Write};

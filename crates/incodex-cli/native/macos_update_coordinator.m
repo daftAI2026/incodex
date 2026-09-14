@@ -1,9 +1,3 @@
-/**
- * [INPUT]: 依赖 AppKit 进程生命周期、libproc 可执行文件身份、受控 pending/registration 状态与内容寻址 Incodex Helper
- * [OUTPUT]: 提供 Sparkle application bundle 替身，覆盖交互式重启与后台更新后的静默恢复
- * [POS]: macOS 更新链的原生 Coordinator；只编排退出和恢复，不实现 ASAR 修改或签名策略
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
- */
 #import <AppKit/AppKit.h>
 #import <CommonCrypto/CommonDigest.h>
 #import <Foundation/Foundation.h>

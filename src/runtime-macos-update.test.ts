@@ -1,9 +1,3 @@
-/**
- * [INPUT]: 依赖 macOS 更新交接模块及临时文件系统夹具，模拟 Coordinator 与原生加载边界
- * [OUTPUT]: 提供交接顺序、资产校验、同步启动及后台禁用 Keychain 探针的回归测试
- * [POS]: src 测试层的 Sparkle 安全网，确保更新恢复钩子先布防且不让官方 main 触发系统授权交互
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";

@@ -1,8 +1,3 @@
-//! [INPUT]: 依赖 macOS 更新资产发布器与真实 Coordinator 子进程
-//! [OUTPUT]: 验证内容寻址注册、跨代刷新、私有文件约束及复用 PID 的 handoff 回收
-//! [POS]: incodex-cli 的 macOS 更新注册集成边界，连接 Rust 注册状态与原生 Coordinator 身份语义
-//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
-
 #![cfg(target_os = "macos")]
 
 use std::fs;

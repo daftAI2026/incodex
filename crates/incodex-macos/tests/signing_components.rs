@@ -1,8 +1,3 @@
-//! [INPUT]: 依赖 incodex-macos 的签名清单与重签入口，以可控的 codesign 替身模拟组件身份和签名失效。
-//! [OUTPUT]: 验证 CUA/vendor sidecar 保留、Sparkle 同代重签，以及 Provider 所在 Framework 与 Electron helpers 同代重签。
-//! [POS]: incodex-macos 的组件级签名回归套件，约束 install 在修改官方 bundle 后仍能生成 deep/strict 可验收产物。
-//! [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
-
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;

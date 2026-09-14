@@ -1,9 +1,3 @@
-/**
- * [INPUT]: 依赖官方 Search/tooltip 布局、共享文案与 profile mask，以及 preload/CDP 提供的动作桥。
- * [OUTPUT]: 挂载私密窗口控件、横幅和 tooltip，向宿主提供 UI 健康状态与动作请求。
- * [POS]: 浏览器 Runtime 编排入口；图标沿用 Search 的布局/token 作用域，图案切换不替换布局壳。
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
- */
 import { cloneButtonIconLayout } from "./button-icon-layout.ts";
 import { isSearchLabel } from "./compatibility/search-labels.ts";
 import { deriveUiProbe } from "./incodex-ui-probe.ts";

@@ -1,10 +1,3 @@
-/**
- * [INPUT]: 读取当前 inject.ts 与提交的帽子/退出 SVG，在最小 DOM 和 VM 中执行真实生产函数。
- * [OUTPUT]: 验证 Search 图标布局祖先链、语义 class/CSS 变量、克隆隔离和 hover 换图契约。
- * [POS]: Runtime 注入器的 8881 帽子图标回归测试；不替代产品代码，只锁定 DOM 语义结果。
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
- */
-
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";

@@ -1,9 +1,3 @@
-/**
- * [INPUT]: 依赖 Electron、会话安全模块、共享注入器及各平台生命周期适配器
- * [OUTPUT]: 对外提供 Runtime 启动门与无痕会话辅助能力，并向官方窗口注入帽子眼镜入口
- * [POS]: runtime 的主编排器；扩展官方应用但必须在官方 main 前保持同步、失败开放的启动边界
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
- */
 // @ts-nocheck
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });

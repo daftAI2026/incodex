@@ -1,9 +1,3 @@
-/**
- * [INPUT]: 依赖 Security.framework 的 SecItemCopyMatching、内容寻址固定 helper 与 fishhook 符号重绑定
- * [OUTPUT]: 对 Codex Storage Key 精确查询提供有界 helper 读取，并在 helper 不可用时回退官方 Security 路径
- * [POS]: incodex-cli/native 的 Keychain 适配层，只接管单一查询且不得让可选增强破坏官方存储功能
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
- */
 #include <CoreFoundation/CoreFoundation.h>
 #include <CommonCrypto/CommonDigest.h>
 #include <Security/Security.h>

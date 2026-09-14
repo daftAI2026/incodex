@@ -1,9 +1,3 @@
-/**
- * [INPUT]: 依赖已校验的 macOS 更新资产、Coordinator ready 文件与官方 Sparkle/objc-js 原生能力
- * [OUTPUT]: 对外提供同步 prepareUpdateHandoff，在官方 main 初始化前完成有界的更新恢复布防
- * [POS]: runtime 的 Sparkle 交接边界；失败时放弃自动恢复，但绝不跨事件循环破坏官方启动时序
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
- */
 // @ts-nocheck
 "use strict";
 
