@@ -13,7 +13,7 @@ interface TestWindow {
   ): void;
 }
 
-function createWindow(): {
+function createWindow(initiallyVisible = true): {
   window: TestWindow;
   emit(
     event: "close" | "closed" | "show",
@@ -27,7 +27,7 @@ function createWindow(): {
     Array<(event?: { defaultPrevented?: boolean }) => void>
   >();
   let destroyed = false;
-  let visible = true;
+  let visible = initiallyVisible;
   return {
     window: {
       isDestroyed: () => destroyed,
@@ -53,6 +53,40 @@ function createWindow(): {
 }
 
 describe("shared incognito window lifecycle", () => {
+  test("a never-shown prewarm window cannot keep the closed session alive", () => {
+    const primary = createWindow();
+    const prewarm = createWindow(false);
+    const exits: number[] = [];
+    const lifecycle = createIncognitoWindowLifecycle((code: number) => exits.push(code));
+    lifecycle.observe(primary.window);
+    lifecycle.observe(prewarm.window);
+    primary.emit("closed");
+    expect(exits).toEqual([0]);
+  });
+
+  test("a prewarm window becomes a session owner only when officially shown", () => {
+    const primary = createWindow();
+    const prewarm = createWindow(false);
+    const exits: number[] = [];
+    const lifecycle = createIncognitoWindowLifecycle((code: number) => exits.push(code));
+    lifecycle.observe(primary.window);
+    lifecycle.observe(prewarm.window);
+    prewarm.show();
+    primary.emit("closed");
+    expect(exits).toEqual([]);
+    prewarm.emit("closed");
+    expect(exits).toEqual([0]);
+  });
+
+  test("disposing an unshown prewarm window does not end startup", () => {
+    const prewarm = createWindow(false);
+    const exits: number[] = [];
+    const lifecycle = createIncognitoWindowLifecycle((code: number) => exits.push(code));
+    lifecycle.observe(prewarm.window);
+    prewarm.emit("closed");
+    expect(exits).toEqual([]);
+  });
+
   test("exits after the last incognito content window is hidden instead of destroyed", () => {
     const fixture = createWindow();
     const scheduled: Array<() => void> = [];
