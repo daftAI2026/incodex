@@ -1,7 +1,18 @@
 import { describe, expect, test } from "bun:test";
-import { discoverOfficialTooltipModules, createOfficialTooltipRenderer } from "./official-tooltip-renderer.ts";
+import { discoverOfficialTooltipModules, createOfficialTooltipRenderer, sharedTooltipState } from "./official-tooltip-renderer.ts";
 
 describe("official tooltip renderer", () => {
+  test("repeated injections share the lifecycle seen by old dismissal listeners", () => {
+    const scope = {};
+    const first = sharedTooltipState(scope);
+    const dismiss = () => first.lifecycle?.dismiss();
+    const second = sharedTooltipState(scope);
+    let dismissed = false;
+    second.lifecycle = { dismiss: () => { dismissed = true; } } as NonNullable<typeof second.lifecycle>;
+    dismiss();
+    expect(first).toBe(second);
+    expect(dismissed).toBe(true);
+  });
   test("discovers hashed packaged modules before any tooltip DOM exists", () => {
     expect(discoverOfficialTooltipModules("app://-/assets/index-123.js", 'const deps=["./react-abc.js","./client-def.js","./tooltip-dismiss-ghi.js","./tooltip-jkl.js"]')).toEqual({
       react: "app://-/assets/react-abc.js", client: "app://-/assets/client-def.js", tooltip: "app://-/assets/tooltip-jkl.js",
