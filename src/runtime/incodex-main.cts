@@ -21,6 +21,7 @@ const USER_ROOT = path.join(os.homedir(), ".incodex");
 const DEFAULT_CODEX_HOME = path.join(os.homedir(), ".codex");
 const READY_TIMEOUT_MS = 15_000;
 let capturedSourceHome = null;
+const shownWindows = new WeakSet();
 
 function targetId() {
   return instance.targetIdFromExec(process.execPath);
@@ -295,7 +296,8 @@ function raiseOurWindows() {
     try {
       // The host owns initial visibility. A ready hidden window may be a
       // prewarmed surface, not a user request to open another chat window.
-      if (!win.isVisible() && !win.isMinimized()) continue;
+      if (win.isVisible() || win.isMinimized()) shownWindows.add(win);
+      if (!shownWindows.has(win)) continue;
       if (win.isMinimized()) win.restore();
       win.show();
       win.focus();
@@ -849,6 +851,7 @@ async function attachElectron() {
       else markAcceptedWindowReady(win);
     });
     win.once("show", () => {
+      shownWindows.add(win);
       bringForward();
       if (!windowsPlatform) markSessionReady();
       markAcceptedWindowReady(win);
