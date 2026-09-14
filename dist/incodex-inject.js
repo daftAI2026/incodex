@@ -1517,6 +1517,7 @@ function createTooltipLifecycle(deps) {
   let triggerBlocked = false;
   let windowFocused = true;
   let restoredFocusBlocked = false;
+  let awaitingPresentation = false;
   function cancelPending() {
     if (pending === null)
       return;
@@ -1524,6 +1525,7 @@ function createTooltipLifecycle(deps) {
     pending = null;
   }
   function hide() {
+    awaitingPresentation = false;
     cancelPending();
     if (open) {
       open = false;
@@ -1532,13 +1534,18 @@ function createTooltipLifecycle(deps) {
     deps.hide();
   }
   function scheduleShow() {
+    awaitingPresentation = false;
     cancelPending();
     if (triggerBlocked)
       return;
     pending = deps.schedule(() => {
       pending = null;
-      if (triggerBlocked || !(hovering || focused) || !deps.canShow())
+      if (triggerBlocked || !windowFocused || !(hovering || focused))
         return;
+      if (!deps.canShow()) {
+        awaitingPresentation = true;
+        return;
+      }
       open = true;
       deps.onOpen?.(hide);
       if (!open)
@@ -1547,6 +1554,10 @@ function createTooltipLifecycle(deps) {
     }, deps.resolveDelay?.(deps.delayMs) ?? deps.delayMs);
   }
   return {
+    presentationReady() {
+      if (awaitingPresentation && windowFocused)
+        scheduleShow();
+    },
     pointerEnter() {
       hovering = true;
       restoredFocusBlocked = false;
@@ -2355,10 +2366,7 @@ function ensureButton() {
     renderer.prepare().then(() => {
       if (tooltipState.renderer !== renderer || !btn?.isConnected)
         return;
-      if (btn.getAttribute("data-incodex-hovered") === "true")
-        tooltipState.lifecycle?.pointerEnter();
-      else if (document.activeElement === btn)
-        tooltipState.lifecycle?.focus();
+      tooltipState.lifecycle?.presentationReady();
     }).catch((error) => console.warn("[incodex] official tooltip renderer unavailable", String(error)));
   }
 }

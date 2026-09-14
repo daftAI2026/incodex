@@ -837,10 +837,8 @@ function ensureButton(): void {
     tooltipState.renderer = renderer;
     void renderer.prepare().then(() => {
       if (tooltipState.renderer !== renderer || !btn?.isConnected) return;
-      // If initialization overlapped the very first hover, schedule the normal
-      // provider delay now instead of requiring a leave/re-enter or Search hover.
-      if (btn.getAttribute("data-incodex-hovered") === "true") tooltipState.lifecycle?.pointerEnter();
-      else if (document.activeElement === btn) tooltipState.lifecycle?.focus();
+      // Async readiness must not reconstruct canceled input from stale DOM state.
+      tooltipState.lifecycle?.presentationReady();
     }).catch((error) => console.warn("[incodex] official tooltip renderer unavailable", String(error)));
   }
 }
