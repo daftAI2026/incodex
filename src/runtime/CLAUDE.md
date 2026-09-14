@@ -4,6 +4,7 @@
 本层是 Electron-side Runtime 的唯一实现面：主进程负责隔离会话、所有权、窗口与 IPC；浏览器注入负责官方页面上的隐私控件、文案、头像遮罩、Search 布局和 tooltip；测试以官方 DOM/生命周期契约约束两条数据流。`incodex-loader.cts` 是官方 asar 内唯一 loader，其余 Runtime 由清单验证后加载。
 
 ## 成员清单
+- `button-icon-layout.ts`: 浅复制 Search 图标到按钮之间的布局祖先，仅保留 class/style 与隐藏语义，使尺寸 token 和相对定位继续生效；hover 仅替换壳内 SVG。
 - `codex-mode-readiness.test.ts`: 验证 Codex 模式探测、官方阻塞层识别与延迟重试调度。
 - `compatibility/search-labels.ts`: 集中维护官方 Search aria-label 多语言集合与前缀识别，供注入层发现 Search 按钮。
 - `dock-menu.test.ts`: 验证 macOS Dock 菜单装饰的插入、去重、标签清洗与异常降级。
