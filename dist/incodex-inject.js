@@ -1,3 +1,19 @@
+// src/runtime/button-icon-layout.ts
+function cloneButtonIconLayout(icon, sample, search) {
+  let root = icon;
+  for (let parent = sample?.parentElement;parent && parent !== search; parent = parent.parentElement) {
+    const shell = parent.cloneNode(false);
+    for (const { name } of [...shell.attributes]) {
+      if (name !== "class" && name !== "style")
+        shell.removeAttribute(name);
+    }
+    shell.setAttribute("aria-hidden", "true");
+    shell.append(root);
+    root = shell;
+  }
+  return root;
+}
+
 // src/runtime/compatibility/search-labels.ts
 var SEARCH_LABELS = new Set([
   "Search",
@@ -1592,6 +1608,9 @@ function createButtonIcon(source, name, sample) {
     return null;
   svg.setAttribute("data-incodex-icon", name);
   svg.setAttribute("class", sample?.getAttribute("class") || "icon-xs");
+  const style = sample?.getAttribute("style");
+  if (style)
+    svg.setAttribute("style", style);
   svg.setAttribute("aria-hidden", "true");
   svg.setAttribute("width", sample?.getAttribute("width") || "16");
   svg.setAttribute("height", sample?.getAttribute("height") || "16");
@@ -1831,9 +1850,10 @@ function buildButton(search) {
   btn.setAttribute(BTN_ATTR, "true");
   btn.setAttribute("data-incodex-hovered", "false");
   btn.className = search.className;
-  const svg = createButtonIcon(ICON_SVG, "hat-glasses", search.querySelector("svg"));
+  const sample = search.querySelector("svg");
+  const svg = createButtonIcon(ICON_SVG, "hat-glasses", sample);
   if (svg)
-    btn.append(svg);
+    btn.append(cloneButtonIconLayout(svg, sample, search));
   const providerTiming = createOfficialTooltipTimingBridge(findSearchButton);
   const tooltipLifecycle = createTooltipLifecycle({
     delayMs: TOOLTIP_FALLBACK_DELAY_MS,
