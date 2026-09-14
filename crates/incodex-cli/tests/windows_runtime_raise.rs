@@ -31,7 +31,7 @@ const server = net.createServer(socket => {{
 server.listen('\\\\.\\pipe\\Incodex-Runtime-Raise', () => console.log('listening'));
 "#
     );
-    let child = Command::new("bun")
+    let child = Command::new("node")
         .args(["-e", &script])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
