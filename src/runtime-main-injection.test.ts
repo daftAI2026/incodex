@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { runInNewContext } from "node:vm";
 
 const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8").replaceAll(
   "\r\n",
@@ -16,6 +17,26 @@ function hookWindowSource(): string {
 }
 
 describe("Electron UI injection reporting", () => {
+  test("raising the session never reveals hidden prewarmed windows", () => {
+    const calls: string[] = [];
+    const window = (name: string, visible: boolean, minimized = false) => ({
+      isVisible: () => visible,
+      isMinimized: () => minimized,
+      restore: () => calls.push(`${name}:restore`),
+      show: () => calls.push(`${name}:show`),
+      focus: () => {},
+      moveTop: () => {},
+    });
+    const windows = [window("primary", true), window("prewarm", false), window("minimized", false, true)];
+    const start = main.indexOf("function raiseOurWindows()");
+    const end = main.indexOf("\nasync function raiseExistingIncognito()", start);
+    runInNewContext(main.slice(start, end) + "\nraiseOurWindows()", {
+      require: () => ({}), process: { platform: "test", pid: 1 },
+      mainWindows: () => windows, hideAuxiliaryWindows: () => {}, raisePid: () => {},
+    });
+    expect(calls).toEqual(["primary:show", "minimized:restore", "minimized:show"]);
+  });
+
   test("native menu launches inherit geometry only from a real main window", () => {
     const start = main.indexOf("function captureSourceBounds()");
     const end = main.indexOf("\nfunction readSourceBounds()", start);
