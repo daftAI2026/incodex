@@ -1372,6 +1372,9 @@ function findOfficialTooltipProvider(trigger) {
 }
 
 // src/runtime/official-tooltip-renderer.ts
+function sharedTooltipState(scope) {
+  return scope.__incodexTooltipState ??= { lifecycle: null, renderer: null };
+}
 function discoverOfficialTooltipModules(entry, source) {
   const result = {};
   for (const name of ["react", "client", "tooltip"]) {
@@ -1668,19 +1671,18 @@ var STRIP_CLONE_ATTRS = [
   "title",
   "tabindex"
 ];
-var activeTooltipLifecycle = null;
-var officialTooltipRenderer = null;
+var tooltipState = sharedTooltipState(window);
 var officialTooltipPresentation = createOfficialTooltipPresentation();
 var launchErrorPending = false;
 var windowsLaunchErrorHost = null;
 function dismissActiveTooltip() {
-  activeTooltipLifecycle?.dismiss();
+  tooltipState.lifecycle?.dismiss();
 }
 function disposeActiveTooltip() {
-  activeTooltipLifecycle?.dispose();
-  activeTooltipLifecycle = null;
-  officialTooltipRenderer?.dispose();
-  officialTooltipRenderer = null;
+  tooltipState.lifecycle?.dispose();
+  tooltipState.lifecycle = null;
+  tooltipState.renderer?.dispose();
+  tooltipState.renderer = null;
 }
 var ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
   <path d="M14 18a2 2 0 0 0-4 0"/>
@@ -1950,7 +1952,7 @@ function tooltipMountStillPresent() {
   return Boolean(host?.isConnected && tip?.isConnected && tip.parentElement === host);
 }
 function needsInject() {
-  return officialTooltipRenderer?.needsRemount() || !buttonStillBesideSearch() || !tooltipMountStillPresent() || !landingStillMounted() || launchErrorNeedsInject() || profileMaskNeedsInject();
+  return tooltipState.renderer?.needsRemount() || !buttonStillBesideSearch() || !tooltipMountStillPresent() || !landingStillMounted() || launchErrorNeedsInject() || profileMaskNeedsInject();
 }
 function buildButton(search) {
   disposeActiveTooltip();
@@ -1981,7 +1983,7 @@ function buildButton(search) {
     show: () => showTooltip(btn),
     hide: hideTooltip
   });
-  activeTooltipLifecycle = tooltipLifecycle;
+  tooltipState.lifecycle = tooltipLifecycle;
   btn.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -2055,7 +2057,7 @@ function observeOfficialTooltip(search) {
     observer.observe(element, { attributes: true, subtree: true, attributeFilter: ["class"] });
 }
 function syncTooltipPresentation() {
-  if (officialTooltipRenderer?.ready()) {
+  if (tooltipState.renderer?.ready()) {
     document.querySelector(`[${BTN_ATTR}]`)?.removeAttribute("title");
     return true;
   }
@@ -2081,8 +2083,8 @@ function tooltipEl() {
 }
 var TOOLTIP_SIDE_OFFSET = 2;
 function showTooltip(btn) {
-  if (officialTooltipRenderer?.ready()) {
-    officialTooltipRenderer.show(btn, labelFor(isIncognitoWindow()), shortcutLabel());
+  if (tooltipState.renderer?.ready()) {
+    tooltipState.renderer.show(btn, labelFor(isIncognitoWindow()), shortcutLabel());
     return;
   }
   const tip = tooltipEl();
@@ -2107,7 +2109,7 @@ function showTooltip(btn) {
   host.style.visibility = "";
 }
 function hideTooltip() {
-  officialTooltipRenderer?.hide();
+  tooltipState.renderer?.hide();
   const host = document.querySelector(`[${TIP_HOST_ATTR}]`);
   if (!host)
     return;
@@ -2343,20 +2345,20 @@ function ensureButton() {
   apply();
   ensureTooltipMount();
   syncTooltipPresentation();
-  if (officialTooltipRenderer?.needsRemount()) {
-    officialTooltipRenderer.dispose();
-    officialTooltipRenderer = null;
+  if (tooltipState.renderer?.needsRemount()) {
+    tooltipState.renderer.dispose();
+    tooltipState.renderer = null;
   }
-  if (!officialTooltipRenderer) {
+  if (!tooltipState.renderer) {
     const renderer = createOfficialTooltipRenderer(document);
-    officialTooltipRenderer = renderer;
+    tooltipState.renderer = renderer;
     renderer.prepare().then(() => {
-      if (officialTooltipRenderer !== renderer || !btn?.isConnected)
+      if (tooltipState.renderer !== renderer || !btn?.isConnected)
         return;
       if (btn.getAttribute("data-incodex-hovered") === "true")
-        activeTooltipLifecycle?.pointerEnter();
+        tooltipState.lifecycle?.pointerEnter();
       else if (document.activeElement === btn)
-        activeTooltipLifecycle?.focus();
+        tooltipState.lifecycle?.focus();
     }).catch((error) => console.warn("[incodex] official tooltip renderer unavailable", String(error)));
   }
 }
@@ -2445,9 +2447,9 @@ function start() {
   ensureProfileMask();
   refreshUiProbe();
   window.addEventListener("keydown", onKeydown, true);
-  window.addEventListener("blur", () => activeTooltipLifecycle?.windowBlur());
-  window.addEventListener("focus", () => activeTooltipLifecycle?.windowFocus());
-  window.addEventListener(TOOLTIP_DISMISS_EVENT, () => activeTooltipLifecycle?.dismiss());
+  window.addEventListener("blur", () => tooltipState.lifecycle?.windowBlur());
+  window.addEventListener("focus", () => tooltipState.lifecycle?.windowFocus());
+  window.addEventListener(TOOLTIP_DISMISS_EVENT, () => tooltipState.lifecycle?.dismiss());
   ensureMutationObserver();
 }
 window.__incodexRefreshProfileMaskHealth = refreshProfileMaskHealth;

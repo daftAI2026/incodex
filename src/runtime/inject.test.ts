@@ -513,7 +513,7 @@ describe("incodex tooltip lifecycle", () => {
         officialTooltipPresentation: { read: () => sample },
         document: { querySelector: (selector: string) => selector === "[button]" ? button : tip },
         BTN_ATTR: "button", TIP_ATTR: "tip", hideTooltip: () => { hidden = true; },
-        officialTooltipRenderer: null,
+        tooltipState: { renderer: null },
         labelFor: () => "Incognito", isIncognitoWindow: () => incognito, shortcutLabel: () => "Shift+Cmd+N",
       });
       const sync = new vm.Script(`${js}; syncTooltipPresentation`).runInContext(context) as () => boolean;
@@ -549,7 +549,7 @@ describe("incodex tooltip lifecycle", () => {
 
   test("listens to the app-wide dismissal signal without dispatching the private event", () => {
     expect(inject).toContain(
-      'window.addEventListener(TOOLTIP_DISMISS_EVENT, () => activeTooltipLifecycle?.dismiss())',
+      'window.addEventListener(TOOLTIP_DISMISS_EVENT, () => tooltipState.lifecycle?.dismiss())',
     );
     expect(inject).not.toContain("dispatchEvent(new Event(TOOLTIP_DISMISS_EVENT))");
   });
@@ -572,10 +572,10 @@ describe("incodex tooltip lifecycle", () => {
 
   test("cancels pending and open tooltips on window blur and Escape", () => {
     expect(inject).toContain(
-      'window.addEventListener("blur", () => activeTooltipLifecycle?.windowBlur())',
+      'window.addEventListener("blur", () => tooltipState.lifecycle?.windowBlur())',
     );
     expect(inject).toContain(
-      'window.addEventListener("focus", () => activeTooltipLifecycle?.windowFocus())',
+      'window.addEventListener("focus", () => tooltipState.lifecycle?.windowFocus())',
     );
     expect(inject).toMatch(
       /function onKeydown\(event: KeyboardEvent\): void \{[\s\S]*event\.key === "Escape"[\s\S]*dismissActiveTooltip\(\);/,

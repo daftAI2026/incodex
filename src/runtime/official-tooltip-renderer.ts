@@ -1,3 +1,14 @@
+import type { TooltipLifecycle } from "./tooltip-lifecycle.ts";
+
+type SharedTooltipState = {
+  lifecycle: TooltipLifecycle | null;
+  renderer: ReturnType<typeof createOfficialTooltipRenderer> | null;
+};
+
+export function sharedTooltipState(scope: { __incodexTooltipState?: SharedTooltipState }): SharedTooltipState {
+  return scope.__incodexTooltipState ??= { lifecycle: null, renderer: null };
+}
+
 type ModulePaths = { react: string; client: string; tooltip: string };
 type Root = { render: (element: unknown) => void; unmount: () => void };
 type RendererModules = {
