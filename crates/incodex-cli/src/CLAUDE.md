@@ -91,6 +91,8 @@ windows_self_uninstall.rs: Windows 受管 CLI 自卸载，复用安装身份和�
 windows_status.rs: Windows status 将 Store 包、安装状态、注册证据及 Runtime 校验组合为可读和 JSON 报告。
 windows_system.rs: Windows 系统程序绝对路径解析及展示路径规范化，拒绝不安全相对组件，不依赖 PATH 找系统工具。
 windows_update.rs: Windows 受管更新编排，验证安装代际和稳定发布，持稳定锁运行固定安装器并同步 Runtime。
-windows_update_flow.rs: Windows 更新流程与呈现分离层，串联 CLI 安装、Runtime 发布和兼容安装器回退，不自行操作磁盘。
+update_flow.rs: 两平台共享更新呈现，串联安装、Runtime 发布和兼容回退回调，不自行操作平台事务。
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+
+windows_runtime_raise.rs: Windows 字节管道有界通信，连接/写入/分段读取共享截止时间，与 Electron node:net 服务协作。

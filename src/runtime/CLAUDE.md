@@ -2,6 +2,10 @@
 > L2 | 父级: ../../CLAUDE.md
 
 ## 成员清单
+button-icon-layout.ts: 克隆官方 SVG 的布局祖先，只保留样式属性，帽子与相机共享尺寸约束。
+official-tooltip-renderer.ts: 从当前官方包加载 Tooltip/React 模块，持有提示根与跨注入共享状态，不引入第二个 React。
+official-tooltip-renderer.test.ts: 官方提示模块发现、挂载销毁与重复注入状态共享回归。
+inject-icon-layout.test.ts: Search 图标祖先布局、属性剥离与图标切换回归。
 capture-window/: Shot 实验编辑器与测试，入口见 CLAUDE.md。
 codex-mode-readiness.test.ts: 回归验证：官方模式就绪时序合同。
 compatibility/: 官方控件兼容标识。
@@ -33,13 +37,13 @@ search-button-placement.ts: Search 触发器边界与注入按钮位置。
 status-menu.test.ts: 回归验证：状态栏菜单合同。
 tooltip-lifecycle.test.ts: 回归验证：hover、焦点、关闭与延迟状态机。
 tooltip-lifecycle.ts: hover、焦点、关闭与延迟状态机。
-tooltip-presentation.test.ts: 回归验证：官方 tooltip 关联取样、缓存失效与无样本原生提示。
-tooltip-presentation.ts: 官方 tooltip 关联取样、缓存失效与无样本原生提示。
+tooltip-presentation.test.ts: 回归验证：官方 tooltip 关联取样、缓存失效与兼容标题格式化。
+tooltip-presentation.ts: 官方 tooltip 关联取样、缓存失效与兼容标题格式化；注入器不再使用原生 title 回退。
 ui-probe.test.ts: 回归验证：注入健康验收。
 window-lifecycle.test.ts: 回归验证：窗口关闭生命周期合同。
 windows-platform.test.ts: 回归验证：Windows Runtime 平台合同。
 
 ## 动态样式边界
-相机 tooltip 只取样 Search 关联提示；编辑器外壳只取样官方 dialog，不互换角色。未取样或不支持的声明保留兼容映射；不宣称所有控件已自动适配。
+相机 tooltip 优先复用官方 Tooltip 组件，模块不可用时才取样 Search 关联提示；编辑器外壳只取样官方 dialog，不互换角色。未取样或不支持的声明保留兼容映射；不宣称所有控件已自动适配。无样本时不恢复原生 title；相机不显示无痕快捷键，重复注入复用同一提示生命周期。
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

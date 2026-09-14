@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: DOM 可见边界与 CaptureCandidate 类型
+ * [OUTPUT]: 截图候选区域及可恢复的身份/项目占位属性
+ * [POS]: Shot 隐私采样边界，输出视口坐标并在截图结束后还原 DOM
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import type { CaptureCandidate, CaptureSize } from "./model.ts";
 
 export const CAPTURE_CANDIDATE_SELECTOR =

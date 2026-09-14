@@ -1,5 +1,6 @@
 export type TooltipLifecycle = {
   pointerEnter: () => void;
+  presentationReady: () => void;
   pointerLeave: () => void;
   focus: () => void;
   blur: () => void;
@@ -30,6 +31,7 @@ export function createTooltipLifecycle(deps: TooltipLifecycleDeps): TooltipLifec
   let triggerBlocked = false;
   let windowFocused = true;
   let restoredFocusBlocked = false;
+  let awaitingPresentation = false;
 
   function cancelPending(): void {
     if (pending === null) return;
@@ -38,6 +40,7 @@ export function createTooltipLifecycle(deps: TooltipLifecycleDeps): TooltipLifec
   }
 
   function hide(): void {
+    awaitingPresentation = false;
     cancelPending();
     if (open) {
       open = false;
@@ -47,11 +50,16 @@ export function createTooltipLifecycle(deps: TooltipLifecycleDeps): TooltipLifec
   }
 
   function scheduleShow(): void {
+    awaitingPresentation = false;
     cancelPending();
     if (triggerBlocked) return;
     pending = deps.schedule(() => {
       pending = null;
-      if (triggerBlocked || !(hovering || focused) || !deps.canShow()) return;
+      if (triggerBlocked || !windowFocused || !(hovering || focused)) return;
+      if (!deps.canShow()) {
+        awaitingPresentation = true;
+        return;
+      }
       open = true;
       deps.onOpen?.(hide);
       if (!open) return;
@@ -60,6 +68,11 @@ export function createTooltipLifecycle(deps: TooltipLifecycleDeps): TooltipLifec
   }
 
   return {
+    presentationReady() {
+      // Readiness is not fresh input. All dismissal paths clear this intent;
+      // an existing delay also keeps its original deadline.
+      if (awaitingPresentation && windowFocused) scheduleShow();
+    },
     pointerEnter() {
       hovering = true;
       restoredFocusBlocked = false;

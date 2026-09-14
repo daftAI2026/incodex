@@ -9,10 +9,8 @@ use std::thread;
 use std::time::Duration;
 
 use crate::parse::ParsedCli;
+use crate::update_flow::{run_installer_fallback, run_update_pipeline, UpdateProgress};
 use crate::windows_system::{system_binary_path, windows_path_for_display};
-use crate::windows_update_flow::{
-    run_windows_installer_fallback, run_windows_update_pipeline, WindowsUpdateProgress,
-};
 use incodex_core::windows_path::reject_reparse_ancestors;
 use serde::{Deserialize, Serialize};
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
@@ -266,8 +264,8 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
         ));
     }
     let package_root = managed_package_root()?;
-    println!("update channel: windows standalone");
     if parsed.dry_run {
+        println!("update channel: windows standalone");
         println!("would install the latest verified Windows release");
         println!("would publish Runtime with the installed CLI");
         println!("no changes made.");
@@ -286,13 +284,14 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
     }
     let mut progress = crate::spinner::Progress::new();
     let mut stdout = std::io::stdout();
-    run_windows_update_pipeline(
+    run_update_pipeline(
         &mut progress,
         &mut stdout,
         |progress| {
             install_latest_stable_release(&package_root, env!("CARGO_PKG_VERSION"), progress)
+                .map(|(ordering, tag)| (ordering, tag, ()))
         },
-        || {
+        |_| {
             let _lock = acquire_windows_install_lock(&package_root)?;
             let (installed, expected_version) = current_release_executable(&package_root)?;
             verify_cli_version(&installed, &expected_version)?;
@@ -303,7 +302,7 @@ pub fn run_update(parsed: &ParsedCli) -> Result<(), String> {
                     "CLI was updated, but Runtime synchronization remains pending".to_string(),
                 );
             }
-            Ok(())
+            Ok(expected_version)
         },
     )
 }
@@ -562,7 +561,7 @@ pub fn windows_release_ordering(
 fn install_latest_stable_release(
     package_root: &Path,
     current: &str,
-    progress: &mut impl WindowsUpdateProgress,
+    progress: &mut impl UpdateProgress,
 ) -> Result<(VersionOrdering, String), String> {
     let work = UpdateWorkDirectory::create(package_root)?;
     let metadata_path = work.path.join("latest.json");
@@ -588,7 +587,7 @@ fn install_latest_stable_release(
         INSTALLER_SCRIPT_LIMIT,
     )?;
     let mut stderr = std::io::stderr();
-    run_windows_installer_fallback(
+    run_installer_fallback(
         progress,
         &mut stderr,
         || run_windows_installer(&tagged_installer, &release),

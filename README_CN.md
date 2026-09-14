@@ -29,6 +29,7 @@
 - **跟随主窗口**：无痕窗口参照主窗口的大小和位置打开
 - **关窗即焚**：正常关掉后清掉这次的临时会话（含独立 Chromium 档案）；登录和设置会留着
 - **可选侧栏按钮**：运行 `incodex install` 后，搜索左边会出现帽子墨镜；macOS 用 `Shift+Command+N`，Windows 用 `Ctrl+Shift+N`
+- **macOS 原生菜单**：`incodex install` 后，也可从官方 Dock 菜单或现有菜单栏状态菜单打开无痕窗口
 - **本机 CLI**：终端菜单、Homebrew / 脚本安装、`status` / `doctor` / `runtime`，不经过官方插件
 
 正常关窗会清理 Incodex 管理的隔离会话；这不等于对本机存储或远端服务作取证级零痕迹承诺。
@@ -86,8 +87,8 @@ cargo install --locked --path crates/incodex-cli
 主路径 `incodex open` 不会修改 Codex。macOS 的可选 `incodex install` 会修改并重新签名本机应用包；Windows 不修改也不复制 Microsoft Store 包，而是注册一套 Incodex 自己拥有的当前用户 Runtime 集成。`install`、`uninstall` 和受支持安装渠道的 `self-uninstall` 在破坏性操作前都会打印计划：TTY 问一次，非 TTY 要 `--yes`，`--dry-run` 只打印。Windows 默认自卸载只移除托管 CLI 及其精确的用户 PATH 项；加 `--restore-app` 才会先移除 Runtime 集成，Runtime 文件和会话状态仍保留。在 macOS 上，`recover` 是显式事务恢复例外：必须带 `--transaction <id>`，不接受 `--dry-run`，并且只续跑这一本已存在的 journal。
 
 - 官方插件加不了这个按钮；macOS 修改应用包，Windows 则保持 Store 包不变，走系统集成边界
-- 默认安装到官方应用后，改包没法继续保留有效的 OpenAI 签名。下次启动时，macOS 可能要求这个已修改的应用访问钥匙串中的 **Codex Storage Key**。只有对话框里的应用和钥匙串项目都符合预期时，才输入 **Mac 登录密码**（不是 ChatGPT 账号密码）并选择 **始终允许**。**允许** / **允许一次**只授权本次访问，之后还可能再次询问；信息不符合预期时选择 **拒绝**。CLI 不会对 `--clone` 或 `--app` 目标给出永久授权建议
-- 官方 **智能快照**（拍照 / 截屏附件，英文 Appshot）会不可用。这不是相机权限没开。Computer Use 一般还能用。`incodex uninstall` 后快照会恢复
+- 在 macOS 上，默认安装到官方应用后，改包没法继续保留有效的 OpenAI 签名。下次启动时，macOS 可能要求这个已修改的应用访问钥匙串中的 **Codex Storage Key**。只有对话框里的应用和钥匙串项目都符合预期时，才输入 **Mac 登录密码**（不是 ChatGPT 账号密码）并选择 **始终允许**。**允许** / **允许一次**只授权本次访问，之后还可能再次询问；信息不符合预期时选择 **拒绝**。CLI 不会对 `--clone` 或 `--app` 目标给出永久授权建议
+- 在 macOS 上，官方 **智能快照**（拍照 / 截屏附件，英文 Appshot）会不可用。这不是相机权限没开。Computer Use 一般还能用。`incodex uninstall` 后快照会恢复
 - 漏洞请走 [SECURITY.md](SECURITY.md)，不要开公开 issue
 
 ## Tips
@@ -166,8 +167,8 @@ $ incodex open --mask --name "Quiet Otter" --avatar ./avatar.png
 
 没有 `--name` 时，每次启动会获得一个友好的随机两词名字；没有 `--avatar` 时，Incodex 会根据最终名字离线生成头像，因此同一个名字会得到同一个头像。自定义头像必须是普通本地 PNG、JPEG 或 WebP 文件，且不超过 5 MiB；原文件不会被修改，显示时会居中放进 Codex 的圆形头像槽。`--name` 和 `--avatar` 都必须与 `--mask` 一起使用，含空格的名字需要 shell 引号。
 
-遮罩只改当前无痕窗口的 profile footer 与账号菜单身份行，不改真实账号、认证或已存资料。
-如果遮罩无法挂载，或在 renderer 重挂载后无法恢复，Incodex 会关闭该窗口，而不是暴露真实身份。
+遮罩只改当前无痕窗口的侧栏 profile footer 与第一层账号菜单身份行。完整设置页仍显示官方账号资料；遮罩不改真实账号、认证或已存资料。从设置返回后，侧栏与菜单遮罩会恢复，包括窗口最小化再恢复的情况。
+如果遮罩无法挂载，或运行中的遮罩失效后无法恢复，Incodex 会关闭该窗口并报告故障。正常关窗会按正常关闭报告。
 
 ### Install
 
@@ -182,7 +183,7 @@ $ incodex install
   ! Official Appshot (smart snapshot) stops until uninstall.
   Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app
   Install id   0778f0fa-…
-  Runtime      1.0.0
+  Runtime      1.0.1
   App          /Applications/ChatGPT.app
   ✓ Done. Open ChatGPT.app when you want Incognito.
   ! Keychain: On next launch, macOS may ask this patched Codex app to access Codex Storage Key.
@@ -204,8 +205,8 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      1.0.0 releases/1.0.0-<manifestSha256>
-  CLI Runtime  1.0.0
+  Runtime      1.0.1 releases/1.0.1-<manifestSha256>
+  CLI Runtime  1.0.1
   Runtime state current
   Version      26.814.41957 6744
   Install id   0778f0fa-…
@@ -228,10 +229,10 @@ $ incodex doctor
   Arch         arm64
 
 ➤ Runtime
-  Version      1.0.0
-  External     1.0.0 releases/1.0.0-<manifestSha256>
+  Version      1.0.1
+  External     1.0.1 releases/1.0.1-<manifestSha256>
   External check checked
-  CLI Runtime  1.0.0
+  CLI Runtime  1.0.1
   CLI manifest <manifestSha256>
   Deployed manifest <manifestSha256>
   Runtime state current
@@ -261,7 +262,7 @@ $ incodex doctor
 ```bash
 $ incodex --version
 
-Incodex version 1.0.0
+Incodex version 1.0.1
 macOS: 26.6
 Architecture: arm64
 Kernel: 25.6.0

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { runInNewContext } from "node:vm";
 
 const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8").replaceAll(
   "\r\n",
@@ -16,6 +17,50 @@ function hookWindowSource(): string {
 }
 
 describe("Electron UI injection reporting", () => {
+  test("raising the session never reveals hidden prewarmed windows", () => {
+    const calls: string[] = [];
+    const window = (name: string, visible: boolean, minimized = false) => ({
+      isVisible: () => visible,
+      isMinimized: () => minimized,
+      restore: () => calls.push(`${name}:restore`),
+      show: () => calls.push(`${name}:show`),
+      focus: () => {},
+      moveTop: () => {},
+    });
+    const windows = [window("primary", true), window("prewarm", false), window("minimized", false, true)];
+    const start = main.indexOf("function raiseOurWindows()");
+    const end = main.indexOf("\nasync function raiseExistingIncognito()", start);
+    runInNewContext(main.slice(start, end) + "\nraiseOurWindows()", {
+      require: () => ({}), process: { platform: "test", pid: 1 },
+      mainWindows: () => windows, hideAuxiliaryWindows: () => {}, raisePid: () => {},
+      shownWindows: new WeakSet(),
+    });
+    expect(calls).toEqual(["primary:show", "minimized:restore", "minimized:show"]);
+  });
+
+  test("an existing session can raise a previously shown window after the host hides it", () => {
+    let visible = true;
+    let shows = 0;
+    const primary = {
+      isVisible: () => visible, isMinimized: () => false,
+      show: () => { visible = true; shows++; }, focus: () => {},
+    };
+    const start = main.indexOf("function raiseOurWindows()");
+    const end = main.indexOf("\nasync function raiseExistingIncognito()", start);
+    const context = {
+      require: () => ({}), process: { platform: "test", pid: 1 },
+      mainWindows: () => [primary], hideAuxiliaryWindows: () => {}, raisePid: () => {},
+      shownWindows: new WeakSet(),
+    };
+    const source = main.slice(start, end) + "\nraiseOurWindows()";
+    runInNewContext(source, context);
+    visible = false;
+    runInNewContext(source, context);
+    expect(visible).toBe(true);
+    expect(shows).toBe(2);
+    expect(main).toContain('shownWindows.add(win)');
+  });
+
   test("native menu launches inherit geometry only from a real main window", () => {
     const start = main.indexOf("function captureSourceBounds()");
     const end = main.indexOf("\nfunction readSourceBounds()", start);

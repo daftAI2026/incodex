@@ -84,10 +84,19 @@ fn run_installer_mode(
     user_root: &Path,
     test_mode: bool,
 ) -> std::process::Output {
+    run_installer_shell(download_dir, user_root, test_mode, "powershell.exe")
+}
+
+fn run_installer_shell(
+    download_dir: &Path,
+    user_root: &Path,
+    test_mode: bool,
+    shell: &str,
+) -> std::process::Output {
     let script = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join("install.ps1");
-    let mut command = Command::new("powershell.exe");
+    let mut command = Command::new(shell);
     command
         .args([
             "-NoLogo",
@@ -118,6 +127,42 @@ fn release_fixture(root: &Path, digest: &str) -> PathBuf {
     )
     .expect("write checksum fixture");
     release
+}
+
+#[test]
+fn powershell7_installs_with_private_directory_and_file_acls() {
+    let root = scratch("pwsh7");
+    let user_root = root.join("用户 [literal] root");
+    let source = Path::new(env!("CARGO_BIN_EXE_incodex"));
+    let release = release_fixture(&root, &sha256(source));
+    let output = run_installer_shell(&release, &user_root, true, "pwsh.exe");
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let installed = user_root
+        .join("packages/standalone/releases")
+        .join(env!("CARGO_PKG_VERSION"))
+        .join("incodex.exe");
+    assert_eq!(sha256(&installed), sha256(source));
+    for path in [&user_root, &user_root.join("standalone-install.lock")] {
+        incodex_core::windows_session::verify_private_acl(path)
+            .expect("PowerShell 7 must retain protected current-user ACLs");
+    }
+    for launcher in ["inc.cmd", "incodex.cmd"] {
+        let output = Command::new("cmd.exe")
+            .args(["/d", "/c"])
+            .arg(user_root.join("bin").join(launcher))
+            .arg("--version")
+            .output()
+            .expect("run installed launcher");
+        assert!(output.status.success());
+        assert!(String::from_utf8_lossy(&output.stdout)
+            .contains(&format!("Incodex version {}", env!("CARGO_PKG_VERSION"))));
+    }
+    fs::remove_dir_all(root).expect("remove PowerShell 7 fixture");
 }
 
 #[test]

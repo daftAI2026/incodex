@@ -411,3 +411,36 @@ fn release_ordering_distinguishes_update_current_and_newer_local() {
         Ordering::Less
     );
 }
+
+#[test]
+fn windows_update_reserves_channel_details_for_dry_run() {
+    let root = std::env::temp_dir()
+        .join(format!("incodex-update-output-{}", std::process::id()))
+        .join(".incodex/packages/standalone");
+    assert!(!root.exists());
+    let run = |dry_run: bool| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_incodex"));
+        command.arg("update");
+        if dry_run {
+            command.arg("--dry-run");
+        }
+        command
+            .env("INCODEX_MANAGED_BY_STANDALONE", "1")
+            .env("INCODEX_MANAGED_PACKAGE_ROOT", &root)
+            .output()
+            .expect("run Windows update presentation probe")
+    };
+    let preview = run(true);
+    assert!(preview.status.success());
+    assert!(String::from_utf8_lossy(&preview.stdout).contains("update channel: windows standalone"));
+    let live = run(false);
+    assert!(
+        !live.status.success(),
+        "missing managed installation must fail"
+    );
+    assert!(!String::from_utf8_lossy(&live.stdout).contains("update channel:"));
+    assert!(
+        !root.exists(),
+        "presentation probe must not create installation state"
+    );
+}
