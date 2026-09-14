@@ -1,3 +1,4 @@
+import { cloneButtonIconLayout } from "./button-icon-layout.ts";
 import { isSearchLabel } from "./compatibility/search-labels.ts";
 import { deriveUiProbe } from "./incodex-ui-probe.ts";
 import { resolveLocale as matchLocale, translate, type CopyKey } from "./incognito-copy.ts";
@@ -107,6 +108,8 @@ function createButtonIcon(source: string, name: IncognitoButtonIcon, sample: SVG
   if (!svg) return null;
   svg.setAttribute("data-incodex-icon", name);
   svg.setAttribute("class", sample?.getAttribute("class") || "icon-xs");
+  const style = sample?.getAttribute("style");
+  if (style) svg.setAttribute("style", style);
   svg.setAttribute("aria-hidden", "true");
   svg.setAttribute("width", sample?.getAttribute("width") || "16");
   svg.setAttribute("height", sample?.getAttribute("height") || "16");
@@ -385,8 +388,9 @@ function buildButton(search: HTMLElement): HTMLElement {
   btn.setAttribute(BTN_ATTR, "true");
   btn.setAttribute("data-incodex-hovered", "false");
   btn.className = search.className;
-  const svg = createButtonIcon(ICON_SVG, "hat-glasses", search.querySelector("svg"));
-  if (svg) btn.append(svg);
+  const sample = search.querySelector<SVGElement>("svg");
+  const svg = createButtonIcon(ICON_SVG, "hat-glasses", sample);
+  if (svg) btn.append(cloneButtonIconLayout(svg, sample, search));
   const providerTiming = createOfficialTooltipTimingBridge(findSearchButton);
   const tooltipLifecycle: TooltipLifecycle = createTooltipLifecycle({
     delayMs: TOOLTIP_FALLBACK_DELAY_MS,
