@@ -230,17 +230,6 @@ fn reconcile(root: &Path, helper: &Path, stop: &OwnedHandle) -> Result<bool, Str
             let target = discover_codex_package()?.package_full_name;
             (state, intent, target)
         };
-        if state.as_ref().is_some_and(|state| {
-            state.desired_enabled()
-                && state.package_full_name == target
-                && matches!(
-                    state.phase,
-                    WindowsInstallPhase::EnabledObserved | WindowsInstallPhase::EnabledUnobserved
-                )
-        }) {
-            status(root, "watching", &target)?;
-            return Ok(true);
-        }
         // 只等待一个已验证目标的进程；退出后整个对账重来，不沿用旧 PID/授权。
         let mut running =
             strict_running_codex_package_process_ids(&target).map_err(|error| error.to_string())?;
@@ -314,7 +303,18 @@ fn reconcile(root: &Path, helper: &Path, stop: &OwnedHandle) -> Result<bool, Str
             }
             strict_running_codex_package_process_ids(package)
         };
-        let repaired = if let Some(state) = state
+        let repaired = if let Some(state) = state.as_ref().filter(|state| {
+            state.desired_enabled() && state.package_full_name == target && intent.is_none()
+        }) {
+            status(root, "rearming-registration", &target)?;
+            rearm_current_registration_with(
+                root,
+                state,
+                |package| inspect(package).map_err(|error| error.to_string()),
+                crate::windows_activation::enable_installed_runtime,
+            )
+            .map(|()| state.clone())
+        } else if let Some(state) = state
             .as_ref()
             .filter(|state| state.desired_enabled() && state.package_full_name != target)
         {
@@ -362,18 +362,42 @@ fn reconcile(root: &Path, helper: &Path, stop: &OwnedHandle) -> Result<bool, Str
                 return Err(error);
             }
         };
+        status(root, "registration-reapplied", &installed.package_full_name)?;
         status(root, "watching", &installed.package_full_name)?;
         return Ok(true);
     }
 }
 
 fn rearm_current_registration_with(
-    _root: &Path,
-    _state: &WindowsInstallState,
-    _inspect: impl FnOnce(&str) -> Result<Vec<u32>, String>,
-    _enable: impl FnOnce(&crate::windows_activation::WindowsInstalledRuntimeRegistration) -> Result<(), String>,
+    root: &Path,
+    state: &WindowsInstallState,
+    inspect: impl FnOnce(&str) -> Result<Vec<u32>, String>,
+    enable: impl FnOnce(
+        &crate::windows_activation::WindowsInstalledRuntimeRegistration,
+    ) -> Result<(), String>,
 ) -> Result<(), String> {
-    Ok(())
+    // 调用方持有安装锁；本地记录只证明授权，不证明跨登录后的系统注册有效。
+    if !state.desired_enabled()
+        || !matches!(
+            state.phase,
+            WindowsInstallPhase::EnabledObserved | WindowsInstallPhase::EnabledUnobserved
+        )
+        || read_windows_install_state(root)?.as_ref() != Some(state)
+    {
+        return Err("Windows registration rearm authorization changed".into());
+    }
+    let evidence = crate::windows_registration::read_windows_debug_registration(root)?
+        .ok_or("Windows registration rearm evidence is missing")?;
+    if !crate::windows_registration::registration_matches_install_state(&evidence, state) {
+        return Err("Windows registration rearm evidence does not match".into());
+    }
+    crate::windows_runtime::verify_installed_windows_runtime(root, &state.runtime_release)?;
+    if !inspect(&state.package_full_name)?.is_empty() {
+        return Err("Windows registration rearm waits for normal package exit".into());
+    }
+    enable(
+        &crate::windows_activation::WindowsInstalledRuntimeRegistration::from_install_state(state)?,
+    )
 }
 
 pub(crate) fn try_run(args: &[String]) -> Option<Result<(), String>> {
@@ -479,17 +503,53 @@ mod tests {
     fn same_generation_startup_reapplies_registration_without_republishing_runtime() {
         let root = fixture_root("rearm");
         let state = crate::windows_install::install_windows_runtime_with(
-            &root, "OpenAI.Codex_1.2.3.4_x64__2p2nqsd0c76g0",
-            &std::env::current_exe().unwrap(), |_| Ok(vec![]), |_| Ok(false), |_| Ok(()), |_| Ok(()),
-        ).unwrap();
+            &root,
+            "OpenAI.Codex_1.2.3.4_x64__2p2nqsd0c76g0",
+            &std::env::current_exe().unwrap(),
+            |_| Ok(vec![]),
+            |_| Ok(false),
+            |_| Ok(()),
+            |_| Ok(()),
+        )
+        .unwrap();
         let before = std::fs::read(root.join("runtime/current.json")).unwrap();
         let mut calls = 0;
-        rearm_current_registration_with(&root, &state, |_| Ok(vec![]), |_| { calls += 1; Ok(()) }).unwrap();
-        assert_eq!(calls, 1, "same package on disk does not prove the OS activation hook survived login");
-        assert_eq!(std::fs::read(root.join("runtime/current.json")).unwrap(), before);
-        assert_eq!(read_windows_install_state(&root).unwrap(), Some(state.clone()));
-        assert!(rearm_current_registration_with(&root, &state, |_| Ok(vec![42]), |_| panic!("must wait for normal exit")).is_err());
-        assert!(rearm_current_registration_with(&root, &state, |_| Ok(vec![]), |_| Err("registration failed".into())).is_err());
+        rearm_current_registration_with(
+            &root,
+            &state,
+            |_| Ok(vec![]),
+            |_| {
+                calls += 1;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            calls, 1,
+            "same package on disk does not prove the OS activation hook survived login"
+        );
+        assert_eq!(
+            std::fs::read(root.join("runtime/current.json")).unwrap(),
+            before
+        );
+        assert_eq!(
+            read_windows_install_state(&root).unwrap(),
+            Some(state.clone())
+        );
+        assert!(rearm_current_registration_with(
+            &root,
+            &state,
+            |_| Ok(vec![42]),
+            |_| panic!("must wait for normal exit")
+        )
+        .is_err());
+        assert!(rearm_current_registration_with(
+            &root,
+            &state,
+            |_| Ok(vec![]),
+            |_| Err("registration failed".into())
+        )
+        .is_err());
     }
 
     #[test]
