@@ -373,6 +373,16 @@ mod tests {
     static STATUS_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
     #[test]
+    fn recorded_install_does_not_claim_verified_activation() {
+        let integration = WindowsIntegrationStatus {
+            installed: true, phase: Some(WindowsInstallPhase::EnabledUnobserved),
+            desired_enabled: true, package_full_name: Some("recorded-package".into()),
+            runtime_release: Some("recorded-runtime".into()), health_issues: vec![],
+        };
+        assert!(format_integration_status(&integration).contains("not verified"));
+    }
+
+    #[test]
     fn unavailable_status_keeps_the_reason_and_no_package_identity() {
         let report = WindowsPackageStatus::unavailable("not installed".to_string());
 
