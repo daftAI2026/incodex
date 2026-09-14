@@ -4,6 +4,7 @@
 ## 成员清单
 
 CLAUDE.md: runtime 局部地图，维护 Electron 扩展面的职责与依赖方向。
+button-icon-layout.ts: 浅复制 Search 图标的布局祖先，只保留 class/style，使官方尺寸 token 与定位作用域随主题和缩放继续生效。
 codex-mode-readiness.test.ts: 无痕窗口 Codex 模式探测与有限回退测试。
 compatibility/: 历史 Runtime 兼容夹具，限制旧磁盘状态的读取边界。
 dock-menu.test.ts: macOS Dock 与状态菜单控制器测试。
