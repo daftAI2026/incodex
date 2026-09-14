@@ -51,14 +51,22 @@ server.listen('\\\\.\\pipe\\Incodex-Runtime-Raise', () => console.log('listening
 fn existing_runtime_raise_uses_bounded_byte_stream_framing() {
     let _owner = match WindowsRuntimeOwnerClaim::acquire().expect("claim fixture owner") {
         WindowsRuntimeOwnerClaim::Owned(owner) => owner,
-        WindowsRuntimeOwnerClaim::Existing => panic!("close the real incognito window before testing"),
+        WindowsRuntimeOwnerClaim::Existing => {
+            panic!("close the real incognito window before testing")
+        }
     };
     for (reply, succeeds) in [
         ("socket.end('raised\\n');", true),
-        ("socket.write('rai'); setTimeout(() => socket.end('sed\\n'), 50);", true),
+        (
+            "socket.write('rai'); setTimeout(() => socket.end('sed\\n'), 50);",
+            true,
+        ),
         ("socket.end('refused\\n');", false),
         ("socket.end('raised');", false),
-        ("/* 保持连接但不回复，客户端必须在既有时限内结束。 */", false),
+        (
+            "/* 保持连接但不回复，客户端必须在既有时限内结束。 */",
+            false,
+        ),
     ] {
         let _server = server(reply);
         let start = Instant::now();
@@ -78,7 +86,10 @@ fn existing_runtime_raise_uses_bounded_byte_stream_framing() {
             "reply={reply}; stderr={}",
             String::from_utf8_lossy(&output.stderr)
         );
-        assert!(start.elapsed() < Duration::from_secs(5), "raise must stay bounded");
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "raise must stay bounded"
+        );
         if succeeds {
             assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "ready");
         } else {

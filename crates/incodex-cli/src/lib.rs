@@ -90,6 +90,8 @@ mod windows_runtime_lifecycle;
 #[cfg(target_os = "windows")]
 pub mod windows_runtime_open;
 #[cfg(target_os = "windows")]
+mod windows_runtime_raise;
+#[cfg(target_os = "windows")]
 pub mod windows_self_uninstall;
 #[cfg(target_os = "windows")]
 pub mod windows_status;
