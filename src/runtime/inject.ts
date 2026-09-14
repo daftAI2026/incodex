@@ -435,7 +435,7 @@ function createTooltipElement(): HTMLElement {
   tip.setAttribute(TIP_ATTR, "true");
   tip.setAttribute("role", "tooltip");
   // Presentation is supplied by the linked official Search tooltip. Until
-  // sampled, the button uses a native title instead of an invented palette.
+  // sampled, keep the accessible label without a separate native tooltip.
   const text = document.createElement("div");
   text.className = "flex items-center gap-2";
   const label = document.createElement("div");
@@ -489,13 +489,8 @@ function syncTooltipPresentation(): boolean {
   observeOfficialTooltip(search);
   const sample = officialTooltipPresentation.read(search);
   const btn = document.querySelector<HTMLElement>(`[${BTN_ATTR}]`);
-  if (btn) {
-    if (sample) btn.removeAttribute("title");
-    else {
-      const title = `${labelFor(isIncognitoWindow())} (${shortcutLabel()})`;
-      if (btn.getAttribute("title") !== title) btn.setAttribute("title", title);
-    }
-  }
+  // Also remove a fallback left by an older injector on an existing button.
+  btn?.removeAttribute("title");
   const tip = document.querySelector<HTMLElement>(`[${TIP_ATTR}]`);
   if (!sample) {
     hideTooltip();

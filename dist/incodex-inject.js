@@ -1944,15 +1944,7 @@ function syncTooltipPresentation() {
   observeOfficialTooltip(search);
   const sample = officialTooltipPresentation.read(search);
   const btn = document.querySelector(`[${BTN_ATTR}]`);
-  if (btn) {
-    if (sample)
-      btn.removeAttribute("title");
-    else {
-      const title = `${labelFor(isIncognitoWindow())} (${shortcutLabel()})`;
-      if (btn.getAttribute("title") !== title)
-        btn.setAttribute("title", title);
-    }
-  }
+  btn?.removeAttribute("title");
   const tip = document.querySelector(`[${TIP_ATTR}]`);
   if (!sample) {
     hideTooltip();
