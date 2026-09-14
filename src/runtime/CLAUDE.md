@@ -26,6 +26,7 @@ incodex-window-lifecycle.cts: 无痕主窗口关闭状态机，等待官方 clos
 incognito-copy-data.ts: 官方支持语言对应的 Incodex 文案数据。
 incognito-copy.ts: Incodex 文案语言解析与回退策略。
 incognito-profile-mask.ts: 截图隐私遮罩的 DOM 识别与骨架布局模型。
+inject-icon-layout.test.ts: 通过打包真实注入器的 DOM 夹具复现 Search 图标布局祖先丢失，验证 token 引用、隔离与 hover 换图。
 inject.test.ts: 共享渲染器注入器行为测试。
 inject.ts: 帽子眼镜、提示、横幅和隐私遮罩的共享渲染器注入实现。
 official-tooltip-provider.test.ts: 官方 tooltip 宿主复用测试。
