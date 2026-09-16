@@ -384,6 +384,10 @@ class FakeNative {
     this.values.set("toolTip", value);
   }
 
+  setAccessibilityLabel$(value: unknown): void {
+    this.values.set("accessibilityLabel", value);
+  }
+
   setHidden$(value: unknown): void {
     this.values.set("hidden", value);
   }
@@ -732,11 +736,12 @@ async function makeHarness(options: {
   onHandoff?: (payload: any) => void;
   onBack?: (payload: any) => { finished?: Promise<unknown>; dispose?: () => void } | undefined;
   locateSettings?: () => unknown;
+  copy?: typeof COPY;
 } = {}) {
   const bridge = makeBridge();
   const api = await createNativeAccessibilitySetupWindow({
     appPath: APP_PATH,
-    copy: COPY,
+    copy: options.copy ?? COPY,
     loadObjcModule: async () => bridge.objc,
     locateSettings: options.locateSettings ?? (() => ({ x: 120, y: 140, width: 920, height: 700 })),
     onHandoff: options.onHandoff,
@@ -819,6 +824,19 @@ describe("native Accessibility setup adapter", () => {
     provider?.invoke("pasteboard:item:provideDataForType:", null, item, "public.file-url");
     expect(item.values.get("pasteboard:public.file-url")).toBe(`file://${APP_PATH}`);
     expect(arrayValues(item.values.get("types"))).toEqual(expect.arrayContaining(["public.file-url"]));
+  });
+
+  test("localizes the native Back accessibility label", async () => {
+    const { api, bridge } = await makeHarness({ copy: { ...COPY, later: "稍後" } });
+    try {
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      const back = bridge.objects.find((value) => value.action === "later:");
+      if (!back) throw new Error("native Back button is missing");
+      expect(back.values.get("accessibilityLabel")).toBe("稍後");
+    } finally {
+      api.close();
+    }
   });
 
   test("Back recaptures the original target and waits for a reverse handoff before cleanup", async () => {

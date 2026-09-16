@@ -463,6 +463,15 @@ describe("Accessibility setup controller", () => {
 
 
 describe("single-window Accessibility setup", () => {
+  test("keeps the native guide in English or the matching Chinese script", () => {
+    const resolveCopy = (runtimeMain as any).resolveAccessibilityCopy;
+    expect(typeof resolveCopy).toBe("function");
+    expect(resolveCopy("zh-CN").body).toBe("安装后，需要重新授权，ChatGPT 才能继续操作其他应用。");
+    expect(resolveCopy("zh-HK").later).toBe("稍後");
+    expect(resolveCopy("zh-TW").later).toBe("稍後");
+    expect(resolveCopy("ja-JP").body).toBe(resolveCopy("en").body);
+  });
+
   test("keeps one window and detects grant while Settings remains frontmost", async () => {
     const h = makeHarness({ probes: [false, false, false, true], dialogResponses: [0] });
     await h.controller.run();

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { resolveLocale, translate } from "./runtime/incognito-copy.ts";
+import { ACCESSIBILITY_SETUP_COPY, resolveLocale, translate } from "./runtime/incognito-copy.ts";
 
 describe("locale fallback", () => {
   test("empty and unknown values fall back to English", () => {
@@ -21,6 +21,31 @@ describe("locale fallback", () => {
       for (const key of ["open", "exit", "title", "dismiss", "errorTitle"] as const) {
         expect(translate(locale, key)).toContain("私密");
       }
+    }
+  });
+
+  test("Accessibility setup copy preserves the supported Chinese script variants", () => {
+    const accessibilityCopy = ACCESSIBILITY_SETUP_COPY as Record<string, { body: string }>;
+    expect(resolveLocale("zh-CN")).toBe("zh-CN");
+    expect(resolveLocale("zh-HK")).toBe("zh-HK");
+    expect(resolveLocale("zh-TW")).toBe("zh-TW");
+    expect(resolveLocale("zh-Hant-HK")).toBe("zh-HK");
+    expect(resolveLocale("zh-Hant")).toBe("zh-TW");
+
+    expect(accessibilityCopy["en"].body).toBe(
+      "After installation, ChatGPT needs to be authorized again to continue controlling other apps.",
+    );
+    expect(accessibilityCopy["zh-CN"].body).toBe(
+      "安装后，需要重新授权，ChatGPT 才能继续操作其他应用。",
+    );
+    expect(accessibilityCopy["zh-HK"].body).toBe(
+      "安裝後，需要重新授權，ChatGPT 才能繼續操作其他應用程式。",
+    );
+    expect(accessibilityCopy["zh-TW"].body).toBe(
+      "安裝後，需要重新授權，ChatGPT 才能繼續操作其他應用程式。",
+    );
+    for (const key of ["en", "zh-CN", "zh-HK", "zh-TW"] as const) {
+      expect(accessibilityCopy[key].body).not.toContain("\n");
     }
   });
 
