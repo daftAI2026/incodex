@@ -33,20 +33,20 @@ describe("locale fallback", () => {
     expect(resolveLocale("zh-Hant")).toBe("zh-TW");
 
     expect(accessibilityCopy["en"].body).toBe(
-      "After installation, ChatGPT needs to be authorized again to continue controlling other apps.",
+      "Installing Incodex modifies ChatGPT, so grant Accessibility access again to let it continue controlling other apps.",
     );
     expect(accessibilityCopy["en"].back).toBe("Back");
     expect(accessibilityCopy["zh-CN"].body).toBe(
-      "安装后，需要重新授权，ChatGPT 才能继续操作其他应用。",
+      "安装 Incodex 会修改 ChatGPT，因此需要重新授予辅助功能权限，才能继续操作其他应用。",
     );
     expect(accessibilityCopy["zh-CN"].back).toBe("返回");
     expect(accessibilityCopy["zh-HK"].body).toBe(
-      "安裝後，需要重新授權，ChatGPT 才能繼續操作其他應用程式。",
+      "安裝 Incodex 會修改 ChatGPT，因此需要重新授予輔助功能權限，才能繼續操作其他應用程式。",
     );
     expect(accessibilityCopy["zh-HK"].back).toBe("返回");
     expect(accessibilityCopy["zh-HK"].addedBody).toContain("確認取得權限後");
     expect(accessibilityCopy["zh-TW"].body).toBe(
-      "安裝後，需要重新授權，ChatGPT 才能繼續操作其他應用程式。",
+      "安裝 Incodex 會修改 ChatGPT，因此需要重新授予輔助功能權限，才能繼續操作其他應用程式。",
     );
     expect(accessibilityCopy["zh-TW"].back).toBe("返回");
     expect(accessibilityCopy["zh-TW"].addedBody).toContain("確認取得權限後");
