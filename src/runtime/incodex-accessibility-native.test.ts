@@ -21,6 +21,8 @@ const COPY = {
   openSettings: "Open Settings",
   checking: "Checking automatically",
   repairing: "Preparing System Settings…",
+  errorTitle: "Unable to open Settings",
+  errorBody: "Try opening System Settings again.",
 };
 
 function frame(width = 0, height = 0, x = 0, y = 0): Frame {
@@ -72,7 +74,8 @@ class FakeNative {
     return this.selectors.has(selector.replaceAll(":", "$"));
   }
 
-  initWithContentRect$styleMask$backing$defer$(value: Frame): FakeNative {
+  initWithContentRect$styleMask$backing$defer$(value: Frame, styleMask: number): FakeNative {
+    this.values.set("styleMask", styleMask);
     this.record("initWithContentRect:styleMask:backing:defer:", value);
     this.frameValue = copyFrame(value);
     return this;
@@ -657,6 +660,7 @@ function makeBridge(bodyHeight = 32): FakeBridge {
   const objc = {
     NobjcLibrary: class {
       constructor(readonly framework: string) {}
+      get NSMutableParagraphStyle() { return library(this.framework).NSMutableParagraphStyle; }
       get NSPanel() { return library(this.framework).NSPanel; }
       get NSVisualEffectView() { return library(this.framework).NSVisualEffectView; }
       get NSImageView() { return library(this.framework).NSImageView; }
@@ -764,7 +768,7 @@ function installPollingClock() {
 }
 
 function helperPanels(bridge: FakeBridge): FakeNative[] {
-  return bridge.objects.filter((value) => value.type.includes("NonactivatingPanel"));
+  return bridge.objects.filter((value) => value.type === "NSPanel" && value.values.get("styleMask") === 128);
 }
 
 async function makeHarness(options: {

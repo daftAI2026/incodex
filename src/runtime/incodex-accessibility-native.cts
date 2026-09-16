@@ -31,10 +31,6 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   const flipped = { isFlipped: { types: "B@:", implementation: () => true } };
   const View = define("View", "NSView", flipped);
   const Material = define("Material", "NSVisualEffectView", flipped);
-  const NonactivatingPanel = define("NonactivatingPanel", "NSPanel", {
-    canBecomeKeyWindow: { types: "B@:", implementation: () => false },
-    canBecomeMainWindow: { types: "B@:", implementation: () => false },
-  });
   function label(value, frame, size = 13, bold = false, centered = false, secondary = false) {
     const field = kit.NSTextField.labelWithString$(str(value));
     field.setFrame$(frame); field.setFont$(bold ? kit.NSFont.boldSystemFontOfSize$(size) : kit.NSFont.systemFontOfSize$(size));
@@ -148,6 +144,13 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   allow.setBordered$(true); allow.setFont$(kit.NSFont.systemFontOfSize$(13));
   allowSurface.addSubview$(allow); card.addSubview$(allowSurface);
   function fitInitialBody() {
+    // CUA description: centered Text.lineSpacing(2), measured after styling.
+    const paragraph = kit.NSMutableParagraphStyle.alloc().init();
+    paragraph.setAlignment$(1); paragraph.setLineSpacing$(2);
+    const attributed = body.attributedStringValue().mutableCopy();
+    attributed.addAttribute$value$range$(str("NSParagraphStyle"), paragraph,
+      { location: 0, length: Number(attributed.length()) });
+    body.setAttributedStringValue$(attributed);
     const measured = Number(body.cell().cellSizeForBounds$(rect(0, 0, 518, 1000)).height);
     if (!Number.isFinite(measured) || measured <= 0) throw new Error("Permission text has invalid native bounds");
     const bodyHeight = Math.ceil(measured);
@@ -242,7 +245,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   let instructionX = 0;
   function positionArrow(frame) { arrowPanel.setFrame$display$(rect(frame.origin.x + instructionX - 7, frame.origin.y + 112 - 12 - 28 - 11, 42, 62.8), false); }
   function createHelper(frame) {
-    const panel = NonactivatingPanel.alloc().initWithContentRect$styleMask$backing$defer$(frame,128,2,false); configurePanel(panel,true);
+    const panel = kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(frame,128,2,false); configurePanel(panel,true);
     panel.setOpaque$(false); panel.setBackgroundColor$(kit.NSColor.clearColor()); panel.setHasShadow$(false); panel.setIgnoresMouseEvents$(false);
     const view = Material.alloc().initWithFrame$(rect(0,0,532,112)); view.setMaterial$(6); view.setBlendingMode$(0); view.setState$(1); view.setWantsLayer$(true); view.layer().setCornerRadius$(12); view.layer().setMasksToBounds$(true);
     const edge = surface(rect(0,0,532,112),12,kit.NSColor.clearColor());
@@ -259,7 +262,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     const box=kit.NSBox.alloc().initWithFrame$(rect(0,0,452,44)); box.setBoxType$(4); box.setBorderType$(1); box.setCornerRadius$(8); box.setBorderWidth$(.5); box.setBorderColor$(kit.NSColor.separatorColor()); box.setFillColor$(kit.NSColor.controlBackgroundColor()); row.addSubview$(box);
     appRowView=View.alloc().initWithFrame$(rect(0,0,452,44)); row.addSubview$(appRowView);
     appRowView.addSubview$(imageView(icon,rect(8,8,28,28))); appRowView.addSubview$(label("ChatGPT",rect(44,13,396,18),13));
-    arrowPanel=NonactivatingPanel.alloc().initWithContentRect$styleMask$backing$defer$(rect(0,0,42,62.8),128,2,false); configurePanel(arrowPanel,true); arrowPanel.setOpaque$(false); arrowPanel.setBackgroundColor$(kit.NSColor.clearColor()); arrowPanel.setHasShadow$(false);
+    arrowPanel=kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(rect(0,0,42,62.8),128,2,false); configurePanel(arrowPanel,true); arrowPanel.setOpaque$(false); arrowPanel.setBackgroundColor$(kit.NSColor.clearColor()); arrowPanel.setHasShadow$(false);
     const canvas=kit.NSView.alloc().initWithFrame$(rect(0,0,42,62.8)); canvas.setWantsLayer$(true); canvas.layer().setMasksToBounds$(false);
     arrow=Arrow.alloc().initWithFrame$(rect(7,11,28,28)); arrow.setWantsLayer$(true); arrow.layer().setGeometryFlipped$(true); arrow.layer().setAnchorPoint$({x:.5,y:1}); arrow.setFrame$(rect(7,11,28,28)); arrow.layer().setMasksToBounds$(false);
     graphics.setBlackColor(arrow.layer(),"shadowColor",1); arrow.layer().setShadowOpacity$(.23); arrow.layer().setShadowRadius$(7); arrow.layer().setShadowOffset$({width:0,height:4});
