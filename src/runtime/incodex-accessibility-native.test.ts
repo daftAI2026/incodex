@@ -841,6 +841,17 @@ describe("native Accessibility setup adapter", () => {
     } finally { api.close(); }
   });
 
+  test("applies the reference title offset without moving body or permission row", async () => {
+    const { api, panel } = await makeHarness({ bodyHeight: 32 });
+    try {
+      expect(objectWithTitle(panel, COPY.title)?.frame().origin.y).toBe(101);
+      expect(objectWithTitle(panel, COPY.body)?.frame().origin.y).toBe(147);
+      const card = descendants(panel).find(value => value.frame().origin.x === 41 && value.frame().size.height === 80);
+      expect(card?.frame().origin.y).toBe(200);
+      expect(panel.frame().size.height).toBe(312);
+    } finally { api.close(); }
+  });
+
   test("fits initial height to localized body while preserving card gap and bottom padding", async () => {
     for (const bodyHeight of [16, 32, 64]) {
       const { api, panel } = await makeHarness({ bodyHeight });
