@@ -346,6 +346,17 @@ class FakeNative {
     this.values.set("stringValue", String(value));
   }
 
+  cell(): FakeNative { return this; }
+
+  cellSizeForBounds$(value: Frame): { width: number; height: number } {
+    this.record("cellSizeForBounds:", value);
+    return { width: value.size.width, height: Number(this.values.get("measuredHeight") ?? 32) };
+  }
+
+  setContentSize$(size: { width: number; height: number }): void {
+    this.frameValue.size = { ...size };
+  }
+
   setFont$(value: unknown): void {
     this.values.set("font", value);
   }
@@ -526,7 +537,7 @@ type FakeBridge = {
   objects: FakeNative[];
 };
 
-function makeBridge(): FakeBridge {
+function makeBridge(bodyHeight = 32): FakeBridge {
   const calls: NativeCall[] = [];
   const objects: FakeNative[] = [];
   const definitions = new Map<string, Record<string, (...args: any[]) => unknown>>();
@@ -558,6 +569,7 @@ function makeBridge(): FakeBridge {
       labelWithString$: (value: unknown) => {
         const field = object(type);
         field.setStringValue$(value);
+        field.values.set("measuredHeight", bodyHeight);
         return field;
       },
       stringWithUTF8String$: (value: string) => value,
@@ -739,8 +751,9 @@ async function makeHarness(options: {
   locateSettings?: () => unknown;
   copy?: typeof COPY;
   reduceMotion?: boolean;
+  bodyHeight?: number;
 } = {}) {
-  const bridge = makeBridge();
+  const bridge = makeBridge(options.bodyHeight);
   const api = await createNativeAccessibilitySetupWindow({
     appPath: APP_PATH,
     copy: options.copy ?? COPY,
@@ -783,6 +796,20 @@ describe("native Accessibility setup adapter", () => {
     expect(objectWithTitle(panel, COPY.permissionDescription)).toBeDefined();
     expect(objectWithTitle(panel, "Screenshots")).toBeUndefined();
     expect(objectWithTitle(panel, COPY.repair)).toBeDefined();
+  });
+
+  test("fits initial height to localized body while preserving card gap and bottom padding", async () => {
+    for (const bodyHeight of [16, 32, 64]) {
+      const { api, panel } = await makeHarness({ bodyHeight });
+      try {
+        const body = objectWithTitle(panel, COPY.body);
+        const card = descendants(panel).find(value => value.frame().origin.x === 41 && value.frame().size.height === 80);
+        expect(body?.frame().size.height).toBe(bodyHeight);
+        expect(card?.frame().origin.y).toBe(147 + bodyHeight + 21);
+        expect(panel.frame().size.height).toBe(147 + bodyHeight + 21 + 80 + 32);
+        expect(panel.contentView()?.frame().size).toEqual(panel.frame().size);
+      } finally { api.close(); }
+    }
   });
 
   test("captures pending source geometry and native snapshot before entering the 532x112 helper", async () => {
