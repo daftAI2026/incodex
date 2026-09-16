@@ -214,7 +214,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     const width = Math.min(instruction.frame().size.width,464); instructionX=(532-28-8-width)/2;
     instruction.setFrame$(rect(instructionX+36,17,width,18)); view.addSubview$(instruction);
     const back = button("",rect(16,58,32,32),"later:");
-    const backLabel = str(text("later"));
+    const backLabel = str(text("back"));
     back.setImage$(kit.NSImage.imageWithSystemSymbolName$accessibilityDescription$(str("chevron.left"),backLabel));
     back.setAccessibilityLabel$(backLabel); back.setBezelStyle$(7); back.setToolTip$(backLabel); view.addSubview$(back);
     const row=Drag.alloc().initWithFrame$(rect(64,52,452,44)); view.addSubview$(row);
