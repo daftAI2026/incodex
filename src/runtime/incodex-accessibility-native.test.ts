@@ -155,7 +155,9 @@ class FakeNative {
 
   displayIfNeeded(): void {}
 
-  sizeToFit(): void {}
+  sizeToFit(): void {
+    if (this.type === "NSButton") this.frameValue.size = { width: 56.5, height: 24 };
+  }
 
   layer(): FakeNative {
     if (!this.layerValue) this.layerValue = new FakeNative("CALayer", this.calls);
@@ -838,6 +840,19 @@ describe("native Accessibility setup adapter", () => {
         expect(attributed?.values.get("attributeRange")).toEqual({ location: 0, length: value.length });
         expect(body.values.get("stringValue")).toBe(value);
       }
+    } finally { api.close(); }
+  });
+
+  test("keeps the native button intrinsic size inside the reference minimum-width capsule", async () => {
+    const { api, panel } = await makeHarness();
+    try {
+      const allow = objectWithTitle(panel, COPY.repair)!;
+      expect(allow.frame().size).toEqual({ width: 56.5, height: 24 });
+      expect(allow.layer().values.get("cornerRadius")).toBe(12);
+      expect(allow.layer().values.get("cornerCurve")).toBe("continuous");
+      expect(allow.layer().values.get("masksToBounds")).toBe(true);
+      const holder = descendants(panel).find(value => value.subviews.includes(allow))!;
+      expect(holder.frame()).toEqual(frame(62, 24, 440, 28));
     } finally { api.close(); }
   });
 
