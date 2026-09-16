@@ -20,8 +20,9 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   const selector = name => objc.callFunction("NSSelectorFromString", { returns: ":", args: ["@"] }, str(name));
   const unique = `IncodexPermission_${process.pid}_${++generation}`;
   let closed = false, state = "pending", settled = false, source = null, helper = null, arrowPanel = null, arrow = null;
-  let tracking = null, arrowTimer = null, returnTimer = null, flight = null, locating = false, attempts = 0, presented = false, dragging = false, dragSession = null, returning = false;
+  let tracking = null, arrowTimer = null, returnTimer = null, backFlightTimer = null, flight = null, locating = false, attempts = 0, presented = false, dragging = false, dragSession = null, returning = false, retryReady = false, returnSequence = 0;
   const closeHandlers = new Set();
+  const retryHandlers = new Set();
   let resolveChoice;
   const choice = new Promise(resolve => { resolveChoice = resolve; });
   const resolveOnce = value => { if (!settled) { settled = true; resolveChoice(value); } };
@@ -63,21 +64,45 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   if (!permissionIcon) permissionIcon = kit.NSImage.imageWithSystemSymbolName$accessibilityDescription$(str("accessibility"), str(text("permissionTitle")));
 
   function stopArrow() { clearTimeout(arrowTimer); clearTimeout(returnTimer); arrowTimer = returnTimer = null; }
+  function stopBackFlightTimer() { clearTimeout(backFlightTimer); backFlightTimer = null; }
   function close() {
     if (closed) return;
-    closed = true; returning = false; dragging = false; dragSession = null;
-    clearInterval(tracking); tracking = null; stopArrow(); flight?.dispose(); flight = null;
+    closed = true; returning = false; retryReady = false; dragging = false; dragSession = null; returnSequence++;
+    clearInterval(tracking); tracking = null; stopArrow(); stopBackFlightTimer(); flight?.dispose(); flight = null;
     resolveOnce("later");
     for (const panel of panels) { panel.orderOut$(null); panel.close(); }
+    helper = null; arrowPanel = null; arrow = null; appRowView = null;
     for (const callback of closeHandlers) callback(); closeHandlers.clear();
+    retryHandlers.clear();
   }
   const Delegate = define("Delegate", "NSObject", {
     "windowWillClose:": { types: "v@:@", implementation: () => close() },
     "allow:": { types: "v@:@", implementation: (_self, sender) => {
-      if (closed || state !== "pending" || settled) return;
+      if (closed) return;
+      if (state === "pending" && !settled) {
+        try { source = captureSource(); }
+        catch { source = null; }
+        resolveOnce("repair");
+        return;
+      }
+      if (state !== "pending" || !settled || !retryReady) return;
+      retryReady = false;
       try { source = captureSource(); }
-      catch { source = null; }
-      resolveOnce("repair");
+      catch { restoreInitialPage(true); return; }
+      setState("repairing");
+      if (retryHandlers.size === 0) { restoreInitialPage(true); return; }
+      for (const callback of retryHandlers) {
+        try {
+          const result = callback();
+          if (result && typeof result.then === "function") {
+            void Promise.resolve(result).catch(() => {
+              if (!closed && state === "repairing" && !retryReady) restoreInitialPage(true);
+            });
+          }
+        } catch {
+          if (!closed && state === "repairing" && !retryReady) restoreInitialPage(true);
+        }
+      }
     } },
     "later:": { types: "v@:@", implementation: () => helper && state === "awaiting-user" ? handleBack() : close() },
   });
@@ -229,33 +254,62 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     const area=kit.NSTrackingArea.alloc().initWithRect$options$owner$userInfo$(arrow.bounds(),1|128|512,arrow,null); arrow.addTrackingArea$(area);
     return {panel,view,frame,radius:12,row};
   }
+  function disposeHelper() {
+    const child = arrowPanel;
+    const owner = helper?.panel;
+    const windows = [child, owner].filter(Boolean);
+    owner?.removeChildWindow$?.(child);
+    for (const panel of windows) {
+      const index = panels.indexOf(panel);
+      if (index >= 0) panels.splice(index, 1);
+    }
+    helper = null; arrowPanel = null; arrow = null; appRowView = null; presented = false; dragging = false; dragSession = null;
+    for (const panel of new Set(windows)) {
+      panel.setDelegate$(null); panel.orderOut$(null); panel.close();
+    }
+  }
+  function restoreInitialPage(enableRetry) {
+    if (closed) return;
+    clearInterval(tracking); tracking = null; stopArrow(); stopBackFlightTimer();
+    disposeHelper(); returning = false; state = "pending"; retryReady = Boolean(enableRetry);
+    title.setStringValue$(str(text("title"))); body.setStringValue$(str(text("body")));
+    allow.setEnabled$(Boolean(enableRetry)); initial.orderFront$(null);
+  }
+  function fallbackToInitial() {
+    returnSequence++;
+    stopBackFlightTimer();
+    const active = flight; flight = null; active?.dispose?.();
+    restoreInitialPage(true);
+  }
   function revealHelper() {
     if (closed || returning || state !== "awaiting-user") return;
     presented=true; helper.panel.orderFront$(null); arrowPanel.orderFront$(null); scheduleArrow();
   }
   function handleBack() {
     if (closed || returning || dragging || state !== "awaiting-user" || !helper) return;
-    if (reducedMotion() || !onBack || !helper.targetRow) { close(); return; }
-    returning = true;
-    clearInterval(tracking); tracking = null;
+    returning = true; retryReady = false; const token = ++returnSequence;
+    clearInterval(tracking); tracking = null; stopArrow();
+    initial.orderFront$(null); title.setStringValue$(str(text("title"))); body.setStringValue$(str(text("body"))); allow.setEnabled$(true);
+    if (reducedMotion() || !onBack || !helper.targetRow) { fallbackToInitial(); return; }
     let returnSource;
     try { returnSource = captureSource(); }
-    catch { close(); return; }
-    stopArrow();
+    catch { fallbackToInitial(); return; }
     let active;
     try {
       active = onBack({ objc, source: returnSource, target: helper.targetRow, reverse: true, isClosed: () => closed });
-    } catch { close(); return; }
+    } catch { fallbackToInitial(); return; }
     helper.panel.orderOut$(null); arrowPanel?.orderOut$(null);
-    if (!active?.finished || typeof active.finished.then !== "function") { close(); return; }
+    if (!active?.finished || typeof active.finished.then !== "function") { active?.dispose?.(); fallbackToInitial(); return; }
     flight = active;
-    void Promise.resolve(active.finished).then(() => {
-      if (flight === active) flight = null;
-      if (!closed) close();
-    }).catch(() => {
-      if (flight === active) flight = null;
-      if (!closed) close();
-    });
+    const finish = () => {
+      if (closed || token !== returnSequence || flight !== active) return;
+      active.dispose?.();
+      flight = null; stopBackFlightTimer(); restoreInitialPage(true);
+    };
+    backFlightTimer = setTimeout(() => {
+      if (token === returnSequence && flight === active) fallbackToInitial();
+    }, 5000);
+    void Promise.resolve(active.finished).then(finish, finish);
   }
   async function place() {
     if (closed || returning || state !== "awaiting-user" || locating) return;
@@ -279,9 +333,13 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
             const activeFlight=onHandoff({objc,source,target:helper.targetRow,isClosed:()=>closed});
             flight=activeFlight;
             void Promise.resolve(activeFlight?.finished).then(() => {
-              if (flight === activeFlight) flight=null;
+              if (flight !== activeFlight || closed || returning) return;
+              flight=null;
               revealHelper();
-            }).catch(() => { if (!closed) setState("error"); });
+            }).catch(() => {
+              if (flight !== activeFlight || closed || returning) return;
+              flight=null; setState("error");
+            });
           } else revealHelper();
         } else revealHelper();
       } else if (!dragging) {
@@ -289,7 +347,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
         if (helper.targetRow) helper.targetRow.frame = helper.panel.convertRectToScreen$(helper.row.convertRect$toView$(helper.row.bounds(), null));
       }
     } catch (error) {
-      if (!closed) { title.setStringValue$(str(text("errorTitle"))); body.setStringValue$(str(text("errorBody"))); initial.orderFront$(null); }
+      if (!closed) setState("error");
     } finally { locating=false; }
   }
   function setState(next) {
@@ -300,10 +358,12 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     if (next==="awaiting-user") { allow.setEnabled$(false); body.setStringValue$(str(text("checking"))); if (!tracking) tracking=setInterval(()=>void place(),100); void place(); }
     if (next==="error" || next==="unknown") {
       clearInterval(tracking);tracking=null;stopArrow();flight?.dispose();flight=null;
-      helper?.panel.orderOut$(null);arrowPanel?.orderOut$(null);title.setStringValue$(str(text("errorTitle")));body.setStringValue$(str(text("errorBody")));initial.orderFront$(null);
+      disposeHelper(); title.setStringValue$(str(text("errorTitle")));body.setStringValue$(str(text("errorBody")));initial.orderFront$(null);
     }
   }
   initial.center(); electron?.app?.focus?.({steal:true}); initial.makeKeyAndOrderFront$(null);
-  return {choice,setState,close,isDestroyed:()=>closed,onClose:callback=>{closeHandlers.add(callback);return()=>closeHandlers.delete(callback);}};
+  return {choice,setState,close,isDestroyed:()=>closed,
+    onClose:callback=>{closeHandlers.add(callback);return()=>closeHandlers.delete(callback);},
+    onRetry:callback=>{if(typeof callback!=="function") return ()=>{}; retryHandlers.add(callback); return()=>retryHandlers.delete(callback);}};
 }
 export {createNativeAccessibilitySetupWindow};
