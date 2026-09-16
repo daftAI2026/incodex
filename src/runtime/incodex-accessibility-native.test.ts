@@ -513,6 +513,7 @@ class FakeNative {
   }
 
   makeKeyAndOrderFront$(_value: unknown): void {
+    this.values.set("keyCount", Number(this.values.get("keyCount") ?? 0) + 1);
     this.visible = true;
   }
 
@@ -943,9 +944,11 @@ describe("native Accessibility setup adapter", () => {
       expect(reverses[0].target.frame.size).toEqual({ width: 452, height: 44 });
       expect(api.isDestroyed()).toBe(false);
 
+      const priorKeyCount = Number(panel.values.get("keyCount"));
       finish();
       await settleNativeAsync();
       expect(api.isDestroyed()).toBe(false);
+      expect(Number(panel.values.get("keyCount"))).toBe(priorKeyCount + 1);
     } finally {
       finish();
       api.close();
