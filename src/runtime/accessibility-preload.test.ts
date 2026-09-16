@@ -18,7 +18,7 @@ test("permission guide uses native drag IPC and never exposes the general app br
       ipcRenderer: { send: (...args: any[]) => sent.push(args), on: () => {} },
     }),
     process: { argv: ["--incodex-accessibility-setup"] },
-    window, module: { exports: {} },
+    window, exports: {}, module: { exports: {} },
     document: { addEventListener: (_name: string, fn: any) => fn(), getElementById: (id: string) => nodes.get(id) },
   });
   expect(exposed).toEqual([]);
