@@ -1038,3 +1038,92 @@ test("Settings tracking continues while the forward flight is still running", as
     expect(helper?.frame().origin.x).not.toBe(before);
   } finally { finish(); api?.close(); clock.restore(); }
 });
+
+test("Back freezes the helper target geometry while the reverse flight is pending", async () => {
+  const clock = installPollingClock();
+  let target = { x: 120, y: 140, width: 920, height: 700 };
+  let reverse: any;
+  let finish!: () => void;
+  const finished = new Promise<void>((resolve) => { finish = resolve; });
+  let api: Awaited<ReturnType<typeof createNativeAccessibilitySetupWindow>> | undefined;
+  try {
+    const harness = await makeHarness({
+      locateSettings: () => target,
+      onBack: (payload) => { reverse = payload; return { finished, dispose: () => {} }; },
+    });
+    api = harness.api;
+    objectWithTitle(harness.panel, COPY.repair)?.performClick$();
+    await api.choice;
+    api.setState("awaiting-user");
+    await settleNativeAsync();
+    const poll = clock.timers.find((timer) => timer.active && timer.delay === 100);
+    const back = harness.bridge.objects.find((value) => value.action === "later:");
+    if (!poll || !back) throw new Error("native Back tracking harness is missing");
+
+    back.performClick$();
+    await settleNativeAsync();
+    const frozen = {
+      origin: { ...reverse.target.frame.origin },
+      size: { ...reverse.target.frame.size },
+    };
+    const frozenPanelFrame = reverse.target.panel.frame();
+    target = { ...target, x: target.x + 280 };
+    poll.callback();
+    await settleNativeAsync();
+
+    expect(reverse.target.frame).toEqual(frozen);
+    expect(reverse.target.panel.frame()).toEqual(frozenPanelFrame);
+    finish();
+    await settleNativeAsync();
+  } finally {
+    finish();
+    api?.close();
+    clock.restore();
+  }
+});
+
+test("Back keeps the reverse flight alive when Settings disappears", async () => {
+  const clock = installPollingClock();
+  let target: { x: number; y: number; width: number; height: number } | null = {
+    x: 120,
+    y: 140,
+    width: 920,
+    height: 700,
+  };
+  let disposed = 0;
+  let finish!: () => void;
+  const finished = new Promise<void>((resolve) => { finish = resolve; });
+  let api: Awaited<ReturnType<typeof createNativeAccessibilitySetupWindow>> | undefined;
+  try {
+    const harness = await makeHarness({
+      locateSettings: () => target,
+      onBack: () => ({ finished, dispose: () => { disposed += 1; } }),
+    });
+    api = harness.api;
+    objectWithTitle(harness.panel, COPY.repair)?.performClick$();
+    await api.choice;
+    api.setState("awaiting-user");
+    await settleNativeAsync();
+    const poll = clock.timers.find((timer) => timer.active && timer.delay === 100);
+    const back = harness.bridge.objects.find((value) => value.action === "later:");
+    if (!poll || !back) throw new Error("native Back tracking harness is missing");
+
+    back.performClick$();
+    await settleNativeAsync();
+    target = null;
+    for (let index = 0; index < 10; index += 1) {
+      poll.callback();
+      await settleNativeAsync();
+    }
+
+    expect(disposed).toBe(0);
+    expect(api.isDestroyed()).toBe(false);
+    finish();
+    await settleNativeAsync();
+    expect(api.isDestroyed()).toBe(true);
+  } finally {
+    finish();
+    api?.close();
+    clock.restore();
+  }
+});
