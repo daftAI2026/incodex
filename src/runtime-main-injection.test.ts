@@ -141,6 +141,22 @@ describe("Electron UI injection reporting", () => {
     expect(handler).toContain("launchIncognito(sourceWindow)");
   });
 
+  test("snapshots launch geometry before asynchronous owner and session work", () => {
+    const start = main.indexOf("function launchIncognito(");
+    const end = main.indexOf("\nfunction runtimeOwnedSessionEnv", start);
+    let geometry = "385,107,1311,873";
+    let deferred: (() => string) | undefined;
+    runInNewContext(`${main.slice(start, end)}\nlaunchIncognito({})`, {
+      windowsPlatform: null,
+      launchHolder: {},
+      instance: { singleFlight: (_holder: unknown, launch: () => string) => { deferred = launch; } },
+      captureSourceBounds: () => geometry,
+      launchIncognitoOnce: (bounds: string) => bounds,
+    });
+    geometry = "0,0,960,720";
+    expect(deferred?.()).toBe("385,107,1311,873");
+  });
+
   test("keeps macOS recovery timing while Windows rechecks asynchronous UI readiness", () => {
     const hook = hookWindowSource();
 
