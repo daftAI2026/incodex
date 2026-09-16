@@ -682,13 +682,50 @@ function flushNativeAsync(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-async function makeHarness(options: { onHandoff?: (payload: any) => void } = {}) {
+async function settleNativeAsync(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+type PollTimer = { id: number; delay: number; callback: () => void; active: boolean };
+
+function installPollingClock() {
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  let nextId = 1;
+  const timers: PollTimer[] = [];
+  globalThis.setInterval = ((callback: TimerHandler, delay?: number) => {
+    const timer = { id: nextId++, delay: Number(delay ?? 0), callback: callback as () => void, active: true };
+    timers.push(timer);
+    return timer.id as unknown as ReturnType<typeof setInterval>;
+  }) as unknown as typeof setInterval;
+  globalThis.clearInterval = ((id?: ReturnType<typeof setInterval>) => {
+    const timer = timers.find((entry) => entry.id === Number(id));
+    if (timer) timer.active = false;
+  }) as unknown as typeof clearInterval;
+  return {
+    timers,
+    restore() {
+      globalThis.setInterval = originalSetInterval;
+      globalThis.clearInterval = originalClearInterval;
+    },
+  };
+}
+
+function helperPanels(bridge: FakeBridge): FakeNative[] {
+  return bridge.objects.filter((value) => value.type.includes("NonactivatingPanel"));
+}
+
+async function makeHarness(options: {
+  onHandoff?: (payload: any) => void;
+  locateSettings?: () => unknown;
+} = {}) {
   const bridge = makeBridge();
   const api = await createNativeAccessibilitySetupWindow({
     appPath: APP_PATH,
     copy: COPY,
     loadObjcModule: async () => bridge.objc,
-    locateSettings: () => ({ x: 120, y: 140, width: 920, height: 700 }),
+    locateSettings: options.locateSettings ?? (() => ({ x: 120, y: 140, width: 920, height: 700 })),
     onHandoff: options.onHandoff,
   });
   const panel = bridge.objects.find((value) => value.type === "NSPanel");
@@ -756,6 +793,75 @@ describe("native Accessibility setup adapter", () => {
     provider?.invoke("pasteboard:item:provideDataForType:", null, item, "public.file-url");
     expect(item.values.get("pasteboard:public.file-url")).toBe(`file://${APP_PATH}`);
     expect(arrayValues(item.values.get("types"))).toEqual(expect.arrayContaining(["public.file-url"]));
+  });
+
+  test("does not fabricate a helper when System Settings never appears", async () => {
+    const clock = installPollingClock();
+    let probes = 0;
+    const { api, bridge, panel } = await makeHarness({
+      locateSettings: () => {
+        probes += 1;
+        return null;
+      },
+    });
+    try {
+      api.setState("awaiting-user");
+      await settleNativeAsync();
+      const poll = clock.timers.find((timer) => timer.active);
+      expect(poll?.delay).toBe(100);
+      for (let index = 0; index < 50; index += 1) {
+        poll?.callback();
+        await settleNativeAsync();
+      }
+
+      expect(probes).toBeGreaterThanOrEqual(50);
+      expect(helperPanels(bridge)).toHaveLength(0);
+      expect(api.isDestroyed() || panel.isVisible()).toBe(true);
+    } finally {
+      api.close();
+      clock.restore();
+    }
+  });
+
+  test("keeps a missing Settings helper during a drag, then cleans it up after bounded probes", async () => {
+    const clock = installPollingClock();
+    let target: { x: number; y: number; width: number; height: number } | null = {
+      x: 120,
+      y: 140,
+      width: 920,
+      height: 700,
+    };
+    const { api, bridge, panel } = await makeHarness({
+      locateSettings: () => target,
+    });
+    try {
+      api.setState("awaiting-user");
+      await settleNativeAsync();
+      const poll = clock.timers.find((timer) => timer.active);
+      expect(poll?.delay).toBe(100);
+      const rows = bridge.objects.filter((value) => value.hasSelector("mouseDown:"));
+      expect(rows).toHaveLength(1);
+      const row = rows[0];
+      row.invoke("draggingSession:willBeginAtPoint:", { x: 0, y: 0 });
+      target = null;
+
+      for (let index = 0; index < 10; index += 1) {
+        poll?.callback();
+        await settleNativeAsync();
+      }
+      expect(helperPanels(bridge).some((value) => value.visible && !value.destroyed)).toBe(true);
+
+      row.invoke("draggingSession:endedAtPoint:operation:", { x: 0, y: 0 }, 0);
+      for (let index = 0; index < 10; index += 1) {
+        poll?.callback();
+        await settleNativeAsync();
+      }
+      expect(helperPanels(bridge).some((value) => value.visible && !value.destroyed)).toBe(false);
+      expect(api.isDestroyed() || panel.isVisible()).toBe(true);
+    } finally {
+      api.close();
+      clock.restore();
+    }
   });
 
   test("waits for the arrow return before scheduling the next native pulse", async () => {
