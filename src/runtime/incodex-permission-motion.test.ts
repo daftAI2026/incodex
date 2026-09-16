@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { samplePermissionFlight, runPermissionFlight } from "./incodex-permission-motion.cts";
+import { samplePermissionFlight, runPermissionFlight, alignPermissionFrame } from "./incodex-permission-motion.cts";
 const source={x:100,y:100,width:100,height:40,radius:20};
 const target={x:600,y:500,width:532,height:112,radius:12};
 test("Cavalry handoff begins at source and settles exactly at target",()=>{
@@ -30,4 +30,12 @@ test("flight retains fractional points until each display aligns its backing pix
   const to = { x: -601.5, y: 35.5, width: 451.5, height: 44.5, radius: 8 };
   expect(samplePermissionFlight(from, to, 0).bounds).toEqual({ x: 100.25, y: 100.5, width: 46.5, height: 20.25 });
   expect(samplePermissionFlight(from, to, 3).bounds).toEqual({ x: -601.5, y: 35.5, width: 451.5, height: 44.5 });
+});
+
+
+test("native pixel alignment rounds rectangle edges with C round semantics on negative displays", () => {
+  expect(alignPermissionFrame({ x: .25, y: -1.25, width: .5, height: .75 }, 2))
+    .toEqual({ x: .5, y: -1.5, width: .5, height: 1 });
+  expect(alignPermissionFrame({ x: .3, y: .3, width: .3, height: .3 }, 1))
+    .toEqual({ x: 0, y: 0, width: 1, height: 1 });
 });
