@@ -2,6 +2,79 @@ import { COPY as REGIONAL_COPY, type CopyKey, type CopyTable } from "./incognito
 
 export type { CopyKey, CopyTable } from "./incognito-copy-data.ts";
 
+// Embedded into the main-process Runtime by build-runtime.ts. Keep the two
+// source languages together without introducing an unverified Runtime asset.
+export const ACCESSIBILITY_SETUP_COPY = {
+  en: {
+    title: "Enable ChatGPT script control",
+    body: "Installing Incodex modifies ChatGPT, so its Accessibility permission needs to be granted again.",
+    permissionTitle: "Accessibility",
+    permissionDescription: "Read and interact with app interfaces",
+    repair: "Allow",
+    later: "Later",
+    back: "Back",
+    addedTitle: "Allow ChatGPT in System Settings",
+    addedBody: "Drag the ChatGPT icon above into the Accessibility list and enable it. Complete any macOS authentication. Access is checked automatically; this window closes when access is ready.",
+    dragInstruction: "Drag ChatGPT to the list above to allow Accessibility",
+    checking: "Waiting for access · checking automatically",
+    repairing: "Preparing System Settings…",
+    openSettings: "Open Settings",
+    errorTitle: "ChatGPT permission setup is incomplete",
+    errorBody: "The permission setup could not be completed. Add /Applications/ChatGPT.app in System Settings → Privacy & Security → Accessibility, then run incodex install to check again.",
+  },
+  "zh-CN": {
+    title: "启用 ChatGPT 脚本控制",
+    body: "安装 Incodex 会修改 ChatGPT，因此需要重新授予它辅助功能权限。",
+    permissionTitle: "辅助功能",
+    permissionDescription: "读取和操作其他应用的界面",
+    repair: "允许",
+    later: "稍后",
+    back: "返回",
+    addedTitle: "在系统设置中允许 ChatGPT",
+    addedBody: "将上方 ChatGPT 图标拖入辅助功能列表并开启权限。完成 macOS 要求的认证后，会自动检查权限；检查通过后，此窗口自动关闭。",
+    dragInstruction: "将 ChatGPT 拖到上方列表，允许辅助功能访问",
+    checking: "等待授权 · 自动检查中",
+    repairing: "正在准备系统设置…",
+    openSettings: "打开系统设置",
+    errorTitle: "ChatGPT 权限设置尚未完成",
+    errorBody: "未能完成权限设置。请在系统设置 → 隐私与安全性 → 辅助功能中添加 /Applications/ChatGPT.app，再运行 incodex install 重新检查。",
+  },
+  "zh-HK": {
+    title: "啟用 ChatGPT 腳本控制",
+    body: "安裝 Incodex 會修改 ChatGPT，因此需要重新授予它輔助功能權限。",
+    permissionTitle: "輔助功能",
+    permissionDescription: "讀取並操作其他應用程式的介面",
+    repair: "允許",
+    later: "稍後",
+    back: "返回",
+    addedTitle: "在系統設定中允許 ChatGPT",
+    addedBody: "將上方 ChatGPT 圖示拖入輔助功能列表並啟用權限。完成 macOS 要求的驗證後，系統會自動檢查權限；確認取得權限後，此視窗會自動關閉。",
+    dragInstruction: "將 ChatGPT 拖到上方列表，以允許輔助功能存取",
+    checking: "等待授權 · 自動檢查中",
+    repairing: "正在準備系統設定…",
+    openSettings: "開啟系統設定",
+    errorTitle: "ChatGPT 權限設定尚未完成",
+    errorBody: "未能完成權限設定。請在系統設定 → 私隱與安全性 → 輔助功能中加入 /Applications/ChatGPT.app，再執行 incodex install 重新檢查。",
+  },
+  "zh-TW": {
+    title: "啟用 ChatGPT 腳本控制",
+    body: "安裝 Incodex 會修改 ChatGPT，因此需要重新授予它輔助功能權限。",
+    permissionTitle: "輔助功能",
+    permissionDescription: "讀取並操作其他應用程式的介面",
+    repair: "允許",
+    later: "稍後",
+    back: "返回",
+    addedTitle: "在系統設定中允許 ChatGPT",
+    addedBody: "將上方的 ChatGPT 圖示拖曳到輔助功能列表並啟用權限。完成 macOS 要求的驗證後，系統會自動檢查權限；確認取得權限後，此視窗會自動關閉。",
+    dragInstruction: "將 ChatGPT 拖曳到上方列表，以允許輔助功能存取",
+    checking: "等待授權 · 自動檢查中",
+    repairing: "正在準備系統設定…",
+    openSettings: "開啟系統設定",
+    errorTitle: "ChatGPT 權限設定尚未完成",
+    errorBody: "未能完成權限設定。請在系統設定 → 隱私權與安全性 → 輔助功能中加入 /Applications/ChatGPT.app，再執行 incodex install 重新檢查。",
+  },
+} as const;
+
 // English and Chinese are the source copy; keep them beside locale resolution.
 const CORE_COPY: Record<string, CopyTable> = {
   en: {

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+mod accessibility;
 mod app_termination;
 mod entitlements;
 mod live_window;
@@ -14,6 +15,7 @@ mod live_window_macos;
 mod session_process;
 mod signature_inspection;
 mod signing;
+pub use accessibility::{inspect_accessibility_for_app, AccessibilityReport, AccessibilityStatus};
 #[cfg(test)]
 use live_window::{is_isolated_launch_command, select_live_main_window_bounds, WindowCandidate};
 pub use live_window::{live_main_window_bounds, WindowBounds};

@@ -19,6 +19,19 @@ const windowsPlatform =
 
 const USER_ROOT = path.join(os.homedir(), ".incodex");
 const DEFAULT_CODEX_HOME = path.join(os.homedir(), ".codex");
+const DEFAULT_APP_PATH = "/Applications/ChatGPT.app";
+const DEFAULT_APP_ASAR_PATH = path.join(DEFAULT_APP_PATH, "Contents", "Resources", "app.asar");
+const DEFAULT_APP_EXECUTABLE_PATH = path.join(DEFAULT_APP_PATH, "Contents", "MacOS", "ChatGPT");
+const ACCESSIBILITY_BUNDLE_ID = "com.openai.codex";
+const ACCESSIBILITY_MARKER_NAME = "accessibility-setup.json";
+const ACCESSIBILITY_MAX_MARKER_BYTES = 8 * 1024;
+const ACCESSIBILITY_PACKAGE_MAX_BYTES = 256 * 1024;
+const ACCESSIBILITY_RESET_TIMEOUT_MS = 5_000;
+const ACCESSIBILITY_SETTINGS_URL =
+  "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
+// The Runtime builder replaces this token with the {en, zh-CN, zh-HK, zh-TW} table.
+const ACCESSIBILITY_COPY = "__INCODEX_ACCESSIBILITY_COPY__";
+const accessibilityWindow = "__INCODEX_ACCESSIBILITY_WINDOW__";
 const READY_TIMEOUT_MS = 15_000;
 let capturedSourceHome = null;
 const shownWindows = new WeakSet();
@@ -107,6 +120,607 @@ function readLocaleOverride() {
   } catch {
     return "";
   }
+}
+
+function accessibilityInstallIdIsSafe(installId) {
+  return (
+    typeof installId === "string" &&
+    installId.length > 0 &&
+    installId.length <= 128 &&
+    /^[A-Za-z0-9._-]+$/.test(installId)
+  );
+}
+
+function accessibilityPathIsDefaultApp(appPath) {
+  return typeof appPath === "string" && path.resolve(appPath) === DEFAULT_APP_PATH;
+}
+
+function accessibilityCurrentUid() {
+  return typeof process.getuid === "function" ? process.getuid() : null;
+}
+
+function accessibilityStatIsSafe(stat, directory) {
+  if (!stat || stat.isSymbolicLink() || (directory ? !stat.isDirectory() : !stat.isFile())) {
+    return false;
+  }
+  const uid = accessibilityCurrentUid();
+  if (uid !== null && stat.uid !== uid) return false;
+  return (stat.mode & 0o022) === 0;
+}
+
+function accessibilityMarkerLayout(fileSystem, requestPath, installId) {
+  if (!accessibilityInstallIdIsSafe(installId) || typeof requestPath !== "string") {
+    return { kind: "unsafe" };
+  }
+  let absolute;
+  try {
+    absolute = path.resolve(requestPath);
+  } catch {
+    return { kind: "unsafe" };
+  }
+  const installDir = path.dirname(absolute);
+  const transactionsDir = path.dirname(installDir);
+  const root = path.dirname(transactionsDir);
+  if (
+    path.basename(absolute) !== ACCESSIBILITY_MARKER_NAME ||
+    path.basename(installDir) !== installId ||
+    path.basename(transactionsDir) !== "transactions" ||
+    !root ||
+    root === transactionsDir
+  ) {
+    return { kind: "unsafe" };
+  }
+  for (const directory of [root, transactionsDir, installDir]) {
+    let stat;
+    try {
+      stat = fileSystem.lstatSync(directory);
+    } catch (error) {
+      if (error?.code === "ENOENT") return { kind: "missing" };
+      return { kind: "unsafe" };
+    }
+    if (!accessibilityStatIsSafe(stat, true)) return { kind: "unsafe" };
+  }
+  let markerStat;
+  try {
+    markerStat = fileSystem.lstatSync(absolute);
+  } catch (error) {
+    if (error?.code === "ENOENT") return { kind: "missing" };
+    return { kind: "unsafe" };
+  }
+  if (!accessibilityStatIsSafe(markerStat, false)) return { kind: "unsafe" };
+  if (markerStat.size > ACCESSIBILITY_MAX_MARKER_BYTES) return { kind: "unsafe" };
+  return { kind: "ok", absolute, root, transactionsDir, installDir, markerStat };
+}
+
+function accessibilityMarkerIsValid(marker, appPath, installId) {
+  if (!marker || typeof marker !== "object") return false;
+  if (marker.schemaVersion !== 1 || marker.installId !== installId) return false;
+  if (!accessibilityPathIsDefaultApp(marker.appPath) || marker.appPath !== appPath) return false;
+  if (!Number.isSafeInteger(marker.requestedAtMs) || marker.requestedAtMs <= 0) return false;
+  if (
+    marker.requestId !== undefined &&
+    (typeof marker.requestId !== "string" || marker.requestId.length === 0 || marker.requestId.length > 100)
+  ) {
+    return false;
+  }
+  return ["pending", "granted", "deferred", "error", "awaiting-user"].includes(marker.state);
+}
+
+function readAccessibilityMarker(fileSystem, requestPath, appPath, installId) {
+  const layout = accessibilityMarkerLayout(fileSystem, requestPath, installId);
+  if (layout.kind !== "ok") return { kind: layout.kind };
+  let marker;
+  try {
+    marker = JSON.parse(fileSystem.readFileSync(layout.absolute, "utf8"));
+  } catch {
+    return { kind: "unsafe" };
+  }
+  if (!accessibilityMarkerIsValid(marker, appPath, installId)) return { kind: "unsafe" };
+  return { kind: "ok", marker, layout };
+}
+
+function accessibilityRequestMatches(current, snapshot) {
+  return (
+    current?.kind === "ok" &&
+    current.marker.installId === snapshot.installId &&
+    current.marker.appPath === snapshot.appPath &&
+    current.marker.requestedAtMs === snapshot.requestedAtMs &&
+    current.marker.requestId === snapshot.requestId
+  );
+}
+
+function writeAccessibilityMarkerState(
+  fileSystem,
+  requestPath,
+  appPath,
+  installId,
+  expectedRequestedAtMs,
+  state,
+  now,
+  extra = {},
+  expectedRequestId,
+) {
+  const current = readAccessibilityMarker(fileSystem, requestPath, appPath, installId);
+  if (
+    current.kind !== "ok" ||
+    current.marker.requestedAtMs !== expectedRequestedAtMs ||
+    current.marker.requestId !== expectedRequestId ||
+    !["granted", "deferred", "error", "awaiting-user"].includes(state)
+  ) {
+    return false;
+  }
+  const next = {
+    ...current.marker,
+    ...extra,
+    state,
+    updatedAtMs: now(),
+  };
+  if (!Number.isSafeInteger(next.updatedAtMs)) next.updatedAtMs = Date.now();
+  if (state !== "error") delete next.error;
+  const temporary = path.join(
+    current.layout.installDir,
+    `.accessibility-setup.${process.pid}.${Date.now()}.tmp`,
+  );
+  let descriptor = null;
+  try {
+    descriptor = fileSystem.openSync(temporary, "wx", 0o600);
+    fileSystem.writeFileSync(descriptor, `${JSON.stringify(next)}\n`, "utf8");
+    if (typeof fileSystem.fsyncSync === "function") fileSystem.fsyncSync(descriptor);
+    fileSystem.closeSync(descriptor);
+    descriptor = null;
+    const latest = readAccessibilityMarker(fileSystem, requestPath, appPath, installId);
+    if (
+      !accessibilityRequestMatches(latest, {
+        installId,
+        appPath,
+        requestedAtMs: expectedRequestedAtMs,
+        requestId: expectedRequestId,
+      }) ||
+      latest.marker.state !== current.marker.state
+    ) {
+      return false;
+    }
+    fileSystem.renameSync(temporary, requestPath);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (descriptor !== null) {
+      try {
+        fileSystem.closeSync(descriptor);
+      } catch {
+        /* best effort */
+      }
+    }
+    try {
+      fileSystem.unlinkSync(temporary);
+    } catch {
+      /* best effort */
+    }
+  }
+}
+
+function readInstalledRuntimeIdentity(app, fileSystem = fs) {
+  if (!app || typeof app.getAppPath !== "function") return null;
+  let appPath;
+  try {
+    appPath = path.resolve(app.getAppPath());
+  } catch {
+    return null;
+  }
+  if (appPath !== DEFAULT_APP_ASAR_PATH) return null;
+  const bundlePath = DEFAULT_APP_PATH;
+  const packagePath = path.join(appPath, "package.json");
+  let stat;
+  try {
+    stat = fileSystem.lstatSync(packagePath);
+    if (stat.isSymbolicLink() || !stat.isFile() || stat.size > ACCESSIBILITY_PACKAGE_MAX_BYTES) {
+      return null;
+    }
+    const packageJson = JSON.parse(fileSystem.readFileSync(packagePath, "utf8"));
+    const installId = packageJson?.__incodex?.installId;
+    if (!accessibilityInstallIdIsSafe(installId)) return null;
+    return { appPath: bundlePath, installId };
+  } catch {
+    return null;
+  }
+}
+
+function accessibilityCopyValue(copy, key) {
+  const value = typeof copy === "function" ? copy(key) : copy?.[key];
+  return typeof value === "string" ? value : "";
+}
+
+function resolveAccessibilityCopy(locale = "en") {
+  const source = ACCESSIBILITY_COPY && typeof ACCESSIBILITY_COPY === "object" ? ACCESSIBILITY_COPY : null;
+  if (!source) return null;
+  const normalized = String(locale || "").trim().replaceAll("_", "-").toLowerCase();
+  let language = "en";
+  if (normalized.startsWith("zh-hant-hk") || normalized.startsWith("zh-hk")) language = "zh-HK";
+  else if (normalized.startsWith("zh-hant") || normalized.startsWith("zh-tw")) language = "zh-TW";
+  else if (normalized.startsWith("zh")) language = "zh-CN";
+  const selected = source[language] || source.en;
+  return selected && typeof selected === "object" ? { ...selected } : null;
+}
+
+function createAccessibilitySetupController(options = {}) {
+  const fileSystem = options.fs || fs;
+  const shell = options.shell || null;
+  const systemPreferences = options.systemPreferences || null;
+  const spawnCommand = options.spawn || spawn;
+  const requestPath = options.requestPath;
+  const appPath = options.appPath;
+  const installId = options.installId;
+  const platform = options.platform || process.platform;
+  const copy = options.copy;
+  const now = typeof options.now === "function" ? options.now : () => Date.now();
+  let flight = null;
+  let panel = null;
+  let pollTimer = null;
+  let resetRunning = false;
+  let retryFlight = null;
+  let retryGeneration = 0;
+  let removeRetry = null;
+  const schedule = options.setInterval || setInterval;
+  const unschedule = options.clearInterval || clearInterval;
+
+  function stopPolling() {
+    if (pollTimer !== null) unschedule(pollTimer);
+    pollTimer = null;
+  }
+
+  function invalidateRetry() {
+    retryGeneration += 1;
+    const unregister = removeRetry;
+    removeRetry = null;
+    if (typeof unregister === "function") {
+      try {
+        unregister();
+      } catch {
+        /* A closed native guide may already have discarded its callback. */
+      }
+    }
+  }
+
+  function closePanel() {
+    stopPolling();
+    invalidateRetry();
+    const currentPanel = panel;
+    panel = null;
+    currentPanel?.close();
+  }
+
+  function poll(snapshot) {
+    if (resetRunning) return;
+    const current = readAccessibilityMarker(fileSystem, requestPath, appPath, installId);
+    if (!accessibilityRequestMatches(current, snapshot) ||
+        !["pending", "awaiting-user"].includes(current.marker.state)) {
+      closePanel();
+      return;
+    }
+    const checked = probe();
+    if (checked.kind === "known" && checked.trusted && transition(snapshot, "granted")) {
+      panel?.setState("granted");
+      closePanel();
+    }
+  }
+
+  function transition(snapshot, state, extra = {}) {
+    return writeAccessibilityMarkerState(
+      fileSystem,
+      requestPath,
+      appPath,
+      installId,
+      snapshot.requestedAtMs,
+      state,
+      now,
+      extra,
+      snapshot.requestId,
+    );
+  }
+
+  function inIncognito() {
+    return typeof options.isIncognito === "function" ? options.isIncognito() : options.isIncognito === true;
+  }
+
+  function probe() {
+    if (platform !== "darwin" || !systemPreferences) return { kind: "unknown" };
+    if (typeof systemPreferences.isTrustedAccessibilityClient !== "function") {
+      return { kind: "unknown" };
+    }
+    try {
+      // false is intentional: startup never asks macOS to prompt on its own.
+      const trusted = systemPreferences.isTrustedAccessibilityClient(false);
+      if (typeof trusted !== "boolean") {
+        return { kind: "unknown", error: "Accessibility probe returned a non-boolean result" };
+      }
+      return {
+        kind: "known",
+        trusted,
+      };
+    } catch (error) {
+      return { kind: "unknown", error: String(error) };
+    }
+  }
+
+  function showRepairError(error) {
+    stopPolling();
+    panel?.setState("error");
+    try {
+      logLaunch("accessibility-repair-failed", { error: String(error) });
+    } catch {
+      /* Logging is best effort. */
+    }
+  }
+
+  function resetAccessibility() {
+    return new Promise((resolve) => {
+      let child;
+      let settled = false;
+      let timedOut = false;
+      let timer = null;
+      const done = (result) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        resolve(result);
+      };
+      timer = setTimeout(() => {
+        timedOut = true;
+        // Wait for close to reap the process; no reset may outlive its error UI.
+        try { child.kill("SIGKILL"); } catch (error) {
+          logLaunch("accessibility-reset-kill-failed", { error: String(error) });
+        }
+      }, ACCESSIBILITY_RESET_TIMEOUT_MS);
+      timer.unref?.();
+      try {
+        child = spawnCommand(
+          "/usr/bin/tccutil",
+          ["reset", "Accessibility", ACCESSIBILITY_BUNDLE_ID],
+          { stdio: "ignore" },
+        );
+      } catch (error) {
+        done({ ok: false, error: String(error) });
+        return;
+      }
+      if (!child || typeof child.once !== "function") {
+        done({ ok: false, error: "tccutil did not start" });
+        return;
+      }
+      child.once("error", (error) => done({ ok: false, error: String(error) }));
+      child.once("close", (code) =>
+        done(timedOut ? { ok: false, error: "tccutil timed out" } :
+          code === 0 ? { ok: true } : { ok: false, error: `tccutil exited ${String(code)}` }),
+      );
+    });
+  }
+
+  async function openAccessibilitySurfaces() {
+    if ((await shell.openExternal(ACCESSIBILITY_SETTINGS_URL)) === false) {
+      throw new Error("could not open Accessibility settings");
+    }
+  }
+
+  function retryPanelIsActive(activePanel, snapshotGeneration) {
+    if (panel !== activePanel || retryGeneration !== snapshotGeneration) return false;
+    try {
+      if (typeof activePanel?.isDestroyed === "function" && activePanel.isDestroyed()) return false;
+    } catch {
+      return false;
+    }
+    return true;
+  }
+
+  function retryMarker(activePanel, snapshot, snapshotGeneration) {
+    if (!retryPanelIsActive(activePanel, snapshotGeneration)) return null;
+    const current = readAccessibilityMarker(fileSystem, requestPath, appPath, installId);
+    if (!accessibilityRequestMatches(current, snapshot) || current.marker.state !== "awaiting-user") {
+      if (panel === activePanel) closePanel();
+      return null;
+    }
+    return current;
+  }
+
+  function retryRequest(activePanel, snapshot) {
+    if (retryFlight?.panel === activePanel) return retryFlight.promise;
+    const snapshotGeneration = ++retryGeneration;
+    const task = { panel: activePanel, promise: null };
+    task.promise = (async () => {
+      if (!retryMarker(activePanel, snapshot, snapshotGeneration)) {
+        return { ok: false, state: "stale" };
+      }
+
+      const checked = probe();
+      if (!retryMarker(activePanel, snapshot, snapshotGeneration)) {
+        return { ok: false, state: "stale" };
+      }
+      if (checked.kind !== "known") {
+        const reason = checked.error || "Accessibility probe unavailable";
+        const written = transition(snapshot, "error", { error: reason });
+        if (written && retryPanelIsActive(activePanel, snapshotGeneration)) {
+          showRepairError(reason);
+        } else if (panel === activePanel) {
+          closePanel();
+        }
+        return { ok: false, state: written ? "error" : "stale" };
+      }
+      if (checked.trusted) {
+        const written = transition(snapshot, "granted");
+        if (written && retryPanelIsActive(activePanel, snapshotGeneration)) {
+          activePanel.setState("granted");
+          closePanel();
+          return { ok: true, state: "granted" };
+        }
+        if (panel === activePanel) closePanel();
+        return { ok: false, state: "stale" };
+      }
+
+      activePanel.setState("repairing");
+      try {
+        await openAccessibilitySurfaces();
+      } catch (error) {
+        if (!retryMarker(activePanel, snapshot, snapshotGeneration)) {
+          return { ok: false, state: "stale" };
+        }
+        const written = transition(snapshot, "error", { error: String(error) });
+        if (written && retryPanelIsActive(activePanel, snapshotGeneration)) {
+          showRepairError(error);
+        } else if (panel === activePanel) {
+          closePanel();
+        }
+        return { ok: false, state: written ? "error" : "stale" };
+      }
+
+      if (!retryMarker(activePanel, snapshot, snapshotGeneration)) {
+        return { ok: false, state: "stale" };
+      }
+      activePanel.setState("awaiting-user");
+      return { ok: true, state: "awaiting-user" };
+    })().finally(() => {
+      if (retryFlight === task) retryFlight = null;
+    });
+    retryFlight = task;
+    return task.promise;
+  }
+
+  async function processRequest() {
+    if (
+      platform !== "darwin" ||
+      inIncognito() ||
+      !accessibilityPathIsDefaultApp(appPath) ||
+      !accessibilityInstallIdIsSafe(installId) ||
+      !copy
+    ) {
+      return { ok: false, state: "unknown", reason: "unsupported-host" };
+    }
+    const loaded = readAccessibilityMarker(fileSystem, requestPath, appPath, installId);
+    if (loaded.kind !== "ok") return { ok: false, state: loaded.kind };
+    const marker = loaded.marker;
+    if (marker.state === "granted" || marker.state === "deferred" || marker.state === "error") {
+      return { ok: true, state: marker.state };
+    }
+    const snapshot = {
+      installId: marker.installId,
+      appPath: marker.appPath,
+      requestedAtMs: marker.requestedAtMs,
+      requestId: marker.requestId,
+    };
+    const initial = probe();
+    if (initial.kind !== "known") return { ok: false, state: "unknown", reason: initial.error };
+    if (initial.trusted) {
+      const written = transition(snapshot, "granted");
+      return { ok: written, state: written ? "granted" : "stale" };
+    }
+    if (marker.state === "awaiting-user") {
+      return { ok: true, state: "awaiting-user" };
+    }
+    if (typeof options.createSetupWindow !== "function") {
+      return { ok: false, state: "unknown", reason: "dialog-unavailable" };
+    }
+    const localized = {
+      title: accessibilityCopyValue(copy, "title"),
+      message: accessibilityCopyValue(copy, "body"),
+      repair: accessibilityCopyValue(copy, "repair"),
+      later: accessibilityCopyValue(copy, "later"),
+    };
+    if (Object.values(localized).some((value) => !value)) {
+      return { ok: false, state: "unknown", reason: "accessibility-copy-unavailable" };
+    }
+    let choice;
+    try {
+      panel = await options.createSetupWindow();
+      const activePanel = panel;
+      panel.onClose(() => {
+        stopPolling();
+        if (panel !== activePanel) return;
+        panel = null;
+        invalidateRetry();
+        const current = readAccessibilityMarker(fileSystem, requestPath, appPath, installId);
+        if (accessibilityRequestMatches(current, snapshot) &&
+            ["pending", "awaiting-user"].includes(current.marker.state)) {
+          transition(snapshot, "deferred");
+        }
+      });
+      if (typeof panel.onRetry === "function") {
+        const unregister = panel.onRetry(() => retryRequest(activePanel, snapshot));
+        removeRetry = typeof unregister === "function" ? unregister : null;
+      }
+      pollTimer = schedule(() => poll(snapshot), 750);
+      pollTimer?.unref?.();
+      choice = await panel.choice;
+    } catch (error) {
+      const written = transition(snapshot, "error", { error: String(error) });
+      if (written) showRepairError(error);
+      return { ok: false, state: written ? "error" : "stale" };
+    }
+    const currentAfterDialog = readAccessibilityMarker(fileSystem, requestPath, appPath, installId);
+    if (!accessibilityRequestMatches(currentAfterDialog, snapshot) || currentAfterDialog.marker.state !== "pending") {
+      return { ok: false, state: "stale" };
+    }
+    if (choice !== "repair") {
+      const written = transition(snapshot, "deferred");
+      closePanel();
+      return { ok: written, state: written ? "deferred" : "stale" };
+    }
+    const beforeReset = probe();
+    if (beforeReset.kind !== "known") {
+      return { ok: false, state: "unknown", reason: beforeReset.error };
+    }
+    if (beforeReset.trusted) {
+      const written = transition(snapshot, "granted");
+      closePanel();
+      return { ok: written, state: written ? "granted" : "stale" };
+    }
+
+    // Record the user-driven attempt before running a process that may be
+    // interrupted.  A crash after tccutil must never turn into an automatic
+    // second reset on the next launch.
+    const awaiting = transition(snapshot, "awaiting-user");
+    if (!awaiting) return { ok: false, state: "stale" };
+
+    panel?.setState("repairing");
+    resetRunning = true;
+    const reset = await resetAccessibility();
+    resetRunning = false;
+    if (!reset.ok) {
+      const written = transition(snapshot, "error", { error: reset.error });
+      if (written) showRepairError(reset.error);
+      return { ok: false, state: written ? "error" : "stale" };
+    }
+    const afterReset = readAccessibilityMarker(fileSystem, requestPath, appPath, installId);
+    if (!panel || !accessibilityRequestMatches(afterReset, snapshot) || afterReset.marker.state !== "awaiting-user") {
+      return { ok: false, state: "stale" };
+    }
+    try {
+      await openAccessibilitySurfaces();
+      panel?.setState("awaiting-user");
+    } catch (error) {
+      const written = transition(snapshot, "error", { error: String(error) });
+      if (written) showRepairError(error);
+      return { ok: false, state: written ? "error" : "stale" };
+    }
+    return { ok: true, state: "awaiting-user" };
+  }
+
+  function run() {
+    if (flight) return flight;
+    flight = Promise.resolve()
+      .then(processRequest)
+      .catch((error) => {
+        try {
+          logLaunch("accessibility-setup-failed", { error: String(error) });
+        } catch {
+          /* best effort */
+        }
+        return { ok: false, state: "error", reason: String(error) };
+      })
+      .finally(() => {
+        flight = null;
+      });
+    return flight;
+  }
+
+  return { run, dispose: closePanel };
 }
 
 function sessionBurnExpectation(session, userRoot = USER_ROOT) {
@@ -248,6 +862,8 @@ function raisePid(pid) {
 function isAuxiliaryWindow(win) {
   if (!win || win.isDestroyed()) return true;
   try {
+    if (win.webContents?.getLastWebPreferences?.().additionalArguments?.some(arg =>
+      arg === "--incodex-accessibility-setup" || arg === "--incodex-accessibility-transition")) return true;
     const bounds = typeof win.getBounds === "function" ? win.getBounds() : {};
     const url = win.webContents && !win.webContents.isDestroyed() ? win.webContents.getURL() : "";
     return windowKind.isAuxiliarySnapshot({
@@ -338,11 +954,16 @@ function logLaunch(message, extra) {
 const CHROME_WINDOW_TILE_PIXELS = process.platform === "darwin" ? 22 : 10;
 const CHROME_MIN_VISIBLE = 30;
 
-function captureSourceBounds() {
+function captureSourceBounds(sourceWindow) {
   try {
     const electron = require("electron");
     const focused = electron.BrowserWindow.getFocusedWindow();
-    const win = focused && !isAuxiliaryWindow(focused) ? focused : mainWindows(electron)[0];
+    const usable = (win) => win && !win.isDestroyed() && !isAuxiliaryWindow(win);
+    const visible = (win) => usable(win) && (win.isVisible() || win.isMinimized());
+    // Renderer actions already passed the IPC identity check. Their actual
+    // window remains the source even when an AX click does not focus it.
+    const win = usable(sourceWindow) ? sourceWindow
+      : visible(focused) ? focused : mainWindows(electron).find(visible);
     if (!win || win.isDestroyed()) return "";
     const b = win.getBounds();
     return `${b.x},${b.y},${b.width},${b.height}`;
@@ -409,15 +1030,16 @@ function applyChromeWindowTile(win) {
 
 const launchHolder = { current: null };
 
-function launchIncognito() {
+function launchIncognito(sourceWindow) {
+  const sourceBounds = captureSourceBounds(sourceWindow);
   const launch = windowsPlatform
     ? () =>
         windowsPlatform.launchIncognito({
           helperPath: process.env.INCODEX_WINDOWS_HELPER,
           sourceHome: sourceHome(),
-          sourceBounds: captureSourceBounds(),
+          sourceBounds,
         })
-    : launchIncognitoOnce;
+    : () => launchIncognitoOnce(sourceBounds);
   return instance.singleFlight(launchHolder, launch);
 }
 
@@ -482,7 +1104,7 @@ function prepareIncognitoSession(options = {}) {
   }
 }
 
-async function launchIncognitoOnce() {
+async function launchIncognitoOnce(sourceBounds) {
   let alreadyRunning;
   try {
     alreadyRunning = await incognitoAlreadyRunning();
@@ -513,7 +1135,6 @@ async function launchIncognitoOnce() {
     return Promise.resolve({ ok: false, reason: "spawn-failed" });
   }
   const args = [`--user-data-dir=${session.chromium}`, "codex://new?mode=codex"];
-  const sourceBounds = captureSourceBounds();
   logLaunch("launch", {
     bin,
     home: session.home,
@@ -760,6 +1381,59 @@ async function attachElectron() {
     process.env.INCODEX_INCOGNITO = "1";
   }
 
+  let accessibilitySetupController = null;
+  let settingsLocator = null;
+  if (
+    !isIncognito() &&
+    process.platform === "darwin" &&
+    path.resolve(process.execPath || "") === DEFAULT_APP_EXECUTABLE_PATH
+  ) {
+    const identity = readInstalledRuntimeIdentity(electron.app);
+    if (identity?.appPath === DEFAULT_APP_PATH) {
+      accessibilitySetupController = createAccessibilitySetupController({
+        app: electron.app,
+        shell: electron.shell,
+        createSetupWindow: () => accessibilityWindow.createNativeAccessibilitySetupWindow({
+          electron,
+          copy: resolveAccessibilityCopy(readLocaleOverride() || electron.app.getLocale?.() || "en"),
+          appPath: identity.appPath,
+          loadObjcModule: () => dockMenu.loadObjcModule(electron.app.getAppPath()),
+          onHandoff: payload => accessibilityWindow.runNativePermissionHandoff({
+            ...payload,
+            onError: error => logLaunch("accessibility-handoff-error", { error: String(error) }),
+          }),
+          onBack: payload => accessibilityWindow.runNativePermissionHandoff({
+            ...payload,
+            onError: error => logLaunch("accessibility-return-error", { error: String(error) }),
+          }),
+          locateSettings: async () => {
+            settingsLocator ||= dockMenu.createNativeSystemSettingsLocator({ appPath: electron.app.getAppPath() });
+            return (await settingsLocator)();
+          },
+        }),
+        systemPreferences: electron.systemPreferences,
+        spawn,
+        fs,
+        requestPath: path.join(
+          USER_ROOT,
+          "transactions",
+          identity.installId,
+          ACCESSIBILITY_MARKER_NAME,
+        ),
+        appPath: identity.appPath,
+        installId: identity.installId,
+        bundleId: ACCESSIBILITY_BUNDLE_ID,
+        platform: process.platform,
+        isIncognito,
+        copy: resolveAccessibilityCopy(
+          readLocaleOverride() || electron.app.getLocale?.() || "en",
+        ),
+        now: () => Date.now(),
+      });
+    }
+  }
+
+  electron.app.once("will-quit", () => accessibilitySetupController?.dispose());
   const source = injectSource();
   let ownerLease = null;
   let raiseServer = null;
@@ -804,7 +1478,8 @@ async function attachElectron() {
           reason: "already-incognito",
         });
       }
-      const result = await launchIncognito();
+      const sourceWindow = electron.BrowserWindow.fromWebContents(event.sender);
+      const result = await launchIncognito(sourceWindow);
       return ipcGuard.actionResponse(requestId, {
         ok: result.ok === true,
         code: result.ok ? "OK" : String(result.reason || "FAILED").toUpperCase(),
@@ -912,12 +1587,20 @@ async function attachElectron() {
     electron.app.on("window-all-closed", () => {
       finishIncognito(0);
     });
+  } else if (accessibilitySetupController) {
+    electron.app.on("activate", () => {
+      void accessibilitySetupController.run();
+    });
+    electron.app.on("browser-window-focus", () => {
+      void accessibilitySetupController.run();
+    });
   }
 
   function ready() {
     hookPreload(electron.session.defaultSession);
     for (const win of electron.BrowserWindow.getAllWindows()) hookWindow(win, source);
     if (isIncognito()) raiseOurWindows();
+    else void accessibilitySetupController?.run();
   }
   if (electron.app.isReady()) ready();
   else void electron.app.whenReady().then(ready);
@@ -927,6 +1610,9 @@ const startupGate = attachElectron();
 if (typeof module !== "undefined") {
   module.exports = {
     startupGate,
+    createAccessibilitySetupController,
+    resolveAccessibilityCopy,
+    readInstalledRuntimeIdentity,
     prepareIncognitoSession,
     runtimeOwnedSessionEnv,
     burnIncognitoSession,

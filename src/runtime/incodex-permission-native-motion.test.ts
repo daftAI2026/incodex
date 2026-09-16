@@ -1,0 +1,316 @@
+import { expect, test } from "bun:test";
+import { createNativeReplicants, runNativePermissionHandoff } from "./incodex-permission-native-motion.cts";
+
+type Rect = { origin: { x: number; y: number }; size: { width: number; height: number } };
+
+const rect = (x: number, y: number, width: number, height: number): Rect => ({
+  origin: { x, y }, size: { width, height },
+});
+
+function nativeMotionBridge(screenSpecs: Array<{ frame: Rect; scale: number }>) {
+  const objects: any[] = [];
+  const calls: Array<{ selector: string; args: any[] }> = [];
+  let currentScreens = screenSpecs.map((spec) => {
+    const screen: any = nativeObject("NSScreen");
+    screen.frameValue = spec.frame;
+    screen.scaleValue = spec.scale;
+    screen.frame = () => screen.frameValue;
+    screen.backingScaleFactor = () => screen.scaleValue;
+    return screen;
+  });
+
+  function copyRect(value: Rect): Rect {
+    return rect(value.origin.x, value.origin.y, value.size.width, value.size.height);
+  }
+
+  function nativeObject(type: string): any {
+    const state: any = {
+      type,
+      values: new Map<string, any>(),
+      subviews: [],
+      frameValue: rect(0, 0, 0, 0),
+      visible: false,
+      closed: false,
+    };
+    const proxy = new Proxy(state, {
+      get(target, property: string | symbol, receiver) {
+        if (property === "then") return undefined;
+        if (property in target) {
+          const value = target[property as keyof typeof target];
+          return typeof value === "function" ? value.bind(receiver) : value;
+        }
+        if (typeof property !== "string") return undefined;
+        return (...args: any[]) => invoke(receiver, property, args);
+      },
+    });
+    objects.push(proxy);
+    state.layer = () => {
+      if (!state.layerValue) state.layerValue = nativeObject("CALayer");
+      return state.layerValue;
+    };
+    return proxy;
+  }
+
+  function invoke(object: any, selector: string, args: any[]): any {
+    calls.push({ selector, args });
+    const key = selector;
+    if (selector.startsWith("initWithContentRect")) {
+      object.frameValue = copyRect(args[0]);
+      return object;
+    }
+    if (selector === "initWithFrame$") {
+      object.frameValue = copyRect(args[0]);
+      return object;
+    }
+    if (selector === "initWithSize$") {
+      object.values.set("size", args[0]);
+      return object;
+    }
+    if (selector === "frame") return copyRect(object.frameValue);
+    if (selector === "bounds") return rect(0, 0, object.frameValue.size.width, object.frameValue.size.height);
+    if (selector === "layer") {
+      if (!object.layerValue) object.layerValue = nativeObject("CALayer");
+      return object.layerValue;
+    }
+    if (selector === "addSubview$") {
+      object.subviews.push(args[0]);
+      return undefined;
+    }
+    if (selector === "setContentView$") {
+      object.contentViewValue = args[0];
+      return undefined;
+    }
+    if (selector === "setFrame$") {
+      object.frameValue = copyRect(args[0]);
+      return undefined;
+    }
+    if (selector === "setContentsScale$") {
+      object.values.set("contentsScale", args[0]);
+      return undefined;
+    }
+    if (selector === "setValue$forKey$") {
+      object.values.set(String(args[1]), args[0]);
+      return undefined;
+    }
+    if (selector === "orderFront$") {
+      object.visible = true;
+      return undefined;
+    }
+    if (selector === "orderOut$") {
+      object.visible = false;
+      return undefined;
+    }
+    if (selector === "close") {
+      object.visible = false;
+      object.closed = true;
+      return undefined;
+    }
+    if (selector === "bitmapImageRepForCachingDisplayInRect$") return nativeObject("NSBitmapImageRep");
+    if (selector === "cacheDisplayInRect$toBitmapImageRep$") return undefined;
+    if (selector === "count") return Array.isArray(object.values.get("items")) ? object.values.get("items").length : 0;
+    if (selector === "objectAtIndex$") return object.values.get("items")?.[args[0]];
+    if (selector === "displayIfNeeded") return undefined;
+    if (selector === "accessibilityDisplayShouldReduceTransparency") return false;
+    if (selector === "arrayWithObject$") {
+      const array = nativeObject("NSArray");
+      array.values.set("items", [args[0]]);
+      return array;
+    }
+    if (selector === "numberWithDouble$") return args[0];
+    if (selector === "stringWithUTF8String$") return String(args[0]);
+    if (selector === "filterWithName$") return nativeObject("CIFilter");
+    if (selector === "begin" || selector === "commit" || selector === "setDisableActions$") return undefined;
+    object.values.set(key, args.length <= 1 ? args[0] : args);
+    return undefined;
+  }
+
+  function classObject(type: string): any {
+    const target: any = {
+      alloc: () => nativeObject(type),
+    };
+    const proxy = new Proxy(target, {
+      get(value, property: string | symbol) {
+        if (property in value) return value[property as keyof typeof value];
+        if (typeof property !== "string") return undefined;
+        return (...args: any[]) => {
+          if (type === "NSScreen" && property === "screens") {
+            const array = nativeObject("NSArray");
+            array.values.set("items", currentScreens);
+            return array;
+          }
+          if (type === "NSWorkspace" && property === "sharedWorkspace") return nativeObject("NSWorkspace");
+          if (type === "NSColor" && property === "clearColor") return nativeObject("NSColor");
+          if (type === "NSArray" && property === "arrayWithObject$") return invoke(proxy, property, args);
+          if (type === "NSString" && property === "stringWithUTF8String$") return String(args[0]);
+          if (type === "NSNumber" && property === "numberWithDouble$") return args[0];
+          if (type === "CIFilter" && property === "filterWithName$") return nativeObject("CIFilter");
+          if (type === "CALayer" && property === "layer") return nativeObject("CALayer");
+          if (type === "CATransaction") return undefined;
+          return undefined;
+        };
+      },
+    });
+    return proxy;
+  }
+
+  const objc: any = {
+    NobjcLibrary: new Proxy(function NobjcLibrary() {}, {
+      construct: () => new Proxy({}, { get: (_target, property: string | symbol) =>
+        typeof property === "string" ? classObject(property) : undefined }),
+    }),
+    NobjcClass: {
+      define(definition: { name: string }) { return classObject(definition.name); },
+    },
+    callFunction(name: string, signature: any, ...args: any[]) {
+      calls.push({ selector: name, args: [signature, ...args] });
+      if (name === "CGColorCreateGenericRGB" || name === "CGPathCreateWithRoundedRect") return nativeObject(name);
+      return undefined;
+    },
+  };
+  return {
+    objc,
+    objects,
+    calls,
+    screens(next: Array<{ frame: Rect; scale: number }>) {
+      currentScreens = next.map((spec) => {
+        const screen: any = nativeObject("NSScreen");
+        screen.frameValue = spec.frame;
+        screen.scaleValue = spec.scale;
+        screen.frame = () => screen.frameValue;
+        screen.backingScaleFactor = () => screen.scaleValue;
+        return screen;
+      });
+    },
+    targetView(bounds: Rect, emptyRep = false) {
+      const view = nativeObject("TargetView");
+      view.frameValue = bounds;
+      view.bitmapImageRepForCachingDisplayInRect$ = () => emptyRep ? null : nativeObject("NSBitmapImageRep");
+      return view;
+    },
+    panels() { return objects.filter((value) => value.type === "NSPanel"); },
+  };
+}
+
+function harness(reducedMotion = false, reverse = false) {
+  let time = 0;
+  let closed = false;
+  const pending = new Map<number, () => void>();
+  let id = 0;
+  const frames: any[] = [];
+  let disposed = 0;
+  let created = 0;
+  const flight = runNativePermissionHandoff({
+    source: { frame: { origin: { x: 10, y: 400 }, size: { width: 80, height: 28 } }, image: {}, radius: 14 },
+    target: { frame: { origin: { x: 300, y: 20 }, size: { width: 532, height: 112 } }, view: {}, panel: {}, radius: 12 },
+    reducedMotion,
+    reverse,
+    isClosed: () => closed,
+    now: () => time,
+    schedule: (callback: () => void) => { pending.set(++id, callback); return id; },
+    cancel: (key: number) => pending.delete(key),
+    createReplicants: () => {
+      created++;
+      return { render: (frame: any) => frames.push(frame), dispose: () => disposed++ };
+    },
+  });
+  return { flight, frames, pending, created: () => created, disposed: () => disposed,
+    closeHost() { closed = true; },
+    advance(ms: number) { time += ms; const tasks = [...pending.values()]; pending.clear(); tasks.forEach(task => { task(); }); } };
+}
+
+test("native flight preserves AppKit screen coordinates at both endpoints", async () => {
+  const h = harness();
+  expect(h.frames[0].bounds).toEqual({ x: 10, y: 400, width: 80, height: 28 });
+  h.advance(3000);
+  await h.flight.finished;
+  expect(h.frames.at(-1).bounds).toEqual({ x: 300, y: 20, width: 532, height: 112 });
+  expect(h.frames.at(-1).targetOpacity).toBe(1);
+  expect(h.disposed()).toBe(1);
+  expect(h.pending.size).toBe(0);
+});
+
+test("native reverse flight keeps source and target images fixed while progress runs backward", async () => {
+  const h = harness(false, true);
+  expect(h.frames[0].progress).toBe(1);
+  expect(h.frames[0].bounds).toEqual({ x: 300, y: 20, width: 532, height: 112 });
+  expect(h.frames[0].sourceOpacity).toBe(0);
+  expect(h.frames[0].targetOpacity).toBe(1);
+  h.advance(3000);
+  await h.flight.finished;
+  expect(h.frames.at(-1).progress).toBe(0);
+  expect(h.frames.at(-1).bounds).toEqual({ x: 10, y: 400, width: 80, height: 28 });
+  expect(h.frames.at(-1).sourceOpacity).toBe(1);
+  expect(h.frames.at(-1).targetOpacity).toBe(0);
+});
+
+test("closing during native flight reaps panels and settles without late frames", async () => {
+  const h = harness();
+  h.flight.dispose();
+  h.flight.dispose();
+  await h.flight.finished;
+  const count = h.frames.length;
+  h.advance(3000);
+  expect(h.frames).toHaveLength(count);
+  expect(h.pending.size).toBe(0);
+  expect(h.disposed()).toBe(1);
+});
+
+test("Reduce Motion avoids creating any snapshot panels", async () => {
+  const h = harness(true);
+  await h.flight.finished;
+  expect(h.created()).toBe(0);
+  expect(h.pending.size).toBe(0);
+});
+
+test("host closure observed inside a frame leaves no timer behind", async () => {
+  const h = harness();
+  h.closeHost();
+  h.advance(16);
+  await h.flight.finished;
+  expect(h.pending.size).toBe(0);
+  expect(h.disposed()).toBe(1);
+});
+
+test("native replicants rebuild for a changed screen topology and backing scale on the next frame", () => {
+  const bridge = nativeMotionBridge([
+    { frame: rect(0.25, 0, 1440, 900), scale: 2 },
+  ]);
+  const source = { image: {}, frame: rect(10, 400, 80, 28) };
+  const targetView = bridge.targetView(rect(0, 0, 452, 44));
+  const replicas = createNativeReplicants({
+    objc: bridge.objc,
+    source,
+    target: { view: targetView },
+  });
+  const sample = {
+    bounds: { x: 100.25, y: 100.25, width: 80.25, height: 28.25 },
+    cornerRadius: 12, progress: 0.2, sourceOpacity: 0.8, targetOpacity: 0.2,
+    sourceBlur: 2.4, targetBlur: 9.6,
+  };
+
+  replicas.render(sample);
+  const firstPanel = bridge.panels()[0];
+  expect(firstPanel).toBeDefined();
+  expect(firstPanel.frameValue.origin.x).toBe(0.5);
+  expect(firstPanel.contentViewValue.subviews[0].layerValue.values.get("contentsScale")).toBe(2);
+
+  bridge.screens([{ frame: rect(0.25, 0, 1440, 900), scale: 1 }]);
+  replicas.render(sample);
+  const panels = bridge.panels();
+  expect(panels).toHaveLength(2);
+  expect(firstPanel.closed).toBe(true);
+  expect(panels[1].contentViewValue.subviews[0].layerValue.values.get("contentsScale")).toBe(1);
+  replicas.dispose();
+});
+
+test("native snapshot rejects an empty view before creating flight panels", () => {
+  const bridge = nativeMotionBridge([
+    { frame: rect(0, 0, 1440, 900), scale: 2 },
+  ]);
+  expect(() => createNativeReplicants({
+    objc: bridge.objc,
+    source: { image: {}, frame: rect(10, 400, 80, 28) },
+    target: { view: bridge.targetView(rect(0, 0, 0, 0)) },
+  })).toThrow(/empty/i);
+  expect(bridge.panels()).toHaveLength(0);
+});
