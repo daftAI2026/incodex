@@ -469,6 +469,9 @@ describe("single-window Accessibility setup", () => {
     expect(resolveCopy("zh-CN").body).toBe("安装后，需要重新授权，ChatGPT 才能继续操作其他应用。");
     expect(resolveCopy("zh-HK").later).toBe("稍後");
     expect(resolveCopy("zh-TW").later).toBe("稍後");
+    expect(resolveCopy("en").back).toBe("Back");
+    expect(resolveCopy("zh-CN").back).toBe("返回");
+    expect(resolveCopy("zh-HK").back).toBe("返回");
     expect(resolveCopy("ja-JP").body).toBe(resolveCopy("en").body);
   });
 

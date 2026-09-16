@@ -15,6 +15,7 @@ const COPY = {
   permissionDescription: "Allows Codex to access app interfaces",
   repair: "Allow",
   later: "Later",
+  back: "Back",
   addedTitle: "Allow Codex in System Settings",
   addedBody: "Drag Codex into Accessibility and wait for the automatic check.",
   openSettings: "Open Settings",
@@ -827,13 +828,16 @@ describe("native Accessibility setup adapter", () => {
   });
 
   test("localizes the native Back accessibility label", async () => {
-    const { api, bridge } = await makeHarness({ copy: { ...COPY, later: "稍後" } });
+    const { api, bridge } = await makeHarness({ copy: { ...COPY, later: "稍後", back: "返回" } });
     try {
       api.setState("awaiting-user");
       await flushNativeAsync();
       const back = bridge.objects.find((value) => value.action === "later:");
       if (!back) throw new Error("native Back button is missing");
-      expect(back.values.get("accessibilityLabel")).toBe("稍後");
+      expect(back.values.get("accessibilityLabel")).toBe("返回");
+      expect(back.values.get("toolTip")).toBe("返回");
+      const image = back.values.get("image") as FakeNative;
+      expect((image.values.get("imageWithSystemSymbolName$accessibilityDescription$") as unknown[])[1]).toBe("返回");
     } finally {
       api.close();
     }

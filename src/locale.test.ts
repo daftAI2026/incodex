@@ -25,7 +25,7 @@ describe("locale fallback", () => {
   });
 
   test("Accessibility setup copy preserves the supported Chinese script variants", () => {
-    const accessibilityCopy = ACCESSIBILITY_SETUP_COPY as Record<string, { body: string }>;
+    const accessibilityCopy = ACCESSIBILITY_SETUP_COPY as Record<string, { body: string; back?: string; addedBody?: string }>;
     expect(resolveLocale("zh-CN")).toBe("zh-CN");
     expect(resolveLocale("zh-HK")).toBe("zh-HK");
     expect(resolveLocale("zh-TW")).toBe("zh-TW");
@@ -35,15 +35,21 @@ describe("locale fallback", () => {
     expect(accessibilityCopy["en"].body).toBe(
       "After installation, ChatGPT needs to be authorized again to continue controlling other apps.",
     );
+    expect(accessibilityCopy["en"].back).toBe("Back");
     expect(accessibilityCopy["zh-CN"].body).toBe(
       "安装后，需要重新授权，ChatGPT 才能继续操作其他应用。",
     );
+    expect(accessibilityCopy["zh-CN"].back).toBe("返回");
     expect(accessibilityCopy["zh-HK"].body).toBe(
       "安裝後，需要重新授權，ChatGPT 才能繼續操作其他應用程式。",
     );
+    expect(accessibilityCopy["zh-HK"].back).toBe("返回");
+    expect(accessibilityCopy["zh-HK"].addedBody).toContain("確認取得權限後");
     expect(accessibilityCopy["zh-TW"].body).toBe(
       "安裝後，需要重新授權，ChatGPT 才能繼續操作其他應用程式。",
     );
+    expect(accessibilityCopy["zh-TW"].back).toBe("返回");
+    expect(accessibilityCopy["zh-TW"].addedBody).toContain("確認取得權限後");
     for (const key of ["en", "zh-CN", "zh-HK", "zh-TW"] as const) {
       expect(accessibilityCopy[key].body).not.toContain("\n");
     }
