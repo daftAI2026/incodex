@@ -20,7 +20,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   const selector = name => objc.callFunction("NSSelectorFromString", { returns: ":", args: ["@"] }, str(name));
   const unique = `IncodexPermission_${process.pid}_${++generation}`;
   let closed = false, state = "pending", settled = false, source = null, helper = null, arrowPanel = null, arrow = null;
-  let tracking = null, arrowTimer = null, returnTimer = null, flight = null, locating = false, attempts = 0, presented = false, dragging = false, dragSession = null;
+  let tracking = null, arrowTimer = null, returnTimer = null, flight = null, locating = false, attempts = 0, presented = false, dragging = false, dragSession = null, returning = false;
   const closeHandlers = new Set();
   let resolveChoice;
   const choice = new Promise(resolve => { resolveChoice = resolve; });
@@ -65,7 +65,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   function stopArrow() { clearTimeout(arrowTimer); clearTimeout(returnTimer); arrowTimer = returnTimer = null; }
   function close() {
     if (closed) return;
-    closed = true; dragging = false; dragSession = null;
+    closed = true; returning = false; dragging = false; dragSession = null;
     clearInterval(tracking); tracking = null; stopArrow(); flight?.dispose(); flight = null;
     resolveOnce("later");
     for (const panel of panels) { panel.orderOut$(null); panel.close(); }
@@ -228,12 +228,14 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     return {panel,view,frame,radius:12,row};
   }
   function revealHelper() {
-    if (closed || state !== "awaiting-user") return;
+    if (closed || returning || state !== "awaiting-user") return;
     presented=true; helper.panel.orderFront$(null); arrowPanel.orderFront$(null); scheduleArrow();
   }
   function handleBack() {
-    if (closed || dragging || state !== "awaiting-user" || !helper) return;
+    if (closed || returning || dragging || state !== "awaiting-user" || !helper) return;
     if (reducedMotion() || !onBack || !helper.targetRow) { close(); return; }
+    returning = true;
+    clearInterval(tracking); tracking = null;
     let returnSource;
     try { returnSource = captureSource(); }
     catch { close(); return; }
@@ -254,10 +256,10 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     });
   }
   async function place() {
-    if (closed || state !== "awaiting-user" || locating) return;
+    if (closed || returning || state !== "awaiting-user" || locating) return;
     locating=true;
     try {
-      const target=await locateSettings?.(); if (closed || state !== "awaiting-user") return;
+      const target=await locateSettings?.(); if (closed || returning || state !== "awaiting-user") return;
       if (!target) {
         attempts++;
         if (helper) { if (attempts >= 10 && !dragging) close(); }
