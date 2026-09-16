@@ -3,6 +3,7 @@ import { runNativePermissionHandoff } from "./incodex-permission-native-motion.c
 
 function harness(reducedMotion = false) {
   let time = 0;
+  let closed = false;
   const pending = new Map<number, () => void>();
   let id = 0;
   const frames: any[] = [];
@@ -12,6 +13,7 @@ function harness(reducedMotion = false) {
     source: { frame: { origin: { x: 10, y: 400 }, size: { width: 80, height: 28 } }, image: {}, radius: 14 },
     target: { frame: { origin: { x: 300, y: 20 }, size: { width: 532, height: 112 } }, view: {}, panel: {}, radius: 12 },
     reducedMotion,
+    isClosed: () => closed,
     now: () => time,
     schedule: (callback: () => void) => { pending.set(++id, callback); return id; },
     cancel: (key: number) => pending.delete(key),
@@ -21,6 +23,7 @@ function harness(reducedMotion = false) {
     },
   });
   return { flight, frames, pending, created: () => created, disposed: () => disposed,
+    closeHost() { closed = true; },
     advance(ms: number) { time += ms; const tasks = [...pending.values()]; pending.clear(); tasks.forEach(task => task()); } };
 }
 
@@ -52,4 +55,13 @@ test("Reduce Motion avoids creating any snapshot panels", async () => {
   await h.flight.finished;
   expect(h.created()).toBe(0);
   expect(h.pending.size).toBe(0);
+});
+
+test("host closure observed inside a frame leaves no timer behind", async () => {
+  const h = harness();
+  h.closeHost();
+  h.advance(16);
+  await h.flight.finished;
+  expect(h.pending.size).toBe(0);
+  expect(h.disposed()).toBe(1);
 });
