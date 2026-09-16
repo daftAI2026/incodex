@@ -61,6 +61,9 @@ type Harness = {
   spawnCalls: Array<{ file: string; args: string[] }>;
   probes: unknown[];
   controller: any;
+  panel: any;
+  tick: () => void;
+  timerActive: () => boolean;
 };
 
 function temporaryRoot(): string {
@@ -150,6 +153,16 @@ function makeHarness(options: {
     throw new Error("dist/incodex-main.cjs does not export createAccessibilitySetupController");
   }
 
+  let polling: (() => void) | null = null;
+  let closed = false;
+  let closeHandler = () => {};
+  const panel = {
+    states: [] as string[],
+    setState(state: string) { this.states.push(state); },
+    close() { closed = true; closeHandler(); },
+    isDestroyed: () => closed,
+    onClose(fn: () => void) { closeHandler = fn; },
+  };
   const controller = createController({
     app: { getLocale: () => "en-US", isReady: () => true },
     shell,
@@ -165,12 +178,18 @@ function makeHarness(options: {
     isIncognito: false,
     copy: options.copy ?? COPY,
     now: () => 1_700_000_000_100,
+    createSetupWindow: async () => ({
+      ...panel,
+      choice: dialog.showMessageBox({ message: COPY_VALUES.body }).then(({ response }) => response === 0 ? "repair" : "later"),
+    }),
+    setInterval: (fn: () => void) => { polling = fn; return 1; },
+    clearInterval: () => { polling = null; },
     // Tests exercise activation rechecks without waiting on wall-clock timers.
     pollDelaysMs: [],
     sleep: async () => {},
   });
 
-  return { root, requestPath, dialog, shell, spawnCalls, probes, controller };
+  return { root, requestPath, dialog, shell, spawnCalls, probes, controller, panel, tick: () => polling?.(), timerActive: () => polling !== null };
 }
 
 test("accepts root-owned ASAR package metadata for the default app identity", () => {
@@ -439,5 +458,42 @@ describe("Accessibility setup controller", () => {
     await oversized.controller.run();
     expect(oversized.dialog.calls).toHaveLength(0);
     expect(readFileSync(oversized.requestPath, "utf8")).toHaveLength(8 * 1024 + 1);
+  });
+});
+
+
+describe("single-window Accessibility setup", () => {
+  test("keeps one window and detects grant while Settings remains frontmost", async () => {
+    const h = makeHarness({ probes: [false, false, false, true], dialogResponses: [0] });
+    await h.controller.run();
+    expect(h.dialog.calls).toHaveLength(1);
+    expect(h.shell.revealed).toHaveLength(0);
+    expect(h.panel.states).toContain("awaiting-user");
+    expect(h.timerActive()).toBe(true);
+    h.tick();
+    expect(readMarker(h.requestPath).state).toBe("awaiting-user");
+    h.tick();
+    expect(readMarker(h.requestPath).state).toBe("granted");
+    expect(h.panel.isDestroyed()).toBe(true);
+    expect(h.timerActive()).toBe(false);
+    expect(h.spawnCalls).toHaveLength(1);
+  });
+
+  test("closing the guide cancels polling and cannot leave automatic reset work", async () => {
+    const h = makeHarness({ probes: [false, false], dialogResponses: [0] });
+    await h.controller.run();
+    expect(h.timerActive()).toBe(true);
+    h.panel.close();
+    expect(h.timerActive()).toBe(false);
+    expect(readMarker(h.requestPath).state).toBe("deferred");
+  });
+
+  test("a stale polling callback cannot grant or overwrite a fresh install request", async () => {
+    const h = makeHarness({ marker: { requestId: "old" }, probes: [false, false, true], dialogResponses: [0] });
+    await h.controller.run();
+    writeMarker(h.requestPath, { requestId: "new", state: "pending" });
+    h.tick();
+    expect(readMarker(h.requestPath).state).toBe("pending");
+    expect(h.timerActive()).toBe(false);
   });
 });
