@@ -346,6 +346,28 @@ class FakeNative {
     this.values.set("stringValue", String(value));
   }
 
+  attributedStringValue(): FakeNative { return this; }
+
+  mutableCopy(): FakeNative {
+    const copy = new FakeNative("NSMutableAttributedString", this.calls);
+    for (const [key, value] of this.values) copy.values.set(key, value);
+    return copy;
+  }
+
+  length(): number { return String(this.values.get("stringValue") ?? "").length; }
+
+  addAttribute$value$range$(name: unknown, value: unknown, range: unknown): void {
+    this.values.set(String(name), value);
+    this.values.set("attributeRange", range);
+  }
+
+  setAttributedStringValue$(value: FakeNative): void {
+    this.values.set("attributedValue", value);
+    this.values.set("stringValue", value.values.get("stringValue"));
+  }
+
+  setLineSpacing$(value: number): void { this.values.set("lineSpacing", value); }
+
   cell(): FakeNative { return this; }
 
   cellSizeForBounds$(value: Frame): { width: number; height: number } {
@@ -796,6 +818,22 @@ describe("native Accessibility setup adapter", () => {
     expect(objectWithTitle(panel, COPY.permissionDescription)).toBeDefined();
     expect(objectWithTitle(panel, "Screenshots")).toBeUndefined();
     expect(objectWithTitle(panel, COPY.repair)).toBeDefined();
+  });
+
+  test("keeps the reference paragraph spacing and alignment after error copy changes", async () => {
+    const { api, panel } = await makeHarness();
+    try {
+      const body = objectWithTitle(panel, COPY.body)!;
+      for (const value of [COPY.body, COPY.errorBody]) {
+        if (value === COPY.errorBody) api.setState("error");
+        const attributed = body.values.get("attributedValue") as FakeNative | undefined;
+        const paragraph = attributed?.values.get("NSParagraphStyle") as FakeNative | undefined;
+        expect(paragraph?.values.get("lineSpacing")).toBe(2);
+        expect(paragraph?.values.get("alignment")).toBe(1);
+        expect(attributed?.values.get("attributeRange")).toEqual({ location: 0, length: value.length });
+        expect(body.values.get("stringValue")).toBe(value);
+      }
+    } finally { api.close(); }
   });
 
   test("fits initial height to localized body while preserving card gap and bottom padding", async () => {
