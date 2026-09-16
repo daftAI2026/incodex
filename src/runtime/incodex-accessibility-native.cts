@@ -127,7 +127,8 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     box.setCornerRadius$(radius); box.setFillColor$(fill); return box;
   }
   initialView.addSubview$(imageView(icon, rect(268, 28, 64, 64)));
-  const title = label(text("title"), rect(20, 112, 560, 32), 26, true, true);
+  // Reference Text.offset(y: -11) shifts drawing without moving the body/card.
+  const title = label(text("title"), rect(20, 112 - 11, 560, 32), 26, true, true);
   const body = label(text("body"), rect(41, 147, 518, 32), 13, false, true, true);
   initialView.addSubview$(title); initialView.addSubview$(body);
   const card = View.alloc().initWithFrame$(rect(41, 200, 518, 80));
