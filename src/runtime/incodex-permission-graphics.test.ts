@@ -37,3 +37,10 @@ test("missing CF values fail explicitly instead of silently removing the visual 
   expect(() => f.graphics.setBlackColor(f.layer, "shadowColor", 1)).toThrow();
   expect(f.stored.size).toBe(0);
 });
+
+test("semantic separator colors retain their RGB and multiplied opacity", () => {
+  const f = fixture();
+  f.graphics.setColor(f.layer, "borderColor", [1, 1, 1, .3 * .75]);
+  expect(f.stored.get("borderColor")).toEqual({ name: "CGColorCreateGenericRGB", args: [1, 1, 1, .3 * .75] });
+  expect(f.released).toEqual(["CGColorRelease"]);
+});
