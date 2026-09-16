@@ -59,7 +59,7 @@ type Harness = {
     showItemInFolder: (file: string) => void;
   };
   spawnCalls: Array<{ file: string; args: string[] }>;
-  probes: boolean[];
+  probes: unknown[];
   controller: any;
 };
 
@@ -94,12 +94,14 @@ function makeHarness(options: {
   marker?: Partial<Marker>;
   requestPath?: string;
   markerMode?: number;
-  probes?: boolean[];
+  probes?: unknown[];
   dialogResponses?: number[];
   spawn?: (file: string, args: string[]) => EventEmitter;
   appPath?: string;
   installId?: string;
   writeMarker?: boolean;
+  copy?: unknown;
+  fs?: any;
 } = {}): Harness {
   const root = temporaryRoot();
   const requestPath = options.requestPath ?? markerPath(root, options.installId ?? INSTALL_ID);
@@ -132,7 +134,7 @@ function makeHarness(options: {
   const spawnCalls: Array<{ file: string; args: string[] }> = [];
   const probes = [...(options.probes ?? [false])];
   const systemPreferences = {
-    isTrustedAccessibilityClient: (): boolean => probes.shift() ?? false,
+    isTrustedAccessibilityClient: (): unknown => probes.shift(),
   };
   const spawn =
     options.spawn ??
@@ -154,14 +156,14 @@ function makeHarness(options: {
     dialog,
     systemPreferences,
     spawn,
-    fs: nodeFs,
+    fs: options.fs ?? nodeFs,
     requestPath,
     appPath: options.appPath ?? APP_PATH,
     installId: options.installId ?? INSTALL_ID,
     bundleId: BUNDLE_ID,
     platform: "darwin",
     isIncognito: false,
-    copy: COPY,
+    copy: options.copy ?? COPY,
     now: () => 1_700_000_000_100,
     // Tests exercise activation rechecks without waiting on wall-clock timers.
     pollDelaysMs: [],
@@ -170,6 +172,31 @@ function makeHarness(options: {
 
   return { root, requestPath, dialog, shell, spawnCalls, probes, controller };
 }
+
+test("accepts root-owned ASAR package metadata for the default app identity", () => {
+  const packagePath = "/Applications/ChatGPT.app/Contents/Resources/app.asar/package.json";
+  const fakeFs = {
+    lstatSync: (file: string) => {
+      expect(file).toBe(packagePath);
+      return {
+        size: 128,
+        uid: 0,
+        isSymbolicLink: () => false,
+        isFile: () => true,
+      };
+    },
+    readFileSync: (file: string) => {
+      expect(file).toBe(packagePath);
+      return JSON.stringify({ __incodex: { installId: INSTALL_ID } });
+    },
+  };
+  const readIdentity = (runtimeMain as any).readInstalledRuntimeIdentity;
+  expect(typeof readIdentity).toBe("function");
+  expect(readIdentity({ getAppPath: () => packagePath.slice(0, -13) }, fakeFs)).toEqual({
+    appPath: APP_PATH,
+    installId: INSTALL_ID,
+  });
+});
 
 describe("Accessibility setup controller", () => {
   test("marks a pending request granted silently when the actual host is trusted", async () => {
@@ -182,6 +209,27 @@ describe("Accessibility setup controller", () => {
     expect(harness.spawnCalls).toHaveLength(0);
     expect(harness.shell.opened).toHaveLength(0);
     expect(harness.shell.revealed).toHaveLength(0);
+  });
+
+  test("treats a non-boolean host probe as unknown and never resets", async () => {
+    const harness = makeHarness({ probes: [undefined] });
+
+    await harness.controller.run();
+
+    expect(readMarker(harness.requestPath).state).toBe("pending");
+    expect(harness.dialog.calls).toHaveLength(0);
+    expect(harness.spawnCalls).toHaveLength(0);
+    expect(harness.shell.opened).toHaveLength(0);
+  });
+
+  test("treats an unbuilt or incomplete copy table as unknown and never prompts", async () => {
+    const harness = makeHarness({ probes: [false], copy: {} });
+
+    await harness.controller.run();
+
+    expect(readMarker(harness.requestPath).state).toBe("pending");
+    expect(harness.dialog.calls).toHaveLength(0);
+    expect(harness.spawnCalls).toHaveLength(0);
   });
 
   test("records deferred and does not prompt again on an ordinary activation", async () => {
@@ -261,6 +309,59 @@ describe("Accessibility setup controller", () => {
 
     expect(harness.dialog.calls).toHaveLength(1);
     expect(readMarker(harness.requestPath).state).toBe("deferred");
+  });
+
+  test("does not let an old dialog reset or overwrite a re-armed request", async () => {
+    const harness = makeHarness({
+      marker: { requestId: "old-request" },
+      probes: [false],
+      dialogResponses: [0],
+    });
+    const originalShowMessageBox = harness.dialog.showMessageBox;
+    harness.dialog.showMessageBox = async (...args: any[]) => {
+      const result = await originalShowMessageBox(...args);
+      const current = readMarker(harness.requestPath);
+      writeMarker(harness.requestPath, {
+        ...current,
+        requestId: "new-request",
+        state: "pending",
+      });
+      return result;
+    };
+
+    await harness.controller.run();
+
+    expect(readMarker(harness.requestPath).requestId).toBe("new-request");
+    expect(readMarker(harness.requestPath).state).toBe("pending");
+    expect(harness.spawnCalls).toHaveLength(0);
+    expect(harness.shell.opened).toHaveLength(0);
+    expect(harness.shell.revealed).toHaveLength(0);
+  });
+
+  test("rechecks the request before replacing the marker after a write race", async () => {
+    let harness: Harness;
+    const racedFs = {
+      ...nodeFs,
+      writeFileSync(target: any, data: any, options?: any) {
+        if (typeof target === "number") {
+          const current = readMarker(harness.requestPath);
+          writeMarker(harness.requestPath, {
+            ...current,
+            requestId: "replacement-during-write",
+            state: "pending",
+          });
+        }
+        return nodeFs.writeFileSync(target, data, options);
+      },
+    };
+    harness = makeHarness({ probes: [true], fs: racedFs });
+
+    await harness.controller.run();
+
+    expect(readMarker(harness.requestPath).requestId).toBe("replacement-during-write");
+    expect(readMarker(harness.requestPath).state).toBe("pending");
+    expect(harness.dialog.calls).toHaveLength(0);
+    expect(harness.spawnCalls).toHaveLength(0);
   });
 
   test("rejects a missing request without probing, resetting, or prompting", async () => {

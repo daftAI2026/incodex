@@ -20,9 +20,7 @@ struct Fixture {
 
 impl Fixture {
     fn transaction_dir(&self) -> PathBuf {
-        self.root
-            .join("transactions")
-            .join(&self.install_id)
+        self.root.join("transactions").join(&self.install_id)
     }
 
     fn marker_path(&self) -> PathBuf {
@@ -60,11 +58,7 @@ fn committed_fixture(label: &str) -> Fixture {
 
     let candidate = sandbox.join("candidate.app");
     ditto(&app, &candidate).unwrap();
-    fs::write(
-        candidate.join("Contents/Resources/payload"),
-        b"installed\n",
-    )
-    .unwrap();
+    fs::write(candidate.join("Contents/Resources/payload"), b"installed\n").unwrap();
     transaction.place_staging(&candidate).unwrap();
     transaction.swap().unwrap();
     transaction.commit().unwrap();
@@ -73,7 +67,11 @@ fn committed_fixture(label: &str) -> Fixture {
     // before it considers placing a Runtime coordination marker.
     let transactions = root.join("transactions");
     let transaction_dir = transactions.join(&install_id);
-    for path in [root.as_path(), transactions.as_path(), transaction_dir.as_path()] {
+    for path in [
+        root.as_path(),
+        transactions.as_path(),
+        transaction_dir.as_path(),
+    ] {
         fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
     }
 
@@ -223,7 +221,9 @@ fn request_rejects_missing_transaction_without_creating_its_directory() {
 
     assert!(!error.is_empty());
     assert!(!missing_transaction.exists());
-    assert!(!missing_transaction.join("accessibility-setup.json").exists());
+    assert!(!missing_transaction
+        .join("accessibility-setup.json")
+        .exists());
 }
 
 #[test]
@@ -284,7 +284,5 @@ fn request_rejects_symlinked_transaction_ancestry_without_following_it() {
         .unwrap()
         .file_type()
         .is_symlink());
-    assert!(!moved_transaction
-        .join("accessibility-setup.json")
-        .exists());
+    assert!(!moved_transaction.join("accessibility-setup.json").exists());
 }

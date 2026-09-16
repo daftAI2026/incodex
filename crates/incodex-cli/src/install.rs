@@ -63,7 +63,12 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
         println!("{}", format_kv("Clone", &app.display().to_string(), None));
     }
     let mut progress = Progress::new();
-    print_install_plan(&app, parsed.clone, &mut progress)?;
+    print_install_plan(
+        &app,
+        parsed.clone,
+        parsed.live && parsed.app.is_none(),
+        &mut progress,
+    )?;
     if parsed.dry_run {
         println!("{}", format_warn("Dry run. No files changed.", None));
         return Ok(());
@@ -96,10 +101,28 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
     progress.stop();
     print_command_result(&result);
     if parsed.live && parsed.app.is_none() {
+        let install_id = result.install_id.as_deref().ok_or(
+            "App installation finished, but its install identity is missing; permission setup was not started.",
+        )?;
+        crate::accessibility_setup::request_setup(&root, &app, install_id).map_err(|error| {
+            format!("App installation finished, but permission setup could not be prepared: {error}. Run incodex install to retry.")
+        })?;
         println!(
             "{}",
-            format_ok("Done. Open ChatGPT.app when you want Incognito.", None)
+            format_kv(
+                "Accessibility",
+                "Checking in ChatGPT on launch; system approval may be needed.",
+                None
+            )
         );
+        let launched = std::process::Command::new("/usr/bin/open")
+            .arg(&app)
+            .status();
+        if !matches!(launched, Ok(status) if status.success()) {
+            println!("{}", format_warn("Open ChatGPT.app to finish Accessibility setup. Installation is complete; permission has not been verified.", None));
+        } else {
+            println!("{}", format_ok("Installed. ChatGPT will verify script-control permission and guide setup if needed.", None));
+        }
     } else {
         println!(
             "{}",
@@ -149,6 +172,9 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
         "{}",
         format_ok(&format!("Uninstalled. {app_name} restored."), None)
     );
+    if official_default {
+        println!("{}", format_warn("Accessibility: the original signing identity was restored. Open ChatGPT and run incodex doctor to check its permission; file restoration alone does not verify it.", None));
+    }
     println!();
     Ok(())
 }
@@ -254,7 +280,12 @@ fn resolve_target(parsed: &ParsedCli, root: &Path) -> PathBuf {
     PathBuf::from(DEFAULT_APP)
 }
 
-fn print_install_plan(app: &Path, clone: bool, progress: &mut Progress) -> Result<(), String> {
+fn print_install_plan(
+    app: &Path,
+    clone: bool,
+    setup_accessibility: bool,
+    progress: &mut Progress,
+) -> Result<(), String> {
     let source = if clone {
         PathBuf::from(DEFAULT_APP)
     } else {
@@ -300,6 +331,9 @@ fn print_install_plan(app: &Path, clone: bool, progress: &mut Progress) -> Resul
             "{}",
             format_warn("Replaces the app in place and resigns it ad hoc.", None)
         );
+        if setup_accessibility {
+            println!("{}", format_kv("Accessibility", "Reopens ChatGPT for permission setup after installation. macOS may require your approval.", None));
+        }
         println!(
             "{}",
             format_warn(
