@@ -774,6 +774,26 @@ function helperPanels(bridge: FakeBridge): FakeNative[] {
   return bridge.objects.filter((value) => value.type === "NSPanel" && value.values.get("styleMask") === 128);
 }
 
+test("anchors the Accessibility helper to the Settings bottom and trailing edges", async () => {
+  const clock = installPollingClock();
+  let target = { x: 554, y: 160, width: 740, height: 625 };
+  let api: Awaited<ReturnType<typeof createNativeAccessibilitySetupWindow>> | undefined;
+  try {
+    const harness = await makeHarness({ locateSettings: () => target });
+    api = harness.api;
+    api.setState("awaiting-user");
+    await settleNativeAsync();
+    const helper = helperPanels(harness.bridge).find((panel) => panel.frame().size.width === 532);
+    // The fake primary screen is 900pt high. CUA's Accessibility branch uses
+    // maxX - fittingWidth - 10, primaryHeight - maxY + 10 (AppKit coordinates).
+    expect(helper?.frame()).toEqual(frame(532, 112, 752, 125));
+    target = { ...target, x: target.x - 80, y: target.y - 60 };
+    clock.timers.find((timer) => timer.active && timer.delay === 100)?.callback();
+    await settleNativeAsync();
+    expect(helper?.frame()).toEqual(frame(532, 112, 672, 185));
+  } finally { api?.close(); clock.restore(); }
+});
+
 async function makeHarness(options: {
   onHandoff?: (payload: any) => void;
   onBack?: (payload: any) => { finished?: Promise<unknown>; dispose?: () => void } | undefined;
