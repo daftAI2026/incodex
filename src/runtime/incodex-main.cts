@@ -358,6 +358,9 @@ function createAccessibilitySetupController(options = {}) {
   let panel = null;
   let pollTimer = null;
   let resetRunning = false;
+  let retryFlight = null;
+  let retryGeneration = 0;
+  let removeRetry = null;
   const schedule = options.setInterval || setInterval;
   const unschedule = options.clearInterval || clearInterval;
 
@@ -366,8 +369,22 @@ function createAccessibilitySetupController(options = {}) {
     pollTimer = null;
   }
 
+  function invalidateRetry() {
+    retryGeneration += 1;
+    const unregister = removeRetry;
+    removeRetry = null;
+    if (typeof unregister === "function") {
+      try {
+        unregister();
+      } catch {
+        /* A closed native guide may already have discarded its callback. */
+      }
+    }
+  }
+
   function closePanel() {
     stopPolling();
+    invalidateRetry();
     const currentPanel = panel;
     panel = null;
     currentPanel?.close();
@@ -484,6 +501,88 @@ function createAccessibilitySetupController(options = {}) {
     }
   }
 
+  function retryPanelIsActive(activePanel, snapshotGeneration) {
+    if (panel !== activePanel || retryGeneration !== snapshotGeneration) return false;
+    try {
+      if (typeof activePanel?.isDestroyed === "function" && activePanel.isDestroyed()) return false;
+    } catch {
+      return false;
+    }
+    return true;
+  }
+
+  function retryMarker(activePanel, snapshot, snapshotGeneration) {
+    if (!retryPanelIsActive(activePanel, snapshotGeneration)) return null;
+    const current = readAccessibilityMarker(fileSystem, requestPath, appPath, installId);
+    if (!accessibilityRequestMatches(current, snapshot) || current.marker.state !== "awaiting-user") {
+      if (panel === activePanel) closePanel();
+      return null;
+    }
+    return current;
+  }
+
+  function retryRequest(activePanel, snapshot) {
+    if (retryFlight?.panel === activePanel) return retryFlight.promise;
+    const snapshotGeneration = ++retryGeneration;
+    const task = { panel: activePanel, promise: null };
+    task.promise = (async () => {
+      if (!retryMarker(activePanel, snapshot, snapshotGeneration)) {
+        return { ok: false, state: "stale" };
+      }
+
+      const checked = probe();
+      if (!retryMarker(activePanel, snapshot, snapshotGeneration)) {
+        return { ok: false, state: "stale" };
+      }
+      if (checked.kind !== "known") {
+        const reason = checked.error || "Accessibility probe unavailable";
+        const written = transition(snapshot, "error", { error: reason });
+        if (written && retryPanelIsActive(activePanel, snapshotGeneration)) {
+          showRepairError(reason);
+        } else if (panel === activePanel) {
+          closePanel();
+        }
+        return { ok: false, state: written ? "error" : "stale" };
+      }
+      if (checked.trusted) {
+        const written = transition(snapshot, "granted");
+        if (written && retryPanelIsActive(activePanel, snapshotGeneration)) {
+          activePanel.setState("granted");
+          closePanel();
+          return { ok: true, state: "granted" };
+        }
+        if (panel === activePanel) closePanel();
+        return { ok: false, state: "stale" };
+      }
+
+      activePanel.setState("repairing");
+      try {
+        await openAccessibilitySurfaces();
+      } catch (error) {
+        if (!retryMarker(activePanel, snapshot, snapshotGeneration)) {
+          return { ok: false, state: "stale" };
+        }
+        const written = transition(snapshot, "error", { error: String(error) });
+        if (written && retryPanelIsActive(activePanel, snapshotGeneration)) {
+          showRepairError(error);
+        } else if (panel === activePanel) {
+          closePanel();
+        }
+        return { ok: false, state: written ? "error" : "stale" };
+      }
+
+      if (!retryMarker(activePanel, snapshot, snapshotGeneration)) {
+        return { ok: false, state: "stale" };
+      }
+      activePanel.setState("awaiting-user");
+      return { ok: true, state: "awaiting-user" };
+    })().finally(() => {
+      if (retryFlight === task) retryFlight = null;
+    });
+    retryFlight = task;
+    return task.promise;
+  }
+
   async function processRequest() {
     if (
       platform !== "darwin" ||
@@ -535,12 +634,17 @@ function createAccessibilitySetupController(options = {}) {
         stopPolling();
         if (panel !== activePanel) return;
         panel = null;
+        invalidateRetry();
         const current = readAccessibilityMarker(fileSystem, requestPath, appPath, installId);
         if (accessibilityRequestMatches(current, snapshot) &&
             ["pending", "awaiting-user"].includes(current.marker.state)) {
           transition(snapshot, "deferred");
         }
       });
+      if (typeof panel.onRetry === "function") {
+        const unregister = panel.onRetry(() => retryRequest(activePanel, snapshot));
+        removeRetry = typeof unregister === "function" ? unregister : null;
+      }
       pollTimer = schedule(() => poll(snapshot), 750);
       pollTimer?.unref?.();
       choice = await panel.choice;
