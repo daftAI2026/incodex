@@ -38,7 +38,9 @@ class FakeNative {
   readonly selectors = new Map<string, (...args: any[]) => unknown>();
   readonly values = new Map<string, unknown>();
   frameValue = frame();
+  visibleFrameValue = frame();
   contentViewValue: FakeNative | null = null;
+  layerValue: FakeNative | null = null;
   target: FakeNative | null = null;
   action: string | null = null;
   visible = false;
@@ -81,9 +83,47 @@ class FakeNative {
     return this;
   }
 
+  initWithRect$options$owner$userInfo$(value: Frame, options: unknown, owner: unknown, userInfo: unknown): FakeNative {
+    this.record("initWithRect:options:owner:userInfo:", value, options, owner, userInfo);
+    this.frameValue = copyFrame(value);
+    return this;
+  }
+
   initWithString$(value: string): FakeNative {
     this.values.set("string", value);
     return this;
+  }
+
+  init(): FakeNative {
+    return this;
+  }
+
+  initWithPasteboardWriter$(value: FakeNative): FakeNative {
+    this.values.set("pasteboardWriter", value);
+    return this;
+  }
+
+  initWithContentsOfFile$(value: unknown): FakeNative {
+    this.values.set("contentsOfFile", value);
+    return this;
+  }
+
+  initWithSize$(value: unknown): FakeNative {
+    this.values.set("size", value);
+    return this;
+  }
+
+  addRepresentation$(value: unknown): void {
+    this.values.set("representation", value);
+  }
+
+  count(): number {
+    return Array.isArray(this.values.get("items")) ? (this.values.get("items") as unknown[]).length : 0;
+  }
+
+  objectAtIndex$(index: number): unknown {
+    const items = this.values.get("items");
+    return Array.isArray(items) ? items[index] : undefined;
   }
 
   frame(): Frame {
@@ -94,15 +134,175 @@ class FakeNative {
     return frame(this.frameValue.size.width, this.frameValue.size.height);
   }
 
+  convertRect$toView$(value: Frame, _view: unknown): Frame {
+    this.record("convertRect:toView:", value, _view);
+    return copyFrame(value);
+  }
+
+  convertRectToScreen$(value: Frame): Frame {
+    this.record("convertRectToScreen:", value);
+    return copyFrame(value);
+  }
+
+  visibleFrame(): Frame {
+    return copyFrame(this.visibleFrameValue.size.width || this.frameValue.size.width
+      ? this.visibleFrameValue : this.frameValue);
+  }
+
+  displayIfNeeded(): void {}
+
+  sizeToFit(): void {}
+
+  layer(): FakeNative {
+    if (!this.layerValue) this.layerValue = new FakeNative("CALayer", this.calls);
+    return this.layerValue;
+  }
+
+  presentationLayer(): FakeNative {
+    return this;
+  }
+
+  transform(): unknown {
+    return this.values.get("transform");
+  }
+
+  settlingDuration(): number {
+    return 0;
+  }
+
   setFrame$(value: Frame): void {
     this.record("setFrame:", value);
     this.frameValue = copyFrame(value);
+  }
+
+  accessibilityDisplayShouldReduceMotion(): boolean { return false; }
+  accessibilityDisplayShouldReduceTransparency(): boolean { return false; }
+
+  effectiveAppearance(): FakeNative {
+    return new FakeNative("NSAppearance", this.calls);
+  }
+
+  name(): string {
+    return "NSAppearanceNameAqua";
+  }
+
+  absoluteString(): string {
+    const path = String(this.values.get("fileURLPath") ?? "");
+    return path.startsWith("file://") ? path : `file://${path}`;
   }
 
   setContentView$(value: FakeNative): void {
     this.record("setContentView:", value);
     this.contentViewValue = value;
     if (!this.subviews.includes(value)) this.subviews.push(value);
+  }
+
+  setDelegate$(value: FakeNative): void {
+    this.values.set("delegate", value);
+  }
+
+  setHidesOnDeactivate$(value: unknown): void {
+    this.values.set("hidesOnDeactivate", value);
+  }
+
+  setLevel$(value: unknown): void {
+    this.values.set("level", value);
+  }
+
+  setOpaque$(value: unknown): void {
+    this.values.set("opaque", value);
+  }
+
+  setBackgroundColor$(value: unknown): void {
+    this.values.set("backgroundColor", value);
+  }
+
+  setHasShadow$(value: unknown): void {
+    this.values.set("hasShadow", value);
+  }
+
+  setTitlebarAppearsTransparent$(value: unknown): void {
+    this.values.set("titlebarAppearsTransparent", value);
+  }
+
+  setTitleVisibility$(value: unknown): void {
+    this.values.set("titleVisibility", value);
+  }
+
+  setWantsLayer$(value: unknown): void {
+    this.values.set("wantsLayer", value);
+  }
+
+  setMaterial$(value: unknown): void {
+    this.values.set("material", value);
+  }
+
+  setBlendingMode$(value: unknown): void {
+    this.values.set("blendingMode", value);
+  }
+
+  setState$(value: unknown): void {
+    this.values.set("state", value);
+  }
+
+  setCornerRadius$(value: unknown): void {
+    this.values.set("cornerRadius", value);
+  }
+
+  setBorderWidth$(value: unknown): void {
+    this.values.set("borderWidth", value);
+  }
+
+  setBorderColor$(value: unknown): void {
+    this.values.set("borderColor", value);
+  }
+
+  setShadowOpacity$(value: unknown): void {
+    this.values.set("shadowOpacity", value);
+  }
+
+  setShadowRadius$(value: unknown): void {
+    this.values.set("shadowRadius", value);
+  }
+
+  setShadowOffset$(value: unknown): void {
+    this.values.set("shadowOffset", value);
+  }
+
+  setShadowColor$(value: unknown): void {
+    this.values.set("shadowColor", value);
+  }
+
+  setGeometryFlipped$(value: unknown): void {
+    this.values.set("geometryFlipped", value);
+  }
+
+  setMasksToBounds$(value: unknown): void {
+    this.values.set("masksToBounds", value);
+  }
+
+  setAnchorPoint$(value: unknown): void {
+    this.values.set("anchorPoint", value);
+  }
+
+  setTransform$(value: unknown): void {
+    this.values.set("transform", value);
+  }
+
+  addAnimation$forKey$(value: unknown, key: unknown): void {
+    this.values.set(`animation:${String(key)}`, value);
+  }
+
+  setFill(): void {}
+
+  setStroke(): void {}
+
+  setFrame$display$(value: Frame): void {
+    this.setFrame$(value);
+  }
+
+  addChildWindow$ordered$(value: FakeNative): void {
+    this.addSubview$(value);
   }
 
   contentView(): FakeNative | null {
@@ -134,6 +334,80 @@ class FakeNative {
   setStringValue$(value: unknown): void {
     this.values.set("stringValue", String(value));
   }
+
+  setFont$(value: unknown): void {
+    this.values.set("font", value);
+  }
+
+  setAlignment$(value: unknown): void {
+    this.values.set("alignment", value);
+  }
+
+  setTextColor$(value: unknown): void {
+    this.values.set("textColor", value);
+  }
+
+  setMaximumNumberOfLines$(value: unknown): void {
+    this.values.set("maximumNumberOfLines", value);
+  }
+
+  setLineBreakMode$(value: unknown): void {
+    this.values.set("lineBreakMode", value);
+  }
+
+  setKeyEquivalent$(value: unknown): void {
+    this.values.set("keyEquivalent", value);
+  }
+
+  setEnabled$(value: unknown): void {
+    this.values.set("enabled", value);
+  }
+
+  setBezelStyle$(value: unknown): void {
+    this.values.set("bezelStyle", value);
+  }
+
+  setBordered$(value: unknown): void { this.values.set("bordered", value); }
+  setContentTintColor$(value: unknown): void { this.values.set("contentTintColor", value); }
+
+  setToolTip$(value: unknown): void {
+    this.values.set("toolTip", value);
+  }
+
+  setHidden$(value: unknown): void {
+    this.values.set("hidden", value);
+  }
+
+  addTrackingArea$(value: unknown): void {
+    this.values.set("trackingArea", value);
+  }
+
+  setAnimatesToStartingPositionsOnCancelOrFail$(value: unknown): void {
+    this.values.set("animatesToStartingPositionsOnCancelOrFail", value);
+  }
+
+  setMass$(value: unknown): void { this.values.set("mass", value); }
+  setStiffness$(value: unknown): void { this.values.set("stiffness", value); }
+  setDamping$(value: unknown): void { this.values.set("damping", value); }
+  setInitialVelocity$(value: unknown): void { this.values.set("initialVelocity", value); }
+  setDuration$(value: unknown): void { this.values.set("duration", value); }
+  setFromValue$(value: unknown): void { this.values.set("fromValue", value); }
+  setToValue$(value: unknown): void { this.values.set("toValue", value); }
+
+  moveToPoint$(value: unknown): void { this.values.set("moveToPoint", value); }
+  lineToPoint$(value: unknown): void { this.values.set("lineToPoint", value); }
+  curveToPoint$controlPoint1$controlPoint2$(...value: unknown[]): void {
+    this.values.set("curveToPoint", value);
+  }
+  closePath(): void { this.values.set("closedPath", true); }
+  setLineWidth$(value: unknown): void { this.values.set("lineWidth", value); }
+  setLineJoinStyle$(value: unknown): void { this.values.set("lineJoinStyle", value); }
+  fill(): void { this.values.set("filled", true); }
+  stroke(): void { this.values.set("stroked", true); }
+
+  setBoxType$(value: unknown): void { this.values.set("boxType", value); }
+  setBorderType$(value: unknown): void { this.values.set("borderType", value); }
+  setFillColor$(value: unknown): void { this.values.set("fillColor", value); }
 
   setImage$(value: unknown): void {
     this.values.set("image", value);
@@ -183,6 +457,14 @@ class FakeNative {
     this.destroyed = true;
   }
 
+  center(): void {
+    this.values.set("centered", true);
+  }
+
+  makeKeyAndOrderFront$(_value: unknown): void {
+    this.visible = true;
+  }
+
   isVisible(): boolean {
     return this.visible;
   }
@@ -209,7 +491,7 @@ class FakeNative {
     this.values.set(`pasteboard:${type}`, value);
   }
 
-  beginDraggingSessionWithItems$event$source$(items: FakeNative[], event: unknown, source: FakeNative): FakeNative {
+  beginDraggingSessionWithItems$event$source$(items: unknown, event: unknown, source: FakeNative): FakeNative {
     this.values.set("draggingItems", items);
     this.values.set("draggingEvent", event);
     this.values.set("draggingSource", source);
@@ -257,10 +539,48 @@ function makeBridge(): FakeBridge {
         button.setAction$(action);
         return button;
       },
+      labelWithString$: (value: unknown) => {
+        const field = object(type);
+        field.setStringValue$(value);
+        return field;
+      },
       stringWithUTF8String$: (value: string) => value,
+      fileURLWithPath$: (value: unknown) => {
+        const url = object(type);
+        url.values.set("fileURLPath", String(value));
+        return url;
+      },
       imageNamed$: (value: string) => value,
       sharedWorkspace: () => object(type),
       defaultCenter: () => object(type),
+      screens: () => {
+        const screen = object("NSScreen");
+        screen.frameValue = frame(1440, 900);
+        screen.visibleFrameValue = frame(1440, 860, 0, 0);
+        const screens = object("NSArray", {
+          count() { return 1; },
+          objectAtIndex$(index: number) { return index === 0 ? screen : undefined; },
+        });
+        screens.values.set("items", [screen]);
+        return screens;
+      },
+      arrayWithObject$: (value: unknown) => {
+        const array = object("NSArray", {
+          count() { return 1; },
+          objectAtIndex$(index: number) { return index === 0 ? value : undefined; },
+        });
+        array.values.set("items", [value]);
+        return array;
+      },
+      arrayWithArray$: (values: unknown) => {
+        const items = values instanceof FakeNative ? values.values.get("items") : values;
+        const array = object("NSArray", {
+          count() { return Array.isArray(items) ? items.length : 0; },
+          objectAtIndex$(index: number) { return Array.isArray(items) ? items[index] : undefined; },
+        });
+        array.values.set("items", Array.isArray(items) ? [...items] : []);
+        return array;
+      },
     };
     return new Proxy(cls, {
       get(target, property) {
@@ -290,20 +610,33 @@ function makeBridge(): FakeBridge {
       get NSPanel() { return library(this.framework).NSPanel; }
       get NSVisualEffectView() { return library(this.framework).NSVisualEffectView; }
       get NSImageView() { return library(this.framework).NSImageView; }
+      get NSImage() { return library(this.framework).NSImage; }
       get NSTextField() { return library(this.framework).NSTextField; }
       get NSButton() { return library(this.framework).NSButton; }
+      get NSFont() { return library(this.framework).NSFont; }
+      get NSView() { return library(this.framework).NSView; }
+      get NSBezierPath() { return library(this.framework).NSBezierPath; }
+      get NSBox() { return library(this.framework).NSBox; }
+      get NSScreen() { return library(this.framework).NSScreen; }
+      get NSTrackingArea() { return library(this.framework).NSTrackingArea; }
       get NSWorkspace() { return library(this.framework).NSWorkspace; }
       get NSPasteboardItem() { return library(this.framework).NSPasteboardItem; }
       get NSDraggingItem() { return library(this.framework).NSDraggingItem; }
+      get NSArray() { return library(this.framework).NSArray; }
+      get NSURL() { return library(this.framework).NSURL; }
       get NSString() { return library(this.framework).NSString; }
       get NSColor() { return library(this.framework).NSColor; }
+      get NSValue() { return library(this.framework).NSValue; }
+      get CASpringAnimation() { return library(this.framework).CASpringAnimation; }
     },
     NobjcClass: {
       define(definition: { name: string; methods?: Record<string, { implementation: (...args: any[]) => unknown }> }) {
         const methods = Object.fromEntries(
           Object.entries(definition.methods ?? {}).map(([selector, value]) => [
             selector,
-            (...args: any[]) => value.implementation(...args),
+            function (this: FakeNative, ...args: any[]) {
+              return value.implementation(this, ...args);
+            },
           ]),
         );
         definitions.set(definition.name, methods);
@@ -335,6 +668,18 @@ function objectWithTitle(root: FakeNative, title: string): FakeNative | undefine
   return descendants(root).find((value) =>
     value.values.get("title") === title || value.values.get("stringValue") === title,
   );
+}
+
+function arrayValues(value: unknown): unknown[] {
+  if (value instanceof FakeNative) {
+    const items = value.values.get("items");
+    return Array.isArray(items) ? items : [];
+  }
+  return Array.isArray(value) ? value : [];
+}
+
+function flushNativeAsync(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 async function makeHarness(options: { onHandoff?: (payload: any) => void } = {}) {
@@ -383,20 +728,23 @@ describe("native Accessibility setup adapter", () => {
     repair.performClick$();
     await expect(api.choice).resolves.toBe("repair");
     api.setState("awaiting-user");
+    await flushNativeAsync();
 
     expect(bridge.calls.some(({ selector }) => selector === "cacheDisplayInRect:toBitmapImageRep:")).toBe(true);
     expect(handoffs).toHaveLength(1);
     expect(handoffs[0].source.frame.size.width).toBeGreaterThan(0);
     expect(handoffs[0].source.frame.size.height).toBeGreaterThan(0);
     expect(handoffs[0].source.image).toBeDefined();
-    expect(handoffs[0].target.frame.size).toEqual({ width: 532, height: 112 });
+    expect(handoffs[0].target.frame.size).toEqual({ width: 452, height: 44 });
+    expect(handoffs[0].target.radius).toBe(8);
     expect(handoffs[0].target.panel).toBeDefined();
-    expect(handoffs[0].target.view).toBeDefined();
+    expect(handoffs[0].target.view?.hasSelector("mouseDown:")).toBe(true);
   });
 
   test("uses a native file URL drag source fixed to the official ChatGPT bundle", async () => {
     const { api, bridge } = await makeHarness();
     api.setState("awaiting-user");
+    await flushNativeAsync();
     const row = bridge.objects.find((value) => value.hasSelector("mouseDown:"));
     if (!row) throw new Error("native helper drag row is missing");
 
@@ -407,7 +755,42 @@ describe("native Accessibility setup adapter", () => {
     const provider = item.values.get("dataProvider") as FakeNative | undefined;
     provider?.invoke("pasteboard:item:provideDataForType:", null, item, "public.file-url");
     expect(item.values.get("pasteboard:public.file-url")).toBe(`file://${APP_PATH}`);
-    expect(item.values.get("types")).toEqual(expect.arrayContaining(["public.file-url"]));
+    expect(arrayValues(item.values.get("types"))).toEqual(expect.arrayContaining(["public.file-url"]));
+  });
+
+  test("waits for the arrow return before scheduling the next native pulse", async () => {
+    const { api, bridge } = await makeHarness();
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+    let nextId = 1;
+    const scheduled: Array<{ id: number; delay: number; callback: () => void }> = [];
+    globalThis.setTimeout = ((callback: TimerHandler, delay?: number) => {
+      const entry = { id: nextId++, delay: Number(delay ?? 0), callback: callback as () => void };
+      scheduled.push(entry);
+      return entry.id as unknown as ReturnType<typeof setTimeout>;
+    }) as unknown as typeof setTimeout;
+    globalThis.clearTimeout = ((id?: ReturnType<typeof setTimeout>) => {
+      const numeric = Number(id);
+      const index = scheduled.findIndex((entry) => entry.id === numeric);
+      if (index >= 0) scheduled.splice(index, 1);
+    }) as unknown as typeof clearTimeout;
+
+    try {
+      api.setState("awaiting-user");
+      await Promise.resolve();
+      await Promise.resolve();
+      const pulse = scheduled.find((entry) => entry.delay === 500);
+      expect(pulse).toBeDefined();
+      pulse?.callback();
+      expect(scheduled.some((entry) => entry.delay === 250)).toBe(true);
+      expect(scheduled.some((entry) => entry.delay === 4000)).toBe(false);
+      scheduled.find((entry) => entry.delay === 250)?.callback();
+      expect(scheduled.some((entry) => entry.delay === 4000)).toBe(true);
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
+      api.close();
+    }
   });
 
   test("closes native panels once and keeps the controller lifecycle contract", async () => {
