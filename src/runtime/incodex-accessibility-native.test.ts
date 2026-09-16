@@ -482,6 +482,7 @@ class FakeNative {
 
   cacheDisplayInRect$toBitmapImageRep$(value: Frame, representation: FakeNative): void {
     this.record("cacheDisplayInRect:toBitmapImageRep:", value, representation);
+    representation.values.set("capturedView", this);
   }
 
   setDataProvider$forTypes$(provider: FakeNative, types: unknown): void {
@@ -775,6 +776,10 @@ describe("native Accessibility setup adapter", () => {
     expect(handoffs[0].source.frame.size.width).toBeGreaterThan(0);
     expect(handoffs[0].source.frame.size.height).toBeGreaterThan(0);
     expect(handoffs[0].source.image).toBeDefined();
+    const capture = handoffs[0].source.image.values.get("representation").values.get("capturedView") as FakeNative;
+    // The transition must include the colored button background, not just its glyphs.
+    expect(capture.subviews.some((view) => view.type === "NSBox")).toBe(true);
+    expect(capture.subviews.some((view) => view.type === "NSButton")).toBe(true);
     expect(handoffs[0].target.frame.size).toEqual({ width: 452, height: 44 });
     expect(handoffs[0].target.radius).toBe(8);
     expect(handoffs[0].target.panel).toBeDefined();
