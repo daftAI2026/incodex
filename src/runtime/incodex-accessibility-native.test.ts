@@ -841,6 +841,17 @@ describe("native Accessibility setup adapter", () => {
     } finally { api.close(); }
   });
 
+  test("shifts the reference content group up nine points while retaining window sizing", async () => {
+    const { api, panel } = await makeHarness({ bodyHeight: 32 });
+    try {
+      const group = panel.contentView()?.subviews.find(value => value.frame().origin.y === -9);
+      expect(group).toBeDefined();
+      expect(group && descendants(group).some(value => value.values.get("stringValue") === COPY.title)).toBe(true);
+      expect(panel.contentView()?.subviews[0].frame().origin.y).toBe(0);
+      expect(panel.frame().size.height).toBe(312);
+    } finally { api.close(); }
+  });
+
   test("applies the reference title offset without moving body or permission row", async () => {
     const { api, panel } = await makeHarness({ bodyHeight: 32 });
     try {
