@@ -19,7 +19,8 @@ const COPY = {
   openSettings: "Open Settings",
   errorTitle: "ChatGPT permission setup is incomplete",
   errorBody: "Add ChatGPT in Accessibility settings, then try again.",
-  awaitingStatus: "Checking automatically",
+  checking: "Checking automatically",
+  repairing: "Preparing System Settings…",
 };
 
 type BrowserWindowOptions = {
@@ -133,7 +134,7 @@ async function flush(): Promise<void> {
 
 async function makeHarness(): Promise<Harness> {
   FakeBrowserWindow.instances = [];
-  const icon = { toDataURL: () => ICON_DATA };
+  const icon = { toDataURL: () => ICON_DATA, isEmpty: () => false, resize() { return this; } };
   const iconCalls: string[] = [];
   const settingsCalls: string[] = [];
   const dialogCalls: unknown[][] = [];
@@ -145,10 +146,10 @@ async function makeHarness(): Promise<Harness> {
         appFocusCalls.push(options ?? {});
       },
       async getFileIcon(file: string): Promise<unknown> {
-        iconCalls.push(file);
-        return icon;
+        throw new Error(`IconServices must not be called: ${file}`);
       },
     },
+    nativeImage: { createFromPath(file: string) { iconCalls.push(file); return icon; } },
     shell: {
       async openExternal(url: string): Promise<boolean> {
         settingsCalls.push(url);
@@ -211,8 +212,11 @@ describe("bounded Accessibility setup window", () => {
     expect(harness.appFocusCalls).toEqual([{ steal: true }]);
     expect(harness.window.showCalls).toBe(1);
     expect(harness.window.focusCalls).toBe(1);
-    expect(harness.iconCalls).toEqual([APP_PATH]);
+    expect(harness.iconCalls).toEqual([`${APP_PATH}/Contents/Resources/icon-chatgpt.png`]);
     expect(document).toContain(`id="app-icon"`);
+    expect(document).toContain(`id="title"`);
+    expect(document).toContain(`id="body"`);
+    expect(document).toContain(`id="status"`);
     expect(document).toContain(`id="repair"`);
     expect(document).toContain(`id="later"`);
     expect(document).toContain(`id="settings"`);
@@ -258,6 +262,8 @@ describe("bounded Accessibility setup window", () => {
 
     emitAction(harness, "later", frame);
     await expect(harness.api.choice).resolves.toBe("later");
+    await flush();
+    expect(harness.window.closeCalls).toBe(1);
   });
 
   test("ignores drag and settings while pending", async () => {
@@ -310,6 +316,35 @@ describe("bounded Accessibility setup window", () => {
     await expect(harness.api.choice).resolves.toBe("later");
   });
 
+  test("later closes the guide after repair has already settled its choice", async () => {
+    const harness = await makeHarness();
+
+    emitAction(harness, "repair");
+    await expect(harness.api.choice).resolves.toBe("repair");
+    await harness.api.setState("repairing");
+    emitAction(harness, "later");
+    await flush();
+
+    expect(harness.window.closeCalls).toBe(1);
+    expect(harness.api.isDestroyed()).toBe(true);
+  });
+
+  test("rejects a non-default app path before creating a window", async () => {
+    FakeBrowserWindow.instances = [];
+    const electron = {
+      BrowserWindow: FakeBrowserWindow,
+      app: { getFileIcon: async () => ({ toDataURL: () => ICON_DATA }) },
+    };
+
+    await expect(createAccessibilitySetupWindow({
+      electron,
+      copy: COPY,
+      appPath: "/Applications/Other.app",
+      preloadPath: PRELOAD_PATH,
+    })).rejects.toThrow("default ChatGPT app");
+    expect(FakeBrowserWindow.instances).toHaveLength(0);
+  });
+
   test("publishes state text and control visibility through the frozen state channel", async () => {
     const harness = await makeHarness();
 
@@ -319,7 +354,7 @@ describe("bounded Accessibility setup window", () => {
       state: "awaiting-user",
       title: COPY.addedTitle,
       body: COPY.addedBody,
-      status: COPY.awaitingStatus,
+      status: COPY.checking,
       repair: { text: COPY.repair, hidden: true },
       settings: { text: COPY.openSettings, hidden: false },
       appIcon: { draggable: true },
@@ -336,26 +371,41 @@ describe("bounded Accessibility setup window", () => {
     expect(FakeBrowserWindow.instances).toHaveLength(1);
   });
 
-  test("keeps terminal states inert and does not create a second prompt", async () => {
-    for (const state of ["granted", "error", "unknown"] as const) {
+  test("keeps granted inert and does not create a second prompt", async () => {
+    const harness = await makeHarness();
+    let resolved = false;
+    void harness.api.choice.then(() => {
+      resolved = true;
+    });
+
+    await harness.api.setState("granted");
+    emitAction(harness, "repair");
+    emitAction(harness, "later");
+    emitAction(harness, "drag");
+    emitAction(harness, "settings");
+    await flush();
+
+    expect(resolved).toBe(false);
+    expect(harness.window.webContents.dragCalls).toHaveLength(0);
+    expect(harness.settingsCalls).toHaveLength(0);
+    expect(harness.dialogCalls).toHaveLength(0);
+    expect(FakeBrowserWindow.instances).toHaveLength(1);
+  });
+
+  test("allows later to close the original error or unknown guide", async () => {
+    for (const state of ["error", "unknown"] as const) {
       const harness = await makeHarness();
-      let resolved = false;
-      void harness.api.choice.then(() => {
-        resolved = true;
-      });
 
       await harness.api.setState(state);
       emitAction(harness, "repair");
-      emitAction(harness, "later");
       emitAction(harness, "drag");
       emitAction(harness, "settings");
       await flush();
 
-      expect(resolved).toBe(false);
       expect(harness.window.webContents.dragCalls).toHaveLength(0);
       expect(harness.settingsCalls).toHaveLength(0);
-      expect(harness.dialogCalls).toHaveLength(0);
-      expect(FakeBrowserWindow.instances).toHaveLength(1);
+      emitAction(harness, "later");
+      await expect(harness.api.choice).resolves.toBe("later");
     }
   });
 
