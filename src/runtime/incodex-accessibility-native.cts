@@ -1,6 +1,7 @@
 // @ts-nocheck
 // Native presentation adapted from Cavalry-i18n e76175fe (MIT).
 // Copyright (c) 2026 daftAI. See LICENSE. Permission decisions stay in the host controller.
+const { createPermissionGraphics } = require("./incodex-permission-graphics.cts");
 let generation = 0;
 const APP_PATH = "/Applications/ChatGPT.app";
 const rect = (x, y, width, height) => ({ origin: { x, y }, size: { width, height } });
@@ -11,7 +12,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   const kit = new objc.NobjcLibrary("/System/Library/Frameworks/AppKit.framework/AppKit");
   const foundation = new objc.NobjcLibrary("/System/Library/Frameworks/Foundation.framework/Foundation");
   const quartz = new objc.NobjcLibrary("/System/Library/Frameworks/QuartzCore.framework/QuartzCore");
-  const graphics = new objc.NobjcLibrary("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics");
+  const graphics = createPermissionGraphics(objc);
   const text = key => typeof copy === "function" ? copy(key) : copy[key] ?? "";
   const str = value => foundation.NSString.stringWithUTF8String$(String(value));
   const array = value => foundation.NSArray.arrayWithObject$(value);
@@ -32,10 +33,6 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     canBecomeKeyWindow: { types: "B@:", implementation: () => false },
     canBecomeMainWindow: { types: "B@:", implementation: () => false },
   });
-  function color(layer, method, alpha) {
-    const value = objc.callFunction("CGColorCreateGenericRGB", { returns: "^v", args: ["d", "d", "d", "d"] }, 0, 0, 0, alpha);
-    try { layer[method](value); } finally { if (value) objc.callFunction("CGColorRelease", { returns: "v", args: ["^v"] }, value); }
-  }
   function label(value, frame, size = 13, bold = false, centered = false, secondary = false) {
     const field = kit.NSTextField.labelWithString$(str(value));
     field.setFrame$(frame); field.setFont$(bold ? kit.NSFont.boldSystemFontOfSize$(size) : kit.NSFont.systemFontOfSize$(size));
@@ -72,7 +69,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     "windowWillClose:": { types: "v@:@", implementation: () => close() },
     "allow:": { types: "v@:@", implementation: (_self, sender) => {
       if (closed || state !== "pending" || settled) return;
-      try { source = { frame: initial.convertRectToScreen$(sender.convertRect$toView$(sender.bounds(), null)), image: snapshot(sender), radius: 14 }; }
+      try { source = { frame: initial.convertRectToScreen$(allowSurface.convertRect$toView$(allowSurface.bounds(), null)), image: snapshot(allowSurface), radius: 10 }; }
       catch { source = null; }
       resolveOnce("repair");
     } },
@@ -111,10 +108,11 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   card.addSubview$(imageView(permissionIcon, rect(8, 7, 52, 52)));
   card.addSubview$(label(text("permissionTitle"), rect(68, 15, 270, 18), 13, true));
   card.addSubview$(label(text("permissionDescription"), rect(68, 34, 270, 18), 11, false, false, true));
-  const allow = button(text("repair"), rect(358, 23, 46, 20), "allow:"); allow.setKeyEquivalent$(str("\r"));
-  card.addSubview$(surface(rect(358, 23, 46, 20), 10, kit.NSColor.controlAccentColor()));
+  const allowSurface = View.alloc().initWithFrame$(rect(358, 23, 46, 20));
+  allowSurface.addSubview$(surface(rect(0, 0, 46, 20), 10, kit.NSColor.controlAccentColor()));
+  const allow = button(text("repair"), rect(0, 0, 46, 20), "allow:"); allow.setKeyEquivalent$(str("\r"));
   allow.setBordered$(false); allow.setContentTintColor$(kit.NSColor.whiteColor());
-  allow.setFont$(kit.NSFont.systemFontOfSize$(10)); card.addSubview$(allow);
+  allow.setFont$(kit.NSFont.systemFontOfSize$(10)); allowSurface.addSubview$(allow); card.addSubview$(allowSurface);
 
   function screens() { const values = kit.NSScreen.screens(); return Array.from({ length: Number(values.count()) }, (_, i) => values.objectAtIndex$(i)); }
   function helperFrame(target) {
@@ -203,10 +201,14 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     arrowPanel=NonactivatingPanel.alloc().initWithContentRect$styleMask$backing$defer$(rect(0,0,42,62.8),128,2,false); configurePanel(arrowPanel,true); arrowPanel.setOpaque$(false); arrowPanel.setBackgroundColor$(kit.NSColor.clearColor()); arrowPanel.setHasShadow$(false);
     const canvas=kit.NSView.alloc().initWithFrame$(rect(0,0,42,62.8)); canvas.setWantsLayer$(true); canvas.layer().setMasksToBounds$(false);
     arrow=Arrow.alloc().initWithFrame$(rect(7,11,28,28)); arrow.setWantsLayer$(true); arrow.layer().setGeometryFlipped$(true); arrow.layer().setAnchorPoint$({x:.5,y:1}); arrow.setFrame$(rect(7,11,28,28)); arrow.layer().setMasksToBounds$(false);
-    color(arrow.layer(),"setShadowColor$",1); arrow.layer().setShadowOpacity$(.23); arrow.layer().setShadowRadius$(7); arrow.layer().setShadowOffset$({width:0,height:4});
+    graphics.setBlackColor(arrow.layer(),"shadowColor",1); arrow.layer().setShadowOpacity$(.23); arrow.layer().setShadowRadius$(7); arrow.layer().setShadowOffset$({width:0,height:4});
     canvas.addSubview$(arrow); arrowPanel.setContentView$(canvas); panel.addChildWindow$ordered$(arrowPanel,1); positionArrow(frame);
     const area=kit.NSTrackingArea.alloc().initWithRect$options$owner$userInfo$(arrow.bounds(),1|128|512,arrow,null); arrow.addTrackingArea$(area);
     return {panel,view,frame,radius:12,row};
+  }
+  function revealHelper() {
+    if (closed || state !== "awaiting-user") return;
+    presented=true; helper.panel.orderFront$(null); arrowPanel.orderFront$(null); scheduleArrow();
   }
   async function place() {
     if (closed || state !== "awaiting-user" || locating) return;
@@ -224,14 +226,19 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
       if (!helper) {
         helper=createHelper(frame); initial.orderOut$(null);
         if (target && source && onHandoff) {
-          const targetRow = { panel: helper.panel, view: helper.row, radius: 8,
+          helper.targetRow = { panel: helper.panel, view: helper.row, radius: 8,
             frame: helper.panel.convertRectToScreen$(helper.row.convertRect$toView$(helper.row.bounds(), null)) };
-          flight=onHandoff({objc,source,target:targetRow,isClosed:()=>closed});
-          await flight?.finished; flight=null;
-        }
-        if (closed) return;
-        presented=true; helper.panel.orderFront$(null); arrowPanel.orderFront$(null); scheduleArrow();
-      } else if (presented && !dragging) { helper.frame=frame; helper.panel.setFrame$display$(frame,false); positionArrow(frame); }
+          const activeFlight=onHandoff({objc,source,target:helper.targetRow,isClosed:()=>closed});
+          flight=activeFlight;
+          void Promise.resolve(activeFlight?.finished).then(() => {
+            if (flight === activeFlight) flight=null;
+            revealHelper();
+          }).catch(() => { if (!closed) setState("error"); });
+        } else revealHelper();
+      } else if (!dragging) {
+        helper.frame=frame; helper.panel.setFrame$display$(frame,false); positionArrow(frame);
+        if (helper.targetRow) helper.targetRow.frame = helper.panel.convertRectToScreen$(helper.row.convertRect$toView$(helper.row.bounds(), null));
+      }
     } catch (error) {
       if (!closed) { title.setStringValue$(str(text("errorTitle"))); body.setStringValue$(str(text("errorBody"))); initial.orderFront$(null); }
     } finally { locating=false; }

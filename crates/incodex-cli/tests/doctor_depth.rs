@@ -1,6 +1,7 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[path = "support/readonly.rs"]
@@ -8,6 +9,8 @@ mod readonly_support;
 mod support;
 
 use readonly_support::{isolated_home, parse_json, run};
+
+static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 struct Fixture {
     root: PathBuf,
@@ -17,8 +20,9 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
+        let sequence = FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let root = std::env::temp_dir().join(format!(
-            "incodex-doctor-depth-{}-{}",
+            "incodex-doctor-depth-{}-{}-{sequence}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)

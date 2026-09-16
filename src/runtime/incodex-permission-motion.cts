@@ -14,7 +14,7 @@ function samplePermissionFlight(source, target, seconds) {
   const controlY=2*apex-(from.y+to.y)/2;
   const centerY=(1-p)*(1-p)*from.y+2*(1-p)*p*controlY+p*p*to.y;
   const width=lerp(source.width,target.width),height=lerp(source.height,target.height);
-  return {progress:p,bounds:{x:Math.round(lerp(from.x,to.x)-width/2),y:Math.round(centerY-height/2),width:Math.round(width),height:Math.round(height)},
+  return {progress:p,bounds:{x:lerp(from.x,to.x)-width/2,y:centerY-height/2,width,height},
     sourceOpacity:1-p,targetOpacity:p,sourceBlur:12*p,targetBlur:12*(1-p),cornerRadius:lerp(source.radius,target.radius)};
 }
 function runPermissionFlight({source,target,reducedMotion,now,schedule,cancel,render,onComplete}) {
@@ -22,7 +22,7 @@ function runPermissionFlight({source,target,reducedMotion,now,schedule,cancel,re
   const start=now();
   function frame() {
     if(disposed)return;
-    const sample=samplePermissionFlight(source,target,reducedMotion?3:(now()-start)/1000);
+    const sample=samplePermissionFlight(source,typeof target === "function" ? target() : target,reducedMotion?3:(now()-start)/1000);
     render(sample);
     if(disposed)return;
     if(sample.progress===1){disposed=true;handle=null;onComplete();return;}
@@ -31,4 +31,10 @@ function runPermissionFlight({source,target,reducedMotion,now,schedule,cancel,re
   frame();
   return ()=>{disposed=true;if(handle!==null)cancel(handle);handle=null;};
 }
-export {samplePermissionFlight,runPermissionFlight};
+function alignPermissionFrame(frame, scale) {
+  if (!Number.isFinite(scale) || scale <= 0) return frame;
+  const rounded = value => (value < 0 ? -Math.round(-value * scale) : Math.round(value * scale)) / scale;
+  const x = rounded(frame.x), y = rounded(frame.y);
+  return { x, y, width: Math.max(0, rounded(frame.x + frame.width) - x), height: Math.max(0, rounded(frame.y + frame.height) - y) };
+}
+export {samplePermissionFlight,runPermissionFlight,alignPermissionFrame};

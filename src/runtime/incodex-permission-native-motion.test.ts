@@ -154,12 +154,10 @@ function nativeMotionBridge(screenSpecs: Array<{ frame: Rect; scale: number }>) 
   }
 
   const objc: any = {
-    NobjcLibrary: class {
-      constructor(_framework: string) {
-        return new Proxy(this, { get: (_target, property: string | symbol) =>
-          typeof property === "string" ? classObject(property) : undefined });
-      }
-    },
+    NobjcLibrary: new Proxy(function NobjcLibrary() {}, {
+      construct: () => new Proxy({}, { get: (_target, property: string | symbol) =>
+        typeof property === "string" ? classObject(property) : undefined }),
+    }),
     NobjcClass: {
       define(definition: { name: string }) { return classObject(definition.name); },
     },
