@@ -121,20 +121,23 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   const background = Material.alloc().initWithFrame$(rect(0, 0, 600, 312));
   background.setMaterial$(6); background.setBlendingMode$(0); background.setState$(1);
   initialView.addSubview$(background); initial.setContentView$(initialView);
+  // Reference VStack.offset(y: -9) preserves the padded background and size.
+  const contentGroup = View.alloc().initWithFrame$(rect(0, -9, 600, 312));
+  initialView.addSubview$(contentGroup);
   const dark = String(initial.effectiveAppearance().name()).includes("Dark");
   function surface(frame, radius, fill) {
     const box = kit.NSBox.alloc().initWithFrame$(frame); box.setBoxType$(4); box.setBorderType$(0);
     box.setCornerRadius$(radius); box.setFillColor$(fill); return box;
   }
-  initialView.addSubview$(imageView(icon, rect(268, 28, 64, 64)));
+  contentGroup.addSubview$(imageView(icon, rect(268, 28, 64, 64)));
   // Reference Text.offset(y: -11) shifts drawing without moving the body/card.
   const title = label(text("title"), rect(20, 112 - 11, 560, 32), 26, true, true);
   const body = label(text("body"), rect(41, 147, 518, 32), 13, false, true, true);
-  initialView.addSubview$(title); initialView.addSubview$(body);
+  contentGroup.addSubview$(title); contentGroup.addSubview$(body);
   const card = View.alloc().initWithFrame$(rect(41, 200, 518, 80));
   card.setClipsToBounds$(false); card.setWantsLayer$(true); card.layer().setMasksToBounds$(false);
   card.addSubview$(createPermissionCardBackground({ View, Material, kit, graphics, str, size: { width: 518, height: 80 }, dark }));
-  initialView.addSubview$(card);
+  contentGroup.addSubview$(card);
   card.addSubview$(imageView(permissionIcon, rect(8, 8, 64, 64)));
   const permissionTitle = label(text("permissionTitle"), rect(84, 19, 330, 20), 16);
   permissionTitle.setFont$(kit.NSFont.systemFontOfSize$weight$(16, .3));
@@ -161,6 +164,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     card.setFrame$(rect(41, cardY, 518, 80));
     initialView.setFrame$(rect(0, 0, 600, contentHeight));
     background.setFrame$(rect(0, 0, 600, contentHeight));
+    contentGroup.setFrame$(rect(0, -9, 600, contentHeight));
     initial.setContentSize$({ width: 600, height: contentHeight });
   }
   function captureSource() {
