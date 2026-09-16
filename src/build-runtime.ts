@@ -37,7 +37,7 @@ writeFileSync(injectTmp, injectSrc);
 const injectOut = join(outDir, "incodex-inject.js");
 
 const inject = Bun.spawnSync({
-  cmd: ["bun", "build", injectTmp, "--outfile", injectOut, "--target", "browser"],
+  cmd: ["bun", "build", injectTmp, "--outfile", injectOut, "--target", "browser", "--minify-whitespace"],
   cwd: root,
   stdout: "inherit",
   stderr: "inherit",
@@ -59,6 +59,21 @@ const emitted = spawnSync(
 if (emitted.status !== 0) process.exit(emitted.status ?? 1);
 
 const emitDir = join(root, ".runtime-cjs");
+async function embeddedCjs(file: string): Promise<string> {
+  const compact = await minify(readFileSync(join(emitDir, file), "utf8"), {
+    module: false, compress: false, mangle: { toplevel: true }, format: { comments: false },
+  });
+  if (!compact.code) throw new Error(`Empty embedded Runtime module: ${file}`);
+  return `(() => { const module = { exports: {} }; const exports = module.exports; ${compact.code}\nreturn module.exports; })()`;
+}
+const motionModule = await embeddedCjs("incodex-permission-motion.cjs");
+const nativeMotionSource = readFileSync(join(emitDir, "incodex-permission-native-motion.cjs"), "utf8")
+  .replace('require("./incodex-permission-motion.cts")', motionModule);
+const nativeMotion = await minify(nativeMotionSource, {
+  module: false, compress: false, mangle: { toplevel: true }, format: { comments: false },
+});
+if (!nativeMotion.code) throw new Error("Native permission motion compaction produced no code");
+const nativeMotionModule = `(() => { const module = { exports: {} }; const exports = module.exports; ${nativeMotion.code}\nreturn module.exports; })()`;
 const cjsNames = RUNTIME_ARTIFACT_NAMES.filter((name) => name.endsWith(".cjs"));
 for (const name of cjsNames) {
   const outputPath = join(outDir, name);
@@ -74,6 +89,17 @@ for (const name of cjsNames) {
   }
   if (name === "incodex-main.cjs") {
     text = text.replace('"__INCODEX_ACCESSIBILITY_COPY__"', JSON.stringify(ACCESSIBILITY_SETUP_COPY));
+    // Compile the short-lived guide into main so existing loader asset allowlists
+    // still verify the complete Runtime. No new disk asset or second publisher.
+    const guideSource = readFileSync(join(emitDir, "incodex-accessibility-native.cjs"), "utf8");
+    const guide = await minify(guideSource, {
+      module: false, compress: false, mangle: { toplevel: true }, format: { comments: false },
+    });
+    if (!guide.code) throw new Error("Permission guide compaction produced no code");
+    text = text.replace('"__INCODEX_ACCESSIBILITY_WINDOW__"',
+      `(() => { const module = { exports: {} }; const exports = module.exports; ${guide.code}\nreturn { ...module.exports, ...${nativeMotionModule} }; })()`);
+  }
+  if (name === "incodex-main.cjs" || name === "incodex-dock-menu.cjs") {
     // Keep readable source while preserving the external Runtime size budget.
     // Do not bundle dependencies or rewrite identifiers; the loader stays unchanged.
     const compact = await minify(text, {

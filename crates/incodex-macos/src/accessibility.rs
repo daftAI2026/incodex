@@ -441,6 +441,8 @@ mod tests {
     use super::inspect_accessibility_for_app;
     use super::{inspect_accessibility_for_app_with, AccessibilityStatus, TccAccessibilityProbe};
     use std::collections::VecDeque;
+
+    type ProcessSnapshotResult = Result<Vec<(i32, PathBuf)>, String>;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
@@ -448,11 +450,11 @@ mod tests {
 
     #[derive(Clone)]
     struct FixtureProcessProbe {
-        snapshots: Arc<Mutex<VecDeque<Result<Vec<(i32, PathBuf)>, String>>>>,
+        snapshots: Arc<Mutex<VecDeque<ProcessSnapshotResult>>>,
     }
 
     impl FixtureProcessProbe {
-        fn new(snapshots: Vec<Result<Vec<(i32, PathBuf)>, String>>) -> Self {
+        fn new(snapshots: Vec<ProcessSnapshotResult>) -> Self {
             Self {
                 snapshots: Arc::new(Mutex::new(snapshots.into_iter().collect())),
             }

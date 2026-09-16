@@ -12,6 +12,13 @@ const MAX_LABEL_LENGTH = 80;
 const STATUS_ITEM_CLASS_HINT = "StatusItem";
 const APP_KIT_PATH = "/System/Library/Frameworks/AppKit.framework/AppKit";
 const FOUNDATION_PATH = "/System/Library/Frameworks/Foundation.framework/Foundation";
+const CORE_FOUNDATION_PATH = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
+const CORE_GRAPHICS_PATH = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics";
+const SETTINGS_BUNDLE_ID = "com.apple.systempreferences";
+const CG_WINDOW_LIST_ON_SCREEN_ONLY = 1;
+const CG_WINDOW_LIST_EXCLUDE_DESKTOP_ELEMENTS = 1 << 4;
+const CG_WINDOW_LIST_OPTIONS =
+  CG_WINDOW_LIST_ON_SCREEN_ONLY | CG_WINDOW_LIST_EXCLUDE_DESKTOP_ELEMENTS;
 
 function normalizeMenuLabel(value) {
   if (typeof value !== "string") return null;
@@ -285,6 +292,207 @@ async function loadObjcModule(appPath) {
   return import(pathToFileURL(modulePath).href);
 }
 
+function nativeNumber(value, method) {
+  if (value === null || value === undefined) return null;
+  try {
+    const converted = typeof value?.[method] === "function" ? value[method]() : value;
+    const number = Number(converted);
+    return Number.isFinite(number) ? number : null;
+  } catch {
+    return null;
+  }
+}
+
+function nativeInteger(value) {
+  return nativeNumber(value, "intValue") ?? nativeNumber(value, "longLongValue") ?? nativeNumber(value, "doubleValue");
+}
+
+function nativeDouble(value) {
+  return nativeNumber(value, "doubleValue");
+}
+
+function nativeDictionaryValue(dictionary, key) {
+  for (const methodName of ["objectForKey$", "objectForKey", "valueForKey$"]) {
+    try {
+      const method = dictionary?.[methodName];
+      if (typeof method !== "function") continue;
+      const value = method.call(dictionary, key);
+      if (value !== null && value !== undefined) return value;
+    } catch {
+      /* A CF dictionary can expose only one of the toll-free methods. */
+    }
+  }
+  return null;
+}
+
+function nativeCollectionItems(collection) {
+  if (!collection) return [];
+  if (Array.isArray(collection)) return collection;
+
+  const count = nativeInteger(
+    typeof collection?.count === "function" ? collection.count() : collection?.count,
+  );
+  if (count !== null && count >= 0 && count <= 10_000) {
+    const items = [];
+    for (let index = 0; index < count; index += 1) {
+      let item = null;
+      for (const methodName of ["objectAtIndex$", "objectAtIndex", "at"]) {
+        try {
+          const method = collection?.[methodName];
+          if (typeof method !== "function") continue;
+          item = method.call(collection, index);
+          break;
+        } catch {
+          /* Try the next toll-free collection method. */
+        }
+      }
+      if (item === null || item === undefined) {
+        try {
+          item = collection[index];
+        } catch {
+          item = null;
+        }
+      }
+      items.push(item);
+    }
+    return items;
+  }
+
+  try {
+    return [...collection];
+  } catch {
+    return [];
+  }
+}
+
+function nativeStringObject(NSString, value) {
+  try {
+    return NSString?.stringWithUTF8String$?.(value) ?? value;
+  } catch {
+    return value;
+  }
+}
+
+async function createNativeSystemSettingsLocator(options) {
+  const loader = options?.loadObjcModule ?? loadObjcModule;
+  const objc = await loader(options?.appPath);
+  if (typeof objc?.NobjcLibrary !== "function" || typeof objc?.callFunction !== "function") {
+    return () => null;
+  }
+
+  let appKit;
+  let foundation;
+  let coreFoundation;
+  let coreGraphics;
+  try {
+    appKit = new objc.NobjcLibrary(APP_KIT_PATH);
+    foundation = new objc.NobjcLibrary(FOUNDATION_PATH);
+    coreFoundation = new objc.NobjcLibrary(CORE_FOUNDATION_PATH);
+    // Loading CoreGraphics makes CGWindowListCopyWindowInfo available to callFunction.
+    coreGraphics = new objc.NobjcLibrary(CORE_GRAPHICS_PATH);
+  } catch {
+    return () => null;
+  }
+
+  const NSString = foundation?.NSString;
+  const NSRunningApplication = appKit?.NSRunningApplication;
+  const keys = {
+    bounds: nativeStringObject(NSString, "kCGWindowBounds"),
+    layer: nativeStringObject(NSString, "kCGWindowLayer"),
+    ownerPid: nativeStringObject(NSString, "kCGWindowOwnerPID"),
+    x: nativeStringObject(NSString, "X"),
+    y: nativeStringObject(NSString, "Y"),
+    width: nativeStringObject(NSString, "Width"),
+    height: nativeStringObject(NSString, "Height"),
+  };
+  const bundleId = nativeStringObject(NSString, SETTINGS_BUNDLE_ID);
+
+  function settingsPids() {
+    if (typeof NSRunningApplication?.runningApplicationsWithBundleIdentifier$ !== "function") {
+      return [];
+    }
+    let applications;
+    try {
+      applications = NSRunningApplication.runningApplicationsWithBundleIdentifier$(bundleId);
+    } catch {
+      return [];
+    }
+    const pids = new Set();
+    for (const application of nativeCollectionItems(applications)) {
+      try {
+        const rawPid =
+          typeof application?.processIdentifier === "function"
+            ? application.processIdentifier()
+            : application?.processIdentifier;
+        const pid = nativeInteger(rawPid);
+        if (pid !== null && pid > 0) pids.add(pid);
+      } catch {
+        /* An exited application is not a usable target. */
+      }
+    }
+    return pids;
+  }
+
+  function locate() {
+    if (!coreFoundation || !coreGraphics) return null;
+    const pids = settingsPids();
+    if (pids.size === 0) return null;
+
+    let windowList = null;
+    try {
+      windowList = objc.callFunction(
+        "CGWindowListCopyWindowInfo",
+        { returns: "@", args: ["I", "I"] },
+        CG_WINDOW_LIST_OPTIONS,
+        0,
+      );
+      if (!windowList) return null;
+
+      let best = null;
+      let bestArea = 0;
+      for (const window of nativeCollectionItems(windowList)) {
+        const ownerPid = nativeInteger(nativeDictionaryValue(window, keys.ownerPid));
+        const layer = nativeInteger(nativeDictionaryValue(window, keys.layer));
+        if (ownerPid === null || !pids.has(ownerPid) || layer !== 0) continue;
+
+        const windowBounds = nativeDictionaryValue(window, keys.bounds);
+        const x = nativeDouble(nativeDictionaryValue(windowBounds, keys.x));
+        const y = nativeDouble(nativeDictionaryValue(windowBounds, keys.y));
+        const width = nativeDouble(nativeDictionaryValue(windowBounds, keys.width));
+        const height = nativeDouble(nativeDictionaryValue(windowBounds, keys.height));
+        if (
+          x === null ||
+          y === null ||
+          width === null ||
+          height === null ||
+          width <= 0 ||
+          height <= 0
+        ) {
+          continue;
+        }
+
+        const area = width * height;
+        if (!Number.isFinite(area) || area <= bestArea) continue;
+        bestArea = area;
+        best = { x, y, width, height };
+      }
+      return best;
+    } catch {
+      return null;
+    } finally {
+      if (windowList) {
+        try {
+          objc.callFunction("CFRelease", { returns: "v", args: ["@"] }, windowList);
+        } catch {
+          /* Metadata lookup is best-effort; never turn a guide into a crash. */
+        }
+      }
+    }
+  }
+
+  return locate;
+}
+
 async function createNativeStatusMenuBridge(options) {
   const { appPath, onError } = options;
   const { NobjcClass, NobjcLibrary, callFunction, typedBlock } =
@@ -429,8 +637,10 @@ async function createNativeStatusMenuBridge(options) {
 }
 
 export {
+  loadObjcModule,
   createDockMenuController,
   createNativeStatusMenuBridge,
+  createNativeSystemSettingsLocator,
   createStatusMenuController,
   isCodexStatusMenu,
   normalizeDockMenuLabel,

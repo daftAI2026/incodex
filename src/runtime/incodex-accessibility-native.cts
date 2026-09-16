@@ -1,0 +1,253 @@
+// @ts-nocheck
+// Native presentation adapted from Cavalry-i18n e76175fe (MIT).
+// Copyright (c) 2026 daftAI. See LICENSE. Permission decisions stay in the host controller.
+let generation = 0;
+const APP_PATH = "/Applications/ChatGPT.app";
+const rect = (x, y, width, height) => ({ origin: { x, y }, size: { width, height } });
+
+async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcModule, locateSettings, onHandoff, electron = null }) {
+  if (appPath !== APP_PATH) throw new Error("Native permission guide requires the default ChatGPT app");
+  const objc = await loadObjcModule();
+  const kit = new objc.NobjcLibrary("/System/Library/Frameworks/AppKit.framework/AppKit");
+  const foundation = new objc.NobjcLibrary("/System/Library/Frameworks/Foundation.framework/Foundation");
+  const quartz = new objc.NobjcLibrary("/System/Library/Frameworks/QuartzCore.framework/QuartzCore");
+  const graphics = new objc.NobjcLibrary("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics");
+  const text = key => typeof copy === "function" ? copy(key) : copy[key] ?? "";
+  const str = value => foundation.NSString.stringWithUTF8String$(String(value));
+  const array = value => foundation.NSArray.arrayWithObject$(value);
+  const selector = name => objc.callFunction("NSSelectorFromString", { returns: ":", args: ["@"] }, str(name));
+  const unique = `IncodexPermission_${process.pid}_${++generation}`;
+  let closed = false, state = "pending", settled = false, source = null, helper = null, arrowPanel = null, arrow = null;
+  let tracking = null, arrowTimer = null, returnTimer = null, flight = null, locating = false, attempts = 0, presented = false, dragging = false;
+  const closeHandlers = new Set();
+  let resolveChoice;
+  const choice = new Promise(resolve => { resolveChoice = resolve; });
+  const resolveOnce = value => { if (!settled) { settled = true; resolveChoice(value); } };
+  const panels = [];
+  function define(name, superclass, methods, protocols) { return objc.NobjcClass.define({ name: `${unique}_${name}`, superclass, methods, ...(protocols ? { protocols } : {}) }); }
+  const flipped = { isFlipped: { types: "B@:", implementation: () => true } };
+  const View = define("View", "NSView", flipped);
+  const Material = define("Material", "NSVisualEffectView", flipped);
+  const NonactivatingPanel = define("NonactivatingPanel", "NSPanel", {
+    canBecomeKeyWindow: { types: "B@:", implementation: () => false },
+    canBecomeMainWindow: { types: "B@:", implementation: () => false },
+  });
+  function color(layer, method, alpha) {
+    const value = objc.callFunction("CGColorCreateGenericRGB", { returns: "^v", args: ["d", "d", "d", "d"] }, 0, 0, 0, alpha);
+    try { layer[method](value); } finally { if (value) objc.callFunction("CGColorRelease", { returns: "v", args: ["^v"] }, value); }
+  }
+  function label(value, frame, size = 13, bold = false, centered = false, secondary = false) {
+    const field = kit.NSTextField.labelWithString$(str(value));
+    field.setFrame$(frame); field.setFont$(bold ? kit.NSFont.boldSystemFontOfSize$(size) : kit.NSFont.systemFontOfSize$(size));
+    field.setAlignment$(centered ? 1 : 0); field.setTextColor$(secondary ? kit.NSColor.secondaryLabelColor() : kit.NSColor.labelColor());
+    field.setMaximumNumberOfLines$(0); field.setLineBreakMode$(0);
+    return field;
+  }
+  function imageView(image, frame) {
+    const view = kit.NSImageView.alloc().initWithFrame$(frame);
+    view.setImage$(image); view.setImageScaling$(3); return view;
+  }
+  function snapshot(view) {
+    view.displayIfNeeded(); const bounds = view.bounds();
+    const rep = view.bitmapImageRepForCachingDisplayInRect$(bounds);
+    if (!rep) throw new Error("Permission view could not be captured");
+    view.cacheDisplayInRect$toBitmapImageRep$(bounds, rep);
+    const image = kit.NSImage.alloc().initWithSize$(bounds.size); image.addRepresentation$(rep); return image;
+  }
+  const icon = kit.NSImage.alloc().initWithContentsOfFile$(str(`${APP_PATH}/Contents/Resources/icon-chatgpt.png`));
+  if (!icon) throw new Error("ChatGPT icon is unavailable");
+  let permissionIcon = kit.NSImage.alloc().initWithContentsOfFile$(str("/System/Library/ExtensionKit/Extensions/AccessibilitySettingsExtension.appex/Contents/Resources/UniversalAccessPref.icns"));
+  if (!permissionIcon) permissionIcon = kit.NSImage.alloc().initWithContentsOfFile$(str("/System/Library/PreferencePanes/UniversalAccessPref.prefPane/Contents/Resources/UniversalAccessPref.icns"));
+  if (!permissionIcon) permissionIcon = kit.NSImage.imageWithSystemSymbolName$accessibilityDescription$(str("accessibility"), str(text("permissionTitle")));
+
+  function stopArrow() { clearTimeout(arrowTimer); clearTimeout(returnTimer); arrowTimer = returnTimer = null; }
+  function close() {
+    if (closed) return;
+    closed = true; clearInterval(tracking); tracking = null; stopArrow(); flight?.dispose(); flight = null;
+    resolveOnce("later");
+    for (const panel of panels) { panel.orderOut$(null); panel.close(); }
+    for (const callback of closeHandlers) callback(); closeHandlers.clear();
+  }
+  const Delegate = define("Delegate", "NSObject", {
+    "windowWillClose:": { types: "v@:@", implementation: () => close() },
+    "allow:": { types: "v@:@", implementation: (_self, sender) => {
+      if (closed || state !== "pending" || settled) return;
+      try { source = { frame: initial.convertRectToScreen$(sender.convertRect$toView$(sender.bounds(), null)), image: snapshot(sender), radius: 14 }; }
+      catch { source = null; }
+      resolveOnce("repair");
+    } },
+    "later:": { types: "v@:@", implementation: () => close() },
+  });
+  const delegate = Delegate.alloc().init();
+  function configurePanel(panel, floating) {
+    panels.push(panel); panel.setReleasedWhenClosed$(false); panel.setHidesOnDeactivate$(false);
+    panel.setDelegate$(delegate); if (floating) panel.setLevel$(3);
+  }
+  function button(title, frame, action) {
+    const control = kit.NSButton.buttonWithTitle$target$action$(str(title), delegate, selector(action));
+    control.setFrame$(frame); control.setBezelStyle$(1); control.setFont$(kit.NSFont.systemFontOfSize$(12)); return control;
+  }
+  // One native permission row follows the owner's supplied CUA reference.
+  const initial = kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(rect(0, 0, 480, 300), 1 | 2 | 32768, 2, false);
+  configurePanel(initial, true); initial.setTitle$(str("")); initial.setTitlebarAppearsTransparent$(true); initial.setTitleVisibility$(1);
+  const initialView = Material.alloc().initWithFrame$(rect(0, 0, 480, 300));
+  initialView.setMaterial$(12); initialView.setBlendingMode$(0); initialView.setState$(1); initial.setContentView$(initialView);
+  const dark = String(initial.effectiveAppearance().name()).includes("Dark");
+  function surface(frame, radius, fill) {
+    const box = kit.NSBox.alloc().initWithFrame$(frame); box.setBoxType$(4); box.setBorderType$(0);
+    box.setCornerRadius$(radius); box.setFillColor$(fill); return box;
+  }
+  initialView.addSubview$(surface(rect(0, 0, 480, 300), 0, kit.NSColor.colorWithWhite$alpha$(dark ? .16 : .925, 1)));
+  initialView.addSubview$(imageView(icon, rect(208, 40, 64, 64)));
+  const title = label(text("title"), rect(24, 130, 432, 28), 20, true, true);
+  const body = label(text("body"), rect(32, 162, 416, 40), 12, false, true, true);
+  initialView.addSubview$(title); initialView.addSubview$(body);
+  const card = View.alloc().initWithFrame$(rect(30, 208, 420, 66));
+  card.setWantsLayer$(true); card.addSubview$(surface(rect(0, 0, 420, 66), 18, kit.NSColor.colorWithWhite$alpha$(dark ? .22 : .945, 1)));
+  card.layer().setCornerRadius$(18); card.layer().setBorderWidth$(0);
+  // Initial PermissionRow effects are not established by the transition's layer constants.
+  // Do not add a guessed stroke or shadow while the original row is under investigation.
+  initialView.addSubview$(card);
+  card.addSubview$(imageView(permissionIcon, rect(8, 7, 52, 52)));
+  card.addSubview$(label(text("permissionTitle"), rect(68, 15, 270, 18), 13, true));
+  card.addSubview$(label(text("permissionDescription"), rect(68, 34, 270, 18), 11, false, false, true));
+  const allow = button(text("repair"), rect(358, 23, 46, 20), "allow:"); allow.setKeyEquivalent$(str("\r"));
+  card.addSubview$(surface(rect(358, 23, 46, 20), 10, kit.NSColor.controlAccentColor()));
+  allow.setBordered$(false); allow.setContentTintColor$(kit.NSColor.whiteColor());
+  allow.setFont$(kit.NSFont.systemFontOfSize$(10)); card.addSubview$(allow);
+
+  function screens() { const values = kit.NSScreen.screens(); return Array.from({ length: Number(values.count()) }, (_, i) => values.objectAtIndex$(i)); }
+  function helperFrame(target) {
+    const displays = screens(); const first = displays[0];
+    if (!first) throw new Error("No display is available for the permission guide");
+    const primary = first.frame();
+    const appRect = target ? rect(target.x, primary.origin.y + primary.size.height - target.y - target.height, target.width, target.height) : first.visibleFrame();
+    const midpoint = { x: appRect.origin.x + appRect.size.width / 2, y: appRect.origin.y + appRect.size.height / 2 };
+    const screen = displays.find(value => { const f = value.frame(); return midpoint.x >= f.origin.x && midpoint.x < f.origin.x + f.size.width && midpoint.y >= f.origin.y && midpoint.y < f.origin.y + f.size.height; }) ?? first;
+    const area = screen.visibleFrame();
+    return rect(Math.round(Math.max(area.origin.x + 20, Math.min(midpoint.x - 266, area.origin.x + area.size.width - 552))), Math.round(area.origin.y + 20), 532, 112);
+  }
+  function animateArrow(x, y) {
+    if (!arrow || closed) return;
+    const layer = arrow.layer();
+    const transform = objc.callFunction("CATransform3DMakeScale", { returns: "{CATransform3D=dddddddddddddddd}", args: ["d", "d", "d"] }, x, y, 1);
+    const spring = quartz.CASpringAnimation.animationWithKeyPath$(str("transform"));
+    spring.setMass$(1); spring.setStiffness$(200); spring.setDamping$(11); spring.setInitialVelocity$(0);
+    spring.setFromValue$(foundation.NSValue.valueWithCATransform3D$((layer.presentationLayer() ?? layer).transform()));
+    spring.setToValue$(foundation.NSValue.valueWithCATransform3D$(transform)); spring.setDuration$(spring.settlingDuration());
+    layer.setTransform$(transform); layer.addAnimation$forKey$(spring, str("incodex-permission-arrow"));
+  }
+  const reducedMotion = () => Boolean(kit.NSWorkspace.sharedWorkspace().accessibilityDisplayShouldReduceMotion());
+  function stretchArrow() {
+    stopArrow();
+    if (!presented || reducedMotion() || closed) return;
+    if (dragging) { scheduleArrow(4000); return; }
+    animateArrow(1.15, 1.6);
+    returnTimer = setTimeout(() => {
+      if (closed || dragging) return;
+      animateArrow(1, 1); scheduleArrow(4000);
+    }, 250);
+  }
+  function scheduleArrow(delay = 500) {
+    stopArrow(); if (closed || reducedMotion()) return;
+    arrowTimer = setTimeout(stretchArrow, delay);
+  }
+  const Arrow = define("Arrow", "NSView", { ...flipped,
+    "mouseEntered:": { types: "v@:@", implementation: stretchArrow },
+    "drawRect:": { types: "v@:{CGRect={CGPoint=dd}{CGSize=dd}}", implementation: () => {
+      const path = kit.NSBezierPath.bezierPath(); const point = (x, y) => ({ x: 2 + x * 24 / 256, y: 2 + y * 24 / 256 });
+      const line = (x, y) => path.lineToPoint$(point(x, y));
+      const curve = (x,y,a,b,c,d) => path.curveToPoint$controlPoint1$controlPoint2$(point(x,y),point(a,b),point(c,d));
+      path.moveToPoint$(point(128,20)); line(232,116); curve(232,132,238.25,122.25,238.25,125.75); line(200,164); curve(184,164,193.75,170.25,190.25,170.25);
+      line(160,140); line(160,224); curve(152,232,160,228.42,156.42,232); line(104,232); curve(96,224,99.58,232,96,228.42); line(96,140); line(72,164); curve(56,164,65.75,170.25,62.25,170.25); line(24,132); curve(24,116,17.75,125.75,17.75,122.25); path.closePath();
+      path.setLineWidth$(2); path.setLineJoinStyle$(1); kit.NSColor.colorWithSRGBRed$green$blue$alpha$(0,107/255,1,1).setFill(); kit.NSColor.whiteColor().setStroke(); path.fill(); path.stroke();
+    } },
+  });
+  let appRowView;
+  const Drag = define("Drag", "NSView", { ...flipped,
+    "mouseDown:": { types: "v@:@", implementation: (self, event) => {
+      if (closed || state !== "awaiting-user") return;
+      const item = kit.NSPasteboardItem.alloc().init(); item.setDataProvider$forTypes$(self, array(str("public.file-url")));
+      const dragging = kit.NSDraggingItem.alloc().initWithPasteboardWriter$(item);
+      dragging.setDraggingFrame$contents$(appRowView.frame(), snapshot(appRowView));
+      const session = self.beginDraggingSessionWithItems$event$source$(array(dragging), event, self);
+      session.setAnimatesToStartingPositionsOnCancelOrFail$(true);
+    } },
+    "pasteboard:item:provideDataForType:": { types: "v@:@@@", implementation: (_self, _pasteboard, item, type) => {
+      if (String(type) === "public.file-url" || type.isEqualToString$(str("public.file-url"))) item.setString$forType$(foundation.NSURL.fileURLWithPath$(str(APP_PATH)).absoluteString(), str("public.file-url"));
+    } },
+    "draggingSession:sourceOperationMaskForDraggingContext:": { types: "Q@:@q", implementation: () => 1 },
+    "ignoreModifierKeysForDraggingSession:": { types: "B@:@", implementation: () => true },
+    "draggingSession:willBeginAtPoint:": { types: "v@:@{CGPoint=dd}", implementation: () => { dragging = true; stopArrow(); animateArrow(1, 1); appRowView.setHidden$(true); } },
+    "draggingSession:endedAtPoint:operation:": { types: "v@:@{CGPoint=dd}Q", implementation: () => { dragging = false; if (!closed) { appRowView.setHidden$(false); scheduleArrow(4000); } } },
+  }, ["NSDraggingSource", "NSPasteboardItemDataProvider"]);
+
+  let instructionX = 0;
+  function positionArrow(frame) { arrowPanel.setFrame$display$(rect(frame.origin.x + instructionX - 7, frame.origin.y + 112 - 12 - 28 - 11, 42, 62.8), false); }
+  function createHelper(frame) {
+    const panel = NonactivatingPanel.alloc().initWithContentRect$styleMask$backing$defer$(frame,128,2,false); configurePanel(panel,true);
+    panel.setOpaque$(false); panel.setBackgroundColor$(kit.NSColor.clearColor()); panel.setHasShadow$(false);
+    const view = Material.alloc().initWithFrame$(rect(0,0,532,112)); view.setMaterial$(7); view.setBlendingMode$(0); view.setState$(1); view.setWantsLayer$(true); view.layer().setCornerRadius$(12); view.layer().setMasksToBounds$(true);
+    const edge = surface(rect(0,0,532,112),12,kit.NSColor.clearColor());
+    edge.setBorderType$(1); edge.setBorderWidth$(.5); edge.setBorderColor$(kit.NSColor.separatorColor()); view.addSubview$(edge);
+    panel.setContentView$(view);
+    const instruction = label(text("dragInstruction") || text("addedBody"),rect(0,0,480,18),13,false); instruction.setFont$(kit.NSFont.systemFontOfSize$weight$(13, .23)); instruction.sizeToFit();
+    const width = Math.min(instruction.frame().size.width,464); instructionX=(532-28-8-width)/2;
+    instruction.setFrame$(rect(instructionX+36,17,width,18)); view.addSubview$(instruction);
+    const back = button("",rect(16,58,32,32),"later:");
+    back.setImage$(kit.NSImage.imageWithSystemSymbolName$accessibilityDescription$(str("chevron.left"),str(text("later")))); back.setBezelStyle$(7); back.setToolTip$(str(text("later"))); view.addSubview$(back);
+    const row=Drag.alloc().initWithFrame$(rect(64,52,452,44)); view.addSubview$(row);
+    const box=kit.NSBox.alloc().initWithFrame$(rect(0,0,452,44)); box.setBoxType$(4); box.setBorderType$(1); box.setCornerRadius$(8); box.setBorderWidth$(.5); box.setBorderColor$(kit.NSColor.separatorColor()); box.setFillColor$(kit.NSColor.controlBackgroundColor()); row.addSubview$(box);
+    appRowView=View.alloc().initWithFrame$(rect(0,0,452,44)); row.addSubview$(appRowView);
+    appRowView.addSubview$(imageView(icon,rect(8,8,28,28))); appRowView.addSubview$(label("ChatGPT",rect(44,13,396,18),13));
+    arrowPanel=NonactivatingPanel.alloc().initWithContentRect$styleMask$backing$defer$(rect(0,0,42,62.8),128,2,false); configurePanel(arrowPanel,true); arrowPanel.setOpaque$(false); arrowPanel.setBackgroundColor$(kit.NSColor.clearColor()); arrowPanel.setHasShadow$(false);
+    const canvas=kit.NSView.alloc().initWithFrame$(rect(0,0,42,62.8)); canvas.setWantsLayer$(true); canvas.layer().setMasksToBounds$(false);
+    arrow=Arrow.alloc().initWithFrame$(rect(7,11,28,28)); arrow.setWantsLayer$(true); arrow.layer().setGeometryFlipped$(true); arrow.layer().setAnchorPoint$({x:.5,y:1}); arrow.setFrame$(rect(7,11,28,28)); arrow.layer().setMasksToBounds$(false);
+    color(arrow.layer(),"setShadowColor$",1); arrow.layer().setShadowOpacity$(.23); arrow.layer().setShadowRadius$(7); arrow.layer().setShadowOffset$({width:0,height:4});
+    canvas.addSubview$(arrow); arrowPanel.setContentView$(canvas); panel.addChildWindow$ordered$(arrowPanel,1); positionArrow(frame);
+    const area=kit.NSTrackingArea.alloc().initWithRect$options$owner$userInfo$(arrow.bounds(),1|128|512,arrow,null); arrow.addTrackingArea$(area);
+    return {panel,view,frame,radius:12,row};
+  }
+  async function place() {
+    if (closed || state !== "awaiting-user" || locating) return;
+    locating=true;
+    try {
+      const target=await locateSettings?.(); if (closed || state !== "awaiting-user") return;
+      if (!target) {
+        attempts++;
+        if (helper) { if (attempts >= 10 && !dragging) close(); }
+        else if (attempts >= 50) setState("error");
+        return;
+      }
+      attempts = 0;
+      const frame=helperFrame(target);
+      if (!helper) {
+        helper=createHelper(frame); initial.orderOut$(null);
+        if (target && source && onHandoff) {
+          const targetRow = { panel: helper.panel, view: helper.row, radius: 8,
+            frame: helper.panel.convertRectToScreen$(helper.row.convertRect$toView$(helper.row.bounds(), null)) };
+          flight=onHandoff({objc,source,target:targetRow,isClosed:()=>closed});
+          await flight?.finished; flight=null;
+        }
+        if (closed) return;
+        presented=true; helper.panel.orderFront$(null); arrowPanel.orderFront$(null); scheduleArrow();
+      } else if (presented && !dragging) { helper.frame=frame; helper.panel.setFrame$display$(frame,false); positionArrow(frame); }
+    } catch (error) {
+      if (!closed) { title.setStringValue$(str(text("errorTitle"))); body.setStringValue$(str(text("errorBody"))); initial.orderFront$(null); }
+    } finally { locating=false; }
+  }
+  function setState(next) {
+    if (closed) return;
+    state=next;
+    if (next==="granted") { close(); return; }
+    if (next==="repairing") { allow.setEnabled$(false); body.setStringValue$(str(text("repairing"))); }
+    if (next==="awaiting-user") { allow.setEnabled$(false); body.setStringValue$(str(text("checking"))); if (!tracking) tracking=setInterval(()=>void place(),100); void place(); }
+    if (next==="error" || next==="unknown") {
+      clearInterval(tracking);tracking=null;stopArrow();flight?.dispose();flight=null;
+      helper?.panel.orderOut$(null);arrowPanel?.orderOut$(null);title.setStringValue$(str(text("errorTitle")));body.setStringValue$(str(text("errorBody")));initial.orderFront$(null);
+    }
+  }
+  initial.center(); electron?.app?.focus?.({steal:true}); initial.makeKeyAndOrderFront$(null);
+  return {choice,setState,close,isDestroyed:()=>closed,onClose:callback=>{closeHandlers.add(callback);return()=>closeHandlers.delete(callback);}};
+}
+export {createNativeAccessibilitySetupWindow};

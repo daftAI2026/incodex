@@ -31,6 +31,7 @@ const ACCESSIBILITY_SETTINGS_URL =
   "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
 // The Runtime builder replaces this token with the small {en, zh-CN} table.
 const ACCESSIBILITY_COPY = "__INCODEX_ACCESSIBILITY_COPY__";
+const accessibilityWindow = "__INCODEX_ACCESSIBILITY_WINDOW__";
 const READY_TIMEOUT_MS = 15_000;
 let capturedSourceHome = null;
 const shownWindows = new WeakSet();
@@ -341,7 +342,6 @@ function resolveAccessibilityCopy(locale = "en") {
 function createAccessibilitySetupController(options = {}) {
   const fileSystem = options.fs || fs;
   const shell = options.shell || null;
-  const dialog = options.dialog || null;
   const systemPreferences = options.systemPreferences || null;
   const spawnCommand = options.spawn || spawn;
   const requestPath = options.requestPath;
@@ -351,6 +351,38 @@ function createAccessibilitySetupController(options = {}) {
   const copy = options.copy;
   const now = typeof options.now === "function" ? options.now : () => Date.now();
   let flight = null;
+  let panel = null;
+  let pollTimer = null;
+  let resetRunning = false;
+  const schedule = options.setInterval || setInterval;
+  const unschedule = options.clearInterval || clearInterval;
+
+  function stopPolling() {
+    if (pollTimer !== null) unschedule(pollTimer);
+    pollTimer = null;
+  }
+
+  function closePanel() {
+    stopPolling();
+    const currentPanel = panel;
+    panel = null;
+    currentPanel?.close();
+  }
+
+  function poll(snapshot) {
+    if (resetRunning) return;
+    const current = readAccessibilityMarker(fileSystem, requestPath, appPath, installId);
+    if (!accessibilityRequestMatches(current, snapshot) ||
+        !["pending", "awaiting-user"].includes(current.marker.state)) {
+      closePanel();
+      return;
+    }
+    const checked = probe();
+    if (checked.kind === "known" && checked.trusted && transition(snapshot, "granted")) {
+      panel?.setState("granted");
+      closePanel();
+    }
+  }
 
   function transition(snapshot, state, extra = {}) {
     return writeAccessibilityMarkerState(
@@ -391,9 +423,8 @@ function createAccessibilitySetupController(options = {}) {
   }
 
   function showRepairError(error) {
-    const title = accessibilityCopyValue(copy, "errorTitle");
-    const body = accessibilityCopyValue(copy, "errorBody");
-    if (title && body && typeof dialog?.showErrorBox === "function") dialog.showErrorBox(title, body);
+    stopPolling();
+    panel?.setState("error");
     try {
       logLaunch("accessibility-repair-failed", { error: String(error) });
     } catch {
@@ -405,6 +436,7 @@ function createAccessibilitySetupController(options = {}) {
     return new Promise((resolve) => {
       let child;
       let settled = false;
+      let timedOut = false;
       let timer = null;
       const done = (result) => {
         if (settled) return;
@@ -412,7 +444,13 @@ function createAccessibilitySetupController(options = {}) {
         if (timer) clearTimeout(timer);
         resolve(result);
       };
-      timer = setTimeout(() => done({ ok: false, error: "tccutil timed out" }), ACCESSIBILITY_RESET_TIMEOUT_MS);
+      timer = setTimeout(() => {
+        timedOut = true;
+        // Wait for close to reap the process; no reset may outlive its error UI.
+        try { child.kill("SIGKILL"); } catch (error) {
+          logLaunch("accessibility-reset-kill-failed", { error: String(error) });
+        }
+      }, ACCESSIBILITY_RESET_TIMEOUT_MS);
       timer.unref?.();
       try {
         child = spawnCommand(
@@ -430,7 +468,8 @@ function createAccessibilitySetupController(options = {}) {
       }
       child.once("error", (error) => done({ ok: false, error: String(error) }));
       child.once("close", (code) =>
-        done(code === 0 ? { ok: true } : { ok: false, error: `tccutil exited ${String(code)}` }),
+        done(timedOut ? { ok: false, error: "tccutil timed out" } :
+          code === 0 ? { ok: true } : { ok: false, error: `tccutil exited ${String(code)}` }),
       );
     });
   }
@@ -439,36 +478,6 @@ function createAccessibilitySetupController(options = {}) {
     if ((await shell.openExternal(ACCESSIBILITY_SETTINGS_URL)) === false) {
       throw new Error("could not open Accessibility settings");
     }
-    shell.showItemInFolder(appPath);
-  }
-
-  async function showAwaitingUserPrompt(snapshot) {
-    const localized = {
-      title: accessibilityCopyValue(copy, "addedTitle"),
-      message: accessibilityCopyValue(copy, "addedBody"),
-      checkAgain: accessibilityCopyValue(copy, "checkAgain"),
-      later: accessibilityCopyValue(copy, "later"),
-    };
-    if (Object.values(localized).some((value) => !value) || typeof dialog?.showMessageBox !== "function") {
-      return false;
-    }
-    const choice = await dialog.showMessageBox({
-      type: "info",
-      title: localized.title,
-      message: localized.message,
-      buttons: [localized.checkAgain, localized.later],
-      defaultId: 0,
-      cancelId: 1,
-      noLink: true,
-    });
-    if (choice?.response !== 0) return false;
-    const current = readAccessibilityMarker(fileSystem, requestPath, appPath, installId);
-    if (!accessibilityRequestMatches(current, snapshot) || current.marker.state !== "awaiting-user") {
-      return false;
-    }
-    const checked = probe();
-    if (checked.kind !== "known" || !checked.trusted) return false;
-    return transition(snapshot, "granted");
   }
 
   async function processRequest() {
@@ -502,7 +511,7 @@ function createAccessibilitySetupController(options = {}) {
     if (marker.state === "awaiting-user") {
       return { ok: true, state: "awaiting-user" };
     }
-    if (typeof dialog?.showMessageBox !== "function") {
+    if (typeof options.createSetupWindow !== "function") {
       return { ok: false, state: "unknown", reason: "dialog-unavailable" };
     }
     const localized = {
@@ -516,15 +525,21 @@ function createAccessibilitySetupController(options = {}) {
     }
     let choice;
     try {
-      choice = await dialog.showMessageBox({
-        type: "warning",
-        title: localized.title,
-        message: localized.message,
-        buttons: [localized.repair, localized.later],
-        defaultId: 0,
-        cancelId: 1,
-        noLink: true,
+      panel = await options.createSetupWindow();
+      const activePanel = panel;
+      panel.onClose(() => {
+        stopPolling();
+        if (panel !== activePanel) return;
+        panel = null;
+        const current = readAccessibilityMarker(fileSystem, requestPath, appPath, installId);
+        if (accessibilityRequestMatches(current, snapshot) &&
+            ["pending", "awaiting-user"].includes(current.marker.state)) {
+          transition(snapshot, "deferred");
+        }
       });
+      pollTimer = schedule(() => poll(snapshot), 750);
+      pollTimer?.unref?.();
+      choice = await panel.choice;
     } catch (error) {
       const written = transition(snapshot, "error", { error: String(error) });
       if (written) showRepairError(error);
@@ -534,8 +549,9 @@ function createAccessibilitySetupController(options = {}) {
     if (!accessibilityRequestMatches(currentAfterDialog, snapshot) || currentAfterDialog.marker.state !== "pending") {
       return { ok: false, state: "stale" };
     }
-    if (choice?.response !== 0) {
+    if (choice !== "repair") {
       const written = transition(snapshot, "deferred");
+      closePanel();
       return { ok: written, state: written ? "deferred" : "stale" };
     }
     const beforeReset = probe();
@@ -544,6 +560,7 @@ function createAccessibilitySetupController(options = {}) {
     }
     if (beforeReset.trusted) {
       const written = transition(snapshot, "granted");
+      closePanel();
       return { ok: written, state: written ? "granted" : "stale" };
     }
 
@@ -553,21 +570,28 @@ function createAccessibilitySetupController(options = {}) {
     const awaiting = transition(snapshot, "awaiting-user");
     if (!awaiting) return { ok: false, state: "stale" };
 
+    panel?.setState("repairing");
+    resetRunning = true;
     const reset = await resetAccessibility();
+    resetRunning = false;
     if (!reset.ok) {
       const written = transition(snapshot, "error", { error: reset.error });
       if (written) showRepairError(reset.error);
       return { ok: false, state: written ? "error" : "stale" };
     }
+    const afterReset = readAccessibilityMarker(fileSystem, requestPath, appPath, installId);
+    if (!panel || !accessibilityRequestMatches(afterReset, snapshot) || afterReset.marker.state !== "awaiting-user") {
+      return { ok: false, state: "stale" };
+    }
     try {
       await openAccessibilitySurfaces();
+      panel?.setState("awaiting-user");
     } catch (error) {
       const written = transition(snapshot, "error", { error: String(error) });
       if (written) showRepairError(error);
       return { ok: false, state: written ? "error" : "stale" };
     }
-    const checked = await showAwaitingUserPrompt(snapshot);
-    return { ok: true, state: checked ? "granted" : "awaiting-user" };
+    return { ok: true, state: "awaiting-user" };
   }
 
   function run() {
@@ -588,7 +612,7 @@ function createAccessibilitySetupController(options = {}) {
     return flight;
   }
 
-  return { run };
+  return { run, dispose: closePanel };
 }
 
 function sessionBurnExpectation(session, userRoot = USER_ROOT) {
@@ -730,6 +754,8 @@ function raisePid(pid) {
 function isAuxiliaryWindow(win) {
   if (!win || win.isDestroyed()) return true;
   try {
+    if (win.webContents?.getLastWebPreferences?.().additionalArguments?.some(arg =>
+      arg === "--incodex-accessibility-setup" || arg === "--incodex-accessibility-transition")) return true;
     const bounds = typeof win.getBounds === "function" ? win.getBounds() : {};
     const url = win.webContents && !win.webContents.isDestroyed() ? win.webContents.getURL() : "";
     return windowKind.isAuxiliarySnapshot({
@@ -1248,6 +1274,7 @@ async function attachElectron() {
   }
 
   let accessibilitySetupController = null;
+  let settingsLocator = null;
   if (
     !isIncognito() &&
     process.platform === "darwin" &&
@@ -1258,7 +1285,20 @@ async function attachElectron() {
       accessibilitySetupController = createAccessibilitySetupController({
         app: electron.app,
         shell: electron.shell,
-        dialog: electron.dialog,
+        createSetupWindow: () => accessibilityWindow.createNativeAccessibilitySetupWindow({
+          electron,
+          copy: resolveAccessibilityCopy(readLocaleOverride() || electron.app.getLocale?.() || "en"),
+          appPath: identity.appPath,
+          loadObjcModule: () => dockMenu.loadObjcModule(electron.app.getAppPath()),
+          onHandoff: payload => accessibilityWindow.runNativePermissionHandoff({
+            ...payload,
+            onError: error => logLaunch("accessibility-handoff-error", { error: String(error) }),
+          }),
+          locateSettings: async () => {
+            settingsLocator ||= dockMenu.createNativeSystemSettingsLocator({ appPath: electron.app.getAppPath() });
+            return (await settingsLocator)();
+          },
+        }),
         systemPreferences: electron.systemPreferences,
         spawn,
         fs,
@@ -1281,6 +1321,7 @@ async function attachElectron() {
     }
   }
 
+  electron.app.once("will-quit", () => accessibilitySetupController?.dispose());
   const source = injectSource();
   let ownerLease = null;
   let raiseServer = null;

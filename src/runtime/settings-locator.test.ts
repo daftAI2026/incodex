@@ -2,8 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { createNativeSystemSettingsLocator } from "./incodex-dock-menu.cts";
 
 const APP_PATH = "/Applications/ChatGPT.app";
-const APP_KIT_PATH = "/System/Library/Frameworks/AppKit.framework/AppKit";
-const FOUNDATION_PATH = "/System/Library/Frameworks/Foundation.framework/Foundation";
 const SETTINGS_BUNDLE_ID = "com.apple.systempreferences";
 
 class FakeNumber {

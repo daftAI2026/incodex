@@ -30,7 +30,7 @@ describe("Electron UI injection reporting", () => {
     const windows = [window("primary", true), window("prewarm", false), window("minimized", false, true)];
     const start = main.indexOf("function raiseOurWindows()");
     const end = main.indexOf("\nasync function raiseExistingIncognito()", start);
-    runInNewContext(main.slice(start, end) + "\nraiseOurWindows()", {
+    runInNewContext(`${main.slice(start, end)}\nraiseOurWindows()`, {
       require: () => ({}), process: { platform: "test", pid: 1 },
       mainWindows: () => windows, hideAuxiliaryWindows: () => {}, raisePid: () => {},
       shownWindows: new WeakSet(),
@@ -52,7 +52,7 @@ describe("Electron UI injection reporting", () => {
       mainWindows: () => [primary], hideAuxiliaryWindows: () => {}, raisePid: () => {},
       shownWindows: new WeakSet(),
     };
-    const source = main.slice(start, end) + "\nraiseOurWindows()";
+    const source = `${main.slice(start, end)}\nraiseOurWindows()`;
     runInNewContext(source, context);
     visible = false;
     runInNewContext(source, context);

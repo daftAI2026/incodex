@@ -88,7 +88,7 @@ cargo install --locked --path crates/incodex-cli
 
 - 官方插件加不了这个按钮；macOS 修改应用包，Windows 则保持 Store 包不变，走系统集成边界
 - 在 macOS 上，默认安装到官方应用后，改包没法继续保留有效的 OpenAI 签名。下次启动时，macOS 可能要求这个已修改的应用访问钥匙串中的 **Codex Storage Key**。只有对话框里的应用和钥匙串项目都符合预期时，才输入 **Mac 登录密码**（不是 ChatGPT 账号密码）并选择 **始终允许**。**允许** / **允许一次**只授权本次访问，之后还可能再次询问；信息不符合预期时选择 **拒绝**。CLI 不会对 `--clone` 或 `--app` 目标给出永久授权建议
-- macOS 默认安装会重新打开 ChatGPT，由它检查脚本控制所需的**辅助功能权限**。未获权时，设置向导提供仅重置 ChatGPT 旧辅助功能登记并打开系统设置的操作。请添加已选中的 `/Applications/ChatGPT.app`，完成 macOS 要求的认证，再回到 ChatGPT 验证。选择“稍后”会保留未完成状态；重新执行 `incodex install` 可以重试，有效的已有安装不会因此重新签名。钥匙串或 Computer Use 已获权不代表此项通过。`incodex doctor` 检查实际运行的目标应用；卸载后请打开恢复的应用再检查。本流程不承诺签名变化后权限仍连续有效。
+- macOS 默认安装会重新打开 ChatGPT，由它检查脚本控制所需的**辅助功能权限**。未获权时，设置向导提供仅重置 ChatGPT 旧辅助功能登记并打开系统设置的操作。将向导中的 ChatGPT 应用行拖入辅助功能列表，完成 macOS 要求的认证；向导会自动检查，通过后自动关闭。关闭向导或点击返回会保留未完成状态；重新执行 `incodex install` 可以重试，有效的已有安装不会因此重新签名。钥匙串或 Computer Use 已获权不代表此项通过。`incodex doctor` 检查实际运行的目标应用；卸载后请打开恢复的应用再检查。本流程不承诺签名变化后权限仍连续有效。
 - 在 macOS 上，官方 **智能快照**（拍照 / 截屏附件，英文 Appshot）会不可用。这不是相机权限没开。Computer Use 一般还能用。`incodex uninstall` 后快照会恢复
 - 漏洞请走 [SECURITY.md](SECURITY.md)，不要开公开 issue
 

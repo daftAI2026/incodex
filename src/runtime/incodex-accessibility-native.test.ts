@@ -865,7 +865,7 @@ describe("native Accessibility setup adapter", () => {
   });
 
   test("waits for the arrow return before scheduling the next native pulse", async () => {
-    const { api, bridge } = await makeHarness();
+    const { api } = await makeHarness();
     const originalSetTimeout = globalThis.setTimeout;
     const originalClearTimeout = globalThis.clearTimeout;
     let nextId = 1;

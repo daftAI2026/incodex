@@ -24,7 +24,7 @@ function harness(reducedMotion = false) {
   });
   return { flight, frames, pending, created: () => created, disposed: () => disposed,
     closeHost() { closed = true; },
-    advance(ms: number) { time += ms; const tasks = [...pending.values()]; pending.clear(); tasks.forEach(task => task()); } };
+    advance(ms: number) { time += ms; const tasks = [...pending.values()]; pending.clear(); tasks.forEach(task => { task(); }); } };
 }
 
 test("native flight preserves AppKit screen coordinates at both endpoints", async () => {
