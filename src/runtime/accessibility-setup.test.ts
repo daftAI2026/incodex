@@ -158,7 +158,8 @@ function makeHarness(options: {
   let closeHandler = () => {};
   const panel = {
     states: [] as string[],
-    setState(state: string) { this.states.push(state); },
+    openedBeforeHandoff: false,
+    setState(state: string) { this.states.push(state); if (state === "awaiting-user") panel.openedBeforeHandoff = shell.opened.length > 0; },
     close() { closed = true; closeHandler(); },
     isDestroyed: () => closed,
     onClose(fn: () => void) { closeHandler = fn; },
@@ -500,7 +501,7 @@ describe("single-window Accessibility setup", () => {
 test("a reset timeout kills and reaps tccutil before reporting failure", async () => {
   const child = Object.assign(new EventEmitter(), {
     killedBy: "",
-    kill(signal: string) { this.killedBy = signal; queueMicrotask(() => this.emit("close", null, signal)); return true; },
+    kill(this: EventEmitter & { killedBy: string }, signal: string) { this.killedBy = signal; queueMicrotask(() => this.emit("close", null, signal)); return true; },
   });
   const h = makeHarness({ probes: [false, false], dialogResponses: [0], spawn: () => child });
   await h.controller.run();
@@ -508,3 +509,9 @@ test("a reset timeout kills and reaps tccutil before reporting failure", async (
   expect(readMarker(h.requestPath).state).toBe("error");
   expect(h.shell.opened).toHaveLength(0);
 }, 7000);
+
+test("opens Settings before asking the guide to locate its handoff destination", async () => {
+  const h = makeHarness({ probes: [false, false], dialogResponses: [0] });
+  await h.controller.run();
+  expect(h.panel.openedBeforeHandoff).toBe(true);
+});
