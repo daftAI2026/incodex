@@ -89,6 +89,17 @@ fn read_marker(fixture: &Fixture) -> Value {
     serde_json::from_slice(&fs::read(fixture.marker_path()).unwrap()).unwrap()
 }
 
+#[test]
+fn each_explicit_install_has_a_distinct_setup_request() {
+    let fixture = committed_fixture("request-generation");
+    request_setup(&fixture.root, &fixture.app, &fixture.install_id).unwrap();
+    let first = read_marker(&fixture);
+    request_setup(&fixture.root, &fixture.app, &fixture.install_id).unwrap();
+    let second = read_marker(&fixture);
+    assert!(first["requestId"].as_str().is_some());
+    assert_ne!(first["requestId"], second["requestId"]);
+}
+
 fn write_marker(fixture: &Fixture, value: &Value) {
     fs::write(fixture.marker_path(), serde_json::to_vec(value).unwrap()).unwrap();
     fs::set_permissions(fixture.marker_path(), fs::Permissions::from_mode(0o600)).unwrap();
