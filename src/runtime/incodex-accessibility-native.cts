@@ -19,7 +19,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   const selector = name => objc.callFunction("NSSelectorFromString", { returns: ":", args: ["@"] }, str(name));
   const unique = `IncodexPermission_${process.pid}_${++generation}`;
   let closed = false, state = "pending", settled = false, source = null, helper = null, arrowPanel = null, arrow = null;
-  let tracking = null, arrowTimer = null, returnTimer = null, flight = null, locating = false, attempts = 0, presented = false, dragging = false;
+  let tracking = null, arrowTimer = null, returnTimer = null, flight = null, locating = false, attempts = 0, presented = false, dragging = false, dragSession = null;
   const closeHandlers = new Set();
   let resolveChoice;
   const choice = new Promise(resolve => { resolveChoice = resolve; });
@@ -60,7 +60,8 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   function stopArrow() { clearTimeout(arrowTimer); clearTimeout(returnTimer); arrowTimer = returnTimer = null; }
   function close() {
     if (closed) return;
-    closed = true; clearInterval(tracking); tracking = null; stopArrow(); flight?.dispose(); flight = null;
+    closed = true; dragging = false; dragSession = null;
+    clearInterval(tracking); tracking = null; stopArrow(); flight?.dispose(); flight = null;
     resolveOnce("later");
     for (const panel of panels) { panel.orderOut$(null); panel.close(); }
     for (const callback of closeHandlers) callback(); closeHandlers.clear();
@@ -168,23 +169,32 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
       const item = kit.NSPasteboardItem.alloc().init(); item.setDataProvider$forTypes$(self, array(str("public.file-url")));
       const dragging = kit.NSDraggingItem.alloc().initWithPasteboardWriter$(item);
       dragging.setDraggingFrame$contents$(appRowView.frame(), snapshot(appRowView));
-      const session = self.beginDraggingSessionWithItems$event$source$(array(dragging), event, self);
-      session.setAnimatesToStartingPositionsOnCancelOrFail$(true);
+      dragSession = self.beginDraggingSessionWithItems$event$source$(array(dragging), event, self);
+      dragSession.setAnimatesToStartingPositionsOnCancelOrFail$(true);
     } },
     "pasteboard:item:provideDataForType:": { types: "v@:@@@", implementation: (_self, _pasteboard, item, type) => {
       if (String(type) === "public.file-url" || type.isEqualToString$(str("public.file-url"))) item.setString$forType$(foundation.NSURL.fileURLWithPath$(str(APP_PATH)).absoluteString(), str("public.file-url"));
     } },
     "draggingSession:sourceOperationMaskForDraggingContext:": { types: "Q@:@q", implementation: () => 1 },
     "ignoreModifierKeysForDraggingSession:": { types: "B@:@", implementation: () => true },
-    "draggingSession:willBeginAtPoint:": { types: "v@:@{CGPoint=dd}", implementation: () => { dragging = true; stopArrow(); animateArrow(1, 1); appRowView.setHidden$(true); } },
-    "draggingSession:endedAtPoint:operation:": { types: "v@:@{CGPoint=dd}Q", implementation: () => { dragging = false; if (!closed) { appRowView.setHidden$(false); scheduleArrow(4000); } } },
+    "draggingSession:willBeginAtPoint:": { types: "v@:@{CGPoint=dd}", implementation: () => {
+      dragging = true; stopArrow(); animateArrow(1, 1); appRowView.setHidden$(true);
+      helper?.panel.setIgnoresMouseEvents$(true);
+    } },
+    "draggingSession:endedAtPoint:operation:": { types: "v@:@{CGPoint=dd}Q", implementation: () => {
+      dragging = false; dragSession = null;
+      if (!closed) {
+        helper?.panel.setIgnoresMouseEvents$(false); helper?.panel.orderFront$(null);
+        appRowView.setHidden$(false); scheduleArrow(4000);
+      }
+    } },
   }, ["NSDraggingSource", "NSPasteboardItemDataProvider"]);
 
   let instructionX = 0;
   function positionArrow(frame) { arrowPanel.setFrame$display$(rect(frame.origin.x + instructionX - 7, frame.origin.y + 112 - 12 - 28 - 11, 42, 62.8), false); }
   function createHelper(frame) {
     const panel = NonactivatingPanel.alloc().initWithContentRect$styleMask$backing$defer$(frame,128,2,false); configurePanel(panel,true);
-    panel.setOpaque$(false); panel.setBackgroundColor$(kit.NSColor.clearColor()); panel.setHasShadow$(false);
+    panel.setOpaque$(false); panel.setBackgroundColor$(kit.NSColor.clearColor()); panel.setHasShadow$(false); panel.setIgnoresMouseEvents$(false);
     const view = Material.alloc().initWithFrame$(rect(0,0,532,112)); view.setMaterial$(7); view.setBlendingMode$(0); view.setState$(1); view.setWantsLayer$(true); view.layer().setCornerRadius$(12); view.layer().setMasksToBounds$(true);
     const edge = surface(rect(0,0,532,112),12,kit.NSColor.clearColor());
     edge.setBorderType$(1); edge.setBorderWidth$(.5); edge.setBorderColor$(kit.NSColor.separatorColor()); view.addSubview$(edge);
