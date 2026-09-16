@@ -879,6 +879,88 @@ describe("native Accessibility setup adapter", () => {
     }
   });
 
+  test("Back restores the initial page and a later Allow dispatches onRetry without resolving choice again", async () => {
+    const handoffs: any[] = [];
+    const retries: string[] = [];
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    let initialPanel: FakeNative | undefined;
+    let initialWasVisibleAtBack = false;
+    const { api, bridge, panel } = await makeHarness({
+      onHandoff: (payload) => handoffs.push(payload),
+      onBack: () => {
+        initialWasVisibleAtBack = Boolean(initialPanel?.isVisible());
+        return { finished, dispose: () => {} };
+      },
+    });
+    initialPanel = panel;
+    const unsubscribe = api.onRetry(() => retries.push("retry"));
+    try {
+      const repair = objectWithTitle(panel, COPY.repair);
+      if (!repair) throw new Error("native repair button is missing");
+      repair.performClick$();
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+
+      const back = bridge.objects.find((value) => value.action === "later:");
+      if (!back) throw new Error("native Back button is missing");
+      back.performClick$();
+      await settleNativeAsync();
+
+      const allow = objectWithTitle(panel, COPY.repair);
+      expect(initialWasVisibleAtBack).toBe(true);
+      expect(panel.isVisible()).toBe(true);
+      expect(allow?.values.get("enabled")).toBe(false);
+
+      finish();
+      await settleNativeAsync();
+      expect(api.isDestroyed()).toBe(false);
+      expect(panel.isVisible()).toBe(true);
+      expect(objectWithTitle(panel, COPY.body)?.values.get("stringValue")).toBe(COPY.body);
+      expect(allow?.values.get("enabled")).toBe(true);
+      expect(helperPanels(bridge).some((value) => value.visible && !value.destroyed)).toBe(false);
+
+      allow?.performClick$();
+      await flushNativeAsync();
+      await settleNativeAsync();
+      expect(retries).toEqual(["retry"]);
+      expect(handoffs).toHaveLength(2);
+      await expect(api.choice).resolves.toBe("repair");
+    } finally {
+      unsubscribe?.();
+      finish();
+      api.close();
+    }
+  });
+
+  test("Back handoff failure returns to an interactive initial page", async () => {
+    const { api, bridge, panel } = await makeHarness({
+      onBack: () => { throw new Error("reverse handoff failed"); },
+    });
+    try {
+      const repair = objectWithTitle(panel, COPY.repair);
+      if (!repair) throw new Error("native repair button is missing");
+      repair.performClick$();
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+
+      const back = bridge.objects.find((value) => value.action === "later:");
+      if (!back) throw new Error("native Back button is missing");
+      back.performClick$();
+      await settleNativeAsync();
+
+      const allow = objectWithTitle(panel, COPY.repair);
+      expect(api.isDestroyed()).toBe(false);
+      expect(panel.isVisible()).toBe(true);
+      expect(allow?.values.get("enabled")).toBe(true);
+      expect(helperPanels(bridge).some((value) => value.visible && !value.destroyed)).toBe(false);
+    } finally {
+      api.close();
+    }
+  });
+
   test("disables helper hit testing for an active drag and restores it when the drag ends", async () => {
     const { api, bridge } = await makeHarness();
     api.setState("awaiting-user");
