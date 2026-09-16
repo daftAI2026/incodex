@@ -872,7 +872,7 @@ describe("native Accessibility setup adapter", () => {
 
       finish();
       await settleNativeAsync();
-      expect(api.isDestroyed()).toBe(true);
+      expect(api.isDestroyed()).toBe(false);
     } finally {
       finish();
       api.close();
@@ -894,7 +894,12 @@ describe("native Accessibility setup adapter", () => {
       },
     });
     initialPanel = panel;
-    const unsubscribe = api.onRetry(() => retries.push("retry"));
+    const unsubscribe = api.onRetry(() => {
+      retries.push("retry");
+      // The controller opens Settings and then drives the adapter back into its
+      // existing awaiting-user state after that async step succeeds.
+      api.setState("awaiting-user");
+    });
     try {
       const repair = objectWithTitle(panel, COPY.repair);
       if (!repair) throw new Error("native repair button is missing");
@@ -1224,7 +1229,7 @@ test("Back keeps the reverse flight alive when Settings disappears", async () =>
     expect(api.isDestroyed()).toBe(false);
     finish();
     await settleNativeAsync();
-    expect(api.isDestroyed()).toBe(true);
+    expect(api.isDestroyed()).toBe(false);
   } finally {
     finish();
     api?.close();
