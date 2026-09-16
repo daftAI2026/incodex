@@ -105,7 +105,7 @@ describe("runtime load", () => {
 
   test("an ordinary incognito click launches the official Codex route", () => {
     const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
-    const launchStart = main.indexOf("async function launchIncognitoOnce()");
+    const launchStart = main.indexOf("async function launchIncognitoOnce(");
     const launchEnd = main.indexOf("\nconst allowedWindows", launchStart);
     const launch = main.slice(launchStart, launchEnd);
 
@@ -116,7 +116,7 @@ describe("runtime load", () => {
 
   test("failed launches remain single-flight through promise settlement", () => {
     const main = readFileSync(join(import.meta.dir, "runtime/incodex-main.cts"), "utf8");
-    const launchStart = main.indexOf("async function launchIncognitoOnce()");
+    const launchStart = main.indexOf("async function launchIncognitoOnce(");
     const launchEnd = main.indexOf("\nconst allowedWindows", launchStart);
     const launch = main.slice(launchStart, launchEnd);
 

@@ -62,7 +62,7 @@ describe("Electron UI injection reporting", () => {
   });
 
   test("native menu launches inherit geometry only from a real main window", () => {
-    const start = main.indexOf("function captureSourceBounds()");
+    const start = main.indexOf("function captureSourceBounds(");
     const end = main.indexOf("\nfunction readSourceBounds()", start);
     const capture = main.slice(start, end);
 
@@ -73,7 +73,7 @@ describe("Electron UI injection reporting", () => {
   });
 
   test("uses the authorized IPC sender window before any focus fallback", () => {
-    const start = main.indexOf("function captureSourceBounds()");
+    const start = main.indexOf("function captureSourceBounds(");
     const end = main.indexOf("\nfunction readSourceBounds()", start);
     const capture = main.slice(start, end);
     const senderWindow = {
@@ -96,7 +96,7 @@ describe("Electron UI injection reporting", () => {
   });
 
   test("uses the visible main window when an accessibility launch has no focused window", () => {
-    const start = main.indexOf("function captureSourceBounds()");
+    const start = main.indexOf("function captureSourceBounds(");
     const end = main.indexOf("\nfunction readSourceBounds()", start);
     const capture = main.slice(start, end);
     const prewarm = {

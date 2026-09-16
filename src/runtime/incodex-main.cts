@@ -820,11 +820,16 @@ function logLaunch(message, extra) {
 const CHROME_WINDOW_TILE_PIXELS = process.platform === "darwin" ? 22 : 10;
 const CHROME_MIN_VISIBLE = 30;
 
-function captureSourceBounds() {
+function captureSourceBounds(sourceWindow) {
   try {
     const electron = require("electron");
     const focused = electron.BrowserWindow.getFocusedWindow();
-    const win = focused && !isAuxiliaryWindow(focused) ? focused : mainWindows(electron)[0];
+    const usable = (win) => win && !win.isDestroyed() && !isAuxiliaryWindow(win);
+    const visible = (win) => usable(win) && (win.isVisible() || win.isMinimized());
+    // Renderer actions already passed the IPC identity check. Their actual
+    // window remains the source even when an AX click does not focus it.
+    const win = usable(sourceWindow) ? sourceWindow
+      : visible(focused) ? focused : mainWindows(electron).find(visible);
     if (!win || win.isDestroyed()) return "";
     const b = win.getBounds();
     return `${b.x},${b.y},${b.width},${b.height}`;
@@ -891,15 +896,16 @@ function applyChromeWindowTile(win) {
 
 const launchHolder = { current: null };
 
-function launchIncognito() {
+function launchIncognito(sourceWindow) {
+  const sourceBounds = captureSourceBounds(sourceWindow);
   const launch = windowsPlatform
     ? () =>
         windowsPlatform.launchIncognito({
           helperPath: process.env.INCODEX_WINDOWS_HELPER,
           sourceHome: sourceHome(),
-          sourceBounds: captureSourceBounds(),
+          sourceBounds,
         })
-    : launchIncognitoOnce;
+    : () => launchIncognitoOnce(sourceBounds);
   return instance.singleFlight(launchHolder, launch);
 }
 
@@ -964,7 +970,7 @@ function prepareIncognitoSession(options = {}) {
   }
 }
 
-async function launchIncognitoOnce() {
+async function launchIncognitoOnce(sourceBounds) {
   let alreadyRunning;
   try {
     alreadyRunning = await incognitoAlreadyRunning();
@@ -995,7 +1001,6 @@ async function launchIncognitoOnce() {
     return Promise.resolve({ ok: false, reason: "spawn-failed" });
   }
   const args = [`--user-data-dir=${session.chromium}`, "codex://new?mode=codex"];
-  const sourceBounds = captureSourceBounds();
   logLaunch("launch", {
     bin,
     home: session.home,
@@ -1320,7 +1325,8 @@ async function attachElectron() {
           reason: "already-incognito",
         });
       }
-      const result = await launchIncognito();
+      const sourceWindow = electron.BrowserWindow.fromWebContents(event.sender);
+      const result = await launchIncognito(sourceWindow);
       return ipcGuard.actionResponse(requestId, {
         ok: result.ok === true,
         code: result.ok ? "OK" : String(result.reason || "FAILED").toUpperCase(),
