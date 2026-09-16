@@ -24,3 +24,10 @@ test("Reduce Motion presents destination without scheduling flight",()=>{
   runPermissionFlight({source,target,reducedMotion:true,now:()=>0,schedule:()=>{throw Error('must not animate')},cancel:()=>{},render:(f:any)=>frames.push(f),onComplete:()=>complete++});
   expect(frames).toHaveLength(1);expect(frames[0].progress).toBe(1);expect(complete).toBe(1);
 });
+
+test("flight retains fractional points until each display aligns its backing pixels", () => {
+  const from = { x: 100.25, y: 100.5, width: 46.5, height: 20.25, radius: 10 };
+  const to = { x: -601.5, y: 35.5, width: 451.5, height: 44.5, radius: 8 };
+  expect(samplePermissionFlight(from, to, 0).bounds).toEqual({ x: 100.25, y: 100.5, width: 46.5, height: 20.25 });
+  expect(samplePermissionFlight(from, to, 3).bounds).toEqual({ x: -601.5, y: 35.5, width: 451.5, height: 44.5 });
+});
