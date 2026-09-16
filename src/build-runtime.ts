@@ -106,11 +106,13 @@ for (const name of cjsNames) {
   }
   if (name === "incodex-main.cjs" || name === "incodex-dock-menu.cjs") {
     // Keep readable source while preserving the external Runtime size budget.
-    // Do not bundle dependencies or rewrite identifiers; the loader stays unchanged.
+    // Preserve top-level entry points, property names and CommonJS paths.
+    // Compact only local identifiers; the loader stays unchanged.
     const compact = await minify(text, {
       module: false,
       compress: false,
-      mangle: false,
+      mangle: { toplevel: false },
+      keep_fnames: true,
       format: { comments: false },
     });
     if (!compact.code) throw new Error("Runtime main compaction produced no code");
