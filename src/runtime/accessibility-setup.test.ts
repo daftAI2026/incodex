@@ -470,7 +470,7 @@ describe("single-window Accessibility setup", () => {
   test("keeps the native guide in English or the matching Chinese script", () => {
     const resolveCopy = (runtimeMain as any).resolveAccessibilityCopy;
     expect(typeof resolveCopy).toBe("function");
-    expect(resolveCopy("zh-CN").body).toBe("安装后，需要重新授权，ChatGPT 才能继续操作其他应用。");
+    expect(resolveCopy("zh-CN").body).toBe("安装 Incodex 会修改 ChatGPT，因此需要重新授予它辅助功能权限。");
     expect(resolveCopy("zh-HK").later).toBe("稍後");
     expect(resolveCopy("zh-TW").later).toBe("稍後");
     expect(resolveCopy("en").back).toBe("Back");
