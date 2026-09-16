@@ -274,7 +274,7 @@ describe("Accessibility setup controller", () => {
     expect(harness.shell.revealed).toHaveLength(0);
   });
 
-  test("resets only after explicit repair, opens both user surfaces, and never grants on a false probe", async () => {
+  test("resets only after explicit repair, opens Settings, and never grants on a false probe", async () => {
     const harness = makeHarness({ probes: [false, false], dialogResponses: [0] });
 
     await harness.controller.run();
@@ -284,7 +284,7 @@ describe("Accessibility setup controller", () => {
     ]);
     expect(harness.shell.opened).toHaveLength(1);
     expect(harness.shell.opened[0]).toMatch(/^x-apple\.systempreferences:/);
-    expect(harness.shell.revealed).toEqual([APP_PATH]);
+    expect(harness.shell.revealed).toEqual([]);
     expect(readMarker(harness.requestPath).state).toBe("awaiting-user");
 
     // A later activation may observe a still-false decision, but cannot reset
@@ -316,9 +316,8 @@ describe("Accessibility setup controller", () => {
     expect(readMarker(harness.requestPath).state).toBe("error");
     expect(harness.shell.opened).toHaveLength(0);
     expect(harness.shell.revealed).toHaveLength(0);
-    expect(harness.dialog.calls.some((options) =>
-      JSON.stringify(options).includes(COPY_VALUES.errorBody),
-    )).toBe(true);
+    expect(harness.panel.states).toContain("error");
+    expect(harness.dialog.calls).toHaveLength(1);
   });
 
   test("single-flights concurrent activation checks so one pending request has one prompt", async () => {
@@ -497,3 +496,15 @@ describe("single-window Accessibility setup", () => {
     expect(h.timerActive()).toBe(false);
   });
 });
+
+test("a reset timeout kills and reaps tccutil before reporting failure", async () => {
+  const child = Object.assign(new EventEmitter(), {
+    killedBy: "",
+    kill(signal: string) { this.killedBy = signal; queueMicrotask(() => this.emit("close", null, signal)); return true; },
+  });
+  const h = makeHarness({ probes: [false, false], dialogResponses: [0], spawn: () => child });
+  await h.controller.run();
+  expect(child.killedBy).toBe("SIGKILL");
+  expect(readMarker(h.requestPath).state).toBe("error");
+  expect(h.shell.opened).toHaveLength(0);
+}, 7000);
