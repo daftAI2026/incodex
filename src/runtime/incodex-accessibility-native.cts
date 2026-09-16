@@ -289,7 +289,8 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     clearInterval(tracking); tracking = null; stopArrow(); stopBackFlightTimer();
     disposeHelper(); returning = false; state = "pending"; retryReady = Boolean(enableRetry);
     title.setStringValue$(str(text("title"))); body.setStringValue$(str(text("body")));
-    allow.setEnabled$(Boolean(enableRetry)); fitInitialBody(); initial.orderFront$(null);
+    allow.setEnabled$(Boolean(enableRetry)); fitInitialBody();
+    electron?.app?.focus?.({steal:true}); initial.makeKeyAndOrderFront$(null);
   }
   function fallbackToInitial() {
     returnSequence++;
