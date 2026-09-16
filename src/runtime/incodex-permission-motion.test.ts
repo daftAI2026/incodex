@@ -1,0 +1,26 @@
+import { expect, test } from "bun:test";
+import { samplePermissionFlight, runPermissionFlight } from "./incodex-permission-motion.cts";
+const source={x:100,y:100,width:100,height:40,radius:20};
+const target={x:600,y:500,width:532,height:112,radius:12};
+test("Cavalry handoff begins at source and settles exactly at target",()=>{
+  expect(samplePermissionFlight(source,target,0).bounds).toEqual({x:100,y:100,width:100,height:40});
+  const final=samplePermissionFlight(source,target,3);
+  expect(final.bounds).toEqual({x:600,y:500,width:532,height:112});
+  expect(final.progress).toBe(1);expect(final.sourceOpacity).toBe(0);expect(final.targetBlur).toBe(0);
+});
+test("handoff uses complementary opacity and blur rather than abruptly swapping images",()=>{
+  const mid=samplePermissionFlight(source,target,.2);
+  expect(mid.progress).toBeGreaterThan(0);expect(mid.progress).toBeLessThan(1);
+  expect(mid.sourceOpacity+mid.targetOpacity).toBeCloseTo(1);
+  expect(mid.sourceBlur+mid.targetBlur).toBeCloseTo(12);
+});
+test("closing cancels queued frames and never completes into a disposed guide",()=>{
+  let time=0;let pending:any=null;let completed=0;const frames:any[]=[];
+  const stop=runPermissionFlight({source,target,reducedMotion:false,now:()=>time,schedule:(fn:any)=>{pending=fn;return 1},cancel:()=>{pending=null},render:(f:any)=>frames.push(f),onComplete:()=>completed++});
+  time=100;pending();expect(frames.length).toBeGreaterThan(1);stop();expect(pending).toBe(null);expect(completed).toBe(0);
+});
+test("Reduce Motion presents destination without scheduling flight",()=>{
+  const frames:any[]=[];let complete=0;
+  runPermissionFlight({source,target,reducedMotion:true,now:()=>0,schedule:()=>{throw Error('must not animate')},cancel:()=>{},render:(f:any)=>frames.push(f),onComplete:()=>complete++});
+  expect(frames).toHaveLength(1);expect(frames[0].progress).toBe(1);expect(complete).toBe(1);
+});
