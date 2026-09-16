@@ -1,9 +1,30 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { createRequire } from "node:module";
+import { runInNewContext } from "node:vm";
 import { describe, expect, test } from "bun:test";
 import { RUNTIME_ARTIFACT_NAMES } from "../src/runtime-manifest.ts";
 
 describe("runtime manifest", () => {
+  test("compiled main resolves the injector and preload beside its own module", () => {
+    const directory = join(import.meta.dir, "../dist");
+    const mainPath = join(directory, "incodex-main.cjs");
+    const module = { exports: {} };
+    const result = runInNewContext(
+      `${readFileSync(mainPath, "utf8")}\n({inject: injectSource(), preload: pickFile("incodex-preload.cjs")})`,
+      {
+        require: createRequire(mainPath),
+        __dirname: directory,
+        module,
+        exports: module.exports,
+        process: { ...process, platform: "test", env: {} },
+        console,
+      },
+    );
+    expect(result.inject).toBe(readFileSync(join(directory, "incodex-inject.js"), "utf8"));
+    expect(result.preload).toBe(join(directory, "incodex-preload.cjs"));
+  });
+
   test("one catalog owns every current Runtime artifact", () => {
     const catalogPath = join(import.meta.dir, "../runtime-artifacts.json");
     expect(existsSync(catalogPath)).toBe(true);
