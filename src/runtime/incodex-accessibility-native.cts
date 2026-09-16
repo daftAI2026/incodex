@@ -181,14 +181,16 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
 
   function screens() { const values = kit.NSScreen.screens(); return Array.from({ length: Number(values.count()) }, (_, i) => values.objectAtIndex$(i)); }
   function helperFrame(target) {
-    const displays = screens(); const first = displays[0];
+    const first = screens()[0];
     if (!first) throw new Error("No display is available for the permission guide");
     const primary = first.frame();
-    const appRect = target ? rect(target.x, primary.origin.y + primary.size.height - target.y - target.height, target.width, target.height) : first.visibleFrame();
-    const midpoint = { x: appRect.origin.x + appRect.size.width / 2, y: appRect.origin.y + appRect.size.height / 2 };
-    const screen = displays.find(value => { const f = value.frame(); return midpoint.x >= f.origin.x && midpoint.x < f.origin.x + f.size.width && midpoint.y >= f.origin.y && midpoint.y < f.origin.y + f.size.height; }) ?? first;
-    const area = screen.visibleFrame();
-    return rect(Math.round(Math.max(area.origin.x + 20, Math.min(midpoint.x - 266, area.origin.x + area.size.width - 552))), Math.round(area.origin.y + 20), 532, 112);
+    // CUA Accessibility accessory: trailing/bottom inset 10pt inside Settings.
+    // Convert Quartz window bounds to AppKit once, then match CGRectIntegral.
+    // ScreenRecording has a separate heading-aware branch; we do not request it.
+    const x = target.x + target.width - 532 - 10;
+    const y = primary.origin.y + primary.size.height - target.y - target.height + 10;
+    const left = Math.floor(x), bottom = Math.floor(y);
+    return rect(left, bottom, Math.ceil(x + 532) - left, Math.ceil(y + 112) - bottom);
   }
   function animateArrow(x, y) {
     if (!arrow || closed) return;
