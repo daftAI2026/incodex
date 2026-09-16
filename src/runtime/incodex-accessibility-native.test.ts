@@ -757,6 +757,8 @@ describe("native Accessibility setup adapter", () => {
 
     expect(panel.isVisible()).toBe(true);
     expect(content.bounds().size.width).toBe(600);
+    expect(content.values.has("material")).toBe(false);
+    expect(content.subviews[0].values.get("material")).toBe(6);
     expect(tree.some(value => value.frame().size.width === 518 && value.frame().size.height === 80)).toBe(true);
     const card = tree.find(value => value.frame().origin.x === 41 && value.frame().size.height === 80);
     expect(card?.values.get("clipsToBounds")).toBe(false);
