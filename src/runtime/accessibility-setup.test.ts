@@ -100,6 +100,7 @@ function makeHarness(options: {
   probes?: unknown[];
   dialogResponses?: number[];
   spawn?: (file: string, args: string[]) => EventEmitter;
+  openExternal?: (url: string) => Promise<boolean>;
   appPath?: string;
   installId?: string;
   writeMarker?: boolean;
@@ -128,7 +129,7 @@ function makeHarness(options: {
     revealed: [] as string[],
     async openExternal(url: string): Promise<boolean> {
       shell.opened.push(url);
-      return true;
+      return options.openExternal ? options.openExternal(url) : true;
     },
     showItemInFolder(file: string): void {
       shell.revealed.push(file);
@@ -159,10 +160,13 @@ function makeHarness(options: {
   const panel = {
     states: [] as string[],
     openedBeforeHandoff: false,
+    retryCallbacks: [] as Array<() => unknown>,
     setState(state: string) { this.states.push(state); if (state === "awaiting-user") panel.openedBeforeHandoff = shell.opened.length > 0; },
     close() { closed = true; closeHandler(); },
     isDestroyed: () => closed,
     onClose(fn: () => void) { closeHandler = fn; },
+    onRetry(fn: () => unknown) { this.retryCallbacks.push(fn); return () => {}; },
+    triggerRetry() { return this.retryCallbacks.at(-1)?.(); },
   };
   const controller = createController({
     app: { getLocale: () => "en-US", isReady: () => true },
@@ -489,6 +493,77 @@ describe("single-window Accessibility setup", () => {
     expect(h.panel.isDestroyed()).toBe(true);
     expect(h.timerActive()).toBe(false);
     expect(h.spawnCalls).toHaveLength(1);
+  });
+
+  test("retries the same awaiting request without a second reset", async () => {
+    const h = makeHarness({ probes: [false, false, false], dialogResponses: [0] });
+
+    await h.controller.run();
+    expect(readMarker(h.requestPath).state).toBe("awaiting-user");
+    expect(h.spawnCalls).toHaveLength(1);
+    expect(h.shell.opened).toHaveLength(1);
+
+    await h.panel.triggerRetry();
+
+    expect(readMarker(h.requestPath).state).toBe("awaiting-user");
+    expect(h.spawnCalls).toHaveLength(1);
+    expect(h.shell.opened).toHaveLength(2);
+    expect(h.panel.states).toEqual(expect.arrayContaining(["repairing", "awaiting-user"]));
+  });
+
+  test("completes an existing awaiting request when retry observes host trust", async () => {
+    const h = makeHarness({ probes: [false, false, true], dialogResponses: [0] });
+
+    await h.controller.run();
+    await h.panel.triggerRetry();
+
+    expect(readMarker(h.requestPath).state).toBe("granted");
+    expect(h.spawnCalls).toHaveLength(1);
+    expect(h.shell.opened).toHaveLength(1);
+    expect(h.panel.isDestroyed()).toBe(true);
+    expect(h.timerActive()).toBe(false);
+  });
+
+  test("does not resume a retry after the guide closes while Settings is opening", async () => {
+    let openCalls = 0;
+    let release!: (value: boolean) => void;
+    const secondOpen = new Promise<boolean>((resolve) => { release = resolve; });
+    const h = makeHarness({
+      probes: [false, false, false],
+      dialogResponses: [0],
+      openExternal: async () => {
+        openCalls += 1;
+        return openCalls === 2 ? secondOpen : true;
+      },
+    });
+
+    await h.controller.run();
+    const retry = h.panel.triggerRetry();
+    h.panel.close();
+    release(true);
+    await retry;
+
+    expect(readMarker(h.requestPath).state).toBe("deferred");
+    expect(h.panel.states.filter((state: string) => state === "awaiting-user")).toHaveLength(1);
+    expect(h.spawnCalls).toHaveLength(1);
+  });
+
+  test("closes a retry callback from an expired request without overwriting it", async () => {
+    const h = makeHarness({ probes: [false, false, false], dialogResponses: [0] });
+
+    await h.controller.run();
+    writeMarker(h.requestPath, {
+      requestId: "replacement-request",
+      requestedAtMs: 1_700_000_000_200,
+      state: "awaiting-user",
+    });
+    await h.panel.triggerRetry();
+
+    expect(readMarker(h.requestPath).requestId).toBe("replacement-request");
+    expect(readMarker(h.requestPath).state).toBe("awaiting-user");
+    expect(h.shell.opened).toHaveLength(1);
+    expect(h.spawnCalls).toHaveLength(1);
+    expect(h.panel.isDestroyed()).toBe(true);
   });
 
   test("closing the guide cancels polling and cannot leave automatic reset work", async () => {
