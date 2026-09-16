@@ -143,9 +143,16 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   permissionTitle.setFont$(kit.NSFont.systemFontOfSize$weight$(16, .3));
   card.addSubview$(permissionTitle);
   card.addSubview$(label(text("permissionDescription"), rect(84, 42, 330, 18), 13, false, false, true));
-  const allowSurface = View.alloc().initWithFrame$(rect(436, 26, 62, 28));
-  const allow = button(text("repair"), rect(0, 0, 62, 28), "allow:"); allow.setKeyEquivalent$(str("\r"));
-  allow.setBordered$(true); allow.setFont$(kit.NSFont.systemFontOfSize$(13));
+  // Reference: DefaultButtonStyle -> continuous Capsule -> minWidth 62 -> x +4.
+  const allowSurface = View.alloc().initWithFrame$(rect(440, 28, 62, 24));
+  const allow = button(text("repair"), rect(0, 0, 62, 24), "allow:"); allow.setKeyEquivalent$(str("\r"));
+  allow.setBordered$(true); allow.setFont$(kit.NSFont.systemFontOfSize$(13)); allow.sizeToFit();
+  const allowSize = allow.frame().size;
+  const allowWidth = Math.max(62, Number(allowSize.width));
+  allowSurface.setFrame$(rect(498 - allowWidth + 4, (80 - allowSize.height) / 2, allowWidth, allowSize.height));
+  allow.setFrame$(rect(Math.round((allowWidth - allowSize.width) / 2), 0, allowSize.width, allowSize.height));
+  allow.setWantsLayer$(true); allow.layer().setCornerRadius$(allowSize.height / 2);
+  allow.layer().setCornerCurve$(str("continuous")); allow.layer().setMasksToBounds$(true);
   allowSurface.addSubview$(allow); card.addSubview$(allowSurface);
   function fitInitialBody() {
     // CUA description: centered Text.lineSpacing(2), measured after styling.
@@ -169,7 +176,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   }
   function captureSource() {
     return { frame: initial.convertRectToScreen$(allowSurface.convertRect$toView$(allowSurface.bounds(), null)),
-      image: snapshot(allowSurface), radius: 14 };
+      image: snapshot(allowSurface), radius: Number(allow.frame().size.height) / 2 };
   }
 
   function screens() { const values = kit.NSScreen.screens(); return Array.from({ length: Number(values.count()) }, (_, i) => values.objectAtIndex$(i)); }

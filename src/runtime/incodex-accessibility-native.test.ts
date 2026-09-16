@@ -976,7 +976,7 @@ describe("native Accessibility setup adapter", () => {
 
       expect(reverses).toHaveLength(1);
       expect(reverses[0].reverse).toBe(true);
-      expect(reverses[0].source.frame.size).toEqual({ width: 62, height: 28 });
+      expect(reverses[0].source.frame.size).toEqual({ width: 62, height: 24 });
       expect(reverses[0].source.image).toBeDefined();
       expect(reverses[0].target.frame.size).toEqual({ width: 452, height: 44 });
       expect(api.isDestroyed()).toBe(false);
