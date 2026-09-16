@@ -730,7 +730,7 @@ function helperPanels(bridge: FakeBridge): FakeNative[] {
 
 async function makeHarness(options: {
   onHandoff?: (payload: any) => void;
-  onBack?: (payload: any) => { finished?: Promise<unknown>; dispose?: () => void } | void;
+  onBack?: (payload: any) => { finished?: Promise<unknown>; dispose?: () => void } | undefined;
   locateSettings?: () => unknown;
 } = {}) {
   const bridge = makeBridge();

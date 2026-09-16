@@ -1294,6 +1294,10 @@ async function attachElectron() {
             ...payload,
             onError: error => logLaunch("accessibility-handoff-error", { error: String(error) }),
           }),
+          onBack: payload => accessibilityWindow.runNativePermissionHandoff({
+            ...payload,
+            onError: error => logLaunch("accessibility-return-error", { error: String(error) }),
+          }),
           locateSettings: async () => {
             settingsLocator ||= dockMenu.createNativeSystemSettingsLocator({ appPath: electron.app.getAppPath() });
             return (await settingsLocator)();

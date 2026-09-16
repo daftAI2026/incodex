@@ -11,6 +11,9 @@ function createPermissionGraphics(objc) {
     finally { objc.callFunction(release, { returns: "v", args: ["@"] }, value); }
   }
   return {
+    setColor(layer, key, components) {
+      store(layer, key, "CGColorCreateGenericRGB", ["d", "d", "d", "d"], components, "CGColorRelease");
+    },
     setBlackColor(layer, key, alpha) {
       store(layer, key, "CGColorCreateGenericRGB", ["d", "d", "d", "d"], [0, 0, 0, alpha], "CGColorRelease");
     },

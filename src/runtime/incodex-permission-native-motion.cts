@@ -146,7 +146,7 @@ function createNativeReplicants({ objc, source, target }) {
 
 function runNativePermissionHandoff(options) {
   let { objc, source, target, isClosed = () => false,
-  reducedMotion, now = () => performance.now(), schedule = fn => setTimeout(fn, 1000 / 60), cancel = clearTimeout,
+  reducedMotion, reverse = false, now = () => performance.now(), schedule = fn => setTimeout(fn, 1000 / 60), cancel = clearTimeout,
   createReplicants = createNativeReplicants, onError = () => {} } = options;
   let resolve;
   const finished = new Promise(done => { resolve = done; });
@@ -167,7 +167,7 @@ function runNativePermissionHandoff(options) {
     replicas = createReplicants({ objc, source, target: initialTarget });
     const flip = item => ({ x: item.frame.origin.x, y: -item.frame.origin.y - item.frame.size.height,
       width: item.frame.size.width, height: item.frame.size.height, radius: item.radius ?? 12 });
-    stop = runPermissionFlight({ source: flip(source), target: () => flip(resolveTarget()), reducedMotion: false, now, schedule, cancel,
+    stop = runPermissionFlight({ source: flip(source), target: () => flip(resolveTarget()), reducedMotion: false, reverse, now, schedule, cancel,
       render(sample) {
         if (isClosed()) { dispose(); return; }
         const bounds = { ...sample.bounds, y: -sample.bounds.y - sample.bounds.height };

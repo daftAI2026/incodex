@@ -2,11 +2,12 @@
 // Native presentation adapted from Cavalry-i18n e76175fe (MIT).
 // Copyright (c) 2026 daftAI. See LICENSE. Permission decisions stay in the host controller.
 const { createPermissionGraphics } = require("./incodex-permission-graphics.cts");
+const { createPermissionCardBackground } = require("./incodex-permission-card.cts");
 let generation = 0;
 const APP_PATH = "/Applications/ChatGPT.app";
 const rect = (x, y, width, height) => ({ origin: { x, y }, size: { width, height } });
 
-async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcModule, locateSettings, onHandoff, electron = null }) {
+async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcModule, locateSettings, onHandoff, onBack, electron = null }) {
   if (appPath !== APP_PATH) throw new Error("Native permission guide requires the default ChatGPT app");
   const objc = await loadObjcModule();
   const kit = new objc.NobjcLibrary("/System/Library/Frameworks/AppKit.framework/AppKit");
@@ -46,6 +47,10 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   }
   function snapshot(view) {
     view.displayIfNeeded(); const bounds = view.bounds();
+    const width = Number(bounds?.size?.width); const height = Number(bounds?.size?.height);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+      throw new Error("Permission view snapshot has empty bounds");
+    }
     const rep = view.bitmapImageRepForCachingDisplayInRect$(bounds);
     if (!rep) throw new Error("Permission view could not be captured");
     view.cacheDisplayInRect$toBitmapImageRep$(bounds, rep);
@@ -70,11 +75,11 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     "windowWillClose:": { types: "v@:@", implementation: () => close() },
     "allow:": { types: "v@:@", implementation: (_self, sender) => {
       if (closed || state !== "pending" || settled) return;
-      try { source = { frame: initial.convertRectToScreen$(allowSurface.convertRect$toView$(allowSurface.bounds(), null)), image: snapshot(allowSurface), radius: 10 }; }
+      try { source = captureSource(); }
       catch { source = null; }
       resolveOnce("repair");
     } },
-    "later:": { types: "v@:@", implementation: () => close() },
+    "later:": { types: "v@:@", implementation: () => helper && state === "awaiting-user" ? handleBack() : close() },
   });
   const delegate = Delegate.alloc().init();
   function configurePanel(panel, floating) {
@@ -85,35 +90,41 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     const control = kit.NSButton.buttonWithTitle$target$action$(str(title), delegate, selector(action));
     control.setFrame$(frame); control.setBezelStyle$(1); control.setFont$(kit.NSFont.systemFontOfSize$(12)); return control;
   }
-  // One native permission row follows the owner's supplied CUA reference.
-  const initial = kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(rect(0, 0, 480, 300), 1 | 2 | 32768, 2, false);
+  // CUA PermissionView: 600pt width, 28/32pt vertical padding, 64pt icon,
+  // 20pt icon-to-title gap, 26pt bold title, 41pt horizontal row inset.
+  // A single 80pt Accessibility row replaces the reference's permission list.
+  const initial = kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(rect(0, 0, 600, 312), 1 | 2 | 32768, 2, false);
   configurePanel(initial, true); initial.setTitle$(str("")); initial.setTitlebarAppearsTransparent$(true); initial.setTitleVisibility$(1);
-  const initialView = Material.alloc().initWithFrame$(rect(0, 0, 480, 300));
-  initialView.setMaterial$(12); initialView.setBlendingMode$(0); initialView.setState$(1); initial.setContentView$(initialView);
+  const initialView = View.alloc().initWithFrame$(rect(0, 0, 600, 312));
+  const background = Material.alloc().initWithFrame$(rect(0, 0, 600, 312));
+  background.setMaterial$(6); background.setBlendingMode$(0); background.setState$(1);
+  initialView.addSubview$(background); initial.setContentView$(initialView);
   const dark = String(initial.effectiveAppearance().name()).includes("Dark");
   function surface(frame, radius, fill) {
     const box = kit.NSBox.alloc().initWithFrame$(frame); box.setBoxType$(4); box.setBorderType$(0);
     box.setCornerRadius$(radius); box.setFillColor$(fill); return box;
   }
-  initialView.addSubview$(surface(rect(0, 0, 480, 300), 0, kit.NSColor.colorWithWhite$alpha$(dark ? .16 : .925, 1)));
-  initialView.addSubview$(imageView(icon, rect(208, 40, 64, 64)));
-  const title = label(text("title"), rect(24, 130, 432, 28), 20, true, true);
-  const body = label(text("body"), rect(32, 162, 416, 40), 12, false, true, true);
+  initialView.addSubview$(imageView(icon, rect(268, 28, 64, 64)));
+  const title = label(text("title"), rect(20, 112, 560, 32), 26, true, true);
+  const body = label(text("body"), rect(41, 147, 518, 32), 13, false, true, true);
   initialView.addSubview$(title); initialView.addSubview$(body);
-  const card = View.alloc().initWithFrame$(rect(30, 208, 420, 66));
-  card.setWantsLayer$(true); card.addSubview$(surface(rect(0, 0, 420, 66), 18, kit.NSColor.colorWithWhite$alpha$(dark ? .22 : .945, 1)));
-  card.layer().setCornerRadius$(18); card.layer().setBorderWidth$(0);
-  // Initial PermissionRow effects are not established by the transition's layer constants.
-  // Do not add a guessed stroke or shadow while the original row is under investigation.
+  const card = View.alloc().initWithFrame$(rect(41, 200, 518, 80));
+  card.setClipsToBounds$(false); card.setWantsLayer$(true); card.layer().setMasksToBounds$(false);
+  card.addSubview$(createPermissionCardBackground({ View, Material, kit, graphics, str, size: { width: 518, height: 80 }, dark }));
   initialView.addSubview$(card);
-  card.addSubview$(imageView(permissionIcon, rect(8, 7, 52, 52)));
-  card.addSubview$(label(text("permissionTitle"), rect(68, 15, 270, 18), 13, true));
-  card.addSubview$(label(text("permissionDescription"), rect(68, 34, 270, 18), 11, false, false, true));
-  const allowSurface = View.alloc().initWithFrame$(rect(358, 23, 46, 20));
-  allowSurface.addSubview$(surface(rect(0, 0, 46, 20), 10, kit.NSColor.controlAccentColor()));
-  const allow = button(text("repair"), rect(0, 0, 46, 20), "allow:"); allow.setKeyEquivalent$(str("\r"));
-  allow.setBordered$(false); allow.setContentTintColor$(kit.NSColor.whiteColor());
-  allow.setFont$(kit.NSFont.systemFontOfSize$(10)); allowSurface.addSubview$(allow); card.addSubview$(allowSurface);
+  card.addSubview$(imageView(permissionIcon, rect(8, 8, 64, 64)));
+  const permissionTitle = label(text("permissionTitle"), rect(84, 19, 330, 20), 16);
+  permissionTitle.setFont$(kit.NSFont.systemFontOfSize$weight$(16, .3));
+  card.addSubview$(permissionTitle);
+  card.addSubview$(label(text("permissionDescription"), rect(84, 42, 330, 18), 13, false, false, true));
+  const allowSurface = View.alloc().initWithFrame$(rect(436, 26, 62, 28));
+  const allow = button(text("repair"), rect(0, 0, 62, 28), "allow:"); allow.setKeyEquivalent$(str("\r"));
+  allow.setBordered$(true); allow.setFont$(kit.NSFont.systemFontOfSize$(13));
+  allowSurface.addSubview$(allow); card.addSubview$(allowSurface);
+  function captureSource() {
+    return { frame: initial.convertRectToScreen$(allowSurface.convertRect$toView$(allowSurface.bounds(), null)),
+      image: snapshot(allowSurface), radius: 14 };
+  }
 
   function screens() { const values = kit.NSScreen.screens(); return Array.from({ length: Number(values.count()) }, (_, i) => values.objectAtIndex$(i)); }
   function helperFrame(target) {
@@ -195,7 +206,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   function createHelper(frame) {
     const panel = NonactivatingPanel.alloc().initWithContentRect$styleMask$backing$defer$(frame,128,2,false); configurePanel(panel,true);
     panel.setOpaque$(false); panel.setBackgroundColor$(kit.NSColor.clearColor()); panel.setHasShadow$(false); panel.setIgnoresMouseEvents$(false);
-    const view = Material.alloc().initWithFrame$(rect(0,0,532,112)); view.setMaterial$(7); view.setBlendingMode$(0); view.setState$(1); view.setWantsLayer$(true); view.layer().setCornerRadius$(12); view.layer().setMasksToBounds$(true);
+    const view = Material.alloc().initWithFrame$(rect(0,0,532,112)); view.setMaterial$(6); view.setBlendingMode$(0); view.setState$(1); view.setWantsLayer$(true); view.layer().setCornerRadius$(12); view.layer().setMasksToBounds$(true);
     const edge = surface(rect(0,0,532,112),12,kit.NSColor.clearColor());
     edge.setBorderType$(1); edge.setBorderWidth$(.5); edge.setBorderColor$(kit.NSColor.separatorColor()); view.addSubview$(edge);
     panel.setContentView$(view);
@@ -220,6 +231,28 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     if (closed || state !== "awaiting-user") return;
     presented=true; helper.panel.orderFront$(null); arrowPanel.orderFront$(null); scheduleArrow();
   }
+  function handleBack() {
+    if (closed || dragging || state !== "awaiting-user" || !helper) return;
+    if (reducedMotion() || !onBack || !helper.targetRow) { close(); return; }
+    let returnSource;
+    try { returnSource = captureSource(); }
+    catch { close(); return; }
+    stopArrow();
+    let active;
+    try {
+      active = onBack({ objc, source: returnSource, target: helper.targetRow, reverse: true, isClosed: () => closed });
+    } catch { close(); return; }
+    helper.panel.orderOut$(null); arrowPanel?.orderOut$(null);
+    if (!active?.finished || typeof active.finished.then !== "function") { close(); return; }
+    flight = active;
+    void Promise.resolve(active.finished).then(() => {
+      if (flight === active) flight = null;
+      if (!closed) close();
+    }).catch(() => {
+      if (flight === active) flight = null;
+      if (!closed) close();
+    });
+  }
   async function place() {
     if (closed || state !== "awaiting-user" || locating) return;
     locating=true;
@@ -235,15 +268,17 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
       const frame=helperFrame(target);
       if (!helper) {
         helper=createHelper(frame); initial.orderOut$(null);
-        if (target && source && onHandoff) {
+        if (target && source) {
           helper.targetRow = { panel: helper.panel, view: helper.row, radius: 8,
             frame: helper.panel.convertRectToScreen$(helper.row.convertRect$toView$(helper.row.bounds(), null)) };
-          const activeFlight=onHandoff({objc,source,target:helper.targetRow,isClosed:()=>closed});
-          flight=activeFlight;
-          void Promise.resolve(activeFlight?.finished).then(() => {
-            if (flight === activeFlight) flight=null;
-            revealHelper();
-          }).catch(() => { if (!closed) setState("error"); });
+          if (onHandoff) {
+            const activeFlight=onHandoff({objc,source,target:helper.targetRow,isClosed:()=>closed});
+            flight=activeFlight;
+            void Promise.resolve(activeFlight?.finished).then(() => {
+              if (flight === activeFlight) flight=null;
+              revealHelper();
+            }).catch(() => { if (!closed) setState("error"); });
+          } else revealHelper();
         } else revealHelper();
       } else if (!dragging) {
         helper.frame=frame; helper.panel.setFrame$display$(frame,false); positionArrow(frame);
