@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { minify } from "terser";
 import { ACCESSIBILITY_SETUP_COPY } from "./runtime/incognito-copy.ts";
 import {
   RUNTIME_ARTIFACT_NAMES,
@@ -75,14 +76,14 @@ for (const name of cjsNames) {
     text = text.replace('"__INCODEX_ACCESSIBILITY_COPY__"', JSON.stringify(ACCESSIBILITY_SETUP_COPY));
     // Keep readable source while preserving the external Runtime size budget.
     // Do not bundle dependencies or rewrite identifiers; the loader stays unchanged.
-    text = new Bun.Transpiler({
-      loader: "js",
-      target: "node",
-      minifyWhitespace: true,
-      deadCodeElimination: false,
-      treeShaking: false,
-      trimUnusedImports: false,
-    }).transformSync(text);
+    const compact = await minify(text, {
+      module: false,
+      compress: false,
+      mangle: false,
+      format: { comments: false },
+    });
+    if (!compact.code) throw new Error("Runtime main compaction produced no code");
+    text = `${compact.code}\n`;
   }
   writeFileSync(outputPath, text);
 }
