@@ -331,6 +331,8 @@ class FakeNative {
     this.values.set("title", String(value));
   }
 
+  setValue$forKey$(value: unknown, key: string): void { this.values.set(key, value); }
+
   setStringValue$(value: unknown): void {
     this.values.set("stringValue", String(value));
   }
@@ -652,6 +654,7 @@ function makeBridge(): FakeBridge {
     callFunction(name: string, ...args: unknown[]) {
       calls.push({ receiver: "C", selector: name, args });
       if (name === "NSSelectorFromString") return String(args.at(-1));
+      if (name === "CGColorCreateGenericRGB" && (args[0] as { returns?: string })?.returns === "@") return { color: args.slice(1) };
       return undefined;
     },
     RunLoop: { run: () => () => {}, stop: () => {} },
@@ -911,4 +914,32 @@ describe("native Accessibility setup adapter", () => {
     expect(panel.isDestroyed()).toBe(true);
     expect(closed).toBe(1);
   });
+});
+
+test("Settings tracking continues while the forward flight is still running", async () => {
+  const clock = installPollingClock();
+  let x = 120;
+  let locations = 0;
+  let finish!: () => void;
+  const finished = new Promise<void>((resolve) => { finish = resolve; });
+  let api: Awaited<ReturnType<typeof createNativeAccessibilitySetupWindow>> | undefined;
+  try {
+    const harness = await makeHarness({
+      locateSettings: () => { locations++; return { x, y: 140, width: 920, height: 700 }; },
+      onHandoff: () => ({ finished, dispose: finish }),
+    });
+    api = harness.api;
+    objectWithTitle(harness.panel, COPY.repair)?.performClick$();
+    await api.choice;
+    api.setState("awaiting-user");
+    await settleNativeAsync();
+    const helper = helperPanels(harness.bridge).find((panel) => panel.frame().size.width === 532);
+    expect(helper).toBeDefined();
+    const before = helper?.frame().origin.x;
+    x += 200;
+    clock.timers[0]?.callback();
+    await settleNativeAsync();
+    expect(locations).toBe(2);
+    expect(helper?.frame().origin.x).not.toBe(before);
+  } finally { finish(); api?.close(); clock.restore(); }
 });
