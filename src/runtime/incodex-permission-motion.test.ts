@@ -39,3 +39,18 @@ test("native pixel alignment rounds rectangle edges with C round semantics on ne
   expect(alignPermissionFrame({ x: .3, y: .3, width: .3, height: .3 }, 1))
     .toEqual({ x: 0, y: 0, width: 1, height: 1 });
 });
+
+test("flight follows a moved Settings target instead of landing at its stale position", () => {
+  let time = 0;
+  let next: (() => void) | null = null;
+  const liveTarget = { ...target };
+  const frames: any[] = [];
+  runPermissionFlight({ source, target: () => liveTarget, reducedMotion: false, now: () => time,
+    schedule: (callback: () => void) => { next = callback; return 1; }, cancel: () => {},
+    render: (frame: any) => frames.push(frame), onComplete: () => {} });
+  liveTarget.x = 800;
+  liveTarget.y = 600;
+  time = 3000;
+  next?.();
+  expect(frames.at(-1).bounds).toEqual({ x: 800, y: 600, width: 532, height: 112 });
+});
