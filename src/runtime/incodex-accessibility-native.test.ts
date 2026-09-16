@@ -249,6 +249,8 @@ class FakeNative {
     this.values.set("state", value);
   }
 
+  setCornerCurve$(value: unknown): void { this.values.set("cornerCurve", value); }
+
   setCornerRadius$(value: unknown): void {
     this.values.set("cornerRadius", value);
   }
@@ -752,6 +754,9 @@ describe("native Accessibility setup adapter", () => {
     if (!icon || !content) throw new Error("initial native panel content is missing");
 
     expect(panel.isVisible()).toBe(true);
+    expect(content.bounds().size.width).toBe(600);
+    expect(tree.some(value => value.frame().size.width === 518 && value.frame().size.height === 80)).toBe(true);
+    expect(tree.some(value => value.values.get("material") === 6)).toBe(true);
     expect(icon.frame().size).toEqual({ width: 64, height: 64 });
     expect(icon.frame().origin.x + icon.frame().size.width / 2).toBeCloseTo(
       content.bounds().size.width / 2,
@@ -784,7 +789,7 @@ describe("native Accessibility setup adapter", () => {
     expect(handoffs[0].source.image).toBeDefined();
     const capture = handoffs[0].source.image.values.get("representation").values.get("capturedView") as FakeNative;
     // The transition must include the colored button background, not just its glyphs.
-    expect(capture.subviews.some((view) => view.type === "NSBox")).toBe(true);
+    expect(capture.subviews.some((view) => view.type === "NSButton" && view.values.get("bordered") === true)).toBe(true);
     expect(capture.subviews.some((view) => view.type === "NSButton")).toBe(true);
     expect(handoffs[0].target.frame.size).toEqual({ width: 452, height: 44 });
     expect(handoffs[0].target.radius).toBe(8);
