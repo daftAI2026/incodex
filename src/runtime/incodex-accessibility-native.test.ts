@@ -789,6 +789,7 @@ describe("native Accessibility setup adapter", () => {
     expect(handoffs[0].target.frame.size).toEqual({ width: 452, height: 44 });
     expect(handoffs[0].target.radius).toBe(8);
     expect(handoffs[0].target.panel).toBeDefined();
+    expect(handoffs[0].target.panel.contentViewValue.values.get("material")).toBe(6);
     expect(handoffs[0].target.view?.hasSelector("mouseDown:")).toBe(true);
   });
 
