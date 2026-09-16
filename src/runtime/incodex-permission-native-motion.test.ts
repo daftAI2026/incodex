@@ -187,7 +187,7 @@ function nativeMotionBridge(screenSpecs: Array<{ frame: Rect; scale: number }>) 
       view.bitmapImageRepForCachingDisplayInRect$ = () => emptyRep ? null : nativeObject("NSBitmapImageRep");
       return view;
     },
-    panels() { return objects.filter((value) => String(value.type).startsWith("IncodexPermissionFlight_")); },
+    panels() { return objects.filter((value) => value.type === "NSPanel"); },
   };
 }
 

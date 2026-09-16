@@ -3,7 +3,6 @@
 // Copyright (c) 2026 daftAI. See LICENSE.
 const { runPermissionFlight, alignPermissionFrame } = require("./incodex-permission-motion.cts");
 const { createPermissionGraphics } = require("./incodex-permission-graphics.cts");
-let sequence = 0;
 const rect = (x, y, width, height) => ({ origin: { x, y }, size: { width, height } });
 
 function snapshot(kit, view) {
@@ -31,11 +30,6 @@ function createNativeReplicants({ objc, source, target }) {
   const graphics = createPermissionGraphics(objc);
   const string = value => foundation.NSString.stringWithUTF8String$(value);
   const targetImage = snapshot(kit, target.view);
-  const Panel = objc.NobjcClass.define({ name: `IncodexPermissionFlight_${process.pid}_${++sequence}`,
-    superclass: "NSPanel", methods: {
-      canBecomeKeyWindow: { types: "B@:", implementation: () => false },
-      canBecomeMainWindow: { types: "B@:", implementation: () => false },
-    } });
   const entries = [];
   const allowsBlur = !kit.NSWorkspace.sharedWorkspace().accessibilityDisplayShouldReduceTransparency();
   let topologyKey = null;
@@ -65,7 +59,7 @@ function createNativeReplicants({ objc, source, target }) {
     const next = [];
     try {
       for (const { frame, scale } of specs) {
-      const panel = Panel.alloc().initWithContentRect$styleMask$backing$defer$(frame, 128, 2, false);
+      const panel = kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(frame, 128, 2, false);
       panel.setReleasedWhenClosed$(false);
       // Keep the panel owned even if construction of its children fails.
       const item = { panel, frame, scale }; next.push(item);
