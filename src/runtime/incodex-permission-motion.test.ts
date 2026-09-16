@@ -54,3 +54,33 @@ test("flight follows a moved Settings target instead of landing at its stale pos
   pending.next?.();
   expect(frames.at(-1).bounds).toEqual({ x: 800, y: 600, width: 532, height: 112 });
 });
+
+test("reverse flight starts at the helper and returns to the original source", () => {
+  let time = 0;
+  let next: (() => void) | null = null;
+  const frames: any[] = [];
+  runPermissionFlight({ source, target, reverse: true, reducedMotion: false, now: () => time,
+    schedule: (callback: () => void) => { next = callback; return 1; }, cancel: () => {},
+    render: (frame: any) => frames.push(frame), onComplete: () => {} });
+
+  expect(frames[0].progress).toBe(1);
+  expect(frames[0].bounds).toEqual({ x: 600, y: 500, width: 532, height: 112 });
+  expect(frames[0].sourceOpacity).toBe(0);
+  expect(frames[0].targetOpacity).toBe(1);
+  time = 3000;
+  next?.();
+  expect(frames.at(-1).progress).toBe(0);
+  expect(frames.at(-1).bounds).toEqual({ x: 100, y: 100, width: 100, height: 40 });
+  expect(frames.at(-1).sourceOpacity).toBe(1);
+  expect(frames.at(-1).targetOpacity).toBe(0);
+});
+
+test("reverse Reduce Motion cleans up without presenting a replacement frame", () => {
+  const frames: any[] = [];
+  let complete = 0;
+  runPermissionFlight({ source, target, reverse: true, reducedMotion: true, now: () => 0,
+    schedule: () => { throw Error("must not animate"); }, cancel: () => {},
+    render: (frame: any) => frames.push(frame), onComplete: () => complete++ });
+  expect(frames).toHaveLength(0);
+  expect(complete).toBe(1);
+});

@@ -726,6 +726,7 @@ function helperPanels(bridge: FakeBridge): FakeNative[] {
 
 async function makeHarness(options: {
   onHandoff?: (payload: any) => void;
+  onBack?: (payload: any) => { finished?: Promise<unknown>; dispose?: () => void } | void;
   locateSettings?: () => unknown;
 } = {}) {
   const bridge = makeBridge();
@@ -735,6 +736,7 @@ async function makeHarness(options: {
     loadObjcModule: async () => bridge.objc,
     locateSettings: options.locateSettings ?? (() => ({ x: 120, y: 140, width: 920, height: 700 })),
     onHandoff: options.onHandoff,
+    onBack: options.onBack,
   });
   const panel = bridge.objects.find((value) => value.type === "NSPanel");
   if (!panel) throw new Error("native Accessibility panel was not created");
@@ -805,6 +807,42 @@ describe("native Accessibility setup adapter", () => {
     provider?.invoke("pasteboard:item:provideDataForType:", null, item, "public.file-url");
     expect(item.values.get("pasteboard:public.file-url")).toBe(`file://${APP_PATH}`);
     expect(arrayValues(item.values.get("types"))).toEqual(expect.arrayContaining(["public.file-url"]));
+  });
+
+  test("Back recaptures the original target and waits for a reverse handoff before cleanup", async () => {
+    const reverses: any[] = [];
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    const { api, bridge, panel } = await makeHarness({
+      onBack: (payload) => { reverses.push(payload); return { finished, dispose: () => {} }; },
+    });
+    try {
+      const repair = objectWithTitle(panel, COPY.repair);
+      if (!repair) throw new Error("native repair button is missing");
+      repair.performClick$();
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+
+      const back = bridge.objects.find((value) => value.action === "later:");
+      if (!back) throw new Error("native Back button is missing");
+      back.performClick$();
+      await settleNativeAsync();
+
+      expect(reverses).toHaveLength(1);
+      expect(reverses[0].reverse).toBe(true);
+      expect(reverses[0].source.frame.size).toEqual({ width: 46, height: 20 });
+      expect(reverses[0].source.image).toBeDefined();
+      expect(reverses[0].target.frame.size).toEqual({ width: 452, height: 44 });
+      expect(api.isDestroyed()).toBe(false);
+
+      finish();
+      await settleNativeAsync();
+      expect(api.isDestroyed()).toBe(true);
+    } finally {
+      finish();
+      api.close();
+    }
   });
 
   test("disables helper hit testing for an active drag and restores it when the drag ends", async () => {

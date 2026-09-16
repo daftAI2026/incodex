@@ -191,7 +191,7 @@ function nativeMotionBridge(screenSpecs: Array<{ frame: Rect; scale: number }>) 
   };
 }
 
-function harness(reducedMotion = false) {
+function harness(reducedMotion = false, reverse = false) {
   let time = 0;
   let closed = false;
   const pending = new Map<number, () => void>();
@@ -203,6 +203,7 @@ function harness(reducedMotion = false) {
     source: { frame: { origin: { x: 10, y: 400 }, size: { width: 80, height: 28 } }, image: {}, radius: 14 },
     target: { frame: { origin: { x: 300, y: 20 }, size: { width: 532, height: 112 } }, view: {}, panel: {}, radius: 12 },
     reducedMotion,
+    reverse,
     isClosed: () => closed,
     now: () => time,
     schedule: (callback: () => void) => { pending.set(++id, callback); return id; },
@@ -226,6 +227,20 @@ test("native flight preserves AppKit screen coordinates at both endpoints", asyn
   expect(h.frames.at(-1).targetOpacity).toBe(1);
   expect(h.disposed()).toBe(1);
   expect(h.pending.size).toBe(0);
+});
+
+test("native reverse flight keeps source and target images fixed while progress runs backward", async () => {
+  const h = harness(false, true);
+  expect(h.frames[0].progress).toBe(1);
+  expect(h.frames[0].bounds).toEqual({ x: 300, y: 20, width: 532, height: 112 });
+  expect(h.frames[0].sourceOpacity).toBe(0);
+  expect(h.frames[0].targetOpacity).toBe(1);
+  h.advance(3000);
+  await h.flight.finished;
+  expect(h.frames.at(-1).progress).toBe(0);
+  expect(h.frames.at(-1).bounds).toEqual({ x: 10, y: 400, width: 80, height: 28 });
+  expect(h.frames.at(-1).sourceOpacity).toBe(1);
+  expect(h.frames.at(-1).targetOpacity).toBe(0);
 });
 
 test("closing during native flight reaps panels and settles without late frames", async () => {
