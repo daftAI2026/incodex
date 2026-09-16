@@ -221,6 +221,10 @@ class FakeNative {
     this.values.set("hasShadow", value);
   }
 
+  setIgnoresMouseEvents$(value: unknown): void {
+    this.values.set("ignoresMouseEvents", value);
+  }
+
   setTitlebarAppearsTransparent$(value: unknown): void {
     this.values.set("titlebarAppearsTransparent", value);
   }
@@ -801,6 +805,42 @@ describe("native Accessibility setup adapter", () => {
     provider?.invoke("pasteboard:item:provideDataForType:", null, item, "public.file-url");
     expect(item.values.get("pasteboard:public.file-url")).toBe(`file://${APP_PATH}`);
     expect(arrayValues(item.values.get("types"))).toEqual(expect.arrayContaining(["public.file-url"]));
+  });
+
+  test("disables helper hit testing for an active drag and restores it when the drag ends", async () => {
+    const { api, bridge } = await makeHarness();
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+    const row = bridge.objects.find((value) => value.hasSelector("mouseDown:"));
+    const helper = helperPanels(bridge).find((value) => value.frame().size.width === 532);
+    if (!row || !helper) throw new Error("native drag helper is missing");
+
+    row.invoke("draggingSession:willBeginAtPoint:", { x: 0, y: 0 });
+    expect(helper.values.get("ignoresMouseEvents")).toBe(true);
+    row.invoke("draggingSession:endedAtPoint:operation:", { x: 0, y: 0 }, 0);
+    expect(helper.values.get("ignoresMouseEvents")).toBe(false);
+    api.close();
+  });
+
+  test("closing during a drag prevents a late drag callback from reviving native UI", async () => {
+    const { api, bridge } = await makeHarness();
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+    const row = bridge.objects.find((value) => value.hasSelector("mouseDown:"));
+    const helper = helperPanels(bridge).find((value) => value.frame().size.width === 532);
+    const appRow = row?.subviews.find((value) => value.type.includes("View"));
+    if (!row || !helper || !appRow) throw new Error("native drag helper is missing");
+
+    row.invoke("mouseDown:", {});
+    row.invoke("draggingSession:willBeginAtPoint:", { x: 0, y: 0 });
+    expect(appRow.values.get("hidden")).toBe(true);
+    api.close();
+    const callsAfterClose = bridge.calls.length;
+    row.invoke("draggingSession:endedAtPoint:operation:", { x: 0, y: 0 }, 0);
+
+    expect(helper.isDestroyed()).toBe(true);
+    expect(appRow.values.get("hidden")).toBe(true);
+    expect(bridge.calls.slice(callsAfterClose).some(({ selector }) => selector === "orderFront:")).toBe(false);
   });
 
   test("does not fabricate a helper when System Settings never appears", async () => {
