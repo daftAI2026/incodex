@@ -118,6 +118,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   // CUA PermissionView: 600pt width, 28/32pt vertical padding, 64pt icon,
   // 20pt icon-to-title gap, 26pt bold title, 41pt horizontal row inset.
   // A single 80pt Accessibility row replaces the reference's permission list.
+  // The initial 312pt allocation is fitted to the localized body before display.
   const initial = kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(rect(0, 0, 600, 312), 1 | 2 | 32768, 2, false);
   configurePanel(initial, true); initial.setTitle$(str("")); initial.setTitlebarAppearsTransparent$(true); initial.setTitleVisibility$(1);
   const initialView = View.alloc().initWithFrame$(rect(0, 0, 600, 312));
@@ -146,6 +147,18 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   const allow = button(text("repair"), rect(0, 0, 62, 28), "allow:"); allow.setKeyEquivalent$(str("\r"));
   allow.setBordered$(true); allow.setFont$(kit.NSFont.systemFontOfSize$(13));
   allowSurface.addSubview$(allow); card.addSubview$(allowSurface);
+  function fitInitialBody() {
+    const measured = Number(body.cell().cellSizeForBounds$(rect(0, 0, 518, 1000)).height);
+    if (!Number.isFinite(measured) || measured <= 0) throw new Error("Permission text has invalid native bounds");
+    const bodyHeight = Math.ceil(measured);
+    const cardY = 147 + bodyHeight + 21;
+    const contentHeight = cardY + 80 + 32;
+    body.setFrame$(rect(41, 147, 518, bodyHeight));
+    card.setFrame$(rect(41, cardY, 518, 80));
+    initialView.setFrame$(rect(0, 0, 600, contentHeight));
+    background.setFrame$(rect(0, 0, 600, contentHeight));
+    initial.setContentSize$({ width: 600, height: contentHeight });
+  }
   function captureSource() {
     return { frame: initial.convertRectToScreen$(allowSurface.convertRect$toView$(allowSurface.bounds(), null)),
       image: snapshot(allowSurface), radius: 14 };
@@ -273,7 +286,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     clearInterval(tracking); tracking = null; stopArrow(); stopBackFlightTimer();
     disposeHelper(); returning = false; state = "pending"; retryReady = Boolean(enableRetry);
     title.setStringValue$(str(text("title"))); body.setStringValue$(str(text("body")));
-    allow.setEnabled$(Boolean(enableRetry)); initial.orderFront$(null);
+    allow.setEnabled$(Boolean(enableRetry)); fitInitialBody(); initial.orderFront$(null);
   }
   function fallbackToInitial() {
     returnSequence++;
@@ -289,7 +302,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     if (closed || returning || dragging || state !== "awaiting-user" || !helper) return;
     returning = true; retryReady = false; const token = ++returnSequence;
     clearInterval(tracking); tracking = null; stopArrow();
-    initial.orderFront$(null); title.setStringValue$(str(text("title"))); body.setStringValue$(str(text("body"))); allow.setEnabled$(true);
+    title.setStringValue$(str(text("title"))); body.setStringValue$(str(text("body"))); allow.setEnabled$(true); fitInitialBody(); initial.orderFront$(null);
     if (reducedMotion() || !onBack || !helper.targetRow) { fallbackToInitial(); return; }
     let returnSource;
     try { returnSource = captureSource(); }
@@ -358,10 +371,10 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     if (next==="awaiting-user") { allow.setEnabled$(false); body.setStringValue$(str(text("checking"))); if (!tracking) tracking=setInterval(()=>void place(),100); void place(); }
     if (next==="error" || next==="unknown") {
       clearInterval(tracking);tracking=null;stopArrow();flight?.dispose();flight=null;
-      disposeHelper(); title.setStringValue$(str(text("errorTitle")));body.setStringValue$(str(text("errorBody")));initial.orderFront$(null);
+      disposeHelper(); title.setStringValue$(str(text("errorTitle")));body.setStringValue$(str(text("errorBody")));fitInitialBody();initial.orderFront$(null);
     }
   }
-  initial.center(); electron?.app?.focus?.({steal:true}); initial.makeKeyAndOrderFront$(null);
+  fitInitialBody(); initial.center(); electron?.app?.focus?.({steal:true}); initial.makeKeyAndOrderFront$(null);
   return {choice,setState,close,isDestroyed:()=>closed,
     onClose:callback=>{closeHandlers.add(callback);return()=>closeHandlers.delete(callback);},
     onRetry:callback=>{if(typeof callback!=="function") return ()=>{}; retryHandlers.add(callback); return()=>retryHandlers.delete(callback);}};
