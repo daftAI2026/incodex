@@ -29,7 +29,7 @@ const ACCESSIBILITY_PACKAGE_MAX_BYTES = 256 * 1024;
 const ACCESSIBILITY_RESET_TIMEOUT_MS = 5_000;
 const ACCESSIBILITY_SETTINGS_URL =
   "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
-// The Runtime builder replaces this token with the small {en, zh-CN} table.
+// The Runtime builder replaces this token with the {en, zh-CN, zh-HK, zh-TW} table.
 const ACCESSIBILITY_COPY = "__INCODEX_ACCESSIBILITY_COPY__";
 const accessibilityWindow = "__INCODEX_ACCESSIBILITY_WINDOW__";
 const READY_TIMEOUT_MS = 15_000;
@@ -334,7 +334,11 @@ function accessibilityCopyValue(copy, key) {
 function resolveAccessibilityCopy(locale = "en") {
   const source = ACCESSIBILITY_COPY && typeof ACCESSIBILITY_COPY === "object" ? ACCESSIBILITY_COPY : null;
   if (!source) return null;
-  const language = String(locale || "").toLowerCase().startsWith("zh") ? "zh-CN" : "en";
+  const normalized = String(locale || "").trim().replaceAll("_", "-").toLowerCase();
+  let language = "en";
+  if (normalized.startsWith("zh-hant-hk") || normalized.startsWith("zh-hk")) language = "zh-HK";
+  else if (normalized.startsWith("zh-hant") || normalized.startsWith("zh-tw")) language = "zh-TW";
+  else if (normalized.startsWith("zh")) language = "zh-CN";
   const selected = source[language] || source.en;
   return selected && typeof selected === "object" ? { ...selected } : null;
 }
@@ -1503,6 +1507,7 @@ if (typeof module !== "undefined") {
   module.exports = {
     startupGate,
     createAccessibilitySetupController,
+    resolveAccessibilityCopy,
     readInstalledRuntimeIdentity,
     prepareIncognitoSession,
     runtimeOwnedSessionEnv,
