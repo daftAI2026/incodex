@@ -57,10 +57,10 @@ test("flight follows a moved Settings target instead of landing at its stale pos
 
 test("reverse flight starts at the helper and returns to the original source", () => {
   let time = 0;
-  let next: (() => void) | null = null;
+  const pending: { next: (() => void) | null } = { next: null };
   const frames: any[] = [];
   runPermissionFlight({ source, target, reverse: true, reducedMotion: false, now: () => time,
-    schedule: (callback: () => void) => { next = callback; return 1; }, cancel: () => {},
+    schedule: (callback: () => void) => { pending.next = callback; return 1; }, cancel: () => {},
     render: (frame: any) => frames.push(frame), onComplete: () => {} });
 
   expect(frames[0].progress).toBe(1);
@@ -68,7 +68,7 @@ test("reverse flight starts at the helper and returns to the original source", (
   expect(frames[0].sourceOpacity).toBe(0);
   expect(frames[0].targetOpacity).toBe(1);
   time = 3000;
-  next?.();
+  pending.next?.();
   expect(frames.at(-1).progress).toBe(0);
   expect(frames.at(-1).bounds).toEqual({ x: 100, y: 100, width: 100, height: 40 });
   expect(frames.at(-1).sourceOpacity).toBe(1);

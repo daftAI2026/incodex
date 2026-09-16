@@ -249,6 +249,8 @@ class FakeNative {
     this.values.set("state", value);
   }
 
+  setClipsToBounds$(value: unknown): void { this.values.set("clipsToBounds", value); }
+
   setCornerCurve$(value: unknown): void { this.values.set("cornerCurve", value); }
 
   setCornerRadius$(value: unknown): void {
@@ -756,6 +758,8 @@ describe("native Accessibility setup adapter", () => {
     expect(panel.isVisible()).toBe(true);
     expect(content.bounds().size.width).toBe(600);
     expect(tree.some(value => value.frame().size.width === 518 && value.frame().size.height === 80)).toBe(true);
+    const card = tree.find(value => value.frame().origin.x === 41 && value.frame().size.height === 80);
+    expect(card?.values.get("clipsToBounds")).toBe(false);
     expect(tree.some(value => value.values.get("material") === 6)).toBe(true);
     expect(icon.frame().size).toEqual({ width: 64, height: 64 });
     expect(icon.frame().origin.x + icon.frame().size.width / 2).toBeCloseTo(
@@ -837,7 +841,7 @@ describe("native Accessibility setup adapter", () => {
 
       expect(reverses).toHaveLength(1);
       expect(reverses[0].reverse).toBe(true);
-      expect(reverses[0].source.frame.size).toEqual({ width: 46, height: 20 });
+      expect(reverses[0].source.frame.size).toEqual({ width: 62, height: 28 });
       expect(reverses[0].source.image).toBeDefined();
       expect(reverses[0].target.frame.size).toEqual({ width: 452, height: 44 });
       expect(api.isDestroyed()).toBe(false);
