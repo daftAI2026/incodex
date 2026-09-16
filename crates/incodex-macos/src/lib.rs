@@ -7,6 +7,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 mod app_termination;
+mod accessibility;
 mod entitlements;
 mod live_window;
 #[cfg(target_os = "macos")]
@@ -20,6 +21,9 @@ pub use live_window::{live_main_window_bounds, WindowBounds};
 pub use session_process::{quiesce_session_processes, session_process_ids_from_ps};
 pub use signature_inspection::inspect_outer_signing;
 pub use signing::*;
+pub use accessibility::{
+    inspect_accessibility_for_app, AccessibilityReport, AccessibilityStatus,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct PlistInfo {
