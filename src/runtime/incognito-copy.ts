@@ -7,7 +7,7 @@ export type { CopyKey, CopyTable } from "./incognito-copy-data.ts";
 export const ACCESSIBILITY_SETUP_COPY = {
   en: {
     title: "Enable ChatGPT script control",
-    body: "After installation, ChatGPT needs to be authorized again to continue controlling other apps.",
+    body: "Installing Incodex modifies ChatGPT, so grant Accessibility access again to let it continue controlling other apps.",
     permissionTitle: "Accessibility",
     permissionDescription: "Read and interact with app interfaces",
     repair: "Allow",
@@ -24,7 +24,7 @@ export const ACCESSIBILITY_SETUP_COPY = {
   },
   "zh-CN": {
     title: "启用 ChatGPT 脚本控制",
-    body: "安装后，需要重新授权，ChatGPT 才能继续操作其他应用。",
+    body: "安装 Incodex 会修改 ChatGPT，因此需要重新授予辅助功能权限，才能继续操作其他应用。",
     permissionTitle: "辅助功能",
     permissionDescription: "读取和操作其他应用的界面",
     repair: "允许",
@@ -41,7 +41,7 @@ export const ACCESSIBILITY_SETUP_COPY = {
   },
   "zh-HK": {
     title: "啟用 ChatGPT 腳本控制",
-    body: "安裝後，需要重新授權，ChatGPT 才能繼續操作其他應用程式。",
+    body: "安裝 Incodex 會修改 ChatGPT，因此需要重新授予輔助功能權限，才能繼續操作其他應用程式。",
     permissionTitle: "輔助功能",
     permissionDescription: "讀取並操作其他應用程式的介面",
     repair: "允許",
@@ -58,7 +58,7 @@ export const ACCESSIBILITY_SETUP_COPY = {
   },
   "zh-TW": {
     title: "啟用 ChatGPT 腳本控制",
-    body: "安裝後，需要重新授權，ChatGPT 才能繼續操作其他應用程式。",
+    body: "安裝 Incodex 會修改 ChatGPT，因此需要重新授予輔助功能權限，才能繼續操作其他應用程式。",
     permissionTitle: "輔助功能",
     permissionDescription: "讀取並操作其他應用程式的介面",
     repair: "允許",
