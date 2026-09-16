@@ -68,14 +68,77 @@ describe("Electron UI injection reporting", () => {
 
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
-    expect(capture).toContain("mainWindows(electron)[0]");
+    expect(capture).toContain("mainWindows(electron)");
     expect(capture).not.toContain("BrowserWindow.getAllWindows()[0]");
+  });
+
+  test("uses the authorized IPC sender window before any focus fallback", () => {
+    const start = main.indexOf("function captureSourceBounds()");
+    const end = main.indexOf("\nfunction readSourceBounds()", start);
+    const capture = main.slice(start, end);
+    const senderWindow = {
+      isDestroyed: () => false,
+      getBounds: () => ({ x: 385, y: 107, width: 1311, height: 873 }),
+    };
+    const prewarm = {
+      isDestroyed: () => false,
+      getBounds: () => ({ x: 0, y: 0, width: 960, height: 720 }),
+    };
+
+    const bounds = runInNewContext(`${capture}\ncaptureSourceBounds(senderWindow)`, {
+      require: () => ({ BrowserWindow: { getFocusedWindow: () => null } }),
+      mainWindows: () => [prewarm],
+      isAuxiliaryWindow: () => false,
+      senderWindow,
+    });
+
+    expect(bounds).toBe("385,107,1311,873");
+  });
+
+  test("uses the visible main window when an accessibility launch has no focused window", () => {
+    const start = main.indexOf("function captureSourceBounds()");
+    const end = main.indexOf("\nfunction readSourceBounds()", start);
+    const capture = main.slice(start, end);
+    const prewarm = {
+      isDestroyed: () => false,
+      isVisible: () => false,
+      isMinimized: () => false,
+      getBounds: () => ({ x: 0, y: 0, width: 960, height: 720 }),
+    };
+    const primary = {
+      isDestroyed: () => false,
+      isVisible: () => true,
+      isMinimized: () => false,
+      getBounds: () => ({ x: 410, y: 114, width: 1398, height: 930 }),
+    };
+    const electron = {
+      BrowserWindow: {
+        getFocusedWindow: () => null,
+      },
+    };
+
+    const bounds = runInNewContext(`${capture}\ncaptureSourceBounds()`, {
+      require: () => electron,
+      mainWindows: () => [prewarm, primary],
+      isAuxiliaryWindow: () => false,
+    });
+
+    expect(bounds).toBe("410,114,1398,930");
   });
 
   test("lets an authorized renderer configure the macOS Dock decorator", () => {
     expect(main).toContain('require("./incodex-dock-menu.cjs")');
     expect(main).toContain('action === "configure-dock-menu"');
     expect(main).toContain("dockMenuController.configure(payload?.label)");
+  });
+
+  test("passes the authorized renderer window into the incognito launch", () => {
+    const start = main.indexOf('electron.ipcMain.handle("incodex-action"');
+    const end = main.indexOf("\n  });", start);
+    const handler = main.slice(start, end);
+
+    expect(handler).toContain("BrowserWindow.fromWebContents(event.sender)");
+    expect(handler).toContain("launchIncognito(sourceWindow)");
   });
 
   test("keeps macOS recovery timing while Windows rechecks asynchronous UI readiness", () => {
