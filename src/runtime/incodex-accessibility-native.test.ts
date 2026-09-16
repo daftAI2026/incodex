@@ -176,7 +176,7 @@ class FakeNative {
     this.frameValue = copyFrame(value);
   }
 
-  accessibilityDisplayShouldReduceMotion(): boolean { return false; }
+  accessibilityDisplayShouldReduceMotion(): boolean { return Boolean(this.values.get("reduceMotion")); }
   accessibilityDisplayShouldReduceTransparency(): boolean { return false; }
 
   effectiveAppearance(): FakeNative {
@@ -738,6 +738,7 @@ async function makeHarness(options: {
   onBack?: (payload: any) => { finished?: Promise<unknown>; dispose?: () => void } | undefined;
   locateSettings?: () => unknown;
   copy?: typeof COPY;
+  reduceMotion?: boolean;
 } = {}) {
   const bridge = makeBridge();
   const api = await createNativeAccessibilitySetupWindow({
@@ -748,6 +749,9 @@ async function makeHarness(options: {
     onHandoff: options.onHandoff,
     onBack: options.onBack,
   });
+  if (options.reduceMotion) {
+    bridge.objects.find((value) => value.type === "NSWorkspace")?.values.set("reduceMotion", true);
+  }
   const panel = bridge.objects.find((value) => value.type === "NSPanel");
   if (!panel) throw new Error("native Accessibility panel was not created");
   return { api, bridge, panel };
@@ -916,7 +920,7 @@ describe("native Accessibility setup adapter", () => {
       const allow = objectWithTitle(panel, COPY.repair);
       expect(initialWasVisibleAtBack).toBe(true);
       expect(panel.isVisible()).toBe(true);
-      expect(allow?.values.get("enabled")).toBe(false);
+      expect(allow?.values.get("enabled")).toBe(true);
 
       finish();
       await settleNativeAsync();
@@ -963,6 +967,104 @@ describe("native Accessibility setup adapter", () => {
       expect(helperPanels(bridge).some((value) => value.visible && !value.destroyed)).toBe(false);
     } finally {
       api.close();
+    }
+  });
+
+  test("reduced motion returns to the initial page without closing the guide", async () => {
+    const { api, bridge, panel } = await makeHarness({ reduceMotion: true });
+    try {
+      objectWithTitle(panel, COPY.repair)?.performClick$();
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+
+      const back = bridge.objects.find((value) => value.action === "later:");
+      if (!back) throw new Error("native Back button is missing");
+      back.performClick$();
+      await settleNativeAsync();
+
+      const allow = objectWithTitle(panel, COPY.repair);
+      expect(api.isDestroyed()).toBe(false);
+      expect(panel.isVisible()).toBe(true);
+      expect(allow?.values.get("enabled")).toBe(true);
+      expect(helperPanels(bridge).some((value) => value.visible && !value.destroyed)).toBe(false);
+    } finally {
+      api.close();
+    }
+  });
+
+  test("a stalled reverse handoff times out back to the initial page", async () => {
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    let disposed = 0;
+    const { api, bridge, panel } = await makeHarness({
+      onBack: () => ({ finished, dispose: () => { disposed += 1; } }),
+    });
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+    let timeoutCallback: (() => void) | undefined;
+    const timeoutToken = {};
+    globalThis.setTimeout = ((callback: TimerHandler, delay?: number) => {
+      if (Number(delay) === 5000) {
+        timeoutCallback = callback as () => void;
+        return timeoutToken as unknown as ReturnType<typeof setTimeout>;
+      }
+      return originalSetTimeout(callback, delay);
+    }) as typeof setTimeout;
+    globalThis.clearTimeout = ((value?: ReturnType<typeof setTimeout>) => {
+      if (value === timeoutToken) return;
+      return originalClearTimeout(value);
+    }) as typeof clearTimeout;
+    try {
+      objectWithTitle(panel, COPY.repair)?.performClick$();
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+
+      const back = bridge.objects.find((value) => value.action === "later:");
+      if (!back) throw new Error("native Back button is missing");
+      back.performClick$();
+      await settleNativeAsync();
+      if (!timeoutCallback) throw new Error("reverse timeout was not scheduled");
+      timeoutCallback();
+      await settleNativeAsync();
+
+      const allow = objectWithTitle(panel, COPY.repair);
+      expect(disposed).toBe(1);
+      expect(api.isDestroyed()).toBe(false);
+      expect(panel.isVisible()).toBe(true);
+      expect(allow?.values.get("enabled")).toBe(true);
+      expect(helperPanels(bridge).some((value) => value.visible && !value.destroyed)).toBe(false);
+      finish();
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
+      finish();
+      api.close();
+    }
+  });
+
+  test("a synchronous forward handoff failure cleans up the helper and stops tracking", async () => {
+    const clock = installPollingClock();
+    const { api, bridge, panel } = await makeHarness({
+      onHandoff: () => { throw new Error("forward handoff failed"); },
+    });
+    try {
+      objectWithTitle(panel, COPY.repair)?.performClick$();
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await settleNativeAsync();
+
+      const poll = clock.timers.find((timer) => timer.delay === 100);
+      if (!poll) throw new Error("native Settings tracking timer is missing");
+      await settleNativeAsync();
+
+      expect(panel.isVisible()).toBe(true);
+      expect(helperPanels(bridge).some((value) => !value.destroyed)).toBe(false);
+      expect(poll.active).toBe(false);
+    } finally {
+      api.close();
+      clock.restore();
     }
   });
 
