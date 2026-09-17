@@ -74,6 +74,13 @@ struct EmbeddedManifest {
     files: BTreeMap<String, String>,
 }
 
+struct EmbeddedSnapshot {
+    manifest: EmbeddedManifest,
+    files: BTreeMap<String, String>,
+    manifest_sha256: String,
+    manifest_bytes: Vec<u8>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CurrentPointer {
@@ -110,11 +117,11 @@ pub fn runtime_version() -> String {
 
 /// Return the validated identity of the Runtime bundled into this binary.
 pub fn runtime_identity() -> Result<RuntimeIdentity, String> {
-    let (manifest, files, manifest_sha256, _) = embedded_snapshot()?;
+    let snapshot = embedded_snapshot()?;
     Ok(RuntimeIdentity {
-        version: manifest.runtime_version,
-        manifest_sha256,
-        files,
+        version: snapshot.manifest.runtime_version,
+        manifest_sha256: snapshot.manifest_sha256,
+        files: snapshot.files,
     })
 }
 
@@ -236,7 +243,12 @@ fn publish_inner<F>(user_root: &Path, mut hook: F) -> Result<PublishedRuntime, S
 where
     F: FnMut(&str),
 {
-    let (manifest, files, manifest_hash, manifest_bytes) = embedded_snapshot()?;
+    let EmbeddedSnapshot {
+        manifest,
+        files,
+        manifest_sha256: manifest_hash,
+        manifest_bytes,
+    } = embedded_snapshot()?;
     let version = manifest.runtime_version.clone();
     validate_path_component(&version, "runtime version")?;
     let release_name = format!("{version}-{manifest_hash}");
@@ -347,8 +359,7 @@ fn embedded_manifest_bytes() -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-fn embedded_snapshot(
-) -> Result<(EmbeddedManifest, BTreeMap<String, String>, String, Vec<u8>), String> {
+fn embedded_snapshot() -> Result<EmbeddedSnapshot, String> {
     let manifest_bytes = embedded_manifest_bytes()?;
     let manifest: EmbeddedManifest = serde_json::from_slice(&manifest_bytes)
         .map_err(|error| format!("invalid embedded runtime manifest: {error}"))?;
@@ -358,7 +369,12 @@ fn embedded_snapshot(
     validate_source_commit(&manifest.source_commit)?;
     let files = runtime_file_hashes(&manifest)?;
     let manifest_hash = sha256_hex(&manifest_bytes);
-    Ok((manifest, files, manifest_hash, manifest_bytes))
+    Ok(EmbeddedSnapshot {
+        manifest,
+        files,
+        manifest_sha256: manifest_hash,
+        manifest_bytes,
+    })
 }
 
 fn runtime_file_hashes(manifest: &EmbeddedManifest) -> Result<BTreeMap<String, String>, String> {
