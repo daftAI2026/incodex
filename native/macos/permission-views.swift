@@ -659,18 +659,7 @@ private struct PermissionHelperForeground<Row: View>: View {
     var showHintArrow: Bool = false
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            PermissionHelperDragHint(state: state, showHintArrow: showHintArrow)
-                // The container supplies the available width. Text and arrow
-                // negotiate it together, including their vertical centering.
-                .frame(width: 531 - 66 - 21, alignment: .leading)
-                .environment(\.layoutDirection, state.layoutDirection)
-                .offset(x: state.positionX(66, width: 444), y: 8.5)
-
-            appRowContent
-                .frame(width: 459, height: 42)
-                .offset(x: state.positionX(62, width: 459), y: 48 + state.extraHeight)
-
+        HStack(alignment: .bottom, spacing: 16) {
             Button { state.send("later:") } label: {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 13, weight: .semibold))
@@ -684,12 +673,24 @@ private struct PermissionHelperForeground<Row: View>: View {
             .help(state.back)
             .accessibilityLabel(state.back)
             .frame(width: 28, height: 28)
-            .offset(x: state.positionX(18, width: 28), y: 55 + state.extraHeight)
+            .padding(.bottom, 27)
+
+            VStack(alignment: .leading, spacing: 7) {
+                PermissionHelperDragHint(state: state, showHintArrow: showHintArrow)
+                    .padding(.leading, 4)
+
+                appRowContent
+                    .frame(height: 42)
+                    .padding(.trailing, 10)
+            }
+            .padding(.bottom, 20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         }
-        .frame(width: 531, height: 110 + state.extraHeight, alignment: .topLeading)
-        // Physical positions above already incorporate direction. Keep this
-        // coordinate container LTR to avoid applying a second implicit mirror.
-        .environment(\.layoutDirection, .leftToRight)
+        .padding(.leading, 18)
+        // Preserve the verified native shell's 110pt height and the product's
+        // long-copy expansion; the reference's inner content frame is 108pt.
+        .frame(width: 531, height: 110 + state.extraHeight)
+        .environment(\.layoutDirection, state.layoutDirection)
     }
 }
 

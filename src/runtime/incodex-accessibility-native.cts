@@ -273,7 +273,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
   function positionArrow(frame) {
     // The original child window is positioned from the helper's bottom-left
     // origin, independently of the fitted helper height.
-    const arrowY = frame.origin.y + HELPER_ARROW_WINDOW_Y + Math.max(0, frame.size.height - HELPER_HEIGHT);
+    const arrowY = frame.origin.y + HELPER_ARROW_WINDOW_Y;
     const arrowX = nativeLayoutDirection === "rightToLeft"
       ? frame.size.width - HELPER_ARROW_WINDOW_X - HELPER_ARROW_WINDOW_SIZE
       : HELPER_ARROW_WINDOW_X;
