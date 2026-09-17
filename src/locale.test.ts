@@ -92,3 +92,78 @@ test("permission setup dismiss action retains the reference Skip meaning in sour
   expect(ACCESSIBILITY_SETUP_COPY["zh-HK"].later).toBe("略過");
   expect(ACCESSIBILITY_SETUP_COPY["zh-TW"].later).toBe("略過");
 });
+
+const AUDITED_REGIONAL_SKIP_COPY: Record<string, string> = {
+  "am": "ዝለል",
+  "ar": "تخطي",
+  "bg-BG": "Пропусни",
+  "bn-BD": "এড়িয়ে যান",
+  "bs-BA": "Preskoči",
+  "ca-ES": "Omet",
+  "cs-CZ": "Přeskočit",
+  "da-DK": "Spring over",
+  "de-DE": "Überspringen",
+  "el-GR": "Παράλειψη",
+  "es-419": "Omitir",
+  "es-ES": "Omitir",
+  "et-EE": "Jäta vahele",
+  "fa": "رد شدن",
+  "fi-FI": "Ohita",
+  "fr-CA": "Ignorer",
+  "fr-FR": "Ignorer",
+  "gu-IN": "છોડી દો",
+  "hi-IN": "छोड़ें",
+  "hr-HR": "Preskoči",
+  "hu-HU": "Kihagyás",
+  "hy-AM": "Բաց թողնել",
+  "id-ID": "Lewati",
+  "is-IS": "Sleppa",
+  "it-IT": "Salta",
+  "ja-JP": "スキップ",
+  "ka-GE": "გამოტოვება",
+  "kk": "Өткізіп жіберу",
+  "kn-IN": "ಬಿಟ್ಟುಬಿಡಿ",
+  "ko-KR": "건너뛰기",
+  "lt": "Praleisti",
+  "lv-LV": "Izlaist",
+  "mk-MK": "Прескокни",
+  "ml": "ഒഴിവാക്കുക",
+  "mn": "Алгасах",
+  "mr-IN": "वगळा",
+  "ms-MY": "Langkau",
+  "my-MM": "ကျော်ရန်",
+  "nb-NO": "Hopp over",
+  "nl-NL": "Overslaan",
+  "pa": "ਛੱਡੋ",
+  "pl-PL": "Pomiń",
+  "pt-BR": "Pular",
+  "pt-PT": "Ignorar",
+  "ro-RO": "Omiteți",
+  "ru-RU": "Пропустить",
+  "sk-SK": "Preskočiť",
+  "sl-SI": "Preskoči",
+  "so-SO": "Ka bood",
+  "sq-AL": "Anashkalo",
+  "sr-RS": "Прескочи",
+  "sv-SE": "Hoppa över",
+  "sw-TZ": "Ruka",
+  "ta-IN": "தவிர்",
+  "te-IN": "దాటవేయి",
+  "th-TH": "ข้าม",
+  "tl": "Laktawan",
+  "tr-TR": "Atla",
+  "uk-UA": "Пропустити",
+  "ur": "چھوڑیں",
+  "vi-VN": "Bỏ qua",
+};
+
+test("regional permission dismiss labels retain audited Skip semantics", () => {
+  const guide = ACCESSIBILITY_SETUP_COPY as Record<string, Record<string, string>>;
+  const regionalLocales = Object.keys(guide).filter(
+    (locale) => !["en", "zh-CN", "zh-HK", "zh-TW"].includes(locale),
+  );
+  expect(regionalLocales.sort()).toEqual(Object.keys(AUDITED_REGIONAL_SKIP_COPY).sort());
+  for (const [locale, expected] of Object.entries(AUDITED_REGIONAL_SKIP_COPY)) {
+    expect(guide[locale]?.later).toBe(expected);
+  }
+});
