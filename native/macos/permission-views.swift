@@ -467,6 +467,15 @@ public final class IncodexPermissionInitialView: NSView {
     }
 }
 
+// Original DraggableApplicationView sizes its NSImage to 32pt before the
+// ApplicationRowView uses Image(nsImage:). Copy to avoid resizing the shared
+// initial-window icon through the bridge.
+func permissionHelperAppIcon(_ image: NSImage?) -> NSImage? {
+    guard let copy = image?.copy() as? NSImage else { return nil }
+    copy.size = NSSize(width: 32, height: 32)
+    return copy
+}
+
 @MainActor
 private final class PermissionHelperState: ObservableObject {
     @Published var instruction = ""
@@ -495,7 +504,7 @@ private final class PermissionHelperState: ObservableObject {
             instruction, runsJSON: permissionCopyString(copy, "dragInstructionRuns")
         )
         back = permissionCopyString(copy, "back")
-        self.appIcon = appIcon
+        self.appIcon = permissionHelperAppIcon(appIcon)
         self.actionTarget = actionTarget
     }
 
@@ -510,22 +519,17 @@ private struct PermissionHelperAppRowRoot: View {
     @ObservedObject var state: PermissionHelperState
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        HStack(alignment: .center, spacing: 4) {
             if let image = state.appIcon {
                 Image(nsImage: image)
-                    .interpolation(.high)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 32, height: 32)
-                    .offset(x: 5, y: 5)
             } else {
-                Color.clear.frame(width: 32, height: 32).offset(x: 5, y: 5)
+                Color.clear.frame(width: 32, height: 32)
             }
             Text("ChatGPT")
-                .font(.system(size: 13))
-                .offset(x: 41, y: 13)
+                .foregroundStyle(.primary)
         }
-        .frame(width: 459, height: 42, alignment: .topLeading)
+        .frame(width: 449, height: 32, alignment: .leading)
+        .padding(5)
     }
 }
 
