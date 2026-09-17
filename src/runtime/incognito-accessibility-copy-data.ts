@@ -39,21 +39,21 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
   },
   "bg-BG": {
     "title": "Разрешете управлението на скриптове за ChatGPT",
-    "body": "Инсталирането на Incodex променя ChatGPT, затова разрешението за достъпност трябва да бъде дадено отново.",
-    "permissionTitle": "Достъпност",
+    "body": "Инсталирането на Incodex променя ChatGPT, затова разрешението за улеснен достъп трябва да бъде дадено отново.",
+    "permissionTitle": "Улеснен достъп",
     "permissionDescription": "Четене и взаимодействие с интерфейсите на приложенията",
     "repair": "Разреши",
     "later": "Пропусни",
     "back": "Назад",
     "addedTitle": "Разрешете ChatGPT в Системни настройки",
-    "addedBody": "Плъзнете иконата на ChatGPT по-горе в списъка за достъпност и я разрешете. Завършете всяко удостоверяване на macOS. Достъпът се проверява автоматично; този прозорец се затваря, когато достъпът е готов.",
-    "dragInstruction": "Плъзнете ChatGPT в списъка по-горе, за да разрешите достъпност",
+    "addedBody": "Плъзнете иконата на ChatGPT по-горе в списъка за улеснен достъп и я разрешете. Завършете всяко удостоверяване на macOS. Достъпът се проверява автоматично; този прозорец се затваря, когато достъпът е готов.",
+    "dragInstruction": "Плъзнете ChatGPT в списъка по-горе, за да разрешите Улеснен достъп",
     "completeInSettings": "Завършете в Системни настройки",
     "checking": "Изчакване на достъпа · автоматична проверка",
     "repairing": "Подготовка на Системни настройки…",
     "openSettings": "Отвори настройките",
     "errorTitle": "Настройването на разрешенията за ChatGPT не е завършено",
-    "errorBody": "Настройването на разрешенията не можа да бъде завършено. Добавете /Applications/ChatGPT.app в Системни настройки → Поверителност и сигурност → Достъпност, след което изпълнете incodex install, за да проверите отново."
+    "errorBody": "Настройването на разрешенията не можа да бъде завършено. Добавете /Applications/ChatGPT.app в Системни настройки → Поверителност и сигурност → Улеснен достъп, след което изпълнете incodex install, за да проверите отново."
   },
   "bn-BD": {
     "title": "ChatGPT স্ক্রিপ্ট নিয়ন্ত্রণ চালু করুন",
@@ -99,15 +99,15 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repair": "Permet",
     "later": "Omet",
     "back": "Enrere",
-    "addedTitle": "Permet ChatGPT als Paràmetres del sistema",
+    "addedTitle": "Permet ChatGPT a la Configuració del sistema",
     "addedBody": "Arrossega la icona de ChatGPT de dalt a la llista d’accessibilitat i activa-la. Completa qualsevol autenticació del macOS. L’accés es comprova automàticament; aquesta finestra es tanca quan l’accés està disponible.",
     "dragInstruction": "Arrossega ChatGPT a la llista de dalt per permetre l’accessibilitat",
-    "completeInSettings": "Completa-ho als Paràmetres del sistema",
+    "completeInSettings": "Completa-ho a la Configuració del sistema",
     "checking": "Esperant l’accés · comprovació automàtica",
-    "repairing": "Preparant els Paràmetres del sistema…",
-    "openSettings": "Obre els paràmetres",
+    "repairing": "Preparant la Configuració del sistema…",
+    "openSettings": "Obre la configuració",
     "errorTitle": "La configuració dels permisos de ChatGPT no s’ha completat",
-    "errorBody": "No s’ha pogut completar la configuració dels permisos. Afegeix /Applications/ChatGPT.app a Paràmetres del sistema → Privacitat i seguretat → Accessibilitat i, després, executa incodex install per tornar-ho a comprovar."
+    "errorBody": "No s’ha pogut completar la configuració dels permisos. Afegeix /Applications/ChatGPT.app a Configuració del sistema → Privacitat i seguretat → Accessibilitat i, després, executa incodex install per tornar-ho a comprovar."
   },
   "cs-CZ": {
     "title": "Povolit ovládání skriptů ChatGPT",
@@ -207,15 +207,15 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repair": "Permitir",
     "later": "Omitir",
     "back": "Atrás",
-    "addedTitle": "Permitir ChatGPT en Configuración del Sistema",
+    "addedTitle": "Permitir ChatGPT en Ajustes del Sistema",
     "addedBody": "Arrastra el icono de ChatGPT de arriba a la lista de Accesibilidad y actívalo. Completa cualquier autenticación de macOS. El acceso se comprueba automáticamente; esta ventana se cierra cuando el acceso está listo.",
     "dragInstruction": "Arrastra ChatGPT a la lista de arriba para permitir la Accesibilidad",
-    "completeInSettings": "Completar en Configuración del Sistema",
+    "completeInSettings": "Completar en Ajustes del Sistema",
     "checking": "Esperando acceso · comprobando automáticamente",
-    "repairing": "Preparando Configuración del Sistema…",
-    "openSettings": "Abrir configuración",
+    "repairing": "Preparando Ajustes del Sistema…",
+    "openSettings": "Abrir ajustes",
     "errorTitle": "La configuración de permisos de ChatGPT está incompleta",
-    "errorBody": "No se pudo completar la configuración de permisos. Añade /Applications/ChatGPT.app en Configuración del Sistema → Privacidad y seguridad → Accesibilidad y luego ejecuta incodex install para volver a comprobarlo."
+    "errorBody": "No se pudo completar la configuración de permisos. Añade /Applications/ChatGPT.app en Ajustes del Sistema → Privacidad y seguridad → Accesibilidad y luego ejecuta incodex install para volver a comprobarlo."
   },
   "et-EE": {
     "title": "Luba ChatGPT skriptijuhtimine",
@@ -809,7 +809,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
     "repairing": "Se pregătesc configurările sistemului…",
     "openSettings": "Deschideți configurările",
     "errorTitle": "Configurarea permisiunii ChatGPT nu este finalizată",
-    "errorBody": "Configurarea permisiunii nu a putut fi finalizată. Adăugați /Applications/ChatGPT.app în Configurări sistem → Confidențialitate și securitate → Accesibilitate, apoi rulați incodex install pentru a verifica din nou."
+    "errorBody": "Configurarea permisiunii nu a putut fi finalizată. Adăugați /Applications/ChatGPT.app în Configurări sistem → Intimitate și securitate → Accesibilitate, apoi rulați incodex install pentru a verifica din nou."
   },
   "ru-RU": {
     "title": "Включить управление скриптами ChatGPT",
