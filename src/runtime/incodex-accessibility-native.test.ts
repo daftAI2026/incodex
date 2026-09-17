@@ -296,6 +296,10 @@ class FakeNative {
     this.values.set("level", value);
   }
 
+  setCollectionBehavior$(value: unknown): void {
+    this.values.set("collectionBehavior", value);
+  }
+
   setOpaque$(value: unknown): void {
     this.values.set("opaque", value);
   }
@@ -1101,6 +1105,7 @@ test("uses the original ordinary helper panel shell without adding safe-area hei
     expect(helper.values.get("toolbarStyle")).toBe(3);
     expect(helper.values.get("movableByWindowBackground")).toBe(false);
     expect(helper.values.get("movable")).toBe(false);
+    expect(helper.values.get("collectionBehavior")).toBe(0x24a);
 
     const background = helper.values.get("backgroundColor");
     expect(background).toBeInstanceOf(FakeNative);
