@@ -3,7 +3,7 @@
 // Copyright (c) 2026 daftAI. See LICENSE. Permission decisions stay in the host controller.
 const { createPermissionGraphics } = require("./incodex-permission-graphics.cts");
 const { createPermissionCardBackground } = require("./incodex-permission-card.cts");
-const { createPermissionPlaceholderBackground } = require("./incodex-permission-placeholder.cts");
+const { createPermissionPlaceholderBackground, updatePermissionPlaceholderState } = require("./incodex-permission-placeholder.cts");
 let generation = 0;
 const APP_PATH = "/Applications/ChatGPT.app";
 const rect = (x, y, width, height) => ({ origin: { x, y }, size: { width, height } });
@@ -149,9 +149,21 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   card.setClipsToBounds$(false); card.setWantsLayer$(true); card.layer().setMasksToBounds$(false);
   card.addSubview$(createPermissionCardBackground({ View, Material, kit, graphics, str, size: { width: 518, height: 80 }, dark }));
   contentGroup.addSubview$(card);
-  const placeholder = View.alloc().initWithFrame$(card.frame());
+  let placeholderHovered = false;
+  const placeholderLayer = createPermissionPlaceholderBackground({ quartz, foundation, kit, graphics, size: { width: 518, height: 80 } });
+  function updatePlaceholderHover(hovered) {
+    placeholderHovered = hovered && !closed && state === "awaiting-user" && !returning;
+    updatePermissionPlaceholderState({ layer: placeholderLayer, kit, graphics, hovered: placeholderHovered });
+  }
+  const Placeholder = define("Placeholder", "NSView", { ...flipped,
+    "mouseEntered:": { types: "v@:@", implementation: () => updatePlaceholderHover(true) },
+    "mouseExited:": { types: "v@:@", implementation: () => updatePlaceholderHover(false) },
+  });
+  const placeholder = Placeholder.alloc().initWithFrame$(card.frame());
   placeholder.setWantsLayer$(true);
-  placeholder.layer().addSublayer$(createPermissionPlaceholderBackground({ quartz, foundation, kit, graphics, size: { width: 518, height: 80 }, dark }));
+  placeholder.layer().addSublayer$(placeholderLayer);
+  const placeholderTracking = kit.NSTrackingArea.alloc().initWithRect$options$owner$userInfo$(placeholder.bounds(), 1 | 128 | 512, placeholder, null);
+  placeholder.addTrackingArea$(placeholderTracking);
   const placeholderTitle = label(text("completeInSettings"), rect(12, 32, 494, 16), 12, false, true, true, true);
   placeholderTitle.setFont$(kit.NSFont.systemFontOfSize$weight$(12, .23));
   const placeholderText = placeholderTitle.attributedStringValue().mutableCopy();
@@ -161,6 +173,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   placeholder.addSubview$(placeholderTitle); placeholder.setHidden$(true);
   contentGroup.addSubview$(placeholder);
   function showSettingsPlaceholder(show) {
+    updatePlaceholderHover(false);
     card.setHidden$(show); placeholder.setHidden$(!show); skip.setHidden$(show);
   }
 
