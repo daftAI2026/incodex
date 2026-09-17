@@ -370,7 +370,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   function createHelper(frame) {
     const panel = kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(frame,128,2,false); configurePanel(panel,true);
     panel.setOpaque$(false); panel.setBackgroundColor$(kit.NSColor.clearColor()); panel.setHasShadow$(false); panel.setIgnoresMouseEvents$(false);
-    const instruction = label(text("dragInstruction") || text("addedBody"),rect(0,0,480,18),13,false); instruction.setFont$(kit.NSFont.systemFontOfSize$weight$(13, .23)); instruction.sizeToFit();
+    const instruction = label(text("dragInstruction") || text("addedBody"),rect(0,0,480,18),13,false); instruction.sizeToFit();
     const referenceInstructionWidth = HELPER_ROW_WIDTH - HELPER_INSTRUCTION_LEADING - HELPER_ARROW_GRAPHIC_SIZE - HELPER_ARROW_TEXT_GAP - HELPER_INSTRUCTION_TRAILING;
     let instructionWidth = Number(instruction.frame().size.width);
     try {
