@@ -914,7 +914,7 @@ function canPresentAccessibilitySetup(electron) {
     if (!ipcGuard.urlAllowed(url, trustedOrigins)) return false;
     // The general window classifier deliberately keeps login windows alive;
     // permission presentation needs the narrower actual application surface.
-    return !/\/(?:auth|login|signin|oauth|authorize|sso)(?:\/|$)/i.test(new URL(url).pathname);
+    return !\/(?:auth|auth0|login|signin|oauth|authorize|okta|sso)(?:\/|$)/i.test(new URL(url).pathname);
   } catch {
     return false;
   }
