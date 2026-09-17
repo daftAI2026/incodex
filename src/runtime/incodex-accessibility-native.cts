@@ -397,7 +397,9 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
         positionArrow(fittedFrame);
         helper=created;
         if (target && source) {
-          helper.flightTarget = { panel: helper.panel, view: helper.view, radius: 12,
+          // Original TransitionCapture.cornerRadius is 14; this is separate
+          // from the ordinary helper window's material/clip styling.
+          helper.flightTarget = { panel: helper.panel, view: helper.view, radius: 14,
             captureImage: () => created.view.snapshotImageWithScale$(Number(created.panel.backingScaleFactor())),
             frame: helper.panel.convertRectToScreen$(helper.view.bounds()) };
           if (onHandoff) {
