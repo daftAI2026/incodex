@@ -118,7 +118,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   const delegate = Delegate.alloc().init();
   function configurePanel(panel, floating) {
     panels.push(panel); panel.setReleasedWhenClosed$(false); panel.setHidesOnDeactivate$(false);
-    panel.setDelegate$(delegate); if (floating) panel.setLevel$(3);
+    panel.setDelegate$(delegate); panel.setLevel$(floating ? 3 : 0);
   }
   function button(title, frame, action) {
     const control = kit.NSButton.buttonWithTitle$target$action$(str(title), delegate, selector(action));
@@ -134,7 +134,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   const INITIAL_SKIP_TRAILING = 57;
   const INITIAL_SKIP_BOTTOM = 12.5;
   const initial = kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(rect(0, 0, INITIAL_WIDTH, INITIAL_MIN_HEIGHT), 1 | 2 | 32768, 2, false);
-  configurePanel(initial, true); initial.setTitle$(str("")); initial.setTitlebarAppearsTransparent$(true); initial.setTitleVisibility$(1);
+  configurePanel(initial, false); initial.setTitle$(str("")); initial.setTitlebarAppearsTransparent$(true); initial.setTitleVisibility$(1);
   const initialView = View.alloc().initWithFrame$(rect(0, 0, INITIAL_WIDTH, INITIAL_MIN_HEIGHT));
   const background = Material.alloc().initWithFrame$(rect(0, 0, INITIAL_WIDTH, INITIAL_MIN_HEIGHT));
   background.setMaterial$(6); background.setBlendingMode$(1); background.setState$(1);
