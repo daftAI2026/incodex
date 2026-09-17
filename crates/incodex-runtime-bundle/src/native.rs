@@ -16,6 +16,12 @@ const MANIFEST_BYTES: &[u8] = include_bytes!(concat!(
     "/../../native/macos/dist/runtime-native-manifest.json"
 ));
 
+#[cfg(target_os = "macos")]
+const SOURCE_BYTES: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../native/macos/permission-views.swift"
+));
+
 pub(crate) fn files() -> &'static [(&'static str, &'static [u8])] {
     #[cfg(target_os = "macos")]
     {
@@ -35,6 +41,19 @@ pub(crate) fn validate() -> Result<(), String> {
 
     #[cfg(target_os = "macos")]
     {
+        validate_with_source_bytes(SOURCE_BYTES)
+    }
+}
+
+pub(crate) fn validate_with_source_bytes(source: &[u8]) -> Result<(), String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = source;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
         if !is_macho(DYLIB_BYTES) {
             return Err("embedded macOS native helper is not a Mach-O binary".into());
         }
@@ -48,10 +67,13 @@ pub(crate) fn validate() -> Result<(), String> {
         {
             return Err("embedded native manifest metadata is invalid".into());
         }
-        manifest["sourceSha256"]
+        let expected_source = manifest["sourceSha256"]
             .as_str()
             .filter(|value| is_sha256(value))
             .ok_or("embedded native manifest sourceSha256 is invalid")?;
+        if expected_source != sha256_hex(source) {
+            return Err("embedded native manifest source hash mismatch".into());
+        }
         let files = manifest["files"]
             .as_object()
             .ok_or("embedded native manifest files are missing")?;
