@@ -118,10 +118,10 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   // CUA PermissionView: 600pt width, 28/32pt vertical padding, 64pt icon,
   // 20pt icon-to-title gap, 26pt bold title, 41pt horizontal row inset.
   // A single 80pt Accessibility row replaces the reference's permission list.
-  // The reference keeps a 600x540 guide allocation even when fewer rows are
-  // shown; localized body text may grow beyond that minimum.
+  // Fit the requested rows and localized body. The reference has three rows;
+  // its 540pt measured height is not a minimum for our single permission.
   const INITIAL_WIDTH = 600;
-  const INITIAL_MIN_HEIGHT = 540;
+  const INITIAL_MIN_HEIGHT = 312;
   const INITIAL_SKIP_TRAILING = 57;
   const INITIAL_SKIP_BOTTOM = 12.5;
   const initial = kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(rect(0, 0, INITIAL_WIDTH, INITIAL_MIN_HEIGHT), 1 | 2 | 32768, 2, false);
@@ -188,7 +188,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     const bodyHeight = Math.ceil(measured);
     const bodyY = 112 + titleHeight + 3;
     const cardY = bodyY + bodyHeight + 21;
-    const contentHeight = Math.max(INITIAL_MIN_HEIGHT, safeTop + cardY + 80 + 32);
+    const contentHeight = safeTop + cardY + 80 + 32;
     title.setFrame$(rect(20, 112 - 11, 560, titleHeight));
     body.setFrame$(rect(41, bodyY, 518, bodyHeight));
     card.setFrame$(rect(41, cardY, 518, 80));
