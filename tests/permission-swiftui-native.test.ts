@@ -6,6 +6,26 @@ import { join } from "node:path";
 
 const layoutSmokeSource = join(import.meta.dir, "native", "permission-views-layout-smoke.m");
 
+test.skipIf(process.platform !== "darwin")("compiles the real placeholder hover reset smoke (runtime is opt-in)", () => {
+  const directory = mkdtempSync(join(tmpdir(), "incodex-placeholder-hover-"));
+  try {
+    const executable = join(directory, "placeholder-hover");
+    const build = spawnSync("xcrun", [
+      "swiftc", "-parse-as-library", "-module-name", "IncodexPlaceholderHoverTest",
+      "native/macos/permission-views.swift", "tests/native/permission-placeholder-hover-smoke.swift",
+      "-o", executable,
+    ], { cwd: join(import.meta.dir, ".."), encoding: "utf8", timeout: 60_000 });
+    expect(build.status, build.stderr || String(build.error ?? "hover smoke compilation failed")).toBe(0);
+    if (build.status !== 0 || process.env.INCODEX_RUN_NATIVE_LAYOUT_SMOKE !== "1") return;
+    const run = spawnSync(executable, [], { encoding: "utf8", timeout: 20_000 });
+    const output = `${run.stdout ?? ""}${run.stderr ?? ""}`;
+    expect(run.status, output || String(run.error ?? "hover reset smoke failed")).toBe(0);
+    expect(output).toContain("placeholder hover reset smoke passed");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}, 90_000);
+
 function permissionCardSource(): string {
   const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
   const start = source.indexOf("private struct PermissionCardRoot");
