@@ -804,5 +804,10 @@ public final class IncodexPermissionHelperView: NSView {
     public func configure(copy: NSDictionary, appIcon: NSImage?, actionTarget: NSObject?) {
         precondition(Thread.isMainThread, "Permission configuration must run on the main thread")
         state.configure(copy: copy, appIcon: appIcon, actionTarget: actionTarget)
+        // Configuration and measurement are one synchronous bridge handoff.
+        // Flush the published state without replacing the embedded row host.
+        host.rootView = PermissionHelperRoot(state: state, appRowBox: appRowBox)
+        host.needsLayout = true
+        host.layoutSubtreeIfNeeded()
     }
 }
