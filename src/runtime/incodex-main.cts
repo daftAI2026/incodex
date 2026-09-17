@@ -358,6 +358,7 @@ function createAccessibilitySetupController(options = {}) {
   const copy = options.copy;
   const now = typeof options.now === "function" ? options.now : () => Date.now();
   let flight = null;
+  let presentationWake = false;
   let panel = null;
   let pollTimer = null;
   let resetRunning = false;
@@ -712,9 +713,19 @@ function createAccessibilitySetupController(options = {}) {
   }
 
   function run() {
-    if (flight) return flight;
+    if (flight) {
+      presentationWake = true;
+      return flight;
+    }
     flight = Promise.resolve()
-      .then(processRequest)
+      .then(async () => {
+        let result;
+        do {
+          presentationWake = false;
+          result = await processRequest();
+        } while (presentationWake && result.reason === "presentation-unavailable");
+        return result;
+      })
       .catch((error) => {
         try {
           logLaunch("accessibility-setup-failed", { error: String(error) });
@@ -898,7 +909,12 @@ function canPresentAccessibilitySetup(electron) {
     if (!win || win.isDestroyed() || !win.isVisible() || win.isMinimized() || !win.isFocused()) return false;
     if (win.getParentWindow?.() || isAuxiliaryWindow(win)) return false;
     const contents = win.webContents;
-    return Boolean(contents && !contents.isDestroyed() && ipcGuard.urlAllowed(contents.getURL(), trustedOrigins));
+    if (!contents || contents.isDestroyed()) return false;
+    const url = contents.getURL();
+    if (!ipcGuard.urlAllowed(url, trustedOrigins)) return false;
+    // The general window classifier deliberately keeps login windows alive;
+    // permission presentation needs the narrower actual application surface.
+    return !/\/(?:auth|login|signin|oauth|authorize|sso)(?:\/|$)/i.test(new URL(url).pathname);
   } catch {
     return false;
   }
