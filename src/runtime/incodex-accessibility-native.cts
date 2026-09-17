@@ -411,7 +411,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
       attempts = 0;
       const frame=helperFrame(target);
       if (!helper) {
-        helper=createHelper(frame); initial.orderOut$(null);
+        helper=createHelper(frame);
         if (target && source) {
           helper.targetRow = { panel: helper.panel, view: helper.row, radius: 8,
             frame: helper.panel.convertRectToScreen$(helper.row.convertRect$toView$(helper.row.bounds(), null)) };
