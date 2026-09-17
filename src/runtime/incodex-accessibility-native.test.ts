@@ -712,6 +712,7 @@ function makeBridge(
       get NSWorkspace() { return library(this.framework).NSWorkspace; }
       get NSPasteboardItem() { return library(this.framework).NSPasteboardItem; }
       get NSDraggingItem() { return library(this.framework).NSDraggingItem; }
+      get NSNumber() { return library(this.framework).NSNumber; }
       get NSArray() { return library(this.framework).NSArray; }
       get NSURL() { return library(this.framework).NSURL; }
       get NSString() { return library(this.framework).NSString; }

@@ -148,6 +148,19 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   card.setClipsToBounds$(false); card.setWantsLayer$(true); card.layer().setMasksToBounds$(false);
   card.addSubview$(createPermissionCardBackground({ View, Material, kit, graphics, str, size: { width: 518, height: 80 }, dark }));
   contentGroup.addSubview$(card);
+  const placeholder = View.alloc().initWithFrame$(card.frame());
+  const placeholderTitle = label(text("completeInSettings"), rect(12, 32, 494, 16), 12, false, true, true, true);
+  placeholderTitle.setFont$(kit.NSFont.systemFontOfSize$weight$(12, .23));
+  const placeholderText = placeholderTitle.attributedStringValue().mutableCopy();
+  placeholderText.addAttribute$value$range$(str("NSKern"), foundation.NSNumber.numberWithDouble$(.7),
+    { location: 0, length: Number(placeholderText.length()) });
+  placeholderTitle.setAttributedStringValue$(placeholderText);
+  placeholder.addSubview$(placeholderTitle); placeholder.setHidden$(true);
+  contentGroup.addSubview$(placeholder);
+  function showSettingsPlaceholder(show) {
+    card.setHidden$(show); placeholder.setHidden$(!show); skip.setHidden$(show);
+  }
+
   card.addSubview$(imageView(permissionIcon, rect(8, 8, 64, 64)));
   const permissionTitle = label(text("permissionTitle"), rect(82.5, 20.5, 330, 20), 16, false, false, false, true);
   permissionTitle.setFont$(kit.NSFont.systemFontOfSize$weight$(16, .3));
@@ -192,6 +205,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     title.setFrame$(rect(20, 112 - 11, 560, titleHeight));
     body.setFrame$(rect(41, bodyY, 518, bodyHeight));
     card.setFrame$(rect(41, cardY, 518, 80));
+    placeholder.setFrame$(card.frame());
     initialView.setFrame$(rect(0, 0, INITIAL_WIDTH, contentHeight));
     background.setFrame$(rect(0, 0, INITIAL_WIDTH, contentHeight));
     contentGroup.setFrame$(rect(0, safeTop - 9, INITIAL_WIDTH, contentHeight - safeTop));
@@ -402,7 +416,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   function restoreInitialPage(enableRetry) {
     if (closed) return;
     clearInterval(tracking); tracking = null; stopArrow(); stopBackFlightTimer();
-    disposeHelper(); returning = false; state = "pending"; retryReady = Boolean(enableRetry);
+    disposeHelper(); showSettingsPlaceholder(false); returning = false; state = "pending"; retryReady = Boolean(enableRetry);
     title.setStringValue$(str(text("title"))); body.setStringValue$(str(text("body")));
     allow.setEnabled$(Boolean(enableRetry)); fitInitialBody();
     electron?.app?.focus?.({steal:true}); initial.makeKeyAndOrderFront$(null);
@@ -419,7 +433,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   }
   function handleBack() {
     if (closed || returning || dragging || state !== "awaiting-user" || !helper) return;
-    returning = true; retryReady = false; const token = ++returnSequence;
+    returning = true; showSettingsPlaceholder(false); retryReady = false; const token = ++returnSequence;
     clearInterval(tracking); tracking = null; stopArrow();
     title.setStringValue$(str(text("title"))); body.setStringValue$(str(text("body"))); allow.setEnabled$(true); fitInitialBody(); initial.orderFront$(null);
     if (reducedMotion() || !onBack || !helper.targetRow) { fallbackToInitial(); return; }
@@ -492,10 +506,10 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     state=next;
     if (next==="granted") { close(); return; }
     if (next==="repairing") { allow.setEnabled$(false); body.setStringValue$(str(text("repairing"))); }
-    if (next==="awaiting-user") { allow.setEnabled$(false); body.setStringValue$(str(text("checking"))); if (!tracking) tracking=setInterval(()=>void place(),100); void place(); }
+    if (next==="awaiting-user") { allow.setEnabled$(false); body.setStringValue$(str(text("body"))); showSettingsPlaceholder(true); if (!tracking) tracking=setInterval(()=>void place(),100); void place(); }
     if (next==="error" || next==="unknown") {
       clearInterval(tracking);tracking=null;stopArrow();flight?.dispose();flight=null;
-      disposeHelper(); title.setStringValue$(str(text("errorTitle")));body.setStringValue$(str(text("errorBody")));fitInitialBody();initial.orderFront$(null);
+      disposeHelper(); showSettingsPlaceholder(false); title.setStringValue$(str(text("errorTitle")));body.setStringValue$(str(text("errorBody")));fitInitialBody();initial.orderFront$(null);
     }
   }
   fitInitialBody(); initial.center(); electron?.app?.focus?.({steal:true}); initial.makeKeyAndOrderFront$(null);
