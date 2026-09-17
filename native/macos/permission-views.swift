@@ -168,6 +168,7 @@ private final class PermissionInitialState: ObservableObject {
     @Published var allowEnabled = true
     @Published var settingsPlaceholder = false
     @Published var placeholderHovered = false
+    @Published var layoutDirection: LayoutDirection = .leftToRight
     weak var actionTarget: NSObject?
 
     func configure(
@@ -186,6 +187,7 @@ private final class PermissionInitialState: ObservableObject {
         self.appIcon = appIcon
         self.permissionIcon = permissionIcon
         self.actionTarget = actionTarget
+        layoutDirection = permissionCopyString(copy, "layoutDirection") == "rightToLeft" ? .rightToLeft : .leftToRight
         allowEnabled = true
         settingsPlaceholder = false
         placeholderHovered = false
@@ -267,7 +269,7 @@ private struct PermissionCardRoot: View {
                 .font(.system(size: 13))
                 .clipShape(Capsule(style: .continuous))
                 .frame(minWidth: 62)
-                .offset(x: 4)
+                .offset(x: state.layoutDirection == .rightToLeft ? -4 : 4)
                 .disabled(!state.allowEnabled)
         }
         .padding(.trailing, 20)
@@ -285,6 +287,7 @@ private struct PermissionCardRoot: View {
         }
         .shadow(color: .black.opacity(0.09), radius: 25, x: 0, y: 5)
         .shadow(color: .black.opacity(0.2), radius: 3, x: 0, y: 0)
+        .environment(\.layoutDirection, state.layoutDirection)
     }
 }
 
@@ -401,6 +404,7 @@ private struct PermissionInitialRoot: View {
         }
         .frame(minWidth: 600, idealWidth: 600, maxWidth: 600, minHeight: 312, alignment: .top)
         .background(.regularMaterial)
+        .environment(\.layoutDirection, state.layoutDirection)
     }
 }
 
@@ -480,6 +484,7 @@ func permissionHelperAppIcon(_ image: NSImage?) -> NSImage? {
 private final class PermissionHelperState: ObservableObject {
     @Published var instruction = ""
     @Published var styledInstruction = AttributedString()
+    @Published var layoutDirection: LayoutDirection = .leftToRight
     @Published var back = ""
     @Published var appIcon: NSImage?
     weak var actionTarget: NSObject?
@@ -496,6 +501,13 @@ private final class PermissionHelperState: ObservableObject {
 
     var extraHeight: CGFloat { max(0, instructionHeight - 16) }
 
+    // AppKit overlays use physical coordinates, whereas the hosted SwiftUI
+    // content uses semantic leading/trailing. Mirror the fixed guide anchors
+    // explicitly so the drag overlay and rendered/snapshot row stay together.
+    func positionX(_ left: CGFloat, width: CGFloat) -> CGFloat {
+        layoutDirection == .rightToLeft ? 531 - left - width : left
+    }
+
     func configure(copy: NSDictionary, appIcon: NSImage?, actionTarget: NSObject?) {
         instruction = permissionCopyString(copy, "dragInstruction")
         if instruction.isEmpty { instruction = permissionCopyString(copy, "addedBody") }
@@ -504,6 +516,7 @@ private final class PermissionHelperState: ObservableObject {
             instruction, runsJSON: permissionCopyString(copy, "dragInstructionRuns")
         )
         back = permissionCopyString(copy, "back")
+        layoutDirection = permissionCopyString(copy, "layoutDirection") == "rightToLeft" ? .rightToLeft : .leftToRight
         self.appIcon = permissionHelperAppIcon(appIcon)
         self.actionTarget = actionTarget
     }
@@ -529,6 +542,7 @@ private struct PermissionHelperAppRowRoot: View {
                 .foregroundStyle(.primary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .environment(\.layoutDirection, state.layoutDirection)
     }
 }
 
@@ -596,16 +610,18 @@ private struct PermissionHelperForeground<Row: View>: View {
                 .font(.body)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(width: 408, alignment: .leading)
-                .offset(x: 102, y: 17)
+                .environment(\.layoutDirection, state.layoutDirection)
+                .offset(x: state.positionX(102, width: 408), y: 17)
 
             appRowContent
                 .frame(width: 459, height: 42)
-                .offset(x: 62, y: 48 + state.extraHeight)
+                .offset(x: state.positionX(62, width: 459), y: 48 + state.extraHeight)
 
             Button { state.send("later:") } label: {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.primary)
+                    .scaleEffect(x: state.layoutDirection == .rightToLeft ? -1 : 1, y: 1)
                     .frame(width: 28, height: 28)
                     .background(permissionBackFill, in: Circle())
                     .contentShape(Circle())
@@ -614,9 +630,12 @@ private struct PermissionHelperForeground<Row: View>: View {
             .help(state.back)
             .accessibilityLabel(state.back)
             .frame(width: 28, height: 28)
-            .offset(x: 18, y: 55 + state.extraHeight)
+            .offset(x: state.positionX(18, width: 28), y: 55 + state.extraHeight)
         }
         .frame(width: 531, height: 110 + state.extraHeight, alignment: .topLeading)
+        // Physical positions above already incorporate direction. Keep this
+        // coordinate container LTR to avoid applying a second implicit mirror.
+        .environment(\.layoutDirection, .leftToRight)
     }
 }
 
@@ -649,7 +668,7 @@ public final class IncodexPermissionHelperView: NSView {
     @objc public var appRowView: NSView { appRowHost }
 
     @objc public var appRowFrame: NSRect {
-        NSRect(x: 62, y: 48 + state.extraHeight, width: 459, height: 42)
+        NSRect(x: state.positionX(62, width: 459), y: 48 + state.extraHeight, width: 459, height: 42)
     }
 
     @objc public var preferredContentSize: NSSize {

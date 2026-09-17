@@ -340,6 +340,12 @@ function resolveAccessibilityCopy(locale = "en") {
   return selected && typeof selected === "object" ? { ...selected } : null;
 }
 
+function resolveAccessibilityLayoutDirection(locale = "en") {
+  const source = ACCESSIBILITY_COPY && typeof ACCESSIBILITY_COPY === "object" ? ACCESSIBILITY_COPY : null;
+  if (!source) return "leftToRight";
+  return ACCESSIBILITY_LOCALE.resolveLocaleDirection(String(locale || ""), source);
+}
+
 function createAccessibilitySetupController(options = {}) {
   const fileSystem = options.fs || fs;
   const shell = options.shell || null;
@@ -1390,24 +1396,28 @@ async function attachElectron() {
       accessibilitySetupController = createAccessibilitySetupController({
         app: electron.app,
         shell: electron.shell,
-        createSetupWindow: () => accessibilityWindow.createNativeAccessibilitySetupWindow({
-          electron,
-          copy: resolveAccessibilityCopy(readLocaleOverride() || electron.app.getLocale?.() || "en"),
-          appPath: identity.appPath,
-          loadObjcModule: () => dockMenu.loadObjcModule(electron.app.getAppPath()),
-          onHandoff: payload => accessibilityWindow.runNativePermissionHandoff({
-            ...payload,
-            onError: error => logLaunch("accessibility-handoff-error", { error: String(error) }),
-          }),
-          onBack: payload => accessibilityWindow.runNativePermissionHandoff({
-            ...payload,
-            onError: error => logLaunch("accessibility-return-error", { error: String(error) }),
-          }),
-          locateSettings: async () => {
-            settingsLocator ||= dockMenu.createNativeSystemSettingsLocator({ appPath: electron.app.getAppPath() });
-            return (await settingsLocator)();
-          },
-        }),
+        createSetupWindow: () => {
+          const selectedLocale = readLocaleOverride() || electron.app.getLocale?.() || "en";
+          return accessibilityWindow.createNativeAccessibilitySetupWindow({
+            electron,
+            copy: resolveAccessibilityCopy(selectedLocale),
+            layoutDirection: resolveAccessibilityLayoutDirection(selectedLocale),
+            appPath: identity.appPath,
+            loadObjcModule: () => dockMenu.loadObjcModule(electron.app.getAppPath()),
+            onHandoff: payload => accessibilityWindow.runNativePermissionHandoff({
+              ...payload,
+              onError: error => logLaunch("accessibility-handoff-error", { error: String(error) }),
+            }),
+            onBack: payload => accessibilityWindow.runNativePermissionHandoff({
+              ...payload,
+              onError: error => logLaunch("accessibility-return-error", { error: String(error) }),
+            }),
+            locateSettings: async () => {
+              settingsLocator ||= dockMenu.createNativeSystemSettingsLocator({ appPath: electron.app.getAppPath() });
+              return (await settingsLocator)();
+            },
+          });
+        },
         systemPreferences: electron.systemPreferences,
         spawn,
         fs,
@@ -1609,6 +1619,7 @@ if (typeof module !== "undefined") {
     startupGate,
     createAccessibilitySetupController,
     resolveAccessibilityCopy,
+    resolveAccessibilityLayoutDirection,
     readInstalledRuntimeIdentity,
     prepareIncognitoSession,
     runtimeOwnedSessionEnv,

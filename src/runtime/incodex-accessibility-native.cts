@@ -7,7 +7,7 @@ let generation = 0;
 const APP_PATH = "/Applications/ChatGPT.app";
 const rect = (x, y, width, height) => ({ origin: { x, y }, size: { width, height } });
 
-async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcModule, locateSettings, onHandoff, onBack, electron = null, nativeLibrary = null }) {
+async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirection = "leftToRight", loadObjcModule, locateSettings, onHandoff, onBack, electron = null, nativeLibrary = null }) {
   if (appPath !== APP_PATH) throw new Error("Native permission guide requires the default ChatGPT app");
   const objc = await loadObjcModule();
   const kit = new objc.NobjcLibrary("/System/Library/Frameworks/AppKit.framework/AppKit");
@@ -19,6 +19,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   if (!InitialView || !HelperView) throw new Error("Native permission SwiftUI guide classes are unavailable");
   const graphics = createPermissionGraphics(objc);
   const text = key => typeof copy === "function" ? copy(key) : copy[key] ?? "";
+  const nativeLayoutDirection = layoutDirection === "rightToLeft" ? "rightToLeft" : "leftToRight";
   const str = value => foundation.NSString.stringWithUTF8String$(String(value));
   const array = value => foundation.NSArray.arrayWithObject$(value);
   const unique = `IncodexPermission_${process.pid}_${++generation}`;
@@ -38,6 +39,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   function nativeCopy() {
     const dictionary = foundation.NSMutableDictionary.dictionary();
     for (const key of copyKeys) dictionary.setObject$forKey$(str(text(key)), str(key));
+    dictionary.setObject$forKey$(str(nativeLayoutDirection), str("layoutDirection"));
     return dictionary;
   }
   function define(name, superclass, methods, protocols) { return objc.NobjcClass.define({ name: `${unique}_${name}`, superclass, methods, ...(protocols ? { protocols } : {}) }); }
@@ -272,8 +274,11 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     // The original child window is positioned from the helper's bottom-left
     // origin, independently of the fitted helper height.
     const arrowY = frame.origin.y + HELPER_ARROW_WINDOW_Y + Math.max(0, frame.size.height - HELPER_HEIGHT);
+    const arrowX = nativeLayoutDirection === "rightToLeft"
+      ? frame.size.width - HELPER_ARROW_WINDOW_X - HELPER_ARROW_WINDOW_SIZE
+      : HELPER_ARROW_WINDOW_X;
     arrowPanel.setFrame$display$(rect(
-      frame.origin.x + HELPER_ARROW_WINDOW_X,
+      frame.origin.x + arrowX,
       arrowY,
       HELPER_ARROW_WINDOW_SIZE,
       HELPER_ARROW_WINDOW_SIZE,

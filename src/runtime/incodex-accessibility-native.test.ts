@@ -1152,6 +1152,28 @@ test("passes the selected native layout direction to initial and helper copy dic
   }
 });
 
+test("defaults both native copy dictionaries to left-to-right", async () => {
+  const harness = await makeHarness();
+  const { api, swift } = harness;
+  try {
+    const initialConfigure = swift!.calls.find(
+      (call) => call.selector === "configureWithCopy:appIcon:permissionIcon:actionTarget:",
+    );
+    const initialCopy = initialConfigure?.args[0] as FakeNative;
+    expect(initialCopy.values.get("layoutDirection")).toBe("leftToRight");
+
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+    const helperConfigure = [...swift!.calls].reverse().find(
+      (call) => call.selector === "configureWithCopy:appIcon:actionTarget:",
+    );
+    const helperCopy = helperConfigure?.args[0] as FakeNative;
+    expect(helperCopy.values.get("layoutDirection")).toBe("leftToRight");
+  } finally {
+    api.close();
+  }
+});
+
 test("mirrors only the helper arrow child-window x in RTL and preserves LTR placement", async () => {
   const target = { x: 554, y: 160, width: 740, height: 625 };
   const rtl = await makeHarness({ layoutDirection: "rightToLeft", locateSettings: () => target });

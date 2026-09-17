@@ -29,4 +29,10 @@ function resolveLocaleFromCatalog(raw, catalog) {
   return regional ?? "en";
 }
 
-export { resolveLocaleFromCatalog };
+function resolveLocaleDirection(raw, catalog) {
+  const canonical = resolveLocaleFromCatalog(raw, catalog);
+  const language = canonical.toLowerCase().split("-")[0] ?? "en";
+  return ["ar", "fa", "ur"].includes(language) ? "rightToLeft" : "leftToRight";
+}
+
+export { resolveLocaleDirection, resolveLocaleFromCatalog };

@@ -164,23 +164,25 @@ private func assertPermissionRowBoxContract(_ helper: IncodexPermissionHelperVie
     helper.layoutSubtreeIfNeeded()
 }
 
-private func makeAppIcon() -> NSImage {
+private func makeAppIcon(redMarker: Bool = false) -> NSImage {
     let image = NSImage(size: NSSize(width: 32, height: 32))
     image.lockFocus()
-    NSColor.systemBlue.setFill()
+    (redMarker ? NSColor.red : NSColor.systemBlue).setFill()
     NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: 32, height: 32), xRadius: 7, yRadius: 7).fill()
     image.unlockFocus()
     return image
 }
 
-private func bluePixelXBounds(_ image: NSImage, top: Int, bottom: Int) -> ClosedRange<Int>? {
+private func bluePixelXBounds(_ image: NSImage, top: Int, bottom: Int, redMarker: Bool = false) -> ClosedRange<Int>? {
     let rep = bitmapRep(image)
     var minimum = rep.pixelsWide
     var maximum = -1
     for y in top..<min(bottom, rep.pixelsHigh) {
         for x in 0..<rep.pixelsWide {
             guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
-            if color.alphaComponent > 0.5 && color.blueComponent > color.redComponent + 0.25 {
+            let marker = redMarker ? color.redComponent > color.blueComponent + 0.25
+                : color.blueComponent > color.redComponent + 0.25
+            if color.alphaComponent > 0.5 && marker {
                 minimum = min(minimum, x)
                 maximum = max(maximum, x)
             }
@@ -285,14 +287,41 @@ enum PermissionHelperSnapshotSmoke {
         precondition(CGFloat(liveIcon.lowerBound) / liveScale > 410, "live NSBox content kept LTR ordering")
 
         let initial = IncodexPermissionInitialView(frame: NSRect(x: 0, y: 0, width: 600, height: 344))
-        initial.configure(copy: rtlCopy, appIcon: nil, permissionIcon: makeAppIcon(), actionTarget: nil)
+        // A red marker distinguishes the permission icon from the blue default
+        // Allow button; blue-pixel bounds would conflate those two controls.
+        initial.configure(copy: rtlCopy, appIcon: nil, permissionIcon: makeAppIcon(redMarker: true), actionTarget: nil)
         initial.layoutSubtreeIfNeeded()
         let card = cacheImage(initial.permissionCardView)
-        guard let cardIcon = bluePixelXBounds(card, top: 0, bottom: bitmapRep(card).pixelsHigh) else {
+        guard let cardIcon = bluePixelXBounds(card, top: 0, bottom: bitmapRep(card).pixelsHigh, redMarker: true) else {
             fatalError("RTL permission card omitted its icon")
         }
         let cardScale = CGFloat(bitmapRep(card).pixelsWide) / card.size.width
         precondition(CGFloat(cardIcon.lowerBound) / cardScale > 430, "separate permission card host kept LTR ordering")
+
+        // Actual ar/fa/ur helper copy, including mixed Latin application names.
+        // This proves foreground output and mirrored anchors, not a full bidi
+        // glyph-order or clipping acceptance on every supported system font.
+        for instruction in [
+            "اسحب ChatGPT إلى القائمة أعلاه للسماح بإمكانية الوصول",
+            "برای اجازه دادن به دسترسی‌پذیری، ChatGPT را به فهرست بالا بکشید",
+            "قابلِ رسائی کی اجازت دینے کے لیے ChatGPT کو اوپر موجود فہرست میں گھسیٹیں",
+        ] {
+            rtlCopy["dragInstruction"] = instruction
+            rtlCopy["dragInstructionRuns"] = ""
+            helper.configure(copy: rtlCopy, appIcon: makeAppIcon(), actionTarget: nil)
+            helper.layoutSubtreeIfNeeded()
+            precondition(helper.appRowFrame.origin.x == 10)
+            guard let localized = helper.snapshotImage(scale: 1) else { fatalError("missing RTL language snapshot") }
+            let rep = bitmapRep(localized)
+            var ink = 0
+            for y in 17..<Int(helper.appRowFrame.minY) {
+                for x in 21..<429 {
+                    if (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.1 { ink += 1 }
+                }
+            }
+            precondition(ink > 100, "RTL instruction foreground is empty")
+            precondition(localized.size.height >= 110 && localized.size.width == 531)
+        }
 
         helper.configure(copy: shortCopy, appIcon: makeAppIcon(), actionTarget: nil)
         helper.layoutSubtreeIfNeeded()
