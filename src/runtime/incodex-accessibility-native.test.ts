@@ -399,6 +399,9 @@ class FakeNative {
   setLineSpacing$(value: number): void { this.values.set("lineSpacing", value); }
 
   cell(): FakeNative { return this; }
+  isHighlighted(): boolean { return Boolean(this.values.get("highlighted")); }
+  setAccessibilityLabel$(value: unknown): void { this.values.set("accessibilityLabel", value); }
+  setAccessibilityElement$(value: unknown): void { this.values.set("accessibilityElement", value); }
 
   cellSizeForBounds$(value: Frame): { width: number; height: number } {
     this.record("cellSizeForBounds:", value);
@@ -1758,5 +1761,33 @@ test("a localized title wraps within the reference width and moves following con
     expect(title.frame().size).toEqual({width:560,height:60});
     expect(body.frame().origin.y).toBe(175);
     expect(panel.frame().size.height).toBe(372);
+  } finally {api.close();}
+});
+
+
+test("Settings placeholder is an actionable native button with pressed feedback and no new repair choice", async () => {
+  const {api,bridge,panel}=await makeHarness({reduceMotion:true});
+  let retries=0;
+  api.onRetry(()=>{retries++;api.setState("awaiting-user");});
+  try {
+    objectWithTitle(panel,COPY.repair)!.performClick$();
+    await expect(api.choice).resolves.toBe("repair");
+    api.setState("awaiting-user");await flushNativeAsync();
+    const title=objectWithTitle(panel,COPY.completeInSettings)!;
+    const placeholder=descendants(panel).find(value=>value.subviews.includes(title))!;
+    expect(placeholder.values.get("accessibilityLabel")).toBe(COPY.completeInSettings);
+    placeholder.values.set("highlighted",true);
+    placeholder.invoke("drawRect:",placeholder.bounds());
+    const outline=bridge.objects.find(value=>value.type==="CAShapeLayer")!;
+    expect(outline.values.get("strokeColor")).toEqual({color:[0,0,0,.22]});
+    placeholder.values.set("highlighted",false);
+    placeholder.invoke("drawRect:",placeholder.bounds());
+    placeholder.performClick$();await flushNativeAsync();
+    expect(retries).toBe(1);
+    await expect(api.choice).resolves.toBe("repair");
+    bridge.objects.find(value=>value.action==="later:")!.performClick$();
+    await flushNativeAsync();
+    placeholder.performClick$();
+    expect(retries).toBe(1);
   } finally {api.close();}
 });
