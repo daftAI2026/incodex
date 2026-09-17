@@ -191,6 +191,42 @@ private func bluePixelXBounds(_ image: NSImage, top: Int, bottom: Int, redMarker
     return maximum >= minimum ? minimum...maximum : nil
 }
 
+private func alphaPixelCount(_ image: NSImage, rect: NSRect, threshold: CGFloat = 0.1) -> Int {
+    let rep = bitmapRep(image)
+    let scaleX = CGFloat(rep.pixelsWide) / image.size.width
+    let scaleY = CGFloat(rep.pixelsHigh) / image.size.height
+    let minX = max(0, Int(floor(rect.minX * scaleX)))
+    let maxX = min(rep.pixelsWide, Int(ceil(rect.maxX * scaleX)))
+    let minY = max(0, Int(floor(rect.minY * scaleY)))
+    let maxY = min(rep.pixelsHigh, Int(ceil(rect.maxY * scaleY)))
+    guard minX < maxX, minY < maxY else { return 0 }
+    var count = 0
+    for y in minY..<maxY {
+        for x in minX..<maxX {
+            if (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > threshold { count += 1 }
+        }
+    }
+    return count
+}
+
+private func assertStaticArrow(_ image: NSImage, x: CGFloat, direction: String) {
+    // Original DragHintView arrow slot: (66, 8.5, 28, 32.5) in LTR.
+    // Our approved 28x28 glyph is vertically centered in that slot; RTL
+    // mirrors the slot to x=437. This is deliberately an occupancy assertion,
+    // not a glyph-shape assertion, so it stays independent of system raster.
+    let slot = NSRect(x: x, y: 8.5, width: 28, height: 32.5)
+    let ink = alphaPixelCount(image, rect: slot)
+    precondition(ink > 8, "\(direction) snapshot omitted the static HintArrow in slot \(slot); alpha pixels=\(ink)")
+
+    // The instruction starts at x=102 in LTR (x=21 in RTL). A static arrow
+    // must occupy its own slot and not be replaced by instruction foreground.
+    let gap = direction == "LTR"
+        ? NSRect(x: 94, y: 8.5, width: 8, height: 32.5)
+        : NSRect(x: 429, y: 8.5, width: 8, height: 32.5)
+    precondition(alphaPixelCount(image, rect: gap) == 0,
+                 "\(direction) snapshot arrow leaked into the 8pt HStack gap")
+}
+
 private func cacheImage(_ view: NSView) -> NSImage {
     view.layoutSubtreeIfNeeded()
     guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { fatalError("missing row bitmap") }
@@ -236,6 +272,7 @@ enum PermissionHelperSnapshotSmoke {
                           tolerance: 0.01, "Aqua snapshot row uses original translucent white fill")
         precondition(alphaAtTopLeft(light2, point: NSPoint(x: 500, y: 5)) == 0, "snapshot background is not transparent")
         precondition(alphaAtTopLeft(light2, point: NSPoint(x: 250, y: 65)) > 0, "snapshot row has no foreground output")
+        assertStaticArrow(light1, x: 66, direction: "LTR")
         precondition(!bitmapBytes(light2).isEmpty, "snapshot is empty")
         precondition(helper.subviews.first === host, "snapshot replaced the live helper host")
         precondition(helper.appRowView === rowHost, "snapshot replaced the live drag row host")
@@ -277,6 +314,7 @@ enum PermissionHelperSnapshotSmoke {
               let snapshotIcon = bluePixelXBounds(rtlSnapshot, top: 50, bottom: 90) else {
             fatalError("RTL snapshot omitted the app icon")
         }
+        assertStaticArrow(rtlSnapshot, x: 437, direction: "RTL")
         precondition(snapshotIcon.lowerBound > 420 && snapshotIcon.upperBound < 470,
                      "RTL snapshot icon did not move to the row's right edge: \(snapshotIcon)")
         let liveRow = cacheImage(rowHost)
