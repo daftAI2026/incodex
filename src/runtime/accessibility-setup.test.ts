@@ -60,6 +60,7 @@ type Harness = {
     showItemInFolder: (file: string) => void;
   };
   spawnCalls: Array<{ file: string; args: string[] }>;
+  createSetupWindowCalls: number;
   probes: unknown[];
   controller: any;
   panel: any;
@@ -99,8 +100,10 @@ function makeHarness(options: {
   requestPath?: string;
   markerMode?: number;
   probes?: unknown[];
+  canPresent?: () => boolean;
   dialogResponses?: number[];
   spawn?: (file: string, args: string[]) => EventEmitter;
+  createSetupWindow?: () => Promise<any> | any;
   openExternal?: (url: string) => Promise<boolean>;
   appPath?: string;
   installId?: string;
@@ -152,6 +155,7 @@ function makeHarness(options: {
       queueMicrotask(() => child.emit("close", 0));
       return child;
     });
+  let createSetupWindowCalls = 0;
 
   const createController = (runtimeMain as any).createAccessibilitySetupController;
   if (typeof createController !== "function") {
@@ -187,10 +191,15 @@ function makeHarness(options: {
     isIncognito: false,
     copy: options.copy ?? COPY,
     now: () => 1_700_000_000_100,
-    createSetupWindow: async () => ({
-      ...panel,
-      choice: dialog.showMessageBox({ message: COPY_VALUES.body }).then(({ response }) => response === 0 ? "repair" : "later"),
-    }),
+    canPresent: options.canPresent,
+    createSetupWindow: async () => {
+      createSetupWindowCalls += 1;
+      if (options.createSetupWindow) return options.createSetupWindow();
+      return {
+        ...panel,
+        choice: dialog.showMessageBox({ message: COPY_VALUES.body }).then(({ response }) => response === 0 ? "repair" : "later"),
+      };
+    },
     setInterval: (fn: () => void) => { polling = fn; return 1; },
     clearInterval: () => { polling = null; },
     // Tests exercise activation rechecks without waiting on wall-clock timers.
@@ -198,7 +207,49 @@ function makeHarness(options: {
     sleep: async () => {},
   });
 
-  return { root, requestPath, dialog, shell, spawnCalls, probes, controller, panel, tick: () => polling?.(), timerActive: () => polling !== null };
+  return { root, requestPath, dialog, shell, spawnCalls, get createSetupWindowCalls() { return createSetupWindowCalls; }, probes, controller, panel, tick: () => polling?.(), timerActive: () => polling !== null };
+}
+
+type BrowserWindowMockOptions = Partial<{
+  visible: boolean;
+  focused: boolean;
+  minimized: boolean;
+  destroyed: boolean;
+  parent: unknown;
+  url: string;
+  alwaysOnTop: boolean;
+  focusable: boolean;
+  webContentsDestroyed: boolean;
+  additionalArguments: string[];
+  bounds: { x: number; y: number; width: number; height: number };
+}>;
+
+function makeBrowserWindow(options: BrowserWindowMockOptions = {}): any {
+  const bounds = options.bounds ?? { x: 20, y: 20, width: 1_000, height: 700 };
+  return {
+    isVisible: () => options.visible ?? true,
+    isFocused: () => options.focused ?? true,
+    isMinimized: () => options.minimized ?? false,
+    isDestroyed: () => options.destroyed ?? false,
+    getParentWindow: () => options.parent ?? null,
+    getBounds: () => bounds,
+    isAlwaysOnTop: () => options.alwaysOnTop ?? false,
+    isFocusable: () => options.focusable ?? true,
+    webContents: {
+      isDestroyed: () => options.webContentsDestroyed ?? false,
+      getURL: () => options.url ?? "app://-",
+      getLastWebPreferences: () => ({ additionalArguments: [...(options.additionalArguments ?? [])] }),
+    },
+  };
+}
+
+function makeElectronWithWindows(windows: any[], focused: any = windows[0] ?? null): any {
+  return {
+    BrowserWindow: {
+      getAllWindows: () => windows,
+      getFocusedWindow: () => focused,
+    },
+  };
 }
 
 test("accepts root-owned ASAR package metadata for the default app identity", () => {
@@ -224,6 +275,29 @@ test("accepts root-owned ASAR package metadata for the default app identity", ()
     appPath: APP_PATH,
     installId: INSTALL_ID,
   });
+});
+
+test("canPresentAccessibilitySetup accepts only the visible focused trusted main window", () => {
+  const canPresent = (runtimeMain as any).canPresentAccessibilitySetup;
+  expect(typeof canPresent).toBe("function");
+
+  const trustedMain = makeBrowserWindow();
+  expect(canPresent(makeElectronWithWindows([trustedMain], trustedMain))).toBe(true);
+
+  const cases: Array<[string, any, any, boolean]> = [
+    ["no windows", [], null, false],
+    ["hidden", [makeBrowserWindow({ visible: false })], undefined, false],
+    ["unfocused", [makeBrowserWindow({ focused: false }), makeBrowserWindow()], null, false],
+    ["minimized", [makeBrowserWindow({ minimized: true })], undefined, false],
+    ["destroyed", [makeBrowserWindow({ destroyed: true })], undefined, false],
+    ["child window", [makeBrowserWindow({ parent: {} })], undefined, false],
+    ["login popup", [makeBrowserWindow({ url: "https://accounts.openai.com/login" })], undefined, false],
+    ["untrusted URL", [makeBrowserWindow({ url: "https://example.invalid/" })], undefined, false],
+  ];
+  for (const [label, windows, focused, expected] of cases) {
+    const actual = canPresent(makeElectronWithWindows(windows, focused));
+    if (actual !== expected) throw new Error(`${label}: expected ${String(expected)}, received ${String(actual)}`);
+  }
 });
 
 describe("Accessibility setup controller", () => {
@@ -258,6 +332,63 @@ describe("Accessibility setup controller", () => {
     expect(readMarker(harness.requestPath).state).toBe("pending");
     expect(harness.dialog.calls).toHaveLength(0);
     expect(harness.spawnCalls).toHaveLength(0);
+  });
+
+  test("keeps a denied pending request untouched when the native guide cannot present", async () => {
+    const harness = makeHarness({ probes: [false], canPresent: () => false });
+    const before = readMarker(harness.requestPath);
+
+    await harness.controller.run();
+
+    expect(readMarker(harness.requestPath)).toEqual(before);
+    expect(harness.createSetupWindowCalls).toBe(0);
+    expect(harness.dialog.calls).toHaveLength(0);
+    expect(harness.spawnCalls).toHaveLength(0);
+    expect(harness.shell.opened).toHaveLength(0);
+  });
+
+  test("still grants a trusted pending request when the native guide cannot present", async () => {
+    const harness = makeHarness({ probes: [true], canPresent: () => false });
+
+    await harness.controller.run();
+
+    expect(readMarker(harness.requestPath).state).toBe("granted");
+    expect(harness.createSetupWindowCalls).toBe(0);
+    expect(harness.dialog.calls).toHaveLength(0);
+    expect(harness.spawnCalls).toHaveLength(0);
+    expect(harness.shell.opened).toHaveLength(0);
+  });
+
+  test("only presents once a denied request becomes presentable on a later run", async () => {
+    let canPresent = false;
+    const harness = makeHarness({ probes: [false, false], canPresent: () => canPresent, dialogResponses: [1] });
+
+    await harness.controller.run();
+    expect(readMarker(harness.requestPath).state).toBe("pending");
+    expect(harness.createSetupWindowCalls).toBe(0);
+    expect(harness.dialog.calls).toHaveLength(0);
+    expect(harness.spawnCalls).toHaveLength(0);
+
+    canPresent = true;
+    await harness.controller.run();
+
+    expect(readMarker(harness.requestPath).state).toBe("deferred");
+    expect(harness.createSetupWindowCalls).toBe(1);
+    expect(harness.dialog.calls).toHaveLength(1);
+    expect(harness.spawnCalls).toHaveLength(0);
+    expect(harness.shell.opened).toHaveLength(0);
+  });
+
+  test("keeps a pending request when asynchronous native guide creation returns no panel", async () => {
+    const harness = makeHarness({ probes: [false], canPresent: () => true, createSetupWindow: async () => null });
+
+    await harness.controller.run();
+
+    expect(readMarker(harness.requestPath).state).toBe("pending");
+    expect(harness.createSetupWindowCalls).toBe(1);
+    expect(harness.dialog.calls).toHaveLength(0);
+    expect(harness.spawnCalls).toHaveLength(0);
+    expect(harness.shell.opened).toHaveLength(0);
   });
 
   test("records deferred and does not prompt again on an ordinary activation", async () => {
