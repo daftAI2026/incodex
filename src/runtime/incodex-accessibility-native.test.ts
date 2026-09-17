@@ -171,7 +171,11 @@ class FakeNative {
   displayIfNeeded(): void {}
 
   sizeToFit(): void {
-    if (this.type === "NSButton") this.frameValue.size = { width: 56.5, height: 24 };
+    if (this.type === "NSButton") {
+      this.frameValue.size = this.values.get("bordered") === false
+        ? { width: 27.5, height: 16 }
+        : { width: 56.5, height: 24 };
+    }
   }
 
   layer(): FakeNative {
@@ -582,7 +586,12 @@ type FakeBridge = {
   objects: FakeNative[];
 };
 
-function makeBridge(bodyHeight = 32, helperFittingSize = { width: 531, height: 110 }): FakeBridge {
+function makeBridge(
+  bodyHeight = 32,
+  helperFittingSize = { width: 531, height: 110 },
+  helperInstructionWidth = 408,
+  helperInstructionText = COPY.addedBody,
+): FakeBridge {
   const calls: NativeCall[] = [];
   const objects: FakeNative[] = [];
   const definitions = new Map<string, Record<string, (...args: any[]) => unknown>>();
@@ -617,6 +626,9 @@ function makeBridge(bodyHeight = 32, helperFittingSize = { width: 531, height: 1
         const field = object(type, methods);
         field.setStringValue$(value);
         field.values.set("measuredHeight", bodyHeight);
+        if (String(value) === helperInstructionText) {
+          field.values.set("fittingSize", { width: helperInstructionWidth, height: 18 });
+        }
         return field;
       },
       stringWithUTF8String$: (value: string) => value,
@@ -875,6 +887,42 @@ test("uses the helper hosting view's fitting size instead of the English sample 
   }
 });
 
+test("expands the helper row around a wider localized instruction", async () => {
+  const { api, bridge } = await makeHarness({
+    helperInstructionWidth: 520,
+    locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+  });
+  try {
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+
+    const helper = helperPanels(bridge).find((panel) => panel.frame().size.width > 531);
+    if (!helper) throw new Error("localized Accessibility helper is missing");
+    expect(helper.frame()).toEqual(frame(643, 110, 641, 125));
+
+    const view = helper.contentViewValue;
+    if (!view) throw new Error("localized Accessibility helper content is missing");
+    const row = view.subviews.find((value) => value.hasSelector("mouseDown:"));
+    const instruction = view.subviews.find((value) => value.values.get("stringValue") === COPY.addedBody);
+    if (!row || !instruction) throw new Error("localized helper layout is missing");
+    expect(row.frame()).toEqual(frame(571, 42, 62, 48));
+    expect(instruction.frame()).toEqual(frame(520, 18, 102, 17));
+
+    const appRow = row.subviews.find((value) => value.type.includes("View"));
+    expect(appRow?.frame()).toEqual(frame(571, 42));
+    expect(appRow?.subviews.find((value) => value.type === "NSImageView")?.frame())
+      .toEqual(frame(32, 32, 5, 5));
+
+    const arrowWindow = helperPanels(bridge).find((panel) => {
+      const size = panel.frame().size;
+      return size.width === 100 && size.height === 100;
+    });
+    expect(arrowWindow?.frame()).toEqual(frame(100, 100, 672, 185));
+  } finally {
+    api.close();
+  }
+});
+
 test("keeps the initial permission window behind the helper during the forward handoff", async () => {
   const { api, panel } = await makeHarness({
     locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
@@ -888,6 +936,23 @@ test("keeps the initial permission window behind the helper during the forward h
   }
 });
 
+test("keeps the 600x540 initial guide with a plain deferred Skip control", async () => {
+  const { api, panel } = await makeHarness();
+  const skip = panel.contentViewValue?.subviews
+    .flatMap((value) => [value, ...descendants(value)])
+    .find((value) => value.action === "skip:");
+  if (!skip) throw new Error("initial Skip control is missing");
+
+  expect(panel.frame().size).toEqual({ width: 600, height: 540 });
+  expect(skip.frame()).toEqual(frame(27.5, 16, 515.5, 511.5));
+  expect(skip.values.get("title")).toBe(COPY.later);
+  expect(skip.values.get("bordered")).toBe(false);
+
+  skip.performClick$();
+  await expect(api.choice).resolves.toBe("later");
+  expect(api.isDestroyed()).toBe(true);
+});
+
 async function makeHarness(options: {
   onHandoff?: (payload: any) => void;
   onBack?: (payload: any) => { finished?: Promise<unknown>; dispose?: () => void } | undefined;
@@ -896,8 +961,14 @@ async function makeHarness(options: {
   reduceMotion?: boolean;
   bodyHeight?: number;
   helperFittingSize?: { width: number; height: number };
+  helperInstructionWidth?: number;
 } = {}) {
-  const bridge = makeBridge(options.bodyHeight, options.helperFittingSize);
+  const bridge = makeBridge(
+    options.bodyHeight,
+    options.helperFittingSize,
+    options.helperInstructionWidth,
+    options.copy?.addedBody ?? COPY.addedBody,
+  );
   const api = await createNativeAccessibilitySetupWindow({
     appPath: APP_PATH,
     copy: options.copy ?? COPY,
@@ -978,7 +1049,7 @@ describe("native Accessibility setup adapter", () => {
       expect(group).toBeDefined();
       expect(group && descendants(group).some(value => value.values.get("stringValue") === COPY.title)).toBe(true);
       expect(panel.contentView()?.subviews[0].frame().origin.y).toBe(0);
-      expect(panel.frame().size.height).toBe(342);
+      expect(panel.frame().size.height).toBe(540);
     } finally { api.close(); }
   });
 
@@ -989,7 +1060,7 @@ describe("native Accessibility setup adapter", () => {
       expect(objectWithTitle(panel, COPY.body)?.frame().origin.y).toBe(145);
       const card = descendants(panel).find(value => value.frame().origin.x === 41 && value.frame().size.height === 80);
       expect(card?.frame().origin.y).toBe(198);
-      expect(panel.frame().size.height).toBe(342);
+      expect(panel.frame().size.height).toBe(540);
     } finally { api.close(); }
   });
 
@@ -1001,7 +1072,7 @@ describe("native Accessibility setup adapter", () => {
         const card = descendants(panel).find(value => value.frame().origin.x === 41 && value.frame().size.height === 80);
         expect(body?.frame().size.height).toBe(bodyHeight);
         expect(card?.frame().origin.y).toBe(145 + bodyHeight + 21);
-        expect(panel.frame().size.height).toBe(32 + 145 + bodyHeight + 21 + 80 + 32);
+        expect(panel.frame().size.height).toBe(Math.max(540, 32 + 145 + bodyHeight + 21 + 80 + 32));
         expect(panel.contentView()?.frame().size).toEqual(panel.frame().size);
       } finally { api.close(); }
     }
@@ -1022,7 +1093,7 @@ describe("native Accessibility setup adapter", () => {
       expect(top + objectWithTitle(panel, COPY.title)!.frame().origin.y).toBe(124);
       expect(top + objectWithTitle(panel, COPY.body)!.frame().origin.y).toBe(168);
       expect(top + card!.frame().origin.y).toBe(223);
-      expect(panel.frame().size).toEqual({ width: 600, height: 344 });
+      expect(panel.frame().size).toEqual({ width: 600, height: 540 });
     } finally { api.close(); }
   });
 
