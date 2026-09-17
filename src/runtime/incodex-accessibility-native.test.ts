@@ -600,6 +600,7 @@ function makeBridge(
   helperFittingSize = { width: 531, height: 110 },
   helperInstructionWidth = 408,
   helperInstructionText = COPY.addedBody,
+  titleHeight = 30,
 ): FakeBridge {
   const calls: NativeCall[] = [];
   const objects: FakeNative[] = [];
@@ -634,7 +635,7 @@ function makeBridge(
       labelWithString$: (value: unknown) => {
         const field = object(type, methods);
         field.setStringValue$(value);
-        field.values.set("measuredHeight", bodyHeight);
+        field.values.set("measuredHeight", String(value) === COPY.title || String(value) === COPY.errorTitle ? titleHeight : bodyHeight);
         if (String(value) === helperInstructionText) {
           field.values.set("fittingSize", { width: helperInstructionWidth, height: 18 });
         }
@@ -975,6 +976,7 @@ async function makeHarness(options: {
   copy?: typeof COPY;
   reduceMotion?: boolean;
   bodyHeight?: number;
+  titleHeight?: number;
   helperFittingSize?: { width: number; height: number };
   helperInstructionWidth?: number;
 } = {}) {
@@ -983,6 +985,7 @@ async function makeHarness(options: {
     options.helperFittingSize,
     options.helperInstructionWidth,
     options.copy?.addedBody ?? COPY.addedBody,
+    options.titleHeight,
   );
   const api = await createNativeAccessibilitySetupWindow({
     appPath: APP_PATH,
@@ -1744,4 +1747,16 @@ test("awaiting Settings placeholder tracks hover and clears feedback on Back", a
     await flushNativeAsync();
     expect(outline.values.get("fillColor")).toEqual({color: [0,0,0,0]});
   } finally { api.close(); }
+});
+
+
+test("a localized title wraps within the reference width and moves following content", async () => {
+  const {api,panel}=await makeHarness({titleHeight:60,bodyHeight:32});
+  try {
+    const title=objectWithTitle(panel,COPY.title)!;
+    const body=objectWithTitle(panel,COPY.body)!;
+    expect(title.frame().size).toEqual({width:560,height:60});
+    expect(body.frame().origin.y).toBe(175);
+    expect(panel.frame().size.height).toBe(372);
+  } finally {api.close();}
 });
