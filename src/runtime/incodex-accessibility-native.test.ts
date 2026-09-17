@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { createNativeAccessibilitySetupWindow } from "./incodex-accessibility-native.cts";
+import { createNativeAccessibilitySetupWindow as createNativeAccessibilitySetupWindowOrDeferred } from "./incodex-accessibility-native.cts";
+
+// Existing fixtures have no presentation gate and must produce a real guide.
+// Keep that assertion explicit now that deferred creation can return null.
+async function createNativeAccessibilitySetupWindow(
+  options: Parameters<typeof createNativeAccessibilitySetupWindowOrDeferred>[0],
+) {
+  const guide = await createNativeAccessibilitySetupWindowOrDeferred(options);
+  if (!guide) throw new Error("Expected a presentable native guide fixture");
+  return guide;
+}
 
 const APP_PATH = "/Applications/ChatGPT.app";
 
@@ -1269,13 +1279,13 @@ test("does not steal focus when presentation becomes unavailable during bridge l
   let release!: (value: any) => void;
   const loading = new Promise<any>((resolve) => { release = resolve; });
   let focusCalls = 0;
-  const pending = createNativeAccessibilitySetupWindow({
+  const pending = createNativeAccessibilitySetupWindowOrDeferred({
     appPath: APP_PATH,
     copy: COPY,
     loadObjcModule: () => loading,
     nativeLibrary: swift.library as any,
     canPresent: () => canPresent,
-    electron: { app: { focus: () => { focusCalls++; } } },
+    electron: { app: { focus: () => { focusCalls++; } } } as any,
     locateSettings: () => null,
     onBack: undefined,
     onHandoff: undefined,

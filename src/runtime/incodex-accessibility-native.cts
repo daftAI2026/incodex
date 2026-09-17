@@ -7,9 +7,13 @@ let generation = 0;
 const APP_PATH = "/Applications/ChatGPT.app";
 const rect = (x, y, width, height) => ({ origin: { x, y }, size: { width, height } });
 
-async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirection = "leftToRight", loadObjcModule, locateSettings, onHandoff, onBack, electron = null, nativeLibrary = null }) {
+async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirection = "leftToRight", loadObjcModule, locateSettings, onHandoff, onBack, electron = null, nativeLibrary = null, canPresent = () => true }) {
   if (appPath !== APP_PATH) throw new Error("Native permission guide requires the default ChatGPT app");
+  if (!canPresent()) return null;
   const objc = await loadObjcModule();
+  // Loading the bridge yields. The host may lose focus to authentication or
+  // close in the meantime; never create a foreground guide on stale readiness.
+  if (!canPresent()) return null;
   const kit = new objc.NobjcLibrary("/System/Library/Frameworks/AppKit.framework/AppKit");
   const foundation = new objc.NobjcLibrary("/System/Library/Frameworks/Foundation.framework/Foundation");
   const quartz = new objc.NobjcLibrary("/System/Library/Frameworks/QuartzCore.framework/QuartzCore");

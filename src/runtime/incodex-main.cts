@@ -617,6 +617,9 @@ function createAccessibilitySetupController(options = {}) {
     if (marker.state === "awaiting-user") {
       return { ok: true, state: "awaiting-user" };
     }
+    if (typeof options.canPresent === "function" && !options.canPresent()) {
+      return { ok: true, state: "pending", reason: "presentation-unavailable" };
+    }
     if (typeof options.createSetupWindow !== "function") {
       return { ok: false, state: "unknown", reason: "dialog-unavailable" };
     }
@@ -632,6 +635,9 @@ function createAccessibilitySetupController(options = {}) {
     let choice;
     try {
       panel = await options.createSetupWindow();
+      // Native bridge loading can outlive the focused host window. This is a
+      // presentation deferral, not a user's Skip action or a permission error.
+      if (!panel) return { ok: true, state: "pending", reason: "presentation-unavailable" };
       const activePanel = panel;
       panel.onClose(() => {
         stopPolling();
@@ -884,6 +890,32 @@ function isAuxiliaryWindow(win) {
 
 function mainWindows(electron) {
   return electron.BrowserWindow.getAllWindows().filter((win) => !isAuxiliaryWindow(win));
+}
+
+function canPresentAccessibilitySetup(electron) {
+  try {
+    const win = electron.BrowserWindow.getFocusedWindow();
+    if (!win || win.isDestroyed() || !win.isVisible() || win.isMinimized() || !win.isFocused()) return false;
+    if (win.getParentWindow?.() || isAuxiliaryWindow(win)) return false;
+    const contents = win.webContents;
+    return Boolean(contents && !contents.isDestroyed() && ipcGuard.urlAllowed(contents.getURL(), trustedOrigins));
+  } catch {
+    return false;
+  }
+}
+
+const accessibilityPresentationWindows = new WeakSet();
+function observeAccessibilityPresentationWindow(win, controller) {
+  if (!controller || !win || accessibilityPresentationWindows.has(win)) return;
+  accessibilityPresentationWindows.add(win);
+  const request = () => { void controller.run(); };
+  const events = ["show", "ready-to-show", "restore"];
+  for (const event of events) win.on(event, request);
+  win.webContents?.on("did-finish-load", request);
+  win.once("closed", () => {
+    for (const event of events) win.removeListener(event, request);
+    win.webContents?.removeListener("did-finish-load", request);
+  });
 }
 
 function hideAuxiliaryWindows(electron) {
@@ -1396,10 +1428,12 @@ async function attachElectron() {
       accessibilitySetupController = createAccessibilitySetupController({
         app: electron.app,
         shell: electron.shell,
+        canPresent: () => canPresentAccessibilitySetup(electron),
         createSetupWindow: () => {
           const selectedLocale = readLocaleOverride() || electron.app.getLocale?.() || "en";
           return accessibilityWindow.createNativeAccessibilitySetupWindow({
             electron,
+            canPresent: () => canPresentAccessibilitySetup(electron),
             copy: resolveAccessibilityCopy(selectedLocale),
             layoutDirection: resolveAccessibilityLayoutDirection(selectedLocale),
             appPath: identity.appPath,
@@ -1508,6 +1542,7 @@ async function attachElectron() {
   });
 
   electron.app.on("browser-window-created", (_event, win) => {
+    observeAccessibilityPresentationWindow(win, accessibilitySetupController);
     if (isAuxiliaryWindow(win)) {
       if (isIncognito()) {
         try {
@@ -1605,7 +1640,10 @@ async function attachElectron() {
 
   function ready() {
     hookPreload(electron.session.defaultSession);
-    for (const win of electron.BrowserWindow.getAllWindows()) hookWindow(win, source);
+    for (const win of electron.BrowserWindow.getAllWindows()) {
+      observeAccessibilityPresentationWindow(win, accessibilitySetupController);
+      hookWindow(win, source);
+    }
     if (isIncognito()) raiseOurWindows();
     else void accessibilitySetupController?.run();
   }
@@ -1618,6 +1656,8 @@ if (typeof module !== "undefined") {
   module.exports = {
     startupGate,
     createAccessibilitySetupController,
+    canPresentAccessibilitySetup,
+    observeAccessibilityPresentationWindow,
     resolveAccessibilityCopy,
     resolveAccessibilityLayoutDirection,
     readInstalledRuntimeIdentity,
