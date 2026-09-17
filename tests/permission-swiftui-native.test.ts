@@ -35,6 +35,21 @@ function permissionCardSource(): string {
   return source.slice(start, end);
 }
 
+test("Back uses the original 13pt primary chevron and semantic tertiary system fill", () => {
+  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const start = source.indexOf('Image(systemName: "chevron.left")');
+  expect(start).toBeGreaterThanOrEqual(0);
+  const label = source.slice(start, source.indexOf('.buttonStyle(.plain)', start));
+  // Original build1001067: label 0x100ec0680, font 0x100ec0730,
+  // primary 0x100ec0768, tertiarySystemFillColor 0x100ec07b4.
+  // These are source guards; hover/pressed pixels remain separate live gates.
+  expect(label).toContain('.font(.system(size: 13, weight: .semibold))');
+  expect(label).toContain('.foregroundStyle(.primary)');
+  expect(label).toContain('.background(permissionBackFill, in: Circle())');
+  expect(source).toContain('Color(nsColor: .tertiarySystemFill)');
+  expect(source).toContain('if #available(macOS 14.0, *)');
+});
+
 test("PermissionCardRoot keeps title and description line limits unconstrained by the original source contract", () => {
   const card = permissionCardSource();
   // The shipped binary's PermissionRow title/description chains have no lineLimit(1)/(2).
