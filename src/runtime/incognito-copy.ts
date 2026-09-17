@@ -1,4 +1,5 @@
 import { ACCESSIBILITY_REGIONAL_COPY } from "./incognito-accessibility-copy-data.ts";
+import { attachAccessibilityDragInstructionRuns } from "./incognito-accessibility-copy-runs.ts";
 import { resolveLocaleFromCatalog } from "./incodex-locale.cts";
 import { COPY as REGIONAL_COPY, type CopyKey, type CopyTable } from "./incognito-copy-data.ts";
 
@@ -6,7 +7,7 @@ export type { CopyKey, CopyTable } from "./incognito-copy-data.ts";
 
 // Embedded into the main-process Runtime by build-runtime.ts. Keep the two
 // source languages together without introducing an unverified Runtime asset.
-export const ACCESSIBILITY_SETUP_COPY = /* @__PURE__ */ (() => ({
+const ACCESSIBILITY_SETUP_COPY_BASE = /* @__PURE__ */ (() => ({
   ...ACCESSIBILITY_REGIONAL_COPY,
   en: {
     title: "Enable ChatGPT script control",
@@ -81,6 +82,10 @@ export const ACCESSIBILITY_SETUP_COPY = /* @__PURE__ */ (() => ({
     errorBody: "未能完成權限設定。請在系統設定 → 隱私權與安全性 → 輔助功能中加入 /Applications/ChatGPT.app，再執行 incodex install 重新檢查。",
   },
 } as const))();
+
+export const ACCESSIBILITY_SETUP_COPY = /* @__PURE__ */ attachAccessibilityDragInstructionRuns(
+  ACCESSIBILITY_SETUP_COPY_BASE,
+);
 
 // English and Chinese are the source copy; keep them beside locale resolution.
 const CORE_COPY: Record<string, CopyTable> = {

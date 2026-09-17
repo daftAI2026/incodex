@@ -129,6 +129,31 @@ private var permissionBackFill: Color {
     return Color.primary.opacity(0.08)
 }
 
+private struct PermissionInstructionRun: Decodable {
+    enum Role: String, Decodable { case primary, secondary }
+    let text: String
+    let role: Role
+}
+
+// Localized copy supplies semantic runs in its own natural order. Never
+// infer names or word boundaries from English substrings in the renderer.
+func permissionStyledInstruction(_ text: String, runsJSON: String) -> AttributedString {
+    guard runsJSON.utf8.count <= 65_536,
+          let data = runsJSON.data(using: .utf8),
+          let runs = try? JSONDecoder().decode([PermissionInstructionRun].self, from: data),
+          !runs.isEmpty, runs.count <= 128,
+          runs.map(\.text).joined() == text else {
+        return AttributedString(text)
+    }
+    var result = AttributedString()
+    for run in runs {
+        var part = AttributedString(run.text)
+        part.foregroundColor = run.role == .primary ? Color.primary : Color.secondary
+        result.append(part)
+    }
+    return result
+}
+
 @MainActor
 private final class PermissionInitialState: ObservableObject {
     @Published var title = ""
@@ -445,6 +470,7 @@ public final class IncodexPermissionInitialView: NSView {
 @MainActor
 private final class PermissionHelperState: ObservableObject {
     @Published var instruction = ""
+    @Published var styledInstruction = AttributedString()
     @Published var back = ""
     @Published var appIcon: NSImage?
     weak var actionTarget: NSObject?
@@ -465,6 +491,9 @@ private final class PermissionHelperState: ObservableObject {
         instruction = permissionCopyString(copy, "dragInstruction")
         if instruction.isEmpty { instruction = permissionCopyString(copy, "addedBody") }
         if instruction.isEmpty { instruction = permissionCopyString(copy, "body") }
+        styledInstruction = permissionStyledInstruction(
+            instruction, runsJSON: permissionCopyString(copy, "dragInstructionRuns")
+        )
         back = permissionCopyString(copy, "back")
         self.appIcon = appIcon
         self.actionTarget = actionTarget
@@ -506,7 +535,7 @@ private struct PermissionHelperRoot: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            Text(state.instruction)
+            Text(state.styledInstruction)
                 .font(.system(size: 13))
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(width: 408, alignment: .leading)

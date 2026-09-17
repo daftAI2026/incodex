@@ -32,7 +32,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   const panels = [];
   const copyKeys = [
     "title", "body", "permissionTitle", "permissionDescription", "repair", "later", "back",
-    "addedTitle", "addedBody", "dragInstruction", "completeInSettings", "checking", "repairing",
+    "addedTitle", "addedBody", "dragInstruction", "dragInstructionRuns", "completeInSettings", "checking", "repairing",
     "openSettings", "errorTitle", "errorBody",
   ];
   function nativeCopy() {

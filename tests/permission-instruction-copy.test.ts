@@ -21,8 +21,8 @@ const locales = Object.keys(guide).sort();
 
 test("permission-only semantic copy is removed from the shared renderer bundle", () => {
   const renderer = readFileSync(join(import.meta.dir, "..", "dist", "incodex-inject.js"), "utf8");
-  expect(renderer).not.toContain("ACCESSIBILITY_DRAG_INSTRUCTION_RUNS");
-  expect(renderer).not.toContain(" to the list above to allow ");
+  expect(renderer.includes("ACCESSIBILITY_DRAG_INSTRUCTION_RUNS"), "native-only table leaked into renderer").toBe(false);
+  expect(renderer.includes(" to the list above to allow "), "native-only text leaked into renderer").toBe(false);
 });
 
 // Frozen from the pre-runs copy table. This protects the existing 65 plain
