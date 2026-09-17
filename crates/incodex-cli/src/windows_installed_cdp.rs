@@ -148,35 +148,42 @@ pub(crate) fn inject_installed_shared_ui(
     };
     let alive = AtomicBool::new(true);
     let mut readiness = CodexModeReadiness::default();
-    let deadline = Instant::now() + BRIDGE_READY_TIMEOUT;
-    let mut last = "installed Codex CDP page not ready".to_string();
-    while Instant::now() < deadline && package_process_is_alive(package_full_name, main_process_id)?
-    {
-        if !listener_belongs_to_package(debug_port, package_full_name)? {
-            thread::sleep(PROCESS_POLL_INTERVAL);
-            continue;
-        }
-        match inject_shared_ui_with_options_while_alive_and_guard_with_readiness_and_runtime(
-            debug_port,
-            &options,
-            &alive,
-            |_| {},
-            &mut readiness,
-            &|stream| require_package_connection_owner(stream, package_full_name),
-            runtime_source,
-        ) {
-            Ok(_) => {
-                return run_bridge_until_exit(
-                    debug_port,
-                    &context,
-                    &options,
-                    &alive,
-                    &mut readiness,
-                );
+    wait_for_installed_ui(
+        BRIDGE_READY_TIMEOUT,
+        PROCESS_POLL_INTERVAL,
+        || package_process_is_alive(package_full_name, main_process_id),
+        |_| {
+            if !listener_belongs_to_package(debug_port, package_full_name)? {
+                return Err("installed Codex CDP listener not ready".into());
             }
+            inject_shared_ui_with_options_while_alive_and_guard_with_readiness_and_runtime(
+                debug_port,
+                &options,
+                &alive,
+                |_| {},
+                &mut readiness,
+                &|stream| require_package_connection_owner(stream, package_full_name),
+                runtime_source,
+            )
+        },
+    )?;
+    run_bridge_until_exit(debug_port, &context, &options, &alive, &mut readiness)
+}
+
+fn wait_for_installed_ui<T>(
+    budget: Duration,
+    interval: Duration,
+    mut process_alive: impl FnMut() -> Result<bool, String>,
+    mut attempt: impl FnMut(Instant) -> Result<T, String>,
+) -> Result<T, String> {
+    let deadline = Instant::now() + budget;
+    let mut last = "installed Codex CDP page not ready".to_string();
+    while Instant::now() < deadline && process_alive()? {
+        match attempt(deadline) {
+            Ok(value) => return Ok(value),
             Err(error) => last = error,
         }
-        thread::sleep(PROCESS_POLL_INTERVAL);
+        thread::sleep(interval);
     }
     Err(format!("installed Windows UI injection failed: {last}"))
 }
