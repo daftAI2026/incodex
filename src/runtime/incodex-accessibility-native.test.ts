@@ -998,6 +998,29 @@ test("uses SwiftUI helper preferred size with AppKit drag and arrow geometry", a
   }
 });
 
+test("gives the ordinary helper its native shadow while keeping the arrow shell shadowless", async () => {
+  const { api, bridge } = await makeHarness({
+    locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+  });
+  try {
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+    const helper = helperPanels(bridge).find((panel) => {
+      const size = panel.frame().size;
+      return size.width === 531 && size.height === 110;
+    });
+    const arrow = helperPanels(bridge).find((panel) => {
+      const size = panel.frame().size;
+      return size.width === 100 && size.height === 100;
+    });
+    if (!helper || !arrow) throw new Error("ordinary helper and arrow panels are missing");
+    expect(helper.values.get("hasShadow")).toBe(true);
+    expect(arrow.values.get("hasShadow")).toBe(false);
+  } finally {
+    api.close();
+  }
+});
+
 test("keeps the reference fixed helper width despite an unrelated host fitting size", async () => {
   const { api, bridge } = await makeHarness({
     helperFittingSize: { width: 600, height: 140 },
