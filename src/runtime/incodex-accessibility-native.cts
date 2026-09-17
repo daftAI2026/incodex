@@ -398,6 +398,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
         helper=created;
         if (target && source) {
           helper.flightTarget = { panel: helper.panel, view: helper.view, radius: 12,
+            captureImage: () => created.view.snapshotImageWithScale$(Number(created.panel.backingScaleFactor())),
             frame: helper.panel.convertRectToScreen$(helper.view.bounds()) };
           if (onHandoff) {
             const activeFlight=onHandoff({objc,source,target:helper.flightTarget,isClosed:()=>closed});

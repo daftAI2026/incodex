@@ -529,9 +529,9 @@ private struct PermissionHelperAppRowRoot: View {
     }
 }
 
-private struct PermissionHelperRoot: View {
+private struct PermissionHelperForeground<Row: View>: View {
     @ObservedObject var state: PermissionHelperState
-    let appRowHost: NSView
+    let appRowContent: Row
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -544,7 +544,7 @@ private struct PermissionHelperRoot: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(Color(nsColor: .controlBackgroundColor))
-                PermissionEmbeddedView(view: appRowHost, size: CGSize(width: 459, height: 42))
+                appRowContent
             }
                 .frame(width: 459, height: 42)
                 .overlay {
@@ -569,6 +569,18 @@ private struct PermissionHelperRoot: View {
             .offset(x: 18, y: 55 + state.extraHeight)
         }
         .frame(width: 531, height: 110 + state.extraHeight, alignment: .topLeading)
+    }
+}
+
+private struct PermissionHelperRoot: View {
+    @ObservedObject var state: PermissionHelperState
+    let appRowHost: NSView
+
+    var body: some View {
+        PermissionHelperForeground(
+            state: state,
+            appRowContent: PermissionEmbeddedView(view: appRowHost, size: CGSize(width: 459, height: 42))
+        )
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay {
@@ -594,6 +606,46 @@ public final class IncodexPermissionHelperView: NSView {
     @objc public var preferredContentSize: NSSize {
         precondition(Thread.isMainThread, "Permission layout must run on the main thread")
         return NSSize(width: 531, height: max(110, host.fittingSize.height))
+    }
+
+    /// The original helper renders AccessorySnapshotForegroundView rather than
+    /// capturing its live Material-backed hosting view. Keep the draggable live
+    /// row attached to its host; ImageRenderer needs a pure SwiftUI snapshot row.
+    @objc(snapshotImageWithScale:)
+    public func snapshotImage(scale: CGFloat) -> NSImage? {
+        precondition(Thread.isMainThread, "Permission snapshots must run on the main thread")
+        guard scale.isFinite, scale > 0, scale <= 8 else { return nil }
+        let size = preferredContentSize
+        let colorScheme: ColorScheme = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? .dark : .light
+        let foreground = PermissionHelperForeground(
+            state: state, appRowContent: PermissionHelperAppRowRoot(state: state)
+        ).environment(\.colorScheme, colorScheme)
+
+        if #available(macOS 13.0, *) {
+            let renderer = ImageRenderer(content: foreground)
+            renderer.proposedSize = ProposedViewSize(size)
+            renderer.scale = scale
+            return renderer.nsImage
+        }
+
+        // macOS 12 has no ImageRenderer. Render the same native SwiftUI
+        // foreground offscreen, never the live host or an approximate AppKit UI.
+        let snapshotHost = NSHostingView(rootView: foreground)
+        snapshotHost.appearance = effectiveAppearance
+        snapshotHost.frame = NSRect(origin: .zero, size: size)
+        snapshotHost.layoutSubtreeIfNeeded()
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: Int(ceil(size.width * scale)),
+            pixelsHigh: Int(ceil(size.height * scale)), bitsPerSample: 8,
+            samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ) else { return nil }
+        bitmap.size = size
+        snapshotHost.cacheDisplay(in: snapshotHost.bounds, to: bitmap)
+        let image = NSImage(size: size)
+        image.addRepresentation(bitmap)
+        return image
     }
 
     public override var isFlipped: Bool { true }

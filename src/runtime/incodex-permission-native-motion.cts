@@ -32,7 +32,11 @@ function createNativeReplicants({ objc, nativeLibrary, source, target, reverse =
   if (!FlightView) throw new Error("Native permission SwiftUI flight class is unavailable");
   const graphics = createPermissionGraphics(objc);
   const string = value => foundation.NSString.stringWithUTF8String$(value);
-  const targetImage = snapshot(kit, target.view);
+  // CUA renders an appearance-bound SwiftUI foreground for its helper,
+  // excluding the live window's Material. Honor that native capture provider
+  // on both legs; a failed provider must not reintroduce the full background.
+  const targetImage = typeof target.captureImage === "function" ? target.captureImage() : snapshot(kit, target.view);
+  if (!targetImage) throw new Error("Native permission foreground snapshot is unavailable");
   // Each leg composites its outgoing snapshot below its incoming snapshot.
   const flightImages = reverse ? [targetImage, source.image] : [source.image, targetImage];
   const entries = [];
