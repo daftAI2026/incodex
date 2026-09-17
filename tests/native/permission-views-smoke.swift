@@ -63,6 +63,13 @@ enum PermissionViewsSmoke {
         precondition(helper.appRowFrame.size == NSSize(width: 459, height: 42))
         precondition(String(describing: type(of: helper.appRowView)).contains("NSHostingView"))
         precondition(String(describing: type(of: helper.subviews[0])).contains("NSHostingView"))
+        // Routine checks must not repeatedly open a synthetic window on the
+        // user's desktop. Keep actual Return behavior as an explicit UI run.
+        guard ProcessInfo.processInfo.environment["INCODEX_RUN_NATIVE_LAYOUT_SMOKE"] == "1" else {
+            precondition(NSApp.windows.allSatisfy { !$0.isVisible }, "headless smoke must not show windows")
+            print("permission SwiftUI host smoke passed (headless; Return UI not run)")
+            return
+        }
         // Preserve the existing product Return-key contract in the real host;
         // a mocked TS callback cannot establish SwiftUI keyboard behavior.
         let sink = PermissionActionSink()

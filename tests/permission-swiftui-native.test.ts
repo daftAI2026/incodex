@@ -65,7 +65,7 @@ test("PermissionCardRoot states the original continuous Capsule shape on Allow",
   expect(card).toMatch(/\.clipShape\(\s*Capsule\(style:\s*\.continuous\)\s*\)/);
 });
 
-test("macOS permission flight uses a public SwiftUI host with a stable bridge ABI", () => {
+test("macOS permission host ABI is headless by default (Return UI is opt-in)", () => {
   const directory = mkdtempSync(join(tmpdir(), "incodex-swiftui-test-"));
   try {
     const executable = join(directory, "permission-ui-test");
@@ -78,6 +78,9 @@ test("macOS permission flight uses a public SwiftUI host with a stable bridge AB
     const run = spawnSync(executable, [], { encoding: "utf8", timeout: 20_000 });
     expect(run.status, run.stderr || String(run.error ?? "Swift host smoke failed")).toBe(0);
     expect(run.stdout).toContain("permission SwiftUI host smoke passed");
+    if (process.env.INCODEX_RUN_NATIVE_LAYOUT_SMOKE !== "1") {
+      expect(run.stdout).toContain("headless; Return UI not run");
+    }
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
