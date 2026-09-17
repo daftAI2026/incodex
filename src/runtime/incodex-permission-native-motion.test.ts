@@ -333,6 +333,36 @@ test("flight keeps each snapshot at its intrinsic size centered in the changing 
   } finally { replicas.dispose(); }
 });
 
+test("flight clips the combined blurred images to the animated continuous corner without clipping shadows", () => {
+  const bridge = nativeMotionBridge([{ frame: rect(0, 0, 1440, 900), scale: 2 }]);
+  const replicas = createNativeReplicants({
+    objc: bridge.objc,
+    source: { image: { size: () => ({ width: 518, height: 80 }) } },
+    target: { view: bridge.targetView(rect(0, 0, 531, 126)) },
+  });
+  try {
+    for (const cornerRadius of [24, 18, 12]) {
+      replicas.render({ bounds: { x: 100, y: 200, width: 526, height: 104 },
+        progress: .5, cornerRadius, sourceOpacity: .5, targetOpacity: .5, sourceBlur: 6, targetBlur: 6 });
+      const root = bridge.panels()[0].contentViewValue;
+      const surface = root.subviews.find((view: any) => view.subviews.length === 2);
+      expect(surface.subviews.map((view: any) => view.type)).toEqual(["NSImageView", "NSImageView"]);
+      expect(surface.layerValue.values.get("setMasksToBounds$")).toBe(true);
+      expect(surface.layerValue.values.get("setCornerCurve$")).toBe("continuous");
+      expect(surface.layerValue.values.get("setCornerRadius$")).toBe(cornerRadius);
+      expect(root.layerValue.values.get("setMasksToBounds$")).toBe(false);
+      for (const image of surface.subviews) {
+        expect(image.layerValue.values.get("setMasksToBounds$")).toBe(false);
+        expect(image.layerValue.values.get("setFilters$")).not.toBeNull();
+      }
+      for (const shadow of root.layerValue.sublayers) {
+        expect(shadow.values.get("setMasksToBounds$")).toBe(false);
+        expect(shadow.values.get("setMask$").values.get("setFillRule$")).toBe("even-odd");
+      }
+    }
+  } finally { replicas.dispose(); }
+});
+
 test("native snapshot rejects an empty view before creating flight panels", () => {
   const bridge = nativeMotionBridge([
     { frame: rect(0, 0, 1440, 900), scale: 2 },
