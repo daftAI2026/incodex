@@ -19,6 +19,12 @@ const COPY = {
   addedTitle: "Allow Codex in System Settings",
   addedBody: "Drag Codex into Accessibility and wait for the automatic check.",
   dragInstruction: "Drag Codex to the list above to allow Accessibility",
+  dragInstructionRuns: JSON.stringify([
+    { text: "Drag ", role: "secondary" },
+    { text: "Codex", role: "primary" },
+    { text: " to the list above to allow ", role: "secondary" },
+    { text: "Accessibility", role: "primary" },
+  ]),
   openSettings: "Open Settings",
   checking: "Checking automatically",
   completeInSettings: "COMPLETE IN SYSTEM SETTINGS",
@@ -1988,6 +1994,7 @@ test("passes helper dragInstruction through the SwiftUI copy dictionary", async 
     const configure=swift!.calls.find((call)=>call.selector==="configureWithCopy:appIcon:actionTarget:");
     const copy=configure?.args[0] as FakeNative;
     expect(copy.values.get("dragInstruction")).toBe(COPY.dragInstruction ?? COPY.addedBody);
+    expect(copy.values.get("dragInstructionRuns")).toBe(COPY.dragInstructionRuns);
     expect(bridge.objects.some((value)=>value.type==="NSTextField")).toBe(false);
   } finally {api.close();}
 });

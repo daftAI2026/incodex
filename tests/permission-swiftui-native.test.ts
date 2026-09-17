@@ -6,6 +6,27 @@ import { join } from "node:path";
 
 const layoutSmokeSource = join(import.meta.dir, "native", "permission-views-layout-smoke.m");
 
+test.skipIf(process.platform !== "darwin")("native helper instruction preserves localized semantic runs without windows", () => {
+  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  expect(source).toContain("Text(state.styledInstruction)");
+  const directory = mkdtempSync(join(tmpdir(), "incodex-instruction-"));
+  try {
+    const executable = join(directory, "instruction");
+    const build = spawnSync("xcrun", [
+      "swiftc", "-parse-as-library", "-module-name", "IncodexInstructionTest",
+      "native/macos/permission-views.swift", "tests/native/permission-instruction-smoke.swift",
+      "-o", executable,
+    ], { cwd: join(import.meta.dir, ".."), encoding: "utf8", timeout: 60_000 });
+    expect(build.status, build.stderr || String(build.error ?? "instruction compilation failed")).toBe(0);
+    if (build.status !== 0) return;
+    const run = spawnSync(executable, [], { encoding: "utf8", timeout: 20_000 });
+    expect(run.status, run.stderr || String(run.error ?? "instruction smoke failed")).toBe(0);
+    expect(run.stdout).toContain("semantic runs passed (no windows)");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}, 90_000);
+
 test.skipIf(process.platform !== "darwin")("compiles the real placeholder hover reset smoke (runtime is opt-in)", () => {
   const directory = mkdtempSync(join(tmpdir(), "incodex-placeholder-hover-"));
   try {
