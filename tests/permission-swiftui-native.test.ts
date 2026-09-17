@@ -106,6 +106,27 @@ test.skipIf(process.platform !== "darwin").each(["current", "forced-hosting-comp
   }
 }, 90_000);
 
+test.skipIf(process.platform !== "darwin")("flight images preserve native size, compositing and rounded clipping without windows", () => {
+  const directory = mkdtempSync(join(tmpdir(), "incodex-flight-pixels-"));
+  try {
+    const executable = join(directory, "flight-pixels");
+    const architecture = process.arch === "arm64" ? "arm64" : "x86_64";
+    const build = spawnSync("xcrun", [
+      "swiftc", "-parse-as-library", "-target", `${architecture}-apple-macos12`,
+      "-module-name", "IncodexFlightPixelsTest",
+      "native/macos/permission-views.swift", "tests/native/permission-flight-pixels-smoke.swift",
+      "-o", executable,
+    ], { cwd: join(import.meta.dir, ".."), encoding: "utf8", timeout: 60_000 });
+    expect(build.status, build.stderr || String(build.error ?? "flight pixels compilation failed")).toBe(0);
+    if (build.status !== 0) return;
+    const run = spawnSync(executable, [], { encoding: "utf8", timeout: 30_000 });
+    expect(run.status, `${run.stdout ?? ""}${run.stderr ?? ""}` || String(run.error ?? "flight pixels smoke failed")).toBe(0);
+    expect(run.stdout).toContain("permission flight pixels smoke passed (windowless;");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}, 100_000);
+
 test("helper instruction uses the original semantic body font and matching native measurement", () => {
   const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
   const start = source.indexOf("Text(state.styledInstruction)");

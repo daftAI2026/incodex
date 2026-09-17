@@ -94,6 +94,39 @@ test("native pixel alignment rounds rectangle edges with C round semantics on ne
     .toEqual({ x: 0, y: 0, width: 1, height: 1 });
 });
 
+test("flight preserves the screen-space quadratic arc and centered size interpolation", () => {
+  // An independent bottom-up screen-space construction checks the top-down
+  // motion adapter in both directions. The curve passes 50pt above the higher
+  // endpoint at p=.5; this point is not necessarily its mathematical apex.
+  const fixtures = [
+    [{ x: 100.25, y: 400.5, width: 518, height: 80, radius: 24 }, { x: 700.5, y: 200.25, width: 531, height: 110, radius: 14 }],
+    [{ x: -1600.5, y: -150.25, width: 518, height: 80, radius: 24 }, { x: -900.25, y: 630.5, width: 531, height: 126, radius: 14 }],
+    [{ x: 500, y: 300, width: 518, height: 80, radius: 24 }, { x: 200, y: 285, width: 531, height: 110, radius: 14 }],
+  ];
+  const topDown = (r: typeof source) => ({ ...r, y: -r.y - r.height });
+  for (const pair of fixtures) for (const [from, to] of [pair, [...pair].reverse()]) {
+    const start = { x: from.x + from.width / 2, y: from.y + from.height / 2 };
+    const end = { x: to.x + to.width / 2, y: to.y + to.height / 2 };
+    const control = {
+      x: 2 * ((start.x + end.x) / 2 - start.x / 4 - end.x / 4),
+      y: 2 * (Math.max(start.y, end.y) + 50 - start.y / 4 - end.y / 4),
+    };
+    for (const p of [0, .1, .25, .5, .75, .9, 1]) {
+      const q = 1 - p;
+      const center = { x: q * q * start.x + 2 * q * p * control.x + p * p * end.x,
+        y: q * q * start.y + 2 * q * p * control.y + p * p * end.y };
+      const width = from.width + p * (to.width - from.width);
+      const height = from.height + p * (to.height - from.height);
+      const actual = motion.samplePermissionFlightAtProgress(topDown(from), topDown(to), p);
+      expect(actual.bounds.x).toBeCloseTo(center.x - width / 2, 9);
+      expect(-actual.bounds.y - actual.bounds.height).toBeCloseTo(center.y - height / 2, 9);
+      expect(actual.bounds.width).toBeCloseTo(width, 9);
+      expect(actual.bounds.height).toBeCloseTo(height, 9);
+      expect(actual.cornerRadius).toBeCloseTo(from.radius + p * (to.radius - from.radius), 9);
+    }
+  }
+});
+
 test("flight follows a moved Settings target instead of landing at its stale position", () => {
   let time = 0;
   const pending: { next: (() => void) | null } = { next: null };
