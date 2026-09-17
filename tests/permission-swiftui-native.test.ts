@@ -6,6 +6,19 @@ import { join } from "node:path";
 
 const layoutSmokeSource = join(import.meta.dir, "native", "permission-views-layout-smoke.m");
 
+test("helper hint lays out arrow and body text in a natural horizontal stack", () => {
+  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const start = source.indexOf("private struct PermissionHelperDragHint:");
+  expect(start).toBeGreaterThanOrEqual(0);
+  const hint = source.slice(start, source.indexOf("private struct PermissionHelperForeground", start));
+  expect(hint).toContain("HStack(alignment: .center, spacing: 8)");
+  expect(hint).toContain("Text(state.styledInstruction)");
+  expect(hint).toContain(".font(.body)");
+  expect(hint).not.toContain(".fixedSize");
+  expect(hint).not.toContain(".frame(width: 408");
+  expect(hint).not.toContain(".offset(");
+});
+
 test("helper delegates outer edge treatment to its native window shell", () => {
   const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
   const start = source.indexOf("private struct PermissionHelperRoot:");
