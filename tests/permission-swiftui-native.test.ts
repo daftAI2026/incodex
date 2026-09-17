@@ -6,6 +6,20 @@ import { join } from "node:path";
 
 const layoutSmokeSource = join(import.meta.dir, "native", "permission-views-layout-smoke.m");
 
+test("helper instruction uses the original semantic body font and matching native measurement", () => {
+  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const start = source.indexOf("Text(state.styledInstruction)");
+  expect(start).toBeGreaterThanOrEqual(0);
+  const instruction = source.slice(start, source.indexOf(".offset(x: 102", start));
+  // Original DragHintView: Font.body at 0x100EBD108, Text.font at
+  // 0x100EBD120. A matching default 13pt value is not the same font API.
+  expect(instruction).toContain(".font(.body)");
+  expect(instruction).not.toContain(".font(.system(size: 13))");
+  const measurement = source.slice(source.indexOf("var instructionHeight:"), source.indexOf("var extraHeight:"));
+  expect(measurement).toContain("NSFont.preferredFont(forTextStyle: .body, options: [:])");
+  expect(measurement).not.toContain("NSFont.systemFont(ofSize: 13)");
+});
+
 test.skipIf(process.platform !== "darwin")("native helper instruction preserves localized semantic runs without windows", () => {
   const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
   expect(source).toContain("Text(state.styledInstruction)");
