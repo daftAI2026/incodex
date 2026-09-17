@@ -33,6 +33,30 @@ enum PermissionViewsSmoke {
         precondition(view.flightProgress == 1 && view.flightCornerRadius == 12)
         precondition(view.hitTest(NSPoint(x: 50, y: 30)) == nil)
         view.setSourceImage(nil, targetImage: nil)
+        let copy: NSDictionary = [
+            "title": "Enable ChatGPT scripting", "body": "Allow Accessibility access.",
+            "permissionTitle": "Accessibility", "permissionDescription": "Read and control app interfaces",
+            "repair": "Allow", "later": "Skip", "completeInSettings": "Complete in Settings",
+            "back": "Back", "dragInstruction": "Drag ChatGPT into the app list above.",
+        ]
+        let initial = IncodexPermissionInitialView(frame: NSRect(x: 0, y: 0, width: 600, height: 340))
+        initial.configure(copy: copy, appIcon: source, permissionIcon: target, actionTarget: nil)
+        let initialHost = initial.subviews[0]
+        precondition(String(describing: type(of: initialHost)).contains("NSHostingView"))
+        precondition(String(describing: type(of: initial.permissionCardView)).contains("NSHostingView"))
+        precondition(initial.preferredContentSize.width == 600)
+        precondition(initial.preferredContentSize.height >= 312)
+        initial.setContent(title: "Error", body: "Retry after fixing permissions.", allowEnabled: false, settingsPlaceholder: true)
+        initial.layoutSubtreeIfNeeded()
+        precondition(initial.subviews[0] === initialHost)
+        precondition(initial.permissionCardView.bounds.size == NSSize(width: 518, height: 80))
+        let helper = IncodexPermissionHelperView(frame: NSRect(x: 0, y: 0, width: 531, height: 110))
+        helper.configure(copy: copy, appIcon: source, actionTarget: nil)
+        precondition(helper.preferredContentSize.width == 531)
+        precondition(helper.preferredContentSize.height >= 110)
+        precondition(helper.appRowFrame.size == NSSize(width: 459, height: 42))
+        precondition(String(describing: type(of: helper.appRowView)).contains("NSHostingView"))
+        precondition(String(describing: type(of: helper.subviews[0])).contains("NSHostingView"))
         print("permission SwiftUI host smoke passed")
     }
 }
