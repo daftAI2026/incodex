@@ -10,6 +10,9 @@ trait RestoreOps {
     fn verify_official(&mut self) -> Result<(), String>;
     fn launch(&mut self) -> Result<(), String>;
     fn probe(&mut self) -> AccessibilityStatus;
+    fn wait_for_window(&mut self) -> Result<(), String> {
+        Ok(())
+    }
     fn reset(&mut self) -> Result<(), String>;
     fn show_settings_and_app(&mut self) -> Result<(), String>;
     fn wait(&mut self, milliseconds: u64);
@@ -158,6 +161,7 @@ mod tests {
         states: VecDeque<AccessibilityStatus>,
         events: Vec<&'static str>,
         reset_error: bool,
+        show_error: bool,
         verify_error: bool,
     }
     impl Fake {
@@ -166,6 +170,7 @@ mod tests {
                 states: states.iter().copied().collect(),
                 events: vec![],
                 reset_error: false,
+                show_error: false,
                 verify_error: false,
             }
         }
@@ -199,6 +204,14 @@ mod tests {
         }
         fn show_settings_and_app(&mut self) -> Result<(), String> {
             self.events.push("show");
+            if self.show_error {
+                Err("open failed".into())
+            } else {
+                Ok(())
+            }
+        }
+        fn wait_for_window(&mut self) -> Result<(), String> {
+            self.events.push("window");
             Ok(())
         }
         fn wait(&mut self, _: u64) {
@@ -231,7 +244,7 @@ mod tests {
     }
     #[test]
     fn unknown_host_identity_never_resets() {
-        let mut ops = Fake::new(&[AccessibilityStatus::Unknown]);
+        let mut ops = Fake::new(&[AccessibilityStatus::Unknown; 120]);
         assert!(renew(&mut ops).is_err());
         assert!(!ops.events.contains(&"reset"));
     }
@@ -265,5 +278,34 @@ mod tests {
         assert_eq!(renew(&mut ops), Ok(Outcome::Granted));
         assert!(ops.events.contains(&"wait"));
         assert!(!ops.events.contains(&"reset"));
+    }
+    #[test]
+    fn transient_identity_changes_are_retried_before_and_after_reset() {
+        let mut ops = Fake::new(&[
+            AccessibilityStatus::NotRunning,
+            AccessibilityStatus::Unknown,
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Unknown,
+            AccessibilityStatus::Granted,
+        ]);
+        assert_eq!(renew(&mut ops), Ok(Outcome::Granted));
+        assert_eq!(ops.events.iter().filter(|x| **x == "reset").count(), 1);
+    }
+    #[test]
+    fn waits_for_window_and_rechecks_access_before_resetting() {
+        let mut ops = Fake::new(&[AccessibilityStatus::Denied, AccessibilityStatus::Granted]);
+        assert_eq!(renew(&mut ops), Ok(Outcome::Granted));
+        assert!(ops.events.contains(&"window"));
+        assert!(!ops.events.contains(&"reset"));
+    }
+    #[test]
+    fn handoff_failure_explains_that_reset_happened_and_how_to_finish() {
+        let mut ops = Fake::new(&[AccessibilityStatus::Denied]);
+        ops.show_error = true;
+        let error = renew(&mut ops).unwrap_err();
+        assert!(error.contains("registration was cleared"));
+        assert!(error.contains("System Settings"));
+        assert!(error.contains("/Applications/ChatGPT.app"));
     }
 }
