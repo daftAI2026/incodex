@@ -4,6 +4,7 @@
 #include <dlfcn.h>
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 
 // This is a deliberately small real-window probe.  Its AX traversal follows
@@ -134,6 +135,10 @@ static BOOL rectanglesOverlap(NSRect first, NSRect second) {
     return intersection.size.width > 0.5 && intersection.size.height > 0.5;
 }
 
+static BOOL approximately(CGFloat actual, CGFloat expected) {
+    return fabs(actual - expected) <= 0.5;
+}
+
 static void drainRunLoop(NSTimeInterval seconds) {
     NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:seconds];
     while ([deadline timeIntervalSinceNow] > 0) {
@@ -166,9 +171,28 @@ static NSDictionary *longTitleCopy(void) {
     };
 }
 
+static NSDictionary *shortTitleCopy(void) {
+    return @{
+        @"title": @"Enable ChatGPT scripting",
+        @"body": @"Allow Accessibility access.",
+        @"permissionTitle": @"Accessibility",
+        @"permissionDescription": @"Read and control app interfaces",
+        @"repair": @"Allow",
+        @"later": @"Skip",
+        @"completeInSettings": @"Complete in Settings",
+        @"back": @"Back",
+        @"dragInstruction": @"Drag ChatGPT into the app list above.",
+    };
+}
+
 int main(int argc, const char **argv) {
-    if (argc != 2) {
-        fprintf(stderr, "usage: %s /path/to/incodex-permission-ui.dylib\n", argv[0]);
+    if (argc < 2 || argc > 3) {
+        fprintf(stderr, "usage: %s /path/to/incodex-permission-ui.dylib [card]\n", argv[0]);
+        return 2;
+    }
+    BOOL cardMode = argc == 3 && strcmp(argv[2], "card") == 0;
+    if (argc == 3 && !cardMode) {
+        fprintf(stderr, "unknown layout smoke mode: %s\n", argv[2]);
         return 2;
     }
 
@@ -191,7 +215,7 @@ int main(int argc, const char **argv) {
             return 4;
         }
 
-        NSDictionary *copy = longTitleCopy();
+        NSDictionary *copy = cardMode ? shortTitleCopy() : longTitleCopy();
         id initial = makeView(initialClass, NSMakeRect(0, 0, 600, 340));
         ((void (*)(id, SEL, id, id, id, id))objc_msgSend)(
             initial,
@@ -216,9 +240,78 @@ int main(int argc, const char **argv) {
 
         AXUIElementRef application = AXUIElementCreateApplication(getpid());
         AXUIElementRef window = findWindow(application, copy[@"title"]);
+        AXUIElementRef card = findAX(window, kAXGroupRole, nil, 518, 80, YES, 0);
+
+        if (cardMode) {
+            AXUIElementRef cardTitle = findAX(card, kAXStaticTextRole, copy[@"permissionTitle"], 0, 0, NO, 0);
+            AXUIElementRef cardDescription = findAX(card, kAXStaticTextRole, copy[@"permissionDescription"], 0, 0, NO, 0);
+            AXUIElementRef allow = findAX(card, kAXButtonRole, copy[@"repair"], 0, 0, NO, 0);
+            NSRect cardRect = NSZeroRect;
+            NSRect titleRect = NSZeroRect;
+            NSRect descriptionRect = NSZeroRect;
+            NSRect allowRect = NSZeroRect;
+            BOOL geometryFound = card != NULL
+                && cardTitle != NULL
+                && cardDescription != NULL
+                && allow != NULL
+                && axRect(card, &cardRect)
+                && axRect(cardTitle, &titleRect)
+                && axRect(cardDescription, &descriptionRect)
+                && axRect(allow, &allowRect);
+            CGFloat titleX = titleRect.origin.x - cardRect.origin.x;
+            CGFloat titleY = titleRect.origin.y - cardRect.origin.y;
+            CGFloat descriptionX = descriptionRect.origin.x - cardRect.origin.x;
+            CGFloat descriptionY = descriptionRect.origin.y - cardRect.origin.y;
+            CGFloat allowX = allowRect.origin.x - cardRect.origin.x;
+            CGFloat allowY = allowRect.origin.y - cardRect.origin.y;
+            BOOL cardSizeOK = geometryFound
+                && approximately(cardRect.size.width, 518.0)
+                && approximately(cardRect.size.height, 80.0);
+            BOOL titleOK = geometryFound
+                && approximately(titleX, 84.5)
+                && approximately(titleY, 20.5);
+            BOOL descriptionOK = geometryFound
+                && approximately(descriptionX, 84.5)
+                && approximately(descriptionY, 42.5);
+            BOOL allowOK = geometryFound
+                && approximately(allowX, 443.0)
+                && approximately(allowY, 28.0)
+                && approximately(allowRect.size.width, 56.5)
+                && approximately(allowRect.size.height, 24.0);
+            printf(
+                "C03_C11_AX card=(%.1f,%.1f %.1fx%.1f) titleRel=(%.1f,%.1f) descRel=(%.1f,%.1f) allowRel=(%.1f,%.1f %.1fx%.1f)\n",
+                cardRect.origin.x, cardRect.origin.y, cardRect.size.width, cardRect.size.height,
+                titleX, titleY, descriptionX, descriptionY,
+                allowX, allowY, allowRect.size.width, allowRect.size.height
+            );
+            printf(
+                "C03_C11_CHECK card=%s title=%s description=%s allow=%s\n",
+                cardSizeOK ? "yes" : "no",
+                titleOK ? "yes" : "no",
+                descriptionOK ? "yes" : "no",
+                allowOK ? "yes" : "no"
+            );
+            if (!geometryFound) {
+                fprintf(stderr, "C03/C11 failed: real AX card/title/description/Allow node was not found\n");
+            }
+            if (!cardSizeOK) fprintf(stderr, "C03/C11 failed: card AX frame is not 518x80\n");
+            if (!titleOK) fprintf(stderr, "C03/C11 failed: card title relative origin is not 84.5,20.5\n");
+            if (!descriptionOK) fprintf(stderr, "C03/C11 failed: card description relative origin is not 84.5,42.5\n");
+            if (!allowOK) fprintf(stderr, "C03/C11 failed: Allow relative frame is not 443,28,56.5,24\n");
+
+            if (cardTitle != NULL) CFRelease(cardTitle);
+            if (cardDescription != NULL) CFRelease(cardDescription);
+            if (allow != NULL) CFRelease(allow);
+            if (card != NULL) CFRelease(card);
+            if (window != NULL) CFRelease(window);
+            if (application != NULL) CFRelease(application);
+            [panel orderOut:nil];
+            [panel close];
+            return cardSizeOK && titleOK && descriptionOK && allowOK ? 0 : 1;
+        }
+
         AXUIElementRef title = findAX(window, kAXStaticTextRole, copy[@"title"], 0, 0, NO, 0);
         AXUIElementRef body = findAX(window, kAXStaticTextRole, copy[@"body"], 0, 0, NO, 0);
-        AXUIElementRef card = findAX(window, kAXGroupRole, nil, 518, 80, YES, 0);
         NSRect titleRect = NSZeroRect;
         NSRect bodyRect = NSZeroRect;
         NSRect cardRect = NSZeroRect;
