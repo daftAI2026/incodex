@@ -192,6 +192,19 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
       image: snapshot(allowSurface), radius: Number(allow.frame().size.height) / 2 };
   }
 
+  const HELPER_WIDTH = 531;
+  const HELPER_HEIGHT = 110;
+  const HELPER_ROW_X = 62;
+  const HELPER_ROW_Y = 48;
+  const HELPER_ROW_WIDTH = 459;
+  const HELPER_ROW_HEIGHT = 42;
+  const HELPER_ARROW_WINDOW_X = 31;
+  const HELPER_ARROW_WINDOW_SIZE = 100;
+  // The measured offset is in the screen's top-left coordinate space. AppKit
+  // stores the child-window origin from the bottom-left, so convert it below.
+  const HELPER_ARROW_SCREEN_TOP = -50;
+  const HELPER_ARROW_GRAPHIC_SIZE = 28;
+  const HELPER_ARROW_TEXT_GAP = 8;
   function screens() { const values = kit.NSScreen.screens(); return Array.from({ length: Number(values.count()) }, (_, i) => values.objectAtIndex$(i)); }
   function helperFrame(target) {
     const first = screens()[0];
@@ -200,10 +213,10 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     // CUA Accessibility accessory: trailing/bottom inset 10pt inside Settings.
     // Convert Quartz window bounds to AppKit once, then match CGRectIntegral.
     // ScreenRecording has a separate heading-aware branch; we do not request it.
-    const x = target.x + target.width - 532 - 10;
+    const x = target.x + target.width - HELPER_WIDTH - 10;
     const y = primary.origin.y + primary.size.height - target.y - target.height + 10;
     const left = Math.floor(x), bottom = Math.floor(y);
-    return rect(left, bottom, Math.ceil(x + 532) - left, Math.ceil(y + 112) - bottom);
+    return rect(left, bottom, Math.ceil(x + HELPER_WIDTH) - left, Math.ceil(y + HELPER_HEIGHT) - bottom);
   }
   function animateArrow(x, y) {
     if (!arrow || closed) return;
@@ -270,28 +283,37 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   }, ["NSDraggingSource", "NSPasteboardItemDataProvider"]);
 
   let instructionX = 0;
-  function positionArrow(frame) { arrowPanel.setFrame$display$(rect(frame.origin.x + instructionX - 7, frame.origin.y + 112 - 12 - 28 - 11, 42, 62.8), false); }
+  function positionArrow(frame) {
+    const arrowY = frame.origin.y + HELPER_HEIGHT - HELPER_ARROW_WINDOW_SIZE - HELPER_ARROW_SCREEN_TOP;
+    arrowPanel.setFrame$display$(rect(
+      frame.origin.x + HELPER_ARROW_WINDOW_X,
+      arrowY,
+      HELPER_ARROW_WINDOW_SIZE,
+      HELPER_ARROW_WINDOW_SIZE,
+    ), false);
+  }
   function createHelper(frame) {
     const panel = kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(frame,128,2,false); configurePanel(panel,true);
     panel.setOpaque$(false); panel.setBackgroundColor$(kit.NSColor.clearColor()); panel.setHasShadow$(false); panel.setIgnoresMouseEvents$(false);
-    const view = Material.alloc().initWithFrame$(rect(0,0,532,112)); view.setMaterial$(6); view.setBlendingMode$(0); view.setState$(1); view.setWantsLayer$(true); view.layer().setCornerRadius$(12); view.layer().setMasksToBounds$(true);
-    const edge = surface(rect(0,0,532,112),12,kit.NSColor.clearColor());
+    const view = Material.alloc().initWithFrame$(rect(0,0,HELPER_WIDTH,HELPER_HEIGHT)); view.setMaterial$(6); view.setBlendingMode$(0); view.setState$(1); view.setWantsLayer$(true); view.layer().setCornerRadius$(12); view.layer().setMasksToBounds$(true);
+    const edge = surface(rect(0,0,HELPER_WIDTH,HELPER_HEIGHT),12,kit.NSColor.clearColor());
     edge.setBorderType$(1); edge.setBorderWidth$(.5); edge.setBorderColor$(kit.NSColor.separatorColor()); view.addSubview$(edge);
     panel.setContentView$(view);
     const instruction = label(text("dragInstruction") || text("addedBody"),rect(0,0,480,18),13,false); instruction.setFont$(kit.NSFont.systemFontOfSize$weight$(13, .23)); instruction.sizeToFit();
-    const width = Math.min(instruction.frame().size.width,464); instructionX=(532-28-8-width)/2;
-    instruction.setFrame$(rect(instructionX+36,17,width,18)); view.addSubview$(instruction);
-    const back = button("",rect(16,58,32,32),"later:");
+    const width = Math.min(instruction.frame().size.width, HELPER_ROW_WIDTH - HELPER_ARROW_GRAPHIC_SIZE - HELPER_ARROW_TEXT_GAP);
+    instructionX = HELPER_ROW_X + (HELPER_ROW_WIDTH - HELPER_ARROW_GRAPHIC_SIZE - HELPER_ARROW_TEXT_GAP - width) / 2;
+    instruction.setFrame$(rect(instructionX + HELPER_ARROW_GRAPHIC_SIZE + HELPER_ARROW_TEXT_GAP,17,width,18)); view.addSubview$(instruction);
+    const back = button("",rect(18,55,28,28),"later:");
     const backLabel = str(text("back"));
     back.setImage$(kit.NSImage.imageWithSystemSymbolName$accessibilityDescription$(str("chevron.left"),backLabel));
     back.setAccessibilityLabel$(backLabel); back.setBezelStyle$(7); back.setToolTip$(backLabel); view.addSubview$(back);
-    const row=Drag.alloc().initWithFrame$(rect(64,52,452,44)); view.addSubview$(row);
-    const box=kit.NSBox.alloc().initWithFrame$(rect(0,0,452,44)); box.setBoxType$(4); box.setBorderType$(1); box.setCornerRadius$(8); box.setBorderWidth$(.5); box.setBorderColor$(kit.NSColor.separatorColor()); box.setFillColor$(kit.NSColor.controlBackgroundColor()); row.addSubview$(box);
-    appRowView=View.alloc().initWithFrame$(rect(0,0,452,44)); row.addSubview$(appRowView);
-    appRowView.addSubview$(imageView(icon,rect(8,8,28,28))); appRowView.addSubview$(label("ChatGPT",rect(44,13,396,18),13));
-    arrowPanel=kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(rect(0,0,42,62.8),128,2,false); configurePanel(arrowPanel,true); arrowPanel.setOpaque$(false); arrowPanel.setBackgroundColor$(kit.NSColor.clearColor()); arrowPanel.setHasShadow$(false);
-    const canvas=kit.NSView.alloc().initWithFrame$(rect(0,0,42,62.8)); canvas.setWantsLayer$(true); canvas.layer().setMasksToBounds$(false);
-    arrow=Arrow.alloc().initWithFrame$(rect(7,11,28,28)); arrow.setWantsLayer$(true); arrow.layer().setGeometryFlipped$(true); arrow.layer().setAnchorPoint$({x:.5,y:1}); arrow.setFrame$(rect(7,11,28,28)); arrow.layer().setMasksToBounds$(false);
+    const row=Drag.alloc().initWithFrame$(rect(HELPER_ROW_X,HELPER_ROW_Y,HELPER_ROW_WIDTH,HELPER_ROW_HEIGHT)); view.addSubview$(row);
+    const box=kit.NSBox.alloc().initWithFrame$(rect(0,0,HELPER_ROW_WIDTH,HELPER_ROW_HEIGHT)); box.setBoxType$(4); box.setBorderType$(1); box.setCornerRadius$(8); box.setBorderWidth$(.5); box.setBorderColor$(kit.NSColor.separatorColor()); box.setFillColor$(kit.NSColor.controlBackgroundColor()); row.addSubview$(box);
+    appRowView=View.alloc().initWithFrame$(rect(0,0,HELPER_ROW_WIDTH,HELPER_ROW_HEIGHT)); row.addSubview$(appRowView);
+    appRowView.addSubview$(imageView(icon,rect(5,5,32,32))); appRowView.addSubview$(label("ChatGPT",rect(41,13,145.5,16),13));
+    arrowPanel=kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(rect(0,0,HELPER_ARROW_WINDOW_SIZE,HELPER_ARROW_WINDOW_SIZE),128,2,false); configurePanel(arrowPanel,true); arrowPanel.setOpaque$(false); arrowPanel.setBackgroundColor$(kit.NSColor.clearColor()); arrowPanel.setHasShadow$(false);
+    const canvas=kit.NSView.alloc().initWithFrame$(rect(0,0,HELPER_ARROW_WINDOW_SIZE,HELPER_ARROW_WINDOW_SIZE)); canvas.setWantsLayer$(true); canvas.layer().setMasksToBounds$(false);
+    arrow=Arrow.alloc().initWithFrame$(rect(36,10,HELPER_ARROW_GRAPHIC_SIZE,HELPER_ARROW_GRAPHIC_SIZE)); arrow.setWantsLayer$(true); arrow.layer().setGeometryFlipped$(true); arrow.layer().setAnchorPoint$({x:.5,y:1}); arrow.setFrame$(rect(36,10,HELPER_ARROW_GRAPHIC_SIZE,HELPER_ARROW_GRAPHIC_SIZE)); arrow.layer().setMasksToBounds$(false);
     graphics.setBlackColor(arrow.layer(),"shadowColor",1); arrow.layer().setShadowOpacity$(.23); arrow.layer().setShadowRadius$(7); arrow.layer().setShadowOffset$({width:0,height:4});
     canvas.addSubview$(arrow); arrowPanel.setContentView$(canvas); panel.addChildWindow$ordered$(arrowPanel,1); positionArrow(frame);
     const area=kit.NSTrackingArea.alloc().initWithRect$options$owner$userInfo$(arrow.bounds(),1|128|512,arrow,null); arrow.addTrackingArea$(area);
