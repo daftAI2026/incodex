@@ -68,13 +68,13 @@ test("native library requires main thread and uses the verified path exactly onc
   let mainThread = false;
   const loaded: string[] = [];
   const library = { IncodexPermissionFlightView: {} };
-  const objc = { NobjcLibrary: class {
-    constructor(path: string) {
+  const objc = { NobjcLibrary: new Proxy(function NobjcLibrary() {}, {
+    construct(_target, [path]: [string]) {
       loaded.push(path);
       if (path.includes("Foundation.framework")) return { NSThread: { isMainThread: () => mainThread } };
       return library;
     }
-  } };
+  }) };
   expect(() => loadPermissionNativeLibrary(objc, directory, "darwin")).toThrow("main thread");
   expect(loaded).not.toContain(join(directory, name));
   mainThread = true;

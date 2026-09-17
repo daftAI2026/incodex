@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "platform": "macos",
+  "abiVersion": 1,
+  "minimumMacOS": "12.0",
+  "architectures": [
+    "arm64",
+    "x86_64"
+  ],
+  "sourceSha256": "3e87c105df3ebf49b8b12f1dff892a0b57eb257c2b3aaacf94e67dfff866aeef",
+  "files": {
+    "incodex-permission-ui.dylib": "fc7805f319d40fcf46ea1ddfe7bd4c9e7bac02e56d69f8ea577ab9a3caeb7d11"
+  }
+}
