@@ -152,13 +152,15 @@ function createNativeReplicants({ objc, nativeLibrary, source, target, reverse =
         surface.setFrame$(inner);
         surface.updateProgress$cornerRadius$reduceTransparency$(sample.progress, sample.cornerRadius, reduceTransparency);
         strokeView.setFrame$(inner);
-        const radius = Math.max(0, sample.cornerRadius - .25);
+        const strokeRadius = Math.max(0, sample.cornerRadius - .25);
         stroke.setFrame$(bounds); stroke.setOpacity$(.15 * Math.max(0, Math.min(1, sample.progress)));
-        graphics.setRoundedPath(stroke, rect(.25, .25, Math.max(0, aligned.width - .5), Math.max(0, aligned.height - .5)), radius);
+        graphics.setRoundedPath(stroke, rect(.25, .25, Math.max(0, aligned.width - .5), Math.max(0, aligned.height - .5)), strokeRadius);
         shadows.forEach((layer, index) => {
           layer.setFrame$(outer); masks[index].setFrame$(outer);
-          graphics.setRoundedShadowPath(layer, inner, radius);
-          graphics.setOuterShadowMaskPath(masks[index], outer, inner, radius);
+          // Shadow silhouette and cutout follow the full clipping shape;
+          // only the centered half-point stroke needs a quarter-point inset.
+          graphics.setRoundedShadowPath(layer, inner, sample.cornerRadius);
+          graphics.setOuterShadowMaskPath(masks[index], outer, inner, sample.cornerRadius);
         });
         shadows[0].setOpacity$(Math.max(0, Math.min(1, sample.progress)));
       }
