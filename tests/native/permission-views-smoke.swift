@@ -1,6 +1,12 @@
 import AppKit
 import SwiftUI
 
+@MainActor
+private final class PermissionActionSink: NSObject {
+    var allowCount = 0
+    @objc func allow(_ sender: Any?) { allowCount += 1 }
+}
+
 @main
 enum PermissionViewsSmoke {
     @MainActor
@@ -57,6 +63,22 @@ enum PermissionViewsSmoke {
         precondition(helper.appRowFrame.size == NSSize(width: 459, height: 42))
         precondition(String(describing: type(of: helper.appRowView)).contains("NSHostingView"))
         precondition(String(describing: type(of: helper.subviews[0])).contains("NSHostingView"))
+        // Preserve the existing product Return-key contract in the real host;
+        // a mocked TS callback cannot establish SwiftUI keyboard behavior.
+        let sink = PermissionActionSink()
+        initial.configure(copy: copy, appIcon: source, permissionIcon: target, actionTarget: sink)
+        initial.setContent(title: "Keyboard", body: "Local contract", allowEnabled: true, settingsPlaceholder: false)
+        let panel = NSPanel(contentRect: initial.bounds, styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
+        panel.isReleasedWhenClosed = false
+        panel.contentView = initial
+        panel.makeKeyAndOrderFront(nil)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: panel.windowNumber, context: nil, characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)!
+        let handled = panel.performKeyEquivalent(with: event)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        panel.orderOut(nil)
+        panel.close()
+        precondition(handled && sink.allowCount == 1, "Return must activate Allow exactly once")
         print("permission SwiftUI host smoke passed")
     }
 }
