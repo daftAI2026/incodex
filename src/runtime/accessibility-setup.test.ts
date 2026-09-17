@@ -618,3 +618,31 @@ test("published permission resolver follows the shared locale selection for all 
     expect(resolveCopy(locale)).toEqual(expected);
   }
 });
+
+test("regional accessibility guides use verified macOS terminology", () => {
+  const guide = ACCESSIBILITY_SETUP_COPY as Record<string, Record<string, string>>;
+
+  expect(guide["es-ES"]).toMatchObject({
+    addedTitle: "Permitir ChatGPT en Ajustes del Sistema",
+    completeInSettings: "Completar en Ajustes del Sistema",
+    repairing: "Preparando Ajustes del Sistema…",
+    openSettings: "Abrir ajustes",
+    errorBody: "No se pudo completar la configuración de permisos. Añade /Applications/ChatGPT.app en Ajustes del Sistema → Privacidad y seguridad → Accesibilidad y luego ejecuta incodex install para volver a comprobarlo.",
+  });
+  expect(guide["ca-ES"]).toMatchObject({
+    addedTitle: "Permet ChatGPT a la Configuració del sistema",
+    completeInSettings: "Completa-ho a la Configuració del sistema",
+    repairing: "Preparant la Configuració del sistema…",
+    openSettings: "Obre la configuració",
+    errorBody: "No s’ha pogut completar la configuració dels permisos. Afegeix /Applications/ChatGPT.app a Configuració del sistema → Privacitat i seguretat → Accessibilitat i, després, executa incodex install per tornar-ho a comprovar.",
+  });
+  expect(guide["bg-BG"]).toMatchObject({
+    body: "Инсталирането на Incodex променя ChatGPT, затова разрешението за улеснен достъп трябва да бъде дадено отново.",
+    permissionTitle: "Улеснен достъп",
+    addedBody: "Плъзнете иконата на ChatGPT по-горе в списъка за улеснен достъп и я разрешете. Завършете всяко удостоверяване на macOS. Достъпът се проверява автоматично; този прозорец се затваря, когато достъпът е готов.",
+    dragInstruction: "Плъзнете ChatGPT в списъка по-горе, за да разрешите Улеснен достъп",
+    errorBody: "Настройването на разрешенията не можа да бъде завършено. Добавете /Applications/ChatGPT.app в Системни настройки → Поверителност и сигурност → Улеснен достъп, след което изпълнете incodex install, за да проверите отново.",
+  });
+  expect(guide["ro-RO"].errorBody).toBe("Configurarea permisiunii nu a putut fi finalizată. Adăugați /Applications/ChatGPT.app în Configurări sistem → Intimitate și securitate → Accesibilitate, apoi rulați incodex install pentru a verifica din nou.");
+  expect(guide["pl-PL"].permissionTitle).toBe("Dostępność");
+});
