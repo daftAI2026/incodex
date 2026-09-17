@@ -88,6 +88,7 @@ The primary `incodex open` path does not patch Codex. On macOS, the optional `in
 
 - Official plugins cannot add this button. macOS changes the app bundle; Windows keeps the Store package intact and uses its platform integration boundary
 - On macOS, after the default official-app install, a valid OpenAI signature cannot be kept. On the next launch, macOS may ask the patched app to access **Codex Storage Key**. Only if the dialog names the expected app and Keychain item should you enter your **Mac login password** (not your ChatGPT password) and choose **Always Allow**. **Allow** / **Allow Once** grants only that access and may prompt again later; if the details do not match, choose **Deny**. The CLI does not give permanent-authorization advice for `--clone` or `--app` targets
+- The default macOS install reopens ChatGPT to check its **Accessibility** permission for script control. If access is missing, its setup dialog offers to reset only ChatGPT's old Accessibility registration and open System Settings. Drag the centered ChatGPT icon from that same guide into the Accessibility list and complete any macOS authentication. The guide checks automatically and closes only after access is verified. Closing the guide or choosing Back leaves setup incomplete; another explicit `incodex install` retries it without re-signing an already valid installation. Keychain approval and Computer Use access do not prove this permission. `incodex doctor` checks the running target app; after uninstall, open the restored app and check again. This flow does not promise permission continuity across signing changes.
 - On macOS, official **Appshot** (smart snapshot: photo / screenshot attachments) then stops working. This is not a missing camera permission. Computer Use usually still works. `incodex uninstall` restores Appshot
 - Report vulnerabilities via [SECURITY.md](SECURITY.md). Do not open a public issue
 
@@ -183,7 +184,7 @@ $ incodex install
   ! Official Appshot (smart snapshot) stops until uninstall.
   Backup       ~/.incodex/transactions/<install-id>/original/ChatGPT.app
   Install id   0778f0fa-…
-  Runtime      1.0.0
+  Runtime      1.0.1
   App          /Applications/ChatGPT.app
   ✓ Done. Open ChatGPT.app when you want Incognito.
   ! Keychain: On next launch, macOS may ask this patched Codex app to access Codex Storage Key.
@@ -205,8 +206,8 @@ $ incodex status
   Exists       yes
   Installed    yes
   Loader       asar loader only
-  Runtime      1.0.0 releases/1.0.0-<manifestSha256>
-  CLI Runtime  1.0.0
+  Runtime      1.0.1 releases/1.0.1-<manifestSha256>
+  CLI Runtime  1.0.1
   Runtime state current
   Version      26.814.41957 6744
   Install id   0778f0fa-…
@@ -229,10 +230,10 @@ $ incodex doctor
   Arch         arm64
 
 ➤ Runtime
-  Version      1.0.0
-  External     1.0.0 releases/1.0.0-<manifestSha256>
+  Version      1.0.1
+  External     1.0.1 releases/1.0.1-<manifestSha256>
   External check checked
-  CLI Runtime  1.0.0
+  CLI Runtime  1.0.1
   CLI manifest <manifestSha256>
   Deployed manifest <manifestSha256>
   Runtime state current
@@ -262,7 +263,7 @@ The default Doctor checks Incodex-owned Runtime, backup, journal, session, and m
 ```bash
 $ incodex --version
 
-Incodex version 1.0.0
+Incodex version 1.0.1
 macOS: 26.6
 Architecture: arm64
 Kernel: 25.6.0

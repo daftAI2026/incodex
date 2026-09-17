@@ -1,4 +1,6 @@
 #[cfg(not(target_os = "windows"))]
+mod accessibility_setup;
+#[cfg(not(target_os = "windows"))]
 pub mod app_bundle;
 #[cfg(not(target_os = "windows"))]
 pub(crate) mod app_quiescence;
@@ -89,6 +91,8 @@ pub mod windows_runtime;
 mod windows_runtime_lifecycle;
 #[cfg(target_os = "windows")]
 pub mod windows_runtime_open;
+#[cfg(target_os = "windows")]
+mod windows_runtime_raise;
 #[cfg(target_os = "windows")]
 pub mod windows_self_uninstall;
 #[cfg(target_os = "windows")]

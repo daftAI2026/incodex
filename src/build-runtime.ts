@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { minify } from "terser";
+import { ACCESSIBILITY_SETUP_COPY } from "./runtime/incognito-copy.ts";
 import {
   RUNTIME_ARTIFACT_NAMES,
   RUNTIME_EXTERNAL_ARTIFACT_NAMES,
@@ -35,7 +37,7 @@ writeFileSync(injectTmp, injectSrc);
 const injectOut = join(outDir, "incodex-inject.js");
 
 const inject = Bun.spawnSync({
-  cmd: ["bun", "build", injectTmp, "--outfile", injectOut, "--target", "browser"],
+  cmd: ["bun", "build", injectTmp, "--outfile", injectOut, "--target", "browser", "--minify-whitespace"],
   cwd: root,
   stdout: "inherit",
   stderr: "inherit",
@@ -57,6 +59,24 @@ const emitted = spawnSync(
 if (emitted.status !== 0) process.exit(emitted.status ?? 1);
 
 const emitDir = join(root, ".runtime-cjs");
+async function embeddedCjs(file: string): Promise<string> {
+  const compact = await minify(readFileSync(join(emitDir, file), "utf8"), {
+    module: false, compress: false, mangle: { toplevel: true }, format: { comments: false },
+  });
+  if (!compact.code) throw new Error(`Empty embedded Runtime module: ${file}`);
+  return `(() => { const module = { exports: {} }; const exports = module.exports; ${compact.code}\nreturn module.exports; })()`;
+}
+const cardModule = await embeddedCjs("incodex-permission-card.cjs");
+const graphicsModule = await embeddedCjs("incodex-permission-graphics.cjs");
+const motionModule = await embeddedCjs("incodex-permission-motion.cjs");
+const nativeMotionSource = readFileSync(join(emitDir, "incodex-permission-native-motion.cjs"), "utf8")
+  .replace('require("./incodex-permission-motion.cts")', motionModule)
+  .replace('require("./incodex-permission-graphics.cts")', graphicsModule);
+const nativeMotion = await minify(nativeMotionSource, {
+  module: false, compress: false, mangle: { toplevel: true }, format: { comments: false },
+});
+if (!nativeMotion.code) throw new Error("Native permission motion compaction produced no code");
+const nativeMotionModule = `(() => { const module = { exports: {} }; const exports = module.exports; ${nativeMotion.code}\nreturn module.exports; })()`;
 const cjsNames = RUNTIME_ARTIFACT_NAMES.filter((name) => name.endsWith(".cjs"));
 for (const name of cjsNames) {
   const outputPath = join(outDir, name);
@@ -69,6 +89,34 @@ for (const name of cjsNames) {
     );
   if (name === RUNTIME_LOADER_NAME) {
     text = embedRuntimeArtifactNames(text);
+  }
+  if (name === "incodex-main.cjs") {
+    text = text.replace('"__INCODEX_ACCESSIBILITY_COPY__"', JSON.stringify(ACCESSIBILITY_SETUP_COPY));
+    // Compile the short-lived guide into main so existing loader asset allowlists
+    // still verify the complete Runtime. No new disk asset or second publisher.
+    const guideSource = readFileSync(join(emitDir, "incodex-accessibility-native.cjs"), "utf8")
+      .replace('require("./incodex-permission-graphics.cts")', graphicsModule)
+      .replace('require("./incodex-permission-card.cts")', cardModule);
+    const guide = await minify(guideSource, {
+      module: false, compress: false, mangle: { toplevel: true }, format: { comments: false },
+    });
+    if (!guide.code) throw new Error("Permission guide compaction produced no code");
+    text = text.replace('"__INCODEX_ACCESSIBILITY_WINDOW__"',
+      `(() => { const module = { exports: {} }; const exports = module.exports; ${guide.code}\nreturn { ...module.exports, ...${nativeMotionModule} }; })()`);
+  }
+  if (name === "incodex-main.cjs" || name === "incodex-dock-menu.cjs") {
+    // Keep readable source while preserving the external Runtime size budget.
+    // Preserve top-level entry points, property names and CommonJS paths.
+    // Compact only local identifiers; the loader stays unchanged.
+    const compact = await minify(text, {
+      module: false,
+      compress: false,
+      mangle: { toplevel: false },
+      keep_fnames: true,
+      format: { comments: false },
+    });
+    if (!compact.code) throw new Error("Runtime main compaction produced no code");
+    text = `${compact.code}\n`;
   }
   writeFileSync(outputPath, text);
 }

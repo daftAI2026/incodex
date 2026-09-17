@@ -12,8 +12,8 @@ import { join } from "node:path";
 
 function loadInstalledRuntimeLocaleReader(sourceHome: string): () => string {
   const main = readFileSync(join(import.meta.dir, "../dist/incodex-main.cjs"), "utf8");
-  const start = main.indexOf("function readLocaleOverride() {");
-  const end = main.indexOf("\nfunction sessionBurnExpectation", start);
+  const start = main.indexOf("function readLocaleOverride(");
+  const end = main.indexOf("function sessionBurnExpectation", start);
   expect(start).toBeGreaterThanOrEqual(0);
   expect(end).toBeGreaterThan(start);
   return new Function(
@@ -33,7 +33,7 @@ function loadInstalledRuntimeLocaleReader(sourceHome: string): () => string {
 function loadInstalledRuntimeHookWindow(readLocaleOverride: () => string) {
   const main = readFileSync(join(import.meta.dir, "../dist/incodex-main.cjs"), "utf8");
   const start = main.indexOf("function hookWindow(");
-  const end = main.indexOf("\nasync function attachElectron", start);
+  const end = main.indexOf("async function attachElectron", start);
   expect(start).toBeGreaterThanOrEqual(0);
   expect(end).toBeGreaterThan(start);
   return new Function(

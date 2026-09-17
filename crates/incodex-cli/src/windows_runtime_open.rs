@@ -26,8 +26,8 @@ use windows_sys::Win32::Storage::FileSystem::{
     ReadFile, FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_INBOUND,
 };
 use windows_sys::Win32::System::Pipes::{
-    CallNamedPipeW, ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId,
-    PIPE_READMODE_MESSAGE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_MESSAGE, PIPE_WAIT,
+    ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, PIPE_READMODE_MESSAGE,
+    PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_MESSAGE, PIPE_WAIT,
 };
 use windows_sys::Win32::System::Threading::{CreateMutexW, ReleaseMutex};
 
@@ -56,7 +56,6 @@ const POLL_INTERVAL: Duration = Duration::from_millis(25);
 const READY_MESSAGE_LIMIT: usize = 64;
 const RUNTIME_OWNER_MUTEX: &str = "Local\\Incodex-OpenAI.Codex-Runtime-Owner";
 const RUNTIME_RAISE_PIPE: &str = r"\\.\pipe\Incodex-Runtime-Raise";
-const RAISE_TIMEOUT_MS: u32 = 3_000;
 
 pub struct WindowsRuntimeReadinessDeadline {
     activation_deadline: Instant,
@@ -371,7 +370,7 @@ fn run_windows_runtime_open(request: WindowsRuntimeOpenRequest) -> Result<(), St
     let owner = match WindowsRuntimeOwnerClaim::acquire()? {
         WindowsRuntimeOwnerClaim::Owned(owner) => owner,
         WindowsRuntimeOwnerClaim::Existing => {
-            raise_existing_windows_runtime()?;
+            crate::windows_runtime_raise::raise_existing()?;
             println!("ready");
             std::io::stdout()
                 .flush()
@@ -399,44 +398,6 @@ fn run_windows_runtime_open(request: WindowsRuntimeOpenRequest) -> Result<(), St
         WindowsInstalledRuntimeRegistration::environment_from_install_state(&state)?;
     let registration = WindowsInstalledRuntimeRegistration::from_install_state(&state)?;
     execute_windows_runtime_open(plan, &registration, launch_gate, owner)
-}
-
-fn raise_existing_windows_runtime() -> Result<(), String> {
-    let pipe = RUNTIME_RAISE_PIPE
-        .encode_utf16()
-        .chain([0])
-        .collect::<Vec<_>>();
-    let deadline = Instant::now() + Duration::from_millis(RAISE_TIMEOUT_MS as u64);
-    loop {
-        let request = b"raise\n";
-        let mut response = [0u8; 32];
-        let mut read = 0;
-        if unsafe {
-            CallNamedPipeW(
-                pipe.as_ptr(),
-                request.as_ptr().cast(),
-                request.len() as u32,
-                response.as_mut_ptr().cast(),
-                response.len() as u32,
-                &mut read,
-                250,
-            )
-        } != 0
-        {
-            return if &response[..read as usize] == b"raised\n" {
-                Ok(())
-            } else {
-                Err("existing Windows Runtime returned an invalid raise response".to_string())
-            };
-        }
-        if Instant::now() >= deadline {
-            return Err(format!(
-                "cannot raise the existing Windows Runtime: {}",
-                std::io::Error::last_os_error()
-            ));
-        }
-        thread::sleep(POLL_INTERVAL);
-    }
 }
 
 fn execute_windows_runtime_open(
