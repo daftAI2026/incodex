@@ -289,6 +289,39 @@ function harness(reducedMotion = false, reverse = false) {
     advance(ms: number) { time += ms; const tasks = [...pending.values()]; pending.clear(); tasks.forEach(task => { task(); }); } };
 }
 
+test("both flight directions use the helper's foreground image provider instead of caching its material host", () => {
+  for (const reverse of [false, true]) {
+    const bridge = nativeMotionBridge([{ frame: rect(0, 0, 1440, 900), scale: 2 }]);
+    const swift = swiftUIFlightLibrary();
+    const sourceImage = { name: "original-card" };
+    const helperImage = { name: "native-foreground" };
+    let captures = 0;
+    const replicas = createNativeReplicants({
+      objc: bridge.objc, nativeLibrary: swift.library, reverse,
+      source: { image: sourceImage },
+      target: {
+        view: bridge.targetView(rect(0, 0, 531, 110)),
+        captureImage: () => { captures++; return helperImage; },
+      },
+    });
+    try {
+      expect(captures).toBe(1);
+      expect(swift.instances[0].imagePair).toEqual(reverse ? [helperImage, sourceImage] : [sourceImage, helperImage]);
+      expect(bridge.calls.some(call => call.selector === "cacheDisplayInRect$toBitmapImageRep$")).toBe(false);
+    } finally { replicas.dispose(); }
+  }
+});
+
+test("a failed native foreground image must not silently fall back to the material-bearing helper", () => {
+  const bridge = nativeMotionBridge([{ frame: rect(0, 0, 1440, 900), scale: 2 }]);
+  const swift = swiftUIFlightLibrary();
+  expect(() => createNativeReplicants({
+    objc: bridge.objc, nativeLibrary: swift.library, source: { image: {} },
+    target: { view: bridge.targetView(rect(0, 0, 531, 110)), captureImage: () => null },
+  })).toThrow("foreground snapshot");
+  expect(bridge.panels()).toHaveLength(0);
+});
+
 test("native flight preserves AppKit screen coordinates at both endpoints", async () => {
   const h = harness();
   expect(h.frames[0].bounds).toEqual({ x: 10, y: 400, width: 80, height: 28 });

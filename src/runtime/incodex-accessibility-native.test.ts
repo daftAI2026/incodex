@@ -153,6 +153,12 @@ class FakeNative {
     return this.invoke("appRowView");
   }
 
+  backingScaleFactor(): number { return Number(this.values.get("backingScaleFactor") ?? 2); }
+  snapshotImageWithScale$(scale: number): unknown {
+    this.record("snapshotImageWithScale:", scale);
+    return this.values.get("foregroundSnapshot");
+  }
+
   addRepresentation$(value: unknown): void {
     this.values.set("representation", value);
   }
@@ -1368,6 +1374,28 @@ describe("native Accessibility setup adapter", () => {
     expect(handoffs[0].target.panel).toBeDefined();
     expect(handoffs[0].target.panel.contentViewValue.type).toBe("IncodexPermissionHelperView");
     expect(handoffs[0].target.view).toBe(handoffs[0].target.panel.contentViewValue);
+  });
+
+  test("helper flight capture reads the current native foreground at the panel's current scale", async () => {
+    const handoffs: any[] = [];
+    const harness = await makeHarness({ onHandoff: payload => handoffs.push(payload) });
+    const { api, swift } = harness;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      expect(handoffs).toHaveLength(1);
+      const target = handoffs[0].target;
+      expect(typeof target.captureImage).toBe("function");
+      const image1 = {}, image2 = {};
+      swift!.helperViews[0].values.set("foregroundSnapshot", image1);
+      expect(target.captureImage()).toBe(image1);
+      target.panel.values.set("backingScaleFactor", 1);
+      swift!.helperViews[0].values.set("foregroundSnapshot", image2);
+      expect(target.captureImage()).toBe(image2);
+      expect(swift!.calls.filter(call => call.selector === "snapshotImageWithScale:").map(call => call.args)).toEqual([[2], [1]]);
+    } finally { api.close(); }
   });
 
   test("uses a native file URL drag source fixed to the official ChatGPT bundle", async () => {
