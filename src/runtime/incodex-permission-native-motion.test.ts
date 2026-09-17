@@ -349,3 +349,15 @@ test("flight shadows follow the reference 30pt container, masks and dynamic roun
     expect(stroke.values.get("path").args).toEqual([rect(.25,.25,517.5,79.5),23.75,23.75,null]);
   } finally {replicas.dispose();}
 });
+
+
+test("flight uses reference integral point bounds before adding the 30pt margin", () => {
+  const bridge=nativeMotionBridge([{frame:rect(0,0,1440,900),scale:2}]);
+  const replicas=createNativeReplicants({objc:bridge.objc,source:{image:{}},target:{view:bridge.targetView(rect(0,0,531,110))}});
+  try {
+    replicas.render({bounds:{x:100.25,y:200.25,width:518.25,height:80.25},cornerRadius:24,progress:.25,
+      sourceOpacity:.75,targetOpacity:.25,sourceBlur:3,targetBlur:9});
+    expect(bridge.panels()[0].contentViewValue.frameValue).toEqual(rect(70,170,579,141));
+    expect(bridge.panels()[0].contentViewValue.subviews[0].frameValue).toEqual(rect(30,30,519,81));
+  }finally{replicas.dispose();}
+});
