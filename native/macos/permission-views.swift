@@ -153,6 +153,7 @@ private final class PermissionInitialState: ObservableObject {
         self.actionTarget = actionTarget
         allowEnabled = true
         settingsPlaceholder = false
+        placeholderHovered = false
     }
 
     func setContent(
@@ -165,6 +166,9 @@ private final class PermissionInitialState: ObservableObject {
         self.body = body
         self.allowEnabled = allowEnabled
         self.settingsPlaceholder = settingsPlaceholder
+        // State transitions must not reuse a previous placeholder's hover.
+        // A later genuine pointer entry may establish fresh hover normally.
+        placeholderHovered = false
     }
 
     func send(_ selector: String) {
