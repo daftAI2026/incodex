@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { ACCESSIBILITY_SETUP_COPY } from "../src/runtime/incognito-copy.ts";
+import { attachAccessibilityDragInstructionRuns } from "../src/runtime/incognito-accessibility-copy-runs.ts";
 
 type DragRun = {
   text: string;
@@ -63,8 +64,8 @@ const EXPECTED_RUNS: Record<string, DragRun[]> = {
   "tr-TR": [
     { text: "Erişilebilirliğe", role: "primary" },
     { text: " izin vermek için ", role: "secondary" },
-    { text: "ChatGPT'yi", role: "primary" },
-    { text: " yukarıdaki listeye sürükleyin", role: "secondary" },
+    { text: "ChatGPT", role: "primary" },
+    { text: "'yi yukarıdaki listeye sürükleyin", role: "secondary" },
   ],
 };
 
@@ -112,11 +113,22 @@ test("publishes exactly two semantic primary runs for every locale", () => {
     const appRuns = runs.filter(run => run.text.includes("ChatGPT"));
     expect(appRuns, `${locale} ChatGPT must be one authored semantic run`).toHaveLength(1);
     expect(appRuns[0]?.role).toBe("primary");
+    // The reference colors the dynamic application display name itself,
+    // not following grammatical suffixes or postpositions.
+    expect(appRuns[0]?.text).toBe("ChatGPT");
 
     const primaryRuns = runs.filter(run => run.role === "primary");
     expect(primaryRuns, `${locale} must mark app and local permission name`).toHaveLength(2);
     expect(primaryRuns.some(run => !run.text.includes("ChatGPT"))).toBe(true);
   }
+});
+
+test("missing optional styling metadata cannot break the Runtime copy catalog", () => {
+  const plain = { future: { dragInstruction: "A future localized instruction", body: "Unchanged" } };
+  const result = attachAccessibilityDragInstructionRuns(plain);
+  expect(result.future.dragInstruction).toBe(plain.future.dragInstruction);
+  expect(result.future.body).toBe("Unchanged");
+  expect(result.future.dragInstructionRuns).toBe("");
 });
 
 test("keeps English and Chinese runs exact, including natural run order", () => {
