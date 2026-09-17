@@ -215,6 +215,7 @@ private struct PermissionCardRoot: View {
 
             Button(state.allow) { state.send("allow:") }
                 .buttonStyle(.automatic)
+                .keyboardShortcut(.defaultAction)
                 .font(.system(size: 13))
                 .clipShape(Capsule())
                 .frame(minWidth: 62)

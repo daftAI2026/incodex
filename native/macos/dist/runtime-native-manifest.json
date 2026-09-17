@@ -7,8 +7,8 @@
     "arm64",
     "x86_64"
   ],
-  "sourceSha256": "39209468825b87e8f1a8167ee772d62788fa4b30a02ddb728a203b150dc53948",
+  "sourceSha256": "b72d6d40134a674f6e2aae48362a3acf1cb1a838f681e01de9cc6a26190b8249",
   "files": {
-    "incodex-permission-ui.dylib": "7ad9a7004911d0dceb5a93f8610914fb2e2baea491c5031f0764d3e7967d4617"
+    "incodex-permission-ui.dylib": "824f3ba5f63b23c12b207d9e3cd8f750a3c6c74501f62456b7683bcd7f61bc3f"
   }
 }
