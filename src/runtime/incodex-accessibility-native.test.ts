@@ -2031,7 +2031,7 @@ describe("native Accessibility setup adapter", () => {
     }
   });
 
-  test("waits for the arrow return before scheduling the next native pulse", async () => {
+  test("schedules the next arrow pulse when the 250ms return phase starts", async () => {
     const { api } = await makeHarness();
     const originalSetTimeout = globalThis.setTimeout;
     const originalClearTimeout = globalThis.clearTimeout;
@@ -2057,6 +2057,7 @@ describe("native Accessibility setup adapter", () => {
       pulse?.callback();
       expect(scheduled.some((entry) => entry.delay === 250)).toBe(true);
       expect(scheduled.some((entry) => entry.delay === 4000)).toBe(false);
+      // This checks when return starts, not when the native spring settles.
       scheduled.find((entry) => entry.delay === 250)?.callback();
       expect(scheduled.some((entry) => entry.delay === 4000)).toBe(true);
     } finally {
