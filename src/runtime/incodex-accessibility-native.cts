@@ -429,13 +429,17 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   }
   function handleBack() {
     if (closed || returning || dragging || state !== "awaiting-user" || !helper) return;
-    returning = true; initial.setLevel$(3); showSettingsPlaceholder(false); retryReady = false; const token = ++returnSequence;
+    returning = true; initial.setLevel$(3); updatePlaceholderHover(false); retryReady = false; const token = ++returnSequence;
     clearInterval(tracking); tracking = null; stopArrow();
-    title.setStringValue$(str(text("title"))); body.setStringValue$(str(text("body"))); allow.setEnabled$(true); fitInitialBody(); initial.orderFront$(null);
+    title.setStringValue$(str(text("title"))); body.setStringValue$(str(text("body"))); allow.setEnabled$(true); fitInitialBody();
     if (reducedMotion() || !onBack || !helper.flightTarget) { fallbackToInitial(); return; }
     let returnSource;
-    try { returnSource = captureSource(); }
+    // Capture the restored card synchronously, then keep the placeholder on
+    // screen until completion. Revealing the real card early duplicates it
+    // beneath the flying replica (unlike the reference Back transition).
+    try { card.setHidden$(false); returnSource = captureSource(); card.setHidden$(true); }
     catch { fallbackToInitial(); return; }
+    initial.orderFront$(null);
     let active;
     try {
       active = onBack({ objc, source: returnSource, target: helper.flightTarget, reverse: true, isClosed: () => closed });
