@@ -6,6 +6,18 @@ import { join } from "node:path";
 
 const layoutSmokeSource = join(import.meta.dir, "native", "permission-views-layout-smoke.m");
 
+test("helper delegates outer edge treatment to its native window shell", () => {
+  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const start = source.indexOf("private struct PermissionHelperRoot:");
+  const end = source.indexOf("@MainActor", start);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  const root = source.slice(start, end);
+  expect(root).toContain(".background(.regularMaterial)");
+  expect(root).not.toContain(".clipShape");
+  expect(root).not.toContain(".stroke");
+});
+
 test("snapshot row retains the original separate SwiftUI fill and stroke shell", () => {
   const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
   const start = source.indexOf("private struct PermissionHelperSnapshotRow");

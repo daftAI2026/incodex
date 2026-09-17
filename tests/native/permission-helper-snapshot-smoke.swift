@@ -370,6 +370,27 @@ enum PermissionHelperSnapshotSmoke {
             precondition(helper.snapshotImage(scale: invalidScale) == nil, "invalid scale was accepted: \(invalidScale)")
         }
 
+        // Attaching to the standard full-size utility panel must not add its
+        // titlebar safe area to the already measured permission content.
+        let controller = NSViewController()
+        controller.view = helper
+        let panel = NSPanel(contentRect: .zero,
+                            styleMask: [.titled, .utilityWindow, .nonactivatingPanel, .fullSizeContentView],
+                            backing: .buffered, defer: false)
+        panel.isReleasedWhenClosed = false
+        panel.contentViewController = controller
+        panel.titleVisibility = .hidden
+        panel.titlebarAppearsTransparent = true
+        panel.toolbarStyle = .unified
+        panel.setFrame(NSRect(x: 798, y: 228, width: 531, height: 110), display: false)
+        helper.layoutSubtreeIfNeeded()
+        precondition(helper.preferredContentSize == NSSize(width: 531, height: 110),
+                     "utility panel titlebar changed helper fitting size: \(helper.preferredContentSize)")
+        precondition(helper.appRowView === rowHost, "panel attachment replaced the drag host")
+        precondition(!panel.isVisible, "shell geometry validation must stay offscreen")
+        panel.contentViewController = nil
+        panel.close()
+
         precondition(NSApp.windows.allSatisfy { !$0.isVisible }, "headless snapshot smoke must not show windows")
         print("permission helper snapshot smoke passed")
     }
