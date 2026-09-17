@@ -305,6 +305,7 @@ private struct PermissionInitialRoot: View {
             VStack(spacing: 0) {
                 if let image = state.appIcon {
                     Image(nsImage: image)
+                        .interpolation(.high)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .frame(width: 64, height: 64)
@@ -469,6 +470,7 @@ private struct PermissionHelperAppRowRoot: View {
         ZStack(alignment: .topLeading) {
             if let image = state.appIcon {
                 Image(nsImage: image)
+                    .interpolation(.high)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(width: 32, height: 32)
