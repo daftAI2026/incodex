@@ -1184,7 +1184,9 @@ test("uses SwiftUI preferred helper size for a wider localized instruction", asy
       const size = panel.frame().size;
       return size.width === 100 && size.height === 100;
     });
-    expect(arrowWindow?.frame()).toEqual(frame(100, 100, 784, 201));
+    // Natural bottom-aligned helper content keeps the arrow's bottom anchor
+    // stable when long copy increases the shell height.
+    expect(arrowWindow?.frame()).toEqual(frame(100, 100, 784, 185));
   } finally {
     api.close();
   }
