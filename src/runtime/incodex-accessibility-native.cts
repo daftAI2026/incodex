@@ -134,7 +134,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   const INITIAL_SKIP_TRAILING = 57;
   const INITIAL_SKIP_BOTTOM = 12.5;
   const initial = kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(rect(0, 0, INITIAL_WIDTH, INITIAL_MIN_HEIGHT), 1 | 2 | 32768, 2, false);
-  configurePanel(initial, false); initial.setTitle$(str("")); initial.setTitlebarAppearsTransparent$(true); initial.setTitleVisibility$(1);
+  configurePanel(initial, true); initial.setTitle$(str("")); initial.setTitlebarAppearsTransparent$(true); initial.setTitleVisibility$(1);
   const initialView = View.alloc().initWithFrame$(rect(0, 0, INITIAL_WIDTH, INITIAL_MIN_HEIGHT));
   const background = Material.alloc().initWithFrame$(rect(0, 0, INITIAL_WIDTH, INITIAL_MIN_HEIGHT));
   background.setMaterial$(6); background.setBlendingMode$(1); background.setState$(1);
@@ -453,7 +453,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     disposeHelper(); showSettingsPlaceholder(false); returning = false; state = "pending"; retryReady = Boolean(enableRetry);
     title.setStringValue$(str(text("title"))); body.setStringValue$(str(text("body")));
     allow.setEnabled$(Boolean(enableRetry)); fitInitialBody();
-    electron?.app?.focus?.({steal:true}); initial.makeKeyAndOrderFront$(null);
+    initial.setLevel$(3); electron?.app?.focus?.({steal:true}); initial.makeKeyAndOrderFront$(null);
   }
   function fallbackToInitial() {
     returnSequence++;
@@ -467,7 +467,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   }
   function handleBack() {
     if (closed || returning || dragging || state !== "awaiting-user" || !helper) return;
-    returning = true; showSettingsPlaceholder(false); retryReady = false; const token = ++returnSequence;
+    returning = true; initial.setLevel$(3); showSettingsPlaceholder(false); retryReady = false; const token = ++returnSequence;
     clearInterval(tracking); tracking = null; stopArrow();
     title.setStringValue$(str(text("title"))); body.setStringValue$(str(text("body"))); allow.setEnabled$(true); fitInitialBody(); initial.orderFront$(null);
     if (reducedMotion() || !onBack || !helper.flightTarget) { fallbackToInitial(); return; }
@@ -538,15 +538,16 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   function setState(next) {
     if (closed) return;
     state=next;
+    if (next === "repairing" || next === "awaiting-user") initial.setLevel$(0);
     if (next==="granted") { close(); return; }
     if (next==="repairing") { allow.setEnabled$(false); body.setStringValue$(str(text("repairing"))); }
     if (next==="awaiting-user") { allow.setEnabled$(false); body.setStringValue$(str(text("body"))); showSettingsPlaceholder(true); if (!tracking) tracking=setInterval(()=>void place(),100); void place(); }
     if (next==="error" || next==="unknown") {
       clearInterval(tracking);tracking=null;stopArrow();flight?.dispose();flight=null;
-      disposeHelper(); showSettingsPlaceholder(false); title.setStringValue$(str(text("errorTitle")));body.setStringValue$(str(text("errorBody")));fitInitialBody();initial.orderFront$(null);
+      disposeHelper(); initial.setLevel$(3); showSettingsPlaceholder(false); title.setStringValue$(str(text("errorTitle")));body.setStringValue$(str(text("errorBody")));fitInitialBody();initial.orderFront$(null);
     }
   }
-  fitInitialBody(); initial.center(); electron?.app?.focus?.({steal:true}); initial.makeKeyAndOrderFront$(null);
+  fitInitialBody(); initial.center(); initial.setLevel$(3); electron?.app?.focus?.({steal:true}); initial.makeKeyAndOrderFront$(null);
   return {choice,setState,close,isDestroyed:()=>closed,
     onClose:callback=>{closeHandlers.add(callback);return()=>closeHandlers.delete(callback);},
     onRetry:callback=>{if(typeof callback!=="function") return ()=>{}; retryHandlers.add(callback); return()=>retryHandlers.delete(callback);}};
