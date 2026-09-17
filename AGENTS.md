@@ -78,6 +78,8 @@ The native Rust contract tests are the product behavior source of truth. The rem
 
 ### Windows adaptation boundary
 
+- Installed normal-App readiness allows up to ten minutes for post-update initialization, using serial one-second retries and one absolute CDP deadline. Once the official primary thread has resumed successfully, injection or bridge failure must never terminate that normal App. Pre-resume preparation and failed-resume cleanup remain unchanged, as do incognito Job/privacy failures. Installed UI diagnostics reuse the private bounded logger in one separate `windows/installed-ui.json` file (4 KiB, eight events); record phase transitions only, not retry polls, DOM or account data. The existing observer file retains its independent 64 KiB/128-event cap. Warm-start and simulated-delay tests do not prove a new real Store update lifecycle.
+
 - Experimental Store update repair must establish its PackageCatalog subscription before the official installed launch proceeds. Run the coordinator concurrently with the installed CDP bridge inside the same helper, cancel on route failure, and join it on normal exit so pending update repair can finish. A live helper or a hat alone does not prove subscription readiness. Lifecycle regression tests live in `windows_update_repair_lifecycle.rs`; this experiment is not a stable automatic-update promise.
 
 - Both Windows update subscribers acquire a scoped PackageCatalog activation factory through `open_current_user_package_catalog`; do not retain the projection's static factory cache across WinRT apartment teardown. The native subscription regression test repeats initialization, subscription and teardown in one process to catch stale-factory access violations.

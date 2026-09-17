@@ -218,7 +218,7 @@ fn expired_shared_ui_attempt_sends_no_cdp_request() {
     });
 
     let process_alive = std::sync::atomic::AtomicBool::new(true);
-    let mut readiness = CodexModeReadiness::default();
+    let mut state = InjectionAttemptState::default();
     let options = InjectionOptions {
         window_kind: CdpWindowKind::Normal,
         ..InjectionOptions::default()
@@ -228,7 +228,7 @@ fn expired_shared_ui_attempt_sends_no_cdp_request() {
         port,
         &options,
         &process_alive,
-        &mut readiness,
+        &mut state,
         &connection_guard,
         "window.__incodexTestRuntime = true;",
         Instant::now() - Duration::from_millis(1),

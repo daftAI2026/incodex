@@ -30,7 +30,9 @@ use crate::windows_process::{
 };
 
 const BINDING_NAME: &str = "__incodexNativeAction";
-const BRIDGE_READY_TIMEOUT: Duration = Duration::from_secs(45);
+// 更新后官方初始化可能持续数分钟；这是附加功能预算，不是官方进程寿命。
+const BRIDGE_READY_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const STARTUP_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 const NATIVE_OPEN_READY_TIMEOUT: Duration = Duration::from_secs(70);
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -147,27 +149,68 @@ pub(crate) fn inject_installed_shared_ui(
         ..InjectionOptions::default()
     };
     let alive = AtomicBool::new(true);
-    let mut readiness = CodexModeReadiness::default();
-    wait_for_installed_ui(
+    let mut injection_state = crate::cdp::InjectionAttemptState::default();
+    record_installed_ui_phase(main_process_id, "waiting");
+    let injection = wait_for_installed_ui(
         BRIDGE_READY_TIMEOUT,
-        PROCESS_POLL_INTERVAL,
+        STARTUP_RETRY_INTERVAL,
         || package_process_is_alive(package_full_name, main_process_id),
-        |_| {
+        |deadline| {
             if !listener_belongs_to_package(debug_port, package_full_name)? {
                 return Err("installed Codex CDP listener not ready".into());
             }
-            inject_shared_ui_with_options_while_alive_and_guard_with_readiness_and_runtime(
+            crate::cdp::inject_shared_ui_once_until(
                 debug_port,
                 &options,
                 &alive,
-                |_| {},
-                &mut readiness,
-                &|stream| require_package_connection_owner(stream, package_full_name),
+                &mut injection_state,
+                &|stream| {
+                    if !package_process_is_alive(package_full_name, main_process_id)? {
+                        return Err("official process exited during injection".into());
+                    }
+                    require_package_connection_owner(stream, package_full_name)
+                },
                 runtime_source,
+                deadline,
             )
         },
-    )?;
-    run_bridge_until_exit(debug_port, &context, &options, &alive, &mut readiness)
+    );
+    if let Err(error) = injection {
+        record_installed_ui_phase(main_process_id, "injection-unavailable");
+        return Err(error);
+    }
+    record_installed_ui_phase(main_process_id, "ready");
+    let bridge = run_bridge_until_exit(
+        debug_port,
+        &context,
+        &options,
+        &alive,
+        &mut injection_state.readiness,
+    );
+    record_installed_ui_phase(
+        main_process_id,
+        if bridge.is_ok() {
+            "closed"
+        } else {
+            "bridge-unavailable"
+        },
+    );
+    bridge
+}
+
+fn record_installed_ui_phase(main_process_id: u32, phase: &str) {
+    let result = (|| {
+        let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+        let root = crate::windows_activation::installed_debugger_user_root(&executable)?;
+        crate::windows_update_observer_log::installed_ui_status(
+            &root,
+            phase,
+            &format!("mainPid={main_process_id}"),
+        )
+    })();
+    if let Err(error) = result {
+        eprintln!("Windows installed UI diagnostics unavailable: {error}");
+    }
 }
 
 fn wait_for_installed_ui<T>(
@@ -183,7 +226,7 @@ fn wait_for_installed_ui<T>(
             Ok(value) => return Ok(value),
             Err(error) => last = error,
         }
-        thread::sleep(interval);
+        thread::sleep(interval.min(deadline.saturating_duration_since(Instant::now())));
     }
     Err(format!("installed Windows UI injection failed: {last}"))
 }
@@ -496,13 +539,18 @@ mod tests {
         // 缩小千倍的时间轴：官方第 180 秒就绪，不能在第 45 秒放弃。
         let started = Instant::now();
         let budget = BRIDGE_READY_TIMEOUT / 1000;
-        let result = wait_for_installed_ui(budget, Duration::from_millis(2), || Ok(true), |_| {
-            if started.elapsed() >= Duration::from_millis(180) {
-                Ok("injected")
-            } else {
-                Err("official app still initializing".into())
-            }
-        });
+        let result = wait_for_installed_ui(
+            budget,
+            Duration::from_millis(2),
+            || Ok(true),
+            |_| {
+                if started.elapsed() >= Duration::from_millis(180) {
+                    Ok("injected")
+                } else {
+                    Err("official app still initializing".into())
+                }
+            },
+        );
         assert_eq!(result.unwrap(), "injected");
     }
 
@@ -510,7 +558,9 @@ mod tests {
     fn installed_readiness_does_not_sleep_past_its_total_budget() {
         let started = Instant::now();
         let result: Result<(), String> = wait_for_installed_ui(
-            Duration::from_millis(30), Duration::from_secs(1), || Ok(true),
+            Duration::from_millis(30),
+            Duration::from_secs(1),
+            || Ok(true),
             |_| Err("not ready".into()),
         );
         assert!(result.is_err());
@@ -522,9 +572,16 @@ mod tests {
         let mut checks = 0;
         let mut attempts = 0;
         let result: Result<(), String> = wait_for_installed_ui(
-            Duration::from_secs(1), Duration::from_millis(1),
-            || { checks += 1; Ok(checks == 1) },
-            |_| { attempts += 1; Err("not ready".into()) },
+            Duration::from_secs(1),
+            Duration::from_millis(1),
+            || {
+                checks += 1;
+                Ok(checks == 1)
+            },
+            |_| {
+                attempts += 1;
+                Err("not ready".into())
+            },
         );
         assert!(result.is_err());
         assert_eq!(attempts, 1);

@@ -991,8 +991,9 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
                         &native_open_executable,
                     ) {
                         Ok(()) => Ok(()),
-                        Err(error) => handle_installed_cdp_failure_after_resume(
+                        Err(error) => handle_installed_cdp_failure(
                             format!("installed Windows CDP bridge failed: {error}"),
+                            InstalledProcessStage::Running,
                             || {
                                 terminate_debugged_package_process(
                                     &package_full_name,
@@ -1054,27 +1055,36 @@ fn terminate_failed_installed_cdp_process(
     thread_id: u32,
     primary: String,
 ) -> Result<(), String> {
-    match terminate_debugged_package_process(package_full_name, process_id, thread_id) {
-        Ok(()) => Err(primary),
-        Err(cleanup) => Err(format!(
-            "{primary}; cannot terminate that exact process: {cleanup}"
-        )),
-    }
+    handle_installed_cdp_failure(primary, InstalledProcessStage::ResumeFailed, || {
+        terminate_debugged_package_process(package_full_name, process_id, thread_id)
+    })
 }
 
-fn handle_installed_cdp_failure_after_resume<C, E>(
+enum InstalledProcessStage {
+    ResumeFailed,
+    Running,
+}
+
+fn handle_installed_cdp_failure<C, E>(
     primary: String,
+    stage: InstalledProcessStage,
     terminate: C,
 ) -> Result<(), String>
 where
     C: FnOnce() -> Result<(), E>,
     E: std::fmt::Display,
 {
-    match terminate() {
-        Ok(()) => Err(primary),
-        Err(cleanup) => Err(format!(
-            "{primary}; cannot terminate that exact process: {cleanup}"
-        )),
+    match stage {
+        InstalledProcessStage::Running => {
+            eprintln!("InjectionUnavailable: {primary}");
+            Ok(())
+        }
+        InstalledProcessStage::ResumeFailed => match terminate() {
+            Ok(()) => Err(primary),
+            Err(cleanup) => Err(format!(
+                "{primary}; cannot terminate that exact process: {cleanup}"
+            )),
+        },
     }
 }
 
@@ -1421,10 +1431,9 @@ mod tests {
 
     use super::{
         acquire_package_activation_lock, activation_manager_failure, cleanup_proof_after_debugging,
-        handle_installed_cdp_failure_after_resume, installed_debugger_route_from_state,
+        handle_installed_cdp_failure, installed_debugger_route_from_state,
         installed_debugger_user_root, node_require_option, prepare_installed_cdp_or_terminate,
-        should_coordinate_installed_update,
-        WindowsDebuggerRoute,
+        should_coordinate_installed_update, InstalledProcessStage, WindowsDebuggerRoute,
     };
 
     #[test]
@@ -1469,10 +1478,26 @@ mod tests {
     }
 
     #[test]
+    fn installed_resume_failure_still_terminates_the_uncertain_process() {
+        let terminated = Cell::new(false);
+        let result = handle_installed_cdp_failure(
+            "resume failed".into(),
+            InstalledProcessStage::ResumeFailed,
+            || {
+                terminated.set(true);
+                Ok::<(), String>(())
+            },
+        );
+        assert!(terminated.get());
+        assert_eq!(result, Err("resume failed".into()));
+    }
+
+    #[test]
     fn installed_cdp_failure_after_resume_does_not_terminate_the_running_process() {
         let terminated = Cell::new(false);
-        let result = handle_installed_cdp_failure_after_resume(
+        let result = handle_installed_cdp_failure(
             "installed Windows CDP bridge failed: CDP readiness unavailable".to_string(),
+            InstalledProcessStage::Running,
             || {
                 terminated.set(true);
                 Ok::<(), String>(())

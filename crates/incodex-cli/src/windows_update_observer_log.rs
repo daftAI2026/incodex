@@ -1,4 +1,4 @@
-// 单一观察者持有 owner 锁后写入；保留有限事件链，不记录轮询、DOM 或账户数据。
+// 观察者与安装态 UI 分文件记录有限事件链，不记录轮询、DOM 或账户数据。
 use std::io::Read;
 use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
@@ -8,8 +8,31 @@ const MAX_EVENTS: usize = 128;
 const MAX_DETAIL_CHARS: usize = 512;
 
 pub(crate) fn status(root: &Path, phase: &str, detail: &str) -> Result<(), String> {
+    write_status(
+        root,
+        "update-observer.json",
+        MAX_BYTES,
+        MAX_EVENTS,
+        phase,
+        detail,
+    )
+}
+
+// 与 observer 分开，避免两个角色覆盖对方的最新阶段；固定一个文件，不滚动分片。
+pub(crate) fn installed_ui_status(root: &Path, phase: &str, detail: &str) -> Result<(), String> {
+    write_status(root, "installed-ui.json", 4096, 8, phase, detail)
+}
+
+fn write_status(
+    root: &Path,
+    filename: &str,
+    max_bytes: usize,
+    max_events: usize,
+    phase: &str,
+    detail: &str,
+) -> Result<(), String> {
     let parent = incodex_core::windows_session::ensure_private_windows_dir(&root.join("windows"))?;
-    let path = parent.join("update-observer.json");
+    let path = parent.join(filename);
     let previous = read_history(&path)?;
     let mut events = previous["events"].as_array().cloned().unwrap_or_default();
     let detail: String = detail.chars().take(MAX_DETAIL_CHARS).collect();
@@ -25,8 +48,8 @@ pub(crate) fn status(root: &Path, phase: &str, detail: &str) -> Result<(), Strin
         "unixSeconds": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs(),
     });
     events.push(current.clone());
-    if events.len() > MAX_EVENTS {
-        events.drain(..events.len() - MAX_EVENTS);
+    if events.len() > max_events {
+        events.drain(..events.len() - max_events);
     }
     let mut record = current;
     record["schemaVersion"] = 1.into();
@@ -44,7 +67,7 @@ pub(crate) fn status(root: &Path, phase: &str, detail: &str) -> Result<(), Strin
     record["events"] = events.into();
     loop {
         let bytes = serde_json::to_vec(&record).map_err(|error| error.to_string())?;
-        if bytes.len() <= MAX_BYTES {
+        if bytes.len() <= max_bytes {
             return crate::windows_runtime::replace_private_file(&parent, &path, &bytes);
         }
         record["events"].as_array_mut().unwrap().remove(0);
@@ -87,14 +110,19 @@ mod tests {
     #[test]
     fn installed_ui_diagnostics_are_separate_and_bounded() {
         let root = std::env::temp_dir().join(format!(
-            "incodex-installed-ui-log-{}-{}", std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            "incodex-installed-ui-log-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         incodex_core::windows_session::ensure_private_windows_dir(&root).unwrap();
         super::status(&root, "watching", "package").unwrap();
         let observer = std::fs::read(root.join("windows/update-observer.json")).unwrap();
         for index in 0..20 {
-            super::installed_ui_status(&root, "waiting", &format!("{index}:{}", "x".repeat(600))).unwrap();
+            super::installed_ui_status(&root, "waiting", &format!("{index}:{}", "x".repeat(600)))
+                .unwrap();
         }
         super::installed_ui_status(&root, "ready", "mainPid=123").unwrap();
         super::installed_ui_status(&root, "ready", "mainPid=123").unwrap();
@@ -104,8 +132,17 @@ mod tests {
         let events = value["events"].as_array().unwrap();
         assert!(events.len() <= 8);
         assert_eq!(events.last().unwrap()["phase"], "ready");
-        assert_eq!(events.iter().filter(|event| event["phase"] == "ready").count(), 1);
-        assert_eq!(std::fs::read(root.join("windows/update-observer.json")).unwrap(), observer);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event["phase"] == "ready")
+                .count(),
+            1
+        );
+        assert_eq!(
+            std::fs::read(root.join("windows/update-observer.json")).unwrap(),
+            observer
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 }
