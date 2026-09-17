@@ -577,6 +577,31 @@ test("flight keeps one SwiftUI material-and-image surface above the AppKit root"
   }
 });
 
+test("flight shadow and cutout retain the full radius while only the stroke is inset", () => {
+  const bridge = nativeMotionBridge([{ frame: rect(0, 0, 1440, 900), scale: 2 }]);
+  const swift = swiftUIFlightLibrary();
+  const replicas = createNativeReplicants({ objc: bridge.objc, nativeLibrary: swift.library,
+    source: { image: {} }, target: { view: bridge.targetView(rect(0, 0, 531, 110)) } });
+  try {
+    // Shadow and even-odd cutout use the clipping shape. The half-line-width
+    // inset belongs only to the stroke, including at small radii.
+    for (const radius of [24, 21, 18, 15, 12, .1, 0]) {
+      const before = bridge.calls.length;
+      replicas.render({ bounds: { x: 100, y: 200, width: 526, height: 104 }, progress: .5, cornerRadius: radius });
+      const root = bridge.panels()[0].contentViewValue;
+      for (const shadow of root.layerValue.sublayers) {
+        expect(shadow.values.get("shadowPath").args).toEqual([rect(30, 30, 526, 104), radius, radius, null]);
+      }
+      const paths = bridge.calls.slice(before).filter(call => call.selector === "CGPathCreateWithRoundedRect");
+      expect(paths).toHaveLength(7);
+      expect(paths[0].args.slice(1)).toEqual([rect(.25, .25, 525.5, 103.5), Math.max(0, radius - .25), Math.max(0, radius - .25), null]);
+      for (const path of paths.slice(1)) {
+        expect(path.args.slice(1)).toEqual([rect(30, 30, 526, 104), radius, radius, null]);
+      }
+    }
+  } finally { replicas.dispose(); }
+});
+
 test("native snapshot rejects an empty view before creating flight panels", () => {
   const bridge = nativeMotionBridge([
     { frame: rect(0, 0, 1440, 900), scale: 2 },
@@ -653,7 +678,7 @@ test("flight shadows follow the reference 30pt container, masks and dynamic roun
     expect(shadows[0].values.get("setOpacity$")).toBe(.25);
     for(const shadow of shadows) {
       expect(shadow.frameValue).toEqual(rect(0,0,578,140));
-      expect(shadow.values.get("shadowPath").args).toEqual([rect(30,30,518,80),23.75,23.75,null]);
+      expect(shadow.values.get("shadowPath").args).toEqual([rect(30,30,518,80),24,24,null]);
       const mask=shadow.values.get("setMask$");
       expect(mask.values.get("setFillRule$")).toBe("even-odd");
       expect(mask.frameValue).toEqual(rect(0,0,578,140));
