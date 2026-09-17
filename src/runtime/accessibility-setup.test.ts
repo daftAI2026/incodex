@@ -237,7 +237,7 @@ function makeBrowserWindow(options: BrowserWindowMockOptions = {}): any {
     isFocusable: () => options.focusable ?? true,
     webContents: {
       isDestroyed: () => options.webContentsDestroyed ?? false,
-      getURL: () => options.url ?? "app://-",
+      getURL: () => options.url ?? "app://-/index.html",
       getLastWebPreferences: () => ({ additionalArguments: [...(options.additionalArguments ?? [])] }),
     },
   };
@@ -298,6 +298,24 @@ test("canPresentAccessibilitySetup accepts only the visible focused trusted main
     const actual = canPresent(makeElectronWithWindows(windows, focused));
     if (actual !== expected) throw new Error(`${label}: expected ${String(expected)}, received ${String(actual)}`);
   }
+});
+
+test("host presentation retries follow real window events once and stop after closure", () => {
+  const observe = (runtimeMain as any).observeAccessibilityPresentationWindow;
+  expect(typeof observe).toBe("function");
+  const win = Object.assign(new EventEmitter(), { webContents: new EventEmitter() });
+  let runs = 0;
+  const controller = { run: async () => { runs++; } };
+  observe(win, controller);
+  observe(win, controller);
+  expect(runs).toBe(0);
+  for (const event of ["show", "ready-to-show", "restore"]) win.emit(event);
+  win.webContents.emit("did-finish-load");
+  expect(runs).toBe(4);
+  win.emit("closed");
+  win.emit("show");
+  win.webContents.emit("did-finish-load");
+  expect(runs).toBe(4);
 });
 
 describe("Accessibility setup controller", () => {
