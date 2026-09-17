@@ -381,6 +381,34 @@ test("flight clips the combined blurred images to the animated continuous corner
   } finally { replicas.dispose(); }
 });
 
+test("flight keeps a live material sibling behind the separately clipped image stack", () => {
+  const bridge = nativeMotionBridge([{ frame: rect(0, 0, 1440, 900), scale: 2 }]);
+  const replicas = createNativeReplicants({ objc: bridge.objc,
+    source: { image: { size: () => ({ width: 518, height: 80 }) } },
+    target: { view: bridge.targetView(rect(0, 0, 531, 110)) } });
+  try {
+    for (const [progress, cornerRadius] of [[0, 24], [.5, 18], [1, 12]]) {
+      replicas.render({ bounds: { x: 100, y: 200, width: 526, height: 104 },
+        progress, cornerRadius, sourceOpacity: 1 - progress, targetOpacity: progress,
+        sourceBlur: 12 * progress, targetBlur: 12 * (1 - progress) });
+      const root = bridge.panels()[0].contentViewValue;
+      const material = root.subviews.find((view: any) => view.type === "NSVisualEffectView");
+      expect(material).toBeDefined();
+      const surface = root.subviews.find((view: any) => view.subviews.length === 2);
+      expect(root.subviews.indexOf(material)).toBeLessThan(root.subviews.indexOf(surface));
+      expect(material.frameValue).toEqual(surface.frameValue);
+      expect(material.values.get("setMaterial$")).toBe(6);
+      expect(material.values.get("setState$")).toBe(1);
+      expect(material.layerValue.values.get("setCornerCurve$")).toBe("continuous");
+      expect(material.layerValue.values.get("setCornerRadius$")).toBe(cornerRadius);
+      expect(material.layerValue.values.get("setMasksToBounds$")).toBe(true);
+      expect(material.layerValue.values.get("contentsScale")).toBe(2);
+      expect(material.values.has("setAlphaValue$")).toBe(false);
+      expect(material.layerValue.values.has("setFilters$")).toBe(false);
+    }
+  } finally { replicas.dispose(); }
+});
+
 test("native snapshot rejects an empty view before creating flight panels", () => {
   const bridge = nativeMotionBridge([
     { frame: rect(0, 0, 1440, 900), scale: 2 },
