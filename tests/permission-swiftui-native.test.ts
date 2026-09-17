@@ -6,6 +6,27 @@ import { join } from "node:path";
 
 const layoutSmokeSource = join(import.meta.dir, "native", "permission-views-layout-smoke.m");
 
+test.skipIf(process.platform !== "darwin")("helper snapshot renders appearance-bound transparent foreground without windows", () => {
+  const directory = mkdtempSync(join(tmpdir(), "incodex-helper-snapshot-"));
+  try {
+    const executable = join(directory, "snapshot");
+    const architecture = process.arch === "arm64" ? "arm64" : "x86_64";
+    const build = spawnSync("xcrun", [
+      "swiftc", "-parse-as-library", "-target", `${architecture}-apple-macos12`,
+      "-module-name", "IncodexHelperSnapshotTest",
+      "native/macos/permission-views.swift", "tests/native/permission-helper-snapshot-smoke.swift",
+      "-o", executable,
+    ], { cwd: join(import.meta.dir, ".."), encoding: "utf8", timeout: 60_000 });
+    expect(build.status, build.stderr || String(build.error ?? "snapshot compilation failed")).toBe(0);
+    if (build.status !== 0) return;
+    const run = spawnSync(executable, [], { encoding: "utf8", timeout: 20_000 });
+    expect(run.status, run.stderr || String(run.error ?? "snapshot smoke failed")).toBe(0);
+    expect(run.stdout).toContain("permission helper snapshot smoke passed");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}, 90_000);
+
 test("helper instruction uses the original semantic body font and matching native measurement", () => {
   const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
   const start = source.indexOf("Text(state.styledInstruction)");
