@@ -51,6 +51,7 @@ class FakeNative {
   frameValue = frame();
   visibleFrameValue = frame();
   contentViewValue: FakeNative | null = null;
+  contentViewControllerValue: FakeNative | null = null;
   layerValue: FakeNative | null = null;
   target: FakeNative | null = null;
   action: string | null = null;
@@ -264,6 +265,25 @@ class FakeNative {
     if (!this.subviews.includes(value)) this.subviews.push(value);
   }
 
+  setContentViewController$(value: FakeNative): void {
+    this.record("setContentViewController:", value);
+    this.contentViewControllerValue = value;
+    const view = value.view();
+    if (view) {
+      this.contentViewValue = view;
+      if (!this.subviews.includes(view)) this.subviews.push(view);
+    }
+  }
+
+  setView$(value: FakeNative): void {
+    this.values.set("view", value);
+  }
+
+  view(): FakeNative | null {
+    const value = this.values.get("view");
+    return value instanceof FakeNative ? value : null;
+  }
+
   setDelegate$(value: FakeNative): void {
     this.values.set("delegate", value);
   }
@@ -284,6 +304,11 @@ class FakeNative {
     this.values.set("backgroundColor", value);
   }
 
+  colorWithAlphaComponent$(value: unknown): FakeNative {
+    this.values.set("alpha", value);
+    return this;
+  }
+
   setHasShadow$(value: unknown): void {
     this.values.set("hasShadow", value);
   }
@@ -298,6 +323,18 @@ class FakeNative {
 
   setTitleVisibility$(value: unknown): void {
     this.values.set("titleVisibility", value);
+  }
+
+  setToolbarStyle$(value: unknown): void {
+    this.values.set("toolbarStyle", value);
+  }
+
+  setMovableByWindowBackground$(value: unknown): void {
+    this.values.set("movableByWindowBackground", value);
+  }
+
+  setMovable$(value: unknown): void {
+    this.values.set("movable", value);
   }
 
   setWantsLayer$(value: unknown): void {
@@ -703,6 +740,16 @@ function makeBridge(
       imageNamed$: (value: string) => value,
       sharedWorkspace: () => object(type),
       defaultCenter: () => object(type),
+      whiteColor: () => {
+        const color = object(type);
+        color.values.set("namedColor", "white");
+        return color;
+      },
+      clearColor: () => {
+        const color = object(type);
+        color.values.set("namedColor", "clear");
+        return color;
+      },
       screens: () => {
         const screen = object("NSScreen");
         screen.frameValue = frame(1440, 900);
@@ -760,6 +807,7 @@ function makeBridge(
       get NSMutableParagraphStyle() { return library(this.framework).NSMutableParagraphStyle; }
       get NSAppearance() { return library(this.framework).NSAppearance; }
       get NSPanel() { return library(this.framework).NSPanel; }
+      get NSViewController() { return library(this.framework).NSViewController; }
       get NSVisualEffectView() { return library(this.framework).NSVisualEffectView; }
       get NSImageView() { return library(this.framework).NSImageView; }
       get NSImage() { return library(this.framework).NSImage; }
@@ -863,7 +911,11 @@ function installPollingClock() {
 }
 
 function helperPanels(bridge: FakeBridge): FakeNative[] {
-  return bridge.objects.filter((value) => value.type === "NSPanel" && value.values.get("styleMask") === 128);
+  // Both the frozen ordinary shell (0x8091) and its independent arrow child
+  // (128) are nonactivating panels; do not identify the helper by the old
+  // exact style mask.
+  return bridge.objects.filter((value) => value.type === "NSPanel"
+    && (Number(value.values.get("styleMask")) & 128) !== 0);
 }
 
 function swiftDelegate(harness: { swift?: ReturnType<typeof swiftPermissionViewsLibrary> }): FakeNative {
@@ -1016,6 +1068,56 @@ test("gives the ordinary helper its native shadow while keeping the arrow shell 
     if (!helper || !arrow) throw new Error("ordinary helper and arrow panels are missing");
     expect(helper.values.get("hasShadow")).toBe(true);
     expect(arrow.values.get("hasShadow")).toBe(false);
+  } finally {
+    api.close();
+  }
+});
+
+test("uses the original ordinary helper panel shell without adding safe-area height", async () => {
+  const { api, bridge } = await makeHarness({
+    locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+  });
+  try {
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+    const helper = bridge.objects.find((panel) => {
+      if (panel.type !== "NSPanel") return false;
+      const size = panel.frame().size;
+      return size.width === 531 && size.height === 110;
+    });
+    const arrow = bridge.objects.find((panel) => {
+      if (panel.type !== "NSPanel") return false;
+      const size = panel.frame().size;
+      return size.width === 100 && size.height === 100;
+    });
+    if (!helper || !arrow) throw new Error("ordinary helper and arrow panels are missing");
+
+    // Frozen original ordinary shell: titled utility nonactivating full-size
+    // content panel, hidden title, transparent titlebar, toolbar style 3,
+    // and neither kind of AppKit movability.
+    expect(helper.values.get("styleMask")).toBe(0x8091);
+    expect(helper.values.get("titleVisibility")).toBe(1);
+    expect(helper.values.get("titlebarAppearsTransparent")).toBe(true);
+    expect(helper.values.get("toolbarStyle")).toBe(3);
+    expect(helper.values.get("movableByWindowBackground")).toBe(false);
+    expect(helper.values.get("movable")).toBe(false);
+
+    const background = helper.values.get("backgroundColor");
+    expect(background).toBeInstanceOf(FakeNative);
+    expect((background as FakeNative).values.get("namedColor")).toBe("white");
+    expect(Number((background as FakeNative).values.get("alpha"))).toBeCloseTo(0.001, 6);
+
+    // The ordinary panel owns a controller whose view is the SwiftUI helper;
+    // direct panel contentView assignment is not an equivalent shell contract.
+    const controller = helper.contentViewControllerValue;
+    expect(controller).toBeInstanceOf(FakeNative);
+    const helperView = controller?.view();
+    expect(helperView).toBe(helper.contentViewValue);
+    expect(helperView?.frame().size).toEqual({ width: 531, height: 110 });
+    expect(helper.frame().size).toEqual({ width: 531, height: 110 });
+
+    // The arrow remains the independent borderless/nonactivating child shell.
+    expect(arrow.values.get("styleMask")).toBe(128);
   } finally {
     api.close();
   }
@@ -1319,7 +1421,7 @@ describe("native Accessibility setup adapter", () => {
     try {
       api.setState("awaiting-user");
       await flushNativeAsync();
-      const helper = bridge.objects.filter((value) => value.type === "NSPanel" && value.values.get("styleMask") === 128);
+      const helper = helperPanels(bridge);
       expect(helper.length).toBeGreaterThan(0);
       expect(helper.every((value) => value.isDestroyed() && !value.isVisible())).toBe(true);
       expect(api.isDestroyed()).toBe(false);
