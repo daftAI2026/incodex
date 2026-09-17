@@ -218,13 +218,13 @@ private func assertStaticArrow(_ image: NSImage, x: CGFloat, direction: String) 
     let ink = alphaPixelCount(image, rect: slot)
     precondition(ink > 8, "\(direction) snapshot omitted the static HintArrow in slot \(slot); alpha pixels=\(ink)")
 
-    // The instruction starts at x=102 in LTR (x=21 in RTL). A static arrow
-    // must occupy its own slot and not be replaced by instruction foreground.
+    // The glyph's shadow extends into the layout gap. The snapshot's image
+    // modifier includes black@.23, radius7, offset(0,4), before opacity.
     let gap = direction == "LTR"
         ? NSRect(x: 94, y: 8.5, width: 8, height: 32.5)
         : NSRect(x: 429, y: 8.5, width: 8, height: 32.5)
-    precondition(alphaPixelCount(image, rect: gap) == 0,
-                 "\(direction) snapshot arrow leaked into the 8pt HStack gap")
+    precondition(alphaPixelCount(image, rect: gap, threshold: 0.005) > 4,
+                 "\(direction) snapshot omitted the arrow's outer shadow")
 }
 
 private func cacheImage(_ view: NSView) -> NSImage {
