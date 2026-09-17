@@ -28,6 +28,7 @@ function nativeMotionBridge(screenSpecs: Array<{ frame: Rect; scale: number }>) 
       type,
       values: new Map<string, any>(),
       subviews: [],
+      sublayers: [],
       frameValue: rect(0, 0, 0, 0),
       visible: false,
       closed: false,
@@ -71,6 +72,9 @@ function nativeMotionBridge(screenSpecs: Array<{ frame: Rect; scale: number }>) 
     if (selector === "layer") {
       if (!object.layerValue) object.layerValue = nativeObject("CALayer");
       return object.layerValue;
+    }
+    if (selector === "addSublayer$") {
+      (object.sublayers ||= []).push(args[0]); return;
     }
     if (selector === "addSubview$") {
       object.subviews.push(args[0]);
@@ -144,7 +148,7 @@ function nativeMotionBridge(screenSpecs: Array<{ frame: Rect; scale: number }>) 
           if (type === "NSString" && property === "stringWithUTF8String$") return String(args[0]);
           if (type === "NSNumber" && property === "numberWithDouble$") return args[0];
           if (type === "CIFilter" && property === "filterWithName$") return nativeObject("CIFilter");
-          if (type === "CALayer" && property === "layer") return nativeObject("CALayer");
+          if ((type === "CALayer" || type === "CAShapeLayer") && property === "layer") return nativeObject("CALayer");
           if (type === "CATransaction") return undefined;
           return undefined;
         };
@@ -163,7 +167,7 @@ function nativeMotionBridge(screenSpecs: Array<{ frame: Rect; scale: number }>) 
     },
     callFunction(name: string, signature: any, ...args: any[]) {
       calls.push({ selector: name, args: [signature, ...args] });
-      if (name === "CGColorCreateGenericRGB" || name === "CGPathCreateWithRoundedRect") return nativeObject(name);
+      if (name === "CGColorCreateGenericRGB" || name === "CGPathCreateWithRoundedRect" || name === "CGPathCreateMutable") { const value=nativeObject(name); value.args=args; return value; }
       return undefined;
     },
   };
@@ -313,4 +317,34 @@ test("native snapshot rejects an empty view before creating flight panels", () =
     target: { view: bridge.targetView(rect(0, 0, 0, 0)) },
   })).toThrow(/empty/i);
   expect(bridge.panels()).toHaveLength(0);
+});
+
+
+test("flight shadows follow the reference 30pt container, masks and dynamic rounded path", () => {
+  const bridge=nativeMotionBridge([{frame:rect(0,0,1440,900),scale:2}]);
+  const replicas=createNativeReplicants({objc:bridge.objc,source:{image:{}},target:{view:bridge.targetView(rect(0,0,531,110))}});
+  try {
+    replicas.render({bounds:{x:100,y:200,width:518,height:80},cornerRadius:24,progress:.25,
+      sourceOpacity:.75,targetOpacity:.25,sourceBlur:3,targetBlur:9});
+    const panel=bridge.panels()[0],root=panel.contentViewValue;
+    expect(panel.values.get("setLevel$")).toBe(25);
+    expect(root.frameValue).toEqual(rect(70,170,578,140));
+    expect(root.subviews[0].frameValue).toEqual(rect(30,30,518,80));
+    const shadows=root.layerValue.sublayers;
+    expect(shadows).toHaveLength(3);
+    expect(shadows.map((v:any)=>[v.values.get("setShadowOpacity$"),v.values.get("setShadowRadius$"),v.values.get("setShadowOffset$")]))
+      .toEqual([[.015,2,{width:0,height:-3}],[.09,15,{width:0,height:-5}],[.20,3,{width:0,height:0}]]);
+    for(const shadow of shadows) {
+      expect(shadow.frameValue).toEqual(rect(0,0,578,140));
+      expect(shadow.values.get("shadowPath").args).toEqual([rect(30,30,518,80),23.75,23.75,null]);
+      const mask=shadow.values.get("setMask$");
+      expect(mask.values.get("setFillRule$")).toBe("even-odd");
+      expect(mask.frameValue).toEqual(rect(0,0,578,140));
+      expect(mask.values.get("path")).toBeDefined();
+      expect(shadow.values.has("setZPosition$")).toBe(false);
+    }
+    const stroke=bridge.objects.find(v=>v.type==="CAShapeLayer" && v.values.get("setLineWidth$")===.5);
+    expect(stroke.values.get("setOpacity$")).toBeCloseTo(.0375);
+    expect(stroke.values.get("path").args).toEqual([rect(.25,.25,517.5,79.5),23.75,23.75,null]);
+  } finally {replicas.dispose();}
 });
