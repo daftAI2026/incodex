@@ -6,6 +6,20 @@ import { join } from "node:path";
 
 const layoutSmokeSource = join(import.meta.dir, "native", "permission-views-layout-smoke.m");
 
+test("initial permission page measures naturally with a bottom-trailing Skip overlay", () => {
+  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const start = source.indexOf("private struct PermissionInitialRoot:");
+  const root = source.slice(start, source.indexOf("@MainActor", start));
+  // Frozen root frame has width 600 and nil height; Skip has a 41pt frame,
+  // followed by trailing padding, inside a bottomTrailing overlay.
+  expect(root).toContain(".overlay(alignment: .bottomTrailing)");
+  expect(root).toMatch(/\.frame\(height:\s*41(?:,\s*alignment:\s*\.center)?\)/);
+  expect(root).toContain(".padding(.trailing, 57)");
+  expect(root).not.toContain("minHeight: 312");
+  expect(root).not.toContain(".padding(.bottom, 12.5)");
+  expect(root).not.toContain("Spacer()");
+});
+
 test("helper foreground composes bottom-aligned stacks and semantic padding", () => {
   const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
   const start = source.indexOf("private struct PermissionHelperForeground");

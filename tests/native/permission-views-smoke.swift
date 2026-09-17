@@ -11,6 +11,18 @@ private func isHostingView(_ view: NSView) -> Bool {
 }
 
 @MainActor
+private func laidOutCardFrame(_ view: IncodexPermissionInitialView) -> NSRect {
+    view.layoutSubtreeIfNeeded()
+    for subview in view.subviews {
+        subview.layoutSubtreeIfNeeded()
+    }
+    let card = view.permissionCardView
+    card.layoutSubtreeIfNeeded()
+    precondition(card.superview != nil, "permission card must be embedded in the live SwiftUI host")
+    return card.convert(card.bounds, to: view)
+}
+
+@MainActor
 private final class PermissionActionSink: NSObject {
     var allowCount = 0
     @objc func allow(_ sender: Any?) { allowCount += 1 }
@@ -61,6 +73,70 @@ enum PermissionViewsSmoke {
         precondition(isHostingView(initial.permissionCardView))
         precondition(initial.preferredContentSize.width == 600)
         precondition(initial.preferredContentSize.height >= 312)
+
+        // The reference measures the body text naturally. A one-line localized
+        // body therefore moves the card up by one body line (18pt), while the
+        // minimum outer height and the bottom-anchored Skip control stay put.
+        // Keep this headless: these are two real NSHostingView trees, not a
+        // source-string or mocked layout assertion.
+        let shortCopy: NSDictionary = [
+            "title": "Enable ChatGPT scripting", "body": "允许 ChatGPT 访问辅助功能。",
+            "permissionTitle": "Accessibility", "permissionDescription": "Read and control app interfaces",
+            "repair": "Allow", "later": "Skip", "completeInSettings": "Complete in Settings",
+            "back": "Back", "dragInstruction": "Drag ChatGPT into the app list above",
+        ]
+        let longCopy: NSDictionary = [
+            "title": "Enable ChatGPT scripting", "body": "Allow Accessibility access.\nThis second line is intentional.",
+            "permissionTitle": "Accessibility", "permissionDescription": "Read and control app interfaces",
+            "repair": "Allow", "later": "Skip", "completeInSettings": "Complete in Settings",
+            "back": "Back", "dragInstruction": "Drag ChatGPT into the app list above",
+        ]
+        let shortInitial = IncodexPermissionInitialView(frame: NSRect(x: 0, y: 0, width: 600, height: 340))
+        shortInitial.configure(copy: shortCopy, appIcon: source, permissionIcon: target, actionTarget: nil)
+        let longInitial = IncodexPermissionInitialView(frame: NSRect(x: 0, y: 0, width: 600, height: 340))
+        longInitial.configure(copy: longCopy, appIcon: source, permissionIcon: target, actionTarget: nil)
+        let shortSize = shortInitial.preferredContentSize
+        let longSize = longInitial.preferredContentSize
+        let shortCard = laidOutCardFrame(shortInitial)
+        let longCard = laidOutCardFrame(longInitial)
+        precondition(shortSize.width == 600 && longSize.width == 600)
+        precondition(shortSize.height > 0 && longSize.height > 0)
+        precondition(abs((longSize.height - shortSize.height) - 18) <= 1.0,
+                     "natural window height did not grow by one body line: short=\(shortSize), long=\(longSize)")
+        precondition(abs((longCard.minY - shortCard.minY) - 18) <= 1.0,
+                     "natural body line did not move card by 18pt: short=\(shortCard), long=\(longCard)")
+        precondition(abs((shortSize.height - shortCard.maxY) - (longSize.height - longCard.maxY)) <= 1.0,
+                     "bottom Skip/edge anchor did not retain its natural bottom gap: short=\(shortSize), shortCard=\(shortCard), long=\(longSize), longCard=\(longCard)")
+
+        // Reusing the same host must return to the one-line geometry rather
+        // than retaining the previous body's measured height.
+        shortInitial.setContent(title: "Enable ChatGPT scripting", body: "允许 ChatGPT 访问辅助功能。", allowEnabled: true, settingsPlaceholder: false)
+        let restoredSize = shortInitial.preferredContentSize
+        let restoredCard = laidOutCardFrame(shortInitial)
+        precondition(abs(restoredSize.height - shortSize.height) <= 0.5
+                     && abs(restoredCard.minY - shortCard.minY) <= 0.5,
+                     "short-body geometry did not recover after a state transition: before=\(shortSize)/\(shortCard), after=\(restoredSize)/\(restoredCard)")
+
+        // Direction changes must not turn the natural vertical measurement
+        // into a locale-specific special case.
+        let rtlShortCopy = NSMutableDictionary(dictionary: shortCopy)
+        rtlShortCopy["layoutDirection"] = "rightToLeft"
+        let rtlLongCopy = NSMutableDictionary(dictionary: longCopy)
+        rtlLongCopy["layoutDirection"] = "rightToLeft"
+        let rtlShortInitial = IncodexPermissionInitialView(frame: NSRect(x: 0, y: 0, width: 600, height: 340))
+        rtlShortInitial.configure(copy: rtlShortCopy, appIcon: source, permissionIcon: target, actionTarget: nil)
+        let rtlLongInitial = IncodexPermissionInitialView(frame: NSRect(x: 0, y: 0, width: 600, height: 340))
+        rtlLongInitial.configure(copy: rtlLongCopy, appIcon: source, permissionIcon: target, actionTarget: nil)
+        let rtlShortSize = rtlShortInitial.preferredContentSize
+        let rtlLongSize = rtlLongInitial.preferredContentSize
+        let rtlShortCard = laidOutCardFrame(rtlShortInitial)
+        let rtlLongCard = laidOutCardFrame(rtlLongInitial)
+        precondition(abs((rtlLongSize.height - rtlShortSize.height) - 18) <= 1.0
+                     && abs((rtlLongCard.minY - rtlShortCard.minY) - 18) <= 1.0
+                     && abs((rtlShortSize.height - rtlShortCard.maxY)
+                            - (rtlLongSize.height - rtlLongCard.maxY)) <= 1.0,
+                     "RTL natural body geometry diverged: short=\(rtlShortSize)/\(rtlShortCard), long=\(rtlLongSize)/\(rtlLongCard)")
+
         initial.setContent(title: "Error", body: "Retry after fixing permissions.", allowEnabled: false, settingsPlaceholder: true)
         initial.layoutSubtreeIfNeeded()
         precondition(initial.subviews[0] === initialHost)
