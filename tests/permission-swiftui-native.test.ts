@@ -1,20 +1,30 @@
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const layoutSmokeSource = join(import.meta.dir, "native", "permission-views-layout-smoke.m");
 
-test.skipIf(process.platform !== "darwin")("helper snapshot renders appearance-bound transparent foreground without windows", () => {
+test.skipIf(process.platform !== "darwin").each(["current", "forced-hosting-compatibility"])("helper snapshot renders transparent foreground without windows (%s)", (mode) => {
   const directory = mkdtempSync(join(tmpdir(), "incodex-helper-snapshot-"));
   try {
+    let nativeSource = join(import.meta.dir, "..", "native/macos/permission-views.swift");
+    if (mode === "forced-hosting-compatibility") {
+      // Exercise the macOS 12 rendering path on the current OS without adding
+      // a product switch or windows. This does not claim an actual macOS 12 run.
+      const source = readFileSync(nativeSource, "utf8");
+      const availability = "if #available(macOS 13.0, *) {";
+      expect(source.split(availability)).toHaveLength(2);
+      nativeSource = join(directory, "permission-views.swift");
+      writeFileSync(nativeSource, source.replace(availability, "if #available(macOS 13.0, *), false {"));
+    }
     const executable = join(directory, "snapshot");
     const architecture = process.arch === "arm64" ? "arm64" : "x86_64";
     const build = spawnSync("xcrun", [
       "swiftc", "-parse-as-library", "-target", `${architecture}-apple-macos12`,
       "-module-name", "IncodexHelperSnapshotTest",
-      "native/macos/permission-views.swift", "tests/native/permission-helper-snapshot-smoke.swift",
+      nativeSource, "tests/native/permission-helper-snapshot-smoke.swift",
       "-o", executable,
     ], { cwd: join(import.meta.dir, ".."), encoding: "utf8", timeout: 60_000 });
     expect(build.status, build.stderr || String(build.error ?? "snapshot compilation failed")).toBe(0);
