@@ -104,6 +104,14 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
         }
       }
     } },
+    "resumeSettings:": { types: "v@:@", implementation: () => {
+      if (closed || returning || dragging || state !== "awaiting-user") return;
+      // The existing controller retry reopens Settings without resetting TCC.
+      for (const callback of retryHandlers) {
+        try { Promise.resolve(callback()).catch(() => { if (!closed && state === "repairing") restoreInitialPage(true); }); }
+        catch { if (!closed && state === "repairing") restoreInitialPage(true); }
+      }
+    } },
     "later:": { types: "v@:@", implementation: () => helper && state === "awaiting-user" ? handleBack() : close() },
     "skip:": { types: "v@:@", implementation: () => { if (!closed && !helper) close(); } },
   });
@@ -155,16 +163,26 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     placeholderHovered = hovered && !closed && state === "awaiting-user" && !returning;
     updatePermissionPlaceholderState({ layer: placeholderLayer, kit, graphics, hovered: placeholderHovered });
   }
-  const Placeholder = define("Placeholder", "NSView", { ...flipped,
+  const Placeholder = define("Placeholder", "NSButton", { ...flipped,
+    "drawRect:": { types: "v@:{CGRect={CGPoint=dd}{CGSize=dd}}", implementation: self => {
+      // NSButton supplies native tracking, keyboard and AXPress behavior; draw
+      // only the reference outline instead of the platform button bezel.
+      updatePermissionPlaceholderState({ layer: placeholderLayer, kit, graphics,
+        hovered: placeholderHovered, pressed: Boolean(self.cell().isHighlighted()) });
+    } },
     "mouseEntered:": { types: "v@:@", implementation: () => updatePlaceholderHover(true) },
     "mouseExited:": { types: "v@:@", implementation: () => updatePlaceholderHover(false) },
   });
   const placeholder = Placeholder.alloc().initWithFrame$(card.frame());
+  placeholder.setTitle$(str("")); placeholder.setBordered$(false);
+  placeholder.setTarget$(delegate); placeholder.setAction$(selector("resumeSettings:"));
+  placeholder.setAccessibilityLabel$(str(text("completeInSettings")));
   placeholder.setWantsLayer$(true);
   placeholder.layer().addSublayer$(placeholderLayer);
   const placeholderTracking = kit.NSTrackingArea.alloc().initWithRect$options$owner$userInfo$(placeholder.bounds(), 1 | 128 | 512, placeholder, null);
   placeholder.addTrackingArea$(placeholderTracking);
   const placeholderTitle = label(text("completeInSettings"), rect(12, 32, 494, 16), 12, false, true, true, true);
+  placeholderTitle.setAccessibilityElement$(false);
   placeholderTitle.setFont$(kit.NSFont.systemFontOfSize$weight$(12, .23));
   const placeholderText = placeholderTitle.attributedStringValue().mutableCopy();
   placeholderText.addAttribute$value$range$(str("NSKern"), foundation.NSNumber.numberWithDouble$(.7),
