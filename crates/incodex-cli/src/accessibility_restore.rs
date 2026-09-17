@@ -10,48 +10,49 @@ trait RestoreOps {
     fn verify_official(&mut self) -> Result<(), String>;
     fn launch(&mut self) -> Result<(), String>;
     fn probe(&mut self) -> AccessibilityStatus;
-    fn wait_for_window(&mut self) -> Result<(), String> {
-        Ok(())
-    }
+    fn wait_for_window(&mut self) -> Result<(), String>;
     fn reset(&mut self) -> Result<(), String>;
     fn show_settings_and_app(&mut self) -> Result<(), String>;
     fn wait(&mut self, milliseconds: u64);
 }
+fn wait_for_decision(ops: &mut impl RestoreOps) -> Result<AccessibilityStatus, String> {
+    for _ in 0..120 {
+        match ops.probe() {
+            status @ (AccessibilityStatus::Granted | AccessibilityStatus::Denied) => {
+                return Ok(status)
+            }
+            AccessibilityStatus::Unknown | AccessibilityStatus::NotRunning => ops.wait(250),
+        }
+    }
+    Err(
+        "The restored app's identity or permission remained unavailable; no reset was performed."
+            .into(),
+    )
+}
+
 fn renew(ops: &mut impl RestoreOps) -> Result<Outcome, String> {
     ops.verify_official()?;
     ops.launch()?;
-    let mut ready = false;
-    for _ in 0..40 {
-        match ops.probe() {
-            AccessibilityStatus::Granted => return Ok(Outcome::Granted),
-            AccessibilityStatus::Denied => {
-                ready = true;
-                break;
-            }
-            AccessibilityStatus::Unknown => {
-                return Err(
-                    "The restored app's permission could not be verified; no reset was performed."
-                        .into(),
-                )
-            }
-            AccessibilityStatus::NotRunning => ops.wait(250),
-        }
+    if wait_for_decision(ops)? == AccessibilityStatus::Granted {
+        return Ok(Outcome::Granted);
     }
-    if !ready {
-        return Err("The restored app did not start in time; no reset was performed.".into());
+    // A PID can precede the first Electron window. Let it appear before raising
+    // Settings/Finder, and recheck in case access changed during startup.
+    ops.wait_for_window()?;
+    if wait_for_decision(ops)? == AccessibilityStatus::Granted {
+        return Ok(Outcome::Granted);
     }
-    // Revalidate the restored identity immediately before deleting an invalid
-    // registration. The production caller holds the app's transaction lock.
+    // The production caller holds the target transaction lock throughout.
     ops.verify_official()?;
     ops.reset()?;
-    ops.show_settings_and_app()?;
+    ops.show_settings_and_app().map_err(|error| format!(
+        "The invalid Accessibility registration was cleared, but the guide could not open. Open System Settings > Privacy & Security > Accessibility, add /Applications/ChatGPT.app, then run incodex doctor. {error}"))?;
     for _ in 0..160 {
         match ops.probe() {
             AccessibilityStatus::Granted => return Ok(Outcome::Granted),
-            AccessibilityStatus::Denied => ops.wait(750),
-            AccessibilityStatus::Unknown | AccessibilityStatus::NotRunning => {
-                return Ok(Outcome::Pending)
-            }
+            AccessibilityStatus::Denied
+            | AccessibilityStatus::Unknown
+            | AccessibilityStatus::NotRunning => ops.wait(750),
         }
     }
     Ok(Outcome::Pending)
@@ -97,6 +98,16 @@ impl RestoreOps for SystemOps<'_> {
     }
     fn probe(&mut self) -> AccessibilityStatus {
         incodex_macos::inspect_accessibility_for_app(self.app).status
+    }
+    fn wait_for_window(&mut self) -> Result<(), String> {
+        let target = incodex_macos::AppQuiescence::for_app(self.app)?;
+        for _ in 0..80 {
+            if incodex_macos::live_main_window_bounds(target.executable())?.is_some() {
+                return Ok(());
+            }
+            self.wait(250);
+        }
+        Err("The restored app's window did not appear; no reset was performed. Open ChatGPT and check with incodex doctor.".into())
     }
     fn reset(&mut self) -> Result<(), String> {
         bounded_command(std::process::Command::new("/usr/bin/tccutil").args([
