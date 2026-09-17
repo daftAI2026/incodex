@@ -130,8 +130,15 @@ function createNativeReplicants({ objc, source, target }) {
     quartz.CATransaction.begin(); quartz.CATransaction.setDisableActions$(true);
     try {
       for (const { frame, scale, root, surface, shadows, masks, strokeView, stroke, images } of entries) {
+        // The reference applies CGRectIntegral in screen points, not nearest
+        // backing pixels, before translating into each screen's container.
         const b = sample.bounds;
-        const aligned = alignPermissionFrame({ x: b.x - frame.origin.x, y: b.y - frame.origin.y, width: b.width, height: b.height }, scale);
+        const x = Math.floor(b.x), y = Math.floor(b.y);
+        const width = Math.ceil(b.x + b.width) - x, height = Math.ceil(b.y + b.height) - y;
+        const localX = x - frame.origin.x, localY = y - frame.origin.y;
+        const aligned = { x: Math.floor(localX), y: Math.floor(localY),
+          width: Math.ceil(localX + width) - Math.floor(localX),
+          height: Math.ceil(localY + height) - Math.floor(localY) };
         const bounds = rect(0, 0, aligned.width, aligned.height);
         const outer = rect(0, 0, aligned.width + 60, aligned.height + 60);
         const inner = rect(30, 30, aligned.width, aligned.height);
