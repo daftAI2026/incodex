@@ -91,7 +91,16 @@ function createNativeReplicants({ objc, source, target, reverse = false }) {
         layer.setMask$(mask); masks.push(mask);
         root.layer().addSublayer$(layer); return layer;
       });
-      root.addSubview$(surface);
+      // CUA's Material.regular is a live sibling below the image clip, not
+      // part of either fading/blurred bitmap. Popover is an AppKit recipe
+      // approximation; behindWindow preserves its cross-window sampling on
+      // this transparent panel (withinWindow has no local backdrop to sample).
+      const material = kit.NSVisualEffectView.alloc().initWithFrame$(rect(0, 0, 1, 1));
+      material.setMaterial$(6); material.setBlendingMode$(0); material.setState$(1);
+      material.setWantsLayer$(true);
+      material.layer().setCornerCurve$(string("continuous"));
+      material.layer().setMasksToBounds$(true); material.layer().setContentsScale$(scale);
+      root.addSubview$(material); root.addSubview$(surface);
       const strokeView = kit.NSView.alloc().initWithFrame$(rect(0, 0, 1, 1));
       strokeView.setWantsLayer$(true); strokeView.layer().setMasksToBounds$(false);
       const stroke = quartz.CAShapeLayer.layer();
@@ -105,7 +114,7 @@ function createNativeReplicants({ objc, source, target, reverse = false }) {
         surface.addSubview$(view); return view;
       });
       const imageSizes = flightImages.map(image => image.size());
-      Object.assign(item, { root, surface, shadows, masks, strokeView, stroke, images, imageSizes });
+      Object.assign(item, { root, material, surface, shadows, masks, strokeView, stroke, images, imageSizes });
       }
       return next;
     } catch (error) {
@@ -135,7 +144,7 @@ function createNativeReplicants({ objc, source, target, reverse = false }) {
     if (current.key !== topologyKey) rebuild();
     quartz.CATransaction.begin(); quartz.CATransaction.setDisableActions$(true);
     try {
-      for (const { frame, scale, root, surface, shadows, masks, strokeView, stroke, images, imageSizes } of entries) {
+      for (const { frame, scale, root, material, surface, shadows, masks, strokeView, stroke, images, imageSizes } of entries) {
         // The reference applies CGRectIntegral in screen points, not nearest
         // backing pixels, before translating into each screen's container.
         const b = sample.bounds;
@@ -149,7 +158,8 @@ function createNativeReplicants({ objc, source, target, reverse = false }) {
         const outer = rect(0, 0, aligned.width + 60, aligned.height + 60);
         const inner = rect(30, 30, aligned.width, aligned.height);
         root.setFrame$(rect(aligned.x - 30, aligned.y - 30, outer.size.width, outer.size.height));
-        surface.setFrame$(inner); strokeView.setFrame$(inner);
+        material.setFrame$(inner); surface.setFrame$(inner); strokeView.setFrame$(inner);
+        material.layer().setCornerRadius$(sample.cornerRadius);
         surface.layer().setCornerRadius$(sample.cornerRadius);
         strokeView.layer().setCornerRadius$(sample.cornerRadius);
         const radius = Math.max(0, sample.cornerRadius - .25);
