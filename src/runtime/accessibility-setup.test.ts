@@ -138,7 +138,10 @@ function makeHarness(options: {
   const spawnCalls: Array<{ file: string; args: string[] }> = [];
   const probes = [...(options.probes ?? [false])];
   const systemPreferences = {
-    isTrustedAccessibilityClient: (): unknown => probes.shift(),
+    isTrustedAccessibilityClient: (prompt: boolean): unknown => {
+      expect(prompt).toBe(false);
+      return probes.shift();
+    },
   };
   const spawn =
     options.spawn ??

@@ -31,8 +31,11 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   const flipped = { isFlipped: { types: "B@:", implementation: () => true } };
   const View = define("View", "NSView", flipped);
   const Material = define("Material", "NSVisualEffectView", flipped);
-  function label(value, frame, size = 13, bold = false, centered = false, secondary = false) {
-    const field = kit.NSTextField.labelWithString$(str(value));
+  const VibrantLabel = define("VibrantLabel", "NSTextField", {
+    allowsVibrancy: { types: "B@:", implementation: () => true },
+  });
+  function label(value, frame, size = 13, bold = false, centered = false, secondary = false, vibrant = false) {
+    const field = (vibrant ? VibrantLabel : kit.NSTextField).labelWithString$(str(value));
     field.setFrame$(frame); field.setFont$(bold ? kit.NSFont.boldSystemFontOfSize$(size) : kit.NSFont.systemFontOfSize$(size));
     field.setAlignment$(centered ? 1 : 0); field.setTextColor$(secondary ? kit.NSColor.secondaryLabelColor() : kit.NSColor.labelColor());
     field.setMaximumNumberOfLines$(0); field.setLineBreakMode$(0);
@@ -119,11 +122,12 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   configurePanel(initial, true); initial.setTitle$(str("")); initial.setTitlebarAppearsTransparent$(true); initial.setTitleVisibility$(1);
   const initialView = View.alloc().initWithFrame$(rect(0, 0, 600, 312));
   const background = Material.alloc().initWithFrame$(rect(0, 0, 600, 312));
-  background.setMaterial$(6); background.setBlendingMode$(0); background.setState$(1);
+  background.setMaterial$(6); background.setBlendingMode$(1); background.setState$(1);
   initialView.addSubview$(background); initial.setContentView$(initialView);
   // Reference VStack.offset(y: -9) preserves the padded background and size.
   const contentGroup = View.alloc().initWithFrame$(rect(0, -9, 600, 312));
-  initialView.addSubview$(contentGroup);
+  // Labels participate in the material's native vibrancy composition.
+  background.addSubview$(contentGroup);
   const dark = String(initial.effectiveAppearance().name()).includes("Dark");
   function surface(frame, radius, fill) {
     const box = kit.NSBox.alloc().initWithFrame$(frame); box.setBoxType$(4); box.setBorderType$(0);
@@ -131,18 +135,18 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   }
   contentGroup.addSubview$(imageView(icon, rect(268, 28, 64, 64)));
   // Reference Text.offset(y: -11) shifts drawing without moving the body/card.
-  const title = label(text("title"), rect(20, 112 - 11, 560, 32), 26, true, true);
-  const body = label(text("body"), rect(41, 147, 518, 32), 13, false, true, true);
+  const title = label(text("title"), rect(20, 112 - 11, 560, 32), 26, true, true, false, true);
+  const body = label(text("body"), rect(41, 147, 518, 32), 13, false, true, true, true);
   contentGroup.addSubview$(title); contentGroup.addSubview$(body);
   const card = View.alloc().initWithFrame$(rect(41, 200, 518, 80));
   card.setClipsToBounds$(false); card.setWantsLayer$(true); card.layer().setMasksToBounds$(false);
   card.addSubview$(createPermissionCardBackground({ View, Material, kit, graphics, str, size: { width: 518, height: 80 }, dark }));
   contentGroup.addSubview$(card);
   card.addSubview$(imageView(permissionIcon, rect(8, 8, 64, 64)));
-  const permissionTitle = label(text("permissionTitle"), rect(84, 19, 330, 20), 16);
+  const permissionTitle = label(text("permissionTitle"), rect(84, 19, 330, 20), 16, false, false, false, true);
   permissionTitle.setFont$(kit.NSFont.systemFontOfSize$weight$(16, .3));
   card.addSubview$(permissionTitle);
-  card.addSubview$(label(text("permissionDescription"), rect(84, 42, 330, 18), 13, false, false, true));
+  card.addSubview$(label(text("permissionDescription"), rect(84, 42, 330, 18), 13, false, false, true, true));
   // Reference: DefaultButtonStyle -> continuous Capsule -> minWidth 62 -> x +4.
   const allowSurface = View.alloc().initWithFrame$(rect(440, 28, 62, 24));
   const allow = button(text("repair"), rect(0, 0, 62, 24), "allow:"); allow.setKeyEquivalent$(str("\r"));

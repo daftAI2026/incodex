@@ -251,6 +251,8 @@ class FakeNative {
     this.values.set("wantsLayer", value);
   }
 
+  setAppearance$(value: unknown): void { this.values.set("appearance", value); }
+
   setMaterial$(value: unknown): void {
     this.values.set("material", value);
   }
@@ -673,6 +675,7 @@ function makeBridge(bodyHeight = 32): FakeBridge {
     NobjcLibrary: class {
       constructor(readonly framework: string) {}
       get NSMutableParagraphStyle() { return library(this.framework).NSMutableParagraphStyle; }
+      get NSAppearance() { return library(this.framework).NSAppearance; }
       get NSPanel() { return library(this.framework).NSPanel; }
       get NSVisualEffectView() { return library(this.framework).NSVisualEffectView; }
       get NSImageView() { return library(this.framework).NSImageView; }
