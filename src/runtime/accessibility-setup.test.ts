@@ -320,7 +320,7 @@ test("host presentation retries follow real window events once and stop after cl
 
 test("permission presentation excludes authentication routes on a trusted origin", () => {
   const canPresent = (runtimeMain as any).canPresentAccessibilitySetup;
-  for (const path of ["/login", "/auth/login", "/oauth/authorize", "/signin"]) {
+  for (const path of ["/login", "/auth/login", "/oauth/authorize", "/signin", "/auth0", "/okta"]) {
     const win = makeBrowserWindow({ url: `https://chatgpt.com${path}` });
     expect(canPresent(makeElectronWithWindows([win], win))).toBe(false);
   }
