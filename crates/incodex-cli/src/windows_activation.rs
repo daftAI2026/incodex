@@ -991,11 +991,15 @@ pub fn try_run_installed_package_debugger(arguments: &[String]) -> Option<Result
                         &native_open_executable,
                     ) {
                         Ok(()) => Ok(()),
-                        Err(error) => terminate_failed_installed_cdp_process(
-                            &package_full_name,
-                            process_id,
-                            thread_id,
+                        Err(error) => handle_installed_cdp_failure_after_resume(
                             format!("installed Windows CDP bridge failed: {error}"),
+                            || {
+                                terminate_debugged_package_process(
+                                    &package_full_name,
+                                    process_id,
+                                    thread_id,
+                                )
+                            },
                         )
                         .map_err(std::io::Error::other),
                     }
@@ -1051,6 +1055,22 @@ fn terminate_failed_installed_cdp_process(
     primary: String,
 ) -> Result<(), String> {
     match terminate_debugged_package_process(package_full_name, process_id, thread_id) {
+        Ok(()) => Err(primary),
+        Err(cleanup) => Err(format!(
+            "{primary}; cannot terminate that exact process: {cleanup}"
+        )),
+    }
+}
+
+fn handle_installed_cdp_failure_after_resume<C, E>(
+    primary: String,
+    terminate: C,
+) -> Result<(), String>
+where
+    C: FnOnce() -> Result<(), E>,
+    E: std::fmt::Display,
+{
+    match terminate() {
         Ok(()) => Err(primary),
         Err(cleanup) => Err(format!(
             "{primary}; cannot terminate that exact process: {cleanup}"
@@ -1401,8 +1421,9 @@ mod tests {
 
     use super::{
         acquire_package_activation_lock, activation_manager_failure, cleanup_proof_after_debugging,
-        installed_debugger_route_from_state, installed_debugger_user_root, node_require_option,
-        prepare_installed_cdp_or_terminate, should_coordinate_installed_update,
+        handle_installed_cdp_failure_after_resume, installed_debugger_route_from_state,
+        installed_debugger_user_root, node_require_option, prepare_installed_cdp_or_terminate,
+        should_coordinate_installed_update,
         WindowsDebuggerRoute,
     };
 
@@ -1445,6 +1466,24 @@ mod tests {
             result.expect_err("preparation must fail closed"),
             "Runtime injector is unreadable"
         );
+    }
+
+    #[test]
+    fn installed_cdp_failure_after_resume_does_not_terminate_the_running_process() {
+        let terminated = Cell::new(false);
+        let result = handle_installed_cdp_failure_after_resume(
+            "installed Windows CDP bridge failed: CDP readiness unavailable".to_string(),
+            || {
+                terminated.set(true);
+                Ok::<(), String>(())
+            },
+        );
+
+        assert!(
+            !terminated.get(),
+            "a CDP failure after resume must not terminate the running official process"
+        );
+        assert_eq!(result, Ok(()));
     }
 
     #[test]
