@@ -257,9 +257,9 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
       image: snapshot(card), radius: 24 };
   }
 
-  // The original accessory is hosted by an NSHostingView and its window
-  // frame comes from fittingSize(). 531x110 is the observed English
-  // geometry/fallback, not a universal localized width.
+  // CUA foreground and snapshot both carry a fixed 531x108 SwiftUI frame;
+  // the observed AppKit shell is 531x110. Long Incodex translations retain
+  // that width and add only their measured extra line height.
   const HELPER_WIDTH = 531;
   const HELPER_HEIGHT = 110;
   const HELPER_ROW_X = 62;
@@ -270,13 +270,10 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   const HELPER_ARROW_WINDOW_Y = 60;
   const HELPER_ARROW_WINDOW_SIZE = 100;
   const HELPER_ARROW_GRAPHIC_SIZE = 28;
-  // Settled AX geometry: the instruction cluster starts 5pt inside the row,
-  // leaves 7pt after the 28pt arrow, and leaves 11pt at the trailing edge.
-  // The native row itself keeps the proven 10pt outer trailing inset.
-  const HELPER_INSTRUCTION_LEADING = 5;
-  const HELPER_ARROW_TEXT_GAP = 7;
-  const HELPER_INSTRUCTION_TRAILING = 11;
-  const HELPER_CONTENT_TRAILING = 10;
+  // Reference AX text starts at x102 and has 408pt available. NSTextField's
+  // cell adds 2pt on each side, unlike SwiftUI Text's glyph bounds.
+  const HELPER_INSTRUCTION_X = 100;
+  const HELPER_INSTRUCTION_WIDTH = 412;
   function screens() { const values = kit.NSScreen.screens(); return Array.from({ length: Number(values.count()) }, (_, i) => values.objectAtIndex$(i)); }
   function helperFrame(target, size = { width: HELPER_WIDTH, height: HELPER_HEIGHT }) {
     const first = screens()[0];
@@ -359,7 +356,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   function positionArrow(frame) {
     // The original child window is positioned from the helper's bottom-left
     // origin, independently of the fitted helper height.
-    const arrowY = frame.origin.y + HELPER_ARROW_WINDOW_Y;
+    const arrowY = frame.origin.y + HELPER_ARROW_WINDOW_Y + Math.max(0, frame.size.height - HELPER_HEIGHT);
     arrowPanel.setFrame$display$(rect(
       frame.origin.x + HELPER_ARROW_WINDOW_X,
       arrowY,
@@ -370,61 +367,26 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   function createHelper(frame) {
     const panel = kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(frame,128,2,false); configurePanel(panel,true);
     panel.setOpaque$(false); panel.setBackgroundColor$(kit.NSColor.clearColor()); panel.setHasShadow$(false); panel.setIgnoresMouseEvents$(false);
-    const instruction = label(text("dragInstruction") || text("addedBody"),rect(0,0,480,18),13,false); instruction.sizeToFit();
-    const referenceInstructionWidth = HELPER_ROW_WIDTH - HELPER_INSTRUCTION_LEADING - HELPER_ARROW_GRAPHIC_SIZE - HELPER_ARROW_TEXT_GAP - HELPER_INSTRUCTION_TRAILING;
-    let instructionWidth = Number(instruction.frame().size.width);
-    try {
-      const measured = instruction.fittingSize();
-      const measuredWidth = Number(measured?.width);
-      if (Number.isFinite(measuredWidth) && measuredWidth > 0) instructionWidth = measuredWidth;
-    } catch {}
-    if (!Number.isFinite(instructionWidth) || instructionWidth <= 0) instructionWidth = referenceInstructionWidth;
-    const contentRowWidth = Math.max(
-      HELPER_ROW_WIDTH,
-      HELPER_INSTRUCTION_LEADING + HELPER_ARROW_GRAPHIC_SIZE + HELPER_ARROW_TEXT_GAP + instructionWidth + HELPER_INSTRUCTION_TRAILING,
-    );
-    const layoutSize = {
-      width: HELPER_ROW_X + contentRowWidth + HELPER_CONTENT_TRAILING,
-      height: HELPER_HEIGHT,
-    };
+    const instruction = label(text("dragInstruction") || text("addedBody"),rect(0,0,HELPER_INSTRUCTION_WIDTH,18),13,false);
+    const measuredHeight = Number(instruction.cell().cellSizeForBounds$(rect(0,0,HELPER_INSTRUCTION_WIDTH,1000)).height);
+    const extraHeight = Number.isFinite(measuredHeight) ? Math.max(0, Math.ceil(measuredHeight) - 16) : 0;
+    const instructionHeight = 18 + extraHeight;
+    const contentRowWidth = HELPER_ROW_WIDTH;
+    const layoutSize = { width: HELPER_WIDTH, height: HELPER_HEIGHT + extraHeight };
     const view = Material.alloc().initWithFrame$(rect(0,0,layoutSize.width,layoutSize.height)); view.setMaterial$(6); view.setBlendingMode$(0); view.setState$(1); view.setWantsLayer$(true); view.layer().setCornerRadius$(12); view.layer().setMasksToBounds$(true);
     const edge = surface(rect(0,0,layoutSize.width,layoutSize.height),12,kit.NSColor.clearColor());
     edge.setBorderType$(1); edge.setBorderWidth$(.5); edge.setBorderColor$(kit.NSColor.separatorColor()); view.addSubview$(edge);
     panel.setContentView$(view);
-    const instructionX = HELPER_ROW_X + HELPER_INSTRUCTION_LEADING + HELPER_ARROW_GRAPHIC_SIZE + HELPER_ARROW_TEXT_GAP;
-    instruction.setFrame$(rect(instructionX,17,instructionWidth,18)); view.addSubview$(instruction);
-    const back = button("",rect(18,55,28,28),"later:");
+    instruction.setFrame$(rect(HELPER_INSTRUCTION_X,17,HELPER_INSTRUCTION_WIDTH,instructionHeight)); view.addSubview$(instruction);
+    const back = button("",rect(18,55+extraHeight,28,28),"later:");
     const backLabel = str(text("back"));
     back.setImage$(kit.NSImage.imageWithSystemSymbolName$accessibilityDescription$(str("chevron.left"),backLabel));
     back.setAccessibilityLabel$(backLabel); back.setBezelStyle$(7); back.setToolTip$(backLabel); view.addSubview$(back);
-    const row=Drag.alloc().initWithFrame$(rect(HELPER_ROW_X,HELPER_ROW_Y,contentRowWidth,HELPER_ROW_HEIGHT)); view.addSubview$(row);
+    const row=Drag.alloc().initWithFrame$(rect(HELPER_ROW_X,HELPER_ROW_Y+extraHeight,contentRowWidth,HELPER_ROW_HEIGHT)); view.addSubview$(row);
     const box=kit.NSBox.alloc().initWithFrame$(rect(0,0,contentRowWidth,HELPER_ROW_HEIGHT)); box.setBoxType$(4); box.setBorderType$(1); box.setCornerRadius$(8); box.setBorderWidth$(.5); box.setBorderColor$(kit.NSColor.separatorColor()); box.setFillColor$(kit.NSColor.controlBackgroundColor()); row.addSubview$(box);
     appRowView=View.alloc().initWithFrame$(rect(0,0,contentRowWidth,HELPER_ROW_HEIGHT)); row.addSubview$(appRowView);
     appRowView.addSubview$(imageView(icon,rect(5,5,32,32))); appRowView.addSubview$(label("ChatGPT",rect(41,13,145.5,16),13));
-    const applyLayout = (size) => {
-      const width = Number(size?.width);
-      const height = Number(size?.height);
-      const fittedWidth = Number.isFinite(width) && width > 0 ? Math.max(layoutSize.width, width) : layoutSize.width;
-      const fittedHeight = Number.isFinite(height) && height > 0 ? Math.max(layoutSize.height, height) : layoutSize.height;
-      const fittedRowWidth = Math.max(HELPER_ROW_WIDTH, fittedWidth - HELPER_ROW_X - HELPER_CONTENT_TRAILING);
-      view.setFrame$(rect(0, 0, fittedWidth, fittedHeight));
-      edge.setFrame$(rect(0, 0, fittedWidth, fittedHeight));
-      instruction.setFrame$(rect(instructionX, 17, instructionWidth, 18));
-      row.setFrame$(rect(HELPER_ROW_X, HELPER_ROW_Y, fittedRowWidth, HELPER_ROW_HEIGHT));
-      box.setFrame$(rect(0, 0, fittedRowWidth, HELPER_ROW_HEIGHT));
-      appRowView.setFrame$(rect(0, 0, fittedRowWidth, HELPER_ROW_HEIGHT));
-      return { width: fittedWidth, height: fittedHeight };
-    };
-    let fittedSize = applyLayout(layoutSize);
-    try {
-      const measured = view.fittingSize();
-      const width = Number(measured?.width);
-      const height = Number(measured?.height);
-      // A manually hosted visual-effect view may report an empty intrinsic
-      // size. The measured NSTextField layout above remains the real minimum;
-      // a native hosting fit may enlarge it further.
-      if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) fittedSize = applyLayout({ width, height });
-    } catch {}
+    const fittedSize = layoutSize;
     arrowPanel=kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(rect(0,0,HELPER_ARROW_WINDOW_SIZE,HELPER_ARROW_WINDOW_SIZE),128,2,false); configurePanel(arrowPanel,true); arrowPanel.setOpaque$(false); arrowPanel.setBackgroundColor$(kit.NSColor.clearColor()); arrowPanel.setHasShadow$(false);
     const canvas=kit.NSView.alloc().initWithFrame$(rect(0,0,HELPER_ARROW_WINDOW_SIZE,HELPER_ARROW_WINDOW_SIZE)); canvas.setWantsLayer$(true); canvas.layer().setMasksToBounds$(false);
     arrow=Arrow.alloc().initWithFrame$(rect(36,10,HELPER_ARROW_GRAPHIC_SIZE,HELPER_ARROW_GRAPHIC_SIZE)); arrow.setWantsLayer$(true); arrow.layer().setGeometryFlipped$(true); arrow.layer().setAnchorPoint$({x:.5,y:1}); arrow.setFrame$(rect(36,10,HELPER_ARROW_GRAPHIC_SIZE,HELPER_ARROW_GRAPHIC_SIZE)); arrow.layer().setMasksToBounds$(false);
