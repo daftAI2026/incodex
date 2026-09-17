@@ -148,7 +148,7 @@ function nativeMotionBridge(screenSpecs: Array<{ frame: Rect; scale: number }>) 
           if (type === "NSString" && property === "stringWithUTF8String$") return String(args[0]);
           if (type === "NSNumber" && property === "numberWithDouble$") return args[0];
           if (type === "CIFilter" && property === "filterWithName$") return nativeObject("CIFilter");
-          if ((type === "CALayer" || type === "CAShapeLayer") && property === "layer") return nativeObject("CALayer");
+          if ((type === "CALayer" || type === "CAShapeLayer") && property === "layer") return nativeObject(type);
           if (type === "CATransaction") return undefined;
           return undefined;
         };
@@ -333,7 +333,8 @@ test("flight shadows follow the reference 30pt container, masks and dynamic roun
     const shadows=root.layerValue.sublayers;
     expect(shadows).toHaveLength(3);
     expect(shadows.map((v:any)=>[v.values.get("setShadowOpacity$"),v.values.get("setShadowRadius$"),v.values.get("setShadowOffset$")]))
-      .toEqual([[.015,2,{width:0,height:-3}],[.09,15,{width:0,height:-5}],[.20,3,{width:0,height:0}]]);
+      .toEqual([[.06,2,{width:0,height:-3}],[.09,15,{width:0,height:-5}],[.20,3,{width:0,height:0}]]);
+    expect(shadows[0].values.get("setOpacity$")).toBe(.25);
     for(const shadow of shadows) {
       expect(shadow.frameValue).toEqual(rect(0,0,578,140));
       expect(shadow.values.get("shadowPath").args).toEqual([rect(30,30,518,80),23.75,23.75,null]);

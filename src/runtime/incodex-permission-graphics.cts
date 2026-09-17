@@ -32,6 +32,24 @@ function createPermissionGraphics(objc) {
         layer.setValue$forKey$(path, foundation.NSString.stringWithUTF8String$("path"));
       } finally { objc.callFunction("CGPathRelease", { returns: "v", args: ["@"] }, path); }
     },
+    setRoundedPath(layer, bounds, radius) {
+      store(layer, "path", "CGPathCreateWithRoundedRect", ["{CGRect={CGPoint=dd}{CGSize=dd}}", "d", "d", "^v"], [bounds, radius, radius, null], "CGPathRelease");
+    },
+    setOuterShadowMaskPath(layer, outer, inner, radius) {
+      const path = objc.callFunction("CGPathCreateMutable", { returns: "@", args: [] });
+      if (!path) throw new Error("Native permission shadow mask could not be created");
+      let rounded;
+      try {
+        rounded = objc.callFunction("CGPathCreateWithRoundedRect", { returns: "@", args: ["{CGRect={CGPoint=dd}{CGSize=dd}}", "d", "d", "^v"] }, inner, radius, radius, null);
+        if (!rounded) throw new Error("Native permission shadow cutout could not be created");
+        objc.callFunction("CGPathAddRect", { returns: "v", args: ["@", "^v", "{CGRect={CGPoint=dd}{CGSize=dd}}"] }, path, null, outer);
+        objc.callFunction("CGPathAddPath", { returns: "v", args: ["@", "^v", "@"] }, path, null, rounded);
+        layer.setValue$forKey$(path, foundation.NSString.stringWithUTF8String$("path"));
+      } finally {
+        if (rounded) objc.callFunction("CGPathRelease", { returns: "v", args: ["@"] }, rounded);
+        objc.callFunction("CGPathRelease", { returns: "v", args: ["@"] }, path);
+      }
+    },
     setRoundedShadowPath(layer, bounds, radius) {
       store(layer, "shadowPath", "CGPathCreateWithRoundedRect", ["{CGRect={CGPoint=dd}{CGSize=dd}}", "d", "d", "^v"], [bounds, radius, radius, null], "CGPathRelease");
     },

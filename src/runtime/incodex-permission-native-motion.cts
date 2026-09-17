@@ -64,31 +64,42 @@ function createNativeReplicants({ objc, source, target }) {
       // Keep the panel owned even if construction of its children fails.
       const item = { panel, frame, scale }; next.push(item);
       panel.setOpaque$(false); panel.setBackgroundColor$(kit.NSColor.clearColor());
-      panel.setHasShadow$(false); panel.setIgnoresMouseEvents$(true); panel.setLevel$(3);
+      panel.setHasShadow$(false); panel.setIgnoresMouseEvents$(true); panel.setLevel$(25);
       panel.setHidesOnDeactivate$(false);
       const root = kit.NSView.alloc().initWithFrame$(rect(0, 0, frame.size.width, frame.size.height));
       const surface = kit.NSView.alloc().initWithFrame$(rect(0, 0, 1, 1));
       surface.setWantsLayer$(true);
       surface.layer().setMasksToBounds$(false);
       surface.layer().setContentsScale$(scale);
-      root.addSubview$(surface); panel.setContentView$(root);
-      const shadows = [[.2, 3, 0, -3], [.06, 2, -3, -1], [.09, 15, -5, -2]].map(([opacity, radius, y, z]) => {
+      root.setWantsLayer$(true); root.layer().setMasksToBounds$(false);
+      panel.setContentView$(root);
+      // CUA ReplicantWindow: destination, key and ambient shadows each have
+      // an even-odd cutout. The animated container extends 30pt past the card.
+      const masks = [];
+      const shadows = [[.06, 2, -3], [.09, 15, -5], [.2, 3, 0]].map(([opacity, radius, y]) => {
         const layer = quartz.CALayer.layer();
         graphics.setBlackColor(layer, "shadowColor", 1);
         layer.setShadowOpacity$(opacity); layer.setShadowRadius$(radius);
-        layer.setShadowOffset$({ width: 0, height: y }); layer.setZPosition$(z);
-        surface.layer().addSublayer$(layer); return layer;
+        layer.setShadowOffset$({ width: 0, height: y }); layer.setMasksToBounds$(false);
+        const mask = quartz.CAShapeLayer.layer();
+        mask.setFillRule$(string("even-odd")); graphics.setColor(mask, "fillColor", [1, 1, 1, 1]);
+        layer.setMask$(mask); masks.push(mask);
+        root.layer().addSublayer$(layer); return layer;
       });
-      const stroke = quartz.CALayer.layer();
-      stroke.setBorderWidth$(.5); graphics.setBlackColor(stroke, "borderColor", .15);
-      stroke.setZPosition$(3); surface.layer().addSublayer$(stroke);
+      root.addSubview$(surface);
+      const strokeView = kit.NSView.alloc().initWithFrame$(rect(0, 0, 1, 1));
+      strokeView.setWantsLayer$(true); strokeView.layer().setMasksToBounds$(false);
+      const stroke = quartz.CAShapeLayer.layer();
+      stroke.setLineWidth$(.5); graphics.setBlackColor(stroke, "strokeColor", 1);
+      graphics.setBlackColor(stroke, "fillColor", 0); stroke.setOpacity$(0);
+      strokeView.layer().addSublayer$(stroke); root.addSubview$(strokeView);
       const images = [source.image, targetImage].map(image => {
         const view = kit.NSImageView.alloc().initWithFrame$(rect(0, 0, 1, 1));
         view.setImage$(image); view.setImageScaling$(1); view.setWantsLayer$(true);
         view.layer().setMasksToBounds$(false); view.layer().setContentsScale$(scale);
         surface.addSubview$(view); return view;
       });
-      Object.assign(item, { surface, shadows, stroke, images });
+      Object.assign(item, { root, surface, shadows, masks, strokeView, stroke, images });
       }
       return next;
     } catch (error) {
@@ -118,17 +129,25 @@ function createNativeReplicants({ objc, source, target }) {
     if (current.key !== topologyKey) rebuild();
     quartz.CATransaction.begin(); quartz.CATransaction.setDisableActions$(true);
     try {
-      for (const { frame, scale, surface, shadows, stroke, images } of entries) {
+      for (const { frame, scale, root, surface, shadows, masks, strokeView, stroke, images } of entries) {
         const b = sample.bounds;
         const aligned = alignPermissionFrame({ x: b.x - frame.origin.x, y: b.y - frame.origin.y, width: b.width, height: b.height }, scale);
         const bounds = rect(0, 0, aligned.width, aligned.height);
-        surface.setFrame$(rect(aligned.x, aligned.y, aligned.width, aligned.height));
-        stroke.setFrame$(bounds); stroke.setCornerRadius$(sample.cornerRadius); stroke.setOpacity$(sample.progress);
-        for (const layer of shadows) {
-          layer.setFrame$(bounds);
-          graphics.setRoundedShadowPath(layer, bounds, 12);
-        }
-        shadows[1].setShadowOpacity$(.06 * sample.progress);
+        const outer = rect(0, 0, aligned.width + 60, aligned.height + 60);
+        const inner = rect(30, 30, aligned.width, aligned.height);
+        root.setFrame$(rect(aligned.x - 30, aligned.y - 30, outer.size.width, outer.size.height));
+        surface.setFrame$(inner); strokeView.setFrame$(inner);
+        surface.layer().setCornerRadius$(sample.cornerRadius);
+        strokeView.layer().setCornerRadius$(sample.cornerRadius);
+        const radius = Math.max(0, sample.cornerRadius - .25);
+        stroke.setFrame$(bounds); stroke.setOpacity$(.15 * Math.max(0, Math.min(1, sample.progress)));
+        graphics.setRoundedPath(stroke, rect(.25, .25, Math.max(0, aligned.width - .5), Math.max(0, aligned.height - .5)), radius);
+        shadows.forEach((layer, index) => {
+          layer.setFrame$(outer); masks[index].setFrame$(outer);
+          graphics.setRoundedShadowPath(layer, inner, radius);
+          graphics.setOuterShadowMaskPath(masks[index], outer, inner, radius);
+        });
+        shadows[0].setOpacity$(Math.max(0, Math.min(1, sample.progress)));
         images.forEach(view => view.setFrame$(bounds));
         images[0].setAlphaValue$(sample.sourceOpacity); images[1].setAlphaValue$(sample.targetOpacity);
         blur(images[0], sample.sourceBlur, scale); blur(images[1], sample.targetBlur, scale);
