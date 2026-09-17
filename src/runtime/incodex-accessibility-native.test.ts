@@ -279,6 +279,9 @@ class FakeNative {
 
   setClipsToBounds$(value: unknown): void { this.values.set("clipsToBounds", value); }
 
+  addSublayer$(value: unknown): void { this.values.set("sublayer", value); }
+  addObject$(value: unknown): void { const items = (this.values.get("items") ?? []) as unknown[]; items.push(value); this.values.set("items", items); }
+  setLineDashPattern$(value: unknown): void { this.values.set("lineDashPattern", value); }
   setCornerCurve$(value: unknown): void { this.values.set("cornerCurve", value); }
 
   setCornerRadius$(value: unknown): void {
@@ -414,6 +417,11 @@ class FakeNative {
     this.values.set("alignment", value);
   }
 
+  colorUsingColorSpace$(_space: unknown): FakeNative { return this; }
+  redComponent(): number { return 0; }
+  greenComponent(): number { return 0; }
+  blueComponent(): number { return 0; }
+  alphaComponent(): number { return 1; }
   setTextColor$(value: unknown): void {
     this.values.set("textColor", value);
   }
@@ -712,6 +720,9 @@ function makeBridge(
       get NSWorkspace() { return library(this.framework).NSWorkspace; }
       get NSPasteboardItem() { return library(this.framework).NSPasteboardItem; }
       get NSDraggingItem() { return library(this.framework).NSDraggingItem; }
+      get NSMutableArray() { return library(this.framework).NSMutableArray; }
+      get CAShapeLayer() { return library(this.framework).CAShapeLayer; }
+      get NSColorSpace() { return library(this.framework).NSColorSpace; }
       get NSNumber() { return library(this.framework).NSNumber; }
       get NSArray() { return library(this.framework).NSArray; }
       get NSURL() { return library(this.framework).NSURL; }
@@ -743,6 +754,8 @@ function makeBridge(
     callFunction(name: string, ...args: unknown[]) {
       calls.push({ receiver: "C", selector: name, args });
       if (name === "NSSelectorFromString") return String(args.at(-1));
+      if (name === "CGPathCreateMutable") return { path: [] };
+      if (name === "CGPathCreateWithRoundedRect") return { path: args.slice(1) };
       if (name === "CGColorCreateGenericRGB" && (args[0] as { returns?: string })?.returns === "@") return { color: args.slice(1) };
       return undefined;
     },

@@ -3,6 +3,7 @@
 // Copyright (c) 2026 daftAI. See LICENSE. Permission decisions stay in the host controller.
 const { createPermissionGraphics } = require("./incodex-permission-graphics.cts");
 const { createPermissionCardBackground } = require("./incodex-permission-card.cts");
+const { createPermissionPlaceholderBackground } = require("./incodex-permission-placeholder.cts");
 let generation = 0;
 const APP_PATH = "/Applications/ChatGPT.app";
 const rect = (x, y, width, height) => ({ origin: { x, y }, size: { width, height } });
@@ -149,6 +150,8 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   card.addSubview$(createPermissionCardBackground({ View, Material, kit, graphics, str, size: { width: 518, height: 80 }, dark }));
   contentGroup.addSubview$(card);
   const placeholder = View.alloc().initWithFrame$(card.frame());
+  placeholder.setWantsLayer$(true);
+  placeholder.layer().addSublayer$(createPermissionPlaceholderBackground({ quartz, foundation, kit, graphics, size: { width: 518, height: 80 }, dark }));
   const placeholderTitle = label(text("completeInSettings"), rect(12, 32, 494, 16), 12, false, true, true, true);
   placeholderTitle.setFont$(kit.NSFont.systemFontOfSize$weight$(12, .23));
   const placeholderText = placeholderTitle.attributedStringValue().mutableCopy();
