@@ -7,7 +7,7 @@ const rect = (x: number, y: number, width: number, height: number): Rect => ({
   origin: { x, y }, size: { width, height },
 });
 
-function nativeMotionBridge(screenSpecs: Array<{ frame: Rect; scale: number }>) {
+function nativeMotionBridge(screenSpecs: Array<{ frame: Rect; scale: number }>, options: { throwOnSwiftSurfaceAdd?: boolean } = {}) {
   const objects: any[] = [];
   const calls: Array<{ selector: string; args: any[] }> = [];
   let currentScreens = screenSpecs.map((spec) => {
@@ -78,6 +78,9 @@ function nativeMotionBridge(screenSpecs: Array<{ frame: Rect; scale: number }>) 
       (object.sublayers ||= []).push(args[0]); return;
     }
     if (selector === "addSubview$") {
+      if (options.throwOnSwiftSurfaceAdd && args[0]?.type === "IncodexPermissionFlightView") {
+        throw new Error("injected SwiftUI surface construction failure");
+      }
       object.subviews.push(args[0]);
       return undefined;
     }
@@ -202,11 +205,23 @@ function swiftUIFlightLibrary() {
     return rect(value.origin.x, value.origin.y, value.size.width, value.size.height);
   }
   function makeView() {
+    const layerState: any = { type: "SwiftUIFlightLayer", values: new Map<string, any>() };
+    const layer = new Proxy(layerState, {
+      get(target, property: string | symbol, receiver) {
+        if (property in target) {
+          const value = target[property as keyof typeof target];
+          return typeof value === "function" ? value.bind(receiver) : value;
+        }
+        if (typeof property !== "string") return undefined;
+        return (...args: any[]) => { target.values.set(property, args[0]); };
+      },
+    });
     const state: any = {
       type: "IncodexPermissionFlightView",
       frameValue: rect(0, 0, 0, 0),
       calls: [] as Array<{ selector: string; args: any[] }>,
       imagePair: null,
+      layer: () => layer,
     };
     const view = new Proxy(state, {
       get(target, property: string | symbol, receiver) {
@@ -357,22 +372,28 @@ test("SwiftUI flight uses its public image/progress ABI instead of AppKit image 
   }
 });
 
-test("Back composites the outgoing helper below the incoming original card", () => {
+test("Back sends the outgoing helper before the incoming original card to SwiftUI", () => {
   const bridge = nativeMotionBridge([{ frame: rect(0, 0, 1440, 900), scale: 2 }]);
+  const swift = swiftUIFlightLibrary();
   const originalImage = { size: () => ({ width: 518, height: 80 }) };
   const replicas = createNativeReplicants({ objc: bridge.objc,
-    source: { image: originalImage }, target: { view: bridge.targetView(rect(0, 0, 531, 126)) }, reverse: true });
+    nativeLibrary: swift.library, source: { image: originalImage },
+    target: { view: bridge.targetView(rect(0, 0, 531, 126)) }, reverse: true });
   try {
     replicas.render({ bounds: { x: 100, y: 200, width: 526, height: 104 },
       progress: .25, cornerRadius: 15, sourceOpacity: .75, targetOpacity: .25, sourceBlur: 3, targetBlur: 9 });
-    const images = bridge.objects.filter(value => value.type === "NSImageView");
-    expect(images[0].values.get("setImage$")).not.toBe(originalImage);
-    expect(images[1].values.get("setImage$")).toBe(originalImage);
-    expect(images.map(value => value.frameValue)).toEqual([
-      rect(-2.5, -11, 531, 126), rect(4, 12, 518, 80),
-    ]);
-    expect(images.map(value => value.values.get("setAlphaValue$"))).toEqual([.75, .25]);
-  } finally { replicas.dispose(); }
+    const view = swift.instances[0];
+    const setImages = view.calls.find((call: any) => call.selector === "setSourceImage$targetImage$");
+    expect(setImages.args[0]).not.toBe(originalImage);
+    expect(setImages.args[1]).toBe(originalImage);
+    const update = view.calls.find((call: any) => call.selector === "updateProgress$cornerRadius$reduceTransparency$");
+    expect(update.args).toEqual([.25, 15, false]);
+    expect(view.frameValue).toEqual(rect(30, 30, 526, 104));
+    expect(bridge.objects.some(value => ["NSVisualEffectView", "NSImageView", "CIFilter"].includes(value.type))).toBe(false);
+  } finally {
+    replicas.dispose();
+    expect(swift.instances[0].calls.at(-1)?.args).toEqual([null, null]);
+  }
 });
 
 test("closing during native flight reaps panels and settles without late frames", async () => {
@@ -407,10 +428,12 @@ test("native replicants rebuild for a changed screen topology and backing scale 
   const bridge = nativeMotionBridge([
     { frame: rect(0.25, 0, 1440, 900), scale: 2 },
   ]);
+  const swift = swiftUIFlightLibrary();
   const source = { image: { size: () => ({ width: 80, height: 28 }) }, frame: rect(10, 400, 80, 28) };
   const targetView = bridge.targetView(rect(0, 0, 452, 44));
   const replicas = createNativeReplicants({
     objc: bridge.objc,
+    nativeLibrary: swift.library,
     source,
     target: { view: targetView },
   });
@@ -424,21 +447,24 @@ test("native replicants rebuild for a changed screen topology and backing scale 
   const firstPanel = bridge.panels()[0];
   expect(firstPanel).toBeDefined();
   expect(firstPanel.frameValue.origin.x).toBe(0.5);
-  expect(firstPanel.contentViewValue.subviews[0].layerValue.values.get("contentsScale")).toBe(2);
+  expect(firstPanel.contentViewValue.subviews[0].type).toBe("IncodexPermissionFlightView");
+  expect(firstPanel.contentViewValue.subviews[0].layer().values.get("setContentsScale$")).toBe(2);
 
   bridge.screens([{ frame: rect(0.25, 0, 1440, 900), scale: 1 }]);
   replicas.render(sample);
   const panels = bridge.panels();
   expect(panels).toHaveLength(2);
   expect(firstPanel.closed).toBe(true);
-  expect(panels[1].contentViewValue.subviews[0].layerValue.values.get("contentsScale")).toBe(1);
+  expect(panels[1].contentViewValue.subviews[0].layer().values.get("setContentsScale$")).toBe(1);
   replicas.dispose();
 });
 
-test("flight keeps each snapshot at its intrinsic size centered in the changing card", () => {
+test("flight keeps the SwiftUI surface centered in the changing card", () => {
   const bridge = nativeMotionBridge([{ frame: rect(0, 0, 1440, 900), scale: 2 }]);
+  const swift = swiftUIFlightLibrary();
   const replicas = createNativeReplicants({
     objc: bridge.objc,
+    nativeLibrary: swift.library,
     source: { image: { size: () => ({ width: 518, height: 80 }) } },
     target: { view: bridge.targetView(rect(0, 0, 531, 126)) },
   });
@@ -450,20 +476,23 @@ test("flight keeps each snapshot at its intrinsic size centered in the changing 
     ]) {
       replicas.render({ bounds, progress: .5, cornerRadius: 18,
         sourceOpacity: .5, targetOpacity: .5, sourceBlur: 6, targetBlur: 6 });
-      const images = bridge.objects.filter(value => value.type === "NSImageView");
-      expect(images.map(value => value.frameValue)).toEqual([
-        rect((bounds.width - 518) / 2, (bounds.height - 80) / 2, 518, 80),
-        rect((bounds.width - 531) / 2, (bounds.height - 126) / 2, 531, 126),
-      ]);
-      expect(images.map(value => value.values.get("setImageScaling$"))).toEqual([2, 2]);
+      const view = swift.instances[0];
+      expect(view.frameValue).toEqual(rect(30, 30, bounds.width, bounds.height));
+      const update = view.calls.filter((call: any) => call.selector === "updateProgress$cornerRadius$reduceTransparency$").at(-1);
+      expect(update.args).toEqual([.5, 18, false]);
     }
-  } finally { replicas.dispose(); }
+  } finally {
+    replicas.dispose();
+    expect(swift.instances[0].calls.at(-1)?.args).toEqual([null, null]);
+  }
 });
 
-test("flight clips the combined blurred images to the animated continuous corner without clipping shadows", () => {
+test("flight delegates material, clipping, and blur to SwiftUI without clipping shadows", () => {
   const bridge = nativeMotionBridge([{ frame: rect(0, 0, 1440, 900), scale: 2 }]);
+  const swift = swiftUIFlightLibrary();
   const replicas = createNativeReplicants({
     objc: bridge.objc,
+    nativeLibrary: swift.library,
     source: { image: { size: () => ({ width: 518, height: 80 }) } },
     target: { view: bridge.targetView(rect(0, 0, 531, 126)) },
   });
@@ -472,27 +501,28 @@ test("flight clips the combined blurred images to the animated continuous corner
       replicas.render({ bounds: { x: 100, y: 200, width: 526, height: 104 },
         progress: .5, cornerRadius, sourceOpacity: .5, targetOpacity: .5, sourceBlur: 6, targetBlur: 6 });
       const root = bridge.panels()[0].contentViewValue;
-      const surface = root.subviews.find((view: any) => view.subviews.length === 2);
-      expect(surface.subviews.map((view: any) => view.type)).toEqual(["NSImageView", "NSImageView"]);
-      expect(surface.layerValue.values.get("setMasksToBounds$")).toBe(true);
-      expect(surface.layerValue.values.get("setCornerCurve$")).toBe("continuous");
-      expect(surface.layerValue.values.get("setCornerRadius$")).toBe(cornerRadius);
+      const surface = root.subviews.find((view: any) => view.type === "IncodexPermissionFlightView");
+      expect(surface).toBe(swift.instances[0]);
+      const update = surface.calls.filter((call: any) => call.selector === "updateProgress$cornerRadius$reduceTransparency$").at(-1);
+      expect(update.args).toEqual([.5, cornerRadius, false]);
       expect(root.layerValue.values.get("setMasksToBounds$")).toBe(false);
-      for (const image of surface.subviews) {
-        expect(image.layerValue.values.get("setMasksToBounds$")).toBe(false);
-        expect(image.layerValue.values.get("setFilters$")).not.toBeNull();
-      }
+      expect(bridge.objects.some((value) => ["NSVisualEffectView", "NSImageView", "CIFilter"].includes(value.type))).toBe(false);
       for (const shadow of root.layerValue.sublayers) {
         expect(shadow.values.get("setMasksToBounds$")).toBe(false);
         expect(shadow.values.get("setMask$").values.get("setFillRule$")).toBe("even-odd");
       }
     }
-  } finally { replicas.dispose(); }
+  } finally {
+    replicas.dispose();
+    expect(swift.instances[0].calls.at(-1)?.args).toEqual([null, null]);
+  }
 });
 
-test("flight keeps a live material sibling behind the separately clipped image stack", () => {
+test("flight keeps one SwiftUI material-and-image surface above the AppKit root", () => {
   const bridge = nativeMotionBridge([{ frame: rect(0, 0, 1440, 900), scale: 2 }]);
+  const swift = swiftUIFlightLibrary();
   const replicas = createNativeReplicants({ objc: bridge.objc,
+    nativeLibrary: swift.library,
     source: { image: { size: () => ({ width: 518, height: 80 }) } },
     target: { view: bridge.targetView(rect(0, 0, 531, 110)) } });
   try {
@@ -501,40 +531,81 @@ test("flight keeps a live material sibling behind the separately clipped image s
         progress, cornerRadius, sourceOpacity: 1 - progress, targetOpacity: progress,
         sourceBlur: 12 * progress, targetBlur: 12 * (1 - progress) });
       const root = bridge.panels()[0].contentViewValue;
-      const material = root.subviews.find((view: any) => view.type === "NSVisualEffectView");
-      expect(material).toBeDefined();
-      const surface = root.subviews.find((view: any) => view.subviews.length === 2);
-      expect(root.subviews.indexOf(material)).toBeLessThan(root.subviews.indexOf(surface));
-      expect(material.frameValue).toEqual(surface.frameValue);
-      expect(material.values.get("setMaterial$")).toBe(6);
-      expect(material.values.get("setBlendingMode$")).toBe(0);
-      expect(material.values.get("setState$")).toBe(1);
-      expect(material.layerValue.values.get("setCornerCurve$")).toBe("continuous");
-      expect(material.layerValue.values.get("setCornerRadius$")).toBe(cornerRadius);
-      expect(material.layerValue.values.get("setMasksToBounds$")).toBe(true);
-      expect(material.layerValue.values.get("contentsScale")).toBe(2);
-      expect(material.values.has("setAlphaValue$")).toBe(false);
-      expect(material.layerValue.values.has("setFilters$")).toBe(false);
+      const surface = root.subviews[0];
+      expect(surface).toBe(swift.instances[0]);
+      expect(root.subviews).toHaveLength(2);
+      const update = surface.calls.filter((call: any) => call.selector === "updateProgress$cornerRadius$reduceTransparency$").at(-1);
+      expect(update.args).toEqual([progress, cornerRadius, false]);
+      expect(bridge.objects.some((value) => ["NSVisualEffectView", "NSImageView", "CIFilter"].includes(value.type))).toBe(false);
     }
-  } finally { replicas.dispose(); }
+  } finally {
+    replicas.dispose();
+    expect(swift.instances[0].calls.at(-1)?.args).toEqual([null, null]);
+  }
 });
 
 test("native snapshot rejects an empty view before creating flight panels", () => {
   const bridge = nativeMotionBridge([
     { frame: rect(0, 0, 1440, 900), scale: 2 },
   ]);
+  const swift = swiftUIFlightLibrary();
   expect(() => createNativeReplicants({
     objc: bridge.objc,
+    nativeLibrary: swift.library,
     source: { image: {}, frame: rect(10, 400, 80, 28) },
     target: { view: bridge.targetView(rect(0, 0, 0, 0)) },
   })).toThrow(/empty/i);
   expect(bridge.panels()).toHaveLength(0);
 });
 
+test("SwiftUI construction failure clears images before closing its owned panel", () => {
+  const bridge = nativeMotionBridge([
+    { frame: rect(0, 0, 1440, 900), scale: 2 },
+  ], { throwOnSwiftSurfaceAdd: true });
+  const swift = swiftUIFlightLibrary();
+  expect(() => createNativeReplicants({
+    objc: bridge.objc,
+    nativeLibrary: swift.library,
+    source: { image: { size: () => ({ width: 518, height: 80 }) } },
+    target: { view: bridge.targetView(rect(0, 0, 531, 110)) },
+  })).toThrow(/construction failure/i);
+  expect(swift.instances).toHaveLength(1);
+  expect(swift.instances[0].calls.at(-1)?.selector).toBe("setSourceImage$targetImage$");
+  expect(swift.instances[0].calls.at(-1)?.args).toEqual([null, null]);
+  expect(bridge.panels()[0].closed).toBe(true);
+  expect(bridge.panels()[0].visible).toBe(false);
+});
+
+test("panel close errors do not stop remaining SwiftUI surfaces from clearing and closing", () => {
+  const bridge = nativeMotionBridge([
+    { frame: rect(0, 0, 1440, 900), scale: 2 },
+    { frame: rect(1440, 0, 1440, 900), scale: 2 },
+  ]);
+  const swift = swiftUIFlightLibrary();
+  const replicas = createNativeReplicants({
+    objc: bridge.objc,
+    nativeLibrary: swift.library,
+    source: { image: { size: () => ({ width: 518, height: 80 }) } },
+    target: { view: bridge.targetView(rect(0, 0, 531, 110)) },
+  });
+  replicas.render({ bounds: { x: 100, y: 200, width: 526, height: 104 },
+    progress: .5, cornerRadius: 18, sourceOpacity: .5, targetOpacity: .5, sourceBlur: 6, targetBlur: 6 });
+  const panels = bridge.panels();
+  expect(panels).toHaveLength(2);
+  const originalClose = panels[0].close;
+  panels[0].close = () => { originalClose.call(panels[0]); throw new Error("injected close failure"); };
+  expect(() => replicas.dispose()).toThrow(/close failure/i);
+  expect(swift.instances).toHaveLength(2);
+  expect(swift.instances.every(view => view.calls.at(-1)?.args?.[0] === null && view.calls.at(-1)?.args?.[1] === null)).toBe(true);
+  expect(panels.every(panel => panel.closed)).toBe(true);
+  expect(panels.every(panel => !panel.visible)).toBe(true);
+});
+
 
 test("flight shadows follow the reference 30pt container, masks and dynamic rounded path", () => {
   const bridge=nativeMotionBridge([{frame:rect(0,0,1440,900),scale:2}]);
-  const replicas=createNativeReplicants({objc:bridge.objc,source:{image:{size:()=>({width:518,height:80})}},target:{view:bridge.targetView(rect(0,0,531,110))}});
+  const swift=swiftUIFlightLibrary();
+  const replicas=createNativeReplicants({objc:bridge.objc,nativeLibrary:swift.library,source:{image:{size:()=>({width:518,height:80})}},target:{view:bridge.targetView(rect(0,0,531,110))}});
   try {
     replicas.render({bounds:{x:100,y:200,width:518,height:80},cornerRadius:24,progress:.25,
       sourceOpacity:.75,targetOpacity:.25,sourceBlur:3,targetBlur:9});
@@ -565,7 +636,8 @@ test("flight shadows follow the reference 30pt container, masks and dynamic roun
 
 test("flight uses reference integral point bounds before adding the 30pt margin", () => {
   const bridge=nativeMotionBridge([{frame:rect(0,0,1440,900),scale:2}]);
-  const replicas=createNativeReplicants({objc:bridge.objc,source:{image:{size:()=>({width:518,height:80})}},target:{view:bridge.targetView(rect(0,0,531,110))}});
+  const swift=swiftUIFlightLibrary();
+  const replicas=createNativeReplicants({objc:bridge.objc,nativeLibrary:swift.library,source:{image:{size:()=>({width:518,height:80})}},target:{view:bridge.targetView(rect(0,0,531,110))}});
   try {
     replicas.render({bounds:{x:100.25,y:200.25,width:518.25,height:80.25},cornerRadius:24,progress:.25,
       sourceOpacity:.75,targetOpacity:.25,sourceBlur:3,targetBlur:9});

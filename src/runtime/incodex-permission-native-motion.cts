@@ -3,6 +3,7 @@
 // Copyright (c) 2026 daftAI. See LICENSE.
 const { runPermissionFlight, alignPermissionFrame } = require("./incodex-permission-motion.cts");
 const { createPermissionGraphics } = require("./incodex-permission-graphics.cts");
+const { loadPermissionNativeLibrary } = require("./incodex-permission-native.cts");
 const rect = (x, y, width, height) => ({ origin: { x, y }, size: { width, height } });
 
 function snapshot(kit, view) {
@@ -22,21 +23,30 @@ function snapshot(kit, view) {
   return image;
 }
 
-function createNativeReplicants({ objc, source, target, reverse = false }) {
+function createNativeReplicants({ objc, nativeLibrary, source, target, reverse = false }) {
   const kit = new objc.NobjcLibrary("/System/Library/Frameworks/AppKit.framework/AppKit");
   const foundation = new objc.NobjcLibrary("/System/Library/Frameworks/Foundation.framework/Foundation");
   const quartz = new objc.NobjcLibrary("/System/Library/Frameworks/QuartzCore.framework/QuartzCore");
-  const coreImage = new objc.NobjcLibrary("/System/Library/Frameworks/CoreImage.framework/CoreImage");
+  const swiftLibrary = nativeLibrary ?? loadPermissionNativeLibrary(objc);
+  const FlightView = swiftLibrary?.IncodexPermissionFlightView;
+  if (!FlightView) throw new Error("Native permission SwiftUI flight class is unavailable");
   const graphics = createPermissionGraphics(objc);
   const string = value => foundation.NSString.stringWithUTF8String$(value);
   const targetImage = snapshot(kit, target.view);
   // Each leg composites its outgoing snapshot below its incoming snapshot.
   const flightImages = reverse ? [targetImage, source.image] : [source.image, targetImage];
   const entries = [];
-  const allowsBlur = !kit.NSWorkspace.sharedWorkspace().accessibilityDisplayShouldReduceTransparency();
+  const reduceTransparency = Boolean(kit.NSWorkspace.sharedWorkspace().accessibilityDisplayShouldReduceTransparency());
   let topologyKey = null;
   function closeEntries(items) {
-    for (const item of items) { item.panel.orderOut$(null); item.panel.close(); }
+    let firstError;
+    const remember = error => { if (!firstError) firstError = error; };
+    for (const item of items) {
+      try { item.surface?.setSourceImage$targetImage$(null, null); } catch (error) { remember(error); }
+      try { item.panel.orderOut$(null); } catch (error) { remember(error); }
+      try { item.panel.close(); } catch (error) { remember(error); }
+    }
+    if (firstError) throw firstError;
   }
   function screenSnapshot() {
     const screens = kit.NSScreen.screens();
@@ -69,12 +79,12 @@ function createNativeReplicants({ objc, source, target, reverse = false }) {
       panel.setHasShadow$(false); panel.setIgnoresMouseEvents$(true); panel.setLevel$(25);
       panel.setHidesOnDeactivate$(false);
       const root = kit.NSView.alloc().initWithFrame$(rect(0, 0, frame.size.width, frame.size.height));
-      const surface = kit.NSView.alloc().initWithFrame$(rect(0, 0, 1, 1));
+      // SwiftUI owns the live material and the clipped image ZStack. Keep the
+      // AppKit root and its shadow/stroke layers around that native surface.
+      const surface = FlightView.alloc().initWithFrame$(rect(0, 0, 1, 1));
+      if (!surface) throw new Error("Native permission SwiftUI flight view construction failed");
+      item.surface = surface;
       surface.setWantsLayer$(true);
-      // CUA's image ZStack is clipped after both opacity/blur branches.
-      // Keep the outer shadow layers and individual image filters unbounded.
-      surface.layer().setCornerCurve$(string("continuous"));
-      surface.layer().setMasksToBounds$(true);
       surface.layer().setContentsScale$(scale);
       root.setWantsLayer$(true); root.layer().setMasksToBounds$(false);
       panel.setContentView$(root);
@@ -91,30 +101,15 @@ function createNativeReplicants({ objc, source, target, reverse = false }) {
         layer.setMask$(mask); masks.push(mask);
         root.layer().addSublayer$(layer); return layer;
       });
-      // CUA's Material.regular is a live sibling below the image clip, not
-      // part of either fading/blurred bitmap. Popover is an AppKit recipe
-      // approximation; behindWindow explicitly requests the cross-window
-      // backdrop needed by this transparent panel, not exact SwiftUI parity.
-      const material = kit.NSVisualEffectView.alloc().initWithFrame$(rect(0, 0, 1, 1));
-      material.setMaterial$(6); material.setBlendingMode$(0); material.setState$(1);
-      material.setWantsLayer$(true);
-      material.layer().setCornerCurve$(string("continuous"));
-      material.layer().setMasksToBounds$(true); material.layer().setContentsScale$(scale);
-      root.addSubview$(material); root.addSubview$(surface);
+      surface.setSourceImage$targetImage$(flightImages[0], flightImages[1]);
+      root.addSubview$(surface);
       const strokeView = kit.NSView.alloc().initWithFrame$(rect(0, 0, 1, 1));
       strokeView.setWantsLayer$(true); strokeView.layer().setMasksToBounds$(false);
       const stroke = quartz.CAShapeLayer.layer();
       stroke.setLineWidth$(.5); graphics.setBlackColor(stroke, "strokeColor", 1);
       graphics.setBlackColor(stroke, "fillColor", 0); stroke.setOpacity$(0);
       strokeView.layer().addSublayer$(stroke); root.addSubview$(strokeView);
-      const images = flightImages.map(image => {
-        const view = kit.NSImageView.alloc().initWithFrame$(rect(0, 0, 1, 1));
-        view.setImage$(image); view.setImageScaling$(2); view.setWantsLayer$(true);
-        view.layer().setMasksToBounds$(false); view.layer().setContentsScale$(scale);
-        surface.addSubview$(view); return view;
-      });
-      const imageSizes = flightImages.map(image => image.size());
-      Object.assign(item, { root, material, surface, shadows, masks, strokeView, stroke, images, imageSizes });
+      Object.assign(item, { root, surface, shadows, masks, strokeView, stroke });
       }
       return next;
     } catch (error) {
@@ -130,21 +125,13 @@ function createNativeReplicants({ objc, source, target, reverse = false }) {
     entries.push(...next);
     topologyKey = current.key;
   }
-  function blur(view, radius, scale) {
-    const layer = view.layer(); layer.setFilters$(null); layer.setShouldRasterize$(false);
-    if (!allowsBlur || radius <= 0) return;
-    const filter = coreImage.CIFilter.filterWithName$(string("CIGaussianBlur"));
-    if (!filter) return;
-    filter.setValue$forKey$(foundation.NSNumber.numberWithDouble$(radius), string("inputRadius"));
-    layer.setFilters$(foundation.NSArray.arrayWithObject$(filter)); layer.setShouldRasterize$(true); layer.setRasterizationScale$(scale);
-  }
   try { rebuild(); } catch (error) { dispose(); throw error; }
   return { dispose, render(sample) {
     const current = screenSnapshot();
     if (current.key !== topologyKey) rebuild();
     quartz.CATransaction.begin(); quartz.CATransaction.setDisableActions$(true);
     try {
-      for (const { frame, scale, root, material, surface, shadows, masks, strokeView, stroke, images, imageSizes } of entries) {
+      for (const { frame, root, surface, shadows, masks, strokeView, stroke } of entries) {
         // The reference applies CGRectIntegral in screen points, not nearest
         // backing pixels, before translating into each screen's container.
         const b = sample.bounds;
@@ -158,10 +145,9 @@ function createNativeReplicants({ objc, source, target, reverse = false }) {
         const outer = rect(0, 0, aligned.width + 60, aligned.height + 60);
         const inner = rect(30, 30, aligned.width, aligned.height);
         root.setFrame$(rect(aligned.x - 30, aligned.y - 30, outer.size.width, outer.size.height));
-        material.setFrame$(inner); surface.setFrame$(inner); strokeView.setFrame$(inner);
-        material.layer().setCornerRadius$(sample.cornerRadius);
-        surface.layer().setCornerRadius$(sample.cornerRadius);
-        strokeView.layer().setCornerRadius$(sample.cornerRadius);
+        surface.setFrame$(inner);
+        surface.updateProgress$cornerRadius$reduceTransparency$(sample.progress, sample.cornerRadius, reduceTransparency);
+        strokeView.setFrame$(inner);
         const radius = Math.max(0, sample.cornerRadius - .25);
         stroke.setFrame$(bounds); stroke.setOpacity$(.15 * Math.max(0, Math.min(1, sample.progress)));
         graphics.setRoundedPath(stroke, rect(.25, .25, Math.max(0, aligned.width - .5), Math.max(0, aligned.height - .5)), radius);
@@ -171,14 +157,6 @@ function createNativeReplicants({ objc, source, target, reverse = false }) {
           graphics.setOuterShadowMaskPath(masks[index], outer, inner, radius);
         });
         shadows[0].setOpacity$(Math.max(0, Math.min(1, sample.progress)));
-        // CUA 0x100EB75F4 uses NSImage.size for a centered fixed frame,
-        // inside an expanding centered frame. The bitmap itself never stretches.
-        images.forEach((view, index) => {
-          const { width, height } = imageSizes[index];
-          view.setFrame$(rect((aligned.width - width) / 2, (aligned.height - height) / 2, width, height));
-        });
-        images[0].setAlphaValue$(sample.sourceOpacity); images[1].setAlphaValue$(sample.targetOpacity);
-        blur(images[0], sample.sourceBlur, scale); blur(images[1], sample.targetBlur, scale);
       }
     } finally { quartz.CATransaction.commit(); }
     for (const item of entries) { if (!item.shown) { item.panel.orderFront$(null); item.shown = true; } }
@@ -187,7 +165,7 @@ function createNativeReplicants({ objc, source, target, reverse = false }) {
 
 function runNativePermissionHandoff(options) {
   let { objc, source, target, isClosed = () => false,
-  reducedMotion, reverse = false, now = () => performance.now(), schedule = fn => setTimeout(fn, 1000 / 60), cancel = clearTimeout,
+  nativeLibrary, reducedMotion, reverse = false, now = () => performance.now(), schedule = fn => setTimeout(fn, 1000 / 60), cancel = clearTimeout,
   createReplicants = createNativeReplicants, onError = () => {} } = options;
   let resolve;
   const finished = new Promise(done => { resolve = done; });
@@ -205,7 +183,7 @@ function runNativePermissionHandoff(options) {
     if (reducedMotion || isClosed()) { dispose(); return { finished, dispose }; }
     const resolveTarget = () => typeof target === "function" ? target() : target;
     const initialTarget = resolveTarget();
-    replicas = createReplicants({ objc, source, target: initialTarget, reverse });
+    replicas = createReplicants({ objc, nativeLibrary, source, target: initialTarget, reverse });
     const flip = item => ({ x: item.frame.origin.x, y: -item.frame.origin.y - item.frame.size.height,
       width: item.frame.size.width, height: item.frame.size.height, radius: item.radius ?? 12 });
     // CUA reverse completion's caller supplies helper -> original captures,

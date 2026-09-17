@@ -71,7 +71,9 @@ const placeholderModule = await embeddedCjs("incodex-permission-placeholder.cjs"
 const cardModule = await embeddedCjs("incodex-permission-card.cjs");
 const graphicsModule = await embeddedCjs("incodex-permission-graphics.cjs");
 const motionModule = await embeddedCjs("incodex-permission-motion.cjs");
+const permissionNativeModule = await embeddedCjs("incodex-permission-native.cjs");
 const nativeMotionSource = readFileSync(join(emitDir, "incodex-permission-native-motion.cjs"), "utf8")
+  .replace('require("./incodex-permission-native.cts")', permissionNativeModule)
   .replace('require("./incodex-permission-motion.cts")', motionModule)
   .replace('require("./incodex-permission-graphics.cts")', graphicsModule);
 const nativeMotion = await minify(nativeMotionSource, {
