@@ -56,6 +56,20 @@ private func assertScale(_ image: NSImage, scale: CGFloat) {
     precondition(rep.pixelsHigh == Int(110 * scale), "snapshot height did not preserve backing scale")
 }
 
+private func assertInstructionIsRendered(_ image: NSImage) {
+    let rep = bitmapRep(image)
+    let scale = CGFloat(rep.pixelsWide) / image.size.width
+    var inkPixels = 0
+    // The instruction sits above the row on a transparent background. A
+    // nonempty row fill alone must not pass a missing-SwiftUI-text regression.
+    for y in Int(17 * scale)..<Int(35 * scale) {
+        for x in Int(102 * scale)..<Int(510 * scale) {
+            if (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.1 { inkPixels += 1 }
+        }
+    }
+    precondition(inkPixels > 100, "snapshot omitted the instruction text")
+}
+
 private func makeAppIcon() -> NSImage {
     let image = NSImage(size: NSSize(width: 32, height: 32))
     image.lockFocus()
@@ -86,6 +100,8 @@ enum PermissionHelperSnapshotSmoke {
         }
         assertScale(light1, scale: 1)
         assertScale(light2, scale: 2)
+        assertInstructionIsRendered(light1)
+        assertInstructionIsRendered(light2)
         precondition(alphaAtTopLeft(light2, point: NSPoint(x: 500, y: 5)) == 0, "snapshot background is not transparent")
         precondition(alphaAtTopLeft(light2, point: NSPoint(x: 250, y: 65)) > 0, "snapshot row has no foreground output")
         precondition(!bitmapBytes(light2).isEmpty, "snapshot is empty")
@@ -97,6 +113,7 @@ enum PermissionHelperSnapshotSmoke {
             fatalError("dark snapshot unexpectedly returned nil")
         }
         assertScale(dark, scale: 2)
+        assertInstructionIsRendered(dark)
         precondition(bitmapBytes(light2) != bitmapBytes(dark), "light and dark snapshots are identical")
         precondition(helper.subviews.first === host, "dark snapshot replaced the live helper host")
         precondition(helper.appRowView === rowHost, "dark snapshot replaced the live drag row host")
