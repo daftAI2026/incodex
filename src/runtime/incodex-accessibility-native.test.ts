@@ -936,15 +936,15 @@ test("keeps the initial permission window behind the helper during the forward h
   }
 });
 
-test("keeps the 600x540 initial guide with a plain deferred Skip control", async () => {
+test("fits a single permission row and places deferred Skip in its existing bottom padding", async () => {
   const { api, panel } = await makeHarness();
   const skip = panel.contentViewValue?.subviews
     .flatMap((value) => [value, ...descendants(value)])
     .find((value) => value.action === "skip:");
   if (!skip) throw new Error("initial Skip control is missing");
 
-  expect(panel.frame().size).toEqual({ width: 600, height: 540 });
-  expect(skip.frame()).toEqual(frame(27.5, 16, 515.5, 511.5));
+  expect(panel.frame().size).toEqual({ width: 600, height: 342 });
+  expect(skip.frame()).toEqual(frame(27.5, 16, 515.5, 313.5));
   expect(skip.values.get("title")).toBe(COPY.later);
   expect(skip.values.get("bordered")).toBe(false);
 
@@ -1049,7 +1049,7 @@ describe("native Accessibility setup adapter", () => {
       expect(group).toBeDefined();
       expect(group && descendants(group).some(value => value.values.get("stringValue") === COPY.title)).toBe(true);
       expect(panel.contentView()?.subviews[0].frame().origin.y).toBe(0);
-      expect(panel.frame().size.height).toBe(540);
+      expect(panel.frame().size.height).toBe(342);
     } finally { api.close(); }
   });
 
@@ -1060,7 +1060,7 @@ describe("native Accessibility setup adapter", () => {
       expect(objectWithTitle(panel, COPY.body)?.frame().origin.y).toBe(145);
       const card = descendants(panel).find(value => value.frame().origin.x === 41 && value.frame().size.height === 80);
       expect(card?.frame().origin.y).toBe(198);
-      expect(panel.frame().size.height).toBe(540);
+      expect(panel.frame().size.height).toBe(342);
     } finally { api.close(); }
   });
 
@@ -1072,7 +1072,7 @@ describe("native Accessibility setup adapter", () => {
         const card = descendants(panel).find(value => value.frame().origin.x === 41 && value.frame().size.height === 80);
         expect(body?.frame().size.height).toBe(bodyHeight);
         expect(card?.frame().origin.y).toBe(145 + bodyHeight + 21);
-        expect(panel.frame().size.height).toBe(Math.max(540, 32 + 145 + bodyHeight + 21 + 80 + 32));
+        expect(panel.frame().size.height).toBe(32 + 145 + bodyHeight + 21 + 80 + 32);
         expect(panel.contentView()?.frame().size).toEqual(panel.frame().size);
       } finally { api.close(); }
     }
@@ -1093,7 +1093,7 @@ describe("native Accessibility setup adapter", () => {
       expect(top + objectWithTitle(panel, COPY.title)!.frame().origin.y).toBe(124);
       expect(top + objectWithTitle(panel, COPY.body)!.frame().origin.y).toBe(168);
       expect(top + card!.frame().origin.y).toBe(223);
-      expect(panel.frame().size).toEqual({ width: 600, height: 540 });
+      expect(panel.frame().size).toEqual({ width: 600, height: 344 });
     } finally { api.close(); }
   });
 
