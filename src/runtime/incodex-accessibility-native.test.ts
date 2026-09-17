@@ -1253,6 +1253,15 @@ describe("native Accessibility setup adapter", () => {
     }
   });
 
+  test.each(["error", "unknown"])("disables the non-retryable Allow action in the %s page", async (state) => {
+    const { api, swift } = await makeHarness();
+    try {
+      api.setState(state);
+      const content = swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1);
+      expect(content?.args.slice(0, 4)).toEqual([COPY.errorTitle, COPY.errorBody, false, false]);
+    } finally { api.close(); }
+  });
+
   test("updates SwiftUI initial content when the controller enters error", async () => {
     const { api, swift } = await makeHarness();
     try {
@@ -1260,7 +1269,7 @@ describe("native Accessibility setup adapter", () => {
       expect(contents().at(-1)?.args.slice(0, 2)).toEqual([COPY.title, COPY.body]);
       api.setState("error");
       expect(contents().at(-1)?.args.slice(0, 2)).toEqual([COPY.errorTitle, COPY.errorBody]);
-      expect(contents().at(-1)?.args[2]).toBe(true);
+      expect(contents().at(-1)?.args[2]).toBe(false);
       expect(contents().at(-1)?.args[3]).toBe(false);
     } finally { api.close(); }
   });
