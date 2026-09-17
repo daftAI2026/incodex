@@ -475,8 +475,8 @@ describe("single-window Accessibility setup", () => {
     const resolveCopy = (runtimeMain as any).resolveAccessibilityCopy;
     expect(typeof resolveCopy).toBe("function");
     expect(resolveCopy("zh-CN").body).toBe("安装 Incodex 会修改 ChatGPT，因此需要重新授予它辅助功能权限。");
-    expect(resolveCopy("zh-HK").later).toBe("稍後");
-    expect(resolveCopy("zh-TW").later).toBe("稍後");
+    expect(resolveCopy("zh-HK").later).toBe("略過");
+    expect(resolveCopy("zh-TW").later).toBe("略過");
     expect(resolveCopy("en").back).toBe("Back");
     expect(resolveCopy("zh-CN").back).toBe("返回");
     expect(resolveCopy("zh-HK").back).toBe("返回");
