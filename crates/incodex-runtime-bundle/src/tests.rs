@@ -287,6 +287,17 @@ fn embedded_identity_rejects_an_incomplete_or_mismatched_manifest_file_set() {
     );
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_native_manifest_binds_the_embedded_swift_source_bytes() {
+    let source = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/permission-views.swift"
+    ));
+    assert!(native::validate_with_source_bytes(source).is_ok());
+    assert!(native::validate_with_source_bytes(b"stale or replaced Swift source").is_err());
+}
+
 #[test]
 fn inspect_deployed_returns_the_verified_pointer_identity() {
     let root = scratch("inspect");
