@@ -66,12 +66,14 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
   function close() {
     if (closed) return;
     closed = true; returning = false; retryReady = false; dragging = false; dragSession = null; returnSequence++;
-    clearInterval(tracking); tracking = null; stopArrow(); stopBackFlightTimer(); flight?.dispose(); flight = null;
+    clearInterval(tracking); tracking = null; stopArrow(); stopBackFlightTimer();
+    const activeFlight = flight; flight = null;
+    try { activeFlight?.dispose(); } catch {}
     resolveOnce("later");
-    for (const panel of panels) { panel.orderOut$(null); panel.close(); }
+    for (const panel of [...panels]) discardPanel(panel);
     helper = null; arrowPanel = null; arrow = null; appRowView = null;
-    for (const callback of closeHandlers) callback(); closeHandlers.clear();
-    retryHandlers.clear();
+    const callbacks = [...closeHandlers]; closeHandlers.clear(); retryHandlers.clear();
+    for (const callback of callbacks) { try { callback(); } catch {} }
   }
   const Delegate = define("Delegate", "NSObject", {
     "windowWillClose:": { types: "v@:@", implementation: () => close() },
