@@ -1379,7 +1379,9 @@ describe("native Accessibility setup adapter", () => {
     expect(handoffs[0].source.radius).toBe(24);
     expect(capture).toBe(swift!.initialCards[0]);
     expect(handoffs[0].target.frame.size).toEqual({ width: 531, height: 110 });
-    expect(handoffs[0].target.radius).toBe(12);
+    // Original helper capture writes 14 to TransitionCapture.cornerRadius
+    // (+0x28); this is not the live helper window's corner radius.
+    expect(handoffs[0].target.radius).toBe(14);
     expect(handoffs[0].target.panel).toBeDefined();
     expect(handoffs[0].target.panel.contentViewValue.type).toBe("IncodexPermissionHelperView");
     expect(handoffs[0].target.view).toBe(handoffs[0].target.panel.contentViewValue);
@@ -1463,6 +1465,7 @@ describe("native Accessibility setup adapter", () => {
       expect(reverses[0].source.frame.size).toEqual({ width: 518, height: 80 });
       expect(reverses[0].source.image).toBeDefined();
       expect(reverses[0].target.frame.size).toEqual({ width: 531, height: 110 });
+      expect(reverses[0].target.radius).toBe(14);
       expect(api.isDestroyed()).toBe(false);
 
       const priorKeyCount = Number(panel.values.get("keyCount"));
