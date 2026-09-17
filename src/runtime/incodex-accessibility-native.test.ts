@@ -20,6 +20,7 @@ const COPY = {
   addedBody: "Drag Codex into Accessibility and wait for the automatic check.",
   openSettings: "Open Settings",
   checking: "Checking automatically",
+  completeInSettings: "COMPLETE IN SYSTEM SETTINGS",
   repairing: "Preparing System Settings…",
   errorTitle: "Unable to open Settings",
   errorBody: "Try opening System Settings again.",
@@ -1678,4 +1679,30 @@ test("Back keeps the reverse flight alive when Settings disappears", async () =>
     api?.close();
     clock.restore();
   }
+});
+
+
+test("handoff replaces the permission card with a placeholder and Back restores it", async () => {
+  const { api, bridge, panel } = await makeHarness({ reduceMotion: true });
+  try {
+    const body = objectWithTitle(panel, COPY.body)!;
+    const permissionTitle = objectWithTitle(panel, COPY.permissionTitle)!;
+    const card = descendants(panel).find(value => value.subviews.includes(permissionTitle))!;
+    const skip = bridge.objects.find(value => value.action === "skip:")!;
+    objectWithTitle(panel, COPY.repair)!.performClick$();
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+    const placeholder = objectWithTitle(panel, COPY.completeInSettings);
+    expect(placeholder).toBeDefined();
+    expect(body.values.get("stringValue")).toBe(COPY.body);
+    expect(card.values.get("hidden")).toBe(true);
+    expect(skip.values.get("hidden")).toBe(true);
+    bridge.objects.find(value => value.action === "later:")!.performClick$();
+    await flushNativeAsync();
+    expect(card.values.get("hidden")).toBe(false);
+    expect(skip.values.get("hidden")).toBe(false);
+    const container = descendants(panel).find(value => value.subviews.includes(placeholder!));
+    expect(container?.values.get("hidden")).toBe(true);
+    expect(body.values.get("stringValue")).toBe(COPY.body);
+  } finally { api.close(); }
 });
