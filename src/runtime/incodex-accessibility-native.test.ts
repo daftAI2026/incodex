@@ -2081,6 +2081,44 @@ describe("native Accessibility setup adapter", () => {
   });
 });
 
+test.each(["flight", "panel-order-out", "panel-close", "close-handler"])("guide teardown continues after a %s cleanup failure", async (failure) => {
+  const clock = installPollingClock();
+  let finish!: () => void;
+  const finished = new Promise<void>(resolve => { finish = resolve; });
+  let disposed = 0;
+  const harness = await makeHarness({ onHandoff: () => ({ finished, dispose: () => {
+    disposed++;
+    finish();
+    if (failure === "flight") throw new Error("injected flight cleanup error");
+  } }) });
+  const { api, bridge } = harness;
+  try {
+    performSwiftAction(harness, "allow:");
+    await api.choice;
+    api.setState("awaiting-user");
+    await settleNativeAsync();
+    const panels = bridge.objects.filter(value => value.type === "NSPanel");
+    expect(panels.length).toBeGreaterThan(1);
+    const first = panels[0];
+    if (failure === "panel-order-out") first.orderOut$ = () => { throw new Error("injected orderOut error"); };
+    if (failure === "panel-close") {
+      const close = first.close.bind(first);
+      first.close = () => { close(); throw new Error("injected panel close error"); };
+    }
+    let callbacks = 0;
+    api.onClose(() => { if (failure === "close-handler") throw new Error("injected close handler error"); });
+    api.onClose(() => { callbacks++; });
+    expect(() => api.close()).not.toThrow();
+    api.close();
+    await settleNativeAsync();
+    expect(disposed).toBe(1);
+    expect(callbacks).toBe(1);
+    expect(api.isDestroyed()).toBe(true);
+    expect(panels.every(panel => panel.isDestroyed())).toBe(true);
+    expect(panels.every(panel => !panel.visible)).toBe(true);
+  } finally { finish(); api.close(); clock.restore(); }
+});
+
 test("Settings tracking continues while the forward flight is still running", async () => {
   const clock = installPollingClock();
   let x = 120;
