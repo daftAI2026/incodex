@@ -1,8 +1,32 @@
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+function permissionCardSource(): string {
+  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const start = source.indexOf("private struct PermissionCardRoot");
+  const end = source.indexOf("private struct PermissionPlaceholderLabel", start);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  return source.slice(start, end);
+}
+
+test("PermissionCardRoot keeps title and description line limits unconstrained by the original source contract", () => {
+  const card = permissionCardSource();
+  // The shipped binary's PermissionRow title/description chains have no lineLimit(1)/(2).
+  // This is a source-structure contract only; it does not claim long-text or pixel parity.
+  expect(card).not.toContain(".lineLimit(1)");
+  expect(card).not.toContain(".lineLimit(2)");
+});
+
+test("PermissionCardRoot states the original continuous Capsule shape on Allow", () => {
+  const card = permissionCardSource();
+  // The binary chain is Capsule(style: .continuous), not the implicit Capsule default.
+  // This asserts source structure only, not runtime pixels.
+  expect(card).toMatch(/\.clipShape\(\s*Capsule\(style:\s*\.continuous\)\s*\)/);
+});
 
 test("macOS permission flight uses a public SwiftUI host with a stable bridge ABI", () => {
   const directory = mkdtempSync(join(tmpdir(), "incodex-swiftui-test-"));
