@@ -69,7 +69,10 @@ function createNativeReplicants({ objc, source, target }) {
       const root = kit.NSView.alloc().initWithFrame$(rect(0, 0, frame.size.width, frame.size.height));
       const surface = kit.NSView.alloc().initWithFrame$(rect(0, 0, 1, 1));
       surface.setWantsLayer$(true);
-      surface.layer().setMasksToBounds$(false);
+      // CUA's image ZStack is clipped after both opacity/blur branches.
+      // Keep the outer shadow layers and individual image filters unbounded.
+      surface.layer().setCornerCurve$(string("continuous"));
+      surface.layer().setMasksToBounds$(true);
       surface.layer().setContentsScale$(scale);
       root.setWantsLayer$(true); root.layer().setMasksToBounds$(false);
       panel.setContentView$(root);
