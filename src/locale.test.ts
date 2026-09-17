@@ -84,3 +84,11 @@ test("permission guide covers every supported Codex locale with complete copy", 
     expect(copy.errorBody).toContain("incodex install");
   }
 });
+
+
+test("permission setup dismiss action retains the reference Skip meaning in source languages", () => {
+  expect(ACCESSIBILITY_SETUP_COPY.en.later).toBe("Skip");
+  expect(ACCESSIBILITY_SETUP_COPY["zh-CN"].later).toBe("跳过");
+  expect(ACCESSIBILITY_SETUP_COPY["zh-HK"].later).toBe("略過");
+  expect(ACCESSIBILITY_SETUP_COPY["zh-TW"].later).toBe("略過");
+});
