@@ -1158,14 +1158,18 @@ describe("native Accessibility setup adapter", () => {
     expect(handoffs[0].source.frame.size.height).toBeGreaterThan(0);
     expect(handoffs[0].source.image).toBeDefined();
     const capture = handoffs[0].source.image.values.get("representation").values.get("capturedView") as FakeNative;
-    // The transition must include the colored button background, not just its glyphs.
-    expect(capture.subviews.some((view) => view.type === "NSButton" && view.values.get("bordered") === true)).toBe(true);
-    expect(capture.subviews.some((view) => view.type === "NSButton")).toBe(true);
-    expect(handoffs[0].target.frame.size).toEqual({ width: 459, height: 42 });
-    expect(handoffs[0].target.radius).toBe(8);
+    // Original full-window recording: the entire permission card transforms
+    // into the helper, and returns to the same card slot on Back.
+    expect(handoffs[0].source.frame.size).toEqual({ width: 518, height: 80 });
+    expect(handoffs[0].source.radius).toBe(24);
+    expect(objectWithTitle(capture, COPY.permissionTitle)).toBeDefined();
+    expect(objectWithTitle(capture, COPY.permissionDescription)).toBeDefined();
+    expect(objectWithTitle(capture, COPY.repair)).toBeDefined();
+    expect(handoffs[0].target.frame.size).toEqual({ width: 531, height: 110 });
+    expect(handoffs[0].target.radius).toBe(12);
     expect(handoffs[0].target.panel).toBeDefined();
     expect(handoffs[0].target.panel.contentViewValue.values.get("material")).toBe(6);
-    expect(handoffs[0].target.view?.hasSelector("mouseDown:")).toBe(true);
+    expect(handoffs[0].target.view).toBe(handoffs[0].target.panel.contentViewValue);
   });
 
   test("uses a native file URL drag source fixed to the official ChatGPT bundle", async () => {
@@ -1223,9 +1227,9 @@ describe("native Accessibility setup adapter", () => {
 
       expect(reverses).toHaveLength(1);
       expect(reverses[0].reverse).toBe(true);
-      expect(reverses[0].source.frame.size).toEqual({ width: 62, height: 24 });
+      expect(reverses[0].source.frame.size).toEqual({ width: 518, height: 80 });
       expect(reverses[0].source.image).toBeDefined();
-      expect(reverses[0].target.frame.size).toEqual({ width: 459, height: 42 });
+      expect(reverses[0].target.frame.size).toEqual({ width: 531, height: 110 });
       expect(api.isDestroyed()).toBe(false);
 
       const priorKeyCount = Number(panel.values.get("keyCount"));
