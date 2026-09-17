@@ -67,6 +67,7 @@ function nativeMotionBridge(screenSpecs: Array<{ frame: Rect; scale: number }>) 
       object.values.set("size", args[0]);
       return object;
     }
+    if (selector === "size") return object.values.get("size");
     if (selector === "frame") return copyRect(object.frameValue);
     if (selector === "bounds") return rect(0, 0, object.frameValue.size.width, object.frameValue.size.height);
     if (selector === "layer") {
@@ -279,7 +280,7 @@ test("native replicants rebuild for a changed screen topology and backing scale 
   const bridge = nativeMotionBridge([
     { frame: rect(0.25, 0, 1440, 900), scale: 2 },
   ]);
-  const source = { image: {}, frame: rect(10, 400, 80, 28) };
+  const source = { image: { size: () => ({ width: 80, height: 28 }) }, frame: rect(10, 400, 80, 28) };
   const targetView = bridge.targetView(rect(0, 0, 452, 44));
   const replicas = createNativeReplicants({
     objc: bridge.objc,
@@ -307,6 +308,31 @@ test("native replicants rebuild for a changed screen topology and backing scale 
   replicas.dispose();
 });
 
+test("flight keeps each snapshot at its intrinsic size centered in the changing card", () => {
+  const bridge = nativeMotionBridge([{ frame: rect(0, 0, 1440, 900), scale: 2 }]);
+  const replicas = createNativeReplicants({
+    objc: bridge.objc,
+    source: { image: { size: () => ({ width: 518, height: 80 }) } },
+    target: { view: bridge.targetView(rect(0, 0, 531, 126)) },
+  });
+  try {
+    for (const bounds of [
+      { x: 100, y: 200, width: 518, height: 80 },
+      { x: 160, y: 250, width: 526, height: 104 },
+      { x: 200, y: 300, width: 531, height: 126 },
+    ]) {
+      replicas.render({ bounds, progress: .5, cornerRadius: 18,
+        sourceOpacity: .5, targetOpacity: .5, sourceBlur: 6, targetBlur: 6 });
+      const images = bridge.objects.filter(value => value.type === "NSImageView");
+      expect(images.map(value => value.frameValue)).toEqual([
+        rect((bounds.width - 518) / 2, (bounds.height - 80) / 2, 518, 80),
+        rect((bounds.width - 531) / 2, (bounds.height - 126) / 2, 531, 126),
+      ]);
+      expect(images.map(value => value.values.get("setImageScaling$"))).toEqual([2, 2]);
+    }
+  } finally { replicas.dispose(); }
+});
+
 test("native snapshot rejects an empty view before creating flight panels", () => {
   const bridge = nativeMotionBridge([
     { frame: rect(0, 0, 1440, 900), scale: 2 },
@@ -322,7 +348,7 @@ test("native snapshot rejects an empty view before creating flight panels", () =
 
 test("flight shadows follow the reference 30pt container, masks and dynamic rounded path", () => {
   const bridge=nativeMotionBridge([{frame:rect(0,0,1440,900),scale:2}]);
-  const replicas=createNativeReplicants({objc:bridge.objc,source:{image:{}},target:{view:bridge.targetView(rect(0,0,531,110))}});
+  const replicas=createNativeReplicants({objc:bridge.objc,source:{image:{size:()=>({width:518,height:80})}},target:{view:bridge.targetView(rect(0,0,531,110))}});
   try {
     replicas.render({bounds:{x:100,y:200,width:518,height:80},cornerRadius:24,progress:.25,
       sourceOpacity:.75,targetOpacity:.25,sourceBlur:3,targetBlur:9});
@@ -353,7 +379,7 @@ test("flight shadows follow the reference 30pt container, masks and dynamic roun
 
 test("flight uses reference integral point bounds before adding the 30pt margin", () => {
   const bridge=nativeMotionBridge([{frame:rect(0,0,1440,900),scale:2}]);
-  const replicas=createNativeReplicants({objc:bridge.objc,source:{image:{}},target:{view:bridge.targetView(rect(0,0,531,110))}});
+  const replicas=createNativeReplicants({objc:bridge.objc,source:{image:{size:()=>({width:518,height:80})}},target:{view:bridge.targetView(rect(0,0,531,110))}});
   try {
     replicas.render({bounds:{x:100.25,y:200.25,width:518.25,height:80.25},cornerRadius:24,progress:.25,
       sourceOpacity:.75,targetOpacity:.25,sourceBlur:3,targetBlur:9});
