@@ -158,6 +158,20 @@ enum PermissionViewsSmoke {
         precondition(helper.appRowFrame.size == NSSize(width: 459, height: 42))
         precondition(isHostingView(helper.appRowView))
         precondition(isHostingView(helper.subviews[0]))
+        let helperShortSize = helper.preferredContentSize
+        let helperLongCopy = NSMutableDictionary(dictionary: copy)
+        helperLongCopy["dragInstruction"] = "Drag ChatGPT into the app list above.\nThen return to this window.\nA third instruction line."
+        let freshLongHelper = IncodexPermissionHelperView(frame: NSRect(x: 0, y: 0, width: 531, height: 110))
+        freshLongHelper.configure(copy: helperLongCopy, appIcon: source, actionTarget: nil)
+        let helperLongSize = freshLongHelper.preferredContentSize
+        precondition(helperLongSize.height > helperShortSize.height,
+                     "fresh multiline helper must grow before any run-loop turn")
+        helper.configure(copy: helperLongCopy, appIcon: source, actionTarget: nil)
+        precondition(abs(helper.preferredContentSize.height - helperLongSize.height) <= 0.5,
+                     "helper immediate measurement retained its previous short layout")
+        helper.configure(copy: copy, appIcon: source, actionTarget: nil)
+        precondition(abs(helper.preferredContentSize.height - helperShortSize.height) <= 0.5,
+                     "helper immediate measurement retained its previous long layout")
         // Routine checks must not repeatedly open a synthetic window on the
         // user's desktop. Keep actual Return behavior as an explicit UI run.
         guard ProcessInfo.processInfo.environment["INCODEX_RUN_NATIVE_LAYOUT_SMOKE"] == "1" else {
