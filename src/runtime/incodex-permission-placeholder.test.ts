@@ -11,14 +11,14 @@ test("Settings placeholder uses the reference dashed outline without card shadow
   const color: any = { colorUsingColorSpace$: () => color, redComponent: () => 0, greenComponent: () => 0, blueComponent: () => 0, alphaComponent: () => 1 };
   const result = createPermissionPlaceholderBackground({
     quartz: { CAShapeLayer: { layer: native } },
-    foundation: { NSMutableArray: { array: () => ({items: [], addObject$(x: any) {this.items.push(x);} }) }, NSNumber: { numberWithDouble$: (x: number) => x } },
+    foundation: { NSMutableArray: { array: () => ({items: [] as any[], addObject$(x: any) {this.items.push(x);} }) }, NSNumber: { numberWithDouble$: (x: number) => x } },
     kit: { NSColor: { labelColor: () => color }, NSColorSpace: { deviceRGBColorSpace: () => ({}) } },
-    graphics: { setColor: (l: any,k: string,v: any) => l.values[k]=v, setRoundedPath: (l: any,b: any,r: number) => {l.values.path={bounds:b,radius:r};} },
+    graphics: { setColor: (l: any,k: string,v: any) => l.values[k]=v, setPlaceholderPath: (l: any) => {l.values.path="SwiftUI continuous 518x80 r24";} },
     size: {width:518,height:80}, dark:false,
   });
   expect(result.values.LineWidth).toBe(1);
   expect(result.values.LineDashPattern.items).toEqual([3,6]);
-  expect(result.values.path.radius).toBe(24);
+  expect(result.values.path).toBe("SwiftUI continuous 518x80 r24");
   expect(result.values.strokeColor).toEqual([0,0,0,.16]);
   expect(result.values.fillColor).toEqual([0,0,0,0]);
   expect(result.values.ShadowOpacity).toBeUndefined();
