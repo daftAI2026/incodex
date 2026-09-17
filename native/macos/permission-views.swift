@@ -476,7 +476,7 @@ private final class PermissionHelperState: ObservableObject {
     weak var actionTarget: NSObject?
 
     var instructionHeight: CGFloat {
-        let font = NSFont.systemFont(ofSize: 13)
+        let font = NSFont.preferredFont(forTextStyle: .body, options: [:])
         let rect = (instruction as NSString).boundingRect(
             with: NSSize(width: 408, height: CGFloat.greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
@@ -536,7 +536,7 @@ private struct PermissionHelperRoot: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             Text(state.styledInstruction)
-                .font(.system(size: 13))
+                .font(.body)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(width: 408, alignment: .leading)
                 .offset(x: 102, y: 17)
