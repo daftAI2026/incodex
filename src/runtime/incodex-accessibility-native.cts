@@ -210,7 +210,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     // NSHostingView includes the titled window's safe area. A plain NSView
     // does not lay out inside it automatically; keep the system-provided inset.
     const safeTop = Number(initialView.safeAreaInsets().top);
-    const titleHeight = Number(title.fittingSize().height);
+    const titleHeight = Number(title.cell().cellSizeForBounds$(rect(0, 0, 560, 1000)).height);
     if (!Number.isFinite(safeTop) || safeTop < 0 || !Number.isFinite(titleHeight) || titleHeight <= 0) {
       throw new Error("Permission header has invalid native bounds");
     }

@@ -66,6 +66,7 @@ async function embeddedCjs(file: string): Promise<string> {
   if (!compact.code) throw new Error(`Empty embedded Runtime module: ${file}`);
   return `(() => { const module = { exports: {} }; const exports = module.exports; ${compact.code}\nreturn module.exports; })()`;
 }
+const localeModule = await embeddedCjs("incodex-locale.cjs");
 const placeholderModule = await embeddedCjs("incodex-permission-placeholder.cjs");
 const cardModule = await embeddedCjs("incodex-permission-card.cjs");
 const graphicsModule = await embeddedCjs("incodex-permission-graphics.cjs");
@@ -92,7 +93,8 @@ for (const name of cjsNames) {
     text = embedRuntimeArtifactNames(text);
   }
   if (name === "incodex-main.cjs") {
-    text = text.replace('"__INCODEX_ACCESSIBILITY_COPY__"', JSON.stringify(ACCESSIBILITY_SETUP_COPY));
+    text = text.replace('"__INCODEX_ACCESSIBILITY_COPY__"', JSON.stringify(ACCESSIBILITY_SETUP_COPY))
+      .replace('"__INCODEX_ACCESSIBILITY_LOCALE__"', localeModule);
     // Compile the short-lived guide into main so existing loader asset allowlists
     // still verify the complete Runtime. No new disk asset or second publisher.
     const guideSource = readFileSync(join(emitDir, "incodex-accessibility-native.cjs"), "utf8")

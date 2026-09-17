@@ -1,10 +1,13 @@
+import { ACCESSIBILITY_REGIONAL_COPY } from "./incognito-accessibility-copy-data.ts";
+import { resolveLocaleFromCatalog } from "./incodex-locale.cts";
 import { COPY as REGIONAL_COPY, type CopyKey, type CopyTable } from "./incognito-copy-data.ts";
 
 export type { CopyKey, CopyTable } from "./incognito-copy-data.ts";
 
 // Embedded into the main-process Runtime by build-runtime.ts. Keep the two
 // source languages together without introducing an unverified Runtime asset.
-export const ACCESSIBILITY_SETUP_COPY = {
+export const ACCESSIBILITY_SETUP_COPY = /* @__PURE__ */ (() => ({
+  ...ACCESSIBILITY_REGIONAL_COPY,
   en: {
     title: "Enable ChatGPT script control",
     body: "Installing Incodex modifies ChatGPT, so its Accessibility permission needs to be granted again.",
@@ -77,7 +80,7 @@ export const ACCESSIBILITY_SETUP_COPY = {
     errorTitle: "ChatGPT 權限設定尚未完成",
     errorBody: "未能完成權限設定。請在系統設定 → 隱私權與安全性 → 輔助功能中加入 /Applications/ChatGPT.app，再執行 incodex install 重新檢查。",
   },
-} as const;
+} as const))();
 
 // English and Chinese are the source copy; keep them beside locale resolution.
 const CORE_COPY: Record<string, CopyTable> = {
@@ -132,33 +135,8 @@ export const COPY: Record<string, CopyTable> = {
   ...CORE_COPY,
 };
 
-// 只有多个区域候选或跨语言别名需要显式默认；单一候选由下方扫描自然解析。
-const LANGUAGE_DEFAULT_OVERRIDES: Record<string, string> = {
-  es: "es-419",
-  fr: "fr-FR",
-  no: "nb-NO",
-  pt: "pt-BR",
-};
-
 export function resolveLocale(raw: string): string {
-  const normalized = raw.trim().replaceAll("_", "-");
-  if (!normalized) return "en";
-  if (COPY[normalized]) return normalized;
-  const lower = normalized.toLowerCase();
-  const exact = Object.keys(COPY).find((key) => key.toLowerCase() === lower);
-  if (exact) return exact;
-  if (lower.startsWith("zh-hant-hk") || lower.startsWith("zh-hk")) return "zh-HK";
-  if (lower.startsWith("zh-hant") || lower.startsWith("zh-tw")) return "zh-TW";
-  if (lower.startsWith("zh")) return "zh-CN";
-  if (lower === "en" || lower.startsWith("en-")) return "en";
-  const language = lower.split("-")[0] ?? "en";
-  if (COPY[language]) return language;
-  const defaultOverride = LANGUAGE_DEFAULT_OVERRIDES[language];
-  if (defaultOverride) {
-    return defaultOverride;
-  }
-  const regional = Object.keys(COPY).find((key) => key.toLowerCase().startsWith(`${language}-`));
-  return regional ?? "en";
+  return resolveLocaleFromCatalog(raw, COPY);
 }
 
 export function translate(locale: string, key: CopyKey): string {

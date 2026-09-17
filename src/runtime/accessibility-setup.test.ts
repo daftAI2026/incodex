@@ -9,7 +9,7 @@ import { join } from "node:path";
 // deliberately tested through that boundary so the main-process export cannot
 // drift away from the artifact that gets loaded by the app.
 import * as runtimeMain from "../../dist/incodex-main.cjs";
-import { COPY, ACCESSIBILITY_SETUP_COPY, resolveLocale } from "./incognito-copy.ts";
+import { COPY as SUPPORTED_COPY, ACCESSIBILITY_SETUP_COPY, resolveLocale } from "./incognito-copy.ts";
 
 const APP_PATH = "/Applications/ChatGPT.app";
 const BUNDLE_ID = "com.openai.codex";
@@ -611,7 +611,7 @@ test("opens Settings before asking the guide to locate its handoff destination",
 test("published permission resolver follows the shared locale selection for all languages and aliases", () => {
   const guide = ACCESSIBILITY_SETUP_COPY as Record<string, Record<string, string>>;
   const resolveCopy = (runtimeMain as any).resolveAccessibilityCopy;
-  const locales = [...Object.keys(COPY), "fr", "pt", "es", "no", "de", "JA_jp", "zh-Hant-HK", "zh-Hant", "en-GB", "unknown"];
+  const locales = [...Object.keys(SUPPORTED_COPY), "fr", "pt", "es", "no", "de", "JA_jp", "zh-Hant-HK", "zh-Hant", "en-GB", "unknown"];
   for (const locale of locales) {
     const expected = guide[resolveLocale(locale)];
     expect(expected).toBeDefined();

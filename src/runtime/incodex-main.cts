@@ -31,6 +31,7 @@ const ACCESSIBILITY_SETTINGS_URL =
   "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
 // The Runtime builder replaces this token with the {en, zh-CN, zh-HK, zh-TW} table.
 const ACCESSIBILITY_COPY = "__INCODEX_ACCESSIBILITY_COPY__";
+const ACCESSIBILITY_LOCALE = "__INCODEX_ACCESSIBILITY_LOCALE__";
 const accessibilityWindow = "__INCODEX_ACCESSIBILITY_WINDOW__";
 const READY_TIMEOUT_MS = 15_000;
 let capturedSourceHome = null;
@@ -334,11 +335,7 @@ function accessibilityCopyValue(copy, key) {
 function resolveAccessibilityCopy(locale = "en") {
   const source = ACCESSIBILITY_COPY && typeof ACCESSIBILITY_COPY === "object" ? ACCESSIBILITY_COPY : null;
   if (!source) return null;
-  const normalized = String(locale || "").trim().replaceAll("_", "-").toLowerCase();
-  let language = "en";
-  if (normalized.startsWith("zh-hant-hk") || normalized.startsWith("zh-hk")) language = "zh-HK";
-  else if (normalized.startsWith("zh-hant") || normalized.startsWith("zh-tw")) language = "zh-TW";
-  else if (normalized.startsWith("zh")) language = "zh-CN";
+  const language = ACCESSIBILITY_LOCALE.resolveLocaleFromCatalog(String(locale || ""), source);
   const selected = source[language] || source.en;
   return selected && typeof selected === "object" ? { ...selected } : null;
 }
