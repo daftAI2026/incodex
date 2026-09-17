@@ -81,3 +81,31 @@ fn read_history(path: &Path) -> Result<serde_json::Value, String> {
     }
     Ok(serde_json::from_slice(&bytes).unwrap_or_default())
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn installed_ui_diagnostics_are_separate_and_bounded() {
+        let root = std::env::temp_dir().join(format!(
+            "incodex-installed-ui-log-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        incodex_core::windows_session::ensure_private_windows_dir(&root).unwrap();
+        super::status(&root, "watching", "package").unwrap();
+        let observer = std::fs::read(root.join("windows/update-observer.json")).unwrap();
+        for index in 0..20 {
+            super::installed_ui_status(&root, "waiting", &format!("{index}:{}", "x".repeat(600))).unwrap();
+        }
+        super::installed_ui_status(&root, "ready", "mainPid=123").unwrap();
+        super::installed_ui_status(&root, "ready", "mainPid=123").unwrap();
+        let bytes = std::fs::read(root.join("windows/installed-ui.json")).unwrap();
+        assert!(bytes.len() <= 4096);
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let events = value["events"].as_array().unwrap();
+        assert!(events.len() <= 8);
+        assert_eq!(events.last().unwrap()["phase"], "ready");
+        assert_eq!(events.iter().filter(|event| event["phase"] == "ready").count(), 1);
+        assert_eq!(std::fs::read(root.join("windows/update-observer.json")).unwrap(), observer);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
