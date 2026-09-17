@@ -643,6 +643,7 @@ private struct PermissionHelperForeground<Row: View>: View {
                 }
                 .frame(width: 28, height: 28)
                 .frame(width: 28, height: 32.5)
+                .shadow(color: .black.opacity(0.23), radius: 7, x: 0, y: 4)
                 .opacity(showHintArrow ? 1 : 0)
                 .accessibilityHidden(true)
                 .allowsHitTesting(false)
