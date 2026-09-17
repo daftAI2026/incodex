@@ -22,7 +22,7 @@ function snapshot(kit, view) {
   return image;
 }
 
-function createNativeReplicants({ objc, source, target }) {
+function createNativeReplicants({ objc, source, target, reverse = false }) {
   const kit = new objc.NobjcLibrary("/System/Library/Frameworks/AppKit.framework/AppKit");
   const foundation = new objc.NobjcLibrary("/System/Library/Frameworks/Foundation.framework/Foundation");
   const quartz = new objc.NobjcLibrary("/System/Library/Frameworks/QuartzCore.framework/QuartzCore");
@@ -30,6 +30,8 @@ function createNativeReplicants({ objc, source, target }) {
   const graphics = createPermissionGraphics(objc);
   const string = value => foundation.NSString.stringWithUTF8String$(value);
   const targetImage = snapshot(kit, target.view);
+  // Each leg composites its outgoing snapshot below its incoming snapshot.
+  const flightImages = reverse ? [targetImage, source.image] : [source.image, targetImage];
   const entries = [];
   const allowsBlur = !kit.NSWorkspace.sharedWorkspace().accessibilityDisplayShouldReduceTransparency();
   let topologyKey = null;
@@ -96,13 +98,13 @@ function createNativeReplicants({ objc, source, target }) {
       stroke.setLineWidth$(.5); graphics.setBlackColor(stroke, "strokeColor", 1);
       graphics.setBlackColor(stroke, "fillColor", 0); stroke.setOpacity$(0);
       strokeView.layer().addSublayer$(stroke); root.addSubview$(strokeView);
-      const images = [source.image, targetImage].map(image => {
+      const images = flightImages.map(image => {
         const view = kit.NSImageView.alloc().initWithFrame$(rect(0, 0, 1, 1));
         view.setImage$(image); view.setImageScaling$(2); view.setWantsLayer$(true);
         view.layer().setMasksToBounds$(false); view.layer().setContentsScale$(scale);
         surface.addSubview$(view); return view;
       });
-      const imageSizes = [source.image, targetImage].map(image => image.size());
+      const imageSizes = flightImages.map(image => image.size());
       Object.assign(item, { root, surface, shadows, masks, strokeView, stroke, images, imageSizes });
       }
       return next;
@@ -193,10 +195,13 @@ function runNativePermissionHandoff(options) {
     if (reducedMotion || isClosed()) { dispose(); return { finished, dispose }; }
     const resolveTarget = () => typeof target === "function" ? target() : target;
     const initialTarget = resolveTarget();
-    replicas = createReplicants({ objc, source, target: initialTarget });
+    replicas = createReplicants({ objc, source, target: initialTarget, reverse });
     const flip = item => ({ x: item.frame.origin.x, y: -item.frame.origin.y - item.frame.size.height,
       width: item.frame.size.width, height: item.frame.size.height, radius: item.radius ?? 12 });
-    stop = runPermissionFlight({ source: flip(source), target: () => flip(resolveTarget()), reducedMotion: false, reverse, now, schedule, cancel,
+    // CUA reverse completion's caller supplies helper -> original captures,
+    // then initializes a fresh 0 -> 1 spring, including shadows and stroke.
+    stop = runPermissionFlight({ source: flip(reverse ? initialTarget : source),
+      target: () => flip(reverse ? source : resolveTarget()), reducedMotion: false, now, schedule, cancel,
       render(sample) {
         if (isClosed()) { dispose(); return; }
         const bounds = { ...sample.bounds, y: -sample.bounds.y - sample.bounds.height };
