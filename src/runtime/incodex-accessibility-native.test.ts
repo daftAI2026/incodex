@@ -1720,3 +1720,24 @@ test("handoff replaces the permission card with a placeholder and Back restores 
     expect(body.values.get("stringValue")).toBe(COPY.body);
   } finally { api.close(); }
 });
+
+test("awaiting Settings placeholder tracks hover and clears feedback on Back", async () => {
+  const { api, bridge, panel } = await makeHarness({ reduceMotion: true });
+  try {
+    objectWithTitle(panel, COPY.repair)!.performClick$();
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+    const title = objectWithTitle(panel, COPY.completeInSettings)!;
+    const placeholder = descendants(panel).find(value => value.subviews.includes(title))!;
+    const outline = bridge.objects.find(value => value.type === "CAShapeLayer")!;
+    placeholder.invoke("mouseEntered:", {});
+    expect(outline.values.get("strokeColor")).toEqual({color: [0,0,0,.18]});
+    expect(outline.values.get("fillColor")).toEqual({color: [0,0,0,.018]});
+    placeholder.invoke("mouseExited:", {});
+    expect(outline.values.get("strokeColor")).toEqual({color: [0,0,0,.16]});
+    placeholder.invoke("mouseEntered:", {});
+    bridge.objects.find(value => value.action === "later:")!.performClick$();
+    await flushNativeAsync();
+    expect(outline.values.get("fillColor")).toEqual({color: [0,0,0,0]});
+  } finally { api.close(); }
+});
