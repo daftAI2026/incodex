@@ -205,6 +205,8 @@ enum PermissionHelperSnapshotSmoke {
         assertScale(light2, scale: 2)
         assertInstructionIsRendered(light1)
         assertInstructionIsRendered(light2)
+        assertNearlyEqual(alphaAtTopLeft(light2, point: NSPoint(x: 500, y: 65)), 0.65,
+                          tolerance: 0.01, "Aqua snapshot row uses original translucent white fill")
         precondition(alphaAtTopLeft(light2, point: NSPoint(x: 500, y: 5)) == 0, "snapshot background is not transparent")
         precondition(alphaAtTopLeft(light2, point: NSPoint(x: 250, y: 65)) > 0, "snapshot row has no foreground output")
         precondition(!bitmapBytes(light2).isEmpty, "snapshot is empty")
@@ -217,6 +219,8 @@ enum PermissionHelperSnapshotSmoke {
         }
         assertScale(dark, scale: 2)
         assertInstructionIsRendered(dark)
+        assertNearlyEqual(alphaAtTopLeft(dark, point: NSPoint(x: 500, y: 65)), 0.06,
+                          tolerance: 0.01, "Dark snapshot row uses original translucent black fill")
         precondition(bitmapBytes(light2) != bitmapBytes(dark), "light and dark snapshots are identical")
         precondition(helper.subviews.first === host, "dark snapshot replaced the live helper host")
         precondition(helper.appRowView === rowHost, "dark snapshot replaced the live drag row host")

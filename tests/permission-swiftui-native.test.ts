@@ -6,6 +6,20 @@ import { join } from "node:path";
 
 const layoutSmokeSource = join(import.meta.dir, "native", "permission-views-layout-smoke.m");
 
+test("snapshot row retains the original separate SwiftUI fill and stroke shell", () => {
+  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const start = source.indexOf("private struct PermissionHelperSnapshotRow");
+  const row = source.slice(start, source.indexOf("private struct PermissionHelperForeground", start));
+  // SHA601 EBF D9C radius7 / GOT1012852C8 continuous / EBF EC8 linewidth1;
+  // EC0020/0044 application row horizontal4, vertical5 padding.
+  expect(row).toContain("RoundedRectangle(cornerRadius: 7, style: .continuous)");
+  expect(row).toContain("lineWidth: 1");
+  expect(row).toContain(".padding(.horizontal, 4)");
+  expect(row).toContain(".padding(.vertical, 5)");
+  expect(row).not.toContain("PermissionEmbeddedView");
+  expect(row).not.toContain(".clipShape");
+});
+
 test.skipIf(process.platform !== "darwin").each(["current", "forced-hosting-compatibility"])("helper snapshot renders transparent foreground without windows (%s)", (mode) => {
   const directory = mkdtempSync(join(tmpdir(), "incodex-helper-snapshot-"));
   try {
