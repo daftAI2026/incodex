@@ -192,19 +192,30 @@ private struct PermissionCardRoot: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        HStack(spacing: 10.5) {
-            if let image = state.permissionIcon {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 64, height: 64)
-            } else {
-                Color.clear.frame(width: 64, height: 64)
+        // Original PermissionRow: zero stack spacing, independently padded
+        // 64pt icon, then a flexible leading text column and trailing control.
+        HStack(spacing: 0) {
+            Group {
+                if let image = state.permissionIcon {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 64, height: 64)
+                } else {
+                    Color.clear.frame(width: 64, height: 64)
+                }
             }
+            .padding(.leading, 8)
+            .padding(.trailing, 12.5)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(state.permissionTitle)
                     .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    // Preserve the measured CUA glyph origin (84.5, 20.5).
+                    // Current SwiftUI places this glyph 1pt lower despite the
+                    // same 16pt font and 2pt stack spacing; do not move the body.
+                    .offset(y: -1)
                 Text(state.permissionDescription)
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
@@ -220,7 +231,7 @@ private struct PermissionCardRoot: View {
                 .offset(x: 4)
                 .disabled(!state.allowEnabled)
         }
-        .padding(8)
+        .padding(.trailing, 20)
         .frame(width: 518, height: 80)
         .background {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -502,12 +513,13 @@ private struct PermissionHelperRoot: View {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 12, weight: .semibold))
                     .frame(width: 28, height: 28)
+                    .background(Color.primary.opacity(0.08), in: Circle())
+                    .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .help(state.back)
             .accessibilityLabel(state.back)
             .frame(width: 28, height: 28)
-            .background(Color.primary.opacity(0.08), in: Circle())
             .offset(x: 18, y: 55 + state.extraHeight)
         }
         .frame(width: 531, height: 110 + state.extraHeight, alignment: .topLeading)
