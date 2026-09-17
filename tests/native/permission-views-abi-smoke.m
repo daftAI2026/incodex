@@ -151,10 +151,12 @@ int main(int argc, const char *argv[]) {
         SEL helperRow = @selector(appRowView);
         SEL helperFrame = @selector(appRowFrame);
         SEL helperSize = @selector(preferredContentSize);
+        SEL helperSnapshot = @selector(snapshotImageWithScale:);
         if (!require_encoding(helperClass, helperConfigure, "v@:@@@")
             || !require_encoding(helperClass, helperRow, "@@:")
             || !require_encoding(helperClass, helperFrame, "{CGRect={CGPoint=dd}{CGSize=dd}}@:")
-            || !require_encoding(helperClass, helperSize, "{CGSize=dd}@:")) {
+            || !require_encoding(helperClass, helperSize, "{CGSize=dd}@:")
+            || !require_encoding(helperClass, helperSnapshot, "@@:d")) {
             return 6;
         }
         NSView *helper = ((id (*)(id, SEL, NSRect))objc_msgSend)(
@@ -181,6 +183,13 @@ int main(int argc, const char *argv[]) {
             return fail("helper row/host/size ABI contract failed");
         }
 
+        NSImage *snapshot = ((id (*)(id, SEL, double))objc_msgSend)(helper, helperSnapshot, 2.0);
+        if (snapshot == nil || !NSEqualSizes(snapshot.size, helperSizeValue)) {
+            return fail("helper foreground snapshot ABI contract failed");
+        }
+        for (NSWindow *window in NSApp.windows) {
+            if (window.visible) return fail("ABI smoke unexpectedly showed a window");
+        }
         puts("permission native Objective-C ABI smoke passed");
         return 0;
     }

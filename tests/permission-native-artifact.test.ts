@@ -126,6 +126,7 @@ test.skipIf(process.platform !== "darwin")(
     expect(strings.output).toContain("configureWithCopy:appIcon:permissionIcon:actionTarget:");
     expect(strings.output).toContain("setContentWithTitle:body:allowEnabled:settingsPlaceholder:");
     expect(strings.output).toContain("configureWithCopy:appIcon:actionTarget:");
+    expect(strings.output).toContain("snapshotImageWithScale:");
   },
 );
 

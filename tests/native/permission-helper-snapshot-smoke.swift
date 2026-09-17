@@ -27,10 +27,11 @@ private let longCopy: NSDictionary = [
 ]
 
 private func bitmapRep(_ image: NSImage) -> NSBitmapImageRep {
-    guard let rep = image.representations.compactMap({ $0 as? NSBitmapImageRep }).first else {
-        fatalError("snapshot did not return an NSBitmapImageRep")
+    if let rep = image.representations.compactMap({ $0 as? NSBitmapImageRep }).first { return rep }
+    guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+        fatalError("snapshot did not return rasterizable image content")
     }
-    return rep
+    return NSBitmapImageRep(cgImage: cgImage)
 }
 
 private func alphaAtTopLeft(_ image: NSImage, point: NSPoint) -> CGFloat {
@@ -39,8 +40,7 @@ private func alphaAtTopLeft(_ image: NSImage, point: NSPoint) -> CGFloat {
     let scaleY = CGFloat(rep.pixelsHigh) / image.size.height
     let x = min(rep.pixelsWide - 1, max(0, Int(floor(point.x * scaleX))))
     let yFromTop = min(rep.pixelsHigh - 1, max(0, Int(floor(point.y * scaleY))))
-    let yFromBottom = rep.pixelsHigh - 1 - yFromTop
-    return rep.colorAt(x: x, y: yFromBottom)?.alphaComponent ?? 0
+    return rep.colorAt(x: x, y: yFromTop)?.alphaComponent ?? 0
 }
 
 private func bitmapBytes(_ image: NSImage) -> Data {
@@ -72,6 +72,7 @@ enum PermissionHelperSnapshotSmoke {
         _ = NSApplication.shared
 
         let helper = IncodexPermissionHelperView(frame: NSRect(x: 0, y: 0, width: 531, height: 110))
+        helper.appearance = NSAppearance(named: .aqua)
         helper.configure(copy: shortCopy, appIcon: makeAppIcon(), actionTarget: nil)
         helper.layoutSubtreeIfNeeded()
         let host = helper.subviews.first
