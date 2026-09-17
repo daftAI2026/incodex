@@ -95,11 +95,12 @@ function createNativeReplicants({ objc, source, target }) {
       strokeView.layer().addSublayer$(stroke); root.addSubview$(strokeView);
       const images = [source.image, targetImage].map(image => {
         const view = kit.NSImageView.alloc().initWithFrame$(rect(0, 0, 1, 1));
-        view.setImage$(image); view.setImageScaling$(1); view.setWantsLayer$(true);
+        view.setImage$(image); view.setImageScaling$(2); view.setWantsLayer$(true);
         view.layer().setMasksToBounds$(false); view.layer().setContentsScale$(scale);
         surface.addSubview$(view); return view;
       });
-      Object.assign(item, { root, surface, shadows, masks, strokeView, stroke, images });
+      const imageSizes = [source.image, targetImage].map(image => image.size());
+      Object.assign(item, { root, surface, shadows, masks, strokeView, stroke, images, imageSizes });
       }
       return next;
     } catch (error) {
@@ -129,7 +130,7 @@ function createNativeReplicants({ objc, source, target }) {
     if (current.key !== topologyKey) rebuild();
     quartz.CATransaction.begin(); quartz.CATransaction.setDisableActions$(true);
     try {
-      for (const { frame, scale, root, surface, shadows, masks, strokeView, stroke, images } of entries) {
+      for (const { frame, scale, root, surface, shadows, masks, strokeView, stroke, images, imageSizes } of entries) {
         // The reference applies CGRectIntegral in screen points, not nearest
         // backing pixels, before translating into each screen's container.
         const b = sample.bounds;
@@ -155,7 +156,12 @@ function createNativeReplicants({ objc, source, target }) {
           graphics.setOuterShadowMaskPath(masks[index], outer, inner, radius);
         });
         shadows[0].setOpacity$(Math.max(0, Math.min(1, sample.progress)));
-        images.forEach(view => view.setFrame$(bounds));
+        // CUA 0x100EB75F4 uses NSImage.size for a centered fixed frame,
+        // inside an expanding centered frame. The bitmap itself never stretches.
+        images.forEach((view, index) => {
+          const { width, height } = imageSizes[index];
+          view.setFrame$(rect((aligned.width - width) / 2, (aligned.height - height) / 2, width, height));
+        });
         images[0].setAlphaValue$(sample.sourceOpacity); images[1].setAlphaValue$(sample.targetOpacity);
         blur(images[0], sample.sourceBlur, scale); blur(images[1], sample.targetBlur, scale);
       }
