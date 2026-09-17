@@ -205,11 +205,9 @@ private struct PermissionCardRoot: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(state.permissionTitle)
                     .font(.system(size: 16, weight: .semibold))
-                    .lineLimit(1)
                 Text(state.permissionDescription)
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -217,7 +215,7 @@ private struct PermissionCardRoot: View {
                 .buttonStyle(.automatic)
                 .keyboardShortcut(.defaultAction)
                 .font(.system(size: 13))
-                .clipShape(Capsule())
+                .clipShape(Capsule(style: .continuous))
                 .frame(minWidth: 62)
                 .offset(x: 4)
                 .disabled(!state.allowEnabled)
