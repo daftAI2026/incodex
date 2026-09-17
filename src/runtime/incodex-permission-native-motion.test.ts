@@ -398,6 +398,7 @@ test("flight keeps a live material sibling behind the separately clipped image s
       expect(root.subviews.indexOf(material)).toBeLessThan(root.subviews.indexOf(surface));
       expect(material.frameValue).toEqual(surface.frameValue);
       expect(material.values.get("setMaterial$")).toBe(6);
+      expect(material.values.get("setBlendingMode$")).toBe(0);
       expect(material.values.get("setState$")).toBe(1);
       expect(material.layerValue.values.get("setCornerCurve$")).toBe("continuous");
       expect(material.layerValue.values.get("setCornerRadius$")).toBe(cornerRadius);
