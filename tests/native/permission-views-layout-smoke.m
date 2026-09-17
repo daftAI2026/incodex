@@ -7,6 +7,17 @@
 #include <string.h>
 #include <unistd.h>
 
+@interface BackTarget : NSObject
+@property(nonatomic) NSInteger laterCount;
+@end
+
+@implementation BackTarget
+- (void)later:(id)sender {
+    (void)sender;
+    self.laterCount += 1;
+}
+@end
+
 // This is a deliberately small real-window probe.  Its AX traversal follows
 // /tmp/incodex-ax-probe.m, but it retains only the text/frame operations needed
 // for P11 so a failing layout assertion is easy to audit.
@@ -187,11 +198,12 @@ static NSDictionary *shortTitleCopy(void) {
 
 int main(int argc, const char **argv) {
     if (argc < 2 || argc > 3) {
-        fprintf(stderr, "usage: %s /path/to/incodex-permission-ui.dylib [card]\n", argv[0]);
+        fprintf(stderr, "usage: %s /path/to/incodex-permission-ui.dylib [card|back]\n", argv[0]);
         return 2;
     }
     BOOL cardMode = argc == 3 && strcmp(argv[2], "card") == 0;
-    if (argc == 3 && !cardMode) {
+    BOOL backMode = argc == 3 && strcmp(argv[2], "back") == 0;
+    if (argc == 3 && !cardMode && !backMode) {
         fprintf(stderr, "unknown layout smoke mode: %s\n", argv[2]);
         return 2;
     }
@@ -210,9 +222,82 @@ int main(int argc, const char **argv) {
         }
 
         Class initialClass = NSClassFromString(@"IncodexPermissionInitialView");
-        if (initialClass == Nil) {
+        Class helperClass = NSClassFromString(@"IncodexPermissionHelperView");
+        if ((!backMode && initialClass == Nil) || (backMode && helperClass == Nil)) {
             dlclose(handle);
             return 4;
+        }
+
+        if (backMode) {
+            NSDictionary *copy = shortTitleCopy();
+            BackTarget *target = [BackTarget new];
+            id helper = makeView(helperClass, NSMakeRect(0, 0, 531, 110));
+            ((void (*)(id, SEL, id, id, id))objc_msgSend)(
+                helper,
+                @selector(configureWithCopy:appIcon:actionTarget:),
+                copy,
+                nil,
+                target
+            );
+            NSSize size = preferredContentSize(helper);
+            [helper setFrameSize:size];
+
+            NSPanel *panel = [[NSPanel alloc] initWithContentRect:NSMakeRect(240, 520, size.width, size.height)
+                                                         styleMask:NSWindowStyleMaskNonactivatingPanel
+                                                           backing:NSBackingStoreBuffered
+                                                             defer:NO];
+            panel.releasedWhenClosed = NO;
+            panel.contentView = helper;
+            panel.level = NSNormalWindowLevel;
+            [panel makeKeyAndOrderFront:nil];
+            drainRunLoop(0.35);
+
+            AXUIElementRef application = AXUIElementCreateApplication(getpid());
+            AXUIElementRef window = findWindow(application, copy[@"dragInstruction"]);
+            AXUIElementRef back = findAX(window, kAXButtonRole, copy[@"back"], 0, 0, NO, 0);
+            NSRect windowRect = NSZeroRect;
+            NSRect backRect = NSZeroRect;
+            BOOL geometryFound = window != NULL && back != NULL
+                && axRect(window, &windowRect)
+                && axRect(back, &backRect);
+            CGFloat backX = backRect.origin.x - windowRect.origin.x;
+            CGFloat backY = backRect.origin.y - windowRect.origin.y;
+            BOOL backGeometryOK = geometryFound
+                && approximately(backX, 18.0)
+                && approximately(backY, 55.0)
+                && approximately(backRect.size.width, 28.0)
+                && approximately(backRect.size.height, 28.0);
+            printf(
+                "BACK_AX window=(%.1f,%.1f %.1fx%.1f) backRel=(%.1f,%.1f %.1fx%.1f)\n",
+                windowRect.origin.x, windowRect.origin.y, windowRect.size.width, windowRect.size.height,
+                backX, backY, backRect.size.width, backRect.size.height
+            );
+            BOOL pressed = back != NULL
+                && AXUIElementPerformAction(back, kAXPressAction) == kAXErrorSuccess;
+            drainRunLoop(0.1);
+            BOOL callbackOK = pressed && target.laterCount == 1;
+            printf(
+                "BACK_CHECK geometry=%s pressed=%s laterCount=%ld\n",
+                backGeometryOK ? "yes" : "no",
+                pressed ? "yes" : "no",
+                (long)target.laterCount
+            );
+            if (!geometryFound) {
+                fprintf(stderr, "Back failed: real AX helper window/button node was not found\n");
+            }
+            if (!backGeometryOK) {
+                fprintf(stderr, "Back failed: AX button frame is not relative 18,55,28x28\n");
+            }
+            if (!callbackOK) {
+                fprintf(stderr, "Back failed: AXPress did not dispatch later exactly once\n");
+            }
+
+            if (back != NULL) CFRelease(back);
+            if (window != NULL) CFRelease(window);
+            if (application != NULL) CFRelease(application);
+            [panel orderOut:nil];
+            [panel close];
+            return backGeometryOK && callbackOK ? 0 : 1;
         }
 
         NSDictionary *copy = cardMode ? shortTitleCopy() : longTitleCopy();

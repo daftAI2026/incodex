@@ -123,3 +123,41 @@ test.skipIf(process.platform !== "darwin")(
   },
   90_000,
 );
+
+test.skipIf(process.platform !== "darwin")(
+  "compiles the real AX Back geometry and action smoke (runtime is opt-in)",
+  () => {
+    const directory = mkdtempSync(join(tmpdir(), "incodex-back-layout-smoke-"));
+    try {
+      const architecture = process.arch === "arm64" ? "arm64" : process.arch === "x64" ? "x86_64" : "";
+      expect(architecture).not.toBe("");
+      if (!architecture) return;
+
+      const executable = join(directory, "permission-views-layout-smoke");
+      const build = spawnSync("/usr/bin/clang", [
+        "-arch", architecture,
+        "-fobjc-arc",
+        "-framework", "Cocoa",
+        "-framework", "ApplicationServices",
+        layoutSmokeSource,
+        "-o", executable,
+      ], { cwd: join(import.meta.dir, ".."), encoding: "utf8", timeout: 60_000 });
+      const buildOutput = `${build.stdout ?? ""}${build.stderr ?? ""}`;
+      expect(build.status, buildOutput || String(build.error ?? "Back Objective-C compilation failed")).toBe(0);
+      if (build.status !== 0 || process.env.INCODEX_RUN_NATIVE_LAYOUT_SMOKE !== "1") return;
+
+      const dylibPath = join(import.meta.dir, "..", "native", "macos", "dist", "incodex-permission-ui.dylib");
+      const run = spawnSync(executable, [dylibPath, "back"], {
+        cwd: join(import.meta.dir, ".."),
+        encoding: "utf8",
+        timeout: 20_000,
+      });
+      const output = `${run.stdout ?? ""}${run.stderr ?? ""}`;
+      expect(run.status, output || String(run.error ?? "Back real AX smoke failed")).toBe(0);
+      expect(output).toContain("BACK_CHECK");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+  90_000,
+);
