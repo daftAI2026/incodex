@@ -66,6 +66,7 @@ async function embeddedCjs(file: string): Promise<string> {
   if (!compact.code) throw new Error(`Empty embedded Runtime module: ${file}`);
   return `(() => { const module = { exports: {} }; const exports = module.exports; ${compact.code}\nreturn module.exports; })()`;
 }
+const placeholderModule = await embeddedCjs("incodex-permission-placeholder.cjs");
 const cardModule = await embeddedCjs("incodex-permission-card.cjs");
 const graphicsModule = await embeddedCjs("incodex-permission-graphics.cjs");
 const motionModule = await embeddedCjs("incodex-permission-motion.cjs");
@@ -96,7 +97,8 @@ for (const name of cjsNames) {
     // still verify the complete Runtime. No new disk asset or second publisher.
     const guideSource = readFileSync(join(emitDir, "incodex-accessibility-native.cjs"), "utf8")
       .replace('require("./incodex-permission-graphics.cts")', graphicsModule)
-      .replace('require("./incodex-permission-card.cts")', cardModule);
+      .replace('require("./incodex-permission-card.cts")', cardModule)
+      .replace('require("./incodex-permission-placeholder.cts")', placeholderModule);
     const guide = await minify(guideSource, {
       module: false, compress: false, mangle: { toplevel: true }, format: { comments: false },
     });
