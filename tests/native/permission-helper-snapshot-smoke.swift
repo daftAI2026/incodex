@@ -70,6 +70,95 @@ private func assertInstructionIsRendered(_ image: NSImage) {
     precondition(inkPixels > 100, "snapshot omitted the instruction text")
 }
 
+private func firstNSBoxAncestor(of view: NSView) -> NSBox? {
+    var ancestor = view.superview
+    while let current = ancestor {
+        if let box = current as? NSBox { return box }
+        ancestor = current.superview
+    }
+    return nil
+}
+
+private func assertNearlyEqual(_ actual: CGFloat, _ expected: CGFloat, tolerance: CGFloat, _ message: String) {
+    precondition(abs(actual - expected) <= tolerance, "\(message): expected \(expected), got \(actual)")
+}
+
+private func assertRect(_ actual: NSRect, _ expected: NSRect, tolerance: CGFloat, _ message: String) {
+    assertNearlyEqual(actual.origin.x, expected.origin.x, tolerance: tolerance, "\(message).origin.x")
+    assertNearlyEqual(actual.origin.y, expected.origin.y, tolerance: tolerance, "\(message).origin.y")
+    assertNearlyEqual(actual.size.width, expected.size.width, tolerance: tolerance, "\(message).width")
+    assertNearlyEqual(actual.size.height, expected.size.height, tolerance: tolerance, "\(message).height")
+}
+
+private func resolvedRGBA(_ color: NSColor, in appearance: NSAppearance) -> (CGFloat, CGFloat, CGFloat, CGFloat) {
+    var result = (CGFloat.zero, CGFloat.zero, CGFloat.zero, CGFloat.zero)
+    appearance.performAsCurrentDrawingAppearance {
+        guard let rgb = color.usingColorSpace(.sRGB) else {
+            fatalError("color did not convert to device RGB")
+        }
+        result = (rgb.redComponent, rgb.greenComponent, rgb.blueComponent, rgb.alphaComponent)
+    }
+    return result
+}
+
+private func assertPermissionRowBoxContract(_ helper: IncodexPermissionHelperView, rowHost: NSView) {
+    let hostingType = String(describing: type(of: rowHost))
+    precondition(hostingType.contains("NSHostingView"), "helper row must remain an NSHostingView: \(hostingType)")
+    guard let box = firstNSBoxAncestor(of: rowHost) else {
+        fatalError("helper row must be wrapped by an ordinary NSBox")
+    }
+    guard let contentView = box.contentView else {
+        fatalError("helper row NSBox has no contentView")
+    }
+
+    precondition(contentView === rowHost, "helper row NSBox contentView must be the live NSHostingView")
+    assertRect(box.bounds, NSRect(x: 0, y: 0, width: 459, height: 42), tolerance: 0.1, "helper row box bounds")
+    precondition(box.boxType == .custom, "helper row NSBox must use custom boxType")
+    precondition(box.titlePosition == .noTitle, "helper row NSBox must have no title")
+    assertNearlyEqual(box.cornerRadius, 7, tolerance: 0.1, "helper row box cornerRadius")
+    assertNearlyEqual(box.contentViewMargins.width, 4, tolerance: 0.1, "helper row box margins.width")
+    assertNearlyEqual(box.contentViewMargins.height, 5, tolerance: 0.1, "helper row box margins.height")
+    assertNearlyEqual(box.borderWidth, 1, tolerance: 0.1, "helper row box borderWidth")
+    assertRect(contentView.frame, NSRect(x: 5, y: 6, width: 449, height: 30), tolerance: 0.1, "helper row contentView frame")
+
+    helper.appearance = NSAppearance(named: .aqua)
+    helper.layoutSubtreeIfNeeded()
+    let aqua = NSAppearance(named: .aqua)!
+    let aquaFill = resolvedRGBA(box.fillColor, in: aqua)
+    assertNearlyEqual(aquaFill.0, 1, tolerance: 0.03, "Aqua row fill.red")
+    assertNearlyEqual(aquaFill.1, 1, tolerance: 0.03, "Aqua row fill.green")
+    assertNearlyEqual(aquaFill.2, 1, tolerance: 0.03, "Aqua row fill.blue")
+    assertNearlyEqual(aquaFill.3, 0.65, tolerance: 0.03, "Aqua row fill.alpha")
+    let aquaBorder = resolvedRGBA(box.borderColor, in: aqua)
+    assertNearlyEqual(aquaBorder.0, 223 / 255, tolerance: 0.03, "Aqua row border.red")
+    assertNearlyEqual(aquaBorder.1, 221 / 255, tolerance: 0.03, "Aqua row border.green")
+    assertNearlyEqual(aquaBorder.2, 227 / 255, tolerance: 0.03, "Aqua row border.blue")
+    assertNearlyEqual(aquaBorder.3, 1, tolerance: 0.03, "Aqua row border.alpha")
+
+    helper.appearance = NSAppearance(named: .darkAqua)
+    helper.layoutSubtreeIfNeeded()
+    let dark = NSAppearance(named: .darkAqua)!
+    let darkFill = resolvedRGBA(box.fillColor, in: dark)
+    assertNearlyEqual(darkFill.0, 0, tolerance: 0.03, "Dark row fill.red")
+    assertNearlyEqual(darkFill.1, 0, tolerance: 0.03, "Dark row fill.green")
+    assertNearlyEqual(darkFill.2, 0, tolerance: 0.03, "Dark row fill.blue")
+    assertNearlyEqual(darkFill.3, 0.06, tolerance: 0.03, "Dark row fill.alpha")
+    let expectedDarkBorder = resolvedRGBA(NSColor.textColor.withAlphaComponent(0.08), in: dark)
+    let darkBorder = resolvedRGBA(box.borderColor, in: dark)
+    assertNearlyEqual(darkBorder.0, expectedDarkBorder.0, tolerance: 0.03, "Dark row border.red")
+    assertNearlyEqual(darkBorder.1, expectedDarkBorder.1, tolerance: 0.03, "Dark row border.green")
+    assertNearlyEqual(darkBorder.2, expectedDarkBorder.2, tolerance: 0.03, "Dark row border.blue")
+    assertNearlyEqual(darkBorder.3, 0.08, tolerance: 0.03, "Dark row border.alpha")
+
+    rowHost.isHidden = true
+    precondition(!box.isHidden, "hiding the row host must not hide the NSBox")
+    rowHost.isHidden = false
+    precondition(firstNSBoxAncestor(of: rowHost) === box, "row host lost its NSBox ancestor after unhide")
+    precondition(box.contentView === rowHost, "row host identity changed after unhide")
+    helper.appearance = NSAppearance(named: .aqua)
+    helper.layoutSubtreeIfNeeded()
+}
+
 private func makeAppIcon() -> NSImage {
     let image = NSImage(size: NSSize(width: 32, height: 32))
     image.lockFocus()
@@ -99,6 +188,7 @@ enum PermissionHelperSnapshotSmoke {
         helper.layoutSubtreeIfNeeded()
         let host = helper.subviews.first
         let rowHost = helper.appRowView
+        assertPermissionRowBoxContract(helper, rowHost: rowHost)
 
         guard let light1 = helper.snapshotImage(scale: 1) else {
             fatalError("scale 1 snapshot unexpectedly returned nil")
