@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ACCESSIBILITY_SETUP_COPY, resolveLocale, translate } from "./runtime/incognito-copy.ts";
+import { COPY, ACCESSIBILITY_SETUP_COPY, resolveLocale, translate } from "./runtime/incognito-copy.ts";
 
 describe("locale fallback", () => {
   test("empty and unknown values fall back to English", () => {
@@ -67,4 +67,20 @@ describe("locale fallback", () => {
   test("regional locales keep the intentionally tight English body fallback", () => {
     expect(translate("fr-FR", "body")).toBe(translate("en", "body"));
   });
+});
+
+
+test("permission guide covers every supported Codex locale with complete copy", () => {
+  const guide = ACCESSIBILITY_SETUP_COPY as Record<string, Record<string, string>>;
+  expect(Object.keys(guide).sort()).toEqual(Object.keys(COPY).sort());
+  const keys = Object.keys(guide.en).sort();
+  for (const copy of Object.values(guide)) {
+    expect(Object.keys(copy).sort()).toEqual(keys);
+    for (const text of Object.values(copy)) expect(text.trim().length).toBeGreaterThan(0);
+    expect(copy.body).toContain("Incodex");
+    expect(copy.body).toContain("ChatGPT");
+    expect(copy.dragInstruction).toContain("ChatGPT");
+    expect(copy.errorBody).toContain("/Applications/ChatGPT.app");
+    expect(copy.errorBody).toContain("incodex install");
+  }
 });

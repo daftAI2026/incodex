@@ -9,6 +9,7 @@ import { join } from "node:path";
 // deliberately tested through that boundary so the main-process export cannot
 // drift away from the artifact that gets loaded by the app.
 import * as runtimeMain from "../../dist/incodex-main.cjs";
+import { COPY, ACCESSIBILITY_SETUP_COPY, resolveLocale } from "./incognito-copy.ts";
 
 const APP_PATH = "/Applications/ChatGPT.app";
 const BUNDLE_ID = "com.openai.codex";
@@ -470,7 +471,7 @@ describe("Accessibility setup controller", () => {
 
 
 describe("single-window Accessibility setup", () => {
-  test("keeps the native guide in English or the matching Chinese script", () => {
+  test("keeps the native guide in the matching supported language", () => {
     const resolveCopy = (runtimeMain as any).resolveAccessibilityCopy;
     expect(typeof resolveCopy).toBe("function");
     expect(resolveCopy("zh-CN").body).toBe("安装 Incodex 会修改 ChatGPT，因此需要重新授予它辅助功能权限。");
@@ -479,7 +480,7 @@ describe("single-window Accessibility setup", () => {
     expect(resolveCopy("en").back).toBe("Back");
     expect(resolveCopy("zh-CN").back).toBe("返回");
     expect(resolveCopy("zh-HK").back).toBe("返回");
-    expect(resolveCopy("ja-JP").body).toBe(resolveCopy("en").body);
+    expect(resolveCopy("ja-JP").body).not.toBe(resolveCopy("en").body);
   });
 
   test("keeps one window and detects grant while Settings remains frontmost", async () => {
@@ -604,4 +605,16 @@ test("opens Settings before asking the guide to locate its handoff destination",
   const h = makeHarness({ probes: [false, false], dialogResponses: [0] });
   await h.controller.run();
   expect(h.panel.openedBeforeHandoff).toBe(true);
+});
+
+
+test("published permission resolver follows the shared locale selection for all languages and aliases", () => {
+  const guide = ACCESSIBILITY_SETUP_COPY as Record<string, Record<string, string>>;
+  const resolveCopy = (runtimeMain as any).resolveAccessibilityCopy;
+  const locales = [...Object.keys(COPY), "fr", "pt", "es", "no", "de", "JA_jp", "zh-Hant-HK", "zh-Hant", "en-GB", "unknown"];
+  for (const locale of locales) {
+    const expected = guide[resolveLocale(locale)];
+    expect(expected).toBeDefined();
+    expect(resolveCopy(locale)).toEqual(expected);
+  }
 });
