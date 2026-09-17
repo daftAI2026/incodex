@@ -104,6 +104,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
       }
     } },
     "later:": { types: "v@:@", implementation: () => helper && state === "awaiting-user" ? handleBack() : close() },
+    "skip:": { types: "v@:@", implementation: () => { if (!closed && !helper) close(); } },
   });
   const delegate = Delegate.alloc().init();
   function configurePanel(panel, floating) {
@@ -117,15 +118,20 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   // CUA PermissionView: 600pt width, 28/32pt vertical padding, 64pt icon,
   // 20pt icon-to-title gap, 26pt bold title, 41pt horizontal row inset.
   // A single 80pt Accessibility row replaces the reference's permission list.
-  // The initial 312pt allocation is fitted to the localized body before display.
-  const initial = kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(rect(0, 0, 600, 312), 1 | 2 | 32768, 2, false);
+  // The reference keeps a 600x540 guide allocation even when fewer rows are
+  // shown; localized body text may grow beyond that minimum.
+  const INITIAL_WIDTH = 600;
+  const INITIAL_MIN_HEIGHT = 540;
+  const INITIAL_SKIP_TRAILING = 57;
+  const INITIAL_SKIP_BOTTOM = 12.5;
+  const initial = kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(rect(0, 0, INITIAL_WIDTH, INITIAL_MIN_HEIGHT), 1 | 2 | 32768, 2, false);
   configurePanel(initial, true); initial.setTitle$(str("")); initial.setTitlebarAppearsTransparent$(true); initial.setTitleVisibility$(1);
-  const initialView = View.alloc().initWithFrame$(rect(0, 0, 600, 312));
-  const background = Material.alloc().initWithFrame$(rect(0, 0, 600, 312));
+  const initialView = View.alloc().initWithFrame$(rect(0, 0, INITIAL_WIDTH, INITIAL_MIN_HEIGHT));
+  const background = Material.alloc().initWithFrame$(rect(0, 0, INITIAL_WIDTH, INITIAL_MIN_HEIGHT));
   background.setMaterial$(6); background.setBlendingMode$(1); background.setState$(1);
   initialView.addSubview$(background); initial.setContentView$(initialView);
   // Reference VStack.offset(y: -9) preserves the padded background and size.
-  const contentGroup = View.alloc().initWithFrame$(rect(0, -9, 600, 312));
+  const contentGroup = View.alloc().initWithFrame$(rect(0, -9, INITIAL_WIDTH, INITIAL_MIN_HEIGHT));
   // Labels participate in the material's native vibrancy composition.
   background.addSubview$(contentGroup);
   const dark = String(initial.effectiveAppearance().name()).includes("Dark");
@@ -158,6 +164,10 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   allow.setWantsLayer$(true); allow.layer().setCornerRadius$(allowSize.height / 2);
   allow.layer().setCornerCurve$(str("continuous")); allow.layer().setMasksToBounds$(true);
   allowSurface.addSubview$(allow); card.addSubview$(allowSurface);
+  const skip = button(text("later"), rect(0, 0, 0, 0), "skip:");
+  skip.setBezelStyle$(0); skip.setBordered$(false); skip.setFont$(kit.NSFont.systemFontOfSize$(13));
+  skip.setAccessibilityLabel$(str(text("later"))); skip.setToolTip$(str(text("later"))); skip.sizeToFit();
+  background.addSubview$(skip);
   function fitInitialBody() {
     // CUA description: centered Text.lineSpacing(2), measured after styling.
     const paragraph = kit.NSMutableParagraphStyle.alloc().init();
@@ -178,20 +188,30 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     const bodyHeight = Math.ceil(measured);
     const bodyY = 112 + titleHeight + 3;
     const cardY = bodyY + bodyHeight + 21;
-    const contentHeight = safeTop + cardY + 80 + 32;
+    const contentHeight = Math.max(INITIAL_MIN_HEIGHT, safeTop + cardY + 80 + 32);
     title.setFrame$(rect(20, 112 - 11, 560, titleHeight));
     body.setFrame$(rect(41, bodyY, 518, bodyHeight));
     card.setFrame$(rect(41, cardY, 518, 80));
-    initialView.setFrame$(rect(0, 0, 600, contentHeight));
-    background.setFrame$(rect(0, 0, 600, contentHeight));
-    contentGroup.setFrame$(rect(0, safeTop - 9, 600, contentHeight - safeTop));
-    initial.setContentSize$({ width: 600, height: contentHeight });
+    initialView.setFrame$(rect(0, 0, INITIAL_WIDTH, contentHeight));
+    background.setFrame$(rect(0, 0, INITIAL_WIDTH, contentHeight));
+    contentGroup.setFrame$(rect(0, safeTop - 9, INITIAL_WIDTH, contentHeight - safeTop));
+    const skipSize = skip.frame().size;
+    skip.setFrame$(rect(
+      INITIAL_WIDTH - INITIAL_SKIP_TRAILING - Number(skipSize.width),
+      contentHeight - INITIAL_SKIP_BOTTOM - Number(skipSize.height),
+      Number(skipSize.width),
+      Number(skipSize.height),
+    ));
+    initial.setContentSize$({ width: INITIAL_WIDTH, height: contentHeight });
   }
   function captureSource() {
     return { frame: initial.convertRectToScreen$(allowSurface.convertRect$toView$(allowSurface.bounds(), null)),
       image: snapshot(allowSurface), radius: Number(allow.frame().size.height) / 2 };
   }
 
+  // The original accessory is hosted by an NSHostingView and its window
+  // frame comes from fittingSize(). 531x110 is the observed English
+  // geometry/fallback, not a universal localized width.
   const HELPER_WIDTH = 531;
   const HELPER_HEIGHT = 110;
   const HELPER_ROW_X = 62;
