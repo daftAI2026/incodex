@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPermissionNativeLibrary, resolvePermissionNativePath } from "./incodex-permission-native.cts";
@@ -81,4 +81,16 @@ test("native library requires main thread and uses the verified path exactly onc
   expect(loadPermissionNativeLibrary(objc, directory, "darwin")).toBe(library);
   expect(loadPermissionNativeLibrary(objc, directory, "darwin")).toBe(library);
   expect(loaded.filter(path => path === join(directory, name))).toHaveLength(1);
+}));
+
+test("native library refuses a replaceable ancestor even when the release itself is private", () => fixture((directory) => {
+  const release = join(directory, "release");
+  mkdirSync(release, { mode: 0o700 });
+  for (const file of [name, manifestName, "runtime-manifest.json"]) {
+    copyFileSync(join(directory, file), join(release, file));
+  }
+  expect(resolvePermissionNativePath(release, "darwin")).toBe(join(release, name));
+  chmodSync(directory, 0o777);
+  try { expect(() => resolvePermissionNativePath(release, "darwin")).toThrow("ancestor"); }
+  finally { chmodSync(directory, 0o700); }
 }));
