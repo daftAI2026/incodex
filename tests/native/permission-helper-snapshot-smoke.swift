@@ -143,7 +143,12 @@ private func assertPermissionRowBoxContract(_ helper: IncodexPermissionHelperVie
     assertNearlyEqual(darkFill.1, 0, tolerance: 0.03, "Dark row fill.green")
     assertNearlyEqual(darkFill.2, 0, tolerance: 0.03, "Dark row fill.blue")
     assertNearlyEqual(darkFill.3, 0.06, tolerance: 0.03, "Dark row fill.alpha")
-    let expectedDarkBorder = resolvedRGBA(NSColor.textColor.withAlphaComponent(0.08), in: dark)
+    var expectedDarkBorder = (CGFloat.zero, CGFloat.zero, CGFloat.zero, CGFloat.zero)
+    // withAlphaComponent may resolve the semantic color immediately, before
+    // usingColorSpace. Construct it under the same appearance as AppKit does.
+    dark.performAsCurrentDrawingAppearance {
+        expectedDarkBorder = resolvedRGBA(NSColor.textColor.withAlphaComponent(0.08), in: dark)
+    }
     let darkBorder = resolvedRGBA(box.borderColor, in: dark)
     assertNearlyEqual(darkBorder.0, expectedDarkBorder.0, tolerance: 0.03, "Dark row border.red")
     assertNearlyEqual(darkBorder.1, expectedDarkBorder.1, tolerance: 0.03, "Dark row border.green")

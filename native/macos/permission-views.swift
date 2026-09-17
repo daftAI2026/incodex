@@ -528,8 +528,61 @@ private struct PermissionHelperAppRowRoot: View {
             Text("ChatGPT")
                 .foregroundStyle(.primary)
         }
-        .frame(width: 449, height: 32, alignment: .leading)
-        .padding(5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// The live draggable row is an AppKit NSBox containing the stable SwiftUI
+// app row. Its default 1pt border and (4,5) margins produce a 449x30 content
+// frame at (5,6); the intrinsic 32pt image extends 1pt above and below it.
+@MainActor
+private final class PermissionHelperRowBox: NSBox {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        boxType = .custom
+        titlePosition = .noTitle
+        cornerRadius = 7
+        contentViewMargins = NSSize(width: 4, height: 5)
+        updateColors()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("Use init(frame:)") }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateColors()
+    }
+
+    private func updateColors() {
+        let dark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        fillColor = dark ? NSColor.black.withAlphaComponent(0.06) : NSColor.white.withAlphaComponent(0.65)
+        borderColor = dark ? NSColor.textColor.withAlphaComponent(0.08)
+            : NSColor(srgbRed: 223 / 255, green: 221 / 255, blue: 227 / 255, alpha: 1)
+        needsDisplay = true
+    }
+}
+
+// SnapshotDraggableApplicationView has its own SwiftUI shape shell, not an
+// NSViewRepresentable. Keep it separate from the live NSBox; its exact shape
+// constants remain a reference-alignment item rather than borrowing NSBox.
+private struct PermissionHelperSnapshotRow: View {
+    @ObservedObject var state: PermissionHelperState
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+            PermissionHelperAppRowRoot(state: state)
+                .frame(width: 449, height: 32, alignment: .leading)
+                .padding(5)
+        }
+        .frame(width: 459, height: 42)
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
@@ -545,17 +598,8 @@ private struct PermissionHelperForeground<Row: View>: View {
                 .frame(width: 408, alignment: .leading)
                 .offset(x: 102, y: 17)
 
-            ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor))
-                appRowContent
-            }
+            appRowContent
                 .frame(width: 459, height: 42)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .offset(x: 62, y: 48 + state.extraHeight)
 
             Button { state.send("later:") } label: {
@@ -578,12 +622,12 @@ private struct PermissionHelperForeground<Row: View>: View {
 
 private struct PermissionHelperRoot: View {
     @ObservedObject var state: PermissionHelperState
-    let appRowHost: NSView
+    let appRowBox: NSView
 
     var body: some View {
         PermissionHelperForeground(
             state: state,
-            appRowContent: PermissionEmbeddedView(view: appRowHost, size: CGSize(width: 459, height: 42))
+            appRowContent: PermissionEmbeddedView(view: appRowBox, size: CGSize(width: 459, height: 42))
         )
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -600,6 +644,7 @@ public final class IncodexPermissionHelperView: NSView {
     private let state: PermissionHelperState
     private let host: NSHostingView<PermissionHelperRoot>
     private let appRowHost: NSHostingView<PermissionHelperAppRowRoot>
+    private let appRowBox: PermissionHelperRowBox
 
     @objc public var appRowView: NSView { appRowHost }
 
@@ -623,7 +668,7 @@ public final class IncodexPermissionHelperView: NSView {
         let colorScheme: ColorScheme = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
             ? .dark : .light
         let foreground = PermissionHelperForeground(
-            state: state, appRowContent: PermissionHelperAppRowRoot(state: state)
+            state: state, appRowContent: PermissionHelperSnapshotRow(state: state)
         ).environment(\.colorScheme, colorScheme)
 
         if #available(macOS 13.0, *) {
@@ -658,12 +703,15 @@ public final class IncodexPermissionHelperView: NSView {
         precondition(Thread.isMainThread, "Permission views must be created on the main thread")
         let state = PermissionHelperState()
         let appRowHost = NSHostingView(rootView: PermissionHelperAppRowRoot(state: state))
+        let appRowBox = PermissionHelperRowBox(frame: NSRect(x: 0, y: 0, width: 459, height: 42))
+        appRowHost.frame = NSRect(x: 0, y: 0, width: 449, height: 30)
+        appRowHost.autoresizingMask = [.width, .height]
+        appRowBox.contentView = appRowHost
         self.state = state
         self.appRowHost = appRowHost
-        host = NSHostingView(rootView: PermissionHelperRoot(state: state, appRowHost: appRowHost))
+        self.appRowBox = appRowBox
+        host = NSHostingView(rootView: PermissionHelperRoot(state: state, appRowBox: appRowBox))
         super.init(frame: frameRect)
-        appRowHost.frame = NSRect(x: 0, y: 0, width: 459, height: 42)
-        appRowHost.autoresizingMask = [.width, .height]
         host.frame = bounds
         host.autoresizingMask = [.width, .height]
         addSubview(host)

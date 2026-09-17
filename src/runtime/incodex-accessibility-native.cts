@@ -245,7 +245,8 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
       if (closed || state !== "awaiting-user") return;
       const item = kit.NSPasteboardItem.alloc().init(); item.setDataProvider$forTypes$(self, array(str("public.file-url")));
       const dragging = kit.NSDraggingItem.alloc().initWithPasteboardWriter$(item);
-      dragging.setDraggingFrame$contents$(appRowView.bounds(), snapshot(appRowView));
+      const dragFrame = appRowView.convertRect$toView$(appRowView.bounds(), self);
+      dragging.setDraggingFrame$contents$(dragFrame, snapshot(appRowView));
       dragSession = self.beginDraggingSessionWithItems$event$source$(array(dragging), event, self);
       dragSession.setAnimatesToStartingPositionsOnCancelOrFail$(true);
     } },
