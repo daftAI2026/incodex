@@ -603,7 +603,7 @@ function makeBridge(bodyHeight = 32): FakeBridge {
         return button;
       },
       labelWithString$: (value: unknown) => {
-        const field = object(type);
+        const field = object(type, methods);
         field.setStringValue$(value);
         field.values.set("measuredHeight", bodyHeight);
         return field;
@@ -887,7 +887,7 @@ describe("native Accessibility setup adapter", () => {
   test("shifts the reference content group up nine points while retaining window sizing", async () => {
     const { api, panel } = await makeHarness({ bodyHeight: 32 });
     try {
-      const group = panel.contentView()?.subviews.find(value => value.frame().origin.y === 32 - 9);
+      const group = descendants(panel).find(value => value.frame().origin.y === 32 - 9);
       expect(group).toBeDefined();
       expect(group && descendants(group).some(value => value.values.get("stringValue") === COPY.title)).toBe(true);
       expect(panel.contentView()?.subviews[0].frame().origin.y).toBe(0);
@@ -926,7 +926,7 @@ describe("native Accessibility setup adapter", () => {
     // Its two extra 80pt rows each add 18pt spacing: 540 - 2 * 98 = 344.
     const { api, panel } = await makeHarness({ bodyHeight: 34 });
     try {
-      const group = panel.contentView()?.subviews[1];
+      const group = descendants(panel).find(value => value.frame().origin.y === 32 - 9);
       if (!group) throw new Error("missing permission content group");
       const icon = descendants(group).find(value => value.type === "NSImageView");
       const card = descendants(group).find(value => value.frame().origin.x === 41 && value.frame().size.height === 80);
@@ -936,6 +936,23 @@ describe("native Accessibility setup adapter", () => {
       expect(top + objectWithTitle(panel, COPY.body)!.frame().origin.y).toBe(168);
       expect(top + card!.frame().origin.y).toBe(223);
       expect(panel.frame().size).toEqual({ width: 600, height: 344 });
+    } finally { api.close(); }
+  });
+
+  test("composites initial labels inside the reference within-window material", async () => {
+    // Real CUA and native rendering experiment: ordinary alpha-over labels
+    // stay too dark. Vibrant labels must participate in the material subtree.
+    const { api, panel } = await makeHarness({ bodyHeight: 34 });
+    try {
+      const background = panel.contentView()!.subviews[0];
+      expect(background.values.get("blendingMode")).toBe(1);
+      const title = objectWithTitle(panel, COPY.title)!;
+      expect(descendants(background)).toContain(title);
+      for (const text of [COPY.title, COPY.body, COPY.permissionTitle, COPY.permissionDescription]) {
+        const field = objectWithTitle(panel, text)!;
+        expect(field.hasSelector("allowsVibrancy")).toBe(true);
+        expect(field.invoke("allowsVibrancy")).toBe(true);
+      }
     } finally { api.close(); }
   });
 
