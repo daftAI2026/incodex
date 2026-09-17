@@ -488,6 +488,48 @@ fn is_transient_websocket_error(error: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::{wait_for_installed_ui, BRIDGE_READY_TIMEOUT};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn installed_slow_start_survives_the_old_readiness_budget() {
+        // 缩小千倍的时间轴：官方第 180 秒就绪，不能在第 45 秒放弃。
+        let started = Instant::now();
+        let budget = BRIDGE_READY_TIMEOUT / 1000;
+        let result = wait_for_installed_ui(budget, Duration::from_millis(2), || Ok(true), |_| {
+            if started.elapsed() >= Duration::from_millis(180) {
+                Ok("injected")
+            } else {
+                Err("official app still initializing".into())
+            }
+        });
+        assert_eq!(result.unwrap(), "injected");
+    }
+
+    #[test]
+    fn installed_readiness_does_not_sleep_past_its_total_budget() {
+        let started = Instant::now();
+        let result: Result<(), String> = wait_for_installed_ui(
+            Duration::from_millis(30), Duration::from_secs(1), || Ok(true),
+            |_| Err("not ready".into()),
+        );
+        assert!(result.is_err());
+        assert!(started.elapsed() < Duration::from_millis(500));
+    }
+
+    #[test]
+    fn installed_readiness_cancels_when_the_official_process_exits() {
+        let mut checks = 0;
+        let mut attempts = 0;
+        let result: Result<(), String> = wait_for_installed_ui(
+            Duration::from_secs(1), Duration::from_millis(1),
+            || { checks += 1; Ok(checks == 1) },
+            |_| { attempts += 1; Err("not ready".into()) },
+        );
+        assert!(result.is_err());
+        assert_eq!(attempts, 1);
+    }
+
     use super::{
         installed_bridge_request_from_event, installed_bridge_source,
         installed_page_requires_reinjection, is_transient_websocket_error,
