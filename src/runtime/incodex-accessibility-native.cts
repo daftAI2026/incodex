@@ -2,23 +2,25 @@
 // Native presentation adapted from Cavalry-i18n e76175fe (MIT).
 // Copyright (c) 2026 daftAI. See LICENSE. Permission decisions stay in the host controller.
 const { createPermissionGraphics } = require("./incodex-permission-graphics.cts");
-const { createPermissionCardBackground } = require("./incodex-permission-card.cts");
-const { createPermissionPlaceholderBackground, updatePermissionPlaceholderState } = require("./incodex-permission-placeholder.cts");
+const { loadPermissionNativeLibrary } = require("./incodex-permission-native.cts");
 let generation = 0;
 const APP_PATH = "/Applications/ChatGPT.app";
 const rect = (x, y, width, height) => ({ origin: { x, y }, size: { width, height } });
 
-async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcModule, locateSettings, onHandoff, onBack, electron = null }) {
+async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcModule, locateSettings, onHandoff, onBack, electron = null, nativeLibrary = null }) {
   if (appPath !== APP_PATH) throw new Error("Native permission guide requires the default ChatGPT app");
   const objc = await loadObjcModule();
   const kit = new objc.NobjcLibrary("/System/Library/Frameworks/AppKit.framework/AppKit");
   const foundation = new objc.NobjcLibrary("/System/Library/Frameworks/Foundation.framework/Foundation");
   const quartz = new objc.NobjcLibrary("/System/Library/Frameworks/QuartzCore.framework/QuartzCore");
+  const swift = nativeLibrary ?? loadPermissionNativeLibrary(objc);
+  const InitialView = swift?.IncodexPermissionInitialView;
+  const HelperView = swift?.IncodexPermissionHelperView;
+  if (!InitialView || !HelperView) throw new Error("Native permission SwiftUI guide classes are unavailable");
   const graphics = createPermissionGraphics(objc);
   const text = key => typeof copy === "function" ? copy(key) : copy[key] ?? "";
   const str = value => foundation.NSString.stringWithUTF8String$(String(value));
   const array = value => foundation.NSArray.arrayWithObject$(value);
-  const selector = name => objc.callFunction("NSSelectorFromString", { returns: ":", args: ["@"] }, str(name));
   const unique = `IncodexPermission_${process.pid}_${++generation}`;
   let closed = false, state = "pending", settled = false, source = null, helper = null, arrowPanel = null, arrow = null;
   let tracking = null, arrowTimer = null, returnTimer = null, backFlightTimer = null, flight = null, locating = false, attempts = 0, presented = false, dragging = false, dragSession = null, returning = false, retryReady = false, returnSequence = 0;
@@ -28,24 +30,18 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   const choice = new Promise(resolve => { resolveChoice = resolve; });
   const resolveOnce = value => { if (!settled) { settled = true; resolveChoice(value); } };
   const panels = [];
+  const copyKeys = [
+    "title", "body", "permissionTitle", "permissionDescription", "repair", "later", "back",
+    "addedTitle", "addedBody", "dragInstruction", "completeInSettings", "checking", "repairing",
+    "openSettings", "errorTitle", "errorBody",
+  ];
+  function nativeCopy() {
+    const dictionary = foundation.NSMutableDictionary.dictionary();
+    for (const key of copyKeys) dictionary.setObject$forKey$(str(text(key)), str(key));
+    return dictionary;
+  }
   function define(name, superclass, methods, protocols) { return objc.NobjcClass.define({ name: `${unique}_${name}`, superclass, methods, ...(protocols ? { protocols } : {}) }); }
   const flipped = { isFlipped: { types: "B@:", implementation: () => true } };
-  const View = define("View", "NSView", flipped);
-  const Material = define("Material", "NSVisualEffectView", flipped);
-  const VibrantLabel = define("VibrantLabel", "NSTextField", {
-    allowsVibrancy: { types: "B@:", implementation: () => true },
-  });
-  function label(value, frame, size = 13, bold = false, centered = false, secondary = false, vibrant = false) {
-    const field = (vibrant ? VibrantLabel : kit.NSTextField).labelWithString$(str(value));
-    field.setFrame$(frame); field.setFont$(bold ? kit.NSFont.boldSystemFontOfSize$(size) : kit.NSFont.systemFontOfSize$(size));
-    field.setAlignment$(centered ? 1 : 0); field.setTextColor$(secondary ? kit.NSColor.secondaryLabelColor() : kit.NSColor.labelColor());
-    field.setMaximumNumberOfLines$(0); field.setLineBreakMode$(0);
-    return field;
-  }
-  function imageView(image, frame) {
-    const view = kit.NSImageView.alloc().initWithFrame$(frame);
-    view.setImage$(image); view.setImageScaling$(3); return view;
-  }
   function snapshot(view) {
     view.displayIfNeeded(); const bounds = view.bounds();
     const width = Number(bounds?.size?.width); const height = Number(bounds?.size?.height);
@@ -120,137 +116,55 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     panels.push(panel); panel.setReleasedWhenClosed$(false); panel.setHidesOnDeactivate$(false);
     panel.setDelegate$(delegate); panel.setLevel$(floating ? 3 : 0);
   }
-  function button(title, frame, action) {
-    const control = kit.NSButton.buttonWithTitle$target$action$(str(title), delegate, selector(action));
-    control.setFrame$(frame); control.setBezelStyle$(1); control.setFont$(kit.NSFont.systemFontOfSize$(12)); return control;
+  function discardPanel(panel) {
+    const index = panels.indexOf(panel);
+    if (index >= 0) panels.splice(index, 1);
+    try { panel.setDelegate$(null); } catch {}
+    try { panel.orderOut$(null); } catch {}
+    try { panel.close(); } catch {}
   }
-  // CUA PermissionView: 600pt width, 28/32pt vertical padding, 64pt icon,
-  // 20pt icon-to-title gap, 26pt bold title, 41pt horizontal row inset.
-  // A single 80pt Accessibility row replaces the reference's permission list.
-  // Fit the requested rows and localized body. The reference has three rows;
-  // its 540pt measured height is not a minimum for our single permission.
+  // SwiftUI owns the material, text, controls and permission card. AppKit
+  // only owns the panel lifetime and the transparent drag/flight shells.
   const INITIAL_WIDTH = 600;
   const INITIAL_MIN_HEIGHT = 312;
-  const INITIAL_SKIP_TRAILING = 57;
-  const INITIAL_SKIP_BOTTOM = 12.5;
   const initial = kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(rect(0, 0, INITIAL_WIDTH, INITIAL_MIN_HEIGHT), 1 | 2 | 32768, 2, false);
   configurePanel(initial, true); initial.setTitle$(str("")); initial.setTitlebarAppearsTransparent$(true); initial.setTitleVisibility$(1);
-  const initialView = View.alloc().initWithFrame$(rect(0, 0, INITIAL_WIDTH, INITIAL_MIN_HEIGHT));
-  const background = Material.alloc().initWithFrame$(rect(0, 0, INITIAL_WIDTH, INITIAL_MIN_HEIGHT));
-  background.setMaterial$(6); background.setBlendingMode$(1); background.setState$(1);
-  initialView.addSubview$(background); initial.setContentView$(initialView);
-  // Reference VStack.offset(y: -9) preserves the padded background and size.
-  const contentGroup = View.alloc().initWithFrame$(rect(0, -9, INITIAL_WIDTH, INITIAL_MIN_HEIGHT));
-  // Labels participate in the material's native vibrancy composition.
-  background.addSubview$(contentGroup);
-  const dark = String(initial.effectiveAppearance().name()).includes("Dark");
-  function surface(frame, radius, fill) {
-    const box = kit.NSBox.alloc().initWithFrame$(frame); box.setBoxType$(4); box.setBorderType$(0);
-    box.setCornerRadius$(radius); box.setFillColor$(fill); return box;
+  let initialView;
+  let card;
+  try {
+    initialView = InitialView.alloc().initWithFrame$(rect(0, 0, INITIAL_WIDTH, INITIAL_MIN_HEIGHT));
+    card = initialView.permissionCardView();
+    if (!card) throw new Error("Native permission card host is unavailable");
+    initialView.configureWithCopy$appIcon$permissionIcon$actionTarget$(nativeCopy(), icon, permissionIcon, delegate);
+    initial.setContentView$(initialView);
+  } catch (error) {
+    discardPanel(initial);
+    throw error;
   }
-  contentGroup.addSubview$(imageView(icon, rect(268, 28, 64, 64)));
-  // Reference Text.offset(y: -11) shifts drawing without moving the body/card.
-  const title = label(text("title"), rect(20, 112 - 11, 560, 32), 26, true, true, false, true);
-  const body = label(text("body"), rect(41, 147, 518, 32), 13, false, true, true, true);
-  contentGroup.addSubview$(title); contentGroup.addSubview$(body);
-  const card = View.alloc().initWithFrame$(rect(41, 200, 518, 80));
-  card.setClipsToBounds$(false); card.setWantsLayer$(true); card.layer().setMasksToBounds$(false);
-  card.addSubview$(createPermissionCardBackground({ View, Material, kit, graphics, str, size: { width: 518, height: 80 }, dark }));
-  contentGroup.addSubview$(card);
-  let placeholderHovered = false;
-  const placeholderLayer = createPermissionPlaceholderBackground({ quartz, foundation, kit, graphics, size: { width: 518, height: 80 } });
-  function updatePlaceholderHover(hovered) {
-    placeholderHovered = hovered && !closed && state === "awaiting-user" && !returning;
-    updatePermissionPlaceholderState({ layer: placeholderLayer, kit, graphics, hovered: placeholderHovered });
-  }
-  const Placeholder = define("Placeholder", "NSButton", { ...flipped,
-    "drawRect:": { types: "v@:{CGRect={CGPoint=dd}{CGSize=dd}}", implementation: self => {
-      // NSButton supplies native tracking, keyboard and AXPress behavior; draw
-      // only the reference outline instead of the platform button bezel.
-      updatePermissionPlaceholderState({ layer: placeholderLayer, kit, graphics,
-        hovered: placeholderHovered, pressed: Boolean(self.cell().isHighlighted()) });
-    } },
-    "mouseEntered:": { types: "v@:@", implementation: () => updatePlaceholderHover(true) },
-    "mouseExited:": { types: "v@:@", implementation: () => updatePlaceholderHover(false) },
-  });
-  const placeholder = Placeholder.alloc().initWithFrame$(card.frame());
-  placeholder.setTitle$(str("")); placeholder.setBordered$(false);
-  placeholder.setTarget$(delegate); placeholder.setAction$(selector("resumeSettings:"));
-  placeholder.setAccessibilityLabel$(str(text("completeInSettings")));
-  placeholder.setWantsLayer$(true);
-  placeholder.layer().addSublayer$(placeholderLayer);
-  const placeholderTracking = kit.NSTrackingArea.alloc().initWithRect$options$owner$userInfo$(placeholder.bounds(), 1 | 128 | 512, placeholder, null);
-  placeholder.addTrackingArea$(placeholderTracking);
-  const placeholderTitle = label(text("completeInSettings"), rect(12, 32, 494, 16), 12, false, true, true, true);
-  placeholderTitle.setAccessibilityElement$(false);
-  placeholderTitle.setFont$(kit.NSFont.systemFontOfSize$weight$(12, .23));
-  const placeholderText = placeholderTitle.attributedStringValue().mutableCopy();
-  placeholderText.addAttribute$value$range$(str("NSKern"), foundation.NSNumber.numberWithDouble$(.7),
-    { location: 0, length: Number(placeholderText.length()) });
-  placeholderTitle.setAttributedStringValue$(placeholderText);
-  placeholder.addSubview$(placeholderTitle); placeholder.setHidden$(true);
-  contentGroup.addSubview$(placeholder);
-  function showSettingsPlaceholder(show) {
-    updatePlaceholderHover(false);
-    card.setHidden$(show); placeholder.setHidden$(!show); skip.setHidden$(show);
-  }
+  let initialTitle = text("title");
+  let initialBody = text("body");
+  let initialAllowEnabled = true;
+  let initialPlaceholder = false;
 
-  card.addSubview$(imageView(permissionIcon, rect(8, 8, 64, 64)));
-  const permissionTitle = label(text("permissionTitle"), rect(82.5, 20.5, 330, 20), 16, false, false, false, true);
-  permissionTitle.setFont$(kit.NSFont.systemFontOfSize$weight$(16, .3));
-  card.addSubview$(permissionTitle);
-  card.addSubview$(label(text("permissionDescription"), rect(82.5, 42.5, 330, 18), 13, false, false, true, true));
-  // Reference: DefaultButtonStyle -> continuous Capsule -> minWidth 62 -> x +4.
-  const allowSurface = View.alloc().initWithFrame$(rect(440, 28, 62, 24));
-  const allow = button(text("repair"), rect(0, 0, 62, 24), "allow:"); allow.setKeyEquivalent$(str("\r"));
-  allow.setBordered$(true); allow.setFont$(kit.NSFont.systemFontOfSize$(13)); allow.sizeToFit();
-  const allowSize = allow.frame().size;
-  const allowWidth = Math.max(62, Number(allowSize.width));
-  allowSurface.setFrame$(rect(498 - allowWidth + 4, (80 - allowSize.height) / 2, allowWidth, allowSize.height));
-  allow.setFrame$(rect(Math.round((allowWidth - allowSize.width) / 2), 0, allowSize.width, allowSize.height));
-  allow.setWantsLayer$(true); allow.layer().setCornerRadius$(allowSize.height / 2);
-  allow.layer().setCornerCurve$(str("continuous")); allow.layer().setMasksToBounds$(true);
-  allowSurface.addSubview$(allow); card.addSubview$(allowSurface);
-  const skip = button(text("later"), rect(0, 0, 0, 0), "skip:");
-  skip.setBezelStyle$(0); skip.setBordered$(false); skip.setFont$(kit.NSFont.systemFontOfSize$(13));
-  skip.setAccessibilityLabel$(str(text("later"))); skip.setToolTip$(str(text("later"))); skip.sizeToFit();
-  background.addSubview$(skip);
   function fitInitialBody() {
-    // CUA description: centered Text.lineSpacing(2), measured after styling.
-    const paragraph = kit.NSMutableParagraphStyle.alloc().init();
-    paragraph.setAlignment$(1); paragraph.setLineSpacing$(2);
-    const attributed = body.attributedStringValue().mutableCopy();
-    attributed.addAttribute$value$range$(str("NSParagraphStyle"), paragraph,
-      { location: 0, length: Number(attributed.length()) });
-    body.setAttributedStringValue$(attributed);
-    const measured = Number(body.cell().cellSizeForBounds$(rect(0, 0, 518, 1000)).height);
-    if (!Number.isFinite(measured) || measured <= 0) throw new Error("Permission text has invalid native bounds");
-    // NSHostingView includes the titled window's safe area. A plain NSView
-    // does not lay out inside it automatically; keep the system-provided inset.
-    const safeTop = Number(initialView.safeAreaInsets().top);
-    const titleHeight = Number(title.cell().cellSizeForBounds$(rect(0, 0, 560, 1000)).height);
-    if (!Number.isFinite(safeTop) || safeTop < 0 || !Number.isFinite(titleHeight) || titleHeight <= 0) {
-      throw new Error("Permission header has invalid native bounds");
+    const preferred = initialView.preferredContentSize();
+    const width = Number(preferred?.width); const height = Number(preferred?.height);
+    if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) {
+      throw new Error("Native permission initial view has invalid preferred size");
     }
-    const bodyHeight = Math.ceil(measured);
-    const bodyY = 112 + titleHeight + 3;
-    const cardY = bodyY + bodyHeight + 21;
-    const contentHeight = safeTop + cardY + 80 + 32;
-    title.setFrame$(rect(20, 112 - 11, 560, titleHeight));
-    body.setFrame$(rect(41, bodyY, 518, bodyHeight));
-    card.setFrame$(rect(41, cardY, 518, 80));
-    placeholder.setFrame$(card.frame());
-    initialView.setFrame$(rect(0, 0, INITIAL_WIDTH, contentHeight));
-    background.setFrame$(rect(0, 0, INITIAL_WIDTH, contentHeight));
-    contentGroup.setFrame$(rect(0, safeTop - 9, INITIAL_WIDTH, contentHeight - safeTop));
-    const skipSize = skip.frame().size;
-    skip.setFrame$(rect(
-      INITIAL_WIDTH - INITIAL_SKIP_TRAILING - Number(skipSize.width),
-      contentHeight - INITIAL_SKIP_BOTTOM - Number(skipSize.height),
-      Number(skipSize.width),
-      Number(skipSize.height),
-    ));
-    initial.setContentSize$({ width: INITIAL_WIDTH, height: contentHeight });
+    initialView.setFrame$(rect(0, 0, width, height));
+    initial.setContentSize$({ width, height });
+  }
+  function setInitialContent({ title = initialTitle, body = initialBody, allowEnabled = initialAllowEnabled, settingsPlaceholder = initialPlaceholder } = {}) {
+    initialTitle = String(title); initialBody = String(body);
+    initialAllowEnabled = Boolean(allowEnabled); initialPlaceholder = Boolean(settingsPlaceholder);
+    initialView.setContentWithTitle$body$allowEnabled$settingsPlaceholder$(
+      str(initialTitle), str(initialBody), initialAllowEnabled, initialPlaceholder,
+    );
+  }
+  function showSettingsPlaceholder(show) {
+    setInitialContent({ settingsPlaceholder: show });
+    card.setHidden$(show);
   }
   function captureSource() {
     return { frame: initial.convertRectToScreen$(card.convertRect$toView$(card.bounds(), null)),
@@ -331,7 +245,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
       if (closed || state !== "awaiting-user") return;
       const item = kit.NSPasteboardItem.alloc().init(); item.setDataProvider$forTypes$(self, array(str("public.file-url")));
       const dragging = kit.NSDraggingItem.alloc().initWithPasteboardWriter$(item);
-      dragging.setDraggingFrame$contents$(appRowView.frame(), snapshot(appRowView));
+      dragging.setDraggingFrame$contents$(appRowView.bounds(), snapshot(appRowView));
       dragSession = self.beginDraggingSessionWithItems$event$source$(array(dragging), event, self);
       dragSession.setAnimatesToStartingPositionsOnCancelOrFail$(true);
     } },
@@ -366,34 +280,38 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   }
   function createHelper(frame) {
     const panel = kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(frame,128,2,false); configurePanel(panel,true);
-    panel.setOpaque$(false); panel.setBackgroundColor$(kit.NSColor.clearColor()); panel.setHasShadow$(false); panel.setIgnoresMouseEvents$(false);
-    const instruction = label(text("dragInstruction") || text("addedBody"),rect(0,0,HELPER_INSTRUCTION_WIDTH,18),13,false);
-    const measuredHeight = Number(instruction.cell().cellSizeForBounds$(rect(0,0,HELPER_INSTRUCTION_WIDTH,1000)).height);
-    const extraHeight = Number.isFinite(measuredHeight) ? Math.max(0, Math.ceil(measuredHeight) - 16) : 0;
-    const instructionHeight = 18 + extraHeight;
-    const contentRowWidth = HELPER_ROW_WIDTH;
-    const layoutSize = { width: HELPER_WIDTH, height: HELPER_HEIGHT + extraHeight };
-    const view = Material.alloc().initWithFrame$(rect(0,0,layoutSize.width,layoutSize.height)); view.setMaterial$(6); view.setBlendingMode$(0); view.setState$(1); view.setWantsLayer$(true); view.layer().setCornerRadius$(12); view.layer().setMasksToBounds$(true);
-    const edge = surface(rect(0,0,layoutSize.width,layoutSize.height),12,kit.NSColor.clearColor());
-    edge.setBorderType$(1); edge.setBorderWidth$(.5); edge.setBorderColor$(kit.NSColor.separatorColor()); view.addSubview$(edge);
-    panel.setContentView$(view);
-    instruction.setFrame$(rect(HELPER_INSTRUCTION_X,17,HELPER_INSTRUCTION_WIDTH,instructionHeight)); view.addSubview$(instruction);
-    const back = button("",rect(18,55+extraHeight,28,28),"later:");
-    const backLabel = str(text("back"));
-    back.setImage$(kit.NSImage.imageWithSystemSymbolName$accessibilityDescription$(str("chevron.left"),backLabel));
-    back.setAccessibilityLabel$(backLabel); back.setBezelStyle$(7); back.setToolTip$(backLabel); view.addSubview$(back);
-    const row=Drag.alloc().initWithFrame$(rect(HELPER_ROW_X,HELPER_ROW_Y+extraHeight,contentRowWidth,HELPER_ROW_HEIGHT)); view.addSubview$(row);
-    const box=kit.NSBox.alloc().initWithFrame$(rect(0,0,contentRowWidth,HELPER_ROW_HEIGHT)); box.setBoxType$(4); box.setBorderType$(1); box.setCornerRadius$(8); box.setBorderWidth$(.5); box.setBorderColor$(kit.NSColor.separatorColor()); box.setFillColor$(kit.NSColor.controlBackgroundColor()); row.addSubview$(box);
-    appRowView=View.alloc().initWithFrame$(rect(0,0,contentRowWidth,HELPER_ROW_HEIGHT)); row.addSubview$(appRowView);
-    appRowView.addSubview$(imageView(icon,rect(5,5,32,32))); appRowView.addSubview$(label("ChatGPT",rect(41,13,145.5,16),13));
-    const fittedSize = layoutSize;
-    arrowPanel=kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(rect(0,0,HELPER_ARROW_WINDOW_SIZE,HELPER_ARROW_WINDOW_SIZE),128,2,false); configurePanel(arrowPanel,true); arrowPanel.setOpaque$(false); arrowPanel.setBackgroundColor$(kit.NSColor.clearColor()); arrowPanel.setHasShadow$(false);
-    const canvas=kit.NSView.alloc().initWithFrame$(rect(0,0,HELPER_ARROW_WINDOW_SIZE,HELPER_ARROW_WINDOW_SIZE)); canvas.setWantsLayer$(true); canvas.layer().setMasksToBounds$(false);
-    arrow=Arrow.alloc().initWithFrame$(rect(36,10,HELPER_ARROW_GRAPHIC_SIZE,HELPER_ARROW_GRAPHIC_SIZE)); arrow.setWantsLayer$(true); arrow.layer().setGeometryFlipped$(true); arrow.layer().setAnchorPoint$({x:.5,y:1}); arrow.setFrame$(rect(36,10,HELPER_ARROW_GRAPHIC_SIZE,HELPER_ARROW_GRAPHIC_SIZE)); arrow.layer().setMasksToBounds$(false);
-    graphics.setBlackColor(arrow.layer(),"shadowColor",1); arrow.layer().setShadowOpacity$(.23); arrow.layer().setShadowRadius$(7); arrow.layer().setShadowOffset$({width:0,height:4});
-    canvas.addSubview$(arrow); arrowPanel.setContentView$(canvas); panel.addChildWindow$ordered$(arrowPanel,1); positionArrow(frame);
-    const area=kit.NSTrackingArea.alloc().initWithRect$options$owner$userInfo$(arrow.bounds(),1|128|512,arrow,null); arrow.addTrackingArea$(area);
-    return {panel,view,frame,size:fittedSize,radius:12,row};
+    try {
+      panel.setOpaque$(false); panel.setBackgroundColor$(kit.NSColor.clearColor()); panel.setHasShadow$(false); panel.setIgnoresMouseEvents$(false);
+      const view = HelperView.alloc().initWithFrame$(rect(0, 0, HELPER_WIDTH, HELPER_HEIGHT));
+      view.configureWithCopy$appIcon$actionTarget$(nativeCopy(), icon, delegate);
+      const preferred = view.preferredContentSize();
+      const fittedSize = { width: Number(preferred?.width), height: Number(preferred?.height) };
+      if (!Number.isFinite(fittedSize.width) || fittedSize.width <= 0 || !Number.isFinite(fittedSize.height) || fittedSize.height <= 0) {
+        throw new Error("Native permission helper has invalid preferred size");
+      }
+      view.setFrame$(rect(0, 0, fittedSize.width, fittedSize.height));
+      panel.setContentView$(view);
+      const rowFrame = view.appRowFrame();
+      appRowView = view.appRowView();
+      if (!appRowView || !rowFrame) throw new Error("Native permission helper row host is unavailable");
+      // Keep drag tracking in AppKit, while the visible row remains the native
+      // SwiftUI host. The overlay frame is supplied by the native layout ABI.
+      const row = Drag.alloc().initWithFrame$(rowFrame);
+      view.addSubview$(row);
+      arrowPanel=kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(rect(0,0,HELPER_ARROW_WINDOW_SIZE,HELPER_ARROW_WINDOW_SIZE),128,2,false); configurePanel(arrowPanel,true); arrowPanel.setOpaque$(false); arrowPanel.setBackgroundColor$(kit.NSColor.clearColor()); arrowPanel.setHasShadow$(false);
+      const canvas=kit.NSView.alloc().initWithFrame$(rect(0,0,HELPER_ARROW_WINDOW_SIZE,HELPER_ARROW_WINDOW_SIZE)); canvas.setWantsLayer$(true); canvas.layer().setMasksToBounds$(false);
+      arrow=Arrow.alloc().initWithFrame$(rect(36,10,HELPER_ARROW_GRAPHIC_SIZE,HELPER_ARROW_GRAPHIC_SIZE)); arrow.setWantsLayer$(true); arrow.layer().setGeometryFlipped$(true); arrow.layer().setAnchorPoint$({x:.5,y:1}); arrow.setFrame$(rect(36,10,HELPER_ARROW_GRAPHIC_SIZE,HELPER_ARROW_GRAPHIC_SIZE)); arrow.layer().setMasksToBounds$(false);
+      graphics.setBlackColor(arrow.layer(),"shadowColor",1); arrow.layer().setShadowOpacity$(.23); arrow.layer().setShadowRadius$(7); arrow.layer().setShadowOffset$({width:0,height:4});
+      canvas.addSubview$(arrow); arrowPanel.setContentView$(canvas); panel.addChildWindow$ordered$(arrowPanel,1); positionArrow(frame);
+      const area=kit.NSTrackingArea.alloc().initWithRect$options$owner$userInfo$(arrow.bounds(),1|128|512,arrow,null); arrow.addTrackingArea$(area);
+      return {panel,view,frame,size:fittedSize,radius:12,row};
+    } catch (error) {
+      const child = arrowPanel;
+      arrowPanel = null; arrow = null; appRowView = null;
+      if (child) discardPanel(child);
+      discardPanel(panel);
+      throw error;
+    }
   }
   function disposeHelper() {
     const child = arrowPanel;
@@ -413,8 +331,8 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     if (closed) return;
     clearInterval(tracking); tracking = null; stopArrow(); stopBackFlightTimer();
     disposeHelper(); showSettingsPlaceholder(false); returning = false; state = "pending"; retryReady = Boolean(enableRetry);
-    title.setStringValue$(str(text("title"))); body.setStringValue$(str(text("body")));
-    allow.setEnabled$(Boolean(enableRetry)); fitInitialBody();
+    setInitialContent({ title: text("title"), body: text("body"), allowEnabled: Boolean(enableRetry), settingsPlaceholder: false });
+    fitInitialBody();
     initial.setLevel$(3); electron?.app?.focus?.({steal:true}); initial.makeKeyAndOrderFront$(null);
   }
   function fallbackToInitial() {
@@ -429,9 +347,10 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   }
   function handleBack() {
     if (closed || returning || dragging || state !== "awaiting-user" || !helper) return;
-    returning = true; initial.setLevel$(3); updatePlaceholderHover(false); retryReady = false; const token = ++returnSequence;
+    returning = true; initial.setLevel$(3); retryReady = false; const token = ++returnSequence;
     clearInterval(tracking); tracking = null; stopArrow();
-    title.setStringValue$(str(text("title"))); body.setStringValue$(str(text("body"))); allow.setEnabled$(true); fitInitialBody();
+    setInitialContent({ title: text("title"), body: text("body"), allowEnabled: true, settingsPlaceholder: false });
+    fitInitialBody();
     if (reducedMotion() || !onBack || !helper.flightTarget) { fallbackToInitial(); return; }
     let returnSource;
     // Capture the restored card synchronously, then keep the placeholder on
@@ -506,14 +425,31 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     state=next;
     if (next === "repairing" || next === "awaiting-user") initial.setLevel$(0);
     if (next==="granted") { close(); return; }
-    if (next==="repairing") { allow.setEnabled$(false); body.setStringValue$(str(text("repairing"))); }
-    if (next==="awaiting-user") { allow.setEnabled$(false); body.setStringValue$(str(text("body"))); showSettingsPlaceholder(true); if (!tracking) tracking=setInterval(()=>void place(),100); void place(); }
+    if (next==="repairing") {
+      setInitialContent({ body: text("repairing"), allowEnabled: false, settingsPlaceholder: false });
+      fitInitialBody();
+    }
+    if (next==="awaiting-user") {
+      setInitialContent({ body: text("body"), allowEnabled: false, settingsPlaceholder: true });
+      showSettingsPlaceholder(true);
+      fitInitialBody();
+      if (!tracking) tracking=setInterval(()=>void place(),100); void place();
+    }
     if (next==="error" || next==="unknown") {
       clearInterval(tracking);tracking=null;stopArrow();flight?.dispose();flight=null;
-      disposeHelper(); initial.setLevel$(3); showSettingsPlaceholder(false); title.setStringValue$(str(text("errorTitle")));body.setStringValue$(str(text("errorBody")));fitInitialBody();initial.orderFront$(null);
+      disposeHelper(); initial.setLevel$(3);
+      setInitialContent({ title: text("errorTitle"), body: text("errorBody"), allowEnabled: true, settingsPlaceholder: false });
+      card.setHidden$(false); fitInitialBody(); initial.orderFront$(null);
     }
   }
-  fitInitialBody(); initial.center(); initial.setLevel$(3); electron?.app?.focus?.({steal:true}); initial.makeKeyAndOrderFront$(null);
+  try {
+    setInitialContent();
+    fitInitialBody();
+  } catch (error) {
+    discardPanel(initial);
+    throw error;
+  }
+  initial.center(); initial.setLevel$(3); electron?.app?.focus?.({steal:true}); initial.makeKeyAndOrderFront$(null);
   return {choice,setState,close,isDestroyed:()=>closed,
     onClose:callback=>{closeHandlers.add(callback);return()=>closeHandlers.delete(callback);},
     onRetry:callback=>{if(typeof callback!=="function") return ()=>{}; retryHandlers.add(callback); return()=>retryHandlers.delete(callback);}};

@@ -28,6 +28,12 @@ function privateDirectory(directory) {
     const stat = fs.lstatSync(current);
     if (stat.isSymbolicLink()) throw new Error("Native permission refuses symlink ancestry");
     if (!stat.isDirectory()) throw new Error("Native permission ancestry is not a directory");
+    // A root-owned sticky temporary container is safe for an owned child;
+    // other writable ancestors could replace the release after verification.
+    const stickyRoot = stat.uid === 0 && (stat.mode & 0o1000) !== 0;
+    if ((stat.uid !== 0 && stat.uid !== process.getuid()) || ((stat.mode & 0o022) && !stickyRoot)) {
+      throw new Error("Native permission runtime ancestor is replaceable");
+    }
     if (current === leaf && (stat.uid !== process.getuid() || (stat.mode & 0o022))) {
       throw new Error("Native permission runtime directory is not private");
     }

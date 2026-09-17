@@ -100,6 +100,7 @@ for (const name of cjsNames) {
     // Compile the short-lived guide into main so existing loader asset allowlists
     // still verify the complete Runtime. No new disk asset or second publisher.
     const guideSource = readFileSync(join(emitDir, "incodex-accessibility-native.cjs"), "utf8")
+      .replace('require("./incodex-permission-native.cts")', permissionNativeModule)
       .replace('require("./incodex-permission-graphics.cts")', graphicsModule)
       .replace('require("./incodex-permission-card.cts")', cardModule)
       .replace('require("./incodex-permission-placeholder.cts")', placeholderModule);

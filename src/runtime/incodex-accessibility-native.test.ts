@@ -808,16 +808,6 @@ function makeBridge(
   return { objc, calls, objects };
 }
 
-function descendants(root: FakeNative): FakeNative[] {
-  return [root, ...root.subviews.flatMap(descendants)];
-}
-
-function objectWithTitle(root: FakeNative, title: string): FakeNative | undefined {
-  return descendants(root).find((value) =>
-    value.values.get("title") === title || value.values.get("stringValue") === title,
-  );
-}
-
 function arrayValues(value: unknown): unknown[] {
   if (value instanceof FakeNative) {
     const items = value.values.get("items");
@@ -887,17 +877,17 @@ function swiftPermissionViewsLibrary() {
     const card = new FakeNative("SwiftPermissionCardView", calls);
     card.frameValue = frame(518, 80);
     const view = new FakeNative("IncodexPermissionInitialView", calls, {
-      "configureWithCopy:appIcon:permissionIcon:actionTarget:": function (...args: unknown[]) {
+      "configureWithCopy:appIcon:permissionIcon:actionTarget:": function (this: FakeNative, ...args: unknown[]) {
         this.record("configureWithCopy:appIcon:permissionIcon:actionTarget:", ...args);
         this.values.set("copy", args[0]);
         this.values.set("actionTarget", args[3]);
       },
-      "setContentWithTitle:body:allowEnabled:settingsPlaceholder:": function (...args: unknown[]) {
+      "setContentWithTitle:body:allowEnabled:settingsPlaceholder:": function (this: FakeNative, ...args: unknown[]) {
         this.record("setContentWithTitle:body:allowEnabled:settingsPlaceholder:", ...args);
         this.values.set("content", args);
       },
-      preferredContentSize: function () { return { width: 600, height: 340 }; },
-      permissionCardView: function () { return card; },
+      preferredContentSize: () => ({ width: 600, height: 340 }),
+      permissionCardView: () => card,
     });
     view.frameValue = frame(600, 340);
     view.subviews.push(new FakeNative("NSHostingView<Initial>", calls));
@@ -910,14 +900,14 @@ function swiftPermissionViewsLibrary() {
     const row = new FakeNative("SwiftPermissionAppRowView", calls);
     row.frameValue = frame(459, 42);
     const view = new FakeNative("IncodexPermissionHelperView", calls, {
-      "configureWithCopy:appIcon:actionTarget:": function (...args: unknown[]) {
+      "configureWithCopy:appIcon:actionTarget:": function (this: FakeNative, ...args: unknown[]) {
         this.record("configureWithCopy:appIcon:actionTarget:", ...args);
         this.values.set("copy", args[0]);
         this.values.set("actionTarget", args[2]);
       },
-      preferredContentSize: function () { return { width: 531, height: 110 }; },
-      appRowFrame: function () { return frame(459, 42, 62, 48); },
-      appRowView: function () { return row; },
+      preferredContentSize: () => ({ width: 531, height: 110 }),
+      appRowFrame: () => frame(459, 42, 62, 48),
+      appRowView: () => row,
     });
     view.frameValue = frame(531, 110);
     view.subviews.push(new FakeNative("NSHostingView<Helper>", calls));
@@ -1023,8 +1013,8 @@ test("uses SwiftUI preferred helper size for a wider localized instruction", asy
   swift.library.IncodexPermissionHelperView.alloc = () => {
     const view = originalHelper();
     view.values.set("preferred", { width: 531, height: 126 });
-    view.selectors.set("preferredContentSize", function () { return { width: 531, height: 126 }; });
-    view.selectors.set("appRowFrame", function () { return frame(459, 42, 62, 64); });
+    view.selectors.set("preferredContentSize", () => ({ width: 531, height: 126 }));
+    view.selectors.set("appRowFrame", () => frame(459, 42, 62, 64));
     return view;
   };
   const { api, bridge } = await makeHarness({
@@ -1150,7 +1140,7 @@ describe("native Accessibility setup adapter", () => {
   test("helper panel uses the injected SwiftUI view ABI for copy, row frame and row view", async () => {
     const swift = swiftPermissionViewsLibrary();
     const { api } = await makeHarness({
-      nativeLibrary: swift.library,
+      nativeLibrary: swift.library as any,
       locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
     });
     try {
@@ -1178,7 +1168,7 @@ describe("native Accessibility setup adapter", () => {
     const original = swift.library.IncodexPermissionInitialView.alloc;
     swift.library.IncodexPermissionInitialView.alloc = () => {
       const view = original();
-      view.selectors.set(selector, function () {
+      view.selectors.set(selector, () => {
         throw new Error("initial SwiftUI ABI failure");
       });
       return view;
@@ -1187,8 +1177,10 @@ describe("native Accessibility setup adapter", () => {
       appPath: APP_PATH,
       copy: COPY,
       loadObjcModule: async () => bridge.objc,
-      nativeLibrary: swift.library,
+      nativeLibrary: swift.library as any,
       locateSettings: () => null,
+      onBack: undefined,
+      onHandoff: undefined,
     })).rejects.toThrow("initial SwiftUI ABI failure");
     const panels = bridge.objects.filter((value) => value.type === "NSPanel");
     expect(panels).toHaveLength(1);
@@ -1202,15 +1194,17 @@ describe("native Accessibility setup adapter", () => {
     const original = swift.library.IncodexPermissionHelperView.alloc;
     swift.library.IncodexPermissionHelperView.alloc = () => {
       const view = original();
-      view.selectors.set("preferredContentSize", function () { return { width: 0, height: 0 }; });
+      view.selectors.set("preferredContentSize", () => ({ width: 0, height: 0 }));
       return view;
     };
     const api = await createNativeAccessibilitySetupWindow({
       appPath: APP_PATH,
       copy: COPY,
       loadObjcModule: async () => bridge.objc,
-      nativeLibrary: swift.library,
+      nativeLibrary: swift.library as any,
       locateSettings: () => ({ x: 120, y: 140, width: 920, height: 700 }),
+      onBack: undefined,
+      onHandoff: undefined,
     });
     try {
       api.setState("awaiting-user");
@@ -1240,8 +1234,10 @@ describe("native Accessibility setup adapter", () => {
     expect(bridge.objects.some(value => value.type === "NSButton")).toBe(false);
     const configure = swift.calls.find((call) => call.selector === "configureWithCopy:appIcon:permissionIcon:actionTarget:");
     expect(configure?.args[0]).toBeDefined();
+    const configuredCopy = configure?.args[0];
+    if (!(configuredCopy instanceof FakeNative)) throw new Error("native initial copy is missing");
     for (const key of ["title", "body", "permissionTitle", "permissionDescription", "repair", "later", "completeInSettings"]) {
-      expect((configure?.args[0] as FakeNative).values.get(key)).toBe(COPY[key as keyof typeof COPY]);
+      expect(configuredCopy.values.get(key)).toBe(COPY[key as keyof typeof COPY]);
     }
   });
 
@@ -1294,7 +1290,7 @@ describe("native Accessibility setup adapter", () => {
       const originalInitial = swift.library.IncodexPermissionInitialView.alloc;
       swift.library.IncodexPermissionInitialView.alloc = () => {
         const view = originalInitial();
-        view.selectors.set("preferredContentSize", function () { return { width: 600, height: 312 + bodyHeight }; });
+        view.selectors.set("preferredContentSize", () => ({ width: 600, height: 312 + bodyHeight }));
         return view;
       };
       const { api, panel } = await makeHarness({ nativeLibrary: swift.library, bodyHeight });
@@ -1310,7 +1306,8 @@ describe("native Accessibility setup adapter", () => {
     const { api, panel, swift } = await makeHarness({ bodyHeight: 34 });
     try {
       expect(panel.frame().size.width).toBe(600);
-      expect(swift!.initialViews[0].preferredContentSize().width).toBe(600);
+      const preferred = swift!.initialViews[0].preferredContentSize() as { width: number };
+      expect(preferred.width).toBe(600);
       expect(swift!.initialCards[0].frame().size).toEqual({ width: 518, height: 80 });
       expect(swift!.initialViews[0].permissionCardView()).toBe(swift!.initialCards[0]);
     } finally { api.close(); }
@@ -1343,7 +1340,7 @@ describe("native Accessibility setup adapter", () => {
     const harness = await makeHarness({
       onHandoff: (payload) => handoffs.push(payload),
     });
-    const { api, bridge, panel, swift } = harness;
+    const { api, swift } = harness;
     performSwiftAction(harness, "allow:");
     await expect(api.choice).resolves.toBe("repair");
     api.setState("awaiting-user");
@@ -1369,7 +1366,7 @@ describe("native Accessibility setup adapter", () => {
 
   test("uses a native file URL drag source fixed to the official ChatGPT bundle", async () => {
     const harness = await makeHarness();
-    const { api, bridge, swift } = harness;
+    const { api, bridge } = harness;
     api.setState("awaiting-user");
     await flushNativeAsync();
     const row = bridge.objects.find((value) => value.hasSelector("mouseDown:"));
@@ -1385,14 +1382,16 @@ describe("native Accessibility setup adapter", () => {
     expect(arrayValues(item.values.get("types"))).toEqual(expect.arrayContaining(["public.file-url"]));
   });
 
-  test("localizes the native Back accessibility label", async () => {
+  test("passes localized Back label into native config", async () => {
     const harness = await makeHarness({ copy: { ...COPY, later: "稍後", back: "返回" } });
     const { api, swift } = harness;
     try {
       api.setState("awaiting-user");
       await flushNativeAsync();
       const configure = swift!.calls.find((call) => call.selector === "configureWithCopy:appIcon:actionTarget:");
-      expect((configure?.args[0] as FakeNative).values.get("back")).toBe("返回");
+      const configuredCopy = configure?.args[0];
+      if (!(configuredCopy instanceof FakeNative)) throw new Error("native helper copy is missing");
+      expect(configuredCopy.values.get("back")).toBe("返回");
       expect(swift!.helperViews[0].type).toBe("IncodexPermissionHelperView");
     } finally {
       api.close();
@@ -1406,7 +1405,7 @@ describe("native Accessibility setup adapter", () => {
     const harness = await makeHarness({
       onBack: (payload) => { reverses.push(payload); return { finished, dispose: () => {} }; },
     });
-    const { api, bridge, panel } = harness;
+    const { api, panel } = harness;
     try {
       performSwiftAction(harness, "allow:");
       await expect(api.choice).resolves.toBe("repair");
@@ -1887,7 +1886,7 @@ test("Back keeps the reverse flight alive when Settings disappears", async () =>
   let finish!: () => void;
   const finished = new Promise<void>(resolve => { finish = resolve; });
   const harness = await makeHarness({ onBack: () => ({ finished, dispose() {} }) });
-  const { api, bridge, panel, swift } = harness;
+  const { api, swift } = harness;
   try {
     const card = swift!.initialCards[0];
     performSwiftAction(harness, "allow:");
@@ -1907,7 +1906,7 @@ test("Back keeps the reverse flight alive when Settings disappears", async () =>
 
 test("handoff toggles SwiftUI settingsPlaceholder and Back restores the card host", async () => {
   const harness = await makeHarness({ reduceMotion: true });
-  const { api, bridge, panel, swift } = harness;
+  const { api, swift } = harness;
   try {
     const card = swift!.initialCards[0];
     performSwiftAction(harness, "allow:");
@@ -1928,7 +1927,7 @@ test("handoff toggles SwiftUI settingsPlaceholder and Back restores the card hos
 
 test("awaiting Settings updates SwiftUI placeholder state and Back clears it", async () => {
   const harness = await makeHarness({ reduceMotion: true });
-  const { api, bridge, panel, swift } = harness;
+  const { api, swift } = harness;
   try {
     performSwiftAction(harness, "allow:");
     api.setState("awaiting-user");
@@ -1948,7 +1947,7 @@ test("adopts a localized SwiftUI initial preferred height", async () => {
   const originalInitial = swift.library.IncodexPermissionInitialView.alloc;
   swift.library.IncodexPermissionInitialView.alloc = () => {
     const view = originalInitial();
-    view.selectors.set("preferredContentSize", function () { return { width: 600, height: 372 }; });
+    view.selectors.set("preferredContentSize", () => ({ width: 600, height: 372 }));
     return view;
   };
   const { api, panel } = await makeHarness({ nativeLibrary: swift.library, titleHeight: 60, bodyHeight: 32 });
@@ -1960,7 +1959,7 @@ test("adopts a localized SwiftUI initial preferred height", async () => {
 
 test("dispatches SwiftUI resumeSettings without creating a new repair choice", async () => {
   const harness=await makeHarness({reduceMotion:true});
-  const {api,bridge,panel,swift}=harness;
+  const {api,bridge,swift}=harness;
   let retries=0;
   api.onRetry(()=>{retries++;api.setState("awaiting-user");});
   try {
@@ -1983,7 +1982,7 @@ test("dispatches SwiftUI resumeSettings without creating a new repair choice", a
 
 test("passes helper dragInstruction through the SwiftUI copy dictionary", async () => {
   const harness=await makeHarness({reduceMotion:true});
-  const {api,bridge,panel,swift}=harness;
+  const {api,bridge,swift}=harness;
   try {
     performSwiftAction(harness,"allow:");api.setState("awaiting-user");await flushNativeAsync();
     const configure=swift!.calls.find((call)=>call.selector==="configureWithCopy:appIcon:actionTarget:");
