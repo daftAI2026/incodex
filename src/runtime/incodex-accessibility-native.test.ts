@@ -588,6 +588,7 @@ function makeBridge(bodyHeight = 32): FakeBridge {
     const methods = definitions.get(type) ?? {};
     const cls: Record<string, unknown> = {
       alloc: () => object(type, methods),
+      appearanceNamed$: (name: string) => name,
       buttonWithTitle$target$action$: (title: unknown, target: FakeNative, action: string) => {
         const button = object(type);
         button.setTitle$(title);
