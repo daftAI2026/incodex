@@ -6,6 +6,22 @@ import { join } from "node:path";
 
 const layoutSmokeSource = join(import.meta.dir, "native", "permission-views-layout-smoke.m");
 
+test("helper foreground composes bottom-aligned stacks and semantic padding", () => {
+  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const start = source.indexOf("private struct PermissionHelperForeground");
+  const foreground = source.slice(start, source.indexOf("private struct PermissionHelperRoot", start));
+  expect(foreground).toContain("HStack(alignment: .bottom, spacing: 16)");
+  expect(foreground).toContain("VStack(alignment: .leading, spacing: 7)");
+  expect(foreground).toContain(".padding(.leading, 18)");
+  expect(foreground).toContain(".padding(.bottom, 27)");
+  expect(foreground).toContain(".padding(.leading, 4)");
+  expect(foreground).toContain(".padding(.trailing, 10)");
+  expect(foreground).toContain(".padding(.bottom, 20)");
+  expect(foreground).not.toContain(".offset(");
+  expect(foreground).not.toContain("ZStack");
+  expect(foreground).not.toContain("state.positionX");
+});
+
 test("helper hint lays out arrow and body text in a natural horizontal stack", () => {
   const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
   const start = source.indexOf("private struct PermissionHelperDragHint:");
