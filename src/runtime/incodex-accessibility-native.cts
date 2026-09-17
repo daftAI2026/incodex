@@ -143,10 +143,10 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
   card.addSubview$(createPermissionCardBackground({ View, Material, kit, graphics, str, size: { width: 518, height: 80 }, dark }));
   contentGroup.addSubview$(card);
   card.addSubview$(imageView(permissionIcon, rect(8, 8, 64, 64)));
-  const permissionTitle = label(text("permissionTitle"), rect(84, 19, 330, 20), 16, false, false, false, true);
+  const permissionTitle = label(text("permissionTitle"), rect(82.5, 20.5, 330, 20), 16, false, false, false, true);
   permissionTitle.setFont$(kit.NSFont.systemFontOfSize$weight$(16, .3));
   card.addSubview$(permissionTitle);
-  card.addSubview$(label(text("permissionDescription"), rect(84, 42, 330, 18), 13, false, false, true, true));
+  card.addSubview$(label(text("permissionDescription"), rect(82.5, 42.5, 330, 18), 13, false, false, true, true));
   // Reference: DefaultButtonStyle -> continuous Capsule -> minWidth 62 -> x +4.
   const allowSurface = View.alloc().initWithFrame$(rect(440, 28, 62, 24));
   const allow = button(text("repair"), rect(0, 0, 62, 24), "allow:"); allow.setKeyEquivalent$(str("\r"));
