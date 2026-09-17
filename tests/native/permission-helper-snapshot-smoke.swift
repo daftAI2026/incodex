@@ -387,6 +387,10 @@ enum PermissionHelperSnapshotSmoke {
         precondition(helper.preferredContentSize == NSSize(width: 531, height: 110),
                      "utility panel titlebar changed helper fitting size: \(helper.preferredContentSize)")
         precondition(helper.appRowView === rowHost, "panel attachment replaced the drag host")
+        guard let attachedBox = firstNSBoxAncestor(of: rowHost) else { fatalError("attached row box missing") }
+        assertRect(attachedBox.convert(attachedBox.bounds, to: helper),
+                   NSRect(x: 62, y: 48, width: 459, height: 42), tolerance: 0.1,
+                   "utility shell preserves actual live row position")
         precondition(!panel.isVisible, "shell geometry validation must stay offscreen")
         panel.contentViewController = nil
         panel.close()

@@ -692,19 +692,21 @@ private struct PermissionHelperRoot: View {
             appRowContent: PermissionEmbeddedView(view: appRowBox, size: CGSize(width: 459, height: 42))
         )
         .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
-        }
     }
+}
+
+// The utility titlebar is transparent and its full-size content is already
+// laid out in window coordinates. Do not add a second titlebar inset when
+// AppKit asks the embedded SwiftUI host for its fitting size.
+private final class PermissionHelperHostingView: NSHostingView<PermissionHelperRoot> {
+    override var safeAreaInsets: NSEdgeInsets { NSEdgeInsets() }
 }
 
 @MainActor
 @objc(IncodexPermissionHelperView)
 public final class IncodexPermissionHelperView: NSView {
     private let state: PermissionHelperState
-    private let host: NSHostingView<PermissionHelperRoot>
+    private let host: PermissionHelperHostingView
     private let appRowHost: NSHostingView<PermissionHelperAppRowRoot>
     private let appRowBox: PermissionHelperRowBox
 
@@ -772,7 +774,7 @@ public final class IncodexPermissionHelperView: NSView {
         self.state = state
         self.appRowHost = appRowHost
         self.appRowBox = appRowBox
-        host = NSHostingView(rootView: PermissionHelperRoot(state: state, appRowBox: appRowBox))
+        host = PermissionHelperHostingView(rootView: PermissionHelperRoot(state: state, appRowBox: appRowBox))
         super.init(frame: frameRect)
         host.frame = bounds
         host.autoresizingMask = [.width, .height]

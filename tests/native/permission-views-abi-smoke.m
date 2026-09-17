@@ -57,7 +57,12 @@ static BOOL require_class(const char *name, Class *result) {
 }
 
 static BOOL hosting_view(NSView *view) {
-    return view != nil && [NSStringFromClass(view.class) containsString:@"NSHostingView"];
+    // A host may specialize AppKit geometry without replacing its SwiftUI
+    // renderer. Verify its actual superclass chain, not just the leaf name.
+    for (Class cls = view.class; cls != Nil; cls = class_getSuperclass(cls)) {
+        if ([NSStringFromClass(cls) containsString:@"NSHostingView"]) return YES;
+    }
+    return NO;
 }
 
 int main(int argc, const char *argv[]) {

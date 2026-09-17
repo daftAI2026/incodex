@@ -1,6 +1,15 @@
 import AppKit
 import SwiftUI
 
+private func isHostingView(_ view: NSView) -> Bool {
+    var candidate: AnyClass? = type(of: view)
+    while let current = candidate {
+        if NSStringFromClass(current).contains("NSHostingView") { return true }
+        candidate = class_getSuperclass(current)
+    }
+    return false
+}
+
 @MainActor
 private final class PermissionActionSink: NSObject {
     var allowCount = 0
@@ -16,7 +25,7 @@ enum PermissionViewsSmoke {
         precondition(NSStringFromClass(type(of: view)) == "IncodexPermissionFlightView")
         precondition(view.subviews.count == 1)
         let host = view.subviews[0]
-        precondition(String(describing: type(of: host)).contains("NSHostingView"))
+        precondition(isHostingView(host))
         let source = NSImage(size: NSSize(width: 518, height: 80))
         let target = NSImage(size: NSSize(width: 531, height: 110))
         view.setSourceImage(source, targetImage: target)
@@ -48,8 +57,8 @@ enum PermissionViewsSmoke {
         let initial = IncodexPermissionInitialView(frame: NSRect(x: 0, y: 0, width: 600, height: 340))
         initial.configure(copy: copy, appIcon: source, permissionIcon: target, actionTarget: nil)
         let initialHost = initial.subviews[0]
-        precondition(String(describing: type(of: initialHost)).contains("NSHostingView"))
-        precondition(String(describing: type(of: initial.permissionCardView)).contains("NSHostingView"))
+        precondition(isHostingView(initialHost))
+        precondition(isHostingView(initial.permissionCardView))
         precondition(initial.preferredContentSize.width == 600)
         precondition(initial.preferredContentSize.height >= 312)
         initial.setContent(title: "Error", body: "Retry after fixing permissions.", allowEnabled: false, settingsPlaceholder: true)
@@ -61,8 +70,8 @@ enum PermissionViewsSmoke {
         precondition(helper.preferredContentSize.width == 531)
         precondition(helper.preferredContentSize.height >= 110)
         precondition(helper.appRowFrame.size == NSSize(width: 459, height: 42))
-        precondition(String(describing: type(of: helper.appRowView)).contains("NSHostingView"))
-        precondition(String(describing: type(of: helper.subviews[0])).contains("NSHostingView"))
+        precondition(isHostingView(helper.appRowView))
+        precondition(isHostingView(helper.subviews[0]))
         // Routine checks must not repeatedly open a synthetic window on the
         // user's desktop. Keep actual Return behavior as an explicit UI run.
         guard ProcessInfo.processInfo.environment["INCODEX_RUN_NATIVE_LAYOUT_SMOKE"] == "1" else {

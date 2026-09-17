@@ -285,9 +285,12 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
     ), false);
   }
   function createHelper(frame) {
-    const panel = kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(frame,128,2,false); configurePanel(panel,true);
+    const panel = kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(frame,0x8091,2,false); configurePanel(panel,true);
     try {
-      panel.setOpaque$(false); panel.setBackgroundColor$(kit.NSColor.clearColor()); panel.setHasShadow$(true); panel.setIgnoresMouseEvents$(false);
+      panel.setOpaque$(false); panel.setBackgroundColor$(kit.NSColor.whiteColor().colorWithAlphaComponent$(.001)); panel.setHasShadow$(true); panel.setIgnoresMouseEvents$(false);
+      panel.setMovableByWindowBackground$(false); panel.setMovable$(false);
+      panel.setTitleVisibility$(1); panel.setTitlebarAppearsTransparent$(true); panel.setToolbarStyle$(3);
+      panel.setCollectionBehavior$(0x24a);
       const view = HelperView.alloc().initWithFrame$(rect(0, 0, HELPER_WIDTH, HELPER_HEIGHT));
       view.configureWithCopy$appIcon$actionTarget$(nativeCopy(), icon, delegate);
       const preferred = view.preferredContentSize();
@@ -296,7 +299,9 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
         throw new Error("Native permission helper has invalid preferred size");
       }
       view.setFrame$(rect(0, 0, fittedSize.width, fittedSize.height));
-      panel.setContentView$(view);
+      const controller = kit.NSViewController.alloc().init();
+      controller.setView$(view);
+      panel.setContentViewController$(controller);
       const rowFrame = view.appRowFrame();
       appRowView = view.appRowView();
       if (!appRowView || !rowFrame) throw new Error("Native permission helper row host is unavailable");
