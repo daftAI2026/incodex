@@ -318,6 +318,14 @@ test("host presentation retries follow real window events once and stop after cl
   expect(runs).toBe(4);
 });
 
+test("permission presentation excludes authentication routes on a trusted origin", () => {
+  const canPresent = (runtimeMain as any).canPresentAccessibilitySetup;
+  for (const path of ["/login", "/auth/login", "/oauth/authorize", "/signin"]) {
+    const win = makeBrowserWindow({ url: `https://chatgpt.com${path}` });
+    expect(canPresent(makeElectronWithWindows([win], win))).toBe(false);
+  }
+});
+
 describe("Accessibility setup controller", () => {
   test("marks a pending request granted silently when the actual host is trusted", async () => {
     const harness = makeHarness({ probes: [true] });
@@ -407,6 +415,30 @@ describe("Accessibility setup controller", () => {
     expect(harness.dialog.calls).toHaveLength(0);
     expect(harness.spawnCalls).toHaveLength(0);
     expect(harness.shell.opened).toHaveLength(0);
+  });
+
+  test("does not lose a presentation wake while native creation is in flight", async () => {
+    let release!: (value: null) => void;
+    const firstCreation = new Promise<null>((resolve) => { release = resolve; });
+    let creations = 0;
+    const harness = makeHarness({
+      probes: [false, false],
+      canPresent: () => true,
+      createSetupWindow: () => ++creations === 1
+        ? firstCreation
+        : { ...harness.panel, choice: Promise.resolve("later") },
+    });
+    const first = harness.controller.run();
+    await Promise.resolve();
+    expect(creations).toBe(1);
+    // The host regained presentation after the native factory decided to
+    // defer, but before the controller received that asynchronous result.
+    const wake = harness.controller.run();
+    release(null);
+    await Promise.all([first, wake]);
+    expect(creations).toBe(2);
+    expect(readMarker(harness.requestPath).state).toBe("deferred");
+    expect(harness.spawnCalls).toHaveLength(0);
   });
 
   test("records deferred and does not prompt again on an ordinary activation", async () => {
