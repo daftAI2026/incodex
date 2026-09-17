@@ -143,6 +143,11 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
     let app = resolve_target(parsed, &root);
     println!("{}", format_step("Uninstall", None));
     println!("{}", format_kv("App", &app.display().to_string(), None));
+    let renew_official_access =
+        parsed.app.is_none() && !parsed.clone && is_official_app(&app, None);
+    if renew_official_access {
+        println!("{}", format_kv("Accessibility", "Reopens the restored official app and checks access. If invalid, resets only ChatGPT's Accessibility registration and guides re-adding it in System Settings.", None));
+    }
     if parsed.dry_run {
         println!("{}", format_warn("Dry run. No files changed.", None));
         return Ok(());
@@ -172,8 +177,8 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
         "{}",
         format_ok(&format!("Uninstalled. {app_name} restored."), None)
     );
-    if official_default {
-        println!("{}", format_warn("Accessibility: the original signing identity was restored. Open ChatGPT and run incodex doctor to check its permission; file restoration alone does not verify it.", None));
+    if renew_official_access {
+        crate::accessibility_restore::finish_uninstall(&root, &app);
     }
     println!();
     Ok(())
