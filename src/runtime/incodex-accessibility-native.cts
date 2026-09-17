@@ -439,7 +439,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     if (next==="error" || next==="unknown") {
       clearInterval(tracking);tracking=null;stopArrow();flight?.dispose();flight=null;
       disposeHelper(); initial.setLevel$(3);
-      setInitialContent({ title: text("errorTitle"), body: text("errorBody"), allowEnabled: true, settingsPlaceholder: false });
+      setInitialContent({ title: text("errorTitle"), body: text("errorBody"), allowEnabled: false, settingsPlaceholder: false });
       card.setHidden$(false); fitInitialBody(); initial.orderFront$(null);
     }
   }
