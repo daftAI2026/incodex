@@ -32,8 +32,15 @@ test("Initial app icon requests high interpolation before SwiftUI resizes it", (
   );
 });
 
-test("Helper app icon requests high interpolation before SwiftUI resizes it", () => {
-  expect(appIconBranch("PermissionHelperAppRowRoot")).toMatch(
-    /Image\(nsImage: image\)\s*\.interpolation\(\.high\)\s*\.resizable\(\)/,
-  );
+test("Helper row uses the original intrinsic NSImage and primary text in a 4pt HStack", () => {
+  // ApplicationRowView conformance 0x10108AF08: resilient body witness at
+  // +0x40 resolves to 0x100EBCE98; builder 0x100EBCD4C is Image + Text.primary.
+  const branch = appIconBranch("PermissionHelperAppRowRoot");
+  expect(branch).toContain("Image(nsImage: image)");
+  expect(branch).not.toContain(".resizable()");
+  expect(branch).not.toContain(".aspectRatio(");
+  const root = rootSource("PermissionHelperAppRowRoot");
+  expect(root).toContain("HStack(alignment: .center, spacing: 4)");
+  expect(root).toContain(".foregroundStyle(.primary)");
+  expect(root).not.toContain(".font(.system(size: 13))");
 });

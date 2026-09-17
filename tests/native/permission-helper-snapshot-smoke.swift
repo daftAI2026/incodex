@@ -85,6 +85,14 @@ enum PermissionHelperSnapshotSmoke {
     static func main() {
         _ = NSApplication.shared
 
+        let sharedIcon = makeAppIcon()
+        sharedIcon.size = NSSize(width: 64, height: 64)
+        guard let rowIcon = permissionHelperAppIcon(sharedIcon) else { fatalError("missing helper icon") }
+        precondition(rowIcon !== sharedIcon, "helper must not resize the initial window's shared icon")
+        precondition(rowIcon.size == NSSize(width: 32, height: 32), "helper icon intrinsic size must be 32pt")
+        precondition(sharedIcon.size == NSSize(width: 64, height: 64), "shared initial icon size was mutated")
+        precondition(permissionHelperAppIcon(nil) == nil)
+
         let helper = IncodexPermissionHelperView(frame: NSRect(x: 0, y: 0, width: 531, height: 110))
         helper.appearance = NSAppearance(named: .aqua)
         helper.configure(copy: shortCopy, appIcon: makeAppIcon(), actionTarget: nil)
