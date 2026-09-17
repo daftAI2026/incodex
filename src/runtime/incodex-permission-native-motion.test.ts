@@ -196,6 +196,57 @@ function nativeMotionBridge(screenSpecs: Array<{ frame: Rect; scale: number }>) 
   };
 }
 
+function swiftUIFlightLibrary() {
+  const instances: any[] = [];
+  function copyRect(value: Rect): Rect {
+    return rect(value.origin.x, value.origin.y, value.size.width, value.size.height);
+  }
+  function makeView() {
+    const state: any = {
+      type: "IncodexPermissionFlightView",
+      frameValue: rect(0, 0, 0, 0),
+      calls: [] as Array<{ selector: string; args: any[] }>,
+      imagePair: null,
+    };
+    const view = new Proxy(state, {
+      get(target, property: string | symbol, receiver) {
+        if (property === "then") return undefined;
+        if (property in target) {
+          const value = target[property as keyof typeof target];
+          return typeof value === "function" ? value.bind(receiver) : value;
+        }
+        if (typeof property !== "string") return undefined;
+        return (...args: any[]) => {
+          target.calls.push({ selector: property, args });
+          if (property === "initWithFrame$") {
+            target.frameValue = copyRect(args[0]);
+            return receiver;
+          }
+          if (property === "setFrame$") {
+            target.frameValue = copyRect(args[0]);
+            return undefined;
+          }
+          if (property === "setFrameSize$") {
+            target.frameValue.size = { width: args[0].width, height: args[0].height };
+            return undefined;
+          }
+          if (property === "setSourceImage$targetImage$") {
+            target.imagePair = args;
+            return undefined;
+          }
+          return undefined;
+        };
+      },
+    });
+    instances.push(view);
+    return view;
+  }
+  return {
+    library: { IncodexPermissionFlightView: { alloc: makeView } },
+    instances,
+  };
+}
+
 function harness(reducedMotion = false, reverse = false) {
   let time = 0;
   let closed = false;
@@ -246,6 +297,64 @@ test("native Back is a new helper-to-card flight with forward decoration progres
   expect(h.frames.at(-1).bounds).toEqual({ x: 10, y: 400, width: 80, height: 28 });
   expect(h.frames.at(-1).sourceOpacity).toBe(0);
   expect(h.frames.at(-1).targetOpacity).toBe(1);
+});
+
+test("native flight forwards the injected SwiftUI library to its replicant factory", async () => {
+  const bridge = nativeMotionBridge([{ frame: rect(0, 0, 1440, 900), scale: 2 }]);
+  const nativeLibrary = { IncodexPermissionFlightView: {} };
+  let received: any;
+  const flight = runNativePermissionHandoff({
+    objc: bridge.objc,
+    nativeLibrary,
+    source: { frame: rect(10, 400, 80, 28), image: {} },
+    target: { frame: rect(300, 20, 532, 112), view: {} },
+    reducedMotion: false,
+    createReplicants: (options: any) => {
+      received = options;
+      return { render() {}, dispose() {} };
+    },
+  });
+  expect(received.nativeLibrary).toBe(nativeLibrary);
+  flight.dispose();
+  await flight.finished;
+});
+
+test("SwiftUI flight uses its public image/progress ABI instead of AppKit image simulation", () => {
+  const bridge = nativeMotionBridge([{ frame: rect(0, 0, 1440, 900), scale: 2 }]);
+  const swift = swiftUIFlightLibrary();
+  const sourceImage = { size: () => ({ width: 518, height: 80 }) };
+  const replicas = createNativeReplicants({
+    objc: bridge.objc,
+    nativeLibrary: swift.library,
+    source: { image: sourceImage },
+    target: { view: bridge.targetView(rect(0, 0, 531, 110)) },
+  });
+  let view: any;
+  try {
+    replicas.render({
+      bounds: { x: 100, y: 200, width: 526, height: 104 },
+      progress: .5,
+      cornerRadius: 18,
+      sourceOpacity: .5,
+      targetOpacity: .5,
+      sourceBlur: 6,
+      targetBlur: 6,
+    });
+    expect(swift.instances).toHaveLength(1);
+    view = swift.instances[0];
+    expect(view.calls.some((call: any) => call.selector === "setSourceImage$targetImage$")).toBe(true);
+    expect(view.calls.some((call: any) => call.selector === "updateProgress$cornerRadius$reduceTransparency$" &&
+      call.args[0] === .5 && call.args[1] === 18 && call.args[2] === false)).toBe(true);
+    expect(view.calls.some((call: any) => call.selector === "setFrame$")).toBe(true);
+    expect(bridge.objects.some((value) => ["NSVisualEffectView", "NSImageView", "CIFilter"].includes(value.type))).toBe(false);
+  } finally {
+    replicas.dispose();
+    if (view) {
+      const clear = view.calls.at(-1);
+      expect(clear?.selector).toBe("setSourceImage$targetImage$");
+      expect(clear?.args).toEqual([null, null]);
+    }
+  }
 });
 
 test("Back composites the outgoing helper below the incoming original card", () => {
