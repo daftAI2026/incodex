@@ -343,67 +343,59 @@ private struct PermissionInitialRoot: View {
     let cardHost: NSView
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            VStack(spacing: 0) {
-                if let image = state.appIcon {
-                    Image(nsImage: image)
-                        .interpolation(.high)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 64, height: 64)
-                        .padding(.top, 28)
-                } else {
-                    Color.clear.frame(width: 64, height: 64).padding(.top, 28)
-                }
-
-                Text(state.title)
-                    .font(.system(size: 26, weight: .bold))
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(width: 560)
-                    .padding(.top, 20)
-                    .offset(y: -11)
-
-                Text(state.body)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(width: 518)
-                    .padding(.top, 3)
-
-                ZStack {
-                    PermissionEmbeddedView(view: cardHost, size: CGSize(width: 518, height: 80))
-                    if state.settingsPlaceholder {
-                        Button { state.send("resumeSettings:") } label: {
-                            permissionPlaceholderText(state.completeInSettings)
-                        }
-                        .buttonStyle(PermissionPlaceholderButtonStyle(state: state))
-                    }
-                }
-                .frame(width: 518, height: 80)
-                .padding(.top, 21)
+        VStack(spacing: 0) {
+            if let image = state.appIcon {
+                Image(nsImage: image)
+                    .interpolation(.high)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 64, height: 64)
+                    .padding(.top, 28)
+            } else {
+                Color.clear.frame(width: 64, height: 64).padding(.top, 28)
             }
-            .frame(width: 600)
-            .offset(y: -9)
-            .padding(.bottom, 32)
 
-            VStack {
-                Spacer()
-                HStack {
-                    Spacer()
-                    if !state.settingsPlaceholder {
-                        Button(state.skip) { state.send("skip:") }
-                            .buttonStyle(.plain)
-                            .padding(.trailing, 57)
+            Text(state.title)
+                .font(.system(size: 26, weight: .bold))
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 560)
+                .padding(.top, 20)
+                .offset(y: -11)
+
+            Text(state.body)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 518)
+                .padding(.top, 3)
+
+            ZStack {
+                PermissionEmbeddedView(view: cardHost, size: CGSize(width: 518, height: 80))
+                if state.settingsPlaceholder {
+                    Button { state.send("resumeSettings:") } label: {
+                        permissionPlaceholderText(state.completeInSettings)
                     }
+                    .buttonStyle(PermissionPlaceholderButtonStyle(state: state))
                 }
-                .padding(.bottom, 12.5)
+            }
+            .frame(width: 518, height: 80)
+            .padding(.top, 21)
+        }
+        .frame(width: 600)
+        .offset(y: -9)
+        .padding(.bottom, 32)
+        .background(.regularMaterial)
+        .overlay(alignment: .bottomTrailing) {
+            if !state.settingsPlaceholder {
+                Button(state.skip) { state.send("skip:") }
+                    .buttonStyle(.plain)
+                    .frame(height: 41, alignment: .center)
+                    .padding(.trailing, 57)
             }
         }
-        .frame(minWidth: 600, idealWidth: 600, maxWidth: 600, minHeight: 312, alignment: .top)
-        .background(.regularMaterial)
         .environment(\.layoutDirection, state.layoutDirection)
     }
 }
@@ -420,7 +412,7 @@ public final class IncodexPermissionInitialView: NSView {
     @objc public var preferredContentSize: NSSize {
         precondition(Thread.isMainThread, "Permission layout must run on the main thread")
         let measured = host.fittingSize
-        return NSSize(width: 600, height: max(312, measured.height))
+        return NSSize(width: 600, height: measured.height)
     }
 
     public override var isFlipped: Bool { true }
@@ -468,6 +460,13 @@ public final class IncodexPermissionInitialView: NSView {
     ) {
         precondition(Thread.isMainThread, "Permission content must run on the main thread")
         state.setContent(title: title, body: body, allowEnabled: allowEnabled, settingsPlaceholder: settingsPlaceholder)
+        // The Runtime measures immediately after this selector returns. Reassign
+        // the same root value synchronously so a @Published update cannot leave
+        // fittingSize one body revision behind; cardHost remains the stable
+        // embedded NSHostingView used by the snapshot/placeholder bridge.
+        host.rootView = PermissionInitialRoot(state: state, cardHost: cardHost)
+        host.needsLayout = true
+        host.layoutSubtreeIfNeeded()
     }
 }
 

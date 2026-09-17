@@ -146,7 +146,7 @@ int main(int argc, const char *argv[]) {
         NSSize initialSizeValue = ((NSSize (*)(id, SEL))objc_msgSend)(initial, initialSize);
         if (!hosting_view(initialCardView)
             || initialSizeValue.width != 600
-            || initialSizeValue.height < 312
+            || initialSizeValue.height <= 0
             || initial.subviews.count == 0
             || !hosting_view(initial.subviews[0])) {
             return fail("initial card/host/size ABI contract failed");

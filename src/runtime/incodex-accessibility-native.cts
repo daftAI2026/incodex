@@ -182,7 +182,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
   const HELPER_ROW_Y = 48;
   const HELPER_ROW_WIDTH = 459;
   const HELPER_ROW_HEIGHT = 42;
-  const HELPER_ARROW_WINDOW_X = 31;
+  const HELPER_ARROW_WINDOW_X = 30;
   const HELPER_ARROW_WINDOW_Y = 60;
   const HELPER_ARROW_WINDOW_SIZE = 100;
   const HELPER_ARROW_GRAPHIC_SIZE = 28;

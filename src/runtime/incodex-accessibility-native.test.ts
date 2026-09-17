@@ -1046,7 +1046,7 @@ test("uses SwiftUI helper preferred size with AppKit drag and arrow geometry", a
       const size = panel.frame().size;
       return size.width === 100 && size.height === 100;
     });
-    expect(arrowWindow?.frame()).toEqual(frame(100, 100, 784, 185));
+    expect(arrowWindow?.frame()).toEqual(frame(100, 100, 783, 185));
     const arrow = bridge.objects.find((value) => value.type.includes("Arrow") && value.hasSelector("drawRect:"));
     expect(arrow?.frame()).toEqual(frame(28, 28, 36, 10));
   } finally {
@@ -1186,7 +1186,7 @@ test("uses SwiftUI preferred helper size for a wider localized instruction", asy
     });
     // Natural bottom-aligned helper content keeps the arrow's bottom anchor
     // stable when long copy increases the shell height.
-    expect(arrowWindow?.frame()).toEqual(frame(100, 100, 784, 185));
+    expect(arrowWindow?.frame()).toEqual(frame(100, 100, 783, 185));
   } finally {
     api.close();
   }
@@ -1316,7 +1316,7 @@ test("mirrors only the helper arrow child-window x in RTL and preserves LTR plac
       const size = panel.frame().size;
       return size.width === 100 && size.height === 100;
     });
-    expect(arrowWindow?.frame()).toEqual(frame(100, 100, 1153, 185));
+    expect(arrowWindow?.frame()).toEqual(frame(100, 100, 1154, 185));
   } finally {
     rtl.api.close();
   }
@@ -1329,7 +1329,7 @@ test("mirrors only the helper arrow child-window x in RTL and preserves LTR plac
       const size = panel.frame().size;
       return size.width === 100 && size.height === 100;
     });
-    expect(arrowWindow?.frame()).toEqual(frame(100, 100, 784, 185));
+    expect(arrowWindow?.frame()).toEqual(frame(100, 100, 783, 185));
   } finally {
     ltr.api.close();
   }

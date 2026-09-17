@@ -12,6 +12,10 @@ private func isHostingView(_ view: NSView) -> Bool {
 
 @MainActor
 private func laidOutCardFrame(_ view: IncodexPermissionInitialView) -> NSRect {
+    // Match the production fittingSize -> setContentSize handoff before
+    // inspecting child frames; leaving the constructor's 340pt frame would
+    // center two natural heights in a stale proposal and halve the delta.
+    view.setFrameSize(view.preferredContentSize)
     view.layoutSubtreeIfNeeded()
     for subview in view.subviews {
         subview.layoutSubtreeIfNeeded()
@@ -72,11 +76,11 @@ enum PermissionViewsSmoke {
         precondition(isHostingView(initialHost))
         precondition(isHostingView(initial.permissionCardView))
         precondition(initial.preferredContentSize.width == 600)
-        precondition(initial.preferredContentSize.height >= 312)
+        precondition(initial.preferredContentSize.height > 0)
 
         // The reference measures the body text naturally. A one-line localized
         // body therefore moves the card up by one body line (18pt), while the
-        // minimum outer height and the bottom-anchored Skip control stay put.
+        // natural window grows and the bottom-anchored Skip gap stays stable.
         // Keep this headless: these are two real NSHostingView trees, not a
         // source-string or mocked layout assertion.
         let shortCopy: NSDictionary = [
@@ -104,12 +108,18 @@ enum PermissionViewsSmoke {
         precondition(abs((longSize.height - shortSize.height) - 18) <= 1.0,
                      "natural window height did not grow by one body line: short=\(shortSize), long=\(longSize)")
         precondition(abs((longCard.minY - shortCard.minY) - 18) <= 1.0,
-                     "natural body line did not move card by 18pt: short=\(shortCard), long=\(longCard)")
+                     "natural body line did not move card by 18pt: short=\(shortSize)/\(shortCard), long=\(longSize)/\(longCard)")
         precondition(abs((shortSize.height - shortCard.maxY) - (longSize.height - longCard.maxY)) <= 1.0,
                      "bottom Skip/edge anchor did not retain its natural bottom gap: short=\(shortSize), shortCard=\(shortCard), long=\(longSize), longCard=\(longCard)")
 
-        // Reusing the same host must return to the one-line geometry rather
-        // than retaining the previous body's measured height.
+        // Reusing the same host must first enter the two-line geometry and then
+        // return to the one-line geometry rather than retaining either height.
+        shortInitial.setContent(title: "Enable ChatGPT scripting", body: "Allow Accessibility access.\nThis second line is intentional.", allowEnabled: true, settingsPlaceholder: false)
+        let transitionedLongSize = shortInitial.preferredContentSize
+        let transitionedLongCard = laidOutCardFrame(shortInitial)
+        precondition(abs(transitionedLongSize.height - longSize.height) <= 0.5
+                     && abs(transitionedLongCard.minY - longCard.minY) <= 0.5,
+                     "long-body geometry did not apply on state transition: expected=\(longSize)/\(longCard), actual=\(transitionedLongSize)/\(transitionedLongCard)")
         shortInitial.setContent(title: "Enable ChatGPT scripting", body: "允许 ChatGPT 访问辅助功能。", allowEnabled: true, settingsPlaceholder: false)
         let restoredSize = shortInitial.preferredContentSize
         let restoredCard = laidOutCardFrame(shortInitial)
