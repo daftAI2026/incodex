@@ -85,15 +85,16 @@ private func placeholderHovered(in view: IncodexPermissionInitialView) -> Bool? 
     return currentValues[0].value
 }
 
-private func sendMouseMoved(to point: NSPoint, window: NSWindow) {
-    guard let primary = NSScreen.screens.first else { exit(2) }
+private func sendMouseMoved(to point: NSPoint, window: NSWindow) -> Bool {
+    guard let primary = NSScreen.screens.first else { return false }
     let screenPoint = window.convertPoint(toScreen: point)
     let quartzPoint = CGPoint(x: screenPoint.x, y: primary.frame.maxY - screenPoint.y)
     guard let event = CGEvent(
         mouseEventSource: nil, mouseType: .mouseMoved,
         mouseCursorPosition: quartzPoint, mouseButton: .left,
-    ) else { exit(2) }
+    ) else { return false }
     event.post(tap: .cghidEventTap)
+    return true
 }
 
 private func ownPanelIsOnScreen(_ panel: NSPanel) -> Bool {
@@ -163,9 +164,26 @@ struct PermissionPlaceholderHoverSmoke {
         let outside = NSPoint(x: cardRect.minX - 20, y: cardRect.minY - 20)
         let center = NSPoint(x: cardRect.midX, y: cardRect.midY)
         report("HOVER_TARGET cardInWindow=\(cardRect) center=\(center) outside=\(outside)")
-        sendMouseMoved(to: outside, window: panel)
+        guard sendMouseMoved(to: outside, window: panel) else {
+            panel.orderOut(nil)
+            panel.close()
+            report("HOVER_PROBE_INVALID failed to post outside mouse event")
+            exit(2)
+        }
         pump(0.1)
-        sendMouseMoved(to: center, window: panel)
+        let beforeHover = placeholderHovered(in: view)
+        guard beforeHover == false else {
+            panel.orderOut(nil)
+            panel.close()
+            report("HOVER_PROBE_INVALID placeholder was not false after outside event")
+            exit(2)
+        }
+        guard sendMouseMoved(to: center, window: panel) else {
+            panel.orderOut(nil)
+            panel.close()
+            report("HOVER_PROBE_INVALID failed to post center mouse event")
+            exit(2)
+        }
         pump(0.2)
         let afterHover = placeholderHovered(in: view)
         guard afterHover == true else {
@@ -191,9 +209,26 @@ struct PermissionPlaceholderHoverSmoke {
             allowEnabled: true,
             settingsPlaceholder: true,
         )
-        sendMouseMoved(to: outside, window: panel)
+        guard sendMouseMoved(to: outside, window: panel) else {
+            panel.orderOut(nil)
+            panel.close()
+            report("HOVER_PROBE_INVALID failed to post second outside mouse event")
+            exit(2)
+        }
         pump(0.1)
-        sendMouseMoved(to: center, window: panel)
+        let secondBeforeHover = placeholderHovered(in: view)
+        guard secondBeforeHover == false else {
+            panel.orderOut(nil)
+            panel.close()
+            report("HOVER_PROBE_INVALID placeholder was not false before second hover")
+            exit(2)
+        }
+        guard sendMouseMoved(to: center, window: panel) else {
+            panel.orderOut(nil)
+            panel.close()
+            report("HOVER_PROBE_INVALID failed to post second center mouse event")
+            exit(2)
+        }
         pump(0.2)
         guard placeholderHovered(in: view) == true else {
             panel.orderOut(nil)
@@ -206,7 +241,7 @@ struct PermissionPlaceholderHoverSmoke {
         // stale hover before any re-display can generate a new onHover(true).
         let afterConfigure = placeholderHovered(in: view)
 
-        report("HOVER_RESET afterHover=\(String(describing: afterHover)) afterHide=\(String(describing: afterHide)) afterConfigure=\(String(describing: afterConfigure))")
+        report("HOVER_RESET beforeHover=\(String(describing: beforeHover)) afterHover=\(String(describing: afterHover)) afterHide=\(String(describing: afterHide)) afterConfigure=\(String(describing: afterConfigure))")
         panel.orderOut(nil)
         panel.close()
 
