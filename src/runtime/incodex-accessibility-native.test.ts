@@ -943,6 +943,16 @@ describe("native Accessibility setup adapter", () => {
     } finally { api.close(); }
   });
 
+  test("aligns permission row glyph origins with the original Retina capture", async () => {
+    // Identical Accessibility glyph masks align after (-3,+3) device pixels;
+    // the description aligns after (-3,+1), at 2x backing scale.
+    const { api, panel } = await makeHarness();
+    try {
+      expect(objectWithTitle(panel, COPY.permissionTitle)!.frame().origin).toEqual({ x: 82.5, y: 20.5 });
+      expect(objectWithTitle(panel, COPY.permissionDescription)!.frame().origin).toEqual({ x: 82.5, y: 42.5 });
+    } finally { api.close(); }
+  });
+
   test("composites initial labels inside the reference within-window material", async () => {
     // Real CUA and native rendering experiment: ordinary alpha-over labels
     // stay too dark. Vibrant labels must participate in the material subtree.
