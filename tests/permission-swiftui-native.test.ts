@@ -55,7 +55,9 @@ test("helper instruction uses the original semantic body font and matching nativ
   const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
   const start = source.indexOf("Text(state.styledInstruction)");
   expect(start).toBeGreaterThanOrEqual(0);
-  const instruction = source.slice(start, source.indexOf(".offset(x: 102", start));
+  const end = source.indexOf(".offset(", start);
+  expect(end).toBeGreaterThan(start);
+  const instruction = source.slice(start, end);
   // Original DragHintView: Font.body at 0x100EBD108, Text.font at
   // 0x100EBD120. A matching default 13pt value is not the same font API.
   expect(instruction).toContain(".font(.body)");
