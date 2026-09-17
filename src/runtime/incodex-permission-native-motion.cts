@@ -93,8 +93,8 @@ function createNativeReplicants({ objc, source, target, reverse = false }) {
       });
       // CUA's Material.regular is a live sibling below the image clip, not
       // part of either fading/blurred bitmap. Popover is an AppKit recipe
-      // approximation; behindWindow preserves its cross-window sampling on
-      // this transparent panel (withinWindow has no local backdrop to sample).
+      // approximation; behindWindow explicitly requests the cross-window
+      // backdrop needed by this transparent panel, not exact SwiftUI parity.
       const material = kit.NSVisualEffectView.alloc().initWithFrame$(rect(0, 0, 1, 1));
       material.setMaterial$(6); material.setBlendingMode$(0); material.setState$(1);
       material.setWantsLayer$(true);
