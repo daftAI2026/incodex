@@ -565,24 +565,24 @@ private final class PermissionHelperRowBox: NSBox {
 
 // SnapshotDraggableApplicationView has its own SwiftUI shape shell, not an
 // NSViewRepresentable. Keep it separate from the live NSBox; its exact shape
-// constants remain a reference-alignment item rather than borrowing NSBox.
+// constants are independently closed by the original snapshot body witness.
 private struct PermissionHelperSnapshotRow: View {
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var state: PermissionHelperState
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-            PermissionHelperAppRowRoot(state: state)
-                .frame(width: 449, height: 32, alignment: .leading)
-                .padding(5)
-        }
-        .frame(width: 459, height: 42)
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        let shape = RoundedRectangle(cornerRadius: 7, style: .continuous)
+        let fill = colorScheme == .dark ? Color.black.opacity(0.06) : Color.white.opacity(0.65)
+        let border = colorScheme == .dark ? Color(nsColor: .textColor).opacity(0.08)
+            : Color(nsColor: NSColor(srgbRed: 223 / 255, green: 221 / 255, blue: 227 / 255, alpha: 1))
+        shape.fill(fill)
+            .overlay { shape.stroke(border, lineWidth: 1) }
+            .overlay {
+                PermissionHelperAppRowRoot(state: state)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 5)
+            }
+            .frame(height: 42)
     }
 }
 
