@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { COPY, ACCESSIBILITY_SETUP_COPY, resolveLocale, translate } from "./runtime/incognito-copy.ts";
+import { resolveLocaleDirection } from "./runtime/incodex-locale.cts";
 
 describe("locale fallback", () => {
   test("empty and unknown values fall back to English", () => {
@@ -62,6 +63,16 @@ describe("locale fallback", () => {
     expect(resolveLocale("no")).toBe("nb-NO");
     expect(resolveLocale("pt")).toBe("pt-BR");
     expect(resolveLocale("en-GB")).toBe("en");
+  });
+
+  test("resolves native layout direction from the canonical locale", () => {
+    const catalog = ACCESSIBILITY_SETUP_COPY as Record<string, unknown>;
+    for (const locale of ["ar", "AR", "ar-SA", "ar_SA", "fa", "fa-IR", "ur", "ur-PK"]) {
+      expect(resolveLocaleDirection(locale, catalog), locale).toBe("rightToLeft");
+    }
+    for (const locale of ["", "en-US", "zh-Hant-HK", "de-DE", "xx-YY", "unknown"]) {
+      expect(resolveLocaleDirection(locale, catalog), locale).toBe("leftToRight");
+    }
   });
 
   test("regional locales keep the intentionally tight English body fallback", () => {

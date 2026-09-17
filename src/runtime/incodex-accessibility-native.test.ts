@@ -1101,6 +1101,7 @@ async function makeHarness(options: {
   helperInstructionWidth?: number;
   helperInstructionHeight?: number;
   nativeLibrary?: any;
+  layoutDirection?: "leftToRight" | "rightToLeft";
 } = {}) {
   const swift = options.nativeLibrary ? undefined : swiftPermissionViewsLibrary();
   const bridge = makeBridge(
@@ -1116,6 +1117,7 @@ async function makeHarness(options: {
     copy: options.copy ?? COPY,
     loadObjcModule: async () => bridge.objc,
     nativeLibrary: options.nativeLibrary ?? swift?.library,
+    layoutDirection: options.layoutDirection,
     locateSettings: options.locateSettings ?? (() => ({ x: 120, y: 140, width: 920, height: 700 })),
     onHandoff: options.onHandoff,
     onBack: options.onBack,
@@ -1127,6 +1129,57 @@ async function makeHarness(options: {
   if (!panel) throw new Error("native Accessibility panel was not created");
   return { api, bridge, panel, swift };
 }
+
+test("passes the selected native layout direction to initial and helper copy dictionaries", async () => {
+  const harness = await makeHarness({ layoutDirection: "rightToLeft" });
+  const { api, swift } = harness;
+  try {
+    const initialConfigure = swift!.calls.find(
+      (call) => call.selector === "configureWithCopy:appIcon:permissionIcon:actionTarget:",
+    );
+    const initialCopy = initialConfigure?.args[0] as FakeNative;
+    expect(initialCopy.values.get("layoutDirection")).toBe("rightToLeft");
+
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+    const helperConfigure = [...swift!.calls].reverse().find(
+      (call) => call.selector === "configureWithCopy:appIcon:actionTarget:",
+    );
+    const helperCopy = helperConfigure?.args[0] as FakeNative;
+    expect(helperCopy.values.get("layoutDirection")).toBe("rightToLeft");
+  } finally {
+    api.close();
+  }
+});
+
+test("mirrors only the helper arrow child-window x in RTL and preserves LTR placement", async () => {
+  const target = { x: 554, y: 160, width: 740, height: 625 };
+  const rtl = await makeHarness({ layoutDirection: "rightToLeft", locateSettings: () => target });
+  try {
+    rtl.api.setState("awaiting-user");
+    await flushNativeAsync();
+    const arrowWindow = helperPanels(rtl.bridge).find((panel) => {
+      const size = panel.frame().size;
+      return size.width === 100 && size.height === 100;
+    });
+    expect(arrowWindow?.frame()).toEqual(frame(100, 100, 1153, 185));
+  } finally {
+    rtl.api.close();
+  }
+
+  const ltr = await makeHarness({ layoutDirection: "leftToRight", locateSettings: () => target });
+  try {
+    ltr.api.setState("awaiting-user");
+    await flushNativeAsync();
+    const arrowWindow = helperPanels(ltr.bridge).find((panel) => {
+      const size = panel.frame().size;
+      return size.width === 100 && size.height === 100;
+    });
+    expect(arrowWindow?.frame()).toEqual(frame(100, 100, 784, 185));
+  } finally {
+    ltr.api.close();
+  }
+});
 
 describe("native Accessibility setup adapter", () => {
   test("initial panel uses the injected SwiftUI view ABI for copy, content and card access", async () => {

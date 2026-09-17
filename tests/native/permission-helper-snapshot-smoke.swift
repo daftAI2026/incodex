@@ -173,6 +173,31 @@ private func makeAppIcon() -> NSImage {
     return image
 }
 
+private func bluePixelXBounds(_ image: NSImage, top: Int, bottom: Int) -> ClosedRange<Int>? {
+    let rep = bitmapRep(image)
+    var minimum = rep.pixelsWide
+    var maximum = -1
+    for y in top..<min(bottom, rep.pixelsHigh) {
+        for x in 0..<rep.pixelsWide {
+            guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+            if color.alphaComponent > 0.5 && color.blueComponent > color.redComponent + 0.25 {
+                minimum = min(minimum, x)
+                maximum = max(maximum, x)
+            }
+        }
+    }
+    return maximum >= minimum ? minimum...maximum : nil
+}
+
+private func cacheImage(_ view: NSView) -> NSImage {
+    view.layoutSubtreeIfNeeded()
+    guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { fatalError("missing row bitmap") }
+    view.cacheDisplay(in: view.bounds, to: rep)
+    let image = NSImage(size: view.bounds.size)
+    image.addRepresentation(rep)
+    return image
+}
+
 @main
 enum PermissionHelperSnapshotSmoke {
     @MainActor
@@ -239,6 +264,40 @@ enum PermissionHelperSnapshotSmoke {
         }
         assertScale(shortAfterLong, scale: 2)
         precondition(helper.appRowView === rowHost, "long-to-short reconfiguration replaced the live drag row host")
+
+        let rtlCopy = shortCopy.mutableCopy() as! NSMutableDictionary
+        rtlCopy["layoutDirection"] = "rightToLeft"
+        helper.configure(copy: rtlCopy, appIcon: makeAppIcon(), actionTarget: nil)
+        helper.layoutSubtreeIfNeeded()
+        precondition(helper.appRowFrame.origin.x == 10, "RTL helper row did not mirror its outer frame")
+        precondition(helper.appRowView === rowHost, "RTL configuration replaced the drag host")
+        guard let rtlSnapshot = helper.snapshotImage(scale: 1),
+              let snapshotIcon = bluePixelXBounds(rtlSnapshot, top: 50, bottom: 90) else {
+            fatalError("RTL snapshot omitted the app icon")
+        }
+        precondition(snapshotIcon.lowerBound > 420 && snapshotIcon.upperBound < 470,
+                     "RTL snapshot icon did not move to the row's right edge: \(snapshotIcon)")
+        let liveRow = cacheImage(rowHost)
+        guard let liveIcon = bluePixelXBounds(liveRow, top: 0, bottom: bitmapRep(liveRow).pixelsHigh) else {
+            fatalError("RTL live row omitted the app icon")
+        }
+        let liveScale = CGFloat(bitmapRep(liveRow).pixelsWide) / liveRow.size.width
+        precondition(CGFloat(liveIcon.lowerBound) / liveScale > 410, "live NSBox content kept LTR ordering")
+
+        let initial = IncodexPermissionInitialView(frame: NSRect(x: 0, y: 0, width: 600, height: 344))
+        initial.configure(copy: rtlCopy, appIcon: nil, permissionIcon: makeAppIcon(), actionTarget: nil)
+        initial.layoutSubtreeIfNeeded()
+        let card = cacheImage(initial.permissionCardView)
+        guard let cardIcon = bluePixelXBounds(card, top: 0, bottom: bitmapRep(card).pixelsHigh) else {
+            fatalError("RTL permission card omitted its icon")
+        }
+        let cardScale = CGFloat(bitmapRep(card).pixelsWide) / card.size.width
+        precondition(CGFloat(cardIcon.lowerBound) / cardScale > 430, "separate permission card host kept LTR ordering")
+
+        helper.configure(copy: shortCopy, appIcon: makeAppIcon(), actionTarget: nil)
+        helper.layoutSubtreeIfNeeded()
+        precondition(helper.appRowFrame.origin.x == 62, "missing direction failed to reset RTL to LTR")
+        precondition(helper.appRowView === rowHost)
 
         for invalidScale in [CGFloat(0), -1, .nan, .infinity] {
             precondition(helper.snapshotImage(scale: invalidScale) == nil, "invalid scale was accepted: \(invalidScale)")
