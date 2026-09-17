@@ -118,6 +118,34 @@ class FakeNative {
     return this;
   }
 
+  configureWithCopy$appIcon$permissionIcon$actionTarget$(...args: unknown[]): unknown {
+    return this.invoke("configureWithCopy:appIcon:permissionIcon:actionTarget:", ...args);
+  }
+
+  configureWithCopy$appIcon$actionTarget$(...args: unknown[]): unknown {
+    return this.invoke("configureWithCopy:appIcon:actionTarget:", ...args);
+  }
+
+  setContentWithTitle$body$allowEnabled$settingsPlaceholder$(...args: unknown[]): unknown {
+    return this.invoke("setContentWithTitle:body:allowEnabled:settingsPlaceholder:", ...args);
+  }
+
+  preferredContentSize(): unknown {
+    return this.invoke("preferredContentSize");
+  }
+
+  permissionCardView(): unknown {
+    return this.invoke("permissionCardView");
+  }
+
+  appRowFrame(): unknown {
+    return this.invoke("appRowFrame");
+  }
+
+  appRowView(): unknown {
+    return this.invoke("appRowView");
+  }
+
   addRepresentation$(value: unknown): void {
     this.values.set("representation", value);
   }
@@ -826,6 +854,69 @@ function helperPanels(bridge: FakeBridge): FakeNative[] {
   return bridge.objects.filter((value) => value.type === "NSPanel" && value.values.get("styleMask") === 128);
 }
 
+function swiftPermissionViewsLibrary() {
+  const calls: NativeCall[] = [];
+  const initialViews: FakeNative[] = [];
+  const initialCards: FakeNative[] = [];
+  const helperViews: FakeNative[] = [];
+  const helperRows: FakeNative[] = [];
+
+  function initialClass() {
+    const card = new FakeNative("SwiftPermissionCardView", calls);
+    card.frameValue = frame(518, 80);
+    const view = new FakeNative("IncodexPermissionInitialView", calls, {
+      "configureWithCopy:appIcon:permissionIcon:actionTarget:": function (...args: unknown[]) {
+        this.record("configureWithCopy:appIcon:permissionIcon:actionTarget:", ...args);
+        this.values.set("copy", args[0]);
+        this.values.set("actionTarget", args[3]);
+      },
+      "setContentWithTitle:body:allowEnabled:settingsPlaceholder:": function (...args: unknown[]) {
+        this.record("setContentWithTitle:body:allowEnabled:settingsPlaceholder:", ...args);
+        this.values.set("content", args);
+      },
+      preferredContentSize: function () { return { width: 600, height: 340 }; },
+      permissionCardView: function () { return card; },
+    });
+    view.frameValue = frame(600, 340);
+    view.subviews.push(new FakeNative("NSHostingView<Initial>", calls));
+    initialCards.push(card);
+    initialViews.push(view);
+    return view;
+  }
+
+  function helperClass() {
+    const row = new FakeNative("SwiftPermissionAppRowView", calls);
+    row.frameValue = frame(459, 42);
+    const view = new FakeNative("IncodexPermissionHelperView", calls, {
+      "configureWithCopy:appIcon:actionTarget:": function (...args: unknown[]) {
+        this.record("configureWithCopy:appIcon:actionTarget:", ...args);
+        this.values.set("copy", args[0]);
+        this.values.set("actionTarget", args[2]);
+      },
+      preferredContentSize: function () { return { width: 531, height: 110 }; },
+      appRowFrame: function () { return frame(459, 42); },
+      appRowView: function () { return row; },
+    });
+    view.frameValue = frame(531, 110);
+    view.subviews.push(new FakeNative("NSHostingView<Helper>", calls));
+    helperRows.push(row);
+    helperViews.push(view);
+    return view;
+  }
+
+  return {
+    library: {
+      IncodexPermissionInitialView: { alloc: initialClass },
+      IncodexPermissionHelperView: { alloc: helperClass },
+    },
+    calls,
+    initialViews,
+    initialCards,
+    helperViews,
+    helperRows,
+  };
+}
+
 test("anchors the Accessibility helper to the Settings bottom and trailing edges", async () => {
   const clock = installPollingClock();
   let target = { x: 554, y: 160, width: 740, height: 625 };
@@ -985,6 +1076,7 @@ async function makeHarness(options: {
   helperFittingSize?: { width: number; height: number };
   helperInstructionWidth?: number;
   helperInstructionHeight?: number;
+  nativeLibrary?: any;
 } = {}) {
   const bridge = makeBridge(
     options.bodyHeight,
@@ -998,6 +1090,7 @@ async function makeHarness(options: {
     appPath: APP_PATH,
     copy: options.copy ?? COPY,
     loadObjcModule: async () => bridge.objc,
+    nativeLibrary: options.nativeLibrary,
     locateSettings: options.locateSettings ?? (() => ({ x: 120, y: 140, width: 920, height: 700 })),
     onHandoff: options.onHandoff,
     onBack: options.onBack,
@@ -1011,6 +1104,47 @@ async function makeHarness(options: {
 }
 
 describe("native Accessibility setup adapter", () => {
+  test("initial panel uses the injected SwiftUI view ABI for copy, content and card access", async () => {
+    const swift = swiftPermissionViewsLibrary();
+    const { api, panel } = await makeHarness({ nativeLibrary: swift.library });
+    try {
+      expect(swift.initialViews).toHaveLength(1);
+      const initial = swift.initialViews[0];
+      expect(panel.contentViewValue).toBe(initial);
+      const configure = swift.calls.find((call) => call.selector === "configureWithCopy:appIcon:permissionIcon:actionTarget:");
+      expect(configure).toBeDefined();
+      const content = swift.calls.find((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:");
+      expect(content?.args.slice(0, 2)).toEqual([COPY.title, COPY.body]);
+      expect(typeof content?.args[2]).toBe("boolean");
+      expect(typeof content?.args[3]).toBe("boolean");
+      expect(initial.preferredContentSize()).toEqual({ width: 600, height: 340 });
+      expect(initial.permissionCardView()).toBe(swift.initialCards[0]);
+    } finally {
+      api.close();
+    }
+  });
+
+  test("helper panel uses the injected SwiftUI view ABI for copy, row frame and row view", async () => {
+    const swift = swiftPermissionViewsLibrary();
+    const { api } = await makeHarness({
+      nativeLibrary: swift.library,
+      locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+    });
+    try {
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      expect(swift.helperViews).toHaveLength(1);
+      const helper = swift.helperViews[0];
+      const configure = swift.calls.find((call) => call.selector === "configureWithCopy:appIcon:actionTarget:");
+      expect(configure).toBeDefined();
+      expect(helper.preferredContentSize()).toEqual({ width: 531, height: 110 });
+      expect(helper.appRowFrame()).toEqual(frame(459, 42));
+      expect(helper.appRowView()).toBe(swift.helperRows[0]);
+    } finally {
+      api.close();
+    }
+  });
+
   test("uses the reference hierarchy in the initial AppKit panel with one centered icon and one permission card", async () => {
     const { panel } = await makeHarness();
     const tree = descendants(panel);
