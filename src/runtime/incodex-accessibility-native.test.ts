@@ -795,15 +795,56 @@ test("anchors the Accessibility helper to the Settings bottom and trailing edges
     api = harness.api;
     api.setState("awaiting-user");
     await settleNativeAsync();
-    const helper = helperPanels(harness.bridge).find((panel) => panel.frame().size.width === 532);
+    const helper = helperPanels(harness.bridge).find((panel) => panel.frame().size.width === 531);
     // The fake primary screen is 900pt high. CUA's Accessibility branch uses
     // maxX - fittingWidth - 10, primaryHeight - maxY + 10 (AppKit coordinates).
-    expect(helper?.frame()).toEqual(frame(532, 112, 752, 125));
+    expect(helper?.frame()).toEqual(frame(531, 110, 753, 125));
     target = { ...target, x: target.x - 80, y: target.y - 60 };
     clock.timers.find((timer) => timer.active && timer.delay === 100)?.callback();
     await settleNativeAsync();
-    expect(helper?.frame()).toEqual(frame(532, 112, 672, 185));
+    expect(helper?.frame()).toEqual(frame(531, 110, 673, 185));
   } finally { api?.close(); clock.restore(); }
+});
+
+test("matches the measured Accessibility helper and arrow geometry", async () => {
+  const { api, bridge } = await makeHarness({
+    locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+  });
+  try {
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+
+    const helper = helperPanels(bridge).find((panel) => {
+      const size = panel.frame().size;
+      return size.width === 531 && size.height === 110;
+    });
+    if (!helper) throw new Error("measured native Accessibility helper is missing");
+    expect(helper.frame()).toEqual(frame(531, 110, 753, 125));
+
+    const view = helper.contentViewValue;
+    if (!view) throw new Error("measured native Accessibility helper content is missing");
+    const back = view.subviews.find((value) => value.action === "later:");
+    const row = view.subviews.find((value) => value.hasSelector("mouseDown:"));
+    if (!back || !row) throw new Error("measured native Accessibility helper controls are missing");
+    expect(back.frame()).toEqual(frame(28, 28, 18, 55));
+    expect(row.frame()).toEqual(frame(459, 42, 62, 48));
+
+    const appRow = row.subviews.find((value) => value.type.includes("View"));
+    const icon = appRow?.subviews.find((value) => value.type === "NSImageView");
+    const appName = appRow?.subviews.find((value) => value.values.get("stringValue") === "ChatGPT");
+    expect(icon?.frame()).toEqual(frame(32, 32, 5, 5));
+    expect(appName?.frame()).toEqual(frame(145.5, 16, 41, 13));
+
+    const arrowWindow = helperPanels(bridge).find((panel) => {
+      const size = panel.frame().size;
+      return size.width === 100 && size.height === 100;
+    });
+    expect(arrowWindow?.frame()).toEqual(frame(100, 100, 784, 185));
+    const arrow = bridge.objects.find((value) => value.type.includes("Arrow") && value.hasSelector("drawRect:"));
+    expect(arrow?.frame()).toEqual(frame(28, 28, 36, 10));
+  } finally {
+    api.close();
+  }
 });
 
 async function makeHarness(options: {
@@ -970,7 +1011,7 @@ describe("native Accessibility setup adapter", () => {
     } finally { api.close(); }
   });
 
-  test("captures pending source geometry and native snapshot before entering the 532x112 helper", async () => {
+  test("captures pending source geometry and native snapshot before entering the 531x110 helper", async () => {
     const handoffs: any[] = [];
     const { api, bridge, panel } = await makeHarness({
       onHandoff: (payload) => handoffs.push(payload),
@@ -992,7 +1033,7 @@ describe("native Accessibility setup adapter", () => {
     // The transition must include the colored button background, not just its glyphs.
     expect(capture.subviews.some((view) => view.type === "NSButton" && view.values.get("bordered") === true)).toBe(true);
     expect(capture.subviews.some((view) => view.type === "NSButton")).toBe(true);
-    expect(handoffs[0].target.frame.size).toEqual({ width: 452, height: 44 });
+    expect(handoffs[0].target.frame.size).toEqual({ width: 459, height: 42 });
     expect(handoffs[0].target.radius).toBe(8);
     expect(handoffs[0].target.panel).toBeDefined();
     expect(handoffs[0].target.panel.contentViewValue.values.get("material")).toBe(6);
@@ -1056,7 +1097,7 @@ describe("native Accessibility setup adapter", () => {
       expect(reverses[0].reverse).toBe(true);
       expect(reverses[0].source.frame.size).toEqual({ width: 62, height: 24 });
       expect(reverses[0].source.image).toBeDefined();
-      expect(reverses[0].target.frame.size).toEqual({ width: 452, height: 44 });
+      expect(reverses[0].target.frame.size).toEqual({ width: 459, height: 42 });
       expect(api.isDestroyed()).toBe(false);
 
       const priorKeyCount = Number(panel.values.get("keyCount"));
@@ -1260,7 +1301,7 @@ describe("native Accessibility setup adapter", () => {
     api.setState("awaiting-user");
     await flushNativeAsync();
     const row = bridge.objects.find((value) => value.hasSelector("mouseDown:"));
-    const helper = helperPanels(bridge).find((value) => value.frame().size.width === 532);
+    const helper = helperPanels(bridge).find((value) => value.frame().size.width === 531);
     if (!row || !helper) throw new Error("native drag helper is missing");
 
     row.invoke("draggingSession:willBeginAtPoint:", { x: 0, y: 0 });
@@ -1275,7 +1316,7 @@ describe("native Accessibility setup adapter", () => {
     api.setState("awaiting-user");
     await flushNativeAsync();
     const row = bridge.objects.find((value) => value.hasSelector("mouseDown:"));
-    const helper = helperPanels(bridge).find((value) => value.frame().size.width === 532);
+    const helper = helperPanels(bridge).find((value) => value.frame().size.width === 531);
     const appRow = row?.subviews.find((value) => value.type.includes("View"));
     if (!row || !helper || !appRow) throw new Error("native drag helper is missing");
 
@@ -1426,7 +1467,7 @@ test("Settings tracking continues while the forward flight is still running", as
     await api.choice;
     api.setState("awaiting-user");
     await settleNativeAsync();
-    const helper = helperPanels(harness.bridge).find((panel) => panel.frame().size.width === 532);
+    const helper = helperPanels(harness.bridge).find((panel) => panel.frame().size.width === 531);
     expect(helper).toBeDefined();
     const before = helper?.frame().origin.x;
     x += 200;
