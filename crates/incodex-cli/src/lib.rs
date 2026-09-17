@@ -1,4 +1,4 @@
-#[cfg(all(test, not(target_os = "windows")))]
+#[cfg(not(target_os = "windows"))]
 mod accessibility_restore;
 #[cfg(not(target_os = "windows"))]
 mod accessibility_setup;

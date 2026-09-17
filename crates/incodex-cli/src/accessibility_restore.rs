@@ -14,8 +14,140 @@ trait RestoreOps {
     fn show_settings_and_app(&mut self) -> Result<(), String>;
     fn wait(&mut self, milliseconds: u64);
 }
-fn renew(_ops: &mut impl RestoreOps) -> Result<Outcome, String> {
+fn renew(ops: &mut impl RestoreOps) -> Result<Outcome, String> {
+    ops.verify_official()?;
+    ops.launch()?;
+    let mut ready = false;
+    for _ in 0..40 {
+        match ops.probe() {
+            AccessibilityStatus::Granted => return Ok(Outcome::Granted),
+            AccessibilityStatus::Denied => {
+                ready = true;
+                break;
+            }
+            AccessibilityStatus::Unknown => {
+                return Err(
+                    "The restored app's permission could not be verified; no reset was performed."
+                        .into(),
+                )
+            }
+            AccessibilityStatus::NotRunning => ops.wait(250),
+        }
+    }
+    if !ready {
+        return Err("The restored app did not start in time; no reset was performed.".into());
+    }
+    // Revalidate the restored identity immediately before deleting an invalid
+    // registration. The production caller holds the app's transaction lock.
+    ops.verify_official()?;
+    ops.reset()?;
+    ops.show_settings_and_app()?;
+    for _ in 0..160 {
+        match ops.probe() {
+            AccessibilityStatus::Granted => return Ok(Outcome::Granted),
+            AccessibilityStatus::Denied => ops.wait(750),
+            AccessibilityStatus::Unknown | AccessibilityStatus::NotRunning => {
+                return Ok(Outcome::Pending)
+            }
+        }
+    }
     Ok(Outcome::Pending)
+}
+
+pub(crate) fn finish_uninstall(root: &std::path::Path, app: &std::path::Path) {
+    use incodex_core::{format_kv, format_ok, format_warn};
+    println!(
+        "{}",
+        format_kv(
+            "Accessibility",
+            "Checking the restored official ChatGPT.",
+            None
+        )
+    );
+    let result = (|| {
+        let _lock =
+            incodex_transaction::acquire_target_lock(root, app, "uninstall-accessibility", None)?;
+        renew(&mut SystemOps { app })
+    })();
+    match result {
+        Ok(Outcome::Granted) => println!("{}", format_ok("Official ChatGPT Accessibility access verified.", None)),
+        Ok(Outcome::Pending) => println!("{}", format_warn("The app is restored, but Accessibility setup is unfinished. Add the selected ChatGPT in System Settings, then run incodex doctor.", None)),
+        Err(error) => println!("{}", format_warn(&format!("The app is restored, but Accessibility could not be renewed: {error}"), None)),
+    }
+}
+
+struct SystemOps<'a> {
+    app: &'a std::path::Path,
+}
+impl RestoreOps for SystemOps<'_> {
+    fn verify_official(&mut self) -> Result<(), String> {
+        incodex_macos::verify_original_vendor_bundle(
+            self.app,
+            Some(incodex_macos::OFFICIAL_BUNDLE_IDENTIFIER),
+            None,
+            None,
+        )
+        .map(|_| ())
+    }
+    fn launch(&mut self) -> Result<(), String> {
+        bounded_command(std::process::Command::new("/usr/bin/open").arg(self.app))
+    }
+    fn probe(&mut self) -> AccessibilityStatus {
+        incodex_macos::inspect_accessibility_for_app(self.app).status
+    }
+    fn reset(&mut self) -> Result<(), String> {
+        bounded_command(std::process::Command::new("/usr/bin/tccutil").args([
+            "reset",
+            "Accessibility",
+            incodex_macos::OFFICIAL_BUNDLE_IDENTIFIER,
+        ]))
+    }
+    fn show_settings_and_app(&mut self) -> Result<(), String> {
+        use incodex_core::format_kv;
+        bounded_command(
+            std::process::Command::new("/usr/bin/open").arg(
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+            ),
+        )?;
+        bounded_command(
+            std::process::Command::new("/usr/bin/open")
+                .arg("-R")
+                .arg(self.app),
+        )?;
+        println!("{}", format_kv("Accessibility", "Drag the selected ChatGPT from Finder into the Accessibility list. Complete any macOS authentication. Checking automatically for up to two minutes.", None));
+        Ok(())
+    }
+    fn wait(&mut self, milliseconds: u64) {
+        std::thread::sleep(std::time::Duration::from_millis(milliseconds));
+    }
+}
+
+fn bounded_command(command: &mut std::process::Command) -> Result<(), String> {
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+    let program = command.get_program().to_string_lossy().into_owned();
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|error| format!("{program}: {error}"))?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => return Ok(()),
+            Ok(Some(status)) => return Err(format!("{program} exited with {status}")),
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(25)),
+            result => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(match result {
+                    Err(error) => format!("{program}: {error}"),
+                    _ => format!("{program} timed out"),
+                });
+            }
+        }
+    }
 }
 
 #[cfg(test)]
