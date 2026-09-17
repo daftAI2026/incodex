@@ -287,7 +287,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
   function createHelper(frame) {
     const panel = kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(frame,128,2,false); configurePanel(panel,true);
     try {
-      panel.setOpaque$(false); panel.setBackgroundColor$(kit.NSColor.clearColor()); panel.setHasShadow$(false); panel.setIgnoresMouseEvents$(false);
+      panel.setOpaque$(false); panel.setBackgroundColor$(kit.NSColor.clearColor()); panel.setHasShadow$(true); panel.setIgnoresMouseEvents$(false);
       const view = HelperView.alloc().initWithFrame$(rect(0, 0, HELPER_WIDTH, HELPER_HEIGHT));
       view.configureWithCopy$appIcon$actionTarget$(nativeCopy(), icon, delegate);
       const preferred = view.preferredContentSize();

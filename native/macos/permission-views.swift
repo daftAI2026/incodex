@@ -600,12 +600,54 @@ private struct PermissionHelperSnapshotRow: View {
     }
 }
 
+// The approved custom glyph also participates in flight snapshots. The live
+// animated glyph remains in its separate AppKit panel, not this foreground.
+private struct PermissionSnapshotArrow: Shape {
+    func path(in rect: CGRect) -> Path {
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.minX + (2 + x * 24 / 256) * rect.width / 28,
+                    y: rect.minY + (2 + y * 24 / 256) * rect.height / 28)
+        }
+        var path = Path()
+        path.move(to: point(128, 20))
+        path.addLine(to: point(232, 116))
+        path.addCurve(to: point(232, 132), control1: point(238.25, 122.25), control2: point(238.25, 125.75))
+        path.addLine(to: point(200, 164))
+        path.addCurve(to: point(184, 164), control1: point(193.75, 170.25), control2: point(190.25, 170.25))
+        path.addLine(to: point(160, 140))
+        path.addLine(to: point(160, 224))
+        path.addCurve(to: point(152, 232), control1: point(160, 228.42), control2: point(156.42, 232))
+        path.addLine(to: point(104, 232))
+        path.addCurve(to: point(96, 224), control1: point(99.58, 232), control2: point(96, 228.42))
+        path.addLine(to: point(96, 140))
+        path.addLine(to: point(72, 164))
+        path.addCurve(to: point(56, 164), control1: point(65.75, 170.25), control2: point(62.25, 170.25))
+        path.addLine(to: point(24, 132))
+        path.addCurve(to: point(24, 116), control1: point(17.75, 125.75), control2: point(17.75, 122.25))
+        path.closeSubpath()
+        return path
+    }
+}
+
 private struct PermissionHelperForeground<Row: View>: View {
     @ObservedObject var state: PermissionHelperState
     let appRowContent: Row
+    var showHintArrow: Bool = false
 
     var body: some View {
         ZStack(alignment: .topLeading) {
+            PermissionSnapshotArrow()
+                .fill(Color(.sRGB, red: 0, green: 107 / 255, blue: 1, opacity: 1))
+                .overlay {
+                    PermissionSnapshotArrow().stroke(.white, style: StrokeStyle(lineWidth: 2, lineJoin: .round))
+                }
+                .frame(width: 28, height: 28)
+                .frame(width: 28, height: 32.5)
+                .opacity(showHintArrow ? 1 : 0)
+                .accessibilityHidden(true)
+                .allowsHitTesting(false)
+                .offset(x: state.positionX(66, width: 28), y: 8.5)
+
             Text(state.styledInstruction)
                 .font(.body)
                 .fixedSize(horizontal: false, vertical: true)
@@ -687,7 +729,7 @@ public final class IncodexPermissionHelperView: NSView {
         let colorScheme: ColorScheme = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
             ? .dark : .light
         let foreground = PermissionHelperForeground(
-            state: state, appRowContent: PermissionHelperSnapshotRow(state: state)
+            state: state, appRowContent: PermissionHelperSnapshotRow(state: state), showHintArrow: true
         ).environment(\.colorScheme, colorScheme)
 
         if #available(macOS 13.0, *) {
