@@ -138,6 +138,14 @@ class FakeNative {
     return frame(this.frameValue.size.width, this.frameValue.size.height);
   }
 
+  safeAreaInsets(): { top: number; left: number; bottom: number; right: number } {
+    return { top: Number(this.values.get("safeAreaTop") ?? 32), left: 0, bottom: 0, right: 0 };
+  }
+
+  fittingSize(): { width: number; height: number } {
+    return { width: 378, height: 30 };
+  }
+
   convertRect$toView$(value: Frame, _view: unknown): Frame {
     this.record("convertRect:toView:", value, _view);
     return copyFrame(value);
@@ -879,11 +887,11 @@ describe("native Accessibility setup adapter", () => {
   test("shifts the reference content group up nine points while retaining window sizing", async () => {
     const { api, panel } = await makeHarness({ bodyHeight: 32 });
     try {
-      const group = panel.contentView()?.subviews.find(value => value.frame().origin.y === -9);
+      const group = panel.contentView()?.subviews.find(value => value.frame().origin.y === 32 - 9);
       expect(group).toBeDefined();
       expect(group && descendants(group).some(value => value.values.get("stringValue") === COPY.title)).toBe(true);
       expect(panel.contentView()?.subviews[0].frame().origin.y).toBe(0);
-      expect(panel.frame().size.height).toBe(312);
+      expect(panel.frame().size.height).toBe(342);
     } finally { api.close(); }
   });
 
@@ -891,10 +899,10 @@ describe("native Accessibility setup adapter", () => {
     const { api, panel } = await makeHarness({ bodyHeight: 32 });
     try {
       expect(objectWithTitle(panel, COPY.title)?.frame().origin.y).toBe(101);
-      expect(objectWithTitle(panel, COPY.body)?.frame().origin.y).toBe(147);
+      expect(objectWithTitle(panel, COPY.body)?.frame().origin.y).toBe(145);
       const card = descendants(panel).find(value => value.frame().origin.x === 41 && value.frame().size.height === 80);
-      expect(card?.frame().origin.y).toBe(200);
-      expect(panel.frame().size.height).toBe(312);
+      expect(card?.frame().origin.y).toBe(198);
+      expect(panel.frame().size.height).toBe(342);
     } finally { api.close(); }
   });
 
@@ -905,11 +913,30 @@ describe("native Accessibility setup adapter", () => {
         const body = objectWithTitle(panel, COPY.body);
         const card = descendants(panel).find(value => value.frame().origin.x === 41 && value.frame().size.height === 80);
         expect(body?.frame().size.height).toBe(bodyHeight);
-        expect(card?.frame().origin.y).toBe(147 + bodyHeight + 21);
-        expect(panel.frame().size.height).toBe(147 + bodyHeight + 21 + 80 + 32);
+        expect(card?.frame().origin.y).toBe(145 + bodyHeight + 21);
+        expect(panel.frame().size.height).toBe(32 + 145 + bodyHeight + 21 + 80 + 32);
         expect(panel.contentView()?.frame().size).toEqual(panel.frame().size);
       } finally { api.close(); }
     }
+  });
+
+  test("matches the original on-screen header and first row after removing two unrequested permission rows", async () => {
+    // CUA build 1001067 on macOS 27: 600x540, 32pt top safe area,
+    // icon top 51, title top 124, body top 168, first row top 223.
+    // Its two extra 80pt rows each add 18pt spacing: 540 - 2 * 98 = 344.
+    const { api, panel } = await makeHarness({ bodyHeight: 34 });
+    try {
+      const group = panel.contentView()?.subviews[1];
+      if (!group) throw new Error("missing permission content group");
+      const icon = descendants(group).find(value => value.type === "NSImageView");
+      const card = descendants(group).find(value => value.frame().origin.x === 41 && value.frame().size.height === 80);
+      const top = group.frame().origin.y;
+      expect(top + icon!.frame().origin.y).toBe(51);
+      expect(top + objectWithTitle(panel, COPY.title)!.frame().origin.y).toBe(124);
+      expect(top + objectWithTitle(panel, COPY.body)!.frame().origin.y).toBe(168);
+      expect(top + card!.frame().origin.y).toBe(223);
+      expect(panel.frame().size).toEqual({ width: 600, height: 344 });
+    } finally { api.close(); }
   });
 
   test("captures pending source geometry and native snapshot before entering the 532x112 helper", async () => {
