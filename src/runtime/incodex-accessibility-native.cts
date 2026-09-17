@@ -164,14 +164,23 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     body.setAttributedStringValue$(attributed);
     const measured = Number(body.cell().cellSizeForBounds$(rect(0, 0, 518, 1000)).height);
     if (!Number.isFinite(measured) || measured <= 0) throw new Error("Permission text has invalid native bounds");
+    // NSHostingView includes the titled window's safe area. A plain NSView
+    // does not lay out inside it automatically; keep the system-provided inset.
+    const safeTop = Number(initialView.safeAreaInsets().top);
+    const titleHeight = Number(title.fittingSize().height);
+    if (!Number.isFinite(safeTop) || safeTop < 0 || !Number.isFinite(titleHeight) || titleHeight <= 0) {
+      throw new Error("Permission header has invalid native bounds");
+    }
     const bodyHeight = Math.ceil(measured);
-    const cardY = 147 + bodyHeight + 21;
-    const contentHeight = cardY + 80 + 32;
-    body.setFrame$(rect(41, 147, 518, bodyHeight));
+    const bodyY = 112 + titleHeight + 3;
+    const cardY = bodyY + bodyHeight + 21;
+    const contentHeight = safeTop + cardY + 80 + 32;
+    title.setFrame$(rect(20, 112 - 11, 560, titleHeight));
+    body.setFrame$(rect(41, bodyY, 518, bodyHeight));
     card.setFrame$(rect(41, cardY, 518, 80));
     initialView.setFrame$(rect(0, 0, 600, contentHeight));
     background.setFrame$(rect(0, 0, 600, contentHeight));
-    contentGroup.setFrame$(rect(0, -9, 600, contentHeight));
+    contentGroup.setFrame$(rect(0, safeTop - 9, 600, contentHeight - safeTop));
     initial.setContentSize$({ width: 600, height: contentHeight });
   }
   function captureSource() {
