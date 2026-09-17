@@ -629,13 +629,12 @@ private struct PermissionSnapshotArrow: Shape {
     }
 }
 
-private struct PermissionHelperForeground<Row: View>: View {
+private struct PermissionHelperDragHint: View {
     @ObservedObject var state: PermissionHelperState
-    let appRowContent: Row
-    var showHintArrow: Bool = false
+    let showHintArrow: Bool
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        HStack(alignment: .center, spacing: 8) {
             PermissionSnapshotArrow()
                 .fill(Color(.sRGB, red: 0, green: 107 / 255, blue: 1, opacity: 1))
                 .overlay {
@@ -647,14 +646,26 @@ private struct PermissionHelperForeground<Row: View>: View {
                 .opacity(showHintArrow ? 1 : 0)
                 .accessibilityHidden(true)
                 .allowsHitTesting(false)
-                .offset(x: state.positionX(66, width: 28), y: 8.5)
 
             Text(state.styledInstruction)
                 .font(.body)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(width: 408, alignment: .leading)
+        }
+    }
+}
+
+private struct PermissionHelperForeground<Row: View>: View {
+    @ObservedObject var state: PermissionHelperState
+    let appRowContent: Row
+    var showHintArrow: Bool = false
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            PermissionHelperDragHint(state: state, showHintArrow: showHintArrow)
+                // The container supplies the available width. Text and arrow
+                // negotiate it together, including their vertical centering.
+                .frame(width: 531 - 66 - 21, alignment: .leading)
                 .environment(\.layoutDirection, state.layoutDirection)
-                .offset(x: state.positionX(102, width: 408), y: 17)
+                .offset(x: state.positionX(66, width: 444), y: 8.5)
 
             appRowContent
                 .frame(width: 459, height: 42)
