@@ -1802,3 +1802,18 @@ test("helper instruction uses the reference body font rather than medium weight"
     expect(font.values.has("systemFontOfSize$weight$")).toBe(false);
   } finally {api.close();}
 });
+
+
+test("initial permission window yields to Settings while the helper remains above it", async () => {
+  const {api,bridge,panel}=await makeHarness({reduceMotion:true});
+  try {
+    expect(panel.values.get("level")).toBe(0);
+    objectWithTitle(panel,COPY.repair)!.performClick$();api.setState("awaiting-user");await flushNativeAsync();
+    const helper=helperPanels(bridge).find(v=>!v.destroyed)!;
+    expect(helper.values.get("level")).toBe(3);
+    const count=Number(panel.values.get("keyCount")||0);
+    bridge.objects.find(v=>v.action==="later:")!.performClick$();await flushNativeAsync();
+    expect(Number(panel.values.get("keyCount"))).toBeGreaterThan(count);
+    expect(panel.values.get("level")).toBe(0);
+  }finally{api.close();}
+});
