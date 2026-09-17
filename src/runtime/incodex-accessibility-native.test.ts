@@ -1335,6 +1335,43 @@ test("mirrors only the helper arrow child-window x in RTL and preserves LTR plac
   }
 });
 
+test("keeps the dynamic arrow glyph slot aligned with the SwiftUI helper slot in both directions", async () => {
+  const target = { x: 554, y: 160, width: 740, height: 625 };
+  const findArrowSlot = (bridge: FakeBridge, helper: FakeNative) => {
+    const arrowWindow = helperPanels(bridge).find((panel) => {
+      const size = panel.frame().size;
+      return size.width === 100 && size.height === 100;
+    });
+    const arrow = bridge.objects.find((value) => value.type.includes("Arrow") && value.hasSelector("drawRect:"));
+    if (!arrowWindow || !arrow) throw new Error("arrow shell is missing");
+    return arrowWindow.frame().origin.x + arrow.frame().origin.x - helper.frame().origin.x;
+  };
+
+  const rtl = await makeHarness({ layoutDirection: "rightToLeft", locateSettings: () => target });
+  try {
+    rtl.api.setState("awaiting-user");
+    await flushNativeAsync();
+    const helper = helperPanels(rtl.bridge).find((panel) => panel.frame().size.width === 531);
+    if (!helper) throw new Error("RTL helper panel is missing");
+    // PermissionHelperForeground's mirrored SwiftUI slot is x=437 in RTL.
+    expect(findArrowSlot(rtl.bridge, helper)).toBe(437);
+  } finally {
+    rtl.api.close();
+  }
+
+  const ltr = await makeHarness({ layoutDirection: "leftToRight", locateSettings: () => target });
+  try {
+    ltr.api.setState("awaiting-user");
+    await flushNativeAsync();
+    const helper = helperPanels(ltr.bridge).find((panel) => panel.frame().size.width === 531);
+    if (!helper) throw new Error("LTR helper panel is missing");
+    // PermissionHelperForeground's leading SwiftUI slot is x=66 in LTR.
+    expect(findArrowSlot(ltr.bridge, helper)).toBe(66);
+  } finally {
+    ltr.api.close();
+  }
+});
+
 describe("native Accessibility setup adapter", () => {
   test("initial panel uses the injected SwiftUI view ABI for copy, content and card access", async () => {
     const swift = swiftPermissionViewsLibrary();
