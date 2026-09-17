@@ -1262,6 +1262,36 @@ async function makeHarness(options: {
   return { api, bridge, panel, swift };
 }
 
+test("does not steal focus when presentation becomes unavailable during bridge loading", async () => {
+  const bridge = makeBridge();
+  const swift = swiftPermissionViewsLibrary();
+  let canPresent = true;
+  let release!: (value: any) => void;
+  const loading = new Promise<any>((resolve) => { release = resolve; });
+  let focusCalls = 0;
+  const pending = createNativeAccessibilitySetupWindow({
+    appPath: APP_PATH,
+    copy: COPY,
+    loadObjcModule: () => loading,
+    nativeLibrary: swift.library as any,
+    canPresent: () => canPresent,
+    electron: { app: { focus: () => { focusCalls++; } } },
+    locateSettings: () => null,
+    onBack: undefined,
+    onHandoff: undefined,
+  });
+  canPresent = false;
+  release(bridge.objc);
+  const api = await pending;
+  try {
+    expect(api).toBeNull();
+    expect(focusCalls).toBe(0);
+    expect(bridge.objects.filter((value) => value.type === "NSPanel")).toHaveLength(0);
+  } finally {
+    api?.close();
+  }
+});
+
 test("passes the selected native layout direction to initial and helper copy dictionaries", async () => {
   const harness = await makeHarness({ layoutDirection: "rightToLeft" });
   const { api, swift } = harness;
