@@ -2,12 +2,46 @@
 // Adapted from Cavalry-i18n e76175fe09d77b48f8e6306294db758b21325dda,
 // macos_permission_handoff.m / ui_review_permission_handoff_runtime.js (MIT).
 // Copyright (c) 2026 daftAI. See LICENSE for the permission notice.
+function createPermissionSpring() {
+  return { value: 0, target: 1, velocity: 0, force: 0, time: 0, settled: false };
+}
+function permissionSpringIsIdle({ value, target, velocity, force }) {
+  const velocitySquared = velocity * velocity, forceSquared = force * force;
+  // Preserve ordered comparisons, including the first-operand NaN behavior.
+  const metric = velocitySquared < forceSquared ? forceSquared : velocitySquared;
+  if (metric > .06 * .06) return false;
+  const tolerance = (target * .01) ** 2, distance = (target - value) ** 2;
+  return !(tolerance > 0) || !(distance > tolerance);
+}
+function advancePermissionSpring(state, targetTime) {
+  if (state.settled || !Number.isFinite(targetTime) || targetTime <= state.time) return state.value;
+  const dt = 1 / 240, halfStep = dt / 2;
+  const stiffness = Math.min((2 * Math.PI / .72) ** 2, 28800);
+  const drag = 2 * Math.sqrt(stiffness);
+  // A suspended display clock resumes with one frame, not seconds of catch-up.
+  if (targetTime - state.time > 1) state.time = targetTime - 1 / 60;
+  while (state.time < targetTime) {
+    const halfVelocity = state.velocity + state.force * halfStep;
+    state.value += halfVelocity * dt;
+    state.force = stiffness * (state.target - state.value) - drag * halfVelocity;
+    state.velocity = halfVelocity + state.force * halfStep;
+    state.time += dt;
+  }
+  if (permissionSpringIsIdle(state)) {
+    state.value = state.target;
+    state.settled = true;
+  }
+  return state.value;
+}
 function springPermissionProgress(seconds) {
-  const frequency = 2 * Math.PI / .72;
-  const elapsed = Math.max(0,seconds);
-  let p = 1 - (1 + frequency * elapsed) * Math.exp(-frequency * elapsed);
-  if (1 - p <= .001) p = 1;
-  return Math.max(0, Math.min(1, p));
+  const state = createPermissionSpring();
+  const elapsed = Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
+  // Stateless samples describe an uninterrupted display timeline. The live
+  // scheduler below instead retains state and applies the stall catch-up rule.
+  for (let time = 1 / 60; time < elapsed && !state.settled; time += 1 / 60) {
+    advancePermissionSpring(state, time);
+  }
+  return advancePermissionSpring(state, elapsed);
 }
 function samplePermissionFlightAtProgress(source, target, progress) {
   const p = Math.max(0, Math.min(1, Number(progress)));
@@ -27,11 +61,12 @@ function samplePermissionFlight(source, target, seconds) {
 function runPermissionFlight({source,target,reducedMotion,reverse=false,now,schedule,cancel,render,onComplete}) {
   let disposed=false,handle=null;
   const start=now();
+  const spring=createPermissionSpring();
   function frame() {
     if(disposed)return;
     if (reducedMotion && reverse) { disposed=true; handle=null; onComplete(); return; }
     const destination=typeof target === "function" ? target() : target;
-    const forward=springPermissionProgress(reducedMotion?3:(now()-start)/1000);
+    const forward=reducedMotion ? 1 : advancePermissionSpring(spring,(now()-start)/1000);
     const sample=samplePermissionFlightAtProgress(source,destination,reverse ? 1-forward : forward);
     render(sample);
     if(disposed)return;
@@ -47,4 +82,4 @@ function alignPermissionFrame(frame, scale) {
   const x = rounded(frame.x), y = rounded(frame.y);
   return { x, y, width: Math.max(0, rounded(frame.x + frame.width) - x), height: Math.max(0, rounded(frame.y + frame.height) - y) };
 }
-export {samplePermissionFlight,samplePermissionFlightAtProgress,runPermissionFlight,alignPermissionFrame};
+export {createPermissionSpring,advancePermissionSpring,permissionSpringIsIdle,samplePermissionFlight,samplePermissionFlightAtProgress,runPermissionFlight,alignPermissionFrame};
