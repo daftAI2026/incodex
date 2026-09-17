@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { ACCESSIBILITY_SETUP_COPY } from "../src/runtime/incognito-copy.ts";
 import { attachAccessibilityDragInstructionRuns } from "../src/runtime/incognito-accessibility-copy-runs.ts";
 
@@ -16,6 +18,12 @@ type PermissionCopy = {
 
 const guide = ACCESSIBILITY_SETUP_COPY as unknown as Record<string, PermissionCopy>;
 const locales = Object.keys(guide).sort();
+
+test("permission-only semantic copy is removed from the shared renderer bundle", () => {
+  const renderer = readFileSync(join(import.meta.dir, "..", "dist", "incodex-inject.js"), "utf8");
+  expect(renderer).not.toContain("ACCESSIBILITY_DRAG_INSTRUCTION_RUNS");
+  expect(renderer).not.toContain(" to the list above to allow ");
+});
 
 // Frozen from the pre-runs copy table. This protects the existing 65 plain
 // sentences independently of any same-source runs generated beside them.
