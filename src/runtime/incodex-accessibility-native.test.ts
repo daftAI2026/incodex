@@ -143,6 +143,13 @@ class FakeNative {
   }
 
   fittingSize(): { width: number; height: number } {
+    const configured = this.values.get("fittingSize");
+    if (configured && typeof configured === "object") {
+      const value = configured as { width?: unknown; height?: unknown };
+      if (typeof value.width === "number" && typeof value.height === "number") {
+        return { width: value.width, height: value.height };
+      }
+    }
     return { width: 378, height: 30 };
   }
 
@@ -575,13 +582,14 @@ type FakeBridge = {
   objects: FakeNative[];
 };
 
-function makeBridge(bodyHeight = 32): FakeBridge {
+function makeBridge(bodyHeight = 32, helperFittingSize = { width: 531, height: 110 }): FakeBridge {
   const calls: NativeCall[] = [];
   const objects: FakeNative[] = [];
   const definitions = new Map<string, Record<string, (...args: any[]) => unknown>>();
 
   function object(type: string, methods: Record<string, (...args: any[]) => unknown> = {}): FakeNative {
     const value = new FakeNative(type, calls, methods);
+    if (type.endsWith("_Material")) value.values.set("fittingSize", { ...helperFittingSize });
     objects.push(value);
     return value;
   }
@@ -847,6 +855,39 @@ test("matches the measured Accessibility helper and arrow geometry", async () =>
   }
 });
 
+test("uses the helper hosting view's fitting size instead of the English sample frame", async () => {
+  const { api, bridge } = await makeHarness({
+    helperFittingSize: { width: 600, height: 140 },
+    locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+  });
+  try {
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+
+    const helper = helperPanels(bridge).find((panel) => {
+      const size = panel.frame().size;
+      return size.width === 600 && size.height === 140;
+    });
+    expect(helper?.frame()).toEqual(frame(600, 140, 684, 125));
+    expect(helper?.contentViewValue?.frame()).toEqual(frame(600, 140));
+  } finally {
+    api.close();
+  }
+});
+
+test("keeps the initial permission window behind the helper during the forward handoff", async () => {
+  const { api, panel } = await makeHarness({
+    locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+  });
+  try {
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+    expect(panel.isVisible()).toBe(true);
+  } finally {
+    api.close();
+  }
+});
+
 async function makeHarness(options: {
   onHandoff?: (payload: any) => void;
   onBack?: (payload: any) => { finished?: Promise<unknown>; dispose?: () => void } | undefined;
@@ -854,8 +895,9 @@ async function makeHarness(options: {
   copy?: typeof COPY;
   reduceMotion?: boolean;
   bodyHeight?: number;
+  helperFittingSize?: { width: number; height: number };
 } = {}) {
-  const bridge = makeBridge(options.bodyHeight);
+  const bridge = makeBridge(options.bodyHeight, options.helperFittingSize);
   const api = await createNativeAccessibilitySetupWindow({
     appPath: APP_PATH,
     copy: options.copy ?? COPY,
