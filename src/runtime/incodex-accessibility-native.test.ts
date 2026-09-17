@@ -1427,6 +1427,30 @@ describe("native Accessibility setup adapter", () => {
     expect(arrayValues(item.values.get("types"))).toEqual(expect.arrayContaining(["public.file-url"]));
   });
 
+  test("converts the inner NSBox content bounds into the drag source coordinates", async () => {
+    const harness = await makeHarness();
+    const { api, bridge, swift } = harness;
+    try {
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      const source = bridge.objects.find(value => value.hasSelector("mouseDown:"));
+      const content = swift!.helperRows[0];
+      if (!source || !content) throw new Error("helper drag content is missing");
+      content.frameValue = frame(449, 30, 5, 6);
+      const conversions: unknown[][] = [];
+      content.convertRect$toView$ = (bounds, target) => {
+        conversions.push([bounds, target]);
+        return frame(449, 30, 5, 6);
+      };
+      source.invoke("mouseDown:", {});
+      const item = bridge.objects.find(value => value.type === "NSDraggingItem");
+      expect(conversions.length).toBe(1);
+      expect(conversions[0]?.[0]).toEqual(frame(449, 30));
+      expect(conversions[0]?.[1] === source).toBe(true);
+      expect(item?.values.get("draggingFrame")).toEqual(frame(449, 30, 5, 6));
+    } finally { api.close(); }
+  });
+
   test("passes localized Back label into native config", async () => {
     const harness = await makeHarness({ copy: { ...COPY, later: "稍後", back: "返回" } });
     const { api, swift } = harness;
