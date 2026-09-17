@@ -5,6 +5,8 @@ import { expect, test } from "bun:test";
 
 test("the published main embeds the native guide and its cancellable handoff", async () => {
   const filename = new URL("../../dist/incodex-main.cjs", import.meta.url);
+  const source = readFileSync(filename, "utf8");
+  expect(source).not.toMatch(/require\(["']\.\/incodex-permission-[^"']+\.cts["']\)/);
   const require = createRequire(filename);
   const api = runInNewContext(`${readFileSync(filename, "utf8")}\n;accessibilityWindow`, {
     require(name: string) {
