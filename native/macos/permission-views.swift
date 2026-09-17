@@ -304,6 +304,9 @@ private struct PermissionInitialRoot: View {
 
                 Text(state.title)
                     .font(.system(size: 26, weight: .bold))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(width: 560)
                     .padding(.top, 20)
                     .offset(y: -11)
 
