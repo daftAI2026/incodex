@@ -119,6 +119,16 @@ private func permissionCopyString(_ copy: NSDictionary, _ key: String) -> String
     return ""
 }
 
+private var permissionBackFill: Color {
+    if #available(macOS 14.0, *) {
+        return Color(nsColor: .tertiarySystemFill)
+    }
+    // The original semantic fill API is unavailable on macOS 12/13.
+    // Preserve the previous SwiftUI fill there; those OS versions do not
+    // claim pixel parity with the macOS 14+ reference.
+    return Color.primary.opacity(0.08)
+}
+
 @MainActor
 private final class PermissionInitialState: ObservableObject {
     @Published var title = ""
@@ -517,9 +527,10 @@ private struct PermissionHelperRoot: View {
 
             Button { state.send("later:") } label: {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary)
                     .frame(width: 28, height: 28)
-                    .background(Color.primary.opacity(0.08), in: Circle())
+                    .background(permissionBackFill, in: Circle())
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
