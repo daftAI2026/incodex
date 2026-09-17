@@ -400,7 +400,6 @@ class FakeNative {
 
   cell(): FakeNative { return this; }
   isHighlighted(): boolean { return Boolean(this.values.get("highlighted")); }
-  setAccessibilityLabel$(value: unknown): void { this.values.set("accessibilityLabel", value); }
   setAccessibilityElement$(value: unknown): void { this.values.set("accessibilityElement", value); }
 
   cellSizeForBounds$(value: Frame): { width: number; height: number } {
