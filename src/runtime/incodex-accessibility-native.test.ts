@@ -603,6 +603,7 @@ function makeBridge(
   helperInstructionWidth = 408,
   helperInstructionText = COPY.addedBody,
   titleHeight = 30,
+  helperInstructionHeight = 16,
 ): FakeBridge {
   const calls: NativeCall[] = [];
   const objects: FakeNative[] = [];
@@ -639,7 +640,8 @@ function makeBridge(
         field.setStringValue$(value);
         field.values.set("measuredHeight", String(value) === COPY.title || String(value) === COPY.errorTitle ? titleHeight : bodyHeight);
         if (String(value) === helperInstructionText) {
-          field.values.set("fittingSize", { width: helperInstructionWidth, height: 18 });
+          field.values.set("fittingSize", { width: helperInstructionWidth, height: helperInstructionHeight });
+          field.values.set("measuredHeight", helperInstructionHeight);
         }
         return field;
       },
@@ -885,7 +887,7 @@ test("matches the measured Accessibility helper and arrow geometry", async () =>
   }
 });
 
-test("uses the helper hosting view's fitting size instead of the English sample frame", async () => {
+test("keeps the reference fixed helper width despite an unrelated host fitting size", async () => {
   const { api, bridge } = await makeHarness({
     helperFittingSize: { width: 600, height: 140 },
     locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
@@ -896,38 +898,39 @@ test("uses the helper hosting view's fitting size instead of the English sample 
 
     const helper = helperPanels(bridge).find((panel) => {
       const size = panel.frame().size;
-      return size.width === 600 && size.height === 140;
+      return size.width === 531 && size.height === 110;
     });
-    expect(helper?.frame()).toEqual(frame(600, 140, 684, 125));
-    expect(helper?.contentViewValue?.frame()).toEqual(frame(600, 140));
+    expect(helper?.frame()).toEqual(frame(531, 110, 753, 125));
+    expect(helper?.contentViewValue?.frame()).toEqual(frame(531, 110));
   } finally {
     api.close();
   }
 });
 
-test("expands the helper row around a wider localized instruction", async () => {
+test("wraps a wider localized instruction without widening the reference helper", async () => {
   const { api, bridge } = await makeHarness({
     helperInstructionWidth: 520,
+    helperInstructionHeight: 32,
     locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
   });
   try {
     api.setState("awaiting-user");
     await flushNativeAsync();
 
-    const helper = helperPanels(bridge).find((panel) => panel.frame().size.width > 531);
+    const helper = helperPanels(bridge).find((panel) => panel.frame().size.height === 126);
     if (!helper) throw new Error("localized Accessibility helper is missing");
-    expect(helper.frame()).toEqual(frame(643, 110, 641, 125));
+    expect(helper.frame()).toEqual(frame(531, 126, 753, 125));
 
     const view = helper.contentViewValue;
     if (!view) throw new Error("localized Accessibility helper content is missing");
     const row = view.subviews.find((value) => value.hasSelector("mouseDown:"));
     const instruction = view.subviews.find((value) => value.values.get("stringValue") === COPY.addedBody);
     if (!row || !instruction) throw new Error("localized helper layout is missing");
-    expect(row.frame()).toEqual(frame(571, 42, 62, 48));
-    expect(instruction.frame()).toEqual(frame(520, 18, 102, 17));
+    expect(row.frame()).toEqual(frame(459, 42, 62, 64));
+    expect(instruction.frame()).toEqual(frame(412, 34, 100, 17));
 
     const appRow = row.subviews.find((value) => value.type.includes("View"));
-    expect(appRow?.frame()).toEqual(frame(571, 42));
+    expect(appRow?.frame()).toEqual(frame(459, 42));
     expect(appRow?.subviews.find((value) => value.type === "NSImageView")?.frame())
       .toEqual(frame(32, 32, 5, 5));
 
@@ -935,7 +938,7 @@ test("expands the helper row around a wider localized instruction", async () => 
       const size = panel.frame().size;
       return size.width === 100 && size.height === 100;
     });
-    expect(arrowWindow?.frame()).toEqual(frame(100, 100, 672, 185));
+    expect(arrowWindow?.frame()).toEqual(frame(100, 100, 784, 201));
   } finally {
     api.close();
   }
@@ -981,6 +984,7 @@ async function makeHarness(options: {
   titleHeight?: number;
   helperFittingSize?: { width: number; height: number };
   helperInstructionWidth?: number;
+  helperInstructionHeight?: number;
 } = {}) {
   const bridge = makeBridge(
     options.bodyHeight,
@@ -988,6 +992,7 @@ async function makeHarness(options: {
     options.helperInstructionWidth,
     options.copy?.addedBody ?? COPY.addedBody,
     options.titleHeight,
+    options.helperInstructionHeight,
   );
   const api = await createNativeAccessibilitySetupWindow({
     appPath: APP_PATH,
