@@ -1710,6 +1710,33 @@ test("Back keeps the reverse flight alive when Settings disappears", async () =>
 });
 
 
+test("Back retains the placeholder until the flying card has landed", async () => {
+  let finish!: () => void;
+  const finished = new Promise<void>(resolve => { finish = resolve; });
+  const { api, bridge, panel } = await makeHarness({ onBack: () => ({ finished, dispose() {} }) });
+  try {
+    const permissionTitle = objectWithTitle(panel, COPY.permissionTitle)!;
+    const card = descendants(panel).find(value => value.subviews.includes(permissionTitle))!;
+    const skip = bridge.objects.find(value => value.action === "skip:")!;
+    objectWithTitle(panel, COPY.repair)!.performClick$();
+    await api.choice;
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+    const placeholderTitle = objectWithTitle(panel, COPY.completeInSettings)!;
+    const placeholder = descendants(panel).find(value => value.subviews.includes(placeholderTitle))!;
+    bridge.objects.find(value => value.action === "later:")!.performClick$();
+    await settleNativeAsync();
+    expect(card.values.get("hidden")).toBe(true);
+    expect(placeholder.values.get("hidden")).toBe(false);
+    expect(skip.values.get("hidden")).toBe(true);
+    finish();
+    await settleNativeAsync();
+    expect(card.values.get("hidden")).toBe(false);
+    expect(placeholder.values.get("hidden")).toBe(true);
+    expect(skip.values.get("hidden")).toBe(false);
+  } finally { finish(); api.close(); }
+});
+
 test("handoff replaces the permission card with a placeholder and Back restores it", async () => {
   const { api, bridge, panel } = await makeHarness({ reduceMotion: true });
   try {
