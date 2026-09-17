@@ -19,7 +19,7 @@ fn runtime_root(user_root: &Path) -> PathBuf {
 }
 
 fn manifest_hash() -> String {
-    sha256_hex(manifest_source().as_bytes())
+    sha256_hex(&embedded_manifest_bytes().unwrap())
 }
 
 fn expected_new_release() -> String {
@@ -236,7 +236,9 @@ fn macos_native_binary_tamper_missing_and_symlink_are_rejected() {
     for label in ["tamper", "missing", "symlink"] {
         let root = scratch(&format!("macos-native-{label}"));
         publish(&root).unwrap();
-        let release = runtime_root(&root).join(expected_new_release());
+        let release = runtime_root(&root)
+            .join("releases")
+            .join(expected_new_release());
         let dylib = release.join(NATIVE_DYLIB_NAME);
         let current_before = fs::read(runtime_root(&root).join("current.json")).unwrap();
 
@@ -472,7 +474,10 @@ fn legacy_pointer_with_old_version_is_stale_even_when_files_match() {
     let root = scratch("legacy-version-stale");
     write_legacy_embedded_release(&root, "0.3.1", "0.3.1");
 
-    assert!(!deployed_current_matches_embedded(&root).unwrap());
+    assert!(!matches!(
+        deployed_current_matches_embedded(&root),
+        Ok(true)
+    ));
     ensure_current(&root).unwrap();
 
     let current = verify_current_complete(&root);
@@ -543,7 +548,7 @@ fn concurrent_publishers_share_one_complete_runtime() {
         .join(expected_new_release());
     assert_eq!(
         fs::read(final_release.join("runtime-manifest.json")).unwrap(),
-        manifest_source().as_bytes()
+        embedded_manifest_bytes().unwrap()
     );
     assert_eq!(
         fs::metadata(final_release.join("runtime-manifest.json"))
