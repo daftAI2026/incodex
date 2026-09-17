@@ -234,18 +234,36 @@ test("native flight preserves AppKit screen coordinates at both endpoints", asyn
   expect(h.pending.size).toBe(0);
 });
 
-test("native reverse flight keeps source and target images fixed while progress runs backward", async () => {
+test("native Back is a new helper-to-card flight with forward decoration progress", async () => {
   const h = harness(false, true);
-  expect(h.frames[0].progress).toBe(1);
+  expect(h.frames[0].progress).toBe(0);
   expect(h.frames[0].bounds).toEqual({ x: 300, y: 20, width: 532, height: 112 });
-  expect(h.frames[0].sourceOpacity).toBe(0);
-  expect(h.frames[0].targetOpacity).toBe(1);
+  expect(h.frames[0].sourceOpacity).toBe(1);
+  expect(h.frames[0].targetOpacity).toBe(0);
   h.advance(3000);
   await h.flight.finished;
-  expect(h.frames.at(-1).progress).toBe(0);
+  expect(h.frames.at(-1).progress).toBe(1);
   expect(h.frames.at(-1).bounds).toEqual({ x: 10, y: 400, width: 80, height: 28 });
-  expect(h.frames.at(-1).sourceOpacity).toBe(1);
-  expect(h.frames.at(-1).targetOpacity).toBe(0);
+  expect(h.frames.at(-1).sourceOpacity).toBe(0);
+  expect(h.frames.at(-1).targetOpacity).toBe(1);
+});
+
+test("Back composites the outgoing helper below the incoming original card", () => {
+  const bridge = nativeMotionBridge([{ frame: rect(0, 0, 1440, 900), scale: 2 }]);
+  const originalImage = { size: () => ({ width: 518, height: 80 }) };
+  const replicas = createNativeReplicants({ objc: bridge.objc,
+    source: { image: originalImage }, target: { view: bridge.targetView(rect(0, 0, 531, 126)) }, reverse: true });
+  try {
+    replicas.render({ bounds: { x: 100, y: 200, width: 526, height: 104 },
+      progress: .25, cornerRadius: 15, sourceOpacity: .75, targetOpacity: .25, sourceBlur: 3, targetBlur: 9 });
+    const images = bridge.objects.filter(value => value.type === "NSImageView");
+    expect(images[0].values.get("setImage$")).not.toBe(originalImage);
+    expect(images[1].values.get("setImage$")).toBe(originalImage);
+    expect(images.map(value => value.frameValue)).toEqual([
+      rect(-2.5, -11, 531, 126), rect(4, 12, 518, 80),
+    ]);
+    expect(images.map(value => value.values.get("setAlphaValue$"))).toEqual([.75, .25]);
+  } finally { replicas.dispose(); }
 });
 
 test("closing during native flight reaps panels and settles without late frames", async () => {
