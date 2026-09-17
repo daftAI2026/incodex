@@ -235,8 +235,8 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     initial.setContentSize$({ width: INITIAL_WIDTH, height: contentHeight });
   }
   function captureSource() {
-    return { frame: initial.convertRectToScreen$(allowSurface.convertRect$toView$(allowSurface.bounds(), null)),
-      image: snapshot(allowSurface), radius: Number(allow.frame().size.height) / 2 };
+    return { frame: initial.convertRectToScreen$(card.convertRect$toView$(card.bounds(), null)),
+      image: snapshot(card), radius: 24 };
   }
 
   // The original accessory is hosted by an NSHostingView and its window
@@ -452,13 +452,13 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
     returning = true; showSettingsPlaceholder(false); retryReady = false; const token = ++returnSequence;
     clearInterval(tracking); tracking = null; stopArrow();
     title.setStringValue$(str(text("title"))); body.setStringValue$(str(text("body"))); allow.setEnabled$(true); fitInitialBody(); initial.orderFront$(null);
-    if (reducedMotion() || !onBack || !helper.targetRow) { fallbackToInitial(); return; }
+    if (reducedMotion() || !onBack || !helper.flightTarget) { fallbackToInitial(); return; }
     let returnSource;
     try { returnSource = captureSource(); }
     catch { fallbackToInitial(); return; }
     let active;
     try {
-      active = onBack({ objc, source: returnSource, target: helper.targetRow, reverse: true, isClosed: () => closed });
+      active = onBack({ objc, source: returnSource, target: helper.flightTarget, reverse: true, isClosed: () => closed });
     } catch { fallbackToInitial(); return; }
     helper.panel.orderOut$(null); arrowPanel?.orderOut$(null);
     if (!active?.finished || typeof active.finished.then !== "function") { active?.dispose?.(); fallbackToInitial(); return; }
@@ -494,10 +494,10 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
         positionArrow(fittedFrame);
         helper=created;
         if (target && source) {
-          helper.targetRow = { panel: helper.panel, view: helper.row, radius: 8,
-            frame: helper.panel.convertRectToScreen$(helper.row.convertRect$toView$(helper.row.bounds(), null)) };
+          helper.flightTarget = { panel: helper.panel, view: helper.view, radius: 12,
+            frame: helper.panel.convertRectToScreen$(helper.view.bounds()) };
           if (onHandoff) {
-            const activeFlight=onHandoff({objc,source,target:helper.targetRow,isClosed:()=>closed});
+            const activeFlight=onHandoff({objc,source,target:helper.flightTarget,isClosed:()=>closed});
             flight=activeFlight;
             void Promise.resolve(activeFlight?.finished).then(() => {
               if (flight !== activeFlight || closed || returning) return;
@@ -511,7 +511,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, loadObjcMod
         } else revealHelper();
       } else if (!dragging) {
         helper.frame=frame; helper.panel.setFrame$display$(frame,false); positionArrow(frame);
-        if (helper.targetRow) helper.targetRow.frame = helper.panel.convertRectToScreen$(helper.row.convertRect$toView$(helper.row.bounds(), null));
+        if (helper.flightTarget) helper.flightTarget.frame = helper.panel.convertRectToScreen$(helper.view.bounds());
       }
     } catch (error) {
       if (!closed) setState("error");
