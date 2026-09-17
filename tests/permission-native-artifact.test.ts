@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { expect, test } from "bun:test";
 
 const repositoryRoot = join(import.meta.dir, "..");
@@ -11,6 +12,7 @@ const distRoot = join(nativeRoot, "dist");
 const dylibName = "incodex-permission-ui.dylib";
 const dylibPath = join(distRoot, dylibName);
 const manifestPath = join(distRoot, "runtime-native-manifest.json");
+const abiSmokeSource = join(repositoryRoot, "tests", "native", "permission-views-abi-smoke.m");
 
 type NativeManifest = {
   schemaVersion: number;
@@ -109,11 +111,55 @@ test.skipIf(process.platform !== "darwin")(
 
     const symbols = command("nm", ["-gU", dylibPath]);
     expect(symbols.status).toBe(0);
-    expect(symbols.output).toContain("IncodexPermissionFlightView");
+    for (const className of [
+      "IncodexPermissionFlightView",
+      "IncodexPermissionInitialView",
+      "IncodexPermissionHelperView",
+    ]) {
+      expect(symbols.output).toContain(className);
+    }
 
     const strings = command("strings", [dylibPath]);
     expect(strings.status).toBe(0);
     expect(strings.output).toContain("setSourceImage:targetImage:");
     expect(strings.output).toContain("updateProgress:cornerRadius:reduceTransparency:");
+    expect(strings.output).toContain("configureWithCopy:appIcon:permissionIcon:actionTarget:");
+    expect(strings.output).toContain("setContentWithTitle:body:allowEnabled:settingsPlaceholder:");
+    expect(strings.output).toContain("configureWithCopy:appIcon:actionTarget:");
   },
+);
+
+test.skipIf(process.platform !== "darwin")(
+  "loads the committed dylib and exercises its Objective-C ABI on the host architecture",
+  () => {
+    const directory = mkdtempSync(join(tmpdir(), "incodex-permission-abi-"));
+    try {
+      const architecture = process.arch === "arm64" ? "arm64" : process.arch === "x64" ? "x86_64" : "";
+      expect(architecture).not.toBe("");
+      if (!architecture) return;
+
+      const executable = join(directory, "permission-views-abi-smoke");
+      const build = command("/usr/bin/clang", [
+        "-arch", architecture,
+        "-fobjc-arc",
+        "-framework", "Cocoa",
+        abiSmokeSource,
+        "-o", executable,
+      ]);
+      expect(build.status, build.output).toBe(0);
+      if (build.status !== 0) return;
+
+      const run = spawnSync(executable, [dylibPath], {
+        cwd: repositoryRoot,
+        encoding: "utf8",
+        timeout: 30_000,
+      });
+      const output = `${run.stdout ?? ""}${run.stderr ?? ""}`;
+      expect(run.status, output || String(run.error ?? "Objective-C ABI smoke failed")).toBe(0);
+      expect(output).toContain("permission native Objective-C ABI smoke passed");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+  90_000,
 );
