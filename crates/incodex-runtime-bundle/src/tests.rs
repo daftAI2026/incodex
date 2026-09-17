@@ -26,6 +26,12 @@ fn expected_new_release() -> String {
     format!("{}-{}", runtime_version(), manifest_hash())
 }
 
+#[cfg(target_os = "macos")]
+const NATIVE_DYLIB_NAME: &str = "incodex-permission-ui.dylib";
+
+#[cfg(target_os = "macos")]
+const NATIVE_MANIFEST_NAME: &str = "runtime-native-manifest.json";
+
 fn write_legacy_embedded_release(user_root: &Path, release: &str, version: &str) {
     let root = runtime_root(user_root);
     let release_dir = root.join("releases").join(release);
@@ -162,6 +168,103 @@ fn runtime_identity_is_content_addressed_by_the_canonical_manifest() {
     let identity = runtime_identity().unwrap();
     assert_eq!(identity.version, runtime_version());
     assert_eq!(identity.manifest_sha256, manifest_hash());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_publish_contains_native_binary_and_merged_manifest_hashes() {
+    let root = scratch("macos-native-publish");
+    let published = publish(&root).unwrap();
+    let release = runtime_root(&root).join(&published.release);
+
+    assert!(required_runtime_files().any(|name| name == NATIVE_DYLIB_NAME));
+    assert!(required_runtime_files().any(|name| name == NATIVE_MANIFEST_NAME));
+
+    let dylib = fs::read(release.join(NATIVE_DYLIB_NAME)).unwrap();
+    assert!(
+        dylib.len() > 4,
+        "native helper must not be an empty placeholder"
+    );
+    let magic = u32::from_be_bytes(dylib[..4].try_into().unwrap());
+    assert!(
+        matches!(magic, 0xcafebabe | 0xcffaedfe | 0xfeedface | 0xfeedfacf),
+        "native helper is not a Mach-O binary: {magic:#x}"
+    );
+    let dylib_hash = sha256_hex(&dylib);
+
+    let native_manifest_bytes = fs::read(release.join(NATIVE_MANIFEST_NAME)).unwrap();
+    let native_manifest: serde_json::Value =
+        serde_json::from_slice(&native_manifest_bytes).unwrap();
+    assert_eq!(native_manifest["schemaVersion"], 1);
+    assert_eq!(native_manifest["platform"], "macos");
+    assert_eq!(native_manifest["abiVersion"], 1);
+    assert_eq!(native_manifest["minimumMacOS"], "12.0");
+    assert_eq!(
+        native_manifest["architectures"],
+        serde_json::json!(["arm64", "x86_64"])
+    );
+    assert_eq!(native_manifest["files"][NATIVE_DYLIB_NAME], dylib_hash);
+    assert!(is_sha256(native_manifest["sourceSha256"].as_str().unwrap()));
+
+    let merged_manifest_bytes = fs::read(release.join(MANIFEST_NAME)).unwrap();
+    let merged_manifest: serde_json::Value =
+        serde_json::from_slice(&merged_manifest_bytes).unwrap();
+    assert_eq!(
+        merged_manifest["files"][NATIVE_DYLIB_NAME],
+        serde_json::Value::String(dylib_hash)
+    );
+    assert_eq!(
+        merged_manifest["files"][NATIVE_MANIFEST_NAME],
+        serde_json::Value::String(sha256_hex(&native_manifest_bytes))
+    );
+
+    let current = read_current(&root);
+    assert_eq!(
+        current["manifestSha256"],
+        serde_json::Value::String(sha256_hex(&merged_manifest_bytes))
+    );
+    let mut merged_files = merged_manifest["files"].as_object().unwrap().clone();
+    assert!(merged_files.remove(LOADER_NAME).is_some());
+    assert_eq!(current["files"], serde_json::Value::Object(merged_files));
+    assert!(deployed_current_matches_embedded(&root).unwrap());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_native_binary_tamper_missing_and_symlink_are_rejected() {
+    for label in ["tamper", "missing", "symlink"] {
+        let root = scratch(&format!("macos-native-{label}"));
+        publish(&root).unwrap();
+        let release = runtime_root(&root).join(expected_new_release());
+        let dylib = release.join(NATIVE_DYLIB_NAME);
+        let current_before = fs::read(runtime_root(&root).join("current.json")).unwrap();
+
+        match label {
+            "tamper" => fs::write(&dylib, b"tampered native helper").unwrap(),
+            "missing" => fs::remove_file(&dylib).unwrap(),
+            "symlink" => {
+                fs::remove_file(&dylib).unwrap();
+                std::os::unix::fs::symlink("/tmp", &dylib).unwrap();
+            }
+            _ => unreachable!(),
+        }
+
+        assert!(
+            inspect_deployed(&root).is_err(),
+            "native {label} must invalidate inspection"
+        );
+        assert!(
+            ensure_current(&root).is_err(),
+            "native {label} must not be silently repaired in-place"
+        );
+        assert_eq!(
+            fs::read(runtime_root(&root).join("current.json")).unwrap(),
+            current_before,
+            "native {label} rejection must preserve the current pointer"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
 }
 
 #[test]
@@ -322,6 +425,7 @@ fn explicit_null_manifest_provenance_is_invalid_and_republished() {
     fs::remove_dir_all(root).unwrap();
 }
 
+#[cfg(not(target_os = "macos"))]
 #[test]
 fn legacy_pointer_with_matching_embedded_files_is_current_without_manifest_provenance() {
     let root = scratch("legacy-current");
@@ -338,6 +442,28 @@ fn legacy_pointer_with_matching_embedded_files_is_current_without_manifest_prove
         current_before,
         "matching legacy content must not be rewritten just because its pointer lacks a manifest hash"
     );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_text_only_legacy_pointer_is_stale_and_ensure_current_repairs_it() {
+    let root = scratch("macos-legacy-text-only");
+    write_legacy_embedded_release(&root, &runtime_version(), &runtime_version());
+
+    assert!(inspect_deployed(&root).is_err());
+    assert!(deployed_current_matches_embedded(&root).is_err());
+    ensure_current(&root).unwrap();
+
+    let current = verify_current_complete(&root);
+    assert_eq!(current["version"], runtime_version());
+    assert_eq!(current["manifestSha256"], manifest_hash());
+    let release = current["release"].as_str().unwrap();
+    assert!(runtime_root(&root)
+        .join(release)
+        .join(NATIVE_DYLIB_NAME)
+        .is_file());
+    assert!(deployed_current_matches_embedded(&root).unwrap());
     fs::remove_dir_all(root).unwrap();
 }
 
