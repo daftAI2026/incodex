@@ -325,7 +325,7 @@ test("a failed native foreground image must not silently fall back to the materi
 test("native flight preserves AppKit screen coordinates at both endpoints", async () => {
   const h = harness();
   expect(h.frames[0].bounds).toEqual({ x: 10, y: 400, width: 80, height: 28 });
-  h.advance(3000);
+  for (let tick = 0; tick < 180; tick++) h.advance(1000 / 60);
   await h.flight.finished;
   expect(h.frames.at(-1).bounds).toEqual({ x: 300, y: 20, width: 532, height: 112 });
   expect(h.frames.at(-1).targetOpacity).toBe(1);
@@ -339,7 +339,7 @@ test("native Back is a new helper-to-card flight with forward decoration progres
   expect(h.frames[0].bounds).toEqual({ x: 300, y: 20, width: 532, height: 112 });
   expect(h.frames[0].sourceOpacity).toBe(1);
   expect(h.frames[0].targetOpacity).toBe(0);
-  h.advance(3000);
+  for (let tick = 0; tick < 180; tick++) h.advance(1000 / 60);
   await h.flight.finished;
   expect(h.frames.at(-1).progress).toBe(1);
   expect(h.frames.at(-1).bounds).toEqual({ x: 10, y: 400, width: 80, height: 28 });

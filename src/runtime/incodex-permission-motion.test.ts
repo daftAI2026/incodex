@@ -1,7 +1,61 @@
 import { expect, test } from "bun:test";
 import { samplePermissionFlight, runPermissionFlight, alignPermissionFrame } from "./incodex-permission-motion.cts";
+import * as motion from "./incodex-permission-motion.cts";
 const source={x:100,y:100,width:100,height:40,radius:20};
 const target={x:600,y:500,width:532,height:112,radius:12};
+
+test("permission spring advances persistent velocity-Verlet state at 240Hz", () => {
+  const state = motion.createPermissionSpring();
+  Object.assign(state, { value: 0, velocity: 0, force: 0, time: 0 });
+  motion.advancePermissionSpring(state, 1 / 240);
+  expect(state.time).toBe(1 / 240);
+  expect(state.value).toBe(0);
+  expect(state.velocity).toBeCloseTo(0.15865490613891076, 13);
+  expect(state.force).toBeCloseTo(76.15435494667716, 12);
+  motion.advancePermissionSpring(state, 2 / 240);
+  expect(state.value).toBeCloseTo(0.0013221242178242563, 14);
+  expect(state.velocity).toBeCloseTo(0.4642172465623554, 13);
+  expect(state.force).toBeCloseTo(70.51556845657626, 12);
+});
+
+test("spring idle requires both squared velocity/force and relative target gates", () => {
+  const state = { value: 1, target: 1, velocity: 0, force: 0 };
+  expect(motion.permissionSpringIsIdle(state)).toBe(true);
+  expect(motion.permissionSpringIsIdle({ ...state, velocity: .061 })).toBe(false);
+  expect(motion.permissionSpringIsIdle({ ...state, force: .061 })).toBe(false);
+  expect(motion.permissionSpringIsIdle({ ...state, value: .98 })).toBe(false);
+  expect(motion.permissionSpringIsIdle({ ...state, value: .995 })).toBe(true);
+  expect(motion.permissionSpringIsIdle({ ...state, value: 1, target: 0 })).toBe(true);
+  expect(motion.permissionSpringIsIdle({ ...state, value: Number.NaN })).toBe(true);
+  expect(motion.permissionSpringIsIdle({ ...state, target: Number.NaN })).toBe(true);
+  // Swift.max preserves the first unordered operand; Math.max is not a substitute.
+  expect(motion.permissionSpringIsIdle({ ...state, velocity: 1, force: Number.NaN })).toBe(false);
+});
+
+test("spring caps stale catch-up time rather than snapping after a suspended frame", () => {
+  const state = motion.createPermissionSpring();
+  const progress = motion.advancePermissionSpring(state, 3);
+  expect(progress).toBeLessThan(.02);
+  expect(state.time).toBeGreaterThanOrEqual(3);
+  expect(state.time).toBeLessThan(3 + 1 / 240);
+  const prior = state.value;
+  motion.advancePermissionSpring(state, 2);
+  expect(state.value).toBe(prior);
+});
+
+test("scheduled flight does not complete when its next frame arrives three seconds late", () => {
+  let time = 0;
+  let pending: (() => void) | undefined;
+  let completed = 0;
+  const frames: any[] = [];
+  runPermissionFlight({ source, target, reducedMotion: false, now: () => time,
+    schedule: (callback: () => void) => { pending = callback; return 1; }, cancel: () => {},
+    render: (frame: any) => frames.push(frame), onComplete: () => completed++ });
+  time = 3000;
+  pending?.();
+  expect(completed).toBe(0);
+  expect(frames.at(-1).progress).toBeLessThan(.02);
+});
 test("Cavalry handoff begins at source and settles exactly at target",()=>{
   expect(samplePermissionFlight(source,target,0).bounds).toEqual({x:100,y:100,width:100,height:40});
   const final=samplePermissionFlight(source,target,3);
@@ -50,8 +104,7 @@ test("flight follows a moved Settings target instead of landing at its stale pos
     render: (frame: any) => frames.push(frame), onComplete: () => {} });
   liveTarget.x = 800;
   liveTarget.y = 600;
-  time = 3000;
-  pending.next?.();
+  for (let tick = 0; tick < 180; tick++) { time += 1000 / 60; pending.next?.(); }
   expect(frames.at(-1).bounds).toEqual({ x: 800, y: 600, width: 532, height: 112 });
 });
 
@@ -67,8 +120,7 @@ test("reverse flight starts at the helper and returns to the original source", (
   expect(frames[0].bounds).toEqual({ x: 600, y: 500, width: 532, height: 112 });
   expect(frames[0].sourceOpacity).toBe(0);
   expect(frames[0].targetOpacity).toBe(1);
-  time = 3000;
-  pending.next?.();
+  for (let tick = 0; tick < 180; tick++) { time += 1000 / 60; pending.next?.(); }
   expect(frames.at(-1).progress).toBe(0);
   expect(frames.at(-1).bounds).toEqual({ x: 100, y: 100, width: 100, height: 40 });
   expect(frames.at(-1).sourceOpacity).toBe(1);
