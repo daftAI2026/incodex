@@ -1790,3 +1790,15 @@ test("Settings placeholder is an actionable native button with pressed feedback 
     expect(retries).toBe(1);
   } finally {api.close();}
 });
+
+
+test("helper instruction uses the reference body font rather than medium weight", async () => {
+  const {api,bridge,panel}=await makeHarness({reduceMotion:true});
+  try {
+    objectWithTitle(panel,COPY.repair)!.performClick$();api.setState("awaiting-user");await flushNativeAsync();
+    const instruction=bridge.objects.find(v=>v.values.get("stringValue")===COPY.addedBody)!;
+    const font=instruction.values.get("font") as FakeNative;
+    expect(font.values.get("systemFontOfSize$")).toBe(13);
+    expect(font.values.has("systemFontOfSize$weight$")).toBe(false);
+  } finally {api.close();}
+});
