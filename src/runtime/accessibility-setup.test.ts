@@ -326,6 +326,32 @@ test("permission presentation excludes authentication routes on a trusted origin
   }
 });
 
+test("host closure does not read webContents after the native window is destroyed", () => {
+  const observe = (runtimeMain as any).observeAccessibilityPresentationWindow;
+  const contents = new EventEmitter();
+  const win = new EventEmitter();
+  let destroyed = false;
+  Object.defineProperty(win, "webContents", {
+    get() {
+      if (destroyed) throw new TypeError("Object has been destroyed");
+      return contents;
+    },
+  });
+  let runs = 0;
+  observe(win, { run: async () => { runs++; } });
+  contents.emit("did-finish-load");
+  expect(runs).toBe(1);
+  destroyed = true;
+  expect(() => win.emit("closed")).not.toThrow();
+  expect(contents.listenerCount("did-finish-load")).toBe(0);
+  for (const event of ["show", "ready-to-show", "restore"]) {
+    expect(win.listenerCount(event)).toBe(0);
+    win.emit(event);
+  }
+  contents.emit("did-finish-load");
+  expect(runs).toBe(1);
+});
+
 describe("Accessibility setup controller", () => {
   test("marks a pending request granted silently when the actual host is trusted", async () => {
     const harness = makeHarness({ probes: [true] });
