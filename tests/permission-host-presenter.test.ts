@@ -68,6 +68,10 @@ enum PermissionHostPresenterSmoke {
                 ?? NSImage(systemSymbolName: "accessibility", accessibilityDescription: "Accessibility")
             let actual = permissionHostPermissionIcon(title: "Accessibility")
             precondition(actual != nil && expected != nil && actual?.tiffRepresentation == expected?.tiffRepresentation)
+            let expectedApp = NSImage(contentsOfFile: "/Applications/ChatGPT.app/Contents/Resources/icon-chatgpt.png")
+            let actualApp = permissionHostAppIcon()
+            precondition((actualApp == nil) == (expectedApp == nil))
+            precondition(actualApp?.tiffRepresentation == expectedApp?.tiffRepresentation)
             print("native-icon-source-preserved")
             return
         }
