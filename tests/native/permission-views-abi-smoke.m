@@ -205,6 +205,9 @@ int main(int argc, const char *argv[]) {
             NSMakeRect(36, 10, 28, 28)
         );
         if (arrow == nil) return fail("SwiftUI arrow init failed");
+        if (arrow.clipsToBounds || (arrow.layer != nil && arrow.layer.masksToBounds)) {
+            return fail("SwiftUI arrow clips animated overflow");
+        }
         ((void (*)(id, SEL, double, double))objc_msgSend)(arrow, arrowAnimate, 1.15, 1.6);
         if (arrow.subviews.count == 0 || !hosting_view(arrow.subviews[0])) {
             return fail("SwiftUI arrow does not retain a hosting view");
