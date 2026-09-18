@@ -73,7 +73,7 @@ function runPermissionFlight({source,target,reducedMotion,reverse=false,now,sche
   render: (frame: any) => void;
   onComplete: () => void;
 }) {
-  let disposed=false,handle=null,frameSourceStarted=false,useTimer=false,displayOrigin=null;
+  let disposed=false,handle=null,frameSourceStarted=false,useTimer=false,displayOrigin=null,lastDisplayTimestamp=null;
   const start=now();
   const spring=createPermissionSpring();
   function stopFrameSource() {
@@ -100,12 +100,20 @@ function runPermissionFlight({source,target,reducedMotion,reverse=false,now,sche
     if(disposed)return;
     if (reducedMotion && reverse) { complete(); return; }
     if (displayTimestamp !== undefined && !Number.isFinite(displayTimestamp)) return;
-    const destination=typeof target === "function" ? target() : target;
     let elapsed=(now()-start)/1000;
     if (typeof displayTimestamp === "number") {
-      if (displayOrigin === null) displayOrigin=displayTimestamp;
-      elapsed=Math.max(0,displayTimestamp-displayOrigin);
+      // The first display tick establishes the source clock; it does not
+      // advance or render. Duplicate/older ticks likewise leave state alone.
+      if (displayOrigin === null) {
+        displayOrigin=displayTimestamp;
+        lastDisplayTimestamp=displayTimestamp;
+        return;
+      }
+      if (displayTimestamp <= lastDisplayTimestamp) return;
+      lastDisplayTimestamp=displayTimestamp;
+      elapsed=displayTimestamp-displayOrigin;
     }
+    const destination=typeof target === "function" ? target() : target;
     const forward=reducedMotion ? 1 : advancePermissionSpring(spring,elapsed);
     const sample=samplePermissionFlightAtProgress(source,destination,reverse ? 1-forward : forward);
     render(sample);
