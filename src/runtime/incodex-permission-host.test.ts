@@ -72,7 +72,7 @@ function makeHost(options: {
   lines: unknown[];
   stdin?: Readable;
   guide?: FakeGuide;
-  createGuide?: (options: Record<string, unknown>) => Promise<FakeGuide>;
+  createGuide?: (options: Record<string, unknown>) => Promise<FakeGuide | null>;
   native?: Record<string, unknown>;
   appPath?: string;
   runtime?: Record<string, unknown>;
@@ -105,6 +105,16 @@ function makeHost(options: {
     runtime: options.runtime,
   });
   return { host, guide, stdout, nativeCalls };
+}
+
+async function waitForReadyOrError(stdout: { lines: string[] }): Promise<"ready" | "error"> {
+  const ready = JSON.stringify({ nonce: NONCE, type: "ready" });
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (stdout.lines.includes(ready)) return "ready";
+    if (stdout.lines.some((line) => line.includes('"type":"error"'))) return "error";
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  return "error";
 }
 
 function appKitRuntimeFixture(runningApplications: Array<Record<string, unknown>>, frontmostApplication: Record<string, unknown>) {
@@ -492,6 +502,79 @@ describe("one-shot native permission host protocol", () => {
       expect(stdout.lines).toEqual([]);
       expect(guide.closeCalls).toBe(0);
     }
+  });
+
+  test("retries a transient null native guide within one presentation deadline", async () => {
+    const stdin = new PassThrough();
+    const guide = fakeGuide();
+    let createCalls = 0;
+    const { host, stdout } = makeHost({
+      lines: [],
+      stdin,
+      guide,
+      presentationTimeoutMs: 100,
+      createGuide: async () => {
+        createCalls += 1;
+        return createCalls === 1 ? null : guide;
+      },
+    });
+    const running = host.run();
+    const outcome = await waitForReadyOrError(stdout);
+    if (outcome === "ready") {
+      guide.resolveChoice("later");
+      stdin.end();
+    } else {
+      host.close();
+      stdin.end();
+    }
+    await running;
+
+    expect(outcome).toBe("ready");
+    expect(createCalls).toBe(2);
+    expect(stdout.lines).toContain(JSON.stringify({ nonce: NONCE, type: "ready" }));
+    expect(stdout.lines).not.toContain(expect.stringContaining('"type":"error"'));
+  });
+
+  test("bounds a permanently unavailable native guide instead of spinning forever", async () => {
+    const stdin = new PassThrough();
+    let createCalls = 0;
+    const { host, stdout } = makeHost({
+      lines: [],
+      stdin,
+      presentationTimeoutMs: 40,
+      createGuide: async () => {
+        createCalls += 1;
+        return null;
+      },
+    });
+    await expect(host.run()).rejects.toThrow();
+    stdin.end();
+
+    expect(createCalls).toBeGreaterThan(1);
+    expect(stdout.lines.at(-1)).toMatch(/"type":"error"/);
+  });
+
+  test("EOF during a null-guide retry prevents a later guide from being created", async () => {
+    const stdin = new PassThrough();
+    const guide = fakeGuide();
+    let createCalls = 0;
+    const { host, stdout } = makeHost({
+      lines: [],
+      stdin,
+      guide,
+      presentationTimeoutMs: 100,
+      createGuide: async () => {
+        createCalls += 1;
+        setTimeout(() => stdin.end(), 0);
+        return null;
+      },
+    });
+
+    await host.run();
+
+    expect(createCalls).toBe(1);
+    expect(stdout.lines).toEqual([]);
+    expect(guide.closeCalls).toBe(0);
   });
 
   test("does not allow a custom app path to become the drag/TCC target", () => {
