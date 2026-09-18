@@ -709,6 +709,79 @@ describe("single-window Accessibility setup", () => {
     expect(h.timerActive()).toBe(false);
   });
 
+  test("recovers a crashed awaiting request without resetting and reopens Settings only after Allow", async () => {
+    let canPresent = false;
+    const h = makeHarness({
+      marker: { state: "awaiting-user" },
+      probes: [false, false, false],
+      canPresent: () => canPresent,
+      createSetupWindow: () => ({ ...h.panel, choice: new Promise(() => {}) }),
+    });
+
+    await h.controller.run();
+    expect(h.createSetupWindowCalls).toBe(0);
+    expect(readMarker(h.requestPath).state).toBe("awaiting-user");
+
+    canPresent = true;
+    await h.controller.run();
+    expect(h.createSetupWindowCalls).toBe(1);
+    expect(h.panel.states).toContain("awaiting-user");
+    expect(h.spawnCalls).toHaveLength(0);
+    expect(h.shell.opened).toHaveLength(0);
+
+    // A recovered guide's Allow action is a retry, not a fresh repair.  It
+    // may reopen Settings, but it must never run tccutil a second time.
+    await h.panel.triggerRetry();
+    expect(readMarker(h.requestPath).state).toBe("awaiting-user");
+    expect(h.spawnCalls).toHaveLength(0);
+    expect(h.shell.opened).toHaveLength(1);
+
+    // A second activation while the recovered guide is live must not create a
+    // duplicate panel.  Closing it still records the user's deferred choice.
+    await h.controller.run();
+    expect(h.createSetupWindowCalls).toBe(1);
+    h.panel.close();
+    expect(readMarker(h.requestPath).state).toBe("deferred");
+  });
+
+  test("recovers an awaiting request silently when already trusted and fails closed on an unknown probe", async () => {
+    const trusted = makeHarness({ marker: { state: "awaiting-user" }, probes: [true], canPresent: () => false });
+    await trusted.controller.run();
+    expect(readMarker(trusted.requestPath).state).toBe("granted");
+    expect(trusted.createSetupWindowCalls).toBe(0);
+    expect(trusted.spawnCalls).toHaveLength(0);
+
+    const unknown = makeHarness({ marker: { state: "awaiting-user" }, probes: [undefined], canPresent: () => true });
+    await unknown.controller.run();
+    expect(readMarker(unknown.requestPath).state).toBe("awaiting-user");
+    expect(unknown.createSetupWindowCalls).toBe(0);
+    expect(unknown.spawnCalls).toHaveLength(0);
+  });
+
+  test("does not let a recovered retry overwrite a newer install request", async () => {
+    const h = makeHarness({
+      marker: { state: "awaiting-user" },
+      probes: [false],
+      canPresent: () => true,
+      createSetupWindow: () => ({ ...h.panel, choice: new Promise(() => {}) }),
+    });
+
+    await h.controller.run();
+    expect(h.createSetupWindowCalls).toBe(1);
+    writeMarker(h.requestPath, {
+      requestId: "replacement-request",
+      requestedAtMs: 1_700_000_000_200,
+      state: "pending",
+    });
+    await h.panel.triggerRetry();
+
+    expect(readMarker(h.requestPath).requestId).toBe("replacement-request");
+    expect(readMarker(h.requestPath).state).toBe("pending");
+    expect(h.shell.opened).toHaveLength(0);
+    expect(h.spawnCalls).toHaveLength(0);
+    expect(h.panel.isDestroyed()).toBe(true);
+  });
+
   test("does not resume a retry after the guide closes while Settings is opening", async () => {
     let openCalls = 0;
     let release!: (value: boolean) => void;
