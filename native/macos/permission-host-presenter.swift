@@ -238,7 +238,7 @@ public final class PermissionHostPresenter: NSObject {
                 contentRect: NSRect(x: 0, y: 0, width: permissionHostInitialWidth, height: 312),
                 styleMask: [.titled, .closable, .fullSizeContentView],
                 backing: .buffered,
-                defer: true,
+                defer: false,
             )
             panel.isReleasedWhenClosed = false
             panel.hidesOnDeactivate = false
@@ -271,7 +271,15 @@ public final class PermissionHostPresenter: NSObject {
             initialView = view
             cardView = card
             initialDelegate = delegate
-            fitInitialPage()
+            guard fitInitialPage() else {
+                panel.delegate = nil
+                panel.close()
+                initialPanel = nil
+                initialView = nil
+                cardView = nil
+                initialDelegate = nil
+                return false
+            }
             panel.center()
             presented = true
             NSApplication.shared.activate(ignoringOtherApps: true)
@@ -416,7 +424,11 @@ public final class PermissionHostPresenter: NSObject {
         guard !closed else { return }
         dragging = true
         stopArrow()
-        arrowView?.resetToIdentity()
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            arrowView?.resetToIdentity()
+        } else {
+            arrowView?.animate(toScaleX: 1, scaleY: 1)
+        }
         appRowView?.isHidden = true
         helperPanel?.ignoresMouseEvents = true
     }
@@ -442,16 +454,18 @@ public final class PermissionHostPresenter: NSObject {
         close()
     }
 
-    private func fitInitialPage() {
-        guard let initialView, let initialPanel else { return }
+    @discardableResult
+    private func fitInitialPage() -> Bool {
+        guard let initialView, let initialPanel else { return false }
         let preferred = initialView.preferredContentSize
-        guard preferred.width > 0, preferred.height > 0, preferred.height.isFinite else {
+        guard preferred.width.isFinite, preferred.width > 0, preferred.height > 0, preferred.height.isFinite else {
             reportMessage("native permission initial view has invalid preferred size")
-            return
+            return false
         }
         initialView.setFrameSize(preferred)
         initialPanel.setContentSize(preferred)
         initialView.layoutSubtreeIfNeeded()
+        return true
     }
 
     private func setInitialContent(title: String, body: String, allowEnabled: Bool, settingsPlaceholder: Bool) {
@@ -516,7 +530,10 @@ public final class PermissionHostPresenter: NSObject {
         guard let target = SettingsLocator().locate() else {
             locatingAttempts += 1
             if helperPanel != nil {
-                if locatingAttempts >= 10, !dragging { close() }
+                if locatingAttempts >= 10, !dragging {
+                    onEvent("later")
+                    close()
+                }
             } else if locatingAttempts >= 50 {
                 setState("error", message: permissionHostString(copy, "errorBody"))
             }
@@ -539,6 +556,11 @@ public final class PermissionHostPresenter: NSObject {
            let fittedFrame = permissionHostFrame(target.frame, size: helperView.preferredContentSize) {
             helperPanel.setFrame(fittedFrame, display: false)
             positionArrow(from: fittedFrame)
+            if sourceEndpoint != nil {
+                startForwardFlight()
+            } else {
+                revealHelper()
+            }
         }
     }
 
@@ -551,7 +573,7 @@ public final class PermissionHostPresenter: NSObject {
             contentRect: frame,
             styleMask: [.titled, .utilityWindow, .nonactivatingPanel, .fullSizeContentView],
             backing: .buffered,
-            defer: true,
+            defer: false,
         )
         panel.isReleasedWhenClosed = false
         panel.isOpaque = false
@@ -576,7 +598,7 @@ public final class PermissionHostPresenter: NSObject {
             actionTarget: actionTarget,
         )
         let preferred = view.preferredContentSize
-        guard preferred.width > 0, preferred.height > 0, preferred.height.isFinite else {
+        guard preferred.width.isFinite, preferred.width > 0, preferred.height > 0, preferred.height.isFinite else {
             reportMessage("native permission helper has invalid preferred size")
             panel.delegate = nil
             panel.close()
@@ -600,7 +622,7 @@ public final class PermissionHostPresenter: NSObject {
             // the arrow tracker receives mouse-enter events.
             styleMask: [.nonactivatingPanel],
             backing: .buffered,
-            defer: true,
+            defer: false,
         )
         arrowPanel.isReleasedWhenClosed = false
         arrowPanel.isOpaque = false
@@ -632,12 +654,6 @@ public final class PermissionHostPresenter: NSObject {
         self.helperDelegate = delegate
         self.arrowDelegate = arrowDelegate
         positionArrow(from: frame)
-
-        if sourceEndpoint != nil {
-            startForwardFlight()
-        } else {
-            revealHelper()
-        }
     }
 
     private func positionArrow(from frame: NSRect) {
@@ -689,7 +705,6 @@ public final class PermissionHostPresenter: NSObject {
 
     private func startBackFlight() {
         guard !closed, !returning, !dragging, state == "awaiting-user",
-              let helperEndpoint = helperEndpoint(),
               let initialView,
               let cardView else { return }
         returning = true
@@ -706,6 +721,14 @@ public final class PermissionHostPresenter: NSObject {
             settingsPlaceholder: false,
         )
         fitInitialPage()
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            fallbackToInitial()
+            return
+        }
+        guard let helperEndpoint = helperEndpoint() else {
+            fallbackToInitial()
+            return
+        }
         cardView.isHidden = false
         guard let targetEndpoint = captureInitialEndpoint() else {
             cardView.isHidden = true
