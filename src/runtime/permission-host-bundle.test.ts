@@ -15,3 +15,10 @@ test("the one-shot permission host is a verified Runtime artifact", () => {
   expect(source).toContain("createNativeAccessibilitySetupWindow");
   expect(source).toContain("runNativePermissionHandoff");
 });
+
+test("the one-shot host references the shared sibling permission UI asset", () => {
+  const source = readFileSync(new URL("../../dist/incodex-permission-host.cjs", import.meta.url), "utf8");
+  expect(source).toContain('require("./incodex-permission-ui.cjs")');
+  expect(source).not.toContain("Native permission SwiftUI guide classes are unavailable");
+  expect(source).not.toContain("Native permission SwiftUI flight class unavailable");
+});
