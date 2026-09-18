@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -10,7 +10,9 @@ const nativeRoot = join(repositoryRoot, "native", "macos");
 const sourcePath = join(nativeRoot, "permission-views.swift");
 const distRoot = join(nativeRoot, "dist");
 const dylibName = "incodex-permission-ui.dylib";
+const hostName = "incodex-permission-host";
 const dylibPath = join(distRoot, dylibName);
+const hostPath = join(distRoot, hostName);
 const manifestPath = join(distRoot, "runtime-native-manifest.json");
 const abiSmokeSource = join(repositoryRoot, "tests", "native", "permission-views-abi-smoke.m");
 
@@ -44,6 +46,35 @@ function requirePublishedFiles(): NativeManifest | null {
 
   return JSON.parse(readFileSync(manifestPath, "utf8")) as NativeManifest;
 }
+
+test.skipIf(process.platform !== "darwin")(
+  "publishes a verified standalone native permission host beside the legacy dylib",
+  () => {
+    const manifest = requirePublishedFiles();
+    if (!manifest) return;
+
+    expect(existsSync(hostPath)).toBe(true);
+    if (!existsSync(hostPath)) return;
+    expect(manifest.files).toEqual({
+      [dylibName]: expect.any(String),
+      [hostName]: expect.any(String),
+    });
+    expect(statSync(hostPath).mode & 0o111).not.toBe(0);
+    const info = command("lipo", ["-info", hostPath]);
+    expect(info.status, info.output).toBe(0);
+    expect(info.output).toContain("arm64");
+    expect(info.output).toContain("x86_64");
+    for (const architecture of ["arm64", "x86_64"]) {
+      const verified = command("lipo", [hostPath, "-verify_arch", architecture]);
+      expect(verified.status, verified.output).toBe(0);
+    }
+    const loadCommands = command("otool", ["-l", hostPath]);
+    expect(loadCommands.status, loadCommands.output).toBe(0);
+    expect((loadCommands.output.match(/minos\s+12\.0/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    const signature = command("codesign", ["--verify", "--strict", "--", hostPath]);
+    expect(signature.status, signature.output).toBe(0);
+  },
+);
 
 test.skipIf(process.platform !== "darwin")(
   "publishes a macOS-only universal permission native artifact with a bound manifest",

@@ -30,6 +30,9 @@ fn expected_new_release() -> String {
 const NATIVE_DYLIB_NAME: &str = "incodex-permission-ui.dylib";
 
 #[cfg(target_os = "macos")]
+const NATIVE_HOST_NAME: &str = "incodex-permission-host";
+
+#[cfg(target_os = "macos")]
 const NATIVE_MANIFEST_NAME: &str = "runtime-native-manifest.json";
 
 fn write_legacy_embedded_release(user_root: &Path, release: &str, version: &str) {
@@ -178,6 +181,7 @@ fn macos_publish_contains_native_binary_and_merged_manifest_hashes() {
     let release = runtime_root(&root).join(&published.release);
 
     assert!(required_runtime_files().any(|name| name == NATIVE_DYLIB_NAME));
+    assert!(required_runtime_files().any(|name| name == NATIVE_HOST_NAME));
     assert!(required_runtime_files().any(|name| name == NATIVE_MANIFEST_NAME));
 
     let dylib = fs::read(release.join(NATIVE_DYLIB_NAME)).unwrap();
@@ -192,6 +196,24 @@ fn macos_publish_contains_native_binary_and_merged_manifest_hashes() {
     );
     let dylib_hash = sha256_hex(&dylib);
 
+    let host = fs::read(release.join(NATIVE_HOST_NAME)).unwrap();
+    assert!(host.len() > 4, "native guide host must not be an empty placeholder");
+    let host_magic = u32::from_be_bytes(host[..4].try_into().unwrap());
+    assert!(
+        matches!(
+            host_magic,
+            0xcafebabe | 0xcffaedfe | 0xfeedface | 0xfeedfacf
+        ),
+        "native guide host is not a Mach-O binary: {host_magic:#x}"
+    );
+    let host_metadata = fs::metadata(release.join(NATIVE_HOST_NAME)).unwrap();
+    assert_ne!(
+        host_metadata.permissions().mode() & 0o111,
+        0,
+        "native guide host must be executable"
+    );
+    let host_hash = sha256_hex(&host);
+
     let native_manifest_bytes = fs::read(release.join(NATIVE_MANIFEST_NAME)).unwrap();
     let native_manifest: serde_json::Value =
         serde_json::from_slice(&native_manifest_bytes).unwrap();
@@ -204,6 +226,8 @@ fn macos_publish_contains_native_binary_and_merged_manifest_hashes() {
         serde_json::json!(["arm64", "x86_64"])
     );
     assert_eq!(native_manifest["files"][NATIVE_DYLIB_NAME], dylib_hash);
+    assert_eq!(native_manifest["files"][NATIVE_HOST_NAME], host_hash);
+    assert_eq!(native_manifest["files"].as_object().unwrap().len(), 2);
     assert!(is_sha256(native_manifest["sourceSha256"].as_str().unwrap()));
 
     let merged_manifest_bytes = fs::read(release.join(MANIFEST_NAME)).unwrap();
@@ -212,6 +236,10 @@ fn macos_publish_contains_native_binary_and_merged_manifest_hashes() {
     assert_eq!(
         merged_manifest["files"][NATIVE_DYLIB_NAME],
         serde_json::Value::String(dylib_hash)
+    );
+    assert_eq!(
+        merged_manifest["files"][NATIVE_HOST_NAME],
+        serde_json::Value::String(host_hash)
     );
     assert_eq!(
         merged_manifest["files"][NATIVE_MANIFEST_NAME],
