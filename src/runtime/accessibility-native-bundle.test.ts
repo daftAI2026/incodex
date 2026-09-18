@@ -30,13 +30,11 @@ test("the published main loads the native guide and its cancellable handoff", as
   await flight.finished;
 });
 
-test("main and the short-lived host load one verified sibling permission UI asset", async () => {
+test("the compatibility main loads one verified sibling permission UI asset", async () => {
   const mainFilename = new URL("../../dist/incodex-main.cjs", import.meta.url);
-  const hostFilename = new URL("../../dist/incodex-permission-host.cjs", import.meta.url);
   const uiFilename = new URL(`../../dist/${SHARED_PERMISSION_UI}`, import.meta.url);
   const manifest = JSON.parse(readFileSync(new URL("../../dist/runtime-manifest.json", import.meta.url), "utf8"));
   const mainSource = readFileSync(mainFilename, "utf8");
-  const hostSource = readFileSync(hostFilename, "utf8");
   const uiBytes = readFileSync(uiFilename);
   const uiSource = uiBytes.toString();
   const presenterMarker = "Native permission SwiftUI guide classes are unavailable";
@@ -45,11 +43,8 @@ test("main and the short-lived host load one verified sibling permission UI asse
   expect(RUNTIME_EXTERNAL_ARTIFACT_NAMES).toContain(SHARED_PERMISSION_UI);
   expect(manifest.files[SHARED_PERMISSION_UI]).toBe(createHash("sha256").update(uiBytes).digest("hex"));
   expect(mainSource).toContain(`require("./${SHARED_PERMISSION_UI}")`);
-  expect(hostSource).toContain(`require("./${SHARED_PERMISSION_UI}")`);
   expect(mainSource).not.toContain(presenterMarker);
   expect(mainSource).not.toContain(flightMarker);
-  expect(hostSource).not.toContain(presenterMarker);
-  expect(hostSource).not.toContain(flightMarker);
   expect(uiSource).toContain(presenterMarker);
   expect(uiSource).toContain(flightMarker);
 
@@ -73,7 +68,4 @@ test("main and the short-lived host load one verified sibling permission UI asse
   });
   expect(mainApi.createNativeAccessibilitySetupWindow).toBe(shared.createNativeAccessibilitySetupWindow);
 
-  const hostRequire = createRequire(hostFilename);
-  const hostApi = hostRequire(hostFilename.pathname);
-  expect(typeof hostApi.createPermissionHost).toBe("function");
 });
