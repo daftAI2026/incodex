@@ -28,4 +28,13 @@ mod tests {
             Some("zh-CN".to_string())
         );
     }
+
+    #[test]
+    fn macos_config_accepts_a_comment_after_the_double_quoted_locale() {
+        let content = "localeOverride = \"zh-CN\" # keep the Codex locale\n";
+        assert_eq!(
+            parse_locale_override(content, &['"']),
+            Some("zh-CN".to_string())
+        );
+    }
 }
