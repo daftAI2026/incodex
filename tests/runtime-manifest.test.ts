@@ -38,7 +38,7 @@ describe("runtime manifest", () => {
     );
     expect(new Set(RUNTIME_ARTIFACT_NAMES).size).toBe(RUNTIME_ARTIFACT_NAMES.length);
     for (const name of RUNTIME_ARTIFACT_NAMES) {
-      expect(name).toMatch(/^incodex-[a-z-]+\.(?:cjs|js)$/);
+      expect(name).toMatch(/^incodex-[a-z-]+\.(?:cjs|js|json)$/);
     }
   });
 
