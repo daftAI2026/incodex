@@ -23,6 +23,7 @@ type NativeManifest = {
   minimumMacOS: string;
   architectures: string[];
   sourceSha256: string;
+  hostSourceSha256?: string;
   files: Record<string, string>;
 };
 
@@ -91,7 +92,11 @@ test.skipIf(process.platform !== "darwin")(
     });
     expect(manifest.sourceSha256).toMatch(/^[0-9a-f]{64}$/);
     expect(manifest.sourceSha256).toBe(sha256(sourcePath));
-    expect(manifest.files).toEqual({ [dylibName]: expect.any(String) });
+    expect(manifest.hostSourceSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(manifest.files).toEqual({
+      [dylibName]: expect.any(String),
+      [hostName]: expect.any(String),
+    });
     expect(manifest.files[dylibName]).toMatch(/^[0-9a-f]{64}$/);
     expect(manifest.files[dylibName]).toBe(sha256(dylibPath));
   },

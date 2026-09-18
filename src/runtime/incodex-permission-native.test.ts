@@ -3,10 +3,11 @@ import { createHash } from "node:crypto";
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadPermissionNativeLibrary, resolvePermissionNativePath } from "./incodex-permission-native.cts";
+import { loadPermissionNativeLibrary, resolvePermissionNativeHostPath, resolvePermissionNativePath } from "./incodex-permission-native.cts";
 
 const hash = (body: string | Buffer) => createHash("sha256").update(body).digest("hex");
 const name = "incodex-permission-ui.dylib";
+const hostName = "incodex-permission-host";
 const manifestName = "runtime-native-manifest.json";
 
 function fixture(run: (directory: string, manifest: any) => void) {
@@ -16,6 +17,20 @@ function fixture(run: (directory: string, manifest: any) => void) {
     minimumMacOS: "12.0", architectures: ["arm64", "x86_64"], sourceSha256: "a".repeat(64),
     files: { [name]: hash(bytes) } };
   writeFileSync(join(directory, name), bytes, { mode: 0o600 });
+  seal(directory, manifest);
+  try { run(directory, manifest); } finally { rmSync(directory, { recursive: true, force: true }); }
+}
+
+function dualFixture(run: (directory: string, manifest: any) => void) {
+  const directory = mkdtempSync(join(realpathSync(tmpdir()), "incodex-native-dual-"));
+  const bytes = Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0, 255, 1]);
+  const host = Buffer.from([0xca, 0xfe, 0xba, 0xbe, 2, 4, 8]);
+  const manifest = { schemaVersion: 1, platform: "macos", abiVersion: 1,
+    minimumMacOS: "12.0", architectures: ["arm64", "x86_64"], sourceSha256: "a".repeat(64),
+    hostSourceSha256: "b".repeat(64),
+    files: { [name]: hash(bytes), [hostName]: hash(host) } };
+  writeFileSync(join(directory, name), bytes, { mode: 0o600 });
+  writeFileSync(join(directory, hostName), host, { mode: 0o700 });
   seal(directory, manifest);
   try { run(directory, manifest); } finally { rmSync(directory, { recursive: true, force: true }); }
 }
@@ -62,6 +77,15 @@ test("native permission refuses symlink ancestry and writable native files", () 
   const alias = join(directory, "alias");
   symlinkSync(directory, alias);
   expect(() => resolvePermissionNativePath(alias, "darwin")).toThrow("symlink");
+}));
+
+test("native permission resolves the optional executable host while retaining dylib compatibility", () => dualFixture((directory) => {
+  expect(resolvePermissionNativePath(directory, "darwin")).toBe(join(directory, name));
+  expect(resolvePermissionNativeHostPath(directory, "darwin")).toBe(join(directory, hostName));
+  chmodSync(join(directory, hostName), 0o600);
+  expect(() => resolvePermissionNativeHostPath(directory, "darwin")).toThrow("unsafe");
+  chmodSync(join(directory, hostName), 0o755);
+  expect(() => resolvePermissionNativeHostPath(directory, "darwin")).toThrow("unsafe");
 }));
 
 test("native library requires main thread and uses the verified path exactly once", () => fixture((directory) => {

@@ -84,6 +84,14 @@ fn set_runtime_dir_modes(root: &Path, release: &Path) {
     }
 }
 
+fn runtime_file_mode(name: &str) -> u32 {
+    #[cfg(target_os = "macos")]
+    if name == NATIVE_HOST_NAME {
+        return 0o700;
+    }
+    FILE_MODE
+}
+
 fn hash_map_for_bodies(body: &[u8]) -> serde_json::Map<String, serde_json::Value> {
     required_runtime_files()
         .map(|name| {
@@ -103,7 +111,7 @@ fn write_old_release(user_root: &Path, release: &str, body: &[u8]) -> serde_json
     for name in required_runtime_files() {
         let path = release_dir.join(name);
         fs::write(&path, body).unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(FILE_MODE)).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(runtime_file_mode(name))).unwrap();
     }
     let files = hash_map_for_bodies(body);
     let current = serde_json::json!({
@@ -197,7 +205,10 @@ fn macos_publish_contains_native_binary_and_merged_manifest_hashes() {
     let dylib_hash = sha256_hex(&dylib);
 
     let host = fs::read(release.join(NATIVE_HOST_NAME)).unwrap();
-    assert!(host.len() > 4, "native guide host must not be an empty placeholder");
+    assert!(
+        host.len() > 4,
+        "native guide host must not be an empty placeholder"
+    );
     let host_magic = u32::from_be_bytes(host[..4].try_into().unwrap());
     assert!(
         matches!(
