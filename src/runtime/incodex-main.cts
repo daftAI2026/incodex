@@ -927,10 +927,13 @@ function observeAccessibilityPresentationWindow(win, controller) {
   const request = () => { void controller.run(); };
   const events = ["show", "ready-to-show", "restore"];
   for (const event of events) win.on(event, request);
-  win.webContents?.on("did-finish-load", request);
+  // BrowserWindow native getters can throw after "closed". Retain the
+  // EventEmitter while the window is alive so teardown only removes listeners.
+  const contents = win.webContents;
+  contents?.on("did-finish-load", request);
   win.once("closed", () => {
     for (const event of events) win.removeListener(event, request);
-    win.webContents?.removeListener("did-finish-load", request);
+    contents?.removeListener("did-finish-load", request);
   });
 }
 
