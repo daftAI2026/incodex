@@ -23,6 +23,42 @@ import AppKit
 import Foundation
 
 @MainActor
+struct PermissionHostFlightEndpoint {
+    let view: NSView
+    let frame: NSRect
+    let radius: CGFloat
+    let image: NSImage?
+    let captureImage: (() -> NSImage?)?
+
+    init(view: NSView, frame: NSRect, radius: CGFloat, image: NSImage? = nil, captureImage: (() -> NSImage?)? = nil) {
+        self.view = view
+        self.frame = frame
+        self.radius = radius
+        self.image = image
+        self.captureImage = captureImage
+    }
+}
+
+@MainActor
+final class PermissionHostFlight {
+    init(source: PermissionHostFlightEndpoint, target: @escaping () -> PermissionHostFlightEndpoint, reverse: Bool = false, isClosed: @escaping () -> Bool, onComplete: @escaping () -> Void, onError: @escaping (String) -> Void) {}
+    func start() {}
+    func dispose() {}
+}
+
+@MainActor
+struct PermissionHostSettingsFrame {
+    let frame: NSRect
+    let pid: pid_t
+    let windowID: CGWindowID
+}
+
+@MainActor
+final class SettingsLocator {
+    func locate() -> PermissionHostSettingsFrame? { nil }
+}
+
+@MainActor
 @main
 enum PermissionHostPresenterSmoke {
     static func main() {
@@ -74,6 +110,7 @@ enum PermissionHostPresenterSmoke {
       ], { cwd: repo, encoding: "utf8", timeout: 90_000 });
       const output = `${build.stdout ?? ""}${build.stderr ?? ""}`;
       expect(build.status, output || String(build.error ?? "Swift presenter compilation failed")).toBe(0);
+      expect(output, output || "Swift presenter compilation emitted a warning").not.toContain("warning:");
 
       if (process.env.INCODEX_RUN_PERMISSION_HOST_PRESENTER_SMOKE === "1") {
         const run = spawnSync(executable, [], { cwd: repo, encoding: "utf8", timeout: 20_000 });

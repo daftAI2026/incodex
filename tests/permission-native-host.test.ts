@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -139,6 +139,29 @@ test.skipIf(process.platform !== "darwin")("state cannot bypass the presentation
     line({ nonce: nonce(), type: "state", state: "granted" }),
   ));
   expect(result.stdout).toContain('"type":"error"');
+  expect(result.stdout).not.toContain('"type":"ready"');
+});
+
+test.skipIf(process.platform !== "darwin")("a blocking presenter cannot acknowledge ready after its deadline", async () => {
+  const fixture = join(host!.directory, "slow-presenter.swift");
+  const executable = join(host!.directory, "slow-host");
+  writeFileSync(fixture, `import AppKit
+@MainActor final class PermissionHostPresenter {
+ init(copy: NSDictionary, layoutDirection: String, onEvent: @escaping (String) -> Void, onError: @escaping (String) -> Void) {}
+ func present() -> Bool {
+  FileHandle.standardError.write(Data("stub-present\\n".utf8))
+  Thread.sleep(forTimeInterval: 0.3)
+  return true
+ }
+ func setState(_ state: String, message: String?) {}
+ func close() { FileHandle.standardError.write(Data("stub-closed\\n".utf8)) }
+}`);
+  const built = spawnSync("xcrun", ["swiftc", "-O", "-D", "INCODEX_PERMISSION_HOST_TESTING", "-D", "INCODEX_PERMISSION_HOST_STUB", hostSource, fixture, "-o", executable], { encoding: "utf8", timeout: 60_000 });
+  expect(built.status, built.stderr).toBe(0);
+  const result = await runHost(executable, stdin => stdin.write(line({ nonce: nonce(), type: "configure", copy: {}, layoutDirection: "leftToRight" })));
+  expect(result.stderr).toContain("stub-present");
+  expect(result.stderr).toContain("stub-closed");
+  expect(result.stdout).toContain("timed out");
   expect(result.stdout).not.toContain('"type":"ready"');
 });
 
