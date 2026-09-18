@@ -631,6 +631,85 @@ private struct PermissionSnapshotArrow: Shape {
     }
 }
 
+@MainActor
+private final class PermissionArrowState: ObservableObject {
+    @Published var scaleX: CGFloat = 1
+    @Published var scaleY: CGFloat = 1
+}
+
+// Keep the live and snapshot glyph on the same SwiftUI Shape. AppKit still
+// owns the separate child panel and tracking overlay, while SwiftUI owns the
+// animated transform so an interrupted spring can continue from its current
+// presentation state instead of resetting a CA transform velocity.
+private struct PermissionLiveArrowRoot: View {
+    @ObservedObject var state: PermissionArrowState
+
+    var body: some View {
+        PermissionSnapshotArrow()
+            .fill(Color(.sRGB, red: 0, green: 107 / 255, blue: 1, opacity: 1))
+            .overlay {
+                PermissionSnapshotArrow()
+                    .stroke(.white, style: StrokeStyle(lineWidth: 2, lineJoin: .round))
+            }
+            .frame(width: 28, height: 28)
+            .scaleEffect(x: state.scaleX, y: state.scaleY, anchor: .bottom)
+            .shadow(color: .black.opacity(0.23), radius: 7, x: 0, y: 4)
+            .allowsHitTesting(false)
+    }
+}
+
+@MainActor
+@objc(IncodexPermissionArrowView)
+public final class IncodexPermissionArrowView: NSView {
+    private let state: PermissionArrowState
+    private let host: NSHostingView<PermissionLiveArrowRoot>
+
+    public override var isFlipped: Bool { true }
+
+    public override init(frame frameRect: NSRect) {
+        precondition(Thread.isMainThread, "Permission arrow must be created on the main thread")
+        let state = PermissionArrowState()
+        self.state = state
+        host = NSHostingView(rootView: PermissionLiveArrowRoot(state: state))
+        super.init(frame: frameRect)
+        host.frame = bounds
+        host.autoresizingMask = [.width, .height]
+        host.clipsToBounds = false
+        host.wantsLayer = true
+        host.layer?.masksToBounds = false
+        addSubview(host)
+    }
+
+    @available(*, unavailable)
+    public required init?(coder: NSCoder) { fatalError("Use init(frame:)") }
+
+    public override func layout() {
+        super.layout()
+        host.frame = bounds
+    }
+
+    public override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    @objc(animateToScaleX:scaleY:)
+    public func animate(toScaleX x: Double, scaleY y: Double) {
+        guard x.isFinite, y.isFinite, x > 0, y > 0 else { return }
+        withAnimation(.interpolatingSpring(mass: 1, stiffness: 200, damping: 11, initialVelocity: 0)) {
+            state.scaleX = CGFloat(x)
+            state.scaleY = CGFloat(y)
+        }
+    }
+
+    @objc(resetToIdentity)
+    public func resetToIdentity() {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            state.scaleX = 1
+            state.scaleY = 1
+        }
+    }
+}
+
 private struct PermissionHelperDragHint: View {
     @ObservedObject var state: PermissionHelperState
     let showHintArrow: Bool

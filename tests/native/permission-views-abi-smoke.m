@@ -196,7 +196,9 @@ int main(int argc, const char *argv[]) {
         }
 
         SEL arrowAnimate = @selector(animateToScaleX:scaleY:);
-        if (!require_encoding(arrowClass, arrowAnimate, "v@:dd")) return 7;
+        SEL arrowReset = @selector(resetToIdentity);
+        if (!require_encoding(arrowClass, arrowAnimate, "v@:dd")
+            || !require_encoding(arrowClass, arrowReset, "v@:")) return 7;
         NSView *arrow = ((id (*)(id, SEL, NSRect))objc_msgSend)(
             [arrowClass alloc],
             @selector(initWithFrame:),
@@ -207,6 +209,7 @@ int main(int argc, const char *argv[]) {
         if (arrow.subviews.count == 0 || !hosting_view(arrow.subviews[0])) {
             return fail("SwiftUI arrow does not retain a hosting view");
         }
+        ((void (*)(id, SEL))objc_msgSend)(arrow, arrowReset);
         for (NSWindow *window in NSApp.windows) {
             if (window.visible) return fail("ABI smoke unexpectedly showed a window");
         }

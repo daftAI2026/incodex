@@ -579,6 +579,16 @@ class FakeNative {
   setFromValue$(value: unknown): void { this.values.set("fromValue", value); }
   setToValue$(value: unknown): void { this.values.set("toValue", value); }
 
+  animateToScaleX$scaleY$(x: number, y: number): void {
+    this.record("animateToScaleX:scaleY:", x, y);
+    this.values.set("scale", { x, y });
+  }
+
+  resetToIdentity(): void {
+    this.record("resetToIdentity");
+    this.values.set("scale", { x: 1, y: 1 });
+  }
+
   moveToPoint$(value: unknown): void { this.values.set("moveToPoint", value); }
   lineToPoint$(value: unknown): void { this.values.set("lineToPoint", value); }
   curveToPoint$controlPoint1$controlPoint2$(...value: unknown[]): void {
@@ -950,6 +960,7 @@ function swiftPermissionViewsLibrary() {
   const initialCards: FakeNative[] = [];
   const helperViews: FakeNative[] = [];
   const helperRows: FakeNative[] = [];
+  const arrowViews: FakeNative[] = [];
 
   function initialClass() {
     const card = new FakeNative("SwiftPermissionCardView", calls);
@@ -994,16 +1005,33 @@ function swiftPermissionViewsLibrary() {
     return view;
   }
 
+  function arrowClass() {
+    const view = new FakeNative("IncodexPermissionArrowView", calls, {
+      "animateToScaleX:scaleY:": function (this: FakeNative, x: number, y: number) {
+        this.animateToScaleX$scaleY$(x, y);
+      },
+      resetToIdentity: function (this: FakeNative) {
+        this.resetToIdentity();
+      },
+    });
+    view.frameValue = frame(28, 28, 36, 10);
+    view.subviews.push(new FakeNative("NSHostingView<Arrow>", calls));
+    arrowViews.push(view);
+    return view;
+  }
+
   return {
     library: {
       IncodexPermissionInitialView: { alloc: initialClass },
       IncodexPermissionHelperView: { alloc: helperClass },
+      IncodexPermissionArrowView: { alloc: arrowClass },
     },
     calls,
     initialViews,
     initialCards,
     helperViews,
     helperRows,
+    arrowViews,
   };
 }
 
@@ -1057,7 +1085,7 @@ test("uses SwiftUI helper preferred size with AppKit drag and arrow geometry", a
       return size.width === 100 && size.height === 100;
     });
     expect(arrowWindow?.frame()).toEqual(frame(100, 100, 783, 185));
-    const arrow = bridge.objects.find((value) => value.type.includes("Arrow") && value.hasSelector("drawRect:"));
+    const arrow = swift?.arrowViews[0];
     expect(arrow?.frame()).toEqual(frame(28, 28, 36, 10));
   } finally {
     api.close();
@@ -1377,36 +1405,38 @@ test("mirrors only the helper arrow child-window x in RTL and preserves LTR plac
 
 test("keeps the dynamic arrow glyph slot aligned with the SwiftUI helper slot in both directions", async () => {
   const target = { x: 554, y: 160, width: 740, height: 625 };
-  const findArrowSlot = (bridge: FakeBridge, helper: FakeNative) => {
+  const findArrowSlot = (bridge: FakeBridge, helper: FakeNative, swift: ReturnType<typeof swiftPermissionViewsLibrary>) => {
     const arrowWindow = helperPanels(bridge).find((panel) => {
       const size = panel.frame().size;
       return size.width === 100 && size.height === 100;
     });
-    const arrow = bridge.objects.find((value) => value.type.includes("Arrow") && value.hasSelector("drawRect:"));
+    const arrow = swift.arrowViews[0];
     if (!arrowWindow || !arrow) throw new Error("arrow shell is missing");
     return arrowWindow.frame().origin.x + arrow.frame().origin.x - helper.frame().origin.x;
   };
 
-  const rtl = await makeHarness({ layoutDirection: "rightToLeft", locateSettings: () => target });
+  const rtlSwift = swiftPermissionViewsLibrary();
+  const rtl = await makeHarness({ layoutDirection: "rightToLeft", locateSettings: () => target, nativeLibrary: rtlSwift.library });
   try {
     rtl.api.setState("awaiting-user");
     await flushNativeAsync();
     const helper = helperPanels(rtl.bridge).find((panel) => panel.frame().size.width === 531);
     if (!helper) throw new Error("RTL helper panel is missing");
     // PermissionHelperForeground's mirrored SwiftUI slot is x=437 in RTL.
-    expect(findArrowSlot(rtl.bridge, helper)).toBe(437);
+    expect(findArrowSlot(rtl.bridge, helper, rtlSwift)).toBe(437);
   } finally {
     rtl.api.close();
   }
 
-  const ltr = await makeHarness({ layoutDirection: "leftToRight", locateSettings: () => target });
+  const ltrSwift = swiftPermissionViewsLibrary();
+  const ltr = await makeHarness({ layoutDirection: "leftToRight", locateSettings: () => target, nativeLibrary: ltrSwift.library });
   try {
     ltr.api.setState("awaiting-user");
     await flushNativeAsync();
     const helper = helperPanels(ltr.bridge).find((panel) => panel.frame().size.width === 531);
     if (!helper) throw new Error("LTR helper panel is missing");
     // PermissionHelperForeground's leading SwiftUI slot is x=66 in LTR.
-    expect(findArrowSlot(ltr.bridge, helper)).toBe(66);
+    expect(findArrowSlot(ltr.bridge, helper, ltrSwift)).toBe(66);
   } finally {
     ltr.api.close();
   }
@@ -1870,7 +1900,7 @@ describe("native Accessibility setup adapter", () => {
 
   test("reduced motion returns to the initial page without closing the guide", async () => {
     const harness = await makeHarness({ reduceMotion: true });
-    const { api, bridge, panel } = harness;
+    const { api, bridge, panel, swift } = harness;
     try {
       performSwiftAction(harness, "allow:");
       await expect(api.choice).resolves.toBe("repair");
@@ -1885,6 +1915,8 @@ describe("native Accessibility setup adapter", () => {
       expect(panel.isVisible()).toBe(true);
       expect(content?.args[2]).toBe(true);
       expect(helperPanels(bridge).some((value) => value.visible && !value.destroyed)).toBe(false);
+      expect(swift?.arrowViews[0].calls.some(({ selector }) => selector === "animateToScaleX:scaleY:")).toBe(false);
+      expect(swift?.arrowViews[0].calls.some(({ selector }) => selector === "resetToIdentity")).toBe(true);
     } finally {
       api.close();
     }
@@ -2072,7 +2104,7 @@ describe("native Accessibility setup adapter", () => {
   });
 
   test("schedules the next arrow pulse when the 250ms return phase starts", async () => {
-    const { api } = await makeHarness();
+    const { api, swift } = await makeHarness();
     const originalSetTimeout = globalThis.setTimeout;
     const originalClearTimeout = globalThis.clearTimeout;
     let nextId = 1;
@@ -2095,11 +2127,21 @@ describe("native Accessibility setup adapter", () => {
       const pulse = scheduled.find((entry) => entry.delay === 500);
       expect(pulse).toBeDefined();
       pulse?.callback();
+      expect(swift?.arrowViews[0].calls.at(-1)).toMatchObject({
+        selector: "animateToScaleX:scaleY:",
+        args: [1.15, 1.6],
+      });
       expect(scheduled.some((entry) => entry.delay === 250)).toBe(true);
       expect(scheduled.some((entry) => entry.delay === 4000)).toBe(false);
       // This checks when return starts, not when the native spring settles.
       scheduled.find((entry) => entry.delay === 250)?.callback();
+      expect(swift?.arrowViews[0].calls.at(-1)).toMatchObject({
+        selector: "animateToScaleX:scaleY:",
+        args: [1, 1],
+      });
       expect(scheduled.some((entry) => entry.delay === 4000)).toBe(true);
+      api.close();
+      expect(swift?.arrowViews[0].calls.at(-1)).toMatchObject({ selector: "resetToIdentity", args: [] });
     } finally {
       globalThis.setTimeout = originalSetTimeout;
       globalThis.clearTimeout = originalClearTimeout;

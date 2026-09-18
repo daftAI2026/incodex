@@ -129,6 +129,7 @@ test.skipIf(process.platform !== "darwin")(
     expect(strings.output).toContain("configureWithCopy:appIcon:actionTarget:");
     expect(strings.output).toContain("snapshotImageWithScale:");
     expect(strings.output).toContain("animateToScaleX:scaleY:");
+    expect(strings.output).toContain("resetToIdentity");
   },
 );
 

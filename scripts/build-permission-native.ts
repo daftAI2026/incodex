@@ -67,13 +67,17 @@ function assertUniversalBinary(path: string): void {
 
 function assertExports(path: string): void {
   const symbols = run("nm", ["-gU", path]);
-  if (!symbols.includes("IncodexPermissionFlightView")) {
-    throw new Error("Permission library does not export IncodexPermissionFlightView");
+  for (const className of ["IncodexPermissionFlightView", "IncodexPermissionArrowView"]) {
+    if (!symbols.includes(className)) {
+      throw new Error(`Permission library does not export ${className}`);
+    }
   }
   const strings = run("strings", [path]);
   for (const selector of [
     "setSourceImage:targetImage:",
     "updateProgress:cornerRadius:reduceTransparency:",
+    "animateToScaleX:scaleY:",
+    "resetToIdentity",
   ]) {
     if (!strings.includes(selector)) {
       throw new Error(`Permission library is missing ObjC selector ${selector}`);

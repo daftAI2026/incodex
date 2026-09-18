@@ -85,7 +85,9 @@ function loadPermissionNativeLibrary(objc, directory = __dirname, platform = pro
     return cached.library;
   }
   const library = new objc.NobjcLibrary(file);
-  if (!library.IncodexPermissionFlightView) throw new Error("Native permission flight class is missing");
+  if (!library.IncodexPermissionFlightView || !library.IncodexPermissionArrowView) {
+    throw new Error("Native permission SwiftUI class is missing");
+  }
   libraries.set(objc, { file, library });
   return library;
 }

@@ -49,6 +49,25 @@ test("helper hint lays out arrow and body text in a natural horizontal stack", (
   expect(hint).not.toContain(".offset(");
 });
 
+test("live helper arrow uses the shared SwiftUI shape and native spring surface", () => {
+  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const start = source.indexOf("@objc(IncodexPermissionArrowView)");
+  const end = source.indexOf("private struct PermissionHelperDragHint", start);
+  const rootStart = source.indexOf("private struct PermissionLiveArrowRoot");
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  expect(rootStart).toBeGreaterThanOrEqual(0);
+  const arrow = source.slice(rootStart, end);
+  expect(arrow).toContain("private struct PermissionLiveArrowRoot: View");
+  expect(arrow).toContain("PermissionSnapshotArrow()");
+  expect(arrow).toContain(".interpolatingSpring(mass: 1, stiffness: 200, damping: 11, initialVelocity: 0)");
+  expect(arrow).toContain("@objc(animateToScaleX:scaleY:)");
+  expect(arrow).toContain("@objc(resetToIdentity)");
+  expect(arrow).toContain("host.clipsToBounds = false");
+  expect(arrow.indexOf(".scaleEffect")).toBeLessThan(arrow.indexOf(".shadow("));
+  expect(source).not.toContain("CASpringAnimation");
+});
+
 test("helper delegates outer edge treatment to its native window shell", () => {
   const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
   const start = source.indexOf("private struct PermissionHelperRoot:");

@@ -67,7 +67,7 @@ test("native permission refuses symlink ancestry and writable native files", () 
 test("native library requires main thread and uses the verified path exactly once", () => fixture((directory) => {
   let mainThread = false;
   const loaded: string[] = [];
-  const library = { IncodexPermissionFlightView: {} };
+  const library = { IncodexPermissionFlightView: {}, IncodexPermissionArrowView: {} };
   const objc = { NobjcLibrary: new Proxy(function NobjcLibrary() {}, {
     construct(_target, [path]: [string]) {
       loaded.push(path);
