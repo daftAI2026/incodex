@@ -22,7 +22,10 @@ private struct PermissionFlightImage: View {
             Image(nsImage: image)
                 .interpolation(.high)
                 .frame(width: image.size.width, height: image.size.height)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                // Preserve the snapshot's intrinsic pixels while accepting
+                // the animated surface's smaller proposal. Otherwise the
+                // image's ideal size enlarges the shared rounded clip.
+                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .center)
                 .opacity(opacity)
                 .blur(radius: blurRadius)
         }
