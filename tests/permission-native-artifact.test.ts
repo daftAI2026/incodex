@@ -115,6 +115,7 @@ test.skipIf(process.platform !== "darwin")(
       "IncodexPermissionFlightView",
       "IncodexPermissionInitialView",
       "IncodexPermissionHelperView",
+      "IncodexPermissionArrowView",
     ]) {
       expect(symbols.output).toContain(className);
     }
@@ -127,6 +128,7 @@ test.skipIf(process.platform !== "darwin")(
     expect(strings.output).toContain("setContentWithTitle:body:allowEnabled:settingsPlaceholder:");
     expect(strings.output).toContain("configureWithCopy:appIcon:actionTarget:");
     expect(strings.output).toContain("snapshotImageWithScale:");
+    expect(strings.output).toContain("animateToScaleX:scaleY:");
   },
 );
 

@@ -80,9 +80,11 @@ int main(int argc, const char *argv[]) {
         Class flightClass = Nil;
         Class initialClass = Nil;
         Class helperClass = Nil;
+        Class arrowClass = Nil;
         if (!require_class("IncodexPermissionFlightView", &flightClass)
             || !require_class("IncodexPermissionInitialView", &initialClass)
-            || !require_class("IncodexPermissionHelperView", &helperClass)) {
+            || !require_class("IncodexPermissionHelperView", &helperClass)
+            || !require_class("IncodexPermissionArrowView", &arrowClass)) {
             return 3;
         }
 
@@ -191,6 +193,19 @@ int main(int argc, const char *argv[]) {
         NSImage *snapshot = ((id (*)(id, SEL, double))objc_msgSend)(helper, helperSnapshot, 2.0);
         if (snapshot == nil || !NSEqualSizes(snapshot.size, helperSizeValue)) {
             return fail("helper foreground snapshot ABI contract failed");
+        }
+
+        SEL arrowAnimate = @selector(animateToScaleX:scaleY:);
+        if (!require_encoding(arrowClass, arrowAnimate, "v@:dd")) return 7;
+        NSView *arrow = ((id (*)(id, SEL, NSRect))objc_msgSend)(
+            [arrowClass alloc],
+            @selector(initWithFrame:),
+            NSMakeRect(36, 10, 28, 28)
+        );
+        if (arrow == nil) return fail("SwiftUI arrow init failed");
+        ((void (*)(id, SEL, double, double))objc_msgSend)(arrow, arrowAnimate, 1.15, 1.6);
+        if (arrow.subviews.count == 0 || !hosting_view(arrow.subviews[0])) {
+            return fail("SwiftUI arrow does not retain a hosting view");
         }
         for (NSWindow *window in NSApp.windows) {
             if (window.visible) return fail("ABI smoke unexpectedly showed a window");
