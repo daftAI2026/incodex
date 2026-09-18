@@ -1299,6 +1299,7 @@ test("dispatches SwiftUI Skip through the guide action target", async () => {
 async function makeHarness(options: {
   onHandoff?: (payload: any) => void;
   onBack?: (payload: any) => { finished?: Promise<unknown>; dispose?: () => void } | undefined;
+  activate?: (options?: { steal?: boolean }) => void;
   locateSettings?: () => unknown;
   copy?: typeof COPY;
   reduceMotion?: boolean;
@@ -1325,6 +1326,7 @@ async function makeHarness(options: {
     loadObjcModule: async () => bridge.objc,
     nativeLibrary: options.nativeLibrary ?? swift?.library,
     layoutDirection: options.layoutDirection,
+    activate: options.activate,
     locateSettings: options.locateSettings ?? (() => ({ x: 120, y: 140, width: 920, height: 700 })),
     onHandoff: options.onHandoff,
     onBack: options.onBack,
@@ -1338,6 +1340,30 @@ async function makeHarness(options: {
   if (!panel) throw new Error("native Accessibility panel was not created");
   return { api, bridge, panel, swift };
 }
+
+test("uses one injected AppKit activation hook for initial and Back restore without Electron", async () => {
+  const activations: Array<{ steal?: boolean } | undefined> = [];
+  const harness = await makeHarness({
+    reduceMotion: true,
+    activate: (options) => { activations.push(options); },
+  });
+  const { api } = harness;
+  try {
+    // Construction activates the initial page once.  Reduced-motion Back takes
+    // the same restore path synchronously, so the second call is observable
+    // without a real panel, Electron object, or event loop.
+    expect(activations).toEqual([{ steal: true }]);
+    performSwiftAction(harness, "allow:");
+    await expect(api.choice).resolves.toBe("repair");
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+    performSwiftAction(harness, "later:");
+    await flushNativeAsync();
+    expect(activations).toEqual([{ steal: true }, { steal: true }]);
+  } finally {
+    api.close();
+  }
+});
 
 test("does not steal focus when presentation becomes unavailable during bridge loading", async () => {
   const bridge = makeBridge();
