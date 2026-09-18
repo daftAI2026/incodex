@@ -133,6 +133,15 @@ test.skipIf(process.platform !== "darwin")("EOF cannot silently accept a truncat
   expect(result.stdout).not.toContain('"type":"ready"');
 });
 
+test.skipIf(process.platform !== "darwin")("state cannot bypass the presentation readiness gate", async () => {
+  const result = await runHost(host!.executable, stdin => stdin.end(
+    line({ nonce: nonce(), type: "configure", copy: { title: "test" }, layoutDirection: "leftToRight" }) +
+    line({ nonce: nonce(), type: "state", state: "granted" }),
+  ));
+  expect(result.stdout).toContain('"type":"error"');
+  expect(result.stdout).not.toContain('"type":"ready"');
+});
+
 test.skipIf(process.platform !== "darwin")(
   "native host entry references the single external presenter and compiles it",
   () => {
