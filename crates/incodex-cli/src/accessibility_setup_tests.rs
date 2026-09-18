@@ -88,6 +88,13 @@ fn read_marker(fixture: &Fixture) -> Value {
 }
 
 #[test]
+fn new_install_assigns_presentation_to_the_shared_cli_host() {
+    let fixture = committed_fixture("cli-presentation");
+    request_setup(&fixture.root, &fixture.app, &fixture.install_id).unwrap();
+    assert_eq!(read_marker(&fixture)["presentationOwner"], "cli");
+}
+
+#[test]
 fn each_explicit_install_has_a_distinct_setup_request() {
     let fixture = committed_fixture("request-generation");
     request_setup(&fixture.root, &fixture.app, &fixture.install_id).unwrap();

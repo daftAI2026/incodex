@@ -319,4 +319,44 @@ mod tests {
         assert!(error.contains("System Settings"));
         assert!(error.contains("/Applications/ChatGPT.app"));
     }
+
+    #[test]
+    fn denied_access_is_not_reset_before_the_native_guide_can_obtain_allow() {
+        // A guide that cannot be presented is not a user Allow.  In particular,
+        // its failure must not leave the official registration reset as a side
+        // effect.  The current implementation resets before calling `show`,
+        // so this is intentionally red until the native-guide handoff is wired.
+        let mut ops = Fake::new(&[AccessibilityStatus::Denied]);
+        ops.show_error = true;
+
+        let _ = renew(&mut ops);
+
+        assert_eq!(ops.events.iter().filter(|event| **event == "reset").count(), 0);
+    }
+
+    #[test]
+    fn native_guide_surface_precedes_the_single_allow_reset() {
+        // The guide owns the decision.  Reset and System Settings may follow
+        // only after its Allow path, never before the surface is ready.
+        let mut ops = Fake::new(&[
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Granted,
+        ]);
+
+        let _ = renew(&mut ops);
+
+        let guide = ops
+            .events
+            .iter()
+            .position(|event| *event == "show")
+            .expect("the native guide surface should be recorded");
+        let reset = ops
+            .events
+            .iter()
+            .position(|event| *event == "reset")
+            .expect("Allow should be the only path to reset");
+        assert!(guide < reset, "reset happened before the Allow-capable guide");
+        assert_eq!(ops.events.iter().filter(|event| **event == "reset").count(), 1);
+    }
 }

@@ -353,6 +353,17 @@ test("host closure does not read webContents after the native window is destroye
 });
 
 describe("Accessibility setup controller", () => {
+  test("leaves CLI-owned setup entirely to the shared external guide", async () => {
+    const harness = makeHarness({ probes: [true] });
+    writeMarker(harness.requestPath, { presentationOwner: "cli" });
+    const before = readMarker(harness.requestPath);
+    await harness.controller.run();
+    expect(readMarker(harness.requestPath)).toEqual(before);
+    expect(harness.createSetupWindowCalls).toBe(0);
+    expect(harness.spawnCalls).toHaveLength(0);
+    expect(harness.shell.opened).toHaveLength(0);
+  });
+
   test("marks a pending request granted silently when the actual host is trusted", async () => {
     const harness = makeHarness({ probes: [true] });
 
