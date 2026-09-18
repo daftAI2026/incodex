@@ -62,6 +62,15 @@ final class SettingsLocator {
 @main
 enum PermissionHostPresenterSmoke {
     static func main() {
+        if CommandLine.arguments.contains("--verify-icon") {
+            let expected = NSImage(contentsOfFile: "/System/Library/ExtensionKit/Extensions/AccessibilitySettingsExtension.appex/Contents/Resources/UniversalAccessPref.icns")
+                ?? NSImage(contentsOfFile: "/System/Library/PreferencePanes/UniversalAccessPref.prefPane/Contents/Resources/UniversalAccessPref.icns")
+                ?? NSImage(systemSymbolName: "accessibility", accessibilityDescription: "Accessibility")
+            let actual = permissionHostPermissionIcon(title: "Accessibility")
+            precondition(actual != nil && expected != nil && actual?.tiffRepresentation == expected?.tiffRepresentation)
+            print("native-icon-source-preserved")
+            return
+        }
         _ = NSApplication.shared
         let copy: NSDictionary = [
             "title": "Enable ChatGPT scripting",
@@ -111,6 +120,9 @@ enum PermissionHostPresenterSmoke {
       const output = `${build.stdout ?? ""}${build.stderr ?? ""}`;
       expect(build.status, output || String(build.error ?? "Swift presenter compilation failed")).toBe(0);
       expect(output, output || "Swift presenter compilation emitted a warning").not.toContain("warning:");
+      const icon = spawnSync(executable, ["--verify-icon"], { encoding: "utf8", timeout: 10_000 });
+      expect(icon.status, icon.stderr).toBe(0);
+      expect(icon.stdout).toContain("native-icon-source-preserved");
 
       if (process.env.INCODEX_RUN_PERMISSION_HOST_PRESENTER_SMOKE === "1") {
         const run = spawnSync(executable, [], { cwd: repo, encoding: "utf8", timeout: 20_000 });
