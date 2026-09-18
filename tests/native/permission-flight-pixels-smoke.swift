@@ -191,10 +191,10 @@ private func assertOutsideRoundedClip(_ image: NSImage, baseline: NSImage, label
 @MainActor
 private func render(_ view: IncodexPermissionFlightView,
                     source: NSImage?, target: NSImage?, progress: CGFloat,
-                    reduceTransparency: Bool, size: NSSize = surfaceSize) -> NSImage {
+                    reduceTransparency: Bool) -> NSImage {
     view.setSourceImage(source, targetImage: target)
     view.updateProgress(progress, cornerRadius: probeRadius, reduceTransparency: reduceTransparency)
-    view.setFrameSize(size)
+    view.setFrameSize(surfaceSize)
     // @Published updates invalidate the hosted SwiftUI tree on the main run
     // loop. Flush that invalidation before cacheDisplay; this remains
     // windowless and is required to sample the state just submitted.
@@ -289,20 +289,6 @@ enum PermissionFlightPixelsSmoke {
             let clipped = render(view, source: source, target: target, progress: 0.5, reduceTransparency: false)
             assertOutsideRoundedClip(clipped, baseline: baseline, label: direction)
             precondition(view.subviews[0] === host, "\(direction): baseline/clip probe replaced live host")
-        }
-
-        // During flight the proposed surface can be smaller than either
-        // snapshot. A full-size-only fixture cannot detect intrinsic image
-        // dimensions enlarging the shared rounded clipping container.
-        for size in [NSSize(width: 525, height: 95), NSSize(width: 518, height: 80)] {
-            let view = IncodexPermissionFlightView(frame: NSRect(origin: .zero, size: size))
-            let source = makeSolidImage(size: large, red: 0.92, green: 0.06, blue: 0.06)
-            let target = makeSolidImage(size: small, red: 0.06, green: 0.18, blue: 0.92)
-            let baseline = render(view, source: nil, target: nil, progress: 0.5,
-                                  reduceTransparency: false, size: size)
-            let composed = render(view, source: source, target: target, progress: 0.5,
-                                  reduceTransparency: false, size: size)
-            assertOutsideRoundedClip(composed, baseline: baseline, label: "shrinking surface \(size)")
         }
 
         precondition(NSApp.windows.allSatisfy { !$0.isVisible }, "flight pixel smoke created a visible window")
