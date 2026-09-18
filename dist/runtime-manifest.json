@@ -16,7 +16,7 @@
     "incodex-runtime-load.cjs": "153ea5d8d2eb68551936da7f997fa46f67882f35c62357391c30da6547251d84",
     "incodex-codex-mode.cjs": "b42a974b9f562b69efadd91caefcf20566ece11a10cd28d426e2c6202c73e609",
     "incodex-dock-menu.cjs": "59656e824910fe8a2da49d570f8c3407dbc67b8f74f62042caef3e518c1e7b32",
-    "incodex-permission-host.cjs": "5895539447f58acb97aaab36fde33c702d8c8565d1ceb163cd9d6902880e6d12",
+    "incodex-permission-host.cjs": "ebcefbe9402a234d56400bcbe2ed88f4a3314f6a5ed0aaf71c8281c83637d8cb",
     "incodex-permission-ui.cjs": "70eabc8707aefcb422b022900c26157a79517e9503e30edc4255419b151d355d"
   }
 }

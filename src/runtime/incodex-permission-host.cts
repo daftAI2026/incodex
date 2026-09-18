@@ -29,6 +29,7 @@ const PRE_READY_MAX_MESSAGES = 16;
 const PRE_READY_MAX_BYTES = HOST_MAX_LINE_BYTES;
 const HOST_TIMEOUT_MS = 15 * 60 * 1000;
 const PRESENTATION_TIMEOUT_MS = 5 * 60 * 1000;
+const GUIDE_RETRY_DELAY_MS = 10;
 const ACCESSIBILITY_COPY = "__INCODEX_ACCESSIBILITY_COPY__";
 const ACCESSIBILITY_LOCALE = "__INCODEX_ACCESSIBILITY_LOCALE__";
 const accessibilityWindow = "__INCODEX_ACCESSIBILITY_WINDOW__";
@@ -585,16 +586,36 @@ function createPermissionHost(options = {}) {
     };
   };
 
-  const waitForPresentation = async (canPresent, timeoutMs) => {
-    const deadline = Date.now() + timeoutMs;
+  const waitForPresentation = async (canPresent, deadline) => {
     while (!finished) {
       let present = false;
       try { present = Boolean(canPresent()); } catch {}
-      if (present) return;
+      if (present) return true;
       if (Date.now() >= deadline) throw new Error("official ChatGPT window is not presentable");
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, Math.min(50, Math.max(1, deadline - Date.now()))));
     }
-    throw new Error("permission host closed before presentation");
+    return false;
+  };
+
+  const makeGuideWithinPresentationDeadline = async (api, canPresent, timeoutMs) => {
+    const deadline = Date.now() + timeoutMs;
+    while (!finished) {
+      const present = await waitForPresentation(canPresent, deadline);
+      if (!present || finished) return null;
+      const createdGuide = await api.makeGuide();
+      if (finished) {
+        try { createdGuide?.close?.(); } catch {}
+        return null;
+      }
+      // The native factory deliberately returns null when focus/authentication
+      // changed between the gate and AppKit construction. Retry the gate and
+      // factory under the original deadline; undefined or another malformed
+      // value remains a hard startup error below.
+      if (createdGuide !== null) return createdGuide;
+      if (Date.now() >= deadline) throw new Error("native permission guide did not become available");
+      await new Promise(resolve => setTimeout(resolve, Math.min(GUIDE_RETRY_DELAY_MS, Math.max(1, deadline - Date.now()))));
+    }
+    return null;
   };
 
   const installLifecycle = () => {
@@ -646,16 +667,12 @@ function createPermissionHost(options = {}) {
       return done;
     }
     const api = nativeGuideApi(options, runtime);
-    await waitForPresentation(
+    const createdGuide = await makeGuideWithinPresentationDeadline(
+      api,
       options.canPresent || runtime.canPresent || (() => true),
       options.presentationTimeoutMs ?? PRESENTATION_TIMEOUT_MS,
     );
-    if (finished) return done;
-    const createdGuide = await api.makeGuide();
-    if (finished) {
-      try { createdGuide?.close?.(); } catch {}
-      return done;
-    }
+    if (finished || createdGuide === null) return done;
     guide = createdGuide;
     if (!guide || typeof guide.choice?.then !== "function") {
       throw new Error("native permission guide did not return a choice promise");
