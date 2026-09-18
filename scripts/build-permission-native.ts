@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  chmodSync,
   copyFileSync,
   mkdirSync,
   mkdtempSync,
@@ -14,9 +15,21 @@ import { tmpdir } from "node:os";
 const root = join(import.meta.dir, "..");
 const nativeRoot = join(root, "native", "macos");
 const sourcePath = join(nativeRoot, "permission-views.swift");
+// The configure-first process entry point is in permission-host.swift and its
+// AppKit presenter is kept separate so the UI and protocol lifetimes remain
+// reviewable.  Keep this list explicit: the repository also contains small
+// presenter-only smoke fixtures which are not part of the shipped binary.
+const hostSourcePaths = [
+  join(nativeRoot, "permission-host-settings.swift"),
+  join(nativeRoot, "permission-host-flight.swift"),
+  join(nativeRoot, "permission-host-presenter.swift"),
+  join(nativeRoot, "permission-host.swift"),
+];
 const distRoot = join(nativeRoot, "dist");
 const dylibName = "incodex-permission-ui.dylib";
+const hostName = "incodex-permission-host";
 const dylibPath = join(distRoot, dylibName);
+const hostPath = join(distRoot, hostName);
 const manifestPath = join(distRoot, "runtime-native-manifest.json");
 const minimumMacOS = "12.0";
 const architectures = ["arm64", "x86_64"] as const;
@@ -28,6 +41,7 @@ type NativeManifest = {
   minimumMacOS: typeof minimumMacOS;
   architectures: string[];
   sourceSha256: string;
+  hostSourceSha256: string;
   files: Record<string, string>;
 };
 
@@ -49,19 +63,25 @@ function sha256(path: string): string {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
+function sha256Files(paths: string[]): string {
+  const digest = createHash("sha256");
+  for (const path of paths) digest.update(readFileSync(path));
+  return digest.digest("hex");
+}
+
 function assertUniversalBinary(path: string): void {
   const lipoInfo = run("lipo", ["-info", path]);
   for (const architecture of architectures) {
     run("lipo", [path, "-verify_arch", architecture]);
     if (!lipoInfo.includes(architecture)) {
-      throw new Error(`Universal permission library is missing ${architecture}: ${lipoInfo}`);
+      throw new Error(`Universal permission native artifact is missing ${architecture}: ${lipoInfo}`);
     }
   }
 
   const loadCommands = run("otool", ["-l", path]);
   const minimumVersionMatches = loadCommands.match(new RegExp(`minos\\s+${minimumMacOS.replace(".", "\\.")}`, "g")) ?? [];
   if (minimumVersionMatches.length < architectures.length) {
-    throw new Error(`Permission library must target macOS ${minimumMacOS} in every slice`);
+    throw new Error(`Permission native artifact must target macOS ${minimumMacOS} in every slice`);
   }
 }
 
@@ -112,6 +132,24 @@ function buildSlice(swiftc: string, sdkPath: string, architecture: string, outpu
   ]);
 }
 
+function buildHostSlice(swiftc: string, sdkPath: string, architecture: string, output: string): void {
+  run(swiftc, [
+    "-parse-as-library",
+    "-emit-executable",
+    "-module-name",
+    "IncodexPermissionHost",
+    "-disable-autolinking-runtime-compatibility",
+    "-target",
+    `${architecture}-apple-macos${minimumMacOS}`,
+    "-sdk",
+    sdkPath,
+    sourcePath,
+    ...hostSourcePaths,
+    "-o",
+    output,
+  ]);
+}
+
 export function buildPermissionNative(): void {
   if (process.platform !== "darwin") {
     throw new Error("macOS permission native artifact must be built on macOS");
@@ -126,18 +164,30 @@ export function buildPermissionNative(): void {
     architecture,
     path: join(temporaryRoot, `incodex-permission-ui-${architecture}.dylib`),
   }));
+  const hostSlices = architectures.map((architecture) => ({
+    architecture,
+    path: join(temporaryRoot, `incodex-permission-host-${architecture}`),
+  }));
   const universalPath = join(temporaryRoot, dylibName);
+  const universalHostPath = join(temporaryRoot, hostName);
 
   try {
     for (const slice of slices) buildSlice(swiftc, sdkPath, slice.architecture, slice.path);
+    for (const slice of hostSlices) buildHostSlice(swiftc, sdkPath, slice.architecture, slice.path);
     run("lipo", ["-create", ...slices.map((slice) => slice.path), "-output", universalPath]);
+    run("lipo", ["-create", ...hostSlices.map((slice) => slice.path), "-output", universalHostPath]);
     run("codesign", ["--force", "--sign", "-", "--timestamp=none", universalPath]);
+    run("codesign", ["--force", "--sign", "-", "--timestamp=none", universalHostPath]);
     run("codesign", ["--verify", "--strict", "--", universalPath]);
+    run("codesign", ["--verify", "--strict", "--", universalHostPath]);
     assertUniversalBinary(universalPath);
+    assertUniversalBinary(universalHostPath);
     assertExports(universalPath);
 
     mkdirSync(distRoot, { recursive: true });
     copyFileSync(universalPath, dylibPath);
+    copyFileSync(universalHostPath, hostPath);
+    chmodSync(hostPath, 0o700);
     const manifest: NativeManifest = {
       schemaVersion: 1,
       platform: "macos",
@@ -145,10 +195,12 @@ export function buildPermissionNative(): void {
       minimumMacOS,
       architectures: [...architectures],
       sourceSha256: sha256(sourcePath),
-      files: { [dylibName]: sha256(dylibPath) },
+      hostSourceSha256: sha256Files(hostSourcePaths),
+      files: { [dylibName]: sha256(dylibPath), [hostName]: sha256(hostPath) },
     };
     writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
     process.stdout.write(`wrote ${dylibPath} (${readFileSync(dylibPath).byteLength} bytes)\n`);
+    process.stdout.write(`wrote ${hostPath} (${readFileSync(hostPath).byteLength} bytes)\n`);
     process.stdout.write(`wrote ${manifestPath}\n`);
   } finally {
     rmSync(temporaryRoot, { recursive: true, force: true });

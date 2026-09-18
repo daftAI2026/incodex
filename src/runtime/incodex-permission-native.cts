@@ -6,15 +6,17 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const NATIVE_NAME = "incodex-permission-ui.dylib";
+const NATIVE_HOST_NAME = "incodex-permission-host";
 const NATIVE_MANIFEST = "runtime-native-manifest.json";
 const libraries = new WeakMap();
 const hash = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
 const validHash = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 
-function privateFile(file, maximumSize) {
+function privateFile(file, maximumSize, executable = false, exactMode = null) {
   const stat = fs.lstatSync(file);
   if (stat.isSymbolicLink()) throw new Error("Native permission refuses symlink file");
-  if (!stat.isFile() || stat.size > maximumSize || stat.uid !== process.getuid() || (stat.mode & 0o022)) {
+  if (!stat.isFile() || stat.size > maximumSize || stat.uid !== process.getuid() || (stat.mode & 0o022) ||
+      (executable && !(stat.mode & 0o111)) || (exactMode !== null && (stat.mode & 0o777) !== exactMode)) {
     throw new Error("Native permission file has unsafe ownership, mode or size");
   }
   return fs.readFileSync(file);
@@ -47,7 +49,7 @@ function privateDirectory(directory) {
 // The library is always a sibling of this verified Runtime, never a path from
 // environment variables or the permissions UI. Older installed loaders still
 // verify the shared JS files; this gate verifies the additional native bytes.
-function resolvePermissionNativePath(directory = __dirname, platform = process.platform) {
+function resolvePermissionNativeArtifacts(directory = __dirname, platform = process.platform) {
   if (platform !== "darwin") throw new Error("Native permission UI is macOS only");
   directory = privateDirectory(directory);
   const runtime = JSON.parse(privateFile(path.join(directory, "runtime-manifest.json"), 1024 * 1024));
@@ -62,15 +64,35 @@ function resolvePermissionNativePath(directory = __dirname, platform = process.p
       !manifest.architectures.includes("arm64") || !manifest.architectures.includes("x86_64")) {
     throw new Error("Native permission manifest ABI is incompatible");
   }
-  if (!manifest.files || Object.keys(manifest.files).length !== 1 || !validHash(manifest.files[NATIVE_NAME]) ||
-      manifest.files[NATIVE_NAME] !== runtime.files[NATIVE_NAME]) {
+  const fileNames = manifest.files && Object.keys(manifest.files);
+  const hasHost = Boolean(fileNames?.includes(NATIVE_HOST_NAME));
+  if (!manifest.files || (fileNames.length !== (hasHost ? 2 : 1)) ||
+      fileNames.some(name => name !== NATIVE_NAME && name !== NATIVE_HOST_NAME) ||
+      !validHash(manifest.files[NATIVE_NAME]) || manifest.files[NATIVE_NAME] !== runtime.files[NATIVE_NAME] ||
+      (hasHost && (!validHash(manifest.files[NATIVE_HOST_NAME]) ||
+        manifest.files[NATIVE_HOST_NAME] !== runtime.files[NATIVE_HOST_NAME] ||
+        !validHash(manifest.hostSourceSha256)))) {
     throw new Error("Native permission artifact manifest mismatch");
   }
   const file = path.join(directory, NATIVE_NAME);
   if (hash(privateFile(file, 16 * 1024 * 1024)) !== manifest.files[NATIVE_NAME]) {
     throw new Error("Native permission dylib hash mismatch");
   }
-  return file;
+  const host = hasHost ? path.join(directory, NATIVE_HOST_NAME) : null;
+  if (host && hash(privateFile(host, 64 * 1024 * 1024, true, 0o700)) !== manifest.files[NATIVE_HOST_NAME]) {
+    throw new Error("Native permission host hash mismatch");
+  }
+  return { directory, manifest, file, host };
+}
+
+function resolvePermissionNativePath(directory = __dirname, platform = process.platform) {
+  return resolvePermissionNativeArtifacts(directory, platform).file;
+}
+
+function resolvePermissionNativeHostPath(directory = __dirname, platform = process.platform) {
+  const host = resolvePermissionNativeArtifacts(directory, platform).host;
+  if (!host) throw new Error("Native permission executable host is unavailable");
+  return host;
 }
 
 function loadPermissionNativeLibrary(objc, directory = __dirname, platform = process.platform) {
@@ -92,4 +114,4 @@ function loadPermissionNativeLibrary(objc, directory = __dirname, platform = pro
   return library;
 }
 
-export { loadPermissionNativeLibrary, resolvePermissionNativePath };
+export { loadPermissionNativeLibrary, resolvePermissionNativeHostPath, resolvePermissionNativePath };

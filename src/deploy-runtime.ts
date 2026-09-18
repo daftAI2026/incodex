@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RUNTIME_ARTIFACT_NAMES } from "./runtime-manifest.ts";
-import { macOSNativeRuntimeFiles } from "./native-runtime-artifacts.ts";
+import { macOSNativeRuntimeFiles, writeNativeRuntimeFiles } from "./native-runtime-artifacts.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = join(root, "dist");
@@ -31,9 +31,7 @@ for (const name of readdirSync(targetsDir)) {
     }
     writeFileSync(join(dest, file), readFileSync(src));
   }
-  for (const [file, bytes] of Object.entries(nativeFiles)) {
-    writeFileSync(join(dest, file), bytes, { mode: 0o600 });
-  }
+  writeNativeRuntimeFiles(dest, nativeFiles);
   copied += 1;
   console.log("deployed runtime to", dest);
 }

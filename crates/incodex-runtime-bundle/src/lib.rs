@@ -20,6 +20,7 @@ mod native;
 
 const DIR_MODE: u32 = 0o700;
 const FILE_MODE: u32 = 0o600;
+const EXECUTABLE_FILE_MODE: u32 = 0o700;
 // The pointer remains schema 1; manifest provenance is an optional extension.
 const CURRENT_SCHEMA: u64 = 1;
 const MANIFEST_NAME: &str = "runtime-manifest.json";
@@ -634,8 +635,13 @@ fn hash_private_file(path: &Path) -> Result<String, String> {
     if !metadata.file_type().is_file() {
         return Err(format!("{} is not a regular file", path.display()));
     }
-    if metadata.permissions().mode() & 0o777 != FILE_MODE {
-        return Err(format!("{} mode is not 0600", path.display()));
+    let expected_mode = expected_file_mode(path);
+    if metadata.permissions().mode() & 0o777 != expected_mode {
+        return Err(format!(
+            "{} mode is not {:04o}",
+            path.display(),
+            expected_mode
+        ));
     }
     let mut hash = Sha256::new();
     let mut chunk = [0_u8; 64 * 1024];
@@ -820,11 +826,12 @@ fn write_durable(path: &Path, body: &[u8]) -> Result<(), String> {
         .parent()
         .ok_or("runtime file needs a parent directory")?;
     mkdir_mode(parent)?;
+    let mode = expected_file_mode(path);
     let mut options = OpenOptions::new();
     options
         .write(true)
         .create_new(true)
-        .mode(FILE_MODE)
+        .mode(mode)
         .custom_flags(libc::O_NOFOLLOW);
     let mut file = options.open(path).map_err(|error| error.to_string())?;
     file.write_all(body).map_err(|error| error.to_string())?;
@@ -832,10 +839,18 @@ fn write_durable(path: &Path, body: &[u8]) -> Result<(), String> {
         .metadata()
         .map_err(|error| error.to_string())?
         .permissions();
-    perms.set_mode(FILE_MODE);
+    perms.set_mode(mode);
     file.set_permissions(perms)
         .map_err(|error| error.to_string())?;
     file.sync_all().map_err(|error| error.to_string())
+}
+
+fn expected_file_mode(path: &Path) -> u32 {
+    if path.file_name().and_then(|name| name.to_str()) == Some(native::HOST_EXECUTABLE_NAME) {
+        EXECUTABLE_FILE_MODE
+    } else {
+        FILE_MODE
+    }
 }
 
 fn write_current<F>(root: &Path, body: &[u8], hook: &mut F) -> Result<(), String>

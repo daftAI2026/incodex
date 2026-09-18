@@ -2,12 +2,19 @@
 use sha2::{Digest, Sha256};
 
 pub(crate) const DYLIB_NAME: &str = "incodex-permission-ui.dylib";
+pub(crate) const HOST_EXECUTABLE_NAME: &str = "incodex-permission-host";
 pub(crate) const MANIFEST_NAME: &str = "runtime-native-manifest.json";
 
 #[cfg(target_os = "macos")]
 const DYLIB_BYTES: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../native/macos/dist/incodex-permission-ui.dylib"
+));
+
+#[cfg(target_os = "macos")]
+const HOST_EXECUTABLE_BYTES: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../native/macos/dist/incodex-permission-host"
 ));
 
 #[cfg(target_os = "macos")]
@@ -22,10 +29,34 @@ const SOURCE_BYTES: &[u8] = include_bytes!(concat!(
     "/../../native/macos/permission-views.swift"
 ));
 
+#[cfg(target_os = "macos")]
+const HOST_SOURCE_BYTES: &[&[u8]] = &[
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/permission-host-settings.swift"
+    )),
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/permission-host-flight.swift"
+    )),
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/permission-host-presenter.swift"
+    )),
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../native/macos/permission-host.swift"
+    )),
+];
+
 pub(crate) fn files() -> &'static [(&'static str, &'static [u8])] {
     #[cfg(target_os = "macos")]
     {
-        &[(DYLIB_NAME, DYLIB_BYTES), (MANIFEST_NAME, MANIFEST_BYTES)]
+        &[
+            (DYLIB_NAME, DYLIB_BYTES),
+            (HOST_EXECUTABLE_NAME, HOST_EXECUTABLE_BYTES),
+            (MANIFEST_NAME, MANIFEST_BYTES),
+        ]
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -57,6 +88,9 @@ pub(crate) fn validate_with_source_bytes(source: &[u8]) -> Result<(), String> {
         if !is_macho(DYLIB_BYTES) {
             return Err("embedded macOS native helper is not a Mach-O binary".into());
         }
+        if !is_macho(HOST_EXECUTABLE_BYTES) {
+            return Err("embedded macOS native guide host is not a Mach-O binary".into());
+        }
         let manifest: serde_json::Value = serde_json::from_slice(MANIFEST_BYTES)
             .map_err(|error| format!("invalid embedded native manifest: {error}"))?;
         if manifest["schemaVersion"] != 1
@@ -74,10 +108,17 @@ pub(crate) fn validate_with_source_bytes(source: &[u8]) -> Result<(), String> {
         if expected_source != sha256_hex(source) {
             return Err("embedded native manifest source hash mismatch".into());
         }
+        let expected_host_source = manifest["hostSourceSha256"]
+            .as_str()
+            .filter(|value| is_sha256(value))
+            .ok_or("embedded native manifest hostSourceSha256 is invalid")?;
+        if expected_host_source != sha256_concat_hex(HOST_SOURCE_BYTES) {
+            return Err("embedded native manifest host source hash mismatch".into());
+        }
         let files = manifest["files"]
             .as_object()
             .ok_or("embedded native manifest files are missing")?;
-        if files.len() != 1 {
+        if files.len() != 2 {
             return Err("embedded native manifest files are invalid".into());
         }
         let expected = files
@@ -88,6 +129,14 @@ pub(crate) fn validate_with_source_bytes(source: &[u8]) -> Result<(), String> {
         let actual = sha256_hex(DYLIB_BYTES);
         if expected != actual {
             return Err("embedded native manifest dylib hash mismatch".into());
+        }
+        let expected_host = files
+            .get(HOST_EXECUTABLE_NAME)
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| is_sha256(value))
+            .ok_or("embedded native manifest host hash is invalid")?;
+        if expected_host != sha256_hex(HOST_EXECUTABLE_BYTES) {
+            return Err("embedded native manifest host hash mismatch".into());
         }
         Ok(())
     }
@@ -115,6 +164,19 @@ fn is_sha256(value: &str) -> bool {
 #[cfg(target_os = "macos")]
 fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn sha256_concat_hex(parts: &[&[u8]]) -> String {
+    let mut digest = Sha256::new();
+    for part in parts {
+        digest.update(part);
+    }
+    digest
+        .finalize()
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
