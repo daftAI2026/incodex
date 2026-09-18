@@ -717,6 +717,7 @@ function makeBridge(
 ): FakeBridge {
   const calls: NativeCall[] = [];
   const objects: FakeNative[] = [];
+  let sharedWorkspace: FakeNative | undefined;
   const definitions = new Map<string, Record<string, (...args: any[]) => unknown>>();
 
   function object(type: string, methods: Record<string, (...args: any[]) => unknown> = {}): FakeNative {
@@ -762,7 +763,7 @@ function makeBridge(
         return url;
       },
       imageNamed$: (value: string) => value,
-      sharedWorkspace: () => object(type),
+      sharedWorkspace: () => sharedWorkspace ??= object(type),
       defaultCenter: () => object(type),
       whiteColor: () => {
         const color = object(type);
@@ -930,6 +931,42 @@ function installPollingClock() {
     restore() {
       globalThis.setInterval = originalSetInterval;
       globalThis.clearInterval = originalClearInterval;
+    },
+  };
+}
+
+type ArrowTimer = { id: number; delay: number; callback: () => void; active: boolean };
+
+function installArrowClock() {
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  let nextId = 1;
+  const timers: ArrowTimer[] = [];
+  globalThis.setTimeout = ((callback: TimerHandler, delay?: number) => {
+    const timer = {
+      id: nextId++,
+      delay: Number(delay ?? 0),
+      callback: callback as () => void,
+      active: true,
+    };
+    timers.push(timer);
+    return timer.id as unknown as ReturnType<typeof setTimeout>;
+  }) as unknown as typeof setTimeout;
+  globalThis.clearTimeout = ((id?: ReturnType<typeof setTimeout>) => {
+    const timer = timers.find((entry) => entry.id === Number(id));
+    if (timer) timer.active = false;
+  }) as unknown as typeof clearTimeout;
+  return {
+    timers,
+    active() { return timers.filter((timer) => timer.active); },
+    fire(timer: ArrowTimer) {
+      if (!timer.active) return;
+      timer.active = false;
+      timer.callback();
+    },
+    restore() {
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
     },
   };
 }
@@ -1293,7 +1330,9 @@ async function makeHarness(options: {
     onBack: options.onBack,
   });
   if (options.reduceMotion) {
-    bridge.objects.find((value) => value.type === "NSWorkspace")?.values.set("reduceMotion", true);
+    const workspace = bridge.objects.find((value) => value.type === "NSWorkspace")
+      ?? new (bridge.objc as any).NobjcLibrary("/System/Library/Frameworks/AppKit.framework/AppKit").NSWorkspace.sharedWorkspace();
+    workspace.values.set("reduceMotion", true);
   }
   const panel = bridge.objects.find((value) => value.type === "NSPanel");
   if (!panel) throw new Error("native Accessibility panel was not created");
@@ -2146,6 +2185,91 @@ describe("native Accessibility setup adapter", () => {
       globalThis.setTimeout = originalSetTimeout;
       globalThis.clearTimeout = originalClearTimeout;
       api.close();
+    }
+  });
+
+  test("keeps one arrow timer through hover replacement and drag start/end", async () => {
+    const harness = await makeHarness();
+    const { api, bridge } = harness;
+    const clock = installArrowClock();
+    try {
+      api.setState("awaiting-user");
+      await settleNativeAsync();
+      const row = bridge.objects.find((value) => value.hasSelector("draggingSession:willBeginAtPoint:"));
+      const tracker = bridge.objects.find((value) => value.hasSelector("mouseEntered:"));
+      if (!row || !tracker) throw new Error("native arrow timer fixtures are missing");
+
+      expect(clock.active().map((timer) => timer.delay)).toEqual([500]);
+      row.invoke("draggingSession:willBeginAtPoint:", { x: 0, y: 0 });
+      expect(clock.active()).toHaveLength(0);
+
+      row.invoke("draggingSession:endedAtPoint:operation:", { x: 0, y: 0 }, 0);
+      expect(clock.active().map((timer) => timer.delay)).toEqual([4000]);
+
+      tracker.invoke("mouseEntered:", {});
+      expect(clock.active().map((timer) => timer.delay)).toEqual([250]);
+      tracker.invoke("mouseEntered:", {});
+      expect(clock.active().map((timer) => timer.delay)).toEqual([250]);
+
+      row.invoke("draggingSession:willBeginAtPoint:", { x: 0, y: 0 });
+      expect(clock.active()).toHaveLength(0);
+      row.invoke("draggingSession:endedAtPoint:operation:", { x: 0, y: 0 }, 0);
+      expect(clock.active().map((timer) => timer.delay)).toEqual([4000]);
+    } finally {
+      api.close();
+      expect(clock.active()).toHaveLength(0);
+      clock.restore();
+    }
+  });
+
+  test("reduced motion keeps the arrow timer queue empty", async () => {
+    const harness = await makeHarness({ reduceMotion: true });
+    const { api, bridge } = harness;
+    const clock = installArrowClock();
+    try {
+      api.setState("awaiting-user");
+      await settleNativeAsync();
+      const row = bridge.objects.find((value) => value.hasSelector("draggingSession:willBeginAtPoint:"));
+      const tracker = bridge.objects.find((value) => value.hasSelector("mouseEntered:"));
+      if (!row || !tracker) throw new Error("native arrow timer fixtures are missing");
+
+      expect(clock.active()).toHaveLength(0);
+      tracker.invoke("mouseEntered:", {});
+      expect(clock.active()).toHaveLength(0);
+      row.invoke("draggingSession:willBeginAtPoint:", { x: 0, y: 0 });
+      row.invoke("draggingSession:endedAtPoint:operation:", { x: 0, y: 0 }, 0);
+      expect(clock.active()).toHaveLength(0);
+    } finally {
+      api.close();
+      expect(clock.active()).toHaveLength(0);
+      clock.restore();
+    }
+  });
+
+  test("close drains arrow timers and stale callbacks cannot revive a pulse", async () => {
+    const harness = await makeHarness();
+    const { api, swift } = harness;
+    const clock = installArrowClock();
+    try {
+      api.setState("awaiting-user");
+      await settleNativeAsync();
+      const pulse = clock.active().find((timer) => timer.delay === 500);
+      if (!pulse) throw new Error("initial arrow pulse timer is missing");
+      clock.fire(pulse);
+      const returnTimer = clock.active().find((timer) => timer.delay === 250);
+      if (!returnTimer) throw new Error("arrow return timer is missing");
+
+      api.close();
+      expect(clock.active()).toHaveLength(0);
+      const callsAtClose = swift?.arrowViews[0].calls.length ?? 0;
+      pulse.callback();
+      returnTimer.callback();
+      expect(clock.active()).toHaveLength(0);
+      expect(swift?.arrowViews[0].calls).toHaveLength(callsAtClose);
+    } finally {
+      api.close();
+      expect(clock.active()).toHaveLength(0);
+      clock.restore();
     }
   });
 
