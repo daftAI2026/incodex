@@ -5,11 +5,13 @@ pub(crate) fn parse_locale_override(content: &str, accepted_quotes: &[char]) -> 
             return None;
         }
         let value = value.trim();
-        let unquoted = accepted_quotes.iter().find_map(|quote| {
-            value
-                .strip_prefix(*quote)
-                .and_then(|value| value.strip_suffix(*quote))
-        })?;
+        let quote = value.chars().next()?;
+        if !accepted_quotes.contains(&quote) {
+            return None;
+        }
+        let value = value.strip_prefix(quote)?;
+        let end = value.find(quote)?;
+        let unquoted = &value[..end];
         let locale = unquoted.trim();
         (!locale.is_empty()).then(|| locale.to_string())
     })
