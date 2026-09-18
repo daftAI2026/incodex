@@ -326,7 +326,7 @@ public final class PermissionHostPresenter: NSObject {
             cardView?.isHidden = false
             setInitialContent(
                 title: permissionHostString(copy, "errorTitle"),
-                body: message ?? permissionHostString(copy, "errorBody"),
+                body: permissionHostString(copy, "errorBody"),
                 allowEnabled: false,
                 settingsPlaceholder: false,
             )
