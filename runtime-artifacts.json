@@ -14,7 +14,7 @@
     "incodex-runtime-load.cjs",
     "incodex-codex-mode.cjs",
     "incodex-dock-menu.cjs",
-    "incodex-permission-host.cjs",
+    "incodex-permission-copy.json",
     "incodex-permission-ui.cjs"
   ]
 }

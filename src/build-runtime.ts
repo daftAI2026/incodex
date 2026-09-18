@@ -5,7 +5,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { minify } from "terser";
 import { ACCESSIBILITY_SETUP_COPY } from "./runtime/incognito-copy.ts";
-import { sharedPermissionCopy } from "./permission-shared-copy.ts";
 import {
   RUNTIME_ARTIFACT_NAMES,
   RUNTIME_EXTERNAL_ARTIFACT_NAMES,
@@ -16,6 +15,7 @@ import {
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = join(root, "dist");
 mkdirSync(outDir, { recursive: true });
+writeFileSync(join(outDir, "incodex-permission-copy.json"), `${JSON.stringify(ACCESSIBILITY_SETUP_COPY)}\n`);
 
 const hatGlassesSvg = readFileSync(join(root, "assets/hat-glasses.svg"), "utf8").trim();
 const circleXSvg = readFileSync(join(root, "assets/circle-x.svg"), "utf8").trim();
@@ -95,10 +95,8 @@ for (const name of cjsNames) {
   if (name === RUNTIME_LOADER_NAME) {
     text = embedRuntimeArtifactNames(text);
   }
-  if (name === "incodex-main.cjs" || name === "incodex-permission-host.cjs") {
-    const guideCopy = name === "incodex-permission-host.cjs"
-      ? sharedPermissionCopy(ACCESSIBILITY_SETUP_COPY) : ACCESSIBILITY_SETUP_COPY;
-    text = text.replace('"__INCODEX_ACCESSIBILITY_COPY__"', JSON.stringify(guideCopy))
+  if (name === "incodex-main.cjs") {
+    text = text.replace('"__INCODEX_ACCESSIBILITY_COPY__"', 'require("./incodex-permission-copy.json")')
       .replace('"__INCODEX_ACCESSIBILITY_LOCALE__"', localeModule);
     text = text.replace('"__INCODEX_ACCESSIBILITY_WINDOW__"',
       'require("./incodex-permission-ui.cjs")');
@@ -118,7 +116,7 @@ for (const name of cjsNames) {
     text = text.replace('"__INCODEX_ACCESSIBILITY_WINDOW__"',
       `(() => { const module = { exports: {} }; const exports = module.exports; ${guide.code}\nreturn { ...module.exports, ...${nativeMotionModule} }; })()`);
   }
-  if (name === "incodex-main.cjs" || name === "incodex-dock-menu.cjs" || name === "incodex-permission-host.cjs" || name === "incodex-permission-ui.cjs") {
+  if (name === "incodex-main.cjs" || name === "incodex-dock-menu.cjs" || name === "incodex-permission-ui.cjs") {
     // Keep readable source while preserving the external Runtime size budget.
     // Preserve top-level entry points, property names and CommonJS paths.
     // Compact only local identifiers; the loader stays unchanged.
