@@ -58,7 +58,21 @@ function samplePermissionFlightAtProgress(source, target, progress) {
 function samplePermissionFlight(source, target, seconds) {
   return samplePermissionFlightAtProgress(source, target, springPermissionProgress(seconds));
 }
-function runPermissionFlight({source,target,reducedMotion,reverse=false,now,schedule,cancel,frameSource=null,render,onComplete}) {
+function runPermissionFlight({source,target,reducedMotion,reverse=false,now,schedule,cancel,frameSource=null,render,onComplete}: {
+  source: any;
+  target: any;
+  reducedMotion: boolean;
+  reverse?: boolean;
+  now: () => number;
+  schedule: (callback: () => void) => any;
+  cancel: (handle: any) => void;
+  frameSource?: {
+    start(callback: (displayTimestamp: number) => void): boolean;
+    stop?: () => void;
+  } | null;
+  render: (frame: any) => void;
+  onComplete: () => void;
+}) {
   let disposed=false,handle=null,frameSourceStarted=false,useTimer=false,displayOrigin=null;
   const start=now();
   const spring=createPermissionSpring();
@@ -75,6 +89,14 @@ function runPermissionFlight({source,target,reducedMotion,reverse=false,now,sche
     if (firstError) throw firstError;
   }
   function frame(displayTimestamp) {
+    try { renderFrame(displayTimestamp); }
+    catch (error) {
+      disposed=true;
+      try { stopFrameSource(); } catch {}
+      throw error;
+    }
+  }
+  function renderFrame(displayTimestamp) {
     if(disposed)return;
     if (reducedMotion && reverse) { complete(); return; }
     if (displayTimestamp !== undefined && !Number.isFinite(displayTimestamp)) return;
@@ -99,7 +121,11 @@ function runPermissionFlight({source,target,reducedMotion,reverse=false,now,sche
       frameSourceStarted=true;
       let started=false;
       try { started=Boolean(frameSource.start(frame)); }
-      catch (error) { frameSourceStarted=false; throw error; }
+      catch (error) {
+        disposed=true;
+        try { stopFrameSource(); } catch {}
+        throw error;
+      }
       if (started) return;
       frameSourceStarted=false;
       useTimer=true;

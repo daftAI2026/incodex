@@ -74,7 +74,7 @@ test("display-link frame source drives relative timestamps and stops after dispo
   const stop = runPermissionFlight({ source, target, reducedMotion: false,
     frameSource, now: () => 0,
     schedule: () => { timerSchedules++; return 1; }, cancel: () => {},
-    render: frame => frames.push(frame), onComplete: () => {} });
+    render: (frame: any) => frames.push(frame), onComplete: () => {} });
 
   expect(starts).toBe(1);
   expect(timerSchedules).toBe(0);
@@ -96,7 +96,7 @@ test("a display source that declines falls back to timer frames until completion
   let schedules = 0;
   const frameSource = { start: () => false, stop: () => { throw new Error("must not stop a declined source"); } };
   const stop = runPermissionFlight({ source, target, reducedMotion: false, frameSource, now: () => 0,
-    schedule: callback => { schedules++; timerCallback = callback; return schedules; }, cancel: () => {},
+    schedule: (callback: () => void) => { schedules++; timerCallback = callback; return schedules; }, cancel: () => {},
     render: () => {}, onComplete: () => {} });
   expect(schedules).toBe(1);
   timerCallback?.();
@@ -130,7 +130,7 @@ test("invalid or backwards display timestamps never switch back to the wall cloc
   };
   runPermissionFlight({ source, target, reducedMotion: false, frameSource, now: () => 99_000,
     schedule: () => { throw new Error("display source should own scheduling"); }, cancel: () => {},
-    render: frame => frames.push(frame), onComplete: () => {} });
+    render: (frame: any) => frames.push(frame), onComplete: () => {} });
   emit?.(4);
   expect(frames).toHaveLength(2);
   emit?.(Number.NaN);
@@ -155,7 +155,7 @@ test("a throwing display render stops scheduling and ignores late callbacks", ()
   let stopped = 0;
   let renders = 0;
   runPermissionFlight({ source, target, reducedMotion: false,
-    frameSource: { start(callback) { emit = callback; return true; }, stop() { stopped++; } },
+    frameSource: { start(callback: (timestamp: number) => void) { emit = callback; return true; }, stop() { stopped++; } },
     now: () => 0, schedule: () => 0, cancel() {},
     render() { if (++renders > 1) throw new Error("render failed"); }, onComplete() {},
   });

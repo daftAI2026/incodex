@@ -352,7 +352,7 @@ test("native handoff prefers the replicant display source and stops it on dispos
     source: { frame: rect(10, 400, 80, 28) },
     target: { frame: rect(300, 20, 532, 112) },
     schedule: () => { timerSchedules++; return 1; }, cancel: () => {},
-    createReplicants: () => ({ frameSource, render: frame => frames.push(frame), dispose() {} }),
+    createReplicants: () => ({ frameSource, render: (frame: any) => frames.push(frame), dispose() {} }),
   });
   expect(starts).toBe(1);
   expect(timerSchedules).toBe(0);
@@ -371,10 +371,10 @@ test("native handoff falls back when the display source declines", async () => {
   const flight = runNativePermissionHandoff({
     objc: {}, reducedMotion: false, now: () => 0,
     source: { frame: rect(10, 400, 80, 28) }, target: { frame: rect(300, 20, 532, 112) },
-    schedule: callback => { schedules++; pending = callback; return schedules; }, cancel: () => {},
+    schedule: (callback: () => void) => { schedules++; pending = callback; return schedules; }, cancel: () => {},
     createReplicants: () => ({
       frameSource: { start: () => false, stop: () => { throw new Error("declined source must not stop"); } },
-      render: frame => frames.push(frame), dispose() {},
+      render: (frame: any) => frames.push(frame), dispose() {},
     }),
   });
   expect(schedules).toBe(1);
@@ -395,7 +395,7 @@ test("native display-source startup failure still disposes its replicants", asyn
       frameSource: { start: () => { throw new Error("display source unavailable"); }, stop() {} },
       render() {}, dispose() { disposed++; },
     }),
-    onError: error => { reported = error; },
+    onError: (error: unknown) => { reported = error; },
   });
   await flight.finished;
   expect((reported as Error).message).toBe("display source unavailable");
@@ -412,7 +412,7 @@ test("native display-link startup exceptions invalidate a partially installed li
     invalidate() { invalidations++; },
     displayLinked() { return true; },
   };
-  swift.library.IncodexPermissionDisplayLink = { alloc: () => displayLink };
+  (swift.library as any).IncodexPermissionDisplayLink = { alloc: () => displayLink };
   bridge.objc.typedBlock = (_signature: any, callback: Function) => ({ callback });
   const replicas = createNativeReplicants({
     objc: bridge.objc,
@@ -445,7 +445,7 @@ test("render failure from a display callback disposes the source and replicants"
       render() { renders++; if (renders > 1) throw new Error("render failed"); },
       dispose() { disposed++; },
     }),
-    onError: error => { reported = error; },
+    onError: (error: unknown) => { reported = error; },
   });
   emit?.(1);
   await flight.finished;
