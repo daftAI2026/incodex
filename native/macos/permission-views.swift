@@ -669,6 +669,7 @@ public final class IncodexPermissionArrowView: NSView {
         self.state = state
         host = NSHostingView(rootView: PermissionLiveArrowRoot(state: state))
         super.init(frame: frameRect)
+        clipsToBounds = false
         host.frame = bounds
         host.autoresizingMask = [.width, .height]
         host.clipsToBounds = false
