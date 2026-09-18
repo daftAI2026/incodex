@@ -141,6 +141,30 @@ test("invalid or backwards display timestamps never switch back to the wall cloc
   expect(frames.at(-1).progress).toBeGreaterThan(0);
 });
 
+test("a partially started display source is stopped when startup throws", () => {
+  let stopped = 0;
+  expect(() => runPermissionFlight({ source, target, reducedMotion: false,
+    frameSource: { start() { throw new Error("start failed"); }, stop() { stopped++; } },
+    now: () => 0, schedule: () => 0, cancel() {}, render() {}, onComplete() {},
+  })).toThrow("start failed");
+  expect(stopped).toBe(1);
+});
+
+test("a throwing display render stops scheduling and ignores late callbacks", () => {
+  let emit: ((timestamp: number) => void) | undefined;
+  let stopped = 0;
+  let renders = 0;
+  runPermissionFlight({ source, target, reducedMotion: false,
+    frameSource: { start(callback) { emit = callback; return true; }, stop() { stopped++; } },
+    now: () => 0, schedule: () => 0, cancel() {},
+    render() { if (++renders > 1) throw new Error("render failed"); }, onComplete() {},
+  });
+  expect(() => emit?.(10)).toThrow("render failed");
+  expect(stopped).toBe(1);
+  expect(() => emit?.(11)).not.toThrow();
+  expect(renders).toBe(2);
+});
+
 test("Cavalry handoff begins at source and settles exactly at target",()=>{
   expect(samplePermissionFlight(source,target,0).bounds).toEqual({x:100,y:100,width:100,height:40});
   const final=samplePermissionFlight(source,target,3);
