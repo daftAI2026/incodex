@@ -445,8 +445,11 @@ mod tests {
     type ProcessSnapshotResult = Result<Vec<(i32, PathBuf)>, String>;
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static FIXTURE_SERIAL: AtomicU64 = AtomicU64::new(0);
 
     #[derive(Clone)]
     struct FixtureProcessProbe {
@@ -533,14 +536,25 @@ mod tests {
     }
 
     fn app_fixture() -> (PathBuf, PathBuf) {
-        let root = std::env::temp_dir().join(format!(
-            "incodex-accessibility-test-{}-{}",
-            std::process::id(),
-            SystemTime::now()
+        let root = loop {
+            let stamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
-        ));
+                .as_nanos();
+            let serial = FIXTURE_SERIAL.fetch_add(1, Ordering::Relaxed);
+            let candidate = std::env::temp_dir().join(format!(
+                "incodex-accessibility-test-{}-{stamp}-{serial}",
+                std::process::id(),
+            ));
+            match fs::create_dir(&candidate) {
+                Ok(()) => break candidate,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => panic!(
+                    "cannot create fixture root {}: {error}",
+                    candidate.display()
+                ),
+            }
+        };
         let app = root.join("ChatGPT.app");
         let executable = app.join("Contents/MacOS/ChatGPT");
         fs::create_dir_all(executable.parent().unwrap()).unwrap();
