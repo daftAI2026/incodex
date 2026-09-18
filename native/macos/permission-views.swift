@@ -71,6 +71,8 @@ public final class IncodexPermissionFlightView: NSView {
         self.state = state
         host = NSHostingView(rootView: PermissionFlightRoot(state: state))
         super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.masksToBounds = false
         host.frame = bounds
         host.autoresizingMask = [.width, .height]
         addSubview(host)
