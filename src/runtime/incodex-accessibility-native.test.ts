@@ -2216,9 +2216,12 @@ describe("native Accessibility setup adapter", () => {
       row.invoke("draggingSession:endedAtPoint:operation:", { x: 0, y: 0 }, 0);
       expect(clock.active().map((timer) => timer.delay)).toEqual([4000]);
     } finally {
-      api.close();
-      expect(clock.active()).toHaveLength(0);
-      clock.restore();
+      try {
+        api.close();
+        expect(clock.active()).toHaveLength(0);
+      } finally {
+        clock.restore();
+      }
     }
   });
 
@@ -2240,9 +2243,12 @@ describe("native Accessibility setup adapter", () => {
       row.invoke("draggingSession:endedAtPoint:operation:", { x: 0, y: 0 }, 0);
       expect(clock.active()).toHaveLength(0);
     } finally {
-      api.close();
-      expect(clock.active()).toHaveLength(0);
-      clock.restore();
+      try {
+        api.close();
+        expect(clock.active()).toHaveLength(0);
+      } finally {
+        clock.restore();
+      }
     }
   });
 
@@ -2267,9 +2273,12 @@ describe("native Accessibility setup adapter", () => {
       expect(clock.active()).toHaveLength(0);
       expect(swift?.arrowViews[0].calls).toHaveLength(callsAtClose);
     } finally {
-      api.close();
-      expect(clock.active()).toHaveLength(0);
-      clock.restore();
+      try {
+        api.close();
+        expect(clock.active()).toHaveLength(0);
+      } finally {
+        clock.restore();
+      }
     }
   });
 
