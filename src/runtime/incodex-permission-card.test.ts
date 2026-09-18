@@ -7,14 +7,14 @@ function fixture(dark = false) {
     const values: Record<string, any> = {};
     const item: any = { values, children: [], initWithFrame$: (frame: any) => { values.frame = frame; return item; },
       layer: () => item, addSubview$: (child: any) => item.children.push(child) };
-    for (const key of ["WantsLayer", "MasksToBounds", "CornerRadius", "CornerCurve", "ShadowOpacity", "ShadowRadius", "ShadowOffset", "Material", "BlendingMode", "State", "BorderWidth"])
+    for (const key of ["Appearance", "WantsLayer", "MasksToBounds", "CornerRadius", "CornerCurve", "ShadowOpacity", "ShadowRadius", "ShadowOffset", "Material", "BlendingMode", "State", "BorderWidth"])
       item[`set${key}$`] = (value: any) => { values[key] = value; };
     objects.push(item); return item;
   }
   const color = { colorUsingColorSpace$: () => color, redComponent: () => 1, greenComponent: () => 1, blueComponent: () => 1, alphaComponent: () => .3 };
   const result = createPermissionCardBackground({
     View: { alloc: view }, Material: { alloc: view }, str: (s: string) => s,
-    kit: { NSColor: { separatorColor: () => color }, NSColorSpace: { deviceRGBColorSpace: () => ({}) } },
+    kit: { NSAppearance: { appearanceNamed$: (name: string) => name }, NSColor: { separatorColor: () => color }, NSColorSpace: { deviceRGBColorSpace: () => ({}) } },
     graphics: { setBlackColor: (layer: any, key: string, alpha: number) => { layer.values[key] = [0, 0, 0, alpha]; },
       setColor: (layer: any, key: string, rgba: number[]) => { layer.values[key] = rgba; } },
     size: { width: 520, height: 80 }, dark,
@@ -39,4 +39,14 @@ test("only the dark card has the source separator outline, retaining its semanti
   const material = objects.find(x => x.values.Material !== undefined);
   expect(material.values.BorderWidth).toBe(1);
   expect(material.values.borderColor).toEqual([1, 1, 1, .3 * .75]);
+});
+
+
+test("shadow containers retain non-vibrant system appearance in either theme", () => {
+  for (const dark of [false, true]) {
+    const { objects } = fixture(dark);
+    const shadows = objects.filter(x => x.values.ShadowOpacity === 1);
+    expect(shadows.map(x => x.values.Appearance)).toEqual(Array(2).fill(
+      dark ? "NSAppearanceNameDarkAqua" : "NSAppearanceNameAqua"));
+  }
 });

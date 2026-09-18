@@ -6,6 +6,10 @@ function createPermissionCardBackground({ View, Material, kit, graphics, str, si
   const bounds = { origin: { x: 0, y: 0 }, size };
   function shadow(alpha, radius, y) {
     const view = View.alloc().initWithFrame$(bounds);
+    // Vibrant ancestor appearance suppresses the shadow composition. The
+    // material and its labels retain their own native vibrancy underneath.
+    view.setAppearance$(kit.NSAppearance.appearanceNamed$(str(
+      dark ? "NSAppearanceNameDarkAqua" : "NSAppearanceNameAqua")));
     view.setWantsLayer$(true);
     const layer = view.layer();
     layer.setMasksToBounds$(false);

@@ -16,6 +16,8 @@ use incodex_runtime_assets::{loader_source as embedded_loader, manifest_source, 
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
+mod native;
+
 const DIR_MODE: u32 = 0o700;
 const FILE_MODE: u32 = 0o600;
 // The pointer remains schema 1; manifest provenance is an optional extension.
@@ -72,6 +74,13 @@ struct EmbeddedManifest {
     files: BTreeMap<String, String>,
 }
 
+struct EmbeddedSnapshot {
+    manifest: EmbeddedManifest,
+    files: BTreeMap<String, String>,
+    manifest_sha256: String,
+    manifest_bytes: Vec<u8>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CurrentPointer {
@@ -93,7 +102,10 @@ pub fn loader_source() -> &'static str {
 
 /// Return the fixed set of artifacts that the external loader requires.
 pub fn required_runtime_files() -> impl Iterator<Item = &'static str> {
-    external_files().iter().map(|(name, _)| *name)
+    external_files()
+        .iter()
+        .map(|(name, _)| *name)
+        .chain(native::files().iter().map(|(name, _)| *name))
 }
 
 pub fn runtime_version() -> String {
@@ -105,11 +117,11 @@ pub fn runtime_version() -> String {
 
 /// Return the validated identity of the Runtime bundled into this binary.
 pub fn runtime_identity() -> Result<RuntimeIdentity, String> {
-    let (manifest, files, manifest_sha256) = embedded_snapshot()?;
+    let snapshot = embedded_snapshot()?;
     Ok(RuntimeIdentity {
-        version: manifest.runtime_version,
-        manifest_sha256,
-        files,
+        version: snapshot.manifest.runtime_version,
+        manifest_sha256: snapshot.manifest_sha256,
+        files: snapshot.files,
     })
 }
 
@@ -231,7 +243,12 @@ fn publish_inner<F>(user_root: &Path, mut hook: F) -> Result<PublishedRuntime, S
 where
     F: FnMut(&str),
 {
-    let (manifest, files, manifest_hash) = embedded_snapshot()?;
+    let EmbeddedSnapshot {
+        manifest,
+        files,
+        manifest_sha256: manifest_hash,
+        manifest_bytes,
+    } = embedded_snapshot()?;
     let version = manifest.runtime_version.clone();
     validate_path_component(&version, "runtime version")?;
     let release_name = format!("{version}-{manifest_hash}");
@@ -258,7 +275,10 @@ where
             for (name, body) in external_files() {
                 write_durable(&staging.join(name), body.as_bytes())?;
             }
-            write_durable(&staging.join(MANIFEST_NAME), manifest_source().as_bytes())?;
+            for (name, body) in native::files() {
+                write_durable(&staging.join(name), body)?;
+            }
+            write_durable(&staging.join(MANIFEST_NAME), &manifest_bytes)?;
             hook("staging-write");
             sync_dir(&staging)?;
             hook("staging-dir-sync");
@@ -298,7 +318,8 @@ where
 }
 
 fn embedded_manifest() -> Result<EmbeddedManifest, String> {
-    let manifest: EmbeddedManifest = serde_json::from_str(manifest_source())
+    let bytes = embedded_manifest_bytes()?;
+    let manifest: EmbeddedManifest = serde_json::from_slice(&bytes)
         .map_err(|error| format!("invalid embedded runtime manifest: {error}"))?;
     if manifest.runtime_version.is_empty() {
         return Err("embedded runtime manifest has no runtimeVersion".into());
@@ -307,11 +328,53 @@ fn embedded_manifest() -> Result<EmbeddedManifest, String> {
     Ok(manifest)
 }
 
-fn embedded_snapshot() -> Result<(EmbeddedManifest, BTreeMap<String, String>, String), String> {
-    let manifest = embedded_manifest()?;
+fn embedded_manifest_bytes() -> Result<Vec<u8>, String> {
+    native::validate()?;
+    if native::files().is_empty() {
+        return Ok(manifest_source().as_bytes().to_vec());
+    }
+
+    let mut manifest: serde_json::Value = serde_json::from_str(manifest_source())
+        .map_err(|error| format!("invalid embedded runtime manifest: {error}"))?;
+    let files = manifest
+        .get_mut("files")
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or("embedded runtime manifest files are missing")?;
+    for (name, body) in native::files() {
+        if files
+            .insert(
+                name.to_string(),
+                serde_json::Value::String(sha256_hex(body)),
+            )
+            .is_some()
+        {
+            return Err(format!(
+                "runtime manifest already contains native artifact: {name}"
+            ));
+        }
+    }
+    let mut bytes = serde_json::to_vec_pretty(&manifest)
+        .map_err(|error| format!("cannot serialize merged runtime manifest: {error}"))?;
+    bytes.push(b'\n');
+    Ok(bytes)
+}
+
+fn embedded_snapshot() -> Result<EmbeddedSnapshot, String> {
+    let manifest_bytes = embedded_manifest_bytes()?;
+    let manifest: EmbeddedManifest = serde_json::from_slice(&manifest_bytes)
+        .map_err(|error| format!("invalid embedded runtime manifest: {error}"))?;
+    if manifest.runtime_version.is_empty() {
+        return Err("embedded runtime manifest has no runtimeVersion".into());
+    }
+    validate_source_commit(&manifest.source_commit)?;
     let files = runtime_file_hashes(&manifest)?;
-    let manifest_hash = sha256_hex(manifest_source().as_bytes());
-    Ok((manifest, files, manifest_hash))
+    let manifest_hash = sha256_hex(&manifest_bytes);
+    Ok(EmbeddedSnapshot {
+        manifest,
+        files,
+        manifest_sha256: manifest_hash,
+        manifest_bytes,
+    })
 }
 
 fn runtime_file_hashes(manifest: &EmbeddedManifest) -> Result<BTreeMap<String, String>, String> {
@@ -331,13 +394,20 @@ fn runtime_file_hashes(manifest: &EmbeddedManifest) -> Result<BTreeMap<String, S
         }
         files.insert((*name).to_string(), actual);
     }
+    for (name, body) in native::files() {
+        let actual = sha256_hex(body);
+        if declared.get(*name) != Some(&actual) {
+            return Err(format!("embedded runtime manifest hash mismatch: {name}"));
+        }
+        files.insert((*name).to_string(), actual);
+    }
     Ok(files)
 }
 
 fn declared_runtime_file_hashes(
     manifest: &EmbeddedManifest,
 ) -> Result<BTreeMap<String, String>, String> {
-    if manifest.files.len() != external_files().len() + 1
+    if manifest.files.len() != external_files().len() + native::files().len() + 1
         || !manifest
             .files
             .get(LOADER_NAME)
@@ -345,19 +415,24 @@ fn declared_runtime_file_hashes(
     {
         return Err("runtime manifest files do not match required artifacts".into());
     }
-    external_files()
-        .iter()
-        .map(|(name, _)| {
-            let hash = manifest
-                .files
-                .get(*name)
-                .filter(|hash| is_sha256(hash))
-                .ok_or_else(|| {
-                    format!("runtime manifest is missing or has an invalid {name} hash")
-                })?;
-            Ok(((*name).to_string(), hash.clone()))
-        })
-        .collect()
+    let mut files = BTreeMap::new();
+    for (name, _) in external_files() {
+        let hash = manifest
+            .files
+            .get(*name)
+            .filter(|hash| is_sha256(hash))
+            .ok_or_else(|| format!("runtime manifest is missing or has an invalid {name} hash"))?;
+        files.insert((*name).to_string(), hash.clone());
+    }
+    for (name, _) in native::files() {
+        let hash = manifest
+            .files
+            .get(*name)
+            .filter(|hash| is_sha256(hash))
+            .ok_or_else(|| format!("runtime manifest is missing or has an invalid {name} hash"))?;
+        files.insert((*name).to_string(), hash.clone());
+    }
+    Ok(files)
 }
 
 fn verify_release(
@@ -371,7 +446,8 @@ fn verify_release(
         return Err("release directory is not named by version and manifest hash".into());
     }
     let manifest_path = release.join(MANIFEST_NAME);
-    verify_file(&manifest_path, manifest_source().as_bytes())?;
+    let manifest_bytes = embedded_manifest_bytes()?;
+    verify_file(&manifest_path, &manifest_bytes)?;
     verify_release_files(release, files)?;
     Ok(())
 }

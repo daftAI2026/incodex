@@ -9,6 +9,7 @@ import { join } from "node:path";
 // deliberately tested through that boundary so the main-process export cannot
 // drift away from the artifact that gets loaded by the app.
 import * as runtimeMain from "../../dist/incodex-main.cjs";
+import { COPY as SUPPORTED_COPY, ACCESSIBILITY_SETUP_COPY, resolveLocale } from "./incognito-copy.ts";
 
 const APP_PATH = "/Applications/ChatGPT.app";
 const BUNDLE_ID = "com.openai.codex";
@@ -59,6 +60,7 @@ type Harness = {
     showItemInFolder: (file: string) => void;
   };
   spawnCalls: Array<{ file: string; args: string[] }>;
+  createSetupWindowCalls: number;
   probes: unknown[];
   controller: any;
   panel: any;
@@ -98,8 +100,10 @@ function makeHarness(options: {
   requestPath?: string;
   markerMode?: number;
   probes?: unknown[];
+  canPresent?: () => boolean;
   dialogResponses?: number[];
   spawn?: (file: string, args: string[]) => EventEmitter;
+  createSetupWindow?: () => Promise<any> | any;
   openExternal?: (url: string) => Promise<boolean>;
   appPath?: string;
   installId?: string;
@@ -138,7 +142,10 @@ function makeHarness(options: {
   const spawnCalls: Array<{ file: string; args: string[] }> = [];
   const probes = [...(options.probes ?? [false])];
   const systemPreferences = {
-    isTrustedAccessibilityClient: (): unknown => probes.shift(),
+    isTrustedAccessibilityClient: (prompt: boolean): unknown => {
+      expect(prompt).toBe(false);
+      return probes.shift();
+    },
   };
   const spawn =
     options.spawn ??
@@ -148,6 +155,7 @@ function makeHarness(options: {
       queueMicrotask(() => child.emit("close", 0));
       return child;
     });
+  let createSetupWindowCalls = 0;
 
   const createController = (runtimeMain as any).createAccessibilitySetupController;
   if (typeof createController !== "function") {
@@ -183,10 +191,15 @@ function makeHarness(options: {
     isIncognito: false,
     copy: options.copy ?? COPY,
     now: () => 1_700_000_000_100,
-    createSetupWindow: async () => ({
-      ...panel,
-      choice: dialog.showMessageBox({ message: COPY_VALUES.body }).then(({ response }) => response === 0 ? "repair" : "later"),
-    }),
+    canPresent: options.canPresent,
+    createSetupWindow: async () => {
+      createSetupWindowCalls += 1;
+      if (options.createSetupWindow) return options.createSetupWindow();
+      return {
+        ...panel,
+        choice: dialog.showMessageBox({ message: COPY_VALUES.body }).then(({ response }) => response === 0 ? "repair" : "later"),
+      };
+    },
     setInterval: (fn: () => void) => { polling = fn; return 1; },
     clearInterval: () => { polling = null; },
     // Tests exercise activation rechecks without waiting on wall-clock timers.
@@ -194,7 +207,49 @@ function makeHarness(options: {
     sleep: async () => {},
   });
 
-  return { root, requestPath, dialog, shell, spawnCalls, probes, controller, panel, tick: () => polling?.(), timerActive: () => polling !== null };
+  return { root, requestPath, dialog, shell, spawnCalls, get createSetupWindowCalls() { return createSetupWindowCalls; }, probes, controller, panel, tick: () => polling?.(), timerActive: () => polling !== null };
+}
+
+type BrowserWindowMockOptions = Partial<{
+  visible: boolean;
+  focused: boolean;
+  minimized: boolean;
+  destroyed: boolean;
+  parent: unknown;
+  url: string;
+  alwaysOnTop: boolean;
+  focusable: boolean;
+  webContentsDestroyed: boolean;
+  additionalArguments: string[];
+  bounds: { x: number; y: number; width: number; height: number };
+}>;
+
+function makeBrowserWindow(options: BrowserWindowMockOptions = {}): any {
+  const bounds = options.bounds ?? { x: 20, y: 20, width: 1_000, height: 700 };
+  return {
+    isVisible: () => options.visible ?? true,
+    isFocused: () => options.focused ?? true,
+    isMinimized: () => options.minimized ?? false,
+    isDestroyed: () => options.destroyed ?? false,
+    getParentWindow: () => options.parent ?? null,
+    getBounds: () => bounds,
+    isAlwaysOnTop: () => options.alwaysOnTop ?? false,
+    isFocusable: () => options.focusable ?? true,
+    webContents: {
+      isDestroyed: () => options.webContentsDestroyed ?? false,
+      getURL: () => options.url ?? "app://-/index.html",
+      getLastWebPreferences: () => ({ additionalArguments: [...(options.additionalArguments ?? [])] }),
+    },
+  };
+}
+
+function makeElectronWithWindows(windows: any[], focused: any = windows[0] ?? null): any {
+  return {
+    BrowserWindow: {
+      getAllWindows: () => windows,
+      getFocusedWindow: () => focused,
+    },
+  };
 }
 
 test("accepts root-owned ASAR package metadata for the default app identity", () => {
@@ -220,6 +275,81 @@ test("accepts root-owned ASAR package metadata for the default app identity", ()
     appPath: APP_PATH,
     installId: INSTALL_ID,
   });
+});
+
+test("canPresentAccessibilitySetup accepts only the visible focused trusted main window", () => {
+  const canPresent = (runtimeMain as any).canPresentAccessibilitySetup;
+  expect(typeof canPresent).toBe("function");
+
+  const trustedMain = makeBrowserWindow();
+  expect(canPresent(makeElectronWithWindows([trustedMain], trustedMain))).toBe(true);
+
+  const cases: Array<[string, any, any, boolean]> = [
+    ["no windows", [], null, false],
+    ["hidden", [makeBrowserWindow({ visible: false })], undefined, false],
+    ["unfocused", [makeBrowserWindow({ focused: false }), makeBrowserWindow()], null, false],
+    ["minimized", [makeBrowserWindow({ minimized: true })], undefined, false],
+    ["destroyed", [makeBrowserWindow({ destroyed: true })], undefined, false],
+    ["child window", [makeBrowserWindow({ parent: {} })], undefined, false],
+    ["login popup", [makeBrowserWindow({ url: "https://accounts.openai.com/login" })], undefined, false],
+    ["untrusted URL", [makeBrowserWindow({ url: "https://example.invalid/" })], undefined, false],
+  ];
+  for (const [label, windows, focused, expected] of cases) {
+    const actual = canPresent(makeElectronWithWindows(windows, focused));
+    if (actual !== expected) throw new Error(`${label}: expected ${String(expected)}, received ${String(actual)}`);
+  }
+});
+
+test("host presentation retries follow real window events once and stop after closure", () => {
+  const observe = (runtimeMain as any).observeAccessibilityPresentationWindow;
+  expect(typeof observe).toBe("function");
+  const win = Object.assign(new EventEmitter(), { webContents: new EventEmitter() });
+  let runs = 0;
+  const controller = { run: async () => { runs++; } };
+  observe(win, controller);
+  observe(win, controller);
+  expect(runs).toBe(0);
+  for (const event of ["show", "ready-to-show", "restore"]) win.emit(event);
+  win.webContents.emit("did-finish-load");
+  expect(runs).toBe(4);
+  win.emit("closed");
+  win.emit("show");
+  win.webContents.emit("did-finish-load");
+  expect(runs).toBe(4);
+});
+
+test("permission presentation excludes authentication routes on a trusted origin", () => {
+  const canPresent = (runtimeMain as any).canPresentAccessibilitySetup;
+  for (const path of ["/login", "/auth/login", "/oauth/authorize", "/signin", "/auth0", "/okta"]) {
+    const win = makeBrowserWindow({ url: `https://chatgpt.com${path}` });
+    expect(canPresent(makeElectronWithWindows([win], win))).toBe(false);
+  }
+});
+
+test("host closure does not read webContents after the native window is destroyed", () => {
+  const observe = (runtimeMain as any).observeAccessibilityPresentationWindow;
+  const contents = new EventEmitter();
+  const win = new EventEmitter();
+  let destroyed = false;
+  Object.defineProperty(win, "webContents", {
+    get() {
+      if (destroyed) throw new TypeError("Object has been destroyed");
+      return contents;
+    },
+  });
+  let runs = 0;
+  observe(win, { run: async () => { runs++; } });
+  contents.emit("did-finish-load");
+  expect(runs).toBe(1);
+  destroyed = true;
+  expect(() => win.emit("closed")).not.toThrow();
+  expect(contents.listenerCount("did-finish-load")).toBe(0);
+  for (const event of ["show", "ready-to-show", "restore"]) {
+    expect(win.listenerCount(event)).toBe(0);
+    win.emit(event);
+  }
+  contents.emit("did-finish-load");
+  expect(runs).toBe(1);
 });
 
 describe("Accessibility setup controller", () => {
@@ -253,6 +383,87 @@ describe("Accessibility setup controller", () => {
 
     expect(readMarker(harness.requestPath).state).toBe("pending");
     expect(harness.dialog.calls).toHaveLength(0);
+    expect(harness.spawnCalls).toHaveLength(0);
+  });
+
+  test("keeps a denied pending request untouched when the native guide cannot present", async () => {
+    const harness = makeHarness({ probes: [false], canPresent: () => false });
+    const before = readMarker(harness.requestPath);
+
+    await harness.controller.run();
+
+    expect(readMarker(harness.requestPath)).toEqual(before);
+    expect(harness.createSetupWindowCalls).toBe(0);
+    expect(harness.dialog.calls).toHaveLength(0);
+    expect(harness.spawnCalls).toHaveLength(0);
+    expect(harness.shell.opened).toHaveLength(0);
+  });
+
+  test("still grants a trusted pending request when the native guide cannot present", async () => {
+    const harness = makeHarness({ probes: [true], canPresent: () => false });
+
+    await harness.controller.run();
+
+    expect(readMarker(harness.requestPath).state).toBe("granted");
+    expect(harness.createSetupWindowCalls).toBe(0);
+    expect(harness.dialog.calls).toHaveLength(0);
+    expect(harness.spawnCalls).toHaveLength(0);
+    expect(harness.shell.opened).toHaveLength(0);
+  });
+
+  test("only presents once a denied request becomes presentable on a later run", async () => {
+    let canPresent = false;
+    const harness = makeHarness({ probes: [false, false], canPresent: () => canPresent, dialogResponses: [1] });
+
+    await harness.controller.run();
+    expect(readMarker(harness.requestPath).state).toBe("pending");
+    expect(harness.createSetupWindowCalls).toBe(0);
+    expect(harness.dialog.calls).toHaveLength(0);
+    expect(harness.spawnCalls).toHaveLength(0);
+
+    canPresent = true;
+    await harness.controller.run();
+
+    expect(readMarker(harness.requestPath).state).toBe("deferred");
+    expect(harness.createSetupWindowCalls).toBe(1);
+    expect(harness.dialog.calls).toHaveLength(1);
+    expect(harness.spawnCalls).toHaveLength(0);
+    expect(harness.shell.opened).toHaveLength(0);
+  });
+
+  test("keeps a pending request when asynchronous native guide creation returns no panel", async () => {
+    const harness = makeHarness({ probes: [false], canPresent: () => true, createSetupWindow: async () => null });
+
+    await harness.controller.run();
+
+    expect(readMarker(harness.requestPath).state).toBe("pending");
+    expect(harness.createSetupWindowCalls).toBe(1);
+    expect(harness.dialog.calls).toHaveLength(0);
+    expect(harness.spawnCalls).toHaveLength(0);
+    expect(harness.shell.opened).toHaveLength(0);
+  });
+
+  test("does not lose a presentation wake while native creation is in flight", async () => {
+    let release!: (value: null) => void;
+    const firstCreation = new Promise<null>((resolve) => { release = resolve; });
+    let creations = 0;
+    const harness = makeHarness({
+      probes: [false, false],
+      canPresent: () => true,
+      createSetupWindow: () => ++creations === 1
+        ? firstCreation
+        : { ...harness.panel, choice: Promise.resolve("later") },
+    });
+    const first = harness.controller.run();
+    await Promise.resolve();
+    expect(creations).toBe(1);
+    // The host regained presentation after the native factory decided to
+    // defer, but before the controller received that asynchronous result.
+    const wake = harness.controller.run();
+    release(null);
+    await Promise.all([first, wake]);
+    expect(creations).toBe(2);
+    expect(readMarker(harness.requestPath).state).toBe("deferred");
     expect(harness.spawnCalls).toHaveLength(0);
   });
 
@@ -467,16 +678,16 @@ describe("Accessibility setup controller", () => {
 
 
 describe("single-window Accessibility setup", () => {
-  test("keeps the native guide in English or the matching Chinese script", () => {
+  test("keeps the native guide in the matching supported language", () => {
     const resolveCopy = (runtimeMain as any).resolveAccessibilityCopy;
     expect(typeof resolveCopy).toBe("function");
     expect(resolveCopy("zh-CN").body).toBe("安装 Incodex 会修改 ChatGPT，因此需要重新授予它辅助功能权限。");
-    expect(resolveCopy("zh-HK").later).toBe("稍後");
-    expect(resolveCopy("zh-TW").later).toBe("稍後");
+    expect(resolveCopy("zh-HK").later).toBe("略過");
+    expect(resolveCopy("zh-TW").later).toBe("略過");
     expect(resolveCopy("en").back).toBe("Back");
     expect(resolveCopy("zh-CN").back).toBe("返回");
     expect(resolveCopy("zh-HK").back).toBe("返回");
-    expect(resolveCopy("ja-JP").body).toBe(resolveCopy("en").body);
+    expect(resolveCopy("ja-JP").body).not.toBe(resolveCopy("en").body);
   });
 
   test("keeps one window and detects grant while Settings remains frontmost", async () => {
@@ -601,4 +812,44 @@ test("opens Settings before asking the guide to locate its handoff destination",
   const h = makeHarness({ probes: [false, false], dialogResponses: [0] });
   await h.controller.run();
   expect(h.panel.openedBeforeHandoff).toBe(true);
+});
+
+
+test("published permission resolver follows the shared locale selection for all languages and aliases", () => {
+  const guide = ACCESSIBILITY_SETUP_COPY as Record<string, Record<string, string>>;
+  const resolveCopy = (runtimeMain as any).resolveAccessibilityCopy;
+  const locales = [...Object.keys(SUPPORTED_COPY), "fr", "pt", "es", "no", "de", "JA_jp", "zh-Hant-HK", "zh-Hant", "en-GB", "unknown"];
+  for (const locale of locales) {
+    const expected = guide[resolveLocale(locale)];
+    expect(expected).toBeDefined();
+    expect(resolveCopy(locale)).toEqual(expected);
+  }
+});
+
+test("regional accessibility guides use verified macOS terminology", () => {
+  const guide = ACCESSIBILITY_SETUP_COPY as Record<string, Record<string, string>>;
+
+  expect(guide["es-ES"]).toMatchObject({
+    addedTitle: "Permitir ChatGPT en Ajustes del Sistema",
+    completeInSettings: "Completar en Ajustes del Sistema",
+    repairing: "Preparando Ajustes del Sistema…",
+    openSettings: "Abrir ajustes",
+    errorBody: "No se pudo completar la configuración de permisos. Añade /Applications/ChatGPT.app en Ajustes del Sistema → Privacidad y seguridad → Accesibilidad y luego ejecuta incodex install para volver a comprobarlo.",
+  });
+  expect(guide["ca-ES"]).toMatchObject({
+    addedTitle: "Permet ChatGPT a la Configuració del sistema",
+    completeInSettings: "Completa-ho a la Configuració del sistema",
+    repairing: "Preparant la Configuració del sistema…",
+    openSettings: "Obre la configuració",
+    errorBody: "No s’ha pogut completar la configuració dels permisos. Afegeix /Applications/ChatGPT.app a Configuració del sistema → Privacitat i seguretat → Accessibilitat i, després, executa incodex install per tornar-ho a comprovar.",
+  });
+  expect(guide["bg-BG"]).toMatchObject({
+    body: "Инсталирането на Incodex променя ChatGPT, затова разрешението за улеснен достъп трябва да бъде дадено отново.",
+    permissionTitle: "Улеснен достъп",
+    addedBody: "Плъзнете иконата на ChatGPT по-горе в списъка за улеснен достъп и я разрешете. Завършете всяко удостоверяване на macOS. Достъпът се проверява автоматично; този прозорец се затваря, когато достъпът е готов.",
+    dragInstruction: "Плъзнете ChatGPT в списъка по-горе, за да разрешите Улеснен достъп",
+    errorBody: "Настройването на разрешенията не можа да бъде завършено. Добавете /Applications/ChatGPT.app в Системни настройки → Поверителност и сигурност → Улеснен достъп, след което изпълнете incodex install, за да проверите отново.",
+  });
+  expect(guide["ro-RO"].errorBody).toBe("Configurarea permisiunii nu a putut fi finalizată. Adăugați /Applications/ChatGPT.app în Configurări sistem → Intimitate și securitate → Accesibilitate, apoi rulați incodex install pentru a verifica din nou.");
+  expect(guide["pl-PL"].permissionTitle).toBe("Dostępność");
 });
