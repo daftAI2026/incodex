@@ -448,6 +448,7 @@ test("render failure from a display callback disposes the source and replicants"
     onError: (error: unknown) => { reported = error; },
   });
   emit?.(1);
+  emit?.(1.1);
   await flight.finished;
   expect((reported as Error).message).toBe("render failed");
   expect(stopped).toBe(1);

@@ -80,7 +80,7 @@ test("display-link frame source drives relative timestamps and stops after dispo
   expect(timerSchedules).toBe(0);
   expect(frames).toHaveLength(1);
   emit?.(100);
-  expect(frames).toHaveLength(2);
+  expect(frames).toHaveLength(1);
   expect(frames.at(-1).progress).toBe(0);
   emit?.(100.25);
   expect(frames.at(-1).progress).toBeGreaterThan(0);
@@ -132,13 +132,18 @@ test("invalid or backwards display timestamps never switch back to the wall cloc
     schedule: () => { throw new Error("display source should own scheduling"); }, cancel: () => {},
     render: (frame: any) => frames.push(frame), onComplete: () => {} });
   emit?.(4);
-  expect(frames).toHaveLength(2);
+  expect(frames).toHaveLength(1);
   emit?.(Number.NaN);
-  expect(frames).toHaveLength(2);
+  expect(frames).toHaveLength(1);
   emit?.(3);
+  expect(frames).toHaveLength(1);
   expect(frames.at(-1).progress).toBe(0);
   emit?.(4.25);
   expect(frames.at(-1).progress).toBeGreaterThan(0);
+  const count = frames.length;
+  emit?.(4.25);
+  emit?.(4.1);
+  expect(frames).toHaveLength(count);
 });
 
 test("a partially started display source is stopped when startup throws", () => {
@@ -159,7 +164,8 @@ test("a throwing display render stops scheduling and ignores late callbacks", ()
     now: () => 0, schedule: () => 0, cancel() {},
     render() { if (++renders > 1) throw new Error("render failed"); }, onComplete() {},
   });
-  expect(() => emit?.(10)).toThrow("render failed");
+  emit?.(10);
+  expect(() => emit?.(10.1)).toThrow("render failed");
   expect(stopped).toBe(1);
   expect(() => emit?.(11)).not.toThrow();
   expect(renders).toBe(2);
