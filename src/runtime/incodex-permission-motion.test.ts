@@ -56,6 +56,41 @@ test("scheduled flight does not complete when its next frame arrives three secon
   expect(completed).toBe(0);
   expect(frames.at(-1).progress).toBeLessThan(.02);
 });
+
+test("display-link frame source drives relative timestamps and stops after dispose", () => {
+  let emit: ((timestamp: number) => void) | undefined;
+  let starts = 0;
+  let stops = 0;
+  let timerSchedules = 0;
+  const frames: any[] = [];
+  const frameSource = {
+    start(callback: (timestamp: number) => void) {
+      starts++;
+      emit = callback;
+      return true;
+    },
+    stop() { stops++; },
+  };
+  const stop = runPermissionFlight({ source, target, reducedMotion: false,
+    frameSource, now: () => 0,
+    schedule: () => { timerSchedules++; return 1; }, cancel: () => {},
+    render: frame => frames.push(frame), onComplete: () => {} });
+
+  expect(starts).toBe(1);
+  expect(timerSchedules).toBe(0);
+  expect(frames).toHaveLength(1);
+  emit?.(100);
+  expect(frames).toHaveLength(2);
+  expect(frames.at(-1).progress).toBe(0);
+  emit?.(100.25);
+  expect(frames.at(-1).progress).toBeGreaterThan(0);
+  stop();
+  expect(stops).toBe(1);
+  const count = frames.length;
+  emit?.(100.5);
+  expect(frames).toHaveLength(count);
+});
+
 test("Cavalry handoff begins at source and settles exactly at target",()=>{
   expect(samplePermissionFlight(source,target,0).bounds).toEqual({x:100,y:100,width:100,height:40});
   const final=samplePermissionFlight(source,target,3);

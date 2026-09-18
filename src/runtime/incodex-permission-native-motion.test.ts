@@ -333,6 +333,37 @@ test("native flight preserves AppKit screen coordinates at both endpoints", asyn
   expect(h.pending.size).toBe(0);
 });
 
+test("native handoff prefers the replicant display source and stops it on dispose", async () => {
+  let emit: ((timestamp: number) => void) | undefined;
+  let starts = 0;
+  let stops = 0;
+  let timerSchedules = 0;
+  const frames: any[] = [];
+  const frameSource = {
+    start(callback: (timestamp: number) => void) {
+      starts++;
+      emit = callback;
+      return true;
+    },
+    stop() { stops++; },
+  };
+  const flight = runNativePermissionHandoff({
+    objc: {}, reducedMotion: false, now: () => 0,
+    source: { frame: rect(10, 400, 80, 28) },
+    target: { frame: rect(300, 20, 532, 112) },
+    schedule: () => { timerSchedules++; return 1; }, cancel: () => {},
+    createReplicants: () => ({ frameSource, render: frame => frames.push(frame), dispose() {} }),
+  });
+  expect(starts).toBe(1);
+  expect(timerSchedules).toBe(0);
+  emit?.(100);
+  emit?.(100.25);
+  expect(frames.at(-1).progress).toBeGreaterThan(0);
+  flight.dispose();
+  await flight.finished;
+  expect(stops).toBe(1);
+});
+
 test("native Back is a new helper-to-card flight with forward decoration progress", async () => {
   const h = harness(false, true);
   expect(h.frames[0].progress).toBe(0);

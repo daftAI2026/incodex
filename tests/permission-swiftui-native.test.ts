@@ -68,6 +68,18 @@ test("live helper arrow uses the shared SwiftUI shape and native spring surface"
   expect(source).not.toContain("CASpringAnimation");
 });
 
+test("permission display clock exposes a main-thread display-link surface with an explicit old-OS fallback", () => {
+  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const start = source.indexOf("@objc(IncodexPermissionDisplayLink)");
+  expect(start).toBeGreaterThanOrEqual(0);
+  const clock = source.slice(start, source.indexOf("private func permissionCopyString", start));
+  expect(clock).toContain("window.displayLink(target: self, selector:");
+  expect(clock).toContain("if #available(macOS 14.0, *)");
+  expect(clock).toContain("displayLinked = false");
+  expect(clock).toContain("invalidate()");
+  expect(clock).toContain("handler:");
+});
+
 test("helper delegates outer edge treatment to its native window shell", () => {
   const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
   const start = source.indexOf("private struct PermissionHelperRoot:");
