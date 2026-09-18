@@ -1326,7 +1326,7 @@ async function makeHarness(options: {
     loadObjcModule: async () => bridge.objc,
     nativeLibrary: options.nativeLibrary ?? swift?.library,
     layoutDirection: options.layoutDirection,
-    activate: options.activate,
+    activate: options.activate as any,
     locateSettings: options.locateSettings ?? (() => ({ x: 120, y: 140, width: 920, height: 700 })),
     onHandoff: options.onHandoff,
     onBack: options.onBack,

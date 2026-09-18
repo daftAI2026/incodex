@@ -217,6 +217,9 @@ function readAccessibilityMarker(fileSystem, requestPath, appPath, installId) {
     return { kind: "unsafe" };
   }
   if (!accessibilityMarkerIsValid(marker, appPath, installId)) return { kind: "unsafe" };
+  // New install/uninstall commands own the shared one-shot guide. Keep the
+  // legacy controller for old requests, but never compete with the CLI host.
+  if (marker.presentationOwner === "cli") return { kind: "cli-owned" };
   return { kind: "ok", marker, layout };
 }
 

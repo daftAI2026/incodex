@@ -98,10 +98,27 @@ fn new_install_assigns_presentation_to_the_shared_cli_host() {
 fn cli_completion_is_bound_to_the_current_request_and_preserves_ownership() {
     let fixture = committed_fixture("cli-completion");
     request_setup(&fixture.root, &fixture.app, &fixture.install_id).unwrap();
-    let request = read_marker(&fixture)["requestId"].as_str().unwrap().to_string();
-    assert!(super::finish_cli_setup(&fixture.root, &fixture.app, &fixture.install_id, "old-request", "granted").is_err());
+    let request = read_marker(&fixture)["requestId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(super::finish_cli_setup(
+        &fixture.root,
+        &fixture.app,
+        &fixture.install_id,
+        "old-request",
+        "granted"
+    )
+    .is_err());
     assert_eq!(read_marker(&fixture)["state"], "pending");
-    super::finish_cli_setup(&fixture.root, &fixture.app, &fixture.install_id, &request, "granted").unwrap();
+    super::finish_cli_setup(
+        &fixture.root,
+        &fixture.app,
+        &fixture.install_id,
+        &request,
+        "granted",
+    )
+    .unwrap();
     let marker = read_marker(&fixture);
     assert_eq!(marker["state"], "granted");
     assert_eq!(marker["presentationOwner"], "cli");

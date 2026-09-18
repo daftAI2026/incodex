@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { minify } from "terser";
 import { ACCESSIBILITY_SETUP_COPY } from "./runtime/incognito-copy.ts";
+import { sharedPermissionCopy } from "./permission-shared-copy.ts";
 import {
   RUNTIME_ARTIFACT_NAMES,
   RUNTIME_EXTERNAL_ARTIFACT_NAMES,
@@ -94,11 +95,17 @@ for (const name of cjsNames) {
   if (name === RUNTIME_LOADER_NAME) {
     text = embedRuntimeArtifactNames(text);
   }
-  if (name === "incodex-main.cjs") {
-    text = text.replace('"__INCODEX_ACCESSIBILITY_COPY__"', JSON.stringify(ACCESSIBILITY_SETUP_COPY))
+  if (name === "incodex-main.cjs" || name === "incodex-permission-host.cjs") {
+    const guideCopy = name === "incodex-permission-host.cjs"
+      ? sharedPermissionCopy(ACCESSIBILITY_SETUP_COPY) : ACCESSIBILITY_SETUP_COPY;
+    text = text.replace('"__INCODEX_ACCESSIBILITY_COPY__"', JSON.stringify(guideCopy))
       .replace('"__INCODEX_ACCESSIBILITY_LOCALE__"', localeModule);
-    // Compile the short-lived guide into main so existing loader asset allowlists
-    // still verify the complete Runtime. No new disk asset or second publisher.
+    text = text.replace('"__INCODEX_ACCESSIBILITY_WINDOW__"',
+      'require("./incodex-permission-ui.cjs")');
+  }
+  if (name === "incodex-permission-ui.cjs") {
+    // Both entry points load one verified presenter/motion artifact. Do not
+    // duplicate the native UI or require the side-effectful Electron main.
     const guideSource = readFileSync(join(emitDir, "incodex-accessibility-native.cjs"), "utf8")
       .replace('require("./incodex-permission-native.cts")', permissionNativeModule)
       .replace('require("./incodex-permission-graphics.cts")', graphicsModule)
@@ -111,7 +118,7 @@ for (const name of cjsNames) {
     text = text.replace('"__INCODEX_ACCESSIBILITY_WINDOW__"',
       `(() => { const module = { exports: {} }; const exports = module.exports; ${guide.code}\nreturn { ...module.exports, ...${nativeMotionModule} }; })()`);
   }
-  if (name === "incodex-main.cjs" || name === "incodex-dock-menu.cjs") {
+  if (name === "incodex-main.cjs" || name === "incodex-dock-menu.cjs" || name === "incodex-permission-host.cjs" || name === "incodex-permission-ui.cjs") {
     // Keep readable source while preserving the external Runtime size budget.
     // Preserve top-level entry points, property names and CommonJS paths.
     // Compact only local identifiers; the loader stays unchanged.

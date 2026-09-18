@@ -34,14 +34,15 @@ struct PendingMarker<'a> {
     requested_at_ms: u64,
     request_id: String,
     state: &'static str,
+    presentation_owner: &'static str,
 }
 
-/// Request that the Runtime perform the host Accessibility setup flow.
+/// Bind a CLI-owned request without starting a second in-app guide.
 ///
 /// The transaction journal remains the authority for the installed app.  The
 /// marker is only a durable, installation-bound handoff to the Runtime; this
 /// function never changes the app bundle or the host's TCC database.
-pub(crate) fn request_setup(root: &Path, app: &Path, install_id: &str) -> Result<(), String> {
+pub(crate) fn request_setup(root: &Path, app: &Path, install_id: &str) -> Result<String, String> {
     if !root.is_absolute() {
         return Err(format!(
             "Incodex state root must be absolute: {}",
@@ -101,6 +102,7 @@ pub(crate) fn request_setup(root: &Path, app: &Path, install_id: &str) -> Result
     validate_existing_marker(&marker, install_id, &canonical_app)?;
 
     let requested_at_ms = unix_now_ms()?;
+    let request_id = new_request_id()?;
     let app_path = canonical_app.to_string_lossy().into_owned();
     let body = format!(
         "{}\n",
@@ -109,10 +111,69 @@ pub(crate) fn request_setup(root: &Path, app: &Path, install_id: &str) -> Result
             install_id,
             app_path: &app_path,
             requested_at_ms,
-            request_id: new_request_id()?,
+            request_id: request_id.clone(),
             state: "pending",
+            presentation_owner: "cli",
         })
         .map_err(|error| format!("cannot encode Accessibility setup request: {error}"))?
+    );
+    write_marker_atomically(&marker, body.as_bytes(), install_id, &canonical_app)?;
+    Ok(request_id)
+}
+
+/// Update only the request owned by this CLI operation. The caller keeps the
+/// target transaction lock while the one-shot guide is alive.
+pub(crate) fn finish_cli_setup(
+    root: &Path,
+    app: &Path,
+    install_id: &str,
+    request_id: &str,
+    state: &str,
+) -> Result<(), String> {
+    if !root.is_absolute() || !app.is_absolute() || !is_uuid(install_id) {
+        return Err("invalid CLI Accessibility request identity".into());
+    }
+    if !matches!(state, "granted" | "deferred" | "error" | "awaiting-user") {
+        return Err("invalid CLI Accessibility request state".into());
+    }
+    let transaction = root.join("transactions").join(install_id);
+    for directory in [
+        root.to_path_buf(),
+        root.join("transactions"),
+        transaction.clone(),
+    ] {
+        ensure_private_directory(&directory, "CLI Accessibility request directory")?;
+    }
+    let canonical_app = fs::canonicalize(app).map_err(|error| error.to_string())?;
+    validate_committed_live_snapshot(root, install_id, &canonical_app)
+        .map_err(|error| error.to_string())?;
+    let marker = transaction.join(MARKER_NAME);
+    validate_existing_marker(&marker, install_id, &canonical_app)?;
+    let mut file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&marker)
+        .map_err(|error| error.to_string())?;
+    let mut bytes = Vec::new();
+    Read::by_ref(&mut file)
+        .take(MAX_MARKER_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() as u64 > MAX_MARKER_BYTES {
+        return Err("CLI Accessibility request is oversized".into());
+    }
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+    if value["requestId"].as_str() != Some(request_id)
+        || value["presentationOwner"].as_str() != Some("cli")
+    {
+        return Err("CLI Accessibility request was replaced".into());
+    }
+    value["state"] = state.into();
+    value["updatedAtMs"] = unix_now_ms()?.into();
+    let body = format!(
+        "{}\n",
+        serde_json::to_string(&value).map_err(|error| error.to_string())?
     );
     write_marker_atomically(&marker, body.as_bytes(), install_id, &canonical_app)
 }

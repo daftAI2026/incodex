@@ -40,7 +40,7 @@ test("main and the short-lived host load one verified sibling permission UI asse
   const uiBytes = readFileSync(uiFilename);
   const uiSource = uiBytes.toString();
   const presenterMarker = "Native permission SwiftUI guide classes are unavailable";
-  const flightMarker = "Native permission SwiftUI flight class unavailable";
+  const flightMarker = "Native permission SwiftUI flight class is unavailable";
 
   expect(RUNTIME_EXTERNAL_ARTIFACT_NAMES).toContain(SHARED_PERMISSION_UI);
   expect(manifest.files[SHARED_PERMISSION_UI]).toBe(createHash("sha256").update(uiBytes).digest("hex"));

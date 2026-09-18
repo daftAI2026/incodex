@@ -1,62 +1,10 @@
-//! Post-uninstall renewal for the restored official app; never grants TCC access.
-use incodex_macos::AccessibilityStatus;
+//! Post-uninstall Accessibility renewal for the restored official app.
+//!
+//! The shared guide loop lives in [`crate::accessibility_guide_host`].  This
+//! wrapper supplies the official-vendor verifier; install uses the same loop
+//! with its own already-validated target verifier.
 
-#[derive(Debug, PartialEq, Eq)]
-enum Outcome {
-    Granted,
-    Pending,
-}
-trait RestoreOps {
-    fn verify_official(&mut self) -> Result<(), String>;
-    fn launch(&mut self) -> Result<(), String>;
-    fn probe(&mut self) -> AccessibilityStatus;
-    fn wait_for_window(&mut self) -> Result<(), String>;
-    fn reset(&mut self) -> Result<(), String>;
-    fn show_settings_and_app(&mut self) -> Result<(), String>;
-    fn wait(&mut self, milliseconds: u64);
-}
-fn wait_for_decision(ops: &mut impl RestoreOps) -> Result<AccessibilityStatus, String> {
-    for _ in 0..120 {
-        match ops.probe() {
-            status @ (AccessibilityStatus::Granted | AccessibilityStatus::Denied) => {
-                return Ok(status)
-            }
-            AccessibilityStatus::Unknown | AccessibilityStatus::NotRunning => ops.wait(250),
-        }
-    }
-    Err(
-        "The restored app's identity or permission remained unavailable; no reset was performed."
-            .into(),
-    )
-}
-
-fn renew(ops: &mut impl RestoreOps) -> Result<Outcome, String> {
-    ops.verify_official()?;
-    ops.launch()?;
-    if wait_for_decision(ops)? == AccessibilityStatus::Granted {
-        return Ok(Outcome::Granted);
-    }
-    // A PID can precede the first Electron window. Let it appear before raising
-    // Settings/Finder, and recheck in case access changed during startup.
-    ops.wait_for_window()?;
-    if wait_for_decision(ops)? == AccessibilityStatus::Granted {
-        return Ok(Outcome::Granted);
-    }
-    // The production caller holds the target transaction lock throughout.
-    ops.verify_official()?;
-    ops.reset()?;
-    ops.show_settings_and_app().map_err(|error| format!(
-        "The invalid Accessibility registration was cleared, but the guide could not open. Open System Settings > Privacy & Security > Accessibility, add /Applications/ChatGPT.app, then run incodex doctor. {error}"))?;
-    for _ in 0..160 {
-        match ops.probe() {
-            AccessibilityStatus::Granted => return Ok(Outcome::Granted),
-            AccessibilityStatus::Denied
-            | AccessibilityStatus::Unknown
-            | AccessibilityStatus::NotRunning => ops.wait(750),
-        }
-    }
-    Ok(Outcome::Pending)
-}
+use crate::accessibility_guide_host::{run_permission_guide, Outcome};
 
 pub(crate) fn finish_uninstall(root: &std::path::Path, app: &std::path::Path) {
     use incodex_core::{format_kv, format_ok, format_warn};
@@ -65,146 +13,91 @@ pub(crate) fn finish_uninstall(root: &std::path::Path, app: &std::path::Path) {
         format_kv(
             "Accessibility",
             "Checking the restored official ChatGPT.",
-            None
+            None,
         )
     );
     let result = (|| {
         let _lock =
             incodex_transaction::acquire_target_lock(root, app, "uninstall-accessibility", None)?;
-        renew(&mut SystemOps { app })
+        run_permission_guide(root, app, || {
+            incodex_macos::verify_original_vendor_bundle(
+                app,
+                Some(incodex_macos::OFFICIAL_BUNDLE_IDENTIFIER),
+                None,
+                None,
+            )
+            .map(|_| ())
+        })
     })();
     match result {
-        Ok(Outcome::Granted) => println!("{}", format_ok("Official ChatGPT Accessibility access verified.", None)),
-        Ok(Outcome::Pending) => println!("{}", format_warn("The app is restored, but Accessibility setup is unfinished. Add the selected ChatGPT in System Settings, then run incodex doctor.", None)),
-        Err(error) => println!("{}", format_warn(&format!("The app is restored, but Accessibility could not be renewed: {error}"), None)),
-    }
-}
-
-struct SystemOps<'a> {
-    app: &'a std::path::Path,
-}
-impl RestoreOps for SystemOps<'_> {
-    fn verify_official(&mut self) -> Result<(), String> {
-        incodex_macos::verify_original_vendor_bundle(
-            self.app,
-            Some(incodex_macos::OFFICIAL_BUNDLE_IDENTIFIER),
-            None,
-            None,
-        )
-        .map(|_| ())
-    }
-    fn launch(&mut self) -> Result<(), String> {
-        bounded_command(std::process::Command::new("/usr/bin/open").arg(self.app))
-    }
-    fn probe(&mut self) -> AccessibilityStatus {
-        incodex_macos::inspect_accessibility_for_app(self.app).status
-    }
-    fn wait_for_window(&mut self) -> Result<(), String> {
-        let target = incodex_macos::AppQuiescence::for_app(self.app)?;
-        for _ in 0..80 {
-            if incodex_macos::live_main_window_bounds(target.executable())?.is_some() {
-                return Ok(());
-            }
-            self.wait(250);
-        }
-        Err("The restored app's window did not appear; no reset was performed. Open ChatGPT and check with incodex doctor.".into())
-    }
-    fn reset(&mut self) -> Result<(), String> {
-        bounded_command(std::process::Command::new("/usr/bin/tccutil").args([
-            "reset",
-            "Accessibility",
-            incodex_macos::OFFICIAL_BUNDLE_IDENTIFIER,
-        ]))
-    }
-    fn show_settings_and_app(&mut self) -> Result<(), String> {
-        use incodex_core::format_kv;
-        bounded_command(
-            std::process::Command::new("/usr/bin/open").arg(
-                "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
-            ),
-        )?;
-        bounded_command(
-            std::process::Command::new("/usr/bin/open")
-                .arg("-R")
-                .arg(self.app),
-        )?;
-        println!("{}", format_kv("Accessibility", "Drag the selected ChatGPT from Finder into the Accessibility list. Complete any macOS authentication. Checking automatically for up to two minutes.", None));
-        Ok(())
-    }
-    fn wait(&mut self, milliseconds: u64) {
-        std::thread::sleep(std::time::Duration::from_millis(milliseconds));
-    }
-}
-
-fn bounded_command(command: &mut std::process::Command) -> Result<(), String> {
-    use std::process::Stdio;
-    use std::time::{Duration, Instant};
-    let program = command.get_program().to_string_lossy().into_owned();
-    let mut child = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .map_err(|error| format!("{program}: {error}"))?;
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) if status.success() => return Ok(()),
-            Ok(Some(status)) => return Err(format!("{program} exited with {status}")),
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(25)),
-            result => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(match result {
-                    Err(error) => format!("{program}: {error}"),
-                    _ => format!("{program} timed out"),
-                });
-            }
-        }
+        Ok(Outcome::Granted) => println!(
+            "{}",
+            format_ok("Official ChatGPT Accessibility access verified.", None)
+        ),
+        Ok(Outcome::Pending) => println!(
+            "{}",
+            format_warn(
+                "The restored app is waiting for Accessibility approval. Complete the System Settings step, then run incodex doctor to check again.",
+                None,
+            )
+        ),
+        Err(error) => println!(
+            "{}",
+            format_warn(
+                &format!("The restored app's Accessibility renewal could not finish: {error}"),
+                None,
+            )
+        ),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::super::accessibility_guide_host::{
+        run_permission_guide_with_timeouts, GuideHost, GuideHostFactory, GuideOps, HostEvent,
+        HostState, Outcome,
+    };
+    use incodex_macos::AccessibilityStatus;
     use std::collections::VecDeque;
-    struct Fake {
+    use std::path::Path;
+    use std::time::Duration;
+
+    struct FakeOps {
         states: VecDeque<AccessibilityStatus>,
         events: Vec<&'static str>,
         reset_error: bool,
-        show_error: bool,
-        verify_error: bool,
+        settings_error: bool,
     }
-    impl Fake {
+
+    impl FakeOps {
         fn new(states: &[AccessibilityStatus]) -> Self {
             Self {
                 states: states.iter().copied().collect(),
                 events: vec![],
                 reset_error: false,
-                show_error: false,
-                verify_error: false,
+                settings_error: false,
             }
         }
     }
-    impl RestoreOps for Fake {
-        fn verify_official(&mut self) -> Result<(), String> {
-            self.events.push("verify");
-            if self.verify_error {
-                Err("not official".into())
-            } else {
-                Ok(())
-            }
-        }
+
+    impl GuideOps for FakeOps {
         fn launch(&mut self) -> Result<(), String> {
             self.events.push("launch");
             Ok(())
         }
+
         fn probe(&mut self) -> AccessibilityStatus {
             self.events.push("probe");
             self.states
                 .pop_front()
                 .unwrap_or(AccessibilityStatus::Denied)
         }
+
+        fn wait_for_window(&mut self) -> Result<(), String> {
+            self.events.push("window");
+            Ok(())
+        }
+
         fn reset(&mut self) -> Result<(), String> {
             self.events.push("reset");
             if self.reset_error {
@@ -213,150 +106,298 @@ mod tests {
                 Ok(())
             }
         }
-        fn show_settings_and_app(&mut self) -> Result<(), String> {
-            self.events.push("show");
-            if self.show_error {
-                Err("open failed".into())
+
+        fn open_settings(&mut self) -> Result<(), String> {
+            self.events.push("settings");
+            if self.settings_error {
+                Err("settings failed".into())
             } else {
                 Ok(())
             }
         }
-        fn wait_for_window(&mut self) -> Result<(), String> {
-            self.events.push("window");
-            Ok(())
-        }
-        fn wait(&mut self, _: u64) {
+
+        fn wait(&mut self, _: Duration) {
             self.events.push("wait");
         }
     }
-    #[test]
-    fn a_valid_official_grant_is_preserved_without_reset_or_settings() {
-        let mut ops = Fake::new(&[AccessibilityStatus::Granted]);
-        assert_eq!(renew(&mut ops), Ok(Outcome::Granted));
-        assert_eq!(ops.events, ["verify", "launch", "probe"]);
+
+    struct FakeHost {
+        events: VecDeque<HostEvent>,
+        poll_delays: VecDeque<Duration>,
+        states: Vec<HostState>,
+        closed: bool,
     }
+
+    impl FakeHost {
+        fn new(events: &[HostEvent]) -> Self {
+            Self {
+                events: events.iter().cloned().collect(),
+                poll_delays: VecDeque::new(),
+                states: vec![],
+                closed: false,
+            }
+        }
+    }
+
+    impl GuideHost for FakeHost {
+        fn send_state(&mut self, state: HostState) -> Result<(), String> {
+            self.states.push(state);
+            Ok(())
+        }
+
+        fn poll(&mut self, _: Duration) -> Result<HostEvent, String> {
+            if let Some(delay) = self.poll_delays.pop_front() {
+                std::thread::sleep(delay);
+            }
+            Ok(self.events.pop_front().unwrap_or(HostEvent::Timeout))
+        }
+
+        fn close(&mut self) {
+            self.closed = true;
+        }
+    }
+
+    struct FakeFactory {
+        host: Option<FakeHost>,
+        start_error: Option<String>,
+    }
+
+    impl FakeFactory {
+        fn new(events: &[HostEvent]) -> Self {
+            Self {
+                host: Some(FakeHost::new(events)),
+                start_error: None,
+            }
+        }
+    }
+
+    impl GuideHostFactory for FakeFactory {
+        fn start(&mut self, _: &Path, _: &Path) -> Result<Box<dyn GuideHost>, String> {
+            if let Some(error) = self.start_error.take() {
+                return Err(error);
+            }
+            Ok(Box::new(self.host.take().expect("fake host is single-use")))
+        }
+    }
+
+    fn run_fake<F>(
+        ops: &mut FakeOps,
+        factory: &mut FakeFactory,
+        mut verify: F,
+    ) -> Result<Outcome, String>
+    where
+        F: FnMut() -> Result<(), String>,
+    {
+        run_fake_with_timeouts(
+            ops,
+            factory,
+            &mut verify,
+            Duration::from_secs(1),
+            Duration::from_secs(1),
+        )
+    }
+
+    fn run_fake_with_timeouts<F>(
+        ops: &mut FakeOps,
+        factory: &mut FakeFactory,
+        verify: &mut F,
+        choice_timeout: Duration,
+        guide_timeout: Duration,
+    ) -> Result<Outcome, String>
+    where
+        F: FnMut() -> Result<(), String>,
+    {
+        run_permission_guide_with_timeouts(
+            ops,
+            Path::new("/tmp/incodex-test-root"),
+            Path::new("/Applications/ChatGPT.app"),
+            verify,
+            factory,
+            choice_timeout,
+            guide_timeout,
+        )
+    }
+
     #[test]
-    fn stale_grant_is_reset_once_and_only_a_positive_host_probe_completes() {
-        let mut ops = Fake::new(&[
+    fn an_existing_grant_never_starts_guide_or_resets() {
+        let mut ops = FakeOps::new(&[AccessibilityStatus::Granted]);
+        let mut factory = FakeFactory::new(&[HostEvent::Ready]);
+        let result = run_fake(&mut ops, &mut factory, || Ok(()));
+        assert_eq!(result, Ok(Outcome::Granted));
+        assert_eq!(ops.events, ["launch", "probe"]);
+    }
+
+    #[test]
+    fn guide_later_returns_pending_without_reset_or_settings() {
+        let mut ops = FakeOps::new(&[AccessibilityStatus::Denied, AccessibilityStatus::Denied]);
+        let mut factory = FakeFactory::new(&[HostEvent::Ready, HostEvent::Later]);
+        let result = run_fake(&mut ops, &mut factory, || Ok(()));
+        assert_eq!(result, Ok(Outcome::Pending));
+        assert!(!ops.events.contains(&"reset"));
+        assert!(!ops.events.contains(&"settings"));
+    }
+
+    #[test]
+    fn choice_wait_has_its_own_bounded_deadline_before_allow() {
+        let mut ops = FakeOps::new(&[
+            AccessibilityStatus::Denied,
             AccessibilityStatus::Denied,
             AccessibilityStatus::Denied,
             AccessibilityStatus::Granted,
         ]);
-        assert_eq!(renew(&mut ops), Ok(Outcome::Granted));
-        assert_eq!(ops.events.iter().filter(|x| **x == "reset").count(), 1);
-        assert!(ops
-            .events
-            .windows(3)
-            .any(|x| x == ["verify", "reset", "show"]));
-        assert!(
-            ops.events.iter().position(|x| *x == "show").unwrap()
-                < ops.events.iter().rposition(|x| *x == "probe").unwrap()
+        let mut factory = FakeFactory::new(&[HostEvent::Ready, HostEvent::Allow]);
+        factory
+            .host
+            .as_mut()
+            .unwrap()
+            .poll_delays
+            .extend([Duration::ZERO, Duration::from_millis(50)]);
+        let mut verify = || Ok(());
+        let result = run_fake_with_timeouts(
+            &mut ops,
+            &mut factory,
+            &mut verify,
+            Duration::from_millis(20),
+            Duration::from_millis(100),
+        );
+        assert_eq!(result, Ok(Outcome::Pending));
+        assert!(!ops.events.contains(&"reset"));
+        assert!(!ops.events.contains(&"settings"));
+    }
+
+    #[test]
+    fn a_host_error_after_ready_is_visible_and_never_resets() {
+        let mut ops = FakeOps::new(&[AccessibilityStatus::Denied, AccessibilityStatus::Denied]);
+        let mut factory = FakeFactory::new(&[
+            HostEvent::Ready,
+            HostEvent::Error("native view failed".into()),
+        ]);
+        let result = run_fake(&mut ops, &mut factory, || Ok(()));
+        assert_eq!(
+            result,
+            Err("native Accessibility guide reported an error: native view failed".into())
+        );
+        assert!(!ops.events.contains(&"reset"));
+    }
+
+    #[test]
+    fn a_host_error_before_ready_is_visible_and_never_resets() {
+        let mut ops = FakeOps::new(&[AccessibilityStatus::Denied, AccessibilityStatus::Denied]);
+        let mut factory = FakeFactory::new(&[HostEvent::Error("native startup failed".into())]);
+        let result = run_fake(&mut ops, &mut factory, || Ok(()));
+        assert_eq!(
+            result,
+            Err(
+                "native Accessibility guide failed before becoming ready: native startup failed"
+                    .into()
+            )
+        );
+        assert!(!ops.events.contains(&"reset"));
+    }
+
+    #[test]
+    fn allow_revalidates_confirmed_denial_and_resets_once() {
+        let mut ops = FakeOps::new(&[
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Granted,
+        ]);
+        let mut factory = FakeFactory::new(&[HostEvent::Ready, HostEvent::Allow]);
+        let mut verify_calls = 0;
+        let result = run_fake(&mut ops, &mut factory, || {
+            verify_calls += 1;
+            Ok(())
+        });
+        assert_eq!(result, Ok(Outcome::Granted));
+        assert_eq!(verify_calls, 2);
+        assert_eq!(
+            ops.events.iter().filter(|event| **event == "reset").count(),
+            1
+        );
+        assert_eq!(
+            ops.events
+                .iter()
+                .filter(|event| **event == "settings")
+                .count(),
+            1
         );
     }
+
     #[test]
-    fn unknown_host_identity_never_resets() {
-        let mut ops = Fake::new(&[AccessibilityStatus::Unknown; 120]);
-        assert!(renew(&mut ops).is_err());
-        assert!(!ops.events.contains(&"reset"));
-    }
-    #[test]
-    fn changed_bundle_never_launches_or_resets() {
-        let mut ops = Fake::new(&[]);
-        ops.verify_error = true;
-        assert!(renew(&mut ops).is_err());
-        assert_eq!(ops.events, ["verify"]);
-    }
-    #[test]
-    fn failed_reset_does_not_open_a_misleading_ready_surface() {
-        let mut ops = Fake::new(&[AccessibilityStatus::Denied]);
-        ops.reset_error = true;
-        assert_eq!(renew(&mut ops), Err("reset failed".into()));
-        assert!(!ops.events.contains(&"show"));
-    }
-    #[test]
-    fn still_denied_after_bounded_wait_is_pending_not_granted() {
-        let mut ops = Fake::new(&[AccessibilityStatus::Denied]);
-        assert_eq!(renew(&mut ops), Ok(Outcome::Pending));
-        assert_eq!(ops.events.iter().filter(|x| **x == "reset").count(), 1);
-        assert!(ops.events.iter().filter(|x| **x == "wait").count() <= 200);
-    }
-    #[test]
-    fn startup_waits_for_the_restored_process_before_deciding() {
-        let mut ops = Fake::new(&[
-            AccessibilityStatus::NotRunning,
+    fn retry_reopens_settings_without_a_second_reset() {
+        let mut ops = FakeOps::new(&[
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Denied,
             AccessibilityStatus::Granted,
         ]);
-        assert_eq!(renew(&mut ops), Ok(Outcome::Granted));
-        assert!(ops.events.contains(&"wait"));
-        assert!(!ops.events.contains(&"reset"));
+        let mut factory = FakeFactory::new(&[HostEvent::Ready, HostEvent::Allow, HostEvent::Retry]);
+        let result = run_fake(&mut ops, &mut factory, || Ok(()));
+        assert_eq!(result, Ok(Outcome::Granted));
+        assert_eq!(
+            ops.events.iter().filter(|event| **event == "reset").count(),
+            1
+        );
+        assert_eq!(
+            ops.events
+                .iter()
+                .filter(|event| **event == "settings")
+                .count(),
+            2
+        );
     }
+
     #[test]
-    fn transient_identity_changes_are_retried_before_and_after_reset() {
-        let mut ops = Fake::new(&[
-            AccessibilityStatus::NotRunning,
-            AccessibilityStatus::Unknown,
+    fn unknown_status_after_allow_is_pending_and_never_resets() {
+        let mut ops = FakeOps::new(&[
             AccessibilityStatus::Denied,
             AccessibilityStatus::Denied,
             AccessibilityStatus::Unknown,
-            AccessibilityStatus::Granted,
         ]);
-        assert_eq!(renew(&mut ops), Ok(Outcome::Granted));
-        assert_eq!(ops.events.iter().filter(|x| **x == "reset").count(), 1);
-    }
-    #[test]
-    fn waits_for_window_and_rechecks_access_before_resetting() {
-        let mut ops = Fake::new(&[AccessibilityStatus::Denied, AccessibilityStatus::Granted]);
-        assert_eq!(renew(&mut ops), Ok(Outcome::Granted));
-        assert!(ops.events.contains(&"window"));
+        let mut factory = FakeFactory::new(&[HostEvent::Ready, HostEvent::Allow]);
+        let result = run_fake(&mut ops, &mut factory, || Ok(()));
+        assert_eq!(result, Ok(Outcome::Pending));
         assert!(!ops.events.contains(&"reset"));
     }
+
     #[test]
-    fn handoff_failure_explains_that_reset_happened_and_how_to_finish() {
-        let mut ops = Fake::new(&[AccessibilityStatus::Denied]);
-        ops.show_error = true;
-        let error = renew(&mut ops).unwrap_err();
-        assert!(error.contains("registration was cleared"));
-        assert!(error.contains("System Settings"));
-        assert!(error.contains("/Applications/ChatGPT.app"));
+    fn target_verifier_failure_before_launch_prevents_guide_and_reset() {
+        let mut ops = FakeOps::new(&[AccessibilityStatus::Denied]);
+        let mut factory = FakeFactory::new(&[HostEvent::Ready, HostEvent::Allow]);
+        let result = run_fake(&mut ops, &mut factory, || Err("target changed".into()));
+        assert_eq!(result, Err("target changed".into()));
+        assert!(ops.events.is_empty());
     }
 
     #[test]
-    fn denied_access_is_not_reset_before_the_native_guide_can_obtain_allow() {
-        // A guide that cannot be presented is not a user Allow.  In particular,
-        // its failure must not leave the official registration reset as a side
-        // effect.  The current implementation resets before calling `show`,
-        // so this is intentionally red until the native-guide handoff is wired.
-        let mut ops = Fake::new(&[AccessibilityStatus::Denied]);
-        ops.show_error = true;
-
-        let _ = renew(&mut ops);
-
-        assert_eq!(ops.events.iter().filter(|event| **event == "reset").count(), 0);
+    fn target_verifier_failure_before_allow_prevents_reset() {
+        let mut ops = FakeOps::new(&[AccessibilityStatus::Denied, AccessibilityStatus::Denied]);
+        let mut factory = FakeFactory::new(&[HostEvent::Ready, HostEvent::Allow]);
+        let mut calls = 0;
+        let result = run_fake(&mut ops, &mut factory, || {
+            calls += 1;
+            if calls == 1 {
+                Ok(())
+            } else {
+                Err("target changed".into())
+            }
+        });
+        assert_eq!(result, Err("target changed".into()));
+        assert!(!ops.events.contains(&"reset"));
     }
 
     #[test]
-    fn native_guide_surface_precedes_the_single_allow_reset() {
-        // The guide owns the decision.  Reset and System Settings may follow
-        // only after its Allow path, never before the surface is ready.
-        let mut ops = Fake::new(&[
-            AccessibilityStatus::Denied,
-            AccessibilityStatus::Denied,
-            AccessibilityStatus::Granted,
-        ]);
-
-        let _ = renew(&mut ops);
-
-        let guide = ops
-            .events
-            .iter()
-            .position(|event| *event == "show")
-            .expect("the native guide surface should be recorded");
-        let reset = ops
-            .events
-            .iter()
-            .position(|event| *event == "reset")
-            .expect("Allow should be the only path to reset");
-        assert!(guide < reset, "reset happened before the Allow-capable guide");
-        assert_eq!(ops.events.iter().filter(|event| **event == "reset").count(), 1);
+    fn a_host_start_failure_is_visible_and_never_resets() {
+        let mut ops = FakeOps::new(&[AccessibilityStatus::Denied, AccessibilityStatus::Denied]);
+        let mut factory = FakeFactory::new(&[]);
+        factory.start_error = Some("host unavailable".into());
+        let result = run_fake(&mut ops, &mut factory, || Ok(()));
+        assert_eq!(
+            result,
+            Err("native Accessibility guide could not start: host unavailable".into())
+        );
+        assert!(!ops.events.contains(&"reset"));
     }
 }

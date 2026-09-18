@@ -6,7 +6,7 @@ let generation = 0;
 const APP_PATH = "/Applications/ChatGPT.app";
 const rect = (x, y, width, height) => ({ origin: { x, y }, size: { width, height } });
 
-async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirection = "leftToRight", loadObjcModule, locateSettings, onHandoff, onBack, electron = null, nativeLibrary = null, canPresent = () => true }) {
+async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirection = "leftToRight", loadObjcModule, locateSettings, onHandoff, onBack, electron = null, activate = null, nativeLibrary = null, canPresent = () => true }) {
   if (appPath !== APP_PATH) throw new Error("Native permission guide requires the default ChatGPT app");
   if (!canPresent()) return null;
   const objc = await loadObjcModule();
@@ -20,6 +20,9 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
   const HelperView = swift?.IncodexPermissionHelperView;
   const ArrowView = swift?.IncodexPermissionArrowView;
   if (!InitialView || !HelperView || !ArrowView) throw new Error("Native permission SwiftUI guide classes are unavailable");
+  const activateApp = typeof activate === "function"
+    ? activate
+    : (options) => electron?.app?.focus?.(options);
   const text = key => typeof copy === "function" ? copy(key) : copy[key] ?? "";
   const nativeLayoutDirection = layoutDirection === "rightToLeft" ? "rightToLeft" : "leftToRight";
   const str = value => foundation.NSString.stringWithUTF8String$(String(value));
@@ -339,7 +342,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
     disposeHelper(); showSettingsPlaceholder(false); returning = false; state = "pending"; retryReady = Boolean(enableRetry);
     setInitialContent({ title: text("title"), body: text("body"), allowEnabled: Boolean(enableRetry), settingsPlaceholder: false });
     fitInitialBody();
-    initial.setLevel$(3); electron?.app?.focus?.({steal:true}); initial.makeKeyAndOrderFront$(null);
+    initial.setLevel$(3); activateApp({ steal: true }); initial.makeKeyAndOrderFront$(null);
   }
   function fallbackToInitial() {
     returnSequence++;
@@ -458,7 +461,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
     discardPanel(initial);
     throw error;
   }
-  initial.center(); initial.setLevel$(3); electron?.app?.focus?.({steal:true}); initial.makeKeyAndOrderFront$(null);
+  initial.center(); initial.setLevel$(3); activateApp({ steal: true }); initial.makeKeyAndOrderFront$(null);
   return {choice,setState,close,isDestroyed:()=>closed,
     onClose:callback=>{closeHandlers.add(callback);return()=>closeHandlers.delete(callback);},
     onRetry:callback=>{if(typeof callback!=="function") return ()=>{}; retryHandlers.add(callback); return()=>retryHandlers.delete(callback);}};

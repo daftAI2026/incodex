@@ -104,24 +104,46 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
         let install_id = result.install_id.as_deref().ok_or(
             "App installation finished, but its install identity is missing; permission setup was not started.",
         )?;
-        crate::accessibility_setup::request_setup(&root, &app, install_id).map_err(|error| {
+        let _permission_lock = incodex_transaction::acquire_target_lock(
+            &root,
+            &app,
+            "install-accessibility",
+            Some(install_id),
+        )?;
+        let request_id = crate::accessibility_setup::request_setup(&root, &app, install_id).map_err(|error| {
             format!("App installation finished, but permission setup could not be prepared: {error}. Run incodex install to retry.")
         })?;
         println!(
             "{}",
             format_kv(
                 "Accessibility",
-                "Checking in ChatGPT on launch; system approval may be needed.",
+                "Checking ChatGPT access; the shared native guide opens only if needed.",
                 None
             )
         );
-        let launched = std::process::Command::new("/usr/bin/open")
-            .arg(&app)
-            .status();
-        if !matches!(launched, Ok(status) if status.success()) {
-            println!("{}", format_warn("Open ChatGPT.app to finish Accessibility setup. Installation is complete; permission has not been verified.", None));
-        } else {
-            println!("{}", format_ok("Installed. ChatGPT will verify script-control permission and guide setup if needed.", None));
+        let permission = crate::accessibility_guide_host::run_permission_guide(&root, &app, || {
+            validate_committed_live_snapshot(&root, install_id, &app)
+                .map_err(|error| error.to_string())?;
+            verify_patched_adhoc_bundle_deep_strict(&app, None).map(|_| ())
+        });
+        let state = match &permission {
+            Ok(crate::accessibility_guide_host::Outcome::Granted) => "granted",
+            Ok(crate::accessibility_guide_host::Outcome::Pending) => "deferred",
+            Err(_) => "error",
+        };
+        if let Err(error) = crate::accessibility_setup::finish_cli_setup(
+            &root,
+            &app,
+            install_id,
+            &request_id,
+            state,
+        ) {
+            println!("{}", format_warn(&format!("Installation is complete, but the permission result could not be recorded: {error}"), None));
+        }
+        match permission {
+            Ok(crate::accessibility_guide_host::Outcome::Granted) => println!("{}", format_ok("Installed. ChatGPT Accessibility access verified.", None)),
+            Ok(crate::accessibility_guide_host::Outcome::Pending) => println!("{}", format_warn("Installed. Accessibility setup is unfinished; complete it in System Settings, then run incodex doctor.", None)),
+            Err(error) => println!("{}", format_warn(&format!("Installed, but Accessibility setup could not finish: {error}"), None)),
         }
     } else {
         println!(
@@ -146,7 +168,7 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
     let renew_official_access =
         parsed.app.is_none() && !parsed.clone && is_official_app(&app, None);
     if renew_official_access {
-        println!("{}", format_kv("Accessibility", "Reopens the restored official app and checks access. If invalid, resets only ChatGPT's Accessibility registration and guides re-adding it in System Settings.", None));
+        println!("{}", format_kv("Accessibility", "Reopens the restored official app and checks access. If invalid, opens the shared native guide; only Allow resets ChatGPT's Accessibility registration and opens System Settings.", None));
     }
     if parsed.dry_run {
         println!("{}", format_warn("Dry run. No files changed.", None));
