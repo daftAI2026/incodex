@@ -62,3 +62,10 @@ test("invalid initial fitting size makes present fail closed", () => {
   expect(fit).toMatch(/private func fitInitialPage\(\)\s*->\s*Bool/);
   expect(present).toMatch(/guard\s+fitInitialPage\(\)\s+else\s*\{[\s\S]*?return false/);
 });
+
+test("host errors preserve the existing localized error-page body", () => {
+  const state = functionBody("public func setState", "public func close");
+  const errorPage = state.slice(state.indexOf('case "error":'), state.indexOf("default:"));
+  expect(errorPage).toContain('body: permissionHostString(copy, "errorBody")');
+  expect(errorPage).not.toContain('body: message ??');
+});
