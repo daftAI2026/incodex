@@ -17,6 +17,18 @@ private let permissionHostArrowWindowX: CGFloat = 30
 private let permissionHostArrowWindowY: CGFloat = 60
 private let permissionHostArrowGraphicSize: CGFloat = 28
 
+@MainActor
+func permissionHostAppIcon() -> NSImage? {
+    NSImage(contentsOfFile: "\(permissionHostAppPath)/Contents/Resources/icon-chatgpt.png")
+}
+
+@MainActor
+func permissionHostPermissionIcon(title: String) -> NSImage? {
+    NSImage(contentsOfFile: "/System/Library/ExtensionKit/Extensions/AccessibilitySettingsExtension.appex/Contents/Resources/UniversalAccessPref.icns")
+        ?? NSImage(contentsOfFile: "/System/Library/PreferencePanes/UniversalAccessPref.prefPane/Contents/Resources/UniversalAccessPref.icns")
+        ?? NSImage(systemSymbolName: "accessibility", accessibilityDescription: title)
+}
+
 private func permissionHostString(_ copy: NSDictionary, _ key: String) -> String {
     if let value = copy[key] as? String { return value }
     if let value = copy[key] as? NSString { return value as String }
@@ -217,6 +229,10 @@ public final class PermissionHostPresenter: NSObject {
     @discardableResult
     public func present() -> Bool {
         guard !closed, !presented else { return !closed }
+        guard let appIcon = permissionHostAppIcon() else {
+            reportMessage("ChatGPT icon is unavailable")
+            return false
+        }
         _ = NSApplication.shared
             let panel = NSPanel(
                 contentRect: NSRect(x: 0, y: 0, width: permissionHostInitialWidth, height: 312),
@@ -237,11 +253,7 @@ public final class PermissionHostPresenter: NSObject {
 
             let view = IncodexPermissionInitialView(frame: panel.contentView?.bounds ?? NSRect(x: 0, y: 0, width: permissionHostInitialWidth, height: 312))
             let card = view.permissionCardView
-            let appIcon = NSWorkspace.shared.icon(forFile: permissionHostAppPath)
-            let permissionIcon = NSImage(
-                systemSymbolName: "accessibility",
-                accessibilityDescription: permissionHostString(self.copy, "permissionTitle"),
-            )
+            let permissionIcon = permissionHostPermissionIcon(title: permissionHostString(self.copy, "permissionTitle"))
             view.configure(
                 copy: permissionHostNativeCopy(self.copy, layoutDirection: layoutDirection),
                 appIcon: appIcon,
@@ -531,6 +543,10 @@ public final class PermissionHostPresenter: NSObject {
     }
 
     private func createHelper(frame: NSRect) {
+        guard let appIcon = permissionHostAppIcon() else {
+            reportMessage("ChatGPT icon is unavailable")
+            return
+        }
         let panel = NSPanel(
             contentRect: frame,
             styleMask: [.titled, .utilityWindow, .nonactivatingPanel, .fullSizeContentView],
@@ -554,7 +570,6 @@ public final class PermissionHostPresenter: NSObject {
         panel.delegate = delegate
 
         let view = IncodexPermissionHelperView(frame: NSRect(x: 0, y: 0, width: permissionHostHelperWidth, height: permissionHostHelperHeight))
-        let appIcon = NSWorkspace.shared.icon(forFile: permissionHostAppPath)
         view.configure(
             copy: permissionHostNativeCopy(copy, layoutDirection: layoutDirection),
             appIcon: appIcon,
