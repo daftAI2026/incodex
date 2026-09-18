@@ -105,6 +105,11 @@ int main(int argc, const char *argv[]) {
             NSMakeRect(0, 0, 128, 128)
         );
         if (flight == nil) return fail("flight init failed");
+        NSView *flightView = flight;
+        flightView.wantsLayer = YES;
+        if (flightView.clipsToBounds || flightView.layer.masksToBounds) {
+            return fail("flight container clips SwiftUI content overflow");
+        }
         ((void (*)(id, SEL, id, id))objc_msgSend)(flight, setSource, nil, nil);
         ((void (*)(id, SEL, double, double, BOOL))objc_msgSend)(
             flight, updateProgress, 0.25, 24.0, YES
