@@ -364,6 +364,115 @@ test("native handoff prefers the replicant display source and stops it on dispos
   expect(stops).toBe(1);
 });
 
+test("native handoff falls back when the display source declines", async () => {
+  let pending: (() => void) | undefined;
+  let schedules = 0;
+  const frames: any[] = [];
+  const flight = runNativePermissionHandoff({
+    objc: {}, reducedMotion: false, now: () => 0,
+    source: { frame: rect(10, 400, 80, 28) }, target: { frame: rect(300, 20, 532, 112) },
+    schedule: callback => { schedules++; pending = callback; return schedules; }, cancel: () => {},
+    createReplicants: () => ({
+      frameSource: { start: () => false, stop: () => { throw new Error("declined source must not stop"); } },
+      render: frame => frames.push(frame), dispose() {},
+    }),
+  });
+  expect(schedules).toBe(1);
+  pending?.();
+  expect(schedules).toBe(2);
+  flight.dispose();
+  await flight.finished;
+  expect(frames.length).toBeGreaterThan(1);
+});
+
+test("native display-source startup failure still disposes its replicants", async () => {
+  let disposed = 0;
+  let reported: unknown;
+  const flight = runNativePermissionHandoff({
+    objc: {}, reducedMotion: false, now: () => 0,
+    source: { frame: rect(10, 400, 80, 28) }, target: { frame: rect(300, 20, 532, 112) },
+    createReplicants: () => ({
+      frameSource: { start: () => { throw new Error("display source unavailable"); }, stop() {} },
+      render() {}, dispose() { disposed++; },
+    }),
+    onError: error => { reported = error; },
+  });
+  await flight.finished;
+  expect((reported as Error).message).toBe("display source unavailable");
+  expect(disposed).toBe(1);
+});
+
+test("native display-link startup exceptions invalidate a partially installed link", () => {
+  const bridge = nativeMotionBridge([{ frame: rect(0, 0, 1440, 900), scale: 2 }]);
+  const swift = swiftUIFlightLibrary();
+  let invalidations = 0;
+  const displayLink = {
+    init() { return this; },
+    startForWindow$handler$() { throw new Error("display-link install failed"); },
+    invalidate() { invalidations++; },
+    displayLinked() { return true; },
+  };
+  swift.library.IncodexPermissionDisplayLink = { alloc: () => displayLink };
+  bridge.objc.typedBlock = (_signature: any, callback: Function) => ({ callback });
+  const replicas = createNativeReplicants({
+    objc: bridge.objc,
+    nativeLibrary: swift.library,
+    source: { image: {} },
+    target: { view: bridge.targetView(rect(0, 0, 531, 110)) },
+  });
+  try {
+    expect(() => replicas.frameSource.start(() => {})).toThrow("display-link install failed");
+    expect(invalidations).toBe(1);
+  } finally {
+    replicas.dispose();
+  }
+});
+
+test("render failure from a display callback disposes the source and replicants", async () => {
+  let emit: ((timestamp: number) => void) | undefined;
+  let stopped = 0;
+  let disposed = 0;
+  let reported: unknown;
+  let renders = 0;
+  const flight = runNativePermissionHandoff({
+    objc: {}, reducedMotion: false, now: () => 0,
+    source: { frame: rect(10, 400, 80, 28) }, target: { frame: rect(300, 20, 532, 112) },
+    createReplicants: () => ({
+      frameSource: {
+        start(callback: (timestamp: number) => void) { emit = callback; return true; },
+        stop() { stopped++; },
+      },
+      render() { renders++; if (renders > 1) throw new Error("render failed"); },
+      dispose() { disposed++; },
+    }),
+    onError: error => { reported = error; },
+  });
+  emit?.(1);
+  await flight.finished;
+  expect((reported as Error).message).toBe("render failed");
+  expect(stopped).toBe(1);
+  expect(disposed).toBe(1);
+  const renderCount = renders;
+  emit?.(2);
+  expect(renders).toBe(renderCount);
+});
+
+test("native dispose closes replicants even when the display source stop throws", async () => {
+  let disposed = 0;
+  const flight = runNativePermissionHandoff({
+    objc: {}, reducedMotion: false, now: () => 0,
+    source: { frame: rect(10, 400, 80, 28) }, target: { frame: rect(300, 20, 532, 112) },
+    createReplicants: () => ({
+      frameSource: { start: () => true, stop: () => { throw new Error("stop failed"); } },
+      render() {}, dispose() { disposed++; },
+    }),
+  });
+  expect(() => flight.dispose()).toThrow("stop failed");
+  await flight.finished;
+  expect(disposed).toBe(1);
+  expect(() => flight.dispose()).not.toThrow();
+});
+
 test("native Back is a new helper-to-card flight with forward decoration progress", async () => {
   const h = harness(false, true);
   expect(h.frames[0].progress).toBe(0);

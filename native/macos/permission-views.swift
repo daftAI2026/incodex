@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import SwiftUI
 
 // AppKit owns the host lifetime; TypeScript owns the externally sampled motion.
@@ -112,6 +113,63 @@ public final class IncodexPermissionFlightView: NSView {
         var transaction = Transaction(animation: nil)
         transaction.disablesAnimations = true
         withTransaction(transaction, update)
+    }
+}
+
+// The reference animation engine is driven by AppKit's display link, not a
+// wall-clock timer.  Keep this small bridge separate from the SwiftUI flight
+// surface so TypeScript can retain the existing spring state and stop it
+// deterministically when the owned panels close.
+@MainActor
+@objc(IncodexPermissionDisplayLink)
+public final class IncodexPermissionDisplayLink: NSObject {
+    private var link: AnyObject?
+    private var handler: ((Double, Double, Double) -> Void)?
+
+    @objc public private(set) var displayLinked = false
+
+    @objc(startForWindow:handler:)
+    public func start(for window: NSWindow, handler: ((Double, Double, Double) -> Void)?) {
+        precondition(Thread.isMainThread, "Permission display link must run on the main thread")
+        invalidate()
+        guard #available(macOS 14.0, *), window.screen != nil else {
+            displayLinked = false
+            return
+        }
+        self.handler = handler
+        let displayLink = window.displayLink(target: self, selector: #selector(displayLinkFired(_:)))
+        displayLink.add(to: .current, forMode: .common)
+        link = displayLink
+        displayLinked = true
+    }
+
+    @objc(startForScreen:handler:)
+    public func start(for screen: NSScreen, handler: ((Double, Double, Double) -> Void)?) {
+        precondition(Thread.isMainThread, "Permission display link must run on the main thread")
+        invalidate()
+        guard #available(macOS 14.0, *) else {
+            displayLinked = false
+            return
+        }
+        self.handler = handler
+        let displayLink = screen.displayLink(target: self, selector: #selector(displayLinkFired(_:)))
+        displayLink.add(to: .current, forMode: .common)
+        link = displayLink
+        displayLinked = true
+    }
+
+    @objc public func invalidate() {
+        if #available(macOS 14.0, *) {
+            (link as? CADisplayLink)?.invalidate()
+        }
+        link = nil
+        handler = nil
+        displayLinked = false
+    }
+
+    @available(macOS 14.0, *)
+    @objc private func displayLinkFired(_ displayLink: CADisplayLink) {
+        handler?(displayLink.timestamp, displayLink.duration, displayLink.targetTimestamp)
     }
 }
 

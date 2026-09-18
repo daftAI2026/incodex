@@ -91,6 +91,56 @@ test("display-link frame source drives relative timestamps and stops after dispo
   expect(frames).toHaveLength(count);
 });
 
+test("a display source that declines falls back to timer frames until completion", () => {
+  let timerCallback: (() => void) | undefined;
+  let schedules = 0;
+  const frameSource = { start: () => false, stop: () => { throw new Error("must not stop a declined source"); } };
+  const stop = runPermissionFlight({ source, target, reducedMotion: false, frameSource, now: () => 0,
+    schedule: callback => { schedules++; timerCallback = callback; return schedules; }, cancel: () => {},
+    render: () => {}, onComplete: () => {} });
+  expect(schedules).toBe(1);
+  timerCallback?.();
+  expect(schedules).toBe(2);
+  stop();
+});
+
+test("a completed display-link flight stops its source before completion", () => {
+  let emit: ((timestamp: number) => void) | undefined;
+  let stopped = 0;
+  let complete = 0;
+  const frameSource = {
+    start(callback: (timestamp: number) => void) { emit = callback; return true; },
+    stop() { stopped++; },
+  };
+  runPermissionFlight({ source, target, reducedMotion: false, frameSource, now: () => 0,
+    schedule: () => { throw new Error("display source should own scheduling"); }, cancel: () => {},
+    render: () => {}, onComplete: () => { complete++; } });
+  emit?.(10);
+  for (let timestamp = 10 + 1 / 60; timestamp <= 12.1 && complete === 0; timestamp += 1 / 60) emit?.(timestamp);
+  expect(complete).toBe(1);
+  expect(stopped).toBe(1);
+});
+
+test("invalid or backwards display timestamps never switch back to the wall clock", () => {
+  let emit: ((timestamp: number) => void) | undefined;
+  let frames: any[] = [];
+  const frameSource = {
+    start(callback: (timestamp: number) => void) { emit = callback; return true; },
+    stop() {},
+  };
+  runPermissionFlight({ source, target, reducedMotion: false, frameSource, now: () => 99_000,
+    schedule: () => { throw new Error("display source should own scheduling"); }, cancel: () => {},
+    render: frame => frames.push(frame), onComplete: () => {} });
+  emit?.(4);
+  expect(frames).toHaveLength(2);
+  emit?.(Number.NaN);
+  expect(frames).toHaveLength(2);
+  emit?.(3);
+  expect(frames.at(-1).progress).toBe(0);
+  emit?.(4.25);
+  expect(frames.at(-1).progress).toBeGreaterThan(0);
+});
+
 test("Cavalry handoff begins at source and settles exactly at target",()=>{
   expect(samplePermissionFlight(source,target,0).bounds).toEqual({x:100,y:100,width:100,height:40});
   const final=samplePermissionFlight(source,target,3);

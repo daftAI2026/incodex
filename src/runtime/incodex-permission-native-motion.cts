@@ -40,8 +40,66 @@ function createNativeReplicants({ objc, nativeLibrary, source, target, reverse =
   // Each leg composites its outgoing snapshot below its incoming snapshot.
   const flightImages = reverse ? [targetImage, source.image] : [source.image, targetImage];
   const entries = [];
+  const DisplayLink = swiftLibrary?.IncodexPermissionDisplayLink;
+  let displayClock = null;
+  let displayClockPanel = null;
+  let displayClockKind = null;
+  let displayClockBlock = null;
+  let displayClockCallback = null;
   const reduceTransparency = Boolean(kit.NSWorkspace.sharedWorkspace().accessibilityDisplayShouldReduceTransparency());
   let topologyKey = null;
+  function displayClockIsLinked() {
+    if (!displayClock) return false;
+    const value = displayClock.displayLinked;
+    return Boolean(typeof value === "function" ? value.call(displayClock) : value);
+  }
+  function invalidateDisplayClock() {
+    try { displayClock?.invalidate?.(); } finally {
+      displayClockPanel = null;
+      displayClockKind = null;
+      displayClockBlock = null;
+    }
+  }
+  function startDisplayClock(callback) {
+    if (!DisplayLink || typeof objc.typedBlock !== "function") {
+      invalidateDisplayClock();
+      return false;
+    }
+    try {
+      if (!displayClock) displayClock = DisplayLink.alloc().init();
+      const block = objc.typedBlock({ returns: "v", args: ["d", "d", "d"] }, callback);
+      // Nobjc blocks are trampolines owned by the JS runtime. Retain the exact
+      // block until invalidate so AppKit cannot call a reclaimed callback.
+      displayClockBlock = block;
+      const panel = entries[0]?.panel;
+      if (panel && typeof displayClock.startForWindow$handler$ === "function") {
+        displayClock.startForWindow$handler$(panel, block);
+        if (displayClockIsLinked()) { displayClockPanel = panel; displayClockKind = "window"; return true; }
+      }
+      const screen = kit.NSScreen.mainScreen?.();
+      if (screen && typeof displayClock.startForScreen$handler$ === "function") {
+        displayClock.startForScreen$handler$(screen, block);
+        if (displayClockIsLinked()) { displayClockPanel = null; displayClockKind = "screen"; return true; }
+      }
+      invalidateDisplayClock();
+      return false;
+    } catch (error) {
+      try { invalidateDisplayClock(); } catch {}
+      throw error;
+    }
+  }
+  const frameSource = {
+    start(callback) {
+      displayClockCallback = callback;
+      const started = startDisplayClock(callback);
+      if (!started) displayClockCallback = null;
+      return started;
+    },
+    stop() {
+      displayClockCallback = null;
+      invalidateDisplayClock();
+    },
+  };
   function closeEntries(items) {
     let firstError;
     const remember = error => { if (!firstError) firstError = error; };
@@ -69,7 +127,11 @@ function createNativeReplicants({ objc, nativeLibrary, source, target, reverse =
     return { specs, key: key.join(";") };
   }
   function dispose() {
-    closeEntries(entries.splice(0));
+    let firstError;
+    try { frameSource.stop(); } catch (error) { firstError = error; }
+    try { closeEntries(entries.splice(0)); }
+    catch (error) { if (!firstError) firstError = error; }
+    if (firstError) throw firstError;
   }
   function buildEntries(specs) {
     const next = [];
@@ -122,12 +184,15 @@ function createNativeReplicants({ objc, nativeLibrary, source, target, reverse =
     }
   }
   function rebuild() {
+    const callback = displayClockCallback;
+    if (callback) invalidateDisplayClock();
     const current = screenSnapshot();
     const old = entries.splice(0);
     closeEntries(old);
     const next = buildEntries(current.specs);
     entries.push(...next);
     topologyKey = current.key;
+    displayClockCallback = callback;
   }
   try { rebuild(); } catch (error) { dispose(); throw error; }
   return { dispose, render(sample) {
@@ -166,7 +231,11 @@ function createNativeReplicants({ objc, nativeLibrary, source, target, reverse =
       }
     } finally { quartz.CATransaction.commit(); }
     for (const item of entries) { if (!item.shown) { item.panel.orderFront$(null); item.shown = true; } }
-  } };
+    if (displayClockCallback && (!displayClockIsLinked() ||
+      (displayClockKind === "window" && displayClockPanel !== entries[0]?.panel))) {
+      startDisplayClock(displayClockCallback);
+    }
+  }, frameSource };
 }
 
 function runNativePermissionHandoff(options) {
@@ -178,8 +247,13 @@ function runNativePermissionHandoff(options) {
   let done = false, stop = null, replicas = null;
   const dispose = () => {
     if (done) return;
-    done = true; stop?.();
-    try { replicas?.dispose(); } finally { resolve(); }
+    done = true;
+    let firstError;
+    try { stop?.(); } catch (error) { firstError = error; }
+    try { replicas?.dispose(); }
+    catch (error) { if (!firstError) firstError = error; }
+    finally { resolve(); }
+    if (firstError) throw firstError;
   };
   try {
     if (reducedMotion === undefined) {
@@ -196,6 +270,7 @@ function runNativePermissionHandoff(options) {
     // then initializes a fresh 0 -> 1 spring, including shadows and stroke.
     stop = runPermissionFlight({ source: flip(reverse ? initialTarget : source),
       target: () => flip(reverse ? source : resolveTarget()), reducedMotion: false, now, schedule, cancel,
+      frameSource: replicas.frameSource,
       render(sample) {
         if (isClosed()) { dispose(); return; }
         const bounds = { ...sample.bounds, y: -sample.bounds.y - sample.bounds.height };

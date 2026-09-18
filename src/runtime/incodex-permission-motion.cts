@@ -58,23 +58,66 @@ function samplePermissionFlightAtProgress(source, target, progress) {
 function samplePermissionFlight(source, target, seconds) {
   return samplePermissionFlightAtProgress(source, target, springPermissionProgress(seconds));
 }
-function runPermissionFlight({source,target,reducedMotion,reverse=false,now,schedule,cancel,render,onComplete}) {
-  let disposed=false,handle=null;
+function runPermissionFlight({source,target,reducedMotion,reverse=false,now,schedule,cancel,frameSource=null,render,onComplete}) {
+  let disposed=false,handle=null,frameSourceStarted=false,useTimer=false,displayOrigin=null;
   const start=now();
   const spring=createPermissionSpring();
-  function frame() {
+  function stopFrameSource() {
+    if (!frameSourceStarted) return;
+    frameSourceStarted=false;
+    frameSource.stop?.();
+  }
+  function complete() {
+    disposed=true;handle=null;
+    let firstError;
+    try { stopFrameSource(); } catch (error) { firstError=error; }
+    try { onComplete(); } catch (error) { if (!firstError) firstError=error; }
+    if (firstError) throw firstError;
+  }
+  function frame(displayTimestamp) {
     if(disposed)return;
-    if (reducedMotion && reverse) { disposed=true; handle=null; onComplete(); return; }
+    if (reducedMotion && reverse) { complete(); return; }
+    if (displayTimestamp !== undefined && !Number.isFinite(displayTimestamp)) return;
     const destination=typeof target === "function" ? target() : target;
-    const forward=reducedMotion ? 1 : advancePermissionSpring(spring,(now()-start)/1000);
+    let elapsed=(now()-start)/1000;
+    if (typeof displayTimestamp === "number") {
+      if (displayOrigin === null) displayOrigin=displayTimestamp;
+      elapsed=Math.max(0,displayTimestamp-displayOrigin);
+    }
+    const forward=reducedMotion ? 1 : advancePermissionSpring(spring,elapsed);
     const sample=samplePermissionFlightAtProgress(source,destination,reverse ? 1-forward : forward);
     render(sample);
     if(disposed)return;
-    if((reverse ? sample.progress===0 : sample.progress===1)){disposed=true;handle=null;onComplete();return;}
+    if((reverse ? sample.progress===0 : sample.progress===1)){
+      complete();return;
+    }
+    if (frameSourceStarted || (frameSource && !useTimer)) return;
+    handle=schedule(frame);
+  }
+  function scheduleNext() {
+    if (frameSource && !frameSourceStarted && !useTimer) {
+      frameSourceStarted=true;
+      let started=false;
+      try { started=Boolean(frameSource.start(frame)); }
+      catch (error) { frameSourceStarted=false; throw error; }
+      if (started) return;
+      frameSourceStarted=false;
+      useTimer=true;
+    }
     handle=schedule(frame);
   }
   frame();
-  return ()=>{disposed=true;if(handle!==null)cancel(handle);handle=null;};
+  if (!disposed) {
+    // The first frame establishes the initial state before the native window
+    // is ordered front. The display source is started only after that render.
+    if (frameSource) scheduleNext();
+  }
+  return ()=>{
+    disposed=true;
+    if(handle!==null)cancel(handle);
+    handle=null;
+    stopFrameSource();
+  };
 }
 function alignPermissionFrame(frame, scale) {
   if (!Number.isFinite(scale) || scale <= 0) return frame;

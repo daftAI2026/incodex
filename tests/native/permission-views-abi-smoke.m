@@ -32,6 +32,9 @@ static BOOL require_encoding(Class cls, SEL selector, const char *expected) {
     if (!matches && strcmp(expected, "v@:ddB") == 0) {
         matches = strcmp(normalized, "v@:ddc") == 0;
     }
+    if (!matches && strcmp(expected, "B@:") == 0) {
+        matches = strcmp(normalized, "c@:") == 0;
+    }
 #endif
     if (!matches) {
         fprintf(
@@ -81,12 +84,44 @@ int main(int argc, const char *argv[]) {
         Class initialClass = Nil;
         Class helperClass = Nil;
         Class arrowClass = Nil;
+        Class displayLinkClass = Nil;
         if (!require_class("IncodexPermissionFlightView", &flightClass)
             || !require_class("IncodexPermissionInitialView", &initialClass)
             || !require_class("IncodexPermissionHelperView", &helperClass)
-            || !require_class("IncodexPermissionArrowView", &arrowClass)) {
+            || !require_class("IncodexPermissionArrowView", &arrowClass)
+            || !require_class("IncodexPermissionDisplayLink", &displayLinkClass)) {
             return 3;
         }
+
+        SEL displayLinkStartWindow = @selector(startForWindow:handler:);
+        SEL displayLinkStartScreen = @selector(startForScreen:handler:);
+        SEL displayLinkInvalidate = @selector(invalidate);
+        SEL displayLinked = @selector(displayLinked);
+        if (!require_encoding(displayLinkClass, displayLinkStartWindow, "v@:@@?")
+            || !require_encoding(displayLinkClass, displayLinkStartScreen, "v@:@@?")
+            || !require_encoding(displayLinkClass, displayLinkInvalidate, "v@:")
+            || !require_encoding(displayLinkClass, displayLinked, "B@:")) {
+            return 4;
+        }
+
+        id displayLink = ((id (*)(id, SEL))objc_msgSend)(
+            [displayLinkClass alloc], @selector(init)
+        );
+        if (displayLink == nil) return fail("display-link init failed");
+        NSPanel *displayProbe = [[NSPanel alloc]
+            initWithContentRect:NSMakeRect(0, 0, 16, 16)
+            styleMask:NSWindowStyleMaskBorderless
+            backing:NSBackingStoreBuffered
+            defer:YES];
+        __block NSUInteger callbacks = 0;
+        void (^displayCallback)(double, double, double) = ^(double timestamp, double duration, double targetTimestamp) {
+            (void)timestamp; (void)duration; (void)targetTimestamp; callbacks += 1;
+        };
+        ((void (*)(id, SEL, id, id))objc_msgSend)(displayLink, displayLinkStartWindow, displayProbe, displayCallback);
+        ((void (*)(id, SEL))objc_msgSend)(displayLink, displayLinkInvalidate);
+        [displayProbe close];
+        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
+        if (callbacks != 0) return fail("display-link callback survived invalidate");
 
         SEL flightProgress = @selector(flightProgress);
         SEL flightCornerRadius = @selector(flightCornerRadius);
@@ -96,7 +131,7 @@ int main(int argc, const char *argv[]) {
             || !require_encoding(flightClass, flightCornerRadius, "d@:")
             || !require_encoding(flightClass, setSource, "v@:@@")
             || !require_encoding(flightClass, updateProgress, "v@:ddB")) {
-            return 4;
+            return 5;
         }
 
         id flight = ((id (*)(id, SEL, NSRect))objc_msgSend)(
@@ -138,7 +173,7 @@ int main(int argc, const char *argv[]) {
         if (!require_encoding(initialClass, initialConfigure, "v@:@@@@")
             || !require_encoding(initialClass, initialCard, "@@:")
             || !require_encoding(initialClass, initialSize, "{CGSize=dd}@:")) {
-            return 5;
+            return 6;
         }
         NSView *initial = ((id (*)(id, SEL, NSRect))objc_msgSend)(
             [initialClass alloc],
@@ -169,7 +204,7 @@ int main(int argc, const char *argv[]) {
             || !require_encoding(helperClass, helperFrame, "{CGRect={CGPoint=dd}{CGSize=dd}}@:")
             || !require_encoding(helperClass, helperSize, "{CGSize=dd}@:")
             || !require_encoding(helperClass, helperSnapshot, "@@:d")) {
-            return 6;
+            return 7;
         }
         NSView *helper = ((id (*)(id, SEL, NSRect))objc_msgSend)(
             [helperClass alloc],
@@ -203,7 +238,7 @@ int main(int argc, const char *argv[]) {
         SEL arrowAnimate = @selector(animateToScaleX:scaleY:);
         SEL arrowReset = @selector(resetToIdentity);
         if (!require_encoding(arrowClass, arrowAnimate, "v@:dd")
-            || !require_encoding(arrowClass, arrowReset, "v@:")) return 7;
+            || !require_encoding(arrowClass, arrowReset, "v@:")) return 8;
         NSView *arrow = ((id (*)(id, SEL, NSRect))objc_msgSend)(
             [arrowClass alloc],
             @selector(initWithFrame:),

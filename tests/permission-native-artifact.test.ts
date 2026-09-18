@@ -116,6 +116,7 @@ test.skipIf(process.platform !== "darwin")(
       "IncodexPermissionInitialView",
       "IncodexPermissionHelperView",
       "IncodexPermissionArrowView",
+      "IncodexPermissionDisplayLink",
     ]) {
       expect(symbols.output).toContain(className);
     }
@@ -130,6 +131,8 @@ test.skipIf(process.platform !== "darwin")(
     expect(strings.output).toContain("snapshotImageWithScale:");
     expect(strings.output).toContain("animateToScaleX:scaleY:");
     expect(strings.output).toContain("resetToIdentity");
+    expect(strings.output).toContain("startForWindow:handler:");
+    expect(strings.output).toContain("startForScreen:handler:");
   },
 );
 
