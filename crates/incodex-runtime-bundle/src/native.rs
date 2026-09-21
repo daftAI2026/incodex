@@ -181,3 +181,11 @@ fn sha256_concat_hex(parts: &[&[u8]]) -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect()
 }
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    #[test]
+    fn shipped_native_host_matches_embedded_source_contract() {
+        super::validate().expect("shipping native host and publisher must bind the same sources");
+    }
+}
