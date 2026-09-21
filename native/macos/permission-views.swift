@@ -2,6 +2,38 @@ import AppKit
 import QuartzCore
 import SwiftUI
 
+// Both transition endpoints render their shared SwiftUI foreground, not a
+// screenshot of the live material and shadow shell.
+@MainActor
+private func permissionForegroundSnapshot<Content: View>(
+    content: Content, size: NSSize, scale: CGFloat, appearance: NSAppearance
+) -> NSImage? {
+    guard scale.isFinite, scale > 0, scale <= 8 else { return nil }
+    if #available(macOS 13.0, *) {
+        let renderer = ImageRenderer(content: content)
+        renderer.proposedSize = ProposedViewSize(size)
+        renderer.scale = scale
+        return renderer.nsImage
+    }
+
+    // macOS 12: render the same foreground offscreen without a window.
+    let snapshotHost = NSHostingView(rootView: content)
+    snapshotHost.appearance = appearance
+    snapshotHost.frame = NSRect(origin: .zero, size: size)
+    snapshotHost.layoutSubtreeIfNeeded()
+    guard let bitmap = NSBitmapImageRep(
+        bitmapDataPlanes: nil, pixelsWide: Int(ceil(size.width * scale)),
+        pixelsHigh: Int(ceil(size.height * scale)), bitsPerSample: 8,
+        samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+        colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+    ) else { return nil }
+    bitmap.size = size
+    snapshotHost.cacheDisplay(in: snapshotHost.bounds, to: bitmap)
+    let image = NSImage(size: size)
+    image.addRepresentation(bitmap)
+    return image
+}
+
 // AppKit owns the host lifetime; TypeScript owns the externally sampled motion.
 // Keep the concrete SwiftUI root alive across display ticks.
 @MainActor
@@ -292,7 +324,7 @@ private struct PermissionCardRoot: View {
     @ObservedObject var state: PermissionInitialState
     @Environment(\.colorScheme) private var colorScheme
 
-    var body: some View {
+    var foreground: some View {
         // Original PermissionRow: zero stack spacing, independently padded
         // 64pt icon, then a flexible leading text column and trailing control.
         HStack(spacing: 0) {
@@ -334,6 +366,10 @@ private struct PermissionCardRoot: View {
         }
         .padding(.trailing, 20)
         .frame(width: 518, height: 80)
+    }
+
+    var body: some View {
+        foreground
         .background {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .fill(.regularMaterial)
@@ -468,6 +504,19 @@ public final class IncodexPermissionInitialView: NSView {
     private let cardHost: NSHostingView<PermissionCardRoot>
 
     @objc public var permissionCardView: NSView { cardHost }
+
+    @objc(snapshotPermissionCardWithScale:)
+    public func snapshotPermissionCard(scale: CGFloat) -> NSImage? {
+        precondition(Thread.isMainThread, "Permission snapshots must run on the main thread")
+        let colorScheme: ColorScheme = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? .dark : .light
+        let foreground = PermissionCardRoot(state: state).foreground
+            .environment(\.layoutDirection, state.layoutDirection)
+            .environment(\.colorScheme, colorScheme)
+        return permissionForegroundSnapshot(
+            content: foreground, size: cardHost.bounds.size, scale: scale, appearance: effectiveAppearance
+        )
+    }
 
     @objc public var preferredContentSize: NSSize {
         precondition(Thread.isMainThread, "Permission layout must run on the main thread")
@@ -886,30 +935,9 @@ public final class IncodexPermissionHelperView: NSView {
             state: state, appRowContent: PermissionHelperSnapshotRow(state: state), showHintArrow: true
         ).environment(\.colorScheme, colorScheme)
 
-        if #available(macOS 13.0, *) {
-            let renderer = ImageRenderer(content: foreground)
-            renderer.proposedSize = ProposedViewSize(size)
-            renderer.scale = scale
-            return renderer.nsImage
-        }
-
-        // macOS 12 has no ImageRenderer. Render the same native SwiftUI
-        // foreground offscreen, never the live host or an approximate AppKit UI.
-        let snapshotHost = NSHostingView(rootView: foreground)
-        snapshotHost.appearance = effectiveAppearance
-        snapshotHost.frame = NSRect(origin: .zero, size: size)
-        snapshotHost.layoutSubtreeIfNeeded()
-        guard let bitmap = NSBitmapImageRep(
-            bitmapDataPlanes: nil, pixelsWide: Int(ceil(size.width * scale)),
-            pixelsHigh: Int(ceil(size.height * scale)), bitsPerSample: 8,
-            samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
-        ) else { return nil }
-        bitmap.size = size
-        snapshotHost.cacheDisplay(in: snapshotHost.bounds, to: bitmap)
-        let image = NSImage(size: size)
-        image.addRepresentation(bitmap)
-        return image
+        return permissionForegroundSnapshot(
+            content: foreground, size: size, scale: scale, appearance: effectiveAppearance
+        )
     }
 
     public override var isFlipped: Bool { true }

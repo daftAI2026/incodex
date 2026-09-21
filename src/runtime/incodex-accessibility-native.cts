@@ -178,8 +178,10 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
     card.setHidden$(show);
   }
   function captureSource() {
+    const image = initialView.snapshotPermissionCardWithScale$(Number(initial.backingScaleFactor()));
+    if (!image) throw new Error("Permission card foreground snapshot unavailable");
     return { frame: initial.convertRectToScreen$(card.convertRect$toView$(card.bounds(), null)),
-      image: snapshot(card), radius: 24 };
+      image, radius: 24 };
   }
 
   // CUA foreground and snapshot both carry a fixed 531x108 SwiftUI frame;
