@@ -718,6 +718,26 @@ test("flight keeps one SwiftUI material-and-image surface above the AppKit root"
   }
 });
 
+test("flight synchronizes all three native container radii without clipping shadow overflow", () => {
+  const bridge = nativeMotionBridge([{ frame: rect(0, 0, 1440, 900), scale: 2 }]);
+  const swift = swiftUIFlightLibrary();
+  const replicas = createNativeReplicants({ objc: bridge.objc, nativeLibrary: swift.library,
+    source: { image: {} }, target: { view: bridge.targetView(rect(0, 0, 531, 110)) } });
+  try {
+    for (const radius of [24, 18, 12, 18, 24, 0]) {
+      replicas.render({ bounds: { x: 100, y: 200, width: 526, height: 104 }, progress: .5, cornerRadius: radius });
+      const root = bridge.panels()[0].contentViewValue;
+      for (const view of [root, ...root.subviews]) {
+        expect(view.layer().values.get("setCornerRadius$")).toBe(radius);
+        expect(view.layer().values.get("setMasksToBounds$")).toBe(false);
+      }
+      for (const shadow of root.layer().sublayers) {
+        expect(shadow.values.get("setMasksToBounds$")).toBe(false);
+      }
+    }
+  } finally { replicas.dispose(); }
+});
+
 test("flight shadow and cutout retain the full radius while only the stroke is inset", () => {
   const bridge = nativeMotionBridge([{ frame: rect(0, 0, 1440, 900), scale: 2 }]);
   const swift = swiftUIFlightLibrary();
