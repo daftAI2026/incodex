@@ -286,6 +286,10 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
     canBecomeKeyWindow: { types: "B@:", implementation: () => false },
     canBecomeMainWindow: { types: "B@:", implementation: () => false },
   });
+  const ArrowPanel = define("ArrowPanel", "NSPanel", {
+    canBecomeKeyWindow: { types: "B@:", implementation: () => false },
+    canBecomeMainWindow: { types: "B@:", implementation: () => false },
+  });
   function createHelper(frame) {
     const panel = HelperPanel.alloc().initWithContentRect$styleMask$backing$defer$(frame,0x8091,2,false); configurePanel(panel,true);
     try {
@@ -311,7 +315,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
       // SwiftUI host. The overlay frame is supplied by the native layout ABI.
       const row = Drag.alloc().initWithFrame$(rowFrame);
       view.addSubview$(row);
-      arrowPanel=kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(rect(0,0,HELPER_ARROW_WINDOW_SIZE,HELPER_ARROW_WINDOW_SIZE),128,2,false); configurePanel(arrowPanel,true); arrowPanel.setOpaque$(false); arrowPanel.setBackgroundColor$(kit.NSColor.clearColor()); arrowPanel.setHasShadow$(false);
+      arrowPanel=ArrowPanel.alloc().initWithContentRect$styleMask$backing$defer$(rect(0,0,HELPER_ARROW_WINDOW_SIZE,HELPER_ARROW_WINDOW_SIZE),128,2,false); configurePanel(arrowPanel,true); arrowPanel.setOpaque$(false); arrowPanel.setBackgroundColor$(kit.NSColor.clearColor()); arrowPanel.setHasShadow$(false);
       const canvas=kit.NSView.alloc().initWithFrame$(rect(0,0,HELPER_ARROW_WINDOW_SIZE,HELPER_ARROW_WINDOW_SIZE)); canvas.setWantsLayer$(true); canvas.layer().setMasksToBounds$(false);
       arrow=ArrowView.alloc().initWithFrame$(rect(36,10,HELPER_ARROW_GRAPHIC_SIZE,HELPER_ARROW_GRAPHIC_SIZE)); arrow.setFrame$(rect(36,10,HELPER_ARROW_GRAPHIC_SIZE,HELPER_ARROW_GRAPHIC_SIZE));
       arrowTracker=ArrowTracker.alloc().initWithFrame$(rect(36,10,HELPER_ARROW_GRAPHIC_SIZE,HELPER_ARROW_GRAPHIC_SIZE)); arrowTracker.setFrame$(rect(36,10,HELPER_ARROW_GRAPHIC_SIZE,HELPER_ARROW_GRAPHIC_SIZE));
