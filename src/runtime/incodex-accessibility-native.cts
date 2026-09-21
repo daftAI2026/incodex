@@ -240,6 +240,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
   });
   let appRowView;
   const Drag = define("Drag", "NSView", { ...flipped,
+    "acceptsFirstMouse:": { types: "B@:@", implementation: () => true },
     "mouseDown:": { types: "v@:@", implementation: (self, event) => {
       if (closed || state !== "awaiting-user") return;
       const item = kit.NSPasteboardItem.alloc().init(); item.setDataProvider$forTypes$(self, array(str("public.file-url")));
