@@ -4,6 +4,42 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+test.skipIf(process.platform !== "darwin")("native stdio entry and OSA presenter close on granted without a second choice", () => {
+  const directory = mkdtempSync(join(tmpdir(), "incodex-osa-stdio-"));
+  const source = join(directory, "source.swift");
+  const output = join(directory, "host");
+  // Only the view is a no-window fixture. The protocol entry, OSA execution,
+  // event draining and shutdown are the actual shipping Swift sources.
+  writeFileSync(source, `
+enum PermissionHostOSASource {
+ static let runtime = """
+ let ready=false,granted=false;
+ function configure(json){JSON.parse(json);return true;}
+ function present(){Promise.resolve().then(()=>ready=true);return false;}
+ function isready(){return ready;}
+ function drainEvents(){return '[]';}
+ function setstate(json){if(JSON.parse(json).state==='granted')granted=true;return true;}
+ function close(){if(!granted)throw Error('closed before grant');return true;}
+ """
+}
+`);
+  const built = spawnSync("xcrun", ["swiftc", "-D", "INCODEX_PERMISSION_HOST_STUB",
+    join(import.meta.dir, "../native/macos/permission-host.swift"),
+    join(import.meta.dir, "../native/macos/permission-host-osa.swift"), source, "-o", output], { encoding: "utf8" });
+  expect(built.status, built.stderr).toBe(0);
+  const nonce = "0123456789abcdef0123456789abcdef";
+  const input = [
+    { nonce, type: "configure", copy: {}, layoutDirection: "leftToRight" },
+    { nonce, type: "state", state: "granted" },
+    { nonce, type: "close" },
+  ].map(value => JSON.stringify(value)).join("\n") + "\n";
+  const result = spawnSync(output, ["--nonce", nonce], { input, encoding: "utf8", timeout: 10_000 });
+  expect(result.status, result.stderr + result.stdout).toBe(0);
+  const events = result.stdout.trim().split("\n").map(line => JSON.parse(line));
+  expect(events.some(event => event.type === "ready")).toBe(true);
+  expect(events.some(event => event.type === "error")).toBe(false);
+}, 120_000);
+
 test.skipIf(process.platform !== "darwin")("OSA presenter handles async ready, events, state and idempotent close without UI", () => {
   const directory = mkdtempSync(join(tmpdir(), "incodex-osa-contract-"));
   const harness = join(directory, "contract.swift");

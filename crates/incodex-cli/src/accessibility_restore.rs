@@ -126,6 +126,7 @@ mod tests {
         poll_delays: VecDeque<Duration>,
         states: Vec<HostState>,
         closed: bool,
+        trace: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
     }
 
     impl FakeHost {
@@ -135,12 +136,14 @@ mod tests {
                 poll_delays: VecDeque::new(),
                 states: vec![],
                 closed: false,
+                trace: Default::default(),
             }
         }
     }
 
     impl GuideHost for FakeHost {
         fn send_state(&mut self, state: HostState) -> Result<(), String> {
+            self.trace.lock().unwrap().push(format!("state:{state:?}"));
             self.states.push(state);
             Ok(())
         }
@@ -154,6 +157,7 @@ mod tests {
 
         fn close(&mut self) {
             self.closed = true;
+            self.trace.lock().unwrap().push("close".into());
         }
     }
 
@@ -347,6 +351,28 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[test]
+    fn shared_controller_automatically_closes_after_external_grant_without_retry() {
+        let mut ops = FakeOps::new(&[
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Granted,
+        ]);
+        let mut factory = FakeFactory::new(&[
+            HostEvent::Ready,
+            HostEvent::Allow,
+            HostEvent::Timeout,
+        ]);
+        let trace = factory.host.as_ref().unwrap().trace.clone();
+        assert_eq!(run_fake(&mut ops, &mut factory, || Ok(())), Ok(Outcome::Granted));
+        let trace = trace.lock().unwrap();
+        assert_eq!(&trace[trace.len() - 2..], &["state:Granted", "close"]);
+        assert_eq!(ops.events.iter().filter(|e| **e == "reset").count(), 1);
+        assert_eq!(ops.events.iter().filter(|e| **e == "settings").count(), 1);
     }
 
     #[test]
