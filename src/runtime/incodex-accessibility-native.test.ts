@@ -719,9 +719,10 @@ function makeBridge(
   const objects: FakeNative[] = [];
   let sharedWorkspace: FakeNative | undefined;
   const definitions = new Map<string, Record<string, (...args: any[]) => unknown>>();
+  const superclasses = new Map<string, string>();
 
   function object(type: string, methods: Record<string, (...args: any[]) => unknown> = {}): FakeNative {
-    const value = new FakeNative(type, calls, methods);
+    const value = new FakeNative(superclasses.get(type) === "NSPanel" ? "NSPanel" : type, calls, methods);
     if (type.endsWith("_Material")) value.values.set("fittingSize", { ...helperFittingSize });
     objects.push(value);
     return value;
@@ -860,7 +861,8 @@ function makeBridge(
       get CASpringAnimation() { return library(this.framework).CASpringAnimation; }
     },
     NobjcClass: {
-      define(definition: { name: string; methods?: Record<string, { implementation: (...args: any[]) => unknown }> }) {
+      define(definition: { name: string; superclass?: string; methods?: Record<string, { implementation: (...args: any[]) => unknown }> }) {
+        if (definition.superclass) superclasses.set(definition.name, definition.superclass);
         const methods = Object.fromEntries(
           Object.entries(definition.methods ?? {}).map(([selector, value]) => [
             selector,
@@ -1175,6 +1177,12 @@ test("uses the original ordinary helper panel shell without adding safe-area hei
     // content panel, hidden title, transparent titlebar, toolbar style 3,
     // and neither kind of AppKit movability.
     expect(helper.values.get("styleMask")).toBe(0x8091);
+    // A nonactivating style alone does not encode the original window's
+    // explicit refusal to become key/main during mouse interaction.
+    expect(helper.selectors.has("canBecomeKeyWindow")).toBe(true);
+    expect(helper.selectors.get("canBecomeKeyWindow")?.()).toBe(false);
+    expect(helper.selectors.has("canBecomeMainWindow")).toBe(true);
+    expect(helper.selectors.get("canBecomeMainWindow")?.()).toBe(false);
     expect(helper.values.get("titleVisibility")).toBe(1);
     expect(helper.values.get("titlebarAppearsTransparent")).toBe(true);
     expect(helper.values.get("toolbarStyle")).toBe(3);
