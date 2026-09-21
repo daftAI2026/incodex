@@ -123,6 +123,24 @@ mod tests {
         assert_eq!(calls.get(), 1);
     }
 
+    #[test]
+    fn nested_directory_replaced_during_enumeration_is_rejected() {
+        use std::os::unix::fs::symlink;
+        let f = Fixture::new();
+        let nested = f.app.join("nested");
+        fs::create_dir(&nested).unwrap();
+        let outside = f.root.join("outside-directory");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("external"), b"not part of the bundle").unwrap();
+        let result = Snapshot::read_with_hook(&f.app, |path| {
+            if path.ends_with("nested") {
+                fs::rename(&nested, f.root.join("saved-directory")).unwrap();
+                symlink(&outside, &nested).unwrap();
+            }
+        });
+        assert!(result.is_err(), "directory replacement must invalidate the traversal");
+    }
+
     #[cfg(unix)]
     #[test]
     fn wrapper_falls_back_to_full_verification_for_unsupported_entries_each_time() {
