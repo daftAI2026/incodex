@@ -3,6 +3,15 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
+test("OSA CommonJS wrapper loads the unchanged shipping bundles", () => {
+  const runtime = readFileSync(join(root, "native/macos/permission-host-runtime.js"), "utf8");
+  const wrapper = runtime.match(/^function loadOriginal\(source\).*$/m)?.[0];
+  expect(wrapper).toBeDefined();
+  const load = new Function("require", "__dirname", `${wrapper};return loadOriginal;`)(() => ({}), "/fixture");
+  for (const name of ["incodex-permission-ui.cjs", "incodex-dock-menu.cjs"]) {
+    expect(Object.keys(load(readFileSync(join(root, "dist", name), "utf8"))).length).toBeGreaterThan(0);
+  }
+});
 test("shipped permission host reuses the original JS UI instead of Swift window orchestration", () => {
   const build = readFileSync(join(root, "scripts/build-permission-native.ts"), "utf8");
   expect(build).toContain("permission-host-osa.swift");
