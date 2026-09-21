@@ -282,8 +282,12 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
       HELPER_ARROW_WINDOW_SIZE,
     ), false);
   }
+  const HelperPanel = define("HelperPanel", "NSPanel", {
+    canBecomeKeyWindow: { types: "B@:", implementation: () => false },
+    canBecomeMainWindow: { types: "B@:", implementation: () => false },
+  });
   function createHelper(frame) {
-    const panel = kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(frame,0x8091,2,false); configurePanel(panel,true);
+    const panel = HelperPanel.alloc().initWithContentRect$styleMask$backing$defer$(frame,0x8091,2,false); configurePanel(panel,true);
     try {
       panel.setOpaque$(false); panel.setBackgroundColor$(kit.NSColor.whiteColor().colorWithAlphaComponent$(.001)); panel.setHasShadow$(true); panel.setIgnoresMouseEvents$(false);
       panel.setMovableByWindowBackground$(false); panel.setMovable$(false);
