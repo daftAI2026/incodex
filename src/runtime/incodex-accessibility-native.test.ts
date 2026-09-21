@@ -183,6 +183,11 @@ class FakeNative {
     return Array.isArray(this.values.get("items")) ? (this.values.get("items") as unknown[]).length : 0;
   }
 
+  firstObject(): unknown {
+    const items = this.values.get("items");
+    return Array.isArray(items) ? items[0] : undefined;
+  }
+
   objectAtIndex$(index: number): unknown {
     const items = this.values.get("items");
     return Array.isArray(items) ? items[index] : undefined;
@@ -642,6 +647,16 @@ class FakeNative {
     this.visible = true;
   }
 
+  orderFrontRegardless(): void {
+    this.record("orderFrontRegardless");
+    this.visible = true;
+  }
+
+  activateWithOptions$(value: unknown): void {
+    this.record("activateWithOptions:", value);
+    this.values.set("activationOptions", value);
+  }
+
   orderOut$(): void {
     this.record("orderOut:");
     this.visible = false;
@@ -719,6 +734,7 @@ function makeBridge(
   helperInstructionText = COPY.addedBody,
   titleHeight = 30,
   helperInstructionHeight = 16,
+  settingsApplicationCount = 1,
 ): FakeBridge {
   const calls: NativeCall[] = [];
   const objects: FakeNative[] = [];
@@ -770,6 +786,21 @@ function makeBridge(
       },
       imageNamed$: (value: string) => value,
       sharedWorkspace: () => sharedWorkspace ??= object(type),
+      runningApplicationsWithBundleIdentifier$: (bundleIdentifier: unknown) => {
+        const applications = Array.from({ length: settingsApplicationCount }, () => object("NSRunningApplication"));
+        calls.push({
+          receiver: "NSRunningApplication",
+          selector: "runningApplicationsWithBundleIdentifier:",
+          args: [bundleIdentifier],
+        });
+        const result = object("NSArray", {
+          count() { return applications.length; },
+          firstObject() { return applications[0]; },
+          objectAtIndex$(index: number) { return applications[index]; },
+        });
+        result.values.set("items", applications);
+        return result;
+      },
       defaultCenter: () => object(type),
       whiteColor: () => {
         const color = object(type);
@@ -852,6 +883,7 @@ function makeBridge(
       get NSScreen() { return library(this.framework).NSScreen; }
       get NSTrackingArea() { return library(this.framework).NSTrackingArea; }
       get NSWorkspace() { return library(this.framework).NSWorkspace; }
+      get NSRunningApplication() { return library(this.framework).NSRunningApplication; }
       get NSPasteboardItem() { return library(this.framework).NSPasteboardItem; }
       get NSDraggingItem() { return library(this.framework).NSDraggingItem; }
       get NSMutableArray() { return library(this.framework).NSMutableArray; }
@@ -1353,6 +1385,7 @@ async function makeHarness(options: {
   helperFittingSize?: { width: number; height: number };
   helperInstructionWidth?: number;
   helperInstructionHeight?: number;
+  settingsApplicationCount?: number;
   nativeLibrary?: any;
   layoutDirection?: "leftToRight" | "rightToLeft";
 } = {}) {
@@ -1364,6 +1397,7 @@ async function makeHarness(options: {
     options.copy?.addedBody ?? COPY.addedBody,
     options.titleHeight,
     options.helperInstructionHeight,
+    options.settingsApplicationCount,
   );
   const api = await createNativeAccessibilitySetupWindow({
     appPath: APP_PATH,
@@ -1809,6 +1843,47 @@ describe("native Accessibility setup adapter", () => {
     expect(handoffs[0].target.panel).toBeDefined();
     expect(handoffs[0].target.panel.contentViewValue.type).toBe("IncodexPermissionHelperView");
     expect(handoffs[0].target.view).toBe(handoffs[0].target.panel.contentViewValue);
+  });
+
+  test("reveal fronts the helper before reactivating the unique Settings application", async () => {
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    const hostActivations: Array<{ steal?: boolean } | undefined> = [];
+    const harness = await makeHarness({
+      activate: options => { hostActivations.push(options); },
+      onHandoff: () => ({ finished }),
+      locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+    });
+    const { api, bridge } = harness;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+
+      expect(helperPanels(bridge).some(value => value.visible)).toBe(false);
+      finish();
+      await settleNativeAsync();
+
+      const frontIndex = bridge.calls.findIndex(({ selector }) => selector === "orderFrontRegardless");
+      const activateIndex = bridge.calls.findIndex(({ selector }) => selector === "activateWithOptions:");
+      expect(frontIndex).toBeGreaterThanOrEqual(0);
+      expect(activateIndex).toBeGreaterThan(frontIndex);
+      expect(bridge.calls[activateIndex]).toMatchObject({
+        receiver: "NSRunningApplication",
+        selector: "activateWithOptions:",
+        args: [1],
+      });
+      expect(bridge.calls.filter(({ selector }) => selector === "runningApplicationsWithBundleIdentifier:")).toHaveLength(1);
+      expect(bridge.calls.find(({ selector }) => selector === "runningApplicationsWithBundleIdentifier:")?.args).toEqual(["com.apple.systempreferences"]);
+      expect(bridge.objects.filter(value => value.type === "NSRunningApplication")).toHaveLength(1);
+      // Reveal must not activate the guide host; construction is the
+      // only expected call to the injected host activation hook.
+      expect(hostActivations).toEqual([{ steal: true }]);
+    } finally {
+      finish();
+      api.close();
+    }
   });
 
   test("helper flight capture reads the current native foreground at the panel's current scale", async () => {
