@@ -151,6 +151,7 @@ function createNativeReplicants({ objc, nativeLibrary, source, target, reverse =
       if (!surface) throw new Error("Native permission SwiftUI flight view construction failed");
       item.surface = surface;
       surface.setWantsLayer$(true);
+      surface.layer().setMasksToBounds$(false);
       surface.layer().setContentsScale$(scale);
       root.setWantsLayer$(true); root.layer().setMasksToBounds$(false);
       panel.setContentView$(root);
@@ -214,9 +215,12 @@ function createNativeReplicants({ objc, nativeLibrary, source, target, reverse =
         const outer = rect(0, 0, aligned.width + 60, aligned.height + 60);
         const inner = rect(30, 30, aligned.width, aligned.height);
         root.setFrame$(rect(aligned.x - 30, aligned.y - 30, outer.size.width, outer.size.height));
+        root.layer().setCornerRadius$(sample.cornerRadius);
         surface.setFrame$(inner);
+        surface.layer().setCornerRadius$(sample.cornerRadius);
         surface.updateProgress$cornerRadius$reduceTransparency$(sample.progress, sample.cornerRadius, reduceTransparency);
         strokeView.setFrame$(inner);
+        strokeView.layer().setCornerRadius$(sample.cornerRadius);
         const strokeRadius = Math.max(0, sample.cornerRadius - .25);
         stroke.setFrame$(bounds); stroke.setOpacity$(.15 * Math.max(0, Math.min(1, sample.progress)));
         graphics.setRoundedPath(stroke, rect(.25, .25, Math.max(0, aligned.width - .5), Math.max(0, aligned.height - .5)), strokeRadius);
