@@ -1806,6 +1806,18 @@ describe("native Accessibility setup adapter", () => {
     expect(arrayValues(item.values.get("types"))).toEqual(expect.arrayContaining(["public.file-url"]));
   });
 
+  test("the helper accepts the first mouse press while Settings is active", async () => {
+    const { api, bridge } = await makeHarness();
+    try {
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      const row = bridge.objects.find(value => value.hasSelector("mouseDown:"));
+      if (!row) throw new Error("native helper drag row is missing");
+      expect(row.hasSelector("acceptsFirstMouse:")).toBe(true);
+      expect(row.invoke("acceptsFirstMouse:", {})).toBe(true);
+    } finally { api.close(); }
+  });
+
   test("converts the inner NSBox content bounds into the drag source coordinates", async () => {
     const harness = await makeHarness();
     const { api, bridge, swift } = harness;
