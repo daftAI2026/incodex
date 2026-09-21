@@ -108,4 +108,68 @@ mod tests {
         symlink("second", f.app.join("link")).unwrap();
         assert!(guard.revalidate().is_err());
     }
+
+    #[test]
+    fn wrapper_runs_full_verification_once_for_a_stable_target() {
+        let f = Fixture::new();
+        let calls = Cell::new(0);
+        let mut verify = verifier(&f.app, true, || {
+            calls.set(calls.get() + 1);
+            Ok(())
+        });
+
+        verify().unwrap();
+        verify().unwrap();
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wrapper_falls_back_to_full_verification_for_unsupported_entries_each_time() {
+        use std::os::unix::fs::symlink;
+
+        for (label, setup) in [
+            ("special", Box::new(|f: &Fixture| {
+                let path = f.app.join("fifo");
+                let path_bytes = std::ffi::CString::new(path.to_string_lossy().as_bytes()).unwrap();
+                assert_eq!(unsafe { libc::mkfifo(path_bytes.as_ptr(), 0o600) }, 0);
+            }) as Box<dyn Fn(&Fixture)>),
+            ("external-symlink", Box::new(|f: &Fixture| {
+                fs::write(f.root.join("outside"), b"outside").unwrap();
+                symlink("../outside", f.app.join("link")).unwrap();
+            })),
+            ("dangling-symlink", Box::new(|f: &Fixture| {
+                symlink("missing", f.app.join("link")).unwrap();
+            })),
+        ] {
+            let f = Fixture::new();
+            setup(&f);
+            let calls = Cell::new(0);
+            let mut verify = verifier(&f.app, true, || {
+                calls.set(calls.get() + 1);
+                Ok(())
+            });
+
+            verify().unwrap_or_else(|error| panic!("{label} fallback failed: {error}"));
+            verify().unwrap_or_else(|error| panic!("{label} fallback did not repeat: {error}"));
+            assert_eq!(calls.get(), 2, "{label} must use full verification every time");
+        }
+    }
+
+    #[test]
+    fn wrapper_drift_fails_closed_without_replacing_its_baseline() {
+        let f = Fixture::new();
+        let calls = Cell::new(0);
+        let mut verify = verifier(&f.app, true, || {
+            calls.set(calls.get() + 1);
+            Ok(())
+        });
+
+        verify().unwrap();
+        fs::write(f.app.join("payload"), b"changed").unwrap();
+        assert!(verify().is_err());
+        fs::write(f.app.join("payload"), b"original").unwrap();
+        assert!(verify().is_err());
+        assert_eq!(calls.get(), 1, "drift must not rerun or replace the full verifier");
+    }
 }
