@@ -137,6 +137,37 @@ test.skipIf(process.platform !== "darwin").each(["current", "forced-hosting-comp
   }
 }, 90_000);
 
+test.skipIf(process.platform !== "darwin").each(["current", "forced-hosting-compatibility"])("permission card snapshot renders transparent foreground without windows (%s)", (mode) => {
+  const directory = mkdtempSync(join(tmpdir(), "incodex-permission-card-snapshot-"));
+  try {
+    let nativeSource = join(import.meta.dir, "..", "native/macos/permission-views.swift");
+    if (mode === "forced-hosting-compatibility") {
+      // Exercise the macOS 12 NSHostingView fallback on the current OS. This
+      // is a test-only source copy; it does not add a product compatibility flag.
+      const source = readFileSync(nativeSource, "utf8");
+      const availability = "if #available(macOS 13.0, *) {";
+      expect(source.split(availability)).toHaveLength(2);
+      nativeSource = join(directory, "permission-views.swift");
+      writeFileSync(nativeSource, source.replace(availability, "if #available(macOS 13.0, *), false {"));
+    }
+    const executable = join(directory, "permission-card-snapshot");
+    const architecture = process.arch === "arm64" ? "arm64" : "x86_64";
+    const build = spawnSync("xcrun", [
+      "swiftc", "-parse-as-library", "-target", `${architecture}-apple-macos12`,
+      "-module-name", "IncodexPermissionCardSnapshotTest",
+      nativeSource, "tests/native/permission-card-snapshot-smoke.swift",
+      "-o", executable,
+    ], { cwd: join(import.meta.dir, ".."), encoding: "utf8", timeout: 60_000 });
+    expect(build.status, build.stderr || String(build.error ?? "permission-card snapshot compilation failed")).toBe(0);
+    if (build.status !== 0) return;
+    const run = spawnSync(executable, [], { encoding: "utf8", timeout: 20_000 });
+    expect(run.status, `${run.stdout ?? ""}${run.stderr ?? ""}` || String(run.error ?? "permission-card snapshot smoke failed")).toBe(0);
+    expect(run.stdout).toContain("permission card snapshot smoke passed");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}, 90_000);
+
 test.skipIf(process.platform !== "darwin")("flight images preserve native size, compositing and rounded clipping without windows", () => {
   const directory = mkdtempSync(join(tmpdir(), "incodex-flight-pixels-"));
   try {
