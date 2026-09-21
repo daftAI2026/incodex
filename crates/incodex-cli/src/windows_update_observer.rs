@@ -2,7 +2,10 @@
 use std::path::Path;
 use std::ptr;
 use std::sync::Arc;
-use windows::ApplicationModel::{PackageCatalog, PackageUpdatingEventArgs};
+use windows::ApplicationModel::{
+    PackageCatalog, PackageInstallingEventArgs, PackageStatusChangedEventArgs,
+    PackageUpdatingEventArgs,
+};
 use windows::Foundation::TypedEventHandler;
 use windows_sys::Win32::Foundation::{
     CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND, ERROR_INVALID_PARAMETER,
@@ -163,15 +166,24 @@ pub(crate) fn start(state: &WindowsInstallState) -> Result<(), String> {
 struct Subscription {
     catalog: PackageCatalog,
     token: i64,
+    installing: Option<i64>,
+    status_changed: Option<i64>,
 }
 impl Drop for Subscription {
     fn drop(&mut self) {
         let _ = self.catalog.RemovePackageUpdating(self.token);
+        if let Some(token) = self.installing {
+            let _ = self.catalog.RemovePackageInstalling(token);
+        }
+        if let Some(token) = self.status_changed {
+            let _ = self.catalog.RemovePackageStatusChanged(token);
+        }
     }
 }
 fn subscribe(wake: Arc<OwnedHandle>) -> Result<Subscription, String> {
     let catalog = crate::windows_update_repair::open_current_user_package_catalog()
         .map_err(|error| error.to_string())?;
+    let update_wake = wake.clone();
     let handler =
         TypedEventHandler::<PackageCatalog, PackageUpdatingEventArgs>::new(move |_, args| {
             if let Some(args) = args.as_ref() {
@@ -179,7 +191,7 @@ fn subscribe(wake: Arc<OwnedHandle>) -> Result<Subscription, String> {
                     && args.ErrorCode()?.0 == 0
                     && args.TargetPackage()?.Id()?.FamilyName()? == CODEX_PACKAGE_FAMILY_NAME
                 {
-                    unsafe { SetEvent(wake.0) };
+                    unsafe { SetEvent(update_wake.0) };
                 }
             }
             Ok(())
@@ -187,7 +199,49 @@ fn subscribe(wake: Arc<OwnedHandle>) -> Result<Subscription, String> {
     let token = catalog
         .PackageUpdating(&handler)
         .map_err(|error| error.to_string())?;
-    Ok(Subscription { catalog, token })
+    // 登录注册不一定是在线更新；保留状态变化与安装完成两个唤醒来源。
+    // 先取得撤销守卫，后续订阅失败也不会留下半套回调。
+    let mut subscription = Subscription {
+        catalog,
+        token,
+        installing: None,
+        status_changed: None,
+    };
+    let install_wake = wake.clone();
+    let installing =
+        TypedEventHandler::<PackageCatalog, PackageInstallingEventArgs>::new(move |_, args| {
+            if let Some(args) = args.as_ref() {
+                if args.IsComplete()?
+                    && args.ErrorCode()?.0 == 0
+                    && args.Package()?.Id()?.FamilyName()? == CODEX_PACKAGE_FAMILY_NAME
+                {
+                    unsafe { SetEvent(install_wake.0) };
+                }
+            }
+            Ok(())
+        });
+    subscription.installing = Some(
+        subscription
+            .catalog
+            .PackageInstalling(&installing)
+            .map_err(|error| error.to_string())?,
+    );
+    let changed =
+        TypedEventHandler::<PackageCatalog, PackageStatusChangedEventArgs>::new(move |_, args| {
+            if let Some(args) = args.as_ref() {
+                if args.Package()?.Id()?.FamilyName()? == CODEX_PACKAGE_FAMILY_NAME {
+                    unsafe { SetEvent(wake.0) };
+                }
+            }
+            Ok(())
+        });
+    subscription.status_changed = Some(
+        subscription
+            .catalog
+            .PackageStatusChanged(&changed)
+            .map_err(|error| error.to_string())?,
+    );
+    Ok(subscription)
 }
 
 fn wait(stop: &OwnedHandle, wake: &OwnedHandle) -> Result<bool, String> {
@@ -465,14 +519,19 @@ pub(crate) fn try_run(args: &[String]) -> Option<Result<(), String>> {
                 }
                 Ok(subscription)
             },
-            || reconcile(&root, &helper, &stop),
+            || {
+                reconcile(&root, &helper, &stop).inspect_err(|error| {
+                    // 本轮不具备恢复条件，不等于放弃未来事件；日志仍有界且去重。
+                    let _ = status(&root, "reconciliation-deferred", error);
+                })
+            },
             || {
                 let updated = wait(&stop, &wake)?;
                 if updated {
                     status(
                         &root,
-                        "package-update-event",
-                        "successful Codex family update; rediscovery pending",
+                        "package-change-event",
+                        "Codex family package event; trusted rediscovery pending",
                     )?;
                 }
                 Ok(updated)
@@ -500,7 +559,9 @@ where
 {
     let _subscription = subscribe()?;
     loop {
-        if !reconcile()? || !wait()? {
+        // 失败只阻止本轮写入；订阅存活，下一次事件重新核验全部授权与包证据。
+        // 没有授权则立即退出；无事件时阻塞等待，不轮询、不按错误字符串放行。
+        if matches!(reconcile(), Ok(false)) || !wait()? {
             break;
         }
     }
@@ -674,9 +735,15 @@ mod tests {
                     _ => Ok(false),
                 }
             },
-            || { wakeups += 1; Ok(true) },
+            || {
+                wakeups += 1;
+                Ok(true)
+            },
         );
-        assert!(result.is_ok(), "temporary package failure ended observer: {result:?}");
+        assert!(
+            result.is_ok(),
+            "temporary package failure ended observer: {result:?}"
+        );
         assert_eq!(reconciliations, 3);
         assert_eq!(wakeups, 2);
     }
@@ -686,7 +753,10 @@ mod tests {
         let mut attempts = 0;
         let result = run_observer_with(
             || Ok(()),
-            || { attempts += 1; Err("package unavailable".into()) },
+            || {
+                attempts += 1;
+                Err("package unavailable".into())
+            },
             || Ok(false),
         );
         assert!(result.is_ok());
