@@ -1,10 +1,11 @@
 //! Private stdio transport for the short-lived native Accessibility guide.
 //!
-//! The short-lived Node native host is only a UI host.  It never performs a
+//! The short-lived native executable host is only a UI host.  It never performs a
 //! TCC reset or opens Settings; those operations stay in the CLI.  This module
 //! deliberately keeps the transport small and bounded so a broken/hostile host cannot
 //! make `uninstall` wait forever or turn arbitrary output into a command.
 
+use std::env;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
@@ -18,10 +19,9 @@ use std::time::{Duration, Instant};
 use incodex_macos::AccessibilityStatus;
 use serde_json::{json, Value};
 
-pub(crate) const HOST_ARTIFACT_NAME: &str = "incodex-permission-host.cjs";
+pub(crate) const HOST_EXECUTABLE_NAME: &str = "incodex-permission-host";
+const PERMISSION_COPY_NAME: &str = "incodex-permission-copy.json";
 pub(crate) const OFFICIAL_APP_PATH: &str = "/Applications/ChatGPT.app";
-pub(crate) const OFFICIAL_NODE_PATH: &str =
-    "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node";
 pub(crate) const MAX_HOST_LINE_BYTES: usize = 64 * 1024;
 // Initial native-window construction may wait for AppKit to attach to the
 // restored Electron process.  This is separate from the two-minute user
@@ -34,7 +34,7 @@ pub(crate) const HOST_GUIDE_TIMEOUT: Duration = Duration::from_secs(120);
 
 const CHILD_CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
 const CHILD_EXIT_GRACE: Duration = Duration::from_millis(100);
-const NODE_VERIFY_TIMEOUT: Duration = Duration::from_secs(5);
+const CODESIGN_VERIFY_TIMEOUT: Duration = Duration::from_secs(5);
 const INITIAL_PROBE_ATTEMPTS: usize = 120;
 const INITIAL_PROBE_INTERVAL: Duration = Duration::from_millis(250);
 const POST_ALLOW_PROBE_INTERVAL: Duration = Duration::from_millis(750);
@@ -43,6 +43,11 @@ const POST_ALLOW_PROBE_INTERVAL: Duration = Duration::from_millis(750);
 pub(crate) enum Outcome {
     Granted,
     Pending,
+}
+
+struct NativeGuideConfig {
+    copy: Value,
+    layout_direction: &'static str,
 }
 
 /// Operations that remain in the CLI process.  In particular, the Runtime
@@ -461,17 +466,15 @@ enum ReaderEvent {
 
 impl ProcessGuideHost {
     fn spawn(root: &Path) -> Result<Self, String> {
-        let node = verified_node_path()?;
-        let script = verified_host_script(root)?;
+        let executable = verified_native_host_path(root)?;
         let nonce = new_nonce()?;
 
-        let mut child = Command::new(&node)
-            .arg(&script)
+        let mut child = Command::new(&executable)
             .arg("--nonce")
             .arg(&nonce)
             // The native host is trusted only through the verified Runtime
-            // release.  Do not let a parent Electron/Node injection setting
-            // alter this short-lived process.
+            // release. Do not let a parent process injection setting alter
+            // this short-lived process.
             .env_remove("NODE_OPTIONS")
             .env_remove("NODE_PATH")
             .env_remove("ELECTRON_RUN_AS_NODE")
@@ -514,13 +517,15 @@ impl ProcessGuideHost {
             ));
         }
 
-        Ok(Self {
+        let mut host = Self {
             child,
             stdin: Some(stdin),
             events,
             nonce,
             closed: false,
-        })
+        };
+        host.send_configure(&native_guide_config()?)?;
+        Ok(host)
     }
 
     fn send_json(&mut self, value: Value) -> Result<(), String> {
@@ -537,6 +542,15 @@ impl ProcessGuideHost {
         write_bounded(stdin, &body)?;
         write_bounded(stdin, b"\n")?;
         flush_bounded(stdin)
+    }
+
+    fn send_configure(&mut self, config: &NativeGuideConfig) -> Result<(), String> {
+        self.send_json(json!({
+            "nonce": self.nonce,
+            "type": "configure",
+            "copy": config.copy,
+            "layoutDirection": config.layout_direction,
+        }))
     }
 
     fn child_status(&mut self) -> Result<Option<ExitStatus>, String> {
@@ -733,51 +747,139 @@ fn decode_host_event(line: &[u8], nonce: &str) -> Result<HostEvent, String> {
     }
 }
 
-fn verified_node_path() -> Result<PathBuf, String> {
-    let path = Path::new(OFFICIAL_NODE_PATH);
-    let metadata = fs::symlink_metadata(path)
-        .map_err(|error| format!("cannot inspect official Runtime node: {error}"))?;
-    if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-        return Err("official Runtime node is not a regular file".into());
+fn native_guide_config() -> Result<NativeGuideConfig, String> {
+    let source = incodex_runtime_assets::external_files()
+        .iter()
+        .find_map(|(name, body)| (*name == PERMISSION_COPY_NAME).then_some(*body))
+        .ok_or("embedded native Accessibility copy catalog is missing")?;
+    let mut catalog: Value = serde_json::from_str(source)
+        .map_err(|error| format!("invalid native Accessibility copy catalog: {error}"))?;
+    let catalog_object = catalog
+        .as_object_mut()
+        .ok_or("native Accessibility copy catalog is not an object")?;
+    let raw_locale = configured_locale().unwrap_or_else(|| "en".into());
+    let locale = resolve_catalog_locale(&raw_locale, catalog_object);
+    let mut copy = catalog_object
+        .remove(&locale)
+        .ok_or_else(|| format!("native Accessibility copy catalog has no locale: {locale}"))?;
+    let copy_object = copy
+        .as_object_mut()
+        .ok_or("native Accessibility locale copy is not an object")?;
+    if let Some(added_title) = copy_object.get("addedTitle").cloned() {
+        copy_object.insert("body".into(), added_title);
     }
-    if metadata.permissions().mode() & 0o111 == 0 {
-        return Err("official Runtime node is not executable".into());
+    if let Some(error_body) = copy_object.get("errorBody").and_then(Value::as_str) {
+        copy_object.insert(
+            "errorBody".into(),
+            Value::String(error_body.replace("incodex install", "incodex doctor")),
+        );
     }
-    let canonical = fs::canonicalize(path)
-        .map_err(|error| format!("cannot resolve official Runtime node: {error}"))?;
-    if canonical != path {
-        return Err("official Runtime node path changed during validation".into());
-    }
-    verify_codesign(path)?;
-    Ok(canonical)
+    let layout_direction = if is_rtl_locale(&locale) {
+        "rightToLeft"
+    } else {
+        "leftToRight"
+    };
+    Ok(NativeGuideConfig {
+        copy,
+        layout_direction,
+    })
 }
 
-fn verify_codesign(path: &Path) -> Result<(), String> {
-    let mut child = Command::new("/usr/bin/codesign")
-        .args(["--verify", "--strict", "--verbose=0", "--"])
-        .arg(path)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|error| format!("cannot verify official Runtime node signature: {error}"))?;
-    let deadline = Instant::now() + NODE_VERIFY_TIMEOUT;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) if status.success() => return Ok(()),
-            Ok(Some(status)) => {
-                return Err(format!("official Runtime node signature failed: {status}"))
-            }
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(25)),
-            Ok(None) | Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err("official Runtime node signature verification timed out".into());
-            }
-        }
+fn configured_locale() -> Option<String> {
+    let source_home = locale_source_home();
+    let config =
+        fs::read_to_string(source_home.join(incodex_core::session_layout::CONFIG_SETTING_FILE))
+            .ok();
+    let config_override = config
+        .as_deref()
+        .and_then(|content| crate::locale::parse_locale_override(content, &['"']));
+    select_locale_source(config_override.as_deref())
+}
+
+fn locale_source_home() -> PathBuf {
+    let fallback = crate::open::default_source_home();
+    resolve_locale_source_home(env::var_os("INCODEX_SOURCE_HOME").as_deref(), &fallback)
+}
+
+fn resolve_locale_source_home(value: Option<&std::ffi::OsStr>, fallback: &Path) -> PathBuf {
+    let Some(value) = value.filter(|value| !value.is_empty()) else {
+        return fallback.to_path_buf();
+    };
+    let path = PathBuf::from(value);
+    if path.is_absolute() {
+        path
+    } else {
+        env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
     }
 }
 
-fn verified_host_script(root: &Path) -> Result<PathBuf, String> {
+fn select_locale_source(config_override: Option<&str>) -> Option<String> {
+    config_override
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
+fn resolve_catalog_locale(raw: &str, catalog: &serde_json::Map<String, Value>) -> String {
+    let normalized = raw.trim().replace('_', "-");
+    let normalized = normalized.split('.').next().unwrap_or("en");
+    if catalog.contains_key(normalized) {
+        return normalized.to_string();
+    }
+    let lower = normalized.to_ascii_lowercase();
+    if let Some(locale) = catalog
+        .keys()
+        .find(|locale| locale.to_ascii_lowercase() == lower)
+    {
+        return locale.clone();
+    }
+    if lower.starts_with("zh-hant-hk") || lower.starts_with("zh-hk") {
+        return "zh-HK".into();
+    }
+    if lower.starts_with("zh-hant") || lower.starts_with("zh-tw") {
+        return "zh-TW".into();
+    }
+    if lower.starts_with("zh") {
+        return "zh-CN".into();
+    }
+    if lower == "en" || lower.starts_with("en-") {
+        return "en".into();
+    }
+    let language = lower.split('-').next().unwrap_or("en");
+    if catalog.contains_key(language) {
+        return language.into();
+    }
+    let override_locale = match language {
+        "es" => Some("es-419"),
+        "fr" => Some("fr-FR"),
+        "no" => Some("nb-NO"),
+        "pt" => Some("pt-BR"),
+        _ => None,
+    };
+    if let Some(locale) = override_locale.filter(|locale| catalog.contains_key(*locale)) {
+        return locale.into();
+    }
+    catalog
+        .keys()
+        .find(|locale| {
+            locale
+                .to_ascii_lowercase()
+                .starts_with(&format!("{language}-"))
+        })
+        .cloned()
+        .unwrap_or_else(|| "en".into())
+}
+
+fn is_rtl_locale(locale: &str) -> bool {
+    matches!(
+        locale.to_ascii_lowercase().split('-').next(),
+        Some("ar" | "fa" | "ur")
+    )
+}
+
+fn verified_native_host_path(root: &Path) -> Result<PathBuf, String> {
     let published = incodex_runtime_bundle::ensure_current(root)?;
     let identity = incodex_runtime_bundle::runtime_identity()?;
     let deployed = incodex_runtime_bundle::inspect_deployed(root)?
@@ -788,22 +890,56 @@ fn verified_host_script(root: &Path) -> Result<PathBuf, String> {
     if !identity.matches(&deployed) {
         return Err("published Runtime identity changed during guide startup".into());
     }
-    let release = root.join("runtime").join(&deployed.release);
-    let script = release.join(HOST_ARTIFACT_NAME);
-    let metadata = fs::symlink_metadata(&script)
-        .map_err(|error| format!("native Accessibility guide Runtime asset is missing: {error}"))?;
-    if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-        return Err("native Accessibility guide Runtime asset is not a regular file".into());
-    }
-    let canonical = fs::canonicalize(&script).map_err(|error| {
-        format!("cannot resolve native Accessibility guide Runtime asset: {error}")
+    let path = root
+        .join("runtime")
+        .join(&deployed.release)
+        .join(HOST_EXECUTABLE_NAME);
+    let metadata = fs::symlink_metadata(&path).map_err(|error| {
+        format!(
+            "native Accessibility guide executable is missing from the verified Runtime: {error}"
+        )
     })?;
-    if canonical != script {
-        return Err(
-            "native Accessibility guide Runtime asset path changed during validation".into(),
-        );
+    if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+        return Err("native Accessibility guide executable is not a regular file".into());
     }
+    if metadata.permissions().mode() & 0o111 == 0 {
+        return Err("native Accessibility guide executable is not executable".into());
+    }
+    let canonical = fs::canonicalize(&path).map_err(|error| {
+        format!("cannot resolve native Accessibility guide executable: {error}")
+    })?;
+    if canonical != path {
+        return Err("native Accessibility guide executable path changed during validation".into());
+    }
+    verify_codesign(&canonical)?;
     Ok(canonical)
+}
+
+fn verify_codesign(path: &Path) -> Result<(), String> {
+    let mut child = Command::new("/usr/bin/codesign")
+        .args(["--verify", "--strict", "--verbose=0", "--"])
+        .arg(path)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("cannot verify native Accessibility guide signature: {error}"))?;
+    let deadline = Instant::now() + CODESIGN_VERIFY_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => return Ok(()),
+            Ok(Some(status)) => {
+                return Err(format!(
+                    "native Accessibility guide signature failed: {status}"
+                ))
+            }
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(25)),
+            Ok(None) | Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("native Accessibility guide signature verification timed out".into());
+            }
+        }
+    }
 }
 
 fn new_nonce() -> Result<String, String> {
@@ -924,5 +1060,82 @@ mod tests {
             HostEvent::Error(message) if message.contains("exited unsuccessfully")
         ));
         host.close();
+    }
+
+    #[test]
+    fn native_copy_locale_resolution_matches_the_runtime_catalog_rules() {
+        let catalog = [
+            "en", "zh-CN", "zh-HK", "zh-TW", "de-DE", "es-419", "fr-FR", "nb-NO", "pt-BR", "ar",
+            "fa", "ur",
+        ]
+        .into_iter()
+        .map(|locale| (locale.to_string(), Value::Null))
+        .collect();
+        let cases = [
+            ("", "en"),
+            ("C.UTF-8", "en"),
+            ("zh-MO", "zh-CN"),
+            ("zh-Hant-HK", "zh-HK"),
+            ("zh_Hant.UTF-8", "zh-TW"),
+            ("de", "de-DE"),
+            ("es", "es-419"),
+            ("fr", "fr-FR"),
+            ("no", "nb-NO"),
+            ("pt", "pt-BR"),
+            ("en-GB", "en"),
+            ("unknown", "en"),
+        ];
+        for (raw, expected) in cases {
+            assert_eq!(
+                resolve_catalog_locale(raw, &catalog),
+                expected,
+                "locale {raw}"
+            );
+        }
+    }
+
+    #[test]
+    fn native_copy_layout_direction_follows_the_canonical_rtl_locale() {
+        let catalog: serde_json::Map<String, Value> = [
+            ("en".into(), Value::Null),
+            ("ar".into(), Value::Null),
+            ("fa".into(), Value::Null),
+            ("ur".into(), Value::Null),
+            ("zh-CN".into(), Value::Null),
+            ("zh-HK".into(), Value::Null),
+            ("de-DE".into(), Value::Null),
+        ]
+        .into_iter()
+        .collect();
+        for raw in ["ar", "AR-SA", "fa_IR", "ur-PK"] {
+            assert!(is_rtl_locale(&resolve_catalog_locale(raw, &catalog)));
+        }
+        for raw in ["", "zh-Hant-HK", "de-DE", "unknown"] {
+            assert!(!is_rtl_locale(&resolve_catalog_locale(raw, &catalog)));
+        }
+    }
+
+    #[test]
+    fn configured_locale_prefers_a_nonempty_config_override() {
+        assert_eq!(select_locale_source(Some("fr-FR")), Some("fr-FR".into()));
+    }
+
+    #[test]
+    fn configured_locale_falls_back_to_catalog_default_when_override_is_empty() {
+        assert_eq!(select_locale_source(Some("  ")), None);
+        assert_eq!(select_locale_source(None), None);
+    }
+
+    #[test]
+    fn locale_source_home_matches_the_runtime_source_home_override() {
+        let fallback = Path::new("/tmp/default-codex-home");
+        assert_eq!(
+            resolve_locale_source_home(
+                Some(std::ffi::OsStr::new("/tmp/selected-codex-home")),
+                fallback
+            ),
+            PathBuf::from("/tmp/selected-codex-home")
+        );
+        assert_eq!(resolve_locale_source_home(None, fallback), fallback);
     }
 }
