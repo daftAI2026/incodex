@@ -170,6 +170,11 @@ class FakeNative {
     return this.values.get("foregroundSnapshot");
   }
 
+  snapshotPermissionCardWithScale$(scale: number): unknown {
+    this.record("snapshotPermissionCardWithScale:", scale);
+    return this.values.get("cardForegroundSnapshot") ?? this;
+  }
+
   addRepresentation$(value: unknown): void {
     this.values.set("representation", value);
   }
@@ -1786,17 +1791,17 @@ describe("native Accessibility setup adapter", () => {
     api.setState("awaiting-user");
     await flushNativeAsync();
 
-    expect(swift!.calls.some(({ selector }) => selector === "cacheDisplayInRect:toBitmapImageRep:")).toBe(true);
+    expect(swift!.calls.filter(({ selector }) => selector === "snapshotPermissionCardWithScale:").map(call => call.args)).toEqual([[2]]);
+    expect(swift!.calls.some(({ selector }) => selector === "cacheDisplayInRect:toBitmapImageRep:")).toBe(false);
     expect(handoffs).toHaveLength(1);
     expect(handoffs[0].source.frame.size.width).toBeGreaterThan(0);
     expect(handoffs[0].source.frame.size.height).toBeGreaterThan(0);
     expect(handoffs[0].source.image).toBeDefined();
-    const capture = handoffs[0].source.image.values.get("representation").values.get("capturedView") as FakeNative;
     // Original full-window recording: the entire permission card transforms
     // into the helper, and returns to the same card slot on Back.
     expect(handoffs[0].source.frame.size).toEqual({ width: 518, height: 80 });
     expect(handoffs[0].source.radius).toBe(24);
-    expect(capture).toBe(swift!.initialCards[0]);
+    expect(handoffs[0].source.image).not.toBe(swift!.initialCards[0]);
     expect(handoffs[0].target.frame.size).toEqual({ width: 531, height: 110 });
     // Original helper capture writes 14 to TransitionCapture.cornerRadius
     // (+0x28); this is not the live helper window's corner radius.
