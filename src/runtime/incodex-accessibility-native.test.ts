@@ -2114,18 +2114,26 @@ describe("native Accessibility setup adapter", () => {
     }
   });
 
-  test("disables helper hit testing for an active drag and restores it when the drag ends", async () => {
-    const { api, bridge } = await makeHarness();
+  test("hides and restores the app row without changing helper input or order on a canceled drag", async () => {
+    const { api, bridge, swift } = await makeHarness();
     api.setState("awaiting-user");
     await flushNativeAsync();
     const row = bridge.objects.find((value) => value.hasSelector("mouseDown:"));
     const helper = helperPanels(bridge).find((value) => value.frame().size.width === 531);
-    if (!row || !helper) throw new Error("native drag helper is missing");
+    const appRow = swift?.helperRows[0];
+    if (!row || !helper || !appRow) throw new Error("native drag helper is missing");
 
-    row.invoke("draggingSession:willBeginAtPoint:", { x: 0, y: 0 });
-    expect(helper.values.get("ignoresMouseEvents")).toBe(true);
-    row.invoke("draggingSession:endedAtPoint:operation:", { x: 0, y: 0 }, 0);
+    // The native helper owns its input policy; the drag only hides the visible row.
     expect(helper.values.get("ignoresMouseEvents")).toBe(false);
+    row.invoke("draggingSession:willBeginAtPoint:", { x: 0, y: 0 });
+    expect(appRow.values.get("hidden")).toBe(true);
+    expect(helper.values.get("ignoresMouseEvents")).toBe(false);
+
+    const callsBeforeCancel = bridge.calls.length;
+    row.invoke("draggingSession:endedAtPoint:operation:", { x: 0, y: 0 }, 0);
+    expect(appRow.values.get("hidden")).toBe(false);
+    expect(helper.values.get("ignoresMouseEvents")).toBe(false);
+    expect(bridge.calls.slice(callsBeforeCancel).some(({ selector }) => selector === "orderFront:")).toBe(false);
     api.close();
   });
 
