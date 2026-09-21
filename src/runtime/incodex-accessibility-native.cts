@@ -257,12 +257,10 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
     "ignoreModifierKeysForDraggingSession:": { types: "B@:@", implementation: () => true },
     "draggingSession:willBeginAtPoint:": { types: "v@:@{CGPoint=dd}", implementation: () => {
       dragging = true; stopArrow(); if (reducedMotion()) resetArrow(); else animateArrow(1, 1); appRowView.setHidden$(true);
-      helper?.panel.setIgnoresMouseEvents$(true);
     } },
     "draggingSession:endedAtPoint:operation:": { types: "v@:@{CGPoint=dd}Q", implementation: () => {
       dragging = false; dragSession = null;
       if (!closed) {
-        helper?.panel.setIgnoresMouseEvents$(false); helper?.panel.orderFront$(null);
         appRowView.setHidden$(false); scheduleArrow(4000);
       }
     } },
