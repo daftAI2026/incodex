@@ -661,6 +661,39 @@ mod tests {
     }
 
     #[test]
+    fn package_unavailable_at_login_keeps_subscription_until_recovery_event() {
+        let mut reconciliations = 0;
+        let mut wakeups = 0;
+        let result = run_observer_with(
+            || Ok(()),
+            || {
+                reconciliations += 1;
+                match reconciliations {
+                    1 => Err("official Codex Microsoft Store package is not healthy".into()),
+                    2 => Ok(true),
+                    _ => Ok(false),
+                }
+            },
+            || { wakeups += 1; Ok(true) },
+        );
+        assert!(result.is_ok(), "temporary package failure ended observer: {result:?}");
+        assert_eq!(reconciliations, 3);
+        assert_eq!(wakeups, 2);
+    }
+
+    #[test]
+    fn unavailable_package_can_be_cancelled_without_retry_or_mutation() {
+        let mut attempts = 0;
+        let result = run_observer_with(
+            || Ok(()),
+            || { attempts += 1; Err("package unavailable".into()) },
+            || Ok(false),
+        );
+        assert!(result.is_ok());
+        assert_eq!(attempts, 1);
+    }
+
+    #[test]
     fn observer_subscribes_before_startup_reconciliation_without_a_new_event() {
         let calls = RefCell::new(Vec::new());
         run_observer_with(
