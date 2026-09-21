@@ -1212,6 +1212,30 @@ test("uses the original ordinary helper panel shell without adding safe-area hei
   }
 });
 
+test("keeps the hint arrow panel from becoming key or main", async () => {
+  const { api, bridge } = await makeHarness({
+    locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+  });
+  try {
+    api.setState("awaiting-user");
+    await flushNativeAsync();
+    const arrow = bridge.objects.find((panel) => {
+      if (panel.type !== "NSPanel") return false;
+      const size = panel.frame().size;
+      return size.width === 100 && size.height === 100;
+    });
+    if (!arrow) throw new Error("ArrowWindow panel is missing");
+
+    // Decorative child windows must reject both AppKit activation paths.
+    expect(arrow.selectors.has("canBecomeKeyWindow")).toBe(true);
+    expect(arrow.selectors.get("canBecomeKeyWindow")?.()).toBe(false);
+    expect(arrow.selectors.has("canBecomeMainWindow")).toBe(true);
+    expect(arrow.selectors.get("canBecomeMainWindow")?.()).toBe(false);
+  } finally {
+    api.close();
+  }
+});
+
 test("keeps the reference fixed helper width despite an unrelated host fitting size", async () => {
   const { api, bridge } = await makeHarness({
     helperFittingSize: { width: 600, height: 140 },
