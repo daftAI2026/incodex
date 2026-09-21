@@ -5,6 +5,8 @@ mod accessibility_restore;
 #[cfg(not(target_os = "windows"))]
 mod accessibility_setup;
 #[cfg(not(target_os = "windows"))]
+mod accessibility_target;
+#[cfg(not(target_os = "windows"))]
 pub mod app_bundle;
 #[cfg(not(target_os = "windows"))]
 pub(crate) mod app_quiescence;

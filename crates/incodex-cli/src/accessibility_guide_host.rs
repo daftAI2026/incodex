@@ -125,18 +125,24 @@ impl GuideHostFactory for ProcessGuideFactory {
 
 /// Run the one-shot guide for either the restored official app or an already
 /// validated patched app.  The caller owns its transaction lock and supplies a
-/// verifier that is invoked before launch and again immediately before the
-/// single possible reset.  No signature policy is hidden in this generic loop.
+/// full verifier before launch. On APFS, a fresh continuity check then binds
+/// Allow to that same verified tree; other filesystems retain full revalidation.
+/// The exact running process is still audited immediately before any reset.
 pub(crate) fn run_permission_guide<F>(
     root: &Path,
     app: &Path,
-    mut verify_target: F,
+    verify_target: F,
 ) -> Result<Outcome, String>
 where
     F: FnMut() -> Result<(), String>,
 {
     let mut ops = SystemGuideOps { app };
     let mut factory = ProcessGuideFactory;
+    let mut verify_target = crate::accessibility_target::verifier(
+        app,
+        supports_permission_continuity(app),
+        verify_target,
+    );
     run_permission_guide_with(
         &mut ops,
         root,
@@ -145,6 +151,31 @@ where
         &mut factory,
         HOST_GUIDE_TIMEOUT,
     )
+}
+
+fn supports_permission_continuity(app: &Path) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        use std::{
+            ffi::{CStr, CString},
+            os::unix::ffi::OsStrExt,
+        };
+        let Ok(path) = CString::new(app.as_os_str().as_bytes()) else {
+            return false;
+        };
+        let mut info: libc::statfs = unsafe { std::mem::zeroed() };
+        if unsafe { libc::statfs(path.as_ptr(), &mut info) } != 0 {
+            return false;
+        }
+        // Do not rely on coarse or remotely supplied change timestamps.
+        unsafe { CStr::from_ptr(info.f_fstypename.as_ptr()) }.to_bytes() == b"apfs"
+            && info.f_flags & libc::MNT_LOCAL as u32 != 0
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        false
+    }
 }
 
 pub(crate) fn run_permission_guide_with<O, F, H>(
@@ -271,13 +302,16 @@ where
                 // The native guide only expresses user intent.  Revalidate
                 // the target in the CLI immediately before the destructive
                 // operation, then perform that operation exactly once.  Tell
-                // the user that this verification is in progress first: a
-                // vendor/signature check may take several seconds.
+                // the user that verification is in progress first. Local
+                // APFS uses the session's verified-target continuity guard;
+                // unsupported targets retain the full verifier fallback.
                 host.send_state(HostState::Repairing)?;
                 verify_target()?;
                 // A user may have approved the system row while the guide was
                 // animating.  Only an explicit denied probe authorizes reset;
                 // unknown/not-running is an identity/readiness failure.
+                // Keep this probe and reset adjacent: no UI handoff or slow
+                // signature inventory belongs between the two operations.
                 match ops.probe() {
                     AccessibilityStatus::Granted => {
                         host.send_state(HostState::Granted)?;
