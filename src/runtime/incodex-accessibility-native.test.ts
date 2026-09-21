@@ -652,9 +652,13 @@ class FakeNative {
     this.visible = true;
   }
 
-  activateWithOptions$(value: unknown): void {
+  activateWithOptions$(value: unknown): boolean {
     this.record("activateWithOptions:", value);
+    const failure = this.values.get("activationFailure");
+    if (failure === "throw") throw new Error("Settings activation failed");
+    if (failure === "false") return false;
     this.values.set("activationOptions", value);
+    return true;
   }
 
   orderOut$(): void {
@@ -735,6 +739,7 @@ function makeBridge(
   titleHeight = 30,
   helperInstructionHeight = 16,
   settingsApplicationCount = 1,
+  settingsApplicationActivation: "ok" | "false" | "throw" = "ok",
 ): FakeBridge {
   const calls: NativeCall[] = [];
   const objects: FakeNative[] = [];
@@ -788,6 +793,7 @@ function makeBridge(
       sharedWorkspace: () => sharedWorkspace ??= object(type),
       runningApplicationsWithBundleIdentifier$: (bundleIdentifier: unknown) => {
         const applications = Array.from({ length: settingsApplicationCount }, () => object("NSRunningApplication"));
+        for (const application of applications) application.values.set("activationFailure", settingsApplicationActivation);
         calls.push({
           receiver: "NSRunningApplication",
           selector: "runningApplicationsWithBundleIdentifier:",
@@ -1386,6 +1392,7 @@ async function makeHarness(options: {
   helperInstructionWidth?: number;
   helperInstructionHeight?: number;
   settingsApplicationCount?: number;
+  settingsApplicationActivation?: "ok" | "false" | "throw";
   nativeLibrary?: any;
   layoutDirection?: "leftToRight" | "rightToLeft";
 } = {}) {
@@ -1398,6 +1405,7 @@ async function makeHarness(options: {
     options.titleHeight,
     options.helperInstructionHeight,
     options.settingsApplicationCount,
+    options.settingsApplicationActivation,
   );
   const api = await createNativeAccessibilitySetupWindow({
     appPath: APP_PATH,
@@ -1882,6 +1890,141 @@ describe("native Accessibility setup adapter", () => {
       expect(hostActivations).toEqual([{ steal: true }]);
     } finally {
       finish();
+      api.close();
+    }
+  });
+
+  test("does not activate a non-unique Settings lookup or fall back to host activation", async () => {
+    const hostActivations: Array<{ steal?: boolean } | undefined> = [];
+    const harness = await makeHarness({
+      activate: options => { hostActivations.push(options); },
+      settingsApplicationCount: 2,
+      locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+    });
+    const { api, bridge } = harness;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      await settleNativeAsync();
+
+      expect(bridge.calls.filter(({ selector }) => selector === "runningApplicationsWithBundleIdentifier:")).toHaveLength(1);
+      expect(bridge.objects.filter(value => value.type === "NSRunningApplication")).toHaveLength(2);
+      expect(bridge.calls.filter(({ selector }) => selector === "activateWithOptions:")).toHaveLength(0);
+      expect(hostActivations).toEqual([{ steal: true }]);
+      expect(helperPanels(bridge).some(value => value.visible)).toBe(true);
+    } finally {
+      api.close();
+    }
+  });
+
+  test("does not repeat a missing Settings lookup or activate the host", async () => {
+    const clock = installPollingClock();
+    const hostActivations: Array<{ steal?: boolean } | undefined> = [];
+    const harness = await makeHarness({
+      activate: options => { hostActivations.push(options); },
+      settingsApplicationCount: 0,
+      locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+    });
+    const { api, bridge } = harness;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await settleNativeAsync();
+      const poll = clock.timers.find(timer => timer.active && timer.delay === 100);
+      if (!poll) throw new Error("native Settings tracking timer is missing");
+      for (let index = 0; index < 3; index += 1) {
+        poll.callback();
+        await settleNativeAsync();
+      }
+
+      expect(bridge.calls.filter(({ selector }) => selector === "runningApplicationsWithBundleIdentifier:")).toHaveLength(1);
+      expect(bridge.calls.filter(({ selector }) => selector === "activateWithOptions:")).toHaveLength(0);
+      expect(hostActivations).toEqual([{ steal: true }]);
+    } finally {
+      api.close();
+      clock.restore();
+    }
+  });
+
+  test("does not reveal or activate Settings when a forward handoff resolves after close", async () => {
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    const harness = await makeHarness({
+      onHandoff: () => ({ finished }),
+      locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+    });
+    const { api, bridge } = harness;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      api.close();
+      finish();
+      await settleNativeAsync();
+
+      expect(bridge.calls.filter(({ selector }) => selector === "orderFrontRegardless")).toHaveLength(0);
+      expect(bridge.calls.filter(({ selector }) => selector === "runningApplicationsWithBundleIdentifier:")).toHaveLength(0);
+      expect(bridge.calls.filter(({ selector }) => selector === "activateWithOptions:")).toHaveLength(0);
+    } finally {
+      finish();
+      api.close();
+    }
+  });
+
+  test("does not reveal or activate Settings when a forward handoff resolves after Back starts", async () => {
+    let finishForward!: () => void;
+    let finishReverse!: () => void;
+    const forwardFinished = new Promise<void>((resolve) => { finishForward = resolve; });
+    const reverseFinished = new Promise<void>((resolve) => { finishReverse = resolve; });
+    const harness = await makeHarness({
+      onHandoff: () => ({ finished: forwardFinished }),
+      onBack: () => ({ finished: reverseFinished }),
+      locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+    });
+    const { api, bridge } = harness;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      performSwiftAction(harness, "later:");
+      await settleNativeAsync();
+      finishForward();
+      await settleNativeAsync();
+
+      expect(bridge.calls.filter(({ selector }) => selector === "orderFrontRegardless")).toHaveLength(0);
+      expect(bridge.calls.filter(({ selector }) => selector === "runningApplicationsWithBundleIdentifier:")).toHaveLength(0);
+      expect(bridge.calls.filter(({ selector }) => selector === "activateWithOptions:")).toHaveLength(0);
+    } finally {
+      finishForward();
+      finishReverse();
+      api.close();
+    }
+  });
+
+  test.each(["false", "throw"] as const)("does not activate the host when Settings activation returns %s", async (failure) => {
+    const hostActivations: Array<{ steal?: boolean } | undefined> = [];
+    const harness = await makeHarness({
+      activate: options => { hostActivations.push(options); },
+      settingsApplicationActivation: failure,
+      locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
+    });
+    const { api, bridge } = harness;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      await settleNativeAsync();
+
+      expect(bridge.calls.filter(({ selector }) => selector === "runningApplicationsWithBundleIdentifier:")).toHaveLength(1);
+      expect(bridge.calls.filter(({ selector }) => selector === "activateWithOptions:")).toHaveLength(1);
+      expect(hostActivations).toEqual([{ steal: true }]);
+    } finally {
       api.close();
     }
   });

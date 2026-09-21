@@ -361,7 +361,14 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
   }
   function revealHelper() {
     if (closed || returning || state !== "awaiting-user") return;
-    presented=true; helper.panel.orderFront$(null); arrowPanel.orderFront$(null); scheduleArrow();
+    presented=true; helper.panel.orderFrontRegardless(); arrowPanel.orderFront$(null);
+    // Present the nonactivating accessory, then hand focus to Settings once.
+    // Never activate the guide host here or repeat this during drag callbacks.
+    try {
+      const applications = kit.NSRunningApplication.runningApplicationsWithBundleIdentifier$(str("com.apple.systempreferences"));
+      if (Number(applications.count()) === 1) applications.objectAtIndex$(0)?.activateWithOptions$(1);
+    } catch {}
+    scheduleArrow();
   }
   function handleBack() {
     if (closed || returning || dragging || state !== "awaiting-user" || !helper) return;
