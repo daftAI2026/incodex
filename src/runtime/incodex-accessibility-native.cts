@@ -138,7 +138,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
   // only owns the panel lifetime and the transparent drag/flight shells.
   const INITIAL_WIDTH = 600;
   const INITIAL_MIN_HEIGHT = 312;
-  const initial = kit.NSPanel.alloc().initWithContentRect$styleMask$backing$defer$(rect(0, 0, INITIAL_WIDTH, INITIAL_MIN_HEIGHT), 1 | 2 | 32768, 2, false);
+  const initial = kit.NSWindow.alloc().initWithContentRect$styleMask$backing$defer$(rect(0, 0, INITIAL_WIDTH, INITIAL_MIN_HEIGHT), 1 | 2 | 32768, 2, false);
   configurePanel(initial, true); initial.setTitle$(str("")); initial.setTitlebarAppearsTransparent$(true); initial.setTitleVisibility$(1);
   let initialView;
   let card;
