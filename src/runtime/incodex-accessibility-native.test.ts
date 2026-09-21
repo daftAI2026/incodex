@@ -833,6 +833,7 @@ function makeBridge(
       get NSMutableParagraphStyle() { return library(this.framework).NSMutableParagraphStyle; }
       get NSAppearance() { return library(this.framework).NSAppearance; }
       get NSPanel() { return library(this.framework).NSPanel; }
+      get NSWindow() { return library(this.framework).NSWindow; }
       get NSViewController() { return library(this.framework).NSViewController; }
       get NSVisualEffectView() { return library(this.framework).NSVisualEffectView; }
       get NSImageView() { return library(this.framework).NSImageView; }
@@ -1275,6 +1276,13 @@ test("uses SwiftUI preferred helper size for a wider localized instruction", asy
   }
 });
 
+test("uses an ordinary initial window and reserves panels for the nonactivating accessories", async () => {
+  const { api, panel } = await makeHarness();
+  try {
+    expect(panel.type).toBe("NSWindow");
+  } finally { api.close(); }
+});
+
 test("keeps the initial permission window behind the helper during the forward handoff", async () => {
   const { api, panel } = await makeHarness({
     locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
@@ -1344,7 +1352,7 @@ async function makeHarness(options: {
       ?? new (bridge.objc as any).NobjcLibrary("/System/Library/Frameworks/AppKit.framework/AppKit").NSWorkspace.sharedWorkspace();
     workspace.values.set("reduceMotion", true);
   }
-  const panel = bridge.objects.find((value) => value.type === "NSPanel");
+  const panel = bridge.objects.find((value) => value.type === "NSWindow" || value.type === "NSPanel");
   if (!panel) throw new Error("native Accessibility panel was not created");
   return { api, bridge, panel, swift };
 }
@@ -1397,7 +1405,7 @@ test("does not steal focus when presentation becomes unavailable during bridge l
   try {
     expect(api).toBeNull();
     expect(focusCalls).toBe(0);
-    expect(bridge.objects.filter((value) => value.type === "NSPanel")).toHaveLength(0);
+    expect(bridge.objects.filter((value) => value.type === "NSWindow" || value.type === "NSPanel")).toHaveLength(0);
   } finally {
     api?.close();
   }
@@ -1581,7 +1589,7 @@ describe("native Accessibility setup adapter", () => {
       onBack: undefined,
       onHandoff: undefined,
     })).rejects.toThrow("initial SwiftUI ABI failure");
-    const panels = bridge.objects.filter((value) => value.type === "NSPanel");
+    const panels = bridge.objects.filter((value) => value.type === "NSWindow" || value.type === "NSPanel");
     expect(panels).toHaveLength(1);
     expect(panels[0].isDestroyed()).toBe(true);
     expect(panels[0].isVisible()).toBe(false);
@@ -2358,7 +2366,7 @@ test.each(["flight", "panel-order-out", "panel-close", "close-handler"])("guide 
     await api.choice;
     api.setState("awaiting-user");
     await settleNativeAsync();
-    const panels = bridge.objects.filter(value => value.type === "NSPanel");
+    const panels = bridge.objects.filter(value => value.type === "NSWindow" || value.type === "NSPanel");
     expect(panels.length).toBeGreaterThan(1);
     const first = panels[0];
     if (failure === "panel-order-out") first.orderOut$ = () => { throw new Error("injected orderOut error"); };
