@@ -1260,6 +1260,7 @@ test("uses the original ordinary helper panel shell without adding safe-area hei
 
     // The arrow remains the independent borderless/nonactivating child shell.
     expect(arrow.values.get("styleMask")).toBe(128);
+    expect(arrow.values.get("collectionBehavior")).toBe(4);
   } finally {
     api.close();
   }
