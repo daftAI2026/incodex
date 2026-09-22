@@ -2431,6 +2431,34 @@ describe("native Accessibility setup adapter", () => {
     }
   });
 
+  test("Back invalid reverse flight still restores when its dispose throws", async () => {
+    let disposed = 0;
+    const harness = await makeHarness({
+      onBack: () => ({ dispose: () => {
+        disposed += 1;
+        throw new Error("invalid reverse cleanup failed");
+      } }),
+    });
+    const { api, bridge, panel } = harness;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+
+      expect(() => performSwiftAction(harness, "later:")).not.toThrow();
+      await settleNativeAsync();
+
+      expect(disposed).toBe(1);
+      expect(api.isDestroyed()).toBe(false);
+      expect(panel.isVisible()).toBe(true);
+      expect(harness.swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1)?.args[2]).toBe(true);
+      expect(helperPanels(bridge).some((value) => value.visible && !value.destroyed)).toBe(false);
+    } finally {
+      api.close();
+    }
+  });
+
   for (const outcome of ["resolve", "reject"] as const) test(`Back restores after reverse ${outcome} when dispose throws`, async () => {
     let settle!: () => void;
     const finished = new Promise<void>((resolve, reject) => {
