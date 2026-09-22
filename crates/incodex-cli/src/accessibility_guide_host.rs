@@ -461,7 +461,7 @@ impl GuideOps for SystemGuideOps<'_> {
 
 fn open_settings_command(url: &str) -> Command {
     let mut command = Command::new("/usr/bin/open");
-    command.arg(url);
+    command.args(["-g", url]);
     command
 }
 

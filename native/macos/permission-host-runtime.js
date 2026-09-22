@@ -67,6 +67,7 @@ function present(){
   locatorModule.createNativeSystemSettingsLocator({loadObjcModule:async()=>objc}).then(locate=>
     ui.createNativeAccessibilitySetupWindow({appPath:'/Applications/ChatGPT.app',copy:configuration.copy,
       layoutDirection:configuration.layoutDirection,loadObjcModule:async()=>objc,locateSettings:locate,
+      prepareSettings:()=>locate.prepareHandoff?.(),
       activate:()=>$.NSApplication.sharedApplication.activateIgnoringOtherApps(true),
       canPresent:()=>!closed,
       onHandoff:options=>ui.runNativePermissionHandoff({...options,onError:error=>emit('error',String(error))}),

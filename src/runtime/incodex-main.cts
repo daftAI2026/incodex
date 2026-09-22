@@ -503,7 +503,7 @@ function createAccessibilitySetupController(options = {}) {
   }
 
   async function openAccessibilitySurfaces() {
-    if ((await shell.openExternal(ACCESSIBILITY_SETTINGS_URL)) === false) {
+    if ((await shell.openExternal(ACCESSIBILITY_SETTINGS_URL, { activate: false })) === false) {
       throw new Error("could not open Accessibility settings");
     }
   }
@@ -1471,6 +1471,10 @@ async function attachElectron() {
             locateSettings: async () => {
               settingsLocator ||= dockMenu.createNativeSystemSettingsLocator({ appPath: electron.app.getAppPath() });
               return (await settingsLocator)();
+            },
+            prepareSettings: async () => {
+              settingsLocator ||= dockMenu.createNativeSystemSettingsLocator({ appPath: electron.app.getAppPath() });
+              return (await settingsLocator).prepareHandoff?.();
             },
           });
         },

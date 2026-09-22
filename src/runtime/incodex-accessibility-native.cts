@@ -6,7 +6,7 @@ let generation = 0;
 const APP_PATH = "/Applications/ChatGPT.app";
 const rect = (x, y, width, height) => ({ origin: { x, y }, size: { width, height } });
 
-async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirection = "leftToRight", loadObjcModule, locateSettings, onHandoff, onBack, electron = null, activate = null, nativeLibrary = null, canPresent = () => true }) {
+async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirection = "leftToRight", loadObjcModule, locateSettings, prepareSettings = null, onHandoff, onBack, electron = null, activate = null, nativeLibrary = null, canPresent = () => true }) {
   if (appPath !== APP_PATH) throw new Error("Native permission guide requires the default ChatGPT app");
   if (!canPresent()) return null;
   const objc = await loadObjcModule();
@@ -489,12 +489,17 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
       if (!closed) setState("error");
     } finally { locating=false; }
   }
+  let settingsPreparation = 0;
   function setState(next) {
     if (closed) return;
+    const previous = state;
     state=next;
+    const preparation = next === "awaiting-user" && previous === next
+      ? settingsPreparation : ++settingsPreparation;
     if (next === "repairing" || next === "awaiting-user") initial.setLevel$(0);
     if (next==="granted") { close(); return; }
     if (next==="repairing") {
+      clearInterval(tracking); tracking = null;
       setInitialContent({ body: text("repairing"), allowEnabled: false, settingsPlaceholder: false });
       fitInitialBody();
     }
@@ -502,7 +507,21 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
       setInitialContent({ body: text("body"), allowEnabled: false, settingsPlaceholder: true });
       showSettingsPlaceholder(true);
       fitInitialBody();
-      if (!tracking) tracking=setInterval(()=>void place(),100); void place();
+      const startTracking = () => {
+        if (closed || returning || state !== "awaiting-user" || preparation !== settingsPreparation) return;
+        if (!tracking) tracking=setInterval(()=>void place(),100);
+        void place();
+      };
+      if (typeof prepareSettings === "function") {
+        if (previous !== next) {
+          void Promise.resolve().then(() => {
+            if (closed || state !== "awaiting-user" || preparation !== settingsPreparation) return;
+            return prepareSettings();
+          }).then(startTracking).catch(() => {
+            if (!closed && state === "awaiting-user" && preparation === settingsPreparation) setState("error");
+          });
+        }
+      } else startTracking();
     }
     if (next==="error" || next==="unknown") {
       clearInterval(tracking);tracking=null;stopArrow();
