@@ -56,7 +56,8 @@ type Harness = {
   shell: {
     opened: string[];
     revealed: string[];
-    openExternal: (url: string) => Promise<boolean>;
+    openOptions: unknown[];
+    openExternal: (url: string, options?: unknown) => Promise<boolean>;
     showItemInFolder: (file: string) => void;
   };
   spawnCalls: Array<{ file: string; args: string[] }>;

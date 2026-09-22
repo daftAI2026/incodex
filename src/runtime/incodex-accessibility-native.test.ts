@@ -1295,9 +1295,34 @@ test("starts tracking after Settings preparation succeeds", async () => {
   });
   try {
     harness.api.setState("awaiting-user");
-    await settleNativeAsync();
+    await flushNativeAsync();
     expect(calls.slice(0, 2)).toEqual(["prepare", "locate"]);
   } finally { harness.api.close(); }
+});
+
+test("re-entering repair stops old tracking before the next Settings preparation", async () => {
+  const clock = installPollingClock();
+  let finish!: () => void;
+  const pending = new Promise<void>(resolve => { finish = resolve; });
+  let prepared = 0;
+  const harness = await makeHarness({
+    prepareSettings: () => ++prepared === 1 ? undefined : pending,
+    locateSettings: () => null,
+  });
+  try {
+    harness.api.setState("awaiting-user");
+    await flushNativeAsync();
+    const first = clock.timers.find(timer => timer.delay === 100);
+    if (!first) throw new Error("tracking did not start");
+    harness.api.setState("repairing");
+    harness.api.setState("awaiting-user");
+    await settleNativeAsync();
+    expect(first.active).toBe(false);
+    expect(clock.timers.filter(timer => timer.active)).toHaveLength(0);
+    finish();
+    await flushNativeAsync();
+    expect(clock.timers.filter(timer => timer.active && timer.delay === 100)).toHaveLength(1);
+  } finally { finish(); harness.api.close(); clock.restore(); }
 });
 
 test("keeps the hint arrow panel from becoming key or main", async () => {
@@ -1461,7 +1486,7 @@ async function makeHarness(options: {
     layoutDirection: options.layoutDirection,
     activate: options.activate as any,
     locateSettings: options.locateSettings ?? (() => ({ x: 120, y: 140, width: 920, height: 700 })),
-    prepareSettings: options.prepareSettings,
+    prepareSettings: options.prepareSettings as any,
     onHandoff: options.onHandoff,
     onBack: options.onBack,
   });
