@@ -262,6 +262,19 @@ function swiftUIFlightLibrary() {
   };
 }
 
+// The reference keeps an outer screen-sized contentView and puts the dynamic
+// replicaContainer below it. Keep existing geometry assertions usable against
+// both the old mock shape (contentView == root) and the reference-shaped mock.
+function replicaContainerFor(panel: any): any {
+  const contentView = panel.contentViewValue;
+  return contentView.subviews?.find((view: any) =>
+    Array.isArray(view.subviews) && view.subviews.some((child: any) => child.type === "IncodexPermissionFlightView")) ?? contentView;
+}
+
+function flightSurfaceFor(root: any): any {
+  return root.subviews?.find((view: any) => view.type === "IncodexPermissionFlightView");
+}
+
 function harness(reducedMotion = false, reverse = false) {
   let time = 0;
   let closed = false;
@@ -621,15 +634,16 @@ test("native replicants rebuild for a changed screen topology and backing scale 
   const firstPanel = bridge.panels()[0];
   expect(firstPanel).toBeDefined();
   expect(firstPanel.frameValue.origin.x).toBe(0.5);
-  expect(firstPanel.contentViewValue.subviews[0].type).toBe("IncodexPermissionFlightView");
-  expect(firstPanel.contentViewValue.subviews[0].layer().values.get("setContentsScale$")).toBe(2);
+  const firstRoot = replicaContainerFor(firstPanel);
+  expect(flightSurfaceFor(firstRoot).type).toBe("IncodexPermissionFlightView");
+  expect(flightSurfaceFor(firstRoot).layer().values.get("setContentsScale$")).toBe(2);
 
   bridge.screens([{ frame: rect(0.25, 0, 1440, 900), scale: 1 }]);
   replicas.render(sample);
   const panels = bridge.panels();
   expect(panels).toHaveLength(2);
   expect(firstPanel.closed).toBe(true);
-  expect(panels[1].contentViewValue.subviews[0].layer().values.get("setContentsScale$")).toBe(1);
+  expect(flightSurfaceFor(replicaContainerFor(panels[1])).layer().values.get("setContentsScale$")).toBe(1);
   replicas.dispose();
 });
 
@@ -674,8 +688,8 @@ test("flight delegates material, clipping, and blur to SwiftUI without clipping 
     for (const cornerRadius of [24, 18, 12]) {
       replicas.render({ bounds: { x: 100, y: 200, width: 526, height: 104 },
         progress: .5, cornerRadius, sourceOpacity: .5, targetOpacity: .5, sourceBlur: 6, targetBlur: 6 });
-      const root = bridge.panels()[0].contentViewValue;
-      const surface = root.subviews.find((view: any) => view.type === "IncodexPermissionFlightView");
+      const root = replicaContainerFor(bridge.panels()[0]);
+      const surface = flightSurfaceFor(root);
       expect(surface).toBe(swift.instances[0]);
       const update = surface.calls.filter((call: any) => call.selector === "updateProgress$cornerRadius$reduceTransparency$").at(-1);
       expect(update.args).toEqual([.5, cornerRadius, false]);
@@ -704,8 +718,8 @@ test("flight keeps one SwiftUI material-and-image surface above the AppKit root"
       replicas.render({ bounds: { x: 100, y: 200, width: 526, height: 104 },
         progress, cornerRadius, sourceOpacity: 1 - progress, targetOpacity: progress,
         sourceBlur: 12 * progress, targetBlur: 12 * (1 - progress) });
-      const root = bridge.panels()[0].contentViewValue;
-      const surface = root.subviews[0];
+      const root = replicaContainerFor(bridge.panels()[0]);
+      const surface = flightSurfaceFor(root);
       expect(surface).toBe(swift.instances[0]);
       expect(root.subviews).toHaveLength(2);
       const update = surface.calls.filter((call: any) => call.selector === "updateProgress$cornerRadius$reduceTransparency$").at(-1);
@@ -726,7 +740,7 @@ test("flight synchronizes all three native container radii without clipping shad
   try {
     for (const radius of [24, 18, 12, 18, 24, 0]) {
       replicas.render({ bounds: { x: 100, y: 200, width: 526, height: 104 }, progress: .5, cornerRadius: radius });
-      const root = bridge.panels()[0].contentViewValue;
+      const root = replicaContainerFor(bridge.panels()[0]);
       for (const view of [root, ...root.subviews]) {
         expect(view.layer().values.get("setCornerRadius$")).toBe(radius);
         expect(view.layer().values.get("setMasksToBounds$")).toBe(false);
@@ -735,6 +749,42 @@ test("flight synchronizes all three native container radii without clipping shad
         expect(shadow.values.get("setMasksToBounds$")).toBe(false);
       }
     }
+  } finally { replicas.dispose(); }
+});
+
+test("reference-shaped flight keeps a stable panel contentView outside its dynamic replicaContainer", () => {
+  const bridge = nativeMotionBridge([{ frame: rect(0, 0, 1440, 900), scale: 2 }]);
+  const swift = swiftUIFlightLibrary();
+  const replicas = createNativeReplicants({ objc: bridge.objc, nativeLibrary: swift.library,
+    source: { image: {} }, target: { view: bridge.targetView(rect(0, 0, 531, 110)) } });
+  try {
+    replicas.render({ bounds: { x: 100, y: 200, width: 518, height: 80 }, progress: .5, cornerRadius: 24 });
+    const panel = bridge.panels()[0];
+    const contentView = panel.contentViewValue;
+    const replica = contentView.subviews.find((view: any) =>
+      Array.isArray(view.subviews) && view.subviews.some((child: any) => child.type === "IncodexPermissionFlightView"));
+    expect({
+      contentFrame: contentView.frameValue,
+      contentCornerRadius: contentView.layer().values.get("setCornerRadius$"),
+      contentShadowCount: contentView.layer().sublayers.length,
+      contentChildTypes: contentView.subviews.map((view: any) => view.type),
+      replicaFound: Boolean(replica),
+      replicaFrame: replica?.frameValue,
+      replicaShadowCount: replica?.layer().sublayers.length,
+      replicaChildren: replica?.subviews.map((view: any) => ({ type: view.type, frame: view.frameValue })),
+    }).toEqual({
+      contentFrame: rect(0, 0, 1440, 900),
+      contentCornerRadius: undefined,
+      contentShadowCount: 0,
+      contentChildTypes: ["NSView"],
+      replicaFound: true,
+      replicaFrame: rect(70, 170, 578, 140),
+      replicaShadowCount: 3,
+      replicaChildren: [
+        { type: "IncodexPermissionFlightView", frame: rect(30, 30, 518, 80) },
+        { type: "NSView", frame: rect(30, 30, 518, 80) },
+      ],
+    });
   } finally { replicas.dispose(); }
 });
 
@@ -749,7 +799,7 @@ test("flight shadow and cutout retain the full radius while only the stroke is i
     for (const radius of [24, 21, 18, 15, 12, .1, 0]) {
       const before = bridge.calls.length;
       replicas.render({ bounds: { x: 100, y: 200, width: 526, height: 104 }, progress: .5, cornerRadius: radius });
-      const root = bridge.panels()[0].contentViewValue;
+      const root = replicaContainerFor(bridge.panels()[0]);
       for (const shadow of root.layerValue.sublayers) {
         expect(shadow.values.get("shadowPath").args).toEqual([rect(30, 30, 526, 104), radius, radius, null]);
       }
@@ -828,7 +878,7 @@ test("flight shadows follow the reference 30pt container, masks and dynamic roun
   try {
     replicas.render({bounds:{x:100,y:200,width:518,height:80},cornerRadius:24,progress:.25,
       sourceOpacity:.75,targetOpacity:.25,sourceBlur:3,targetBlur:9});
-    const panel=bridge.panels()[0],root=panel.contentViewValue;
+    const panel=bridge.panels()[0],root=replicaContainerFor(panel);
     expect(panel.values.get("setLevel$")).toBe(25);
     expect(root.frameValue).toEqual(rect(70,170,578,140));
     expect(root.subviews[0].frameValue).toEqual(rect(30,30,518,80));
@@ -860,7 +910,8 @@ test("flight uses reference integral point bounds before adding the 30pt margin"
   try {
     replicas.render({bounds:{x:100.25,y:200.25,width:518.25,height:80.25},cornerRadius:24,progress:.25,
       sourceOpacity:.75,targetOpacity:.25,sourceBlur:3,targetBlur:9});
-    expect(bridge.panels()[0].contentViewValue.frameValue).toEqual(rect(70,170,579,141));
-    expect(bridge.panels()[0].contentViewValue.subviews[0].frameValue).toEqual(rect(30,30,519,81));
+    const root = replicaContainerFor(bridge.panels()[0]);
+    expect(root.frameValue).toEqual(rect(70,170,579,141));
+    expect(flightSurfaceFor(root).frameValue).toEqual(rect(30,30,519,81));
   }finally{replicas.dispose();}
 });
