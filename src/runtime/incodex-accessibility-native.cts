@@ -30,6 +30,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
   const unique = `IncodexPermission_${process.pid}_${++generation}`;
   let closed = false, state = "pending", settled = false, source = null, helper = null, arrowPanel = null, arrow = null, arrowTracker = null;
   let tracking = null, arrowTimer = null, returnTimer = null, backFlightTimer = null, flight = null, locating = false, attempts = 0, presented = false, dragging = false, dragSession = null, returning = false, retryReady = false, returnSequence = 0;
+  let terminalDragOwner = null;
   const closeHandlers = new Set();
   const retryHandlers = new Set();
   let resolveChoice;
@@ -71,13 +72,27 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
   function stopBackFlightTimer() { clearTimeout(backFlightTimer); backFlightTimer = null; }
   function close() {
     if (closed) return;
+    // AppKit retains the source window until its drag ends and may order it
+    // again after close. Retire its pixels now and finish disposal at drag end.
+    if ((dragging || dragSession) && helper) {
+      terminalDragOwner = { panel: helper.panel, session: dragSession };
+      try { terminalDragOwner.panel.setAlphaValue$(0); } catch {}
+    }
     closed = true; returning = false; retryReady = false; dragging = false; dragSession = null; returnSequence++;
     clearInterval(tracking); tracking = null; stopArrow(); stopBackFlightTimer();
     const activeFlight = flight; flight = null;
     try { activeFlight?.dispose(); } catch {}
     resetArrow();
     resolveOnce("later");
-    for (const panel of [...panels]) discardPanel(panel);
+    for (const panel of [...panels]) {
+      if (panel === terminalDragOwner?.panel) {
+        // Keep the source view tree and session alive until AppKit calls ended.
+        const index = panels.indexOf(panel);
+        if (index >= 0) panels.splice(index, 1);
+        try { panel.setDelegate$(null); } catch {}
+        try { panel.orderOut$(null); } catch {}
+      } else discardPanel(panel);
+    }
     helper = null; arrowPanel = null; arrow = null; arrowTracker = null; appRowView = null;
     const callbacks = [...closeHandlers]; closeHandlers.clear(); retryHandlers.clear();
     for (const callback of callbacks) { try { callback(); } catch {} }
@@ -258,10 +273,16 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
     "draggingSession:sourceOperationMaskForDraggingContext:": { types: "Q@:@q", implementation: () => 1 },
     "ignoreModifierKeysForDraggingSession:": { types: "B@:@", implementation: () => true },
     "draggingSession:willBeginAtPoint:": { types: "v@:@{CGPoint=dd}", implementation: () => {
+      if (closed) return;
       dragging = true; stopArrow(); if (reducedMotion()) resetArrow(); else animateArrow(1, 1); appRowView.setHidden$(true);
     } },
     "draggingSession:endedAtPoint:operation:": { types: "v@:@{CGPoint=dd}Q", implementation: () => {
       dragging = false; dragSession = null;
+      if (closed) {
+        const owner = terminalDragOwner; terminalDragOwner = null;
+        if (owner) discardPanel(owner.panel);
+        return;
+      }
       if (!closed) {
         appRowView.setHidden$(false); scheduleArrow(4000);
       }

@@ -2634,7 +2634,7 @@ describe("native Accessibility setup adapter", () => {
       api.close();
       // Actual AppKit can re-order its retained source window after close.
       expect(helper.isDestroyed()).toBe(false);
-      helper.orderFront$(null);
+      helper.orderFront$();
       expect(helper.values.get("alphaValue")).toBe(0);
       row.invoke("draggingSession:endedAtPoint:operation:", { x: 0, y: 0 }, 0);
       expect(helper.visible).toBe(false);
@@ -2656,7 +2656,7 @@ describe("native Accessibility setup adapter", () => {
       api.close();
       expect(() => row.invoke("draggingSession:willBeginAtPoint:", { x: 0, y: 0 })).not.toThrow();
       expect(helper.values.get("alphaValue")).toBe(0);
-      helper.orderFront$(null);
+      helper.orderFront$();
       row.invoke("draggingSession:endedAtPoint:operation:", { x: 0, y: 0 }, 0);
       expect(helper.visible).toBe(false);
     } finally { api.close(); }
