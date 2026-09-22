@@ -2200,6 +2200,46 @@ describe("native Accessibility setup adapter", () => {
     } finally { finish(); harness.api.close(); }
   });
 
+  for (const modern of [true, false]) test(`Back activation selector failure falls back safely (modern=${modern})`, async () => {
+    let onBackCalls = 0;
+    const harness = await makeHarness({
+      onBack: () => {
+        onBackCalls += 1;
+        return { finished: Promise.resolve(), dispose() {} };
+      },
+    });
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(harness.api.choice).resolves.toBe("repair");
+      harness.api.setState("awaiting-user");
+      await flushNativeAsync();
+
+      const library = new (harness.bridge.objc as any).NobjcLibrary("/System/Library/Frameworks/AppKit.framework/AppKit");
+      const application = library.NSApplication.sharedApplication();
+      if (modern) {
+        application.activate = () => {
+          throw new Error("native activation failed");
+        };
+      } else {
+        application.activate = undefined;
+        application.activateIgnoringOtherApps$ = () => {
+          throw new Error("legacy native activation failed");
+        };
+      }
+
+      expect(() => performSwiftAction(harness, "later:")).not.toThrow();
+      await settleNativeAsync();
+
+      expect(onBackCalls).toBe(0);
+      expect(harness.api.isDestroyed()).toBe(false);
+      expect(harness.panel.values.get("level")).toBe(3);
+      expect(harness.swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1)?.args[2]).toBe(true);
+      expect(helperPanels(harness.bridge).some((panel) => panel.visible && !panel.destroyed)).toBe(false);
+    } finally {
+      harness.api.close();
+    }
+  });
+
   test("Back recaptures the original target and waits for a reverse handoff before cleanup", async () => {
     const reverses: any[] = [];
     let finish!: () => void;
