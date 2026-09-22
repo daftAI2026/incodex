@@ -320,6 +320,9 @@ class FakeNative {
     this.values.set("alphaValue", value);
   }
 
+  activate(): void { this.record("activate"); }
+  activateIgnoringOtherApps$(value: unknown): void { this.record("activateIgnoringOtherApps:", value); }
+
   setCollectionBehavior$(value: unknown): void {
     this.values.set("collectionBehavior", value);
   }
@@ -796,10 +799,7 @@ function makeBridge(
       },
       imageNamed$: (value: string) => value,
       sharedWorkspace: () => sharedWorkspace ??= object(type),
-      sharedApplication: () => sharedApplication ??= object(type, {
-        activate() { calls.push({ receiver: "NSApplication", selector: "activate", args: [] }); },
-        activateIgnoringOtherApps$(value: unknown) { calls.push({ receiver: "NSApplication", selector: "activateIgnoringOtherApps:", args: [value] }); },
-      }),
+      sharedApplication: () => sharedApplication ??= object(type),
       runningApplicationsWithBundleIdentifier$: (bundleIdentifier: unknown) => {
         const applications = Array.from({ length: settingsApplicationCount }, () => object("NSRunningApplication"));
         for (const application of applications) application.values.set("activationFailure", settingsApplicationActivation);
