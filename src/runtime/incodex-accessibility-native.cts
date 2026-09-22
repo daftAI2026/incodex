@@ -372,7 +372,9 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
   }
   function handleBack() {
     if (closed || returning || dragging || state !== "awaiting-user" || !helper) return;
-    returning = true; initial.setLevel$(3); retryReady = false; const token = ++returnSequence;
+    // Restore the floating level only when the reverse flight completes (or
+    // its fallback restores the initial page), not while its replica is moving.
+    returning = true; retryReady = false; const token = ++returnSequence;
     clearInterval(tracking); tracking = null; stopArrow();
     setInitialContent({ title: text("title"), body: text("body"), allowEnabled: true, settingsPlaceholder: false });
     fitInitialBody();
