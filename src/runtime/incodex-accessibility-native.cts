@@ -356,7 +356,8 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
   function fallbackToInitial() {
     returnSequence++;
     stopBackFlightTimer();
-    const active = flight; flight = null; active?.dispose?.();
+    const active = flight; flight = null;
+    try { active?.dispose?.(); } catch {}
     restoreInitialPage(true);
   }
   function revealHelper() {
@@ -405,7 +406,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
     flight = active;
     const finish = () => {
       if (closed || token !== returnSequence || flight !== active) return;
-      active.dispose?.();
+      try { active.dispose?.(); } catch {}
       flight = null; stopBackFlightTimer(); restoreInitialPage(true);
     };
     backFlightTimer = setTimeout(() => {
