@@ -144,7 +144,13 @@ function createNativeReplicants({ objc, nativeLibrary, source, target, reverse =
       panel.setOpaque$(false); panel.setBackgroundColor$(kit.NSColor.clearColor());
       panel.setHasShadow$(false); panel.setIgnoresMouseEvents$(true); panel.setLevel$(25);
       panel.setHidesOnDeactivate$(false);
-      const root = kit.NSView.alloc().initWithFrame$(rect(0, 0, frame.size.width, frame.size.height));
+      const contentView = kit.NSView.alloc().initWithFrame$(rect(0, 0, frame.size.width, frame.size.height));
+      contentView.setWantsLayer$(true);
+      panel.setContentView$(contentView);
+      // The window owns a stable screen-sized view; only its replica child
+      // follows the animated card bounds and carries decoration layers.
+      const root = kit.NSView.alloc().initWithFrame$(rect(0, 0, 0, 0));
+      root.setTranslatesAutoresizingMaskIntoConstraints$(true);
       // SwiftUI owns the live material and the clipped image ZStack. Keep the
       // AppKit root and its shadow/stroke layers around that native surface.
       const surface = FlightView.alloc().initWithFrame$(rect(0, 0, 1, 1));
@@ -154,7 +160,7 @@ function createNativeReplicants({ objc, nativeLibrary, source, target, reverse =
       surface.layer().setMasksToBounds$(false);
       surface.layer().setContentsScale$(scale);
       root.setWantsLayer$(true); root.layer().setMasksToBounds$(false);
-      panel.setContentView$(root);
+      contentView.addSubview$(root);
       // CUA ReplicantWindow: destination, key and ambient shadows each have
       // an even-odd cutout. The animated container extends 30pt past the card.
       const masks = [];
