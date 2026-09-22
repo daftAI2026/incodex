@@ -1750,6 +1750,43 @@ describe("native Accessibility setup adapter", () => {
     } finally { api.close(); }
   });
 
+  test.each(["error", "unknown"])("continues %s cleanup when the forward flight dispose throws", async (state) => {
+    const clock = installPollingClock();
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    let disposed = 0;
+    const harness = await makeHarness({
+      onHandoff: () => ({ finished, dispose: () => {
+        disposed += 1;
+        throw new Error("injected forward flight cleanup error");
+      } }),
+    });
+    const { api, bridge, swift } = harness;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await settleNativeAsync();
+
+      const helper = helperPanels(bridge).find((panel) => panel.frame().size.width === 531);
+      const poll = clock.timers.find((timer) => timer.delay === 100);
+      if (!helper || !poll) throw new Error("active forward flight fixture is missing");
+
+      expect(() => api.setState(state)).not.toThrow();
+      expect(disposed).toBe(1);
+      expect(helper.isDestroyed()).toBe(true);
+      expect(helper.isVisible()).toBe(false);
+      expect(poll.active).toBe(false);
+      expect(swift?.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1)?.args.slice(0, 4))
+        .toEqual([COPY.errorTitle, COPY.errorBody, false, false]);
+      expect(swift?.initialCards[0].values.get("hidden")).toBe(false);
+    } finally {
+      api.close();
+      finish();
+      clock.restore();
+    }
+  });
+
   test("keeps the native SwiftUI card host contract while Allow is enabled", async () => {
     const { api, swift } = await makeHarness();
     try {
