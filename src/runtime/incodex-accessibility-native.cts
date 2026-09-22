@@ -474,7 +474,9 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
               revealHelper();
             }).catch(() => {
               if (flight !== activeFlight || closed || returning) return;
-              flight=null; setState("error");
+              // The error transition owns disposal, including cleanup failures.
+              // Keep the flight reachable until that transition clears it.
+              setState("error");
             });
           } else revealHelper();
         } else revealHelper();
