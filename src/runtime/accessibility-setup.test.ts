@@ -130,9 +130,11 @@ function makeHarness(options: {
   };
   const shell = {
     opened: [] as string[],
+    openOptions: [] as unknown[],
     revealed: [] as string[],
-    async openExternal(url: string): Promise<boolean> {
+    async openExternal(url: string, openOptions?: unknown): Promise<boolean> {
       shell.opened.push(url);
+      shell.openOptions.push(openOptions);
       return options.openExternal ? options.openExternal(url) : true;
     },
     showItemInFolder(file: string): void {
@@ -689,6 +691,12 @@ describe("Accessibility setup controller", () => {
 
 
 describe("single-window Accessibility setup", () => {
+  test("opens Settings in the background before native focus preparation", async () => {
+    const h = makeHarness({ probes: [false, false], dialogResponses: [0] });
+    await h.controller.run();
+    expect(h.shell.openOptions).toEqual([{ activate: false }]);
+    h.panel.close();
+  });
   test("keeps the native guide in the matching supported language", () => {
     const resolveCopy = (runtimeMain as any).resolveAccessibilityCopy;
     expect(typeof resolveCopy).toBe("function");

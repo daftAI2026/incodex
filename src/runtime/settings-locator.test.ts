@@ -82,17 +82,20 @@ function windowInfo(
   ownerPid: number,
   layer: number,
   windowBounds: FakeDictionary,
+  onscreen?: boolean,
 ): FakeDictionary {
   return new FakeDictionary({
     kCGWindowBounds: windowBounds,
     kCGWindowLayer: number(layer),
     kCGWindowOwnerPID: number(ownerPid),
+    kCGWindowIsOnscreen: onscreen,
   });
 }
 
 function fakeObjcModule(windows: FakeArray, calls: Array<{ name: string; args: unknown[] }>) {
   const settingsApp = {
     processIdentifier: () => number(4242),
+    activateWithOptions$: (options: number) => { calls.push({ name: "activate", args: [options] }); return true; },
   };
   const NSString = {
     stringWithUTF8String$: (value: string) => value,
@@ -126,6 +129,25 @@ function fakeObjcModule(windows: FakeArray, calls: Array<{ name: string; args: u
 }
 
 describe("native System Settings window locator", () => {
+  test.each([
+    ["empty", [], false],
+    ["visible", [windowInfo(4242, 0, bounds(0, 0, 740, 625), true)], false],
+    ["hidden", [windowInfo(4242, 0, bounds(0, 0, 740, 625))], true],
+    ["small", [windowInfo(4242, 0, bounds(0, 0, 600, 625), true)], true],
+    ["other owner", [windowInfo(9999, 0, bounds(0, 0, 740, 625), true)], false],
+  ] as const)("prepares a background Settings handoff only when needed: %s", async (_, windows, activate) => {
+    const calls: Array<{ name: string; args: unknown[] }> = [];
+    const objc = fakeObjcModule(new FakeArray([...windows]), calls);
+    const locate = await createNativeSystemSettingsLocator({ loadObjcModule: async () => objc });
+    await locate.prepareHandoff();
+    expect(calls.filter(call => call.name === "activate").map(call => call.args)).toEqual(activate ? [[0]] : []);
+    expect(calls.find(call => call.name === "CGWindowListCopyWindowInfo")?.args.at(-2)).toBe(16);
+    expect(calls.filter(call => call.name === "CFRelease")).toHaveLength(1);
+    calls.length = 0;
+    locate();
+    expect(calls.some(call => call.name === "activate")).toBe(false);
+  });
+
   test("finds the first sufficiently large visible window owned by System Settings", async () => {
     const windows = new FakeArray([
       windowInfo(4242, 0, bounds(21.5, 32.25, 300.5, 200.75)),

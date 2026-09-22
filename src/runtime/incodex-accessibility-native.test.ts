@@ -1266,6 +1266,40 @@ test("uses the original ordinary helper panel shell without adding safe-area hei
   }
 });
 
+test("prepares Settings once before tracking and ignores completion after close", async () => {
+  let finish!: () => void;
+  const pending = new Promise<void>(resolve => { finish = resolve; });
+  let prepared = 0, located = 0;
+  const harness = await makeHarness({
+    prepareSettings: () => { prepared++; return pending; },
+    locateSettings: () => { located++; return null; },
+  });
+  try {
+    harness.api.setState("awaiting-user");
+    harness.api.setState("awaiting-user");
+    await settleNativeAsync();
+    expect(prepared).toBe(1);
+    expect(located).toBe(0);
+    harness.api.close();
+    finish();
+    await settleNativeAsync();
+    expect(located).toBe(0);
+  } finally { finish(); harness.api.close(); }
+});
+
+test("starts tracking after Settings preparation succeeds", async () => {
+  const calls: string[] = [];
+  const harness = await makeHarness({
+    prepareSettings: async () => { calls.push("prepare"); },
+    locateSettings: () => { calls.push("locate"); return null; },
+  });
+  try {
+    harness.api.setState("awaiting-user");
+    await settleNativeAsync();
+    expect(calls.slice(0, 2)).toEqual(["prepare", "locate"]);
+  } finally { harness.api.close(); }
+});
+
 test("keeps the hint arrow panel from becoming key or main", async () => {
   const { api, bridge } = await makeHarness({
     locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
@@ -1395,6 +1429,7 @@ async function makeHarness(options: {
   onBack?: (payload: any) => { finished?: Promise<unknown>; dispose?: () => void } | undefined;
   activate?: (options?: { steal?: boolean }) => void;
   locateSettings?: () => unknown;
+  prepareSettings?: () => unknown;
   copy?: typeof COPY;
   reduceMotion?: boolean;
   bodyHeight?: number;
@@ -1426,6 +1461,7 @@ async function makeHarness(options: {
     layoutDirection: options.layoutDirection,
     activate: options.activate as any,
     locateSettings: options.locateSettings ?? (() => ({ x: 120, y: 140, width: 920, height: 700 })),
+    prepareSettings: options.prepareSettings,
     onHandoff: options.onHandoff,
     onBack: options.onBack,
   });
