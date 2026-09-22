@@ -5,7 +5,7 @@
     "incodex-loader.cjs": "c4ec4af721545cb003bb6dc0492d51918c0322fc2a3c7b2d3b26ed049a680907",
     "incodex-main.cjs": "9cca1563f6fb83ea2a6b6f0943fd4605772575218c2fe2bfd563f4c75dc87141",
     "incodex-preload.cjs": "7b325b1ddc3d444e625e459fcf3edc00397bf78b38b36e95e56b9b4c7a0686e6",
-    "incodex-inject.js": "161a402bbe1378ca1b38ffcacb1ea9175dff885676bae76171c6bd2f630cbc2a",
+    "incodex-inject.js": "ffcc55e278c8966e2f8282428c8de60022963e3a9453bce1c052aca6f0a59e8e",
     "incodex-safe-home.cjs": "bfd2e9c7c3185c12e7b52a898dc2cf3e326729c6e9da8c4495f81340caee0e78",
     "incodex-ipc-guard.cjs": "b81c83a9a5bc916882556e58a4f5569ec4fc9db6ae12aa0b5a49e6529567b60e",
     "incodex-owner-core.cjs": "88615c946b59380686674bf9f576be5a97d8866a5d0acbf5edbb81189fcf978e",
@@ -17,6 +17,6 @@
     "incodex-codex-mode.cjs": "b42a974b9f562b69efadd91caefcf20566ece11a10cd28d426e2c6202c73e609",
     "incodex-dock-menu.cjs": "59656e824910fe8a2da49d570f8c3407dbc67b8f74f62042caef3e518c1e7b32",
     "incodex-permission-copy.json": "8e89c6ac113c941fe7644053c2468c155eedac47537d3ee9c474b0a741f43d9f",
-    "incodex-permission-ui.cjs": "5b7d7f190f985dc0f42a049dff3e69cd4b8c8d4c188b0fb86d9c5aac87e0138b"
+    "incodex-permission-ui.cjs": "35dfc02dd8aed35d4e2906792c0957d1b6dd7fc6d10194f65e3b29c4ed68381a"
   }
 }

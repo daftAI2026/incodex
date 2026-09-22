@@ -376,9 +376,14 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
     // its fallback restores the initial page), not while its replica is moving.
     returning = true; retryReady = false; const token = ++returnSequence;
     clearInterval(tracking); tracking = null; stopArrow();
-    const application = kit.NSApplication.sharedApplication();
-    if (typeof application.activate === "function") application.activate();
-    else application.activateIgnoringOtherApps$(false);
+    try {
+      const application = kit.NSApplication.sharedApplication();
+      if (typeof application.activate === "function") application.activate();
+      else application.activateIgnoringOtherApps$(false);
+    } catch {
+      fallbackToInitial();
+      return;
+    }
     setInitialContent({ title: text("title"), body: text("body"), allowEnabled: true, settingsPlaceholder: false });
     fitInitialBody();
     if (reducedMotion() || !onBack || !helper.flightTarget) { fallbackToInitial(); return; }
