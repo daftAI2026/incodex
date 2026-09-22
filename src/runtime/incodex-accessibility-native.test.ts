@@ -748,6 +748,7 @@ function makeBridge(
   const calls: NativeCall[] = [];
   const objects: FakeNative[] = [];
   let sharedWorkspace: FakeNative | undefined;
+  let sharedApplication: FakeNative | undefined;
   const definitions = new Map<string, Record<string, (...args: any[]) => unknown>>();
   const superclasses = new Map<string, string>();
 
@@ -795,6 +796,10 @@ function makeBridge(
       },
       imageNamed$: (value: string) => value,
       sharedWorkspace: () => sharedWorkspace ??= object(type),
+      sharedApplication: () => sharedApplication ??= object(type, {
+        activate() { calls.push({ receiver: "NSApplication", selector: "activate", args: [] }); },
+        activateIgnoringOtherApps$(value: unknown) { calls.push({ receiver: "NSApplication", selector: "activateIgnoringOtherApps:", args: [value] }); },
+      }),
       runningApplicationsWithBundleIdentifier$: (bundleIdentifier: unknown) => {
         const applications = Array.from({ length: settingsApplicationCount }, () => object("NSRunningApplication"));
         for (const application of applications) application.values.set("activationFailure", settingsApplicationActivation);
@@ -893,6 +898,7 @@ function makeBridge(
       get NSScreen() { return library(this.framework).NSScreen; }
       get NSTrackingArea() { return library(this.framework).NSTrackingArea; }
       get NSWorkspace() { return library(this.framework).NSWorkspace; }
+      get NSApplication() { return library(this.framework).NSApplication; }
       get NSRunningApplication() { return library(this.framework).NSRunningApplication; }
       get NSPasteboardItem() { return library(this.framework).NSPasteboardItem; }
       get NSDraggingItem() { return library(this.framework).NSDraggingItem; }
@@ -2169,6 +2175,28 @@ describe("native Accessibility setup adapter", () => {
       finish();
       await settleNativeAsync();
       expect(accessories.every(p => !p.visible && p.destroyed)).toBe(true);
+    } finally { finish(); harness.api.close(); }
+  });
+
+  for (const modern of [true, false]) test(`Back requests native app activation before reverse flight (modern=${modern})`, async () => {
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    let seen: NativeCall[] = [];
+    const harness = await makeHarness({ onBack: () => {
+      seen = harness.bridge.calls.filter(call => call.receiver === "NSApplication");
+      return { finished, dispose() {} };
+    } });
+    try {
+      const library = new (harness.bridge.objc as any).NobjcLibrary("/System/Library/Frameworks/AppKit.framework/AppKit");
+      if (!modern) library.NSApplication.sharedApplication().activate = undefined;
+      performSwiftAction(harness, "allow:");
+      await expect(harness.api.choice).resolves.toBe("repair");
+      harness.api.setState("awaiting-user");
+      await flushNativeAsync();
+      performSwiftAction(harness, "later:");
+      await settleNativeAsync();
+      expect(seen).toEqual([{ receiver: "NSApplication", selector: modern ? "activate" : "activateIgnoringOtherApps:", args: modern ? [] : [false] }]);
+      expect(harness.panel.values.get("level")).toBe(0);
     } finally { finish(); harness.api.close(); }
   });
 
