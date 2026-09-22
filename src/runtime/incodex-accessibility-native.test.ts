@@ -1774,6 +1774,9 @@ describe("native Accessibility setup adapter", () => {
 
       expect(() => api.setState(state)).not.toThrow();
       expect(disposed).toBe(1);
+      finish();
+      await settleNativeAsync();
+      expect(disposed).toBe(1);
       expect(helper.isDestroyed()).toBe(true);
       expect(helper.isVisible()).toBe(false);
       expect(poll.active).toBe(false);

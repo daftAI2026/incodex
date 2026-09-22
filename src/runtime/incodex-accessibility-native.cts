@@ -502,7 +502,9 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
       if (!tracking) tracking=setInterval(()=>void place(),100); void place();
     }
     if (next==="error" || next==="unknown") {
-      clearInterval(tracking);tracking=null;stopArrow();flight?.dispose();flight=null;
+      clearInterval(tracking);tracking=null;stopArrow();
+      const failedFlight=flight;flight=null;
+      try { failedFlight?.dispose(); } catch { /* Continue restoring the error page. */ }
       disposeHelper(); initial.setLevel$(3);
       setInitialContent({ title: text("errorTitle"), body: text("errorBody"), allowEnabled: false, settingsPlaceholder: false });
       card.setHidden$(false); fitInitialBody(); initial.orderFront$(null);
