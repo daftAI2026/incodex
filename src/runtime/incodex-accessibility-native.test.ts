@@ -2633,6 +2633,7 @@ describe("native Accessibility setup adapter", () => {
       row.invoke("draggingSession:willBeginAtPoint:", { x: 0, y: 0 });
       api.close();
       // Actual AppKit can re-order its retained source window after close.
+      expect(helper.isDestroyed()).toBe(false);
       helper.orderFront$(null);
       expect(helper.values.get("alphaValue")).toBe(0);
       row.invoke("draggingSession:endedAtPoint:operation:", { x: 0, y: 0 }, 0);
