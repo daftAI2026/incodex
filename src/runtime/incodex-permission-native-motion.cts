@@ -143,6 +143,10 @@ function createNativeReplicants({ objc, nativeLibrary, source, target, reverse =
       const item = { panel, frame, scale }; next.push(item);
       panel.setOpaque$(false); panel.setBackgroundColor$(kit.NSColor.clearColor());
       panel.setHasShadow$(false); panel.setIgnoresMouseEvents$(true); panel.setLevel$(25);
+      // The flight owns its motion; AppKit must not add an ordering animation.
+      // Keep the replica on the same Spaces/full-screen policy as its native shell.
+      panel.setAnimationBehavior$(2);
+      panel.setCollectionBehavior$(0x1149);
       panel.setHidesOnDeactivate$(false);
       const contentView = kit.NSView.alloc().initWithFrame$(rect(0, 0, frame.size.width, frame.size.height));
       contentView.setWantsLayer$(true);
