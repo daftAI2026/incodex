@@ -388,9 +388,11 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
     initial.orderFront$(null);
     let active;
     try {
+      // Keep the accessory window lifetime through completion while its
+      // foreground replica takes over drawing the return transition.
+      helper.panel.setAlphaValue$(0); helper.view.setAlphaValue$(0); arrowPanel?.setAlphaValue$(0);
       active = onBack({ objc, source: returnSource, target: helper.flightTarget, reverse: true, isClosed: () => closed });
     } catch { fallbackToInitial(); return; }
-    helper.panel.orderOut$(null); arrowPanel?.orderOut$(null);
     if (!active?.finished || typeof active.finished.then !== "function") { active?.dispose?.(); fallbackToInitial(); return; }
     flight = active;
     const finish = () => {
