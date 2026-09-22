@@ -38,6 +38,8 @@ const CODESIGN_VERIFY_TIMEOUT: Duration = Duration::from_secs(5);
 const INITIAL_PROBE_ATTEMPTS: usize = 120;
 const INITIAL_PROBE_INTERVAL: Duration = Duration::from_millis(250);
 const POST_ALLOW_PROBE_INTERVAL: Duration = Duration::from_millis(750);
+const ACCESSIBILITY_SETTINGS_URL: &str =
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Outcome {
@@ -439,11 +441,8 @@ impl GuideOps for SystemGuideOps<'_> {
 
     fn open_settings(&mut self) -> Result<(), String> {
         use incodex_core::format_kv;
-        bounded_command(
-            Command::new("/usr/bin/open").arg(
-                "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
-            ),
-        )?;
+        let mut command = open_settings_command(ACCESSIBILITY_SETTINGS_URL);
+        bounded_command(&mut command)?;
         println!(
             "{}",
             format_kv(
@@ -458,6 +457,12 @@ impl GuideOps for SystemGuideOps<'_> {
     fn wait(&mut self, duration: Duration) {
         thread::sleep(duration);
     }
+}
+
+fn open_settings_command(url: &str) -> Command {
+    let mut command = Command::new("/usr/bin/open");
+    command.arg(url);
+    command
 }
 
 fn bounded_command(command: &mut Command) -> Result<(), String> {
@@ -1147,6 +1152,20 @@ mod tests {
         for raw in ["", "zh-Hant-HK", "de-DE", "unknown"] {
             assert!(!is_rtl_locale(&resolve_catalog_locale(raw, &catalog)));
         }
+    }
+
+    #[test]
+    fn open_settings_command_uses_background_open() {
+        let command = open_settings_command(ACCESSIBILITY_SETTINGS_URL);
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(command.get_program().to_string_lossy(), "/usr/bin/open");
+        assert_eq!(
+            args,
+            vec!["-g".to_string(), ACCESSIBILITY_SETTINGS_URL.to_string()]
+        );
     }
 
     #[test]
