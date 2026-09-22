@@ -316,6 +316,10 @@ class FakeNative {
     this.values.set("level", value);
   }
 
+  setAlphaValue$(value: unknown): void {
+    this.values.set("alphaValue", value);
+  }
+
   setCollectionBehavior$(value: unknown): void {
     this.values.set("collectionBehavior", value);
   }
@@ -2140,6 +2144,32 @@ describe("native Accessibility setup adapter", () => {
       await settleNativeAsync();
       expect(panel.values.get("level")).toBe(3);
     } finally { finish(); api.close(); }
+  });
+
+  test("Back makes accessory windows transparent before flight without ordering them out early", async () => {
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    let atStart: any;
+    const harness = await makeHarness({ onBack: () => {
+      atStart = helperPanels(harness.bridge).map(p => ({ visible: p.visible, alpha: p.values.get("alphaValue") }));
+      return { finished, dispose() {} };
+    } });
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(harness.api.choice).resolves.toBe("repair");
+      harness.api.setState("awaiting-user");
+      await flushNativeAsync();
+      const accessories = helperPanels(harness.bridge);
+      expect(accessories).toHaveLength(2);
+      performSwiftAction(harness, "later:");
+      await settleNativeAsync();
+      expect(atStart).toEqual([{ visible: true, alpha: 0 }, { visible: true, alpha: 0 }]);
+      expect(harness.swift!.helperViews[0].values.get("alphaValue")).toBe(0);
+      expect(accessories.every(p => p.visible && !p.destroyed)).toBe(true);
+      finish();
+      await settleNativeAsync();
+      expect(accessories.every(p => !p.visible && p.destroyed)).toBe(true);
+    } finally { finish(); harness.api.close(); }
   });
 
   test("Back recaptures the original target and waits for a reverse handoff before cleanup", async () => {
