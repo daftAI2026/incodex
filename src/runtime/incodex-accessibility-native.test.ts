@@ -1790,6 +1790,34 @@ describe("native Accessibility setup adapter", () => {
     }
   });
 
+  for (const cleanupThrows of [false, true]) test(`forward rejection disposes its flight before restoring error (cleanup throws: ${cleanupThrows})`, async () => {
+    let rejectFlight!: (error: Error) => void;
+    const finished = new Promise<void>((_, reject) => { rejectFlight = reject; });
+    let disposed = 0;
+    const harness = await makeHarness({
+      onHandoff: () => ({ finished, dispose: () => {
+        disposed += 1;
+        if (cleanupThrows) throw new Error("injected rejected flight cleanup failure");
+      } }),
+    });
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(harness.api.choice).resolves.toBe("repair");
+      harness.api.setState("awaiting-user");
+      await settleNativeAsync();
+      rejectFlight(new Error("injected forward rejection"));
+      await settleNativeAsync();
+      expect(disposed).toBe(1);
+      expect(helperPanels(harness.bridge).some(panel => panel.visible && !panel.destroyed)).toBe(false);
+      expect(harness.swift!.calls.filter(call => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1)?.args.slice(0, 4))
+        .toEqual([COPY.errorTitle, COPY.errorBody, false, false]);
+      harness.api.close();
+      expect(disposed).toBe(1);
+    } finally {
+      harness.api.close();
+    }
+  });
+
   test("keeps the native SwiftUI card host contract while Allow is enabled", async () => {
     const { api, swift } = await makeHarness();
     try {
