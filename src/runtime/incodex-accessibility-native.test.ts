@@ -2621,6 +2621,46 @@ describe("native Accessibility setup adapter", () => {
     expect(bridge.calls.slice(callsAfterClose).some(({ selector }) => selector === "orderFront:")).toBe(false);
   });
 
+  test("a closed drag source stays transparent if AppKit reorders it and is discarded on drag end", async () => {
+    const { api, bridge } = await makeHarness();
+    try {
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      const row = bridge.objects.find(value => value.hasSelector("mouseDown:"));
+      const helper = helperPanels(bridge).find(value => value.frame().size.width === 531);
+      if (!row || !helper) throw new Error("native drag helper is missing");
+      row.invoke("mouseDown:", {});
+      row.invoke("draggingSession:willBeginAtPoint:", { x: 0, y: 0 });
+      api.close();
+      // Actual AppKit can re-order its retained source window after close.
+      helper.orderFront$(null);
+      expect(helper.values.get("alphaValue")).toBe(0);
+      row.invoke("draggingSession:endedAtPoint:operation:", { x: 0, y: 0 }, 0);
+      expect(helper.visible).toBe(false);
+      const afterEnd = bridge.calls.length;
+      row.invoke("draggingSession:endedAtPoint:operation:", { x: 0, y: 0 }, 0);
+      expect(bridge.calls.length).toBe(afterEnd);
+    } finally { api.close(); }
+  });
+
+  test("closing after native drag creation but before willBegin tolerates both late callbacks", async () => {
+    const { api, bridge } = await makeHarness();
+    try {
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      const row = bridge.objects.find(value => value.hasSelector("mouseDown:"));
+      const helper = helperPanels(bridge).find(value => value.frame().size.width === 531);
+      if (!row || !helper) throw new Error("native drag helper is missing");
+      row.invoke("mouseDown:", {});
+      api.close();
+      expect(() => row.invoke("draggingSession:willBeginAtPoint:", { x: 0, y: 0 })).not.toThrow();
+      expect(helper.values.get("alphaValue")).toBe(0);
+      helper.orderFront$(null);
+      row.invoke("draggingSession:endedAtPoint:operation:", { x: 0, y: 0 }, 0);
+      expect(helper.visible).toBe(false);
+    } finally { api.close(); }
+  });
+
   test("does not fabricate a helper when System Settings never appears", async () => {
     const clock = installPollingClock();
     let probes = 0;
