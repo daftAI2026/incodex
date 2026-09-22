@@ -126,12 +126,13 @@ function fakeObjcModule(windows: FakeArray, calls: Array<{ name: string; args: u
 }
 
 describe("native System Settings window locator", () => {
-  test("finds the largest visible layer-0 window owned by System Settings", async () => {
+  test("finds the first sufficiently large visible window owned by System Settings", async () => {
     const windows = new FakeArray([
       windowInfo(4242, 0, bounds(21.5, 32.25, 300.5, 200.75)),
-      windowInfo(4242, 1, bounds(0, 0, 4000, 4000)),
+      windowInfo(4242, 1, bounds(0, 0, 1920, 30)),
       windowInfo(9999, 0, bounds(0, 0, 5000, 5000)),
       windowInfo(4242, 0, bounds(100.25, 80.5, 900.75, 700.125)),
+      windowInfo(4242, 0, bounds(0, 0, 1200, 900)),
       windowInfo(4242, 0, bounds(0, 0, 0, 900)),
     ]);
     const calls: Array<{ name: string; args: unknown[] }> = [];
@@ -158,7 +159,7 @@ describe("native System Settings window locator", () => {
 
   test("returns null and still releases the window list when no eligible window exists", async () => {
     const windows = new FakeArray([
-      windowInfo(4242, 1, bounds(0, 0, 800, 600)),
+      windowInfo(4242, 1, bounds(0, 0, 1920, 30)),
       windowInfo(9999, 0, bounds(0, 0, 1200, 900)),
     ]);
     const calls: Array<{ name: string; args: unknown[] }> = [];
@@ -171,6 +172,31 @@ describe("native System Settings window locator", () => {
 
     expect(locate()).toBeNull();
     expect(calls.filter(({ name }) => name === "CFRelease")).toHaveLength(1);
+  });
+
+  test.each([
+    [600, 625, false],
+    [601, 469, false],
+    [601, 470, true],
+    [600.5, 470, true],
+  ])("requires width > 600 and height >= 470: %s x %s", async (width, height, eligible) => {
+    const calls: Array<{ name: string; args: unknown[] }> = [];
+    const objc = fakeObjcModule(new FakeArray([
+      windowInfo(4242, 0, bounds(10, 20, width, height)),
+    ]), calls);
+    const locate = await createNativeSystemSettingsLocator({ loadObjcModule: async () => objc });
+    expect(locate()).toEqual(eligible ? { x: 10, y: 20, width, height } : null);
+    expect(calls.filter(({ name }) => name === "CFRelease")).toHaveLength(1);
+  });
+
+  test("does not replace visible-window ordering with a layer filter", async () => {
+    const calls: Array<{ name: string; args: unknown[] }> = [];
+    const objc = fakeObjcModule(new FakeArray([
+      windowInfo(4242, 1, bounds(10, 20, 740, 625)),
+      windowInfo(4242, 0, bounds(30, 40, 900, 700)),
+    ]), calls);
+    const locate = await createNativeSystemSettingsLocator({ loadObjcModule: async () => objc });
+    expect(locate()).toEqual({ x: 10, y: 20, width: 740, height: 625 });
   });
 
   test("does not load a framework until the locator factory is created", async () => {
