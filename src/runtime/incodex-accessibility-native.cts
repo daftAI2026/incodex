@@ -155,6 +155,9 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
   const INITIAL_MIN_HEIGHT = 312;
   const initial = kit.NSWindow.alloc().initWithContentRect$styleMask$backing$defer$(rect(0, 0, INITIAL_WIDTH, INITIAL_MIN_HEIGHT), 1 | 2 | 32768, 2, false);
   configurePanel(initial, true); initial.setTitle$(str("")); initial.setTitlebarAppearsTransparent$(true); initial.setTitleVisibility$(1);
+  initial.setMovableByWindowBackground$(true);
+  initial.setOpaque$(false);
+  initial.setBackgroundColor$(kit.NSColor.whiteColor().colorWithAlphaComponent$(.001));
   let initialView;
   let card;
   try {
