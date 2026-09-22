@@ -398,7 +398,6 @@ async function createNativeSystemSettingsLocator(options) {
   const NSRunningApplication = appKit?.NSRunningApplication;
   const keys = {
     bounds: nativeStringObject(NSString, "kCGWindowBounds"),
-    layer: nativeStringObject(NSString, "kCGWindowLayer"),
     ownerPid: nativeStringObject(NSString, "kCGWindowOwnerPID"),
     x: nativeStringObject(NSString, "X"),
     y: nativeStringObject(NSString, "Y"),
@@ -448,12 +447,9 @@ async function createNativeSystemSettingsLocator(options) {
       );
       if (!windowList) return null;
 
-      let best = null;
-      let bestArea = 0;
       for (const window of nativeCollectionItems(windowList)) {
         const ownerPid = nativeInteger(nativeDictionaryValue(window, keys.ownerPid));
-        const layer = nativeInteger(nativeDictionaryValue(window, keys.layer));
-        if (ownerPid === null || !pids.has(ownerPid) || layer !== 0) continue;
+        if (ownerPid === null || !pids.has(ownerPid)) continue;
 
         const windowBounds = nativeDictionaryValue(window, keys.bounds);
         const x = nativeDouble(nativeDictionaryValue(windowBounds, keys.x));
@@ -465,18 +461,17 @@ async function createNativeSystemSettingsLocator(options) {
           y === null ||
           width === null ||
           height === null ||
-          width <= 0 ||
-          height <= 0
+          width <= 600 ||
+          height < 470
         ) {
           continue;
         }
 
-        const area = width * height;
-        if (!Number.isFinite(area) || area <= bestArea) continue;
-        bestArea = area;
-        best = { x, y, width, height };
+        // Preserve the visible-window list order; small transient surfaces are
+        // not the Settings window that the permission guide should follow.
+        return { x, y, width, height };
       }
-      return best;
+      return null;
     } catch {
       return null;
     } finally {
