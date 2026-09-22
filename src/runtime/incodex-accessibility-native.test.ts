@@ -1419,6 +1419,24 @@ test("uses an ordinary initial window and reserves panels for the nonactivating 
   } finally { api.close(); }
 });
 
+test("initial window lets its SwiftUI material own the transparent background", async () => {
+  const { api, panel } = await makeHarness();
+  try {
+    expect(panel.values.get("opaque")).toBe(false);
+    const background = panel.values.get("backgroundColor") as FakeNative;
+    expect(background).toBeInstanceOf(FakeNative);
+    expect(background.values.get("namedColor")).toBe("white");
+    expect(Number(background.values.get("alpha"))).toBeCloseTo(0.001, 6);
+  } finally { api.close(); }
+});
+
+test("initial window permits dragging by its noninteractive background", async () => {
+  const { api, panel } = await makeHarness();
+  try {
+    expect(panel.values.get("movableByWindowBackground")).toBe(true);
+  } finally { api.close(); }
+});
+
 test("keeps the initial permission window behind the helper during the forward handoff", async () => {
   const { api, panel } = await makeHarness({
     locateSettings: () => ({ x: 554, y: 160, width: 740, height: 625 }),
