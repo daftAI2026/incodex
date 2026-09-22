@@ -2121,6 +2121,27 @@ describe("native Accessibility setup adapter", () => {
     }
   });
 
+  test("Back keeps the initial window at its waiting level until reverse completion", async () => {
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    const harness = await makeHarness({ onBack: () => ({ finished, dispose() {} }) });
+    const { api, panel } = harness;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      const waitingLevel = panel.values.get("level");
+      expect(waitingLevel).toBe(0);
+      performSwiftAction(harness, "later:");
+      await settleNativeAsync();
+      expect(panel.values.get("level")).toBe(waitingLevel);
+      finish();
+      await settleNativeAsync();
+      expect(panel.values.get("level")).toBe(3);
+    } finally { finish(); api.close(); }
+  });
+
   test("Back recaptures the original target and waits for a reverse handoff before cleanup", async () => {
     const reverses: any[] = [];
     let finish!: () => void;
