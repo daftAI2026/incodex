@@ -675,6 +675,21 @@ test("flight keeps the SwiftUI surface centered in the changing card", () => {
   }
 });
 
+for (const [selector, expected] of [["setAnimationBehavior$", 2], ["setCollectionBehavior$", 0x1149]] as const) {
+test(`flight panels preserve native ${selector} before presentation`, () => {
+  const bridge = nativeMotionBridge([{ frame: rect(0, 0, 1440, 900), scale: 2 }]);
+  const native = swiftUIFlightLibrary();
+  const replicas = createNativeReplicants({ objc: bridge.objc, nativeLibrary: native.library,
+    source: { image: {} }, target: { captureImage: () => ({}) } });
+  try {
+    const panels = bridge.objects.filter((object: any) => object.type === "NSPanel");
+    expect(panels).toHaveLength(1);
+    expect(panels[0].values.get(selector)).toBe(expected);
+    expect(panels[0].visible).toBe(false);
+  } finally { replicas.dispose(); }
+});
+}
+
 test("flight delegates material, clipping, and blur to SwiftUI without clipping shadows", () => {
   const bridge = nativeMotionBridge([{ frame: rect(0, 0, 1440, 900), scale: 2 }]);
   const swift = swiftUIFlightLibrary();
