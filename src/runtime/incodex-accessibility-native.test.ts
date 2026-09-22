@@ -2431,6 +2431,98 @@ describe("native Accessibility setup adapter", () => {
     }
   });
 
+  for (const outcome of ["resolve", "reject"] as const) test(`Back restores after reverse ${outcome} when dispose throws`, async () => {
+    let settle!: () => void;
+    const finished = new Promise<void>((resolve, reject) => {
+      if (outcome === "resolve") settle = resolve;
+      else settle = () => reject(new Error("reverse handoff rejected"));
+    });
+    let disposed = 0;
+    const harness = await makeHarness({
+      onBack: () => ({ finished, dispose: () => {
+        disposed += 1;
+        throw new Error("reverse cleanup failed");
+      } }),
+    });
+    const { api, bridge, panel } = harness;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+
+      performSwiftAction(harness, "later:");
+      await settleNativeAsync();
+      settle();
+      await settleNativeAsync();
+
+      expect(disposed).toBe(1);
+      expect(api.isDestroyed()).toBe(false);
+      expect(panel.isVisible()).toBe(true);
+      expect(harness.swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1)?.args[2]).toBe(true);
+      expect(helperPanels(bridge).some((value) => value.visible && !value.destroyed)).toBe(false);
+    } finally {
+      api.close();
+    }
+  });
+
+  test("Back timeout tolerates throwing dispose and ignores late completion", async () => {
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    let disposed = 0;
+    const harness = await makeHarness({
+      onBack: () => ({ finished, dispose: () => {
+        disposed += 1;
+        throw new Error("reverse timeout cleanup failed");
+      } }),
+    });
+    const { api, bridge, panel } = harness;
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+    let timeoutCallback: (() => void) | undefined;
+    const timeoutToken = {};
+    globalThis.setTimeout = ((callback: TimerHandler, delay?: number) => {
+      if (Number(delay) === 5000) {
+        timeoutCallback = callback as () => void;
+        return timeoutToken as unknown as ReturnType<typeof setTimeout>;
+      }
+      return originalSetTimeout(callback, delay);
+    }) as typeof setTimeout;
+    globalThis.clearTimeout = ((value?: ReturnType<typeof setTimeout>) => {
+      if (value === timeoutToken) return;
+      return originalClearTimeout(value);
+    }) as typeof clearTimeout;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+
+      performSwiftAction(harness, "later:");
+      await settleNativeAsync();
+      if (!timeoutCallback) throw new Error("reverse timeout was not scheduled");
+      timeoutCallback();
+      await settleNativeAsync();
+
+      expect(disposed).toBe(1);
+      expect(api.isDestroyed()).toBe(false);
+      expect(panel.isVisible()).toBe(true);
+      expect(harness.swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1)?.args[2]).toBe(true);
+      expect(helperPanels(bridge).some((value) => value.visible && !value.destroyed)).toBe(false);
+
+      finish();
+      await settleNativeAsync();
+      timeoutCallback();
+      await settleNativeAsync();
+      expect(disposed).toBe(1);
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
+      finish();
+      api.close();
+    }
+  });
+
   test("a synchronous forward handoff failure cleans up the helper and stops tracking", async () => {
     const clock = installPollingClock();
     const harness = await makeHarness({
