@@ -402,7 +402,11 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
       helper.panel.setAlphaValue$(0); helper.view.setAlphaValue$(0); arrowPanel?.setAlphaValue$(0);
       active = onBack({ objc, source: returnSource, target: helper.flightTarget, reverse: true, isClosed: () => closed });
     } catch { fallbackToInitial(); return; }
-    if (!active?.finished || typeof active.finished.then !== "function") { active?.dispose?.(); fallbackToInitial(); return; }
+    if (!active?.finished || typeof active.finished.then !== "function") {
+      try { active?.dispose?.(); } catch {}
+      fallbackToInitial();
+      return;
+    }
     flight = active;
     const finish = () => {
       if (closed || token !== returnSequence || flight !== active) return;
