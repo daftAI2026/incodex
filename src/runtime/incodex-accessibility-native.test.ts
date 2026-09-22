@@ -1028,11 +1028,10 @@ function installArrowClock() {
 }
 
 function helperPanels(bridge: FakeBridge): FakeNative[] {
-  // Both the frozen ordinary shell (0x8091) and its independent arrow child
-  // (128) are nonactivating panels; do not identify the helper by the old
-  // exact style mask.
+  // Identify the two accessory subclasses by their key-window contract,
+  // not by the helper's style mask (the arrow is borderless style 0).
   return bridge.objects.filter((value) => value.type === "NSPanel"
-    && (Number(value.values.get("styleMask")) & 128) !== 0);
+    && value.selectors.has("canBecomeKeyWindow"));
 }
 
 function swiftDelegate(harness: { swift?: ReturnType<typeof swiftPermissionViewsLibrary> }): FakeNative {
@@ -1258,8 +1257,8 @@ test("uses the original ordinary helper panel shell without adding safe-area hei
     expect(helperView?.frame().size).toEqual({ width: 531, height: 110 });
     expect(helper.frame().size).toEqual({ width: 531, height: 110 });
 
-    // The arrow remains the independent borderless/nonactivating child shell.
-    expect(arrow.values.get("styleMask")).toBe(128);
+    // The arrow is the independent borderless child shell.
+    expect(arrow.values.get("styleMask")).toBe(0);
     expect(arrow.values.get("collectionBehavior")).toBe(4);
   } finally {
     api.close();
