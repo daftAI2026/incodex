@@ -172,6 +172,8 @@ class FakeNative {
 
   snapshotPermissionCardWithScale$(scale: number): unknown {
     this.record("snapshotPermissionCardWithScale:", scale);
+    const queued = this.values.get("cardForegroundSnapshots");
+    if (Array.isArray(queued) && queued.length > 0) return queued.shift();
     return this.values.get("cardForegroundSnapshot") ?? this;
   }
 
@@ -2008,6 +2010,47 @@ describe("native Accessibility setup adapter", () => {
     expect(handoffs[0].target.panel).toBeDefined();
     expect(handoffs[0].target.panel.contentViewValue.type).toBe("IncodexPermissionHelperView");
     expect(handoffs[0].target.view).toBe(handoffs[0].target.panel.contentViewValue);
+  });
+
+  test("retries a transient SwiftUI foreground snapshot before the first Allow handoff", async () => {
+    const handoffs: any[] = [];
+    const harness = await makeHarness({ onHandoff: payload => { handoffs.push(payload); } });
+    const { api, swift } = harness;
+    swift!.initialViews[0].values.set("cardForegroundSnapshots", [null, swift!.initialViews[0]]);
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      expect(swift!.calls.filter(call => call.selector === "snapshotPermissionCardWithScale:")).toHaveLength(2);
+      expect(handoffs).toHaveLength(1);
+      expect(handoffs[0].source.image).toBe(swift!.initialViews[0]);
+    } finally { api.close(); }
+  });
+
+  test("Back retry still dispatches after one transient SwiftUI foreground snapshot failure", async () => {
+    const handoffs: any[] = [];
+    let retries = 0;
+    const harness = await makeHarness({
+      onHandoff: payload => { handoffs.push(payload); return { finished: Promise.resolve() }; },
+    });
+    const { api, swift } = harness;
+    api.onRetry(() => { retries++; api.setState("awaiting-user"); });
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await settleNativeAsync();
+      performSwiftAction(harness, "later:");
+      await settleNativeAsync();
+      swift!.initialViews[0].values.set("cardForegroundSnapshots", [null, swift!.initialViews[0]]);
+
+      performSwiftAction(harness, "allow:");
+      await settleNativeAsync();
+      expect(retries).toBe(1);
+      expect(handoffs).toHaveLength(2);
+      expect(swift!.calls.filter(call => call.selector === "snapshotPermissionCardWithScale:")).toHaveLength(4);
+    } finally { api.close(); }
   });
 
   test("reveal fronts the helper before reactivating the unique Settings application", async () => {
