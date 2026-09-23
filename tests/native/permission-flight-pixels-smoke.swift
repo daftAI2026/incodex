@@ -291,6 +291,26 @@ enum PermissionFlightPixelsSmoke {
             precondition(view.subviews[0] === host, "\(direction): baseline/clip probe replaced live host")
         }
 
+        // Back finishes at the smaller permission card. Its larger helper
+        // snapshot must not keep the SwiftUI material or image clip at the
+        // helper's old 531x110 layout size after the host becomes 518x80.
+        let largeSource = makeSolidImage(size: large, red: red.red, green: red.green, blue: red.blue)
+        let smallTarget = makeSolidImage(size: small, red: blue.red, green: blue.green, blue: blue.blue)
+        let shrinking = IncodexPermissionFlightView(frame: NSRect(origin: .zero, size: large))
+        shrinking.setSourceImage(largeSource, targetImage: smallTarget)
+        shrinking.updateProgress(1, cornerRadius: probeRadius, reduceTransparency: true)
+        shrinking.setFrameSize(small)
+        for _ in 0..<3 {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+            shrinking.layoutSubtreeIfNeeded()
+            shrinking.subviews.first?.layoutSubtreeIfNeeded()
+        }
+        let landing = cacheImage(shrinking)
+        precondition(pixel(landing, x: 0, y: 0).alpha < 0.05,
+                     "reverse landing: oversized source left opaque pixels in the 24pt rounded corner")
+        precondition(pixel(landing, x: small.width / 2, y: small.height / 2).alpha > 0.75,
+                     "reverse landing: material or foreground disappeared at card center")
+
         precondition(NSApp.windows.allSatisfy { !$0.isVisible }, "flight pixel smoke created a visible window")
         print("permission flight pixels smoke passed (windowless; F03/F05/F07 image branches; blur effect unobserved in this cache path)")
     }

@@ -70,21 +70,28 @@ private struct PermissionFlightRoot: View {
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: state.cornerRadius, style: .continuous)
-        ZStack {
+        // The helper image is larger than the card image. Its intrinsic size
+        // must not grow the material and shared clip after Back shrinks the
+        // AppKit surface to the card's current frame.
+        GeometryReader { geometry in
             shape.fill(.regularMaterial)
-            ZStack {
-                PermissionFlightImage(
-                    image: state.source,
-                    opacity: 1 - state.progress,
-                    blurRadius: state.reduceTransparency ? 0 : 12 * state.progress
-                )
-                PermissionFlightImage(
-                    image: state.target,
-                    opacity: state.progress,
-                    blurRadius: state.reduceTransparency ? 0 : 12 * (1 - state.progress)
-                )
-            }
-            .clipShape(shape)
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .overlay {
+                    ZStack {
+                        PermissionFlightImage(
+                            image: state.source,
+                            opacity: 1 - state.progress,
+                            blurRadius: state.reduceTransparency ? 0 : 12 * state.progress
+                        )
+                        PermissionFlightImage(
+                            image: state.target,
+                            opacity: state.progress,
+                            blurRadius: state.reduceTransparency ? 0 : 12 * (1 - state.progress)
+                        )
+                    }
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .clipShape(shape)
+                }
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
@@ -359,7 +366,7 @@ private struct PermissionCardRoot: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Button(state.allow) { state.send("allow:") }
-                .buttonStyle(DefaultButtonStyle())
+                .buttonStyle(.automatic)
                 .keyboardShortcut(.defaultAction)
                 .font(.system(size: 13))
                 .clipShape(Capsule(style: .continuous))

@@ -7,10 +7,10 @@
     "arm64",
     "x86_64"
   ],
-  "sourceSha256": "7c1e883d34acbf63d5ed632a79c3df028d2edaf736d6605ee096be1a3c730718",
+  "sourceSha256": "3b46b899b5744e11d7be4c7493c66caad03570dc8e74d944c8a9e465c94a251f",
   "hostSourceSha256": "67adbed0085e080e97d20d7c5ff7c89ef2a1210f12eac7a9a774da723a8ed9ad",
   "files": {
-    "incodex-permission-ui.dylib": "043d1074be705aba3a6d59b8c746bf54bffa7d482d4aeedafa00accd62ea2c9e",
+    "incodex-permission-ui.dylib": "00882b87870559baa06cccf099ad4e01539315aab3c6e9df0c67bdeec7806a82",
     "incodex-permission-host": "9ed29801b6cc0a29222fd0eaaf53e6d5a0af6f2ca10e188a17083a9edd49ebc1"
   }
 }

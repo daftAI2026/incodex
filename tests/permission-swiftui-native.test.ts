@@ -20,11 +20,12 @@ test("initial permission page measures naturally with a bottom-trailing Skip ove
   expect(root).not.toContain("Spacer()");
 });
 
-test("Allow keeps the original SwiftUI default style and snapshots its real foreground through hosting", () => {
+test("Allow preserves the original automatic live style while snapshotting its real foreground through hosting", () => {
   const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
   const card = source.slice(source.indexOf("private struct PermissionCardRoot:"), source.indexOf("@objc(IncodexPermissionInitialView)"));
   const snapshot = source.slice(source.indexOf("public func snapshotPermissionCard(scale:"), source.indexOf("@objc public var preferredContentSize:"));
-  expect(card).toContain(".buttonStyle(DefaultButtonStyle())");
+  expect(card).toContain(".buttonStyle(.automatic)");
+  expect(card).not.toContain(".buttonStyle(DefaultButtonStyle())");
   expect(card).toContain(".clipShape(Capsule(style: .continuous))");
   expect(card).toContain(".frame(minWidth: 62)");
   expect(snapshot).toContain("PermissionCardRoot(state: state).foreground");
