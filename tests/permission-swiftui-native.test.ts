@@ -201,8 +201,10 @@ test("helper instruction uses the original semantic body font and matching nativ
   expect(instruction).toContain(".font(.body)");
   expect(instruction).not.toContain(".font(.system(size: 13))");
   const measurement = source.slice(source.indexOf("var instructionHeight:"), source.indexOf("var extraHeight:"));
-  expect(measurement).toContain("NSFont.preferredFont(forTextStyle: .body, options: [:])");
-  expect(measurement).not.toContain("NSFont.systemFont(ofSize: 13)");
+  expect(measurement).toContain("Text(styledInstruction)");
+  expect(measurement).toContain(".font(.body)");
+  expect(measurement).toContain("NSHostingView(rootView: label).fittingSize.height");
+  expect(measurement).not.toContain("(instruction as NSString).boundingRect");
 });
 
 test.skipIf(process.platform !== "darwin")("native helper instruction preserves localized semantic runs without windows", () => {

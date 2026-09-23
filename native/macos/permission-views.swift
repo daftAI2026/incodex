@@ -598,13 +598,15 @@ private final class PermissionHelperState: ObservableObject {
     weak var actionTarget: NSObject?
 
     var instructionHeight: CGFloat {
-        let font = NSFont.preferredFont(forTextStyle: .body, options: [:])
-        let rect = (instruction as NSString).boundingRect(
-            with: NSSize(width: 408, height: CGFloat.greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: [.font: font],
-        )
-        return max(16, ceil(rect.height))
+        // Measure the same attributed SwiftUI Text shown in the natural hint
+        // HStack. The old 408pt NSString estimate could wrap while the live
+        // 429pt proposal stayed on one line, needlessly raising the helper.
+        let availableWidth: CGFloat = 531 - 18 - 28 - 16 - 4 - 28 - 8
+        let label = Text(styledInstruction)
+            .font(.body)
+            .frame(width: availableWidth, alignment: .leading)
+            .environment(\.layoutDirection, layoutDirection)
+        return max(16, ceil(NSHostingView(rootView: label).fittingSize.height))
     }
 
     var extraHeight: CGFloat { max(0, instructionHeight - 16) }

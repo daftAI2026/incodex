@@ -172,6 +172,48 @@ enum PermissionViewsSmoke {
         helper.configure(copy: copy, appIcon: source, actionTarget: nil)
         precondition(abs(helper.preferredContentSize.height - helperShortSize.height) <= 0.5,
                      "helper immediate measurement retained its previous long layout")
+        // The hint gets the natural width left by the verified 531pt parent:
+        // leading18 + Back28 + spacing16 + hint leading4 + arrow28 + spacing8.
+        // Its rendered Text must govern the extra height, not an older 408pt
+        // NSString estimate. Urdu is a known wrap-boundary case.
+        let urInstruction = "قابلِ رسائی کی اجازت دینے کے لیے ChatGPT کو اوپر موجود فہرست میں گھسیٹیں"
+        let urRuns = #"[{"text":"قابلِ رسائی","role":"primary"},{"text":" کی اجازت دینے کے لیے ","role":"secondary"},{"text":"ChatGPT","role":"primary"},{"text":" کو اوپر موجود فہرست میں گھسیٹیں","role":"secondary"}]"#
+        let naturalHintWidth: CGFloat = 531 - 18 - 28 - 16 - 4 - 28 - 8
+        let urText = Text(permissionStyledInstruction(urInstruction, runsJSON: urRuns))
+            .font(.body)
+            .frame(width: naturalHintWidth, alignment: .leading)
+            .environment(\.layoutDirection, LayoutDirection.rightToLeft)
+        let oneLineText = Text("ChatGPT")
+            .font(.body)
+            .frame(width: naturalHintWidth, alignment: .leading)
+            .environment(\.layoutDirection, LayoutDirection.rightToLeft)
+        let urRenderedHeight = NSHostingView(rootView: urText).fittingSize.height
+        let oneLineHeight = NSHostingView(rootView: oneLineText).fittingSize.height
+        precondition(urRenderedHeight <= oneLineHeight + 1,
+                     "Urdu hint is not one natural line: rendered=\(urRenderedHeight), baseline=\(oneLineHeight)")
+        let urCopy = NSMutableDictionary(dictionary: copy)
+        urCopy["dragInstruction"] = urInstruction
+        urCopy["dragInstructionRuns"] = urRuns
+        urCopy["layoutDirection"] = "rightToLeft"
+        let urHelper = IncodexPermissionHelperView(frame: NSRect(x: 0, y: 0, width: 531, height: 110))
+        urHelper.configure(copy: urCopy, appIcon: source, actionTarget: nil)
+        precondition(abs(urHelper.preferredContentSize.height - helperShortSize.height) <= 0.5,
+                     "one-line natural Urdu hint overexpanded helper: rendered=\(urRenderedHeight), helper=\(urHelper.preferredContentSize)")
+        let catalogURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("dist/incodex-permission-copy.json")
+        let catalogData = try! Data(contentsOf: catalogURL)
+        let catalog = try! JSONSerialization.jsonObject(with: catalogData) as! [String: [String: String]]
+        precondition(catalog.count == 65, "permission copy catalog must retain all 65 locales")
+        for locale in catalog.keys.sorted() {
+            let localized = IncodexPermissionHelperView(frame: NSRect(x: 0, y: 0, width: 531, height: 110))
+            localized.configure(copy: catalog[locale]! as NSDictionary, appIcon: source, actionTarget: nil)
+            let size = localized.preferredContentSize
+            let row = localized.appRowFrame
+            precondition(size.width == 531 && size.height >= 110,
+                         "invalid natural helper size for \(locale): \(size)")
+            precondition(abs(row.maxY + 20 - size.height) <= 1,
+                         "row lost its bottom anchor for \(locale): helper=\(size), row=\(row)")
+        }
         // Routine checks must not repeatedly open a synthetic window on the
         // user's desktop. Keep actual Return behavior as an explicit UI run.
         guard ProcessInfo.processInfo.environment["INCODEX_RUN_NATIVE_LAYOUT_SMOKE"] == "1" else {
