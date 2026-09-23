@@ -295,6 +295,9 @@ where
         }
         CliCommand::Install => crate::install::run_install(&parsed).map_err(CliFailure::from),
         CliCommand::Uninstall => crate::install::run_uninstall(&parsed).map_err(CliFailure::from),
+        CliCommand::Accessibility => {
+            crate::install::run_accessibility(&parsed).map_err(CliFailure::from)
+        }
         CliCommand::Recover => crate::install::run_recover(&parsed).map_err(CliFailure::from),
         CliCommand::Status | CliCommand::Doctor => run_diagnosis(&parsed),
         other => Err(CliFailure::new(format!(

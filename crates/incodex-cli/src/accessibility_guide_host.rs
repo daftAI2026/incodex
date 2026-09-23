@@ -810,7 +810,7 @@ fn native_guide_config() -> Result<NativeGuideConfig, String> {
     if let Some(error_body) = copy_object.get("errorBody").and_then(Value::as_str) {
         copy_object.insert(
             "errorBody".into(),
-            Value::String(error_body.replace("incodex install", "incodex doctor")),
+            Value::String(reentry_error_body(error_body)),
         );
     }
     let layout_direction = if is_rtl_locale(&locale) {
@@ -822,6 +822,10 @@ fn native_guide_config() -> Result<NativeGuideConfig, String> {
         copy,
         layout_direction,
     })
+}
+
+fn reentry_error_body(body: &str) -> String {
+    body.replace("incodex install", "incodex accessibility")
 }
 
 fn configured_locale() -> Option<String> {

@@ -37,14 +37,14 @@ pub(crate) fn finish_uninstall(root: &std::path::Path, app: &std::path::Path) {
         Ok(Outcome::Pending) => println!(
             "{}",
             format_warn(
-                "The restored app is waiting for Accessibility approval. Complete the System Settings step, then run incodex doctor to check again.",
+                "The restored app is waiting for Accessibility approval. Run `incodex accessibility` when ready; `incodex doctor` only checks access.",
                 None,
             )
         ),
         Err(error) => println!(
             "{}",
             format_warn(
-                &format!("The restored app's Accessibility renewal could not finish: {error}"),
+                &format!("The restored app's Accessibility renewal could not finish: {error}. Run `incodex accessibility` to retry."),
                 None,
             )
         ),
@@ -362,13 +362,13 @@ mod tests {
             AccessibilityStatus::Denied,
             AccessibilityStatus::Granted,
         ]);
-        let mut factory = FakeFactory::new(&[
-            HostEvent::Ready,
-            HostEvent::Allow,
-            HostEvent::Timeout,
-        ]);
+        let mut factory =
+            FakeFactory::new(&[HostEvent::Ready, HostEvent::Allow, HostEvent::Timeout]);
         let trace = factory.host.as_ref().unwrap().trace.clone();
-        assert_eq!(run_fake(&mut ops, &mut factory, || Ok(())), Ok(Outcome::Granted));
+        assert_eq!(
+            run_fake(&mut ops, &mut factory, || Ok(())),
+            Ok(Outcome::Granted)
+        );
         let trace = trace.lock().unwrap();
         assert_eq!(&trace[trace.len() - 2..], &["state:Granted", "close"]);
         assert_eq!(ops.events.iter().filter(|e| **e == "reset").count(), 1);

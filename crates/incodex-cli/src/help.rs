@@ -12,6 +12,7 @@ Commands:
   uninstall    Restore the official Codex app
   status       Show whether Incodex is installed
   doctor       Diagnose the install
+  accessibility  Reopen ChatGPT's Accessibility setup when you choose
   runtime      Update Incodex without re-signing Codex
   recover      Roll back a failed install
   open         Open an incognito window without patching Codex
@@ -127,6 +128,7 @@ generation, and publish the Runtime embedded in that new CLI.
 "
         }
         CliCommand::Recover => "This command is not available on Windows yet.\n",
+        CliCommand::Accessibility => "This command is only available on macOS.\n",
         CliCommand::SelfUninstall => {
             "\
 Usage:
@@ -217,6 +219,20 @@ Examples:
   incodex doctor
   incodex doctor --json
   incodex doctor --deep
+"
+        }
+        CliCommand::Accessibility => {
+            "\
+Usage:
+  incodex accessibility
+
+Explicitly check ChatGPT's Accessibility access and reopen the shared guide
+only when it is missing. Works with a verified Incodex installation or the
+restored official /Applications/ChatGPT.app. It does not patch or uninstall
+the app. A TCC reset is possible only after you choose Allow in the guide.
+
+If you choose Skip, close the guide, or the process is interrupted, run this
+command again when you want to continue. Doctor remains read-only.
 "
         }
         CliCommand::Runtime => {

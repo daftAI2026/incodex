@@ -142,8 +142,8 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
         }
         match permission {
             Ok(crate::accessibility_guide_host::Outcome::Granted) => println!("{}", format_ok("Installed. ChatGPT Accessibility access verified.", None)),
-            Ok(crate::accessibility_guide_host::Outcome::Pending) => println!("{}", format_warn("Installed. Accessibility setup is unfinished; complete it in System Settings, then run incodex doctor.", None)),
-            Err(error) => println!("{}", format_warn(&format!("Installed, but Accessibility setup could not finish: {error}"), None)),
+            Ok(crate::accessibility_guide_host::Outcome::Pending) => println!("{}", format_warn("Installed. Accessibility setup is unfinished; run `incodex accessibility` when ready. `incodex doctor` only checks access.", None)),
+            Err(error) => println!("{}", format_warn(&format!("Installed, but Accessibility setup could not finish: {error}. Run `incodex accessibility` to retry."), None)),
         }
     } else {
         println!(
@@ -158,6 +158,69 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
     );
     println!();
     Ok(())
+}
+
+/// User-initiated re-entry after Skip, close, or an interrupted guide. This
+/// never repeats the install/uninstall transaction; both identities use the
+/// same verified native guide and only an explicit Allow may reset TCC.
+pub fn run_accessibility(parsed: &ParsedCli) -> Result<(), String> {
+    if parsed.app.is_some()
+        || parsed.clone
+        || parsed.dry_run
+        || parsed.json
+        || parsed.transaction.is_some()
+        || parsed.restore_app
+    {
+        return Err(
+            "accessibility only supports the default /Applications/ChatGPT.app without other flags"
+                .into(),
+        );
+    }
+    let root = user_root();
+    let app = Path::new(DEFAULT_APP);
+    let _lock =
+        incodex_transaction::acquire_target_lock(&root, app, "accessibility-reentry", None)?;
+    let installed = inspect_existing_install(app, &root, &app.join(ASAR_REL))?;
+    if let Some(install_id) = installed {
+        let request_id = crate::accessibility_setup::request_setup(&root, app, &install_id)?;
+        let outcome = crate::accessibility_guide_host::run_permission_guide(&root, app, || {
+            validate_committed_live_snapshot(&root, &install_id, app)
+                .map_err(|error| error.to_string())?;
+            verify_patched_adhoc_bundle_deep_strict(app, None).map(|_| ())
+        });
+        let state = match &outcome {
+            Ok(crate::accessibility_guide_host::Outcome::Granted) => "granted",
+            Ok(crate::accessibility_guide_host::Outcome::Pending) => "deferred",
+            Err(_) => "error",
+        };
+        crate::accessibility_setup::finish_cli_setup(&root, app, &install_id, &request_id, state)?;
+        print_accessibility_reentry(outcome, "installed")
+    } else {
+        verify_original_vendor_bundle(app, Some(OFFICIAL_BUNDLE_IDENTIFIER), None, None)
+            .map(|_| ())?;
+        let outcome = crate::accessibility_guide_host::run_permission_guide(&root, app, || {
+            verify_original_vendor_bundle(app, Some(OFFICIAL_BUNDLE_IDENTIFIER), None, None)
+                .map(|_| ())
+        });
+        print_accessibility_reentry(outcome, "official")
+    }
+}
+
+fn print_accessibility_reentry(
+    outcome: Result<crate::accessibility_guide_host::Outcome, String>,
+    identity: &str,
+) -> Result<(), String> {
+    match outcome {
+        Ok(crate::accessibility_guide_host::Outcome::Granted) => {
+            println!("{}", format_ok(&format!("{identity} ChatGPT Accessibility access verified."), None));
+            Ok(())
+        }
+        Ok(crate::accessibility_guide_host::Outcome::Pending) => {
+            println!("{}", format_warn("Accessibility setup is unfinished. Run `incodex accessibility` when you want to continue; `incodex doctor` only checks the result.", None));
+            Ok(())
+        }
+        Err(error) => Err(format!("Accessibility setup could not finish: {error}. Run `incodex accessibility` to retry when ready.")),
+    }
 }
 
 pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
