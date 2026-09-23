@@ -294,13 +294,8 @@ public final class PermissionHostPresenter: NSObject {
             state = nextState
             initialPanel?.level = .normal
             stopTracking()
-            setInitialContent(
-                title: permissionHostString(copy, "title"),
-                body: permissionHostString(copy, "repairing").isEmpty ? (message ?? permissionHostString(copy, "body")) : permissionHostString(copy, "repairing"),
-                allowEnabled: false,
-                settingsPlaceholder: false,
-            )
-            fitInitialPage()
+            // Match the reference transition: keep the original card until
+            // the same-height Settings placeholder takes its place.
         case "awaiting-user":
             state = nextState
             initialPanel?.level = .normal
@@ -311,7 +306,6 @@ public final class PermissionHostPresenter: NSObject {
                 settingsPlaceholder: true,
             )
             cardView?.isHidden = true
-            fitInitialPage()
             startSettingsTracking()
         case "granted":
             close()

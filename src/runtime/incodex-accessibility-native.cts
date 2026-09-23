@@ -522,13 +522,13 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
     if (next==="granted") { close(); return; }
     if (next==="repairing") {
       clearInterval(tracking); tracking = null;
-      setInitialContent({ body: text("repairing"), allowEnabled: false, settingsPlaceholder: false });
-      fitInitialBody();
+      // The reference keeps its initial row and explanation in place until
+      // the equal-height Settings placeholder replaces that row. Preparation
+      // is an internal state, not a second visible page with a shorter body.
     }
     if (next==="awaiting-user") {
       setInitialContent({ body: text("body"), allowEnabled: false, settingsPlaceholder: true });
       showSettingsPlaceholder(true);
-      fitInitialBody();
       const startTracking = () => {
         if (closed || returning || state !== "awaiting-user" || preparation !== settingsPreparation) return;
         if (!tracking) tracking=setInterval(()=>void place(),100);

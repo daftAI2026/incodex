@@ -268,6 +268,7 @@ private final class PermissionInitialState: ObservableObject {
     @Published var appIcon: NSImage?
     @Published var permissionIcon: NSImage?
     @Published var allowEnabled = true
+    @Published var allowHovered = false
     @Published var settingsPlaceholder = false
     @Published var placeholderHovered = false
     @Published var layoutDirection: LayoutDirection = .leftToRight
@@ -291,6 +292,7 @@ private final class PermissionInitialState: ObservableObject {
         self.actionTarget = actionTarget
         layoutDirection = permissionCopyString(copy, "layoutDirection") == "rightToLeft" ? .rightToLeft : .leftToRight
         allowEnabled = true
+        allowHovered = false
         settingsPlaceholder = false
         placeholderHovered = false
     }
@@ -304,6 +306,7 @@ private final class PermissionInitialState: ObservableObject {
         self.title = title
         self.body = body
         self.allowEnabled = allowEnabled
+        allowHovered = false
         self.settingsPlaceholder = settingsPlaceholder
         // State transitions must not reuse a previous placeholder's hover.
         // A later genuine pointer entry may establish fresh hover normally.
@@ -328,6 +331,63 @@ private struct PermissionEmbeddedView: NSViewRepresentable {
         // while taking permission-card snapshots and restores it independently.
         nsView.setFrameSize(size)
     }
+}
+
+private struct PermissionAllowButtonStyle: ButtonStyle {
+    @ObservedObject var state: PermissionInitialState
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.controlActiveState) private var controlActiveState
+
+    func makeBody(configuration: Configuration) -> some View {
+        PermissionAllowButtonFace(
+            label: configuration.label,
+            isEnabled: isEnabled,
+            isActive: controlActiveState == .key,
+            isPressed: configuration.isPressed,
+            state: state
+        )
+    }
+}
+
+private struct PermissionAllowButtonFace<Label: View>: View {
+    let label: Label
+    let isEnabled: Bool
+    let isActive: Bool
+    let isPressed: Bool
+    @ObservedObject var state: PermissionInitialState
+
+    private var foreground: Color {
+        guard isEnabled else { return Color(nsColor: .disabledControlTextColor) }
+        return isActive ? .white : Color(nsColor: .controlTextColor)
+    }
+
+    private var background: Color {
+        guard isEnabled else { return Color(nsColor: .controlColor) }
+        guard !isActive else { return .accentColor }
+        if #available(macOS 14.0, *) { return Color(nsColor: .systemFill) }
+        return Color.primary.opacity(0.08)
+    }
+
+    var body: some View {
+        label
+            // 4pt was the measured label adjustment under the automatic
+            // style; replace its lost 8pt-per-side system inset explicitly.
+            .padding(.horizontal, 12)
+            .frame(height: 24)
+            .foregroundStyle(foreground)
+            .background {
+                Capsule(style: .continuous)
+                    .fill(background)
+                    // State feedback modifies the same capsule fill; do not
+                    // add separate hover/pressed overlay surfaces.
+                    .brightness(isPressed ? -0.08 : (isHovered && isEnabled && isActive ? 0.06 : 0))
+            }
+            .onHover { state.allowHovered = $0 }
+            .animation(.easeOut(duration: 0.12), value: isHovered)
+            .animation(.easeOut(duration: 0.08), value: isPressed)
+    }
+
+    private var isHovered: Bool { state.allowHovered }
 }
 
 private struct PermissionCardRoot: View {
@@ -365,10 +425,11 @@ private struct PermissionCardRoot: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button(state.allow) { state.send("allow:") }
-                .buttonStyle(.automatic)
+            Button { state.send("allow:") } label: {
+                Text(state.allow)
+            }
+                .buttonStyle(PermissionAllowButtonStyle(state: state))
                 .keyboardShortcut(.defaultAction)
-                .font(.system(size: 13))
                 .clipShape(Capsule(style: .continuous))
                 .frame(minWidth: 62)
                 .offset(x: state.layoutDirection == .rightToLeft ? -4 : 4)

@@ -1934,6 +1934,21 @@ describe("native Accessibility setup adapter", () => {
     } finally { api.close(); }
   });
 
+  test("keeps the original card and window geometry during internal Settings preparation", async () => {
+    const { api, panel, swift } = await makeHarness();
+    try {
+      const contents = () => swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:");
+      const initialCount = contents().length;
+      const initialFrame = panel.frame();
+      api.setState("repairing");
+      expect(contents().length).toBe(initialCount);
+      expect(panel.frame()).toEqual(initialFrame);
+      api.setState("awaiting-user");
+      expect(contents().at(-1)?.args.slice(0, 4)).toEqual([COPY.title, COPY.body, false, true]);
+      expect(panel.frame()).toEqual(initialFrame);
+    } finally { api.close(); }
+  });
+
   test("adopts localized initial height from SwiftUI preferredContentSize", async () => {
     for (const bodyHeight of [16, 32, 64]) {
       const swift = swiftPermissionViewsLibrary();

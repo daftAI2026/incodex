@@ -20,17 +20,50 @@ test("initial permission page measures naturally with a bottom-trailing Skip ove
   expect(root).not.toContain("Spacer()");
 });
 
-test("Allow preserves the original automatic live style while snapshotting its real foreground through hosting", () => {
+test("Allow uses one live SwiftUI control style for the card and foreground snapshots", () => {
   const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
   const card = source.slice(source.indexOf("private struct PermissionCardRoot:"), source.indexOf("@objc(IncodexPermissionInitialView)"));
   const snapshot = source.slice(source.indexOf("public func snapshotPermissionCard(scale:"), source.indexOf("@objc public var preferredContentSize:"));
-  expect(card).toContain(".buttonStyle(.automatic)");
+  expect(card).toContain(".buttonStyle(PermissionAllowButtonStyle(state: state))");
+  expect(card).toContain("Text(state.allow)");
   expect(card).not.toContain(".buttonStyle(DefaultButtonStyle())");
   expect(card).toContain(".clipShape(Capsule(style: .continuous))");
   expect(card).toContain(".frame(minWidth: 62)");
   expect(snapshot).toContain("PermissionCardRoot(state: state).foreground");
   expect(snapshot).toContain("useHostingView: true");
   expect(snapshot).not.toContain("permissionHostCachedImage");
+});
+
+test("Allow draws the SwiftUI capsule at its target height and keeps natural label width", () => {
+  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const card = source.slice(source.indexOf("private struct PermissionCardRoot:"), source.indexOf("@objc(IncodexPermissionInitialView)"));
+  const styleStart = source.indexOf("private struct PermissionAllowButtonStyle:");
+  const style = source.slice(styleStart, source.indexOf("private struct PermissionCardRoot:", styleStart));
+  const start = card.indexOf("Button { state.send(\"allow:\") }");
+  const end = card.indexOf(".disabled(!state.allowEnabled)", start);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  expect(styleStart).toBeGreaterThanOrEqual(0);
+  expect(style).toContain("configuration.label");
+  expect(style).toContain(".padding(.horizontal, 12)");
+  expect(style).toContain(".frame(height: 24)");
+  expect(style).toContain("Capsule(style: .continuous)");
+  expect(style).toContain("configuration.isPressed");
+  expect(style).toContain("controlActiveState");
+  expect(style).toContain("controlActiveState == .key");
+  expect(style).toContain("isEnabled");
+  expect(style).toContain("Color(nsColor: .systemFill)");
+  expect(style).not.toContain("Color(nsColor: .tertiarySystemFill)");
+  expect(style).toContain("guard isEnabled else { return Color(nsColor: .controlColor) }");
+  expect(style).not.toContain(".frame(width:");
+  const allow = card.slice(start, end);
+  expect(allow).toContain("Text(state.allow)");
+  expect(allow).not.toContain(".font(.system(size: 13))");
+  expect(allow).toContain(".buttonStyle(PermissionAllowButtonStyle(state: state))");
+  expect(allow).toContain(".keyboardShortcut(.defaultAction)");
+  expect(allow).toContain(".clipShape(Capsule(style: .continuous))");
+  expect(allow).toContain(".frame(minWidth: 62)");
+  expect(allow).not.toContain(".frame(width:");
 });
 
 test("helper foreground composes bottom-aligned stacks and semantic padding", () => {
