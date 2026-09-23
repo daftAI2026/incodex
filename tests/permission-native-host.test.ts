@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -61,6 +61,7 @@ function runHost(
   executable: string,
   write: (stdin: ChildProcessWithoutNullStreams["stdin"]) => void,
   timeoutMs = 3_000,
+  extraEnv: Record<string, string> = {},
 ): Promise<HostResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(executable, ["--nonce", nonce()], {
@@ -70,6 +71,7 @@ function runHost(
         // The behavior tests must never create an AppKit window, even if the
         // developer happens to have the official target in front.
         INCODEX_PERMISSION_HOST_DISABLE_PRESENTATION: "1",
+        ...extraEnv,
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -118,6 +120,28 @@ test.skipIf(process.platform !== "darwin")("invalid launch arguments exit nonzer
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain("--nonce HEX32");
   }
+});
+
+test.skipIf(process.platform !== "darwin")("locale request reads the target bundle without presenting a window", async () => {
+  const bundle = join(host!.directory, "LocaleFixture.app");
+  mkdirSync(join(bundle, "Contents", "Resources", "fr.lproj"), { recursive: true });
+  writeFileSync(join(bundle, "Contents", "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.openai.codex</string>
+<key>CFBundleDevelopmentRegion</key><string>fr</string>
+<key>CFBundleExecutable</key><string>ChatGPT</string>
+</dict></plist>`);
+  const result = await runHost(host!.executable, stdin => {
+    stdin.end(
+      line({ nonce: nonce(), type: "app-locale-request" }) +
+      line({ nonce: nonce(), type: "close" }),
+    );
+  }, 3_000, { INCODEX_PERMISSION_HOST_TARGET_BUNDLE: bundle });
+  const events = result.stdout.trim().split("\n").map(value => JSON.parse(value));
+  expect(events).toEqual([{ nonce: nonce(), type: "app-locale", locale: "fr" }]);
+  expect(result.code).toBe(0);
+  expect(result.stdout).not.toContain('"type":"ready"');
 });
 
 test.skipIf(process.platform !== "darwin")("the presentation deadline also bounds waiting for configure", async () => {
