@@ -2049,7 +2049,7 @@ describe("native Accessibility setup adapter", () => {
       await settleNativeAsync();
       expect(retries).toBe(1);
       expect(handoffs).toHaveLength(2);
-      expect(swift!.calls.filter(call => call.selector === "snapshotPermissionCardWithScale:")).toHaveLength(4);
+      expect(swift!.calls.filter(call => call.selector === "snapshotPermissionCardWithScale:")).toHaveLength(3);
     } finally { api.close(); }
   });
 

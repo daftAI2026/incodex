@@ -196,7 +196,16 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
     card.setHidden$(show);
   }
   function captureSource() {
-    const image = initialView.snapshotPermissionCardWithScale$(Number(initial.backingScaleFactor()));
+    const scale = Number(initial.backingScaleFactor());
+    let image;
+    try { image = initialView.snapshotPermissionCardWithScale$(scale); } catch { image = null; }
+    if (!image) {
+      // ImageRenderer may not have produced pixels on the first request after
+      // a SwiftUI content update. Flush the existing view and retry that same
+      // foreground provider before allowing a no-flight fallback.
+      initialView.displayIfNeeded();
+      image = initialView.snapshotPermissionCardWithScale$(scale);
+    }
     if (!image) throw new Error("Permission card foreground snapshot unavailable");
     return { frame: initial.convertRectToScreen$(card.convertRect$toView$(card.bounds(), null)),
       image, radius: 24 };
