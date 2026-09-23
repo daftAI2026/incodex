@@ -3116,6 +3116,38 @@ describe("native Accessibility setup adapter", () => {
     }
   });
 
+  test("enabling reduced motion during a pulse skips its animated return", async () => {
+    const { api, bridge, swift } = await makeHarness();
+    const clock = installArrowClock();
+    try {
+      api.setState("awaiting-user");
+      await settleNativeAsync();
+      const pulse = clock.active().find((timer) => timer.delay === 500);
+      if (!pulse) throw new Error("initial arrow pulse timer is missing");
+      clock.fire(pulse);
+      const animatedBeforeChange = swift?.arrowViews[0].calls.filter(
+        ({ selector }) => selector === "animateToScaleX:scaleY:",
+      ).length ?? 0;
+      expect(animatedBeforeChange).toBe(1);
+
+      const workspace = bridge.objects.find((value) => value.type === "NSWorkspace");
+      if (!workspace) throw new Error("shared workspace is missing");
+      workspace.values.set("reduceMotion", true);
+      const returnTimer = clock.active().find((timer) => timer.delay === 250);
+      if (!returnTimer) throw new Error("arrow return timer is missing");
+      clock.fire(returnTimer);
+
+      expect(swift?.arrowViews[0].calls.filter(
+        ({ selector }) => selector === "animateToScaleX:scaleY:",
+      )).toHaveLength(animatedBeforeChange);
+      expect(swift?.arrowViews[0].calls.at(-1)).toMatchObject({ selector: "resetToIdentity", args: [] });
+      expect(clock.active()).toHaveLength(0);
+    } finally {
+      api.close();
+      clock.restore();
+    }
+  });
+
   test("close drains arrow timers and stale callbacks cannot revive a pulse", async () => {
     const harness = await makeHarness();
     const { api, swift } = harness;

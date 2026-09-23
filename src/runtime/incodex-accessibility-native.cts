@@ -256,6 +256,9 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
     animateArrow(1.15, 1.6);
     returnTimer = setTimeout(() => {
       if (closed || dragging) return;
+      // The preference can change while the stretch spring is in flight.
+      // Do not start a second animation after Reduce Motion becomes active.
+      if (reducedMotion()) { resetArrow(); return; }
       animateArrow(1, 1); scheduleArrow(4000);
     }, 250);
   }
