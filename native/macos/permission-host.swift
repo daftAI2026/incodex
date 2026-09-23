@@ -9,6 +9,7 @@ private let permissionHostPresentationTimeout: TimeInterval = 0.15
 private let permissionHostPresentationTimeout: TimeInterval = 5 * 60
 #endif
 private let officialCodexBundleIdentifier = "com.openai.codex"
+private let officialCodexAppPath = "/Applications/ChatGPT.app"
 private let officialCodexExecutable = "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT"
 
 /// The entry point deliberately owns protocol/process lifetime only. The
@@ -62,6 +63,7 @@ private final class PermissionHostProcess {
     private let nonce: String
     private var input = Data()
     private var configured = false
+    private var reportedLocale = false
     private var ready = false
     private var finished = false
     private var presenter: PermissionHostPresenter?
@@ -139,6 +141,7 @@ private final class PermissionHostProcess {
         }
 
         switch type {
+        case "app-locale-request": handleAppLocaleRequest(message)
         case "configure": handleConfigure(message)
         case "state": handleState(message)
         case "close":
@@ -150,6 +153,29 @@ private final class PermissionHostProcess {
         default:
             protocolError("permission host message type is unsupported")
         }
+    }
+
+    private func handleAppLocaleRequest(_ message: [String: Any]) {
+        let targetBundlePath: String
+#if INCODEX_PERMISSION_HOST_TESTING
+        targetBundlePath = ProcessInfo.processInfo.environment["INCODEX_PERMISSION_HOST_TARGET_BUNDLE"]
+            ?? officialCodexAppPath
+#else
+        targetBundlePath = officialCodexAppPath
+#endif
+        guard !configured, !reportedLocale,
+              message.keys.allSatisfy({ $0 == "nonce" || $0 == "type" }),
+              let bundle = Bundle(path: targetBundlePath),
+              bundle.bundleIdentifier == officialCodexBundleIdentifier,
+              let locale = bundle.preferredLocalizations.first,
+              !locale.isEmpty else {
+            protocolError("target app preferred localization is unavailable")
+            return
+        }
+        reportedLocale = true
+        // The CLI chooses copy only after receiving the target bundle's
+        // preferred localization; this is not the helper process's locale.
+        send(type: "app-locale", locale: locale)
     }
 
     private func handleConfigure(_ message: [String: Any]) {
@@ -246,10 +272,11 @@ private final class PermissionHostProcess {
         signalSources.append(source)
     }
 
-    private func send(type: String, message: String? = nil) {
+    private func send(type: String, message: String? = nil, locale: String? = nil) {
         guard !finished else { return }
         var object: [String: Any] = ["nonce": nonce, "type": type]
         if let message { object["message"] = String(message.prefix(512)) }
+        if let locale { object["locale"] = locale }
         guard let data = try? JSONSerialization.data(withJSONObject: object),
               data.count + 1 <= permissionHostMaxLineBytes else {
             protocolError("permission host output is too large")

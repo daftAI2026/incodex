@@ -8,9 +8,9 @@
     "x86_64"
   ],
   "sourceSha256": "06aa43ff4b7ed25dc922497b4ba06b81418fe3a77ab64cc3231e2305c65e7cde",
-  "hostSourceSha256": "18f3fee24ff35b41d98d8139c1d28f83be8fee680bfcfc10f7a56e8853c18d85",
+  "hostSourceSha256": "67adbed0085e080e97d20d7c5ff7c89ef2a1210f12eac7a9a774da723a8ed9ad",
   "files": {
     "incodex-permission-ui.dylib": "78908e57554bb13b5f5ee284ae2779f93d708122338bfe2242d2f53bec22e9da",
-    "incodex-permission-host": "d070e2f677ca85e424e723c479b852aec3c383377561125f991a465a254ef9e3"
+    "incodex-permission-host": "9ed29801b6cc0a29222fd0eaaf53e6d5a0af6f2ca10e188a17083a9edd49ebc1"
   }
 }

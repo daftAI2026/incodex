@@ -23,6 +23,9 @@ pub(crate) const HOST_EXECUTABLE_NAME: &str = "incodex-permission-host";
 const PERMISSION_COPY_NAME: &str = "incodex-permission-copy.json";
 pub(crate) const OFFICIAL_APP_PATH: &str = "/Applications/ChatGPT.app";
 pub(crate) const MAX_HOST_LINE_BYTES: usize = 64 * 1024;
+// AppKit may take longer to initialize on a cold system. This pre-configure
+// locale handshake is bounded independently from visible-window readiness.
+const HOST_LOCALE_TIMEOUT: Duration = Duration::from_secs(5);
 // Initial native-window construction may wait for AppKit to attach to the
 // restored Electron process.  This is separate from the two-minute user
 // handoff window below and must not be confused with a Settings timeout.
@@ -90,6 +93,7 @@ impl HostState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum HostEvent {
+    AppLocale(String),
     Ready,
     Allow,
     Retry,
@@ -247,6 +251,12 @@ where
     let mut ready = false;
     while Instant::now() < ready_deadline {
         match host.poll(Duration::from_millis(250))? {
+            HostEvent::AppLocale(_) => {
+                host.close();
+                return Err(
+                    "native Accessibility guide repeated its locale after configuration".into(),
+                );
+            }
             HostEvent::Ready => {
                 ready = true;
                 break;
@@ -307,6 +317,12 @@ where
             break;
         }
         match event {
+            HostEvent::AppLocale(_) => {
+                host.close();
+                return Err(
+                    "native Accessibility guide repeated its locale after configuration".into(),
+                );
+            }
             HostEvent::Ready | HostEvent::Timeout => {}
             HostEvent::Allow if !reset_performed => {
                 // The native guide only expresses user intent.  Revalidate
@@ -571,7 +587,21 @@ impl ProcessGuideHost {
             nonce,
             closed: false,
         };
-        host.send_configure(&native_guide_config(copy_context)?)?;
+        host.send_json(json!({ "nonce": host.nonce, "type": "app-locale-request" }))?;
+        let app_locale = match host.poll(HOST_LOCALE_TIMEOUT)? {
+            HostEvent::AppLocale(locale) => locale,
+            HostEvent::Error(message) => {
+                return Err(format!(
+                    "native Accessibility guide locale probe failed: {message}"
+                ))
+            }
+            other => {
+                return Err(format!(
+                    "native Accessibility guide did not report the target app locale: {other:?}"
+                ))
+            }
+        };
+        host.send_configure(&native_guide_config(copy_context, Some(&app_locale))?)?;
         Ok(host)
     }
 
@@ -776,6 +806,24 @@ fn decode_host_event(line: &[u8], nonce: &str) -> Result<HostEvent, String> {
         .and_then(Value::as_str)
         .ok_or("native Accessibility guide message type is missing")?;
     match kind {
+        "app-locale" => {
+            if object.len() != 3 {
+                return Err("native Accessibility guide locale message has extra fields".into());
+            }
+            let locale = object
+                .get("locale")
+                .and_then(Value::as_str)
+                .filter(|value| {
+                    !value.is_empty()
+                        && value.len() <= 64
+                        && value.as_bytes()[0].is_ascii_alphabetic()
+                        && value.bytes().all(|byte| {
+                            byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'
+                        })
+                })
+                .ok_or("native Accessibility guide target app locale is invalid")?;
+            Ok(HostEvent::AppLocale(locale.into()))
+        }
         "ready" => Ok(HostEvent::Ready),
         "allow" => Ok(HostEvent::Allow),
         "retry" => Ok(HostEvent::Retry),
@@ -794,7 +842,10 @@ fn decode_host_event(line: &[u8], nonce: &str) -> Result<HostEvent, String> {
     }
 }
 
-fn native_guide_config(copy_context: GuideCopyContext) -> Result<NativeGuideConfig, String> {
+fn native_guide_config(
+    copy_context: GuideCopyContext,
+    app_locale: Option<&str>,
+) -> Result<NativeGuideConfig, String> {
     let source = incodex_runtime_assets::external_files()
         .iter()
         .find_map(|(name, body)| (*name == PERMISSION_COPY_NAME).then_some(*body))
@@ -804,7 +855,7 @@ fn native_guide_config(copy_context: GuideCopyContext) -> Result<NativeGuideConf
     let catalog_object = catalog
         .as_object_mut()
         .ok_or("native Accessibility copy catalog is not an object")?;
-    let raw_locale = configured_locale().unwrap_or_else(|| "en".into());
+    let raw_locale = configured_locale(app_locale);
     let locale = resolve_catalog_locale(&raw_locale, catalog_object);
     let mut copy = catalog_object
         .remove(&locale)
@@ -852,7 +903,7 @@ fn reentry_error_body(body: &str) -> String {
     body.replace("incodex install", "incodex accessibility")
 }
 
-fn configured_locale() -> Option<String> {
+fn configured_locale(app_locale: Option<&str>) -> String {
     let source_home = locale_source_home();
     let config =
         fs::read_to_string(source_home.join(incodex_core::session_layout::CONFIG_SETTING_FILE))
@@ -860,7 +911,7 @@ fn configured_locale() -> Option<String> {
     let config_override = config
         .as_deref()
         .and_then(|content| crate::locale::parse_locale_override(content, &['"']));
-    select_locale_source(config_override.as_deref())
+    select_locale_source(config_override.as_deref(), app_locale)
 }
 
 fn locale_source_home() -> PathBuf {
@@ -882,11 +933,12 @@ fn resolve_locale_source_home(value: Option<&std::ffi::OsStr>, fallback: &Path) 
     }
 }
 
-fn select_locale_source(config_override: Option<&str>) -> Option<String> {
+fn select_locale_source(config_override: Option<&str>, app_locale: Option<&str>) -> String {
     config_override
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned)
+        .and_then(|value| (!value.trim().is_empty()).then_some(value.trim()))
+        .or_else(|| app_locale.and_then(|value| (!value.trim().is_empty()).then_some(value.trim())))
+        .unwrap_or("en")
+        .into()
 }
 
 fn resolve_catalog_locale(raw: &str, catalog: &serde_json::Map<String, Value>) -> String {
