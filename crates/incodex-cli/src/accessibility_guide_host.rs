@@ -1134,6 +1134,14 @@ mod tests {
     }
 
     #[test]
+    fn native_error_copy_points_to_explicit_reentry_not_read_only_doctor() {
+        assert_eq!(
+            reentry_error_body("Run incodex install to check again."),
+            "Run incodex accessibility to check again."
+        );
+    }
+
+    #[test]
     fn native_copy_layout_direction_follows_the_canonical_rtl_locale() {
         let catalog: serde_json::Map<String, Value> = [
             ("en".into(), Value::Null),
