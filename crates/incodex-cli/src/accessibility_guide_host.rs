@@ -1146,6 +1146,25 @@ mod tests {
     }
 
     #[test]
+    fn native_guide_body_follows_verified_target_identity() {
+        let mut installed = serde_json::json!({
+            "body": "Installing Incodex changes ChatGPT.",
+            "officialBody": "This is the official ChatGPT app.",
+        });
+        choose_guide_body(installed.as_object_mut().unwrap(), GuideCopyContext::Installed)
+            .unwrap();
+        assert_eq!(installed["body"], "Installing Incodex changes ChatGPT.");
+
+        let mut official = installed.clone();
+        choose_guide_body(official.as_object_mut().unwrap(), GuideCopyContext::Official).unwrap();
+        assert_eq!(official["body"], "This is the official ChatGPT app.");
+
+        let mut missing = serde_json::json!({ "body": "Install only" });
+        assert!(choose_guide_body(missing.as_object_mut().unwrap(), GuideCopyContext::Official)
+            .is_err());
+    }
+
+    #[test]
     fn native_copy_layout_direction_follows_the_canonical_rtl_locale() {
         let catalog: serde_json::Map<String, Value> = [
             ("en".into(), Value::Null),
