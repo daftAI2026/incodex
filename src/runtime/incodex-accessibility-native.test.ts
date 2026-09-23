@@ -173,7 +173,11 @@ class FakeNative {
   snapshotPermissionCardWithScale$(scale: number): unknown {
     this.record("snapshotPermissionCardWithScale:", scale);
     const queued = this.values.get("cardForegroundSnapshots");
-    if (Array.isArray(queued) && queued.length > 0) return queued.shift();
+    if (Array.isArray(queued) && queued.length > 0) {
+      const next = queued.shift();
+      if (next instanceof Error) throw next;
+      return next;
+    }
     return this.values.get("cardForegroundSnapshot") ?? this;
   }
 
@@ -2050,6 +2054,57 @@ describe("native Accessibility setup adapter", () => {
       expect(retries).toBe(1);
       expect(handoffs).toHaveLength(2);
       expect(swift!.calls.filter(call => call.selector === "snapshotPermissionCardWithScale:")).toHaveLength(3);
+    } finally { api.close(); }
+  });
+
+  test.each(["nil", "throw"] as const)("persistent %s card snapshot failure keeps the first Allow guide usable", async (failure) => {
+    const handoffs: any[] = [];
+    const harness = await makeHarness({ onHandoff: payload => { handoffs.push(payload); } });
+    const { api, bridge, swift } = harness;
+    swift!.initialViews[0].values.set("cardForegroundSnapshots", failure === "nil"
+      ? [null, null]
+      : [new Error("snapshot unavailable"), new Error("snapshot unavailable")]);
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await settleNativeAsync();
+
+      expect(swift!.calls.filter(call => call.selector === "snapshotPermissionCardWithScale:")).toHaveLength(2);
+      expect(handoffs).toHaveLength(0);
+      expect(helperPanels(bridge).some(panel => panel.frame().size.width === 531 && panel.visible)).toBe(true);
+      expect(api.isDestroyed()).toBe(false);
+      expect(swift!.initialViews[0].values.get("content")).toEqual([
+        COPY.title, COPY.body, false, true,
+      ]);
+    } finally { api.close(); }
+  });
+
+  test("persistent snapshot failure after Back leaves retry available without submitting it", async () => {
+    let retries = 0;
+    const harness = await makeHarness({
+      onHandoff: () => ({ finished: Promise.resolve() }),
+    });
+    const { api, swift } = harness;
+    api.onRetry(() => { retries++; api.setState("awaiting-user"); });
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await settleNativeAsync();
+      performSwiftAction(harness, "later:");
+      await settleNativeAsync();
+
+      swift!.initialViews[0].values.set("cardForegroundSnapshots", [null, null]);
+      performSwiftAction(harness, "allow:");
+      await settleNativeAsync();
+      expect(retries).toBe(0);
+      expect(swift!.initialViews[0].values.get("content")).toEqual([COPY.title, COPY.body, true, false]);
+
+      performSwiftAction(harness, "allow:");
+      await settleNativeAsync();
+      expect(retries).toBe(1);
+      expect(api.isDestroyed()).toBe(false);
     } finally { api.close(); }
   });
 
