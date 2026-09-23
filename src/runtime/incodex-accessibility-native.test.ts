@@ -2342,6 +2342,33 @@ describe("native Accessibility setup adapter", () => {
     } finally { finish(); api.close(); }
   });
 
+  test("Back raises the initial window while the transparent helper is still ordered", async () => {
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    const harness = await makeHarness({ onBack: () => ({ finished, dispose() {} }) });
+    const { api, panel, bridge } = harness;
+    try {
+      performSwiftAction(harness, "allow:");
+      await expect(api.choice).resolves.toBe("repair");
+      api.setState("awaiting-user");
+      await flushNativeAsync();
+      const helper = helperPanels(bridge).find(value => value.frame().size.width === 531)!;
+      let helperAtLevelThree: { visible: boolean; alpha: unknown } | undefined;
+      const setLevel = panel.setLevel$.bind(panel);
+      panel.setLevel$ = (level: number) => {
+        if (level === 3) helperAtLevelThree = { visible: helper.visible, alpha: helper.values.get("alphaValue") };
+        setLevel(level);
+      };
+
+      performSwiftAction(harness, "later:");
+      finish();
+      await settleNativeAsync();
+      expect(helperAtLevelThree).toEqual({ visible: true, alpha: 0 });
+      expect(helper.visible).toBe(false);
+      expect(helper.destroyed).toBe(true);
+    } finally { finish(); api.close(); }
+  });
+
   test("Back makes accessory windows transparent before flight without ordering them out early", async () => {
     let finish!: () => void;
     const finished = new Promise<void>((resolve) => { finish = resolve; });
