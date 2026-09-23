@@ -121,11 +121,16 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
                 None
             )
         );
-        let permission = crate::accessibility_guide_host::run_permission_guide(&root, &app, || {
-            validate_committed_live_snapshot(&root, install_id, &app)
-                .map_err(|error| error.to_string())?;
-            verify_patched_adhoc_bundle_deep_strict(&app, None).map(|_| ())
-        });
+        let permission = crate::accessibility_guide_host::run_permission_guide(
+            &root,
+            &app,
+            crate::accessibility_guide_host::GuideCopyContext::Installed,
+            || {
+                validate_committed_live_snapshot(&root, install_id, &app)
+                    .map_err(|error| error.to_string())?;
+                verify_patched_adhoc_bundle_deep_strict(&app, None).map(|_| ())
+            },
+        );
         let state = match &permission {
             Ok(crate::accessibility_guide_host::Outcome::Granted) => "granted",
             Ok(crate::accessibility_guide_host::Outcome::Pending) => "deferred",
@@ -183,11 +188,16 @@ pub fn run_accessibility(parsed: &ParsedCli) -> Result<(), String> {
     let installed = inspect_existing_install(app, &root, &app.join(ASAR_REL))?;
     if let Some(install_id) = installed {
         let request_id = crate::accessibility_setup::request_setup(&root, app, &install_id)?;
-        let outcome = crate::accessibility_guide_host::run_permission_guide(&root, app, || {
-            validate_committed_live_snapshot(&root, &install_id, app)
-                .map_err(|error| error.to_string())?;
-            verify_patched_adhoc_bundle_deep_strict(app, None).map(|_| ())
-        });
+        let outcome = crate::accessibility_guide_host::run_permission_guide(
+            &root,
+            app,
+            crate::accessibility_guide_host::GuideCopyContext::Installed,
+            || {
+                validate_committed_live_snapshot(&root, &install_id, app)
+                    .map_err(|error| error.to_string())?;
+                verify_patched_adhoc_bundle_deep_strict(app, None).map(|_| ())
+            },
+        );
         let state = match &outcome {
             Ok(crate::accessibility_guide_host::Outcome::Granted) => "granted",
             Ok(crate::accessibility_guide_host::Outcome::Pending) => "deferred",
@@ -198,10 +208,15 @@ pub fn run_accessibility(parsed: &ParsedCli) -> Result<(), String> {
     } else {
         verify_original_vendor_bundle(app, Some(OFFICIAL_BUNDLE_IDENTIFIER), None, None)
             .map(|_| ())?;
-        let outcome = crate::accessibility_guide_host::run_permission_guide(&root, app, || {
-            verify_original_vendor_bundle(app, Some(OFFICIAL_BUNDLE_IDENTIFIER), None, None)
-                .map(|_| ())
-        });
+        let outcome = crate::accessibility_guide_host::run_permission_guide(
+            &root,
+            app,
+            crate::accessibility_guide_host::GuideCopyContext::Official,
+            || {
+                verify_original_vendor_bundle(app, Some(OFFICIAL_BUNDLE_IDENTIFIER), None, None)
+                    .map(|_| ())
+            },
+        );
         print_accessibility_reentry(outcome, "official")
     }
 }

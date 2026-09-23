@@ -47,6 +47,12 @@ pub(crate) enum Outcome {
     Pending,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GuideCopyContext {
+    Installed,
+    Official,
+}
+
 struct NativeGuideConfig {
     copy: Value,
     layout_direction: &'static str,
@@ -107,8 +113,9 @@ pub(crate) trait GuideHostFactory {
     fn start(&mut self, root: &Path, app: &Path) -> Result<Box<dyn GuideHost>, String>;
 }
 
-#[derive(Default)]
-pub(crate) struct ProcessGuideFactory;
+pub(crate) struct ProcessGuideFactory {
+    copy_context: GuideCopyContext,
+}
 
 impl GuideHostFactory for ProcessGuideFactory {
     fn start(&mut self, root: &Path, app: &Path) -> Result<Box<dyn GuideHost>, String> {
@@ -121,7 +128,7 @@ impl GuideHostFactory for ProcessGuideFactory {
                 OFFICIAL_APP_PATH
             ));
         }
-        Ok(Box::new(ProcessGuideHost::spawn(root)?))
+        Ok(Box::new(ProcessGuideHost::spawn(root, self.copy_context)?))
     }
 }
 
@@ -133,13 +140,14 @@ impl GuideHostFactory for ProcessGuideFactory {
 pub(crate) fn run_permission_guide<F>(
     root: &Path,
     app: &Path,
+    copy_context: GuideCopyContext,
     verify_target: F,
 ) -> Result<Outcome, String>
 where
     F: FnMut() -> Result<(), String>,
 {
     let mut ops = SystemGuideOps { app };
-    let mut factory = ProcessGuideFactory;
+    let mut factory = ProcessGuideFactory { copy_context };
     let mut verify_target = crate::accessibility_target::verifier(
         app,
         supports_permission_continuity(app),
@@ -504,7 +512,7 @@ enum ReaderEvent {
 }
 
 impl ProcessGuideHost {
-    fn spawn(root: &Path) -> Result<Self, String> {
+    fn spawn(root: &Path, copy_context: GuideCopyContext) -> Result<Self, String> {
         let executable = verified_native_host_path(root)?;
         let nonce = new_nonce()?;
 
@@ -563,7 +571,7 @@ impl ProcessGuideHost {
             nonce,
             closed: false,
         };
-        host.send_configure(&native_guide_config()?)?;
+        host.send_configure(&native_guide_config(copy_context)?)?;
         Ok(host)
     }
 
@@ -786,7 +794,7 @@ fn decode_host_event(line: &[u8], nonce: &str) -> Result<HostEvent, String> {
     }
 }
 
-fn native_guide_config() -> Result<NativeGuideConfig, String> {
+fn native_guide_config(copy_context: GuideCopyContext) -> Result<NativeGuideConfig, String> {
     let source = incodex_runtime_assets::external_files()
         .iter()
         .find_map(|(name, body)| (*name == PERMISSION_COPY_NAME).then_some(*body))
@@ -804,9 +812,7 @@ fn native_guide_config() -> Result<NativeGuideConfig, String> {
     let copy_object = copy
         .as_object_mut()
         .ok_or("native Accessibility locale copy is not an object")?;
-    if let Some(added_title) = copy_object.get("addedTitle").cloned() {
-        copy_object.insert("body".into(), added_title);
-    }
+    choose_guide_body(copy_object, copy_context)?;
     if let Some(error_body) = copy_object.get("errorBody").and_then(Value::as_str) {
         copy_object.insert(
             "errorBody".into(),
@@ -822,6 +828,24 @@ fn native_guide_config() -> Result<NativeGuideConfig, String> {
         copy,
         layout_direction,
     })
+}
+
+fn choose_guide_body(
+    copy: &mut serde_json::Map<String, Value>,
+    context: GuideCopyContext,
+) -> Result<(), String> {
+    let key = match context {
+        GuideCopyContext::Installed => "body",
+        GuideCopyContext::Official => "officialBody",
+    };
+    let body = copy
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|body| !body.trim().is_empty())
+        .ok_or_else(|| format!("native Accessibility copy is missing {key}"))?
+        .to_owned();
+    copy.insert("body".into(), Value::String(body));
+    Ok(())
 }
 
 fn reentry_error_body(body: &str) -> String {
@@ -1151,17 +1175,55 @@ mod tests {
             "body": "Installing Incodex changes ChatGPT.",
             "officialBody": "This is the official ChatGPT app.",
         });
-        choose_guide_body(installed.as_object_mut().unwrap(), GuideCopyContext::Installed)
-            .unwrap();
+        choose_guide_body(
+            installed.as_object_mut().unwrap(),
+            GuideCopyContext::Installed,
+        )
+        .unwrap();
         assert_eq!(installed["body"], "Installing Incodex changes ChatGPT.");
 
         let mut official = installed.clone();
-        choose_guide_body(official.as_object_mut().unwrap(), GuideCopyContext::Official).unwrap();
+        choose_guide_body(
+            official.as_object_mut().unwrap(),
+            GuideCopyContext::Official,
+        )
+        .unwrap();
         assert_eq!(official["body"], "This is the official ChatGPT app.");
 
         let mut missing = serde_json::json!({ "body": "Install only" });
-        assert!(choose_guide_body(missing.as_object_mut().unwrap(), GuideCopyContext::Official)
-            .is_err());
+        assert!(
+            choose_guide_body(missing.as_object_mut().unwrap(), GuideCopyContext::Official)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn embedded_native_copy_has_both_reasons_for_all_65_locales() {
+        let source = incodex_runtime_assets::external_files()
+            .iter()
+            .find_map(|(name, body)| (*name == PERMISSION_COPY_NAME).then_some(*body))
+            .expect("embedded permission catalog");
+        let catalog: serde_json::Map<String, Value> = serde_json::from_str(source).unwrap();
+        assert_eq!(catalog.len(), 65);
+        for (locale, entry) in catalog {
+            let install = entry["body"].as_str().expect("localized install reason");
+            let official = entry["officialBody"]
+                .as_str()
+                .expect("localized official reason");
+            let instruction = entry["addedTitle"].as_str().expect("instruction");
+            assert!(!install.trim().is_empty(), "{locale}");
+            assert!(!official.trim().is_empty(), "{locale}");
+            assert!(official.contains("ChatGPT"), "{locale}");
+            assert_ne!(install, official, "{locale}");
+            assert_ne!(install, instruction, "{locale}");
+
+            let mut installed = entry.as_object().unwrap().clone();
+            choose_guide_body(&mut installed, GuideCopyContext::Installed).unwrap();
+            assert_eq!(installed["body"], install, "{locale}");
+            let mut restored = entry.as_object().unwrap().clone();
+            choose_guide_body(&mut restored, GuideCopyContext::Official).unwrap();
+            assert_eq!(restored["body"], official, "{locale}");
+        }
     }
 
     #[test]

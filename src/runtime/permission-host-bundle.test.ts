@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { RUNTIME_EXTERNAL_ARTIFACT_NAMES } from "../runtime-manifest.ts";
+import { sharedPermissionCopy } from "../permission-shared-copy.ts";
 import { ACCESSIBILITY_SETUP_COPY } from "./incognito-copy.ts";
 
 test("native and compatibility hosts share one verified permission copy catalog", () => {
@@ -10,7 +11,7 @@ test("native and compatibility hosts share one verified permission copy catalog"
   const bytes = readFileSync(new URL("../../dist/incodex-permission-copy.json", import.meta.url));
   const manifest = JSON.parse(readFileSync(new URL("../../dist/runtime-manifest.json", import.meta.url), "utf8"));
   expect(manifest.files["incodex-permission-copy.json"]).toBe(createHash("sha256").update(bytes).digest("hex"));
-  expect(JSON.parse(bytes.toString())).toEqual(ACCESSIBILITY_SETUP_COPY);
+  expect(JSON.parse(bytes.toString())).toEqual(sharedPermissionCopy(ACCESSIBILITY_SETUP_COPY));
 });
 
 test("the compatibility host references shared permission UI and copy assets", () => {

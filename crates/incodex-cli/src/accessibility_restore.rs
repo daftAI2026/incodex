@@ -4,7 +4,7 @@
 //! wrapper supplies the official-vendor verifier; install uses the same loop
 //! with its own already-validated target verifier.
 
-use crate::accessibility_guide_host::{run_permission_guide, Outcome};
+use crate::accessibility_guide_host::{run_permission_guide, GuideCopyContext, Outcome};
 
 pub(crate) fn finish_uninstall(root: &std::path::Path, app: &std::path::Path) {
     use incodex_core::{format_kv, format_ok, format_warn};
@@ -19,7 +19,7 @@ pub(crate) fn finish_uninstall(root: &std::path::Path, app: &std::path::Path) {
     let result = (|| {
         let _lock =
             incodex_transaction::acquire_target_lock(root, app, "uninstall-accessibility", None)?;
-        run_permission_guide(root, app, || {
+        run_permission_guide(root, app, GuideCopyContext::Official, || {
             incodex_macos::verify_original_vendor_bundle(
                 app,
                 Some(incodex_macos::OFFICIAL_BUNDLE_IDENTIFIER),

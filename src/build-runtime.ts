@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { minify } from "terser";
 import { ACCESSIBILITY_SETUP_COPY } from "./runtime/incognito-copy.ts";
+import { sharedPermissionCopy } from "./permission-shared-copy.ts";
 import {
   RUNTIME_ARTIFACT_NAMES,
   RUNTIME_EXTERNAL_ARTIFACT_NAMES,
@@ -15,7 +16,7 @@ import {
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = join(root, "dist");
 mkdirSync(outDir, { recursive: true });
-writeFileSync(join(outDir, "incodex-permission-copy.json"), `${JSON.stringify(ACCESSIBILITY_SETUP_COPY)}\n`);
+writeFileSync(join(outDir, "incodex-permission-copy.json"), `${JSON.stringify(sharedPermissionCopy(ACCESSIBILITY_SETUP_COPY))}\n`);
 
 const hatGlassesSvg = readFileSync(join(root, "assets/hat-glasses.svg"), "utf8").trim();
 const circleXSvg = readFileSync(join(root, "assets/circle-x.svg"), "utf8").trim();
