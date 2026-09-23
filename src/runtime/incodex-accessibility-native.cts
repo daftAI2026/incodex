@@ -445,6 +445,9 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
       fallbackToInitial();
       return;
     }
+    // The reference retires the already-transparent arrow while the reverse
+    // replica is moving, but keeps the helper ordered until the initial rises.
+    try { arrowPanel?.orderOut$(null); } catch { fallbackToInitial(); return; }
     flight = active;
     const finish = () => {
       if (closed || token !== returnSequence || flight !== active) return;
