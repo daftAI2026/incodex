@@ -238,6 +238,13 @@ mod tests {
     }
 
     #[test]
+    fn accessibility_is_an_explicit_reentry_command() {
+        let parsed = parse_cli(&args(&["accessibility"])).unwrap();
+        assert_eq!(parsed.command.as_str(), "accessibility");
+        assert!(!parsed.live);
+    }
+
+    #[test]
     fn unknown_flags_fail_closed() {
         assert!(parse_cli(&args(&["status", "--please"]))
             .unwrap_err()
