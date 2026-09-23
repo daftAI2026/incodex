@@ -1057,6 +1057,27 @@ mod tests {
     }
 
     #[test]
+    fn native_host_reports_the_target_app_locale_before_copy_is_selected() {
+        assert_eq!(
+            decode_host_event(
+                br#"{"nonce":"abc","type":"app-locale","locale":"ar-SA"}"#,
+                "abc",
+            ),
+            Ok(HostEvent::AppLocale("ar-SA".into()))
+        );
+        assert!(decode_host_event(
+            br#"{"nonce":"wrong","type":"app-locale","locale":"ar-SA"}"#,
+            "abc",
+        )
+        .is_err());
+        assert!(decode_host_event(
+            br#"{"nonce":"abc","type":"app-locale","locale":"../../wrong"}"#,
+            "abc",
+        )
+        .is_err());
+    }
+
+    #[test]
     fn rejects_oversized_transport_lines_without_parsing_them() {
         let (sender, receiver) = mpsc::sync_channel(2);
         let oversized = vec![b'x'; MAX_HOST_LINE_BYTES + 1];
@@ -1263,13 +1284,14 @@ mod tests {
 
     #[test]
     fn configured_locale_prefers_a_nonempty_config_override() {
-        assert_eq!(select_locale_source(Some("fr-FR")), Some("fr-FR".into()));
+        assert_eq!(select_locale_source(Some("fr-FR"), Some("ar-SA")), "fr-FR");
     }
 
     #[test]
-    fn configured_locale_falls_back_to_catalog_default_when_override_is_empty() {
-        assert_eq!(select_locale_source(Some("  ")), None);
-        assert_eq!(select_locale_source(None), None);
+    fn configured_locale_falls_back_to_the_target_app_before_english() {
+        assert_eq!(select_locale_source(Some("  "), Some("ar-SA")), "ar-SA");
+        assert_eq!(select_locale_source(None, Some("zh-Hant-HK")), "zh-Hant-HK");
+        assert_eq!(select_locale_source(None, None), "en");
     }
 
     #[test]
