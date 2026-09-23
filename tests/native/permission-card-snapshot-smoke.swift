@@ -82,6 +82,28 @@ private func redPixelCount(_ image: NSImage, rect: NSRect) -> Int {
     return count
 }
 
+private func bluePixelCount(_ image: NSImage, rect: NSRect) -> Int {
+    let rep = bitmapRep(image)
+    let scaleX = CGFloat(rep.pixelsWide) / image.size.width
+    let scaleY = CGFloat(rep.pixelsHigh) / image.size.height
+    let minX = max(0, Int(floor(rect.minX * scaleX)))
+    let maxX = min(rep.pixelsWide, Int(ceil(rect.maxX * scaleX)))
+    let minY = max(0, Int(floor(rect.minY * scaleY)))
+    let maxY = min(rep.pixelsHigh, Int(ceil(rect.maxY * scaleY)))
+    guard minX < maxX, minY < maxY else { return 0 }
+    var count = 0
+    for y in minY..<maxY {
+        for x in minX..<maxX {
+            guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+            if color.alphaComponent > 0.4 && color.blueComponent > color.redComponent + 0.2
+                && color.blueComponent > color.greenComponent + 0.05 {
+                count += 1
+            }
+        }
+    }
+    return count
+}
+
 private func makeIcon() -> NSImage {
     let image = NSImage(size: NSSize(width: 64, height: 64))
     image.lockFocus()
@@ -143,6 +165,10 @@ private func assertCardForeground(_ image: NSImage) {
     precondition(redPixelCount(image, rect: iconRect) > 500, "permission icon was omitted from card foreground")
     precondition(alphaPixelCount(image, rect: textRect, threshold: 0.1) > 40, "permission title/description was omitted")
     precondition(alphaPixelCount(image, rect: buttonRect, threshold: 0.1) > 40, "Allow control was omitted from card foreground")
+    precondition(bluePixelCount(image, rect: buttonRect) > 100,
+                 "Allow snapshot lost its blue default-button fill")
+    precondition(redPixelCount(image, rect: buttonRect) == 0,
+                 "Allow snapshot contains a forbidden-operation mark")
 }
 
 @main

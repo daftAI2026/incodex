@@ -20,6 +20,18 @@ test("initial permission page measures naturally with a bottom-trailing Skip ove
   expect(root).not.toContain("Spacer()");
 });
 
+test("Allow keeps the original SwiftUI default style and snapshots its real foreground through hosting", () => {
+  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const card = source.slice(source.indexOf("private struct PermissionCardRoot:"), source.indexOf("@objc(IncodexPermissionInitialView)"));
+  const snapshot = source.slice(source.indexOf("public func snapshotPermissionCard(scale:"), source.indexOf("@objc public var preferredContentSize:"));
+  expect(card).toContain(".buttonStyle(DefaultButtonStyle())");
+  expect(card).toContain(".clipShape(Capsule(style: .continuous))");
+  expect(card).toContain(".frame(minWidth: 62)");
+  expect(snapshot).toContain("PermissionCardRoot(state: state).foreground");
+  expect(snapshot).toContain("useHostingView: true");
+  expect(snapshot).not.toContain("permissionHostCachedImage");
+});
+
 test("helper foreground composes bottom-aligned stacks and semantic padding", () => {
   const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
   const start = source.indexOf("private struct PermissionHelperForeground");
@@ -114,7 +126,7 @@ test.skipIf(process.platform !== "darwin").each(["current", "forced-hosting-comp
       // Exercise the macOS 12 rendering path on the current OS without adding
       // a product switch or windows. This does not claim an actual macOS 12 run.
       const source = readFileSync(nativeSource, "utf8");
-      const availability = "if #available(macOS 13.0, *) {";
+      const availability = "if #available(macOS 13.0, *), !useHostingView {";
       expect(source.split(availability)).toHaveLength(2);
       nativeSource = join(directory, "permission-views.swift");
       writeFileSync(nativeSource, source.replace(availability, "if #available(macOS 13.0, *), false {"));
@@ -145,7 +157,7 @@ test.skipIf(process.platform !== "darwin").each(["current", "forced-hosting-comp
       // Exercise the macOS 12 NSHostingView fallback on the current OS. This
       // is a test-only source copy; it does not add a product compatibility flag.
       const source = readFileSync(nativeSource, "utf8");
-      const availability = "if #available(macOS 13.0, *) {";
+      const availability = "if #available(macOS 13.0, *), !useHostingView {";
       expect(source.split(availability)).toHaveLength(2);
       nativeSource = join(directory, "permission-views.swift");
       writeFileSync(nativeSource, source.replace(availability, "if #available(macOS 13.0, *), false {"));

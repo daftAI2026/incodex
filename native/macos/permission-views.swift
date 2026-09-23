@@ -6,17 +6,20 @@ import SwiftUI
 // screenshot of the live material and shadow shell.
 @MainActor
 private func permissionForegroundSnapshot<Content: View>(
-    content: Content, size: NSSize, scale: CGFloat, appearance: NSAppearance
+    content: Content, size: NSSize, scale: CGFloat, appearance: NSAppearance,
+    useHostingView: Bool = false
 ) -> NSImage? {
     guard scale.isFinite, scale > 0, scale <= 8 else { return nil }
-    if #available(macOS 13.0, *) {
+    if #available(macOS 13.0, *), !useHostingView {
         let renderer = ImageRenderer(content: content)
         renderer.proposedSize = ProposedViewSize(size)
         renderer.scale = scale
         return renderer.nsImage
     }
 
-    // macOS 12: render the same foreground offscreen without a window.
+    // The permission-card Button renders a forbidden-operation glyph when
+    // ImageRenderer runs inside the interactive host. Use the same SwiftUI
+    // foreground in an offscreen NSHostingView instead; this also covers 12.x.
     let snapshotHost = NSHostingView(rootView: content)
     snapshotHost.appearance = appearance
     snapshotHost.frame = NSRect(origin: .zero, size: size)
@@ -356,7 +359,7 @@ private struct PermissionCardRoot: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Button(state.allow) { state.send("allow:") }
-                .buttonStyle(.automatic)
+                .buttonStyle(DefaultButtonStyle())
                 .keyboardShortcut(.defaultAction)
                 .font(.system(size: 13))
                 .clipShape(Capsule(style: .continuous))
@@ -514,7 +517,8 @@ public final class IncodexPermissionInitialView: NSView {
             .environment(\.layoutDirection, state.layoutDirection)
             .environment(\.colorScheme, colorScheme)
         return permissionForegroundSnapshot(
-            content: foreground, size: cardHost.bounds.size, scale: scale, appearance: effectiveAppearance
+            content: foreground, size: cardHost.bounds.size, scale: scale,
+            appearance: effectiveAppearance, useHostingView: true
         )
     }
 
