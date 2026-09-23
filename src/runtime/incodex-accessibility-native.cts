@@ -379,13 +379,17 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
       panel.setDelegate$(null); panel.orderOut$(null); panel.close();
     }
   }
-  function restoreInitialPage(enableRetry) {
+  function restoreInitialPage(enableRetry, raiseBeforeHelperDisposal = false) {
     if (closed) return;
     clearInterval(tracking); tracking = null; stopArrow(); stopBackFlightTimer();
+    // On a completed Back, the reference raises the initial window while the
+    // transparent helper still exists, then retires the accessory windows.
+    if (raiseBeforeHelperDisposal) initial.setLevel$(3);
     disposeHelper(); showSettingsPlaceholder(false); returning = false; state = "pending"; retryReady = Boolean(enableRetry);
     setInitialContent({ title: text("title"), body: text("body"), allowEnabled: Boolean(enableRetry), settingsPlaceholder: false });
     fitInitialBody();
-    initial.setLevel$(3); activateApp({ steal: true }); initial.makeKeyAndOrderFront$(null);
+    if (!raiseBeforeHelperDisposal) initial.setLevel$(3);
+    activateApp({ steal: true }); initial.makeKeyAndOrderFront$(null);
   }
   function fallbackToInitial() {
     returnSequence++;
@@ -445,7 +449,7 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
     const finish = () => {
       if (closed || token !== returnSequence || flight !== active) return;
       try { active.dispose?.(); } catch {}
-      flight = null; stopBackFlightTimer(); restoreInitialPage(true);
+      flight = null; stopBackFlightTimer(); restoreInitialPage(true, true);
     };
     backFlightTimer = setTimeout(() => {
       if (token === returnSequence && flight === active) fallbackToInitial();
