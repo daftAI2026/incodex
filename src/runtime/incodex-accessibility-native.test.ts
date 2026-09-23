@@ -2369,7 +2369,7 @@ describe("native Accessibility setup adapter", () => {
     } finally { finish(); api.close(); }
   });
 
-  test("Back makes accessory windows transparent before flight without ordering them out early", async () => {
+  test("Back retires the transparent arrow during flight but keeps the helper until landing", async () => {
     let finish!: () => void;
     const finished = new Promise<void>((resolve) => { finish = resolve; });
     let atStart: any;
@@ -2388,7 +2388,10 @@ describe("native Accessibility setup adapter", () => {
       await settleNativeAsync();
       expect(atStart).toEqual([{ visible: true, alpha: 0 }, { visible: true, alpha: 0 }]);
       expect(harness.swift!.helperViews[0].values.get("alphaValue")).toBe(0);
-      expect(accessories.every(p => p.visible && !p.destroyed)).toBe(true);
+      expect(accessories[0].visible).toBe(true);
+      expect(accessories[0].destroyed).toBe(false);
+      expect(accessories[1].visible).toBe(false);
+      expect(accessories[1].destroyed).toBe(false);
       finish();
       await settleNativeAsync();
       expect(accessories.every(p => !p.visible && p.destroyed)).toBe(true);
