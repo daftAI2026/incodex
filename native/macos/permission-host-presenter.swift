@@ -154,6 +154,9 @@ private final class PermissionHostDragView: NSView, NSDraggingSource, NSPasteboa
 
     override var isFlipped: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func shouldDelayWindowOrdering(for event: NSEvent) -> Bool {
+        owner?.canStartDrag ?? false
+    }
 
     override func mouseDown(with event: NSEvent) {
         guard let owner, owner.canStartDrag, let rowView else { return }
@@ -163,6 +166,10 @@ private final class PermissionHostDragView: NSView, NSDraggingSource, NSPasteboa
         let frame = rowView.convert(rowView.bounds, to: self)
         draggingItem.setDraggingFrame(frame, contents: permissionHostCachedImage(rowView))
         let session = beginDraggingSession(with: [draggingItem], event: event, source: self)
+        // Complete the mouse-down ordering delay after starting the native
+        // drag. Otherwise AppKit may activate the host and lift its initial
+        // window over System Settings while the pointer is still held down.
+        NSApplication.shared.preventWindowOrdering()
         owner.recordDragSession(session)
         session.animatesToStartingPositionsOnCancelOrFail = true
     }

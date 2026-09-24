@@ -74,6 +74,10 @@ test.skipIf(process.platform !== "darwin")(
     expect((loadCommands.output.match(/minos\s+12\.0/g) ?? []).length).toBeGreaterThanOrEqual(2);
     const signature = command("codesign", ["--verify", "--strict", "--", hostPath]);
     expect(signature.status, signature.output).toBe(0);
+    const selectors = command("strings", [hostPath]);
+    expect(selectors.status, selectors.output).toBe(0);
+    expect(selectors.output).toContain("shouldDelayWindowOrderingForEvent:");
+    expect(selectors.output).toContain("preventWindowOrdering");
   },
 );
 

@@ -41,6 +41,15 @@ test("unshipped Swift accessory and drag input preserve the proven window policy
   ]) expect(presenter.includes(contract)).toBe(true);
 });
 
+test("Swift helper drag suppresses mouse-down ordering once the native drag starts", () => {
+  const drag = presenter.split("private final class PermissionHostDragView:")[1]?.split("public final class PermissionHostPresenter:")[0] ?? "";
+  expect(drag).toContain("override func shouldDelayWindowOrdering(for event: NSEvent) -> Bool");
+  expect(drag).toContain("owner?.canStartDrag ?? false");
+  const mouseDown = drag.split("override func mouseDown(with event: NSEvent) {")[1]?.split("func pasteboard(")[0] ?? "";
+  expect(mouseDown).toContain("NSApplication.shared.preventWindowOrdering()");
+  expect(mouseDown.indexOf("NSApplication.shared.preventWindowOrdering()")).toBeGreaterThan(mouseDown.indexOf("beginDraggingSession(with:"));
+});
+
 test("unshipped Swift Back keeps the placeholder and ordered helper through the reverse flight", () => {
   const back = presenter.split("private func startBackFlight() {")[1]?.split("private func finishBackFlight")[0] ?? "";
   const restore = presenter.split("private func restoreInitialPage(")[1]?.split("private func disposeActiveFlight")[0] ?? "";
