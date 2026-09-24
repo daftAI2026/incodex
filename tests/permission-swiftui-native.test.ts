@@ -24,7 +24,7 @@ test("Allow uses one live SwiftUI control style for the card and foreground snap
   const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
   const card = source.slice(source.indexOf("private struct PermissionCardRoot:"), source.indexOf("@objc(IncodexPermissionInitialView)"));
   const snapshot = source.slice(source.indexOf("public func snapshotPermissionCard(scale:"), source.indexOf("@objc public var preferredContentSize:"));
-  expect(card).toContain(".buttonStyle(PermissionAllowButtonStyle(state: state))");
+  expect(card).toContain(".buttonStyle(PermissionAllowButtonStyle())");
   expect(card).toContain("Text(state.allow)");
   expect(card).not.toContain(".buttonStyle(DefaultButtonStyle())");
   expect(card).toContain(".clipShape(Capsule(style: .continuous))");
@@ -55,11 +55,13 @@ test("Allow draws the SwiftUI capsule at its target height and keeps natural lab
   expect(style).toContain("Color(nsColor: .systemFill)");
   expect(style).not.toContain("Color(nsColor: .tertiarySystemFill)");
   expect(style).toContain("guard isEnabled else { return Color(nsColor: .controlColor) }");
+  expect(style).toContain(".brightness(isPressed ? -0.115 : 0)");
+  expect(style).not.toContain(".onHover");
   expect(style).not.toContain(".frame(width:");
   const allow = card.slice(start, end);
   expect(allow).toContain("Text(state.allow)");
   expect(allow).not.toContain(".font(.system(size: 13))");
-  expect(allow).toContain(".buttonStyle(PermissionAllowButtonStyle(state: state))");
+  expect(allow).toContain(".buttonStyle(PermissionAllowButtonStyle())");
   expect(allow).toContain(".keyboardShortcut(.defaultAction)");
   expect(allow).toContain(".clipShape(Capsule(style: .continuous))");
   expect(allow).toContain(".frame(minWidth: 62)");
