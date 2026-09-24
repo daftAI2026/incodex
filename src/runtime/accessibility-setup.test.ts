@@ -696,6 +696,9 @@ describe("single-window Accessibility setup", () => {
   test("opens Settings in the background before native focus preparation", async () => {
     const h = makeHarness({ probes: [false, false], dialogResponses: [0] });
     await h.controller.run();
+    expect(h.shell.opened).toEqual([
+      "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility",
+    ]);
     expect(h.shell.openOptions).toEqual([{ activate: false }]);
     h.panel.close();
   });

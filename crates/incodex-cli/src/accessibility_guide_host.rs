@@ -42,7 +42,7 @@ const INITIAL_PROBE_ATTEMPTS: usize = 120;
 const INITIAL_PROBE_INTERVAL: Duration = Duration::from_millis(250);
 const POST_ALLOW_PROBE_INTERVAL: Duration = Duration::from_millis(750);
 const ACCESSIBILITY_SETTINGS_URL: &str =
-    "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
+    "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Outcome {
@@ -1322,6 +1322,10 @@ mod tests {
 
     #[test]
     fn open_settings_command_uses_background_open() {
+        assert_eq!(
+            ACCESSIBILITY_SETTINGS_URL,
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility"
+        );
         let command = open_settings_command(ACCESSIBILITY_SETTINGS_URL);
         let args: Vec<String> = command
             .get_args()

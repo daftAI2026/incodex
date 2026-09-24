@@ -28,7 +28,7 @@ const ACCESSIBILITY_MAX_MARKER_BYTES = 8 * 1024;
 const ACCESSIBILITY_PACKAGE_MAX_BYTES = 256 * 1024;
 const ACCESSIBILITY_RESET_TIMEOUT_MS = 5_000;
 const ACCESSIBILITY_SETTINGS_URL =
-  "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
+  "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility";
 // The Runtime builder replaces this token with the {en, zh-CN, zh-HK, zh-TW} table.
 const ACCESSIBILITY_COPY = "__INCODEX_ACCESSIBILITY_COPY__";
 const ACCESSIBILITY_LOCALE = "__INCODEX_ACCESSIBILITY_LOCALE__";
