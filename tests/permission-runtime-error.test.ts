@@ -191,6 +191,7 @@ test.skipIf(process.platform !== "darwin" || !runDynamic)("formal OSA UI host re
   try {
     const built = buildIsolatedFormalHost(directory);
     const settingsBefore = runningSettingsPids();
+    expect(settingsBefore.length).toBeGreaterThan(0);
     first = startHost(built.executable, built.runtimeDirectory);
     configure(first, "Allow ChatGPT to access Accessibility.", longErrorBody);
     await first.waitFor((event) => event.type === "ready");
@@ -203,8 +204,12 @@ test.skipIf(process.platform !== "darwin" || !runDynamic)("formal OSA UI host re
     // opens only the guide/helper surfaces; no permission toggle or app launch
     // is performed by the fixture.
     first.send({ type: "state", state: "awaiting-user" });
-    await delay(900);
-    const awaiting = inspect(built.axProbe, first.child.pid!, "Enable ChatGPT scripting", "", "");
+    let awaiting = inspect(built.axProbe, first.child.pid!, "Enable ChatGPT scripting", "", "");
+    for (let attempt = 0; attempt < 50 && awaiting.cgOnscreenWindowCount <= initial.cgOnscreenWindowCount; attempt++) {
+      await delay(100);
+      awaiting = inspect(built.axProbe, first.child.pid!, "Enable ChatGPT scripting", "", "");
+    }
+    expect(awaiting.cgOnscreenWindowCount).toBeGreaterThan(initial.cgOnscreenWindowCount);
 
     first.send({ type: "state", state: "error" });
     const error = await waitForAX(built.axProbe, first.child.pid!, "Permission needs attention", longErrorBody, "Allow");
@@ -217,10 +222,8 @@ test.skipIf(process.platform !== "darwin" || !runDynamic)("formal OSA UI host re
     // Error state must order out helper/flight/arrow windows and restore the
     // one accessible guide window. AppKit can retain closed offscreen rows in
     // CGWindowList, so compare on-screen rows here and report all rows below.
-    if (awaiting.cgOnscreenWindowCount > initial.cgOnscreenWindowCount) {
-      expect(afterCleanup.cgOnscreenWindowCount).toBe(initial.cgOnscreenWindowCount);
-      expect(afterCleanup.axWindowCount).toBe(initial.axWindowCount);
-    }
+    expect(afterCleanup.cgOnscreenWindowCount).toBe(initial.cgOnscreenWindowCount);
+    expect(afterCleanup.axWindowCount).toBe(initial.axWindowCount);
     const settingsAfter = runningSettingsPids();
     expect(settingsAfter).toEqual(settingsBefore);
     expect(first.events.some((event) => event.type === "allow")).toBe(false);
