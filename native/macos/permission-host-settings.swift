@@ -21,11 +21,10 @@ public struct PermissionHostSettingsFrame {
 
 /// Read-only System Settings window discovery used by the short-lived host.
 ///
-/// This intentionally follows the existing dock-menu locator: it asks
-/// LaunchServices for System Settings PIDs, then chooses the largest visible
-/// layer-zero window owned by one of those PIDs.  It does not inspect titles,
-/// accessibility elements, or user data, and it never launches or activates
-/// System Settings.
+/// Normal tracking follows the shared Runtime locator: it keeps CG's visible
+/// window order and ignores small transient Settings surfaces. A separate
+/// one-shot handoff may reveal an already-running Settings instance with no
+/// visible main window; neither path launches Settings or reads user data.
 @MainActor
 public final class SettingsLocator {
     public static let bundleIdentifier = "com.apple.systempreferences"
@@ -51,31 +50,41 @@ public final class SettingsLocator {
             return nil
         }
 
-        var best: PermissionHostSettingsFrame?
-        var bestArea: CGFloat = 0
         for window in rawWindows {
             guard let ownerPID = number(window[kCGWindowOwnerPID as String]),
                   pids.contains(pid_t(ownerPID)),
-                  number(window[kCGWindowLayer as String]) == 0,
                   let bounds = windowBounds(window[kCGWindowBounds as String]),
-                  bounds.width > 0,
-                  bounds.height > 0 else {
-                continue
-            }
-
-            let area = bounds.width * bounds.height
-            guard area.isFinite, area > bestArea,
+                  bounds.width > 600,
+                  bounds.height >= 470,
                   let rawWindowID = number(window[kCGWindowNumber as String]) else {
                 continue
             }
-            bestArea = area
-            best = PermissionHostSettingsFrame(
+            return PermissionHostSettingsFrame(
                 frame: bounds,
                 pid: pid_t(ownerPID),
                 windowID: CGWindowID(rawWindowID),
             )
         }
-        return best
+        return nil
+    }
+
+    /// Match the shared Runtime's one-shot hidden-window reveal before normal
+    /// read-only tracking. The CLI owns the actual Settings URL open request.
+    public func prepareHandoff() {
+        let applications = NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleIdentifier)
+        guard applications.count == 1, let application = applications.first,
+              application.processIdentifier > 0,
+              let windows = CGWindowListCopyWindowInfo(CGWindowListOption(rawValue: 16), kCGNullWindowID)
+                as? [[String: Any]] else { return }
+        let owned = windows.filter {
+            number($0[kCGWindowOwnerPID as String]) == Int(application.processIdentifier)
+        }
+        let visibleMain = owned.contains { window in
+            guard let bounds = windowBounds(window[kCGWindowBounds as String]) else { return false }
+            return bounds.width > 600 && bounds.height >= 470 &&
+                number(window[kCGWindowIsOnscreen as String]) == 1
+        }
+        if !owned.isEmpty && !visibleMain { _ = application.activate(options: []) }
     }
 
     private func number(_ value: Any?) -> Int? {

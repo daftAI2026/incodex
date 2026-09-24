@@ -36,7 +36,7 @@ test("losing Settings after helper presentation reports later before closing", (
 test("all migrated guide panels use immediate AppKit window creation", () => {
   const present = functionBody("public func present()", "public func setState");
   const createHelper = functionBody("private func createHelper(frame: NSRect)", "private func positionArrow");
-  const arrow = functionBody("let arrowPanel = NSPanel(", "self.helperPanel = panel");
+  const arrow = functionBody("let arrowPanel = PermissionHostArrowPanel(", "self.helperPanel = panel");
   expect(present).toContain("defer: false");
   expect(createHelper).toContain("defer: false");
   expect(arrow).toContain("defer: false");

@@ -55,7 +55,9 @@ struct PermissionHostSettingsFrame {
 
 @MainActor
 final class SettingsLocator {
+    static let bundleIdentifier = "com.apple.systempreferences"
     func locate() -> PermissionHostSettingsFrame? { nil }
+    func prepareHandoff() {}
 }
 
 @MainActor

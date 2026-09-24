@@ -116,6 +116,18 @@ private final class PermissionHostActionTarget: NSObject {
 }
 
 @MainActor
+private final class PermissionHostHelperPanel: NSPanel {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
+
+@MainActor
+private final class PermissionHostArrowPanel: NSPanel {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
+
+@MainActor
 private final class PermissionHostArrowTrackerView: NSView {
     weak var owner: PermissionHostPresenter?
 
@@ -141,6 +153,7 @@ private final class PermissionHostDragView: NSView, NSDraggingSource, NSPasteboa
     weak var rowView: NSView?
 
     override var isFlipped: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
         guard let owner, owner.canStartDrag, let rowView else { return }
@@ -150,6 +163,7 @@ private final class PermissionHostDragView: NSView, NSDraggingSource, NSPasteboa
         let frame = rowView.convert(rowView.bounds, to: self)
         draggingItem.setDraggingFrame(frame, contents: permissionHostCachedImage(rowView))
         let session = beginDraggingSession(with: [draggingItem], event: event, source: self)
+        owner.recordDragSession(session)
         session.animatesToStartingPositionsOnCancelOrFail = true
     }
 
@@ -180,13 +194,16 @@ public final class PermissionHostPresenter: NSObject {
     private let onError: (String) -> Void
     private lazy var actionTarget = PermissionHostActionTarget(owner: self)
 
-    private var initialPanel: NSPanel?
+    private var initialPanel: NSWindow?
     private var initialView: IncodexPermissionInitialView?
     private var cardView: NSView?
     private var helperPanel: NSPanel?
     private var helperView: IncodexPermissionHelperView?
     private var appRowView: NSView?
     private var dragView: PermissionHostDragView?
+    private var dragSession: NSDraggingSession?
+    private var terminalDragPanel: NSPanel?
+    private var terminalDragSession: NSDraggingSession?
     private var arrowPanel: NSPanel?
     private var arrowView: IncodexPermissionArrowView?
     private var arrowTracker: PermissionHostArrowTrackerView?
@@ -207,6 +224,7 @@ public final class PermissionHostPresenter: NSObject {
     private var returning = false
     private var dragging = false
     private var locatingAttempts = 0
+    private var forwardSequence = 0
     private var returnSequence = 0
 
     public init(
@@ -234,7 +252,7 @@ public final class PermissionHostPresenter: NSObject {
             return false
         }
         _ = NSApplication.shared
-            let panel = NSPanel(
+            let panel = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: permissionHostInitialWidth, height: 312),
                 styleMask: [.titled, .closable, .fullSizeContentView],
                 backing: .buffered,
@@ -246,8 +264,9 @@ public final class PermissionHostPresenter: NSObject {
             panel.title = ""
             panel.titleVisibility = .hidden
             panel.titlebarAppearsTransparent = true
+            panel.isMovableByWindowBackground = true
             panel.isOpaque = false
-            panel.backgroundColor = .clear
+            panel.backgroundColor = NSColor.white.withAlphaComponent(0.001)
             let delegate = PermissionHostWindowDelegate { [weak self] in self?.handleWindowClosed() }
             panel.delegate = delegate
 
@@ -297,6 +316,7 @@ public final class PermissionHostPresenter: NSObject {
             // Match the reference transition: keep the original card until
             // the same-height Settings placeholder takes its place.
         case "awaiting-user":
+            let enteringAwaitingUser = state != "awaiting-user"
             state = nextState
             initialPanel?.level = .normal
             setInitialContent(
@@ -306,6 +326,7 @@ public final class PermissionHostPresenter: NSObject {
                 settingsPlaceholder: true,
             )
             cardView?.isHidden = true
+            if enteringAwaitingUser { SettingsLocator().prepareHandoff() }
             startSettingsTracking()
         case "granted":
             close()
@@ -314,8 +335,8 @@ public final class PermissionHostPresenter: NSObject {
             returning = false
             stopTracking()
             stopBackFlightTimer()
-            disposeHelper()
             disposeActiveFlight()
+            disposeHelper()
             initialPanel?.level = .floating
             cardView?.isHidden = false
             setInitialContent(
@@ -333,16 +354,24 @@ public final class PermissionHostPresenter: NSObject {
 
     public func close() {
         guard !closed else { return }
+        // AppKit can reorder the dragging source even after a close request.
+        // Keep that source alive, but retire every pixel until ended arrives.
+        if (dragging || dragSession != nil), let helperPanel {
+            terminalDragPanel = helperPanel
+            terminalDragSession = dragSession
+            terminalDragPanel?.alphaValue = 0
+        }
         closed = true
         presented = false
         returning = false
         retryReady = false
         dragging = false
+        dragSession = nil
         stopTracking()
         stopArrow()
         stopBackFlightTimer()
         disposeActiveFlight()
-        dragView?.removeFromSuperview()
+        if helperPanel !== terminalDragPanel { dragView?.removeFromSuperview() }
         dragView = nil
 
         if let arrowPanel {
@@ -358,7 +387,7 @@ public final class PermissionHostPresenter: NSObject {
         if let helperPanel {
             helperPanel.delegate = nil
             helperPanel.orderOut(nil)
-            helperPanel.close()
+            if helperPanel !== terminalDragPanel { helperPanel.close() }
         }
         helperPanel = nil
         helperView = nil
@@ -384,7 +413,13 @@ public final class PermissionHostPresenter: NSObject {
         }
         guard state == "pending", settled, retryReady else { return }
         retryReady = false
-        sourceEndpoint = captureInitialEndpoint()
+        guard let endpoint = captureInitialEndpoint() else {
+            sourceEndpoint = nil
+            restoreInitialPage()
+            return
+        }
+        sourceEndpoint = endpoint
+        setState("repairing", message: nil)
         onEvent("retry")
     }
 
@@ -424,16 +459,31 @@ public final class PermissionHostPresenter: NSObject {
             arrowView?.animate(toScaleX: 1, scaleY: 1)
         }
         appRowView?.isHidden = true
-        helperPanel?.ignoresMouseEvents = true
     }
 
     fileprivate func handleDragEnded() {
         dragging = false
-        guard !closed else { return }
-        helperPanel?.ignoresMouseEvents = false
-        helperPanel?.orderFront(nil)
+        dragSession = nil
+        if closed { finishTerminalDrag(); return }
         appRowView?.isHidden = false
         scheduleArrow(after: 4)
+    }
+
+    fileprivate func recordDragSession(_ session: NSDraggingSession) {
+        if closed {
+            terminalDragSession = session
+        } else {
+            dragSession = session
+        }
+    }
+
+    private func finishTerminalDrag() {
+        guard let panel = terminalDragPanel else { return }
+        terminalDragPanel = nil
+        terminalDragSession = nil
+        panel.delegate = nil
+        panel.orderOut(nil)
+        panel.close()
     }
 
     private func report(_ error: Error) { reportMessage(error.localizedDescription) }
@@ -473,12 +523,19 @@ public final class PermissionHostPresenter: NSObject {
     }
 
     private func captureInitialEndpoint() -> PermissionHostFlightEndpoint? {
-        guard let cardView else { return nil }
+        guard let initialView, let cardView else { return nil }
+        let scale = initialView.window?.backingScaleFactor ?? 1
+        var image = initialView.snapshotPermissionCard(scale: scale)
+        if image == nil {
+            initialView.displayIfNeeded()
+            image = initialView.snapshotPermissionCard(scale: scale)
+        }
+        guard let image else { return nil }
         return PermissionHostFlightEndpoint(
             view: cardView,
             frame: permissionHostScreenFrame(cardView),
             radius: 24,
-            image: permissionHostCachedImage(cardView),
+            image: image,
         )
     }
 
@@ -542,7 +599,7 @@ public final class PermissionHostPresenter: NSObject {
             return
         }
         guard let frame = permissionHostFrame(target.frame, size: NSSize(width: permissionHostHelperWidth, height: permissionHostHelperHeight)) else {
-            reportMessage("no display is available for the permission guide")
+            setState("error", message: "no display is available for the permission guide")
             return
         }
         createHelper(frame: frame)
@@ -560,10 +617,10 @@ public final class PermissionHostPresenter: NSObject {
 
     private func createHelper(frame: NSRect) {
         guard let appIcon = permissionHostAppIcon() else {
-            reportMessage("ChatGPT icon is unavailable")
+            setState("error", message: "ChatGPT icon is unavailable")
             return
         }
-        let panel = NSPanel(
+        let panel = PermissionHostHelperPanel(
             contentRect: frame,
             styleMask: [.titled, .utilityWindow, .nonactivatingPanel, .fullSizeContentView],
             backing: .buffered,
@@ -593,9 +650,9 @@ public final class PermissionHostPresenter: NSObject {
         )
         let preferred = view.preferredContentSize
         guard preferred.width.isFinite, preferred.width > 0, preferred.height > 0, preferred.height.isFinite else {
-            reportMessage("native permission helper has invalid preferred size")
             panel.delegate = nil
             panel.close()
+            setState("error", message: "native permission helper has invalid preferred size")
             return
         }
         view.frame = NSRect(origin: .zero, size: preferred)
@@ -608,13 +665,9 @@ public final class PermissionHostPresenter: NSObject {
         row.rowView = view.appRowView
         view.addSubview(row)
 
-        let arrowPanel = NSPanel(
+        let arrowPanel = PermissionHostArrowPanel(
             contentRect: NSRect(x: 0, y: 0, width: permissionHostArrowWindowSize, height: permissionHostArrowWindowSize),
-            // The reference arrow is a non-activating child panel (raw style
-            // mask 128), rather than an ordinary borderless panel.  Keeping
-            // that distinction prevents the guide from stealing focus while
-            // the arrow tracker receives mouse-enter events.
-            styleMask: [.nonactivatingPanel],
+            styleMask: [],
             backing: .buffered,
             defer: false,
         )
@@ -623,6 +676,7 @@ public final class PermissionHostPresenter: NSObject {
         arrowPanel.backgroundColor = .clear
         arrowPanel.hasShadow = false
         arrowPanel.ignoresMouseEvents = false
+        arrowPanel.collectionBehavior = NSWindow.CollectionBehavior(rawValue: 4)
         arrowPanel.level = NSWindow.Level(rawValue: 3)
         arrowPanel.hidesOnDeactivate = false
         let arrowDelegate = PermissionHostWindowDelegate { [weak self] in self?.handleWindowClosed() }
@@ -669,8 +723,12 @@ public final class PermissionHostPresenter: NSObject {
     private func revealHelper() {
         guard !closed, state == "awaiting-user", !returning else { return }
         presented = true
-        helperPanel?.orderFront(nil)
+        helperPanel?.orderFrontRegardless()
         arrowPanel?.orderFront(nil)
+        let applications = NSRunningApplication.runningApplications(withBundleIdentifier: SettingsLocator.bundleIdentifier)
+        if applications.count == 1, let application = applications.first {
+            _ = application.activate(options: .activateAllWindows)
+        }
         scheduleArrow(after: 0.5)
     }
 
@@ -679,20 +737,22 @@ public final class PermissionHostPresenter: NSObject {
             revealHelper()
             return
         }
+        forwardSequence += 1
+        let sequence = forwardSequence
         let active = PermissionHostFlight(
             source: sourceEndpoint,
             target: { [weak self] in self?.helperEndpoint() ?? targetEndpoint },
             reverse: false,
             isClosed: { [weak self] in self?.closed ?? true },
-            onComplete: { [weak self] in self?.finishForwardFlight() },
-            onError: { [weak self] message in self?.handleFlightError(message) },
+            onComplete: { [weak self] in self?.finishForwardFlight(sequence: sequence) },
+            onError: { [weak self] _ in self?.noteFlightFallback() },
         )
         flight = active
         active.start()
     }
 
-    private func finishForwardFlight() {
-        guard !closed, flight != nil else { return }
+    private func finishForwardFlight(sequence: Int) {
+        guard !closed, !returning, state == "awaiting-user", forwardSequence == sequence, flight != nil else { return }
         flight = nil
         revealHelper()
     }
@@ -707,12 +767,12 @@ public final class PermissionHostPresenter: NSObject {
         stopTracking()
         stopArrow()
         retryReady = false
-        initialPanel?.level = .floating
+        NSApplication.shared.activate(ignoringOtherApps: false)
         setInitialContent(
             title: permissionHostString(copy, "title"),
             body: permissionHostString(copy, "body"),
             allowEnabled: true,
-            settingsPlaceholder: false,
+            settingsPlaceholder: true,
         )
         fitInitialPage()
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
@@ -742,10 +802,14 @@ public final class PermissionHostPresenter: NSObject {
             reverse: true,
             isClosed: { [weak self] in self?.closed ?? true },
             onComplete: { [weak self] in self?.finishBackFlight(sequence: sequence) },
-            onError: { [weak self] message in self?.handleFlightError(message) },
+            onError: { [weak self] _ in self?.noteFlightFallback() },
         )
         flight = active
-        helperPanel?.orderOut(nil)
+        helperPanel?.alphaValue = 0
+        helperView?.alphaValue = 0
+        arrowPanel?.alphaValue = 0
+        active.start()
+        guard flight === active, returning, !closed else { return }
         arrowPanel?.orderOut(nil)
         backFlightTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { [weak self, weak active] _ in
             Task { @MainActor [weak self, weak active] in
@@ -754,7 +818,6 @@ public final class PermissionHostPresenter: NSObject {
                 self.fallbackToInitial()
             }
         }
-        active.start()
         _ = initialView
     }
 
@@ -762,7 +825,7 @@ public final class PermissionHostPresenter: NSObject {
         guard !closed, returnSequence == sequence, flight != nil else { return }
         flight = nil
         stopBackFlightTimer()
-        restoreInitialPage()
+        restoreInitialPage(raiseBeforeHelperDisposal: true)
     }
 
     private func fallbackToInitial() {
@@ -772,8 +835,9 @@ public final class PermissionHostPresenter: NSObject {
         restoreInitialPage()
     }
 
-    private func restoreInitialPage() {
+    private func restoreInitialPage(raiseBeforeHelperDisposal: Bool = false) {
         guard !closed else { return }
+        if raiseBeforeHelperDisposal { initialPanel?.level = .floating }
         disposeHelper()
         returning = false
         state = "pending"
@@ -785,7 +849,7 @@ public final class PermissionHostPresenter: NSObject {
             settingsPlaceholder: false,
         )
         fitInitialPage()
-        initialPanel?.level = .floating
+        if !raiseBeforeHelperDisposal { initialPanel?.level = .floating }
         NSApplication.shared.activate(ignoringOtherApps: true)
         initialPanel?.makeKeyAndOrderFront(nil)
     }
@@ -800,12 +864,11 @@ public final class PermissionHostPresenter: NSObject {
         active?.dispose()
     }
 
-    private func handleFlightError(_ message: String) {
-        guard !closed else { return }
-        returning = false
-        stopBackFlightTimer()
-        disposeActiveFlight()
-        setState("error", message: message)
+    private func noteFlightFallback() {
+        // A replica failure is visual-only: dispose settles its completion
+        // callback, which reveals the helper or restores the initial card.
+        // The controller must not treat it as a permission transaction error.
+        NSLog("permission flight fallback")
     }
 
     private func disposeHelper() {
@@ -843,6 +906,10 @@ public final class PermissionHostPresenter: NSObject {
     private func scheduleArrow(after delay: TimeInterval) {
         stopArrow()
         guard !closed else { return }
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            arrowView?.resetToIdentity()
+            return
+        }
         arrowTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.stretchArrow()
@@ -865,6 +932,10 @@ public final class PermissionHostPresenter: NSObject {
         arrowReturnTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: false) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, !self.closed, !self.dragging else { return }
+                if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                    self.arrowView?.resetToIdentity()
+                    return
+                }
                 self.arrowView?.animate(toScaleX: 1, scaleY: 1)
                 self.scheduleArrow(after: 4)
             }

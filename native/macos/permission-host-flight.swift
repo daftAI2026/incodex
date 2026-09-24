@@ -72,6 +72,7 @@ final class PermissionHostFlight {
     @MainActor private final class Entry {
         let panel: NSPanel
         let screenFrame: NSRect
+        let contentView: NSView
         let root: NSView
         let surface: IncodexPermissionFlightView
         let strokeView: NSView
@@ -90,11 +91,17 @@ final class PermissionHostFlight {
             panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = false
             panel.ignoresMouseEvents = true; panel.level = NSWindow.Level(rawValue: 25)
             panel.hidesOnDeactivate = false
-            root = NSView(frame: NSRect(origin: .zero, size: screenFrame.size))
+            panel.animationBehavior = .none
+            panel.collectionBehavior = NSWindow.CollectionBehavior(rawValue: 0x1149)
+            contentView = NSView(frame: NSRect(origin: .zero, size: screenFrame.size))
+            contentView.wantsLayer = true
+            panel.contentView = contentView
+            root = NSView(frame: .zero)
             root.wantsLayer = true; root.layer?.masksToBounds = false
-            panel.contentView = root
+            contentView.addSubview(root)
             surface = IncodexPermissionFlightView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
             surface.wantsLayer = true; surface.layer?.contentsScale = scale
+            surface.layer?.masksToBounds = false
             for (opacity, radius, y) in [(Float(0.06), CGFloat(2), CGFloat(-3)), (0.09, 15, -5), (0.2, 3, 0)] {
                 let layer = CALayer()
                 layer.shadowColor = NSColor.black.cgColor
@@ -242,9 +249,12 @@ final class PermissionHostFlight {
             let inner = NSRect(x: 30, y: 30, width: local.width, height: local.height)
             let outer = NSRect(x: 0, y: 0, width: local.width + 60, height: local.height + 60)
             entry.root.frame = NSRect(x: local.minX - 30, y: local.minY - 30, width: outer.width, height: outer.height)
+            entry.root.layer?.cornerRadius = sample.cornerRadius
             entry.surface.frame = inner
+            entry.surface.layer?.cornerRadius = sample.cornerRadius
             entry.surface.updateProgress(sample.progress, cornerRadius: sample.cornerRadius, reduceTransparency: reduceTransparency)
             entry.strokeView.frame = inner
+            entry.strokeView.layer?.cornerRadius = sample.cornerRadius
             entry.stroke.frame = NSRect(origin: .zero, size: local.size)
             entry.stroke.opacity = Float(0.15 * sample.progress)
             let strokeRadius = max(0, sample.cornerRadius - 0.25)
