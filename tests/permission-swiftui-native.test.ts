@@ -305,6 +305,18 @@ test("placeholder pressed style transforms the whole SwiftUI button, not only it
   expect(placeholder).toContain(".opacity(pressed ? 0.88 : 1)");
 });
 
+test("placeholder text uses the measured 12pt medium face, tracking, and tone", () => {
+  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const start = source.indexOf("private func permissionPlaceholderText");
+  const end = source.indexOf("private struct PermissionPlaceholderButtonStyle", start);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  const placeholderText = source.slice(start, end);
+  expect(placeholderText).toContain(".systemFont(ofSize: 12, weight: .medium)");
+  expect(placeholderText).toContain(".kern: 0.7");
+  expect(source).toContain("permissionPlaceholderText(state.completeInSettings)\n                            .opacity(0.86)");
+});
+
 function permissionCardSource(): string {
   const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
   const start = source.indexOf("private struct PermissionCardRoot");

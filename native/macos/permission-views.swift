@@ -488,7 +488,7 @@ private func permissionPlaceholderText(_ value: String) -> Text {
     let attributed = NSAttributedString(
         string: value,
         attributes: [
-            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+            .font: NSFont.systemFont(ofSize: 12, weight: .medium),
             .kern: 0.7,
         ],
     )
@@ -546,6 +546,7 @@ private struct PermissionInitialRoot: View {
                 if state.settingsPlaceholder {
                     Button { state.send("resumeSettings:") } label: {
                         permissionPlaceholderText(state.completeInSettings)
+                            .opacity(0.86)
                     }
                     .buttonStyle(PermissionPlaceholderButtonStyle(state: state))
                 }
