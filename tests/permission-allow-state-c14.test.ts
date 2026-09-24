@@ -297,13 +297,13 @@ test.skipIf(process.platform !== "darwin" || !runDiagnostic)(
       const readings = { normal, hover, held, dragged, cancelled, cancelledOutside, recoveryHover, afterRecovery };
       const pixelCaptureComplete = Object.values(readings).every((reading) => reading.pixelKnown === true);
       if (pixelCaptureComplete) {
-        expect(luminance(hover)).toBeGreaterThan(luminance(normal) + 0.005);
+        // The installed original has no visual Allow hover treatment.
+        expect(Math.abs(luminance(hover) - luminance(normal))).toBeLessThan(0.005);
         expect(luminance(held)).toBeLessThan(luminance(hover) - 0.005);
         expect(luminance(cancelled)).toBeGreaterThan(luminance(held) + 0.005);
-        // SwiftUI's onHover remains latched during the drag tracking loop and
-        // clears on the next ordinary move event after mouse-up.
-        expect(Math.abs(luminance(cancelledOutside) - luminance(normal))).toBeLessThan(0.035);
-        expect(Math.abs(luminance(recoveryHover) - luminance(afterRecovery))).toBeLessThan(0.035);
+        expect(Math.abs(luminance(cancelledOutside) - luminance(normal))).toBeLessThan(0.005);
+        expect(Math.abs(luminance(recoveryHover) - luminance(normal))).toBeLessThan(0.005);
+        expect(Math.abs(luminance(afterRecovery) - luminance(normal))).toBeLessThan(0.005);
       }
 
       console.log(`C14_ALLOW_STATE ${JSON.stringify({

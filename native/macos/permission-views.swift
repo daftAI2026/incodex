@@ -268,7 +268,6 @@ private final class PermissionInitialState: ObservableObject {
     @Published var appIcon: NSImage?
     @Published var permissionIcon: NSImage?
     @Published var allowEnabled = true
-    @Published var allowHovered = false
     @Published var settingsPlaceholder = false
     @Published var placeholderHovered = false
     @Published var layoutDirection: LayoutDirection = .leftToRight
@@ -292,7 +291,6 @@ private final class PermissionInitialState: ObservableObject {
         self.actionTarget = actionTarget
         layoutDirection = permissionCopyString(copy, "layoutDirection") == "rightToLeft" ? .rightToLeft : .leftToRight
         allowEnabled = true
-        allowHovered = false
         settingsPlaceholder = false
         placeholderHovered = false
     }
@@ -306,7 +304,6 @@ private final class PermissionInitialState: ObservableObject {
         self.title = title
         self.body = body
         self.allowEnabled = allowEnabled
-        allowHovered = false
         self.settingsPlaceholder = settingsPlaceholder
         // State transitions must not reuse a previous placeholder's hover.
         // A later genuine pointer entry may establish fresh hover normally.
@@ -334,7 +331,6 @@ private struct PermissionEmbeddedView: NSViewRepresentable {
 }
 
 private struct PermissionAllowButtonStyle: ButtonStyle {
-    @ObservedObject var state: PermissionInitialState
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.controlActiveState) private var controlActiveState
 
@@ -343,8 +339,7 @@ private struct PermissionAllowButtonStyle: ButtonStyle {
             label: configuration.label,
             isEnabled: isEnabled,
             isActive: controlActiveState == .key,
-            isPressed: configuration.isPressed,
-            state: state
+            isPressed: configuration.isPressed
         )
     }
 }
@@ -354,7 +349,6 @@ private struct PermissionAllowButtonFace<Label: View>: View {
     let isEnabled: Bool
     let isActive: Bool
     let isPressed: Bool
-    @ObservedObject var state: PermissionInitialState
 
     private var foreground: Color {
         guard isEnabled else { return Color(nsColor: .disabledControlTextColor) }
@@ -378,16 +372,12 @@ private struct PermissionAllowButtonFace<Label: View>: View {
             .background {
                 Capsule(style: .continuous)
                     .fill(background)
-                    // State feedback modifies the same capsule fill; do not
-                    // add separate hover/pressed overlay surfaces.
-                    .brightness(isPressed ? -0.08 : (isHovered && isEnabled && isActive ? 0.06 : 0))
+                    // Original Allow has no visible hover treatment. Its
+                    // pressed fill darkens in place, without another surface.
+                    .brightness(isPressed ? -0.115 : 0)
             }
-            .onHover { state.allowHovered = $0 }
-            .animation(.easeOut(duration: 0.12), value: isHovered)
             .animation(.easeOut(duration: 0.08), value: isPressed)
     }
-
-    private var isHovered: Bool { state.allowHovered }
 }
 
 private struct PermissionCardRoot: View {
@@ -428,7 +418,7 @@ private struct PermissionCardRoot: View {
             Button { state.send("allow:") } label: {
                 Text(state.allow)
             }
-                .buttonStyle(PermissionAllowButtonStyle(state: state))
+                .buttonStyle(PermissionAllowButtonStyle())
                 .keyboardShortcut(.defaultAction)
                 .clipShape(Capsule(style: .continuous))
                 .frame(minWidth: 62)
