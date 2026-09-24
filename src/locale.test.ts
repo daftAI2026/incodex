@@ -34,7 +34,7 @@ describe("locale fallback", () => {
     expect(resolveLocale("zh-Hant")).toBe("zh-TW");
 
     expect(accessibilityCopy["en"].body).toBe(
-      "Installing Incodex modifies ChatGPT, so its Accessibility permission needs to be granted again.",
+      "Installing Incodex modifies ChatGPT,\nso its Accessibility permission needs to be granted again.",
     );
     expect(accessibilityCopy["en"].back).toBe("Back");
     expect(accessibilityCopy["zh-CN"].body).toBe(
@@ -51,7 +51,7 @@ describe("locale fallback", () => {
     );
     expect(accessibilityCopy["zh-TW"].back).toBe("返回");
     expect(accessibilityCopy["zh-TW"].addedBody).toContain("確認取得權限後");
-    for (const key of ["en", "zh-CN", "zh-HK", "zh-TW"] as const) {
+    for (const key of ["zh-CN", "zh-HK", "zh-TW"] as const) {
       expect(accessibilityCopy[key].body).not.toContain("\n");
     }
   });

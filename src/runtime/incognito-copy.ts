@@ -11,7 +11,7 @@ const ACCESSIBILITY_SETUP_COPY_BASE = /* @__PURE__ */ (() => ({
   ...ACCESSIBILITY_REGIONAL_COPY,
   en: {
     title: "Enable ChatGPT script control",
-    body: "Installing Incodex modifies ChatGPT, so its Accessibility permission needs to be granted again.",
+    body: "Installing Incodex modifies ChatGPT,\nso its Accessibility permission needs to be granted again.",
     permissionTitle: "Accessibility",
     permissionDescription: "Read and interact with app interfaces",
     repair: "Allow",
