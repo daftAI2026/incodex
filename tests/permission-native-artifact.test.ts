@@ -76,8 +76,9 @@ test.skipIf(process.platform !== "darwin")(
     expect(signature.status, signature.output).toBe(0);
     const selectors = command("strings", [hostPath]);
     expect(selectors.status, selectors.output).toBe(0);
-    expect(selectors.output).toContain("shouldDelayWindowOrderingForEvent:");
-    expect(selectors.output).toContain("preventWindowOrdering");
+    expect(selectors.output).toContain("setActivationPolicy:");
+    expect(selectors.output).not.toContain("shouldDelayWindowOrderingForEvent:");
+    expect(selectors.output).not.toContain("preventWindowOrdering");
   },
 );
 

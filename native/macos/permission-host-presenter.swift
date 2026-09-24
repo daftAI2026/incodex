@@ -154,9 +154,6 @@ private final class PermissionHostDragView: NSView, NSDraggingSource, NSPasteboa
 
     override var isFlipped: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func shouldDelayWindowOrdering(for event: NSEvent) -> Bool {
-        owner?.canStartDrag ?? false
-    }
 
     override func mouseDown(with event: NSEvent) {
         guard let owner, owner.canStartDrag, let rowView else { return }
@@ -166,10 +163,6 @@ private final class PermissionHostDragView: NSView, NSDraggingSource, NSPasteboa
         let frame = rowView.convert(rowView.bounds, to: self)
         draggingItem.setDraggingFrame(frame, contents: permissionHostCachedImage(rowView))
         let session = beginDraggingSession(with: [draggingItem], event: event, source: self)
-        // Complete the mouse-down ordering delay after starting the native
-        // drag. Otherwise AppKit may activate the host and lift its initial
-        // window over System Settings while the pointer is still held down.
-        NSApplication.shared.preventWindowOrdering()
         owner.recordDragSession(session)
         session.animatesToStartingPositionsOnCancelOrFail = true
     }
@@ -338,6 +331,7 @@ public final class PermissionHostPresenter: NSObject {
         case "granted":
             close()
         case "error":
+            guard setGuideActivationPolicy(.accessory) else { return }
             state = nextState
             returning = false
             stopTracking()
@@ -408,6 +402,11 @@ public final class PermissionHostPresenter: NSObject {
         initialPanel = nil
         initialView = nil
         cardView = nil
+        // Close can arrive directly from the CLI or after a grant without a
+        // Back transition. No guide window remains visible at this point.
+        if NSApplication.shared.activationPolicy() == .prohibited {
+            _ = NSApplication.shared.setActivationPolicy(.accessory)
+        }
     }
 
     fileprivate func handleAllow() {
@@ -497,6 +496,17 @@ public final class PermissionHostPresenter: NSObject {
 
     private func reportMessage(_ message: String) {
         onError(String(message.prefix(512)))
+    }
+
+    @discardableResult
+    private func setGuideActivationPolicy(_ policy: NSApplication.ActivationPolicy) -> Bool {
+        let application = NSApplication.shared
+        if application.activationPolicy() == policy { return true }
+        guard application.setActivationPolicy(policy) else {
+            reportMessage("native permission guide could not change its activation policy")
+            return false
+        }
+        return true
     }
 
     private func handleWindowClosed() {
@@ -736,6 +746,13 @@ public final class PermissionHostPresenter: NSObject {
         if applications.count == 1, let application = applications.first {
             _ = application.activate(options: .activateAllWindows)
         }
+        // A mouse press on the nonactivating helper can still activate this
+        // process before the drag view receives mouseDown.  That activation
+        // raises the separate initial NSWindow above Settings.  During the
+        // guide, keep the existing windows and native drag, but disallow
+        // process activation; Back restores the ordinary policy before its
+        // existing activation and reverse flight.
+        guard setGuideActivationPolicy(.prohibited) else { return }
         scheduleArrow(after: 0.5)
     }
 
@@ -768,6 +785,7 @@ public final class PermissionHostPresenter: NSObject {
         guard !closed, !returning, !dragging, state == "awaiting-user",
               let initialView,
               let cardView else { return }
+        guard setGuideActivationPolicy(.accessory) else { return }
         returning = true
         returnSequence += 1
         let sequence = returnSequence
@@ -844,6 +862,7 @@ public final class PermissionHostPresenter: NSObject {
 
     private func restoreInitialPage(raiseBeforeHelperDisposal: Bool = false) {
         guard !closed else { return }
+        guard setGuideActivationPolicy(.accessory) else { return }
         if raiseBeforeHelperDisposal { initialPanel?.level = .floating }
         disposeHelper()
         returning = false
