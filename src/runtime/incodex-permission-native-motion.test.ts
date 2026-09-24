@@ -930,3 +930,44 @@ test("flight uses reference integral point bounds before adding the 30pt margin"
     expect(flightSurfaceFor(root).frameValue).toEqual(rect(30,30,519,81));
   }finally{replicas.dispose();}
 });
+
+test("flight updates the 30pt replica and all shadow frames on every render across screen origins", () => {
+  const screens = [
+    { frame: rect(-1280, 0, 1280, 800), scale: 1 },
+    { frame: rect(0, 0, 1440, 900), scale: 2 },
+  ];
+  const bridge = nativeMotionBridge(screens);
+  const swift = swiftUIFlightLibrary();
+  const replicas = createNativeReplicants({
+    objc: bridge.objc,
+    nativeLibrary: swift.library,
+    source: { image: { size: () => ({ width: 518, height: 80 }) } },
+    target: { view: bridge.targetView(rect(0, 0, 531, 110)) },
+  });
+  try {
+    for (const frame of [
+      rect(-100, 200, 518, 80),
+      rect(200, 150, 520, 100),
+      rect(500, 300, 531, 110),
+    ]) {
+      replicas.render({
+        bounds: { x: frame.origin.x, y: frame.origin.y, width: frame.size.width, height: frame.size.height },
+        progress: .5, cornerRadius: 18, sourceOpacity: .5, targetOpacity: .5, sourceBlur: 6, targetBlur: 6,
+      });
+      for (const [index, panel] of bridge.panels().entries()) {
+        const root = replicaContainerFor(panel);
+        const width = frame.size.width, height = frame.size.height;
+        expect(root.frameValue).toEqual(rect(
+          frame.origin.x - screens[index].frame.origin.x - 30,
+          frame.origin.y - screens[index].frame.origin.y - 30,
+          width + 60, height + 60,
+        ));
+        expect(flightSurfaceFor(root).frameValue).toEqual(rect(30, 30, width, height));
+        for (const shadow of root.layerValue.sublayers) {
+          expect(shadow.frameValue).toEqual(rect(0, 0, width + 60, height + 60));
+          expect(shadow.values.get("shadowPath").args).toEqual([rect(30, 30, width, height), 18, 18, null]);
+        }
+      }
+    }
+  } finally { replicas.dispose(); }
+});
