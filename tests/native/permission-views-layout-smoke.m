@@ -267,15 +267,150 @@ static int checkCatalogTitles(Class initialClass, NSString *catalogPath) {
     return allPassed ? 0 : 1;
 }
 
+typedef struct {
+    NSRect window;
+    NSRect title;
+    NSRect body;
+    NSRect card;
+    NSRect skip;
+} InitialGeometry;
+
+static BOOL readInitialGeometry(NSDictionary *copy, InitialGeometry *result) {
+    AXUIElementRef application = AXUIElementCreateApplication(getpid());
+    AXUIElementRef window = findWindow(application, copy[@"title"]);
+    AXUIElementRef title = findAX(window, kAXStaticTextRole, copy[@"title"], 0, 0, NO, 0);
+    AXUIElementRef body = findAX(window, kAXStaticTextRole, copy[@"body"], 0, 0, NO, 0);
+    AXUIElementRef card = findAX(window, kAXGroupRole, nil, 518, 80, YES, 0);
+    AXUIElementRef skip = findAX(window, kAXButtonRole, copy[@"later"], 0, 0, NO, 0);
+    BOOL found = window != NULL && title != NULL && body != NULL && card != NULL && skip != NULL
+        && axRect(window, &result->window) && axRect(title, &result->title)
+        && axRect(body, &result->body) && axRect(card, &result->card) && axRect(skip, &result->skip);
+    if (skip != NULL) CFRelease(skip);
+    if (card != NULL) CFRelease(card);
+    if (body != NULL) CFRelease(body);
+    if (title != NULL) CFRelease(title);
+    if (window != NULL) CFRelease(window);
+    CFRelease(application);
+    return found;
+}
+
+static BOOL checkInitialSpacing(InitialGeometry geometry) {
+    CGFloat titleToBody = NSMinY(geometry.body) - NSMaxY(geometry.title);
+    CGFloat bodyToCard = NSMinY(geometry.card) - NSMaxY(geometry.body);
+    CGFloat cardToBottom = NSMaxY(geometry.window) - NSMaxY(geometry.card);
+    CGFloat skipTrailing = NSMaxX(geometry.window) - NSMaxX(geometry.skip);
+    return approximately(titleToBody, 14.0)
+        && approximately(bodyToCard, 21.0)
+        && approximately(cardToBottom, 41.0)
+        && approximately(skipTrailing, 57.0)
+        && !rectanglesOverlap(geometry.title, geometry.body)
+        && !rectanglesOverlap(geometry.body, geometry.card)
+        && !rectanglesOverlap(geometry.card, geometry.skip);
+}
+
+static void captureInitialView(NSView *view, NSString *path) {
+    if (path == nil) return;
+    [view displayIfNeeded];
+    NSBitmapImageRep *bitmap = [view bitmapImageRepForCachingDisplayInRect:view.bounds];
+    if (bitmap == nil) return;
+    [view cacheDisplayInRect:view.bounds toBitmapImageRep:bitmap];
+    NSData *png = [bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+    [png writeToFile:path atomically:YES];
+}
+
+static int checkBodyGrowth(Class initialClass, NSString *catalogPath, NSString *capturePrefix) {
+    NSData *data = [NSData dataWithContentsOfFile:catalogPath];
+    NSDictionary *catalog = data == nil ? nil : [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    NSDictionary *english = [catalog isKindOfClass:[NSDictionary class]] ? catalog[@"en"] : nil;
+    if (![english isKindOfClass:[NSDictionary class]]) {
+        fprintf(stderr, "P13–P16 catalog lacks en production copy\n");
+        return 2;
+    }
+    NSMutableDictionary *copy = [english mutableCopy];
+    NSString *shortBody = copy[@"body"];
+    NSString *longBody = [@[shortBody, shortBody, shortBody, shortBody, shortBody] componentsJoinedByString:@" "];
+    id initial = makeView(initialClass, NSMakeRect(0, 0, 600, 340));
+    ((void (*)(id, SEL, id, id, id, id))objc_msgSend)(
+        initial, @selector(configureWithCopy:appIcon:permissionIcon:actionTarget:), copy, nil, nil, nil
+    );
+    NSWindow *window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 600, 312)
+                                                  styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskFullSizeContentView)
+                                                    backing:NSBackingStoreBuffered defer:NO];
+    window.releasedWhenClosed = NO;
+    window.titlebarAppearsTransparent = YES;
+    window.titleVisibility = NSWindowTitleHidden;
+    window.contentView = initial;
+    NSSize shortSize = preferredContentSize(initial);
+    [initial setFrameSize:shortSize];
+    [window setContentSize:shortSize];
+    [window center];
+    [window makeKeyAndOrderFront:nil];
+    drainRunLoop(0.35);
+
+    InitialGeometry shortGeometry = {0}, longGeometry = {0}, darkGeometry = {0}, restoredGeometry = {0};
+    BOOL shortOK = readInitialGeometry(copy, &shortGeometry) && checkInitialSpacing(shortGeometry);
+    copy[@"body"] = longBody;
+    ((void (*)(id, SEL, id, id, BOOL, BOOL))objc_msgSend)(
+        initial, @selector(setContentWithTitle:body:allowEnabled:settingsPlaceholder:), copy[@"title"], longBody, YES, NO
+    );
+    NSSize longSize = preferredContentSize(initial);
+    [initial setFrameSize:longSize];
+    [window setContentSize:longSize];
+    drainRunLoop(0.35);
+    BOOL longOK = readInitialGeometry(copy, &longGeometry) && checkInitialSpacing(longGeometry)
+        && longGeometry.body.size.height > shortGeometry.body.size.height + 30.0
+        && approximately(longGeometry.window.size.height - shortGeometry.window.size.height,
+                         longGeometry.body.size.height - shortGeometry.body.size.height)
+        && approximately((longGeometry.card.origin.y - longGeometry.window.origin.y)
+                         - (shortGeometry.card.origin.y - shortGeometry.window.origin.y),
+                         longGeometry.body.size.height - shortGeometry.body.size.height);
+    if (capturePrefix != nil) captureInitialView(initial, [capturePrefix stringByAppendingString:@"-long.png"]);
+
+    window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+    drainRunLoop(0.35);
+    BOOL darkOK = readInitialGeometry(copy, &darkGeometry) && checkInitialSpacing(darkGeometry)
+        && approximately(darkGeometry.window.size.height, longGeometry.window.size.height)
+        && approximately(darkGeometry.skip.origin.x - darkGeometry.window.origin.x,
+                         longGeometry.skip.origin.x - longGeometry.window.origin.x)
+        && approximately(darkGeometry.skip.origin.y - darkGeometry.window.origin.y,
+                         longGeometry.skip.origin.y - longGeometry.window.origin.y);
+    if (capturePrefix != nil) captureInitialView(initial, [capturePrefix stringByAppendingString:@"-dark.png"]);
+
+    copy[@"body"] = shortBody;
+    ((void (*)(id, SEL, id, id, BOOL, BOOL))objc_msgSend)(
+        initial, @selector(setContentWithTitle:body:allowEnabled:settingsPlaceholder:), copy[@"title"], shortBody, YES, NO
+    );
+    NSSize restoredSize = preferredContentSize(initial);
+    [initial setFrameSize:restoredSize];
+    [window setContentSize:restoredSize];
+    drainRunLoop(0.35);
+    BOOL restoreOK = readInitialGeometry(copy, &restoredGeometry) && checkInitialSpacing(restoredGeometry)
+        && approximately(restoredGeometry.window.size.height, shortGeometry.window.size.height)
+        && approximately(restoredGeometry.body.size.height, shortGeometry.body.size.height);
+    printf("P13_P16_BODY shortWindow=%.1f shortBody=%.1f longWindow=%.1f longBody=%.1f darkWindow=%.1f restoredWindow=%.1f titleBody=%.1f bodyCard=%.1f cardBottom=%.1f skipTrailing=%.1f short=%s long=%s dark=%s restore=%s\n",
+           shortGeometry.window.size.height, shortGeometry.body.size.height,
+           longGeometry.window.size.height, longGeometry.body.size.height,
+           darkGeometry.window.size.height, restoredGeometry.window.size.height,
+           NSMinY(longGeometry.body) - NSMaxY(longGeometry.title),
+           NSMinY(longGeometry.card) - NSMaxY(longGeometry.body),
+           NSMaxY(longGeometry.window) - NSMaxY(longGeometry.card),
+           NSMaxX(longGeometry.window) - NSMaxX(longGeometry.skip),
+           shortOK ? "yes" : "no", longOK ? "yes" : "no", darkOK ? "yes" : "no", restoreOK ? "yes" : "no");
+    [window orderOut:nil];
+    [window close];
+    return shortOK && longOK && darkOK && restoreOK ? 0 : 1;
+}
+
 int main(int argc, const char **argv) {
-    if (argc < 2 || argc > 4) {
-        fprintf(stderr, "usage: %s /path/to/incodex-permission-ui.dylib [card|back|titles /path/to/catalog.json]\n", argv[0]);
+    if (argc < 2 || argc > 5) {
+        fprintf(stderr, "usage: %s /path/to/incodex-permission-ui.dylib [card|back|titles /path/to/catalog.json|body /path/to/catalog.json [capture-prefix]]\n", argv[0]);
         return 2;
     }
     BOOL cardMode = argc == 3 && strcmp(argv[2], "card") == 0;
     BOOL backMode = argc == 3 && strcmp(argv[2], "back") == 0;
     BOOL catalogMode = argc == 4 && strcmp(argv[2], "titles") == 0;
-    if ((argc == 3 && !cardMode && !backMode) || (argc == 4 && !catalogMode)) {
+    BOOL bodyMode = (argc == 4 || argc == 5) && strcmp(argv[2], "body") == 0;
+    if ((argc == 3 && !cardMode && !backMode) || (argc == 4 && !catalogMode && !bodyMode) || (argc == 5 && !bodyMode)) {
         fprintf(stderr, "unknown layout smoke mode: %s\n", argv[2]);
         return 2;
     }
@@ -301,6 +436,8 @@ int main(int argc, const char **argv) {
         }
 
         if (catalogMode) return checkCatalogTitles(initialClass, [NSString stringWithUTF8String:argv[3]]);
+        if (bodyMode) return checkBodyGrowth(initialClass, [NSString stringWithUTF8String:argv[3]],
+                                             argc == 5 ? [NSString stringWithUTF8String:argv[4]] : nil);
 
         if (backMode) {
             NSDictionary *copy = shortTitleCopy();
