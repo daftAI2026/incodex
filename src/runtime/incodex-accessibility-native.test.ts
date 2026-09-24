@@ -3375,7 +3375,7 @@ test("Back keeps the reverse flight alive when Settings disappears", async () =>
     performSwiftAction(harness, "later:");
     await settleNativeAsync();
     expect(card.values.get("hidden")).toBe(true);
-    expect(swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1)?.args[3]).toBe(false);
+    expect(swift!.calls.filter((call) => call.selector === "setContentWithTitle:body:allowEnabled:settingsPlaceholder:").at(-1)?.args[3]).toBe(true);
     finish();
     await settleNativeAsync();
     expect(card.values.get("hidden")).toBe(false);

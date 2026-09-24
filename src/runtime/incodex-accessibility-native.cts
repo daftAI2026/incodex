@@ -426,7 +426,9 @@ async function createNativeAccessibilitySetupWindow({ appPath, copy, layoutDirec
       fallbackToInitial();
       return;
     }
-    setInitialContent({ title: text("title"), body: text("body"), allowEnabled: true, settingsPlaceholder: false });
+    // The original keeps the dashed Settings placeholder beneath the moving
+    // replica. Only replace it with the live card after the flight lands.
+    setInitialContent({ title: text("title"), body: text("body"), allowEnabled: true, settingsPlaceholder: true });
     fitInitialBody();
     if (reducedMotion() || !onBack || !helper.flightTarget) { fallbackToInitial(); return; }
     let returnSource;
