@@ -196,14 +196,86 @@ static NSDictionary *shortTitleCopy(void) {
     };
 }
 
+static int checkCatalogTitles(Class initialClass, NSString *catalogPath) {
+    NSData *data = [NSData dataWithContentsOfFile:catalogPath];
+    NSError *error = nil;
+    NSDictionary *catalog = data == nil ? nil : [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+    if (![catalog isKindOfClass:[NSDictionary class]]) {
+        fprintf(stderr, "P11 catalog could not be read: %s\n", error.localizedDescription.UTF8String ?: "missing JSON");
+        return 2;
+    }
+
+    NSArray<NSString *> *locales = @[@"bg-BG", @"el-GR", @"hu-HU", @"hy-AM", @"mk-MK", @"ml", @"mn"];
+    BOOL allPassed = YES;
+    for (NSString *locale in locales) {
+        NSDictionary *copy = catalog[locale];
+        if (![copy isKindOfClass:[NSDictionary class]]) {
+            fprintf(stderr, "P11 catalog missing locale %s\n", locale.UTF8String);
+            allPassed = NO;
+            continue;
+        }
+        id initial = makeView(initialClass, NSMakeRect(0, 0, 600, 340));
+        ((void (*)(id, SEL, id, id, id, id))objc_msgSend)(
+            initial, @selector(configureWithCopy:appIcon:permissionIcon:actionTarget:), copy, nil, nil, nil
+        );
+        NSSize size = preferredContentSize(initial);
+        [initial setFrameSize:size];
+        NSPanel *panel = [[NSPanel alloc] initWithContentRect:NSMakeRect(240, 520, size.width, size.height)
+                                                     styleMask:NSWindowStyleMaskTitled
+                                                       backing:NSBackingStoreBuffered
+                                                         defer:NO];
+        panel.releasedWhenClosed = NO;
+        panel.contentView = initial;
+        [panel makeKeyAndOrderFront:nil];
+        drainRunLoop(0.35);
+
+        AXUIElementRef application = AXUIElementCreateApplication(getpid());
+        AXUIElementRef window = findWindow(application, copy[@"title"]);
+        AXUIElementRef title = findAX(window, kAXStaticTextRole, copy[@"title"], 0, 0, NO, 0);
+        AXUIElementRef body = findAX(window, kAXStaticTextRole, copy[@"body"], 0, 0, NO, 0);
+        AXUIElementRef card = findAX(window, kAXGroupRole, nil, 518, 80, YES, 0);
+        AXUIElementRef skip = findAX(window, kAXButtonRole, copy[@"later"], 0, 0, NO, 0);
+        NSRect windowRect = NSZeroRect, titleRect = NSZeroRect, bodyRect = NSZeroRect;
+        NSRect cardRect = NSZeroRect, skipRect = NSZeroRect;
+        BOOL found = window != NULL && title != NULL && body != NULL && card != NULL && skip != NULL
+            && axRect(window, &windowRect) && axRect(title, &titleRect) && axRect(body, &bodyRect)
+            && axRect(card, &cardRect) && axRect(skip, &skipRect);
+        BOOL passed = found && approximately(windowRect.size.width, 600.0)
+            && titleRect.size.width <= 560.0 && titleRect.size.height > 30.0
+            && fabs(NSMidX(titleRect) - NSMidX(windowRect)) <= 1.0
+            && !rectanglesOverlap(titleRect, bodyRect)
+            && !rectanglesOverlap(titleRect, cardRect)
+            && !rectanglesOverlap(bodyRect, cardRect)
+            && !rectanglesOverlap(cardRect, skipRect)
+            && NSMaxY(skipRect) <= NSMaxY(windowRect) + 0.5;
+        printf("P11_CATALOG locale=%s window=%.1fx%.1f title=(%.1f,%.1f %.1fx%.1f) bodyY=%.1f cardY=%.1f skipY=%.1f pass=%s\n",
+               locale.UTF8String, windowRect.size.width, windowRect.size.height,
+               titleRect.origin.x, titleRect.origin.y, titleRect.size.width, titleRect.size.height,
+               bodyRect.origin.y, cardRect.origin.y, skipRect.origin.y, passed ? "yes" : "no");
+        allPassed = allPassed && passed;
+
+        if (skip != NULL) CFRelease(skip);
+        if (card != NULL) CFRelease(card);
+        if (body != NULL) CFRelease(body);
+        if (title != NULL) CFRelease(title);
+        if (window != NULL) CFRelease(window);
+        CFRelease(application);
+        [panel orderOut:nil];
+        [panel close];
+        drainRunLoop(0.05);
+    }
+    return allPassed ? 0 : 1;
+}
+
 int main(int argc, const char **argv) {
-    if (argc < 2 || argc > 3) {
-        fprintf(stderr, "usage: %s /path/to/incodex-permission-ui.dylib [card|back]\n", argv[0]);
+    if (argc < 2 || argc > 4) {
+        fprintf(stderr, "usage: %s /path/to/incodex-permission-ui.dylib [card|back|titles /path/to/catalog.json]\n", argv[0]);
         return 2;
     }
     BOOL cardMode = argc == 3 && strcmp(argv[2], "card") == 0;
     BOOL backMode = argc == 3 && strcmp(argv[2], "back") == 0;
-    if (argc == 3 && !cardMode && !backMode) {
+    BOOL catalogMode = argc == 4 && strcmp(argv[2], "titles") == 0;
+    if ((argc == 3 && !cardMode && !backMode) || (argc == 4 && !catalogMode)) {
         fprintf(stderr, "unknown layout smoke mode: %s\n", argv[2]);
         return 2;
     }
@@ -227,6 +299,8 @@ int main(int argc, const char **argv) {
             dlclose(handle);
             return 4;
         }
+
+        if (catalogMode) return checkCatalogTitles(initialClass, [NSString stringWithUTF8String:argv[3]]);
 
         if (backMode) {
             NSDictionary *copy = shortTitleCopy();

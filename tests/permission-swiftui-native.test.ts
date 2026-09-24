@@ -416,6 +416,39 @@ test.skipIf(process.platform !== "darwin")(
 );
 
 test.skipIf(process.platform !== "darwin")(
+  "seven production long titles wrap and remain clear of body, card and Skip in real AX windows (opt-in)",
+  () => {
+    const directory = mkdtempSync(join(tmpdir(), "incodex-long-title-ax-"));
+    try {
+      const architecture = process.arch === "arm64" ? "arm64" : process.arch === "x64" ? "x86_64" : "";
+      expect(architecture).not.toBe("");
+      if (!architecture) return;
+      const executable = join(directory, "permission-views-layout-smoke");
+      const build = spawnSync("/usr/bin/clang", [
+        "-arch", architecture, "-fobjc-arc", "-framework", "Cocoa", "-framework", "ApplicationServices",
+        layoutSmokeSource, "-o", executable,
+      ], { cwd: join(import.meta.dir, ".."), encoding: "utf8", timeout: 60_000 });
+      expect(build.status, `${build.stdout ?? ""}${build.stderr ?? ""}` || String(build.error ?? "P11 AX compile failed")).toBe(0);
+      if (build.status !== 0 || process.env.INCODEX_RUN_NATIVE_LAYOUT_SMOKE !== "1") return;
+
+      const root = join(import.meta.dir, "..");
+      const run = spawnSync(executable, [
+        join(root, "native/macos/dist/incodex-permission-ui.dylib"),
+        "titles",
+        join(root, "dist/incodex-permission-copy.json"),
+      ], { cwd: root, encoding: "utf8", timeout: 30_000 });
+      const output = `${run.stdout ?? ""}${run.stderr ?? ""}`;
+      expect(run.status, output || String(run.error ?? "P11 production title AX failed")).toBe(0);
+      expect((run.stdout ?? "").match(/P11_CATALOG locale=/g)).toHaveLength(7);
+      expect(run.stdout).not.toContain("pass=no");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+  90_000,
+);
+
+test.skipIf(process.platform !== "darwin")(
   "compiles the C03/C11 real AX permission-card geometry smoke (runtime is opt-in)",
   () => {
     const directory = mkdtempSync(join(tmpdir(), "incodex-card-layout-smoke-"));
