@@ -153,7 +153,10 @@ function nativeMotionBridge(screenSpecs: Array<{ frame: Rect; scale: number }>, 
           if (type === "NSNumber" && property === "numberWithDouble$") return args[0];
           if (type === "CIFilter" && property === "filterWithName$") return nativeObject("CIFilter");
           if ((type === "CALayer" || type === "CAShapeLayer") && property === "layer") return nativeObject(type);
-          if (type === "CATransaction") return undefined;
+          if (type === "CATransaction") {
+            calls.push({ selector: property, args });
+            return undefined;
+          }
           return undefined;
         };
       },
@@ -969,5 +972,51 @@ test("flight updates the 30pt replica and all shadow frames on every render acro
         }
       }
     }
+  } finally { replicas.dispose(); }
+});
+
+test("each flight screen keeps one transparent click-through shell and one stable SwiftUI surface", () => {
+  const bridge = nativeMotionBridge([
+    { frame: rect(-1280, 0, 1280, 800), scale: 1 },
+    { frame: rect(0, 0, 1440, 900), scale: 2 },
+  ]);
+  const swift = swiftUIFlightLibrary();
+  const replicas = createNativeReplicants({
+    objc: bridge.objc,
+    nativeLibrary: swift.library,
+    source: { image: { size: () => ({ width: 518, height: 80 }) } },
+    target: { view: bridge.targetView(rect(0, 0, 531, 110)) },
+  });
+  try {
+    const panels = bridge.panels();
+    expect(panels).toHaveLength(2);
+    const contentViews = panels.map(panel => panel.contentViewValue);
+    const roots = panels.map(panel => replicaContainerFor(panel));
+    const surfaces = roots.map(root => flightSurfaceFor(root));
+    for (const panel of panels) {
+      expect(panel.values.get("setOpaque$")).toBe(false);
+      expect(panel.values.get("setHasShadow$")).toBe(false);
+      expect(panel.values.get("setIgnoresMouseEvents$")).toBe(true);
+      expect(panel.values.get("setLevel$")).toBe(25);
+      expect(panel.values.get("setAnimationBehavior$")).toBe(2);
+      expect(panel.values.get("setBackgroundColor$")?.type).toBe("NSColor");
+    }
+    for (const [progress, x] of [[0, -100], [.5, 200], [1, 500]]) {
+      replicas.render({ bounds: { x, y: 200, width: 518, height: 80 }, progress,
+        cornerRadius: 24 - 12 * progress, sourceOpacity: 1 - progress, targetOpacity: progress,
+        sourceBlur: 12 * progress, targetBlur: 12 * (1 - progress) });
+      for (const [index, panel] of panels.entries()) {
+        expect(panel.contentViewValue).toBe(contentViews[index]);
+        expect(replicaContainerFor(panel)).toBe(roots[index]);
+        expect(flightSurfaceFor(roots[index])).toBe(surfaces[index]);
+        expect(roots[index].layerValue.values.get("setMasksToBounds$")).toBe(false);
+        expect(roots[index].layerValue.sublayers).toHaveLength(3);
+        expect(roots[index].subviews).toHaveLength(2);
+        expect(roots[index].subviews[0]).toBe(surfaces[index]);
+        expect(roots[index].subviews[1].type).toBe("NSView");
+      }
+    }
+    expect(bridge.calls.filter(call => call.selector === "setDisableActions$").map(call => call.args)).toEqual([[true], [true], [true]]);
+    expect(panels.every(panel => panel.visible)).toBe(true);
   } finally { replicas.dispose(); }
 });
