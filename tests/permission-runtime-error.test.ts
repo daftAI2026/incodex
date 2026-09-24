@@ -31,6 +31,13 @@ function buildIsolatedFormalHost(directory: string): { executable: string; runti
   const host = readFileSync(join(nativeDist, "incodex-permission-host"));
   const manifest = JSON.parse(nativeManifest.toString("utf8"));
   expect(manifest.sourceSha256).toBe(digest(source));
+  const hostSources = [
+    "permission-host.swift",
+    "permission-host-presenter.swift",
+    "permission-host-settings.swift",
+    "permission-host-flight.swift",
+  ].map((name) => readFileSync(join(native, name)));
+  expect(manifest.hostSourceSha256).toBe(digest(Buffer.concat(hostSources)));
   expect(manifest.files["incodex-permission-ui.dylib"]).toBe(digest(dylib));
   expect(manifest.files["incodex-permission-host"]).toBe(digest(host));
 
@@ -47,19 +54,9 @@ function buildIsolatedFormalHost(directory: string): { executable: string; runti
   writeFileSync(join(runtimeDirectory, "runtime-manifest.json"), `${JSON.stringify(runtimeManifest)}\n`, { mode: 0o600 });
   chmodSync(runtimeDirectory, 0o700);
 
-  const runtime = readFileSync(join(native, "permission-host-runtime.js"), "utf8")
-    .replace("// __INCODEX_OBJC_ADAPTER__", () => readFileSync(join(native, "permission-host-objc.js"), "utf8"))
-    .replace("__INCODEX_ORIGINAL_UI_JSON__", () => JSON.stringify(readFileSync(join(root, "dist", "incodex-permission-ui.cjs"), "utf8")))
-    .replace("__INCODEX_ORIGINAL_LOCATOR_JSON__", () => JSON.stringify(readFileSync(join(root, "dist", "incodex-dock-menu.cjs"), "utf8")));
-  let delimiter = "#";
-  while (runtime.includes(`"""${delimiter}`) || runtime.includes(`\\${delimiter}(`)) delimiter += "#";
-  const embedded = join(runtimeDirectory, "permission-host-runtime.swift");
-  writeFileSync(embedded, `enum PermissionHostOSASource { static let runtime = ${delimiter}"""\n${runtime}\n"""${delimiter} }\n`);
-
   // The product host admits only the unique foreground Codex process. This
   // isolated fixture bypasses just that external-process eligibility check;
-  // it still runs the shipping OSA protocol adapter, embedded TS bundle,
-  // signed SwiftUI dylib, settings locator and AppKit window path.
+  // it still compiles the shipping Swift protocol, presenter, flight and views.
   const hostSource = readFileSync(join(native, "permission-host.swift"), "utf8");
   const gate = /static func canPresentOfficialTarget\(\) -> Bool \{[\s\S]*?\n {4}\}/;
   expect(hostSource.match(gate)?.[0]).toContain("officialCodexBundleIdentifier");
@@ -70,17 +67,16 @@ function buildIsolatedFormalHost(directory: string): { executable: string; runti
   const sdk = spawnSync("xcrun", ["--sdk", "macosx", "--show-sdk-path"], { encoding: "utf8" });
   expect(sdk.status, sdk.stderr).toBe(0);
   const architecture = process.arch === "arm64" ? "arm64" : "x86_64";
-  const bridgeObject = join(runtimeDirectory, "permission-host-bridge.o");
-  const bridgeBuild = spawnSync("xcrun", ["clang", "-fobjc-arc", "-target", `${architecture}-apple-macos12.0`,
-    "-isysroot", sdk.stdout.trim(), "-c", join(native, "permission-host-bridge.m"), "-o", bridgeObject],
-  { cwd: root, encoding: "utf8", timeout: 60_000 });
-  expect(bridgeBuild.status, bridgeBuild.stderr).toBe(0);
 
   const executable = join(runtimeDirectory, "incodex-permission-host-test");
   const hostBuild = spawnSync("xcrun", ["swiftc", "-parse-as-library", "-emit-executable",
     "-module-name", "IncodexPermissionHostIsolatedTest", "-disable-autolinking-runtime-compatibility",
     "-target", `${architecture}-apple-macos12.0`, "-sdk", sdk.stdout.trim(),
-    join(native, "permission-host-osa.swift"), isolatedHost, embedded, bridgeObject,
+    join(native, "permission-views.swift"),
+    join(native, "permission-host-settings.swift"),
+    join(native, "permission-host-flight.swift"),
+    join(native, "permission-host-presenter.swift"),
+    isolatedHost,
     "-Xlinker", "-export_dynamic", "-o", executable],
   { cwd: root, encoding: "utf8", timeout: 90_000 });
   expect(hostBuild.status, hostBuild.stderr).toBe(0);
@@ -181,7 +177,7 @@ const longErrorBody = [
   "P19-LONG-BODY-END",
 ].join("\n");
 
-test.skipIf(process.platform !== "darwin" || !runDynamic)("formal OSA UI host reflows the P19 error page, cleans helper surfaces, closes on Skip and accepts a fresh request", async () => {
+test.skipIf(process.platform !== "darwin" || !runDynamic)("formal native Swift UI host reflows the P19 error page, cleans helper surfaces, closes on Skip and accepts a fresh request", async () => {
   // The secure native artifact loader deliberately rejects symlink ancestors.
   // Keep the ephemeral test runtime under the canonical repository directory
   // instead of macOS's often-symlinked temporary path.
@@ -232,7 +228,9 @@ test.skipIf(process.platform !== "darwin" || !runDynamic)("formal OSA UI host re
     const pressed = inspect(built.axProbe, first.child.pid!, "Permission needs attention", longErrorBody, "Skip", true);
     expect(pressed.pressResult).toBe(0);
     await first.waitFor((event) => event.type === "later");
-    await first.waitFor((event) => event.type === "close");
+    // The CLI owns the process lifetime: a user dismissal emits `later`, and
+    // its caller then sends the close command. The presenter does not invent
+    // a second protocol event when it closes its own window.
     first.send({ type: "close" });
     const firstExit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) =>
       first!.child.once("close", (code, signal) => resolve({ code, signal })));
@@ -250,7 +248,7 @@ test.skipIf(process.platform !== "darwin" || !runDynamic)("formal OSA UI host re
       second!.child.once("close", (code, signal) => resolve({ code, signal })));
     expect(secondExit).toEqual({ code: 0, signal: null });
 
-    console.log(`P19_RUNTIME initial=${initial.width}x${initial.height} awaitingOnscreen=${awaiting.cgOnscreenWindowCount} error=${error.width}x${error.height} errorAX=${afterCleanup.axWindowCount} errorOnscreen=${afterCleanup.cgOnscreenWindowCount} errorCGRows=${JSON.stringify(afterCleanup.cgWindows)} buttonEnabled=${error.buttonEnabled} settingsPidsStable=${settingsBefore.join(",") === settingsAfter.join(",")} allowEvent=false skip=${pressed.pressResult} later=seen close=seen reentry=yes`);
+    console.log(`P19_RUNTIME initial=${initial.width}x${initial.height} awaitingOnscreen=${awaiting.cgOnscreenWindowCount} error=${error.width}x${error.height} errorAX=${afterCleanup.axWindowCount} errorOnscreen=${afterCleanup.cgOnscreenWindowCount} errorCGRows=${JSON.stringify(afterCleanup.cgWindows)} buttonEnabled=${error.buttonEnabled} settingsPidsStable=${settingsBefore.join(",") === settingsAfter.join(",")} allowEvent=false skip=${pressed.pressResult} later=seen closeCommand=sent reentry=yes`);
   } finally {
     for (const host of [first, second]) {
       if (host && host.child.exitCode === null && host.child.signalCode === null) {

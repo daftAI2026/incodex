@@ -33,31 +33,19 @@ const SOURCE_BYTES: &[u8] = include_bytes!(concat!(
 const HOST_SOURCE_BYTES: &[&[u8]] = &[
     include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../native/macos/permission-host-osa.swift"
-    )),
-    include_bytes!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
         "/../../native/macos/permission-host.swift"
     )),
     include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../native/macos/permission-host-bridge.m"
+        "/../../native/macos/permission-host-presenter.swift"
     )),
     include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../native/macos/permission-host-runtime.js"
+        "/../../native/macos/permission-host-settings.swift"
     )),
     include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../native/macos/permission-host-objc.js"
-    )),
-    include_bytes!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../dist/incodex-permission-ui.cjs"
-    )),
-    include_bytes!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../dist/incodex-dock-menu.cjs"
+        "/../../native/macos/permission-host-flight.swift"
     )),
 ];
 

@@ -15,16 +15,11 @@ import { tmpdir } from "node:os";
 const root = join(import.meta.dir, "..");
 const nativeRoot = join(root, "native", "macos");
 const sourcePath = join(nativeRoot, "permission-views.swift");
-// The native process owns only protocol/lifetime and ABI adaptation. Embed
-// the existing JS UI verbatim; do not compile the retired duplicate presenter.
 const hostSourcePaths = [
-  join(nativeRoot, "permission-host-osa.swift"),
   join(nativeRoot, "permission-host.swift"),
-  join(nativeRoot, "permission-host-bridge.m"),
-  join(nativeRoot, "permission-host-runtime.js"),
-  join(nativeRoot, "permission-host-objc.js"),
-  join(root, "dist", "incodex-permission-ui.cjs"),
-  join(root, "dist", "incodex-dock-menu.cjs"),
+  join(nativeRoot, "permission-host-presenter.swift"),
+  join(nativeRoot, "permission-host-settings.swift"),
+  join(nativeRoot, "permission-host-flight.swift"),
 ];
 const distRoot = join(nativeRoot, "dist");
 const dylibName = "incodex-permission-ui.dylib";
@@ -134,17 +129,6 @@ function buildSlice(swiftc: string, sdkPath: string, architecture: string, outpu
 }
 
 function buildHostSlice(swiftc: string, sdkPath: string, architecture: string, output: string): void {
-  const source = readFileSync(join(nativeRoot, "permission-host-runtime.js"), "utf8")
-    .replace("// __INCODEX_OBJC_ADAPTER__", () => readFileSync(join(nativeRoot, "permission-host-objc.js"), "utf8"))
-    .replace("__INCODEX_ORIGINAL_UI_JSON__", () => JSON.stringify(readFileSync(join(root, "dist", "incodex-permission-ui.cjs"), "utf8")))
-    .replace("__INCODEX_ORIGINAL_LOCATOR_JSON__", () => JSON.stringify(readFileSync(join(root, "dist", "incodex-dock-menu.cjs"), "utf8")));
-  let delimiter = "#";
-  while (source.includes(`"""${delimiter}`) || source.includes(`\\${delimiter}(`)) delimiter += "#";
-  const embedded = `${output}-source.swift`;
-  writeFileSync(embedded, `enum PermissionHostOSASource { static let runtime = ${delimiter}"""\n${source}\n"""${delimiter} }\n`);
-  const bridgeObject = `${output}-bridge.o`;
-  run("xcrun", ["clang", "-fobjc-arc", "-target", `${architecture}-apple-macos${minimumMacOS}`,
-    "-isysroot", sdkPath, "-c", join(nativeRoot, "permission-host-bridge.m"), "-o", bridgeObject]);
   run(swiftc, [
     "-parse-as-library",
     "-emit-executable",
@@ -155,9 +139,8 @@ function buildHostSlice(swiftc: string, sdkPath: string, architecture: string, o
     `${architecture}-apple-macos${minimumMacOS}`,
     "-sdk",
     sdkPath,
-    ...hostSourcePaths.filter(path => path.endsWith(".swift")),
-    embedded,
-    bridgeObject,
+    sourcePath,
+    ...hostSourcePaths,
     "-Xlinker", "-export_dynamic",
     "-o",
     output,

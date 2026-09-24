@@ -19,7 +19,8 @@ import Foundation
   var interrupted = PermissionHostSpring()
   let interruptedTimes = [0.0, 0.016, 0.016, 0.008, Double.nan, Double.infinity, 0.032, 4.0, 4.016, 4.032]
   let interruptedSamples = interruptedTimes.map { interrupted.advance(to: $0) }
-  let geometry = [0.0, 0.25, 0.5, 0.75, 1.0].map { progress -> [Double] in
+  let geometry = (0...10).map { progressIndex -> [Double] in
+   let progress = Double(progressIndex) / 10
    let sample = permissionHostFlightSample(source: CGRect(x: 10,y: 20,width: 518,height: 80), sourceRadius: 12, target: CGRect(x: 300,y: 500,width: 400,height: 180), targetRadius: 14, progress: progress)
    return [sample.bounds.minX, sample.bounds.minY, sample.bounds.width, sample.bounds.height, sample.cornerRadius]
   }
@@ -52,7 +53,7 @@ import Foundation
   for (const [index, time] of [0, .016, .016, .008, Number.NaN, Number.POSITIVE_INFINITY, .032, 4, 4.016, 4.032].entries()) {
     expect(actual.interrupted[index]).toBeCloseTo(advancePermissionSpring(interrupted, time), 12);
   }
-  for (const [index, progress] of [0, .25, .5, .75, 1].entries()) {
+  for (const [index, progress] of Array.from({ length: 11 }, (_, i) => i / 10).entries()) {
     const sample = samplePermissionFlightAtProgress({ x: 10, y: 20, width: 518, height: 80, radius: 12 }, { x: 300, y: 500, width: 400, height: 180, radius: 14 }, progress);
     expect(actual.geometry[index]).toEqual([sample.bounds.x, sample.bounds.y, sample.bounds.width, sample.bounds.height, sample.cornerRadius]);
   }

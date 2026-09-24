@@ -33,6 +33,13 @@ function buildIsolatedFormalHost(directory: string): { executable: string; runti
   const host = readFileSync(join(nativeDist, "incodex-permission-host"));
   const manifest = JSON.parse(nativeManifest.toString("utf8"));
   expect(manifest.sourceSha256).toBe(digest(source));
+  const hostSources = [
+    "permission-host.swift",
+    "permission-host-presenter.swift",
+    "permission-host-settings.swift",
+    "permission-host-flight.swift",
+  ].map((name) => readFileSync(join(native, name)));
+  expect(manifest.hostSourceSha256).toBe(digest(Buffer.concat(hostSources)));
   expect(manifest.files["incodex-permission-ui.dylib"]).toBe(digest(dylib));
   expect(manifest.files["incodex-permission-host"]).toBe(digest(host));
 
@@ -49,17 +56,9 @@ function buildIsolatedFormalHost(directory: string): { executable: string; runti
   writeFileSync(join(runtimeDirectory, "runtime-manifest.json"), `${JSON.stringify(runtimeManifest)}\n`, { mode: 0o600 });
   chmodSync(runtimeDirectory, 0o700);
 
-  const runtime = readFileSync(join(native, "permission-host-runtime.js"), "utf8")
-    .replace("// __INCODEX_OBJC_ADAPTER__", () => readFileSync(join(native, "permission-host-objc.js"), "utf8"))
-    .replace("__INCODEX_ORIGINAL_UI_JSON__", () => JSON.stringify(readFileSync(join(root, "dist", "incodex-permission-ui.cjs"), "utf8")))
-    .replace("__INCODEX_ORIGINAL_LOCATOR_JSON__", () => JSON.stringify(readFileSync(join(root, "dist", "incodex-dock-menu.cjs"), "utf8")));
-  let delimiter = "#";
-  while (runtime.includes(`"""${delimiter}`) || runtime.includes(`\\${delimiter}(`)) delimiter += "#";
-  const embedded = join(runtimeDirectory, "permission-host-runtime.swift");
-  writeFileSync(embedded, `enum PermissionHostOSASource { static let runtime = ${delimiter}"""\n${runtime}\n"""${delimiter} }\n`);
-
-  // This isolated copy bypasses only the official Codex foreground-process
-  // eligibility gate and pins Aqua appearance for a repeatable Light sample.
+  // The product host admits only the unique foreground Codex process. This
+  // isolated fixture bypasses that external eligibility gate and uses the
+  // same SwiftUI views, native presenter, flight and Settings locator.
   const hostSource = readFileSync(join(native, "permission-host.swift"), "utf8");
   const gate = /static func canPresentOfficialTarget\(\) -> Bool \{[\s\S]*?\n {4}\}/;
   expect(hostSource.match(gate)?.[0]).toContain("officialCodexBundleIdentifier");
@@ -76,17 +75,16 @@ function buildIsolatedFormalHost(directory: string): { executable: string; runti
   const sdk = spawnSync("xcrun", ["--sdk", "macosx", "--show-sdk-path"], { encoding: "utf8" });
   expect(sdk.status, sdk.stderr).toBe(0);
   const architecture = process.arch === "arm64" ? "arm64" : "x86_64";
-  const bridgeObject = join(runtimeDirectory, "permission-host-bridge.o");
-  const bridgeBuild = spawnSync("xcrun", ["clang", "-fobjc-arc", "-target", `${architecture}-apple-macos12.0`,
-    "-isysroot", sdk.stdout.trim(), "-c", join(native, "permission-host-bridge.m"), "-o", bridgeObject],
-  { cwd: root, encoding: "utf8", timeout: 60_000 });
-  expect(bridgeBuild.status, bridgeBuild.stderr).toBe(0);
 
   const executable = join(runtimeDirectory, "incodex-permission-host-c14");
   const hostBuild = spawnSync("xcrun", ["swiftc", "-parse-as-library", "-emit-executable",
     "-module-name", "IncodexPermissionHostC14Test", "-disable-autolinking-runtime-compatibility",
     "-target", `${architecture}-apple-macos12.0`, "-sdk", sdk.stdout.trim(),
-    join(native, "permission-host-osa.swift"), isolatedHost, embedded, bridgeObject,
+    join(native, "permission-views.swift"),
+    join(native, "permission-host-settings.swift"),
+    join(native, "permission-host-flight.swift"),
+    join(native, "permission-host-presenter.swift"),
+    isolatedHost,
     "-Xlinker", "-export_dynamic", "-o", executable],
   { cwd: root, encoding: "utf8", timeout: 90_000 });
   expect(hostBuild.status, hostBuild.stderr).toBe(0);
@@ -200,7 +198,7 @@ function luminance(pixel: Probe): number {
 }
 
 test.skipIf(process.platform !== "darwin" || !runDiagnostic)(
-  "formal OSA UI host records the C14 Allow control through hover, held press, drag-out cancellation and one recovery click",
+  "formal native Swift UI host records the C14 Allow control through hover, held press, drag-out cancellation and one recovery click",
   async () => {
     // The secure native artifact loader rejects symlink ancestors. The isolated
     // runtime lives under the real repo. Captured PNGs stay in the OS temp dir

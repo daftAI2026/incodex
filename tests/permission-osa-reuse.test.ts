@@ -1,29 +1,23 @@
 import { expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { RUNTIME_EXTERNAL_ARTIFACT_NAMES } from "../src/runtime-manifest.ts";
 
 const root = join(import.meta.dir, "..");
-test("OSA CommonJS wrapper loads the unchanged shipping bundles", () => {
-  const runtime = readFileSync(join(root, "native/macos/permission-host-runtime.js"), "utf8");
-  const wrapper = runtime.match(/^function loadOriginal\(source\).*$/m)?.[0];
-  expect(wrapper).toBeDefined();
-  const load = new Function("require", "__dirname", `${wrapper};return loadOriginal;`)(() => ({}), "/fixture");
-  for (const name of ["incodex-permission-ui.cjs", "incodex-dock-menu.cjs"]) {
-    expect(Object.keys(load(readFileSync(join(root, "dist", name), "utf8"))).length).toBeGreaterThan(0);
-  }
+const sha = (bytes: Buffer | string) => createHash("sha256").update(bytes).digest("hex");
+
+test("the shared TypeScript permission UI remains a published Electron Runtime artifact", () => {
+  const uiPath = join(root, "dist/incodex-permission-ui.cjs");
+  const ui = readFileSync(uiPath);
+  const manifest = JSON.parse(readFileSync(join(root, "dist/runtime-manifest.json"), "utf8"));
+  expect(RUNTIME_EXTERNAL_ARTIFACT_NAMES).toContain("incodex-permission-ui.cjs");
+  expect(manifest.files["incodex-permission-ui.cjs"]).toBe(sha(ui));
+  expect(ui.toString("utf8")).toContain("createNativeAccessibilitySetupWindow");
 });
-test("shipped permission host reuses the original JS UI instead of Swift window orchestration", () => {
-  const build = readFileSync(join(root, "scripts/build-permission-native.ts"), "utf8");
-  expect(build).toContain("permission-host-osa.swift");
-  expect(build).toContain("permission-host-runtime.js");
-  expect(build).not.toContain('join(nativeRoot, "permission-host-flight.swift")');
-  expect(build).not.toContain('join(nativeRoot, "permission-host-presenter.swift")');
-});
-test("OSA runtime uses the original loader and does not inject an unchecked native library", () => {
-  const runtime = readFileSync(join(root, "native/macos/permission-host-runtime.js"), "utf8");
-  expect(runtime).toContain("__INCODEX_ORIGINAL_UI_JSON__");
-  expect(runtime).toContain("createNativeAccessibilitySetupWindow");
-  expect(runtime).not.toContain("nativeLibrary:");
-  expect(runtime).not.toContain("startForScreenHandler");
-  expect(runtime).not.toContain("x-apple.systempreferences");
+
+test("the compatibility native library remains a separately published artifact", () => {
+  const manifest = JSON.parse(readFileSync(join(root, "native/macos/dist/runtime-native-manifest.json"), "utf8"));
+  const dylib = readFileSync(join(root, "native/macos/dist/incodex-permission-ui.dylib"));
+  expect(manifest.files["incodex-permission-ui.dylib"]).toBe(sha(dylib));
 });

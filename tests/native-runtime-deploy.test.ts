@@ -53,32 +53,28 @@ test("development Runtime includes native bytes in the same manifest, never on W
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
-test("development Runtime carries the optional executable host with its source hash", () => {
+test("development Runtime carries the Swift executable host with its source hash", () => {
   const projectRoot = mkdtempSync(join(tmpdir(), "incodex-native-host-deploy-"));
   const directory = join(projectRoot, "native", "macos");
   try {
     const source = "SwiftUI source";
     const nativeHostSources = [
-      "permission-host-osa.swift",
       "permission-host.swift",
-      "permission-host-bridge.m",
-      "permission-host-runtime.js",
-      "permission-host-objc.js",
+      "permission-host-presenter.swift",
+      "permission-host-settings.swift",
+      "permission-host-flight.swift",
     ];
-    const embeddedHostSources = ["incodex-permission-ui.cjs", "incodex-dock-menu.cjs"];
     const bytes = Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0xff]);
     const host = Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0x01]);
     mkdirSync(join(directory, "dist"), { recursive: true });
     mkdirSync(join(projectRoot, "dist"), { recursive: true });
     writeFileSync(join(directory, "permission-views.swift"), source);
     for (const file of nativeHostSources) writeFileSync(join(directory, file), file);
-    for (const file of embeddedHostSources) writeFileSync(join(projectRoot, "dist", file), file);
     writeFileSync(join(directory, "dist/incodex-permission-ui.dylib"), bytes);
     // Git preserves the executable bit, not private deployment permissions.
     writeFileSync(join(directory, "dist/incodex-permission-host"), host, { mode: 0o755 });
     const hostSourceHash = sha(Buffer.concat([
       ...nativeHostSources.map((file) => readFileSync(join(directory, file))),
-      ...embeddedHostSources.map((file) => readFileSync(join(projectRoot, "dist", file))),
     ]));
     const manifest = JSON.stringify({ schemaVersion: 1, platform: "macos", abiVersion: 1,
       minimumMacOS: "12.0", architectures: ["arm64", "x86_64"], sourceSha256: sha(source),

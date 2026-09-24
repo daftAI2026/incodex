@@ -30,13 +30,10 @@ export function macOSNativeRuntimeFiles(
   const hostBytes = hostDeclared ? read(join(nativeRoot, "dist", hostName)) : undefined;
   const hostMode = hostDeclared ? lstatSync(join(nativeRoot, "dist", hostName)).mode : 0;
   const hostSourcePaths = [
-    join(nativeRoot, "permission-host-osa.swift"),
     join(nativeRoot, "permission-host.swift"),
-    join(nativeRoot, "permission-host-bridge.m"),
-    join(nativeRoot, "permission-host-runtime.js"),
-    join(nativeRoot, "permission-host-objc.js"),
-    join(nativeRoot, "..", "..", "dist", "incodex-permission-ui.cjs"),
-    join(nativeRoot, "..", "..", "dist", "incodex-dock-menu.cjs"),
+    join(nativeRoot, "permission-host-presenter.swift"),
+    join(nativeRoot, "permission-host-settings.swift"),
+    join(nativeRoot, "permission-host-flight.swift"),
   ];
   const hostSourceHash = hostDeclared
     ? sha(Buffer.concat(hostSourcePaths.map((file) => read(file))))
