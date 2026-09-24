@@ -477,6 +477,8 @@ private struct PermissionPlaceholderLabel<Label: View>: View {
                         style: StrokeStyle(lineWidth: 1, dash: [3, 6]),
                     )
             }
+            .scaleEffect(pressed ? 0.99 : 1)
+            .opacity(pressed ? 0.88 : 1)
             .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             .onHover { state.placeholderHovered = $0 }
     }

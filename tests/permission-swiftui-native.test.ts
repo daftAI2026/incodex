@@ -294,6 +294,17 @@ test.skipIf(process.platform !== "darwin")("compiles the real placeholder hover 
   }
 }, 90_000);
 
+test("placeholder pressed style transforms the whole SwiftUI button, not only its outline", () => {
+  const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
+  const start = source.indexOf("private struct PermissionPlaceholderLabel");
+  const end = source.indexOf("private func permissionPlaceholderText", start);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  const placeholder = source.slice(start, end);
+  expect(placeholder).toContain(".scaleEffect(pressed ? 0.99 : 1)");
+  expect(placeholder).toContain(".opacity(pressed ? 0.88 : 1)");
+});
+
 function permissionCardSource(): string {
   const source = readFileSync(join(import.meta.dir, "..", "native/macos/permission-views.swift"), "utf8");
   const start = source.indexOf("private struct PermissionCardRoot");
