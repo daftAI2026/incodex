@@ -256,7 +256,8 @@ describe("hat-glasses stays after header remount", () => {
 
   test("parks the button before the Search tooltip trigger boundary", () => {
     expect(inject).toContain("searchButtonPlacement(search)");
-    expect(inject).toContain("placement.parent.insertBefore(btn, placement.before)");
+    expect(inject).toContain("placement.parent.insertBefore(mount, placement.before)");
+    expect(inject).toContain("const mount = buttonMount(btn, placement)");
     expect(inject).not.toContain("search.parentElement.insertBefore(btn, search)");
     expect(inject).not.toContain("cluster.insertBefore(btn, cluster.firstElementChild)");
   });
