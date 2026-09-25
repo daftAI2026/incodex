@@ -904,7 +904,7 @@ fn native_guide_config(
     let copy_object = copy
         .as_object_mut()
         .ok_or("native Accessibility locale copy is not an object")?;
-    choose_guide_body(copy_object, copy_context)?;
+    choose_guide_copy(copy_object, copy_context)?;
     if let Some(error_body) = copy_object.get("errorBody").and_then(Value::as_str) {
         copy_object.insert(
             "errorBody".into(),
@@ -922,20 +922,27 @@ fn native_guide_config(
     })
 }
 
-fn choose_guide_body(
+fn choose_guide_copy(
     copy: &mut serde_json::Map<String, Value>,
     context: GuideCopyContext,
 ) -> Result<(), String> {
-    let key = match context {
-        GuideCopyContext::Installed => "body",
-        GuideCopyContext::Official => "officialBody",
+    let (title_key, body_key) = match context {
+        GuideCopyContext::Installed => ("installedTitle", "body"),
+        GuideCopyContext::Official => ("title", "officialBody"),
     };
+    let title = copy
+        .get(title_key)
+        .and_then(Value::as_str)
+        .filter(|title| !title.trim().is_empty())
+        .ok_or_else(|| format!("native Accessibility copy is missing {title_key}"))?
+        .to_owned();
     let body = copy
-        .get(key)
+        .get(body_key)
         .and_then(Value::as_str)
         .filter(|body| !body.trim().is_empty())
-        .ok_or_else(|| format!("native Accessibility copy is missing {key}"))?
+        .ok_or_else(|| format!("native Accessibility copy is missing {body_key}"))?
         .to_owned();
+    copy.insert("title".into(), Value::String(title));
     copy.insert("body".into(), Value::String(body));
     Ok(())
 }
@@ -1284,14 +1291,15 @@ mod tests {
     }
 
     #[test]
-    fn native_guide_body_follows_verified_target_identity() {
+    fn native_guide_copy_follows_verified_target_identity() {
         let mut installed = serde_json::json!({
             "title": "Enable ChatGPT script control",
             "installedTitle": "Re-enable ChatGPT script control",
             "body": "Installing Incodex changes ChatGPT.",
             "officialBody": "This is the official ChatGPT app.",
         });
-        choose_guide_body(
+        let original = installed.clone();
+        choose_guide_copy(
             installed.as_object_mut().unwrap(),
             GuideCopyContext::Installed,
         )
@@ -1299,8 +1307,8 @@ mod tests {
         assert_eq!(installed["title"], "Re-enable ChatGPT script control");
         assert_eq!(installed["body"], "Installing Incodex changes ChatGPT.");
 
-        let mut official = installed.clone();
-        choose_guide_body(
+        let mut official = original;
+        choose_guide_copy(
             official.as_object_mut().unwrap(),
             GuideCopyContext::Official,
         )
@@ -1310,14 +1318,14 @@ mod tests {
 
         let mut missing = serde_json::json!({ "body": "Install only" });
         assert!(
-            choose_guide_body(missing.as_object_mut().unwrap(), GuideCopyContext::Official)
+            choose_guide_copy(missing.as_object_mut().unwrap(), GuideCopyContext::Official)
                 .is_err()
         );
         let mut missing_installed_title = serde_json::json!({
             "title": "Enable ChatGPT script control",
             "body": "Install only",
         });
-        assert!(choose_guide_body(
+        assert!(choose_guide_copy(
             missing_installed_title.as_object_mut().unwrap(),
             GuideCopyContext::Installed,
         )
@@ -1351,11 +1359,11 @@ mod tests {
             assert_ne!(install, instruction, "{locale}");
 
             let mut installed = entry.as_object().unwrap().clone();
-            choose_guide_body(&mut installed, GuideCopyContext::Installed).unwrap();
+            choose_guide_copy(&mut installed, GuideCopyContext::Installed).unwrap();
             assert_eq!(installed["title"], installed_title, "{locale}");
             assert_eq!(installed["body"], install, "{locale}");
             let mut restored = entry.as_object().unwrap().clone();
-            choose_guide_body(&mut restored, GuideCopyContext::Official).unwrap();
+            choose_guide_copy(&mut restored, GuideCopyContext::Official).unwrap();
             assert_eq!(restored["title"], title, "{locale}");
             assert_eq!(restored["body"], official, "{locale}");
         }

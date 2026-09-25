@@ -11,6 +11,7 @@ const ACCESSIBILITY_SETUP_COPY_BASE = /* @__PURE__ */ (() => ({
   ...ACCESSIBILITY_REGIONAL_COPY,
   en: {
     title: "Enable ChatGPT script control",
+    installedTitle: "Re-enable ChatGPT script control",
     body: "Installing Incodex modifies ChatGPT,\nso its Accessibility permission needs to be granted again.",
     permissionTitle: "Accessibility",
     permissionDescription: "Read and interact with app interfaces",
@@ -29,6 +30,7 @@ const ACCESSIBILITY_SETUP_COPY_BASE = /* @__PURE__ */ (() => ({
   },
   "zh-CN": {
     title: "启用 ChatGPT 脚本控制",
+    installedTitle: "重新启用 ChatGPT 脚本控制",
     body: "安装 Incodex 会修改 ChatGPT，因此需要重新授予它辅助功能权限。",
     permissionTitle: "无障碍",
     permissionDescription: "读取和操作其他应用的界面",
@@ -47,6 +49,7 @@ const ACCESSIBILITY_SETUP_COPY_BASE = /* @__PURE__ */ (() => ({
   },
   "zh-HK": {
     title: "啟用 ChatGPT 腳本控制",
+    installedTitle: "重新啟用 ChatGPT 腳本控制",
     body: "安裝 Incodex 會修改 ChatGPT，因此需要重新授予它輔助功能權限。",
     permissionTitle: "輔助使用",
     permissionDescription: "讀取並操作其他應用程式的介面",
@@ -65,6 +68,7 @@ const ACCESSIBILITY_SETUP_COPY_BASE = /* @__PURE__ */ (() => ({
   },
   "zh-TW": {
     title: "啟用 ChatGPT 腳本控制",
+    installedTitle: "重新啟用 ChatGPT 腳本控制",
     body: "安裝 Incodex 會修改 ChatGPT，因此需要重新授予它輔助功能權限。",
     permissionTitle: "輔助使用",
     permissionDescription: "讀取並操作其他應用程式的介面",
