@@ -353,9 +353,15 @@ where
                         return Ok(Outcome::Pending);
                     }
                 }
-                ops.reset()?;
+                if let Err(error) = ops.reset() {
+                    show_error_until_dismissed(&mut *host, error.clone(), choice_timeout);
+                    return Err(error);
+                }
                 reset_performed = true;
-                ops.open_settings()?;
+                if let Err(error) = ops.open_settings() {
+                    show_error_until_dismissed(&mut *host, error.clone(), choice_timeout);
+                    return Err(error);
+                }
                 // Only charge the two-minute handoff window once Settings
                 // has actually opened.  Target revalidation and TCC reset
                 // are synchronous CLI work after the user's choice and must
@@ -374,7 +380,10 @@ where
                 // Back -> Allow is a retry of the system handoff, not another
                 // TCC reset.  Settings is reopened and the same app is probed.
                 host.send_state(HostState::Repairing)?;
-                ops.open_settings()?;
+                if let Err(error) = ops.open_settings() {
+                    show_error_until_dismissed(&mut *host, error.clone(), choice_timeout);
+                    return Err(error);
+                }
                 host.send_state(HostState::AwaitingUser)?;
             }
             HostEvent::Retry => {
@@ -408,13 +417,36 @@ where
         });
     }
 
-    let _ = host.send_state(HostState::Error(if reset_performed {
+    let message = if reset_performed {
         "native Accessibility guide timed out before Accessibility was granted".into()
     } else {
         "native Accessibility guide did not receive a user choice in time".into()
-    }));
-    host.close();
+    };
+    show_error_until_dismissed(&mut *host, message, choice_timeout);
     Ok(Outcome::Pending)
+}
+
+/// Keep the native error page alive long enough for a user to read it or
+/// dismiss it.  The timeout remains bounded, and no further choices can
+/// authorize a reset while the presenter is in its non-retryable error state.
+fn show_error_until_dismissed(host: &mut dyn GuideHost, message: String, timeout: Duration) {
+    if host.send_state(HostState::Error(message)).is_err() {
+        host.close();
+        return;
+    }
+
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        match host.poll(remaining.min(Duration::from_millis(250))) {
+            Ok(HostEvent::Later | HostEvent::Close | HostEvent::Eof | HostEvent::Error(_))
+            | Err(_) => break,
+            // Error is a terminal presenter state. Ignore any stale or
+            // malformed choice rather than starting another operation.
+            Ok(_) => {}
+        }
+    }
+    host.close();
 }
 
 fn wait_for_decision(ops: &mut impl GuideOps) -> Result<AccessibilityStatus, String> {

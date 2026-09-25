@@ -67,6 +67,8 @@ mod tests {
         events: Vec<&'static str>,
         reset_error: bool,
         settings_error: bool,
+        settings_error_after_first: bool,
+        settings_calls: usize,
     }
 
     impl FakeOps {
@@ -76,6 +78,8 @@ mod tests {
                 events: vec![],
                 reset_error: false,
                 settings_error: false,
+                settings_error_after_first: false,
+                settings_calls: 0,
             }
         }
     }
@@ -109,7 +113,8 @@ mod tests {
 
         fn open_settings(&mut self) -> Result<(), String> {
             self.events.push("settings");
-            if self.settings_error {
+            self.settings_calls += 1;
+            if self.settings_error || (self.settings_error_after_first && self.settings_calls > 1) {
                 Err("settings failed".into())
             } else {
                 Ok(())
@@ -152,12 +157,23 @@ mod tests {
             if let Some(delay) = self.poll_delays.pop_front() {
                 std::thread::sleep(delay);
             }
-            Ok(self.events.pop_front().unwrap_or(HostEvent::Timeout))
+            let event = self.events.pop_front().unwrap_or(HostEvent::Timeout);
+            self.trace.lock().unwrap().push(format!("poll:{event:?}"));
+            Ok(event)
         }
 
         fn close(&mut self) {
+            if self.closed {
+                return;
+            }
             self.closed = true;
             self.trace.lock().unwrap().push("close".into());
+        }
+    }
+
+    impl Drop for FakeHost {
+        fn drop(&mut self) {
+            self.close();
         }
     }
 
@@ -276,6 +292,183 @@ mod tests {
                 .filter(|event| **event == "settings")
                 .count(),
             1
+        );
+    }
+
+    #[test]
+    fn reset_failure_keeps_the_error_page_open_until_the_user_dismisses_it() {
+        let mut ops = FakeOps::new(&[
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Denied,
+        ]);
+        ops.reset_error = true;
+        let mut factory = FakeFactory::new(&[HostEvent::Ready, HostEvent::Allow, HostEvent::Later]);
+        let trace = factory.host.as_ref().unwrap().trace.clone();
+
+        let result = run_fake(&mut ops, &mut factory, || Ok(()));
+
+        assert_eq!(result, Err("reset failed".into()));
+        assert_eq!(
+            ops.events.iter().filter(|event| **event == "reset").count(),
+            1
+        );
+        assert!(!ops.events.contains(&"settings"));
+        let trace = trace.lock().unwrap();
+        let error = trace
+            .iter()
+            .position(|event| event == "state:Error(\"reset failed\")")
+            .expect("reset failure must be shown in the native guide");
+        let dismissal = trace
+            .iter()
+            .position(|event| event == "poll:Later")
+            .expect("the fake host must receive the user's dismissal");
+        let close = trace.iter().position(|event| event == "close").unwrap();
+        assert!(
+            error < dismissal && dismissal < close,
+            "error page must remain open through dismissal: {trace:?}"
+        );
+    }
+
+    #[test]
+    fn settings_launch_failure_keeps_the_error_page_open_until_the_user_dismisses_it() {
+        let mut ops = FakeOps::new(&[
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Denied,
+        ]);
+        ops.settings_error = true;
+        let mut factory = FakeFactory::new(&[HostEvent::Ready, HostEvent::Allow, HostEvent::Later]);
+        let trace = factory.host.as_ref().unwrap().trace.clone();
+
+        let result = run_fake(&mut ops, &mut factory, || Ok(()));
+
+        assert_eq!(result, Err("settings failed".into()));
+        assert_eq!(
+            ops.events.iter().filter(|event| **event == "reset").count(),
+            1
+        );
+        assert_eq!(
+            ops.events
+                .iter()
+                .filter(|event| **event == "settings")
+                .count(),
+            1
+        );
+        let trace = trace.lock().unwrap();
+        let error = trace
+            .iter()
+            .position(|event| event == "state:Error(\"settings failed\")")
+            .expect("Settings launch failure must be shown in the native guide");
+        let dismissal = trace
+            .iter()
+            .position(|event| event == "poll:Later")
+            .expect("the fake host must receive the user's dismissal");
+        let close = trace.iter().position(|event| event == "close").unwrap();
+        assert!(
+            error < dismissal && dismissal < close,
+            "error page must remain open through dismissal: {trace:?}"
+        );
+    }
+
+    #[test]
+    fn retry_settings_launch_failure_keeps_error_open_without_repeating_reset() {
+        let mut ops = FakeOps::new(&[
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Denied,
+        ]);
+        ops.settings_error_after_first = true;
+        let mut factory = FakeFactory::new(&[
+            HostEvent::Ready,
+            HostEvent::Allow,
+            HostEvent::Retry,
+            HostEvent::Later,
+        ]);
+        let trace = factory.host.as_ref().unwrap().trace.clone();
+
+        let result = run_fake(&mut ops, &mut factory, || Ok(()));
+
+        assert_eq!(result, Err("settings failed".into()));
+        assert_eq!(
+            ops.events.iter().filter(|event| **event == "reset").count(),
+            1
+        );
+        assert_eq!(
+            ops.settings_calls, 2,
+            "initial open should succeed and Retry should fail"
+        );
+        let trace = trace.lock().unwrap();
+        let error = trace
+            .iter()
+            .position(|event| event == "state:Error(\"settings failed\")")
+            .expect("retry Settings failure must be shown in the native guide");
+        let dismissal = trace
+            .iter()
+            .position(|event| event == "poll:Later")
+            .expect("the fake host must receive the user's dismissal");
+        let close = trace.iter().position(|event| event == "close").unwrap();
+        assert!(
+            error < dismissal && dismissal < close,
+            "retry error page must remain open through dismissal: {trace:?}"
+        );
+    }
+
+    #[test]
+    fn post_allow_timeout_keeps_the_error_page_open_until_the_user_dismisses_it() {
+        let mut ops = FakeOps::new(&[
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Denied,
+        ]);
+        let mut factory = FakeFactory::new(&[
+            HostEvent::Ready,
+            HostEvent::Allow,
+            HostEvent::Timeout,
+            HostEvent::Later,
+        ]);
+        factory.host.as_mut().unwrap().poll_delays.extend([
+            Duration::ZERO,
+            Duration::ZERO,
+            Duration::from_millis(30),
+        ]);
+        let trace = factory.host.as_ref().unwrap().trace.clone();
+        let mut verify = || Ok(());
+
+        let result = run_fake_with_timeouts(
+            &mut ops,
+            &mut factory,
+            &mut verify,
+            Duration::from_secs(1),
+            Duration::from_millis(5),
+        );
+
+        assert_eq!(result, Ok(Outcome::Pending));
+        assert_eq!(
+            ops.events.iter().filter(|event| **event == "reset").count(),
+            1
+        );
+        assert_eq!(
+            ops.events
+                .iter()
+                .filter(|event| **event == "settings")
+                .count(),
+            1
+        );
+        let trace = trace.lock().unwrap();
+        let error = trace
+            .iter()
+            .position(|event| event.contains("state:Error(\"native Accessibility guide timed out"))
+            .expect("guide timeout must be shown in the native guide");
+        let dismissal = trace
+            .iter()
+            .rposition(|event| event == "poll:Later")
+            .expect("the fake host must receive the user's dismissal after timeout");
+        let close = trace.iter().position(|event| event == "close").unwrap();
+        assert!(
+            error < dismissal && dismissal < close,
+            "timeout page must remain open through dismissal: {trace:?}"
         );
     }
 
