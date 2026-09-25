@@ -261,7 +261,7 @@ public final class PermissionHostPresenter: NSObject {
             panel.isReleasedWhenClosed = false
             panel.hidesOnDeactivate = false
             panel.level = NSWindow.Level(rawValue: 3)
-            panel.title = ""
+            panel.title = permissionHostString(self.copy, "title")
             panel.titleVisibility = .hidden
             panel.titlebarAppearsTransparent = true
             panel.isMovableByWindowBackground = true
