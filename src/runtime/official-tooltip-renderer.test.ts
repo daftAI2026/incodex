@@ -1,12 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import {
   discoverCreateRootFactoryExport,
-  discoverOfficialReactRuntime,
+  discoverOfficialDynamicModuleGraph,
   discoverOfficialStaticModuleGraph,
+  discoverCalledFactoryExports,
+  assertOfficialModuleSourceSize,
+  discoverOfficialJsxFactoryExport,
+  discoverOfficialTooltipJsxReceivers,
+  discoverOfficialJsxRuntime,
   discoverOfficialTooltipModuleGraph,
   discoverOfficialTooltipModules,
-  captureOfficialTooltipContextProviders,
-  wrapWithOfficialTooltipContexts,
+  findOfficialSearchButton,
   findOfficialTooltipComponent,
   createOfficialTooltipRenderer,
   sharedTooltipState,
@@ -49,11 +53,39 @@ describe("official tooltip renderer", () => {
   test("limits shared runtime discovery to static modules reachable from the active entry", () => {
     expect(discoverOfficialStaticModuleGraph(
       "app://-/assets/index-current.js",
-      'import{n as runtime}from"./runtime-build.js";import{a as app}from"./shared-build.js";await import("./lazy-build.js");',
+      'import{n as runtime}from"./runtime-build.js";import{a as app}from"./shared-build.js";import"./styles-build.js";export{x}from"./reexport-build.js";const preload="./unrelated-build.js";const expression=/import{bad}from".\\/regex-build.js"/;/* import"./comment-build.js" */await import("./lazy-build.js");',
     )).toEqual([
       "app://-/assets/runtime-build.js",
       "app://-/assets/shared-build.js",
+      "app://-/assets/styles-build.js",
+      "app://-/assets/reexport-build.js",
     ]);
+  });
+  test("finds direct dynamic imports without treating preload-only URLs as dependencies", () => {
+    expect(discoverOfficialDynamicModuleGraph(
+      "app://-/assets/index-current.js",
+      'const deps=(m.f||(m.f=["./preload-only.js"]));import{shared}from"./shared.js";await load(()=>import(`./main-current.js`),preload([0]));',
+    )).toEqual([
+      "app://-/assets/shared.js",
+      "app://-/assets/main-current.js",
+    ]);
+  });
+  test("keeps the observed shared chunk under a dedicated source budget", () => {
+    const observedSharedChunk = "x".repeat(3_680_505);
+    expect(() => assertOfficialModuleSourceSize(observedSharedChunk, 8_000_000)).not.toThrow();
+    expect(() => assertOfficialModuleSourceSize(observedSharedChunk, 2_000_000)).toThrow();
+  });
+  test("requires a unique localized official Search trigger", () => {
+    const search = { getAttribute: () => "搜索" } as unknown as HTMLElement;
+    expect(findOfficialSearchButton({ querySelectorAll: () => [search] } as unknown as Document)).toBe(search);
+    expect(() => findOfficialSearchButton({ querySelectorAll: () => [] } as unknown as Document)).toThrow();
+    expect(() => findOfficialSearchButton({ querySelectorAll: () => [search, search] } as unknown as Document)).toThrow();
+  });
+  test("fails closed on a static import that escapes the packaged asset directory", () => {
+    expect(() => discoverOfficialStaticModuleGraph(
+      "app://-/assets/index-current.js",
+      'import{runtime}from"../outside.js";',
+    )).toThrow();
   });
   test("keeps the old direct-module layout in the same local graph", () => {
     expect(discoverOfficialTooltipModuleGraph(
@@ -75,16 +107,40 @@ describe("official tooltip renderer", () => {
 
     expect(discoverCreateRootFactoryExport(importer, source, shared)).toBe("Module");
   });
-  test("finds the one React singleton by public runtime capabilities", () => {
-    const expected = {
-      version: "19.1.0",
-      Fragment: Symbol.for("react.fragment"),
-      createElement() {},
-      createContext() {},
-      useContext() {},
+  test("finds only no-argument factories actually called by the current consumer", () => {
+    expect(discoverCalledFactoryExports(
+      "app://-/assets/current-main.js",
+      'import{Jsx as warm,Root as createRoot}from"./shared.js";const root=createRoot();warm();window.root=root;',
+      "app://-/assets/shared.js",
+    )).toEqual(["Jsx", "Root"]);
+  });
+  test("maps the live Tooltip JSX receiver through its initializer and consumer export", () => {
+    const runtimeVar = { jsx: (type: unknown, props: Record<string, unknown>) => ({ type, props }) };
+    function TooltipMock() { return runtimeVar.jsx("span", {}); }
+    const sharedSource = [
+      Function.prototype.toString.call(TooltipMock),
+      "var runtimeVar;function initialize(){runtimeVar=lazyFactory();}",
+      "export{lazyFactory as opaqueGetter};",
+    ].join("");
+    const importerSource = 'import{opaqueGetter as warm}from"./shared.js";warm();';
+    expect(discoverOfficialJsxFactoryExport(
+      TooltipMock, sharedSource, "app://-/assets/main.js", importerSource, "app://-/assets/shared.js",
+    )).toBe("opaqueGetter");
+  });
+  test("recognizes the official bundler's unbound JSX call form", () => {
+    expect(discoverOfficialTooltipJsxReceivers("function T(e){return(0,R3.jsx)(R3.Fragment,e)}"))
+      .toEqual(["R3"]);
+  });
+  test("invokes only the statically selected getter and validates official JSX capabilities", () => {
+    const expected = { Fragment: Symbol.for("react.fragment"), jsx() {}, jsxs() {} };
+    let invoked = 0;
+    const namespace = {
+      officialFactory: () => { invoked++; return expected; },
+      unrelated: () => { throw new Error("must not be called"); },
     };
-    expect(discoverOfficialReactRuntime({ opaqueExport: expected, decoy: { createElement() {} } })).toBe(expected);
-    expect(() => discoverOfficialReactRuntime({ first: expected, second: { ...expected } })).toThrow();
+    expect(discoverOfficialJsxRuntime(namespace, "officialFactory")).toBe(expected);
+    expect(invoked).toBe(1);
+    expect(() => discoverOfficialJsxRuntime({ officialFactory: () => ({ jsx() {} }) }, "officialFactory")).toThrow();
   });
   test("reuses the exported Tooltip type present in the live Search fiber", () => {
     function OfficialTooltip() {}
@@ -99,40 +155,6 @@ describe("official tooltip renderer", () => {
 
     expect(findOfficialTooltipComponent(trigger, { opaqueExport: OfficialTooltip })).toBe(OfficialTooltip);
     expect(() => findOfficialTooltipComponent(trigger, { unrelated: function Other() {} })).toThrow();
-  });
-  test("carries only contexts consumed by the Tooltip subtree into its isolated root", () => {
-    const outerProvider = { provider: "outer" };
-    const innerProvider = { provider: "inner" };
-    const outerContext = { Provider: outerProvider };
-    const innerContext = { Provider: innerProvider };
-    const tooltipFiber = {
-      dependencies: { firstContext: { context: innerContext, next: { context: outerContext } } },
-      child: { dependencies: { firstContext: { context: outerContext } } },
-      return: {
-        type: innerProvider,
-        memoizedProps: { value: "inner-value" },
-        return: { type: outerProvider, memoizedProps: { value: "outer-value" } },
-      },
-    };
-    const providers = captureOfficialTooltipContextProviders(tooltipFiber);
-
-    expect(providers).toEqual([
-      { type: innerProvider, value: "inner-value", depth: 1 },
-      { type: outerProvider, value: "outer-value", depth: 2 },
-    ]);
-    const wrapped = wrapWithOfficialTooltipContexts(
-      (type, props) => ({ type, props }), providers, "official-tooltip",
-    );
-    expect(wrapped).toEqual({
-      type: outerProvider,
-      props: {
-        value: "outer-value",
-        children: {
-          type: innerProvider,
-          props: { value: "inner-value", children: "official-tooltip" },
-        },
-      },
-    });
   });
   test("rejects external, traversing, ambiguous, or incomplete module sources", () => {
     for (const source of [
