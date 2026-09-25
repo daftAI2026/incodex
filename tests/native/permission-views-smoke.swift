@@ -204,15 +204,34 @@ enum PermissionViewsSmoke {
         let catalogData = try! Data(contentsOf: catalogURL)
         let catalog = try! JSONSerialization.jsonObject(with: catalogData) as! [String: [String: String]]
         precondition(catalog.count == 65, "permission copy catalog must retain all 65 locales")
+        let zhBaselineText = Text("ChatGPT")
+            .font(.body)
+            .frame(width: naturalHintWidth, alignment: .leading)
+        let zhBaselineHeight = ceil(NSHostingView(rootView: zhBaselineText).fittingSize.height)
         for locale in catalog.keys.sorted() {
+            let localizedCopy = catalog[locale]!
             let localized = IncodexPermissionHelperView(frame: NSRect(x: 0, y: 0, width: 531, height: 110))
-            localized.configure(copy: catalog[locale]! as NSDictionary, appIcon: source, actionTarget: nil)
+            localized.configure(copy: localizedCopy as NSDictionary, appIcon: source, actionTarget: nil)
             let size = localized.preferredContentSize
             let row = localized.appRowFrame
             precondition(size.width == 531 && size.height >= 110,
                          "invalid natural helper size for \(locale): \(size)")
             precondition(abs(row.maxY + 20 - size.height) <= 1,
                          "row lost its bottom anchor for \(locale): helper=\(size), row=\(row)")
+            if ["zh-CN", "zh-HK", "zh-TW"].contains(locale) {
+                let instruction = localizedCopy["dragInstruction"]!
+                let runsJSON = localizedCopy["dragInstructionRuns"]!
+                let styled = permissionStyledInstruction(instruction, runsJSON: runsJSON)
+                precondition(String(styled.characters) == instruction,
+                             "localized semantic runs changed or truncated \(locale) instruction")
+                let label = Text(styled)
+                    .font(.body)
+                    .frame(width: naturalHintWidth, alignment: .leading)
+                let renderedHeight = ceil(NSHostingView(rootView: label).fittingSize.height)
+                let requiredHelperHeight = max(110, 110 + renderedHeight - zhBaselineHeight)
+                precondition(size.height + 0.5 >= requiredHelperHeight,
+                             "natural helper height clipped \(locale) instruction: text=\(renderedHeight), helper=\(size.height)")
+            }
         }
         // Routine checks must not repeatedly open a synthetic window on the
         // user's desktop. Keep actual Return behavior as an explicit UI run.

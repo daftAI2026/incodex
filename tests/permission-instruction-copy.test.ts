@@ -11,8 +11,11 @@ type DragRun = {
 };
 
 type PermissionCopy = {
+  addedBody: string;
+  body: string;
   dragInstruction: string;
   dragInstructionRuns: string;
+  errorBody: string;
   permissionTitle: string;
 };
 
@@ -25,9 +28,10 @@ test("permission-only semantic copy is removed from the shared renderer bundle",
   expect(renderer.includes(" to the list above to allow "), "native-only text leaked into renderer").toBe(false);
 });
 
-// Frozen from the pre-runs copy table. This protects the existing 65 plain
-// sentences independently of any same-source runs generated beside them.
-const DRAG_INSTRUCTION_BASELINE_SHA256 = "67f47b23b9594334c3704d7d8db0a6fde4c5ac936a56083b9b6860fc69f07ef5";
+// Frozen from the authored copy table. This protects all 65 plain sentences
+// independently of any same-source runs generated beside them. Five direct
+// macOS pane references use the current local Settings label.
+const DRAG_INSTRUCTION_BASELINE_SHA256 = "760d073837e32dcd18235e13824af649720d11a9b682867da7dfa025e5fa29f9";
 
 const EXPECTED_RUNS: Record<string, DragRun[]> = {
   en: [
@@ -39,23 +43,23 @@ const EXPECTED_RUNS: Record<string, DragRun[]> = {
   "zh-CN": [
     { text: "将 ", role: "secondary" },
     { text: "ChatGPT", role: "primary" },
-    { text: " 拖到上方列表，允许", role: "secondary" },
-    { text: "辅助功能", role: "primary" },
-    { text: "访问", role: "secondary" },
+    { text: " 拖到上方的“", role: "secondary" },
+    { text: "无障碍", role: "primary" },
+    { text: "”列表中，然后开启对应权限", role: "secondary" },
   ],
   "zh-HK": [
     { text: "將 ", role: "secondary" },
     { text: "ChatGPT", role: "primary" },
-    { text: " 拖到上方列表，以允許", role: "secondary" },
-    { text: "輔助功能", role: "primary" },
-    { text: "存取", role: "secondary" },
+    { text: " 拖到上方的「", role: "secondary" },
+    { text: "輔助使用", role: "primary" },
+    { text: "」列表中，然後啟用權限", role: "secondary" },
   ],
   "zh-TW": [
     { text: "將 ", role: "secondary" },
     { text: "ChatGPT", role: "primary" },
-    { text: " 拖曳到上方列表，以允許", role: "secondary" },
-    { text: "輔助功能", role: "primary" },
-    { text: "存取", role: "secondary" },
+    { text: " 拖曳到上方的「", role: "secondary" },
+    { text: "輔助使用", role: "primary" },
+    { text: "」列表中，然後啟用權限", role: "secondary" },
   ],
   "et-EE": [
     { text: "Juurdepääsetavuse", role: "primary" },
@@ -75,6 +79,14 @@ const EXPECTED_RUNS: Record<string, DragRun[]> = {
     { text: "ChatGPT", role: "primary" },
     { text: "'yi yukarıdaki listeye sürükleyin", role: "secondary" },
   ],
+};
+
+const MACOS_ACCESSIBILITY_TERMS: Record<string, string> = {
+  ar: "تسهيلات الاستخدام",
+  "uk-UA": "Доступність",
+  "zh-CN": "无障碍",
+  "zh-HK": "輔助使用",
+  "zh-TW": "輔助使用",
 };
 
 function parseRuns(locale: string): DragRun[] {
@@ -151,4 +163,20 @@ test("keeps inflected permission names as authored primary runs", () => {
     expect(parseRuns(locale), locale).toEqual(EXPECTED_RUNS[locale]);
     expect(parseRuns(locale).map(run => run.text).join(""), locale).toBe(guide[locale].dragInstruction);
   }
+});
+
+test("uses the current macOS Accessibility label in direct navigation copy", () => {
+  for (const [locale, term] of Object.entries(MACOS_ACCESSIBILITY_TERMS)) {
+    const copy = guide[locale];
+    expect(copy.permissionTitle, `${locale} card title`).toBe(term);
+    expect(copy.addedBody, `${locale} Settings list`).toContain(term);
+    expect(copy.dragInstruction, `${locale} drag target`).toContain(term);
+    expect(copy.errorBody, `${locale} recovery breadcrumb`).toContain(`→ ${term}`);
+
+    const permissionNameRuns = parseRuns(locale).filter(run => run.role === "primary" && run.text !== "ChatGPT");
+    expect(permissionNameRuns, `${locale} permission-name emphasis`).toEqual([{ text: term, role: "primary" }]);
+  }
+  // This introductory Ukrainian sentence quotes the pane name; it is not
+  // merely a generic explanation of Accessibility permission.
+  expect(guide["uk-UA"].body).toContain("«Доступність»");
 });

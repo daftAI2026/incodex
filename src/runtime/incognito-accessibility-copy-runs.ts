@@ -23,8 +23,8 @@ export const ACCESSIBILITY_DRAG_INSTRUCTION_RUNS: Readonly<Record<string, string
   ar: authoredRuns(
     secondary("اسحب "),
     primary("ChatGPT"),
-    secondary(" إلى القائمة أعلاه للسماح ب"),
-    primary("إمكانية الوصول"),
+    secondary(" إلى القائمة أعلاه لمنحه إذن "),
+    primary("تسهيلات الاستخدام"),
   ),
   "bg-BG": authoredRuns(
     secondary("Плъзнете "),
@@ -370,9 +370,9 @@ export const ACCESSIBILITY_DRAG_INSTRUCTION_RUNS: Readonly<Record<string, string
   "uk-UA": authoredRuns(
     secondary("Перетягніть "),
     primary("ChatGPT"),
-    secondary(" до списку вище, щоб дозволити «"),
-    primary("Спеціальні можливості"),
-    secondary("»"),
+    secondary(" до списку «"),
+    primary("Доступність"),
+    secondary("» вище, щоб надати дозвіл"),
   ),
   ur: authoredRuns(
     primary("قابلِ رسائی"),
@@ -395,23 +395,23 @@ export const ACCESSIBILITY_DRAG_INSTRUCTION_RUNS: Readonly<Record<string, string
   "zh-CN": authoredRuns(
     secondary("将 "),
     primary("ChatGPT"),
-    secondary(" 拖到上方列表，允许"),
-    primary("辅助功能"),
-    secondary("访问"),
+    secondary(" 拖到上方的“"),
+    primary("无障碍"),
+    secondary("”列表中，然后开启对应权限"),
   ),
   "zh-HK": authoredRuns(
     secondary("將 "),
     primary("ChatGPT"),
-    secondary(" 拖到上方列表，以允許"),
-    primary("輔助功能"),
-    secondary("存取"),
+    secondary(" 拖到上方的「"),
+    primary("輔助使用"),
+    secondary("」列表中，然後啟用權限"),
   ),
   "zh-TW": authoredRuns(
     secondary("將 "),
     primary("ChatGPT"),
-    secondary(" 拖曳到上方列表，以允許"),
-    primary("輔助功能"),
-    secondary("存取"),
+    secondary(" 拖曳到上方的「"),
+    primary("輔助使用"),
+    secondary("」列表中，然後啟用權限"),
   ),
 }))();
 
