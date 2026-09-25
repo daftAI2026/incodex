@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   discoverCreateRootFactoryExport,
   discoverOfficialReactRuntime,
+  discoverOfficialStaticModuleGraph,
   discoverOfficialTooltipModuleGraph,
   discoverOfficialTooltipModules,
   captureOfficialTooltipContextProviders,
@@ -43,6 +44,15 @@ describe("official tooltip renderer", () => {
       "app://-/assets/rolldown-runtime-current.js",
       "app://-/assets/app-shared-current.js",
       "app://-/assets/app-main-current.js",
+    ]);
+  });
+  test("limits shared runtime discovery to static modules reachable from the active entry", () => {
+    expect(discoverOfficialStaticModuleGraph(
+      "app://-/assets/index-current.js",
+      'import{n as runtime}from"./runtime-build.js";import{a as app}from"./shared-build.js";await import("./lazy-build.js");',
+    )).toEqual([
+      "app://-/assets/runtime-build.js",
+      "app://-/assets/shared-build.js",
     ]);
   });
   test("keeps the old direct-module layout in the same local graph", () => {
