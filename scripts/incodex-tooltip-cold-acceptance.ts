@@ -515,6 +515,194 @@ export function tooltipStateExpression(): string {
   })()`;
 }
 
+export function liveCapabilityProbeExpression(): string {
+  const labels = JSON.stringify([...SEARCH_LABELS]);
+  return `(async()=>{
+    const result={schema:'live-capability-v1',status:'UNAVAILABLE',failureCode:null,entryModulePath:null,sharedModulePath:null,sharedSelectionMethod:null,appMainModulePath:null,appMainSourceAvailable:false,directStaticModuleCount:0,namespaceExportCount:0,reactFacadeMatchCount:0,reactFacadeAliases:[],reactApiCapabilityCounts:{createElement:0,createContext:0,useContext:0,Fragment:0,version:0,createRoot:0,createPortal:0},createRootDirectObjectMatchCount:0,createRootDirectObjectAliases:[],createRootSource:'unresolved',appMainRootFactoryImportMatchCount:0,appMainUsesRootFactoryExport:false,appMainRootFactoryExportAliases:[],appMainRootFactoryLocalAliases:[],tooltipFiberFound:false,tooltipFiberCandidateCount:0,tooltipNamespaceIdentityMatchCount:0,tooltipExportAliases:[],tooltipContextFiberCount:0,tooltipContextDependencyCount:0,tooltipDistinctContextCount:0,tooltipContextsWithAncestorProviderCount:0,tooltipMatchingProviderFiberCount:0};
+    const fail=code=>{const error=new Error();error.probeCode=code;throw error};
+    const allowedCodes=new Set(['ENTRY_NOT_FOUND','ENTRY_AMBIGUOUS','ENTRY_TOO_LARGE','STATIC_IMPORT_LIMIT','STATIC_IMPORT_INVALID','MODULE_FETCH_FAILED','MODULE_TOO_LARGE','SHARED_NOT_FOUND','SHARED_AMBIGUOUS','SEARCH_NOT_FOUND','SEARCH_FIBER_NOT_FOUND','PROBE_TIMEOUT']);
+    const token=v=>typeof v==='string'&&/^[A-Za-z_$][A-Za-z0-9_$]{0,79}$/.test(v)?v:null;
+    const basename=url=>new URL(url).pathname.split('/').at(-1)||'';
+    const importPattern=/\\bimport\\s*(?:\\{[^}]*\\}|\\*\\s+as\\s+[A-Za-z_$][\\w$]*|[A-Za-z_$][\\w$]*(?:\\s*,\\s*\\{[^}]*\\})?)\\s*from\\s*["'\\x60]([^"'\\x60]+)["'\\x60]/gu;
+    const sideEffectPattern=/\\bimport\\s*["'\\x60]([^"'\\x60]+)["'\\x60]/gu;
+    const readData=(object,key)=>{if(!object||typeof object!=='object')return undefined;const descriptor=Object.getOwnPropertyDescriptor(object,key);return descriptor&&Object.hasOwn(descriptor,'value')?descriptor.value:undefined};
+    try{
+      const deadline=performance.now()+5500;
+      const controller=new AbortController();
+      const abortTimer=setTimeout(()=>controller.abort(),5500);
+      const fetchSource=async(url,maxBytes)=>{
+        if(performance.now()>=deadline)fail('PROBE_TIMEOUT');
+        let response;
+        try{response=await fetch(url,{redirect:'error',signal:controller.signal})}catch{fail('MODULE_FETCH_FAILED')}
+        if(!response.ok)fail('MODULE_FETCH_FAILED');
+        const source=await response.text();
+        if(source.length>maxBytes)fail('MODULE_TOO_LARGE');
+        if(performance.now()>=deadline)fail('PROBE_TIMEOUT');
+        return source;
+      };
+      try{
+        const entries=[...document.querySelectorAll('script[type="module"][src]')].map(node=>new URL(node.src,location.href)).filter(url=>url.protocol===location.protocol&&url.host===location.host&&/^\\/assets\\/index-[A-Za-z0-9_-]+\\.js$/.test(url.pathname));
+        if(entries.length===0)fail('ENTRY_NOT_FOUND');
+        if(entries.length!==1)fail('ENTRY_AMBIGUOUS');
+        const entry=entries[0];result.entryModulePath=entry.href;
+        const assetDir=new URL('./assets/',location.href).pathname;
+        const entrySource=await fetchSource(entry.href,2_000_000);
+        const specifiers=new Set();
+        for(const match of entrySource.matchAll(importPattern))specifiers.add(match[1]);
+        for(const match of entrySource.matchAll(sideEffectPattern))specifiers.add(match[1]);
+        const urls=new Set();
+        for(const specifier of specifiers){
+          if(!specifier.startsWith('.')||!specifier.endsWith('.js'))continue;
+          if(!/^\\.\\/[A-Za-z0-9_-][A-Za-z0-9._-]*\\.js$/.test(specifier))fail('STATIC_IMPORT_INVALID');
+          const url=new URL(specifier,entry.href);
+          if(url.protocol!==entry.protocol||url.host!==entry.host||!url.pathname.startsWith(assetDir))fail('STATIC_IMPORT_INVALID');
+          urls.add(url.href);
+        }
+        if(urls.size===0)fail('SHARED_NOT_FOUND');
+        if(urls.size>32)fail('STATIC_IMPORT_LIMIT');
+        result.directStaticModuleCount=urls.size;
+        const imports=Promise.all([...urls].map(async url=>{
+          let source=null;
+          try{source=await fetchSource(url,4_000_000)}catch(error){if(error?.probeCode==='PROBE_TIMEOUT')throw error;}
+          const ns=await import(url);
+          return{url,source,ns,base:basename(url)};
+        }));
+        let importTimer;
+        const candidates=await Promise.race([imports,new Promise((_,reject)=>{importTimer=setTimeout(()=>{const error=new Error();error.probeCode='PROBE_TIMEOUT';reject(error)},Math.max(1,deadline-performance.now()))})]).finally(()=>clearTimeout(importTimer));
+        if(performance.now()>=deadline)fail('PROBE_TIMEOUT');
+        const search=[...document.querySelectorAll('button[aria-label]')].find(element=>${labels}.includes((element.getAttribute('aria-label')||'').trim()));
+        if(!search)fail('SEARCH_NOT_FOUND');
+        const fiberKey=Object.keys(search).find(key=>key.startsWith('__reactFiber$'));
+        let searchFiber=fiberKey?search[fiberKey]:null;
+        if(!searchFiber)fail('SEARCH_FIBER_NOT_FOUND');
+        const tooltipFibers=[];
+        for(let node=searchFiber,depth=0;node&&depth<64;node=node.return,depth++){
+          const type=node.elementType||node.type;
+          const props=node.memoizedProps||node.pendingProps;
+          if(type&&(typeof props==='object'||typeof props==='function')&&props!==null&&Object.hasOwn(props,'tooltipContent'))tooltipFibers.push({node,type});
+        }
+        result.tooltipFiberCandidateCount=tooltipFibers.length;
+        const inspected=candidates.map(module=>{
+          const entries=Object.entries(module.ns);
+          const facadeAliases=[];
+          const rootAliases=[];
+          const apiCounts={createElement:0,createContext:0,useContext:0,Fragment:0,version:0,createRoot:0,createPortal:0};
+          for(const [alias,value] of entries){
+            if(value&&typeof value==='object'){
+              const createElement=readData(value,'createElement');
+              const createContext=readData(value,'createContext');
+              const useContext=readData(value,'useContext');
+              const fragment=readData(value,'Fragment');
+              const version=readData(value,'version');
+              if(typeof createElement==='function')apiCounts.createElement++;
+              if(typeof createContext==='function')apiCounts.createContext++;
+              if(typeof useContext==='function')apiCounts.useContext++;
+              if(fragment!==undefined)apiCounts.Fragment++;
+              if(typeof version==='string')apiCounts.version++;
+              if(typeof readData(value,'createRoot')==='function'){apiCounts.createRoot++;rootAliases.push(token(alias));}
+              if(typeof readData(value,'createPortal')==='function')apiCounts.createPortal++;
+              if(typeof createElement==='function'&&typeof createContext==='function'&&typeof useContext==='function'&&typeof version==='string'&&fragment!==undefined)facadeAliases.push(token(alias));
+            }
+          }
+          const tooltipAliases=[];
+          for(const [alias,value] of entries)if(tooltipFibers.some(candidate=>candidate.type===value))tooltipAliases.push(token(alias));
+          return{...module,namespaceExportCount:entries.length,facadeAliases:facadeAliases.filter(Boolean),rootAliases:rootAliases.filter(Boolean),apiCounts,tooltipAliases:tooltipAliases.filter(Boolean)};
+        });
+        const namedShared=inspected.filter(module=>/^app-shared(?:-[A-Za-z0-9_-]+)?\\.js$/.test(module.base));
+        let shared=null;
+        if(namedShared.length===1){shared=namedShared[0];result.sharedSelectionMethod='current-basename-candidate';}
+        else if(namedShared.length>1)fail('SHARED_AMBIGUOUS');
+        else{
+          const shaped=inspected.filter(module=>module.facadeAliases.length>0||module.tooltipAliases.length>0);
+          if(shaped.length===1){shared=shaped[0];result.sharedSelectionMethod='unique-live-capability-shape';}
+          else if(shaped.length>1)fail('SHARED_AMBIGUOUS');
+        }
+        if(!shared)fail('SHARED_NOT_FOUND');
+        result.sharedModulePath=shared.url;
+        result.namespaceExportCount=shared.namespaceExportCount;
+        result.reactFacadeMatchCount=shared.facadeAliases.length;
+        result.reactFacadeAliases=shared.facadeAliases.slice(0,16);
+        result.reactApiCapabilityCounts=shared.apiCounts;
+        result.createRootDirectObjectMatchCount=shared.rootAliases.length;
+        result.createRootDirectObjectAliases=shared.rootAliases.slice(0,16);
+        if(shared.rootAliases.length>0)result.createRootSource='shared-direct-object-export';
+        const appMainModules=inspected.filter(module=>/^app-main(?:-[A-Za-z0-9_-]+)?\\.js$/.test(module.base));
+        if(appMainModules.length===1){
+          const appMain=appMainModules[0];result.appMainModulePath=appMain.url;
+          const source=appMain.source;
+          if(source!==null){
+            result.appMainSourceAvailable=true;
+            const pattern=/\\bimport\\s*\\{([^}]+)\\}\\s*from\\s*["'\\x60]([^"'\\x60]+)["'\\x60]/gu;
+            const bindings=[];
+            for(const match of source.matchAll(pattern)){
+              let dependency;try{dependency=new URL(match[2],appMain.url).href}catch{continue}
+              if(dependency!==shared.url)continue;
+              for(const rawBinding of match[1].split(',')){
+                const parts=rawBinding.trim().split(/\\s+as\\s+/u);
+                const imported=parts[0]?.trim();const local=(parts[1]??parts[0])?.trim();
+                if(imported&&local&&/^[A-Za-z_$][\\w$]*$/.test(imported)&&/^[A-Za-z_$][\\w$]*$/.test(local))bindings.push({imported,local});
+              }
+            }
+            const escape=value=>value.replace(/\\$/g,'\\\\$');
+            const factoryBindings=[];
+            for(const binding of bindings){
+              if(typeof shared.ns[binding.imported]!=='function')continue;
+              const local=escape(binding.local);
+              const assignment=new RegExp('\\\\b([A-Za-z_$][\\w$]*)\\\\s*=\\\\s*'+local+'\\\\s*\\\\(\\\\s*\\\\)','gu');
+              let used=false;
+              for(const match of source.matchAll(assignment)){
+                const receiver=escape(match[1]);
+                if(new RegExp('\\\\b'+receiver+'\\\\s*\\\\.\\\\s*createRoot\\\\b').test(source))used=true;
+              }
+              if(new RegExp('\\\\b'+local+'\\\\s*\\\\(\\\\s*\\\\)\\\\s*\\\\.\\\\s*createRoot\\\\b').test(source))used=true;
+              if(used)factoryBindings.push(binding);
+            }
+            result.appMainRootFactoryImportMatchCount=factoryBindings.length;
+            result.appMainUsesRootFactoryExport=factoryBindings.length>0;
+            if(factoryBindings.length>0)result.createRootSource='app-main-consumed-factory-export';
+            result.appMainRootFactoryExportAliases=[...new Set(factoryBindings.map(binding=>token(binding.imported)).filter(Boolean))].slice(0,16);
+            result.appMainRootFactoryLocalAliases=[...new Set(factoryBindings.map(binding=>token(binding.local)).filter(Boolean))].slice(0,16);
+          }
+        }
+        const chosenTooltipFibers=tooltipFibers.filter(candidate=>Object.values(shared.ns).some(value=>candidate.type===value));
+        const uniqueTypes=new Set(chosenTooltipFibers.map(candidate=>candidate.type));
+        const matchedAliases=[];
+        for(const [alias,value] of Object.entries(shared.ns))if(uniqueTypes.has(value)){const safe=token(alias);if(safe)matchedAliases.push(safe)}
+        result.tooltipFiberFound=chosenTooltipFibers.length>0;
+        result.tooltipNamespaceIdentityMatchCount=matchedAliases.length;
+        result.tooltipExportAliases=[...new Set(matchedAliases)].slice(0,16);
+        const selected=uniqueTypes.size===1?chosenTooltipFibers[0]:null;
+        if(selected){
+          const contexts=new Set();const pending=[selected.node];const visited=new Set();let dependencyCount=0;let fiberCount=0;
+          while(pending.length&&fiberCount<512){
+            const node=pending.pop();if(!node||visited.has(node))continue;visited.add(node);fiberCount++;
+            let dependency=node.dependencies?.firstContext;
+            for(let index=0;dependency&&index<64;index++,dependency=dependency.next){if(dependency.context!==undefined){contexts.add(dependency.context);dependencyCount++}}
+            for(let child=node.child;child;child=child.sibling)pending.push(child);
+          }
+          result.tooltipContextFiberCount=fiberCount;result.tooltipContextDependencyCount=dependencyCount;result.tooltipDistinctContextCount=contexts.size;
+          const provided=new Set();const matchingProviders=new Set();
+          for(const context of contexts){
+            const provider=readData(context,'Provider');
+            for(let ancestor=selected.node.return,depth=1;ancestor&&depth<=64;ancestor=ancestor.return,depth++){
+              const type=ancestor.elementType||ancestor.type;
+              const matches=type===context||type===provider||(type&&typeof type==='object'&&readData(type,'_context')===context);
+              if(matches){provided.add(context);matchingProviders.add(ancestor);break}
+            }
+          }
+          result.tooltipContextsWithAncestorProviderCount=provided.size;result.tooltipMatchingProviderFiberCount=matchingProviders.size;
+        }
+        result.status='OK';
+        clearTimeout(abortTimer);
+        return result;
+      }catch(error){clearTimeout(abortTimer);throw error}
+    }catch(error){
+      const code=allowedCodes.has(error?.probeCode)?error.probeCode:'PROBE_FAILED';
+      result.status='UNAVAILABLE';result.failureCode=code;return result;
+    }
+  })()`;
+}
+
 function responseValue<T>(response: unknown): T {
   const record = response as { exceptionDetails?: unknown; result?: { value?: T } };
   if (record.exceptionDetails) throw new Error("renderer state read failed");
@@ -891,6 +1079,15 @@ async function runAcceptance(options: Options): Promise<Record<string, unknown>>
       throw new Error("native title or legacy tooltip is already present; refusing to measure the wrong tooltip path");
     }
     report.cdp = { targetId: cdpTarget.id, targetUrl: cdpTarget.url, websocketHost: wsUrl.hostname, websocketPort: Number(wsUrl.port) };
+    try {
+      report.liveCapabilitySummary = await cdp.evaluate<Record<string, unknown>>(liveCapabilityProbeExpression());
+    } catch {
+      report.liveCapabilitySummary = {
+        schema: "live-capability-v1",
+        status: "UNAVAILABLE",
+        failureCode: "CDP_EVALUATION_FAILED",
+      };
+    }
 
     const outPoint = outsidePoint(initialState);
     const move = async (point: { x: number; y: number }) => {
@@ -1237,6 +1434,7 @@ function selfTest(): void {
   if (!coldLatencyFailure(1_402, 724, 300)) throw new Error("a repeated cold delay should fail the Search comparison");
   new Function(`return ${tooltipStateExpression()}`);
   new Function(`return ${tooltipEventProbeExpression()}`);
+  new Function(`return ${liveCapabilityProbeExpression()}`);
   console.log(JSON.stringify({ ok: true, mode: "no-window-self-test", externalProcessesStarted: false, appTouched: false }));
 }
 

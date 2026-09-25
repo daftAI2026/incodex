@@ -3,6 +3,7 @@ import {
   assertLoopbackListenerOwnership,
   assertRuntimeCandidate,
   coldLatencyFailure,
+  liveCapabilityProbeExpression,
   findDebuggerChild,
   findDebuggerChildIfStarted,
   maySendEscapeToDismissAcceptanceTooltip,
@@ -181,6 +182,23 @@ describe("installed tooltip acceptance safety contracts", () => {
     expect(events).toContain("sequence:++window.__incodexTooltipAcceptanceSequence");
     expect(events).not.toContain("innerText");
     expect(() => new Function(`return ${events}`)).not.toThrow();
+  });
+
+  test("live module capability probe is bounded, identity-based, and content-free", () => {
+    const probe = liveCapabilityProbeExpression();
+    expect(probe).toContain("directStaticModuleCount");
+    expect(probe).toContain("reactFacadeMatchCount");
+    expect(probe).toContain("tooltipNamespaceIdentityMatchCount");
+    expect(probe).toContain("candidate.type===value");
+    expect(probe).toContain("tooltipDistinctContextCount");
+    expect(probe).toContain("tooltipMatchingProviderFiberCount");
+    expect(probe).toContain("await import(url)");
+    expect(probe).toContain("PROBE_TIMEOUT");
+    expect(probe).not.toContain("Function.prototype.toString");
+    expect(probe).not.toContain("innerText");
+    expect(probe).not.toContain("textContent");
+    expect(probe).not.toContain("outerHTML");
+    expect(() => new Function(`return ${probe}`)).not.toThrow();
   });
 
   test("renderer warning output is reduced to a known error code and internal asset paths", () => {
