@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
+  discoverCreateRootFactoryExport,
+  discoverOfficialReactRuntime,
   discoverOfficialTooltipModuleGraph,
   discoverOfficialTooltipModules,
+  findOfficialTooltipComponent,
   createOfficialTooltipRenderer,
   sharedTooltipState,
 } from "./official-tooltip-renderer.ts";
@@ -49,6 +52,41 @@ describe("official tooltip renderer", () => {
       "app://-/assets/client-b2.js",
       "app://-/assets/tooltip-c3.js",
     ]);
+  });
+  test("resolves the root factory through the current consumer import and use", () => {
+    const importer = "app://-/assets/current-main.js";
+    const shared = "app://-/assets/current-shared.js";
+    const source = [
+      'import{Provider as setup,Module as loader}from"./current-shared.js";',
+      'let root;function mount(){root=loader();window.root??=(0,root.createRoot)(element)}',
+    ].join("");
+
+    expect(discoverCreateRootFactoryExport(importer, source, shared)).toBe("Module");
+  });
+  test("finds the one React singleton by public runtime capabilities", () => {
+    const expected = {
+      version: "19.1.0",
+      Fragment: Symbol.for("react.fragment"),
+      createElement() {},
+      createContext() {},
+      useContext() {},
+    };
+    expect(discoverOfficialReactRuntime({ opaqueExport: expected, decoy: { createElement() {} } })).toBe(expected);
+    expect(() => discoverOfficialReactRuntime({ first: expected, second: { ...expected } })).toThrow();
+  });
+  test("reuses the exported Tooltip type present in the live Search fiber", () => {
+    function OfficialTooltip() {}
+    const trigger = {
+      "__reactFiber$runtime": {
+        return: {
+          type: OfficialTooltip,
+          memoizedProps: { tooltipContent: "Search", children: {} },
+        },
+      },
+    } as unknown as HTMLElement;
+
+    expect(findOfficialTooltipComponent(trigger, { opaqueExport: OfficialTooltip })).toBe(OfficialTooltip);
+    expect(() => findOfficialTooltipComponent(trigger, { unrelated: function Other() {} })).toThrow();
   });
   test("rejects external, traversing, ambiguous, or incomplete module sources", () => {
     for (const source of [
