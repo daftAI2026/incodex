@@ -13,7 +13,7 @@ private let permissionHostHelperHeight: CGFloat = 110
 private let permissionHostRowWidth: CGFloat = 459
 private let permissionHostRowHeight: CGFloat = 42
 private let permissionHostArrowWindowSize: CGFloat = 100
-private let permissionHostArrowWindowX: CGFloat = 30
+private let permissionHostArrowWindowX: CGFloat = 31
 private let permissionHostArrowWindowY: CGFloat = 60
 private let permissionHostArrowGraphicSize: CGFloat = 28
 
