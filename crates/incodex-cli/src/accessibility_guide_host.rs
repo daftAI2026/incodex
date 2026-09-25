@@ -562,9 +562,18 @@ enum ReaderEvent {
 impl ProcessGuideHost {
     fn spawn(root: &Path, copy_context: GuideCopyContext) -> Result<Self, String> {
         let executable = verified_native_host_path(root)?;
+        Self::spawn_executable(&executable, copy_context)
+    }
+
+    #[cfg(test)]
+    fn spawn_for_test(executable: &Path, copy_context: GuideCopyContext) -> Result<Self, String> {
+        Self::spawn_executable(executable, copy_context)
+    }
+
+    fn spawn_executable(executable: &Path, copy_context: GuideCopyContext) -> Result<Self, String> {
         let nonce = new_nonce()?;
 
-        let mut child = Command::new(&executable)
+        let mut child = Command::new(executable)
             .arg("--nonce")
             .arg(&nonce)
             // The native host is trusted only through the verified Runtime
@@ -1393,5 +1402,91 @@ mod tests {
             PathBuf::from("/tmp/selected-codex-home")
         );
         assert_eq!(resolve_locale_source_home(None, fallback), fallback);
+    }
+
+    struct FormalProcessHostFactory {
+        executable: PathBuf,
+        pid_file: PathBuf,
+    }
+
+    impl GuideHostFactory for FormalProcessHostFactory {
+        fn start(&mut self, _: &Path, _: &Path) -> Result<Box<dyn GuideHost>, String> {
+            let host =
+                ProcessGuideHost::spawn_for_test(&self.executable, GuideCopyContext::Installed)?;
+            fs::write(&self.pid_file, host.child.id().to_string())
+                .map_err(|error| format!("cannot publish G10 child-host PID: {error}"))?;
+            Ok(Box::new(host))
+        }
+    }
+
+    #[derive(Default)]
+    struct DiagnosticFailureOps {
+        reset_calls: usize,
+        settings_calls: usize,
+    }
+
+    impl GuideOps for DiagnosticFailureOps {
+        fn launch(&mut self) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn probe(&mut self) -> AccessibilityStatus {
+            AccessibilityStatus::Denied
+        }
+
+        fn wait_for_window(&mut self) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn reset(&mut self) -> Result<(), String> {
+            self.reset_calls += 1;
+            Err("G10_DIAGNOSTIC_RESET_FAILURE".into())
+        }
+
+        fn open_settings(&mut self) -> Result<(), String> {
+            self.settings_calls += 1;
+            Err("G10 diagnostic must not open System Settings".into())
+        }
+
+        fn wait(&mut self, _: Duration) {}
+    }
+
+    #[test]
+    #[ignore = "opt-in visible UI diagnostic; run only through permission-cli-host-error.test.ts"]
+    fn rust_coordinator_process_host_displays_mocked_reset_failure_until_dismissed() {
+        let executable = env::var_os("INCODEX_G10_HOST_EXECUTABLE")
+            .map(PathBuf::from)
+            .expect("G10 test host executable path");
+        let pid_file = env::var_os("INCODEX_G10_HOST_PID_FILE")
+            .map(PathBuf::from)
+            .expect("G10 test host PID file path");
+        let test_pid_file = env::var_os("INCODEX_G10_TEST_PID_FILE")
+            .map(PathBuf::from)
+            .expect("G10 Rust test PID file path");
+        fs::write(test_pid_file, std::process::id().to_string())
+            .expect("publish G10 Rust test PID");
+        let mut ops = DiagnosticFailureOps::default();
+        let mut factory = FormalProcessHostFactory {
+            executable,
+            pid_file,
+        };
+        let mut verify = || Ok(());
+
+        let result = run_permission_guide_with_timeouts(
+            &mut ops,
+            Path::new("/private/tmp/incodex-g10-diagnostic-root"),
+            Path::new("/Applications/ChatGPT.app"),
+            &mut verify,
+            &mut factory,
+            Duration::from_secs(30),
+            Duration::from_secs(1),
+        );
+
+        assert_eq!(result, Err("G10_DIAGNOSTIC_RESET_FAILURE".into()));
+        assert_eq!(ops.reset_calls, 1, "only the fake reset may be attempted");
+        assert_eq!(
+            ops.settings_calls, 0,
+            "the fake flow must never open Settings"
+        );
     }
 }
