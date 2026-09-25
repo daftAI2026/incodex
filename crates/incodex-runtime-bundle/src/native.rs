@@ -6,13 +6,13 @@ pub(crate) const HOST_EXECUTABLE_NAME: &str = "incodex-permission-host";
 pub(crate) const MANIFEST_NAME: &str = "runtime-native-manifest.json";
 
 #[cfg(target_os = "macos")]
-const DYLIB_BYTES: &[u8] = include_bytes!(concat!(
+static DYLIB_BYTES: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../native/macos/dist/incodex-permission-ui.dylib"
 ));
 
 #[cfg(target_os = "macos")]
-const HOST_EXECUTABLE_BYTES: &[u8] = include_bytes!(concat!(
+static HOST_EXECUTABLE_BYTES: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../native/macos/dist/incodex-permission-host"
 ));
@@ -49,14 +49,17 @@ const HOST_SOURCE_BYTES: &[&[u8]] = &[
     )),
 ];
 
+#[cfg(target_os = "macos")]
+static NATIVE_FILES: &[(&str, &[u8])] = &[
+    (DYLIB_NAME, DYLIB_BYTES),
+    (HOST_EXECUTABLE_NAME, HOST_EXECUTABLE_BYTES),
+    (MANIFEST_NAME, MANIFEST_BYTES),
+];
+
 pub(crate) fn files() -> &'static [(&'static str, &'static [u8])] {
     #[cfg(target_os = "macos")]
     {
-        &[
-            (DYLIB_NAME, DYLIB_BYTES),
-            (HOST_EXECUTABLE_NAME, HOST_EXECUTABLE_BYTES),
-            (MANIFEST_NAME, MANIFEST_BYTES),
-        ]
+        NATIVE_FILES
     }
     #[cfg(not(target_os = "macos"))]
     {

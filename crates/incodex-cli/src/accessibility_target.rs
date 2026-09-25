@@ -22,6 +22,7 @@ struct Node {
 }
 
 const UNSUPPORTED: &str = "continuity unavailable: ";
+type AncestorIdentity = (PathBuf, u64, u64, u32, Option<PathBuf>);
 
 impl Node {
     fn from_metadata(metadata: &fs::Metadata, link: Option<PathBuf>) -> Self {
@@ -45,7 +46,7 @@ impl Node {
 #[derive(Debug, PartialEq, Eq)]
 struct Snapshot {
     canonical: PathBuf,
-    ancestors: Vec<(PathBuf, u64, u64, u32, Option<PathBuf>)>,
+    ancestors: Vec<AncestorIdentity>,
     nodes: BTreeMap<PathBuf, Node>,
 }
 
@@ -175,9 +176,7 @@ impl Snapshot {
     }
 }
 
-fn ancestor_identities(
-    app: &Path,
-) -> Result<Vec<(PathBuf, u64, u64, u32, Option<PathBuf>)>, String> {
+fn ancestor_identities(app: &Path) -> Result<Vec<AncestorIdentity>, String> {
     app.ancestors()
         .skip(1)
         .map(|path| {
