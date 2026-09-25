@@ -69,15 +69,33 @@ private func permissionHostIntegral(_ value: CGFloat) -> CGFloat { floor(value) 
 
 private func permissionHostFrame(_ target: NSRect, size: NSSize) -> NSRect? {
     guard let screen = NSScreen.screens.first else { return nil }
+    let screenFrame = screen.frame
+    guard target.origin.x.isFinite, target.origin.y.isFinite,
+          target.width.isFinite, target.width > 0,
+          target.height.isFinite, target.height > 0,
+          size.width.isFinite, size.width > 0,
+          size.height.isFinite, size.height > 0,
+          screenFrame.origin.x.isFinite, screenFrame.origin.y.isFinite,
+          screenFrame.width.isFinite, screenFrame.width > 0,
+          screenFrame.height.isFinite, screenFrame.height > 0 else { return nil }
+
     let x = target.minX + target.width - size.width - 10
-    let y = screen.frame.minY + screen.frame.height - target.minY - target.height + 10
+    let y = screenFrame.minY + screenFrame.height - target.minY - target.height + 10
+    let maxX = x + size.width
+    let maxY = y + size.height
+    guard x.isFinite, y.isFinite, maxX.isFinite, maxY.isFinite else { return nil }
     let left = permissionHostIntegral(x)
     let bottom = permissionHostIntegral(y)
+    let width = ceil(maxX) - left
+    let height = ceil(maxY) - bottom
+    guard left.isFinite, bottom.isFinite,
+          width.isFinite, width > 0,
+          height.isFinite, height > 0 else { return nil }
     return NSRect(
         x: left,
         y: bottom,
-        width: ceil(x + size.width) - left,
-        height: ceil(y + size.height) - bottom,
+        width: width,
+        height: height,
     )
 }
 
