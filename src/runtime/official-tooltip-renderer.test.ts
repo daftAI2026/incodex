@@ -4,6 +4,8 @@ import {
   discoverOfficialReactRuntime,
   discoverOfficialTooltipModuleGraph,
   discoverOfficialTooltipModules,
+  captureOfficialTooltipContextProviders,
+  wrapWithOfficialTooltipContexts,
   findOfficialTooltipComponent,
   createOfficialTooltipRenderer,
   sharedTooltipState,
@@ -87,6 +89,40 @@ describe("official tooltip renderer", () => {
 
     expect(findOfficialTooltipComponent(trigger, { opaqueExport: OfficialTooltip })).toBe(OfficialTooltip);
     expect(() => findOfficialTooltipComponent(trigger, { unrelated: function Other() {} })).toThrow();
+  });
+  test("carries only contexts consumed by the Tooltip subtree into its isolated root", () => {
+    const outerProvider = { provider: "outer" };
+    const innerProvider = { provider: "inner" };
+    const outerContext = { Provider: outerProvider };
+    const innerContext = { Provider: innerProvider };
+    const tooltipFiber = {
+      dependencies: { firstContext: { context: innerContext, next: { context: outerContext } } },
+      child: { dependencies: { firstContext: { context: outerContext } } },
+      return: {
+        type: innerProvider,
+        memoizedProps: { value: "inner-value" },
+        return: { type: outerProvider, memoizedProps: { value: "outer-value" } },
+      },
+    };
+    const providers = captureOfficialTooltipContextProviders(tooltipFiber);
+
+    expect(providers).toEqual([
+      { type: innerProvider, value: "inner-value", depth: 1 },
+      { type: outerProvider, value: "outer-value", depth: 2 },
+    ]);
+    const wrapped = wrapWithOfficialTooltipContexts(
+      (type, props) => ({ type, props }), providers, "official-tooltip",
+    );
+    expect(wrapped).toEqual({
+      type: outerProvider,
+      props: {
+        value: "outer-value",
+        children: {
+          type: innerProvider,
+          props: { value: "inner-value", children: "official-tooltip" },
+        },
+      },
+    });
   });
   test("rejects external, traversing, ambiguous, or incomplete module sources", () => {
     for (const source of [
