@@ -61,6 +61,12 @@ test.skipIf(process.platform !== "darwin" || !runVisibleDiagnostic)(
     expect(output).toContain('"kind":"DIAGNOSTIC_COMPLETED"');
     expect(output).toContain('"voiceOver":"not toggled or tested"');
     expect(output).toContain('"referenceParity":"not asserted"');
+    const initialWindowTitles = diagnosticOutput.split("\n")
+      .filter((line) => line.startsWith("{"))
+      .map((line) => JSON.parse(line) as { kind?: string; state?: string; role?: string; title?: string })
+      .filter((event) => event.kind === "AX_NODE" && event.state === "initial" && event.role === "AXWindow")
+      .map((event) => event.title);
+    expect(initialWindowTitles).toContain("Enable ChatGPT scripting");
   },
   80_000,
 );
