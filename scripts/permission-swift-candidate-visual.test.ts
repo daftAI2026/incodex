@@ -63,6 +63,16 @@ test("unsupported AXHidden does not hide an otherwise geometrically visible butt
   expect(helper).not.toContain("as? Bool == false else");
 });
 
+test("remote overlay exception requires an explicit opt-in and exact window identity", () => {
+  const helper = readFileSync(join(import.meta.dir, "permission-swift-candidate-visual-helper.swift"), "utf8");
+  expect(helper).toContain("INCODEX_VISUAL_IGNORE_UU_REMOTE_OVERLAY");
+  expect(helper).toContain('ownerName == "UURemoteServer"');
+  expect(helper).toContain("layer == 2147483631");
+  expect(helper).toContain('frontmost?.bundleIdentifier == "com.apple.systempreferences"');
+  expect(helper).toContain('(targetWindow["layer"] as? Int) == 3');
+  expect(helper).toContain('"ignoredRemoteOverlays": ignoredRemoteOverlays');
+});
+
 test("self-test mode is available without visible UI", () => {
   const result = spawnSync("bun", [script, "--self-test"], { encoding: "utf8", timeout: 10_000 });
   expect(result.status).toBe(0);
