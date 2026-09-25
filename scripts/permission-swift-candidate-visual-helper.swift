@@ -223,26 +223,27 @@ private struct PermissionSwiftCandidateVisualHelper {
             frontmost?.bundleIdentifier == "com.apple.systempreferences" &&
             (targetWindow["layer"] as? Int) == 0 &&
             targetBounds.map { abs($0.width - 600) <= 2 && (300...400).contains($0.height) } == true
-        let ignoredRemoteOverlays = orderedWindows.filter { window in
-            guard ignoreRemoteOverlay,
-                  (expectedHostFocus || expectedHelperFocus || expectedPlaceholderFocus),
-                  let ownerName = window["ownerName"] as? String,
-                  ownerName == "UURemoteServer",
+        let ignoredNonInteractiveOverlays = orderedWindows.filter { window in
+            guard let ownerName = window["ownerName"] as? String,
                   let layer = window["layer"] as? Int,
-                  layer == 2147483631,
                   let bounds = cgRect(window["bounds"]),
                   abs(bounds.minX - primaryDisplay.minX) <= 1,
                   abs(bounds.minY - primaryDisplay.minY) <= 1,
                   abs(bounds.width - primaryDisplay.width) <= 1,
                   abs(bounds.height - primaryDisplay.height) <= 1 else { return false }
-            return true
+            // The full-screen Dock desktop surface is not an input blocker.
+            // A smaller Dock menu/window must still fail the occlusion guard.
+            if ownerName == "Dock" && layer == 20 { return true }
+            return ignoreRemoteOverlay &&
+                (expectedHostFocus || expectedHelperFocus || expectedPlaceholderFocus) &&
+                ownerName == "UURemoteServer" && layer == 2147483631
         }
-        let ignoredRemoteOverlayIDs = Set(ignoredRemoteOverlays.compactMap { $0["windowID"] as? Int })
+        let ignoredNonInteractiveOverlayIDs = Set(ignoredNonInteractiveOverlays.compactMap { $0["windowID"] as? Int })
         let occluders = orderedWindows.filter { window in
             guard (window["zIndex"] as? Int ?? Int.max) < targetZ,
                   (window["alpha"] as? Double ?? 0) > 0,
                   let bounds = cgRect(window["bounds"]) else { return false }
-            if let windowID = window["windowID"] as? Int, ignoredRemoteOverlayIDs.contains(windowID) { return false }
+            if let windowID = window["windowID"] as? Int, ignoredNonInteractiveOverlayIDs.contains(windowID) { return false }
             let intersection = bounds.intersection(buttonRect)
             return !intersection.isNull && intersection.width > 0 && intersection.height > 0
         }
@@ -308,7 +309,7 @@ private struct PermissionSwiftCandidateVisualHelper {
             "frontmostWindowBeforePress": frontmostWindow as Any? ?? NSNull(),
             "occludingWindows": occluders,
             "settingsOccludingWindows": settingsOccluders,
-            "ignoredRemoteOverlays": ignoredRemoteOverlays,
+            "ignoredNonInteractiveOverlays": ignoredNonInteractiveOverlays,
             "axError": action.rawValue,
             "wallTime": ISO8601DateFormatter().string(from: Date()),
             "monotonicSeconds": ProcessInfo.processInfo.systemUptime,

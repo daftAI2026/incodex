@@ -117,7 +117,15 @@ test("remote overlay exception requires an explicit opt-in and exact window iden
   expect(helper).toContain("layer == 2147483631");
   expect(helper).toContain('frontmost?.bundleIdentifier == "com.apple.systempreferences"');
   expect(helper).toContain('(targetWindow["layer"] as? Int) == 3');
-  expect(helper).toContain('"ignoredRemoteOverlays": ignoredRemoteOverlays');
+  expect(helper).toContain('"ignoredNonInteractiveOverlays": ignoredNonInteractiveOverlays');
+});
+
+test("the noninteractive full-screen Dock surface does not mask an otherwise unique AX button", () => {
+  const helper = readFileSync(join(import.meta.dir, "permission-swift-candidate-visual-helper.swift"), "utf8");
+  expect(helper).toContain('ownerName == "Dock" && layer == 20');
+  expect(helper).toContain("abs(bounds.width - primaryDisplay.width) <= 1");
+  expect(helper).toContain("abs(bounds.height - primaryDisplay.height) <= 1");
+  expect(helper).toContain("ignoredNonInteractiveOverlayIDs.contains(windowID)");
 });
 
 test("press output reports the matched button AX actions and label metadata", () => {
