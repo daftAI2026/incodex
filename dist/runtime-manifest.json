@@ -1,6 +1,6 @@
 {
   "runtimeVersion": "1.0.1",
-  "sourceCommit": "523a65d",
+  "sourceCommit": "523a65d16844c714e9d8e416068aa57a71267849",
   "files": {
     "incodex-loader.cjs": "c4ec4af721545cb003bb6dc0492d51918c0322fc2a3c7b2d3b26ed049a680907",
     "incodex-main.cjs": "8a1a1f7e07ae94658f284ec0ddb694d49ab7984cf3257a68184434e9c7917742",
