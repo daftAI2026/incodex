@@ -7,7 +7,7 @@ type ScheduledTask = {
 };
 
 function createHarness(
-  canShow = true,
+  canShow: boolean | (() => boolean) = true,
   timing: {
     resolveDelay?: (fallbackMs: number) => number;
     onOpen?: (close: () => void) => void;
@@ -30,7 +30,7 @@ function createHarness(
       const task = tasks.get(id);
       if (task) task.cancelled = true;
     },
-    canShow: () => canShow,
+    canShow: () => typeof canShow === "function" ? canShow() : canShow,
     show: () => events.push("show"),
     hide: () => events.push("hide"),
     ...timing,
@@ -52,12 +52,18 @@ function createHarness(
 }
 
 describe("tooltip lifecycle", () => {
-  test("late presentation readiness retries only an uncanceled interaction", () => {
-    const active = createHarness(false);
+  test("late presentation readiness does not repeat an already elapsed official delay", () => {
+    let presentationReady = false;
+    const active = createHarness(() => presentationReady);
     active.lifecycle.pointerEnter();
     active.runScheduled();
+    expect(active.events).not.toContain("show");
+
+    presentationReady = true;
     active.lifecycle.presentationReady();
-    expect(active.delays).toEqual([700, 700]);
+    expect(active.delays).toEqual([700, 0]);
+    active.runScheduled();
+    expect(active.events).toEqual(["show"]);
 
     for (const cancel of ["dismiss", "windowBlur", "pointerLeave", "blur", "trigger", "dispose"] as const) {
       const harness = createHarness(false);
