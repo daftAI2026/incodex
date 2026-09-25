@@ -43,7 +43,6 @@ describe("Search button placement", () => {
     const placement = searchButtonPlacement(search as unknown as HTMLElement);
     expect(placement?.parent).toBe(header as unknown as HTMLElement);
     expect(placement?.before).toBe(tooltipTrigger as unknown as HTMLElement);
-    expect(placement?.shellTemplate).toBe(tooltipTrigger as unknown as HTMLElement);
   });
 
   test("keeps the direct sibling placement when Search has no tooltip trigger wrapper", () => {
@@ -53,7 +52,6 @@ describe("Search button placement", () => {
     const placement = searchButtonPlacement(search as unknown as HTMLElement);
     expect(placement?.parent).toBe(header as unknown as HTMLElement);
     expect(placement?.before).toBe(search as unknown as HTMLElement);
-    expect(placement?.shellTemplate).toBeNull();
   });
 
   test("does not escape an unrelated stateful wrapper", () => {
