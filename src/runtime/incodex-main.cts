@@ -1161,6 +1161,14 @@ function prepareIncognitoSession(options = {}) {
   }
 }
 
+function incognitoLaunchArguments(chromiumPath, argv = process.argv) {
+  const args = [`--user-data-dir=${chromiumPath}`, "codex://new?mode=codex"];
+  if (argv.includes("--force-renderer-accessibility")) {
+    args.unshift("--force-renderer-accessibility");
+  }
+  return args;
+}
+
 async function launchIncognitoOnce(sourceBounds) {
   let alreadyRunning;
   try {
@@ -1191,7 +1199,7 @@ async function launchIncognitoOnce(sourceBounds) {
     }
     return Promise.resolve({ ok: false, reason: "spawn-failed" });
   }
-  const args = [`--user-data-dir=${session.chromium}`, "codex://new?mode=codex"];
+  const args = incognitoLaunchArguments(session.chromium);
   logLaunch("launch", {
     bin,
     home: session.home,
