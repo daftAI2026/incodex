@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import vm from "node:vm";
+import { searchButtonPlacement } from "./search-button-placement.ts";
 
 type Listener = (...args: unknown[]) => unknown;
 
@@ -274,7 +275,7 @@ async function bundleInject(): Promise<string> {
           path: resolve(runtimeDir, args.path),
         }));
         build.onLoad({ filter: /.*/, namespace: "incodex-test" }, () => ({
-          contents: `${source}\nglobalThis.__incodexLayoutExports = { buildButton, setButtonHover };`,
+          contents: `${source}\nglobalThis.__incodexLayoutExports = { buildButton, setButtonHover, buttonMount, isParkedLeftOfSearch };`,
           loader: "ts",
           resolveDir: runtimeDir,
         }));
@@ -293,6 +294,8 @@ const INJECT_BUNDLE = await bundleInject();
 function makeRuntime(): {
   buildButton: (search: FakeElement) => FakeElement;
   setButtonHover: (button: FakeElement, hovered: boolean) => void;
+  buttonMount: (button: FakeElement, placement: NonNullable<ReturnType<typeof searchButtonPlacement>>) => FakeElement;
+  isParkedLeftOfSearch: (button: FakeElement, search: FakeElement) => boolean;
 } {
   const document = new FakeDocument();
   const window = {
@@ -320,6 +323,8 @@ function makeRuntime(): {
     __incodexLayoutExports: {
       buildButton: (search: FakeElement) => FakeElement;
       setButtonHover: (button: FakeElement, hovered: boolean) => void;
+      buttonMount: (button: FakeElement, placement: NonNullable<ReturnType<typeof searchButtonPlacement>>) => FakeElement;
+      isParkedLeftOfSearch: (button: FakeElement, search: FakeElement) => boolean;
     };
   }).__incodexLayoutExports;
 }
@@ -390,6 +395,74 @@ function layoutWrappers(button: FakeElement): FakeElement[] {
 }
 
 describe("8881 hat-glasses icon layout", () => {
+  test("retains Search's outer tooltip-trigger layout token without its tooltip identity", () => {
+    const document = new FakeDocument();
+    const runtime = makeRuntime();
+    const { search, parent } = makeSearch(document, true);
+    const trigger = document.createElement("span");
+    trigger.className = "relative size-6 shrink-0";
+    trigger.style.setProperty("--control-size", "var(--size-header-control)");
+    trigger.setAttribute("data-state", "closed");
+    trigger.setAttribute("aria-describedby", "official-search-tooltip");
+    trigger.setAttribute("id", "official-search-trigger");
+    parent.insertBefore(trigger, search);
+    trigger.append(search);
+    const placement = searchButtonPlacement(search as unknown as HTMLElement);
+    expect(placement?.shellTemplate).toBe(trigger as unknown as HTMLElement);
+
+    const button = runtime.buildButton(search);
+    const shell = runtime.buttonMount(button, placement!);
+    parent.insertBefore(shell, trigger);
+    expect(shell.tagName).toBe("span");
+    expect(shell.className).toBe(trigger.className);
+    expect(shell.style.getPropertyValue("--control-size")).toBe("var(--size-header-control)");
+    expect(shell.getAttribute("data-incodex-privacy-shell")).toBe("true");
+    expect(shell.getAttribute("data-state")).toBeNull();
+    expect(shell.getAttribute("aria-describedby")).toBeNull();
+    expect(shell.getAttribute("id")).toBeNull();
+    expect(shell.children).toEqual([button]);
+    expect(parent.children[0]).toBe(shell);
+    expect(parent.children[1]).toBe(trigger);
+    expect(runtime.isParkedLeftOfSearch(button, search)).toBe(true);
+
+    trigger.className = "relative size-7 shrink-0";
+    trigger.style.setProperty("--control-size", "var(--size-header-control-updated)");
+    expect(runtime.isParkedLeftOfSearch(button, search)).toBe(false);
+    expect(runtime.buttonMount(button, placement!)).toBe(shell);
+    expect(shell.className).toBe(trigger.className);
+    expect(shell.style.getPropertyValue("--control-size")).toBe("var(--size-header-control-updated)");
+    expect(runtime.isParkedLeftOfSearch(button, search)).toBe(true);
+  });
+
+  test("reuses the same hat button as Search changes between wrapped and direct markup", () => {
+    const document = new FakeDocument();
+    const runtime = makeRuntime();
+    const { search, parent } = makeSearch(document, true);
+    const button = runtime.buildButton(search);
+    const direct = searchButtonPlacement(search as unknown as HTMLElement)!;
+    parent.insertBefore(runtime.buttonMount(button, direct), direct.before as unknown as FakeElement);
+    expect(runtime.isParkedLeftOfSearch(button, search)).toBe(true);
+
+    const trigger = document.createElement("span");
+    trigger.className = "size-header-control";
+    trigger.setAttribute("data-state", "closed");
+    parent.insertBefore(trigger, search);
+    trigger.append(search);
+    const wrapped = searchButtonPlacement(search as unknown as HTMLElement)!;
+    const shell = runtime.buttonMount(button, wrapped);
+    parent.insertBefore(shell, wrapped.before as unknown as FakeElement);
+    expect(shell.children).toEqual([button]);
+    expect(runtime.isParkedLeftOfSearch(button, search)).toBe(true);
+
+    parent.insertBefore(search, trigger);
+    trigger.remove();
+    const directAgain = searchButtonPlacement(search as unknown as HTMLElement)!;
+    parent.insertBefore(runtime.buttonMount(button, directAgain), directAgain.before as unknown as FakeElement);
+    expect(shell.isConnected).toBe(false);
+    expect(button.parentElement).toBe(parent);
+    expect(runtime.isParkedLeftOfSearch(button, search)).toBe(true);
+  });
+
   test("copies the Search icon's non-interactive layout wrapper and CSS variable", () => {
     const document = new FakeDocument();
     const { buildButton } = makeRuntime();

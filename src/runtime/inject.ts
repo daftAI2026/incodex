@@ -10,7 +10,7 @@ import {
 } from "./incognito-profile-mask.ts";
 import { createOfficialTooltipTimingBridge } from "./official-tooltip-provider.ts";
 import { createOfficialTooltipRenderer, sharedTooltipState } from "./official-tooltip-renderer.ts";
-import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement.ts";
+import { searchButtonPlacement, searchTooltipOpen, type SearchButtonPlacement } from "./search-button-placement.ts";
 import { createTooltipLifecycle, type TooltipLifecycle } from "./tooltip-lifecycle.ts";
 import {
   createOfficialTooltipPresentation,
@@ -20,6 +20,7 @@ import {
 
 const STYLE_ID = "incodex-privacy-style";
 const BTN_ATTR = "data-incodex-privacy-toggle";
+const BTN_SHELL_ATTR = "data-incodex-privacy-shell";
 const TIP_ATTR = "data-incodex-tooltip";
 const TIP_HOST_ATTR = "data-incodex-tooltip-host";
 const LANDING_ATTR = "data-incodex-landing";
@@ -337,9 +338,44 @@ function findSearchButton(): HTMLElement | null {
 
 function isParkedLeftOfSearch(btn: HTMLElement, search: HTMLElement): boolean {
   const placement = searchButtonPlacement(search);
-  return Boolean(
-    placement && btn.parentElement === placement.parent && btn.nextElementSibling === placement.before,
-  );
+  if (!placement) return false;
+  const shell = btn.parentElement?.hasAttribute(BTN_SHELL_ATTR) ? btn.parentElement : null;
+  const mount = shell ?? btn;
+  if (Boolean(shell) !== Boolean(placement.shellTemplate)) return false;
+  if (shell && placement.shellTemplate && (
+    shell.tagName !== placement.shellTemplate.tagName ||
+    shell.className !== placement.shellTemplate.className ||
+    shell.getAttribute("style") !== placement.shellTemplate.getAttribute("style")
+  )) return false;
+  return mount.parentElement === placement.parent && mount.nextElementSibling === placement.before;
+}
+
+function buttonMount(btn: HTMLElement, placement: SearchButtonPlacement): HTMLElement {
+  const oldShell = btn.parentElement?.hasAttribute(BTN_SHELL_ATTR) ? btn.parentElement : null;
+  const template = placement.shellTemplate;
+  if (!template) {
+    oldShell?.remove();
+    return btn;
+  }
+
+  let shell = oldShell;
+  if (!shell || shell.tagName !== template.tagName) {
+    // Search's tooltip trigger supplies the button-size token. Clone only its
+    // layout scope, not its Radix state, identity, listeners or tooltip action.
+    shell = template.cloneNode(false) as HTMLElement;
+    for (const { name } of [...shell.attributes]) {
+      if (name !== "class" && name !== "style") shell.removeAttribute(name);
+    }
+    shell.setAttribute(BTN_SHELL_ATTR, "true");
+    shell.append(btn);
+    oldShell?.remove();
+  } else {
+    shell.className = template.className;
+    const style = template.getAttribute("style");
+    if (style === null) shell.removeAttribute("style");
+    else shell.setAttribute("style", style);
+  }
+  return shell;
 }
 
 function buttonStillBesideSearch(): boolean {
@@ -822,8 +858,9 @@ function ensureButton(): void {
   }
 
   if (!btn) btn = buildButton(search);
+  const mount = buttonMount(btn, placement);
   if (!isParkedLeftOfSearch(btn, search)) {
-    placement.parent.insertBefore(btn, placement.before);
+    placement.parent.insertBefore(mount, placement.before);
   }
   apply();
   ensureTooltipMount();
