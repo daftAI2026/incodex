@@ -24,6 +24,24 @@ type ProcessRow = { pid: number; ppid: number; started: string; command: string 
 type DebuggerChild = ProcessRow & { port: number };
 type CdpTarget = { id: string; type: string; url: string; webSocketDebuggerUrl: string };
 type CdpReply = { id?: number; result?: unknown; error?: { message?: string } };
+type HitTestNode = {
+  tag: string;
+  role: string | null;
+  testId: string | null;
+  dataState: string | null;
+  ariaModal: boolean;
+  idHash: string | null;
+  classHash: string | null;
+  position: string;
+  zIndex: string;
+  pointerEvents: string;
+  bounds: { x: number; y: number; width: number; height: number };
+};
+type HitTestDiagnostic = {
+  hit: boolean;
+  point: { x: number; y: number } | null;
+  stack: HitTestNode[];
+};
 type TooltipState = {
   incognito: boolean;
   button: { x: number; y: number; width: number; height: number } | null;
@@ -33,6 +51,8 @@ type TooltipState = {
   documentFocused: boolean;
   hatHitTest: boolean;
   searchHitTest: boolean;
+  hatHitTarget: HitTestDiagnostic;
+  searchHitTarget: HitTestDiagnostic;
   hatHovered: boolean;
   hatTooltipOpen: boolean;
   hatTooltipClass: string | null;
@@ -264,6 +284,14 @@ export function coldLatencyFailure(hatMs: number, searchMs: number, toleranceMs:
   return null;
 }
 
+export function maySendEscapeToDismissAcceptanceTooltip(
+  inputConfirmed: boolean,
+  testOwnedTooltipVisible: boolean,
+  documentFocused: boolean,
+): boolean {
+  return inputConfirmed && testOwnedTooltipVisible && documentFocused;
+}
+
 function runReadOnly(binary: string, args: string[], timeout = 30_000): string {
   const result = spawnSync(binary, args, {
     cwd: root,
@@ -374,6 +402,47 @@ async function observeUntil<T>(
   return { matched: accept(value), elapsedMs: Math.round(performance.now() - startedAt), value };
 }
 
+type HitTestReadiness = Pick<TooltipState, "documentFocused" | "hatHitTest" | "searchHitTest">;
+type StableHitTestResult<T> = {
+  stable: boolean;
+  waitMs: number;
+  samples: number;
+  state: T;
+  firstBlocked: T | null;
+};
+
+export async function waitForStableHitTest<T extends HitTestReadiness>(
+  read: () => Promise<T>,
+  childState: { exited: boolean; exitCode: number | null },
+  timeoutMs = 8_000,
+  requiredSamples = 3,
+  intervalMs = 100,
+): Promise<StableHitTestResult<T>> {
+  const started = performance.now();
+  let state = await read();
+  let firstBlocked: T | null = null;
+  let samples = 0;
+  let consecutive = 0;
+  while (true) {
+    if (childState.exited) throw new Error(`CLI exited during hit-test readiness wait (code ${childState.exitCode})`);
+    samples += 1;
+    if (state.documentFocused && state.hatHitTest && state.searchHitTest) {
+      consecutive += 1;
+      if (consecutive >= requiredSamples) {
+        return { stable: true, waitMs: Math.round(performance.now() - started), samples, state, firstBlocked };
+      }
+    } else {
+      consecutive = 0;
+      firstBlocked ??= state;
+    }
+    if (performance.now() - started >= timeoutMs) {
+      return { stable: false, waitMs: Math.round(performance.now() - started), samples, state, firstBlocked };
+    }
+    await delay(intervalMs);
+    state = await read();
+  }
+}
+
 export function tooltipStateExpression(): string {
   const labels = JSON.stringify([...SEARCH_LABELS]);
   return `(()=>{
@@ -381,12 +450,16 @@ export function tooltipStateExpression(): string {
     const s=[...document.querySelectorAll('button[aria-label]')].find(e=>${labels}.includes((e.getAttribute('aria-label')||'').trim()));
     const rect=e=>{if(!e)return null;const r=e.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}};
     const visible=e=>!!e&&e.isConnected&&e.getBoundingClientRect().width>0&&getComputedStyle(e).visibility!=='hidden'&&getComputedStyle(e).display!=='none';
-    const hit=e=>{if(!e?.isConnected)return false;const r=e.getBoundingClientRect(),top=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return !!top&&(top===e||e.contains(top))};
+    const token=v=>typeof v==='string'&&/^[A-Za-z0-9_.:-]{1,80}$/.test(v)?v:null;
+    const hash=v=>{if(!v)return null;let h=2166136261;for(let i=0;i<v.length;i++){h^=v.charCodeAt(i);h=Math.imul(h,16777619)}return(h>>>0).toString(16).padStart(8,'0')};
+    const nodeInfo=e=>{const r=e.getBoundingClientRect(),style=getComputedStyle(e);return{tag:e.tagName,role:token(e.getAttribute('role')),testId:token(e.getAttribute('data-testid')),dataState:token(e.getAttribute('data-state')),ariaModal:e.getAttribute('aria-modal')==='true',idHash:hash(e.id),classHash:hash(typeof e.className==='string'?e.className:String(e.className)),position:token(style.position)||'other',zIndex:token(style.zIndex)||'other',pointerEvents:token(style.pointerEvents)||'other',bounds:{x:Math.round(r.x),y:Math.round(r.y),width:Math.round(r.width),height:Math.round(r.height)}}};
+    const hitInfo=e=>{if(!e?.isConnected)return{hit:false,point:null,stack:[]};const r=e.getBoundingClientRect(),point={x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)},top=document.elementFromPoint(point.x,point.y);const stack=[];for(let n=top;n&&stack.length<4;n=n.parentElement)stack.push(nodeInfo(n));return{hit:!!top&&(top===e||e.contains(top)),point,stack}};
     const described=e=>[e,e?.parentElement].flatMap(x=>(x?.getAttribute('aria-describedby')||'').split(/\\s+/)).filter(Boolean).map(id=>document.getElementById(id)).find(t=>t?.getAttribute('role')==='tooltip');
     const hatTip=document.getElementById('incodex-official-tooltip');
     const searchTip=described(s);
     const legacyHost=document.querySelector('[data-incodex-tooltip-host]');
     const legacyTip=legacyHost?.querySelector('[data-incodex-tooltip]');
+    const hatHitInfo=hitInfo(b),searchHitInfo=hitInfo(s);
     let provider=null;
     let fiber=(()=>{if(!s)return null;const k=Object.keys(s).find(k=>k.startsWith('__reactFiber$'));return k?s[k]:null})();
     for(let depth=0;fiber&&depth<64;depth++,fiber=fiber.return){
@@ -424,7 +497,7 @@ export function tooltipStateExpression(): string {
     return{
       incognito:window.__incodexIncognito===true,
       button:rect(b),search:rect(s),viewport:{width:innerWidth,height:innerHeight},
-      nowMs:performance.now(),documentFocused:document.hasFocus(),hatHitTest:hit(b),searchHitTest:hit(s),
+      nowMs:performance.now(),documentFocused:document.hasFocus(),hatHitTest:hatHitInfo.hit,searchHitTest:searchHitInfo.hit,hatHitTarget:hatHitInfo,searchHitTarget:searchHitInfo,
       hatHovered:b?.getAttribute('data-incodex-hovered')==='true',
       hatTooltipOpen:visible(hatTip),hatTooltipClass:hatTip?.className||null,
       searchTooltipOpen:visible(searchTip),searchTooltipClass:searchTip?.className||null,
@@ -872,8 +945,28 @@ async function runAcceptance(options: Options): Promise<Record<string, unknown>>
     );
     await delay(coldIdleMs);
 
-    const preFirstHat = await readState();
-    Object.assign(report.observations as object, { preFirstHat: stateSummary(preFirstHat) });
+    const hitTestWait = await waitForStableHitTest(readState, childState);
+    report.hitTestGate = {
+      status: hitTestWait.stable ? "READY" : "INPUT_INVALID",
+      waitMs: hitTestWait.waitMs,
+      samples: hitTestWait.samples,
+      requiredConsecutiveSamples: 3,
+      firstBlocked: hitTestWait.firstBlocked ? stateSummary(hitTestWait.firstBlocked as TooltipState) : null,
+      final: stateSummary(hitTestWait.state as TooltipState),
+    };
+    if (!hitTestWait.stable) {
+      const reason = "INPUT_INVALID: hat and Search centers did not remain hit-testable while the document was focused; no tooltip timing or Escape dismissal was attempted";
+      Object.assign(report.measurements as object, {
+        coldFirstHat: { inputStatus: "INPUT_INVALID", elapsedMs: null, tooltipTimeoutMs: null },
+        officialSearch: { inputStatus: "INPUT_INVALID", elapsedMs: null, tooltipTimeoutMs: null },
+        searchToHat: { inputStatus: "INPUT_INVALID", elapsedMs: null, tooltipTimeoutMs: null },
+      });
+      report.escape = { inputStatus: "SKIPPED_UNKNOWN_UI", sent: false, reason: "No test-owned tooltip appeared; unknown obstructing UI was left untouched" };
+      report.acceptanceFailures = [reason];
+      throw new Error(reason);
+    }
+    const preFirstHat = hitTestWait.state as TooltipState;
+    Object.assign(report.observations as object, { hitTestStable: stateSummary(preFirstHat) });
     const coldHatResult = await measureHover(
       "hat",
       { x: initialState.button!.x + initialState.button!.width / 2, y: initialState.button!.y + initialState.button!.height / 2 },
@@ -944,29 +1037,49 @@ async function runAcceptance(options: Options): Promise<Record<string, unknown>>
     });
     Object.assign(report.observations as object, { afterSearchToHat: stateSummary(handoff) });
 
-    const escapeSequenceBefore = await eventSequence();
-    const escapeStarted = performance.now();
-    await cdp.request("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-    await cdp.request("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-    const escapeInput = await observeUntil(
-      readEvents,
-      (events) => events.some((event) => event.sequence > escapeSequenceBefore && event.type === "keydown" && event.target === "window" && event.trusted),
-      1_000,
-      childState,
-      escapeStarted,
+    const stateBeforeEscape = await readState();
+    const testOwnedHatTooltipVisible = handoffResult.inputConfirmed && (handoff.hatTooltipOpen || handoff.legacyTooltipVisible);
+    const mayDismissTestOwnedTooltip = maySendEscapeToDismissAcceptanceTooltip(
+      handoffResult.inputConfirmed,
+      testOwnedHatTooltipVisible,
+      stateBeforeEscape.documentFocused,
     );
-    const escapeTrusted = escapeInput.value.some((event) => event.sequence > escapeSequenceBefore && event.type === "keydown" && event.target === "window" && event.trusted);
-    const escapeResult = escapeTrusted
-      ? await observeUntil(readState, (state) => !state.hatTooltipOpen && !state.legacyTooltipVisible, 2_000, childState, performance.now())
-      : { matched: false, elapsedMs: escapeInput.elapsedMs, value: await readState() };
-    const readinessAvailable = await cdp.evaluate<boolean>("typeof window.__incodexTooltipState?.lifecycle?.presentationReady === 'function'");
-    if (escapeTrusted && readinessAvailable) {
-      await cdp.evaluate("window.__incodexTooltipState.lifecycle.presentationReady()");
-      await delay(250);
+    let escapeTrusted = false;
+    let escapeSkipped = false;
+    let escapeResult: { matched: boolean; elapsedMs: number; value: TooltipState };
+    let readinessAvailable = false;
+    let afterEscape: TooltipState;
+    if (mayDismissTestOwnedTooltip) {
+      const escapeSequenceBefore = await eventSequence();
+      const escapeStarted = performance.now();
+      await cdp.request("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+      await cdp.request("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+      const escapeInput = await observeUntil(
+        readEvents,
+        (events) => events.some((event) => event.sequence > escapeSequenceBefore && event.type === "keydown" && event.target === "window" && event.trusted),
+        1_000,
+        childState,
+        escapeStarted,
+      );
+      escapeTrusted = escapeInput.value.some((event) => event.sequence > escapeSequenceBefore && event.type === "keydown" && event.target === "window" && event.trusted);
+      escapeResult = escapeTrusted
+        ? await observeUntil(readState, (state) => !state.hatTooltipOpen && !state.legacyTooltipVisible, 2_000, childState, performance.now())
+        : { matched: false, elapsedMs: escapeInput.elapsedMs, value: await readState() };
+      readinessAvailable = await cdp.evaluate<boolean>("typeof window.__incodexTooltipState?.lifecycle?.presentationReady === 'function'");
+      if (escapeTrusted && readinessAvailable) {
+        await cdp.evaluate("window.__incodexTooltipState.lifecycle.presentationReady()");
+        await delay(250);
+      }
+      afterEscape = await readState();
+    } else {
+      escapeSkipped = true;
+      escapeResult = { matched: false, elapsedMs: 0, value: stateBeforeEscape };
+      afterEscape = stateBeforeEscape;
     }
-    const afterEscape = await readState();
     const remainedClosed = !afterEscape.hatTooltipOpen && !afterEscape.legacyTooltipVisible;
-    report.escape = { inputStatus: escapeTrusted ? "VALID" : "INPUT_INVALID", dismissed: escapeResult.matched, elapsedMs: escapeResult.elapsedMs, lateReadinessCheckAvailable: readinessAvailable, remainedClosed };
+    report.escape = escapeSkipped
+      ? { inputStatus: "SKIPPED_UNKNOWN_UI", sent: false, reason: "No test-owned Search-to-hat tooltip was visible in the focused document; unknown UI was left untouched" }
+      : { inputStatus: escapeTrusted ? "VALID" : "INPUT_INVALID", sent: true, dismissed: escapeResult.matched, elapsedMs: escapeResult.elapsedMs, lateReadinessCheckAvailable: readinessAvailable, remainedClosed };
     Object.assign(report.observations as object, { afterEscape: stateSummary(afterEscape) });
     report.rendererUnavailableWarningCount = rendererUnavailableWarningCount;
     report.rendererPrepareDiagnostics = rendererPrepareDiagnostics;
@@ -981,7 +1094,8 @@ async function runAcceptance(options: Options): Promise<Record<string, unknown>>
       ...(!presentationMatches && officialSearch.searchTooltipOpen && handoff.hatTooltipOpen ? ["hat tooltip presentation class differs from official Search"] : []),
       ...(directLatencyIssue ? [directLatencyIssue] : []),
       ...(handoffLatencyIssue ? [handoffLatencyIssue] : []),
-      ...(!escapeTrusted ? ["Escape input was not confirmed by trusted keydown"] : []),
+      ...(escapeSkipped ? ["Escape was skipped because no test-owned tooltip was visible; unknown UI was left untouched"] : []),
+      ...(!escapeSkipped && !escapeTrusted ? ["Escape input was not confirmed by trusted keydown"] : []),
       ...(escapeTrusted && (!escapeResult.matched || !remainedClosed) ? ["Escape failed to dismiss or late readiness reopened tooltip"] : []),
     ];
     report.acceptanceFailures = acceptanceFailures;

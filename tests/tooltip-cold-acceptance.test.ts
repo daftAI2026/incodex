@@ -5,12 +5,14 @@ import {
   coldLatencyFailure,
   findDebuggerChild,
   findDebuggerChildIfStarted,
+  maySendEscapeToDismissAcceptanceTooltip,
   parseArguments,
   parseDryRunTargets,
   parseListenerRows,
   parseProcessTable,
   parseRendererPrepareWarning,
   verifiedDescendantPids,
+  waitForStableHitTest,
   tooltipEventProbeExpression,
   tooltipStateExpression,
   validateWebSocketUrl,
@@ -109,6 +111,45 @@ describe("installed tooltip acceptance safety contracts", () => {
     expect(coldLatencyFailure(-1, 724, 300)).toMatch(/non-negative/u);
   });
 
+  test("Escape is sent only to dismiss this run's visible tooltip in the focused document", () => {
+    expect(maySendEscapeToDismissAcceptanceTooltip(true, true, true)).toBe(true);
+    expect(maySendEscapeToDismissAcceptanceTooltip(false, true, true)).toBe(false);
+    expect(maySendEscapeToDismissAcceptanceTooltip(true, false, true)).toBe(false);
+    expect(maySendEscapeToDismissAcceptanceTooltip(true, true, false)).toBe(false);
+  });
+
+  test("input readiness waits for stable hit targets and reports obstruction without guessing", async () => {
+    const samples = [
+      { documentFocused: true, hatHitTest: false, searchHitTest: false, marker: "blocked" },
+      { documentFocused: true, hatHitTest: false, searchHitTest: false, marker: "blocked" },
+      { documentFocused: true, hatHitTest: true, searchHitTest: true, marker: "ready" },
+      { documentFocused: true, hatHitTest: true, searchHitTest: true, marker: "ready" },
+      { documentFocused: true, hatHitTest: true, searchHitTest: true, marker: "ready" },
+    ];
+    const ready = await waitForStableHitTest(
+      async () => samples.shift() ?? { documentFocused: true, hatHitTest: true, searchHitTest: true, marker: "ready" },
+      { exited: false, exitCode: null },
+      1_000,
+      3,
+      1,
+    );
+    expect(ready.stable).toBe(true);
+    expect(ready.samples).toBe(5);
+    expect(ready.firstBlocked?.marker).toBe("blocked");
+    expect(ready.state.marker).toBe("ready");
+
+    const blocked = await waitForStableHitTest(
+      async () => ({ documentFocused: true, hatHitTest: false, searchHitTest: false, marker: "covered" }),
+      { exited: false, exitCode: null },
+      3,
+      3,
+      1,
+    );
+    expect(blocked.stable).toBe(false);
+    expect(blocked.firstBlocked?.marker).toBe("covered");
+    expect(blocked.state.marker).toBe("covered");
+  });
+
   test("cold observation records provider timing and renderer state without waiting for readiness", () => {
     const state = tooltipStateExpression();
     expect(state).toContain("rendererReady");
@@ -116,6 +157,13 @@ describe("installed tooltip acceptance safety contracts", () => {
     expect(state).toContain("documentFocused");
     expect(state).toContain("hatHitTest");
     expect(state).toContain("searchHitTest");
+    expect(state).toContain("hatHitTarget");
+    expect(state).toContain("searchHitTarget");
+    expect(state).toContain("ariaModal");
+    expect(state).toContain("data-testid");
+    expect(state).toContain("idHash");
+    expect(state).toContain("classHash");
+    expect(state).not.toContain("outerHTML");
     expect(state).toContain("searchTooltipSampleAvailable");
     expect(state).toContain("getOpenDelay('default',700)");
     expect(state).toContain("isHoverOpenBlocked('incodex-privacy-toggle')");
