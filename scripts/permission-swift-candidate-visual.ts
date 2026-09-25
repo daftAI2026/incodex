@@ -29,6 +29,8 @@ type Options = {
   acknowledgeVisibleUI: boolean;
   diagnoseInitialKeyboard: boolean;
   diagnosePlaceholderAXPress: boolean;
+  diagnoseSettingsMove: boolean;
+  diagnoseSettingsCloseDuringBack: boolean;
   selfTest: boolean;
   help: boolean;
   outputDirectory?: string;
@@ -38,6 +40,9 @@ type Options = {
 type HostMessage = { nonce: string; type: string; message?: string; locale?: string };
 type HelperResult = Record<string, unknown> & { ok?: boolean; error?: string };
 type HostEventCounts = { allow: number; retry: number };
+type WindowBounds = { x: number; y: number; width: number; height: number };
+type SettingsWindow = HelperResult & { pid: number; windowID: number; bounds: WindowBounds; title: string };
+type InitialSettingsState = { wasOpen: boolean; pid?: number; window?: SettingsWindow };
 
 const delay = (milliseconds: number) => new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
 const timestamp = () => new Date().toISOString();
@@ -56,9 +61,12 @@ function usage(): string {
     "in place of AXPress; the helper must see the candidate's normal initial window frontmost.",
     "Optional: --diagnose-placeholder-axpress AXPresses the exact Settings placeholder once",
     "after verifying its AXButton identity, production initial window, and Settings occlusion.",
+    "Optional: --diagnose-settings-move moves the exact selected Settings main window by at most 24×16 points during the forward flight, then restores its original rectangle.",
+    "Optional: --diagnose-settings-close-during-back AXPresses the selected window's exact AXCloseButton after the reverse flight surface is visible, then restores the original Settings state and rectangle.",
+    "These Settings mutations require separate opt-in flags. They never click Settings content or change a permission.",
     "It sends mocked repairing/awaiting-user host states; it never resets or changes TCC.",
     "Full-screen screenshots may contain private desktop content; use a private output path.",
-    "Existing ChatGPT/System Settings processes are not terminated. Only the child host is cleaned up.",
+    "Existing ChatGPT/System Settings processes are not terminated. The optional close diagnostic closes one exact Settings window and restores its initial state.",
     "Screen Recording and Accessibility must already be authorized; the script does not request them.",
     "",
     "Safe checks:",
@@ -73,6 +81,8 @@ function parseArguments(args: string[]): Options {
     acknowledgeVisibleUI: false,
     diagnoseInitialKeyboard: false,
     diagnosePlaceholderAXPress: false,
+    diagnoseSettingsMove: false,
+    diagnoseSettingsCloseDuringBack: false,
     selfTest: false,
     help: false,
     timeoutSeconds: 45,
@@ -83,6 +93,8 @@ function parseArguments(args: string[]): Options {
     else if (argument === "--acknowledge-visible-ui") options.acknowledgeVisibleUI = true;
     else if (argument === "--diagnose-initial-keyboard") options.diagnoseInitialKeyboard = true;
     else if (argument === "--diagnose-placeholder-axpress") options.diagnosePlaceholderAXPress = true;
+    else if (argument === "--diagnose-settings-move") options.diagnoseSettingsMove = true;
+    else if (argument === "--diagnose-settings-close-during-back") options.diagnoseSettingsCloseDuringBack = true;
     else if (argument === "--self-test") options.selfTest = true;
     else if (argument === "--help" || argument === "-h") options.help = true;
     else if (argument === "--out") {
@@ -101,16 +113,20 @@ function parseArguments(args: string[]): Options {
       throw new Error(`unknown option: ${argument}`);
     }
   }
-  if (options.selfTest && (options.run || options.acknowledgeVisibleUI || options.diagnoseInitialKeyboard || options.diagnosePlaceholderAXPress || options.outputDirectory)) {
+  if (options.selfTest && (options.run || options.acknowledgeVisibleUI || options.diagnoseInitialKeyboard || options.diagnosePlaceholderAXPress || options.diagnoseSettingsMove || options.diagnoseSettingsCloseDuringBack || options.outputDirectory)) {
     throw new Error("--self-test cannot be combined with visible-run options");
   }
-  if (options.help && (options.run || options.acknowledgeVisibleUI || options.diagnoseInitialKeyboard || options.diagnosePlaceholderAXPress || options.outputDirectory)) {
+  if (options.help && (options.run || options.acknowledgeVisibleUI || options.diagnoseInitialKeyboard || options.diagnosePlaceholderAXPress || options.diagnoseSettingsMove || options.diagnoseSettingsCloseDuringBack || options.outputDirectory)) {
     throw new Error("--help cannot be combined with visible-run options");
   }
   return options;
 }
 
 function validateRunOptIn(options: Options): string {
+  if ((options.diagnoseSettingsMove || options.diagnoseSettingsCloseDuringBack) &&
+      (!options.run || !options.acknowledgeVisibleUI || !options.outputDirectory)) {
+    throw new Error("Settings window mutation diagnostic requires --run --acknowledge-visible-ui and a new --out directory");
+  }
   if (!options.run || !options.acknowledgeVisibleUI) {
     throw new Error("visible run refused: pass both --run and --acknowledge-visible-ui after reviewing the UI/privacy effects");
   }
@@ -126,7 +142,7 @@ function validateRunOptIn(options: Options): string {
 function selfTest(): void {
   let rejected = false;
   try {
-    validateRunOptIn({ run: true, acknowledgeVisibleUI: false, diagnoseInitialKeyboard: false, diagnosePlaceholderAXPress: false, selfTest: false, help: false, outputDirectory: "/private/tmp/example", timeoutSeconds: 45 });
+    validateRunOptIn({ run: true, acknowledgeVisibleUI: false, diagnoseInitialKeyboard: false, diagnosePlaceholderAXPress: false, diagnoseSettingsMove: false, diagnoseSettingsCloseDuringBack: false, selfTest: false, help: false, outputDirectory: "/private/tmp/example", timeoutSeconds: 45 });
   } catch (error) {
     rejected = error instanceof Error && error.message.includes("--acknowledge-visible-ui");
   }
@@ -224,6 +240,14 @@ function assertInitialAllowKeyboardResult(result: HelperResult, expectedAllow: s
 
 function record(outputDirectory: string, event: Record<string, unknown>): void {
   appendFileSync(join(outputDirectory, "events.jsonl"), `${JSON.stringify({ wallTime: timestamp(), monotonicSeconds: monotonicSeconds(), ...event })}\n`, { mode: 0o600 });
+}
+
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+function combineErrors(primary: Error | undefined, cleanupLabel: string, cleanup: Error): Error {
+  return new Error([primary?.stack ?? primary?.message, `${cleanupLabel}: ${cleanup.stack ?? cleanup.message}`].filter(Boolean).join("\n"));
 }
 
 function run(command: string, args: string[], timeoutMilliseconds = 30_000): string {
@@ -466,6 +490,150 @@ async function waitForSettings(helper: string, outputDirectory: string, timeoutM
   throw new Error(`System Settings did not expose a visible main window; last status=${JSON.stringify(latest)}`);
 }
 
+function settingsWindow(helper: string, outputDirectory: string, pid: number, label: string): SettingsWindow {
+  const result = helperCall(helper, ["settings-window", String(pid), settingsExecutablePath]) as SettingsWindow;
+  if (result.pid !== pid || typeof result.windowID !== "number" || !result.bounds || typeof result.title !== "string") {
+    throw new Error(`Settings did not resolve to one exact AXWindow/CGWindow identity: ${JSON.stringify(result)}`);
+  }
+  record(outputDirectory, { type: "settings-window-identity", label, result });
+  return result;
+}
+
+function initialSettingsState(helper: string, outputDirectory: string, enabled: boolean): InitialSettingsState {
+  if (!enabled) return { wasOpen: false };
+  const app = helperCall(helper, ["app", "com.apple.systempreferences", settingsExecutablePath]);
+  const pids = app.matchingPIDs as number[] | undefined;
+  if (!pids?.length) {
+    const state = { wasOpen: false } satisfies InitialSettingsState;
+    record(outputDirectory, { type: "settings-original-state", state });
+    return state;
+  }
+  if (pids.length !== 1) throw new Error(`Settings mutation diagnostic requires one exact System Settings process; found ${pids.length}`);
+  const pid = pids[0]!;
+  const visible = (app.windows as Array<Record<string, unknown>> | undefined)?.filter((window) => window.layer === 0 && (window.alpha as number) > 0) ?? [];
+  if (!visible.length) {
+    const state = { wasOpen: false, pid } satisfies InitialSettingsState;
+    record(outputDirectory, { type: "settings-original-state", state, note: "process existed but had no visible layer-0 window" });
+    return state;
+  }
+  if (visible.length !== 1) throw new Error(`Settings mutation diagnostic requires one visible Settings window; found ${visible.length}`);
+  const window = settingsWindow(helper, outputDirectory, pid, "before-test");
+  const state = { wasOpen: true, pid, window } satisfies InitialSettingsState;
+  record(outputDirectory, { type: "settings-original-state", state });
+  return state;
+}
+
+function moveSettingsWindow(helper: string, outputDirectory: string, window: SettingsWindow, label: string): HelperResult {
+  const startedAt = monotonicSeconds();
+  const result = helperCall(helper, [
+    "settings-move",
+    String(window.pid), settingsExecutablePath, String(window.windowID),
+    String(window.bounds.x), String(window.bounds.y), String(window.bounds.width), String(window.bounds.height),
+  ]);
+  record(outputDirectory, { type: "settings-window-moved", label, callStartMonotonicSeconds: startedAt, expectedWindow: window, result });
+  return result;
+}
+
+function restoreSettingsPosition(helper: string, outputDirectory: string, window: SettingsWindow, target: WindowBounds, label: string): HelperResult {
+  const startedAt = monotonicSeconds();
+  const current = settingsWindow(helper, outputDirectory, window.pid, `${label}-before`);
+  if (current.windowID !== window.windowID) throw new Error(`Settings window identity changed before restoring its position: expected ${window.windowID}, received ${current.windowID}`);
+  const result = helperCall(helper, [
+    "settings-restore-position",
+    String(current.pid), settingsExecutablePath, String(current.windowID),
+    String(current.bounds.x), String(current.bounds.y), String(current.bounds.width), String(current.bounds.height),
+    String(target.x), String(target.y),
+  ]);
+  record(outputDirectory, { type: "settings-window-position-restored", label, callStartMonotonicSeconds: startedAt, expectedWindow: current, targetBounds: target, result });
+  return result;
+}
+
+function closeSettingsWindow(helper: string, outputDirectory: string, window: SettingsWindow, label: string): HelperResult {
+  const startedAt = monotonicSeconds();
+  const result = helperCall(helper, [
+    "settings-close",
+    String(window.pid), settingsExecutablePath, String(window.windowID),
+    String(window.bounds.x), String(window.bounds.y), String(window.bounds.width), String(window.bounds.height),
+  ]);
+  record(outputDirectory, { type: "settings-window-closed", label, callStartMonotonicSeconds: startedAt, expectedWindow: window, result });
+  return result;
+}
+
+async function waitForVisibleFlightStart(
+  helper: string,
+  outputDirectory: string,
+  hostPID: number,
+  baseline: HelperResult,
+  direction: "forward" | "reverse",
+  timeoutMilliseconds: number,
+): Promise<HelperResult> {
+  const baselineWindows = baseline.windows as Array<Record<string, unknown>> | undefined;
+  const baselineFlightIDs = new Set((baselineWindows ?? [])
+    .filter((window) => window.ownerPID === hostPID && window.layer === 25 && (window.alpha as number) > 0)
+    .map((window) => window.windowID));
+  const deadline = Date.now() + Math.min(timeoutMilliseconds, 2_000);
+  let latest: HelperResult | undefined;
+  while (Date.now() < deadline) {
+    latest = helperCall(helper, ["windows"]);
+    const windows = latest.windows as Array<Record<string, unknown>> | undefined;
+    const flightWindow = windows?.find((window) =>
+      window.ownerPID === hostPID && window.layer === 25 && (window.alpha as number) > 0 &&
+      typeof window.windowID === "number" && !baselineFlightIDs.has(window.windowID));
+    if (flightWindow) {
+      record(outputDirectory, { type: `${direction}-flight-visible-start`, hostPID, flightWindow, result: latest });
+      return latest;
+    }
+    await delay(40);
+  }
+  throw new Error(`${direction} flight screen surface was not observed; last window snapshot=${JSON.stringify(latest)}`);
+}
+
+async function restoreInitialSettingsState(
+  helper: string,
+  outputDirectory: string,
+  original: InitialSettingsState,
+  timeoutMilliseconds: number,
+): Promise<void> {
+  const app = helperCall(helper, ["app", "com.apple.systempreferences", settingsExecutablePath]);
+  const pids = app.matchingPIDs as number[] | undefined;
+  let pid = pids?.length === 1 ? pids[0]! : original.pid;
+  const visible = (app.windows as Array<Record<string, unknown>> | undefined)?.filter((window) => window.layer === 0 && (window.alpha as number) > 0) ?? [];
+  if (pids && pids.length > 1) throw new Error(`cannot restore Settings state: found ${pids.length} System Settings processes`);
+
+  if (original.wasOpen) {
+    if (!original.window) throw new Error("cannot restore Settings state: original visible window identity was not recorded");
+    if (!visible.length) {
+      run("/usr/bin/open", ["-a", settingsAppPath]);
+      record(outputDirectory, { type: "settings-reopened-for-restore", app: settingsAppPath, priorPID: original.pid });
+      pid = await waitForSettings(helper, outputDirectory, timeoutMilliseconds);
+    } else if (visible.length !== 1) {
+      throw new Error(`cannot restore Settings state: expected one visible main window, found ${visible.length}`);
+    }
+    const currentPID = pid ?? (await waitForSettings(helper, outputDirectory, timeoutMilliseconds));
+    const current = settingsWindow(helper, outputDirectory, currentPID, "before-final-restore");
+    if (Math.abs(current.bounds.width - original.window.bounds.width) > 1 || Math.abs(current.bounds.height - original.window.bounds.height) > 1) {
+      throw new Error(`Settings window size changed; position-only restore cannot reproduce original rectangle: original=${JSON.stringify(original.window.bounds)} current=${JSON.stringify(current.bounds)}`);
+    }
+    if (Math.abs(current.bounds.x - original.window.bounds.x) > 1 || Math.abs(current.bounds.y - original.window.bounds.y) > 1) {
+      restoreSettingsPosition(helper, outputDirectory, current, original.window.bounds, "restore-preexisting-settings-rectangle");
+    }
+    record(outputDirectory, { type: "settings-original-state-restored", wasOpen: true, original: original.window, finalWindow: settingsWindow(helper, outputDirectory, currentPID, "after-final-restore") });
+    return;
+  }
+
+  if (!visible.length) {
+    record(outputDirectory, { type: "settings-original-state-restored", wasOpen: false, nowHasVisibleWindow: false, processPID: pid ?? null });
+    return;
+  }
+  if (visible.length !== 1 || !pid) throw new Error(`cannot restore initially closed Settings state: visible window/process identity is not unique (${visible.length} window(s), PID=${pid ?? "none"})`);
+  const current = settingsWindow(helper, outputDirectory, pid, "before-close-initially-closed-settings");
+  closeSettingsWindow(helper, outputDirectory, current, "restore-initially-closed-settings");
+  const afterClose = helperCall(helper, ["app", "com.apple.systempreferences", settingsExecutablePath]);
+  const remaining = (afterClose.windows as Array<Record<string, unknown>> | undefined)?.filter((window) => window.layer === 0 && (window.alpha as number) > 0) ?? [];
+  if (remaining.length !== 0) throw new Error(`Settings remained visibly open after restoring initial closed state: ${JSON.stringify(remaining)}`);
+  record(outputDirectory, { type: "settings-original-state-restored", wasOpen: false, nowHasVisibleWindow: false, processPID: pid });
+}
+
 async function waitForHostWindowCount(helper: string, outputDirectory: string, pid: number, expectedMaximum: number, timeoutMilliseconds: number): Promise<void> {
   const deadline = Date.now() + timeoutMilliseconds;
   let latest: HelperResult | undefined;
@@ -480,6 +648,32 @@ async function waitForHostWindowCount(helper: string, outputDirectory: string, p
     await delay(150);
   }
   throw new Error(`candidate PID ${pid} did not settle to at most ${expectedMaximum} visible windows: ${JSON.stringify(latest)}`);
+}
+
+async function waitForHostInitialReturn(helper: string, outputDirectory: string, pid: number, timeoutMilliseconds: number): Promise<HelperResult> {
+  const deadline = Date.now() + timeoutMilliseconds;
+  let latest: HelperResult | undefined;
+  while (Date.now() < deadline) {
+    latest = currentWindows(helper, outputDirectory, `host-pid-${pid}-initial-return-check`);
+    const windows = latest.windows as Array<Record<string, unknown>> | undefined;
+    const visible = windows?.filter((window) => window.ownerPID === pid && (window.alpha as number) > 0) ?? [];
+    const initial = visible.filter((window) => {
+      const bounds = window.bounds as WindowBounds | undefined;
+      // restoreInitialPage() deliberately raises the initial NSWindow to
+      // .floating before disposing the helper. Back must settle at layer 3,
+      // including when the Settings window closes during the reverse flight.
+      return window.layer === 3 && bounds && Math.abs(bounds.width - 600) <= 2 && bounds.height >= 250 && bounds.height <= 450;
+    });
+    const initialIDs = new Set(initial.map((window) => window.windowID));
+    const transient = visible.filter((window) => window.layer === 25 ||
+      (window.layer === 3 && !initialIDs.has(window.windowID)));
+    if (visible.length === 1 && initial.length === 1 && transient.length === 0) {
+      record(outputDirectory, { type: "host-initial-page-restored", pid, result: latest, passed: true });
+      return latest;
+    }
+    await delay(80);
+  }
+  throw new Error(`candidate host did not return to exactly one visible floating initial 600-point window: ${JSON.stringify(latest)}`);
 }
 
 function createManifest(outputDirectory: string, values: Record<string, unknown>): void {
@@ -509,10 +703,15 @@ async function visibleRun(options: Options): Promise<void> {
   let hostChild: ChildProcessWithoutNullStreams | undefined;
   let outputCreated = false;
   let hostClient: ReturnType<typeof createHostClient> | undefined;
+  let visualHelperPath: string | undefined;
+  let originalSettings: InitialSettingsState | undefined;
   let resultStatus: "running" | "passed-diagnostic-only" | "failed-diagnostic-only" = "running";
   let errorText: string | undefined;
+  let runFailure: Error | undefined;
+  let settingsRestoreFailure: Error | undefined;
   try {
     const binaries = compileCandidate(tempDirectory);
+    visualHelperPath = binaries.helper;
     const preflight = helperCall(binaries.helper, ["preflight"]);
     if (preflight.screenCaptureAlreadyGranted !== true) throw new Error("Screen Recording is not already authorized for this helper; refused before app launch, no request was made");
     if (preflight.accessibilityAlreadyGranted !== true) throw new Error("Accessibility control is not already authorized for this helper; refused before app launch, no request was made");
@@ -523,6 +722,11 @@ async function visibleRun(options: Options): Promise<void> {
 
     createDirectory(outputDirectory);
     outputCreated = true;
+    originalSettings = initialSettingsState(
+      binaries.helper,
+      outputDirectory,
+      options.diagnoseSettingsMove || options.diagnoseSettingsCloseDuringBack,
+    );
     const sourcePaths = [...hostSourceNames.map((name) => join(nativeRoot, name)), join(import.meta.dir, helperSourceName), join(import.meta.dir, "permission-swift-candidate-visual.ts")];
     const sourceHashes = Object.fromEntries(sourcePaths.map((path) => [path.replace(`${repositoryRoot}/`, ""), sha256(path)]));
     const commit = run("git", ["rev-parse", "HEAD"]).trim();
@@ -539,6 +743,9 @@ async function visibleRun(options: Options): Promise<void> {
       manualT01DragIncluded: false,
       initialKeyboardDiagnostic: options.diagnoseInitialKeyboard,
       placeholderAXPressDiagnostic: options.diagnosePlaceholderAXPress,
+      settingsMoveDiagnostic: options.diagnoseSettingsMove,
+      settingsCloseDuringBackDiagnostic: options.diagnoseSettingsCloseDuringBack,
+      settingsInitialState: originalSettings ?? null,
       fullPrimaryDisplayCapture: true,
       outputDirectory,
       repoHead: commit,
@@ -631,12 +838,64 @@ async function visibleRun(options: Options): Promise<void> {
     await takeScreenshot(binaries.helper, outputDirectory, "repairing-mocked", 2);
     const settingsPid = await waitForSettings(binaries.helper, outputDirectory, options.timeoutSeconds * 1000);
 
-    const forwardSeries = captureSeries(binaries.helper, outputDirectory, "allow-to-settings-helper", 12, 100);
-    hostClient.send({ type: "state", state: "awaiting-user" });
-    record(outputDirectory, { type: "mocked-state", state: "awaiting-user", settingsPID: settingsPid, reason: "opened real System Settings app; no pane or permission row was clicked" });
-    await forwardSeries;
-    await takeScreenshot(binaries.helper, outputDirectory, "helper-landed", 30);
-    currentWindows(binaries.helper, outputDirectory, "helper-landed-window-order");
+    const settingsWindowBeforeForward = options.diagnoseSettingsMove
+      ? settingsWindow(binaries.helper, outputDirectory, settingsPid, "before-forward-flight")
+      : undefined;
+    const forwardBaseline = options.diagnoseSettingsMove
+      ? currentWindows(binaries.helper, outputDirectory, "before-forward-flight")
+      : undefined;
+    if (settingsWindowBeforeForward && originalSettings?.wasOpen && originalSettings.window) {
+      const original = originalSettings.window.bounds;
+      const current = settingsWindowBeforeForward.bounds;
+      if (Math.abs(current.x - original.x) > 1 || Math.abs(current.y - original.y) > 1 ||
+          Math.abs(current.width - original.width) > 1 || Math.abs(current.height - original.height) > 1) {
+        throw new Error(`Settings moved before the forward-flight diagnostic: original=${JSON.stringify(original)} current=${JSON.stringify(current)}`);
+      }
+    }
+    const forwardSeries = captureSeries(binaries.helper, outputDirectory, "allow-to-settings-helper", 12, 100)
+      .then(() => undefined, (error) => asError(error));
+    let settingsMoveAttempted = false;
+    let forwardError: Error | undefined;
+    try {
+      hostClient.send({ type: "state", state: "awaiting-user" });
+      record(outputDirectory, { type: "mocked-state", state: "awaiting-user", settingsPID: settingsPid, reason: "opened real System Settings app; no pane or permission row was clicked" });
+      if (options.diagnoseSettingsMove && settingsWindowBeforeForward) {
+        if (forwardBaseline) {
+          await waitForVisibleFlightStart(binaries.helper, outputDirectory, hostChild.pid, forwardBaseline, "forward", options.timeoutSeconds * 1000);
+        }
+        settingsMoveAttempted = true;
+        moveSettingsWindow(binaries.helper, outputDirectory, settingsWindowBeforeForward, "during-forward-flight");
+      }
+      const captureError = await forwardSeries;
+      if (captureError) throw captureError;
+      await takeScreenshot(binaries.helper, outputDirectory, "helper-landed", 30);
+      currentWindows(binaries.helper, outputDirectory, "helper-landed-window-order");
+    } catch (error) {
+      forwardError = asError(error);
+    } finally {
+      const captureError = await forwardSeries;
+      if (captureError) {
+        record(outputDirectory, { type: "forward-capture-settlement-error", error: captureError.stack ?? captureError.message });
+        if (forwardError !== captureError) forwardError = combineErrors(forwardError, "forward capture settlement failed", captureError);
+      }
+      if (settingsMoveAttempted && settingsWindowBeforeForward) {
+        try {
+          restoreSettingsPosition(
+            binaries.helper,
+            outputDirectory,
+            settingsWindowBeforeForward,
+            settingsWindowBeforeForward.bounds,
+            "finally-restore-after-forward-flight-move",
+          );
+        } catch (error) {
+          const restoreError = asError(error);
+          record(outputDirectory, { type: "forward-settings-restore-error", error: restoreError.stack ?? restoreError.message });
+          forwardError = combineErrors(forwardError, "forward Settings position restore failed", restoreError);
+        }
+        settingsMoveAttempted = false;
+      }
+    }
+    if (forwardError) throw forwardError;
 
     let placeholderDiagnosticError: Error | undefined;
     let placeholderCountsBefore: HostEventCounts | undefined;
@@ -672,13 +931,57 @@ async function visibleRun(options: Options): Promise<void> {
     }
 
     const backTitle = selected.copy.back ?? "Back";
+    const settingsWindowBeforeBackClose = options.diagnoseSettingsCloseDuringBack
+      ? settingsWindow(binaries.helper, outputDirectory, settingsPid, "before-back-flight-close")
+      : undefined;
+    const backBaseline = options.diagnoseSettingsCloseDuringBack
+      ? currentWindows(binaries.helper, outputDirectory, "before-back-flight")
+      : undefined;
     const backPress = helperCall(binaries.helper, ["press", String(hostChild.pid), backTitle]);
     assertBackButtonResult(backPress, backTitle);
     record(outputDirectory, { type: "ax-button-pressed", label: backTitle, hostPID: hostChild.pid, result: backPress });
-    await captureSeries(binaries.helper, outputDirectory, "back-to-initial", 12, 100);
-    await waitForHostWindowCount(binaries.helper, outputDirectory, hostChild.pid, 1, options.timeoutSeconds * 1000);
-    await takeScreenshot(binaries.helper, outputDirectory, "initial-restored", 60);
-    currentWindows(binaries.helper, outputDirectory, "initial-restored-window-order");
+    const reverseSeries = captureSeries(binaries.helper, outputDirectory, "back-to-initial", 12, 100)
+      .then(() => undefined, (error) => asError(error));
+    let reverseError: Error | undefined;
+    try {
+      if (options.diagnoseSettingsCloseDuringBack && settingsWindowBeforeBackClose && backBaseline) {
+        await waitForVisibleFlightStart(binaries.helper, outputDirectory, hostChild.pid, backBaseline, "reverse", options.timeoutSeconds * 1000);
+        const exactCurrentSettingsWindow = settingsWindow(binaries.helper, outputDirectory, settingsPid, "at-back-flight-close");
+        if (exactCurrentSettingsWindow.windowID !== settingsWindowBeforeBackClose.windowID ||
+            Math.abs(exactCurrentSettingsWindow.bounds.x - settingsWindowBeforeBackClose.bounds.x) > 1 ||
+            Math.abs(exactCurrentSettingsWindow.bounds.y - settingsWindowBeforeBackClose.bounds.y) > 1 ||
+            Math.abs(exactCurrentSettingsWindow.bounds.width - settingsWindowBeforeBackClose.bounds.width) > 1 ||
+            Math.abs(exactCurrentSettingsWindow.bounds.height - settingsWindowBeforeBackClose.bounds.height) > 1) {
+          throw new Error(`Settings window identity or bounds changed before Back-close: before=${JSON.stringify(settingsWindowBeforeBackClose)} now=${JSON.stringify(exactCurrentSettingsWindow)}`);
+        }
+        const closeResult = helperCall(binaries.helper, [
+          "settings-close-during-flight",
+          String(exactCurrentSettingsWindow.pid), settingsExecutablePath, String(exactCurrentSettingsWindow.windowID),
+          String(exactCurrentSettingsWindow.bounds.x), String(exactCurrentSettingsWindow.bounds.y),
+          String(exactCurrentSettingsWindow.bounds.width), String(exactCurrentSettingsWindow.bounds.height),
+          String(hostChild.pid),
+        ]);
+        record(outputDirectory, { type: "settings-back-close", label: "after-visible-reverse-flight-start", expectedWindow: exactCurrentSettingsWindow, result: closeResult });
+      }
+      const captureError = await reverseSeries;
+      if (captureError) throw captureError;
+      if (options.diagnoseSettingsCloseDuringBack) {
+        await waitForHostInitialReturn(binaries.helper, outputDirectory, hostChild.pid, options.timeoutSeconds * 1000);
+      } else {
+        await waitForHostWindowCount(binaries.helper, outputDirectory, hostChild.pid, 1, options.timeoutSeconds * 1000);
+      }
+      await takeScreenshot(binaries.helper, outputDirectory, "initial-restored", 60);
+      currentWindows(binaries.helper, outputDirectory, "initial-restored-window-order");
+    } catch (error) {
+      reverseError = asError(error);
+    } finally {
+      const captureError = await reverseSeries;
+      if (captureError) {
+        record(outputDirectory, { type: "reverse-capture-settlement-error", error: captureError.stack ?? captureError.message });
+        if (reverseError !== captureError) reverseError = combineErrors(reverseError, "reverse capture settlement failed", captureError);
+      }
+    }
+    if (reverseError) throw reverseError;
     if (placeholderCountsBefore) {
       const finalCounts = hostEventCounts(hostClient.events);
       try {
@@ -693,9 +996,9 @@ async function visibleRun(options: Options): Promise<void> {
     resultStatus = "passed-diagnostic-only";
   } catch (error) {
     resultStatus = "failed-diagnostic-only";
-    errorText = error instanceof Error ? error.stack ?? error.message : String(error);
+    runFailure = asError(error);
+    errorText = runFailure.stack ?? runFailure.message;
     if (outputCreated) record(outputDirectory, { type: "runner-error", error: errorText });
-    throw error;
   } finally {
     if (hostChild && hostChild.exitCode === null && hostChild.signalCode === null) {
       try {
@@ -715,15 +1018,36 @@ async function visibleRun(options: Options): Promise<void> {
         }
       }
     }
+    if (outputCreated && visualHelperPath && originalSettings &&
+        (options.diagnoseSettingsMove || options.diagnoseSettingsCloseDuringBack)) {
+      try {
+        await restoreInitialSettingsState(visualHelperPath, outputDirectory, originalSettings, options.timeoutSeconds * 1000);
+      } catch (error) {
+        settingsRestoreFailure = error instanceof Error ? error : new Error(String(error));
+        resultStatus = "failed-diagnostic-only";
+        errorText = [errorText, `Settings state restoration failed: ${settingsRestoreFailure.message}`].filter(Boolean).join("\n");
+        record(outputDirectory, { type: "settings-original-state-restore-failed", error: settingsRestoreFailure.stack ?? settingsRestoreFailure.message });
+      }
+    }
     if (outputCreated) {
       try {
-        createManifest(outputDirectory, { status: resultStatus, error: errorText, initialKeyboardDiagnostic: options.diagnoseInitialKeyboard, placeholderAXPressDiagnostic: options.diagnosePlaceholderAXPress });
+        createManifest(outputDirectory, {
+          status: resultStatus,
+          error: errorText,
+          initialKeyboardDiagnostic: options.diagnoseInitialKeyboard,
+          placeholderAXPressDiagnostic: options.diagnosePlaceholderAXPress,
+          settingsMoveDiagnostic: options.diagnoseSettingsMove,
+          settingsCloseDuringBackDiagnostic: options.diagnoseSettingsCloseDuringBack,
+          settingsInitialState: originalSettings ?? null,
+        });
       } catch (error) {
         record(outputDirectory, { type: "manifest-finalization-error", error: String(error) });
       }
     }
     rmSync(tempDirectory, { recursive: true, force: true });
   }
+  if (settingsRestoreFailure) throw combineErrors(runFailure, "Settings restoration failed", settingsRestoreFailure);
+  if (runFailure) throw runFailure;
 }
 
 async function main(): Promise<void> {
@@ -757,7 +1081,7 @@ async function main(): Promise<void> {
     return;
   }
   try {
-    process.stdout.write("Opt-in accepted. This will open ChatGPT and System Settings and save full primary-display screenshots. No permission pane will be clicked, and only the candidate host process will be closed.\n");
+    process.stdout.write("Opt-in accepted. This will open ChatGPT and System Settings and save full primary-display screenshots. No permission pane will be clicked; Settings window changes run only with their explicit diagnostic flags.\n");
     await visibleRun(options);
     process.stdout.write(`Diagnostic visual run finished. Evidence retained at ${options.outputDirectory}\n`);
   } catch (error) {

@@ -24,7 +24,7 @@ private struct PermissionSwiftCandidateVisualHelper {
     @MainActor
     private static func run(_ arguments: [String]) async throws {
         guard let command = arguments.first else {
-            throw VisualToolError(message: "expected preflight, app, windows, press, press-settings-placeholder, or snapshot")
+            throw VisualToolError(message: "expected preflight, app, windows, Settings window diagnostics, press, press-settings-placeholder, or snapshot")
         }
         switch command {
         case "preflight":
@@ -76,6 +76,19 @@ private struct PermissionSwiftCandidateVisualHelper {
                 "wallTime": ISO8601DateFormatter().string(from: Date()),
                 "monotonicSeconds": ProcessInfo.processInfo.systemUptime,
             ])
+        case "settings-window":
+            try reportExactSettingsWindow(arguments)
+        case "settings-move":
+            try moveExactSettingsWindow(arguments)
+        case "settings-restore-position":
+            try restoreExactSettingsWindowPosition(arguments)
+        case "settings-close":
+            try closeExactSettingsWindow(arguments, duringFlightForHostPID: nil)
+        case "settings-close-during-flight":
+            guard arguments.count == 9, let hostPID = pid_t(arguments[8]) else {
+                throw VisualToolError(message: "settings-close-during-flight requires PID EXECUTABLE WINDOW_ID X Y WIDTH HEIGHT FLIGHT_HOST_PID")
+            }
+            try closeExactSettingsWindow(arguments, duringFlightForHostPID: hostPID)
         case "press":
             try pressButton(arguments, settingsPlaceholderDiagnostic: false)
         case "press-settings-placeholder":
@@ -300,6 +313,419 @@ private struct PermissionSwiftCandidateVisualHelper {
             "wallTime": ISO8601DateFormatter().string(from: Date()),
             "monotonicSeconds": ProcessInfo.processInfo.systemUptime,
         ])
+    }
+
+    private static func reportExactSettingsWindow(_ arguments: [String]) throws {
+        guard arguments.count == 3, let pid = pid_t(arguments[1]) else {
+            throw VisualToolError(message: "settings-window requires PID EXECUTABLE_PATH")
+        }
+        let executable = standardizedExecutable(arguments[2])
+        let selected = try exactVisibleSettingsWindow(pid: pid, executable: executable)
+        var result = settingsWindowJSON(command: "settings-window", selected: selected)
+        do {
+            result["closeButton"] = try exactSettingsCloseButton(for: selected).json
+        } catch {
+            result["closeButton"] = ["available": false, "error": error.localizedDescription]
+        }
+        writeJSON(result)
+    }
+
+    private static func moveExactSettingsWindow(_ arguments: [String]) throws {
+        guard arguments.count == 8, let pid = pid_t(arguments[1]), let windowID = Int(arguments[3]),
+              let expectedBounds = argumentsBounds(arguments, from: 4) else {
+            throw VisualToolError(message: "settings-move requires PID EXECUTABLE_PATH WINDOW_ID X Y WIDTH HEIGHT")
+        }
+        guard AXIsProcessTrusted() else {
+            throw VisualToolError(message: "Accessibility control is not already authorized; no prompt was requested")
+        }
+        let executable = standardizedExecutable(arguments[2])
+        let selected = try exactVisibleSettingsWindow(pid: pid, executable: executable)
+        try requireExactWindow(selected, windowID: windowID, expectedBounds: expectedBounds)
+
+        let displayBounds = activeDisplayContaining(selected.cgBounds)
+        guard let displayBounds else {
+            throw VisualToolError(message: "selected Settings window does not fit wholly on one active display; no move was attempted")
+        }
+        let roomRight = max(0, displayBounds.maxX - selected.cgBounds.maxX)
+        let roomLeft = max(0, selected.cgBounds.minX - displayBounds.minX)
+        let roomDown = max(0, displayBounds.maxY - selected.cgBounds.maxY)
+        let roomUp = max(0, selected.cgBounds.minY - displayBounds.minY)
+        let dx = roomRight >= 8 ? min(24, roomRight) : (roomLeft >= 8 ? -min(24, roomLeft) : 0)
+        let dy = roomDown >= 8 ? min(16, roomDown) : (roomUp >= 8 ? -min(16, roomUp) : 0)
+        guard dx != 0 || dy != 0 else {
+            throw VisualToolError(message: "no bounded 8-point Settings window offset fits on the selected display")
+        }
+        let originalBounds = selected.axBounds
+        let requestedPosition = CGPoint(x: originalBounds.minX + dx, y: originalBounds.minY + dy)
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        let startedWallTime = ISO8601DateFormatter().string(from: Date())
+        do {
+            try setWindowPosition(selected.element, to: requestedPosition)
+            let moved = try waitForWindowPosition(selected.element, expected: requestedPosition, originalSize: originalBounds.size)
+            let matchingCG = try waitForCGWindow(windowID: windowID, pid: pid, expected: moved, timeout: 1.0)
+            writeJSON([
+                "ok": true,
+                "command": "settings-move",
+                "pid": Int(pid),
+                "executablePath": executable,
+                "windowID": windowID,
+                "title": selected.title,
+                "axRole": selected.role,
+                "actions": selected.actions,
+                "beforeBounds": rectObject(originalBounds),
+                "requestedBounds": rectObject(CGRect(origin: requestedPosition, size: originalBounds.size)),
+                "afterBounds": rectObject(moved),
+                "cgWindowAfterMove": matchingCG,
+                "offset": ["x": dx, "y": dy],
+                "boundedOffsetMaximum": ["x": 24, "y": 16],
+                "wallTimeStarted": startedWallTime,
+                "wallTimeFinished": ISO8601DateFormatter().string(from: Date()),
+                "monotonicStartedSeconds": startedAt,
+                "monotonicFinishedSeconds": ProcessInfo.processInfo.systemUptime,
+            ])
+        } catch {
+            var rollback: [String: Any] = ["attempted": true, "ok": false]
+            do {
+                try setWindowPosition(selected.element, to: originalBounds.origin)
+                let restored = try waitForWindowPosition(selected.element, expected: originalBounds.origin, originalSize: originalBounds.size)
+                rollback = ["attempted": true, "ok": true, "bounds": rectObject(restored)]
+            } catch {
+                rollback["error"] = error.localizedDescription
+            }
+            throw VisualToolError(message: "Settings move did not verify; rollback=\(rollback), cause=\(error.localizedDescription)")
+        }
+    }
+
+    private static func restoreExactSettingsWindowPosition(_ arguments: [String]) throws {
+        guard arguments.count == 10, let pid = pid_t(arguments[1]), let windowID = Int(arguments[3]),
+              let expectedBounds = argumentsBounds(arguments, from: 4),
+              let targetX = Double(arguments[8]), let targetY = Double(arguments[9]),
+              targetX.isFinite, targetY.isFinite else {
+            throw VisualToolError(message: "settings-restore-position requires PID EXECUTABLE_PATH WINDOW_ID X Y WIDTH HEIGHT TARGET_X TARGET_Y")
+        }
+        guard AXIsProcessTrusted() else {
+            throw VisualToolError(message: "Accessibility control is not already authorized; no prompt was requested")
+        }
+        let executable = standardizedExecutable(arguments[2])
+        let selected = try exactVisibleSettingsWindow(pid: pid, executable: executable)
+        try requireExactWindow(selected, windowID: windowID, expectedBounds: expectedBounds)
+        let target = CGPoint(x: targetX, y: targetY)
+        let display = activeDisplayContaining(CGRect(origin: target, size: selected.axBounds.size))
+        guard display != nil else {
+            throw VisualToolError(message: "original Settings rectangle no longer fits on an active display; no position change was attempted")
+        }
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        let startedWallTime = ISO8601DateFormatter().string(from: Date())
+        try setWindowPosition(selected.element, to: target)
+        let restored = try waitForWindowPosition(selected.element, expected: target, originalSize: selected.axBounds.size)
+        let matchingCG = try waitForCGWindow(windowID: windowID, pid: pid, expected: restored, timeout: 1.0)
+        writeJSON([
+            "ok": true,
+            "command": "settings-restore-position",
+            "pid": Int(pid),
+            "executablePath": executable,
+            "windowID": windowID,
+            "title": selected.title,
+            "beforeBounds": rectObject(selected.axBounds),
+            "targetBounds": rectObject(CGRect(origin: target, size: selected.axBounds.size)),
+            "afterBounds": rectObject(restored),
+            "cgWindowAfterRestore": matchingCG,
+            "wallTimeStarted": startedWallTime,
+            "wallTimeFinished": ISO8601DateFormatter().string(from: Date()),
+            "monotonicStartedSeconds": startedAt,
+            "monotonicFinishedSeconds": ProcessInfo.processInfo.systemUptime,
+        ])
+    }
+
+    private static func closeExactSettingsWindow(_ arguments: [String], duringFlightForHostPID hostPID: pid_t?) throws {
+        let expectedCount = hostPID == nil ? 8 : 9
+        guard arguments.count == expectedCount, let pid = pid_t(arguments[1]), let windowID = Int(arguments[3]),
+              let expectedBounds = argumentsBounds(arguments, from: 4) else {
+            throw VisualToolError(message: hostPID == nil
+                ? "settings-close requires PID EXECUTABLE_PATH WINDOW_ID X Y WIDTH HEIGHT"
+                : "settings-close-during-flight requires PID EXECUTABLE_PATH WINDOW_ID X Y WIDTH HEIGHT FLIGHT_HOST_PID")
+        }
+        guard AXIsProcessTrusted() else {
+            throw VisualToolError(message: "Accessibility control is not already authorized; no prompt was requested")
+        }
+        let executable = standardizedExecutable(arguments[2])
+        let selected = try exactVisibleSettingsWindow(pid: pid, executable: executable)
+        try requireExactWindow(selected, windowID: windowID, expectedBounds: expectedBounds)
+
+        let closeButton = try exactSettingsCloseButton(for: selected)
+        let flightWindows: [[String: Any]]
+        if let hostPID {
+            flightWindows = windowRecords().filter { window in
+                (window["ownerPID"] as? Int) == Int(hostPID) &&
+                    (window["layer"] as? Int) == 25 &&
+                    (window["alpha"] as? Double ?? 0) > 0
+            }
+            guard !flightWindows.isEmpty else {
+                throw VisualToolError(message: "reverse-flight layer-25 host window is no longer visible; Settings close-button AXPress was not performed")
+            }
+        } else {
+            flightWindows = []
+        }
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        let startedWallTime = ISO8601DateFormatter().string(from: Date())
+        let action = AXUIElementPerformAction(closeButton.element, kAXPressAction as CFString)
+        guard action.rawValue == 0 else {
+            throw VisualToolError(message: "AXPress on the exact Settings close button failed for PID \(pid) window \(windowID): AXError \(action.rawValue)")
+        }
+        let deadline = Date().addingTimeInterval(1.5)
+        var remainsVisible = true
+        while Date() < deadline {
+            remainsVisible = windowRecords().contains { window in
+                (window["ownerPID"] as? Int) == Int(pid) &&
+                    (window["windowID"] as? Int) == windowID &&
+                    (window["layer"] as? Int) == 0 &&
+                    (window["alpha"] as? Double ?? 0) > 0
+            }
+            if !remainsVisible { break }
+            Thread.sleep(forTimeInterval: 0.04)
+        }
+        guard !remainsVisible else {
+            throw VisualToolError(message: "close-button AXPress returned success but exact Settings window \(windowID) remained visible")
+        }
+        writeJSON([
+            "ok": true,
+            "command": hostPID == nil ? "settings-close" : "settings-close-during-flight",
+            "pid": Int(pid),
+            "executablePath": executable,
+            "windowID": windowID,
+            "title": selected.title,
+            "axRole": selected.role,
+            "windowActions": selected.actions,
+            "closeButton": closeButton.json,
+            "performedAction": kAXPressAction as String,
+            "boundsAtClose": rectObject(selected.axBounds),
+            "flightHostPID": hostPID.map { Int($0) } as Any? ?? NSNull(),
+            "flightWindowsVisibleAtButtonPress": flightWindows,
+            "axError": action.rawValue,
+            "windowAbsentAfterClose": true,
+            "wallTimeStarted": startedWallTime,
+            "wallTimeFinished": ISO8601DateFormatter().string(from: Date()),
+            "monotonicStartedSeconds": startedAt,
+            "monotonicFinishedSeconds": ProcessInfo.processInfo.systemUptime,
+        ])
+    }
+
+    private struct SelectedSettingsWindow {
+        let element: AXUIElement
+        let pid: pid_t
+        let windowID: Int
+        let title: String
+        let role: String
+        let actions: [String]
+        let axBounds: CGRect
+        let cgBounds: CGRect
+        let cgRecord: [String: Any]
+    }
+
+    private struct ExactSettingsCloseButton {
+        let element: AXUIElement
+        let role: String
+        let subrole: String
+        let actions: [String]
+        let bounds: CGRect
+        let label: String
+        let ownerPID: pid_t
+        let ownerWindowID: Int
+        let ownerWindowTitle: String
+
+        var json: [String: Any] {
+            [
+                "available": true,
+                "role": role,
+                "subrole": subrole,
+                "actions": actions,
+                "bounds": rectObject(bounds),
+                "label": label,
+                "ownerPID": Int(ownerPID),
+                "ownerWindowID": ownerWindowID,
+                "ownerWindowTitle": ownerWindowTitle,
+                "ownerMatchesSelectedAXWindow": true,
+            ]
+        }
+    }
+
+    private static func exactSettingsCloseButton(for selected: SelectedSettingsWindow) throws -> ExactSettingsCloseButton {
+        guard let rawButton = copyAttribute(selected.element, kAXCloseButtonAttribute as CFString),
+              CFGetTypeID(rawButton) == AXUIElementGetTypeID() else {
+            throw VisualToolError(message: "exact Settings AXWindow has no accessible AXCloseButton; no close was performed")
+        }
+        let button = unsafeBitCast(rawButton, to: AXUIElement.self)
+        let role = copyAttribute(button, kAXRoleAttribute as CFString) as? String ?? ""
+        let subrole = copyAttribute(button, kAXSubroleAttribute as CFString) as? String ?? ""
+        guard role == (kAXButtonRole as String), subrole == (kAXCloseButtonSubrole as String) else {
+            throw VisualToolError(message: "Settings AXCloseButton did not identify as AXButton/AXCloseButton; no close was performed")
+        }
+        guard copyAttribute(button, kAXEnabledAttribute as CFString) as? Bool == true,
+              copyAttribute(button, kAXHiddenAttribute as CFString) as? Bool != true else {
+            throw VisualToolError(message: "Settings AXCloseButton is disabled or hidden; no close was performed")
+        }
+        guard let rawOwner = copyAttribute(button, kAXWindowAttribute as CFString),
+              CFGetTypeID(rawOwner) == AXUIElementGetTypeID(), CFEqual(rawOwner, selected.element) else {
+            throw VisualToolError(message: "Settings close button is not owned by the exact selected AXWindow; no close was performed")
+        }
+        var rawActions: CFArray?
+        _ = AXUIElementCopyActionNames(button, &rawActions)
+        let actions = [String](rawActions as? [String] ?? [])
+        guard actions.contains(kAXPressAction as String) else {
+            throw VisualToolError(message: "Settings AXCloseButton does not expose AXPress; no close was performed")
+        }
+        guard let bounds = axRect(button),
+              selected.axBounds.insetBy(dx: -2, dy: -2).contains(bounds),
+              bounds.width <= 64, bounds.height <= 64,
+              bounds.minX <= selected.axBounds.minX + 90,
+              bounds.minY <= selected.axBounds.minY + 90 else {
+            throw VisualToolError(message: "Settings AXCloseButton is outside the expected top-left close-control frame; no close was performed")
+        }
+        return ExactSettingsCloseButton(
+            element: button,
+            role: role,
+            subrole: subrole,
+            actions: actions,
+            bounds: bounds,
+            label: copyAttribute(button, kAXTitleAttribute as CFString) as? String ?? "",
+            ownerPID: selected.pid,
+            ownerWindowID: selected.windowID,
+            ownerWindowTitle: selected.title
+        )
+    }
+
+    private static func exactVisibleSettingsWindow(pid: pid_t, executable: String) throws -> SelectedSettingsWindow {
+        guard let running = NSRunningApplication(processIdentifier: pid),
+              running.bundleIdentifier == "com.apple.systempreferences",
+              running.executableURL?.standardizedFileURL.path == executable else {
+            throw VisualToolError(message: "Settings PID does not match the exact System Settings bundle and executable")
+        }
+        let appElement = AXUIElementCreateApplication(pid)
+        let appWindows = copyAttribute(appElement, kAXWindowsAttribute as CFString) as? [AXUIElement] ?? []
+        let visibleMainCGWindows = windowRecords().filter { window in
+            guard (window["ownerPID"] as? Int) == Int(pid),
+                  (window["layer"] as? Int) == 0,
+                  (window["alpha"] as? Double ?? 0) > 0,
+                  let bounds = cgRect(window["bounds"]) else { return false }
+            return bounds.width > 600 && bounds.height >= 470
+        }
+        guard visibleMainCGWindows.count == 1, let cgRecord = visibleMainCGWindows.first,
+              let windowID = cgRecord["windowID"] as? Int,
+              let cgBounds = cgRect(cgRecord["bounds"]) else {
+            throw VisualToolError(message: "expected exactly one visible primary System Settings window for PID \(pid); found \(visibleMainCGWindows.count)")
+        }
+        let matches = appWindows.compactMap { window -> SelectedSettingsWindow? in
+            let role = copyAttribute(window, kAXRoleAttribute as CFString) as? String ?? ""
+            guard role == (kAXWindowRole as String),
+                  copyAttribute(window, kAXMinimizedAttribute as CFString) as? Bool != true,
+                  let bounds = axRect(window), rectsMatch(bounds, cgBounds, tolerance: 2) else { return nil }
+            var rawActions: CFArray?
+            _ = AXUIElementCopyActionNames(window, &rawActions)
+            return SelectedSettingsWindow(
+                element: window,
+                pid: pid,
+                windowID: windowID,
+                title: copyAttribute(window, kAXTitleAttribute as CFString) as? String ?? "",
+                role: role,
+                actions: [String](rawActions as? [String] ?? []),
+                axBounds: bounds,
+                cgBounds: cgBounds,
+                cgRecord: cgRecord
+            )
+        }
+        guard matches.count == 1, let selected = matches.first else {
+            throw VisualToolError(message: "visible Settings CGWindow did not map to exactly one AXWindow for PID \(pid); matches=\(matches.count)")
+        }
+        return selected
+    }
+
+    private static func settingsWindowJSON(command: String, selected: SelectedSettingsWindow) -> [String: Any] {
+        [
+            "ok": true,
+            "command": command,
+            "pid": Int(selected.pid),
+            "windowID": selected.windowID,
+            "title": selected.title,
+            "axRole": selected.role,
+            "actions": selected.actions,
+            "bounds": rectObject(selected.axBounds),
+            "cgWindow": selected.cgRecord,
+            "wallTime": ISO8601DateFormatter().string(from: Date()),
+            "monotonicSeconds": ProcessInfo.processInfo.systemUptime,
+        ]
+    }
+
+    private static func requireExactWindow(_ selected: SelectedSettingsWindow, windowID: Int, expectedBounds: CGRect) throws {
+        guard selected.windowID == windowID, rectsMatch(selected.axBounds, expectedBounds, tolerance: 1),
+              rectsMatch(selected.cgBounds, expectedBounds, tolerance: 2) else {
+            throw VisualToolError(message: "refusing to mutate Settings: exact window ID/frame mismatch; actualID=\(selected.windowID), expectedID=\(windowID), actualAX=\(selected.axBounds), actualCG=\(selected.cgBounds), expected=\(expectedBounds)")
+        }
+    }
+
+    private static func standardizedExecutable(_ path: String) -> String {
+        URL(fileURLWithPath: path).standardizedFileURL.path
+    }
+
+    private static func argumentsBounds(_ arguments: [String], from start: Int) -> CGRect? {
+        guard arguments.count >= start + 4,
+              let x = Double(arguments[start]), let y = Double(arguments[start + 1]),
+              let width = Double(arguments[start + 2]), let height = Double(arguments[start + 3]),
+              x.isFinite, y.isFinite, width.isFinite, height.isFinite,
+              width > 0, height > 0 else { return nil }
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    private static func rectsMatch(_ lhs: CGRect, _ rhs: CGRect, tolerance: CGFloat) -> Bool {
+        abs(lhs.minX - rhs.minX) <= tolerance && abs(lhs.minY - rhs.minY) <= tolerance &&
+            abs(lhs.width - rhs.width) <= tolerance && abs(lhs.height - rhs.height) <= tolerance
+    }
+
+    private static func activeDisplayContaining(_ rect: CGRect) -> CGRect? {
+        var displayCount: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &displayCount) == .success, displayCount > 0 else { return nil }
+        var displayIDs = Array(repeating: CGDirectDisplayID(), count: Int(displayCount))
+        guard CGGetActiveDisplayList(displayCount, &displayIDs, &displayCount) == .success else { return nil }
+        return displayIDs.map(CGDisplayBounds).first { $0.insetBy(dx: -1, dy: -1).contains(rect) }
+    }
+
+    private static func setWindowPosition(_ window: AXUIElement, to point: CGPoint) throws {
+        var valuePoint = point
+        guard let value = AXValueCreate(.cgPoint, &valuePoint) else {
+            throw VisualToolError(message: "could not create an AX position value")
+        }
+        let result = AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, value)
+        guard result.rawValue == 0 else {
+            throw VisualToolError(message: "AX position update failed: AXError \(result.rawValue)")
+        }
+    }
+
+    private static func waitForWindowPosition(_ window: AXUIElement, expected: CGPoint, originalSize: CGSize) throws -> CGRect {
+        let deadline = Date().addingTimeInterval(1.0)
+        var latest = axRect(window)
+        while Date() < deadline {
+            if let frame = axRect(window) {
+                latest = frame
+                if abs(frame.minX - expected.x) <= 1 && abs(frame.minY - expected.y) <= 1 &&
+                    abs(frame.width - originalSize.width) <= 1 && abs(frame.height - originalSize.height) <= 1 {
+                    return frame
+                }
+            }
+            Thread.sleep(forTimeInterval: 0.025)
+        }
+        throw VisualToolError(message: "Settings AXWindow did not reach requested position while preserving size; expected=(\(expected.x),\(expected.y),\(originalSize.width),\(originalSize.height)) actual=\(String(describing: latest))")
+    }
+
+    private static func waitForCGWindow(windowID: Int, pid: pid_t, expected: CGRect, timeout: TimeInterval) throws -> [String: Any] {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let match = windowRecords().first(where: {
+                ($0["ownerPID"] as? Int) == Int(pid) && ($0["windowID"] as? Int) == windowID
+            }), let bounds = cgRect(match["bounds"]), rectsMatch(bounds, expected, tolerance: 2) {
+                return match
+            }
+            Thread.sleep(forTimeInterval: 0.025)
+        }
+        throw VisualToolError(message: "CGWindow \(windowID) for Settings PID \(pid) did not confirm AX geometry \(expected)")
     }
 
     @MainActor

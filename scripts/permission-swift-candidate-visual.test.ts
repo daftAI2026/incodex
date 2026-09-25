@@ -41,6 +41,38 @@ test("initial keyboard Allow diagnostic cannot bypass the visible-run gates", ()
   expect(result.stdout + result.stderr).not.toContain("Opt-in accepted");
 });
 
+test("Settings window mutation diagnostics are recognized and refused without the visible-run gates", () => {
+  for (const flag of ["--diagnose-settings-move", "--diagnose-settings-close-during-back"]) {
+    const result = spawnSync("bun", [script, flag], { encoding: "utf8", timeout: 10_000 });
+    expect(result.status).toBe(2);
+    expect(result.stdout + result.stderr).toContain("requires --run --acknowledge-visible-ui and a new --out directory");
+    expect(result.stdout + result.stderr).not.toContain("Launching official ChatGPT");
+  }
+});
+
+test("combined Settings mutation diagnostic identifies exact reversible AX operations and window bounds", () => {
+  const source = readFileSync(script, "utf8");
+  const helperSource = readFileSync(helper, "utf8");
+  expect(source).toContain("diagnoseSettingsMove: false");
+  expect(source).toContain("diagnoseSettingsCloseDuringBack: false");
+  expect(source).toContain("settings-window-moved");
+  expect(source).toContain("settings-back-close");
+  expect(source).toContain("settings-restore-position");
+  expect(source).toContain("originalSettings");
+  expect(source).toContain("waitForVisibleFlightStart");
+  expect(source).toContain("window.layer === 3 && bounds && Math.abs(bounds.width - 600)");
+  expect(source).toContain("window.layer === 3 && !initialIDs.has(window.windowID)");
+  expect(helperSource).toContain("AXUIElementSetAttributeValue");
+  expect(helperSource).toContain("kAXPositionAttribute");
+  expect(helperSource).toContain("kAXCloseButtonAttribute");
+  expect(helperSource).toContain("kAXCloseButtonSubrole");
+  expect(helperSource).toContain("kAXPressAction as String");
+  expect(helperSource).toContain("windowID");
+  expect(helperSource).toContain("expectedBounds");
+  expect(helperSource).toContain("min(24, roomRight)");
+  expect(helperSource).toContain("min(16, roomDown)");
+});
+
 test("runner source is read-only with respect to TCC and compiles the production gate", () => {
   const source = readFileSync(script, "utf8");
   const helperSource = readFileSync(helper, "utf8");
