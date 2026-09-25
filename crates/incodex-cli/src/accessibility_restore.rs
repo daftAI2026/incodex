@@ -242,6 +242,44 @@ mod tests {
     }
 
     #[test]
+    fn closing_the_guide_is_pending_and_never_resets() {
+        let mut ops = FakeOps::new(&[AccessibilityStatus::Denied, AccessibilityStatus::Denied]);
+        let mut factory = FakeFactory::new(&[HostEvent::Ready, HostEvent::Close]);
+        assert_eq!(
+            run_fake(&mut ops, &mut factory, || Ok(())),
+            Ok(Outcome::Pending)
+        );
+        assert!(!ops.events.contains(&"reset"));
+        assert!(!ops.events.contains(&"settings"));
+    }
+
+    #[test]
+    fn later_after_allow_stays_pending_without_repeating_the_reset() {
+        let mut ops = FakeOps::new(&[
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Denied,
+            AccessibilityStatus::Denied,
+        ]);
+        let mut factory = FakeFactory::new(&[HostEvent::Ready, HostEvent::Allow, HostEvent::Later]);
+        assert_eq!(
+            run_fake(&mut ops, &mut factory, || Ok(())),
+            Ok(Outcome::Pending)
+        );
+        assert_eq!(
+            ops.events.iter().filter(|event| **event == "reset").count(),
+            1
+        );
+        assert_eq!(
+            ops.events
+                .iter()
+                .filter(|event| **event == "settings")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
     fn choice_wait_has_its_own_bounded_deadline_before_allow() {
         let mut ops = FakeOps::new(&[
             AccessibilityStatus::Denied,
