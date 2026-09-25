@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { discoverOfficialTooltipModules, createOfficialTooltipRenderer, sharedTooltipState } from "./official-tooltip-renderer.ts";
+import {
+  discoverOfficialTooltipModuleGraph,
+  discoverOfficialTooltipModules,
+  createOfficialTooltipRenderer,
+  sharedTooltipState,
+} from "./official-tooltip-renderer.ts";
 
 describe("official tooltip renderer", () => {
   test("repeated injections share the lifecycle seen by old dismissal listeners", () => {
@@ -17,6 +22,33 @@ describe("official tooltip renderer", () => {
     expect(discoverOfficialTooltipModules("app://-/assets/index-123.js", 'const deps=["./react-abc.js","./client-def.js","./tooltip-dismiss-ghi.js","./tooltip-jkl.js"]')).toEqual({
       react: "app://-/assets/react-abc.js", client: "app://-/assets/client-def.js", tooltip: "app://-/assets/tooltip-jkl.js",
     });
+  });
+  test("walks the current shared-chunk graph without depending on its content hash", () => {
+    const entry = "app://-/assets/index-current.js";
+    const source = [
+      'const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["./rpc-current.js","./app-initial-current.js","./rolldown-runtime-current.js","./app-shared-current.js","./app-main-current.js"])))=>i.map(i=>d[i]);',
+      'import{n as e}from"./rolldown-runtime-current.js";',
+      'import{H3 as n,V3 as r,W3 as i}from"./app-shared-current.js";',
+      'await import("./app-main-current.js");',
+    ].join("");
+
+    expect(discoverOfficialTooltipModuleGraph(entry, source)).toEqual([
+      "app://-/assets/rpc-current.js",
+      "app://-/assets/app-initial-current.js",
+      "app://-/assets/rolldown-runtime-current.js",
+      "app://-/assets/app-shared-current.js",
+      "app://-/assets/app-main-current.js",
+    ]);
+  });
+  test("keeps the old direct-module layout in the same local graph", () => {
+    expect(discoverOfficialTooltipModuleGraph(
+      "app://-/assets/index-old.js",
+      'import{t}from"./react-a1.js";import{t as e}from"./client-b2.js";import{r,t}from"./tooltip-c3.js";',
+    )).toEqual([
+      "app://-/assets/react-a1.js",
+      "app://-/assets/client-b2.js",
+      "app://-/assets/tooltip-c3.js",
+    ]);
   });
   test("rejects external, traversing, ambiguous, or incomplete module sources", () => {
     for (const source of [
