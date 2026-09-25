@@ -17,13 +17,36 @@ type RendererModules = {
   Tooltip: unknown;
 };
 
+// Read the entry's dependency graph instead of assuming every release keeps
+// React and Tooltip in separately named chunks. Rolldown/Vite may merge them.
+export function discoverOfficialTooltipModuleGraph(entry: string, source: string): string[] {
+  const entryUrl = new URL(entry);
+  if (!["app:", "file:"].includes(entryUrl.protocol)) throw new Error("Not a packaged renderer");
+  const assetsDirectory = new URL("./", entryUrl);
+  const modules = new Set<string>();
+  const specifierPattern = /["'`](\.\/[^"'`]+\.js)["'`]/g;
+  for (const match of source.matchAll(specifierPattern)) {
+    const specifier = match[1]!;
+    if (!/^\.\/[A-Za-z0-9_-][A-Za-z0-9._-]*\.js$/u.test(specifier)) continue;
+    const resolved = new URL(specifier, entryUrl);
+    if (resolved.protocol !== entryUrl.protocol || resolved.host !== entryUrl.host ||
+        !resolved.pathname.startsWith(assetsDirectory.pathname)) {
+      throw new Error("Official module graph escapes the packaged assets directory");
+    }
+    modules.add(resolved.href);
+    if (modules.size > 256) throw new Error("Official module graph is unexpectedly large");
+  }
+  return [...modules];
+}
+
 // Read the current packaged entry's dependency map, not fixed asset hashes or
 // copied CSS. Only direct siblings in that entry's assets directory may load.
 export function discoverOfficialTooltipModules(entry: string, source: string): ModulePaths {
+  const graph = discoverOfficialTooltipModuleGraph(entry, source);
   const result = {} as ModulePaths;
   for (const name of ["react", "client", "tooltip"] as const) {
-    const pattern = new RegExp(`["'\x60](\\./${name}-[A-Za-z0-9_]+\\.js)["'\x60]`, "g");
-    const paths = [...new Set([...source.matchAll(pattern)].map((match) => new URL(match[1]!, entry).href))];
+    const moduleName = new RegExp(`^${name}-[A-Za-z0-9_]+\\.js$`, "u");
+    const paths = graph.filter((url) => moduleName.test(new URL(url).pathname.split("/").at(-1) ?? ""));
     if (paths.length !== 1) throw new Error(`Official ${name} module is unavailable or ambiguous`);
     result[name] = paths[0]!;
   }
