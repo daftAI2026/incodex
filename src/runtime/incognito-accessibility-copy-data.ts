@@ -3,7 +3,7 @@
 export const ACCESSIBILITY_REGIONAL_COPY = {
   "am": {
     "title": "የChatGPT ስክሪፕት ቁጥጥርን አንቃ",
-    "installedTitle": "የChatGPT ስክሪፕት ቁጥጥርን አንቃ",
+    "installedTitle": "የChatGPT ስክሪፕት ቁጥጥርን እንደገና አንቃ",
     "body": "Incodexን መጫን ChatGPTን ይለውጠዋል፣ ስለዚህ የተደራሽነት ፈቃዱ እንደገና መሰጠት አለበት።",
     "permissionTitle": "ተደራሽነት",
     "permissionDescription": "የመተግበሪያ በይነገጾችን ማንበብ እና መጠቀም",
@@ -326,7 +326,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
   },
   "gu-IN": {
     "title": "ChatGPT સ્ક્રિપ્ટ નિયંત્રણ સક્ષમ કરો",
-    "installedTitle": "ChatGPT સ્ક્રિપ્ટ નિયંત્રણ સક્ષમ કરો",
+    "installedTitle": "ChatGPT સ્ક્રિપ્ટ નિયંત્રણ ફરીથી સક્ષમ કરો",
     "body": "Incodex ઇન્સ્ટોલ કરવાથી ChatGPTમાં ફેરફાર થાય છે, તેથી તેની ઍક્સેસિબિલિટી પરવાનગી ફરીથી આપવી જરૂરી છે.",
     "permissionTitle": "ઍક્સેસિબિલિટી",
     "permissionDescription": "ઍપના ઇન્ટરફેસ વાંચો અને તેની સાથે ક્રિયા કરો",
@@ -402,7 +402,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
   },
   "hy-AM": {
     "title": "Միացնել ChatGPT-ի սկրիպտերի կառավարումը",
-    "installedTitle": "Միացնել ChatGPT-ի սկրիպտերի կառավարումը",
+    "installedTitle": "Կրկին միացնել ChatGPT-ի սկրիպտերի կառավարումը",
     "body": "Incodex-ի տեղադրումը փոփոխում է ChatGPT-ը, ուստի Մատչելիության թույլտվությունը պետք է կրկին տրամադրել։",
     "permissionTitle": "Մատչելիություն",
     "permissionDescription": "Կարդալ և փոխազդել հավելվածների միջերեսների հետ",
@@ -497,7 +497,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
   },
   "ka-GE": {
     "title": "ChatGPT-ის სკრიპტების მართვის ჩართვა",
-    "installedTitle": "ChatGPT-ის სკრიპტების მართვის ჩართვა",
+    "installedTitle": "ChatGPT-ის სკრიპტების მართვის ხელახლა ჩართვა",
     "body": "Incodex-ის ინსტალაცია ChatGPT-ს ცვლის, ამიტომ წვდომადობის ნებართვა ხელახლა უნდა მიენიჭოს.",
     "permissionTitle": "წვდომადობა",
     "permissionDescription": "აპების ინტერფეისების წაკითხვა და მათთან ურთიერთქმედება",
@@ -516,7 +516,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
   },
   "kk": {
     "title": "ChatGPT скрипттерін басқаруды қосу",
-    "installedTitle": "ChatGPT скрипттерін басқаруды қосу",
+    "installedTitle": "ChatGPT скрипттерін басқаруды қайта қосу",
     "body": "Incodex орнатылғанда ChatGPT өзгертіледі, сондықтан оның Арнайы мүмкіндіктер рұқсатын қайта беру керек.",
     "permissionTitle": "Арнайы мүмкіндіктер",
     "permissionDescription": "Қолданба интерфейстерін оқу және олармен әрекеттесу",
@@ -535,7 +535,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
   },
   "kn-IN": {
     "title": "ChatGPT ಸ್ಕ್ರಿಪ್ಟ್ ನಿಯಂತ್ರಣವನ್ನು ಸಕ್ರಿಯಗೊಳಿಸಿ",
-    "installedTitle": "ChatGPT ಸ್ಕ್ರಿಪ್ಟ್ ನಿಯಂತ್ರಣವನ್ನು ಸಕ್ರಿಯಗೊಳಿಸಿ",
+    "installedTitle": "ChatGPT ಸ್ಕ್ರಿಪ್ಟ್ ನಿಯಂತ್ರಣವನ್ನು ಮತ್ತೆ ಸಕ್ರಿಯಗೊಳಿಸಿ",
     "body": "Incodex ಅನ್ನು ಇನ್‌ಸ್ಟಾಲ್ ಮಾಡುವುದರಿಂದ ChatGPT ಬದಲಾಗುತ್ತದೆ, ಆದ್ದರಿಂದ ಅದರ ಆಕ್ಸೆಸಿಬಿಲಿಟಿ ಅನುಮತಿಯನ್ನು ಮತ್ತೆ ನೀಡಬೇಕು.",
     "permissionTitle": "ಆಕ್ಸೆಸಿಬಿಲಿಟಿ",
     "permissionDescription": "ಆ್ಯಪ್ ಇಂಟರ್‌ಫೇಸ್‌ಗಳನ್ನು ಓದಿ ಅವುಗಳೊಂದಿಗೆ ಸಂವಹನ ನಡೆಸಿ",
@@ -630,7 +630,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
   },
   "ml": {
     "title": "ChatGPT സ്ക്രിപ്റ്റ് നിയന്ത്രണം പ്രവർത്തനക്ഷമമാക്കുക",
-    "installedTitle": "ChatGPT സ്ക്രിപ്റ്റ് നിയന്ത്രണം പ്രവർത്തനക്ഷമമാക്കുക",
+    "installedTitle": "ChatGPT സ്ക്രിപ്റ്റ് നിയന്ത്രണം വീണ്ടും പ്രവർത്തനക്ഷമമാക്കുക",
     "body": "Incodex ഇൻസ്റ്റാൾ ചെയ്യുന്നത് ChatGPT-ൽ മാറ്റങ്ങൾ വരുത്തുന്നതിനാൽ, അതിന്റെ ആക്‌സസിബിലിറ്റി അനുമതി വീണ്ടും നൽകണം.",
     "permissionTitle": "ആക്‌സസിബിലിറ്റി",
     "permissionDescription": "ആപ്പുകളുടെ ഇന്റർഫേസുകൾ വായിക്കുകയും അവയുമായി ഇടപഴകുകയും ചെയ്യുക",
@@ -649,7 +649,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
   },
   "mn": {
     "title": "ChatGPT скриптийн удирдлагыг идэвхжүүлэх",
-    "installedTitle": "ChatGPT скриптийн удирдлагыг идэвхжүүлэх",
+    "installedTitle": "ChatGPT скриптийн удирдлагыг дахин идэвхжүүлэх",
     "body": "Incodex суулгаснаар ChatGPT-д өөрчлөлт ордог тул түүний Хандалтын зөвшөөрлийг дахин олгоно.",
     "permissionTitle": "Хандалт",
     "permissionDescription": "Аппын интерфэйсийг уншиж, харилцах",
@@ -668,7 +668,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
   },
   "mr-IN": {
     "title": "ChatGPT स्क्रिप्ट नियंत्रण सुरू करा",
-    "installedTitle": "ChatGPT स्क्रिप्ट नियंत्रण सुरू करा",
+    "installedTitle": "ChatGPT स्क्रिप्ट नियंत्रण पुन्हा सुरू करा",
     "body": "Incodex इंस्टॉल केल्याने ChatGPT मध्ये बदल होतात, त्यामुळे त्याची सुलभता परवानगी पुन्हा द्यावी लागेल.",
     "permissionTitle": "सुलभता",
     "permissionDescription": "अॅपचे इंटरफेस वाचा आणि त्यांच्याशी संवाद साधा",
@@ -706,7 +706,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
   },
   "my-MM": {
     "title": "ChatGPT စခရစ်ထိန်းချုပ်မှုကို ဖွင့်ရန်",
-    "installedTitle": "ChatGPT စခရစ်ထိန်းချုပ်မှုကို ဖွင့်ရန်",
+    "installedTitle": "ChatGPT စခရစ်ထိန်းချုပ်မှုကို ထပ်မံဖွင့်ရန်",
     "body": "Incodex ကို ထည့်သွင်းခြင်းကြောင့် ChatGPT ကို ပြင်ဆင်မည်ဖြစ်သဖြင့် ၎င်း၏ အသုံးပြုနိုင်မှု ခွင့်ပြုချက်ကို ထပ်မံပေးရပါမည်။",
     "permissionTitle": "အသုံးပြုနိုင်မှု",
     "permissionDescription": "အက်ပ်အင်တာဖေ့စ်များကို ဖတ်ရှုပြီး အပြန်အလှန်လုပ်ဆောင်ရန်",
@@ -763,7 +763,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
   },
   "pa": {
     "title": "ChatGPT ਸਕ੍ਰਿਪਟ ਕੰਟਰੋਲ ਚਾਲੂ ਕਰੋ",
-    "installedTitle": "ChatGPT ਸਕ੍ਰਿਪਟ ਕੰਟਰੋਲ ਚਾਲੂ ਕਰੋ",
+    "installedTitle": "ChatGPT ਸਕ੍ਰਿਪਟ ਕੰਟਰੋਲ ਦੁਬਾਰਾ ਚਾਲੂ ਕਰੋ",
     "body": "Incodex ਇੰਸਟਾਲ ਕਰਨ ਨਾਲ ChatGPT ਵਿੱਚ ਤਬਦੀਲੀ ਹੁੰਦੀ ਹੈ, ਇਸ ਲਈ ਇਸਦੀ ਪਹੁੰਚਯੋਗਤਾ ਦੀ ਇਜਾਜ਼ਤ ਦੁਬਾਰਾ ਦੇਣੀ ਪਵੇਗੀ।",
     "permissionTitle": "ਪਹੁੰਚਯੋਗਤਾ",
     "permissionDescription": "ਐਪ ਦੇ ਇੰਟਰਫੇਸ ਪੜ੍ਹੋ ਅਤੇ ਉਨ੍ਹਾਂ ਨਾਲ ਇੰਟਰੈਕਟ ਕਰੋ",
@@ -915,7 +915,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
   },
   "so-SO": {
     "title": "Daar xakamaynta qoraalka ChatGPT",
-    "installedTitle": "Daar xakamaynta qoraalka ChatGPT",
+    "installedTitle": "Daar xakamaynta qoraalka ChatGPT mar kale",
     "body": "Rakibidda Incodex waxay wax ka beddeshaa ChatGPT, sidaas darteed oggolaanshaha Helitaanka waa in mar kale la bixiyaa.",
     "permissionTitle": "Helitaanka",
     "permissionDescription": "Akhri oo la falgal is-dhexgallada abka",
@@ -1010,7 +1010,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
   },
   "ta-IN": {
     "title": "ChatGPT ஸ்கிரிப்ட் கட்டுப்பாட்டை இயக்கவும்",
-    "installedTitle": "ChatGPT ஸ்கிரிப்ட் கட்டுப்பாட்டை இயக்கவும்",
+    "installedTitle": "ChatGPT ஸ்கிரிப்ட் கட்டுப்பாட்டை மீண்டும் இயக்கவும்",
     "body": "Incodex-ஐ நிறுவுவது ChatGPT-ஐ மாற்றுவதால், அதன் அணுகல்தன்மை அனுமதியை மீண்டும் வழங்க வேண்டும்.",
     "permissionTitle": "அணுகல்தன்மை",
     "permissionDescription": "ஆப்ஸ் இடைமுகங்களைப் படித்து அவற்றுடன் தொடர்புகொள்ளவும்",
@@ -1029,7 +1029,7 @@ export const ACCESSIBILITY_REGIONAL_COPY = {
   },
   "te-IN": {
     "title": "ChatGPT స్క్రిప్ట్ నియంత్రణను ప్రారంభించండి",
-    "installedTitle": "ChatGPT స్క్రిప్ట్ నియంత్రణను ప్రారంభించండి",
+    "installedTitle": "ChatGPT స్క్రిప్ట్ నియంత్రణను మళ్లీ ప్రారంభించండి",
     "body": "Incodexను ఇన్‌స్టాల్ చేయడం వల్ల ChatGPTలో మార్పులు జరుగుతాయి, కాబట్టి దాని యాక్సెసిబిలిటీ అనుమతిని మళ్లీ ఇవ్వాలి.",
     "permissionTitle": "యాక్సెసిబిలిటీ",
     "permissionDescription": "యాప్ ఇంటర్‌ఫేస్‌లను చదివి వాటితో పరస్పర చర్య చేయండి",

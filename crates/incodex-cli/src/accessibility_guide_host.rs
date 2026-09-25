@@ -1353,7 +1353,10 @@ mod tests {
             assert!(!install.trim().is_empty(), "{locale}");
             assert!(!installed_title.trim().is_empty(), "{locale}");
             assert!(!title.trim().is_empty(), "{locale}");
-            assert_ne!(installed_title, title, "{locale} needs a localized re-enable title");
+            assert_ne!(
+                installed_title, title,
+                "{locale} needs a localized re-enable title"
+            );
             assert!(!official.trim().is_empty(), "{locale}");
             assert!(official.contains("ChatGPT"), "{locale}");
             assert_ne!(install, official, "{locale}");
