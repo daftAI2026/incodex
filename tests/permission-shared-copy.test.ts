@@ -2,11 +2,6 @@ import { expect, test } from "bun:test";
 import { ACCESSIBILITY_SETUP_COPY } from "../src/runtime/incognito-copy.ts";
 import { sharedPermissionCopy } from "../src/permission-shared-copy.ts";
 
-const INSTALLED_TITLE_FALLBACK_LOCALES = [
-  "am", "gu-IN", "hy-AM", "ka-GE", "kk", "kn-IN", "ml", "mn", "mr-IN",
-  "my-MM", "pa", "so-SO", "ta-IN", "te-IN",
-];
-
 test("the CLI guide keeps the installation reason and a distinct official-app reason in every locale", () => {
   const original = JSON.stringify(ACCESSIBILITY_SETUP_COPY);
   const copy = sharedPermissionCopy(ACCESSIBILITY_SETUP_COPY);
@@ -15,11 +10,7 @@ test("the CLI guide keeps the installation reason and a distinct official-app re
     expect(copy[locale].title).toBe(source.title);
     expect(typeof copy[locale].installedTitle, `${locale} installed title`).toBe("string");
     expect(copy[locale].installedTitle.trim().length, `${locale} installed title`).toBeGreaterThan(0);
-    if (INSTALLED_TITLE_FALLBACK_LOCALES.includes(locale)) {
-      expect(copy[locale].installedTitle, `${locale} intentionally retains the reviewed title`).toBe(source.title);
-    } else {
-      expect(copy[locale].installedTitle, `${locale} localized re-enable title`).not.toBe(source.title);
-    }
+    expect(copy[locale].installedTitle, `${locale} localized re-enable title`).not.toBe(source.title);
     expect(copy[locale].body).toBe(source.body);
     expect(copy[locale].body.length).toBeGreaterThan(0);
     expect(copy[locale].officialBody?.trim().length, `${locale} official app reason`).toBeGreaterThan(0);
