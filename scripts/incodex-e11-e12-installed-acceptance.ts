@@ -453,6 +453,28 @@ async function inspectWhenWindowReady(binary: string, pid: number, timeoutMs = 1
   }, (reply) => (reply.windows?.length ?? 0) > 0, timeoutMs);
 }
 
+async function inspectWhenExitToggleReady(
+  binary: string,
+  binding: OwnerBinding,
+  parentPid: number,
+  parentBounds: Bounds,
+  windowId: number,
+  timeoutMs = 15_000,
+): Promise<{ inspect: HelperReply; window: AxWindow; toggle: AxToggle }> {
+  return waitFor(`private exit AXCheckBox in exact window ${windowId}`, () => {
+    assertNoBlockingSystemWindow(binary);
+    assertCurrentOwnerBinding(binding, binary, parentPid);
+    const inspected = axCall(binary, "inspect", [String(binding.pid), executablePath, JSON.stringify(labelsByKind)]);
+    const window = oneMainWindow(inspected);
+    if (window.windowId !== windowId) throw new Error("private child main-window CGWindowID changed while awaiting renderer AX");
+    requireExpectedTile(parentBounds, window.bounds, "private child window awaiting renderer AX");
+    const matches = (inspected.toggles ?? []).filter((toggle) => toggle.kind === "exit" && toggle.windowId === windowId);
+    if (matches.length > 1) throw new Error("multiple private exit AXCheckBoxes appeared in the exact child window");
+    if (matches.length === 0) return null;
+    return { inspect: inspected, window, toggle: oneToggle(inspected, "exit", windowId) };
+  }, () => true, timeoutMs);
+}
+
 function activateThenPress(binary: string, pid: number, kind: "open" | "exit", windowId: number): AxToggle {
   axCall(binary, "activate", [String(pid), executablePath]);
   const toggle = callToggle(binary, pid, kind, windowId);
@@ -526,7 +548,7 @@ async function runAcceptance(parentPid: number, outputPath: string): Promise<voi
     const childInspect = await inspectWhenWindowReady(helper, firstBinding.pid);
     const childWindow = oneMainWindow(childInspect);
     const firstBounds = requireExpectedTile(parentWindow.bounds, childWindow.bounds, "first private child window");
-    const childToggle = oneToggle(childInspect, "exit", childWindow.windowId);
+    const childToggle = (await inspectWhenExitToggleReady(helper, firstBinding, parentPid, parentWindow.bounds, childWindow.windowId)).toggle;
     assertExactProcessSet(helper, [parentPid, firstBinding.pid], "after first hat trigger");
     appendStep(report, "E11/E12 first hat open", {
       toggle: openedToggle,
@@ -597,7 +619,7 @@ async function runAcceptance(parentPid: number, outputPath: string): Promise<voi
     const secondInspect = await inspectWhenWindowReady(helper, secondBinding.pid);
     const secondWindow = oneMainWindow(secondInspect);
     const secondBounds = requireExpectedTile(parentWindow.bounds, secondWindow.bounds, "second private child window");
-    const secondToggle = oneToggle(secondInspect, "exit", secondWindow.windowId);
+    const secondToggle = (await inspectWhenExitToggleReady(helper, secondBinding, parentPid, parentWindow.bounds, secondWindow.windowId)).toggle;
     assertExactProcessSet(helper, [parentPid, secondBinding.pid], "after second hat trigger");
     appendStep(report, "E12 native-close session opened", {
       toggle: secondToggle,

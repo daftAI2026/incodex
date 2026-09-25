@@ -54,14 +54,14 @@ function createHarness(
 describe("tooltip lifecycle", () => {
   test("late presentation readiness does not repeat an already elapsed official delay", () => {
     let presentationReady = false;
-    const active = createHarness(() => presentationReady);
+    const active = createHarness(() => presentationReady, { resolveDelay: () => 725 });
     active.lifecycle.pointerEnter();
     active.runScheduled();
     expect(active.events).not.toContain("show");
 
     presentationReady = true;
     active.lifecycle.presentationReady();
-    expect(active.delays).toEqual([700, 0]);
+    expect(active.delays).toEqual([725, 0]);
     active.runScheduled();
     expect(active.events).toEqual(["show"]);
 
