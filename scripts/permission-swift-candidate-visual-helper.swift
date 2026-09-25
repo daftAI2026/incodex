@@ -24,7 +24,7 @@ private struct PermissionSwiftCandidateVisualHelper {
     @MainActor
     private static func run(_ arguments: [String]) async throws {
         guard let command = arguments.first else {
-            throw VisualToolError(message: "expected preflight, app, windows, press, or snapshot")
+            throw VisualToolError(message: "expected preflight, app, windows, press, press-settings-placeholder, or snapshot")
         }
         switch command {
         case "preflight":
@@ -76,113 +76,9 @@ private struct PermissionSwiftCandidateVisualHelper {
                 "monotonicSeconds": ProcessInfo.processInfo.systemUptime,
             ])
         case "press":
-            guard arguments.count == 3, let pid = pid_t(arguments[1]) else {
-                throw VisualToolError(message: "press requires PID EXACT_AX_BUTTON_TITLE")
-            }
-            guard AXIsProcessTrusted() else {
-                throw VisualToolError(message: "Accessibility control is not already authorized; no prompt was requested")
-            }
-            let title = arguments[2]
-            let appElement = AXUIElementCreateApplication(pid)
-            let windows = copyAttribute(appElement, kAXWindowsAttribute as CFString) as? [AXUIElement] ?? []
-            var buttons: [AXUIElement] = []
-            var visitCount = 0
-            for window in windows {
-                collectButtons(window, expectedTitle: title, depth: 0, visitCount: &visitCount, into: &buttons)
-            }
-            guard buttons.count == 1, let button = buttons.first else {
-                throw VisualToolError(message: "expected exactly one AXButton titled \(title.debugDescription) in PID \(pid); found \(buttons.count)")
-            }
-            guard copyAttribute(button, kAXEnabledAttribute as CFString) as? Bool == true else {
-                throw VisualToolError(message: "unique AXButton \(title.debugDescription) in PID \(pid) is not enabled")
-            }
-            // AppKit may omit AXHidden for a visible control. An explicit true is
-            // disqualifying; the owning-window geometry and z-order checks below
-            // establish visibility when the attribute is unsupported.
-            if copyAttribute(button, kAXHiddenAttribute as CFString) as? Bool == true {
-                throw VisualToolError(message: "unique AXButton \(title.debugDescription) in PID \(pid) is hidden")
-            }
-            guard let rawAXWindow = copyAttribute(button, kAXWindowAttribute as CFString),
-                  CFGetTypeID(rawAXWindow) == AXUIElementGetTypeID() else {
-                throw VisualToolError(message: "unique AXButton \(title.debugDescription) has no valid owning AXWindow/frame in PID \(pid)")
-            }
-            let axWindow = unsafeBitCast(rawAXWindow, to: AXUIElement.self)
-            guard let buttonRect = axRect(button),
-                  let axWindowRect = axRect(axWindow),
-                  axWindowRect.insetBy(dx: -2, dy: -2).contains(buttonRect) else {
-                throw VisualToolError(message: "unique AXButton \(title.debugDescription) is not visibly within its owning AXWindow in PID \(pid)")
-            }
-            let orderedWindows = windowRecords()
-            let targetWindows = orderedWindows.filter { window in
-                guard (window["ownerPID"] as? Int) == Int(pid),
-                      let bounds = cgRect(window["bounds"]) else { return false }
-                return bounds.insetBy(dx: -2, dy: -2).contains(buttonRect)
-            }
-            guard targetWindows.count == 1, let targetWindow = targetWindows.first,
-                  (targetWindow["alpha"] as? Double ?? 0) > 0 else {
-                throw VisualToolError(message: "AXButton owning window does not map to exactly one visible CGWindow for PID \(pid)")
-            }
-            let targetZ = targetWindow["zIndex"] as? Int ?? Int.max
-            let frontmost = NSWorkspace.shared.frontmostApplication
-            let primaryDisplay = CGDisplayBounds(CGMainDisplayID())
-            let ignoreRemoteOverlay = ProcessInfo.processInfo.environment["INCODEX_VISUAL_IGNORE_UU_REMOTE_OVERLAY"] == "1"
-            let expectedHostFocus = frontmost?.processIdentifier == pid
-            let expectedHelperFocus = frontmost?.bundleIdentifier == "com.apple.systempreferences" &&
-                (targetWindow["layer"] as? Int) == 3
-            let ignoredRemoteOverlays = orderedWindows.filter { window in
-                guard ignoreRemoteOverlay,
-                      (expectedHostFocus || expectedHelperFocus),
-                      let ownerName = window["ownerName"] as? String,
-                      ownerName == "UURemoteServer",
-                      let layer = window["layer"] as? Int,
-                      layer == 2147483631,
-                      let bounds = cgRect(window["bounds"]),
-                      abs(bounds.minX - primaryDisplay.minX) <= 1,
-                      abs(bounds.minY - primaryDisplay.minY) <= 1,
-                      abs(bounds.width - primaryDisplay.width) <= 1,
-                      abs(bounds.height - primaryDisplay.height) <= 1 else { return false }
-                return true
-            }
-            let ignoredRemoteOverlayIDs = Set(ignoredRemoteOverlays.compactMap { $0["windowID"] as? Int })
-            let occluders = orderedWindows.filter { window in
-                guard (window["zIndex"] as? Int ?? Int.max) < targetZ,
-                      (window["alpha"] as? Double ?? 0) > 0,
-                      let bounds = cgRect(window["bounds"]) else { return false }
-                if let windowID = window["windowID"] as? Int, ignoredRemoteOverlayIDs.contains(windowID) { return false }
-                let intersection = bounds.intersection(buttonRect)
-                return !intersection.isNull && intersection.width > 0 && intersection.height > 0
-            }
-            guard occluders.isEmpty else {
-                throw VisualToolError(message: "refusing AXPress: button is covered by higher z-order window(s): \(occluders.map { $0["windowID"] ?? "?" })")
-            }
-            let frontmostWindow = orderedWindows.first { window in
-                guard let frontmostPID = frontmost?.processIdentifier else { return false }
-                return (window["ownerPID"] as? Int) == Int(frontmostPID) && (window["alpha"] as? Double ?? 0) > 0
-            }
-            let action = AXUIElementPerformAction(button, kAXPressAction as CFString)
-            guard action.rawValue == 0 else {
-                throw VisualToolError(message: "AXPress failed for PID \(pid), \(title.debugDescription): AXError \(action.rawValue)")
-            }
-            writeJSON([
-                "ok": true,
-                "command": "press",
-                "pid": Int(pid),
-                "role": "AXButton",
-                "title": title,
-                "uniqueMatchCount": buttons.count,
-                "axWindowTitle": copyAttribute(axWindow, kAXTitleAttribute as CFString) as? String ?? "",
-                "axWindowBounds": rectObject(axWindowRect),
-                "buttonBounds": rectObject(buttonRect),
-                "ownerCGWindow": targetWindow,
-                "frontmostPIDBeforePress": frontmost.map { Int($0.processIdentifier) } as Any? ?? NSNull(),
-                "frontmostBundleIDBeforePress": frontmost?.bundleIdentifier as Any? ?? NSNull(),
-                "frontmostWindowBeforePress": frontmostWindow as Any? ?? NSNull(),
-                "occludingWindows": occluders,
-                "ignoredRemoteOverlays": ignoredRemoteOverlays,
-                "axError": action.rawValue,
-                "wallTime": ISO8601DateFormatter().string(from: Date()),
-                "monotonicSeconds": ProcessInfo.processInfo.systemUptime,
-            ])
+            try pressButton(arguments, settingsPlaceholderDiagnostic: false)
+        case "press-settings-placeholder":
+            try pressButton(arguments, settingsPlaceholderDiagnostic: true)
         case "snapshot":
             guard arguments.count == 2 else {
                 throw VisualToolError(message: "snapshot requires OUTPUT_PNG_PATH")
@@ -227,6 +123,172 @@ private struct PermissionSwiftCandidateVisualHelper {
         default:
             throw VisualToolError(message: "unsupported helper command: \(command)")
         }
+    }
+
+    @MainActor
+    private static func pressButton(_ arguments: [String], settingsPlaceholderDiagnostic: Bool) throws {
+        guard arguments.count == 3, let pid = pid_t(arguments[1]) else {
+            let command = settingsPlaceholderDiagnostic ? "press-settings-placeholder" : "press"
+            throw VisualToolError(message: "\(command) requires PID EXACT_AX_BUTTON_LABEL")
+        }
+        guard AXIsProcessTrusted() else {
+            throw VisualToolError(message: "Accessibility control is not already authorized; no prompt was requested")
+        }
+        let title = arguments[2]
+        let appElement = AXUIElementCreateApplication(pid)
+        let windows = copyAttribute(appElement, kAXWindowsAttribute as CFString) as? [AXUIElement] ?? []
+        var buttons: [AXUIElement] = []
+        var visitCount = 0
+        for window in windows {
+            collectButtons(window, expectedTitle: title, depth: 0, visitCount: &visitCount, into: &buttons)
+        }
+        guard buttons.count == 1, let button = buttons.first else {
+            throw VisualToolError(message: "expected exactly one AXButton labeled \(title.debugDescription) in PID \(pid); found \(buttons.count)")
+        }
+        var actionNames: CFArray?
+        let actionNamesError = AXUIElementCopyActionNames(button, &actionNames)
+        let actionNameList = [String](actionNames as? [String] ?? [])
+        let buttonRole = copyAttribute(button, kAXRoleAttribute as CFString) as? String
+        let buttonTitle = copyAttribute(button, kAXTitleAttribute as CFString) as? String
+        let buttonDescription = copyAttribute(button, kAXDescriptionAttribute as CFString) as? String
+        let buttonValue = copyAttribute(button, kAXValueAttribute as CFString)
+        if settingsPlaceholderDiagnostic {
+            guard buttonRole == (kAXButtonRole as String) else {
+                throw VisualToolError(message: "Settings placeholder target is not an AXButton")
+            }
+            guard actionNameList.contains(kAXPressAction as String) else {
+                throw VisualToolError(message: "Settings placeholder AXButton does not expose AXPress")
+            }
+        }
+        guard copyAttribute(button, kAXEnabledAttribute as CFString) as? Bool == true else {
+            throw VisualToolError(message: "unique AXButton \(title.debugDescription) in PID \(pid) is not enabled")
+        }
+        // AppKit may omit AXHidden for a visible control. An explicit true is
+        // disqualifying; the owning-window geometry and z-order checks below
+        // establish visibility when the attribute is unsupported.
+        if copyAttribute(button, kAXHiddenAttribute as CFString) as? Bool == true {
+            throw VisualToolError(message: "unique AXButton \(title.debugDescription) in PID \(pid) is hidden")
+        }
+        guard let rawAXWindow = copyAttribute(button, kAXWindowAttribute as CFString),
+              CFGetTypeID(rawAXWindow) == AXUIElementGetTypeID() else {
+            throw VisualToolError(message: "unique AXButton \(title.debugDescription) has no valid owning AXWindow/frame in PID \(pid)")
+        }
+        let axWindow = unsafeBitCast(rawAXWindow, to: AXUIElement.self)
+        guard let buttonRect = axRect(button),
+              let axWindowRect = axRect(axWindow),
+              axWindowRect.insetBy(dx: -2, dy: -2).contains(buttonRect) else {
+            throw VisualToolError(message: "unique AXButton \(title.debugDescription) is not within its owning AXWindow in PID \(pid)")
+        }
+        let orderedWindows = windowRecords()
+        let targetWindows = orderedWindows.filter { window in
+            guard (window["ownerPID"] as? Int) == Int(pid),
+                  let bounds = cgRect(window["bounds"]) else { return false }
+            return bounds.insetBy(dx: -2, dy: -2).contains(buttonRect)
+        }
+        guard targetWindows.count == 1, let targetWindow = targetWindows.first,
+              (targetWindow["alpha"] as? Double ?? 0) > 0 else {
+            throw VisualToolError(message: "AXButton owning window does not map to exactly one visible CGWindow for PID \(pid)")
+        }
+        let targetZ = targetWindow["zIndex"] as? Int ?? Int.max
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        let primaryDisplay = CGDisplayBounds(CGMainDisplayID())
+        let ignoreRemoteOverlay = ProcessInfo.processInfo.environment["INCODEX_VISUAL_IGNORE_UU_REMOTE_OVERLAY"] == "1"
+        let expectedHostFocus = frontmost?.processIdentifier == pid
+        let expectedHelperFocus = frontmost?.bundleIdentifier == "com.apple.systempreferences" &&
+            (targetWindow["layer"] as? Int) == 3
+        let targetBounds = cgRect(targetWindow["bounds"])
+        let expectedPlaceholderFocus = settingsPlaceholderDiagnostic &&
+            frontmost?.bundleIdentifier == "com.apple.systempreferences" &&
+            (targetWindow["layer"] as? Int) == 0 &&
+            targetBounds.map { abs($0.width - 600) <= 2 && (300...400).contains($0.height) } == true
+        let ignoredRemoteOverlays = orderedWindows.filter { window in
+            guard ignoreRemoteOverlay,
+                  (expectedHostFocus || expectedHelperFocus || expectedPlaceholderFocus),
+                  let ownerName = window["ownerName"] as? String,
+                  ownerName == "UURemoteServer",
+                  let layer = window["layer"] as? Int,
+                  layer == 2147483631,
+                  let bounds = cgRect(window["bounds"]),
+                  abs(bounds.minX - primaryDisplay.minX) <= 1,
+                  abs(bounds.minY - primaryDisplay.minY) <= 1,
+                  abs(bounds.width - primaryDisplay.width) <= 1,
+                  abs(bounds.height - primaryDisplay.height) <= 1 else { return false }
+            return true
+        }
+        let ignoredRemoteOverlayIDs = Set(ignoredRemoteOverlays.compactMap { $0["windowID"] as? Int })
+        let occluders = orderedWindows.filter { window in
+            guard (window["zIndex"] as? Int ?? Int.max) < targetZ,
+                  (window["alpha"] as? Double ?? 0) > 0,
+                  let bounds = cgRect(window["bounds"]) else { return false }
+            if let windowID = window["windowID"] as? Int, ignoredRemoteOverlayIDs.contains(windowID) { return false }
+            let intersection = bounds.intersection(buttonRect)
+            return !intersection.isNull && intersection.width > 0 && intersection.height > 0
+        }
+        var settingsOccluders: [[String: Any]] = []
+        if settingsPlaceholderDiagnostic {
+            let ownerBounds = cgRect(targetWindow["bounds"])
+            guard (targetWindow["layer"] as? Int) == 0,
+                  let ownerBounds,
+                  abs(ownerBounds.width - 600) <= 2,
+                  (300...400).contains(ownerBounds.height) else {
+                throw VisualToolError(message: "Settings placeholder AXButton is not in the production 600-point initial window")
+            }
+            guard let frontmost,
+                  frontmost.bundleIdentifier == "com.apple.systempreferences" else {
+                throw VisualToolError(message: "Settings placeholder AXPress requires real System Settings to be frontmost")
+            }
+            settingsOccluders = occluders.filter {
+                ($0["ownerPID"] as? Int) == Int(frontmost.processIdentifier) && ($0["layer"] as? Int) == 0
+            }
+            guard !settingsOccluders.isEmpty else {
+                throw VisualToolError(message: "Settings does not occlude the production placeholder button")
+            }
+            let unexpectedOccluders = occluders.filter {
+                ($0["ownerPID"] as? Int) != Int(frontmost.processIdentifier) || ($0["layer"] as? Int) != 0
+            }
+            guard unexpectedOccluders.isEmpty else {
+                throw VisualToolError(message: "Settings placeholder button has non-Settings occluders: \(unexpectedOccluders.map { $0["windowID"] ?? "?" })")
+            }
+        } else {
+            guard occluders.isEmpty else {
+                throw VisualToolError(message: "refusing AXPress: button is covered by higher z-order window(s): \(occluders.map { $0["windowID"] ?? "?" })")
+            }
+        }
+        let frontmostWindow = orderedWindows.first { window in
+            guard let frontmostPID = frontmost?.processIdentifier else { return false }
+            return (window["ownerPID"] as? Int) == Int(frontmostPID) && (window["alpha"] as? Double ?? 0) > 0
+        }
+        let action = AXUIElementPerformAction(button, kAXPressAction as CFString)
+        guard action.rawValue == 0 else {
+            throw VisualToolError(message: "AXPress failed for PID \(pid), \(title.debugDescription): AXError \(action.rawValue)")
+        }
+        writeJSON([
+            "ok": true,
+            "command": settingsPlaceholderDiagnostic ? "press-settings-placeholder" : "press",
+            "pid": Int(pid),
+            "role": "AXButton",
+            "buttonAXRole": buttonRole as Any? ?? NSNull(),
+            "title": title,
+            "buttonAXTitle": buttonTitle as Any? ?? NSNull(),
+            "buttonAXDescription": buttonDescription as Any? ?? NSNull(),
+            "buttonAXValue": buttonValue as Any? ?? NSNull(),
+            "axActionNames": [String](actionNames as? [String] ?? []),
+            "axActionNamesError": actionNamesError.rawValue,
+            "uniqueMatchCount": buttons.count,
+            "axWindowTitle": copyAttribute(axWindow, kAXTitleAttribute as CFString) as? String ?? "",
+            "axWindowBounds": rectObject(axWindowRect),
+            "buttonBounds": rectObject(buttonRect),
+            "ownerCGWindow": targetWindow,
+            "frontmostPIDBeforePress": frontmost.map { Int($0.processIdentifier) } as Any? ?? NSNull(),
+            "frontmostBundleIDBeforePress": frontmost?.bundleIdentifier as Any? ?? NSNull(),
+            "frontmostWindowBeforePress": frontmostWindow as Any? ?? NSNull(),
+            "occludingWindows": occluders,
+            "settingsOccludingWindows": settingsOccluders,
+            "ignoredRemoteOverlays": ignoredRemoteOverlays,
+            "axError": action.rawValue,
+            "wallTime": ISO8601DateFormatter().string(from: Date()),
+            "monotonicSeconds": ProcessInfo.processInfo.systemUptime,
+        ])
     }
 
     private static func copyAttribute(_ element: AXUIElement, _ name: CFString) -> CFTypeRef? {

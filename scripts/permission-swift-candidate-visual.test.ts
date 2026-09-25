@@ -27,6 +27,13 @@ test("visible-UI opt-in still requires a fresh, explicit output directory", () =
   }
 });
 
+test("placeholder AXPress opt-in cannot bypass the visible-run gates", () => {
+  const result = spawnSync("bun", [script, "--diagnose-placeholder-axpress"], { encoding: "utf8", timeout: 10_000 });
+  expect(result.status).toBe(2);
+  expect(result.stdout + result.stderr).toContain("--run --acknowledge-visible-ui");
+  expect(result.stdout + result.stderr).not.toContain("Opt-in accepted");
+});
+
 test("runner source is read-only with respect to TCC and compiles the production gate", () => {
   const source = readFileSync(script, "utf8");
   const helperSource = readFileSync(helper, "utf8");
@@ -71,6 +78,40 @@ test("remote overlay exception requires an explicit opt-in and exact window iden
   expect(helper).toContain('frontmost?.bundleIdentifier == "com.apple.systempreferences"');
   expect(helper).toContain('(targetWindow["layer"] as? Int) == 3');
   expect(helper).toContain('"ignoredRemoteOverlays": ignoredRemoteOverlays');
+});
+
+test("press output reports the matched button AX actions and label metadata", () => {
+  const helper = readFileSync(join(import.meta.dir, "permission-swift-candidate-visual-helper.swift"), "utf8");
+  expect(helper).toContain("AXUIElementCopyActionNames(button, &actionNames)");
+  expect(helper).toContain('"axActionNames": [String](actionNames as? [String] ?? [])');
+  expect(helper).toContain('"buttonAXTitle": buttonTitle as Any? ?? NSNull()');
+  expect(helper).toContain('"buttonAXDescription": buttonDescription as Any? ?? NSNull()');
+});
+
+test("placeholder AXPress is separately opted in inside the existing helper-to-Back flow", () => {
+  const source = readFileSync(script, "utf8");
+  const helperSource = readFileSync(helper, "utf8");
+  expect(source).toContain("diagnosePlaceholderAXPress: false");
+  expect(source).toContain("--diagnose-placeholder-axpress");
+  const helperLanded = source.indexOf('"helper-landed-window-order"');
+  const placeholderPress = source.indexOf('"press-settings-placeholder"');
+  const backPress = source.indexOf('const backPress = helperCall');
+  expect(helperLanded).toBeGreaterThanOrEqual(0);
+  expect(placeholderPress).toBeGreaterThan(helperLanded);
+  expect(backPress).toBeGreaterThan(placeholderPress);
+  expect(source).toContain('selected.copy.completeInSettings');
+  expect(source).toContain("retryAfter !== retryBefore + 1");
+  expect(source).toContain("allowAfter !== allowBefore");
+  expect(helperSource).toContain('case "press-settings-placeholder":');
+  expect(helperSource).toContain('"buttonAXRole": buttonRole as Any? ?? NSNull()');
+  expect(helperSource).toContain('guard buttonRole == (kAXButtonRole as String)');
+  expect(helperSource).toContain('guard actionNameList.contains(kAXPressAction as String)');
+  expect(helperSource).toContain('frontmost?.bundleIdentifier == "com.apple.systempreferences"');
+  expect(helperSource).toContain('(targetWindow["layer"] as? Int) == 0');
+  expect(helperSource).toContain('guard !settingsOccluders.isEmpty');
+  expect(helperSource).toContain('expectedPlaceholderFocus');
+  expect(helperSource).toContain('(expectedHostFocus || expectedHelperFocus || expectedPlaceholderFocus)');
+  expect(helperSource).toContain('guard occluders.isEmpty else');
 });
 
 test("self-test mode is available without visible UI", () => {

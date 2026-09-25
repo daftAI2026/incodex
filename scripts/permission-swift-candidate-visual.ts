@@ -27,6 +27,7 @@ const settingsExecutablePath = "/System/Applications/System Settings.app/Content
 type Options = {
   run: boolean;
   acknowledgeVisibleUI: boolean;
+  diagnosePlaceholderAXPress: boolean;
   selfTest: boolean;
   help: boolean;
   outputDirectory?: string;
@@ -35,6 +36,7 @@ type Options = {
 
 type HostMessage = { nonce: string; type: string; message?: string; locale?: string };
 type HelperResult = Record<string, unknown> & { ok?: boolean; error?: string };
+type HostEventCounts = { allow: number; retry: number };
 
 const delay = (milliseconds: number) => new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
 const timestamp = () => new Date().toISOString();
@@ -49,6 +51,8 @@ function usage(): string {
     "",
     "The run opens official ChatGPT and System Settings, presses only the unique AXButton",
     "Allow and Back in the temporary candidate host, and captures the primary display.",
+    "Optional: --diagnose-placeholder-axpress AXPresses the exact Settings placeholder once",
+    "after verifying its AXButton identity, production initial window, and Settings occlusion.",
     "It sends mocked repairing/awaiting-user host states; it never resets or changes TCC.",
     "Full-screen screenshots may contain private desktop content; use a private output path.",
     "Existing ChatGPT/System Settings processes are not terminated. Only the child host is cleaned up.",
@@ -64,6 +68,7 @@ function parseArguments(args: string[]): Options {
   const options: Options = {
     run: false,
     acknowledgeVisibleUI: false,
+    diagnosePlaceholderAXPress: false,
     selfTest: false,
     help: false,
     timeoutSeconds: 45,
@@ -72,6 +77,7 @@ function parseArguments(args: string[]): Options {
     const argument = args[index];
     if (argument === "--run") options.run = true;
     else if (argument === "--acknowledge-visible-ui") options.acknowledgeVisibleUI = true;
+    else if (argument === "--diagnose-placeholder-axpress") options.diagnosePlaceholderAXPress = true;
     else if (argument === "--self-test") options.selfTest = true;
     else if (argument === "--help" || argument === "-h") options.help = true;
     else if (argument === "--out") {
@@ -90,10 +96,10 @@ function parseArguments(args: string[]): Options {
       throw new Error(`unknown option: ${argument}`);
     }
   }
-  if (options.selfTest && (options.run || options.acknowledgeVisibleUI || options.outputDirectory)) {
+  if (options.selfTest && (options.run || options.acknowledgeVisibleUI || options.diagnosePlaceholderAXPress || options.outputDirectory)) {
     throw new Error("--self-test cannot be combined with visible-run options");
   }
-  if (options.help && (options.run || options.acknowledgeVisibleUI || options.outputDirectory)) {
+  if (options.help && (options.run || options.acknowledgeVisibleUI || options.diagnosePlaceholderAXPress || options.outputDirectory)) {
     throw new Error("--help cannot be combined with visible-run options");
   }
   return options;
@@ -115,11 +121,52 @@ function validateRunOptIn(options: Options): string {
 function selfTest(): void {
   let rejected = false;
   try {
-    validateRunOptIn({ run: true, acknowledgeVisibleUI: false, selfTest: false, help: false, outputDirectory: "/private/tmp/example", timeoutSeconds: 45 });
+    validateRunOptIn({ run: true, acknowledgeVisibleUI: false, diagnosePlaceholderAXPress: false, selfTest: false, help: false, outputDirectory: "/private/tmp/example", timeoutSeconds: 45 });
   } catch (error) {
     rejected = error instanceof Error && error.message.includes("--acknowledge-visible-ui");
   }
   if (!rejected) throw new Error("missing visible-UI opt-in was not refused");
+  assertPlaceholderCallbackCounts({ allow: 1, retry: 0 }, { allow: 1, retry: 1 });
+  let callbackMismatchRejected = false;
+  try {
+    assertPlaceholderCallbackCounts({ allow: 1, retry: 0 }, { allow: 2, retry: 2 });
+  } catch {
+    callbackMismatchRejected = true;
+  }
+  if (!callbackMismatchRejected) throw new Error("placeholder callback count mismatch was not refused");
+}
+
+function hostEventCounts(events: HostMessage[]): HostEventCounts {
+  return {
+    allow: events.filter((event) => event.type === "allow").length,
+    retry: events.filter((event) => event.type === "retry").length,
+  };
+}
+
+function assertPlaceholderCallbackCounts(before: HostEventCounts, after: HostEventCounts): void {
+  const allowBefore = before.allow;
+  const allowAfter = after.allow;
+  const retryBefore = before.retry;
+  const retryAfter = after.retry;
+  if (retryAfter !== retryBefore + 1) {
+    throw new Error(`placeholder AXPress must add exactly one retry callback (before=${retryBefore}, after=${retryAfter})`);
+  }
+  if (allowAfter !== allowBefore) {
+    throw new Error(`placeholder AXPress changed allow callback count (before=${allowBefore}, after=${allowAfter})`);
+  }
+}
+
+function assertPlaceholderButtonResult(result: HelperResult, expectedLabel: string): void {
+  const actions = result.axActionNames as string[] | undefined;
+  if (result.role !== "AXButton" || result.buttonAXRole !== "AXButton" || result.uniqueMatchCount !== 1) {
+    throw new Error(`placeholder AXPress did not resolve one AXButton: ${JSON.stringify(result)}`);
+  }
+  if (result.buttonAXTitle !== expectedLabel && result.buttonAXDescription !== expectedLabel && result.buttonAXValue !== expectedLabel) {
+    throw new Error(`placeholder AXButton label did not match the selected copy: ${JSON.stringify(result)}`);
+  }
+  if (!actions?.includes("AXPress") || result.axError !== 0) {
+    throw new Error(`placeholder AXButton did not expose and complete AXPress: ${JSON.stringify(result)}`);
+  }
 }
 
 function record(outputDirectory: string, event: Record<string, unknown>): void {
@@ -434,6 +481,7 @@ async function visibleRun(options: Options): Promise<void> {
       localeConfigurationChanged: false,
       installedApplicationsChanged: false,
       manualT01DragIncluded: false,
+      placeholderAXPressDiagnostic: options.diagnosePlaceholderAXPress,
       fullPrimaryDisplayCapture: true,
       outputDirectory,
       repoHead: commit,
@@ -495,6 +543,39 @@ async function visibleRun(options: Options): Promise<void> {
     await takeScreenshot(binaries.helper, outputDirectory, "helper-landed", 30);
     currentWindows(binaries.helper, outputDirectory, "helper-landed-window-order");
 
+    let placeholderDiagnosticError: Error | undefined;
+    let placeholderCountsBefore: HostEventCounts | undefined;
+    if (options.diagnosePlaceholderAXPress) {
+      placeholderCountsBefore = hostEventCounts(hostClient.events);
+      try {
+        if (placeholderCountsBefore.allow !== 1 || placeholderCountsBefore.retry !== 0) {
+          throw new Error(`placeholder diagnostic requires the initial Allow-only callback state: ${JSON.stringify(placeholderCountsBefore)}`);
+        }
+        const placeholderLabel = selected.copy.completeInSettings ?? "Complete in System Settings";
+        const placeholderPress = helperCall(binaries.helper, ["press-settings-placeholder", String(hostChild.pid), placeholderLabel]);
+        assertPlaceholderButtonResult(placeholderPress, placeholderLabel);
+        record(outputDirectory, { type: "placeholder-axpress", hostPID: hostChild.pid, label: placeholderLabel, result: placeholderPress });
+        const retryEvent = await hostClient.waitFor(
+          (message) => message.type === "retry" || message.type === "error",
+          5_000,
+        );
+        if (retryEvent.type === "error") throw new Error(`candidate host reported an error after placeholder AXPress: ${retryEvent.message ?? "unknown error"}`);
+        await delay(250);
+        const callbackCounts = hostEventCounts(hostClient.events);
+        assertPlaceholderCallbackCounts(placeholderCountsBefore, callbackCounts);
+        record(outputDirectory, { type: "placeholder-axpress-callback-check", before: placeholderCountsBefore, after: callbackCounts, passed: true });
+      } catch (error) {
+        placeholderDiagnosticError = error instanceof Error ? error : new Error(String(error));
+        record(outputDirectory, {
+          type: "placeholder-axpress-callback-check",
+          before: placeholderCountsBefore,
+          after: hostEventCounts(hostClient.events),
+          passed: false,
+          error: placeholderDiagnosticError.message,
+        });
+      }
+    }
+
     const backTitle = selected.copy.back ?? "Back";
     const backPress = helperCall(binaries.helper, ["press", String(hostChild.pid), backTitle]);
     record(outputDirectory, { type: "ax-button-pressed", label: backTitle, hostPID: hostChild.pid, result: backPress });
@@ -502,6 +583,17 @@ async function visibleRun(options: Options): Promise<void> {
     await waitForHostWindowCount(binaries.helper, outputDirectory, hostChild.pid, 1, options.timeoutSeconds * 1000);
     await takeScreenshot(binaries.helper, outputDirectory, "initial-restored", 60);
     currentWindows(binaries.helper, outputDirectory, "initial-restored-window-order");
+    if (placeholderCountsBefore) {
+      const finalCounts = hostEventCounts(hostClient.events);
+      try {
+        assertPlaceholderCallbackCounts(placeholderCountsBefore, finalCounts);
+        record(outputDirectory, { type: "placeholder-axpress-final-callback-check", before: placeholderCountsBefore, after: finalCounts, passed: true });
+      } catch (error) {
+        placeholderDiagnosticError ??= error instanceof Error ? error : new Error(String(error));
+        record(outputDirectory, { type: "placeholder-axpress-final-callback-check", before: placeholderCountsBefore, after: finalCounts, passed: false, error: placeholderDiagnosticError.message });
+      }
+    }
+    if (placeholderDiagnosticError) throw placeholderDiagnosticError;
     resultStatus = "passed-diagnostic-only";
   } catch (error) {
     resultStatus = "failed-diagnostic-only";
@@ -529,7 +621,7 @@ async function visibleRun(options: Options): Promise<void> {
     }
     if (outputCreated) {
       try {
-        createManifest(outputDirectory, { status: resultStatus, error: errorText });
+        createManifest(outputDirectory, { status: resultStatus, error: errorText, placeholderAXPressDiagnostic: options.diagnosePlaceholderAXPress });
       } catch (error) {
         record(outputDirectory, { type: "manifest-finalization-error", error: String(error) });
       }
