@@ -1286,6 +1286,8 @@ mod tests {
     #[test]
     fn native_guide_body_follows_verified_target_identity() {
         let mut installed = serde_json::json!({
+            "title": "Enable ChatGPT script control",
+            "installedTitle": "Re-enable ChatGPT script control",
             "body": "Installing Incodex changes ChatGPT.",
             "officialBody": "This is the official ChatGPT app.",
         });
@@ -1294,6 +1296,7 @@ mod tests {
             GuideCopyContext::Installed,
         )
         .unwrap();
+        assert_eq!(installed["title"], "Re-enable ChatGPT script control");
         assert_eq!(installed["body"], "Installing Incodex changes ChatGPT.");
 
         let mut official = installed.clone();
@@ -1302,6 +1305,7 @@ mod tests {
             GuideCopyContext::Official,
         )
         .unwrap();
+        assert_eq!(official["title"], "Enable ChatGPT script control");
         assert_eq!(official["body"], "This is the official ChatGPT app.");
 
         let mut missing = serde_json::json!({ "body": "Install only" });
@@ -1309,6 +1313,15 @@ mod tests {
             choose_guide_body(missing.as_object_mut().unwrap(), GuideCopyContext::Official)
                 .is_err()
         );
+        let mut missing_installed_title = serde_json::json!({
+            "title": "Enable ChatGPT script control",
+            "body": "Install only",
+        });
+        assert!(choose_guide_body(
+            missing_installed_title.as_object_mut().unwrap(),
+            GuideCopyContext::Installed,
+        )
+        .is_err());
     }
 
     #[test]
@@ -1320,12 +1333,18 @@ mod tests {
         let catalog: serde_json::Map<String, Value> = serde_json::from_str(source).unwrap();
         assert_eq!(catalog.len(), 65);
         for (locale, entry) in catalog {
+            let installed_title = entry["installedTitle"]
+                .as_str()
+                .expect("localized installed title");
+            let title = entry["title"].as_str().expect("localized official title");
             let install = entry["body"].as_str().expect("localized install reason");
             let official = entry["officialBody"]
                 .as_str()
                 .expect("localized official reason");
             let instruction = entry["addedTitle"].as_str().expect("instruction");
             assert!(!install.trim().is_empty(), "{locale}");
+            assert!(!installed_title.trim().is_empty(), "{locale}");
+            assert!(!title.trim().is_empty(), "{locale}");
             assert!(!official.trim().is_empty(), "{locale}");
             assert!(official.contains("ChatGPT"), "{locale}");
             assert_ne!(install, official, "{locale}");
@@ -1333,9 +1352,11 @@ mod tests {
 
             let mut installed = entry.as_object().unwrap().clone();
             choose_guide_body(&mut installed, GuideCopyContext::Installed).unwrap();
+            assert_eq!(installed["title"], installed_title, "{locale}");
             assert_eq!(installed["body"], install, "{locale}");
             let mut restored = entry.as_object().unwrap().clone();
             choose_guide_body(&mut restored, GuideCopyContext::Official).unwrap();
+            assert_eq!(restored["title"], title, "{locale}");
             assert_eq!(restored["body"], official, "{locale}");
         }
     }
