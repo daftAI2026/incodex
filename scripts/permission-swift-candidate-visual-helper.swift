@@ -123,17 +123,38 @@ private struct PermissionSwiftCandidateVisualHelper {
                 throw VisualToolError(message: "AXButton owning window does not map to exactly one visible CGWindow for PID \(pid)")
             }
             let targetZ = targetWindow["zIndex"] as? Int ?? Int.max
+            let frontmost = NSWorkspace.shared.frontmostApplication
+            let primaryDisplay = CGDisplayBounds(CGMainDisplayID())
+            let ignoreRemoteOverlay = ProcessInfo.processInfo.environment["INCODEX_VISUAL_IGNORE_UU_REMOTE_OVERLAY"] == "1"
+            let expectedHostFocus = frontmost?.processIdentifier == pid
+            let expectedHelperFocus = frontmost?.bundleIdentifier == "com.apple.systempreferences" &&
+                (targetWindow["layer"] as? Int) == 3
+            let ignoredRemoteOverlays = orderedWindows.filter { window in
+                guard ignoreRemoteOverlay,
+                      (expectedHostFocus || expectedHelperFocus),
+                      let ownerName = window["ownerName"] as? String,
+                      ownerName == "UURemoteServer",
+                      let layer = window["layer"] as? Int,
+                      layer == 2147483631,
+                      let bounds = cgRect(window["bounds"]),
+                      abs(bounds.minX - primaryDisplay.minX) <= 1,
+                      abs(bounds.minY - primaryDisplay.minY) <= 1,
+                      abs(bounds.width - primaryDisplay.width) <= 1,
+                      abs(bounds.height - primaryDisplay.height) <= 1 else { return false }
+                return true
+            }
+            let ignoredRemoteOverlayIDs = Set(ignoredRemoteOverlays.compactMap { $0["windowID"] as? Int })
             let occluders = orderedWindows.filter { window in
                 guard (window["zIndex"] as? Int ?? Int.max) < targetZ,
                       (window["alpha"] as? Double ?? 0) > 0,
                       let bounds = cgRect(window["bounds"]) else { return false }
+                if let windowID = window["windowID"] as? Int, ignoredRemoteOverlayIDs.contains(windowID) { return false }
                 let intersection = bounds.intersection(buttonRect)
                 return !intersection.isNull && intersection.width > 0 && intersection.height > 0
             }
             guard occluders.isEmpty else {
                 throw VisualToolError(message: "refusing AXPress: button is covered by higher z-order window(s): \(occluders.map { $0["windowID"] ?? "?" })")
             }
-            let frontmost = NSWorkspace.shared.frontmostApplication
             let frontmostWindow = orderedWindows.first { window in
                 guard let frontmostPID = frontmost?.processIdentifier else { return false }
                 return (window["ownerPID"] as? Int) == Int(frontmostPID) && (window["alpha"] as? Double ?? 0) > 0
@@ -157,6 +178,7 @@ private struct PermissionSwiftCandidateVisualHelper {
                 "frontmostBundleIDBeforePress": frontmost?.bundleIdentifier as Any? ?? NSNull(),
                 "frontmostWindowBeforePress": frontmostWindow as Any? ?? NSNull(),
                 "occludingWindows": occluders,
+                "ignoredRemoteOverlays": ignoredRemoteOverlays,
                 "axError": action.rawValue,
                 "wallTime": ISO8601DateFormatter().string(from: Date()),
                 "monotonicSeconds": ProcessInfo.processInfo.systemUptime,
