@@ -27,6 +27,7 @@ const settingsExecutablePath = "/System/Applications/System Settings.app/Content
 type Options = {
   run: boolean;
   acknowledgeVisibleUI: boolean;
+  diagnoseInitialKeyboard: boolean;
   diagnosePlaceholderAXPress: boolean;
   selfTest: boolean;
   help: boolean;
@@ -49,8 +50,10 @@ function usage(): string {
     "No UI is opened unless both opt-in flags and a new output directory are provided:",
     "  bun scripts/permission-swift-candidate-visual.ts --run --acknowledge-visible-ui --out /private/path/new-run-dir",
     "",
-    "The run opens official ChatGPT and System Settings, presses only the unique AXButton",
-    "Allow and Back in the temporary candidate host, and captures the primary display.",
+    "The run opens official ChatGPT and System Settings and captures the primary display.",
+    "By default it uses one AXPress each for Allow and Back in the temporary candidate host.",
+    "Optional: --diagnose-initial-keyboard reads Allow/Skip focus and sends one Return to Allow",
+    "in place of AXPress; the helper must see the candidate's normal initial window frontmost.",
     "Optional: --diagnose-placeholder-axpress AXPresses the exact Settings placeholder once",
     "after verifying its AXButton identity, production initial window, and Settings occlusion.",
     "It sends mocked repairing/awaiting-user host states; it never resets or changes TCC.",
@@ -68,6 +71,7 @@ function parseArguments(args: string[]): Options {
   const options: Options = {
     run: false,
     acknowledgeVisibleUI: false,
+    diagnoseInitialKeyboard: false,
     diagnosePlaceholderAXPress: false,
     selfTest: false,
     help: false,
@@ -77,6 +81,7 @@ function parseArguments(args: string[]): Options {
     const argument = args[index];
     if (argument === "--run") options.run = true;
     else if (argument === "--acknowledge-visible-ui") options.acknowledgeVisibleUI = true;
+    else if (argument === "--diagnose-initial-keyboard") options.diagnoseInitialKeyboard = true;
     else if (argument === "--diagnose-placeholder-axpress") options.diagnosePlaceholderAXPress = true;
     else if (argument === "--self-test") options.selfTest = true;
     else if (argument === "--help" || argument === "-h") options.help = true;
@@ -96,10 +101,10 @@ function parseArguments(args: string[]): Options {
       throw new Error(`unknown option: ${argument}`);
     }
   }
-  if (options.selfTest && (options.run || options.acknowledgeVisibleUI || options.diagnosePlaceholderAXPress || options.outputDirectory)) {
+  if (options.selfTest && (options.run || options.acknowledgeVisibleUI || options.diagnoseInitialKeyboard || options.diagnosePlaceholderAXPress || options.outputDirectory)) {
     throw new Error("--self-test cannot be combined with visible-run options");
   }
-  if (options.help && (options.run || options.acknowledgeVisibleUI || options.diagnosePlaceholderAXPress || options.outputDirectory)) {
+  if (options.help && (options.run || options.acknowledgeVisibleUI || options.diagnoseInitialKeyboard || options.diagnosePlaceholderAXPress || options.outputDirectory)) {
     throw new Error("--help cannot be combined with visible-run options");
   }
   return options;
@@ -121,7 +126,7 @@ function validateRunOptIn(options: Options): string {
 function selfTest(): void {
   let rejected = false;
   try {
-    validateRunOptIn({ run: true, acknowledgeVisibleUI: false, diagnosePlaceholderAXPress: false, selfTest: false, help: false, outputDirectory: "/private/tmp/example", timeoutSeconds: 45 });
+    validateRunOptIn({ run: true, acknowledgeVisibleUI: false, diagnoseInitialKeyboard: false, diagnosePlaceholderAXPress: false, selfTest: false, help: false, outputDirectory: "/private/tmp/example", timeoutSeconds: 45 });
   } catch (error) {
     rejected = error instanceof Error && error.message.includes("--acknowledge-visible-ui");
   }
@@ -134,6 +139,24 @@ function selfTest(): void {
     callbackMismatchRejected = true;
   }
   if (!callbackMismatchRejected) throw new Error("placeholder callback count mismatch was not refused");
+  assertInitialAllowKeyboardResult({
+    command: "keyboard-allow",
+    keyboardKey: "Return",
+    logicalKeyboardPresses: 1,
+    allowAXPressPerformed: false,
+    allowAXRole: "AXButton",
+    allowAXLabel: "Allow",
+    allowAXEnabled: true,
+    allowAXActionNames: ["AXPress"],
+    skipAXRole: "AXButton",
+    skipAXLabel: "Skip",
+    skipAXEnabled: true,
+    skipAXActionNames: ["AXPress"],
+    focusedWindowTitleBefore: "Enable ChatGPT scripting",
+    expectedWindowTitle: "Enable ChatGPT scripting",
+    frontmostPIDBefore: 123,
+    targetPID: 123,
+  }, "Allow", "Skip");
 }
 
 function hostEventCounts(events: HostMessage[]): HostEventCounts {
@@ -164,8 +187,38 @@ function assertPlaceholderButtonResult(result: HelperResult, expectedLabel: stri
   if (result.buttonAXTitle !== expectedLabel && result.buttonAXDescription !== expectedLabel && result.buttonAXValue !== expectedLabel) {
     throw new Error(`placeholder AXButton label did not match the selected copy: ${JSON.stringify(result)}`);
   }
-  if (!actions?.includes("AXPress") || result.axError !== 0) {
+  if (result.buttonAXEnabled !== true || !actions?.includes("AXPress") || result.axError !== 0) {
     throw new Error(`placeholder AXButton did not expose and complete AXPress: ${JSON.stringify(result)}`);
+  }
+}
+
+function assertBackButtonResult(result: HelperResult, expectedLabel: string): void {
+  const actions = result.axActionNames as string[] | undefined;
+  if (result.role !== "AXButton" || result.buttonAXRole !== "AXButton" || result.uniqueMatchCount !== 1) {
+    throw new Error(`Back AXPress did not resolve one AXButton: ${JSON.stringify(result)}`);
+  }
+  if (result.buttonAXTitle !== expectedLabel && result.buttonAXDescription !== expectedLabel && result.buttonAXValue !== expectedLabel) {
+    throw new Error(`Back AXButton label did not match the selected copy: ${JSON.stringify(result)}`);
+  }
+  if (result.buttonAXEnabled !== true || !actions?.includes("AXPress") || result.axError !== 0) {
+    throw new Error(`Back AXButton did not expose and complete AXPress: ${JSON.stringify(result)}`);
+  }
+}
+
+function assertInitialAllowKeyboardResult(result: HelperResult, expectedAllow: string, expectedSkip: string): void {
+  const allowActions = result.allowAXActionNames as string[] | undefined;
+  const skipActions = result.skipAXActionNames as string[] | undefined;
+  if (result.command !== "keyboard-allow" || result.keyboardKey !== "Return" || result.logicalKeyboardPresses !== 1 || result.allowAXPressPerformed !== false) {
+    throw new Error(`initial keyboard diagnostic did not report exactly one Return without AXPress: ${JSON.stringify(result)}`);
+  }
+  if (result.allowAXRole !== "AXButton" || result.allowAXLabel !== expectedAllow || result.allowAXEnabled !== true || !allowActions?.includes("AXPress")) {
+    throw new Error(`initial Allow AX semantics did not match the selected copy: ${JSON.stringify(result)}`);
+  }
+  if (result.skipAXRole !== "AXButton" || result.skipAXLabel !== expectedSkip || result.skipAXEnabled !== true || !skipActions?.includes("AXPress")) {
+    throw new Error(`initial Skip AX semantics did not match the selected copy: ${JSON.stringify(result)}`);
+  }
+  if (result.focusedWindowTitleBefore !== result.expectedWindowTitle || result.frontmostPIDBefore !== result.targetPID) {
+    throw new Error(`initial Return was not scoped to the frontmost candidate initial window: ${JSON.stringify(result)}`);
   }
 }
 
@@ -463,6 +516,9 @@ async function visibleRun(options: Options): Promise<void> {
     const preflight = helperCall(binaries.helper, ["preflight"]);
     if (preflight.screenCaptureAlreadyGranted !== true) throw new Error("Screen Recording is not already authorized for this helper; refused before app launch, no request was made");
     if (preflight.accessibilityAlreadyGranted !== true) throw new Error("Accessibility control is not already authorized for this helper; refused before app launch, no request was made");
+    if (options.diagnoseInitialKeyboard && preflight.postEventAccessAlreadyGranted !== true) {
+      throw new Error("CGPreflightPostEventAccess is false for the keyboard diagnostic helper; refused before app launch, no permission prompt was requested");
+    }
     if (Number(String(preflight.osVersion).split(".")[0]) < 14) throw new Error("this read-only screen-capture harness requires macOS 14 or later");
 
     createDirectory(outputDirectory);
@@ -481,6 +537,7 @@ async function visibleRun(options: Options): Promise<void> {
       localeConfigurationChanged: false,
       installedApplicationsChanged: false,
       manualT01DragIncluded: false,
+      initialKeyboardDiagnostic: options.diagnoseInitialKeyboard,
       placeholderAXPressDiagnostic: options.diagnosePlaceholderAXPress,
       fullPrimaryDisplayCapture: true,
       outputDirectory,
@@ -525,11 +582,49 @@ async function visibleRun(options: Options): Promise<void> {
     if (ready.type === "error") throw new Error(`candidate host failed to present: ${ready.message ?? "unknown error"}`);
     await takeScreenshot(binaries.helper, outputDirectory, "initial-ready", 1);
 
-    const allowPress = helperCall(binaries.helper, ["press", String(hostChild.pid), selected.copy.repair ?? "Allow"]);
-    record(outputDirectory, { type: "ax-button-pressed", label: "Allow", hostPID: hostChild.pid, result: allowPress });
-    const allowEvent = await hostClient.waitFor((message) => ["allow", "error"].includes(message.type), options.timeoutSeconds * 1000);
+    const allowLabel = selected.copy.repair ?? "Allow";
+    const skipLabel = selected.copy.later ?? "Skip";
+    const initialCountsBefore = hostEventCounts(hostClient.events);
+    if (initialCountsBefore.allow !== 0 || initialCountsBefore.retry !== 0 || hostClient.events.some((event) => event.type === "later")) {
+      throw new Error(`initial permission page already emitted an action before Allow: ${JSON.stringify(initialCountsBefore)}`);
+    }
+    if (options.diagnoseInitialKeyboard) {
+      const keyboardAllow = helperCall(binaries.helper, [
+        "keyboard-allow",
+        String(hostChild.pid),
+        allowLabel,
+        skipLabel,
+        selected.copy.title ?? "Enable ChatGPT scripting",
+      ]);
+      assertInitialAllowKeyboardResult(keyboardAllow, allowLabel, skipLabel);
+      record(outputDirectory, {
+        type: "initial-keyboard-allow",
+        hostPID: hostChild.pid,
+        callbackCountsBefore: initialCountsBefore,
+        result: keyboardAllow,
+        axPressPerformed: false,
+      });
+    } else {
+      const allowPress = helperCall(binaries.helper, ["press", String(hostChild.pid), allowLabel]);
+      record(outputDirectory, { type: "ax-button-pressed", label: allowLabel, hostPID: hostChild.pid, result: allowPress });
+    }
+    const allowEvent = await hostClient.waitFor((message) => ["allow", "later", "retry", "error"].includes(message.type), options.timeoutSeconds * 1000);
     if (allowEvent.type === "error") throw new Error(`candidate host reported error after Allow: ${allowEvent.message ?? "unknown error"}`);
-    if (allowEvent.type !== "allow") throw new Error(`expected Allow event, received ${allowEvent.type}`);
+    if (allowEvent.type !== "allow") throw new Error(`expected exactly one Allow event, received ${allowEvent.type}`);
+    await delay(200);
+    const initialCountsAfter = hostEventCounts(hostClient.events);
+    const initialLaterCount = hostClient.events.filter((event) => event.type === "later").length;
+    if (initialCountsAfter.allow !== 1 || initialCountsAfter.retry !== 0 || initialLaterCount !== 0) {
+      throw new Error(`initial Allow action did not produce exactly one Allow callback: before=${JSON.stringify(initialCountsBefore)} after=${JSON.stringify(initialCountsAfter)} later=${initialLaterCount}`);
+    }
+    record(outputDirectory, {
+      type: "initial-allow-callback-check",
+      action: options.diagnoseInitialKeyboard ? "Return keyboard event; no Allow AXPress" : "one Allow AXPress",
+      before: initialCountsBefore,
+      after: initialCountsAfter,
+      later: initialLaterCount,
+      passed: true,
+    });
 
     hostClient.send({ type: "state", state: "repairing" });
     record(outputDirectory, { type: "mocked-state", state: "repairing", reason: "diagnostic harness substitutes only the CLI/TCC operation" });
@@ -578,6 +673,7 @@ async function visibleRun(options: Options): Promise<void> {
 
     const backTitle = selected.copy.back ?? "Back";
     const backPress = helperCall(binaries.helper, ["press", String(hostChild.pid), backTitle]);
+    assertBackButtonResult(backPress, backTitle);
     record(outputDirectory, { type: "ax-button-pressed", label: backTitle, hostPID: hostChild.pid, result: backPress });
     await captureSeries(binaries.helper, outputDirectory, "back-to-initial", 12, 100);
     await waitForHostWindowCount(binaries.helper, outputDirectory, hostChild.pid, 1, options.timeoutSeconds * 1000);
@@ -621,7 +717,7 @@ async function visibleRun(options: Options): Promise<void> {
     }
     if (outputCreated) {
       try {
-        createManifest(outputDirectory, { status: resultStatus, error: errorText, placeholderAXPressDiagnostic: options.diagnosePlaceholderAXPress });
+        createManifest(outputDirectory, { status: resultStatus, error: errorText, initialKeyboardDiagnostic: options.diagnoseInitialKeyboard, placeholderAXPressDiagnostic: options.diagnosePlaceholderAXPress });
       } catch (error) {
         record(outputDirectory, { type: "manifest-finalization-error", error: String(error) });
       }

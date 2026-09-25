@@ -36,6 +36,7 @@ private struct PermissionSwiftCandidateVisualHelper {
                 "command": "preflight",
                 "screenCaptureAlreadyGranted": screenCapture,
                 "accessibilityAlreadyGranted": accessibility,
+                "postEventAccessAlreadyGranted": CGPreflightPostEventAccess(),
                 "osVersion": "\(operatingSystem.majorVersion).\(operatingSystem.minorVersion).\(operatingSystem.patchVersion)",
                 "wallTime": ISO8601DateFormatter().string(from: Date()),
                 "monotonicSeconds": ProcessInfo.processInfo.systemUptime,
@@ -79,6 +80,8 @@ private struct PermissionSwiftCandidateVisualHelper {
             try pressButton(arguments, settingsPlaceholderDiagnostic: false)
         case "press-settings-placeholder":
             try pressButton(arguments, settingsPlaceholderDiagnostic: true)
+        case "keyboard-allow":
+            try activateInitialAllowByKeyboard(arguments)
         case "snapshot":
             guard arguments.count == 2 else {
                 throw VisualToolError(message: "snapshot requires OUTPUT_PNG_PATH")
@@ -159,6 +162,12 @@ private struct PermissionSwiftCandidateVisualHelper {
             guard actionNameList.contains(kAXPressAction as String) else {
                 throw VisualToolError(message: "Settings placeholder AXButton does not expose AXPress")
             }
+        }
+        guard buttonRole == (kAXButtonRole as String) else {
+            throw VisualToolError(message: "AXPress target is not an AXButton")
+        }
+        guard actionNameList.contains(kAXPressAction as String) else {
+            throw VisualToolError(message: "AXButton does not expose AXPress")
         }
         guard copyAttribute(button, kAXEnabledAttribute as CFString) as? Bool == true else {
             throw VisualToolError(message: "unique AXButton \(title.debugDescription) in PID \(pid) is not enabled")
@@ -272,6 +281,8 @@ private struct PermissionSwiftCandidateVisualHelper {
             "buttonAXTitle": buttonTitle as Any? ?? NSNull(),
             "buttonAXDescription": buttonDescription as Any? ?? NSNull(),
             "buttonAXValue": buttonValue as Any? ?? NSNull(),
+            "buttonAXEnabled": copyAttribute(button, kAXEnabledAttribute as CFString) as? Bool as Any? ?? NSNull(),
+            "buttonAXFocused": copyAttribute(button, kAXFocusedAttribute as CFString) as? Bool as Any? ?? NSNull(),
             "axActionNames": [String](actionNames as? [String] ?? []),
             "axActionNamesError": actionNamesError.rawValue,
             "uniqueMatchCount": buttons.count,
@@ -289,6 +300,165 @@ private struct PermissionSwiftCandidateVisualHelper {
             "wallTime": ISO8601DateFormatter().string(from: Date()),
             "monotonicSeconds": ProcessInfo.processInfo.systemUptime,
         ])
+    }
+
+    @MainActor
+    private static func activateInitialAllowByKeyboard(_ arguments: [String]) throws {
+        guard arguments.count == 5, let pid = pid_t(arguments[1]) else {
+            throw VisualToolError(message: "keyboard-allow requires PID ALLOW_LABEL SKIP_LABEL INITIAL_WINDOW_TITLE")
+        }
+        guard AXIsProcessTrusted() else {
+            throw VisualToolError(message: "Accessibility control is not already authorized; no prompt was requested")
+        }
+        guard CGPreflightPostEventAccess() else {
+            throw VisualToolError(message: "CGPreflightPostEventAccess=false; Return was not sent and no permission prompt was requested")
+        }
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else {
+            throw VisualToolError(message: "candidate host is not frontmost; Return was not sent")
+        }
+
+        let allowLabel = arguments[2]
+        let skipLabel = arguments[3]
+        let expectedWindowTitle = arguments[4]
+        let appElement = AXUIElementCreateApplication(pid)
+        let windows = copyAttribute(appElement, kAXWindowsAttribute as CFString) as? [AXUIElement] ?? []
+        var allowButtons: [AXUIElement] = []
+        var skipButtons: [AXUIElement] = []
+        var visitCount = 0
+        for window in windows {
+            collectButtons(window, expectedTitle: allowLabel, depth: 0, visitCount: &visitCount, into: &allowButtons)
+            collectButtons(window, expectedTitle: skipLabel, depth: 0, visitCount: &visitCount, into: &skipButtons)
+        }
+        guard allowButtons.count == 1, let allow = allowButtons.first,
+              skipButtons.count == 1, let skip = skipButtons.first else {
+            throw VisualToolError(message: "expected exactly one initial Allow and Skip AXButton; found Allow=\(allowButtons.count), Skip=\(skipButtons.count); Return was not sent")
+        }
+        guard let focusedWindow = axElement(appElement, kAXFocusedWindowAttribute as CFString) else {
+            throw VisualToolError(message: "candidate host has no AXFocusedWindow; Return was not sent")
+        }
+        let focusedWindowTitle = copyAttribute(focusedWindow, kAXTitleAttribute as CFString) as? String ?? ""
+        guard focusedWindowTitle == expectedWindowTitle else {
+            throw VisualToolError(message: "focused window title did not match the candidate initial page; Return was not sent")
+        }
+
+        let allowSemantics = try initialButtonSemantics(allow, expectedLabel: allowLabel, expectedWindowTitle: expectedWindowTitle)
+        let skipSemantics = try initialButtonSemantics(skip, expectedLabel: skipLabel, expectedWindowTitle: expectedWindowTitle)
+        let applicationFocusBefore = axElement(appElement, kAXFocusedUIElementAttribute as CFString)
+        let systemFocusBefore = axElement(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute as CFString)
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+              CGPreflightPostEventAccess() else {
+            throw VisualToolError(message: "candidate host focus or post-event access changed before Return; no key was sent")
+        }
+        guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: true),
+              let up = CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: false) else {
+            throw VisualToolError(message: "could not construct the Return key event; no key was sent")
+        }
+
+        // This is the only initial Allow activation in the diagnostic path.
+        // Never fall back to AXPress if the event is unavailable or fails.
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+        Thread.sleep(forTimeInterval: 0.12)
+
+        let applicationFocusAfter = axElement(appElement, kAXFocusedUIElementAttribute as CFString)
+        let systemFocusAfter = axElement(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute as CFString)
+        writeJSON([
+            "ok": true,
+            "command": "keyboard-allow",
+            "targetPID": Int(pid),
+            "expectedWindowTitle": expectedWindowTitle,
+            "focusedWindowTitleBefore": focusedWindowTitle,
+            "frontmostPIDBefore": Int(pid),
+            "frontmostPIDAfter": NSWorkspace.shared.frontmostApplication.map { Int($0.processIdentifier) } as Any? ?? NSNull(),
+            "allowAXRole": allowSemantics["role"] ?? NSNull(),
+            "allowAXLabel": allowSemantics["label"] ?? NSNull(),
+            "allowAXEnabled": allowSemantics["enabled"] ?? NSNull(),
+            "allowAXFocused": allowSemantics["focused"] ?? NSNull(),
+            "allowAXTitle": allowSemantics["title"] ?? NSNull(),
+            "allowAXDescription": allowSemantics["description"] ?? NSNull(),
+            "allowAXValue": allowSemantics["value"] ?? NSNull(),
+            "allowAXActionNames": allowSemantics["actions"] ?? [],
+            "skipAXRole": skipSemantics["role"] ?? NSNull(),
+            "skipAXLabel": skipSemantics["label"] ?? NSNull(),
+            "skipAXEnabled": skipSemantics["enabled"] ?? NSNull(),
+            "skipAXFocused": skipSemantics["focused"] ?? NSNull(),
+            "skipAXTitle": skipSemantics["title"] ?? NSNull(),
+            "skipAXDescription": skipSemantics["description"] ?? NSNull(),
+            "skipAXValue": skipSemantics["value"] ?? NSNull(),
+            "skipAXActionNames": skipSemantics["actions"] ?? [],
+            "applicationFocusedElementBefore": focusSummary(applicationFocusBefore),
+            "systemFocusedElementBefore": focusSummary(systemFocusBefore),
+            "applicationFocusedElementAfter": focusSummary(applicationFocusAfter),
+            "systemFocusedElementAfter": focusSummary(systemFocusAfter),
+            "keyboardKey": "Return",
+            "logicalKeyboardPresses": 1,
+            "keyboardEventsPosted": 2,
+            "allowAXPressPerformed": false,
+            "postEventAccessPreflight": true,
+            "wallTime": ISO8601DateFormatter().string(from: Date()),
+            "monotonicSeconds": ProcessInfo.processInfo.systemUptime,
+        ])
+    }
+
+    private static func initialButtonSemantics(
+        _ button: AXUIElement,
+        expectedLabel: String,
+        expectedWindowTitle: String,
+    ) throws -> [String: Any] {
+        let role = copyAttribute(button, kAXRoleAttribute as CFString) as? String
+        guard role == (kAXButtonRole as String) else {
+            throw VisualToolError(message: "initial control \(expectedLabel.debugDescription) is not an AXButton; Return was not sent")
+        }
+        guard buttonTitles(button).contains(expectedLabel) else {
+            throw VisualToolError(message: "initial control AX label did not match \(expectedLabel.debugDescription); Return was not sent")
+        }
+        guard copyAttribute(button, kAXEnabledAttribute as CFString) as? Bool == true,
+              copyAttribute(button, kAXHiddenAttribute as CFString) as? Bool != true else {
+            throw VisualToolError(message: "initial control \(expectedLabel.debugDescription) is disabled or hidden; Return was not sent")
+        }
+        guard let rawWindow = copyAttribute(button, kAXWindowAttribute as CFString),
+              CFGetTypeID(rawWindow) == AXUIElementGetTypeID() else {
+            throw VisualToolError(message: "initial control \(expectedLabel.debugDescription) has no AXWindow; Return was not sent")
+        }
+        let window = unsafeBitCast(rawWindow, to: AXUIElement.self)
+        let windowTitle = copyAttribute(window, kAXTitleAttribute as CFString) as? String ?? ""
+        guard windowTitle == expectedWindowTitle else {
+            throw VisualToolError(message: "initial control \(expectedLabel.debugDescription) belongs to an unexpected AXWindow; Return was not sent")
+        }
+        var actions: CFArray?
+        let actionResult = AXUIElementCopyActionNames(button, &actions)
+        let actionNames = [String](actions as? [String] ?? [])
+        guard actionNames.contains(kAXPressAction as String) else {
+            throw VisualToolError(message: "initial control \(expectedLabel.debugDescription) does not expose AXPress; Return was not sent")
+        }
+        return [
+            "role": role as Any,
+            "label": expectedLabel,
+            "enabled": true,
+            "focused": copyAttribute(button, kAXFocusedAttribute as CFString) as? Bool as Any? ?? NSNull(),
+            "title": copyAttribute(button, kAXTitleAttribute as CFString) as? String as Any? ?? NSNull(),
+            "description": copyAttribute(button, kAXDescriptionAttribute as CFString) as? String as Any? ?? NSNull(),
+            "value": copyAttribute(button, kAXValueAttribute as CFString).map { String(describing: $0) } as Any? ?? NSNull(),
+            "actions": actionNames,
+            "actionsResult": actionResult.rawValue,
+        ]
+    }
+
+    private static func axElement(_ element: AXUIElement, _ name: CFString) -> AXUIElement? {
+        guard let value = copyAttribute(element, name), CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        return unsafeBitCast(value, to: AXUIElement.self)
+    }
+
+    private static func focusSummary(_ element: AXUIElement?) -> [String: Any] {
+        guard let element else { return ["available": false] }
+        return [
+            "available": true,
+            "role": copyAttribute(element, kAXRoleAttribute as CFString) as? String as Any? ?? NSNull(),
+            "title": copyAttribute(element, kAXTitleAttribute as CFString) as? String as Any? ?? NSNull(),
+            "description": copyAttribute(element, kAXDescriptionAttribute as CFString) as? String as Any? ?? NSNull(),
+            "value": copyAttribute(element, kAXValueAttribute as CFString) as? String as Any? ?? NSNull(),
+            "focused": copyAttribute(element, kAXFocusedAttribute as CFString) as? Bool as Any? ?? NSNull(),
+        ]
     }
 
     private static func copyAttribute(_ element: AXUIElement, _ name: CFString) -> CFTypeRef? {

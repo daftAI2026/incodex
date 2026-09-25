@@ -34,10 +34,18 @@ test("placeholder AXPress opt-in cannot bypass the visible-run gates", () => {
   expect(result.stdout + result.stderr).not.toContain("Opt-in accepted");
 });
 
+test("initial keyboard Allow diagnostic cannot bypass the visible-run gates", () => {
+  const result = spawnSync("bun", [script, "--diagnose-initial-keyboard"], { encoding: "utf8", timeout: 10_000 });
+  expect(result.status).toBe(2);
+  expect(result.stdout + result.stderr).toContain("--run --acknowledge-visible-ui");
+  expect(result.stdout + result.stderr).not.toContain("Opt-in accepted");
+});
+
 test("runner source is read-only with respect to TCC and compiles the production gate", () => {
   const source = readFileSync(script, "utf8");
   const helperSource = readFileSync(helper, "utf8");
   expect(helperSource).toContain("CGPreflightScreenCaptureAccess");
+  expect(helperSource).toContain('"postEventAccessAlreadyGranted": CGPreflightPostEventAccess()');
   expect(helperSource).toContain("AXIsProcessTrusted()");
   expect(helperSource).toContain("#available(macOS 14.0, *)");
   expect(helperSource).not.toContain("CGRequestScreenCaptureAccess");
@@ -112,6 +120,49 @@ test("placeholder AXPress is separately opted in inside the existing helper-to-B
   expect(helperSource).toContain('expectedPlaceholderFocus');
   expect(helperSource).toContain('(expectedHostFocus || expectedHelperFocus || expectedPlaceholderFocus)');
   expect(helperSource).toContain('guard occluders.isEmpty else');
+});
+
+test("initial keyboard diagnostic records Allow and Skip focus, then activates Allow exactly once with Return", () => {
+  const source = readFileSync(script, "utf8");
+  const helperSource = readFileSync(helper, "utf8");
+  expect(source).toContain("diagnoseInitialKeyboard: false");
+  expect(source).toContain("--diagnose-initial-keyboard");
+  expect(source).toContain("initial-keyboard-allow");
+  expect(source).toContain("assertInitialAllowKeyboardResult");
+  expect(source).toContain("initialCountsBefore.allow !== 0 || initialCountsBefore.retry !== 0");
+  expect(source).toContain("initialCountsAfter.allow !== 1 || initialCountsAfter.retry !== 0");
+  const ready = source.indexOf('await takeScreenshot(binaries.helper, outputDirectory, "initial-ready", 1)');
+  const keyboardAllow = source.indexOf('const keyboardAllow = helperCall(binaries.helper, [');
+  const axAllow = source.indexOf('const allowPress = helperCall(binaries.helper, ["press"');
+  expect(ready).toBeGreaterThanOrEqual(0);
+  expect(keyboardAllow).toBeGreaterThan(ready);
+  expect(axAllow).toBeGreaterThan(keyboardAllow);
+  expect(source).toContain('const skipLabel = selected.copy.later ?? "Skip"');
+  expect(helperSource).toContain('case "keyboard-allow":');
+  expect(helperSource).toContain("frontmost?.processIdentifier == pid");
+  expect(helperSource).toContain("CGPreflightPostEventAccess()");
+  expect(source).toContain("preflight.postEventAccessAlreadyGranted !== true");
+  expect(helperSource).toContain("kAXFocusedUIElementAttribute");
+  expect(helperSource).toContain("buttonAXEnabled");
+  expect(helperSource).toContain("buttonAXFocused");
+  expect(helperSource).toContain("virtualKey: 36");
+  expect(helperSource).toContain("down.post(tap: .cghidEventTap)");
+  expect(helperSource).toContain("up.post(tap: .cghidEventTap)");
+  expect(helperSource).not.toContain("CGRequestPostEventAccess");
+  expect(source.indexOf("preflight.postEventAccessAlreadyGranted !== true")).toBeLessThan(source.indexOf("await waitForOfficialApp("));
+});
+
+test("Back and Settings placeholder presses report one enabled AXButton with AXPress", () => {
+  const source = readFileSync(script, "utf8");
+  const helperSource = readFileSync(helper, "utf8");
+  expect(source).toContain("assertBackButtonResult(backPress, backTitle)");
+  expect(source).toContain("assertPlaceholderButtonResult(placeholderPress, placeholderLabel)");
+  expect(helperSource).toContain('"buttonAXEnabled": copyAttribute(button, kAXEnabledAttribute as CFString) as? Bool as Any? ?? NSNull()');
+  expect(source).toContain("function assertBackButtonResult");
+  expect(source).toContain('actions?.includes("AXPress")');
+  expect(helperSource).toContain('"buttonAXRole": buttonRole as Any? ?? NSNull()');
+  expect(helperSource).toContain('"buttonAXEnabled": copyAttribute(button, kAXEnabledAttribute as CFString) as? Bool as Any? ?? NSNull()');
+  expect(helperSource).toContain('"axActionNames": [String](actionNames as? [String] ?? [])');
 });
 
 test("self-test mode is available without visible UI", () => {
