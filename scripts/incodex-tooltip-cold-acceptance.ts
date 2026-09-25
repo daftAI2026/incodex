@@ -29,6 +29,10 @@ type TooltipState = {
   button: { x: number; y: number; width: number; height: number } | null;
   search: { x: number; y: number; width: number; height: number } | null;
   viewport: { width: number; height: number };
+  nowMs: number;
+  documentFocused: boolean;
+  hatHitTest: boolean;
+  searchHitTest: boolean;
   hatHovered: boolean;
   hatTooltipOpen: boolean;
   hatTooltipClass: string | null;
@@ -36,6 +40,7 @@ type TooltipState = {
   searchTooltipClass: string | null;
   titlePresent: boolean;
   legacyTooltipOpen: boolean;
+  legacyTooltipVisible: boolean;
   tooltipRootCount: number;
   rendererReady: boolean;
   lifecyclePresent: boolean;
@@ -55,6 +60,7 @@ type TooltipState = {
   };
 };
 type ListenerRow = { pid: number; endpoint: string };
+type ProbeEvent = { sequence: number; type: string; target: string; trusted: boolean; timeMs: number };
 
 const root = resolve(import.meta.dir, "..");
 const bundleIdentifier = "com.openai.codex";
@@ -191,16 +197,37 @@ export function parseListenerRows(output: string): ListenerRow[] {
   });
 }
 
-export function assertLoopbackListenerOwnership(rows: ListenerRow[], pid: number, port: number): void {
+export function assertLoopbackListenerOwnership(
+  rows: ListenerRow[],
+  pid: number,
+  port: number,
+  authorizedPids: ReadonlySet<number> = new Set([pid]),
+): void {
   if (rows.length === 0) throw new Error(`no CDP listener is bound to port ${port}`);
+  if (!authorizedPids.has(pid)) throw new Error(`exact child PID ${pid} is not in the verified process tree`);
   const allowed = new Set([`127.0.0.1:${port}`, `[::1]:${port}`]);
   const owners = [...new Set(rows.map((row) => row.pid))];
-  if (owners.length !== 1 || owners[0] !== pid) {
-    throw new Error(`CDP port ${port} is not owned exclusively by child PID ${pid}`);
+  if (owners.some((owner) => !authorizedPids.has(owner))) {
+    throw new Error(`CDP port ${port} is not owned exclusively by the verified child process tree`);
   }
   if (rows.some((row) => !allowed.has(row.endpoint))) {
     throw new Error(`CDP port ${port} is not bound exclusively to loopback`);
   }
+}
+
+export function verifiedDescendantPids(rows: ProcessRow[], rootPid: number): Set<number> {
+  const descendants = new Set([rootPid]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const row of rows) {
+      if (!descendants.has(row.pid) && descendants.has(row.ppid)) {
+        descendants.add(row.pid);
+        changed = true;
+      }
+    }
+  }
+  return descendants;
 }
 
 export function validateWebSocketUrl(value: string, port: number): URL {
@@ -354,9 +381,12 @@ export function tooltipStateExpression(): string {
     const s=[...document.querySelectorAll('button[aria-label]')].find(e=>${labels}.includes((e.getAttribute('aria-label')||'').trim()));
     const rect=e=>{if(!e)return null;const r=e.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}};
     const visible=e=>!!e&&e.isConnected&&e.getBoundingClientRect().width>0&&getComputedStyle(e).visibility!=='hidden'&&getComputedStyle(e).display!=='none';
+    const hit=e=>{if(!e?.isConnected)return false;const r=e.getBoundingClientRect(),top=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return !!top&&(top===e||e.contains(top))};
     const described=e=>[e,e?.parentElement].flatMap(x=>(x?.getAttribute('aria-describedby')||'').split(/\\s+/)).filter(Boolean).map(id=>document.getElementById(id)).find(t=>t?.getAttribute('role')==='tooltip');
     const hatTip=document.getElementById('incodex-official-tooltip');
     const searchTip=described(s);
+    const legacyHost=document.querySelector('[data-incodex-tooltip-host]');
+    const legacyTip=legacyHost?.querySelector('[data-incodex-tooltip]');
     let provider=null;
     let fiber=(()=>{if(!s)return null;const k=Object.keys(s).find(k=>k.startsWith('__reactFiber$'));return k?s[k]:null})();
     for(let depth=0;fiber&&depth<64;depth++,fiber=fiber.return){
@@ -394,11 +424,13 @@ export function tooltipStateExpression(): string {
     return{
       incognito:window.__incodexIncognito===true,
       button:rect(b),search:rect(s),viewport:{width:innerWidth,height:innerHeight},
+      nowMs:performance.now(),documentFocused:document.hasFocus(),hatHitTest:hit(b),searchHitTest:hit(s),
       hatHovered:b?.getAttribute('data-incodex-hovered')==='true',
       hatTooltipOpen:visible(hatTip),hatTooltipClass:hatTip?.className||null,
       searchTooltipOpen:visible(searchTip),searchTooltipClass:searchTip?.className||null,
       titlePresent:b?.hasAttribute('title')??false,
-      legacyTooltipOpen:document.querySelector('[data-incodex-tooltip-host]')?.hasAttribute('data-open')??false,
+      legacyTooltipOpen:legacyHost?.hasAttribute('data-open')??false,
+      legacyTooltipVisible:visible(legacyTip)&&legacyHost?.hasAttribute('data-open')===true,
       tooltipRootCount:document.querySelectorAll('[data-incodex-official-tooltip-root]').length,
       rendererReady:window.__incodexTooltipState?.renderer?.ready?.()===true,
       lifecyclePresent:!!window.__incodexTooltipState?.lifecycle,
@@ -513,7 +545,7 @@ function stateSummary(state: TooltipState): Record<string, unknown> {
 export function tooltipEventProbeExpression(): string {
   const labels = JSON.stringify([...SEARCH_LABELS]);
   return `(()=>{
-    const events=[];window.__incodexTooltipAcceptanceEvents=events;
+    const events=[];window.__incodexTooltipAcceptanceEvents=events;window.__incodexTooltipAcceptanceSequence=0;
     const labels=${labels};
     for(const name of ['pointerenter','pointerleave','focus','blur','keydown'])window.addEventListener(name,e=>{
       let target='other';
@@ -523,7 +555,7 @@ export function tooltipEventProbeExpression(): string {
         else {const b=e.target.closest('button[aria-label]');if(b&&labels.includes((b.getAttribute('aria-label')||'').trim()))target='search'}
       }
       if(target==='hat'||target==='search'||(name==='keydown'&&e.key==='Escape')||((name==='focus'||name==='blur')&&target==='window')){
-        events.push({type:name,target:name==='keydown'?'window':target,trusted:e.isTrusted,timeMs:Math.round(performance.now())});
+        events.push({sequence:++window.__incodexTooltipAcceptanceSequence,type:name,target:name==='keydown'?'window':target,trusted:e.isTrusted,timeMs:Math.round(performance.now())});
         if(events.length>12)events.shift();
       }
     },true);
@@ -607,15 +639,18 @@ async function runAcceptance(options: Options): Promise<Record<string, unknown>>
 
   const stillOwned = (): boolean => {
     if (!ownedChild || !cliPid || !expectedBinary) return false;
-    const current = processRows().find((row) => row.pid === ownedChild!.pid);
+    const snapshot = processRows();
+    const current = snapshot.find((row) => row.pid === ownedChild!.pid);
     if (
       !current ||
+      current.ppid !== cliPid ||
       current.started !== ownedChild.started ||
       !executableCommand(current, expectedBinary) ||
       !/(?:^|\s)--remote-debugging-port=\d+(?:\s|$)/u.test(current.command)
     ) return false;
+    const authorizedPids = verifiedDescendantPids(snapshot, ownedChild.pid);
     const listenerRows = lsofRows(ownedChild.port);
-    assertLoopbackListenerOwnership(listenerRows, ownedChild.pid, ownedChild.port);
+    assertLoopbackListenerOwnership(listenerRows, ownedChild.pid, ownedChild.port, authorizedPids);
     return true;
   };
 
@@ -699,15 +734,21 @@ async function runAcceptance(options: Options): Promise<Record<string, unknown>>
     await waitFor(
       "loopback CDP listener owned exclusively by the child",
       async () => {
+        const snapshot = processRows();
         const rows = lsofRows(boundChild.port);
         if (rows.length === 0) return false;
-        assertLoopbackListenerOwnership(rows, boundChild.pid, boundChild.port);
+        const authorizedPids = verifiedDescendantPids(snapshot, boundChild.pid);
+        assertLoopbackListenerOwnership(rows, boundChild.pid, boundChild.port, authorizedPids);
         return true;
       },
       (value) => value,
       20_000,
       childState,
     );
+    const verifiedListeners = lsofRows(boundChild.port);
+    const verifiedProcessTree = verifiedDescendantPids(processRows(), boundChild.pid);
+    assertLoopbackListenerOwnership(verifiedListeners, boundChild.pid, boundChild.port, verifiedProcessTree);
+    Object.assign(report.process as object, { listenerOwnerPids: [...new Set(verifiedListeners.map((row) => row.pid))] });
     const targets = await waitFor(
       "main app CDP page target",
       async () => {
@@ -748,6 +789,23 @@ async function runAcceptance(options: Options): Promise<Record<string, unknown>>
       } catch { /* Ignore non-JSON and all unrelated console output. */ }
     });
     await cdp.request("Runtime.enable");
+    const childBeforeActivation = processRows().find((row) => row.pid === boundChild.pid);
+    if (
+      !childBeforeActivation || childBeforeActivation.ppid !== cliPid ||
+      childBeforeActivation.started !== boundChild.started ||
+      !executableCommand(childBeforeActivation, candidate.binary)
+    ) throw new Error("refused to activate a ChatGPT process other than this exact CLI child");
+    runReadOnly("/usr/bin/osascript", [
+      "-e",
+      `tell application "System Events" to set frontmost of first application process whose unix id is ${boundChild.pid} to true`,
+    ], 10_000);
+    const frontmostPidOutput = runReadOnly("/usr/bin/osascript", [
+      "-e",
+      "tell application \"System Events\" to get unix id of first application process whose frontmost is true",
+    ], 10_000).trim();
+    const frontmostPid = Number(frontmostPidOutput);
+    if (frontmostPid !== boundChild.pid) throw new Error("the isolated CLI child did not become the frontmost application");
+    report.activation = { requestedPid: boundChild.pid, observedFrontmostPid: frontmostPid };
     await cdp.request("Page.bringToFront");
     const initialState = await waitFor(
       "incognito hat and Search controls (renderer readiness is observation only)",
@@ -766,13 +824,49 @@ async function runAcceptance(options: Options): Promise<Record<string, unknown>>
       await cdp!.request("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y });
     };
     const readState = () => cdp!.evaluate<TooltipState>(tooltipStateExpression());
+    const readEvents = () => cdp!.evaluate<ProbeEvent[]>("window.__incodexTooltipAcceptanceEvents||[]");
+    const eventSequence = () => cdp!.evaluate<number>("window.__incodexTooltipAcceptanceSequence||0");
+    const measureHover = async (
+      trigger: "hat" | "search",
+      point: { x: number; y: number },
+      opens: (state: TooltipState) => boolean,
+    ) => {
+      const before = await readState();
+      const hitTest = trigger === "hat" ? before.hatHitTest : before.searchHitTest;
+      if (!before.documentFocused || !hitTest) {
+        return { inputConfirmed: false, shown: false, elapsedMs: null, state: before, pointerEnter: null as ProbeEvent | null, reason: !before.documentFocused ? "page document is not focused" : `${trigger} center failed document.elementFromPoint hitTest` };
+      }
+      const sequenceBefore = await eventSequence();
+      await move(point);
+      const eventWaitStarted = performance.now();
+      const eventWait = await observeUntil(
+        readEvents,
+        (events) => events.some((event) => event.sequence > sequenceBefore && event.type === "pointerenter" && event.target === trigger && event.trusted),
+        1_500,
+        childState,
+        eventWaitStarted,
+      );
+      const pointerEnter = eventWait.value.find((event) => event.sequence > sequenceBefore && event.type === "pointerenter" && event.target === trigger && event.trusted) ?? null;
+      if (!eventWait.matched || !pointerEnter) {
+        return { inputConfirmed: false, shown: false, elapsedMs: null, state: await readState(), pointerEnter: null, reason: `no trusted ${trigger} pointerenter was observed` };
+      }
+      const tooltipWait = await observeUntil(readState, opens, tooltipTimeoutMs, childState, performance.now());
+      return {
+        inputConfirmed: true,
+        shown: tooltipWait.matched,
+        elapsedMs: Math.max(0, Math.round(tooltipWait.value.nowMs - pointerEnter.timeMs)),
+        state: tooltipWait.value,
+        pointerEnter,
+        reason: null as string | null,
+      };
+    };
     await cdp.evaluate(tooltipEventProbeExpression());
     Object.assign(report.observations as object, { beforeColdHat: stateSummary(initialState) });
     await move(outPoint);
     await waitFor(
       "pointer leaving both tooltip triggers",
       readState,
-      (state) => !state.hatHovered && !state.hatTooltipOpen && !state.searchTooltipOpen,
+      (state) => !state.hatHovered && !state.hatTooltipOpen && !state.legacyTooltipVisible && !state.searchTooltipOpen,
       2_000,
       childState,
     );
@@ -780,17 +874,24 @@ async function runAcceptance(options: Options): Promise<Record<string, unknown>>
 
     const preFirstHat = await readState();
     Object.assign(report.observations as object, { preFirstHat: stateSummary(preFirstHat) });
-    const firstHatStarted = performance.now();
-    await move({ x: initialState.button!.x + initialState.button!.width / 2, y: initialState.button!.y + initialState.button!.height / 2 });
-    const coldHatResult = await observeUntil(readState, (state) => state.hatTooltipOpen, tooltipTimeoutMs, childState, firstHatStarted);
-    const coldHat = coldHatResult.value;
+    const coldHatResult = await measureHover(
+      "hat",
+      { x: initialState.button!.x + initialState.button!.width / 2, y: initialState.button!.y + initialState.button!.height / 2 },
+      (state) => state.hatTooltipOpen || state.legacyTooltipVisible,
+    );
+    const coldHat = coldHatResult.state;
     const coldHatMs = coldHatResult.elapsedMs;
     const coldHatClassHash = classHash(coldHat.hatTooltipClass);
     Object.assign(report.measurements as object, {
       coldFirstHat: {
-        shown: coldHatResult.matched,
+        inputStatus: coldHatResult.inputConfirmed ? "VALID" : "INPUT_INVALID",
+        inputFailure: coldHatResult.reason,
+        shown: coldHatResult.inputConfirmed ? coldHatResult.shown : null,
+        officialShown: coldHat.hatTooltipOpen,
+        legacyFallbackVisible: coldHat.legacyTooltipVisible,
         elapsedMs: coldHatMs,
-        timeoutMs: tooltipTimeoutMs,
+        tooltipTimeoutMs: coldHatResult.inputConfirmed ? tooltipTimeoutMs : null,
+        inputWaitTimeoutMs: coldHatResult.inputConfirmed ? null : 1_500,
         toleranceComparedWithSearchMs: options.toleranceMs,
         officialClassSha256: coldHatClassHash,
         nativeTitlePresent: coldHat.titlePresent,
@@ -799,72 +900,92 @@ async function runAcceptance(options: Options): Promise<Record<string, unknown>>
     });
     Object.assign(report.observations as object, { afterColdHat: stateSummary(coldHat) });
 
-    await move(outPoint);
     const coldCloseStarted = performance.now();
-    const coldClose = await observeUntil(readState, (state) => !state.hatTooltipOpen, 2_000, childState, coldCloseStarted);
+    await move(outPoint);
+    const coldClose = await observeUntil(readState, (state) => !state.hatTooltipOpen && !state.legacyTooltipVisible, 2_000, childState, coldCloseStarted);
     Object.assign(report.measurements as object, { coldHatClose: { closed: coldClose.matched, elapsedMs: coldClose.elapsedMs } });
     await delay(coldIdleMs);
 
-    const searchStarted = performance.now();
-    await move({ x: initialState.search!.x + initialState.search!.width / 2, y: initialState.search!.y + initialState.search!.height / 2 });
-    const searchResult = await observeUntil(readState, (state) => state.searchTooltipOpen, tooltipTimeoutMs, childState, searchStarted);
-    const officialSearch = searchResult.value;
+    const searchResult = await measureHover(
+      "search",
+      { x: initialState.search!.x + initialState.search!.width / 2, y: initialState.search!.y + initialState.search!.height / 2 },
+      (state) => state.searchTooltipOpen,
+    );
+    const officialSearch = searchResult.state;
     const searchMs = searchResult.elapsedMs;
     const searchClassHash = classHash(officialSearch.searchTooltipClass);
     Object.assign(report.measurements as object, {
-      officialSearch: { shown: searchResult.matched, elapsedMs: searchMs, timeoutMs: tooltipTimeoutMs, officialClassSha256: searchClassHash },
+      officialSearch: { inputStatus: searchResult.inputConfirmed ? "VALID" : "INPUT_INVALID", inputFailure: searchResult.reason, shown: searchResult.inputConfirmed ? searchResult.shown : null, elapsedMs: searchMs, tooltipTimeoutMs: searchResult.inputConfirmed ? tooltipTimeoutMs : null, inputWaitTimeoutMs: searchResult.inputConfirmed ? null : 1_500, officialClassSha256: searchClassHash },
     });
     Object.assign(report.observations as object, { afterOfficialSearch: stateSummary(officialSearch) });
 
     const handoffStarted = performance.now();
-    await move({ x: initialState.button!.x + initialState.button!.width / 2, y: initialState.button!.y + initialState.button!.height / 2 });
     const [handoffResult, searchCloseResult] = await Promise.all([
-      observeUntil(readState, (state) => state.hatTooltipOpen, tooltipTimeoutMs, childState, handoffStarted),
+      measureHover(
+        "hat",
+        { x: initialState.button!.x + initialState.button!.width / 2, y: initialState.button!.y + initialState.button!.height / 2 },
+        (state) => state.hatTooltipOpen || state.legacyTooltipVisible,
+      ),
       observeUntil(readState, (state) => !state.searchTooltipOpen, 2_000, childState, handoffStarted),
     ]);
-    const handoff = handoffResult.value;
+    const handoff = handoffResult.state;
     const handoffMs = handoffResult.elapsedMs;
     const handoffClassHash = classHash(handoff.hatTooltipClass);
-    const presentationMatches = !!handoffClassHash && !!searchClassHash && handoffClassHash === searchClassHash;
-    const directLatencyIssue = coldHatResult.matched && searchResult.matched
-      ? coldLatencyFailure(coldHatMs, searchMs, options.toleranceMs)
-      : coldHatResult.matched ? null : "first direct hat tooltip did not appear before timeout";
-    const handoffLatencyIssue = handoffResult.matched && searchResult.matched && handoffMs - searchMs > options.toleranceMs
-      ? `Search-to-hat handoff was ${handoffMs - searchMs}ms slower than Search (tolerance ${options.toleranceMs}ms)`
+    const presentationMatches = handoff.hatTooltipOpen && !!handoffClassHash && !!searchClassHash && handoffClassHash === searchClassHash;
+    const directLatencyIssue = coldHatResult.inputConfirmed && coldHat.hatTooltipOpen && searchResult.inputConfirmed && officialSearch.searchTooltipOpen
+      ? coldLatencyFailure(coldHatMs!, searchMs!, options.toleranceMs)
+      : null;
+    const handoffLatencyIssue = handoffResult.inputConfirmed && handoff.hatTooltipOpen && searchResult.inputConfirmed && officialSearch.searchTooltipOpen && handoffMs! - searchMs! > options.toleranceMs
+      ? `Search-to-hat handoff was ${handoffMs! - searchMs!}ms slower than Search (tolerance ${options.toleranceMs}ms)`
       : null;
     Object.assign(report.measurements as object, {
       searchClose: { closed: searchCloseResult.matched, elapsedMs: searchCloseResult.elapsedMs },
-      searchToHat: { shown: handoffResult.matched, elapsedMs: handoffMs, officialClassMatchesSearch: presentationMatches, officialClassSha256: handoffClassHash },
+      searchToHat: { inputStatus: handoffResult.inputConfirmed ? "VALID" : "INPUT_INVALID", inputFailure: handoffResult.reason, shown: handoffResult.inputConfirmed ? handoffResult.shown : null, officialShown: handoff.hatTooltipOpen, legacyFallbackVisible: handoff.legacyTooltipVisible, elapsedMs: handoffMs, tooltipTimeoutMs: handoffResult.inputConfirmed ? tooltipTimeoutMs : null, inputWaitTimeoutMs: handoffResult.inputConfirmed ? null : 1_500, officialClassMatchesSearch: presentationMatches, officialClassSha256: handoffClassHash },
     });
     Object.assign(report.observations as object, { afterSearchToHat: stateSummary(handoff) });
 
+    const escapeSequenceBefore = await eventSequence();
     const escapeStarted = performance.now();
     await cdp.request("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
     await cdp.request("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-    const escapeResult = await observeUntil(readState, (state) => !state.hatTooltipOpen, 2_000, childState, escapeStarted);
+    const escapeInput = await observeUntil(
+      readEvents,
+      (events) => events.some((event) => event.sequence > escapeSequenceBefore && event.type === "keydown" && event.target === "window" && event.trusted),
+      1_000,
+      childState,
+      escapeStarted,
+    );
+    const escapeTrusted = escapeInput.value.some((event) => event.sequence > escapeSequenceBefore && event.type === "keydown" && event.target === "window" && event.trusted);
+    const escapeResult = escapeTrusted
+      ? await observeUntil(readState, (state) => !state.hatTooltipOpen && !state.legacyTooltipVisible, 2_000, childState, performance.now())
+      : { matched: false, elapsedMs: escapeInput.elapsedMs, value: await readState() };
     const readinessAvailable = await cdp.evaluate<boolean>("typeof window.__incodexTooltipState?.lifecycle?.presentationReady === 'function'");
-    if (readinessAvailable) {
+    if (escapeTrusted && readinessAvailable) {
       await cdp.evaluate("window.__incodexTooltipState.lifecycle.presentationReady()");
       await delay(250);
     }
     const afterEscape = await readState();
-    const remainedClosed = !afterEscape.hatTooltipOpen;
-    report.escape = { dismissed: escapeResult.matched, elapsedMs: escapeResult.elapsedMs, lateReadinessCheckAvailable: readinessAvailable, remainedClosed };
+    const remainedClosed = !afterEscape.hatTooltipOpen && !afterEscape.legacyTooltipVisible;
+    report.escape = { inputStatus: escapeTrusted ? "VALID" : "INPUT_INVALID", dismissed: escapeResult.matched, elapsedMs: escapeResult.elapsedMs, lateReadinessCheckAvailable: readinessAvailable, remainedClosed };
     Object.assign(report.observations as object, { afterEscape: stateSummary(afterEscape) });
     report.rendererUnavailableWarningCount = rendererUnavailableWarningCount;
     report.rendererPrepareDiagnostics = rendererPrepareDiagnostics;
     const acceptanceFailures = [
-      ...(!coldHatResult.matched ? ["first direct hat tooltip did not appear before timeout"] : []),
-      ...(!searchResult.matched ? ["official Search tooltip did not appear before timeout"] : []),
-      ...(!handoffResult.matched ? ["Search-to-hat tooltip handoff did not appear before timeout"] : []),
+      ...(!coldHatResult.inputConfirmed ? [`cold-hat timing invalid: ${coldHatResult.reason ?? "trusted pointer input unconfirmed"}`] : []),
+      ...(coldHatResult.inputConfirmed && !coldHat.hatTooltipOpen ? [coldHat.legacyTooltipVisible ? "cold hat showed only the legacy fallback, not official Tooltip" : "cold official hat tooltip did not appear before timeout"] : []),
+      ...(!searchResult.inputConfirmed ? [`Search timing invalid: ${searchResult.reason ?? "trusted pointer input unconfirmed"}`] : []),
+      ...(searchResult.inputConfirmed && !officialSearch.searchTooltipOpen ? ["official Search tooltip did not appear before timeout"] : []),
+      ...(!handoffResult.inputConfirmed ? [`Search-to-hat timing invalid: ${handoffResult.reason ?? "trusted pointer input unconfirmed"}`] : []),
+      ...(handoffResult.inputConfirmed && !handoff.hatTooltipOpen ? [handoff.legacyTooltipVisible ? "warm hat showed only the legacy fallback, not official Tooltip" : "official Search-to-hat tooltip did not appear before timeout"] : []),
       ...(coldHat.titlePresent || coldHat.legacyTooltipOpen || handoff.titlePresent || handoff.legacyTooltipOpen ? ["native title or duplicate legacy tooltip was present"] : []),
-      ...(!presentationMatches && searchResult.matched && handoffResult.matched ? ["hat tooltip presentation class differs from official Search"] : []),
+      ...(!presentationMatches && officialSearch.searchTooltipOpen && handoff.hatTooltipOpen ? ["hat tooltip presentation class differs from official Search"] : []),
       ...(directLatencyIssue ? [directLatencyIssue] : []),
       ...(handoffLatencyIssue ? [handoffLatencyIssue] : []),
-      ...(!escapeResult.matched || !remainedClosed ? ["Escape failed to dismiss or late readiness reopened tooltip"] : []),
+      ...(!escapeTrusted ? ["Escape input was not confirmed by trusted keydown"] : []),
+      ...(escapeTrusted && (!escapeResult.matched || !remainedClosed) ? ["Escape failed to dismiss or late readiness reopened tooltip"] : []),
     ];
     report.acceptanceFailures = acceptanceFailures;
-    const eventLog = await cdp.evaluate<Array<{ type: string; target: string; trusted: boolean; timeMs: number }>>("window.__incodexTooltipAcceptanceEvents||[]");
+    const eventLog = await readEvents();
     report.trustedInputEvents = eventLog.slice(-12);
     if (acceptanceFailures.length) throw new Error(acceptanceFailures.join("; "));
 

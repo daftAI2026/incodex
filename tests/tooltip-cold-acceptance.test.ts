@@ -10,6 +10,7 @@ import {
   parseListenerRows,
   parseProcessTable,
   parseRendererPrepareWarning,
+  verifiedDescendantPids,
   tooltipEventProbeExpression,
   tooltipStateExpression,
   validateWebSocketUrl,
@@ -81,6 +82,15 @@ describe("installed tooltip acceptance safety contracts", () => {
       "ChatGPT 234 d 61u IPv6 0xdef 0t0 TCP [::1]:56789 (LISTEN)",
     ].join("\n"));
     expect(() => assertLoopbackListenerOwnership(listeners, 234, 56789)).not.toThrow();
+    const childTree = verifiedDescendantPids([
+      { pid: 234, ppid: 123, started: "child", command: "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT --remote-debugging-port=56789" },
+      { pid: 626, ppid: 234, started: "service", command: "/Applications/ChatGPT.app/Contents/Frameworks/SkyComputerUseService" },
+      { pid: 627, ppid: 626, started: "nested", command: "/Applications/ChatGPT.app/Contents/Frameworks/helper" },
+    ], 234);
+    expect([...childTree].sort((a, b) => a - b)).toEqual([234, 626, 627]);
+    expect(() => assertLoopbackListenerOwnership([
+      { pid: 234, endpoint: "127.0.0.1:56789" }, { pid: 626, endpoint: "127.0.0.1:56789" },
+    ], 234, 56789, childTree)).not.toThrow();
     expect(() => assertLoopbackListenerOwnership([{ pid: 999, endpoint: "127.0.0.1:56789" }], 234, 56789))
       .toThrow(/not owned exclusively/u);
     expect(() => assertLoopbackListenerOwnership([{ pid: 234, endpoint: "*:56789" }], 234, 56789))
@@ -103,6 +113,9 @@ describe("installed tooltip acceptance safety contracts", () => {
     const state = tooltipStateExpression();
     expect(state).toContain("rendererReady");
     expect(state).toContain("tooltipRootCount");
+    expect(state).toContain("documentFocused");
+    expect(state).toContain("hatHitTest");
+    expect(state).toContain("searchHitTest");
     expect(state).toContain("searchTooltipSampleAvailable");
     expect(state).toContain("getOpenDelay('default',700)");
     expect(state).toContain("isHoverOpenBlocked('incodex-privacy-toggle')");
@@ -117,6 +130,7 @@ describe("installed tooltip acceptance safety contracts", () => {
     expect(events).toContain("pointerenter");
     expect(events).toContain("e.isTrusted");
     expect(events).toContain("e.key==='Escape'");
+    expect(events).toContain("sequence:++window.__incodexTooltipAcceptanceSequence");
     expect(events).not.toContain("innerText");
     expect(() => new Function(`return ${events}`)).not.toThrow();
   });
