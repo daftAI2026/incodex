@@ -85,7 +85,7 @@ test("unshipped Swift presenter passes the same copy keys and uses the same Swif
     "permissionHostInitialWidth: CGFloat = 600", "permissionHostHelperWidth: CGFloat = 531",
     "permissionHostHelperHeight: CGFloat = 110", "permissionHostRowWidth: CGFloat = 459",
     "permissionHostRowHeight: CGFloat = 42", "permissionHostArrowWindowSize: CGFloat = 100",
-    "permissionHostArrowWindowX: CGFloat = 30", "permissionHostArrowWindowY: CGFloat = 60",
+    "permissionHostArrowWindowX: CGFloat = 31", "permissionHostArrowWindowY: CGFloat = 60",
     "permissionHostArrowGraphicSize: CGFloat = 28",
   ]) expect(presenter.includes(value)).toBe(true);
 });
