@@ -439,6 +439,20 @@ function callToggle(binary: string, pid: number, kind: "open" | "exit", windowId
   return oneToggle(inspected, kind, windowId);
 }
 
+async function inspectWhenWindowReady(binary: string, pid: number, timeoutMs = 10_000): Promise<HelperReply> {
+  return waitFor(`AXWindow for exact PID ${pid}`, () => {
+    assertNoBlockingSystemWindow(binary);
+    try {
+      return axCall(binary, "inspect", [String(pid), executablePath, JSON.stringify(labelsByKind)]);
+    } catch (error) {
+      // A just-spawned Electron process can exist before its native AXWindow.
+      // Retry only that observed transient; every other AX failure stays fatal.
+      if (String(error).includes("AX attribute AXWindows unavailable (AXError -25204)")) return null;
+      throw error;
+    }
+  }, (reply) => (reply.windows?.length ?? 0) > 0, timeoutMs);
+}
+
 function activateThenPress(binary: string, pid: number, kind: "open" | "exit", windowId: number): AxToggle {
   axCall(binary, "activate", [String(pid), executablePath]);
   const toggle = callToggle(binary, pid, kind, windowId);
@@ -508,11 +522,11 @@ async function runAcceptance(parentPid: number, outputPath: string): Promise<voi
     axCall(helper, "press", [String(parentPid), executablePath, JSON.stringify(labelsByKind), "open", String(parentWindow.windowId)]);
     const firstBinding = await waitForNewOwner(sessionBaseline, helper, firstProcessBaseline, parentPid);
     assertCurrentOwnerBinding(firstBinding, helper, parentPid);
-    const childInspect = axCall(helper, "inspect", [String(firstBinding.pid), executablePath, JSON.stringify(labelsByKind)]);
+    activeBinding = firstBinding;
+    const childInspect = await inspectWhenWindowReady(helper, firstBinding.pid);
     const childWindow = oneMainWindow(childInspect);
     const firstBounds = requireExpectedTile(parentWindow.bounds, childWindow.bounds, "first private child window");
     const childToggle = oneToggle(childInspect, "exit", childWindow.windowId);
-    activeBinding = firstBinding;
     assertExactProcessSet(helper, [parentPid, firstBinding.pid], "after first hat trigger");
     appendStep(report, "E11/E12 first hat open", {
       toggle: openedToggle,
@@ -579,11 +593,11 @@ async function runAcceptance(parentPid: number, outputPath: string): Promise<voi
     activateThenPress(helper, parentPid, "open", parentWindow.windowId);
     const secondBinding = await waitForNewOwner(secondBaseline, helper, secondProcessBaseline, parentPid);
     assertCurrentOwnerBinding(secondBinding, helper, parentPid);
-    const secondInspect = axCall(helper, "inspect", [String(secondBinding.pid), executablePath, JSON.stringify(labelsByKind)]);
+    activeBinding = secondBinding;
+    const secondInspect = await inspectWhenWindowReady(helper, secondBinding.pid);
     const secondWindow = oneMainWindow(secondInspect);
     const secondBounds = requireExpectedTile(parentWindow.bounds, secondWindow.bounds, "second private child window");
     const secondToggle = oneToggle(secondInspect, "exit", secondWindow.windowId);
-    activeBinding = secondBinding;
     assertExactProcessSet(helper, [parentPid, secondBinding.pid], "after second hat trigger");
     appendStep(report, "E12 native-close session opened", {
       toggle: secondToggle,
@@ -626,17 +640,22 @@ async function runAcceptance(parentPid: number, outputPath: string): Promise<voi
           if (parentWindowForCleanup && cleanupParentWindow.windowId !== parentWindowForCleanup.windowId) {
             throw new Error("parent window identity changed; refusing failure cleanup");
           }
-          const cleanupChildWindow = oneMainWindow(axCall(helper, "inspect", [String(pendingCleanup.pid), executablePath, JSON.stringify(labelsByKind)]));
+          const cleanupInspect = await inspectWhenWindowReady(helper, pendingCleanup.pid);
+          const cleanupChildWindow = oneMainWindow(cleanupInspect);
           requireExpectedTile(cleanupParentWindow.bounds, cleanupChildWindow.bounds, "private child window before failure cleanup");
-          oneToggle(
-            axCall(helper, "inspect", [String(pendingCleanup.pid), executablePath, JSON.stringify(labelsByKind)]),
-            "exit",
-            cleanupChildWindow.windowId,
-          );
+          const exitToggles = (cleanupInspect.toggles ?? []).filter((toggle) => toggle.kind === "exit" && toggle.windowId === cleanupChildWindow.windowId);
+          if (exitToggles.length > 1) throw new Error("multiple private exit toggles; refusing failure cleanup");
           assertCurrentOwnerBinding(pendingCleanup, helper, parentPid);
-          axCall(helper, "press", [String(pendingCleanup.pid), executablePath, JSON.stringify(labelsByKind), "exit", String(cleanupChildWindow.windowId)]);
+          if (exitToggles.length === 1) {
+            oneToggle(cleanupInspect, "exit", cleanupChildWindow.windowId);
+            axCall(helper, "press", [String(pendingCleanup.pid), executablePath, JSON.stringify(labelsByKind), "exit", String(cleanupChildWindow.windowId)]);
+          } else {
+            // Renderer AX can be disabled even while the native child window is
+            // present. Close only this identity-checked test window via AppKit.
+            axCall(helper, "close-window", [String(pendingCleanup.pid), executablePath, String(cleanupChildWindow.windowId)]);
+          }
           await waitForBurn(pendingCleanup, helper, parentPid, 30_000);
-          (report.steps as Array<Record<string, unknown>>).push({ name: "safe product-close cleanup after failed assertion", sessionId: pendingCleanup.sessionId, childPid: pendingCleanup.pid, burned: true });
+          (report.steps as Array<Record<string, unknown>>).push({ name: "safe exact-window cleanup after failed assertion", sessionId: pendingCleanup.sessionId, childPid: pendingCleanup.pid, method: exitToggles.length === 1 ? "product exit toggle" : "native close button (renderer AX unavailable)", burned: true });
           activeBinding = null;
         } else {
           (report.steps as Array<Record<string, unknown>>).push({ name: "cleanup not attempted", sessionId: pendingCleanup.sessionId, childPid: pendingCleanup.pid, reason: "child not frontmost; preserving unrelated/system UI and process" });
