@@ -507,6 +507,53 @@ fn parses_supported_dylib_load_command_paths_in_command_order() {
 }
 
 #[test]
+fn parses_lazy_dylib_load_paths_for_each_supported_architecture() {
+    const LC_LAZY_LOAD_DYLIB: u32 = 0x20;
+    for cpu in [0x0100_000c, 0x0100_0007] {
+        let macho = thin_macho_with_dylib_commands(
+            cpu,
+            &[dylib_load_command(
+                LC_LAZY_LOAD_DYLIB,
+                "@rpath/Renamed.framework/Renamed",
+            )],
+        );
+        assert_eq!(
+            linked_dylib_paths(&macho).unwrap(),
+            ["@rpath/Renamed.framework/Renamed"]
+        );
+    }
+}
+
+#[test]
+fn resolves_lazy_dylib_load_against_the_same_runpath_search() {
+    let executable = Path::new("/Applications/ChatGPT.app/Contents/MacOS/Helper");
+    let macho = thin_macho_with_dylib_commands(
+        0x0100_000c,
+        &[
+            rpath_load_command("@loader_path/../Frameworks"),
+            dylib_load_command(0x20, "@rpath/Renamed.framework/Renamed"),
+        ],
+    );
+    assert_eq!(
+        resolved_linked_dylib_paths(&macho, executable).unwrap(),
+        [vec![executable
+            .parent()
+            .unwrap()
+            .join("../Frameworks/Renamed.framework/Renamed")]]
+    );
+}
+
+#[test]
+fn rejects_lazy_dylib_names_outside_the_command() {
+    let mut macho = thin_macho_with_dylib_commands(
+        0x0100_000c,
+        &[dylib_load_command(0x20, "@rpath/Renamed.framework/Renamed")],
+    );
+    write_u32_le(&mut macho, MACH_HEADER_64_SIZE + 8, 0);
+    assert!(linked_dylib_paths(&macho).is_err());
+}
+
+#[test]
 fn resolves_rpath_install_name_against_loader_path() {
     const ARM64: u32 = 0x0100_000c;
     const LC_LOAD_DYLIB: u32 = 0x0000_000c;
