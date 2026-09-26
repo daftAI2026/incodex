@@ -16,7 +16,9 @@ const LC_LOAD_DYLIB: u32 = 0x0000_000c;
 const LC_LOAD_WEAK_DYLIB: u32 = 0x8000_0018;
 const LC_REEXPORT_DYLIB: u32 = 0x8000_001f;
 const LC_LOAD_UPWARD_DYLIB: u32 = 0x8000_0023;
+const LC_RPATH: u32 = 0x8000_001c;
 const DYLIB_COMMAND_SIZE: usize = 24;
+const RPATH_COMMAND_SIZE: usize = 12;
 const LC_SYMTAB: u32 = 0x02;
 const SYMTAB_COMMAND_SIZE: usize = 24;
 const NLIST_64_SIZE: usize = 16;
@@ -100,9 +102,60 @@ pub(crate) fn plan_integrity_digest_update(
     Ok(Some(updated))
 }
 
+#[cfg(test)]
+#[allow(dead_code)] // Used by the path-included parser integration test, not by the library test harness.
 pub(crate) fn linked_dylib_paths(bytes: &[u8]) -> Result<Vec<String>, String> {
+    Ok(parse_linked_dylib_commands(bytes)?
+        .into_iter()
+        .flat_map(|slice| slice.dylibs)
+        .collect())
+}
+
+pub(crate) fn resolved_linked_dylib_paths(
+    bytes: &[u8],
+    executable: &Path,
+) -> Result<Vec<Vec<PathBuf>>, String> {
+    let image_dir = executable
+        .parent()
+        .ok_or_else(|| "Mach-O executable has no parent directory".to_string())?;
+    let mut groups = Vec::new();
+    for slice in parse_linked_dylib_commands(bytes)? {
+        for dependency in slice.dylibs {
+            if let Some(relative) = dependency.strip_prefix("@rpath/") {
+                if relative.is_empty() {
+                    return Err("Mach-O @rpath dependency has an empty suffix".into());
+                }
+                let mut candidates = Vec::with_capacity(slice.rpaths.len());
+                for rpath in &slice.rpaths {
+                    let base = expand_runpath(rpath, image_dir)
+                        .ok_or_else(|| format!("cannot resolve Mach-O LC_RPATH entry {rpath:?}"))?;
+                    candidates.push(base.join(relative));
+                }
+                groups.push(candidates);
+            } else if let Some(path) = expand_image_path(&dependency, image_dir) {
+                groups.push(vec![path]);
+            } else if dependency.starts_with('@') {
+                // Unknown dyld tokens cannot be proven to refer to a framework
+                // we are changing. Do not reinterpret them as filesystem paths.
+                groups.push(Vec::new());
+            } else if Path::new(&dependency).is_absolute() {
+                groups.push(vec![PathBuf::from(dependency)]);
+            } else {
+                groups.push(Vec::new());
+            }
+        }
+    }
+    Ok(groups)
+}
+
+struct SliceDylibCommands {
+    rpaths: Vec<String>,
+    dylibs: Vec<String>,
+}
+
+fn parse_linked_dylib_commands(bytes: &[u8]) -> Result<Vec<SliceDylibCommands>, String> {
     let slices = parse_slices(bytes)?;
-    let mut paths = Vec::new();
+    let mut parsed_slices = Vec::with_capacity(slices.len());
 
     for (slice_index, slice) in slices.iter().enumerate() {
         let slice_end = slice
@@ -141,6 +194,8 @@ pub(crate) fn linked_dylib_paths(bytes: &[u8]) -> Result<Vec<String>, String> {
         }
 
         let mut cursor = load_start;
+        let mut rpaths = Vec::new();
+        let mut dylibs = Vec::new();
         for command_index in 0..ncmds {
             require_range(load_end, cursor, 8, "Mach-O load-command header")?;
             let command = read_u32(slice_bytes, cursor, order)?;
@@ -152,7 +207,23 @@ pub(crate) fn linked_dylib_paths(bytes: &[u8]) -> Result<Vec<String>, String> {
             }
             require_range(load_end, cursor, command_size, "Mach-O load command")?;
 
-            if matches!(
+            if command == LC_RPATH {
+                if command_size < RPATH_COMMAND_SIZE {
+                    return Err(format!(
+                        "Mach-O slice {slice_index} LC_RPATH command {command_index} is truncated"
+                    ));
+                }
+                let path_offset = read_u32(slice_bytes, cursor + 8, order)? as usize;
+                rpaths.push(read_load_command_string(
+                    slice_bytes,
+                    cursor,
+                    command_size,
+                    path_offset,
+                    RPATH_COMMAND_SIZE,
+                    (slice_index, command_index),
+                    "LC_RPATH path",
+                )?);
+            } else if matches!(
                 command,
                 LC_LOAD_DYLIB | LC_LOAD_WEAK_DYLIB | LC_REEXPORT_DYLIB | LC_LOAD_UPWARD_DYLIB
             ) {
@@ -162,40 +233,15 @@ pub(crate) fn linked_dylib_paths(bytes: &[u8]) -> Result<Vec<String>, String> {
                     ));
                 }
                 let name_offset = read_u32(slice_bytes, cursor + 8, order)? as usize;
-                if !(DYLIB_COMMAND_SIZE..command_size).contains(&name_offset) {
-                    return Err(format!(
-                        "Mach-O slice {slice_index} dylib command {command_index} name offset is out of range"
-                    ));
-                }
-                let command_end = cursor
-                    .checked_add(command_size)
-                    .ok_or_else(|| "Mach-O dylib command range overflow".to_string())?;
-                let name_start = cursor
-                    .checked_add(name_offset)
-                    .ok_or_else(|| "Mach-O dylib name offset overflow".to_string())?;
-                require_range(
-                    slice_bytes.len(),
-                    name_start,
-                    command_end.saturating_sub(name_start),
-                    "Mach-O dylib name",
-                )?;
-                let name_region = &slice_bytes[name_start..command_end];
-                let terminator = name_region.iter().position(|byte| *byte == 0).ok_or_else(|| {
-                    format!(
-                        "Mach-O slice {slice_index} dylib command {command_index} name is not NUL-terminated"
-                    )
-                })?;
-                if terminator == 0 {
-                    return Err(format!(
-                        "Mach-O slice {slice_index} dylib command {command_index} has an empty name"
-                    ));
-                }
-                let path = std::str::from_utf8(&name_region[..terminator]).map_err(|error| {
-                    format!(
-                        "Mach-O slice {slice_index} dylib command {command_index} name is not UTF-8: {error}"
-                    )
-                })?;
-                paths.push(path.to_owned());
+                dylibs.push(read_load_command_string(
+                    slice_bytes,
+                    cursor,
+                    command_size,
+                    name_offset,
+                    DYLIB_COMMAND_SIZE,
+                    (slice_index, command_index),
+                    "dylib name",
+                )?);
             }
             cursor += command_size;
         }
@@ -204,16 +250,79 @@ pub(crate) fn linked_dylib_paths(bytes: &[u8]) -> Result<Vec<String>, String> {
                 "Mach-O slice {slice_index} load-command sizes do not match sizeofcmds"
             ));
         }
+        parsed_slices.push(SliceDylibCommands { rpaths, dylibs });
     }
 
-    Ok(paths)
+    Ok(parsed_slices)
 }
 
-pub(crate) fn resolved_linked_dylib_paths(
-    _bytes: &[u8],
-    _executable: &Path,
-) -> Result<Vec<Vec<PathBuf>>, String> {
-    Ok(Vec::new())
+fn read_load_command_string(
+    slice: &[u8],
+    command_offset: usize,
+    command_size: usize,
+    string_offset: usize,
+    fixed_size: usize,
+    command_indices: (usize, usize),
+    label: &str,
+) -> Result<String, String> {
+    let (slice_index, command_index) = command_indices;
+    if !(fixed_size..command_size).contains(&string_offset) {
+        return Err(format!(
+            "Mach-O slice {slice_index} load command {command_index} {label} offset is out of range"
+        ));
+    }
+    let command_end = command_offset
+        .checked_add(command_size)
+        .ok_or_else(|| format!("Mach-O {label} command range overflow"))?;
+    let string_start = command_offset
+        .checked_add(string_offset)
+        .ok_or_else(|| format!("Mach-O {label} offset overflow"))?;
+    require_range(
+        slice.len(),
+        string_start,
+        command_end.saturating_sub(string_start),
+        label,
+    )?;
+    let string_region = &slice[string_start..command_end];
+    let terminator = string_region
+        .iter()
+        .position(|byte| *byte == 0)
+        .ok_or_else(|| {
+            format!(
+            "Mach-O slice {slice_index} load command {command_index} {label} is not NUL-terminated"
+        )
+        })?;
+    if terminator == 0 {
+        return Err(format!(
+            "Mach-O slice {slice_index} load command {command_index} has an empty {label}"
+        ));
+    }
+    std::str::from_utf8(&string_region[..terminator])
+        .map(str::to_owned)
+        .map_err(|error| {
+            format!(
+                "Mach-O slice {slice_index} load command {command_index} {label} is not UTF-8: {error}"
+            )
+        })
+}
+
+fn expand_image_path(path: &str, image_dir: &Path) -> Option<PathBuf> {
+    for token in ["@loader_path", "@executable_path"] {
+        if path == token {
+            return Some(image_dir.to_path_buf());
+        }
+        if let Some(relative) = path.strip_prefix(&format!("{token}/")) {
+            return Some(image_dir.join(relative));
+        }
+    }
+    None
+}
+
+fn expand_runpath(path: &str, image_dir: &Path) -> Option<PathBuf> {
+    if Path::new(path).is_absolute() {
+        return Some(PathBuf::from(path));
+    }
+    expand_image_path(path, image_dir)
 }
 
 pub(crate) fn dynamic_framework_load_paths(bytes: &[u8]) -> Result<Vec<String>, String> {

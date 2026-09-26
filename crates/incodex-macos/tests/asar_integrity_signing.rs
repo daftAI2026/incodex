@@ -45,7 +45,18 @@ fn signed_fixture_with_loader_location(
     dynamic: bool,
     sibling_helper: bool,
 ) -> SignedFixture {
-    signed_fixture_with_linkage(helper_identifier, dynamic, sibling_helper, false, false)
+    signed_fixture_with_linkage(
+        helper_identifier,
+        dynamic,
+        sibling_helper,
+        false,
+        false,
+        false,
+    )
+}
+
+fn signed_fixture_with_app_descendant_loader(helper_identifier: &str) -> SignedFixture {
+    signed_fixture_with_linkage(helper_identifier, false, false, true, false, false)
 }
 
 fn signed_fixture_with_rpath_loader(
@@ -57,6 +68,7 @@ fn signed_fixture_with_rpath_loader(
         helper_identifier,
         false,
         sibling_helper,
+        false,
         true,
         shadow_first_rpath,
     )
@@ -66,6 +78,7 @@ fn signed_fixture_with_linkage(
     helper_identifier: &str,
     dynamic: bool,
     sibling_helper: bool,
+    app_descendant_helper: bool,
     rpath_link: bool,
     shadow_first_rpath: bool,
 ) -> SignedFixture {
@@ -135,7 +148,10 @@ fn signed_fixture_with_linkage(
             "com.openai.codex.framework.mask",
             "",
         );
-        run("codesign", &["--force", "--sign", "-", shadow.to_str().unwrap()]);
+        run(
+            "codesign",
+            &["--force", "--sign", "-", shadow.to_str().unwrap()],
+        );
     }
     let integrity = format!("<key>ElectronAsarIntegrity</key><dict><key>Resources/app.asar</key><dict><key>algorithm</key><string>SHA256</string><key>hash</key><string>{}</string></dict></dict>", "a".repeat(64));
     write_plist(
@@ -144,7 +160,9 @@ fn signed_fixture_with_linkage(
         "com.openai.codex",
         &integrity,
     );
-    let helper = if sibling_helper {
+    let helper = if app_descendant_helper {
+        app.join("Contents/Helpers/LinkedHelper.app")
+    } else if sibling_helper {
         app.join("Contents/Frameworks/LinkedHelper.app")
     } else {
         framework.join("Helpers/LinkedHelper.app")
@@ -326,23 +344,30 @@ fn sibling_direct_dependent_helper_gets_resigned_with_library_validation_exempti
     sign_app_with_asar_integrity(&fixture.app, &"c".repeat(64)).unwrap();
     verify_bundle_deep_strict(&fixture.app).unwrap();
     let entitlements = read_entitlements(&fixture.helper).unwrap();
-    assert!(
-        entitlements
-            .keys
-            .contains("com.apple.security.cs.disable-library-validation")
-    );
-    assert!(
-        entitlements
-            .keys
-            .contains("com.apple.security.cs.allow-jit")
-    );
+    assert!(entitlements
+        .keys
+        .contains("com.apple.security.cs.disable-library-validation"));
+    assert!(entitlements
+        .keys
+        .contains("com.apple.security.cs.allow-jit"));
+    fs::remove_dir_all(&fixture.root).unwrap();
+}
+
+#[test]
+fn direct_dependent_helper_in_another_app_descendant_gets_resigned() {
+    let fixture = signed_fixture_with_app_descendant_loader("com.openai.codex.helper.nested");
+    sign_app_with_asar_integrity(&fixture.app, &"c".repeat(64)).unwrap();
+    verify_bundle_deep_strict(&fixture.app).unwrap();
+    let entitlements = read_entitlements(&fixture.helper).unwrap();
+    assert!(entitlements
+        .keys
+        .contains("com.apple.security.cs.disable-library-validation"));
     fs::remove_dir_all(&fixture.root).unwrap();
 }
 
 #[test]
 fn sibling_rpath_dependent_helper_gets_resigned_with_library_validation_exemption() {
-    let fixture =
-        signed_fixture_with_rpath_loader("com.openai.codex.helper.rpath", true, false);
+    let fixture = signed_fixture_with_rpath_loader("com.openai.codex.helper.rpath", true, false);
     sign_app_with_asar_integrity(&fixture.app, &"c".repeat(64)).unwrap();
     verify_bundle_deep_strict(&fixture.app).unwrap();
     let entitlements = read_entitlements(&fixture.helper).unwrap();
@@ -354,8 +379,7 @@ fn sibling_rpath_dependent_helper_gets_resigned_with_library_validation_exemptio
 
 #[test]
 fn earlier_existing_non_target_rpath_masks_later_target_framework() {
-    let fixture =
-        signed_fixture_with_rpath_loader("com.openai.codex.helper.rpath", true, true);
+    let fixture = signed_fixture_with_rpath_loader("com.openai.codex.helper.rpath", true, true);
     sign_app_with_asar_integrity(&fixture.app, &"c".repeat(64)).unwrap();
     verify_bundle_deep_strict(&fixture.app).unwrap();
     let entitlements = read_entitlements(&fixture.helper).unwrap();

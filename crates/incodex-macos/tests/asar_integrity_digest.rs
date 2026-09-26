@@ -7,7 +7,7 @@ use asar_integrity_digest::{
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 const SLOT_SENTINEL: &[u8; 32] = b"AGbevlPCksUGKNL8TSn7wGmJEuJsXb2A";
 const SLOT_SIZE: usize = 66;
@@ -528,7 +528,7 @@ fn resolves_rpath_install_name_against_loader_path() {
 
     assert_eq!(
         resolved_linked_dylib_paths(&macho, executable).unwrap(),
-        [vec![PathBuf::from(expected)]]
+        [vec![expected]]
     );
 }
 
@@ -560,7 +560,49 @@ fn preserves_rpath_search_order_when_first_candidate_is_a_non_target() {
         [vec![non_target.clone(), target.clone()]],
         "retain per-load-command alternatives in LC_RPATH search order"
     );
-    assert_ne!(non_target, target, "same install name must not imply same binary");
+    assert_ne!(
+        non_target, target,
+        "same install name must not imply same binary"
+    );
+}
+
+#[test]
+fn resolves_runpaths_within_each_fat_slice_without_cross_pairing() {
+    const ARM64: u32 = 0x0100_000c;
+    const X86_64: u32 = 0x0100_0007;
+    const LC_LOAD_DYLIB: u32 = 0x0000_000c;
+    let executable = Path::new("/Applications/ChatGPT.app/Contents/MacOS/LinkedHelper");
+    let (macho, _) = fat32_macho(&[
+        (
+            ARM64,
+            thin_macho_with_dylib_commands(
+                ARM64,
+                &[
+                    rpath_load_command("@loader_path/arm64"),
+                    dylib_load_command(LC_LOAD_DYLIB, "@rpath/Framework/Framework"),
+                ],
+            ),
+        ),
+        (
+            X86_64,
+            thin_macho_with_dylib_commands(
+                X86_64,
+                &[
+                    rpath_load_command("@loader_path/x86_64"),
+                    dylib_load_command(LC_LOAD_DYLIB, "@rpath/Framework/Framework"),
+                ],
+            ),
+        ),
+    ]);
+
+    let loader_dir = executable.parent().unwrap();
+    assert_eq!(
+        resolved_linked_dylib_paths(&macho, executable).unwrap(),
+        [
+            vec![loader_dir.join("arm64/Framework/Framework")],
+            vec![loader_dir.join("x86_64/Framework/Framework")],
+        ]
+    );
 }
 
 #[test]

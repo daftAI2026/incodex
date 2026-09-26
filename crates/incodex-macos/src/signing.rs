@@ -351,6 +351,44 @@ fn verified_host_identifier(app: &Path, plist_identifier: &str) -> Result<String
     verified_identifier(component, plist_identifier)
 }
 
+fn first_existing_load_candidate_matches(
+    candidates: &[PathBuf],
+    framework_binary: &Path,
+) -> Result<bool, String> {
+    for candidate in candidates {
+        match fs::canonicalize(candidate) {
+            Ok(resolved) => return Ok(resolved == framework_binary),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                ) =>
+            {
+                continue;
+            }
+            Err(error) => {
+                return Err(format!(
+                    "cannot resolve Mach-O dylib dependency {}: {error}",
+                    candidate.display()
+                ));
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn linked_dependencies_load_framework(
+    dependencies: &[Vec<PathBuf>],
+    framework_binary: &Path,
+) -> Result<bool, String> {
+    for candidates in dependencies {
+        if first_existing_load_candidate_matches(candidates, framework_binary)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn verified_identifier(
     component: SignedComponent,
     plist_identifier: &str,
@@ -421,12 +459,6 @@ fn dependent_helper_updates(
         .into_iter()
         .filter(|path| path.extension().is_some_and(|ext| ext == "app"))
     {
-        let Some(framework) = frameworks
-            .iter()
-            .find(|framework| bundle.starts_with(&framework.bundle))
-        else {
-            continue;
-        };
         let info = read_plist_info(&bundle).ok_or("nested helper plist unavailable")?;
         if info.executable.is_empty()
             || Path::new(&info.executable).components().count() != 1
@@ -437,41 +469,43 @@ fn dependent_helper_updates(
         }
         let binary = fs::canonicalize(bundle.join("Contents/MacOS").join(&info.executable))
             .map_err(|error| error.to_string())?;
-        if !binary.starts_with(fs::canonicalize(&bundle).map_err(|error| error.to_string())?) {
+        let canonical_bundle = fs::canonicalize(&bundle).map_err(|error| error.to_string())?;
+        if !binary.starts_with(canonical_bundle) {
             return Err("helper executable escapes its bundle".into());
         }
         let bytes = fs::read(&binary).map_err(|error| error.to_string())?;
-        let dependencies = super::asar_integrity_digest::linked_dylib_paths(&bytes)?;
-        let directly_loads_framework = dependencies.iter().any(|dependency| {
-            let candidate = if let Some(relative) = dependency
-                .strip_prefix("@executable_path/")
-                .or_else(|| dependency.strip_prefix("@loader_path/"))
-            {
-                binary.parent().map(|parent| parent.join(relative))
-            } else if Path::new(dependency).is_absolute() {
-                Some(PathBuf::from(dependency))
-            } else {
-                None
-            };
-            candidate
-                .and_then(|path| fs::canonicalize(path).ok())
-                .is_some_and(|path| path == framework.binary)
-        });
-        let dynamically_loads_framework = if directly_loads_framework {
-            false
-        } else {
-            super::asar_integrity_digest::dynamic_framework_load_paths(&bytes)?
-                .iter()
-                .any(|relative| {
+        let dependencies =
+            super::asar_integrity_digest::resolved_linked_dylib_paths(&bytes, &binary)?;
+        let mut matching_framework = None;
+        for framework in frameworks {
+            if linked_dependencies_load_framework(&dependencies, &framework.binary)? {
+                if matching_framework.is_some() {
+                    return Err("helper loads multiple changed frameworks".into());
+                }
+                matching_framework = Some(framework);
+            }
+        }
+        if matching_framework.is_none() {
+            let dynamic_paths = super::asar_integrity_digest::dynamic_framework_load_paths(&bytes)?;
+            for framework in frameworks {
+                let dynamically_loads_framework = dynamic_paths.iter().any(|relative| {
                     binary
                         .parent()
                         .and_then(|parent| fs::canonicalize(parent.join(relative)).ok())
                         .is_some_and(|path| path == framework.binary)
-                })
+                });
+                if dynamically_loads_framework {
+                    if matching_framework.is_some() {
+                        return Err("helper loads multiple changed frameworks".into());
+                    }
+                    matching_framework = Some(framework);
+                }
+            }
+        }
+        let Some(framework) = matching_framework else {
+            continue;
         };
-        if !(directly_loads_framework || dynamically_loads_framework)
-            || !inspect_hardened_runtime(&bundle)?
-        {
+        if !inspect_hardened_runtime(&bundle)? {
             continue;
         }
         let source = read_entitlements(&bundle)?;
