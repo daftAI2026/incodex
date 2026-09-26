@@ -1,6 +1,9 @@
 #![cfg(target_os = "macos")]
 
-use incodex_macos::{read_entitlements, sign_app_with_asar_integrity, verify_bundle_deep_strict};
+use incodex_macos::{
+    read_entitlements, sign_app_with_asar_integrity, sign_staged_app_with_asar_integrity,
+    verify_bundle_deep_strict,
+};
 use std::{
     fs,
     path::Path,
@@ -30,6 +33,13 @@ struct SignedFixture {
     binary: std::path::PathBuf,
     helper: std::path::PathBuf,
     helper_binary: std::path::PathBuf,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum AbsoluteLoadTarget {
+    None,
+    FinalApp,
+    External,
 }
 
 fn signed_fixture(helper_identifier: &str) -> SignedFixture {
@@ -89,12 +99,32 @@ fn signed_fixture_with_linkage(
         app_descendant_helper,
         rpath_link,
         shadow_first_rpath,
-        false,
+        AbsoluteLoadTarget::None,
     )
 }
 
 fn signed_fixture_with_absolute_loader(helper_identifier: &str) -> SignedFixture {
-    signed_fixture_with_linkage_options(helper_identifier, false, true, false, false, false, true)
+    signed_fixture_with_linkage_options(
+        helper_identifier,
+        false,
+        true,
+        false,
+        false,
+        false,
+        AbsoluteLoadTarget::FinalApp,
+    )
+}
+
+fn signed_fixture_with_external_absolute_loader(helper_identifier: &str) -> SignedFixture {
+    signed_fixture_with_linkage_options(
+        helper_identifier,
+        false,
+        true,
+        false,
+        false,
+        false,
+        AbsoluteLoadTarget::External,
+    )
 }
 
 fn signed_fixture_with_linkage_options(
@@ -104,7 +134,7 @@ fn signed_fixture_with_linkage_options(
     app_descendant_helper: bool,
     rpath_link: bool,
     shadow_first_rpath: bool,
-    absolute_load_path: bool,
+    absolute_load_target: AbsoluteLoadTarget,
 ) -> SignedFixture {
     let root = std::env::temp_dir().join(format!(
         "incodex-integrity-signing-{}-{}-{}",
@@ -130,13 +160,30 @@ fn signed_fixture_with_linkage_options(
     let binary = framework.join("Renamed");
     let absolute_install_name = format!("-Wl,-install_name,{}", binary.display());
     let mut framework_args = vec!["-dynamiclib", source.to_str().unwrap()];
-    if absolute_load_path {
+    if absolute_load_target == AbsoluteLoadTarget::FinalApp {
         framework_args.push(&absolute_install_name);
     } else if rpath_link {
         framework_args.push("-Wl,-install_name,@rpath/Renamed.framework/Renamed");
     }
     framework_args.extend(["-o", binary.to_str().unwrap()]);
     run("clang", &framework_args);
+    let external_binary = root.join("external/Unrelated.dylib");
+    if absolute_load_target == AbsoluteLoadTarget::External {
+        fs::create_dir_all(external_binary.parent().unwrap()).unwrap();
+        let external_source = root.join("external.c");
+        fs::write(&external_source, "int fixture(void) { return 1; }").unwrap();
+        let external_install_name = format!("-Wl,-install_name,{}", external_binary.display());
+        run(
+            "clang",
+            &[
+                "-dynamiclib",
+                external_source.to_str().unwrap(),
+                &external_install_name,
+                "-o",
+                external_binary.to_str().unwrap(),
+            ],
+        );
+    }
     let main = root.join("main.c");
     fs::write(&main, "int main(void) {return 0;}").unwrap();
     run(
@@ -219,6 +266,9 @@ return dlsym(handle,"ChromeMain") ? 0 : 3; }
     fs::write(&helper_source, source).unwrap();
     let helper_binary = helper.join("Contents/MacOS/LinkedHelper");
     let mut args = vec![helper_source.to_str().unwrap()];
+    if absolute_load_target == AbsoluteLoadTarget::External {
+        args.push(external_binary.to_str().unwrap());
+    }
     if rpath_link {
         args.extend(["-F", framework.parent().unwrap().to_str().unwrap()]);
         args.extend(["-framework", "Renamed"]);
@@ -230,7 +280,7 @@ return dlsym(handle,"ChromeMain") ? 0 : 3; }
         } else {
             "-Wl,-rpath,@loader_path/../../../../../"
         });
-    } else if !dynamic {
+    } else if !dynamic && absolute_load_target != AbsoluteLoadTarget::External {
         args.push(binary.to_str().unwrap());
     }
     args.extend(["-o", helper_binary.to_str().unwrap()]);
@@ -404,7 +454,7 @@ fn absolute_final_app_framework_load_is_resolved_to_its_staged_copy() {
         "fixture must retain its absolute final-app load path: {linkage}"
     );
 
-    sign_app_with_asar_integrity(&staged, &"c".repeat(64)).unwrap();
+    sign_staged_app_with_asar_integrity(&staged, &fixture.app, &"c".repeat(64)).unwrap();
     verify_bundle_deep_strict(&staged).unwrap();
     let staged_helper = staged.join("Contents/Frameworks/LinkedHelper.app");
     let entitlements = read_entitlements(&staged_helper).unwrap();
@@ -417,6 +467,45 @@ fn absolute_final_app_framework_load_is_resolved_to_its_staged_copy() {
     assert!(entitlements
         .keys
         .contains("com.apple.security.cs.allow-jit"));
+    fs::remove_dir_all(&fixture.root).unwrap();
+}
+
+#[test]
+fn external_absolute_framework_load_is_not_rebased_into_the_staged_app() {
+    let fixture = signed_fixture_with_external_absolute_loader("com.openai.codex.helper.external");
+    let staged = fixture.root.join("scratch/ChatGPT.app");
+    fs::create_dir_all(staged.parent().unwrap()).unwrap();
+    run(
+        "ditto",
+        &[fixture.app.to_str().unwrap(), staged.to_str().unwrap()],
+    );
+    let staged_helper_binary =
+        staged.join("Contents/Frameworks/LinkedHelper.app/Contents/MacOS/LinkedHelper");
+    let linkage = Command::new("otool")
+        .args(["-L"])
+        .arg(&staged_helper_binary)
+        .output()
+        .unwrap();
+    assert!(linkage.status.success());
+    let linkage = String::from_utf8_lossy(&linkage.stdout);
+    assert!(
+        linkage.contains(
+            fixture
+                .root
+                .join("external/Unrelated.dylib")
+                .to_str()
+                .unwrap()
+        ),
+        "fixture must retain an external absolute load path: {linkage}"
+    );
+
+    sign_staged_app_with_asar_integrity(&staged, &fixture.app, &"c".repeat(64)).unwrap();
+    verify_bundle_deep_strict(&staged).unwrap();
+    let staged_helper = staged.join("Contents/Frameworks/LinkedHelper.app");
+    let entitlements = read_entitlements(&staged_helper).unwrap();
+    assert!(!entitlements
+        .keys
+        .contains("com.apple.security.cs.disable-library-validation"));
     fs::remove_dir_all(&fixture.root).unwrap();
 }
 

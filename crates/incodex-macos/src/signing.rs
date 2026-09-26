@@ -311,11 +311,30 @@ fn inspect_hardened_runtime(app: &Path) -> Result<bool, String> {
 
 /// 使用共享 entitlement/component policy 完成 ad-hoc 签名。
 pub fn sign_app_with_asar_integrity(app: &Path, hash: &str) -> Result<(), String> {
-    sign_app_impl(app, Some(hash))
+    sign_app_impl(app, Some(hash), None)
+}
+
+/// Sign a staged copy while resolving absolute Mach-O dependencies against the
+/// verified final app root. Only dependencies that remain inside that final
+/// bundle are translated to their staged counterparts.
+pub fn sign_staged_app_with_asar_integrity(
+    staged_app: &Path,
+    final_app: &Path,
+    hash: &str,
+) -> Result<(), String> {
+    let staged_info =
+        super::read_plist_info(staged_app).ok_or("staged app identity unavailable")?;
+    let staged_identifier = verified_host_identifier(staged_app, &staged_info.bundle_identifier)?;
+    let final_info = super::read_plist_info(final_app).ok_or("final app identity unavailable")?;
+    let final_identifier = verified_host_identifier(final_app, &final_info.bundle_identifier)?;
+    if staged_identifier != final_identifier {
+        return Err("staged and final app identities do not match".into());
+    }
+    sign_app_impl(staged_app, Some(hash), Some(final_app))
 }
 
 pub fn sign_app(app: &Path) -> Result<(), String> {
-    sign_app_impl(app, None)
+    sign_app_impl(app, None, None)
 }
 
 struct FrameworkDigestUpdate {
@@ -389,6 +408,78 @@ fn linked_dependencies_load_framework(
     Ok(false)
 }
 
+fn remap_final_app_load_candidates_to_stage(
+    dependencies: &mut [Vec<PathBuf>],
+    staged_app: &Path,
+    final_app: &Path,
+) -> Result<(), String> {
+    let staged_root = fs::canonicalize(staged_app).map_err(|error| {
+        format!(
+            "cannot resolve staged app {}: {error}",
+            staged_app.display()
+        )
+    })?;
+    let final_root = fs::canonicalize(final_app)
+        .map_err(|error| format!("cannot resolve final app {}: {error}", final_app.display()))?;
+
+    for candidate in dependencies.iter_mut().flatten() {
+        if !candidate.is_absolute() {
+            continue;
+        }
+        let resolved_final = match fs::canonicalize(&*candidate) {
+            Ok(path) => path,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                ) =>
+            {
+                continue;
+            }
+            Err(error) => {
+                return Err(format!(
+                    "cannot resolve final-app Mach-O dependency {}: {error}",
+                    candidate.display()
+                ));
+            }
+        };
+        let Ok(relative) = resolved_final.strip_prefix(&final_root) else {
+            // In-bundle symlinks that escape the verified final root are
+            // external dependencies, not aliases for staged app contents.
+            continue;
+        };
+        let staged_candidate = staged_root.join(relative);
+        match fs::canonicalize(&staged_candidate) {
+            Ok(resolved_staged) => {
+                if !resolved_staged.starts_with(&staged_root) {
+                    return Err(format!(
+                        "staged Mach-O dependency escapes app root: {}",
+                        staged_candidate.display()
+                    ));
+                }
+                *candidate = resolved_staged;
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                ) =>
+            {
+                // Preserve the candidate's place in the dyld search order,
+                // but model the path that will exist after stage placement.
+                *candidate = staged_candidate;
+            }
+            Err(error) => {
+                return Err(format!(
+                    "cannot resolve staged Mach-O dependency {}: {error}",
+                    staged_candidate.display()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn verified_identifier(
     component: SignedComponent,
     plist_identifier: &str,
@@ -445,6 +536,7 @@ fn entitlement_enabled(source: &EntitlementSnapshot, key: &str) -> Result<bool, 
 fn dependent_helper_updates(
     app: &Path,
     frameworks: &[FrameworkDigestUpdate],
+    final_app: Option<&Path>,
 ) -> Result<Vec<DependentHelperUpdate>, String> {
     if frameworks.is_empty() {
         return Ok(Vec::new());
@@ -474,8 +566,11 @@ fn dependent_helper_updates(
             return Err("helper executable escapes its bundle".into());
         }
         let bytes = fs::read(&binary).map_err(|error| error.to_string())?;
-        let dependencies =
+        let mut dependencies =
             super::asar_integrity_digest::resolved_linked_dylib_paths(&bytes, &binary)?;
+        if let Some(final_app) = final_app {
+            remap_final_app_load_candidates_to_stage(&mut dependencies, app, final_app)?;
+        }
         let mut matching_framework = None;
         for framework in frameworks {
             if linked_dependencies_load_framework(&dependencies, &framework.binary)? {
@@ -618,7 +713,11 @@ fn framework_digest_updates(
     Ok(updates)
 }
 
-fn sign_app_impl(app: &Path, integrity_hash: Option<&str>) -> Result<(), String> {
+fn sign_app_impl(
+    app: &Path,
+    integrity_hash: Option<&str>,
+    final_app: Option<&Path>,
+) -> Result<(), String> {
     let before = read_entitlements(app)?;
     let plan = plan_adhoc_entitlements(&before)?;
     let outer = inspect_component(app)?;
@@ -629,7 +728,7 @@ fn sign_app_impl(app: &Path, integrity_hash: Option<&str>) -> Result<(), String>
         Some((old, new)) => framework_digest_updates(app, old, new)?,
         None => Vec::new(),
     };
-    let helpers = dependent_helper_updates(app, &updates)?;
+    let helpers = dependent_helper_updates(app, &updates, final_app)?;
     // Validate every existing nested signature before altering any digest. Only the
     // proven digest-bearing framework and necessary loading Electron helpers
     // are excluded; all other vendor children stay stashed.
