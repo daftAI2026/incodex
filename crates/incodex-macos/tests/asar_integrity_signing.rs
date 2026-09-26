@@ -239,14 +239,106 @@ fn dynamic_framework_loader_retains_its_own_entitlements_and_library_validation_
     sign_app_with_asar_integrity(&fixture.app, &"c".repeat(64)).unwrap();
     verify_bundle_deep_strict(&fixture.app).unwrap();
     let entitlements = read_entitlements(&fixture.helper).unwrap();
-    assert!(entitlements.keys.contains("com.apple.security.cs.disable-library-validation"), "a dlopen helper needs its own exemption for the modified Framework");
-    assert!(entitlements.keys.contains("com.apple.security.cs.allow-jit"));
+    assert!(
+        entitlements
+            .keys
+            .contains("com.apple.security.cs.disable-library-validation"),
+        "a dlopen helper needs its own exemption for the modified Framework"
+    );
+    assert!(entitlements
+        .keys
+        .contains("com.apple.security.cs.allow-jit"));
     fs::remove_dir_all(&fixture.root).unwrap();
 }
 
 #[test]
 fn unknown_direct_dependent_is_rejected_before_any_bundle_mutation() {
-    let fixture = signed_fixture("com.openai.sky.fixture");
+    assert_unknown_dependent_unchanged(false);
+}
+
+#[test]
+fn unknown_dynamic_dependent_is_rejected_before_any_bundle_mutation() {
+    assert_unknown_dependent_unchanged(true);
+}
+
+fn assert_unknown_dependent_unchanged(dynamic: bool) {
+    let fixture = signed_fixture_with_loader("com.openai.sky.fixture", dynamic);
+    assert_rejection_unchanged(fixture, "unknown helper");
+}
+
+#[test]
+fn helper_signed_identity_cannot_be_spoofed_by_its_plist() {
+    assert_signed_identity_mismatch_unchanged("helper");
+}
+
+#[test]
+fn framework_signed_identity_cannot_be_spoofed_by_its_plist() {
+    assert_signed_identity_mismatch_unchanged("framework");
+}
+
+#[test]
+fn host_signed_identity_cannot_be_spoofed_by_its_plist() {
+    assert_signed_identity_mismatch_unchanged("host");
+}
+
+fn assert_signed_identity_mismatch_unchanged(role: &str) {
+    let fixture = signed_fixture_with_loader("com.openai.codex.helper.renderer", true);
+    if role == "helper" {
+        run(
+            "codesign",
+            &[
+                "--force",
+                "--sign",
+                "-",
+                "--identifier",
+                "com.openai.sky.fixture",
+                "--options",
+                "runtime",
+                "--entitlements",
+                fixture
+                    .root
+                    .join("helper-entitlements.plist")
+                    .to_str()
+                    .unwrap(),
+                fixture.helper.to_str().unwrap(),
+            ],
+        );
+    }
+    run(
+        "codesign",
+        &[
+            "--force",
+            "--sign",
+            "-",
+            "--identifier",
+            if role == "framework" {
+                "com.openai.sky.framework"
+            } else {
+                "com.openai.codex.framework"
+            },
+            fixture.framework.to_str().unwrap(),
+        ],
+    );
+    run(
+        "codesign",
+        &[
+            "--force",
+            "--sign",
+            "-",
+            "--identifier",
+            if role == "host" {
+                "com.openai.sky.host"
+            } else {
+                "com.openai.codex"
+            },
+            fixture.app.to_str().unwrap(),
+        ],
+    );
+    verify_bundle_deep_strict(&fixture.app).unwrap();
+    assert_rejection_unchanged(fixture, "signature identifier mismatch");
+}
+
+fn assert_rejection_unchanged(fixture: SignedFixture, expected_error: &str) {
     let info_plist = fixture.app.join("Contents/Info.plist");
     let original_plist = fs::read(&info_plist).unwrap();
     let original_framework = fs::read(&fixture.binary).unwrap();
@@ -258,8 +350,8 @@ fn unknown_direct_dependent_is_rejected_before_any_bundle_mutation() {
     ];
 
     let error = sign_app_with_asar_integrity(&fixture.app, &"c".repeat(64))
-        .expect_err("unknown direct dependent must fail closed");
-    assert!(error.contains("unknown helper"), "{error}");
+        .expect_err("unknown or mismatched dependent must fail closed");
+    assert!(error.contains(expected_error), "{error}");
     assert_eq!(fs::read(&info_plist).unwrap(), original_plist);
     assert_eq!(fs::read(&fixture.binary).unwrap(), original_framework);
     assert_eq!(fs::read(&fixture.helper_binary).unwrap(), original_helper);
