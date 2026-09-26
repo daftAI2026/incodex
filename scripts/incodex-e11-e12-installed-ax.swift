@@ -21,6 +21,13 @@ private struct Bounds: Equatable {
         height = Double(rect.size.height)
     }
 
+    init(x: Double, y: Double, width: Double, height: Double) {
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+    }
+
     var json: [String: Double] {
         ["x": x, "y": y, "width": width, "height": height]
     }
@@ -79,6 +86,17 @@ private struct ToggleRecord {
             "windowBounds": windowBounds.json,
             "actions": actions,
         ]
+    }
+}
+
+private struct SearchButtonRecord: Equatable {
+    let role: String
+    let label: String
+    let bounds: Bounds
+    let windowId: Int
+
+    var json: [String: Any] {
+        ["role": role, "label": label, "bounds": bounds.json, "windowId": windowId]
     }
 }
 
@@ -168,7 +186,25 @@ private enum Helper {
             guard selectedWindow == 202, ambiguousMain == nil else {
                 throw ToolError(message: "pure exact main-window selection test failed")
             }
-            return ["ok": true, "mode": "no-window-self-test", "uiTouched": false, "visibleSecurityAgentRejected": true, "visibleSystemSettingsRejected": true, "ambiguousWindowMappingRejected": true, "exactMainWindowSelectionVerified": true]
+            let oldHatSize = Bounds(x: 1, y: 2, width: 24, height: 24)
+            let currentHatSize = Bounds(x: 3, y: 4, width: 28, height: 28)
+            let wrongHatSize = Bounds(x: 5, y: 6, width: 24, height: 28)
+            guard sizesMatchLiveSearch(oldHatSize, oldHatSize),
+                  sizesMatchLiveSearch(currentHatSize, currentHatSize),
+                  !sizesMatchLiveSearch(currentHatSize, oldHatSize),
+                  !sizesMatchLiveSearch(wrongHatSize, currentHatSize) else {
+                throw ToolError(message: "pure live Search sizing test failed")
+            }
+            let search = SearchButtonRecord(role: kAXButtonRole as String, label: "Search", bounds: currentHatSize, windowId: 99)
+            let otherWindowSearch = SearchButtonRecord(role: kAXButtonRole as String, label: "Search", bounds: oldHatSize, windowId: 100)
+            let selectedSearch = try uniqueSearchButton(windowId: 99, from: [search, otherWindowSearch])
+            var ambiguousSearchRejected = false
+            do { _ = try uniqueSearchButton(windowId: 99, from: [search, search]) }
+            catch { ambiguousSearchRejected = true }
+            guard selectedSearch == search, ambiguousSearchRejected else {
+                throw ToolError(message: "pure exact-window Search reference test failed")
+            }
+            return ["ok": true, "mode": "no-window-self-test", "uiTouched": false, "visibleSecurityAgentRejected": true, "visibleSystemSettingsRejected": true, "ambiguousWindowMappingRejected": true, "exactMainWindowSelectionVerified": true, "liveSearchSizingVerified": true, "ambiguousSearchReferenceRejected": true]
         case "activate":
             guard values.count == 2, let pid = pid_t(values[0]) else { throw ToolError(message: "activate requires PID EXECUTABLE_PATH") }
             let executablePath = standardized(values[1])
@@ -195,7 +231,7 @@ private enum Helper {
             let labels = try decodeLabels(values[2])
             let result = try inspect(pid: pid, labels: labels)
             try requireSafeFrontmost()
-            return ["ok": true, "pid": Int(pid), "windows": result.windows.map(\.json), "toggles": result.toggles.map(\.json)]
+            return ["ok": true, "pid": Int(pid), "windows": result.windows.map(\.json), "toggles": result.toggles.map(\.json), "searchButtons": result.searchButtons.map(\.json)]
         case "press":
             guard values.count == 5, let pid = pid_t(values[0]), let expectedWindowId = Int(values[4]), expectedWindowId > 0 else {
                 throw ToolError(message: "press requires PID EXECUTABLE_PATH LABELS_JSON KIND CG_WINDOW_ID")
@@ -215,7 +251,7 @@ private enum Helper {
             guard let firstToggle = try uniqueToggle(kind: kind, windowId: expectedWindowId, from: first.toggles) else {
                 throw ToolError(message: "no exact \(kind) AXCheckBox exists in selected CG window \(expectedWindowId); no press was performed")
             }
-            try validatePressable(firstToggle, expectedKind: kind)
+            let firstSearchButton = try validatePressable(firstToggle, expectedKind: kind, searchButtons: first.searchButtons)
 
             // Re-read both the primary-window identity and toggle before AXPress. A process-wide label match
             // is insufficient: only the exact main CGWindowID chosen by the TS coordinator may be targeted.
@@ -226,8 +262,9 @@ private enum Helper {
             guard let toggle = try uniqueToggle(kind: kind, windowId: expectedWindowId, from: current.toggles) else {
                 throw ToolError(message: "selected main window no longer contains one exact \(kind) AXCheckBox; no action was performed")
             }
-            try validatePressable(toggle, expectedKind: kind)
-            guard toggle.label == firstToggle.label, toggle.bounds == firstToggle.bounds else {
+            let currentSearchButton = try validatePressable(toggle, expectedKind: kind, searchButtons: current.searchButtons)
+            guard toggle.label == firstToggle.label, toggle.bounds == firstToggle.bounds,
+                  currentSearchButton == firstSearchButton else {
                 throw ToolError(message: "selected main-window toggle identity changed before AXPress; no action was performed")
             }
             try requireFrontmost(pid: pid)
@@ -367,18 +404,20 @@ private enum Helper {
         }
         let open = Set(object["open"] ?? [])
         let exit = Set(object["exit"] ?? [])
-        guard !open.isEmpty, !exit.isEmpty else { throw ToolError(message: "LABELS_JSON must contain non-empty open and exit arrays") }
-        return ["open": open, "exit": exit]
+        let search = Set(object["search"] ?? [])
+        guard !open.isEmpty, !exit.isEmpty, !search.isEmpty else { throw ToolError(message: "LABELS_JSON must contain non-empty open, exit, and search arrays") }
+        return ["open": open, "exit": exit, "search": search]
     }
 
-    private static func inspect(pid: pid_t, labels: [String: Set<String>]) throws -> (windows: [WindowRecord], toggles: [ToggleRecord]) {
+    private static func inspect(pid: pid_t, labels: [String: Set<String>]) throws -> (windows: [WindowRecord], toggles: [ToggleRecord], searchButtons: [SearchButtonRecord]) {
         let windows = try readWindows(pid: pid)
         var toggles: [ToggleRecord] = []
+        var searchButtons: [SearchButtonRecord] = []
         var visited = 0
         for window in windows {
-            collectToggles(in: window.element, window: window, labels: labels, depth: 0, visited: &visited, into: &toggles)
+            collectToggles(in: window.element, window: window, labels: labels, depth: 0, visited: &visited, into: &toggles, searchButtons: &searchButtons)
         }
-        return (windows, toggles)
+        return (windows, toggles, searchButtons)
     }
 
     private static func readWindows(pid: pid_t) throws -> [WindowRecord] {
@@ -432,7 +471,8 @@ private enum Helper {
         labels: [String: Set<String>],
         depth: Int,
         visited: inout Int,
-        into toggles: inout [ToggleRecord]
+        into toggles: inout [ToggleRecord],
+        searchButtons: inout [SearchButtonRecord]
     ) {
         guard depth <= maximumAXDepth, visited < maximumAXNodes else { return }
         visited += 1
@@ -456,9 +496,14 @@ private enum Helper {
                 actions: actionNames(element)
             ))
         }
+        if (try? copyAttribute(element, kAXRoleAttribute as CFString) as? String) == (kAXButtonRole as String),
+           let label = matchedSearchLabel(in: element, labels: labels),
+           let bounds = elementBounds(element) {
+            searchButtons.append(SearchButtonRecord(role: kAXButtonRole as String, label: label, bounds: bounds, windowId: window.windowId))
+        }
         guard let children = try? copyAttribute(element, kAXChildrenAttribute as CFString) as? [AXUIElement] else { return }
         for child in children {
-            collectToggles(in: child, window: window, labels: labels, depth: depth + 1, visited: &visited, into: &toggles)
+            collectToggles(in: child, window: window, labels: labels, depth: depth + 1, visited: &visited, into: &toggles, searchButtons: &searchButtons)
             if visited >= maximumAXNodes { return }
         }
     }
@@ -474,21 +519,47 @@ private enum Helper {
         return nil
     }
 
+    private static func matchedSearchLabel(in element: AXUIElement, labels: [String: Set<String>]) -> String? {
+        guard let expected = labels["search"] else { return nil }
+        let candidates = [kAXTitleAttribute, kAXDescriptionAttribute, kAXHelpAttribute].compactMap { attribute in
+            try? copyAttribute(element, attribute as CFString) as? String
+        }
+        return candidates.first(where: { expected.contains($0.trimmingCharacters(in: .whitespacesAndNewlines)) })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+    }
+
     private static func uniqueToggle(kind: String, windowId: Int, from toggles: [ToggleRecord]) throws -> ToggleRecord? {
         let matches = toggles.filter { $0.kind == kind && $0.windowId == windowId }
         guard matches.count == 1 else { throw ToolError(message: "expected one \(kind) AXCheckBox in CG window \(windowId); found \(matches.count)") }
         return matches.first
     }
 
-    private static func validatePressable(_ toggle: ToggleRecord, expectedKind: String) throws {
+    private static func uniqueSearchButton(windowId: Int, from searchButtons: [SearchButtonRecord]) throws -> SearchButtonRecord {
+        let matches = searchButtons.filter { $0.windowId == windowId && $0.role == (kAXButtonRole as String) }
+        guard matches.count == 1, let button = matches.first else {
+            throw ToolError(message: "expected one official Search AXButton in CG window \(windowId); found \(matches.count)")
+        }
+        return button
+    }
+
+    private static func sizesMatchLiveSearch(_ toggleBounds: Bounds, _ searchBounds: Bounds) -> Bool {
+        let dimensions = [toggleBounds.width, toggleBounds.height, searchBounds.width, searchBounds.height]
+        guard dimensions.allSatisfy({ $0.isFinite && $0 > 0 }) else { return false }
+        return abs(toggleBounds.width - searchBounds.width) <= 0.25
+            && abs(toggleBounds.height - searchBounds.height) <= 0.25
+    }
+
+    @discardableResult
+    private static func validatePressable(_ toggle: ToggleRecord, expectedKind: String, searchButtons: [SearchButtonRecord]) throws -> SearchButtonRecord {
+        let searchButton = try uniqueSearchButton(windowId: toggle.windowId, from: searchButtons)
         guard toggle.kind == expectedKind,
               toggle.role == (kAXCheckBoxRole as String),
-              abs(toggle.bounds.width - 24) <= 0.25,
-              abs(toggle.bounds.height - 24) <= 0.25,
+              sizesMatchLiveSearch(toggle.bounds, searchButton.bounds),
               toggle.enabled,
               toggle.actions.contains(kAXPressAction as String) else {
-            throw ToolError(message: "exact \(expectedKind) toggle failed role/enabled/24x24/AXPress checks; no action was performed")
+            throw ToolError(message: "exact \(expectedKind) toggle failed role/enabled/live-Search-size/AXPress checks; no action was performed")
         }
+        return searchButton
     }
 
     private static func elementBounds(_ element: AXUIElement) -> Bounds? {

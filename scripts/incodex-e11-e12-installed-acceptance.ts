@@ -20,6 +20,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { COPY } from "../src/runtime/incognito-copy.ts";
+import { SEARCH_LABELS } from "../src/runtime/compatibility/search-labels.ts";
 
 const root = resolve(import.meta.dir, "..");
 const cli = join(root, "target/release/incodex");
@@ -35,6 +36,7 @@ const processStartIdentityPattern = /^(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+(?:Jan|F
 const labelsByKind = {
   open: [...new Set(Object.values(COPY).map((copy) => copy.open))],
   exit: [...new Set(Object.values(COPY).map((copy) => copy.exit))],
+  search: [...SEARCH_LABELS],
 };
 
 type Mode = "preflight" | "run" | "self-test";
@@ -63,6 +65,7 @@ type AxToggle = {
   windowBounds: Bounds;
   actions: string[];
 };
+type AxSearchButton = { role: string; label: string; bounds: Bounds; windowId: number };
 type HelperReply = {
   ok: boolean;
   error?: string;
@@ -76,6 +79,7 @@ type HelperReply = {
   systemSettingsWindowVisible?: boolean;
   windows?: AxWindow[];
   toggles?: AxToggle[];
+  searchButtons?: AxSearchButton[];
   performed?: boolean;
 };
 function usage(): string {
@@ -175,12 +179,15 @@ export function parseNewOwnerMetadata(raw: string, expectedSessionId: string): O
   };
 }
 
-export function toggleFailures(toggle: AxToggle, expectedKind: "open" | "exit"): string[] {
+export function toggleFailures(toggle: AxToggle, expectedKind: "open" | "exit", searchBounds: Bounds): string[] {
   const failures: string[] = [];
   if (toggle.kind !== expectedKind) failures.push(`expected ${expectedKind} toggle, saw ${toggle.kind}`);
   if (toggle.role !== "AXCheckBox") failures.push(`expected AXCheckBox, saw ${toggle.role}`);
-  if (Math.abs(toggle.bounds.width - 24) > 0.25 || Math.abs(toggle.bounds.height - 24) > 0.25) {
-    failures.push(`expected 24×24 pt, saw ${toggle.bounds.width}×${toggle.bounds.height} pt`);
+  const dimensions = [toggle.bounds.width, toggle.bounds.height, searchBounds.width, searchBounds.height];
+  if (dimensions.some((dimension) => !Number.isFinite(dimension) || dimension <= 0)
+    || Math.abs(toggle.bounds.width - searchBounds.width) > 0.25
+    || Math.abs(toggle.bounds.height - searchBounds.height) > 0.25) {
+    failures.push(`toggle size ${toggle.bounds.width}×${toggle.bounds.height} pt does not match live Search ${searchBounds.width}×${searchBounds.height} pt`);
   }
   if (!toggle.enabled) failures.push("toggle is disabled");
   if (!toggle.actions.includes("AXPress")) failures.push("toggle does not expose AXPress");
@@ -339,9 +346,19 @@ function oneToggle(reply: HelperReply, kind: "open" | "exit", windowId: number):
   const matches = (reply.toggles ?? []).filter((toggle) => toggle.kind === kind && toggle.windowId === windowId);
   if (matches.length !== 1) throw new Error(`expected one ${kind} AXCheckBox in CG window ${windowId}; found ${matches.length}`);
   const toggle = matches[0];
-  const failures = toggleFailures(toggle, kind);
+  const searchButton = oneSearchButton(reply, windowId);
+  const failures = toggleFailures(toggle, kind, searchButton.bounds);
   if (failures.length) throw new Error(failures.join("; "));
   return toggle;
+}
+
+function oneSearchButton(reply: HelperReply, windowId: number): AxSearchButton {
+  const matches = (reply.searchButtons ?? []).filter((button) =>
+    button.windowId === windowId
+    && button.role === "AXButton"
+    && SEARCH_LABELS.has(button.label.trim()));
+  if (matches.length !== 1) throw new Error(`expected one official Search AXButton in CG window ${windowId}; found ${matches.length}`);
+  return matches[0];
 }
 
 function compareBounds(source: Bounds, child: Bounds): BoundsComparison {
@@ -533,7 +550,8 @@ async function runAcceptance(parentPid: number, outputPath: string): Promise<voi
     const parentWindow = oneMainWindow(parentInspect);
     parentWindowForCleanup = parentWindow;
     const openToggle = oneToggle(parentInspect, "open", parentWindow.windowId);
-    appendStep(report, "E11 main window and 24x24 AXCheckBox", { toggle: openToggle, window: parentWindow });
+    const openSearchButton = oneSearchButton(parentInspect, parentWindow.windowId);
+    appendStep(report, "E11 main window and live-Search-sized AXCheckBox", { toggle: openToggle, searchButton: openSearchButton, window: parentWindow });
     const parentFront = axCall(helper, "frontmost", []).frontmostPid;
     if (parentFront !== parentPid) throw new Error(`ChatGPT parent PID ${parentPid} is not frontmost; no control was pressed`);
 
@@ -548,7 +566,8 @@ async function runAcceptance(parentPid: number, outputPath: string): Promise<voi
     const childInspect = await inspectWhenWindowReady(helper, firstBinding.pid);
     const childWindow = oneMainWindow(childInspect);
     const firstBounds = requireExpectedTile(parentWindow.bounds, childWindow.bounds, "first private child window");
-    const childToggle = (await inspectWhenExitToggleReady(helper, firstBinding, parentPid, parentWindow.bounds, childWindow.windowId)).toggle;
+    const childExitState = await inspectWhenExitToggleReady(helper, firstBinding, parentPid, parentWindow.bounds, childWindow.windowId);
+    const childToggle = childExitState.toggle;
     assertExactProcessSet(helper, [parentPid, firstBinding.pid], "after first hat trigger");
     appendStep(report, "E11/E12 first hat open", {
       toggle: openedToggle,
@@ -557,6 +576,7 @@ async function runAcceptance(parentPid: number, outputPath: string): Promise<voi
       parentChainPids: firstBinding.parentChainPids ?? [],
       bounds: firstBounds,
       exitToggle: childToggle,
+      exitSearchButton: oneSearchButton(childExitState.inspect, childWindow.windowId),
     });
     const parentAfterOpen = oneMainWindow(axCall(helper, "inspect", [String(parentPid), executablePath, JSON.stringify(labelsByKind)]));
     const parentAfterOpenBounds = compareBounds(parentWindow.bounds, parentAfterOpen.bounds);
@@ -600,7 +620,13 @@ async function runAcceptance(parentPid: number, outputPath: string): Promise<voi
     const exitToggle = oneToggle(exitInspect, "exit", currentChildWindow.windowId);
     axCall(helper, "press", [String(firstBinding.pid), executablePath, JSON.stringify(labelsByKind), "exit", String(currentChildWindow.windowId)]);
     await waitForBurn(firstBinding, helper, parentPid);
-    appendStep(report, "E12 private-window hat close burns session", { toggle: exitToggle, sessionId: firstBinding.sessionId, childPid: firstBinding.pid, burned: true });
+    appendStep(report, "E12 private-window hat close burns session", {
+      toggle: exitToggle,
+      searchButton: oneSearchButton(exitInspect, currentChildWindow.windowId),
+      sessionId: firstBinding.sessionId,
+      childPid: firstBinding.pid,
+      burned: true,
+    });
     activeBinding = null;
 
     const secondBaseline = sessionNames();
@@ -619,10 +645,12 @@ async function runAcceptance(parentPid: number, outputPath: string): Promise<voi
     const secondInspect = await inspectWhenWindowReady(helper, secondBinding.pid);
     const secondWindow = oneMainWindow(secondInspect);
     const secondBounds = requireExpectedTile(parentWindow.bounds, secondWindow.bounds, "second private child window");
-    const secondToggle = (await inspectWhenExitToggleReady(helper, secondBinding, parentPid, parentWindow.bounds, secondWindow.windowId)).toggle;
+    const secondExitState = await inspectWhenExitToggleReady(helper, secondBinding, parentPid, parentWindow.bounds, secondWindow.windowId);
+    const secondToggle = secondExitState.toggle;
     assertExactProcessSet(helper, [parentPid, secondBinding.pid], "after second hat trigger");
     appendStep(report, "E12 native-close session opened", {
       toggle: secondToggle,
+      searchButton: oneSearchButton(secondExitState.inspect, secondWindow.windowId),
       sessionId: secondBinding.sessionId,
       childPid: secondBinding.pid,
       parentChainPids: secondBinding.parentChainPids ?? [],
@@ -751,10 +779,21 @@ function selfTest(): void {
     value: false, bounds: { x: 1, y: 2, width: 24, height: 24 }, windowId: 99,
     windowBounds: { x: 0, y: 0, width: 800, height: 600 }, actions: ["AXPress"],
   };
-  assert.deepEqual(toggleFailures(validToggle, "open"), []);
-  assert.deepEqual(oneToggle({ ok: true, toggles: [validToggle, { ...validToggle, windowId: 100 }] }, "open", 99), validToggle);
-  assert.throws(() => oneToggle({ ok: true, toggles: [{ ...validToggle, windowId: 100 }] }, "open", 99), /CG window 99/u);
-  assert.throws(() => oneToggle({ ok: true, toggles: [validToggle, validToggle] }, "open", 99), /found 2/u);
+  const liveSearch24: AxSearchButton = { role: "AXButton", label: "Search", bounds: { x: 40, y: 2, width: 24, height: 24 }, windowId: 99 };
+  const liveSearch28 = { role: "AXButton", label: "Search", bounds: { x: 40, y: 2, width: 28, height: 28 }, windowId: 99 };
+  const validToggle28 = { ...validToggle, bounds: { ...validToggle.bounds, width: 28, height: 28 } };
+  assert.deepEqual(toggleFailures(validToggle, "open", liveSearch24.bounds), []);
+  assert.deepEqual(toggleFailures(validToggle28, "open", liveSearch28.bounds), []);
+  assert.deepEqual(oneToggle({ ok: true, toggles: [validToggle, { ...validToggle, windowId: 100 }], searchButtons: [liveSearch24, { ...liveSearch24, windowId: 100 }] }, "open", 99), validToggle);
+  assert.deepEqual(oneToggle({ ok: true, toggles: [validToggle28], searchButtons: [liveSearch28] }, "open", 99), validToggle28);
+  assert.throws(() => oneToggle({ ok: true, toggles: [{ ...validToggle, windowId: 100 }], searchButtons: [liveSearch24] }, "open", 99), /CG window 99/u);
+  assert.throws(() => oneToggle({ ok: true, toggles: [validToggle, validToggle], searchButtons: [liveSearch24] }, "open", 99), /found 2/u);
+  assert.throws(() => oneToggle({ ok: true, toggles: [{ ...validToggle, bounds: { ...validToggle.bounds, width: 28, height: 28 } }], searchButtons: [liveSearch24] }, "open", 99), /does not match live Search/u);
+  assert.throws(() => oneToggle({ ok: true, toggles: [validToggle] }, "open", 99), /official Search AXButton.*found 0/u);
+  assert.throws(() => oneToggle({ ok: true, toggles: [validToggle], searchButtons: [liveSearch24, liveSearch24] }, "open", 99), /official Search AXButton.*found 2/u);
+  assert.throws(() => oneToggle({ ok: true, toggles: [validToggle], searchButtons: [{ ...liveSearch24, windowId: 100 }] }, "open", 99), /official Search AXButton.*found 0/u);
+  assert.throws(() => oneToggle({ ok: true, toggles: [validToggle], searchButtons: [{ ...liveSearch24, role: "AXTextField" }] }, "open", 99), /official Search AXButton.*found 0/u);
+  assert.throws(() => oneToggle({ ok: true, toggles: [validToggle], searchButtons: [{ ...liveSearch24, label: "Not Search" }] }, "open", 99), /official Search AXButton.*found 0/u);
   assert.deepEqual(requireExpectedTile({ x: 100, y: 200, width: 600, height: 400 }, { x: 122, y: 222, width: 600, height: 400 }, "fixture"), {
     source: { x: 100, y: 200, width: 600, height: 400 },
     child: { x: 122, y: 222, width: 600, height: 400 },
@@ -763,14 +802,26 @@ function selfTest(): void {
     chromeTile22: true,
   });
   assert.throws(() => requireExpectedTile({ x: 100, y: 200, width: 600, height: 400 }, { x: 124, y: 222, width: 600, height: 400 }, "fixture"), /22 pt child-window tile/u);
-  assert(toggleFailures({ ...validToggle, role: "AXButton" }, "open").some((failure) => failure.includes("AXCheckBox")));
-  assert(toggleFailures({ ...validToggle, bounds: { ...validToggle.bounds, height: 20 } }, "open").some((failure) => failure.includes("24×24")));
-  assert(toggleFailures({ ...validToggle, enabled: false }, "open").includes("toggle is disabled"));
-  assert(toggleFailures({ ...validToggle, actions: [] }, "open").includes("toggle does not expose AXPress"));
+  assert(toggleFailures({ ...validToggle, role: "AXButton" }, "open", liveSearch24.bounds).some((failure) => failure.includes("AXCheckBox")));
+  assert(toggleFailures({ ...validToggle, bounds: { ...validToggle.bounds, height: 20 } }, "open", liveSearch24.bounds).some((failure) => failure.includes("live Search")));
+  assert(toggleFailures({ ...validToggle, enabled: false }, "open", liveSearch24.bounds).includes("toggle is disabled"));
+  assert(toggleFailures({ ...validToggle, actions: [] }, "open", liveSearch24.bounds).includes("toggle does not expose AXPress"));
   assert.deepEqual(parseArguments(["--preflight", "--parent-pid", "123"]), { mode: "preflight", parentPid: 123, output: undefined });
   assert.throws(() => parseArguments(["--run"]), /requires --parent-pid/u);
   assert.throws(() => parseArguments(["--self-test", "--parent-pid", "123"]), /does not accept/u);
-  process.stdout.write(`${JSON.stringify({ ok: true, mode: "no-window-self-test", uiTouched: false })}\n`);
+  const helperTemp = mkdtempSync(join(tmpdir(), "incodex-e11-e12-self-test-"));
+  let swiftHelperSelfTest: Record<string, unknown>;
+  try {
+    const helper = compileHelper(helperTemp);
+    const result = spawnSync(helper, ["self-test"], { encoding: "utf8", timeout: 30_000 });
+    if (result.error) throw result.error;
+    if (result.status !== 0) throw new Error(`Swift AX helper self-test failed: ${(result.stderr || result.stdout).trim()}`);
+    swiftHelperSelfTest = JSON.parse(result.stdout) as Record<string, unknown>;
+    assert.equal(swiftHelperSelfTest.ok, true);
+  } finally {
+    rmSync(helperTemp, { recursive: true, force: true });
+  }
+  process.stdout.write(`${JSON.stringify({ ok: true, mode: "no-window-self-test", uiTouched: false, swiftHelperSelfTest })}\n`);
 }
 
 async function main(): Promise<void> {
