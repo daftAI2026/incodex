@@ -10,6 +10,7 @@ import {
 } from "./incognito-profile-mask.ts";
 import { createOfficialTooltipTimingBridge } from "./official-tooltip-provider.ts";
 import { createOfficialTooltipRenderer, sharedTooltipState } from "./official-tooltip-renderer.ts";
+import { officialStyleAttributes } from "./official-style-attributes.ts";
 import { searchButtonPlacement, searchTooltipOpen } from "./search-button-placement.ts";
 import { createTooltipLifecycle, type TooltipLifecycle } from "./tooltip-lifecycle.ts";
 import {
@@ -58,16 +59,6 @@ const STRIP_CLONE_ATTRS = [
   "title",
   "tabindex",
 ];
-
-// These are the official Button component's styling tokens, not identity or
-// interaction state. In particular data-size="xs" selects the compact hit target.
-const BUTTON_STYLE_TOKEN_ATTRS = new Set([
-  "data-color",
-  "data-variant",
-  "data-squircle",
-  "data-uniform",
-  "data-size",
-]);
 
 const tooltipState = sharedTooltipState(window);
 const officialTooltipPresentation = createOfficialTooltipPresentation();
@@ -126,6 +117,10 @@ function createButtonIcon(source: string, name: IncognitoButtonIcon, sample: SVG
   svg.setAttribute("aria-hidden", "true");
   svg.setAttribute("width", sample?.getAttribute("width") || "16");
   svg.setAttribute("height", sample?.getAttribute("height") || "16");
+  const styleAttributes = officialStyleAttributes(document);
+  for (const attribute of Array.from(sample?.attributes ?? [])) {
+    if (styleAttributes.has(attribute.name)) svg.setAttribute(attribute.name, attribute.value);
+  }
   return svg;
 }
 
@@ -393,10 +388,11 @@ function needsInject(): boolean {
 
 function buildButton(search: HTMLElement): HTMLElement {
   disposeActiveTooltip();
+  const styleAttributes = officialStyleAttributes(document);
   const btn = search.cloneNode(false) as HTMLElement;
   for (const name of STRIP_CLONE_ATTRS) btn.removeAttribute(name);
   for (const name of [...btn.attributes].map((attr) => attr.name)) {
-    if (name.startsWith("data-") && !BUTTON_STYLE_TOKEN_ATTRS.has(name)) btn.removeAttribute(name);
+    if (name.startsWith("data-") && !styleAttributes.has(name)) btn.removeAttribute(name);
   }
   btn.setAttribute("type", "button");
   btn.setAttribute(BTN_ATTR, "true");
@@ -404,7 +400,7 @@ function buildButton(search: HTMLElement): HTMLElement {
   btn.className = search.className;
   const sample = search.querySelector<SVGElement>("svg");
   const svg = createButtonIcon(ICON_SVG, "hat-glasses", sample);
-  if (svg) btn.append(cloneButtonIconLayout(svg, sample, search));
+  if (svg) btn.append(cloneButtonIconLayout(svg, sample, search, styleAttributes));
   const providerTiming = createOfficialTooltipTimingBridge(findSearchButton);
   const tooltipLifecycle: TooltipLifecycle = createTooltipLifecycle({
     delayMs: TOOLTIP_FALLBACK_DELAY_MS,
