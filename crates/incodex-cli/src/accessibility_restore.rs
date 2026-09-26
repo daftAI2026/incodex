@@ -245,6 +245,20 @@ mod tests {
         let result = run_fake(&mut ops, &mut factory, || Ok(()));
         assert_eq!(result, Ok(Outcome::Granted));
         assert_eq!(ops.events, ["launch", "probe"]);
+        assert!(factory.host.is_some(), "guide factory must not be started");
+    }
+
+    #[test]
+    fn grant_after_window_ready_never_starts_guide_or_resets() {
+        let mut ops = FakeOps::new(&[AccessibilityStatus::Denied, AccessibilityStatus::Granted]);
+        let mut factory = FakeFactory::new(&[HostEvent::Ready]);
+        let result = run_fake(&mut ops, &mut factory, || Ok(()));
+
+        assert_eq!(result, Ok(Outcome::Granted));
+        assert_eq!(ops.events, ["launch", "probe", "window", "probe"]);
+        assert!(factory.host.is_some(), "guide factory must not be started");
+        assert!(!ops.events.contains(&"reset"));
+        assert!(!ops.events.contains(&"settings"));
     }
 
     #[test]
