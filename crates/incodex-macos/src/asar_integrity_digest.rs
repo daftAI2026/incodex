@@ -16,6 +16,9 @@ const LC_LOAD_WEAK_DYLIB: u32 = 0x8000_0018;
 const LC_REEXPORT_DYLIB: u32 = 0x8000_001f;
 const LC_LOAD_UPWARD_DYLIB: u32 = 0x8000_0023;
 const DYLIB_COMMAND_SIZE: usize = 24;
+const LC_SYMTAB: u32 = 0x02;
+const SYMTAB_COMMAND_SIZE: usize = 24;
+const NLIST_64_SIZE: usize = 16;
 
 const FAT_MAGIC: u32 = 0xcafe_babe;
 const FAT_MAGIC_64: u32 = 0xcafe_babf;
@@ -205,8 +208,340 @@ pub(crate) fn linked_dylib_paths(bytes: &[u8]) -> Result<Vec<String>, String> {
     Ok(paths)
 }
 
-pub(crate) fn dynamic_framework_load_paths(_bytes: &[u8]) -> Result<Vec<String>, String> {
-    Err("dynamic framework loader parser is not implemented".into())
+pub(crate) fn dynamic_framework_load_paths(bytes: &[u8]) -> Result<Vec<String>, String> {
+    const LC_SEGMENT_64: u32 = 0x19;
+    const N_EXT: u8 = 0x01;
+    const N_TYPE: u8 = 0x0e;
+    const N_UNDF: u8 = 0x00;
+    const N_STAB: u8 = 0xe0;
+    const CSTRING_PATH_PREFIX: &[u8] = b"../../../../";
+
+    let slices = parse_slices(bytes)?;
+    let mut paths = Vec::new();
+
+    for (slice_index, slice) in slices.iter().enumerate() {
+        let slice_end = slice
+            .offset
+            .checked_add(slice.size)
+            .ok_or_else(|| format!("Mach-O slice {slice_index} range overflow"))?;
+        require_range(bytes.len(), slice.offset, slice.size, "Mach-O slice")?;
+        let slice_bytes = &bytes[slice.offset..slice_end];
+        let (order, cpu_type) = macho_header(slice_bytes)?;
+        validate_cpu_type(cpu_type)?;
+        if slice
+            .fat_cpu_type
+            .is_some_and(|fat_cpu| fat_cpu != cpu_type)
+        {
+            return Err(format!(
+                "fat Mach-O architecture CPU type does not match slice {slice_index} header"
+            ));
+        }
+
+        let ncmds = read_u32(slice_bytes, 16, order)? as usize;
+        let sizeofcmds = read_u32(slice_bytes, 20, order)? as usize;
+        let load_start = MACH_HEADER_64_SIZE;
+        let load_end = load_start
+            .checked_add(sizeofcmds)
+            .ok_or_else(|| format!("Mach-O slice {slice_index} load-command range overflow"))?;
+        require_range(
+            slice_bytes.len(),
+            load_start,
+            sizeofcmds,
+            "Mach-O load commands",
+        )?;
+        if ncmds > sizeofcmds / 8 {
+            return Err(format!(
+                "Mach-O slice {slice_index} command count exceeds its load-command data"
+            ));
+        }
+
+        let mut cursor = load_start;
+        let mut text_string_sections = Vec::new();
+        let mut symtab = None;
+        for command_index in 0..ncmds {
+            require_range(load_end, cursor, 8, "Mach-O load-command header")?;
+            let command = read_u32(slice_bytes, cursor, order)?;
+            let command_size = read_u32(slice_bytes, cursor + 4, order)? as usize;
+            if command_size < 8 || command_size % 8 != 0 {
+                return Err(format!(
+                    "Mach-O slice {slice_index} load command {command_index} has invalid size"
+                ));
+            }
+            require_range(load_end, cursor, command_size, "Mach-O load command")?;
+
+            match command {
+                LC_SEGMENT_64 => inspect_dynamic_text_segment(
+                    slice_bytes,
+                    order,
+                    cursor,
+                    command_size,
+                    command_index,
+                    &mut text_string_sections,
+                )?,
+                LC_SYMTAB => {
+                    if command_size != SYMTAB_COMMAND_SIZE {
+                        return Err(format!(
+                            "Mach-O slice {slice_index} LC_SYMTAB command {command_index} has invalid size"
+                        ));
+                    }
+                    if symtab.is_some() {
+                        return Err(format!(
+                            "Mach-O slice {slice_index} has duplicate LC_SYMTAB commands"
+                        ));
+                    }
+                    symtab = Some((
+                        read_u32(slice_bytes, cursor + 8, order)? as usize,
+                        read_u32(slice_bytes, cursor + 12, order)? as usize,
+                        read_u32(slice_bytes, cursor + 16, order)? as usize,
+                        read_u32(slice_bytes, cursor + 20, order)? as usize,
+                    ));
+                }
+                _ => {}
+            }
+            cursor += command_size;
+        }
+        if cursor != load_end {
+            return Err(format!(
+                "Mach-O slice {slice_index} load-command sizes do not match sizeofcmds"
+            ));
+        }
+
+        let mut strings = Vec::new();
+        for section in &text_string_sections {
+            let end = section
+                .offset
+                .checked_add(section.size)
+                .ok_or_else(|| "Mach-O text string section range overflow".to_string())?;
+            require_range(
+                slice_bytes.len(),
+                section.offset,
+                section.size,
+                "Mach-O text string section",
+            )?;
+            let data = &slice_bytes[section.offset..end];
+            strings.extend(parse_bounded_c_strings(
+                data,
+                section.allow_non_string_tail,
+                slice_index,
+                section.name,
+            )?);
+        }
+
+        let (has_dlopen, has_dlsym) = if let Some((
+            symbol_offset,
+            symbol_count,
+            string_offset,
+            string_size,
+        )) = symtab
+        {
+            let symbol_bytes_size = symbol_count
+                .checked_mul(NLIST_64_SIZE)
+                .ok_or_else(|| format!("Mach-O slice {slice_index} nlist64 table size overflow"))?;
+            require_range(
+                slice_bytes.len(),
+                symbol_offset,
+                symbol_bytes_size,
+                "Mach-O nlist64 symbol table",
+            )?;
+            require_range(
+                slice_bytes.len(),
+                string_offset,
+                string_size,
+                "Mach-O symbol string table",
+            )?;
+            let symbol_strings = &slice_bytes[string_offset..string_offset + string_size];
+            let mut has_dlopen = false;
+            let mut has_dlsym = false;
+            for symbol_index in 0..symbol_count {
+                let entry_offset = symbol_offset
+                    .checked_add(symbol_index * NLIST_64_SIZE)
+                    .ok_or_else(|| "Mach-O nlist64 entry offset overflow".to_string())?;
+                let string_index = read_u32(slice_bytes, entry_offset, order)? as usize;
+                let n_type = slice_bytes[entry_offset + 4];
+                if string_index == 0 {
+                    continue;
+                }
+                if string_index >= symbol_strings.len() {
+                    return Err(format!(
+                        "Mach-O slice {slice_index} symbol {symbol_index} string index is out of range"
+                    ));
+                }
+                let name_region = &symbol_strings[string_index..];
+                let name_end = name_region.iter().position(|byte| *byte == 0).ok_or_else(|| {
+                    format!(
+                        "Mach-O slice {slice_index} symbol {symbol_index} name is not NUL-terminated"
+                    )
+                })?;
+                let is_undefined_external =
+                    n_type & N_EXT != 0 && n_type & N_TYPE == N_UNDF && n_type & N_STAB == 0;
+                if is_undefined_external {
+                    match &name_region[..name_end] {
+                        b"_dlopen" => has_dlopen = true,
+                        b"_dlsym" => has_dlsym = true,
+                        _ => {}
+                    }
+                }
+            }
+            (has_dlopen, has_dlsym)
+        } else {
+            (false, false)
+        };
+
+        if !has_dlopen || !has_dlsym || !strings.iter().any(|value| *value == b"ChromeMain") {
+            continue;
+        }
+        for value in strings {
+            let Some(executable_name) = value.strip_prefix(CSTRING_PATH_PREFIX) else {
+                continue;
+            };
+            if executable_name.is_empty() {
+                continue;
+            }
+            let path = std::str::from_utf8(value).map_err(|error| {
+                format!("Mach-O slice {slice_index} framework loader path is not UTF-8: {error}")
+            })?;
+            paths.push(path.to_owned());
+        }
+    }
+
+    Ok(paths)
+}
+
+#[derive(Clone, Copy)]
+struct TextStringSection {
+    offset: usize,
+    size: usize,
+    name: &'static str,
+    allow_non_string_tail: bool,
+}
+
+fn inspect_dynamic_text_segment(
+    slice: &[u8],
+    order: ByteOrder,
+    command_offset: usize,
+    command_size: usize,
+    command_index: usize,
+    text_string_sections: &mut Vec<TextStringSection>,
+) -> Result<(), String> {
+    if command_size < SEGMENT_COMMAND_64_SIZE {
+        return Err(format!(
+            "Mach-O LC_SEGMENT_64 command {command_index} is truncated"
+        ));
+    }
+    let nsects = read_u32(slice, command_offset + 64, order)? as usize;
+    let expected_size = nsects
+        .checked_mul(SECTION_64_SIZE)
+        .and_then(|sections| SEGMENT_COMMAND_64_SIZE.checked_add(sections))
+        .ok_or_else(|| format!("Mach-O segment command {command_index} size overflow"))?;
+    if command_size != expected_size {
+        return Err(format!(
+            "Mach-O LC_SEGMENT_64 command {command_index} has inconsistent section count"
+        ));
+    }
+
+    let segment_name = &slice[command_offset + 8..command_offset + 24];
+    let is_text_segment = fixed_name_eq(segment_name, b"__TEXT");
+    let segment_file_offset = read_u64(slice, command_offset + 40, order)?;
+    let segment_file_size = read_u64(slice, command_offset + 48, order)?;
+    let (segment_start, segment_end) = if is_text_segment {
+        let segment_start = usize::try_from(segment_file_offset)
+            .map_err(|_| "__TEXT file offset is not representable".to_string())?;
+        let segment_size = usize::try_from(segment_file_size)
+            .map_err(|_| "__TEXT file size is not representable".to_string())?;
+        require_range(
+            slice.len(),
+            segment_start,
+            segment_size,
+            "__TEXT segment file range",
+        )?;
+        let segment_end = segment_start
+            .checked_add(segment_size)
+            .ok_or_else(|| "__TEXT segment file range overflow".to_string())?;
+        (segment_start, segment_end)
+    } else {
+        (0, 0)
+    };
+
+    for section_index in 0..nsects {
+        let section_offset =
+            command_offset + SEGMENT_COMMAND_64_SIZE + section_index * SECTION_64_SIZE;
+        let section_name = &slice[section_offset..section_offset + 16];
+        let section_segment_name = &slice[section_offset + 16..section_offset + 32];
+        let (name, allow_non_string_tail) = if fixed_name_eq(section_name, b"__cstring") {
+            ("__cstring", false)
+        } else if fixed_name_eq(section_name, b"__const") {
+            ("__const", true)
+        } else {
+            continue;
+        };
+        let section_claims_text = fixed_name_eq(section_segment_name, b"__TEXT");
+        if section_claims_text != is_text_segment {
+            return Err(format!(
+                "Mach-O segment command {command_index} has a {name} section with a mismatched segment name"
+            ));
+        }
+        if !is_text_segment {
+            continue;
+        }
+        if text_string_sections
+            .iter()
+            .any(|existing| existing.name == name)
+        {
+            return Err(format!("duplicate __TEXT,{name} sections in Mach-O slice"));
+        }
+
+        let size = usize::try_from(read_u64(slice, section_offset + 40, order)?)
+            .map_err(|_| format!("__TEXT,{name} size is not representable"))?;
+        let file_offset = read_u32(slice, section_offset + 48, order)? as usize;
+        require_range(
+            slice.len(),
+            file_offset,
+            size,
+            &format!("Mach-O __TEXT,{name} section range"),
+        )?;
+        let section_end = file_offset
+            .checked_add(size)
+            .ok_or_else(|| format!("__TEXT,{name} section range overflow"))?;
+        if file_offset < segment_start || section_end > segment_end {
+            return Err(format!(
+                "__TEXT,{name} section lies outside the __TEXT segment"
+            ));
+        }
+        text_string_sections.push(TextStringSection {
+            offset: file_offset,
+            size,
+            name,
+            allow_non_string_tail,
+        });
+    }
+    Ok(())
+}
+
+fn parse_bounded_c_strings<'a>(
+    data: &'a [u8],
+    allow_non_string_tail: bool,
+    slice_index: usize,
+    section_name: &str,
+) -> Result<Vec<&'a [u8]>, String> {
+    if !allow_non_string_tail && !data.is_empty() && data.last() != Some(&0) {
+        return Err(format!(
+            "Mach-O slice {slice_index} __TEXT,{section_name} section is not NUL-terminated"
+        ));
+    }
+
+    let mut strings = Vec::new();
+    let mut start = 0;
+    for (index, byte) in data.iter().enumerate() {
+        if *byte == 0 {
+            if index > start {
+                strings.push(&data[start..index]);
+            }
+            start = index + 1;
+        }
+    }
+    // __const contains non-string constants too. Only complete NUL-terminated
+    // entries are candidates; an unterminated trailing constant is ignored.
+    Ok(strings)
 }
 
 fn integrity_dictionary_digest(map: &Value) -> Result<[u8; SLOT_DIGEST_SIZE], String> {

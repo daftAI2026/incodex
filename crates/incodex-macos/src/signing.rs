@@ -332,6 +332,26 @@ struct DependentHelperUpdate {
     entitlements: String,
 }
 
+fn verified_bundle_identifier(bundle: &Path, plist_identifier: &str) -> Result<String, String> {
+    let component = inspect_component(bundle)?;
+    if !component.verified {
+        return Err(format!(
+            "signature verification failed: {}",
+            bundle.display()
+        ));
+    }
+    let identifier = component
+        .identifier
+        .ok_or_else(|| format!("signature identifier unavailable: {}", bundle.display()))?;
+    if identifier != plist_identifier {
+        return Err(format!(
+            "signature identifier mismatch: {}",
+            bundle.display()
+        ));
+    }
+    Ok(identifier)
+}
+
 fn entitlement_enabled(source: &EntitlementSnapshot, key: &str) -> Result<bool, String> {
     if !source.keys.contains(key) {
         return Ok(false);
@@ -372,6 +392,7 @@ fn dependent_helper_updates(
     let app_identifier = read_plist_info(app)
         .ok_or("app identity unavailable")?
         .bundle_identifier;
+    let app_identifier = verified_bundle_identifier(app, &app_identifier)?;
     let namespace = format!("{app_identifier}.helper");
     let mut updates = Vec::new();
     for bundle in enumerate_component_paths(app)?
@@ -397,9 +418,8 @@ fn dependent_helper_updates(
         if !binary.starts_with(fs::canonicalize(&bundle).map_err(|error| error.to_string())?) {
             return Err("helper executable escapes its bundle".into());
         }
-        let dependencies = super::asar_integrity_digest::linked_dylib_paths(
-            &fs::read(&binary).map_err(|error| error.to_string())?,
-        )?;
+        let bytes = fs::read(&binary).map_err(|error| error.to_string())?;
+        let dependencies = super::asar_integrity_digest::linked_dylib_paths(&bytes)?;
         let directly_loads_framework = dependencies.iter().any(|dependency| {
             let candidate = if let Some(relative) = dependency
                 .strip_prefix("@executable_path/")
@@ -415,21 +435,36 @@ fn dependent_helper_updates(
                 .and_then(|path| fs::canonicalize(path).ok())
                 .is_some_and(|path| path == framework.binary)
         });
-        if !directly_loads_framework || !inspect_hardened_runtime(&bundle)? {
+        let dynamically_loads_framework = if directly_loads_framework {
+            false
+        } else {
+            super::asar_integrity_digest::dynamic_framework_load_paths(&bytes)?
+                .iter()
+                .any(|relative| {
+                    binary
+                        .parent()
+                        .and_then(|parent| fs::canonicalize(parent.join(relative)).ok())
+                        .is_some_and(|path| path == framework.binary)
+                })
+        };
+        if !(directly_loads_framework || dynamically_loads_framework)
+            || !inspect_hardened_runtime(&bundle)?
+        {
             continue;
         }
         let source = read_entitlements(&bundle)?;
         if entitlement_enabled(&source, DISABLE_LIBRARY_VALIDATION)? {
             continue;
         }
+        let helper_identifier = verified_bundle_identifier(&bundle, &info.bundle_identifier)?;
         // Chromium's notification helper has a Framework-derived identity,
         // separate from Electron's .helper namespace. Admit only that exact
         // role under the host's own Framework, never arbitrary Framework children.
-        let is_electron_helper = info.bundle_identifier == namespace
-            || info.bundle_identifier.starts_with(&format!("{namespace}."));
+        let is_electron_helper = helper_identifier == namespace
+            || helper_identifier.starts_with(&format!("{namespace}."));
         let is_notification_helper = framework.bundle_identifier
             == format!("{app_identifier}.framework")
-            && info.bundle_identifier
+            && helper_identifier
                 == format!("{}.AlertNotificationService", framework.bundle_identifier);
         // CUA sidecars are neither of these identities. An unknown dependent
         // fails closed before any digest, metadata or signature changes.
@@ -495,6 +530,7 @@ fn framework_digest_updates(
                 .and_then(serde_json::Value::as_str)
                 .filter(|identifier| !identifier.is_empty())
                 .ok_or("framework has no CFBundleIdentifier")?;
+            let bundle_identifier = verified_bundle_identifier(&bundle, bundle_identifier)?;
             let source = read_entitlements(&bundle)?;
             let stripped = source
                 .keys
@@ -539,7 +575,7 @@ fn sign_app_impl(app: &Path, integrity_hash: Option<&str>) -> Result<(), String>
     };
     let helpers = dependent_helper_updates(app, &updates)?;
     // Validate every existing nested signature before altering any digest. Only the
-    // proven digest-bearing framework and necessary direct-loading Electron helpers
+    // proven digest-bearing framework and necessary loading Electron helpers
     // are excluded; all other vendor children stay stashed.
     let excluded: Vec<_> = updates
         .iter()
