@@ -4,8 +4,23 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-export function runtimeCheckEnvironment(_committedSourceCommit: string, environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return { ...environment };
+export function runtimeCheckEnvironment(committedSourceCommit: string, environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return { ...environment, SOURCE_COMMIT: environment.SOURCE_COMMIT || committedSourceCommit };
+}
+
+function committedRuntimeSourceCommit(): string {
+  const committed = spawnSync("git", ["show", "HEAD:dist/runtime-manifest.json"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  if (committed.status !== 0) {
+    throw new Error(`Cannot read the committed Runtime manifest: ${committed.stderr.trim()}`);
+  }
+  const manifest = JSON.parse(committed.stdout) as { sourceCommit?: unknown };
+  if (typeof manifest.sourceCommit !== "string" || !/^(?:[a-f0-9]{40})?$/.test(manifest.sourceCommit)) {
+    throw new Error("The committed Runtime manifest has invalid source provenance");
+  }
+  return manifest.sourceCommit;
 }
 
 function main(): void {
@@ -13,6 +28,7 @@ function main(): void {
     cwd: root,
     encoding: "utf8",
     stdio: "inherit",
+    env: runtimeCheckEnvironment(committedRuntimeSourceCommit(), process.env),
   });
   if (built.status !== 0) {
     process.exit(built.status ?? 1);
