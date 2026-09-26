@@ -15,6 +15,7 @@ const CPU_TYPE_ARM64: u32 = 0x0100_000c;
 const LC_LOAD_DYLIB: u32 = 0x0000_000c;
 const LC_LOAD_WEAK_DYLIB: u32 = 0x8000_0018;
 const LC_REEXPORT_DYLIB: u32 = 0x8000_001f;
+const LC_LAZY_LOAD_DYLIB: u32 = 0x0000_0020;
 const LC_LOAD_UPWARD_DYLIB: u32 = 0x8000_0023;
 const LC_RPATH: u32 = 0x8000_001c;
 const DYLIB_COMMAND_SIZE: usize = 24;
@@ -225,7 +226,11 @@ fn parse_linked_dylib_commands(bytes: &[u8]) -> Result<Vec<SliceDylibCommands>, 
                 )?);
             } else if matches!(
                 command,
-                LC_LOAD_DYLIB | LC_LOAD_WEAK_DYLIB | LC_REEXPORT_DYLIB | LC_LOAD_UPWARD_DYLIB
+                LC_LOAD_DYLIB
+                    | LC_LOAD_WEAK_DYLIB
+                    | LC_REEXPORT_DYLIB
+                    | LC_LAZY_LOAD_DYLIB
+                    | LC_LOAD_UPWARD_DYLIB
             ) {
                 if command_size < DYLIB_COMMAND_SIZE {
                     return Err(format!(
