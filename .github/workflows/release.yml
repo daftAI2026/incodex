@@ -239,6 +239,9 @@ jobs:
                 "incodex-permission-ui.cjs",
                 "incodex-runtime-load.cjs",
                 "incodex-loader.cjs",
+                "incodex-permission-host",
+                "incodex-permission-ui.dylib",
+                "runtime-native-manifest.json",
               ];
               const REQUIRED_EXTERNAL_FILES = [
                 ...REQUIRED_MANIFEST_FILES.filter((name) => name !== "incodex-loader.cjs"),
