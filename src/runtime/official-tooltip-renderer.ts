@@ -29,6 +29,10 @@ type JsxFactoryFunction = (type: unknown, props: Record<string, unknown>) => unk
 
 type NamedImport = { imported: string; local: string };
 
+// Official releases consolidate vendor/UI code into larger shared chunks.
+// This byte/character guard is not a UI timer or a fixed asset-size assumption.
+export const SHARED_MODULE_SOURCE_BUDGET = 16_000_000;
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
@@ -455,7 +459,7 @@ async function loadSharedOfficialTooltipModules(
   }
   if (matches.length !== 1) throw new Error("Official shared Tooltip module is unavailable or ambiguous");
   const { url: sharedModulePath, namespace, Tooltip } = matches[0]!;
-  const sharedSource = await readOfficialModuleSource(sharedModulePath, 8_000_000);
+  const sharedSource = await readOfficialModuleSource(sharedModulePath, SHARED_MODULE_SOURCE_BUDGET);
 
   const dynamicPaths = discoverOfficialDynamicModuleGraph(entry, entrySource)
     .filter((url) => !staticPaths.includes(url));
