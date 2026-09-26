@@ -16,7 +16,7 @@ test("discovers current and future style attribute names from loaded official ru
 
 test("excludes official interaction, identity and test state despite CSS references", () => {
   const names = officialStyleAttributes(documentWith([{
-    selectorText: "[data-size][data-state][data-testid][data-loading][data-selected][data-disabled][data-incodex-privacy-toggle][data-tracking-id]",
+    selectorText: "[data-size][data-state][data-testid][data-loading][data-selected][data-disabled][data-incodex-privacy-toggle][data-tracking-id][data-slot][data-component][data-part]",
   }]));
   expect([...names]).toEqual(["data-size"]);
 });
@@ -31,4 +31,9 @@ test("handles recursive imported rules without repeated traversal", () => {
   const sheet: { cssRules: unknown[] } = { cssRules: [] };
   sheet.cssRules.push({ selectorText: "[data-shape]", styleSheet: sheet });
   expect([...officialStyleAttributes({ styleSheets: [sheet] } as unknown as Pick<Document, "styleSheets">)]).toEqual(["data-shape"]);
+});
+
+test("discovers style keys from already-adopted constructed stylesheets", () => {
+  const document = { styleSheets: [], adoptedStyleSheets: [{ cssRules: [{ selectorText: "[data-future-size]" }] }] };
+  expect([...officialStyleAttributes(document as unknown as Document)]).toEqual(["data-future-size"]);
 });

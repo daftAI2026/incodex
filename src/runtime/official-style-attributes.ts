@@ -2,12 +2,12 @@
 // Identity and transient input state remain explicit non-inheritable boundaries.
 function isStyleAttribute(name: string): boolean {
   return !/^data-(?:incodex-|test|react|radix|tracking|analytics|telemetry)/.test(name) &&
-    !/(?:^|-)(?:state|status|loading|selected|disabled|inert|open|closed|expanded|pressed|checked|focused|hovered|active|busy|pending|id|key)(?:-|$)/.test(name);
+    !/(?:^|-)(?:state|status|loading|selected|disabled|inert|open|closed|expanded|pressed|checked|focused|hovered|active|busy|pending|id|key|slot|component|part)(?:-|$)/.test(name);
 }
 
 type RuleContainer = { cssRules?: CSSRuleList; styleSheet?: CSSStyleSheet | null };
 
-export function officialStyleAttributes(document: Pick<Document, "styleSheets">): Set<string> {
+export function officialStyleAttributes(document: Pick<Document, "styleSheets"> & Partial<Pick<Document, "adoptedStyleSheets">>): Set<string> {
   const names = new Set<string>();
   const visited = new Set<object>();
   const visit = (container: RuleContainer): void => {
@@ -28,6 +28,6 @@ export function officialStyleAttributes(document: Pick<Document, "styleSheets">)
       if (imported) visit(imported);
     }
   };
-  for (const sheet of Array.from(document.styleSheets ?? [])) visit(sheet);
+  for (const sheet of [...Array.from(document.styleSheets ?? []), ...Array.from(document.adoptedStyleSheets ?? [])]) visit(sheet);
   return names;
 }
