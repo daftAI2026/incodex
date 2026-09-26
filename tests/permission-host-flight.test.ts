@@ -34,9 +34,10 @@ import Foundation
    flight.dispose()
   }
   var fallbackEvents: [String] = []
+  let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
   let missing = PermissionHostFlight(source: endpoint, target: { endpoint }, isClosed: { false }, onComplete: { fallbackEvents.append("complete") }, onError: { _ in fallbackEvents.append("error") })
   missing.start()
-  print(String(data: try JSONSerialization.data(withJSONObject: ["samples": samples, "interrupted": interruptedSamples, "geometry": geometry, "closedLifecycle": [completions, targets, errors], "missingSnapshot": fallbackEvents]), encoding: .utf8)!)
+  print(String(data: try JSONSerialization.data(withJSONObject: ["samples": samples, "interrupted": interruptedSamples, "geometry": geometry, "closedLifecycle": [completions, targets, errors], "reduceMotion": reduceMotion, "missingSnapshot": fallbackEvents]), encoding: .utf8)!)
  }
 }`);
   const compiled = spawnSync("xcrun", ["swiftc", "-parse-as-library", "native/macos/permission-views.swift", "native/macos/permission-host-flight.swift", main, "-o", binary], { cwd: root, encoding: "utf8", timeout: 60_000 });
@@ -46,7 +47,10 @@ import Foundation
   expect(ran.status).toBe(0);
   const actual = JSON.parse(ran.stdout);
   expect(actual.closedLifecycle).toEqual([2, 0, 0]);
-  expect(actual.missingSnapshot).toEqual(["error", "complete"]);
+  // The system's reduced-motion path completes before it attempts snapshots.
+  // CI runners may enable it; do not change a real system preference for a math fixture.
+  expect(typeof actual.reduceMotion).toBe("boolean");
+  expect(actual.missingSnapshot).toEqual(actual.reduceMotion ? ["complete"] : ["error", "complete"]);
   const spring = createPermissionSpring();
   for (let i = 0; i <= 120; i++) expect(actual.samples[i]).toBeCloseTo(advancePermissionSpring(spring, i / 60), 12);
   const interrupted = createPermissionSpring();
