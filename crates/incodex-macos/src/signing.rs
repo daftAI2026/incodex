@@ -7,8 +7,9 @@
 
 use std::collections::BTreeSet;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use super::entitlements::add_entitlement_key;
 use super::signature_inspection::{has_identity_evidence, inspect_codesign};
@@ -285,21 +286,27 @@ pub fn verify_bundle_deep_strict(app: &Path) -> Result<(), String> {
 }
 
 pub fn has_hardened_runtime(app: &Path) -> bool {
-    let Ok(output) = Command::new("codesign")
+    inspect_hardened_runtime(app).unwrap_or(false)
+}
+
+fn inspect_hardened_runtime(app: &Path) -> Result<bool, String> {
+    let output = Command::new("codesign")
         .args(["--display", "--verbose=2", "--"])
         .arg(app)
         .output()
-    else {
-        return false;
-    };
+        .map_err(|error| format!("cannot inspect runtime flags {}: {error}", app.display()))?;
+    if !output.status.success() {
+        return Err(format!("cannot inspect runtime flags: {}", app.display()));
+    }
     let text = format!(
         "{}{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    text.lines()
+    Ok(text
+        .lines()
         .filter_map(|line| line.split_once("flags=").map(|(_, flags)| flags))
-        .any(|flags| flags.contains("runtime"))
+        .any(|flags| flags.contains("runtime")))
 }
 
 /// 使用共享 entitlement/component policy 完成 ad-hoc 签名。
@@ -317,6 +324,129 @@ struct FrameworkDigestUpdate {
     bytes: Vec<u8>,
     entitlements: String,
     hardened_runtime: bool,
+}
+
+struct DependentHelperUpdate {
+    bundle: PathBuf,
+    entitlements: String,
+}
+
+fn entitlement_enabled(source: &EntitlementSnapshot, key: &str) -> Result<bool, String> {
+    if !source.keys.contains(key) {
+        return Ok(false);
+    }
+    let mut child = Command::new("plutil")
+        .args(["-convert", "json", "-o", "-", "--", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| error.to_string())?;
+    child
+        .stdin
+        .take()
+        .ok_or("plutil stdin is unavailable")?
+        .write_all(source.xml.as_bytes())
+        .map_err(|error| error.to_string())?;
+    let output = child
+        .wait_with_output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err("cannot parse library-validation entitlement".into());
+    }
+    let raw: serde_json::Value =
+        serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())?;
+    raw.get(key)
+        .and_then(serde_json::Value::as_bool)
+        .ok_or_else(|| "library-validation entitlement must be Boolean".into())
+}
+
+fn dependent_helper_updates(
+    app: &Path,
+    frameworks: &[FrameworkDigestUpdate],
+) -> Result<Vec<DependentHelperUpdate>, String> {
+    if frameworks.is_empty() {
+        return Ok(Vec::new());
+    }
+    let namespace = format!(
+        "{}.helper",
+        read_plist_info(app)
+            .ok_or("app identity unavailable")?
+            .bundle_identifier
+    );
+    let mut updates = Vec::new();
+    for bundle in enumerate_component_paths(app)?
+        .into_iter()
+        .filter(|path| path.extension().is_some_and(|ext| ext == "app"))
+    {
+        let Some(framework) = frameworks
+            .iter()
+            .find(|framework| bundle.starts_with(&framework.bundle))
+        else {
+            continue;
+        };
+        let info = read_plist_info(&bundle).ok_or("nested helper plist unavailable")?;
+        if info.executable.is_empty()
+            || Path::new(&info.executable).components().count() != 1
+            || info.executable == "."
+            || info.executable == ".."
+        {
+            return Err("invalid helper executable name".into());
+        }
+        let binary = fs::canonicalize(bundle.join("Contents/MacOS").join(&info.executable))
+            .map_err(|error| error.to_string())?;
+        if !binary.starts_with(fs::canonicalize(&bundle).map_err(|error| error.to_string())?) {
+            return Err("helper executable escapes its bundle".into());
+        }
+        let dependencies = super::asar_integrity_digest::linked_dylib_paths(
+            &fs::read(&binary).map_err(|error| error.to_string())?,
+        )?;
+        let directly_loads_framework = dependencies.iter().any(|dependency| {
+            let candidate = if let Some(relative) = dependency
+                .strip_prefix("@executable_path/")
+                .or_else(|| dependency.strip_prefix("@loader_path/"))
+            {
+                binary.parent().map(|parent| parent.join(relative))
+            } else if Path::new(dependency).is_absolute() {
+                Some(PathBuf::from(dependency))
+            } else {
+                None
+            };
+            candidate
+                .and_then(|path| fs::canonicalize(path).ok())
+                .is_some_and(|path| path == framework.binary)
+        });
+        if !directly_loads_framework || !inspect_hardened_runtime(&bundle)? {
+            continue;
+        }
+        let source = read_entitlements(&bundle)?;
+        if entitlement_enabled(&source, DISABLE_LIBRARY_VALIDATION)? {
+            continue;
+        }
+        // CUA sidecars do not use the verified Electron helper identity. An
+        // unknown dependent fails closed instead of broadening the signing scope.
+        if info.bundle_identifier != namespace
+            && !info.bundle_identifier.starts_with(&format!("{namespace}."))
+        {
+            return Err(format!(
+                "protected or unknown helper requires changed framework: {}",
+                bundle.display()
+            ));
+        }
+        let mut source = source;
+        if source.keys.remove(DISABLE_LIBRARY_VALIDATION) {
+            source.xml = strip_unretainable_entitlements(
+                &source.xml,
+                &BTreeSet::from([DISABLE_LIBRARY_VALIDATION.to_string()]),
+            )?;
+        }
+        let entitlements = plan_adhoc_entitlements(&source)?.xml;
+        updates.push(DependentHelperUpdate {
+            bundle,
+            entitlements,
+        });
+    }
+    Ok(updates)
 }
 
 fn framework_digest_updates(
@@ -395,9 +525,15 @@ fn sign_app_impl(app: &Path, integrity_hash: Option<&str>) -> Result<(), String>
         Some((old, new)) => framework_digest_updates(app, old, new)?,
         None => Vec::new(),
     };
+    let helpers = dependent_helper_updates(app, &updates)?;
     // Validate every existing nested signature before altering any digest. Only the
-    // proven digest-bearing framework is excluded; its vendor children stay stashed.
-    let excluded: Vec<_> = updates.iter().map(|update| update.bundle.clone()).collect();
+    // proven digest-bearing framework and necessary direct-loading Electron helpers
+    // are excluded; all other vendor children stay stashed.
+    let excluded: Vec<_> = updates
+        .iter()
+        .map(|update| update.bundle.clone())
+        .chain(helpers.iter().map(|helper| helper.bundle.clone()))
+        .collect();
     let preserve = collect_vendor_helper_roots_excluding(app, &outer, &excluded)?;
     let stash_root = if preserve.is_empty() {
         None
@@ -440,6 +576,9 @@ fn sign_app_impl(app: &Path, integrity_hash: Option<&str>) -> Result<(), String>
         });
     }
     deep?;
+    for helper in &helpers {
+        sign_component_with_entitlements(&helper.bundle, &helper.entitlements, true)?;
+    }
     for update in &updates {
         sign_component_with_entitlements(
             &update.bundle,

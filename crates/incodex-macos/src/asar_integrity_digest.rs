@@ -11,6 +11,12 @@ const SECTION_64_SIZE: usize = 80;
 const CPU_TYPE_X86_64: u32 = 0x0100_0007;
 const CPU_TYPE_ARM64: u32 = 0x0100_000c;
 
+const LC_LOAD_DYLIB: u32 = 0x0000_000c;
+const LC_LOAD_WEAK_DYLIB: u32 = 0x8000_0018;
+const LC_REEXPORT_DYLIB: u32 = 0x8000_001f;
+const LC_LOAD_UPWARD_DYLIB: u32 = 0x8000_0023;
+const DYLIB_COMMAND_SIZE: usize = 24;
+
 const FAT_MAGIC: u32 = 0xcafe_babe;
 const FAT_MAGIC_64: u32 = 0xcafe_babf;
 
@@ -90,8 +96,113 @@ pub(crate) fn plan_integrity_digest_update(
     Ok(Some(updated))
 }
 
-pub(crate) fn linked_dylib_paths(_bytes: &[u8]) -> Result<Vec<String>, String> {
-    Ok(Vec::new())
+pub(crate) fn linked_dylib_paths(bytes: &[u8]) -> Result<Vec<String>, String> {
+    let slices = parse_slices(bytes)?;
+    let mut paths = Vec::new();
+
+    for (slice_index, slice) in slices.iter().enumerate() {
+        let slice_end = slice
+            .offset
+            .checked_add(slice.size)
+            .ok_or_else(|| format!("Mach-O slice {slice_index} range overflow"))?;
+        require_range(bytes.len(), slice.offset, slice.size, "Mach-O slice")?;
+        let slice_bytes = &bytes[slice.offset..slice_end];
+        let (order, cpu_type) = macho_header(slice_bytes)?;
+        validate_cpu_type(cpu_type)?;
+        if slice
+            .fat_cpu_type
+            .is_some_and(|fat_cpu| fat_cpu != cpu_type)
+        {
+            return Err(format!(
+                "fat Mach-O architecture CPU type does not match slice {slice_index} header"
+            ));
+        }
+
+        let ncmds = read_u32(slice_bytes, 16, order)? as usize;
+        let sizeofcmds = read_u32(slice_bytes, 20, order)? as usize;
+        let load_start = MACH_HEADER_64_SIZE;
+        let load_end = load_start
+            .checked_add(sizeofcmds)
+            .ok_or_else(|| format!("Mach-O slice {slice_index} load-command range overflow"))?;
+        require_range(
+            slice_bytes.len(),
+            load_start,
+            sizeofcmds,
+            "Mach-O load commands",
+        )?;
+        if ncmds > sizeofcmds / 8 {
+            return Err(format!(
+                "Mach-O slice {slice_index} command count exceeds its load-command data"
+            ));
+        }
+
+        let mut cursor = load_start;
+        for command_index in 0..ncmds {
+            require_range(load_end, cursor, 8, "Mach-O load-command header")?;
+            let command = read_u32(slice_bytes, cursor, order)?;
+            let command_size = read_u32(slice_bytes, cursor + 4, order)? as usize;
+            if command_size < 8 || command_size % 8 != 0 {
+                return Err(format!(
+                    "Mach-O slice {slice_index} load command {command_index} has invalid size"
+                ));
+            }
+            require_range(load_end, cursor, command_size, "Mach-O load command")?;
+
+            if matches!(
+                command,
+                LC_LOAD_DYLIB | LC_LOAD_WEAK_DYLIB | LC_REEXPORT_DYLIB | LC_LOAD_UPWARD_DYLIB
+            ) {
+                if command_size < DYLIB_COMMAND_SIZE {
+                    return Err(format!(
+                        "Mach-O slice {slice_index} dylib command {command_index} is truncated"
+                    ));
+                }
+                let name_offset = read_u32(slice_bytes, cursor + 8, order)? as usize;
+                if !(DYLIB_COMMAND_SIZE..command_size).contains(&name_offset) {
+                    return Err(format!(
+                        "Mach-O slice {slice_index} dylib command {command_index} name offset is out of range"
+                    ));
+                }
+                let command_end = cursor
+                    .checked_add(command_size)
+                    .ok_or_else(|| "Mach-O dylib command range overflow".to_string())?;
+                let name_start = cursor
+                    .checked_add(name_offset)
+                    .ok_or_else(|| "Mach-O dylib name offset overflow".to_string())?;
+                require_range(
+                    slice_bytes.len(),
+                    name_start,
+                    command_end.saturating_sub(name_start),
+                    "Mach-O dylib name",
+                )?;
+                let name_region = &slice_bytes[name_start..command_end];
+                let terminator = name_region.iter().position(|byte| *byte == 0).ok_or_else(|| {
+                    format!(
+                        "Mach-O slice {slice_index} dylib command {command_index} name is not NUL-terminated"
+                    )
+                })?;
+                if terminator == 0 {
+                    return Err(format!(
+                        "Mach-O slice {slice_index} dylib command {command_index} has an empty name"
+                    ));
+                }
+                let path = std::str::from_utf8(&name_region[..terminator]).map_err(|error| {
+                    format!(
+                        "Mach-O slice {slice_index} dylib command {command_index} name is not UTF-8: {error}"
+                    )
+                })?;
+                paths.push(path.to_owned());
+            }
+            cursor += command_size;
+        }
+        if cursor != load_end {
+            return Err(format!(
+                "Mach-O slice {slice_index} load-command sizes do not match sizeofcmds"
+            ));
+        }
+    }
+
+    Ok(paths)
 }
 
 fn integrity_dictionary_digest(map: &Value) -> Result<[u8; SLOT_DIGEST_SIZE], String> {
