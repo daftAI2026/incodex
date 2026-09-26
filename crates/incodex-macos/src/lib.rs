@@ -458,7 +458,7 @@ fn write_asar_integrity_payload(plist: &Path, payload: &serde_json::Value) -> Re
     for flag in ["-replace", "-insert"] {
         let result = Command::new("plutil")
             .args([flag, "ElectronAsarIntegrity", "-json", &json])
-            .arg(&plist)
+            .arg(plist)
             .status();
         match result {
             Ok(status) if status.success() => return Ok(()),

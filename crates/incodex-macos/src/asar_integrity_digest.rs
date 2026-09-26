@@ -144,7 +144,7 @@ pub(crate) fn linked_dylib_paths(bytes: &[u8]) -> Result<Vec<String>, String> {
             require_range(load_end, cursor, 8, "Mach-O load-command header")?;
             let command = read_u32(slice_bytes, cursor, order)?;
             let command_size = read_u32(slice_bytes, cursor + 4, order)? as usize;
-            if command_size < 8 || command_size % 8 != 0 {
+            if command_size < 8 || !command_size.is_multiple_of(8) {
                 return Err(format!(
                     "Mach-O slice {slice_index} load command {command_index} has invalid size"
                 ));
@@ -262,7 +262,7 @@ pub(crate) fn dynamic_framework_load_paths(bytes: &[u8]) -> Result<Vec<String>, 
             require_range(load_end, cursor, 8, "Mach-O load-command header")?;
             let command = read_u32(slice_bytes, cursor, order)?;
             let command_size = read_u32(slice_bytes, cursor + 4, order)? as usize;
-            if command_size < 8 || command_size % 8 != 0 {
+            if command_size < 8 || !command_size.is_multiple_of(8) {
                 return Err(format!(
                     "Mach-O slice {slice_index} load command {command_index} has invalid size"
                 ));
@@ -761,7 +761,7 @@ fn inspect_integrity_slot(bytes: &[u8], slice: MachSlice) -> Result<SlotObservat
         require_range(load_end, cursor, 8, "Mach-O load-command header")?;
         let command = read_u32(slice_bytes, cursor, order)?;
         let command_size = read_u32(slice_bytes, cursor + 4, order)? as usize;
-        if command_size < 8 || command_size % 8 != 0 {
+        if command_size < 8 || !command_size.is_multiple_of(8) {
             return Err(format!(
                 "Mach-O load command {command_index} has invalid size"
             ));
