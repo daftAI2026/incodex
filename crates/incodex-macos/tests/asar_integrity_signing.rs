@@ -45,6 +45,30 @@ fn signed_fixture_with_loader_location(
     dynamic: bool,
     sibling_helper: bool,
 ) -> SignedFixture {
+    signed_fixture_with_linkage(helper_identifier, dynamic, sibling_helper, false, false)
+}
+
+fn signed_fixture_with_rpath_loader(
+    helper_identifier: &str,
+    sibling_helper: bool,
+    shadow_first_rpath: bool,
+) -> SignedFixture {
+    signed_fixture_with_linkage(
+        helper_identifier,
+        false,
+        sibling_helper,
+        true,
+        shadow_first_rpath,
+    )
+}
+
+fn signed_fixture_with_linkage(
+    helper_identifier: &str,
+    dynamic: bool,
+    sibling_helper: bool,
+    rpath_link: bool,
+    shadow_first_rpath: bool,
+) -> SignedFixture {
     let root = std::env::temp_dir().join(format!(
         "incodex-integrity-signing-{}-{}-{}",
         std::process::id(),
@@ -67,15 +91,12 @@ fn signed_fixture_with_loader_location(
     let source = root.join("framework.c");
     fs::write(&source, format!(r#"__attribute__((used,section("__DATA_CONST,__asar_integrity"))) const struct {{ char sentinel[32]; unsigned char used, version, digest[32]; }} slot = {{"AGbevlPCksUGKNL8TSn7wGmJEuJsXb2A", 1, 1, {{{bytes}}}}}; int fixture(void) {{return 1;}}"#)).unwrap();
     let binary = framework.join("Renamed");
-    run(
-        "clang",
-        &[
-            "-dynamiclib",
-            source.to_str().unwrap(),
-            "-o",
-            binary.to_str().unwrap(),
-        ],
-    );
+    let mut framework_args = vec!["-dynamiclib", source.to_str().unwrap()];
+    if rpath_link {
+        framework_args.push("-Wl,-install_name,@rpath/Renamed.framework/Renamed");
+    }
+    framework_args.extend(["-o", binary.to_str().unwrap()]);
+    run("clang", &framework_args);
     let main = root.join("main.c");
     fs::write(&main, "int main(void) {return 0;}").unwrap();
     run(
@@ -92,6 +113,30 @@ fn signed_fixture_with_loader_location(
         "com.openai.codex.framework",
         "",
     );
+    if shadow_first_rpath {
+        assert!(rpath_link && sibling_helper);
+        let shadow = app.join("Contents/Frameworks/Mask/Renamed.framework");
+        fs::create_dir_all(shadow.join("Resources")).unwrap();
+        let shadow_source = root.join("shadow.c");
+        fs::write(&shadow_source, "int fixture(void) { return 1; }").unwrap();
+        run(
+            "clang",
+            &[
+                "-dynamiclib",
+                shadow_source.to_str().unwrap(),
+                "-Wl,-install_name,@rpath/Renamed.framework/Renamed",
+                "-o",
+                shadow.join("Renamed").to_str().unwrap(),
+            ],
+        );
+        write_plist(
+            &shadow.join("Resources/Info.plist"),
+            "Renamed",
+            "com.openai.codex.framework.mask",
+            "",
+        );
+        run("codesign", &["--force", "--sign", "-", shadow.to_str().unwrap()]);
+    }
     let integrity = format!("<key>ElectronAsarIntegrity</key><dict><key>Resources/app.asar</key><dict><key>algorithm</key><string>SHA256</string><key>hash</key><string>{}</string></dict></dict>", "a".repeat(64));
     write_plist(
         &app.join("Contents/Info.plist"),
@@ -129,7 +174,18 @@ return dlsym(handle,"ChromeMain") ? 0 : 3; }
     fs::write(&helper_source, source).unwrap();
     let helper_binary = helper.join("Contents/MacOS/LinkedHelper");
     let mut args = vec![helper_source.to_str().unwrap()];
-    if !dynamic {
+    if rpath_link {
+        args.extend(["-F", framework.parent().unwrap().to_str().unwrap()]);
+        args.extend(["-framework", "Renamed"]);
+        if shadow_first_rpath {
+            args.push("-Wl,-rpath,@loader_path/../../../Mask");
+        }
+        args.push(if sibling_helper {
+            "-Wl,-rpath,@loader_path/../../../"
+        } else {
+            "-Wl,-rpath,@loader_path/../../../../../"
+        });
+    } else if !dynamic {
         args.push(binary.to_str().unwrap());
     }
     args.extend(["-o", helper_binary.to_str().unwrap()]);
@@ -280,6 +336,32 @@ fn sibling_direct_dependent_helper_gets_resigned_with_library_validation_exempti
             .keys
             .contains("com.apple.security.cs.allow-jit")
     );
+    fs::remove_dir_all(&fixture.root).unwrap();
+}
+
+#[test]
+fn sibling_rpath_dependent_helper_gets_resigned_with_library_validation_exemption() {
+    let fixture =
+        signed_fixture_with_rpath_loader("com.openai.codex.helper.rpath", true, false);
+    sign_app_with_asar_integrity(&fixture.app, &"c".repeat(64)).unwrap();
+    verify_bundle_deep_strict(&fixture.app).unwrap();
+    let entitlements = read_entitlements(&fixture.helper).unwrap();
+    assert!(entitlements
+        .keys
+        .contains("com.apple.security.cs.disable-library-validation"));
+    fs::remove_dir_all(&fixture.root).unwrap();
+}
+
+#[test]
+fn earlier_existing_non_target_rpath_masks_later_target_framework() {
+    let fixture =
+        signed_fixture_with_rpath_loader("com.openai.codex.helper.rpath", true, true);
+    sign_app_with_asar_integrity(&fixture.app, &"c".repeat(64)).unwrap();
+    verify_bundle_deep_strict(&fixture.app).unwrap();
+    let entitlements = read_entitlements(&fixture.helper).unwrap();
+    assert!(!entitlements
+        .keys
+        .contains("com.apple.security.cs.disable-library-validation"));
     fs::remove_dir_all(&fixture.root).unwrap();
 }
 
