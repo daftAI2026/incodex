@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  SHARED_MODULE_SOURCE_BUDGET,
   discoverCreateRootFactoryExport,
   discoverOfficialDynamicModuleGraph,
   discoverOfficialStaticModuleGraph,
@@ -71,8 +72,9 @@ describe("official tooltip renderer", () => {
     ]);
   });
   test("keeps the observed shared chunk under a dedicated source budget", () => {
-    const observedSharedChunk = "x".repeat(3_680_505);
-    expect(() => assertOfficialModuleSourceSize(observedSharedChunk, 8_000_000)).not.toThrow();
+    const observedSharedChunk = "x".repeat(7_071_636);
+    expect(() => assertOfficialModuleSourceSize(observedSharedChunk, SHARED_MODULE_SOURCE_BUDGET)).not.toThrow();
+    expect(SHARED_MODULE_SOURCE_BUDGET).toBeGreaterThanOrEqual(2 * observedSharedChunk.length);
     expect(() => assertOfficialModuleSourceSize(observedSharedChunk, 2_000_000)).toThrow();
   });
   test("requires a unique localized official Search trigger", () => {
