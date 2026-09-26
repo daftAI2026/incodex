@@ -82,6 +82,30 @@ fn signed_fixture_with_linkage(
     rpath_link: bool,
     shadow_first_rpath: bool,
 ) -> SignedFixture {
+    signed_fixture_with_linkage_options(
+        helper_identifier,
+        dynamic,
+        sibling_helper,
+        app_descendant_helper,
+        rpath_link,
+        shadow_first_rpath,
+        false,
+    )
+}
+
+fn signed_fixture_with_absolute_loader(helper_identifier: &str) -> SignedFixture {
+    signed_fixture_with_linkage_options(helper_identifier, false, true, false, false, false, true)
+}
+
+fn signed_fixture_with_linkage_options(
+    helper_identifier: &str,
+    dynamic: bool,
+    sibling_helper: bool,
+    app_descendant_helper: bool,
+    rpath_link: bool,
+    shadow_first_rpath: bool,
+    absolute_load_path: bool,
+) -> SignedFixture {
     let root = std::env::temp_dir().join(format!(
         "incodex-integrity-signing-{}-{}-{}",
         std::process::id(),
@@ -104,8 +128,11 @@ fn signed_fixture_with_linkage(
     let source = root.join("framework.c");
     fs::write(&source, format!(r#"__attribute__((used,section("__DATA_CONST,__asar_integrity"))) const struct {{ char sentinel[32]; unsigned char used, version, digest[32]; }} slot = {{"AGbevlPCksUGKNL8TSn7wGmJEuJsXb2A", 1, 1, {{{bytes}}}}}; int fixture(void) {{return 1;}}"#)).unwrap();
     let binary = framework.join("Renamed");
+    let absolute_install_name = format!("-Wl,-install_name,{}", binary.display());
     let mut framework_args = vec!["-dynamiclib", source.to_str().unwrap()];
-    if rpath_link {
+    if absolute_load_path {
+        framework_args.push(&absolute_install_name);
+    } else if rpath_link {
         framework_args.push("-Wl,-install_name,@rpath/Renamed.framework/Renamed");
     }
     framework_args.extend(["-o", binary.to_str().unwrap()]);
@@ -347,6 +374,46 @@ fn sibling_direct_dependent_helper_gets_resigned_with_library_validation_exempti
     assert!(entitlements
         .keys
         .contains("com.apple.security.cs.disable-library-validation"));
+    assert!(entitlements
+        .keys
+        .contains("com.apple.security.cs.allow-jit"));
+    fs::remove_dir_all(&fixture.root).unwrap();
+}
+
+#[test]
+fn absolute_final_app_framework_load_is_resolved_to_its_staged_copy() {
+    let fixture = signed_fixture_with_absolute_loader("com.openai.codex.helper.absolute");
+    let staged = fixture.root.join("scratch/ChatGPT.app");
+    fs::create_dir_all(staged.parent().unwrap()).unwrap();
+    run(
+        "ditto",
+        &[fixture.app.to_str().unwrap(), staged.to_str().unwrap()],
+    );
+
+    let staged_helper_binary =
+        staged.join("Contents/Frameworks/LinkedHelper.app/Contents/MacOS/LinkedHelper");
+    let linkage = Command::new("otool")
+        .args(["-L"])
+        .arg(&staged_helper_binary)
+        .output()
+        .unwrap();
+    assert!(linkage.status.success());
+    let linkage = String::from_utf8_lossy(&linkage.stdout);
+    assert!(
+        linkage.contains(fixture.binary.to_str().unwrap()),
+        "fixture must retain its absolute final-app load path: {linkage}"
+    );
+
+    sign_app_with_asar_integrity(&staged, &"c".repeat(64)).unwrap();
+    verify_bundle_deep_strict(&staged).unwrap();
+    let staged_helper = staged.join("Contents/Frameworks/LinkedHelper.app");
+    let entitlements = read_entitlements(&staged_helper).unwrap();
+    assert!(
+        entitlements
+            .keys
+            .contains("com.apple.security.cs.disable-library-validation"),
+        "helper loading the final app's changed Framework must be selected through the staged counterpart"
+    );
     assert!(entitlements
         .keys
         .contains("com.apple.security.cs.allow-jit"));
