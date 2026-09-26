@@ -138,6 +138,7 @@ Public docs use the native `incodex` / `inc` binaries. Bun is retained for Elect
 - Official install/uninstall default to `/Applications/ChatGPT.app`. That is intentional. Confirm on TTY; require `--yes` without a TTY.
 - Never write a second installer or restore a TypeScript router around the native CLI.
 - Only sign what must be signed. Leave official CUA sidecars official.
+- Electron builds that bind `ElectronAsarIntegrity` to a Framework digest need both metadata and digest updated in the staged transaction. Use `sign_app_with_asar_integrity`: validate all original nested signatures and the old digest before mutation, re-sign only the unique digest-bearing Framework plus the existing host/Sparkle scope, and preserve its vendor children and all CUA sidecars. Never disable the integrity fuse or digest `used` bit to make a patched app launch.
 - Do not enable required GitHub reviews. Do not force-push `main`.
 - Pin GitHub Actions to a 40-character commit SHA with a version comment: `uses: owner/repo@<sha> # vX.Y.Z`. Do not leave floating `@v4` tags.
 - Official CLI packages are git tags `vX.Y.Z`. Follow `.claude/skills/release-flow/SKILL.md`, then `.claude/skills/release-notes/SKILL.md`. Do not `gh release create` and do not turn `generate_release_notes` back on.

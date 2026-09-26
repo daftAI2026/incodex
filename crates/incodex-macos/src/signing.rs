@@ -304,15 +304,101 @@ pub fn has_hardened_runtime(app: &Path) -> bool {
 
 /// 使用共享 entitlement/component policy 完成 ad-hoc 签名。
 pub fn sign_app_with_asar_integrity(app: &Path, hash: &str) -> Result<(), String> {
-    super::write_asar_integrity(app, hash)?;
-    sign_app(app)
+    sign_app_impl(app, Some(hash))
 }
 
 pub fn sign_app(app: &Path) -> Result<(), String> {
+    sign_app_impl(app, None)
+}
+
+struct FrameworkDigestUpdate {
+    bundle: PathBuf,
+    binary: PathBuf,
+    bytes: Vec<u8>,
+    entitlements: String,
+    hardened_runtime: bool,
+}
+
+fn framework_digest_updates(
+    app: &Path,
+    old: &serde_json::Value,
+    new: &serde_json::Value,
+) -> Result<Vec<FrameworkDigestUpdate>, String> {
+    let mut updates = Vec::new();
+    for bundle in enumerate_component_paths(app)?
+        .into_iter()
+        .filter(|path| path.extension().is_some_and(|ext| ext == "framework"))
+    {
+        let plist = bundle.join("Resources/Info.plist");
+        if !plist.exists() {
+            continue;
+        }
+        let raw = super::read_plist_json_result(&plist)?;
+        let name = raw
+            .get("CFBundleExecutable")
+            .and_then(serde_json::Value::as_str)
+            .ok_or("framework has no CFBundleExecutable")?;
+        if name.is_empty()
+            || Path::new(name).components().count() != 1
+            || name == "."
+            || name == ".."
+        {
+            return Err("invalid framework executable name".into());
+        }
+        let binary = fs::canonicalize(bundle.join(name))
+            .map_err(|error| format!("cannot resolve framework executable: {error}"))?;
+        if !binary.starts_with(fs::canonicalize(&bundle).map_err(|error| error.to_string())?) {
+            return Err("framework executable escapes its bundle".into());
+        }
+        let bytes = fs::read(&binary).map_err(|error| error.to_string())?;
+        if let Some(bytes) =
+            super::asar_integrity_digest::plan_integrity_digest_update(&bytes, old, new)?
+        {
+            let source = read_entitlements(&bundle)?;
+            let stripped = source
+                .keys
+                .iter()
+                .filter(|key| ADHOC_UNRETAINABLE_ENTITLEMENTS.contains(&key.as_str()))
+                .cloned()
+                .collect();
+            let entitlements = if source.xml.is_empty() {
+                empty_entitlements_xml()
+            } else {
+                strip_unretainable_entitlements(&source.xml, &stripped)?
+            };
+            updates.push(FrameworkDigestUpdate {
+                hardened_runtime: has_hardened_runtime(&bundle),
+                bundle,
+                binary,
+                bytes,
+                entitlements,
+            });
+        }
+    }
+    if updates.len() > 1 {
+        return Err(
+            "multiple frameworks enforce the host ASAR dictionary; refusing ambiguous mutation"
+                .into(),
+        );
+    }
+    Ok(updates)
+}
+
+fn sign_app_impl(app: &Path, integrity_hash: Option<&str>) -> Result<(), String> {
     let before = read_entitlements(app)?;
     let plan = plan_adhoc_entitlements(&before)?;
     let outer = inspect_component(app)?;
-    let preserve = collect_vendor_helper_roots_for_outer(app, &outer)?;
+    let integrity = integrity_hash
+        .map(|hash| super::asar_integrity_payload(app, hash))
+        .transpose()?;
+    let updates = match &integrity {
+        Some((old, new)) => framework_digest_updates(app, old, new)?,
+        None => Vec::new(),
+    };
+    // Validate every existing nested signature before altering any digest. Only the
+    // proven digest-bearing framework is excluded; its vendor children stay stashed.
+    let excluded: Vec<_> = updates.iter().map(|update| update.bundle.clone()).collect();
+    let preserve = collect_vendor_helper_roots_excluding(app, &outer, &excluded)?;
     let stash_root = if preserve.is_empty() {
         None
     } else {
@@ -332,12 +418,20 @@ pub fn sign_app(app: &Path) -> Result<(), String> {
             stashed.push((src.clone(), dest));
         }
     }
-    let deep = Command::new("codesign")
-        .args(["--force", "--deep", "--sign", "-", "--"])
-        .arg(app)
-        .output()
-        .map_err(|error| error.to_string())
-        .and_then(command_success);
+    let deep = (|| {
+        if let Some((_, new)) = &integrity {
+            super::write_asar_integrity_payload(&app.join("Contents/Info.plist"), new)?;
+        }
+        for update in &updates {
+            fs::write(&update.binary, &update.bytes).map_err(|error| error.to_string())?;
+        }
+        Command::new("codesign")
+            .args(["--force", "--deep", "--sign", "-", "--"])
+            .arg(app)
+            .output()
+            .map_err(|error| error.to_string())
+            .and_then(command_success)
+    })();
     let restore = restore_stashed_helpers(&stashed, stash_root.as_deref());
     if let Err(error) = restore {
         return Err(match deep {
@@ -346,6 +440,18 @@ pub fn sign_app(app: &Path) -> Result<(), String> {
         });
     }
     deep?;
+    for update in &updates {
+        sign_component_with_entitlements(
+            &update.bundle,
+            &update.entitlements,
+            update.hardened_runtime,
+        )?;
+        if let Some((_, new)) = &integrity {
+            let bytes = fs::read(&update.binary).map_err(|error| error.to_string())?;
+            // An already matching digest is a no-op, not a validation failure.
+            super::asar_integrity_digest::plan_integrity_digest_update(&bytes, new, new)?;
+        }
+    }
     sign_outer_with_entitlements(app, &plan.xml)?;
     verify_patched_adhoc_bundle_deep_strict(app, None)
         .map(|_| ())
@@ -364,6 +470,14 @@ fn collect_vendor_helper_roots_for_outer(
     app: &Path,
     outer: &SignedComponent,
 ) -> Result<Vec<PathBuf>, String> {
+    collect_vendor_helper_roots_excluding(app, outer, &[])
+}
+
+fn collect_vendor_helper_roots_excluding(
+    app: &Path,
+    outer: &SignedComponent,
+    excluded: &[PathBuf],
+) -> Result<Vec<PathBuf>, String> {
     let components = inspect_nested_components(app)?;
     let generic_outer =
         outer.kind == SignatureKind::Other && has_identity_evidence(outer) && outer.verified;
@@ -377,6 +491,7 @@ fn collect_vendor_helper_roots_for_outer(
         .filter(|component| {
             component.kind == SignatureKind::Vendor
                 && !component.path.starts_with(app.join(SPARKLE_FRAMEWORK))
+                && !excluded.contains(&component.path)
         })
         .map(|component| component.path.clone())
         .collect::<Vec<_>>();
@@ -675,6 +790,14 @@ fn xml_value_end(xml: &str, start: usize) -> Option<usize> {
 }
 
 fn sign_outer_with_entitlements(app: &Path, entitlements: &str) -> Result<(), String> {
+    sign_component_with_entitlements(app, entitlements, true)
+}
+
+fn sign_component_with_entitlements(
+    app: &Path,
+    entitlements: &str,
+    hardened_runtime: bool,
+) -> Result<(), String> {
     let root = temporary_dir("incodex-ent");
     fs::create_dir_all(&root).map_err(|error| error.to_string())?;
     let file = root.join("entitlements.plist");
@@ -682,15 +805,13 @@ fn sign_outer_with_entitlements(app: &Path, entitlements: &str) -> Result<(), St
         let _ = fs::remove_dir_all(&root);
         return Err(error.to_string());
     }
-    let result = Command::new("codesign")
-        .args([
-            "--force",
-            "--sign",
-            "-",
-            "--options",
-            "runtime",
-            "--entitlements",
-        ])
+    let mut command = Command::new("codesign");
+    command.args(["--force", "--sign", "-"]);
+    if hardened_runtime {
+        command.args(["--options", "runtime"]);
+    }
+    let result = command
+        .args(["--entitlements"])
         .arg(&file)
         .args(["--"])
         .arg(app)

@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 mod accessibility;
 mod app_termination;
+mod asar_integrity_digest;
 mod entitlements;
 mod live_window;
 #[cfg(target_os = "macos")]
@@ -427,9 +428,31 @@ pub fn write_asar_integrity(app: &Path, hash: &str) -> Result<(), String> {
     if !plist.exists() {
         return Ok(());
     }
-    let payload = serde_json::json!({
-        "Resources/app.asar": { "algorithm": "SHA256", "hash": hash }
-    });
+    let (_, payload) = asar_integrity_payload(app, hash)?;
+    write_asar_integrity_payload(&plist, &payload)
+}
+
+fn asar_integrity_payload(
+    app: &Path,
+    hash: &str,
+) -> Result<(serde_json::Value, serde_json::Value), String> {
+    let raw = read_plist_json_result(&app.join("Contents/Info.plist"))?;
+    let old = raw
+        .get("ElectronAsarIntegrity")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let mut new = old.clone();
+    let map = new
+        .as_object_mut()
+        .ok_or("ElectronAsarIntegrity must be a dictionary")?;
+    map.insert(
+        "Resources/app.asar".into(),
+        serde_json::json!({"algorithm":"SHA256", "hash":hash}),
+    );
+    Ok((old, new))
+}
+
+fn write_asar_integrity_payload(plist: &Path, payload: &serde_json::Value) -> Result<(), String> {
     let json = serde_json::to_string(&payload).map_err(|err| err.to_string())?;
     let mut failures = Vec::new();
     for flag in ["-replace", "-insert"] {

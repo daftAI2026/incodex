@@ -10,8 +10,7 @@ const SLOT_SIZE: usize = 66;
 const MACH_HEADER_64_SIZE: usize = 32;
 const SEGMENT_COMMAND_64_SIZE: usize = 72;
 const SECTION_64_SIZE: usize = 80;
-const SLOT_FILE_OFFSET: usize =
-    MACH_HEADER_64_SIZE + SEGMENT_COMMAND_64_SIZE + SECTION_64_SIZE;
+const SLOT_FILE_OFFSET: usize = MACH_HEADER_64_SIZE + SEGMENT_COMMAND_64_SIZE + SECTION_64_SIZE;
 
 fn map_pair(first_hash: &str, second_hash: &str) -> Value {
     // Reverse insertion order deliberately; the production digest must use
@@ -37,12 +36,7 @@ fn spec_digest(map: &Value) -> [u8; 32] {
                 .expect("test algorithm string")
                 .as_bytes(),
         );
-        hasher.update(
-            entry["hash"]
-                .as_str()
-                .expect("test hash string")
-                .as_bytes(),
-        );
+        hasher.update(entry["hash"].as_str().expect("test hash string").as_bytes());
     }
     hasher.finalize().into()
 }
@@ -63,6 +57,10 @@ fn write_u32_le(bytes: &mut [u8], offset: usize, value: u32) {
 
 fn write_u64_le(bytes: &mut [u8], offset: usize, value: u64) {
     bytes[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
+}
+
+fn write_u64_be(bytes: &mut [u8], offset: usize, value: u64) {
+    bytes[offset..offset + 8].copy_from_slice(&value.to_be_bytes());
 }
 
 fn write_u32_be(bytes: &mut [u8], offset: usize, value: u32) {
@@ -87,7 +85,11 @@ fn thin_macho(cpu_type: u32, section_data: Option<&[u8]>) -> Vec<u8> {
     write_u32_le(&mut bytes, 4, cpu_type);
     write_u32_le(&mut bytes, 12, 6); // MH_DYLIB
     write_u32_le(&mut bytes, 16, 1); // ncmds
-    write_u32_le(&mut bytes, 20, (SEGMENT_COMMAND_64_SIZE + SECTION_64_SIZE) as u32);
+    write_u32_le(
+        &mut bytes,
+        20,
+        (SEGMENT_COMMAND_64_SIZE + SECTION_64_SIZE) as u32,
+    );
 
     // LC_SEGMENT_64 with one __DATA_CONST,__asar_integrity section.
     let command = MACH_HEADER_64_SIZE;
@@ -142,9 +144,35 @@ fn fat32_macho(slices: &[(u32, Vec<u8>)]) -> (Vec<u8>, Vec<usize>) {
     (bytes, offsets)
 }
 
+fn fat64_macho(slices: &[(u32, Vec<u8>)]) -> (Vec<u8>, Vec<usize>) {
+    let header_size = 8 + slices.len() * 32;
+    let mut offsets = Vec::with_capacity(slices.len());
+    let mut next_offset = (header_size + 7) & !7;
+    for (_, slice) in slices {
+        offsets.push(next_offset);
+        next_offset = (next_offset + slice.len() + 7) & !7;
+    }
+    let mut bytes = vec![0; next_offset];
+    bytes[0..4].copy_from_slice(&0xcafebabf_u32.to_be_bytes()); // FAT_MAGIC_64
+    write_u32_be(&mut bytes, 4, slices.len() as u32);
+    for (index, (cpu_type, slice)) in slices.iter().enumerate() {
+        let entry = 8 + index * 32;
+        write_u32_be(&mut bytes, entry, *cpu_type);
+        write_u32_be(&mut bytes, entry + 4, 0); // cpusubtype
+        write_u64_be(&mut bytes, entry + 8, offsets[index] as u64);
+        write_u64_be(&mut bytes, entry + 16, slice.len() as u64);
+        write_u32_be(&mut bytes, entry + 24, 3); // 8-byte alignment
+        write_u32_be(&mut bytes, entry + 28, 0); // reserved
+        bytes[offsets[index]..offsets[index] + slice.len()].copy_from_slice(slice);
+    }
+    (bytes, offsets)
+}
+
 fn read_slot_digest(bytes: &[u8], slice_offset: usize) -> [u8; 32] {
     let start = slice_offset + SLOT_FILE_OFFSET + 34;
-    bytes[start..start + 32].try_into().expect("slot digest bytes")
+    bytes[start..start + 32]
+        .try_into()
+        .expect("slot digest bytes")
 }
 
 #[test]
@@ -158,7 +186,10 @@ fn updates_thin_arm64_slot_only_after_matching_old_map_digest() {
         .expect("valid current digest map")
         .expect("active slot should be modified");
 
-    assert_eq!(&updated[..SLOT_FILE_OFFSET + 34], &original[..SLOT_FILE_OFFSET + 34]);
+    assert_eq!(
+        &updated[..SLOT_FILE_OFFSET + 34],
+        &original[..SLOT_FILE_OFFSET + 34]
+    );
     assert_eq!(read_slot_digest(&updated, 0), spec_digest(&new_map));
     assert_eq!(updated[SLOT_FILE_OFFSET + 32], 1, "slot remains used");
     assert_eq!(updated[SLOT_FILE_OFFSET + 33], 1, "slot version remains v1");
@@ -188,6 +219,27 @@ fn updates_every_arm64_and_x64_slice_before_returning_a_fat_file() {
 }
 
 #[test]
+fn updates_fat64_slices_and_leaves_architecture_table_unchanged() {
+    const ARM64: u32 = 0x0100_000c;
+    const X86_64: u32 = 0x0100_0007;
+    let old_map = map_pair(&"13".repeat(32), &"24".repeat(32));
+    let new_map = map_pair(&"35".repeat(32), &"46".repeat(32));
+    let (original, offsets) = fat64_macho(&[
+        (ARM64, thin_macho(ARM64, Some(&slot(&old_map, 1, 1)))),
+        (X86_64, thin_macho(X86_64, Some(&slot(&old_map, 1, 1)))),
+    ]);
+
+    let updated = plan_integrity_digest_update(&original, &old_map, &new_map)
+        .expect("valid FAT_MAGIC_64 file")
+        .expect("both active fat64 slices should be updated");
+
+    assert_eq!(&updated[..8 + 2 * 32], &original[..8 + 2 * 32]);
+    for offset in offsets {
+        assert_eq!(read_slot_digest(&updated, offset), spec_digest(&new_map));
+    }
+}
+
+#[test]
 fn old_macho_without_the_slot_is_compatible_and_unchanged() {
     const ARM64: u32 = 0x0100_000c;
     let old_map = map_pair(&"99".repeat(32), &"aa".repeat(32));
@@ -212,6 +264,76 @@ fn unused_slot_is_preserved_without_enabling_or_rewriting_it() {
         None
     );
     assert_eq!(original[SLOT_FILE_OFFSET + 32], 0);
+}
+
+#[test]
+fn identical_new_map_is_a_noop_for_an_already_matching_active_slot() {
+    const ARM64: u32 = 0x0100_000c;
+    let map = map_pair(&"47".repeat(32), &"58".repeat(32));
+    let original = thin_macho(ARM64, Some(&slot(&map, 1, 1)));
+
+    assert_eq!(
+        plan_integrity_digest_update(&original, &map, &map).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn unknown_used_value_fails_closed_without_mutating_the_input() {
+    const ARM64: u32 = 0x0100_000c;
+    let old_map = map_pair(&"69".repeat(32), &"7a".repeat(32));
+    let new_map = map_pair(&"8b".repeat(32), &"9c".repeat(32));
+    let original = thin_macho(ARM64, Some(&slot(&old_map, 2, 1)));
+
+    let error = plan_integrity_digest_update(&original, &old_map, &new_map)
+        .expect_err("unknown used state must fail closed");
+    assert!(error.to_lowercase().contains("used"), "{error}");
+    assert_eq!(original[SLOT_FILE_OFFSET + 32], 2);
+}
+
+#[test]
+fn sentinel_outside_the_named_integrity_section_is_ignored() {
+    const ARM64: u32 = 0x0100_000c;
+    let old_map = map_pair(&"ad".repeat(32), &"be".repeat(32));
+    let new_map = map_pair(&"cf".repeat(32), &"d0".repeat(32));
+    let mut original = thin_macho(ARM64, Some(&slot(&old_map, 1, 1)));
+    let section_name = MACH_HEADER_64_SIZE + SEGMENT_COMMAND_64_SIZE;
+    original[section_name..section_name + 16].fill(0);
+    original[section_name..section_name + 6].copy_from_slice(b"__text");
+
+    assert_eq!(
+        plan_integrity_digest_update(&original, &old_map, &new_map).unwrap(),
+        None,
+        "the scanner must not find the sentinel elsewhere in the Mach-O"
+    );
+}
+
+#[test]
+fn malformed_load_command_range_fails_closed_without_panicking() {
+    const ARM64: u32 = 0x0100_000c;
+    let old_map = map_pair(&"e1".repeat(32), &"f2".repeat(32));
+    let new_map = map_pair(&"a3".repeat(32), &"b4".repeat(32));
+    let mut original = thin_macho(ARM64, Some(&slot(&old_map, 1, 1)));
+    write_u32_le(&mut original, 20, 8); // load command advertises more bytes than sizeofcmds
+
+    assert!(plan_integrity_digest_update(&original, &old_map, &new_map).is_err());
+}
+
+#[test]
+fn overlapping_fat_slices_fail_closed() {
+    const ARM64: u32 = 0x0100_000c;
+    const X86_64: u32 = 0x0100_0007;
+    let old_map = map_pair(&"c5".repeat(32), &"d6".repeat(32));
+    let new_map = map_pair(&"e7".repeat(32), &"f8".repeat(32));
+    let (mut original, offsets) = fat32_macho(&[
+        (ARM64, thin_macho(ARM64, Some(&slot(&old_map, 1, 1)))),
+        (X86_64, thin_macho(X86_64, Some(&slot(&old_map, 1, 1)))),
+    ]);
+    write_u32_be(&mut original, 8 + 20 + 8, offsets[0] as u32);
+
+    let error = plan_integrity_digest_update(&original, &old_map, &new_map)
+        .expect_err("overlapping fat slices are ambiguous");
+    assert!(error.to_lowercase().contains("overlap"), "{error}");
 }
 
 #[test]

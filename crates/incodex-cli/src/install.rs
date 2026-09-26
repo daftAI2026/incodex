@@ -8,9 +8,9 @@ use incodex_core::{format_kv, format_ok, format_step, format_warn};
 #[cfg(test)]
 use incodex_macos::AppQuiescence;
 use incodex_macos::{
-    ditto, notify_launch_services, read_asar_integrity, read_plist_info, sign_app, verify_app,
-    verify_original_vendor_bundle, verify_patched_adhoc_bundle_deep_strict, write_asar_integrity,
-    OFFICIAL_BUNDLE_IDENTIFIER,
+    ditto, notify_launch_services, read_asar_integrity, read_plist_info,
+    sign_app_with_asar_integrity, verify_app, verify_original_vendor_bundle,
+    verify_patched_adhoc_bundle_deep_strict, write_asar_integrity, OFFICIAL_BUNDLE_IDENTIFIER,
 };
 use incodex_runtime_bundle::{ensure_current, loader_source, runtime_version};
 #[cfg(test)]
@@ -543,16 +543,15 @@ where
         Ok(result) => result,
         Err(error) => return Err(rollback_install(&mut tx, Some(&staged), error)),
     };
-    if let Err(error) = write_asar_integrity(&staged, &hash) {
-        return Err(rollback_install(&mut tx, Some(&staged), error));
-    }
     if let Err(error) = quiescence.ensure_quiescent(app) {
         return Err(rollback_install(&mut tx, Some(&staged), error));
     }
     if is_official_app(app, None) || verify_app(app) || app.join("Contents/MacOS").exists() {
-        if let Err(err) = sign_app(&staged) {
+        if let Err(err) = sign_app_with_asar_integrity(&staged, &hash) {
             return Err(rollback_install(&mut tx, Some(&staged), err));
         }
+    } else if let Err(error) = write_asar_integrity(&staged, &hash) {
+        return Err(rollback_install(&mut tx, Some(&staged), error));
     }
     progress.stage("Replacing the app");
     if let Err(error) = quiescence.ensure_quiescent(app) {
