@@ -711,6 +711,43 @@ fn classic_loader_requires_undefined_external_symbols_instead_of_defined_symbols
 }
 
 #[test]
+fn accepts_valid_symbol_name_suffixes_in_the_shared_lc_symtab_string_pool() {
+    const ARM64: u32 = 0x0100_000c;
+    const N_UNDF_EXT: u8 = 0x01;
+    let mut macho = thin_macho_with_cstrings_and_symbols(
+        ARM64,
+        "__TEXT",
+        "__cstring",
+        &["ChromeMain", "../../../../Codex Framework"],
+        &[("_prefix_dlopen", N_UNDF_EXT), ("_dlsym", N_UNDF_EXT)],
+    );
+
+    let symtab_command = MACH_HEADER_64_SIZE + SEGMENT_COMMAND_64_SIZE + SECTION_64_SIZE;
+    let symbol_offset = u32::from_le_bytes(
+        macho[symtab_command + 8..symtab_command + 12]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    let string_offset = u32::from_le_bytes(
+        macho[symtab_command + 16..symtab_command + 20]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    let suffix_index = 1 + "_prefix".len();
+    assert_eq!(
+        &macho[string_offset + suffix_index..string_offset + suffix_index + 8],
+        b"_dlopen\0"
+    );
+    assert_ne!(macho[string_offset + suffix_index - 1], 0);
+    write_u32_le(&mut macho, symbol_offset, suffix_index as u32);
+
+    assert_eq!(
+        dynamic_framework_load_paths(&macho).unwrap(),
+        ["../../../../Codex Framework"]
+    );
+}
+
+#[test]
 fn dynamic_loader_does_not_scan_outside_the_text_cstring_section() {
     const ARM64: u32 = 0x0100_000c;
     const N_UNDF_EXT: u8 = 0x01;
