@@ -322,14 +322,6 @@ pub fn sign_staged_app_with_asar_integrity(
     final_app: &Path,
     hash: &str,
 ) -> Result<(), String> {
-    let staged_info =
-        super::read_plist_info(staged_app).ok_or("staged app identity unavailable")?;
-    let staged_identifier = verified_host_identifier(staged_app, &staged_info.bundle_identifier)?;
-    let final_info = super::read_plist_info(final_app).ok_or("final app identity unavailable")?;
-    let final_identifier = verified_host_identifier(final_app, &final_info.bundle_identifier)?;
-    if staged_identifier != final_identifier {
-        return Err("staged and final app identities do not match".into());
-    }
     sign_app_impl(staged_app, Some(hash), Some(final_app))
 }
 
@@ -545,6 +537,15 @@ fn dependent_helper_updates(
         .ok_or("app identity unavailable")?
         .bundle_identifier;
     let app_identifier = verified_host_identifier(app, &app_identifier)?;
+    if let Some(final_app) = final_app {
+        let final_identifier = read_plist_info(final_app)
+            .ok_or("final app identity unavailable")?
+            .bundle_identifier;
+        let final_identifier = verified_host_identifier(final_app, &final_identifier)?;
+        if app_identifier != final_identifier {
+            return Err("staged and final app identities do not match".into());
+        }
+    }
     let namespace = format!("{app_identifier}.helper");
     let mut updates = Vec::new();
     for bundle in enumerate_component_paths(app)?
