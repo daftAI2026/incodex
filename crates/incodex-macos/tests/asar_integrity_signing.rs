@@ -281,6 +281,67 @@ fn host_signed_identity_cannot_be_spoofed_by_its_plist() {
     assert_signed_identity_mismatch_unchanged("host");
 }
 
+#[test]
+fn planned_asar_resource_patch_does_not_invalidate_the_unmodified_host_code_identity() {
+    let fixture = signed_fixture("com.openai.codex.helper.fixture");
+    fs::create_dir_all(fixture.app.join("Contents/Resources")).unwrap();
+    let asar = fixture.app.join("Contents/Resources/app.asar");
+    fs::write(&asar, b"original archive fixture").unwrap();
+    run(
+        "codesign",
+        &["--force", "--sign", "-", fixture.app.to_str().unwrap()],
+    );
+    verify_bundle_deep_strict(&fixture.app).unwrap();
+    // The installer edits ASAR in the stage before it calls the signing API.
+    fs::write(&asar, b"planned patched archive fixture").unwrap();
+    assert!(verify_bundle_deep_strict(&fixture.app).is_err());
+    run(
+        "codesign",
+        &[
+            "--verify",
+            "--strict",
+            "--ignore-resources",
+            fixture.app.to_str().unwrap(),
+        ],
+    );
+    sign_app_with_asar_integrity(&fixture.app, &"c".repeat(64)).unwrap();
+    verify_bundle_deep_strict(&fixture.app).unwrap();
+    assert_eq!(fs::read(&asar).unwrap(), b"planned patched archive fixture");
+    fs::remove_dir_all(&fixture.root).unwrap();
+}
+
+#[test]
+fn host_code_corruption_still_fails_before_signing() {
+    let fixture = signed_fixture("com.openai.codex.helper.fixture");
+    let executable = fixture.app.join("Contents/MacOS/ChatGPT");
+    let mut bytes = fs::read(&executable).unwrap();
+    bytes[4096] ^= 1;
+    fs::write(&executable, bytes).unwrap();
+    assert_rejection_unchanged(fixture, "signature verification failed");
+}
+
+#[test]
+fn host_plist_corruption_still_fails_even_when_resources_are_planned_to_change() {
+    let fixture = signed_fixture("com.openai.codex.helper.fixture");
+    let plist = fixture.app.join("Contents/Info.plist");
+    let original = fs::read_to_string(&plist).unwrap();
+    fs::write(
+        &plist,
+        original.replace("<string>1</string>", "<string>2</string>"),
+    )
+    .unwrap();
+    let probe = Command::new("codesign")
+        .args(["--verify", "--strict", "--ignore-resources"])
+        .arg(&fixture.app)
+        .output()
+        .unwrap();
+    assert!(
+        !probe.status.success(),
+        "Info.plist remains a sealed identity input"
+    );
+    assert_rejection_unchanged(fixture, "signature verification failed");
+}
+
 fn assert_signed_identity_mismatch_unchanged(role: &str) {
     let fixture = signed_fixture_with_loader("com.openai.codex.helper.renderer", true);
     if role == "helper" {
@@ -341,6 +402,8 @@ fn assert_signed_identity_mismatch_unchanged(role: &str) {
 fn assert_rejection_unchanged(fixture: SignedFixture, expected_error: &str) {
     let info_plist = fixture.app.join("Contents/Info.plist");
     let original_plist = fs::read(&info_plist).unwrap();
+    let host_binary = fixture.app.join("Contents/MacOS/ChatGPT");
+    let original_host = fs::read(&host_binary).unwrap();
     let original_framework = fs::read(&fixture.binary).unwrap();
     let original_helper = fs::read(&fixture.helper_binary).unwrap();
     let original_hashes = [
@@ -353,6 +416,7 @@ fn assert_rejection_unchanged(fixture: SignedFixture, expected_error: &str) {
         .expect_err("unknown or mismatched dependent must fail closed");
     assert!(error.contains(expected_error), "{error}");
     assert_eq!(fs::read(&info_plist).unwrap(), original_plist);
+    assert_eq!(fs::read(&host_binary).unwrap(), original_host);
     assert_eq!(fs::read(&fixture.binary).unwrap(), original_framework);
     assert_eq!(fs::read(&fixture.helper_binary).unwrap(), original_helper);
     assert_eq!(
