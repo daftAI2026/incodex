@@ -24,7 +24,7 @@ private struct PermissionSwiftCandidateVisualHelper {
     @MainActor
     private static func run(_ arguments: [String]) async throws {
         guard let command = arguments.first else {
-            throw VisualToolError(message: "expected preflight, app, windows, Settings window diagnostics, press, press-settings-placeholder, or snapshot")
+            throw VisualToolError(message: "expected preflight, app, windows, Settings window diagnostics, press, keyboard diagnostics, or snapshot")
         }
         switch command {
         case "preflight":
@@ -37,6 +37,7 @@ private struct PermissionSwiftCandidateVisualHelper {
                 "screenCaptureAlreadyGranted": screenCapture,
                 "accessibilityAlreadyGranted": accessibility,
                 "postEventAccessAlreadyGranted": CGPreflightPostEventAccess(),
+                "fullKeyboardAccessEnabled": NSApplication.shared.isFullKeyboardAccessEnabled,
                 "osVersion": "\(operatingSystem.majorVersion).\(operatingSystem.minorVersion).\(operatingSystem.patchVersion)",
                 "wallTime": ISO8601DateFormatter().string(from: Date()),
                 "monotonicSeconds": ProcessInfo.processInfo.systemUptime,
@@ -95,6 +96,8 @@ private struct PermissionSwiftCandidateVisualHelper {
             try pressButton(arguments, settingsPlaceholderDiagnostic: true)
         case "keyboard-allow":
             try activateInitialAllowByKeyboard(arguments)
+        case "keyboard-skip":
+            try activateInitialSkipByKeyboard(arguments)
         case "snapshot":
             guard arguments.count == 2 else {
                 throw VisualToolError(message: "snapshot requires OUTPUT_PNG_PATH")
@@ -550,6 +553,20 @@ private struct PermissionSwiftCandidateVisualHelper {
         }
     }
 
+    private struct SelectedInitialKeyboardWindow {
+        let element: AXUIElement
+        let windowID: Int
+        let title: String
+        let axBounds: CGRect
+        let cgBounds: CGRect
+        let cgRecord: [String: Any]
+    }
+
+    private struct InitialKeyboardFocus {
+        let summary: [String: Any]
+        let matchesSkip: Bool
+    }
+
     private static func exactSettingsCloseButton(for selected: SelectedSettingsWindow) throws -> ExactSettingsCloseButton {
         guard let rawButton = copyAttribute(selected.element, kAXCloseButtonAttribute as CFString),
               CFGetTypeID(rawButton) == AXUIElementGetTypeID() else {
@@ -827,10 +844,355 @@ private struct PermissionSwiftCandidateVisualHelper {
         ])
     }
 
+    @MainActor
+    private static func activateInitialSkipByKeyboard(_ arguments: [String]) throws {
+        guard arguments.count == 5, let pid = pid_t(arguments[1]) else {
+            throw VisualToolError(message: "keyboard-skip requires PID ALLOW_LABEL SKIP_LABEL INITIAL_WINDOW_TITLE")
+        }
+        let allowLabel = arguments[2]
+        let skipLabel = arguments[3]
+        let expectedWindowTitle = arguments[4]
+        try requireKeyboardEventAccess()
+        let selected = try exactInitialKeyboardWindow(pid: pid, expectedTitle: expectedWindowTitle, expectedWindowID: nil)
+        var allowButtons: [AXUIElement] = []
+        var skipButtons: [AXUIElement] = []
+        var visitCount = 0
+        collectButtons(selected.element, expectedTitle: allowLabel, depth: 0, visitCount: &visitCount, into: &allowButtons)
+        collectButtons(selected.element, expectedTitle: skipLabel, depth: 0, visitCount: &visitCount, into: &skipButtons)
+        guard allowButtons.count == 1, let allow = allowButtons.first,
+              skipButtons.count == 1, let skip = skipButtons.first else {
+            throw VisualToolError(message: "expected exactly one Allow and Skip AXButton inside the exact initial AXWindow; found Allow=\(allowButtons.count), Skip=\(skipButtons.count); no keyboard event was sent")
+        }
+        let allowSemantics = try initialButtonSemantics(
+            allow,
+            expectedLabel: allowLabel,
+            expectedWindowTitle: expectedWindowTitle,
+            expectedWindow: selected.element
+        )
+        let skipSemantics = try initialButtonSemantics(
+            skip,
+            expectedLabel: skipLabel,
+            expectedWindowTitle: expectedWindowTitle,
+            expectedWindow: selected.element
+        )
+        var keyboardKeys: [String] = []
+        var focusSteps: [[String: Any]] = []
+        let frontmostPIDBefore = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        var currentFocus = try guardedInitialKeyboardFocus(
+            pid: pid,
+            selected: selected,
+            expectedWindowID: selected.windowID,
+            skipButton: skip,
+            skipLabel: skipLabel
+        )
+        let result: (InitialKeyboardFocus, Bool, String, pid_t?, Bool?) -> [String: Any] = {
+            focus, spaceSent, status, frontmostAfterSpace, targetWindowPresentAfterSpace in
+            [
+                "ok": true,
+                "command": "keyboard-skip",
+                "diagnosticStatus": status,
+                "targetPID": Int(pid),
+                "expectedWindowTitle": expectedWindowTitle,
+                "focusedWindowTitleBefore": selected.title,
+                "frontmostPIDBefore": frontmostPIDBefore.map { Int($0) } as Any? ?? NSNull(),
+                "frontmostPIDAfterSpace": frontmostAfterSpace.map { Int($0) } as Any? ?? NSNull(),
+                "windowID": selected.windowID,
+                "windowBounds": rectObject(selected.axBounds),
+                "ownerCGWindow": selected.cgRecord,
+                "fullKeyboardAccessEnabled": NSApplication.shared.isFullKeyboardAccessEnabled,
+                "allowAXRole": allowSemantics["role"] ?? NSNull(),
+                "allowAXLabel": allowSemantics["label"] ?? NSNull(),
+                "allowAXEnabled": allowSemantics["enabled"] ?? NSNull(),
+                "skipAXRole": skipSemantics["role"] ?? NSNull(),
+                "skipAXLabel": skipSemantics["label"] ?? NSNull(),
+                "skipAXEnabled": skipSemantics["enabled"] ?? NSNull(),
+                "focusSteps": focusSteps,
+                "spaceFocusBefore": focus.summary,
+                "spaceTarget": spaceSent ? "Skip" : NSNull(),
+                "spaceEventSent": spaceSent,
+                "keyboardKeys": keyboardKeys,
+                "logicalKeyboardPresses": keyboardKeys.count,
+                "keyboardEventsPosted": keyboardKeys.count * 2,
+                "skipAXPressPerformed": false,
+                "postEventAccessPreflight": true,
+                "targetWindowPresentAfterSpace": targetWindowPresentAfterSpace.map { $0 as Any } ?? NSNull(),
+                "wallTime": ISO8601DateFormatter().string(from: Date()),
+                "monotonicSeconds": ProcessInfo.processInfo.systemUptime,
+            ]
+        }
+        // Tab one event at a time and stop as soon as the unique Skip AXButton is focused.
+        // The cap avoids an unbounded walk if the host's macOS keyboard-navigation mode skips buttons.
+        let maximumTabSteps = 12
+        for index in 0..<maximumTabSteps {
+            if index > 0 && currentFocus.matchesSkip { break }
+            let step = try postGuardedInitialKeyboardKey(
+                keyName: "Tab",
+                virtualKey: 48,
+                flags: [],
+                pid: pid,
+                selected: selected,
+                expectedWindowID: selected.windowID,
+                skipButton: skip,
+                skipLabel: skipLabel
+            )
+            keyboardKeys.append("Tab")
+            focusSteps.append(step.json)
+            currentFocus = step.after
+        }
+
+        guard currentFocus.matchesSkip else {
+            writeJSON(result(currentFocus, false, "skip-not-reached-by-tab", nil, nil))
+            return
+        }
+
+        let shiftTab = try postGuardedInitialKeyboardKey(
+            keyName: "Shift-Tab",
+            virtualKey: 48,
+            flags: .maskShift,
+            pid: pid,
+            selected: selected,
+            expectedWindowID: selected.windowID,
+            skipButton: skip,
+            skipLabel: skipLabel
+        )
+        keyboardKeys.append("Shift-Tab")
+        focusSteps.append(shiftTab.json)
+        guard !shiftTab.after.matchesSkip else {
+            writeJSON(result(shiftTab.after, false, "shift-tab-did-not-leave-skip", nil, nil))
+            return
+        }
+
+        let returnToSkip = try postGuardedInitialKeyboardKey(
+            keyName: "Tab",
+            virtualKey: 48,
+            flags: [],
+            pid: pid,
+            selected: selected,
+            expectedWindowID: selected.windowID,
+            skipButton: skip,
+            skipLabel: skipLabel
+        )
+        keyboardKeys.append("Tab")
+        focusSteps.append(returnToSkip.json)
+        guard returnToSkip.after.matchesSkip else {
+            writeJSON(result(returnToSkip.after, false, "tab-did-not-return-to-skip", nil, nil))
+            return
+        }
+
+        // This is the final exact-window/focus/access gate before the only Space event.
+        let spaceFocus = try guardedInitialKeyboardFocus(
+            pid: pid,
+            selected: selected,
+            expectedWindowID: selected.windowID,
+            skipButton: skip,
+            skipLabel: skipLabel
+        )
+        guard spaceFocus.matchesSkip else {
+            writeJSON(result(spaceFocus, false, "skip-focus-changed-before-space", nil, nil))
+            return
+        }
+        guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 49, keyDown: true),
+              let up = CGEvent(keyboardEventSource: nil, virtualKey: 49, keyDown: false) else {
+            throw VisualToolError(message: "could not construct the Space key event; no Space was sent")
+        }
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+        keyboardKeys.append("Space")
+        Thread.sleep(forTimeInterval: 0.12)
+
+        let remainingWindow = windowRecords().first { record in
+            (record["ownerPID"] as? Int) == Int(pid) &&
+                (record["windowID"] as? Int) == selected.windowID &&
+                (record["layer"] as? Int) == 3 &&
+                (record["alpha"] as? Double ?? 0) > 0
+        }
+        writeJSON(result(spaceFocus, true, "space-sent-to-focused-skip", NSWorkspace.shared.frontmostApplication?.processIdentifier, remainingWindow != nil))
+    }
+
+    private static func requireKeyboardEventAccess() throws {
+        guard AXIsProcessTrusted() else {
+            throw VisualToolError(message: "Accessibility control is not already authorized; no prompt was requested and no keyboard event was sent")
+        }
+        guard CGPreflightPostEventAccess() else {
+            throw VisualToolError(message: "CGPreflightPostEventAccess=false; no keyboard event was sent and no permission prompt was requested")
+        }
+    }
+
+    private static func exactInitialKeyboardWindow(
+        pid: pid_t,
+        expectedTitle: String,
+        expectedWindowID: Int?,
+    ) throws -> SelectedInitialKeyboardWindow {
+        let appElement = AXUIElementCreateApplication(pid)
+        let appWindows = copyAttribute(appElement, kAXWindowsAttribute as CFString) as? [AXUIElement] ?? []
+        let visibleCGWindows = windowRecords().filter { record in
+            guard (record["ownerPID"] as? Int) == Int(pid),
+                  (record["layer"] as? Int) == 3,
+                  (record["alpha"] as? Double ?? 0) > 0,
+                  let bounds = cgRect(record["bounds"]), bounds.width > 0, bounds.height > 0 else { return false }
+            if let expectedWindowID, (record["windowID"] as? Int) != expectedWindowID { return false }
+            return true
+        }
+        let matches = appWindows.compactMap { window -> SelectedInitialKeyboardWindow? in
+            let role = copyAttribute(window, kAXRoleAttribute as CFString) as? String ?? ""
+            let title = copyAttribute(window, kAXTitleAttribute as CFString) as? String ?? ""
+            guard role == (kAXWindowRole as String), title == expectedTitle,
+                  copyAttribute(window, kAXMinimizedAttribute as CFString) as? Bool != true,
+                  let axBounds = axRect(window) else { return nil }
+            let cgMatches = visibleCGWindows.filter { record in
+                guard let cgBounds = cgRect(record["bounds"]) else { return false }
+                return rectsMatch(axBounds, cgBounds, tolerance: 2)
+            }
+            guard cgMatches.count == 1, let cgRecord = cgMatches.first,
+                  let windowID = cgRecord["windowID"] as? Int,
+                  let cgBounds = cgRect(cgRecord["bounds"]) else { return nil }
+            return SelectedInitialKeyboardWindow(
+                element: window,
+                windowID: windowID,
+                title: title,
+                axBounds: axBounds,
+                cgBounds: cgBounds,
+                cgRecord: cgRecord
+            )
+        }
+        guard visibleCGWindows.count == 1, matches.count == 1, let selected = matches.first else {
+            throw VisualToolError(message: "initial keyboard diagnostic requires one exact visible candidate AXWindow/CGWindow pair for PID \(pid), title \(expectedTitle.debugDescription), expectedWindowID=\(expectedWindowID.map(String.init) ?? "unset"); visibleCGWindows=\(visibleCGWindows.count), exactPairs=\(matches.count)")
+        }
+        return selected
+    }
+
+    private static func guardInitialKeyboardWindowStillFocused(
+        pid: pid_t,
+        selected: SelectedInitialKeyboardWindow,
+        expectedWindowID: Int,
+    ) throws {
+        try requireKeyboardEventAccess()
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else {
+            throw VisualToolError(message: "frontmost PID changed; no further keyboard event was sent")
+        }
+        let current = try exactInitialKeyboardWindow(
+            pid: pid,
+            expectedTitle: selected.title,
+            expectedWindowID: expectedWindowID
+        )
+        guard current.windowID == expectedWindowID,
+              CFEqual(current.element, selected.element),
+              rectsMatch(current.axBounds, selected.axBounds, tolerance: 1),
+              rectsMatch(current.cgBounds, selected.cgBounds, tolerance: 2) else {
+            throw VisualToolError(message: "exact initial AXWindow/CGWindow identity or bounds changed; no further keyboard event was sent")
+        }
+        let appElement = AXUIElementCreateApplication(pid)
+        guard let focusedWindow = axElement(appElement, kAXFocusedWindowAttribute as CFString),
+              CFEqual(focusedWindow, selected.element),
+              (copyAttribute(focusedWindow, kAXTitleAttribute as CFString) as? String) == selected.title else {
+            throw VisualToolError(message: "AXFocusedWindow left the exact initial candidate window; no further keyboard event was sent")
+        }
+    }
+
+    private static func guardedInitialKeyboardFocus(
+        pid: pid_t,
+        selected: SelectedInitialKeyboardWindow,
+        expectedWindowID: Int,
+        skipButton: AXUIElement,
+        skipLabel: String,
+    ) throws -> InitialKeyboardFocus {
+        try guardInitialKeyboardWindowStillFocused(pid: pid, selected: selected, expectedWindowID: expectedWindowID)
+        let appElement = AXUIElementCreateApplication(pid)
+        guard let focusedWindow = axElement(appElement, kAXFocusedWindowAttribute as CFString),
+              CFEqual(focusedWindow, selected.element) else {
+            throw VisualToolError(message: "exact AXFocusedWindow changed while reading focus; no keyboard event was sent")
+        }
+        guard let focusedElement = axElement(appElement, kAXFocusedUIElementAttribute as CFString) else {
+            return InitialKeyboardFocus(
+                summary: ["available": false, "matchesSkip": false],
+                matchesSkip: false
+            )
+        }
+        let isWindow = CFEqual(focusedElement, selected.element)
+        if !isWindow {
+            guard let rawOwner = copyAttribute(focusedElement, kAXWindowAttribute as CFString),
+                  CFGetTypeID(rawOwner) == AXUIElementGetTypeID(),
+                  CFEqual(rawOwner, selected.element) else {
+                throw VisualToolError(message: "focused AXUIElement is not owned by the exact initial AXWindow; no further keyboard event was sent")
+            }
+        }
+        let role = copyAttribute(focusedElement, kAXRoleAttribute as CFString) as? String ?? ""
+        let labels = buttonTitles(focusedElement)
+        let matchesSkip = !isWindow && CFEqual(focusedElement, skipButton) &&
+            role == (kAXButtonRole as String) && labels.contains(skipLabel) &&
+            copyAttribute(focusedElement, kAXEnabledAttribute as CFString) as? Bool == true &&
+            copyAttribute(focusedElement, kAXHiddenAttribute as CFString) as? Bool != true
+        let summary: [String: Any] = [
+            "available": true,
+            "role": role,
+            "label": matchesSkip ? skipLabel : (labels.first ?? ""),
+            "labels": labels,
+            "title": copyAttribute(focusedElement, kAXTitleAttribute as CFString) as? String as Any? ?? NSNull(),
+            "description": copyAttribute(focusedElement, kAXDescriptionAttribute as CFString) as? String as Any? ?? NSNull(),
+            "enabled": copyAttribute(focusedElement, kAXEnabledAttribute as CFString) as? Bool as Any? ?? NSNull(),
+            "focused": copyAttribute(focusedElement, kAXFocusedAttribute as CFString) as? Bool as Any? ?? NSNull(),
+            "isWindowElement": isWindow,
+            "ownerWindowID": expectedWindowID,
+            "matchesSkip": matchesSkip,
+            "skipUniqueWithinWindow": true,
+        ]
+        return InitialKeyboardFocus(summary: summary, matchesSkip: matchesSkip)
+    }
+
+    private struct InitialKeyboardFocusStep {
+        let json: [String: Any]
+        let after: InitialKeyboardFocus
+    }
+
+    private static func postGuardedInitialKeyboardKey(
+        keyName: String,
+        virtualKey: CGKeyCode,
+        flags: CGEventFlags,
+        pid: pid_t,
+        selected: SelectedInitialKeyboardWindow,
+        expectedWindowID: Int,
+        skipButton: AXUIElement,
+        skipLabel: String,
+    ) throws -> InitialKeyboardFocusStep {
+        let before = try guardedInitialKeyboardFocus(
+            pid: pid,
+            selected: selected,
+            expectedWindowID: expectedWindowID,
+            skipButton: skipButton,
+            skipLabel: skipLabel
+        )
+        guard let down = CGEvent(keyboardEventSource: nil, virtualKey: virtualKey, keyDown: true),
+              let up = CGEvent(keyboardEventSource: nil, virtualKey: virtualKey, keyDown: false) else {
+            throw VisualToolError(message: "could not construct the \(keyName) key event; no key was sent")
+        }
+        down.flags = flags
+        up.flags = flags
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+        Thread.sleep(forTimeInterval: 0.12)
+        let after = try guardedInitialKeyboardFocus(
+            pid: pid,
+            selected: selected,
+            expectedWindowID: expectedWindowID,
+            skipButton: skipButton,
+            skipLabel: skipLabel
+        )
+        return InitialKeyboardFocusStep(
+            json: [
+                "key": keyName,
+                "windowID": expectedWindowID,
+                "before": before.summary,
+                "after": after.summary,
+            ],
+            after: after
+        )
+    }
+
     private static func initialButtonSemantics(
         _ button: AXUIElement,
         expectedLabel: String,
         expectedWindowTitle: String,
+        expectedWindow: AXUIElement? = nil,
     ) throws -> [String: Any] {
         let role = copyAttribute(button, kAXRoleAttribute as CFString) as? String
         guard role == (kAXButtonRole as String) else {
@@ -849,8 +1211,9 @@ private struct PermissionSwiftCandidateVisualHelper {
         }
         let window = unsafeBitCast(rawWindow, to: AXUIElement.self)
         let windowTitle = copyAttribute(window, kAXTitleAttribute as CFString) as? String ?? ""
-        guard windowTitle == expectedWindowTitle else {
-            throw VisualToolError(message: "initial control \(expectedLabel.debugDescription) belongs to an unexpected AXWindow; Return was not sent")
+        guard windowTitle == expectedWindowTitle,
+              expectedWindow.map({ CFEqual(window, $0) }) ?? true else {
+            throw VisualToolError(message: "initial control \(expectedLabel.debugDescription) belongs to an unexpected AXWindow; no keyboard event was sent")
         }
         var actions: CFArray?
         let actionResult = AXUIElementCopyActionNames(button, &actions)

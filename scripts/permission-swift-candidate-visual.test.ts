@@ -41,6 +41,18 @@ test("initial keyboard Allow diagnostic cannot bypass the visible-run gates", ()
   expect(result.stdout + result.stderr).not.toContain("Opt-in accepted");
 });
 
+test("initial Tab/Shift-Tab/Space Skip diagnostic is separate and cannot bypass the visible-run gates", () => {
+  const result = spawnSync("bun", [script, "--diagnose-initial-tab-skip"], { encoding: "utf8", timeout: 10_000 });
+  expect(result.status).toBe(2);
+  expect(result.stdout + result.stderr).toContain("--run --acknowledge-visible-ui");
+  expect(result.stdout + result.stderr).not.toContain("Opt-in accepted");
+
+  const combined = spawnSync("bun", [script, "--diagnose-initial-keyboard", "--diagnose-initial-tab-skip"], { encoding: "utf8", timeout: 10_000 });
+  expect(combined.status).toBe(2);
+  expect(combined.stdout + combined.stderr).toContain("keyboard diagnostics cannot be combined");
+  expect(combined.stdout + combined.stderr).not.toContain("Opt-in accepted");
+});
+
 test("Settings window mutation diagnostics are recognized and refused without the visible-run gates", () => {
   for (const flag of ["--diagnose-settings-move", "--diagnose-settings-close-during-back"]) {
     const result = spawnSync("bun", [script, flag], { encoding: "utf8", timeout: 10_000 });
@@ -190,6 +202,31 @@ test("initial keyboard diagnostic records Allow and Skip focus, then activates A
   expect(helperSource).toContain("up.post(tap: .cghidEventTap)");
   expect(helperSource).not.toContain("CGRequestPostEventAccess");
   expect(source.indexOf("preflight.postEventAccessAlreadyGranted !== true")).toBeLessThan(source.indexOf("await waitForOfficialApp("));
+});
+
+test("initial Skip keyboard diagnostic gates every key by the exact initial window and reports one Later only", () => {
+  const source = readFileSync(script, "utf8");
+  const helperSource = readFileSync(helper, "utf8");
+  expect(source).toContain("diagnoseInitialTabSkip: false");
+  expect(source).toContain("--diagnose-initial-tab-skip");
+  expect(source).toContain("assertInitialSkipKeyboardResult");
+  expect(source).toContain("assertInitialSkipKeyboardCallbacks");
+  expect(source).toContain('type: "initial-keyboard-skip"');
+  expect(source).toContain("initialCountsAfter.later !== 1");
+  expect(source).toContain("initialCountsAfter.allow !== 0 || initialCountsAfter.retry !== 0");
+  expect(helperSource).toContain('case "keyboard-skip":');
+  expect(helperSource).toContain("kAXFocusedWindowAttribute");
+  expect(helperSource).toContain("kAXFocusedUIElementAttribute");
+  expect(helperSource).toContain("expectedWindowID");
+  expect(helperSource).toContain("windowRecords()");
+  expect(helperSource).toContain('virtualKey: 48');
+  expect(helperSource).toContain('virtualKey: 49');
+  expect(helperSource).toContain(".maskShift");
+  expect(helperSource).toContain('"spaceTarget": spaceSent ? "Skip" : NSNull()');
+  expect(helperSource).toContain("isFullKeyboardAccessEnabled");
+  expect(helperSource).toContain('"fullKeyboardAccessEnabled": NSApplication.shared.isFullKeyboardAccessEnabled');
+  expect(helperSource).not.toContain("CGRequestPostEventAccess");
+  expect(source.indexOf('type: "initial-keyboard-skip"')).toBeLessThan(source.indexOf("assertInitialSkipKeyboardResult(keyboardSkip"));
 });
 
 test("Back and Settings placeholder presses report one enabled AXButton with AXPress", () => {

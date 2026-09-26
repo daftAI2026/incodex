@@ -28,6 +28,7 @@ type Options = {
   run: boolean;
   acknowledgeVisibleUI: boolean;
   diagnoseInitialKeyboard: boolean;
+  diagnoseInitialTabSkip: boolean;
   diagnosePlaceholderAXPress: boolean;
   diagnoseSettingsMove: boolean;
   diagnoseSettingsCloseDuringBack: boolean;
@@ -39,7 +40,7 @@ type Options = {
 
 type HostMessage = { nonce: string; type: string; message?: string; locale?: string };
 type HelperResult = Record<string, unknown> & { ok?: boolean; error?: string };
-type HostEventCounts = { allow: number; retry: number };
+type HostEventCounts = { allow: number; retry: number; later: number };
 type WindowBounds = { x: number; y: number; width: number; height: number };
 type SettingsWindow = HelperResult & { pid: number; windowID: number; bounds: WindowBounds; title: string };
 type InitialSettingsState = { wasOpen: boolean; pid?: number; window?: SettingsWindow };
@@ -59,6 +60,7 @@ function usage(): string {
     "By default it uses one AXPress each for Allow and Back in the temporary candidate host.",
     "Optional: --diagnose-initial-keyboard reads Allow/Skip focus and sends one Return to Allow",
     "in place of AXPress; the helper must see the candidate's normal initial window frontmost.",
+    "Optional: --diagnose-initial-tab-skip records single-step Tab/Shift-Tab focus and sends Space only to the unique focused Skip button.",
     "Optional: --diagnose-placeholder-axpress AXPresses the exact Settings placeholder once",
     "after verifying its AXButton identity, production initial window, and Settings occlusion.",
     "Optional: --diagnose-settings-move moves the exact selected Settings main window by at most 24×16 points during the forward flight, then restores its original rectangle.",
@@ -80,6 +82,7 @@ function parseArguments(args: string[]): Options {
     run: false,
     acknowledgeVisibleUI: false,
     diagnoseInitialKeyboard: false,
+    diagnoseInitialTabSkip: false,
     diagnosePlaceholderAXPress: false,
     diagnoseSettingsMove: false,
     diagnoseSettingsCloseDuringBack: false,
@@ -92,6 +95,7 @@ function parseArguments(args: string[]): Options {
     if (argument === "--run") options.run = true;
     else if (argument === "--acknowledge-visible-ui") options.acknowledgeVisibleUI = true;
     else if (argument === "--diagnose-initial-keyboard") options.diagnoseInitialKeyboard = true;
+    else if (argument === "--diagnose-initial-tab-skip") options.diagnoseInitialTabSkip = true;
     else if (argument === "--diagnose-placeholder-axpress") options.diagnosePlaceholderAXPress = true;
     else if (argument === "--diagnose-settings-move") options.diagnoseSettingsMove = true;
     else if (argument === "--diagnose-settings-close-during-back") options.diagnoseSettingsCloseDuringBack = true;
@@ -113,10 +117,13 @@ function parseArguments(args: string[]): Options {
       throw new Error(`unknown option: ${argument}`);
     }
   }
-  if (options.selfTest && (options.run || options.acknowledgeVisibleUI || options.diagnoseInitialKeyboard || options.diagnosePlaceholderAXPress || options.diagnoseSettingsMove || options.diagnoseSettingsCloseDuringBack || options.outputDirectory)) {
+  if (options.diagnoseInitialTabSkip && (options.diagnoseInitialKeyboard || options.diagnosePlaceholderAXPress || options.diagnoseSettingsMove || options.diagnoseSettingsCloseDuringBack)) {
+    throw new Error("keyboard diagnostics cannot be combined with other input or Settings diagnostics");
+  }
+  if (options.selfTest && (options.run || options.acknowledgeVisibleUI || options.diagnoseInitialKeyboard || options.diagnoseInitialTabSkip || options.diagnosePlaceholderAXPress || options.diagnoseSettingsMove || options.diagnoseSettingsCloseDuringBack || options.outputDirectory)) {
     throw new Error("--self-test cannot be combined with visible-run options");
   }
-  if (options.help && (options.run || options.acknowledgeVisibleUI || options.diagnoseInitialKeyboard || options.diagnosePlaceholderAXPress || options.diagnoseSettingsMove || options.diagnoseSettingsCloseDuringBack || options.outputDirectory)) {
+  if (options.help && (options.run || options.acknowledgeVisibleUI || options.diagnoseInitialKeyboard || options.diagnoseInitialTabSkip || options.diagnosePlaceholderAXPress || options.diagnoseSettingsMove || options.diagnoseSettingsCloseDuringBack || options.outputDirectory)) {
     throw new Error("--help cannot be combined with visible-run options");
   }
   return options;
@@ -142,19 +149,80 @@ function validateRunOptIn(options: Options): string {
 function selfTest(): void {
   let rejected = false;
   try {
-    validateRunOptIn({ run: true, acknowledgeVisibleUI: false, diagnoseInitialKeyboard: false, diagnosePlaceholderAXPress: false, diagnoseSettingsMove: false, diagnoseSettingsCloseDuringBack: false, selfTest: false, help: false, outputDirectory: "/private/tmp/example", timeoutSeconds: 45 });
+    validateRunOptIn({ run: true, acknowledgeVisibleUI: false, diagnoseInitialKeyboard: false, diagnoseInitialTabSkip: false, diagnosePlaceholderAXPress: false, diagnoseSettingsMove: false, diagnoseSettingsCloseDuringBack: false, selfTest: false, help: false, outputDirectory: "/private/tmp/example", timeoutSeconds: 45 });
   } catch (error) {
     rejected = error instanceof Error && error.message.includes("--acknowledge-visible-ui");
   }
   if (!rejected) throw new Error("missing visible-UI opt-in was not refused");
-  assertPlaceholderCallbackCounts({ allow: 1, retry: 0 }, { allow: 1, retry: 1 });
+  assertPlaceholderCallbackCounts({ allow: 1, retry: 0, later: 0 }, { allow: 1, retry: 1, later: 0 });
   let callbackMismatchRejected = false;
   try {
-    assertPlaceholderCallbackCounts({ allow: 1, retry: 0 }, { allow: 2, retry: 2 });
+    assertPlaceholderCallbackCounts({ allow: 1, retry: 0, later: 0 }, { allow: 2, retry: 2, later: 0 });
   } catch {
     callbackMismatchRejected = true;
   }
   if (!callbackMismatchRejected) throw new Error("placeholder callback count mismatch was not refused");
+  assertInitialSkipKeyboardCallbacks(
+    { allow: 0, retry: 0, later: 0 },
+    { allow: 0, retry: 0, later: 1 },
+  );
+  let skipCallbackMismatchRejected = false;
+  try {
+    assertInitialSkipKeyboardCallbacks(
+      { allow: 0, retry: 0, later: 0 },
+      { allow: 1, retry: 0, later: 1 },
+    );
+  } catch {
+    skipCallbackMismatchRejected = true;
+  }
+  if (!skipCallbackMismatchRejected) throw new Error("Skip keyboard callback mismatch was not refused");
+  let incompleteSkipClassified = false;
+  try {
+    assertInitialSkipKeyboardResult({
+      command: "keyboard-skip",
+      diagnosticStatus: "skip-not-reached-by-tab",
+      spaceTarget: null,
+      spaceEventSent: false,
+      skipAXPressPerformed: false,
+    }, "Allow", "Skip", "Enable ChatGPT scripting");
+  } catch (error) {
+    incompleteSkipClassified = error instanceof Error && error.message.includes("this is not a product-defect finding");
+  }
+  if (!incompleteSkipClassified) throw new Error("unfocused Skip must be classified as an incomplete diagnostic, not an incorrect activation");
+  assertInitialSkipKeyboardResult({
+    command: "keyboard-skip",
+    diagnosticStatus: "space-sent-to-focused-skip",
+    spaceTarget: "Skip",
+    spaceEventSent: true,
+    skipAXPressPerformed: false,
+    targetPID: 123,
+    frontmostPIDBefore: 123,
+    expectedWindowTitle: "Enable ChatGPT scripting",
+    focusedWindowTitleBefore: "Enable ChatGPT scripting",
+    windowID: 456,
+    allowAXRole: "AXButton",
+    allowAXLabel: "Allow",
+    allowAXEnabled: true,
+    skipAXRole: "AXButton",
+    skipAXLabel: "Skip",
+    skipAXEnabled: true,
+    keyboardKeys: ["Tab", "Shift-Tab", "Tab", "Space"],
+    logicalKeyboardPresses: 4,
+    keyboardEventsPosted: 8,
+    focusSteps: [
+      { key: "Tab", windowID: 456, before: {}, after: {} },
+      { key: "Shift-Tab", windowID: 456, before: {}, after: {} },
+      { key: "Tab", windowID: 456, before: {}, after: { matchesSkip: true } },
+    ],
+    spaceFocusBefore: {
+      matchesSkip: true,
+      skipUniqueWithinWindow: true,
+      ownerWindowID: 456,
+      role: "AXButton",
+      label: "Skip",
+      enabled: true,
+    },
+  }, "Allow", "Skip", "Enable ChatGPT scripting");
   assertInitialAllowKeyboardResult({
     command: "keyboard-allow",
     keyboardKey: "Return",
@@ -179,7 +247,17 @@ function hostEventCounts(events: HostMessage[]): HostEventCounts {
   return {
     allow: events.filter((event) => event.type === "allow").length,
     retry: events.filter((event) => event.type === "retry").length,
+    later: events.filter((event) => event.type === "later").length,
   };
+}
+
+function assertInitialSkipKeyboardCallbacks(before: HostEventCounts, after: HostEventCounts): void {
+  if (before.allow !== 0 || before.retry !== 0 || before.later !== 0) {
+    throw new Error(`initial Skip keyboard diagnostic requires a clean callback baseline: ${JSON.stringify(before)}`);
+  }
+  if (after.later !== 1 || after.allow !== 0 || after.retry !== 0) {
+    throw new Error(`initial Space on Skip must produce later=1, allow=0, retry=0: ${JSON.stringify(after)}`);
+  }
 }
 
 function assertPlaceholderCallbackCounts(before: HostEventCounts, after: HostEventCounts): void {
@@ -235,6 +313,44 @@ function assertInitialAllowKeyboardResult(result: HelperResult, expectedAllow: s
   }
   if (result.focusedWindowTitleBefore !== result.expectedWindowTitle || result.frontmostPIDBefore !== result.targetPID) {
     throw new Error(`initial Return was not scoped to the frontmost candidate initial window: ${JSON.stringify(result)}`);
+  }
+}
+
+function assertInitialSkipKeyboardResult(result: HelperResult, expectedAllow: string, expectedSkip: string, expectedTitle: string): void {
+  const focusSteps = result.focusSteps as Array<Record<string, unknown>> | undefined;
+  const keyboardKeys = result.keyboardKeys as string[] | undefined;
+  const spaceFocus = result.spaceFocusBefore as Record<string, unknown> | undefined;
+  const windowID = result.windowID;
+  if (result.command !== "keyboard-skip" || result.skipAXPressPerformed !== false) {
+    throw new Error(`initial Skip diagnostic used an unexpected command or AXPress: ${JSON.stringify(result)}`);
+  }
+  if (result.diagnosticStatus !== "space-sent-to-focused-skip" || result.spaceEventSent !== true) {
+    throw new Error(`initial keyboard diagnostic is incomplete (${String(result.diagnosticStatus)}); Space was not sent unless Skip was uniquely focused; this is not a product-defect finding: ${JSON.stringify(result)}`);
+  }
+  if (result.spaceTarget !== "Skip") {
+    throw new Error(`initial Skip diagnostic did not target Space on the focused Skip button: ${JSON.stringify(result)}`);
+  }
+  if (result.allowAXRole !== "AXButton" || result.allowAXLabel !== expectedAllow || result.allowAXEnabled !== true ||
+      result.skipAXRole !== "AXButton" || result.skipAXLabel !== expectedSkip || result.skipAXEnabled !== true) {
+    throw new Error(`initial Allow/Skip AX semantics did not match the selected copy: ${JSON.stringify(result)}`);
+  }
+  if (result.expectedWindowTitle !== expectedTitle || result.focusedWindowTitleBefore !== expectedTitle ||
+      result.targetPID !== result.frontmostPIDBefore || !Number.isInteger(windowID)) {
+    throw new Error(`initial Tab/Space diagnostic did not bind the frontmost initial window: ${JSON.stringify(result)}`);
+  }
+  const focusKeys = keyboardKeys?.filter((key) => key !== "Space") ?? [];
+  if (!keyboardKeys?.includes("Tab") || !keyboardKeys.includes("Shift-Tab") || keyboardKeys.at(-2) !== "Tab" || keyboardKeys.at(-1) !== "Space" ||
+      result.logicalKeyboardPresses !== keyboardKeys.length || result.keyboardEventsPosted !== keyboardKeys.length * 2) {
+    throw new Error(`initial Skip diagnostic did not report the complete single-key sequence: ${JSON.stringify(result)}`);
+  }
+  if (!Array.isArray(focusSteps) || focusSteps.length < 3 ||
+      focusSteps.length !== focusKeys.length ||
+      focusSteps.some((step, index) => step.windowID !== windowID || step.key !== focusKeys[index] || !step.before || !step.after) ||
+      (focusSteps.at(-1)?.after as Record<string, unknown> | undefined)?.matchesSkip !== true ||
+      spaceFocus?.matchesSkip !== true || spaceFocus.skipUniqueWithinWindow !== true ||
+      spaceFocus.ownerWindowID !== windowID || spaceFocus.role !== "AXButton" ||
+      spaceFocus.label !== expectedSkip || spaceFocus.enabled !== true) {
+    throw new Error(`initial Skip focus steps were not bound to the unique focused AXButton/window: ${JSON.stringify(result)}`);
   }
 }
 
@@ -715,7 +831,7 @@ async function visibleRun(options: Options): Promise<void> {
     const preflight = helperCall(binaries.helper, ["preflight"]);
     if (preflight.screenCaptureAlreadyGranted !== true) throw new Error("Screen Recording is not already authorized for this helper; refused before app launch, no request was made");
     if (preflight.accessibilityAlreadyGranted !== true) throw new Error("Accessibility control is not already authorized for this helper; refused before app launch, no request was made");
-    if (options.diagnoseInitialKeyboard && preflight.postEventAccessAlreadyGranted !== true) {
+    if ((options.diagnoseInitialKeyboard || options.diagnoseInitialTabSkip) && preflight.postEventAccessAlreadyGranted !== true) {
       throw new Error("CGPreflightPostEventAccess is false for the keyboard diagnostic helper; refused before app launch, no permission prompt was requested");
     }
     if (Number(String(preflight.osVersion).split(".")[0]) < 14) throw new Error("this read-only screen-capture harness requires macOS 14 or later");
@@ -742,6 +858,7 @@ async function visibleRun(options: Options): Promise<void> {
       installedApplicationsChanged: false,
       manualT01DragIncluded: false,
       initialKeyboardDiagnostic: options.diagnoseInitialKeyboard,
+      initialKeyboardTabSkipDiagnostic: options.diagnoseInitialTabSkip,
       placeholderAXPressDiagnostic: options.diagnosePlaceholderAXPress,
       settingsMoveDiagnostic: options.diagnoseSettingsMove,
       settingsCloseDuringBackDiagnostic: options.diagnoseSettingsCloseDuringBack,
@@ -792,8 +909,42 @@ async function visibleRun(options: Options): Promise<void> {
     const allowLabel = selected.copy.repair ?? "Allow";
     const skipLabel = selected.copy.later ?? "Skip";
     const initialCountsBefore = hostEventCounts(hostClient.events);
-    if (initialCountsBefore.allow !== 0 || initialCountsBefore.retry !== 0 || hostClient.events.some((event) => event.type === "later")) {
-      throw new Error(`initial permission page already emitted an action before Allow: ${JSON.stringify(initialCountsBefore)}`);
+    if (initialCountsBefore.allow !== 0 || initialCountsBefore.retry !== 0 || initialCountsBefore.later !== 0) {
+      throw new Error(`initial permission page already emitted an action before keyboard input: ${JSON.stringify(initialCountsBefore)}`);
+    }
+    if (options.diagnoseInitialTabSkip) {
+      const keyboardSkip = helperCall(binaries.helper, [
+        "keyboard-skip",
+        String(hostChild.pid),
+        allowLabel,
+        skipLabel,
+        selected.copy.title ?? "Enable ChatGPT scripting",
+      ], options.timeoutSeconds * 1000);
+      record(outputDirectory, {
+        type: "initial-keyboard-skip",
+        hostPID: hostChild.pid,
+        callbackCountsBefore: initialCountsBefore,
+        result: keyboardSkip,
+        axPressPerformed: false,
+      });
+      assertInitialSkipKeyboardResult(keyboardSkip, allowLabel, skipLabel, selected.copy.title ?? "Enable ChatGPT scripting");
+      const laterEvent = await hostClient.waitFor(
+        (message) => ["allow", "later", "retry", "error"].includes(message.type),
+        options.timeoutSeconds * 1000,
+      );
+      if (laterEvent.type !== "later") {
+        throw new Error(`expected exactly one Space-triggered Skip callback, received ${laterEvent.type}${laterEvent.message ? `: ${laterEvent.message}` : ""}`);
+      }
+      await delay(200);
+      const initialCountsAfter = hostEventCounts(hostClient.events);
+      if (initialCountsAfter.later !== 1) throw new Error(`expected initialCountsAfter.later !== 1 to be false; got ${JSON.stringify(initialCountsAfter)}`);
+      if (initialCountsAfter.allow !== 0 || initialCountsAfter.retry !== 0) {
+        throw new Error(`Space on Skip must not emit Allow or Retry: ${JSON.stringify(initialCountsAfter)}`);
+      }
+      assertInitialSkipKeyboardCallbacks(initialCountsBefore, initialCountsAfter);
+      record(outputDirectory, { type: "initial-keyboard-skip-callback-check", before: initialCountsBefore, after: initialCountsAfter, passed: true });
+      resultStatus = "passed-diagnostic-only";
+      return;
     }
     if (options.diagnoseInitialKeyboard) {
       const keyboardAllow = helperCall(binaries.helper, [
@@ -820,16 +971,15 @@ async function visibleRun(options: Options): Promise<void> {
     if (allowEvent.type !== "allow") throw new Error(`expected exactly one Allow event, received ${allowEvent.type}`);
     await delay(200);
     const initialCountsAfter = hostEventCounts(hostClient.events);
-    const initialLaterCount = hostClient.events.filter((event) => event.type === "later").length;
-    if (initialCountsAfter.allow !== 1 || initialCountsAfter.retry !== 0 || initialLaterCount !== 0) {
-      throw new Error(`initial Allow action did not produce exactly one Allow callback: before=${JSON.stringify(initialCountsBefore)} after=${JSON.stringify(initialCountsAfter)} later=${initialLaterCount}`);
+    if (initialCountsAfter.allow !== 1 || initialCountsAfter.retry !== 0 || initialCountsAfter.later !== 0) {
+      throw new Error(`initial Allow action did not produce exactly one Allow callback: before=${JSON.stringify(initialCountsBefore)} after=${JSON.stringify(initialCountsAfter)}`);
     }
     record(outputDirectory, {
       type: "initial-allow-callback-check",
       action: options.diagnoseInitialKeyboard ? "Return keyboard event; no Allow AXPress" : "one Allow AXPress",
       before: initialCountsBefore,
       after: initialCountsAfter,
-      later: initialLaterCount,
+      later: initialCountsAfter.later,
       passed: true,
     });
 
@@ -1035,6 +1185,7 @@ async function visibleRun(options: Options): Promise<void> {
           status: resultStatus,
           error: errorText,
           initialKeyboardDiagnostic: options.diagnoseInitialKeyboard,
+          initialKeyboardTabSkipDiagnostic: options.diagnoseInitialTabSkip,
           placeholderAXPressDiagnostic: options.diagnosePlaceholderAXPress,
           settingsMoveDiagnostic: options.diagnoseSettingsMove,
           settingsCloseDuringBackDiagnostic: options.diagnoseSettingsCloseDuringBack,
@@ -1081,7 +1232,9 @@ async function main(): Promise<void> {
     return;
   }
   try {
-    process.stdout.write("Opt-in accepted. This will open ChatGPT and System Settings and save full primary-display screenshots. No permission pane will be clicked; Settings window changes run only with their explicit diagnostic flags.\n");
+    process.stdout.write(options.diagnoseInitialTabSkip
+      ? "Opt-in accepted. This will open ChatGPT and capture one full-display screenshot. Tab, Shift-Tab, and Space are sent only to the exact focused candidate window; Settings and AXPress are not used.\n"
+      : "Opt-in accepted. This will open ChatGPT and System Settings and save full primary-display screenshots. No permission pane will be clicked; Settings window changes run only with their explicit diagnostic flags.\n");
     await visibleRun(options);
     process.stdout.write(`Diagnostic visual run finished. Evidence retained at ${options.outputDirectory}\n`);
   } catch (error) {
