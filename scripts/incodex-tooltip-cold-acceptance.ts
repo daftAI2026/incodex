@@ -443,6 +443,24 @@ export async function waitForStableHitTest<T extends HitTestReadiness>(
   }
 }
 
+// Read only the recognized toolbar controls; never serialize page/chat text.
+export function headerStyleProbeExpression(): string {
+  const labels = JSON.stringify([...SEARCH_LABELS]);
+  return `(()=>{
+    const search=[...document.querySelectorAll('button[aria-label]')].find(e=>${labels}.includes((e.getAttribute('aria-label')||'').trim()));
+    const hat=document.querySelector('[data-incodex-privacy-toggle]');
+    const rect=e=>{if(!e)return null;const r=e.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}};
+    const style=e=>{if(!e)return null;const s=getComputedStyle(e);return Object.fromEntries(['width','height','padding','color','backgroundColor','borderRadius','strokeWidth','display','gap'].map(k=>[k,s[k]]))};
+    const info=e=>{if(!e)return null;const svg=e.querySelector('svg');const props={};for(const a of [...e.attributes])if(a.name==='class'||a.name==='style'||['data-size','data-color','data-variant','data-uniform','data-squircle'].includes(a.name))props[a.name]=a.value;
+      const ancestors=[];for(let n=svg?.parentElement;n&&n!==e&&ancestors.length<4;n=n.parentElement)ancestors.push({tag:n.tagName,class:n.getAttribute('class'),style:n.getAttribute('style'),bounds:rect(n)});
+      return{bounds:rect(e),props,computed:style(e),icon:svg?{bounds:rect(svg),class:svg.getAttribute('class'),style:svg.getAttribute('style'),width:svg.getAttribute('width'),height:svg.getAttribute('height'),viewBox:svg.getAttribute('viewBox'),strokeWidth:svg.getAttribute('stroke-width'),noAutosize:svg.getAttribute('data-no-autosize'),computed:style(svg),ancestors}:null}};
+    const trigger=search?.parentElement?.tagName==='SPAN'&&['closed','delayed-open','instant-open'].includes(search.parentElement.getAttribute('data-state'))?search.parentElement:search;
+    const group=trigger?.parentElement;
+    const siblings=group?[...group.children].slice(0,12).map(e=>({tag:e.tagName,class:e.getAttribute('class'),state:e.getAttribute('data-state'),isHat:e===hat,isSearch:e===trigger,buttonCount:e.tagName==='BUTTON'?1:e.querySelectorAll('button').length,bounds:rect(e)})):[];
+    return{schema:'toolbar-style-v1',hat:info(hat),search:info(search),group:group?{tag:group.tagName,class:group.getAttribute('class'),computed:style(group),siblings}:null};
+  })()`;
+}
+
 export function tooltipStateExpression(): string {
   const labels = JSON.stringify([...SEARCH_LABELS]);
   return `(()=>{
@@ -1089,6 +1107,7 @@ async function runAcceptance(options: Options): Promise<Record<string, unknown>>
       };
     }
 
+    report.toolbarStyle = await cdp.evaluate<Record<string, unknown>>(headerStyleProbeExpression());
     const outPoint = outsidePoint(initialState);
     const move = async (point: { x: number; y: number }) => {
       await cdp!.request("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y });
