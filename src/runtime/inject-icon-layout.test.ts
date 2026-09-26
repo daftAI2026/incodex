@@ -396,6 +396,29 @@ function layoutWrappers(button: FakeElement): FakeElement[] {
 }
 
 describe("8881 hat-glasses icon layout", () => {
+  test("preserves the live official SVG autosize opt-out instead of using Button's larger icon token", () => {
+    const document = new FakeDocument();
+    const { buildButton, setButtonHover } = makeRuntime();
+    const { search } = makeSearch(document, true);
+    const sample = search.querySelector("svg")!;
+    sample.setAttribute("data-no-autosize", "true");
+    const button = buildButton(search);
+
+    expect(button.querySelector("svg")?.getAttribute("data-no-autosize")).toBe("true");
+    setButtonHover(button, true);
+    expect(button.querySelector("svg")?.getAttribute("data-no-autosize")).toBe("true");
+    setButtonHover(button, false);
+    expect(button.querySelector("svg")?.getAttribute("data-no-autosize")).toBe("true");
+    expect(button.querySelector("svg")?.getAttribute("viewBox")).toBe("0 0 24 24");
+  });
+
+  test("does not force an SVG autosize opt-out when the official sample uses its Button token", () => {
+    const document = new FakeDocument();
+    const { buildButton } = makeRuntime();
+    const { search } = makeSearch(document, true);
+    expect(buildButton(search).querySelector("svg")?.hasAttribute("data-no-autosize")).toBe(false);
+  });
+
   test("retains the official Button styling tokens that size the hit target", () => {
     const document = new FakeDocument();
     const { buildButton } = makeRuntime();
