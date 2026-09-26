@@ -133,3 +133,76 @@ fn uninstall_refuses_symlink_backup_and_foreign_live() {
         .extract(LOADER_NAME)
         .is_ok());
 }
+
+fn install_with_redirected_user_root() -> (PathBuf, PathBuf, PathBuf, String) {
+    let sandbox = home();
+    let requested_home = sandbox.join("requested-home");
+    let backing_home = sandbox.join("backing-home");
+    fs::create_dir_all(&requested_home).unwrap();
+    fs::create_dir_all(&backing_home).unwrap();
+    let app = patchable_app(&sandbox);
+    let install_id = install(&backing_home, &app);
+    let backing_root = backing_home.join(".incodex");
+    fs::write(
+        backing_root.join("outside-root-canary"),
+        b"keep-external-data\n",
+    )
+    .unwrap();
+    symlink(&backing_root, requested_home.join(".incodex")).unwrap();
+    (sandbox, requested_home, backing_root, install_id)
+}
+
+#[test]
+fn uninstall_refuses_a_symlinked_user_root_without_touching_its_target() {
+    let (sandbox, requested_home, backing_root, install_id) = install_with_redirected_user_root();
+    let app = sandbox.join("ChatGPT.app");
+    let asar = app.join("Contents/Resources/app.asar");
+    let before = fs::read(&asar).unwrap();
+    let transaction = backing_root.join("transactions").join(&install_id);
+    let canary = backing_root.join("outside-root-canary");
+    let canary_before = fs::read(&canary).unwrap();
+
+    let (status, _stdout, stderr) = run(
+        &["uninstall", "--yes", "--app", app.to_str().unwrap()],
+        &requested_home,
+    );
+
+    assert!(
+        fs::read(&asar).unwrap() == before,
+        "uninstall changed the app through a symlinked user root"
+    );
+    assert!(
+        transaction.is_dir(),
+        "transaction was removed through symlink"
+    );
+    assert_eq!(fs::read(&canary).unwrap(), canary_before);
+    assert_eq!(status, 1, "symlinked user root was followed: {stderr}");
+    assert!(stderr.contains("symlink"), "{stderr}");
+}
+
+#[test]
+fn recover_refuses_a_symlinked_user_root_without_cleaning_its_target() {
+    let (_sandbox, requested_home, backing_root, install_id) = install_with_redirected_user_root();
+    let transaction = backing_root.join("transactions").join(&install_id);
+    let canary = backing_root.join("outside-root-canary");
+    let canary_before = fs::read(&canary).unwrap();
+    let journal = fs::read(transaction.join("journal.json")).unwrap();
+    fs::write(
+        backing_root
+            .join("transactions")
+            .join(format!(".cleanup-{install_id}.json")),
+        journal,
+    )
+    .unwrap();
+
+    let (status, _stdout, stderr) =
+        run(&["recover", "--transaction", &install_id], &requested_home);
+
+    assert!(
+        transaction.is_dir(),
+        "transaction was removed through symlink"
+    );
+    assert_eq!(fs::read(&canary).unwrap(), canary_before);
+    assert_eq!(status, 1, "symlinked user root was followed: {stderr}");
+    assert!(stderr.contains("symlink"), "{stderr}");
+}
