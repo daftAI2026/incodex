@@ -76,6 +76,7 @@ pub fn run_install(parsed: &ParsedCli) -> Result<(), String> {
     if !parsed.clone {
         crate::confirm::require("install", parsed.yes)?;
     }
+    incodex_transaction::validate_storage_root(&root)?;
     let official_default = is_official_app(&app, None);
     if parsed.clone && parsed.app.is_none() {
         progress.stage("Cloning official app");
@@ -255,6 +256,7 @@ pub fn run_uninstall(parsed: &ParsedCli) -> Result<(), String> {
     if !parsed.clone {
         crate::confirm::require("uninstall", parsed.yes)?;
     }
+    incodex_transaction::validate_storage_root(&root)?;
     if !app.exists() {
         return Err(format!("Codex app not found: {}", app.display()));
     }
@@ -290,6 +292,7 @@ pub fn run_recover(parsed: &ParsedCli) -> Result<(), String> {
         .transaction
         .as_deref()
         .ok_or("recover requires --transaction <id>\n  incodex recover --transaction <id>")?;
+    incodex_transaction::validate_storage_root(&root)?;
     let v2 = root.join("transactions").join(id).join("journal.json");
     let v1 = root.join("transactions").join(format!("{id}.json"));
     let cleanup_pending = terminal_cleanup_pending(&root, id);
@@ -353,11 +356,13 @@ pub fn run_recover(parsed: &ParsedCli) -> Result<(), String> {
 }
 
 pub(crate) fn restore_default_for_self_uninstall(progress: &mut Progress) -> Result<(), String> {
+    let root = user_root();
+    incodex_transaction::validate_storage_root(&root)?;
     let app = Path::new(DEFAULT_APP);
     let guard = AppGuard::for_app(app)?;
     progress.stage("Closing ChatGPT");
     guard.close_official()?;
-    uninstall_app_with_quiescence(app, &user_root(), progress, guard, true)
+    uninstall_app_with_quiescence(app, &root, progress, guard, true)
 }
 
 fn map_tx(err: TxError) -> String {
@@ -666,6 +671,7 @@ fn uninstall_app_with_quiescence<Q>(
 where
     Q: QuiescenceGuard + Clone,
 {
+    incodex_transaction::validate_storage_root(root)?;
     if !app.exists() {
         return Err(format!("Codex app not found: {}", app.display()));
     }

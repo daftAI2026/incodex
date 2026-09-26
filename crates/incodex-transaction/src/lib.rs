@@ -21,6 +21,23 @@ pub use uninstall::{
     restore_committed, restore_committed_with_checkpoint, restore_committed_with_quiescence,
 };
 
+/// Refuse a redirected or non-directory Incodex storage root without creating it.
+/// A missing root remains valid so callers retain their existing no-state behavior.
+pub fn validate_storage_root(root: &Path) -> Result<(), String> {
+    match fs::symlink_metadata(root) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            Err(format!("storage root is a symlink: {}", root.display()))
+        }
+        Ok(metadata) if !metadata.is_dir() => Err(format!(
+            "storage root is not a directory: {}",
+            root.display()
+        )),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("cannot inspect storage root: {error}")),
+    }
+}
+
 pub fn journal_v2(root: &Path, install_id: &str) -> Result<JournalV2, String> {
     journal::load_v2(root, install_id)
 }
