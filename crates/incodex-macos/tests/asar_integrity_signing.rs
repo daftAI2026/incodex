@@ -173,9 +173,8 @@ fn code_directory_hash(path: &Path) -> String {
         .to_owned()
 }
 
-#[test]
-fn signed_framework_digest_matches_the_updated_plist_without_disabling_validation() {
-    let fixture = signed_fixture("com.openai.codex.framework.AlertNotificationService");
+fn assert_signed_framework_digest_matches_updated_plist(helper_identifier: &str) {
+    let fixture = signed_fixture(helper_identifier);
     sign_app_with_asar_integrity(&fixture.app, &"c".repeat(64)).unwrap();
     verify_bundle_deep_strict(&fixture.app).unwrap();
     let helper_entitlements = read_entitlements(&fixture.helper).unwrap();
@@ -208,6 +207,18 @@ fn signed_framework_digest_matches_the_updated_plist_without_disabling_validatio
         actual_digest, expected,
         "deep codesign success does not prove Electron integrity consistency"
     );
+}
+
+#[test]
+fn framework_alert_notification_service_identity_is_supported() {
+    assert_signed_framework_digest_matches_updated_plist(
+        "com.openai.codex.framework.AlertNotificationService",
+    );
+}
+
+#[test]
+fn codex_helper_namespace_identity_remains_supported() {
+    assert_signed_framework_digest_matches_updated_plist("com.openai.codex.helper.fixture");
 }
 
 #[test]

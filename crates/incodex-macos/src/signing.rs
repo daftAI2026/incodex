@@ -320,6 +320,7 @@ pub fn sign_app(app: &Path) -> Result<(), String> {
 
 struct FrameworkDigestUpdate {
     bundle: PathBuf,
+    bundle_identifier: String,
     binary: PathBuf,
     bytes: Vec<u8>,
     entitlements: String,
@@ -368,12 +369,10 @@ fn dependent_helper_updates(
     if frameworks.is_empty() {
         return Ok(Vec::new());
     }
-    let namespace = format!(
-        "{}.helper",
-        read_plist_info(app)
-            .ok_or("app identity unavailable")?
-            .bundle_identifier
-    );
+    let app_identifier = read_plist_info(app)
+        .ok_or("app identity unavailable")?
+        .bundle_identifier;
+    let namespace = format!("{app_identifier}.helper");
     let mut updates = Vec::new();
     for bundle in enumerate_component_paths(app)?
         .into_iter()
@@ -423,11 +422,18 @@ fn dependent_helper_updates(
         if entitlement_enabled(&source, DISABLE_LIBRARY_VALIDATION)? {
             continue;
         }
-        // CUA sidecars do not use the verified Electron helper identity. An
-        // unknown dependent fails closed instead of broadening the signing scope.
-        if info.bundle_identifier != namespace
-            && !info.bundle_identifier.starts_with(&format!("{namespace}."))
-        {
+        // Chromium's notification helper has a Framework-derived identity,
+        // separate from Electron's .helper namespace. Admit only that exact
+        // role under the host's own Framework, never arbitrary Framework children.
+        let is_electron_helper = info.bundle_identifier == namespace
+            || info.bundle_identifier.starts_with(&format!("{namespace}."));
+        let is_notification_helper = framework.bundle_identifier
+            == format!("{app_identifier}.framework")
+            && info.bundle_identifier
+                == format!("{}.AlertNotificationService", framework.bundle_identifier);
+        // CUA sidecars are neither of these identities. An unknown dependent
+        // fails closed before any digest, metadata or signature changes.
+        if !is_electron_helper && !is_notification_helper {
             return Err(format!(
                 "protected or unknown helper requires changed framework: {}",
                 bundle.display()
@@ -484,6 +490,11 @@ fn framework_digest_updates(
         if let Some(bytes) =
             super::asar_integrity_digest::plan_integrity_digest_update(&bytes, old, new)?
         {
+            let bundle_identifier = raw
+                .get("CFBundleIdentifier")
+                .and_then(serde_json::Value::as_str)
+                .filter(|identifier| !identifier.is_empty())
+                .ok_or("framework has no CFBundleIdentifier")?;
             let source = read_entitlements(&bundle)?;
             let stripped = source
                 .keys
@@ -498,6 +509,7 @@ fn framework_digest_updates(
             };
             updates.push(FrameworkDigestUpdate {
                 hardened_runtime: has_hardened_runtime(&bundle),
+                bundle_identifier: bundle_identifier.to_string(),
                 bundle,
                 binary,
                 bytes,
