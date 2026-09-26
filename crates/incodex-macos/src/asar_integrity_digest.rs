@@ -90,6 +90,10 @@ pub(crate) fn plan_integrity_digest_update(
     Ok(Some(updated))
 }
 
+pub(crate) fn linked_dylib_paths(_bytes: &[u8]) -> Result<Vec<String>, String> {
+    Ok(Vec::new())
+}
+
 fn integrity_dictionary_digest(map: &Value) -> Result<[u8; SLOT_DIGEST_SIZE], String> {
     let entries = map
         .as_object()

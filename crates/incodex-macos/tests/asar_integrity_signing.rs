@@ -1,6 +1,6 @@
 #![cfg(target_os = "macos")]
 
-use incodex_macos::{sign_app_with_asar_integrity, verify_bundle_deep_strict};
+use incodex_macos::{read_entitlements, sign_app_with_asar_integrity, verify_bundle_deep_strict};
 use std::{
     fs,
     path::Path,
@@ -75,6 +75,15 @@ fn signed_framework_digest_matches_the_updated_plist_without_disabling_validatio
         "com.openai.codex",
         &integrity,
     );
+    let helper = framework.join("Helpers/LinkedHelper.app");
+    fs::create_dir_all(helper.join("Contents/MacOS")).unwrap();
+    write_plist(&helper.join("Contents/Info.plist"), "LinkedHelper", "com.openai.codex.helper.fixture", "");
+    let helper_source = root.join("helper.c");
+    fs::write(&helper_source, "extern int fixture(void); int main(void) {return fixture()-1;}").unwrap();
+    run("clang", &[helper_source.to_str().unwrap(), binary.to_str().unwrap(), "-o", helper.join("Contents/MacOS/LinkedHelper").to_str().unwrap()]);
+    let entitlements = root.join("helper-entitlements.plist");
+    fs::write(&entitlements, r#"<?xml version="1.0"?><plist><dict><key>com.apple.security.cs.allow-jit</key><true/></dict></plist>"#).unwrap();
+    run("codesign", &["--force", "--sign", "-", "--options", "runtime", "--entitlements", entitlements.to_str().unwrap(), helper.to_str().unwrap()]);
     run(
         "codesign",
         &["--force", "--sign", "-", framework.to_str().unwrap()],
@@ -85,6 +94,9 @@ fn signed_framework_digest_matches_the_updated_plist_without_disabling_validatio
     );
     sign_app_with_asar_integrity(&app, &"c".repeat(64)).unwrap();
     verify_bundle_deep_strict(&app).unwrap();
+    let helper_entitlements = read_entitlements(&helper).unwrap();
+    assert!(helper_entitlements.keys.contains("com.apple.security.cs.allow-jit"), "retain helper's original entitlements");
+    assert!(helper_entitlements.keys.contains("com.apple.security.cs.disable-library-validation"), "a hardened helper loading the newly ad-hoc framework needs its own library-validation entitlement");
     let actual = fs::read(&binary).unwrap();
     let marker = b"AGbevlPCksUGKNL8TSn7wGmJEuJsXb2A";
     let offset = actual

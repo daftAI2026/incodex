@@ -1,7 +1,7 @@
 #[path = "../src/asar_integrity_digest.rs"]
 mod asar_integrity_digest;
 
-use asar_integrity_digest::plan_integrity_digest_update;
+use asar_integrity_digest::{linked_dylib_paths, plan_integrity_digest_update};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
@@ -166,6 +166,32 @@ fn fat64_macho(slices: &[(u32, Vec<u8>)]) -> (Vec<u8>, Vec<usize>) {
         bytes[offsets[index]..offsets[index] + slice.len()].copy_from_slice(slice);
     }
     (bytes, offsets)
+}
+
+fn dylib_load_command(command: u32, path: &str) -> Vec<u8> {
+    let command_size = (24 + path.len() + 1 + 7) & !7;
+    let mut bytes = vec![0; command_size];
+    write_u32_le(&mut bytes, 0, command);
+    write_u32_le(&mut bytes, 4, command_size as u32);
+    write_u32_le(&mut bytes, 8, 24); // dylib.name.offset
+    bytes[24..24 + path.len()].copy_from_slice(path.as_bytes());
+    bytes
+}
+
+fn thin_macho_with_dylib_commands(cpu_type: u32, commands: &[Vec<u8>]) -> Vec<u8> {
+    let command_bytes: usize = commands.iter().map(Vec::len).sum();
+    let mut bytes = vec![0; MACH_HEADER_64_SIZE + command_bytes];
+    bytes[0..4].copy_from_slice(&[0xcf, 0xfa, 0xed, 0xfe]); // MH_MAGIC_64
+    write_u32_le(&mut bytes, 4, cpu_type);
+    write_u32_le(&mut bytes, 12, 6); // MH_DYLIB
+    write_u32_le(&mut bytes, 16, commands.len() as u32);
+    write_u32_le(&mut bytes, 20, command_bytes as u32);
+    let mut cursor = MACH_HEADER_64_SIZE;
+    for command in commands {
+        bytes[cursor..cursor + command.len()].copy_from_slice(command);
+        cursor += command.len();
+    }
+    bytes
 }
 
 fn read_slot_digest(bytes: &[u8], slice_offset: usize) -> [u8; 32] {
@@ -334,6 +360,96 @@ fn overlapping_fat_slices_fail_closed() {
     let error = plan_integrity_digest_update(&original, &old_map, &new_map)
         .expect_err("overlapping fat slices are ambiguous");
     assert!(error.to_lowercase().contains("overlap"), "{error}");
+}
+
+#[test]
+fn parses_supported_dylib_load_command_paths_in_command_order() {
+    const ARM64: u32 = 0x0100_000c;
+    const LC_LOAD_DYLIB: u32 = 0x0000_000c;
+    const LC_LOAD_WEAK_DYLIB: u32 = 0x8000_0018;
+    const LC_REEXPORT_DYLIB: u32 = 0x8000_001f;
+    const LC_LOAD_UPWARD_DYLIB: u32 = 0x8000_0023;
+    const LC_ID_DYLIB: u32 = 0x0000_000d;
+    let macho = thin_macho_with_dylib_commands(
+        ARM64,
+        &[
+            dylib_load_command(LC_LOAD_DYLIB, "@rpath/Aperitif.framework/Aperitif"),
+            dylib_load_command(LC_ID_DYLIB, "ignored-install-name.dylib"),
+            dylib_load_command(LC_LOAD_WEAK_DYLIB, "@loader_path/libOptional.dylib"),
+            dylib_load_command(LC_REEXPORT_DYLIB, "/usr/lib/libReexport.dylib"),
+            dylib_load_command(LC_LOAD_UPWARD_DYLIB, "@executable_path/Host.framework/Host"),
+        ],
+    );
+
+    assert_eq!(
+        linked_dylib_paths(&macho).unwrap(),
+        [
+            "@rpath/Aperitif.framework/Aperitif",
+            "@loader_path/libOptional.dylib",
+            "/usr/lib/libReexport.dylib",
+            "@executable_path/Host.framework/Host",
+        ]
+    );
+}
+
+#[test]
+fn rejects_dylib_name_offsets_outside_the_command() {
+    const ARM64: u32 = 0x0100_000c;
+    const LC_LOAD_DYLIB: u32 = 0x0000_000c;
+    let mut macho = thin_macho_with_dylib_commands(
+        ARM64,
+        &[dylib_load_command(LC_LOAD_DYLIB, "@rpath/libExample.dylib")],
+    );
+    write_u32_le(&mut macho, MACH_HEADER_64_SIZE + 8, u32::MAX);
+
+    assert!(linked_dylib_paths(&macho).is_err());
+}
+
+#[test]
+fn rejects_dylib_names_without_a_terminator_inside_the_command() {
+    const ARM64: u32 = 0x0100_000c;
+    const LC_LOAD_DYLIB: u32 = 0x0000_000c;
+    let mut macho = thin_macho_with_dylib_commands(
+        ARM64,
+        &[dylib_load_command(LC_LOAD_DYLIB, "@rpath/libExample.dylib")],
+    );
+    let command_start = MACH_HEADER_64_SIZE;
+    let command_size = u32::from_le_bytes(
+        macho[command_start + 4..command_start + 8]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    macho[command_start + 24..command_start + command_size].fill(b'x');
+
+    assert!(linked_dylib_paths(&macho).is_err());
+}
+
+#[test]
+fn aggregates_linked_dylib_paths_from_each_fat_slice() {
+    const ARM64: u32 = 0x0100_000c;
+    const X86_64: u32 = 0x0100_0007;
+    const LC_LOAD_DYLIB: u32 = 0x0000_000c;
+    let (macho, _) = fat32_macho(&[
+        (
+            ARM64,
+            thin_macho_with_dylib_commands(
+                ARM64,
+                &[dylib_load_command(LC_LOAD_DYLIB, "@rpath/arm64.dylib")],
+            ),
+        ),
+        (
+            X86_64,
+            thin_macho_with_dylib_commands(
+                X86_64,
+                &[dylib_load_command(LC_LOAD_DYLIB, "@rpath/x86_64.dylib")],
+            ),
+        ),
+    ]);
+
+    assert_eq!(
+        linked_dylib_paths(&macho).unwrap(),
+        ["@rpath/arm64.dylib", "@rpath/x86_64.dylib"]
+    );
 }
 
 #[test]
