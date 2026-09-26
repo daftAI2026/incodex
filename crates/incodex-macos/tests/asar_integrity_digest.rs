@@ -1,7 +1,9 @@
 #[path = "../src/asar_integrity_digest.rs"]
 mod asar_integrity_digest;
 
-use asar_integrity_digest::{linked_dylib_paths, plan_integrity_digest_update};
+use asar_integrity_digest::{
+    dynamic_framework_load_paths, linked_dylib_paths, plan_integrity_digest_update,
+};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
@@ -191,6 +193,90 @@ fn thin_macho_with_dylib_commands(cpu_type: u32, commands: &[Vec<u8>]) -> Vec<u8
         bytes[cursor..cursor + command.len()].copy_from_slice(command);
         cursor += command.len();
     }
+    bytes
+}
+
+fn thin_macho_with_cstrings_and_symbols(
+    cpu_type: u32,
+    segment_name: &str,
+    section_name: &str,
+    cstrings: &[&str],
+    symbols: &[(&str, u8)],
+) -> Vec<u8> {
+    const LC_SEGMENT_64: u32 = 0x19;
+    const LC_SYMTAB: u32 = 0x02;
+    const SEGMENT_COMMAND_64_SIZE: usize = 72;
+    const SECTION_64_SIZE: usize = 80;
+    const SYMTAB_COMMAND_SIZE: usize = 24;
+    const NLIST_64_SIZE: usize = 16;
+
+    let mut cstring_data = Vec::from([0]);
+    for value in cstrings {
+        cstring_data.extend_from_slice(value.as_bytes());
+        cstring_data.push(0);
+    }
+
+    let mut string_table = Vec::from([0]);
+    let mut string_indexes = Vec::with_capacity(symbols.len());
+    for (name, _) in symbols {
+        string_indexes.push(string_table.len() as u32);
+        string_table.extend_from_slice(name.as_bytes());
+        string_table.push(0);
+    }
+
+    let command_bytes = SEGMENT_COMMAND_64_SIZE + SECTION_64_SIZE + SYMTAB_COMMAND_SIZE;
+    let cstring_offset = MACH_HEADER_64_SIZE + command_bytes;
+    let symbol_offset = (cstring_offset + cstring_data.len() + 7) & !7;
+    let symbol_bytes_len = symbols.len() * NLIST_64_SIZE;
+    let string_offset = symbol_offset + symbol_bytes_len;
+    let total_len = string_offset + string_table.len();
+    let mut bytes = vec![0; total_len];
+
+    // mach_header_64
+    bytes[0..4].copy_from_slice(&[0xcf, 0xfa, 0xed, 0xfe]); // MH_MAGIC_64
+    write_u32_le(&mut bytes, 4, cpu_type);
+    write_u32_le(&mut bytes, 12, 2); // MH_EXECUTE
+    write_u32_le(&mut bytes, 16, 2); // LC_SEGMENT_64 + LC_SYMTAB
+    write_u32_le(&mut bytes, 20, command_bytes as u32);
+
+    // LC_SEGMENT_64 with the requested cstring section.
+    let segment = MACH_HEADER_64_SIZE;
+    write_u32_le(&mut bytes, segment, LC_SEGMENT_64);
+    write_u32_le(
+        &mut bytes,
+        segment + 4,
+        (SEGMENT_COMMAND_64_SIZE + SECTION_64_SIZE) as u32,
+    );
+    bytes[segment + 8..segment + 8 + segment_name.len()].copy_from_slice(segment_name.as_bytes());
+    write_u64_le(&mut bytes, segment + 32, cstring_data.len() as u64); // vmsize
+    write_u64_le(&mut bytes, segment + 40, cstring_offset as u64); // fileoff
+    write_u64_le(&mut bytes, segment + 48, cstring_data.len() as u64); // filesize
+    write_u32_le(&mut bytes, segment + 56, 7); // maxprot
+    write_u32_le(&mut bytes, segment + 60, 5); // initprot
+    write_u32_le(&mut bytes, segment + 64, 1); // nsects
+
+    let section = segment + SEGMENT_COMMAND_64_SIZE;
+    bytes[section..section + section_name.len()].copy_from_slice(section_name.as_bytes());
+    bytes[section + 16..section + 16 + segment_name.len()].copy_from_slice(segment_name.as_bytes());
+    write_u64_le(&mut bytes, section + 40, cstring_data.len() as u64);
+    write_u32_le(&mut bytes, section + 48, cstring_offset as u32);
+
+    // LC_SYMTAB; every supplied tuple is (symbol name, n_type).
+    let symtab = segment + SEGMENT_COMMAND_64_SIZE + SECTION_64_SIZE;
+    write_u32_le(&mut bytes, symtab, LC_SYMTAB);
+    write_u32_le(&mut bytes, symtab + 4, SYMTAB_COMMAND_SIZE as u32);
+    write_u32_le(&mut bytes, symtab + 8, symbol_offset as u32);
+    write_u32_le(&mut bytes, symtab + 12, symbols.len() as u32);
+    write_u32_le(&mut bytes, symtab + 16, string_offset as u32);
+    write_u32_le(&mut bytes, symtab + 20, string_table.len() as u32);
+
+    for (index, ((_, n_type), string_index)) in symbols.iter().zip(string_indexes).enumerate() {
+        let nlist = symbol_offset + index * NLIST_64_SIZE;
+        write_u32_le(&mut bytes, nlist, string_index);
+        bytes[nlist + 4] = *n_type;
+    }
+    bytes[cstring_offset..cstring_offset + cstring_data.len()].copy_from_slice(&cstring_data);
+    bytes[string_offset..string_offset + string_table.len()].copy_from_slice(&string_table);
     bytes
 }
 
@@ -450,6 +536,194 @@ fn aggregates_linked_dylib_paths_from_each_fat_slice() {
         linked_dylib_paths(&macho).unwrap(),
         ["@rpath/arm64.dylib", "@rpath/x86_64.dylib"]
     );
+}
+
+#[test]
+fn recognizes_classic_dynamic_framework_loader_from_real_cstrings_and_imports() {
+    const ARM64: u32 = 0x0100_000c;
+    const N_UNDF_EXT: u8 = 0x01;
+    let macho = thin_macho_with_cstrings_and_symbols(
+        ARM64,
+        "__TEXT",
+        "__cstring",
+        &["ChromeMain", "../../../../Codex Framework"],
+        &[("_dlopen", N_UNDF_EXT), ("_dlsym", N_UNDF_EXT)],
+    );
+
+    assert_eq!(
+        dynamic_framework_load_paths(&macho).unwrap(),
+        ["../../../../Codex Framework"]
+    );
+}
+
+#[test]
+fn aggregates_classic_dynamic_framework_paths_from_fat_arm64_and_x64_slices() {
+    const ARM64: u32 = 0x0100_000c;
+    const X86_64: u32 = 0x0100_0007;
+    const N_UNDF_EXT: u8 = 0x01;
+    let (macho, _) = fat32_macho(&[
+        (
+            ARM64,
+            thin_macho_with_cstrings_and_symbols(
+                ARM64,
+                "__TEXT",
+                "__cstring",
+                &["ChromeMain", "../../../../Codex Framework"],
+                &[("_dlopen", N_UNDF_EXT), ("_dlsym", N_UNDF_EXT)],
+            ),
+        ),
+        (
+            X86_64,
+            thin_macho_with_cstrings_and_symbols(
+                X86_64,
+                "__TEXT",
+                "__cstring",
+                &["ChromeMain", "../../../../Codex Framework x64"],
+                &[("_dlopen", N_UNDF_EXT), ("_dlsym", N_UNDF_EXT)],
+            ),
+        ),
+    ]);
+
+    assert_eq!(
+        dynamic_framework_load_paths(&macho).unwrap(),
+        [
+            "../../../../Codex Framework",
+            "../../../../Codex Framework x64"
+        ]
+    );
+}
+
+#[test]
+fn classic_loader_contract_requires_both_imports_chromemain_and_framework_path() {
+    const ARM64: u32 = 0x0100_000c;
+    const N_UNDF_EXT: u8 = 0x01;
+    let both_imports = &[("_dlopen", N_UNDF_EXT), ("_dlsym", N_UNDF_EXT)];
+
+    let missing_dlopen = thin_macho_with_cstrings_and_symbols(
+        ARM64,
+        "__TEXT",
+        "__cstring",
+        &["ChromeMain", "../../../../Codex Framework"],
+        &[("_dlsym", N_UNDF_EXT)],
+    );
+    let missing_chrome_main = thin_macho_with_cstrings_and_symbols(
+        ARM64,
+        "__TEXT",
+        "__cstring",
+        &["../../../../Codex Framework"],
+        both_imports,
+    );
+    let missing_framework_path = thin_macho_with_cstrings_and_symbols(
+        ARM64,
+        "__TEXT",
+        "__cstring",
+        &["ChromeMain"],
+        both_imports,
+    );
+
+    for macho in [missing_dlopen, missing_chrome_main, missing_framework_path] {
+        assert!(dynamic_framework_load_paths(&macho).unwrap().is_empty());
+    }
+}
+
+#[test]
+fn classic_loader_requires_undefined_external_symbols_instead_of_defined_symbols() {
+    const ARM64: u32 = 0x0100_000c;
+    const N_SECT_EXT: u8 = 0x0f;
+    const N_UNDF: u8 = 0x00;
+    let macho = thin_macho_with_cstrings_and_symbols(
+        ARM64,
+        "__TEXT",
+        "__cstring",
+        &["ChromeMain", "../../../../Codex Framework"],
+        &[("_dlopen", N_SECT_EXT), ("_dlsym", N_UNDF)],
+    );
+
+    assert!(dynamic_framework_load_paths(&macho).unwrap().is_empty());
+}
+
+#[test]
+fn dynamic_loader_does_not_scan_outside_the_text_cstring_section() {
+    const ARM64: u32 = 0x0100_000c;
+    const N_UNDF_EXT: u8 = 0x01;
+    let macho = thin_macho_with_cstrings_and_symbols(
+        ARM64,
+        "__DATA",
+        "__cstring",
+        &["ChromeMain", "../../../../Codex Framework"],
+        &[("_dlopen", N_UNDF_EXT), ("_dlsym", N_UNDF_EXT)],
+    );
+
+    assert!(dynamic_framework_load_paths(&macho).unwrap().is_empty());
+}
+
+#[test]
+fn dynamic_loader_rejects_out_of_range_cstring_and_symbol_tables() {
+    const ARM64: u32 = 0x0100_000c;
+    const N_UNDF_EXT: u8 = 0x01;
+    let make_fixture = || {
+        thin_macho_with_cstrings_and_symbols(
+            ARM64,
+            "__TEXT",
+            "__cstring",
+            &["ChromeMain", "../../../../Codex Framework"],
+            &[("_dlopen", N_UNDF_EXT), ("_dlsym", N_UNDF_EXT)],
+        )
+    };
+
+    let mut bad_cstring_range = make_fixture();
+    let cstring_offset_field = MACH_HEADER_64_SIZE + SEGMENT_COMMAND_64_SIZE + 48;
+    write_u32_le(&mut bad_cstring_range, cstring_offset_field, u32::MAX);
+    assert!(dynamic_framework_load_paths(&bad_cstring_range).is_err());
+
+    let mut bad_symbol_range = make_fixture();
+    let symtab_command = MACH_HEADER_64_SIZE + SEGMENT_COMMAND_64_SIZE + SECTION_64_SIZE;
+    write_u32_le(&mut bad_symbol_range, symtab_command + 8, u32::MAX);
+    assert!(dynamic_framework_load_paths(&bad_symbol_range).is_err());
+}
+
+#[test]
+fn dynamic_loader_rejects_unterminated_cstrings_and_symbol_names() {
+    const ARM64: u32 = 0x0100_000c;
+    const N_UNDF_EXT: u8 = 0x01;
+    let make_fixture = || {
+        thin_macho_with_cstrings_and_symbols(
+            ARM64,
+            "__TEXT",
+            "__cstring",
+            &["ChromeMain", "../../../../Codex Framework"],
+            &[("_dlopen", N_UNDF_EXT), ("_dlsym", N_UNDF_EXT)],
+        )
+    };
+
+    let mut unterminated_cstring = make_fixture();
+    let cstring_offset =
+        MACH_HEADER_64_SIZE + SEGMENT_COMMAND_64_SIZE + SECTION_64_SIZE + 24;
+    // The fixture's __cstring table ends immediately before 8-byte symtab alignment.
+    let cstring_size = 1 + "ChromeMain".len() + 1 + "../../../../Codex Framework".len() + 1;
+    unterminated_cstring[cstring_offset + cstring_size - 1] = b'x';
+    assert!(dynamic_framework_load_paths(&unterminated_cstring).is_err());
+
+    let mut unterminated_symbol = make_fixture();
+    let symtab_command = MACH_HEADER_64_SIZE + SEGMENT_COMMAND_64_SIZE + SECTION_64_SIZE;
+    let symbol_offset = u32::from_le_bytes(
+        unterminated_symbol[symtab_command + 8..symtab_command + 12]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    let string_offset = u32::from_le_bytes(
+        unterminated_symbol[symtab_command + 16..symtab_command + 20]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    let string_size = u32::from_le_bytes(
+        unterminated_symbol[symtab_command + 20..symtab_command + 24]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    assert!(symbol_offset < string_offset, "fixture has nlist64 entries");
+    unterminated_symbol[string_offset + string_size - 1] = b'x';
+    assert!(dynamic_framework_load_paths(&unterminated_symbol).is_err());
 }
 
 #[test]

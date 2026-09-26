@@ -205,6 +205,10 @@ pub(crate) fn linked_dylib_paths(bytes: &[u8]) -> Result<Vec<String>, String> {
     Ok(paths)
 }
 
+pub(crate) fn dynamic_framework_load_paths(_bytes: &[u8]) -> Result<Vec<String>, String> {
+    Err("dynamic framework loader parser is not implemented".into())
+}
+
 fn integrity_dictionary_digest(map: &Value) -> Result<[u8; SLOT_DIGEST_SIZE], String> {
     let entries = map
         .as_object()

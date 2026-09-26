@@ -33,6 +33,10 @@ struct SignedFixture {
 }
 
 fn signed_fixture(helper_identifier: &str) -> SignedFixture {
+    signed_fixture_with_loader(helper_identifier, false)
+}
+
+fn signed_fixture_with_loader(helper_identifier: &str, dynamic: bool) -> SignedFixture {
     let root = std::env::temp_dir().join(format!(
         "incodex-integrity-signing-{}-{}-{}",
         std::process::id(),
@@ -96,20 +100,28 @@ fn signed_fixture(helper_identifier: &str) -> SignedFixture {
         "",
     );
     let helper_source = root.join("helper.c");
-    fs::write(
-        &helper_source,
-        "extern int fixture(void); int main(void) {return fixture()-1;}",
-    )
-    .unwrap();
-    run(
-        "clang",
-        &[
-            helper_source.to_str().unwrap(),
-            binary.to_str().unwrap(),
-            "-o",
-            helper.join("Contents/MacOS/LinkedHelper").to_str().unwrap(),
-        ],
-    );
+    let source = if dynamic {
+        r#"#include <dlfcn.h>
+#include <mach-o/dyld.h>
+#include <libgen.h>
+#include <stdio.h>
+int main(void) { char exe[4096], path[8192]; uint32_t size=sizeof(exe);
+if (_NSGetExecutablePath(exe,&size)) return 1;
+snprintf(path,sizeof(path),"%s/%s",dirname(exe),"../../../../Renamed");
+void *handle=dlopen(path,RTLD_LAZY); if (!handle) return 2;
+return dlsym(handle,"ChromeMain") ? 0 : 3; }
+"#
+    } else {
+        "extern int fixture(void); int main(void) {return fixture()-1;}"
+    };
+    fs::write(&helper_source, source).unwrap();
+    let helper_binary = helper.join("Contents/MacOS/LinkedHelper");
+    let mut args = vec![helper_source.to_str().unwrap()];
+    if !dynamic {
+        args.push(binary.to_str().unwrap());
+    }
+    args.extend(["-o", helper_binary.to_str().unwrap()]);
+    run("clang", &args);
     let entitlements = root.join("helper-entitlements.plist");
     fs::write(&entitlements, r#"<?xml version="1.0"?><plist><dict><key>com.apple.security.cs.allow-jit</key><true/></dict></plist>"#).unwrap();
     run(
@@ -219,6 +231,17 @@ fn framework_alert_notification_service_identity_is_supported() {
 #[test]
 fn codex_helper_namespace_identity_remains_supported() {
     assert_signed_framework_digest_matches_updated_plist("com.openai.codex.helper.fixture");
+}
+
+#[test]
+fn dynamic_framework_loader_retains_its_own_entitlements_and_library_validation_exemption() {
+    let fixture = signed_fixture_with_loader("com.openai.codex.helper.renderer", true);
+    sign_app_with_asar_integrity(&fixture.app, &"c".repeat(64)).unwrap();
+    verify_bundle_deep_strict(&fixture.app).unwrap();
+    let entitlements = read_entitlements(&fixture.helper).unwrap();
+    assert!(entitlements.keys.contains("com.apple.security.cs.disable-library-validation"), "a dlopen helper needs its own exemption for the modified Framework");
+    assert!(entitlements.keys.contains("com.apple.security.cs.allow-jit"));
+    fs::remove_dir_all(&fixture.root).unwrap();
 }
 
 #[test]
