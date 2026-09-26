@@ -4,6 +4,10 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
+export function runtimeCheckEnvironment(_committedSourceCommit: string, environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return { ...environment };
+}
+
 function main(): void {
   const built = spawnSync("bun", ["src/build-runtime.ts"], {
     cwd: root,
@@ -28,4 +32,4 @@ function main(): void {
   process.stdout.write("dist/ matches the rebuild\n");
 }
 
-main();
+if (import.meta.main) main();
