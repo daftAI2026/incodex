@@ -1,5 +1,6 @@
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::path::{Path, PathBuf};
 
 const SLOT_SENTINEL: &[u8; 32] = b"AGbevlPCksUGKNL8TSn7wGmJEuJsXb2A";
 const SLOT_DIGEST_SIZE: usize = 32;
@@ -206,6 +207,13 @@ pub(crate) fn linked_dylib_paths(bytes: &[u8]) -> Result<Vec<String>, String> {
     }
 
     Ok(paths)
+}
+
+pub(crate) fn resolved_linked_dylib_paths(
+    _bytes: &[u8],
+    _executable: &Path,
+) -> Result<Vec<Vec<PathBuf>>, String> {
+    Ok(Vec::new())
 }
 
 pub(crate) fn dynamic_framework_load_paths(bytes: &[u8]) -> Result<Vec<String>, String> {

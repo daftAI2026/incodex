@@ -37,6 +37,14 @@ fn signed_fixture(helper_identifier: &str) -> SignedFixture {
 }
 
 fn signed_fixture_with_loader(helper_identifier: &str, dynamic: bool) -> SignedFixture {
+    signed_fixture_with_loader_location(helper_identifier, dynamic, false)
+}
+
+fn signed_fixture_with_loader_location(
+    helper_identifier: &str,
+    dynamic: bool,
+    sibling_helper: bool,
+) -> SignedFixture {
     let root = std::env::temp_dir().join(format!(
         "incodex-integrity-signing-{}-{}-{}",
         std::process::id(),
@@ -91,7 +99,11 @@ fn signed_fixture_with_loader(helper_identifier: &str, dynamic: bool) -> SignedF
         "com.openai.codex",
         &integrity,
     );
-    let helper = framework.join("Helpers/LinkedHelper.app");
+    let helper = if sibling_helper {
+        app.join("Contents/Frameworks/LinkedHelper.app")
+    } else {
+        framework.join("Helpers/LinkedHelper.app")
+    };
     fs::create_dir_all(helper.join("Contents/MacOS")).unwrap();
     write_plist(
         &helper.join("Contents/Info.plist"),
@@ -249,6 +261,34 @@ fn dynamic_framework_loader_retains_its_own_entitlements_and_library_validation_
         .keys
         .contains("com.apple.security.cs.allow-jit"));
     fs::remove_dir_all(&fixture.root).unwrap();
+}
+
+#[test]
+fn sibling_direct_dependent_helper_gets_resigned_with_library_validation_exemption() {
+    let fixture =
+        signed_fixture_with_loader_location("com.openai.codex.helper.linked", false, true);
+    sign_app_with_asar_integrity(&fixture.app, &"c".repeat(64)).unwrap();
+    verify_bundle_deep_strict(&fixture.app).unwrap();
+    let entitlements = read_entitlements(&fixture.helper).unwrap();
+    assert!(
+        entitlements
+            .keys
+            .contains("com.apple.security.cs.disable-library-validation")
+    );
+    assert!(
+        entitlements
+            .keys
+            .contains("com.apple.security.cs.allow-jit")
+    );
+    fs::remove_dir_all(&fixture.root).unwrap();
+}
+
+#[test]
+fn sibling_unknown_or_cua_dependent_is_rejected_before_any_bundle_mutation() {
+    for identifier in ["com.openai.sky.fixture", "com.openai.cua.fixture"] {
+        let fixture = signed_fixture_with_loader_location(identifier, false, true);
+        assert_rejection_unchanged(fixture, "unknown helper");
+    }
 }
 
 #[test]

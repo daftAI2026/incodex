@@ -3,9 +3,11 @@ mod asar_integrity_digest;
 
 use asar_integrity_digest::{
     dynamic_framework_load_paths, linked_dylib_paths, plan_integrity_digest_update,
+    resolved_linked_dylib_paths,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::path::{Path, PathBuf};
 
 const SLOT_SENTINEL: &[u8; 32] = b"AGbevlPCksUGKNL8TSn7wGmJEuJsXb2A";
 const SLOT_SIZE: usize = 66;
@@ -177,6 +179,17 @@ fn dylib_load_command(command: u32, path: &str) -> Vec<u8> {
     write_u32_le(&mut bytes, 4, command_size as u32);
     write_u32_le(&mut bytes, 8, 24); // dylib.name.offset
     bytes[24..24 + path.len()].copy_from_slice(path.as_bytes());
+    bytes
+}
+
+fn rpath_load_command(path: &str) -> Vec<u8> {
+    const LC_RPATH: u32 = 0x8000_001c;
+    let command_size = (12 + path.len() + 1 + 7) & !7;
+    let mut bytes = vec![0; command_size];
+    write_u32_le(&mut bytes, 0, LC_RPATH);
+    write_u32_le(&mut bytes, 4, command_size as u32);
+    write_u32_le(&mut bytes, 8, 12); // rpath.path.offset
+    bytes[12..12 + path.len()].copy_from_slice(path.as_bytes());
     bytes
 }
 
@@ -491,6 +504,94 @@ fn parses_supported_dylib_load_command_paths_in_command_order() {
             "@executable_path/Host.framework/Host",
         ]
     );
+}
+
+#[test]
+fn resolves_rpath_install_name_against_loader_path() {
+    const ARM64: u32 = 0x0100_000c;
+    const LC_LOAD_DYLIB: u32 = 0x0000_000c;
+    let executable = Path::new(
+        "/Applications/ChatGPT.app/Contents/Frameworks/LinkedHelper.app/Contents/MacOS/LinkedHelper",
+    );
+    let macho = thin_macho_with_dylib_commands(
+        ARM64,
+        &[
+            rpath_load_command("@loader_path/../../../"),
+            dylib_load_command(LC_LOAD_DYLIB, "@rpath/Renamed.framework/Renamed"),
+        ],
+    );
+    let expected = executable
+        .parent()
+        .unwrap()
+        .join("../../../")
+        .join("Renamed.framework/Renamed");
+
+    assert_eq!(
+        resolved_linked_dylib_paths(&macho, executable).unwrap(),
+        [vec![PathBuf::from(expected)]]
+    );
+}
+
+#[test]
+fn preserves_rpath_search_order_when_first_candidate_is_a_non_target() {
+    const ARM64: u32 = 0x0100_000c;
+    const LC_LOAD_DYLIB: u32 = 0x0000_000c;
+    let executable = Path::new(
+        "/Applications/ChatGPT.app/Contents/Frameworks/LinkedHelper.app/Contents/MacOS/LinkedHelper",
+    );
+    let macho = thin_macho_with_dylib_commands(
+        ARM64,
+        &[
+            rpath_load_command("@loader_path/../../../Other"),
+            rpath_load_command("@loader_path/../../../"),
+            dylib_load_command(LC_LOAD_DYLIB, "@rpath/Renamed.framework/Renamed"),
+        ],
+    );
+    let loader_dir = executable.parent().unwrap();
+    let non_target = loader_dir
+        .join("../../../Other")
+        .join("Renamed.framework/Renamed");
+    let target = loader_dir
+        .join("../../../")
+        .join("Renamed.framework/Renamed");
+
+    assert_eq!(
+        resolved_linked_dylib_paths(&macho, executable).unwrap(),
+        [vec![non_target.clone(), target.clone()]],
+        "retain per-load-command alternatives in LC_RPATH search order"
+    );
+    assert_ne!(non_target, target, "same install name must not imply same binary");
+}
+
+#[test]
+fn rejects_out_of_range_and_unterminated_rpath_strings() {
+    const ARM64: u32 = 0x0100_000c;
+    const LC_LOAD_DYLIB: u32 = 0x0000_000c;
+    let executable = Path::new("/tmp/LinkedHelper");
+    let mut out_of_range = thin_macho_with_dylib_commands(
+        ARM64,
+        &[
+            rpath_load_command("@loader_path/Frameworks"),
+            dylib_load_command(LC_LOAD_DYLIB, "@rpath/Renamed.framework/Renamed"),
+        ],
+    );
+    write_u32_le(&mut out_of_range, MACH_HEADER_64_SIZE + 8, u32::MAX);
+    assert!(resolved_linked_dylib_paths(&out_of_range, executable).is_err());
+
+    let mut unterminated = thin_macho_with_dylib_commands(
+        ARM64,
+        &[
+            rpath_load_command("@loader_path/Frameworks"),
+            dylib_load_command(LC_LOAD_DYLIB, "@rpath/Renamed.framework/Renamed"),
+        ],
+    );
+    let command_size = u32::from_le_bytes(
+        unterminated[MACH_HEADER_64_SIZE + 4..MACH_HEADER_64_SIZE + 8]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    unterminated[MACH_HEADER_64_SIZE + 12..MACH_HEADER_64_SIZE + command_size].fill(b'x');
+    assert!(resolved_linked_dylib_paths(&unterminated, executable).is_err());
 }
 
 #[test]
