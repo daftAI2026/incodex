@@ -333,7 +333,29 @@ struct DependentHelperUpdate {
 }
 
 fn verified_bundle_identifier(bundle: &Path, plist_identifier: &str) -> Result<String, String> {
-    let component = inspect_component(bundle)?;
+    verified_identifier(inspect_component(bundle)?, plist_identifier)
+}
+
+fn verified_host_identifier(app: &Path, plist_identifier: &str) -> Result<String, String> {
+    // The installer validates the complete original before making its stage.
+    // ASAR is intentionally edited in that stage before this signing API;
+    // validate the still-sealed executable and Info.plist, not the old ASAR seal.
+    // Nested helpers/Frameworks retain full validation before any writes.
+    let component = inspect_codesign(app, |path| {
+        Command::new("codesign")
+            .args(["--verify", "--strict", "--ignore-resources", "--"])
+            .arg(path)
+            .output()
+            .is_ok_and(|output| output.status.success())
+    })?;
+    verified_identifier(component, plist_identifier)
+}
+
+fn verified_identifier(
+    component: SignedComponent,
+    plist_identifier: &str,
+) -> Result<String, String> {
+    let bundle = &component.path;
     if !component.verified {
         return Err(format!(
             "signature verification failed: {}",
@@ -392,7 +414,7 @@ fn dependent_helper_updates(
     let app_identifier = read_plist_info(app)
         .ok_or("app identity unavailable")?
         .bundle_identifier;
-    let app_identifier = verified_bundle_identifier(app, &app_identifier)?;
+    let app_identifier = verified_host_identifier(app, &app_identifier)?;
     let namespace = format!("{app_identifier}.helper");
     let mut updates = Vec::new();
     for bundle in enumerate_component_paths(app)?
