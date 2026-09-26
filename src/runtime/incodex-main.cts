@@ -28,9 +28,10 @@ const ACCESSIBILITY_MAX_MARKER_BYTES = 8 * 1024;
 const ACCESSIBILITY_PACKAGE_MAX_BYTES = 256 * 1024;
 const ACCESSIBILITY_RESET_TIMEOUT_MS = 5_000;
 const ACCESSIBILITY_SETTINGS_URL =
-  "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
+  "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility";
 // The Runtime builder replaces this token with the {en, zh-CN, zh-HK, zh-TW} table.
 const ACCESSIBILITY_COPY = "__INCODEX_ACCESSIBILITY_COPY__";
+const ACCESSIBILITY_LOCALE = "__INCODEX_ACCESSIBILITY_LOCALE__";
 const accessibilityWindow = "__INCODEX_ACCESSIBILITY_WINDOW__";
 const READY_TIMEOUT_MS = 15_000;
 let capturedSourceHome = null;
@@ -216,6 +217,9 @@ function readAccessibilityMarker(fileSystem, requestPath, appPath, installId) {
     return { kind: "unsafe" };
   }
   if (!accessibilityMarkerIsValid(marker, appPath, installId)) return { kind: "unsafe" };
+  // New install/uninstall commands own the shared one-shot guide. Keep the
+  // legacy controller for old requests, but never compete with the CLI host.
+  if (marker.presentationOwner === "cli") return { kind: "cli-owned" };
   return { kind: "ok", marker, layout };
 }
 
@@ -334,13 +338,15 @@ function accessibilityCopyValue(copy, key) {
 function resolveAccessibilityCopy(locale = "en") {
   const source = ACCESSIBILITY_COPY && typeof ACCESSIBILITY_COPY === "object" ? ACCESSIBILITY_COPY : null;
   if (!source) return null;
-  const normalized = String(locale || "").trim().replaceAll("_", "-").toLowerCase();
-  let language = "en";
-  if (normalized.startsWith("zh-hant-hk") || normalized.startsWith("zh-hk")) language = "zh-HK";
-  else if (normalized.startsWith("zh-hant") || normalized.startsWith("zh-tw")) language = "zh-TW";
-  else if (normalized.startsWith("zh")) language = "zh-CN";
+  const language = ACCESSIBILITY_LOCALE.resolveLocaleFromCatalog(String(locale || ""), source);
   const selected = source[language] || source.en;
   return selected && typeof selected === "object" ? { ...selected } : null;
+}
+
+function resolveAccessibilityLayoutDirection(locale = "en") {
+  const source = ACCESSIBILITY_COPY && typeof ACCESSIBILITY_COPY === "object" ? ACCESSIBILITY_COPY : null;
+  if (!source) return "leftToRight";
+  return ACCESSIBILITY_LOCALE.resolveLocaleDirection(String(locale || ""), source);
 }
 
 function createAccessibilitySetupController(options = {}) {
@@ -355,6 +361,7 @@ function createAccessibilitySetupController(options = {}) {
   const copy = options.copy;
   const now = typeof options.now === "function" ? options.now : () => Date.now();
   let flight = null;
+  let presentationWake = false;
   let panel = null;
   let pollTimer = null;
   let resetRunning = false;
@@ -496,7 +503,7 @@ function createAccessibilitySetupController(options = {}) {
   }
 
   async function openAccessibilitySurfaces() {
-    if ((await shell.openExternal(ACCESSIBILITY_SETTINGS_URL)) === false) {
+    if ((await shell.openExternal(ACCESSIBILITY_SETTINGS_URL, { activate: false })) === false) {
       throw new Error("could not open Accessibility settings");
     }
   }
@@ -614,6 +621,9 @@ function createAccessibilitySetupController(options = {}) {
     if (marker.state === "awaiting-user") {
       return { ok: true, state: "awaiting-user" };
     }
+    if (typeof options.canPresent === "function" && !options.canPresent()) {
+      return { ok: true, state: "pending", reason: "presentation-unavailable" };
+    }
     if (typeof options.createSetupWindow !== "function") {
       return { ok: false, state: "unknown", reason: "dialog-unavailable" };
     }
@@ -629,6 +639,9 @@ function createAccessibilitySetupController(options = {}) {
     let choice;
     try {
       panel = await options.createSetupWindow();
+      // Native bridge loading can outlive the focused host window. This is a
+      // presentation deferral, not a user's Skip action or a permission error.
+      if (!panel) return { ok: true, state: "pending", reason: "presentation-unavailable" };
       const activePanel = panel;
       panel.onClose(() => {
         stopPolling();
@@ -703,9 +716,19 @@ function createAccessibilitySetupController(options = {}) {
   }
 
   function run() {
-    if (flight) return flight;
+    if (flight) {
+      presentationWake = true;
+      return flight;
+    }
     flight = Promise.resolve()
-      .then(processRequest)
+      .then(async () => {
+        let result;
+        do {
+          presentationWake = false;
+          result = await processRequest();
+        } while (presentationWake && result.reason === "presentation-unavailable");
+        return result;
+      })
       .catch((error) => {
         try {
           logLaunch("accessibility-setup-failed", { error: String(error) });
@@ -881,6 +904,40 @@ function isAuxiliaryWindow(win) {
 
 function mainWindows(electron) {
   return electron.BrowserWindow.getAllWindows().filter((win) => !isAuxiliaryWindow(win));
+}
+
+function canPresentAccessibilitySetup(electron) {
+  try {
+    const win = electron.BrowserWindow.getFocusedWindow();
+    if (!win || win.isDestroyed() || !win.isVisible() || win.isMinimized() || !win.isFocused()) return false;
+    if (win.getParentWindow?.() || isAuxiliaryWindow(win)) return false;
+    const contents = win.webContents;
+    if (!contents || contents.isDestroyed()) return false;
+    const url = contents.getURL();
+    if (!ipcGuard.urlAllowed(url, trustedOrigins)) return false;
+    // The general window classifier deliberately keeps login windows alive;
+    // permission presentation needs the narrower actual application surface.
+    return !/\/(?:auth|auth0|login|signin|oauth|authorize|okta|sso)(?:\/|$)/i.test(new URL(url).pathname);
+  } catch {
+    return false;
+  }
+}
+
+const accessibilityPresentationWindows = new WeakSet();
+function observeAccessibilityPresentationWindow(win, controller) {
+  if (!controller || !win || accessibilityPresentationWindows.has(win)) return;
+  accessibilityPresentationWindows.add(win);
+  const request = () => { void controller.run(); };
+  const events = ["show", "ready-to-show", "restore"];
+  for (const event of events) win.on(event, request);
+  // BrowserWindow native getters can throw after "closed". Retain the
+  // EventEmitter while the window is alive so teardown only removes listeners.
+  const contents = win.webContents;
+  contents?.on("did-finish-load", request);
+  win.once("closed", () => {
+    for (const event of events) win.removeListener(event, request);
+    contents?.removeListener("did-finish-load", request);
+  });
 }
 
 function hideAuxiliaryWindows(electron) {
@@ -1104,6 +1161,14 @@ function prepareIncognitoSession(options = {}) {
   }
 }
 
+function incognitoLaunchArguments(chromiumPath, argv = process.argv) {
+  const args = [`--user-data-dir=${chromiumPath}`, "codex://new?mode=codex"];
+  if (argv.includes("--force-renderer-accessibility")) {
+    args.unshift("--force-renderer-accessibility");
+  }
+  return args;
+}
+
 async function launchIncognitoOnce(sourceBounds) {
   let alreadyRunning;
   try {
@@ -1134,7 +1199,7 @@ async function launchIncognitoOnce(sourceBounds) {
     }
     return Promise.resolve({ ok: false, reason: "spawn-failed" });
   }
-  const args = [`--user-data-dir=${session.chromium}`, "codex://new?mode=codex"];
+  const args = incognitoLaunchArguments(session.chromium);
   logLaunch("launch", {
     bin,
     home: session.home,
@@ -1393,24 +1458,34 @@ async function attachElectron() {
       accessibilitySetupController = createAccessibilitySetupController({
         app: electron.app,
         shell: electron.shell,
-        createSetupWindow: () => accessibilityWindow.createNativeAccessibilitySetupWindow({
-          electron,
-          copy: resolveAccessibilityCopy(readLocaleOverride() || electron.app.getLocale?.() || "en"),
-          appPath: identity.appPath,
-          loadObjcModule: () => dockMenu.loadObjcModule(electron.app.getAppPath()),
-          onHandoff: payload => accessibilityWindow.runNativePermissionHandoff({
-            ...payload,
-            onError: error => logLaunch("accessibility-handoff-error", { error: String(error) }),
-          }),
-          onBack: payload => accessibilityWindow.runNativePermissionHandoff({
-            ...payload,
-            onError: error => logLaunch("accessibility-return-error", { error: String(error) }),
-          }),
-          locateSettings: async () => {
-            settingsLocator ||= dockMenu.createNativeSystemSettingsLocator({ appPath: electron.app.getAppPath() });
-            return (await settingsLocator)();
-          },
-        }),
+        canPresent: () => canPresentAccessibilitySetup(electron),
+        createSetupWindow: () => {
+          const selectedLocale = readLocaleOverride() || electron.app.getLocale?.() || "en";
+          return accessibilityWindow.createNativeAccessibilitySetupWindow({
+            electron,
+            canPresent: () => canPresentAccessibilitySetup(electron),
+            copy: resolveAccessibilityCopy(selectedLocale),
+            layoutDirection: resolveAccessibilityLayoutDirection(selectedLocale),
+            appPath: identity.appPath,
+            loadObjcModule: () => dockMenu.loadObjcModule(electron.app.getAppPath()),
+            onHandoff: payload => accessibilityWindow.runNativePermissionHandoff({
+              ...payload,
+              onError: error => logLaunch("accessibility-handoff-error", { error: String(error) }),
+            }),
+            onBack: payload => accessibilityWindow.runNativePermissionHandoff({
+              ...payload,
+              onError: error => logLaunch("accessibility-return-error", { error: String(error) }),
+            }),
+            locateSettings: async () => {
+              settingsLocator ||= dockMenu.createNativeSystemSettingsLocator({ appPath: electron.app.getAppPath() });
+              return (await settingsLocator)();
+            },
+            prepareSettings: async () => {
+              settingsLocator ||= dockMenu.createNativeSystemSettingsLocator({ appPath: electron.app.getAppPath() });
+              return (await settingsLocator).prepareHandoff?.();
+            },
+          });
+        },
         systemPreferences: electron.systemPreferences,
         spawn,
         fs,
@@ -1501,6 +1576,7 @@ async function attachElectron() {
   });
 
   electron.app.on("browser-window-created", (_event, win) => {
+    observeAccessibilityPresentationWindow(win, accessibilitySetupController);
     if (isAuxiliaryWindow(win)) {
       if (isIncognito()) {
         try {
@@ -1598,7 +1674,10 @@ async function attachElectron() {
 
   function ready() {
     hookPreload(electron.session.defaultSession);
-    for (const win of electron.BrowserWindow.getAllWindows()) hookWindow(win, source);
+    for (const win of electron.BrowserWindow.getAllWindows()) {
+      observeAccessibilityPresentationWindow(win, accessibilitySetupController);
+      hookWindow(win, source);
+    }
     if (isIncognito()) raiseOurWindows();
     else void accessibilitySetupController?.run();
   }
@@ -1611,7 +1690,10 @@ if (typeof module !== "undefined") {
   module.exports = {
     startupGate,
     createAccessibilitySetupController,
+    canPresentAccessibilitySetup,
+    observeAccessibilityPresentationWindow,
     resolveAccessibilityCopy,
+    resolveAccessibilityLayoutDirection,
     readInstalledRuntimeIdentity,
     prepareIncognitoSession,
     runtimeOwnedSessionEnv,

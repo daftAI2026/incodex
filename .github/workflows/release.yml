@@ -235,8 +235,13 @@ jobs:
                 "incodex-window-lifecycle.cjs",
                 "incodex-codex-mode.cjs",
                 "incodex-dock-menu.cjs",
+                "incodex-permission-copy.json",
+                "incodex-permission-ui.cjs",
                 "incodex-runtime-load.cjs",
                 "incodex-loader.cjs",
+                "incodex-permission-host",
+                "incodex-permission-ui.dylib",
+                "runtime-native-manifest.json",
               ];
               const REQUIRED_EXTERNAL_FILES = [
                 ...REQUIRED_MANIFEST_FILES.filter((name) => name !== "incodex-loader.cjs"),

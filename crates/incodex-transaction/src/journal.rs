@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::durable::{write_atomic, write_atomic_tracked, AtomicWriteError};
+use crate::validate_storage_root;
 
 pub const STAGED_REL: &str = "staging/ChatGPT.app";
 pub const OUTGOING_REL: &str = "outgoing/ChatGPT.app";
@@ -232,6 +233,7 @@ pub fn seal(mut journal: JournalV2) -> JournalV2 {
 }
 
 pub fn write_journal(root: &Path, journal: &JournalV2) -> Result<(), String> {
+    validate_storage_root(root)?;
     let (path, body) = journal_body(root, journal)?;
     write_atomic(&path, &body)
 }
@@ -258,6 +260,7 @@ pub(crate) fn write_journal_tracked(
 }
 
 fn journal_body(root: &Path, journal: &JournalV2) -> Result<(std::path::PathBuf, Vec<u8>), String> {
+    validate_storage_root(root)?;
     if journal.install_id.is_empty() || !is_uuid(&journal.install_id) {
         return Err("install id must be an RFC 4122 UUID".into());
     }
@@ -272,6 +275,7 @@ fn journal_body(root: &Path, journal: &JournalV2) -> Result<(std::path::PathBuf,
 }
 
 pub fn load_v2(root: &Path, install_id: &str) -> Result<JournalV2, String> {
+    validate_storage_root(root)?;
     if !is_uuid(install_id) {
         return Err("install id must be an RFC 4122 UUID".into());
     }
@@ -297,6 +301,7 @@ pub fn load_v2(root: &Path, install_id: &str) -> Result<JournalV2, String> {
 }
 
 pub(crate) fn load_cleanup_manifest(root: &Path, install_id: &str) -> Result<JournalV2, String> {
+    validate_storage_root(root)?;
     if !is_uuid(install_id) {
         return Err("install id must be an RFC 4122 UUID".into());
     }
@@ -336,6 +341,7 @@ fn load_v2_at(path: &Path, install_id: &str) -> Result<JournalV2, String> {
 }
 
 pub(crate) fn write_cleanup_manifest(root: &Path, journal: &JournalV2) -> Result<(), String> {
+    validate_storage_root(root)?;
     if !is_uuid(&journal.install_id) {
         return Err("install id must be an RFC 4122 UUID".into());
     }
@@ -442,6 +448,7 @@ fn reconstructed_in(
     journal: &JournalV2,
     transaction_dir: PathBuf,
 ) -> Result<TxPaths, String> {
+    validate_storage_root(root)?;
     validate_rel_paths(journal)?;
     let paths = tx_paths_in(transaction_dir);
     reject_symlink(&root.join("transactions"), "transactions directory")?;

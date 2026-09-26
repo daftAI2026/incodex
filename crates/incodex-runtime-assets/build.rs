@@ -73,6 +73,7 @@ fn safe_name(name: &str) -> bool {
     let Some(stem) = name.strip_prefix("incodex-").and_then(|name| {
         name.strip_suffix(".cjs")
             .or_else(|| name.strip_suffix(".js"))
+            .or_else(|| name.strip_suffix(".json"))
     }) else {
         return false;
     };

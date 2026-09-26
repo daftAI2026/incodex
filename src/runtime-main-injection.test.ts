@@ -157,6 +157,31 @@ describe("Electron UI injection reporting", () => {
     expect(deferred?.()).toBe("385,107,1311,873");
   });
 
+  test("propagates renderer accessibility only to diagnostic incognito launches", () => {
+    const start = main.indexOf("function incognitoLaunchArguments(");
+    const end = main.indexOf("\nasync function launchIncognitoOnce", start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const helper = main.slice(start, end);
+    const context = { process: { argv: ["ChatGPT", "--force-renderer-accessibility"] } };
+
+    const defaultArgs = runInNewContext(
+      `${helper}\nincognitoLaunchArguments("/session/chromium", ["ChatGPT"])`,
+      context,
+    );
+    const diagnosticArgs = runInNewContext(
+      `${helper}\nincognitoLaunchArguments("/session/chromium")`,
+      context,
+    );
+
+    expect(defaultArgs).toEqual(["--user-data-dir=/session/chromium", "codex://new?mode=codex"]);
+    expect(diagnosticArgs).toEqual([
+      "--force-renderer-accessibility",
+      "--user-data-dir=/session/chromium",
+      "codex://new?mode=codex",
+    ]);
+  });
+
   test("keeps macOS recovery timing while Windows rechecks asynchronous UI readiness", () => {
     const hook = hookWindowSource();
 

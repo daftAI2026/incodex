@@ -5,11 +5,13 @@ pub(crate) fn parse_locale_override(content: &str, accepted_quotes: &[char]) -> 
             return None;
         }
         let value = value.trim();
-        let unquoted = accepted_quotes.iter().find_map(|quote| {
-            value
-                .strip_prefix(*quote)
-                .and_then(|value| value.strip_suffix(*quote))
-        })?;
+        let quote = value.chars().next()?;
+        if !accepted_quotes.contains(&quote) {
+            return None;
+        }
+        let value = value.strip_prefix(quote)?;
+        let end = value.find(quote)?;
+        let unquoted = &value[..end];
         let locale = unquoted.trim();
         (!locale.is_empty()).then(|| locale.to_string())
     })
@@ -25,6 +27,15 @@ mod tests {
         assert_eq!(parse_locale_override(content, &['"']), None);
         assert_eq!(
             parse_locale_override(content, &['"', '\'']),
+            Some("zh-CN".to_string())
+        );
+    }
+
+    #[test]
+    fn macos_config_accepts_a_comment_after_the_double_quoted_locale() {
+        let content = "localeOverride = \"zh-CN\" # keep the Codex locale\n";
+        assert_eq!(
+            parse_locale_override(content, &['"']),
             Some("zh-CN".to_string())
         );
     }

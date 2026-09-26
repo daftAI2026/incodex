@@ -12,7 +12,7 @@ Safety rules matter more than speed. Treat installer, signing, session cleanup, 
 
 ## Product Direction
 
-Users launch the official Codex icon as usual. After `incodex install`, a hat-glasses control sits left of Search. Click or `Shift+Command+N` opens a second isolated Codex window: same login, language, and base settings; no old chats; close burns that temp home.
+Users launch the official Codex icon as usual. After `incodex install`, a hat-glasses control sits at the leading edge of Search's toolbar action group, before its other actions. Reuse the live official Search Button and SVG sizing/style tokens; do not pin official generated class names, asset hashes, or pixel sizes. Click or `Shift+Command+N` opens a second isolated Codex window: same login, language, and base settings; no old chats; close burns that temp home.
 
 `incodex open` is the other launch path: spawn the official binary with an isolated home, do not copy/patch/resign the official app, then inject the **same** `inject.js` (hat-glasses + banner) through Chrome DevTools Protocol. CDP is not the macOS Dock / `install` entry; the validated Windows Store exception is defined below.
 
@@ -138,6 +138,7 @@ Public docs use the native `incodex` / `inc` binaries. Bun is retained for Elect
 - Official install/uninstall default to `/Applications/ChatGPT.app`. That is intentional. Confirm on TTY; require `--yes` without a TTY.
 - Never write a second installer or restore a TypeScript router around the native CLI.
 - Only sign what must be signed. Leave official CUA sidecars official.
+- Electron builds that bind `ElectronAsarIntegrity` to a Framework digest need both metadata and digest updated in the staged transaction. Use `sign_app_with_asar_integrity`: validate all original nested signatures and the old digest before mutation, re-sign the unique digest-bearing Framework plus the existing host/Sparkle scope. A hardened descendant Electron helper whose verified CodeDirectory identifier matches its plist identity and is in the host's `.helper` namespace or the exact host-derived Framework `.AlertNotificationService` identity and whose Mach-O directly loads that modified Framework or whose verified classic `ChromeMain`/`dlopen` loader resolves to that exact binary also needs its own filtered entitlements and disabled library validation if it did not already have that exemption; sign these helpers before the Framework. Preserve all other vendor children and all CUA sidecars; a dependent outside that identity boundary fails closed. Never disable the integrity fuse or digest `used` bit to make a patched app launch.
 - Do not enable required GitHub reviews. Do not force-push `main`.
 - Pin GitHub Actions to a 40-character commit SHA with a version comment: `uses: owner/repo@<sha> # vX.Y.Z`. Do not leave floating `@v4` tags.
 - Official CLI packages are git tags `vX.Y.Z`. Follow `.claude/skills/release-flow/SKILL.md`, then `.claude/skills/release-notes/SKILL.md`. Do not `gh release create` and do not turn `generate_release_notes` back on.

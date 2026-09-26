@@ -24,10 +24,9 @@ use committed_install_support::committed_install;
 fn doctor_missing_app_prints_labeled_sections() {
     let home = isolated_home();
     let app = home.join("Missing.app");
-    let runtime_manifest = Sha256::digest(include_bytes!("../../../dist/runtime-manifest.json"))
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
+    let runtime_manifest = incodex_runtime_bundle::runtime_identity()
+        .expect("validated platform Runtime identity")
+        .manifest_sha256;
     let (status, stdout, stderr) = run(&["doctor", "--app", app.to_str().unwrap()], &home);
     assert_eq!(status, 0);
     assert_eq!(stderr, "");

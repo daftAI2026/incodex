@@ -201,6 +201,11 @@ class FakeElement {
 }
 
 class FakeDocument extends FakeElement {
+  readonly styleSheets = [{
+    cssRules: [{
+      selectorText: "[data-color][data-variant][data-squircle][data-uniform][data-size][data-icon-size][data-gutter-size][data-pill][data-no-autosize][data-future-metric]",
+    }],
+  }];
   readonly documentElement = new FakeElement("html");
   readonly head = new FakeElement("head");
   readonly body = new FakeElement("body");
@@ -332,6 +337,15 @@ function makeSearch(document: FakeDocument, nested: boolean): { search: FakeElem
   search.setAttribute("title", "Search official tooltip");
   search.setAttribute("aria-describedby", "official-search-tooltip");
   search.setAttribute("data-testid", "official-search-button");
+  search.setAttribute("data-color", "secondary");
+  search.setAttribute("data-variant", "ghost");
+  search.setAttribute("data-squircle", "");
+  search.setAttribute("data-uniform", "");
+  search.setAttribute("data-size", "xs");
+  search.setAttribute("data-icon-size", "sm");
+  search.setAttribute("data-gutter-size", "xs");
+  search.setAttribute("data-pill", "");
+  search.setAttribute("data-state", "closed");
   search.textContent = "Search text that must not be cloned";
 
   const icon = document.createElement("svg");
@@ -390,6 +404,54 @@ function layoutWrappers(button: FakeElement): FakeElement[] {
 }
 
 describe("8881 hat-glasses icon layout", () => {
+  test("preserves the live official SVG autosize opt-out instead of using Button's larger icon token", () => {
+    const document = new FakeDocument();
+    const { buildButton, setButtonHover } = makeRuntime();
+    const { search } = makeSearch(document, true);
+    const sample = search.querySelector("svg")!;
+    sample.setAttribute("data-no-autosize", "true");
+    const button = buildButton(search);
+
+    expect(button.querySelector("svg")?.getAttribute("data-no-autosize")).toBe("true");
+    setButtonHover(button, true);
+    expect(button.querySelector("svg")?.getAttribute("data-no-autosize")).toBe("true");
+    setButtonHover(button, false);
+    expect(button.querySelector("svg")?.getAttribute("data-no-autosize")).toBe("true");
+    expect(button.querySelector("svg")?.getAttribute("viewBox")).toBe("0 0 24 24");
+  });
+
+  test("does not force an SVG autosize opt-out when the official sample uses its Button token", () => {
+    const document = new FakeDocument();
+    const { buildButton } = makeRuntime();
+    const { search } = makeSearch(document, true);
+    expect(buildButton(search).querySelector("svg")?.hasAttribute("data-no-autosize")).toBe(false);
+  });
+
+  test("inherits a future CSS-declared style token without extending a Button attribute whitelist", () => {
+    const document = new FakeDocument();
+    const { buildButton } = makeRuntime();
+    const { search } = makeSearch(document, true);
+    search.setAttribute("data-future-metric", "next");
+    search.setAttribute("data-unreferenced-business-value", "must-not-copy");
+    const button = buildButton(search);
+    expect(button.getAttribute("data-future-metric")).toBe("next");
+    expect(button.getAttribute("data-unreferenced-business-value")).toBeNull();
+  });
+
+  test("retains the official Button styling tokens that size the hit target", () => {
+    const document = new FakeDocument();
+    const { buildButton } = makeRuntime();
+    const { search } = makeSearch(document, true);
+    const button = buildButton(search);
+
+    for (const name of ["data-color", "data-variant", "data-squircle", "data-uniform", "data-size", "data-icon-size", "data-gutter-size", "data-pill"]) {
+      expect(button.getAttribute(name)).toBe(search.getAttribute(name));
+    }
+    expect(button.getAttribute("data-size")).toBe("xs");
+    expect(button.getAttribute("data-state")).toBeNull();
+    expect(button.getAttribute("data-testid")).toBeNull();
+  });
+
   test("copies the Search icon's non-interactive layout wrapper and CSS variable", () => {
     const document = new FakeDocument();
     const { buildButton } = makeRuntime();

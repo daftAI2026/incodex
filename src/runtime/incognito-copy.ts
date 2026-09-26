@@ -1,21 +1,27 @@
+import { ACCESSIBILITY_REGIONAL_COPY } from "./incognito-accessibility-copy-data.ts";
+import { attachAccessibilityDragInstructionRuns } from "./incognito-accessibility-copy-runs.ts";
+import { resolveLocaleFromCatalog } from "./incodex-locale.cts";
 import { COPY as REGIONAL_COPY, type CopyKey, type CopyTable } from "./incognito-copy-data.ts";
 
 export type { CopyKey, CopyTable } from "./incognito-copy-data.ts";
 
 // Embedded into the main-process Runtime by build-runtime.ts. Keep the two
 // source languages together without introducing an unverified Runtime asset.
-export const ACCESSIBILITY_SETUP_COPY = {
+const ACCESSIBILITY_SETUP_COPY_BASE = /* @__PURE__ */ (() => ({
+  ...ACCESSIBILITY_REGIONAL_COPY,
   en: {
     title: "Enable ChatGPT script control",
-    body: "Installing Incodex modifies ChatGPT, so its Accessibility permission needs to be granted again.",
+    installedTitle: "Re-enable ChatGPT script control",
+    body: "Installing Incodex modifies ChatGPT,\nso its Accessibility permission needs to be granted again.",
     permissionTitle: "Accessibility",
     permissionDescription: "Read and interact with app interfaces",
     repair: "Allow",
-    later: "Later",
+    later: "Skip",
     back: "Back",
     addedTitle: "Allow ChatGPT in System Settings",
     addedBody: "Drag the ChatGPT icon above into the Accessibility list and enable it. Complete any macOS authentication. Access is checked automatically; this window closes when access is ready.",
     dragInstruction: "Drag ChatGPT to the list above to allow Accessibility",
+    completeInSettings: "COMPLETE IN SYSTEM SETTINGS",
     checking: "Waiting for access · checking automatically",
     repairing: "Preparing System Settings…",
     openSettings: "Open Settings",
@@ -24,56 +30,66 @@ export const ACCESSIBILITY_SETUP_COPY = {
   },
   "zh-CN": {
     title: "启用 ChatGPT 脚本控制",
+    installedTitle: "重新启用 ChatGPT 脚本控制",
     body: "安装 Incodex 会修改 ChatGPT，因此需要重新授予它辅助功能权限。",
-    permissionTitle: "辅助功能",
+    permissionTitle: "无障碍",
     permissionDescription: "读取和操作其他应用的界面",
     repair: "允许",
-    later: "稍后",
+    later: "跳过",
     back: "返回",
     addedTitle: "在系统设置中允许 ChatGPT",
-    addedBody: "将上方 ChatGPT 图标拖入辅助功能列表并开启权限。完成 macOS 要求的认证后，会自动检查权限；检查通过后，此窗口自动关闭。",
-    dragInstruction: "将 ChatGPT 拖到上方列表，允许辅助功能访问",
+    addedBody: "将上方 ChatGPT 图标拖入“无障碍”列表并开启权限。完成 macOS 要求的认证后，会自动检查权限；检查通过后，此窗口自动关闭。",
+    dragInstruction: "将 ChatGPT 拖到上方的“无障碍”列表中，然后开启对应权限",
+    completeInSettings: "在系统设置中完成",
     checking: "等待授权 · 自动检查中",
     repairing: "正在准备系统设置…",
     openSettings: "打开系统设置",
     errorTitle: "ChatGPT 权限设置尚未完成",
-    errorBody: "未能完成权限设置。请在系统设置 → 隐私与安全性 → 辅助功能中添加 /Applications/ChatGPT.app，再运行 incodex install 重新检查。",
+    errorBody: "未能完成权限设置。请在系统设置 → 隐私与安全性 → 无障碍中添加 /Applications/ChatGPT.app，再运行 incodex install 重新检查。",
   },
   "zh-HK": {
     title: "啟用 ChatGPT 腳本控制",
+    installedTitle: "重新啟用 ChatGPT 腳本控制",
     body: "安裝 Incodex 會修改 ChatGPT，因此需要重新授予它輔助功能權限。",
-    permissionTitle: "輔助功能",
+    permissionTitle: "輔助使用",
     permissionDescription: "讀取並操作其他應用程式的介面",
     repair: "允許",
-    later: "稍後",
+    later: "略過",
     back: "返回",
     addedTitle: "在系統設定中允許 ChatGPT",
-    addedBody: "將上方 ChatGPT 圖示拖入輔助功能列表並啟用權限。完成 macOS 要求的驗證後，系統會自動檢查權限；確認取得權限後，此視窗會自動關閉。",
-    dragInstruction: "將 ChatGPT 拖到上方列表，以允許輔助功能存取",
+    addedBody: "將上方 ChatGPT 圖示拖入「輔助使用」列表並啟用權限。完成 macOS 要求的驗證後，系統會自動檢查權限；確認取得權限後，此視窗會自動關閉。",
+    dragInstruction: "將 ChatGPT 拖到上方的「輔助使用」列表中，然後啟用權限",
+    completeInSettings: "在系統設定中完成",
     checking: "等待授權 · 自動檢查中",
     repairing: "正在準備系統設定…",
     openSettings: "開啟系統設定",
     errorTitle: "ChatGPT 權限設定尚未完成",
-    errorBody: "未能完成權限設定。請在系統設定 → 私隱與安全性 → 輔助功能中加入 /Applications/ChatGPT.app，再執行 incodex install 重新檢查。",
+    errorBody: "未能完成權限設定。請在系統設定 → 私隱與安全性 → 輔助使用中加入 /Applications/ChatGPT.app，再執行 incodex install 重新檢查。",
   },
   "zh-TW": {
     title: "啟用 ChatGPT 腳本控制",
+    installedTitle: "重新啟用 ChatGPT 腳本控制",
     body: "安裝 Incodex 會修改 ChatGPT，因此需要重新授予它輔助功能權限。",
-    permissionTitle: "輔助功能",
+    permissionTitle: "輔助使用",
     permissionDescription: "讀取並操作其他應用程式的介面",
     repair: "允許",
-    later: "稍後",
+    later: "略過",
     back: "返回",
     addedTitle: "在系統設定中允許 ChatGPT",
-    addedBody: "將上方的 ChatGPT 圖示拖曳到輔助功能列表並啟用權限。完成 macOS 要求的驗證後，系統會自動檢查權限；確認取得權限後，此視窗會自動關閉。",
-    dragInstruction: "將 ChatGPT 拖曳到上方列表，以允許輔助功能存取",
+    addedBody: "將上方的 ChatGPT 圖示拖曳到「輔助使用」列表並啟用權限。完成 macOS 要求的驗證後，系統會自動檢查權限；確認取得權限後，此視窗會自動關閉。",
+    dragInstruction: "將 ChatGPT 拖曳到上方的「輔助使用」列表中，然後啟用權限",
+    completeInSettings: "在系統設定中完成",
     checking: "等待授權 · 自動檢查中",
     repairing: "正在準備系統設定…",
     openSettings: "開啟系統設定",
     errorTitle: "ChatGPT 權限設定尚未完成",
-    errorBody: "未能完成權限設定。請在系統設定 → 隱私權與安全性 → 輔助功能中加入 /Applications/ChatGPT.app，再執行 incodex install 重新檢查。",
+    errorBody: "未能完成權限設定。請在系統設定 → 隱私權與安全性 → 輔助使用中加入 /Applications/ChatGPT.app，再執行 incodex install 重新檢查。",
   },
-} as const;
+} as const))();
+
+export const ACCESSIBILITY_SETUP_COPY = /* @__PURE__ */ attachAccessibilityDragInstructionRuns(
+  ACCESSIBILITY_SETUP_COPY_BASE,
+);
 
 // English and Chinese are the source copy; keep them beside locale resolution.
 const CORE_COPY: Record<string, CopyTable> = {
@@ -128,33 +144,8 @@ export const COPY: Record<string, CopyTable> = {
   ...CORE_COPY,
 };
 
-// 只有多个区域候选或跨语言别名需要显式默认；单一候选由下方扫描自然解析。
-const LANGUAGE_DEFAULT_OVERRIDES: Record<string, string> = {
-  es: "es-419",
-  fr: "fr-FR",
-  no: "nb-NO",
-  pt: "pt-BR",
-};
-
 export function resolveLocale(raw: string): string {
-  const normalized = raw.trim().replaceAll("_", "-");
-  if (!normalized) return "en";
-  if (COPY[normalized]) return normalized;
-  const lower = normalized.toLowerCase();
-  const exact = Object.keys(COPY).find((key) => key.toLowerCase() === lower);
-  if (exact) return exact;
-  if (lower.startsWith("zh-hant-hk") || lower.startsWith("zh-hk")) return "zh-HK";
-  if (lower.startsWith("zh-hant") || lower.startsWith("zh-tw")) return "zh-TW";
-  if (lower.startsWith("zh")) return "zh-CN";
-  if (lower === "en" || lower.startsWith("en-")) return "en";
-  const language = lower.split("-")[0] ?? "en";
-  if (COPY[language]) return language;
-  const defaultOverride = LANGUAGE_DEFAULT_OVERRIDES[language];
-  if (defaultOverride) {
-    return defaultOverride;
-  }
-  const regional = Object.keys(COPY).find((key) => key.toLowerCase().startsWith(`${language}-`));
-  return regional ?? "en";
+  return resolveLocaleFromCatalog(raw, COPY);
 }
 
 export function translate(locale: string, key: CopyKey): string {

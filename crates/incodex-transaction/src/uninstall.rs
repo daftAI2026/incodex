@@ -431,6 +431,9 @@ pub(crate) fn cleanup_manifest(root: &Path, install_id: &str) -> Result<JournalV
 }
 
 pub(crate) fn cleanup_pending(root: &Path, install_id: &str) -> bool {
+    if crate::validate_storage_root(root).is_err() {
+        return false;
+    }
     fs::symlink_metadata(cleanup_manifest_path(root, install_id)).is_ok()
 }
 

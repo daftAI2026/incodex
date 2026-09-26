@@ -3,6 +3,7 @@
 // Copyright (c) 2026 daftAI. See LICENSE.
 const { runPermissionFlight, alignPermissionFrame } = require("./incodex-permission-motion.cts");
 const { createPermissionGraphics } = require("./incodex-permission-graphics.cts");
+const { loadPermissionNativeLibrary } = require("./incodex-permission-native.cts");
 const rect = (x, y, width, height) => ({ origin: { x, y }, size: { width, height } });
 
 function snapshot(kit, view) {
@@ -22,19 +23,92 @@ function snapshot(kit, view) {
   return image;
 }
 
-function createNativeReplicants({ objc, source, target }) {
+function createNativeReplicants({ objc, nativeLibrary, source, target, reverse = false }) {
   const kit = new objc.NobjcLibrary("/System/Library/Frameworks/AppKit.framework/AppKit");
   const foundation = new objc.NobjcLibrary("/System/Library/Frameworks/Foundation.framework/Foundation");
   const quartz = new objc.NobjcLibrary("/System/Library/Frameworks/QuartzCore.framework/QuartzCore");
-  const coreImage = new objc.NobjcLibrary("/System/Library/Frameworks/CoreImage.framework/CoreImage");
+  const swiftLibrary = nativeLibrary ?? loadPermissionNativeLibrary(objc);
+  const FlightView = swiftLibrary?.IncodexPermissionFlightView;
+  if (!FlightView) throw new Error("Native permission SwiftUI flight class is unavailable");
   const graphics = createPermissionGraphics(objc);
   const string = value => foundation.NSString.stringWithUTF8String$(value);
-  const targetImage = snapshot(kit, target.view);
+  // CUA renders an appearance-bound SwiftUI foreground for its helper,
+  // excluding the live window's Material. Honor that native capture provider
+  // on both legs; a failed provider must not reintroduce the full background.
+  const targetImage = typeof target.captureImage === "function" ? target.captureImage() : snapshot(kit, target.view);
+  if (!targetImage) throw new Error("Native permission foreground snapshot is unavailable");
+  // Each leg composites its outgoing snapshot below its incoming snapshot.
+  const flightImages = reverse ? [targetImage, source.image] : [source.image, targetImage];
   const entries = [];
-  const allowsBlur = !kit.NSWorkspace.sharedWorkspace().accessibilityDisplayShouldReduceTransparency();
+  const DisplayLink = swiftLibrary?.IncodexPermissionDisplayLink;
+  let displayClock = null;
+  let displayClockPanel = null;
+  let displayClockKind = null;
+  let displayClockBlock = null;
+  let displayClockCallback = null;
+  const reduceTransparency = Boolean(kit.NSWorkspace.sharedWorkspace().accessibilityDisplayShouldReduceTransparency());
   let topologyKey = null;
+  function displayClockIsLinked() {
+    if (!displayClock) return false;
+    const value = displayClock.displayLinked;
+    return Boolean(typeof value === "function" ? value.call(displayClock) : value);
+  }
+  function invalidateDisplayClock() {
+    try { displayClock?.invalidate?.(); } finally {
+      displayClockPanel = null;
+      displayClockKind = null;
+      displayClockBlock = null;
+    }
+  }
+  function startDisplayClock(callback) {
+    if (!DisplayLink || typeof objc.typedBlock !== "function") {
+      invalidateDisplayClock();
+      return false;
+    }
+    try {
+      if (!displayClock) displayClock = DisplayLink.alloc().init();
+      const block = objc.typedBlock({ returns: "v", args: ["d", "d", "d"] }, callback);
+      // Nobjc blocks are trampolines owned by the JS runtime. Retain the exact
+      // block until invalidate so AppKit cannot call a reclaimed callback.
+      displayClockBlock = block;
+      const panel = entries[0]?.panel;
+      if (panel && typeof displayClock.startForWindow$handler$ === "function") {
+        displayClock.startForWindow$handler$(panel, block);
+        if (displayClockIsLinked()) { displayClockPanel = panel; displayClockKind = "window"; return true; }
+      }
+      const screen = kit.NSScreen.mainScreen?.();
+      if (screen && typeof displayClock.startForScreen$handler$ === "function") {
+        displayClock.startForScreen$handler$(screen, block);
+        if (displayClockIsLinked()) { displayClockPanel = null; displayClockKind = "screen"; return true; }
+      }
+      invalidateDisplayClock();
+      return false;
+    } catch (error) {
+      try { invalidateDisplayClock(); } catch {}
+      throw error;
+    }
+  }
+  const frameSource = {
+    start(callback) {
+      displayClockCallback = callback;
+      const started = startDisplayClock(callback);
+      if (!started) displayClockCallback = null;
+      return started;
+    },
+    stop() {
+      displayClockCallback = null;
+      invalidateDisplayClock();
+    },
+  };
   function closeEntries(items) {
-    for (const item of items) { item.panel.orderOut$(null); item.panel.close(); }
+    let firstError;
+    const remember = error => { if (!firstError) firstError = error; };
+    for (const item of items) {
+      try { item.surface?.setSourceImage$targetImage$(null, null); } catch (error) { remember(error); }
+      try { item.panel.orderOut$(null); } catch (error) { remember(error); }
+      try { item.panel.close(); } catch (error) { remember(error); }
+    }
+    if (firstError) throw firstError;
   }
   function screenSnapshot() {
     const screens = kit.NSScreen.screens();
@@ -53,7 +127,11 @@ function createNativeReplicants({ objc, source, target }) {
     return { specs, key: key.join(";") };
   }
   function dispose() {
-    closeEntries(entries.splice(0));
+    let firstError;
+    try { frameSource.stop(); } catch (error) { firstError = error; }
+    try { closeEntries(entries.splice(0)); }
+    catch (error) { if (!firstError) firstError = error; }
+    if (firstError) throw firstError;
   }
   function buildEntries(specs) {
     const next = [];
@@ -64,31 +142,51 @@ function createNativeReplicants({ objc, source, target }) {
       // Keep the panel owned even if construction of its children fails.
       const item = { panel, frame, scale }; next.push(item);
       panel.setOpaque$(false); panel.setBackgroundColor$(kit.NSColor.clearColor());
-      panel.setHasShadow$(false); panel.setIgnoresMouseEvents$(true); panel.setLevel$(3);
+      panel.setHasShadow$(false); panel.setIgnoresMouseEvents$(true); panel.setLevel$(25);
+      // The flight owns its motion; AppKit must not add an ordering animation.
+      // Keep the replica on the same Spaces/full-screen policy as its native shell.
+      panel.setAnimationBehavior$(2);
+      panel.setCollectionBehavior$(0x1149);
       panel.setHidesOnDeactivate$(false);
-      const root = kit.NSView.alloc().initWithFrame$(rect(0, 0, frame.size.width, frame.size.height));
-      const surface = kit.NSView.alloc().initWithFrame$(rect(0, 0, 1, 1));
+      const contentView = kit.NSView.alloc().initWithFrame$(rect(0, 0, frame.size.width, frame.size.height));
+      contentView.setWantsLayer$(true);
+      panel.setContentView$(contentView);
+      // The window owns a stable screen-sized view; only its replica child
+      // follows the animated card bounds and carries decoration layers.
+      const root = kit.NSView.alloc().initWithFrame$(rect(0, 0, 0, 0));
+      root.setTranslatesAutoresizingMaskIntoConstraints$(true);
+      // SwiftUI owns the live material and the clipped image ZStack. Keep the
+      // AppKit root and its shadow/stroke layers around that native surface.
+      const surface = FlightView.alloc().initWithFrame$(rect(0, 0, 1, 1));
+      if (!surface) throw new Error("Native permission SwiftUI flight view construction failed");
+      item.surface = surface;
       surface.setWantsLayer$(true);
       surface.layer().setMasksToBounds$(false);
       surface.layer().setContentsScale$(scale);
-      root.addSubview$(surface); panel.setContentView$(root);
-      const shadows = [[.2, 3, 0, -3], [.06, 2, -3, -1], [.09, 15, -5, -2]].map(([opacity, radius, y, z]) => {
+      root.setWantsLayer$(true); root.layer().setMasksToBounds$(false);
+      contentView.addSubview$(root);
+      // CUA ReplicantWindow: destination, key and ambient shadows each have
+      // an even-odd cutout. The animated container extends 30pt past the card.
+      const masks = [];
+      const shadows = [[.06, 2, -3], [.09, 15, -5], [.2, 3, 0]].map(([opacity, radius, y]) => {
         const layer = quartz.CALayer.layer();
         graphics.setBlackColor(layer, "shadowColor", 1);
         layer.setShadowOpacity$(opacity); layer.setShadowRadius$(radius);
-        layer.setShadowOffset$({ width: 0, height: y }); layer.setZPosition$(z);
-        surface.layer().addSublayer$(layer); return layer;
+        layer.setShadowOffset$({ width: 0, height: y }); layer.setMasksToBounds$(false);
+        const mask = quartz.CAShapeLayer.layer();
+        mask.setFillRule$(string("even-odd")); graphics.setColor(mask, "fillColor", [1, 1, 1, 1]);
+        layer.setMask$(mask); masks.push(mask);
+        root.layer().addSublayer$(layer); return layer;
       });
-      const stroke = quartz.CALayer.layer();
-      stroke.setBorderWidth$(.5); graphics.setBlackColor(stroke, "borderColor", .15);
-      stroke.setZPosition$(3); surface.layer().addSublayer$(stroke);
-      const images = [source.image, targetImage].map(image => {
-        const view = kit.NSImageView.alloc().initWithFrame$(rect(0, 0, 1, 1));
-        view.setImage$(image); view.setImageScaling$(1); view.setWantsLayer$(true);
-        view.layer().setMasksToBounds$(false); view.layer().setContentsScale$(scale);
-        surface.addSubview$(view); return view;
-      });
-      Object.assign(item, { surface, shadows, stroke, images });
+      surface.setSourceImage$targetImage$(flightImages[0], flightImages[1]);
+      root.addSubview$(surface);
+      const strokeView = kit.NSView.alloc().initWithFrame$(rect(0, 0, 1, 1));
+      strokeView.setWantsLayer$(true); strokeView.layer().setMasksToBounds$(false);
+      const stroke = quartz.CAShapeLayer.layer();
+      stroke.setLineWidth$(.5); graphics.setBlackColor(stroke, "strokeColor", 1);
+      graphics.setBlackColor(stroke, "fillColor", 0); stroke.setOpacity$(0);
+      strokeView.layer().addSublayer$(stroke); root.addSubview$(strokeView);
+      Object.assign(item, { root, surface, shadows, masks, strokeView, stroke });
       }
       return next;
     } catch (error) {
@@ -97,20 +195,15 @@ function createNativeReplicants({ objc, source, target }) {
     }
   }
   function rebuild() {
+    const callback = displayClockCallback;
+    if (callback) invalidateDisplayClock();
     const current = screenSnapshot();
     const old = entries.splice(0);
     closeEntries(old);
     const next = buildEntries(current.specs);
     entries.push(...next);
     topologyKey = current.key;
-  }
-  function blur(view, radius, scale) {
-    const layer = view.layer(); layer.setFilters$(null); layer.setShouldRasterize$(false);
-    if (!allowsBlur || radius <= 0) return;
-    const filter = coreImage.CIFilter.filterWithName$(string("CIGaussianBlur"));
-    if (!filter) return;
-    filter.setValue$forKey$(foundation.NSNumber.numberWithDouble$(radius), string("inputRadius"));
-    layer.setFilters$(foundation.NSArray.arrayWithObject$(filter)); layer.setShouldRasterize$(true); layer.setRasterizationScale$(scale);
+    displayClockCallback = callback;
   }
   try { rebuild(); } catch (error) { dispose(); throw error; }
   return { dispose, render(sample) {
@@ -118,37 +211,63 @@ function createNativeReplicants({ objc, source, target }) {
     if (current.key !== topologyKey) rebuild();
     quartz.CATransaction.begin(); quartz.CATransaction.setDisableActions$(true);
     try {
-      for (const { frame, scale, surface, shadows, stroke, images } of entries) {
+      for (const { frame, root, surface, shadows, masks, strokeView, stroke } of entries) {
+        // The reference applies CGRectIntegral in screen points, not nearest
+        // backing pixels, before translating into each screen's container.
         const b = sample.bounds;
-        const aligned = alignPermissionFrame({ x: b.x - frame.origin.x, y: b.y - frame.origin.y, width: b.width, height: b.height }, scale);
+        const x = Math.floor(b.x), y = Math.floor(b.y);
+        const width = Math.ceil(b.x + b.width) - x, height = Math.ceil(b.y + b.height) - y;
+        const localX = x - frame.origin.x, localY = y - frame.origin.y;
+        const aligned = { x: Math.floor(localX), y: Math.floor(localY),
+          width: Math.ceil(localX + width) - Math.floor(localX),
+          height: Math.ceil(localY + height) - Math.floor(localY) };
         const bounds = rect(0, 0, aligned.width, aligned.height);
-        surface.setFrame$(rect(aligned.x, aligned.y, aligned.width, aligned.height));
-        stroke.setFrame$(bounds); stroke.setCornerRadius$(sample.cornerRadius); stroke.setOpacity$(sample.progress);
-        for (const layer of shadows) {
-          layer.setFrame$(bounds);
-          graphics.setRoundedShadowPath(layer, bounds, 12);
-        }
-        shadows[1].setShadowOpacity$(.06 * sample.progress);
-        images.forEach(view => view.setFrame$(bounds));
-        images[0].setAlphaValue$(sample.sourceOpacity); images[1].setAlphaValue$(sample.targetOpacity);
-        blur(images[0], sample.sourceBlur, scale); blur(images[1], sample.targetBlur, scale);
+        const outer = rect(0, 0, aligned.width + 60, aligned.height + 60);
+        const inner = rect(30, 30, aligned.width, aligned.height);
+        root.setFrame$(rect(aligned.x - 30, aligned.y - 30, outer.size.width, outer.size.height));
+        root.layer().setCornerRadius$(sample.cornerRadius);
+        surface.setFrame$(inner);
+        surface.layer().setCornerRadius$(sample.cornerRadius);
+        surface.updateProgress$cornerRadius$reduceTransparency$(sample.progress, sample.cornerRadius, reduceTransparency);
+        strokeView.setFrame$(inner);
+        strokeView.layer().setCornerRadius$(sample.cornerRadius);
+        const strokeRadius = Math.max(0, sample.cornerRadius - .25);
+        stroke.setFrame$(bounds); stroke.setOpacity$(.15 * Math.max(0, Math.min(1, sample.progress)));
+        graphics.setRoundedPath(stroke, rect(.25, .25, Math.max(0, aligned.width - .5), Math.max(0, aligned.height - .5)), strokeRadius);
+        shadows.forEach((layer, index) => {
+          layer.setFrame$(outer); masks[index].setFrame$(outer);
+          // Shadow silhouette and cutout follow the full clipping shape;
+          // only the centered half-point stroke needs a quarter-point inset.
+          graphics.setRoundedShadowPath(layer, inner, sample.cornerRadius);
+          graphics.setOuterShadowMaskPath(masks[index], outer, inner, sample.cornerRadius);
+        });
+        shadows[0].setOpacity$(Math.max(0, Math.min(1, sample.progress)));
       }
     } finally { quartz.CATransaction.commit(); }
     for (const item of entries) { if (!item.shown) { item.panel.orderFront$(null); item.shown = true; } }
-  } };
+    if (displayClockCallback && (!displayClockIsLinked() ||
+      (displayClockKind === "window" && displayClockPanel !== entries[0]?.panel))) {
+      startDisplayClock(displayClockCallback);
+    }
+  }, frameSource };
 }
 
 function runNativePermissionHandoff(options) {
   let { objc, source, target, isClosed = () => false,
-  reducedMotion, reverse = false, now = () => performance.now(), schedule = fn => setTimeout(fn, 1000 / 60), cancel = clearTimeout,
+  nativeLibrary, reducedMotion, reverse = false, now = () => performance.now(), schedule = fn => setTimeout(fn, 1000 / 60), cancel = clearTimeout,
   createReplicants = createNativeReplicants, onError = () => {} } = options;
   let resolve;
   const finished = new Promise(done => { resolve = done; });
   let done = false, stop = null, replicas = null;
   const dispose = () => {
     if (done) return;
-    done = true; stop?.();
-    try { replicas?.dispose(); } finally { resolve(); }
+    done = true;
+    let firstError;
+    try { stop?.(); } catch (error) { firstError = error; }
+    try { replicas?.dispose(); }
+    catch (error) { if (!firstError) firstError = error; }
+    finally { resolve(); }
+    if (firstError) throw firstError;
   };
   try {
     if (reducedMotion === undefined) {
@@ -158,10 +277,14 @@ function runNativePermissionHandoff(options) {
     if (reducedMotion || isClosed()) { dispose(); return { finished, dispose }; }
     const resolveTarget = () => typeof target === "function" ? target() : target;
     const initialTarget = resolveTarget();
-    replicas = createReplicants({ objc, source, target: initialTarget });
+    replicas = createReplicants({ objc, nativeLibrary, source, target: initialTarget, reverse });
     const flip = item => ({ x: item.frame.origin.x, y: -item.frame.origin.y - item.frame.size.height,
       width: item.frame.size.width, height: item.frame.size.height, radius: item.radius ?? 12 });
-    stop = runPermissionFlight({ source: flip(source), target: () => flip(resolveTarget()), reducedMotion: false, reverse, now, schedule, cancel,
+    // CUA reverse completion's caller supplies helper -> original captures,
+    // then initializes a fresh 0 -> 1 spring, including shadows and stroke.
+    stop = runPermissionFlight({ source: flip(reverse ? initialTarget : source),
+      target: () => flip(reverse ? source : resolveTarget()), reducedMotion: false, now, schedule, cancel,
+      frameSource: replicas.frameSource,
       render(sample) {
         if (isClosed()) { dispose(); return; }
         const bounds = { ...sample.bounds, y: -sample.bounds.y - sample.bounds.height };

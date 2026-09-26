@@ -88,6 +88,44 @@ fn read_marker(fixture: &Fixture) -> Value {
 }
 
 #[test]
+fn new_install_assigns_presentation_to_the_shared_cli_host() {
+    let fixture = committed_fixture("cli-presentation");
+    request_setup(&fixture.root, &fixture.app, &fixture.install_id).unwrap();
+    assert_eq!(read_marker(&fixture)["presentationOwner"], "cli");
+}
+
+#[test]
+fn cli_completion_is_bound_to_the_current_request_and_preserves_ownership() {
+    let fixture = committed_fixture("cli-completion");
+    request_setup(&fixture.root, &fixture.app, &fixture.install_id).unwrap();
+    let request = read_marker(&fixture)["requestId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(super::finish_cli_setup(
+        &fixture.root,
+        &fixture.app,
+        &fixture.install_id,
+        "old-request",
+        "granted"
+    )
+    .is_err());
+    assert_eq!(read_marker(&fixture)["state"], "pending");
+    super::finish_cli_setup(
+        &fixture.root,
+        &fixture.app,
+        &fixture.install_id,
+        &request,
+        "granted",
+    )
+    .unwrap();
+    let marker = read_marker(&fixture);
+    assert_eq!(marker["state"], "granted");
+    assert_eq!(marker["presentationOwner"], "cli");
+    assert!(marker["updatedAtMs"].as_u64().unwrap() > 0);
+}
+
+#[test]
 fn each_explicit_install_has_a_distinct_setup_request() {
     let fixture = committed_fixture("request-generation");
     request_setup(&fixture.root, &fixture.app, &fixture.install_id).unwrap();

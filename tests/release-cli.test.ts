@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { createRequire } from "node:module";
 import { join } from "node:path";
+import { runInNewContext } from "node:vm";
 
 const root = join(import.meta.dir, "..");
 const releaseYml = readFileSync(join(root, ".github/workflows/release.yml"), "utf8");
@@ -17,6 +21,66 @@ const runtimeManifest = JSON.parse(readFileSync(join(root, "dist/runtime-manifes
 };
 const manifestFileNames = Object.keys(runtimeManifest.files).sort();
 const externalFileNames = manifestFileNames.filter((name) => name !== "incodex-loader.cjs");
+const nativeFileNames = [
+  "incodex-permission-host",
+  "incodex-permission-ui.dylib",
+  "runtime-native-manifest.json",
+];
+
+// Execute the actual workflow verifier against a small published-Runtime fixture,
+// rather than checking only the source-only JavaScript manifest in dist/.
+function verifyPublishedRuntime(corruptFile?: string, omitFile?: string) {
+  const script = releaseYml.match(
+    /verify_runtime_pointer\(\) \{\s*SMOKE_HOME[^\n]+bun -e '([\s\S]*?)\n\s*'\s*\}/,
+  )?.[1];
+  if (!script) throw new Error("release Runtime verifier not found");
+  const home = mkdtempSync(join(tmpdir(), "incodex-release-pointer-test-"));
+  try {
+    const version = "0.0.0";
+    const sourceCommit = "1".repeat(40);
+    const bytes = Object.fromEntries(
+      [...externalFileNames, ...nativeFileNames]
+        .filter((name) => name !== omitFile)
+        .map((name) => [name, Buffer.from(`fixture:${name}`)]),
+    );
+    const hash = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
+    const files = Object.fromEntries(
+      Object.entries(bytes).map(([name, value]) => [name, hash(value)]),
+    );
+    const manifestBytes = JSON.stringify({
+      runtimeVersion: version,
+      sourceCommit,
+      files: { ...files, "incodex-loader.cjs": hash("fixture:loader") },
+    });
+    const manifestSha256 = hash(manifestBytes);
+    const release = `releases/${version}-${manifestSha256}`;
+    const runtimeRoot = join(home, ".incodex", "runtime");
+    const releaseRoot = join(runtimeRoot, release);
+    mkdirSync(releaseRoot, { recursive: true });
+    for (const [name, value] of Object.entries(bytes)) {
+      writeFileSync(join(releaseRoot, name), name === corruptFile ? "corrupted" : value);
+    }
+    writeFileSync(join(releaseRoot, "runtime-manifest.json"), manifestBytes);
+    writeFileSync(join(runtimeRoot, "current.json"), JSON.stringify({
+      schemaVersion: 1, version, sourceCommit, manifestSha256, release, files,
+    }));
+    try {
+      runInNewContext(script, {
+        require: createRequire(import.meta.url),
+        process: { env: {
+          SMOKE_HOME: home,
+          EXPECTED_VERSION: version,
+          EXPECTED_SOURCE_COMMIT: sourceCommit,
+        } },
+      });
+      return { exitCode: 0, stderr: "" };
+    } catch (error) {
+      return { exitCode: 1, stderr: String(error) };
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+}
 
 describe("release CLI artifacts", () => {
   test("cross-compiles the native Rust CLI into the stable macOS asset names", () => {
@@ -199,8 +263,10 @@ describe("release CLI artifacts", () => {
   });
 
   test("smoke validates external and manifest Runtime file sets separately", () => {
-    expect(externalFileNames).toHaveLength(13);
-    expect(manifestFileNames).toHaveLength(14);
+    expect(externalFileNames).toHaveLength(15);
+    expect(externalFileNames).toContain("incodex-permission-copy.json");
+    expect(externalFileNames).toContain("incodex-permission-ui.cjs");
+    expect(manifestFileNames).toHaveLength(16);
     expect(manifestFileNames.filter((name) => !externalFileNames.includes(name))).toEqual([
       "incodex-loader.cjs",
     ]);
@@ -222,6 +288,26 @@ describe("release CLI artifacts", () => {
     expect(releaseYml).toContain('if (!/^[0-9a-f]{64}$/.test(loaderManifestHash))');
     expect(releaseYml).not.toContain('path.join(release, "incodex-loader.cjs")');
   });
+
+  test("release verifier accepts the merged JavaScript and native Runtime publication", () => {
+    const result = verifyPublishedRuntime();
+    expect(result.stderr).toBe("");
+    expect(result.exitCode).toBe(0);
+  });
+
+  for (const name of nativeFileNames) {
+    test(`release verifier hashes native artifact ${name}`, () => {
+      const result = verifyPublishedRuntime(name);
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain(`runtime file hash mismatch: ${name}`);
+    });
+
+    test(`release verifier rejects missing native artifact ${name}`, () => {
+      const result = verifyPublishedRuntime(undefined, name);
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain("runtime file set mismatch");
+    });
+  }
 
   test("publishes only the three stable native assets and their checksums", () => {
     expect(releaseYml).toContain("SHA256SUMS");

@@ -1,5 +1,21 @@
 import { describe, expect, test } from "bun:test";
-import { discoverOfficialTooltipModules, createOfficialTooltipRenderer, sharedTooltipState } from "./official-tooltip-renderer.ts";
+import {
+  SHARED_MODULE_SOURCE_BUDGET,
+  discoverCreateRootFactoryExport,
+  discoverOfficialDynamicModuleGraph,
+  discoverOfficialStaticModuleGraph,
+  discoverCalledFactoryExports,
+  assertOfficialModuleSourceSize,
+  discoverOfficialJsxFactoryExport,
+  discoverOfficialTooltipJsxReceivers,
+  discoverOfficialJsxRuntime,
+  discoverOfficialTooltipModuleGraph,
+  discoverOfficialTooltipModules,
+  findOfficialSearchButton,
+  findOfficialTooltipComponent,
+  createOfficialTooltipRenderer,
+  sharedTooltipState,
+} from "./official-tooltip-renderer.ts";
 
 describe("official tooltip renderer", () => {
   test("repeated injections share the lifecycle seen by old dismissal listeners", () => {
@@ -17,6 +33,130 @@ describe("official tooltip renderer", () => {
     expect(discoverOfficialTooltipModules("app://-/assets/index-123.js", 'const deps=["./react-abc.js","./client-def.js","./tooltip-dismiss-ghi.js","./tooltip-jkl.js"]')).toEqual({
       react: "app://-/assets/react-abc.js", client: "app://-/assets/client-def.js", tooltip: "app://-/assets/tooltip-jkl.js",
     });
+  });
+  test("walks the current shared-chunk graph without depending on its content hash", () => {
+    const entry = "app://-/assets/index-current.js";
+    const source = [
+      'const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["./rpc-current.js","./app-initial-current.js","./rolldown-runtime-current.js","./app-shared-current.js","./app-main-current.js"])))=>i.map(i=>d[i]);',
+      'import{n as e}from"./rolldown-runtime-current.js";',
+      'import{H3 as n,V3 as r,W3 as i}from"./app-shared-current.js";',
+      'await import("./app-main-current.js");',
+    ].join("");
+
+    expect(discoverOfficialTooltipModuleGraph(entry, source)).toEqual([
+      "app://-/assets/rpc-current.js",
+      "app://-/assets/app-initial-current.js",
+      "app://-/assets/rolldown-runtime-current.js",
+      "app://-/assets/app-shared-current.js",
+      "app://-/assets/app-main-current.js",
+    ]);
+  });
+  test("limits shared runtime discovery to static modules reachable from the active entry", () => {
+    expect(discoverOfficialStaticModuleGraph(
+      "app://-/assets/index-current.js",
+      'import{n as runtime}from"./runtime-build.js";import{a as app}from"./shared-build.js";import"./styles-build.js";export{x}from"./reexport-build.js";const preload="./unrelated-build.js";const expression=/import{bad}from".\\/regex-build.js"/;/* import"./comment-build.js" */await import("./lazy-build.js");',
+    )).toEqual([
+      "app://-/assets/runtime-build.js",
+      "app://-/assets/shared-build.js",
+      "app://-/assets/styles-build.js",
+      "app://-/assets/reexport-build.js",
+    ]);
+  });
+  test("finds direct dynamic imports without treating preload-only URLs as dependencies", () => {
+    expect(discoverOfficialDynamicModuleGraph(
+      "app://-/assets/index-current.js",
+      'const deps=(m.f||(m.f=["./preload-only.js"]));import{shared}from"./shared.js";await load(()=>import(`./main-current.js`),preload([0]));',
+    )).toEqual([
+      "app://-/assets/shared.js",
+      "app://-/assets/main-current.js",
+    ]);
+  });
+  test("keeps the observed shared chunk under a dedicated source budget", () => {
+    const observedSharedChunk = "x".repeat(7_071_636);
+    expect(() => assertOfficialModuleSourceSize(observedSharedChunk, SHARED_MODULE_SOURCE_BUDGET)).not.toThrow();
+    expect(SHARED_MODULE_SOURCE_BUDGET).toBeGreaterThanOrEqual(2 * observedSharedChunk.length);
+    expect(() => assertOfficialModuleSourceSize(observedSharedChunk, 2_000_000)).toThrow();
+  });
+  test("requires a unique localized official Search trigger", () => {
+    const search = { getAttribute: () => "搜索" } as unknown as HTMLElement;
+    expect(findOfficialSearchButton({ querySelectorAll: () => [search] } as unknown as Document)).toBe(search);
+    expect(() => findOfficialSearchButton({ querySelectorAll: () => [] } as unknown as Document)).toThrow();
+    expect(() => findOfficialSearchButton({ querySelectorAll: () => [search, search] } as unknown as Document)).toThrow();
+  });
+  test("fails closed on a static import that escapes the packaged asset directory", () => {
+    expect(() => discoverOfficialStaticModuleGraph(
+      "app://-/assets/index-current.js",
+      'import{runtime}from"../outside.js";',
+    )).toThrow();
+  });
+  test("keeps the old direct-module layout in the same local graph", () => {
+    expect(discoverOfficialTooltipModuleGraph(
+      "app://-/assets/index-old.js",
+      'import{t}from"./react-a1.js";import{t as e}from"./client-b2.js";import{r,t}from"./tooltip-c3.js";',
+    )).toEqual([
+      "app://-/assets/react-a1.js",
+      "app://-/assets/client-b2.js",
+      "app://-/assets/tooltip-c3.js",
+    ]);
+  });
+  test("resolves the root factory through the current consumer import and use", () => {
+    const importer = "app://-/assets/current-main.js";
+    const shared = "app://-/assets/current-shared.js";
+    const source = [
+      'import{Provider as setup,Module as loader}from"./current-shared.js";',
+      'let root;function mount(){root=loader();window.root??=(0,root.createRoot)(element)}',
+    ].join("");
+
+    expect(discoverCreateRootFactoryExport(importer, source, shared)).toBe("Module");
+  });
+  test("finds only no-argument factories actually called by the current consumer", () => {
+    expect(discoverCalledFactoryExports(
+      "app://-/assets/current-main.js",
+      'import{Jsx as warm,Root as createRoot}from"./shared.js";const root=createRoot();warm();window.root=root;',
+      "app://-/assets/shared.js",
+    )).toEqual(["Jsx", "Root"]);
+  });
+  test("maps the live Tooltip JSX receiver through its initializer and consumer export", () => {
+    const runtimeVar = { jsx: (type: unknown, props: Record<string, unknown>) => ({ type, props }) };
+    function TooltipMock() { return runtimeVar.jsx("span", {}); }
+    const sharedSource = [
+      Function.prototype.toString.call(TooltipMock),
+      "var runtimeVar;function initialize(){runtimeVar=lazyFactory();}",
+      "export{lazyFactory as opaqueGetter};",
+    ].join("");
+    const importerSource = 'import{opaqueGetter as warm}from"./shared.js";warm();';
+    expect(discoverOfficialJsxFactoryExport(
+      TooltipMock, sharedSource, "app://-/assets/main.js", importerSource, "app://-/assets/shared.js",
+    )).toBe("opaqueGetter");
+  });
+  test("recognizes the official bundler's unbound JSX call form", () => {
+    expect(discoverOfficialTooltipJsxReceivers("function T(e){return(0,R3.jsx)(R3.Fragment,e)}"))
+      .toEqual(["R3"]);
+  });
+  test("invokes only the statically selected getter and validates official JSX capabilities", () => {
+    const expected = { Fragment: Symbol.for("react.fragment"), jsx() {}, jsxs() {} };
+    let invoked = 0;
+    const namespace = {
+      officialFactory: () => { invoked++; return expected; },
+      unrelated: () => { throw new Error("must not be called"); },
+    };
+    expect(discoverOfficialJsxRuntime(namespace, "officialFactory")).toBe(expected);
+    expect(invoked).toBe(1);
+    expect(() => discoverOfficialJsxRuntime({ officialFactory: () => ({ jsx() {} }) }, "officialFactory")).toThrow();
+  });
+  test("reuses the exported Tooltip type present in the live Search fiber", () => {
+    function OfficialTooltip() {}
+    const trigger = {
+      "__reactFiber$runtime": {
+        return: {
+          type: OfficialTooltip,
+          memoizedProps: { tooltipContent: "Search", children: {} },
+        },
+      },
+    } as unknown as HTMLElement;
+
+    expect(findOfficialTooltipComponent(trigger, { opaqueExport: OfficialTooltip })).toBe(OfficialTooltip);
+    expect(() => findOfficialTooltipComponent(trigger, { unrelated: function Other() {} })).toThrow();
   });
   test("rejects external, traversing, ambiguous, or incomplete module sources", () => {
     for (const source of [
