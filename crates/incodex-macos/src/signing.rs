@@ -303,6 +303,11 @@ pub fn has_hardened_runtime(app: &Path) -> bool {
 }
 
 /// 使用共享 entitlement/component policy 完成 ad-hoc 签名。
+pub fn sign_app_with_asar_integrity(app: &Path, hash: &str) -> Result<(), String> {
+    super::write_asar_integrity(app, hash)?;
+    sign_app(app)
+}
+
 pub fn sign_app(app: &Path) -> Result<(), String> {
     let before = read_entitlements(app)?;
     let plan = plan_adhoc_entitlements(&before)?;
