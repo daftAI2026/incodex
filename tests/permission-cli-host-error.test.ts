@@ -11,7 +11,10 @@ const root = join(import.meta.dir, "..");
 const nativeRoot = join(root, "native", "macos");
 const runVisible = process.env.INCODEX_RUN_G10_FORMAL_HOST_ERROR === "1";
 const compileG10Host = process.env.INCODEX_COMPILE_G10_HOST === "1";
-const english = sharedPermissionCopy(ACCESSIBILITY_SETUP_COPY).en!;
+// The Rust fixture uses GuideCopyContext::Installed, not the restored official
+// app context. Select its localized title from the same shared catalog.
+const installedEnglish = sharedPermissionCopy(ACCESSIBILITY_SETUP_COPY).en!;
+const english: typeof installedEnglish = { ...installedEnglish, title: installedEnglish.installedTitle! };
 const delay = (milliseconds: number) => new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
 const sha256 = (value: Buffer | string) => createHash("sha256").update(value).digest("hex");
 
@@ -161,6 +164,8 @@ test("G10 failure UI can run only behind explicit opt-in and a new private outpu
   expect(source).toContain("G10_DIAGNOSTIC_RESET_FAILURE");
   expect(source).toContain("settingsCalls: 0");
   expect(source).toContain("test.skipIf(process.platform !== \"darwin\" || !runVisible)");
+  expect(english.title).toBe(ACCESSIBILITY_SETUP_COPY.en!.installedTitle!);
+  expect(english.title).not.toBe(ACCESSIBILITY_SETUP_COPY.en!.title!);
 });
 
 test.skipIf(process.platform !== "darwin" || !compileG10Host)("G10 protocol fixture compiles the real Swift host and AX probe without launching either", () => {
@@ -307,4 +312,4 @@ test.skipIf(process.platform !== "darwin" || !runVisible)("Rust coordinator and 
       }, null, 2)}\n`, { mode: 0o600, flag: "wx" });
     }
   }
-});
+}, 180_000);
