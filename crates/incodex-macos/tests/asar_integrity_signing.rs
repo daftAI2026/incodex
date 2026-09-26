@@ -77,7 +77,7 @@ fn signed_fixture(helper_identifier: &str) -> SignedFixture {
     write_plist(
         &framework.join("Resources/Info.plist"),
         "Renamed",
-        "com.example.framework",
+        "com.openai.codex.framework",
         "",
     );
     let integrity = format!("<key>ElectronAsarIntegrity</key><dict><key>Resources/app.asar</key><dict><key>algorithm</key><string>SHA256</string><key>hash</key><string>{}</string></dict></dict>", "a".repeat(64));
@@ -175,7 +175,7 @@ fn code_directory_hash(path: &Path) -> String {
 
 #[test]
 fn signed_framework_digest_matches_the_updated_plist_without_disabling_validation() {
-    let fixture = signed_fixture("com.openai.codex.helper.fixture");
+    let fixture = signed_fixture("com.openai.codex.framework.AlertNotificationService");
     sign_app_with_asar_integrity(&fixture.app, &"c".repeat(64)).unwrap();
     verify_bundle_deep_strict(&fixture.app).unwrap();
     let helper_entitlements = read_entitlements(&fixture.helper).unwrap();
