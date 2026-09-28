@@ -168,6 +168,37 @@ test("G10 failure UI can run only behind explicit opt-in and a new private outpu
   expect(english.title).not.toBe(ACCESSIBILITY_SETUP_COPY.en!.title!);
 });
 
+test("G10 open-Settings failure uses an opt-in fake-only Rust coordinator diagnostic", () => {
+  const source = readFileSync(join(import.meta.dir, "permission-cli-host-error.test.ts"), "utf8");
+  const rust = readFileSync(join(root, "crates", "incodex-cli", "src", "accessibility_guide_host.rs"), "utf8");
+  const contains = (text: string, value: string, reason: string) =>
+    expect(text.includes(value), reason).toBe(true);
+  contains(
+    source,
+    'const runOpenSettingsFailure = process.env.INCODEX_RUN_G10_OPEN_SETTINGS_FAILURE === "1";',
+    "missing explicit G10 open-Settings opt-in",
+  );
+  contains(
+    source,
+    'test.skipIf(process.platform !== "darwin" || !runOpenSettingsFailure)',
+    "open-Settings diagnostic must be skipped by default and off macOS",
+  );
+  contains(
+    source,
+    "visible G10 diagnostic requires an absolute INCODEX_G10_OUT that does not exist yet",
+    "diagnostic must reuse the fresh private output gate",
+  );
+  contains(source, "G10_DIAGNOSTIC_OPEN_SETTINGS_FAILURE", "missing injected settings failure marker");
+  contains(
+    rust,
+    "rust_coordinator_process_host_displays_mocked_open_settings_failure_until_dismissed",
+    "Rust fixture must exercise the production coordinator and child host",
+  );
+  contains(rust, 'Err("G10_DIAGNOSTIC_OPEN_SETTINGS_FAILURE".into())', "fake open_settings must fail");
+  contains(rust, "assert_eq!(ops.reset_calls, 1", "fake reset must run once before the settings failure");
+  contains(rust, "assert_eq!(ops.settings_calls, 1", "fake open_settings must run exactly once");
+});
+
 test.skipIf(process.platform !== "darwin" || !compileG10Host)("G10 protocol fixture compiles the real Swift host and AX probe without launching either", () => {
   const workDirectory = mkdtempSync(join(tmpdir(), "incodex-g10-formal-host-build-"));
   try {
