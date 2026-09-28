@@ -6,6 +6,8 @@ import {
 } from "./official-tooltip-provider.ts";
 
 type TestFiber = {
+  type?: unknown;
+  memoizedProps?: Record<string, unknown> | null;
   return?: TestFiber | null;
   dependencies?: {
     firstContext?: TestContext | null;
@@ -19,6 +21,32 @@ type TestContext = {
 
 function triggerWithFiber(fiber: TestFiber): HTMLElement {
   return { "__reactFiber$build-specific": fiber } as unknown as HTMLElement;
+}
+
+function officialTooltipComponentFromFirstBuild(props: Record<string, unknown>): unknown {
+  const { delayDuration, delayOpen, getDelayDuration, skipDelayKey, tooltipContent, variant } = props;
+  const provider = {
+    getOpenDelay: (_key: unknown, delay: unknown) => delay,
+    activateTooltip: (...args: unknown[]) => args,
+  };
+  const delay = delayOpen ? 250 : delayDuration;
+  return [
+    provider.getOpenDelay(skipDelayKey, delay),
+    provider.activateTooltip(tooltipContent, skipDelayKey, variant, getDelayDuration),
+  ];
+}
+
+function differentlyNamedTooltipComponentFromAnotherBuild(props: Record<string, unknown>): unknown {
+  const { delayDuration, delayOpen, getDelayDuration, skipDelayKey, tooltipContent, variant } = props;
+  const provider = {
+    getOpenDelay: (_key: unknown, delay: unknown) => delay,
+    activateTooltip: (...args: unknown[]) => args,
+  };
+  const delay = delayOpen ? 250 : delayDuration;
+  return [
+    provider.getOpenDelay(skipDelayKey, delay),
+    provider.activateTooltip(tooltipContent, skipDelayKey, variant, getDelayDuration),
+  ];
 }
 
 function provider(): OfficialTooltipProvider {
