@@ -588,6 +588,9 @@ export function createOfficialTooltipRenderer(
         doc.body.append(host);
         root = modules.createRoot(host);
       }).catch((error) => {
+        host?.remove();
+        host = null;
+        modules = null;
         pending = null;
         throw error;
       });
