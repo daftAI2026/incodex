@@ -605,12 +605,15 @@ function classNameOf(element: Element): string {
 }
 
 function findOfficialBannerSlot(): HTMLElement | null {
-  return (
-    [...document.querySelectorAll<HTMLElement>("div")].find((el) => {
-      if (el.hasAttribute(BANNER_HOST_ATTR)) return false;
-      return classNameOf(el).split(/\s+/).includes("home-banners");
-    }) ?? null
-  );
+  const candidates = [...document.querySelectorAll<HTMLElement>("div")].filter((el) => {
+    if (el.hasAttribute(BANNER_HOST_ATTR)) return false;
+    const classes = classNameOf(el).split(/\s+/);
+    return classes.includes("home-banners") || (
+      classes.includes("not-has-[>:not([hidden])]:hidden") &&
+      classes.some((name) => name.includes("has-[[data-home-beacon-banner]]:mx-0"))
+    );
+  });
+  return candidates.length === 1 ? candidates[0]! : null;
 }
 
 function mountInOfficialBannerSlot(element: HTMLElement): boolean {
