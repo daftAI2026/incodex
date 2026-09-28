@@ -1,5 +1,26 @@
 import { expect, test } from "bun:test";
-import { officialStyleAttributes } from "./official-style-attributes.ts";
+import { officialStyleAttributes, syncOfficialButtonAppearance } from "./official-style-attributes.ts";
+
+function button(className: string, attributes: Record<string, string>): HTMLElement {
+  const values = new Map(Object.entries(attributes));
+  return {
+    className,
+    getAttribute: (name: string) => values.get(name) ?? null,
+    setAttribute: (name: string, value: string) => { values.set(name, value); },
+    removeAttribute: (name: string) => { values.delete(name); },
+  } as unknown as HTMLElement;
+}
+
+test("syncs live Search style changes without copying interaction state", () => {
+  const search = button("new-theme", { "data-color": "accent", "data-state": "open" });
+  const hat = button("old-theme", { "data-color": "secondary", "data-size": "small", "data-incodex-privacy-toggle": "true" });
+  syncOfficialButtonAppearance(search, hat, new Set(["data-color", "data-size"]));
+  expect(hat.className).toBe("new-theme");
+  expect(hat.getAttribute("data-color")).toBe("accent");
+  expect(hat.getAttribute("data-size")).toBeNull();
+  expect(hat.getAttribute("data-state")).toBeNull();
+  expect(hat.getAttribute("data-incodex-privacy-toggle")).toBe("true");
+});
 
 function documentWith(rules: unknown[]): Pick<Document, "styleSheets"> {
   return { styleSheets: [{ cssRules: rules }] } as unknown as Pick<Document, "styleSheets">;
