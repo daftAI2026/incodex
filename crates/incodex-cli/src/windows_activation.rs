@@ -1432,9 +1432,42 @@ mod tests {
     use super::{
         acquire_package_activation_lock, activation_manager_failure, cleanup_proof_after_debugging,
         handle_installed_cdp_failure, installed_debugger_route_from_state,
+        installed_state_for_current_helper, InstalledDebuggerRegistrationEvidence,
         installed_debugger_user_root, node_require_option, prepare_installed_cdp_or_terminate,
         should_coordinate_installed_update, InstalledProcessStage, WindowsDebuggerRoute,
     };
+
+    #[test]
+    fn installed_debugger_reseals_root_after_sandbox_adds_a_read_ace() {
+        let root = std::env::temp_dir().join(format!(
+            "incodex-debugger-sandbox-read-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        incodex_core::windows_session::ensure_private_windows_dir(&root).unwrap();
+        let grant = std::process::Command::new("icacls")
+            .arg(&root)
+            .args(["/grant", "*S-1-5-32-545:(RX)"])
+            .output()
+            .unwrap();
+        assert!(grant.status.success(), "{}", String::from_utf8_lossy(&grant.stderr));
+        assert!(incodex_core::windows_session::verify_private_acl(&root).is_err());
+
+        let evidence = InstalledDebuggerRegistrationEvidence {
+            helper: root.join(r"windows\i\0123456789abcdef\i.exe"),
+            package_full_name: "OpenAI.Codex_1.2.3.4_x64__2p2nqsd0c76g0".into(),
+            user_root: root.clone(),
+        };
+        assert_eq!(
+            installed_state_for_current_helper(&evidence).unwrap_err(),
+            "Windows installed debugger state does not exist"
+        );
+        incodex_core::windows_session::verify_private_acl(&root).unwrap();
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 
     #[test]
     fn installed_cdp_primary_remains_the_update_coordinator() {
