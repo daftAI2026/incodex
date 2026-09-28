@@ -225,6 +225,38 @@ describe("official tooltip renderer", () => {
     expect(renders.at(-1)?.props.sideOffset).toBe(9);
     renderer.dispose();
   });
+  test("inherits the live Search zoom context instead of scaling tooltip pixels", async () => {
+    let zoom = 1.25;
+    const zoomContext = { Provider: {} };
+    const providerFiber = { tag: 10, type: zoomContext, memoizedProps: { value: zoom }, return: null };
+    const search = { "__reactFiber$live": { return: providerFiber } } as unknown as HTMLElement;
+    const renders: Array<{ type: unknown; props: Record<string, unknown> }> = [];
+    const host = { setAttribute() {}, isConnected: true, remove() {} };
+    const doc = {
+      createElement: () => host,
+      body: { append() {} },
+      defaultView: { getComputedStyle: () => ({ getPropertyValue: (name: string) => name === "--codex-window-zoom" ? String(zoom) : "" }) },
+    } as unknown as Document;
+    const tooltip = () => {};
+    const renderer = createOfficialTooltipRenderer(doc, async () => ({
+      createElement: (type: unknown, props: Record<string, unknown>) => ({ type, props }),
+      createRoot: () => ({ render(value: unknown) { if (value) renders.push(value as typeof renders[number]); }, unmount() {} }),
+      Tooltip: tooltip,
+    }));
+    await renderer.prepare();
+    const button = { isConnected: true, getAttribute: () => null, setAttribute() {}, removeAttribute() {} } as unknown as HTMLElement;
+    renderer.show(button, "Open incognito", "Ctrl+Shift+N", search);
+    expect(renders.at(-1)).toMatchObject({ type: zoomContext.Provider, props: { value: zoom, children: { type: tooltip } } });
+    zoom = 1.4;
+    providerFiber.memoizedProps.value = zoom;
+    renderer.show(button, "Open incognito", "Ctrl+Shift+N", search);
+    expect(renders.at(-1)).toMatchObject({ type: zoomContext.Provider, props: { value: zoom, children: { type: tooltip } } });
+    zoom = 1;
+    providerFiber.memoizedProps.value = zoom;
+    renderer.show(button, "Open incognito", "Ctrl+Shift+N", search);
+    expect(renders.at(-1)?.type).toBe(tooltip);
+    renderer.dispose();
+  });
   test("does not attach a late module result after disposal", async () => {
     let resolve!: (value: never) => void;
     let hosts = 0;
