@@ -31,3 +31,17 @@ export function officialStyleAttributes(document: Pick<Document, "styleSheets"> 
   for (const sheet of [...Array.from(document.styleSheets ?? []), ...Array.from(document.adoptedStyleSheets ?? [])]) visit(sheet);
   return names;
 }
+
+export function syncOfficialButtonAppearance(
+  search: HTMLElement,
+  button: HTMLElement,
+  styleAttributes: ReadonlySet<string>,
+): void {
+  if (button.className !== search.className) button.className = search.className;
+  for (const name of ["style", ...styleAttributes]) {
+    const current = search.getAttribute(name);
+    if (button.getAttribute(name) === current) continue;
+    if (current === null) button.removeAttribute(name);
+    else button.setAttribute(name, current);
+  }
+}

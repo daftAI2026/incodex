@@ -210,4 +210,46 @@ describe("official tooltip renderer", () => {
     renderer.hide();
     renderer.dispose();
   });
+  test("allows a later Search remount to retry a transient module-load failure", async () => {
+    let attempts = 0;
+    const host = { setAttribute() {}, isConnected: true, remove() {} };
+    const doc = { createElement: () => host, body: { append() {} } } as unknown as Document;
+    const renderer = createOfficialTooltipRenderer(doc, async () => {
+      if (++attempts === 1) throw new Error("Search is remounting");
+      return {
+        createElement: () => ({}),
+        createRoot: () => ({ render() {}, unmount() {} }),
+        Tooltip: () => {},
+      };
+    });
+    expect(renderer.needsPreparation()).toBe(true);
+    await expect(renderer.prepare()).rejects.toThrow("Search is remounting");
+    expect(renderer.needsPreparation()).toBe(true);
+    await renderer.prepare();
+    expect(attempts).toBe(2);
+    expect(renderer.ready()).toBe(true);
+    renderer.dispose();
+  });
+  test("removes an orphan tooltip host before retrying failed React root creation", async () => {
+    let attempts = 0;
+    let removed = 0;
+    const doc = {
+      createElement: () => ({ setAttribute() {}, isConnected: true, remove() { removed++; } }),
+      body: { append() {} },
+    } as unknown as Document;
+    const renderer = createOfficialTooltipRenderer(doc, async () => ({
+      createElement: () => ({}),
+      createRoot: () => {
+        if (++attempts === 1) throw new Error("root unavailable");
+        return { render() {}, unmount() {} };
+      },
+      Tooltip: () => {},
+    }));
+    await expect(renderer.prepare()).rejects.toThrow("root unavailable");
+    expect(removed).toBe(1);
+    await renderer.prepare();
+    expect(renderer.ready()).toBe(true);
+    renderer.dispose();
+    expect(removed).toBe(2);
+  });
 });
