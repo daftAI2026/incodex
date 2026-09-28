@@ -228,4 +228,26 @@ describe("official tooltip renderer", () => {
     expect(renderer.ready()).toBe(true);
     renderer.dispose();
   });
+  test("removes an orphan tooltip host before retrying failed React root creation", async () => {
+    let attempts = 0;
+    let removed = 0;
+    const doc = {
+      createElement: () => ({ setAttribute() {}, isConnected: true, remove() { removed++; } }),
+      body: { append() {} },
+    } as unknown as Document;
+    const renderer = createOfficialTooltipRenderer(doc, async () => ({
+      createElement: () => ({}),
+      createRoot: () => {
+        if (++attempts === 1) throw new Error("root unavailable");
+        return { render() {}, unmount() {} };
+      },
+      Tooltip: () => {},
+    }));
+    await expect(renderer.prepare()).rejects.toThrow("root unavailable");
+    expect(removed).toBe(1);
+    await renderer.prepare();
+    expect(renderer.ready()).toBe(true);
+    renderer.dispose();
+    expect(removed).toBe(2);
+  });
 });
