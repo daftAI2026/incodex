@@ -201,11 +201,16 @@ class FakeElement {
 }
 
 class FakeDocument extends FakeElement {
-  readonly styleSheets = [{
+  styleSheetReads = 0;
+  private readonly sheets = [{
     cssRules: [{
       selectorText: "[data-color][data-variant][data-squircle][data-uniform][data-size][data-icon-size][data-gutter-size][data-pill][data-no-autosize][data-future-metric]",
     }],
   }];
+  get styleSheets() {
+    this.styleSheetReads += 1;
+    return this.sheets;
+  }
   readonly documentElement = new FakeElement("html");
   readonly head = new FakeElement("head");
   readonly body = new FakeElement("body");
@@ -298,6 +303,7 @@ const INJECT_BUNDLE = await bundleInject();
 function makeRuntime(): {
   buildButton: (search: FakeElement) => FakeElement;
   setButtonHover: (button: FakeElement, hovered: boolean) => void;
+  document: FakeDocument;
 } {
   const document = new FakeDocument();
   const window = {
@@ -321,12 +327,12 @@ function makeRuntime(): {
   });
   context.globalThis = context;
   new vm.Script(INJECT_BUNDLE, { filename: "inject.ts" }).runInContext(context);
-  return (context as typeof context & {
+  return { ...(context as typeof context & {
     __incodexLayoutExports: {
       buildButton: (search: FakeElement) => FakeElement;
       setButtonHover: (button: FakeElement, hovered: boolean) => void;
     };
-  }).__incodexLayoutExports;
+  }).__incodexLayoutExports, document };
 }
 
 function makeSearch(document: FakeDocument, nested: boolean): { search: FakeElement; parent: FakeElement; officialTooltipListener: Listener } {
@@ -534,5 +540,17 @@ describe("8881 hat-glasses icon layout", () => {
     expect(layoutWrappers(button)[1]).toBe(wrapper);
     expect(wrapper?.querySelector('svg[data-incodex-icon="hat-glasses"]')).not.toBeNull();
     expect(wrapper?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  test("does not rescan the full official stylesheet on each icon hover", () => {
+    const runtime = makeRuntime();
+    const { search } = makeSearch(runtime.document, true);
+    const button = runtime.buildButton(search);
+    const readsAfterMount = runtime.document.styleSheetReads;
+    expect(readsAfterMount).toBeGreaterThan(0);
+
+    runtime.setButtonHover(button, true);
+    runtime.setButtonHover(button, false);
+    expect(runtime.document.styleSheetReads).toBe(readsAfterMount);
   });
 });

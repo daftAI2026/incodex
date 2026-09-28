@@ -89,6 +89,18 @@ describe("Search button placement", () => {
     expect(placement?.parent).not.toBe(header as unknown as HTMLElement);
   });
 
+  test("never treats a Search tooltip trigger containing another button as the toolbar group", () => {
+    const actions = node();
+    const bell = node({ tagName: "BUTTON", parent: actions });
+    const trigger = node({ tagName: "SPAN", parent: actions, attributes: { "data-state": "closed" } });
+    const search = node({ tagName: "BUTTON", parent: trigger, attributes: { "aria-label": "Search" } });
+    node({ tagName: "BUTTON", parent: trigger, attributes: { "aria-label": "Tooltip auxiliary action" } });
+
+    const placement = searchButtonPlacement(search as unknown as HTMLElement);
+    expect(placement?.parent).toBe(actions as unknown as HTMLElement);
+    expect(placement?.before).toBe(bell as unknown as HTMLElement);
+  });
+
   test("does not count an existing injected hat as a first-party toolbar action", () => {
     const { actions, bellTrigger, search } = groupedTooltipActions();
     const hat = node({
