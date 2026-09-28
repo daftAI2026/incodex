@@ -20,7 +20,7 @@ use windows_sys::Win32::System::Threading::{
 use crate::windows_app::{discover_codex_package, CODEX_PACKAGE_FAMILY_NAME};
 use crate::windows_install_state::{
     acquire_windows_install_state, read_windows_install_state, read_windows_update_repair_intent,
-    WindowsInstallPhase, WindowsInstallState,
+    WindowsInstallPhase, WindowsInstallState, WindowsUpdateRepairIntent,
 };
 use crate::windows_process::strict_running_codex_package_process_ids;
 use crate::windows_update_observer_log::status;
@@ -255,6 +255,15 @@ fn wait(stop: &OwnedHandle, wake: &OwnedHandle) -> Result<bool, String> {
     }
 }
 
+fn read_observer_state(
+    root: &Path,
+) -> Result<(Option<WindowsInstallState>, Option<WindowsUpdateRepairIntent>), String> {
+    Ok((
+        read_windows_install_state(root)?,
+        read_windows_update_repair_intent(root)?,
+    ))
+}
+
 fn reconcile(root: &Path, helper: &Path, stop: &OwnedHandle) -> Result<bool, String> {
     loop {
         // 持久状态快照在安装锁下读取，等待进程退出时不占安装锁。
@@ -263,8 +272,7 @@ fn reconcile(root: &Path, helper: &Path, stop: &OwnedHandle) -> Result<bool, Str
             if !crate::windows_update_startup::is_registered(helper)? {
                 return Ok(false);
             }
-            let state = read_windows_install_state(root)?;
-            let intent = read_windows_update_repair_intent(root)?;
+            let (state, intent) = read_observer_state(root)?;
             if state.is_none() && intent.is_none() {
                 return Ok(false);
             }
@@ -572,6 +580,24 @@ where
 mod tests {
     use super::*;
     use std::cell::RefCell;
+
+    #[test]
+    fn observer_reseals_root_after_sandbox_adds_a_read_ace() {
+        let root = fixture_root("sandbox-read");
+        incodex_core::windows_session::ensure_private_windows_dir(&root).unwrap();
+        let grant = std::process::Command::new("icacls")
+            .arg(&root)
+            .args(["/grant", "*S-1-5-32-545:(RX)"])
+            .output()
+            .unwrap();
+        assert!(grant.status.success(), "{}", String::from_utf8_lossy(&grant.stderr));
+        assert!(incodex_core::windows_session::verify_private_acl(&root).is_err());
+
+        let (state, intent) = read_observer_state(&root).unwrap();
+        assert!(state.is_none() && intent.is_none());
+        incodex_core::windows_session::verify_private_acl(&root).unwrap();
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 
     #[test]
     fn same_generation_startup_reapplies_registration_without_republishing_runtime() {
