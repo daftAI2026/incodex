@@ -33,7 +33,10 @@ pub(crate) const MODE: &str = "--incodex-windows-update-observer";
 const START_TIMEOUT_MS: u32 = 15_000;
 
 fn observer_creation_flags() -> u32 {
-    windows_sys::Win32::System::Threading::CREATE_NO_WINDOW
+    use windows_sys::Win32::System::Threading::{CREATE_BREAKAWAY_FROM_JOB, CREATE_NO_WINDOW};
+
+    // 安装器可能由受 Job 管理的终端启动；登录观察者必须独立存活。
+    CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB
 }
 
 struct OwnedHandle(HANDLE);
@@ -593,9 +596,7 @@ mod tests {
 
     #[test]
     fn observer_launch_escapes_an_inherited_installer_job() {
-        use windows_sys::Win32::System::Threading::{
-            CREATE_BREAKAWAY_FROM_JOB, CREATE_NO_WINDOW,
-        };
+        use windows_sys::Win32::System::Threading::{CREATE_BREAKAWAY_FROM_JOB, CREATE_NO_WINDOW};
 
         let flags = observer_creation_flags();
         assert_ne!(flags & CREATE_NO_WINDOW, 0);
