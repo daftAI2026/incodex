@@ -313,6 +313,39 @@ describe("incognito button exit affordance", () => {
 });
 
 describe("incognito banner placement", () => {
+  function bannerCandidate(className: string, injected = false) {
+    return {
+      getAttribute: (name: string) => name === "class" ? className : null,
+      hasAttribute: (name: string) => injected && name === "data-incodex-banner-host",
+    };
+  }
+
+  function discoverBannerSlot(candidates: ReturnType<typeof bannerCandidate>[]) {
+    const start = inject.indexOf("function classNameOf(");
+    const end = inject.indexOf("function mountInOfficialBannerSlot(", start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const js = new Bun.Transpiler({ loader: "ts" }).transformSync(inject.slice(start, end));
+    return vm.runInNewContext(`${js}; findOfficialBannerSlot()`, {
+      document: { querySelectorAll: (selector: string) => selector === "div" ? candidates : [] },
+      BANNER_HOST_ATTR: "data-incodex-banner-host",
+    });
+  }
+
+  test("finds the new official home banner slot, not the composer banner-aware wrapper", () => {
+    const slot = bannerCandidate("not-has-[>:not([hidden])]:hidden electron:mx-[var(--home-composer-inline-inset)] electron:has-[[data-home-beacon-banner]]:mx-0");
+    const composer = bannerCandidate("px-[var(--home-composer-inline-inset)] pb-2 empty:hidden has-[[data-home-beacon-banner]]:px-0");
+    expect(discoverBannerSlot([slot, composer])).toBe(slot);
+  });
+
+  test("preserves the legacy slot and rejects competing official slots", () => {
+    const legacy = bannerCandidate("home-banners");
+    const current = bannerCandidate("not-has-[>:not([hidden])]:hidden electron:has-[[data-home-beacon-banner]]:mx-0");
+    expect(discoverBannerSlot([legacy])).toBe(legacy);
+    expect(discoverBannerSlot([legacy, current])).toBeNull();
+    expect(discoverBannerSlot([current, current])).toBeNull();
+  });
+
   test("uses the one official banner slot without a second mount model", () => {
     expect(inject).toContain("mountInOfficialBannerSlot(host)");
     expect(inject).toContain("const slot = findOfficialBannerSlot()");
