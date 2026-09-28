@@ -36,7 +36,13 @@ function directChildContaining(parent: HTMLElement, descendant: HTMLElement): HT
 }
 
 function groupedToolbarPlacement(search: HTMLElement): SearchButtonPlacement | null {
-  for (let group = search.parentElement; group; group = group.parentElement) {
+  let firstGroup = search.parentElement;
+  for (let ancestor = firstGroup; ancestor; ancestor = ancestor.parentElement) {
+    if (!isSearchTooltipTrigger(ancestor)) continue;
+    firstGroup = ancestor.parentElement;
+    break;
+  }
+  for (let group = firstGroup; group; group = group.parentElement) {
     if (group.tagName === "BODY" || group.tagName === "HTML") break;
     const searchBranch = directChildContaining(group, search);
     if (!searchBranch) continue;

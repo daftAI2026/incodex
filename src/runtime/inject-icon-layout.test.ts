@@ -201,11 +201,16 @@ class FakeElement {
 }
 
 class FakeDocument extends FakeElement {
-  readonly styleSheets = [{
+  styleSheetReads = 0;
+  private readonly sheets = [{
     cssRules: [{
       selectorText: "[data-color][data-variant][data-squircle][data-uniform][data-size][data-icon-size][data-gutter-size][data-pill][data-no-autosize][data-future-metric]",
     }],
   }];
+  get styleSheets() {
+    this.styleSheetReads += 1;
+    return this.sheets;
+  }
   readonly documentElement = new FakeElement("html");
   readonly head = new FakeElement("head");
   readonly body = new FakeElement("body");
@@ -279,7 +284,7 @@ async function bundleInject(): Promise<string> {
           path: resolve(runtimeDir, args.path),
         }));
         build.onLoad({ filter: /.*/, namespace: "incodex-test" }, () => ({
-          contents: `${source}\nglobalThis.__incodexLayoutExports = { buildButton, setButtonHover };`,
+          contents: `${source}\nglobalThis.__incodexLayoutExports = { buildButton, setButtonHover, observeSearchAppearance };`,
           loader: "ts",
           resolveDir: runtimeDir,
         }));
@@ -298,8 +303,12 @@ const INJECT_BUNDLE = await bundleInject();
 function makeRuntime(): {
   buildButton: (search: FakeElement) => FakeElement;
   setButtonHover: (button: FakeElement, hovered: boolean) => void;
+  observeSearchAppearance: (search: FakeElement, button: FakeElement) => void;
+  triggerSearchMutation: () => void;
+  document: FakeDocument;
 } {
   const document = new FakeDocument();
+  const observers: Array<() => void> = [];
   const window = {
     __incodexIncognito: true,
     __incodexPlatform: "darwin",
@@ -315,18 +324,23 @@ function makeRuntime(): {
     TextEncoder,
     TextDecoder,
     crypto,
-    MutationObserver: class {},
+    MutationObserver: class {
+      constructor(private readonly callback: () => void) {}
+      observe() { observers.push(this.callback); }
+      disconnect() {}
+    },
     requestAnimationFrame: () => {},
     globalThis: undefined,
   });
   context.globalThis = context;
   new vm.Script(INJECT_BUNDLE, { filename: "inject.ts" }).runInContext(context);
-  return (context as typeof context & {
+  return { ...(context as typeof context & {
     __incodexLayoutExports: {
       buildButton: (search: FakeElement) => FakeElement;
       setButtonHover: (button: FakeElement, hovered: boolean) => void;
+      observeSearchAppearance: (search: FakeElement, button: FakeElement) => void;
     };
-  }).__incodexLayoutExports;
+  }).__incodexLayoutExports, document, triggerSearchMutation: () => observers.at(-1)?.() };
 }
 
 function makeSearch(document: FakeDocument, nested: boolean): { search: FakeElement; parent: FakeElement; officialTooltipListener: Listener } {
@@ -534,5 +548,37 @@ describe("8881 hat-glasses icon layout", () => {
     expect(layoutWrappers(button)[1]).toBe(wrapper);
     expect(wrapper?.querySelector('svg[data-incodex-icon="hat-glasses"]')).not.toBeNull();
     expect(wrapper?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  test("does not rescan the full official stylesheet on each icon hover", () => {
+    const runtime = makeRuntime();
+    const { search } = makeSearch(runtime.document, true);
+    const button = runtime.buildButton(search);
+    const readsAfterMount = runtime.document.styleSheetReads;
+    expect(readsAfterMount).toBeGreaterThan(0);
+
+    runtime.setButtonHover(button, true);
+    runtime.setButtonHover(button, false);
+    expect(runtime.document.styleSheetReads).toBe(readsAfterMount);
+  });
+
+  test("tracks in-place official Search style changes without cloning interaction state", () => {
+    const runtime = makeRuntime();
+    const { search, parent } = makeSearch(runtime.document, true);
+    const button = runtime.buildButton(search);
+    parent.insertBefore(button, search);
+    runtime.observeSearchAppearance(search, button);
+
+    search.className = "new-theme new-shape";
+    search.setAttribute("data-color", "accent");
+    search.removeAttribute("data-size");
+    search.setAttribute("data-state", "open");
+    runtime.triggerSearchMutation();
+
+    expect(button.className).toBe(search.className);
+    expect(button.getAttribute("data-color")).toBe("accent");
+    expect(button.getAttribute("data-size")).toBeNull();
+    expect(button.getAttribute("data-state")).toBeNull();
+    expect(button.getAttribute("data-incodex-privacy-toggle")).toBe("true");
   });
 });
